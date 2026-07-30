@@ -57,6 +57,15 @@ invocations. The scripts own parsing, idempotency, and state transitions. The
 ADRs own the trust boundaries and rationale. Update those sources and this
 runbook together when a contract changes.
 
+Two shared modules sit under the stages above.
+`scripts/sentry-triage-project-core.mjs` owns the VERDICT contract — markers,
+parsing, and the two comment selectors every fence is asked through.
+`scripts/sentry-triage-queue-contract.mjs` owns the QUEUE contract — the label
+namespace, the untrusted-text neutralization, and the archive freshness-baseline
+fields. `scripts/sentry-triage-requeue.mjs` is the one place a queue stub is ever
+re-queued for triage; both producers call it and neither reconstructs the
+sequence.
+
 The triage row states an operator requirement, now backed by a mechanical
 guarantee. Every secret-bearing job in these workflows declares the
 `sentry-pipeline` GitHub Environment, whose deployment-branch policy names `main`
@@ -137,11 +146,17 @@ bulk:
   no parseable baseline;
 - other closed match: leave it closed.
 
-That write order is load-bearing at both ends. The fence goes first so no
+That write order is load-bearing at both ends, and no stage writes it by hand.
+Every re-queue in the pipeline runs through one function,
+`requeueQueueStub` in `scripts/sentry-triage-requeue.mjs`, which takes the CAUSE
+as an argument and decides the fence from it. The fence goes first so no
 interruption can leave a stub re-queued for triage without it; the state change
 goes last so none can leave it open but unselectable. Every interruption point
-then lands on a state that is inert or recoverable. The fence post is guarded by
-an exact-body check, so a retry completes the sequence without duplicating it.
+then lands on a state that is inert or recoverable. On this path the fence post
+is additionally guarded by an author-fenced identity check, so a retry completes
+the sequence without duplicating it — a guard the caller declares, and one that
+disarms itself whenever `lastSeen` does not parse, because the rendered body
+then identifies no particular occurrence.
 
 Missing or invalid timestamps fail toward re-triage. The strict timestamp gate
 prevents Sentry's long-lived regressed substatus from causing a reopen/close
@@ -166,6 +181,13 @@ Sentry loop runs, so by the time the sweep reaches a given stub the snapshot can
 be minutes old — long enough for a human to have declined it by removing the
 label, which the sweep would otherwise put straight back. A failed re-read
 leaves the stub stranded for the next run rather than recovering blind.
+
+The sweep also skips any stub the regression path ATTEMPTED this run, not merely
+the ones it re-queued. A Sentry-evidence re-queue that throws half-way would
+otherwise be recovered by the fence-free bookkeeping path seconds later, inside
+one run — a failed regression re-queue laundered into a bookkeeping one. The
+chokepoint records the attempt before its first write, so the record exists
+whether or not the writes do.
 
 The namespace is separate from the development backlog:
 
@@ -373,14 +395,19 @@ refuses a currently regressed/escalating issue, and uses the documented issue
 update API to set `archived_until_escalating`. It then records the approver
 and timestamp, applies `sentry:archived`, and closes the queue issue.
 
-The regression refusal re-queues the stub, and its comment opens with the
-regression fence line so the verdict parser reads the previous round's verdict
-as stale. That is the general rule for every re-queue: one caused by new Sentry
-events must fence, because any prior verdict described the old occurrence; one
-caused by bookkeeping — the stranded-stub sweep above — must not, because
+The regression refusal re-queues the stub through `requeueQueueStub`, declaring
+cause `sentry-evidence`; that is what makes its comment open with the regression
+fence line, so the verdict parser reads the previous round's verdict as stale.
+The cause is the whole rule: one caused by new Sentry events must fence, because
+any prior verdict described the old occurrence; one caused by bookkeeping — the
+stranded-stub sweep above, which declares `bookkeeping` — must not, because
 nothing about the Sentry issue changed and that verdict is still valid. Drop the
 fence and a triage round that dies before posting lets the `verdict` job
-re-apply the previous verdict and close the stub over a live regression.
+re-apply the previous verdict and close the stub over a live regression. Add one
+where it does not belong and a good verdict is discarded and re-triaged for
+nothing. Neither call site can make that mistake by omission: an undeclared
+cause refuses rather than defaulting either way, and `buildRegressedComment` —
+the fence's one definition — has exactly one caller, inside the chokepoint.
 
 The refusal will not re-queue a stub it cannot fence, and it decides that by
 asking whether any verdict is still admissible — never by checking that a fence
@@ -388,7 +415,8 @@ comment exists. Presence is not admissibility: the refusal body is identical
 across runs for one `lastSeen`, so an earlier run's fence can sit on the stub
 underneath a verdict posted after it, where the parser correctly ignores it. Both
 checks on this path run `selectVerdictComment`, the parser's own selector, so the
-guard and the thing it guards against cannot drift apart.
+guard and the thing it guards against cannot drift apart. Both now live in the
+chokepoint, so a future re-queue site inherits them instead of re-deriving them.
 
 If approval disappears during the mutation window, the script rolls the queue
 stub back and leaves it available for fresh triage. It does NOT un-archive the
@@ -791,6 +819,7 @@ pnpm sentry:project:test
 pnpm sentry:autofix:select:test
 pnpm sentry:autofix:finalize:test
 pnpm sentry:archive:test
+pnpm sentry:requeue:test
 
 # Read-only previews that require local credentials:
 pnpm sentry:ingest --dry-run --lookback-days 8
