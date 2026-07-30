@@ -157,6 +157,79 @@ three `hypotheses`, an `investigated` list, and an
 `escalation_reason`. A missing or placeholder `human_question` is invalid:
 an escalation must be decision-ready, not “please look.”
 
+The agent posts that comment through `scripts/sentry-triage-agent-comment.mjs`,
+its only write path. The wrapper accepts no issue argument, and does not take
+the target from the environment either: bash arithmetic expansion assigns, so a
+body containing `$((SENTRY_TRIAGE_COMMENT_ISSUE=1234))` rewrites the exported
+variable while the agent's own command line is expanded, before Node starts.
+The authoritative target is a JSON file that a trusted step pins under
+`$RUNNER_TEMP` before the agent runs, left mode 0444 inside a mode 0555
+directory. The env var survives as a cross-check only, and a disagreement
+between the two refuses loudly rather than picking a winner.
+
+Those modes are load-bearing, because **the agent can write files**. Claude
+Code's permission rules match a command carrying an output redirection
+(CHANGELOG v1.0.123), and `gh issue view --template` renders arbitrary
+constructed text, so the read-only `gh` grants compose into "write any content
+to any path this user can write" — including over the wrapper itself. The same
+trusted step therefore copies the wrapper's whole runtime import closure into a
+read-only `sentry-triage-tools` directory under `$RUNNER_TEMP`, and the agent's
+`--allowedTools` grant names **that** path, never `scripts/`.
+`scripts/sentry-triage-agent-comment.test.mjs` recomputes the closure from the
+source and fails if the staging list stops matching it, so the attack cannot
+move one file over. The agent job's checkout also sets
+`persist-credentials: false`, matching the autofix agent job.
+
+**The agent job ends with the agent.** Immutable copies alone would not be
+enough: the agent can append to `$GITHUB_ENV`, and
+`BASH_ENV=<payload it wrote into the checkout>` is then exported to every later
+step in the same job, whose bash sources that payload _before_ running its own
+command. So the trusted follow-up is a separate `verdict` job — the shape
+`sentry-autofix.yml` already uses for `select → agent → finalize`. A fresh job
+means a fresh runner, a fresh checkout and a fresh environment, so nothing the
+agent wrote to `$GITHUB_ENV`, `$GITHUB_PATH`, `$GITHUB_OUTPUT` or the checkout
+exists there at all. Nothing crosses the job boundary: the handoff is the
+verdict comment on the queue issue, which `verdict` re-reads from GitHub
+through the same authoritative parser and validates against the closed verdict
+enum. Its only inputs are the select job's `^[0-9]+$`-validated issue number
+and `GITHUB_REPOSITORY`, and it holds `github.token` alone — no secret, no
+`environment:`. Tests assert that the agent step is the last step of its job
+and that no credential-bearing work follows it.
+
+The wrapper also refuses a body that does not start with the
+verdict marker and a body carrying its own authorship marker; it appends
+`<!-- sentry-triage-agent-authored:v1 -->` and pipes the result into
+`gh --body-file -` on stdin, handing `gh` an allowlisted environment that
+carries neither the Sentry token nor the Claude OAuth token. Deterministic
+scripts and the agent share the `github-actions[bot]` identity, so that marker
+— and the required verdict-marker prefix — are what separate agent text from
+pipeline text.
+
+**The body never touches the filesystem, and that is load-bearing.** An earlier
+version wrote the validated body to a predictable `$RUNNER_TEMP` path and let
+`gh` read it back. The agent can background a second permitted command
+(`gh issue view … --template '<forged>' > that-path &`) and swap the content
+inside the window between the check and the read; reproduced, it posted a
+forged `Regressed in Sentry …` control comment past every fence. No check
+closes a check-then-use window on a path the attacker can write — removing the
+file removes the window. Do not reintroduce an intermediate file for the body.
+
+**Credential exfiltration is not contained here, and the wrapper does not claim
+to contain it.** `SENTRY_TRIAGE_TOKEN` must sit in job env for the Sentry MCP
+server's `${VAR}` expansion, and `claude-code-action` puts the Claude OAuth
+token in the same process env, so both are live in the agent's Bash. A
+successful prompt injection can put either in a public queue comment. The
+wrapper refuses a body reproducing a token verbatim, which catches the common
+accident — prose that quotes an environment value or a failed command's output
+— but it is not a leak control: the agent writes the shell command, and bash
+expands and transforms `$VAR` before the wrapper sees argv, so a spliced or
+split value passes. Exact-value scanning is the wrong layer when the adversary
+controls the shell. Closing this needs the credential out of the agent's process
+env: per-step or first-class MCP env forwarding, which `claude-code-action` does
+not offer at the pinned v1.0.179, or a local credential broker the MCP server
+talks to so the agent holds no Sentry token at all. Both tokens are read-only or
+inference scoped, and any use lands in an auditable public comment.
+
 The deterministic parser accepts only comments from
 `github-actions[bot]`. After a regression reopen, it accepts only a verdict
 newer than the latest pipeline-authored regression comment. It then applies

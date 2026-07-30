@@ -18,6 +18,16 @@ export const VERDICT_MARKER = "<!-- sentry-triage-verdict:v1 -->";
 // fence below rejects a verdict comment that is not strictly newer than it.
 export const REGRESSION_PREFIX = "Regressed in Sentry (last seen ";
 
+// Authorship marker appended to EVERY comment the triage LLM posts, by the
+// only tool that can post one (scripts/sentry-triage-agent-comment.mjs, issue
+// #1288). The deterministic pipeline scripts never emit it, and the agent has
+// no other write path, so "body contains this marker" is a sound test for
+// agent-authored text — which the `github-actions[bot]` identity alone cannot
+// give, since the scripts and the agent share it (see TRUSTED_COMMENT_AUTHORS
+// below). Defined in this contract module so the emitter and any future
+// consumer cannot drift.
+export const AGENT_COMMENT_MARKER = "<!-- sentry-triage-agent-authored:v1 -->";
+
 export const PROJECTED_LABEL = "sentry:projected";
 
 // Machine-parseable prefix of the pointer comment the projection step posts on
@@ -494,6 +504,16 @@ function compareCreatedAt(a, b) {
 // commenter could paste a marker-bearing comment and drive labeling, closing,
 // and (once the PAT exists) cross-repo issue creation. Comments with a
 // missing/unknown author are untrusted (fail closed).
+//
+// KNOWN LIMIT of this fence: the triage LLM posts under the same bot identity,
+// so authorship alone cannot separate agent text from deterministic-script
+// text. The agent's write wrapper (issue #1288) closes that by construction for
+// every prefix-anchored consumer — it requires an agent body to START with
+// VERDICT_MARKER, so no agent comment can impersonate REGRESSION_PREFIX,
+// PROJECTED_COMMENT_PREFIX, or AUTOFIX_COMMENT_PREFIX — and it stamps
+// AGENT_COMMENT_MARKER so a consumer that wants to reject agent text outright
+// has a positive test to use. The verdict comment is agent text BY DESIGN and
+// stays trusted-as-data: it is enum-validated and never interpolated.
 export const TRUSTED_COMMENT_AUTHORS = [
   "github-actions",
   "github-actions[bot]",

@@ -2254,6 +2254,12 @@ while IFS= read -r path; do
           ;;
         scripts/sentry-triage-project.mjs|scripts/sentry-triage-project-core.mjs|scripts/sentry-triage-project.test.mjs)
           add_command "pnpm sentry:project:test" "Sentry triage projection helper changed"
+          # The agent's comment wrapper imports the shared marker contract from
+          # sentry-triage-project-core.mjs, so its fences ride on this module.
+          add_command "node scripts/sentry-triage-agent-comment.test.mjs" "Sentry triage projection helper changed"
+          ;;
+        scripts/sentry-triage-agent-comment.mjs|scripts/sentry-triage-agent-comment.test.mjs)
+          add_command "node scripts/sentry-triage-agent-comment.test.mjs" "Sentry triage agent comment wrapper changed"
           ;;
         scripts/sentry-autofix-select.mjs|scripts/sentry-autofix-select.test.mjs)
           add_command "pnpm sentry:autofix:select:test" "Sentry autofix select helper changed"

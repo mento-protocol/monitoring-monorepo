@@ -145,19 +145,49 @@ jobs:
   #     id-token, no packages — the agent holds no write credential beyond
   #     commenting/labeling on THIS repo.
   #   - --allowedTools is an explicit allowlist: repo READ tools (Read/Grep/Glob),
-  #     Sentry READ tools only, and three scoped `gh issue` subcommands. view/list
-  #     are read-only and stay repo-wide (duplicate search needs them); the
-  #     agent's ONLY write is `gh issue comment`, pinned to this matrix job's
-  #     queue-issue number at the permission layer, so an injected instruction
-  #     cannot retarget other issues. (Prefix-match residual: a number that
-  #     string-extends the queue issue's digits, e.g. 123 → 1234, would still
-  #     match — accepted.) The label swap is NOT delegated to the agent: a
-  #     deterministic step below parses the verdict out of the comment and
-  #     applies the label itself. No bare Bash, no `gh api`, no `gh issue edit`,
-  #     no Write/Edit, no Sentry write/execute tools, no WebFetch/WebSearch.
+  #     Sentry READ tools only, two read-only `gh issue` subcommands, and one
+  #     write wrapper. view/list stay repo-wide (duplicate search needs them);
+  #     the agent's ONLY write is the wrapper, and the grant names the IMMUTABLE
+  #     staged copy under $RUNNER_TEMP, never the checkout path — the checkout is
+  #     agent-writable, so a grant pointing there is a grant to run whatever the
+  #     agent last wrote (see the staging step). It takes its target issue from
+  #     the pinned file, not the environment, and accepts no issue argument — so
+  #     the permission layer's string-prefix match can only extend the wrapper's
+  #     ARGUMENTS, never the write target. That
+  #     replaces the old `Bash(gh issue comment <n>:*)` grant, whose prefix match
+  #     also admitted 1234, 12345, … (issue #1288). The wrapper additionally
+  #     stamps every agent comment with the `sentry-triage-agent-authored:v1`
+  #     marker and requires it to start with the verdict marker, so agent text
+  #     stays distinguishable from deterministic-script text even though both
+  #     post as `github-actions[bot]`. The label swap is NOT delegated to the
+  #     agent: the separate `verdict` job parses the verdict out of the comment
+  #     and applies the label itself. No bare Bash, no `gh api`, no
+  #     `gh issue edit`, no `gh issue comment`, no Write/Edit, no Sentry
+  #     write/execute tools, no WebFetch/WebSearch.
+  #   - THIS JOB ENDS WITH THE AGENT. No step runs after the claude-code-action
+  #     step, which is what makes $GITHUB_ENV injection inert: the agent can
+  #     append `BASH_ENV=<payload it wrote>` to that file, and GitHub would
+  #     export it to every LATER step in the same job, whose bash would source
+  #     the payload before running its own command — defeating the immutable
+  #     staged copies, since the payload runs first. There is no later step
+  #     here to poison. Asserted by a test in
+  #     scripts/sentry-triage-agent-comment.test.mjs; do not add a step below
+  #     the agent.
   #   - SENTRY_TRIAGE_TOKEN is set as job env (see the env: note below) and is
   #     consumed via ${VAR} expansion in --mcp-config; it is never echoed and
-  #     never placed in a command.
+  #     never placed in a command. The wrapper drops it (and every other secret
+  #     bar gh's own credential) from the `gh` subprocess env.
+  #   - NOT CONTAINED, stated plainly: SENTRY_TRIAGE_TOKEN and the Claude OAuth
+  #     token are live in the agent's OWN Bash process env, so a successful
+  #     prompt injection can exfiltrate either into a public queue comment. The
+  #     wrapper refuses a body reproducing a token verbatim, but that is hygiene
+  #     against an accident, NOT a leak control: the agent writes the shell
+  #     command, and bash expands and transforms `$VAR` before the wrapper
+  #     receives argv, so a spliced or split value passes. Closing this needs
+  #     the credential out of the agent's process env — per-step env forwarding
+  #     the pinned action does not support, or a credential broker the MCP
+  #     server talks to. Both tokens are read-only / inference scoped and any
+  #     use lands in an auditable public comment.
   # ---------------------------------------------------------------------------
   triage:
     needs: select
@@ -177,49 +207,154 @@ jobs:
     permissions:
       contents: read
       issues: write
-    # Job-level (NOT step-level) env: claude-code-action is a composite action
-    # whose internal run step has its own env: block that shadows caller
-    # step-level env vars — its action.yml explicitly instructs custom env vars
-    # to be set at job level or via $GITHUB_ENV so they reach the Claude
-    # subprocess. Job env is exported to every step process of this job.
-    #   - GH_TOKEN: gh CLI auth for the agent's scoped `gh issue …` commands
-    #     (this job's GITHUB_TOKEN: issues:write + contents:read only).
+    # Job-level (NOT step-level) env: claude-code-action is a composite action,
+    # and GitHub Actions does not pass a CALLER step's env: into a composite
+    # action's steps at all; the action's internal run step additionally
+    # declares its own env: block. Its action.yml says so in as many words for
+    # its own MCP vars — "this step's env: block shadows the calling workflow's
+    # job-level env vars … Set these in your workflow's job-level env: or via a
+    # prior step that writes to $GITHUB_ENV". RE-VERIFIED for issue #1288
+    # against the version pinned below, v1.0.179 (b76a0776): there is still no
+    # per-step env passthrough and no first-class MCP env input, and
+    # $GITHUB_ENV would expose the value to every LATER step instead of fewer,
+    # so SENTRY_TRIAGE_TOKEN cannot move to step scope. Re-check on the next
+    # major action bump; do not re-open the question without testing a version.
+    #   - GH_TOKEN: gh CLI auth for the agent's read-only `gh issue view/list`
+    #     (this job's GITHUB_TOKEN: issues:write + contents:read only) and for
+    #     the deterministic steps below.
     #   - SENTRY_TRIAGE_TOKEN: consumed by ${SENTRY_TRIAGE_TOKEN} expansion in
     #     --mcp-config when the CLI launches the stdio Sentry MCP server
     #     (expansion of inline --mcp-config env values verified against the
-    #     CLI). Never echoed. Accepted residual: like GH_TOKEN, it is visible
-    #     to the agent's allowlisted Bash subprocesses; the token is read-only
-    #     scoped, and any misuse lands in the auditable queue-issue comment.
+    #     CLI). Never echoed. Accepted residual, unchanged by #1288: like
+    #     GH_TOKEN it is visible to the agent's allowlisted Bash subprocesses,
+    #     and an injected agent can exfiltrate it through its own write path —
+    #     see the "NOT CONTAINED" bullet in the job banner for why no check
+    #     inside the wrapper can stop that. What #1288 did buy: the write target
+    #     cannot be model-controlled, agent comments cannot impersonate the
+    #     pipeline's control comments, and `gh` itself no longer receives this
+    #     token. The token is read-only scoped.
+    #   - SENTRY_TRIAGE_COMMENT_ISSUE: a CROSS-CHECK on the wrapper's write
+    #     target, never the binding itself. Env cannot fence the target: bash
+    #     arithmetic expansion assigns, so a body containing
+    #     `$((SENTRY_TRIAGE_COMMENT_ISSUE=1234))` rewrites this variable while
+    #     the agent's own command line is expanded, before node starts. The
+    #     authoritative target is the read-only file written by the "Pin the
+    #     agent write target" step below; the wrapper refuses when the two
+    #     disagree, because a disagreement is evidence of exactly that.
     env:
       GH_TOKEN: ${{ github.token }}
       SENTRY_TRIAGE_TOKEN: ${{ secrets.SENTRY_TRIAGE_TOKEN }}
+      SENTRY_TRIAGE_COMMENT_ISSUE: ${{ matrix.issue }}
     steps:
       # SHA-pinned (not tags) so tag retargeting / a compromised release cannot
       # silently run new code. Bump via Dependabot (.github/dependabot.yml).
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 1
+          # The agent can write into this checkout (see the staging step below),
+          # and it holds Read. Do NOT leave the checkout credential in
+          # .git/config for it to read — same rule sentry-autofix.yml applies to
+          # its agent job. Nothing in this job pushes or fetches.
+          persist-credentials: false
 
-      # The deterministic verdict-label and projection steps below run
-      # scripts/sentry-triage-project.mjs, so pin node to .node-version rather
-      # than relying on the runner image's system node (mirrors the digest job).
+      # The agent's comment wrapper runs under node, so pin it to .node-version
+      # rather than relying on the runner image's system node (mirrors the
+      # digest job). Nothing else in this job runs node.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version
+
+      # -----------------------------------------------------------------------
+      # Move everything the agent's grants can EXECUTE, and the target it writes
+      # to, out of the checkout and make both immutable (issue #1288).
+      #
+      # THE CHECKOUT IS AGENT-WRITABLE. Claude Code documents that a
+      # `Bash(cmd:*)` rule matches a command carrying an output redirection
+      # (CHANGELOG v1.0.123), and `gh issue view … --template` renders arbitrary
+      # constructed text (`gh help formatting`), so the agent's read-only `gh`
+      # grants compose into "write any content to any path this user can write":
+      #
+      #     gh issue view <n> --json number --template '<literal JavaScript>' \
+      #       > scripts/sentry-triage-agent-comment.mjs
+      #
+      # That replaces the wrapper the agent is then allowed to run, defeating
+      # the pinned target, the marker fences and the child-env scrub in one
+      # step. Verified: the --template rendering above was reproduced against
+      # the live API.
+      #
+      # So nothing executable is loaded from the checkout in this job. The
+      # wrapper's whole runtime import closure is copied here, read-only, and
+      # the agent's grant names THIS path. Everything trusted that used to run
+      # after the agent now runs in the `verdict` job, on its own runner with
+      # its own pristine checkout — see that job's banner for why a separate
+      # job and not merely a separate file.
+      #
+      # The closure is copied rather than inlined so the marker constants keep a
+      # single owner (sentry-triage-project-core.mjs) — inlining them into the
+      # wrapper is the drift this pipeline already guards against elsewhere.
+      # scripts/sentry-triage-agent-comment.test.mjs recomputes the closure from
+      # the source and fails if this list stops matching it.
+      #
+      # Modes are load-bearing, not decoration: 0444 files in a 0555 directory
+      # make open(O_WRONLY), create, unlink and rename all fail EACCES for the
+      # owning (non-root) user. Verified, with a control at 0755/0644 that
+      # succeeds. The wrapper additionally refuses if it finds its pinned target
+      # writable, which catches this step regressing.
+      # -----------------------------------------------------------------------
+      - name: Stage immutable agent tools and pin the write target (trusted)
+        env:
+          QUEUE_ISSUE_NUMBER: ${{ matrix.issue }}
+        run: |
+          set -euo pipefail
+
+          # --- the write target -------------------------------------------------
+          target_dir="${RUNNER_TEMP}/sentry-triage-target"
+          mkdir -p "${target_dir}"
+          chmod 0755 "${target_dir}"
+          # jq emits the JSON so the values are quoted by a parser rather than
+          # by string concatenation. Both inputs are trusted (a validated
+          # integer and GITHUB_REPOSITORY); the wrapper still parses this as
+          # JSON and must never be handed a hand-rolled document.
+          jq -n \
+            --arg repo "${GITHUB_REPOSITORY}" \
+            --arg issue "${QUEUE_ISSUE_NUMBER}" \
+            '{repo: $repo, issue: $issue}' > "${target_dir}/target.json"
+          chmod 0444 "${target_dir}/target.json"
+          chmod 0555 "${target_dir}"
+
+          # --- the executable closure -------------------------------------------
+          tools_dir="${RUNNER_TEMP}/sentry-triage-tools"
+          mkdir -p "${tools_dir}"
+          chmod 0755 "${tools_dir}"
+          for f in \
+            sentry-triage-agent-comment.mjs \
+            sentry-triage-project-core.mjs; do
+            install -m 0444 "scripts/${f}" "${tools_dir}/${f}"
+          done
+          chmod 0555 "${tools_dir}"
+
+          echo "Pinned write target: ${GITHUB_REPOSITORY}#${QUEUE_ISSUE_NUMBER}"
+          ls -ld "${target_dir}" "${tools_dir}"
+          ls -l "${target_dir}/target.json" "${tools_dir}"
 
       - name: Render triage prompt
         id: render
         env:
           QUEUE_ISSUE_NUMBER: ${{ matrix.issue }}
+          COMMENT_TOOL: ${{ runner.temp }}/sentry-triage-tools/sentry-triage-agent-comment.mjs
         run: |
           set -euo pipefail
-          # Wire only the queue-issue number into the checked-in prompt file;
-          # the SECURITY section and everything else stay verbatim. sed instead
-          # of envsubst: gettext is not guaranteed on ubuntu-latest, and the
-          # replacement is a ^[0-9]+$-validated integer, so it is sed-safe.
+          # Wire the queue-issue number and the staged wrapper path into the
+          # checked-in prompt file; the SECURITY section and everything else
+          # stay verbatim. sed instead of envsubst: gettext is not guaranteed on
+          # ubuntu-latest. The issue number is a ^[0-9]+$-validated integer; the
+          # tool path is runner-provided and contains no `|`, which is why that
+          # substitution uses `|` as its delimiter rather than `/`.
           {
             echo 'prompt<<SENTRY_TRIAGE_PROMPT_EOF'
-            sed "s/\$QUEUE_ISSUE_NUMBER/${QUEUE_ISSUE_NUMBER}/g" .github/prompts/sentry-triage.md
+            sed -e "s/\$QUEUE_ISSUE_NUMBER/${QUEUE_ISSUE_NUMBER}/g" \
+                -e "s|\$SENTRY_TRIAGE_COMMENT_TOOL|${COMMENT_TOOL}|g" \
+                .github/prompts/sentry-triage.md
             echo 'SENTRY_TRIAGE_PROMPT_EOF'
           } >> "${GITHUB_OUTPUT}"
 
@@ -243,7 +378,64 @@ jobs:
             --max-turns 50
             --setting-sources user
             --mcp-config '{"mcpServers":{"sentry":{"command":"npx","args":["-y","@sentry/mcp-server@0.37.0"],"env":{"SENTRY_ACCESS_TOKEN":"${SENTRY_TRIAGE_TOKEN}","SENTRY_HOST":"us.sentry.io"}}}}'
-            --allowedTools 'Read,Grep,Glob,Bash(gh issue view:*),Bash(gh issue list:*),Bash(gh issue comment ${{ matrix.issue }}:*),mcp__sentry__find_organizations,mcp__sentry__find_projects,mcp__sentry__get_issue_details,mcp__sentry__get_event_stacktrace,mcp__sentry__get_issue_tag_values,mcp__sentry__get_issue_activity,mcp__sentry__search_issues,mcp__sentry__search_events,mcp__sentry__search_issue_events,mcp__sentry__get_sentry_resource'
+            --allowedTools 'Read,Grep,Glob,Bash(gh issue view:*),Bash(gh issue list:*),Bash(node ${{ runner.temp }}/sentry-triage-tools/sentry-triage-agent-comment.mjs:*),mcp__sentry__find_organizations,mcp__sentry__find_projects,mcp__sentry__get_issue_details,mcp__sentry__get_event_stacktrace,mcp__sentry__get_issue_tag_values,mcp__sentry__get_issue_activity,mcp__sentry__search_issues,mcp__sentry__search_events,mcp__sentry__search_issue_events,mcp__sentry__get_sentry_resource'
+
+  # ---------------------------------------------------------------------------
+  # verdict: apply the verdict label and settle the queue stub (deterministic).
+  #
+  # A SEPARATE JOB, not steps at the end of `triage`, and that is the whole
+  # point. The agent can append to $GITHUB_ENV — the path is in its environment
+  # and a permitted `gh issue view --template` renders arbitrary text — so
+  # `BASH_ENV=<payload it wrote into the checkout>` would be exported into any
+  # later step IN THE SAME JOB, and bash would source that payload before
+  # running the step's own command. Staging immutable copies does not help: the
+  # payload runs first. Same shape sentry-autofix.yml uses (select → agent →
+  # finalize): the untrusted job ends when the agent ends, and everything
+  # credential-bearing happens on a fresh runner with a fresh checkout and a
+  # fresh environment, where nothing the agent wrote to $GITHUB_ENV,
+  # $GITHUB_PATH, $GITHUB_OUTPUT or the checkout exists at all.
+  #
+  # NOTHING crosses the job boundary from the agent. The handoff is the verdict
+  # comment on the queue issue, which this job re-reads from GitHub through the
+  # single authoritative parser and validates against the closed verdict enum —
+  # the same untrusted-input discipline as before, unchanged by the split. The
+  # only inputs are `matrix.issue` (the select job's ^[0-9]+$-validated integer)
+  # and GITHUB_REPOSITORY.
+  #
+  # if: always() + a non-zero count, like `project` and `digest`: a failed
+  # triage leg must not stop the other legs from settling. A leg whose agent
+  # failed simply finds no usable verdict and fails loudly here, leaving
+  # sentry:needs-triage for the next run — the same outcome as before the split.
+  #
+  # No `environment:` and no secret: this job holds only github.token. It is
+  # deliberately not a copy of the agent job's block.
+  # ---------------------------------------------------------------------------
+  verdict:
+    needs: [select, triage]
+    if: ${{ always() && needs.select.outputs.count != '' && needs.select.outputs.count != '0' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      max-parallel: 2
+      fail-fast: false
+      matrix:
+        issue: ${{ fromJSON(needs.select.outputs.issues) }}
+    permissions:
+      contents: read
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      # SHA-pinned (not tags) so tag retargeting / a compromised release cannot
+      # silently run new code. Bump via Dependabot (.github/dependabot.yml).
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
 
       - name: Apply verdict label (deterministic)
         id: verdict
@@ -278,6 +470,9 @@ jobs:
           # whether this stub is settled here or deferred to the serialized
           # `project` job.
           parse_file="${RUNNER_TEMP}/verdict-parse.json"
+          # Plain scripts/ is correct HERE and nowhere else in this file: this
+          # job has its own runner and its own pristine checkout, which the
+          # agent never touched.
           if ! node scripts/sentry-triage-project.mjs \
               --parse-only \
               --issue "${QUEUE_ISSUE_NUMBER}" \
@@ -358,6 +553,7 @@ jobs:
             exit 1
           fi
           echo "Closed issue #${QUEUE_ISSUE_NUMBER} (verdict: ${VERDICT})."
+
   # ---------------------------------------------------------------------------
   # project: SERIALIZED verdict projection (deterministic, no LLM — ADR 0038).
   # Runs ONCE per triage run, after every matrix job settles, and processes the
@@ -384,7 +580,7 @@ jobs:
   # labels) and turn the job red so the main-failure notifier fires.
   # ---------------------------------------------------------------------------
   project:
-    needs: [select, triage]
+    needs: [select, triage, verdict]
     if: ${{ always() && needs.select.outputs.count != '' && needs.select.outputs.count != '0' }}
     # sentry-pipeline Environment (issue #1289): SENTRY_PROJECTION_TOKEN is now an
     # environment secret, so this job MUST declare the environment to receive it;
@@ -534,7 +730,7 @@ jobs:
   #     registered) surfaces to #ci-failures — so a broken digest can't go dark.
   # ---------------------------------------------------------------------------
   digest:
-    needs: [select, triage, project]
+    needs: [select, triage, verdict, project]
     if: ${{ always() && needs.select.outputs.count != '' && needs.select.outputs.count != '0' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
