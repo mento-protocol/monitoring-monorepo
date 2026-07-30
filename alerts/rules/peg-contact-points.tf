@@ -64,7 +64,10 @@ locals {
   peg_contact_point_names = {
     market_warning = "Peg market warnings (#alerts-pools)"
     ops_warning    = "Peg producer warnings (#alerts-infra)"
-    page           = "Peg pages (Splunk On-Call + @support-engineer in #alerts-critical)"
+    # Grafana uses the contact-point name as identity. Renaming it forces a
+    # delete while alert rules still refer to the old name, which Grafana
+    # rejects. Keep the stable name; the Slack message names @support-engineer.
+    page = "Peg pages (Splunk On-Call + #alerts-critical)"
   }
 
   peg_notify_market_warning = {
