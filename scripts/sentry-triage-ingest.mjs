@@ -17,7 +17,10 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-import { selectMarkedComment } from "./sentry-triage-project-core.mjs";
+import {
+  extractYamlBlock,
+  selectMarkedComment,
+} from "./sentry-triage-project-core.mjs";
 
 export const DEFAULT_REPO = "mento-protocol/monitoring-monorepo";
 export const DEFAULT_ORG = "mento-labs";
@@ -59,6 +62,12 @@ export function resolveLookbackDays(cliValue, env = process.env) {
   return days;
 }
 
+// The run record is also a machine-read contract, not just an operator note.
+// `alerts/infra/sentry-ingest-watcher/` pins this exact marker and parses the
+// first ISO-8601 instant in the body as the last-ingest time, because a run
+// that no-ops on the kill switch or a missing token still concludes `success`
+// and never reaches this writer. Bump the version here only together with that
+// reader — an unmatched marker makes the dead-man switch fail closed and page.
 export const RUN_RECORD_MARKER = "<!-- sentry-triage-ingest:run-record:v1 -->";
 const BODY_MARKER = "<!-- sentry-triage:v1 -->";
 
@@ -254,6 +263,103 @@ export const FIX_REFUSED_LABEL = "sentry:fix-refused";
 export const APPROVED_ARCHIVE_LABEL = "sentry:approved-archive";
 export const ARCHIVED_LABEL = "sentry:archived";
 
+// Archive freshness baseline (issue #1371). The archive script records the
+// Sentry `lastSeen` it observed immediately BEFORE it mutated the issue, plus
+// the Sentry issue id it mutated. `decideDedupAction` compares a regression's
+// `lastSeen` against that instant instead of the stub's `closedAt`: the close
+// necessarily postdates any event that landed while the archive ran, so a
+// `closedAt` comparison would evaluate false for that event permanently and bury
+// a real regression until some later event happened to arrive. These field names
+// are the shared contract with scripts/sentry-triage-archive.mjs.
+//
+// The baseline lives in the queue stub's BODY, in the same yaml block ingest
+// writes at creation — never in a comment. That placement IS the trust boundary,
+// and it is structural rather than cryptographic. The Stage B triage agent is an
+// LLM reading attacker-controlled Sentry payloads, and
+// .github/workflows/sentry-triage-agent.yml grants it
+// `Bash(gh issue comment <matrix.issue>:*)` — its comments post as
+// `github-actions[bot]`, on this exact stub. So no author check, marker check, or
+// id check applied to a COMMENT can be trusted: a prompt-injected payload can
+// satisfy all of them and plant a far-future baseline, after which every later
+// regression of that Sentry issue is skipped indefinitely. The agent's allowlist
+// grants no tool that edits an issue body (`Read,Grep,Glob` + three scoped
+// `gh issue` subcommands; the autofix agent gets file-edit tools and no shell at
+// all), and no script or workflow step ever rewrites a stub body except the
+// archive leg's own deterministic, zero-LLM write. Moving the field into the body
+// therefore removes the forgery surface instead of trying to authenticate inside
+// it, which a shared-secret signature could only match, never beat.
+export const ARCHIVE_BASELINE_FIELD = "archive_baseline_last_seen";
+export const ARCHIVE_BASELINE_ID_FIELD = "archive_baseline_sentry_issue_id";
+
+/** Read one scalar out of a stub's yaml block. Keys are fixed literals (no regex
+ * injection) written one per line as `key: "value"`. */
+function readBaselineField(block, key) {
+  const match = new RegExp(`^${key}:[ \\t]*(.+)$`, "m").exec(
+    String(block ?? ""),
+  );
+  if (!match) return "";
+  return match[1]
+    .trim()
+    .replace(/^["']|["']$/g, "")
+    .trim();
+}
+
+/**
+ * Parse the archive freshness baseline out of a queue stub's BODY. Returns null
+ * when the body carries no baseline field — the normal state for a stub that has
+ * never been archived. The timestamp comes back RAW; validity is the caller's
+ * `Date.parse` gate, so a garbage value degrades to the `closedAt` fallback
+ * instead of throwing.
+ */
+export function parseArchiveBaseline(issueBody) {
+  const block = extractYamlBlock(issueBody);
+  if (!block) return null;
+  const lastSeen = readBaselineField(block, ARCHIVE_BASELINE_FIELD);
+  if (!lastSeen) return null;
+  return {
+    lastSeen,
+    sentryIssueId: readBaselineField(block, ARCHIVE_BASELINE_ID_FIELD),
+  };
+}
+
+/**
+ * Return `body` with the archive baseline fields set inside its existing yaml
+ * block, replacing any previous values (a re-archive supersedes). Used by the
+ * archive leg's body rewrite; kept here so the writer and the reader above stay
+ * one edit apart.
+ *
+ * A NULL baseline strips the two fields instead of setting them. The archive's
+ * rollback needs that: it must put the baseline back the way it found it while
+ * leaving every other part of the body — including edits a human made after the
+ * run's snapshot — exactly as it is live.
+ *
+ * Returns null when the body has no yaml block to extend — the archive treats
+ * that as a hard refusal rather than inventing structure, since a stub whose
+ * body it cannot parse is one ingest cannot read a baseline back out of either.
+ */
+export function withArchiveBaseline(body, baseline) {
+  const source = String(body ?? "");
+  const block = extractYamlBlock(source);
+  if (!block) return null;
+  const stripped = block
+    .split("\n")
+    .filter(
+      (line) =>
+        !new RegExp(
+          `^(${ARCHIVE_BASELINE_FIELD}|${ARCHIVE_BASELINE_ID_FIELD}):`,
+        ).test(line.trim()),
+    )
+    .join("\n");
+  const rebuilt = baseline
+    ? [
+        stripped,
+        `${ARCHIVE_BASELINE_FIELD}: ${JSON.stringify(String(baseline.lastSeen ?? ""))}`,
+        `${ARCHIVE_BASELINE_ID_FIELD}: ${JSON.stringify(String(baseline.sentryIssueId ?? ""))}`,
+      ].join("\n")
+    : stripped;
+  return source.replace(block, rebuilt);
+}
+
 // Stage B's verdict namespace, derived from the definitions above so the two
 // can't drift. A reopened regression must shed its previous verdict — the
 // old verdict described the old occurrence, and downstream consumers filter
@@ -314,12 +420,48 @@ export function indexQueueIssuesByShortId(issues) {
  * `substatus=regressed` for days after a regression, so an unconditional
  * reopen would loop a verdict-closed, already-triaged stub through
  * reopen -> re-triage -> close on every run until Sentry flips the
- * substatus (the counterpart of the Stage B queue-closing step). Missing or
- * unparsable timestamps fail open toward triage (reopen): a wrongly
- * skipped regression is silent, a wrongly reopened one merely re-triages.
+ * substatus (the counterpart of the Stage B queue-closing step). A missing or
+ * unparsable `lastSeen` fails open toward triage (reopen): a wrongly skipped
+ * regression is silent, a wrongly reopened one merely re-triages.
  * Closed match, not regressed -> skip (stays closed). No match -> create.
+ *
+ * An ARCHIVED stub (`sentry:archived`) compares against `archiveBaseline` — the
+ * Sentry `lastSeen` the archive leg observed just before it mutated the issue —
+ * instead of `closedAt` (issue #1371). The archive's close postdates any event
+ * that landed inside its mutation window, so `closedAt` would hide that event
+ * forever. A missing, unparsable, or non-date baseline falls back to the
+ * `closedAt` comparison, which keeps every stub archived before this contract
+ * existed working exactly as before.
+ *
+ * Order matters, and it is deliberate: a usable, bound baseline wins over
+ * `closedAt` even when `closedAt` itself is missing or unparsable. The baseline
+ * is strictly better evidence — it names the instant the archive observed, while
+ * `closedAt` is only a proxy for it — so a NaN `closedAt` must not short-circuit
+ * to reopen ahead of the baseline branch and defeat the mechanism on every run.
+ * The `closedAt` fail-open still applies once no usable baseline is in play.
+ *
+ * That baseline only gates the decision while it is BOUND to the Sentry issue
+ * the stub tracks: the archive leg records the id it mutated
+ * (`archiveBaselineIssueId`) beside the timestamp, and a baseline naming a
+ * different id — or naming none at all — is evidence about some other issue and
+ * cannot speak for this one. An unbound baseline therefore reopens rather than
+ * falling back to `closedAt`: same fail-open direction as the unparsable
+ * timestamps above and for the same reason (a wrongly skipped regression is
+ * silent, a wrongly reopened one merely re-triages), and the `closedAt` fallback
+ * is reserved for stubs archived before this contract existed, not for a
+ * baseline that is present but does not describe this issue. It cannot loop —
+ * the reopen sheds `sentry:archived` (REOPEN_SHED_LABELS), so the stub takes the
+ * ordinary `closedAt` path from then on.
+ *
  */
-export function decideDedupAction({ existingIssue, isRegressed, lastSeen }) {
+export function decideDedupAction({
+  existingIssue,
+  isRegressed,
+  lastSeen,
+  archiveBaseline = null,
+  archiveBaselineIssueId = null,
+  sentryIssueId = null,
+}) {
   if (!existingIssue) return { action: "create" };
   if (existingIssue.state === "OPEN") {
     return { action: "skip", reason: "already open" };
@@ -330,9 +472,22 @@ export function decideDedupAction({ existingIssue, isRegressed, lastSeen }) {
   // would order "…00.500Z" BEFORE "…00Z".
   const closedAtMs = Date.parse(existingIssue.closedAt ?? "");
   const lastSeenMs = Date.parse(lastSeen ?? "");
-  if (Number.isNaN(closedAtMs) || Number.isNaN(lastSeenMs)) {
-    return { action: "reopen" };
+  if (Number.isNaN(lastSeenMs)) return { action: "reopen" };
+
+  const isArchived = (existingIssue.labels ?? []).includes(ARCHIVED_LABEL);
+  const baselineMs = Date.parse(archiveBaseline ?? "");
+  if (isArchived && !Number.isNaN(baselineMs)) {
+    const recordedId = String(archiveBaselineIssueId ?? "").trim();
+    const currentId = String(sentryIssueId ?? "").trim();
+    if (!recordedId || recordedId !== currentId) return { action: "reopen" };
+    if (lastSeenMs > baselineMs) return { action: "reopen" };
+    return {
+      action: "skip",
+      reason: "archived, no events since the archive baseline",
+    };
   }
+
+  if (Number.isNaN(closedAtMs)) return { action: "reopen" };
   if (lastSeenMs > closedAtMs) return { action: "reopen" };
   return { action: "skip", reason: "closed, no events since close" };
 }
@@ -672,8 +827,11 @@ async function ensureLabelsExist(options) {
 }
 
 // Normalize a REST-API issue (lowercase `state`, `pull_request` marker on
-// PRs, `closed_at` for the regression-reopen timestamp gate) into the shape
-// decideDedupAction expects. Exported for tests.
+// PRs, `closed_at` for the regression-reopen timestamp gate, `labels` so the
+// archive-baseline branch can recognize a `sentry:archived` stub, and `body`
+// which carries that baseline) into the shape decideDedupAction expects. The
+// REST list returns all four, so reading a baseline costs no extra request.
+// Exported for tests.
 export function normalizeRestIssues(pages) {
   return (pages ?? [])
     .flat()
@@ -683,6 +841,10 @@ export function normalizeRestIssues(pages) {
       title: issue.title ?? "",
       state: String(issue.state ?? "").toUpperCase(),
       closedAt: issue.closed_at ?? null,
+      body: issue.body ?? "",
+      labels: (issue.labels ?? [])
+        .map((label) => (typeof label === "string" ? label : label?.name))
+        .filter(Boolean),
     }));
 }
 
@@ -898,10 +1060,19 @@ export async function runIngest(options, deps = {}) {
   for (const sentryIssue of merged.values()) {
     try {
       const existingIssue = existingByShortId.get(sentryIssue.shortId) ?? null;
+      // Only an archived, closed, regressed stub needs its audit comment read
+      // (issue #1371) — everything else decides off the labels/timestamps we
+      // already have.
+      // The baseline rides in the stub BODY, which the dedup scan already
+      // fetched — no per-stub comment read, and no forgeable comment surface.
+      const baseline = parseArchiveBaseline(existingIssue?.body);
       const decision = decideDedupAction({
         existingIssue,
         isRegressed: sentryIssue.isRegressed,
         lastSeen: sentryIssue.lastSeen,
+        archiveBaseline: baseline?.lastSeen ?? null,
+        archiveBaselineIssueId: baseline?.sentryIssueId ?? null,
+        sentryIssueId: sentryIssue.id,
       });
       if (decision.action === "skip") {
         counts.skippedExisting += 1;

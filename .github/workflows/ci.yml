@@ -199,6 +199,7 @@ jobs:
               # on listener + channel changes too.
               - alerts/infra/onchain-event-listeners/**
               - alerts/infra/channels/**
+              - alerts/infra/sentry-ingest-watcher/**
               - alerts/infra/*.tf
               - shared-config/**
               - scripts/eslint-baseline-diff.mjs
@@ -718,6 +719,10 @@ jobs:
       - name: Test with coverage (oncall-announcer)
         working-directory: alerts/infra/oncall-announcer
         run: pnpm run test:coverage
+      # The Sentry ingest watcher imports nothing but its own modules — plain
+      # ESM plus `node --test`, so it needs no package-local install step.
+      - name: Test (sentry-ingest-watcher)
+        run: pnpm alerts:watcher:test
       # Verify event-hashes.json is in sync with safe-abi.json. The handler
       # computes Safe event topic hashes at runtime from safe-abi.json
       # (constants.ts:extractEventSignatures), and the QuickNode webhook

@@ -38,6 +38,22 @@ export const PROJECTED_LABEL = "sentry:projected";
 // consumer (sentry-triage-digest.mjs) can never drift.
 export const PROJECTED_COMMENT_PREFIX = "Projected to owning repo: ";
 
+// First line of the Phase 2a archive leg's audit comment on a queue stub. The
+// archive leg emits it (`buildAuditComment`) and treats it as the at-most-once
+// key for that post, so a dispatch retry cannot double-audit.
+//
+// It is NOT a trust fence, and must never be used as one. The triage agent's
+// LLM-authored comment is posted with `github.token`, so it passes
+// `isTrustedComment` exactly like the deterministic scripts do, and a marker is
+// just text any comment author can write. The freshness baseline (issue #1371)
+// lives in the queue-stub BODY for that reason — no untrusted step holds a tool
+// grant that edits a body. Defined here — the pure contract module — for
+// the same reason as PROJECTED_COMMENT_PREFIX above (emitter and consumer can
+// never drift) and because sentry-triage-archive.mjs already imports from
+// sentry-triage-ingest.mjs, so the consumer importing it from the emitter would
+// be a cycle.
+export const ARCHIVE_COMMENT_MARKER = "<!-- sentry-triage-archive:v1 -->";
+
 // Only ACTIONABLE verdicts project. `needs-human` / `upstream-transient` stay
 // in the queue (verdict contract).
 export const PROJECTABLE_VERDICTS = ["code-fix", "config-fix"];
