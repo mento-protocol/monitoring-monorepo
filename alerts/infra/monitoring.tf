@@ -17,8 +17,8 @@ locals {
   # 26h clears normal drift without hiding an outage.
   sentry_ingest_freshness_threshold_seconds = 26 * 60 * 60
 
-  # Two watcher runs land in every alignment bucket, so one missed hourly run
-  # still leaves a point and cannot be mistaken for missing data.
+  # Two watcher runs land in every alignment bucket, so a single missed hourly
+  # run still leaves a point and cannot read as an absent series.
   sentry_ingest_freshness_alignment_period = "7200s"
 }
 
@@ -310,14 +310,28 @@ resource "google_monitoring_metric_descriptor" "sentry_ingest_freshness" {
 #      could not parse. The function never guesses a value in those cases, so
 #      silence is the signal.
 #
-# `EVALUATION_MISSING_DATA_ACTIVE` is the Cloud Monitoring equivalent of the
-# Grafana `no_data_state = "Alerting"` on "Aegis does not report new data"
-# (alerts/rules/rules-aegis-service.tf). It covers gaps inside the retention
-# window; `condition_absent` covers a series that stops entirely. A watcher
+# `condition_absent` is what makes this a dead-man switch — the Cloud
+# Monitoring equivalent of the Grafana `no_data_state = "Alerting"` on "Aegis
+# does not report new data" (alerts/rules/rules-aegis-service.tf). A watcher
 # that can fail quietly reproduces the incident this switch exists to prevent.
 #
-# Neither condition can fire before the series exists at all, so confirm the
-# first successful publish after apply — see alerts/infra/README.md.
+# The threshold condition deliberately does NOT set `evaluation_missing_data`.
+# Two reasons, in order of weight:
+#
+#   * It would be redundant. Freshness is an ABSOLUTE age, not a delta, so a
+#     gap loses no information: the first point published after any gap carries
+#     the true age and trips the 26h threshold on its own if the pipeline is
+#     really dead. Treating the gap itself as violating only adds firing while
+#     the watcher blips and the pipeline is healthy — a false positive.
+#   * The API forbids it here anyway. `MetricThreshold.evaluationMissingData`:
+#     "To use this control, the value of the duration field must be greater
+#     than or equal to 60 seconds." This condition runs at `duration = "0s"`,
+#     so one aligned point over 26h alerts immediately.
+#
+# So the two conditions divide cleanly: the threshold owns "ingest is stale and
+# still reporting", `condition_absent` owns "nothing is reporting at all".
+# Neither can fire before the series exists, so confirm the first successful
+# publish after apply — see alerts/infra/README.md.
 resource "google_monitoring_alert_policy" "sentry_ingest_staleness_policy" {
   project      = local.project_id
   display_name = "sentry-triage-ingest-stale"
@@ -379,8 +393,6 @@ resource "google_monitoring_alert_policy" "sentry_ingest_staleness_policy" {
       trigger {
         count = 1
       }
-
-      evaluation_missing_data = "EVALUATION_MISSING_DATA_ACTIVE"
     }
   }
 

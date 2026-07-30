@@ -201,11 +201,21 @@ cloud-routine experiment ran for weeks producing nothing and nobody noticed.
   without updating the watcher makes it fail closed and alert — deliberate, so
   the contract cannot drift silently. `RUN_RECORD_MARKER` in
   `scripts/sentry-triage-ingest.mjs` carries the matching note
-- `sentry-triage-ingest-stale` alerts `#alerts-infra` when the gauge exceeds
-  26h (ingest runs 2x/day and GitHub's scheduler drifts up to ~3h, so 26h
-  clears normal drift) **or** when the gauge stops arriving for 3h. The
-  missing-data half is the point: a watcher that can fail quietly reproduces
-  the incident it exists to prevent
+- `sentry-triage-ingest-stale` alerts `#alerts-infra` on two conditions that
+  divide cleanly. A threshold condition owns _ingest is stale and the watcher
+  is still reporting_: the gauge exceeds 26h (ingest runs 2x/day and GitHub's
+  scheduler drifts up to ~3h, so 26h clears normal drift). An absence
+  condition owns _nothing is reporting at all_: no point for 3h. The absence
+  half is the dead-man switch — a watcher that can fail quietly reproduces the
+  incident it exists to prevent
+- The threshold deliberately does not set `evaluation_missing_data`. Freshness
+  is an absolute age rather than a delta, so a gap loses no information: the
+  first point after any gap carries the true age and crosses 26h on its own if
+  the pipeline is really dead. Treating the gap itself as a violation would
+  only add firing while the watcher blips and the pipeline is fine. The v3 API
+  forbids the combination regardless — that control requires
+  `duration >= 60s`, and this condition runs at `0s` so a single aligned point
+  over 26h alerts immediately
 - The pure helpers are unit-tested with `pnpm alerts:watcher:test`. The
   function's own code imports nothing beyond them; `package.json` pins only
   the Cloud Functions runtime shim, at the exact version the other two
@@ -272,7 +282,8 @@ steps below are required before treating this as armed.
 - On-chain handler drop and processing-budget policies share the same
   `#alerts-infra` destination
 - `sentry-triage-ingest-stale` shares that destination too, and is the only
-  policy here that treats missing data as a firing condition
+  policy here that alerts on an absent series rather than on a signal it
+  received
 
 ### Build-artifact retention
 

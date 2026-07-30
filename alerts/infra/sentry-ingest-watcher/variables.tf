@@ -67,7 +67,7 @@ variable "runtime" {
 }
 
 variable "schedule" {
-  description = "Cloud Scheduler cron expression. Must stay at least twice as frequent as the alert's 7200s alignment period, otherwise an empty alignment bucket reads as missing data and fires the staleness alert on a healthy pipeline."
+  description = "Cloud Scheduler cron expression. Must stay at least twice as frequent as the alert's 7200s alignment period, so a single missed run still leaves a point in the bucket and cannot read as an absent series on a healthy pipeline."
   type        = string
   default     = "0 * * * *"
 }
