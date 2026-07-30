@@ -29,6 +29,7 @@ import {
   MAX_CHANGED_FILES,
   redactCredentialShaped,
   runCli,
+  selectAutofixRunRecordComment,
 } from "./sentry-autofix-finalize.mjs";
 import { AUTOFIX_COMMENT_PREFIX } from "./sentry-triage-digest.mjs";
 import {
@@ -507,6 +508,46 @@ await test("run record body coerces missing/bad counters and labels safely", () 
   assert(body.includes("Refused (no PR): 0"), "missing refused -> 0");
 });
 
+// Comments as the raw REST endpoint returns them: pipeline-authored comments
+// resolve to the Actions bot login "github-actions[bot]".
+function trackerComment(id, body, login) {
+  return { id, body, user: { login } };
+}
+
+await test("selectAutofixRunRecordComment ignores a marker planted by an untrusted author", () => {
+  const planted = trackerComment(
+    999,
+    `${AUTOFIX_RUN_RECORD_MARKER}\n\nDrive-by defacement.`,
+    "drive-by-user",
+  );
+  assertEqual(selectAutofixRunRecordComment([planted]), null);
+});
+
+await test("selectAutofixRunRecordComment rejects a trusted comment where the marker is mid-body, not anchored at the start", () => {
+  const midBody = trackerComment(
+    1,
+    `Some chatter.\n\n${AUTOFIX_RUN_RECORD_MARKER}`,
+    "github-actions[bot]",
+  );
+  assertEqual(selectAutofixRunRecordComment([midBody]), null);
+});
+
+await test("selectAutofixRunRecordComment selects the pipeline's own prefix-anchored, trusted-author record", () => {
+  const genuine = trackerComment(
+    1,
+    `${AUTOFIX_RUN_RECORD_MARKER}\n\n**Sentry autofix — last run:** now`,
+    "github-actions[bot]",
+  );
+  const planted = trackerComment(
+    999,
+    `${AUTOFIX_RUN_RECORD_MARKER}\n\nDrive-by defacement.`,
+    "drive-by-user",
+  );
+  const selected = selectAutofixRunRecordComment([planted, genuine]);
+  assert(selected !== null, "expected the genuine record to be selected");
+  assertEqual(selected.id, 1);
+});
+
 await test("analysis comment leads with the deterministic reason only", () => {
   const c = buildAnalysisComment("Too many files.");
   assert(c.includes("**Autofix: no PR opened.**"), "header present");
@@ -654,6 +695,57 @@ await test("selected-verdict-id fails closed to 'none' (#1506)", () => {
   for (const f of [noVerdict, malformed, missing]) {
     assert(
       captureCli(["selected-verdict-id", "--comments-file", f]).trim() ===
+        "none",
+      `fails closed to none for ${f}`,
+    );
+  }
+});
+
+await test("select-run-record-id prints the trusted, prefix-anchored record's id, never a planted untrusted one", () => {
+  const dir = mkdtempSync(join(tmpdir(), "autofix-runrecord-id-"));
+  const file = join(dir, "comments.json");
+  writeFileSync(
+    file,
+    JSON.stringify([
+      trackerComment(
+        999,
+        `${AUTOFIX_RUN_RECORD_MARKER}\n\nDrive-by defacement.`,
+        "drive-by-user",
+      ),
+      trackerComment(
+        1,
+        `${AUTOFIX_RUN_RECORD_MARKER}\n\n**Sentry autofix — last run:** now`,
+        "github-actions[bot]",
+      ),
+    ]),
+  );
+  assertEqual(
+    captureCli(["select-run-record-id", "--comments-file", file]).trim(),
+    "1",
+  );
+});
+
+await test("select-run-record-id fails closed to 'none' for no record, a mid-body marker, and unparsable input", () => {
+  const dir = mkdtempSync(join(tmpdir(), "autofix-runrecord-id-none-"));
+  const empty = join(dir, "empty.json");
+  writeFileSync(empty, "[]");
+  const midBody = join(dir, "mid-body.json");
+  writeFileSync(
+    midBody,
+    JSON.stringify([
+      trackerComment(
+        1,
+        `Some chatter.\n\n${AUTOFIX_RUN_RECORD_MARKER}`,
+        "github-actions[bot]",
+      ),
+    ]),
+  );
+  const malformed = join(dir, "bad.json");
+  writeFileSync(malformed, "{not json");
+  const missing = join(dir, "nope.json");
+  for (const f of [empty, midBody, malformed, missing]) {
+    assert(
+      captureCli(["select-run-record-id", "--comments-file", f]).trim() ===
         "none",
       `fails closed to none for ${f}`,
     );

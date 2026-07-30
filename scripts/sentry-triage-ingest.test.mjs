@@ -26,8 +26,10 @@ import {
   REOPEN_SHED_LABELS,
   resolveLookbackDays,
   resolveTokenGuard,
+  RUN_RECORD_MARKER,
   runIngest,
   sanitizeFreeText,
+  selectRunRecordComment,
   toMetadata,
   truncateTitle,
   VERDICT_LABELS,
@@ -788,6 +790,55 @@ await test("run record body includes counts and the rolling-comment marker", () 
   assert(body.includes("Skipped (existing): 2"), "missing skipped count");
   assert(body.includes("Reopened (regressed): 1"), "missing reopened count");
   assert(body.includes("Errors: 0"), "missing errors count");
+});
+
+// Comments as the raw REST endpoint returns them (the shape
+// fetchTrackerComments consumes): pipeline-authored comments resolve to the
+// Actions bot login "github-actions[bot]".
+function trackerComment(id, body, login) {
+  return { id, body, user: { login } };
+}
+
+await test("selectRunRecordComment ignores a marker planted by an untrusted author", () => {
+  const planted = trackerComment(
+    999,
+    `${RUN_RECORD_MARKER}\n\nDrive-by defacement.`,
+    "drive-by-user",
+  );
+  assertEqual(selectRunRecordComment([planted]), null);
+});
+
+await test("selectRunRecordComment rejects a trusted comment where the marker is mid-body, not anchored at the start", () => {
+  const midBody = trackerComment(
+    1,
+    `Some chatter.\n\n${RUN_RECORD_MARKER}`,
+    "github-actions[bot]",
+  );
+  assertEqual(selectRunRecordComment([midBody]), null);
+});
+
+await test("selectRunRecordComment selects the pipeline's own prefix-anchored, trusted-author record", () => {
+  const genuine = trackerComment(
+    1,
+    `${RUN_RECORD_MARKER}\n\n**Sentry triage ingest — last run:** now`,
+    "github-actions[bot]",
+  );
+  const planted = trackerComment(
+    999,
+    `${RUN_RECORD_MARKER}\n\nDrive-by defacement.`,
+    "drive-by-user",
+  );
+  const selected = selectRunRecordComment([planted, genuine]);
+  assert(selected !== null, "expected the genuine record to be selected");
+  assertEqual(selected.id, 1);
+});
+
+await test("selectRunRecordComment returns null when no comment qualifies", () => {
+  assertEqual(selectRunRecordComment([]), null);
+  assertEqual(
+    selectRunRecordComment([trackerComment(1, "chatter", "github-actions")]),
+    null,
+  );
 });
 
 // ---------------------------------------------------------------------------

@@ -17,6 +17,8 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
+import { isTrustedComment } from "./sentry-triage-project-core.mjs";
+
 export const DEFAULT_REPO = "mento-protocol/monitoring-monorepo";
 export const DEFAULT_ORG = "mento-labs";
 export const DEFAULT_SENTRY_BASE_URL = "https://us.sentry.io";
@@ -822,14 +824,31 @@ async function fetchTrackerComments(options) {
   return pages.flat();
 }
 
+/**
+ * Pick the existing rolling run-record comment to update, if any. Fenced the
+ * same way every other pipeline consumer fences a tracker comment
+ * (`isTrustedComment`, scripts/sentry-triage-project-core.mjs) plus a
+ * `startsWith` anchor on RUN_RECORD_MARKER — this repo is public and #1282 is
+ * open, so without both an untrusted commenter could plant the marker
+ * anywhere in a comment body and have the next run PATCH its content into
+ * their comment, defacing it and losing the real record. Exported so the
+ * fence is independently testable (mirrors selectVerdictComment's shape).
+ */
+export function selectRunRecordComment(comments) {
+  return (
+    (comments ?? []).find(
+      (comment) =>
+        typeof comment?.body === "string" &&
+        isTrustedComment(comment) &&
+        comment.body.startsWith(RUN_RECORD_MARKER),
+    ) ?? null
+  );
+}
+
 async function defaultPostRunRecord(options, counts, now) {
   const body = buildRunRecordBody(counts, now.toISOString());
   const comments = await fetchTrackerComments(options);
-  const existing = comments.find(
-    (comment) =>
-      typeof comment.body === "string" &&
-      comment.body.includes(RUN_RECORD_MARKER),
-  );
+  const existing = selectRunRecordComment(comments);
   if (existing) {
     await runGh(
       [
