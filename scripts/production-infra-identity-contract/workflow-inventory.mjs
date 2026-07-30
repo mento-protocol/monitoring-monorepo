@@ -38,6 +38,8 @@ const APPLY_CONFIG_BY_WORKFLOW = {
       TF_VAR_grafana_service_account_token:
         "${{ secrets.TF_VAR_GRAFANA_SERVICE_ACCOUNT_TOKEN }}",
       TF_VAR_slack_bot_token: "${{ secrets.TF_VAR_SLACK_BOT_TOKEN }}",
+      TF_VAR_oncall_support_usergroup_id:
+        "${{ secrets.TF_VAR_ONCALL_SUPPORT_USERGROUP_ID }}",
       TF_VAR_splunk_on_call_alerts_webhook_url:
         "${{ secrets.TF_VAR_SPLUNK_ON_CALL_ALERTS_WEBHOOK_URL }}",
     },

@@ -1139,6 +1139,86 @@ test("committed peg rules preserve coverage, rollover, and routing invariants", 
   );
 });
 
+test("Peg Slack pages mention @support-engineer only while critical alerts are firing", () => {
+  const templates = readFileSync(
+    path.resolve(__dirname, "..", "alerts/rules/peg-message-templates.tf"),
+    "utf8",
+  );
+  const slackMessageTemplate = templates.slice(
+    templates.indexOf(
+      'resource "grafana_message_template" "peg_slack_message"',
+    ),
+    templates.indexOf(
+      'resource "grafana_message_template" "peg_victorops_title"',
+    ),
+  );
+  const victorOpsTemplates = templates.slice(
+    templates.indexOf(
+      'resource "grafana_message_template" "peg_victorops_title"',
+    ),
+  );
+  const supportMention = "<!subteam^${var.oncall_support_usergroup_id}>";
+  const guardedMention = [
+    '{{ if and (len .Alerts.Firing) (eq .CommonLabels.severity "critical") -}}',
+    `${supportMention} Please investigate this critical Peg alert.`,
+    "{{ end -}}",
+  ].join("\n");
+
+  assert(
+    slackMessageTemplate.includes(guardedMention),
+    "the Slack support mention must require both a firing alert and common critical severity",
+  );
+  assert(
+    (slackMessageTemplate.match(/<!subteam\^/gu) ?? []).length === 1,
+    "the Slack support usergroup must be mentioned exactly once",
+  );
+  assert(
+    !victorOpsTemplates.includes("<!subteam^"),
+    "the Slack usergroup mention must not enter Splunk On-Call payloads",
+  );
+});
+
+test("Peg support-engineer input remains managed when the on-call announcer is disabled", () => {
+  const infra = readFileSync(
+    path.resolve(__dirname, "..", "alerts/infra/main.tf"),
+    "utf8",
+  );
+  const sharedSecrets = infra.slice(
+    infra.indexOf("alerts_infra_ci_shared_secret_names"),
+    infra.indexOf("alerts_infra_ci_oncall_secret_names"),
+  );
+  const oncallSecrets = infra.slice(
+    infra.indexOf("alerts_infra_ci_oncall_secret_names"),
+    infra.indexOf("alerts_infra_ci_monitoring_secret_names"),
+  );
+  const infraVariables = readFileSync(
+    path.resolve(__dirname, "..", "alerts/infra/variables.tf"),
+    "utf8",
+  );
+  const supportUsergroupVariable = infraVariables.slice(
+    infraVariables.indexOf('variable "oncall_support_usergroup_id"'),
+    infraVariables.indexOf('variable "slack_notification_channel_id"'),
+  );
+
+  assert(
+    sharedSecrets.includes('"TF_VAR_ONCALL_SUPPORT_USERGROUP_ID"'),
+    "the support-engineer usergroup must be in the unconditional shared-secret set",
+  );
+  assert(
+    !oncallSecrets.includes('"TF_VAR_ONCALL_SUPPORT_USERGROUP_ID"'),
+    "the optional announcer secret set must not own the shared support-engineer usergroup",
+  );
+  assert(
+    infra.includes("local.alerts_infra_ci_shared_secret_names,"),
+    "the managed-secret union must include the shared support-engineer usergroup",
+  );
+  assert(
+    !supportUsergroupVariable.includes('default     = ""') &&
+      supportUsergroupVariable.includes('can(regex("^S[A-Z0-9]{8,}$"'),
+    "the shared support-engineer usergroup must remain a required valid Slack ID",
+  );
+});
+
 test("Peg Grafana consumers use a literal source activation guard", () => {
   const rulesDir = path.resolve(__dirname, "..", "alerts/rules");
   const policyLocals = readFileSync(

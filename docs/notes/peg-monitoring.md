@@ -71,22 +71,22 @@ must never be inferred from source health.
 
 For each active policy, the generated source defines:
 
-| Rule                          | Signal                                                                                                      | Delivery                              |
-| ----------------------------- | ----------------------------------------------------------------------------------------------------------- | ------------------------------------- |
-| Downside warning              | Fresh uncapped executable sell-price deviation with poll and usable-decision coverage                       | `#alerts-pools`                       |
-| Premium warning               | Fresh uncapped executable premium with the same coverage gates                                              | `#alerts-pools`                       |
-| Deep-venue downside critical  | Sustained critical downside on the policy-designated deep venue                                             | Splunk On-Call and `#alerts-critical` |
-| Deep-venue spread warning     | Fresh deep-venue spread above its approved envelope                                                         | `#alerts-pools`                       |
-| Structural saturation warning | Fresh reachable indexed-pool saturation above policy                                                        | `#alerts-pools`                       |
-| Blind warning                 | Producer count reaches `blindConsecutivePolls` without a usable uncapped deep-venue decision                | `#alerts-infra`                       |
-| Blind while stressed critical | Confirmed consecutive blindness plus reachable structural stress, spread stress, or partial-price shortfall | Splunk On-Call and `#alerts-critical` |
-| Source unhealthy              | Expected source unhealthy while the asset heartbeat is fresh                                                | `#alerts-infra`                       |
-| Source permanently dead       | Source unhealthy for `permanentlyDeadSeconds`                                                               | `#alerts-infra`                       |
-| Registry rot                  | A non-deep source, including display-only, is `absent` at its producer-side consecutive-check threshold     | `#alerts-infra`                       |
-| Critical path unreachable     | The policy-designated deep source is `absent` at its producer-side consecutive-check threshold              | `#alerts-infra`                       |
-| Indexed pool unreachable      | The registry-bound indexed pool is zero or absent while the exact-version asset poll remains fresh          | `#alerts-infra`                       |
-| Heartbeat missing             | The isolated asset poll no longer advances                                                                  | `#alerts-infra`                       |
-| Policy rollover stuck         | A retained previous policy exists and the active version is not acknowledged in time                        | `#alerts-infra`                       |
+| Rule                          | Signal                                                                                                      | Delivery                                                     |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| Downside warning              | Fresh uncapped executable sell-price deviation with poll and usable-decision coverage                       | `#alerts-pools`                                              |
+| Premium warning               | Fresh uncapped executable premium with the same coverage gates                                              | `#alerts-pools`                                              |
+| Deep-venue downside critical  | Sustained critical downside on the policy-designated deep venue                                             | Splunk On-Call and `@support-engineer` in `#alerts-critical` |
+| Deep-venue spread warning     | Fresh deep-venue spread above its approved envelope                                                         | `#alerts-pools`                                              |
+| Structural saturation warning | Fresh reachable indexed-pool saturation above policy                                                        | `#alerts-pools`                                              |
+| Blind warning                 | Producer count reaches `blindConsecutivePolls` without a usable uncapped deep-venue decision                | `#alerts-infra`                                              |
+| Blind while stressed critical | Confirmed consecutive blindness plus reachable structural stress, spread stress, or partial-price shortfall | Splunk On-Call and `@support-engineer` in `#alerts-critical` |
+| Source unhealthy              | Expected source unhealthy while the asset heartbeat is fresh                                                | `#alerts-infra`                                              |
+| Source permanently dead       | Source unhealthy for `permanentlyDeadSeconds`                                                               | `#alerts-infra`                                              |
+| Registry rot                  | A non-deep source, including display-only, is `absent` at its producer-side consecutive-check threshold     | `#alerts-infra`                                              |
+| Critical path unreachable     | The policy-designated deep source is `absent` at its producer-side consecutive-check threshold              | `#alerts-infra`                                              |
+| Indexed pool unreachable      | The registry-bound indexed pool is zero or absent while the exact-version asset poll remains fresh          | `#alerts-infra`                                              |
+| Heartbeat missing             | The isolated asset poll no longer advances                                                                  | `#alerts-infra`                                              |
+| Policy rollover stuck         | A retained previous policy exists and the active version is not acknowledged in time                        | `#alerts-infra`                                              |
 
 When `previous` is retained, the same decision ladder remains generated for
 that exact previous version. Previous-version rules do not stop at the first

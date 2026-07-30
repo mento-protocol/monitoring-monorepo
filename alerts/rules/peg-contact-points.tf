@@ -64,7 +64,7 @@ locals {
   peg_contact_point_names = {
     market_warning = "Peg market warnings (#alerts-pools)"
     ops_warning    = "Peg producer warnings (#alerts-infra)"
-    page           = "Peg pages (Splunk On-Call + #alerts-critical)"
+    page           = "Peg pages (Splunk On-Call + @support-engineer in #alerts-critical)"
   }
 
   peg_notify_market_warning = {

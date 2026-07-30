@@ -58,8 +58,16 @@ function HealthLabel({
   );
 }
 
-function decisionText(asset: PegAssetPresentation): string {
+function decisionText(
+  asset: PegAssetPresentation,
+  stale: boolean,
+  usesPreviousPolicy: boolean,
+): string {
   if (asset.currentCritical) return "Critical condition in the current package";
+  if (stale && asset.tone === "critical")
+    return "Critical condition in the last confirmed package";
+  if (usesPreviousPolicy && asset.tone === "critical")
+    return "Critical result under the previous alert policy";
   if (asset.uncertain) return "Current status cannot be confirmed";
   if (asset.tone === "critical") return "Critical condition detected";
   if (asset.tone === "warning")
@@ -235,11 +243,15 @@ function HealthSummary({
 function AssetScorecard({
   asset,
   stale,
+  usesPreviousPolicy,
 }: {
   asset: PegAssetPresentation;
   stale: boolean;
+  usesPreviousPolicy: boolean;
 }): React.JSX.Element {
   const source = asset.decisionSource;
+  const retainedCritical =
+    (stale || usesPreviousPolicy) && asset.tone === "critical";
   return (
     <article
       data-testid={`peg-scorecard-${asset.asset.asset}`}
@@ -280,10 +292,12 @@ function AssetScorecard({
           <p className="text-xs font-semibold uppercase tracking-wide">
             {stale ? "Last confirmed conclusion" : "Current conclusion"}
           </p>
-          <p className="mt-2 text-sm font-medium">{decisionText(asset)}</p>
+          <p className="mt-2 text-sm font-medium">
+            {decisionText(asset, stale, usesPreviousPolicy)}
+          </p>
           {asset.reasons[0] ? (
             <p className="mt-2 text-xs leading-5 text-slate-300">
-              {asset.currentCritical
+              {asset.currentCritical || retainedCritical
                 ? asset.reasons[0]
                 : (asset.uncertaintyReason ?? asset.reasons[0])}
             </p>
@@ -347,10 +361,12 @@ export function PegMonitoringScorecard({
   presentation,
   ageMs,
   stale,
+  usesPreviousPolicy,
 }: {
   presentation: PegMonitoringPresentation;
   ageMs: number;
   stale: boolean;
+  usesPreviousPolicy: boolean;
 }): React.JSX.Element {
   const closestHeadline = closestWarningHeadline(
     presentation.closestWarning,
@@ -409,7 +425,12 @@ export function PegMonitoringScorecard({
       </div>
       <div className="space-y-4">
         {presentation.assets.map((asset) => (
-          <AssetScorecard key={asset.asset.asset} asset={asset} stale={stale} />
+          <AssetScorecard
+            key={asset.asset.asset}
+            asset={asset}
+            stale={stale}
+            usesPreviousPolicy={usesPreviousPolicy}
+          />
         ))}
       </div>
     </section>

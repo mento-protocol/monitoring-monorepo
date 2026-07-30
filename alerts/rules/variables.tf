@@ -16,6 +16,16 @@ variable "slack_bot_token" {
   sensitive   = true
 }
 
+variable "oncall_support_usergroup_id" {
+  description = "Slack usergroup ID for @support-engineer, mentioned by firing critical Peg alerts."
+  type        = string
+
+  validation {
+    condition     = can(regex("^S[A-Z0-9]{8,}$", var.oncall_support_usergroup_id))
+    error_message = "oncall_support_usergroup_id must be a Slack usergroup ID such as S0123ABC456."
+  }
+}
+
 variable "splunk_on_call_alerts_webhook_url" {
   description = "Webhook URL for triggering Splunk On-Call alerts."
   type        = string

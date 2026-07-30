@@ -27,7 +27,8 @@ From the repository root:
 
 ```bash
 cp alerts/rules/terraform.tfvars.example alerts/rules/terraform.tfvars
-# Paste the Slack bot token, Grafana SA token, and Splunk webhook into terraform.tfvars.
+# Paste the Slack bot token, @support-engineer usergroup ID, Grafana SA token,
+# and Splunk webhook into terraform.tfvars.
 
 pnpm alerts:rules:init
 pnpm alerts:rules:plan
@@ -37,7 +38,9 @@ pnpm alerts:rules:plan
 # from a feature branch — it will fight CI on the next merge.
 ```
 
-All rule/routing secrets live in `alerts/rules/terraform.tfvars` (gitignored). Matches the pattern of `terraform/terraform.tfvars` — one file, one place per stack.
+All rule/routing inputs that lack safe defaults live in
+`alerts/rules/terraform.tfvars` (gitignored). This matches the pattern of
+`terraform/terraform.tfvars`: one file, one place per stack.
 
 ### Static checks
 
@@ -59,10 +62,12 @@ sets the singleton `local.peg_alerts_enabled` switch to the literal `true`,
 which creates its folder, templates, contact points, and rule group. Market
 warnings route to `#alerts-pools`, producer and source warnings route to
 `#alerts-infra`, and critical rules route to both Splunk On-Call and
-`#alerts-critical`. Peg rules use direct rule-level contact points and never
-inherit the FX-weekend mute. Blind rules compare the producer's exact
-consecutive deep-poll count with policy; they do not infer 30-second poll
-history from Grafana's 60-second evaluation clock.
+`#alerts-critical`. While a critical alert is firing, its Slack message
+mentions `@support-engineer`; warning and resolve-only messages do not. Peg
+rules use direct rule-level contact points and never inherit the FX-weekend
+mute. Blind rules compare the producer's exact consecutive deep-poll count with
+policy; they do not infer 30-second poll history from Grafana's 60-second
+evaluation clock.
 
 The Peg activation apply is complete and its rules are live in Grafana
 ([#1680](https://github.com/mento-protocol/monitoring-monorepo/pull/1680),

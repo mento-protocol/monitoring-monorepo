@@ -76,7 +76,9 @@ cp alerts/infra/terraform.tfvars.example alerts/infra/terraform.tfvars
 
 Use [`terraform.tfvars.example`](terraform.tfvars.example) as the maintained
 local variable guide. It documents the required GCP, Slack, Sentry, QuickNode,
-and optional on-call values and their scope requirements.
+and `@support-engineer` usergroup values, plus optional on-call-announcer
+values and their scope requirements. Critical Peg pages require the usergroup
+even when the optional announcer is disabled.
 
 Do not override `multisigs` in `terraform.tfvars` with a partial map: Terraform
 would replace the entire committed default and silently stop monitoring omitted
@@ -90,9 +92,28 @@ pnpm alerts:infra:init
 pnpm alerts:infra:plan
 ```
 
-Open a PR with the stack change and review the CI plan. Apply happens only after
-merge to `main`, through `.github/workflows/alerts-infra.yml` and its
-`production-infra` required-reviewer gate. Do not run a local Terraform apply.
+Open a PR with the stack change and review the CI plan. Apply normally happens
+only after merge to `main`, through `.github/workflows/alerts-infra.yml` and
+its `production-infra` required-reviewer gate.
+
+### Recovering a missing `@support-engineer` workflow input
+
+The protected `alerts-infra` workflow normally maintains the GitHub Actions
+mirror for `TF_VAR_ONCALL_SUPPORT_USERGROUP_ID`. If the mirror's name is
+missing, the workflow cannot restore it: the same value is required before
+Terraform can reach the mirror resource. Confirm that only the name is missing
+without reading its value. Then, after explicit human approval, use clean
+current `main` and the existing gitignored `alerts/infra/terraform.tfvars` to
+review and apply the `alerts-delivery` stack locally:
+
+```bash
+pnpm tf plan alerts-delivery
+pnpm tf apply alerts-delivery
+```
+
+Inspect the plan, monitor the apply to completion, verify the mirror name, and
+then run the next trusted-main or drift plan. Never use a GitHub secret CLI to
+seed or restore this input.
 
 ### 3. Verify Deployment
 

@@ -166,9 +166,12 @@ function buildAssetPresentation(
   context: PackageContext,
   producedAtMs: number,
 ): PegAssetPresentation {
-  const selection = selectSources(item, context.nowMs);
+  // A stale package presents the last confirmed result, so every evidence
+  // consumer must evaluate freshness at that package timestamp.
+  const evidenceAtMs = context.packageIsStale ? producedAtMs : context.nowMs;
+  const selection = selectSources(item, evidenceAtMs);
   const structuralExpired =
-    context.nowMs - producedAtMs > item.policy.freshnessGraceSeconds * 1_000;
+    evidenceAtMs - producedAtMs > item.policy.freshnessGraceSeconds * 1_000;
   return {
     asset: item,
     assetName: assetName(
@@ -179,10 +182,15 @@ function buildAssetPresentation(
     deepSource: selection.deepSource,
     structuralEvidenceCurrent: !structuralExpired,
     usableSourceCount: item.sources.filter(
-      (source) => !sourceHasUnavailableEvidence(source, context.nowMs),
+      (source) => !sourceHasUnavailableEvidence(source, evidenceAtMs),
     ).length,
     ...describeDistance(item, selection),
-    ...classifySafety(item, selection, context, structuralExpired),
+    ...classifySafety(
+      item,
+      selection,
+      { ...context, nowMs: evidenceAtMs },
+      structuralExpired,
+    ),
   };
 }
 

@@ -29,7 +29,7 @@ const SOURCE_BLOCK_SHAPE_SPECIFICATIONS = [
   "alerts/infra:variable.oncall_announce_on_first_run|e36344bd00f1f50834bd9243d1c4e059bdb52da9c090c5f1f3876ca6950557bb",
   "alerts/infra:variable.oncall_rotation_check_schedule|0019df3ba1482127d81c064fe39e4b8d01f1217602baca2aa6e3e0aaed40a916",
   "alerts/infra:variable.oncall_slack_channel_id|de5843b9c72d3b4400b1df21867ca03b969020399514940324fd68c750bc89a6",
-  "alerts/infra:variable.oncall_support_usergroup_id|db9c2eea4c309b047d059b9768699fcce95c73be8335360e06872c4111062e89",
+  "alerts/infra:variable.oncall_support_usergroup_id|c65531b6a19f26ea2c0efb6196481a8ea9cf0949f219a147fb8a2398b2777903",
   "alerts/infra:variable.org_id|9f4baa3184507cb57b60f341f8a8bd31877289b78cc638e67709406c677f6602",
   "alerts/infra:variable.project_name|f951d1cd861531aa1dc012f0b6c7feccf75a79661162c85ad210590c072caf6e",
   "alerts/infra:variable.quicknode_api_key|eb47592c0969d91dec66c730b9e9a989bf206b1d5b962d102c52e6376c0d4fa7",
