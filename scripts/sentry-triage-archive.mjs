@@ -23,21 +23,29 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import {
+  ARCHIVE_COMMENT_MARKER,
+  isTrustedComment,
+} from "./sentry-triage-project-core.mjs";
+import {
   APPROVED_ARCHIVE_LABEL,
   ARCHIVED_LABEL,
   LABEL_DEFINITIONS,
   neutralizeUntrusted,
   parseArchiveBaseline,
-  REOPEN_SHED_LABELS,
   truncateTitle,
   withArchiveBaseline,
-} from "./sentry-triage-ingest.mjs";
+} from "./sentry-triage-queue-contract.mjs";
 import {
-  ARCHIVE_COMMENT_MARKER,
-  isTrustedComment,
-} from "./sentry-triage-project-core.mjs";
+  buildRequeueFence,
+  REQUEUE_CAUSE_SENTRY_EVIDENCE,
+  REQUEUE_ON_FAILURE_VERIFY_END_STATE,
+  requeueQueueStub,
+} from "./sentry-triage-requeue.mjs";
 
-const NEEDS_TRIAGE_LABEL = "sentry:needs-triage";
+// The stub-selectability predicate lives with the re-queue chokepoint that
+// drives it; re-exported here because it is part of this module's tested
+// surface.
+export { isSelectableForTriage } from "./sentry-triage-requeue.mjs";
 
 export const DEFAULT_REPO = "mento-protocol/monitoring-monorepo";
 export const DEFAULT_ORG = "mento-labs";
@@ -553,10 +561,13 @@ export function buildStaleRetryRefusalComment(shortId, recorded, observed) {
   ].join("\n");
 }
 
-/** Fixed refusal comment for the live-regression path (no marker — this stub is
- * re-queued, not settled). `shortId` is Sentry-assigned but still neutralized as
- * defense in depth. */
-export function buildRegressionRefusalComment(shortId) {
+/** The human-facing half of the live-regression refusal. The FENCE LINE it sits
+ * under is not written here and cannot be: `buildRequeueFence` renders it from
+ * the declared re-queue cause, so this path can explain itself without being
+ * able to author — or omit — the line `selectVerdictComment` actually reads.
+ *
+ * `shortId` is Sentry-assigned but still neutralized as defense in depth. */
+function regressionRefusalProse(shortId) {
   const safeShortId = truncateTitle(neutralizeUntrusted(shortId), 90);
   return [
     `**Not archived.** The underlying Sentry issue \`${safeShortId}\` currently`,
@@ -564,7 +575,30 @@ export function buildRegressionRefusalComment(shortId) {
     "now would close this stub over that regression and reset Sentry's escalation",
     "baseline, hiding a real issue. Re-queued for fresh triage instead — a new",
     "human approval is required once it is re-triaged.",
-  ].join("\n");
+  ];
+}
+
+/** The full refusal comment for the live-regression path (no archive marker —
+ * this stub is re-queued, not settled).
+ *
+ * THE FIRST LINE IS LOAD-BEARING, and the chokepoint owns it. Because the cause
+ * declared here is `sentry-evidence`, `buildRequeueFence` opens the body with
+ * REGRESSION_PREFIX and `selectVerdictComment`
+ * (scripts/sentry-triage-project-core.mjs) reads the comment as a regression
+ * fence. Without it the re-queued stub still carries the PREVIOUS round's
+ * verdict comment as the newest admissible verdict: when the next triage agent
+ * leg dies before posting, the `verdict` job (which runs on `always()`) accepts
+ * that stale verdict, relabels the stub and closes it — burying a regression
+ * Sentry explicitly reported.
+ *
+ * Exported because it is the documented shape of this refusal and the tests pin
+ * it; `runArchive` does not call it — it hands the prose to the chokepoint,
+ * which composes exactly this body. */
+export function buildRegressionRefusalComment(shortId, lastSeen) {
+  return buildRequeueFence(REQUEUE_CAUSE_SENTRY_EVIDENCE, {
+    lastSeen,
+    prose: regressionRefusalProse(shortId),
+  });
 }
 
 /**
@@ -876,125 +910,6 @@ export function settlementHeld({ state, labels, body } = {}, expected = null) {
     !!recorded &&
     recorded.lastSeen === String(expected.lastSeen ?? "") &&
     recorded.sentryIssueId === String(expected.sentryIssueId ?? "")
-  );
-}
-
-/** The pair Stage B's selector matches: `--state open` AND
- * `sentry:needs-triage`. A stub missing either is invisible to triage, and — if
- * its `closedAt` postdates the regression — to ingest as well. */
-export function isSelectableForTriage({ state, labels } = {}) {
-  return (
-    String(state ?? "").toUpperCase() !== "CLOSED" &&
-    (Array.isArray(labels) ? labels : []).includes(NEEDS_TRIAGE_LABEL)
-  );
-}
-
-/**
- * Drive a stub to the selectable pair and VERIFY it got there, or fail loudly.
- *
- * This exists because checking each write's return value kept missing a layer:
- * the reopen was absent, then a failed read aborted it, then the reopen write
- * itself could fail — three rounds, one location, each fix covering only the
- * failure mode in front of it. Asserting the END STATE covers all of them and
- * whatever comes next, because it observes the thing that actually matters
- * rather than the success of the steps meant to produce it.
- *
- * Observe, correct what is wrong, observe again. Both corrections are idempotent
- * so a retry is safe and cheap, and it runs before failing. When the final
- * observation still disagrees — or could never be taken — the stub is stranded
- * and only a human can free it, so this throws and the run goes RED with an
- * `::error::` naming what was actually seen.
- *
- * `fallbackState` is the caller's pre-run observation, used only to decide
- * whether to attempt a reopen when a read fails; it never satisfies the
- * invariant, which requires a real confirming read.
- *
- * Returns the confirming read, so the caller can judge the rest of the stub's
- * state from what was actually observed rather than from what its own writes
- * reported — the same ambiguous-response discipline the reconciler uses.
- */
-export async function ensureSelectableForTriage(
-  runGh,
-  { repo, queueIssue, fallbackState = "CLOSED", attempts = 2 },
-) {
-  let observed = null;
-  let readError = null;
-
-  const observe = async () => {
-    try {
-      const live = await readQueueIssue(runGh, repo, queueIssue);
-      observed = live;
-      readError = null;
-      return live;
-    } catch (err) {
-      readError = err instanceof Error ? err.message : String(err);
-      process.stderr.write(
-        `::notice::Could not read #${queueIssue} while re-queuing it for triage (${readError}); correcting from its pre-run state (${fallbackState}) and re-checking.\n`,
-      );
-      return null;
-    }
-  };
-
-  for (let round = 1; round <= attempts; round += 1) {
-    const live = await observe();
-    if (live && isSelectableForTriage(live)) return live;
-
-    // Correct whatever is — or, with no read, may be — wrong. Both writes are
-    // idempotent, so a repeat costs nothing and a lost response is harmless.
-    const looksClosed = live
-      ? live.state === "CLOSED"
-      : String(fallbackState ?? "").toUpperCase() === "CLOSED";
-    const missingLabel = live
-      ? !live.labels.includes(NEEDS_TRIAGE_LABEL)
-      : false;
-    if (looksClosed) {
-      try {
-        process.stderr.write(
-          `::notice::Reopening #${queueIssue} so the live regression is visible to triage (round ${round}).\n`,
-        );
-        await runGh(["issue", "reopen", String(queueIssue), "-R", repo]);
-      } catch (err) {
-        process.stderr.write(
-          `::notice::Reopen of #${queueIssue} reported a failure (${
-            err instanceof Error ? err.message : String(err)
-          }); the verification read decides.\n`,
-        );
-      }
-    }
-    if (missingLabel) {
-      try {
-        await runGh([
-          "issue",
-          "edit",
-          String(queueIssue),
-          "-R",
-          repo,
-          "--add-label",
-          NEEDS_TRIAGE_LABEL,
-        ]);
-      } catch (err) {
-        process.stderr.write(
-          `::notice::Re-adding ${NEEDS_TRIAGE_LABEL} to #${queueIssue} reported a failure (${
-            err instanceof Error ? err.message : String(err)
-          }); the verification read decides.\n`,
-        );
-      }
-    }
-  }
-
-  // The mandatory final verification, on the main path — never skippable, and
-  // never reached by a correction whose result nobody looked at.
-  const finalLive = await observe();
-  if (finalLive && isSelectableForTriage(finalLive)) return finalLive;
-
-  const seen = observed
-    ? `state=${observed.state}, labels=${observed.labels.join("|")}`
-    : `unreadable (${readError})`;
-  process.stderr.write(
-    `::error::Queue stub #${queueIssue} could not be confirmed open and carrying ${NEEDS_TRIAGE_LABEL} after refusing to archive over a live regression (${seen}). It is STRANDED — Stage B selects only open stubs, and ingest will skip it while its closedAt postdates the regression. Reopen it by hand.\n`,
-  );
-  throw new Error(
-    `Queue stub #${queueIssue} is not selectable for triage after a live-regression refusal (${seen}).`,
   );
 }
 
@@ -1560,93 +1475,43 @@ export async function runArchive(options, deps = {}) {
     process.stderr.write(
       `::notice::Sentry issue ${meta.shortId} (${issueId}) is a live regression/escalation; refusing to archive over it and re-queuing the stub for triage.\n`,
     );
-    // The refusal comment is COSMETIC and therefore best-effort. Anything that
-    // can throw ahead of the verifier can skip it, and a guard that only runs on
-    // the happy path guards nothing — so a note must never be able to abort a
-    // state transition.
-    try {
-      await runGh([
-        "issue",
-        "comment",
-        String(queueIssue),
-        "-R",
-        repo,
-        "--body",
-        buildRegressionRefusalComment(meta.shortId),
-      ]);
-    } catch (err) {
-      process.stderr.write(
-        `::notice::Could not post the regression refusal comment on #${queueIssue} (${
-          err instanceof Error ? err.message : String(err)
-        }); the label and state changes below carry the meaning.\n`,
-      );
-    }
-
-    // Re-queue: add needs-triage, shed the stale approval/verdict/archive
-    // markers. A failure here must NOT propagate past the verifier below — that
-    // is exactly what let a throw skip the guard. Record it and keep going; the
-    // verifier re-adds needs-triage itself, so the stub still becomes
-    // selectable, and the unshed markers surface as a RED run afterwards.
-    let requeueError = null;
-    try {
-      await runGh([
-        "issue",
-        "edit",
-        String(queueIssue),
-        "-R",
-        repo,
-        "--add-label",
-        NEEDS_TRIAGE_LABEL,
-        "--remove-label",
-        REOPEN_SHED_LABELS.join(","),
-      ]);
-    } catch (err) {
-      requeueError = err instanceof Error ? err.message : String(err);
-      process.stderr.write(
-        `::notice::Re-queue label edit on #${queueIssue} reported a failure (${requeueError}); the end-state verification below still runs.\n`,
-      );
-    }
-
-    // THE INVARIANT for this path: when it returns, the stub is OPEN and carries
-    // `sentry:needs-triage` — the exact pair Stage B's selector matches
-    // (.github/workflows/sentry-triage-agent.yml). Anything else is invisible:
-    // the selector filters on `--state open`, and ingest leaves a closed stub
-    // alone whenever this occurrence's `lastSeen` is not newer than the later
-    // `closedAt`, so a regression we KNOW is live would sit unseen indefinitely.
+    // EVERYTHING about the re-queue below — the fence, its position before the
+    // label write, the state change last, the admissibility gates on both sides
+    // of it, and the end-state verification — belongs to the chokepoint
+    // (scripts/sentry-triage-requeue.mjs). This site declares two things: the
+    // CAUSE, which is what decides the fence, and the prose that renders under
+    // it.
     //
-    // Enforced by checking the END STATE, not each write's return, and reached
-    // from EVERY exit above rather than only the successful one. Four rounds
-    // fixed this spot one layer at a time — the missing reopen, a read that
-    // aborted it, a reopen write that could fail, and then the verifier itself
-    // being skippable — because each fix covered only the failure in front of
-    // it. Nothing between entering this branch and here can throw past it now.
-    const verified = await ensureSelectableForTriage(runGh, {
-      repo,
-      queueIssue,
-      fallbackState: stub.state,
-    });
-
-    // Judge the shed from the VERIFICATION READ, not from what the edit
-    // reported. `gh` can apply the label swap and lose the response, and
-    // throwing on the report alone turned a successful refusal into a red run
-    // claiming markers survived that the very next read shows are gone. Fail
-    // only on markers actually still present — loud after the stub is safe,
-    // never instead of making it safe.
-    const survivingMarkers = REOPEN_SHED_LABELS.filter((name) =>
-      verified.labels.includes(name),
+    // The cause is `sentry-evidence` because Sentry itself reported the new
+    // events. That makes the fence a PRECONDITION of re-queuing rather than a
+    // note about it, and it inverts the "safe first, loud second" ordering this
+    // block used to follow: a selectable stub with no fence IS the
+    // close-over-a-live-regression setup, and the archive and agent workflows
+    // hold separate concurrency groups, so a triage run can select it inside the
+    // window. Post the fence, or do not re-queue at all.
+    //
+    // `verify-end-state` because this path is past the point its caller's
+    // reconciler can help — settlement never ran, so it holds no target. A
+    // reported write failure may only refine the decision, never skip it: the
+    // sequence completes, the END STATE is read, and anything still wrong is
+    // surfaced as a RED run afterwards. Loud AFTER the stub is safe, never
+    // instead of making it safe.
+    await requeueQueueStub(
+      {
+        writeGh: (args) => runGh(args),
+        readStub: (number) => readQueueIssue(runGh, repo, number),
+      },
+      {
+        repo,
+        issueNumber: queueIssue,
+        cause: REQUEUE_CAUSE_SENTRY_EVIDENCE,
+        // The lastSeen THIS RUN observed in Sentry, never the stub body's copy.
+        lastSeen: current.lastSeen,
+        fenceProse: regressionRefusalProse(meta.shortId),
+        onFailure: REQUEUE_ON_FAILURE_VERIFY_END_STATE,
+        fallbackState: stub.state,
+      },
     );
-    if (survivingMarkers.length) {
-      throw new Error(
-        `Queue stub #${queueIssue} was made selectable for triage, but these stale markers survived: ${survivingMarkers.join(", ")}${
-          requeueError ? ` (label edit reported: ${requeueError})` : ""
-        }.`,
-      );
-    }
-    if (requeueError) {
-      process.stderr.write(
-        `::notice::The re-queue label edit on #${queueIssue} reported a failure (${requeueError}) that the verification read disproves; the stale markers are gone.\n`,
-      );
-    }
     return {
       issue: queueIssue,
       shortId: meta.shortId,

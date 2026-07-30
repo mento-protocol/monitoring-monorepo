@@ -706,6 +706,16 @@ jobs:
           # the issue for the digest and human label filters) AND shedding any
           # stale sentry:projected (removing an absent label is a no-op), then
           # fail the job loudly so the main-failure notifier fires.
+          #
+          # A REPORTED close failure is not proof the close did not happen: if
+          # the mutation landed and only its response was lost, this
+          # compensation puts sentry:needs-triage on a CLOSED stub — a pairing
+          # the selector above (--state open) and ingest's regression gate both
+          # miss. GitHub has no conditional close, so this step cannot avoid
+          # writing it; ingest repairs it from observed state on its next run
+          # (isStrandedNeedsTriage in scripts/sentry-triage-ingest.mjs). Do not
+          # "fix" that by re-reading state here — the repair belongs at one
+          # place that covers every producer, including hand-editing.
           if ! gh issue close "${QUEUE_ISSUE_NUMBER}" \
             --repo "${GITHUB_REPOSITORY}" \
             --reason completed \
@@ -854,7 +864,10 @@ jobs:
                 ;;
             esac
             # Close the projected stub (same fixed comment + compensation
-            # semantics as the matrix close step; the compensation edit is
+            # semantics as the matrix close step, including the lost-close-
+            # response case it documents — a compensated close that actually
+            # landed leaves a CLOSED stub wearing sentry:needs-triage, which
+            # ingest's stranded-stub sweep repairs; the compensation edit is
             # guarded so one failure cannot abort settlement of later rows).
             if ! gh issue close "${n}" \
               --repo "${GITHUB_REPOSITORY}" \

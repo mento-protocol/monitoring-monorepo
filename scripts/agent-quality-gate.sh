@@ -2293,6 +2293,14 @@ while IFS= read -r path; do
         scripts/sentry-mcp-broker.mjs|scripts/sentry-mcp-broker.test.mjs)
           add_command "pnpm sentry:broker:test" "Sentry credential broker changed"
           ;;
+        scripts/sentry-triage-requeue.mjs|scripts/sentry-triage-requeue.test.mjs|scripts/sentry-triage-queue-contract.mjs)
+          # The single re-queue chokepoint and the queue contract it reads. Both
+          # sites that re-queue a stub run through it, so its suite is never the
+          # whole story — run theirs too.
+          add_command "pnpm sentry:requeue:test" "Sentry re-queue chokepoint changed"
+          add_command "pnpm sentry:ingest:test" "Sentry re-queue chokepoint changed"
+          add_command "pnpm sentry:archive:test" "Sentry re-queue chokepoint changed"
+          ;;
         scripts/pr-feedback-state.mjs|scripts/pr-feedback-state-core.mjs|scripts/pr-feedback-state-claude.mjs|scripts/pr-feedback-state.test.mjs)
           add_command "pnpm pr:feedback-state:test" "PR feedback-state helper changed"
           ;;
