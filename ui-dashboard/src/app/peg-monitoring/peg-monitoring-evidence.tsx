@@ -239,7 +239,19 @@ function AlertSettings({
                 {formatBps(source.policy.spreadEnvelopeBps)}
               </>
             )}
-            .
+            , or when pool inflow reaches{" "}
+            {formatFraction(policy.structuralWarnFraction)} of its active
+            trading limit.
+          </dd>
+        </div>
+        <div className="py-3">
+          <dt className="text-xs font-medium text-slate-300">
+            Other non-paging warnings
+          </dt>
+          <dd className="mt-1 text-sm leading-6 text-slate-300">
+            Separate operations warnings cover market availability and listings,
+            pool reachability, missed checks, and policy rollover. They do not
+            page the on-call engineer.
           </dd>
         </div>
         <div className="py-3">
@@ -438,6 +450,10 @@ function SafetyChecks({
         On-chain checks show whether the monitored pool is reachable, how close
         net inflow is to its active trading limit, and whether its trade
         safeguard is ready.
+      </p>
+      <p className="mt-1 text-xs leading-5 text-slate-400">
+        A trade safeguard problem makes this dashboard critical, but it does not
+        page the on-call engineer by itself.
       </p>
       <div className="mt-4 grid gap-3 md:grid-cols-2">
         <div className="rounded-md border border-slate-800 bg-slate-900/45 p-3">

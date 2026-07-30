@@ -140,6 +140,9 @@ export function OtherMarkets({
   const sources = asset.asset.sources.filter(
     (source) => source.id !== asset.asset.policy.deepVenueSource,
   );
+  const hasWarningAuthority = sources.some(
+    (source) => source.authority === "secondary",
+  );
   return sources.length === 0 ? null : (
     <details
       data-testid={`peg-other-markets-${asset.asset.asset}`}
@@ -150,7 +153,9 @@ export function OtherMarkets({
       </summary>
       <div className="border-t border-slate-800 p-4">
         <p className="mb-3 text-xs leading-5 text-slate-400">
-          These markets add context. They do not set the status above.
+          {hasWarningAuthority
+            ? "Secondary markets can raise separate market warnings; the status above uses the decision market. Display-only markets do not affect peg price status, but their health or listing can raise operational warnings."
+            : "Display-only markets do not affect peg price status, but their health or listing can raise operational warnings."}
         </p>
         <div className="grid gap-3 md:grid-cols-2">
           {sources.map((source) => (

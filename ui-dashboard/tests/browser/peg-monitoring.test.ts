@@ -118,7 +118,7 @@ test("shows a decision scorecard, keeps evidence on demand, and retains stale ev
   ).toBeVisible();
   await expect(
     page.getByText(
-      "A warning fires after 10 minutes when the price is 0.25% (25 bps) below target or 0.25% (25 bps) above target, or when the decision market's buy/sell spread exceeds 30 bps.",
+      "A warning fires after 10 minutes when the price is 0.25% (25 bps) below target or 0.25% (25 bps) above target, or when the decision market's buy/sell spread exceeds 30 bps, or when pool inflow reaches 80% of its active trading limit.",
       { exact: true },
     ),
   ).toBeVisible();
@@ -140,6 +140,12 @@ test("shows a decision scorecard, keeps evidence on demand, and retains stale ev
   await expect(otherMarkets).not.toHaveAttribute("open", "");
   await expect(technicalRecord).not.toHaveAttribute("open", "");
   await otherMarkets.getByText("Other market checks (2)").click();
+  await expect(
+    otherMarkets.getByText(
+      "Secondary markets can raise separate market warnings; the status above uses the decision market. Display-only markets do not affect peg price status, but their health or listing can raise operational warnings.",
+      { exact: true },
+    ),
+  ).toBeVisible();
   await expect(
     page.getByText(
       "Converted from USD to EUR using rate feed 0xec5748…c318ca on chain 137.",

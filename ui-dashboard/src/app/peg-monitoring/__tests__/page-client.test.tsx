@@ -120,7 +120,7 @@ describe("PegMonitoringPageClient", () => {
       "A 50,000 EUROP sale would get about 0.9965 EUR per EUROP.",
     );
     expect(container.textContent).toContain(
-      "A warning fires after 10 minutes when the price is 0.25% (25 bps) below target or 0.25% (25 bps) above target, or when the decision market's buy/sell spread exceeds 30 bps.",
+      "A warning fires after 10 minutes when the price is 0.25% (25 bps) below target or 0.25% (25 bps) above target, or when the decision market's buy/sell spread exceeds 30 bps, or when pool inflow reaches 80% of its active trading limit.",
     );
     expect(container.textContent).toContain(
       "Also page immediately when the full-size sale price is missing for 10 consecutive checks and another risk signal is active: high pool inflow, an unusually wide buy/sell spread, or a partial-fill price below the critical limit.",
@@ -132,6 +132,16 @@ describe("PegMonitoringPageClient", () => {
       "Net pool inflow is at 42% of the active on-chain trading limit. Warn at 80%.",
     );
     expect(otherMarkets?.hasAttribute("open")).toBe(false);
+    expect(otherMarkets?.textContent).toContain(
+      "Secondary markets can raise separate market warnings; the status above uses the decision market. Display-only markets do not affect peg price status, but their health or listing can raise operational warnings.",
+    );
+    expect(container.textContent).toContain(
+      "Separate operations warnings cover market availability and listings, pool reachability, missed checks, and policy rollover. They do not page the on-call engineer.",
+    );
+    expect(container.textContent).toContain("Other non-paging warnings");
+    expect(container.textContent).toContain(
+      "A trade safeguard problem makes this dashboard critical, but it does not page the on-call engineer by itself.",
+    );
     expect(technical?.hasAttribute("open")).toBe(false);
     expect(technical?.textContent).toContain("Schema");
   });
@@ -160,7 +170,7 @@ describe("PegMonitoringPageClient", () => {
       '[data-testid="peg-alert-settings-europ-schuman"]',
     );
     expect(settings?.textContent).toContain(
-      "A warning fires after 10 minutes when the price is 0.25% (25 bps) below target or 0.25% (25 bps) above target.",
+      "A warning fires after 10 minutes when the price is 0.25% (25 bps) below target or 0.25% (25 bps) above target, or when pool inflow reaches 80% of its active trading limit.",
     );
     expect(settings?.textContent).not.toContain(
       "decision market's buy/sell spread exceeds",
