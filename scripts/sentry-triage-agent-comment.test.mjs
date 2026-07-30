@@ -525,16 +525,78 @@ test("the wrapper's runtime closure is exactly what the workflow stages", () => 
   }
 });
 
-test("the post-agent verdict script's closure is staged too", () => {
-  // This one runs AFTER the agent, from the same job, so it is exposed to the
-  // same rewrite.
-  for (const file of importClosure("sentry-triage-project.mjs")) {
-    const stagingBlock = WORKFLOW.slice(
-      WORKFLOW.indexOf("Stage immutable agent tools"),
-      WORKFLOW.indexOf("Render triage prompt"),
+/** The agent job's block, from its key to the next job's. */
+function triageJobBlock() {
+  const start = WORKFLOW.indexOf("\n  triage:");
+  const end = WORKFLOW.indexOf("\n  verdict:");
+  assert.ok(
+    start > 0 && end > start,
+    "triage/verdict job boundaries not found",
+  );
+  return WORKFLOW.slice(start, end);
+}
+
+test("the agent job ENDS with the agent — nothing runs after it", () => {
+  // The property that makes $GITHUB_ENV injection inert. The agent can append
+  // `BASH_ENV=<payload it wrote>` to $GITHUB_ENV; GitHub exports that to every
+  // later step in the SAME job, and the step's bash sources the payload before
+  // running its own command — which staging immutable copies does not prevent,
+  // because the payload runs first. So there must be no later step.
+  const steps = [
+    ...triageJobBlock().matchAll(/^ {6}- (?:name|uses):\s*(.+)$/gm),
+  ].map((m) => m[1].trim());
+  assert.ok(steps.length > 0, "no steps parsed out of the triage job");
+  assert.match(
+    steps.at(-1),
+    /^anthropics\/claude-code-action@/,
+    `the agent must be the LAST step of its job; found "${steps.at(-1)}" after it`,
+  );
+});
+
+test("no credential-bearing work follows the agent in its job", () => {
+  const job = triageJobBlock();
+  const afterAgent = job.slice(job.indexOf("anthropics/claude-code-action@"));
+  for (const forbidden of [
+    /- name: Apply verdict label/,
+    /- name: Close queue stub/,
+    /gh issue edit/,
+    /gh issue close/,
+    /node scripts\//,
+  ]) {
+    assert.ok(
+      !forbidden.test(afterAgent),
+      `credential-bearing work follows the agent: ${forbidden}`,
     );
-    assert.ok(stagingBlock.includes(file), `${file} is not staged`);
   }
+});
+
+test("the trusted follow-up lives in its own job, on its own runner", () => {
+  const job = WORKFLOW.slice(
+    WORKFLOW.indexOf("\n  verdict:"),
+    WORKFLOW.indexOf("\n  project:"),
+  );
+  assert.match(job, /needs: \[select, triage\]/);
+  assert.match(job, /Apply verdict label \(deterministic\)/);
+  assert.match(job, /Close queue stub \(deterministic\)/);
+  assert.match(job, /persist-credentials: false/);
+  // Narrowest permissions for the work, not a copy of the agent job's, and no
+  // secret-bearing environment: this job holds only github.token.
+  assert.match(job, /permissions:\n\s+contents: read\n\s+issues: write/);
+  assert.ok(
+    !/environment:/.test(job),
+    "the verdict job holds no secret and must not claim a secret environment",
+  );
+  // Its checkout is pristine and the agent never touched this runner, so plain
+  // scripts/ is correct HERE — and only here.
+  assert.match(job, /node scripts\/sentry-triage-project\.mjs/);
+});
+
+test("projection and digest wait for the verdict job", () => {
+  assert.match(WORKFLOW, /project:\n\s+needs: \[select, triage, verdict\]/);
+  assert.match(
+    WORKFLOW,
+    /digest:\n\s+needs: \[select, triage, verdict, project\]/,
+  );
 });
 
 test("no executable grant or in-job node call points at the checkout", () => {
@@ -554,13 +616,10 @@ test("no executable grant or in-job node call points at the checkout", () => {
       `grant executes a checkout path: ${g}`,
     );
   }
-  // And no step in the file runs node against the checkout inside this job.
-  const triageJob = WORKFLOW.slice(
-    WORKFLOW.indexOf("\n  triage:"),
-    WORKFLOW.indexOf("\n  project:"),
-  );
+  // And no step in the AGENT job runs node against the checkout. (The verdict
+  // job does, correctly: its runner and checkout are pristine.)
   assert.ok(
-    !/node scripts\//.test(triageJob),
+    !/node scripts\//.test(triageJobBlock()),
     "the triage job still executes a script from the agent-writable checkout",
   );
 });

@@ -172,15 +172,29 @@ Code's permission rules match a command carrying an output redirection
 (CHANGELOG v1.0.123), and `gh issue view --template` renders arbitrary
 constructed text, so the read-only `gh` grants compose into "write any content
 to any path this user can write" — including over the wrapper itself. The same
-trusted step therefore copies the wrapper's whole runtime import closure, and
-the post-agent verdict script's, into a read-only `sentry-triage-tools`
-directory under `$RUNNER_TEMP`; the agent's `--allowedTools` grant and the
-deterministic verdict step both execute **those** copies, never `scripts/`, so
-nothing executable is loaded from the agent-writable checkout.
+trusted step therefore copies the wrapper's whole runtime import closure into a
+read-only `sentry-triage-tools` directory under `$RUNNER_TEMP`, and the agent's
+`--allowedTools` grant names **that** path, never `scripts/`.
 `scripts/sentry-triage-agent-comment.test.mjs` recomputes the closure from the
 source and fails if the staging list stops matching it, so the attack cannot
 move one file over. The agent job's checkout also sets
 `persist-credentials: false`, matching the autofix agent job.
+
+**The agent job ends with the agent.** Immutable copies alone would not be
+enough: the agent can append to `$GITHUB_ENV`, and
+`BASH_ENV=<payload it wrote into the checkout>` is then exported to every later
+step in the same job, whose bash sources that payload _before_ running its own
+command. So the trusted follow-up is a separate `verdict` job — the shape
+`sentry-autofix.yml` already uses for `select → agent → finalize`. A fresh job
+means a fresh runner, a fresh checkout and a fresh environment, so nothing the
+agent wrote to `$GITHUB_ENV`, `$GITHUB_PATH`, `$GITHUB_OUTPUT` or the checkout
+exists there at all. Nothing crosses the job boundary: the handoff is the
+verdict comment on the queue issue, which `verdict` re-reads from GitHub
+through the same authoritative parser and validates against the closed verdict
+enum. Its only inputs are the select job's `^[0-9]+$`-validated issue number
+and `GITHUB_REPOSITORY`, and it holds `github.token` alone — no secret, no
+`environment:`. Tests assert that the agent step is the last step of its job
+and that no credential-bearing work follows it.
 
 The wrapper also refuses a body that does not start with the
 verdict marker and a body carrying its own authorship marker; it appends
