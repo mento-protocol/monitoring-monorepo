@@ -39,8 +39,41 @@ wrong layer when the adversary controls the shell.
 
 ## Decision
 
-**Keep the credential out of the untrusted agent's process env. A trusted step
-holds it and hands the agent a per-run handle that is worthless off-runner.**
+**Keep the credential out of the untrusted agent's REACH — not merely out of its
+own environment. A trusted step holds it and hands the agent a per-run handle
+that is worthless off-runner.**
+
+Out of the agent's own env is not the property that matters, and stopping there
+is the mistake this ADR exists to name. Every step runs as `runner` and the
+agent holds `Read`, so **every same-UID-readable surface is agent-reachable**:
+`/proc/<pid>/environ` and `/proc/<pid>/cmdline` of every process in the job, and
+every file on disk. A broker that merely inherited the token from its step's
+`env:` would have left it one `Read` away, and the step logs the broker's PID.
+
+**`/proc/<pid>/environ` is the environment captured at `exec`.** Deleting the
+variable inside the process afterwards does not change it, so any scrub after
+start is theatre. The variable must be absent when the process is exec'd. So:
+
+- The trusted step copies the secret to a shell-local, `unset`s the exported
+  name, and only then spawns node — and hands the token over on **stdin**,
+  written by `printf`, a bash **builtin**. That covers all three surfaces: no
+  env var, no argv (a builtin in a pipeline runs in a forked subshell that never
+  execs, so its `cmdline` stays the parent shell's), and no temp file (a
+  pipeline uses an anonymous pipe, unlike `<<<` or `<<`).
+- The broker **refuses to start** if it finds the token in its own exec-time
+  environment, checked against a snapshot taken at module load. A regression in
+  the workflow becomes a loud startup failure rather than a silent leak.
+- The secret reaches the step through an `env:` binding and never through
+  `${{ secrets.* }}` inside the `run:` body. That is deliberate, not style:
+  GitHub expands `${{ }}` **before** writing the step script to `$RUNNER_TEMP`,
+  so an inline secret would sit in plaintext on disk for the life of the job —
+  the same same-UID-readable class. Through `env:` the script holds only the
+  variable name.
+- The trusted step's own shell still holds the token in its environment. That is
+  acceptable only because each `run:` step is its own process and the runner
+  gates the next step on this one's exit code, so it is gone before the agent
+  starts. The broker deliberately outlives its step, which is exactly why its
+  environment is the one that had to be cleaned.
 
 - A trusted step, ordered before the agent and holding the secret **step-scoped**,
   starts `scripts/sentry-mcp-broker.mjs` bound to `127.0.0.1` and mints an
@@ -73,6 +106,13 @@ holds it and hands the agent a per-run handle that is worthless off-runner.**
 - **Scrub or transform the credential in the agent's env.** Rejected: the
   credential must be readable by a child of the agent's own process, so any
   value the MCP server can read, the agent can read.
+- **Let the broker inherit the token and `delete process.env.<name>` at
+  startup.** Rejected, and recorded because it is the plausible wrong fix:
+  `/proc/<pid>/environ` is fixed at `exec`, so the file still shows the original
+  block. A mutation test pins this — scrubbing at runtime must fail the suite.
+- **A temp file the broker reads and unlinks.** Rejected: readable by the agent
+  for the window it exists, and a broker that dies mid-read leaves it behind.
+  Stdin has no such window and no such remnant.
 - **Harden the comment wrapper further.** Rejected on the finding above — no
   check inside a wrapper closes a channel the shell opens before argv exists.
 
@@ -101,6 +141,23 @@ holds it and hands the agent a per-run handle that is worthless off-runner.**
 - **No stop step.** The agent job must end with the agent (a later step's bash
   would source a `$GITHUB_ENV`-injected `BASH_ENV` payload), so the broker
   bounds its own life with a TTL on an ephemeral runner instead.
+- **Accepted residual — heap residency, UNVERIFIED.** The token now lives in the
+  broker's heap. Reading `/proc/<pid>/mem` requires `PTRACE_MODE_ATTACH`, which
+  Yama's `ptrace_scope=1` denies to a non-descendant same-user process — but the
+  GitHub runner's setting is not established, and this ADR does not claim it.
+  The broker step logs `/proc/sys/kernel/yama/ptrace_scope` so the first real
+  run settles it. If it reports `0`, heap residency is genuinely reachable and
+  needs its own mitigation.
+- **Reachability inventory (checked, negative).** Audited for what an agent with
+  `Read` on this runner can actually reach, rather than assumed:
+  **zero** steps across all 31 workflows interpolate `${{ secrets.* }}` into a
+  `run:` body (the only three inline expressions anywhere are `github.base_ref`,
+  `matrix.id` and `github.sha`); the triage job's single `$GITHUB_ENV` write is
+  the broker handle and its single `$GITHUB_OUTPUT` write is the rendered
+  prompt; the staged `sentry-triage-tools` directory is agent-readable by design
+  and holds only files already public in this repo; `target.json` holds a repo
+  name and a public issue number; and the broker's log is method, path, status
+  and refusal reason only. Nothing sensitive in any of them.
 
 ## Evidence
 

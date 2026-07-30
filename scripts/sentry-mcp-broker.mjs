@@ -22,6 +22,43 @@
  * the broker validates the handle, swaps in the real token, and forwards to
  * Sentry over HTTPS.
  *
+ * THE TOKEN ARRIVES ON STDIN, AND EVERY OTHER CHANNEL LEAKS IT. GitHub Actions
+ * runs every step as `runner`, and the agent holds `Read`, so any same-UID
+ * readable surface is agent-reachable. Ruled out, each for a specific reason:
+ *
+ *   - PROCESS ENVIRONMENT. `/proc/<pid>/environ` is world-readable to the same
+ *     UID, so inheriting the token from the step's `env:` block puts it one
+ *     `Read` away — and the workflow logs this process's PID. THE SUBTLETY THAT
+ *     MAKES THIS EASY TO FIX WRONGLY: that file is the environment captured at
+ *     `exec`. `delete process.env.<name>` at runtime does not change it. Any
+ *     scrub after start is theatre. The variable must not exist when this
+ *     process is exec'd, which is why the workflow copies it to a shell-local
+ *     and `unset`s the exported name BEFORE spawning node, and why
+ *     `assertTokenAbsentFromExecEnv` refuses to start if it finds it anyway.
+ *   - ARGV. `/proc/<pid>/cmdline` is readable the same way, so the token is
+ *     never a process argument. The workflow writes it with `printf`, a bash
+ *     BUILTIN — a builtin in a pipeline runs in a forked subshell that never
+ *     `exec`s, so its `/proc/<pid>/cmdline` is the parent shell's command line,
+ *     not the builtin's arguments. That is a property of fork-without-exec, not
+ *     an accident worth relying on silently.
+ *   - THE FILESYSTEM. A temp file is readable for as long as it exists. A
+ *     pipeline uses an anonymous pipe and creates no file, unlike a here-string
+ *     (`<<<`) or heredoc (`<<`), where bash may materialise one — do not
+ *     "simplify" the pipe into either.
+ *   - THE STEP SHELL'S OWN ENVIRONMENT still holds the token, and that is
+ *     acceptable only because each `run:` step is its own process that has
+ *     exited before the next step starts (the runner gates the next step on
+ *     this one's exit code). The agent runs in a later step, so that process is
+ *     gone. This broker deliberately outlives its step, which is exactly why
+ *     ITS environment is the one that matters.
+ *
+ * RESIDUAL, UNVERIFIED: the token then lives in this process's heap. Reading
+ * `/proc/<pid>/mem` needs `PTRACE_MODE_ATTACH`, which Yama's
+ * `ptrace_scope=1` denies to a non-descendant same-user process — but the
+ * runner's setting is not established. The broker step logs
+ * `/proc/sys/kernel/yama/ptrace_scope` so the first real run settles it. Until
+ * then, treat heap residency as unmitigated rather than safe.
+ *
  * THE HANDLE IS NOT A SECOND SECRET, and that is load-bearing. It is worthless
  * outside this run and outside this process: the broker binds 127.0.0.1 ONLY
  * (see BIND_HOST — nothing makes the bind address configurable), the handle is
@@ -77,11 +114,26 @@ import { createServer } from "node:http";
 import { fileURLToPath } from "node:url";
 
 /**
+ * The environment exactly as this process received it at `exec`, captured at
+ * module load before anything can mutate `process.env`.
+ *
+ * This snapshot — not live `process.env` — is what `/proc/<pid>/environ`
+ * contains for the life of the process. Never replace a use of this with
+ * `process.env`, and never `delete process.env.<name>` anywhere in this file:
+ * a runtime scrub leaves `/proc` untouched and only hides the leak from the
+ * check that exists to find it.
+ */
+const ENV_AT_EXEC = Object.freeze({ ...process.env });
+
+/**
  * Loopback ONLY. This is the property that makes a leaked handle worthless off
  * the runner, so it is a constant with no env override — widening it would
  * silently convert the handle into a credential that travels.
  */
 export const BIND_HOST = "127.0.0.1";
+
+/** Shortest value accepted as a Sentry token; real ones are far longer. */
+export const MIN_TOKEN_LENGTH = 16;
 
 /** Sentry SaaS US region. Overridable only for tests via the env below. */
 export const DEFAULT_UPSTREAM = "https://us.sentry.io";
@@ -369,8 +421,70 @@ function requireEnv(env, name) {
   return value;
 }
 
+/**
+ * Reads the Sentry token from stdin — the channel that leaves no readable
+ * trace. See the header for why every other channel does.
+ *
+ * The workflow pipes it from a bash builtin, so the value never becomes a
+ * process argument and no temporary file is created. Stdin reaches EOF as soon
+ * as the writer exits, and an anonymous pipe keeps no history, so once this
+ * resolves the only copy left is this process's heap.
+ */
+export function readTokenFromStdin(stream = process.stdin, timeoutMs = 10_000) {
+  return new Promise((resolve, reject) => {
+    if (stream.isTTY) {
+      reject(
+        new Error(
+          "the Sentry token must be piped on stdin (stdin is a TTY); the workflow pipes it from a bash builtin",
+        ),
+      );
+      return;
+    }
+    let data = "";
+    const timer = setTimeout(() => {
+      stream.destroy();
+      reject(new Error(`no token arrived on stdin within ${timeoutMs}ms`));
+    }, timeoutMs);
+    stream.setEncoding("utf8");
+    stream.on("data", (chunk) => {
+      data += chunk;
+    });
+    stream.on("end", () => {
+      clearTimeout(timer);
+      resolve(data.trim());
+    });
+    stream.on("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+  });
+}
+
+/**
+ * Refuses to start if the token is anywhere in the EXEC-TIME environment.
+ *
+ * This is the enforcement behind the header's central claim, and it must be
+ * given the exec-time snapshot rather than live `process.env`. Deleting a
+ * variable at runtime does NOT change `/proc/<pid>/environ` — that file is the
+ * block captured at `exec` — so a check against live `process.env` would pass
+ * for the exact wiring it exists to catch. Naming a variable here means the
+ * workflow exported the token to this process and the fix belongs in the
+ * workflow, not in a runtime scrub.
+ */
+export function assertTokenAbsentFromExecEnv(token, envAtExec) {
+  for (const [name, value] of Object.entries(envAtExec)) {
+    if (typeof value === "string" && value.includes(token)) {
+      throw new Error(
+        `the Sentry token is present in this process's exec-time environment as ${name}; ` +
+          "any same-UID process can read it from /proc/<pid>/environ. " +
+          "Do not scrub it at runtime — that does not change /proc. " +
+          "Stop exporting it to this process (see the broker step in .github/workflows/sentry-triage-agent.yml).",
+      );
+    }
+  }
+}
+
 export function resolveConfig(env) {
-  const token = requireEnv(env, "SENTRY_MCP_BROKER_TOKEN");
   const handle = requireEnv(env, "SENTRY_MCP_BROKER_HANDLE");
   if (handle.length < MIN_HANDLE_LENGTH) {
     throw new Error(
@@ -385,7 +499,12 @@ export function resolveConfig(env) {
       `SENTRY_MCP_BROKER_UPSTREAM must be https (got ${upstream})`,
     );
   }
-  const port = Number(env.SENTRY_MCP_BROKER_PORT ?? 9401);
+  // REQUIRED, not defaulted. The port is the contract between the broker step
+  // and the agent step's --mcp-config, and it has exactly one literal: the
+  // triage job's `env: SENTRY_MCP_BROKER_PORT`. A default here would be a
+  // second source of truth that could silently disagree with the workflow and
+  // surface only as a connection refused on a live run.
+  const port = Number(requireEnv(env, "SENTRY_MCP_BROKER_PORT"));
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     throw new Error(
       `SENTRY_MCP_BROKER_PORT must be a valid port (got ${port})`,
@@ -402,7 +521,6 @@ export function resolveConfig(env) {
     );
   }
   return {
-    token,
     handle,
     upstream,
     port,
@@ -411,12 +529,40 @@ export function resolveConfig(env) {
   };
 }
 
-async function main(env = process.env) {
-  const config = resolveConfig(env);
+/**
+ * Everything that must hold before a socket is bound: config from the
+ * exec-time environment, token from stdin, and the exec-time env proven clean.
+ *
+ * `envAtExec` is a parameter so a test can hand in a snapshot that still holds
+ * the token while live `process.env` no longer does — the exact shape of the
+ * tempting wrong fix. Passing live `process.env` here instead would make that
+ * case pass, which is why it is threaded through rather than read inline.
+ */
+export async function resolveRuntime({
+  envAtExec = ENV_AT_EXEC,
+  stdin = process.stdin,
+} = {}) {
+  const config = resolveConfig(envAtExec);
+  const token = await readTokenFromStdin(stdin);
+  if (token.length < MIN_TOKEN_LENGTH) {
+    throw new Error(
+      `the token read from stdin is ${token.length} characters; expected at least ${MIN_TOKEN_LENGTH}`,
+    );
+  }
+  // Before the socket binds, so a leaking wiring never serves a single request.
+  assertTokenAbsentFromExecEnv(token, envAtExec);
+  return { ...config, token };
+}
+
+async function main() {
+  const config = await resolveRuntime();
   const server = await startBroker(config);
   const { port } = server.address();
   console.log(
     `sentry-mcp-broker: listening on ${BIND_HOST}:${port} -> ${config.upstream} (ttl ${config.ttlSeconds}s)`,
+  );
+  console.log(
+    "sentry-mcp-broker: token read from stdin; absent from this process's exec-time environment",
   );
   if (config.readyFile) writeFileSync(config.readyFile, `${port}\n`);
   setTimeout(() => {

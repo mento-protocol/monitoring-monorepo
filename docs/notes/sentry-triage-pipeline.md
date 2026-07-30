@@ -264,17 +264,38 @@ accepted residuals; this is the mechanism.
 
 A trusted step in the triage job — before the agent, holding
 `SENTRY_TRIAGE_TOKEN` step-scoped — starts `scripts/sentry-mcp-broker.mjs` on
-`127.0.0.1:9401` and mints an opaque per-run handle with `openssl rand -hex 32`.
-The agent step receives the handle through `$GITHUB_ENV` and no Sentry
-credential. Its Sentry MCP server runs with
-`--host 127.0.0.1:9401 --insecure-http` and the handle as `SENTRY_ACCESS_TOKEN`;
-the broker validates the handle, swaps in the real token and forwards to
-`https://us.sentry.io`. `--insecure-http` is CLI-only, `SENTRY_URL` must be HTTPS
-and cannot combine with it, and `SENTRY_HOST` takes a bare hostname — so the
-loopback wiring lives in the MCP server's `args` and `SENTRY_HOST` is gone with
-the token. `$GITHUB_ENV` carries the handle and never the token: it exposes a
-value to every later step, which is right for an authenticator that only works
-against a loopback process on this runner and wrong for a credential.
+loopback and mints an opaque per-run handle with `openssl rand -hex 32`. The
+agent step receives the handle through `$GITHUB_ENV` and no Sentry credential.
+Its Sentry MCP server runs with `--host 127.0.0.1:<port> --insecure-http` and
+the handle as `SENTRY_ACCESS_TOKEN`; the broker validates the handle, swaps in
+the real token and forwards to `https://us.sentry.io`. `--insecure-http` is
+CLI-only, `SENTRY_URL` must be HTTPS and cannot combine with it, and
+`SENTRY_HOST` takes a bare hostname — so the loopback wiring lives in the MCP
+server's `args` and `SENTRY_HOST` is gone with the token. `$GITHUB_ENV` carries
+the handle and never the token: it exposes a value to every later step, which is
+right for an authenticator that only works against a loopback process on this
+runner and wrong for a credential. The port has exactly one literal — the triage
+job's `env: SENTRY_MCP_BROKER_PORT`. The broker requires it rather than
+defaulting and the agent step interpolates it, so the two cannot drift into a
+connection refused that only a live run would reveal.
+
+**Out of the agent's env is not out of the agent's reach.** Every step runs as
+`runner` and the agent holds `Read`, so `/proc/<pid>/environ` and
+`/proc/<pid>/cmdline` of every process in the job are agent-readable — and the
+step logs the broker's PID. `/proc/<pid>/environ` is the block captured at
+`exec`, so deleting the variable inside the broker would not clear it; any
+runtime scrub is theatre. The step therefore copies the token to a shell-local,
+`unset`s the exported name, and pipes the value to the broker's **stdin** from
+`printf`, a bash builtin: no env var, no argv, no temp file. The broker refuses
+to start if it finds the token in its own exec-time environment. Do not rewrite
+that pipe as a here-string or heredoc, where bash may materialise a file the
+agent can read.
+
+**Secrets reach steps through `env:`, never `${{ secrets.* }}` inside `run:`.**
+GitHub expands `${{ }}` before writing the step script to `$RUNNER_TEMP`, so an
+inline secret sits in plaintext on disk for the whole job — the same
+same-UID-readable class as `/proc`. Audited across all 31 workflows: zero hits,
+and a test in `scripts/sentry-mcp-broker.test.mjs` keeps this workflow that way.
 
 The broker refuses anything that is not a GET on an allow-listed path with the
 exact handle, and refuses to relay an upstream redirect (the MCP client would
