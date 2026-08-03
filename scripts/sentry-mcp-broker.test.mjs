@@ -19,6 +19,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { connect } from "node:net";
 import { readFileSync } from "node:fs";
+import { platform } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -607,38 +608,75 @@ test("assertTokenAbsentFromExecEnv names the leaking variable, never the value",
 // `Read`, and `/proc/<pid>/environ` is same-UID readable — so the broker
 // inheriting the token from its step's `env:` left it one `Read` away.
 //
-// These tests run on macOS, which has no `/proc`. `ps -E` reads the same
-// exec-time environment block, and the positive control below proves it is the
-// same thing that matters: it still reports a variable the child DELETED at
-// runtime. That is the property, and it is why a runtime scrub is theatre.
+// READ THIS BEFORE TOUCHING THE PLATFORM SPLIT BELOW. An earlier revision used
+// `ps -E -p <pid>` on every platform. That is BSD/macOS syntax: procps rejects
+// `-E` as an "unsupported SysV option" — its `parse_sysv_option` has no
+// `case 'E'` and falls to that default, while only the bare BSD `e` sets the
+// environment flag. So on the Ubuntu runner the call errored, the reader
+// returned null, and the tests that establish this entire credential boundary
+// could not pass on the one platform we ship to. The defect was A VERIFICATION
+// THAT COULD NOT RUN, not a product bug: the strongest-looking evidence in the
+// change was inert exactly where it mattered. Keep this split, and keep it
+// explicit.
+//
+// On Linux we read `/proc/<pid>/environ` directly. That is not an analogue of
+// the threat — it IS the file a prompt-injected agent would open with `Read`.
+// `ps -E` stays as the macOS fallback so the suite still means something
+// locally. NEITHER READER MAY FAIL SOFT: a silent empty read would make every
+// negative result below meaningless, which is the same class of mistake as the
+// one above, so a failed read throws and turns the suite red rather than
+// skipping. The positive control proves whichever reader is in play actually
+// detects a leak, and that it still reports a variable the child DELETED at
+// runtime — which is why a runtime scrub is theatre.
 
 const BROKER_PATH = join(
   dirname(fileURLToPath(import.meta.url)),
   "sentry-mcp-broker.mjs",
 );
 
-/** The exec-time environment of a live process, as an outsider sees it. */
-function execEnvironOf(pid) {
-  try {
-    return execFileSync("ps", ["-E", "-p", String(pid)], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    });
-  } catch {
-    return null;
-  }
+const ON_LINUX = platform() === "linux";
+
+/** How the exec-time environment is being read, named in failure messages. */
+const READER = ON_LINUX ? "/proc/<pid>/environ" : "ps -E -p <pid>";
+
+/**
+ * Decodes a `/proc/<pid>/environ` block: NUL-separated `KEY=VALUE` entries with
+ * a trailing NUL. Split out so the Linux branch's decoding is covered by a test
+ * even when the suite runs on a host without `/proc` — the file read itself
+ * cannot be, and that gap is stated in the PR rather than papered over.
+ */
+function decodeProcBlock(buffer) {
+  return buffer.toString("utf8").split("\0").join("\n");
 }
 
-/** The command line of a live process — the `/proc/<pid>/cmdline` analogue. */
-function commandLineOf(pid) {
-  try {
-    return execFileSync("ps", ["-o", "command=", "-p", String(pid)], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    });
-  } catch {
-    return null;
+/**
+ * The exec-time environment of a live process, as an outsider sees it.
+ * Throws on any failure — it must never return a falsy "nothing found".
+ */
+function execEnvironOf(pid) {
+  if (ON_LINUX) {
+    // A dead pid or an EACCES throws out of readFileSync, which is the point:
+    // a failed read must never read as "no token here".
+    return decodeProcBlock(readFileSync(`/proc/${pid}/environ`));
   }
+  return execFileSync("ps", ["-E", "-p", String(pid)], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+}
+
+/** The command line of a live process — `/proc/<pid>/cmdline` on Linux. */
+function commandLineOf(pid) {
+  if (ON_LINUX) {
+    return readFileSync(`/proc/${pid}/cmdline`)
+      .toString("utf8")
+      .split("\0")
+      .join(" ");
+  }
+  return execFileSync("ps", ["-o", "command=", "-p", String(pid)], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
 }
 
 const settle = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -687,6 +725,26 @@ test("a RUNTIME scrub does not satisfy the guard — only an exec-time absence d
   assert.equal(config.port, 9401);
 });
 
+test("the Linux reader decodes a real /proc/<pid>/environ block", () => {
+  // Runs on every platform: the decoding half of the Linux branch, which the
+  // macOS host cannot exercise through an actual file read.
+  const block = Buffer.from(
+    `PATH=/usr/bin\0SENTRY_MCP_BROKER_HANDLE=${HANDLE}\0SENTRY_TRIAGE_TOKEN=${REAL_TOKEN}\0`,
+    "utf8",
+  );
+  const decoded = decodeProcBlock(block);
+  assert.ok(decoded.includes(`SENTRY_TRIAGE_TOKEN=${REAL_TOKEN}`));
+  assert.ok(decoded.includes("SENTRY_MCP_BROKER_HANDLE"));
+  // Entries must not run together, or a leak could hide across a boundary.
+  assert.deepEqual(decoded.split("\n").slice(0, 2), [
+    "PATH=/usr/bin",
+    `SENTRY_MCP_BROKER_HANDLE=${HANDLE}`,
+  ]);
+  // An empty block decodes to something falsy-ish, which is exactly why the
+  // reader throws on failure instead of returning a block it never read.
+  assert.equal(decodeProcBlock(Buffer.alloc(0)), "");
+});
+
 test("POSITIVE CONTROL: an outsider reads a child's exec-time env, and a runtime delete does NOT clear it", async () => {
   const child = spawn(
     process.execPath,
@@ -695,11 +753,17 @@ test("POSITIVE CONTROL: an outsider reads a child's exec-time env, and a runtime
   );
   try {
     await settle(500);
+    // No try/catch: a reader that cannot run must fail this test, because every
+    // negative result below is only worth what this positive result is worth.
     const seen = execEnvironOf(child.pid);
-    assert.ok(seen, "ps -E must work here, or the tests below prove nothing");
     assert.ok(
       seen.includes(REAL_TOKEN),
-      "the observation method must detect a token in a child's exec-time env",
+      `${READER} did not detect a token in a child's exec-time env; every assertion below is vacuous until it does`,
+    );
+    // Belt: prove the reader returns a populated block, not a lucky substring.
+    assert.ok(
+      seen.includes("PROBE_TOKEN"),
+      `${READER} returned a block without the variable name — the reader is not reading what it claims`,
     );
   } finally {
     child.kill("SIGKILL");
@@ -728,15 +792,17 @@ test("the broker, spawned the way the workflow spawns it, has NO token in its ex
   }).trim();
   try {
     await settle(700);
+    // Throws if the broker died or the read failed — never a soft null.
     const environ = execEnvironOf(pid);
-    assert.ok(environ, `the broker (pid ${pid}) must still be running`);
     assert.ok(
       !environ.includes(REAL_TOKEN),
-      "the token is in the broker's exec-time environment — /proc/<pid>/environ would hand it to the agent",
+      `the token is in the broker's exec-time environment (read via ${READER}) — the agent could take it straight out of /proc`,
     );
+    // The load-bearing sanity check on BOTH reader paths: without it, a reader
+    // that returned an empty-but-successful block would pass the line above.
     assert.ok(
       environ.includes("SENTRY_MCP_BROKER_HANDLE"),
-      "sanity: the handle IS exported, so an absent token is a real result and not an empty read",
+      `${READER} returned a block without the handle, so the absent token is not a real result`,
     );
     // /proc/<pid>/cmdline is readable the same way; the token is never an argv.
     assert.ok(
