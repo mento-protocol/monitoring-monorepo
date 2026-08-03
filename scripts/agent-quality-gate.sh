@@ -764,7 +764,7 @@ classify_root_package_json_changes() {
         echo "workspace"
         return
         ;;
-      /scripts/agent:quality-gate|/scripts/agent:quality-gate:test|/scripts/agent:prewarm|/scripts/agent:prewarm:test|/scripts/agent:review-materiality|/scripts/agent:review-materiality:test|/scripts/agent:context-check|/scripts/agent:context-budget|/scripts/agent:context-budget:test|/scripts/docs:index|/scripts/docs:index:test|/scripts/docs:audit|/scripts/docs:audit:test|/scripts/docs:garden|/scripts/docs:garden:test|/scripts/docs:navigation-eval|/scripts/docs:navigation-eval:test|/scripts/agent:autoreview|/scripts/issue:board|/scripts/issue:board:test|/scripts/issue:claim|/scripts/issue:review|/scripts/issue:release|/scripts/sentry:ingest|/scripts/sentry:ingest:test|/scripts/sentry:digest|/scripts/sentry:digest:test|/scripts/sentry:autofix:select|/scripts/sentry:autofix:select:test|/scripts/sentry:autofix:finalize:test|/scripts/sentry:archive|/scripts/sentry:archive:test|/scripts/pr:feedback-state|/scripts/pr:feedback-state:test|/scripts/pr:ready-state|/scripts/pr:ready-state:test|/scripts/tf|/scripts/tf:test|/scripts/alerts:rules:lint|/scripts/alerts:rules:lint:test|/scripts/lockfile:lint|/scripts/lockfile:lint:test|/scripts/skew:check|/scripts/skew:check:test|/scripts/override:prune-report|/scripts/override:prune-report:test|/scripts/adr:check|/scripts/adr:check:test|/scripts/sanitize:test)
+      /scripts/agent:quality-gate|/scripts/agent:quality-gate:test|/scripts/agent:prewarm|/scripts/agent:prewarm:test|/scripts/agent:review-materiality|/scripts/agent:review-materiality:test|/scripts/agent:context-check|/scripts/agent:context-budget|/scripts/agent:context-budget:test|/scripts/docs:index|/scripts/docs:index:test|/scripts/docs:audit|/scripts/docs:audit:test|/scripts/docs:garden|/scripts/docs:garden:test|/scripts/docs:navigation-eval|/scripts/docs:navigation-eval:test|/scripts/agent:autoreview|/scripts/issue:board|/scripts/issue:board:test|/scripts/issue:claim|/scripts/issue:review|/scripts/issue:release|/scripts/sentry:ingest|/scripts/sentry:ingest:test|/scripts/sentry:digest|/scripts/sentry:digest:test|/scripts/sentry:autofix:select|/scripts/sentry:autofix:select:test|/scripts/sentry:autofix:finalize:test|/scripts/sentry:archive|/scripts/sentry:archive:test|/scripts/sentry:broker:test|/scripts/pr:feedback-state|/scripts/pr:feedback-state:test|/scripts/pr:ready-state|/scripts/pr:ready-state:test|/scripts/tf|/scripts/tf:test|/scripts/alerts:rules:lint|/scripts/alerts:rules:lint:test|/scripts/lockfile:lint|/scripts/lockfile:lint:test|/scripts/skew:check|/scripts/skew:check:test|/scripts/override:prune-report|/scripts/override:prune-report:test|/scripts/adr:check|/scripts/adr:check:test|/scripts/sanitize:test)
         saw_tooling_script=true
         ;;
       /scripts)
@@ -1264,6 +1264,7 @@ add_root_tooling_package_script_checks() {
   add_command "pnpm sentry:autofix:select:test" "$reason"
   add_command "pnpm sentry:autofix:finalize:test" "$reason"
   add_command "pnpm sentry:archive:test" "$reason"
+  add_command "pnpm sentry:broker:test" "$reason"
   add_command "node scripts/pr-feedback-state.test.mjs" "$reason"
   add_command "node scripts/pr-ready-state.test.mjs" "$reason"
   add_command "node scripts/terraform-fmt-check.test.mjs" "$reason"
@@ -1964,6 +1965,13 @@ while IFS= read -r path; do
         .github/workflows/lighthouse.yml)
           add_checklist "docs/pr-checklists/code-health.md" "Lighthouse CI workflow changed"
           ;;
+        .github/workflows/sentry-triage-agent.yml)
+          # Both suites assert on this file: the agent-comment tests own the
+          # "agent is the last step" and staged-closure invariants, the broker
+          # tests own "no Sentry credential in the agent's env" (#1711).
+          add_command "node scripts/sentry-triage-agent-comment.test.mjs" "Sentry triage agent workflow changed"
+          add_command "pnpm sentry:broker:test" "Sentry triage agent workflow changed"
+          ;;
         .github/actions/pnpm-install/*)
           add_surface "workspace"
           add_preflight_command "pnpm install --frozen-lockfile" "pnpm install action changed"
@@ -2281,6 +2289,9 @@ while IFS= read -r path; do
           ;;
         scripts/sentry-triage-archive.mjs|scripts/sentry-triage-archive.test.mjs)
           add_command "pnpm sentry:archive:test" "Sentry triage archive helper changed"
+          ;;
+        scripts/sentry-mcp-broker.mjs|scripts/sentry-mcp-broker.test.mjs)
+          add_command "pnpm sentry:broker:test" "Sentry credential broker changed"
           ;;
         scripts/sentry-triage-requeue.mjs|scripts/sentry-triage-requeue.test.mjs|scripts/sentry-triage-queue-contract.mjs)
           # The single re-queue chokepoint and the queue contract it reads. Both

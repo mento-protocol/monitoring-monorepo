@@ -59,10 +59,14 @@
  * script receives argv, so `--body "…${SENTRY_TRIAGE_TOKEN:0:4}x${SENTRY_TRIAGE_TOKEN:4}"`
  * — or any substring split or substitution — arrives as a value this scan
  * cannot match. Exact-value scanning is structurally the wrong layer when the
- * adversary controls the shell. The real residual is recorded in the workflow's
- * containment banner and in docs/notes/sentry-triage-pipeline.md; closing it
- * means removing the credential from the agent's process env, which no check
- * inside this script can do.
+ * adversary controls the shell. That is why the Sentry token no longer reaches
+ * this process at all: issue #1711 put it behind a loopback credential broker
+ * (scripts/sentry-mcp-broker.mjs) and left the agent an opaque per-run handle.
+ * `SENTRY_TRIAGE_TOKEN` stays in SECRET_ENV_VARS below as a regression
+ * tripwire — it should now be unset here, so a body that could match it would
+ * mean the workflow put the token back. The credentials that ARE still live,
+ * and their bounding, are in the workflow's containment banner and in
+ * docs/notes/sentry-triage-pipeline.md.
  *
  * THE BODY NEVER TOUCHES THE FILESYSTEM. It goes to `gh --body-file -` on the
  * child's stdin. An earlier version validated the body, wrote it to a
@@ -100,7 +104,8 @@ export const ISSUE_ENV_VAR = "SENTRY_TRIAGE_COMMENT_ISSUE";
  * refusing. Covers this workflow's own secrets plus the tokens
  * claude-code-action puts in the CLI subprocess env (which the agent's Bash
  * therefore inherits). Hygiene only — a deliberately transformed value passes
- * (see the header). */
+ * (see the header). `SENTRY_TRIAGE_TOKEN` should be unset here since #1711; it
+ * is kept as a tripwire for the workflow putting it back in job env. */
 export const SECRET_ENV_VARS = [
   "SENTRY_TRIAGE_TOKEN",
   "GH_TOKEN",

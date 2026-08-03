@@ -53,6 +53,7 @@
     "sentry:autofix:finalize:test": "node scripts/sentry-autofix-finalize.test.mjs",
     "sentry:archive": "node scripts/sentry-triage-archive.mjs",
     "sentry:archive:test": "node scripts/sentry-triage-archive.test.mjs",
+    "sentry:broker:test": "node --test scripts/sentry-mcp-broker.test.mjs",
     "sentry:requeue:test": "node scripts/sentry-triage-requeue.test.mjs",
     "pr:feedback-state": "node scripts/pr-feedback-state.mjs",
     "pr:feedback-state:test": "node scripts/pr-feedback-state.test.mjs",
