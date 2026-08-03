@@ -1017,6 +1017,9 @@ test("committed peg rules preserve coverage, rollover, and routing invariants", 
       contacts.includes("peg_contact_point_names = {") &&
       contacts.includes("name = local.peg_contact_point_names.page") &&
       contacts.includes(
+        'page = "Peg pages (Splunk On-Call + #alerts-critical)"',
+      ) &&
+      contacts.includes(
         "contact_point   = local.peg_contact_point_names.page",
       ) &&
       contacts.includes("victorops {") &&
