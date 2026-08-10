@@ -2370,10 +2370,16 @@ while IFS= read -r path; do
         scripts/check-workflow-permissions-drift.mjs|scripts/check-workflow-permissions-drift.test.mjs)
           add_command "node scripts/check-workflow-permissions-drift.test.mjs" "platform-settings workflow-permissions drift checker changed"
           ;;
-        scripts/check-sentry-suites-in-ci.test.mjs)
+        scripts/check-sentry-suites-in-ci.test.mjs|scripts/sentry-*.test.mjs)
           # Belongs in the scripts/*.mjs arm, beside its peer checkers. It first
           # landed under scripts/*.sh, where a .mjs path can never reach it — so
           # the check that exists to catch unwired suites was itself unwired.
+          #
+          # Every scripts/sentry-*.test.mjs maps here too, not just the checker:
+          # adding a suite is precisely when it must run, and a new suite need
+          # not touch package.json or ci.yml to exist. Without this, the local
+          # gate maps a new suite to lint alone and only CI notices it is
+          # unwired — which is the gap this check exists to close.
           add_command "node scripts/check-sentry-suites-in-ci.test.mjs" "Sentry CI-coverage check changed"
           ;;
         scripts/check-github-action-pins.test.mjs)

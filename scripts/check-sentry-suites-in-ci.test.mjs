@@ -239,8 +239,11 @@ test("the exemptions still hold", () => {
     );
     assert.match(
       tfStacks,
-      new RegExp(`import\\s+["']\\./${escapeRegExp(file)}["']`),
-      `${file} is exempted because tf-stacks.test.mjs imports it, but that import is gone`,
+      // Anchored at line start so `// import "./x"` does not satisfy it — a
+      // commented-out import is not an import.
+      new RegExp(`^\\s*import\\s+["']\\./${escapeRegExp(file)}["']`, "m"),
+      `${file} is exempted because tf-stacks.test.mjs imports it, but no ` +
+        "live import of it remains",
     );
     assert.ok(
       runs(jobCommands("production-infra-contract"), "pnpm tf:test"),
@@ -260,10 +263,7 @@ test("every sentry:*:test script resolves to an enumerated suite", () => {
   );
 
   const unresolved = aliases.filter(
-    (alias) =>
-      !SENTRY_SUITES.some((file) =>
-        PKG_SCRIPTS[alias].includes(`scripts/${file}`),
-      ),
+    (alias) => !SENTRY_SUITES.some((file) => aliasesFor(file).includes(alias)),
   );
   assert.deepEqual(
     unresolved,
@@ -277,10 +277,12 @@ test("the local gate's tooling allowlist lists every sentry:* script", () => {
   const sentryScripts = Object.keys(PKG_SCRIPTS)
     .filter((name) => name.startsWith("sentry:"))
     .sort();
+  // Comment-stripped: a commented-out allowlist entry is not an entry.
+  const gateCode = GATE.split("\n").map(stripComment).join("\n");
   const missing = sentryScripts.filter(
     (name) =>
-      !GATE.includes(`/scripts/${name}|`) &&
-      !GATE.includes(`/scripts/${name})`),
+      !gateCode.includes(`/scripts/${name}|`) &&
+      !gateCode.includes(`/scripts/${name})`),
   );
   assert.deepEqual(
     missing,
