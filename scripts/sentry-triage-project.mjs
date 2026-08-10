@@ -50,12 +50,6 @@ import { fileURLToPath } from "node:url";
 export * from "./sentry-triage-project-core.mjs";
 
 import {
-  ALIAS_NOTE_PREFIX,
-  bodyBacklinksShortId,
-  buildAliasComment,
-  buildProjectedBody,
-  buildProjectedTitle,
-  commentBacklinksShortId,
   DEFAULT_REPO,
   extractPermalink,
   isPriorVerdictToken,
@@ -73,6 +67,29 @@ import {
   validateAffectedRepo,
   verdictCommentIdFromUrl,
 } from "./sentry-triage-project-core.mjs";
+
+// Projected-issue rendering lives in its own module (#1769), imported HERE
+// rather than re-exported through the verdict contract so the contract stays
+// out of the untrusted agent wrapper's runtime closure. Re-exported below so
+// this leg's tests keep reaching the renderers through this entry module.
+export {
+  ALIAS_NOTE_PREFIX,
+  bodyBacklinksShortId,
+  buildAliasComment,
+  buildProjectedBody,
+  buildProjectedTitle,
+  buildProjectionMarker,
+  commentBacklinksShortId,
+  leadingProjectionMarkers,
+} from "./sentry-triage-projection.mjs";
+import {
+  ALIAS_NOTE_PREFIX,
+  bodyBacklinksShortId,
+  buildAliasComment,
+  buildProjectedBody,
+  buildProjectedTitle,
+  commentBacklinksShortId,
+} from "./sentry-triage-projection.mjs";
 import { LABEL_DEFINITIONS, VERDICT_LABELS } from "./sentry-triage-ingest.mjs";
 
 // ---------------------------------------------------------------------------

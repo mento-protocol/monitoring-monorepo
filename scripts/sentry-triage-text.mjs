@@ -1,19 +1,22 @@
 /**
- * Untrusted-text neutralization and bounding for the Sentry triage pipeline.
+ * Untrusted-text neutralization, bounding, and SHORT-ID validation for the
+ * Sentry triage pipeline.
  *
  * Sentry payloads are attacker-reachable and this repo is PUBLIC, so every
  * string derived from one is single-lined, defanged and bounded before it
- * reaches an issue, a comment or a Slack message. Those transforms are the
+ * reaches an issue, a comment or a Slack message. Those transforms — plus the
+ * SHORT-ID shape check every marker/back-link and header leans on — are the
  * lowest layer of the pipeline: they depend on nothing, and the verdict
- * contract, the queue contract and both brief emitters all sit on top of them.
+ * contract, the queue contract, the projection renderer and both brief emitters
+ * all sit on top of them.
  *
- * Split out of `sentry-triage-project-core.mjs` (#1748) when the brief's shared
- * bounds pushed that file past the 1,000-line hard cap in
+ * Split out of `sentry-triage-project-core.mjs` (#1748, extended #1769) as that
+ * file kept brushing the 1,000-line hard cap in
  * docs/pr-checklists/recurring-review-patterns.md. It is a MOVE, not a rewrite:
  * `sentry-triage-project-core.mjs` re-exports every name below, so no importer
  * or test changed. Keeping the re-export is deliberate — the verdict contract
  * stays one import surface for its consumers, and this module stays the one
- * place the transforms are defined.
+ * place the helpers are defined.
  *
  * NOTHING here may import from another pipeline module. That is what keeps it
  * usable from every layer without a cycle.
@@ -119,4 +122,44 @@ export function boundBriefList(items) {
     .filter(Boolean)
     .join("; ");
   return joined ? boundBriefText(joined) : "";
+}
+
+// ---------------------------------------------------------------------------
+// SHORT-ID validation. A Sentry SHORT-ID is Sentry-assigned but still transits
+// an untrusted channel, and it drives HTML-comment markers, owning-repo search
+// queries and brief headers — so its shape is validated at this lowest layer,
+// shared by the verdict contract, the projection renderer and the brief.
+// ---------------------------------------------------------------------------
+
+// Sentry SHORT-IDs look like `GOVERNANCE-MENTO-ORG-51` — always
+// `<PROJECT-SLUG>-<SUFFIX>` where the suffix is Sentry's base-36 issue
+// counter (numeric early on, alphanumeric later: `APP-MENTO-ORG-2S`).
+// Requiring the trailing `-<alnum>` (not just a safe charset) keeps bare
+// common words like "Sentry" from validating, since every accepted value can
+// drive an owning-repo search. Do NOT require a decimal-only suffix: that
+// would make base-36 short IDs permanently unprojectable.
+const SHORT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*-[A-Za-z0-9]+$/;
+
+export function isValidShortId(shortId) {
+  return (
+    typeof shortId === "string" &&
+    shortId.length > 0 &&
+    shortId.length <= 120 &&
+    SHORT_ID_PATTERN.test(shortId)
+  );
+}
+
+/** Only keep unique values that look like Sentry SHORT-IDs, bounded for
+ * rendering/memory (the LOOKUP budget is MAX_DUPLICATE_LOOKUPS, applied
+ * later); drop everything else so a hostile duplicate list can neither inject
+ * markup nor bloat the projected body. */
+export function sanitizeDuplicateIds(list) {
+  const unique = [
+    ...new Set(
+      (Array.isArray(list) ? list : []).map((value) =>
+        String(value ?? "").trim(),
+      ),
+    ),
+  ];
+  return unique.filter(isValidShortId).slice(0, 20);
 }

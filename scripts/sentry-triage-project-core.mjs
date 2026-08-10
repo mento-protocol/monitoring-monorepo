@@ -84,51 +84,45 @@ export const VERDICT_TO_LABEL = {
   "needs-human": "sentry:verdict-needs-human",
 };
 
-// Sentry SHORT-IDs look like `GOVERNANCE-MENTO-ORG-51` — always
-// `<PROJECT-SLUG>-<SUFFIX>` where the suffix is Sentry's base-36 issue
-// counter (numeric early on, alphanumeric later: `APP-MENTO-ORG-2S`).
-// Requiring the trailing `-<alnum>` (not just a safe charset) keeps bare
-// common words like "Sentry" from validating, since every accepted value can
-// drive an owning-repo search — validate the shape before it goes into an
-// HTML-comment marker or a search query; it is Sentry-assigned but still
-// transits an untrusted channel. Do NOT require a decimal-only suffix: that
-// would make base-36 short IDs permanently unprojectable.
-const SHORT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*-[A-Za-z0-9]+$/;
-
-const FOOTER =
-  "Filed by the Mento Sentry triage pipeline (ADR 0036 / ADR 0038 — verdict " +
-  "projection). Machine-filed from a triage verdict; advisory only, so confirm " +
-  "the root cause in Sentry before acting. The HTML comment marker at the top " +
-  "keys automatic de-duplication — please keep it.";
-
 // ---------------------------------------------------------------------------
-// Untrusted-text neutralization and bounding.
+// Lowest layer, re-exported so this module stays the verdict contract's single
+// import surface: scripts/sentry-triage-text.mjs — untrusted-text
+// neutralization/bounding AND SHORT-ID validation (#1748, extended #1769). It
+// imports nothing, so every layer can sit on it without a cycle.
+//
+// The projected-issue rendering (owning-repo body/title, alias comment,
+// idempotency marker + back-link matchers) is a SECOND file-size split,
+// scripts/sentry-triage-projection.mjs (#1769) — but it is deliberately NOT
+// re-exported here. Only the projection LEG (scripts/sentry-triage-project.mjs)
+// needs it, and it imports it directly. Re-exporting it here would pull the
+// renderer into the runtime closure of every project-core importer, including
+// the untrusted triage agent's write wrapper (sentry-triage-agent-comment.mjs),
+// whose staged closure is kept minimal on purpose (a test in
+// sentry-triage-agent-comment.test.mjs pins it). sentry-triage-projection.mjs
+// sits ON this contract (it imports the SHORT-ID helpers from the text layer),
+// and this file does not import it back, so there is no cycle either way.
 // ---------------------------------------------------------------------------
 
-// These live in scripts/sentry-triage-text.mjs, the pipeline's lowest layer —
-// it imports nothing, so every other layer can sit on it without a cycle. They
-// are re-exported here rather than relocated in every caller: this module is
-// the verdict contract's single import surface, and the split was a file-size
-// remedy (#1748), not a change of ownership.
 export {
   boundBriefList,
   boundBriefText,
   defangBackticks,
   defangHtmlComments,
   defangMentions,
+  isValidShortId,
   MAX_BRIEF_TEXT_LEN,
   neutralizeBlock,
   neutralizeUntrusted,
+  sanitizeDuplicateIds,
   sanitizeFreeText,
   truncate,
 } from "./sentry-triage-text.mjs";
 
 // `export … from` re-exports without binding the names locally, and the parsing
-// and rendering below use several of them.
+// and validation below use several of them.
 import {
   boundBriefText,
-  neutralizeBlock,
-  neutralizeUntrusted,
+  sanitizeDuplicateIds,
   sanitizeFreeText,
   truncate,
 } from "./sentry-triage-text.mjs";
@@ -157,14 +151,9 @@ export function parseShortId(title) {
   return match ? match[1] : null;
 }
 
-export function isValidShortId(shortId) {
-  return (
-    typeof shortId === "string" &&
-    shortId.length > 0 &&
-    shortId.length <= 120 &&
-    SHORT_ID_PATTERN.test(shortId)
-  );
-}
+// `isValidShortId` now lives in sentry-triage-text.mjs (re-exported above): the
+// projection renderer needs it too, and keeping it on the lowest layer lets that
+// module sit on the text layer without importing this contract.
 
 // A validated permalink is later embedded in Slack mrkdwn link syntax
 // (`<url|text>`, in the digest's `link()`), so `<`, `>`, `|` in the URL would
@@ -352,20 +341,9 @@ export function sanitizeBriefList(list) {
     .slice(0, MAX_BRIEF_LIST_ITEMS);
 }
 
-/** Only keep unique values that look like Sentry SHORT-IDs, bounded for
- * rendering/memory (the LOOKUP budget is MAX_DUPLICATE_LOOKUPS, applied
- * later); drop everything else so a hostile duplicate list can neither inject
- * markup nor bloat the projected body. */
-export function sanitizeDuplicateIds(list) {
-  const unique = [
-    ...new Set(
-      (Array.isArray(list) ? list : []).map((value) =>
-        String(value ?? "").trim(),
-      ),
-    ),
-  ];
-  return unique.filter(isValidShortId).slice(0, 20);
-}
+// `sanitizeDuplicateIds` now lives in sentry-triage-text.mjs (re-exported
+// above), beside `isValidShortId` it depends on; parseVerdictYaml below still
+// calls it through the local import.
 
 /**
  * Line-oriented, tolerant parse of the verdict yaml — deliberately NOT a real
@@ -797,7 +775,10 @@ export function resolveVerdict(issue, queueIssueNumber, options = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// Allowlist validation + idempotency marker.
+// Allowlist validation. The projected-issue rendering, the alias comment, and
+// the idempotency marker/back-link matchers moved to
+// sentry-triage-projection.mjs (#1769) and are re-exported at the top of this
+// file, so callers still reach them through the verdict contract unchanged.
 // ---------------------------------------------------------------------------
 
 /**
@@ -826,205 +807,4 @@ export function validateAffectedRepo(repo) {
     warning: `affected_repo ${value ? `'${truncate(value, 80)}'` : "(empty)"} is not in the projection allowlist; treating as ${LOCAL_REPO} and not projecting.`,
     reason: "unrecognized-repo",
   };
-}
-
-export function buildProjectionMarker(shortId) {
-  return `<!-- sentry-projection:v1 ${shortId} -->`;
-}
-
-const MARKER_LINE_PATTERN = /^<!-- sentry-projection:v1 (\S+) -->$/;
-
-/**
- * The SHORT-IDs in the body's LEADING marker block: consecutive
- * `<!-- sentry-projection:v1 … -->` lines at the very top of the body (after
- * optional leading blanks) — buildProjectedBody emits exactly one, and the
- * block form tolerates future multi-marker bodies. The first non-blank
- * non-marker line ends the block, so a marker-shaped sequence embedded in a
- * rendered free-text field further down can never register.
- */
-export function leadingProjectionMarkers(body) {
-  const markers = [];
-  for (const raw of String(body ?? "").split(/\r?\n/)) {
-    const line = raw.trim();
-    if (line === "") {
-      if (markers.length === 0) continue; // leading blanks before the block
-      break; // blank after the block ends it (our own format)
-    }
-    const match = MARKER_LINE_PATTERN.exec(line);
-    if (!match || !isValidShortId(match[1])) break;
-    markers.push(match[1]);
-  }
-  return markers;
-}
-
-/**
- * True when `body` is a genuine projection back-link for `shortId`. Markers
- * are only accepted at their fixed structural position — the leading marker
- * block — never via a broad substring search: a marker-shaped sequence
- * embedded in a rendered free-text field of an UNRELATED projected issue
- * must not satisfy the idempotency check for a different SHORT-ID (which
- * would close that stub as "reused" without filing anything). Rendered
- * fields additionally defang `<!--` (defangHtmlComments) so such a sequence
- * cannot survive rendering intact in the first place. Coalesced duplicates
- * are matched separately via projector-authored alias COMMENTS
- * (commentBacklinksShortId below).
- */
-export function bodyBacklinksShortId(body, shortId) {
-  if (!isValidShortId(shortId)) return false;
-  return leadingProjectionMarkers(body).includes(shortId);
-}
-
-/**
- * Build the duplicate-coalescing ALIAS COMMENT: the marker anchored as the
- * comment's first line (the authoritative alias predicate,
- * commentBacklinksShortId) followed by a visible note carrying the SHORT-ID,
- * the footer phrase, and the queue-stub back-link (so the search pre-filter —
- * which matches visible text — finds the aliased id) — PLUS the new
- * occurrence's full rendered verdict fields. The verdict contract defines
- * `duplicate_of` as a same-culprit/message FAMILY signal, not a confirmed
- * exact duplicate, so coalescing must not discard the new finding's
- * substance: the summary/root cause/proposed action land here (neutralized
- * and bounded exactly like the projected body), and the note invites the team
- * to split the entry into its own issue if it is actually distinct.
- *
- * An alias is a COMMENT, never a body edit, deliberately: comment creation is
- * an atomic APPEND, so two parallel matrix jobs coalescing different
- * SHORT-IDs onto the same issue can never lose each other's alias the way
- * concurrent read-modify-write body edits could (GitHub has no conditional
- * body update to CAS against). It is also the ONLY coalescing side effect, so
- * a partial failure can never strand a half-recorded alias. `shortId` is
- * shape-validated, `verdict`/`confidence` are closed enums, and
- * `queueIssueUrl` is a trusted GitHub-API/self-built URL.
- */
-// Fixed lead-in of the alias comment's visible note. Shared with the entry
-// module's dedicated alias search (`"<prefix> <shortId>" in:comments`) so the
-// searchable phrase and the rendered text can never drift apart.
-export const ALIAS_NOTE_PREFIX = "Also tracking Sentry";
-
-export function buildAliasComment({
-  shortId,
-  queueIssueUrl,
-  verdict,
-  confidence,
-  summary,
-  rootCause,
-  proposedAction,
-}) {
-  return [
-    buildProjectionMarker(shortId),
-    "",
-    `${ALIAS_NOTE_PREFIX} \`${shortId}\` — the Mento Sentry triage pipeline ` +
-      "marked it a duplicate of this issue's underlying error (same " +
-      "culprit/message family; if it is actually distinct, split it into its " +
-      "own issue). " +
-      `Queue stub: ${queueIssueUrl}`,
-    "",
-    `**Triage verdict:** \`${verdict}\`${confidence ? ` (confidence: \`${confidence}\`)` : ""}`,
-    "",
-    "**Summary**",
-    "",
-    fencedBlock(summary),
-    "",
-    "**Root cause**",
-    "",
-    fencedBlock(rootCause),
-    "",
-    "**Proposed action**",
-    "",
-    fencedBlock(proposedAction),
-  ].join("\n");
-}
-
-/** True when a COMMENT is a genuine alias record for `shortId`: the marker
- * must be the comment's first non-empty line (the caller additionally
- * verifies the comment author is the projector identity). */
-export function commentBacklinksShortId(commentBody, shortId) {
-  if (!isValidShortId(shortId)) return false;
-  const first = String(commentBody ?? "")
-    .split(/\r?\n/)
-    .find((line) => line.trim() !== "");
-  return first !== undefined && first.trim() === buildProjectionMarker(shortId);
-}
-
-// ---------------------------------------------------------------------------
-// Projected-issue rendering.
-// ---------------------------------------------------------------------------
-
-export function buildProjectedTitle(summary) {
-  const clean = neutralizeUntrusted(summary);
-  const base = clean || "(no summary provided)";
-  return `Sentry: ${truncate(base, 200)}`;
-}
-
-// Every free-text field the body/alias renders — summary INCLUDED — goes
-// through this fenced, inert treatment: fencing is what stops markdown
-// (images, task lists, links, inline HTML) from rendering live in the
-// owning-repo issue, and neutralizeBlock bounds it (600 chars / 8 lines) and
-// defangs backticks so the fence can't be closed early. Everything else is
-// already bounded: title caps at 200, duplicates at 20 shape-validated
-// SHORT-IDs, shortId at 120, verdict/confidence are closed enums, and the
-// permalink is a Stage-A-bounded validated URL.
-function fencedBlock(text) {
-  const body = neutralizeBlock(text);
-  if (!body) return "_(none provided)_";
-  return ["```text", body, "```"].join("\n");
-}
-
-/**
- * Build the projected owning-repo issue body. `shortId`, `verdict`,
- * `confidence` are validated/closed-set (safe as inline code); `permalink` is a
- * validated https sentry.io URL; `queueIssueUrl` is a trusted github.com URL
- * built from the workflow's own repo/issue. Every other field is agent-derived
- * and neutralized before it lands here.
- */
-export function buildProjectedBody({
-  shortId,
-  verdict,
-  confidence,
-  summary,
-  rootCause,
-  proposedAction,
-  duplicateOf,
-  permalink,
-  queueIssueUrl,
-}) {
-  const dupIds = sanitizeDuplicateIds(duplicateOf);
-  const dupText = dupIds.length
-    ? dupIds.map((id) => `\`${id}\``).join(", ")
-    : "none";
-
-  const parts = [
-    buildProjectionMarker(shortId),
-    "",
-    "> Filed automatically by the Mento **Sentry triage pipeline** from an agent triage verdict.",
-    "> Verdict fields only — no raw Sentry payload is copied here. Confirm in Sentry before acting.",
-    "",
-    `**Sentry issue:** \`${shortId}\``,
-    `**Triage verdict:** \`${verdict}\`${confidence ? ` (confidence: \`${confidence}\`)` : ""}`,
-    "",
-    "**Summary**",
-    "",
-    fencedBlock(summary),
-    "",
-    "**Root cause**",
-    "",
-    fencedBlock(rootCause),
-    "",
-    "**Proposed action**",
-    "",
-    fencedBlock(proposedAction),
-    "",
-    `**Possible duplicate Sentry issues:** ${dupText}`,
-    "",
-    "**Links**",
-    "",
-  ];
-  if (permalink) parts.push(`- [View the error in Sentry](${permalink})`);
-  parts.push(`- Central triage queue stub: ${queueIssueUrl}`);
-  parts.push("");
-  parts.push("---");
-  parts.push("");
-  parts.push(FOOTER);
-  parts.push("");
-  return parts.join("\n");
 }
