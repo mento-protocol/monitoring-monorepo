@@ -270,64 +270,55 @@ pushes the decision further down the page.
 
 ### The needs-human brief
 
-`scripts/sentry-triage-brief.mjs` renders those fields into the queue stub's
-**body**, above the metadata YAML, in a fixed order — question, how to check,
-what each answer leads to, evidence collapsed underneath. The `verdict` job
-runs it right after the label swap, so a stub a person is asked to decide opens
-with the decision instead of the YAML. The digest's Slack brief
+`scripts/sentry-triage-brief.mjs` renders those fields as a dedicated,
+updated-in-place **comment** on the queue stub, in a fixed order — question, how
+to check, what each answer leads to, evidence collapsed underneath. The
+`verdict` job runs it right after the label swap, so a stub a person is asked to
+decide carries the decision beside its YAML. The digest's Slack brief
 (`renderNeedsHumanBrief` in `scripts/sentry-triage-digest.mjs`) is the second
 emitter over the same shared field selection; only the escaping differs —
 Slack gets `escapeSlackText`, GitHub gets `escapeGithubMarkdown`, which
 backslash-escapes every active markdown character so agent-authored text can
 never render a link, image, tag or entity beside the pipeline's own controls.
 
-**The block exists if and only if a live `needs-human` verdict describes the
-stub.** That lifecycle is one rule in three places, because a rendering that
-outlives what it renders reads as current to whoever opens the issue:
+**A comment, not the stub body.** An earlier revision rendered the brief into
+the body and tried to keep it clear of the archive leg — the body's writer —
+through label observation. That could not hold (PR #1769): the archive's
+settlement deletes `sentry:approved-archive` **before** it writes its freshness
+baseline and adds `sentry:archived` only **after** the close, so between them
+the stub carries neither coordination label and a whole-body edit could clobber
+the baseline in a window no label check sees. A comment races nothing. The
+archive stays the **single stub-body writer** (PR #1766); the brief cannot drop
+the baseline in any interleaving because it never touches the body.
 
-- a `needs-human` verdict renders the block, replacing any previous one;
-- **any other verdict removes it** — which is why the workflow step is
-  ungated. The script resolves the verdict itself, so gating the step added
-  nothing and cost a stale "Decision needed" block on every stub re-triaged to
-  `code-fix`, `config-fix` or `upstream-transient`;
-- a re-queue does **not** remove it, though that would be the earliest moment
-  to drop a fenced verdict's rendering. The re-queue chokepoint writes no stub
-  body at all (issue #1692, pinned by a test in
-  `scripts/sentry-triage-requeue.test.mjs`): a whole-body write there would move
-  the ingest-written `last_seen` the reopen baseline depends on, and would add a
-  third writer racing the archive leg. A re-queued stub therefore shows its old
-  block until the next round's verdict lands — on a stub already labelled
-  `sentry:needs-triage`.
+**The comment exists if and only if a live `needs-human` verdict describes the
+stub.** That lifecycle is one rule, because a rendering that outlives what it
+renders reads as current to whoever opens the issue:
 
-The archive leg rewrites the same body to record its freshness baseline, under
-a **different concurrency group**, and `gh issue edit` replaces the whole body
-with no conditional update available. Losing that baseline is silent and it
-strands the archive contract, so the brief leg coordinates rather than races:
-
-- **it yields.** A stub carrying `sentry:approved-archive` or `sentry:archived`
-  belongs to the archive leg, and the brief writes nothing to it
-  (`archiveHoldsStub`, re-checked every round). The writer with nothing at
-  stake gives way — an approved stub is on its way to closed, and the next
-  triage round renders the block if it survives.
-- inside the remaining window it builds from a live read, refuses to move the
-  baseline itself (`assertBaselineUnchanged`), re-reads after writing, and
-  restores a baseline it can see was lost, bounded by `BRIEF_WRITE_ATTEMPTS`.
-- the one interleaving a whole-body replace cannot see from the body alone —
-  the **first** archive of a stub, where before and after both read as "no
-  baseline" — is caught by the archive's labels appearing on the post-write
-  read, and fails the job red. A value the brief never saw is not one it may
-  invent.
+- a `needs-human` verdict creates the comment, or updates it in place if it is
+  already there — never a second copy;
+- **any other verdict deletes it**, regardless of any label the stub carries —
+  which is why the workflow step is ungated. The script resolves the verdict
+  itself, so gating the step added nothing and cost a stale "Decision needed"
+  brief on every stub re-triaged to `code-fix`, `config-fix` or
+  `upstream-transient` — including one still carrying a stale
+  `sentry:approved-archive`, where the old body version yielded and left the
+  brief in place for a later close to bury;
+- a re-queue does **not** remove it: the re-queue chokepoint writes no body and
+  posts no comment (issue #1692, pinned by a test in
+  `scripts/sentry-triage-requeue.test.mjs`). A re-queued stub therefore shows
+  its old comment until the next round's verdict lands — on a stub already
+  labelled `sentry:needs-triage`.
 
 Nothing machine-readable moves. The verdict YAML stays in the verdict comment,
 where the label step, the projection, the digest and the autofix selector read
 it; the stub's metadata YAML stays where `extractPermalink` and
-`parseArchiveBaseline` read it. The brief is delimited by
-`<!-- sentry-triage-brief:v1 -->`, so a re-triage after a regression reopen
-replaces it rather than stacking a second copy, and it emits no fenced block of
-its own — a fence above the metadata block would shadow the archive freshness
-baseline, whose placement in the body is a trust boundary (see
-`scripts/sentry-triage-queue-contract.mjs`). Every rendered field is
-single-line, neutralized, bounded and markdown-escaped; a write whose block
+`parseArchiveBaseline` read it. The brief comment is anchored by
+`<!-- sentry-triage-brief:v1 -->` and selected by trusted author plus that
+marker, so a re-triage replaces it rather than stacking a copy and a drive-by
+commenter cannot make the leg PATCH or DELETE their comment. It emits no fenced
+block, so `parseVerdictComment` never mistakes it for a verdict. Every rendered
+field is single-line, neutralized, bounded and markdown-escaped; a comment that
 could be misread by a prefix-anchored consumer fails closed.
 
 The agent posts that comment through `scripts/sentry-triage-agent-comment.mjs`,

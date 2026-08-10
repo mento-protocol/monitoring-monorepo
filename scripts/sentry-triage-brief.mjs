@@ -1,94 +1,77 @@
 #!/usr/bin/env node
 /**
  * needs-human BRIEF leg of the Sentry triage pipeline (issue #1748): a
- * deterministic, no-LLM step that renders the decision a human must make into
- * the queue stub's BODY, above the fold, so opening the issue from a
- * notification shows the question, how to check it, and what each answer leads
- * to — instead of a wall of YAML whose action is 300 words down.
+ * deterministic, no-LLM step that renders the decision a human must make as a
+ * dedicated, updated-in-place COMMENT on the queue stub — the question, how to
+ * check it, and what each answer leads to — so opening the issue from a
+ * notification shows the decision instead of a wall of YAML.
  *
- * It is a PURE CONSUMER of the verdict contract in
- * docs/notes/sentry-triage-pipeline.md. It re-reads the stub from GitHub,
- * resolves the verdict through `resolveVerdict` (the pipeline's single
- * authoritative parser — the same one the label and projection steps run),
- * renders, and writes. It never re-fetches Sentry, never runs an LLM, never
- * touches labels or state, and never posts a comment.
+ * WHY A COMMENT, NOT THE BODY. An earlier revision rendered the brief INTO the
+ * stub BODY and tried to keep it safe against the archive leg — the other writer
+ * of that body — through label observation. That was fundamentally insufficient
+ * (PR #1769 review): the archive's settlement deletes `sentry:approved-archive`
+ * BEFORE it writes its freshness baseline and adds `sentry:archived` only AFTER
+ * the close, so between them the stub carries NEITHER coordination label and a
+ * whole-body edit here could silently clobber the archive's baseline — a window
+ * no label check can see. And yielding on an approval label meant a stub
+ * re-triaged away from needs-human while still carrying that label never had its
+ * stale brief removed, so a later close could bury an obsolete "Decision needed"
+ * block permanently.
  *
- * WHAT IT DOES NOT MOVE: the machine-readable YAML. The verdict YAML stays in
- * the verdict comment where `parseVerdictComment` / `resolveVerdict` (label
- * step, projection, digest, autofix select) read it, and the stub's metadata
- * YAML stays in its body where `extractPermalink` and `parseArchiveBaseline`
- * read it. This leg only PREPENDS a rendered block; every existing parser sees
- * exactly what it saw before.
+ * A comment dissolves both, and restores the single-writer invariant PR #1766
+ * established (the archive leg is the SOLE stub-body writer; losing the baseline
+ * strands the archive contract, #1371):
+ *   - This leg NEVER writes the stub body. It cannot drop the archive freshness
+ *     baseline in ANY interleaving — labeled, unlabeled, or first-archive —
+ *     because it never touches the surface the baseline lives on.
+ *   - Stale-brief removal is deleting THIS leg's own marked comment, regardless
+ *     of any label. A re-triage to code-fix / config-fix / upstream-transient
+ *     removes the brief even while the stub still carries a stale archive
+ *     approval, so a re-triaged stub can never close showing an obsolete brief.
+ *
+ * THE COMMENT'S LIFECYCLE, in one place, because a rendering that outlives what
+ * it renders is worse than no rendering. The comment exists IFF a live
+ * needs-human verdict describes the stub:
+ *   - needs-human verdict -> create the comment, or update it in place if it is
+ *     already there (idempotent, so a re-triage never stacks a second one), and
+ *     delete any duplicate brief comment.
+ *   - ANY other verdict -> DELETE the brief comment. The workflow step is
+ *     therefore ungated: gating it on needs-human is what let a brief survive a
+ *     re-triage to code-fix / config-fix / upstream-transient permanently.
+ *   - a re-queue would be the earliest moment to drop the rendering, and this
+ *     leg deliberately does not reach there: the re-queue chokepoint writes no
+ *     stub body and posts no comment (issue #1692). So a re-queued stub carries
+ *     its old comment until the next round's verdict lands, on a stub whose
+ *     labels already read `sentry:needs-triage`.
  *
  * Security posture — the rendered fields are agent-authored text derived from
  * attacker-reachable Sentry payloads, and this repo is public:
  *   - Every free-form field goes through the SHARED selection+bound
  *     (`selectNeedsHumanBriefFields`, `MAX_BRIEF_TEXT_LEN`), then
  *     `neutralizeUntrusted` — control chars stripped, newlines collapsed,
- *     backticks defanged, `@` defanged, `<!--` broken — and finally this
- *     emitter's own surface escape, `escapeGithubMarkdown`. The escape is what
- *     makes the omission policy hold on the RENDERED surface too: the brief
- *     shows the verdict's fields and the pipeline's own controls, and nothing
- *     an agent wrote may render as a control of its own. Neutralization alone
- *     leaves `[text](url)`, `![img](url)`, raw HTML and entity references
- *     active, which is enough for agent text to put a clickable link beside the
- *     trusted `[View in Sentry]` one.
- *   - SINGLE-LINE by construction. That is load-bearing, not cosmetic: a
- *     surviving newline would let a field emit a body line of its own, and a
- *     line reading `permalink: https://<attacker>.sentry.io/...` ABOVE the
- *     metadata block would shadow the real one for `extractPermalink`, whose
- *     regex is multiline-anchored and first-match-wins.
- *   - No fenced code block is emitted anywhere in the brief. `extractYamlBlock`
- *     (and through it `parseArchiveBaseline`) takes the FIRST ```yaml fence in
- *     the body, so a fence above the metadata block would shadow the archive
- *     freshness baseline — the one field whose placement in the body IS the
- *     trust boundary (see sentry-triage-queue-contract.mjs). Backtick defanging
- *     already makes an agent-authored fence impossible; emitting none of our
- *     own keeps that true without depending on it.
+ *     backticks defanged, `@` defanged — and finally this emitter's own surface
+ *     escape, `escapeGithubMarkdown`. The escape is what makes agent text render
+ *     as text and never as a control of its own: neutralization alone leaves
+ *     `[text](url)`, `![img](url)`, raw HTML and entity references active, which
+ *     is enough for agent text to put a clickable link beside the trusted
+ *     `[View in Sentry]` one.
+ *   - SINGLE-LINE by construction, so a field cannot emit a line of its own.
+ *   - No fenced code block is emitted anywhere, so the comment cannot be parsed
+ *     as a verdict comment (`parseVerdictComment` needs a ```yaml fence).
  *   - Closed-set and shape-validated values only in the header: SHORT-ID
  *     (`isValidShortId`), confidence (closed enum), affected repo (bare
  *     `owner/name` slug or nothing), Sentry permalink (`extractPermalink`,
  *     https `*.sentry.io`).
- *   - `assertInertBlock` fails the write CLOSED if the assembled block would
- *     open with the verdict marker or reproduce a prefix-anchored control
- *     comment (regression reopen / projection pointer / autofix pointer) at the
- *     start of a line.
- *
- * THE BLOCK'S LIFECYCLE, in one place, because a rendering that outlives what it
- * renders is worse than no rendering: a stale "Decision needed" block is read as
- * current by whoever opens the issue. The block exists IFF a live needs-human
- * verdict describes the stub.
- *   - needs-human verdict -> render, replacing any previous block (idempotent,
- *     so a re-triage never stacks a second one).
- *   - ANY other verdict -> REMOVE the block. The workflow step is therefore
- *     ungated: gating it on needs-human is what let a brief survive a re-triage
- *     to code-fix / config-fix / upstream-transient permanently.
- *   - a re-queue would be the earliest moment to drop a fenced verdict's
- *     rendering, and this leg deliberately does not reach there: the re-queue
- *     chokepoint writes no stub body at all (issue #1692, pinned by a test in
- *     sentry-triage-requeue.test.mjs). So a re-queued stub carries its old block
- *     until the next round's verdict lands, on a stub whose labels already read
- *     `sentry:needs-triage`.
- *
- * THE WRITE IS NOT ALONE ON THIS BODY. The archive leg rewrites the same body to
- * record its freshness baseline, under a DIFFERENT concurrency group, so the two
- * can overlap on one stub — and `gh issue edit` replaces the WHOLE body, with no
- * conditional update to make the replace safe. Losing that baseline is silent
- * and it strands the archive contract (issue #1371), so:
- *   - THE BRIEF YIELDS. A stub carrying `sentry:approved-archive` or
- *     `sentry:archived` belongs to the archive leg, and this leg does not write
- *     to it at all (`archiveHoldsStub`, re-checked every round). The writer with
- *     nothing at stake gives way: an approved stub is on its way to closed, and
- *     the next triage round renders the block if it survives.
- *   - Inside the remaining window — an archive that starts after this leg's read
- *     and takes the stub's labels with it — the write still builds from a live
- *     read, refuses to move the baseline itself (`assertBaselineUnchanged`),
- *     re-reads afterwards, and restores a baseline it can see was lost.
- *   - The one interleaving a whole-body replace cannot detect from the body
- *     alone — the FIRST archive of a stub, where before and after both read as
- *     "no baseline" — is caught by the archive's own labels appearing on the
- *     post-write read, and fails the job RED. A value this leg never saw is not
- *     one it may invent.
+ *   - `assertInertBlock` fails the write CLOSED if the comment would open with
+ *     the verdict marker or reproduce a prefix-anchored control comment
+ *     (regression reopen / projection pointer / autofix pointer) at the start of
+ *     a line. That keeps the display-only brief comment inert to every
+ *     prefix-anchored pipeline consumer (`selectVerdictComment` and friends).
+ *   - The brief comment is DISPLAY-ONLY: no pipeline consumer parses it as a
+ *     contract, so its author identity is not a trust boundary. This leg selects
+ *     the comment to update/delete by the shared trusted-author + marker fence
+ *     (`isTrustedComment` + `BRIEF_COMMENT_MARKER`), so a drive-by commenter
+ *     cannot make it PATCH or DELETE their comment.
  */
 
 import { spawn } from "node:child_process";
@@ -100,6 +83,7 @@ import { AUTOFIX_COMMENT_PREFIX } from "./sentry-triage-digest.mjs";
 import {
   DEFAULT_REPO,
   extractPermalink,
+  isTrustedComment,
   isValidShortId,
   neutralizeUntrusted,
   parseShortId,
@@ -108,32 +92,15 @@ import {
   resolveVerdict,
   selectNeedsHumanBriefFields,
   VERDICT_MARKER,
+  verdictCommentIdFromUrl,
 } from "./sentry-triage-project-core.mjs";
-// The block's delimiters and its removal live in the queue contract, because the
-// re-queue chokepoint removes the block too and the two must agree byte for byte.
-import {
-  APPROVED_ARCHIVE_LABEL,
-  ARCHIVED_LABEL,
-  BRIEF_BLOCK_END,
-  BRIEF_BLOCK_START,
-  parseArchiveBaseline,
-  stripBriefFromBody,
-  withArchiveBaseline,
-} from "./sentry-triage-queue-contract.mjs";
 
-// The stub body's own first line, owned by the ingest (`BODY_MARKER` there).
-// The brief goes AFTER it and BEFORE the metadata yaml block: the marker stays
-// the body's first line, which is how every stub written since queue contract
-// v2 looks, and the yaml block keeps its position relative to the readers that
-// find it by fence rather than by offset.
-export const STUB_BODY_MARKER = "<!-- sentry-triage:v1 -->";
-
-export { BRIEF_BLOCK_END, BRIEF_BLOCK_START, stripBriefFromBody };
-
-// How many read -> write -> verify rounds the body write takes before it gives
-// up and fails the job. Two is enough for one interfering write; the third is
-// there so a repair round still gets a verification of its own.
-export const BRIEF_WRITE_ATTEMPTS = 3;
+// The brief comment's anchor. The selector matches a comment by trusted author
+// AND `startsWith(BRIEF_COMMENT_MARKER)` — the same fence the rolling run-record
+// writers use — so an untrusted commenter cannot plant the marker and have this
+// leg PATCH or DELETE their comment. Escaping already stops an agent-authored
+// field from reproducing these literal bytes.
+export const BRIEF_COMMENT_MARKER = "<!-- sentry-triage-brief:v1 -->";
 
 // Prefix-anchored control comments elsewhere in the pipeline. The brief must
 // never reproduce one at the start of a line — see `assertInertBlock`.
@@ -166,9 +133,9 @@ const GITHUB_MARKDOWN_ACTIVE = /[\\`*_[\]()<>&#+.!|~-]/g;
  * The GitHub emitter's surface escape — the counterpart of the Slack emitter's
  * `escapeSlackText`, applied on top of the shared bound + neutralization.
  *
- * Neutralization makes a field single-line and kills backticks, mentions and
- * comment openers; it does NOT stop the field from RENDERING. A question
- * carrying `[View in Sentry](https://evil.example)` or a step carrying
+ * Neutralization makes a field single-line and kills backticks and mentions; it
+ * does NOT stop the field from RENDERING. A question carrying
+ * `[View in Sentry](https://evil.example)` or a step carrying
  * `![ok](https://evil.example/x)` renders as a live link or image next to the
  * pipeline's own trusted controls, which is the whole spoof. After this, agent
  * text can only ever render as text.
@@ -190,23 +157,32 @@ function renderBullets(items) {
     .filter((l) => l !== "- ");
 }
 
+/** `- **<label>:** <item>` per list entry, so a collapsed evidence bullet says
+ * what kind of evidence it is without a nested list. */
+function labelledBullets(label, items) {
+  return items
+    .map((item) => renderField(item))
+    .filter(Boolean)
+    .map((item) => `- **${label}:** ${item}`);
+}
+
 /**
- * Render the decision-ready brief for ONE resolved needs-human verdict.
+ * Render the decision-ready brief comment for ONE resolved needs-human verdict.
  *
- * Fixed order, so the format cannot drift comment to comment: decision header
- * -> the question -> how to check -> what each answer leads to -> everything
- * else collapsed. Sections whose field the verdict did not carry are omitted
- * entirely rather than rendered empty; `human_question` is always present
- * because `resolveVerdict` rejects a needs-human verdict without one.
+ * Fixed order, so the format cannot drift comment to comment: marker -> decision
+ * header -> the question -> how to check -> what each answer leads to ->
+ * everything else collapsed. Sections whose field the verdict did not carry are
+ * omitted entirely rather than rendered empty; `human_question` is always
+ * present because `resolveVerdict` rejects a needs-human verdict without one.
  *
  * @param {object} args
  * @param {object} args.parsed  parsed verdict comment (parseVerdictComment)
  * @param {string} args.shortId Sentry SHORT-ID from the queue title
  * @param {string|null} args.permalink Sentry permalink from the stub body
  */
-export function renderBriefBlock({ parsed, shortId, permalink }) {
+export function renderBriefComment({ parsed, shortId, permalink }) {
   const fields = selectNeedsHumanBriefFields(parsed);
-  const lines = [BRIEF_BLOCK_START, ""];
+  const lines = [BRIEF_COMMENT_MARKER, ""];
 
   // Header: shape-validated / closed-enum values only, never free text.
   const headerParts = ["**Decision needed**"];
@@ -255,24 +231,13 @@ export function renderBriefBlock({ parsed, shortId, permalink }) {
   }
 
   lines.push(
-    "_Rendered from the verdict comment below by the Sentry triage pipeline; the machine-readable verdict YAML lives there. Edits here are overwritten on re-triage._",
-    "",
-    BRIEF_BLOCK_END,
+    "_Rendered by the Sentry triage pipeline from this issue's verdict comment; the machine-readable verdict YAML lives there. This comment is overwritten on re-triage and removed once the verdict is no longer needs-human._",
   );
   return lines.join("\n");
 }
 
-/** `- **<label>:** <item>` per list entry, so a collapsed evidence bullet says
- * what kind of evidence it is without a nested list. */
-function labelledBullets(label, items) {
-  return items
-    .map((item) => renderField(item))
-    .filter(Boolean)
-    .map((item) => `- **${label}:** ${item}`);
-}
-
 /**
- * Fail CLOSED if the assembled block could be misread by a prefix-anchored
+ * Fail CLOSED if the assembled comment could be misread by a prefix-anchored
  * consumer: it must not START with the verdict marker, and no line may START
  * with a control-comment prefix. Neither is reachable through a rendered field
  * today (every field is single-line and lands after our own literal prefix),
@@ -283,42 +248,19 @@ export function assertInertBlock(block) {
   const text = String(block ?? "");
   if (text.startsWith(VERDICT_MARKER)) {
     throw new Error(
-      "Refusing to write a brief block that starts with the verdict marker.",
+      "Refusing to write a brief comment that starts with the verdict marker.",
     );
   }
   for (const line of text.split("\n")) {
     for (const prefix of CONTROL_PREFIXES) {
       if (line.startsWith(prefix)) {
         throw new Error(
-          `Refusing to write a brief block whose line reproduces a pipeline control prefix: ${prefix.trim()}`,
+          `Refusing to write a brief comment whose line reproduces a pipeline control prefix: ${prefix.trim()}`,
         );
       }
     }
   }
   return text;
-}
-
-/**
- * Return `body` with `block` written above the metadata yaml, replacing any
- * previous brief block (idempotent across re-triage). Returns null when the
- * body carries an opener with no closer — a malformed block is a hard refusal,
- * not something to guess at.
- */
-export function applyBriefToBody(body, block) {
-  const source = String(body ?? "");
-  const start = source.indexOf(BRIEF_BLOCK_START);
-  if (start !== -1) {
-    const end = source.indexOf(BRIEF_BLOCK_END, start);
-    if (end === -1) return null;
-    return `${source.slice(0, start)}${block}${source.slice(end + BRIEF_BLOCK_END.length)}`;
-  }
-  if (source.startsWith(STUB_BODY_MARKER)) {
-    const rest = source.slice(STUB_BODY_MARKER.length).replace(/^\r?\n+/, "");
-    return `${STUB_BODY_MARKER}\n\n${block}\n\n${rest}`;
-  }
-  // No stub marker (hand-created or hand-edited stub): put the brief first
-  // rather than refusing — the decision still belongs above the fold.
-  return `${block}\n\n${source}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -360,49 +302,10 @@ function defaultRunGh(args, { stdin } = {}) {
   });
 }
 
-export function labelNames(labels) {
-  return (Array.isArray(labels) ? labels : [])
-    .map((label) => (typeof label === "string" ? label : label?.name))
-    .filter(Boolean);
-}
-
-/**
- * Is the archive leg holding this stub? `sentry:approved-archive` means a human
- * approved it and the archive workflow is triggered, queued or running;
- * `sentry:archived` means it already settled, and the stub is closed with its
- * freshness baseline live in the body. Either way this leg does not write.
- *
- * This is the coordination between the two body writers. They hold different
- * concurrency groups, `gh issue edit` replaces the whole body, and GitHub has
- * no conditional issue update — so the writer with nothing at stake yields.
- * Nothing is lost by yielding: an approved stub is on its way to closed, and
- * the next triage round renders the block if it survives.
- */
-export function archiveHoldsStub(labels) {
-  const names = labelNames(labels);
-  return (
-    names.includes(APPROVED_ARCHIVE_LABEL) || names.includes(ARCHIVED_LABEL)
-  );
-}
-
-/** Body + labels: the write loop re-reads once per round, and needs the labels
- * to see the archive leg. The comments are the largest part of a stub and the
- * verdict is resolved once, from the full read below, never re-resolved
- * mid-write. */
-async function readStubState(runGh, repo, number) {
-  const stdout = await runGh([
-    "issue",
-    "view",
-    String(number),
-    "-R",
-    repo,
-    "--json",
-    "body,labels",
-  ]);
-  const data = JSON.parse(stdout);
-  return { body: data.body ?? "", labels: labelNames(data.labels) };
-}
-
+/** Read the stub: title (short id), body (permalink) and comments (verdict
+ * resolution AND the brief comment this leg maintains). Labels are deliberately
+ * NOT read — this leg no longer observes them, because it no longer writes the
+ * body and so has nothing to coordinate with the archive leg over. */
 async function readQueueIssue(runGh, repo, number) {
   const stdout = await runGh([
     "issue",
@@ -411,11 +314,10 @@ async function readQueueIssue(runGh, repo, number) {
     "-R",
     repo,
     "--json",
-    "number,title,body,labels,comments",
+    "number,title,body,comments",
   ]);
   const data = JSON.parse(stdout);
   return {
-    labels: labelNames(data.labels),
     number: data.number,
     title: data.title ?? "",
     body: data.body ?? "",
@@ -423,166 +325,90 @@ async function readQueueIssue(runGh, repo, number) {
   };
 }
 
-/** Same baseline, field for field. A null on both sides counts as same: a stub
- * that has never been archived carries none, and that is not a loss. */
-function sameBaseline(a, b) {
-  if (!a && !b) return true;
-  if (!a || !b) return false;
-  return a.lastSeen === b.lastSeen && a.sentryIssueId === b.sentryIssueId;
-}
-
 /**
- * Fail CLOSED if THIS leg's own edit would move the archive freshness baseline.
- * Nothing in the render or the removal touches the yaml block, so a difference
- * means the body transform changed shape — and the field it would take with it
- * is the one whose placement in the body IS a trust boundary (issue #1371;
- * losing it silently reverts every later regression of that Sentry issue to the
- * `closedAt` comparison the baseline exists to replace).
+ * Every brief comment on the stub: trusted author AND anchored by
+ * `BRIEF_COMMENT_MARKER`, the same fence `selectMarkedComment` applies for the
+ * rolling run-records. Plural so removal can clear a duplicate a prior run or a
+ * marker-planting commenter left behind — a re-triaged stub must never keep a
+ * "Decision needed" comment, and never two.
  */
-export function assertBaselineUnchanged(previousBody, nextBody, issueNumber) {
-  const before = parseArchiveBaseline(previousBody);
-  const after = parseArchiveBaseline(nextBody);
-  if (!sameBaseline(before, after)) {
-    throw new Error(
-      `Refusing to write issue #${issueNumber}: the brief edit would change the archive freshness baseline (${
-        before ? before.lastSeen : "absent"
-      } -> ${after ? after.lastSeen : "absent"}).`,
-    );
-  }
-  return nextBody;
-}
-
-/**
- * Apply `mutate` to the stub body and make it STICK, against a concurrent
- * archive run rewriting the same body under a different concurrency group.
- *
- * Every round reads the body live and rebuilds from THAT, never from an earlier
- * snapshot — writing back a stale snapshot is precisely how one writer deletes
- * the other's edit. After the write it reads again and asks two questions:
- * is `mutate` now a fixed point on the live body (our edit is present and
- * current), and did the archive baseline survive? A lost baseline is restored
- * from the pre-write read before the next round, so an interleaving cannot cost
- * the body either mutation.
- *
- * `mutate` must be idempotent — both callers are (an applied block replaces
- * itself; a removed block stays removed) — because the fixed-point test is what
- * stands in for the compare-and-set GitHub does not offer on issue bodies.
- */
-async function settleStubBody({
-  runGh,
-  repo,
-  issueNumber,
-  first, // `{ body, labels }` from the read that resolved the verdict
-  mutate,
-  dryRun,
-  log,
-}) {
-  let live = first;
-  let wrote = false;
-  for (let attempt = 1; attempt <= BRIEF_WRITE_ATTEMPTS; attempt += 1) {
-    // YIELD, don't race. Checked every round, on a body read this loop takes
-    // anyway, so an approval that lands mid-loop still stops the next write.
-    if (archiveHoldsStub(live.labels)) {
-      log(
-        `::notice::Issue #${issueNumber} is held by the archive leg (${APPROVED_ARCHIVE_LABEL} / ${ARCHIVED_LABEL}); leaving its body alone so the freshness baseline cannot be replaced. The next triage round renders the brief if the stub is still open.`,
-      );
-      return { written: wrote, body: live.body, yielded: true };
-    }
-
-    const next = mutate(live.body);
-    if (next === null) {
-      throw new Error(
-        `Issue #${issueNumber} carries a brief opener with no closing delimiter; refusing to rewrite the body. Repair the body by hand and re-run.`,
-      );
-    }
-    if (next === live.body) return { written: wrote, body: next };
-    assertBaselineUnchanged(live.body, next, issueNumber);
-    if (dryRun) {
-      log(next);
-      return { written: false, body: next };
-    }
-
-    // `--body-file -` reads the body from stdin: the body carries untrusted
-    // agent prose and must never transit an argv slot or a shell.
-    await runGh(
-      ["issue", "edit", String(issueNumber), "-R", repo, "--body-file", "-"],
-      { stdin: next },
-    );
-    wrote = true;
-
-    const after = await readStubState(runGh, repo, issueNumber);
-    const stuck = mutate(after.body) === after.body;
-    const baselineBefore = parseArchiveBaseline(live.body);
-    const baselineAfter = parseArchiveBaseline(after.body);
-
-    // The archive started AND settled inside this write's window: the stub now
-    // shows the archive's labels, and the body this write left behind carries
-    // no baseline. When the pre-write read had one, restore it. When it did not
-    // — the first archive of this stub, the case a whole-body replace cannot
-    // detect from the body alone — the value is not ours to invent, so fail
-    // RED rather than leave the archive contract stranded on `closedAt`.
-    if (!baselineAfter && archiveHoldsStub(after.labels)) {
-      if (!baselineBefore) {
-        throw new Error(
-          `Issue #${issueNumber}: an archive run landed inside this brief write's window — the stub now carries the archive labels and its body has no freshness baseline, which this write replaced. Re-run the archive workflow for this stub so the baseline is recorded again.`,
-        );
-      }
-      const repaired = withArchiveBaseline(after.body, baselineBefore);
-      if (repaired === null) {
-        throw new Error(
-          `Issue #${issueNumber} lost its archive freshness baseline to a concurrent write and has no yaml block to restore it into; repair the body by hand.`,
-        );
-      }
-      log(
-        `::notice::Restoring the archive freshness baseline on issue #${issueNumber}; a concurrent body write dropped it (round ${attempt}).`,
-      );
-      await runGh(
-        ["issue", "edit", String(issueNumber), "-R", repo, "--body-file", "-"],
-        { stdin: repaired },
-      );
-      live = await readStubState(runGh, repo, issueNumber);
-      continue;
-    }
-
-    const lostBaseline = Boolean(baselineBefore) && !baselineAfter;
-    if (stuck && !lostBaseline) return { written: true, body: after.body };
-
-    if (lostBaseline) {
-      const repaired = withArchiveBaseline(after.body, baselineBefore);
-      if (repaired === null) {
-        throw new Error(
-          `Issue #${issueNumber} lost its archive freshness baseline to a concurrent write and has no yaml block to restore it into; repair the body by hand.`,
-        );
-      }
-      log(
-        `::notice::Restoring the archive freshness baseline on issue #${issueNumber}; a concurrent body write dropped it (round ${attempt}).`,
-      );
-      await runGh(
-        ["issue", "edit", String(issueNumber), "-R", repo, "--body-file", "-"],
-        { stdin: repaired },
-      );
-    }
-    live = await readStubState(runGh, repo, issueNumber);
-  }
-  throw new Error(
-    `Issue #${issueNumber}: the brief write did not settle after ${BRIEF_WRITE_ATTEMPTS} rounds — another writer keeps replacing the body. Re-run once the archive workflow for this stub has finished.`,
+export function findBriefComments(comments) {
+  return (Array.isArray(comments) ? comments : []).filter(
+    (comment) =>
+      typeof comment?.body === "string" &&
+      isTrustedComment(comment) &&
+      comment.body.startsWith(BRIEF_COMMENT_MARKER),
   );
 }
 
+/** The numeric REST id of a comment, parsed from its `url` (`gh`'s comment
+ * `.id` is an opaque GraphQL node id the REST edit/delete endpoints reject).
+ * Throws rather than guess: without it this leg cannot edit or delete. */
+function briefCommentId(comment) {
+  const id = verdictCommentIdFromUrl(comment?.url);
+  if (!id) {
+    throw new Error(
+      `Brief comment ${JSON.stringify(
+        comment?.url ?? null,
+      )} has no parseable numeric id; refusing to edit or delete it.`,
+    );
+  }
+  return id;
+}
+
+/** Create the brief comment. `--body-file -` reads the body from stdin: it
+ * carries untrusted agent prose and must never transit an argv slot or a
+ * shell. */
+function createBriefComment(runGh, repo, issueNumber, body) {
+  return runGh(
+    ["issue", "comment", String(issueNumber), "-R", repo, "--body-file", "-"],
+    { stdin: body },
+  );
+}
+
+/** Update the brief comment in place. The JSON request body goes on stdin via
+ * `--input -`, so the untrusted body never reaches argv. */
+function updateBriefComment(runGh, repo, commentId, body) {
+  return runGh(
+    [
+      "api",
+      "-X",
+      "PATCH",
+      `repos/${repo}/issues/comments/${commentId}`,
+      "--input",
+      "-",
+    ],
+    { stdin: JSON.stringify({ body }) },
+  );
+}
+
+/** Delete the brief comment. */
+function deleteBriefComment(runGh, repo, commentId) {
+  return runGh([
+    "api",
+    "-X",
+    "DELETE",
+    `repos/${repo}/issues/comments/${commentId}`,
+  ]);
+}
+
 /**
- * Read the stub, resolve its verdict, and drive the brief block to the state
- * that verdict implies: rendered for `needs-human`, REMOVED for every other
- * verdict. The removal arm is why the workflow step is ungated — a brief that
- * survives a re-triage to code-fix describes a decision nobody has to make any
- * more, and it sits at the top of the issue looking current.
+ * Read the stub, resolve its verdict, and drive the brief COMMENT to the state
+ * that verdict implies: present and current for `needs-human`, ABSENT for every
+ * other verdict. The removal arm is why the workflow step is ungated — a brief
+ * that survives a re-triage to code-fix describes a decision nobody has to make
+ * any more, and it sits on the issue looking current.
  *
- * Fails LOUD on a missing/stale/invalid verdict (via `resolveVerdict`), on a
- * malformed existing block, and on a write that cannot be made to stick. The
- * verdict job runs this after the label swap, inside the window where
- * `sentry:needs-triage` is already off, so its step catches a failure here and
- * re-queues the stub before failing — see the compensation in
- * .github/workflows/sentry-triage-agent.yml. Everything this leg does is
- * idempotent, so that retry costs nothing.
+ * The write touches only comments, never the stub body, so it cannot race the
+ * archive leg's baseline write (the single-writer invariant of PR #1766) and
+ * needs no label observation to stay clear of it.
+ *
+ * Fails LOUD on a missing/stale/invalid verdict (via `resolveVerdict`) and on a
+ * brief comment with no parseable id. The verdict job runs this after the label
+ * swap, inside the window where `sentry:needs-triage` is already off, so its
+ * step catches a failure here and re-queues the stub before failing — see the
+ * compensation in .github/workflows/sentry-triage-agent.yml. Everything this leg
+ * does is idempotent, so that retry costs nothing.
  */
 export async function runBrief({
   runGh = defaultRunGh,
@@ -593,44 +419,68 @@ export async function runBrief({
 } = {}) {
   const issue = await readQueueIssue(runGh, repo, issueNumber);
   const { parsed, verdict } = resolveVerdict(issue, issueNumber);
+  const existing = findBriefComments(issue.comments);
 
-  let mutate;
-  if (verdict === "needs-human") {
-    const block = assertInertBlock(
-      renderBriefBlock({
-        parsed,
-        shortId: parseShortId(issue.title),
-        permalink: extractPermalink(issue.body),
-      }),
+  if (verdict !== "needs-human") {
+    // The decision is gone — delete every brief comment, regardless of any
+    // label the stub carries. This is what a stub re-triaged away from
+    // needs-human while still holding a stale `sentry:approved-archive` needs:
+    // its brief is removed, so a later close can never show an obsolete one.
+    if (dryRun) {
+      if (existing.length) {
+        log(
+          `[dry-run] would delete ${existing.length} stale needs-human brief comment(s) from issue #${issueNumber} (verdict is ${verdict}).`,
+        );
+      }
+      return { written: false, verdict };
+    }
+    let written = false;
+    for (const comment of existing) {
+      await deleteBriefComment(runGh, repo, briefCommentId(comment));
+      written = true;
+    }
+    log(
+      written
+        ? `Removed the stale needs-human brief comment(s) from issue #${issueNumber} (verdict is ${verdict}).`
+        : `Issue #${issueNumber} carries no needs-human brief; nothing to remove (verdict is ${verdict}).`,
     );
-    mutate = (body) => applyBriefToBody(body, block);
-  } else {
-    mutate = stripBriefFromBody;
+    return { written, verdict };
   }
 
-  const { written, body, yielded } = await settleStubBody({
-    runGh,
-    repo,
-    issueNumber,
-    first: { body: issue.body, labels: issue.labels },
-    mutate,
-    dryRun,
-    log,
-  });
-  if (written) {
-    log(
-      verdict === "needs-human"
-        ? `Wrote the needs-human brief to issue #${issueNumber}.`
-        : `Removed the stale needs-human brief from issue #${issueNumber} (verdict is ${verdict}).`,
-    );
-  } else if (!dryRun && !yielded) {
-    // A yield already said why on its own line; do not follow it with a claim
-    // about the block's state that this run deliberately did not establish.
-    log(
-      `Issue #${issueNumber} already carries the brief its ${verdict} verdict implies; nothing to write.`,
-    );
+  const block = assertInertBlock(
+    renderBriefComment({
+      parsed,
+      shortId: parseShortId(issue.title),
+      permalink: extractPermalink(issue.body),
+    }),
+  );
+
+  if (dryRun) {
+    log(block);
+    return { written: false, verdict };
   }
-  return { written, verdict, body, yielded: Boolean(yielded) };
+
+  const [primary, ...duplicates] = existing;
+  let written = false;
+  if (!primary) {
+    await createBriefComment(runGh, repo, issueNumber, block);
+    written = true;
+  } else if (primary.body !== block) {
+    await updateBriefComment(runGh, repo, briefCommentId(primary), block);
+    written = true;
+  }
+  // Never leave two "Decision needed" comments on one stub.
+  for (const duplicate of duplicates) {
+    await deleteBriefComment(runGh, repo, briefCommentId(duplicate));
+    written = true;
+  }
+
+  log(
+    written
+      ? `Wrote the needs-human brief comment to issue #${issueNumber}.`
+      : `Issue #${issueNumber} already carries its current needs-human brief; nothing to write.`,
+  );
+  return { written, verdict };
 }
 
 // ---------------------------------------------------------------------------

@@ -738,22 +738,25 @@ jobs:
       # -----------------------------------------------------------------------
       # needs-human brief (#1748). A needs-human stub stays OPEN for a person,
       # and the thing that person needs is the decision, not the yaml. This
-      # deterministic, zero-LLM step renders the verdict's own brief fields into
-      # the stub BODY, above the metadata yaml, so opening the issue from a
-      # notification shows the question, how to check it and what each answer
-      # leads to without scrolling. It moves no machine-readable text: the
-      # verdict yaml stays in the verdict comment and the metadata yaml stays
-      # where it is, so every downstream parser reads exactly what it read
-      # before. Same untrusted-input discipline as the label step above — the
-      # script re-reads the stub from GitHub and resolves it through the single
-      # authoritative parser; the agent's text is data, neutralized, bounded and
-      # markdown-escaped at render.
+      # deterministic, zero-LLM step renders the verdict's own brief fields as a
+      # dedicated, updated-in-place COMMENT on the stub, so opening the issue
+      # from a notification shows the question, how to check it and what each
+      # answer leads to. It writes NO stub body — the archive leg is the single
+      # body writer (#1766), and a comment races nothing, so the brief can never
+      # drop the archive freshness baseline (the failure a body render risked
+      # through the archive's unlabeled settlement window, #1769). It moves no
+      # machine-readable text either: the verdict yaml stays in the verdict
+      # comment and the metadata yaml stays where it is. Same untrusted-input
+      # discipline as the label step above — the script re-reads the stub from
+      # GitHub and resolves it through the single authoritative parser; the
+      # agent's text is data, neutralized, bounded and markdown-escaped at
+      # render.
       #
-      # UNGATED on purpose. The script owns the whole lifecycle of the block:
-      # it renders on `needs-human` and REMOVES on every other verdict. Gating
-      # this step on `needs-human` — as it was — meant a stub re-triaged from
-      # needs-human to code-fix / config-fix / upstream-transient kept a
-      # "Decision needed" block at the top of its body forever, describing a
+      # UNGATED on purpose. The script owns the whole lifecycle of the comment:
+      # it renders on `needs-human` and DELETES on every other verdict,
+      # regardless of any label. Gating this step on `needs-human` — as it was —
+      # meant a stub re-triaged from needs-human to code-fix / config-fix /
+      # upstream-transient kept a "Decision needed" brief forever, describing a
       # decision nobody has to make. The verdict it reads is resolved by the
       # script itself, so the step needs no verdict input to decide.
       #

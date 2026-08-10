@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * Tests for the needs-human brief leg (issue #1748).
+ * Tests for the needs-human brief leg (issue #1748), a dedicated updated-in-place
+ * COMMENT on the queue stub (redesigned from a stub-body render in PR #1769).
  *
  * The properties that matter here are not "does it render nice markdown" —
  * they are the ones a refactor could quietly drop while the output still looks
@@ -8,17 +9,18 @@
  *
  *   - the decision leads and the justification is collapsed, in a FIXED order;
  *   - every rendered field is single-line, neutralized, bounded and escaped, so
- *     no field can emit a body line of its own, open a code fence, or RENDER as
- *     a link, image, tag or control comment beside the pipeline's own;
- *   - the stub still parses afterwards — permalink, archive baseline, yaml
- *     block, short id, verdict resolution — including under a field that tries
- *     to shadow one of them;
- *   - the block's lifecycle holds across verdict transitions: rendered on
- *     needs-human, replaced on re-triage, REMOVED on any other verdict;
- *   - the archive leg writes the same body under its own concurrency group, so
- *     this leg yields to it, never moves the freshness baseline itself, and
- *     fails red rather than losing one it cannot restore;
- *   - the block cannot be misread by a prefix-anchored consumer;
+ *     no field can emit a line of its own, open a code fence, or RENDER as a
+ *     link, image, tag or control comment beside the pipeline's own;
+ *   - the comment's lifecycle holds across verdict transitions: created on
+ *     needs-human, updated in place on re-triage to needs-human, DELETED on any
+ *     other verdict — regardless of any label the stub carries;
+ *   - the leg NEVER writes the stub body, so it cannot drop the archive
+ *     freshness baseline in any interleaving, including the archive's unlabeled
+ *     settlement window (finding 2 of the PR #1769 review);
+ *   - a stub re-triaged away from needs-human while still carrying a stale
+ *     `sentry:approved-archive` has its brief removed, not left for a later
+ *     close to bury (finding 1 of the PR #1769 review);
+ *   - the comment cannot be misread by a prefix-anchored consumer;
  *   - the verdict contract, the prompt and the pipeline doc agree about the two
  *     new fields, and the workflow actually invokes this leg.
  */
@@ -27,36 +29,26 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
-  applyBriefToBody,
-  assertBaselineUnchanged,
   assertInertBlock,
-  BRIEF_BLOCK_END,
-  BRIEF_BLOCK_START,
-  BRIEF_WRITE_ATTEMPTS,
+  BRIEF_COMMENT_MARKER,
   escapeGithubMarkdown,
+  findBriefComments,
   parseArgs,
-  renderBriefBlock,
+  renderBriefComment,
   runBrief,
-  STUB_BODY_MARKER,
-  stripBriefFromBody,
 } from "./sentry-triage-brief.mjs";
 import {
   extractPermalink,
-  extractYamlBlock,
   MAX_BRIEF_LIST_ITEMS,
   MAX_BRIEF_TEXT_LEN,
   parseShortId,
   parseVerdictComment,
   parseVerdictYaml,
   REGRESSION_PREFIX,
-  resolveVerdict,
   selectNeedsHumanBriefFields,
   VERDICT_MARKER,
 } from "./sentry-triage-project-core.mjs";
-import {
-  parseArchiveBaseline,
-  withArchiveBaseline,
-} from "./sentry-triage-queue-contract.mjs";
+import { parseArchiveBaseline } from "./sentry-triage-queue-contract.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -106,7 +98,7 @@ const PERMALINK = "https://mento-labs.sentry.io/issues/7651697505/";
 const TITLE = "[sentry] GOVERNANCE-MENTO-ORG-5G (governance-mento-org, error)";
 
 const STUB_BODY = [
-  STUB_BODY_MARKER,
+  "<!-- sentry-triage:v1 -->",
   "",
   "```yaml",
   'short_id: "GOVERNANCE-MENTO-ORG-5G"',
@@ -146,29 +138,114 @@ function verdictComment(yaml = VERDICT_YAML) {
   return [VERDICT_MARKER, "", "```yaml", yaml, "```", ""].join("\n");
 }
 
+function verdictCommentObject(
+  yaml = VERDICT_YAML,
+  createdAt = "2026-08-10T10:00:00Z",
+) {
+  return {
+    author: { login: "github-actions" },
+    createdAt,
+    body: verdictComment(yaml),
+  };
+}
+
 function stubIssue(yaml = VERDICT_YAML, body = STUB_BODY) {
   return {
     number: 1731,
     title: TITLE,
     body,
-    comments: [
-      {
-        author: { login: "github-actions" },
-        createdAt: "2026-08-10T10:00:00Z",
-        body: verdictComment(yaml),
-      },
-    ],
+    comments: [verdictCommentObject(yaml)],
+  };
+}
+
+/** A brief comment as `gh issue view --json comments` renders one: trusted
+ * author, and a `url` whose `#issuecomment-<n>` tail is the numeric REST id the
+ * edit/delete endpoints key on. */
+function briefCommentObject(
+  body,
+  id = 4242,
+  createdAt = "2026-08-10T11:00:00Z",
+) {
+  return {
+    author: { login: "github-actions" },
+    createdAt,
+    body,
+    url: `https://github.com/mento-protocol/monitoring-monorepo/issues/1731#issuecomment-${id}`,
   };
 }
 
 function renderFixture(yaml = VERDICT_YAML, body = STUB_BODY) {
   const parsed = parseVerdictComment(verdictComment(yaml));
-  return renderBriefBlock({
+  return renderBriefComment({
     parsed,
     shortId: parseShortId(TITLE),
     permalink: extractPermalink(body),
   });
 }
+
+/**
+ * A STATEFUL fake `gh`. `issue view` returns the live state; `issue comment
+ * --body-file -` appends a trusted-author comment carrying a fresh
+ * `#issuecomment-<n>` url; `api -X PATCH .../comments/<id>` edits that comment
+ * in place; `api -X DELETE .../comments/<id>` removes it. The stub BODY is never
+ * a write target — that is the invariant these tests exist to hold.
+ */
+function makeRunGh(issue, { nextCommentId = 9000 } = {}) {
+  const state = {
+    number: issue.number,
+    title: issue.title,
+    body: issue.body,
+    labels: issue.labels ?? [],
+    comments: (issue.comments ?? []).map((c) => ({ ...c })),
+  };
+  const calls = [];
+  let idSeq = nextCommentId;
+  const idOf = (path) => path.split("/").pop();
+  const matches = (comment, id) =>
+    String(comment.url ?? "").endsWith(`#issuecomment-${id}`);
+  return {
+    calls,
+    state,
+    runGh: async (args, opts) => {
+      calls.push({ args, stdin: opts?.stdin });
+      if (args[0] === "issue" && args[1] === "view") {
+        return JSON.stringify(state);
+      }
+      if (args[0] === "issue" && args[1] === "comment") {
+        idSeq += 1;
+        state.comments.push({
+          author: { login: "github-actions" },
+          createdAt: "2026-08-10T12:00:00Z",
+          body: opts?.stdin ?? "",
+          url: `https://github.com/mento-protocol/monitoring-monorepo/issues/${state.number}#issuecomment-${idSeq}`,
+        });
+        return "";
+      }
+      if (args[0] === "api" && args.includes("PATCH")) {
+        const id = idOf(args[args.indexOf("PATCH") + 1]);
+        const body = JSON.parse(opts?.stdin ?? "{}").body ?? "";
+        const target = state.comments.find((c) => matches(c, id));
+        if (target) target.body = body;
+        return "";
+      }
+      if (args[0] === "api" && args.includes("DELETE")) {
+        const id = idOf(args[args.indexOf("DELETE") + 1]);
+        state.comments = state.comments.filter((c) => !matches(c, id));
+        return "";
+      }
+      return "";
+    },
+  };
+}
+
+const wroteBody = (gh) =>
+  gh.calls.some((c) => c.args[0] === "issue" && c.args[1] === "edit");
+const created = (gh) =>
+  gh.calls.filter((c) => c.args[0] === "issue" && c.args[1] === "comment");
+const patched = (gh) =>
+  gh.calls.filter((c) => c.args[0] === "api" && c.args.includes("PATCH"));
+const deleted = (gh) =>
+  gh.calls.filter((c) => c.args[0] === "api" && c.args.includes("DELETE"));
 
 // ---------------------------------------------------------------------------
 // Contract: the two new verdict fields.
@@ -265,6 +342,7 @@ await test("the decision leads and the justification is collapsed", () => {
     block.includes("`mento-protocol/frontend-monorepo`"),
     "expected the owning repo on the how-to-check line",
   );
+  assert(block.startsWith(BRIEF_COMMENT_MARKER), "expected the marker first");
 });
 
 await test("sections whose field is absent are omitted, not rendered empty", () => {
@@ -340,20 +418,17 @@ await test("a hostile verdict renders no active markdown, html or entity", () =>
     "expected no markdown link/image target syntax from a field",
   );
   assert(!/!\[/.test(fields), "expected no image syntax below the header");
-  // The text stays legible for the human reading the brief — every escape is a
-  // backslash GitHub renders away — but it is text, not a target.
   assert(
     fields.includes("\\[View in Sentry\\]\\(https://evil\\.example/phish\\)"),
     `expected the hostile link escaped in place, got: ${fields.slice(0, 200)}`,
   );
 
-  // Raw HTML and autolinks: the renderer's own two lines are the only place an
+  // Raw HTML and autolinks: the renderer's own lines are the only place an
   // angle bracket is allowed to be live.
   const rendererHtml = new Set([
     "<details><summary>Evidence and context</summary>",
     "</details>",
-    BRIEF_BLOCK_START,
-    BRIEF_BLOCK_END,
+    BRIEF_COMMENT_MARKER,
   ]);
   const liveAngles = fields
     .split("\n")
@@ -365,12 +440,11 @@ await test("a hostile verdict renders no active markdown, html or entity", () =>
   // every character escaped above.
   assert(!/&#\d/.test(block), "expected entity references escaped");
 
-  // Control comments: the only `<!--` sequences in the block are its own two
-  // delimiters, and no line reproduces a prefix-anchored control comment.
-  assertEqual(block.split("<!--").length - 1, 2);
+  // Control comments: the only `<!--` sequence in the comment is its own marker.
+  assertEqual(block.split("<!--").length - 1, 1);
   assert(
-    block.startsWith(BRIEF_BLOCK_START) && block.endsWith(BRIEF_BLOCK_END),
-    "expected the two delimiters to be those two comments",
+    block.startsWith(BRIEF_COMMENT_MARKER),
+    "expected the marker to be that one comment",
   );
   for (const line of block.split("\n")) {
     for (const prefix of [VERDICT_MARKER, REGRESSION_PREFIX]) {
@@ -406,7 +480,7 @@ await test("the escape leaves plain prose readable and is applied per field", ()
   assertEqual(escapeGithubMarkdown("\\[x](y)"), "\\\\\\[x\\]\\(y\\)");
 });
 
-await test("assertInertBlock refuses a block a prefix-anchored consumer could misread", () => {
+await test("assertInertBlock refuses a comment a prefix-anchored consumer could misread", () => {
   assertInertBlock(renderFixture());
   let threw = false;
   try {
@@ -419,7 +493,7 @@ await test("assertInertBlock refuses a block a prefix-anchored consumer could mi
   threw = false;
   try {
     assertInertBlock(
-      `${BRIEF_BLOCK_START}\nProjected to owning repo: https://example.test\n${BRIEF_BLOCK_END}`,
+      `${BRIEF_COMMENT_MARKER}\nProjected to owning repo: https://example.test`,
     );
   } catch {
     threw = true;
@@ -428,120 +502,10 @@ await test("assertInertBlock refuses a block a prefix-anchored consumer could mi
 });
 
 // ---------------------------------------------------------------------------
-// Body write: placement, idempotency, and the parsers that must survive it.
+// runBrief: the comment write path.
 // ---------------------------------------------------------------------------
 
-await test("the brief lands above the metadata yaml, under the stub marker", () => {
-  const body = applyBriefToBody(STUB_BODY, renderFixture());
-  assert(body.startsWith(STUB_BODY_MARKER), "expected the stub marker first");
-  assert(
-    body.indexOf(BRIEF_BLOCK_START) < body.indexOf("```yaml"),
-    "expected the brief above the metadata yaml",
-  );
-});
-
-await test("re-triage replaces the block instead of stacking a second one", () => {
-  const once = applyBriefToBody(STUB_BODY, renderFixture());
-  const twice = applyBriefToBody(once, renderFixture());
-  assertEqual(twice, once);
-  const rewritten = applyBriefToBody(
-    once,
-    renderFixture(
-      [
-        "verdict: needs-human",
-        "confidence: high",
-        "human_question: A different decision entirely.",
-      ].join("\n"),
-    ),
-  );
-  assertEqual(rewritten.split(BRIEF_BLOCK_START).length - 1, 1);
-  assert(
-    rewritten.includes("A different decision entirely"),
-    "expected the new question",
-  );
-  assert(
-    !rewritten.includes("Confirm whether the app references"),
-    "expected the old question gone",
-  );
-});
-
-await test("an opener with no closer is a refusal, not a guess", () => {
-  const broken = `${STUB_BODY_MARKER}\n\n${BRIEF_BLOCK_START}\nhalf a block\n\n${STUB_BODY}`;
-  assertEqual(applyBriefToBody(broken, renderFixture()), null);
-});
-
-await test("a stub without the marker still gets the brief above the fold", () => {
-  const body = applyBriefToBody("hand written stub\n", renderFixture());
-  assert(body.startsWith(BRIEF_BLOCK_START), "expected the brief first");
-  assert(body.includes("hand written stub"), "expected the body preserved");
-});
-
-await test("every stub-body parser still reads the same values after the write", () => {
-  const body = applyBriefToBody(STUB_BODY, renderFixture());
-  assertEqual(extractPermalink(body), PERMALINK);
-  assertEqual(parseArchiveBaseline(body).lastSeen, "2026-08-04T12:29:24Z");
-  assertEqual(parseArchiveBaseline(body).sentryIssueId, "7651697505");
-  assert(
-    extractYamlBlock(body).includes('short_id: "GOVERNANCE-MENTO-ORG-5G"'),
-    "expected the metadata block to stay the first yaml fence",
-  );
-  assertEqual(parseShortId(TITLE), "GOVERNANCE-MENTO-ORG-5G");
-  assertEqual(
-    resolveVerdict({ ...stubIssue(), body }, 1731).verdict,
-    "needs-human",
-  );
-});
-
-await test("a field cannot shadow the permalink or the archive baseline", () => {
-  const hostile = [
-    "verdict: needs-human",
-    "confidence: low",
-    "human_question: |",
-    "  Decide now",
-    '  permalink: "https://evil.sentry.io/issues/1/"',
-    '  archive_baseline_last_seen: "2099-01-01T00:00:00Z"',
-  ].join("\n");
-  const body = applyBriefToBody(STUB_BODY, renderFixture(hostile));
-  assertEqual(extractPermalink(body), PERMALINK);
-  assertEqual(parseArchiveBaseline(body).lastSeen, "2026-08-04T12:29:24Z");
-});
-
-// ---------------------------------------------------------------------------
-// runBrief.
-// ---------------------------------------------------------------------------
-
-/**
- * A STATEFUL fake: `issue edit --body-file -` really replaces the body, so the
- * write path's post-write verification read observes what it wrote. `interfere`
- * is the other body writer — it runs after an edit lands and returns the body a
- * concurrent archive run would have left behind.
- */
-function makeRunGh(issue, { interfere = null } = {}) {
-  const state = { labels: [], ...issue };
-  const calls = [];
-  let edits = 0;
-  return {
-    calls,
-    state,
-    editCount: () => edits,
-    runGh: async (args, opts) => {
-      calls.push({ args, stdin: opts?.stdin });
-      if (args[1] === "view") return JSON.stringify(state);
-      if (args[1] === "edit" && args.includes("--body-file")) {
-        edits += 1;
-        state.body = opts?.stdin ?? "";
-        // The other writer, landing between this write and its verification.
-        // Returning a string replaces the body; mutating `state.labels` is how
-        // a test makes the archive leg's labels appear mid-window.
-        const meddled = interfere?.(state.body, edits, state);
-        if (typeof meddled === "string") state.body = meddled;
-      }
-      return "";
-    },
-  };
-}
-
-await test("runBrief writes the rendered body through --body-file -", async () => {
+await test("runBrief creates the brief comment through --body-file -, never argv", async () => {
   const gh = makeRunGh(stubIssue());
   const result = await runBrief({
     runGh: gh.runGh,
@@ -550,14 +514,65 @@ await test("runBrief writes the rendered body through --body-file -", async () =
     log: () => {},
   });
   assertEqual(result.written, true);
-  const edit = gh.calls.find((call) => call.args[1] === "edit");
-  assert(edit, "expected an issue edit");
-  assertEqual(edit.args.includes("--body-file"), true);
-  assertEqual(edit.args[edit.args.indexOf("--body-file") + 1], "-");
+  const create = created(gh)[0];
+  assert(create, "expected an issue comment create");
+  assertEqual(create.args.includes("--body-file"), true);
+  assertEqual(create.args[create.args.indexOf("--body-file") + 1], "-");
   assert(
-    edit.stdin.includes(BRIEF_BLOCK_START),
+    create.stdin.includes(BRIEF_COMMENT_MARKER),
     "expected the brief on stdin, never in argv",
   );
+  // The stub body is never a write target.
+  assertEqual(wroteBody(gh), false);
+  assertEqual(findBriefComments(gh.state.comments).length, 1);
+});
+
+await test("a second needs-human round updates the comment in place via PATCH", async () => {
+  const yaml = [
+    "verdict: needs-human",
+    "confidence: high",
+    "human_question: A second round asks something else",
+  ].join("\n");
+  const gh = makeRunGh({
+    ...stubIssue(yaml),
+    comments: [
+      briefCommentObject(renderFixture(), 6001),
+      verdictCommentObject(yaml, "2026-08-12T10:00:00Z"),
+    ],
+  });
+  const result = await runBrief({
+    runGh: gh.runGh,
+    issueNumber: 1731,
+    log: () => {},
+  });
+  assertEqual(result.written, true);
+  assertEqual(patched(gh).length, 1);
+  assertEqual(created(gh).length, 0);
+  const briefs = findBriefComments(gh.state.comments);
+  assertEqual(briefs.length, 1);
+  assert(
+    briefs[0].body.includes("A second round asks something else"),
+    "expected the comment updated to the new question",
+  );
+});
+
+await test("runBrief writes nothing when the brief comment is already current", async () => {
+  const gh = makeRunGh({
+    ...stubIssue(),
+    comments: [
+      briefCommentObject(renderFixture(), 7001),
+      verdictCommentObject(),
+    ],
+  });
+  const result = await runBrief({
+    runGh: gh.runGh,
+    issueNumber: 1731,
+    log: () => {},
+  });
+  assertEqual(result.written, false);
+  assertEqual(patched(gh).length, 0);
+  assertEqual(created(gh).length, 0);
+  assertEqual(deleted(gh).length, 0);
 });
 
 await test("runBrief writes nothing when a non-needs-human stub has no brief", async () => {
@@ -572,22 +587,7 @@ await test("runBrief writes nothing when a non-needs-human stub has no brief", a
   assertEqual(result.written, false);
   assertEqual(result.verdict, "code-fix");
   assertEqual(
-    gh.calls.some((call) => call.args[1] === "edit"),
-    false,
-  );
-});
-
-await test("runBrief writes nothing when the brief is already current", async () => {
-  const current = applyBriefToBody(STUB_BODY, renderFixture());
-  const gh = makeRunGh(stubIssue(VERDICT_YAML, current));
-  const result = await runBrief({
-    runGh: gh.runGh,
-    issueNumber: 1731,
-    log: () => {},
-  });
-  assertEqual(result.written, false);
-  assertEqual(
-    gh.calls.some((call) => call.args[1] === "edit"),
+    gh.calls.some((c) => !(c.args[0] === "issue" && c.args[1] === "view")),
     false,
   );
 });
@@ -602,7 +602,7 @@ await test("runBrief writes nothing on --dry-run", async () => {
   });
   assertEqual(result.written, false);
   assertEqual(
-    gh.calls.some((call) => call.args[1] === "edit"),
+    gh.calls.some((c) => !(c.args[0] === "issue" && c.args[1] === "view")),
     false,
   );
 });
@@ -613,203 +613,6 @@ await test("runBrief fails loud on a missing verdict", async () => {
     runBrief({ runGh: gh.runGh, issueNumber: 1731, log: () => {} }),
     /No usable verdict comment/,
   );
-});
-
-// ---------------------------------------------------------------------------
-// The block's lifecycle: it exists IFF a live needs-human verdict describes the
-// stub. These are the tests the gated-on-needs-human version could not pass.
-// ---------------------------------------------------------------------------
-
-await test("removing the block restores the pre-brief body byte for byte", () => {
-  assertEqual(
-    stripBriefFromBody(applyBriefToBody(STUB_BODY, renderFixture())),
-    STUB_BODY,
-  );
-  const handWritten = "hand written stub\n";
-  assertEqual(
-    stripBriefFromBody(applyBriefToBody(handWritten, renderFixture())),
-    handWritten,
-  );
-  // A body with no block is left alone; an opener with no closer is a refusal.
-  assertEqual(stripBriefFromBody(STUB_BODY), STUB_BODY);
-  assertEqual(
-    stripBriefFromBody(`${STUB_BODY_MARKER}\n\n${BRIEF_BLOCK_START}\nhalf\n`),
-    null,
-  );
-});
-
-await test("a re-triage away from needs-human removes the stale brief", async () => {
-  const briefed = applyBriefToBody(STUB_BODY, renderFixture());
-  const gh = makeRunGh(
-    stubIssue("verdict: code-fix\nconfidence: high\nsummary: x", briefed),
-  );
-  const result = await runBrief({
-    runGh: gh.runGh,
-    issueNumber: 1731,
-    log: () => {},
-  });
-  assertEqual(result.written, true);
-  assertEqual(result.verdict, "code-fix");
-  assertEqual(gh.state.body, STUB_BODY);
-  assert(
-    !gh.state.body.includes("Decision needed"),
-    "expected no decision block on a code-fix stub",
-  );
-  // The stub still parses exactly as it did before the brief ever landed.
-  assertEqual(extractPermalink(gh.state.body), PERMALINK);
-  assertEqual(
-    parseArchiveBaseline(gh.state.body).lastSeen,
-    "2026-08-04T12:29:24Z",
-  );
-});
-
-await test("the block survives one full verdict transition cycle", async () => {
-  // needs-human -> re-triage to needs-human -> re-triage to upstream-transient.
-  const gh = makeRunGh(stubIssue());
-  await runBrief({ runGh: gh.runGh, issueNumber: 1731, log: () => {} });
-  assertEqual(gh.state.body.split(BRIEF_BLOCK_START).length - 1, 1);
-
-  gh.state.comments = [
-    {
-      author: { login: "github-actions" },
-      createdAt: "2026-08-11T10:00:00Z",
-      body: verdictComment(
-        [
-          "verdict: needs-human",
-          "confidence: high",
-          "human_question: A second round asks something else",
-        ].join("\n"),
-      ),
-    },
-  ];
-  await runBrief({ runGh: gh.runGh, issueNumber: 1731, log: () => {} });
-  assertEqual(gh.state.body.split(BRIEF_BLOCK_START).length - 1, 1);
-  assert(
-    gh.state.body.includes("A second round asks something else"),
-    "expected the block replaced, not stacked",
-  );
-
-  gh.state.comments = [
-    {
-      author: { login: "github-actions" },
-      createdAt: "2026-08-12T10:00:00Z",
-      body: verdictComment("verdict: upstream-transient\nconfidence: high"),
-    },
-  ];
-  await runBrief({ runGh: gh.runGh, issueNumber: 1731, log: () => {} });
-  assertEqual(gh.state.body, STUB_BODY);
-});
-
-// ---------------------------------------------------------------------------
-// The other writer: the archive leg rewrites this same body under a different
-// concurrency group.
-// ---------------------------------------------------------------------------
-
-await test("the write refuses to move the archive freshness baseline itself", () => {
-  const stripped = withArchiveBaseline(STUB_BODY, null);
-  let threw = false;
-  try {
-    assertBaselineUnchanged(STUB_BODY, stripped, 1731);
-  } catch {
-    threw = true;
-  }
-  assert(threw, "expected a refusal when the edit would drop the baseline");
-  assertEqual(
-    assertBaselineUnchanged(STUB_BODY, applyBriefToBody(STUB_BODY, "X"), 1731)
-      .length > 0,
-    true,
-  );
-});
-
-await test("a concurrent writer that drops the brief is retried, not accepted", async () => {
-  // The archive leg replaces the whole body from its own read, which can land
-  // after this write and erase the block.
-  const gh = makeRunGh(stubIssue(), {
-    interfere: (_body, edits) => (edits === 1 ? STUB_BODY : null),
-  });
-  const result = await runBrief({
-    runGh: gh.runGh,
-    issueNumber: 1731,
-    log: () => {},
-  });
-  assertEqual(result.written, true);
-  assertEqual(gh.editCount(), 2);
-  assertEqual(gh.state.body.split(BRIEF_BLOCK_START).length - 1, 1);
-});
-
-await test("a baseline lost inside the write window is restored, not left gone", async () => {
-  // The opposite interleaving: the archive wrote its baseline between this
-  // leg's read and its write, so this write replaced a body that had it.
-  const gh = makeRunGh(stubIssue(), {
-    interfere: (body, edits) =>
-      edits === 1 ? withArchiveBaseline(body, null) : null,
-  });
-  const result = await runBrief({
-    runGh: gh.runGh,
-    issueNumber: 1731,
-    log: () => {},
-  });
-  assertEqual(result.written, true);
-  const baseline = parseArchiveBaseline(gh.state.body);
-  assert(baseline, "expected the baseline restored");
-  assertEqual(baseline.lastSeen, "2026-08-04T12:29:24Z");
-  assertEqual(baseline.sentryIssueId, "7651697505");
-  assertEqual(gh.state.body.split(BRIEF_BLOCK_START).length - 1, 1);
-});
-
-await test("an archive holding the stub makes this leg yield, not race", async () => {
-  // The interleaving the whole-body replace cannot survive: the archive leg
-  // writes the freshness baseline into this same body under its own
-  // concurrency group. So when the stub carries the archive's labels, this leg
-  // writes nothing at all and the baseline is never at risk.
-  for (const held of ["sentry:approved-archive", "sentry:archived"]) {
-    const gh = makeRunGh({ ...stubIssue(), labels: [{ name: held }] });
-    const result = await runBrief({
-      runGh: gh.runGh,
-      issueNumber: 1731,
-      log: () => {},
-    });
-    assertEqual(result.written, false);
-    assertEqual(result.yielded, true);
-    assertEqual(gh.editCount(), 0);
-    assertEqual(gh.state.body, STUB_BODY);
-    assertEqual(
-      parseArchiveBaseline(gh.state.body).lastSeen,
-      "2026-08-04T12:29:24Z",
-    );
-  }
-});
-
-await test("a first archive landing inside the write window fails RED", async () => {
-  // The one ordering a body-only comparison cannot see: the stub had NO
-  // baseline when this leg read it, the archive wrote and verified its first
-  // one inside the window, and this write replaced it. Before and after both
-  // read as "no baseline", so the archive's own labels are the evidence — and
-  // a value this leg never saw is not one it may invent.
-  const noBaseline = withArchiveBaseline(STUB_BODY, null);
-  const gh = makeRunGh(
-    { ...stubIssue(VERDICT_YAML, noBaseline), labels: [] },
-    {
-      interfere: (_body, edits, state) => {
-        if (edits === 1) state.labels = [{ name: "sentry:archived" }];
-        return null;
-      },
-    },
-  );
-  await assertRejects(
-    runBrief({ runGh: gh.runGh, issueNumber: 1731, log: () => {} }),
-    /an archive run landed inside this brief write's window/,
-  );
-  assertEqual(gh.editCount(), 1);
-});
-
-await test("a writer that never lets go fails the job loudly", async () => {
-  const gh = makeRunGh(stubIssue(), { interfere: () => STUB_BODY });
-  await assertRejects(
-    runBrief({ runGh: gh.runGh, issueNumber: 1731, log: () => {} }),
-    /did not settle after 3 rounds/,
-  );
-  assertEqual(gh.editCount(), BRIEF_WRITE_ATTEMPTS);
 });
 
 await test("parseArgs requires a numeric issue and rejects unknown flags", () => {
@@ -827,8 +630,150 @@ await test("parseArgs requires a numeric issue and rejects unknown flags", () =>
 });
 
 // ---------------------------------------------------------------------------
-// Wiring: prompt, doc, workflow. The renderer is only useful if the agent is
-// asked for the fields and the workflow runs the leg.
+// The comment's lifecycle: it exists IFF a live needs-human verdict describes
+// the stub. These are the tests the gated-on-needs-human version could not pass.
+// ---------------------------------------------------------------------------
+
+await test("a re-triage away from needs-human deletes the brief comment", async () => {
+  const gh = makeRunGh({
+    ...stubIssue("verdict: code-fix\nconfidence: high\nsummary: x"),
+    comments: [
+      briefCommentObject(renderFixture(), 8001),
+      verdictCommentObject(
+        "verdict: code-fix\nconfidence: high\nsummary: x",
+        "2026-08-11T10:00:00Z",
+      ),
+    ],
+  });
+  const result = await runBrief({
+    runGh: gh.runGh,
+    issueNumber: 1731,
+    log: () => {},
+  });
+  assertEqual(result.written, true);
+  assertEqual(result.verdict, "code-fix");
+  assertEqual(deleted(gh).length, 1);
+  assertEqual(findBriefComments(gh.state.comments).length, 0);
+  assertEqual(wroteBody(gh), false);
+  // The stub body and its archive baseline are untouched.
+  assertEqual(gh.state.body, STUB_BODY);
+});
+
+// FINDING 1 (comment 3753275021): approval label alone must NOT suppress the
+// required stale-brief removal.
+await test("a re-triage deletes the brief even under a stale sentry:approved-archive (finding 1)", async () => {
+  const gh = makeRunGh({
+    ...stubIssue("verdict: code-fix\nconfidence: high\nsummary: x"),
+    // The stub still carries a human archive approval from the previous round.
+    // The old body version YIELDED on this label and left the stale brief for a
+    // later close to bury; the comment version removes it regardless of labels.
+    labels: [{ name: "sentry:approved-archive" }],
+    comments: [
+      briefCommentObject(renderFixture(), 8101),
+      verdictCommentObject(
+        "verdict: code-fix\nconfidence: high\nsummary: x",
+        "2026-08-11T10:00:00Z",
+      ),
+    ],
+  });
+  const result = await runBrief({
+    runGh: gh.runGh,
+    issueNumber: 1731,
+    log: () => {},
+  });
+  assertEqual(result.written, true);
+  // The brief was DELETED, not yielded on — no yield path exists any more.
+  assertEqual(deleted(gh).length, 1);
+  assertEqual(findBriefComments(gh.state.comments).length, 0);
+  // And the body — the archive's surface — was never touched.
+  assertEqual(wroteBody(gh), false);
+  assertEqual(gh.state.body, STUB_BODY);
+});
+
+await test("the comment survives one full verdict transition cycle", async () => {
+  const gh = makeRunGh(stubIssue());
+  await runBrief({ runGh: gh.runGh, issueNumber: 1731, log: () => {} });
+  assertEqual(findBriefComments(gh.state.comments).length, 1);
+
+  // Re-triage to a fresh needs-human: updated in place, still exactly one.
+  gh.state.comments.push(
+    verdictCommentObject(
+      [
+        "verdict: needs-human",
+        "confidence: high",
+        "human_question: A second round asks something else",
+      ].join("\n"),
+      "2026-08-11T10:00:00Z",
+    ),
+  );
+  await runBrief({ runGh: gh.runGh, issueNumber: 1731, log: () => {} });
+  const briefs = findBriefComments(gh.state.comments);
+  assertEqual(briefs.length, 1);
+  assert(
+    briefs[0].body.includes("A second round asks something else"),
+    "expected the comment updated, not stacked",
+  );
+
+  // Re-triage to a non-needs-human verdict: the comment is gone.
+  gh.state.comments.push(
+    verdictCommentObject(
+      "verdict: upstream-transient\nconfidence: high",
+      "2026-08-12T10:00:00Z",
+    ),
+  );
+  await runBrief({ runGh: gh.runGh, issueNumber: 1731, log: () => {} });
+  assertEqual(findBriefComments(gh.state.comments).length, 0);
+});
+
+await test("a duplicate brief comment is reduced to one, then cleared on removal", async () => {
+  const gh = makeRunGh({
+    ...stubIssue(),
+    comments: [
+      briefCommentObject(renderFixture(), 8201),
+      briefCommentObject(renderFixture(), 8202),
+      verdictCommentObject(),
+    ],
+  });
+  await runBrief({ runGh: gh.runGh, issueNumber: 1731, log: () => {} });
+  assertEqual(findBriefComments(gh.state.comments).length, 1);
+  assertEqual(deleted(gh).length, 1);
+});
+
+// ---------------------------------------------------------------------------
+// The other writer: the archive leg rewrites the stub BODY under a different
+// concurrency group. This leg touches only comments, so it can never race it.
+// ---------------------------------------------------------------------------
+
+// FINDING 2 (comment 3753275028): the archive's settlement window is unlabeled
+// (approval deleted before the baseline write, `sentry:archived` added only
+// after the close), so a body writer could clobber the baseline in a window no
+// label check sees. A comment writer never touches the body, so there is no
+// window to serialize.
+await test("the brief never writes the body, so a baseline in the archive's unlabeled window is safe (finding 2)", async () => {
+  const gh = makeRunGh({
+    ...stubIssue(), // needs-human; STUB_BODY already carries the archive baseline
+    labels: [], // the unlabeled settlement window: neither approved-archive nor archived
+  });
+  const result = await runBrief({
+    runGh: gh.runGh,
+    issueNumber: 1731,
+    log: () => {},
+  });
+  assertEqual(result.written, true);
+  // The body is byte-for-byte unchanged and still carries the archive baseline.
+  assertEqual(gh.state.body, STUB_BODY);
+  assertEqual(
+    parseArchiveBaseline(gh.state.body).lastSeen,
+    "2026-08-04T12:29:24Z",
+  );
+  assertEqual(parseArchiveBaseline(gh.state.body).sentryIssueId, "7651697505");
+  // Structurally: the leg issued ZERO stub-body writes, whatever the labels say.
+  assertEqual(wroteBody(gh), false);
+  assertEqual(findBriefComments(gh.state.comments).length, 1);
+});
+
+// ---------------------------------------------------------------------------
+// Wiring: prompt, doc, workflow, and the single-body-writer invariant.
 // ---------------------------------------------------------------------------
 
 function readRepoFile(relative) {
@@ -875,11 +820,6 @@ await test("the verdict job runs the brief leg on EVERY verdict", () => {
 });
 
 await test("a failing brief step re-queues the stub instead of stranding it", () => {
-  // Ungating put this step inside the window the verdict step opens by taking
-  // sentry:needs-triage off (#1764). Nothing downstream re-queues an open,
-  // verdict-labeled stub — the close step never runs, the project job skips
-  // it, the scheduled selector requires the label — so this step's failure
-  // path owes the same compensation, over the same closed enums.
   const workflow = readRepoFile(".github/workflows/sentry-triage-agent.yml");
   const step = workflow.slice(
     workflow.indexOf("- name: Render or clear the needs-human brief"),
@@ -892,16 +832,10 @@ await test("a failing brief step re-queues the stub instead of stranding it", ()
     ) && step.includes('--add-label "sentry:needs-triage"'),
     "expected the same re-queue edit the verdict post-condition makes",
   );
-  // A re-queue must not carry a human's archive approval into the next round:
-  // the archive workflow's dispatch path takes approval + any verdict label as
-  // its whole precondition. Same rule REOPEN_SHED_LABELS states for every other
-  // re-queue producer.
   assert(
     step.includes("sentry:approved-archive"),
     "expected the stale archive approval shed with the rest",
   );
-  // The enums come from the verdict step rather than a second literal copy of
-  // the verdict namespace.
   assert(
     step.includes("VERDICT_SHED: ${{ steps.verdict.outputs.shed }}") &&
       workflow.includes('echo "shed=${shed}"'),
@@ -919,16 +853,35 @@ await test("a failing brief step re-queues the stub instead of stranding it", ()
   });
 });
 
+await test("the brief leg is not a stub-body writer, and owns its marker alone", () => {
+  // The stub body has exactly ONE authorized writer (the trust boundary in
+  // sentry-triage-queue-contract.mjs): the archive leg's baseline write. The
+  // brief renders a COMMENT, so no other script carries its marker or the old
+  // body-strip helper, and the leg itself never runs `gh issue edit`.
+  const scriptsDir = join(repoRoot, "scripts");
+  const offenders = [];
+  for (const file of readdirSync(scriptsDir)) {
+    if (!file.endsWith(".mjs") || file.endsWith(".test.mjs")) continue;
+    if (file === "sentry-triage-brief.mjs") continue;
+    const src = readFileSync(join(scriptsDir, file), "utf8");
+    if (
+      /BRIEF_COMMENT_MARKER|sentry-triage-brief:v1|stripBriefFromBody/.test(src)
+    ) {
+      offenders.push(file);
+    }
+  }
+  assertEqual(offenders.join(", "), "");
+  const brief = readFileSync(
+    join(scriptsDir, "sentry-triage-brief.mjs"),
+    "utf8",
+  );
+  assert(
+    !/"issue",\s*"edit"/.test(brief),
+    "the brief leg must not run `gh issue edit` — it writes comments only",
+  );
+});
+
 await test("the pipeline's shared modules stay under the file-size hard cap", () => {
-  // `max-lines` is configured per PACKAGE, and `scripts/` belongs to none, so
-  // CI would not catch a breach of the 1,000-line hard cap in
-  // docs/pr-checklists/recurring-review-patterns.md. The brief's shared bounds
-  // pushed sentry-triage-project-core.mjs over it, which is why
-  // sentry-triage-text.mjs exists — this is the check that keeps it split.
-  //
-  // Scoped to the modules this leg owns. `sentry-triage-archive.mjs` and
-  // `sentry-triage-ingest.mjs` are over the cap already and predate this work;
-  // widening this check is a separate change with a separate split to make.
   const oversized = [
     "scripts/sentry-triage-project-core.mjs",
     "scripts/sentry-triage-text.mjs",
@@ -943,9 +896,6 @@ await test("the pipeline's shared modules stay under the file-size hard cap", ()
 });
 
 await test("the moved text helpers stay importable from the verdict contract", () => {
-  // The split was a file-size remedy, not a change of ownership: every caller
-  // still reaches these through sentry-triage-project-core.mjs, and the module
-  // they moved to imports nothing, so no layer can create a cycle with it.
   const text = readRepoFile("scripts/sentry-triage-text.mjs");
   assert(
     !/^import\s/m.test(text),
@@ -970,26 +920,6 @@ await test("the moved text helpers stay importable from the verdict contract", (
       `expected sentry-triage-text.mjs to define ${name}`,
     );
   }
-});
-
-await test("this leg stays the only writer of the block, on the only path that may", () => {
-  // The stub body has exactly two authorized writers (the trust boundary in
-  // sentry-triage-queue-contract.mjs): the archive leg's baseline write and
-  // this one. The re-queue chokepoint deliberately writes NO body — issue
-  // #1692 pins that with a test of its own — so removal has to reach a stub
-  // through this leg, which is why the leg runs on every verdict.
-  const scriptsDir = join(repoRoot, "scripts");
-  const offenders = [];
-  for (const file of readdirSync(scriptsDir)) {
-    if (!file.endsWith(".mjs") || file.endsWith(".test.mjs")) continue;
-    if (file === "sentry-triage-brief.mjs") continue;
-    if (file === "sentry-triage-queue-contract.mjs") continue; // defines it
-    const src = readFileSync(join(scriptsDir, file), "utf8");
-    if (/\bstripBriefFromBody\s*\(|BRIEF_BLOCK_START/.test(src)) {
-      offenders.push(file);
-    }
-  }
-  assertEqual(offenders.join(", "), "");
 });
 
 if (failed > 0) {
