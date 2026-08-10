@@ -3,7 +3,7 @@ title: PR Operating Card
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-23
+last_verified: 2026-08-10
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -129,8 +129,9 @@ Solution` (approach before implementation detail). PRs open **ready for
    new additions against the scope baseline frozen at step 4; classify each as
    in-scope, follow-up, or stop; **file a GitHub issue before deferring any valid
    follow-up** and link it from the PR's `## Deferrals` section. Warn as the
-   diff approaches twice the baseline, and pause for reclassification after two
-   review-triggered patch cycles rather than starting a third. Authority:
+   diff approaches twice the baseline. Do not pause solely for cycle count
+   before five review-triggered patch cycles are complete; pause for
+   reclassification before starting a sixth. Authority:
    [`agent-issue-workflow.md`](agent-issue-workflow.md) for the deferral and
    issue-lifecycle rules.
 
