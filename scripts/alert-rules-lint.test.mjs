@@ -900,7 +900,10 @@ test("committed peg rules preserve coverage, rollover, and routing invariants", 
   );
   for (const policy of ["active", "previous"]) {
     assert(
-      source.includes(`peg_${policy}_operational_sources = {`) &&
+      source.includes(`peg_${policy}_authoritative_sources = {`) &&
+        source.includes(
+          `peg_${policy}_operational_sources = local.peg_${policy}_authoritative_sources`,
+        ) &&
         source.includes(`peg_${policy}_secondary_sources = {`) &&
         source.includes(`peg_${policy}_source_unhealthy_for_duration = {`) &&
         source.includes(

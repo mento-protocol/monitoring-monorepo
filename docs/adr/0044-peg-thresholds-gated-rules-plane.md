@@ -140,10 +140,15 @@ Phase 3 must implement the following protected artifact and rules contract:
     consecutive-check gauge. Inferring it from a timestamp gauge with
     `changes()` is forbidden: a listed or halted reset can occur between
     30-second scrapes and never appear in the sampled range. During this
-    field's first rollover only, the exact retained predecessor omits the
-    field and the producer uses the initial value `2`. Remove that
-    compatibility default after the reviewed `previous=null` cleanup; every
-    active policy must declare its own bounded threshold.
+    field's first rollover only, the exact retained predecessor
+    `europ-2026-07-22-v1-a69b99aad61649957a2639dc8348b05f` omits the field and
+    the bridge uses the initial value `2`. Source-controlled validators now
+    require the field and checked-in policy has `previous: null`; this
+    runtime-only shim remains while production is pinned to the legacy
+    generation. Remove it in a follow-up PR only after the `previous: null`
+    generation is published, pinned, and live-verified; [#1750](https://github.com/mento-protocol/monitoring-monorepo/issues/1750)
+    tracks that removal. Every active policy must declare its own bounded
+    threshold.
   - Severity and routing stay per-rule: warn → Slack, critical → page, each
     with its own contact-point wiring.
 

@@ -3,7 +3,7 @@ title: Peg monitoring alert source validation and activation
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-29
+last_verified: 2026-08-10
 doc_type: runbook
 scope: alerts/peg-monitoring
 review_interval_days: 90
@@ -58,6 +58,18 @@ operation until the human-approved `alerts-rules` cleanup, protected
 publication, reviewed runtime-generation attachment, and post-change
 producer/Grafana checks complete in that order.
 
+Source validators now require every policy source to declare
+`listingAbsentConsecutiveChecks`, and the checked-in policy keeps `previous`
+as `null`. Metrics Bridge retains a runtime-only compatibility shim for the
+exact legacy previous version
+`europ-2026-07-22-v1-a69b99aad61649957a2639dc8348b05f`, which defaults the
+missing threshold to `2` while Cloud Run remains pinned to the production
+generation containing that predecessor. The bridge normalizes the value into
+decision packages, so the dashboard schema remains strict. Remove the shim in
+a follow-up PR after the `previous: null` generation is published, pinned, and
+live-verified; [#1750](https://github.com/mento-protocol/monitoring-monorepo/issues/1750)
+tracks that removal.
+
 The production identity bootstrap in
 [#1566](https://github.com/mento-protocol/monitoring-monorepo/pull/1566) is
 merged and its separately reviewed Terraform apply is complete. The producer
@@ -98,7 +110,8 @@ For each active policy, the generated source defines:
 When `previous` is retained, the same decision ladder remains generated for
 that exact previous version. Previous-version rules do not stop at the first
 active-version acknowledgement; cleanup is a later reviewed policy change.
-Every policy source declares its own bounded listing-absence threshold.
+Source-controlled policy requires every source to declare its bounded
+listing-absence threshold.
 
 Display sources create registry-rot listing alerts, but never deviation,
 premium, source-unhealthy, or permanently-dead rules. Deep-source health uses
@@ -155,15 +168,20 @@ the peg rule resources.
 After this source change merges, keep the policy predecessor cleanup in the
 following order:
 
-1. Inspect the trusted-main `alerts-rules` plan, then explicitly approve its
+1. Let the automatic Metrics Bridge workflow deploy the compatibility-retaining
+   revision from `main`. Verify it still loads the pinned legacy generation and
+   continues publishing current Peg polls and decision packages.
+2. Inspect the trusted-main `alerts-rules` plan, then explicitly approve its
    `production-infra` apply. Confirm retained-previous rules are removed and
    active rules remain evaluable in Grafana. Removing consumers before their
    producer series follows the rollback dependency order.
-2. Inspect the trusted-main publication plan, then explicitly approve its
+3. Inspect the trusted-main publication plan, then explicitly approve its
    `production-infra` apply to publish the `previous: null` artifact.
-3. Review the platform change that pins Metrics Bridge to that exact positive
+4. Review the platform change that pins Metrics Bridge to that exact positive
    generation, apply it through its owning approved path, and verify the
    producer reports only the active policy.
+5. After active-only production is live-verified, remove the exact legacy
+   runtime shim through [#1750](https://github.com/mento-protocol/monitoring-monorepo/issues/1750).
 
 Never run these applies from an agent session. A merged source change, a policy
 publication, or a runtime attachment alone is insufficient proof of

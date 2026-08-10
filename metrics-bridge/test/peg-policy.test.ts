@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   parsePegPolicyBundle,
   PEG_POLICY_MAX_ASSETS,
+  PEG_POLICY_LEGACY_LISTING_ABSENT_CONSECUTIVE_CHECKS_VERSION,
   PEG_POLICY_MAX_LISTING_ABSENT_CONSECUTIVE_CHECKS,
+  effectiveListingAbsentConsecutiveChecks,
   PEG_POLICY_MAX_SOURCES_PER_ASSET,
   pegPolicyContentDigest,
   pegPolicyVersionForContent,
@@ -29,6 +31,18 @@ function versioned(
     ...candidate,
     version: pegPolicyVersionForContent(prefix, candidate),
   };
+}
+
+function legacyPrevious(policy: PegPolicyBundle): PegPolicyBundle["active"] {
+  const previous = structuredClone(policy.active);
+  previous.version =
+    PEG_POLICY_LEGACY_LISTING_ABSENT_CONSECUTIVE_CHECKS_VERSION;
+  for (const asset of Object.values(previous.assets)) {
+    for (const source of Object.values(asset.sources)) {
+      delete source.listingAbsentConsecutiveChecks;
+    }
+  }
+  return previous;
 }
 
 describe("Peg policy", () => {
@@ -182,7 +196,7 @@ describe("Peg policy", () => {
     ).toThrow(/>=2/);
   });
 
-  it("requires every policy source to declare a listing threshold", async () => {
+  it("accepts and normalizes the exact legacy retained predecessor only", async () => {
     const policy = await productionPolicy();
     const asset = policy.active.assets["europ-schuman"]!;
     const source = asset.sources.bitvavo_eur!;
@@ -206,9 +220,23 @@ describe("Peg policy", () => {
           },
         },
       }),
-    ).toThrow(/listingAbsentConsecutiveChecks/);
+    ).toThrow(/must be declared by the active policy/);
 
-    const previousWithoutThreshold = versioned("europ-2026-07-22-v0", {
+    const exactLegacyPrevious = legacyPrevious(policy);
+    const parsed = parsePegPolicyBundle({
+      ...policy,
+      previous: exactLegacyPrevious,
+    });
+    expect(parsed.previous?.version).toBe(
+      PEG_POLICY_LEGACY_LISTING_ABSENT_CONSECUTIVE_CHECKS_VERSION,
+    );
+    expect(
+      effectiveListingAbsentConsecutiveChecks(
+        parsed.previous!.assets["europ-schuman"]!.sources.bitvavo_eur!,
+      ),
+    ).toBe(2);
+
+    const otherPreviousWithoutThreshold = versioned("europ-2026-07-22-v0", {
       ...policy.active,
       assets: {
         ...policy.active.assets,
@@ -222,8 +250,13 @@ describe("Peg policy", () => {
       },
     });
     expect(() =>
-      parsePegPolicyBundle({ ...policy, previous: previousWithoutThreshold }),
-    ).toThrow(/listingAbsentConsecutiveChecks/);
+      parsePegPolicyBundle({
+        ...policy,
+        previous: otherPreviousWithoutThreshold,
+      }),
+    ).toThrow(
+      /may be omitted only by the exact pre-streak retained predecessor/,
+    );
   });
 
   it("keeps asset freshness relationships executable", async () => {

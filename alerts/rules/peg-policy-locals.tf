@@ -49,10 +49,9 @@ locals {
   }
   # Display-only sources remain visible in market context and registry-rot
   # coverage, but do not create operational health alerts.
-  peg_active_operational_sources = {
-    for key, item in local.peg_active_sources : key => item
-    if item.source.authority != "display"
-  }
+  # Operational source health follows the authoritative source set. Keep this
+  # semantic alias because health-rule locals refer to operational sources.
+  peg_active_operational_sources = local.peg_active_authoritative_sources
   peg_active_secondary_sources = {
     for key, item in local.peg_active_sources : key => item
     if item.source.authority == "secondary"
@@ -90,10 +89,8 @@ locals {
     for key, item in local.peg_previous_sources : key => item
     if item.source.authority != "display"
   }
-  peg_previous_operational_sources = {
-    for key, item in local.peg_previous_sources : key => item
-    if item.source.authority != "display"
-  }
+  # See the active alias above; retained-previous health uses the same scope.
+  peg_previous_operational_sources = local.peg_previous_authoritative_sources
   peg_previous_secondary_sources = {
     for key, item in local.peg_previous_sources : key => item
     if item.source.authority == "secondary"
