@@ -2308,7 +2308,7 @@ while IFS= read -r path; do
           # Sibling emitter over the same shared selection.
           add_command "pnpm sentry:digest:test" "Sentry needs-human brief helper changed"
           ;;
-        scripts/sentry-triage-project.mjs|scripts/sentry-triage-project-core.mjs|scripts/sentry-triage-project.test.mjs)
+        scripts/sentry-triage-project.mjs|scripts/sentry-triage-project-core.mjs|scripts/sentry-triage-project.test.mjs|scripts/sentry-triage-text.mjs)
           add_command "pnpm sentry:project:test" "Sentry triage projection helper changed"
           # The agent's comment wrapper imports the shared marker contract from
           # sentry-triage-project-core.mjs, so its fences ride on this module.

@@ -258,9 +258,12 @@ escalation_reason: |
 `how_to_check` and `decision_branches` exist because the brief below is
 deterministic: nothing else in the contract carries the instruction half of a
 decision, so without them a rendered brief can only restate the situation.
-Every list is capped at `MAX_BRIEF_LIST_ITEMS`, and every field is bounded at
-`MAX_BRIEF_TEXT_LEN` before either emitter escapes it — both in
-`scripts/sentry-triage-project-core.mjs`, shared so the two briefs cannot
+Every list is capped at `MAX_BRIEF_LIST_ITEMS` (in
+`scripts/sentry-triage-project-core.mjs`), and every field is bounded at
+`MAX_BRIEF_TEXT_LEN` before either emitter escapes it. The bounds and the
+untrusted-text neutralization live in `scripts/sentry-triage-text.mjs` — the
+pipeline's lowest layer, importing nothing — and are re-exported by the verdict
+contract, so every caller keeps one import surface and the two briefs cannot
 drift. For a `needs-human` verdict the prose after the YAML block is at most
 two sentences: the fields are the brief, and a paragraph restating them only
 pushes the decision further down the page.
@@ -297,13 +300,23 @@ outlives what it renders reads as current to whoever opens the issue:
   `sentry:needs-triage`.
 
 The archive leg rewrites the same body to record its freshness baseline, under
-a **different concurrency group**, and `gh issue edit` replaces the whole body.
-Both brief writers therefore rebuild from a live read rather than a snapshot,
-and the brief leg additionally refuses to write a body whose archive baseline
-differs from the one it just read, re-reads after writing, and — bounded by
-`BRIEF_WRITE_ATTEMPTS` — restores a baseline the window lost and re-applies a
-block the window dropped. GitHub offers no conditional issue update, so a
-one-round-trip window survives; what does not survive is a silent loss.
+a **different concurrency group**, and `gh issue edit` replaces the whole body
+with no conditional update available. Losing that baseline is silent and it
+strands the archive contract, so the brief leg coordinates rather than races:
+
+- **it yields.** A stub carrying `sentry:approved-archive` or `sentry:archived`
+  belongs to the archive leg, and the brief writes nothing to it
+  (`archiveHoldsStub`, re-checked every round). The writer with nothing at
+  stake gives way — an approved stub is on its way to closed, and the next
+  triage round renders the block if it survives.
+- inside the remaining window it builds from a live read, refuses to move the
+  baseline itself (`assertBaselineUnchanged`), re-reads after writing, and
+  restores a baseline it can see was lost, bounded by `BRIEF_WRITE_ATTEMPTS`.
+- the one interleaving a whole-body replace cannot see from the body alone —
+  the **first** archive of a stub, where before and after both read as "no
+  baseline" — is caught by the archive's labels appearing on the post-write
+  read, and fails the job red. A value the brief never saw is not one it may
+  invent.
 
 Nothing machine-readable moves. The verdict YAML stays in the verdict comment,
 where the label step, the projection, the digest and the autofix selector read

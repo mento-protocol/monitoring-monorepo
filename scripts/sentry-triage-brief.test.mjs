@@ -14,10 +14,10 @@
  *     block, short id, verdict resolution — including under a field that tries
  *     to shadow one of them;
  *   - the block's lifecycle holds across verdict transitions: rendered on
- *     needs-human, replaced on re-triage, REMOVED on any other verdict, and
- *     removed by the re-queue chokepoint when the verdict is fenced;
- *   - the write survives the archive leg writing the same body concurrently —
- *     it re-reads, retries, and never loses the freshness baseline;
+ *     needs-human, replaced on re-triage, REMOVED on any other verdict;
+ *   - the archive leg writes the same body under its own concurrency group, so
+ *     this leg yields to it, never moves the freshness baseline itself, and
+ *     fails red rather than losing one it cannot restore;
  *   - the block cannot be misread by a prefix-anchored consumer;
  *   - the verdict contract, the prompt and the pipeline doc agree about the two
  *     new fields, and the workflow actually invokes this leg.
@@ -517,7 +517,7 @@ await test("a field cannot shadow the permalink or the archive baseline", () => 
  * concurrent archive run would have left behind.
  */
 function makeRunGh(issue, { interfere = null } = {}) {
-  const state = { ...issue };
+  const state = { labels: [], ...issue };
   const calls = [];
   let edits = 0;
   return {
@@ -530,7 +530,10 @@ function makeRunGh(issue, { interfere = null } = {}) {
       if (args[1] === "edit" && args.includes("--body-file")) {
         edits += 1;
         state.body = opts?.stdin ?? "";
-        const meddled = interfere?.(state.body, edits);
+        // The other writer, landing between this write and its verification.
+        // Returning a string replaces the body; mutating `state.labels` is how
+        // a test makes the archive leg's labels appear mid-window.
+        const meddled = interfere?.(state.body, edits, state);
         if (typeof meddled === "string") state.body = meddled;
       }
       return "";
@@ -754,6 +757,52 @@ await test("a baseline lost inside the write window is restored, not left gone",
   assertEqual(gh.state.body.split(BRIEF_BLOCK_START).length - 1, 1);
 });
 
+await test("an archive holding the stub makes this leg yield, not race", async () => {
+  // The interleaving the whole-body replace cannot survive: the archive leg
+  // writes the freshness baseline into this same body under its own
+  // concurrency group. So when the stub carries the archive's labels, this leg
+  // writes nothing at all and the baseline is never at risk.
+  for (const held of ["sentry:approved-archive", "sentry:archived"]) {
+    const gh = makeRunGh({ ...stubIssue(), labels: [{ name: held }] });
+    const result = await runBrief({
+      runGh: gh.runGh,
+      issueNumber: 1731,
+      log: () => {},
+    });
+    assertEqual(result.written, false);
+    assertEqual(result.yielded, true);
+    assertEqual(gh.editCount(), 0);
+    assertEqual(gh.state.body, STUB_BODY);
+    assertEqual(
+      parseArchiveBaseline(gh.state.body).lastSeen,
+      "2026-08-04T12:29:24Z",
+    );
+  }
+});
+
+await test("a first archive landing inside the write window fails RED", async () => {
+  // The one ordering a body-only comparison cannot see: the stub had NO
+  // baseline when this leg read it, the archive wrote and verified its first
+  // one inside the window, and this write replaced it. Before and after both
+  // read as "no baseline", so the archive's own labels are the evidence — and
+  // a value this leg never saw is not one it may invent.
+  const noBaseline = withArchiveBaseline(STUB_BODY, null);
+  const gh = makeRunGh(
+    { ...stubIssue(VERDICT_YAML, noBaseline), labels: [] },
+    {
+      interfere: (_body, edits, state) => {
+        if (edits === 1) state.labels = [{ name: "sentry:archived" }];
+        return null;
+      },
+    },
+  );
+  await assertRejects(
+    runBrief({ runGh: gh.runGh, issueNumber: 1731, log: () => {} }),
+    /an archive run landed inside this brief write's window/,
+  );
+  assertEqual(gh.editCount(), 1);
+});
+
 await test("a writer that never lets go fails the job loudly", async () => {
   const gh = makeRunGh(stubIssue(), { interfere: () => STUB_BODY });
   await assertRejects(
@@ -839,9 +888,17 @@ await test("a failing brief step re-queues the stub instead of stranding it", ()
   assert(step.includes("requeue_for_retry() {"), "expected the compensation");
   assert(
     step.includes(
-      '--remove-label "${VERDICT_LABEL},${VERDICT_SHED},sentry:projected"',
+      '--remove-label "${VERDICT_LABEL},${VERDICT_SHED},sentry:projected,sentry:approved-archive"',
     ) && step.includes('--add-label "sentry:needs-triage"'),
     "expected the same re-queue edit the verdict post-condition makes",
+  );
+  // A re-queue must not carry a human's archive approval into the next round:
+  // the archive workflow's dispatch path takes approval + any verdict label as
+  // its whole precondition. Same rule REOPEN_SHED_LABELS states for every other
+  // re-queue producer.
+  assert(
+    step.includes("sentry:approved-archive"),
+    "expected the stale archive approval shed with the rest",
   );
   // The enums come from the verdict step rather than a second literal copy of
   // the verdict namespace.
@@ -860,6 +917,59 @@ await test("a failing brief step re-queues the stub instead of stranding it", ()
     if (line !== "exit 1") return;
     assertEqual(meaningful[i - 1], "requeue_for_retry");
   });
+});
+
+await test("the pipeline's shared modules stay under the file-size hard cap", () => {
+  // `max-lines` is configured per PACKAGE, and `scripts/` belongs to none, so
+  // CI would not catch a breach of the 1,000-line hard cap in
+  // docs/pr-checklists/recurring-review-patterns.md. The brief's shared bounds
+  // pushed sentry-triage-project-core.mjs over it, which is why
+  // sentry-triage-text.mjs exists — this is the check that keeps it split.
+  //
+  // Scoped to the modules this leg owns. `sentry-triage-archive.mjs` and
+  // `sentry-triage-ingest.mjs` are over the cap already and predate this work;
+  // widening this check is a separate change with a separate split to make.
+  const oversized = [
+    "scripts/sentry-triage-project-core.mjs",
+    "scripts/sentry-triage-text.mjs",
+    "scripts/sentry-triage-brief.mjs",
+    "scripts/sentry-triage-queue-contract.mjs",
+    "scripts/sentry-triage-requeue.mjs",
+  ]
+    .map((path) => [path, readRepoFile(path).split("\n").length])
+    .filter(([, lines]) => lines > 1000)
+    .map(([path, lines]) => `${path}:${lines}`);
+  assertEqual(oversized.join(", "), "");
+});
+
+await test("the moved text helpers stay importable from the verdict contract", () => {
+  // The split was a file-size remedy, not a change of ownership: every caller
+  // still reaches these through sentry-triage-project-core.mjs, and the module
+  // they moved to imports nothing, so no layer can create a cycle with it.
+  const text = readRepoFile("scripts/sentry-triage-text.mjs");
+  assert(
+    !/^import\s/m.test(text),
+    "sentry-triage-text.mjs must not import from another module",
+  );
+  const core = readRepoFile("scripts/sentry-triage-project-core.mjs");
+  for (const name of [
+    "sanitizeFreeText",
+    "neutralizeUntrusted",
+    "neutralizeBlock",
+    "truncate",
+    "boundBriefText",
+    "boundBriefList",
+    "MAX_BRIEF_TEXT_LEN",
+  ]) {
+    assert(
+      new RegExp(`^\\s*${name},$`, "m").test(core),
+      `expected sentry-triage-project-core.mjs to re-export ${name}`,
+    );
+    assert(
+      new RegExp(`export (function|const) ${name}\\b`).test(text),
+      `expected sentry-triage-text.mjs to define ${name}`,
+    );
+  }
 });
 
 await test("this leg stays the only writer of the block, on the only path that may", () => {

@@ -102,72 +102,36 @@ const FOOTER =
   "keys automatic de-duplication — please keep it.";
 
 // ---------------------------------------------------------------------------
-// Untrusted-text neutralization (mirrors the ingest's helpers).
+// Untrusted-text neutralization and bounding.
 // ---------------------------------------------------------------------------
 
-/** Strip control chars/newlines and collapse whitespace to a single line. */
-export function sanitizeFreeText(text) {
-  return (
-    String(text ?? "")
-      // eslint-disable-next-line no-control-regex -- stripping control chars from untrusted agent text is the whole point here
-      .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "")
-      .replace(/[\r\n\t]+/g, " ")
-      .replace(/\s+/g, " ")
-      .trim()
-  );
-}
+// These live in scripts/sentry-triage-text.mjs, the pipeline's lowest layer —
+// it imports nothing, so every other layer can sit on it without a cycle. They
+// are re-exported here rather than relocated in every caller: this module is
+// the verdict contract's single import surface, and the split was a file-size
+// remedy (#1748), not a change of ownership.
+export {
+  boundBriefList,
+  boundBriefText,
+  defangBackticks,
+  defangHtmlComments,
+  defangMentions,
+  MAX_BRIEF_TEXT_LEN,
+  neutralizeBlock,
+  neutralizeUntrusted,
+  sanitizeFreeText,
+  truncate,
+} from "./sentry-triage-text.mjs";
 
-/** Replace every backtick with a look-alike so an attacker-controlled value can
- * never close a markdown code fence / inline-code span early. */
-export function defangBackticks(text) {
-  return String(text ?? "").replace(/`/g, "ˋ");
-}
-
-/** Insert a zero-width space after every `@` so `@user` / `@org/team` in
- * agent-reachable text can never become a live GitHub mention once embedded in
- * an issue body. Visual fidelity is preserved for review. */
-export function defangMentions(text) {
-  return String(text ?? "").replace(/@/g, "@\u200B");
-}
-
-/** Break every HTML-comment opener (`<!--` -> `<!` + zero-width space + `--`)
- * so agent text can never embed a marker-shaped sequence \u2014 e.g. a spoofed
- * `<!-- sentry-projection:v1 OTHER-ID -->` inside a rendered verdict field \u2014
- * into a projected issue body. The idempotency back-link marker must only
- * ever exist where buildProjectedBody itself emits it (the first body line);
- * this is defense in depth behind the first-line anchoring of
- * bodyBacklinksShortId. */
-export function defangHtmlComments(text) {
-  return String(text ?? "").replace(/<!--/g, "<!\u200B--");
-}
-
-/** Single-line neutralization for titles and inline fields. */
-export function neutralizeUntrusted(text) {
-  return defangMentions(
-    defangBackticks(defangHtmlComments(sanitizeFreeText(text))),
-  );
-}
-
-/** Multi-line neutralization for block fields (root cause / proposed action):
- * strip control chars but KEEP newlines, defang backticks + mentions + HTML
- * comments, and hard bound both line count and length. Rendered inside a
- * fenced block by the caller so any surviving markdown is inert. */
-export function neutralizeBlock(text, { maxLen = 600, maxLines = 8 } = {}) {
-  let s = String(text ?? "")
-    // eslint-disable-next-line no-control-regex -- keep \n (0x0a) + \t (0x09); strip the rest
-    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "")
-    .replace(/\r/g, "");
-  s = defangMentions(defangBackticks(defangHtmlComments(s)));
-  s = s.split("\n").slice(0, maxLines).join("\n");
-  if (s.length > maxLen) s = `${s.slice(0, maxLen).trimEnd()}…`;
-  return s.trim();
-}
-
-export function truncate(text, maxLen) {
-  const clean = String(text ?? "");
-  if (clean.length <= maxLen) return clean;
-  return `${clean.slice(0, maxLen).trimEnd()}…`;
-}
+// `export … from` re-exports without binding the names locally, and the parsing
+// and rendering below use several of them.
+import {
+  boundBriefText,
+  neutralizeBlock,
+  neutralizeUntrusted,
+  sanitizeFreeText,
+  truncate,
+} from "./sentry-triage-text.mjs";
 
 function stripYamlQuotes(value) {
   const v = String(value ?? "").trim();
@@ -515,32 +479,6 @@ export function parseVerdictComment(commentBody) {
     investigated: parsed.investigated,
     escalationReason: parsed.escalation_reason,
   };
-}
-
-// Hard bound on each rendered needs-human brief field. Applied BEFORE either
-// emitter's surface escape, so the bound governs the human-visible text rather
-// than the entity soup an escape expands it into (an all-`<` value grows ~4x in
-// Slack and ~1x on GitHub — bounding first makes the two agree).
-export const MAX_BRIEF_TEXT_LEN = 400;
-
-/** Single-line, hard-bounded projection of ONE untrusted brief field. Shared
- * pre-escape stage for both emitters (Slack digest, GitHub issue brief) so the
- * two surfaces can never disagree about what a field is or how long it may be;
- * each emitter applies its own escape on top (`escapeSlackText` /
- * `neutralizeUntrusted`). */
-export function boundBriefText(text) {
-  return truncate(sanitizeFreeText(text), MAX_BRIEF_TEXT_LEN);
-}
-
-/** Single-line, hard-bounded projection of a brief LIST, items joined with
- * "; " so the whole line obeys the same bound. Empty in -> "" (callers omit
- * the line). */
-export function boundBriefList(items) {
-  const joined = (Array.isArray(items) ? items : [])
-    .map((item) => sanitizeFreeText(item))
-    .filter(Boolean)
-    .join("; ");
-  return joined ? boundBriefText(joined) : "";
 }
 
 /**

@@ -510,6 +510,10 @@ test("the wrapper's runtime closure is exactly what the workflow stages", () => 
   assert.deepEqual(closure, [
     "sentry-triage-agent-comment.mjs",
     "sentry-triage-project-core.mjs",
+    // The neutralization helpers the verdict contract re-exports (#1748 split);
+    // the wrapper reaches them through that module, so they are part of the
+    // closure the job must run from the read-only staging directory.
+    "sentry-triage-text.mjs",
   ]);
   // Every file in the closure must appear in the staging step's copy list.
   const stagingBlock = WORKFLOW.slice(
@@ -647,9 +651,18 @@ test("a failed verdict post-condition re-queues the stub instead of stranding it
   assert.match(helper, /gh issue edit "\$\{QUEUE_ISSUE_NUMBER\}"/);
   assert.match(
     helper,
-    /--remove-label "\$\{label\},\$\{shed\},sentry:projected"/,
+    /--remove-label "\$\{label\},\$\{shed\},sentry:projected,sentry:approved-archive"/,
   );
   assert.match(helper, /--add-label "sentry:needs-triage"/);
+  // The approval is shed for the reason REOPEN_SHED_LABELS gives: the archive
+  // workflow's dispatch path takes approval + any verdict label as its whole
+  // precondition, so a re-queued stub that keeps a human's approval can have
+  // the NEXT round's occurrence archived without fresh review. Shedding an
+  // approval is always allowed here; adding one never is.
+  assert.ok(
+    !/--add-label[^\n]*sentry:approved-archive/.test(WORKFLOW),
+    "no step may ADD the human archive approval",
+  );
 
   // Fail CLOSED on the re-read too: an unverifiable stub is re-queued, never
   // waved through to the close/project/digest legs.

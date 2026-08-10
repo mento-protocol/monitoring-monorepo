@@ -72,13 +72,23 @@
  *
  * THE WRITE IS NOT ALONE ON THIS BODY. The archive leg rewrites the same body to
  * record its freshness baseline, under a DIFFERENT concurrency group, so the two
- * can overlap on one stub and `gh issue edit` replaces the whole body. So this
- * leg does what the archive leg does: build the new body from a live read, never
- * from a stale snapshot; refuse to write a body whose archive baseline differs
- * from the one just read; re-read after writing; and, bounded by
- * `BRIEF_WRITE_ATTEMPTS`, repair a baseline the window lost and re-apply a brief
- * the window dropped. GitHub offers no conditional issue update, so a one
- * round-trip window remains — what cannot remain is a SILENT loss.
+ * can overlap on one stub — and `gh issue edit` replaces the WHOLE body, with no
+ * conditional update to make the replace safe. Losing that baseline is silent
+ * and it strands the archive contract (issue #1371), so:
+ *   - THE BRIEF YIELDS. A stub carrying `sentry:approved-archive` or
+ *     `sentry:archived` belongs to the archive leg, and this leg does not write
+ *     to it at all (`archiveHoldsStub`, re-checked every round). The writer with
+ *     nothing at stake gives way: an approved stub is on its way to closed, and
+ *     the next triage round renders the block if it survives.
+ *   - Inside the remaining window — an archive that starts after this leg's read
+ *     and takes the stub's labels with it — the write still builds from a live
+ *     read, refuses to move the baseline itself (`assertBaselineUnchanged`),
+ *     re-reads afterwards, and restores a baseline it can see was lost.
+ *   - The one interleaving a whole-body replace cannot detect from the body
+ *     alone — the FIRST archive of a stub, where before and after both read as
+ *     "no baseline" — is caught by the archive's own labels appearing on the
+ *     post-write read, and fails the job RED. A value this leg never saw is not
+ *     one it may invent.
  */
 
 import { spawn } from "node:child_process";
@@ -102,6 +112,8 @@ import {
 // The block's delimiters and its removal live in the queue contract, because the
 // re-queue chokepoint removes the block too and the two must agree byte for byte.
 import {
+  APPROVED_ARCHIVE_LABEL,
+  ARCHIVED_LABEL,
   BRIEF_BLOCK_END,
   BRIEF_BLOCK_START,
   parseArchiveBaseline,
@@ -348,10 +360,36 @@ function defaultRunGh(args, { stdin } = {}) {
   });
 }
 
-/** Just the body. The write loop re-reads once per round and the comments are
- * the largest part of a stub — the verdict is resolved once, from the full read
- * below, and never re-resolved mid-write. */
-async function readStubBody(runGh, repo, number) {
+export function labelNames(labels) {
+  return (Array.isArray(labels) ? labels : [])
+    .map((label) => (typeof label === "string" ? label : label?.name))
+    .filter(Boolean);
+}
+
+/**
+ * Is the archive leg holding this stub? `sentry:approved-archive` means a human
+ * approved it and the archive workflow is triggered, queued or running;
+ * `sentry:archived` means it already settled, and the stub is closed with its
+ * freshness baseline live in the body. Either way this leg does not write.
+ *
+ * This is the coordination between the two body writers. They hold different
+ * concurrency groups, `gh issue edit` replaces the whole body, and GitHub has
+ * no conditional issue update — so the writer with nothing at stake yields.
+ * Nothing is lost by yielding: an approved stub is on its way to closed, and
+ * the next triage round renders the block if it survives.
+ */
+export function archiveHoldsStub(labels) {
+  const names = labelNames(labels);
+  return (
+    names.includes(APPROVED_ARCHIVE_LABEL) || names.includes(ARCHIVED_LABEL)
+  );
+}
+
+/** Body + labels: the write loop re-reads once per round, and needs the labels
+ * to see the archive leg. The comments are the largest part of a stub and the
+ * verdict is resolved once, from the full read below, never re-resolved
+ * mid-write. */
+async function readStubState(runGh, repo, number) {
   const stdout = await runGh([
     "issue",
     "view",
@@ -359,9 +397,10 @@ async function readStubBody(runGh, repo, number) {
     "-R",
     repo,
     "--json",
-    "body",
+    "body,labels",
   ]);
-  return JSON.parse(stdout).body ?? "";
+  const data = JSON.parse(stdout);
+  return { body: data.body ?? "", labels: labelNames(data.labels) };
 }
 
 async function readQueueIssue(runGh, repo, number) {
@@ -372,10 +411,11 @@ async function readQueueIssue(runGh, repo, number) {
     "-R",
     repo,
     "--json",
-    "number,title,body,comments",
+    "number,title,body,labels,comments",
   ]);
   const data = JSON.parse(stdout);
   return {
+    labels: labelNames(data.labels),
     number: data.number,
     title: data.title ?? "",
     body: data.body ?? "",
@@ -432,7 +472,7 @@ async function settleStubBody({
   runGh,
   repo,
   issueNumber,
-  first, // the body from the read that resolved the verdict
+  first, // `{ body, labels }` from the read that resolved the verdict
   mutate,
   dryRun,
   log,
@@ -440,14 +480,23 @@ async function settleStubBody({
   let live = first;
   let wrote = false;
   for (let attempt = 1; attempt <= BRIEF_WRITE_ATTEMPTS; attempt += 1) {
-    const next = mutate(live);
+    // YIELD, don't race. Checked every round, on a body read this loop takes
+    // anyway, so an approval that lands mid-loop still stops the next write.
+    if (archiveHoldsStub(live.labels)) {
+      log(
+        `::notice::Issue #${issueNumber} is held by the archive leg (${APPROVED_ARCHIVE_LABEL} / ${ARCHIVED_LABEL}); leaving its body alone so the freshness baseline cannot be replaced. The next triage round renders the brief if the stub is still open.`,
+      );
+      return { written: wrote, body: live.body, yielded: true };
+    }
+
+    const next = mutate(live.body);
     if (next === null) {
       throw new Error(
         `Issue #${issueNumber} carries a brief opener with no closing delimiter; refusing to rewrite the body. Repair the body by hand and re-run.`,
       );
     }
-    if (next === live) return { written: wrote, body: next };
-    assertBaselineUnchanged(live, next, issueNumber);
+    if (next === live.body) return { written: wrote, body: next };
+    assertBaselineUnchanged(live.body, next, issueNumber);
     if (dryRun) {
       log(next);
       return { written: false, body: next };
@@ -461,18 +510,45 @@ async function settleStubBody({
     );
     wrote = true;
 
-    const after = await readStubBody(runGh, repo, issueNumber);
-    const stuck = mutate(after) === after;
-    const baselineBefore = parseArchiveBaseline(live);
-    const lostBaseline =
-      Boolean(baselineBefore) && !parseArchiveBaseline(after);
-    if (stuck && !lostBaseline) return { written: true, body: after };
+    const after = await readStubState(runGh, repo, issueNumber);
+    const stuck = mutate(after.body) === after.body;
+    const baselineBefore = parseArchiveBaseline(live.body);
+    const baselineAfter = parseArchiveBaseline(after.body);
+
+    // The archive started AND settled inside this write's window: the stub now
+    // shows the archive's labels, and the body this write left behind carries
+    // no baseline. When the pre-write read had one, restore it. When it did not
+    // — the first archive of this stub, the case a whole-body replace cannot
+    // detect from the body alone — the value is not ours to invent, so fail
+    // RED rather than leave the archive contract stranded on `closedAt`.
+    if (!baselineAfter && archiveHoldsStub(after.labels)) {
+      if (!baselineBefore) {
+        throw new Error(
+          `Issue #${issueNumber}: an archive run landed inside this brief write's window — the stub now carries the archive labels and its body has no freshness baseline, which this write replaced. Re-run the archive workflow for this stub so the baseline is recorded again.`,
+        );
+      }
+      const repaired = withArchiveBaseline(after.body, baselineBefore);
+      if (repaired === null) {
+        throw new Error(
+          `Issue #${issueNumber} lost its archive freshness baseline to a concurrent write and has no yaml block to restore it into; repair the body by hand.`,
+        );
+      }
+      log(
+        `::notice::Restoring the archive freshness baseline on issue #${issueNumber}; a concurrent body write dropped it (round ${attempt}).`,
+      );
+      await runGh(
+        ["issue", "edit", String(issueNumber), "-R", repo, "--body-file", "-"],
+        { stdin: repaired },
+      );
+      live = await readStubState(runGh, repo, issueNumber);
+      continue;
+    }
+
+    const lostBaseline = Boolean(baselineBefore) && !baselineAfter;
+    if (stuck && !lostBaseline) return { written: true, body: after.body };
 
     if (lostBaseline) {
-      // The archive leg wrote its baseline inside our read/write window and this
-      // write replaced it. Put it back on the LIVE body — the archive's own
-      // settlement check may already have passed, so nothing else will.
-      const repaired = withArchiveBaseline(after, baselineBefore);
+      const repaired = withArchiveBaseline(after.body, baselineBefore);
       if (repaired === null) {
         throw new Error(
           `Issue #${issueNumber} lost its archive freshness baseline to a concurrent write and has no yaml block to restore it into; repair the body by hand.`,
@@ -486,7 +562,7 @@ async function settleStubBody({
         { stdin: repaired },
       );
     }
-    live = await readStubBody(runGh, repo, issueNumber);
+    live = await readStubState(runGh, repo, issueNumber);
   }
   throw new Error(
     `Issue #${issueNumber}: the brief write did not settle after ${BRIEF_WRITE_ATTEMPTS} rounds — another writer keeps replacing the body. Re-run once the archive workflow for this stub has finished.`,
@@ -532,11 +608,11 @@ export async function runBrief({
     mutate = stripBriefFromBody;
   }
 
-  const { written, body } = await settleStubBody({
+  const { written, body, yielded } = await settleStubBody({
     runGh,
     repo,
     issueNumber,
-    first: issue.body,
+    first: { body: issue.body, labels: issue.labels },
     mutate,
     dryRun,
     log,
@@ -547,12 +623,14 @@ export async function runBrief({
         ? `Wrote the needs-human brief to issue #${issueNumber}.`
         : `Removed the stale needs-human brief from issue #${issueNumber} (verdict is ${verdict}).`,
     );
-  } else if (!dryRun) {
+  } else if (!dryRun && !yielded) {
+    // A yield already said why on its own line; do not follow it with a claim
+    // about the block's state that this run deliberately did not establish.
     log(
       `Issue #${issueNumber} already carries the brief its ${verdict} verdict implies; nothing to write.`,
     );
   }
-  return { written, verdict, body };
+  return { written, verdict, body, yielded: Boolean(yielded) };
 }
 
 // ---------------------------------------------------------------------------

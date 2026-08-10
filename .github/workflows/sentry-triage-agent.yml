@@ -355,6 +355,7 @@ jobs:
           for f in \
             sentry-triage-agent-comment.mjs \
             sentry-triage-project-core.mjs \
+            sentry-triage-text.mjs \
             sentry-mcp-broker.mjs; do
             install -m 0444 "scripts/${f}" "${tools_dir}/${f}"
           done
@@ -683,10 +684,17 @@ jobs:
           # never a second literal list. Unguarded like the close step's
           # compensation: this step is failing either way, and a compensation
           # that itself fails should fail loudly under set -e.
+          # `sentry:approved-archive` is in the removal list for the reason
+          # REOPEN_SHED_LABELS gives (scripts/sentry-triage-queue-contract.mjs):
+          # a re-queued stub must not carry a human's archive approval into the
+          # round that follows, or the archive workflow's dispatch path — which
+          # takes approval + any verdict label as its whole precondition — can
+          # archive a freshly triaged occurrence nobody approved. Shedding an
+          # approval is always allowed; ADDING one never is.
           requeue_for_retry() {
             gh issue edit "${QUEUE_ISSUE_NUMBER}" \
               --repo "${GITHUB_REPOSITORY}" \
-              --remove-label "${label},${shed},sentry:projected" \
+              --remove-label "${label},${shed},sentry:projected,sentry:approved-archive" \
               --add-label "sentry:needs-triage"
           }
           # Post-condition, re-read from GitHub rather than assumed: refuse to
@@ -771,7 +779,7 @@ jobs:
           requeue_for_retry() {
             gh issue edit "${QUEUE_ISSUE_NUMBER}" \
               --repo "${GITHUB_REPOSITORY}" \
-              --remove-label "${VERDICT_LABEL},${VERDICT_SHED},sentry:projected" \
+              --remove-label "${VERDICT_LABEL},${VERDICT_SHED},sentry:projected,sentry:approved-archive" \
               --add-label "sentry:needs-triage"
           }
           # Plain scripts/ is correct HERE for the same reason as the label
