@@ -85,37 +85,48 @@ function jobBlock(name) {
 }
 
 /**
- * The `scripts` job with full-line YAML comments removed. Several steps in
- * that job carry comments naming the suites they run; matching against the
- * raw body would let a comment alone satisfy this check.
- */
-const SCRIPTS_JOB = jobBlock("scripts")
-  .split("\n")
-  .filter((line) => !/^\s*#/.test(line))
-  .join("\n");
-
-/**
- * The whole workflow with full-line YAML comments removed. Exemption re-proofs
- * point at steps in OTHER jobs, so they cannot use `SCRIPTS_JOB` — but they
- * need the same protection: matching raw text would let a commented-out step
- * keep an exemption green after the real step was deleted.
- */
-const CI_WITHOUT_COMMENTS = CI.split("\n")
-  .filter((line) => !/^\s*#/.test(line))
-  .join("\n");
-
-/**
- * Every executable command in the `scripts` job: the value of each `run:` key,
- * plus the continuation lines of block scalars (`run: |`).
+ * Strip YAML comments — both full-line and trailing. A trailing `# run: …`
+ * would otherwise read as an executable command.
  *
- * Searching the whole job body would let ANY occurrence satisfy the invariant —
- * `run: echo "temporarily disabled: pnpm sentry:requeue:test"` would count as
- * running the suite. Commands are collected from `run:` positions only, and a
- * command quoted inside another command's arguments is not one of them.
+ * `#` inside a quoted string is not a comment, so quoted spans are skipped.
+ * @param {string} line
  */
-const SCRIPTS_JOB_COMMANDS = (() => {
+function stripComment(line) {
+  let quote = null;
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i];
+    if (quote) {
+      if (ch === quote && line[i - 1] !== "\\") quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      continue;
+    }
+    if (ch === "#" && (i === 0 || /\s/.test(line[i - 1]))) {
+      return line.slice(0, i);
+    }
+  }
+  return line;
+}
+
+/**
+ * Every executable command in a job: the value of each `run:` key, plus the
+ * continuation lines of block scalars (`run: |`), with comments stripped.
+ *
+ * Searching a job body as text would let ANY occurrence satisfy an invariant —
+ * `run: echo "temporarily disabled: pnpm sentry:requeue:test"` would count as
+ * running the suite, and a trailing `# run: pnpm tf:test` would count as a
+ * live step. Commands come from `run:` positions only.
+ *
+ * Every check in this file goes through here. Three review rounds on this PR
+ * each found the same defect in a different place, because the guard existed
+ * in one spot and the other call sites matched raw text.
+ * @param {string} jobName
+ */
+function jobCommands(jobName) {
   const commands = [];
-  const lines = SCRIPTS_JOB.split("\n");
+  const lines = jobBlock(jobName).split("\n").map(stripComment);
   for (let i = 0; i < lines.length; i += 1) {
     const inline = /^\s*(?:-\s+)?run:\s*(?![|>])(\S.*)$/.exec(lines[i]);
     if (inline) {
@@ -134,28 +145,43 @@ const SCRIPTS_JOB_COMMANDS = (() => {
     }
   }
   return commands;
-})();
+}
+
+const SCRIPTS_JOB_COMMANDS = jobCommands("scripts");
 
 /**
- * Does the `scripts` job run this command? True only when the command appears
- * at the START of an executable `run:` command — so it cannot be satisfied by
- * the command's name appearing inside another command's arguments.
+ * Does `commands` contain one that starts with `command`? Anchored at the
+ * start, so the name appearing inside another command's arguments does not
+ * count.
+ * @param {string[]} commands
  * @param {string} command
  */
-function scriptsJobRuns(command) {
+function runs(commands, command) {
   // The trailing guard keeps `pnpm sentry:archive` from matching a job that
   // only runs `pnpm sentry:archive:test`.
   const pattern = new RegExp(`^${escapeRegExp(command)}(?![\\w:.-])`);
-  return SCRIPTS_JOB_COMMANDS.some((entry) => pattern.test(entry));
+  return commands.some((entry) => pattern.test(entry));
+}
+
+/** @param {string} command */
+function scriptsJobRuns(command) {
+  return runs(SCRIPTS_JOB_COMMANDS, command);
 }
 
 /**
- * package.json aliases whose command invokes this script file.
+ * package.json aliases that actually INVOKE this script file.
+ *
+ * A substring match would accept `"sentry:ingest:test": "echo scripts/x.mjs"`
+ * — the alias resolves and the CI step runs it, while nothing executes the
+ * suite. The alias must run the file with node.
  * @param {string} file
  */
 function aliasesFor(file) {
+  const invokes = new RegExp(
+    `^node\\s+(?:--test\\s+)?scripts/${escapeRegExp(file)}(?![\\w.-])`,
+  );
   return Object.entries(PKG_SCRIPTS)
-    .filter(([, command]) => command.includes(`scripts/${file}`))
+    .filter(([, command]) => invokes.test(command.trim()))
     .map(([name]) => name);
 }
 
@@ -216,10 +242,10 @@ test("the exemptions still hold", () => {
       new RegExp(`import\\s+["']\\./${escapeRegExp(file)}["']`),
       `${file} is exempted because tf-stacks.test.mjs imports it, but that import is gone`,
     );
-    assert.match(
-      CI_WITHOUT_COMMENTS,
-      /run: pnpm tf:test/,
-      `${file} is exempted because CI runs \`pnpm tf:test\`, but that step is gone`,
+    assert.ok(
+      runs(jobCommands("production-infra-contract"), "pnpm tf:test"),
+      `${file} is exempted because the \`production-infra-contract\` job runs ` +
+        "`pnpm tf:test`, but no executable step in that job does",
     );
   }
 });
