@@ -1078,7 +1078,6 @@ jobs:
         # itself only runs weekly via supply-chain.yml; this required job is
         # what catches a regression in the script on every PR.
         run: node scripts/override-prune-report.test.mjs
-<<<<<<< HEAD
       # ── Sentry triage and autofix suites (issue #1721) ──────────────────────
       # These guard the machine-authored triage and autofix legs: queue
       # transitions, digest and projection shape, autofix selection and
