@@ -3,7 +3,7 @@ title: Codex Agent Skills
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-29
+last_verified: 2026-08-10
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -23,7 +23,10 @@ team-shareable project workflows there instead of relying on local-only
 `~/.agents/skills` and should be exposed to both agents through the
 `~/.codex/skills` and `~/.claude/skills` mirrors. Project-level Codex MCP config
 lives in `.codex/config.toml`; local personal Codex settings belong in
-`~/.codex/config.toml`.
+`~/.codex/config.toml`. Project config may enable or disable a named MCP server,
+but its machine-local transport and authentication stay in the personal config.
+Never copy command arguments, headers, tokens, or credentials into the
+repository.
 
 ## Autoreview routing
 
