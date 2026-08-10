@@ -1616,6 +1616,168 @@ describe("peg poll cycle conversion and cadence", () => {
     expect(errors.map(({ kind }) => kind)).toContain("conversion_unavailable");
   });
 
+  it("refreshes a healthy converted display source when its conversion expires before source cadence", async () => {
+    const spec = primaryAsset({
+      sources: [
+        primarySource({
+          pollIntervalSeconds: 300,
+          staleAfterSeconds: 600,
+        }),
+        primarySource({
+          id: "kraken_usd",
+          provider: "kraken",
+          pair: "PEG/USD",
+          authority: "display",
+          pollIntervalSeconds: 300,
+          staleAfterSeconds: 600,
+          converted: true,
+        }),
+      ],
+    });
+    const input = makeInput([spec]);
+    let nowMs = 1_800_000_000_000;
+    const fetchKraken = vi.fn(async () =>
+      observation(nowMs, { vwap: 2, bid: 1.998, ask: 2.002 }),
+    );
+    const readConversionLeg = vi.fn(async () => ({
+      rate: 2,
+      medianAt: Math.floor(nowMs / 1_000),
+      expirySeconds: 60,
+      authoritative: true,
+      unavailableReason: null,
+    }));
+    const poller = createPegPoller({
+      nowMs: () => nowMs,
+      fetchStructuralContext: vi.fn(async () =>
+        structuralContext(spec, Math.floor(nowMs / 1_000)),
+      ),
+      fetchBitvavo: vi.fn(async () => observation(nowMs)),
+      fetchKraken,
+      readConversionLeg,
+      publish: vi.fn(),
+    });
+
+    const initial = (await poller.pollCycle(input))[0]!;
+    expect(source(initial, "kraken_usd")).toMatchObject({
+      healthy: true,
+      observation: { vwap: 1 },
+    });
+
+    nowMs += 61_000;
+    const refreshed = (await poller.pollCycle(input))[0]!;
+    expect(source(refreshed, "kraken_usd")).toMatchObject({
+      healthy: true,
+      newSuccess: true,
+      observation: { vwap: 1 },
+    });
+    expect(fetchKraken).toHaveBeenCalledTimes(2);
+    expect(readConversionLeg).toHaveBeenCalledTimes(2);
+  });
+
+  it("fails closed once on converted-source expiry without retrying until ordinary cadence", async () => {
+    const spec = primaryAsset({
+      sources: [
+        primarySource({
+          pollIntervalSeconds: 300,
+          staleAfterSeconds: 600,
+        }),
+        primarySource({
+          id: "kraken_usd",
+          provider: "kraken",
+          pair: "PEG/USD",
+          authority: "display",
+          pollIntervalSeconds: 300,
+          staleAfterSeconds: 600,
+          converted: true,
+        }),
+      ],
+    });
+    const input = makeInput([spec]);
+    let nowMs = 1_800_000_000_000;
+    let authoritative = true;
+    const errors: PegPollErrorEvent[] = [];
+    const fetchKraken = vi.fn(async () => observation(nowMs));
+    const poller = createPegPoller({
+      nowMs: () => nowMs,
+      fetchStructuralContext: vi.fn(async () =>
+        structuralContext(spec, Math.floor(nowMs / 1_000)),
+      ),
+      fetchBitvavo: vi.fn(async () => observation(nowMs)),
+      fetchKraken,
+      readConversionLeg: vi.fn(async () => ({
+        rate: 2,
+        medianAt: Math.floor(nowMs / 1_000),
+        expirySeconds: 60,
+        authoritative,
+        unavailableReason: authoritative ? null : ("stale" as const),
+      })),
+      publish: vi.fn(),
+      onError: (event) => errors.push(event),
+    });
+
+    await poller.pollCycle(input);
+    authoritative = false;
+    nowMs += 61_000;
+    const expired = (await poller.pollCycle(input))[0]!;
+    expect(source(expired, "kraken_usd")).toMatchObject({
+      healthy: false,
+      observation: null,
+    });
+    expect(fetchKraken).toHaveBeenCalledTimes(2);
+    expect(errors.map(({ kind }) => kind)).toEqual(["conversion_unavailable"]);
+
+    nowMs += 15_000;
+    await poller.pollCycle(input);
+    expect(fetchKraken).toHaveBeenCalledTimes(2);
+    expect(errors).toHaveLength(1);
+
+    nowMs += 285_000;
+    await poller.pollCycle(input);
+    expect(fetchKraken).toHaveBeenCalledTimes(3);
+    expect(errors.map(({ kind }) => kind)).toEqual([
+      "conversion_unavailable",
+      "conversion_unavailable",
+    ]);
+  });
+
+  it("keeps direct-source polling on ordinary cadence", async () => {
+    const spec = primaryAsset({
+      sources: [
+        primarySource({
+          id: "kraken_eur",
+          provider: "kraken",
+          pair: "PEG/EUR",
+          pollIntervalSeconds: 300,
+          staleAfterSeconds: 600,
+        }),
+      ],
+    });
+    const input = makeInput([spec]);
+    let nowMs = 1_800_000_000_000;
+    const fetchKraken = vi.fn(async () => observation(nowMs));
+    const poller = createPegPoller({
+      nowMs: () => nowMs,
+      fetchStructuralContext: vi.fn(async () =>
+        structuralContext(spec, Math.floor(nowMs / 1_000)),
+      ),
+      fetchKraken,
+      publish: vi.fn(),
+    });
+
+    await poller.pollCycle(input);
+    nowMs += 120_000;
+    const cached = (await poller.pollCycle(input))[0]!;
+    expect(source(cached, "kraken_eur")).toMatchObject({
+      healthy: true,
+      newSuccess: false,
+    });
+    expect(fetchKraken).toHaveBeenCalledOnce();
+
+    nowMs += 180_000;
+    await poller.pollCycle(input);
+    expect(fetchKraken).toHaveBeenCalledTimes(2);
+  });
+
   it("honors independent Bitvavo and Kraken source cadences", async () => {
     const spec = primaryAsset({
       sources: [

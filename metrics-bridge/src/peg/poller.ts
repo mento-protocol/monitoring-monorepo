@@ -407,6 +407,33 @@ function sourceCadences(
   };
 }
 
+function conversionExpiryDue(
+  state: SourceState,
+  source: PegSource,
+  context: CycleContext,
+): boolean {
+  return (
+    source.convertVia !== undefined &&
+    state.observation !== null &&
+    state.observation.venueState !== "halted" &&
+    state.conversionValidUntil !== null &&
+    context.nowSeconds > state.conversionValidUntil
+  );
+}
+
+function sourceDue(
+  state: SourceState,
+  input: PollSourceInput,
+  refSize: number,
+  observationCadenceDue: boolean,
+): boolean {
+  return (
+    observationCadenceDue ||
+    state.referenceSize !== refSize ||
+    conversionExpiryDue(state, input.source, input.context)
+  );
+}
+
 function fetchSource(
   input: PollSourceInput,
   refSize: number,
@@ -756,9 +783,9 @@ async function pollSource(
       listingCadenceDue,
     );
   }
-  // A changed binding reference size requires an immediate new decision even
-  // inside the ordinary cadence window.
-  const due = observationCadenceDue || state.referenceSize !== refSize;
+  // A changed binding reference size or expired conversion proof requires an
+  // immediate refresh inside the ordinary cadence window.
+  const due = sourceDue(state, input, refSize, observationCadenceDue);
   if (due) {
     const snapshot = await pollDueSource(
       input,
