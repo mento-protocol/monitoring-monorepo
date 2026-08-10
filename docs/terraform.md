@@ -183,24 +183,26 @@ soft-delete retention, `force_destroy = false`, and Terraform
 `prevent_destroy`. Cloud Build callers can read bucket metadata and create
 objects. The dedicated Alloy `grafana_agent_builder` and
 `metrics-bridge-builder` can view Cloud Build source objects; the Alloy builder
-is also an App Engine uploader. The legacy default Compute executor
-`80554359692-compute@developer.gserviceaccount.com` retains the same
-read-only Cloud Build source access only while the dedicated Metrics Bridge
-route completes its GitHub and direct `main` canaries. App Engine uploaders
-have Object Admin only on the App Engine source bucket because the CLI can
-replace or clean up cached hash-named objects. AppSpot can view those objects.
-The routine deployer and `gcp_dev_members` have Service Account User only on
-the dedicated Metrics Bridge runtime identity and dedicated builder. They have
-no default-Compute or project-wide Service Account User grant.
+is also an App Engine uploader. Both Metrics Bridge route canaries passed. The
+follow-up cleanup removes the legacy default Compute executor
+`80554359692-compute@developer.gserviceaccount.com` from the direct Cloud Build
+source-bucket Object Viewer set. App Engine uploaders have Object Admin only on
+the App Engine source bucket because the CLI can replace or clean up cached
+hash-named objects. AppSpot can view those objects. Default Compute has no direct
+App Engine source-bucket grant in this stack.
 
-After both route canaries pass, remove the temporary default-Compute source
-reader in a separate reviewed cleanup PR. Refresh current `main`, inspect a
-clean platform plan, obtain explicit apply approval, apply, and verify both
-effective bucket IAM and the live Cloud Run revision. [ADR
+The routine deployer and `gcp_dev_members` have Service Account User only on the
+dedicated Metrics Bridge runtime identity and dedicated builder. They have no
+default-Compute or project-wide Service Account User grant.
+
+Apply the direct-reader cleanup only from clean current `main`, after reviewing
+a full platform plan and obtaining explicit approval. Verify that the direct
+bucket policy no longer lists default Compute and still lists both dedicated
+builders, then verify the live Cloud Run revision. Default Compute's separate
+project-level Editor role may still grant inherited Storage access and remains
+outside this cleanup. [ADR
 0058](adr/0058-metrics-bridge-dedicated-cloud-build-executor.md) owns that
 boundary.
-
-Metrics Bridge's default Compute executor has no App Engine source-bucket grant.
 
 The five approved checked-in `gcloud builds submit` / `gcloud app deploy`
 calls use their required source-staging flag/value. `pnpm tf:test` enforces that
@@ -208,11 +210,11 @@ inventory; [ADR 0053](adr/0053-explicit-deployment-source-staging.md) defines
 the supported static syntax and deliberate proof limits.
 
 The original source-bucket rollout, five route canaries, ADR 0054 policy
-foundation, broad-role removal, and effective-IAM audit are complete. For ADR
-0058, the additive Metrics Bridge builder is applied and verified, and the
-checked-in build config pins it. Canary the GitHub and direct `main` deploy
-paths, then remove the temporary default Compute source reader through a
-separate reviewed cleanup and approved apply.
+foundation, broad-role removal, and effective-IAM audit are complete. ADR 0058's
+additive Metrics Bridge builder is applied and verified, the checked-in build
+config pins it, and both route canaries passed. The separate approved cleanup
+apply removes only default Compute's direct Cloud Build source-bucket Object
+Viewer.
 
 ## Platform GitHub Actions secrets and variables
 

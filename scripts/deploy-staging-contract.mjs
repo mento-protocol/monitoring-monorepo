@@ -37,7 +37,6 @@ const METRICS_BRIDGE_PUBLIC_BINDING_TARGET =
   "google_cloud_run_v2_service_iam_member.metrics_bridge_public";
 const CLOUD_BUILD_SOURCE_EXECUTORS = [
   "serviceAccount:${google_service_account.grafana_agent_builder.email}",
-  "serviceAccount:${google_project.monitoring.number}-compute@developer.gserviceaccount.com",
   "serviceAccount:${google_service_account.metrics_bridge_builder.email}",
 ];
 
@@ -224,9 +223,7 @@ function validateCloudBuildSourceExecutors(blocks, errors) {
       CLOUD_BUILD_SOURCE_EXECUTORS,
     )
   ) {
-    errors.push(
-      `${label}: must contain the two dedicated builders and temporary default Compute reader`,
-    );
+    errors.push(`${label}: must contain only the two dedicated builders`);
   }
 
   const grant = requireBlock(

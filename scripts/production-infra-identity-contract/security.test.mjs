@@ -645,7 +645,7 @@ expectFailure(
 const cloudBuildExecutorFiles = liveRepositoryFiles();
 const alloyBuilderExecutor =
   '    "serviceAccount:${google_service_account.grafana_agent_builder.email}",\n';
-const metricsBridgeExecutor =
+const defaultComputeExecutor =
   '    "serviceAccount:${google_project.monitoring.number}-compute@developer.gserviceaccount.com",\n';
 const dedicatedMetricsBridgeBuilderExecutor =
   '    "serviceAccount:${google_service_account.metrics_bridge_builder.email}",\n';
@@ -655,8 +655,8 @@ assert(
   ),
 );
 assert(
-  cloudBuildExecutorFiles["terraform/deploy-staging.tf"].includes(
-    metricsBridgeExecutor,
+  !cloudBuildExecutorFiles["terraform/deploy-staging.tf"].includes(
+    defaultComputeExecutor,
   ),
 );
 assert(
@@ -666,7 +666,6 @@ assert(
 );
 for (const executor of [
   alloyBuilderExecutor,
-  metricsBridgeExecutor,
   dedicatedMetricsBridgeBuilderExecutor,
 ]) {
   const files = {
@@ -681,13 +680,27 @@ for (const executor of [
   );
 }
 
+const restoredDefaultComputeExecutorFiles = {
+  ...cloudBuildExecutorFiles,
+  "terraform/deploy-staging.tf": cloudBuildExecutorFiles[
+    "terraform/deploy-staging.tf"
+  ].replace(
+    dedicatedMetricsBridgeBuilderExecutor,
+    `${defaultComputeExecutor}${dedicatedMetricsBridgeBuilderExecutor}`,
+  ),
+};
+expectFailure(
+  restoredDefaultComputeExecutorFiles,
+  "IAM local source blocks must match its exact audited shape",
+);
+
 const broadenedCloudBuildExecutorFiles = {
   ...cloudBuildExecutorFiles,
   "terraform/deploy-staging.tf": cloudBuildExecutorFiles[
     "terraform/deploy-staging.tf"
   ].replace(
-    metricsBridgeExecutor,
-    `${metricsBridgeExecutor}    "serviceAccount:\${google_project.monitoring.number}@cloudbuild.gserviceaccount.com",\n`,
+    dedicatedMetricsBridgeBuilderExecutor,
+    `${dedicatedMetricsBridgeBuilderExecutor}    "serviceAccount:\${google_project.monitoring.number}@cloudbuild.gserviceaccount.com",\n`,
   ),
 };
 expectFailure(

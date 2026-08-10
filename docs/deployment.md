@@ -186,28 +186,29 @@ audited. [ADR 0053](adr/0053-explicit-deployment-source-staging.md) records that
 permission split and completed sequence.
 
 The Metrics Bridge builder foundation is applied, its effective IAM is
-verified, and `cloudbuild.yaml` pins both submit paths to it. Complete the
-remaining phase-two rollout under
-[ADR 0058](adr/0058-metrics-bridge-dedicated-cloud-build-executor.md):
+verified, `cloudbuild.yaml` pins both submit paths to it, and both route canaries
+passed. The direct `pnpm bridge:deploy` path reconciles the builder,
+direct-deployer IAM, and Peg-policy bucket IAM dependency, then verifies whether
+Metrics Bridge already exists. It preserves an existing live revision and
+creates the service only from a guarded no-refresh plan after both live and
+state checks confirm its absence. If an interrupted first bootstrap left the
+public binding out of Terraform state, a separate guarded no-refresh plan may
+create only that binding. The deploy then verifies the live service and public
+binding; tracked IAM drift or other service-shape drift requires a reviewed full
+platform plan/apply.
 
-1. Watch the GitHub `main` deployment complete. It is the first canary of the
-   dedicated builder while the default-Compute source reader remains live.
-2. From the resulting clean `main`, run and verify the direct
-   `pnpm bridge:deploy` canary. Its Terraform bootstrap reconciles the applied
-   builder, direct-deployer IAM, and Peg-policy bucket IAM dependency, then
-   verifies whether Metrics Bridge already exists. It preserves an existing
-   live revision and creates the service only from a guarded no-refresh plan
-   after both live and state checks confirm its absence. If an interrupted
-   first bootstrap left the public binding out of Terraform state, a separate
-   guarded no-refresh plan may create only that binding. The deploy then
-   verifies the live service and public binding; tracked IAM drift or other
-   service-shape drift requires a reviewed full platform plan/apply. The
-   temporary default-Compute reader remains unchanged in this routing phase.
-3. In a separate reviewed cleanup PR, remove that reader. Refresh current
-   `main`, inspect a clean platform plan, obtain explicit apply approval, and
-   apply it.
-4. Verify effective bucket IAM no longer grants default Compute access, and
-   verify the deployed Cloud Run revision and `/health` endpoint.
+[ADR 0058](adr/0058-metrics-bridge-dedicated-cloud-build-executor.md)'s
+follow-up cleanup removes default Compute's direct Object Viewer binding from
+`mento-monitoring-cloud-build-source`. After that cleanup merges, refresh clean
+current `main` and inspect the full platform plan. The intended plan destroys
+only
+`google_storage_bucket_iam_member.cloud_build_source_executor_object_viewer["serviceAccount:80554359692-compute@developer.gserviceaccount.com"]`;
+stop if it contains another change. Obtain explicit apply approval, apply, then
+verify that the direct bucket binding is absent, both dedicated builders remain,
+and the deployed Cloud Run revision and `/health` endpoint stay healthy.
+
+This cleanup does not remove or make claims about default Compute's separate
+project-level Editor role, which may still grant inherited Storage access.
 
 The routine deployer and `gcp_dev_members` have Service Account User only on
 the dedicated builder and runtime identity; neither may receive default-Compute

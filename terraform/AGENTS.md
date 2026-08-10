@@ -77,9 +77,10 @@ image pull depend on the exact boundaries.
   Metrics Bridge builder migration in
   [`ADR 0058`](../docs/adr/0058-metrics-bridge-dedicated-cloud-build-executor.md)
   has an applied, verified IAM foundation, and the checked-in build config pins
-  the dedicated builder. Verify the GitHub and direct `main` deploy canaries
-  while default Compute still has its temporary source reader, then remove that
-  reader only in a later reviewed PR and approved clean-current-main apply.
+  the dedicated builder. Both route canaries passed. Keep direct Cloud Build
+  source-object reads limited to the Alloy and Metrics Bridge builders; never
+  reintroduce default Compute's direct bucket Object Viewer. Its project-level
+  Editor role remains a separate audit and retirement task.
 - Keep routine deploy, PR plan, trusted-main refresh, and production apply
   identities separate as required by
   [`ADR 0047`](../docs/adr/0047-separated-terraform-ci-identities.md). Policy

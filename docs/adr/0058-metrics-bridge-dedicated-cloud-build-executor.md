@@ -14,9 +14,10 @@ garden_lane: adrs-architecture
 # ADR 0058 — Metrics Bridge uses a dedicated Cloud Build executor
 
 **Status:** Accepted (Aug 2026). Phase 1 infrastructure is applied and
-effective IAM is verified. Phase 2 routing is configured; its two canaries and
-later cleanup remain in the order below. **Scope:** terraform/infra /
-metrics-bridge.
+effective IAM is verified. Phase 2 routes both deployment paths through the
+dedicated builder, and both canaries passed. The follow-up cleanup removes
+default Compute's direct source-bucket Object Viewer through the approved
+sequence below. **Scope:** terraform/infra / metrics-bridge.
 
 ## Context
 
@@ -47,19 +48,24 @@ Storage write role, project Editor, or Token Creator grant.
 The migration is two phases. Phase 1 created the builder, its exact IAM, and
 the submitter act-as grants. Its clean-current-main plan, approved apply, and
 effective-IAM verification are complete. It deliberately retained default
-Compute's existing source-bucket Object Viewer grant.
+Compute's direct source-bucket Object Viewer through the route canaries.
 
-Phase 2 has a strict order:
+Phase 2 follows this strict order:
 
-1. Pin `cloudbuild.yaml` to the dedicated builder without removing default
-   Compute's source reader. This repository now has that configuration, and the
-   direct deploy bootstrap reconciles the builder and operator IAM it needs.
-2. Canary the GitHub `main` deploy while default Compute still has its
-   temporary source-bucket reader.
-3. Canary the direct `main` deploy while that reader still exists.
-4. In a separate cleanup PR, remove the reader, then run a clean current-main
-   platform plan and obtain explicit approval before apply.
-5. Verify effective IAM and the live Metrics Bridge revision after the cleanup.
+1. Pin `cloudbuild.yaml` to the dedicated builder while retaining the direct
+   default-Compute reader. The checked-in configuration and direct deploy
+   bootstrap now use that builder.
+2. Canary the GitHub `main` deploy. This passed.
+3. Canary the direct `main` deploy. This passed.
+4. In a separate cleanup PR, remove only default Compute's direct source-bucket
+   Object Viewer. From the merged cleanup on clean current `main`, inspect the
+   full platform plan and obtain explicit approval before apply.
+5. Verify the direct bucket binding is absent, both dedicated builders remain,
+   and the live Metrics Bridge revision and `/health` endpoint stay healthy.
+
+The cleanup does not claim that default Compute has zero effective Storage
+access. Its project-level Editor role remains a separate audit and retirement
+task and may still grant inherited access.
 
 ## Alternatives considered
 
@@ -74,15 +80,14 @@ Phase 2 has a strict order:
 
 ## Consequences
 
-- The builder foundation is live without having changed a production build
-  route.
-- The routing PR may merge only after the applied foundation proves the builder
-  and submitter bindings exist; that proof is complete.
-- The temporary default-Compute reader survives both route canaries and is
-  removed only by a separate approved cleanup apply.
+- The builder foundation and both dedicated routes are live.
+- The applied foundation proved the builder and submitter bindings before the
+  routing change; both route canaries then passed.
+- A separate approved cleanup apply removes default Compute's direct
+  source-bucket Object Viewer while retaining both dedicated builders.
 - The default Compute service account's broader project role remains a
-  separate audit and retirement task; this decision removes it from the Metrics
-  Bridge build path without assuming no other workload uses it.
+  separate audit and retirement task; this decision removes the direct Metrics
+  Bridge build-path grant without assuming no other workload uses the account.
 
 ## Evidence
 

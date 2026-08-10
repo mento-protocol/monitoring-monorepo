@@ -14,9 +14,9 @@ resource "google_artifact_registry_repository" "metrics_bridge" {
 #
 # The applied phase-one foundation gives Metrics Bridge a narrow executor in
 # place of the project's Editor-bearing default Compute identity. Phase two
-# pins `cloudbuild.yaml` to this identity and canaries both deployment paths.
-# A later reviewed cleanup removes the still-temporary default Compute source
-# reader through a separately approved apply.
+# pins `cloudbuild.yaml` to this identity; both deployment-path canaries passed.
+# The follow-up cleanup removes default Compute's direct source-bucket Object
+# Viewer. Its project-level Editor role remains a separate retirement task.
 locals {
   metrics_bridge_builder_project_roles = toset([
     "roles/cloudbuild.builds.editor",

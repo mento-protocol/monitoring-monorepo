@@ -816,9 +816,18 @@ assert(
   files["terraform/deploy-staging.tf"].includes(metricsBridgeBuilderExecutor),
   "Metrics Bridge builder must be in the source-executor set",
 );
+assert(
+  !files["terraform/deploy-staging.tf"].includes(defaultComputeExecutor),
+  "Default Compute must not be in the source-executor set",
+);
 expectFailure(
-  mutate(files, "terraform/deploy-staging.tf", defaultComputeExecutor, ""),
-  "Cloud Build source executors: must contain the two dedicated builders and temporary default Compute reader",
+  mutate(
+    files,
+    "terraform/deploy-staging.tf",
+    metricsBridgeBuilderExecutor,
+    `${defaultComputeExecutor}${metricsBridgeBuilderExecutor}`,
+  ),
+  "Cloud Build source executors: must contain only the two dedicated builders",
 );
 expectFailure(
   mutate(
@@ -827,7 +836,7 @@ expectFailure(
     metricsBridgeBuilderExecutor,
     "",
   ),
-  "Cloud Build source executors: must contain the two dedicated builders and temporary default Compute reader",
+  "Cloud Build source executors: must contain only the two dedicated builders",
 );
 expectFailure(
   mutate(
@@ -836,7 +845,7 @@ expectFailure(
     metricsBridgeBuilderExecutor,
     `${metricsBridgeBuilderExecutor}    "serviceAccount:\${google_project.monitoring.number}@cloudbuild.gserviceaccount.com",\n`,
   ),
-  "Cloud Build source executors: must contain the two dedicated builders and temporary default Compute reader",
+  "Cloud Build source executors: must contain only the two dedicated builders",
 );
 expectFailure(
   mutate(
