@@ -1,13 +1,11 @@
-# Personal, local-only example. Copy this table into ~/.codex/config.toml.
+# Personal, local-only output shape. Generate the real table with
+# `node scripts/render-upstash-mcp-config.mjs`; its paths must be absolute.
 # Never merge it into this repository's .codex/config.toml: Codex Cloud cannot
 # receive these credentials during the agent phase.
 
 [mcp_servers.upstash]
-args = [
-  "node_modules/@upstash/mcp-server/dist/index.js",
-  "--disable-telemetry",
-]
-command = "node"
+args = ["/absolute/path/to/monitoring-monorepo/scripts/upstash-mcp-launcher.mjs"]
+command = "/absolute/path/to/node"
 default_tools_approval_mode = "prompt"
 enabled = false
 enabled_tools = [

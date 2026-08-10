@@ -22,14 +22,18 @@ or the authenticated dashboard editor.
 
 The workspace pins `@upstash/mcp-server@0.2.4` in `package.json` and
 `pnpm-lock.yaml`. Normal repository setup installs that reviewed artifact. The
-personal config launches the reviewed entrypoint directly with
-`node node_modules/@upstash/mcp-server/dist/index.js --disable-telemetry`. It
-cannot install a missing package or resolve a newer version from the registry
-at startup.
+personal config uses absolute paths for Node and the repository-owned launcher.
+Before every start, the launcher resolves the package from its own repository
+path, verifies version `0.2.4` and the reviewed entrypoint SHA-256, then starts
+it with `--disable-telemetry`. It cannot select a package from the session's
+working directory, install a missing package, or resolve a newer version from
+the registry at startup.
 
 - npm integrity:
   `sha512-LN5yao74QQZTjGmolGqAh9YkQa/206ni94wwTtu6I/mVkyMeAbRME7rjK64KrWmCTw2OHUb8TMFsw6r4rMmUSQ==`
 - npm shasum: `4b2a627dbce2773f000a0e14d15e61a7ca1150f8`
+- entrypoint SHA-256:
+  `1949e38e9c66aaac5cc00e2da2b8bbf712a4c39266f8f501a3cdd86253fe4b8e`
 - upstream git commit: `e3ab3c20ebd7d0e195cd774004fdb4c3dcb448d1`
 
 The published entrypoint reads `UPSTASH_EMAIL` and `UPSTASH_API_KEY` when the
@@ -70,11 +74,20 @@ controls rather than substitutes for provider-side least privilege.
 
 ## Configure local Codex
 
-Copy the `mcp_servers.upstash` tables from
-[`.codex/upstash-mcp.example.toml`](../../.codex/upstash-mcp.example.toml) into
-`~/.codex/config.toml`. Keep `enabled = false` as the normal state. Do not add an
-Upstash table to the repository's `.codex/config.toml`. Start Codex from this
-repository so the launcher resolves the workspace-installed binary.
+Generate the `mcp_servers.upstash` tables from the checkout that will own this
+transport:
+
+```bash
+node scripts/render-upstash-mcp-config.mjs
+```
+
+Copy that credential-free output into `~/.codex/config.toml`. The checked-in
+[`.codex/upstash-mcp.example.toml`](../../.codex/upstash-mcp.example.toml) shows
+the output shape but contains placeholder paths. Keep `enabled = false` as the
+normal state. Regenerate the table after moving the checkout or Node binary.
+Do not add an Upstash table to the repository's `.codex/config.toml`. The
+absolute launcher remains bound to this checkout even when Codex starts from a
+different working directory.
 
 For an attended upload session, use the approved secret-manager integration to
 inject `UPSTASH_EMAIL` and `UPSTASH_API_KEY` into the Codex process and enable
@@ -105,6 +118,8 @@ shared log, record only these facts after redaction:
 
 - server name is `upstash`;
 - workspace package and lockfile resolve exactly `@upstash/mcp-server@0.2.4`;
+- Node and the repository-owned launcher use absolute paths;
+- the launcher verifies the reviewed entrypoint SHA-256 before startup;
 - credential flags are absent;
 - forwarded names are `UPSTASH_EMAIL` and `UPSTASH_API_KEY`;
 - only the two reviewed tools are enabled;

@@ -3774,6 +3774,14 @@ run_gate "scripts/upstash-mcp-config.test.mjs"
 assert_contains "- pnpm lint:scripts (root build script changed)"
 assert_contains "- node --test scripts/upstash-mcp-config.test.mjs (Upstash MCP transport contract changed)"
 
+run_gate "scripts/upstash-mcp-launcher.mjs"
+assert_contains "- pnpm lint:scripts (root build script changed)"
+assert_contains "- node --test scripts/upstash-mcp-config.test.mjs (Upstash MCP transport contract changed)"
+
+run_gate "scripts/render-upstash-mcp-config.mjs"
+assert_contains "- pnpm lint:scripts (root build script changed)"
+assert_contains "- node --test scripts/upstash-mcp-config.test.mjs (Upstash MCP transport contract changed)"
+
 run_gate "scripts/docs-index.mjs"
 assert_contains "- pnpm docs:index:test (documentation catalog helper changed)"
 assert_contains "- pnpm docs:index --check (documentation catalog helper changed)"
