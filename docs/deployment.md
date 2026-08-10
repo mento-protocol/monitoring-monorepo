@@ -179,18 +179,22 @@ required source-staging flag/value. [ADR 0053](adr/0053-explicit-deployment-sour
 defines the supported static discovery syntax and its deliberate indirect and
 dynamic proof limits.
 
-This migration has a strict rollout order. First merge the infrastructure-only
-PR. Refresh current `main`, run a clean current-main platform plan, get explicit
-apply approval, apply, and verify both buckets, their bucket-scoped IAM, and the
-exact dedicated Metrics Bridge runtime act-as grants for the routine deployer
-and `gcp_dev_members`. Those identities must have no default-Compute or
-project-wide Service Account User grant. Only then merge the routing follow-up;
-that merge triggers the Metrics Bridge and Aegis workflows.
-Canary all five paths, including `pnpm aegis:agent:deploy`, before applying the
-policy foundation. That apply removes broad Storage Admin, Storage Object
-Admin, and Service Account User grants and requires an effective-IAM audit.
-[ADR 0053](adr/0053-explicit-deployment-source-staging.md) records the
-permission split and phase boundary.
+The source-staging migration is complete: both buckets and their scoped IAM are
+applied, all five deployment paths were canaried, and the broad Storage Admin,
+Storage Object Admin, and Service Account User fallbacks were removed and
+audited. [ADR 0053](adr/0053-explicit-deployment-source-staging.md) records that
+permission split and completed sequence.
+
+The Metrics Bridge builder repair has its own strict order under
+[ADR 0058](adr/0058-metrics-bridge-dedicated-cloud-build-executor.md). First
+merge the infrastructure-only PR. Refresh current `main`, run a clean platform
+plan, get explicit apply approval, apply, and verify the pre-routed
+`metrics-bridge-builder`, its scoped grants, and the exact deployer and
+`gcp_dev_members` act-as bindings. Those submitters must have no
+default-Compute or project-wide Service Account User grant. Keep the current
+default-Compute source-bucket Object Viewer during this phase. Only then merge
+the routing follow-up, canary the GitHub and direct deploy paths, and remove the
+default-Compute source reader.
 
 ---
 

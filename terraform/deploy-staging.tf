@@ -1,7 +1,8 @@
 # Explicit source staging keeps routine deploys off Cloud Build and App
-# Engine's project-discovered default buckets. Phase 1 adds these scoped grants
-# while the legacy project-wide Storage Admin grants remain available for
-# canary deployments; a separate reviewed phase removes those broad grants.
+# Engine's project-discovered default buckets. The buckets and existing scoped
+# grants are live, and the former project-wide storage and act-as fallbacks are
+# gone. ADR 0058 adds the Metrics Bridge builder here before a separate routing
+# change selects it.
 
 locals {
   deploy_source_callers = setunion(
@@ -9,13 +10,15 @@ locals {
     toset(["serviceAccount:${google_service_account.metrics_bridge_deployer.email}"]),
   )
 
-  # Alloy pins its Cloud Build executor to grafana_agent_builder. Recent
-  # Metrics Bridge builds use the project's default Compute service account
-  # (80554359692-compute@developer.gserviceaccount.com). Both executors need
-  # only object reads for the submitted archive, on this bucket only.
+  # Alloy pins its Cloud Build executor to grafana_agent_builder. Phase 1 adds
+  # Metrics Bridge's dedicated builder alongside the current default Compute
+  # executor. Keep both Object Viewer grants until the later routing PR pins
+  # the new identity and its canaries pass; this apply must not change the live
+  # build route.
   cloud_build_source_executor_members = toset([
     "serviceAccount:${google_service_account.grafana_agent_builder.email}",
     "serviceAccount:${google_project.monitoring.number}-compute@developer.gserviceaccount.com",
+    "serviceAccount:${google_service_account.metrics_bridge_builder.email}",
   ])
 
   # Metrics Bridge's default Compute executor has no App Engine deploy path.
@@ -165,9 +168,8 @@ resource "google_storage_bucket_iam_member" "app_engine_source_appspot_object_vi
   depends_on = [google_app_engine_application.aegis]
 }
 
-# Preserve the routine Metrics Bridge rollout after phase 2 removes the
-# project-wide Service Account User grant. Cloud Run pins the dedicated runtime
-# identity, so the deployer can act only as that service account.
+# Cloud Run pins the dedicated Metrics Bridge runtime identity, so the deployer
+# can act as that service account without project-wide Service Account User.
 resource "google_service_account_iam_member" "ci_metrics_bridge_runtime_service_account_user" {
   service_account_id = google_service_account.metrics_bridge_runtime.name
   role               = "roles/iam.serviceAccountUser"
@@ -194,6 +196,31 @@ resource "google_service_account_iam_member" "dev_metrics_bridge_runtime_service
     google_project_iam_member.dev_run_admin,
     google_service_account.metrics_bridge_runtime,
   ]
+}
+
+# Phase 1 grants submitters act-as only on the future dedicated build executor.
+# Current Metrics Bridge submits still use the default Compute executor until a
+# later reviewed routing change updates cloudbuild.yaml after this foundation's
+# approved current-main apply. Do not grant default-Compute Service Account User.
+resource "google_service_account_iam_member" "ci_metrics_bridge_builder_service_account_user" {
+  service_account_id = google_service_account.metrics_bridge_builder.name
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:${google_service_account.metrics_bridge_deployer.email}"
+
+  depends_on = [
+    google_service_account.metrics_bridge_builder,
+    google_service_account.metrics_bridge_deployer,
+  ]
+}
+
+resource "google_service_account_iam_member" "dev_metrics_bridge_builder_service_account_user" {
+  for_each = toset(var.gcp_dev_members)
+
+  service_account_id = google_service_account.metrics_bridge_builder.name
+  role               = "roles/iam.serviceAccountUser"
+  member             = each.value
+
+  depends_on = [google_service_account.metrics_bridge_builder]
 }
 
 # The target account changes as well as the resource names, so Terraform plans
