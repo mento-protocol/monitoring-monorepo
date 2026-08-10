@@ -12,7 +12,7 @@ import {
   type KrakenObservationRequest,
 } from "./adapters/kraken.js";
 import {
-  convertQuotePriceToPeg,
+  convertPegSourceObservation,
   readPegConversionLeg,
   type PegConversionLeg,
 } from "./conversion.js";
@@ -172,6 +172,7 @@ const defaultSourceState = (): SourceState => ({
   lastObservationAt: null,
   identitiesAtLastObservationAt: new Set(),
   observation: null,
+  rawObservation: null,
   referenceSize: null,
   conversionValidUntil: null,
   listingState: null,
@@ -254,27 +255,6 @@ function takeBounded<Value>(
     );
   }
   return values.slice(0, maximum);
-}
-
-function convertObservation(
-  observation: PegObservation,
-  conversion: PegConversionLeg,
-): PegObservation {
-  return {
-    ...observation,
-    vwap:
-      observation.vwap === null
-        ? null
-        : convertQuotePriceToPeg(observation.vwap, conversion),
-    bid:
-      observation.bid === null
-        ? null
-        : convertQuotePriceToPeg(observation.bid, conversion),
-    ask:
-      observation.ask === null
-        ? null
-        : convertQuotePriceToPeg(observation.ask, conversion),
-  };
 }
 
 function observationIsFresh(
@@ -415,7 +395,10 @@ function conversionExpiryDue(
   return (
     source.convertVia !== undefined &&
     state.observation !== null &&
+    state.rawObservation !== null &&
     state.observation.venueState !== "halted" &&
+    state.listingState !== "absent" &&
+    state.listingState !== "halted" &&
     state.conversionValidUntil !== null &&
     context.nowSeconds > state.conversionValidUntil
   );
@@ -423,15 +406,10 @@ function conversionExpiryDue(
 
 function sourceDue(
   state: SourceState,
-  input: PollSourceInput,
   refSize: number,
   observationCadenceDue: boolean,
 ): boolean {
-  return (
-    observationCadenceDue ||
-    state.referenceSize !== refSize ||
-    conversionExpiryDue(state, input.source, input.context)
-  );
+  return observationCadenceDue || state.referenceSize !== refSize;
 }
 
 function fetchSource(
@@ -462,6 +440,7 @@ function fetchSource(
 
 function clearSource(state: SourceState, refSize: number | null): void {
   state.observation = null;
+  state.rawObservation = null;
   state.referenceSize = refSize;
   state.conversionValidUntil = null;
 }
@@ -490,37 +469,10 @@ function cachedObservation(
     !conversionFresh ||
     !observationIsFresh(state.observation, policy, context.nowMs)
   ) {
-    state.observation = null;
+    clearSource(state, state.referenceSize);
     return null;
   }
   return state.observation;
-}
-
-async function convertSourceObservation(
-  source: PegSource,
-  observation: PegObservation,
-  context: CycleContext,
-): Promise<{
-  observation: PegObservation | null;
-  validUntil: number | null;
-}> {
-  if (observation.venueState === "halted") {
-    return { observation, validUntil: null };
-  }
-  if (source.convertVia === undefined) {
-    return { observation, validUntil: null };
-  }
-  const conversion = await context.dependencies.readConversionLeg(
-    source.convertVia,
-    context.nowSeconds,
-  );
-  if (!conversion.authoritative) {
-    return { observation: null, validUntil: null };
-  }
-  return {
-    observation: convertObservation(observation, conversion),
-    validUntil: conversion.medianAt + conversion.expirySeconds,
-  };
 }
 
 function unavailableSourceSnapshot(
@@ -613,12 +565,42 @@ function failSource(
   return unavailableSourceSnapshot(input, state, refSize);
 }
 
+function providerAdvancement(
+  input: PollSourceInput,
+  state: SourceState,
+  rawObservation: PegObservation,
+): { advanced: boolean; failure: string | null } {
+  if (
+    rawObservation.observationAt === null ||
+    rawObservation.sequence === null
+  ) {
+    return {
+      advanced: false,
+      failure: "venue observation has no publication identity",
+    };
+  }
+  if (!observationIsFresh(rawObservation, input.policy, input.context.nowMs)) {
+    return { advanced: false, failure: "stale venue observation" };
+  }
+  return recordProviderAdvancement(
+    state,
+    rawObservation.observationAt,
+    rawObservation.sequence,
+  );
+}
+
+type DueObservation = {
+  raw: PegObservation;
+  converted: Awaited<ReturnType<typeof convertPegSourceObservation>>;
+};
+
 function acceptDueObservation(
   input: PollSourceInput,
   state: SourceState,
   refSize: number,
-  converted: Awaited<ReturnType<typeof convertSourceObservation>>,
+  due: DueObservation,
 ): PegSourceMetricSnapshot {
+  const { raw: rawObservation, converted } = due;
   if (converted.observation === null) {
     return failSource(input, state, refSize, {
       kind: "conversion_unavailable",
@@ -630,6 +612,7 @@ function acceptDueObservation(
     // A halt is diagnostic, not a successful price observation. Preserve the
     // last accepted identity so reopening with the same frozen book fails shut.
     state.observation = observation;
+    state.rawObservation = null;
     state.referenceSize = refSize;
     state.conversionValidUntil = null;
     return sourceSnapshot(input, state, {
@@ -638,28 +621,7 @@ function acceptDueObservation(
       newSuccess: false,
     });
   }
-  if (observation.observationAt === null || observation.sequence === null) {
-    return failSource(input, state, refSize, {
-      kind: "source_freshness",
-      cause: new Error("venue observation has no publication identity"),
-    });
-  }
-  const fresh = observationIsFresh(
-    observation,
-    input.policy,
-    input.context.nowMs,
-  );
-  if (!fresh) {
-    return failSource(input, state, refSize, {
-      kind: "source_freshness",
-      cause: new Error("stale venue observation"),
-    });
-  }
-  const advancement = recordProviderAdvancement(
-    state,
-    observation.observationAt,
-    observation.sequence,
-  );
+  const advancement = providerAdvancement(input, state, rawObservation);
   if (advancement.failure !== null) {
     return failSource(input, state, refSize, {
       kind: "source_freshness",
@@ -667,6 +629,8 @@ function acceptDueObservation(
     });
   }
   state.observation = observation;
+  state.rawObservation =
+    input.source.convertVia === undefined ? null : rawObservation;
   state.referenceSize = refSize;
   state.conversionValidUntil = converted.validUntil;
   // A repeated provider identity remains healthy until its provider timestamp
@@ -675,6 +639,52 @@ function acceptDueObservation(
     referenceSize: refSize,
     observation,
     newSuccess: advancement.advanced,
+  });
+}
+
+async function refreshExpiredConversion(
+  input: PollSourceInput,
+  state: SourceState,
+  refSize: number,
+): Promise<PegSourceMetricSnapshot> {
+  const rawObservation = state.rawObservation;
+  if (
+    rawObservation === null ||
+    !observationIsFresh(rawObservation, input.policy, input.context.nowMs)
+  ) {
+    return failSource(input, state, refSize, {
+      kind: "source_freshness",
+      cause: new Error("stale retained venue observation"),
+    });
+  }
+
+  let converted: Awaited<ReturnType<typeof convertPegSourceObservation>>;
+  try {
+    converted = await convertPegSourceObservation(
+      rawObservation,
+      input.source.convertVia,
+      input.context.nowSeconds,
+      input.context.dependencies.readConversionLeg,
+    );
+  } catch (cause) {
+    return failSource(input, state, refSize, {
+      kind: "conversion",
+      cause,
+    });
+  }
+  if (converted.observation === null) {
+    return failSource(input, state, refSize, {
+      kind: "conversion_unavailable",
+      cause: new Error("conversion leg is not authoritative"),
+    });
+  }
+
+  state.observation = converted.observation;
+  state.conversionValidUntil = converted.validUntil;
+  return sourceSnapshot(input, state, {
+    referenceSize: refSize,
+    observation: converted.observation,
+    newSuccess: false,
   });
 }
 
@@ -739,12 +749,13 @@ async function pollDueSource(
       cause: listingError,
     });
   }
-  let converted: Awaited<ReturnType<typeof convertSourceObservation>>;
+  let converted: Awaited<ReturnType<typeof convertPegSourceObservation>>;
   try {
-    converted = await convertSourceObservation(
-      input.source,
+    converted = await convertPegSourceObservation(
       rawObservation,
-      input.context,
+      input.source.convertVia,
+      input.context.nowSeconds,
+      input.context.dependencies.readConversionLeg,
     );
   } catch (cause) {
     return failSource(input, state, refSize, {
@@ -752,7 +763,32 @@ async function pollDueSource(
       cause,
     });
   }
-  return acceptDueObservation(input, state, refSize, converted);
+  return acceptDueObservation(input, state, refSize, {
+    raw: rawObservation,
+    converted,
+  });
+}
+
+async function pollProviderDue(
+  input: PollSourceInput,
+  state: SourceState,
+  refSize: number,
+  listingCadenceDue: boolean,
+): Promise<PegSourceMetricSnapshot> {
+  const snapshot = await pollDueSource(
+    input,
+    state,
+    refSize,
+    listingCadenceDue,
+  );
+  if (input.blindConsecutivePollLimit !== null) {
+    updateBlindConsecutivePolls(
+      state,
+      input.blindConsecutivePollLimit,
+      snapshot.newUsableDecision,
+    );
+  }
+  return snapshot;
 }
 
 async function pollSource(
@@ -783,27 +819,17 @@ async function pollSource(
       listingCadenceDue,
     );
   }
-  // A changed binding reference size or expired conversion proof requires an
-  // immediate refresh inside the ordinary cadence window.
-  const due = sourceDue(state, input, refSize, observationCadenceDue);
+  // A changed binding reference size requires an immediate provider refresh.
+  const due = sourceDue(state, refSize, observationCadenceDue);
   if (due) {
-    const snapshot = await pollDueSource(
-      input,
-      state,
-      refSize,
-      listingCadenceDue,
-    );
-    if (input.blindConsecutivePollLimit !== null) {
-      updateBlindConsecutivePolls(
-        state,
-        input.blindConsecutivePollLimit,
-        snapshot.newUsableDecision,
-      );
-    }
-    return snapshot;
+    return pollProviderDue(input, state, refSize, listingCadenceDue);
   }
 
   await pollListingOnly(input, state, listingCadenceDue);
+
+  if (conversionExpiryDue(state, input.source, input.context)) {
+    return refreshExpiredConversion(input, state, refSize);
+  }
 
   const observation = cachedObservation(
     state,

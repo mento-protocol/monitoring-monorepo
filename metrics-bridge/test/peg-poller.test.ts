@@ -794,7 +794,9 @@ describe("peg poll cycle freshness and measurements", () => {
     const input = makeInput([spec]);
     let nowMs = 1_800_000_000_000;
     let limit0 = "0";
-    const fetchBitvavo = vi.fn(async () => observation(nowMs));
+    const fetchBitvavo = vi.fn(async () =>
+      observation(nowMs, { capped: true, filledFraction: 0.5 }),
+    );
     const fetchStructuralContext = vi.fn(async () =>
       structuralContext(spec, Math.floor(nowMs / 1_000), {
         limit0,
@@ -812,6 +814,7 @@ describe("peg poll cycle freshness and measurements", () => {
 
     const capSnapshot = (await poller.pollCycle(input))[0]!;
     expect(source(capSnapshot).referenceSize).toBe(50);
+    expect(capSnapshot.blindConsecutivePolls).toBe(1);
     expect(fetchBitvavo.mock.calls[0]?.[0]).toMatchObject({
       market: "PEG-EUR",
       refSize: 50,
@@ -826,6 +829,7 @@ describe("peg poll cycle freshness and measurements", () => {
     nowMs += 1_000;
     const limitedSnapshot = (await poller.pollCycle(input))[0]!;
     expect(source(limitedSnapshot).referenceSize).toBe(20);
+    expect(limitedSnapshot.blindConsecutivePolls).toBe(2);
     expect(fetchBitvavo.mock.calls[1]?.[0].refSize).toBe(20);
   });
 
@@ -1616,7 +1620,7 @@ describe("peg poll cycle conversion and cadence", () => {
     expect(errors.map(({ kind }) => kind)).toContain("conversion_unavailable");
   });
 
-  it("refreshes a healthy converted display source when its conversion expires before source cadence", async () => {
+  it("refreshes short-lived conversion evidence without advancing provider cadence", async () => {
     const spec = primaryAsset({
       sources: [
         primarySource({
@@ -1667,11 +1671,29 @@ describe("peg poll cycle conversion and cadence", () => {
     const refreshed = (await poller.pollCycle(input))[0]!;
     expect(source(refreshed, "kraken_usd")).toMatchObject({
       healthy: true,
-      newSuccess: true,
+      newSuccess: false,
       observation: { vwap: 1 },
     });
-    expect(fetchKraken).toHaveBeenCalledTimes(2);
+    expect(source(refreshed, "kraken_usd")).not.toHaveProperty(
+      "rawObservation",
+    );
+    expect(fetchKraken).toHaveBeenCalledOnce();
     expect(readConversionLeg).toHaveBeenCalledTimes(2);
+
+    nowMs += 61_000;
+    const refreshedAgain = (await poller.pollCycle(input))[0]!;
+    expect(source(refreshedAgain, "kraken_usd")).toMatchObject({
+      healthy: true,
+      newSuccess: false,
+      observation: { vwap: 1 },
+    });
+    expect(fetchKraken).toHaveBeenCalledOnce();
+    expect(readConversionLeg).toHaveBeenCalledTimes(3);
+
+    nowMs += 178_000;
+    await poller.pollCycle(input);
+    expect(fetchKraken).toHaveBeenCalledTimes(2);
+    expect(readConversionLeg).toHaveBeenCalledTimes(4);
   });
 
   it("fails closed once on converted-source expiry without retrying until ordinary cadence", async () => {
@@ -1697,6 +1719,13 @@ describe("peg poll cycle conversion and cadence", () => {
     let authoritative = true;
     const errors: PegPollErrorEvent[] = [];
     const fetchKraken = vi.fn(async () => observation(nowMs));
+    const readConversionLeg = vi.fn(async () => ({
+      rate: 2,
+      medianAt: Math.floor(nowMs / 1_000),
+      expirySeconds: 60,
+      authoritative,
+      unavailableReason: authoritative ? null : ("stale" as const),
+    }));
     const poller = createPegPoller({
       nowMs: () => nowMs,
       fetchStructuralContext: vi.fn(async () =>
@@ -1704,13 +1733,7 @@ describe("peg poll cycle conversion and cadence", () => {
       ),
       fetchBitvavo: vi.fn(async () => observation(nowMs)),
       fetchKraken,
-      readConversionLeg: vi.fn(async () => ({
-        rate: 2,
-        medianAt: Math.floor(nowMs / 1_000),
-        expirySeconds: 60,
-        authoritative,
-        unavailableReason: authoritative ? null : ("stale" as const),
-      })),
+      readConversionLeg,
       publish: vi.fn(),
       onError: (event) => errors.push(event),
     });
@@ -1723,21 +1746,206 @@ describe("peg poll cycle conversion and cadence", () => {
       healthy: false,
       observation: null,
     });
-    expect(fetchKraken).toHaveBeenCalledTimes(2);
+    expect(fetchKraken).toHaveBeenCalledOnce();
+    expect(readConversionLeg).toHaveBeenCalledTimes(2);
     expect(errors.map(({ kind }) => kind)).toEqual(["conversion_unavailable"]);
 
     nowMs += 15_000;
     await poller.pollCycle(input);
-    expect(fetchKraken).toHaveBeenCalledTimes(2);
+    expect(fetchKraken).toHaveBeenCalledOnce();
+    expect(readConversionLeg).toHaveBeenCalledTimes(2);
     expect(errors).toHaveLength(1);
 
-    nowMs += 285_000;
+    nowMs += 223_000;
     await poller.pollCycle(input);
-    expect(fetchKraken).toHaveBeenCalledTimes(3);
+    expect(fetchKraken).toHaveBeenCalledOnce();
+    expect(readConversionLeg).toHaveBeenCalledTimes(2);
+    expect(errors).toHaveLength(1);
+
+    nowMs += 1_000;
+    await poller.pollCycle(input);
+    expect(fetchKraken).toHaveBeenCalledTimes(2);
+    expect(readConversionLeg).toHaveBeenCalledTimes(3);
     expect(errors.map(({ kind }) => kind)).toEqual([
       "conversion_unavailable",
       "conversion_unavailable",
     ]);
+  });
+
+  it("fails closed when retained raw provider evidence expires", async () => {
+    const spec = primaryAsset({
+      sources: [
+        primarySource({
+          id: "kraken_usd",
+          provider: "kraken",
+          pair: "PEG/USD",
+          authority: "deep",
+          pollIntervalSeconds: 300,
+          staleAfterSeconds: 600,
+          converted: true,
+        }),
+      ],
+    });
+    const input = makeInput([spec]);
+    let nowMs = 1_800_000_000_000;
+    const errors: PegPollErrorEvent[] = [];
+    const fetchKraken = vi.fn(async () =>
+      observation(nowMs, {
+        observationAt: nowMs - 570_000,
+        sequence: `old-sequence-${nowMs}`,
+      }),
+    );
+    const readConversionLeg = vi.fn(async () => ({
+      rate: 2,
+      medianAt: Math.floor(nowMs / 1_000),
+      expirySeconds: 60,
+      authoritative: true,
+      unavailableReason: null,
+    }));
+    const poller = createPegPoller({
+      nowMs: () => nowMs,
+      fetchStructuralContext: vi.fn(async () =>
+        structuralContext(spec, Math.floor(nowMs / 1_000)),
+      ),
+      fetchKraken,
+      readConversionLeg,
+      publish: vi.fn(),
+      onError: (event) => errors.push(event),
+    });
+
+    await poller.pollCycle(input);
+    nowMs += 61_000;
+    const stale = (await poller.pollCycle(input))[0]!;
+
+    expect(source(stale, "kraken_usd")).toMatchObject({
+      healthy: false,
+      observation: null,
+    });
+    expect(fetchKraken).toHaveBeenCalledOnce();
+    expect(readConversionLeg).toHaveBeenCalledOnce();
+    expect(errors.map(({ kind }) => kind)).toEqual(["source_freshness"]);
+
+    nowMs += 239_000;
+    await poller.pollCycle(input);
+    expect(fetchKraken).toHaveBeenCalledTimes(2);
+    expect(readConversionLeg).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not count conversion-only refreshes as deep-source cadence slots", async () => {
+    const spec = primaryAsset({
+      sources: [
+        primarySource({
+          pollIntervalSeconds: 300,
+          staleAfterSeconds: 600,
+          converted: true,
+        }),
+      ],
+    });
+    const input = makeInput([spec]);
+    let nowMs = 1_800_000_000_000;
+    const fetchBitvavo = vi.fn(async () =>
+      observation(nowMs, {
+        vwap: 2,
+        bid: 1.998,
+        ask: 2.002,
+        capped: true,
+        filledFraction: 0.5,
+      }),
+    );
+    const readConversionLeg = vi.fn(async () => ({
+      rate: 2,
+      medianAt: Math.floor(nowMs / 1_000),
+      expirySeconds: 60,
+      authoritative: true,
+      unavailableReason: null,
+    }));
+    const poller = createPegPoller({
+      nowMs: () => nowMs,
+      fetchStructuralContext: vi.fn(async () =>
+        structuralContext(spec, Math.floor(nowMs / 1_000)),
+      ),
+      fetchBitvavo,
+      readConversionLeg,
+      publish: vi.fn(),
+    });
+
+    const initial = (await poller.pollCycle(input))[0]!;
+    expect(initial.blindConsecutivePolls).toBe(1);
+
+    nowMs += 61_000;
+    const firstRefresh = (await poller.pollCycle(input))[0]!;
+    expect(firstRefresh.blindConsecutivePolls).toBe(1);
+    nowMs += 61_000;
+    const secondRefresh = (await poller.pollCycle(input))[0]!;
+    expect(secondRefresh.blindConsecutivePolls).toBe(1);
+    expect(fetchBitvavo).toHaveBeenCalledOnce();
+    expect(readConversionLeg).toHaveBeenCalledTimes(3);
+
+    nowMs += 178_000;
+    const ordinaryCadence = (await poller.pollCycle(input))[0]!;
+    expect(ordinaryCadence.blindConsecutivePolls).toBe(2);
+    expect(fetchBitvavo).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not refresh conversion evidence for a halted converted source", async () => {
+    const spec = primaryAsset({
+      sources: [
+        primarySource({
+          id: "kraken_usd",
+          provider: "kraken",
+          pair: "PEG/USD",
+          authority: "deep",
+          pollIntervalSeconds: 300,
+          staleAfterSeconds: 600,
+          converted: true,
+        }),
+      ],
+    });
+    const input = makeInput([spec]);
+    let nowMs = 1_800_000_000_000;
+    let halted = false;
+    const fetchKraken = vi.fn(async () =>
+      observation(nowMs, {
+        venueState: halted ? "halted" : "ok",
+        vwap: halted ? null : 2,
+        bid: halted ? null : 1.998,
+        ask: halted ? null : 2.002,
+      }),
+    );
+    const readConversionLeg = vi.fn(async () => ({
+      rate: 2,
+      medianAt: Math.floor(nowMs / 1_000),
+      expirySeconds: 60,
+      authoritative: true,
+      unavailableReason: null,
+    }));
+    const poller = createPegPoller({
+      nowMs: () => nowMs,
+      fetchStructuralContext: vi.fn(async () =>
+        structuralContext(spec, Math.floor(nowMs / 1_000)),
+      ),
+      fetchKraken,
+      readConversionLeg,
+      publish: vi.fn(),
+    });
+
+    await poller.pollCycle(input);
+    halted = true;
+    nowMs += 300_000;
+    const haltedSnapshot = (await poller.pollCycle(input))[0]!;
+    expect(source(haltedSnapshot, "kraken_usd")).toMatchObject({
+      healthy: false,
+      observation: { venueState: "halted" },
+    });
+
+    nowMs += 61_000;
+    const retainedHalt = (await poller.pollCycle(input))[0]!;
+    expect(source(retainedHalt, "kraken_usd")).toMatchObject({
+      healthy: false,
+      observation: { venueState: "halted" },
+    });
+    expect(fetchKraken).toHaveBeenCalledTimes(2);
+    expect(readConversionLeg).toHaveBeenCalledOnce();
   });
 
   it("keeps direct-source polling on ordinary cadence", async () => {
