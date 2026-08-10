@@ -13,21 +13,24 @@ minimumReleaseAgeExclude:
   - form-data
   - esbuild
   - js-yaml
-  # GHSA-r28c-9q8g-f849: first patched PostCSS release (2026-07-24).
-  - postcss@8.5.18
+  # GHSA-fxqj-rqcc-2cmp: all releases through 8.5.22 are vulnerable.
+  - postcss@8.5.23
   - protobufjs
   - vite
 
 overrides:
   "@grpc/grpc-js": 1.14.4
-  # GHSA-mh99-v99m-4gvg: all releases through 5.0.7 are vulnerable.
-  "brace-expansion@^1.0.0": 5.0.8
-  "brace-expansion@>=5.0.0 <6": 5.0.8
-  fast-uri@<3.1.4: 3.1.4
+  # GHSA-rgw5-rvv9-x895: the 5.0.8 resource-limit fix is incomplete.
+  "brace-expansion@^1.0.0": 5.0.9
+  "brace-expansion@>=5.0.0 <6": 5.0.9
+  # GHSA-7p8r-x3mc-p8w7: 3.1.5 fixes backslash authority confusion.
+  fast-uri@<3.1.5: 3.1.5
   form-data@<2.5.6: 2.5.6
-  js-yaml@>=4.0.0 <4.3.0: 4.3.0
-  # GHSA-r28c-9q8g-f849: <=8.5.17 can disclose arbitrary source-map files.
-  postcss@<8.5.18: 8.5.18
+  js-yaml@>=4.0.0 <4.3.1: 4.3.1
+  # GHSA-2v37-7h3g-55p8: 3.3.17 fixes zero-size generator hangs.
+  nanoid@<3.3.17: 3.3.17
+  # GHSA-fxqj-rqcc-2cmp: all releases through 8.5.22 are vulnerable.
+  postcss@<8.5.23: 8.5.23
   protobufjs@>=7.0.0 <7.6.5: 7.6.5
   qs@<6.15.2: 6.15.2
   uuid: 11.1.1
