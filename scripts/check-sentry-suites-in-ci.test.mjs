@@ -237,10 +237,15 @@ test("the exemptions still hold", () => {
       join(SCRIPTS_DIR, "tf-stacks.test.mjs"),
       "utf8",
     );
+    // Block comments stripped first: `/* import "./x"; */` leaves a line
+    // starting with `import`, so a line-start anchor alone is not enough.
+    const tfStacksCode = tfStacks
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .split("\n")
+      .map((line) => line.replace(/\/\/.*$/, ""))
+      .join("\n");
     assert.match(
-      tfStacks,
-      // Anchored at line start so `// import "./x"` does not satisfy it — a
-      // commented-out import is not an import.
+      tfStacksCode,
       new RegExp(`^\\s*import\\s+["']\\./${escapeRegExp(file)}["']`, "m"),
       `${file} is exempted because tf-stacks.test.mjs imports it, but no ` +
         "live import of it remains",
@@ -292,6 +297,57 @@ test("the local gate's tooling allowlist lists every sentry:* script", () => {
       "touching only that script classifies as `package-scripts` instead of " +
       "`root-tooling-scripts` — conservative, but drift.",
   );
+
+  // Allowlisting an alias TRUSTS it: `agent:quality-gate --run` will execute
+  // it without `--allow-package-script-changes`. That trust is only safe while
+  // check-agent-quality-gate-package-scripts.sh pins the alias to an exact
+  // command — otherwise appending `&& <anything>` to a trusted script runs it.
+  // The two lists drifted apart before this assertion existed: 13 aliases were
+  // trusted and 4 pinned.
+  const validator = readFileSync(
+    join(SCRIPTS_DIR, "check-agent-quality-gate-package-scripts.sh"),
+    "utf8",
+  );
+  const unpinned = sentryScripts.filter(
+    (name) => !validator.includes(`"${name}":`),
+  );
+  assert.deepEqual(
+    unpinned,
+    [],
+    "these sentry:* scripts are trusted by classify_root_package_json_changes " +
+      `but not pinned to an exact command in ` +
+      `check-agent-quality-gate-package-scripts.sh: ${unpinned.join(", ")}. ` +
+      "A trusted alias whose command is not pinned can gain an appended " +
+      "command that the gate then runs unprompted.",
+  );
+});
+
+test("the `scripts` job is reachable from the paths the suites guard", () => {
+  // Steps existing in the job is not enough: the job is gated on
+  // `needs.changes.outputs.rootScripts`, so if that filter loses a path, a PR
+  // touching only that path skips the whole job and every suite with it —
+  // silently, and this file would not run to complain either.
+  //
+  // sentry-mcp-broker.test.mjs asserts on .github/workflows/sentry-triage-agent.yml,
+  // so a workflow-only edit must reach the job that runs it.
+  // `rootScripts:` appears twice — once declaring the job output, once as the
+  // filter key. Anchor on the `filters:` block so this reads the real one.
+  const filtersAt = CI.indexOf("filters: |");
+  assert.ok(filtersAt >= 0, "the paths-filter `filters:` block is gone");
+  const afterFilters = CI.slice(filtersAt);
+  const start = afterFilters.indexOf("rootScripts:");
+  assert.ok(start >= 0, "the `rootScripts` paths-filter key is gone");
+  const rest = afterFilters.slice(start + "rootScripts:".length);
+  const next = rest.search(/\n {12}[A-Za-z][A-Za-z0-9_-]*:\n/);
+  const filter = next === -1 ? rest : rest.slice(0, next);
+  for (const required of ["scripts/**/*.mjs", ".github/workflows/**"]) {
+    assert.ok(
+      filter.includes(required),
+      `the rootScripts paths-filter no longer lists \`${required}\`, so a PR ` +
+        "touching only those files skips the `scripts` job and every Sentry " +
+        "suite in it",
+    );
+  }
 });
 
 test("this check itself runs in the ci.yml `scripts` job", () => {
