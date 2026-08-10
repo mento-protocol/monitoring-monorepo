@@ -140,6 +140,7 @@
     "@lezer/lr": "^1.4.10",
     "@lhci/cli": "^0.15.1",
     "@prometheus-io/lezer-promql": "0.311.3",
+    "@upstash/mcp-server": "0.2.4",
     "dependency-cruiser": "17.4.0",
     "envio-cloud": "0.9.3",
     "eslint": "^10.0.2",

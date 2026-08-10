@@ -1,0 +1,21 @@
+# Personal, local-only example. Copy this table into ~/.codex/config.toml.
+# Never merge it into this repository's .codex/config.toml: Codex Cloud cannot
+# receive these credentials during the agent phase.
+
+[mcp_servers.upstash]
+args = [
+  "node_modules/@upstash/mcp-server/dist/index.js",
+  "--disable-telemetry",
+]
+command = "node"
+default_tools_approval_mode = "prompt"
+enabled = false
+enabled_tools = [
+  "redis_database_list_databases",
+  "redis_database_run_redis_commands",
+]
+env_vars = ["UPSTASH_EMAIL", "UPSTASH_API_KEY"]
+startup_timeout_sec = 40
+
+[mcp_servers.upstash.tools.redis_database_run_redis_commands]
+approval_mode = "prompt"

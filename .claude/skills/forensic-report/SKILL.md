@@ -5,7 +5,7 @@ title: Forensic Report Skill
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-23
+last_verified: 2026-08-10
 doc_type: skill
 scope: repo-wide
 review_interval_days: 90
@@ -229,8 +229,9 @@ _Investigation date: YYYY-MM-DD._
 
 ### Step 10 — Push to production → `references/upload.md`
 
-By default the skill stops at the local draft and asks the user to review; upload only on `--upload` or an explicit equivalent. Three safety properties are non-negotiable and live here, not only in the reference file:
+By default the skill stops at the local draft and asks the user to review; upload only on `--upload` or an explicit equivalent. These safety properties are non-negotiable and live here, not only in the reference file:
 
+- The MCP upload is local-only and must use the pinned personal setup in [`docs/notes/upstash-mcp-operator.md`](../../../docs/notes/upstash-mcp-operator.md). If its two reviewed tools are unavailable, do not request credentials or edit shared config; stop and route the upload to an attended local session or the authenticated editor.
 - Keep `mcp__upstash__redis_database_run_redis_commands` out of repo-shared auto-allow lists. **The MCP approval prompt is the production write guard for this path.**
 - **Derive `AUTHOR_EMAIL` from `git config user.email` at runtime** — never hardcode it, or every teammate's reports get mis-attributed and PII lands in git. `git config` is local and unauthenticated, so **show the derived email and have the user confirm** it matches their workspace identity before sending the EVAL.
 - Re-read the record immediately before writing and pass the derived expected version to the CAS Lua upsert: `""` means **create-only** (fail if another writer creates it first); otherwise the fresh base version. On a conflict, stop, show it, and ask — **never auto-retry with a new base version.**
