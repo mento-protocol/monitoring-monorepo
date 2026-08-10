@@ -149,6 +149,15 @@ function readYamlField(body, key) {
  * `sentry_issue_id`, so `sentryIssueId` is normally the numeric Sentry id
  * directly; `resolveIssueIdFromShortId` is the fallback for a stub that lacks
  * a usable numeric id.
+ *
+ * `lastSeen` is the ingest-written `last_seen`, and it is here for one reason:
+ * it is the only instant in reach that provably predates the human approval, so
+ * it is what `pickReopenBaseline` hands ingest's reopen gate (issue #1692).
+ * Ingest writes it ONCE, when it creates the stub (`buildIssueBody`, called only
+ * from `createQueueIssue`); a reopen edits labels, comments and state and never
+ * the body. So on a stub that has regressed and reopened since, this is still
+ * the CREATION-time value and can be as old as the stub itself — which is the
+ * point: earlier only makes the reopen gate more eager.
  */
 export function parseStubMetadata(body) {
   const permalinkRaw = readYamlField(body, "permalink");
@@ -156,6 +165,7 @@ export function parseStubMetadata(body) {
     shortId: readYamlField(body, "short_id"),
     sentryIssueId: readYamlField(body, "sentry_issue_id"),
     project: readYamlField(body, "project"),
+    lastSeen: readYamlField(body, "last_seen"),
     permalink: isSafeSentryPermalink(permalinkRaw) ? permalinkRaw : null,
   };
 }
@@ -227,6 +237,7 @@ export function buildAuditComment({
   timestampIso,
   alreadyArchived = false,
   baselineLastSeen = null,
+  reopenBaselineLastSeen = null,
 }) {
   const safeApprover = sanitizeApprover(approver);
   const safeShortId = truncateTitle(neutralizeUntrusted(shortId), 90);
@@ -247,7 +258,17 @@ export function buildAuditComment({
   // comment cannot hold it, because the triage LLM can post comments under this
   // same bot identity (see isSettledAuditComment).
   lines.push(
-    `- Freshness baseline recorded in the issue body: ${auditBaselineToken(baselineLastSeen)}.`,
+    `- Freshness baseline this run observed in Sentry: ${auditBaselineToken(baselineLastSeen)}.`,
+  );
+  // Two baselines, two readers, and the note says which is which because an
+  // operator debugging a reopen that did or did not happen is reading the
+  // second one (issue #1692). Only the first is the audit dedup token.
+  if (reopenBaselineLastSeen) {
+    lines.push(
+      `- Reopen baseline recorded in the issue body (predates the approval; ingest compares against this): \`${yamlScalar(reopenBaselineLastSeen)}\`.`,
+    );
+  }
+  lines.push(
     "",
     "Never hard-resolved: the issue stays archived only until it escalates. If",
     "it escalates/regresses in Sentry, Stage A's regression-reopen path reopens",
@@ -427,11 +448,52 @@ export function isUsableBaseline(lastSeen) {
 }
 
 /**
+ * The baseline INGEST compares against, which is a different question from the
+ * one `baselineLastSeen` answers (issue #1692).
+ *
+ * The archive reads Sentry after the human applied `sentry:approved-archive`, so
+ * an event landing in between is folded into that read: ingest asks
+ * `lastSeen > baseline`, and for the very event that moved `lastSeen` the answer
+ * is false. Forever. The live read still has two jobs the earlier value cannot
+ * do — the post-PUT mutation-window comparison, and the evidence behind the
+ * `skipped-stale-retry` / `skipped-unbaselined-retry` refusals, both of which
+ * must describe what THIS run saw — so it stays exactly where it is, and ingest
+ * gets its own value instead.
+ *
+ * That value is the stub body's `last_seen`, written by ingest when it CREATED
+ * the stub and never rewritten since — no reopen or re-queue step edits a stub
+ * body — so it predates the approval by construction, whatever the shape of the
+ * approval-to-run window. On a stub that has flapped it is still the creation
+ * instant, potentially the stub's whole lifetime old, which widens this gate and
+ * can never narrow it.
+ *
+ * Two guards on top of it, both taking the EARLIER of the two candidates:
+ *   - an unparsable stub `last_seen` (a hand-edited body, a stub created when
+ *     Sentry returned none) falls back to the live read, which is the pre-#1692
+ *     behaviour rather than a refusal — the archive already fails closed on an
+ *     unusable live baseline, and a stub's own stale field must not become a
+ *     second, unfixable way to make a human approval unspendable;
+ *   - a stub `last_seen` NEWER than the live read (a stale Sentry replica on
+ *     this run) would widen the gate rather than narrow it, so the live read
+ *     wins there.
+ * Both cases resolve the same way: never later than the live read, and as early
+ * as the evidence honestly allows.
+ */
+export function pickReopenBaseline(stubLastSeen, liveLastSeen) {
+  const stubMs = Date.parse(stubLastSeen ?? "");
+  const liveMs = Date.parse(liveLastSeen ?? "");
+  if (Number.isNaN(stubMs)) return liveLastSeen;
+  if (Number.isNaN(liveMs)) return stubLastSeen;
+  return stubMs <= liveMs ? stubLastSeen : liveLastSeen;
+}
+
+/**
  * True when `comment` is THIS pipeline's settled audit comment for the Sentry
  * issue being archived — the at-most-once key for the audit post.
  *
  * This governs a HUMAN-READABLE note only. The machine-readable baseline lives
- * in the stub body (scripts/sentry-triage-ingest.mjs, `withArchiveBaseline`),
+ * in the stub body (scripts/sentry-triage-queue-contract.mjs,
+ * `withArchiveBaseline`),
  * because the Stage B triage agent is an LLM reading attacker-controlled Sentry
  * payloads and holds `Bash(gh issue comment <its stub>:*)` — so it can post a
  * comment under the trusted Actions identity, on the right stub, with any
@@ -883,8 +945,9 @@ async function consumeApprovalLabel(runGh, repo, queueIssue) {
  * deliberately absent — settlement consumed it.
  *
  * Read AFTER the settlement writes, because ingest's regression reopen does not
- * need `sentry:approved-archive` to run: `buildReopenLabelEditArgs` only
- * `--remove-label`s it, which no-ops once this run's CAS took it. So a reopen
+ * need `sentry:approved-archive` to run: the chokepoint's shed step
+ * (`buildRequeueShedLabelArgs`) only `--remove-label`s it, which no-ops once
+ * this run's CAS took it. So a reopen
  * can complete entirely inside the settlement window, and the close would then
  * land on a stub ingest just reopened for a live regression. Any of the three
  * signals catches it whichever order the two runs interleave — the reopen sheds
@@ -905,10 +968,15 @@ export function settlementHeld({ state, labels, body } = {}, expected = null) {
   // body edit racing between the write and this check — and state-and-labels
   // alone would call that settled, reporting success on a closed
   // `sentry:archived` stub whose body sends ingest straight back to `closedAt`.
+  // Both fields, because they answer to different consumers and only one of them
+  // is the reopen gate: a body carrying this run's live read but the previous
+  // archive's (or no) pre-approval baseline would pass a lastSeen-only check
+  // while ingest compared against the wrong instant.
   const recorded = parseArchiveBaseline(body);
   return (
     !!recorded &&
     recorded.lastSeen === String(expected.lastSeen ?? "") &&
+    recorded.reopenLastSeen === String(expected.reopenLastSeen ?? "") &&
     recorded.sentryIssueId === String(expected.sentryIssueId ?? "")
   );
 }
@@ -951,7 +1019,9 @@ export function settlementHeld({ state, labels, body } = {}, expected = null) {
  * baseline are equivalent for reconciliation even if they differ elsewhere. */
 function baselineOf(body) {
   const parsed = parseArchiveBaseline(body);
-  return parsed ? `${parsed.lastSeen}|${parsed.sentryIssueId}` : "";
+  return parsed
+    ? `${parsed.lastSeen}|${parsed.reopenLastSeen}|${parsed.sentryIssueId}`
+    : "";
 }
 
 export async function reconcileToTarget(
@@ -1156,6 +1226,7 @@ async function settleQueueStub(
     timestampIso,
     alreadyArchived,
     baselineLastSeen,
+    reopenBaselineLastSeen,
     onTarget,
   },
 ) {
@@ -1255,6 +1326,7 @@ async function settleQueueStub(
   const bodySource = await readQueueIssue(runGh, repo, queueIssue);
   const nextBody = withArchiveBaseline(bodySource.body, {
     lastSeen: baselineLastSeen,
+    reopenLastSeen: reopenBaselineLastSeen,
     sentryIssueId,
   });
   if (!nextBody) {
@@ -1311,6 +1383,7 @@ async function settleQueueStub(
   if (
     !settlementHeld(verify, {
       lastSeen: baselineLastSeen,
+      reopenLastSeen: reopenBaselineLastSeen,
       sentryIssueId,
     })
   ) {
@@ -1360,6 +1433,7 @@ async function settleQueueStub(
           timestampIso,
           alreadyArchived,
           baselineLastSeen,
+          reopenBaselineLastSeen,
         }),
       ]);
     } catch (err) {
@@ -1462,6 +1536,17 @@ export async function runArchive(options, deps = {}) {
       status: "skipped-no-baseline",
     };
   }
+
+  // The baseline INGEST reads (issue #1692). Derived from the stub's own
+  // `last_seen`, so it predates the human approval and an event that landed
+  // between the approval and the read above still reopens the stub. Computed
+  // here, next to the live read it is deliberately NOT, so the two are one edit
+  // apart. `baselineLastSeen` is already known usable at this point, so this
+  // never returns an unparsable value.
+  const reopenBaselineLastSeen = pickReopenBaseline(
+    meta.lastSeen,
+    baselineLastSeen,
+  );
 
   // Live-regression guard. If Sentry has flagged the issue as regressed/
   // escalating, DO NOT archive: closing the stub after that regression's
@@ -1816,6 +1901,7 @@ export async function runArchive(options, deps = {}) {
       timestampIso: now().toISOString(),
       alreadyArchived,
       baselineLastSeen,
+      reopenBaselineLastSeen,
       onTarget: (t) => {
         settleTarget = t;
       },

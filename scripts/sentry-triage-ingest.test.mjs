@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import {
   buildIssueBody,
   buildMetadataYaml,
@@ -6,7 +10,8 @@ import {
   buildQueueLabels,
   buildQueueTitle,
   buildRegressedComment,
-  buildReopenLabelEditArgs,
+  buildRequeueAddLabelArgs,
+  buildRequeueShedLabelArgs,
   buildRunRecordBody,
   buildStrandedRecoveryComment,
   classifyNoise,
@@ -28,6 +33,7 @@ import {
   parseLinkHeader,
   PROJECTED_LABEL,
   recoverStrandedQueueIssue,
+  reopenBaselineOf,
   reopenQueueIssue,
   REOPEN_SHED_LABELS,
   resolveLookbackDays,
@@ -757,6 +763,119 @@ await test("dedup: a baseline on a stub without sentry:archived is ignored", () 
   );
 });
 
+await test("dedup: an event absorbed by the approval-to-run window still reopens (#1692)", () => {
+  // T0 the stub's own `last_seen`; T1 the human approves; T2 the event lands;
+  // T3 the archive reads Sentry and sees T2. Comparing T2 against the archive's
+  // T3 read answers "skip" — for the very event that produced it, forever. The
+  // archive now records T0 for this gate, and T2 > T0 is a reopen.
+  const absorbedEvent = "2026-07-17T07:59:30Z";
+  const archiveRead = absorbedEvent; // the archive's read IS the absorbed event
+  const preApproval = "2026-07-14T10:00:00Z";
+  const stub = archivedStub("2026-07-17T08:00:00Z");
+
+  const decide = (archiveBaseline) =>
+    decideDedupAction({
+      existingIssue: stub,
+      isRegressed: true,
+      lastSeen: absorbedEvent,
+      archiveBaseline,
+      archiveBaselineIssueId: "6197137101",
+      sentryIssueId: "6197137101",
+    }).action;
+
+  assertEqual(decide(archiveRead), "skip", "the window this issue closes");
+  assertEqual(decide(preApproval), "reopen");
+});
+
+await test("reopenBaselineOf prefers the pre-approval field and falls back to the live read", () => {
+  const body = (fields) =>
+    ["<!-- sentry-triage:v1 -->", "", "```yaml", ...fields, "```"].join("\n");
+  const both = parseArchiveBaseline(
+    body([
+      'archive_baseline_last_seen: "2026-07-19T11:59:00.000Z"',
+      'archive_reopen_baseline_last_seen: "2026-07-14T10:00:00Z"',
+      'archive_baseline_sentry_issue_id: "6197137101"',
+    ]),
+  );
+  assertEqual(reopenBaselineOf(both), "2026-07-14T10:00:00Z");
+
+  // A stub archived before the second field existed keeps its old behaviour
+  // rather than losing the baseline entirely.
+  const legacy = parseArchiveBaseline(
+    body([
+      'archive_baseline_last_seen: "2026-07-19T11:59:00.000Z"',
+      'archive_baseline_sentry_issue_id: "6197137101"',
+    ]),
+  );
+  assertEqual(legacy.reopenLastSeen, "");
+  assertEqual(reopenBaselineOf(legacy), "2026-07-19T11:59:00.000Z");
+  assertEqual(reopenBaselineOf(null), null);
+});
+
+await test("an archived stub's PRE-APPROVAL baseline drives the reopen decision (#1692)", async () => {
+  // Wiring, end to end: runIngest must hand decideDedupAction the reopen
+  // baseline out of the body, not the archive-time read sitting beside it.
+  const sentryIssue = mapSentryIssue({
+    id: 9,
+    shortId: "X-9",
+    title: "Regressed bug",
+    lastSeen: "2026-07-19T11:59:00Z",
+  });
+  let reopenCount = 0;
+  const result = await runIngest(
+    { repo: "owner/repo", trackerIssue: 1282 },
+    {
+      fetchMergedSentryIssues: async () => mergeSentryIssues([], [sentryIssue]),
+      listQueueIssues: async () => [
+        {
+          number: 200,
+          title: buildQueueTitle("X-9", "unknown", "error"),
+          state: "CLOSED",
+          closedAt: "2026-07-19T12:00:00Z",
+          labels: ["sentry-triage", "sentry:archived"],
+          // The archive read exactly this event, so the old baseline skips it.
+          body: archivedStubBody({
+            lastSeen: "2026-07-19T11:59:00Z",
+            reopenLastSeen: "2026-07-19T00:00:00Z",
+          }),
+        },
+      ],
+      ensureLabels: async () => {},
+      createIssue: async () => {
+        throw new Error("unexpected create in this scenario");
+      },
+      reopenIssue: async () => {
+        reopenCount += 1;
+      },
+      postRunRecord: async () => {},
+      now: () => new Date("2026-07-20T05:30:00.000Z"),
+    },
+  );
+  assertEqual(result.reopened, 1);
+  assertEqual(reopenCount, 1);
+});
+
+await test("the stub body is rendered once, at creation (#1692)", () => {
+  // `buildIssueBody` is the only thing that renders `last_seen` into a body, and
+  // the reopen baseline's whole worth is that the value it renders is never
+  // refreshed: that is what makes it provably earlier than the human approval a
+  // later archive run acts on. A second call site — a "freshen it on reopen"
+  // edit being the obvious one — would move the baseline later and narrow the
+  // gate this issue exists to widen, so the docstrings on `parseStubMetadata`
+  // and `pickReopenBaseline` name creation specifically. Pin it.
+  const src = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "sentry-triage-ingest.mjs"),
+    "utf8",
+  );
+  const calls = src.match(/(?<!function\s)\bbuildIssueBody\s*\(/g) ?? [];
+  // Exactly one — the declaration is excluded by the lookbehind.
+  assertEqual(calls.length, 1);
+  assert(
+    /async function createQueueIssue\([\s\S]*?buildIssueBody\(/.test(src),
+    "the single call must sit inside createQueueIssue",
+  );
+});
+
 await test("parseArchiveBaseline reads the yaml fields and tolerates junk", () => {
   const parsed = parseArchiveBaseline(
     [
@@ -1319,8 +1438,10 @@ await test("reopen shed set is every verdict label plus projected + autofix + ar
 });
 
 await test("reopen label edit re-queues triage and sheds stale verdict + projected + autofix + archive labels", () => {
-  const args = buildReopenLabelEditArgs(200, "owner/repo");
-  assertDeepEqual(args, [
+  // Two calls, never one: `--add-label X --remove-label Y` on a single
+  // `gh issue edit` is two concurrent mutations, and losing the add half strands
+  // the stub (#1693).
+  assertDeepEqual(buildRequeueAddLabelArgs(200, "owner/repo"), [
     "issue",
     "edit",
     "200",
@@ -1328,6 +1449,13 @@ await test("reopen label edit re-queues triage and sheds stale verdict + project
     "owner/repo",
     "--add-label",
     "sentry:needs-triage",
+  ]);
+  assertDeepEqual(buildRequeueShedLabelArgs(200, "owner/repo"), [
+    "issue",
+    "edit",
+    "200",
+    "-R",
+    "owner/repo",
     "--remove-label",
     "sentry:verdict-code-fix,sentry:verdict-config-fix,sentry:verdict-upstream,sentry:verdict-needs-human,sentry:projected,sentry:fix-pr-opened,sentry:fix-refused,sentry:approved-archive,sentry:archived",
   ]);
@@ -1450,7 +1578,7 @@ await test("a regressed, previously closed issue is reopened exactly once", asyn
 });
 
 /** A stub body carrying an archive baseline, as the archive leg writes it. */
-function archivedStubBody({ lastSeen, sentryIssueId = "9" }) {
+function archivedStubBody({ lastSeen, sentryIssueId = "9", reopenLastSeen }) {
   return withArchiveBaseline(
     buildIssueBody(
       toMetadata({
@@ -1461,7 +1589,7 @@ function archivedStubBody({ lastSeen, sentryIssueId = "9" }) {
         permalink: "https://mento-labs.sentry.io/issues/9/",
       }),
     ),
-    { lastSeen, sentryIssueId },
+    { lastSeen, reopenLastSeen, sentryIssueId },
   );
 }
 
@@ -1687,6 +1815,13 @@ function makeFakeGitHub({
   issues = [],
   ambiguousOn = () => false,
   rejectOn = () => false,
+  // `gh issue edit --add-label X --remove-label Y` is NOT one write: the CLI
+  // fires addLabels and removeLabels as discrete, concurrent GraphQL mutations
+  // (cli/cli, pkg/cmd/pr/shared/editable_http.go). This hook models the half the
+  // pipeline cannot afford to lose — the removes land, the adds do not, and the
+  // CLI reports failure (issue #1693). It fires per CALL, so a sequence that
+  // never puts both flags on one call keeps whatever it added earlier.
+  dropAddLabelsOn = () => false,
 } = {}) {
   const state = new Map(
     issues.map((issue) => [
@@ -1724,6 +1859,9 @@ function makeFakeGitHub({
     if (verb === "edit") {
       for (const name of splitLabels(flag(args, "--remove-label"))) {
         issue.labels = issue.labels.filter((label) => label !== name);
+      }
+      if (dropAddLabelsOn(args)) {
+        throw fail(args);
       }
       for (const name of splitLabels(flag(args, "--add-label"))) {
         if (!issue.labels.includes(name)) issue.labels.push(name);
@@ -2014,9 +2152,10 @@ await test("stranded recovery re-queues, sheds stale markers, and changes state 
   // on the snapshot it was handed — and the state change still comes last.
   assertDeepEqual(
     fake.calls.map((args) => args[1]),
-    ["view", "edit", "comment", "reopen"],
+    ["view", "edit", "edit", "comment", "reopen"],
   );
-  assertDeepEqual(fake.calls[1], buildReopenLabelEditArgs(42, REPO));
+  assertDeepEqual(fake.calls[1], buildRequeueAddLabelArgs(42, REPO));
+  assertDeepEqual(fake.calls[2], buildRequeueShedLabelArgs(42, REPO));
   const issue = fake.get(42);
   assertEqual(issue.state, "OPEN");
   assertDeepEqual(issue.labels, ["sentry-triage", NEEDS_TRIAGE_LABEL]);
@@ -2456,6 +2595,59 @@ for (const verb of ["comment", "edit", "reopen"]) {
     });
   }
 }
+
+await test("a half-applied label edit leaves a stub some later run recovers (#1693)", async () => {
+  // The label write is TWO concurrent GraphQL mutations. When the remove lands
+  // and the add does not, the pre-#1693 single edit left a CLOSED stub with
+  // `sentry:archived` shed and `sentry:needs-triage` never applied — a state
+  // `decideDedupAction`'s baseline branch cannot see (it gates on
+  // `sentry:archived`) and the stranded sweep cannot see either (it gates on
+  // `sentry:needs-triage`). Nothing frees it but a human.
+  let halfFailureArmed = true;
+  const fake = makeFakeGitHub({
+    issues: [
+      {
+        ...REGRESSED_STUB,
+        labels: ["sentry-triage", "sentry:verdict-upstream", "sentry:archived"],
+      },
+    ],
+    // One transient half-failure, on the first call that carries a remove; the
+    // recovery run below then meets a healthy GitHub, which is what makes this
+    // a test about the state left behind rather than about a permanent outage.
+    dropAddLabelsOn: (args) => {
+      if (!halfFailureArmed || !args.includes("--remove-label")) return false;
+      halfFailureArmed = false;
+      return true;
+    },
+  });
+
+  let threw = false;
+  try {
+    await reopenQueueIssue({ repo: REPO }, { number: 200 }, REGRESSED_SENTRY, {
+      runGh: fake.runGh,
+    });
+  } catch {
+    threw = true;
+  }
+  assert(threw, "the interrupted label write must surface as a rejection");
+
+  // The invariant: the stub still wears a marker SOME recovery path reads.
+  const stranded = fake.get(200);
+  assert(
+    stranded.labels.includes(NEEDS_TRIAGE_LABEL) ||
+      stranded.labels.includes("sentry:archived"),
+    `no recovery path can see this stub: labels=${JSON.stringify(stranded.labels)}`,
+  );
+
+  // And the next scheduled run actually frees it.
+  const counts = await runIngest(
+    { repo: REPO, trackerIssue: 1282 },
+    ingestDeps(fake),
+  );
+  assertEqual(counts.errors, 0);
+  assertEqual(counts.recovered, 1);
+  assertDeepEqual(fake.selectable(), [200]);
+});
 
 await test("an interrupted regression reopen retries without double-posting the fence", async () => {
   // Crash after the fence lands but before the state change — the widest

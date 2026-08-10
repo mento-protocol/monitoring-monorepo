@@ -137,11 +137,11 @@ bulk:
 - no matching queue issue: create one;
 - open match: leave it open;
 - closed match with a regression whose `lastSeen` is newer than
-  `closed_at`: post the regression fence comment, shed the stale
-  verdict/projection/autofix/archive labels, restore `sentry:needs-triage`, and
-  reopen — in that order;
+  `closed_at`: post the regression fence comment, restore `sentry:needs-triage`,
+  shed the stale verdict/projection/autofix/archive labels, and reopen — in that
+  order;
 - closed match carrying `sentry:archived`: compare `lastSeen` against the
-  archive freshness baseline in the stub's own body instead of `closed_at` (see
+  archive reopen baseline in the stub's own body instead of `closed_at` (see
   the archive section below), falling back to `closed_at` when the body carries
   no parseable baseline;
 - other closed match: leave it closed.
@@ -151,8 +151,15 @@ Every re-queue in the pipeline runs through one function,
 `requeueQueueStub` in `scripts/sentry-triage-requeue.mjs`, which takes the CAUSE
 as an argument and decides the fence from it. The fence goes first so no
 interruption can leave a stub re-queued for triage without it; the state change
-goes last so none can leave it open but unselectable. Every interruption point
-then lands on a state that is inert or recoverable. On this path the fence post
+goes last so none can leave it open but unselectable. Inside the label step the
+restore and the shed are two ordered `gh issue edit` calls, never one call
+carrying both flags: `gh` sends `--add-label` and `--remove-label` as discrete,
+concurrent GraphQL mutations, and a lost add half used to leave a closed stub
+with `sentry:archived` shed and `sentry:needs-triage` never applied — a pairing
+the baseline branch and the stranded sweep are both blind to. Adding first means
+every interruption lands on a pairing one of them still reads. Every
+interruption point then lands on a state that is inert or recoverable. On this
+path the fence post
 is additionally guarded by an author-fenced identity check, so a retry completes
 the sequence without duplicating it — a guard the caller declares, and one that
 disarms itself whenever `lastSeen` does not parse, because the rendered body
@@ -656,10 +663,37 @@ neither ingest query (both are `is:unresolved`) and a single already-counted
 event does not reliably trip Sentry's escalation forecast. Reverting puts it back
 in front of both.
 
-**The baseline lives in the stub BODY, never in a comment.** It is written into
-the same yaml block ingest creates the stub with, as
-`archive_baseline_last_seen` plus the Sentry issue id it mutated, and the write
-happens before anything marks the stub settled. Placement is the entire trust
+**There are two baselines, and they answer different questions.** The live read
+above is what THIS RUN observed, and only this run's own gates may use it: the
+post-PUT mutation-window comparison, and the two already-archived retry refusals
+(`skipped-stale-retry`, `skipped-unbaselined-retry`), which exist to say whether
+anything moved since the archive that already happened. Repointing those at any
+earlier value would refuse every legitimate `workflow_dispatch` retry as stale.
+
+Ingest reads the OTHER one. The live read happens after the human applied
+`sentry:approved-archive` — 30-90 seconds later on the label trigger, unbounded
+on a dispatch — so an event landing in that window is folded into the value
+meant to detect it, and `lastSeen > baseline` is false for that exact event
+forever. The reopen baseline is taken from the stub body's own `last_seen`,
+written by ingest when it **created** the stub and never rewritten since — a
+reopen edits the stub's labels, comments and state, never its body — so it
+predates the approval by construction. On a stub that has flapped it is still
+the creation instant and can be as old as the stub itself; that only
+makes reopens more eager, which is the intended bias — a spurious reopen costs
+one triage cycle, a buried regression costs an incident. Two guards keep it from
+being the worse choice: an unparsable stub `last_seen` falls back to the live
+read (the pre-#1692 behaviour, so a stale body field can never make a human
+approval unspendable), and a stub `last_seen` newer than the live read loses to
+it.
+
+**The baselines live in the stub BODY, never in a comment.** They are written
+into the same yaml block ingest creates the stub with, as
+`archive_baseline_last_seen` (the live read) and
+`archive_reopen_baseline_last_seen` (the pre-approval instant ingest compares
+against), plus the Sentry issue id the run mutated, and the write
+happens before anything marks the stub settled. A stub archived before the
+second field existed carries only the first, and ingest falls back to it, so
+those stubs behave exactly as they did. Placement is the entire trust
 boundary here, and it is structural rather than cryptographic. The Stage B
 triage agent is an LLM reading attacker-controlled Sentry payloads, and
 `.github/workflows/sentry-triage-agent.yml` grants it

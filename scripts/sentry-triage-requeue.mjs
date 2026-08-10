@@ -35,7 +35,11 @@
  *     line; it can never author the fence line itself.
  *  3. Post the fence BEFORE mutating labels; change state LAST. An interrupted run
  *     must leave a fenced-but-unqueued stub (inert, retried), never a
- *     queued-but-unfenced one (the close-over-a-live-regression setup).
+ *     queued-but-unfenced one (the close-over-a-live-regression setup). Inside
+ *     the label step the same rule again: ADD `sentry:needs-triage` in its own
+ *     call before SHEDDING the previous round's markers, because one `gh issue
+ *     edit` carrying both flags is two concurrent mutations and the losable half
+ *     is the one every recovery path reads (`buildRequeueAddLabelArgs`).
  *  4. The exclusion set records ATTEMPTS, not successes: `claim` fires before any
  *     I/O, so a re-queue that throws half-way is never inherited by the
  *     fence-free bookkeeping sweep inside the same run.
@@ -196,12 +200,38 @@ export function isSelectableForTriage({ state, labels } = {}) {
 }
 
 /**
- * The label edit every re-queue makes: restore `sentry:needs-triage` and shed
- * every marker describing the previous round (REOPEN_SHED_LABELS). Removing an
- * absent label is a no-op for `gh issue edit` (the labels themselves always
- * exist because the ingest label bootstrap runs first). Exported for tests.
+ * The label edit every re-queue makes, as TWO ordered calls: restore
+ * `sentry:needs-triage` first, then shed every marker describing the previous
+ * round (REOPEN_SHED_LABELS). Removing an absent label is a no-op for
+ * `gh issue edit` (the labels themselves always exist because the ingest label
+ * bootstrap runs first). Exported for tests.
+ *
+ * ONE `gh issue edit --add-label … --remove-label …` is NOT one write (issue
+ * #1693). The CLI fires `addLabels` and `removeLabels` as discrete, concurrent
+ * GraphQL mutations (cli/cli, `pkg/cmd/pr/shared/editable_http.go`: "Labels are
+ * updated through discrete mutations"), so a partial failure can land the remove
+ * without the add. On the regression-reopen path that produced a CLOSED stub
+ * with `sentry:archived` shed and `sentry:needs-triage` never applied — a state
+ * NEITHER recovery path can see. `decideDedupAction` gates its baseline branch
+ * on `sentry:archived`, so it falls back to `closedAt`, which postdates the very
+ * regression the baseline exists to catch; the stranded sweep gates on
+ * `sentry:needs-triage`, which is absent. The run goes red once and the stub
+ * never self-heals after that.
+ *
+ * Ordering the two calls removes the state rather than narrowing it. Add first
+ * and every interruption lands on a pairing something still sees: nothing
+ * written yet (the markers survive, ingest keeps its baseline branch, next run
+ * retries), or `sentry:needs-triage` written and the shed not (the stranded
+ * pairing, which the sweep reopens — and on a fencing cause the fence is already
+ * on the stub, because the fence goes first). The reverse order is what today's
+ * single call can degrade to, so the cost is one API call per re-queue.
+ *
+ * It does briefly leave `sentry:needs-triage` beside a stale verdict marker.
+ * That window is not new — the concurrent mutations can already produce it — and
+ * the state change goes last, so the stub is still CLOSED and invisible to Stage
+ * B's `--state open` selector for the whole of it on the ingest path.
  */
-export function buildReopenLabelEditArgs(issueNumber, repo) {
+export function buildRequeueAddLabelArgs(issueNumber, repo) {
   return [
     "issue",
     "edit",
@@ -210,6 +240,16 @@ export function buildReopenLabelEditArgs(issueNumber, repo) {
     repo,
     "--add-label",
     NEEDS_TRIAGE_LABEL,
+  ];
+}
+
+export function buildRequeueShedLabelArgs(issueNumber, repo) {
+  return [
+    "issue",
+    "edit",
+    String(issueNumber),
+    "-R",
+    repo,
     "--remove-label",
     REOPEN_SHED_LABELS.join(","),
   ];
@@ -513,10 +553,15 @@ export async function requeueQueueStub(
     }
   }
 
-  // Labels: restore `sentry:needs-triage`, shed the previous round's markers.
+  // Labels: restore `sentry:needs-triage`, THEN shed the previous round's
+  // markers — two ordered calls, never one edit carrying both flags. See
+  // `buildRequeueAddLabelArgs`: the single edit is two concurrent GraphQL
+  // mutations, and the half that can be lost is the one both recovery paths
+  // depend on (issue #1693).
   let labelError = null;
   try {
-    await writeGh(buildReopenLabelEditArgs(issueNumber, repo));
+    await writeGh(buildRequeueAddLabelArgs(issueNumber, repo));
+    await writeGh(buildRequeueShedLabelArgs(issueNumber, repo));
   } catch (err) {
     if (!verifyEndState) throw err;
     // Must NOT propagate past the end-state verification below — that is exactly
