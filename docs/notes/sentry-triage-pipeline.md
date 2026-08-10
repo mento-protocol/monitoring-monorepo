@@ -899,6 +899,12 @@ These checks are offline unless noted. CI runs all of them in the required
 that broke; `scripts/check-sentry-suites-in-ci.test.mjs` fails if a new suite
 lands without a step there.
 
+That check parses ci.yml rather than searching it, so a step only counts when
+it runs the suite as its whole command. Adding an `if:`, a
+`continue-on-error:`, a `working-directory:`, an `env:`, a `|| true`, or an
+extra argument makes the step stop counting, and the failure names which one.
+Write the step as a bare `pnpm <alias>` or `node scripts/<file>`.
+
 ```bash
 pnpm sentry:ingest:test
 pnpm sentry:digest:test
