@@ -335,7 +335,7 @@ function postAuthApplySteps(config) {
         run: "terraform apply -auto-approve -input=false -lock-timeout=10m",
       },
       {
-        uses: "Kesin11/actions-timeline@7bf79990b7c09f5dfb570ac30b814ca597bd538e",
+        uses: "Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad",
         if: "always()",
       },
     ];
@@ -362,7 +362,7 @@ function postAuthApplySteps(config) {
       run: applySummaryCommand(config.summaryRoot),
     },
     {
-      uses: "Kesin11/actions-timeline@7bf79990b7c09f5dfb570ac30b814ca597bd538e",
+      uses: "Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad",
       if: "always()",
     },
   ];
