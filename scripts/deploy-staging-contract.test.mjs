@@ -20,6 +20,11 @@ import {
   stripDeployStagingTemplateSuffix,
   validateDeployStagingContract,
 } from "./deploy-staging-contract.mjs";
+import {
+  METRICS_BRIDGE_PUBLIC_BINDING_ADDRESS,
+  METRICS_BRIDGE_SERVICE_ADDRESS,
+  validateMetricsBridgeBootstrapPlan,
+} from "./check-metrics-bridge-bootstrap-plan.mjs";
 
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -152,6 +157,95 @@ function expectFailure(files, expected) {
 }
 
 const files = repositoryFiles();
+
+const noOpServiceChange = {
+  address: "google_cloud_run_v2_service.metrics_bridge",
+  mode: "managed",
+  change: { actions: ["no-op"] },
+};
+const publicBindingCreate = {
+  address: METRICS_BRIDGE_PUBLIC_BINDING_ADDRESS,
+  mode: "managed",
+  change: { actions: ["create"] },
+};
+assert.deepEqual(
+  validateMetricsBridgeBootstrapPlan(
+    {
+      resource_changes: [noOpServiceChange, publicBindingCreate],
+    },
+    "public-binding",
+  ),
+  [],
+  "partial bootstrap plan should allow only the public binding create",
+);
+assert.deepEqual(
+  validateMetricsBridgeBootstrapPlan(
+    {
+      resource_changes: [noOpServiceChange],
+    },
+    "public-binding",
+  ),
+  [],
+  "a concurrent no-op recovery should remain safe",
+);
+const serviceCreate = {
+  address: METRICS_BRIDGE_SERVICE_ADDRESS,
+  mode: "managed",
+  change: { actions: ["create"] },
+};
+assert.deepEqual(
+  validateMetricsBridgeBootstrapPlan(
+    { resource_changes: [serviceCreate] },
+    "service",
+  ),
+  [],
+  "first bootstrap plan should allow exactly the service create",
+);
+assert.deepEqual(
+  validateMetricsBridgeBootstrapPlan(
+    { resource_changes: [noOpServiceChange] },
+    "service",
+  ),
+  ["service bootstrap plan must create its resource exactly once"],
+  "a concurrent service state change should stop before apply",
+);
+for (const unsafeChange of [
+  {
+    address: "google_cloud_run_v2_service.metrics_bridge",
+    mode: "managed",
+    change: { actions: ["update"] },
+  },
+  {
+    ...publicBindingCreate,
+    change: { actions: ["delete", "create"] },
+  },
+  {
+    address: "google_project_iam_member.unrelated",
+    mode: "managed",
+    change: { actions: ["create"] },
+  },
+]) {
+  assert.equal(
+    validateMetricsBridgeBootstrapPlan(
+      {
+        resource_changes: [unsafeChange],
+      },
+      "public-binding",
+    ).length,
+    1,
+    `${unsafeChange.address} mutation should fail closed`,
+  );
+}
+assert.deepEqual(
+  validateMetricsBridgeBootstrapPlan(
+    {
+      resource_changes: [publicBindingCreate],
+      resource_drift: [noOpServiceChange],
+    },
+    "public-binding",
+  ),
+  ["bootstrap plan must not contain refreshed resource drift"],
+);
 
 const rootGcloudIgnoreEntries = files[".gcloudignore"]
   .split(/\r?\n/u)
@@ -562,15 +656,157 @@ for (const [filePath, configFlag] of [
 for (const target of [
   "google_project_iam_member.metrics_bridge_builder",
   "google_artifact_registry_repository_iam_member.metrics_bridge_builder_writer",
+  "google_storage_bucket_iam_policy.peg_policy",
   "google_project_iam_member.dev_logging_viewer",
   "google_service_account_iam_member.dev_metrics_bridge_builder_service_account_user",
   "google_service_account_iam_member.dev_metrics_bridge_runtime_service_account_user",
 ]) {
+  const targetLine = files["scripts/deploy-bridge.sh"]
+    .split("\n")
+    .find((line) => line.includes(`-target=${target}`));
+  assert(targetLine, `direct bootstrap target fixture missing: ${target}`);
   expectFailure(
-    mutate(files, "scripts/deploy-bridge.sh", `  -target=${target} \\\n`, ""),
+    mutate(files, "scripts/deploy-bridge.sh", `${targetLine}\n`, ""),
     `scripts/deploy-bridge.sh: direct bootstrap must target ${target} exactly once`,
   );
 }
+
+expectFailure(
+  mutate(
+    files,
+    "scripts/deploy-bridge.sh",
+    "      -target=google_cloud_run_v2_service.metrics_bridge\n",
+    "",
+  ),
+  "scripts/deploy-bridge.sh: google_cloud_run_v2_service.metrics_bridge must run exactly once only through a guarded no-refresh plan in the confirmed-absent service branch",
+);
+expectFailure(
+  mutate(
+    files,
+    "scripts/deploy-bridge.sh",
+    "    -target=google_cloud_run_v2_service_iam_member.metrics_bridge_public\n",
+    "",
+  ),
+  "scripts/deploy-bridge.sh: partial bootstrap recovery must apply only a guarded no-refresh public-binding plan",
+);
+
+expectFailure(
+  mutate(
+    files,
+    "scripts/deploy-bridge.sh",
+    'if ! EXISTING_METRICS_BRIDGE_SERVICE="$(gcloud run services list',
+    'if EXISTING_METRICS_BRIDGE_SERVICE="$(gcloud run services list',
+  ),
+  "scripts/deploy-bridge.sh: existing-service lookup must be exact and fail closed",
+);
+expectFailure(
+  mutate(
+    files,
+    "scripts/deploy-bridge.sh",
+    "  --filter='metadata.name=metrics-bridge' \\\n",
+    "  --filter='metadata.name:metrics-bridge' \\\n",
+  ),
+  "scripts/deploy-bridge.sh: existing-service lookup must be exact and fail closed",
+);
+expectFailure(
+  mutate(
+    files,
+    "scripts/deploy-bridge.sh",
+    '  echo "Unable to verify Metrics Bridge Cloud Run service state; refusing to deploy."\n  exit 1\nfi',
+    '  echo "Unable to verify Metrics Bridge Cloud Run service state; refusing to deploy."\nfi',
+  ),
+  "scripts/deploy-bridge.sh: existing-service lookup must be exact and fail closed",
+);
+expectFailure(
+  mutate(
+    files,
+    "scripts/deploy-bridge.sh",
+    '    echo "Unexpected Cloud Run service lookup result; refusing to deploy."\n    exit 1\n    ;;',
+    '    echo "Unexpected Cloud Run service lookup result; refusing to deploy."\n    ;;',
+  ),
+  "scripts/deploy-bridge.sh: service bootstrap branching must reject unexpected lookup results",
+);
+expectFailure(
+  mutate(
+    mutate(
+      files,
+      "scripts/deploy-bridge.sh",
+      "      -target=google_cloud_run_v2_service.metrics_bridge\n",
+      "",
+    ),
+    "scripts/deploy-bridge.sh",
+    "  -target=google_service_account_iam_member.dev_metrics_bridge_runtime_service_account_user\n",
+    "  -target=google_service_account_iam_member.dev_metrics_bridge_runtime_service_account_user \\\n  -target=google_cloud_run_v2_service.metrics_bridge\n",
+  ),
+  "scripts/deploy-bridge.sh: google_cloud_run_v2_service.metrics_bridge must run exactly once only through a guarded no-refresh plan in the confirmed-absent service branch",
+);
+expectFailure(
+  mutate(files, "scripts/deploy-bridge.sh", "      -refresh=false \\\n", ""),
+  "scripts/deploy-bridge.sh: google_cloud_run_v2_service.metrics_bridge must run exactly once only through a guarded no-refresh plan in the confirmed-absent service branch",
+);
+expectFailure(
+  mutate(
+    files,
+    "scripts/deploy-bridge.sh",
+    "node scripts/check-metrics-bridge-bootstrap-plan.mjs service",
+    "node scripts/other-plan-checker.mjs service",
+  ),
+  "scripts/deploy-bridge.sh: google_cloud_run_v2_service.metrics_bridge must run exactly once only through a guarded no-refresh plan in the confirmed-absent service branch",
+);
+expectFailure(
+  mutate(
+    files,
+    "scripts/deploy-bridge.sh",
+    'if ! CREATED_METRICS_BRIDGE_SERVICE="$(gcloud run services list',
+    'if CREATED_METRICS_BRIDGE_SERVICE="$(gcloud run services list',
+  ),
+  "scripts/deploy-bridge.sh: google_cloud_run_v2_service.metrics_bridge must run exactly once only through a guarded no-refresh plan in the confirmed-absent service branch",
+);
+expectFailure(
+  mutate(
+    files,
+    "scripts/deploy-bridge.sh",
+    "    -refresh=false \\\n" + '    -out="$PUBLIC_BINDING_PLAN" \\\n',
+    '    -out="$PUBLIC_BINDING_PLAN" \\\n',
+  ),
+  "scripts/deploy-bridge.sh: partial bootstrap recovery must apply only a guarded no-refresh public-binding plan",
+);
+expectFailure(
+  mutate(
+    files,
+    "scripts/deploy-bridge.sh",
+    "node scripts/check-metrics-bridge-bootstrap-plan.mjs public-binding",
+    "node scripts/other-plan-checker.mjs public-binding",
+  ),
+  "scripts/deploy-bridge.sh: partial bootstrap recovery must apply only a guarded no-refresh public-binding plan",
+);
+expectFailure(
+  mutate(
+    files,
+    "scripts/deploy-bridge.sh",
+    'if ! grep -Fqx -- "$METRICS_BRIDGE_SERVICE_ADDRESS" <<<"$TERRAFORM_STATE_ADDRESSES"; then',
+    'if grep -Fqx -- "$METRICS_BRIDGE_SERVICE_ADDRESS" <<<"$TERRAFORM_STATE_ADDRESSES"; then',
+  ),
+  "scripts/deploy-bridge.sh: service bootstrap branching must reject unexpected lookup results",
+);
+expectFailure(
+  mutate(
+    files,
+    "scripts/deploy-bridge.sh",
+    "  --filter='bindings.role=roles/run.invoker AND bindings.members=allUsers' \\\n",
+    "  --filter='bindings.role=roles/run.invoker' \\\n",
+  ),
+  "scripts/deploy-bridge.sh: live public-binding verification must be exact and fail before image rollout",
+);
+expectFailure(
+  mutate(
+    files,
+    "scripts/deploy-bridge.sh",
+    '    echo "Public invoker binding is tracked but missing live; run a reviewed platform plan/apply before deploying."\n    exit 1',
+    '    echo "Public invoker binding is tracked but missing live; run a reviewed platform plan/apply before deploying."',
+  ),
+  "scripts/deploy-bridge.sh: live public-binding verification must be exact and fail before image rollout",
+);
 
 const metricsBridgeBuilderExecutor =
   '    "serviceAccount:${google_service_account.metrics_bridge_builder.email}",\n';

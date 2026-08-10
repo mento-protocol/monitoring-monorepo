@@ -22,7 +22,7 @@
  *   - the verdict contract, the prompt and the pipeline doc agree about the two
  *     new fields, and the workflow actually invokes this leg.
  */
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -825,26 +825,61 @@ await test("the verdict job runs the brief leg on EVERY verdict", () => {
   );
 });
 
-await test("every re-queue call site wires the body reader the brief clear needs", () => {
-  // The chokepoint owns WHEN a stale brief is cleared, but it cannot read a
-  // body without a reader. A production caller that forgets one degrades
-  // silently, which is the exact drift the chokepoint exists to prevent — so
-  // pin the wiring where a reviewer can see it.
-  for (const relative of [
-    "scripts/sentry-triage-ingest.mjs",
-    "scripts/sentry-triage-archive.mjs",
-  ]) {
-    const src = readRepoFile(relative);
-    const sites = src.split("requeueQueueStub(").slice(1);
-    assert(sites.length > 0, `expected a re-queue call site in ${relative}`);
-    for (const site of sites) {
-      const deps = site.slice(0, site.indexOf("},"));
-      assert(
-        deps.includes("readBody:"),
-        `expected readBody wired at every requeueQueueStub call in ${relative}`,
-      );
+await test("a failing brief step re-queues the stub instead of stranding it", () => {
+  // Ungating put this step inside the window the verdict step opens by taking
+  // sentry:needs-triage off (#1764). Nothing downstream re-queues an open,
+  // verdict-labeled stub — the close step never runs, the project job skips
+  // it, the scheduled selector requires the label — so this step's failure
+  // path owes the same compensation, over the same closed enums.
+  const workflow = readRepoFile(".github/workflows/sentry-triage-agent.yml");
+  const step = workflow.slice(
+    workflow.indexOf("- name: Render or clear the needs-human brief"),
+    workflow.indexOf("- name: Close queue stub"),
+  );
+  assert(step.includes("requeue_for_retry() {"), "expected the compensation");
+  assert(
+    step.includes(
+      '--remove-label "${VERDICT_LABEL},${VERDICT_SHED},sentry:projected"',
+    ) && step.includes('--add-label "sentry:needs-triage"'),
+    "expected the same re-queue edit the verdict post-condition makes",
+  );
+  // The enums come from the verdict step rather than a second literal copy of
+  // the verdict namespace.
+  assert(
+    step.includes("VERDICT_SHED: ${{ steps.verdict.outputs.shed }}") &&
+      workflow.includes('echo "shed=${shed}"'),
+    "expected the shed carried as a step output",
+  );
+  const meaningful = step
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "" && !line.startsWith("#"));
+  const exits = meaningful.filter((line) => line === "exit 1");
+  assertEqual(exits.length, 1);
+  meaningful.forEach((line, i) => {
+    if (line !== "exit 1") return;
+    assertEqual(meaningful[i - 1], "requeue_for_retry");
+  });
+});
+
+await test("this leg stays the only writer of the block, on the only path that may", () => {
+  // The stub body has exactly two authorized writers (the trust boundary in
+  // sentry-triage-queue-contract.mjs): the archive leg's baseline write and
+  // this one. The re-queue chokepoint deliberately writes NO body — issue
+  // #1692 pins that with a test of its own — so removal has to reach a stub
+  // through this leg, which is why the leg runs on every verdict.
+  const scriptsDir = join(repoRoot, "scripts");
+  const offenders = [];
+  for (const file of readdirSync(scriptsDir)) {
+    if (!file.endsWith(".mjs") || file.endsWith(".test.mjs")) continue;
+    if (file === "sentry-triage-brief.mjs") continue;
+    if (file === "sentry-triage-queue-contract.mjs") continue; // defines it
+    const src = readFileSync(join(scriptsDir, file), "utf8");
+    if (/\bstripBriefFromBody\s*\(|BRIEF_BLOCK_START/.test(src)) {
+      offenders.push(file);
     }
   }
+  assertEqual(offenders.join(", "), "");
 });
 
 if (failed > 0) {

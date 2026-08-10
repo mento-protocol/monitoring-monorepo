@@ -48,10 +48,9 @@ export const PROJECTED_COMMENT_PREFIX = "Projected to owning repo: ";
 // just text any comment author can write. The freshness baseline (issue #1371)
 // lives in the queue-stub BODY for that reason — no untrusted step holds a tool
 // grant that edits a body. Defined here — the pure contract module — for
-// the same reason as PROJECTED_COMMENT_PREFIX above (emitter and consumer can
-// never drift) and because sentry-triage-archive.mjs already imports from
-// sentry-triage-ingest.mjs, so the consumer importing it from the emitter would
-// be a cycle.
+// the same reason as PROJECTED_COMMENT_PREFIX above: the emitter
+// (sentry-triage-archive.mjs) and any consumer read one definition, so the two
+// cannot drift.
 export const ARCHIVE_COMMENT_MARKER = "<!-- sentry-triage-archive:v1 -->";
 
 // Only ACTIONABLE verdicts project. `needs-human` / `upstream-transient` stay

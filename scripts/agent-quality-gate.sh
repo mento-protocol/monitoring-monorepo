@@ -2299,6 +2299,9 @@ while IFS= read -r path; do
           # The two needs-human brief emitters share their field selection and
           # bounds; the queue-issue one also reads the digest's autofix prefix.
           add_command "pnpm sentry:brief:test" "Sentry triage digest helper changed"
+          # The digest owns LABEL_TO_VERDICT, one of the three verdict-label
+          # maps the projection suite pins against each other.
+          add_command "pnpm sentry:project:test" "Sentry triage digest helper changed"
           ;;
         scripts/sentry-triage-brief.mjs|scripts/sentry-triage-brief.test.mjs)
           add_command "pnpm sentry:brief:test" "Sentry needs-human brief helper changed"
@@ -2340,6 +2343,10 @@ while IFS= read -r path; do
           # The brief writes the stub BODY the archive baseline lives in, and
           # asserts every contract reader still sees it afterwards.
           add_command "pnpm sentry:brief:test" "Sentry re-queue chokepoint changed"
+          # The contract owns VERDICT_LABELS, which the verdict step's shed is
+          # derived from and the projection suite pins against the other two
+          # verdict-label maps.
+          add_command "pnpm sentry:project:test" "Sentry re-queue chokepoint changed"
           ;;
         scripts/pr-feedback-state.mjs|scripts/pr-feedback-state-core.mjs|scripts/pr-feedback-state-claude.mjs|scripts/pr-feedback-state.test.mjs)
           add_command "pnpm pr:feedback-state:test" "PR feedback-state helper changed"

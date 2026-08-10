@@ -24,6 +24,7 @@ import {
   NEEDS_TRIAGE_LABEL,
   neutralizeUntrusted,
   parseArchiveBaseline,
+  reopenBaselineOf,
   truncateTitle,
 } from "./sentry-triage-queue-contract.mjs";
 import {
@@ -42,6 +43,7 @@ export {
   APPROVED_ARCHIVE_LABEL,
   ARCHIVE_BASELINE_FIELD,
   ARCHIVE_BASELINE_ID_FIELD,
+  ARCHIVE_REOPEN_BASELINE_FIELD,
   ARCHIVED_LABEL,
   CODE_FIX_VERDICT_LABEL,
   defangBackticks,
@@ -53,6 +55,7 @@ export {
   neutralizeUntrusted,
   parseArchiveBaseline,
   PROJECTED_LABEL,
+  reopenBaselineOf,
   REOPEN_SHED_LABELS,
   sanitizeFreeText,
   truncateTitle,
@@ -61,7 +64,8 @@ export {
 } from "./sentry-triage-queue-contract.mjs";
 export {
   buildRegressedComment,
-  buildReopenLabelEditArgs,
+  buildRequeueAddLabelArgs,
+  buildRequeueShedLabelArgs,
   buildStrandedRecoveryComment,
 } from "./sentry-triage-requeue.mjs";
 
@@ -190,13 +194,21 @@ export function indexQueueIssuesByShortId(issues) {
  * regression is silent, a wrongly reopened one merely re-triages.
  * Closed match, not regressed -> skip (stays closed). No match -> create.
  *
- * An ARCHIVED stub (`sentry:archived`) compares against `archiveBaseline` — the
- * Sentry `lastSeen` the archive leg observed just before it mutated the issue —
- * instead of `closedAt` (issue #1371). The archive's close postdates any event
+ * An ARCHIVED stub (`sentry:archived`) compares against `archiveBaseline` —
+ * `reopenBaselineOf` over the baseline the archive leg wrote into the stub body
+ * — instead of `closedAt` (issue #1371). The archive's close postdates any event
  * that landed inside its mutation window, so `closedAt` would hide that event
  * forever. A missing, unparsable, or non-date baseline falls back to the
  * `closedAt` comparison, which keeps every stub archived before this contract
  * existed working exactly as before.
+ *
+ * The value that arrives here is deliberately the archive's PRE-APPROVAL
+ * baseline, not the `lastSeen` it read at archive time (issue #1692). That read
+ * happens after the human applied `sentry:approved-archive`, so an event landing
+ * between the two is folded into the baseline and this comparison answers false
+ * for it permanently. The earlier value only ever reopens more eagerly, which is
+ * the correct bias: a spurious reopen costs a triage cycle, a buried regression
+ * costs an incident.
  *
  * Order matters, and it is deliberate: a usable, bound baseline wins over
  * `closedAt` even when `closedAt` itself is missing or unparsable. The baseline
@@ -725,11 +737,7 @@ export function isStrandedNeedsTriage(issue) {
   );
 }
 
-/**
- * Live state of one queue stub, for the sweep's pre-mutation revalidation and
- * for the re-queue chokepoint's brief clear (`body`, invariant 8 there — one
- * field on a call that was already being made).
- */
+/** Live state of one queue stub, for the sweep's pre-mutation revalidation. */
 async function readQueueIssueState(options, issueNumber, runner) {
   const run = runner ?? ((args) => runGh(args, {}));
   const stdout = await run([
@@ -739,13 +747,12 @@ async function readQueueIssueState(options, issueNumber, runner) {
     "-R",
     options.repo,
     "--json",
-    "number,state,labels,body",
+    "number,state,labels",
   ]);
   const data = stdout && stdout.trim() ? JSON.parse(stdout) : {};
   return {
     number: data.number,
     state: String(data.state ?? "").toUpperCase(),
-    body: data.body ?? "",
     labels: (data.labels ?? [])
       .map((label) => (typeof label === "string" ? label : label?.name))
       .filter(Boolean),
@@ -786,8 +793,6 @@ export async function recoverStrandedQueueIssue(
     {
       writeGh: (args) => run(args, { dryRun: options.dryRun, mutates: true }),
       readStub: (number) => readQueueIssueState(options, number, deps.runGh),
-      readBody: async (number) =>
-        (await readQueueIssueState(options, number, deps.runGh)).body,
     },
     {
       repo: options.repo,
@@ -855,10 +860,6 @@ export async function reopenQueueIssue(
     {
       writeGh: (args) => run(args, { dryRun: options.dryRun, mutates: true }),
       readComments: (number) => fetchIssueComments(options, number, deps.runGh),
-      // Invariant 8 there: this cause fences, so the rendered needs-human brief
-      // describing the now-dead occurrence is cleared with it.
-      readBody: async (number) =>
-        (await readQueueIssueState(options, number, deps.runGh)).body,
       // Records the ATTEMPT in runIngest's exclusion set before the first write,
       // so a reopen that throws half-way is never inherited by the same run's
       // fence-free bookkeeping sweep.
@@ -994,7 +995,11 @@ export async function runIngest(options, deps = {}) {
         existingIssue,
         isRegressed: sentryIssue.isRegressed,
         lastSeen: sentryIssue.lastSeen,
-        archiveBaseline: baseline?.lastSeen ?? null,
+        // The REOPEN baseline, never the archive's own live read: that read
+        // happens after the human approved, so it absorbs any event that landed
+        // in between (issue #1692). `reopenBaselineOf` falls back to the live
+        // read for stubs archived before the second field existed.
+        archiveBaseline: reopenBaselineOf(baseline),
         archiveBaselineIssueId: baseline?.sentryIssueId ?? null,
         sentryIssueId: sentryIssue.id,
       });

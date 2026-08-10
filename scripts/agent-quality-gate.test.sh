@@ -3616,9 +3616,14 @@ assert_contains "- pnpm lockfile:lint:test (lockfile lint helper changed)"
 
 run_gate "scripts/sentry-triage-digest.mjs"
 assert_contains "- pnpm sentry:digest:test (Sentry triage digest helper changed)"
+assert_contains "- pnpm sentry:project:test (Sentry triage digest helper changed)"
 
 run_gate "scripts/sentry-triage-digest.test.mjs"
 assert_contains "- pnpm sentry:digest:test (Sentry triage digest helper changed)"
+
+run_gate "scripts/sentry-triage-queue-contract.mjs"
+assert_contains "- pnpm sentry:requeue:test (Sentry re-queue chokepoint changed)"
+assert_contains "- pnpm sentry:project:test (Sentry re-queue chokepoint changed)"
 
 run_gate "scripts/sentry-triage-project.mjs"
 assert_contains "- pnpm sentry:project:test (Sentry triage projection helper changed)"

@@ -376,9 +376,14 @@ export function classifyIssue(issue) {
     : EMPTY_PARSED;
 
   const stillNeedsTriage = labelNames.includes(NEEDS_TRIAGE_LABEL);
-  const verdictLabel = labelNames.find((name) =>
+  // A stub is supposed to carry exactly one verdict label — the workflow's
+  // verdict step sheds the others in the same edit (#1745). Keep the full list
+  // so a violation is reportable; the bucket still takes the first match,
+  // because picking a different loser would not make the answer any more true.
+  const verdictLabels = labelNames.filter((name) =>
     Object.hasOwn(LABEL_TO_VERDICT, name),
   );
+  const verdictLabel = verdictLabels[0];
   const verdictFromLabel = verdictLabel ? LABEL_TO_VERDICT[verdictLabel] : null;
 
   let bucket;
@@ -392,6 +397,7 @@ export function classifyIssue(issue) {
     number: issue?.number,
     shortId: shortId ?? `#${issue?.number}`,
     project: project ?? "unknown",
+    verdictLabels,
     url: typeof issue?.url === "string" ? issue.url : "",
     bucket,
     section: sectionForEntry(bucket, autofixUrl),
@@ -641,6 +647,25 @@ export function chunkBriefs(headerLine, briefs, maxLen = MAX_SECTION_TEXT_LEN) {
 }
 
 /**
+ * Stubs carrying more than one `sentry:verdict-*` label, as ready-to-emit
+ * warning lines. The verdict step enforces the one-label invariant and fails
+ * its own matrix job on a violation (#1745); the digest only REPORTS one,
+ * because it is the batch's single daily Slack notification and taking the run
+ * down would trade a mis-bucketed row for no notification at all. A stub can
+ * still reach here double-labelled if a human hand-labelled it or it predates
+ * the shed. Pure — the caller does the writing.
+ */
+export function doubleVerdictWarnings(issues) {
+  return (issues ?? [])
+    .map(classifyIssue)
+    .filter((entry) => entry.verdictLabels.length > 1)
+    .map(
+      (entry) =>
+        `Issue #${entry.number} carries ${entry.verdictLabels.length} verdict labels (${entry.verdictLabels.join(", ")}); this digest bucketed it as "${entry.bucket}" from the first one. Remove the stale label.`,
+    );
+}
+
+/**
  * Build the deterministic Slack `chat.postMessage` payload for one batch.
  * `channel` is passed in (hardcoded by the workflow); `now` is injectable for
  * tests. Pure — no I/O, no escaping omissions: every free-form value is routed
@@ -860,6 +885,9 @@ async function main() {
   }
 
   const issues = await collectIssues(options.repo, options.issues);
+  for (const warning of doubleVerdictWarnings(issues)) {
+    process.stderr.write(`::warning::${warning}\n`);
+  }
   const payload = buildDigest(issues, {
     channel: options.channel,
     now: new Date(),

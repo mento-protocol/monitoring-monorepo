@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { LABEL_TO_VERDICT } from "./sentry-triage-digest.mjs";
+import { VERDICT_LABELS } from "./sentry-triage-ingest.mjs";
 import {
   ALLOWED_OWNING_REPOS,
   bodyBacklinksShortId,
@@ -2153,6 +2155,20 @@ await test("VERDICT_TO_LABEL encodes the upstream label/value asymmetry", () => 
   assertEqual(VERDICT_TO_LABEL["needs-human"], "sentry:verdict-needs-human");
 });
 
+// The shed is derived from VERDICT_LABELS, the digest buckets through
+// LABEL_TO_VERDICT, and the label step maps through VERDICT_TO_LABEL. Nothing
+// else makes the three agree, so a fifth verdict added to one map would ship a
+// label the shed never removes and the digest never recognizes.
+await test("VERDICT_LABELS, VERDICT_TO_LABEL and LABEL_TO_VERDICT pin one label set", () => {
+  const contract = [...VERDICT_LABELS].sort();
+  assert(contract.length > 0, "VERDICT_LABELS is empty");
+  assertDeepEqual(
+    [...new Set(Object.values(VERDICT_TO_LABEL))].sort(),
+    contract,
+  );
+  assertDeepEqual(Object.keys(LABEL_TO_VERDICT).sort(), contract);
+});
+
 await test("runParseOnly returns the validated verdict + mapped label + projectability", async () => {
   const { runGh, calls } = makeRunGh({ issue: queueIssue() });
   const result = await runParseOnly(
@@ -2163,6 +2179,7 @@ await test("runParseOnly returns the validated verdict + mapped label + projecta
     verdict: "code-fix",
     label: "sentry:verdict-code-fix",
     projectable: true,
+    shed: "sentry:verdict-config-fix,sentry:verdict-upstream,sentry:verdict-needs-human",
   });
   // Read-only: exactly one `gh issue view` with the ambient token.
   assertEqual(calls.length, 1);
@@ -2205,7 +2222,56 @@ await test("runParseOnly maps upstream-transient to the asymmetric label", async
     verdict: "upstream-transient",
     label: "sentry:verdict-upstream",
     projectable: false,
+    shed: "sentry:verdict-code-fix,sentry:verdict-config-fix,sentry:verdict-needs-human",
   });
+});
+
+// The re-dispatch case the double-label bug comes from: a human answers a
+// `needs-human` escalation, re-runs the workflow, and the agent verdicts
+// something else. `--add-label` only adds, so the stale label has to come off
+// in the same edit.
+await test("runParseOnly sheds every verdict label except the one being applied", async () => {
+  const issue = queueIssue({
+    labels: ["sentry-triage", "sentry:verdict-needs-human"],
+    comments: [
+      botComment(
+        verdictComment({ verdict: "config-fix" }),
+        "2026-07-17T10:00:00Z",
+      ),
+    ],
+  });
+  const result = await runParseOnly(
+    { localRepo: "mento-protocol/monitoring-monorepo", queueIssue: 500 },
+    { runGh: makeRunGh({ issue }).runGh },
+  );
+  assertEqual(result.label, "sentry:verdict-config-fix");
+  const shed = result.shed.split(",");
+  assertDeepEqual(shed.sort(), [
+    "sentry:verdict-code-fix",
+    "sentry:verdict-needs-human",
+    "sentry:verdict-upstream",
+  ]);
+  assert(
+    !shed.includes(result.label),
+    "the label being applied must never also be removed in the same edit",
+  );
+});
+
+// REOPEN_SHED_LABELS is the superset the re-queue chokepoint uses. Handing it
+// to this step would strip the autofix dedup markers (re-fixing an already
+// fixed stub) and the archive audit markers.
+await test("runParseOnly sheds ONLY the verdict namespace", async () => {
+  const { runGh } = makeRunGh({ issue: queueIssue() });
+  const result = await runParseOnly(
+    { localRepo: "mento-protocol/monitoring-monorepo", queueIssue: 500 },
+    { runGh },
+  );
+  for (const name of result.shed.split(",")) {
+    assert(
+      name.startsWith("sentry:verdict-"),
+      `shed carries a non-verdict label: ${name}`,
+    );
+  }
 });
 
 await test("runParseOnly fails loud on missing, hostile-author, stale, and invalid verdicts", async () => {
@@ -2331,6 +2397,7 @@ await test("runParseOnly accepts a needs-human verdict WITH human_question", asy
     verdict: "needs-human",
     label: "sentry:verdict-needs-human",
     projectable: false,
+    shed: "sentry:verdict-code-fix,sentry:verdict-config-fix,sentry:verdict-upstream",
   });
 });
 

@@ -222,14 +222,22 @@ export const REOPEN_SHED_LABELS = [
 // ---------------------------------------------------------------------------
 
 // Delimiters of the block `scripts/sentry-triage-brief.mjs` renders into the
-// stub body. They live HERE rather than in the renderer because the block has
-// TWO writers by design and they must agree byte for byte: the brief leg writes
-// and replaces it, and the re-queue chokepoint REMOVES it (a re-queue fences the
-// verdict the block renders, so the rendering dies with it — see
-// `stripBriefFromBody` and `sentry-triage-requeue.mjs`).
+// stub body. They live HERE, beside the archive baseline they must never
+// disturb, because the block has a LIFECYCLE and not just a render: the brief
+// leg writes it on a `needs-human` verdict and REMOVES it on every other one,
+// so a rendering can never outlive the verdict it renders.
+//
+// Removal deliberately does NOT reach the re-queue chokepoint, which would be
+// the earliest possible moment to drop a fenced verdict's rendering. That path
+// writes no stub body at all (issue #1692, pinned by a test in
+// scripts/sentry-triage-requeue.test.mjs): a whole-body write there would move
+// the ingest-written `last_seen` the reopen baseline depends on, and would add a
+// third writer racing the archive leg over the fields below. The cost is a stale
+// block between a re-queue and the next round's verdict, on a stub whose labels
+// already say it is awaiting fresh triage.
 //
 // Both delimiters are required for either operation. An opener with no closer is
-// a malformed block that neither writer guesses at: guessing would either eat
+// a malformed block the writer refuses to guess at: guessing would either eat
 // the rest of the body or stack a duplicate.
 export const BRIEF_BLOCK_START = "<!-- sentry-triage-brief:v1 -->";
 export const BRIEF_BLOCK_END = "<!-- /sentry-triage-brief:v1 -->";
@@ -287,9 +295,9 @@ export function stripBriefFromBody(body) {
 // `gh issue` subcommands; the autofix agent gets file-edit tools and no shell at
 // all), and the only steps that rewrite a stub body are deterministic, zero-LLM
 // ones running on a trusted runner: the archive leg's baseline write, and the
-// needs-human brief's own lifecycle — the render/remove write in
-// scripts/sentry-triage-brief.mjs and the re-queue chokepoint's clear
-// (`stripBriefFromBody` above, #1748). Moving the field into the body therefore
+// needs-human brief's render/remove write (scripts/sentry-triage-brief.mjs,
+// #1748). Those two, and no third — see the block delimiters above for why the
+// re-queue chokepoint stays out. Moving the field into the body therefore
 // removes the forgery surface instead of trying to authenticate inside it,
 // which a shared-secret signature could only match, never beat.
 //
@@ -300,14 +308,39 @@ export function stripBriefFromBody(body) {
 // (first fence wins) nor emit a line of the form `archive_baseline_last_seen: …`
 // that a reader could pick up. Its suite asserts both against a hostile verdict.
 //
-// Neither brief writer is allowed to MOVE this field either. Both rebuild the
-// body from a live read and assert the parsed baseline is unchanged across their
-// own edit, and the brief leg re-reads after writing and restores a baseline
-// that a concurrent archive run lost inside the window — the archive workflow
+// The brief is not allowed to MOVE this field either. It rebuilds the body from
+// a live read, asserts the parsed baseline is unchanged across its own edit,
+// re-reads after writing, and restores a baseline that a concurrent archive run
+// lost inside the window — the archive workflow
 // and the triage-agent workflow hold different concurrency groups, so the two
 // body writers really can overlap on one stub.
 export const ARCHIVE_BASELINE_FIELD = "archive_baseline_last_seen";
 export const ARCHIVE_BASELINE_ID_FIELD = "archive_baseline_sentry_issue_id";
+
+// The SECOND baseline, and the one ingest's reopen gate actually compares
+// against (issue #1692). `ARCHIVE_BASELINE_FIELD` above is read from Sentry
+// AFTER the human applied `sentry:approved-archive`, so an event landing between
+// the approval and that read is folded into the value meant to detect it: ingest
+// asks `lastSeen > baseline`, which is false for the event that produced the
+// baseline. The archive's own consumers still need that live read — it is the
+// only thing the post-PUT mutation-window check and the already-archived retry
+// refusals can compare against — so the fix is a second field rather than a
+// different value in the first.
+//
+// This one carries an instant that provably PREDATES the approval: the stub
+// body's own `last_seen`, written by ingest when it CREATED the stub and never
+// rewritten — a reopen edits labels, comments and state, never the body, which
+// is the same property that keeps the archive leg the only stub-body writer
+// (see the trust-boundary note above). So on a stub that has regressed and
+// reopened since, this is still the creation instant and can be as old as the
+// stub itself — which only makes reopens more eager, and that is the intended
+// bias (a spurious reopen costs one triage cycle, a buried regression costs an
+// incident).
+//
+// A stub archived before this field existed carries only the first one, so
+// `reopenBaselineOf` falls back to it and those stubs behave exactly as they did.
+export const ARCHIVE_REOPEN_BASELINE_FIELD =
+  "archive_reopen_baseline_last_seen";
 
 /** Read one scalar out of a stub's yaml block. Keys are fixed literals (no regex
  * injection) written one per line as `key: "value"`. */
@@ -328,6 +361,12 @@ function readBaselineField(block, key) {
  * never been archived. The timestamp comes back RAW; validity is the caller's
  * `Date.parse` gate, so a garbage value degrades to the `closedAt` fallback
  * instead of throwing.
+ *
+ * `reopenLastSeen` is the RAW second field and is `""` when the body does not
+ * carry one. Faithfulness matters here: the archive's rollback reads a baseline
+ * back out and writes it onto the live body, so inventing a value a pre-#1692
+ * stub never had would make the rollback rewrite fields it is meant to restore.
+ * Consumers that want the resolved value ask `reopenBaselineOf`.
  */
 export function parseArchiveBaseline(issueBody) {
   const block = extractYamlBlock(issueBody);
@@ -337,7 +376,20 @@ export function parseArchiveBaseline(issueBody) {
   return {
     lastSeen,
     sentryIssueId: readBaselineField(block, ARCHIVE_BASELINE_ID_FIELD),
+    reopenLastSeen: readBaselineField(block, ARCHIVE_REOPEN_BASELINE_FIELD),
   };
+}
+
+/**
+ * The instant ingest's reopen gate compares a regression's `lastSeen` against:
+ * the pre-approval baseline when the stub carries one, else the archive-time
+ * read (issue #1692). One accessor so no consumer has to remember the fallback,
+ * and so a stub archived before the second field existed keeps its old
+ * behaviour rather than losing its baseline entirely.
+ */
+export function reopenBaselineOf(baseline) {
+  if (!baseline) return null;
+  return baseline.reopenLastSeen || baseline.lastSeen || null;
 }
 
 /**
@@ -354,6 +406,10 @@ export function parseArchiveBaseline(issueBody) {
  * Returns null when the body has no yaml block to extend — the archive treats
  * that as a hard refusal rather than inventing structure, since a stub whose
  * body it cannot parse is one ingest cannot read a baseline back out of either.
+ *
+ * `baseline.reopenLastSeen` renders only when it is set, which is what keeps
+ * this an exact inverse of `parseArchiveBaseline`: feeding a parsed pre-#1692
+ * baseline straight back writes the same two fields it came from.
  */
 export function withArchiveBaseline(body, baseline) {
   const source = String(body ?? "");
@@ -364,14 +420,20 @@ export function withArchiveBaseline(body, baseline) {
     .filter(
       (line) =>
         !new RegExp(
-          `^(${ARCHIVE_BASELINE_FIELD}|${ARCHIVE_BASELINE_ID_FIELD}):`,
+          `^(${ARCHIVE_BASELINE_FIELD}|${ARCHIVE_REOPEN_BASELINE_FIELD}|${ARCHIVE_BASELINE_ID_FIELD}):`,
         ).test(line.trim()),
     )
     .join("\n");
+  const reopenLastSeen = String(baseline?.reopenLastSeen ?? "");
   const rebuilt = baseline
     ? [
         stripped,
         `${ARCHIVE_BASELINE_FIELD}: ${JSON.stringify(String(baseline.lastSeen ?? ""))}`,
+        ...(reopenLastSeen
+          ? [
+              `${ARCHIVE_REOPEN_BASELINE_FIELD}: ${JSON.stringify(reopenLastSeen)}`,
+            ]
+          : []),
         `${ARCHIVE_BASELINE_ID_FIELD}: ${JSON.stringify(String(baseline.sentryIssueId ?? ""))}`,
       ].join("\n")
     : stripped;

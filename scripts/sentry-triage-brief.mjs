@@ -63,10 +63,12 @@
  *   - ANY other verdict -> REMOVE the block. The workflow step is therefore
  *     ungated: gating it on needs-human is what let a brief survive a re-triage
  *     to code-fix / config-fix / upstream-transient permanently.
- *   - re-queue on new Sentry evidence -> the chokepoint
- *     (`sentry-triage-requeue.mjs`) removes it as it fences the verdict, so the
- *     dead decision is gone while fresh triage is pending rather than at the end
- *     of it.
+ *   - a re-queue would be the earliest moment to drop a fenced verdict's
+ *     rendering, and this leg deliberately does not reach there: the re-queue
+ *     chokepoint writes no stub body at all (issue #1692, pinned by a test in
+ *     sentry-triage-requeue.test.mjs). So a re-queued stub carries its old block
+ *     until the next round's verdict lands, on a stub whose labels already read
+ *     `sentry:needs-triage`.
  *
  * THE WRITE IS NOT ALONE ON THIS BODY. The archive leg rewrites the same body to
  * record its freshness baseline, under a DIFFERENT concurrency group, so the two

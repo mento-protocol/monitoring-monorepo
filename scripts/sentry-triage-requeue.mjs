@@ -35,7 +35,11 @@
  *     line; it can never author the fence line itself.
  *  3. Post the fence BEFORE mutating labels; change state LAST. An interrupted run
  *     must leave a fenced-but-unqueued stub (inert, retried), never a
- *     queued-but-unfenced one (the close-over-a-live-regression setup).
+ *     queued-but-unfenced one (the close-over-a-live-regression setup). Inside
+ *     the label step the same rule again: ADD `sentry:needs-triage` in its own
+ *     call before SHEDDING the previous round's markers, because one `gh issue
+ *     edit` carrying both flags is two concurrent mutations and the losable half
+ *     is the one every recovery path reads (`buildRequeueAddLabelArgs`).
  *  4. The exclusion set records ATTEMPTS, not successes: `claim` fires before any
  *     I/O, so a re-queue that throws half-way is never inherited by the
  *     fence-free bookkeeping sweep inside the same run.
@@ -48,14 +52,6 @@
  *     This repo is PUBLIC; an unfenced body match is satisfiable by anyone.
  *  7. Live state is revalidated immediately before mutating when the caller's
  *     premise is a snapshot, and a failed read aborts rather than proceeding.
- *  8. A fencing re-queue also clears the RENDERED verdict — the needs-human
- *     brief block in the stub body (`stripBriefFromBody`). Same decision, same
- *     cause: fencing declares the previous verdict to describe a dead
- *     occurrence, and the brief is that verdict rendered above the fold, where a
- *     human reads it as the current decision. Leaving it turned a fenced stub
- *     into one that still shows a live-looking "Decision needed" for the whole
- *     window until the next round, and permanently if that round landed on a
- *     verdict with no brief of its own.
  *
  * Callers declare a CAUSE and a small, explicit policy. They never reconstruct
  * the sequence, and they never decide the fence.
@@ -65,7 +61,6 @@ import {
   NEEDS_TRIAGE_LABEL,
   neutralizeUntrusted,
   REOPEN_SHED_LABELS,
-  stripBriefFromBody,
   truncateTitle,
 } from "./sentry-triage-queue-contract.mjs";
 import {
@@ -205,12 +200,38 @@ export function isSelectableForTriage({ state, labels } = {}) {
 }
 
 /**
- * The label edit every re-queue makes: restore `sentry:needs-triage` and shed
- * every marker describing the previous round (REOPEN_SHED_LABELS). Removing an
- * absent label is a no-op for `gh issue edit` (the labels themselves always
- * exist because the ingest label bootstrap runs first). Exported for tests.
+ * The label edit every re-queue makes, as TWO ordered calls: restore
+ * `sentry:needs-triage` first, then shed every marker describing the previous
+ * round (REOPEN_SHED_LABELS). Removing an absent label is a no-op for
+ * `gh issue edit` (the labels themselves always exist because the ingest label
+ * bootstrap runs first). Exported for tests.
+ *
+ * ONE `gh issue edit --add-label … --remove-label …` is NOT one write (issue
+ * #1693). The CLI fires `addLabels` and `removeLabels` as discrete, concurrent
+ * GraphQL mutations (cli/cli, `pkg/cmd/pr/shared/editable_http.go`: "Labels are
+ * updated through discrete mutations"), so a partial failure can land the remove
+ * without the add. On the regression-reopen path that produced a CLOSED stub
+ * with `sentry:archived` shed and `sentry:needs-triage` never applied — a state
+ * NEITHER recovery path can see. `decideDedupAction` gates its baseline branch
+ * on `sentry:archived`, so it falls back to `closedAt`, which postdates the very
+ * regression the baseline exists to catch; the stranded sweep gates on
+ * `sentry:needs-triage`, which is absent. The run goes red once and the stub
+ * never self-heals after that.
+ *
+ * Ordering the two calls removes the state rather than narrowing it. Add first
+ * and every interruption lands on a pairing something still sees: nothing
+ * written yet (the markers survive, ingest keeps its baseline branch, next run
+ * retries), or `sentry:needs-triage` written and the shed not (the stranded
+ * pairing, which the sweep reopens — and on a fencing cause the fence is already
+ * on the stub, because the fence goes first). The reverse order is what today's
+ * single call can degrade to, so the cost is one API call per re-queue.
+ *
+ * It does briefly leave `sentry:needs-triage` beside a stale verdict marker.
+ * That window is not new — the concurrent mutations can already produce it — and
+ * the state change goes last, so the stub is still CLOSED and invisible to Stage
+ * B's `--state open` selector for the whole of it on the ingest path.
  */
-export function buildReopenLabelEditArgs(issueNumber, repo) {
+export function buildRequeueAddLabelArgs(issueNumber, repo) {
   return [
     "issue",
     "edit",
@@ -219,6 +240,16 @@ export function buildReopenLabelEditArgs(issueNumber, repo) {
     repo,
     "--add-label",
     NEEDS_TRIAGE_LABEL,
+  ];
+}
+
+export function buildRequeueShedLabelArgs(issueNumber, repo) {
+  return [
+    "issue",
+    "edit",
+    String(issueNumber),
+    "-R",
+    repo,
     "--remove-label",
     REOPEN_SHED_LABELS.join(","),
   ];
@@ -240,75 +271,6 @@ async function admissibleVerdictSurvives(readStub, issueNumber) {
     );
     return true;
   }
-}
-
-/**
- * INVARIANT 8 — clear the rendered verdict along with the fenced one.
- *
- * Reads the body live and rebuilds from THAT (never from a caller's snapshot),
- * so the edit carries every other body mutation forward untouched — including
- * the archive freshness baseline, which lives in the same body and whose loss is
- * silent. `stripBriefFromBody` leaves a body with no block byte-identical, so
- * this is safe to run on every fencing re-queue without asking first.
- *
- * NON-FATAL by design, and this is the one place in the module where that is
- * right: a stale rendering is a display defect, while refusing the re-queue over
- * it would leave a live regression unqueued — the exact failure the whole module
- * exists to prevent. Every failure surfaces as a `::notice::`, and the brief leg
- * removes the block itself on the next round whatever verdict it lands on.
- *
- * The body transits argv here rather than stdin because that is what `writeGh`
- * offers; the callers spawn `gh` directly with no shell, and this is the same
- * whole-body argv write the archive leg already makes on this field.
- */
-async function clearRenderedBrief(
-  { writeGh, readBody },
-  { repo, issueNumber },
-) {
-  if (!readBody) {
-    process.stderr.write(
-      `::notice::No body reader wired for the re-queue of #${issueNumber}; a rendered needs-human brief (if any) stays until the next triage round removes it.\n`,
-    );
-    return false;
-  }
-  let body;
-  try {
-    body = await readBody(issueNumber);
-  } catch (err) {
-    process.stderr.write(
-      `::notice::Could not read #${issueNumber} to clear its rendered brief (${
-        err instanceof Error ? err.message : String(err)
-      }); leaving the body as it is.\n`,
-    );
-    return false;
-  }
-  const next = stripBriefFromBody(body);
-  if (next === null) {
-    process.stderr.write(
-      `::notice::Issue #${issueNumber} carries a brief opener with no closing delimiter; refusing to guess at the body while re-queuing it.\n`,
-    );
-    return false;
-  }
-  if (next === body) return false;
-  try {
-    await writeGh([
-      "issue",
-      "edit",
-      String(issueNumber),
-      "-R",
-      repo,
-      "--body",
-      next,
-    ]);
-  } catch (err) {
-    process.stderr.write(
-      `::notice::Clearing the stale brief on #${issueNumber} reported a failure (${
-        err instanceof Error ? err.message : String(err)
-      }); the re-queue continues and the next triage round rewrites the block.\n`,
-    );
-    return false;
-  }
-  return true;
 }
 
 /**
@@ -443,10 +405,6 @@ export const REQUEUE_ON_FAILURE_VERIFY_END_STATE = "verify-end-state";
  *                          the declared policy reads live state.
  *   `readComments(n)`    — live comment objects (author included). Required only
  *                          for `dedupeFence`.
- *   `readBody(n)`        — the stub's live body. Required for the invariant-8
- *                          brief clear, which only fencing causes reach; its
- *                          absence degrades to a `::notice::`, never to a
- *                          refused re-queue.
  *   `claim()`            — optional; record this ATTEMPT in the caller's
  *                          exclusion set. Invoked before any I/O (invariant 4).
  *
@@ -468,13 +426,7 @@ export const REQUEUE_ON_FAILURE_VERIFY_END_STATE = "verify-end-state";
  * Returns `{ requeued, reason, verified, labelError }`.
  */
 export async function requeueQueueStub(
-  {
-    writeGh,
-    readStub = null,
-    readComments = null,
-    readBody = null,
-    claim = null,
-  },
+  { writeGh, readStub = null, readComments = null, claim = null },
   {
     repo,
     issueNumber,
@@ -601,18 +553,15 @@ export async function requeueQueueStub(
     }
   }
 
-  // INVARIANT 8 — the rendered verdict goes with the fenced one. It rides here,
-  // between the fence and the labels, for the same ordering reason: an
-  // interruption must land on fenced-but-unqueued, and a cleared brief on a
-  // fenced stub is correct at every one of those points.
-  if (fences) {
-    await clearRenderedBrief({ writeGh, readBody }, { repo, issueNumber });
-  }
-
-  // Labels: restore `sentry:needs-triage`, shed the previous round's markers.
+  // Labels: restore `sentry:needs-triage`, THEN shed the previous round's
+  // markers — two ordered calls, never one edit carrying both flags. See
+  // `buildRequeueAddLabelArgs`: the single edit is two concurrent GraphQL
+  // mutations, and the half that can be lost is the one both recovery paths
+  // depend on (issue #1693).
   let labelError = null;
   try {
-    await writeGh(buildReopenLabelEditArgs(issueNumber, repo));
+    await writeGh(buildRequeueAddLabelArgs(issueNumber, repo));
+    await writeGh(buildRequeueShedLabelArgs(issueNumber, repo));
   } catch (err) {
     if (!verifyEndState) throw err;
     // Must NOT propagate past the end-state verification below — that is exactly
