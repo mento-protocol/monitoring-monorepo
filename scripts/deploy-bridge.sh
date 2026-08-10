@@ -25,7 +25,21 @@ set -euo pipefail
 PROJECT="${GCP_PROJECT:-mento-monitoring}"
 REGION="${GCP_REGION:-europe-west1}"
 AR_REPO="${REGION}-docker.pkg.dev/${PROJECT}/metrics-bridge"
+METRICS_BRIDGE_SERVICE_ADDRESS="google_cloud_run_v2_service.metrics_bridge"
+METRICS_BRIDGE_PUBLIC_BINDING_ADDRESS="google_cloud_run_v2_service_iam_member.metrics_bridge_public"
 SKIP_CONFIRM=false
+SERVICE_BOOTSTRAP_PLAN=""
+PUBLIC_BINDING_PLAN=""
+
+cleanup() {
+  if [[ -n "$SERVICE_BOOTSTRAP_PLAN" ]]; then
+    rm -f -- "$SERVICE_BOOTSTRAP_PLAN"
+  fi
+  if [[ -n "$PUBLIC_BINDING_PLAN" ]]; then
+    rm -f -- "$PUBLIC_BINDING_PLAN"
+  fi
+}
+trap cleanup EXIT
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -103,18 +117,123 @@ if ! EXISTING_METRICS_BRIDGE_SERVICE="$(gcloud run services list \
   exit 1
 fi
 
+# Classify Terraform ownership before acting on the live lookup. Saved plans
+# below use -refresh=false and a strict JSON allowlist so a concurrent state
+# change makes the plan stale instead of refreshing an existing live revision.
+echo "Checking Metrics Bridge Terraform bootstrap state..."
+if ! TERRAFORM_STATE_ADDRESSES="$(terraform -chdir=terraform state list)"; then
+  echo "Unable to read Metrics Bridge Terraform state; refusing to deploy."
+  exit 1
+fi
+
 case "$EXISTING_METRICS_BRIDGE_SERVICE" in
   metrics-bridge)
+    if ! grep -Fqx -- "$METRICS_BRIDGE_SERVICE_ADDRESS" <<<"$TERRAFORM_STATE_ADDRESSES"; then
+      echo "Cloud Run service exists but is not tracked in Terraform state; refusing to deploy."
+      exit 1
+    fi
     echo "Cloud Run service exists; preserving its live revision during Terraform reconciliation."
     ;;
   "")
+    if grep -Fqx -- "$METRICS_BRIDGE_SERVICE_ADDRESS" <<<"$TERRAFORM_STATE_ADDRESSES"; then
+      echo "Cloud Run service is tracked in Terraform state but missing live; run a reviewed platform plan/apply before deploying."
+      exit 1
+    fi
     echo "Cloud Run service is absent; bootstrapping it with Terraform..."
-    terraform -chdir=terraform apply $TF_APPROVE \
-      -target=google_cloud_run_v2_service.metrics_bridge \
-      -target=google_cloud_run_v2_service_iam_member.metrics_bridge_public
+    SERVICE_BOOTSTRAP_PLAN="$(mktemp "${TMPDIR:-/tmp}/metrics-bridge-service-bootstrap.XXXXXX")"
+    terraform -chdir=terraform plan \
+      -refresh=false \
+      -out="$SERVICE_BOOTSTRAP_PLAN" \
+      -target=google_cloud_run_v2_service.metrics_bridge
+    terraform -chdir=terraform show -json "$SERVICE_BOOTSTRAP_PLAN" \
+      | node scripts/check-metrics-bridge-bootstrap-plan.mjs service
+    terraform -chdir=terraform apply "$SERVICE_BOOTSTRAP_PLAN"
+    rm -f -- "$SERVICE_BOOTSTRAP_PLAN"
+    SERVICE_BOOTSTRAP_PLAN=""
+
+    if ! CREATED_METRICS_BRIDGE_SERVICE="$(gcloud run services list \
+      --project="$PROJECT" \
+      --region="$REGION" \
+      --filter='metadata.name=metrics-bridge' \
+      --format='value(metadata.name)' \
+      --limit=2)"; then
+      echo "Unable to verify the created Metrics Bridge Cloud Run service; refusing to deploy."
+      exit 1
+    fi
+    if [[ "$CREATED_METRICS_BRIDGE_SERVICE" != "metrics-bridge" ]]; then
+      echo "Created Metrics Bridge Cloud Run service lookup was not exact; refusing to deploy."
+      exit 1
+    fi
     ;;
   *)
     echo "Unexpected Cloud Run service lookup result; refusing to deploy."
+    exit 1
+    ;;
+esac
+
+# Refresh state addresses after a successful service creation. This also proves
+# that the saved plan recorded the exact service before binding recovery.
+if ! TERRAFORM_STATE_ADDRESSES="$(terraform -chdir=terraform state list)"; then
+  echo "Unable to verify Metrics Bridge Terraform state; refusing to deploy."
+  exit 1
+fi
+if ! grep -Fqx -- "$METRICS_BRIDGE_SERVICE_ADDRESS" <<<"$TERRAFORM_STATE_ADDRESSES"; then
+  echo "Cloud Run service is absent from Terraform state; refusing to deploy."
+  exit 1
+fi
+
+# Step 1c: Resume an incomplete first bootstrap without refreshing the service.
+# The saved-plan guard permits only creation of the public binding, so a pending
+# template change or a live revision cannot slip into this recovery apply.
+if grep -Fqx -- "$METRICS_BRIDGE_PUBLIC_BINDING_ADDRESS" <<<"$TERRAFORM_STATE_ADDRESSES"; then
+  echo "Public invoker binding is tracked in Terraform state."
+else
+  echo "Resuming incomplete public invoker binding bootstrap..."
+  PUBLIC_BINDING_PLAN="$(mktemp "${TMPDIR:-/tmp}/metrics-bridge-public-bootstrap.XXXXXX")"
+  terraform -chdir=terraform plan \
+    -refresh=false \
+    -out="$PUBLIC_BINDING_PLAN" \
+    -target=google_cloud_run_v2_service_iam_member.metrics_bridge_public
+  terraform -chdir=terraform show -json "$PUBLIC_BINDING_PLAN" \
+    | node scripts/check-metrics-bridge-bootstrap-plan.mjs public-binding
+  terraform -chdir=terraform apply "$PUBLIC_BINDING_PLAN"
+  rm -f -- "$PUBLIC_BINDING_PLAN"
+  PUBLIC_BINDING_PLAN=""
+
+  if ! TERRAFORM_STATE_ADDRESSES="$(terraform -chdir=terraform state list)"; then
+    echo "Unable to verify Metrics Bridge Terraform state after binding bootstrap."
+    exit 1
+  fi
+  if ! grep -Fqx -- "$METRICS_BRIDGE_PUBLIC_BINDING_ADDRESS" <<<"$TERRAFORM_STATE_ADDRESSES"; then
+    echo "Public invoker binding is still absent from Terraform state; refusing to deploy."
+    exit 1
+  fi
+fi
+
+# State presence proves Terraform ownership; the live policy check also catches
+# later out-of-band binding drift before a private revision can be rolled out.
+echo "Checking live Metrics Bridge public invoker binding..."
+if ! LIVE_PUBLIC_INVOKER="$(gcloud run services get-iam-policy metrics-bridge \
+  --project="$PROJECT" \
+  --region="$REGION" \
+  --flatten='bindings[].members' \
+  --filter='bindings.role=roles/run.invoker AND bindings.members=allUsers' \
+  --format='value(bindings.members)' \
+  --limit=2)"; then
+  echo "Unable to verify the live public invoker binding; refusing to deploy."
+  exit 1
+fi
+
+case "$LIVE_PUBLIC_INVOKER" in
+  allUsers)
+    echo "Live public invoker binding verified."
+    ;;
+  "")
+    echo "Public invoker binding is tracked but missing live; run a reviewed platform plan/apply before deploying."
+    exit 1
+    ;;
+  *)
+    echo "Unexpected public invoker lookup result; refusing to deploy."
     exit 1
     ;;
 esac

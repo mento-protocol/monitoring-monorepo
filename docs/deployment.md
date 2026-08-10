@@ -195,9 +195,14 @@ remaining phase-two rollout under
 2. From the resulting clean `main`, run and verify the direct
    `pnpm bridge:deploy` canary. Its Terraform bootstrap reconciles the applied
    builder and direct-deployer IAM, then verifies whether Metrics Bridge already
-   exists. It preserves an existing live revision; only a confirmed first
-   bootstrap creates the service and public binding. The temporary
-   default-Compute reader remains unchanged in this routing phase.
+   exists. It preserves an existing live revision and creates the service only
+   from a guarded no-refresh plan after both live and state checks confirm its
+   absence. If an interrupted first bootstrap left the public binding out of
+   Terraform state, a separate guarded no-refresh plan may create only that
+   binding. The deploy then verifies the live service and public binding;
+   tracked IAM drift or other service-shape drift requires a reviewed full
+   platform plan/apply. The temporary default-Compute reader remains unchanged
+   in this routing phase.
 3. In a separate reviewed cleanup PR, remove that reader. Refresh current
    `main`, inspect a clean platform plan, obtain explicit apply approval, and
    apply it.

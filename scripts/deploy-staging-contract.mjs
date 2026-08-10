@@ -30,10 +30,10 @@ const METRICS_BRIDGE_DIRECT_BOOTSTRAP_TARGETS = [
   "google_service_account_iam_member.dev_metrics_bridge_builder_service_account_user",
   "google_service_account_iam_member.dev_metrics_bridge_runtime_service_account_user",
 ];
-const METRICS_BRIDGE_SERVICE_BOOTSTRAP_TARGETS = [
-  "google_cloud_run_v2_service.metrics_bridge",
-  "google_cloud_run_v2_service_iam_member.metrics_bridge_public",
-];
+const METRICS_BRIDGE_SERVICE_BOOTSTRAP_TARGET =
+  "google_cloud_run_v2_service.metrics_bridge";
+const METRICS_BRIDGE_PUBLIC_BINDING_TARGET =
+  "google_cloud_run_v2_service_iam_member.metrics_bridge_public";
 const CLOUD_BUILD_SOURCE_EXECUTORS = [
   "serviceAccount:${google_service_account.grafana_agent_builder.email}",
   "serviceAccount:${google_project.monitoring.number}-compute@developer.gserviceaccount.com",
@@ -525,9 +525,21 @@ function validateCallsites(files, errors) {
     'if ! EXISTING_METRICS_BRIDGE_SERVICE="$(gcloud run services list',
   );
   const serviceProbeEnd = directDeploy.indexOf("\nfi", serviceProbeStart);
+  const initialStateReadStart = directDeploy.indexOf(
+    'if ! TERRAFORM_STATE_ADDRESSES="$(terraform -chdir=terraform state list)"',
+    serviceProbeEnd,
+  );
   const serviceCaseStart = directDeploy.indexOf(
     'case "$EXISTING_METRICS_BRIDGE_SERVICE" in',
     serviceProbeEnd,
+  );
+  const existingServiceStart = directDeploy.indexOf(
+    "  metrics-bridge)",
+    serviceCaseStart,
+  );
+  const existingServiceEnd = directDeploy.indexOf(
+    "    ;;",
+    existingServiceStart,
   );
   const absentServiceStart = directDeploy.indexOf('  "")', serviceCaseStart);
   const absentServiceEnd = directDeploy.indexOf("    ;;", absentServiceStart);
@@ -539,7 +551,10 @@ function validateCallsites(files, errors) {
       errors.push(
         `${directDeployPath}: direct bootstrap must target ${target} exactly once`,
       );
-    } else if (directDeploy.indexOf(matches[0]) > serviceProbeStart) {
+    } else if (
+      serviceProbeStart >= 0 &&
+      directDeploy.indexOf(matches[0]) > serviceProbeStart
+    ) {
       errors.push(
         `${directDeployPath}: direct IAM target ${target} must run before the service lookup`,
       );
@@ -567,28 +582,63 @@ function validateCallsites(files, errors) {
     );
   }
 
-  for (const target of METRICS_BRIDGE_SERVICE_BOOTSTRAP_TARGETS) {
-    const matches = directDeploy.match(targetLine(target));
-    const targetIndex =
-      matches?.length === 1 ? directDeploy.indexOf(matches[0]) : -1;
-    if (
-      matches?.length !== 1 ||
-      targetIndex <= absentServiceStart ||
-      targetIndex >= absentServiceEnd
-    ) {
-      errors.push(
-        `${directDeployPath}: ${target} must run exactly once only in the confirmed-absent service branch`,
-      );
-    }
+  const serviceTargetMatches = directDeploy.match(
+    targetLine(METRICS_BRIDGE_SERVICE_BOOTSTRAP_TARGET),
+  );
+  const serviceTargetIndex =
+    serviceTargetMatches?.length === 1
+      ? directDeploy.indexOf(serviceTargetMatches[0])
+      : -1;
+  const absentServiceBlock =
+    absentServiceStart >= 0 && absentServiceEnd > absentServiceStart
+      ? directDeploy.slice(absentServiceStart, absentServiceEnd)
+      : "";
+  const expectedServiceBootstrapFragments = [
+    'if grep -Fqx -- "$METRICS_BRIDGE_SERVICE_ADDRESS"',
+    "Cloud Run service is tracked in Terraform state but missing live",
+    'mktemp "${TMPDIR:-/tmp}/metrics-bridge-service-bootstrap.XXXXXX"',
+    "terraform -chdir=terraform plan",
+    "-refresh=false",
+    '-out="$SERVICE_BOOTSTRAP_PLAN"',
+    'terraform -chdir=terraform show -json "$SERVICE_BOOTSTRAP_PLAN"',
+    "node scripts/check-metrics-bridge-bootstrap-plan.mjs service",
+    'terraform -chdir=terraform apply "$SERVICE_BOOTSTRAP_PLAN"',
+    'if ! CREATED_METRICS_BRIDGE_SERVICE="$(gcloud run services list',
+    '[[ "$CREATED_METRICS_BRIDGE_SERVICE" != "metrics-bridge" ]]',
+    "exit 1",
+  ];
+  if (
+    serviceTargetMatches?.length !== 1 ||
+    serviceTargetIndex <= absentServiceStart ||
+    serviceTargetIndex >= absentServiceEnd ||
+    !absentServiceBlock ||
+    expectedServiceBootstrapFragments.some(
+      (fragment) => !absentServiceBlock.includes(fragment),
+    )
+  ) {
+    errors.push(
+      `${directDeployPath}: ${METRICS_BRIDGE_SERVICE_BOOTSTRAP_TARGET} must run exactly once only through a guarded no-refresh plan in the confirmed-absent service branch`,
+    );
   }
 
   const unexpectedResultStart = directDeploy.indexOf("  *)", absentServiceEnd);
+  const existingServiceBlock =
+    existingServiceStart >= 0 && existingServiceEnd > existingServiceStart
+      ? directDeploy.slice(existingServiceStart, existingServiceEnd)
+      : "";
   const unexpectedResultBlock =
     unexpectedResultStart >= 0 && serviceCaseEnd > unexpectedResultStart
       ? directDeploy.slice(unexpectedResultStart, serviceCaseEnd)
       : "";
   if (
     serviceCaseStart < 0 ||
+    !existingServiceBlock.includes(
+      'if ! grep -Fqx -- "$METRICS_BRIDGE_SERVICE_ADDRESS"',
+    ) ||
+    !existingServiceBlock.includes(
+      "Cloud Run service exists but is not tracked in Terraform state",
+    ) ||
+    !existingServiceBlock.includes("exit 1") ||
     absentServiceStart < 0 ||
     absentServiceEnd < 0 ||
     serviceCaseEnd < 0 ||
@@ -596,6 +646,122 @@ function validateCallsites(files, errors) {
   ) {
     errors.push(
       `${directDeployPath}: service bootstrap branching must reject unexpected lookup results`,
+    );
+  }
+
+  const postServiceStateReadStart = directDeploy.indexOf(
+    'if ! TERRAFORM_STATE_ADDRESSES="$(terraform -chdir=terraform state list)"',
+    serviceCaseEnd,
+  );
+  const publicBindingStateStart = directDeploy.indexOf(
+    'if grep -Fqx -- "$METRICS_BRIDGE_PUBLIC_BINDING_ADDRESS"',
+    postServiceStateReadStart,
+  );
+  const publicBindingRecoveryStart = directDeploy.indexOf(
+    "\nelse\n",
+    publicBindingStateStart,
+  );
+  const stateClassificationBlock =
+    initialStateReadStart >= 0 &&
+    publicBindingRecoveryStart > initialStateReadStart
+      ? directDeploy.slice(initialStateReadStart, publicBindingRecoveryStart)
+      : "";
+  const publicBindingRecoveryEnd = directDeploy.indexOf(
+    "# State presence proves Terraform ownership",
+    publicBindingRecoveryStart,
+  );
+  const publicBindingRecoveryBlock =
+    publicBindingRecoveryStart >= 0 &&
+    publicBindingRecoveryEnd > publicBindingRecoveryStart
+      ? directDeploy.slice(publicBindingRecoveryStart, publicBindingRecoveryEnd)
+      : "";
+  const publicTargetMatches = directDeploy.match(
+    targetLine(METRICS_BRIDGE_PUBLIC_BINDING_TARGET),
+  );
+  const publicTargetIndex =
+    publicTargetMatches?.length === 1
+      ? directDeploy.indexOf(publicTargetMatches[0])
+      : -1;
+  const expectedRecoveryFragments = [
+    'mktemp "${TMPDIR:-/tmp}/metrics-bridge-public-bootstrap.XXXXXX"',
+    "terraform -chdir=terraform plan",
+    "-refresh=false",
+    '-out="$PUBLIC_BINDING_PLAN"',
+    'terraform -chdir=terraform show -json "$PUBLIC_BINDING_PLAN"',
+    "node scripts/check-metrics-bridge-bootstrap-plan.mjs public-binding",
+    'terraform -chdir=terraform apply "$PUBLIC_BINDING_PLAN"',
+    'grep -Fqx -- "$METRICS_BRIDGE_PUBLIC_BINDING_ADDRESS"',
+    "exit 1",
+  ];
+  const expectedStateFragments = [
+    "terraform -chdir=terraform state list",
+    'if ! grep -Fqx -- "$METRICS_BRIDGE_SERVICE_ADDRESS"',
+    "Cloud Run service exists but is not tracked in Terraform state",
+    'if grep -Fqx -- "$METRICS_BRIDGE_SERVICE_ADDRESS"',
+    "Cloud Run service is tracked in Terraform state but missing live",
+    "Cloud Run service is absent from Terraform state",
+    'grep -Fqx -- "$METRICS_BRIDGE_PUBLIC_BINDING_ADDRESS"',
+    "exit 1",
+  ];
+  if (
+    initialStateReadStart <= serviceProbeEnd ||
+    initialStateReadStart >= serviceCaseStart ||
+    postServiceStateReadStart <= serviceCaseEnd ||
+    publicBindingStateStart <= postServiceStateReadStart ||
+    !stateClassificationBlock ||
+    expectedStateFragments.some(
+      (fragment) => !stateClassificationBlock.includes(fragment),
+    ) ||
+    !publicBindingRecoveryBlock ||
+    publicTargetMatches?.length !== 1 ||
+    publicTargetIndex <= publicBindingRecoveryStart ||
+    publicTargetIndex >= publicBindingRecoveryEnd ||
+    expectedRecoveryFragments.some(
+      (fragment) => !publicBindingRecoveryBlock.includes(fragment),
+    )
+  ) {
+    errors.push(
+      `${directDeployPath}: partial bootstrap recovery must apply only a guarded no-refresh public-binding plan`,
+    );
+  }
+
+  const liveBindingProbeStart = directDeploy.indexOf(
+    'if ! LIVE_PUBLIC_INVOKER="$(gcloud run services get-iam-policy metrics-bridge',
+    publicBindingRecoveryEnd,
+  );
+  const liveBindingCaseEnd = directDeploy.indexOf(
+    "esac",
+    liveBindingProbeStart,
+  );
+  const buildStart = directDeploy.indexOf(
+    'echo "Building container image via Cloud Build..."',
+  );
+  const liveBindingBlock =
+    liveBindingProbeStart >= 0 && liveBindingCaseEnd > liveBindingProbeStart
+      ? directDeploy.slice(liveBindingProbeStart, liveBindingCaseEnd)
+      : "";
+  const expectedLiveBindingFragments = [
+    '--project="$PROJECT"',
+    '--region="$REGION"',
+    "--flatten='bindings[].members'",
+    "--filter='bindings.role=roles/run.invoker AND bindings.members=allUsers'",
+    "--format='value(bindings.members)'",
+    "--limit=2",
+    'echo "Unable to verify the live public invoker binding; refusing to deploy."\n  exit 1\nfi',
+    'case "$LIVE_PUBLIC_INVOKER" in',
+    "allUsers)",
+    '  "")\n    echo "Public invoker binding is tracked but missing live; run a reviewed platform plan/apply before deploying."\n    exit 1',
+    '  *)\n    echo "Unexpected public invoker lookup result; refusing to deploy."\n    exit 1',
+  ];
+  if (
+    !liveBindingBlock ||
+    buildStart <= liveBindingCaseEnd ||
+    expectedLiveBindingFragments.some(
+      (fragment) => !liveBindingBlock.includes(fragment),
+    )
+  ) {
+    errors.push(
+      `${directDeployPath}: live public-binding verification must be exact and fail before image rollout`,
     );
   }
 }

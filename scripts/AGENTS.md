@@ -48,8 +48,11 @@ garden_lane: agent-entry-points
   reconcile the builder's project roles, repository writer, developer act-as
   bindings, and build-log reader before submitting and rolling out a build.
   For an existing Metrics Bridge service, that bootstrap must fail closed if it
-  cannot verify the exact service name and must not target the service or public
-  binding; those targets run only for a confirmed absent service.
+  cannot verify the exact service name and must not target the service. A first
+  service create and an interrupted public-binding create must use separate
+  no-refresh saved plans accepted by `check-metrics-bridge-bootstrap-plan.mjs`.
+  The deploy must then verify Terraform state, the live service, and the live
+  public binding before building.
   [ADR 0053](../docs/adr/0053-explicit-deployment-source-staging.md) owns the
   supported static syntax and explicit proof limits. Keep indirect or dynamic
   deploy forms forbidden and inert examples confined to
