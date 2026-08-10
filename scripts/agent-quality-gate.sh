@@ -2553,6 +2553,7 @@ while IFS= read -r path; do
         scripts/agent-quality-gate.sh | \
         scripts/check-agent-quality-gate-package-scripts.sh | \
         scripts/check-sentry-suites-in-ci.test.mjs | \
+        scripts/check-sentry-suites-in-ci-core.mjs | \
         scripts/sentry-*.test.mjs | \
         scripts/*/sentry-*.test.mjs | \
         scripts/tf-stacks.test.mjs)

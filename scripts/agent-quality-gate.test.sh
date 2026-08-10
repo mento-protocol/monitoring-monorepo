@@ -3709,6 +3709,9 @@ sentry_ci_check="- node scripts/check-sentry-suites-in-ci.test.mjs (Sentry CI-co
 run_gate "scripts/check-sentry-suites-in-ci.test.mjs"
 assert_contains "$sentry_ci_check"
 
+run_gate "scripts/check-sentry-suites-in-ci-core.mjs"
+assert_contains "$sentry_ci_check"
+
 run_gate "package.json"
 assert_contains "$sentry_ci_check"
 
