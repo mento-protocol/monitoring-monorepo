@@ -233,9 +233,16 @@ cloud-routine experiment ran for weeks producing nothing and nobody noticed.
 - **Real absence latency is 5h, not the 3h `duration` reads.** Both conditions
   aggregate over a 7200s `ALIGN_MAX` window, and an aligned point persists
   while that trailing window still holds the last raw publish, so the absence
-  timer starts 2h late. Worst case from pipeline death to notification is ~6h:
-  up to 1h for the hourly publish that never happens, then 5h. Proven
-  2026-08-10 — last publish 12:00:02Z, alert 17:02:12Z
+  timer starts 2h late. Proven 2026-08-10 — last publish 12:00:02Z, alert
+  17:02:12Z
+- That 5h is measured **from the last published point**, not from the moment
+  the watcher stops, and the two differ by up to the publish interval. A
+  watcher dying just after a publish is caught ~5h later; one dying just
+  before the next is caught ~4h later. The missed run is already inside the
+  window, so it is not added on top
+- It is **watcher-silence** latency, not pipeline-death latency. Ingest dying
+  while the watcher keeps reporting is the threshold condition's job, and that
+  one fires at 26h
 - The threshold deliberately does not set `evaluation_missing_data`. Freshness
   is an absolute age rather than a delta, so a gap loses no information: the
   first point after any gap carries the true age and crosses 26h on its own if
