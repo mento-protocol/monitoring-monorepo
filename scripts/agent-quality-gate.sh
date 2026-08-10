@@ -2370,18 +2370,6 @@ while IFS= read -r path; do
         scripts/check-workflow-permissions-drift.mjs|scripts/check-workflow-permissions-drift.test.mjs)
           add_command "node scripts/check-workflow-permissions-drift.test.mjs" "platform-settings workflow-permissions drift checker changed"
           ;;
-        scripts/check-sentry-suites-in-ci.test.mjs|scripts/sentry-*.test.mjs)
-          # Belongs in the scripts/*.mjs arm, beside its peer checkers. It first
-          # landed under scripts/*.sh, where a .mjs path can never reach it — so
-          # the check that exists to catch unwired suites was itself unwired.
-          #
-          # Every scripts/sentry-*.test.mjs maps here too, not just the checker:
-          # adding a suite is precisely when it must run, and a new suite need
-          # not touch package.json or ci.yml to exist. Without this, the local
-          # gate maps a new suite to lint alone and only CI notices it is
-          # unwired — which is the gap this check exists to close.
-          add_command "node scripts/check-sentry-suites-in-ci.test.mjs" "Sentry CI-coverage check changed"
-          ;;
         scripts/check-github-action-pins.test.mjs)
           add_command "node scripts/check-github-action-pins.test.mjs" "GitHub Actions pin checker test changed"
           ;;
@@ -2538,6 +2526,32 @@ while IFS= read -r path; do
       add_command "pnpm tf:test" "production infrastructure identity contract surface changed"
       ;;
   esac
+  # `check-sentry-suites-in-ci.test.mjs` asserts that every Sentry suite runs in
+  # CI. Its invariants are claims ABOUT the files below, so editing one of them
+  # is exactly when it must run. Routing lives here rather than in the extension
+  # cases above for two reasons: the readers span `.sh`, `.mjs`, `.yml`, and
+  # `package.json`, and the first matching arm in those cases wins — every
+  # existing `scripts/sentry-*.test.mjs` already matches a dedicated arm, so an
+  # arm nested there would never see them. A new suite need not touch
+  # package.json or ci.yml to exist, so the glob covers suites with no arm yet.
+  # `add_command` deduplicates, so ci.yml keeps its more specific reason above.
+  #
+  # Repository-specific, like the `pnpm tf:test` sweep below: the gate unit
+  # tests run this script against stub fixture repositories that own neither
+  # the check nor the suites it enumerates.
+  if [[ "$script_source_dir" == "$repo_root/scripts" ]]; then
+    case "$path" in
+      .github/workflows/ci.yml | \
+        package.json | \
+        scripts/agent-quality-gate.sh | \
+        scripts/check-agent-quality-gate-package-scripts.sh | \
+        scripts/check-sentry-suites-in-ci.test.mjs | \
+        scripts/sentry-*.test.mjs | \
+        scripts/tf-stacks.test.mjs)
+        add_command "node scripts/check-sentry-suites-in-ci.test.mjs" "Sentry CI-coverage check reads this file"
+        ;;
+    esac
+  fi
   if [[ "$terraform_stack_paths_count" -gt 0 ]]; then
     for terraform_stack_path in "${terraform_stack_paths[@]}"; do
       case "$path" in

@@ -3632,6 +3632,40 @@ assert_contains "- pnpm sentry:archive:test (Sentry triage archive helper change
 run_gate "scripts/sentry-triage-archive.test.mjs"
 assert_contains "- pnpm sentry:archive:test (Sentry triage archive helper changed)"
 
+# check-sentry-suites-in-ci.test.mjs asserts that every Sentry suite runs in
+# CI. Every file it reads must route it, or the drift it exists to catch is
+# only caught after push. Its first home was an arm nested under `scripts/*.sh`,
+# where a `.mjs` path could never reach it — hence a case per reader here.
+sentry_ci_check="- node scripts/check-sentry-suites-in-ci.test.mjs (Sentry CI-coverage check reads this file)"
+
+run_gate "scripts/check-sentry-suites-in-ci.test.mjs"
+assert_contains "$sentry_ci_check"
+
+run_gate "package.json"
+assert_contains "$sentry_ci_check"
+
+run_gate "scripts/agent-quality-gate.sh"
+assert_contains "$sentry_ci_check"
+
+run_gate "scripts/check-agent-quality-gate-package-scripts.sh"
+assert_contains "$sentry_ci_check"
+
+run_gate "scripts/tf-stacks.test.mjs"
+assert_contains "$sentry_ci_check"
+
+# A suite that lands without a dedicated arm of its own still routes.
+run_gate "scripts/sentry-not-yet-written.test.mjs"
+assert_contains "$sentry_ci_check"
+
+# An existing suite keeps its specific helper command and gains this one.
+run_gate "scripts/sentry-triage-requeue.test.mjs"
+assert_contains "- pnpm sentry:requeue:test (Sentry re-queue chokepoint changed)"
+assert_contains "$sentry_ci_check"
+
+# ci.yml routes it too, under its own more specific reason.
+run_gate ".github/workflows/ci.yml"
+assert_contains "- node scripts/check-sentry-suites-in-ci.test.mjs (central CI workflow changed)"
+
 run_gate "scripts/pr-feedback-state-claude.mjs"
 assert_contains "- pnpm pr:feedback-state:test (PR feedback-state helper changed)"
 
