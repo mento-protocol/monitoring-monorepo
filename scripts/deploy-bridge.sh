@@ -78,11 +78,12 @@ if [ "$SKIP_CONFIRM" = false ]; then
   fi
 fi
 
-# Step 1a: Reconcile the GCP APIs, build/runtime IAM, and source staging used by
-# both first-time and routine deploys. Keep the Cloud Run service out of this
-# apply: its revision stays Terraform-managed for reviewed Peg-policy rollovers,
-# so targeting an existing service after a gcloud rollout would mint a redundant
-# Terraform revision before the intended image rollout below.
+# Step 1a: Reconcile the GCP APIs, build/runtime IAM, source staging, and the
+# Peg-policy bucket IAM dependency used by both first-time and routine deploys.
+# Keep the Cloud Run service out of this apply: its revision stays
+# Terraform-managed for reviewed Peg-policy rollovers, so targeting an existing
+# service after a gcloud rollout would mint a redundant Terraform revision
+# before the intended image rollout below.
 echo "Ensuring GCP infrastructure..."
 terraform -chdir=terraform apply $TF_APPROVE \
   -target=google_project.monitoring \
@@ -97,6 +98,7 @@ terraform -chdir=terraform apply $TF_APPROVE \
   -target=google_storage_bucket_iam_member.cloud_build_source_caller_bucket_reader \
   -target=google_storage_bucket_iam_member.cloud_build_source_caller_object_creator \
   -target=google_storage_bucket_iam_member.cloud_build_source_executor_object_viewer \
+  -target=google_storage_bucket_iam_policy.peg_policy \
   -target=google_project_iam_member.dev_run_admin \
   -target=google_project_iam_member.dev_ar_writer \
   -target=google_project_iam_member.dev_cloudbuild_editor \

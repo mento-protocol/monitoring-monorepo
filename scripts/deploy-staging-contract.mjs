@@ -26,6 +26,7 @@ const METRICS_BRIDGE_BUILDER =
 const METRICS_BRIDGE_DIRECT_BOOTSTRAP_TARGETS = [
   "google_project_iam_member.metrics_bridge_builder",
   "google_artifact_registry_repository_iam_member.metrics_bridge_builder_writer",
+  "google_storage_bucket_iam_policy.peg_policy",
   "google_project_iam_member.dev_logging_viewer",
   "google_service_account_iam_member.dev_metrics_bridge_builder_service_account_user",
   "google_service_account_iam_member.dev_metrics_bridge_runtime_service_account_user",
