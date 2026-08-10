@@ -52,7 +52,8 @@ Compute's existing source-bucket Object Viewer grant.
 Phase 2 has a strict order:
 
 1. Pin `cloudbuild.yaml` to the dedicated builder without removing default
-   Compute's source reader. This repository now has that configuration.
+   Compute's source reader. This repository now has that configuration, and the
+   direct deploy bootstrap reconciles the builder and operator IAM it needs.
 2. Canary the GitHub `main` deploy while default Compute still has its
    temporary source-bucket reader.
 3. Canary the direct `main` deploy while that reader still exists.

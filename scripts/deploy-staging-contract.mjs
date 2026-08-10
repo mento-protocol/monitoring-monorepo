@@ -23,6 +23,13 @@ const TERRAFORM_FILE = "terraform/deploy-staging.tf";
 const METRICS_BRIDGE_BUILD_CONFIG = "cloudbuild.yaml";
 const METRICS_BRIDGE_BUILDER =
   "projects/$PROJECT_ID/serviceAccounts/metrics-bridge-builder@$PROJECT_ID.iam.gserviceaccount.com";
+const METRICS_BRIDGE_DIRECT_BOOTSTRAP_TARGETS = [
+  "google_project_iam_member.metrics_bridge_builder",
+  "google_artifact_registry_repository_iam_member.metrics_bridge_builder_writer",
+  "google_project_iam_member.dev_logging_viewer",
+  "google_service_account_iam_member.dev_metrics_bridge_builder_service_account_user",
+  "google_service_account_iam_member.dev_metrics_bridge_runtime_service_account_user",
+];
 const CLOUD_BUILD_SOURCE_EXECUTORS = [
   "serviceAccount:${google_service_account.grafana_agent_builder.email}",
   "serviceAccount:${google_project.monitoring.number}-compute@developer.gserviceaccount.com",
@@ -501,6 +508,22 @@ function validateCallsites(files, errors) {
     errors.push(
       `${METRICS_BRIDGE_BUILD_CONFIG}: Cloud Build logging must be CLOUD_LOGGING_ONLY`,
     );
+  }
+
+  const directDeployPath = "scripts/deploy-bridge.sh";
+  const directDeploy = requireSource(files, directDeployPath, errors);
+  for (const target of METRICS_BRIDGE_DIRECT_BOOTSTRAP_TARGETS) {
+    const matches = directDeploy.match(
+      new RegExp(
+        `^\\s+-target=${target.replaceAll(".", "\\.")}\\s+\\\\$`,
+        "gmu",
+      ),
+    );
+    if (matches?.length !== 1) {
+      errors.push(
+        `${directDeployPath}: direct bootstrap must target ${target} exactly once`,
+      );
+    }
   }
 }
 

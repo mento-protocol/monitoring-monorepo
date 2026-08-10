@@ -559,6 +559,19 @@ for (const [filePath, configFlag] of [
   );
 }
 
+for (const target of [
+  "google_project_iam_member.metrics_bridge_builder",
+  "google_artifact_registry_repository_iam_member.metrics_bridge_builder_writer",
+  "google_project_iam_member.dev_logging_viewer",
+  "google_service_account_iam_member.dev_metrics_bridge_builder_service_account_user",
+  "google_service_account_iam_member.dev_metrics_bridge_runtime_service_account_user",
+]) {
+  expectFailure(
+    mutate(files, "scripts/deploy-bridge.sh", `  -target=${target} \\\n`, ""),
+    `scripts/deploy-bridge.sh: direct bootstrap must target ${target} exactly once`,
+  );
+}
+
 const metricsBridgeBuilderExecutor =
   '    "serviceAccount:${google_service_account.metrics_bridge_builder.email}",\n';
 const defaultComputeExecutor =

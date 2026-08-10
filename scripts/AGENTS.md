@@ -44,7 +44,9 @@ garden_lane: agent-entry-points
   callsites, including their source-staging flag and value. It also pins both
   Metrics Bridge submit paths to the checked-in `cloudbuild.yaml`, rejects CLI
   service-account overrides, and verifies that config's exact builder identity
-  and logging mode.
+  and logging mode. It also requires the direct Metrics Bridge bootstrap to
+  reconcile the builder's project roles, repository writer, developer act-as
+  bindings, and build-log reader before submitting and rolling out a build.
   [ADR 0053](../docs/adr/0053-explicit-deployment-source-staging.md) owns the
   supported static syntax and explicit proof limits. Keep indirect or dynamic
   deploy forms forbidden and inert examples confined to
