@@ -310,11 +310,11 @@ two conditions separately: step 2 covers the threshold, step 3 covers absence.
    a value. The threshold cannot cover a watcher that stops publishing, so
    this is the only step that proves the switch survives its own death.
 
-   Pause the scheduler and leave it paused **more than 5h** — not the 3h the
-   `duration` field reads. The absence condition carries the same 7200s
-   `ALIGN_MAX` aggregation as the threshold, and an aligned point keeps
-   existing while a trailing 2h window still contains the last raw publish. So
-   the 3h absence timer cannot start until 2h after the final point:
+   Pause the scheduler and leave it paused **more than 5h**. The absence
+   condition carries the same 7200s `ALIGN_MAX` aggregation as the threshold,
+   and an aligned point keeps existing while a trailing 2h window still
+   contains the last raw publish. So the 3h `duration` timer cannot start until
+   2h after the final point:
 
    ```text
    last publish + 7200s (alignment empties) + 10800s (duration) = fire
