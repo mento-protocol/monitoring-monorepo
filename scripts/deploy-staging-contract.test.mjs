@@ -508,7 +508,7 @@ expectFailure(
   mutate(
     files,
     "cloudbuild.yaml",
-    "serviceAccount: projects/mento-monitoring/serviceAccounts/metrics-bridge-builder@mento-monitoring.iam.gserviceaccount.com\n",
+    "serviceAccount: projects/$PROJECT_ID/serviceAccounts/metrics-bridge-builder@$PROJECT_ID.iam.gserviceaccount.com\n",
     "",
   ),
   "cloudbuild.yaml: Cloud Build serviceAccount must be",
@@ -517,8 +517,8 @@ expectFailure(
   mutate(
     files,
     "cloudbuild.yaml",
-    "metrics-bridge-builder@mento-monitoring.iam.gserviceaccount.com",
-    "80554359692-compute@developer.gserviceaccount.com",
+    "serviceAccount: projects/$PROJECT_ID/serviceAccounts/metrics-bridge-builder@$PROJECT_ID.iam.gserviceaccount.com",
+    "serviceAccount: projects/mento-monitoring/serviceAccounts/metrics-bridge-builder@mento-monitoring.iam.gserviceaccount.com",
   ),
   "cloudbuild.yaml: Cloud Build serviceAccount must be",
 );

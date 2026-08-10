@@ -22,7 +22,7 @@ export {
 const TERRAFORM_FILE = "terraform/deploy-staging.tf";
 const METRICS_BRIDGE_BUILD_CONFIG = "cloudbuild.yaml";
 const METRICS_BRIDGE_BUILDER =
-  "projects/mento-monitoring/serviceAccounts/metrics-bridge-builder@mento-monitoring.iam.gserviceaccount.com";
+  "projects/$PROJECT_ID/serviceAccounts/metrics-bridge-builder@$PROJECT_ID.iam.gserviceaccount.com";
 const CLOUD_BUILD_SOURCE_EXECUTORS = [
   "serviceAccount:${google_service_account.grafana_agent_builder.email}",
   "serviceAccount:${google_project.monitoring.number}-compute@developer.gserviceaccount.com",
