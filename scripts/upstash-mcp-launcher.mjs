@@ -9,6 +9,15 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 export const UPSTASH_MCP_VERSION = "0.2.4";
 export const UPSTASH_MCP_ENTRYPOINT_SHA256 =
   "1949e38e9c66aaac5cc00e2da2b8bbf712a4c39266f8f501a3cdd86253fe4b8e";
+export const UPSTASH_MCP_RUNTIME_SHA256 =
+  "c6770a6008cfb5946a4e87385c6f61aa1166fff0614d541789949cb577ce09b6";
+export const UPSTASH_MCP_RUNTIME_LOADER = [
+  'import { readFileSync } from "node:fs";',
+  'process.argv.splice(1, 0, "upstash-mcp-runtime.mjs");',
+  "const runtimeBytes = readFileSync(3);",
+  'const runtimeUrl = `data:text/javascript;base64,${runtimeBytes.toString("base64")}`;',
+  "await import(runtimeUrl);",
+].join("\n");
 
 const TERMINATION_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"];
 
@@ -69,6 +78,23 @@ export function verifyUpstashMcpEntrypoint({
   return { entrypoint, sha256, version: packageJson.version };
 }
 
+export function verifyUpstashMcpRuntime({
+  runtimePath,
+  expectedSha256 = UPSTASH_MCP_RUNTIME_SHA256,
+}) {
+  if (typeof runtimePath !== "string" || !isAbsolute(runtimePath)) {
+    throw new Error("the personal Upstash MCP runtime path must be absolute");
+  }
+  const bytes = readFileSync(runtimePath);
+  const sha256 = createHash("sha256").update(bytes).digest("hex");
+  if (sha256 !== expectedSha256) {
+    throw new Error(
+      "the personal Upstash MCP runtime does not match the reviewed bundle",
+    );
+  }
+  return { bytes, sha256 };
+}
+
 export function createTerminationForwarder(parent = process) {
   let child;
   let forwardedSignal;
@@ -109,17 +135,27 @@ export function createTerminationForwarder(parent = process) {
   };
 }
 
-export async function launchUpstashMcp({ repoRoot = defaultRepoRoot() } = {}) {
-  const { entrypoint } = verifyUpstashMcpEntrypoint({ repoRoot });
+export async function launchUpstashMcp({ runtimePath } = {}) {
+  const { bytes: runtimeBytes } = verifyUpstashMcpRuntime({ runtimePath });
 
   await new Promise((resolveLaunch, rejectLaunch) => {
     const signalForwarding = createTerminationForwarder();
     let child;
     try {
-      child = spawn(process.execPath, [entrypoint, "--disable-telemetry"], {
-        env: process.env,
-        stdio: "inherit",
-      });
+      child = spawn(
+        process.execPath,
+        [
+          "--input-type=module",
+          "--eval",
+          UPSTASH_MCP_RUNTIME_LOADER,
+          "--",
+          "--disable-telemetry",
+        ],
+        {
+          env: process.env,
+          stdio: ["inherit", "inherit", "inherit", "pipe"],
+        },
+      );
     } catch (error) {
       signalForwarding.cleanup();
       rejectLaunch(error);
@@ -145,7 +181,15 @@ export async function launchUpstashMcp({ repoRoot = defaultRepoRoot() } = {}) {
       process.exitCode = code ?? 1;
       resolveLaunch();
     });
+    child.stdio[3].once("error", (error) => {
+      if (settled) return;
+      settled = true;
+      child.kill("SIGKILL");
+      signalForwarding.cleanup();
+      rejectLaunch(error);
+    });
     signalForwarding.attachChild(child);
+    child.stdio[3].end(runtimeBytes);
   });
 }
 

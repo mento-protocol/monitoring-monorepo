@@ -3,7 +3,7 @@ title: Upstash MCP operator setup
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-10
+last_verified: 2026-08-11
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -20,23 +20,31 @@ or the authenticated dashboard editor.
 
 ## Reviewed transport
 
-The workspace pins `@upstash/mcp-server@0.2.4` in `package.json` and
-`pnpm-lock.yaml`. Normal repository setup installs that reviewed artifact. The
-personal config uses absolute paths for Node and the repository-owned launcher.
-The generated personal config also stores an inline verifier outside the
-checkout. Before importing any checkout code, that verifier checks the launcher
-against its reviewed SHA-256 and imports that exact byte snapshot from memory.
-The launcher then resolves the package from its own repository path, verifies
-version `0.2.4` and the reviewed entrypoint SHA-256, and starts it with
-`--disable-telemetry`. This chain cannot select a package from the session's
-working directory, install a missing package, or resolve a newer version from
-the registry at startup.
+The workspace pins `@upstash/mcp-server@0.2.4` and `esbuild@0.28.1` in
+`package.json` and `pnpm-lock.yaml`. Normal repository setup installs those
+reviewed artifacts. Config generation verifies the server entrypoint, bundles
+its complete non-builtin dependency closure, rejects any output that differs
+from the reviewed runtime SHA-256, and writes that credential-free runtime to a
+private file under `~/.codex/mcp-runtimes/`.
+
+The personal config uses absolute paths for Node, the repository-owned
+launcher, and that personal runtime. It also stores an inline verifier outside
+the checkout. Before importing any checkout code, the verifier checks the
+launcher against its reviewed SHA-256 and imports that exact byte snapshot from
+memory. The launcher then verifies the personal runtime, passes those exact
+bytes to a child over a private file descriptor, and imports the snapshot from
+memory with `--disable-telemetry`. Runtime startup does not load workspace
+`node_modules`. This chain cannot select code from the session's working
+directory, install a missing package, or resolve a newer version from the
+registry.
 
 - npm integrity:
   `sha512-LN5yao74QQZTjGmolGqAh9YkQa/206ni94wwTtu6I/mVkyMeAbRME7rjK64KrWmCTw2OHUb8TMFsw6r4rMmUSQ==`
 - npm shasum: `4b2a627dbce2773f000a0e14d15e61a7ca1150f8`
 - launcher SHA-256:
-  `44b23e61ca9775b2b319bd018099ccdef472ca809a7486b2e417b18e765d0b3b`
+  `651e4a9194348728f492274e9346172a3bbd51039883480e46c196cbb33f3a1f`
+- dependency-closed runtime SHA-256:
+  `c6770a6008cfb5946a4e87385c6f61aa1166fff0614d541789949cb577ce09b6`
 - entrypoint SHA-256:
   `1949e38e9c66aaac5cc00e2da2b8bbf712a4c39266f8f501a3cdd86253fe4b8e`
 - upstream git commit: `e3ab3c20ebd7d0e195cd774004fdb4c3dcb448d1`
@@ -46,8 +54,9 @@ matching command flags are absent. The reviewed config omits those flags,
 disables upstream telemetry, and exposes only
 `redis_database_list_databases` and
 `redis_database_run_redis_commands`. Updating the version requires reviewing
-the new published artifact, recording its integrity and commit here, and
-updating the focused contract test.
+the new published artifact, recording its integrity and commit here, rebuilding
+the dependency-closed runtime with the config renderer, updating both runtime
+and launcher hashes, and updating the focused contract test.
 
 ## Provision or rotate the key
 
@@ -86,16 +95,19 @@ transport:
 node scripts/render-upstash-mcp-config.mjs
 ```
 
-Copy that credential-free output into `~/.codex/config.toml`. The checked-in
+The command also creates the reviewed, credential-free runtime under
+`~/.codex/mcp-runtimes/` with no group or other permissions. Copy its
+credential-free config output into `~/.codex/config.toml`. The checked-in
 [`.codex/upstash-mcp.example.toml`](../../.codex/upstash-mcp.example.toml) shows
 the output shape but contains placeholder paths. Keep `enabled = false` as the
 normal state. Regenerate the table after moving the checkout or Node binary.
-After an intentional launcher edit, review the change, update its pinned hash,
-and regenerate the table. Do not add an Upstash table to the repository's
-`.codex/config.toml`. The absolute launcher remains bound to this checkout even
-when Codex starts from a different working directory. If the checkout changes
-the launcher afterward, startup stops before the changed launcher can read the
-injected account key.
+After an intentional launcher, server, dependency, or bundler edit, review the
+change, update the affected pinned hashes, and regenerate the table. Generation
+refuses a dependency closure that does not match the reviewed runtime hash. Do
+not add an Upstash table to the repository's `.codex/config.toml`. The absolute
+launcher remains bound to this checkout even when Codex starts from a different
+working directory. If the checkout changes the launcher or the personal runtime
+afterward, startup stops before changed code can read the injected account key.
 
 For an attended upload session, use the approved secret-manager integration to
 inject `UPSTASH_EMAIL` and `UPSTASH_API_KEY` into the Codex process and enable
@@ -129,7 +141,10 @@ shared log, record only these facts after redaction:
 - Node and the repository-owned launcher use absolute paths;
 - the personal config verifies the reviewed launcher SHA-256 before importing
   checkout code;
-- the launcher verifies the reviewed entrypoint SHA-256 before startup;
+- config generation verifies and bundles the reviewed entrypoint and its full
+  non-builtin dependency closure;
+- the launcher verifies and executes the reviewed runtime byte snapshot without
+  loading workspace `node_modules`;
 - credential flags are absent;
 - forwarded names are `UPSTASH_EMAIL` and `UPSTASH_API_KEY`;
 - only the two reviewed tools are enabled;

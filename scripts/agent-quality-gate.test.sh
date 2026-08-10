@@ -3770,6 +3770,10 @@ run_gate "scripts/check-agent-context.test.mjs"
 assert_contains "- pnpm agent:context-check (agent context checker changed)"
 assert_contains "- node scripts/check-agent-context.test.mjs (agent context checker changed)"
 
+run_gate "scripts/build-upstash-mcp-runtime.mjs"
+assert_contains "- pnpm lint:scripts (root build script changed)"
+assert_contains "- node --test scripts/upstash-mcp-config.test.mjs (Upstash MCP transport contract changed)"
+
 run_gate "scripts/upstash-mcp-config.test.mjs"
 assert_contains "- pnpm lint:scripts (root build script changed)"
 assert_contains "- node --test scripts/upstash-mcp-config.test.mjs (Upstash MCP transport contract changed)"
