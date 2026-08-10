@@ -23,7 +23,7 @@ MCP credential handed to an untrusted agent).
 `claude-code-action` agent that reads Sentry over an MCP server. The Claude CLI
 launches that server as a child of the agent's own process, and
 `claude-code-action` is a composite action: GitHub Actions does not pass a
-caller step's `env:` into a composite action's steps, and the pinned v1.0.179
+caller step's `env:` into a composite action's steps, and the pinned v1.0.183
 exposes no per-step passthrough and no first-class MCP env input. So anything
 the MCP server must read had to be **job** env — which the agent's allow-listed
 Bash inherits.
@@ -97,10 +97,12 @@ start is theatre. The variable must be absent when the process is exec'd. So:
 ## Alternatives considered
 
 - **Wait for per-step or first-class MCP env forwarding in
-  `claude-code-action`.** Cheapest fix if it lands. Absent at the pinned
-  v1.0.179 and upstream's only release tag is `v1` (Aug 2025), so there is no
-  newer version to adopt. Re-check on the next bump; the broker generalises to
-  the next MCP credential either way.
+  `claude-code-action`.** Cheapest fix if it lands. Still absent at the pinned
+  v1.0.183, whose `action.yml` is byte-identical to the v1.0.179 this ADR was
+  written against; upstream deprecated the old `mcp_config` input in favour of
+  `claude_args: --mcp-config`, which takes a path or JSON and never env.
+  Re-check on the next bump; the broker generalises to the next MCP credential
+  either way.
 - **Write the resolved `--mcp-config` to `$RUNNER_TEMP`.** Rejected: it
   relocates the credential to a file the agent's `Read` tool can open.
 - **Scrub or transform the credential in the agent's env.** Rejected: the
