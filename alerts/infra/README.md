@@ -233,8 +233,7 @@ cloud-routine experiment ran for weeks producing nothing and nobody noticed.
 - **Real absence latency is 5h, not the 3h `duration` reads.** Both conditions
   aggregate over a 7200s `ALIGN_MAX` window, and an aligned point persists
   while that trailing window still holds the last raw publish, so the absence
-  timer starts 2h late. Proven 2026-08-10 — last publish 12:00:02Z, alert
-  17:02:12Z
+  timer starts 2h late
 - That 5h is measured **from the last published point**, not from the moment
   the watcher stops, and the two differ by up to the publish interval. A
   watcher dying just after a publish is caught ~5h later; one dying just
@@ -320,11 +319,10 @@ two conditions separately: step 2 covers the threshold, step 3 covers absence.
    last publish + 7200s (alignment empties) + 10800s (duration) = fire
    ```
 
-   Measured on 2026-08-10: last publish 12:00:02Z, alert opened **17:02:12Z** —
-   the derivation plus propagation. **At the 3h mark the alert has provably not
-   fired, and reading `duration = "10800s"` as the wait is what makes an
-   operator conclude the switch is broken.** It cost an investigation to unwind
-   once already.
+   Expect the alert about 5h after the last publish, plus a couple of minutes
+   of propagation. **At the 3h mark it has not fired yet, and reading
+   `duration = "10800s"` as the wait is what makes an operator conclude the
+   switch is broken.**
 
    **Resume it afterwards** — a paused watcher is a disarmed switch:
 

@@ -408,8 +408,7 @@ resource "google_monitoring_alert_policy" "sentry_ingest_staleness_policy" {
       # Reads as 3h; the real latency is 5h. The aggregation below means an
       # aligned point persists while its trailing 7200s window still contains
       # the last raw publish, so this timer only starts 2h after the watcher
-      # goes quiet. Measured 2026-08-10: last publish 12:00:02Z, alert
-      # 17:02:12Z. Do not "fix" a slow-looking absence alert by shortening
+      # goes quiet. Do not "fix" a slow-looking absence alert by shortening
       # this — see alerts/infra/README.md § "After apply: prove the switch
       # fires" step 3, and drop the aggregations block instead if 3h is
       # actually required.
