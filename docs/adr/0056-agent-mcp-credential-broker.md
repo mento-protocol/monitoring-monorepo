@@ -3,7 +3,7 @@ title: An untrusted agent's MCP credentials sit behind a loopback broker, not in
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-30
+last_verified: 2026-08-10
 scope: ci/process
 date: 2026-07
 doc_type: adr
