@@ -59,10 +59,14 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import {
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
+  statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -73,12 +77,19 @@ import { CORE_SCHEMA, dump, load } from "js-yaml";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const SCRIPTS_DIR = join(ROOT, "scripts");
-const CI_PATH = join(ROOT, ".github", "workflows", "ci.yml");
+const WORKFLOWS_DIR = join(ROOT, ".github", "workflows");
+const CI_PATH = join(WORKFLOWS_DIR, "ci.yml");
 const GATE_PATH = join(SCRIPTS_DIR, "agent-quality-gate.sh");
 const VALIDATOR_PATH = join(
   SCRIPTS_DIR,
   "check-agent-quality-gate-package-scripts.sh",
 );
+
+/** The pin validator invocation the `scripts` job must run before any alias. */
+const PIN_VALIDATOR_COMMAND = [
+  "bash",
+  "scripts/check-agent-quality-gate-package-scripts.sh",
+];
 
 /** This file, so the check can assert its own CI step still exists. */
 const SELF = "scripts/check-sentry-suites-in-ci.test.mjs";
@@ -93,19 +104,103 @@ const PKG_SCRIPTS = PKG.scripts ?? {};
 const GATE = readFileSync(GATE_PATH, "utf8");
 
 /**
+ * Every workflow under .github/workflows, parsed. The `ci` check-run name must
+ * be unique across all of them, so this check reads the whole directory rather
+ * than ci.yml alone.
+ */
+const WORKFLOWS = readdirSync(WORKFLOWS_DIR, { withFileTypes: true })
+  .filter(
+    (entry) =>
+      entry.isFile() &&
+      (entry.name.endsWith(".yml") || entry.name.endsWith(".yaml")),
+  )
+  .map((entry) => ({
+    path: `.github/workflows/${entry.name}`,
+    workflow: load(readFileSync(join(WORKFLOWS_DIR, entry.name), "utf8"), {
+      schema: CORE_SCHEMA,
+    }),
+  }));
+
+/**
+ * The composite-action steps a job pulls in through `uses: ./…`. A trusted job's
+ * environment is set by its own steps AND by any local composite action it
+ * runs, so the env-mutation scan must see both. Third-party `uses:` (pinned by
+ * SHA, covered by check-github-action-pins.mjs) are out of scope here.
+ *
+ * @param {Record<string, any>} job
+ */
+function localCompositeSteps(job) {
+  const steps = [];
+  for (const step of job?.steps ?? []) {
+    if (!isPlainObject(step) || typeof step.uses !== "string") continue;
+    if (!step.uses.startsWith("./")) continue;
+    const actionDir = join(ROOT, step.uses.slice(2));
+    let source;
+    for (const file of ["action.yml", "action.yaml"]) {
+      try {
+        source = readFileSync(join(actionDir, file), "utf8");
+        break;
+      } catch {
+        // try the other extension
+      }
+    }
+    assert.ok(
+      source !== undefined,
+      `local action \`${step.uses}\` has no action.yml/action.yaml — the env scan cannot read it`,
+    );
+    const action = load(source, { schema: CORE_SCHEMA });
+    for (const composite of action?.runs?.steps ?? []) {
+      if (isPlainObject(composite)) steps.push(composite);
+    }
+  }
+  return steps;
+}
+
+/** The alls-green step of a (cloned) workflow's `ci` sentinel. */
+function allsGreenStep(workflow) {
+  return workflow.jobs.ci.steps.find((step) =>
+    String(step.uses ?? "").startsWith("re-actors/alls-green@"),
+  );
+}
+
+/**
  * Every `sentry-*.test.mjs` under scripts/, at any depth, as a repo-relative
  * path. Recursive so a suite cannot hide from invariant 1 by moving into a
  * subdirectory.
  *
+ * A Dirent from `readdirSync(withFileTypes)` comes from `lstat`, so a symlink to
+ * a directory reports `isDirectory() === false` and would be neither recursed
+ * into nor recorded — a suite behind `scripts/<symlink>/` would silently drop
+ * out of enumeration and never be required in CI. So a symlink is resolved with
+ * `statSync` (which follows it) and walked when it points to a directory; a
+ * `realpathSync` visited-set fails closed on a cycle rather than looping.
+ *
  * @param {string} dir
  * @param {string} prefix
+ * @param {Set<string>} ancestors resolved directories on the path to `dir`
  */
-function findSentrySuites(dir, prefix = "scripts") {
+function findSentrySuites(dir, prefix = "scripts", ancestors = new Set()) {
+  const realDir = realpathSync(dir);
+  // Only a directory that is its own ancestor is a cycle. A symlink to an
+  // already-enumerated sibling is a diamond, not a loop, and must still be
+  // walked — tracking the path to here rather than every dir seen keeps the
+  // first without looping on the second.
+  assert.ok(
+    !ancestors.has(realDir),
+    `symlink cycle under scripts/ at ${prefix} — resolve it; the suite enumeration cannot walk a cycle`,
+  );
+  const nextAncestors = new Set(ancestors).add(realDir);
   const found = [];
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const relative = `${prefix}/${entry.name}`;
-    if (entry.isDirectory()) {
-      found.push(...findSentrySuites(join(dir, entry.name), relative));
+    const full = join(dir, entry.name);
+    // A broken symlink throws here, which is the intended failure mode: an
+    // unresolvable entry under scripts/ must fail the enumeration, not vanish.
+    const isDirectory = entry.isSymbolicLink()
+      ? statSync(full).isDirectory()
+      : entry.isDirectory();
+    if (isDirectory) {
+      found.push(...findSentrySuites(full, relative, nextAncestors));
     } else if (
       entry.name.startsWith("sentry-") &&
       entry.name.endsWith(".test.mjs")
@@ -187,11 +282,14 @@ const PROBE_INPUTS = new Map([
 import {
   aliasesFor,
   commandRunsOnly,
+  contextOwnershipBlockers,
+  envMutationBlockers,
   globToRegExp,
   invocationsOf,
   isPlainObject,
   jobBlockers,
   nearMisses,
+  pinValidationOrderBlockers,
   provenCommands,
   requiredPathsMissing,
   runsCommand,
@@ -389,11 +487,47 @@ test("the sentinel check rejects a workflow whose `ci` job stops gating", () => 
     [
       "`scripts` under `allowed-failures`",
       (w) => {
-        const step = w.jobs.ci.steps.find((s) =>
-          String(s.uses ?? "").startsWith("re-actors/alls-green@"),
-        );
-        step.with["allowed-failures"] = "scripts";
+        allsGreenStep(w).with["allowed-failures"] = "scripts";
       },
+    ],
+    [
+      "a JSON-encoded `allowed-failures` the comma split cannot read",
+      // The alls-green action `json.loads()` this first, so it is a real
+      // one-element allowlist to the runner; a comma-only reader sees one
+      // opaque token and tolerates nothing. This is the merge-gate hole.
+      (w) => {
+        allsGreenStep(w).with["allowed-failures"] = '["scripts"]';
+      },
+    ],
+    [
+      "`production-infra-contract` under a JSON `allowed-failures`",
+      (w) => {
+        allsGreenStep(w).with["allowed-failures"] =
+          '["production-infra-contract"]';
+      },
+    ],
+    [
+      "`changes` tolerated as a failure",
+      // `changes` decides whether every path-gated job runs; tolerating its
+      // failure turns a red detector into silent skips of every Sentry suite.
+      (w) => {
+        allsGreenStep(w).with["allowed-failures"] = "changes";
+      },
+    ],
+    [
+      "a case-variant `JOBS` overriding `jobs`",
+      // The runner matches `with:` keys case-insensitively and the last wins,
+      // so `jobs` still literally reads `${{ toJSON(needs) }}` while `JOBS`
+      // feeds the action a hand-picked all-green matrix.
+      (w) => {
+        allsGreenStep(w).with.JOBS = '{"changes":{"result":"success"}}';
+      },
+    ],
+    [
+      "a renamed sentinel job",
+      // The required context is matched by check-run name; renaming it leaves
+      // `jobs.ci` keyed the same while it publishes a different context.
+      (w) => (w.jobs.ci.name = "ci-aggregate"),
     ],
   ];
   for (const [label, mutate] of mutations) {
@@ -427,6 +561,10 @@ test("the trigger check rejects a `pull_request` trigger that can miss main", ()
     [
       "a `branches` list without main",
       (w) => (w.on.pull_request.branches = ["release/**"]),
+    ],
+    [
+      "a negated `branches` entry that still lists main",
+      (w) => (w.on.pull_request.branches = ["main", "!main"]),
     ],
     ["a path-scoped trigger", (w) => (w.on.pull_request.paths = ["src/**"])],
     [
@@ -727,6 +865,32 @@ test("the reachability check rejects a filter that drops a required path", () =>
         }
       },
     ],
+    [
+      "a negated glob that cancels a required path it still lists",
+      // dorny/paths-filter honours `!` negation, so `!scripts/**` cancels the
+      // required `scripts/**/*.mjs`/`.sh` entries while they stay literally
+      // present — a PR touching only scripts/ then skips the job.
+      (w) => {
+        let added = 0;
+        for (const job of Object.values(w.jobs)) {
+          for (const step of job.steps ?? []) {
+            if (!String(step.uses ?? "").startsWith("dorny/paths-filter@")) {
+              continue;
+            }
+            const filters = load(step.with.filters, { schema: CORE_SCHEMA });
+            if (Array.isArray(filters.rootScripts)) {
+              filters.rootScripts.push("!scripts/**");
+              added += 1;
+            }
+            step.with.filters = dump(filters);
+          }
+        }
+        assert.ok(
+          added > 0,
+          "no `rootScripts` filter to negate — probe is inert",
+        );
+      },
+    ],
   ];
   for (const [label, mutate] of chainMutations) {
     const workflow = structuredClone(CI);
@@ -788,4 +952,227 @@ test("this check itself runs in the ci.yml `scripts` job", () => {
     `the \`scripts\` job must run \`node ${SELF}\` as a whole step command: ` +
       `${nearMisses(CI, "scripts", [["node", SELF]]).join("; ") || "no step mentions it"}`,
   );
+});
+
+test("a step proves a suite only when the suite is its whole command", () => {
+  // provenCommands must reject a step whose body runs more than the target: a
+  // sibling bare-word line can rebind it without being a shell keyword —
+  // `cd <dir>` moves which package.json `pnpm <alias>` resolves, `PATH=`/`hash`
+  // shadows the binary, `cp /dev/null <suite>` truncates the suite file — and
+  // `runsCommand` would otherwise match the target sitting among them. All three
+  // are shellcheck-clean, so only this rule catches them.
+  const bodies = [
+    "cd ui-dashboard\npnpm sentry:ingest:test",
+    "hash -p /bin/true pnpm\npnpm sentry:ingest:test",
+    "PATH=/tmp/shim:/usr/bin\npnpm sentry:ingest:test",
+    "cp /dev/null scripts/sentry-triage-ingest.test.mjs\npnpm sentry:ingest:test",
+  ];
+  for (const body of bodies) {
+    const workflow = structuredClone(CI);
+    const step = workflow.jobs.scripts.steps.find(
+      (candidate) => candidate.run === "pnpm sentry:ingest:test",
+    );
+    assert.ok(
+      step,
+      "anchor step `pnpm sentry:ingest:test` is gone — this probe would prove nothing",
+    );
+    step.run = body;
+    assert.equal(
+      runsCommand(provenCommands(workflow, "scripts"), [
+        "pnpm",
+        "sentry:ingest:test",
+      ]),
+      false,
+      `provenCommands accepted a step whose body is ${JSON.stringify(body)}`,
+    );
+  }
+});
+
+test("a trusted job may not mutate the runner environment for later steps", () => {
+  // A `>> $GITHUB_ENV` / `>> $GITHUB_PATH` write reaches every later step with
+  // the same force as a job-level `env:` — which this file rejects — but
+  // imperative and unparsable, so the declarative `env:` checks never see it.
+  // Both trusted jobs, and the local composite actions they pull in, must be
+  // clean today, and the blocker must reject each vector.
+  for (const name of TRUSTED_JOBS.keys()) {
+    const job = CI.jobs[name];
+    assert.deepEqual(
+      envMutationBlockers(job.steps, `\`${name}\``),
+      [],
+      `the \`${name}\` job already writes the runner environment`,
+    );
+    assert.deepEqual(
+      envMutationBlockers(
+        localCompositeSteps(job),
+        `\`${name}\` composite step`,
+      ),
+      [],
+      `a local composite action used by \`${name}\` writes the runner environment`,
+    );
+  }
+
+  // jobBlockers folds the scan in, so a direct env-file write is caught end to
+  // end, and the composite scan rejects the self-concealing variant that leaves
+  // ci.yml untouched.
+  const vectors = [
+    {
+      name: "$GITHUB_ENV NODE_OPTIONS injection",
+      run: 'echo "NODE_OPTIONS=--import=./evil.mjs" >> "$GITHUB_ENV"',
+    },
+    {
+      name: "$GITHUB_PATH shim",
+      run: 'echo "$RUNNER_TEMP/shim" >> "$GITHUB_PATH"',
+    },
+  ];
+  for (const vector of vectors) {
+    const workflow = structuredClone(CI);
+    workflow.jobs.scripts.steps.splice(2, 0, vector);
+    assert.notDeepEqual(
+      jobBlockers(workflow, "scripts", TRUSTED_JOBS),
+      [],
+      `jobBlockers accepts a \`scripts\` job with a ${vector.name} step`,
+    );
+    // The same write inside a composite action must also be caught.
+    assert.notDeepEqual(
+      envMutationBlockers([vector], "composite"),
+      [],
+      `envMutationBlockers accepts a composite ${vector.name} step`,
+    );
+  }
+});
+
+test("the required `ci` check-run name is owned by exactly the sentinel", () => {
+  const owner = ".github/workflows/ci.yml#ci";
+  assert.deepEqual(
+    contextOwnershipBlockers(WORKFLOWS, "ci", owner),
+    [],
+    "the `ci` check-run name is not uniquely owned by the ci.yml sentinel",
+  );
+
+  // A decoy job named `ci` in any other workflow satisfies the required context
+  // with a green check while the real aggregator stops being required.
+  const decoy = {
+    path: ".github/workflows/decoy.yml",
+    workflow: {
+      on: { pull_request: { branches: ["main"] } },
+      jobs: { sentinel: { name: "ci", "runs-on": "ubuntu-latest", steps: [] } },
+    },
+  };
+  assert.notDeepEqual(
+    contextOwnershipBlockers([...WORKFLOWS, decoy], "ci", owner),
+    [],
+    "the ownership check accepts a second job publishing the `ci` check-run name",
+  );
+
+  // Renaming the real sentinel's key so no job owns the name must also fail.
+  const orphaned = WORKFLOWS.map(({ path, workflow }) =>
+    path === ".github/workflows/ci.yml"
+      ? {
+          path,
+          workflow: {
+            ...workflow,
+            jobs: Object.fromEntries(
+              Object.entries(workflow.jobs).map(([key, job]) =>
+                key === "ci"
+                  ? [key, { ...job, name: "ci-aggregate" }]
+                  : [key, job],
+              ),
+            ),
+          },
+        }
+      : { path, workflow },
+  );
+  assert.notDeepEqual(
+    contextOwnershipBlockers(orphaned, "ci", owner),
+    [],
+    "the ownership check accepts a workflow set where no job owns the `ci` name",
+  );
+});
+
+test("the `scripts` job validates alias pins before invoking them", () => {
+  // The gate trusts the sentry aliases; the pin validator is what keeps that
+  // trust safe. In CI it must run BEFORE any `pnpm <alias>` step, or a drifted
+  // alias runs its appended command before the meta-check (last step) reds the
+  // job. This mirrors the local gate's fail-fast ordering.
+  const aliasTargets = Object.keys(PKG_SCRIPTS)
+    .filter((name) => name.startsWith("sentry:") && name.endsWith(":test"))
+    .flatMap((name) => [
+      ["pnpm", name],
+      ["pnpm", "run", name],
+    ]);
+  assert.ok(aliasTargets.length > 0, "no sentry:*:test aliases to guard");
+  assert.deepEqual(
+    pinValidationOrderBlockers(
+      CI,
+      "scripts",
+      PIN_VALIDATOR_COMMAND,
+      aliasTargets,
+    ),
+    [],
+    "the `scripts` job invokes a trusted alias before validating its pin",
+  );
+
+  const validatorRun = PIN_VALIDATOR_COMMAND.join(" ");
+
+  // Probe 1: drop the validator step entirely.
+  const withoutValidator = structuredClone(CI);
+  withoutValidator.jobs.scripts.steps =
+    withoutValidator.jobs.scripts.steps.filter(
+      (step) => step.run !== validatorRun,
+    );
+  assert.notDeepEqual(
+    pinValidationOrderBlockers(
+      withoutValidator,
+      "scripts",
+      PIN_VALIDATOR_COMMAND,
+      aliasTargets,
+    ),
+    [],
+    "the order check accepts a `scripts` job with no pin validator step",
+  );
+
+  // Probe 2: move the validator to the end, after the aliases.
+  const reordered = structuredClone(CI);
+  const steps = reordered.jobs.scripts.steps;
+  const validatorAt = steps.findIndex((step) => step.run === validatorRun);
+  assert.ok(
+    validatorAt >= 0,
+    "pin validator step is gone — probe would prove nothing",
+  );
+  const [validatorStep] = steps.splice(validatorAt, 1);
+  steps.push(validatorStep);
+  assert.notDeepEqual(
+    pinValidationOrderBlockers(
+      reordered,
+      "scripts",
+      PIN_VALIDATOR_COMMAND,
+      aliasTargets,
+    ),
+    [],
+    "the order check accepts a validator step that runs after the aliases",
+  );
+});
+
+test("the suite enumeration walks symlinked directories", () => {
+  // A Dirent for a symlink-to-dir reports isDirectory()===false, so a naive
+  // walk would neither recurse into it nor record it, dropping any suite behind
+  // it from the required set. The enumeration resolves the symlink; this proves
+  // it, on a synthetic tree so no repo file is touched.
+  const base = mkdtempSync(join(tmpdir(), "sentry-symlink-probe-"));
+  try {
+    const scripts = join(base, "scripts");
+    const real = join(scripts, "real-dir");
+    mkdirSync(real, { recursive: true });
+    writeFileSync(join(real, "sentry-hidden.test.mjs"), "// suite\n");
+    writeFileSync(join(scripts, "sentry-visible.test.mjs"), "// suite\n");
+    symlinkSync(real, join(scripts, "linked-dir"));
+
+    const found = findSentrySuites(scripts);
+    assert.ok(
+      found.includes("scripts/linked-dir/sentry-hidden.test.mjs"),
+      `a suite behind a symlinked directory was not enumerated: ${JSON.stringify(found)}`,
+    );
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
 });

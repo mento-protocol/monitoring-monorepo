@@ -303,6 +303,14 @@ export function jobBlockers(workflow, name, trustedJobs, seen = new Set()) {
     blockers.push(`\`${name}\` has no \`steps:\` list`);
   }
 
+  // Only a trusted job's own steps run alongside its suites; a needed job runs
+  // on a separate runner, so its environment writes cannot reach here. Scan the
+  // trusted job itself, every step of it, for the imperative env-mutation
+  // vector the declarative `env:` checks above cannot see.
+  if (trustedJobs.has(name)) {
+    blockers.push(...envMutationBlockers(job.steps, `\`${name}\``));
+  }
+
   for (const dependency of needsList(job.needs)) {
     if (!isPlainObject(workflow.jobs?.[dependency])) {
       blockers.push(
@@ -358,6 +366,41 @@ function stepBlockers(step) {
 }
 
 /**
+ * A `run:` line writing one of the runner's environment files. `>> $GITHUB_ENV`
+ * sets a variable for every LATER step in the job, and `>> $GITHUB_PATH`
+ * prepends a directory to `PATH` for them — the same reach as a job-level
+ * `env:`, which this file rejects, but imperative and unparsable, so the
+ * declarative `env:` checks never see it. `NODE_OPTIONS=--import=…` written this
+ * way preloads a module into every later `node`/`pnpm`; a `$GITHUB_PATH` shim
+ * dir shadows `pnpm` itself.
+ */
+const ENV_FILE_WRITE = /\b(GITHUB_ENV|GITHUB_PATH)\b/;
+
+/**
+ * Steps in a trusted job that mutate the runner environment for later steps.
+ * Unlike stepBlockers (consulted only for the step that RUNS a suite), this
+ * judges EVERY step: a step that sabotages the suites rather than invoking them
+ * is never a "proven command", so it would otherwise contribute no blocker.
+ *
+ * @param {unknown} steps
+ * @param {string} label the job or action the steps belong to
+ */
+export function envMutationBlockers(steps, label) {
+  const blockers = [];
+  for (const step of Array.isArray(steps) ? steps : []) {
+    if (!isPlainObject(step) || typeof step.run !== "string") continue;
+    if (ENV_FILE_WRITE.test(step.run)) {
+      blockers.push(
+        `${label} has a step (\`${step.name ?? step.run.trim().split("\n")[0]}\`) that writes ` +
+          "`$GITHUB_ENV`/`$GITHUB_PATH`, which sets an environment variable or PATH entry for every " +
+          "later step — the same reach as a job-level `env:`, which this file rejects",
+      );
+    }
+  }
+  return blockers;
+}
+
+/**
  * Every command a job is proven to run, with its exit status reaching the job.
  * A step that cannot be proven contributes nothing, so an unreadable step
  * reads as "does not run the suite" — which fails closed.
@@ -370,7 +413,19 @@ export function provenCommands(workflow, name) {
   for (const step of ciJob(workflow, name).steps ?? []) {
     if (!isPlainObject(step) || typeof step.run !== "string") continue;
     if (stepBlockers(step).length > 0) continue;
-    commands.push(...parseShellScript(step.run).commands);
+    const parsed = parseShellScript(step.run).commands;
+    // A step proves a command only when that command is the WHOLE step. A
+    // sibling bare-word line can rebind the target without being a shell
+    // keyword: `cd <dir>` moves which package.json `pnpm <alias>` resolves (the
+    // shell twin of the `working-directory:` stepBlockers already rejects), a
+    // bare `PATH=…`/`hash -p …`/`NAME=…` shadows the binary, `cp /dev/null
+    // <suite>` truncates the suite file. `runsCommand` only asks whether the
+    // target appears among a step's commands, so any of these passes while the
+    // suite never runs. No blacklist closes this — `cp` is an ordinary command
+    // — so the rule is the same one `commandRunsOnly` applies to package
+    // scripts: exactly one command, or the step proves nothing.
+    if (parsed.length !== 1) continue;
+    commands.push(parsed[0]);
   }
   return commands;
 }
@@ -400,6 +455,11 @@ export function nearMisses(workflow, name, targets) {
     const { commands, blocker } = parseShellScript(step.run);
     if (blocker) {
       notes.push(`step \`${step.name ?? step.run}\`: ${blocker}`);
+    } else if (commands.length > 1) {
+      notes.push(
+        `step \`${step.name ?? step.run}\`: runs ${commands.length} commands; a suite must be the ` +
+          "step's whole command, or a sibling line can rebind it (`cd`, `PATH=`, `cp /dev/null <suite>`)",
+      );
     } else if (!targets.some((target) => runsCommand(commands, target))) {
       notes.push(
         `step \`${step.name ?? step.run}\`: runs \`${step.run.trim()}\`, which is not one of ` +
@@ -408,6 +468,54 @@ export function nearMisses(workflow, name, targets) {
     }
   }
   return notes;
+}
+
+/**
+ * Read an action input by name the way the runner does: `with:` keys are
+ * matched case-insensitively and the last one wins, so `JOBS:` silently
+ * overrides `jobs:`. An exact-case JS property read (`with.jobs`) would see the
+ * decoy value the runner never uses. Returns the effective value and the set of
+ * keys that collided, so a caller can reject the ambiguity outright.
+ *
+ * @param {Record<string, unknown> | undefined} withMap
+ * @param {string} name
+ */
+export function withInput(withMap, name) {
+  const hits = Object.entries(withMap ?? {}).filter(
+    ([key]) => key.toLowerCase() === name.toLowerCase(),
+  );
+  return {
+    value: hits.length > 0 ? hits[hits.length - 1][1] : undefined,
+    collidingKeys: hits.length > 1 ? hits.map(([key]) => key) : [],
+  };
+}
+
+/**
+ * Parse an alls-green list input the way the action does: `json.loads` first,
+ * comma-split only as a fallback. `allowed-failures: '["scripts"]'` is a real
+ * one-element list to the action and would be one opaque token to a comma-only
+ * split, so a comma-only reader sees no tolerated job while the action tolerates
+ * `scripts`. A value that parses as JSON but is not an array is not a list the
+ * action iterates meaningfully; treat it as one opaque token and fail closed.
+ *
+ * @param {unknown} raw
+ * @returns {string[]}
+ */
+export function parseActionList(raw) {
+  const text = String(raw ?? "").trim();
+  if (text === "") return [];
+  try {
+    const parsed = JSON.parse(text);
+    if (Array.isArray(parsed)) {
+      return parsed.map((entry) => String(entry).trim()).filter(Boolean);
+    }
+    return [text];
+  } catch {
+    return text
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+  }
 }
 
 /**
@@ -426,6 +534,21 @@ export function sentinelBlockers(workflow, trustedNames) {
   const sentinel = ciJob(workflow, "ci");
   const names = [...trustedNames];
   const blockers = [];
+
+  // The required status context is matched by check-run NAME, not by the YAML
+  // key `ci`. A job keyed `ci` but named something else no longer publishes the
+  // `ci` context the ruleset requires — merges then wait on a context that
+  // never reports, or a decoy job elsewhere named `ci` satisfies it. Bind the
+  // sentinel to the identity that makes it required. `contextOwnershipBlockers`
+  // (asserted in the entry point over every workflow) proves no other job
+  // claims the name.
+  const sentinelName = sentinel.name ?? "ci";
+  if (sentinelName !== "ci") {
+    blockers.push(
+      `the \`ci\` sentinel job publishes its check run as \`${sentinelName}\`, not \`ci\` — ` +
+        "the branch ruleset requires the context `ci`, which is matched by check-run name",
+    );
+  }
 
   // A skipped job's check run reports success, so a sentinel that can skip
   // stops propagating a red `scripts` job to the required `ci` context. Its
@@ -475,18 +598,122 @@ export function sentinelBlockers(workflow, trustedNames) {
       `the \`ci\` sentinel's alls-green step, the one step that turns a red job into a red \`ci\`, has ${blocker}`,
     );
   }
-  if (gate.with?.jobs !== "${{ toJSON(needs) }}") {
+  const jobsInput = withInput(gate.with, "jobs");
+  if (jobsInput.collidingKeys.length > 0) {
     blockers.push(
-      `the alls-green step reads \`${gate.with?.jobs}\` instead of every job it needs`,
+      `the alls-green step passes \`jobs\` under case-variant keys ${JSON.stringify(jobsInput.collidingKeys)}; ` +
+        "the runner matches `with:` keys case-insensitively and the last wins, so the decoy overrides the real value",
     );
   }
-  const tolerated = String(gate.with?.["allowed-failures"] ?? "")
-    .split(",")
-    .map((entry) => entry.trim());
-  for (const name of names) {
-    if (tolerated.includes(name)) {
+  if (jobsInput.value !== "${{ toJSON(needs) }}") {
+    blockers.push(
+      `the alls-green step reads \`${jobsInput.value}\` instead of every job it needs`,
+    );
+  }
+
+  // Parse `allowed-failures` exactly as the action does (JSON first, comma
+  // fallback), read through the case-insensitive helper, and reject it whenever
+  // it names anything at all. The real sentinel has no `allowed-failures`, so
+  // any non-empty value is a regression: a name here excludes that job from the
+  // `result == 'success'` requirement in every state, which lets a red
+  // `scripts` (all the Sentry suites) or a red `production-infra-contract`
+  // merge behind a green `ci`. `changes` gates whether the path-filtered jobs
+  // run at all, so tolerating its failure is just as fatal — hence "any name",
+  // not only the trusted ones.
+  const failuresInput = withInput(gate.with, "allowed-failures");
+  if (failuresInput.collidingKeys.length > 0) {
+    blockers.push(
+      `the alls-green step passes \`allowed-failures\` under case-variant keys ${JSON.stringify(failuresInput.collidingKeys)}`,
+    );
+  }
+  const tolerated = parseActionList(failuresInput.value);
+  if (tolerated.length > 0) {
+    blockers.push(
+      `the \`ci\` sentinel sets \`allowed-failures\` (${JSON.stringify(tolerated)}); no job may be tolerated as a ` +
+        "failure — a red trusted job, or a red `changes`, must turn the required `ci` context red",
+    );
+  }
+  return blockers;
+}
+
+/**
+ * The check-run name a job publishes is its `name:`, defaulting to its key. The
+ * required `ci` status context is matched by that name across every workflow,
+ * so the guarantee that a red `scripts` reaches the merge gate holds only while
+ * exactly one job — the real sentinel — publishes the name `ci`. Rename the
+ * sentinel and give the name to a trivial always-green job in another workflow
+ * and the required context resolves to the decoy.
+ *
+ * @param {Array<{ path: string, workflow: Record<string, any> }>} workflows
+ * @param {string} context the required check-run name, e.g. `ci`
+ * @param {string} owner the `path#jobKey` that must be its sole producer
+ */
+export function contextOwnershipBlockers(workflows, context, owner) {
+  const owners = [];
+  for (const { path, workflow } of workflows) {
+    if (!isPlainObject(workflow?.jobs)) continue;
+    for (const [key, job] of Object.entries(workflow.jobs)) {
+      if (!isPlainObject(job)) continue;
+      // A reusable-workflow job (`uses:`) publishes its own called jobs' check
+      // runs, not one named after this key, so it cannot claim the context.
+      if (typeof job.uses === "string") continue;
+      const name = typeof job.name === "string" ? job.name : key;
+      if (name === context) owners.push(`${path}#${key}`);
+    }
+  }
+  if (owners.length === 1 && owners[0] === owner) return [];
+  return [
+    `the required \`${context}\` check-run name is published by ${owners.length} job(s) ` +
+      `(${owners.join(", ") || "none"}); exactly one — ${owner} — may, or the required context can resolve to a decoy`,
+  ];
+}
+
+/**
+ * Blockers when a job invokes a trusted `pnpm <alias>` before validating that
+ * alias's pin. The pins are what make a trusted alias safe: without them a
+ * drifted `"sentry:x:test": "node scripts/x.test.mjs && curl evil"` runs its
+ * appended command. The meta-check re-checks the pins, but it runs last, so an
+ * earlier alias step has already run the appended command. The local gate runs
+ * the pin validator first; CI must too, so a drift fails fast before any
+ * trusted alias executes.
+ *
+ * @param {Record<string, any>} workflow
+ * @param {string} name the job whose step order is judged
+ * @param {string[]} validatorTarget the pin validator command, matched whole
+ * @param {string[][]} aliasTargets the trusted `pnpm <alias>` invocations to guard
+ */
+export function pinValidationOrderBlockers(
+  workflow,
+  name,
+  validatorTarget,
+  aliasTargets,
+) {
+  const steps = ciJob(workflow, name).steps ?? [];
+  const firstProvenIndex = (target) => {
+    for (let index = 0; index < steps.length; index += 1) {
+      const step = steps[index];
+      if (!isPlainObject(step) || typeof step.run !== "string") continue;
+      if (stepBlockers(step).length > 0) continue;
+      const parsed = parseShellScript(step.run).commands;
+      if (parsed.length === 1 && isCommand(parsed[0], target)) return index;
+    }
+    return -1;
+  };
+
+  const validatorIndex = firstProvenIndex(validatorTarget);
+  if (validatorIndex < 0) {
+    return [
+      `the \`${name}\` job never runs \`${validatorTarget.join(" ")}\` as a whole step command, ` +
+        "so it invokes trusted aliases without validating their pins first",
+    ];
+  }
+  const blockers = [];
+  for (const target of aliasTargets) {
+    const at = firstProvenIndex(target);
+    if (at >= 0 && at < validatorIndex) {
       blockers.push(
-        `the \`ci\` sentinel tolerates a failing \`${name}\` job via \`allowed-failures\``,
+        `the \`${name}\` job runs \`${target.join(" ")}\` (step ${at}) before the pin validator ` +
+          `(step ${validatorIndex}) — a drifted alias would run its appended command before the pins are checked`,
       );
     }
   }
@@ -517,10 +744,27 @@ export function triggerBlockers(workflow) {
   // false positive, and it is the only form that can exclude main while
   // `branches` reads as unset.
   const branches = trigger.branches;
-  if (!(branches === undefined || branches.includes("main"))) {
-    blockers.push(
-      `ci.yml's \`pull_request\` trigger no longer covers main: ${JSON.stringify(branches)}`,
+  if (branches !== undefined) {
+    // A `branches:` list may itself carry negations: `branches: [main, "!main"]`
+    // lists main yet excludes it, because a later negative pattern overrides an
+    // earlier positive for the same ref. `includes("main")` reads that as
+    // covered. This repo's trigger uses positive patterns only, so any `!`
+    // entry is rejected outright — no false positive, and it is the form that
+    // can exclude main while `branches` literally names it.
+    const list = Array.isArray(branches) ? branches : [branches];
+    const negated = list.filter(
+      (entry) => typeof entry === "string" && entry.startsWith("!"),
     );
+    if (negated.length > 0) {
+      blockers.push(
+        `ci.yml's \`pull_request\` trigger \`branches:\` uses negative patterns ${JSON.stringify(negated)}, ` +
+          "which can exclude main even while it is listed",
+      );
+    } else if (!list.includes("main")) {
+      blockers.push(
+        `ci.yml's \`pull_request\` trigger no longer covers main: ${JSON.stringify(branches)}`,
+      );
+    }
   }
   if (trigger["branches-ignore"] !== undefined) {
     blockers.push(
@@ -640,6 +884,22 @@ export function requiredPathsMissing(workflow, guard, required) {
   if (!Array.isArray(paths)) {
     return [
       `the \`${filterKey}\` filter is ${JSON.stringify(paths)}, not a list of paths`,
+    ];
+  }
+
+  // dorny/paths-filter globs may be negated with a leading `!`, and a negation
+  // cancels an earlier positive for the files it matches: `["scripts/**/*.mjs",
+  // "!scripts/**"]` still literally lists the required path, so `includes()`
+  // reads it as covered while edits under scripts/ no longer trigger the job.
+  // This repo's filters use positive rules only, so any `!` entry is rejected
+  // outright rather than matched against each required path.
+  const negated = paths.filter(
+    (entry) => typeof entry === "string" && entry.startsWith("!"),
+  );
+  if (negated.length > 0) {
+    return [
+      `the \`${filterKey}\` filter uses negative patterns ${JSON.stringify(negated)}, ` +
+        "which can cancel a required path even when it is listed",
     ];
   }
 

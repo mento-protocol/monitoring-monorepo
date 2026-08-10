@@ -960,6 +960,15 @@ jobs:
           # commit so results remain reproducible after later doc changes.
           fetch-depth: 0
       - uses: ./.github/actions/pnpm-install
+      - name: Validate trusted package-script pins
+        # Fail fast before any `pnpm <alias>` step runs. The gate's tooling
+        # allowlist TRUSTS these aliases, and the pin validator is what keeps
+        # that trust safe: a drifted `sentry:*:test` (e.g. an appended `&&
+        # <command>`) would otherwise run its extra command before the coverage
+        # meta-check below reds the job. The local pre-push gate runs this
+        # validator first for the same reason; check-sentry-suites-in-ci.test.mjs
+        # asserts this step precedes every trusted alias invocation.
+        run: bash scripts/check-agent-quality-gate-package-scripts.sh
       - name: ESLint root scripts
         run: pnpm lint:scripts
       - name: Peg registry integrity
