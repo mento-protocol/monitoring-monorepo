@@ -17,9 +17,11 @@ bundle preparation/verification, runtime-change refusal handling, and other
 adapter mechanics. Follow it rather than duplicating those rules here.
 
 Verify every accepted finding before editing. If fixes are made, rerun focused
-checks and autoreview for that batch; pause for scope reclassification before a
-third review-triggered patch cycle. A clean source review is not test, browser,
-generated-artifact, CLI/API, or runtime proof, so retain every applicable gate.
+checks and autoreview for that batch. Do not pause solely for cycle count before
+five review-triggered patch cycles are complete; pause for scope
+reclassification before starting a sixth. A clean source review is not test,
+browser, generated-artifact, CLI/API, or runtime proof, so retain every
+applicable gate.
 If an autoreview runtime change triggers the owning adapter's self-review
 refusal, keep it intact and follow the trusted pre-change sequence in the owner
 note.

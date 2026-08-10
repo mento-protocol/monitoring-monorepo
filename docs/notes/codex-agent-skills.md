@@ -3,7 +3,7 @@ title: Codex Agent Skills
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-29
+last_verified: 2026-08-10
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -23,7 +23,20 @@ team-shareable project workflows there instead of relying on local-only
 `~/.agents/skills` and should be exposed to both agents through the
 `~/.codex/skills` and `~/.claude/skills` mirrors. Project-level Codex MCP config
 lives in `.codex/config.toml`; local personal Codex settings belong in
-`~/.codex/config.toml`.
+`~/.codex/config.toml`. Project config may define a complete, credential-free
+shared MCP launcher, as the checked-in `chrome-devtools` server does. Do not add
+partial project entries that depend on a personal server definition: Codex
+Cloud does not inherit personal config, and Codex rejects an enabled server
+without a transport. Keep machine-specific transport and all authentication or
+secret material, including secret-bearing command arguments, environment
+values, headers, and tokens, out of the repository. Secret provisioning and
+rotation remain in the owning IaC path under
+[ADR 0030](../adr/0030-iac-before-cli-secrets.md).
+
+Treat MCP diagnostics as secret-adjacent. Do not use `codex mcp list` in shared
+logs when a personal server may contain credential-bearing arguments; inspect
+only redacted structural fields such as server name, enabled state, and
+transport presence.
 
 ## Autoreview routing
 
