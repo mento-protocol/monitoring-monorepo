@@ -23,10 +23,15 @@ team-shareable project workflows there instead of relying on local-only
 `~/.agents/skills` and should be exposed to both agents through the
 `~/.codex/skills` and `~/.claude/skills` mirrors. Project-level Codex MCP config
 lives in `.codex/config.toml`; local personal Codex settings belong in
-`~/.codex/config.toml`. Project config may enable or disable a named MCP server,
-but its machine-local transport and authentication stay in the personal config.
-Never copy command arguments, headers, tokens, or credentials into the
-repository.
+`~/.codex/config.toml`. Project config may define a credential-free shared MCP
+launcher, as the checked-in `chrome-devtools` server does, or enable or disable
+a server already defined in personal config. An `enabled`-only override requires
+the same named server and its transport in personal config; otherwise Codex
+rejects the incomplete entry. Add that user-level server first through the
+official [Codex MCP configuration guide](https://developers.openai.com/codex/mcp#configure-with-configtoml).
+Keep machine-specific transport and all authentication or secret material,
+including secret-bearing command arguments, environment values, headers, and
+tokens, out of the repository.
 
 ## Autoreview routing
 
