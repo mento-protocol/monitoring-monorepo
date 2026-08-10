@@ -30,6 +30,12 @@
  * An unparsable ci.yml throws here, and that is correct: this same job runs
  * scripts/check-autofix-ci-trust.mjs, which already fails closed on one.
  *
+ * Every predicate takes the structure it judges as an argument rather than
+ * reading a module-level constant, so each one is exercised twice: once against
+ * the real ci.yml, and once against a `structuredClone` of it with a single
+ * field broken. A check that passes on the real workflow has proven only that
+ * it accepts; the probes are what prove it rejects.
+ *
  * Three invariants, each guarding a different way the wiring rots:
  *
  *   1. Every `scripts/sentry-*.test.mjs` is invoked by the `scripts` job —
@@ -61,7 +67,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { CORE_SCHEMA, load } from "js-yaml";
+import { CORE_SCHEMA, dump, load } from "js-yaml";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const SCRIPTS_DIR = join(ROOT, "scripts");
@@ -137,14 +143,40 @@ const TRUSTED_JOBS = new Map([
 /**
  * Paths whose edits must re-run the `scripts` job. Every one is an input to a
  * suite that job owns: the suites themselves, the workflow files
- * sentry-mcp-broker.test.mjs parses, and the manifest holding the aliases the
- * CI steps invoke.
+ * sentry-mcp-broker.test.mjs parses, the shell scripts this check runs as
+ * probes — `gateClassifications` executes agent-quality-gate.sh's own `case`
+ * statement and `validatorPins` runs check-agent-quality-gate-package-scripts.sh
+ * — and the manifest holding the aliases the CI steps invoke.
+ *
+ * The `.sh` entry matters most where it is least visible: without it, a PR
+ * editing only the gate's tooling allowlist or the pin validator would skip the
+ * `scripts` job, and the `ci` sentinel lists `scripts` under `allowed-skips`,
+ * so nothing would report the gap.
  */
 const REQUIRED_ROOT_SCRIPT_PATHS = [
   "scripts/**/*.mjs",
+  "scripts/**/*.sh",
   ".github/workflows/**",
   "package.json",
 ];
+
+/**
+ * Every file this check parses or executes to reach a verdict, with the reader
+ * that consumes it. `the required paths route every file this check reads`
+ * asserts each one is covered by REQUIRED_ROOT_SCRIPT_PATHS: an input the
+ * filter does not route is an input whose edit skips the whole `scripts` job.
+ */
+const PROBE_INPUTS = new Map([
+  [".github/workflows/ci.yml", "the workflow every invariant here walks"],
+  ["package.json", "the alias map `aliasesFor` resolves suites through"],
+  ["scripts/agent-quality-gate.sh", "`gateClassifications` runs its `case`"],
+  [
+    "scripts/check-agent-quality-gate-package-scripts.sh",
+    "`validatorPins` runs it to enumerate the pins it enforces",
+  ],
+  ["scripts/tf-stacks.test.mjs", "`staticImports` parses its import list"],
+  [SELF, "this check itself"],
+]);
 
 /**
  * Env names proven not to change any suite's behaviour. Empty on purpose: an
@@ -156,6 +188,39 @@ const PROVEN_INERT_ENV = new Set();
 /** @param {unknown} value */
 function isPlainObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * A paths-filter glob as a regular expression. Only the four forms this repo's
+ * filter uses need to be right — `**` across directories, `*` within one, and
+ * literal names — so this is a coverage check on our own constant, not a
+ * general glob engine.
+ *
+ * @param {string} glob
+ */
+function globToRegExp(glob) {
+  let pattern = "";
+  for (let i = 0; i < glob.length; i += 1) {
+    const character = glob[i];
+    if (character === "*") {
+      if (glob[i + 1] === "*" && glob[i + 2] === "/") {
+        pattern += "(?:[^/]*/)*";
+        i += 2;
+      } else if (glob[i + 1] === "*") {
+        pattern += ".*";
+        i += 1;
+      } else {
+        pattern += "[^/]*";
+      }
+    } else if (character === "?") {
+      pattern += "[^/]";
+    } else if (/[.+^${}()|[\]\\]/.test(character)) {
+      pattern += `\\${character}`;
+    } else {
+      pattern += character;
+    }
+  }
+  return new RegExp(`^${pattern}$`);
 }
 
 // ── shell command grammar ────────────────────────────────────────────────────
@@ -275,18 +340,28 @@ function runsCommand(commands, target) {
 // ── ci.yml structure ─────────────────────────────────────────────────────────
 
 /**
+ * Every predicate below takes the parsed workflow as its first argument rather
+ * than closing over `CI`. That is what lets a mutation probe run the real check
+ * against a `structuredClone` of the workflow with one field changed, proving
+ * the check rejects it — without writing a fixture workflow that would drift
+ * from the real one.
+ */
+
+/**
  * Workflow-scope settings that reach into every job: a `defaults.run` can move
  * the working directory or swap the shell out from under a step, and a
  * workflow-level `env:` reaches the suites the same way a step-level one does.
+ *
+ * @param {Record<string, any>} workflow
  */
-function workflowBlockers() {
+function workflowBlockers(workflow) {
   const blockers = [];
-  if (CI.defaults !== undefined) {
+  if (workflow.defaults !== undefined) {
     blockers.push(
       "ci.yml declares workflow-level `defaults:`, which can redirect every job's shell or working directory",
     );
   }
-  for (const key of Object.keys(CI.env ?? {})) {
+  for (const key of Object.keys(workflow.env ?? {})) {
     if (!PROVEN_INERT_ENV.has(key)) {
       blockers.push(
         `ci.yml sets workflow-level \`env.${key}\`, which may change what a suite does`,
@@ -296,14 +371,14 @@ function workflowBlockers() {
   return blockers;
 }
 
-/** @param {string} name */
-function ciJob(name) {
-  assert.ok(isPlainObject(CI?.jobs), `${CI_PATH} declares no \`jobs:\` map`);
-  const job = CI.jobs[name];
-  assert.ok(
-    isPlainObject(job),
-    `the \`${name}\` job was not found in ${CI_PATH}`,
-  );
+/**
+ * @param {Record<string, any>} workflow
+ * @param {string} name
+ */
+function ciJob(workflow, name) {
+  assert.ok(isPlainObject(workflow?.jobs), "ci.yml declares no `jobs:` map");
+  const job = workflow.jobs[name];
+  assert.ok(isPlainObject(job), `the \`${name}\` job was not found in ci.yml`);
   return job;
 }
 
@@ -323,16 +398,18 @@ function needsList(needs) {
  * workflow when a step fails. Its `if:` is checked against TRUSTED_JOBS, so a
  * changed guard shows up here rather than silently gating the suites.
  *
+ * @param {Record<string, any>} workflow
  * @param {string} name
+ * @param {Map<string, string | null>} trustedJobs
  * @param {Set<string>} [seen]
  */
-function jobBlockers(name, seen = new Set()) {
+function jobBlockers(workflow, name, trustedJobs, seen = new Set()) {
   if (seen.has(name)) return [];
   seen.add(name);
-  const job = ciJob(name);
+  const job = ciJob(workflow, name);
   const blockers = [];
 
-  const allowedIf = TRUSTED_JOBS.has(name) ? TRUSTED_JOBS.get(name) : null;
+  const allowedIf = trustedJobs.has(name) ? trustedJobs.get(name) : null;
   if (job.if !== undefined && job.if !== allowedIf) {
     blockers.push(
       allowedIf === null
@@ -390,13 +467,13 @@ function jobBlockers(name, seen = new Set()) {
   }
 
   for (const dependency of needsList(job.needs)) {
-    if (!isPlainObject(CI.jobs?.[dependency])) {
+    if (!isPlainObject(workflow.jobs?.[dependency])) {
       blockers.push(
         `\`${name}\` needs \`${dependency}\`, which does not exist — the job can never start`,
       );
       continue;
     }
-    blockers.push(...jobBlockers(dependency, seen));
+    blockers.push(...jobBlockers(workflow, dependency, trustedJobs, seen));
   }
   return blockers;
 }
@@ -448,11 +525,12 @@ function stepBlockers(step) {
  * A step that cannot be proven contributes nothing, so an unreadable step
  * reads as "does not run the suite" — which fails closed.
  *
+ * @param {Record<string, any>} workflow
  * @param {string} name
  */
-function provenCommands(name) {
+function provenCommands(workflow, name) {
   const commands = [];
-  for (const step of ciJob(name).steps ?? []) {
+  for (const step of ciJob(workflow, name).steps ?? []) {
     if (!isPlainObject(step) || typeof step.run !== "string") continue;
     if (stepBlockers(step).length > 0) continue;
     commands.push(...parseShellScript(step.run).commands);
@@ -465,12 +543,13 @@ function provenCommands(name) {
  * failure messages so a rejected `|| true` says so instead of reading as a
  * missing step.
  *
+ * @param {Record<string, any>} workflow
  * @param {string} name
  * @param {string[][]} targets
  */
-function nearMisses(name, targets) {
+function nearMisses(workflow, name, targets) {
   const notes = [];
-  for (const step of ciJob(name).steps ?? []) {
+  for (const step of ciJob(workflow, name).steps ?? []) {
     if (!isPlainObject(step) || typeof step.run !== "string") continue;
     const mentionsTarget = targets.some((target) =>
       target.every((word) => step.run.includes(word)),
@@ -494,41 +573,300 @@ function nearMisses(name, targets) {
   return notes;
 }
 
+/**
+ * Everything that stops the `ci` sentinel from turning a red trusted job into a
+ * red required check.
+ *
+ * The suites only guard anything while a red `scripts` job blocks the merge.
+ * Dropping it from the sentinel's `needs`, listing it as an allowed failure, or
+ * letting the sentinel itself skip would leave every step in place and every
+ * assertion inert.
+ *
+ * @param {Record<string, any>} workflow
+ * @param {Iterable<string>} trustedNames
+ */
+function sentinelBlockers(workflow, trustedNames) {
+  const sentinel = ciJob(workflow, "ci");
+  const names = [...trustedNames];
+  const blockers = [];
+
+  // A skipped job's check run reports success, so a sentinel that can skip
+  // stops propagating a red `scripts` job to the required `ci` context. Its
+  // fourteen path-gated dependencies make `always()` load-bearing, not
+  // decorative: without it the sentinel skips on any PR that skips one of them.
+  if (sentinel.if !== "always()") {
+    blockers.push(
+      `the \`ci\` sentinel has \`if: ${sentinel.if}\` — it must be \`always()\`, because ` +
+        "a skipped job reports success and the required `ci` context would stop " +
+        "propagating a red `scripts` job",
+    );
+  }
+
+  const required = needsList(sentinel.needs);
+  for (const name of names) {
+    if (!required.includes(name)) {
+      blockers.push(
+        `the \`ci\` sentinel no longer needs \`${name}\`, so that job's failure would not block a merge`,
+      );
+    }
+  }
+  if (
+    sentinel["continue-on-error"] !== undefined &&
+    sentinel["continue-on-error"] !== false
+  ) {
+    blockers.push(
+      "the `ci` sentinel sets `continue-on-error`, so it reports success whatever its jobs did",
+    );
+  }
+
+  const allsGreen = (sentinel.steps ?? []).filter(
+    (step) =>
+      isPlainObject(step) &&
+      typeof step.uses === "string" &&
+      step.uses.startsWith("re-actors/alls-green@"),
+  );
+  if (allsGreen.length !== 1) {
+    blockers.push(
+      `the \`ci\` sentinel has ${allsGreen.length} alls-green steps — it must have exactly the one that reads every job's result`,
+    );
+    return blockers;
+  }
+
+  const [gate] = allsGreen;
+  for (const blocker of stepBlockers(gate)) {
+    blockers.push(
+      `the \`ci\` sentinel's alls-green step has ${blocker}, so a red job would not block a merge`,
+    );
+  }
+  if (gate.with?.jobs !== "${{ toJSON(needs) }}") {
+    blockers.push(
+      `the alls-green step reads \`${gate.with?.jobs}\` instead of every job it needs`,
+    );
+  }
+  const tolerated = String(gate.with?.["allowed-failures"] ?? "")
+    .split(",")
+    .map((entry) => entry.trim());
+  for (const name of names) {
+    if (tolerated.includes(name)) {
+      blockers.push(
+        `the \`ci\` sentinel tolerates a failing \`${name}\` job via \`allowed-failures\``,
+      );
+    }
+  }
+  return blockers;
+}
+
+/**
+ * Everything that stops ci.yml from running on a pull request to main.
+ * Everything else in this file assumes these jobs run before a merge.
+ *
+ * @param {Record<string, any>} workflow
+ */
+function triggerBlockers(workflow) {
+  const triggers = workflow.on;
+  if (!isPlainObject(triggers)) return ["ci.yml declares no `on:` triggers"];
+  if (!("pull_request" in triggers)) {
+    return [
+      "ci.yml no longer runs on `pull_request`, so none of these jobs gate a merge",
+    ];
+  }
+
+  const trigger = triggers.pull_request ?? {};
+  const blockers = [];
+
+  // Absent both filters the trigger covers every base branch, main included,
+  // so `undefined` is correct here. A NEGATIVE filter is not: GitHub rejects a
+  // trigger that sets both keys, so rejecting `branches-ignore` outright has no
+  // false positive, and it is the only form that can exclude main while
+  // `branches` reads as unset.
+  const branches = trigger.branches;
+  if (!(branches === undefined || branches.includes("main"))) {
+    blockers.push(
+      `ci.yml's \`pull_request\` trigger no longer covers main: ${JSON.stringify(branches)}`,
+    );
+  }
+  if (trigger["branches-ignore"] !== undefined) {
+    blockers.push(
+      `ci.yml's \`pull_request\` trigger uses \`branches-ignore: ${JSON.stringify(trigger["branches-ignore"])}\`, ` +
+        "which can exclude main — the workflow would never run, and every affected PR " +
+        "would wait forever on a required `ci` context that never reports",
+    );
+  }
+  // A `paths:`/`paths-ignore:` on the trigger skips the WORKFLOW, not just a
+  // job, so no `allowed-skips` reasoning applies and nothing here would run.
+  if ((trigger.paths ?? trigger["paths-ignore"]) !== undefined) {
+    blockers.push(
+      "ci.yml's `pull_request` trigger is path-scoped, so a PR outside those paths runs no job at all",
+    );
+  }
+  // Default types are opened/synchronize/reopened. Narrowing them would stop
+  // the workflow re-running on a push to the branch.
+  const types = trigger.types;
+  if (
+    !(
+      types === undefined ||
+      (types.includes("opened") &&
+        types.includes("synchronize") &&
+        types.includes("reopened"))
+    )
+  ) {
+    blockers.push(
+      `ci.yml's \`pull_request\` trigger narrows \`types\` to ${JSON.stringify(types)}, so pushes may not re-run it`,
+    );
+  }
+  return blockers;
+}
+
+/**
+ * Which of `required` the path filter behind `guard` no longer lists, or why
+ * the chain from the guard to that filter could not be followed.
+ *
+ * Steps existing in a job is not enough. The `scripts` job is path-gated, and
+ * the `ci` sentinel lists it under `allowed-skips`, so if the filter loses a
+ * path, a PR touching only that path skips the whole job and every suite in it
+ * — silently, and this file would not run to complain either.
+ *
+ * The whole chain is followed from the parsed workflow: the job's `if:` names
+ * an output of a job, that output names a step, that step's `filters` value is
+ * an inner YAML document, and the key it defines is a list of paths.
+ *
+ * @param {Record<string, any>} workflow
+ * @param {string} guard the gated job's `if:` expression
+ * @param {string[]} required
+ */
+function requiredPathsMissing(workflow, guard, required) {
+  const gate =
+    /^\s*(?:\$\{\{\s*)?needs\.([A-Za-z0-9_-]+)\.outputs\.([A-Za-z0-9_-]+)\s*==\s*'true'\s*(?:\}\})?\s*$/.exec(
+      guard,
+    );
+  if (!gate) {
+    return [
+      `the \`scripts\` job guard \`${guard}\` is not a form this test can follow — extend the grammar and re-prove it`,
+    ];
+  }
+  const [, gateJob, outputName] = gate;
+
+  const producer = ciJob(workflow, gateJob);
+  const expression = producer.outputs?.[outputName];
+  if (typeof expression !== "string") {
+    return [
+      `the \`${gateJob}\` job declares no \`${outputName}\` output, so the \`scripts\` job's guard is never true`,
+    ];
+  }
+  const wired =
+    /^\$\{\{\s*steps\.([A-Za-z0-9_-]+)\.outputs\.([A-Za-z0-9_-]+)\s*\}\}$/.exec(
+      expression.trim(),
+    );
+  if (!wired) {
+    return [
+      `\`${gateJob}.outputs.${outputName}\` is \`${expression}\`, which this test cannot trace to a step`,
+    ];
+  }
+  const [, stepId, filterKey] = wired;
+
+  const filterStep = (producer.steps ?? []).find(
+    (step) => isPlainObject(step) && step.id === stepId,
+  );
+  if (!filterStep) {
+    return [`the \`${gateJob}\` job has no step with \`id: ${stepId}\``];
+  }
+  if (
+    typeof filterStep.uses !== "string" ||
+    !filterStep.uses.startsWith("dorny/paths-filter@")
+  ) {
+    return [
+      `step \`${stepId}\` is \`${filterStep.uses}\`, not the paths filter this test knows how to read`,
+    ];
+  }
+  const stepIssues = stepBlockers(filterStep);
+  if (stepIssues.length > 0) {
+    return stepIssues.map(
+      (blocker) =>
+        `step \`${stepId}\` has ${blocker}, so \`${outputName}\` may be empty and the \`scripts\` job would skip`,
+    );
+  }
+  // `base:`/`ref:` change what the filter diffs against — `base: HEAD` reports
+  // no changed files and every output goes false. Only `filters:` is proven.
+  const inputs = Object.keys(filterStep.with ?? {});
+  if (inputs.length !== 1 || inputs[0] !== "filters") {
+    return [
+      `step \`${stepId}\` passes inputs beyond \`filters:\` (${JSON.stringify(inputs)}), which can change what it compares`,
+    ];
+  }
+
+  // The value is a YAML string that itself holds a YAML document.
+  const filters = load(filterStep.with?.filters, { schema: CORE_SCHEMA });
+  if (!isPlainObject(filters)) {
+    return [`step \`${stepId}\` has no parsable \`filters:\` document`];
+  }
+  const paths = filters[filterKey];
+  if (!Array.isArray(paths)) {
+    return [
+      `the \`${filterKey}\` filter is ${JSON.stringify(paths)}, not a list of paths`,
+    ];
+  }
+
+  return required.filter((entry) => !paths.includes(entry));
+}
+
 // ── package.json aliases ─────────────────────────────────────────────────────
+
+/** The command forms that count as running `file`. @param {string} file */
+function suiteTargets(file) {
+  return [
+    ["node", file],
+    ["node", "--test", file],
+  ];
+}
+
+/**
+ * Does this package-script command run one of `targets` and nothing else?
+ *
+ * Exactly one command, not "one of its commands": a package script is handed to
+ * a shell WITHOUT `-e`, so in `"node scripts/x.test.mjs\ntrue"` the second line
+ * decides the alias's exit status and the suite's failures are swallowed. The
+ * invoking CI step's own `bash -e` does not reach inside the script it runs.
+ *
+ * @param {unknown} command
+ * @param {string[][]} targets
+ */
+function commandRunsOnly(command, targets) {
+  if (typeof command !== "string") return false;
+  const { commands } = parseShellScript(command);
+  return (
+    commands.length === 1 &&
+    targets.some((target) => isCommand(commands[0], target))
+  );
+}
 
 /**
  * The package.json aliases that actually run this suite file.
  *
  * The command is tokenized and matched whole, so
- * `"sentry:ingest:test": "echo scripts/x.mjs"` and
- * `"sentry:ingest:test": "node scripts/x.mjs || true"` both fail to resolve —
- * the CI step would run, the suite would not.
+ * `"sentry:ingest:test": "echo scripts/x.mjs"`,
+ * `"sentry:ingest:test": "node scripts/x.mjs || true"`, and
+ * `"sentry:ingest:test": "node scripts/x.mjs\ntrue"` all fail to resolve — the
+ * CI step would run, the suite would not.
  *
+ * @param {Record<string, unknown>} scripts package.json's `scripts` map
  * @param {string} file repo-relative path, e.g. `scripts/sentry-x.test.mjs`
  */
-function aliasesFor(file) {
-  const targets = [
-    ["node", file],
-    ["node", "--test", file],
-  ];
-  return Object.entries(PKG_SCRIPTS)
-    .filter(([, command]) => {
-      if (typeof command !== "string") return false;
-      const { commands } = parseShellScript(command);
-      return commands.some((parsed) =>
-        targets.some((target) => isCommand(parsed, target)),
-      );
-    })
+function aliasesFor(scripts, file) {
+  const targets = suiteTargets(file);
+  return Object.entries(scripts)
+    .filter(([, command]) => commandRunsOnly(command, targets))
     .map(([name]) => name);
 }
 
-/** Every way a job may invoke this suite. @param {string} file */
-function invocationsOf(file) {
-  const targets = [
-    ["node", file],
-    ["node", "--test", file],
-  ];
-  for (const alias of aliasesFor(file)) {
+/**
+ * Every way a job may invoke this suite.
+ *
+ * @param {Record<string, unknown>} scripts
+ * @param {string} file
+ */
+function invocationsOf(scripts, file) {
+  const targets = suiteTargets(file);
+  for (const alias of aliasesFor(scripts, file)) {
     targets.push(["pnpm", alias], ["pnpm", "run", alias]);
   }
   return targets;
@@ -672,13 +1010,13 @@ test("the enumeration found the Sentry suites at all", () => {
 
 test("the ci.yml jobs this file trusts still run and still fail on failure", () => {
   assert.deepEqual(
-    workflowBlockers(),
+    workflowBlockers(CI),
     [],
     "ci.yml's workflow-scope settings changed",
   );
   for (const name of TRUSTED_JOBS.keys()) {
     assert.deepEqual(
-      jobBlockers(name),
+      jobBlockers(CI, name, TRUSTED_JOBS),
       [],
       `the \`${name}\` job can no longer be trusted to run its steps and fail the workflow`,
     );
@@ -686,99 +1024,97 @@ test("the ci.yml jobs this file trusts still run and still fail on failure", () 
 });
 
 test("the `ci` sentinel still requires those jobs", () => {
-  // The suites only guard anything while a red `scripts` job blocks the merge.
-  // Dropping it from the sentinel's `needs`, or listing it as an allowed
-  // failure, would leave every step in place and every assertion inert.
-  const sentinel = ciJob("ci");
-  const required = needsList(sentinel.needs);
-  for (const name of TRUSTED_JOBS.keys()) {
-    assert.ok(
-      required.includes(name),
-      `the \`ci\` sentinel no longer needs \`${name}\`, so that job's failure would not block a merge`,
-    );
-  }
-  assert.ok(
-    sentinel["continue-on-error"] === undefined ||
-      sentinel["continue-on-error"] === false,
-    "the `ci` sentinel sets `continue-on-error`, so it reports success whatever its jobs did",
-  );
-
-  const allsGreen = (sentinel.steps ?? []).filter(
-    (step) =>
-      isPlainObject(step) &&
-      typeof step.uses === "string" &&
-      step.uses.startsWith("re-actors/alls-green@"),
-  );
-  assert.equal(
-    allsGreen.length,
-    1,
-    `the \`ci\` sentinel has ${allsGreen.length} alls-green steps — it must have exactly the one that reads every job's result`,
-  );
-  const [gate] = allsGreen;
   assert.deepEqual(
-    stepBlockers(gate),
+    sentinelBlockers(CI, TRUSTED_JOBS.keys()),
     [],
-    "the `ci` sentinel's alls-green step may not run or may not fail, so a red job would not block a merge",
+    "the `ci` sentinel would no longer turn a red trusted job into a red required check",
   );
-  assert.equal(
-    gate.with?.jobs,
-    "${{ toJSON(needs) }}",
-    `the alls-green step reads \`${gate.with?.jobs}\` instead of every job it needs`,
-  );
-  const tolerated = String(gate.with?.["allowed-failures"] ?? "")
-    .split(",")
-    .map((entry) => entry.trim());
-  for (const name of TRUSTED_JOBS.keys()) {
-    assert.ok(
-      !tolerated.includes(name),
-      `the \`ci\` sentinel tolerates a failing \`${name}\` job via \`allowed-failures\``,
+});
+
+test("the sentinel check rejects a workflow whose `ci` job stops gating", () => {
+  // Mutation probes: the assertion above passes on the real workflow, which
+  // proves nothing about what it REJECTS. Each clone breaks the sentinel one
+  // way and must be caught, so a later edit that weakens the check fails here.
+  const mutations = [
+    ["`if: false`", (w) => (w.jobs.ci.if = "false")],
+    ["a dropped `if: always()`", (w) => delete w.jobs.ci.if],
+    [
+      "a `needs` without `scripts`",
+      (w) => (w.jobs.ci.needs = w.jobs.ci.needs.filter((n) => n !== "scripts")),
+    ],
+    ["`continue-on-error`", (w) => (w.jobs.ci["continue-on-error"] = true)],
+    [
+      "`scripts` under `allowed-failures`",
+      (w) => {
+        const step = w.jobs.ci.steps.find((s) =>
+          String(s.uses ?? "").startsWith("re-actors/alls-green@"),
+        );
+        step.with["allowed-failures"] = "scripts";
+      },
+    ],
+  ];
+  for (const [label, mutate] of mutations) {
+    const workflow = structuredClone(CI);
+    mutate(workflow);
+    assert.notDeepEqual(
+      sentinelBlockers(workflow, TRUSTED_JOBS.keys()),
+      [],
+      `the sentinel check accepts a \`ci\` job with ${label}`,
     );
   }
 });
 
 test("ci.yml still runs on pull requests to main", () => {
-  // Everything below assumes these jobs run before a merge.
-  const triggers = CI.on;
-  assert.ok(isPlainObject(triggers), "ci.yml declares no `on:` triggers");
-  assert.ok(
-    "pull_request" in triggers,
-    "ci.yml no longer runs on `pull_request`, so none of these jobs gate a merge",
-  );
-  const trigger = triggers.pull_request ?? {};
-  const branches = trigger.branches;
-  assert.ok(
-    branches === undefined || branches.includes("main"),
-    `ci.yml's \`pull_request\` trigger no longer covers main: ${JSON.stringify(branches)}`,
-  );
-  // A `paths:`/`paths-ignore:` on the trigger skips the WORKFLOW, not just a
-  // job, so no `allowed-skips` reasoning applies and nothing here would run.
-  assert.equal(
-    trigger.paths ?? trigger["paths-ignore"],
-    undefined,
-    "ci.yml's `pull_request` trigger is path-scoped, so a PR outside those paths runs no job at all",
-  );
-  // Default types are opened/synchronize/reopened. Narrowing them would stop
-  // the workflow re-running on a push to the branch.
-  const types = trigger.types;
-  assert.ok(
-    types === undefined ||
-      (types.includes("opened") &&
-        types.includes("synchronize") &&
-        types.includes("reopened")),
-    `ci.yml's \`pull_request\` trigger narrows \`types\` to ${JSON.stringify(types)}, so pushes may not re-run it`,
+  assert.deepEqual(
+    triggerBlockers(CI),
+    [],
+    "ci.yml no longer runs on every pull request to main, so these jobs may not gate a merge",
   );
 });
 
+test("the trigger check rejects a `pull_request` trigger that can miss main", () => {
+  const mutations = [
+    [
+      "`branches-ignore: [main]` in place of `branches: [main]`",
+      (w) => {
+        delete w.on.pull_request.branches;
+        w.on.pull_request["branches-ignore"] = ["main"];
+      },
+    ],
+    [
+      "a `branches` list without main",
+      (w) => (w.on.pull_request.branches = ["release/**"]),
+    ],
+    ["a path-scoped trigger", (w) => (w.on.pull_request.paths = ["src/**"])],
+    [
+      "`types` narrowed to `opened`",
+      (w) => (w.on.pull_request.types = ["opened"]),
+    ],
+    ["no `pull_request` trigger at all", (w) => delete w.on.pull_request],
+  ];
+  for (const [label, mutate] of mutations) {
+    const workflow = structuredClone(CI);
+    mutate(workflow);
+    assert.notDeepEqual(
+      triggerBlockers(workflow),
+      [],
+      `the trigger check accepts ${label}`,
+    );
+  }
+});
+
 test("every Sentry suite is invoked by the ci.yml `scripts` job", () => {
-  const commands = provenCommands("scripts");
+  const commands = provenCommands(CI, "scripts");
   const missing = SENTRY_SUITES.filter(
     (file) =>
       !RUN_BY_ANOTHER_JOB.has(file) &&
-      !invocationsOf(file).some((target) => runsCommand(commands, target)),
+      !invocationsOf(PKG_SCRIPTS, file).some((target) =>
+        runsCommand(commands, target),
+      ),
   );
   const detail = missing
     .flatMap((file) =>
-      nearMisses("scripts", invocationsOf(file)).map(
+      nearMisses(CI, "scripts", invocationsOf(PKG_SCRIPTS, file)).map(
         (note) => `  ${file}: ${note}`,
       ),
     )
@@ -815,16 +1151,16 @@ test("the exemption for sentry-provider-contract still holds", () => {
 
     // Half two: an unconditional job really runs tf-stacks.test.mjs.
     const owner = "production-infra-contract";
-    const targets = invocationsOf("scripts/tf-stacks.test.mjs");
+    const targets = invocationsOf(PKG_SCRIPTS, "scripts/tf-stacks.test.mjs");
     assert.ok(
       targets.length > 2,
       "no package.json alias resolves to scripts/tf-stacks.test.mjs, so `pnpm tf:test` proves nothing",
     );
-    const commands = provenCommands(owner);
+    const commands = provenCommands(CI, owner);
     assert.ok(
       targets.some((target) => runsCommand(commands, target)),
       `${file} is exempted because the \`${owner}\` job runs tf-stacks.test.mjs, but no ` +
-        `step there does: ${nearMisses(owner, targets).join("; ") || "no step mentions it"}`,
+        `step there does: ${nearMisses(CI, owner, targets).join("; ") || "no step mentions it"}`,
     );
   }
 });
@@ -839,7 +1175,10 @@ test("every sentry:*:test script resolves to an enumerated suite", () => {
   );
 
   const unresolved = aliases.filter(
-    (alias) => !SENTRY_SUITES.some((file) => aliasesFor(file).includes(alias)),
+    (alias) =>
+      !SENTRY_SUITES.some((file) =>
+        aliasesFor(PKG_SCRIPTS, file).includes(alias),
+      ),
   );
   assert.deepEqual(
     unresolved,
@@ -937,97 +1276,173 @@ test("every sentry:* script the gate trusts is pinned to an exact command", () =
 });
 
 test("the `scripts` job stays reachable from the paths its suites guard", () => {
-  // Steps existing in the job is not enough. The job is path-gated, and the
-  // `ci` sentinel lists it under `allowed-skips`, so if the filter loses a
-  // path, a PR touching only that path skips the whole job and every suite in
-  // it — silently, and this file would not run to complain either.
-  //
-  // The whole chain is followed from the parsed workflow: the job's `if:`
-  // names an output of `changes`, that output names a step, that step's
-  // `filters` value is an inner YAML document, and the key it defines is a
-  // list of paths.
-  const guard = TRUSTED_JOBS.get("scripts");
-  const gate =
-    /^\s*(?:\$\{\{\s*)?needs\.([A-Za-z0-9_-]+)\.outputs\.([A-Za-z0-9_-]+)\s*==\s*'true'\s*(?:\}\})?\s*$/.exec(
-      guard,
-    );
-  assert.ok(
-    gate,
-    `the \`scripts\` job guard \`${guard}\` is not a form this test can follow — extend the grammar and re-prove it`,
-  );
-  const [, gateJob, outputName] = gate;
-
-  const producer = ciJob(gateJob);
-  const expression = producer.outputs?.[outputName];
-  assert.ok(
-    typeof expression === "string",
-    `the \`${gateJob}\` job declares no \`${outputName}\` output, so the \`scripts\` job's guard is never true`,
-  );
-  const wired =
-    /^\$\{\{\s*steps\.([A-Za-z0-9_-]+)\.outputs\.([A-Za-z0-9_-]+)\s*\}\}$/.exec(
-      expression.trim(),
-    );
-  assert.ok(
-    wired,
-    `\`${gateJob}.outputs.${outputName}\` is \`${expression}\`, which this test cannot trace to a step`,
-  );
-  const [, stepId, filterKey] = wired;
-
-  const filterStep = (producer.steps ?? []).find(
-    (step) => isPlainObject(step) && step.id === stepId,
-  );
-  assert.ok(
-    filterStep,
-    `the \`${gateJob}\` job has no step with \`id: ${stepId}\``,
-  );
-  assert.ok(
-    typeof filterStep.uses === "string" &&
-      filterStep.uses.startsWith("dorny/paths-filter@"),
-    `step \`${stepId}\` is \`${filterStep.uses}\`, not the paths filter this test knows how to read`,
-  );
   assert.deepEqual(
-    stepBlockers(filterStep),
+    requiredPathsMissing(
+      CI,
+      TRUSTED_JOBS.get("scripts"),
+      REQUIRED_ROOT_SCRIPT_PATHS,
+    ),
     [],
-    `step \`${stepId}\` may not run, so \`${outputName}\` may be empty and the \`scripts\` job would skip`,
+    "the paths filter behind the `scripts` job no longer covers every input its " +
+      "suites read, so a PR touching only those files skips the job and every " +
+      "Sentry suite in it",
   );
-  // `base:`/`ref:` change what the filter diffs against — `base: HEAD` reports
-  // no changed files and every output goes false. Only `filters:` is proven.
-  assert.deepEqual(
-    Object.keys(filterStep.with ?? {}),
-    ["filters"],
-    `step \`${stepId}\` passes inputs beyond \`filters:\`, which can change what it compares`,
-  );
+});
 
-  // The value is a YAML string that itself holds a YAML document.
-  const filters = load(filterStep.with?.filters, { schema: CORE_SCHEMA });
-  assert.ok(
-    isPlainObject(filters),
-    `step \`${stepId}\` has no parsable \`filters:\` document`,
-  );
-  const paths = filters[filterKey];
-  assert.ok(
-    Array.isArray(paths),
-    `the \`${filterKey}\` filter is ${JSON.stringify(paths)}, not a list of paths`,
-  );
+/**
+ * Remove `target` from every list in every `dorny/paths-filter` step's inner
+ * `filters` document. Generic on purpose: the probe below must not re-implement
+ * the guard→output→step→document walk it is testing.
+ *
+ * @param {Record<string, any>} workflow
+ * @param {string} target
+ */
+function dropFilterPath(workflow, target) {
+  let removed = 0;
+  for (const job of Object.values(workflow.jobs ?? {})) {
+    for (const step of job.steps ?? []) {
+      if (!isPlainObject(step)) continue;
+      if (!String(step.uses ?? "").startsWith("dorny/paths-filter@")) continue;
+      const filters = load(step.with?.filters, { schema: CORE_SCHEMA });
+      if (!isPlainObject(filters)) continue;
+      for (const [key, paths] of Object.entries(filters)) {
+        if (!Array.isArray(paths) || !paths.includes(target)) continue;
+        filters[key] = paths.filter((entry) => entry !== target);
+        removed += 1;
+      }
+      step.with.filters = dump(filters);
+    }
+  }
+  return removed;
+}
 
-  const dropped = REQUIRED_ROOT_SCRIPT_PATHS.filter(
-    (required) => !paths.includes(required),
+test("the required paths route every file this check reads", () => {
+  // The gap this closes was invisible from either side alone: the check reads
+  // two `.sh` files as probes, the filter routed only `.mjs`, and the `ci`
+  // sentinel lists `scripts` under `allowed-skips` — so a PR editing only the
+  // gate's allowlist or the pin validator skipped the job that would have
+  // caught it, and no check reported a thing.
+  const unrouted = [...PROBE_INPUTS].filter(
+    ([path]) =>
+      !REQUIRED_ROOT_SCRIPT_PATHS.some((glob) => globToRegExp(glob).test(path)),
   );
   assert.deepEqual(
-    dropped,
+    unrouted.map(([path]) => path),
     [],
-    `the \`${filterKey}\` paths filter no longer lists ${dropped.map((p) => `\`${p}\``).join(", ")}, ` +
-      "so a PR touching only those files skips the `scripts` job and every Sentry suite in it",
+    "REQUIRED_ROOT_SCRIPT_PATHS does not route " +
+      unrouted.map(([path, reader]) => `${path} (${reader})`).join(", ") +
+      " — an edit to one of those files would skip the `scripts` job, and the " +
+      "`ci` sentinel allows that skip",
   );
+});
+
+test("the reachability check rejects a filter that drops a required path", () => {
+  // Mutation probes on a cloned workflow. The first is the one that matters:
+  // the gate and the pin validator are `.sh`, so without `scripts/**/*.sh` in
+  // the filter a PR editing only those files skips the `scripts` job — and the
+  // `ci` sentinel allows that skip, so nothing reports it.
+  for (const required of REQUIRED_ROOT_SCRIPT_PATHS) {
+    const workflow = structuredClone(CI);
+    assert.ok(
+      dropFilterPath(workflow, required) > 0,
+      `no paths filter in ci.yml lists \`${required}\`, so this probe would prove nothing`,
+    );
+    assert.deepEqual(
+      requiredPathsMissing(
+        workflow,
+        TRUSTED_JOBS.get("scripts"),
+        REQUIRED_ROOT_SCRIPT_PATHS,
+      ),
+      [required],
+      `the reachability check accepts a filter with \`${required}\` removed`,
+    );
+  }
+
+  // The chain itself must fail closed, not just the final list comparison.
+  const chainMutations = [
+    [
+      "a filter step that can be skipped",
+      (w) => {
+        for (const job of Object.values(w.jobs)) {
+          for (const step of job.steps ?? []) {
+            if (String(step.uses ?? "").startsWith("dorny/paths-filter@")) {
+              step.if = "false";
+            }
+          }
+        }
+      },
+    ],
+    [
+      "a filter step passing `base:` alongside `filters:`",
+      (w) => {
+        for (const job of Object.values(w.jobs)) {
+          for (const step of job.steps ?? []) {
+            if (String(step.uses ?? "").startsWith("dorny/paths-filter@")) {
+              step.with.base = "HEAD";
+            }
+          }
+        }
+      },
+    ],
+  ];
+  for (const [label, mutate] of chainMutations) {
+    const workflow = structuredClone(CI);
+    mutate(workflow);
+    assert.notDeepEqual(
+      requiredPathsMissing(
+        workflow,
+        TRUSTED_JOBS.get("scripts"),
+        REQUIRED_ROOT_SCRIPT_PATHS,
+      ),
+      [],
+      `the reachability check accepts ${label}`,
+    );
+  }
+});
+
+test("an alias resolves a suite only when it runs that suite alone", () => {
+  // Synthetic input, no repo file: a package script is run WITHOUT `-e`, so
+  // `node scripts/x.test.mjs\ntrue` exits 0 whatever the suite did. Accepting
+  // it would let a green `pnpm <alias>` step in CI prove nothing.
+  const targets = suiteTargets("scripts/x.test.mjs");
+  const accepted = [
+    "node scripts/x.test.mjs",
+    "node --test scripts/x.test.mjs",
+  ];
+  const rejected = [
+    "node scripts/x.test.mjs\ntrue",
+    "true\nnode scripts/x.test.mjs",
+    "node scripts/x.test.mjs && true",
+    "node scripts/x.test.mjs || true",
+    "node scripts/x.test.mjs --test-name-pattern=nothing",
+    "echo scripts/x.test.mjs",
+    "node scripts/y.test.mjs",
+    "",
+    42,
+  ];
+  for (const command of accepted) {
+    assert.equal(
+      commandRunsOnly(command, targets),
+      true,
+      `commandRunsOnly rejected \`${command}\`, which runs the suite as its whole script`,
+    );
+  }
+  for (const command of rejected) {
+    assert.equal(
+      commandRunsOnly(command, targets),
+      false,
+      `commandRunsOnly accepted ${JSON.stringify(command)}, which does not run the suite as its whole script`,
+    );
+  }
 });
 
 test("this check itself runs in the ci.yml `scripts` job", () => {
   // Without this, the meta-check could be dropped from CI and every invariant
   // above would go quiet.
-  const commands = provenCommands("scripts");
+  const commands = provenCommands(CI, "scripts");
   assert.ok(
     runsCommand(commands, ["node", SELF]),
     `the \`scripts\` job must run \`node ${SELF}\` as a whole step command: ` +
-      `${nearMisses("scripts", [["node", SELF]]).join("; ") || "no step mentions it"}`,
+      `${nearMisses(CI, "scripts", [["node", SELF]]).join("; ") || "no step mentions it"}`,
   );
 });
