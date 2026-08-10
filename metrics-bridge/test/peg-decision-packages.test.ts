@@ -197,6 +197,7 @@ function sourceState(lastAttemptAt: number): PegPollSourceState {
     lastObservationAt: null,
     identitiesAtLastObservationAt: new Set(),
     observation: null,
+    rawObservation: null,
     referenceSize: null,
     conversionValidUntil: null,
     listingState: null,
@@ -475,6 +476,7 @@ describe("peg decision-package producer", () => {
     const { dependencies, report } = cycleDependencies();
     const activeKey = sourceStateKey(active.version);
     const original = sourceState(1);
+    original.rawObservation = snapshot(active.version).sources[0]!.observation;
     const sourceStates = new Map([[activeKey, original]]);
     const byteLength = vi
       .spyOn(Buffer, "byteLength")
@@ -489,7 +491,9 @@ describe("peg decision-package producer", () => {
           if (selectedPolicy.version === previous.version) {
             throw new Error("previous build failed");
           }
-          cycle.sourceStates.get(activeKey)!.lastAttemptAt += 100;
+          const stagedState = cycle.sourceStates.get(activeKey)!;
+          stagedState.lastAttemptAt += 100;
+          stagedState.rawObservation!.vwap = 0.5;
           cycle.activeStateKeys.add(activeKey);
           return [snapshot(active.version)];
         },
@@ -505,6 +509,7 @@ describe("peg decision-package producer", () => {
     );
     expect(currentPegDecisionPackagesJson()).toBe(first);
     expect(sourceStates.get(activeKey)).toBe(original);
+    expect(original.rawObservation?.vwap).toBe(0.99);
     expect(await register.metrics()).not.toContain(
       `mento_peg_poll_success_total{asset="asset-one",source="deep_eur",policy_version="${active.version}"} 1`,
     );
