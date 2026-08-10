@@ -398,8 +398,13 @@ export function classifyIssue(issue) {
     verdict: bucket === FAILED_BUCKET ? null : bucket,
     confidence: parsed.confidence,
     summary: parsed.summary,
-    // needs-human decision-ready brief.
+    // needs-human decision-ready brief. The full contract rides along even
+    // though the Slack render below shows a subset (#1748) — carrying it here
+    // keeps "which fields exist" a contract question and "which fields show"
+    // a render one.
     humanQuestion: parsed.humanQuestion ?? "",
+    howToCheck: parsed.howToCheck ?? [],
+    decisionBranches: parsed.decisionBranches ?? [],
     hypotheses: parsed.hypotheses ?? [],
     investigated: parsed.investigated ?? [],
     escalationReason: parsed.escalationReason ?? "",

@@ -54,11 +54,11 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
+// The autofix pointer prefix is owned by the digest module (it defines the
+// emission contract #1278 reads); import it rather than restating the literal.
+import { AUTOFIX_COMMENT_PREFIX } from "./sentry-triage-digest.mjs";
 import {
-  AUTOFIX_COMMENT_PREFIX,
   DEFAULT_REPO,
-} from "./sentry-triage-digest.mjs";
-import {
   extractPermalink,
   isValidShortId,
   neutralizeUntrusted,
