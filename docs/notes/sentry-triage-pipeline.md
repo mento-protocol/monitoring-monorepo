@@ -404,8 +404,12 @@ A stub carries exactly one `sentry:verdict-*` label. The label edit adds the
 new one and removes every other verdict label in the same call, so
 re-dispatching an already-verdicted stub — the usual case after a human answers
 a `needs-human` escalation — replaces the old verdict instead of stacking a
-second one. The step then re-reads the stub and fails its own matrix job if
-more than one survives. The shed list comes from the same `--parse-only` output
+second one. The step then re-reads the stub and fails its own matrix job if the
+read fails or more than one verdict label survives — restoring
+`sentry:needs-triage` and shedding the verdict labels first, the same
+compensation the close and projection failure paths make, so the stub goes back
+in the queue instead of being stranded open with no retry path. The shed list
+comes from the same `--parse-only` output
 as the label, and covers the verdict namespace only: the wider re-queue shed
 also clears the projection, autofix, and archive markers, which must survive a
 verdict change. The digest warns about a double-verdicted stub but never fails
