@@ -95,14 +95,58 @@ const SCRIPTS_JOB = jobBlock("scripts")
   .join("\n");
 
 /**
- * Does the `scripts` job run this command? Matched on the comment-stripped job
- * body so both `run: <cmd>` and folded block scalars count.
+ * The whole workflow with full-line YAML comments removed. Exemption re-proofs
+ * point at steps in OTHER jobs, so they cannot use `SCRIPTS_JOB` — but they
+ * need the same protection: matching raw text would let a commented-out step
+ * keep an exemption green after the real step was deleted.
+ */
+const CI_WITHOUT_COMMENTS = CI.split("\n")
+  .filter((line) => !/^\s*#/.test(line))
+  .join("\n");
+
+/**
+ * Every executable command in the `scripts` job: the value of each `run:` key,
+ * plus the continuation lines of block scalars (`run: |`).
+ *
+ * Searching the whole job body would let ANY occurrence satisfy the invariant —
+ * `run: echo "temporarily disabled: pnpm sentry:requeue:test"` would count as
+ * running the suite. Commands are collected from `run:` positions only, and a
+ * command quoted inside another command's arguments is not one of them.
+ */
+const SCRIPTS_JOB_COMMANDS = (() => {
+  const commands = [];
+  const lines = SCRIPTS_JOB.split("\n");
+  for (let i = 0; i < lines.length; i += 1) {
+    const inline = /^\s*(?:-\s+)?run:\s*(?![|>])(\S.*)$/.exec(lines[i]);
+    if (inline) {
+      commands.push(inline[1].trim());
+      continue;
+    }
+    const block = /^(\s*)(?:-\s+)?run:\s*[|>][+-]?\s*$/.exec(lines[i]);
+    if (!block) continue;
+    const indent = block[1].length;
+    for (let j = i + 1; j < lines.length; j += 1) {
+      const line = lines[j];
+      if (line.trim() === "") continue;
+      const lead = line.length - line.trimStart().length;
+      if (lead <= indent) break;
+      commands.push(line.trim());
+    }
+  }
+  return commands;
+})();
+
+/**
+ * Does the `scripts` job run this command? True only when the command appears
+ * at the START of an executable `run:` command — so it cannot be satisfied by
+ * the command's name appearing inside another command's arguments.
  * @param {string} command
  */
 function scriptsJobRuns(command) {
   // The trailing guard keeps `pnpm sentry:archive` from matching a job that
   // only runs `pnpm sentry:archive:test`.
-  return new RegExp(`${escapeRegExp(command)}(?![\\w:.-])`).test(SCRIPTS_JOB);
+  const pattern = new RegExp(`^${escapeRegExp(command)}(?![\\w:.-])`);
+  return SCRIPTS_JOB_COMMANDS.some((entry) => pattern.test(entry));
 }
 
 /**
@@ -173,7 +217,7 @@ test("the exemptions still hold", () => {
       `${file} is exempted because tf-stacks.test.mjs imports it, but that import is gone`,
     );
     assert.match(
-      CI,
+      CI_WITHOUT_COMMENTS,
       /run: pnpm tf:test/,
       `${file} is exempted because CI runs \`pnpm tf:test\`, but that step is gone`,
     );

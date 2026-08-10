@@ -2192,9 +2192,6 @@ while IFS= read -r path; do
         scripts/agent-quality-gate.sh|scripts/agent-quality-gate.test.sh|scripts/check-react-doctor-diff.sh|scripts/check-react-doctor-score.sh)
           add_command "pnpm agent:quality-gate:test" "agent quality gate mapping changed"
           ;;
-        scripts/check-sentry-suites-in-ci.test.mjs)
-          add_command "node scripts/check-sentry-suites-in-ci.test.mjs" "Sentry CI-coverage check changed"
-          ;;
         scripts/agent-autoreview.sh|scripts/agent-autoreview.test.sh)
           add_command "pnpm agent:autoreview:test" "agent autoreview adapter changed"
           ;;
@@ -2372,6 +2369,12 @@ while IFS= read -r path; do
           ;;
         scripts/check-workflow-permissions-drift.mjs|scripts/check-workflow-permissions-drift.test.mjs)
           add_command "node scripts/check-workflow-permissions-drift.test.mjs" "platform-settings workflow-permissions drift checker changed"
+          ;;
+        scripts/check-sentry-suites-in-ci.test.mjs)
+          # Belongs in the scripts/*.mjs arm, beside its peer checkers. It first
+          # landed under scripts/*.sh, where a .mjs path can never reach it — so
+          # the check that exists to catch unwired suites was itself unwired.
+          add_command "node scripts/check-sentry-suites-in-ci.test.mjs" "Sentry CI-coverage check changed"
           ;;
         scripts/check-github-action-pins.test.mjs)
           add_command "node scripts/check-github-action-pins.test.mjs" "GitHub Actions pin checker test changed"
