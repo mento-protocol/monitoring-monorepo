@@ -1,8 +1,8 @@
 # Explicit source staging keeps routine deploys off Cloud Build and App
 # Engine's project-discovered default buckets. The buckets and existing scoped
 # grants are live, and the former project-wide storage and act-as fallbacks are
-# gone. ADR 0058 adds the Metrics Bridge builder here before a separate routing
-# change selects it.
+# gone. ADR 0058's dedicated Metrics Bridge builder is applied and routed; a
+# later reviewed cleanup removes default Compute's temporary source reader.
 
 locals {
   deploy_source_callers = setunion(
