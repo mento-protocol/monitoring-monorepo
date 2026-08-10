@@ -2223,6 +2223,9 @@ while IFS= read -r path; do
           add_command "pnpm agent:context-check" "agent context checker changed"
           add_command "node scripts/check-agent-context.test.mjs" "agent context checker changed"
           ;;
+        scripts/file-size-watchlist.mjs|scripts/file-size-watchlist-issue.mjs|scripts/file-size-watchlist.test.mjs)
+          add_command "node --test scripts/file-size-watchlist.test.mjs" "file-size watchlist automation changed"
+          ;;
         scripts/claude-runtime-document-registry.mjs|scripts/docs-index.mjs|scripts/docs-index-helpers.mjs|scripts/docs-index.test.mjs)
           add_command "pnpm docs:index:test" "documentation catalog helper changed"
           add_command "pnpm docs:index --check" "documentation catalog helper changed"

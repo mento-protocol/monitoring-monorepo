@@ -2235,6 +2235,15 @@ run_gate "scripts/filter-envio-runtime-errors.test.mjs"
 assert_contains "- pnpm lint:scripts (root build script changed)"
 assert_contains "- node scripts/filter-envio-runtime-errors.test.mjs (indexer runtime-log filter changed)"
 
+for path in \
+  scripts/file-size-watchlist.mjs \
+  scripts/file-size-watchlist-issue.mjs \
+  scripts/file-size-watchlist.test.mjs; do
+  run_gate "$path"
+  assert_contains "- pnpm lint:scripts (root build script changed)"
+  assert_contains "- node --test scripts/file-size-watchlist.test.mjs (file-size watchlist automation changed)"
+done
+
 run_gate "scripts/deploy-indexer-verify.mjs"
 assert_contains "- pnpm lint:scripts (root build script changed)"
 assert_contains "- node scripts/deploy-indexer-verify.test.mjs (indexer deploy verifier changed)"
@@ -3483,11 +3492,12 @@ run_gate ".codex/hooks.json"
 assert_contains "- agent-context"
 assert_contains "- pnpm agent:context-check (agent context files changed)"
 
-set +e
-AGENT_CONTEXT_CODEX_HOOKS_FILE="$codex_hooks_fixture" \
-  node scripts/check-agent-context.mjs > "$output_file" 2>&1
-unscoped_override_status=$?
-set -e
+if AGENT_CONTEXT_CODEX_HOOKS_FILE="$codex_hooks_fixture" \
+  node scripts/check-agent-context.mjs > "$output_file" 2>&1; then
+  unscoped_override_status=0
+else
+  unscoped_override_status=$?
+fi
 [[ "$unscoped_override_status" -ne 0 ]] ||
   fail "expected an unscoped test input override to fail"
 assert_contains "AGENT_CONTEXT_CODEX_HOOKS_FILE: test-only override requires NODE_ENV=test"
