@@ -72,6 +72,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0038](0038-sentry-central-plane-verdict-projection.md)     | Central Sentry triage plane; actionable verdicts projected into owning repos         |
 | [0040](0040-bounded-documentation-garden-queue.md)          | Weekly bounded documentation packets enter one serialized GitHub Issue queue         |
 | [0041](0041-offline-documentation-navigation-evaluation.md) | Fresh-agent documentation navigation is evaluated offline with deterministic scoring |
+| [0056](0056-agent-mcp-credential-broker.md)                 | An untrusted agent's MCP credentials sit behind a loopback broker, not in its env    |
 
 ### shared-config
 
@@ -131,6 +132,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0049](0049-peg-decision-package-read-model.md)          | Peg decisions use a bounded Metrics Bridge read model                         |
 | [0054](0054-same-project-peg-policy-artifact.md)         | Peg policy stays private and generation-pinned in the monitoring project      |
 | [0055](0055-peg-policy-bucket-controller-recovery.md)    | Peg bucket IAM reconciliation uses a narrow controller and bounded recovery   |
+| [0057](0057-peg-observation-advancement.md)              | Repeated provider observations retain bounded health, never sample authority  |
 
 ### terraform / infra
 
@@ -147,6 +149,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0053](0053-explicit-deployment-source-staging.md)    | Routine Cloud Build and App Engine deploys use explicit, bucket-scoped source staging                             |
 | [0054](0054-same-project-peg-policy-artifact.md)      | Peg policy stays private and generation-pinned in the monitoring project                                          |
 | [0055](0055-peg-policy-bucket-controller-recovery.md) | Peg bucket IAM reconciliation uses a narrow controller and bounded recovery                                       |
+| [0057](0057-peg-observation-advancement.md)           | Repeated provider observations retain bounded health, never sample authority                                      |
 
 ### governance-watchdog
 

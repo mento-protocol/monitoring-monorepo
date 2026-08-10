@@ -19,56 +19,35 @@ describe("PegMonitoringResponseSchema", () => {
     expect(parsed.packages[0]?.structural.blindConsecutivePolls).toBe(0);
     expect(parsed.packages[0]?.policy.blindConsecutivePolls).toBe(10);
   });
-  it("defaults legacy listing absence confirmation to two checks", () => {
+  it("requires listing absence confirmation from every active policy source", () => {
     const response = makePegMonitoringResponse();
     const item = response.packages[0]!;
     const source = item.sources[0]!;
-    const legacyPolicy: Record<string, unknown> = { ...source.policy };
-    delete legacyPolicy.listingAbsentConsecutiveChecks;
-
-    const parsed = PegMonitoringResponseSchema.parse({
-      ...response,
-      packages: [
-        {
-          ...item,
-          sources: [{ ...source, policy: legacyPolicy }],
-        },
-      ],
-    });
+    const policyWithoutListingThreshold: Record<string, unknown> = {
+      ...source.policy,
+    };
+    delete policyWithoutListingThreshold.listingAbsentConsecutiveChecks;
 
     expect(
-      parsed.packages[0]?.sources[0]?.policy.listingAbsentConsecutiveChecks,
-    ).toBe(2);
+      PegMonitoringResponseSchema.safeParse({
+        ...response,
+        packages: [
+          {
+            ...item,
+            sources: [{ ...source, policy: policyWithoutListingThreshold }],
+          },
+        ],
+      }).success,
+    ).toBe(false);
   });
-  it("defaults the produced legacy policy during a previous-slot rollover", () => {
+  it("requires listing absence confirmation from every previous policy source", () => {
     const response = makePegMonitoringResponse();
     const item = response.packages[0]!;
     const source = item.sources[0]!;
-    const legacyPolicy: Record<string, unknown> = { ...source.policy };
-    delete legacyPolicy.listingAbsentConsecutiveChecks;
-
-    const parsed = PegMonitoringResponseSchema.parse({
-      ...response,
-      approvedActivePolicyVersion: FUTURE_POLICY_VERSION,
-      policySlot: "previous",
-      packages: [
-        {
-          ...item,
-          sources: [{ ...source, policy: legacyPolicy }],
-        },
-      ],
-    });
-
-    expect(
-      parsed.packages[0]?.sources[0]?.policy.listingAbsentConsecutiveChecks,
-    ).toBe(2);
-  });
-  it("rejects a missing threshold from a future produced previous-slot policy", () => {
-    const response = makePegMonitoringResponse();
-    const item = response.packages[0]!;
-    const source = item.sources[0]!;
-    const legacyPolicy: Record<string, unknown> = { ...source.policy };
-    delete legacyPolicy.listingAbsentConsecutiveChecks;
+    const policyWithoutListingThreshold: Record<string, unknown> = {
+      ...source.policy,
+    };
+    delete policyWithoutListingThreshold.listingAbsentConsecutiveChecks;
 
     expect(
       PegMonitoringResponseSchema.safeParse({
@@ -79,7 +58,7 @@ describe("PegMonitoringResponseSchema", () => {
         packages: [
           {
             ...item,
-            sources: [{ ...source, policy: legacyPolicy }],
+            sources: [{ ...source, policy: policyWithoutListingThreshold }],
           },
         ],
       }).success,
@@ -114,27 +93,6 @@ describe("PegMonitoringResponseSchema", () => {
     expect(
       parsed.packages[0]?.sources[0]?.policy.listingAbsentConsecutiveChecks,
     ).toBe(3);
-  });
-  it("rejects a missing listing absence confirmation threshold from a future policy", () => {
-    const response = makePegMonitoringResponse();
-    const item = response.packages[0]!;
-    const source = item.sources[0]!;
-    const legacyPolicy: Record<string, unknown> = { ...source.policy };
-    delete legacyPolicy.listingAbsentConsecutiveChecks;
-
-    expect(
-      PegMonitoringResponseSchema.safeParse({
-        ...response,
-        approvedActivePolicyVersion: FUTURE_POLICY_VERSION,
-        producedPolicyVersion: FUTURE_POLICY_VERSION,
-        packages: [
-          {
-            ...item,
-            sources: [{ ...source, policy: legacyPolicy }],
-          },
-        ],
-      }).success,
-    ).toBe(false);
   });
   it("rejects invalid listing absence confirmation thresholds", () => {
     const response = makePegMonitoringResponse();

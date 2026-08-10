@@ -53,6 +53,7 @@
     "sentry:autofix:finalize:test": "node scripts/sentry-autofix-finalize.test.mjs",
     "sentry:archive": "node scripts/sentry-triage-archive.mjs",
     "sentry:archive:test": "node scripts/sentry-triage-archive.test.mjs",
+    "sentry:broker:test": "node --test scripts/sentry-mcp-broker.test.mjs",
     "sentry:requeue:test": "node scripts/sentry-triage-requeue.test.mjs",
     "pr:feedback-state": "node scripts/pr-feedback-state.mjs",
     "pr:feedback-state:test": "node scripts/pr-feedback-state.test.mjs",
@@ -144,7 +145,7 @@
     "eslint": "^10.0.2",
     "globals": "^17.4.0",
     "graphql": "16.13.1",
-    "js-yaml": "4.3.0",
+    "js-yaml": "4.3.1",
     "jscpd": "4.0.9",
     "turbo": "^2.9.14",
     "typescript": "5.9.3"

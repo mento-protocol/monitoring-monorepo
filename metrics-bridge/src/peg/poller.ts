@@ -509,16 +509,35 @@ function unavailableSourceSnapshot(
   });
 }
 
+function isCurrentRetainedExecutableObservation(
+  state: SourceState,
+  observationAt: number,
+  sequence: string,
+): boolean {
+  const observation = state.observation;
+  if (observation === null || observation.venueState === "halted") return false;
+  if (state.listingState === "halted" || state.listingState === "absent") {
+    return false;
+  }
+  return (
+    observation.observationAt === observationAt &&
+    observation.sequence === sequence
+  );
+}
+
 function recordProviderAdvancement(
   state: SourceState,
   observationAt: number,
   sequence: string,
-): string | null {
+): { advanced: boolean; failure: string | null } {
   if (
     state.lastObservationAt !== null &&
     observationAt < state.lastObservationAt
   ) {
-    return "venue observation timestamp regressed";
+    return {
+      advanced: false,
+      failure: "venue observation timestamp regressed",
+    };
   }
 
   if (
@@ -528,21 +547,30 @@ function recordProviderAdvancement(
     state.lastObservationAt = observationAt;
     state.identitiesAtLastObservationAt.clear();
     state.identitiesAtLastObservationAt.add(sequence);
-    return null;
+    return { advanced: true, failure: null };
   }
 
+  if (isCurrentRetainedExecutableObservation(state, observationAt, sequence)) {
+    return { advanced: false, failure: null };
+  }
   if (state.identitiesAtLastObservationAt.has(sequence)) {
-    return "venue observation did not advance";
+    return {
+      advanced: false,
+      failure: "venue observation identity replayed",
+    };
   }
   if (
     state.identitiesAtLastObservationAt.size >=
     MAX_IDENTITIES_PER_OBSERVATION_TIMESTAMP
   ) {
-    return "venue observation identity bound exceeded";
+    return {
+      advanced: false,
+      failure: "venue observation identity bound exceeded",
+    };
   }
 
   state.identitiesAtLastObservationAt.add(sequence);
-  return null;
+  return { advanced: true, failure: null };
 }
 
 function failSource(
@@ -600,24 +628,26 @@ function acceptDueObservation(
       cause: new Error("stale venue observation"),
     });
   }
-  const advancementFailure = recordProviderAdvancement(
+  const advancement = recordProviderAdvancement(
     state,
     observation.observationAt,
     observation.sequence,
   );
-  if (advancementFailure !== null) {
+  if (advancement.failure !== null) {
     return failSource(input, state, refSize, {
       kind: "source_freshness",
-      cause: new Error(advancementFailure),
+      cause: new Error(advancement.failure),
     });
   }
   state.observation = observation;
   state.referenceSize = refSize;
   state.conversionValidUntil = converted.validUntil;
+  // A repeated provider identity remains healthy until its provider timestamp
+  // expires, but cannot create new coverage or sustain a price decision.
   return sourceSnapshot(input, state, {
     referenceSize: refSize,
     observation,
-    newSuccess: true,
+    newSuccess: advancement.advanced,
   });
 }
 

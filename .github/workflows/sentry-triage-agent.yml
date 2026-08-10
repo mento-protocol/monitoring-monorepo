@@ -173,29 +173,42 @@ jobs:
   #     here to poison. Asserted by a test in
   #     scripts/sentry-triage-agent-comment.test.mjs; do not add a step below
   #     the agent.
-  #   - SENTRY_TRIAGE_TOKEN is set as job env (see the env: note below) and is
-  #     consumed via ${VAR} expansion in --mcp-config; it is never echoed and
-  #     never placed in a command. The wrapper drops it (and every other secret
-  #     bar gh's own credential) from the `gh` subprocess env.
-  #   - NOT CONTAINED, stated plainly: SENTRY_TRIAGE_TOKEN and the Claude OAuth
-  #     token are live in the agent's OWN Bash process env, so a successful
-  #     prompt injection can exfiltrate either into a public queue comment. The
-  #     wrapper refuses a body reproducing a token verbatim, but that is hygiene
-  #     against an accident, NOT a leak control: the agent writes the shell
-  #     command, and bash expands and transforms `$VAR` before the wrapper
-  #     receives argv, so a spliced or split value passes. Closing this needs
-  #     the credential out of the agent's process env — per-step env forwarding
-  #     the pinned action does not support, or a credential broker the MCP
-  #     server talks to. Both tokens are read-only / inference scoped and any
-  #     use lands in an auditable public comment.
+  #   - NO SENTRY CREDENTIAL IN THE AGENT'S ENV (issue #1711). The Sentry token
+  #     is step-scoped to the broker step below and is NOT job env. The agent
+  #     step holds only an opaque per-run HANDLE, which the loopback broker
+  #     trades for the real token. That closes the class the old wiring could
+  #     not: with the token in job env, the agent's Bash inherited it, and since
+  #     the agent authors its own shell command, bash expands and transforms
+  #     `$VAR` before any wrapper sees argv — `${TOKEN:0:4}x${TOKEN:4}` posts
+  #     the whole token with one removable character spliced in. No check inside
+  #     the wrapper can stop that.
+  #   - RESIDUAL, stated plainly: CLAUDE_CODE_OAUTH_TOKEN is still live in the
+  #     agent's Bash env. `claude-code-action` puts it there itself — its
+  #     base-action/src/parse-sdk-options.ts spreads the whole `process.env`
+  #     into the CLI subprocess, deleting only the OIDC request vars — and the
+  #     pinned v1.0.183 offers no per-step or first-class MCP env forwarding to
+  #     move it. It is inference-scoped: worst case is inference-quota abuse,
+  #     not repo or queue compromise, and any use lands in an auditable public
+  #     comment. Re-check on the next action bump.
+  #   - RESIDUAL, stated plainly: the run handle IS in the agent's env, and
+  #     three allow-listed tools (find_projects, search_issues, search_events)
+  #     take an agent-controlled `regionUrl` that the MCP server's
+  #     validateRegionUrl accepts for {sentry.io, us.sentry.io, de.sentry.io}.
+  #     It keeps only the host and re-applies its own protocol, which is http
+  #     under --insecure-http, so an injected agent can send its Authorization
+  #     header to `http://us.sentry.io/...` in cleartext, past the broker. What
+  #     leaks there is the HANDLE, and the handle is worthless outside this run:
+  #     the broker binds 127.0.0.1 only and dies with the runner. Sentry egress
+  #     is NOT closed here and this design does not pretend it is. Tracked
+  #     separately (see the broker script header).
   # ---------------------------------------------------------------------------
   triage:
     needs: select
     if: ${{ needs.select.outputs.count != '' && needs.select.outputs.count != '0' }}
     # sentry-pipeline Environment (issue #1289): server-enforced main-only access
-    # to SENTRY_TRIAGE_TOKEN (job env) and CLAUDE_CODE_OAUTH_TOKEN
-    # (claude-code-action) — a non-main workflow_dispatch is refused before this
-    # matrix job runs.
+    # to SENTRY_TRIAGE_TOKEN (now read only by the broker step) and
+    # CLAUDE_CODE_OAUTH_TOKEN (claude-code-action) — a non-main
+    # workflow_dispatch is refused before this matrix job runs.
     environment: sentry-pipeline
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -213,26 +226,28 @@ jobs:
     # declares its own env: block. Its action.yml says so in as many words for
     # its own MCP vars — "this step's env: block shadows the calling workflow's
     # job-level env vars … Set these in your workflow's job-level env: or via a
-    # prior step that writes to $GITHUB_ENV". RE-VERIFIED for issue #1288
-    # against the version pinned below, v1.0.179 (b76a0776): there is still no
-    # per-step env passthrough and no first-class MCP env input, and
-    # $GITHUB_ENV would expose the value to every LATER step instead of fewer,
-    # so SENTRY_TRIAGE_TOKEN cannot move to step scope. Re-check on the next
-    # major action bump; do not re-open the question without testing a version.
+    # prior step that writes to $GITHUB_ENV". RE-VERIFIED for issue #1288, for
+    # #1711, and again on the bump to the version pinned below, v1.0.183
+    # (be7b93b1): its action.yml is byte-identical to the previously verified
+    # v1.0.179 (b76a0776), so there is still no per-step env passthrough and no
+    # first-class MCP env input — upstream deprecated `mcp_config` in favour of
+    # `claude_args: --mcp-config`, which takes a path or JSON, never env. So
+    # anything the MCP server must read has to be job env — which is exactly why
+    # the SENTRY TOKEN IS NO LONGER HERE and an opaque per-run handle is (issue
+    # #1711). Re-check on the next action bump; do not re-open the question
+    # without testing a version. Upstream cuts a GitHub Release per patch, so
+    # "there is no newer version" is never the reason to skip that check.
     #   - GH_TOKEN: gh CLI auth for the agent's read-only `gh issue view/list`
     #     (this job's GITHUB_TOKEN: issues:write + contents:read only) and for
     #     the deterministic steps below.
-    #   - SENTRY_TRIAGE_TOKEN: consumed by ${SENTRY_TRIAGE_TOKEN} expansion in
-    #     --mcp-config when the CLI launches the stdio Sentry MCP server
-    #     (expansion of inline --mcp-config env values verified against the
-    #     CLI). Never echoed. Accepted residual, unchanged by #1288: like
-    #     GH_TOKEN it is visible to the agent's allowlisted Bash subprocesses,
-    #     and an injected agent can exfiltrate it through its own write path —
-    #     see the "NOT CONTAINED" bullet in the job banner for why no check
-    #     inside the wrapper can stop that. What #1288 did buy: the write target
-    #     cannot be model-controlled, agent comments cannot impersonate the
-    #     pipeline's control comments, and `gh` itself no longer receives this
-    #     token. The token is read-only scoped.
+    #   - SENTRY_MCP_BROKER_HANDLE: minted by the broker step below and exported
+    #     through $GITHUB_ENV, then consumed by the ${SENTRY_MCP_BROKER_HANDLE}
+    #     expansion in --mcp-config when the CLI launches the stdio Sentry MCP
+    #     server. $GITHUB_ENV is correct HERE and would be wrong for the token:
+    #     it exposes a value to every LATER step, and this value is not a
+    #     secret. The handle authenticates to a 127.0.0.1-bound broker that dies
+    #     with the runner, so it is worthless outside this run — which is what
+    #     makes the regionUrl steering channel in the job banner survivable.
     #   - SENTRY_TRIAGE_COMMENT_ISSUE: a CROSS-CHECK on the wrapper's write
     #     target, never the binding itself. Env cannot fence the target: bash
     #     arithmetic expansion assigns, so a body containing
@@ -241,10 +256,16 @@ jobs:
     #     authoritative target is the read-only file written by the "Pin the
     #     agent write target" step below; the wrapper refuses when the two
     #     disagree, because a disagreement is evidence of exactly that.
+    #   - SENTRY_MCP_BROKER_PORT: the ONLY literal for the broker's port. The
+    #     broker step reads it straight from the environment and the agent
+    #     step's --mcp-config interpolates it, so the two cannot drift. The
+    #     broker script REQUIRES it rather than defaulting — a default would be
+    #     a second source of truth that disagrees only on a live run, as a
+    #     connection refused.
     env:
       GH_TOKEN: ${{ github.token }}
-      SENTRY_TRIAGE_TOKEN: ${{ secrets.SENTRY_TRIAGE_TOKEN }}
       SENTRY_TRIAGE_COMMENT_ISSUE: ${{ matrix.issue }}
+      SENTRY_MCP_BROKER_PORT: "9401"
     steps:
       # SHA-pinned (not tags) so tag retargeting / a compromised release cannot
       # silently run new code. Bump via Dependabot (.github/dependabot.yml).
@@ -326,9 +347,15 @@ jobs:
           tools_dir="${RUNNER_TEMP}/sentry-triage-tools"
           mkdir -p "${tools_dir}"
           chmod 0755 "${tools_dir}"
+          # sentry-mcp-broker.mjs is NOT agent-executable (no grant names it) —
+          # it is staged because this job must execute nothing from the
+          # agent-writable checkout, and staging it keeps that true even if the
+          # broker step ever moves. Its own import closure is itself; the
+          # closure check lives in scripts/sentry-mcp-broker.test.mjs.
           for f in \
             sentry-triage-agent-comment.mjs \
-            sentry-triage-project-core.mjs; do
+            sentry-triage-project-core.mjs \
+            sentry-mcp-broker.mjs; do
             install -m 0444 "scripts/${f}" "${tools_dir}/${f}"
           done
           chmod 0555 "${tools_dir}"
@@ -336,6 +363,132 @@ jobs:
           echo "Pinned write target: ${GITHUB_REPOSITORY}#${QUEUE_ISSUE_NUMBER}"
           ls -ld "${target_dir}" "${tools_dir}"
           ls -l "${target_dir}/target.json" "${tools_dir}"
+
+      # -----------------------------------------------------------------------
+      # Take the Sentry credential OUT of the agent's process env (issue #1711).
+      #
+      # THIS STEP IS TRUSTED and it is the ONLY place SENTRY_TRIAGE_TOKEN
+      # appears in this workflow. It starts a loopback broker holding the real
+      # token, mints an opaque per-run handle, and exports only the handle. The
+      # agent step then points the Sentry MCP server at 127.0.0.1 with the
+      # handle as its access token, so the agent's Bash inherits no Sentry
+      # credential at all. That is the fix: with the token in job env, the agent
+      # authored its own shell command and bash expanded and transformed `$VAR`
+      # before any wrapper saw argv, so no check inside the wrapper could stop
+      # exfiltration.
+      #
+      # OUT OF THE AGENT'S ENV IS NOT ENOUGH — IT MUST BE OUT OF THE AGENT'S
+      # REACH. Every step runs as `runner` and the agent holds `Read`, so
+      # `/proc/<pid>/environ` of ANY process in this job is agent-readable, and
+      # this step logs the broker's PID. So the broker must be EXEC'd without
+      # the token: the value is copied to a shell-local and the exported name
+      # is `unset` before node is spawned, and the token is handed over on
+      # STDIN. Note `/proc/<pid>/environ` is the block captured at `exec` —
+      # deleting the variable inside node afterwards would NOT clear it, which
+      # is why the fix is here and not in the script. The broker independently
+      # refuses to start if it finds the token in its own exec-time env.
+      #
+      # `printf` is a bash BUILTIN, so the token never becomes a process
+      # argument in `/proc/<pid>/cmdline` (a builtin in a pipeline runs in a
+      # forked subshell that never execs, so its cmdline stays the parent
+      # shell's). A pipeline uses an anonymous pipe and creates no file — do NOT
+      # rewrite it as a here-string (`<<<`) or heredoc, where bash may
+      # materialise a temp file the agent could read.
+      #
+      # THIS step's own shell still holds the token in its environment, which is
+      # fine only because each `run:` step is its own process and the runner
+      # gates the next step on this one's exit code — so it is gone before the
+      # agent starts. The broker deliberately outlives this step, which is
+      # precisely why its environment is the one that had to be cleaned.
+      #
+      # `--insecure-http` is CLI-only (there is no env var for it), `SENTRY_URL`
+      # must be HTTPS and cannot combine with it, and `SENTRY_HOST` takes a
+      # hostname with no scheme — so the loopback wiring lives in the MCP
+      # server's `args`, and `SENTRY_HOST` is gone along with the token.
+      #
+      # It runs the IMMUTABLE staged copy, not `scripts/`. This step is ordered
+      # before the agent, so the checkout is still pristine here — but the rule
+      # for this job is that it executes nothing from the agent-writable
+      # checkout, full stop, and a rule with an ordering caveat is one refactor
+      # away from being wrong.
+      #
+      # NO STOP STEP, deliberately. This job must END with the agent: the agent
+      # can append `BASH_ENV=<payload it wrote>` to $GITHUB_ENV, and any later
+      # step's bash would source that payload before running its own command —
+      # an escape from the whole permission allowlist. So the broker bounds its
+      # own life with a TTL instead, set to the job timeout; the runner is
+      # ephemeral and is destroyed with the job either way.
+      # -----------------------------------------------------------------------
+      - name: Start the Sentry credential broker (trusted)
+        env:
+          # Step-scoped, and an `env:` binding rather than a `${{ secrets.* }}`
+          # interpolation inside the run body ON PURPOSE: GitHub expands `${{ }}`
+          # BEFORE writing the step script to $RUNNER_TEMP, so an inline secret
+          # would sit in plaintext on disk for the life of the job, readable by
+          # the agent. Through `env:` the script holds only the variable name.
+          # Never written to $GITHUB_ENV either — that would hand it to every
+          # later step, including the agent's.
+          SENTRY_TRIAGE_TOKEN: ${{ secrets.SENTRY_TRIAGE_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          # Copy to a shell-local and drop the EXPORTED name, so every child
+          # below — including node — is exec'd without it. This is the line that
+          # keeps the token out of /proc/<broker-pid>/environ; a scrub inside
+          # node could not, since that file is fixed at exec.
+          token="${SENTRY_TRIAGE_TOKEN:-}"
+          unset SENTRY_TRIAGE_TOKEN
+
+          if [ -z "${token}" ]; then
+            echo "::error::SENTRY_TRIAGE_TOKEN is empty in the triage job; refusing to start the agent without a working Sentry path."
+            exit 1
+          fi
+
+          # Establishes the heap-residency residual recorded in ADR 0056:
+          # ptrace_scope=1 (or higher) denies /proc/<pid>/mem to a non-descendant
+          # same-user process; 0 does not. Logged, not assumed.
+          echo "yama ptrace_scope: $(cat /proc/sys/kernel/yama/ptrace_scope 2>/dev/null || echo unavailable)"
+
+          # The handle is an authenticator for a 127.0.0.1-bound process that
+          # dies with this runner, not a secret — $GITHUB_ENV is the right
+          # channel for it, and the only one the CLI's --mcp-config expansion
+          # can read.
+          handle="$(openssl rand -hex 32)"
+          ready_file="${RUNNER_TEMP}/sentry-mcp-broker.ready"
+          log_file="${RUNNER_TEMP}/sentry-mcp-broker.log"
+          rm -f "${ready_file}"
+
+          # Token on STDIN via a builtin: no env var, no argv, no temp file.
+          # Redirecting stdout/stderr to a file releases the step's pipe, so the
+          # backgrounded broker does not hold the step open. `$!` is the last
+          # element of the pipeline — node, which is the pid we wait on.
+          printf '%s' "${token}" | \
+          SENTRY_MCP_BROKER_HANDLE="${handle}" \
+          SENTRY_MCP_BROKER_READY_FILE="${ready_file}" \
+          SENTRY_MCP_BROKER_TTL_SECONDS=1800 \
+            node "${RUNNER_TEMP}/sentry-triage-tools/sentry-mcp-broker.mjs" \
+            > "${log_file}" 2>&1 &
+          broker_pid=$!
+
+          # Fail CLOSED: if the broker never came up, the agent would run
+          # against a dead endpoint and burn its turn budget on failed reads.
+          for _ in $(seq 1 50); do
+            if [ -s "${ready_file}" ]; then break; fi
+            if ! kill -0 "${broker_pid}" 2>/dev/null; then
+              echo "::error::Sentry credential broker exited before becoming ready."
+              cat "${log_file}" || true
+              exit 1
+            fi
+            sleep 0.2
+          done
+          if [ ! -s "${ready_file}" ]; then
+            echo "::error::Sentry credential broker did not become ready within 10s."
+            cat "${log_file}" || true
+            exit 1
+          fi
+
+          echo "SENTRY_MCP_BROKER_HANDLE=${handle}" >> "${GITHUB_ENV}"
+          echo "Sentry credential broker listening on 127.0.0.1:$(cat "${ready_file}") (pid ${broker_pid})."
 
       - name: Render triage prompt
         id: render
@@ -358,15 +511,31 @@ jobs:
             echo 'SENTRY_TRIAGE_PROMPT_EOF'
           } >> "${GITHUB_OUTPUT}"
 
-      - uses: anthropics/claude-code-action@b76a0776ae74036e77cd11018083743453d7ad35 # v1.0.179
+      - uses: anthropics/claude-code-action@be7b93b1907a4abad570368f3c74b6fe3807510b # v1.0.183
         with:
           github_token: ${{ github.token }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           prompt: ${{ steps.render.outputs.prompt }}
-          # Sentry MCP (stdio, read-only token) is wired via --mcp-config. The
-          # allowlist excludes every Sentry write/mutation tool (update_issue,
-          # add_issue_note, create_*/update_*/remove_*), the search-tools/
-          # execute-tool meta-executor, and analyze_issue_with_seer.
+          # Sentry MCP (stdio) is wired via --mcp-config, pointed at the
+          # loopback credential broker started above: the agent's process env
+          # holds the opaque per-run handle, never the Sentry token (#1711).
+          # `--insecure-http` is CLI-only, so the loopback wiring goes in `args`
+          # and `SENTRY_HOST` is gone. Plain http is safe here and only here:
+          # the hop is 127.0.0.1 on this runner, and the broker makes the real
+          # HTTPS call to Sentry itself.
+          #
+          # The allowlist excludes every Sentry write/mutation tool
+          # (update_issue, add_issue_note, create_*/update_*/remove_*), the
+          # search-tools/execute-tool meta-executor, and
+          # analyze_issue_with_seer. Note that five names below
+          # (get_issue_details, get_event_stacktrace, get_issue_tag_values,
+          # get_issue_activity, search_issue_events) do not exist at
+          # @sentry/mcp-server@0.37.0 — they are inert grants kept so a version
+          # bump that restores them does not silently lose the grant. The
+          # broker's path allowlist is derived from the five that DO exist
+          # (find_organizations, find_projects, search_issues, search_events,
+          # get_sentry_resource); re-derive it on a version bump, per
+          # docs/notes/sentry-triage-pipeline.md.
           #
           # --setting-sources user: do NOT load the checked-out repo's
           # .claude/settings.json — its permissions.allow list (e.g. `node *`)
@@ -377,7 +546,7 @@ jobs:
             --model claude-sonnet-5
             --max-turns 50
             --setting-sources user
-            --mcp-config '{"mcpServers":{"sentry":{"command":"npx","args":["-y","@sentry/mcp-server@0.37.0"],"env":{"SENTRY_ACCESS_TOKEN":"${SENTRY_TRIAGE_TOKEN}","SENTRY_HOST":"us.sentry.io"}}}}'
+            --mcp-config '{"mcpServers":{"sentry":{"command":"npx","args":["-y","@sentry/mcp-server@0.37.0","--host","127.0.0.1:${{ env.SENTRY_MCP_BROKER_PORT }}","--insecure-http"],"env":{"SENTRY_ACCESS_TOKEN":"${SENTRY_MCP_BROKER_HANDLE}"}}}}'
             --allowedTools 'Read,Grep,Glob,Bash(gh issue view:*),Bash(gh issue list:*),Bash(node ${{ runner.temp }}/sentry-triage-tools/sentry-triage-agent-comment.mjs:*),mcp__sentry__find_organizations,mcp__sentry__find_projects,mcp__sentry__get_issue_details,mcp__sentry__get_event_stacktrace,mcp__sentry__get_issue_tag_values,mcp__sentry__get_issue_activity,mcp__sentry__search_issues,mcp__sentry__search_events,mcp__sentry__search_issue_events,mcp__sentry__get_sentry_resource'
 
   # ---------------------------------------------------------------------------
