@@ -33,6 +33,27 @@ Keep machine-specific transport and all authentication or secret material,
 including secret-bearing command arguments, environment values, headers, and
 tokens, out of the repository.
 
+The checked-in `upstash` toggle expects this user-level entry, using the
+[upstream Upstash MCP server](https://github.com/upstash/mcp-server#openai-codex):
+
+```toml
+[mcp_servers.upstash]
+command = "npx"
+args = [
+  "-y",
+  "@upstash/mcp-server@latest",
+  "--email",
+  "<UPSTASH_EMAIL>",
+  "--api-key",
+  "<UPSTASH_API_KEY>",
+]
+startup_timeout_sec = 20
+```
+
+Replace the placeholders only in `~/.codex/config.toml`. Create the API key in
+the Upstash Console, prefer a read-only key when its reduced tool set is enough,
+and never commit or paste the populated entry into logs.
+
 ## Autoreview routing
 
 `autoreview` is pinned through `scripts/agent-autoreview.mjs` and exposed as
