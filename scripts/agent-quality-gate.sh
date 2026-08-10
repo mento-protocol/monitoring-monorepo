@@ -2536,24 +2536,33 @@ while IFS= read -r path; do
   # package.json or ci.yml to exist, so the glob covers suites with no arm yet.
   # `add_command` deduplicates, so ci.yml keeps its more specific reason above.
   #
+  # `.github/workflows/*` and `.github/actions/*` cover every reader the check
+  # opens beyond ci.yml: `contextOwnershipBlockers` parses EVERY workflow to
+  # prove no decoy job owns the `ci` check-run name, and the env scan recurses
+  # into the composite `action.yml` files the trusted jobs pull in. Editing one
+  # of those must run the check, or the drift it exists to catch surfaces only
+  # after push. `scripts/check-sentry-suites-in-ci*.mjs` covers this file, the
+  # core, and its `-core-commands` / `-probes` siblings alike.
+  #
   # Two suite globs because `findSentrySuites` in the check enumerates
   # recursively — a suite in a subdirectory is one the check will demand a CI
   # step for, so it has to route the check too. `scripts/*/sentry-*.test.mjs`
   # covers every depth: a `case` pattern is not pathname expansion, so `*`
   # matches `/`. (`**` would behave identically here and only invite a reader to
-  # assume globstar semantics bash does not implement.)
+  # assume globstar semantics bash does not implement.) The same `*`-matches-`/`
+  # rule is why `.github/actions/*` reaches a nested `action.yml`.
   #
   # Repository-specific, like the `pnpm tf:test` sweep below: the gate unit
   # tests run this script against stub fixture repositories that own neither
   # the check nor the suites it enumerates.
   if [[ "$script_source_dir" == "$repo_root/scripts" ]]; then
     case "$path" in
-      .github/workflows/ci.yml | \
+      .github/workflows/* | \
+        .github/actions/* | \
         package.json | \
         scripts/agent-quality-gate.sh | \
         scripts/check-agent-quality-gate-package-scripts.sh | \
-        scripts/check-sentry-suites-in-ci.test.mjs | \
-        scripts/check-sentry-suites-in-ci-core.mjs | \
+        scripts/check-sentry-suites-in-ci*.mjs | \
         scripts/sentry-*.test.mjs | \
         scripts/*/sentry-*.test.mjs | \
         scripts/tf-stacks.test.mjs)

@@ -3712,6 +3712,25 @@ assert_contains "$sentry_ci_check"
 run_gate "scripts/check-sentry-suites-in-ci-core.mjs"
 assert_contains "$sentry_ci_check"
 
+# The core-grammar and probes siblings are read the same way; the glob covers
+# every `check-sentry-suites-in-ci*.mjs`, not just the two named modules.
+run_gate "scripts/check-sentry-suites-in-ci-core-commands.mjs"
+assert_contains "$sentry_ci_check"
+
+run_gate "scripts/check-sentry-suites-in-ci-probes.mjs"
+assert_contains "$sentry_ci_check"
+
+# The check parses EVERY workflow (contextOwnershipBlockers proves no decoy job
+# owns the `ci` check-run name), so a non-ci workflow edit must route it too.
+run_gate ".github/workflows/sentry-triage-agent.yml"
+assert_contains "$sentry_ci_check"
+
+# The env scan recurses into the composite actions the trusted jobs pull in, so
+# editing a local action.yml must route it — the reader the one-level scan and
+# the ci.yml-only arm both missed.
+run_gate ".github/actions/pnpm-install/action.yml"
+assert_contains "$sentry_ci_check"
+
 run_gate "package.json"
 assert_contains "$sentry_ci_check"
 

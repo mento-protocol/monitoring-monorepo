@@ -57,228 +57,18 @@
  */
 
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import {
   mkdirSync,
   mkdtempSync,
-  readdirSync,
   readFileSync,
-  realpathSync,
   rmSync,
-  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
 import { CORE_SCHEMA, dump, load } from "js-yaml";
-
-const ROOT = fileURLToPath(new URL("..", import.meta.url));
-const SCRIPTS_DIR = join(ROOT, "scripts");
-const WORKFLOWS_DIR = join(ROOT, ".github", "workflows");
-const CI_PATH = join(WORKFLOWS_DIR, "ci.yml");
-const GATE_PATH = join(SCRIPTS_DIR, "agent-quality-gate.sh");
-const VALIDATOR_PATH = join(
-  SCRIPTS_DIR,
-  "check-agent-quality-gate-package-scripts.sh",
-);
-
-/** The pin validator invocation the `scripts` job must run before any alias. */
-const PIN_VALIDATOR_COMMAND = [
-  "bash",
-  "scripts/check-agent-quality-gate-package-scripts.sh",
-];
-
-/** This file, so the check can assert its own CI step still exists. */
-const SELF = "scripts/check-sentry-suites-in-ci.test.mjs";
-
-/** The module holding every predicate this file asserts with. */
-const CORE = "scripts/check-sentry-suites-in-ci-core.mjs";
-
-// A throw here is the intended failure mode for a malformed workflow.
-const CI = load(readFileSync(CI_PATH, "utf8"), { schema: CORE_SCHEMA });
-const PKG = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"));
-const PKG_SCRIPTS = PKG.scripts ?? {};
-const GATE = readFileSync(GATE_PATH, "utf8");
-
-/**
- * Every workflow under .github/workflows, parsed. The `ci` check-run name must
- * be unique across all of them, so this check reads the whole directory rather
- * than ci.yml alone.
- */
-const WORKFLOWS = readdirSync(WORKFLOWS_DIR, { withFileTypes: true })
-  .filter(
-    (entry) =>
-      entry.isFile() &&
-      (entry.name.endsWith(".yml") || entry.name.endsWith(".yaml")),
-  )
-  .map((entry) => ({
-    path: `.github/workflows/${entry.name}`,
-    workflow: load(readFileSync(join(WORKFLOWS_DIR, entry.name), "utf8"), {
-      schema: CORE_SCHEMA,
-    }),
-  }));
-
-/**
- * The composite-action steps a job pulls in through `uses: ./…`. A trusted job's
- * environment is set by its own steps AND by any local composite action it
- * runs, so the env-mutation scan must see both. Third-party `uses:` (pinned by
- * SHA, covered by check-github-action-pins.mjs) are out of scope here.
- *
- * @param {Record<string, any>} job
- */
-function localCompositeSteps(job) {
-  const steps = [];
-  for (const step of job?.steps ?? []) {
-    if (!isPlainObject(step) || typeof step.uses !== "string") continue;
-    if (!step.uses.startsWith("./")) continue;
-    const actionDir = join(ROOT, step.uses.slice(2));
-    let source;
-    for (const file of ["action.yml", "action.yaml"]) {
-      try {
-        source = readFileSync(join(actionDir, file), "utf8");
-        break;
-      } catch {
-        // try the other extension
-      }
-    }
-    assert.ok(
-      source !== undefined,
-      `local action \`${step.uses}\` has no action.yml/action.yaml — the env scan cannot read it`,
-    );
-    const action = load(source, { schema: CORE_SCHEMA });
-    for (const composite of action?.runs?.steps ?? []) {
-      if (isPlainObject(composite)) steps.push(composite);
-    }
-  }
-  return steps;
-}
-
-/** The alls-green step of a (cloned) workflow's `ci` sentinel. */
-function allsGreenStep(workflow) {
-  return workflow.jobs.ci.steps.find((step) =>
-    String(step.uses ?? "").startsWith("re-actors/alls-green@"),
-  );
-}
-
-/**
- * Every `sentry-*.test.mjs` under scripts/, at any depth, as a repo-relative
- * path. Recursive so a suite cannot hide from invariant 1 by moving into a
- * subdirectory.
- *
- * A Dirent from `readdirSync(withFileTypes)` comes from `lstat`, so a symlink to
- * a directory reports `isDirectory() === false` and would be neither recursed
- * into nor recorded — a suite behind `scripts/<symlink>/` would silently drop
- * out of enumeration and never be required in CI. So a symlink is resolved with
- * `statSync` (which follows it) and walked when it points to a directory; a
- * `realpathSync` visited-set fails closed on a cycle rather than looping.
- *
- * @param {string} dir
- * @param {string} prefix
- * @param {Set<string>} ancestors resolved directories on the path to `dir`
- */
-function findSentrySuites(dir, prefix = "scripts", ancestors = new Set()) {
-  const realDir = realpathSync(dir);
-  // Only a directory that is its own ancestor is a cycle. A symlink to an
-  // already-enumerated sibling is a diamond, not a loop, and must still be
-  // walked — tracking the path to here rather than every dir seen keeps the
-  // first without looping on the second.
-  assert.ok(
-    !ancestors.has(realDir),
-    `symlink cycle under scripts/ at ${prefix} — resolve it; the suite enumeration cannot walk a cycle`,
-  );
-  const nextAncestors = new Set(ancestors).add(realDir);
-  const found = [];
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    const relative = `${prefix}/${entry.name}`;
-    const full = join(dir, entry.name);
-    // A broken symlink throws here, which is the intended failure mode: an
-    // unresolvable entry under scripts/ must fail the enumeration, not vanish.
-    const isDirectory = entry.isSymbolicLink()
-      ? statSync(full).isDirectory()
-      : entry.isDirectory();
-    if (isDirectory) {
-      found.push(...findSentrySuites(full, relative, nextAncestors));
-    } else if (
-      entry.name.startsWith("sentry-") &&
-      entry.name.endsWith(".test.mjs")
-    ) {
-      found.push(relative);
-    }
-  }
-  return found.sort();
-}
-
-const SENTRY_SUITES = findSentrySuites(SCRIPTS_DIR);
-
-/**
- * Sentry-named suites that another CI job owns. The value names the route;
- * `the exemption for sentry-provider-contract still holds` re-proves it. An
- * exemption whose route disappeared is a hole, not an exemption.
- */
-const RUN_BY_ANOTHER_JOB = new Map([
-  [
-    "scripts/sentry-provider-contract.test.mjs",
-    "imported by scripts/tf-stacks.test.mjs, which `pnpm tf:test` runs in the " +
-      "unconditional `Production infrastructure contract` job",
-  ],
-]);
-
-/**
- * The jobs this file trusts to run its assertions, and the ONLY `if:` each may
- * carry. `null` means the job must be unconditional.
- *
- * `scripts` is path-gated, so its guard is pinned to an exact string and
- * `the scripts job stays reachable from the paths its suites guard` follows
- * that string through the paths filter. Any edit to the guard fails here and
- * has to be re-proven, which is the point.
- */
-const TRUSTED_JOBS = new Map([
-  ["scripts", "needs.changes.outputs.rootScripts == 'true'"],
-  ["production-infra-contract", null],
-]);
-
-/**
- * Paths whose edits must re-run the `scripts` job. Every one is an input to a
- * suite that job owns: the suites themselves, the workflow files
- * sentry-mcp-broker.test.mjs parses, the shell scripts this check runs as
- * probes — `gateClassifications` executes agent-quality-gate.sh's own `case`
- * statement and `validatorPins` runs check-agent-quality-gate-package-scripts.sh
- * — and the manifest holding the aliases the CI steps invoke.
- *
- * The `.sh` entry matters most where it is least visible: without it, a PR
- * editing only the gate's tooling allowlist or the pin validator would skip the
- * `scripts` job, and the `ci` sentinel lists `scripts` under `allowed-skips`,
- * so nothing would report the gap.
- */
-const REQUIRED_ROOT_SCRIPT_PATHS = [
-  "scripts/**/*.mjs",
-  "scripts/**/*.sh",
-  ".github/workflows/**",
-  "package.json",
-];
-
-/**
- * Every file this check parses or executes to reach a verdict, with the reader
- * that consumes it. `the required paths route every file this check reads`
- * asserts each one is covered by REQUIRED_ROOT_SCRIPT_PATHS: an input the
- * filter does not route is an input whose edit skips the whole `scripts` job.
- */
-const PROBE_INPUTS = new Map([
-  [".github/workflows/ci.yml", "the workflow every invariant here walks"],
-  ["package.json", "the alias map `aliasesFor` resolves suites through"],
-  ["scripts/agent-quality-gate.sh", "`gateClassifications` runs its `case`"],
-  [
-    "scripts/check-agent-quality-gate-package-scripts.sh",
-    "`validatorPins` runs it to enumerate the pins it enforces",
-  ],
-  ["scripts/tf-stacks.test.mjs", "`staticImports` parses its import list"],
-  [SELF, "this check itself"],
-  [CORE, "every predicate this check asserts with"],
-]);
-
 import {
   aliasesFor,
   commandRunsOnly,
@@ -286,7 +76,6 @@ import {
   envMutationBlockers,
   globToRegExp,
   invocationsOf,
-  isPlainObject,
   jobBlockers,
   nearMisses,
   pinValidationOrderBlockers,
@@ -298,131 +87,36 @@ import {
   triggerBlockers,
   workflowBlockers,
 } from "./check-sentry-suites-in-ci-core.mjs";
+import { countLines, HARD_CAP } from "./file-size-watchlist.mjs";
+import {
+  allsGreenStep,
+  CI,
+  collectCompositeActions,
+  CORE,
+  dropFilterPath,
+  findSentrySuites,
+  gateClassifications,
+  PIN_VALIDATOR_COMMAND,
+  PKG_SCRIPTS,
+  PROBE_INPUTS,
+  REQUIRED_ROOT_SCRIPT_PATHS,
+  ROOT,
+  RUN_BY_ANOTHER_JOB,
+  SCRIPTS_DIR,
+  SELF,
+  SENTRY_SUITES,
+  staticImports,
+  TRUSTED_JOBS,
+  VALIDATOR_PATH,
+  validatorPins,
+  WORKFLOWS,
+} from "./check-sentry-suites-in-ci-probes.mjs";
 
-// ── external parsers ─────────────────────────────────────────────────────────
-
-/**
- * The static import specifiers of an ES module, straight from V8's parser.
- * Nothing is executed and no text is matched, so a commented-out import (line
- * or block), an import inside a string or template literal, and an unreached
- * dynamic `import()` are all absent — correctly.
- *
- * @param {string} path
- */
-function staticImports(path) {
-  const program = `
-const vm = require("node:vm");
-const fs = require("node:fs");
-// Node strips the shebang when it loads a file; vm.SourceTextModule does not.
-const source = fs.readFileSync(process.argv[1], "utf8").replace(/^#![^\\n]*/, "");
-process.stdout.write(
-  JSON.stringify(new vm.SourceTextModule(source, { identifier: process.argv[1] }).dependencySpecifiers),
-);
-`;
-  const out = execFileSync(
-    process.execPath,
-    ["--experimental-vm-modules", "--no-warnings", "-e", program, path],
-    { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
-  );
-  return JSON.parse(out);
-}
-
-/**
- * Run the gate's own `case` statement over each path and report how it
- * classifies them. bash parses its own source and does its own pattern
- * matching, so a commented-out entry, an entry moved to a different arm, and
- * an arm whose body changed all show up as a different classification.
- *
- * @param {string[]} paths
- * @returns {Map<string, string>}
- */
-function gateClassifications(paths) {
-  const header = "\nclassify_root_package_json_changes() {\n";
-  const first = GATE.indexOf(header);
-  assert.ok(
-    first >= 0,
-    `classify_root_package_json_changes is gone from ${GATE_PATH}`,
-  );
-  assert.equal(
-    GATE.lastIndexOf(header),
-    first,
-    "classify_root_package_json_changes is defined more than once — this probe would read the wrong one",
-  );
-  const rest = GATE.slice(first + 1);
-  const end = rest.indexOf("\n}\n");
-  assert.ok(
-    end > 0,
-    "classify_root_package_json_changes has no closing brace at column 0",
-  );
-  const fnSource = rest.slice(0, end + 3);
-
-  // `json_change_paths` reads git; the probe feeds the function one synthetic
-  // change path instead. Process substitution forks the shell, so the loop
-  // variable is visible inside the stub.
-  const program = `
-set -uo pipefail
-${fnSource}
-json_change_paths() { printf '%s\\n' "$__probe_path"; }
-declare -F classify_root_package_json_changes > /dev/null || { echo "__probe_broken__"; exit 3; }
-for __probe_path in "$@"; do
-  printf '%s\\t%s\\n' "$__probe_path" "$(classify_root_package_json_changes)"
-done
-`;
-  const out = execFileSync("bash", ["-s", "--", ...paths], {
-    input: program,
-    encoding: "utf8",
-    stdio: ["pipe", "pipe", "pipe"],
-  });
-  const classifications = new Map();
-  for (const line of out.split("\n")) {
-    if (line.trim() === "") continue;
-    const [path, verdict] = line.split("\t");
-    classifications.set(path, verdict);
-  }
-  return classifications;
-}
-
-/**
- * The exact commands check-agent-quality-gate-package-scripts.sh pins, read
- * from the validator itself: it is run against a package.json with no scripts,
- * so it reports every pin it enforces, with the command it demands.
- *
- * This reads enforcement, not declaration. A commented-out pin produces no
- * line — and neither would a pin the validator declared but never checked.
- *
- * @returns {Map<string, string>}
- */
-function validatorPins() {
-  const dir = mkdtempSync(join(tmpdir(), "sentry-pin-probe-"));
-  let output;
-  try {
-    writeFileSync(join(dir, "package.json"), '{"scripts":{}}\n');
-    try {
-      execFileSync("bash", [VALIDATOR_PATH], {
-        cwd: dir,
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-      output = "";
-    } catch (error) {
-      // A pin that is not satisfied is reported and exits non-zero, which is
-      // the whole point of the probe.
-      output = `${error.stdout ?? ""}${error.stderr ?? ""}`;
-    }
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-
-  const pins = new Map();
-  for (const line of output.split("\n")) {
-    const match = /^package\.json scripts\.(\S+) must be (.+)$/.exec(
-      line.trim(),
-    );
-    if (!match) continue;
-    pins.set(match[1], JSON.parse(match[2]));
-  }
-  return pins;
-}
+// The file reads, external-process probes, and repo-specific constants live in
+// check-sentry-suites-in-ci-probes.mjs; the predicates live in
+// check-sentry-suites-in-ci-core.mjs (with the command grammar re-exported from
+// -core-commands.mjs). This file owns every `test()` and the `structuredClone`
+// mutation probes that prove each predicate rejects, not only accepts.
 
 // ── invariants ───────────────────────────────────────────────────────────────
 
@@ -466,7 +160,7 @@ test("the ci.yml jobs this file trusts still run and still fail on failure", () 
 
 test("the `ci` sentinel still requires those jobs", () => {
   assert.deepEqual(
-    sentinelBlockers(CI, TRUSTED_JOBS.keys()),
+    sentinelBlockers(CI, TRUSTED_JOBS),
     [],
     "the `ci` sentinel would no longer turn a red trusted job into a red required check",
   );
@@ -529,12 +223,35 @@ test("the sentinel check rejects a workflow whose `ci` job stops gating", () => 
       // `jobs.ci` keyed the same while it publishes a different context.
       (w) => (w.jobs.ci.name = "ci-aggregate"),
     ],
+    [
+      "path-gated `scripts` dropped from `allowed-skips`",
+      // `scripts` is path-gated, so it reports "skipped" on any PR outside its
+      // filter. alls-green turns a skip of a job NOT in `allowed-skips` into a
+      // gate failure, so dropping it here reds the required `ci` for every such
+      // PR — while the edit that drops it activates the filter, so the change's
+      // own PR runs the job and never sees the red.
+      (w) => {
+        const step = allsGreenStep(w);
+        step.with["allowed-skips"] = step.with["allowed-skips"]
+          .split(",")
+          .filter((job) => job.trim() !== "scripts")
+          .join(",");
+      },
+    ],
+    [
+      "a JSON-encoded `allowed-skips` without `scripts`",
+      // The action `json.loads()` this first, so a comma-only reader would see
+      // one opaque token and wrongly believe `scripts` is still listed.
+      (w) => {
+        allsGreenStep(w).with["allowed-skips"] = '["ui","indexer"]';
+      },
+    ],
   ];
   for (const [label, mutate] of mutations) {
     const workflow = structuredClone(CI);
     mutate(workflow);
     assert.notDeepEqual(
-      sentinelBlockers(workflow, TRUSTED_JOBS.keys()),
+      sentinelBlockers(workflow, TRUSTED_JOBS),
       [],
       `the sentinel check accepts a \`ci\` job with ${label}`,
     );
@@ -770,33 +487,6 @@ test("the `scripts` job stays reachable from the paths its suites guard", () => 
   );
 });
 
-/**
- * Remove `target` from every list in every `dorny/paths-filter` step's inner
- * `filters` document. Generic on purpose: the probe below must not re-implement
- * the guard→output→step→document walk it is testing.
- *
- * @param {Record<string, any>} workflow
- * @param {string} target
- */
-function dropFilterPath(workflow, target) {
-  let removed = 0;
-  for (const job of Object.values(workflow.jobs ?? {})) {
-    for (const step of job.steps ?? []) {
-      if (!isPlainObject(step)) continue;
-      if (!String(step.uses ?? "").startsWith("dorny/paths-filter@")) continue;
-      const filters = load(step.with?.filters, { schema: CORE_SCHEMA });
-      if (!isPlainObject(filters)) continue;
-      for (const [key, paths] of Object.entries(filters)) {
-        if (!Array.isArray(paths) || !paths.includes(target)) continue;
-        filters[key] = paths.filter((entry) => entry !== target);
-        removed += 1;
-      }
-      step.with.filters = dump(filters);
-    }
-  }
-  return removed;
-}
-
 test("the required paths route every file this check reads", () => {
   // The gap this closes was invisible from either side alone: the check reads
   // two `.sh` files as probes, the filter routed only `.mjs`, and the `ci`
@@ -1003,7 +693,7 @@ test("a trusted job may not mutate the runner environment for later steps", () =
     );
     assert.deepEqual(
       envMutationBlockers(
-        localCompositeSteps(job),
+        collectCompositeActions(job).steps,
         `\`${name}\` composite step`,
       ),
       [],
@@ -1038,6 +728,88 @@ test("a trusted job may not mutate the runner environment for later steps", () =
       [],
       `envMutationBlockers accepts a composite ${vector.name} step`,
     );
+  }
+});
+
+test("the composite scan recurses through nested local actions", () => {
+  // A one-level scan is bypassed by a composite that itself `uses:` another
+  // local composite: the env write hides one action deeper. Build a synthetic
+  // tree — job → level1 → level2, the write two levels down — and prove
+  // `collectCompositeActions` walks to it. On disk, no repo action touched, so
+  // the recursion is exercised without giving the real workflow a nested
+  // action to protect.
+  const base = mkdtempSync(join(tmpdir(), "sentry-nested-action-"));
+  try {
+    const write = (rel, doc) => {
+      const full = join(base, rel);
+      mkdirSync(join(full, ".."), { recursive: true });
+      writeFileSync(full, doc);
+    };
+    write(
+      ".github/actions/level1/action.yml",
+      dump({
+        name: "level1",
+        runs: {
+          using: "composite",
+          steps: [{ uses: "./.github/actions/level2" }],
+        },
+      }),
+    );
+    const job = { steps: [{ uses: "./.github/actions/level1" }] };
+
+    // Control: with a clean leaf, the two-level walk finds no env write and
+    // reports both action.yml files it opened.
+    write(
+      ".github/actions/level2/action.yml",
+      dump({
+        name: "level2",
+        runs: {
+          using: "composite",
+          steps: [{ run: "echo hello", shell: "bash" }],
+        },
+      }),
+    );
+    const clean = collectCompositeActions(job, base);
+    assert.deepEqual(
+      envMutationBlockers(clean.steps, "nested composite"),
+      [],
+      "the recursion invented an env write that the clean leaf never made",
+    );
+    assert.deepEqual(
+      clean.files.sort(),
+      [
+        ".github/actions/level1/action.yml",
+        ".github/actions/level2/action.yml",
+      ],
+      "the recursion did not report every action.yml it opened",
+    );
+
+    // The mutation: a `$GITHUB_ENV` write two levels deep must be caught.
+    write(
+      ".github/actions/level2/action.yml",
+      dump({
+        name: "level2",
+        runs: {
+          using: "composite",
+          steps: [
+            {
+              run: 'echo "NODE_OPTIONS=--import=./evil.mjs" >> "$GITHUB_ENV"',
+              shell: "bash",
+            },
+          ],
+        },
+      }),
+    );
+    assert.notDeepEqual(
+      envMutationBlockers(
+        collectCompositeActions(job, base).steps,
+        "nested composite",
+      ),
+      [],
+      "a $GITHUB_ENV write two composites deep escaped the recursive scan",
+    );
+  } finally {
+    rmSync(base, { recursive: true, force: true });
   }
 });
 
@@ -1175,4 +947,30 @@ test("the suite enumeration walks symlinked directories", () => {
   } finally {
     rmSync(base, { recursive: true, force: true });
   }
+});
+
+test("the checker's own files stay under the file-size hard cap", () => {
+  // Round 9's split drifted back over the 1,000-line cap because nothing
+  // machine-enforced it: the root ESLint config sets no `max-lines`, and the
+  // file-size watchlist scopes the package `src/` trees, not scripts/. Lock the
+  // checker's own modules here, reusing the watchlist's own line counter, so a
+  // future round cannot quietly regrow one past the cap.
+  const files = [
+    CORE,
+    SELF,
+    "scripts/check-sentry-suites-in-ci-core-commands.mjs",
+    "scripts/check-sentry-suites-in-ci-probes.mjs",
+  ];
+  const over = files
+    .map((file) => ({
+      file,
+      lines: countLines(readFileSync(join(ROOT, file), "utf8")).raw,
+    }))
+    .filter(({ lines }) => lines >= HARD_CAP);
+  assert.deepEqual(
+    over,
+    [],
+    `these checker files crossed the ${HARD_CAP}-line hard cap; split them into ` +
+      `a focused sibling module: ${JSON.stringify(over)}`,
+  );
 });

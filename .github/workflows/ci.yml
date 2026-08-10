@@ -285,7 +285,12 @@ jobs:
               # sentry-triage-agent.yml. Narrowing this glob would let a
               # workflow-only edit skip the suites that exist to guard it.
               - .github/workflows/**
-              - .github/actions/pnpm-install/**
+              # check-sentry-suites-in-ci recurses into the composite actions
+              # the trusted jobs pull in, scanning each action.yml for a
+              # `$GITHUB_ENV` write that would neuter the Sentry suites. An edit
+              # to any local action must re-run it, so this covers all of them,
+              # not only pnpm-install.
+              - .github/actions/**
               # The baseline-resolve composite exports ESLINT_BASELINE_MAIN,
               # consumed by scripts/eslint-baseline-diff.mjs — the scripts
               # job's baseline-diff semantic suite must re-run when the
