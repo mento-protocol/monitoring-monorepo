@@ -18,6 +18,7 @@ import {
   isNotFoundError,
   isSelectableForTriage,
   isNumericId,
+  pickReopenBaseline,
   settlementHeld,
   isSafeSentryPermalink,
   isSettledAuditComment,
@@ -38,6 +39,7 @@ import {
   buildRegressedComment,
   buildStrandedRecoveryComment,
   parseArchiveBaseline,
+  reopenBaselineOf,
   withArchiveBaseline,
 } from "./sentry-triage-ingest.mjs";
 import {
@@ -841,6 +843,138 @@ await test("runArchive happy path archives and settles the queue stub", async ()
   );
 });
 
+// ---------------------------------------------------------------------------
+// The approval-to-run window (issue #1692).
+//
+// The archive reads Sentry AFTER the human applied `sentry:approved-archive`,
+// so an event landing in between is folded into the value meant to detect it.
+// The fix is a second baseline for ingest, taken from the stub's own
+// ingest-written `last_seen`; the live read stays exactly where it is, because
+// the mutation-window guard and both already-archived retry refusals have to
+// describe what THIS run saw.
+// ---------------------------------------------------------------------------
+
+/** The stub body's own `last_seen`, written by ingest long before any approval. */
+const STUB_LAST_SEEN = "2026-07-14T10:00:00Z";
+
+await test("the recorded reopen baseline predates the approval, not the archive read", async () => {
+  // `makeFetch` serves BASELINE_LAST_SEEN, five days newer than the stub's
+  // `last_seen` — that gap models the event that landed after the approval.
+  const stub = makeStub();
+  const { runGh, calls: ghCalls, model } = makeRunGh({ stub });
+  const { fetchImpl } = makeFetch();
+
+  const result = await runArchive(baseOptions(), {
+    runGh,
+    fetchImpl,
+    now: FIXED_NOW,
+  });
+  assertEqual(result.status, "archived");
+
+  const recorded = parseArchiveBaseline(model.body);
+  // The live read is still recorded — the archive's own consumers need it.
+  assertEqual(recorded.lastSeen, BASELINE_LAST_SEEN);
+  // And ingest gets an instant that provably predates the approval, so the
+  // absorbed event is strictly newer than the value its gate compares against.
+  assertEqual(recorded.reopenLastSeen, STUB_LAST_SEEN);
+  assertEqual(reopenBaselineOf(recorded), STUB_LAST_SEEN);
+  assertEqual(
+    lastSeenMoved(reopenBaselineOf(recorded), BASELINE_LAST_SEEN),
+    true,
+  );
+
+  // The audit note names both, because an operator debugging a reopen that did
+  // or did not fire is reading the second one.
+  const comment = ghCall(ghCalls, "comment");
+  const auditBody = comment[comment.indexOf("--body") + 1];
+  assert(
+    auditBody.includes(BASELINE_LAST_SEEN) &&
+      auditBody.includes(STUB_LAST_SEEN),
+    `audit note must name both baselines: ${auditBody}`,
+  );
+});
+
+await test("a legitimate retry still measures itself against the LIVE archive read", async () => {
+  // The sharp half of the same change: repointing the already-archived retry
+  // gates at the earlier baseline would refuse every honest dispatch retry as
+  // stale. This stub carries both fields; Sentry's `lastSeen` still reads what
+  // the first run saw, so the retry must proceed.
+  const stub = makeStub({
+    body: withArchiveBaseline(stubBody(), {
+      lastSeen: BASELINE_LAST_SEEN,
+      reopenLastSeen: STUB_LAST_SEEN,
+      sentryIssueId: "6197137101",
+    }),
+  });
+  const { runGh } = makeRunGh({ stub });
+  const { fetchImpl } = makeFetch({
+    issue: { status: "ignored", substatus: "archived_until_escalating" },
+  });
+
+  const result = await runArchive(baseOptions(), {
+    runGh,
+    fetchImpl,
+    now: FIXED_NOW,
+  });
+  assertEqual(result.status, "already-archived");
+});
+
+await test("pickReopenBaseline takes the earlier value and never a worse one", () => {
+  // Normal case: the stub's own `last_seen`, which predates the approval.
+  assertEqual(
+    pickReopenBaseline(STUB_LAST_SEEN, BASELINE_LAST_SEEN),
+    STUB_LAST_SEEN,
+  );
+  // A stub `last_seen` NEWER than this run's read (a stale Sentry replica)
+  // would widen the gate, so the live read wins.
+  assertEqual(
+    pickReopenBaseline("2026-07-25T00:00:00Z", BASELINE_LAST_SEEN),
+    BASELINE_LAST_SEEN,
+  );
+  // An unusable stub `last_seen` degrades to the pre-#1692 behaviour rather
+  // than making a human approval unspendable.
+  for (const junk of [undefined, null, "", "   ", "not-a-date"]) {
+    assertEqual(
+      pickReopenBaseline(junk, BASELINE_LAST_SEEN),
+      BASELINE_LAST_SEEN,
+    );
+  }
+  // Equal timestamps are not a reason to prefer the later name for the value.
+  assertEqual(
+    pickReopenBaseline(BASELINE_LAST_SEEN, BASELINE_LAST_SEEN),
+    BASELINE_LAST_SEEN,
+  );
+});
+
+await test("settlementHeld rejects a body carrying the wrong reopen baseline", () => {
+  const expected = {
+    lastSeen: BASELINE_LAST_SEEN,
+    reopenLastSeen: STUB_LAST_SEEN,
+    sentryIssueId: "6197137101",
+  };
+  const settled = {
+    state: "CLOSED",
+    labels: ["sentry-triage", "sentry:archived", "sentry:verdict-upstream"],
+    body: withArchiveBaseline(stubBody(), expected),
+  };
+  assertEqual(settlementHeld(settled, expected), true);
+  // A body that kept only the live read is the pre-#1692 shape, and it sends
+  // ingest back to comparing against a post-approval instant.
+  assertEqual(
+    settlementHeld(
+      {
+        ...settled,
+        body: withArchiveBaseline(stubBody(), {
+          lastSeen: BASELINE_LAST_SEEN,
+          sentryIssueId: "6197137101",
+        }),
+      },
+      expected,
+    ),
+    false,
+  );
+});
+
 await test("runArchive is idempotent when the issue is already archived", async () => {
   const stub = makeStub({ body: settledStubBody() });
   const { runGh, calls: ghCalls } = makeRunGh({ stub });
@@ -897,10 +1031,19 @@ await test("runArchive refuses and re-queues a live regression instead of archiv
   );
   assert(!ghCall(ghCalls, "close"), "must not close over the regression");
   assert(ghCall(ghCalls, "comment"), "posts a refusal comment");
-  const edit = ghCall(ghCalls, "edit");
-  assert(edit, "re-queues via a label edit");
-  assertEqual(edit[edit.indexOf("--add-label") + 1], "sentry:needs-triage");
-  const removed = edit[edit.indexOf("--remove-label") + 1];
+  // Two ordered label calls, add before shed: one edit carrying both flags is
+  // two concurrent mutations, and losing the add half strands the stub (#1693).
+  const edits = ghCalls.filter((args) => args[1] === "edit");
+  assertEqual(edits.length, 2);
+  assertEqual(
+    edits[0][edits[0].indexOf("--add-label") + 1],
+    "sentry:needs-triage",
+  );
+  assert(
+    !edits[0].includes("--remove-label"),
+    "the add must not ride along with the shed",
+  );
+  const removed = edits[1][edits[1].indexOf("--remove-label") + 1];
   assert(
     removed.includes("sentry:approved-archive") &&
       removed.includes("sentry:verdict-upstream"),

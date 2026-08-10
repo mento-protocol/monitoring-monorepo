@@ -25,7 +25,8 @@ import {
 import { NEEDS_TRIAGE_LABEL } from "./sentry-triage-queue-contract.mjs";
 import {
   buildRegressedComment,
-  buildReopenLabelEditArgs,
+  buildRequeueAddLabelArgs,
+  buildRequeueShedLabelArgs,
   buildRequeueFence,
   buildStrandedRecoveryComment,
   hasAdmissibleVerdict,
@@ -219,12 +220,13 @@ await test("a Sentry-evidence re-queue posts the fence before it touches labels"
       lastSeen: "2026-07-20T08:00:00Z",
     },
   );
-  assertDeepEqual(w.verbs(), ["comment", "edit", "reopen"]);
+  assertDeepEqual(w.verbs(), ["comment", "edit", "edit", "reopen"]);
   assertEqual(
     w.calls[0][w.calls[0].indexOf("--body") + 1],
     buildRegressedComment("2026-07-20T08:00:00Z"),
   );
-  assertDeepEqual(w.calls[1], buildReopenLabelEditArgs(42, REPO));
+  assertDeepEqual(w.calls[1], buildRequeueAddLabelArgs(42, REPO));
+  assertDeepEqual(w.calls[2], buildRequeueShedLabelArgs(42, REPO));
 });
 
 await test("a bookkeeping re-queue writes labels, its note, then the state", async () => {
@@ -238,9 +240,9 @@ await test("a bookkeeping re-queue writes labels, its note, then the state", asy
       note: buildStrandedRecoveryComment(),
     },
   );
-  assertDeepEqual(w.verbs(), ["edit", "comment", "reopen"]);
+  assertDeepEqual(w.verbs(), ["edit", "edit", "comment", "reopen"]);
   assertEqual(
-    w.calls[1][w.calls[1].indexOf("--body") + 1],
+    w.calls[2][w.calls[2].indexOf("--body") + 1],
     buildStrandedRecoveryComment(),
   );
 });
@@ -263,6 +265,61 @@ await test("an interrupted fence post never leaves the stub queued", async () =>
     ),
   );
   assertDeepEqual(w.verbs(), ["comment"]);
+});
+
+await test("no re-queue write mixes --add-label with --remove-label (#1693)", async () => {
+  // `gh issue edit --add-label X --remove-label Y` is TWO concurrent GraphQL
+  // mutations, not one write. The half that can be lost is the add, and losing
+  // it on the regression path leaves a CLOSED stub with `sentry:archived` shed
+  // and `sentry:needs-triage` never applied — invisible to `decideDedupAction`'s
+  // baseline branch AND to the stranded sweep. Ordering the two flags into two
+  // calls is what removes that state, so no single call may carry both again.
+  for (const [cause, extra] of [
+    [REQUEUE_CAUSE_SENTRY_EVIDENCE, { lastSeen: "2026-07-20T08:00:00Z" }],
+    [REQUEUE_CAUSE_BOOKKEEPING, { note: buildStrandedRecoveryComment() }],
+  ]) {
+    const w = makeWriter();
+    await requeueQueueStub(
+      { writeGh: w.writeGh },
+      { repo: REPO, issueNumber: 42, cause, ...extra },
+    );
+    for (const args of w.calls) {
+      assert(
+        !(args.includes("--add-label") && args.includes("--remove-label")),
+        `one call carried both label flags: ${args.join(" ")}`,
+      );
+    }
+    // And in the order that makes every interruption sweep-visible.
+    const labelEdits = w.calls.filter((args) => args[1] === "edit");
+    assertDeepEqual(labelEdits, [
+      buildRequeueAddLabelArgs(42, REPO),
+      buildRequeueShedLabelArgs(42, REPO),
+    ]);
+  }
+});
+
+await test("a failed needs-triage add never proceeds to the shed (#1693)", async () => {
+  // Abort ordering, stated as the property that matters: the stub keeps the
+  // markers ingest's baseline branch reads, because the shed never ran.
+  const w = makeWriter({
+    failOn: (args) =>
+      args.includes("--add-label") ? "gh issue edit: 500" : null,
+  });
+  await assertRejects(
+    requeueQueueStub(
+      { writeGh: w.writeGh },
+      {
+        repo: REPO,
+        issueNumber: 42,
+        cause: REQUEUE_CAUSE_SENTRY_EVIDENCE,
+        lastSeen: "2026-07-20T08:00:00Z",
+      },
+    ),
+  );
+  assert(
+    !w.calls.some((args) => args.includes("--remove-label")),
+    "the shed must not run once the add has failed",
+  );
 });
 
 await test("the state change is the last write on both causes", async () => {
@@ -417,7 +474,7 @@ await test("the dedup read is author-fenced", async () => {
       dedupeFence: true,
     },
   );
-  assertDeepEqual(w.verbs(), ["comment", "edit", "reopen"]);
+  assertDeepEqual(w.verbs(), ["comment", "edit", "edit", "reopen"]);
 });
 
 await test("the bot's own identical fence is deduped", async () => {
@@ -436,7 +493,7 @@ await test("the bot's own identical fence is deduped", async () => {
       dedupeFence: true,
     },
   );
-  assertDeepEqual(w.verbs(), ["edit", "reopen"]);
+  assertDeepEqual(w.verbs(), ["edit", "edit", "reopen"]);
 });
 
 await test("a fence that identifies no occurrence is never deduped", async () => {
@@ -459,7 +516,7 @@ await test("a fence that identifies no occurrence is never deduped", async () =>
         dedupeFence: true,
       },
     );
-    assertDeepEqual(w.verbs(), ["comment", "edit", "reopen"]);
+    assertDeepEqual(w.verbs(), ["comment", "edit", "edit", "reopen"]);
   }
 });
 
@@ -478,7 +535,7 @@ await test("dedup is opt-in: a site that does not declare it always posts", asyn
       lastSeen: "2026-07-20T08:00:00Z",
     },
   );
-  assertDeepEqual(w.verbs(), ["comment", "edit", "reopen"]);
+  assertDeepEqual(w.verbs(), ["comment", "edit", "edit", "reopen"]);
 });
 
 // ---------------------------------------------------------------------------
