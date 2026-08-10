@@ -894,7 +894,10 @@ permission or the environment-secret writes 403 (`terraform/providers.tf`).
 
 ## Verification
 
-These checks are offline unless noted:
+These checks are offline unless noted. CI runs all of them in the required
+`Lint + test root scripts` job, one step per suite, so a red check names the leg
+that broke; `scripts/check-sentry-suites-in-ci.test.mjs` fails if a new suite
+lands without a step there.
 
 ```bash
 pnpm sentry:ingest:test
@@ -903,7 +906,10 @@ pnpm sentry:project:test
 pnpm sentry:autofix:select:test
 pnpm sentry:autofix:finalize:test
 pnpm sentry:archive:test
+pnpm sentry:broker:test
 pnpm sentry:requeue:test
+node scripts/sentry-triage-agent-comment.test.mjs
+node scripts/check-sentry-suites-in-ci.test.mjs
 
 # Read-only previews that require local credentials:
 pnpm sentry:ingest --dry-run --lookback-days 8

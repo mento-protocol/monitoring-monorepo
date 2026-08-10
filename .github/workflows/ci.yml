@@ -279,6 +279,11 @@ jobs:
               # Notifier coverage check re-runs when any workflow changes —
               # a new workflow with push-main or schedule must be caught even
               # if only the new workflow file is touched (no script change).
+              # Two further suites in this job read workflow files rather than
+              # scripts: check-autofix-ci-trust.mjs scans every workflow for
+              # PR-reachable secrets, and sentry-mcp-broker.test.mjs parses
+              # sentry-triage-agent.yml. Narrowing this glob would let a
+              # workflow-only edit skip the suites that exist to guard it.
               - .github/workflows/**
               - .github/actions/pnpm-install/**
               # The baseline-resolve composite exports ESLINT_BASELINE_MAIN,
@@ -1073,6 +1078,42 @@ jobs:
         # itself only runs weekly via supply-chain.yml; this required job is
         # what catches a regression in the script on every PR.
         run: node scripts/override-prune-report.test.mjs
+      # ── Sentry triage and autofix suites (issue #1721) ──────────────────────
+      # These guard the machine-authored triage and autofix legs: queue
+      # transitions, digest and projection shape, autofix selection and
+      # finalize, archive, the credential broker, and the re-queue chokepoint.
+      # Until this block existed they ran only in the local pre-push hook, so a
+      # contributor who bypassed the hook could merge a regression in any of
+      # them. One step per suite: a red check names the leg that broke.
+      - name: Sentry triage ingest suite
+        run: pnpm sentry:ingest:test
+      - name: Sentry triage digest suite
+        run: pnpm sentry:digest:test
+      - name: Sentry triage projection suite
+        run: pnpm sentry:project:test
+      - name: Sentry autofix select suite
+        run: pnpm sentry:autofix:select:test
+      - name: Sentry autofix finalize suite
+        run: pnpm sentry:autofix:finalize:test
+      - name: Sentry triage archive suite
+        run: pnpm sentry:archive:test
+      - name: Sentry credential broker suite
+        # Also parses .github/workflows/sentry-triage-agent.yml (token
+        # placement, the --mcp-config shape, the single port literal). The
+        # rootScripts filter already covers .github/workflows/**, so a
+        # workflow-only edit still reaches this step.
+        run: pnpm sentry:broker:test
+      - name: Sentry re-queue chokepoint suite
+        run: pnpm sentry:requeue:test
+      - name: Sentry triage agent comment suite
+        # No pnpm alias — invoked by path, the way the local gate runs it.
+        run: node scripts/sentry-triage-agent-comment.test.mjs
+      - name: Sentry suite CI coverage assertion
+        # The meta-check that keeps this gap from recurring: every
+        # scripts/sentry-*.test.mjs must be invoked by this job, every
+        # sentry:*:test alias must resolve to one of those files, and the local
+        # gate's tooling allowlist must list every sentry:* script.
+        run: node scripts/check-sentry-suites-in-ci.test.mjs
       - uses: Kesin11/actions-timeline@7bf79990b7c09f5dfb570ac30b814ca597bd538e # v3.1.1
         if: always()
 
