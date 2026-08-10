@@ -1696,7 +1696,75 @@ describe("peg poll cycle conversion and cadence", () => {
     expect(readConversionLeg).toHaveBeenCalledTimes(4);
   });
 
-  it("fails closed once on converted-source expiry without retrying until ordinary cadence", async () => {
+  it("refreshes expired conversion evidence during a structural outage", async () => {
+    const spec = primaryAsset({
+      sources: [
+        primarySource({
+          id: "kraken_usd",
+          provider: "kraken",
+          pair: "PEG/USD",
+          pollIntervalSeconds: 300,
+          staleAfterSeconds: 600,
+          converted: true,
+        }),
+      ],
+    });
+    const input = makeInput([spec]);
+    let nowMs = 1_800_000_000_000;
+    let structuralAvailable = true;
+    const fetchKraken = vi.fn(async () =>
+      observation(nowMs, { vwap: 2, bid: 1.998, ask: 2.002 }),
+    );
+    const readConversionLeg = vi.fn(async () => ({
+      rate: 2,
+      medianAt: Math.floor(nowMs / 1_000),
+      expirySeconds: 60,
+      authoritative: true,
+      unavailableReason: null,
+    }));
+    const poller = createPegPoller({
+      nowMs: () => nowMs,
+      fetchStructuralContext: vi.fn(async () => {
+        if (!structuralAvailable) throw new Error("Hasura unavailable");
+        return structuralContext(spec, Math.floor(nowMs / 1_000));
+      }),
+      fetchKraken,
+      readConversionLeg,
+      publish: vi.fn(),
+    });
+
+    await poller.pollCycle(input);
+    structuralAvailable = false;
+    nowMs += 61_000;
+    const unavailable = (await poller.pollCycle(input))[0]!;
+    expect(unavailable.indexedPoolReachable).toBe(false);
+    expect(source(unavailable, "kraken_usd")).toMatchObject({
+      healthy: true,
+      referenceSize: 50,
+      newSuccess: false,
+      observation: { vwap: 1 },
+    });
+    expect(source(unavailable, "kraken_usd")).not.toHaveProperty(
+      "rawObservation",
+    );
+    expect(fetchKraken).toHaveBeenCalledOnce();
+    expect(readConversionLeg).toHaveBeenCalledTimes(2);
+
+    structuralAvailable = true;
+    nowMs += 1_000;
+    const recovered = (await poller.pollCycle(input))[0]!;
+    expect(recovered.indexedPoolReachable).toBe(true);
+    expect(source(recovered, "kraken_usd")).toMatchObject({
+      healthy: true,
+      referenceSize: 50,
+      newSuccess: false,
+      observation: { vwap: 1 },
+    });
+    expect(fetchKraken).toHaveBeenCalledOnce();
+    expect(readConversionLeg).toHaveBeenCalledTimes(2);
+  });
+
+  it("fails closed once during a structural outage without retrying before ordinary cadence", async () => {
     const spec = primaryAsset({
       sources: [
         primarySource({
@@ -1717,6 +1785,7 @@ describe("peg poll cycle conversion and cadence", () => {
     const input = makeInput([spec]);
     let nowMs = 1_800_000_000_000;
     let authoritative = true;
+    let structuralAvailable = true;
     const errors: PegPollErrorEvent[] = [];
     const fetchKraken = vi.fn(async () => observation(nowMs));
     const readConversionLeg = vi.fn(async () => ({
@@ -1728,9 +1797,10 @@ describe("peg poll cycle conversion and cadence", () => {
     }));
     const poller = createPegPoller({
       nowMs: () => nowMs,
-      fetchStructuralContext: vi.fn(async () =>
-        structuralContext(spec, Math.floor(nowMs / 1_000)),
-      ),
+      fetchStructuralContext: vi.fn(async () => {
+        if (!structuralAvailable) throw new Error("Hasura unavailable");
+        return structuralContext(spec, Math.floor(nowMs / 1_000));
+      }),
       fetchBitvavo: vi.fn(async () => observation(nowMs)),
       fetchKraken,
       readConversionLeg,
@@ -1740,36 +1810,49 @@ describe("peg poll cycle conversion and cadence", () => {
 
     await poller.pollCycle(input);
     authoritative = false;
+    structuralAvailable = false;
     nowMs += 61_000;
     const expired = (await poller.pollCycle(input))[0]!;
+    expect(expired.indexedPoolReachable).toBe(false);
     expect(source(expired, "kraken_usd")).toMatchObject({
       healthy: false,
       observation: null,
     });
     expect(fetchKraken).toHaveBeenCalledOnce();
     expect(readConversionLeg).toHaveBeenCalledTimes(2);
-    expect(errors.map(({ kind }) => kind)).toEqual(["conversion_unavailable"]);
+    expect(
+      errors.filter(({ kind }) => kind === "conversion_unavailable"),
+    ).toHaveLength(1);
 
     nowMs += 15_000;
     await poller.pollCycle(input);
     expect(fetchKraken).toHaveBeenCalledOnce();
     expect(readConversionLeg).toHaveBeenCalledTimes(2);
-    expect(errors).toHaveLength(1);
+    expect(
+      errors.filter(({ kind }) => kind === "conversion_unavailable"),
+    ).toHaveLength(1);
 
+    structuralAvailable = true;
     nowMs += 223_000;
-    await poller.pollCycle(input);
+    const recovered = (await poller.pollCycle(input))[0]!;
+    expect(recovered.indexedPoolReachable).toBe(true);
+    expect(source(recovered, "kraken_usd")).toMatchObject({
+      healthy: false,
+      observation: null,
+    });
     expect(fetchKraken).toHaveBeenCalledOnce();
     expect(readConversionLeg).toHaveBeenCalledTimes(2);
-    expect(errors).toHaveLength(1);
+    expect(
+      errors.filter(({ kind }) => kind === "conversion_unavailable"),
+    ).toHaveLength(1);
 
     nowMs += 1_000;
     await poller.pollCycle(input);
     expect(fetchKraken).toHaveBeenCalledTimes(2);
     expect(readConversionLeg).toHaveBeenCalledTimes(3);
-    expect(errors.map(({ kind }) => kind)).toEqual([
-      "conversion_unavailable",
-      "conversion_unavailable",
-    ]);
+    expect(
+      errors.filter(({ kind }) => kind === "conversion_unavailable"),
+    ).toHaveLength(2);
   });
 
   it("fails closed when retained raw provider evidence expires", async () => {

@@ -868,6 +868,9 @@ async function snapshotWithoutReferenceSize(
       newSuccess: false,
     });
   }
+  if (conversionExpiryDue(state, input.source, input.context)) {
+    return refreshExpiredConversion(input, state, state.referenceSize);
+  }
   const observation = cachedObservation(
     state,
     input.source,
