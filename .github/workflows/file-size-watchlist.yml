@@ -1,0 +1,67 @@
+name: File-size Watchlist
+
+# Monthly issue-only scheduler for the repository's lint-aware file-size
+# reporter. It never edits repository content or opens pull requests. A manual
+# branch dispatch may validate unreleased scheduler code, but the report always
+# comes from a separate checkout of the current default branch.
+
+on:
+  schedule:
+    # First day of each month, off the hour to avoid scheduler contention.
+    - cron: 13 7 1 * *
+  workflow_dispatch:
+    # checkov:skip=CKV_GHA_7: publish_report only forces a closed evidence issue
+    # when current main has no actionable drift. Scheduled runs stay quiet.
+    inputs:
+      publish_report:
+        description: Publish a closed evidence issue when no actionable drift exists
+        required: true
+        default: false
+        type: boolean
+
+permissions: read-all
+
+concurrency:
+  group: file-size-watchlist
+  cancel-in-progress: false
+
+jobs:
+  sync-issue:
+    name: Synchronize actionable file-size drift
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Check out current main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          path: main-checkout
+          persist-credentials: false
+      - name: Check out scheduler source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.ref }}
+          path: scheduler-source
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: scheduler-source/.node-version
+      - name: Ensure the file-size watchlist label exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh label create "file-size-watchlist" --repo "${{ github.repository }}"
+          --color "5319e7" --description "Actionable lint-aware file-size drift"
+          --force
+      - name: Generate the current-main report and synchronize its issue
+        working-directory: scheduler-source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FILE_SIZE_WATCHLIST_ROOT: ${{ github.workspace }}/main-checkout
+          FILE_SIZE_WATCHLIST_REPO: ${{ github.repository }}
+          FILE_SIZE_WATCHLIST_PUBLISH_REPORT: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_report && 'true' || 'false' }}
+          FILE_SIZE_WATCHLIST_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: node scripts/file-size-watchlist-issue.mjs --json

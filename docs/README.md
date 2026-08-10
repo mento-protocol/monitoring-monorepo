@@ -184,6 +184,7 @@ Authority: canonical
 - [`docs/adr/0056-agent-mcp-credential-broker.md`](adr/0056-agent-mcp-credential-broker.md) — An untrusted agent's MCP credentials sit behind a loopback broker, not in its env
 - [`docs/adr/0057-peg-observation-advancement.md`](adr/0057-peg-observation-advancement.md) — Repeated Peg provider observations retain bounded health, never sample authority
 - [`docs/adr/0058-metrics-bridge-dedicated-cloud-build-executor.md`](adr/0058-metrics-bridge-dedicated-cloud-build-executor.md) — Metrics Bridge uses a dedicated Cloud Build executor
+- [`docs/adr/0059-repo-owned-file-size-watchlist-scheduler.md`](adr/0059-repo-owned-file-size-watchlist-scheduler.md) — File-size watchlist scheduling is repository-owned and issue-only
 
 Authority: non-canonical
 

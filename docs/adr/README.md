@@ -73,6 +73,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0040](0040-bounded-documentation-garden-queue.md)          | Weekly bounded documentation packets enter one serialized GitHub Issue queue         |
 | [0041](0041-offline-documentation-navigation-evaluation.md) | Fresh-agent documentation navigation is evaluated offline with deterministic scoring |
 | [0056](0056-agent-mcp-credential-broker.md)                 | An untrusted agent's MCP credentials sit behind a loopback broker, not in its env    |
+| [0059](0059-repo-owned-file-size-watchlist-scheduler.md)    | Monthly lint-aware file-size drift enters one repository-owned issue route           |
 
 ### shared-config
 

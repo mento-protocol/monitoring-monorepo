@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,6 +15,11 @@ import {
   scopeForPath,
   withRawDeltas,
 } from "./file-size-watchlist.mjs";
+import {
+  ISSUE_MARKER,
+  actionableFileSizeRows,
+  planIssueSync,
+} from "./file-size-watchlist-issue.mjs";
 
 const scriptPath = fileURLToPath(import.meta.url);
 const repoRoot = resolve(dirname(scriptPath), "..");
@@ -162,4 +168,91 @@ test("fail-on policy only blocks the requested severity", () => {
   assert.equal(_private.shouldFail([{ status: "soft" }], "soft"), true);
   assert.equal(_private.shouldFail([{ status: "soft" }], "hard"), false);
   assert.equal(_private.shouldFail([{ status: "hard" }], "hard"), true);
+});
+
+test("actionable drift keeps cap status separate from raw growth", () => {
+  const rows = [
+    { path: "hard.ts", status: "hard", rawDelta: 0 },
+    { path: "near.ts", status: "near-hard", rawDelta: -20 },
+    { path: "new-soft.ts", status: "soft", rawDelta: null },
+    { path: "growing-soft.ts", status: "soft", rawDelta: 101 },
+    { path: "steady-soft.ts", status: "soft", rawDelta: 100 },
+    { path: "raw-only.ts", status: "watch", rawDelta: 500 },
+  ];
+
+  assert.deepEqual(
+    actionableFileSizeRows(rows).map((row) => row.path),
+    ["hard.ts", "near.ts", "new-soft.ts", "growing-soft.ts"],
+  );
+});
+
+test("issue sync creates, resolves, and force-publishes one marked issue", () => {
+  const actionableRows = [
+    { path: "near.ts", status: "near-hard", rawDelta: 0 },
+  ];
+  const marked = {
+    number: 44,
+    state: "open",
+    body: ISSUE_MARKER,
+    labels: [{ name: "agent-ready" }, { name: "custom" }],
+  };
+
+  assert.equal(
+    planIssueSync({ issues: [], rows: actionableRows, publishReport: false })
+      .action,
+    "create",
+  );
+
+  const resolved = planIssueSync({
+    issues: [marked],
+    rows: [],
+    publishReport: false,
+  });
+  assert.equal(resolved.action, "close-resolved");
+  assert.deepEqual(resolved.labels, ["custom", "file-size-watchlist"]);
+
+  assert.equal(
+    planIssueSync({ issues: [], rows: [], publishReport: true }).action,
+    "create-closed-report",
+  );
+});
+
+test("issue sync never overwrites a claimed packet and fails on duplicates", () => {
+  const active = {
+    number: 45,
+    state: "open",
+    body: ISSUE_MARKER,
+    labels: [{ name: "agent-active" }],
+  };
+  assert.equal(
+    planIssueSync({ issues: [active], rows: [], publishReport: true }).action,
+    "retain",
+  );
+
+  assert.throws(
+    () =>
+      planIssueSync({
+        issues: [active, { ...active, number: 46 }],
+        rows: [],
+        publishReport: false,
+      }),
+    /expected at most one/,
+  );
+});
+
+test("workflow owns the monthly current-main issue route", () => {
+  const workflow = readFileSync(
+    resolve(repoRoot, ".github/workflows/file-size-watchlist.yml"),
+    "utf8",
+  );
+
+  assert.match(workflow, /cron: 13 7 1 \* \*$/m);
+  assert.match(
+    workflow,
+    /ref: \$\{\{ github\.event\.repository\.default_branch \}\}/,
+  );
+  assert.match(workflow, /FILE_SIZE_WATCHLIST_ROOT:/);
+  assert.match(workflow, /gh label create "file-size-watchlist"/);
+  assert.match(workflow, /node scripts\/file-size-watchlist-issue\.mjs --json/);
+  assert.doesNotMatch(workflow, /BACKLOG\.md/);
 });
