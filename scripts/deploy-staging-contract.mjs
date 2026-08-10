@@ -30,6 +30,10 @@ const METRICS_BRIDGE_DIRECT_BOOTSTRAP_TARGETS = [
   "google_service_account_iam_member.dev_metrics_bridge_builder_service_account_user",
   "google_service_account_iam_member.dev_metrics_bridge_runtime_service_account_user",
 ];
+const METRICS_BRIDGE_SERVICE_BOOTSTRAP_TARGETS = [
+  "google_cloud_run_v2_service.metrics_bridge",
+  "google_cloud_run_v2_service_iam_member.metrics_bridge_public",
+];
 const CLOUD_BUILD_SOURCE_EXECUTORS = [
   "serviceAccount:${google_service_account.grafana_agent_builder.email}",
   "serviceAccount:${google_project.monitoring.number}-compute@developer.gserviceaccount.com",
@@ -512,18 +516,87 @@ function validateCallsites(files, errors) {
 
   const directDeployPath = "scripts/deploy-bridge.sh";
   const directDeploy = requireSource(files, directDeployPath, errors);
-  for (const target of METRICS_BRIDGE_DIRECT_BOOTSTRAP_TARGETS) {
-    const matches = directDeploy.match(
-      new RegExp(
-        `^\\s+-target=${target.replaceAll(".", "\\.")}\\s+\\\\$`,
-        "gmu",
-      ),
+  const targetLine = (target) =>
+    new RegExp(
+      `^\\s+-target=${target.replaceAll(".", "\\.")}\\s*(?:\\\\)?$`,
+      "gmu",
     );
+  const serviceProbeStart = directDeploy.indexOf(
+    'if ! EXISTING_METRICS_BRIDGE_SERVICE="$(gcloud run services list',
+  );
+  const serviceProbeEnd = directDeploy.indexOf("\nfi", serviceProbeStart);
+  const serviceCaseStart = directDeploy.indexOf(
+    'case "$EXISTING_METRICS_BRIDGE_SERVICE" in',
+    serviceProbeEnd,
+  );
+  const absentServiceStart = directDeploy.indexOf('  "")', serviceCaseStart);
+  const absentServiceEnd = directDeploy.indexOf("    ;;", absentServiceStart);
+  const serviceCaseEnd = directDeploy.indexOf("esac", absentServiceEnd);
+
+  for (const target of METRICS_BRIDGE_DIRECT_BOOTSTRAP_TARGETS) {
+    const matches = directDeploy.match(targetLine(target));
     if (matches?.length !== 1) {
       errors.push(
         `${directDeployPath}: direct bootstrap must target ${target} exactly once`,
       );
+    } else if (directDeploy.indexOf(matches[0]) > serviceProbeStart) {
+      errors.push(
+        `${directDeployPath}: direct IAM target ${target} must run before the service lookup`,
+      );
     }
+  }
+
+  const expectedProbeFragments = [
+    '--project="$PROJECT"',
+    '--region="$REGION"',
+    "--filter='metadata.name=metrics-bridge'",
+    "--format='value(metadata.name)'",
+    "--limit=2",
+  ];
+  const probeBlock =
+    serviceProbeStart >= 0 && serviceProbeEnd > serviceProbeStart
+      ? directDeploy.slice(serviceProbeStart, serviceProbeEnd)
+      : "";
+  if (
+    !probeBlock ||
+    !probeBlock.includes("exit 1") ||
+    expectedProbeFragments.some((fragment) => !probeBlock.includes(fragment))
+  ) {
+    errors.push(
+      `${directDeployPath}: existing-service lookup must be exact and fail closed`,
+    );
+  }
+
+  for (const target of METRICS_BRIDGE_SERVICE_BOOTSTRAP_TARGETS) {
+    const matches = directDeploy.match(targetLine(target));
+    const targetIndex =
+      matches?.length === 1 ? directDeploy.indexOf(matches[0]) : -1;
+    if (
+      matches?.length !== 1 ||
+      targetIndex <= absentServiceStart ||
+      targetIndex >= absentServiceEnd
+    ) {
+      errors.push(
+        `${directDeployPath}: ${target} must run exactly once only in the confirmed-absent service branch`,
+      );
+    }
+  }
+
+  const unexpectedResultStart = directDeploy.indexOf("  *)", absentServiceEnd);
+  const unexpectedResultBlock =
+    unexpectedResultStart >= 0 && serviceCaseEnd > unexpectedResultStart
+      ? directDeploy.slice(unexpectedResultStart, serviceCaseEnd)
+      : "";
+  if (
+    serviceCaseStart < 0 ||
+    absentServiceStart < 0 ||
+    absentServiceEnd < 0 ||
+    serviceCaseEnd < 0 ||
+    !unexpectedResultBlock.includes("exit 1")
+  ) {
+    errors.push(
+      `${directDeployPath}: service bootstrap branching must reject unexpected lookup results`,
+    );
   }
 }
 

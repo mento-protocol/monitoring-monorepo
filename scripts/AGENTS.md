@@ -3,7 +3,7 @@ title: Scripts Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-27
+last_verified: 2026-08-10
 doc_type: agent-instructions
 scope: scripts
 review_interval_days: 90
@@ -47,6 +47,9 @@ garden_lane: agent-entry-points
   and logging mode. It also requires the direct Metrics Bridge bootstrap to
   reconcile the builder's project roles, repository writer, developer act-as
   bindings, and build-log reader before submitting and rolling out a build.
+  For an existing Metrics Bridge service, that bootstrap must fail closed if it
+  cannot verify the exact service name and must not target the service or public
+  binding; those targets run only for a confirmed absent service.
   [ADR 0053](../docs/adr/0053-explicit-deployment-source-staging.md) owns the
   supported static syntax and explicit proof limits. Keep indirect or dynamic
   deploy forms forbidden and inert examples confined to

@@ -2,9 +2,10 @@
 # Build and deploy the metrics-bridge container to Cloud Run.
 #
 # Handles both first-time bootstrap and subsequent deploys:
-#   1. Ensures GCP project + APIs + Artifact Registry + Cloud Run service
-#      exist (terraform apply). On first run the service boots with the
-#      bootstrap image from var.metrics_bridge_image (gcr.io/cloudrun/hello).
+#   1. Reconciles GCP project APIs, Artifact Registry, and IAM with Terraform,
+#      then verifies the Cloud Run service. Only a confirmed first run creates
+#      the service with the bootstrap image from var.metrics_bridge_image
+#      (gcr.io/cloudrun/hello).
 #   2. Builds and pushes the container image (gcloud builds submit).
 #   3. Rolls a new revision via `gcloud run services update --image=<digest>`.
 #      Image rollouts are intentionally OUT OF terraform — the CR resource
@@ -63,10 +64,11 @@ if [ "$SKIP_CONFIRM" = false ]; then
   fi
 fi
 
-# Step 1: Ensure GCP infra + IAM + Cloud Run service shape exist. On
-# subsequent runs this is a no-op (terraform ignores image drift via
-# `lifecycle.ignore_changes`, so the current running image is preserved
-# even though `var.metrics_bridge_image` defaults to the bootstrap placeholder).
+# Step 1a: Reconcile the GCP APIs, build/runtime IAM, and source staging used by
+# both first-time and routine deploys. Keep the Cloud Run service out of this
+# apply: its revision stays Terraform-managed for reviewed Peg-policy rollovers,
+# so targeting an existing service after a gcloud rollout would mint a redundant
+# Terraform revision before the intended image rollout below.
 echo "Ensuring GCP infrastructure..."
 terraform -chdir=terraform apply $TF_APPROVE \
   -target=google_project.monitoring \
@@ -86,9 +88,36 @@ terraform -chdir=terraform apply $TF_APPROVE \
   -target=google_project_iam_member.dev_cloudbuild_editor \
   -target=google_project_iam_member.dev_logging_viewer \
   -target=google_service_account_iam_member.dev_metrics_bridge_builder_service_account_user \
-  -target=google_service_account_iam_member.dev_metrics_bridge_runtime_service_account_user \
-  -target=google_cloud_run_v2_service.metrics_bridge \
-  -target=google_cloud_run_v2_service_iam_member.metrics_bridge_public
+  -target=google_service_account_iam_member.dev_metrics_bridge_runtime_service_account_user
+
+# Step 1b: A successful exact-name list distinguishes an existing service from
+# a first bootstrap. Any gcloud/API/auth failure stops before another mutation.
+echo "Checking Metrics Bridge Cloud Run service..."
+if ! EXISTING_METRICS_BRIDGE_SERVICE="$(gcloud run services list \
+  --project="$PROJECT" \
+  --region="$REGION" \
+  --filter='metadata.name=metrics-bridge' \
+  --format='value(metadata.name)' \
+  --limit=2)"; then
+  echo "Unable to verify Metrics Bridge Cloud Run service state; refusing to deploy."
+  exit 1
+fi
+
+case "$EXISTING_METRICS_BRIDGE_SERVICE" in
+  metrics-bridge)
+    echo "Cloud Run service exists; preserving its live revision during Terraform reconciliation."
+    ;;
+  "")
+    echo "Cloud Run service is absent; bootstrapping it with Terraform..."
+    terraform -chdir=terraform apply $TF_APPROVE \
+      -target=google_cloud_run_v2_service.metrics_bridge \
+      -target=google_cloud_run_v2_service_iam_member.metrics_bridge_public
+    ;;
+  *)
+    echo "Unexpected Cloud Run service lookup result; refusing to deploy."
+    exit 1
+    ;;
+esac
 
 # Step 2: Build and push the image.
 echo ""

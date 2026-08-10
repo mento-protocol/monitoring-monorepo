@@ -566,11 +566,82 @@ for (const target of [
   "google_service_account_iam_member.dev_metrics_bridge_builder_service_account_user",
   "google_service_account_iam_member.dev_metrics_bridge_runtime_service_account_user",
 ]) {
+  const targetLine = files["scripts/deploy-bridge.sh"]
+    .split("\n")
+    .find((line) => line.includes(`-target=${target}`));
+  assert(targetLine, `direct bootstrap target fixture missing: ${target}`);
   expectFailure(
-    mutate(files, "scripts/deploy-bridge.sh", `  -target=${target} \\\n`, ""),
+    mutate(files, "scripts/deploy-bridge.sh", `${targetLine}\n`, ""),
     `scripts/deploy-bridge.sh: direct bootstrap must target ${target} exactly once`,
   );
 }
+
+for (const [target, targetLine] of [
+  [
+    "google_cloud_run_v2_service.metrics_bridge",
+    "      -target=google_cloud_run_v2_service.metrics_bridge \\\n",
+  ],
+  [
+    "google_cloud_run_v2_service_iam_member.metrics_bridge_public",
+    "      -target=google_cloud_run_v2_service_iam_member.metrics_bridge_public\n",
+  ],
+]) {
+  expectFailure(
+    mutate(files, "scripts/deploy-bridge.sh", targetLine, ""),
+    `scripts/deploy-bridge.sh: ${target} must run exactly once only in the confirmed-absent service branch`,
+  );
+}
+
+expectFailure(
+  mutate(
+    files,
+    "scripts/deploy-bridge.sh",
+    'if ! EXISTING_METRICS_BRIDGE_SERVICE="$(gcloud run services list',
+    'if EXISTING_METRICS_BRIDGE_SERVICE="$(gcloud run services list',
+  ),
+  "scripts/deploy-bridge.sh: existing-service lookup must be exact and fail closed",
+);
+expectFailure(
+  mutate(
+    files,
+    "scripts/deploy-bridge.sh",
+    "  --filter='metadata.name=metrics-bridge' \\\n",
+    "  --filter='metadata.name:metrics-bridge' \\\n",
+  ),
+  "scripts/deploy-bridge.sh: existing-service lookup must be exact and fail closed",
+);
+expectFailure(
+  mutate(
+    files,
+    "scripts/deploy-bridge.sh",
+    '  echo "Unable to verify Metrics Bridge Cloud Run service state; refusing to deploy."\n  exit 1\nfi',
+    '  echo "Unable to verify Metrics Bridge Cloud Run service state; refusing to deploy."\nfi',
+  ),
+  "scripts/deploy-bridge.sh: existing-service lookup must be exact and fail closed",
+);
+expectFailure(
+  mutate(
+    files,
+    "scripts/deploy-bridge.sh",
+    '    echo "Unexpected Cloud Run service lookup result; refusing to deploy."\n    exit 1\n    ;;',
+    '    echo "Unexpected Cloud Run service lookup result; refusing to deploy."\n    ;;',
+  ),
+  "scripts/deploy-bridge.sh: service bootstrap branching must reject unexpected lookup results",
+);
+expectFailure(
+  mutate(
+    mutate(
+      files,
+      "scripts/deploy-bridge.sh",
+      "      -target=google_cloud_run_v2_service.metrics_bridge \\\n",
+      "",
+    ),
+    "scripts/deploy-bridge.sh",
+    "  -target=google_service_account_iam_member.dev_metrics_bridge_runtime_service_account_user\n",
+    "  -target=google_service_account_iam_member.dev_metrics_bridge_runtime_service_account_user \\\n  -target=google_cloud_run_v2_service.metrics_bridge\n",
+  ),
+  "scripts/deploy-bridge.sh: google_cloud_run_v2_service.metrics_bridge must run exactly once only in the confirmed-absent service branch",
+);
 
 const metricsBridgeBuilderExecutor =
   '    "serviceAccount:${google_service_account.metrics_bridge_builder.email}",\n';
