@@ -455,38 +455,22 @@ test("peg policy requires bounded listing confirmation and matching staleness", 
   );
 });
 
-test("peg policy defaults listing confirmation only for the exact retained legacy version", () => {
+test("peg policy requires every source to declare listing confirmation", () => {
   const policy = freshPegPolicy();
-  const legacyVersion = "europ-2026-07-22-v1-a69b99aad61649957a2639dc8348b05f";
   assert(
-    policy.previous.version === legacyVersion,
-    "expected the committed retained predecessor to be the exact legacy version",
-  );
-  assert(
-    Object.values(policy.previous.assets["europ-schuman"].sources).every(
-      (source) => source.listingAbsentConsecutiveChecks === undefined,
-    ),
-    "expected the exact legacy predecessor to exercise the default",
+    policy.previous === null,
+    "expected the committed policy predecessor to be cleared",
   );
   assert(
     pegPolicyFailures(policy) === "",
-    "expected the exact retained legacy predecessor to default to two checks",
+    "expected the checked-in active policy to declare every threshold",
   );
 
-  policy.previous.version = "europ-future-policy";
+  delete policy.active.assets["europ-schuman"].sources.bitvavo_eur
+    .listingAbsentConsecutiveChecks;
   assert(
     /listingAbsentConsecutiveChecks/.test(pegPolicyFailures(policy)),
-    "expected any other retained version to require an explicit threshold",
-  );
-
-  const activeWithoutThreshold = freshPegPolicy();
-  delete activeWithoutThreshold.active.assets["europ-schuman"].sources
-    .bitvavo_eur.listingAbsentConsecutiveChecks;
-  assert(
-    /listingAbsentConsecutiveChecks/.test(
-      pegPolicyFailures(activeWithoutThreshold),
-    ),
-    "expected active policy to require an explicit threshold",
+    "expected every policy source to require an explicit threshold",
   );
 });
 
@@ -893,10 +877,7 @@ test("committed peg rules preserve coverage, rollover, and routing invariants", 
     path.resolve(__dirname, "..", "alerts/rules/peg-message-templates.tf"),
     "utf8",
   );
-  const europPolicies = [
-    pegPolicyFixture.active.assets["europ-schuman"],
-    pegPolicyFixture.previous.assets["europ-schuman"],
-  ];
+  const europPolicies = [pegPolicyFixture.active.assets["europ-schuman"]];
 
   assert(
     source.includes("increase(mento_peg_poll_success_total") &&
@@ -917,6 +898,36 @@ test("committed peg rules preserve coverage, rollover, and routing invariants", 
       ),
     "health comparisons and conversion error bands must stay explicit",
   );
+  for (const policy of ["active", "previous"]) {
+    assert(
+      source.includes(`peg_${policy}_operational_sources = {`) &&
+        source.includes(`peg_${policy}_secondary_sources = {`) &&
+        source.includes(`peg_${policy}_source_unhealthy_for_duration = {`) &&
+        source.includes(
+          'peg_secondary_source_unhealthy_for_duration = "1800s"',
+        ) &&
+        source.includes('item.source.authority != "display"') &&
+        source.includes(
+          'item.source.authority == "secondary" ? local.peg_secondary_source_unhealthy_for_duration',
+        ) &&
+        ruleDefinitions.includes(
+          `for key, item in local.peg_${policy}_operational_sources : "${policy}-unhealthy-\${key}" => {`,
+        ) &&
+        ruleDefinitions.includes(
+          `for key, item in local.peg_${policy}_secondary_sources : "${policy}-dead-\${key}" => {`,
+        ) &&
+        ruleDefinitions.includes(
+          `for_duration       = local.peg_${policy}_source_unhealthy_for_duration[key]`,
+        ) &&
+        !ruleDefinitions.includes(
+          `for key, item in local.peg_${policy}_sources : "${policy}-unhealthy-\${key}" => {`,
+        ) &&
+        !ruleDefinitions.includes(
+          `for key, item in local.peg_${policy}_non_deep_sources : "${policy}-dead-\${key}" => {`,
+        ),
+      `${policy} source-health rules must skip display sources, hold secondary failures for 30 minutes, and retain deep two-poll duration`,
+    );
+  }
   for (const policy of ["active", "previous"]) {
     const policyVersion = `\${local.peg_${policy}_policy_version}`;
     const sourceUnhealthy =
@@ -1069,13 +1080,14 @@ test("committed peg rules preserve coverage, rollover, and routing invariants", 
     "listing alerts must use instant exact-version producer state, bounded streak, and fresh authoritative check time",
   );
   assert(
-    /peg_legacy_listing_absent_consecutive_checks_policy_version\s*=\s*"europ-2026-07-22-v1-a69b99aad61649957a2639dc8348b05f"/.test(
-      source,
+    !source.includes(
+      "peg_legacy_listing_absent_consecutive_checks_policy_version",
     ) &&
+      !source.includes("source.listingAbsentConsecutiveChecks,") &&
       source.includes(
-        "local.peg_previous_policy.version == local.peg_legacy_listing_absent_consecutive_checks_policy_version ? 2 : source.listingAbsentConsecutiveChecks",
+        "listing_absent_consecutive_checks = source.listingAbsentConsecutiveChecks",
       ),
-    "only the exact retained legacy policy may default listing confirmation to two checks",
+    "listing confirmation must come directly from each active or retained policy source",
   );
   assert(
     source.includes(

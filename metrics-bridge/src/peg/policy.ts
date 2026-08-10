@@ -53,22 +53,11 @@ export const PEG_POLICY_MAX_ASSETS = 32;
 export const PEG_POLICY_MAX_SOURCES_PER_ASSET = 16;
 export const PEG_POLICY_MAX_BLIND_CONSECUTIVE_POLLS = 1_000;
 export const PEG_POLICY_MAX_LISTING_ABSENT_CONSECUTIVE_CHECKS = 1_000;
-export const PEG_POLICY_INITIAL_LISTING_ABSENT_CONSECUTIVE_CHECKS = 2;
-export const PEG_POLICY_LEGACY_LISTING_ABSENT_CONSECUTIVE_CHECKS_VERSION =
-  "europ-2026-07-22-v1-a69b99aad61649957a2639dc8348b05f";
 
-/**
- * The retained pre-streak policy must stay byte-for-byte intact through its
- * two-phase rollover. Remove this compatibility default after that predecessor
- * is cleared; active policies always declare the field below.
- */
 export function effectiveListingAbsentConsecutiveChecks(source: {
-  listingAbsentConsecutiveChecks?: number | undefined;
+  listingAbsentConsecutiveChecks: number;
 }): number {
-  return (
-    source.listingAbsentConsecutiveChecks ??
-    PEG_POLICY_INITIAL_LISTING_ABSENT_CONSECUTIVE_CHECKS
-  );
+  return source.listingAbsentConsecutiveChecks;
 }
 
 export const PegSourcePolicySchema = z
@@ -81,8 +70,7 @@ export const PegSourcePolicySchema = z
       .number()
       .int()
       .min(2)
-      .max(PEG_POLICY_MAX_LISTING_ABSENT_CONSECUTIVE_CHECKS)
-      .optional(),
+      .max(PEG_POLICY_MAX_LISTING_ABSENT_CONSECUTIVE_CHECKS),
     spreadEnvelopeBps: z.number().finite().nonnegative().max(10_000),
     conversionErrorBps: z.number().finite().nonnegative().max(10_000),
   })
@@ -235,44 +223,6 @@ export const PegPolicyVersionSchema = z
     }
   });
 
-function requireListingThresholds(
-  policy: z.infer<typeof PegPolicyVersionSchema>,
-  slot: "active" | "previous",
-  context: z.RefinementCtx,
-): void {
-  if (
-    slot === "previous" &&
-    policy.version ===
-      PEG_POLICY_LEGACY_LISTING_ABSENT_CONSECUTIVE_CHECKS_VERSION
-  ) {
-    return;
-  }
-  const missing = Object.entries(policy.assets).flatMap(([assetId, asset]) =>
-    Object.entries(asset.sources)
-      .filter(
-        ([, source]) => source.listingAbsentConsecutiveChecks === undefined,
-      )
-      .map(([sourceId]) => ({ assetId, sourceId })),
-  );
-  for (const { assetId, sourceId } of missing) {
-    context.addIssue({
-      code: "custom",
-      path: [
-        slot,
-        "assets",
-        assetId,
-        "sources",
-        sourceId,
-        "listingAbsentConsecutiveChecks",
-      ],
-      message:
-        slot === "active"
-          ? "must be declared by the active policy"
-          : "may be omitted only by the exact pre-streak retained predecessor",
-    });
-  }
-}
-
 export const PegPolicyBundleSchema = z
   .object({
     schemaVersion: z.literal(1),
@@ -287,10 +237,6 @@ export const PegPolicyBundleSchema = z
         path: ["previous", "version"],
         message: "must differ from the active version",
       });
-    }
-    requireListingThresholds(bundle.active, "active", context);
-    if (bundle.previous !== null) {
-      requireListingThresholds(bundle.previous, "previous", context);
     }
   });
 

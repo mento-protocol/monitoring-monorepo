@@ -289,15 +289,12 @@ describe("peg decision-package producer", () => {
     );
   });
 
-  it("selects retained previous only as the explicit active-incomplete fallback", () => {
-    const legacyPrevious = structuredClone(previous);
-    delete legacyPrevious.assets["asset-one"]!.sources.deep_eur!
-      .listingAbsentConsecutiveChecks;
+  it("selects a complete retained previous as the active-incomplete fallback", () => {
     const prepared = preparePegDecisionPackages(
-      [snapshot(legacyPrevious.version)],
-      context([active, legacyPrevious], active.version, legacyPrevious.version),
+      [snapshot(previous.version)],
+      context([active, previous], active.version, previous.version),
     )!;
-    expect(prepared.model.producedPolicyVersion).toBe(legacyPrevious.version);
+    expect(prepared.model.producedPolicyVersion).toBe(previous.version);
     expect(prepared.model.policySlot).toBe("previous");
     expect(
       prepared.model.packages[0]?.sources[0]?.policy

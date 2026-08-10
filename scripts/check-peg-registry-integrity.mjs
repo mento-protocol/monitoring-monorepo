@@ -38,8 +38,6 @@ const POLICY_SOURCE_NUMBER_FIELDS = [
 const POLICY_AUTHORITIES = new Set(["deep", "secondary", "display"]);
 const POLICY_VERSION_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 const POLICY_VERSION_DIGEST_PATTERN = /-([0-9a-f]{32})$/;
-const LEGACY_LISTING_ABSENT_CONSECUTIVE_CHECKS_VERSION =
-  "europ-2026-07-22-v1-a69b99aad61649957a2639dc8348b05f";
 
 function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -589,21 +587,13 @@ function compareKeys(expected, actual, path, noun, errors) {
   }
 }
 
-function validatePolicySourceFields(
-  source,
-  path,
-  errors,
-  allowLegacyThreshold,
-) {
+function validatePolicySourceFields(source, path, errors) {
   if (!POLICY_AUTHORITIES.has(source.authority)) {
     errors.push(
       `${path}.authority: expected deep, secondary, or display; received ${printable(source.authority)}`,
     );
   }
   for (const field of POLICY_SOURCE_NUMBER_FIELDS) {
-    if (allowLegacyThreshold && field === "listingAbsentConsecutiveChecks") {
-      continue;
-    }
     if (!Number.isFinite(source[field])) {
       errors.push(`${path}.${field}: missing or non-finite source policy`);
     }
@@ -647,13 +637,7 @@ function validateSourcePolicyConsistency(
   }
 }
 
-function validatePolicyAsset(
-  policyAsset,
-  context,
-  path,
-  errors,
-  allowLegacyListingThreshold,
-) {
+function validatePolicyAsset(policyAsset, context, path, errors) {
   if (!isRecord(policyAsset.sources)) {
     errors.push(`${path}.sources: expected an object`);
     return;
@@ -689,13 +673,7 @@ function validatePolicyAsset(
       errors.push(`${sourcePath}: expected an object`);
       continue;
     }
-    validatePolicySourceFields(
-      policySource,
-      sourcePath,
-      errors,
-      allowLegacyListingThreshold &&
-        policySource.listingAbsentConsecutiveChecks === undefined,
-    );
+    validatePolicySourceFields(policySource, sourcePath, errors);
     if (policySource.authority === "deep") deepSources.push(sourceId);
     const registrySource = context?.sources.get(sourceId);
     if (registrySource) {
@@ -778,8 +756,6 @@ function validatePolicy(policy, contexts, errors) {
         context,
         `${assetsPath}[${printable(slug)}]`,
         errors,
-        versionName === "previous" &&
-          version.version === LEGACY_LISTING_ABSENT_CONSECUTIVE_CHECKS_VERSION,
       );
     }
   }

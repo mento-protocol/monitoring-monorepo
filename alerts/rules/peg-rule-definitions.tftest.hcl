@@ -24,4 +24,52 @@ run "peg_rule_definitions_preserve_consumer_guard_invariant" {
     condition     = length(local.peg_rule_definitions) > 0
     error_message = "Peg rule definitions must evaluate with the source-controlled consumer guard."
   }
+
+  assert {
+    condition = alltrue(concat(
+      [
+        for key, item in local.peg_active_sources :
+        item.source.authority != "display" || (
+          try(local.peg_rule_definitions["active-unhealthy-${key}"].for_duration, "absent") == "absent" &&
+          try(local.peg_rule_definitions["active-dead-${key}"].for_duration, "absent") == "absent"
+        )
+      ],
+      [
+        for key, item in local.peg_previous_sources :
+        item.source.authority != "display" || (
+          try(local.peg_rule_definitions["previous-unhealthy-${key}"].for_duration, "absent") == "absent" &&
+          try(local.peg_rule_definitions["previous-dead-${key}"].for_duration, "absent") == "absent"
+        )
+      ],
+    ))
+    error_message = "Display-authority sources must not create Source Unhealthy or Permanently Dead operational rules."
+  }
+
+  assert {
+    condition = alltrue(concat(
+      [
+        for key, item in local.peg_active_sources :
+        item.source.authority != "secondary" || try(local.peg_rule_definitions["active-unhealthy-${key}"].for_duration, "absent") == "1800s"
+      ],
+      [
+        for key, item in local.peg_previous_sources :
+        item.source.authority != "secondary" || try(local.peg_rule_definitions["previous-unhealthy-${key}"].for_duration, "absent") == "1800s"
+      ],
+    ))
+    error_message = "Secondary-source unhealthy rules must require a sustained 30 minutes."
+  }
+
+  assert {
+    condition = alltrue(concat(
+      [
+        for key, item in local.peg_active_sources :
+        item.source.authority != "deep" || try(local.peg_rule_definitions["active-unhealthy-${key}"].for_duration, "absent") == "${item.source.pollIntervalSeconds * 2}s"
+      ],
+      [
+        for key, item in local.peg_previous_sources :
+        item.source.authority != "deep" || try(local.peg_rule_definitions["previous-unhealthy-${key}"].for_duration, "absent") == "${item.source.pollIntervalSeconds * 2}s"
+      ],
+    ))
+    error_message = "Deep-source unhealthy rules must retain their two-poll hold."
+  }
 }
