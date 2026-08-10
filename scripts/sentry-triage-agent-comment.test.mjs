@@ -591,6 +591,26 @@ test("the trusted follow-up lives in its own job, on its own runner", () => {
   assert.match(job, /node scripts\/sentry-triage-project\.mjs/);
 });
 
+test("the verdict edit sheds the other verdict labels and proves it landed", () => {
+  const job = WORKFLOW.slice(
+    WORKFLOW.indexOf("\n  verdict:"),
+    WORKFLOW.indexOf("\n  project:"),
+  );
+  // The shed list comes from the SAME --parse-only output as the label, so the
+  // workflow never carries a second literal copy of the verdict namespace.
+  assert.match(job, /shed=\$\(jq -r '\.shed' "\$\{parse_file\}"\)/);
+  assert.match(job, /--remove-label "sentry:needs-triage,\$\{shed\}"/);
+  // Deleting the shed and going back to the bare removal must fail here.
+  assert.ok(
+    !/--remove-label ['"]sentry:needs-triage['"]/.test(job),
+    "the verdict edit removes only sentry:needs-triage; stale verdict labels would survive it",
+  );
+  // Post-condition: the stub is re-read and >1 surviving verdict label fails
+  // this matrix job rather than reaching the close/project/digest legs.
+  assert.match(job, /select\(startswith\("sentry:verdict-"\)\)/);
+  assert.match(job, /if \[ "\$\{survivor_count\}" -gt 1 \]; then/);
+});
+
 test("projection and digest wait for the verdict job", () => {
   assert.match(WORKFLOW, /project:\n\s+needs: \[select, triage, verdict\]/);
   assert.match(

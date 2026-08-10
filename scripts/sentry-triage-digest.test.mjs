@@ -6,6 +6,7 @@ import {
   chunkLines,
   classifyIssue,
   collectIssues,
+  doubleVerdictWarnings,
   escapeSlackText,
   extractAutofixUrl,
   extractPermalink,
@@ -602,6 +603,49 @@ await test("classifyIssue treats an unlabeled batch issue as failed (visible, no
   const entry = classifyIssue(issueFixture({ labels: ["sentry-triage"] }));
   assertEqual(entry.bucket, "failed");
   assertEqual(entry.section, "failed");
+});
+
+await test("a double-verdicted stub warns and still renders — the digest never fails on it", () => {
+  const doubled = issueFixture({
+    number: 1671,
+    labels: [
+      "sentry-triage",
+      "sentry:verdict-needs-human",
+      "sentry:verdict-config-fix",
+    ],
+  });
+  const entry = classifyIssue(doubled);
+  assertDeepEqual(entry.verdictLabels, [
+    "sentry:verdict-needs-human",
+    "sentry:verdict-config-fix",
+  ]);
+  // First match wins the bucket; the warning is what makes the ambiguity
+  // visible.
+  assertEqual(entry.bucket, "needs-human");
+
+  const warnings = doubleVerdictWarnings([doubled]);
+  assertEqual(warnings.length, 1);
+  assert(warnings[0].includes("#1671"), warnings[0]);
+  assert(warnings[0].includes("sentry:verdict-config-fix"), warnings[0]);
+
+  // Never a hard failure: the digest is the batch's one daily notification, so
+  // the payload must still build.
+  const payload = buildDigest([doubled], {
+    channel: "C123",
+    now: new Date("2026-07-17T14:20:33Z"),
+  });
+  assertEqual(payload.channel, "C123");
+  assert(payload.blocks.length > 0, "expected a rendered digest payload");
+});
+
+await test("a single-verdict stub produces no double-verdict warning", () => {
+  assertDeepEqual(
+    doubleVerdictWarnings([
+      issueFixture({ labels: ["sentry-triage", "sentry:verdict-code-fix"] }),
+      issueFixture({ labels: ["sentry-triage", NEEDS_TRIAGE_LABEL] }),
+    ]),
+    [],
+  );
 });
 
 await test("classifyIssue falls back to #number when the title does not parse", () => {
