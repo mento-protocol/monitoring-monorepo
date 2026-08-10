@@ -459,6 +459,27 @@ resource "google_service_account_iam_member" "dev_metrics_bridge_runtime_service
   ]
 }
 
+resource "google_service_account_iam_member" "ci_metrics_bridge_builder_service_account_user" {
+  service_account_id = google_service_account.metrics_bridge_builder.name
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:\${google_service_account.metrics_bridge_deployer.email}"
+
+  depends_on = [
+    google_service_account.metrics_bridge_builder,
+    google_service_account.metrics_bridge_deployer,
+  ]
+}
+
+resource "google_service_account_iam_member" "dev_metrics_bridge_builder_service_account_user" {
+  for_each = toset(var.gcp_dev_members)
+
+  service_account_id = google_service_account.metrics_bridge_builder.name
+  role               = "roles/iam.serviceAccountUser"
+  member             = each.value
+
+  depends_on = [google_service_account.metrics_bridge_builder]
+}
+
 moved {
   from = google_service_account_iam_member.ci_default_compute_service_account_user
   to   = google_service_account_iam_member.ci_metrics_bridge_runtime_service_account_user

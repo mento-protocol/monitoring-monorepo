@@ -647,6 +647,8 @@ const alloyBuilderExecutor =
   '    "serviceAccount:${google_service_account.grafana_agent_builder.email}",\n';
 const metricsBridgeExecutor =
   '    "serviceAccount:${google_project.monitoring.number}-compute@developer.gserviceaccount.com",\n';
+const dedicatedMetricsBridgeBuilderExecutor =
+  '    "serviceAccount:${google_service_account.metrics_bridge_builder.email}",\n';
 assert(
   cloudBuildExecutorFiles["terraform/deploy-staging.tf"].includes(
     alloyBuilderExecutor,
@@ -657,7 +659,16 @@ assert(
     metricsBridgeExecutor,
   ),
 );
-for (const executor of [alloyBuilderExecutor, metricsBridgeExecutor]) {
+assert(
+  cloudBuildExecutorFiles["terraform/deploy-staging.tf"].includes(
+    dedicatedMetricsBridgeBuilderExecutor,
+  ),
+);
+for (const executor of [
+  alloyBuilderExecutor,
+  metricsBridgeExecutor,
+  dedicatedMetricsBridgeBuilderExecutor,
+]) {
   const files = {
     ...cloudBuildExecutorFiles,
     "terraform/deploy-staging.tf": cloudBuildExecutorFiles[

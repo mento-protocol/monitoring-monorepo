@@ -63,6 +63,14 @@ const IAM_MEMBER_EXPRESSION_GROUPS = [
   },
   {
     expression:
+      '"serviceAccount:${google_service_account.metrics_bridge_builder.email}"',
+    blocks: [
+      "terraform/metrics-bridge.tf:google_artifact_registry_repository_iam_member.metrics_bridge_builder_writer",
+      "terraform/metrics-bridge.tf:google_project_iam_member.metrics_bridge_builder",
+    ],
+  },
+  {
+    expression:
       '"serviceAccount:${google_service_account.agent_readonly.email}"',
     blocks: [
       "terraform/agent-readonly.tf:google_organization_iam_member.agent_readonly_org_roles",
@@ -89,6 +97,7 @@ const IAM_MEMBER_EXPRESSION_GROUPS = [
     blocks: [
       "terraform/ci-wif.tf:google_project_iam_member.ci_deployer",
       "terraform/ci-wif.tf:google_service_account_iam_member.ci_appengine_default_service_account_user",
+      "terraform/deploy-staging.tf:google_service_account_iam_member.ci_metrics_bridge_builder_service_account_user",
       "terraform/deploy-staging.tf:google_service_account_iam_member.ci_metrics_bridge_runtime_service_account_user",
     ],
   },
@@ -232,6 +241,7 @@ const IAM_MEMBER_EXPRESSION_GROUPS = [
       "terraform/project-iam.tf:google_project_iam_member.dev_logging_viewer",
       "terraform/project-iam.tf:google_project_iam_member.dev_run_admin",
       "terraform/project-iam.tf:google_service_account_iam_member.dev_appengine_default_service_account_user",
+      "terraform/deploy-staging.tf:google_service_account_iam_member.dev_metrics_bridge_builder_service_account_user",
       "terraform/deploy-staging.tf:google_service_account_iam_member.dev_metrics_bridge_runtime_service_account_user",
       "terraform/deploy-staging.tf:google_storage_bucket_iam_member.app_engine_source_uploader_bucket_reader",
       "terraform/deploy-staging.tf:google_storage_bucket_iam_member.app_engine_source_uploader_object_admin",
@@ -305,7 +315,9 @@ const IAM_BLOCK_SHAPE_SPECIFICATIONS = [
   "terraform/peg-policy.tf:google_storage_bucket_iam_policy.peg_policy_access_logs|e7abbe2a07d3a595e4fe2daa4a17a2173d5b41fbb778ab870f4fc35df25f6ed7",
   "terraform/peg-policy.tf:google_storage_bucket_iam_policy.peg_policy|8654ea4c5cfe26a5a3ecdee37fa4f2be66e2d5eae1b107c6b1ca84f4050f1546",
   "terraform/deploy-staging.tf:google_service_account_iam_member.ci_metrics_bridge_runtime_service_account_user|fd31180eb5036885f3c78250edb2ce5f88bb6ba3ca9b2794d56879bdbc26d1aa",
+  "terraform/deploy-staging.tf:google_service_account_iam_member.ci_metrics_bridge_builder_service_account_user|f0fad13d5abab55418e19b697e393c37eefe8e5a339e9f936a99cec528f7294b",
   "terraform/deploy-staging.tf:google_service_account_iam_member.dev_metrics_bridge_runtime_service_account_user|1dca68bc8a33e26718e128ab292dafc0ee49d796627250655f2c8c82d6eec00a",
+  "terraform/deploy-staging.tf:google_service_account_iam_member.dev_metrics_bridge_builder_service_account_user|85ac512c2efcf4f2986af3c4196840e5e1f45e2218b6e75410850423ac7d52a9",
   "terraform/deploy-staging.tf:google_storage_bucket_iam_member.app_engine_source_appspot_object_viewer|c0d52c65b643e00d1e975719c1a12e7acb0bf67095ef3ad252a280c3e8fa7a80",
   "terraform/deploy-staging.tf:google_storage_bucket_iam_member.app_engine_source_uploader_bucket_reader|4cf45608033e66f0a77972f96e15b8bdd74a8f085c3d3e7e48c12cbb734c4fd7",
   "terraform/deploy-staging.tf:google_storage_bucket_iam_member.app_engine_source_uploader_object_admin|89d5d472e5a1067313e2b1cafa5baf10ec90c7a93f7d941d0aeaa38f4861c801",
@@ -314,6 +326,8 @@ const IAM_BLOCK_SHAPE_SPECIFICATIONS = [
   "terraform/deploy-staging.tf:google_storage_bucket_iam_member.cloud_build_source_executor_object_viewer|60cbb3346e381a7823e4d6db82626f2b7e543992c99064450ac6e86d6513e6ba",
   "terraform/gcp-project.tf:google_project_iam_member.terraform_owner|3280f80f6f5a6293d453a3d550eeeab7a818dbb8d313160fac41df4753012d4a",
   "terraform/metrics-bridge.tf:google_cloud_run_v2_service_iam_member.metrics_bridge_public|9bd48a6d3612b82847564ed91fdcd3199dfe565bde34d18eb5df2c4d635a8a4a",
+  "terraform/metrics-bridge.tf:google_artifact_registry_repository_iam_member.metrics_bridge_builder_writer|ff100ccdc63bb50c8ac4d9bec72e8ac8f9566ad557f85bde1e7ea9a916ff7e82",
+  "terraform/metrics-bridge.tf:google_project_iam_member.metrics_bridge_builder|1e0fe7c90eda6475df4daf6739b3ca4628a1bf49ad84c2dae86f1ecaaa6e386a",
   "terraform/project-iam.tf:google_project_iam_member.dev_appengine_admin|46e0559a495dac87da8892c4b007a3aea38193c9cf3a05aa8d256c4a52c0770d",
   "terraform/project-iam.tf:google_project_iam_member.dev_ar_writer|2ff84334fef6c77f3fbca0d073eb5695a2356bb9fa51b756745b75dcb6a84b1b",
   "terraform/project-iam.tf:google_project_iam_member.dev_cloudbuild_editor|1cc71220cc894b2085f247a727722870eeb23cb6b913837a4008050de106009e",
@@ -353,6 +367,7 @@ const IDENTITY_SOURCE_BLOCK_SHAPE_SPECIFICATIONS = [
   "terraform/ci-wif.tf:google_service_account.peg_policy_publication_reader|99513117a555159c40cab2f1e78d5aa034d1e64f8e8da49e3368add680df1500,130bdd40b07455b068006dfe6533ed51f555ce9be6a5f6c3e7958f9e2cba3501",
   "terraform/ci-wif.tf:google_service_account.production_infra_applier|02bb20c0c7f7c5550ff341f77f85dcfa00cd0b4615936eb6a1e18ea6923c11d5,53ab416891c6eeba7ad063fd45341139fba6a8e7d341a5e45242b7be76f08e1f",
   "terraform/ci-wif.tf:google_service_account.terraform_refresh_readonly|c51792f5180d455dd87e9acbea26fa08a50b24a91bc4e4a93e01149f80007b66,73b3810af667664ebddf1aa217846be5cffe9340970a7d0a53d3d4e7a4fb2b05",
+  "terraform/metrics-bridge.tf:google_service_account.metrics_bridge_builder|7f1a0d6a838ccd0a8052cbbb3b45a93048bef3dbb89bc48655eb7f91ff3ed4c7",
   "terraform/peg-policy.tf:google_service_account.metrics_bridge_runtime|a96ee5a36934ee2d1d7e3ce6fd72dd28f0e02461e1a370b787cddce42dac85be",
   "terraform/peg-policy.tf:google_service_account.peg_policy_publisher|8a48876857f9b5d6b7b90c053a3b97b526cb8708f7989f67c8d523be04ef3386",
 ];

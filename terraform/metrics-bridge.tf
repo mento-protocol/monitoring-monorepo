@@ -10,6 +10,59 @@ resource "google_artifact_registry_repository" "metrics_bridge" {
   depends_on = [google_project_service.artifactregistry]
 }
 
+# ── Metrics Bridge Cloud Build executor ──────────────────────────────────────
+#
+# Cloud Build currently defaults to the project's Compute service account. That
+# identity retains project Editor, so provisioning this dedicated executor is
+# deliberately separate from routing: Terraform creates its narrow authority
+# first. After an approved current-main apply, a later reviewed change pins
+# `cloudbuild.yaml` to this identity and canaries both deployment paths.
+locals {
+  metrics_bridge_builder_project_roles = toset([
+    "roles/cloudbuild.builds.editor",
+    "roles/logging.logWriter",
+  ])
+}
+
+resource "google_service_account" "metrics_bridge_builder" {
+  project      = google_project.monitoring.project_id
+  account_id   = "metrics-bridge-builder"
+  display_name = "Metrics Bridge Cloud Build executor"
+  description  = "Dedicated least-privilege Cloud Build identity for Metrics Bridge image builds."
+
+  depends_on = [
+    google_project_iam_member.terraform_owner,
+    google_project_service.iam,
+  ]
+}
+
+# `cloudbuild.builds.editor` is the narrowest established project role used by
+# this repository's user-specified Cloud Build executor. It permits Cloud Build
+# lifecycle updates but does not grant Storage, Artifact Registry, Cloud Run,
+# or runtime-identity authority. Logs and images stay separately scoped below.
+resource "google_project_iam_member" "metrics_bridge_builder" {
+  for_each = local.metrics_bridge_builder_project_roles
+
+  project = google_project.monitoring.project_id
+  role    = each.value
+  member  = "serviceAccount:${google_service_account.metrics_bridge_builder.email}"
+
+  depends_on = [
+    google_project_iam_member.terraform_owner,
+    google_project_service.cloudbuild,
+  ]
+}
+
+resource "google_artifact_registry_repository_iam_member" "metrics_bridge_builder_writer" {
+  project    = google_artifact_registry_repository.metrics_bridge.project
+  location   = google_artifact_registry_repository.metrics_bridge.location
+  repository = google_artifact_registry_repository.metrics_bridge.repository_id
+  role       = "roles/artifactregistry.writer"
+  member     = "serviceAccount:${google_service_account.metrics_bridge_builder.email}"
+
+  depends_on = [google_service_account.metrics_bridge_builder]
+}
+
 # ── Metrics Bridge (Cloud Run) ───────────────────────────────────────────────
 # Polls Hasura for FPMM pool KPIs and exports Prometheus gauges.
 # Scraped by Grafana Alloy (Aegis repo) → Grafana Cloud alert rules.

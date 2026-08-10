@@ -881,6 +881,34 @@ function rejectBroadProjectFallbacks(topLevelBlocks, errors) {
     );
   }
 
+  const expectedMetricsBridgeBuilderRoles = [
+    "roles/cloudbuild.builds.editor",
+    "roles/logging.logWriter",
+  ];
+  const metricsBridgeBuilderRoleBlocks = topLevelBlocks.filter(
+    (block) =>
+      block.filePath === "terraform/metrics-bridge.tf" &&
+      block.kind === "locals" &&
+      block.code.includes("metrics_bridge_builder_project_roles"),
+  );
+  if (metricsBridgeBuilderRoleBlocks.length !== 1) {
+    errors.push(
+      "terraform: metrics_bridge_builder_project_roles must be declared exactly once",
+    );
+  } else if (
+    !sameSortedValues(
+      extractStringSet(
+        metricsBridgeBuilderRoleBlocks[0].code,
+        "metrics_bridge_builder_project_roles",
+      ),
+      expectedMetricsBridgeBuilderRoles,
+    )
+  ) {
+    errors.push(
+      "terraform: metrics_bridge_builder_project_roles must contain only the approved builder roles",
+    );
+  }
+
   const forbiddenProjectRoles = new Set([
     "roles/storage.admin",
     "roles/storage.objectAdmin",
