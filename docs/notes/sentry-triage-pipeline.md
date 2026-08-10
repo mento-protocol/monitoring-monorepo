@@ -226,10 +226,60 @@ proposed_action: |
 duplicate_of: [] # Sentry SHORT-IDs only
 ```
 
-A `needs-human` verdict also includes a concrete `human_question`, one to
-three `hypotheses`, an `investigated` list, and an
-`escalation_reason`. A missing or placeholder `human_question` is invalid:
-an escalation must be decision-ready, not “please look.”
+A `needs-human` verdict also includes a concrete `human_question`, a
+`how_to_check` list, a `decision_branches` list, one to three `hypotheses`, an
+`investigated` list, and an `escalation_reason`. A missing or placeholder
+`human_question` is invalid: an escalation must be decision-ready, not “please
+look.”
+
+```yaml
+human_question: |
+  <the single decision a human must make>
+how_to_check: # the concrete steps that answer it
+  - <step>
+decision_branches: # what each answer leads to, one per answer
+  - "Yes -> config-fix: <disposition>"
+  - "No -> noise: close as upstream-transient"
+hypotheses: # candidate root causes, each with a confidence lean
+  - <hypothesis>
+investigated: # what was already checked or ruled out
+  - <evidence>
+escalation_reason: |
+  <why a confident verdict was not reachable>
+```
+
+`how_to_check` and `decision_branches` exist because the brief below is
+deterministic: nothing else in the contract carries the instruction half of a
+decision, so without them a rendered brief can only restate the situation.
+Every list is capped at `MAX_BRIEF_LIST_ITEMS`, and every field is bounded at
+`MAX_BRIEF_TEXT_LEN` before either emitter escapes it — both in
+`scripts/sentry-triage-project-core.mjs`, shared so the two briefs cannot
+drift. For a `needs-human` verdict the prose after the YAML block is at most
+two sentences: the fields are the brief, and a paragraph restating them only
+pushes the decision further down the page.
+
+### The needs-human brief
+
+`scripts/sentry-triage-brief.mjs` renders those fields into the queue stub's
+**body**, above the metadata YAML, in a fixed order — question, how to check,
+what each answer leads to, evidence collapsed underneath. The `verdict` job
+runs it right after the label swap, gated on the resolved verdict, so a stub a
+person is asked to decide opens with the decision instead of the YAML. The
+digest's Slack brief (`renderNeedsHumanBrief` in
+`scripts/sentry-triage-digest.mjs`) is the second emitter over the same shared
+field selection; only the escaping differs.
+
+Nothing machine-readable moves. The verdict YAML stays in the verdict comment,
+where the label step, the projection, the digest and the autofix selector read
+it; the stub's metadata YAML stays where `extractPermalink` and
+`parseArchiveBaseline` read it. The brief is delimited by
+`<!-- sentry-triage-brief:v1 -->`, so a re-triage after a regression reopen
+replaces it rather than stacking a second copy, and it emits no fenced block of
+its own — a fence above the metadata block would shadow the archive freshness
+baseline, whose placement in the body is a trust boundary (see
+`scripts/sentry-triage-queue-contract.mjs`). Every rendered field is
+single-line, neutralized and bounded; a write whose block could be misread by a
+prefix-anchored consumer fails closed.
 
 The agent posts that comment through `scripts/sentry-triage-agent-comment.mjs`,
 its only write path. The wrapper accepts no issue argument, and does not take
@@ -900,6 +950,7 @@ These checks are offline unless noted:
 pnpm sentry:ingest:test
 pnpm sentry:digest:test
 pnpm sentry:project:test
+pnpm sentry:brief:test
 pnpm sentry:autofix:select:test
 pnpm sentry:autofix:finalize:test
 pnpm sentry:archive:test
@@ -909,6 +960,7 @@ pnpm sentry:requeue:test
 pnpm sentry:ingest --dry-run --lookback-days 8
 SENTRY_TRIAGE_ISSUES='[123,456]' pnpm sentry:digest --channel '#engineering'
 pnpm sentry:autofix:select --cap 2
+pnpm sentry:brief --issue 1731 --dry-run
 ```
 
 For any contract change, also run the matching workflow/script tests,

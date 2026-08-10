@@ -48,6 +48,8 @@
     "sentry:digest:test": "node scripts/sentry-triage-digest.test.mjs",
     "sentry:project": "node scripts/sentry-triage-project.mjs",
     "sentry:project:test": "node scripts/sentry-triage-project.test.mjs",
+    "sentry:brief": "node scripts/sentry-triage-brief.mjs",
+    "sentry:brief:test": "node scripts/sentry-triage-brief.test.mjs",
     "sentry:autofix:select": "node scripts/sentry-autofix-select.mjs",
     "sentry:autofix:select:test": "node scripts/sentry-autofix-select.test.mjs",
     "sentry:autofix:finalize:test": "node scripts/sentry-autofix-finalize.test.mjs",

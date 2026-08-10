@@ -667,6 +667,38 @@ jobs:
           } >> "${GITHUB_OUTPUT}"
 
       # -----------------------------------------------------------------------
+      # needs-human brief (#1748). A needs-human stub stays OPEN for a person,
+      # and the thing that person needs is the decision, not the yaml. This
+      # deterministic, zero-LLM step renders the verdict's own brief fields into
+      # the stub BODY, above the metadata yaml, so opening the issue from a
+      # notification shows the question, how to check it and what each answer
+      # leads to without scrolling. It moves no machine-readable text: the
+      # verdict yaml stays in the verdict comment and the metadata yaml stays
+      # where it is, so every downstream parser reads exactly what it read
+      # before. Same untrusted-input discipline as the label step above — the
+      # script re-reads the stub from GitHub and resolves it through the single
+      # authoritative parser; the agent's text is data, neutralized and bounded
+      # at render.
+      #
+      # Failing here turns the job red for the main-failure notifier and
+      # strands nothing: the close step's needs-human arm is a no-op, so the
+      # stub is already in its settled end state (open, verdict-labeled) with
+      # only the brief missing.
+      # -----------------------------------------------------------------------
+      - name: Render needs-human brief (deterministic)
+        if: ${{ steps.verdict.outputs.verdict == 'needs-human' }}
+        env:
+          QUEUE_ISSUE_NUMBER: ${{ matrix.issue }}
+        run: |
+          set -euo pipefail
+          # Plain scripts/ is correct HERE for the same reason as the label
+          # step above: this job has its own runner and its own pristine
+          # checkout, which the agent never touched.
+          node scripts/sentry-triage-brief.mjs \
+            --issue "${QUEUE_ISSUE_NUMBER}" \
+            --repo "${GITHUB_REPOSITORY}"
+
+      # -----------------------------------------------------------------------
       # Queue hygiene (#1338/#1354): a verdicted queue issue is a closed ledger
       # entry, not an archive record. This step settles every bucket EXCEPT
       # actionable EXTERNAL verdicts, which are deferred (left open,

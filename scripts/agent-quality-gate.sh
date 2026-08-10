@@ -764,7 +764,7 @@ classify_root_package_json_changes() {
         echo "workspace"
         return
         ;;
-      /scripts/agent:quality-gate|/scripts/agent:quality-gate:test|/scripts/agent:prewarm|/scripts/agent:prewarm:test|/scripts/agent:review-materiality|/scripts/agent:review-materiality:test|/scripts/agent:context-check|/scripts/agent:context-budget|/scripts/agent:context-budget:test|/scripts/docs:index|/scripts/docs:index:test|/scripts/docs:audit|/scripts/docs:audit:test|/scripts/docs:garden|/scripts/docs:garden:test|/scripts/docs:navigation-eval|/scripts/docs:navigation-eval:test|/scripts/agent:autoreview|/scripts/issue:board|/scripts/issue:board:test|/scripts/issue:claim|/scripts/issue:review|/scripts/issue:release|/scripts/sentry:ingest|/scripts/sentry:ingest:test|/scripts/sentry:digest|/scripts/sentry:digest:test|/scripts/sentry:autofix:select|/scripts/sentry:autofix:select:test|/scripts/sentry:autofix:finalize:test|/scripts/sentry:archive|/scripts/sentry:archive:test|/scripts/sentry:broker:test|/scripts/pr:feedback-state|/scripts/pr:feedback-state:test|/scripts/pr:ready-state|/scripts/pr:ready-state:test|/scripts/tf|/scripts/tf:test|/scripts/alerts:rules:lint|/scripts/alerts:rules:lint:test|/scripts/lockfile:lint|/scripts/lockfile:lint:test|/scripts/skew:check|/scripts/skew:check:test|/scripts/override:prune-report|/scripts/override:prune-report:test|/scripts/adr:check|/scripts/adr:check:test|/scripts/sanitize:test)
+      /scripts/agent:quality-gate|/scripts/agent:quality-gate:test|/scripts/agent:prewarm|/scripts/agent:prewarm:test|/scripts/agent:review-materiality|/scripts/agent:review-materiality:test|/scripts/agent:context-check|/scripts/agent:context-budget|/scripts/agent:context-budget:test|/scripts/docs:index|/scripts/docs:index:test|/scripts/docs:audit|/scripts/docs:audit:test|/scripts/docs:garden|/scripts/docs:garden:test|/scripts/docs:navigation-eval|/scripts/docs:navigation-eval:test|/scripts/agent:autoreview|/scripts/issue:board|/scripts/issue:board:test|/scripts/issue:claim|/scripts/issue:review|/scripts/issue:release|/scripts/sentry:ingest|/scripts/sentry:ingest:test|/scripts/sentry:digest|/scripts/sentry:digest:test|/scripts/sentry:brief|/scripts/sentry:brief:test|/scripts/sentry:autofix:select|/scripts/sentry:autofix:select:test|/scripts/sentry:autofix:finalize:test|/scripts/sentry:archive|/scripts/sentry:archive:test|/scripts/sentry:broker:test|/scripts/pr:feedback-state|/scripts/pr:feedback-state:test|/scripts/pr:ready-state|/scripts/pr:ready-state:test|/scripts/tf|/scripts/tf:test|/scripts/alerts:rules:lint|/scripts/alerts:rules:lint:test|/scripts/lockfile:lint|/scripts/lockfile:lint:test|/scripts/skew:check|/scripts/skew:check:test|/scripts/override:prune-report|/scripts/override:prune-report:test|/scripts/adr:check|/scripts/adr:check:test|/scripts/sanitize:test)
         saw_tooling_script=true
         ;;
       /scripts)
@@ -1261,6 +1261,7 @@ add_root_tooling_package_script_checks() {
   add_command "pnpm sentry:ingest:test" "$reason"
   add_command "pnpm sentry:digest:test" "$reason"
   add_command "pnpm sentry:project:test" "$reason"
+  add_command "pnpm sentry:brief:test" "$reason"
   add_command "pnpm sentry:autofix:select:test" "$reason"
   add_command "pnpm sentry:autofix:finalize:test" "$reason"
   add_command "pnpm sentry:archive:test" "$reason"
@@ -1971,11 +1972,26 @@ while IFS= read -r path; do
           # tests own "no Sentry credential in the agent's env" (#1711).
           add_command "node scripts/sentry-triage-agent-comment.test.mjs" "Sentry triage agent workflow changed"
           add_command "pnpm sentry:broker:test" "Sentry triage agent workflow changed"
+          # A third: the brief suite asserts the verdict job actually runs the
+          # needs-human brief leg, gated on the resolved verdict (#1748).
+          add_command "pnpm sentry:brief:test" "Sentry triage agent workflow changed"
           ;;
         .github/actions/pnpm-install/*)
           add_surface "workspace"
           add_preflight_command "pnpm install --frozen-lockfile" "pnpm install action changed"
           add_workspace_quality_commands "pnpm install action changed"
+          ;;
+      esac
+      ;;
+    .github/prompts/*)
+      add_surface "tooling"
+      case "$path" in
+        .github/prompts/sentry-triage.md)
+          # The prompt is the producing half of the verdict contract. The brief
+          # suite asserts it still asks for the needs-human brief fields the
+          # renderer consumes (#1748); dropping one here would leave the brief
+          # silently half-empty in production.
+          add_command "pnpm sentry:brief:test" "Sentry triage prompt changed"
           ;;
       esac
       ;;
@@ -2144,6 +2160,12 @@ while IFS= read -r path; do
         docs/context-standards.md|docs/pr-checklists/recurring-review-patterns.md)
           add_command "pnpm agent:context-check" "agent context standards changed"
           ;;
+        docs/notes/sentry-triage-pipeline.md)
+          # This note is the verdict contract, and the brief suite asserts the
+          # contract's needs-human fields are documented here (#1748) — a field
+          # renamed in code and not here is exactly the drift it catches.
+          add_command "pnpm sentry:brief:test" "Sentry verdict contract note changed"
+          ;;
         SPEC.md)
           add_command "pnpm agent:context-check" "technical specification changed"
           ;;
@@ -2274,12 +2296,24 @@ while IFS= read -r path; do
           ;;
         scripts/sentry-triage-digest.mjs|scripts/sentry-triage-digest.test.mjs)
           add_command "pnpm sentry:digest:test" "Sentry triage digest helper changed"
+          # The two needs-human brief emitters share their field selection and
+          # bounds; the queue-issue one also reads the digest's autofix prefix.
+          add_command "pnpm sentry:brief:test" "Sentry triage digest helper changed"
+          ;;
+        scripts/sentry-triage-brief.mjs|scripts/sentry-triage-brief.test.mjs)
+          add_command "pnpm sentry:brief:test" "Sentry needs-human brief helper changed"
+          # Sibling emitter over the same shared selection.
+          add_command "pnpm sentry:digest:test" "Sentry needs-human brief helper changed"
           ;;
         scripts/sentry-triage-project.mjs|scripts/sentry-triage-project-core.mjs|scripts/sentry-triage-project.test.mjs)
           add_command "pnpm sentry:project:test" "Sentry triage projection helper changed"
           # The agent's comment wrapper imports the shared marker contract from
           # sentry-triage-project-core.mjs, so its fences ride on this module.
           add_command "node scripts/sentry-triage-agent-comment.test.mjs" "Sentry triage projection helper changed"
+          # The verdict parser and the shared brief selection live here; both
+          # brief emitters are pure consumers of them.
+          add_command "pnpm sentry:brief:test" "Sentry triage projection helper changed"
+          add_command "pnpm sentry:digest:test" "Sentry triage projection helper changed"
           ;;
         scripts/sentry-triage-agent-comment.mjs|scripts/sentry-triage-agent-comment.test.mjs)
           add_command "node scripts/sentry-triage-agent-comment.test.mjs" "Sentry triage agent comment wrapper changed"
@@ -2303,6 +2337,9 @@ while IFS= read -r path; do
           add_command "pnpm sentry:requeue:test" "Sentry re-queue chokepoint changed"
           add_command "pnpm sentry:ingest:test" "Sentry re-queue chokepoint changed"
           add_command "pnpm sentry:archive:test" "Sentry re-queue chokepoint changed"
+          # The brief writes the stub BODY the archive baseline lives in, and
+          # asserts every contract reader still sees it afterwards.
+          add_command "pnpm sentry:brief:test" "Sentry re-queue chokepoint changed"
           ;;
         scripts/pr-feedback-state.mjs|scripts/pr-feedback-state-core.mjs|scripts/pr-feedback-state-claude.mjs|scripts/pr-feedback-state.test.mjs)
           add_command "pnpm pr:feedback-state:test" "PR feedback-state helper changed"

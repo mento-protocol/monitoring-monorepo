@@ -242,10 +242,19 @@ export const REOPEN_SHED_LABELS = [
 // regression of that Sentry issue is skipped indefinitely. The agent's allowlist
 // grants no tool that edits an issue body (`Read,Grep,Glob` + three scoped
 // `gh issue` subcommands; the autofix agent gets file-edit tools and no shell at
-// all), and no script or workflow step ever rewrites a stub body except the
-// archive leg's own deterministic, zero-LLM write. Moving the field into the body
-// therefore removes the forgery surface instead of trying to authenticate inside
-// it, which a shared-secret signature could only match, never beat.
+// all), and the only steps that rewrite a stub body are deterministic, zero-LLM
+// ones running on a trusted runner: the archive leg's baseline write, and the
+// needs-human brief (scripts/sentry-triage-brief.mjs, #1748). Moving the field
+// into the body therefore removes the forgery surface instead of trying to
+// authenticate inside it, which a shared-secret signature could only match,
+// never beat.
+//
+// The brief renders agent-authored text, so it stays clear of this field by
+// construction rather than by care: it writes ABOVE the yaml block, emits no
+// fenced block of its own, and renders every field single-line — so it can
+// neither shadow this block for `extractYamlBlock` (first fence wins) nor emit
+// a line of the form `archive_baseline_last_seen: …` that a reader could pick
+// up. Its suite asserts both against a hostile verdict.
 export const ARCHIVE_BASELINE_FIELD = "archive_baseline_last_seen";
 export const ARCHIVE_BASELINE_ID_FIELD = "archive_baseline_sentry_issue_id";
 

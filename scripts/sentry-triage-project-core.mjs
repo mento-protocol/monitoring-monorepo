@@ -350,18 +350,19 @@ function collectBlockScalar(lines, start, rest) {
 // consume budget and push a real duplicate past the cap.
 export const MAX_DUPLICATE_LOOKUPS = 5;
 
-// Hard bound on how many free-text brief-list items (needs-human `hypotheses`
-// / `investigated`) are retained. These are agent-produced from untrusted
-// Sentry content and consumed ONLY by the outcome digest's needs-human brief
-// (they never reach an owning-repo issue — needs-human never projects), so a
-// scannable handful is enough; per-item text is neutralized+bounded by the
-// digest at render time.
+// Hard bound on how many free-text brief-list items (needs-human
+// `how_to_check` / `decision_branches` / `hypotheses` / `investigated`) are
+// retained. These are agent-produced from untrusted Sentry content and consumed
+// ONLY by the two needs-human brief emitters — the outcome digest and the queue
+// stub's issue-body brief (they never reach an owning-repo issue: needs-human
+// never projects) — so a scannable handful is enough; per-item text is
+// neutralized+bounded by each emitter at render time.
 export const MAX_BRIEF_LIST_ITEMS = 5;
 
-/** Parse a free-text yaml list value (needs-human `hypotheses`/`investigated`):
- * an inline `[a, b]`, a single inline scalar, or a block `- item` list. Unlike
+/** Parse a free-text yaml list value (any needs-human brief list): an inline
+ * `[a, b]`, a single inline scalar, or a block `- item` list. Unlike
  * sanitizeDuplicateIds these entries are prose, so nothing is shape-validated
- * away — the digest neutralizes+escapes them at render. Returns `{items,
+ * away — each emitter neutralizes+escapes them at render. Returns `{items,
  * next}` mirroring collectDashList so the caller advances the line cursor. */
 function parseFreeTextList(lines, i, rest) {
   const trimmed = String(rest ?? "").trim();
@@ -423,6 +424,8 @@ export function parseVerdictYaml(block) {
     // needs-human decision-ready brief fields (optional-absent for other
     // verdicts; resolveVerdict requires human_question for needs-human).
     human_question: "",
+    how_to_check: [],
+    decision_branches: [],
     hypotheses: [],
     investigated: [],
     escalation_reason: "",
@@ -470,13 +473,20 @@ export function parseVerdictYaml(block) {
         out.duplicate_of = items;
         i = next - 1;
       }
-    } else if (key === "hypotheses" || key === "investigated") {
+    } else if (
+      key === "hypotheses" ||
+      key === "investigated" ||
+      key === "how_to_check" ||
+      key === "decision_branches"
+    ) {
       const { items, next } = parseFreeTextList(lines, i, rest);
       out[key] = items;
       i = next - 1;
     }
   }
   out.duplicate_of = sanitizeDuplicateIds(out.duplicate_of);
+  out.how_to_check = sanitizeBriefList(out.how_to_check);
+  out.decision_branches = sanitizeBriefList(out.decision_branches);
   out.hypotheses = sanitizeBriefList(out.hypotheses);
   out.investigated = sanitizeBriefList(out.investigated);
   return out;
@@ -500,9 +510,62 @@ export function parseVerdictComment(commentBody) {
     duplicateOf: parsed.duplicate_of,
     // needs-human decision-ready brief fields (empty for other verdicts).
     humanQuestion: parsed.human_question,
+    howToCheck: parsed.how_to_check,
+    decisionBranches: parsed.decision_branches,
     hypotheses: parsed.hypotheses,
     investigated: parsed.investigated,
     escalationReason: parsed.escalation_reason,
+  };
+}
+
+// Hard bound on each rendered needs-human brief field. Applied BEFORE either
+// emitter's surface escape, so the bound governs the human-visible text rather
+// than the entity soup an escape expands it into (an all-`<` value grows ~4x in
+// Slack and ~1x on GitHub — bounding first makes the two agree).
+export const MAX_BRIEF_TEXT_LEN = 400;
+
+/** Single-line, hard-bounded projection of ONE untrusted brief field. Shared
+ * pre-escape stage for both emitters (Slack digest, GitHub issue brief) so the
+ * two surfaces can never disagree about what a field is or how long it may be;
+ * each emitter applies its own escape on top (`escapeSlackText` /
+ * `neutralizeUntrusted`). */
+export function boundBriefText(text) {
+  return truncate(sanitizeFreeText(text), MAX_BRIEF_TEXT_LEN);
+}
+
+/** Single-line, hard-bounded projection of a brief LIST, items joined with
+ * "; " so the whole line obeys the same bound. Empty in -> "" (callers omit
+ * the line). */
+export function boundBriefList(items) {
+  const joined = (Array.isArray(items) ? items : [])
+    .map((item) => sanitizeFreeText(item))
+    .filter(Boolean)
+    .join("; ");
+  return joined ? boundBriefText(joined) : "";
+}
+
+/**
+ * The SINGLE field selection behind every needs-human brief: which parsed
+ * verdict fields a brief may render, in which shape, under which bound.
+ * Returns sanitized single-line strings plus the raw-but-capped item lists the
+ * GitHub emitter renders as bullets (each item still bounded individually).
+ *
+ * Sharing this is the point (#1748): the Slack digest and the queue-issue brief
+ * are two emitters over ONE selection, so a field added to the verdict contract
+ * cannot land on one surface and silently miss the other, and a bound cannot
+ * drift between them. Escaping stays per-surface — Slack mrkdwn and GitHub
+ * markdown neutralize different characters.
+ */
+export function selectNeedsHumanBriefFields(parsed) {
+  return {
+    question: boundBriefText(parsed?.humanQuestion),
+    howToCheck: sanitizeBriefList(parsed?.howToCheck).map(boundBriefText),
+    decisionBranches: sanitizeBriefList(parsed?.decisionBranches).map(
+      boundBriefText,
+    ),
+    hypotheses: sanitizeBriefList(parsed?.hypotheses).map(boundBriefText),
+    investigated: sanitizeBriefList(parsed?.investigated).map(boundBriefText),
+    escalationReason: boundBriefText(parsed?.escalationReason),
   };
 }
 

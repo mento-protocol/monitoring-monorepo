@@ -3630,6 +3630,25 @@ assert_contains "- node scripts/sentry-triage-agent-comment.test.mjs (Sentry tri
 run_gate "scripts/sentry-triage-project.test.mjs"
 assert_contains "- pnpm sentry:project:test (Sentry triage projection helper changed)"
 
+# The needs-human brief (#1748) reads the verdict contract, the prompt that
+# produces it, the note that documents it, and the workflow step that runs it —
+# every one of those must route its suite, or the drift lands unnoticed.
+run_gate "scripts/sentry-triage-brief.mjs"
+assert_contains "- pnpm sentry:brief:test (Sentry needs-human brief helper changed)"
+assert_contains "- pnpm sentry:digest:test (Sentry needs-human brief helper changed)"
+
+run_gate "scripts/sentry-triage-brief.test.mjs"
+assert_contains "- pnpm sentry:brief:test (Sentry needs-human brief helper changed)"
+
+run_gate ".github/prompts/sentry-triage.md"
+assert_contains "- pnpm sentry:brief:test (Sentry triage prompt changed)"
+
+run_gate "docs/notes/sentry-triage-pipeline.md"
+assert_contains "- pnpm sentry:brief:test (Sentry verdict contract note changed)"
+
+run_gate ".github/workflows/sentry-triage-agent.yml"
+assert_contains "- pnpm sentry:brief:test (Sentry triage agent workflow changed)"
+
 run_gate "scripts/sentry-triage-agent-comment.mjs"
 assert_contains "- node scripts/sentry-triage-agent-comment.test.mjs (Sentry triage agent comment wrapper changed)"
 
