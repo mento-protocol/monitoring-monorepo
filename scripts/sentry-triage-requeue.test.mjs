@@ -12,7 +12,9 @@
  *   - the fence text has exactly one definition and one caller;
  *   - the fence precedes the label write and the state change goes last;
  *   - the claim records ATTEMPTS, including ones that throw;
- *   - admissibility is asked by recency, never by presence.
+ *   - admissibility is asked by recency, never by presence;
+ *   - a fencing re-queue clears the RENDERED verdict too, and does it without
+ *     disturbing anything else in the body.
  */
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -22,7 +24,12 @@ import {
   REGRESSION_PREFIX,
   VERDICT_MARKER,
 } from "./sentry-triage-project-core.mjs";
-import { NEEDS_TRIAGE_LABEL } from "./sentry-triage-queue-contract.mjs";
+import {
+  BRIEF_BLOCK_END,
+  BRIEF_BLOCK_START,
+  NEEDS_TRIAGE_LABEL,
+  parseArchiveBaseline,
+} from "./sentry-triage-queue-contract.mjs";
 import {
   buildRegressedComment,
   buildReopenLabelEditArgs,
@@ -595,6 +602,137 @@ await test("verify-end-state fails RED on a marker the shed left behind", async 
     ),
     /these stale markers survived: sentry:approved-archive/,
   );
+});
+
+// ---------------------------------------------------------------------------
+// INVARIANT 8 — the rendered verdict goes with the fenced one.
+// ---------------------------------------------------------------------------
+
+const STUB_TAIL = [
+  "```yaml",
+  'short_id: "ABC-1"',
+  'archive_baseline_last_seen: "2026-08-04T12:29:24Z"',
+  'archive_baseline_sentry_issue_id: "7651697505"',
+  "```",
+  "",
+].join("\n");
+
+const UNBRIEFED_BODY = `<!-- sentry-triage:v1 -->\n\n${STUB_TAIL}`;
+
+const BRIEFED_BODY = [
+  "<!-- sentry-triage:v1 -->",
+  "",
+  BRIEF_BLOCK_START,
+  "",
+  "> **Decision needed** · `ABC-1` · confidence: low",
+  "",
+  "**Question:** Decide whether to rotate the key",
+  "",
+  BRIEF_BLOCK_END,
+  "",
+  STUB_TAIL,
+].join("\n");
+
+await test("a Sentry-evidence re-queue clears the brief between the fence and the labels", async () => {
+  const w = makeWriter();
+  await requeueQueueStub(
+    { writeGh: w.writeGh, readBody: async () => BRIEFED_BODY },
+    {
+      repo: REPO,
+      issueNumber: 42,
+      cause: REQUEUE_CAUSE_SENTRY_EVIDENCE,
+      lastSeen: "2026-07-20T08:00:00Z",
+    },
+  );
+  // fence -> body clear -> labels -> reopen. The ordering matters for the same
+  // reason the fence does: every interruption point stays safe.
+  assertDeepEqual(w.verbs(), ["comment", "edit", "edit", "reopen"]);
+  const cleared = w.calls[1][w.calls[1].indexOf("--body") + 1];
+  assert(
+    !cleared.includes(BRIEF_BLOCK_START) &&
+      !cleared.includes("Decision needed"),
+    "expected the rendered brief gone",
+  );
+  assertEqual(cleared, UNBRIEFED_BODY);
+  // Everything else in the body — including the archive freshness baseline,
+  // whose loss is silent — survives untouched.
+  assertEqual(parseArchiveBaseline(cleared).lastSeen, "2026-08-04T12:29:24Z");
+  assertEqual(parseArchiveBaseline(cleared).sentryIssueId, "7651697505");
+  assertDeepEqual(w.calls[2], buildReopenLabelEditArgs(42, REPO));
+});
+
+await test("a bookkeeping re-queue leaves the brief alone", async () => {
+  // Nothing in Sentry moved, so the verdict stays admissible — and so does the
+  // brief that renders it. Over-clearing is as wrong as under-clearing.
+  let reads = 0;
+  const w = makeWriter();
+  await requeueQueueStub(
+    {
+      writeGh: w.writeGh,
+      readBody: async () => {
+        reads += 1;
+        return BRIEFED_BODY;
+      },
+    },
+    {
+      repo: REPO,
+      issueNumber: 42,
+      cause: REQUEUE_CAUSE_BOOKKEEPING,
+      note: buildStrandedRecoveryComment(),
+    },
+  );
+  assertEqual(reads, 0);
+  assertDeepEqual(w.verbs(), ["edit", "comment", "reopen"]);
+});
+
+await test("a body with no brief is not rewritten at all", async () => {
+  const w = makeWriter();
+  await requeueQueueStub(
+    { writeGh: w.writeGh, readBody: async () => UNBRIEFED_BODY },
+    {
+      repo: REPO,
+      issueNumber: 42,
+      cause: REQUEUE_CAUSE_SENTRY_EVIDENCE,
+      lastSeen: "2026-07-20T08:00:00Z",
+    },
+  );
+  assertDeepEqual(w.verbs(), ["comment", "edit", "reopen"]);
+});
+
+await test("a brief clear that fails never costs the re-queue", async () => {
+  // A stale rendering is a display defect; an unqueued live regression is the
+  // failure this module exists to prevent. So every failure mode here — an
+  // unreadable body, a malformed block, a failed write — degrades to a notice.
+  for (const deps of [
+    {
+      readBody: async () => {
+        throw new Error("gh issue view: 500");
+      },
+    },
+    { readBody: async () => `${BRIEF_BLOCK_START}\nhalf a block\n` },
+    {
+      readBody: async () => BRIEFED_BODY,
+      failEdits: true,
+    },
+  ]) {
+    const w = makeWriter({
+      failOn: (args) =>
+        deps.failEdits && args[1] === "edit" && args.includes("--body")
+          ? "gh issue edit: 500"
+          : null,
+    });
+    const outcome = await requeueQueueStub(
+      { writeGh: w.writeGh, readBody: deps.readBody },
+      {
+        repo: REPO,
+        issueNumber: 42,
+        cause: REQUEUE_CAUSE_SENTRY_EVIDENCE,
+        lastSeen: "2026-07-20T08:00:00Z",
+      },
+    );
+    assertEqual(outcome.requeued, true);
+    assertEqual(w.verbs().at(-1), "reopen");
+  }
 });
 
 if (failed > 0) {

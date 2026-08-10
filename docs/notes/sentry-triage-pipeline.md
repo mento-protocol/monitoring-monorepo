@@ -263,11 +263,36 @@ pushes the decision further down the page.
 `scripts/sentry-triage-brief.mjs` renders those fields into the queue stub's
 **body**, above the metadata YAML, in a fixed order — question, how to check,
 what each answer leads to, evidence collapsed underneath. The `verdict` job
-runs it right after the label swap, gated on the resolved verdict, so a stub a
-person is asked to decide opens with the decision instead of the YAML. The
-digest's Slack brief (`renderNeedsHumanBrief` in
-`scripts/sentry-triage-digest.mjs`) is the second emitter over the same shared
-field selection; only the escaping differs.
+runs it right after the label swap, so a stub a person is asked to decide opens
+with the decision instead of the YAML. The digest's Slack brief
+(`renderNeedsHumanBrief` in `scripts/sentry-triage-digest.mjs`) is the second
+emitter over the same shared field selection; only the escaping differs —
+Slack gets `escapeSlackText`, GitHub gets `escapeGithubMarkdown`, which
+backslash-escapes every active markdown character so agent-authored text can
+never render a link, image, tag or entity beside the pipeline's own controls.
+
+**The block exists if and only if a live `needs-human` verdict describes the
+stub.** That lifecycle is one rule in three places, because a rendering that
+outlives what it renders reads as current to whoever opens the issue:
+
+- a `needs-human` verdict renders the block, replacing any previous one;
+- **any other verdict removes it** — which is why the workflow step is
+  ungated. The script resolves the verdict itself, so gating the step added
+  nothing and cost a stale "Decision needed" block on every stub re-triaged to
+  `code-fix`, `config-fix` or `upstream-transient`;
+- a re-queue on new Sentry evidence removes it as it fences the verdict
+  (invariant 8 in `scripts/sentry-triage-requeue.mjs`), so the dead decision is
+  gone while fresh triage is pending rather than at the end of it. A
+  `bookkeeping` re-queue keeps the verdict and keeps the brief.
+
+The archive leg rewrites the same body to record its freshness baseline, under
+a **different concurrency group**, and `gh issue edit` replaces the whole body.
+Both brief writers therefore rebuild from a live read rather than a snapshot,
+and the brief leg additionally refuses to write a body whose archive baseline
+differs from the one it just read, re-reads after writing, and — bounded by
+`BRIEF_WRITE_ATTEMPTS` — restores a baseline the window lost and re-applies a
+block the window dropped. GitHub offers no conditional issue update, so a
+one-round-trip window survives; what does not survive is a silent loss.
 
 Nothing machine-readable moves. The verdict YAML stays in the verdict comment,
 where the label step, the projection, the digest and the autofix selector read
@@ -278,8 +303,8 @@ replaces it rather than stacking a second copy, and it emits no fenced block of
 its own — a fence above the metadata block would shadow the archive freshness
 baseline, whose placement in the body is a trust boundary (see
 `scripts/sentry-triage-queue-contract.mjs`). Every rendered field is
-single-line, neutralized and bounded; a write whose block could be misread by a
-prefix-anchored consumer fails closed.
+single-line, neutralized, bounded and markdown-escaped; a write whose block
+could be misread by a prefix-anchored consumer fails closed.
 
 The agent posts that comment through `scripts/sentry-triage-agent-comment.mjs`,
 its only write path. The wrapper accepts no issue argument, and does not take

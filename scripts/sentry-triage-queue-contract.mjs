@@ -218,6 +218,49 @@ export const REOPEN_SHED_LABELS = [
 ];
 
 // ---------------------------------------------------------------------------
+// The rendered needs-human brief block (issue #1748).
+// ---------------------------------------------------------------------------
+
+// Delimiters of the block `scripts/sentry-triage-brief.mjs` renders into the
+// stub body. They live HERE rather than in the renderer because the block has
+// TWO writers by design and they must agree byte for byte: the brief leg writes
+// and replaces it, and the re-queue chokepoint REMOVES it (a re-queue fences the
+// verdict the block renders, so the rendering dies with it — see
+// `stripBriefFromBody` and `sentry-triage-requeue.mjs`).
+//
+// Both delimiters are required for either operation. An opener with no closer is
+// a malformed block that neither writer guesses at: guessing would either eat
+// the rest of the body or stack a duplicate.
+export const BRIEF_BLOCK_START = "<!-- sentry-triage-brief:v1 -->";
+export const BRIEF_BLOCK_END = "<!-- /sentry-triage-brief:v1 -->";
+
+/**
+ * Return `body` with the rendered brief block REMOVED, leaving everything else
+ * — the stub marker, the metadata yaml block and its archive baseline, any
+ * human edit — exactly as it is. A body with no block comes back unchanged, so
+ * this is safe to run unconditionally; a body carrying an opener with no closer
+ * returns null (the same hard refusal the write path makes).
+ *
+ * The blank-line handling makes render -> clear a byte-exact round trip back to
+ * the pre-brief body, so a stub cannot accumulate blank lines across verdict
+ * transitions.
+ */
+export function stripBriefFromBody(body) {
+  const source = String(body ?? "");
+  const start = source.indexOf(BRIEF_BLOCK_START);
+  if (start === -1) return source;
+  const end = source.indexOf(BRIEF_BLOCK_END, start);
+  if (end === -1) return null;
+  const head = source.slice(0, start).replace(/(\r?\n)+$/, "");
+  const tail = source
+    .slice(end + BRIEF_BLOCK_END.length)
+    .replace(/^(\r?\n)+/, "");
+  if (!head) return tail;
+  if (!tail) return `${head}\n`;
+  return `${head}\n\n${tail}`;
+}
+
+// ---------------------------------------------------------------------------
 // Archive freshness baseline (issue #1371).
 // ---------------------------------------------------------------------------
 
@@ -244,17 +287,25 @@ export const REOPEN_SHED_LABELS = [
 // `gh issue` subcommands; the autofix agent gets file-edit tools and no shell at
 // all), and the only steps that rewrite a stub body are deterministic, zero-LLM
 // ones running on a trusted runner: the archive leg's baseline write, and the
-// needs-human brief (scripts/sentry-triage-brief.mjs, #1748). Moving the field
-// into the body therefore removes the forgery surface instead of trying to
-// authenticate inside it, which a shared-secret signature could only match,
-// never beat.
+// needs-human brief's own lifecycle — the render/remove write in
+// scripts/sentry-triage-brief.mjs and the re-queue chokepoint's clear
+// (`stripBriefFromBody` above, #1748). Moving the field into the body therefore
+// removes the forgery surface instead of trying to authenticate inside it,
+// which a shared-secret signature could only match, never beat.
 //
 // The brief renders agent-authored text, so it stays clear of this field by
 // construction rather than by care: it writes ABOVE the yaml block, emits no
-// fenced block of its own, and renders every field single-line — so it can
-// neither shadow this block for `extractYamlBlock` (first fence wins) nor emit
-// a line of the form `archive_baseline_last_seen: …` that a reader could pick
-// up. Its suite asserts both against a hostile verdict.
+// fenced block of its own, and renders every field single-line and
+// markdown-escaped — so it can neither shadow this block for `extractYamlBlock`
+// (first fence wins) nor emit a line of the form `archive_baseline_last_seen: …`
+// that a reader could pick up. Its suite asserts both against a hostile verdict.
+//
+// Neither brief writer is allowed to MOVE this field either. Both rebuild the
+// body from a live read and assert the parsed baseline is unchanged across their
+// own edit, and the brief leg re-reads after writing and restores a baseline
+// that a concurrent archive run lost inside the window — the archive workflow
+// and the triage-agent workflow hold different concurrency groups, so the two
+// body writers really can overlap on one stub.
 export const ARCHIVE_BASELINE_FIELD = "archive_baseline_last_seen";
 export const ARCHIVE_BASELINE_ID_FIELD = "archive_baseline_sentry_issue_id";
 

@@ -1500,6 +1500,10 @@ export async function runArchive(options, deps = {}) {
       {
         writeGh: (args) => runGh(args),
         readStub: (number) => readQueueIssue(runGh, repo, number),
+        // Invariant 8 there: this cause fences, so the rendered needs-human
+        // brief describing the now-dead occurrence is cleared with it.
+        readBody: async (number) =>
+          (await readQueueIssue(runGh, repo, number)).body,
       },
       {
         repo,

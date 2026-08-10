@@ -725,7 +725,11 @@ export function isStrandedNeedsTriage(issue) {
   );
 }
 
-/** Live state of one queue stub, for the sweep's pre-mutation revalidation. */
+/**
+ * Live state of one queue stub, for the sweep's pre-mutation revalidation and
+ * for the re-queue chokepoint's brief clear (`body`, invariant 8 there — one
+ * field on a call that was already being made).
+ */
 async function readQueueIssueState(options, issueNumber, runner) {
   const run = runner ?? ((args) => runGh(args, {}));
   const stdout = await run([
@@ -735,12 +739,13 @@ async function readQueueIssueState(options, issueNumber, runner) {
     "-R",
     options.repo,
     "--json",
-    "number,state,labels",
+    "number,state,labels,body",
   ]);
   const data = stdout && stdout.trim() ? JSON.parse(stdout) : {};
   return {
     number: data.number,
     state: String(data.state ?? "").toUpperCase(),
+    body: data.body ?? "",
     labels: (data.labels ?? [])
       .map((label) => (typeof label === "string" ? label : label?.name))
       .filter(Boolean),
@@ -781,6 +786,8 @@ export async function recoverStrandedQueueIssue(
     {
       writeGh: (args) => run(args, { dryRun: options.dryRun, mutates: true }),
       readStub: (number) => readQueueIssueState(options, number, deps.runGh),
+      readBody: async (number) =>
+        (await readQueueIssueState(options, number, deps.runGh)).body,
     },
     {
       repo: options.repo,
@@ -848,6 +855,10 @@ export async function reopenQueueIssue(
     {
       writeGh: (args) => run(args, { dryRun: options.dryRun, mutates: true }),
       readComments: (number) => fetchIssueComments(options, number, deps.runGh),
+      // Invariant 8 there: this cause fences, so the rendered needs-human brief
+      // describing the now-dead occurrence is cleared with it.
+      readBody: async (number) =>
+        (await readQueueIssueState(options, number, deps.runGh)).body,
       // Records the ATTEMPT in runIngest's exclusion set before the first write,
       // so a reopen that throws half-way is never inherited by the same run's
       // fence-free bookkeeping sweep.
