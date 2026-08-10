@@ -348,6 +348,22 @@ function defaultRunGh(args, { stdin } = {}) {
   });
 }
 
+/** Just the body. The write loop re-reads once per round and the comments are
+ * the largest part of a stub — the verdict is resolved once, from the full read
+ * below, and never re-resolved mid-write. */
+async function readStubBody(runGh, repo, number) {
+  const stdout = await runGh([
+    "issue",
+    "view",
+    String(number),
+    "-R",
+    repo,
+    "--json",
+    "body",
+  ]);
+  return JSON.parse(stdout).body ?? "";
+}
+
 async function readQueueIssue(runGh, repo, number) {
   const stdout = await runGh([
     "issue",
@@ -416,7 +432,7 @@ async function settleStubBody({
   runGh,
   repo,
   issueNumber,
-  first,
+  first, // the body from the read that resolved the verdict
   mutate,
   dryRun,
   log,
@@ -424,14 +440,14 @@ async function settleStubBody({
   let live = first;
   let wrote = false;
   for (let attempt = 1; attempt <= BRIEF_WRITE_ATTEMPTS; attempt += 1) {
-    const next = mutate(live.body);
+    const next = mutate(live);
     if (next === null) {
       throw new Error(
         `Issue #${issueNumber} carries a brief opener with no closing delimiter; refusing to rewrite the body. Repair the body by hand and re-run.`,
       );
     }
-    if (next === live.body) return { written: wrote, body: next };
-    assertBaselineUnchanged(live.body, next, issueNumber);
+    if (next === live) return { written: wrote, body: next };
+    assertBaselineUnchanged(live, next, issueNumber);
     if (dryRun) {
       log(next);
       return { written: false, body: next };
@@ -445,18 +461,18 @@ async function settleStubBody({
     );
     wrote = true;
 
-    const after = await readQueueIssue(runGh, repo, issueNumber);
-    const stuck = mutate(after.body) === after.body;
-    const baselineBefore = parseArchiveBaseline(live.body);
+    const after = await readStubBody(runGh, repo, issueNumber);
+    const stuck = mutate(after) === after;
+    const baselineBefore = parseArchiveBaseline(live);
     const lostBaseline =
-      Boolean(baselineBefore) && !parseArchiveBaseline(after.body);
-    if (stuck && !lostBaseline) return { written: true, body: after.body };
+      Boolean(baselineBefore) && !parseArchiveBaseline(after);
+    if (stuck && !lostBaseline) return { written: true, body: after };
 
     if (lostBaseline) {
       // The archive leg wrote its baseline inside our read/write window and this
       // write replaced it. Put it back on the LIVE body — the archive's own
       // settlement check may already have passed, so nothing else will.
-      const repaired = withArchiveBaseline(after.body, baselineBefore);
+      const repaired = withArchiveBaseline(after, baselineBefore);
       if (repaired === null) {
         throw new Error(
           `Issue #${issueNumber} lost its archive freshness baseline to a concurrent write and has no yaml block to restore it into; repair the body by hand.`,
@@ -470,7 +486,7 @@ async function settleStubBody({
         { stdin: repaired },
       );
     }
-    live = await readQueueIssue(runGh, repo, issueNumber);
+    live = await readStubBody(runGh, repo, issueNumber);
   }
   throw new Error(
     `Issue #${issueNumber}: the brief write did not settle after ${BRIEF_WRITE_ATTEMPTS} rounds — another writer keeps replacing the body. Re-run once the archive workflow for this stub has finished.`,
@@ -486,10 +502,11 @@ async function settleStubBody({
  *
  * Fails LOUD on a missing/stale/invalid verdict (via `resolveVerdict`), on a
  * malformed existing block, and on a write that cannot be made to stick. The
- * verdict job runs this AFTER the label swap and before its close step, whose
- * needs-human arm is a no-op — so a failure here turns the job red for the
- * notifier without stranding the stub: it stays open, verdict-labeled, exactly
- * where a needs-human stub belongs.
+ * verdict job runs this after the label swap, inside the window where
+ * `sentry:needs-triage` is already off, so its step catches a failure here and
+ * re-queues the stub before failing — see the compensation in
+ * .github/workflows/sentry-triage-agent.yml. Everything this leg does is
+ * idempotent, so that retry costs nothing.
  */
 export async function runBrief({
   runGh = defaultRunGh,
@@ -519,7 +536,7 @@ export async function runBrief({
     runGh,
     repo,
     issueNumber,
-    first: issue,
+    first: issue.body,
     mutate,
     dryRun,
     log,
