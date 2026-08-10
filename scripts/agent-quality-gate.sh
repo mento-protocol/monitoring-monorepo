@@ -2274,6 +2274,9 @@ while IFS= read -r path; do
           ;;
         scripts/sentry-triage-digest.mjs|scripts/sentry-triage-digest.test.mjs)
           add_command "pnpm sentry:digest:test" "Sentry triage digest helper changed"
+          # The digest owns LABEL_TO_VERDICT, one of the three verdict-label
+          # maps the projection suite pins against each other.
+          add_command "pnpm sentry:project:test" "Sentry triage digest helper changed"
           ;;
         scripts/sentry-triage-project.mjs|scripts/sentry-triage-project-core.mjs|scripts/sentry-triage-project.test.mjs)
           add_command "pnpm sentry:project:test" "Sentry triage projection helper changed"
@@ -2303,6 +2306,10 @@ while IFS= read -r path; do
           add_command "pnpm sentry:requeue:test" "Sentry re-queue chokepoint changed"
           add_command "pnpm sentry:ingest:test" "Sentry re-queue chokepoint changed"
           add_command "pnpm sentry:archive:test" "Sentry re-queue chokepoint changed"
+          # The contract owns VERDICT_LABELS, which the verdict step's shed is
+          # derived from and the projection suite pins against the other two
+          # verdict-label maps.
+          add_command "pnpm sentry:project:test" "Sentry re-queue chokepoint changed"
           ;;
         scripts/pr-feedback-state.mjs|scripts/pr-feedback-state-core.mjs|scripts/pr-feedback-state-claude.mjs|scripts/pr-feedback-state.test.mjs)
           add_command "pnpm pr:feedback-state:test" "PR feedback-state helper changed"

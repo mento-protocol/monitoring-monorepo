@@ -68,7 +68,7 @@ import {
   VALID_VERDICTS,
   validateAffectedRepo,
 } from "./sentry-triage-project-core.mjs";
-import { LABEL_DEFINITIONS } from "./sentry-triage-ingest.mjs";
+import { LABEL_DEFINITIONS, VERDICT_LABELS } from "./sentry-triage-ingest.mjs";
 
 // ---------------------------------------------------------------------------
 // GitHub I/O (via `gh`, mirroring the ingest/digest scripts). `runGh` is
@@ -375,6 +375,15 @@ async function markStubProjected(localRun, localRepo, issue, projectedUrl) {
  * `gh issue view` with the ambient token; the projection PAT is never needed
  * here. Throws on missing/stale/invalid verdicts so the label step fails
  * loudly and leaves `sentry:needs-triage` in place for retry.
+ *
+ * It also emits `shed`: the comma-joined verdict labels the label step must
+ * REMOVE in the same `gh issue edit` (#1745). A re-dispatched stub already
+ * carries a verdict label and `gh issue edit --add-label` only adds, so
+ * without the shed the stub ends up carrying two contradictory verdicts and
+ * the digest — which buckets on the FIRST matching label — reports whichever
+ * one GitHub happens to order first. Bash cannot import a JS constant, so the
+ * list travels through this single authoritative parser's output rather than
+ * becoming a second literal list in the workflow.
  */
 export async function runParseOnly(options, deps = {}) {
   const runGh = deps.runGh ?? defaultRunGh;
@@ -393,7 +402,17 @@ export async function runParseOnly(options, deps = {}) {
     }
     projectable = repoCheck.projectable;
   }
-  return { verdict, label, projectable };
+  // The VERDICT namespace only — deliberately not REOPEN_SHED_LABELS, which
+  // also carries `sentry:projected` and the autofix/archive markers. Shedding
+  // the autofix markers here would un-dedup the select step and let the same
+  // stub be fixed twice; shedding `sentry:archived` would erase an audit
+  // marker. The label being applied is excluded so one name never reaches both
+  // `--remove-label` and `--add-label` in a single edit. Removing a label the
+  // stub does not carry is a no-op — the same property
+  // `buildReopenLabelEditArgs` relies on — so the first-pass case (no verdict
+  // label yet) costs nothing.
+  const shed = VERDICT_LABELS.filter((name) => name !== label).join(",");
+  return { verdict, label, projectable, shed };
 }
 
 export async function runProjection(options, deps = {}) {

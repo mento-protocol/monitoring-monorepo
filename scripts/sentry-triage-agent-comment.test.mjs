@@ -591,6 +591,93 @@ test("the trusted follow-up lives in its own job, on its own runner", () => {
   assert.match(job, /node scripts\/sentry-triage-project\.mjs/);
 });
 
+test("the verdict edit sheds the other verdict labels and proves it landed", () => {
+  const job = WORKFLOW.slice(
+    WORKFLOW.indexOf("\n  verdict:"),
+    WORKFLOW.indexOf("\n  project:"),
+  );
+  // The shed list comes from the SAME --parse-only output as the label, so the
+  // workflow never carries a second literal copy of the verdict namespace.
+  assert.match(job, /shed=\$\(jq -r '\.shed' "\$\{parse_file\}"\)/);
+  assert.match(job, /--remove-label "sentry:needs-triage,\$\{shed\}"/);
+  // Deleting the shed and going back to the bare removal must fail here.
+  assert.ok(
+    !/--remove-label ['"]sentry:needs-triage['"]/.test(job),
+    "the verdict edit removes only sentry:needs-triage; stale verdict labels would survive it",
+  );
+  // Post-condition: the stub is re-read and >1 surviving verdict label fails
+  // this matrix job rather than reaching the close/project/digest legs.
+  assert.match(job, /select\(startswith\("sentry:verdict-"\)\)/);
+  assert.match(job, /if \[ "\$\{survivor_count\}" -gt 1 \]; then/);
+});
+
+/**
+ * The verdict label step from the edit that takes `sentry:needs-triage` off to
+ * the end of the step — the window where the stub is invisible to the selector
+ * and every exit therefore owes it a re-queue.
+ */
+function verdictPostConditionBlock() {
+  const job = WORKFLOW.slice(
+    WORKFLOW.indexOf("\n  verdict:"),
+    WORKFLOW.indexOf("\n  project:"),
+  );
+  const start = job.indexOf('--remove-label "sentry:needs-triage,${shed}"');
+  const end = job.indexOf("- name: Close queue stub");
+  assert.ok(
+    start > 0 && end > start,
+    "the verdict label step's post-condition block was not found",
+  );
+  return job.slice(start, end);
+}
+
+test("a failed verdict post-condition re-queues the stub instead of stranding it", () => {
+  const block = verdictPostConditionBlock();
+  const lines = block.split("\n");
+
+  // The compensation: the close step's shape (restore sentry:needs-triage,
+  // shed the verdict label + any stale sentry:projected), widened to the whole
+  // verdict namespace because this is the one branch where a stub can be
+  // wearing more than one verdict label — and a re-queued stub carries none.
+  const open = lines.findIndex(
+    (line) => line.trim() === "requeue_for_retry() {",
+  );
+  assert.ok(open >= 0, "the verdict post-condition has no re-queue helper");
+  const close = lines.findIndex((line, i) => i > open && line.trim() === "}");
+  const helper = lines.slice(open, close).join("\n");
+  assert.match(helper, /gh issue edit "\$\{QUEUE_ISSUE_NUMBER\}"/);
+  assert.match(
+    helper,
+    /--remove-label "\$\{label\},\$\{shed\},sentry:projected"/,
+  );
+  assert.match(helper, /--add-label "sentry:needs-triage"/);
+
+  // Fail CLOSED on the re-read too: an unverifiable stub is re-queued, never
+  // waved through to the close/project/digest legs.
+  assert.match(block, /if ! gh issue view "\$\{QUEUE_ISSUE_NUMBER\}"/);
+
+  // The property the whole block exists for: no exit leaves the stub open,
+  // verdict-labeled and off sentry:needs-triage, which nothing downstream
+  // re-queues — the close step never runs, the project job skips it, and the
+  // scheduled selector requires sentry:needs-triage. Deleting the call from
+  // any failure branch fails here.
+  const meaningful = lines
+    .map((line) => line.trim())
+    .filter((line) => line !== "" && !line.startsWith("#"));
+  const exits = meaningful.filter((line) => line === "exit 1");
+  assert.ok(
+    exits.length >= 2,
+    `expected the read-failure and surviving-label exits, found ${exits.length}`,
+  );
+  meaningful.forEach((line, i) => {
+    if (line !== "exit 1") return;
+    assert.equal(
+      meaningful[i - 1],
+      "requeue_for_retry",
+      "an exit from the verdict post-condition must restore sentry:needs-triage first, or the open stub is stranded with no retry path",
+    );
+  });
+});
+
 test("projection and digest wait for the verdict job", () => {
   assert.match(WORKFLOW, /project:\n\s+needs: \[select, triage, verdict\]/);
   assert.match(
