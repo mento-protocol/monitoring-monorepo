@@ -4,7 +4,7 @@
 # receive these credentials during the agent phase.
 
 [mcp_servers.upstash]
-args = ["/absolute/path/to/monitoring-monorepo/scripts/upstash-mcp-launcher.mjs"]
+args = ["--input-type=module","--eval","import { createHash } from \"node:crypto\";\nimport { readFileSync } from \"node:fs\";\nimport { dirname } from \"node:path\";\nconst launcherPath = \"/absolute/path/to/monitoring-monorepo/scripts/upstash-mcp-launcher.mjs\";\nconst expectedSha256 = \"0000000000000000000000000000000000000000000000000000000000000000\";\nconst launcherBytes = readFileSync(launcherPath);\nconst actualSha256 = createHash(\"sha256\").update(launcherBytes).digest(\"hex\");\nif (actualSha256 !== expectedSha256) {\n  throw new Error(\"Refusing to start Upstash MCP: launcher does not match the reviewed artifact\");\n}\nconst repoRoot = dirname(dirname(launcherPath));\nconst launcherUrl = `data:text/javascript;base64,${launcherBytes.toString(\"base64\")}`;\nconst { launchUpstashMcp } = await import(launcherUrl);\nawait launchUpstashMcp({ repoRoot });"]
 command = "/absolute/path/to/node"
 default_tools_approval_mode = "prompt"
 enabled = false

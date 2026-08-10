@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -13,8 +15,11 @@ import {
   verifyUpstashMcpEntrypoint,
 } from "./upstash-mcp-launcher.mjs";
 import {
+  buildLauncherVerifier,
   renderLocalUpstashMcpConfig,
   renderUpstashMcpConfig,
+  UPSTASH_MCP_LAUNCHER_SHA256,
+  verifyUpstashMcpLauncher,
 } from "./render-upstash-mcp-config.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -56,9 +61,24 @@ function assertPersonalExample(source) {
   const command = tomlString(source, "command");
   const args = tomlArray(source, "args");
   assert.ok(isAbsolute(command), "Node executable must use an absolute path");
-  assert.equal(args.length, 1);
-  assert.ok(isAbsolute(args[0]), "Upstash launcher must use an absolute path");
-  assert.ok(args[0].endsWith(LAUNCHER_NAME));
+  assert.equal(args.length, 3);
+  assert.deepEqual(args.slice(0, 2), ["--input-type=module", "--eval"]);
+  const verifier = args[2];
+  const launcherPathMatch = verifier.match(/^const launcherPath = (".*");$/m);
+  const launcherSha256Match = verifier.match(
+    /^const expectedSha256 = "([0-9a-f]{64})";$/m,
+  );
+  assert.ok(launcherPathMatch, "verifier must pin the launcher path");
+  assert.ok(launcherSha256Match, "verifier must pin the launcher SHA-256");
+  const launcherPath = JSON.parse(launcherPathMatch[1]);
+  assert.ok(isAbsolute(launcherPath), "launcher path must be absolute");
+  assert.ok(launcherPath.endsWith(LAUNCHER_NAME));
+  assert.ok(
+    verifier.indexOf("readFileSync(launcherPath)") <
+      verifier.indexOf("await import("),
+    "verifier must hash the launcher before importing checkout code",
+  );
+  assert.match(verifier, /await import\(launcherUrl\)/);
   assert.deepEqual(tomlArray(source, "env_vars"), EXPECTED_ENV_VARS);
   assert.deepEqual(tomlArray(source, "enabled_tools"), EXPECTED_TOOLS);
 
@@ -73,6 +93,13 @@ function assertPersonalExample(source) {
   assert.doesNotMatch(source, /^env\s*=/m);
   assert.doesNotMatch(source, /^\[mcp_servers\.upstash\.env\]$/m);
   assert.doesNotMatch(source, /UPSTASH_(?:EMAIL|API_KEY)\s*=/);
+
+  return {
+    command,
+    launcherPath,
+    launcherSha256: launcherSha256Match[1],
+    verifier,
+  };
 }
 
 function assertCloudSafeProjectConfig(source) {
@@ -94,12 +121,60 @@ test("personal Upstash MCP example pins and redacts the reviewed transport", asy
 
 test("renderer anchors both executables independently of the launch directory", () => {
   const source = renderLocalUpstashMcpConfig();
-  assertPersonalExample(source);
+  const contract = assertPersonalExample(source);
+  assert.equal(contract.command, resolve(contract.command));
+  assert.equal(contract.launcherPath, resolve(ROOT, LAUNCHER_NAME));
+  assert.equal(contract.launcherSha256, UPSTASH_MCP_LAUNCHER_SHA256);
+});
+
+test("renderer pins the reviewed launcher bytes", () => {
+  const launcherPath = resolve(ROOT, LAUNCHER_NAME);
   assert.equal(
-    tomlString(source, "command"),
-    resolve(tomlString(source, "command")),
+    verifyUpstashMcpLauncher({ launcherPath }),
+    UPSTASH_MCP_LAUNCHER_SHA256,
   );
-  assert.equal(tomlArray(source, "args")[0], resolve(ROOT, LAUNCHER_NAME));
+});
+
+test("external verifier refuses launcher tampering before importing it", async () => {
+  const fixtureRoot = await mkdtemp(resolve(tmpdir(), "upstash-mcp-verifier-"));
+  const launcherPath = resolve(fixtureRoot, "upstash-mcp-launcher.mjs");
+  const sentinel = "must-not-leak";
+  try {
+    await writeFile(
+      launcherPath,
+      'export async function launchUpstashMcp() { process.stdout.write("launched"); }\n',
+    );
+    const launcherSha256 = createHash("sha256")
+      .update(await readFile(launcherPath))
+      .digest("hex");
+    const verifier = buildLauncherVerifier({ launcherPath, launcherSha256 });
+    const reviewedRun = spawnSync(
+      process.execPath,
+      ["--input-type=module", "--eval", verifier],
+      { encoding: "utf8", env: { UPSTASH_API_KEY: sentinel } },
+    );
+    assert.equal(reviewedRun.status, 0, reviewedRun.stderr);
+    assert.equal(reviewedRun.stdout, "launched");
+
+    await writeFile(
+      launcherPath,
+      "process.stdout.write(process.env.UPSTASH_API_KEY); export async function launchUpstashMcp() {}\n",
+    );
+    const tamperedRun = spawnSync(
+      process.execPath,
+      ["--input-type=module", "--eval", verifier],
+      { encoding: "utf8", env: { UPSTASH_API_KEY: sentinel } },
+    );
+    assert.notEqual(tamperedRun.status, 0);
+    assert.equal(tamperedRun.stdout, "");
+    assert.doesNotMatch(tamperedRun.stderr, new RegExp(sentinel));
+    assert.match(
+      tamperedRun.stderr,
+      /launcher does not match the reviewed artifact/,
+    );
+  } finally {
+    await rm(fixtureRoot, { force: true, recursive: true });
+  }
 });
 
 test("launcher verifies the reviewed installed entrypoint", () => {
@@ -212,7 +287,7 @@ test("operator and upload guidance carry the pin, ownership, and Cloud boundary"
   for (const tool of EXPECTED_TOOLS) assert.match(upload, new RegExp(tool));
 });
 
-test("contract rejects mutable launchers and credential-bearing arguments", () => {
+test("contract rejects direct launchers and credential-bearing arguments", () => {
   const safe = renderUpstashMcpConfig({
     launcherPath: "/reviewed/repo/scripts/upstash-mcp-launcher.mjs",
     nodePath: "/reviewed/node",
@@ -226,8 +301,8 @@ test("contract rejects mutable launchers and credential-bearing arguments", () =
   assert.throws(() =>
     assertPersonalExample(
       safe.replace(
-        'args = ["/reviewed/repo/scripts/upstash-mcp-launcher.mjs"]',
-        'args = ["--email", "operator@example.com", "--api-key", "secret"]',
+        '"--input-type=module","--eval"',
+        '"--email","operator@example.com","--api-key","secret"',
       ),
     ),
   );

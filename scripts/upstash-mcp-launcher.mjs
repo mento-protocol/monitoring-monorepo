@@ -10,9 +10,11 @@ export const UPSTASH_MCP_VERSION = "0.2.4";
 export const UPSTASH_MCP_ENTRYPOINT_SHA256 =
   "1949e38e9c66aaac5cc00e2da2b8bbf712a4c39266f8f501a3cdd86253fe4b8e";
 
-const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = realpathSync(resolve(SCRIPT_DIR, ".."));
 const TERMINATION_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"];
+
+function defaultRepoRoot() {
+  return realpathSync(resolve(dirname(fileURLToPath(import.meta.url)), ".."));
+}
 
 function isWithin(parent, child) {
   const pathFromParent = relative(parent, child);
@@ -27,7 +29,7 @@ function isWithin(parent, child) {
 }
 
 export function verifyUpstashMcpEntrypoint({
-  repoRoot = REPO_ROOT,
+  repoRoot = defaultRepoRoot(),
   expectedVersion = UPSTASH_MCP_VERSION,
   expectedSha256 = UPSTASH_MCP_ENTRYPOINT_SHA256,
 } = {}) {
@@ -107,8 +109,8 @@ export function createTerminationForwarder(parent = process) {
   };
 }
 
-export async function launchUpstashMcp() {
-  const { entrypoint } = verifyUpstashMcpEntrypoint();
+export async function launchUpstashMcp({ repoRoot = defaultRepoRoot() } = {}) {
+  const { entrypoint } = verifyUpstashMcpEntrypoint({ repoRoot });
 
   await new Promise((resolveLaunch, rejectLaunch) => {
     const signalForwarding = createTerminationForwarder();
