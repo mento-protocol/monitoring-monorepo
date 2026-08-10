@@ -107,7 +107,12 @@ edit limited to root tooling scripts such as `scripts.agent:quality-gate`,
 `scripts.adr:check`, or `scripts.adr:check:test`; the gate treats that
 as tooling-only and runs an
 entrypoint validator plus the gate/prewarm/PR-feedback/PR-ready/Terraform-stack
-regression tests instead of the package-script refusal path. Existing changed paths run
+regression tests instead of the package-script refusal path. That exemption
+holds only because every allowlisted alias is pinned to an exact command, so the
+entrypoint validator
+(`scripts/check-agent-quality-gate-package-scripts.sh`) runs as a fail-fast
+quality-setup prerequisite: an unpinned or drifted alias aborts the run before
+any `pnpm <alias>` executes, and `--skip-if-fresh` cannot skip it. Existing changed paths run
 targeted Trunk checks for faster local iteration. Deleted paths,
 Trunk/tooling changes, package-manager changes, pnpm patches, and
 package-manifest changes still run full-repo Trunk locally. CI also runs a
@@ -115,8 +120,11 @@ required full-repo Trunk check on every
 PR. Normal `--run` mode executes independent quality-phase commands with
 bounded parallelism (`--parallel <n>`, default `auto` capped at 4 workers, or
 `AGENT_QUALITY_PARALLELISM`). Preflight, codegen, post-codegen install,
-Terraform init/validate chains, and shared-config build setup remain ordered
-prerequisites. Playwright browser install, dashboard `test:browser`, and
+Terraform init/validate chains, shared-config build setup, and the package
+script pin validator remain ordered prerequisites on every path — including
+`--parallel 1` and keep-going runs, where they previously degraded to ordinary
+keep-going commands and let their dependents run after a
+failure. Playwright browser install, dashboard `test:browser`, and
 build-backed `size-limit` stay serialized with each other, but are not global
 quality prerequisites. The quality-gate self-test is also serialized before the
 parallel pool because it temporarily mutates tracked fixture files; this keeps

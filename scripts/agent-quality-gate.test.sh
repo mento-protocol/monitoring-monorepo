@@ -2474,6 +2474,74 @@ assert_contains "+ pnpm agent:prewarm:test"
 assert_contains "All mapped commands passed."
 assert_not_contains "parallel marker was not created"
 
+# A package.json edit confined to allowlisted aliases classifies as
+# root-tooling-scripts and is exempt from --allow-package-script-changes. That
+# exemption is only safe while every allowlisted alias is pinned to an exact
+# command, so the pin validator has to be a fail-fast PREREQUISITE: if it runs
+# in the same pool as the aliases, an edit appending `&& <anything>` to a
+# trusted alias executes on the developer's machine before the gate reports the
+# unpinned command. The stub pnpm here touches a marker; it must never run.
+pin_prerequisite_repo="$(mktemp -d)"
+pin_prerequisite_marker="$pin_prerequisite_repo/pool-marker"
+(
+  cd "$pin_prerequisite_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  mkdir -p bin scripts tools
+  cat > package.json <<'JSON'
+{
+  "name": "quality-gate-pin-fixture",
+  "scripts": {
+    "sentry:project:test": "node ok.mjs"
+  }
+}
+JSON
+  cat > scripts/check-agent-quality-gate-package-scripts.sh <<'STUB'
+#!/usr/bin/env bash
+echo 'package.json scripts.sentry:project:test must be "node ok.mjs"'
+exit 1
+STUB
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  cat > bin/pnpm <<'STUB'
+#!/usr/bin/env bash
+: > "${POOL_MARKER:?}"
+STUB
+  chmod +x bin/pnpm tools/trunk scripts/check-agent-quality-gate-package-scripts.sh
+  git add .
+  git commit -qm init
+  cat > package.json <<'JSON'
+{
+  "name": "quality-gate-pin-fixture",
+  "scripts": {
+    "sentry:project:test": "node ok.mjs && echo appended"
+  }
+}
+JSON
+  set +e
+  POOL_MARKER="$pin_prerequisite_marker" \
+    PATH="$pin_prerequisite_repo/bin:$PATH" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD \
+    --run \
+    --parallel 4 \
+    > "$output_file" 2>&1
+  exit_code=$?
+  set -e
+  [[ "$exit_code" -ne 0 ]]
+)
+if [[ -f "$pin_prerequisite_marker" ]]; then
+  rm -rf "$pin_prerequisite_repo"
+  fail "the quality pool ran a trusted pnpm alias even though the pin validator failed"
+fi
+rm -rf "$pin_prerequisite_repo"
+assert_contains "+ bash scripts/check-agent-quality-gate-package-scripts.sh"
+assert_contains "Stopping after first failed mapped command (--fail-fast)."
+assert_not_contains "Running quality commands with parallelism 4."
+
 autoreview_progress_repo="$(mktemp -d)"
 (
   cd "$autoreview_progress_repo"
@@ -3655,6 +3723,15 @@ assert_contains "$sentry_ci_check"
 
 # A suite that lands without a dedicated arm of its own still routes.
 run_gate "scripts/sentry-not-yet-written.test.mjs"
+assert_contains "$sentry_ci_check"
+
+# findSentrySuites enumerates recursively, so a nested suite is one the check
+# will demand a CI step for. Routing has to reach the same depth or the drift
+# is only caught after push.
+run_gate "scripts/nested/sentry-new.test.mjs"
+assert_contains "$sentry_ci_check"
+
+run_gate "scripts/a/b/sentry-deep.test.mjs"
 assert_contains "$sentry_ci_check"
 
 # An existing suite keeps its specific helper command and gains this one.

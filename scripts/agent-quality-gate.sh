@@ -2536,6 +2536,13 @@ while IFS= read -r path; do
   # package.json or ci.yml to exist, so the glob covers suites with no arm yet.
   # `add_command` deduplicates, so ci.yml keeps its more specific reason above.
   #
+  # Two suite globs because `findSentrySuites` in the check enumerates
+  # recursively — a suite in a subdirectory is one the check will demand a CI
+  # step for, so it has to route the check too. `scripts/*/sentry-*.test.mjs`
+  # covers every depth: a `case` pattern is not pathname expansion, so `*`
+  # matches `/`. (`**` would behave identically here and only invite a reader to
+  # assume globstar semantics bash does not implement.)
+  #
   # Repository-specific, like the `pnpm tf:test` sweep below: the gate unit
   # tests run this script against stub fixture repositories that own neither
   # the check nor the suites it enumerates.
@@ -2547,6 +2554,7 @@ while IFS= read -r path; do
         scripts/check-agent-quality-gate-package-scripts.sh | \
         scripts/check-sentry-suites-in-ci.test.mjs | \
         scripts/sentry-*.test.mjs | \
+        scripts/*/sentry-*.test.mjs | \
         scripts/tf-stacks.test.mjs)
         add_command "node scripts/check-sentry-suites-in-ci.test.mjs" "Sentry CI-coverage check reads this file"
         ;;
@@ -3268,10 +3276,26 @@ run_mapped_command_to_files() {
 
 is_quality_setup_command() {
   local command="$1"
-  # These commands have side effects that later quality checks depend on, so
-  # they must finish before the independent quality pool starts. Keep this list
-  # in sync with new setup-style commands added by the path mapper above.
+  # These commands have side effects that later quality checks depend on, or
+  # gate whether later commands may run at all, so they must finish before the
+  # independent quality pool starts. Keep this list in sync with new
+  # setup-style commands added by the path mapper above.
   case "$command" in
+    "bash scripts/check-agent-quality-gate-package-scripts.sh")
+      # A SAFETY prerequisite, not a build one. The `root-tooling-scripts`
+      # classification skips the `--allow-package-script-changes` refusal for a
+      # package.json edit that touches only allowlisted aliases, which is only
+      # sound while this validator pins each of those aliases to an exact
+      # command. `add_root_tooling_package_script_checks` queues the validator
+      # into the SAME pool as `pnpm sentry:requeue:test` and friends, so before
+      # this arm existed an edit appending `&& <anything>` to a trusted alias
+      # ran that alias concurrently with the check meant to reject it — and
+      # keep-going meant a failed validator only incremented the failure count.
+      # As a setup command it runs in run_prerequisite_phase, which is fail-fast
+      # and stamp-exempt, so an unpinned or drifted alias aborts the run before
+      # any `pnpm <alias>` executes and `--skip-if-fresh` cannot skip it.
+      return 0
+      ;;
     "pnpm --filter @mento-protocol/config build")
       return 0
       ;;
@@ -3576,21 +3600,32 @@ run_prerequisite_phase() {
 
 run_quality_phase() {
   local setup_entries=()
+  local rest_entries=()
   local serial_entries=()
   local parallel_entries=()
   local entry
   local command
 
-  if [[ "$fail_fast" == "1" || "$fail_fast" == "true" || "$quality_parallelism" -le 1 ]]; then
-    run_mapped_entries_sequential "quality" "${quality_commands[@]+"${quality_commands[@]}"}"
-    return
-  fi
-
+  # Split setup out FIRST, so it reaches run_prerequisite_phase on every path.
+  # While the partition lived below the sequential early-return, --parallel 1
+  # and the hook's keep-going setting let a failed setup command's dependents
+  # run anyway: `terraform validate` after a failed `terraform init`, the
+  # typechecks after a failed shared-config build, and the trusted `pnpm
+  # <alias>` commands after the failed package-script validator that exists to
+  # gate them.
+  #
+  # The sequential path keeps the mapper's original ordering for everything
+  # else. Serial-vs-parallel is a concurrency partition, not a priority one, so
+  # reordering it here would change which command a --fail-fast run reports
+  # first for no gain.
   for entry in "${quality_commands[@]+"${quality_commands[@]}"}"; do
     command="${entry%%|*}"
     if is_quality_setup_command "$command"; then
       setup_entries+=("$entry")
-    elif is_quality_serial_command "$command"; then
+      continue
+    fi
+    rest_entries+=("$entry")
+    if is_quality_serial_command "$command"; then
       serial_entries+=("$entry")
     else
       parallel_entries+=("$entry")
@@ -3598,6 +3633,12 @@ run_quality_phase() {
   done
 
   run_prerequisite_phase "quality setup" "${setup_entries[@]+"${setup_entries[@]}"}"
+
+  if [[ "$fail_fast" == "1" || "$fail_fast" == "true" || "$quality_parallelism" -le 1 ]]; then
+    run_mapped_entries_sequential "quality" "${rest_entries[@]+"${rest_entries[@]}"}"
+    return
+  fi
+
   run_mapped_entries_sequential "quality serialized" "${serial_entries[@]+"${serial_entries[@]}"}"
   run_mapped_entries_parallel "quality" "$quality_parallelism" "${parallel_entries[@]+"${parallel_entries[@]}"}"
 }
