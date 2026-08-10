@@ -59,7 +59,9 @@ Phase 2 follows this strict order:
 3. Canary the direct `main` deploy. This passed.
 4. In a separate cleanup PR, remove only default Compute's direct source-bucket
    Object Viewer. From the merged cleanup on clean current `main`, inspect the
-   full platform plan and obtain explicit approval before apply.
+   full platform plan and obtain explicit approval before apply. The routine
+   Metrics Bridge deploy targets only the two dedicated reader instances, so it
+   cannot select this pending sibling removal.
 5. Verify the direct bucket binding is absent, both dedicated builders remain,
    and the live Metrics Bridge revision and `/health` endpoint stay healthy.
 

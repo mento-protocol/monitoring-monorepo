@@ -195,7 +195,9 @@ state checks confirm its absence. If an interrupted first bootstrap left the
 public binding out of Terraform state, a separate guarded no-refresh plan may
 create only that binding. The deploy then verifies the live service and public
 binding; tracked IAM drift or other service-shape drift requires a reviewed full
-platform plan/apply.
+platform plan/apply. Its IAM bootstrap targets the two dedicated source-reader
+instances, never their whole `for_each` collection, so a routine deploy cannot
+apply a pending sibling removal.
 
 [ADR 0058](adr/0058-metrics-bridge-dedicated-cloud-build-executor.md)'s
 follow-up cleanup removes default Compute's direct Object Viewer binding from

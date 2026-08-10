@@ -79,8 +79,11 @@ image pull depend on the exact boundaries.
   has an applied, verified IAM foundation, and the checked-in build config pins
   the dedicated builder. Both route canaries passed. Keep direct Cloud Build
   source-object reads limited to the Alloy and Metrics Bridge builders; never
-  reintroduce default Compute's direct bucket Object Viewer. Its project-level
-  Editor role remains a separate audit and retirement task.
+  reintroduce default Compute's direct bucket Object Viewer. Routine Metrics
+  Bridge deploys must target the two dedicated reader instances, never their
+  whole `for_each` collection, so only a reviewed full platform apply can enact
+  a pending sibling removal. Default Compute's project-level Editor role
+  remains a separate audit and retirement task.
 - Keep routine deploy, PR plan, trusted-main refresh, and production apply
   identities separate as required by
   [`ADR 0047`](../docs/adr/0047-separated-terraform-ci-identities.md). Policy

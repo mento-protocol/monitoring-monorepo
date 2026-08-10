@@ -671,6 +671,83 @@ for (const target of [
   );
 }
 
+const directSourceReaderTargets = [
+  {
+    variable: "GRAFANA_AGENT_SOURCE_READER_TARGET",
+    account: "grafana-agent-builder",
+  },
+  {
+    variable: "METRICS_BRIDGE_SOURCE_READER_TARGET",
+    account: "metrics-bridge-builder",
+  },
+];
+const directSourceReaderAssignments = [];
+const directSourceReaderArguments = [];
+for (const { variable, account } of directSourceReaderTargets) {
+  const assignment = `${variable}="google_storage_bucket_iam_member.cloud_build_source_executor_object_viewer[\\"serviceAccount:${account}@\${PROJECT}.iam.gserviceaccount.com\\"]"`;
+  const targetLine = `  -target="$${variable}" \\\n`;
+  directSourceReaderAssignments.push(assignment);
+  directSourceReaderArguments.push(targetLine.trim().replace(/\s*\\$/u, ""));
+  assert(
+    files["scripts/deploy-bridge.sh"].includes(assignment),
+    `direct source-reader target fixture missing: ${variable}`,
+  );
+  assert(
+    files["scripts/deploy-bridge.sh"].includes(targetLine),
+    `direct source-reader target line missing: ${variable}`,
+  );
+  expectFailure(
+    mutate(files, "scripts/deploy-bridge.sh", `${targetLine}`, ""),
+    `scripts/deploy-bridge.sh: direct bootstrap must target the exact ${variable} instance once`,
+  );
+  expectFailure(
+    mutate(
+      files,
+      "scripts/deploy-bridge.sh",
+      assignment,
+      assignment.replace(account, "default-compute"),
+    ),
+    `scripts/deploy-bridge.sh: direct bootstrap must target the exact ${variable} instance once`,
+  );
+}
+
+const directSourceReaderArgv = execFileSync(
+  "bash",
+  [
+    "-c",
+    [
+      "set -eu",
+      "PROJECT=mento-monitoring",
+      ...directSourceReaderAssignments,
+      `set -- ${directSourceReaderArguments.join(" ")}`,
+      `printf '%s\\n' "$@"`,
+    ].join("\n"),
+  ],
+  { encoding: "utf8" },
+)
+  .trim()
+  .split("\n");
+assert.deepEqual(
+  directSourceReaderArgv,
+  directSourceReaderTargets.map(
+    ({ account }) =>
+      `-target=google_storage_bucket_iam_member.cloud_build_source_executor_object_viewer["serviceAccount:${account}@mento-monitoring.iam.gserviceaccount.com"]`,
+  ),
+  "direct source-reader targets must reach Terraform as quoted for_each instance addresses",
+);
+
+const broadSourceReaderTarget =
+  "  -target=google_storage_bucket_iam_member.cloud_build_source_executor_object_viewer \\\n";
+expectFailure(
+  mutate(
+    files,
+    "scripts/deploy-bridge.sh",
+    '  -target="$GRAFANA_AGENT_SOURCE_READER_TARGET" \\\n',
+    `${broadSourceReaderTarget}  -target="$GRAFANA_AGENT_SOURCE_READER_TARGET" \\\n`,
+  ),
+  "scripts/deploy-bridge.sh: direct bootstrap must not target the whole source-reader collection",
+);
+
 expectFailure(
   mutate(
     files,
