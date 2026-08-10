@@ -58,9 +58,9 @@ export const PEG_POLICY_LEGACY_LISTING_ABSENT_CONSECUTIVE_CHECKS_VERSION =
   "europ-2026-07-22-v1-a69b99aad61649957a2639dc8348b05f";
 
 /**
- * The retained pre-streak policy must stay byte-for-byte intact through its
- * two-phase rollover. Remove this compatibility default after that predecessor
- * is cleared; active policies always declare the field below.
+ * The runtime may read the exact retained pre-streak production policy until
+ * the checked-in `previous: null` generation is published, pinned, and live
+ * verified. Source-controlled policy remains strict.
  */
 export function effectiveListingAbsentConsecutiveChecks(source: {
   listingAbsentConsecutiveChecks?: number | undefined;

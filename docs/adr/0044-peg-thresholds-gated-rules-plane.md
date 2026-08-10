@@ -3,7 +3,7 @@ title: Peg alert thresholds stay in the gated alerts-rules plane, read from one 
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-24
+last_verified: 2026-08-10
 scope: alerts
 date: 2026-07
 doc_type: adr
@@ -21,6 +21,8 @@ routing. Protected policy publication and authentication, producer activation,
 human-approved Grafana application, and live proof remain separate rollout
 gates tracked by
 [`docs/notes/peg-monitoring.md`](../notes/peg-monitoring.md).
+ADR 0057 narrows this record's observation-advancement rule without changing
+the gated-policy ownership or rollover contract.
 **Scope:** alerts
 
 ## Context
@@ -106,7 +108,12 @@ Phase 3 must implement the following protected artifact and rules contract:
     venue-data timestamp or sequence from the venue payload, never on mere
     HTTP fetch success; a source whose venue-side signal stops advancing
     fails closed to unhealthy, so a frozen at-par book behind a healthy
-    endpoint cannot certify freshness or coverage during a real depeg.
+    endpoint cannot certify freshness or coverage during a real depeg. A
+    repeated provider observation may retain source health only while its
+    provider timestamp remains within that source's `staleAfterSeconds`; it
+    never advances a sample or usable decision. Stale, regressing, and
+    identity-invalid inputs fail closed as specified by
+    [ADR 0057](0057-peg-observation-advancement.md).
   - Blindness and heartbeat rules set `no_data_state = "Alerting"` with the
     documented justification and ~5-minute grace, following the
     bridge-down/pool-coverage precedent: for these rules, absence of data
@@ -133,10 +140,15 @@ Phase 3 must implement the following protected artifact and rules contract:
     consecutive-check gauge. Inferring it from a timestamp gauge with
     `changes()` is forbidden: a listed or halted reset can occur between
     30-second scrapes and never appear in the sampled range. During this
-    field's first rollover only, the exact retained predecessor omits the
-    field and the producer uses the initial value `2`. Remove that
-    compatibility default after the reviewed `previous=null` cleanup; every
-    active policy must declare its own bounded threshold.
+    field's first rollover only, the exact retained predecessor
+    `europ-2026-07-22-v1-a69b99aad61649957a2639dc8348b05f` omits the field and
+    the bridge uses the initial value `2`. Source-controlled validators now
+    require the field and checked-in policy has `previous: null`; this
+    runtime-only shim remains while production is pinned to the legacy
+    generation. Remove it in a follow-up PR only after the `previous: null`
+    generation is published, pinned, and live-verified; [#1750](https://github.com/mento-protocol/monitoring-monorepo/issues/1750)
+    tracks that removal. Every active policy must declare its own bounded
+    threshold.
   - Severity and routing stay per-rule: warn → Slack, critical → page, each
     with its own contact-point wiring.
 
