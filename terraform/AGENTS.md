@@ -76,9 +76,10 @@ image pull depend on the exact boundaries.
   [`ADR 0053`](../docs/adr/0053-explicit-deployment-source-staging.md). The
   Metrics Bridge builder migration in
   [`ADR 0058`](../docs/adr/0058-metrics-bridge-dedicated-cloud-build-executor.md)
-  must apply its additive IAM foundation from clean current `main` before a
-  later routing change selects it. Retain the default-Compute source reader
-  until that route passes both canaries.
+  has an applied, verified IAM foundation, and the checked-in build config pins
+  the dedicated builder. Verify the GitHub and direct `main` deploy canaries
+  while default Compute still has its temporary source reader, then remove that
+  reader only in a later reviewed PR and approved clean-current-main apply.
 - Keep routine deploy, PR plan, trusted-main refresh, and production apply
   identities separate as required by
   [`ADR 0047`](../docs/adr/0047-separated-terraform-ci-identities.md). Policy
@@ -101,7 +102,7 @@ image pull depend on the exact boundaries.
   project-level controller grant or broad Storage Admin, Storage Object Admin,
   or Service Account User fallbacks. The routine deployer and `gcp_dev_members`
   receive Service Account User only on the Metrics Bridge runtime identity and
-  the pre-routed dedicated builder, never on default Compute. An approved,
+  dedicated builder, never on default Compute. An approved,
   time-bounded emergency bootstrap may grant only `pegPolicyBucketController` at
   project level until both policies reconcile; remove it immediately, verify its
   absence, and run a clean full plan. Terraform derives the pinned GCS URL and

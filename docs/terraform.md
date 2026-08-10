@@ -3,7 +3,7 @@ title: Terraform Stacks
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-28
+last_verified: 2026-08-10
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -181,20 +181,24 @@ upload boundary for routine GCP deploys. The platform stack creates:
 Both buckets use uniform access, enforced public-access prevention, disabled
 soft-delete retention, `force_destroy = false`, and Terraform
 `prevent_destroy`. Cloud Build callers can read bucket metadata and create
-objects. The dedicated Alloy `grafana_agent_builder`, Metrics Bridge's current
-default Compute executor `80554359692-compute@developer.gserviceaccount.com`,
-and the pre-routed `metrics-bridge-builder` can view those objects; the Alloy
-builder is also an App Engine uploader. App Engine uploaders have
-Object Admin only on the App Engine source bucket because the CLI can replace
-or clean up cached hash-named objects. AppSpot can view those objects. The
-routine deployer and `gcp_dev_members` have Service Account User only on the
-dedicated Metrics Bridge runtime identity and the pre-routed dedicated builder.
-They have no default-Compute or project-wide Service Account User grant. The
-builder exists as an additive foundation only: do not route builds to it or
-remove the default-Compute source reader until a clean current-main plan,
-explicit apply approval, apply, effective-IAM verification, and both route
-canaries complete. [ADR 0058](adr/0058-metrics-bridge-dedicated-cloud-build-executor.md)
-owns that boundary.
+objects. The dedicated Alloy `grafana_agent_builder` and
+`metrics-bridge-builder` can view Cloud Build source objects; the Alloy builder
+is also an App Engine uploader. The legacy default Compute executor
+`80554359692-compute@developer.gserviceaccount.com` retains the same
+read-only Cloud Build source access only while the dedicated Metrics Bridge
+route completes its GitHub and direct `main` canaries. App Engine uploaders
+have Object Admin only on the App Engine source bucket because the CLI can
+replace or clean up cached hash-named objects. AppSpot can view those objects.
+The routine deployer and `gcp_dev_members` have Service Account User only on
+the dedicated Metrics Bridge runtime identity and dedicated builder. They have
+no default-Compute or project-wide Service Account User grant.
+
+After both route canaries pass, remove the temporary default-Compute source
+reader in a separate reviewed cleanup PR. Refresh current `main`, inspect a
+clean platform plan, obtain explicit apply approval, apply, and verify both
+effective bucket IAM and the live Cloud Run revision. [ADR
+0058](adr/0058-metrics-bridge-dedicated-cloud-build-executor.md) owns that
+boundary.
 
 Metrics Bridge's default Compute executor has no App Engine source-bucket grant.
 
@@ -205,9 +209,10 @@ the supported static syntax and deliberate proof limits.
 
 The original source-bucket rollout, five route canaries, ADR 0054 policy
 foundation, broad-role removal, and effective-IAM audit are complete. For ADR
-0058, apply and verify the additive Metrics Bridge builder from clean current
-`main` before its separate routing change. Canary the GitHub and direct deploy
-paths before removing the default Compute source reader.
+0058, the additive Metrics Bridge builder is applied and verified, and the
+checked-in build config pins it. Canary the GitHub and direct `main` deploy
+paths, then remove the temporary default Compute source reader through a
+separate reviewed cleanup and approved apply.
 
 ## Platform GitHub Actions secrets and variables
 

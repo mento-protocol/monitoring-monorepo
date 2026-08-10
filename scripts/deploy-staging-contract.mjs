@@ -1,9 +1,11 @@
 import {
+  extractStringSet,
   expectExpression,
   expectNoResourceMultiplicity,
   expectString,
   nestedBlocks,
   requireBlock,
+  sameSortedValues,
   terraformTopLevelBlocks,
 } from "./production-infra-identity-contract/hcl.mjs";
 import {
@@ -18,6 +20,14 @@ export {
 } from "./deploy-staging-callsite-discovery.mjs";
 
 const TERRAFORM_FILE = "terraform/deploy-staging.tf";
+const METRICS_BRIDGE_BUILD_CONFIG = "cloudbuild.yaml";
+const METRICS_BRIDGE_BUILDER =
+  "projects/mento-monitoring/serviceAccounts/metrics-bridge-builder@mento-monitoring.iam.gserviceaccount.com";
+const CLOUD_BUILD_SOURCE_EXECUTORS = [
+  "serviceAccount:${google_service_account.grafana_agent_builder.email}",
+  "serviceAccount:${google_project.monitoring.number}-compute@developer.gserviceaccount.com",
+  "serviceAccount:${google_service_account.metrics_bridge_builder.email}",
+];
 
 const EXPECTED_CALLSITES = [
   {
@@ -178,6 +188,59 @@ function validateTerraform(files, errors) {
     },
     errors,
   );
+  validateCloudBuildSourceExecutors(blocks, errors);
+}
+
+function validateCloudBuildSourceExecutors(blocks, errors) {
+  const label = `${TERRAFORM_FILE}: Cloud Build source executors`;
+  const executorLocals = blocks.filter(
+    (block) =>
+      block.filePath === TERRAFORM_FILE &&
+      block.kind === "locals" &&
+      block.code.includes("cloud_build_source_executor_members"),
+  );
+  if (executorLocals.length !== 1) {
+    errors.push(`${label}: must declare exactly one executor set`);
+    return;
+  }
+  if (
+    !sameSortedValues(
+      extractStringSet(
+        executorLocals[0].code,
+        "cloud_build_source_executor_members",
+      ),
+      CLOUD_BUILD_SOURCE_EXECUTORS,
+    )
+  ) {
+    errors.push(
+      `${label}: must contain the two dedicated builders and temporary default Compute reader`,
+    );
+  }
+
+  const grant = requireBlock(
+    blocks,
+    TERRAFORM_FILE,
+    "google_storage_bucket_iam_member",
+    "cloud_build_source_executor_object_viewer",
+    errors,
+    label,
+  );
+  if (!grant) return;
+  expectExpression(
+    grant,
+    "for_each",
+    "local.cloud_build_source_executor_members",
+    errors,
+    label,
+  );
+  expectExpression(
+    grant,
+    "bucket",
+    "google_storage_bucket.cloud_build_source_staging.name",
+    errors,
+    label,
+  );
+  expectString(grant, "role", "roles/storage.objectViewer", errors, label);
 }
 
 function isShellRedirection(token) {
@@ -293,32 +356,32 @@ function matchesShellValue(token, value) {
   return false;
 }
 
-function hasStructuredFlag(args, flag, value) {
-  let optionsTerminated = false;
-  for (let index = 0; index < args.length; index += 1) {
-    const argument = args[index];
-    if (argument === "--") {
-      optionsTerminated = true;
-      continue;
-    }
-    if (optionsTerminated) continue;
-    if (argument === `--${flag}=${value}`) return true;
-    if (argument === `--${flag}` && args[index + 1] === value) return true;
-  }
-  return false;
-}
-
-export function recordHasDeployStagingFlag(record, flag, value) {
-  if (record.flagTrusted === false) return false;
+function recordFlagValues(record, flag) {
   if (record.args) {
-    return (
-      record.argsTrusted !== false &&
-      hasStructuredFlag(record.args, flag, value)
-    );
+    if (record.argsTrusted === false) return undefined;
+    const values = [];
+    let optionsTerminated = false;
+    for (let index = 0; index < record.args.length; index += 1) {
+      const argument = record.args[index];
+      if (argument === "--") {
+        optionsTerminated = true;
+        continue;
+      }
+      if (optionsTerminated) continue;
+      if (argument.startsWith(`--${flag}=`)) {
+        values.push(argument.slice(flag.length + 3));
+      } else if (argument === `--${flag}`) {
+        values.push(record.args[index + 1]);
+      }
+    }
+    return values;
   }
+  if (record.flagTrusted === false) return undefined;
+
   const tokens = topLevelShellWords(record.raw ?? record.normalized ?? "");
   const gcloudIndex = tokens.findIndex(isGcloudExecutable);
-  if (gcloudIndex === -1) return false;
+  if (gcloudIndex === -1) return undefined;
+  const values = [];
   let optionsTerminated = false;
   let redirectionConsumesNext = false;
   for (let index = gcloudIndex + 1; index < tokens.length; index += 1) {
@@ -335,24 +398,32 @@ export function recordHasDeployStagingFlag(record, flag, value) {
       redirectionConsumesNext = false;
       continue;
     }
-    if (optionsTerminated) {
-      continue;
-    }
-    const prefix = `--${flag}=`;
-    if (
-      token.startsWith(prefix) &&
-      matchesShellValue(token.slice(prefix.length), value)
-    ) {
-      return true;
-    }
-    if (
-      token === `--${flag}` &&
-      matchesShellValue(tokens[index + 1] ?? "", value)
-    ) {
-      return true;
+    if (optionsTerminated) continue;
+    if (token.startsWith(`--${flag}=`)) {
+      values.push(token.slice(flag.length + 3));
+    } else if (token === `--${flag}`) {
+      values.push(tokens[index + 1]);
     }
   }
-  return false;
+  return values;
+}
+
+function recordHasExactSingleFlag(record, flag, value) {
+  const values = recordFlagValues(record, flag);
+  return values?.length === 1 && matchesShellValue(values[0] ?? "", value);
+}
+
+function recordHasForbiddenFlag(record, flag) {
+  const values = recordFlagValues(record, flag);
+  return values === undefined || values.length > 0;
+}
+
+export function recordHasDeployStagingFlag(record, flag, value) {
+  const values = recordFlagValues(record, flag);
+  return (
+    values?.some((candidate) => matchesShellValue(candidate ?? "", value)) ??
+    false
+  );
 }
 
 function validateCallsites(files, errors) {
@@ -386,6 +457,26 @@ function validateCallsites(files, errors) {
     }
   }
 
+  for (const filePath of [
+    ".github/workflows/metrics-bridge.yml",
+    "scripts/deploy-bridge.sh",
+  ]) {
+    const record = records.find(
+      (candidate) =>
+        candidate.filePath === filePath && candidate.kind === "builds-submit",
+    );
+    if (!recordHasExactSingleFlag(record ?? {}, "config", "cloudbuild.yaml")) {
+      errors.push(
+        `${filePath}: Metrics Bridge builds must set --config=cloudbuild.yaml exactly`,
+      );
+    }
+    if (recordHasForbiddenFlag(record ?? {}, "service-account")) {
+      errors.push(
+        `${filePath}: Metrics Bridge builds must not override cloudbuild.yaml with --service-account`,
+      );
+    }
+  }
+
   const alloyPath = "aegis/grafana-agent/cloudbuild.yaml";
   const alloy = parseDeployStagingStructuredFile(
     alloyPath,
@@ -394,6 +485,22 @@ function validateCallsites(files, errors) {
   );
   if (alloy?.options?.logging !== "CLOUD_LOGGING_ONLY") {
     errors.push(`${alloyPath}: Cloud Build logging must be CLOUD_LOGGING_ONLY`);
+  }
+
+  const metricsBridge = parseDeployStagingStructuredFile(
+    METRICS_BRIDGE_BUILD_CONFIG,
+    requireSource(files, METRICS_BRIDGE_BUILD_CONFIG, errors),
+    errors,
+  );
+  if (metricsBridge?.serviceAccount !== METRICS_BRIDGE_BUILDER) {
+    errors.push(
+      `${METRICS_BRIDGE_BUILD_CONFIG}: Cloud Build serviceAccount must be ${METRICS_BRIDGE_BUILDER}`,
+    );
+  }
+  if (metricsBridge?.options?.logging !== "CLOUD_LOGGING_ONLY") {
+    errors.push(
+      `${METRICS_BRIDGE_BUILD_CONFIG}: Cloud Build logging must be CLOUD_LOGGING_ONLY`,
+    );
   }
 }
 

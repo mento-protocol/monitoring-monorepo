@@ -41,7 +41,10 @@ garden_lane: agent-entry-points
   for behavior that syntax and lint checks cannot verify.
 - `pnpm tf:test` owns the deployment source-staging contract. It allows exactly
   five literal checked-in `gcloud builds submit` / `gcloud app deploy`
-  callsites, including their source-staging flag and value.
+  callsites, including their source-staging flag and value. It also pins both
+  Metrics Bridge submit paths to the checked-in `cloudbuild.yaml`, rejects CLI
+  service-account overrides, and verifies that config's exact builder identity
+  and logging mode.
   [ADR 0053](../docs/adr/0053-explicit-deployment-source-staging.md) owns the
   supported static syntax and explicit proof limits. Keep indirect or dynamic
   deploy forms forbidden and inert examples confined to

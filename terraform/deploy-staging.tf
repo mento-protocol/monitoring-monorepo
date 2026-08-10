@@ -10,11 +10,9 @@ locals {
     toset(["serviceAccount:${google_service_account.metrics_bridge_deployer.email}"]),
   )
 
-  # Alloy pins its Cloud Build executor to grafana_agent_builder. Phase 1 adds
-  # Metrics Bridge's dedicated builder alongside the current default Compute
-  # executor. Keep both Object Viewer grants until the later routing PR pins
-  # the new identity and its canaries pass; this apply must not change the live
-  # build route.
+  # Both Cloud Build routes pin dedicated executors. Retain default Compute's
+  # temporary source reader until the GitHub and direct Metrics Bridge canaries
+  # pass; a later reviewed cleanup removes it through an approved apply.
   cloud_build_source_executor_members = toset([
     "serviceAccount:${google_service_account.grafana_agent_builder.email}",
     "serviceAccount:${google_project.monitoring.number}-compute@developer.gserviceaccount.com",
@@ -115,10 +113,9 @@ resource "google_storage_bucket_iam_member" "cloud_build_source_caller_object_cr
   member = each.value
 }
 
-# The Alloy rollout pins its executor to the dedicated builder identity. Metrics
-# Bridge's verified executor is the project's default Compute service account.
-# Give both read-only access to the explicit source bucket before the routing
-# follow-up directs their build submissions there.
+# The Alloy and Metrics Bridge Cloud Build configurations pin dedicated
+# executors. Keep their source access read-only and exact; default Compute stays
+# temporarily until both Metrics Bridge route canaries pass.
 resource "google_storage_bucket_iam_member" "cloud_build_source_executor_object_viewer" {
   for_each = local.cloud_build_source_executor_members
 
@@ -198,10 +195,9 @@ resource "google_service_account_iam_member" "dev_metrics_bridge_runtime_service
   ]
 }
 
-# Phase 1 grants submitters act-as only on the future dedicated build executor.
-# Current Metrics Bridge submits still use the default Compute executor until a
-# later reviewed routing change updates cloudbuild.yaml after this foundation's
-# approved current-main apply. Do not grant default-Compute Service Account User.
+# The applied phase-one foundation grants submitters act-as only on the
+# dedicated build executor now pinned by cloudbuild.yaml. Do not grant
+# default-Compute Service Account User.
 resource "google_service_account_iam_member" "ci_metrics_bridge_builder_service_account_user" {
   service_account_id = google_service_account.metrics_bridge_builder.name
   role               = "roles/iam.serviceAccountUser"

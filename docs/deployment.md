@@ -3,7 +3,7 @@ title: Deployment Guide
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-28
+last_verified: 2026-08-10
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -185,16 +185,25 @@ Storage Object Admin, and Service Account User fallbacks were removed and
 audited. [ADR 0053](adr/0053-explicit-deployment-source-staging.md) records that
 permission split and completed sequence.
 
-The Metrics Bridge builder repair has its own strict order under
-[ADR 0058](adr/0058-metrics-bridge-dedicated-cloud-build-executor.md). First
-merge the infrastructure-only PR. Refresh current `main`, run a clean platform
-plan, get explicit apply approval, apply, and verify the pre-routed
-`metrics-bridge-builder`, its scoped grants, and the exact deployer and
-`gcp_dev_members` act-as bindings. Those submitters must have no
-default-Compute or project-wide Service Account User grant. Keep the current
-default-Compute source-bucket Object Viewer during this phase. Only then merge
-the routing follow-up, canary the GitHub and direct deploy paths, and remove the
-default-Compute source reader.
+The Metrics Bridge builder foundation is applied, its effective IAM is
+verified, and `cloudbuild.yaml` pins both submit paths to it. Complete the
+remaining phase-two rollout under
+[ADR 0058](adr/0058-metrics-bridge-dedicated-cloud-build-executor.md):
+
+1. Watch the GitHub `main` deployment complete. It is the first canary of the
+   dedicated builder while the default-Compute source reader remains live.
+2. From the resulting clean `main`, run and verify the direct
+   `pnpm bridge:deploy` canary. Its Terraform bootstrap remains a no-op for the
+   temporary default-Compute reader in this routing phase.
+3. In a separate reviewed cleanup PR, remove that reader. Refresh current
+   `main`, inspect a clean platform plan, obtain explicit apply approval, and
+   apply it.
+4. Verify effective bucket IAM no longer grants default Compute access, and
+   verify the deployed Cloud Run revision and `/health` endpoint.
+
+The routine deployer and `gcp_dev_members` have Service Account User only on
+the dedicated builder and runtime identity; neither may receive default-Compute
+or project-wide Service Account User.
 
 ---
 
