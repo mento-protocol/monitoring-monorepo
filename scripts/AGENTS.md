@@ -3,7 +3,7 @@ title: Scripts Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-27
+last_verified: 2026-08-10
 doc_type: agent-instructions
 scope: scripts
 review_interval_days: 90
@@ -46,7 +46,14 @@ garden_lane: agent-entry-points
   service-account overrides, and verifies that config's exact builder identity
   and logging mode. It also requires the direct Metrics Bridge bootstrap to
   reconcile the builder's project roles, repository writer, developer act-as
-  bindings, and build-log reader before submitting and rolling out a build.
+  bindings, build-log reader, and Peg-policy bucket IAM dependency before
+  submitting and rolling out a build.
+  For an existing Metrics Bridge service, that bootstrap must fail closed if it
+  cannot verify the exact service name and must not target the service. A first
+  service create and an interrupted public-binding create must use separate
+  no-refresh saved plans accepted by `check-metrics-bridge-bootstrap-plan.mjs`.
+  The deploy must then verify Terraform state, the live service, and the live
+  public binding before building.
   [ADR 0053](../docs/adr/0053-explicit-deployment-source-staging.md) owns the
   supported static syntax and explicit proof limits. Keep indirect or dynamic
   deploy forms forbidden and inert examples confined to
