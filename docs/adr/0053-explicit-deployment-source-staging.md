@@ -3,7 +3,7 @@ title: Routine GCP deploys use explicit source-staging buckets
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-27
+last_verified: 2026-08-10
 scope: terraform/infra
 date: 2026-07
 doc_type: adr
@@ -13,9 +13,11 @@ garden_lane: adrs-architecture
 
 # ADR 0053 — Routine GCP deploys use explicit source-staging buckets
 
-**Status:** Accepted (Jul 2026). The additive infrastructure prerequisite is
-applied and routing is implemented in source; live canaries and broad-role
-removal remain separate future gates.
+**Status:** Accepted (Jul 2026). The source-staging foundation, routing,
+canaries, and broad-role removal are complete. The bucket decision remains in
+force; [ADR 0058](0058-metrics-bridge-dedicated-cloud-build-executor.md)
+supersedes the Metrics Bridge executor choice through a separate phased
+migration.
 **Scope:** terraform/infra
 
 ## Context
@@ -33,10 +35,10 @@ expiry. App Engine also requires a `US`-compatible bucket for the immutable
 `us-central` application, while Metrics Bridge builds run in `var.gcp_region`.
 
 The Alloy Cloud Build path is pinned to the dedicated
-`grafana_agent_builder` service account. Recent Metrics Bridge builds use the
-project's default Compute service account
-`80554359692-compute@developer.gserviceaccount.com`. Both are exact Cloud
-Build source executors. The legacy
+`grafana_agent_builder` service account. Metrics Bridge's current route still
+uses the project's default Compute service account
+`80554359692-compute@developer.gserviceaccount.com`; ADR 0058 provisions its
+dedicated replacement before routing changes. The legacy
 `80554359692@cloudbuild.gserviceaccount.com` identity is not a source-staging
 principal and has no Alloy Secret Manager access.
 
@@ -53,7 +55,7 @@ Both buckets enforce public-access prevention, disable soft-delete retention,
 set `force_destroy = false`, and use Terraform `prevent_destroy`. Their
 contents are reconstructible deployment input, not durable records.
 
-The routing phase makes every executable deploy path name its bucket:
+The completed routing phase makes every executable deploy path name its bucket:
 
 - `gcloud builds submit` uses `--gcs-source-staging-dir`;
 - `gcloud app deploy` uses `--bucket`;
@@ -61,8 +63,9 @@ The routing phase makes every executable deploy path name its bucket:
 
 Cloud Build callers — the routine deployer and `gcp_dev_members` — receive
 bucket metadata read plus object create on the Cloud Build bucket. Its exact
-executors — the dedicated `grafana_agent_builder` and Metrics Bridge's verified
-default Compute service account — receive object view there. App Engine
+executors — the dedicated `grafana_agent_builder`, Metrics Bridge's current
+default Compute service account, and the pre-routed `metrics-bridge-builder`
+foundation — receive object view there. App Engine
 uploaders — those callers plus that builder — receive bucket metadata read plus
 object admin on the App Engine bucket. AppSpot receives object view. No staging
 grant is project-wide.
@@ -72,25 +75,23 @@ read-only access to the Cloud Build source bucket and no grant on the App Engine
 source bucket.
 
 The routine deployer and `gcp_dev_members` receive Service Account User on the
-exact default Compute Engine service account used by the unpinned Metrics
-Bridge Cloud Run service. This preserves both the automated Metrics Bridge
-rollout and the supported direct `pnpm bridge:deploy` path after the broad
-fallback is removed. The existing exact AppSpot binding continues to cover
+dedicated Metrics Bridge runtime identity. ADR 0058 additionally grants them
+Service Account User on the dedicated builder only; neither receives
+default-Compute act-as. The existing exact AppSpot binding continues to cover
 Aegis.
 
-This first phase is additive. Existing project-wide Storage Admin, Storage
-Object Admin, and routine Service Account User grants remain until all five
-deployment paths prove the explicit routes. ADR 0054 owns the later reviewed
-same-project Peg-policy foundation. Its applied foundation removed those broad
-grants and requires an effective project, bucket, inherited, and
-service-account IAM audit after applies. ADR 0055 owns the narrow controller
-recovery required before policy publication resumes.
+The source-staging migration was deliberately additive. It first retained the
+project-wide Storage Admin, Storage Object Admin, and routine Service Account
+User grants while all five deployment paths proved the explicit routes. ADR
+0054's later reviewed foundation removed those broad grants after the canaries;
+the effective project, bucket, inherited, and service-account IAM audits are
+complete. ADR 0055 records the bounded controller recovery used before policy
+publication resumed.
 
-Land the infrastructure as its own PR. After it merges, refresh current `main`,
-run a clean current-main platform plan, get explicit apply approval, apply, and
-verify the live buckets and IAM. Only then merge the routing follow-up. That
-follow-up triggers the Metrics Bridge and Aegis deploy workflows; reversing the
-order makes both automatic deploys race missing infrastructure and fail closed.
+ADR 0058 reuses that sequencing rule for the Metrics Bridge builder: apply and
+verify its additive identity foundation from clean current `main` before a
+later routing change selects it. Keep the default Compute source reader until
+the new route passes both canaries.
 
 ## Alternatives considered
 
@@ -119,9 +120,10 @@ order makes both automatic deploys race missing infrastructure and fail closed.
   sensitive buckets cannot inherit.
 - App Engine uploaders retain stronger object authority, but only on a
   short-lived source bucket.
-- The dedicated Alloy builder and Metrics Bridge's verified default Compute
-  executor have the exact staging grants they need; the legacy default Cloud
-  Build identity remains outside the staging-principal set.
+- The dedicated Alloy builder, Metrics Bridge's current default Compute
+  executor, and its pre-routed dedicated replacement have exact staging grants;
+  the legacy default Cloud Build identity remains outside the staging-principal
+  set.
 - A checked-in contract allows exactly five literal checked-in submit/deploy
   callsites and their required source-staging flag/value. Discovery rejects
   additional deploy records recovered from shell-like surfaces, wrappers,
@@ -135,11 +137,9 @@ order makes both automatic deploys race missing infrastructure and fail closed.
   cmd shell preserves `#` as executable text; known Unix and PowerShell shells
   retain their native `#` comment behavior. Inert examples belong only in
   `scripts/deploy-staging-contract.test.mjs`.
-- Operators must preserve the phase boundary: merge and apply the additive
-  infrastructure from current `main`, merge routing, and run all five deploy
-  canaries. The applied same-project Peg-policy foundation removed broad roles
-  and requires an effective-IAM audit; ADR 0055 now governs its controller
-  recovery. This ADR itself creates no peg-policy bucket or identity.
+- The original source-staging phase boundary is complete. ADR 0058 now requires
+  the same foundation-before-routing order for the Metrics Bridge builder. This
+  ADR itself creates no peg-policy bucket or identity.
 
 ## Evidence
 

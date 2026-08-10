@@ -343,7 +343,7 @@ jobs:
               - scripts/version-skew-check.test.mjs
               - .github/workflows/ci.yml
               - .github/actions/pnpm-install/**
-      - uses: Kesin11/actions-timeline@7bf79990b7c09f5dfb570ac30b814ca597bd538e # v3.1.1
+      - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
         if: always()
 
   shared:
@@ -383,7 +383,7 @@ jobs:
           flags: config
           directory: shared-config/coverage
           token: ${{ secrets.CODECOV_TOKEN }}
-      - uses: Kesin11/actions-timeline@7bf79990b7c09f5dfb570ac30b814ca597bd538e # v3.1.1
+      - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
         if: always()
 
   ui:
@@ -502,7 +502,7 @@ jobs:
           flags: ui-dashboard
           directory: ui-dashboard/coverage
           token: ${{ secrets.CODECOV_TOKEN }}
-      - uses: Kesin11/actions-timeline@7bf79990b7c09f5dfb570ac30b814ca597bd538e # v3.1.1
+      - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
         if: always()
 
   indexer:
@@ -586,7 +586,7 @@ jobs:
           flags: indexer-envio
           directory: indexer-envio/coverage
           token: ${{ secrets.CODECOV_TOKEN }}
-      - uses: Kesin11/actions-timeline@7bf79990b7c09f5dfb570ac30b814ca597bd538e # v3.1.1
+      - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
         if: always()
 
   bridge:
@@ -633,7 +633,7 @@ jobs:
           flags: metrics-bridge
           directory: metrics-bridge/coverage
           token: ${{ secrets.CODECOV_TOKEN }}
-      - uses: Kesin11/actions-timeline@7bf79990b7c09f5dfb570ac30b814ca597bd538e # v3.1.1
+      - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
         if: always()
 
   integration-probes:
@@ -671,7 +671,7 @@ jobs:
           flags: integration-probes
           directory: integration-probes/coverage
           token: ${{ secrets.CODECOV_TOKEN }}
-      - uses: Kesin11/actions-timeline@7bf79990b7c09f5dfb570ac30b814ca597bd538e # v3.1.1
+      - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
         if: always()
 
   alerts:
@@ -765,7 +765,7 @@ jobs:
           flags: alerts-oncall-announcer
           directory: alerts/infra/oncall-announcer/coverage
           token: ${{ secrets.CODECOV_TOKEN }}
-      - uses: Kesin11/actions-timeline@7bf79990b7c09f5dfb570ac30b814ca597bd538e # v3.1.1
+      - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
         if: always()
 
   gov-watchdog:
@@ -825,7 +825,7 @@ jobs:
           flags: governance-watchdog
           directory: governance-watchdog/coverage
           token: ${{ secrets.CODECOV_TOKEN }}
-      - uses: Kesin11/actions-timeline@7bf79990b7c09f5dfb570ac30b814ca597bd538e # v3.1.1
+      - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
         if: always()
 
   # Registry-backed Terraform validation inside the required `ci` sentinel.
@@ -887,7 +887,7 @@ jobs:
             [[ -n "$stack" ]] || continue
             node scripts/tf-stacks.mjs validate "$stack"
           done <<< "$stack_ids"
-      - uses: Kesin11/actions-timeline@7bf79990b7c09f5dfb570ac30b814ca597bd538e # v3.1.1
+      - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
         if: always()
 
   aegis:
@@ -939,7 +939,7 @@ jobs:
           flags: aegis
           directory: aegis/coverage
           token: ${{ secrets.CODECOV_TOKEN }}
-      - uses: Kesin11/actions-timeline@7bf79990b7c09f5dfb570ac30b814ca597bd538e # v3.1.1
+      - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
         if: always()
 
   scripts:
@@ -1078,6 +1078,7 @@ jobs:
         # itself only runs weekly via supply-chain.yml; this required job is
         # what catches a regression in the script on every PR.
         run: node scripts/override-prune-report.test.mjs
+<<<<<<< HEAD
       # ── Sentry triage and autofix suites (issue #1721) ──────────────────────
       # These guard the machine-authored triage and autofix legs: queue
       # transitions, digest and projection shape, autofix selection and
@@ -1114,7 +1115,7 @@ jobs:
         # sentry:*:test alias must resolve to one of those files, and the local
         # gate's tooling allowlist must list every sentry:* script.
         run: node scripts/check-sentry-suites-in-ci.test.mjs
-      - uses: Kesin11/actions-timeline@7bf79990b7c09f5dfb570ac30b814ca597bd538e # v3.1.1
+      - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
         if: always()
 
   production-infra-contract:
@@ -1133,7 +1134,7 @@ jobs:
       - uses: ./.github/actions/pnpm-install
       - name: Terraform production infrastructure contract
         run: pnpm tf:test
-      - uses: Kesin11/actions-timeline@7bf79990b7c09f5dfb570ac30b814ca597bd538e # v3.1.1
+      - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
         if: always()
 
   autoreview-suite:
@@ -1165,7 +1166,7 @@ jobs:
           node_source="$(node -p 'process.execPath')"
           /usr/bin/install -m 0500 "$node_source" "$trusted_node_dir/node"
           PATH="$trusted_node_dir:$PATH" pnpm agent:autoreview:test -- --jobs 1
-      - uses: Kesin11/actions-timeline@7bf79990b7c09f5dfb570ac30b814ca597bd538e # v3.1.1
+      - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
         if: always()
 
   autoreview-root-runtime:
@@ -1210,7 +1211,7 @@ jobs:
             AUTOREVIEW_TEST_NODE_SNAPSHOT_DIAGNOSTICS=1 \
             AUTOREVIEW_TEST_TRUSTED_FIXTURE_PARENT=/root \
             "$node_path" scripts/agent-autoreview-target-guard.test.mjs
-      - uses: Kesin11/actions-timeline@7bf79990b7c09f5dfb570ac30b814ca597bd538e # v3.1.1
+      - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
         if: always()
 
   version-skew:
@@ -1234,7 +1235,7 @@ jobs:
         run: pnpm skew:check
       - name: Version skew checker tests
         run: pnpm skew:check:test
-      - uses: Kesin11/actions-timeline@7bf79990b7c09f5dfb570ac30b814ca597bd538e # v3.1.1
+      - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
         if: always()
 
   deps:
@@ -1260,7 +1261,7 @@ jobs:
       - uses: ./.github/actions/pnpm-install
       - name: dependency-cruiser (cross-package boundaries, blocking)
         run: pnpm code-health:deps
-      - uses: Kesin11/actions-timeline@7bf79990b7c09f5dfb570ac30b814ca597bd538e # v3.1.1
+      - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
         if: always()
 
   ci:
@@ -1295,5 +1296,5 @@ jobs:
         with:
           jobs: ${{ toJSON(needs) }}
           allowed-skips: shared,ui,indexer,bridge,integration-probes,aegis,alerts,gov-watchdog,terraform,deps,scripts,autoreview-suite,autoreview-root-runtime,version-skew
-      - uses: Kesin11/actions-timeline@7bf79990b7c09f5dfb570ac30b814ca597bd538e # v3.1.1
+      - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
         if: always()

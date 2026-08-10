@@ -183,6 +183,7 @@ Authority: canonical
 - [`docs/adr/0055-peg-policy-bucket-controller-recovery.md`](adr/0055-peg-policy-bucket-controller-recovery.md) — Peg policy bucket controller recovers authoritative IAM reconciliation
 - [`docs/adr/0056-agent-mcp-credential-broker.md`](adr/0056-agent-mcp-credential-broker.md) — An untrusted agent's MCP credentials sit behind a loopback broker, not in its env
 - [`docs/adr/0057-peg-observation-advancement.md`](adr/0057-peg-observation-advancement.md) — Repeated Peg provider observations retain bounded health, never sample authority
+- [`docs/adr/0058-metrics-bridge-dedicated-cloud-build-executor.md`](adr/0058-metrics-bridge-dedicated-cloud-build-executor.md) — Metrics Bridge uses a dedicated Cloud Build executor
 
 Authority: non-canonical
 
