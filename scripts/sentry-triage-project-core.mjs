@@ -624,6 +624,60 @@ export function verdictCommentIdFromUrl(url) {
   return match ? match[1] : null;
 }
 
+// ---------------------------------------------------------------------------
+// Round binding (issue #1717): which verdict comment was already on the stub
+// BEFORE this triage round ran.
+// ---------------------------------------------------------------------------
+
+/** No trusted, admissible verdict comment existed before the round. */
+export const PRIOR_VERDICT_NONE = "none";
+/** The pre-round read failed, or produced a comment with no parseable id.
+ * Distinct from `none` on purpose: `none` is a fact ("nothing was there"),
+ * `unknown` is an absence of evidence, and only one of them may pass. */
+export const PRIOR_VERDICT_UNKNOWN = "unknown";
+
+/** True for the three shapes a prior-verdict token may take: a bare numeric
+ * comment id, `none`, or `unknown`. Everything else is a wiring bug. */
+export function isPriorVerdictToken(value) {
+  return (
+    value === PRIOR_VERDICT_NONE ||
+    value === PRIOR_VERDICT_UNKNOWN ||
+    (typeof value === "string" && /^[0-9]+$/.test(value))
+  );
+}
+
+/**
+ * The round binding itself: given the verdict comment `selectVerdictComment`
+ * picked NOW and the token recorded BEFORE the round, decide whether this
+ * resolution may settle the stub. Returns null to allow, or a refusal reason.
+ *
+ * Accept only a comment strictly NEWER than the one the round started from.
+ * GitHub issue-comment ids come from one monotonically increasing sequence, so
+ * "newer" is a numeric comparison — and comparing rather than merely testing
+ * equality also covers the case where the recorded comment was deleted between
+ * the two reads, which equality would wave through onto an even older verdict.
+ * `unknown` never passes: without a baseline nothing can be proven newer than
+ * it, and settling a stub on an unprovable verdict is the failure this closes.
+ */
+export function priorVerdictRefusal(priorToken, selectedUrl) {
+  if (priorToken == null) return null; // no binding requested (projection path)
+  if (!isPriorVerdictToken(priorToken)) {
+    return `prior-verdict token ${JSON.stringify(priorToken)} is not a comment id, '${PRIOR_VERDICT_NONE}' or '${PRIOR_VERDICT_UNKNOWN}'`;
+  }
+  if (priorToken === PRIOR_VERDICT_UNKNOWN) {
+    return "the verdict comment present before this triage round could not be read, so no verdict can be shown to postdate it";
+  }
+  if (priorToken === PRIOR_VERDICT_NONE) return null;
+  const selectedId = verdictCommentIdFromUrl(selectedUrl);
+  if (selectedId === null) {
+    return `the selected verdict comment carries no parseable comment id (url=${selectedUrl}), so it cannot be shown to postdate comment ${priorToken}`;
+  }
+  if (BigInt(selectedId) > BigInt(priorToken)) return null;
+  return selectedId === priorToken
+    ? `the newest usable verdict comment (${selectedId}) is the one that was already on the stub before this triage round — the round posted no verdict of its own`
+    : `the newest usable verdict comment (${selectedId}) predates the one recorded before this triage round (${priorToken})`;
+}
+
 // Blatant non-decision placeholders that defeat the point of a needs-human
 // escalation — "please look" is not a decision. This is a DETERMINISTIC
 // BACKSTOP against the laziest bypasses, not a full decision-quality judge (a
@@ -683,12 +737,31 @@ export function isDecisionReadyQuestion(text) {
  * stub and then silently skip its projection while the stub closes as if
  * handled; funneling both steps through this one function removes that
  * divergence by construction (PR #1356 review).
+ *
+ * `options.priorVerdictCommentId` binds the resolution to the ROUND that is
+ * settling the stub (issue #1717). The regression fence above only catches a
+ * verdict older than a fence comment somebody posted; a stub re-queued for
+ * bookkeeping reasons carries no fence by design, so without this binding a
+ * triage round that dies before posting lets the `verdict` job label and close
+ * on the PREVIOUS round's verdict — laundering a regression that landed after
+ * ingest's Sentry query into a settled, closed stub. Callers that are already
+ * downstream of a settled verdict (projection, autofix select) pass nothing and
+ * keep the pre-#1717 behaviour.
  */
-export function resolveVerdict(issue, queueIssueNumber) {
+export function resolveVerdict(issue, queueIssueNumber, options = {}) {
   const selected = selectVerdictComment(issue.comments);
   if (!selected.body) {
     throw new Error(
       `No usable verdict comment on issue #${queueIssueNumber} (${selected.reason}).`,
+    );
+  }
+  const refusal = priorVerdictRefusal(
+    options.priorVerdictCommentId ?? null,
+    selected.url,
+  );
+  if (refusal) {
+    throw new Error(
+      `Refusing to settle issue #${queueIssueNumber} on a verdict this triage round did not produce: ${refusal}. Leaving sentry:needs-triage in place for re-triage.`,
     );
   }
   const parsed = parseVerdictComment(selected.body);

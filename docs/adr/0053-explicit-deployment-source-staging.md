@@ -37,8 +37,9 @@ expiry. App Engine also requires a `US`-compatible bucket for the immutable
 The Alloy Cloud Build path is pinned to the dedicated
 `grafana_agent_builder` service account. ADR 0058's applied foundation provides
 the dedicated Metrics Bridge replacement, and the checked-in config pins
-`metrics-bridge-builder`. The current default Compute source reader remains
-temporarily through the GitHub and direct `main` canaries. The legacy
+`metrics-bridge-builder`. Both Metrics Bridge route canaries passed, and the
+follow-up cleanup removes default Compute's direct source-bucket Object Viewer.
+Its project-level Editor role remains a separate audit and retirement task. The legacy
 `80554359692@cloudbuild.gserviceaccount.com` identity is not a source-staging
 principal and has no Alloy Secret Manager access.
 
@@ -64,16 +65,14 @@ The completed routing phase makes every executable deploy path name its bucket:
 Cloud Build callers — the routine deployer and `gcp_dev_members` — receive
 bucket metadata read plus object create on the Cloud Build bucket. Its dedicated
 executors — `grafana_agent_builder` and `metrics-bridge-builder` — receive
-object view there. Default Compute retains its legacy read-only source access
-only through ADR 0058's two route canaries, then a separate approved cleanup
-apply removes it. App Engine
-uploaders — those callers plus that builder — receive bucket metadata read plus
-object admin on the App Engine bucket. AppSpot receives object view. No staging
-grant is project-wide.
-
-Metrics Bridge's default Compute executor is not an App Engine uploader. Its
-temporary Cloud Build source access never grants access to the App Engine source
-bucket.
+object view there. After ADR 0058's two route canaries, a separate approved
+cleanup apply removes default Compute's direct Cloud Build source-bucket Object
+Viewer. Its project-level Editor role may still grant inherited Storage access
+and remains outside this source-staging cleanup. App Engine uploaders — those
+callers plus the Alloy builder — receive bucket metadata read plus object admin
+on the App Engine bucket. AppSpot receives object view. No direct staging grant
+is project-wide, and default Compute has no direct App Engine source-bucket
+grant in this stack.
 
 The routine deployer and `gcp_dev_members` receive Service Account User on the
 dedicated Metrics Bridge runtime identity. ADR 0058 additionally grants them
@@ -91,8 +90,9 @@ publication resumed.
 
 ADR 0058 reuses that sequencing rule for the Metrics Bridge builder. Its
 additive identity foundation is applied and verified, and the build config now
-selects it. Complete both canaries while default Compute retains its temporary
-reader, then remove it in a separate reviewed cleanup PR and approved apply.
+selects it. Both route canaries passed. The follow-up cleanup removes default
+Compute's direct source-bucket Object Viewer through a separately reviewed and
+approved apply.
 
 ## Alternatives considered
 
@@ -122,9 +122,10 @@ reader, then remove it in a separate reviewed cleanup PR and approved apply.
 - App Engine uploaders retain stronger object authority, but only on a
   short-lived source bucket.
 - The dedicated Alloy and Metrics Bridge builders have exact staging grants.
-  Default Compute retains a temporary read-only source grant only until both
-  Metrics Bridge route canaries pass; the legacy default Cloud Build identity
-  remains outside the staging-principal set.
+  The cleanup leaves default Compute outside the direct source-bucket Object
+  Viewer set; its separate project-level Editor role remains outside this ADR.
+  The legacy default Cloud Build identity remains outside the staging-principal
+  set.
 - A checked-in contract allows exactly five literal checked-in submit/deploy
   callsites and their required source-staging flag/value. Discovery rejects
   additional deploy records recovered from shell-like surfaces, wrappers,
@@ -139,9 +140,9 @@ reader, then remove it in a separate reviewed cleanup PR and approved apply.
   retain their native `#` comment behavior. Inert examples belong only in
   `scripts/deploy-staging-contract.test.mjs`.
 - The original source-staging phase boundary is complete. ADR 0058 adds a
-  separate applied-foundation, routing-canary, then cleanup sequence for the
-  Metrics Bridge builder. This ADR itself creates no peg-policy bucket or
-  identity.
+  separate applied-foundation, routing-canary, then direct-reader cleanup
+  sequence for the Metrics Bridge builder. This ADR itself creates no peg-policy
+  bucket or identity.
 
 ## Evidence
 

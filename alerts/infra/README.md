@@ -230,6 +230,18 @@ cloud-routine experiment ran for weeks producing nothing and nobody noticed.
   condition owns _nothing is reporting at all_: no point for 3h. The absence
   half is the dead-man switch — a watcher that can fail quietly reproduces the
   incident it exists to prevent
+- **Real absence latency is 5h, not the 3h `duration` reads.** Both conditions
+  aggregate over a 7200s `ALIGN_MAX` window, and an aligned point persists
+  while that trailing window still holds the last raw publish, so the absence
+  timer starts 2h late
+- That 5h is measured **from the last published point**, not from the moment
+  the watcher stops, and the two differ by up to the publish interval. A
+  watcher dying just after a publish is caught ~5h later; one dying just
+  before the next is caught ~4h later. The missed run is already inside the
+  window, so it is not added on top
+- It is **watcher-silence** latency, not pipeline-death latency. Ingest dying
+  while the watcher keeps reporting is the threshold condition's job, and that
+  one fires at 26h
 - The threshold deliberately does not set `evaluation_missing_data`. Freshness
   is an absolute age rather than a delta, so a gap loses no information: the
   first point after any gap carries the true age and crosses 26h on its own if
@@ -297,17 +309,38 @@ two conditions separately: step 2 covers the threshold, step 3 covers absence.
    a value. The threshold cannot cover a watcher that stops publishing, so
    this is the only step that proves the switch survives its own death.
 
-   Pause the scheduler, leave it paused past the condition's 3h duration, and
-   confirm the `#alerts-infra` message arrives. **Resume it afterwards** — a
-   paused watcher is a disarmed switch:
+   Pause the scheduler and leave it paused **more than 5h**. The absence
+   condition carries the same 7200s `ALIGN_MAX` aggregation as the threshold,
+   and an aligned point keeps existing while a trailing 2h window still
+   contains the last raw publish. So the 3h `duration` timer cannot start until
+   2h after the final point:
+
+   ```text
+   last publish + 7200s (alignment empties) + 10800s (duration) = fire
+   ```
+
+   Expect the alert about 5h after the last publish, plus a couple of minutes
+   of propagation. **At the 3h mark it has not fired yet, and reading
+   `duration = "10800s"` as the wait is what makes an operator conclude the
+   switch is broken.**
+
+   **Resume it afterwards** — a paused watcher is a disarmed switch:
 
    ```bash
    gcloud scheduler jobs pause sentry-ingest-freshness-check \
      --location europe-west1 --project "$PROJECT_ID"
-   # wait > 3h, confirm the alert fires, then:
+   # wait > 5h (2h alignment + 3h duration), confirm the alert fires, then:
    gcloud scheduler jobs resume sentry-ingest-freshness-check \
      --location europe-west1 --project "$PROJECT_ID"
+   # verify it took: state must read ENABLED
+   gcloud scheduler jobs describe sentry-ingest-freshness-check \
+     --location europe-west1 --project "$PROJECT_ID" --format='value(state)'
    ```
+
+   The absence message is distinguishable from the threshold's and worth
+   checking rather than assuming: it says _"has not been seen for over 180
+   minutes"_ and carries **no value**, because there is no data point to
+   report. A message quoting a value is the threshold condition, not this one.
 
 Do not sign this off on a passing plan alone — an untested dead-man switch is
 the failure mode being guarded against.

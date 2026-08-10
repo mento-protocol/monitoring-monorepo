@@ -31,13 +31,26 @@ const METRICS_BRIDGE_DIRECT_BOOTSTRAP_TARGETS = [
   "google_service_account_iam_member.dev_metrics_bridge_builder_service_account_user",
   "google_service_account_iam_member.dev_metrics_bridge_runtime_service_account_user",
 ];
+const METRICS_BRIDGE_DIRECT_SOURCE_READER_TARGETS = [
+  {
+    variable: "GRAFANA_AGENT_SOURCE_READER_TARGET",
+    assignment:
+      'GRAFANA_AGENT_SOURCE_READER_TARGET="google_storage_bucket_iam_member.cloud_build_source_executor_object_viewer[\\"serviceAccount:grafana-agent-builder@${PROJECT}.iam.gserviceaccount.com\\"]"',
+  },
+  {
+    variable: "METRICS_BRIDGE_SOURCE_READER_TARGET",
+    assignment:
+      'METRICS_BRIDGE_SOURCE_READER_TARGET="google_storage_bucket_iam_member.cloud_build_source_executor_object_viewer[\\"serviceAccount:metrics-bridge-builder@${PROJECT}.iam.gserviceaccount.com\\"]"',
+  },
+];
+const CLOUD_BUILD_SOURCE_EXECUTOR_COLLECTION_TARGET =
+  "google_storage_bucket_iam_member.cloud_build_source_executor_object_viewer";
 const METRICS_BRIDGE_SERVICE_BOOTSTRAP_TARGET =
   "google_cloud_run_v2_service.metrics_bridge";
 const METRICS_BRIDGE_PUBLIC_BINDING_TARGET =
   "google_cloud_run_v2_service_iam_member.metrics_bridge_public";
 const CLOUD_BUILD_SOURCE_EXECUTORS = [
   "serviceAccount:${google_service_account.grafana_agent_builder.email}",
-  "serviceAccount:${google_project.monitoring.number}-compute@developer.gserviceaccount.com",
   "serviceAccount:${google_service_account.metrics_bridge_builder.email}",
 ];
 
@@ -224,9 +237,7 @@ function validateCloudBuildSourceExecutors(blocks, errors) {
       CLOUD_BUILD_SOURCE_EXECUTORS,
     )
   ) {
-    errors.push(
-      `${label}: must contain the two dedicated builders and temporary default Compute reader`,
-    );
+    errors.push(`${label}: must contain only the two dedicated builders`);
   }
 
   const grant = requireBlock(
@@ -517,6 +528,9 @@ function validateCallsites(files, errors) {
 
   const directDeployPath = "scripts/deploy-bridge.sh";
   const directDeploy = requireSource(files, directDeployPath, errors);
+  const normalizedDirectDeployLines = directDeploy
+    .split("\n")
+    .map((line) => line.trim().replace(/\s*\\$/u, ""));
   const targetLine = (target) =>
     new RegExp(
       `^\\s+-target=${target.replaceAll(".", "\\.")}\\s*(?:\\\\)?$`,
@@ -560,6 +574,36 @@ function validateCallsites(files, errors) {
         `${directDeployPath}: direct IAM target ${target} must run before the service lookup`,
       );
     }
+  }
+
+  for (const {
+    variable,
+    assignment,
+  } of METRICS_BRIDGE_DIRECT_SOURCE_READER_TARGETS) {
+    const assignmentCount = directDeploy.split(assignment).length - 1;
+    const targetCount = normalizedDirectDeployLines.filter(
+      (line) => line === `-target="$${variable}"`,
+    ).length;
+    if (assignmentCount !== 1 || targetCount !== 1) {
+      errors.push(
+        `${directDeployPath}: direct bootstrap must target the exact ${variable} instance once`,
+      );
+    }
+  }
+
+  const broadSourceReaderTargets = new Set([
+    `-target=${CLOUD_BUILD_SOURCE_EXECUTOR_COLLECTION_TARGET}`,
+    `-target="${CLOUD_BUILD_SOURCE_EXECUTOR_COLLECTION_TARGET}"`,
+    `-target='${CLOUD_BUILD_SOURCE_EXECUTOR_COLLECTION_TARGET}'`,
+  ]);
+  if (
+    normalizedDirectDeployLines.some((line) =>
+      broadSourceReaderTargets.has(line),
+    )
+  ) {
+    errors.push(
+      `${directDeployPath}: direct bootstrap must not target the whole source-reader collection`,
+    );
   }
 
   const expectedProbeFragments = [

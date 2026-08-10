@@ -10,9 +10,9 @@ steps:
 images:
   - $_IMAGE
 # Pin Metrics Bridge builds to its Terraform-managed least-privilege executor.
-# Submitters have Service Account User only on this identity. Default Compute
-# keeps temporary source-bucket read access through both canaries; ADR 0058
-# moves its removal to a later approved cleanup. Cloud Build expands PROJECT_ID
+# Submitters have Service Account User only on this identity. ADR 0058's cleanup
+# removes default Compute's direct source-bucket Object Viewer; its separate
+# project-level Editor role remains out of scope. Cloud Build expands PROJECT_ID
 # from the selected build project so the resource path and email stay aligned.
 serviceAccount: projects/$PROJECT_ID/serviceAccounts/metrics-bridge-builder@$PROJECT_ID.iam.gserviceaccount.com
 options:

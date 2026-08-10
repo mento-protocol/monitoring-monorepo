@@ -196,6 +196,19 @@ one run — a failed regression re-queue laundered into a bookkeeping one. The
 chokepoint records the attempt before its first write, so the record exists
 whether or not the writes do.
 
+**The sweep has one blind spot, and it is structural.** It decides `bookkeeping`
+from GitHub state, and GitHub state cannot show a Sentry occurrence that landed
+after this run's `fetchMergedSentryIssues()` returned. When one does, the true
+cause was Sentry evidence: the stub goes back in the queue fence-free and the
+previous round's verdict — which describes the pre-regression occurrence — stays
+admissible. Nothing here closes that. A per-stub Sentry lookup in the sweep was
+rejected (it introduces Sentry coupling into a sweep that needs none, and any
+Sentry read has a window after it), and so was fencing every recovery, which
+would discard a good verdict on each genuine bookkeeping strand. The
+CONSEQUENCE is closed instead, one stage later: the settlement is bound to the
+triage round that produced its verdict — see
+[the round binding](#the-round-binding) (issue #1717).
+
 The namespace is separate from the development backlog:
 
 | Label                        | Meaning                                                                |
@@ -426,6 +439,45 @@ Every deterministic close records that the ledger issue will reopen on a
 future Sentry regression. A missing verdict after a scheduled run is an
 operational failure signal, not “no issues found.”
 
+### The round binding
+
+The `verdict` job runs `if: always()`, so a triage round that died before
+posting still reaches it — and it settles the stub on the newest ADMISSIBLE
+verdict comment, which may be the PREVIOUS round's. The regression fence only
+makes one inadmissible when a producer posted a fence, and the stranded-stub
+sweep deliberately posts none. So the settlement is bound to the round instead:
+
+- the `select` job records, per selected stub, the id of the verdict comment
+  already on it (`sentry-triage-project.mjs --prior-verdicts`, which selects
+  through `selectVerdictComment` — the same selector the settlement resolves
+  with, so the two ends cannot disagree about what "the previous verdict" is);
+- the `verdict` job passes that token to `--parse-only`, and `resolveVerdict`
+  refuses unless the comment it selects is strictly NEWER. Refusing on the same
+  id is the common case: the round posted nothing. Refusing on an OLDER id
+  covers the recorded comment having been deleted in between, which equality
+  alone would wave through onto an even older verdict.
+
+Only `select` may record it: it is trusted and it runs before the agent, so what
+it reads is what the round started from. Read afterwards, the token would
+include the round's own comment and prove nothing.
+
+The token is the `#issuecomment-<n>` id — the same generation token the autofix
+leg threads for its ABA check (issue #1506). Ids are unique and never reused, so
+there is no window to race.
+
+Both ends fail CLOSED, per stub and never per batch. A stub `select` could not
+read, or whose verdict comment carries no parseable id, is recorded `unknown`,
+and `unknown` never passes: nothing can be shown to postdate a baseline that was
+never read. That costs one wasted triage round on that stub — loud, and
+self-healing, because that round's own verdict comment becomes the next run's
+baseline. The refusal happens before the label edit, so the stub keeps
+`sentry:needs-triage` and the next scheduled run re-triages it.
+
+This closes the consequence whatever the re-queue's cause was, and it holds for
+the surviving archive-side route as well as the sweep's blind spot. It does not
+make the sweep able to see Sentry, and it is not a substitute for the fence: the
+digest, projection, and autofix consumers still read the fence.
+
 ### External verdict projection
 
 [ADR 0038](../adr/0038-sentry-central-plane-verdict-projection.md) limits projection to
@@ -508,12 +560,19 @@ The cause is the whole rule: one caused by new Sentry events must fence, because
 any prior verdict described the old occurrence; one caused by bookkeeping — the
 stranded-stub sweep above, which declares `bookkeeping` — must not, because
 nothing about the Sentry issue changed and that verdict is still valid. Drop the
-fence and a triage round that dies before posting lets the `verdict` job
-re-apply the previous verdict and close the stub over a live regression. Add one
-where it does not belong and a good verdict is discarded and re-triaged for
-nothing. Neither call site can make that mistake by omission: an undeclared
-cause refuses rather than defaulting either way, and `buildRegressedComment` —
-the fence's one definition — has exactly one caller, inside the chokepoint.
+fence and the digest, projection, and autofix consumers all read a verdict
+describing a dead occurrence. Add one where it does not belong and a good
+verdict is discarded and re-triaged for nothing. Neither call site can make that
+mistake by omission: an undeclared cause refuses rather than defaulting either
+way, and `buildRegressedComment` — the fence's one definition — has exactly one
+caller, inside the chokepoint.
+
+The fence is no longer the only thing standing between a fence-free re-queue and
+a stub closed over a live regression. The `verdict` job is additionally bound to
+the round that produced its verdict ([the round binding](#the-round-binding)),
+which holds whether or not a fence was posted and whether or not the declared
+cause was right. The fence still decides admissibility for every consumer; the
+binding decides whether this run may settle the stub at all.
 
 The refusal will not re-queue a stub it cannot fence, and it decides that by
 asking whether any verdict is still admissible — never by checking that a fence
@@ -851,6 +910,14 @@ permission or the environment-secret writes 403 (`terraform/providers.tf`).
 - A failed or invalid triage verdict retains `sentry:needs-triage`; rerun the
   agent workflow after correcting the underlying failure. Manual
   `issue_number` dispatches must target an open queue issue.
+- **A red `verdict` job saying it refuses to settle a stub "on a verdict this
+  triage round did not produce" is working as designed** ([the round
+  binding](#the-round-binding)). The round posted nothing — usually because the
+  agent leg failed — so the stub keeps `sentry:needs-triage` and the next
+  scheduled run re-triages it. Read the agent leg's failure, not this one. The
+  variant naming an unreadable prior verdict (`unknown`) means the `select`
+  job's per-stub read failed; that also self-heals on the next run. Neither
+  needs a manual label edit.
 - A refused autofix is terminal until a human reviews the refusal, corrects
   any transient cause, and removes `sentry:fix-refused` from the queue issue.
   Then dispatch `Sentry Autofix` from `main` for that issue or let the next

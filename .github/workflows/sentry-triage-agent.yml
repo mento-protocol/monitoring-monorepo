@@ -51,6 +51,12 @@ jobs:
   # and the secret guard live inside the first step, so a disabled or
   # unprovisioned state is a clean no-op (`[]`, exit 0), never a failure and
   # never an empty matrix expression downstream.
+  #
+  # It also records, per selected stub, the verdict comment already on it — the
+  # round binding for the `verdict` job below (issue #1717). This is the only
+  # job that can: it is trusted AND it runs before the agent, so what it reads
+  # is what the round started from. The read is GitHub-only; no Sentry call and
+  # no Sentry credential enter this job.
   # ---------------------------------------------------------------------------
   select:
     runs-on: ubuntu-latest
@@ -68,7 +74,22 @@ jobs:
     outputs:
       issues: ${{ steps.select.outputs.issues }}
       count: ${{ steps.select.outputs.count }}
+      priorVerdicts: ${{ steps.prior-verdicts.outputs.priorVerdicts }}
     steps:
+      # SHA-pinned (not tags) so tag retargeting / a compromised release cannot
+      # silently run new code. Bump via Dependabot (.github/dependabot.yml).
+      # This checkout is PRISTINE — no agent runs in this job — so the
+      # prior-verdict recorder below is safe to run from the checkout path, the
+      # same reasoning the `verdict` job's plain `scripts/` invocation rests on.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+
       - name: Select queue issues (kill-switch + secret guarded)
         id: select
         env:
@@ -136,6 +157,57 @@ jobs:
             echo "count=${count}"
           } >> "${GITHUB_OUTPUT}"
           echo "Selected ${count} issue(s): ${issues}"
+
+      # -----------------------------------------------------------------------
+      # Round binding, recorded BEFORE the agent runs (issue #1717).
+      #
+      # The `verdict` job is `if: always()`, so a triage round that dies before
+      # posting still reaches it, and it settles the stub on the newest
+      # ADMISSIBLE verdict comment. The regression fence only makes a verdict
+      # inadmissible when some producer posted a fence; ingest's stranded-stub
+      # sweep re-queues for BOOKKEEPING and posts none, by design — nothing
+      # about the Sentry issue changed as far as it can see. It reads GitHub
+      # only, so a Sentry occurrence that landed after its own
+      # `fetchMergedSentryIssues()` returned is invisible to it, and the
+      # previous round's verdict — which describes the pre-regression
+      # occurrence — stays admissible. Without this binding the `verdict` job
+      # then labels and closes on it, and the close postdates the occurrence, so
+      # ingest's dedup gate skips the stub until the NEXT occurrence: a live
+      # regression laundered into a settled ledger entry.
+      #
+      # So record what each stub already carried and make the verdict job prove
+      # the round moved it forward. This is the same generation-token plumbing
+      # the autofix leg threads (issue #1506), and it kills the consequence
+      # whatever the re-queue's cause was — no per-stub Sentry lookup is added
+      # to the sweep, which is what makes it a design fix rather than a guard.
+      #
+      # `[]` (kill switch off, secrets unprovisioned, or an empty queue) emits
+      # `{}` and costs nothing. A per-stub read failure records `unknown`, which
+      # the verdict job refuses — fail closed for that stub only, never a
+      # starved batch.
+      # -----------------------------------------------------------------------
+      - name: Record the verdict comment each stub arrives with
+        id: prior-verdicts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SELECTED_ISSUES: ${{ steps.select.outputs.issues }}
+        run: |
+          set -euo pipefail
+          # Plain scripts/ is correct here for the same reason it is in the
+          # verdict job and nowhere near the agent: this job has its own runner
+          # and its own pristine checkout, which no agent ever touched.
+          prior_file="${RUNNER_TEMP}/prior-verdicts.json"
+          node scripts/sentry-triage-project.mjs \
+            --prior-verdicts \
+            --issues "${SELECTED_ISSUES}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            > "${prior_file}"
+          # Compact to one line: GITHUB_OUTPUT is line-oriented, and the script
+          # already prints a single line — re-compacting is the cheap assertion
+          # that it stayed that way.
+          prior=$(jq -c . "${prior_file}")
+          echo "priorVerdicts=${prior}" >> "${GITHUB_OUTPUT}"
+          echo "Prior verdict comments: ${prior}"
 
   # ---------------------------------------------------------------------------
   # triage: one claude-code-action run per queue issue (max 2 in parallel).
@@ -610,8 +682,33 @@ jobs:
         id: verdict
         env:
           QUEUE_ISSUE_NUMBER: ${{ matrix.issue }}
+          # The select job's per-stub record of the verdict comment this round
+          # started from (issue #1717). Bot-produced JSON, read with jq below
+          # and shape-checked before it reaches the parser.
+          PRIOR_VERDICTS: ${{ needs.select.outputs.priorVerdicts }}
         run: |
           set -euo pipefail
+          # Round binding (#1717). This job runs under `if: always()`, so it
+          # also runs when the triage round died before posting anything — and
+          # the stub it is settling may have been re-queued by ingest's
+          # stranded-stub sweep, which declares `bookkeeping` and therefore
+          # posts no staleness fence. Without a binding, the resolution below
+          # would then re-apply the PREVIOUS round's verdict and close the stub,
+          # burying a Sentry regression that landed after ingest's own Sentry
+          # query. So require the verdict comment to be strictly newer than the
+          # one select recorded before the agent ran.
+          #
+          # A missing key is treated as `unknown`, which the parser refuses:
+          # every selected stub gets a record, so an absent one means the two
+          # jobs disagree about the batch — exactly when settling a stub is
+          # least defensible. An unset/unparsable PRIOR_VERDICTS fails the jq
+          # under set -e, which leaves sentry:needs-triage on for the next run.
+          prior=$(printf '%s' "${PRIOR_VERDICTS:-}" \
+            | jq -r --arg n "${QUEUE_ISSUE_NUMBER}" '.[$n] // "unknown"')
+          if ! [[ "${prior}" =~ ^([0-9]+|none|unknown)$ ]]; then
+            echo "::error::prior-verdict record for issue #${QUEUE_ISSUE_NUMBER} is '${prior}', not a comment id / none / unknown; refusing to settle the stub."
+            exit 1
+          fi
           # The agent's only write is the verdict comment. The label swap is
           # applied HERE, deterministically, so a prompt-injected agent cannot
           # touch labels at all. The PARSE is delegated to
@@ -621,7 +718,8 @@ jobs:
           # sed-vs-script divergence here could apply a label and then have the
           # projection silently skip while the stub closes as if handled). The
           # script reads the newest <!-- sentry-triage-verdict:v1 --> comment,
-          # applies the regression fence (only a verdict strictly newer than
+          # applies the round binding above and the regression fence (only a
+          # verdict strictly newer than
           # the newest "Regressed in Sentry (last seen " reopen comment counts,
           # so a stale pre-regression verdict never re-labels a regressed
           # issue), validates the verdict against the closed four-value enum,
@@ -646,8 +744,9 @@ jobs:
               --parse-only \
               --issue "${QUEUE_ISSUE_NUMBER}" \
               --repo "${GITHUB_REPOSITORY}" \
+              --prior-verdict-comment "${prior}" \
               > "${parse_file}"; then
-            echo "::error::No usable verdict on issue #${QUEUE_ISSUE_NUMBER} (missing, stale pre-regression, or invalid verdict comment — see the log above); leaving sentry:needs-triage in place for retry."
+            echo "::error::No usable verdict on issue #${QUEUE_ISSUE_NUMBER} (missing, stale pre-regression, invalid, or not produced by this triage round — see the log above); leaving sentry:needs-triage in place for retry."
             exit 1
           fi
           verdict=$(jq -r '.verdict' "${parse_file}")

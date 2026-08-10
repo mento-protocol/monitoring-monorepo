@@ -678,6 +678,62 @@ test("a failed verdict post-condition re-queues the stub instead of stranding it
   });
 });
 
+/** The select job's block, from its key to the triage job's. */
+function selectJobBlock() {
+  const start = WORKFLOW.indexOf("\n  select:");
+  const end = WORKFLOW.indexOf("\n  triage:");
+  assert.ok(start > 0 && end > start, "select/triage job boundaries not found");
+  return WORKFLOW.slice(start, end);
+}
+
+test("the round binding is recorded BEFORE the agent runs (#1717)", () => {
+  // Only the select job can record it: it is trusted AND it runs before the
+  // agent, so what it reads is what the round started from. Recorded anywhere
+  // later it would see the round's own comment and prove nothing.
+  const select = selectJobBlock();
+  assert.match(select, /--prior-verdicts/);
+  assert.match(select, /priorVerdicts: \$\{\{ steps\.prior-verdicts\.outputs/);
+  assert.match(select, /node scripts\/sentry-triage-project\.mjs/);
+  // It needs its own pristine checkout to run that script, and no agent runs
+  // in this job.
+  assert.match(select, /actions\/checkout@[0-9a-f]{40}/);
+  assert.match(select, /persist-credentials: false/);
+  // No other job may recompute it: a second recorder would be free to read the
+  // stub after the agent posted, which defeats the whole binding.
+  const elsewhere = WORKFLOW.replace(select, "");
+  assert.ok(
+    !/--prior-verdicts\b/.test(elsewhere),
+    "only the select job may record the prior verdict comment",
+  );
+});
+
+test("the verdict step binds its resolution to the recorded round (#1717)", () => {
+  const job = WORKFLOW.slice(
+    WORKFLOW.indexOf("\n  verdict:"),
+    WORKFLOW.indexOf("\n  project:"),
+  );
+  // The token travels through env + jq, never string-interpolated into the
+  // command line, and its shape is checked against the parser's closed set.
+  assert.match(
+    job,
+    /PRIOR_VERDICTS: \$\{\{ needs\.select\.outputs\.priorVerdicts \}\}/,
+  );
+  assert.match(job, /\^\(\[0-9\]\+\|none\|unknown\)\$/);
+  assert.match(job, /--prior-verdict-comment "\$\{prior\}"/);
+  // A missing record must resolve to `unknown` (which the parser refuses), not
+  // to an empty string that would silently unbind the fence.
+  assert.match(job, /'\.\[\$n\] \/\/ "unknown"'/);
+
+  // The refusal has to land BEFORE the label edit takes sentry:needs-triage
+  // off; after it, a refusal would strand the stub instead of re-queueing it.
+  const parse = job.indexOf("--prior-verdict-comment");
+  const edit = job.indexOf('--remove-label "sentry:needs-triage,${shed}"');
+  assert.ok(
+    parse > 0 && edit > parse,
+    "the binding must be checked before the label edit",
+  );
+});
+
 test("projection and digest wait for the verdict job", () => {
   assert.match(WORKFLOW, /project:\n\s+needs: \[select, triage, verdict\]/);
   assert.match(
