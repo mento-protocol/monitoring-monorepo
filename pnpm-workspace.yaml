@@ -51,11 +51,11 @@ minimumReleaseAgeExclude:
   - "@next/swc-win32-x64-msvc@16.2.11"
   - next-auth@5.0.0-beta.32
   - "@auth/core@0.41.3"
-  # GHSA-r28c-9q8g-f849: first patched PostCSS release (2026-07-24).
-  - postcss@8.5.18
+  # GHSA-fxqj-rqcc-2cmp: all releases through 8.5.22 are vulnerable.
+  - postcss@8.5.23
   - protobufjs
   - tar
-  - undici@7.28.0
+  - undici@7.29.0
   - vite
 
 ignoredBuiltDependencies:
@@ -83,25 +83,29 @@ overrides:
   # Remove once the supported stable Next line selects sharp >=0.35.0.
   "sharp@<0.35.0": 0.35.3
   "flatted@<3.4.2": 3.4.2
-  # GHSA-mh99-v99m-4gvg: all releases through 5.0.7 are vulnerable.
-  "brace-expansion@>=2.0.0 <3": 5.0.8
-  "brace-expansion@>=5.0.0 <6": 5.0.8
-  # GHSA-r28c-9q8g-f849: <=8.5.17 can disclose arbitrary source-map files.
-  "postcss@<8.5.18": 8.5.18
+  # GHSA-rgw5-rvv9-x895: the 5.0.8 resource-limit fix is incomplete.
+  "brace-expansion@>=2.0.0 <3": 5.0.9
+  "brace-expansion@>=5.0.0 <6": 5.0.9
+  # GHSA-fxqj-rqcc-2cmp: all releases through 8.5.22 are vulnerable.
+  "postcss@<8.5.23": 8.5.23
   "picomatch@>=4.0.0 <4.0.4": 4.0.4
   "vite@>=8.0.0 <8.0.16": 8.0.16
   "@grpc/grpc-js": 1.14.4
   "esbuild": 0.28.1
   "@babel/core@>=7.0.0 <7.29.6": 7.29.6
-  "body-parser@<1.20.3": 1.20.3
+  # GHSA-v422-hmwv-36x6: enforce limit validation on both supported lines.
+  "body-parser@<1.20.6": 1.20.6
   "path-to-regexp@<0.1.13": 0.1.13
-  "fast-uri@<3.1.4": 3.1.4
+  # GHSA-7p8r-x3mc-p8w7: 3.1.5 fixes backslash authority confusion.
+  "fast-uri@<3.1.5": 3.1.5
   "express@<4.20.0": 4.22.1
   "form-data@<2.5.6": 2.5.6
   "form-data@>=4.0.0 <4.0.6": 4.0.6
-  "@istanbuljs/load-nyc-config>js-yaml": 4.3.0
-  "@lhci/utils>js-yaml": 4.3.0
-  "js-yaml@>=4.0.0 <4.3.0": 4.3.0
+  "@istanbuljs/load-nyc-config>js-yaml": 4.3.1
+  "@lhci/utils>js-yaml": 4.3.1
+  "js-yaml@>=4.0.0 <4.3.1": 4.3.1
+  # GHSA-2v37-7h3g-55p8: 3.3.17 fixes zero-size generator hangs.
+  "nanoid@<3.3.17": 3.3.17
   "protobufjs@>=7.0.0 <7.6.5": 7.6.5
   "qs@<6.15.2": 6.15.2
   "cookie@<0.7.0": 0.7.2
@@ -110,13 +114,15 @@ overrides:
   "@eslint/eslintrc@<3.3.5": 3.3.5
   "ajv@^6.0.0": ^6.14.0
   "ajv@^8.0.0": ^8.18.0
-  "body-parser@>=2.0.0 <2.2.1": 2.2.1
-  # GHSA-mh99-v99m-4gvg: all releases through 5.0.7 are vulnerable.
-  "brace-expansion@^1.0.0": 5.0.8
+  "body-parser@>=2.0.0 <2.3.0": 2.3.0
+  # GHSA-rgw5-rvv9-x895: the 5.0.8 resource-limit fix is incomplete.
+  "brace-expansion@^1.0.0": 5.0.9
   "cron": 4.3.4
   "diff@^4.0.0": ^4.0.4
   "file-type@^21.0.0": ^21.3.2
   "handlebars@<4.7.9": 4.7.9
+  # GHSA-mwp4-54f8-5fhr: 10.3.1 rejects ambiguous leading-zero IPv4 octets.
+  "ip-address@<10.3.1": 10.3.1
   "lodash@>=4.0.0 <4.17.23": 4.18.1
   "minimatch@^3.0.0": ^3.1.4
   "minimatch@^9.0.0": ^9.0.7
@@ -125,16 +131,19 @@ overrides:
   "@opentelemetry/core@<2.8.0": 2.8.0
   "path-to-regexp@^8.0.0": ^8.4.0
   "picomatch@^2.0.0": ^2.3.2
-  "@trunkio/launcher>tar": 7.5.19
-  "tar@>=7.0.0 <7.5.19": 7.5.19
+  # GHSA-r292-9mhp-454m: 7.5.21 bounds long-path selection recursion.
+  "@trunkio/launcher>tar": 7.5.21
+  "tar@>=7.0.0 <7.5.21": 7.5.21
   "@lhci/cli>tmp": 0.2.7
   "external-editor>tmp": 0.2.7
   "uuid@<11.1.1": 11.1.1
-  "undici@>=7.23.0 <7.28.0": 7.28.0
+  # GHSA-4cwx-7wf7-3272: 7.29.0 fixes private cache directive handling.
+  "undici@>=7.23.0 <7.29.0": 7.29.0
   "webpack@>=5.0.0 <5.104.1": 5.106.2
   "lighthouse>ws": 7.5.11
   "ws@>=8.0.0 <8.21.0": 8.21.0
-  "undici@<6.27.0": 6.27.0
+  # GHSA-8xcm-r25x-g524, GHSA-m8rv-5g2x-5cg5, GHSA-v3r7-h72x-cjcm.
+  "undici@<6.28.0": 6.28.0
   "yaml@^2.0.0": ^2.8.3
 
 patchedDependencies:

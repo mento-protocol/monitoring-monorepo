@@ -17,12 +17,13 @@ locals {
     "peg-monitoring" = true
   } : {}
 
-  peg_policy_bundle                                           = jsondecode(file("${path.module}/peg-thresholds.json"))
-  peg_active_policy                                           = local.peg_policy_bundle.active
-  peg_previous_policy                                         = local.peg_policy_bundle.previous
-  peg_active_policy_version                                   = local.peg_active_policy.version
-  peg_previous_policy_version                                 = try(local.peg_previous_policy.version, "no-retained-previous-policy")
-  peg_legacy_listing_absent_consecutive_checks_policy_version = "europ-2026-07-22-v1-a69b99aad61649957a2639dc8348b05f"
+  peg_policy_bundle           = jsondecode(file("${path.module}/peg-thresholds.json"))
+  peg_active_policy           = local.peg_policy_bundle.active
+  peg_previous_policy         = local.peg_policy_bundle.previous
+  peg_active_policy_version   = local.peg_active_policy.version
+  peg_previous_policy_version = try(local.peg_previous_policy.version, "no-retained-previous-policy")
+
+  peg_secondary_source_unhealthy_for_duration = "1800s"
 
   peg_active_assets   = local.peg_active_policy.assets
   peg_previous_assets = local.peg_previous_policy == null ? {} : local.peg_previous_policy.assets
@@ -46,6 +47,20 @@ locals {
     for key, item in local.peg_active_sources : key => item
     if item.source.authority != "display"
   }
+  # Display-only sources remain visible in market context and registry-rot
+  # coverage, but do not create operational health alerts.
+  # Operational source health follows the authoritative source set. Keep this
+  # semantic alias because health-rule locals refer to operational sources.
+  peg_active_operational_sources = local.peg_active_authoritative_sources
+  peg_active_secondary_sources = {
+    for key, item in local.peg_active_sources : key => item
+    if item.source.authority == "secondary"
+  }
+  peg_active_source_unhealthy_for_duration = {
+    for key, item in local.peg_active_operational_sources : key => (
+      item.source.authority == "secondary" ? local.peg_secondary_source_unhealthy_for_duration : "${item.source.pollIntervalSeconds * 2}s"
+    )
+  }
   peg_active_deep_sources = {
     for key, item in local.peg_active_sources : key => item
     if item.source_id == item.asset.deepVenueSource
@@ -59,16 +74,13 @@ locals {
     for item in flatten([
       for asset_id, asset in local.peg_previous_assets : [
         for source_id, source in asset.sources : {
-          asset_id    = asset_id
-          asset       = asset
-          source_id   = source_id
-          source      = source
-          policy      = local.peg_previous_policy
-          policy_slot = "previous"
-          listing_absent_consecutive_checks = try(
-            source.listingAbsentConsecutiveChecks,
-            local.peg_previous_policy.version == local.peg_legacy_listing_absent_consecutive_checks_policy_version ? 2 : source.listingAbsentConsecutiveChecks,
-          )
+          asset_id                          = asset_id
+          asset                             = asset
+          source_id                         = source_id
+          source                            = source
+          policy                            = local.peg_previous_policy
+          policy_slot                       = "previous"
+          listing_absent_consecutive_checks = source.listingAbsentConsecutiveChecks
         }
       ]
     ]) : "${item.asset_id}/${item.source_id}" => item
@@ -76,6 +88,17 @@ locals {
   peg_previous_authoritative_sources = {
     for key, item in local.peg_previous_sources : key => item
     if item.source.authority != "display"
+  }
+  # See the active alias above; retained-previous health uses the same scope.
+  peg_previous_operational_sources = local.peg_previous_authoritative_sources
+  peg_previous_secondary_sources = {
+    for key, item in local.peg_previous_sources : key => item
+    if item.source.authority == "secondary"
+  }
+  peg_previous_source_unhealthy_for_duration = {
+    for key, item in local.peg_previous_operational_sources : key => (
+      item.source.authority == "secondary" ? local.peg_secondary_source_unhealthy_for_duration : "${item.source.pollIntervalSeconds * 2}s"
+    )
   }
   peg_previous_deep_sources = {
     for key, item in local.peg_previous_sources : key => item

@@ -216,10 +216,10 @@ locals {
       }
     },
     {
-      for key, item in local.peg_active_sources : "active-unhealthy-${key}" => {
+      for key, item in local.peg_active_operational_sources : "active-unhealthy-${key}" => {
         name               = "Peg Source Unhealthy [${item.asset_id}/${item.source_id} · active]"
         expr               = local.peg_active_source_unhealthy_promql[key]
-        for_duration       = "${item.source.pollIntervalSeconds * 2}s"
+        for_duration       = local.peg_active_source_unhealthy_for_duration[key]
         no_data_state      = "OK"
         severity           = "warning"
         route              = "ops"
@@ -237,7 +237,7 @@ locals {
       }
     },
     {
-      for key, item in local.peg_active_non_deep_sources : "active-dead-${key}" => {
+      for key, item in local.peg_active_secondary_sources : "active-dead-${key}" => {
         name               = "Peg Source Permanently Dead [${item.asset_id}/${item.source_id} · active]"
         expr               = local.peg_active_source_unhealthy_promql[key]
         for_duration       = "${item.asset.permanentlyDeadSeconds}s"
@@ -498,10 +498,10 @@ locals {
       }
     },
     {
-      for key, item in local.peg_previous_sources : "previous-unhealthy-${key}" => {
+      for key, item in local.peg_previous_operational_sources : "previous-unhealthy-${key}" => {
         name               = "Peg Source Unhealthy [${item.asset_id}/${item.source_id} · previous]"
         expr               = local.peg_previous_source_unhealthy_promql[key]
-        for_duration       = "${item.source.pollIntervalSeconds * 2}s"
+        for_duration       = local.peg_previous_source_unhealthy_for_duration[key]
         no_data_state      = "OK"
         severity           = "warning"
         route              = "ops"
@@ -519,7 +519,7 @@ locals {
       }
     },
     {
-      for key, item in local.peg_previous_non_deep_sources : "previous-dead-${key}" => {
+      for key, item in local.peg_previous_secondary_sources : "previous-dead-${key}" => {
         name               = "Peg Source Permanently Dead [${item.asset_id}/${item.source_id} · previous]"
         expr               = local.peg_previous_source_unhealthy_promql[key]
         for_duration       = "${item.asset.permanentlyDeadSeconds}s"

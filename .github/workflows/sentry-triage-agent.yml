@@ -183,12 +183,13 @@ jobs:
   #     the whole token with one removable character spliced in. No check inside
   #     the wrapper can stop that.
   #   - RESIDUAL, stated plainly: CLAUDE_CODE_OAUTH_TOKEN is still live in the
-  #     agent's Bash env. `claude-code-action` puts it there itself, and the
-  #     pinned v1.0.179 offers no per-step or first-class MCP env forwarding to
-  #     move it (upstream's only release tag is v1, Aug 2025 — there is no newer
-  #     version to adopt). It is inference-scoped: worst case is inference-quota
-  #     abuse, not repo or queue compromise, and any use lands in an auditable
-  #     public comment. Re-check on the next action bump.
+  #     agent's Bash env. `claude-code-action` puts it there itself — its
+  #     base-action/src/parse-sdk-options.ts spreads the whole `process.env`
+  #     into the CLI subprocess, deleting only the OIDC request vars — and the
+  #     pinned v1.0.183 offers no per-step or first-class MCP env forwarding to
+  #     move it. It is inference-scoped: worst case is inference-quota abuse,
+  #     not repo or queue compromise, and any use lands in an auditable public
+  #     comment. Re-check on the next action bump.
   #   - RESIDUAL, stated plainly: the run handle IS in the agent's env, and
   #     three allow-listed tools (find_projects, search_issues, search_events)
   #     take an agent-controlled `regionUrl` that the MCP server's
@@ -225,14 +226,17 @@ jobs:
     # declares its own env: block. Its action.yml says so in as many words for
     # its own MCP vars — "this step's env: block shadows the calling workflow's
     # job-level env vars … Set these in your workflow's job-level env: or via a
-    # prior step that writes to $GITHUB_ENV". RE-VERIFIED for issue #1288 and
-    # again for #1711 against the version pinned below, v1.0.179 (b76a0776):
-    # there is still no per-step env passthrough and no first-class MCP env
-    # input (upstream's only release tag is v1, Aug 2025). So anything the MCP
-    # server must read has to be job env — which is exactly why the SENTRY
-    # TOKEN IS NO LONGER HERE and an opaque per-run handle is (issue #1711).
-    # Re-check on the next action bump; do not re-open the question without
-    # testing a version.
+    # prior step that writes to $GITHUB_ENV". RE-VERIFIED for issue #1288, for
+    # #1711, and again on the bump to the version pinned below, v1.0.183
+    # (be7b93b1): its action.yml is byte-identical to the previously verified
+    # v1.0.179 (b76a0776), so there is still no per-step env passthrough and no
+    # first-class MCP env input — upstream deprecated `mcp_config` in favour of
+    # `claude_args: --mcp-config`, which takes a path or JSON, never env. So
+    # anything the MCP server must read has to be job env — which is exactly why
+    # the SENTRY TOKEN IS NO LONGER HERE and an opaque per-run handle is (issue
+    # #1711). Re-check on the next action bump; do not re-open the question
+    # without testing a version. Upstream cuts a GitHub Release per patch, so
+    # "there is no newer version" is never the reason to skip that check.
     #   - GH_TOKEN: gh CLI auth for the agent's read-only `gh issue view/list`
     #     (this job's GITHUB_TOKEN: issues:write + contents:read only) and for
     #     the deterministic steps below.
@@ -507,7 +511,7 @@ jobs:
             echo 'SENTRY_TRIAGE_PROMPT_EOF'
           } >> "${GITHUB_OUTPUT}"
 
-      - uses: anthropics/claude-code-action@b76a0776ae74036e77cd11018083743453d7ad35 # v1.0.179
+      - uses: anthropics/claude-code-action@be7b93b1907a4abad570368f3c74b6fe3807510b # v1.0.183
         with:
           github_token: ${{ github.token }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

@@ -3,7 +3,7 @@ title: Peg monitoring alert source validation and activation
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-29
+last_verified: 2026-08-10
 doc_type: runbook
 scope: alerts/peg-monitoring
 review_interval_days: 90
@@ -32,7 +32,7 @@ The source-owned surfaces are:
 
 This source packet does not apply Grafana resources by itself. The activation
 apply is complete: the Peg folder, templates, contact points, and rule group
-are live in Grafana for both the active and retained policy versions
+are live in Grafana for the policy version published at that time
 ([#1680](https://github.com/mento-protocol/monitoring-monorepo/pull/1680),
 [#1685](https://github.com/mento-protocol/monitoring-monorepo/pull/1685)).
 `terraform/peg-policy.tf` owns the policy identities and bucket IAM. Controller
@@ -50,6 +50,25 @@ single Terraform local gates the Peg folder, templates, contact points, and
 rule group; it is not a workflow, variable, or policy-artifact switch. This
 source change does not prove the consumers exist in Grafana or that their
 queries have live data.
+
+This source cleanup sets `previous` to `null`. It does not itself remove
+retained Grafana rules, publish a new immutable policy generation, or attach
+that generation to Metrics Bridge. Do not claim active-only production
+operation until the human-approved `alerts-rules` cleanup, protected
+publication, reviewed runtime-generation attachment, and post-change
+producer/Grafana checks complete in that order.
+
+Source validators now require every policy source to declare
+`listingAbsentConsecutiveChecks`, and the checked-in policy keeps `previous`
+as `null`. Metrics Bridge retains a runtime-only compatibility shim for the
+exact legacy previous version
+`europ-2026-07-22-v1-a69b99aad61649957a2639dc8348b05f`, which defaults the
+missing threshold to `2` while Cloud Run remains pinned to the production
+generation containing that predecessor. The bridge normalizes the value into
+decision packages, so the dashboard schema remains strict. Remove the shim in
+a follow-up PR after the `previous: null` generation is published, pinned, and
+live-verified; [#1750](https://github.com/mento-protocol/monitoring-monorepo/issues/1750)
+tracks that removal.
 
 The production identity bootstrap in
 [#1566](https://github.com/mento-protocol/monitoring-monorepo/pull/1566) is
@@ -80,8 +99,8 @@ For each active policy, the generated source defines:
 | Structural saturation warning | Fresh reachable indexed-pool saturation above policy                                                        | `#alerts-pools`                                              |
 | Blind warning                 | Producer count reaches `blindConsecutivePolls` without a usable uncapped deep-venue decision                | `#alerts-infra`                                              |
 | Blind while stressed critical | Confirmed consecutive blindness plus reachable structural stress, spread stress, or partial-price shortfall | Splunk On-Call and `@support-engineer` in `#alerts-critical` |
-| Source unhealthy              | Expected source unhealthy while the asset heartbeat is fresh                                                | `#alerts-infra`                                              |
-| Source permanently dead       | Source unhealthy for `permanentlyDeadSeconds`                                                               | `#alerts-infra`                                              |
+| Source unhealthy              | Deep source unhealthy for two polls, or secondary source unhealthy for 30 minutes; display sources excluded | `#alerts-infra`                                              |
+| Source permanently dead       | Secondary source unhealthy for `permanentlyDeadSeconds`; display sources excluded                           | `#alerts-infra`                                              |
 | Registry rot                  | A non-deep source, including display-only, is `absent` at its producer-side consecutive-check threshold     | `#alerts-infra`                                              |
 | Critical path unreachable     | The policy-designated deep source is `absent` at its producer-side consecutive-check threshold              | `#alerts-infra`                                              |
 | Indexed pool unreachable      | The registry-bound indexed pool is zero or absent while the exact-version asset poll remains fresh          | `#alerts-infra`                                              |
@@ -91,19 +110,19 @@ For each active policy, the generated source defines:
 When `previous` is retained, the same decision ladder remains generated for
 that exact previous version. Previous-version rules do not stop at the first
 active-version acknowledgement; cleanup is a later reviewed policy change.
-The legacy retained policy
-`europ-2026-07-22-v1-a69b99aad61649957a2639dc8348b05f` has an effective listing
-absence threshold of two checks. Every newer policy declares its own bounded
-threshold.
+Source-controlled policy requires every source to declare its bounded
+listing-absence threshold.
 
-Display sources never create deviation or premium rules. Structural saturation
-never pages alone. Blindness does not depend on indexed-pool reachability:
-reachability gates only the structural branch of the independent-stress page,
-so market stress remains observable during an indexer or pool-data outage. The
-producer updates `mento_peg_blind_consecutive_polls` at deep-venue poll cadence
-and resets it on each usable uncapped decision. Grafana compares that exact
-count with policy; its 60-second evaluation clock never approximates 30-second
-polls.
+Display sources create registry-rot listing alerts, but never deviation,
+premium, source-unhealthy, or permanently-dead rules. Deep-source health uses
+a two-poll hold; secondary-source health uses a 30-minute hold. Structural
+saturation never pages alone. Blindness does not depend on indexed-pool
+reachability: reachability gates only the structural branch of the
+independent-stress page, so market stress remains observable during an indexer
+or pool-data outage. The producer updates
+`mento_peg_blind_consecutive_polls` at deep-venue poll cadence and resets it on
+each usable uncapped decision. Grafana compares that exact count with policy;
+its 60-second evaluation clock never approximates 30-second polls.
 
 Listing rules follow the same producer-owned discipline. The bridge increments
 the bounded absence streak only on an authoritative exact-pair `absent`
@@ -115,6 +134,11 @@ delisting. `Peg Registry Rot`, `Peg Critical Path Unreachable`, and
 warning severity, and the direct `#alerts-infra` contact point. They never
 page. The [onboarding and re-census runbook](peg-monitoring-onboarding.md)
 owns source admission, response, and cleanup.
+
+Under [ADR 0057](../adr/0057-peg-observation-advancement.md), a repeated
+provider observation may retain source health only while its provider timestamp
+is within `staleAfterSeconds`. It never advances a sample or usable decision.
+Stale, regressing, and identity-invalid provider inputs fail closed.
 
 ## Local source validation
 
@@ -138,6 +162,30 @@ secret-backed contact-point dependencies. The first complete remote diff is
 therefore the trusted-main plan after merge. Keep its `production-infra` apply
 blocked, inspect the full plan, and do not treat a targeted PR plan as proof of
 the peg rule resources.
+
+## Predecessor cleanup deployment proof
+
+After this source change merges, keep the policy predecessor cleanup in the
+following order:
+
+1. Let the automatic Metrics Bridge workflow deploy the compatibility-retaining
+   revision from `main`. Verify it still loads the pinned legacy generation and
+   continues publishing current Peg polls and decision packages.
+2. Inspect the trusted-main `alerts-rules` plan, then explicitly approve its
+   `production-infra` apply. Confirm retained-previous rules are removed and
+   active rules remain evaluable in Grafana. Removing consumers before their
+   producer series follows the rollback dependency order.
+3. Inspect the trusted-main publication plan, then explicitly approve its
+   `production-infra` apply to publish the `previous: null` artifact.
+4. Review the platform change that pins Metrics Bridge to that exact positive
+   generation, apply it through its owning approved path, and verify the
+   producer reports only the active policy.
+5. After active-only production is live-verified, remove the exact legacy
+   runtime shim through [#1750](https://github.com/mento-protocol/monitoring-monorepo/issues/1750).
+
+Never run these applies from an agent session. A merged source change, a policy
+publication, or a runtime attachment alone is insufficient proof of
+active-only operation.
 
 ## Production activation preconditions
 

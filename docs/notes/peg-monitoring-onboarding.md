@@ -3,7 +3,7 @@ title: Peg monitoring onboarding and re-census
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-29
+last_verified: 2026-08-10
 doc_type: runbook
 scope: metrics-bridge / alerts / ui-dashboard
 review_interval_days: 90
@@ -23,7 +23,8 @@ The architecture is fixed by ADRs
 [0044](../adr/0044-peg-thresholds-gated-rules-plane.md),
 [0045](../adr/0045-peg-paging-semantics.md),
 [0054](../adr/0054-same-project-peg-policy-artifact.md), and
-[0049](../adr/0049-peg-decision-package-read-model.md).
+[0049](../adr/0049-peg-decision-package-read-model.md), and
+[0057](../adr/0057-peg-observation-advancement.md).
 
 ## Completion states
 
@@ -371,9 +372,15 @@ between scrapes.
 Only an authoritative response advances `mento_peg_listing_checked_at`.
 Unknown, missing, or stale evidence is not delisting. Listing confirmation can
 still succeed when the later book fetch fails, so listing alerts do not gate
-on source health, observation time, or the asset heartbeat. The exact retained
-legacy policy omits `listingAbsentConsecutiveChecks` and has an effective
-threshold of `2`; every newer policy must declare the bounded threshold.
+on source health, observation time, or the asset heartbeat. Source validators
+require every policy source to declare its bounded listing-confirmation
+threshold. During the production transition only, Metrics Bridge accepts the
+omission from the exact legacy retained version
+`europ-2026-07-22-v1-a69b99aad61649957a2639dc8348b05f` and normalizes it to
+`2` in decision packages. Remove that runtime shim in a follow-up PR after the
+`previous: null` generation is published, pinned, and live-verified;
+[#1750](https://github.com/mento-protocol/monitoring-monorepo/issues/1750)
+tracks that removal.
 
 A source restoration is not enough by itself. Repeat the executable-depth and
 coverage gates before restoring alert authority.

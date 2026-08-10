@@ -4,6 +4,7 @@ import { _resetPegDecisionPackagesForTests } from "../src/peg/decision-packages.
 import type { PegStructuralContextResult } from "../src/peg/graphql.js";
 import {
   _resetPegMetricsForTests,
+  publishPegMetrics,
   type PegAssetMetricSnapshot,
 } from "../src/peg/metrics.js";
 import {
@@ -571,7 +572,7 @@ describe("peg poll cycle freshness and measurements", () => {
     expect(fetchBitvavoListing).toHaveBeenCalledTimes(2);
   });
 
-  it("does not count a frozen at-par book and fails it stale", async () => {
+  it("keeps a fresh frozen at-par book healthy without advancing coverage", async () => {
     const spec = primaryAsset({
       sources: [primarySource({ staleAfterSeconds: 60 })],
     });
@@ -580,13 +581,18 @@ describe("peg poll cycle freshness and measurements", () => {
     let nowMs = baseMs;
     const frozen = observation(baseMs, { sequence: "frozen" });
     const publish = vi.fn<(snapshots: PegAssetMetricSnapshot[]) => void>();
+    const errors: PegPollErrorEvent[] = [];
     const poller = createPegPoller({
       nowMs: () => nowMs,
       fetchStructuralContext: vi.fn(async () =>
         structuralContext(spec, Math.floor(nowMs / 1_000)),
       ),
       fetchBitvavo: vi.fn(async () => frozen),
-      publish,
+      publish: (snapshots) => {
+        publish(snapshots);
+        publishPegMetrics(snapshots);
+      },
+      onError: (event) => errors.push(event),
     });
 
     const first = (await poller.pollCycle(input))[0]!;
@@ -604,11 +610,27 @@ describe("peg poll cycle freshness and measurements", () => {
     nowMs = baseMs + 30_000;
     const second = (await poller.pollCycle(input))[0]!;
     expect(source(second)).toMatchObject({
-      healthy: false,
-      observation: null,
+      healthy: true,
+      observation: { sequence: "frozen" },
       newSuccess: false,
       newUsableDecision: false,
+      deviationBps: 0,
     });
+    expect(second.blind).toBe(false);
+    const freshFrozenMetrics = await register.metrics();
+    expect(freshFrozenMetrics).toContain(
+      `mento_peg_source_healthy{asset="asset-one",source="deep_eur",policy_version="${input.policy.version}"} 1`,
+    );
+    expect(freshFrozenMetrics).toContain(
+      `mento_peg_deviation_bps{asset="asset-one",source="deep_eur",policy_version="${input.policy.version}"} 0`,
+    );
+    expect(freshFrozenMetrics).toContain(
+      `mento_peg_poll_success_total{asset="asset-one",source="deep_eur",policy_version="${input.policy.version}"} 1`,
+    );
+    expect(freshFrozenMetrics).toContain(
+      `mento_peg_usable_decision_total{asset="asset-one",source="deep_eur",policy_version="${input.policy.version}"} 1`,
+    );
+    expect(errors).toEqual([]);
 
     nowMs = baseMs + 61_000;
     const third = (await poller.pollCycle(input))[0]!;
@@ -619,6 +641,22 @@ describe("peg poll cycle freshness and measurements", () => {
       observation: null,
     });
     expect(third.blind).toBe(true);
+    const staleFrozenMetrics = await register.metrics();
+    expect(staleFrozenMetrics).toContain(
+      `mento_peg_source_healthy{asset="asset-one",source="deep_eur",policy_version="${input.policy.version}"} 0`,
+    );
+    expect(staleFrozenMetrics).not.toContain("mento_peg_deviation_bps{");
+    expect(staleFrozenMetrics).toContain(
+      `mento_peg_poll_success_total{asset="asset-one",source="deep_eur",policy_version="${input.policy.version}"} 1`,
+    );
+    expect(staleFrozenMetrics).toContain(
+      `mento_peg_usable_decision_total{asset="asset-one",source="deep_eur",policy_version="${input.policy.version}"} 1`,
+    );
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatchObject({
+      kind: "source_freshness",
+      cause: new Error("stale venue observation"),
+    });
     expect(publish).toHaveBeenCalledTimes(3);
   });
 
@@ -671,7 +709,7 @@ describe("peg poll cycle freshness and measurements", () => {
     );
   });
 
-  it("accepts distinct same-millisecond updates once and rejects A/B replay", async () => {
+  it("accepts distinct same-millisecond updates once and rejects A/B/A replays", async () => {
     const spec = primaryAsset();
     const input = makeInput([spec]);
     const baseMs = 1_800_000_000_000;
@@ -695,20 +733,23 @@ describe("peg poll cycle freshness and measurements", () => {
     });
 
     const successes: boolean[] = [];
+    const healthy: boolean[] = [];
     for (let index = 0; index < 4; index += 1) {
       const snapshot = (await poller.pollCycle(input))[0]!;
       successes.push(source(snapshot).newSuccess);
+      healthy.push(source(snapshot).healthy);
       nowMs += 30_000;
     }
 
     expect(successes).toEqual([true, true, false, false]);
+    expect(healthy).toEqual([true, true, false, false]);
     expect(errors.map(({ kind }) => kind)).toEqual([
       "source_freshness",
       "source_freshness",
     ]);
     expect(errors.map(({ cause }) => cause)).toEqual([
-      new Error("venue observation did not advance"),
-      new Error("venue observation did not advance"),
+      new Error("venue observation identity replayed"),
+      new Error("venue observation identity replayed"),
     ]);
   });
 
@@ -1324,18 +1365,15 @@ describe("peg poll cycle isolation", () => {
     const recovered = (await poller.pollCycle(input))[0]!;
     expect(recovered.indexedPoolReachable).toBe(true);
     expect(source(recovered)).toMatchObject({
-      healthy: false,
-      observation: null,
-      deviationBps: null,
+      healthy: true,
+      observation: { sequence: "frozen" },
       newSuccess: false,
     });
-    expect(recovered.blind).toBe(true);
+    expect(source(recovered).deviationBps).toBeCloseTo(1_000);
+    expect(recovered.blind).toBe(false);
     expect(recovered.blindConsecutivePolls).toBe(2);
     expect(fetchBitvavo).toHaveBeenCalledTimes(2);
-    expect(errors.map(({ kind }) => kind)).toEqual([
-      "structural_query",
-      "source_freshness",
-    ]);
+    expect(errors.map(({ kind }) => kind)).toEqual(["structural_query"]);
   });
 
   it.each([

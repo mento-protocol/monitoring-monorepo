@@ -18,7 +18,10 @@ import {
   type PegPollCycleContext,
   type PegPollSourceState,
 } from "../src/peg/poll-cycle.js";
-import type { PegPolicyVersion } from "../src/peg/policy.js";
+import {
+  PEG_POLICY_LEGACY_LISTING_ABSENT_CONSECUTIVE_CHECKS_VERSION,
+  type PegPolicyVersion,
+} from "../src/peg/policy.js";
 import { publishPegPollSnapshot } from "../src/peg/publisher.js";
 import { parsePegRegistry } from "../src/peg/registry.js";
 
@@ -289,8 +292,10 @@ describe("peg decision-package producer", () => {
     );
   });
 
-  it("selects retained previous only as the explicit active-incomplete fallback", () => {
-    const legacyPrevious = structuredClone(previous);
+  it("normalizes the exact legacy retained previous in the active-incomplete fallback", () => {
+    const legacyPrevious = policy(
+      PEG_POLICY_LEGACY_LISTING_ABSENT_CONSECUTIVE_CHECKS_VERSION,
+    );
     delete legacyPrevious.assets["asset-one"]!.sources.deep_eur!
       .listingAbsentConsecutiveChecks;
     const prepared = preparePegDecisionPackages(

@@ -77,8 +77,6 @@ const POLICY_VERSION_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 const POLICY_VERSION_DIGEST_PATTERN = /-([0-9a-f]{32})$/;
 const MAX_POLICY_ASSETS = 32;
 const MAX_POLICY_SOURCES = 16;
-const LEGACY_LISTING_ABSENT_CONSECUTIVE_CHECKS_VERSION =
-  "europ-2026-07-22-v1-a69b99aad61649957a2639dc8348b05f";
 const APPROVED_POLICY_VERSION_INTERPOLATION = {
   active: "${local.peg_active_policy_version}",
   previous: "${local.peg_previous_policy_version}",
@@ -120,7 +118,7 @@ const SOURCE_NUMBER_RULES = [
 ];
 
 function effectiveListingAbsentConsecutiveChecks(source) {
-  return source.listingAbsentConsecutiveChecks ?? 2;
+  return source.listingAbsentConsecutiveChecks;
 }
 
 const intEnv = (name, fallback) => {
@@ -475,36 +473,11 @@ function collectRegistrySources(registryAsset, location, failures) {
   return sources;
 }
 
-function validatePolicySource(
-  source,
-  registrySource,
-  location,
-  failures,
-  allowLegacyThreshold,
-) {
-  const hasListingThreshold = Object.hasOwn(
-    source,
-    "listingAbsentConsecutiveChecks",
-  );
-  const expectedKeys =
-    allowLegacyThreshold && !hasListingThreshold
-      ? POLICY_SOURCE_KEYS.filter(
-          (key) => key !== "listingAbsentConsecutiveChecks",
-        )
-      : POLICY_SOURCE_KEYS;
-  if (!validateExactObject(source, expectedKeys, location, failures)) {
+function validatePolicySource(source, registrySource, location, failures) {
+  if (!validateExactObject(source, POLICY_SOURCE_KEYS, location, failures)) {
     return;
   }
-  validateNumberFields(
-    source,
-    location,
-    allowLegacyThreshold && !hasListingThreshold
-      ? SOURCE_NUMBER_RULES.filter(
-          ([field]) => field !== "listingAbsentConsecutiveChecks",
-        )
-      : SOURCE_NUMBER_RULES,
-    failures,
-  );
+  validateNumberFields(source, location, SOURCE_NUMBER_RULES, failures);
 
   const expectedAuthority =
     SOURCE_AUTHORITY_BY_REGISTRY_ROLE[registrySource?.role];
@@ -542,7 +515,6 @@ function validatePolicySources(
   location,
   failures,
   registryAligned,
-  allowLegacyListingThreshold,
 ) {
   const registrySources = registryAligned
     ? collectRegistrySources(registryAsset, `registry.${location}`, failures)
@@ -585,7 +557,6 @@ function validatePolicySources(
       registrySources.get(sourceId),
       `${location}.sources.${sourceId}`,
       failures,
-      allowLegacyListingThreshold,
     );
     if (source.authority === "deep") deepSourceCount += 1;
   }
@@ -639,7 +610,6 @@ function validatePolicyAsset(
   location,
   failures,
   registryAligned,
-  allowLegacyListingThreshold,
 ) {
   if (!validateExactObject(asset, POLICY_ASSET_KEYS, location, failures)) {
     return;
@@ -652,7 +622,6 @@ function validatePolicyAsset(
     location,
     failures,
     registryAligned,
-    allowLegacyListingThreshold,
   );
 }
 
@@ -719,8 +688,6 @@ function validatePolicyVersion(
       `${location}.assets.${assetId}`,
       failures,
       registryAligned,
-      !registryAligned &&
-        policy.version === LEGACY_LISTING_ABSENT_CONSECUTIVE_CHECKS_VERSION,
     );
   }
 }
