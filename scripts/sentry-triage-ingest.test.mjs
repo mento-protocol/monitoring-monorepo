@@ -49,8 +49,15 @@ import {
 import * as ingestModule from "./sentry-triage-ingest.mjs";
 import {
   ARCHIVE_COMMENT_MARKER,
+  REGRESSION_PREFIX,
   selectMarkedComment,
+  selectVerdictComment,
+  VERDICT_MARKER,
 } from "./sentry-triage-project-core.mjs";
+// The two workflow-facing helpers the round binding (#1717) spans: what the
+// select job records before the agent runs, and what the verdict job resolves
+// after it. Imported from the entry module because that is where they live.
+import { runParseOnly, runPriorVerdicts } from "./sentry-triage-project.mjs";
 
 let passed = 0;
 let failed = 0;
@@ -2852,6 +2859,225 @@ await test("one unrecoverable stub is counted without stranding the rest", async
   assertEqual(counts.errors, 1);
   assertEqual(fake.get(43).state, "OPEN");
   assertEqual(fake.get(42).state, "CLOSED");
+});
+
+// ---------------------------------------------------------------------------
+// The sweep's blind spot, and what stops it laundering a regression (#1717).
+//
+// The sweep re-queues with cause `bookkeeping` and posts no staleness fence.
+// That stays correct and is deliberately unchanged here: it reads GitHub only,
+// and fencing every recovery would discard a good verdict on each genuine
+// bookkeeping strand — over-fencing, which is as wrong as under-fencing and
+// quieter. What no GitHub read can see is a Sentry occurrence that landed after
+// this run's `fetchMergedSentryIssues()` returned. The previous round's verdict
+// then stays ADMISSIBLE on a stub that is back in the queue, and the `verdict`
+// job runs `if: always()` — so a triage round that dies before posting used to
+// end with that verdict labeled and the stub closed, its `closed_at` past the
+// occurrence's `last_seen`, which makes ingest's own dedup gate skip it.
+//
+// The fix binds the settlement to the round instead of trying to infer the
+// cause. Both tests below drive the REAL sweep, then the REAL select-side
+// recorder, then the REAL resolver the verdict job runs.
+// ---------------------------------------------------------------------------
+
+/** One trusted verdict comment body, minimal but contract-shaped. */
+function verdictCommentBody(verdict) {
+  return [
+    VERDICT_MARKER,
+    "",
+    "```yaml",
+    `verdict: ${verdict}`,
+    "confidence: medium",
+    "affected_repo: mento-protocol/monitoring-monorepo",
+    "summary: a redacted one-liner",
+    "root_cause: |",
+    "  a redacted cause",
+    "proposed_action: |",
+    "  a redacted action",
+    "duplicate_of: []",
+    "```",
+  ].join("\n");
+}
+
+/** Dress the fake's comment BODIES as `gh issue view --json comments` returns
+ * them: trusted author, ascending createdAt, and the `#issuecomment-<id>` url
+ * the round binding reads its token from. */
+function asViewedComments(bodies, firstId = 9000) {
+  return bodies.map((body, index) => ({
+    body,
+    author: { login: "github-actions" },
+    createdAt: `2026-07-2${index}T00:00:00Z`,
+    url: `https://github.com/${REPO}/issues/42#issuecomment-${firstId + index}`,
+  }));
+}
+
+/** The two GitHub-facing helpers the triage workflow runs around a round, wired
+ * to one fixed comment list: what `select` records before the agent, and what
+ * the `verdict` job resolves after it. */
+function triageRoundHelpers(comments) {
+  const runGh = async () =>
+    JSON.stringify({
+      number: 42,
+      title: buildQueueTitle("X-42", "web", "error"),
+      body: "",
+      url: `https://github.com/${REPO}/issues/42`,
+      state: "OPEN",
+      labels: [{ name: "sentry-triage" }, { name: NEEDS_TRIAGE_LABEL }],
+      comments,
+    });
+  return {
+    recordPriorVerdicts: () =>
+      runPriorVerdicts({ localRepo: REPO, queueIssues: [42] }, { runGh }),
+    settle: (priorVerdictCommentId) =>
+      runParseOnly(
+        { localRepo: REPO, queueIssue: 42, priorVerdictCommentId },
+        { runGh },
+      ),
+  };
+}
+
+async function assertRefuses(promise, pattern) {
+  try {
+    await promise;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (!pattern.test(message)) {
+      throw new Error(`expected ${message} to match ${pattern}`, {
+        cause: err,
+      });
+    }
+    return;
+  }
+  throw new Error("expected the resolution to refuse");
+}
+
+await test("a regression landing after the Sentry query is not laundered by the sweep (#1717)", async () => {
+  const verdict = verdictCommentBody("upstream-transient");
+  const fake = makeFakeGitHub({
+    issues: [
+      {
+        number: 42,
+        title: buildQueueTitle("X-42", "web", "error"),
+        state: "CLOSED",
+        labels: ["sentry-triage", NEEDS_TRIAGE_LABEL],
+        comments: [verdict],
+      },
+    ],
+  });
+
+  // `ingestDeps` sees no Sentry results at all — which IS this scenario: the
+  // query returned before the occurrence arrived, so the regression branch
+  // never claims this stub and the sweep is what reaches it.
+  const counts = await runIngest(
+    { repo: REPO, trackerIssue: 1282 },
+    ingestDeps(fake),
+  );
+  assertEqual(counts.recovered, 1);
+  assertDeepEqual(fake.selectable(), [42]);
+
+  // The re-queue is fence-free — the precondition for the laundering, and the
+  // behaviour this fix deliberately leaves alone.
+  const bodies = fake.get(42).comments;
+  assertDeepEqual(bodies, [verdict, buildStrandedRecoveryComment()]);
+  const comments = asViewedComments(bodies);
+  assertEqual(
+    selectVerdictComment(comments).body,
+    verdict,
+    "the pre-regression verdict must still be admissible, or this test proves nothing",
+  );
+
+  // Select records what the stub arrived with. The round then dies before
+  // posting, so nothing is appended.
+  const { recordPriorVerdicts, settle } = triageRoundHelpers(comments);
+  const prior = await recordPriorVerdicts();
+  assertDeepEqual(prior, { 42: "9000" });
+
+  await assertRefuses(
+    settle(prior["42"]),
+    /round did not produce.*already on the stub before this triage round/s,
+  );
+  // Nothing was written: the stub keeps sentry:needs-triage for the next run,
+  // which is what lets a later occurrence re-fence it properly.
+  assertDeepEqual(fake.selectable(), [42]);
+});
+
+await test("an archive refusal whose fence was deleted is not laundered either (#1717)", async () => {
+  // The surviving archive-side route (R2): the live-regression refusal
+  // re-queued through the chokepoint, someone with write access deleted the
+  // fence comment it posted, and the reopen then failed both attempts —
+  // leaving CLOSED + needs-triage + no fence, with only the archive's audit
+  // comment to show the leg ran. That run was already RED; the laundering is
+  // what a LATER ingest run would otherwise do to it.
+  const verdict = verdictCommentBody("code-fix");
+  const audit = `${ARCHIVE_COMMENT_MARKER}\nArchive refused: the Sentry issue is actively regressing.`;
+  const fake = makeFakeGitHub({
+    issues: [
+      {
+        number: 42,
+        title: buildQueueTitle("X-42", "web", "error"),
+        state: "CLOSED",
+        labels: ["sentry-triage", NEEDS_TRIAGE_LABEL],
+        comments: [verdict, audit],
+      },
+    ],
+  });
+
+  const counts = await runIngest(
+    { repo: REPO, trackerIssue: 1282 },
+    ingestDeps(fake),
+  );
+  assertEqual(counts.recovered, 1);
+
+  const bodies = fake.get(42).comments;
+  assert(
+    !bodies.some((body) => body.startsWith(REGRESSION_PREFIX)),
+    "the deleted fence is not restored by the bookkeeping sweep",
+  );
+  const comments = asViewedComments(bodies);
+  assertEqual(
+    selectVerdictComment(comments).body,
+    verdict,
+    "the archive audit comment is not a fence, so the verdict stays admissible",
+  );
+
+  const { recordPriorVerdicts, settle } = triageRoundHelpers(comments);
+  const prior = await recordPriorVerdicts();
+  await assertRefuses(
+    settle(prior["42"]),
+    /round did not produce.*already on the stub before this triage round/s,
+  );
+  assertDeepEqual(fake.selectable(), [42]);
+});
+
+await test("a round that DOES post a verdict still settles the swept stub (#1717)", async () => {
+  // The binding must not become a blanket refusal on every swept stub: a
+  // recovery whose next round works normally settles exactly as before.
+  const fake = makeFakeGitHub({
+    issues: [
+      {
+        number: 42,
+        title: buildQueueTitle("X-42", "web", "error"),
+        state: "CLOSED",
+        labels: ["sentry-triage", NEEDS_TRIAGE_LABEL],
+        comments: [verdictCommentBody("upstream-transient")],
+      },
+    ],
+  });
+  await runIngest({ repo: REPO, trackerIssue: 1282 }, ingestDeps(fake));
+
+  const before = asViewedComments(fake.get(42).comments);
+  const prior = await triageRoundHelpers(before).recordPriorVerdicts();
+  // The round posts its own verdict, which lands after everything select saw.
+  const after = asViewedComments([
+    ...fake.get(42).comments,
+    verdictCommentBody("needs-human").replace(
+      "duplicate_of: []",
+      "duplicate_of: []\nhuman_question: |\n  Decide whether to roll back or wait for upstream.",
+    ),
+  ]);
+  const result = await triageRoundHelpers(after).settle(prior["42"]);
+  assertEqual(result.verdict, "needs-human");
+  assertEqual(result.label, "sentry:verdict-needs-human");
 });
 
 if (failed > 0) {

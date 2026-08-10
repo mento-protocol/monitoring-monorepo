@@ -41,6 +41,9 @@ export interface PegPollSourceState {
   lastObservationAt: number | null;
   identitiesAtLastObservationAt: Set<string>;
   observation: PegObservation | null;
+  // Internal provider-native book retained only so an expired conversion can
+  // be refreshed without advancing the provider polling cadence.
+  rawObservation: PegObservation | null;
   referenceSize: number | null;
   conversionValidUntil: number | null;
   listingState: MarketState | null;
@@ -101,6 +104,8 @@ function cloneSourceStates(
         ),
         observation:
           state.observation === null ? null : { ...state.observation },
+        rawObservation:
+          state.rawObservation === null ? null : { ...state.rawObservation },
       },
     ]),
   );

@@ -25,6 +25,7 @@ import {
   parseVerdictComment,
   PROJECTED_LABEL,
   runParseOnly,
+  runPriorVerdicts,
   runProjection,
   runProjectionBatch,
   sanitizeDuplicateIds,
@@ -2399,6 +2400,247 @@ await test("runParseOnly accepts a needs-human verdict WITH human_question", asy
     projectable: false,
     shed: "sentry:verdict-code-fix,sentry:verdict-config-fix,sentry:verdict-upstream",
   });
+});
+
+// ---------------------------------------------------------------------------
+// Round binding: the verdict job may only settle a stub on a verdict comment
+// THIS triage round produced (issue #1717).
+// ---------------------------------------------------------------------------
+
+/** A bot comment carrying the `#issuecomment-<id>` url `gh issue view --json
+ * comments` returns — the shape the generation token is parsed from. */
+function botCommentWithId(body, createdAt, id) {
+  return {
+    ...botComment(body, createdAt),
+    url: `https://github.com/mento-protocol/monitoring-monorepo/issues/500#issuecomment-${id}`,
+  };
+}
+
+const PARSE_OPTS = {
+  localRepo: "mento-protocol/monitoring-monorepo",
+  queueIssue: 500,
+};
+
+await test("the round binding refuses a verdict the round did not produce", async () => {
+  // The laundering shape at its narrowest: the stub carries one verdict comment,
+  // select recorded it, and the round posted nothing new. Settling here would
+  // close the stub on a verdict that predates whatever re-queued it.
+  const issue = queueIssue({
+    labels: ["sentry-triage", "sentry:needs-triage"],
+    comments: [
+      botCommentWithId(verdictComment(), "2026-07-17T10:00:00Z", "9001"),
+    ],
+  });
+  const { runGh } = makeRunGh({ issue });
+  await assertRejects(
+    runParseOnly({ ...PARSE_OPTS, priorVerdictCommentId: "9001" }, { runGh }),
+    /round did not produce.*already on the stub before this triage round/s,
+  );
+});
+
+await test("the round binding accepts the verdict this round posted", async () => {
+  const issue = queueIssue({
+    labels: ["sentry-triage", "sentry:needs-triage"],
+    comments: [
+      botCommentWithId(
+        verdictComment({ verdict: "upstream-transient" }),
+        "2026-07-17T10:00:00Z",
+        "9001",
+      ),
+      botCommentWithId(
+        verdictComment({ verdict: "code-fix" }),
+        "2026-07-18T10:00:00Z",
+        "9002",
+      ),
+    ],
+  });
+  const { runGh } = makeRunGh({ issue });
+  const result = await runParseOnly(
+    { ...PARSE_OPTS, priorVerdictCommentId: "9001" },
+    { runGh },
+  );
+  assertEqual(result.verdict, "code-fix");
+  assertEqual(result.label, "sentry:verdict-code-fix");
+});
+
+await test("a first-pass stub records `none` and settles normally", async () => {
+  const issue = queueIssue({
+    labels: ["sentry-triage", "sentry:needs-triage"],
+    comments: [
+      botCommentWithId(verdictComment(), "2026-07-17T10:00:00Z", "9002"),
+    ],
+  });
+  const { runGh } = makeRunGh({ issue });
+  const result = await runParseOnly(
+    { ...PARSE_OPTS, priorVerdictCommentId: "none" },
+    { runGh },
+  );
+  assertEqual(result.verdict, "code-fix");
+});
+
+await test("an unreadable prior verdict refuses rather than settling blind", async () => {
+  // `unknown` is an absence of evidence, not evidence of absence: nothing can be
+  // shown to postdate a baseline that was never read, so the stub goes back in
+  // the queue instead of being settled on an unprovable verdict.
+  const issue = queueIssue({
+    labels: ["sentry-triage", "sentry:needs-triage"],
+    comments: [
+      botCommentWithId(verdictComment(), "2026-07-17T10:00:00Z", "9002"),
+    ],
+  });
+  const { runGh } = makeRunGh({ issue });
+  await assertRejects(
+    runParseOnly(
+      { ...PARSE_OPTS, priorVerdictCommentId: "unknown" },
+      { runGh },
+    ),
+    /could not be read/,
+  );
+});
+
+await test("the binding fails closed when the selected comment has no id", async () => {
+  // A verdict comment with no parseable `#issuecomment-<n>` url cannot be shown
+  // to postdate the baseline, so it must not settle the stub either.
+  const issue = queueIssue({
+    labels: ["sentry-triage", "sentry:needs-triage"],
+    comments: [botComment(verdictComment(), "2026-07-17T10:00:00Z")],
+  });
+  const { runGh } = makeRunGh({ issue });
+  await assertRejects(
+    runParseOnly({ ...PARSE_OPTS, priorVerdictCommentId: "9001" }, { runGh }),
+    /no parseable comment id/,
+  );
+});
+
+await test("the binding refuses a verdict OLDER than the recorded one", async () => {
+  // Reachable only if the recorded comment was deleted between the two reads —
+  // the same write-access premise the surviving archive-side footnote needs.
+  // Equality alone would wave this through onto an even older verdict, so the
+  // comparison is strictly-newer, not same-or-not.
+  const issue = queueIssue({
+    labels: ["sentry-triage", "sentry:needs-triage"],
+    comments: [
+      botCommentWithId(verdictComment(), "2026-07-16T10:00:00Z", "8999"),
+    ],
+  });
+  const { runGh } = makeRunGh({ issue });
+  await assertRejects(
+    runParseOnly({ ...PARSE_OPTS, priorVerdictCommentId: "9001" }, { runGh }),
+    /predates the one recorded before this triage round/,
+  );
+});
+
+await test("an unbound resolution keeps the pre-#1717 behaviour", async () => {
+  // The projection and autofix-select paths run downstream of a verdict the
+  // binding already cleared; they pass no token and must not start refusing.
+  const issue = queueIssue({
+    labels: ["sentry-triage", "sentry:needs-triage"],
+    comments: [
+      botCommentWithId(verdictComment(), "2026-07-17T10:00:00Z", "9001"),
+    ],
+  });
+  const { runGh } = makeRunGh({ issue });
+  const result = await runParseOnly(PARSE_OPTS, { runGh });
+  assertEqual(result.verdict, "code-fix");
+});
+
+await test("--prior-verdicts records ids, absence, and unreadable stubs", async () => {
+  const stubs = {
+    // Carries a verdict comment with a parseable id.
+    501: queueIssue({
+      number: 501,
+      comments: [
+        botCommentWithId(verdictComment(), "2026-07-17T10:00:00Z", "9001"),
+        botCommentWithId(verdictComment(), "2026-07-18T10:00:00Z", "9002"),
+      ],
+    }),
+    // No verdict comment at all — a first-pass stub.
+    502: queueIssue({ number: 502, comments: [botComment("chatter", "x")] }),
+    // A verdict comment whose url carries no id: unprovable later, so unknown.
+    503: queueIssue({
+      number: 503,
+      comments: [botComment(verdictComment(), "2026-07-17T10:00:00Z")],
+    }),
+    // Fenced out by a newer regression comment: nothing admissible is present,
+    // which is `none` — the same answer the verdict job's own selector gives.
+    504: queueIssue({
+      number: 504,
+      comments: [
+        botCommentWithId(verdictComment(), "2026-07-17T09:00:00Z", "9003"),
+        botComment(
+          "Regressed in Sentry (last seen 2026-07-17T11:00:00Z)",
+          "2026-07-17T10:00:00Z",
+        ),
+      ],
+    }),
+  };
+  const runGh = async (args) => {
+    const number = args[2];
+    // 505 models a read that fails outright.
+    if (number === "505") throw new Error("gh issue view failed with exit 1");
+    return JSON.stringify(stubs[number]);
+  };
+  const result = await runPriorVerdicts(
+    {
+      localRepo: "mento-protocol/monitoring-monorepo",
+      queueIssues: [501, 502, 503, 504, 505],
+    },
+    { runGh },
+  );
+  assertDeepEqual(result, {
+    501: "9002",
+    502: "none",
+    503: "unknown",
+    504: "none",
+    505: "unknown",
+  });
+});
+
+await test("parseArgs validates the prior-verdict token against its closed set", () => {
+  assertEqual(
+    parseArgs(["--issue", "5", "--parse-only", "--prior-verdict-comment", "42"])
+      .priorVerdictCommentId,
+    "42",
+  );
+  for (const token of ["none", "unknown"]) {
+    assertEqual(
+      parseArgs([
+        "--issue",
+        "5",
+        "--parse-only",
+        "--prior-verdict-comment",
+        token,
+      ]).priorVerdictCommentId,
+      token,
+    );
+  }
+  assertEqual(parseArgs(["--issue", "5"]).priorVerdictCommentId, null);
+  // A wiring bug must fail loud: degrading silently to "unbound" would remove
+  // the fence without saying so.
+  for (const bad of ["", "0x1f", "-1", "NONE", "42 "]) {
+    assertThrows(
+      () =>
+        parseArgs([
+          "--issue",
+          "5",
+          "--parse-only",
+          "--prior-verdict-comment",
+          bad,
+        ]),
+      /--prior-verdict-comment must be/,
+    );
+  }
+  // The recorder mode takes the select job's issue array, not a single issue.
+  assertDeepEqual(
+    parseArgs(["--prior-verdicts", "--issues", "[7, 8]"]).queueIssues,
+    [7, 8],
+  );
+  // Only --parse-only consumes the token; anywhere else it would be silently
+  // dropped, which is the failure the flag exists to prevent.
+  assertThrows(
+    () => parseArgs(["--issue", "5", "--prior-verdict-comment", "42"]),
+    /only consumed by --parse-only/,
+  );
 });
 
 // ---------------------------------------------------------------------------

@@ -58,15 +58,20 @@ import {
   commentBacklinksShortId,
   DEFAULT_REPO,
   extractPermalink,
+  isPriorVerdictToken,
   isValidShortId,
   MAX_DUPLICATE_LOOKUPS,
   parseShortId,
+  PRIOR_VERDICT_NONE,
+  PRIOR_VERDICT_UNKNOWN,
   PROJECTABLE_VERDICTS,
   PROJECTED_COMMENT_PREFIX,
   PROJECTED_LABEL,
   resolveVerdict,
+  selectVerdictComment,
   VALID_VERDICTS,
   validateAffectedRepo,
+  verdictCommentIdFromUrl,
 } from "./sentry-triage-project-core.mjs";
 import { LABEL_DEFINITIONS, VERDICT_LABELS } from "./sentry-triage-ingest.mjs";
 
@@ -393,7 +398,13 @@ export async function runParseOnly(options, deps = {}) {
     options.localRepo,
     options.queueIssue,
   );
-  const { parsed, verdict, label } = resolveVerdict(issue, options.queueIssue);
+  // The round binding (#1717): `--prior-verdict-comment` carries what the
+  // select job saw on this stub BEFORE the agent ran, so a round that posted
+  // nothing cannot settle the stub on the previous round's verdict. Absent flag
+  // -> null -> unbound, the pre-#1717 behaviour.
+  const { parsed, verdict, label } = resolveVerdict(issue, options.queueIssue, {
+    priorVerdictCommentId: options.priorVerdictCommentId,
+  });
   let projectable = false;
   if (PROJECTABLE_VERDICTS.includes(verdict)) {
     const repoCheck = validateAffectedRepo(parsed.affectedRepo);
@@ -413,6 +424,64 @@ export async function runParseOnly(options, deps = {}) {
   // label yet) costs nothing.
   const shed = VERDICT_LABELS.filter((name) => name !== label).join(",");
   return { verdict, label, projectable, shed };
+}
+
+/**
+ * `--prior-verdicts` mode: the SELECT job's recorder for the round binding
+ * (issue #1717). For each stub about to be triaged, emit the id of the verdict
+ * comment already on it — `{"<issue>": "<comment-id>" | "none" | "unknown"}` —
+ * so the `verdict` job can later refuse to settle the stub on a comment that
+ * predates the round. It must run in the trusted select job, BEFORE the agent:
+ * read it afterwards and it would see the round's own comment and prove
+ * nothing.
+ *
+ * Selection runs through `selectVerdictComment`, the same single selector the
+ * verdict job resolves with, so the two ends cannot drift into disagreeing
+ * about which comment "the previous verdict" is.
+ *
+ * Fail CLOSED per stub, never per run: an unreadable stub, or a selected
+ * comment whose url carries no parseable id, records `unknown`, which
+ * `resolveVerdict` refuses. That costs one wasted triage round on the affected
+ * stub — loud, and self-healing on the next run, since that round's own verdict
+ * comment becomes the next baseline — where waving it through is exactly the
+ * laundering this closes. One unreadable stub does not fail the whole select
+ * job and starve the rest of the batch.
+ */
+export async function runPriorVerdicts(options, deps = {}) {
+  const runGh = deps.runGh ?? defaultRunGh;
+  const localRun = (args) => runGh(args, {});
+  const priorVerdicts = {};
+  for (const number of options.queueIssues) {
+    let issue;
+    try {
+      // The shared reader, not a leaner `--json comments` of its own: one
+      // reader means one normalization, and the extra fields cost nothing on a
+      // batch capped at ten stubs.
+      issue = await readQueueIssue(localRun, options.localRepo, number);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      process.stderr.write(
+        `::warning::Could not read queue issue #${number} to record its prior verdict comment (${message}); recording '${PRIOR_VERDICT_UNKNOWN}', which makes this run refuse to settle it.\n`,
+      );
+      priorVerdicts[String(number)] = PRIOR_VERDICT_UNKNOWN;
+      continue;
+    }
+    const selected = selectVerdictComment(issue.comments);
+    if (!selected.body) {
+      priorVerdicts[String(number)] = PRIOR_VERDICT_NONE;
+      continue;
+    }
+    const id = verdictCommentIdFromUrl(selected.url);
+    if (!id) {
+      process.stderr.write(
+        `::warning::Queue issue #${number} carries a usable verdict comment with no parseable id (url=${selected.url}); recording '${PRIOR_VERDICT_UNKNOWN}', which makes this run refuse to settle it.\n`,
+      );
+      priorVerdicts[String(number)] = PRIOR_VERDICT_UNKNOWN;
+      continue;
+    }
+    priorVerdicts[String(number)] = id;
+  }
+  return priorVerdicts;
 }
 
 export async function runProjection(options, deps = {}) {
@@ -775,6 +844,17 @@ Options:
                        labeling and projection share ONE parser. Fails (exit 1)
                        on a missing, stale pre-regression, or invalid verdict
                        comment.
+  --prior-verdicts     Print {"<issue>": "<comment-id>|${PRIOR_VERDICT_NONE}|${PRIOR_VERDICT_UNKNOWN}"} for
+                       --issues: the verdict comment already on each stub. Run
+                       by the SELECT job, before the triage agent, to record
+                       what the round started from (issue #1717).
+  --prior-verdict-comment <token>
+                       With --parse-only: the id --prior-verdicts recorded for
+                       this stub (or ${PRIOR_VERDICT_NONE} / ${PRIOR_VERDICT_UNKNOWN}). The resolution
+                       then refuses (exit 1) unless the verdict comment it
+                       selects is strictly newer, so a triage round that posted
+                       nothing cannot settle the stub on the previous round's
+                       verdict.
   --verdict <value>    Already-validated verdict from the label step. When set,
                        the script fails loud if its own parse of the newest
                        verdict comment disagrees (never a silent skip).
@@ -818,6 +898,8 @@ export function parseArgs(argv, env = process.env) {
     queueIssues: [],
     batch: false,
     parseOnly: false,
+    priorVerdicts: false,
+    priorVerdictCommentId: null,
     expectedVerdict: null,
     help: false,
   };
@@ -846,6 +928,23 @@ export function parseArgs(argv, env = process.env) {
       case "--parse-only":
         options.parseOnly = true;
         break;
+      case "--prior-verdicts":
+        options.priorVerdicts = true;
+        break;
+      case "--prior-verdict-comment": {
+        // A bare comment id, `none`, or `unknown` — the closed set
+        // `--prior-verdicts` emits. Anything else is a wiring bug between the
+        // two jobs, and a wiring bug that silently degraded to "unbound" would
+        // remove the fence without saying so, so it fails loud here.
+        const value = readValue();
+        if (!isPriorVerdictToken(value)) {
+          throw new Error(
+            `--prior-verdict-comment must be a numeric comment id, ${PRIOR_VERDICT_NONE}, or ${PRIOR_VERDICT_UNKNOWN}, got: ${value}`,
+          );
+        }
+        options.priorVerdictCommentId = value;
+        break;
+      }
       case "--verdict": {
         // Comes from the label step's closed-enum output; anything else is a
         // wiring bug — fail loud rather than carrying an invalid expectation.
@@ -867,7 +966,15 @@ export function parseArgs(argv, env = process.env) {
     }
   }
   if (!options.help) {
-    if (options.batch) {
+    // Only --parse-only consumes the token. Accepting it on a projection run
+    // would silently drop the fence, which is the one failure mode the flag
+    // exists to prevent — so an unconsumed token is a wiring bug, not a no-op.
+    if (options.priorVerdictCommentId !== null && !options.parseOnly) {
+      throw new Error(
+        "--prior-verdict-comment is only consumed by --parse-only; pass both or neither",
+      );
+    }
+    if (options.batch || options.priorVerdicts) {
       options.queueIssues = parseIssueNumbers(issuesRaw);
     } else if (
       !Number.isInteger(options.queueIssue) ||
@@ -889,6 +996,8 @@ async function main() {
   let result;
   if (options.batch) {
     result = await runProjectionBatch(options);
+  } else if (options.priorVerdicts) {
+    result = await runPriorVerdicts(options);
   } else if (options.parseOnly) {
     result = await runParseOnly(options);
   } else {

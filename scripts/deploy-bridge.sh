@@ -25,6 +25,8 @@ set -euo pipefail
 PROJECT="${GCP_PROJECT:-mento-monitoring}"
 REGION="${GCP_REGION:-europe-west1}"
 AR_REPO="${REGION}-docker.pkg.dev/${PROJECT}/metrics-bridge"
+GRAFANA_AGENT_SOURCE_READER_TARGET="google_storage_bucket_iam_member.cloud_build_source_executor_object_viewer[\"serviceAccount:grafana-agent-builder@${PROJECT}.iam.gserviceaccount.com\"]"
+METRICS_BRIDGE_SOURCE_READER_TARGET="google_storage_bucket_iam_member.cloud_build_source_executor_object_viewer[\"serviceAccount:metrics-bridge-builder@${PROJECT}.iam.gserviceaccount.com\"]"
 METRICS_BRIDGE_SERVICE_ADDRESS="google_cloud_run_v2_service.metrics_bridge"
 METRICS_BRIDGE_PUBLIC_BINDING_ADDRESS="google_cloud_run_v2_service_iam_member.metrics_bridge_public"
 SKIP_CONFIRM=false
@@ -84,6 +86,9 @@ fi
 # Terraform-managed for reviewed Peg-policy rollovers, so targeting an existing
 # service after a gcloud rollout would mint a redundant Terraform revision
 # before the intended image rollout below.
+# Target the two dedicated source-reader instances, not their whole for_each
+# collection. A broad target could enact a pending sibling removal before its
+# separately approved full platform apply.
 echo "Ensuring GCP infrastructure..."
 terraform -chdir=terraform apply $TF_APPROVE \
   -target=google_project.monitoring \
@@ -97,7 +102,8 @@ terraform -chdir=terraform apply $TF_APPROVE \
   -target=google_storage_bucket.cloud_build_source_staging \
   -target=google_storage_bucket_iam_member.cloud_build_source_caller_bucket_reader \
   -target=google_storage_bucket_iam_member.cloud_build_source_caller_object_creator \
-  -target=google_storage_bucket_iam_member.cloud_build_source_executor_object_viewer \
+  -target="$GRAFANA_AGENT_SOURCE_READER_TARGET" \
+  -target="$METRICS_BRIDGE_SOURCE_READER_TARGET" \
   -target=google_storage_bucket_iam_policy.peg_policy \
   -target=google_project_iam_member.dev_run_admin \
   -target=google_project_iam_member.dev_ar_writer \

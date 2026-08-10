@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 import type { PublicClient } from "viem";
 import { classifyFxMarketPause } from "../fx-market.js";
 import type { PegConversion } from "./registry.js";
+import type { PegObservation } from "./types.js";
 
 const SORTED_ORACLES_ABI = [
   {
@@ -55,6 +56,11 @@ export interface PegConversionLeg {
   expirySeconds: number;
   authoritative: boolean;
   unavailableReason: "stale" | "future_timestamp" | "fx_market_pause" | null;
+}
+
+export interface ConvertedPegObservation {
+  observation: PegObservation | null;
+  validUntil: number | null;
 }
 
 export function conversionFeedPair(conversion: PegConversion): string {
@@ -175,4 +181,45 @@ export function convertQuotePriceToPeg(
     throw new Error("Conversion leg is not alert-authoritative");
   }
   return quotePrice / conversion.rate;
+}
+
+function convertObservation(
+  observation: PegObservation,
+  conversion: PegConversionLeg,
+): PegObservation {
+  return {
+    ...observation,
+    vwap:
+      observation.vwap === null
+        ? null
+        : convertQuotePriceToPeg(observation.vwap, conversion),
+    bid:
+      observation.bid === null
+        ? null
+        : convertQuotePriceToPeg(observation.bid, conversion),
+    ask:
+      observation.ask === null
+        ? null
+        : convertQuotePriceToPeg(observation.ask, conversion),
+  };
+}
+
+export async function convertPegSourceObservation(
+  observation: PegObservation,
+  conversion: PegConversion | undefined,
+  nowSeconds: number,
+  readConversionLeg: (
+    conversion: PegConversion,
+    nowSeconds: number,
+  ) => Promise<PegConversionLeg>,
+): Promise<ConvertedPegObservation> {
+  if (observation.venueState === "halted" || conversion === undefined) {
+    return { observation, validUntil: null };
+  }
+  const leg = await readConversionLeg(conversion, nowSeconds);
+  if (!leg.authoritative) return { observation: null, validUntil: null };
+  return {
+    observation: convertObservation(observation, leg),
+    validUntil: leg.medianAt + leg.expirySeconds,
+  };
 }

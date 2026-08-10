@@ -1,8 +1,9 @@
 # Explicit source staging keeps routine deploys off Cloud Build and App
 # Engine's project-discovered default buckets. The buckets and existing scoped
 # grants are live, and the former project-wide storage and act-as fallbacks are
-# gone. ADR 0058's dedicated Metrics Bridge builder is applied and routed; a
-# later reviewed cleanup removes default Compute's temporary source reader.
+# gone. ADR 0058's dedicated Metrics Bridge builder is applied and routed. This
+# stack removes default Compute's direct source-bucket Object Viewer; its
+# project-level Editor role remains a separate audit and retirement task.
 
 locals {
   deploy_source_callers = setunion(
@@ -10,17 +11,14 @@ locals {
     toset(["serviceAccount:${google_service_account.metrics_bridge_deployer.email}"]),
   )
 
-  # Both Cloud Build routes pin dedicated executors. Retain default Compute's
-  # temporary source reader until the GitHub and direct Metrics Bridge canaries
-  # pass; a later reviewed cleanup removes it through an approved apply.
+  # Both Cloud Build routes pin dedicated executors. Keep direct source-object
+  # reads limited to those two identities.
   cloud_build_source_executor_members = toset([
     "serviceAccount:${google_service_account.grafana_agent_builder.email}",
-    "serviceAccount:${google_project.monitoring.number}-compute@developer.gserviceaccount.com",
     "serviceAccount:${google_service_account.metrics_bridge_builder.email}",
   ])
 
-  # Metrics Bridge's default Compute executor has no App Engine deploy path.
-  # Keep its archive read authority out of the App Engine source bucket.
+  # App Engine source access remains separate from Cloud Build source access.
   app_engine_source_uploaders = setunion(
     local.deploy_source_callers,
     toset(["serviceAccount:${google_service_account.grafana_agent_builder.email}"]),
@@ -114,8 +112,7 @@ resource "google_storage_bucket_iam_member" "cloud_build_source_caller_object_cr
 }
 
 # The Alloy and Metrics Bridge Cloud Build configurations pin dedicated
-# executors. Keep their source access read-only and exact; default Compute stays
-# temporarily until both Metrics Bridge route canaries pass.
+# executors. Keep their direct source access read-only and exact.
 resource "google_storage_bucket_iam_member" "cloud_build_source_executor_object_viewer" {
   for_each = local.cloud_build_source_executor_members
 
