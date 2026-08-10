@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import {
   buildIssueBody,
   buildMetadataYaml,
@@ -849,6 +853,27 @@ await test("an archived stub's PRE-APPROVAL baseline drives the reopen decision 
   );
   assertEqual(result.reopened, 1);
   assertEqual(reopenCount, 1);
+});
+
+await test("the stub body is rendered once, at creation (#1692)", () => {
+  // `buildIssueBody` is the only thing that renders `last_seen` into a body, and
+  // the reopen baseline's whole worth is that the value it renders is never
+  // refreshed: that is what makes it provably earlier than the human approval a
+  // later archive run acts on. A second call site — a "freshen it on reopen"
+  // edit being the obvious one — would move the baseline later and narrow the
+  // gate this issue exists to widen, so the docstrings on `parseStubMetadata`
+  // and `pickReopenBaseline` name creation specifically. Pin it.
+  const src = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "sentry-triage-ingest.mjs"),
+    "utf8",
+  );
+  const calls = src.match(/(?<!function\s)\bbuildIssueBody\s*\(/g) ?? [];
+  // Exactly one — the declaration is excluded by the lookbehind.
+  assertEqual(calls.length, 1);
+  assert(
+    /async function createQueueIssue\([\s\S]*?buildIssueBody\(/.test(src),
+    "the single call must sit inside createQueueIssue",
+  );
 });
 
 await test("parseArchiveBaseline reads the yaml fields and tolerates junk", () => {

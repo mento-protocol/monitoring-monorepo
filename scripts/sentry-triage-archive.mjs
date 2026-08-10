@@ -153,8 +153,11 @@ function readYamlField(body, key) {
  * `lastSeen` is the ingest-written `last_seen`, and it is here for one reason:
  * it is the only instant in reach that provably predates the human approval, so
  * it is what `pickReopenBaseline` hands ingest's reopen gate (issue #1692).
- * Ingest writes it at creation and on a reopen and nothing rewrites it after
- * that, so it may be far older than this run — which is the point.
+ * Ingest writes it ONCE, when it creates the stub (`buildIssueBody`, called only
+ * from `createQueueIssue`); a reopen edits labels, comments and state and never
+ * the body. So on a stub that has regressed and reopened since, this is still
+ * the CREATION-time value and can be as old as the stub itself — which is the
+ * point: earlier only makes the reopen gate more eager.
  */
 export function parseStubMetadata(body) {
   const permalinkRaw = readYamlField(body, "permalink");
@@ -457,9 +460,12 @@ export function isUsableBaseline(lastSeen) {
  * must describe what THIS run saw — so it stays exactly where it is, and ingest
  * gets its own value instead.
  *
- * That value is the stub body's `last_seen`, written by ingest at creation or on
- * its last reopen and never rewritten since; it therefore predates the approval
- * by construction, whatever the shape of the approval-to-run window.
+ * That value is the stub body's `last_seen`, written by ingest when it CREATED
+ * the stub and never rewritten since — no reopen or re-queue step edits a stub
+ * body — so it predates the approval by construction, whatever the shape of the
+ * approval-to-run window. On a stub that has flapped it is still the creation
+ * instant, potentially the stub's whole lifetime old, which widens this gate and
+ * can never narrow it.
  *
  * Two guards on top of it, both taking the EARLIER of the two candidates:
  *   - an unparsable stub `last_seen` (a hand-edited body, a stub created when

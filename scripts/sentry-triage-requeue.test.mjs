@@ -654,6 +654,76 @@ await test("verify-end-state fails RED on a marker the shed left behind", async 
   );
 });
 
+// ---------------------------------------------------------------------------
+// The stub BODY is nobody's to rewrite here.
+// ---------------------------------------------------------------------------
+
+await test("no re-queue path rewrites the stub body (#1692)", async () => {
+  // The reopen baseline `pickReopenBaseline` hands ingest is the stub body's
+  // `last_seen`, and its whole worth is that ingest wrote it ONCE, at creation:
+  // that is what makes it provably earlier than the human approval. A body write
+  // on this path would break two things at once. It would move the baseline
+  // later, narrowing the gate #1692 exists to widen; and because
+  // `gh issue edit --body` replaces the WHOLE body, it would put a second writer
+  // beside the archive leg — the only one the trust boundary in
+  // sentry-triage-queue-contract.mjs allows — racing it over the
+  // `archive_*_last_seen` fields ingest reads back.
+  //
+  // Bodies are still written here, as COMMENTS. The distinction is the property.
+  let reads = 0;
+  const cases = [
+    [
+      {},
+      {
+        cause: REQUEUE_CAUSE_SENTRY_EVIDENCE,
+        lastSeen: "2026-07-20T08:00:00Z",
+      },
+    ],
+    [
+      {},
+      {
+        cause: REQUEUE_CAUSE_BOOKKEEPING,
+        note: buildStrandedRecoveryComment(),
+      },
+    ],
+    [
+      {
+        // Closed and unlabelled on the first read, so the verifier's own repair
+        // writes run too; selectable on the next, so it settles.
+        readStub: async () => {
+          reads += 1;
+          return reads === 1
+            ? { state: "CLOSED", labels: ["sentry-triage"], comments: [] }
+            : {
+                state: "OPEN",
+                labels: ["sentry-triage", NEEDS_TRIAGE_LABEL],
+                comments: [fenceAt("2026-07-22T10:00:00Z")],
+              };
+        },
+      },
+      {
+        cause: REQUEUE_CAUSE_SENTRY_EVIDENCE,
+        lastSeen: "2026-07-20T08:00:00Z",
+        onFailure: REQUEUE_ON_FAILURE_VERIFY_END_STATE,
+      },
+    ],
+  ];
+  for (const [deps, options] of cases) {
+    const w = makeWriter();
+    await requeueQueueStub(
+      { writeGh: w.writeGh, ...deps },
+      { repo: REPO, issueNumber: 42, ...options },
+    );
+    assert(w.calls.length > 0, "the case must actually write something");
+    for (const args of w.calls) {
+      assert(
+        !args.includes("--body") || args[1] === "comment",
+        `a re-queue wrote a body outside a comment: ${args.join(" ")}`,
+      );
+    }
+  }
+});
+
 if (failed > 0) {
   process.stderr.write(`${failed} failed, ${passed} passed\n`);
   process.exitCode = 1;

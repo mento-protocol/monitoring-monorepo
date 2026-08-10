@@ -660,8 +660,10 @@ Ingest reads the OTHER one. The live read happens after the human applied
 on a dispatch — so an event landing in that window is folded into the value
 meant to detect it, and `lastSeen > baseline` is false for that exact event
 forever. The reopen baseline is taken from the stub body's own `last_seen`,
-written by ingest at creation or on its last reopen and never rewritten since,
-so it predates the approval by construction. It can be weeks old; that only
+written by ingest when it **created** the stub and never rewritten since — a
+reopen edits the stub's labels, comments and state, never its body — so it
+predates the approval by construction. On a stub that has flapped it is still
+the creation instant and can be as old as the stub itself; that only
 makes reopens more eager, which is the intended bias — a spurious reopen costs
 one triage cycle, a buried regression costs an incident. Two guards keep it from
 being the worse choice: an unparsable stub `last_seen` falls back to the live

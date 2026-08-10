@@ -260,10 +260,14 @@ export const ARCHIVE_BASELINE_ID_FIELD = "archive_baseline_sentry_issue_id";
 // different value in the first.
 //
 // This one carries an instant that provably PREDATES the approval: the stub
-// body's own `last_seen`, written by ingest when it created or last reopened the
-// stub. Nothing rewrites it afterwards, so it can be weeks old — which only
-// makes reopens more eager, and that is the intended bias (a spurious reopen
-// costs one triage cycle, a buried regression costs an incident).
+// body's own `last_seen`, written by ingest when it CREATED the stub and never
+// rewritten — a reopen edits labels, comments and state, never the body, which
+// is the same property that keeps the archive leg the only stub-body writer
+// (see the trust-boundary note above). So on a stub that has regressed and
+// reopened since, this is still the creation instant and can be as old as the
+// stub itself — which only makes reopens more eager, and that is the intended
+// bias (a spurious reopen costs one triage cycle, a buried regression costs an
+// incident).
 //
 // A stub archived before this field existed carries only the first one, so
 // `reopenBaselineOf` falls back to it and those stubs behave exactly as they did.
