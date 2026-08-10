@@ -9,6 +9,12 @@ steps:
       - .
 images:
   - $_IMAGE
+# Pin Metrics Bridge builds to its Terraform-managed least-privilege executor.
+# Submitters have Service Account User only on this identity. Default Compute
+# keeps temporary source-bucket read access through both canaries; ADR 0058
+# moves its removal to a later approved cleanup. Cloud Build expands PROJECT_ID
+# from the selected build project so the resource path and email stay aligned.
+serviceAccount: projects/$PROJECT_ID/serviceAccounts/metrics-bridge-builder@$PROJECT_ID.iam.gserviceaccount.com
 options:
   # Write logs ONLY to Cloud Logging (not the default GCS log bucket), so the
   # deploy SA can stream them with `roles/logging.viewer` alone. The default

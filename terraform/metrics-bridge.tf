@@ -12,11 +12,11 @@ resource "google_artifact_registry_repository" "metrics_bridge" {
 
 # ── Metrics Bridge Cloud Build executor ──────────────────────────────────────
 #
-# Cloud Build currently defaults to the project's Compute service account. That
-# identity retains project Editor, so provisioning this dedicated executor is
-# deliberately separate from routing: Terraform creates its narrow authority
-# first. After an approved current-main apply, a later reviewed change pins
-# `cloudbuild.yaml` to this identity and canaries both deployment paths.
+# The applied phase-one foundation gives Metrics Bridge a narrow executor in
+# place of the project's Editor-bearing default Compute identity. Phase two
+# pins `cloudbuild.yaml` to this identity and canaries both deployment paths.
+# A later reviewed cleanup removes the still-temporary default Compute source
+# reader through a separately approved apply.
 locals {
   metrics_bridge_builder_project_roles = toset([
     "roles/cloudbuild.builds.editor",

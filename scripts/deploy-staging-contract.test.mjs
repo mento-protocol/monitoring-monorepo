@@ -505,6 +505,114 @@ expectFailure(
 );
 
 expectFailure(
+  mutate(
+    files,
+    "cloudbuild.yaml",
+    "serviceAccount: projects/$PROJECT_ID/serviceAccounts/metrics-bridge-builder@$PROJECT_ID.iam.gserviceaccount.com\n",
+    "",
+  ),
+  "cloudbuild.yaml: Cloud Build serviceAccount must be",
+);
+expectFailure(
+  mutate(
+    files,
+    "cloudbuild.yaml",
+    "serviceAccount: projects/$PROJECT_ID/serviceAccounts/metrics-bridge-builder@$PROJECT_ID.iam.gserviceaccount.com",
+    "serviceAccount: projects/mento-monitoring/serviceAccounts/metrics-bridge-builder@mento-monitoring.iam.gserviceaccount.com",
+  ),
+  "cloudbuild.yaml: Cloud Build serviceAccount must be",
+);
+expectFailure(
+  mutate(
+    files,
+    "cloudbuild.yaml",
+    "  logging: CLOUD_LOGGING_ONLY",
+    "  logging: GCS_ONLY",
+  ),
+  "cloudbuild.yaml: Cloud Build logging must be CLOUD_LOGGING_ONLY",
+);
+
+for (const [filePath, configFlag] of [
+  [
+    ".github/workflows/metrics-bridge.yml",
+    "            --config=cloudbuild.yaml \\\n",
+  ],
+  ["scripts/deploy-bridge.sh", "  --config=cloudbuild.yaml \\\n"],
+]) {
+  expectFailure(
+    mutate(
+      files,
+      filePath,
+      configFlag,
+      configFlag.replace("cloudbuild.yaml", "other.yaml"),
+    ),
+    `${filePath}: Metrics Bridge builds must set --config=cloudbuild.yaml exactly`,
+  );
+  expectFailure(
+    mutate(
+      files,
+      filePath,
+      configFlag,
+      `${configFlag.slice(0, -2)}  --service-account=default@mento-monitoring.iam.gserviceaccount.com \\\n`,
+    ),
+    `${filePath}: Metrics Bridge builds must not override cloudbuild.yaml with --service-account`,
+  );
+}
+
+for (const target of [
+  "google_project_iam_member.metrics_bridge_builder",
+  "google_artifact_registry_repository_iam_member.metrics_bridge_builder_writer",
+  "google_project_iam_member.dev_logging_viewer",
+  "google_service_account_iam_member.dev_metrics_bridge_builder_service_account_user",
+  "google_service_account_iam_member.dev_metrics_bridge_runtime_service_account_user",
+]) {
+  expectFailure(
+    mutate(files, "scripts/deploy-bridge.sh", `  -target=${target} \\\n`, ""),
+    `scripts/deploy-bridge.sh: direct bootstrap must target ${target} exactly once`,
+  );
+}
+
+const metricsBridgeBuilderExecutor =
+  '    "serviceAccount:${google_service_account.metrics_bridge_builder.email}",\n';
+const defaultComputeExecutor =
+  '    "serviceAccount:${google_project.monitoring.number}-compute@developer.gserviceaccount.com",\n';
+assert(
+  files["terraform/deploy-staging.tf"].includes(metricsBridgeBuilderExecutor),
+  "Metrics Bridge builder must be in the source-executor set",
+);
+expectFailure(
+  mutate(files, "terraform/deploy-staging.tf", defaultComputeExecutor, ""),
+  "Cloud Build source executors: must contain the two dedicated builders and temporary default Compute reader",
+);
+expectFailure(
+  mutate(
+    files,
+    "terraform/deploy-staging.tf",
+    metricsBridgeBuilderExecutor,
+    "",
+  ),
+  "Cloud Build source executors: must contain the two dedicated builders and temporary default Compute reader",
+);
+expectFailure(
+  mutate(
+    files,
+    "terraform/deploy-staging.tf",
+    metricsBridgeBuilderExecutor,
+    `${metricsBridgeBuilderExecutor}    "serviceAccount:\${google_project.monitoring.number}@cloudbuild.gserviceaccount.com",\n`,
+  ),
+  "Cloud Build source executors: must contain the two dedicated builders and temporary default Compute reader",
+);
+expectFailure(
+  mutate(
+    files,
+    "terraform/deploy-staging.tf",
+    '  role   = "roles/storage.objectViewer"',
+    '  role   = "roles/storage.objectAdmin"',
+  ),
+  "Cloud Build source executors: role must be exactly",
+);
+
+expectFailure(
   {
     ...files,
     "scripts/new-deploy.sh":
