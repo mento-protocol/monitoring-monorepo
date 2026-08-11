@@ -66,6 +66,7 @@ import {
   VALID_VERDICTS,
   validateAffectedRepo,
   verdictCommentIdFromUrl,
+  VERDICT_TO_LABEL,
 } from "./sentry-triage-project-core.mjs";
 
 // Projected-issue rendering lives in its own module (#1769), imported HERE
@@ -91,6 +92,7 @@ import {
   commentBacklinksShortId,
 } from "./sentry-triage-projection.mjs";
 import { LABEL_DEFINITIONS, VERDICT_LABELS } from "./sentry-triage-ingest.mjs";
+import { selectInheritableSibling } from "./sentry-triage-queue-contract.mjs";
 // Clear any stale needs-human brief before this job CLOSES a projected stub: a
 // stub re-triaged needs-human -> code-fix/config-fix whose brief-clear failed in
 // the matrix would otherwise be projected and closed here still showing the
@@ -158,6 +160,60 @@ async function readQueueIssue(localRun, repo, number) {
       .filter(Boolean),
     comments: data.comments ?? [],
   };
+}
+
+/**
+ * Read the queue stubs for a family's declared duplicates (#1614 part 2).
+ *
+ * One local listing, not one lookup per sibling: the cap is small but a
+ * per-sibling `gh issue view` would put up to MAX_DUPLICATE_LOOKUPS extra
+ * round-trips inside the label step, which runs before the stub has a verdict
+ * label and must not become slow or flaky. `--state all` is required — the
+ * inheritable sibling is by definition CLOSED.
+ *
+ * Failure is NOT fatal: inheritance is an optimisation over escalating, so a
+ * listing error falls back to the agent's own `needs-human`. The stub still
+ * gets a decision-ready brief; it just does not get collapsed into its family.
+ */
+async function readSiblingVerdicts(localRun, repo, duplicateOf) {
+  const wanted = new Set(duplicateOf ?? []);
+  if (wanted.size === 0) return [];
+  let stdout;
+  try {
+    stdout = await localRun([
+      "issue",
+      "list",
+      "-R",
+      repo,
+      "--label",
+      "sentry-triage",
+      "--state",
+      "all",
+      "--limit",
+      "200",
+      "--json",
+      "title,state,labels",
+    ]);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    process.stderr.write(
+      `::warning::Could not list queue stubs to check family inheritance (${message}); keeping the agent's own verdict.\n`,
+    );
+    return [];
+  }
+  let rows;
+  try {
+    rows = JSON.parse(stdout);
+  } catch {
+    return [];
+  }
+  const out = [];
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const shortId = parseShortId(row?.title);
+    if (!shortId || !wanted.has(shortId)) continue;
+    out.push({ shortId, state: row?.state, labels: row?.labels ?? [] });
+  }
+  return out;
 }
 
 // Fixed, markup-free phrase from the projected-issue footer, ANDed with the
@@ -426,9 +482,33 @@ export async function runParseOnly(options, deps = {}) {
   // select job saw on this stub BEFORE the agent ran, so a round that posted
   // nothing cannot settle the stub on the previous round's verdict. Absent flag
   // -> null -> unbound, the pre-#1717 behaviour.
-  const { parsed, verdict, label } = resolveVerdict(issue, options.queueIssue, {
+  let { parsed, verdict, label } = resolveVerdict(issue, options.queueIssue, {
     priorVerdictCommentId: options.priorVerdictCommentId,
   });
+  // Family inheritance (#1614 part 2): an escalation whose family was already
+  // judged `upstream-transient` settles the same way instead of becoming a
+  // second ask. Only needs-human is redirected — a verdict the agent reached on
+  // its own is never overridden by a sibling's. See selectInheritableSibling
+  // for why only that one verdict is inheritable.
+  let inheritedFrom = null;
+  if (verdict === "needs-human" && parsed.duplicateOf?.length) {
+    const sibling = selectInheritableSibling(
+      parsed.duplicateOf,
+      await readSiblingVerdicts(
+        localRun,
+        options.localRepo,
+        parsed.duplicateOf,
+      ),
+    );
+    if (sibling) {
+      inheritedFrom = sibling.shortId;
+      verdict = sibling.verdict;
+      label = VERDICT_TO_LABEL[verdict];
+      process.stderr.write(
+        `::notice::Issue #${options.queueIssue} inherits ${verdict} from family sibling ${sibling.shortId} (already closed with that verdict) instead of escalating.\n`,
+      );
+    }
+  }
   let projectable = false;
   if (PROJECTABLE_VERDICTS.includes(verdict)) {
     const repoCheck = validateAffectedRepo(parsed.affectedRepo);
@@ -447,7 +527,7 @@ export async function runParseOnly(options, deps = {}) {
   // `buildReopenLabelEditArgs` relies on — so the first-pass case (no verdict
   // label yet) costs nothing.
   const shed = VERDICT_LABELS.filter((name) => name !== label).join(",");
-  return { verdict, label, projectable, shed };
+  return { verdict, label, projectable, shed, inheritedFrom };
 }
 
 /**

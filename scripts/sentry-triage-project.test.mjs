@@ -38,6 +38,7 @@ import {
   VERDICT_TO_LABEL,
 } from "./sentry-triage-project.mjs";
 import { BRIEF_COMMENT_MARKER } from "./sentry-triage-brief.mjs";
+import { selectInheritableSibling } from "./sentry-triage-queue-contract.mjs";
 
 let passed = 0;
 let failed = 0;
@@ -2199,6 +2200,7 @@ await test("runParseOnly returns the validated verdict + mapped label + projecta
     label: "sentry:verdict-code-fix",
     projectable: true,
     shed: "sentry:verdict-config-fix,sentry:verdict-upstream,sentry:verdict-needs-human",
+    inheritedFrom: null,
   });
   // Read-only: exactly one `gh issue view` with the ambient token.
   assertEqual(calls.length, 1);
@@ -2242,6 +2244,7 @@ await test("runParseOnly maps upstream-transient to the asymmetric label", async
     label: "sentry:verdict-upstream",
     projectable: false,
     shed: "sentry:verdict-code-fix,sentry:verdict-config-fix,sentry:verdict-needs-human",
+    inheritedFrom: null,
   });
 });
 
@@ -2419,6 +2422,7 @@ await test("runParseOnly accepts a needs-human verdict WITH human_question", asy
     label: "sentry:verdict-needs-human",
     projectable: false,
     shed: "sentry:verdict-code-fix,sentry:verdict-config-fix,sentry:verdict-upstream",
+    inheritedFrom: null,
   });
 });
 
@@ -3026,6 +3030,172 @@ await test("runProjectionBatch survives a failing label ensure", async () => {
     { runGh },
   );
   assertEqual(rows[0].status, "projected");
+});
+
+const needsHumanVerdictComment = (duplicates) =>
+  verdictComment({
+    verdict: "needs-human",
+    duplicates: JSON.stringify(duplicates),
+    humanQuestion: "decide whether to allowlist the host or close as noise",
+    howToCheck: ["grep the app for the blocked hostnames"],
+    decisionBranches: ["Yes -> config-fix", "No -> close as upstream"],
+    hypotheses: ["third-party widget (lean: medium)"],
+    investigated: ["read the payload"],
+    escalationReason: "ambiguity",
+  });
+
+// #1614 part 2. Every test here is about what inheritance must REFUSE. The
+// mechanism keys on `duplicate_of`, which is agent-authored, so the blast
+// radius of a wrong inheritance is the whole point: `upstream-transient` only
+// closes a stub, while any projectable verdict would write into another repo —
+// or, on a local stub, start an autofix run — for an issue no agent examined.
+const SIB = (shortId, state, ...labels) => ({
+  shortId,
+  state,
+  labels: labels.map((name) => ({ name })),
+});
+
+await test("inherits upstream-transient from a closed family sibling", () => {
+  const got = selectInheritableSibling(
+    ["GOV-56"],
+    [SIB("GOV-56", "CLOSED", "sentry-triage", "sentry:verdict-upstream")],
+  );
+  assertEqual(got?.shortId, "GOV-56");
+  assertEqual(got?.verdict, "upstream-transient");
+});
+
+await test("never inherits a verdict that can write outside the queue", () => {
+  // code-fix/config-fix PROJECT (an issue in another team's repo) and code-fix
+  // on a local stub is autofix-eligible. An agent-authored duplicate_of must
+  // never be able to trigger either for a stub nothing examined.
+  for (const label of [
+    "sentry:verdict-code-fix",
+    "sentry:verdict-config-fix",
+    "sentry:verdict-needs-human",
+  ]) {
+    assertEqual(
+      selectInheritableSibling(
+        ["GOV-56"],
+        [SIB("GOV-56", "CLOSED", "sentry-triage", label)],
+      ),
+      null,
+    );
+  }
+});
+
+await test("never inherits from an OPEN sibling", () => {
+  // An open sibling is mid-flight: its verdict label can still be shed by the
+  // re-queue compensation, so reading it is a race, not a judgement.
+  assertEqual(
+    selectInheritableSibling(
+      ["GOV-56"],
+      [SIB("GOV-56", "OPEN", "sentry-triage", "sentry:verdict-upstream")],
+    ),
+    null,
+  );
+});
+
+await test("inheritance is capped and ordered by duplicate_of, not by listing", () => {
+  const many = ["A-1", "A-2", "A-3", "A-4", "A-5", "A-6"];
+  const siblings = many.map((id) =>
+    SIB(id, "CLOSED", "sentry:verdict-upstream"),
+  );
+  // Only the first MAX_DUPLICATE_LOOKUPS are consulted, and the winner is the
+  // first in duplicate_of order however GitHub happened to list them.
+  assertEqual(
+    selectInheritableSibling(many, [...siblings].reverse())?.shortId,
+    "A-1",
+  );
+  // Only the 6th carries the label, so it sits past MAX_DUPLICATE_LOOKUPS and
+  // must not be reached however many unlabelled siblings precede it.
+  const onlyLastLabelled = many.map((id) =>
+    id === "A-6"
+      ? SIB(id, "CLOSED", "sentry:verdict-upstream")
+      : SIB(id, "CLOSED", "sentry-triage"),
+  );
+  assertEqual(selectInheritableSibling(many, onlyLastLabelled), null);
+});
+
+await test("a malformed or unknown duplicate_of inherits nothing", () => {
+  for (const dups of [[], null, undefined, ["not a short id"], ["GOV-99"]]) {
+    assertEqual(
+      selectInheritableSibling(dups, [
+        SIB("GOV-56", "CLOSED", "sentry:verdict-upstream"),
+      ]),
+      null,
+    );
+  }
+});
+
+await test("runParseOnly redirects a needs-human escalation to its family verdict", async () => {
+  const calls = [];
+  const runGh = async (args) => {
+    calls.push(args[1]);
+    if (args[1] === "view") {
+      return JSON.stringify({
+        number: 700,
+        title: "[sentry] GOV-57 (governance-mento-org, error)",
+        body: "",
+        url: "https://github.com/o/r/issues/700",
+        state: "OPEN",
+        labels: [{ name: "sentry-triage" }],
+        comments: [
+          {
+            url: "https://github.com/o/r/issues/700#issuecomment-9",
+            body: needsHumanVerdictComment(["GOV-56"]),
+            author: { login: "github-actions" },
+          },
+        ],
+      });
+    }
+    return JSON.stringify([
+      {
+        title: "[sentry] GOV-56 (governance-mento-org, error)",
+        state: "CLOSED",
+        labels: [{ name: "sentry:verdict-upstream" }],
+      },
+    ]);
+  };
+  const out = await runParseOnly(
+    { localRepo: "o/r", queueIssue: 700, priorVerdictCommentId: null },
+    { runGh },
+  );
+  assertEqual(out.verdict, "upstream-transient");
+  assertEqual(out.label, "sentry:verdict-upstream");
+  // Never projectable: upstream-transient is not in PROJECTABLE_VERDICTS, so
+  // an inherited verdict cannot reach the cross-repo write path.
+  assertEqual(out.projectable, false);
+  assert(calls.includes("list"), "expected the family listing");
+});
+
+await test("a failed sibling listing keeps the agent's own escalation", async () => {
+  const runGh = async (args) => {
+    if (args[1] === "view") {
+      return JSON.stringify({
+        number: 701,
+        title: "[sentry] GOV-58 (governance-mento-org, error)",
+        body: "",
+        url: "https://github.com/o/r/issues/701",
+        state: "OPEN",
+        labels: [{ name: "sentry-triage" }],
+        comments: [
+          {
+            url: "https://github.com/o/r/issues/701#issuecomment-9",
+            body: needsHumanVerdictComment(["GOV-56"]),
+            author: { login: "github-actions" },
+          },
+        ],
+      });
+    }
+    throw new Error("gh list exploded");
+  };
+  const out = await runParseOnly(
+    { localRepo: "o/r", queueIssue: 701, priorVerdictCommentId: null },
+    { runGh },
+  );
+  // Fail toward the escalation: the human still gets the decision-ready brief.
+  assertEqual(out.verdict, "needs-human");
+  assertEqual(out.label, "sentry:verdict-needs-human");
 });
 
 if (failed > 0) {

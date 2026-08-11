@@ -16,7 +16,11 @@
  * their tests keep one import surface.
  */
 
-import { extractYamlBlock } from "./sentry-triage-project-core.mjs";
+import {
+  extractYamlBlock,
+  MAX_DUPLICATE_LOOKUPS,
+} from "./sentry-triage-project-core.mjs";
+import { sanitizeDuplicateIds } from "./sentry-triage-text.mjs";
 
 // ---------------------------------------------------------------------------
 // Untrusted-text neutralization. Sentry titles/culprits/timestamps are
@@ -382,4 +386,56 @@ export function withArchiveBaseline(body, baseline) {
       ].join("\n")
     : stripped;
   return source.replace(block, rebuilt);
+}
+
+// Family-verdict inheritance (#1614 part 2). A stub whose family was already
+// judged should not become a second escalation — that is how one error family
+// became four `needs-human` asks (GOV-55/56/57/59).
+//
+// ONLY `upstream-transient` is inheritable, and the exclusions are the whole
+// design rather than caution:
+//
+//   - `code-fix` / `config-fix` PROJECT. Inheriting one files or reopens an
+//     issue in another team's repo for a stub no agent examined, and on a
+//     LOCAL stub `code-fix` is autofix-eligible, so it can open a PR here.
+//     `duplicate_of` is agent-authored (a family signal, not a confirmed
+//     duplicate — see the note above), so inheritance must never be able to
+//     cause a write outside this queue.
+//   - `needs-human` is an unanswered question, not a judgement.
+//
+// `upstream-transient` only closes the stub, so a wrong inheritance costs one
+// re-opened issue if Sentry regresses it — recoverable, and the regression path
+// already exists.
+export const INHERITABLE_VERDICT = "upstream-transient";
+export const INHERITABLE_VERDICT_LABEL = "sentry:verdict-upstream";
+
+/**
+ * Pure: pick the sibling this stub may inherit from, or null.
+ *
+ * `siblings` is `[{ shortId, state, labels }]` for the stub's declared
+ * duplicates. A candidate must be CLOSED (an open sibling is mid-flight, and
+ * its label may still be shed) and carry exactly the inheritable verdict
+ * label. First match in `duplicateOf` order wins, so the result does not
+ * depend on GitHub's listing order.
+ */
+export function selectInheritableSibling(duplicateOf, siblings) {
+  const bySid = new Map();
+  for (const s of siblings ?? []) {
+    if (s?.shortId && !bySid.has(s.shortId)) bySid.set(s.shortId, s);
+  }
+  for (const shortId of sanitizeDuplicateIds(duplicateOf).slice(
+    0,
+    MAX_DUPLICATE_LOOKUPS,
+  )) {
+    const sib = bySid.get(shortId);
+    if (!sib) continue;
+    if (String(sib.state).toUpperCase() !== "CLOSED") continue;
+    const labels = (sib.labels ?? []).map((l) =>
+      typeof l === "string" ? l : (l?.name ?? ""),
+    );
+    if (labels.includes(INHERITABLE_VERDICT_LABEL)) {
+      return { shortId, verdict: INHERITABLE_VERDICT };
+    }
+  }
+  return null;
 }
