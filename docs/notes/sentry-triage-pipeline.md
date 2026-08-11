@@ -336,15 +336,17 @@ block, so `parseVerdictComment` never mistakes it for a verdict. Every rendered
 field is single-line, neutralized, bounded and markdown-escaped; a comment that
 could be misread by a prefix-anchored consumer fails closed.
 
-The agent posts that comment through `scripts/sentry-triage-agent-comment.mjs`,
-its only write path. The wrapper accepts no issue argument, and does not take
-the target from the environment either: bash arithmetic expansion assigns, so a
-body containing `$((SENTRY_TRIAGE_COMMENT_ISSUE=1234))` rewrites the exported
-variable while the agent's own command line is expanded, before Node starts.
-The authoritative target is a JSON file that a trusted step pins under
-`$RUNNER_TEMP` before the agent runs, left mode 0444 inside a mode 0555
-directory. The env var survives as a cross-check only, and a disagreement
-between the two refuses loudly rather than picking a winner.
+The agent posts its verdict comment — never the brief, which `runBrief` writes
+separately through its own `gh` calls — through
+`scripts/sentry-triage-agent-comment.mjs`, its only write path. The wrapper
+accepts no issue argument, and does not take the target from the environment
+either: bash arithmetic expansion assigns, so a body containing
+`$((SENTRY_TRIAGE_COMMENT_ISSUE=1234))` rewrites the exported variable while
+the agent's own command line is expanded, before Node starts. The authoritative
+target is a JSON file that a trusted step pins under `$RUNNER_TEMP` before the
+agent runs, left mode 0444 inside a mode 0555 directory. The env var survives
+as a cross-check only, and a disagreement between the two refuses loudly rather
+than picking a winner.
 
 Those modes are load-bearing, because **the agent can write files**. Claude
 Code's permission rules match a command carrying an output redirection
