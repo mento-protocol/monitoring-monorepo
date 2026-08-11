@@ -507,11 +507,14 @@ function parseFreeTextList(lines, i, rest) {
   return collectDashList(lines, i);
 }
 
-/** Trim, drop empties, and cap a free-text brief list for memory safety. */
+// Trim, cap, and drop items empty AFTER neutralization (not a bare `Boolean`):
+// the escape decoder yields control-only items (`["\a"]`, `["\0"]`) that strip to
+// "" at render, which would settle a needs-human verdict then show an empty
+// section. Every brief list field routes through this one helper (#1769 r15).
 export function sanitizeBriefList(list) {
   return (Array.isArray(list) ? list : [])
     .map((value) => String(value ?? "").trim())
-    .filter(Boolean)
+    .filter((value) => sanitizeFreeText(value) !== "")
     .slice(0, MAX_BRIEF_LIST_ITEMS);
 }
 
@@ -937,11 +940,9 @@ export function resolveVerdict(issue, queueIssueNumber, options = {}) {
       );
     }
     // A decision-ready escalation also needs the INSTRUCTION half: at least one
-    // how_to_check step AND at least one decision_branch. Without them the brief
-    // renders a question with no checks and no dispositions — a permanently open
-    // escalation that tells a human nothing actionable (#1769 round 11). Reject
-    // so the workflow's --parse-only label step keeps sentry:needs-triage and the
-    // next round re-triages, rather than settling an incomplete brief.
+    // how_to_check step AND one decision_branch that SURVIVE neutralization —
+    // sanitizeBriefList drops control-only items that would render empty, so a
+    // question with no real checks/dispositions is rejected (#1769 rounds 11, 15).
     if (
       sanitizeBriefList(parsed.howToCheck).length === 0 ||
       sanitizeBriefList(parsed.decisionBranches).length === 0

@@ -49,6 +49,7 @@ import {
   parseVerdictYaml,
   REGRESSION_PREFIX,
   resolveVerdict,
+  sanitizeBriefList,
   selectNeedsHumanBriefFields,
   VERDICT_MARKER,
 } from "./sentry-triage-project-core.mjs";
@@ -249,13 +250,16 @@ function makeRunGh(
       }
       if (args[0] === "issue" && args[1] === "comment") {
         idSeq += 1;
+        const url = `https://github.com/mento-protocol/monitoring-monorepo/issues/${state.number}#issuecomment-${idSeq}`;
         state.comments.push({
           author: { login: "github-actions" },
           createdAt: "2026-08-10T12:00:00Z",
           body: opts?.stdin ?? "",
-          url: `https://github.com/mento-protocol/monitoring-monorepo/issues/${state.number}#issuecomment-${idSeq}`,
+          url,
         });
-        return "";
+        // Real `gh issue comment` prints the new comment's URL to stdout; the
+        // brief leg parses it to capture the id for the post-write fail-safe.
+        return `${url}\n`;
       }
       if (args[0] === "api" && args.includes("PATCH")) {
         const id = idOf(args[args.indexOf("PATCH") + 1]);
@@ -524,6 +528,88 @@ await test("resolveVerdict rejects an incomplete needs-human brief (#1769 round 
   // A COMPLETE needs-human verdict still resolves.
   const ok = resolveVerdict(stubIssue(needsHumanYaml("Decide X")), 1731);
   assertEqual(ok.verdict, "needs-human");
+});
+
+await test("brief list items that neutralize to empty are dropped from every field (#1769 round 15)", () => {
+  // The full YAML escape decoder makes control-only items (`["\a"]`, `["\0"]`):
+  // non-empty strings here that strip to "" at render. sanitizeBriefList drops
+  // them so the completeness gate and the renderer agree — across ALL fields.
+  assertEqual(
+    JSON.stringify(
+      sanitizeBriefList(["\x07", "\0", "   ", "\t", "real check"]),
+    ),
+    JSON.stringify(["real check"]),
+  );
+
+  // parseVerdictYaml routes every list field through sanitizeBriefList, so a
+  // control-only / whitespace-only inline list becomes empty for how_to_check,
+  // decision_branches, hypotheses AND investigated.
+  for (const field of [
+    "how_to_check",
+    "decision_branches",
+    "hypotheses",
+    "investigated",
+  ]) {
+    const parsed = parseVerdictYaml(`${field}: ["\\a", "\\0", "   "]`);
+    assertEqual(
+      parsed[field].length,
+      0,
+      `${field}: control-only list must empty`,
+    );
+  }
+
+  // The completeness gate rejects a needs-human verdict whose instruction half is
+  // control-only, exactly as it rejects an empty one.
+  const rejects = (yaml, why) => {
+    let message = "";
+    try {
+      resolveVerdict(stubIssue(yaml), 1731);
+    } catch (err) {
+      message = err instanceof Error ? err.message : String(err);
+    }
+    assert(/incomplete brief/.test(message), why);
+  };
+  rejects(
+    [
+      "verdict: needs-human",
+      "confidence: low",
+      "human_question: Decide whether to rotate the key",
+      'how_to_check: ["\\a"]',
+      "decision_branches:",
+      "  - Yes -> rotate",
+    ].join("\n"),
+    "a control-only how_to_check must be rejected",
+  );
+  rejects(
+    [
+      "verdict: needs-human",
+      "confidence: low",
+      "human_question: Decide whether to rotate the key",
+      "how_to_check:",
+      "  - inspect the handler",
+      'decision_branches: ["\\0"]',
+    ].join("\n"),
+    "a control-only decision_branches must be rejected",
+  );
+
+  // The shared render contract never emits an empty bullet for a survivor: the
+  // control-only item is gone, not rendered as "".
+  const fields = selectNeedsHumanBriefFields({
+    humanQuestion: "Decide whether to rotate the key",
+    howToCheck: ["\x07", "real check"],
+    decisionBranches: ["\0", "Yes -> rotate"],
+    hypotheses: [],
+    investigated: [],
+    escalationReason: "",
+  });
+  assertEqual(
+    JSON.stringify(fields.howToCheck),
+    JSON.stringify(["real check"]),
+  );
+  assertEqual(
+    JSON.stringify(fields.decisionBranches),
+    JSON.stringify(["Yes -> rotate"]),
+  );
 });
 
 await test("a comment on the key line does not swallow the dash items (#1769 round 5)", () => {
@@ -1286,6 +1372,55 @@ await test("a stub that goes terminal between the guard and the write self-heals
   assertEqual(wroteBody(gh), false);
 });
 
+// FINDING (#1769 round 15): the round-7 post-write verifier had an indeterminate
+// path — if the terminal re-read (or its cleanup) THREW, runBrief propagated the
+// error AFTER creating the comment but before removing it, and the best-effort
+// workflow swallowed the throw, permanently stranding the brief on a stub that
+// settled during the write. Fail-safe: if we cannot CONFIRM the stub is live
+// after writing, remove the brief we wrote.
+await test("the brief is removed when the post-write terminal re-check FAILS (#1769 round 15)", async () => {
+  // View #1 initial, #2 pre-write guard (both open, so the write proceeds), then
+  // the post-write terminal re-read (#3) FAILS transiently. The fail-safe removal
+  // reads the comments (#4 succeeds) and clears the brief this run just wrote.
+  const gh = makeRunGh(stubIssue(), {
+    onView: (n) => {
+      if (n === 3) throw new Error("gh issue view failed with exit 1: timeout");
+    },
+  });
+  const result = await runBrief({
+    runGh: gh.runGh,
+    issueNumber: 1731,
+    log: () => {},
+  });
+  assertEqual(result.settledUnverified, true);
+  assertEqual(result.written, false);
+  assertEqual(created(gh).length, 1);
+  assert(deleted(gh).length >= 1, "the just-written brief is deleted");
+  assertEqual(findBriefComments(gh.state.comments).length, 0);
+  assertEqual(wroteBody(gh), false);
+});
+
+await test("the fail-safe deletes by the captured id when the cleanup read ALSO fails (#1769 round 15)", async () => {
+  // Both post-write reads fail (#3 the verifier, #4 the cleanup's comments read),
+  // so the fail-safe cannot clear by reading — it falls back to deleting the id
+  // captured from the create's stdout. Without that capture the brief would strand.
+  const gh = makeRunGh(stubIssue(), {
+    onView: (n) => {
+      if (n >= 3) throw new Error("gh issue view failed with exit 1: 502");
+    },
+  });
+  const result = await runBrief({
+    runGh: gh.runGh,
+    issueNumber: 1731,
+    log: () => {},
+  });
+  assertEqual(result.settledUnverified, true);
+  assertEqual(created(gh).length, 1);
+  assert(deleted(gh).length >= 1, "the just-written brief is deleted by id");
+  assertEqual(findBriefComments(gh.state.comments).length, 0);
+  assertEqual(wroteBody(gh), false);
+});
+
 const deleteBriefOnPatch = (args, state) => {
   if (args[0] === "api" && args.includes("PATCH")) {
     state.comments = state.comments.filter(
@@ -1480,6 +1615,22 @@ await test("live script comments describe the brief as a comment, not a body wri
   assert(
     !/issue-body brief/i.test(digest),
     "the digest comment must not call the brief an issue-body brief",
+  );
+});
+
+await test("the brief header describes the re-queue comment writes accurately (#1769 round 15)", () => {
+  // The re-queue chokepoint DOES post its own comment (a sentry-evidence
+  // regression fence or a bookkeeping note); it only leaves the stub body and
+  // this leg's marked brief untouched. A stale "posts no comment" header would
+  // mislead a later change about the verdict-staleness fence.
+  const brief = readRepoFile("scripts/sentry-triage-brief.mjs");
+  assert(
+    !/posts no comment/i.test(brief),
+    "the brief header must not claim the re-queue chokepoint posts no comment",
+  );
+  assert(
+    /re-queue chokepoint[\s\S]{0,240}\bMAY post\b/i.test(brief),
+    "the brief header must state the re-queue chokepoint MAY post its own comment",
   );
 });
 

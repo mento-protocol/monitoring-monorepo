@@ -40,8 +40,10 @@
  *     re-triage to code-fix / config-fix / upstream-transient permanently.
  *   - a re-queue would be the earliest moment to drop the rendering, and this
  *     leg deliberately does not reach there: the re-queue chokepoint writes no
- *     stub body and posts no comment (issue #1692). So a re-queued stub carries
- *     its old comment until the next round's verdict lands, on a stub whose
+ *     stub body and never touches this leg's marked brief comment. It MAY post
+ *     its OWN comment — a `sentry-evidence` regression fence or a `bookkeeping`
+ *     note (issue #1692) — but not the brief. So a re-queued stub carries its
+ *     old brief comment until the next round's verdict lands, on a stub whose
  *     labels already read `sentry:needs-triage`.
  *
  * The rendering, the two markdown escapes and the inert-block assertion live in
@@ -228,6 +230,13 @@ function createBriefComment(runGh, repo, issueNumber, body) {
   );
 }
 
+/** The numeric REST id of the comment `gh issue comment` just created, parsed
+ * from the URL it prints to stdout. Null if the output cannot be parsed — the
+ * caller then falls back to a comments read to locate the brief it wrote. */
+function createdBriefCommentId(stdout) {
+  return verdictCommentIdFromUrl(String(stdout ?? "").trim());
+}
+
 /** Update the brief comment in place. The JSON request body goes on stdin via
  * `--input -`, so the untrusted body never reaches argv. */
 function updateBriefComment(runGh, repo, commentId, body) {
@@ -299,6 +308,36 @@ export async function clearBriefComments({
     );
   }
   return removed;
+}
+
+/**
+ * Remove the brief this run just wrote, fail-safe. Prefers clearing every marked
+ * comment via a fresh read (thorough — sweeps a straggler too); if that read
+ * itself fails, falls back to deleting the one comment id captured at write time,
+ * so a transient gh failure AFTER a write can never strand the brief. A 404 is
+ * success (already gone). Throws only when it can neither read the comments nor
+ * delete by a known id — the caller must then not swallow that failure, so a
+ * possibly-stranded brief surfaces rather than passing silently (#1769 round 15).
+ */
+async function removeWrittenBrief({
+  runGh,
+  repo,
+  issueNumber,
+  writtenCommentId,
+  log,
+}) {
+  try {
+    const { comments } = await readQueueIssue(runGh, repo, issueNumber);
+    await clearBriefComments({ runGh, repo, issueNumber, comments, log });
+    return;
+  } catch (readErr) {
+    if (writtenCommentId == null) throw readErr; // cannot locate it -> surface
+    try {
+      await deleteBriefComment(runGh, repo, writtenCommentId);
+    } catch (deleteErr) {
+      if (!isNotFoundError(deleteErr)) throw deleteErr;
+    }
+  }
 }
 
 /**
@@ -397,12 +436,19 @@ export async function runBrief({
 
   const [primary, ...duplicates] = existing;
   let written = false;
+  // The id of the brief this run wrote, captured so the post-write settlement can
+  // remove it even if the verifying read fails (#1769 round 15).
+  let writtenCommentId = null;
   if (!primary) {
-    await createBriefComment(runGh, repo, issueNumber, block);
+    writtenCommentId = createdBriefCommentId(
+      await createBriefComment(runGh, repo, issueNumber, block),
+    );
     written = true;
   } else if (primary.body !== block) {
+    const primaryId = briefCommentId(primary);
     try {
-      await updateBriefComment(runGh, repo, briefCommentId(primary), block);
+      await updateBriefComment(runGh, repo, primaryId, block);
+      writtenCommentId = primaryId;
       written = true;
     } catch (err) {
       if (!isNotFoundError(err)) throw err;
@@ -424,29 +470,63 @@ export async function runBrief({
       log(
         `::notice::Issue #${issueNumber}: the brief comment was deleted on an open stub; recreating it.`,
       );
-      await createBriefComment(runGh, repo, issueNumber, block);
+      writtenCommentId = createdBriefCommentId(
+        await createBriefComment(runGh, repo, issueNumber, block),
+      );
       written = true;
     }
   }
-  // Never leave two "Decision needed" comments on one stub.
+  // Never leave two "Decision needed" comments on one stub. A 404 means a
+  // duplicate is already gone (a concurrent delete) — success, the same rule
+  // every other delete path applies (#1769 round 15).
   for (const duplicate of duplicates) {
-    await deleteBriefComment(runGh, repo, briefCommentId(duplicate));
-    written = true;
+    try {
+      await deleteBriefComment(runGh, repo, briefCommentId(duplicate));
+      written = true;
+    } catch (err) {
+      if (!isNotFoundError(err)) throw err;
+    }
   }
 
-  // Post-write settlement (#1769 round 7). The pre-write guard is a TOCTOU
-  // check: an archive can close+archive the stub AND run its own cleanup in the
-  // window between that read and this write, after which the comment we just
-  // created/updated sits on a closed archive. Re-read the terminal state AFTER
-  // the write and, if the stub is now terminal, delete the brief we just wrote.
-  // The common race self-heals within the run — the write-side complement of
-  // the archive's cleanup (round 5) and the pre-write guard (round 6), closing
-  // the last window. Idempotent, and it removes only marked comments.
+  // Post-write settlement + fail-safe (#1769 rounds 7 and 15). The pre-write
+  // guard is a TOCTOU check: an archive can close+archive the stub AND run its
+  // own cleanup in the window between that read and this write, after which the
+  // comment we just created/updated sits on a closed archive. Re-read the
+  // terminal state AFTER the write. Remove the brief we just wrote when the stub
+  // is terminal — OR when the re-read (or its cleanup) FAILS, so we cannot
+  // confirm the stub is still live. A brief stranded on a settled stub is
+  // permanent because this workflow step is best-effort and never retries; a
+  // still-live stub simply re-gets its brief on the next scheduled round (this
+  // leg is idempotent). So the safe default under uncertainty is to remove.
+  // Removal is itself fail-safe (clears via a fresh read, else deletes the
+  // captured id), and it touches only marked comments.
   if (written) {
-    const settled = await readStubTerminalState(runGh, repo, issueNumber);
+    let settled;
+    try {
+      settled = await readStubTerminalState(runGh, repo, issueNumber);
+    } catch (err) {
+      await removeWrittenBrief({
+        runGh,
+        repo,
+        issueNumber,
+        writtenCommentId,
+        log,
+      });
+      log(
+        `::notice::Issue #${issueNumber}: could not verify the stub is live after the brief write (${
+          err instanceof Error ? err.message : String(err)
+        }); removed the brief just written as a fail-safe (a live stub re-creates it next round).`,
+      );
+      return { written: false, verdict, settledUnverified: true };
+    }
     if (settled.closed || settled.archived) {
-      const { comments } = await readQueueIssue(runGh, repo, issueNumber);
-      await clearBriefComments({ runGh, repo, issueNumber, comments, log });
+      await removeWrittenBrief({
+        runGh,
+        repo,
+        issueNumber,
+        writtenCommentId,
+        log,
+      });
       log(
         `::notice::Issue #${issueNumber} settled terminal during the brief write; removed the brief just written (state=${settled.state}, archived=${settled.archived}).`,
       );

@@ -3710,6 +3710,11 @@ assert_contains "- pnpm sentry:project:test (Sentry triage projection helper cha
 run_gate "scripts/sentry-triage-project-core.mjs"
 assert_contains "- pnpm sentry:project:test (Sentry triage projection helper changed)"
 assert_contains "- node scripts/sentry-triage-agent-comment.test.mjs (Sentry triage projection helper changed)"
+# Both brief emitters and the archive leg consume this module's exports (the
+# verdict parser + shared selection, and the marker/trusted-author contract), so
+# a change here must run their focused suites too (#1769 round 15).
+assert_contains "- pnpm sentry:brief:test (Sentry triage projection helper changed)"
+assert_contains "- pnpm sentry:archive:test (Sentry triage projection helper changed)"
 
 run_gate "scripts/sentry-triage-project.test.mjs"
 assert_contains "- pnpm sentry:project:test (Sentry triage projection helper changed)"
@@ -3720,6 +3725,12 @@ assert_contains "- pnpm sentry:project:test (Sentry triage projection helper cha
 run_gate "scripts/sentry-triage-brief.mjs"
 assert_contains "- pnpm sentry:brief:test (Sentry needs-human brief helper changed)"
 assert_contains "- pnpm sentry:digest:test (Sentry needs-human brief helper changed)"
+# The brief leg is a shared dependency of BOTH legs that call clearBriefComments,
+# so a brief change must run each one's focused suite (#1769 round 15): the
+# archive leg (settleQueueStub) and the projection leg (runProjectionBatch),
+# whose close guard clears a stale brief before it closes the stub.
+assert_contains "- pnpm sentry:archive:test (Sentry needs-human brief helper changed)"
+assert_contains "- pnpm sentry:project:test (Sentry needs-human brief helper changed)"
 
 run_gate "scripts/sentry-triage-brief.test.mjs"
 assert_contains "- pnpm sentry:brief:test (Sentry needs-human brief helper changed)"

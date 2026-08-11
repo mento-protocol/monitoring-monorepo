@@ -2341,9 +2341,15 @@ while IFS= read -r path; do
           add_command "pnpm sentry:brief:test" "Sentry needs-human brief helper changed"
           # Sibling emitter over the same shared selection.
           add_command "pnpm sentry:digest:test" "Sentry needs-human brief helper changed"
-          # The archive leg calls into the brief leg (settleQueueStub ->
-          # clearBriefComments), so a brief change can alter archive settlement.
+          # The brief leg is a shared dependency of the two other legs that call
+          # into it, so a brief export or clearing-semantics change must run BOTH
+          # their focused suites: the archive leg clears the brief on settlement
+          # (settleQueueStub -> clearBriefComments), and the projection leg clears
+          # a stale brief before it closes the stub (runProjectionBatch ->
+          # clearBriefComments). Without the projection suite here a brief change
+          # can break that close guard without running its consumer test.
           add_command "pnpm sentry:archive:test" "Sentry needs-human brief helper changed"
+          add_command "pnpm sentry:project:test" "Sentry needs-human brief helper changed"
           ;;
         scripts/sentry-triage-project.mjs|scripts/sentry-triage-project-core.mjs|scripts/sentry-triage-project.test.mjs|scripts/sentry-triage-text.mjs|scripts/sentry-triage-projection.mjs)
           add_command "pnpm sentry:project:test" "Sentry triage projection helper changed"
@@ -2354,6 +2360,10 @@ while IFS= read -r path; do
           # brief emitters are pure consumers of them.
           add_command "pnpm sentry:brief:test" "Sentry triage projection helper changed"
           add_command "pnpm sentry:digest:test" "Sentry triage projection helper changed"
+          # The archive leg imports the marker + trusted-author contract from this
+          # module (ARCHIVE_COMMENT_MARKER, isTrustedComment), so a change here can
+          # break its audit-comment idempotency and brief-clear (#1769 round 15).
+          add_command "pnpm sentry:archive:test" "Sentry triage projection helper changed"
           ;;
         scripts/sentry-triage-agent-comment.mjs|scripts/sentry-triage-agent-comment.test.mjs)
           add_command "node scripts/sentry-triage-agent-comment.test.mjs" "Sentry triage agent comment wrapper changed"
