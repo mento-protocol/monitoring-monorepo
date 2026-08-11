@@ -1103,6 +1103,19 @@ These checks are offline unless noted. CI runs all of them in the required
 that broke; `scripts/check-sentry-suites-in-ci.test.mjs` fails if a new suite
 lands without a step there.
 
+An unconditional `sentry-suites` job (no `if:`, in `ci.needs` and absent from
+`alls-green` `allowed-skips`, so it can never be skipped) also runs the suites
+and proves they ran (ADR 0062). It executes `node scripts/sentry-suite-gate.mjs`,
+which reconciles the `scripts/sentry-*.test.mjs` files against
+`scripts/sentry-suite-manifest.json` by exact set equality (in both directions)
+and, for each non-exempt suite, asserts child exit 0, parsed `fail == 0`, parsed
+`pass >= floor`, and `pass ==` the per-case lines it emitted — so a suite that
+exits 0 without asserting fails the gate. The gate is dependency-free, runs with
+no `pnpm install` before it, and its own suite
+(`scripts/sentry-suite-gate.test.mjs`) is enumerated and run like any other. The
+per-suite steps in `Lint + test root scripts` and the `check-sentry-suites-in-ci`
+checker stay in place; both jobs run the suites for now.
+
 That check parses ci.yml rather than searching it, so a step only counts when
 it runs the suite as its whole command. Adding an `if:`, a
 `continue-on-error:`, a `working-directory:`, an `env:`, a `|| true`, or an
@@ -1128,6 +1141,10 @@ node --test scripts/sentry-mcp-broker.test.mjs
 node scripts/sentry-triage-requeue.test.mjs
 node scripts/sentry-triage-agent-comment.test.mjs
 node scripts/check-sentry-suites-in-ci.test.mjs
+# The self-run gate's own suite (a scripts/sentry-*.test.mjs), then the gate
+# itself, which runs every suite above and asserts each one actually ran:
+node scripts/sentry-suite-gate.test.mjs
+node scripts/sentry-suite-gate.mjs
 ```
 
 The `pnpm sentry:*:test` aliases still run these suites for interactive use and

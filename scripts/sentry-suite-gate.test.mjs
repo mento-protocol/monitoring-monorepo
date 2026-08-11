@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * The sentry-suite gate's own suite (issue #1779, ADR 0059).
+ * The sentry-suite gate's own suite (issue #1779, ADR 0062).
  *
  * Named `sentry-*.test.mjs` on purpose: `findSentrySuites` enumerates it and the
  * real gate runs it, so neutering the runner now also requires faking THIS

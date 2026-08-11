@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Self-run Sentry-suite gate (issue #1779, ADR 0059).
+ * Self-run Sentry-suite gate (issue #1779, ADR 0062).
  *
  * The #1754 checker proves CI *would* run the Sentry suites. It cannot prove
  * they *did* anything: a suite that exits 0 for an environment reason, or one
