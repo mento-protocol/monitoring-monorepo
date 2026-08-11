@@ -7,13 +7,15 @@
  * enforces on it. The split is behaviour-neutral: no case was renamed or
  * rewritten, only moved.
  *
- * This half owns the claims about a gate RUN being trustworthy as a whole,
- * rather than about parsing one suite's output:
+ * This half owns what the gate DERIVES and watches; the isolation sibling
+ * (sentry-suite-gate-isolation.test.mjs, split off when this file hit the cap)
+ * owns whether one suite can reach another's inputs:
  *
- *   - one child cannot forge another's result (digest verification, before each
- *     spawn and again after the last one);
  *   - the watch set EQUALS the inputs the gate consults to decide, derived from
- *     the manifest rather than hand-listed;
+ *     the manifest rather than hand-listed, following V8's imports and the
+ *     declared file and directory reads;
+ *   - a declaration that is absent, phantom, escaping, or not a directory is
+ *     rejected, and an undeclared read fails the suite that needed it;
  *   - a suite created mid-run is caught by re-enumeration;
  *   - an exemption's route evidence cannot be rewritten by an earlier suite;
  *   - fixture gates never write their tables into the real step summary.
@@ -26,7 +28,7 @@
  */
 
 import { join } from "node:path";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -54,144 +56,6 @@ const { test, assert, assertEqual, summarize } = makeHarness();
 const REAL_ROOT = fileURLToPath(new URL("..", import.meta.url));
 
 // ── (a2) suite isolation: one child must not be able to reach another's inputs ─
-
-await test("an earlier suite rewriting a later one changes nothing — the victim's real result stands", async () => {
-  const root = makeRoot();
-  try {
-    // Codex 3759964336, then 3761572724. The first round caught this rewrite
-    // with digests; the second showed digests could not catch the transient
-    // form of it. Each suite now runs from its own snapshot, taken before any
-    // child starts, so the attacker's `writeFileSync` lands in ITS OWN copy of
-    // the victim — a file nothing else reads. The victim, a genuinely failing
-    // suite, runs from a pristine copy and reports its real failure.
-    writeSuite(
-      root,
-      "sentry-aaa-attacker.test.mjs",
-      [
-        'import { writeFileSync } from "node:fs";',
-        'import { fileURLToPath } from "node:url";',
-        'writeFileSync(fileURLToPath(new URL("./sentry-zzz-victim.test.mjs", import.meta.url)),',
-        '  \'process.stdout.write("ok forged\\\\n");process.stdout.write("1 passed\\\\n");\');',
-        'process.stdout.write("ok attacker\\n");',
-        'process.stdout.write("1 passed\\n");',
-        "",
-      ].join("\n"),
-    );
-    writeSuite(
-      root,
-      "sentry-zzz-victim.test.mjs",
-      [
-        'process.stdout.write("ok one\\n");',
-        'process.stderr.write("not ok two\\n  a real regression\\n");',
-        'process.stderr.write("1 failed, 1 passed\\n");',
-        "process.exitCode = 1;",
-        "",
-      ].join("\n"),
-    );
-    writeManifest(root, {
-      "scripts/sentry-aaa-attacker.test.mjs": {
-        reporter: "count-line",
-        floor: 1,
-      },
-      "scripts/sentry-zzz-victim.test.mjs": {
-        reporter: "count-line",
-        floor: 1,
-      },
-    });
-    const { status, stdout } = runGate(root);
-    assert(status !== 0, "the victim really fails, so the gate must red");
-    assert(
-      !stdout.includes("ok forged"),
-      `the forged program must never have run: ${stdout}`,
-    );
-    assert(
-      /sentry-zzz-victim\.test\.mjs \| FAIL/.test(stdout),
-      `the victim's own failure must be the reported result: ${stdout}`,
-    );
-  } finally {
-    cleanup(root);
-  }
-});
-
-await test("a suite rewriting one that ALREADY ran changes nothing", async () => {
-  const root = makeRoot();
-  try {
-    // The ordering no per-spawn digest could see. It no longer needs seeing:
-    // the early suite finished reading a tree the late one cannot address.
-    writeSuite(
-      root,
-      "sentry-aaa-early.test.mjs",
-      [
-        'process.stdout.write("ok early\\n");',
-        'process.stdout.write("1 passed\\n");',
-        "",
-      ].join("\n"),
-    );
-    writeSuite(
-      root,
-      "sentry-zzz-late.test.mjs",
-      [
-        'import { writeFileSync } from "node:fs";',
-        'import { fileURLToPath } from "node:url";',
-        'writeFileSync(fileURLToPath(new URL("./sentry-aaa-early.test.mjs", import.meta.url)), "// tampered\\n");',
-        'process.stdout.write("ok late\\n");',
-        'process.stdout.write("1 passed\\n");',
-        "",
-      ].join("\n"),
-    );
-    writeManifest(root, {
-      "scripts/sentry-aaa-early.test.mjs": { reporter: "count-line", floor: 1 },
-      "scripts/sentry-zzz-late.test.mjs": { reporter: "count-line", floor: 1 },
-    });
-    const { status, stdout } = runGate(root);
-    assertEqual(status, 0, `both suites really passed: ${stdout}`);
-    assert(
-      !stdout.includes("TAMPERED"),
-      `nothing shared was touched: ${stdout}`,
-    );
-  } finally {
-    cleanup(root);
-  }
-});
-
-await test("red: a suite that writes to the SHARED CHECKOUT is caught by the sweep", async () => {
-  const root = makeRoot();
-  try {
-    // The residual the snapshots do not remove. A child cannot address another
-    // child's snapshot, but in CI it does know the checkout — `GITHUB_WORKSPACE`
-    // is in its environment — so it can still write there. Nothing this run
-    // decides is read from the checkout after the snapshots are taken, so it
-    // cannot forge a result; it would poison the NEXT run and it is not
-    // something any suite should do, so the sweep reds and names the file.
-    writeSuite(
-      root,
-      "sentry-writer.test.mjs",
-      [
-        'import { writeFileSync } from "node:fs";',
-        // The absolute path stands in for a suite reading GITHUB_WORKSPACE.
-        `writeFileSync(${JSON.stringify(join(root, "scripts", "sentry-suite-manifest.json"))}, JSON.stringify({ suites: {} }));`,
-        'process.stdout.write("ok w\\n");',
-        'process.stdout.write("1 passed\\n");',
-        "",
-      ].join("\n"),
-    );
-    writeManifest(root, {
-      "scripts/sentry-writer.test.mjs": { reporter: "count-line", floor: 1 },
-    });
-    const { status, stdout } = runGate(root);
-    assert(status !== 0, "writing to the checkout must red the gate");
-    assert(
-      stdout.includes("sentry-suite-manifest.json was REWRITTEN"),
-      `the sweep should name the file: ${stdout}`,
-    );
-    assert(
-      stdout.includes("wrote to the shared checkout"),
-      `and say what it means: ${stdout}`,
-    );
-  } finally {
-    cleanup(root);
-  }
-});
 
 await test("digestDrift reports created, deleted, and rewritten files", async () => {
   const root = makeRoot();
@@ -608,6 +472,64 @@ await test("red: a suite reading a repository file it did not declare fails on t
       declared.status,
       0,
       `declaring the read should make it pass: ${declared.stdout}${declared.stderr}`,
+    );
+  } finally {
+    cleanup(root);
+  }
+});
+
+await test("a declared directory is copied whole, so an enumerating suite sees the checkout", async () => {
+  // Codex 3761902959, and the limit of the round-11 argument. Sparseness is
+  // self-enforcing for a suite that OPENS a file — absent, so it dies. A suite
+  // that ENUMERATES a sparsely populated directory does not die; it passes
+  // having checked almost nothing. `sentry-triage-requeue.test.mjs` walks every
+  // non-test `scripts/*.mjs` to prove one function has a single call site, and
+  // saw 25 of 92 — so a forbidden call in any of the other 67 was invisible.
+  const manifest = JSON.parse(
+    readFileSync(join(REAL_ROOT, "scripts/sentry-suite-manifest.json"), "utf8"),
+  );
+  const isTarget = (f) => f.endsWith(".mjs") && !f.endsWith(".test.mjs");
+  const onDisk = readdirSync(join(REAL_ROOT, "scripts")).filter(isTarget);
+  for (const suite of [
+    "scripts/sentry-triage-requeue.test.mjs",
+    "scripts/sentry-triage-brief.test.mjs",
+  ]) {
+    const entry = manifest.suites[suite];
+    assert(
+      (entry.readsDirs ?? []).includes("scripts"),
+      `${suite} enumerates scripts/, so it must declare it in readsDirs`,
+    );
+    const inputs = gateInputs(manifest, REAL_ROOT);
+    const visible = inputs
+      .filter((p) => p.startsWith("scripts/") && !p.slice(8).includes("/"))
+      .map((p) => p.slice("scripts/".length))
+      .filter(isTarget);
+    assertEqual(
+      visible.length,
+      onDisk.length,
+      `${suite} must see every non-test scripts/*.mjs, not a subset`,
+    );
+  }
+});
+
+await test("red: a readsDirs entry that is not a directory is rejected", async () => {
+  const root = makeRoot();
+  try {
+    // Declaring a FILE here would copy it without its siblings and leave the
+    // enumeration sparse — the very thing the field exists to remove.
+    writeSuite(root, "sentry-a.test.mjs", countLineSuite(1));
+    writeManifest(root, {
+      "scripts/sentry-a.test.mjs": {
+        reporter: "count-line",
+        floor: 1,
+        readsDirs: ["package.json"],
+      },
+    });
+    const { status, stderr } = runGate(root);
+    assert(status !== 0, "a non-directory readsDirs entry must red the gate");
+    assert(
+      stderr.includes("not a directory"),
+      `should say what readsDirs means: ${stderr}`,
     );
   } finally {
     cleanup(root);

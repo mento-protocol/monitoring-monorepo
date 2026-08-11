@@ -101,8 +101,9 @@ the suites needs no install. It:
 The committed manifest is the closed-world expected set. Per suite it carries
 `path`, `reporter` (`count-line` | `node-test` | `exit-only`), optional
 `nodeArgs` (the broker's `--test`), a pass-count `floor`, optional `reads` (the
-repository files it opens rather than imports), and — for the one non-gate suite
-— an `exempt` route with its importer. Floors use `>=` semantics.
+repository files it opens rather than imports) and `readsDirs` (the directories
+it enumerates, copied whole), and — for the one non-gate suite — an `exempt`
+route with its importer. Floors use `>=` semantics.
 
 `scripts/sentry-suite-gate.test.mjs` is the runner's own suite, named `sentry-*`
 so `findSentrySuites` enumerates it and the gate runs it — neutering the runner
@@ -133,6 +134,35 @@ three times the gate's entire runtime. Copying the ~65-file derived set measured
 a suite that opens a repository file it did not declare finds it absent and
 fails, so the list cannot silently rot. Review reported one such read; running
 every suite from a sparse snapshot found six, across three suites.
+
+**Sparseness is NOT self-enforcing for a suite that enumerates a directory, and
+that asymmetry is the sharpest edge here.** A missing file makes a suite die; a
+sparsely populated directory makes it pass, having checked almost nothing.
+`sentry-triage-requeue.test.mjs` walks every non-test `scripts/*.mjs` to prove
+one function has a single call site, and saw 25 of 92 — so a forbidden call in
+any of the other 67 was invisible to the gate while failing in the checkout. A
+mechanism that makes a suite quietly weaker is worse than one that breaks it
+loudly, and this one was introduced by the fix for exactly that class. Hence
+`readsDirs`, which copies a directory and every entry under it, and a floor
+inside each enumerating suite so a partial view fails rather than passes. The two
+enumerating suites were found by grepping the closure for the enumeration APIs
+and then PROVING each one by planting a module it had to flag.
+
+**Snapshot addressing is a separate problem from snapshot isolation.** The first
+implementation put every snapshot under one base with a name derived from the
+suite's manifest path, and handed each child its own snapshot as `cwd` — so
+`dirname(process.cwd())` plus the victim's sanitised name reached the victim's
+inputs, and a victim that throws against committed code reported `ok` at exit 0.
+Three layers now, in order of how much they are worth: the snapshot of the child
+about to run is verified against its own baseline immediately before the spawn,
+which is what actually closes it (a poisoner has by definition already exited, so
+its write is on disk and cannot be taken back); names are random, so they cannot
+be derived; and the base is mode `0111`, traversable but not listable, so they
+cannot be enumerated either. The last two are defence in depth — a determined
+child could still be handed a path — and the pre-spawn check is the guarantee.
+Note this is not the model deleted above: that one hashed the shared checkout
+after every child had finished, where a rewrite could be undone before the sweep
+looked.
 
 **The residual is a suite writing to the shared checkout.** A child cannot
 address another child's snapshot, but in CI it knows the checkout —
@@ -323,5 +353,6 @@ without a manifest edit fails set equality; a suite under its floor reds; and
 - Dependency-freedom: the 34 modules the gate loads or spawns — itself, its imports, every non-exempt suite and their transitive first-party imports — import only `node:` builtins and repo-local siblings, checked by walking `staticImports` over that closure. (The exempt importer's own closure does reach `js-yaml`; the gate digests those files, it never loads them.) The checker's `js-yaml` import is why the checker stays a step 4-5 job.
 - The gate green against the real suites: `node scripts/sentry-suite-gate.mjs` reconciles all thirteen `scripts/sentry-*.test.mjs`, asserts the twelve non-exempt suites from their output, and re-verifies the provider-contract exemption route.
 - Each negative path reds the gate: `node scripts/sentry-suite-gate.test.mjs` and `node scripts/sentry-suite-gate-integrity.test.mjs`.
-- Snapshot cost, measured on this repository: full tracked tree 1.48s each / 18.8s for thirteen; derived input set 20ms each / 241ms for thirteen. The gate's own overhead went 0.21s → 0.60s, its total 5.3s → 5.7s.
+- Snapshot cost, measured on this repository: full tracked tree 1.48s each / 18.8s for thirteen; derived input set 20ms each / 241ms for thirteen. The gate's own overhead went 0.21s → 0.60s, its total 5.3s → 5.7s. Adding `readsDirs` for the two enumerating suites, per-snapshot digests and the pre-spawn verification took it to 7.6s.
 - Declared reads are complete because incompleteness fails: running every suite from a sparse snapshot converged on six reads across three suites, one of which review had found by inspection.
+- The enumerating suites really enumerate: planting `scripts/zz-round12-decoy.mjs` with a forbidden `buildRegressedComment(` call reds `sentry-triage-requeue.test.mjs` (`expected [], got ["zz-round12-decoy.mjs"]`), and the same file with a `BRIEF_COMMENT_MARKER` reference reds `sentry-triage-brief.test.mjs`. Both are clean again once it is removed.

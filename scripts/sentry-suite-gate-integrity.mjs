@@ -16,7 +16,14 @@
  */
 
 import { createHash } from "node:crypto";
-import { copyFileSync, mkdirSync, readFileSync } from "node:fs";
+import {
+  copyFileSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  statSync,
+} from "node:fs";
 import { dirname, isAbsolute, join, normalize } from "node:path";
 
 import { staticImportsOf } from "./static-imports.mjs";
@@ -132,6 +139,14 @@ export function gateInputs(manifest, root) {
     // finds it absent and fails (Codex 3761572727 reported one such read; the
     // sparse snapshot found six across three suites).
     for (const read of entry?.reads ?? []) inputs.add(read);
+    // A declared directory's ENTRIES are watched individually, so a rewrite of
+    // any one of them is drift in the shared checkout exactly as a declared
+    // file's would be. The directory itself is not a digestible thing.
+    for (const dir of entry?.readsDirs ?? []) {
+      for (const file of filesUnder(join(root, dir))) {
+        inputs.add(`${dir}/${file}`);
+      }
+    }
     if (!entry?.exempt) continue;
     // Both halves of the route proof, per ADR 0062.
     inputs.add(entry.exempt.importer);
@@ -242,6 +257,60 @@ export function localImportClosure(relative, root) {
 }
 
 /**
+ * Every file under `dir`, at any depth, as paths relative to `dir`.
+ *
+ * A Dirent is an `lstat`, so a directory SYMLINK reports `isDirectory() ===
+ * false` and would be listed as a file and copied as one (EISDIR). Resolve
+ * links with `statSync` and walk them, exactly as `findSentrySuites` does — a
+ * suite reachable only through a link is one the enumeration must see. Copying
+ * by content rather than relinking also means a finished snapshot contains no
+ * symlink at all, so no path inside one can address anything outside it.
+ *
+ * @param {string} dir absolute
+ * @param {string} [prefix]
+ * @param {Set<string>} [ancestors] cycle guard over resolved paths
+ * @returns {string[]}
+ */
+export function filesUnder(dir, prefix = "", ancestors = new Set()) {
+  const found = [];
+  const here = join(dir, prefix);
+  let real;
+  try {
+    real = realpathSync(here);
+  } catch {
+    return found;
+  }
+  if (ancestors.has(real)) {
+    throw new IntegrityError(
+      `symlink cycle under a declared directory at ${prefix || dir} — resolve it; ` +
+        "a snapshot cannot copy a cycle",
+    );
+  }
+  const nextAncestors = new Set(ancestors).add(real);
+  let entries;
+  try {
+    entries = readdirSync(here, { withFileTypes: true });
+  } catch {
+    return found;
+  }
+  for (const entry of entries) {
+    const relative = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
+    let isDirectory = entry.isDirectory();
+    if (entry.isSymbolicLink()) {
+      try {
+        isDirectory = statSync(join(dir, relative)).isDirectory();
+      } catch {
+        // A broken link has no content to copy and nothing to enumerate.
+        continue;
+      }
+    }
+    if (isDirectory) found.push(...filesUnder(dir, relative, nextAncestors));
+    else found.push(relative);
+  }
+  return found;
+}
+
+/**
  * Copy `files` out of `root` into a fresh directory: one suite's immutable view
  * of the committed tree.
  *
@@ -267,7 +336,7 @@ export function localImportClosure(relative, root) {
  * @param {string} dest existing directory to fill
  * @returns {string} dest
  */
-export function snapshotInputs(files, root, dest) {
+export function snapshotInputs(files, root, dest, dirs = []) {
   for (const relative of files) {
     const target = join(dest, relative);
     mkdirSync(dirname(target), { recursive: true });
@@ -280,7 +349,86 @@ export function snapshotInputs(files, root, dest) {
       if (err.code !== "ENOENT") throw err;
     }
   }
+  // Declared DIRECTORIES are copied whole, entries and all.
+  //
+  // Sparseness is self-enforcing for a suite that OPENS a named file — the file
+  // is absent and the suite dies. It is the opposite for a suite that
+  // ENUMERATES a directory: a sparsely populated directory does not throw, it
+  // yields fewer entries, and a structural check over them passes having
+  // checked almost nothing. `sentry-triage-requeue.test.mjs` walks every
+  // non-test `scripts/*.mjs` to prove one function has a single call site; the
+  // derived set carried 25 of 92, so a forbidden call in any of the other 67
+  // was invisible (Codex 3761902959). Silent weakening is worse than loud
+  // breakage, and it is the failure mode this whole gate exists to prevent.
+  for (const relative of dirs) {
+    for (const file of filesUnder(join(root, relative))) {
+      const target = join(dest, relative, file);
+      mkdirSync(dirname(target), { recursive: true });
+      try {
+        copyFileSync(join(root, relative, file), target);
+      } catch (err) {
+        if (err.code !== "ENOENT") throw err;
+      }
+    }
+  }
   return dest;
+}
+
+/**
+ * Digest every file in a snapshot, so the child about to read it can be shown
+ * the bytes are the ones copied.
+ *
+ * @param {string} dest snapshot root
+ * @param {string} [prefix]
+ * @returns {Map<string, string | null>}
+ */
+export function snapshotDigest(dest, prefix = "") {
+  const digests = new Map();
+  for (const entry of readdirSync(join(dest, prefix), {
+    withFileTypes: true,
+  })) {
+    const relative = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
+    if (entry.isDirectory()) {
+      for (const [k, v] of snapshotDigest(dest, relative)) digests.set(k, v);
+    } else {
+      digests.set(relative, digestFile(join(dest, relative)));
+    }
+  }
+  return digests;
+}
+
+/**
+ * What changed in a snapshot since it was taken.
+ *
+ * This is the check that actually closes sibling tampering, and it is NOT the
+ * model deleted in the previous round. That one hashed the shared checkout
+ * after every child had finished, which a rewrite could undo before the sweep
+ * looked. This hashes the specific inputs of the ONE child about to run, at the
+ * moment it runs — and a poisoner has by definition already exited, so its
+ * write is on disk and cannot be taken back.
+ *
+ * @param {Map<string, string | null>} baseline
+ * @param {string} dest
+ * @returns {string[]}
+ */
+export function snapshotDrift(baseline, dest) {
+  const now = snapshotDigest(dest);
+  const drift = [];
+  for (const [relative, before] of baseline) {
+    const after = now.get(relative) ?? null;
+    if (before === after) continue;
+    drift.push(
+      after === null
+        ? `${relative} was DELETED from this suite's snapshot`
+        : `${relative} was REWRITTEN in this suite's snapshot`,
+    );
+  }
+  for (const relative of now.keys()) {
+    if (!baseline.has(relative)) {
+      drift.push(`${relative} was ADDED to this suite's snapshot`);
+    }
+  }
+  return drift;
 }
 
 /**

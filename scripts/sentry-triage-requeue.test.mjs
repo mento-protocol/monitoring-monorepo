@@ -177,10 +177,12 @@ await test("buildRegressedComment has exactly one call site: the chokepoint", ()
   // caller is what makes "declare a cause" the only way to get one.
   const scriptsDir = dirname(fileURLToPath(import.meta.url));
   const offenders = [];
+  let scanned = 0;
   for (const file of readdirSync(scriptsDir)) {
     if (!file.endsWith(".mjs")) continue;
     if (file.endsWith(".test.mjs")) continue; // tests pin the text, by design
     if (file === "sentry-triage-requeue.mjs") continue;
+    scanned += 1;
     const src = readFileSync(join(scriptsDir, file), "utf8");
     // A bare re-export is not a call site.
     const withoutExports = src.replace(
@@ -191,6 +193,15 @@ await test("buildRegressedComment has exactly one call site: the chokepoint", ()
       offenders.push(file);
     }
   }
+  // An enumeration that finds almost nothing PASSES, silently, having checked
+  // almost nothing — the failure mode a sparse view creates (Codex 3761902959:
+  // 25 of 92 modules were visible inside the gate's per-suite snapshot). A
+  // floor makes that loud instead. It is deliberately well under the real count
+  // so ordinary additions and deletions never touch it.
+  assert(
+    scanned >= 60,
+    `only ${scanned} non-test scripts/*.mjs were scanned — this check is running against a partial view of scripts/, so its result means nothing`,
+  );
   assertDeepEqual(offenders, []);
 });
 

@@ -25,7 +25,11 @@
     },
     "scripts/sentry-suite-gate-integrity.test.mjs": {
       "reporter": "count-line",
-      "floor": 21
+      "floor": 20
+    },
+    "scripts/sentry-suite-gate-isolation.test.mjs": {
+      "reporter": "count-line",
+      "floor": 6
     },
     "scripts/sentry-suite-gate.test.mjs": {
       "reporter": "count-line",
@@ -48,7 +52,8 @@
         ".github/workflows/sentry-triage-agent.yml",
         "docs/notes/sentry-triage-pipeline.md",
         "scripts/agent-quality-gate.sh"
-      ]
+      ],
+      "readsDirs": ["scripts"]
     },
     "scripts/sentry-triage-digest.test.mjs": {
       "reporter": "count-line",
@@ -64,7 +69,8 @@
     },
     "scripts/sentry-triage-requeue.test.mjs": {
       "reporter": "count-line",
-      "floor": 31
+      "floor": 31,
+      "readsDirs": ["scripts"]
     }
   }
 }
