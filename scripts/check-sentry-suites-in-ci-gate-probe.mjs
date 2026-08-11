@@ -17,6 +17,13 @@
  * bash where the function ends (`bashFunctionSource`), and every later step is
  * written to red the test rather than return a short or invented map.
  *
+ * Re-running the lifted function is the other half. It runs with `$PATH` set to
+ * an empty directory, so the only things it can reach are shell builtins and the
+ * stubs this module supplies, and a DEBUG trap names anything else on stderr
+ * before it runs. That holds on bash 3.2, which the gate supports and which has
+ * no `command_not_found_handle`, and it catches an INSTALLED binary, which that
+ * handler never sees.
+ *
  * Split out of check-sentry-suites-in-ci-probes.mjs to keep both under the
  * repo's 1,000-line cap; that module re-exports this one, so the tests keep
  * importing from a single facade.
@@ -24,7 +31,13 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -51,8 +64,61 @@ export const GATE_ROOT_PACKAGE_JSON_CLASSES = new Set([
   "package-scripts",
 ]);
 
-/** Printed by the probe shell when it runs a command that does not exist. */
+/** Printed by the probe shell when it is about to run a command it did not provide. */
 const MISSING_COMMAND_MARKER = "__probe_missing_command__";
+
+/**
+ * Bash sees `$PATH` set to a directory the probe creates and leaves empty, so no
+ * external command resolves and the classifier can only reach what the probe
+ * explicitly provides: shell builtins, keywords, and the stubs below. Two things
+ * follow. The probe cannot execute a binary while re-running gate code. And
+ * `command -v` becomes the test for "did the probe provide this?", which is what
+ * `PROBE_COMMAND_GUARD` asks on every command.
+ *
+ * @param {string} dir
+ */
+const restrictPath = (dir) => {
+  assert.doesNotMatch(
+    dir,
+    /'/,
+    `the probe's empty PATH directory (${dir}) contains a quote and cannot be embedded in the probe shell`,
+  );
+  return `PATH='${dir}'\nexport PATH`;
+};
+
+/**
+ * A DEBUG trap that reports any command the probe did not provide, BEFORE it
+ * runs.
+ *
+ * This is the layer that works everywhere. `command_not_found_handle` needs bash
+ * 4.0, and the gate supports bash 3.2 (docs/notes/agent-quality-gate-mechanics.md);
+ * bash's own `command not found` diagnostic is written by the failing command, so
+ * a `2> /dev/null` on it suppresses the message on every bash version. A DEBUG
+ * trap fires before the command's redirections are applied, so its marker reaches
+ * the probe's stderr either way — and it fires for an INSTALLED binary too, not
+ * only a missing one, which `command_not_found_handle` never sees.
+ *
+ * A leading `VAR=value` is an assignment, not a command word: `saw_change=true`
+ * is skipped entirely, and `IFS= read -r change` is checked as `read`.
+ */
+const PROBE_COMMAND_GUARD = `__probe_guard() {
+  local __rest="$1"
+  local __word
+  while :; do
+    __word="\${__rest%%[[:space:]]*}"
+    case "$__word" in
+      "") return 0 ;;
+      *=*) ;;
+      *) break ;;
+    esac
+    case "$__rest" in
+      *[[:space:]]*) __rest="\${__rest#*[[:space:]]}" ;;
+      *) return 0 ;;
+    esac
+  done
+  command -v -- "$__word" > /dev/null 2>&1 && return 0
+  printf '%s %s\\n' '${MISSING_COMMAND_MARKER}' "$__word" >&2
+}`;
 
 /**
  * How far past a definition the end-of-function scan will look. The gate's
@@ -119,6 +185,10 @@ name="$1"
 tail_file="$2"
 cand_file="$3"
 max="$4"
+# Only builtins are used below, and no candidate is supposed to execute at all;
+# an empty PATH keeps that true rather than merely intended.
+PATH="$5"
+export PATH
 
 body=""
 n=0
@@ -156,9 +226,11 @@ exit 4
  * @param {string} script the whole shell script
  * @param {string} name the function to extract
  * @param {string} label the script's path, for assertion messages
+ * @param {string} [bash] the interpreter to ask; overridable so a test can prove
+ *   this works on every bash installed, not only the first one on PATH
  * @returns {string}
  */
-export function bashFunctionSource(script, name, label) {
+export function bashFunctionSource(script, name, label, bash = "bash") {
   assert.match(
     name,
     /^[A-Za-z_][A-Za-z0-9_]*$/,
@@ -185,10 +257,20 @@ export function bashFunctionSource(script, name, label) {
   try {
     const tailPath = join(dir, "tail.sh");
     writeFileSync(tailPath, tail);
+    const empty = join(dir, "empty");
+    mkdirSync(empty);
     const max = Math.min(tailLines.length, MAX_FUNCTION_LINES);
     const scan = spawnSync(
-      "bash",
-      ["-s", "--", name, tailPath, join(dir, "candidate.sh"), String(max)],
+      bash,
+      [
+        "-s",
+        "--",
+        name,
+        tailPath,
+        join(dir, "candidate.sh"),
+        String(max),
+        empty,
+      ],
       { input: FUNCTION_END_SCAN, encoding: "utf8" },
     );
     assert.equal(
@@ -203,7 +285,7 @@ export function bashFunctionSource(script, name, label) {
     );
 
     const text = `${tailLines.slice(0, endLine).join("\n")}\n`;
-    const parse = spawnSync("bash", ["-n"], { input: text, encoding: "utf8" });
+    const parse = spawnSync(bash, ["-n"], { input: text, encoding: "utf8" });
     assert.equal(
       parse.status,
       0,
@@ -227,24 +309,25 @@ export function bashFunctionSource(script, name, label) {
  * an arm whose body changed all show up as a different classification.
  *
  * Every step is fail-closed. The function body comes from `bashFunctionSource`,
- * so a wrong span is a thrown assertion rather than a plausible verdict. A
- * command the probe does not provide trips `command_not_found_handle`, whose
- * marker lands on BOTH streams — stdout so it becomes the verdict the shape
- * check rejects, stderr so it is still visible when a `$(…)` swallows the
- * subshell's exit status. And the output must be exactly one line per requested
- * path, each with a known class: a probe that classified nothing, classified
- * something twice, or invented a path now reds the test instead of returning a
- * short map whose missing keys read as `undefined`.
+ * so a wrong span is a thrown assertion rather than a plausible verdict. The
+ * classifier then runs with an empty `$PATH` under a DEBUG-trap guard, so a
+ * command the probe did not provide is named on stderr before it runs — an
+ * installed binary as much as a missing one, and on bash 3.2 as much as 5.x.
+ * And the output must be exactly one line per requested path, each with a known
+ * class: a probe that classified nothing, classified something twice, or
+ * invented a path now reds the test instead of returning a short map whose
+ * missing keys read as `undefined`.
  *
  * @param {string[]} paths distinct, free of tabs and newlines — the wire format
  *   is tab-separated, so a path carrying either is rejected, not misparsed
- * @param {{ script?: string, label?: string }} [options] override the script to
- *   read, so the regression tests can drive this whole path with a fixture
+ * @param {{ script?: string, label?: string, bash?: string }} [options] override
+ *   the script to read, so the regression tests can drive this whole path with a
+ *   fixture, and the interpreter, so they can drive it with every installed bash
  * @returns {Map<string, string>}
  */
 export function gateClassifications(
   paths,
-  { script = GATE, label = GATE_PATH } = {},
+  { script = GATE, label = GATE_PATH, bash = "bash" } = {},
 ) {
   assert.ok(
     Array.isArray(paths) && paths.length > 0,
@@ -269,7 +352,7 @@ export function gateClassifications(
     "gateClassifications was handed a duplicate path; the verdict map would collapse them",
   );
 
-  const fnSource = bashFunctionSource(script, GATE_CLASSIFIER, label);
+  const fnSource = bashFunctionSource(script, GATE_CLASSIFIER, label, bash);
 
   // A helper the body calls but the probe does not define runs as a missing
   // command inside `$(…)`, where the non-zero exit dies with the subshell. The
@@ -295,14 +378,18 @@ export function gateClassifications(
       "stub the new ones in GATE_PROBE_STUBS or the probe runs them as missing commands and reports a partial verdict",
   );
 
-  const program = `
+  const dir = mkdtempSync(join(tmpdir(), "gate-classify-"));
+  let run;
+  try {
+    const empty = join(dir, "empty");
+    mkdirSync(empty);
+    const program = `
 set -uo pipefail
-# \`command_not_found_handle\` is the run-time half of the missing-command net,
-# and bash only honours it from 4.0. Refuse to report verdicts without it.
-if ((BASH_VERSINFO[0] < 4)); then
-  printf '%s bash-%s-has-no-command_not_found_handle\\n' '${MISSING_COMMAND_MARKER}' "\${BASH_VERSINFO[0]}"
-  exit 96
-fi
+${restrictPath(empty)}
+${PROBE_COMMAND_GUARD}
+# From bash 4.0 this fires for a command that resolved nowhere, naming it and
+# exiting non-zero. It is a second reading of what the DEBUG trap already
+# reports, and defining it on bash 3.2 is inert rather than an error.
 command_not_found_handle() {
   printf '%s %s\\n' '${MISSING_COMMAND_MARKER}' "$1"
   printf '%s %s\\n' '${MISSING_COMMAND_MARKER}' "$1" >&2
@@ -311,28 +398,43 @@ command_not_found_handle() {
 ${fnSource}
 ${[...GATE_PROBE_STUBS.values()].join("\n")}
 declare -F ${GATE_CLASSIFIER} > /dev/null || { printf '%s\\n' '${MISSING_COMMAND_MARKER} the-extracted-source-defined-no-${GATE_CLASSIFIER}'; exit 3; }
+# \`set -T\` carries the trap into the classifier, its \`$(…)\` subshells and the
+# process substitution feeding its loop — every place a stray command could run.
+set -T
+trap '__probe_guard "$BASH_COMMAND"' DEBUG
 for __probe_path in "$@"; do
   printf '%s\\t%s\\n' "$__probe_path" "$(${GATE_CLASSIFIER})"
 done
 `;
-  const run = spawnSync("bash", ["-s", "--", ...paths], {
-    input: program,
-    encoding: "utf8",
-  });
-  const streams = `${run.stdout ?? ""}${run.stderr ?? ""}`.trim();
+    run = spawnSync(bash, ["-s", "--", ...paths], {
+      input: program,
+      encoding: "utf8",
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
   assert.equal(
     run.error,
     undefined,
     `the probe shell did not run: ${run.error}`,
   );
+  // The probe shell has nothing legitimate to say on stderr. Asserting it is
+  // EMPTY rather than scanning it for a phrase catches the guard's marker, the
+  // `command not found` bash writes itself, an unset variable under `set -u`,
+  // and any diagnostic in a locale this check has never seen.
+  assert.equal(
+    run.stderr,
+    "",
+    `\`${GATE_CLASSIFIER}\` from ${label} wrote to stderr, so its verdicts cannot be trusted: ${run.stderr.trim()}`,
+  );
   assert.ok(
-    !streams.includes(MISSING_COMMAND_MARKER),
-    `\`${GATE_CLASSIFIER}\` from ${label} ran a command the probe does not provide, so its verdicts are partial: ${streams}`,
+    !run.stdout.includes(MISSING_COMMAND_MARKER),
+    `\`${GATE_CLASSIFIER}\` from ${label} ran a command the probe does not provide, so its verdicts are partial: ${run.stdout.trim()}`,
   );
   assert.equal(
     run.status,
     0,
-    `the probe shell running \`${GATE_CLASSIFIER}\` from ${label} exited ${run.status}: ${streams}`,
+    `the probe shell running \`${GATE_CLASSIFIER}\` from ${label} exited ${run.status}: ${run.stdout.trim()}`,
   );
 
   const emitted = run.stdout.split("\n");

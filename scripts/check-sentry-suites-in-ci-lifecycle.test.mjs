@@ -29,6 +29,7 @@
  */
 
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import {
   mkdirSync,
   mkdtempSync,
@@ -250,7 +251,9 @@ test("the gate-function extractor ends the function where bash ends it", () => {
   // TRUNCATION. A heredoc whose content has `}` at column 0 ends the old span
   // inside the heredoc — a prefix of the function.
   const heredoc = gateFixture({
-    inner: `  cat > /dev/null <<'NOTE'
+    // `:` rather than `cat`: the probe runs the classifier with an empty PATH,
+    // so a heredoc has to be consumed by a builtin.
+    inner: `  : <<'NOTE'
 Reviewers keep proposing this shape. It is wrong:
 }
 NOTE`,
@@ -315,7 +318,7 @@ test("the gate probe classifies a gate the old terminator could not read", () =>
     [
       "heredoc",
       gateFixture({
-        inner: `  cat > /dev/null <<'NOTE'
+        inner: `  : <<'NOTE'
 }
 NOTE`,
       }),
@@ -336,6 +339,71 @@ NOTE`,
         [UNTRUSTED_PATH, "package-scripts"],
       ],
       `the probe misread the ${label} gate`,
+    );
+  }
+});
+
+/**
+ * Every distinct bash on this machine, by resolved path. macOS ships 3.2 at
+ * /bin/bash and contributors usually have a newer one earlier on PATH, so this
+ * finds both; a runner with one bash yields one entry and the test still runs.
+ */
+const installedBashes = () => {
+  const found = new Map();
+  for (const candidate of ["bash", "/bin/bash"]) {
+    const probe = spawnSync(
+      candidate,
+      [
+        "-c",
+        'printf "%s\\t%s.%s" "$BASH" "${BASH_VERSINFO[0]}" "${BASH_VERSINFO[1]}"',
+      ],
+      { encoding: "utf8" },
+    );
+    if (probe.error || probe.status !== 0) continue;
+    const [path, version] = probe.stdout.split("\t");
+    if (!found.has(path)) found.set(path, { candidate, version });
+  }
+  return [...found.entries()];
+};
+
+test("the gate probe runs on every bash installed, not just the newest", () => {
+  // The gate supports bash 3.2 (docs/notes/agent-quality-gate-mechanics.md) and
+  // routes edits to these scripts into itself, so a probe that needs bash 4 —
+  // by refusing to run, or by leaning on `command_not_found_handle` alone —
+  // stops a stock-macOS contributor from passing the required local gate. The
+  // probe takes the interpreter as an argument precisely so this can be checked
+  // rather than asserted in a comment.
+  const bashes = installedBashes();
+  assert.ok(
+    bashes.length >= 1,
+    "no usable bash found — this test would prove nothing",
+  );
+  for (const [path, { candidate, version }] of bashes) {
+    const verdicts = gateClassifications([TRUSTED_PATH, UNTRUSTED_PATH], {
+      script: gateFixture({}),
+      label: `bash ${version} at ${path}`,
+      bash: candidate,
+    });
+    assert.deepEqual(
+      [...verdicts],
+      [
+        [TRUSTED_PATH, "root-tooling-scripts"],
+        [UNTRUSTED_PATH, "package-scripts"],
+      ],
+      `the probe cannot classify under bash ${version} (${path})`,
+    );
+
+    // And the missing-command net has to hold there too, on the case that has
+    // no `command_not_found_handle` behind it: an installed binary.
+    assert.throws(
+      () =>
+        gateClassifications([TRUSTED_PATH], {
+          script: gateFixture({ inner: `  cat /no/such/file 2> /dev/null` }),
+          label: `bash ${version} at ${path}`,
+          bash: candidate,
+        }),
+      /__probe_missing_command__ cat/,
+      `bash ${version} (${path}) ran an installed binary without the probe noticing`,
     );
   }
 });
@@ -371,8 +439,24 @@ test("the gate probe fails closed on a body it cannot fully provide for", () => 
     "the probe ran a gate helper it does not stub",
   );
 
-  // A command that is not a gate function at all never reaches the read-time
-  // check above; `command_not_found_handle` is the layer that catches it.
+  // An INSTALLED binary is the case `command_not_found_handle` never sees, and
+  // `cat` failing on a missing file with its stderr redirected leaves no trace
+  // at all: no handler, and bash's own `command not found` is written by the
+  // failing command, so the redirection swallows it on every bash version. The
+  // probe's empty PATH plus the DEBUG-trap guard is what reports it — before the
+  // command runs, so before its redirections apply.
+  assert.throws(
+    () =>
+      gateClassifications([TRUSTED_PATH], {
+        script: gateFixture({ inner: `  cat /no/such/file 2> /dev/null` }),
+        label: "installed binary",
+      }),
+    /__probe_missing_command__ cat/,
+    "the probe ran an installed binary and reported a verdict anyway",
+  );
+
+  // A command that exists nowhere is caught by the same guard, and on bash >= 4
+  // by `command_not_found_handle` as well.
   assert.throws(
     () =>
       gateClassifications([TRUSTED_PATH], {
