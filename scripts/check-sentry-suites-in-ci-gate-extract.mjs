@@ -302,11 +302,6 @@ export function bashFunctionSource(script, name, label, bash = "bash") {
     `${label} defines \`${name}\` ${definitions.length} times — this probe cannot know which one the gate runs`,
   );
   const [definition] = definitions;
-  assert.equal(
-    definition[0],
-    definition[0].trimStart(),
-    `${label} defines \`${name}\` indented, so it is nested inside another function; this probe reads top-level definitions only`,
-  );
 
   const tail = script.slice(definition.index);
   const tailLines = tail.split("\n");
@@ -315,6 +310,33 @@ export function bashFunctionSource(script, name, label, bash = "bash") {
     const tailPath = join(dir, "tail.sh");
     writeFileSync(tailPath, tail);
     const dirs = probeDirs(dir);
+
+    // Column 0 is not the same question as top level, and the difference is not
+    // cosmetic: a definition nested inside another function is never executed
+    // by the gate, so lifting it out and re-running it reports verdicts for
+    // logic the gate does not have. Nothing in this repo's tooling prevents the
+    // layout either — there is no shell formatter, and shellcheck does not
+    // object to a nested definition.
+    //
+    // So ask bash about ENCLOSURE rather than measuring indentation. Everything
+    // before the definition's header is a complete script exactly when that
+    // header is at top level; if it sits inside a function, an `if`, or any
+    // other compound command, the text before it ends with that construct still
+    // open and cannot parse. `bash -n` answers that without executing a line of
+    // the gate, in one spawn — 13ms against the real gate.
+    const prefix = runProbeShell(bash, ["-n"], {
+      input: script.slice(0, definition.index),
+      dirs,
+      timeout: PROBE_TIMEOUT_MS,
+    });
+    assert.equal(
+      prefix.status,
+      0,
+      `${label} defines \`${name}\` inside another construct rather than at top level, so the gate never defines it ` +
+        `where it is called, and this probe would report verdicts for a function the gate does not have. bash reads ` +
+        `the text before it as incomplete: ${prefix.stderr.trim().split("\n").pop()}`,
+    );
+
     const max = Math.min(tailLines.length, MAX_FUNCTION_LINES);
     const scan = runProbeShell(
       bash,

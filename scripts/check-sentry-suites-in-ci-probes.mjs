@@ -547,6 +547,14 @@ const STATIC_PROBE_INPUTS = new Map([
     "the extractor and probe shells `gateClassifications` runs on",
   ],
   [
+    "scripts/check-sentry-suites-in-ci-gate-extract.test.mjs",
+    "the extractor's own invariants, which this check runs",
+  ],
+  [
+    "scripts/check-sentry-suites-in-ci-gate-fixtures.mjs",
+    "the fixtures both gate-probe test modules share",
+  ],
+  [
     "scripts/check-agent-quality-gate-package-scripts.sh",
     "`validatorPins` runs it to enumerate the pins it enforces",
   ],

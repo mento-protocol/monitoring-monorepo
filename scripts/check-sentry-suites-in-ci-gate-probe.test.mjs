@@ -17,11 +17,17 @@
  */
 
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import {
+  gateFixture,
+  installedBashes,
+  legacyFunctionSource,
+  TRUSTED_PATH,
+  UNTRUSTED_PATH,
+} from "./check-sentry-suites-in-ci-gate-fixtures.mjs";
 import {
   bashFunctionSource,
   GATE,
@@ -30,200 +36,6 @@ import {
   GATE_PATH,
   inputRedirections,
 } from "./check-sentry-suites-in-ci-probes.mjs";
-
-const TRUSTED_PATH = "/scripts/agent:quality-gate";
-const UNTRUSTED_PATH = "/scripts/__not_an_allowlisted_alias__";
-
-/**
- * A synthetic agent-quality-gate.sh: a `json_change_paths` the probe stubs over,
- * one classifier with the real one's shape, and slots for the variations each
- * test needs. Built from one template so the difference under test is the only
- * difference in the file.
- */
-const gateFixture = ({
-  prelude = "",
-  header = `${GATE_CLASSIFIER}() {`,
-  inner = "",
-  verdict = `  if [[ "$saw_tooling" == true ]]; then
-    echo "root-tooling-scripts"
-  else
-    echo "package-scripts"
-  fi`,
-  closer = "}",
-  trailer = 'root_package_json_class=""',
-}) => `#!/usr/bin/env bash
-set -euo pipefail
-
-json_change_paths() {
-  echo "__unknown__"
-}
-${prelude}
-${header}
-  local change
-  local saw_tooling=false
-  while IFS= read -r change; do
-    [[ -n "$change" ]] || continue
-    case "$change" in
-      ${TRUSTED_PATH}) saw_tooling=true ;;
-    esac
-  done < <(json_change_paths "package.json")
-${inner}
-${verdict}
-${closer}
-
-${trailer}
-`;
-
-/**
- * The terminator this probe used to use: the first line that is exactly `}` at
- * column 0. Kept here, in the test rather than the probe, so each fixture below
- * has to prove it actually discriminates — a fixture the old rule reads
- * correctly would pin nothing.
- */
-const legacyFunctionSource = (script) => {
-  const header = `\n${GATE_CLASSIFIER}() {\n`;
-  const start = script.indexOf(header);
-  if (start < 0) return null;
-  const rest = script.slice(start + 1);
-  const end = rest.indexOf("\n}\n");
-  return end > 0 ? rest.slice(0, end + 3) : null;
-};
-
-test("the gate-function extractor ends the function where bash ends it", () => {
-  // Control: on the shape the gate has today the old rule was right, so any
-  // difference below comes from the fixture, not from the two rules disagreeing
-  // about ordinary text.
-  const clean = gateFixture({});
-  assert.equal(
-    bashFunctionSource(clean, GATE_CLASSIFIER, "clean"),
-    legacyFunctionSource(clean),
-    "the extractor disagrees with the old terminator on a gate with nothing unusual in it",
-  );
-
-  // TRUNCATION. A heredoc whose content has `}` at column 0 ends the old span
-  // inside the heredoc — a prefix of the function.
-  const heredoc = gateFixture({
-    // `:` rather than `cat`: the probe runs the classifier with an empty PATH,
-    // so a heredoc has to be consumed by a builtin.
-    inner: `  : <<'NOTE'
-Reviewers keep proposing this shape. It is wrong:
-}
-NOTE`,
-  });
-  const heredocSource = bashFunctionSource(heredoc, GATE_CLASSIFIER, "heredoc");
-  assert.ok(
-    heredocSource.includes("\nNOTE\n"),
-    `the extractor stopped inside the heredoc: ${JSON.stringify(heredocSource)}`,
-  );
-  assert.notEqual(
-    heredocSource,
-    legacyFunctionSource(heredoc),
-    "the old terminator read the heredoc fixture correctly, so it pins nothing",
-  );
-
-  // OVER-CAPTURE. One trailing space on the closing brace and `\n}\n` skips it,
-  // locking on to the next column-0 `}` — the function plus everything between.
-  const trailing = gateFixture({
-    closer: "} ",
-    trailer: `echo "__after_the_function__"
-
-later_helper() {
-  :
-}`,
-  });
-  const trailingSource = bashFunctionSource(
-    trailing,
-    GATE_CLASSIFIER,
-    "trailing",
-  );
-  assert.ok(
-    !trailingSource.includes("__after_the_function__"),
-    `the extractor swallowed code that follows the function: ${JSON.stringify(trailingSource)}`,
-  );
-  assert.ok(
-    legacyFunctionSource(trailing).includes("__after_the_function__"),
-    "the old terminator read the trailing-space fixture correctly, so it pins nothing",
-  );
-
-  // The `function` keyword is a definition the old exact-string header missed
-  // entirely, which read as "the function is gone" rather than as a variant.
-  const keyword = gateFixture({
-    header: `function ${GATE_CLASSIFIER}() {`,
-  });
-  assert.ok(
-    bashFunctionSource(keyword, GATE_CLASSIFIER, "keyword").startsWith(
-      `function ${GATE_CLASSIFIER}() {`,
-    ),
-    "the extractor cannot read a `function`-keyword definition",
-  );
-  assert.equal(
-    legacyFunctionSource(keyword),
-    null,
-    "the old header string read the `function`-keyword fixture, so it pins nothing",
-  );
-});
-
-test("the gate probe classifies a gate the old terminator could not read", () => {
-  // The point of the two fixtures above is not that they fail loudly — it is
-  // that the probe keeps WORKING on them. Both classify correctly.
-  for (const [label, script] of [
-    [
-      "heredoc",
-      gateFixture({
-        inner: `  : <<'NOTE'
-}
-NOTE`,
-      }),
-    ],
-    [
-      "function keyword",
-      gateFixture({ header: `function ${GATE_CLASSIFIER} {` }),
-    ],
-    // A trailing comment on the header is ordinary style, and the matcher read
-    // it as neither a definition nor an error: the probe threw "defines it 0
-    // times" and stopped working on an honest classifier.
-    [
-      "commented header",
-      gateFixture({ header: `${GATE_CLASSIFIER}() { # classify the manifest` }),
-    ],
-  ]) {
-    const verdicts = gateClassifications([TRUSTED_PATH, UNTRUSTED_PATH], {
-      script,
-      label,
-    });
-    assert.deepEqual(
-      [...verdicts],
-      [
-        [TRUSTED_PATH, "root-tooling-scripts"],
-        [UNTRUSTED_PATH, "package-scripts"],
-      ],
-      `the probe misread the ${label} gate`,
-    );
-  }
-});
-
-/**
- * Every distinct bash on this machine, by resolved path. macOS ships 3.2 at
- * /bin/bash and contributors usually have a newer one earlier on PATH, so this
- * finds both; a runner with one bash yields one entry and the test still runs.
- */
-const installedBashes = () => {
-  const found = new Map();
-  for (const candidate of ["bash", "/bin/bash"]) {
-    const probe = spawnSync(
-      candidate,
-      [
-        "-c",
-        'printf "%s\\t%s.%s" "$BASH" "${BASH_VERSINFO[0]}" "${BASH_VERSINFO[1]}"',
-      ],
-      { encoding: "utf8" },
-    );
-    if (probe.error || probe.status !== 0) continue;
-    const [path, version] = probe.stdout.split("\t");
-    if (!found.has(path)) found.set(path, { candidate, version });
-  }
-  return [...found.entries()];
-};
 
 test("the gate probe runs on every bash installed, not just the newest", () => {
   // The gate supports bash 3.2 (docs/notes/agent-quality-gate-mechanics.md) and
@@ -857,63 +669,6 @@ test("a restricted-mode refusal explains itself, not just what bash said", () =>
       /move the redirection out of the classifier/,
       `bash ${version} did not say what to do about it`,
     );
-  }
-});
-
-test("the gate probe will not carry a trailer off the closing brace", () => {
-  // `}; printf owned > file` ends the function AND starts a top-level command
-  // on the same line. Slicing whole lines put that command inside the extracted
-  // source, where both the scan and the probe ran it. The span now ends at the
-  // closing brace's column, and the scan sources its candidates restricted, so
-  // the trailer neither lands in the span nor runs while the span is found.
-  const owned = join(
-    mkdtempSync(join(tmpdir(), "gate-probe-trailer-")),
-    "owned.txt",
-  );
-  try {
-    const script = gateFixture({ closer: `}; printf owned > ${owned}` });
-    const extracted = bashFunctionSource(script, GATE_CLASSIFIER, "trailer");
-    assert.ok(
-      !extracted.includes("owned"),
-      `the extracted span carried the trailer with it: ${JSON.stringify(extracted.split("\n").at(-2))}`,
-    );
-    assert.ok(
-      !existsSync(owned),
-      "finding the end of the function ran the trailer that followed it",
-    );
-
-    for (const [, { candidate, version }] of installedBashes()) {
-      assert.deepEqual(
-        [
-          ...gateClassifications([TRUSTED_PATH], {
-            script,
-            label: `trailer under bash ${version}`,
-            bash: candidate,
-          }),
-        ],
-        [[TRUSTED_PATH, "root-tooling-scripts"]],
-        `the probe misread the trailer gate under bash ${version}`,
-      );
-      assert.ok(
-        !existsSync(owned),
-        `bash ${version} ran the trailer that followed the closing brace`,
-      );
-    }
-
-    // A trailer that is not a separate command changes what the function does,
-    // so the span cannot simply drop it.
-    assert.throws(
-      () =>
-        bashFunctionSource(
-          gateFixture({ closer: `} > /dev/null` }),
-          GATE_CLASSIFIER,
-          "redirected definition",
-        ),
-      /neither a comment nor a separate command/,
-      "the extractor silently dropped a redirection attached to the definition",
-    );
-  } finally {
-    rmSync(join(owned, ".."), { recursive: true, force: true });
   }
 });
 
