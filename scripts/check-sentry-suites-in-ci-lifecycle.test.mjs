@@ -582,6 +582,53 @@ test("the gate probe refuses an executable path and a classifier that fails", ()
   }
 });
 
+test("a restricted-mode refusal explains itself, not just what bash said", () => {
+  // `cmd > /dev/null` is the everyday idiom, and restricted mode is the probe's
+  // own choice, so the person who adds one to the classifier years from now
+  // meets a message they did not cause. Bash says `restricted: cannot redirect
+  // output` and stops there, which reads as a broken probe and sends them to
+  // the wrong file. These assertions pin the explanation so it cannot rot back
+  // into the bare bash text.
+  for (const [, { candidate, version }] of installedBashes()) {
+    let message = "";
+    assert.throws(
+      () =>
+        gateClassifications([TRUSTED_PATH], {
+          script: gateFixture({ inner: `  builtin echo probing > /dev/null` }),
+          label: `redirecting classifier under bash ${version}`,
+          bash: candidate,
+        }),
+      (error) => {
+        message = error.message;
+        return true;
+      },
+    );
+
+    // The raw diagnostic stays: it is the only thing that locates the line.
+    assert.match(
+      message,
+      /restricted: cannot redirect output/,
+      `bash ${version} lost the diagnostic that locates the offending line`,
+    );
+    // Whose choice it was, why, and what to do about it.
+    assert.match(
+      message,
+      /deliberate, and it is this probe's doing/,
+      `bash ${version} left the reader to guess whether the probe is broken`,
+    );
+    assert.match(
+      message,
+      /set -r/,
+      `bash ${version} did not name the mechanism doing the refusing`,
+    );
+    assert.match(
+      message,
+      /move the redirection out of the classifier/,
+      `bash ${version} did not say what to do about it`,
+    );
+  }
+});
+
 test("the gate probe will not carry a trailer off the closing brace", () => {
   // `}; printf owned > file` ends the function AND starts a top-level command
   // on the same line. Slicing whole lines put that command inside the extracted

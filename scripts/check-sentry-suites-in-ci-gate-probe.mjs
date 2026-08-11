@@ -71,6 +71,21 @@ const MISSING_COMMAND_MARKER = "__probe_missing_command__";
 const NONZERO_EXIT_MARKER = "__probe_nonzero_exit__";
 
 /**
+ * Appended when bash refuses something because the probe restricted the shell.
+ * The bash diagnostic locates the line but not the reason, and "restricted"
+ * reads as a broken probe to whoever meets it years from now.
+ */
+const RESTRICTED_MODE_EXPLANATION =
+  `\n\nThis is deliberate, and it is this probe's doing, not a bug in the gate: the probe re-runs ` +
+  `\`${GATE_CLASSIFIER}\` under \`set -r\` (restricted mode) so that bash itself refuses a \`/\` in a ` +
+  "command name, `command -p`, `exec`, `enable -f` and any assignment to $PATH — the ways a classifier " +
+  "could otherwise reach a binary the probe never provided, and report a verdict computed by something " +
+  "this check cannot see. Restricted mode also forbids output redirection, which is what the message " +
+  "above is. The fix is to move the redirection out of the classifier: a function whose whole job is to " +
+  "print one classification should not need to redirect anything. If it genuinely must, this probe has " +
+  "to change with it — see scripts/check-sentry-suites-in-ci-gate-probe.mjs.";
+
+/**
  * Bash sees `$PATH` set to a directory the probe creates and leaves empty, so no
  * external command resolves and the classifier can only reach what the probe
  * explicitly provides: shell builtins, keywords, and the stubs below. Two things
@@ -549,7 +564,10 @@ done
   assert.equal(
     run.stderr,
     "",
-    `\`${GATE_CLASSIFIER}\` from ${label} wrote to stderr, so its verdicts cannot be trusted: ${run.stderr.trim()}`,
+    `\`${GATE_CLASSIFIER}\` from ${label} wrote to stderr, so its verdicts cannot be trusted: ${run.stderr.trim()}` +
+      // `restricted:` reads like a probe defect to whoever hits it, and they go
+      // looking in the wrong file. Say whose choice it was and what to do.
+      (run.stderr.includes("restricted:") ? RESTRICTED_MODE_EXPLANATION : ""),
   );
   assert.equal(
     run.status,
