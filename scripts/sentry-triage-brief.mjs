@@ -147,6 +147,27 @@ export function escapeGithubMarkdown(text) {
   return String(text ?? "").replace(GITHUB_MARKDOWN_ACTIVE, "\\$&");
 }
 
+// The chars that let a value break OUT of a markdown link destination `(...)`
+// or plant an adjacent `[..](..)` link next to the trusted one: the closing
+// paren ends the destination, `[`/`]`/`(` open a new link, backtick a code
+// span, and the backslash itself must come first. `<>|` and whitespace/control
+// chars are already rejected upstream by `isSafeSentryPermalink`. A URL's own
+// `.`/`-`/`/`/`:` are NOT escaped, so a legit permalink still renders as a clean
+// link while a hostile one is inert.
+const GITHUB_LINK_DESTINATION_ACTIVE = /[\\`()[\]]/g;
+
+/**
+ * Escape a URL for use as a GitHub markdown link DESTINATION. The Sentry
+ * permalink is validated (`isSafeSentryPermalink`: https `*.sentry.io`, no
+ * `<>|`/control chars) but that check is Slack-oriented and lets `)([]` through,
+ * so a value like `https://sentry.io/x)[evil](https://evil.example` would render
+ * a second active link beside the trusted control. Escaping the
+ * destination-breaking chars closes that (#1769 round 8).
+ */
+export function escapeGithubLinkDestination(url) {
+  return String(url ?? "").replace(GITHUB_LINK_DESTINATION_ACTIVE, "\\$&");
+}
+
 /** Neutralize AND escape one already-selected, already-bounded field for GitHub
  * markdown. Single-line in, single-line inert text out. */
 function renderField(text) {
@@ -190,7 +211,11 @@ export function renderBriefComment({ parsed, shortId, permalink }) {
   // Header: shape-validated / closed-enum values only, never free text.
   const headerParts = ["**Decision needed**"];
   if (isValidShortId(shortId)) headerParts.push(`\`${shortId}\``);
-  if (permalink) headerParts.push(`[View in Sentry](${permalink})`);
+  if (permalink) {
+    headerParts.push(
+      `[View in Sentry](${escapeGithubLinkDestination(permalink)})`,
+    );
+  }
   headerParts.push(`confidence: ${parsed?.confidence ?? "unknown"}`);
   lines.push(`> ${headerParts.join(" · ")}`, "");
 

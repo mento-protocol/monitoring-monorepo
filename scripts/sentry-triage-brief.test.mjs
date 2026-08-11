@@ -32,6 +32,7 @@ import {
   assertInertBlock,
   BRIEF_COMMENT_MARKER,
   clearBriefComments,
+  escapeGithubLinkDestination,
   escapeGithubMarkdown,
   findBriefComments,
   parseArgs,
@@ -304,6 +305,21 @@ await test("the new fields accept an inline list and cap at the list bound", () 
   assertEqual(capped.how_to_check.length, MAX_BRIEF_LIST_ITEMS);
 });
 
+await test("inline list items keep commas inside quotes (#1769 round 8)", () => {
+  // A comma inside a quoted item must NOT split the item, or the public brief
+  // shows the wrong answer branches (e.g. a standalone `B"` bullet).
+  const parsed = parseVerdictYaml(
+    'decision_branches: ["Yes -> config-fix: allow A, B", "No -> upstream-transient"]\n' +
+      "how_to_check: ['grep for A, B, and C', \"check head tags\"]",
+  );
+  assertEqual(parsed.decision_branches.length, 2);
+  assertEqual(parsed.decision_branches[0], "Yes -> config-fix: allow A, B");
+  assertEqual(parsed.decision_branches[1], "No -> upstream-transient");
+  assertEqual(parsed.how_to_check.length, 2);
+  assertEqual(parsed.how_to_check[0], "grep for A, B, and C");
+  assertEqual(parsed.how_to_check[1], "check head tags");
+});
+
 await test("the new fields are empty for a verdict that omits them", () => {
   const parsed = parseVerdictComment(
     verdictComment("verdict: code-fix\nconfidence: high"),
@@ -535,6 +551,43 @@ await test("the escape leaves plain prose readable and is applied per field", ()
   // The backslash itself is escaped, so a field cannot cancel the escape of the
   // character that follows it.
   assertEqual(escapeGithubMarkdown("\\[x](y)"), "\\\\\\[x\\]\\(y\\)");
+});
+
+await test("a hostile permalink cannot plant a second link in the header (#1769 round 8)", () => {
+  // `isSafeSentryPermalink` accepts this (https sentry.io host, no <>| or
+  // control chars), so it reaches the header — where a raw interpolation would
+  // close the trusted link early and render `[evil](https://evil.example)`
+  // beside it. The link-destination escape neutralizes it.
+  const hostile = "https://sentry.io/foo)[evil](https://evil.example";
+  const escaped = escapeGithubLinkDestination(hostile);
+  // The destination-breaking chars are escaped; the URL's own `.`/`/`/`:` are not.
+  assertEqual(
+    escaped,
+    "https://sentry.io/foo\\)\\[evil\\]\\(https://evil.example",
+  );
+
+  const block = renderBriefComment({
+    parsed: parseVerdictComment(verdictComment()),
+    shortId: parseShortId(TITLE),
+    permalink: hostile,
+  });
+  const header = block.split("\n").find((line) => line.startsWith(">"));
+  assert(header.includes("[View in Sentry]("), "expected the trusted link");
+  // Exactly ONE markdown link opener in the header: the pipeline's own. A raw
+  // permalink would add a second `](` from the injected `[evil](`.
+  assertEqual(header.split("](").length - 1, 1);
+  assert(!header.includes("[evil]("), "the injected second link must be inert");
+  // A benign permalink still renders as a clean, working link (no over-escape of
+  // URL chars).
+  const benign = renderBriefComment({
+    parsed: parseVerdictComment(verdictComment()),
+    shortId: parseShortId(TITLE),
+    permalink: PERMALINK,
+  });
+  assert(
+    benign.includes(`[View in Sentry](${PERMALINK})`),
+    "a benign permalink must render unescaped",
+  );
 });
 
 await test("assertInertBlock refuses a comment a prefix-anchored consumer could misread", () => {
@@ -1026,68 +1079,58 @@ await test("the verdict job runs the brief leg on EVERY verdict", () => {
   );
 });
 
-await test("a failing brief step re-queues the stub instead of stranding it", () => {
+await test("the brief step is best-effort and never re-queues on its own failure (#1769 round 8)", () => {
+  // The brief is an advisory rendering on top of a stub the verdict step already
+  // settled (verdict label + verdict comment). A render/clear failure must log
+  // and continue (exit 0) — no re-queue, no compensation — so the close/project
+  // legs settle the stub normally. Removing the compensation removes the whole
+  // class of race/ordering/fail-open edges (#1769 rounds 6-8).
   const workflow = readRepoFile(".github/workflows/sentry-triage-agent.yml");
   const step = workflow.slice(
     workflow.indexOf("- name: Render or clear the needs-human brief"),
     workflow.indexOf("- name: Close queue stub"),
   );
-  assert(step.includes("requeue_for_retry() {"), "expected the compensation");
   assert(
-    step.includes(
-      '--remove-label "${VERDICT_LABEL},${VERDICT_SHED},sentry:projected,sentry:approved-archive"',
-    ) && step.includes('--add-label "sentry:needs-triage"'),
-    "expected the same re-queue edit the verdict post-condition makes",
-  );
-  assert(
-    step.includes("sentry:approved-archive"),
-    "expected the stale archive approval shed with the rest",
-  );
-  assert(
-    step.includes("VERDICT_SHED: ${{ steps.verdict.outputs.shed }}") &&
-      workflow.includes('echo "shed=${shed}"'),
-    "expected the shed carried as a step output",
+    step.includes("node scripts/sentry-triage-brief.mjs"),
+    "expected the brief leg to be invoked",
   );
   const meaningful = step
     .split("\n")
     .map((line) => line.trim())
     .filter((line) => line !== "" && !line.startsWith("#"));
-  const exits = meaningful.filter((line) => line === "exit 1");
-  assertEqual(exits.length, 1);
-  meaningful.forEach((line, i) => {
-    if (line !== "exit 1") return;
-    assertEqual(meaningful[i - 1], "requeue_for_retry");
-  });
+  // No re-queue helper, no failing exit, no terminal-state re-read — the whole
+  // compensation class is gone.
+  assert(
+    !step.includes("requeue_for_retry"),
+    "the best-effort brief step must not re-queue",
+  );
+  assert(
+    !meaningful.includes("exit 1"),
+    "a brief render/clear failure must not fail the job",
+  );
+  assert(
+    !step.includes("--json state"),
+    "no terminal-state re-read remains (no compensation to guard)",
+  );
+  // The failure path logs a warning and continues.
+  assert(/::warning::/.test(step), "expected a best-effort warning on failure");
 });
 
-await test("the brief compensation no-ops on a terminal stub, never stranding it (#1769 round 7)", () => {
+await test("the verdict step keeps its own re-queue compensation (not reversed by round 8)", () => {
+  // Best-effort applies ONLY to the brief step. The verdict step still re-queues
+  // on a VERDICT failure — that guarantee (#1764/#1745) is untouched.
   const workflow = readRepoFile(".github/workflows/sentry-triage-agent.yml");
-  const step = workflow.slice(
+  const verdictJob = workflow.slice(
+    workflow.indexOf("- name: Apply verdict label"),
     workflow.indexOf("- name: Render or clear the needs-human brief"),
-    workflow.indexOf("- name: Close queue stub"),
-  );
-  // On a script failure, the compensation re-reads the terminal signals and
-  // NO-OPS (exit 0) when the archive settled the stub — so it never adds
-  // sentry:needs-triage to a closed/archived stub, which would strand a
-  // closed+archived+needs-triage stub no stage can act on.
-  assert(
-    step.includes("--json state"),
-    "the compensation must re-read the stub state before re-queuing",
   );
   assert(
-    step.includes('.name == "sentry:archived"'),
-    "the compensation must check the terminal archive marker",
+    verdictJob.includes("requeue_for_retry() {"),
+    "the verdict step must keep its re-queue compensation",
   );
-  const meaningful = step
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line !== "" && !line.startsWith("#"));
-  const exit0 = meaningful.indexOf("exit 0");
-  const requeueCall = meaningful.indexOf("requeue_for_retry");
-  assert(exit0 >= 0, "expected an exit-0 no-op path for a terminal stub");
   assert(
-    exit0 < requeueCall,
-    "the terminal no-op (exit 0) must precede requeue_for_retry, so a terminal stub is never re-queued",
+    verdictJob.includes('--add-label "sentry:needs-triage"'),
+    "the verdict step's compensation must restore sentry:needs-triage",
   );
 });
 

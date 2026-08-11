@@ -316,6 +316,34 @@ export const MAX_BRIEF_LIST_ITEMS = 5;
  * sanitizeDuplicateIds these entries are prose, so nothing is shape-validated
  * away — each emitter neutralizes+escapes them at render. Returns `{items,
  * next}` mirroring collectDashList so the caller advances the line cursor. */
+/**
+ * Split a YAML flow-sequence body (`a, "b, c", 'd'`) on commas OUTSIDE quotes,
+ * so a comma inside a quoted brief item is preserved rather than splitting the
+ * item into rendered bullets (#1769 round 8: a `decision_branches` value like
+ * `"Yes -> allow A, B"` must stay one branch). Quote chars are consumed, each
+ * item is trimmed, and empties dropped.
+ */
+function splitQuotedListItems(inner) {
+  const items = [];
+  let buf = "";
+  let quote = null;
+  for (const ch of String(inner ?? "")) {
+    if (quote) {
+      if (ch === quote) quote = null;
+      else buf += ch;
+    } else if (ch === '"' || ch === "'") {
+      quote = ch;
+    } else if (ch === ",") {
+      items.push(buf.trim());
+      buf = "";
+    } else {
+      buf += ch;
+    }
+  }
+  items.push(buf.trim());
+  return items.filter(Boolean);
+}
+
 function parseFreeTextList(lines, i, rest) {
   const trimmed = String(rest ?? "").trim();
   // A comment-only remainder (`how_to_check: # the concrete steps that answer
@@ -330,11 +358,8 @@ function parseFreeTextList(lines, i, rest) {
     if (trimmed.startsWith("[")) {
       const close = trimmed.indexOf("]");
       const inner = close === -1 ? trimmed.slice(1) : trimmed.slice(1, close);
-      const items = inner
-        .split(",")
-        .map((s) => stripYamlQuotes(s.trim()))
-        .filter(Boolean);
-      return { items, next: i + 1 };
+      // Quote-aware split: a comma inside a quoted item stays part of it.
+      return { items: splitQuotedListItems(inner), next: i + 1 };
     }
     return { items: [stripYamlQuotes(trimmed)], next: i + 1 };
   }
