@@ -389,8 +389,16 @@ managed by the `platform` Terraform stack:
 ```bash
 pnpm tf list        # show all registered Terraform stacks
 pnpm infra:plan     # preview platform changes
-pnpm infra:apply    # apply platform changes after review
+pnpm infra:apply -- -auto-approve # apply after explicit human approval
 ```
+
+The platform wrapper creates a private temporary plan, checks the actual plan
+against the Metrics Bridge rollout mode, and applies those exact bytes. It
+deletes the plan after the command. The `-auto-approve` flag acknowledges the
+prior human approval; the wrapper consumes it instead of asking Terraform to
+create another plan after its check. The earlier `pnpm infra:plan` is a separate
+preflight, not the plan later applied; the final apply plan receives exact
+machine checks, not exact human review.
 
 Aggregator integration snapshots are produced by the scheduled
 `Integration Probes` GitHub Actions workflow and rendered at

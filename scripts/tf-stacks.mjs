@@ -14,6 +14,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { checkTerraformFormat } from "./terraform-fmt-check.mjs";
+import {
+  assertPlatformTerraformEnvironment,
+  parsePlatformCommandArgs,
+  runGuardedPlatformCommand,
+} from "./tf-platform-plan-guard.mjs";
 
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -27,6 +32,7 @@ const WRITE_ONLY_SECRET_STACKS = new Set(["platform"]);
 const WORKFLOW_ONLY_LOCAL_STATEFUL_STACKS = new Map([
   ["peg-policy-publication", ".github/workflows/peg-policy-publication.yml"],
 ]);
+const PLATFORM_STACK_ID = "platform";
 
 function usage(exitCode = 0) {
   const out = exitCode === 0 ? process.stdout : process.stderr;
@@ -36,6 +42,8 @@ function usage(exitCode = 0) {
   pnpm tf validate [<stack-id>]
   pnpm tf plan <stack-id> [terraform args...]
   pnpm tf apply <stack-id> [--force-local-apply] [terraform args...]
+
+Platform apply requires an explicit -auto-approve acknowledgement after human approval.
 
 Stack ids come from terraform.stacks.json.
 `);
@@ -91,6 +99,7 @@ function run(command, args, options = {}) {
     env: { ...process.env, ...options.env },
     stdio: options.stdio ?? "inherit",
     encoding: "utf8",
+    maxBuffer: options.maxBuffer,
   });
 
   if (result.error) {
@@ -346,6 +355,16 @@ function splitApplyArgs(args) {
   return { forceLocalApply, terraformArgs };
 }
 
+function consumeTerraformArgSeparator(args) {
+  const normalized = args[0] === "--" ? args.slice(1) : [...args];
+  if (normalized.includes("--")) {
+    throw new Error(
+      "Terraform arguments may contain at most one leading -- separator",
+    );
+  }
+  return normalized;
+}
+
 function localApplySafetyStatus() {
   try {
     gitOutput(["fetch", "--quiet", "origin", ORIGIN_MAIN_FETCH_REFSPEC]);
@@ -533,7 +552,19 @@ function platformVariableArgs(stack, terraformArgs) {
     }
   }
 
-  return [...implicitVariableFiles, ...normalizedArgs];
+  const planArgs = [...implicitVariableFiles, ...normalizedArgs];
+  const savedPlanApplyArgs = [];
+  for (let index = 0; index < planArgs.length; index += 1) {
+    const arg = planArgs[index];
+    if (arg === "-var" || arg === "-var-file") {
+      savedPlanApplyArgs.push(arg, planArgs[index + 1]);
+      index += 1;
+    } else if (arg.startsWith("-var=") || arg.startsWith("-var-file=")) {
+      savedPlanApplyArgs.push(arg);
+    }
+  }
+
+  return { planArgs, savedPlanApplyArgs };
 }
 
 function assertWriteOnlySecretLoggingDisabled(stack, command) {
@@ -578,7 +609,7 @@ function runStackCommand(command, args) {
     throw new Error(`${command} requires a stack id`);
   }
   const stack = stackById(stackId);
-  const rawTerraformArgs = args.slice(1);
+  const rawTerraformArgs = consumeTerraformArgSeparator(args.slice(1));
   const { forceLocalApply, terraformArgs } =
     command === "apply"
       ? splitApplyArgs(rawTerraformArgs)
@@ -586,6 +617,9 @@ function runStackCommand(command, args) {
   const initArgs = ["init", "-input=false"];
 
   assertWriteOnlySecretLoggingDisabled(stack, command);
+  if (stack.id === PLATFORM_STACK_ID && ["plan", "apply"].includes(command)) {
+    assertPlatformTerraformEnvironment();
+  }
   const trustedSourceHead = ["plan", "apply"].includes(command)
     ? assertTrustedCheckoutAllowed(stack, command, forceLocalApply)
     : undefined;
@@ -608,11 +642,46 @@ function runStackCommand(command, args) {
             };
           })()
         : stack;
-    const executionArgs = WRITE_ONLY_SECRET_STACKS.has(stack.id)
-      ? platformVariableArgs(stack, terraformArgs)
-      : terraformArgs;
-    runTerraform(executionStack, initArgs);
-    runTerraform(executionStack, [command, ...executionArgs]);
+    const platformPolicy =
+      stack.id === PLATFORM_STACK_ID && ["plan", "apply"].includes(command)
+        ? parsePlatformCommandArgs(command, terraformArgs)
+        : undefined;
+    const platformTerraformEnvironment = platformPolicy
+      ? {
+          TF_DATA_DIR: path.join(snapshotRoot, ".terraform-data"),
+          TF_WORKSPACE: "default",
+        }
+      : undefined;
+    const runExecutionTerraform = platformTerraformEnvironment
+      ? (targetStack, terraformCommandArgs, options = {}) =>
+          runTerraform(targetStack, terraformCommandArgs, {
+            ...options,
+            env: {
+              ...options.env,
+              ...platformTerraformEnvironment,
+            },
+          })
+      : runTerraform;
+    const platformVariables = WRITE_ONLY_SECRET_STACKS.has(stack.id)
+      ? platformVariableArgs(stack, platformPolicy?.planArgs ?? terraformArgs)
+      : undefined;
+    const executionArgs = platformVariables?.planArgs ?? terraformArgs;
+    runExecutionTerraform(executionStack, initArgs);
+    if (platformPolicy) {
+      runGuardedPlatformCommand({
+        command,
+        executionStack,
+        planArgs: executionArgs,
+        recoveryTargetOnly: platformPolicy.recoveryTargetOnly,
+        runTerraform: runExecutionTerraform,
+        savedPlanApplyArgs: [
+          ...(platformVariables?.savedPlanApplyArgs ?? []),
+          ...platformPolicy.savedPlanApplyArgs,
+        ],
+      });
+    } else {
+      runExecutionTerraform(executionStack, [command, ...executionArgs]);
+    }
   } finally {
     if (snapshotRoot) {
       rmSync(snapshotRoot, { force: true, recursive: true });

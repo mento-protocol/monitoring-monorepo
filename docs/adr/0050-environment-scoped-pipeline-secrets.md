@@ -108,7 +108,8 @@ Boundaries of the decision:
   then dispatch. That live settings edit leaves the checked-in Terraform
   untouched, so the identity contract (which hashes source) does not see it, and
   no drift job monitors the manual-apply platform stack's environment settings;
-  only the next `pnpm tf apply platform` reconciles it. Containing that would
+  only the next `pnpm tf apply platform -- -auto-approve` reconciles it.
+  Containing that would
   need the credential outside repo-admin control (the separate-repository
   alternative below).
 - **`CLAUDE_CODE_OAUTH_TOKEN` stays repo-level.** `claude.yml` reads it on

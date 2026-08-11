@@ -143,7 +143,7 @@ pnpm tf list                  # Registered Terraform stacks from terraform.stack
 pnpm tf validate <stack>      # fmt/init -backend=false/validate for one stack
 pnpm infra:init               # Init providers (first time or after changes)
 pnpm infra:plan               # Plan a committed snapshot from clean current main
-pnpm infra:apply              # Explicit human approval required
+pnpm infra:apply -- -auto-approve # Exact checked plan; explicit human approval required
 # Event-driven alerts stack (Cloud Functions + Slack channels/usergroups + Sentry bridge + QuickNode webhooks):
 pnpm alerts:infra:init
 pnpm alerts:infra:plan

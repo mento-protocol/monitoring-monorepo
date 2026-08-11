@@ -2362,7 +2362,7 @@ while IFS= read -r path; do
         scripts/review-process-metrics.mjs|scripts/review-process-metrics.test.mjs)
           add_command "node scripts/review-process-metrics.test.mjs" "review-process metrics collector changed"
           ;;
-        scripts/tf-stacks.mjs|scripts/tf-stacks.test.mjs)
+        scripts/check-metrics-bridge-template-plan.mjs|scripts/check-metrics-bridge-template-plan.test.mjs|scripts/tf-platform-plan-guard.mjs|scripts/tf-stacks.mjs|scripts/tf-stacks.test.mjs)
           add_command "pnpm tf:test" "Terraform stack wrapper changed"
           add_terraform_validate_commands "terraform" "Terraform stack wrapper changed"
           add_terraform_validate_commands "alerts/rules" "Terraform stack wrapper changed"
