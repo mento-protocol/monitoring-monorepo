@@ -94,6 +94,9 @@ import {
   VERDICT_MARKER,
   verdictCommentIdFromUrl,
 } from "./sentry-triage-project-core.mjs";
+// The terminal marker the write-side guard refuses to write past — one source of
+// truth with the archive leg that applies it.
+import { ARCHIVED_LABEL } from "./sentry-triage-queue-contract.mjs";
 
 // The brief comment's anchor. The selector matches a comment by trusted author
 // AND `startsWith(BRIEF_COMMENT_MARKER)` — the same fence the rolling run-record
@@ -303,9 +306,12 @@ function defaultRunGh(args, { stdin } = {}) {
 }
 
 /** Read the stub: title (short id), body (permalink) and comments (verdict
- * resolution AND the brief comment this leg maintains). Labels are deliberately
- * NOT read — this leg no longer observes them, because it no longer writes the
- * body and so has nothing to coordinate with the archive leg over. */
+ * resolution AND the brief comment this leg maintains). This read does not fetch
+ * state/labels — the verdict decides what to do. The WRITE path takes a separate
+ * terminal-state read (`readStubTerminalState`) right before it writes: that is
+ * the one place this leg must see the archive leg's terminal marker, to refuse
+ * creating a brief on a stub the archive settled after this read (#1769 round
+ * 6). It still never OBSERVES the approval label — only the terminal one. */
 async function readQueueIssue(runGh, repo, number) {
   const stdout = await runGh([
     "issue",
@@ -322,6 +328,34 @@ async function readQueueIssue(runGh, repo, number) {
     title: data.title ?? "",
     body: data.body ?? "",
     comments: data.comments ?? [],
+  };
+}
+
+/**
+ * Re-read the stub's terminal signals immediately before a brief WRITE. `state`
+ * is CLOSED once the stub is settled; `sentry:archived` is the durable terminal
+ * marker the archive leg applies. Both come from a fresh read, so an archive
+ * that closed/archived the stub AFTER `runBrief`'s initial read is caught here.
+ */
+async function readStubTerminalState(runGh, repo, number) {
+  const stdout = await runGh([
+    "issue",
+    "view",
+    String(number),
+    "-R",
+    repo,
+    "--json",
+    "state,labels",
+  ]);
+  const data = JSON.parse(stdout);
+  const labels = (Array.isArray(data.labels) ? data.labels : [])
+    .map((label) => (typeof label === "string" ? label : label?.name))
+    .filter(Boolean);
+  const state = String(data.state ?? "").toUpperCase();
+  return {
+    state,
+    closed: state === "CLOSED",
+    archived: labels.includes(ARCHIVED_LABEL),
   };
 }
 
@@ -495,6 +529,25 @@ export async function runBrief({
   if (dryRun) {
     log(block);
     return { written: false, verdict };
+  }
+
+  // Terminal-write guard (#1769 round 6). The archive leg runs in a DIFFERENT
+  // concurrency group and round 5 made it CLEAR this brief on settlement. So an
+  // archive can close the stub and add `sentry:archived` AFTER this leg's read
+  // but BEFORE this write — its cleanup already ran, and a create here would
+  // strand a "Decision needed" comment on the closed archive forever. Re-read the
+  // terminal signals right before writing and refuse. Unlike the approval label
+  // the redesign deliberately does not observe, `sentry:archived` is terminal and
+  // MONOTONIC — only a regression reopen sheds it, and that reopen re-triages — so
+  // a stub that reads closed/archived here will not silently revert, and refusing
+  // is race-free. This is the write-side complement of the archive's terminal
+  // cleanup; together they cover both orderings of the two legs.
+  const terminal = await readStubTerminalState(runGh, repo, issueNumber);
+  if (terminal.closed || terminal.archived) {
+    log(
+      `::notice::Issue #${issueNumber} is terminal before the brief write (state=${terminal.state}, archived=${terminal.archived}); refusing to write a needs-human brief onto a settled stub.`,
+    );
+    return { written: false, verdict, refused: true };
   }
 
   const [primary, ...duplicates] = existing;

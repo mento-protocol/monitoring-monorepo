@@ -196,6 +196,10 @@ function makeRunGh(issue, { nextCommentId = 9000 } = {}) {
     number: issue.number,
     title: issue.title,
     body: issue.body,
+    // `state` + `labels` feed the write-side terminal guard's fresh read
+    // (`issue view --json state,labels`); an OPEN, unarchived stub is the normal
+    // case, so tests that don't say otherwise write as before.
+    state: issue.state ?? "OPEN",
     labels: issue.labels ?? [],
     comments: (issue.comments ?? []).map((c) => ({ ...c })),
   };
@@ -834,6 +838,52 @@ await test("the brief never writes the body, so a baseline in the archive's unla
   assertEqual(parseArchiveBaseline(gh.state.body).sentryIssueId, "7651697505");
   // Structurally: the leg issued ZERO stub-body writes, whatever the labels say.
   assertEqual(wroteBody(gh), false);
+  assertEqual(findBriefComments(gh.state.comments).length, 1);
+});
+
+// FINDING (#1769 round 6): the MIRROR ordering. Round 5 made the archive CLEAR
+// the brief on settlement; if the archive's cleanup runs BEFORE this write, a
+// create here would strand a brief on a closed/archived stub. The write-side
+// guard re-reads the terminal signals and refuses.
+await test("the write refuses when the stub is closed or archived (#1769 round 6)", async () => {
+  for (const terminal of [
+    { state: "CLOSED", labels: [{ name: "sentry:verdict-needs-human" }] },
+    {
+      state: "OPEN",
+      labels: [
+        { name: "sentry:verdict-needs-human" },
+        { name: "sentry:archived" },
+      ],
+    },
+  ]) {
+    const gh = makeRunGh({ ...stubIssue(), ...terminal });
+    const result = await runBrief({
+      runGh: gh.runGh,
+      issueNumber: 1731,
+      log: () => {},
+    });
+    assertEqual(result.written, false);
+    assertEqual(result.refused, true);
+    // Nothing was created / updated / deleted, and no body write either.
+    assertEqual(created(gh).length, 0);
+    assertEqual(patched(gh).length, 0);
+    assertEqual(deleted(gh).length, 0);
+    assertEqual(wroteBody(gh), false);
+    assertEqual(findBriefComments(gh.state.comments).length, 0);
+  }
+});
+
+await test("the normal open needs-human stub still writes past the guard", async () => {
+  // The guard must not block the happy path: an OPEN, unarchived stub writes.
+  const gh = makeRunGh(stubIssue());
+  const result = await runBrief({
+    runGh: gh.runGh,
+    issueNumber: 1731,
+    log: () => {},
+  });
+  assertEqual(result.written, true);
+  assertEqual(result.refused, undefined);
+  assertEqual(created(gh).length, 1);
   assertEqual(findBriefComments(gh.state.comments).length, 1);
 });
 

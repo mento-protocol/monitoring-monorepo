@@ -2307,6 +2307,9 @@ while IFS= read -r path; do
           add_command "pnpm sentry:brief:test" "Sentry needs-human brief helper changed"
           # Sibling emitter over the same shared selection.
           add_command "pnpm sentry:digest:test" "Sentry needs-human brief helper changed"
+          # The archive leg calls into the brief leg (settleQueueStub ->
+          # clearBriefComments), so a brief change can alter archive settlement.
+          add_command "pnpm sentry:archive:test" "Sentry needs-human brief helper changed"
           ;;
         scripts/sentry-triage-project.mjs|scripts/sentry-triage-project-core.mjs|scripts/sentry-triage-project.test.mjs|scripts/sentry-triage-text.mjs|scripts/sentry-triage-projection.mjs)
           add_command "pnpm sentry:project:test" "Sentry triage projection helper changed"
