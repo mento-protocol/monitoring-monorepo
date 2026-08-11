@@ -699,6 +699,7 @@ test("the checker's own files stay under the file-size hard cap", () => {
     "scripts/check-sentry-suites-in-ci-lifecycle.test.mjs",
     "scripts/check-sentry-suites-in-ci-gate-job.test.mjs",
     "scripts/check-sentry-suites-in-ci-coverage.test.mjs",
+    "scripts/static-imports.mjs",
     // The runtime gate and its suites: unwatched, they grew to 833 and 935
     // lines with the cap unenforced — this check's own drift class, at home.
     "scripts/sentry-suite-gate.mjs",

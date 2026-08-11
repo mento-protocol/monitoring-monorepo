@@ -19,6 +19,8 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, isAbsolute, join, normalize } from "node:path";
 
+import { staticImportsOf } from "./static-imports.mjs";
+
 /** The manifest, the runner, and the second half of every exemption proof. */
 export const MANIFEST_LABEL = "scripts/sentry-suite-manifest.json";
 export const GATE_LABEL = "scripts/sentry-suite-gate.mjs";
@@ -109,23 +111,26 @@ export function gateInputs(manifest, root) {
     );
   }
   const inputs = new Set([MANIFEST_LABEL, GATE_LABEL]);
-  const external = [];
+  // The gate's own source decides how every result is judged, and half of that
+  // source lives in the modules it imports — this one included. Closing over
+  // GATE_LABEL keeps them watched by derivation rather than by remembering to
+  // list them, which is the property the hand-written set lacked.
+  const entryPoints = [GATE_LABEL];
   for (const [suite, entry] of Object.entries(manifest?.suites ?? {})) {
     inputs.add(suite);
     // A suite's verdict is only as trustworthy as everything that determines
     // its output, which includes every module it pulls in, transitively.
-    const closure = localImportClosure(suite, root);
-    for (const dependency of closure.local) inputs.add(dependency);
-    external.push(...closure.external);
+    entryPoints.push(suite);
     if (!entry?.exempt) continue;
     // Both halves of the route proof, per ADR 0062.
     inputs.add(entry.exempt.importer);
-    for (const dependency of localImportClosure(entry.exempt.importer, root)
-      .local) {
-      inputs.add(dependency);
-    }
+    entryPoints.push(entry.exempt.importer);
     inputs.add(PACKAGE_JSON_LABEL);
   }
+  // One closure over every entry point, so a module imported by several suites
+  // is parsed once rather than once per importer.
+  const { local, external } = importClosure(entryPoints, root);
+  for (const dependency of local) inputs.add(dependency);
   if (external.length > 0) {
     // Fail closed rather than watch a moving target. Nothing under scripts/
     // reaches outside the repository today, and a relative import that does
@@ -141,35 +146,7 @@ export function gateInputs(manifest, root) {
 }
 
 /**
- * The specifiers of a module's TOP-LEVEL static imports and re-exports.
- *
- * @param {string} source
- * @returns {string[]}
- */
-export function topLevelImportSpecifiers(source) {
-  // Line-anchored, unlike `staticImportSpecifiers`, and deliberately so. A
-  // static `import` is a top-level statement by specification, so it always
-  // begins a line; a test file that embeds FIXTURE source as string literals
-  // (`'import "./helper.mjs";'`) does not, and the unanchored scanner counted
-  // those as real dependencies — which pulled non-existent paths into the watch
-  // set and turned a fixture's deliberately-escaping import into a hard error
-  // for the whole gate. Comments are stripped first so a mention in prose is
-  // not a dependency either.
-  const withoutComments = source
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/(^|[^:])\/\/.*$/gm, "$1");
-  const specifiers = [];
-  const pattern =
-    /^[ \t]*(?:import|export)\s+(?:[^'"()\n]*?\sfrom\s*)?['"]([^'"]+)['"]/gm;
-  let match;
-  while ((match = pattern.exec(withoutComments)) !== null) {
-    specifiers.push(match[1]);
-  }
-  return specifiers;
-}
-
-/**
- * Every first-party module a file pulls in, transitively, as repo-relative
+ * Every first-party module these files pull in, transitively, as repo-relative
  * paths.
  *
  * Only RELATIVE specifiers are followed: a bare specifier is either a `node:`
@@ -182,35 +159,75 @@ export function topLevelImportSpecifiers(source) {
  * forged pass was accepted (measured: a suite that fails against its committed
  * helper reported `ok` at exit 0).
  *
- * @param {string} relative repo-relative entry path
+ * The import list comes from V8 (`staticImportsOf`), not from a regex. The
+ * regex this replaced was line-anchored — to stop it counting `import` inside a
+ * string literal — and therefore blind to ordinary MULTILINE imports, so
+ * `sentry-autofix-select.mjs`, `sentry-autofix-finalize.mjs` and
+ * `sentry-triage-agent-comment.mjs` were absent from the derived watch set on
+ * the very branch that introduced it (Codex 3761232904): an earlier suite could
+ * rewrite a later suite's implementation, forge its pass, and leave the final
+ * digest sweep green.
+ *
+ * Breadth-first, one child process per frontier, because a spawn costs ~28ms
+ * and the real closure is ~45 files.
+ *
+ * @param {string[]} entries repo-relative entry paths
  * @param {string} root
- * @param {Set<string>} [seen] cycle guard, also the accumulator
- * @returns {{ local: string[], external: string[] }}
+ * @returns {{ local: string[], external: string[] }} `local` excludes an entry
+ *   unless another module imports it
  */
-export function localImportClosure(relative, root, seen = new Set()) {
+export function importClosure(entries, root) {
+  const seen = new Set();
   const external = [];
-  let source;
-  try {
-    source = readFileSync(join(root, relative), "utf8");
-  } catch {
-    // Unreadable or absent: the digest layer records that as its own drift, and
-    // a broken import fails the suite on its own merits.
-    return { local: [...seen], external };
-  }
-  const fromDir = dirname(relative);
-  for (const specifier of topLevelImportSpecifiers(source)) {
-    if (!specifier.startsWith(".")) continue;
-    const resolved = normalize(join(fromDir, specifier));
-    if (resolved.startsWith("..") || isAbsolute(resolved)) {
-      external.push(`${relative} -> ${specifier}`);
-      continue;
+  let frontier = [...new Set(entries)];
+  const parsed = new Set(frontier);
+  while (frontier.length > 0) {
+    const results = staticImportsOf(frontier.map((r) => join(root, r)));
+    const next = [];
+    for (const relative of frontier) {
+      const result = results.get(join(root, relative));
+      if (!result || result.error !== undefined) {
+        // Absent is tolerated: the digest layer records a missing watched file
+        // as its own drift, and an unresolvable import fails the suite on its
+        // own merits. Present-but-unparsable is NOT — silently returning "no
+        // dependencies" for a file V8 refused is exactly how a dependency slips
+        // out of the watch set.
+        if (result && !result.missing) {
+          throw new IntegrityError(
+            `${relative} could not be parsed for its static imports (${result.error}); ` +
+              "the gate cannot derive what determines a suite's result from a file it cannot read as a module",
+          );
+        }
+        continue;
+      }
+      const fromDir = dirname(relative);
+      for (const specifier of result.specifiers) {
+        if (!specifier.startsWith(".")) continue;
+        const resolved = normalize(join(fromDir, specifier));
+        if (resolved.startsWith("..") || isAbsolute(resolved)) {
+          external.push(`${relative} -> ${specifier}`);
+          continue;
+        }
+        if (!seen.has(resolved)) seen.add(resolved);
+        if (parsed.has(resolved)) continue;
+        parsed.add(resolved);
+        next.push(resolved);
+      }
     }
-    if (seen.has(resolved)) continue;
-    seen.add(resolved);
-    const nested = localImportClosure(resolved, root, seen);
-    external.push(...nested.external);
+    frontier = next;
   }
   return { local: [...seen], external };
+}
+
+/**
+ * `importClosure` for a single entry point.
+ *
+ * @param {string} relative repo-relative entry path
+ * @param {string} root
+ * @returns {{ local: string[], external: string[] }}
+ */
+export function localImportClosure(relative, root) {
+  return importClosure([relative], root);
 }
 
 /**

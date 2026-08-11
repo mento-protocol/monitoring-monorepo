@@ -21,14 +21,17 @@
  *      (`^ok ` for the homegrown count-line harness, `^✔ ` for node:test). Any
  *      parse failure or missing suite fails closed.
  *   4. Each exempt suite's route is re-verified: its documented importer still
- *      statically imports it and package.json still routes there. The exempt
- *      suite runs in another job (production-infra-contract via `pnpm tf:test`),
- *      never here.
+ *      statically imports it (V8's module requests, so an unreached
+ *      `import()` proves nothing) and the exact package.json alias the owning
+ *      job runs is nothing but `node <importer>`. The exempt suite runs in
+ *      another job (production-infra-contract via `pnpm tf:test`), never here.
  *
- * Dependency-free by construction: it imports only `node:` builtins, so the CI
- * `sentry-suites` job runs it with no `pnpm install` and thus no PR-authored
- * pre-suite code (postinstall) — the R1 window the ADR closes. Every
- * `scripts/sentry-*.mjs` it spawns likewise imports only `node:` builtins.
+ * Dependency-free by construction: this file and everything it loads or spawns
+ * import only `node:` builtins and repo-local siblings, so the CI
+ * `sentry-suites` job runs with no `pnpm install` and thus no PR-authored
+ * pre-suite code (postinstall) — the R1 window the ADR closes. That is not left
+ * to convention: `sentry-suite-gate-integrity.test.mjs` derives the load closure
+ * and fails on any package specifier in it.
  *
  * Test/fixture hooks (never set in CI):
  *   SENTRY_SUITE_GATE_ROOT — repo root override; the gate reads
@@ -54,19 +57,26 @@ import {
   digestFile,
   digestWatchSet,
   gateInputs,
+  importClosure,
   localImportClosure,
   MANIFEST_LABEL,
   PACKAGE_JSON_LABEL,
-  topLevelImportSpecifiers,
 } from "./sentry-suite-gate-integrity.mjs";
+// V8's own dependency list, shared with the CI-coverage checker so there is one
+// implementation of "what does this module import" rather than two that drift.
+import { staticImports } from "./static-imports.mjs";
+// The checker's shell grammar, shared for the same reason: it already knows
+// which package-script bodies can mask a non-zero exit.
+import { commandRunsOnly } from "./check-sentry-suites-in-ci-core-commands.mjs";
 
 export {
   digestDrift,
   digestFile,
   digestWatchSet,
   gateInputs,
+  importClosure,
   localImportClosure,
-  topLevelImportSpecifiers,
+  staticImports,
 };
 
 const ROOT = process.env.SENTRY_SUITE_GATE_ROOT
@@ -106,36 +116,6 @@ const EXEMPT_ROUTE = {
   via: "pnpm tf:test",
   importer: "scripts/tf-stacks.test.mjs",
 };
-
-/** Escape a literal for embedding in a RegExp. */
-function escapeForRegExp(literal) {
-  return literal.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-/**
- * Static `import` specifiers of a module, with comments stripped first.
- *
- * The route check used to substring-match the suite's basename against the
- * importer's raw text, which a comment mentioning the path satisfied (measured:
- * a one-line comment plus an `echo` package script passed the whole exemption).
- * Parsing the actual import statements is what makes the route real.
- *
- * @param {string} source
- * @returns {string[]}
- */
-export function staticImportSpecifiers(source) {
-  const withoutComments = source
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/(^|[^:])\/\/.*$/gm, "$1");
-  const specifiers = [];
-  const pattern =
-    /\bimport\s+(?:[^'"()]*?\sfrom\s*)?['"]([^'"]+)['"]|\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
-  let match;
-  while ((match = pattern.exec(withoutComments)) !== null) {
-    specifiers.push(match[1] ?? match[2]);
-  }
-  return specifiers;
-}
 
 /**
  * Every `sentry-*.test.mjs` under `dir`, at any depth, as a repo-relative path
@@ -543,18 +523,23 @@ export function judgeSuite(result, entry) {
  */
 export function verifyExemptRoute(suite, exempt, root) {
   const reasons = [];
-  const importerPath = join(root, exempt.importer);
-  let importerText;
+  // V8's dependency list for the importer, not a scan of its text. A regex was
+  // satisfied first by a comment naming the path, then by
+  // `if (false) import("./sentry-provider-contract.test.mjs")` — an import
+  // expression that never runs, recorded as proof that the module loads the
+  // suite (Codex 3761232894). A module request is the only thing that makes
+  // `pnpm tf:test` actually execute the exempt suite, so ask for module
+  // requests.
+  let specifiers;
   try {
-    importerText = readFileSync(importerPath, "utf8");
+    specifiers = staticImports(join(root, exempt.importer));
   } catch (err) {
-    reasons.push(`importer ${exempt.importer} unreadable: ${err.message}`);
+    reasons.push(
+      `importer ${exempt.importer} could not be parsed for its static imports: ${err.message}`,
+    );
     return reasons;
   }
-  // A real static import, not a mention. Substring-matching the raw text was
-  // satisfied by a comment naming the path.
   const base = suite.slice(suite.lastIndexOf("/") + 1);
-  const specifiers = staticImportSpecifiers(importerText);
   if (!specifiers.includes(`./${base}`)) {
     reasons.push(
       `importer ${exempt.importer} has no static import of ./${base} (its imports are ` +
@@ -563,11 +548,6 @@ export function verifyExemptRoute(suite, exempt, root) {
   }
   try {
     const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
-    // The script must actually RUN the importer with node, not merely mention
-    // it — `echo scripts/tf-stacks.test.mjs` satisfied a substring check.
-    const runner = new RegExp(
-      `(^|&&|\\|\\||;)\\s*node\\s+(--[\\w-]+(=\\S+)?\\s+)*${escapeForRegExp(exempt.importer)}(\\s|$)`,
-    );
     // The manifest names the exact command the owning job runs, so validate
     // THAT alias rather than "some script somewhere runs the importer". Scanning
     // every script accepted an unused `decoy` while the named `tf:test` had been
@@ -590,12 +570,21 @@ export function verifyExemptRoute(suite, exempt, root) {
           `package.json has no \`${alias}\` script, so \`${via}\` — the command ` +
             `\`${exempt.runBy || "the owning job"}\` runs — cannot run ${exempt.importer}`,
         );
-      } else if (!runner.test(command)) {
+      } else if (!commandRunsOnly(command, [["node", exempt.importer]])) {
+        // Parsed as shell, not matched: the alias must be ONE simple command
+        // and that command must be exactly `node <importer>`. A regex anchored
+        // on `&&`/`||`/`;` accepted both `true || node scripts/tf-stacks.test.mjs`
+        // (the importer never runs) and `node scripts/tf-stacks.test.mjs || true`
+        // (its failures are swallowed), and would have kept accepting the next
+        // form nobody enumerated (Codex 3761232900). A package script is handed
+        // to a shell WITHOUT `-e`, so a second line decides the alias's exit
+        // status too; `commandRunsOnly` rejects every one of these because it
+        // allowlists bare words rather than blacklisting operators.
         reasons.push(
-          `the \`${alias}\` script is ${JSON.stringify(command)}, which does not run ` +
-            `\`node ${exempt.importer}\`; \`${via}\` is the ONLY command ` +
-            `\`${exempt.runBy || "the owning job"}\` runs, so another script running the importer ` +
-            "does not keep the suite covered",
+          `the \`${alias}\` script is ${JSON.stringify(command)}, which is not exactly ` +
+            `\`node ${exempt.importer}\` and nothing else; \`${via}\` is the ONLY command ` +
+            `\`${exempt.runBy || "the owning job"}\` runs, so any shell syntax around it can ` +
+            "stop the importer running or swallow its failures",
         );
       }
     }

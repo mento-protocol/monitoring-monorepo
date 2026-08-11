@@ -41,7 +41,8 @@ import {
   parseNodeTest,
   reconcile,
   runSuite,
-  staticImportSpecifiers,
+  staticImports,
+  verifyExemptRoute,
 } from "./sentry-suite-gate.mjs";
 
 const { test, assert, assertEqual, summarize } = makeHarness();
@@ -329,24 +330,138 @@ await test("red: an unrecognised top-level manifest key is rejected", async () =
   }
 });
 
-await test("staticImportSpecifiers ignores mentions in comments", async () => {
-  const specifiers = staticImportSpecifiers(
-    [
-      '// import "./commented-out.mjs";',
-      '/* import "./blocked.mjs"; */',
-      'import "./real-side-effect.mjs";',
-      'import { x } from "./named.mjs";',
-      'const y = await import("./dynamic.mjs");',
-      "",
-    ].join("\n"),
+await test("staticImports reports V8's module requests, not text that looks like one", async () => {
+  // Both regexes this replaced produced a P1. Unanchored, the scanner counted
+  // `import` inside a string literal; line-anchored to fix that, it stopped
+  // seeing ordinary multiline imports. This asserts the whole grid at once, so
+  // a future round cannot fix one column by breaking another.
+  const root = makeRoot();
+  try {
+    writeSuite(
+      root,
+      "probe.mjs",
+      [
+        '// import "./commented-out.mjs";',
+        '/* import "./blocked.mjs"; */',
+        "const embedded = 'import \"./in-a-string.mjs\";';",
+        'import "./side-effect.mjs";',
+        "import {",
+        "  a,",
+        "  b,",
+        '} from "./multiline.mjs";',
+        'export { c } from "./reexport.mjs";',
+        'export * from "./star.mjs";',
+        'const dynamic = await import("./dynamic.mjs");',
+        'if (false) import("./unreached.mjs");',
+        "void embedded;",
+        "void dynamic;",
+        "void a;",
+        "void b;",
+        "",
+      ].join("\n"),
+    );
+    assertEqual(
+      JSON.stringify(staticImports(join(root, "scripts", "probe.mjs")).sort()),
+      JSON.stringify(
+        [
+          "./multiline.mjs",
+          "./reexport.mjs",
+          "./side-effect.mjs",
+          "./star.mjs",
+        ].sort(),
+      ),
+      "multiline and re-export in; comment, string literal and dynamic import out",
+    );
+  } finally {
+    cleanup(root);
+  }
+});
+
+/** A fixture root whose exempt route is intact, ready to be broken one way. */
+function routeRoot({ importer, tfTest }) {
+  const root = makeRoot();
+  writeSuite(
+    root,
+    "sentry-provider-contract.test.mjs",
+    "// the exempt suite\n",
   );
-  assertEqual(
-    JSON.stringify(specifiers.sort()),
-    JSON.stringify(
-      ["./dynamic.mjs", "./named.mjs", "./real-side-effect.mjs"].sort(),
-    ),
-    "only real imports",
+  writeSuite(
+    root,
+    "tf-stacks.test.mjs",
+    importer ?? 'import "./sentry-provider-contract.test.mjs";\n',
   );
+  writeFileSync(
+    join(root, "package.json"),
+    JSON.stringify({
+      scripts: { "tf:test": tfTest ?? "node scripts/tf-stacks.test.mjs" },
+    }),
+  );
+  return root;
+}
+
+const ROUTE_EXEMPT = {
+  runBy: "production-infra-contract",
+  via: "pnpm tf:test",
+  importer: "scripts/tf-stacks.test.mjs",
+};
+const ROUTE_SUITE = "scripts/sentry-provider-contract.test.mjs";
+
+await test("green: the committed exemption shape verifies", async () => {
+  const root = routeRoot({});
+  try {
+    const reasons = verifyExemptRoute(ROUTE_SUITE, ROUTE_EXEMPT, root);
+    assertEqual(
+      JSON.stringify(reasons),
+      "[]",
+      `an intact route must produce no blockers: ${reasons.join("; ")}`,
+    );
+  } finally {
+    cleanup(root);
+  }
+});
+
+await test("red: a dynamic import does not prove the exempt route", async () => {
+  // Codex 3761232894. The regex recorded the specifier inside
+  // `if (false) import("…")`, so `verifyExemptRoute` returned no blockers for an
+  // importer that never loads the suite — `pnpm tf:test` would run and the
+  // provider assertions would never execute, in either job.
+  const root = routeRoot({
+    importer: 'if (false) import("./sentry-provider-contract.test.mjs");\n',
+  });
+  try {
+    const reasons = verifyExemptRoute(ROUTE_SUITE, ROUTE_EXEMPT, root);
+    assert(
+      reasons.some((r) => r.includes("has no static import of")),
+      `an unreached dynamic import must not satisfy the route: ${JSON.stringify(reasons)}`,
+    );
+  } finally {
+    cleanup(root);
+  }
+});
+
+await test("red: an alias that can skip or mask the importer breaks the route", async () => {
+  // Codex 3761232900. `true || node …` never runs the importer; `node … || true`
+  // swallows its failures. Both left the required jobs green with no successful
+  // provider suite anywhere. The alias must be one exact command.
+  for (const tfTest of [
+    "true || node scripts/tf-stacks.test.mjs",
+    "node scripts/tf-stacks.test.mjs || true",
+    "node scripts/tf-stacks.test.mjs; true",
+    "node scripts/tf-stacks.test.mjs\ntrue",
+    "node scripts/tf-stacks.test.mjs --test-name-pattern=nothing",
+    "echo node scripts/tf-stacks.test.mjs",
+  ]) {
+    const root = routeRoot({ tfTest });
+    try {
+      const reasons = verifyExemptRoute(ROUTE_SUITE, ROUTE_EXEMPT, root);
+      assert(
+        reasons.some((r) => r.includes("and nothing else")),
+        `\`${tfTest}\` must break the route: ${JSON.stringify(reasons)}`,
+      );
+    } finally {
+      cleanup(root);
+    }
+  }
 });
 
 // ── (b) R1: NODE_OPTIONS neutering, and the env -u latch that defeats it ──────

@@ -24,11 +24,11 @@
     },
     "scripts/sentry-suite-gate-integrity.test.mjs": {
       "reporter": "count-line",
-      "floor": 14
+      "floor": 18
     },
     "scripts/sentry-suite-gate.test.mjs": {
       "reporter": "count-line",
-      "floor": 32
+      "floor": 35
     },
     "scripts/sentry-triage-agent-comment.test.mjs": {
       "reporter": "node-test",

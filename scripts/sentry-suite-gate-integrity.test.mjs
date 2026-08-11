@@ -20,11 +20,14 @@
  *
  * Named `sentry-*.test.mjs` on purpose, like its sibling: `findSentrySuites`
  * enumerates it, so the gate runs it and holds it to a floor like any other
- * suite. Dependency-free — only `node:` builtins and the two local modules.
+ * suite. Dependency-free — only `node:` builtins and local sibling modules, an
+ * invariant one of the cases below now derives and checks rather than asserting
+ * from the file-naming convention.
  */
 
 import { join } from "node:path";
 import { readFileSync, writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 import {
   cleanup,
@@ -40,10 +43,15 @@ import {
   digestFile,
   digestWatchSet,
   gateInputs,
+  importClosure,
   successAttestation,
 } from "./sentry-suite-gate.mjs";
+import { staticImportsOf } from "./static-imports.mjs";
 
 const { test, assert, assertEqual, summarize } = makeHarness();
+
+/** This repository, for the cases that must hold of the committed tree. */
+const REAL_ROOT = fileURLToPath(new URL("..", import.meta.url));
 
 // ── (a2) suite-rewrite: one child must not be able to forge another's result ──
 
@@ -342,6 +350,119 @@ await test("the watch set equals every input the gate reads to decide", async ()
   }
 });
 
+await test("the watch set follows MULTILINE imports and ignores imports in string literals", async () => {
+  // Codex 3761232904. The scanner was line-anchored to stop it counting
+  // `import` inside a string literal — a real fix that created a false negative:
+  // ordinary multiline imports stopped matching, so the implementation modules
+  // of three committed suites dropped out of the derived watch set and an
+  // earlier suite could rewrite a later suite's implementation, forge its pass,
+  // and leave the final digest sweep green. Both columns are asserted here, in
+  // one case, because fixing either one by regex broke the other.
+  const root = makeRoot();
+  try {
+    writeSuite(
+      root,
+      "sentry-a.test.mjs",
+      [
+        "import {",
+        "  implementation,",
+        '} from "./implementation.mjs";',
+        // The false positive the line anchor was added for: fixture source
+        // embedded as a string must not become a watched dependency.
+        "const fixture = 'import \"./not-a-real-file.mjs\";';",
+        "void implementation;",
+        "void fixture;",
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(
+      join(root, "scripts", "implementation.mjs"),
+      "export const implementation = 1;\n",
+    );
+    const inputs = gateInputs(
+      {
+        suites: {
+          "scripts/sentry-a.test.mjs": { reporter: "count-line", floor: 1 },
+        },
+      },
+      root,
+    );
+    assert(
+      inputs.includes("scripts/implementation.mjs"),
+      `a multiline import must be watched: ${JSON.stringify(inputs)}`,
+    );
+    assert(
+      !inputs.includes("scripts/not-a-real-file.mjs"),
+      `an import inside a string literal must not be watched: ${JSON.stringify(inputs)}`,
+    );
+  } finally {
+    cleanup(root);
+  }
+});
+
+await test("the watch set covers the gate's OWN imports, not just its entry file", async () => {
+  // The gate's source decides how every result is judged, and most of that
+  // source now lives in the modules it imports. Watching only the entry file
+  // left them rewritable mid-run — the same hole as an unwatched suite helper,
+  // one level up.
+  const inputs = gateInputs(
+    JSON.parse(
+      readFileSync(
+        join(REAL_ROOT, "scripts/sentry-suite-manifest.json"),
+        "utf8",
+      ),
+    ),
+    REAL_ROOT,
+  );
+  for (const module of [
+    "scripts/sentry-suite-gate.mjs",
+    "scripts/sentry-suite-gate-integrity.mjs",
+    "scripts/static-imports.mjs",
+    "scripts/check-sentry-suites-in-ci-core-commands.mjs",
+  ]) {
+    assert(
+      inputs.includes(module),
+      `${module} decides the verdict but is not watched: ${JSON.stringify(inputs)}`,
+    );
+  }
+});
+
+await test("everything the gate loads or spawns imports only node: builtins and siblings", async () => {
+  // The `sentry-suites` job runs with NO `pnpm install` — that is what closes
+  // the R1 postinstall window. A package specifier anywhere in the gate's load
+  // closure breaks the job, and the closure now reaches beyond `sentry-*`: the
+  // gate imports the checker's command grammar and the shared V8 parser. Derive
+  // the closure and check it rather than trusting the file-naming convention.
+  const manifest = JSON.parse(
+    readFileSync(join(REAL_ROOT, "scripts/sentry-suite-manifest.json"), "utf8"),
+  );
+  const entries = ["scripts/sentry-suite-gate.mjs"];
+  for (const [suite, entry] of Object.entries(manifest.suites)) {
+    // The exempt suite is never loaded here; it runs in another job, whose own
+    // install is allowed to provide packages.
+    if (!entry.exempt) entries.push(suite);
+  }
+  const loaded = [...entries, ...importClosure(entries, REAL_ROOT).local];
+  const parsed = staticImportsOf(loaded.map((p) => join(REAL_ROOT, p)));
+  const packageImports = [];
+  for (const relative of loaded) {
+    for (const specifier of parsed.get(join(REAL_ROOT, relative))?.specifiers ??
+      []) {
+      if (specifier.startsWith("node:") || specifier.startsWith(".")) continue;
+      packageImports.push(`${relative} -> ${specifier}`);
+    }
+  }
+  assertEqual(
+    JSON.stringify(packageImports),
+    "[]",
+    "a package import in the gate's load closure would fail the no-install job",
+  );
+  assert(
+    loaded.length > 20,
+    `the closure looks empty: ${loaded.length} modules`,
+  );
+});
+
 await test("gateInputs refuses to run without a root rather than deriving less", async () => {
   // Omitting the root would make every import closure read nothing and silently
   // shrink the set back to the pre-closure one — the regression the closure
@@ -403,6 +524,28 @@ await test("red: a suite rewriting another suite's imported helper is caught", a
     assert(
       stdout.includes("victim-helper.mjs was REWRITTEN"),
       `should name the helper: ${stdout}`,
+    );
+  } finally {
+    cleanup(root);
+  }
+});
+
+await test("red: a watched file V8 cannot parse fails closed rather than reading as import-free", async () => {
+  // Asking V8 means a file it refuses is a file whose dependencies are unknown.
+  // Treating that as "imports nothing" is how a dependency silently leaves the
+  // watch set, which is the whole class of bug this layer exists to close.
+  const root = makeRoot();
+  try {
+    writeSuite(root, "sentry-a.test.mjs", 'import "./broken.mjs";\n');
+    writeFileSync(join(root, "scripts", "broken.mjs"), "import { from;\n");
+    writeManifest(root, {
+      "scripts/sentry-a.test.mjs": { reporter: "count-line", floor: 1 },
+    });
+    const { status, stderr } = runGate(root);
+    assert(status !== 0, "an unparsable dependency must red the gate");
+    assert(
+      stderr.includes("could not be parsed for its static imports"),
+      `should name the unparsable file: ${stderr}`,
     );
   } finally {
     cleanup(root);

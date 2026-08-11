@@ -91,9 +91,10 @@ the suites needs no install. It:
    under a forced spec reporter). Any parse failure or missing suite fails closed;
 4. re-verifies each exemption's route without running it — that
    `scripts/tf-stacks.test.mjs` still statically imports
-   `scripts/sentry-provider-contract.test.mjs` and that a package.json script
-   still routes there — since that suite runs in `production-infra-contract` via
-   `pnpm tf:test` and carries import-time assertions with no counts;
+   `scripts/sentry-provider-contract.test.mjs`, and that the exact package.json
+   alias the owning job runs is nothing but `node scripts/tf-stacks.test.mjs` —
+   since that suite runs in `production-infra-contract` via `pnpm tf:test` and
+   carries import-time assertions with no counts;
 5. writes a per-suite pass/floor/line table to stdout and `$GITHUB_STEP_SUMMARY`.
 
 The committed manifest is the closed-world expected set. Per suite it carries
@@ -106,6 +107,37 @@ so `findSentrySuites` enumerates it and the gate runs it — neutering the runne
 now also requires faking its own suite's count and per-case lines. Because it is
 enumerated, the still-in-place `scripts` job gains a direct step invoking it,
 which keeps the #1754 coverage checker green until that checker relocates.
+
+**Every suite shares one writable checkout, so the gate digests a derived watch
+set.** Without it an alphabetically earlier suite rewrites a later one — or a
+helper it imports, or the manifest, or the exemption's route evidence — and both
+report passing (each of those was measured green before its digest existed). The
+set is derived, never listed: the manifest, this runner and its own imports,
+every manifest-listed suite, each suite's transitive first-party import closure,
+and per exempt entry its importer plus `package.json`. A hand-written list was
+wrong three times running.
+
+**The gate asks V8 what a module imports, and the shell what a script runs. It
+does not match text for either.** `scripts/static-imports.mjs` returns
+`vm.SourceTextModule(...).dependencySpecifiers` — the module record's own
+dependency list — and both the gate and the #1754 checker call it, so there is
+one implementation rather than two that drift. Regex was tried and failed in
+three distinct ways: unanchored it counted `import` inside a string literal;
+line-anchored to fix that it stopped seeing ordinary multiline imports, dropping
+three suites' implementation modules out of the watch set; and either form
+accepted `if (false) import("…")` as proof that an importer loads the exempt
+suite. A module request is what makes code load, so the module record is the
+right authority. The exemption's `via` alias is held to the same rule: it must
+parse, through the checker's own simple-command grammar, as exactly
+`node <importer>` and nothing else — a regex anchored on `&&`/`||`/`;` accepted
+both `true || node …` (the importer never runs) and `node … || true` (its
+failures are swallowed).
+
+The cost is process spawns: `vm.SourceTextModule` needs
+`--experimental-vm-modules`, so each parse happens in a child. A breadth-first
+closure that parses each frontier in ONE child keeps this bounded — the real
+manifest's 63-file closure takes 6 spawns and ~185ms, where parsing file by file
+would take 63 spawns and ~1.75s.
 
 ## Alternatives considered
 
@@ -148,9 +180,10 @@ suite runner keeps the window closed and still gives the static checker its
 The suites now run unconditionally on every push rather than when the
 `rootScripts` paths filter matches, which retires the whole filter-narrowing
 bypass class at runtime and makes the static drift net unskippable for the first
-time. Compute is roughly flat: the suites take two wall-clock seconds and the job
-costs one runner boot; on a public repository those GitHub-hosted minutes are
-free.
+time. Compute is roughly flat: the gate takes about five wall-clock seconds — of
+which ~0.2s is its own watch-set derivation and the rest is the suites, two of
+which spawn the whole gate against ~30 fixture roots — and the job costs one
+runner boot; on a public repository those GitHub-hosted minutes are free.
 
 Manifest floors churn. A legitimate test deletion reds the gate until the JSON is
 edited. Floors use `>=`, so adding tests never breaks anyone, and the runner
@@ -248,6 +281,6 @@ without a manifest edit fails set equality; a suite under its floor reds; and
 ## Evidence
 
 - R2 defect and fix: `node scripts/sentry-triage-project.test.mjs | grep -c '^ok '` returned 112 against a reported `110 passed` before PR #1787 moved the summary block to the file's end; the count now reads 112, which the gate's floor requires.
-- Dependency-freedom: `git grep -h 'from "' -- scripts/sentry-*.mjs` shows only `node:` and sibling `./sentry-*` imports; the checker's `js-yaml` import is why it stays a step 4-5 job.
-- The gate green against the real suites: `node scripts/sentry-suite-gate.mjs` reconciles all twelve `scripts/sentry-*.test.mjs`, asserts the ten non-exempt suites from their output, and re-verifies the provider-contract exemption route.
+- Dependency-freedom: the 34 modules the gate loads or spawns — itself, its imports, every non-exempt suite and their transitive first-party imports — import only `node:` builtins and repo-local siblings, checked by walking `staticImports` over that closure. (The exempt importer's own closure does reach `js-yaml`; the gate digests those files, it never loads them.) The checker's `js-yaml` import is why the checker stays a step 4-5 job.
+- The gate green against the real suites: `node scripts/sentry-suite-gate.mjs` reconciles all thirteen `scripts/sentry-*.test.mjs`, asserts the twelve non-exempt suites from their output, and re-verifies the provider-contract exemption route.
 - Each negative path reds the gate: `node scripts/sentry-suite-gate.test.mjs`.
