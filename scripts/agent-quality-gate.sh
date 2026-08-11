@@ -2270,11 +2270,16 @@ while IFS= read -r path; do
     scripts/sentry-suite-manifest.json)
       # The manifest the self-run Sentry-suite gate reconciles against (#1779,
       # ADR 0062). A .json edit never reaches the scripts/*.mjs focused case, so
-      # route the gate test here: a lowered floor or a suite dropped from the
-      # manifest is exactly what the gate test must catch locally. Same reason
-      # string as the gate/test arm so both read as one focused mapping.
+      # route both commands here, with the same reason strings as that arm.
+      #
+      # The real gate is the load-bearing one for a manifest edit: the self-test
+      # builds throwaway fixture manifests in a temp dir and never reads the
+      # committed file, so a bad floor, an unknown reporter, or a dead exemption
+      # here passes it and only fails after push. Only `sentry-suite-gate.mjs`
+      # reconciles THIS manifest against the real suites. It takes ~3s.
       add_surface "scripts"
       add_command "node scripts/sentry-suite-gate.test.mjs" "Sentry-suite gate, manifest, or its test changed"
+      add_command "node scripts/sentry-suite-gate.mjs" "Sentry-suite gate, manifest, or its test changed (validate the committed manifest against the real suites)"
       ;;
     scripts/*.mjs|scripts/*.cjs|scripts/*.js|eslint.config.mjs)
       # `.dependency-cruiser.cjs` is handled fully by its dedicated case
@@ -2419,9 +2424,19 @@ while IFS= read -r path; do
           # The self-run Sentry-suite gate (#1779, ADR 0062) and its own suite.
           # The manifest it reconciles against is a .json and never reaches this
           # scripts/*.mjs case, so it is routed by its own outer arm below with
-          # the same reason string. The gate test spawns the real gate against
-          # fixtures, so it covers the gate script and this test.
+          # the same reason strings.
+          #
+          # BOTH commands are required, and neither substitutes for the other.
+          # The self-test only proves the gate's LOGIC against throwaway fixture
+          # manifests in a temp dir — it never reads the committed manifest, so a
+          # bad floor, an unknown reporter, or a dead exemption in the real one
+          # sails past it. The real gate is what validates the committed manifest
+          # against the real suites, and it is also the only check that runs
+          # sentry-suite-gate.test.mjs the way CI does (the test file is itself a
+          # scripts/sentry-*.test.mjs the gate enumerates, so editing it moves the
+          # gate's own pass count against its floor). It takes ~3s.
           add_command "node scripts/sentry-suite-gate.test.mjs" "Sentry-suite gate, manifest, or its test changed"
+          add_command "node scripts/sentry-suite-gate.mjs" "Sentry-suite gate, manifest, or its test changed (validate the committed manifest against the real suites)"
           ;;
         scripts/pr-feedback-state.mjs|scripts/pr-feedback-state-core.mjs|scripts/pr-feedback-state-claude.mjs|scripts/pr-feedback-state.test.mjs)
           add_command "pnpm pr:feedback-state:test" "PR feedback-state helper changed"

@@ -3790,15 +3790,26 @@ assert_contains "- pnpm sentry:archive:test (Sentry triage archive helper change
 # purpose: the gate reconciles set membership and per-suite floors against it, so
 # a floor edit is exactly the kind of change that must run the gate test.
 sentry_gate_test="- node scripts/sentry-suite-gate.test.mjs (Sentry-suite gate, manifest, or its test changed)"
+# The REAL gate must be routed too, for all three paths. The self-test only
+# exercises the gate's logic against throwaway fixture manifests in a temp dir —
+# it never reads the committed scripts/sentry-suite-manifest.json. Proven: with
+# the requeue floor bumped 31 -> 999, `node scripts/sentry-suite-gate.test.mjs`
+# still exits 0 while `node scripts/sentry-suite-gate.mjs` exits 1 and names the
+# suite. Without this second assertion a routing that drops the real gate would
+# leave a bad floor, an unknown reporter, or a dead exemption to fail only in CI.
+sentry_gate_run="- node scripts/sentry-suite-gate.mjs (Sentry-suite gate, manifest, or its test changed (validate the committed manifest against the real suites))"
 
 run_gate "scripts/sentry-suite-gate.mjs"
 assert_contains "$sentry_gate_test"
+assert_contains "$sentry_gate_run"
 
 run_gate "scripts/sentry-suite-gate.test.mjs"
 assert_contains "$sentry_gate_test"
+assert_contains "$sentry_gate_run"
 
 run_gate "scripts/sentry-suite-manifest.json"
 assert_contains "$sentry_gate_test"
+assert_contains "$sentry_gate_run"
 
 # check-sentry-suites-in-ci.test.mjs asserts that every Sentry suite runs in
 # CI. Every file it reads must route it, or the drift it exists to catch is
