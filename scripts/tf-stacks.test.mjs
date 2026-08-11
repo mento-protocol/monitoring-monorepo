@@ -1092,6 +1092,7 @@ function runPlatformPlanPolicyTests(tempDir) {
 
   const recoveryPlan = {
     ...structuredClone(defaultPlatformPlan),
+    complete: false,
     resource_changes: [
       {
         address: "google_project_iam_custom_role.peg_policy_bucket_controller",
@@ -1120,6 +1121,26 @@ function runPlatformPlanPolicyTests(tempDir) {
     "exact ADR 0055 recovery plan should pass",
   );
   assertExactSavedPlanBinding(fakeTools.terraformLog, false);
+  resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
+
+  result = runFail(
+    [
+      "plan",
+      "platform",
+      "-refresh=false",
+      "-target=google_project_service.storage",
+    ],
+    { env: baseEnv },
+  );
+  assertIncludes(
+    result.stderr,
+    "permits -refresh=false and -target only for the exact ADR 0055 controller recovery",
+    "recovery target arguments must fail closed before Terraform",
+  );
+  assertNoTerraformCalls(
+    fakeTools.terraformLog,
+    "unexpected recovery target must not run Terraform",
+  );
   resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
 
   const expandedRecoveryPlan = structuredClone(recoveryPlan);

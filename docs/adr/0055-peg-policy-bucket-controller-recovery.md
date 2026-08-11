@@ -62,7 +62,9 @@ recovery exception, not a retained project-level grant.
 ## Recovery procedure
 
 From clean current `main`, record explicit approval and the temporary grant's
-expiry. The target plan must add only the custom role.
+expiry. The target plan must add only the custom role. Terraform marks this
+exact target plan `complete: false`; the guard accepts that incomplete envelope
+only for this recovery target and its exact create action.
 
 ```bash
 pnpm tf plan platform -- -refresh=false -target=google_project_iam_custom_role.peg_policy_bucket_controller

@@ -56,14 +56,15 @@ per command:
   requires one in-place service update, a known non-revision template change,
   a named revision before apply, and that old name becoming known null or
   absent without appearing elsewhere in the new template.
-- A full plan must contain exactly one canonical Metrics Bridge service entry.
-  Aliases, module/index/deposed forms, previous addresses, deferred changes,
-  action invocations, incomplete plans, errored plans, and unknown template
-  changes fail closed.
+- Full stable and rollout plans must have `complete: true` and contain exactly
+  one canonical Metrics Bridge service entry. Aliases, module/index/deposed
+  forms, previous addresses, deferred changes, action invocations, incomplete
+  plans, errored plans, and unknown template changes fail closed.
 - ADR 0055's exact `-refresh=false` controller-role target is the only target
-  exception. Its entire managed non-no-op diff may only create
-  `google_project_iam_custom_role.peg_policy_bucket_controller`, and rollout
-  mode forbids the recovery.
+  exception. Terraform marks that target plan `complete: false`; only this
+  recovery may use that incomplete envelope, and its entire managed non-no-op
+  diff may only create `google_project_iam_custom_role.peg_policy_bucket_controller`.
+  Rollout mode forbids the recovery.
 - Apply requires exactly one `-auto-approve` argument as an acknowledgement
   that explicit human approval already exists. The wrapper removes that flag,
   forces `-input=false`, re-supplies variable inputs for ephemeral values, and

@@ -92,7 +92,7 @@ function relatedServiceEntry(change) {
   );
 }
 
-function validateEnvelope(plan, errors) {
+function validateEnvelope(plan, errors, recoveryTargetOnly) {
   if (!isObject(plan)) {
     errors.push("Terraform plan JSON must be an object");
     return false;
@@ -104,7 +104,10 @@ function validateEnvelope(plan, errors) {
   if (formatMajor !== 1) {
     errors.push("Terraform plan JSON must use supported format major 1");
   }
-  if (plan.complete !== true) {
+  if (
+    plan.complete !== true &&
+    !(recoveryTargetOnly === true && plan.complete === false)
+  ) {
     errors.push("Terraform plan must be complete");
   }
   if (plan.errored !== false) {
@@ -285,7 +288,7 @@ export function validateMetricsBridgeTemplatePlan(
   if (typeof rolloutActive !== "boolean") {
     errors.push("Metrics Bridge rollout mode must be a boolean");
   }
-  if (!validateEnvelope(plan, errors)) return errors;
+  if (!validateEnvelope(plan, errors, recoveryTargetOnly)) return errors;
 
   const relatedEntries = plan.resource_changes.filter(relatedServiceEntry);
   if (relatedEntries.length > 1) {

@@ -297,39 +297,49 @@ const recoveryRoleCreate = {
   name: "peg_policy_bucket_controller",
   change: { actions: ["create"], before: null, after: {} },
 };
-expectPass(plan([recoveryRoleCreate]), {
+expectPass(plan([recoveryRoleCreate], { complete: false }), {
   requireService: false,
   recoveryTargetOnly: true,
 });
 expectFailure(
-  plan([recoveryRoleCreate]),
+  plan([recoveryRoleCreate], { complete: false }),
   "rollout mode forbids targeted platform recovery",
-  { rolloutActive: true, requireService: false, recoveryTargetOnly: true },
+  {
+    rolloutActive: true,
+    requireService: false,
+    recoveryTargetOnly: true,
+  },
 );
 expectFailure(
-  plan([
-    recoveryRoleCreate,
-    {
-      address: "google_project_service.storage",
-      mode: "managed",
-      change: { actions: ["create"], before: null, after: {} },
-    },
-  ]),
+  plan(
+    [
+      recoveryRoleCreate,
+      {
+        address: "google_project_service.storage",
+        mode: "managed",
+        change: { actions: ["create"], before: null, after: {} },
+      },
+    ],
+    { complete: false },
+  ),
   "may only create the Peg policy bucket controller role",
   { requireService: false, recoveryTargetOnly: true },
 );
 expectFailure(
-  plan([
-    {
-      ...recoveryRoleCreate,
-      change: { actions: ["update"], before: {}, after: {} },
-    },
-  ]),
+  plan(
+    [
+      {
+        ...recoveryRoleCreate,
+        change: { actions: ["update"], before: {}, after: {} },
+      },
+    ],
+    { complete: false },
+  ),
   "may only create the Peg policy bucket controller role",
   { requireService: false, recoveryTargetOnly: true },
 );
 expectFailure(
-  plan([{ ...recoveryRoleCreate, deposed: "deadbeef" }]),
+  plan([{ ...recoveryRoleCreate, deposed: "deadbeef" }], { complete: false }),
   "may only create the Peg policy bucket controller role",
   { requireService: false, recoveryTargetOnly: true },
 );
@@ -344,6 +354,19 @@ for (const [overrides, expected] of [
 ]) {
   expectFailure(plan([serviceChange()], overrides), expected);
 }
+expectFailure(
+  plan(
+    [
+      serviceChange({
+        actions: ["update"],
+        afterTemplate: template(null, "1785276001213661"),
+      }),
+    ],
+    { complete: false },
+  ),
+  "must be complete",
+  { rolloutActive: true },
+);
 expectFailure(
   plan(
     [
