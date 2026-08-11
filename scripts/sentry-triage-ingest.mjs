@@ -17,7 +17,10 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-import { selectMarkedComment } from "./sentry-triage-project-core.mjs";
+import {
+  isValidShortId,
+  selectMarkedComment,
+} from "./sentry-triage-project-core.mjs";
 import {
   ARCHIVED_LABEL,
   LABEL_DEFINITIONS,
@@ -1078,8 +1081,15 @@ export async function runIngest(options, deps = {}) {
       // nothing — the measurement this rule is gated on would come back empty
       // and read as "no candidates" rather than "never looked". stderr, not
       // stdout: `--json` callers parse stdout.
+      // `shortId` reaches this line straight off the Sentry payload, and a
+      // `::notice::` is a WORKFLOW COMMAND: a newline in it would let crafted
+      // Sentry data emit its own `::error::`/`::add-mask::`/`::stop-commands::`
+      // into the Actions log. `isValidShortId` admits no newline or colon, so
+      // gating on it keeps this diagnostic from becoming an injection point.
+      // An invalid short id is not a usable candidate record anyway.
       if (
         LOG_NOISE_CANDIDATES &&
+        isValidShortId(sentryIssue.shortId) &&
         classifyDeterministicNoise({
           title: sentryIssue.title,
           users: sentryIssue.usersKnown ? sentryIssue.users : undefined,

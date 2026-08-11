@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { isValidShortId } from "./sentry-triage-project-core.mjs";
 import {
   buildIssueBody,
   buildMetadataYaml,
@@ -3108,6 +3109,23 @@ await test("the noise predicate settles nothing — no code path acts on it", ()
   );
   const reads = src.match(/LOG_NOISE_CANDIDATES/g) ?? [];
   assertEqual(reads.length, 2);
+});
+
+await test("the candidate notice cannot emit its own workflow command", () => {
+  // `::notice::` is a workflow COMMAND. shortId comes straight off the Sentry
+  // payload, so a newline in it would let crafted data emit ::error:: or
+  // ::stop-commands:: into the Actions log. The emitter gates on
+  // isValidShortId, whose pattern admits neither newline nor colon.
+  for (const hostile of [
+    "ABC-1\n::error::pwned",
+    "ABC-1\r::add-mask::x",
+    "::stop-commands::abc",
+    "ABC 1",
+    "",
+  ]) {
+    assertEqual(isValidShortId(hostile), false);
+  }
+  assertEqual(isValidShortId("ANALYTICS-MENTO-ORG-2E"), true);
 });
 
 await test("the noise rule needs all three signals, not any one", () => {
