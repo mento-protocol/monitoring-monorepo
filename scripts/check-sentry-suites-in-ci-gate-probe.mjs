@@ -98,17 +98,46 @@ const restrictPath = (dir) => {
  * the probe's stderr either way — and it fires for an INSTALLED binary too, not
  * only a missing one, which `command_not_found_handle` never sees.
  *
- * A leading `VAR=value` is an assignment, not a command word: `saw_change=true`
- * is skipped entirely, and `IFS= read -r change` is checked as `read`.
+ * The word to check is not always the first one, so the loop strips prefixes
+ * until it reaches the command actually being run:
+ *
+ *   - `VAR=value` is an assignment. `saw_change=true` is skipped entirely, and
+ *     `IFS= read -r change` is checked as `read`.
+ *   - `command`, `builtin` and `exec` are the command modifiers: they take a
+ *     command word and run it, so checking THEM checks nothing. That set is
+ *     closed. Every other way of reaching a command re-enters this trap on its
+ *     own and is caught by the ordinary path — `eval` and `source` re-parse,
+ *     a function call traces its body under `set -T`, an alias is expanded
+ *     before `$BASH_COMMAND` is set, and `time`/`!` are keywords bash reports
+ *     the wrapped command through. All four were checked on 3.2 and 5.3, and
+ *     `compgen -b` differs between them only by `compopt`/`mapfile`/`readarray`,
+ *     none of which run a command word.
+ *   - `command -p` is rejected rather than unwrapped: `-p` uses a default PATH
+ *     "guaranteed to find all of the standard utilities", so it reaches a binary
+ *     no matter what the probe sets `$PATH` to. There is nothing to validate —
+ *     the escape is the invocation.
  */
 const PROBE_COMMAND_GUARD = `__probe_guard() {
   local __rest="$1"
   local __word
+  local __modifier=""
   while :; do
     __word="\${__rest%%[[:space:]]*}"
     case "$__word" in
       "") return 0 ;;
+      # A redirection or operator is not a command word (\`exec > /dev/null\`).
+      [\\<\\>\\&\\|\\;]*) return 0 ;;
       *=*) ;;
+      command | builtin | exec) __modifier="$__word" ;;
+      -*)
+        [ -n "$__modifier" ] || break
+        case "$__modifier:$__word" in
+          command:-*p*)
+            printf '%s %s\\n' '${MISSING_COMMAND_MARKER}' "\\\`$__modifier $__word\\\` reaches a binary through its own default PATH" >&2
+            return 0
+            ;;
+        esac
+        ;;
       *) break ;;
     esac
     case "$__rest" in
@@ -119,6 +148,14 @@ const PROBE_COMMAND_GUARD = `__probe_guard() {
   command -v -- "$__word" > /dev/null 2>&1 && return 0
   printf '%s %s\\n' '${MISSING_COMMAND_MARKER}' "$__word" >&2
 }`;
+
+/**
+ * `command -p` written into the gate's classifier, found by reading rather than
+ * by running. The trap above already reports it, but this names the line the way
+ * the helper-set check names a helper, and it fires even for a branch the probe's
+ * synthetic paths never take.
+ */
+const PATH_ESCAPE = /(?:^|[\s;&|(`])command[ \t]+-[A-Za-z]*p/;
 
 /**
  * How far past a definition the end-of-function scan will look. The gate's
@@ -354,6 +391,17 @@ export function gateClassifications(
 
   const fnSource = bashFunctionSource(script, GATE_CLASSIFIER, label, bash);
 
+  const escape = fnSource
+    .split("\n")
+    .findIndex((line) => PATH_ESCAPE.test(line));
+  assert.equal(
+    escape,
+    -1,
+    `\`${GATE_CLASSIFIER}\` in ${label} runs \`command -p\`, which uses a default PATH that finds the standard ` +
+      `utilities whatever the probe sets \`$PATH\` to, so the probe cannot bound what it executes: ` +
+      `line ${escape + 1} is ${JSON.stringify(fnSource.split("\n")[escape])}`,
+  );
+
   // A helper the body calls but the probe does not define runs as a missing
   // command inside `$(…)`, where the non-zero exit dies with the subshell. The
   // handler below catches that at run time; this catches it at read time, with
@@ -385,6 +433,11 @@ export function gateClassifications(
     mkdirSync(empty);
     const program = `
 set -uo pipefail
+# \`hash -p /bin/cat cat\` binds a name straight to a path, so the empty PATH
+# below never sees it AND \`command -v\` reports it as found — a bypass of both
+# halves at once, and not a command modifier, so unwrapping cannot reach it.
+# Turning hashing off makes \`hash -p\` fail and the lookup miss, on 3.2 and 5.x.
+set +h
 ${restrictPath(empty)}
 ${PROBE_COMMAND_GUARD}
 # From bash 4.0 this fires for a command that resolved nowhere, naming it and

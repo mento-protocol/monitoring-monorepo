@@ -470,6 +470,82 @@ test("the gate probe fails closed on a body it cannot fully provide for", () => 
   );
 });
 
+test("the gate probe sees through every wrapper a command can hide behind", () => {
+  // The guard reads a command word, so anything that WRAPS the real command
+  // hides it. `command`, `builtin` and `exec` are the whole set of bash command
+  // modifiers; the other routes to a command re-enter the DEBUG trap on their
+  // own, which is why unwrapping those three is a rule rather than a list that
+  // grows. Each row is asserted on every installed bash, because two of them
+  // behaved differently on 3.2 and 5.3 before this: `command cat` was caught on
+  // 5.3 only, by `command_not_found_handle`, which 3.2 does not have.
+  const hidden = [
+    ["command", `  command cat /no/such/file 2> /dev/null`],
+    ["exec in a subshell", `  ( exec cat /no/such/file 2> /dev/null )`],
+    ["the time keyword", `  time cat /no/such/file 2> /dev/null`],
+    ["eval", `  eval "cat /no/such/file 2> /dev/null"`],
+    // Not a wrapper: `hash -p` binds a name straight to a path, so it defeats
+    // the empty PATH and `command -v` at once. `set +h` is what closes it.
+    [
+      "hash -p",
+      `  hash -p /bin/cat cat 2> /dev/null
+  cat /no/such/file 2> /dev/null`,
+    ],
+  ];
+  for (const [, { candidate, version }] of installedBashes()) {
+    for (const [label, inner] of hidden) {
+      assert.throws(
+        () =>
+          gateClassifications([TRUSTED_PATH], {
+            script: gateFixture({ inner }),
+            label: `${label} under bash ${version}`,
+            bash: candidate,
+          }),
+        /__probe_missing_command__ cat/,
+        `bash ${version} ran \`cat\` behind ${label} without the probe noticing`,
+      );
+    }
+
+    // `builtin` hides the word the same way, but what it reaches is a builtin,
+    // so nothing external runs and the probe must NOT red. This is the control:
+    // without it, "reject anything wrapped" would pass every row above.
+    assert.deepEqual(
+      [
+        ...gateClassifications([TRUSTED_PATH], {
+          script: gateFixture({ inner: `  builtin echo hidden > /dev/null` }),
+          label: `builtin under bash ${version}`,
+          bash: candidate,
+        }),
+      ],
+      [[TRUSTED_PATH, "root-tooling-scripts"]],
+      `bash ${version} rejected \`builtin echo\`, which runs nothing external`,
+    );
+  }
+});
+
+test("the gate probe rejects `command -p`, which outruns its empty PATH", () => {
+  // `-p` uses a default PATH "guaranteed to find all of the standard
+  // utilities", so it reaches a binary whatever the probe sets `$PATH` to.
+  // There is nothing to validate behind it — the escape is the invocation — so
+  // it is rejected at read time, by the line, on every bash.
+  for (const inner of [
+    `  command -p cat /etc/passwd > /dev/null`,
+    `  command -p cat /no/such/file 2> /dev/null`,
+  ]) {
+    for (const [, { candidate, version }] of installedBashes()) {
+      assert.throws(
+        () =>
+          gateClassifications([TRUSTED_PATH], {
+            script: gateFixture({ inner }),
+            label: `command -p under bash ${version}`,
+            bash: candidate,
+          }),
+        /runs `command -p`/,
+        `bash ${version} accepted a classifier reaching a binary through \`command -p\``,
+      );
+    }
+  }
+});
+
 test("the gate probe fails closed on output it cannot account for", () => {
   // An arm that prints nothing used to land in the map as `""`, and a class the
   // probe does not know used to land as itself — both read as a verdict.
