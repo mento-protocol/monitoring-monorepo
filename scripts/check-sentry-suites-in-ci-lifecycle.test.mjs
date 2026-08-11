@@ -523,6 +523,60 @@ test("the gate probe sees through every wrapper a command can hide behind", () =
   }
 });
 
+test("a construct that consumes the guard's report cannot bury it", () => {
+  // The classifier reads a process substitution already — `done < <(…)` is how
+  // the real one gets its change paths — so a second one around an unstubbed
+  // helper is an ordinary edit, not a contrived one. It used to feed the guard's
+  // marker straight into the loop as input and return a clean verdict on bash 4+,
+  // where `command_not_found_handle` writes to the same swallowed stream. A
+  // `$(…)` captures it the same way, and a pipeline sends it down the pipe.
+  //
+  // Two things stop that now: fd 9 is duplicated from the real stderr before the
+  // classifier can touch it, and the guard takes the shell down with `kill`
+  // against `$$`, which stays the invoking shell's pid inside either construct.
+  const consuming = [
+    [
+      "a consumed process substitution",
+      `  local ignored
+  while IFS= read -r ignored; do :; done < <(__probe_absent_helper__)`,
+    ],
+    [
+      "a command substitution",
+      `  local captured
+  captured="$(__probe_absent_helper__)"`,
+    ],
+    [
+      "a pipeline",
+      `  __probe_absent_helper__ | while IFS= read -r piped; do :; done`,
+    ],
+  ];
+  for (const [, { candidate, version }] of installedBashes()) {
+    for (const [label, inner] of consuming) {
+      let message = "";
+      assert.throws(
+        () =>
+          gateClassifications([TRUSTED_PATH], {
+            script: gateFixture({ inner }),
+            label: `${label} under bash ${version}`,
+            bash: candidate,
+          }),
+        (error) => {
+          message = error.message;
+          return true;
+        },
+        `bash ${version} let ${label} bury the guard's report`,
+      );
+      // The name still has to reach the reader: burying it was the bug, and a
+      // bare "killed by SIGTERM" would send the next reader hunting a probe bug.
+      assert.match(
+        message,
+        /__probe_missing_command__ __probe_absent_helper__/,
+        `bash ${version} lost the command name to ${label}`,
+      );
+    }
+  }
+});
+
 test("the gate probe rejects `command -p`, which outruns its empty PATH", () => {
   // `-p` uses a default PATH "guaranteed to find all of the standard
   // utilities", so it reaches a binary whatever the probe sets `$PATH` to.

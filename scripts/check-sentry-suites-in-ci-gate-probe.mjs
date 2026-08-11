@@ -116,6 +116,17 @@ const restrictPath = (dir) => {
  * the probe's stderr either way — and it fires for an INSTALLED binary too, not
  * only a missing one, which `command_not_found_handle` never sees.
  *
+ * Reporting alone is not enough, because the classifier can consume the report.
+ * The real one already ends its loop with `< <(json_change_paths …)`, and a
+ * second process substitution around an unstubbed helper feeds this marker
+ * straight into that loop as input — an ordinary edit, not a contrived one. So
+ * the trap does not rely on a channel the classifier can read: it prints, then
+ * takes the whole probe shell down with `kill` against `$$`. Inside `$(…)` and
+ * `<(…)` alike, `$$` stays the INVOKING shell's pid — that is precisely what
+ * `BASHPID` exists to distinguish — so no construct can contain the failure, and
+ * `kill` is a builtin, needing neither PATH nor a redirection under `set -r`.
+ * The caller reads a signalled death as a hard failure whatever reached stdout.
+ *
  * The word to check is not always the first one, so the loop strips prefixes
  * until it reaches the command actually being run:
  *
@@ -135,7 +146,18 @@ const restrictPath = (dir) => {
  *     no matter what the probe sets `$PATH` to. There is nothing to validate —
  *     the escape is the invocation.
  */
-const PROBE_COMMAND_GUARD = `__probe_guard() {
+const PROBE_COMMAND_GUARD = `__probe_refuse() {
+  # fd 9 is the probe's real stderr, duplicated before the classifier could
+  # redirect anything, so the name reaches the caller out of any \`$(…)\` or
+  # \`< <(…)\` that would otherwise consume it. A dup of an already-open fd is
+  # the one output redirection restricted mode still allows.
+  printf '%s %s\\n' '${MISSING_COMMAND_MARKER}' "$1" >&9
+  # Then stop the shell, so a classifier that closed fd 9 cannot buy silence
+  # either. SIGTERM rather than SIGKILL: bash flushes on its way out.
+  kill -TERM "$$"
+}
+
+__probe_guard() {
   local __rest="$1"
   local __word
   local __modifier=""
@@ -152,7 +174,7 @@ const PROBE_COMMAND_GUARD = `__probe_guard() {
         [ -n "$__modifier" ] || break
         case "$__modifier:$__word" in
           command:-*p*)
-            printf '%s %s\\n' '${MISSING_COMMAND_MARKER}' "\\\`$__modifier $__word\\\` reaches a binary through its own default PATH"
+            __probe_refuse "\\\`$__modifier $__word\\\` reaches a binary through its own default PATH"
             return 0
             ;;
         esac
@@ -169,12 +191,12 @@ const PROBE_COMMAND_GUARD = `__probe_guard() {
   # construction, named by a path that never had to resolve through PATH.
   case "$__word" in
     */*)
-      printf '%s %s\\n' '${MISSING_COMMAND_MARKER}' "$__word (an executable path, which no builtin or function can be)"
+      __probe_refuse "$__word (an executable path, which no builtin or function can be)"
       return 0
       ;;
   esac
   if __found="$(command -v -- "$__word")"; then return 0; fi
-  printf '%s %s\\n' '${MISSING_COMMAND_MARKER}' "$__word"
+  __probe_refuse "$__word"
 }`;
 
 /**
@@ -496,6 +518,9 @@ set -uo pipefail
 # Turning hashing off makes \`hash -p\` fail and the lookup miss, on 3.2 and 5.x.
 set +h
 ${restrictPath(empty)}
+# The guard's own channel, duplicated from the real stderr while redirections
+# are still allowed and before any classifier code can touch it.
+exec 9>&2
 ${PROBE_COMMAND_GUARD}
 # From bash 4.0 this fires for a command that resolved nowhere, naming it and
 # exiting non-zero. It is a second reading of what the DEBUG trap already
@@ -504,7 +529,7 @@ ${PROBE_COMMAND_GUARD}
 # this handler both run before the traced command's own redirections apply, so
 # stdout reaches the caller even through a \`> /dev/null\` on that command.
 command_not_found_handle() {
-  printf '%s %s\\n' '${MISSING_COMMAND_MARKER}' "$1"
+  __probe_refuse "$1"
   exit 97
 }
 ${fnSource}
@@ -545,12 +570,38 @@ done
     undefined,
     `the probe shell did not run: ${run.error}`,
   );
-  // The guard's marker first, because it names the command; bash's own
-  // diagnostics are the fallback for anything the guard did not phrase better.
+  // Whatever the guard managed to say, on fd 9 or wherever else survived.
+  const refusals = [
+    ...new Set(
+      [
+        ...`${run.stdout}${run.stderr}`.matchAll(
+          new RegExp(`^${MISSING_COMMAND_MARKER} .*$`, "gm"),
+        ),
+      ].map((match) => match[0].trim()),
+    ),
+  ];
+
+  // The signal first: it is the report of last resort, and the only one a
+  // construct around the offending command cannot swallow. A signalled child
+  // reports `status: null`, which the `status` assertion below catches only by
+  // being strict (`null !== 0`), so it is checked here on its own terms.
   assert.ok(
-    !`${run.stdout}${run.stderr}`.includes(MISSING_COMMAND_MARKER),
+    !run.signal,
+    `\`${GATE_CLASSIFIER}\` from ${label} ran a command the probe does not provide, and the probe shell ` +
+      `stopped itself (${run.signal}) rather than report a verdict computed by something it cannot see. ` +
+      (refusals.length > 0
+        ? refusals.join("; ")
+        : "The command's name did not survive: the classifier ran it inside a construct that consumed the " +
+          "diagnostic — a command substitution, or a process substitution whose output it reads — and fd 9, " +
+          "which the guard writes to precisely because such a construct cannot capture it, did not carry it " +
+          "either. Look for a command the probe does not stub inside a `$(…)` or a `< <(…)`."),
+  );
+  // A marker without a signal, for any path that reports without terminating.
+  assert.equal(
+    refusals.length,
+    0,
     `\`${GATE_CLASSIFIER}\` from ${label} ran a command the probe does not provide, so its verdicts are partial: ` +
-      `${`${run.stdout}${run.stderr}`.trim()}`,
+      `${refusals.join("; ")}`,
   );
   assert.ok(
     !run.stdout.includes(NONZERO_EXIT_MARKER),
