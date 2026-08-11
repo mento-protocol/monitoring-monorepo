@@ -29,6 +29,34 @@
  * classifier-specific part built on top. Both were split out of
  * check-sentry-suites-in-ci-probes.mjs to keep each under the repo's 1,000-line
  * cap, and that module re-exports them, so the tests import one facade.
+ *
+ * KNOWN RESIDUALS — what this probe does not observe, and why it stops there.
+ * The probe reads a first-party, code-reviewed gate script; its job is to catch
+ * drift and mistake, not to withstand an author who could edit this file just as
+ * easily. Each of these leaves the verdicts it reports about honest classifiers
+ * correct.
+ *
+ *   Reading host state. The empty working directory removes the checkout from
+ *   any RELATIVE read, so `[[ -f package.json ]]`, a glob and `test -e` all
+ *   observe nothing. Two forms remain: an ABSOLUTE path (`[[ -f /etc/passwd ]]`),
+ *   and `$(< file)` nested inside a conditional, which the coarse `[[ … ]]` strip
+ *   removes before the `<` inside it is seen and which runs no command for the
+ *   DEBUG guard to catch. Both observe host state no synthetic input controls.
+ *   Closing them needs either filesystem isolation bash cannot provide, or
+ *   `case`-aware parsing of bash source — and the second is the class of textual
+ *   heuristic that produced most of the defects this module has already fixed.
+ *
+ *   Untaken branches. The DEBUG guard is authoritative for every branch the
+ *   synthetic paths exercise: whatever runs is checked before it runs. The
+ *   read-time scans are best-effort over the rest, so an external command
+ *   reachable only from a branch no synthetic path enters is not detected. The
+ *   verdicts stay correct — that branch never ran — what is missing is assurance
+ *   about code that was not exercised. If a later synthetic path does reach it,
+ *   the guard catches it then.
+ *
+ *   A same-line trailer on the closing brace runs once while the extractor finds
+ *   the closing column, bounded by restricted mode and the empty PATH rather
+ *   than prevented; see check-sentry-suites-in-ci-gate-extract.mjs.
  */
 
 import assert from "node:assert/strict";
@@ -206,30 +234,73 @@ const PROBE_COMMAND_GUARD = `__probe_refuse() {
   kill -TERM "$$"
 }
 
+# Split one word off "$1" into __word, leaving the remainder in __rest.
+#
+# Splitting on the first space is not enough, because a value can contain one:
+# in \`LABEL="two words" cat …\` the first space falls INSIDE the assignment, and
+# a naive split leaves \`LABEL="two\` — a fragment, from which the guard used to
+# give up and stop checking \`cat\` at all. Tracking quotes and \`$( … )\` keeps a
+# value whole, so \`LABEL="two words"\` is one word and \`cat\` is the next, while
+# \`seen="$(printf '%s' "$x")"\` is a single word with no command after it.
+#
+# Only the leading words of a command are ever scanned — the loop below stops at
+# the first word that is not an assignment or a modifier — so this walks a few
+# characters per traced command, not the whole line.
+__probe_take() {
+  local __s="$1"
+  local __c
+  local __q=""
+  local __depth=0
+  __word=""
+  while [ -n "$__s" ]; do
+    __c="\${__s:0:1}"
+    __s="\${__s:1}"
+    if [ -n "$__q" ]; then
+      __word="$__word$__c"
+      if [ "$__c" = "$__q" ]; then __q=""; fi
+      continue
+    fi
+    case "$__c" in
+      '"' | "'")
+        __q="$__c"
+        __word="$__word$__c"
+        ;;
+      '$')
+        __word="$__word$__c"
+        case "$__s" in "("*) __depth=$((__depth + 1)) ;; esac
+        ;;
+      ')')
+        if [ "$__depth" -gt 0 ]; then __depth=$((__depth - 1)); fi
+        __word="$__word$__c"
+        ;;
+      ' ' | '	')
+        if [ "$__depth" -gt 0 ]; then __word="$__word$__c"; else break; fi
+        ;;
+      *) __word="$__word$__c" ;;
+    esac
+  done
+  while [ -n "$__s" ]; do
+    case "\${__s:0:1}" in
+      ' ' | '	') __s="\${__s:1}" ;;
+      *) break ;;
+    esac
+  done
+  __rest="$__s"
+}
+
 __probe_guard() {
   local __rest="$1"
-  local __word
+  local __word=""
   local __modifier=""
   local __found
-  local __dq
-  local __sq
   while :; do
-    __word="\${__rest%%[[:space:]]*}"
+    __probe_take "$__rest"
     case "$__word" in
       "") return 0 ;;
       # A redirection or operator is not a command word (\`exec > /dev/null\`).
       [\\<\\>\\&\\|\\;]*) return 0 ;;
-      # A \`VAR=value\` prefix, but only when the word is whole. In
-      # \`seen="$(printf '%s' "$x")"\` the first word is \`seen="$(printf\` — a
-      # fragment of one assignment, not a prefix to a command — so stripping it
-      # would leave \`'%s'\` looking like a command and flag an honest classifier.
-      # Unbalanced quoting is how a fragment is recognised: the value runs past
-      # the space, so there is no command word on this line to check.
-      *=*)
-        __dq="\${__word//[!\\"]/}"
-        __sq="\${__word//[!\\']/}"
-        if ((\${#__dq} % 2 || \${#__sq} % 2)); then return 0; fi
-        ;;
+      # A whole \`VAR=value\` word is a prefix; the command follows it.
+      [A-Za-z_]*=*) ;;
       command | builtin | exec) __modifier="$__word" ;;
       -*)
         [ -n "$__modifier" ] || break
@@ -242,10 +313,7 @@ __probe_guard() {
         ;;
       *) break ;;
     esac
-    case "$__rest" in
-      *[[:space:]]*) __rest="\${__rest#*[[:space:]]}" ;;
-      *) return 0 ;;
-    esac
+    if [ -z "$__rest" ]; then return 0; fi
   done
   # Everything the probe provides is a function or a builtin, and neither can
   # contain a slash. So a command word with one in it is an executable file by
@@ -288,13 +356,11 @@ const PATH_ESCAPE = /(?:^|[\s;&|(`])command[ \t]+-[A-Za-z]*p/;
  * read text out of the script; and `< <(…)`, the gate loop's own input. The
  * matching is textual, so it errs loud — a `<` in a string literal is reported.
  *
- * Named residual: the `[[ … ]]` strip is coarse, so `[[ -n "$(< /etc/hostname)" ]]`
- * escapes it, and `$(< file)` runs no command so the guard misses it too. The
- * boundary was measured: every plain `< file` an ordinary classifier could write
- * is still caught — on the conditional, beside it, on the enclosing loop — as is
- * `$(< file)` OUTSIDE a conditional. Only the nested form slips, it needs an
- * absolute path, and closing it means enumerating syntax forms rather than
- * closing a class; the empty `cwd` already covers the relative-path version.
+ * The boundary was measured rather than assumed: every plain `< file` an
+ * ordinary classifier could write is caught — on the conditional, beside it, on
+ * the enclosing loop — as is `$(< file)` OUTSIDE a conditional. Only the nested
+ * form slips, which is part of the reading-host-state residual at the top of
+ * this file.
  *
  * @param {string} source
  * @returns {Array<[number, string]>} [1-based line number, line]

@@ -173,12 +173,14 @@ const MAX_FUNCTION_LINES = 500;
 
 /**
  * A bash function definition, at any indentation, in every form bash accepts:
- * `name() {`, `function name {`, and `function name() {`. Matching all three is
- * the point — an exact-string header match reads a `function`-keyword variant as
- * "the function is gone", and reads a nested, indented redefinition as absent.
+ * `name() {`, `function name {`, and `function name() {`, with or without a
+ * trailing comment. Matching all of them is the point — an exact-string header
+ * match reads a `function`-keyword variant as "the function is gone", reads a
+ * nested indented redefinition as absent, and read `name() { # why` as neither a
+ * definition nor an error, which broke the probe outright on ordinary style.
  */
 export const BASH_DEFINITION =
-  /^[ \t]*(?:function[ \t]+([A-Za-z_][A-Za-z0-9_]*)(?:[ \t]*\([ \t]*\))?|([A-Za-z_][A-Za-z0-9_]*)[ \t]*\([ \t]*\))[ \t]*\{?[ \t]*$/gm;
+  /^[ \t]*(?:function[ \t]+([A-Za-z_][A-Za-z0-9_]*)(?:[ \t]*\([ \t]*\))?|([A-Za-z_][A-Za-z0-9_]*)[ \t]*\([ \t]*\))[ \t]*\{?[ \t]*(?:#.*)?$/gm;
 
 /** The name a `BASH_DEFINITION` match defines, from whichever form matched. */
 export const definedName = (match) => match[1] ?? match[2];

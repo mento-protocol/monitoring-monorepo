@@ -179,6 +179,13 @@ NOTE`,
       "function keyword",
       gateFixture({ header: `function ${GATE_CLASSIFIER} {` }),
     ],
+    // A trailing comment on the header is ordinary style, and the matcher read
+    // it as neither a definition nor an error: the probe threw "defines it 0
+    // times" and stopped working on an honest classifier.
+    [
+      "commented header",
+      gateFixture({ header: `${GATE_CLASSIFIER}() { # classify the manifest` }),
+    ],
   ]) {
     const verdicts = gateClassifications([TRUSTED_PATH, UNTRUSTED_PATH], {
       script,
@@ -351,6 +358,11 @@ test("the gate probe sees through every wrapper a command can hide behind", () =
   // 5.3 only, by `command_not_found_handle`, which 3.2 does not have.
   const hidden = [
     ["command", `  command cat /no/such/file 2> /dev/null`],
+    // A value with a space in it: the first space falls inside the assignment,
+    // so splitting on it left a fragment and the guard stopped checking `cat`
+    // entirely. Ordinary shell, and bash 3.2 proves who caught it — it has no
+    // `command_not_found_handle`, so before this the marker never appeared.
+    ["an assignment prefix", `  LABEL="two words" cat /missing`],
     ["exec in a subshell", `  ( exec cat /no/such/file 2> /dev/null )`],
     ["the time keyword", `  time cat /no/such/file 2> /dev/null`],
     ["eval", `  eval "cat /no/such/file 2> /dev/null"`],
@@ -394,16 +406,13 @@ test("the gate probe sees through every wrapper a command can hide behind", () =
 });
 
 test("a construct that consumes the guard's report cannot bury it", () => {
-  // The classifier reads a process substitution already — `done < <(…)` is how
-  // the real one gets its change paths — so a second one around an unstubbed
-  // helper is an ordinary edit, not a contrived one. It used to feed the guard's
-  // marker straight into the loop as input and return a clean verdict on bash 4+,
-  // where `command_not_found_handle` writes to the same swallowed stream. A
-  // `$(…)` captures it the same way, and a pipeline sends it down the pipe.
-  //
-  // Two things stop that now: fd 9 is duplicated from the real stderr before the
-  // classifier can touch it, and the guard takes the shell down with `kill`
-  // against `$$`, which stays the invoking shell's pid inside either construct.
+  // The real classifier already ends its loop with `done < <(…)`, so a second
+  // process substitution around an unstubbed helper is an ordinary edit. It used
+  // to feed the guard's marker into that loop as input and return a clean verdict
+  // on bash 4+; a `$(…)` captures it the same way and a pipeline pipes it away.
+  // Two things stop that: fd 9, duplicated from the real stderr before the
+  // classifier can touch it, and `kill` against `$$`, which stays the invoking
+  // shell's pid inside either construct.
   const consuming = [
     [
       "a consumed process substitution",
@@ -449,15 +458,12 @@ test("a construct that consumes the guard's report cannot bury it", () => {
 
 test("the gate probe rejects `command -p`, which outruns its empty PATH", () => {
   // `-p` uses a default PATH "guaranteed to find all of the standard
-  // utilities", so it reaches a binary whatever the probe sets `$PATH` to.
-  // There is nothing to validate behind it — the escape is the invocation — so
-  // it is rejected at read time, by the line, on every bash.
-  //
-  // Quoted and escaped forms included: this scan reads the same normalized copy
-  // the helper-name search does, because they ask the same question about the
-  // same text and one seeing through quoting while the other did not was an
-  // inconsistency in this file rather than a decision. The last two sit in a
-  // branch no synthetic path enters, so the runtime guard never fires either.
+  // utilities", so it reaches a binary whatever the probe sets `$PATH` to, and
+  // there is nothing to validate behind it — the escape is the invocation.
+  // Quoted and escaped forms are included because this scan reads the same
+  // normalized copy the helper-name search does; one seeing through quoting
+  // while the other did not was an inconsistency, not a decision. The last two
+  // sit in a branch no synthetic path enters, so the runtime guard never fires.
   for (const inner of [
     `  command -p cat /etc/passwd > /dev/null`,
     `  command -p cat /no/such/file 2> /dev/null`,
@@ -515,14 +521,13 @@ test("the gate probe refuses an executable path and a classifier that fails", ()
 });
 
 test("the gate probe rejects a classifier that reads anything it did not supply", () => {
-  // The verdict has to be a function of the synthetic change paths and nothing
-  // else. A `read` from a file makes it a function of the machine — the drift
-  // the stubbed-helper check exists to stop, arriving through a redirection
-  // rather than a command, which is why that check never saw it.
+  // The verdict has to be a function of the synthetic change paths, so a `read`
+  // from a file makes it a function of the machine — the drift the stubbed-helper
+  // check exists to stop, arriving through a redirection rather than a command.
   //
-  // Checked by reading, not by watching. `$BASH_COMMAND` carries the redirection
-  // for a SIMPLE command on both interpreters, but a compound's redirection is
-  // absent: `while IFS= read -r l; do :; done < /etc/passwd` reports only
+  // Checked by reading, not watching: `$BASH_COMMAND` carries a SIMPLE command's
+  // redirection on both interpreters but not a compound's —
+  // `while IFS= read -r l; do :; done < /etc/passwd` reports only
   // `IFS= read -r l`. That missing half is the shape the classifier's own loop
   // uses, so a run-time guard would be blind to exactly the wrong case.
   for (const inner of [
@@ -590,17 +595,12 @@ test("the gate probe bounds a classifier that never terminates", () => {
 });
 
 test("the gate probe's verdict does not depend on who ran it", () => {
-  // Branching on an ambient variable is an ordinary thing for a shell function
-  // to do — `CI`, `GITHUB_ACTIONS`, a tool flag. Inheriting the parent's
-  // environment made the probe answer one way on a laptop and another on a
-  // runner, and call both correct. No imported function needed: a plain
-  // variable was enough to change the accepted verdict.
-  //
-  // `HOME` and `TMPDIR` are covered too, and they are the reason this reads by
-  // NAME rather than by a fixed fixture: allowlisting those two names while
-  // still passing the operator's VALUES through narrowed the surface without
-  // closing it. Both flips use real directories, since Node reads `TMPDIR` for
-  // its own `mkdtemp`.
+  // Branching on an ambient variable — `CI`, `GITHUB_ACTIONS`, a tool flag — is
+  // ordinary shell, and inheriting the parent's environment made the probe
+  // answer one way on a laptop and another on a runner, calling both correct.
+  // `HOME` and `TMPDIR` are read by NAME here because allowlisting those names
+  // while passing the operator's VALUES through narrowed the surface without
+  // closing it. Both flips use real directories: Node reads `TMPDIR` itself.
   const first = mkdtempSync(join(tmpdir(), "gate-probe-ambient-a-"));
   const second = mkdtempSync(join(tmpdir(), "gate-probe-ambient-b-"));
   try {
