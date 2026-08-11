@@ -3974,6 +3974,15 @@ run_gate "scripts/check-peg-registry-integrity.test.mjs"
 assert_contains "- node scripts/check-peg-registry-integrity.mjs (peg registry integrity checker changed)"
 assert_contains "- node scripts/check-peg-registry-integrity.test.mjs (peg registry integrity checker changed)"
 
+run_gate "scripts/europ-operational-admission.mjs"
+assert_contains "- node --test scripts/europ-operational-admission.test.mjs (EUROP operational-admission evaluator changed)"
+
+run_gate "scripts/europ-operational-admission.test.mjs"
+assert_contains "- node --test scripts/europ-operational-admission.test.mjs (EUROP operational-admission evaluator changed)"
+
+run_gate "scripts/fixtures/europ-operational-admission/2026-08-11.json"
+assert_contains "- node --test scripts/europ-operational-admission.test.mjs (EUROP operational-admission evaluator changed)"
+
 run_gate "scripts/check-pr-description.mjs"
 assert_contains "- node scripts/check-pr-description.test.mjs (PR description validator changed)"
 

@@ -483,3 +483,13 @@ until accountable owners supply and approve:
 Do not copy the dated market-depth figures from
 [`docs/PLAN-peg-monitoring.md`](../PLAN-peg-monitoring.md) into an approval.
 Repeat the census and attach current evidence.
+
+The current six-hour EUROP operational-admission record is in
+[EUROP operational admission evidence](europ-operational-admission.md). Its
+deterministic evaluator preserves the current **Blocked** decision until a
+fresh same-block input includes the numeric budget, enforceable controls,
+explicit certificate expiries, and a boundary-aligned EURm calculation. Its
+TradingLimitsV2 capacity output alone never proves the loss-budget gate. The
+current evaluator cannot grant readiness: it remains Blocked until an
+executable model authenticates the inputs and reproduces every sequential
+protected-boundary transition.

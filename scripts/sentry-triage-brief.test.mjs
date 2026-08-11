@@ -52,6 +52,7 @@ import {
   resolveVerdict,
   sanitizeBriefList,
   selectNeedsHumanBriefFields,
+  VALID_VERDICTS,
   VERDICT_MARKER,
 } from "./sentry-triage-project-core.mjs";
 import { parseArchiveBaseline } from "./sentry-triage-queue-contract.mjs";
@@ -1808,6 +1809,39 @@ await test("the moved text helpers stay importable from the verdict contract", (
     assert(
       new RegExp(`export (function|const) ${name}\\b`).test(text),
       `expected sentry-triage-text.mjs to define ${name}`,
+    );
+  }
+});
+
+// Nothing parses the prompt — it reaches the agent through a `sed` step in
+// sentry-triage-agent.yml — so its coupling to the verdict contract is held by
+// convention alone. "asks for the two new fields" above covers the two fields
+// resolveVerdict hard-throws on; this covers the rest of that contract, where a
+// silent drop degrades escalations instead of failing them (#1792).
+await test("the triage prompt documents the rest of the verdict contract", () => {
+  const prompt = readRepoFile(".github/prompts/sentry-triage.md");
+
+  // Parsed for every needs-human verdict. Losing one of these does NOT throw —
+  // the escalation resolves and posts with a hole in the brief, which is the
+  // harder failure to notice.
+  for (const field of [
+    "human_question",
+    "hypotheses",
+    "investigated",
+    "escalation_reason",
+  ]) {
+    assert(
+      prompt.includes(`\`${field}:\``),
+      `expected the prompt to document \`${field}:\` — the needs-human brief contract parses it, and an undocumented field silently yields an incomplete brief`,
+    );
+  }
+
+  // The agent can only choose from what the classify block lists, so a verdict
+  // the parser accepts but the prompt omits is unreachable in practice.
+  for (const verdict of VALID_VERDICTS) {
+    assert(
+      new RegExp(`^- ${verdict}:`, "m").test(prompt),
+      `expected the prompt's classify block to offer \`${verdict}\` — it is in VALID_VERDICTS, so the parser accepts it, but the agent never emits a verdict this block does not name`,
     );
   }
 });
