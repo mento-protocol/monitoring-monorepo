@@ -393,6 +393,43 @@ function deleteBriefComment(runGh, repo, commentId) {
 }
 
 /**
+ * Delete every marked needs-human brief comment on a stub, given that stub's
+ * `comments` (as `gh issue view --json comments` returns them: trusted author,
+ * `url` carrying the numeric REST id). Idempotent — no marked comment means no
+ * call — and returns the number removed.
+ *
+ * This is the CLASS fix for the terminal-transition gap (#1769 round 5). The
+ * brief's own lifecycle clears the comment on a VERDICT change, but a stub can
+ * also reach a terminal state WITHOUT one: a human applies
+ * `sentry:approved-archive` to a `needs-human` stub and the archive leg closes
+ * it and adds `sentry:archived` without ever re-running this script. Any such
+ * close path must call this so the settled stub does not sit closed showing a
+ * stale "Decision needed". Deleting a comment is not a body write, so #1766's
+ * single-body-writer invariant is untouched; the trusted-author + marker fence
+ * (`findBriefComments`) is exactly what gets deleted, so a drive-by comment is
+ * never removed by mistake.
+ */
+export async function clearBriefComments({
+  runGh,
+  repo = DEFAULT_REPO,
+  issueNumber,
+  comments,
+  log = () => {},
+}) {
+  let removed = 0;
+  for (const comment of findBriefComments(comments)) {
+    await deleteBriefComment(runGh, repo, briefCommentId(comment));
+    removed += 1;
+  }
+  if (removed) {
+    log(
+      `Removed ${removed} needs-human brief comment(s) from issue #${issueNumber} on a terminal transition that did not change its verdict.`,
+    );
+  }
+  return removed;
+}
+
+/**
  * Read the stub, resolve its verdict, and drive the brief COMMENT to the state
  * that verdict implies: present and current for `needs-human`, ABSENT for every
  * other verdict. The removal arm is why the workflow step is ungated — a brief

@@ -306,7 +306,7 @@ export const MAX_DUPLICATE_LOOKUPS = 5;
 // `how_to_check` / `decision_branches` / `hypotheses` / `investigated`) are
 // retained. These are agent-produced from untrusted Sentry content and consumed
 // ONLY by the two needs-human brief emitters — the outcome digest and the queue
-// stub's issue-body brief (they never reach an owning-repo issue: needs-human
+// stub's brief comment (they never reach an owning-repo issue: needs-human
 // never projects) — so a scannable handful is enough; per-item text is
 // neutralized+bounded by each emitter at render time.
 export const MAX_BRIEF_LIST_ITEMS = 5;
@@ -318,7 +318,15 @@ export const MAX_BRIEF_LIST_ITEMS = 5;
  * next}` mirroring collectDashList so the caller advances the line cursor. */
 function parseFreeTextList(lines, i, rest) {
   const trimmed = String(rest ?? "").trim();
-  if (trimmed !== "") {
+  // A comment-only remainder (`how_to_check: # the concrete steps that answer
+  // it`) is a documented-but-empty key: YAML drops the trailing comment, and the
+  // real list is the indented dash block below. Without this, the sample comment
+  // would be recorded as the sole item and the dash items dropped — so an agent
+  // copying the doc example verbatim would publish the sample comments instead of
+  // the real checks/outcomes/evidence (#1769 round 5).
+  const isCommentOnly =
+    trimmed !== "" && stripTrailingYamlComment(trimmed).trim() === "";
+  if (trimmed !== "" && !isCommentOnly) {
     if (trimmed.startsWith("[")) {
       const close = trimmed.indexOf("]");
       const inner = close === -1 ? trimmed.slice(1) : trimmed.slice(1, close);

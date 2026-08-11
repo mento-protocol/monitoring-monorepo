@@ -31,6 +31,7 @@ import { fileURLToPath } from "node:url";
 import {
   assertInertBlock,
   BRIEF_COMMENT_MARKER,
+  clearBriefComments,
   escapeGithubMarkdown,
   findBriefComments,
   parseArgs,
@@ -286,6 +287,39 @@ await test("the new fields are empty for a verdict that omits them", () => {
   );
   assertEqual(parsed.howToCheck.length, 0);
   assertEqual(parsed.decisionBranches.length, 0);
+});
+
+await test("a comment on the key line does not swallow the dash items (#1769 round 5)", () => {
+  // An agent copying a `how_to_check: # note` example verbatim must still get
+  // the indented dash items, not the sample comment as the sole item — or the
+  // public brief shows the doc's placeholder text instead of the real content.
+  const parsed = parseVerdictYaml(
+    [
+      "how_to_check: # the concrete steps that answer it",
+      "  - grep the app for the font CDN hostnames",
+      "  - check head tags",
+      "decision_branches: # what each answer leads to",
+      "  - Yes -> config-fix",
+      "hypotheses: # candidate root causes",
+      "  - first-party code references the CDN",
+      "investigated: # what was already checked",
+      "  - latest event payload",
+    ].join("\n"),
+  );
+  assertEqual(
+    parsed.how_to_check.join("|"),
+    "grep the app for the font CDN hostnames|check head tags",
+  );
+  assert(
+    !parsed.how_to_check.some((item) => item.includes("#")),
+    "the key-line comment must not appear as an item",
+  );
+  assertEqual(parsed.decision_branches.join("|"), "Yes -> config-fix");
+  assertEqual(
+    parsed.hypotheses.join("|"),
+    "first-party code references the CDN",
+  );
+  assertEqual(parsed.investigated.join("|"), "latest event payload");
 });
 
 await test("the shared selector bounds every field it hands an emitter", () => {
@@ -737,6 +771,37 @@ await test("a duplicate brief comment is reduced to one, then cleared on removal
   await runBrief({ runGh: gh.runGh, issueNumber: 1731, log: () => {} });
   assertEqual(findBriefComments(gh.state.comments).length, 1);
   assertEqual(deleted(gh).length, 1);
+});
+
+await test("clearBriefComments deletes marked comments and no-ops when absent (#1769 round 5)", async () => {
+  // The CLASS fix: a terminal transition that does NOT run the verdict path (the
+  // archive leg settling a needs-human stub) calls this to clear the brief.
+  const gh = makeRunGh(stubIssue());
+  const removed = await clearBriefComments({
+    runGh: gh.runGh,
+    repo: "mento-protocol/monitoring-monorepo",
+    issueNumber: 1731,
+    comments: [
+      briefCommentObject(renderFixture(), 9101),
+      verdictCommentObject(),
+    ],
+    log: () => {},
+  });
+  assertEqual(removed, 1);
+  assertEqual(deleted(gh).length, 1);
+  // Deleting a comment is never a body write.
+  assertEqual(wroteBody(gh), false);
+
+  // Idempotent: no marked comment -> no call at all.
+  const gh2 = makeRunGh(stubIssue());
+  const removed2 = await clearBriefComments({
+    runGh: gh2.runGh,
+    issueNumber: 1731,
+    comments: [verdictCommentObject()],
+    log: () => {},
+  });
+  assertEqual(removed2, 0);
+  assertEqual(gh2.calls.length, 0);
 });
 
 // ---------------------------------------------------------------------------

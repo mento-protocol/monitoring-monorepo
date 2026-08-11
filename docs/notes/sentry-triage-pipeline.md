@@ -255,15 +255,15 @@ look.”
 ```yaml
 human_question: |
   <the single decision a human must make>
-how_to_check: # the concrete steps that answer it
-  - <step>
-decision_branches: # what each answer leads to, one per answer
+how_to_check:
+  - <a concrete step that answers the question>
+decision_branches:
   - "Yes -> config-fix: <disposition>"
   - "No -> noise: close as upstream-transient"
-hypotheses: # candidate root causes, each with a confidence lean
-  - <hypothesis>
-investigated: # what was already checked or ruled out
-  - <evidence>
+hypotheses:
+  - <a candidate root cause, with a confidence lean>
+investigated:
+  - <what was already checked or ruled out>
 escalation_reason: |
   <why a confident verdict was not reachable>
 ```
@@ -317,11 +317,13 @@ renders reads as current to whoever opens the issue:
   `upstream-transient` — including one still carrying a stale
   `sentry:approved-archive`, where the old body version yielded and left the
   brief in place for a later close to bury;
-- a re-queue does **not** remove it: the re-queue chokepoint writes no body and
-  posts no comment (issue #1692, pinned by a test in
-  `scripts/sentry-triage-requeue.test.mjs`). A re-queued stub therefore shows
-  its old comment until the next round's verdict lands — on a stub already
-  labelled `sentry:needs-triage`.
+- a re-queue does **not** clear it: the re-queue chokepoint leaves the marked
+  brief comment untouched. It writes no stub BODY — that is the invariant
+  `scripts/sentry-triage-requeue.test.mjs` pins (issue #1692) — but it may post
+  its OWN comment: a regression-fence comment for a `sentry-evidence` re-queue,
+  a bookkeeping note otherwise (see the regression fence below). So a re-queued
+  stub keeps its old brief until the next round's verdict lands — on a stub
+  already labelled `sentry:needs-triage`.
 
 Nothing machine-readable moves. The verdict YAML stays in the verdict comment,
 where the label step, the projection, the digest and the autofix selector read

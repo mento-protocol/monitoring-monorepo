@@ -41,6 +41,11 @@ import {
   REQUEUE_ON_FAILURE_VERIFY_END_STATE,
   requeueQueueStub,
 } from "./sentry-triage-requeue.mjs";
+// A needs-human stub archived directly (human applies sentry:approved-archive)
+// reaches a terminal state without a verdict change, so the brief leg never
+// runs to clear its comment. Archive settlement clears it here — deleting a
+// comment is not a body write, so #1766's single-body-writer invariant holds.
+import { clearBriefComments } from "./sentry-triage-brief.mjs";
 
 // The stub-selectability predicate lives with the re-queue chokepoint that
 // drives it; re-exported here because it is part of this module's tested
@@ -1392,6 +1397,29 @@ async function settleQueueStub(
     );
     // The caller's reconciler rolls the queue stub back against live state.
     return { settled: false };
+  }
+
+  // Clear a stale needs-human brief. A stub archived directly from a
+  // needs-human verdict never ran the brief leg (no verdict change), so its
+  // marked "Decision needed" comment would otherwise sit on the closed archive
+  // forever (#1769 round 5). Best-effort and idempotent, on the SAME footing as
+  // the audit note below: the settlement is already verified correct, so a
+  // failed comment delete must not roll a legitimate archive back. Uses the
+  // post-settlement read's comments, so a brief added mid-window is still seen.
+  try {
+    await clearBriefComments({
+      runGh,
+      repo,
+      issueNumber: queueIssue,
+      comments: verify.comments,
+      log: (message) => process.stderr.write(`::notice::${message}\n`),
+    });
+  } catch (err) {
+    process.stderr.write(
+      `::warning::Issue #${queueIssue} settled correctly but its stale needs-human brief comment could not be cleared (${
+        err instanceof Error ? err.message : String(err)
+      }); remove it by hand if the closed archive still shows "Decision needed".\n`,
+    );
   }
 
   // Audit note LAST, after everything failure-prone has converged. Posting it
