@@ -3370,6 +3370,24 @@ await test("a security-sensitive escalation is never inherited away", async () =
   assertEqual(searched, false);
 });
 
+await test("the security refusal recognises the contract's own literal reason", () => {
+  // The prompt tells the agent to write exactly this. An earlier revision of
+  // the marker list omitted "security" entirely, so the MOST compliant
+  // escalation was the one it failed to catch — the guard was weakest exactly
+  // where the contract is most explicit.
+  assertEqual(
+    mentionsSecuritySensitiveSurface("security-sensitive surface"),
+    true,
+  );
+  assertEqual(
+    mentionsSecuritySensitiveSurface(
+      "security-sensitive surface",
+      "decide whether the SSO failure needs incident response",
+    ),
+    true,
+  );
+});
+
 await test("the security refusal reads the whole brief, not one field", () => {
   assertEqual(mentionsSecuritySensitiveSurface("ambiguity"), false);
   assertEqual(mentionsSecuritySensitiveSurface("", "", []), false);

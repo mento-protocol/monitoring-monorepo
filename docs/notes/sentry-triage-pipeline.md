@@ -525,6 +525,13 @@ decision (#1614). The label step logs a `::notice::` naming the sibling it
 inherited from, so a closed stub whose comment still reads `needs-human` is
 explained by that line rather than being a defect.
 
+**Security-sensitive escalations are never inherited**, whatever their family
+decided — there the human is deciding disposition, not diagnosis. The check
+reads `escalation_reason`, `human_question` and `hypotheses`, and refuses before
+the family is even looked up, so such a stub stays open on
+`sentry:verdict-needs-human` by design. An open escalation that names a closed
+upstream sibling is that rule working, not a failed inheritance.
+
 Only `upstream-transient` is inheritable. `code-fix` and `config-fix` project
 into another team's repo — and a local `code-fix` can enter autofix — so
 inheriting either would cause a write for a stub no agent examined, on the

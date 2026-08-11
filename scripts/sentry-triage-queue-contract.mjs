@@ -433,7 +433,13 @@ export const INHERITABLE_VERDICT_LABEL = VERDICT_TO_LABEL[INHERITABLE_VERDICT];
 // human read (the pre-inheritance behaviour), a false negative closes a live
 // security question. Widen this list before narrowing it.
 const SECURITY_SENSITIVE_MARKERS = [
+  // The contract's OWN literal reason first. `.github/prompts/sentry-triage.md`
+  // tells the agent to write `escalation_reason: security-sensitive surface`,
+  // and the first version of this list did not contain "security" at all — so
+  // the single most compliant escalation was the one it failed to recognise.
+  "security",
   "auth",
+  "billing",
   "credential",
   "key",
   "login",
@@ -443,6 +449,7 @@ const SECURITY_SENSITIVE_MARKERS = [
   "secret",
   "session",
   "sign",
+  "sso",
   "token",
   "wallet",
 ];
