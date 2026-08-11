@@ -31,6 +31,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   rmSync,
@@ -511,13 +512,13 @@ test("the gate probe sees through every wrapper a command can hide behind", () =
     assert.deepEqual(
       [
         ...gateClassifications([TRUSTED_PATH], {
-          script: gateFixture({ inner: `  builtin echo hidden > /dev/null` }),
+          script: gateFixture({ inner: `  builtin :` }),
           label: `builtin under bash ${version}`,
           bash: candidate,
         }),
       ],
       [[TRUSTED_PATH, "root-tooling-scripts"]],
-      `bash ${version} rejected \`builtin echo\`, which runs nothing external`,
+      `bash ${version} rejected \`builtin :\`, which runs nothing external`,
     );
   }
 });
@@ -543,6 +544,98 @@ test("the gate probe rejects `command -p`, which outruns its empty PATH", () => 
         `bash ${version} accepted a classifier reaching a binary through \`command -p\``,
       );
     }
+  }
+});
+
+test("the gate probe refuses an executable path and a classifier that fails", () => {
+  for (const [, { candidate, version }] of installedBashes()) {
+    // Everything the probe provides is a function or a builtin, and neither can
+    // contain a slash, so a command word with one is an executable file that
+    // never had to resolve through the empty PATH.
+    assert.throws(
+      () =>
+        gateClassifications([TRUSTED_PATH], {
+          script: gateFixture({ inner: `  /bin/cat /etc/passwd` }),
+          label: `absolute path under bash ${version}`,
+          bash: candidate,
+        }),
+      /__probe_missing_command__ \/bin\/cat/,
+      `bash ${version} ran a binary named by absolute path without the probe noticing`,
+    );
+
+    // `printf … "$(classifier)"` reports PRINTF's status, so a classifier that
+    // echoes a real class and then fails used to read as a clean run. A
+    // classifier that fails has not classified anything, whatever it echoed.
+    assert.throws(
+      () =>
+        gateClassifications([TRUSTED_PATH], {
+          script: gateFixture({
+            verdict: `  echo "root-tooling-scripts"
+  return 42`,
+          }),
+          label: `non-zero return under bash ${version}`,
+          bash: candidate,
+        }),
+      /returned non-zero/,
+      `bash ${version} accepted a class from a classifier that then failed`,
+    );
+  }
+});
+
+test("the gate probe will not carry a trailer off the closing brace", () => {
+  // `}; printf owned > file` ends the function AND starts a top-level command
+  // on the same line. Slicing whole lines put that command inside the extracted
+  // source, where both the scan and the probe ran it. The span now ends at the
+  // closing brace's column, and the scan sources its candidates restricted, so
+  // the trailer neither lands in the span nor runs while the span is found.
+  const owned = join(
+    mkdtempSync(join(tmpdir(), "gate-probe-trailer-")),
+    "owned.txt",
+  );
+  try {
+    const script = gateFixture({ closer: `}; printf owned > ${owned}` });
+    const extracted = bashFunctionSource(script, GATE_CLASSIFIER, "trailer");
+    assert.ok(
+      !extracted.includes("owned"),
+      `the extracted span carried the trailer with it: ${JSON.stringify(extracted.split("\n").at(-2))}`,
+    );
+    assert.ok(
+      !existsSync(owned),
+      "finding the end of the function ran the trailer that followed it",
+    );
+
+    for (const [, { candidate, version }] of installedBashes()) {
+      assert.deepEqual(
+        [
+          ...gateClassifications([TRUSTED_PATH], {
+            script,
+            label: `trailer under bash ${version}`,
+            bash: candidate,
+          }),
+        ],
+        [[TRUSTED_PATH, "root-tooling-scripts"]],
+        `the probe misread the trailer gate under bash ${version}`,
+      );
+      assert.ok(
+        !existsSync(owned),
+        `bash ${version} ran the trailer that followed the closing brace`,
+      );
+    }
+
+    // A trailer that is not a separate command changes what the function does,
+    // so the span cannot simply drop it.
+    assert.throws(
+      () =>
+        bashFunctionSource(
+          gateFixture({ closer: `} > /dev/null` }),
+          GATE_CLASSIFIER,
+          "redirected definition",
+        ),
+      /neither a comment nor a separate command/,
+      "the extractor silently dropped a redirection attached to the definition",
+    );
+  } finally {
+    rmSync(join(owned, ".."), { recursive: true, force: true });
   }
 });
 

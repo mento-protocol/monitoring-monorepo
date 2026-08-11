@@ -67,6 +67,9 @@ export const GATE_ROOT_PACKAGE_JSON_CLASSES = new Set([
 /** Printed by the probe shell when it is about to run a command it did not provide. */
 const MISSING_COMMAND_MARKER = "__probe_missing_command__";
 
+/** Printed in place of a verdict when the classifier returned non-zero. */
+const NONZERO_EXIT_MARKER = "__probe_nonzero_exit__";
+
 /**
  * Bash sees `$PATH` set to a directory the probe creates and leaves empty, so no
  * external command resolves and the classifier can only reach what the probe
@@ -121,6 +124,7 @@ const PROBE_COMMAND_GUARD = `__probe_guard() {
   local __rest="$1"
   local __word
   local __modifier=""
+  local __found
   while :; do
     __word="\${__rest%%[[:space:]]*}"
     case "$__word" in
@@ -133,7 +137,7 @@ const PROBE_COMMAND_GUARD = `__probe_guard() {
         [ -n "$__modifier" ] || break
         case "$__modifier:$__word" in
           command:-*p*)
-            printf '%s %s\\n' '${MISSING_COMMAND_MARKER}' "\\\`$__modifier $__word\\\` reaches a binary through its own default PATH" >&2
+            printf '%s %s\\n' '${MISSING_COMMAND_MARKER}' "\\\`$__modifier $__word\\\` reaches a binary through its own default PATH"
             return 0
             ;;
         esac
@@ -145,8 +149,17 @@ const PROBE_COMMAND_GUARD = `__probe_guard() {
       *) return 0 ;;
     esac
   done
-  command -v -- "$__word" > /dev/null 2>&1 && return 0
-  printf '%s %s\\n' '${MISSING_COMMAND_MARKER}' "$__word" >&2
+  # Everything the probe provides is a function or a builtin, and neither can
+  # contain a slash. So a command word with one in it is an executable file by
+  # construction, named by a path that never had to resolve through PATH.
+  case "$__word" in
+    */*)
+      printf '%s %s\\n' '${MISSING_COMMAND_MARKER}' "$__word (an executable path, which no builtin or function can be)"
+      return 0
+      ;;
+  esac
+  if __found="$(command -v -- "$__word")"; then return 0; fi
+  printf '%s %s\\n' '${MISSING_COMMAND_MARKER}' "$__word"
 }`;
 
 /**
@@ -206,41 +219,59 @@ const definedName = (match) => match[1] ?? match[2];
  * candidate that also parses has pulled in top-level code that follows the
  * function.
  *
- * Nothing in the script executes before the scan stops. Every candidate shorter
- * than the true end leaves the body open, so `source` reports a syntax error and
- * runs none of it; the one that succeeds is a lone function definition, which
- * has no effect beyond defining it. That is what lets the sourcing happen in the
- * scan shell rather than a subshell per line — six times faster, and the `unset`
- * keeps a definition from one attempt out of the next. A bash that treated the
- * syntax error as fatal would exit non-zero here, which the caller reads as a
- * failed extraction; there is no path where this returns a span it did not
- * prove.
+ * A line is not a fine enough boundary, because a line can carry a trailer:
+ * `}; printf owned > file` ends the function AND starts a top-level command. So
+ * the scan runs twice — over lines to find the last one, then over the columns
+ * of that line to find the first cut that still parses. `}` wins over
+ * `}; printf …`, and the trailer stays out of the span.
+ *
+ * The candidate is sourced in a restricted subshell (`set -r`) with an empty
+ * PATH, from a directory the scan `cd`s into first, since restricted mode also
+ * forbids a `/` in a `source` argument. Every candidate shorter than the true
+ * end leaves the body open, so `source` reports a syntax error and runs none of
+ * it — but the one that succeeds executes whatever top-level code it caught,
+ * which is exactly the trailer above. Restricted mode is what makes that
+ * harmless: no output redirection, no `/` in a command name, and nothing on
+ * PATH to find.
  */
 const FUNCTION_END_SCAN = `
 set -uo pipefail
 name="$1"
 tail_file="$2"
-cand_file="$3"
-max="$4"
-# Only builtins are used below, and no candidate is supposed to execute at all;
-# an empty PATH keeps that true rather than merely intended.
-PATH="$5"
-export PATH
+cand_dir="$3"
+cand_base="$4"
+max="$5"
+empty="$6"
+
+__probe_try() {
+  printf '%s__probe_sentinel__() { :; }\\n' "$1" > "$cand_dir/$cand_base"
+  (
+    cd "$cand_dir"
+    PATH="$empty"
+    set -r
+    # shellcheck disable=SC1090
+    source "$cand_base"
+    declare -F "$name" && declare -F __probe_sentinel__
+  ) > /dev/null 2>&1
+}
 
 body=""
 n=0
 while IFS= read -r line || [[ -n "$line" ]]; do
   n=$((n + 1))
-  body+="$line"$'\\n'
-  printf '%s__probe_sentinel__() { :; }\\n' "$body" > "$cand_file"
-  unset -f "$name" __probe_sentinel__ 2> /dev/null
-  # shellcheck disable=SC1090
-  source "$cand_file" > /dev/null 2>&1
-  if declare -F "$name" > /dev/null 2>&1 &&
-    declare -F __probe_sentinel__ > /dev/null 2>&1; then
-    printf '%s\\n' "$n"
+  if __probe_try "$body$line"$'\\n'; then
+    k=0
+    while [ "$k" -lt "\${#line}" ]; do
+      k=$((k + 1))
+      if __probe_try "$body\${line:0:$k}"$'\\n'; then
+        printf '%s\\t%s\\n' "$n" "$k"
+        exit 0
+      fi
+    done
+    printf '%s\\t%s\\n' "$n" "\${#line}"
     exit 0
   fi
+  body="$body$line"$'\\n'
   if ((n >= max)); then break; fi
 done < "$tail_file"
 
@@ -299,15 +330,7 @@ export function bashFunctionSource(script, name, label, bash = "bash") {
     const max = Math.min(tailLines.length, MAX_FUNCTION_LINES);
     const scan = spawnSync(
       bash,
-      [
-        "-s",
-        "--",
-        name,
-        tailPath,
-        join(dir, "candidate.sh"),
-        String(max),
-        empty,
-      ],
+      ["-s", "--", name, tailPath, dir, "candidate.sh", String(max), empty],
       { input: FUNCTION_END_SCAN, encoding: "utf8" },
     );
     assert.equal(
@@ -315,13 +338,32 @@ export function bashFunctionSource(script, name, label, bash = "bash") {
       0,
       `could not find where \`${name}\` ends in ${label}: ${`${scan.stdout ?? ""}${scan.stderr ?? ""}`.trim()}`,
     );
-    const endLine = Number(scan.stdout.trim());
+    const [endLine, endColumn] = scan.stdout.trim().split("\t").map(Number);
+    const lastLine = tailLines[endLine - 1] ?? "";
     assert.ok(
-      Number.isInteger(endLine) && endLine >= 1 && endLine <= max,
-      `the end-of-function scan of ${label} reported ${JSON.stringify(scan.stdout)}, which is not a line number in range`,
+      Number.isInteger(endLine) &&
+        endLine >= 1 &&
+        endLine <= max &&
+        Number.isInteger(endColumn) &&
+        endColumn >= 1 &&
+        endColumn <= lastLine.length,
+      `the end-of-function scan of ${label} reported ${JSON.stringify(scan.stdout)}, which is not a line and column in range`,
     );
 
-    const text = `${tailLines.slice(0, endLine).join("\n")}\n`;
+    // Whatever follows the closing token on that line is the gate's business,
+    // not part of the function — but it has to be something this probe can
+    // safely leave behind. A `;` starts a separate command and a `#` starts a
+    // comment; anything else (a redirection on the definition itself, say)
+    // would change what the function does, so refuse rather than drop it.
+    const trailer = lastLine.slice(endColumn).trim();
+    assert.ok(
+      trailer === "" || trailer.startsWith(";") || trailer.startsWith("#"),
+      `\`${name}\` in ${label} ends at line ${endLine} column ${endColumn}, and the rest of that line (${JSON.stringify(trailer)}) ` +
+        "is neither a comment nor a separate command, so extracting the function alone would change what it does",
+    );
+
+    const head = tailLines.slice(0, endLine - 1);
+    const text = `${[...head, lastLine.slice(0, endColumn)].join("\n")}\n`;
     const parse = spawnSync(bash, ["-n"], { input: text, encoding: "utf8" });
     assert.equal(
       parse.status,
@@ -442,10 +484,12 @@ ${restrictPath(empty)}
 ${PROBE_COMMAND_GUARD}
 # From bash 4.0 this fires for a command that resolved nowhere, naming it and
 # exiting non-zero. It is a second reading of what the DEBUG trap already
-# reports, and defining it on bash 3.2 is inert rather than an error.
+# reports, and defining it on bash 3.2 is inert rather than an error. Its marker
+# goes to stdout only: restricted mode below forbids \`>&2\`, and a DEBUG trap and
+# this handler both run before the traced command's own redirections apply, so
+# stdout reaches the caller even through a \`> /dev/null\` on that command.
 command_not_found_handle() {
   printf '%s %s\\n' '${MISSING_COMMAND_MARKER}' "$1"
-  printf '%s %s\\n' '${MISSING_COMMAND_MARKER}' "$1" >&2
   exit 97
 }
 ${fnSource}
@@ -455,8 +499,23 @@ declare -F ${GATE_CLASSIFIER} > /dev/null || { printf '%s\\n' '${MISSING_COMMAND
 # process substitution feeding its loop — every place a stray command could run.
 set -T
 trap '__probe_guard "$BASH_COMMAND"' DEBUG
+# Restricted mode, last, because it cannot be turned off again and it forbids
+# the setup above (PATH assignment, redirections). It refuses a \`/\` in a command
+# name, \`command -p\`, \`exec\`, \`enable -f\` and any change to PATH — the whole
+# family of ways out of the empty PATH, closed by bash rather than by this
+# probe's reading of a command word. The real classifier runs under it: its only
+# redirection is the \`< <(…)\` feeding its loop, and input redirection is allowed.
+set -r
 for __probe_path in "$@"; do
-  printf '%s\\t%s\\n' "$__probe_path" "$(${GATE_CLASSIFIER})"
+  # Capture the status separately. \`printf … "$(f)"\` reports PRINTF's status, so
+  # a classifier that echoes a valid class and then fails reads as a clean run.
+  __probe_verdict="$(${GATE_CLASSIFIER})"
+  __probe_status=$?
+  if [ "$__probe_status" -ne 0 ]; then
+    printf '%s\\t${NONZERO_EXIT_MARKER} %s\\n' "$__probe_path" "$__probe_status"
+  else
+    printf '%s\\t%s\\n' "$__probe_path" "$__probe_verdict"
+  fi
 done
 `;
     run = spawnSync(bash, ["-s", "--", ...paths], {
@@ -471,18 +530,26 @@ done
     undefined,
     `the probe shell did not run: ${run.error}`,
   );
+  // The guard's marker first, because it names the command; bash's own
+  // diagnostics are the fallback for anything the guard did not phrase better.
+  assert.ok(
+    !`${run.stdout}${run.stderr}`.includes(MISSING_COMMAND_MARKER),
+    `\`${GATE_CLASSIFIER}\` from ${label} ran a command the probe does not provide, so its verdicts are partial: ` +
+      `${`${run.stdout}${run.stderr}`.trim()}`,
+  );
+  assert.ok(
+    !run.stdout.includes(NONZERO_EXIT_MARKER),
+    `\`${GATE_CLASSIFIER}\` from ${label} printed a class and then returned non-zero; a classifier that fails ` +
+      `has not classified anything, whatever it echoed on the way out: ${run.stdout.trim()}`,
+  );
   // The probe shell has nothing legitimate to say on stderr. Asserting it is
-  // EMPTY rather than scanning it for a phrase catches the guard's marker, the
-  // `command not found` bash writes itself, an unset variable under `set -u`,
-  // and any diagnostic in a locale this check has never seen.
+  // EMPTY rather than scanning it for a phrase catches bash's own `command not
+  // found` and `restricted:` refusals, an unset variable under `set -u`, and any
+  // diagnostic in a locale this check has never seen.
   assert.equal(
     run.stderr,
     "",
     `\`${GATE_CLASSIFIER}\` from ${label} wrote to stderr, so its verdicts cannot be trusted: ${run.stderr.trim()}`,
-  );
-  assert.ok(
-    !run.stdout.includes(MISSING_COMMAND_MARKER),
-    `\`${GATE_CLASSIFIER}\` from ${label} ran a command the probe does not provide, so its verdicts are partial: ${run.stdout.trim()}`,
   );
   assert.equal(
     run.status,
