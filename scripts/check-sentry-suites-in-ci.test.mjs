@@ -975,6 +975,7 @@ test("the checker's own files stay under the file-size hard cap", () => {
     "scripts/check-sentry-suites-in-ci-probes.mjs",
     "scripts/check-sentry-suites-in-ci-gate-probe.mjs",
     "scripts/check-sentry-suites-in-ci-gate-probe.test.mjs",
+    "scripts/check-sentry-suites-in-ci-gate-extract.mjs",
     "scripts/check-sentry-suites-in-ci-lifecycle.test.mjs",
   ];
   const over = files

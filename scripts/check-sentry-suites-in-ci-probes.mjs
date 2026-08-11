@@ -73,10 +73,14 @@ export const GATE_PROBE = "scripts/check-sentry-suites-in-ci-gate-probe.mjs";
 export const GATE_PROBE_TESTS =
   "scripts/check-sentry-suites-in-ci-gate-probe.test.mjs";
 
+/** The module that lifts a bash function out of a script, and runs the shells. */
+export const GATE_EXTRACT =
+  "scripts/check-sentry-suites-in-ci-gate-extract.mjs";
+
 // The gate probe owns the gate file it reads; re-exported here so the tests
 // keep importing every probe from one façade.
+export { bashFunctionSource } from "./check-sentry-suites-in-ci-gate-extract.mjs";
 export {
-  bashFunctionSource,
   GATE,
   GATE_CLASSIFIER,
   gateClassifications,
@@ -538,6 +542,10 @@ const STATIC_PROBE_INPUTS = new Map([
   ["scripts/agent-quality-gate.sh", "`gateClassifications` runs its `case`"],
   [GATE_PROBE, "the probe that lifts the gate's classifier out and re-runs it"],
   [GATE_PROBE_TESTS, "that probe's own invariants, which this check runs"],
+  [
+    GATE_EXTRACT,
+    "the extractor and probe shells `gateClassifications` runs on",
+  ],
   [
     "scripts/check-agent-quality-gate-package-scripts.sh",
     "`validatorPins` runs it to enumerate the pins it enforces",
