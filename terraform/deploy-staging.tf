@@ -162,6 +162,17 @@ resource "google_storage_bucket_iam_member" "app_engine_source_appspot_object_vi
   depends_on = [google_app_engine_application.aegis]
 }
 
+# App Engine still writes its service-owned staging.<project>.appspot.com
+# bucket after gcloud routes source input through the explicit bucket above.
+# Google requires Storage Admin for this default service account on that bucket.
+resource "google_storage_bucket_iam_member" "app_engine_default_staging_admin" {
+  bucket = "staging.${google_project.monitoring.project_id}.appspot.com"
+  role   = "roles/storage.admin"
+  member = "serviceAccount:${local.aegis_app_engine_default_service_account}"
+
+  depends_on = [google_app_engine_application.aegis]
+}
+
 # Cloud Run pins the dedicated Metrics Bridge runtime identity, so the deployer
 # can act as that service account without project-wide Service Account User.
 resource "google_service_account_iam_member" "ci_metrics_bridge_runtime_service_account_user" {

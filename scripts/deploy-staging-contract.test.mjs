@@ -439,6 +439,74 @@ expectFailure(
   ),
   "retention_duration_seconds must be exactly 0",
 );
+const appEngineDefaultStagingBucket =
+  '  bucket = "staging.${google_project.monitoring.project_id}.appspot.com"';
+const appEngineDefaultStagingAdminRole = '  role   = "roles/storage.admin"';
+const appEngineDefaultStagingAdminMember =
+  '  member = "serviceAccount:${local.aegis_app_engine_default_service_account}"';
+const appEngineDefaultStagingAdminDependency =
+  "  depends_on = [google_app_engine_application.aegis]";
+const appEngineDefaultStagingAdminBlock = `resource "google_storage_bucket_iam_member" "app_engine_default_staging_admin" {
+${appEngineDefaultStagingBucket}
+${appEngineDefaultStagingAdminRole}
+${appEngineDefaultStagingAdminMember}
+
+${appEngineDefaultStagingAdminDependency}
+}`;
+assert(
+  files["terraform/deploy-staging.tf"].includes(
+    appEngineDefaultStagingAdminBlock,
+  ),
+  "App Engine default staging grant must target its service-owned bucket",
+);
+expectFailure(
+  mutate(
+    files,
+    "terraform/deploy-staging.tf",
+    appEngineDefaultStagingAdminBlock,
+    appEngineDefaultStagingAdminBlock.replace(
+      appEngineDefaultStagingBucket,
+      "  bucket = google_storage_bucket.app_engine_source_staging.name",
+    ),
+  ),
+  "App Engine default staging admin: bucket must be exactly",
+);
+expectFailure(
+  mutate(
+    files,
+    "terraform/deploy-staging.tf",
+    appEngineDefaultStagingAdminBlock,
+    appEngineDefaultStagingAdminBlock.replace(
+      appEngineDefaultStagingAdminRole,
+      '  role   = "roles/storage.objectAdmin"',
+    ),
+  ),
+  "App Engine default staging admin: role must be exactly",
+);
+expectFailure(
+  mutate(
+    files,
+    "terraform/deploy-staging.tf",
+    appEngineDefaultStagingAdminBlock,
+    appEngineDefaultStagingAdminBlock.replace(
+      appEngineDefaultStagingAdminMember,
+      '  member = "serviceAccount:${google_service_account.grafana_agent_builder.email}"',
+    ),
+  ),
+  "App Engine default staging admin: member must be exactly",
+);
+expectFailure(
+  mutate(
+    files,
+    "terraform/deploy-staging.tf",
+    appEngineDefaultStagingAdminBlock,
+    appEngineDefaultStagingAdminBlock.replace(
+      appEngineDefaultStagingAdminDependency,
+      "  depends_on = [google_project_service.appengine]",
+    ),
+  ),
+  "App Engine default staging admin: depends_on must be exactly",
+);
 expectFailure(
   mutate(
     files,

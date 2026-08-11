@@ -3,7 +3,7 @@ title: Terraform Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-10
+last_verified: 2026-08-11
 doc_type: agent-instructions
 scope: terraform
 review_interval_days: 90
@@ -89,6 +89,9 @@ image pull depend on the exact boundaries.
 - Keep routine Cloud Build and App Engine uploads on the explicit buckets and
   scoped roles in
   [`ADR 0053`](../docs/adr/0053-explicit-deployment-source-staging.md). The
+  default AppSpot service account may receive Storage Admin only on its
+  service-owned `staging.<project>.appspot.com` bucket; never grant it at
+  project scope or on either Terraform-managed source bucket. The
   Metrics Bridge builder migration in
   [`ADR 0058`](../docs/adr/0058-metrics-bridge-dedicated-cloud-build-executor.md)
   has an applied, verified IAM foundation, and the checked-in build config pins
