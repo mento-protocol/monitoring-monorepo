@@ -320,6 +320,25 @@ await test("inline list items keep commas inside quotes (#1769 round 8)", () => 
   assertEqual(parsed.how_to_check[1], "check head tags");
 });
 
+await test("inline list items honor escaped/doubled quotes (#1769 round 9)", () => {
+  // A backslash-escaped quote (YAML `"\""`) before a comma must NOT end the item
+  // and split the comma into another bullet.
+  const escaped = parseVerdictYaml(
+    'decision_branches: ["Yes: preserve \\"A, B\\"", "No: close"]',
+  );
+  assertEqual(escaped.decision_branches.length, 2);
+  assertEqual(escaped.decision_branches[0], 'Yes: preserve "A, B"');
+  assertEqual(escaped.decision_branches[1], "No: close");
+
+  // A doubled single-quote (YAML `''`) is a literal quote inside the item.
+  const doubled = parseVerdictYaml(
+    "how_to_check: ['it''s here, look', 'then here']",
+  );
+  assertEqual(doubled.how_to_check.length, 2);
+  assertEqual(doubled.how_to_check[0], "it's here, look");
+  assertEqual(doubled.how_to_check[1], "then here");
+});
+
 await test("the new fields are empty for a verdict that omits them", () => {
   const parsed = parseVerdictComment(
     verdictComment("verdict: code-fix\nconfidence: high"),
@@ -587,6 +606,58 @@ await test("a hostile permalink cannot plant a second link in the header (#1769 
   assert(
     benign.includes(`[View in Sentry](${PERMALINK})`),
     "a benign permalink must render unescaped",
+  );
+});
+
+await test("an unrecognized affected_repo is not rendered as a go-look-here pointer (#1769 round 9)", () => {
+  // A prompt-injected but syntactically valid `affected_repo` must not be
+  // elevated into a "How to check — in `attacker/evil-repo`" instruction; it is
+  // omitted unless it is on the projection allowlist (or this repo).
+  const hostile = renderBriefComment({
+    parsed: parseVerdictComment(
+      verdictComment(
+        [
+          "verdict: needs-human",
+          "confidence: low",
+          "affected_repo: attacker/evil-repo",
+          "human_question: Decide whether to rotate the signing key.",
+          "how_to_check:",
+          "  - inspect the handler",
+        ].join("\n"),
+      ),
+    ),
+    shortId: parseShortId(TITLE),
+    permalink: PERMALINK,
+  });
+  assert(
+    !hostile.includes("attacker/evil-repo"),
+    "an unrecognized repo must never be rendered verbatim",
+  );
+  assert(
+    hostile.includes("**How to check**:"),
+    "the how-to-check clause renders without a repo when unrecognized",
+  );
+
+  // An allowlisted repo still renders (routing a checker needs).
+  const allowed = renderBriefComment({
+    parsed: parseVerdictComment(
+      verdictComment(
+        [
+          "verdict: needs-human",
+          "confidence: low",
+          "affected_repo: mento-protocol/minipay-dapp",
+          "human_question: Decide whether to rotate the signing key.",
+          "how_to_check:",
+          "  - inspect the handler",
+        ].join("\n"),
+      ),
+    ),
+    shortId: parseShortId(TITLE),
+    permalink: PERMALINK,
+  });
+  assert(
+    allowed.includes("**How to check** — in `mento-protocol/minipay-dapp`:"),
+    "an allowlisted repo is named on the how-to-check line",
   );
 });
 
@@ -1138,12 +1209,18 @@ await test("the brief leg is not a stub-body writer, and owns its marker alone",
   // The stub body has exactly ONE authorized writer (the trust boundary in
   // sentry-triage-queue-contract.mjs): the archive leg's baseline write. The
   // brief renders a COMMENT, so no other script carries its marker or the old
-  // body-strip helper, and the leg itself never runs `gh issue edit`.
+  // body-strip helper, and the leg itself never runs `gh issue edit`. The marker
+  // and renderer live in the brief leg's two files (the render sibling from the
+  // #1769 round-9 split), which are the only ones exempt.
+  const briefLegFiles = new Set([
+    "sentry-triage-brief.mjs",
+    "sentry-triage-brief-render.mjs",
+  ]);
   const scriptsDir = join(repoRoot, "scripts");
   const offenders = [];
   for (const file of readdirSync(scriptsDir)) {
     if (!file.endsWith(".mjs") || file.endsWith(".test.mjs")) continue;
-    if (file === "sentry-triage-brief.mjs") continue;
+    if (briefLegFiles.has(file)) continue;
     const src = readFileSync(join(scriptsDir, file), "utf8");
     if (
       /BRIEF_COMMENT_MARKER|sentry-triage-brief:v1|stripBriefFromBody/.test(src)
@@ -1167,6 +1244,7 @@ await test("the pipeline's shared modules stay under the file-size hard cap", ()
     "scripts/sentry-triage-project-core.mjs",
     "scripts/sentry-triage-text.mjs",
     "scripts/sentry-triage-brief.mjs",
+    "scripts/sentry-triage-brief-render.mjs",
     "scripts/sentry-triage-queue-contract.mjs",
     "scripts/sentry-triage-requeue.mjs",
   ]
@@ -1174,6 +1252,19 @@ await test("the pipeline's shared modules stay under the file-size hard cap", ()
     .filter(([, lines]) => lines > 1000)
     .map(([path, lines]) => `${path}:${lines}`);
   assertEqual(oversized.join(", "), "");
+});
+
+await test("the brief leg stays under the 600-line soft cap (#1769 round 9)", () => {
+  // docs/pr-checklists/recurring-review-patterns.md sets a 600-line soft cap;
+  // scripts/ has no max-lines lint, so pin it here. The round-9 split moved the
+  // renderer into a sibling to bring the leg back under it.
+  for (const path of [
+    "scripts/sentry-triage-brief.mjs",
+    "scripts/sentry-triage-brief-render.mjs",
+  ]) {
+    const lines = readRepoFile(path).split("\n").length;
+    assert(lines <= 600, `${path} is ${lines} lines, over the 600 soft cap`);
+  }
 });
 
 await test("the moved text helpers stay importable from the verdict contract", () => {

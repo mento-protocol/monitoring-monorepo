@@ -320,17 +320,33 @@ export const MAX_BRIEF_LIST_ITEMS = 5;
  * Split a YAML flow-sequence body (`a, "b, c", 'd'`) on commas OUTSIDE quotes,
  * so a comma inside a quoted brief item is preserved rather than splitting the
  * item into rendered bullets (#1769 round 8: a `decision_branches` value like
- * `"Yes -> allow A, B"` must stay one branch). Quote chars are consumed, each
- * item is trimmed, and empties dropped.
+ * `"Yes -> allow A, B"` must stay one branch). Escapes are honored so an item
+ * can contain the quote character itself (#1769 round 9): inside a double-quoted
+ * item a backslash escapes the next char (YAML `"\""`), and a doubled quote of
+ * either kind is a literal quote (YAML `'' `/`""`) — neither ends the item.
+ * Quote chars are consumed, each item is trimmed, and empties dropped.
  */
 function splitQuotedListItems(inner) {
   const items = [];
   let buf = "";
   let quote = null;
-  for (const ch of String(inner ?? "")) {
+  const s = String(inner ?? "");
+  for (let i = 0; i < s.length; i += 1) {
+    const ch = s[i];
     if (quote) {
-      if (ch === quote) quote = null;
-      else buf += ch;
+      if (quote === '"' && ch === "\\" && i + 1 < s.length) {
+        // Double-quote backslash escape: the next char is literal (incl. `"`).
+        buf += s[i + 1];
+        i += 1;
+      } else if (ch === quote && s[i + 1] === quote) {
+        // Doubled quote inside a quote of the same kind -> one literal quote.
+        buf += ch;
+        i += 1;
+      } else if (ch === quote) {
+        quote = null;
+      } else {
+        buf += ch;
+      }
     } else if (ch === '"' || ch === "'") {
       quote = ch;
     } else if (ch === ",") {

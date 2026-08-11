@@ -44,252 +44,47 @@
  *     its old comment until the next round's verdict lands, on a stub whose
  *     labels already read `sentry:needs-triage`.
  *
- * Security posture — the rendered fields are agent-authored text derived from
- * attacker-reachable Sentry payloads, and this repo is public:
- *   - Every free-form field goes through the SHARED selection+bound
- *     (`selectNeedsHumanBriefFields`, `MAX_BRIEF_TEXT_LEN`), then
- *     `neutralizeUntrusted` — control chars stripped, newlines collapsed,
- *     backticks defanged, `@` defanged — and finally this emitter's own surface
- *     escape, `escapeGithubMarkdown`. The escape is what makes agent text render
- *     as text and never as a control of its own: neutralization alone leaves
- *     `[text](url)`, `![img](url)`, raw HTML and entity references active, which
- *     is enough for agent text to put a clickable link beside the trusted
- *     `[View in Sentry]` one.
- *   - SINGLE-LINE by construction, so a field cannot emit a line of its own.
- *   - No fenced code block is emitted anywhere, so the comment cannot be parsed
- *     as a verdict comment (`parseVerdictComment` needs a ```yaml fence).
- *   - Closed-set and shape-validated values only in the header: SHORT-ID
- *     (`isValidShortId`), confidence (closed enum), affected repo (bare
- *     `owner/name` slug or nothing), Sentry permalink (`extractPermalink`,
- *     https `*.sentry.io`).
- *   - `assertInertBlock` fails the write CLOSED if the comment would open with
- *     the verdict marker or reproduce a prefix-anchored control comment
- *     (regression reopen / projection pointer / autofix pointer) at the start of
- *     a line. That keeps the display-only brief comment inert to every
- *     prefix-anchored pipeline consumer (`selectVerdictComment` and friends).
- *   - The brief comment is DISPLAY-ONLY: no pipeline consumer parses it as a
- *     contract, so its author identity is not a trust boundary. This leg selects
- *     the comment to update/delete by the shared trusted-author + marker fence
- *     (`isTrustedComment` + `BRIEF_COMMENT_MARKER`), so a drive-by commenter
- *     cannot make it PATCH or DELETE their comment.
+ * The rendering, the two markdown escapes and the inert-block assertion live in
+ * scripts/sentry-triage-brief-render.mjs (#1769 round 9 file-size split) and are
+ * re-exported below; their security posture is documented there. This module
+ * owns the lifecycle, the GitHub I/O, and the write-side terminal guards
+ * (#1769 rounds 6-7). The brief comment is DISPLAY-ONLY: no pipeline consumer
+ * parses it as a contract, so this leg selects the comment to update/delete by
+ * the shared trusted-author + marker fence (`isTrustedComment` +
+ * `BRIEF_COMMENT_MARKER`), and a drive-by commenter cannot make it PATCH or
+ * DELETE their comment.
  */
 
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-// The autofix pointer prefix is owned by the digest module (it defines the
-// emission contract #1278 reads); import it rather than restating the literal.
-import { AUTOFIX_COMMENT_PREFIX } from "./sentry-triage-digest.mjs";
 import {
   DEFAULT_REPO,
   extractPermalink,
   isTrustedComment,
-  isValidShortId,
-  neutralizeUntrusted,
   parseShortId,
-  PROJECTED_COMMENT_PREFIX,
-  REGRESSION_PREFIX,
   resolveVerdict,
-  selectNeedsHumanBriefFields,
-  VERDICT_MARKER,
   verdictCommentIdFromUrl,
 } from "./sentry-triage-project-core.mjs";
 // The terminal marker the write-side guard refuses to write past — one source of
 // truth with the archive leg that applies it.
 import { ARCHIVED_LABEL } from "./sentry-triage-queue-contract.mjs";
+// Pure rendering + the two markdown escapes + the inert-block assertion live in
+// a sibling module (#1769 round 9 file-size split). Re-exported here so the brief
+// leg stays one import surface for its consumers (its tests, the archive leg).
+import {
+  assertInertBlock,
+  BRIEF_COMMENT_MARKER,
+  renderBriefComment,
+} from "./sentry-triage-brief-render.mjs";
 
-// The brief comment's anchor. The selector matches a comment by trusted author
-// AND `startsWith(BRIEF_COMMENT_MARKER)` — the same fence the rolling run-record
-// writers use — so an untrusted commenter cannot plant the marker and have this
-// leg PATCH or DELETE their comment. Escaping already stops an agent-authored
-// field from reproducing these literal bytes.
-export const BRIEF_COMMENT_MARKER = "<!-- sentry-triage-brief:v1 -->";
-
-// Prefix-anchored control comments elsewhere in the pipeline. The brief must
-// never reproduce one at the start of a line — see `assertInertBlock`.
-const CONTROL_PREFIXES = [
-  VERDICT_MARKER,
-  REGRESSION_PREFIX,
-  PROJECTED_COMMENT_PREFIX,
-  AUTOFIX_COMMENT_PREFIX,
-];
-
-// ---------------------------------------------------------------------------
-// Rendering (pure).
-// ---------------------------------------------------------------------------
-
-// Every character GitHub markdown treats as ACTIVE. A backslash before ASCII
-// punctuation is a CommonMark escape, so escaping the whole set costs nothing
-// visually — the reader sees the original characters, the renderer sees no
-// syntax — which is why the set is deliberately wide rather than minimal.
-//
-// `&` is in the set because GitHub decodes entity references: leaving it live
-// would let `&#60;` render as `<` and reintroduce every character escaped here.
-// `<` and `>` cover raw HTML and autolinks; `[` `]` `(` `)` `!` cover links and
-// images; `#` `+` `-` `.` cover the block constructs a field could start after
-// the renderer's own `- ` bullet prefix; `*` `_` `~` cover emphasis; `|` covers
-// table cells; the backslash itself must come first, and does, because the
-// class is applied in one pass.
-const GITHUB_MARKDOWN_ACTIVE = /[\\`*_[\]()<>&#+.!|~-]/g;
-
-/**
- * The GitHub emitter's surface escape — the counterpart of the Slack emitter's
- * `escapeSlackText`, applied on top of the shared bound + neutralization.
- *
- * Neutralization makes a field single-line and kills backticks and mentions; it
- * does NOT stop the field from RENDERING. A question carrying
- * `[View in Sentry](https://evil.example)` or a step carrying
- * `![ok](https://evil.example/x)` renders as a live link or image next to the
- * pipeline's own trusted controls, which is the whole spoof. After this, agent
- * text can only ever render as text.
- */
-export function escapeGithubMarkdown(text) {
-  return String(text ?? "").replace(GITHUB_MARKDOWN_ACTIVE, "\\$&");
-}
-
-// The chars that let a value break OUT of a markdown link destination `(...)`
-// or plant an adjacent `[..](..)` link next to the trusted one: the closing
-// paren ends the destination, `[`/`]`/`(` open a new link, backtick a code
-// span, and the backslash itself must come first. `<>|` and whitespace/control
-// chars are already rejected upstream by `isSafeSentryPermalink`. A URL's own
-// `.`/`-`/`/`/`:` are NOT escaped, so a legit permalink still renders as a clean
-// link while a hostile one is inert.
-const GITHUB_LINK_DESTINATION_ACTIVE = /[\\`()[\]]/g;
-
-/**
- * Escape a URL for use as a GitHub markdown link DESTINATION. The Sentry
- * permalink is validated (`isSafeSentryPermalink`: https `*.sentry.io`, no
- * `<>|`/control chars) but that check is Slack-oriented and lets `)([]` through,
- * so a value like `https://sentry.io/x)[evil](https://evil.example` would render
- * a second active link beside the trusted control. Escaping the
- * destination-breaking chars closes that (#1769 round 8).
- */
-export function escapeGithubLinkDestination(url) {
-  return String(url ?? "").replace(GITHUB_LINK_DESTINATION_ACTIVE, "\\$&");
-}
-
-/** Neutralize AND escape one already-selected, already-bounded field for GitHub
- * markdown. Single-line in, single-line inert text out. */
-function renderField(text) {
-  return escapeGithubMarkdown(neutralizeUntrusted(text));
-}
-
-/** `- item` bullets for one neutralized list; empty list -> no lines. */
-function renderBullets(items) {
-  return items
-    .map((item) => `- ${renderField(item)}`)
-    .filter((l) => l !== "- ");
-}
-
-/** `- **<label>:** <item>` per list entry, so a collapsed evidence bullet says
- * what kind of evidence it is without a nested list. */
-function labelledBullets(label, items) {
-  return items
-    .map((item) => renderField(item))
-    .filter(Boolean)
-    .map((item) => `- **${label}:** ${item}`);
-}
-
-/**
- * Render the decision-ready brief comment for ONE resolved needs-human verdict.
- *
- * Fixed order, so the format cannot drift comment to comment: marker -> decision
- * header -> the question -> how to check -> what each answer leads to ->
- * everything else collapsed. Sections whose field the verdict did not carry are
- * omitted entirely rather than rendered empty; `human_question` is always
- * present because `resolveVerdict` rejects a needs-human verdict without one.
- *
- * @param {object} args
- * @param {object} args.parsed  parsed verdict comment (parseVerdictComment)
- * @param {string} args.shortId Sentry SHORT-ID from the queue title
- * @param {string|null} args.permalink Sentry permalink from the stub body
- */
-export function renderBriefComment({ parsed, shortId, permalink }) {
-  const fields = selectNeedsHumanBriefFields(parsed);
-  const lines = [BRIEF_COMMENT_MARKER, ""];
-
-  // Header: shape-validated / closed-enum values only, never free text.
-  const headerParts = ["**Decision needed**"];
-  if (isValidShortId(shortId)) headerParts.push(`\`${shortId}\``);
-  if (permalink) {
-    headerParts.push(
-      `[View in Sentry](${escapeGithubLinkDestination(permalink)})`,
-    );
-  }
-  headerParts.push(`confidence: ${parsed?.confidence ?? "unknown"}`);
-  lines.push(`> ${headerParts.join(" · ")}`, "");
-
-  lines.push(`**Question:** ${renderField(fields.question)}`, "");
-
-  if (fields.howToCheck.length) {
-    // `affected_repo` parses as a bare `owner/name` slug or empty — safe to
-    // inline, and it is the one piece of routing a checker needs first.
-    const repo = parsed?.affectedRepo ? ` — in \`${parsed.affectedRepo}\`` : "";
-    lines.push(
-      `**How to check**${repo}:`,
-      "",
-      ...renderBullets(fields.howToCheck),
-      "",
-    );
-  }
-
-  if (fields.decisionBranches.length) {
-    lines.push("**Then:**", "", ...renderBullets(fields.decisionBranches), "");
-  }
-
-  // Justification, not instruction — collapsed, per #1748. Rendered as bullets
-  // (never a fence: see the module header).
-  const evidence = [];
-  if (fields.escalationReason) {
-    evidence.push(
-      `- **Why escalated:** ${renderField(fields.escalationReason)}`,
-    );
-  }
-  evidence.push(...labelledBullets("Hypothesis", fields.hypotheses));
-  evidence.push(...labelledBullets("Checked", fields.investigated));
-  if (evidence.length) {
-    lines.push(
-      "<details><summary>Evidence and context</summary>",
-      "",
-      ...evidence,
-      "",
-      "</details>",
-      "",
-    );
-  }
-
-  lines.push(
-    "_Rendered by the Sentry triage pipeline from this issue's verdict comment; the machine-readable verdict YAML lives there. This comment is overwritten on re-triage and removed once the verdict is no longer needs-human._",
-  );
-  return lines.join("\n");
-}
-
-/**
- * Fail CLOSED if the assembled comment could be misread by a prefix-anchored
- * consumer: it must not START with the verdict marker, and no line may START
- * with a control-comment prefix. Neither is reachable through a rendered field
- * today (every field is single-line and lands after our own literal prefix),
- * which is exactly why this is an assertion rather than a rewrite — if it ever
- * fires, the renderer changed shape and the change needs a human.
- */
-export function assertInertBlock(block) {
-  const text = String(block ?? "");
-  if (text.startsWith(VERDICT_MARKER)) {
-    throw new Error(
-      "Refusing to write a brief comment that starts with the verdict marker.",
-    );
-  }
-  for (const line of text.split("\n")) {
-    for (const prefix of CONTROL_PREFIXES) {
-      if (line.startsWith(prefix)) {
-        throw new Error(
-          `Refusing to write a brief comment whose line reproduces a pipeline control prefix: ${prefix.trim()}`,
-        );
-      }
-    }
-  }
-  return text;
-}
+export {
+  assertInertBlock,
+  BRIEF_COMMENT_MARKER,
+  escapeGithubLinkDestination,
+  escapeGithubMarkdown,
+  renderBriefComment,
+} from "./sentry-triage-brief-render.mjs";
 
 // ---------------------------------------------------------------------------
 // GitHub I/O (via `gh`, mirroring the projection/digest legs).
@@ -508,11 +303,9 @@ export async function clearBriefComments({
  * needs no label observation to stay clear of it.
  *
  * Fails LOUD on a missing/stale/invalid verdict (via `resolveVerdict`) and on a
- * brief comment with no parseable id. The verdict job runs this after the label
- * swap, inside the window where `sentry:needs-triage` is already off, so its
- * step catches a failure here and re-queues the stub before failing — see the
- * compensation in .github/workflows/sentry-triage-agent.yml. Everything this leg
- * does is idempotent, so that retry costs nothing.
+ * brief comment with no parseable id. The workflow step is best-effort (#1769
+ * round 8): a failure here logs and the job continues, leaving the stub in its
+ * already-correct post-verdict state. Everything this leg does is idempotent.
  */
 export async function runBrief({
   runGh = defaultRunGh,

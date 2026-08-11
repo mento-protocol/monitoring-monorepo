@@ -2303,7 +2303,7 @@ while IFS= read -r path; do
           # maps the projection suite pins against each other.
           add_command "pnpm sentry:project:test" "Sentry triage digest helper changed"
           ;;
-        scripts/sentry-triage-brief.mjs|scripts/sentry-triage-brief.test.mjs)
+        scripts/sentry-triage-brief.mjs|scripts/sentry-triage-brief-render.mjs|scripts/sentry-triage-brief.test.mjs)
           add_command "pnpm sentry:brief:test" "Sentry needs-human brief helper changed"
           # Sibling emitter over the same shared selection.
           add_command "pnpm sentry:digest:test" "Sentry needs-human brief helper changed"
