@@ -375,6 +375,14 @@ export function findBriefComments(comments) {
   );
 }
 
+/** A `gh` failure whose target no longer exists (HTTP 404). Local copy of the
+ * archive leg's predicate — brief.mjs cannot import from archive.mjs, which
+ * imports IT (round 5). Used to treat "the archive already deleted this brief"
+ * as a no-op success rather than a failure. */
+function isNotFoundError(err) {
+  return /HTTP 404|Not Found/i.test(err instanceof Error ? err.message : "");
+}
+
 /** The numeric REST id of a comment, parsed from its `url` (`gh`'s comment
  * `.id` is an opaque GraphQL node id the REST edit/delete endpoints reject).
  * Throws rather than guess: without it this leg cannot edit or delete. */
@@ -556,13 +564,47 @@ export async function runBrief({
     await createBriefComment(runGh, repo, issueNumber, block);
     written = true;
   } else if (primary.body !== block) {
-    await updateBriefComment(runGh, repo, briefCommentId(primary), block);
-    written = true;
+    try {
+      await updateBriefComment(runGh, repo, briefCommentId(primary), block);
+      written = true;
+    } catch (err) {
+      // The archive leg deleted the brief between our read and this update
+      // (round 5 cleanup) — it already did the right thing. A 404 here is a
+      // no-op SUCCESS, not a failure: throwing would trip the workflow
+      // compensation, which would add sentry:needs-triage to a stub the archive
+      // just settled (#1769 round 7). Do not re-create it either — re-creating
+      // is the very race the post-write settlement below exists to undo.
+      if (!isNotFoundError(err)) throw err;
+      log(
+        `::notice::Issue #${issueNumber}: the brief comment was already deleted before this update (archive settlement); treating as a no-op.`,
+      );
+      return { written: false, verdict, settledTerminal: true };
+    }
   }
   // Never leave two "Decision needed" comments on one stub.
   for (const duplicate of duplicates) {
     await deleteBriefComment(runGh, repo, briefCommentId(duplicate));
     written = true;
+  }
+
+  // Post-write settlement (#1769 round 7). The pre-write guard is a TOCTOU
+  // check: an archive can close+archive the stub AND run its own cleanup in the
+  // window between that read and this write, after which the comment we just
+  // created/updated sits on a closed archive. Re-read the terminal state AFTER
+  // the write and, if the stub is now terminal, delete the brief we just wrote.
+  // The common race self-heals within the run — the write-side complement of
+  // the archive's cleanup (round 5) and the pre-write guard (round 6), closing
+  // the last window. Idempotent, and it removes only marked comments.
+  if (written) {
+    const settled = await readStubTerminalState(runGh, repo, issueNumber);
+    if (settled.closed || settled.archived) {
+      const { comments } = await readQueueIssue(runGh, repo, issueNumber);
+      await clearBriefComments({ runGh, repo, issueNumber, comments, log });
+      log(
+        `::notice::Issue #${issueNumber} settled terminal during the brief write; removed the brief just written (state=${settled.state}, archived=${settled.archived}).`,
+      );
+      return { written: false, verdict, settledTerminal: true };
+    }
   }
 
   log(

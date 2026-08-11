@@ -890,6 +890,21 @@ jobs:
           if ! node scripts/sentry-triage-brief.mjs \
               --issue "${QUEUE_ISSUE_NUMBER}" \
               --repo "${GITHUB_REPOSITORY}"; then
+            # The archive leg runs in a DIFFERENT concurrency group and can settle
+            # this stub concurrently. If it did — CLOSED or sentry:archived — the
+            # archive OWNS it: re-queuing (adding sentry:needs-triage without
+            # reopening) would strand a closed+archived+needs-triage stub no stage
+            # can act on, and failing the job over a stub that reached a valid
+            # terminal state is a false alarm. Re-read and no-op on terminal
+            # (#1769 round 7). runBrief's own post-write settlement already makes
+            # the common race self-heal; this guards the residual where the script
+            # fails for another reason on a stub the archive settled meanwhile.
+            brief_state=$(gh issue view "${QUEUE_ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --json state --jq '.state')
+            brief_archived=$(gh issue view "${QUEUE_ISSUE_NUMBER}" --repo "${GITHUB_REPOSITORY}" --json labels --jq 'any(.labels[]?; .name == "sentry:archived")')
+            if [ "${brief_state}" = "CLOSED" ] || [ "${brief_archived}" = "true" ]; then
+              echo "::notice::Issue #${QUEUE_ISSUE_NUMBER} settled terminal (state=${brief_state}, archived=${brief_archived}) during the brief step; the archive leg owns it — not re-queuing."
+              exit 0
+            fi
             echo "::error::Could not settle the needs-human brief on issue #${QUEUE_ISSUE_NUMBER} (see the log above); restoring sentry:needs-triage (and shedding the verdict labels + sentry:projected) so the next scheduled run retries it."
             requeue_for_retry
             exit 1

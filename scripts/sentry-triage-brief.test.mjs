@@ -191,7 +191,10 @@ function renderFixture(yaml = VERDICT_YAML, body = STUB_BODY) {
  * in place; `api -X DELETE .../comments/<id>` removes it. The stub BODY is never
  * a write target — that is the invariant these tests exist to hold.
  */
-function makeRunGh(issue, { nextCommentId = 9000 } = {}) {
+function makeRunGh(
+  issue,
+  { nextCommentId = 9000, onView = null, beforeCall = null } = {},
+) {
   const state = {
     number: issue.number,
     title: issue.title,
@@ -205,6 +208,7 @@ function makeRunGh(issue, { nextCommentId = 9000 } = {}) {
   };
   const calls = [];
   let idSeq = nextCommentId;
+  let views = 0;
   const idOf = (path) => path.split("/").pop();
   const matches = (comment, id) =>
     String(comment.url ?? "").endsWith(`#issuecomment-${id}`);
@@ -213,7 +217,15 @@ function makeRunGh(issue, { nextCommentId = 9000 } = {}) {
     state,
     runGh: async (args, opts) => {
       calls.push({ args, stdin: opts?.stdin });
+      // `beforeCall` lets a test model the archive leg mutating the stub between
+      // this leg's reads and its writes (the TOCTOU window, #1769 round 7).
+      beforeCall?.(args, state);
       if (args[0] === "issue" && args[1] === "view") {
+        views += 1;
+        // `onView(n, state)` lets a test flip the stub terminal AFTER a given
+        // read — e.g. open at the pre-write guard, archived at the post-write
+        // settlement read.
+        onView?.(views, state);
         return JSON.stringify(state);
       }
       if (args[0] === "issue" && args[1] === "comment") {
@@ -230,7 +242,14 @@ function makeRunGh(issue, { nextCommentId = 9000 } = {}) {
         const id = idOf(args[args.indexOf("PATCH") + 1]);
         const body = JSON.parse(opts?.stdin ?? "{}").body ?? "";
         const target = state.comments.find((c) => matches(c, id));
-        if (target) target.body = body;
+        // A PATCH against a comment the archive already deleted 404s — the shape
+        // the update-target-deleted path must treat as a no-op success.
+        if (!target) {
+          throw new Error(
+            `gh ${args.join(" ")} failed with exit 1:\ngh: Not Found (HTTP 404)`,
+          );
+        }
+        target.body = body;
         return "";
       }
       if (args[0] === "api" && args.includes("DELETE")) {
@@ -887,6 +906,79 @@ await test("the normal open needs-human stub still writes past the guard", async
   assertEqual(findBriefComments(gh.state.comments).length, 1);
 });
 
+// FINDING (#1769 round 7): the residual TOCTOU between the pre-write guard and
+// the write. Post-write settlement self-heals it; a deleted update target is a
+// no-op success, not a failure.
+await test("a stub that goes terminal between the guard and the write self-heals (round 7)", async () => {
+  // View #1 = initial read (open); view #2 = pre-write guard (open, so the write
+  // proceeds); the archive then settles the stub; view #3 = post-write read
+  // (terminal), which deletes the brief this run just created.
+  const gh = makeRunGh(stubIssue(), {
+    onView: (n, state) => {
+      if (n === 3) {
+        state.state = "CLOSED";
+        state.labels = [{ name: "sentry:archived" }];
+      }
+    },
+  });
+  const result = await runBrief({
+    runGh: gh.runGh,
+    issueNumber: 1731,
+    log: () => {},
+  });
+  assertEqual(result.settledTerminal, true);
+  assertEqual(result.written, false);
+  // The brief WAS created, then removed by the post-write settlement.
+  assertEqual(created(gh).length, 1);
+  assert(deleted(gh).length >= 1, "the just-written brief is deleted");
+  assertEqual(findBriefComments(gh.state.comments).length, 0);
+  // Never a body write.
+  assertEqual(wroteBody(gh), false);
+});
+
+await test("an update whose target was deleted concludes success, no compensation (round 7)", async () => {
+  // Primary brief exists with STALE content (so the update path is taken), but
+  // the archive deletes it just before the PATCH lands -> 404. That is a no-op
+  // success (archive already did the right thing), NOT a throw that would trip
+  // the workflow compensation, and the brief is NOT re-created.
+  const gh = makeRunGh(
+    {
+      ...stubIssue(),
+      comments: [
+        briefCommentObject(`${BRIEF_COMMENT_MARKER}\n\n> stale brief`, 9401),
+        verdictCommentObject(),
+      ],
+    },
+    {
+      beforeCall: (args, state) => {
+        if (args[0] === "api" && args.includes("PATCH")) {
+          state.comments = state.comments.filter(
+            (c) => !String(c.body).startsWith(BRIEF_COMMENT_MARKER),
+          );
+        }
+      },
+    },
+  );
+  let threw = false;
+  let result;
+  try {
+    result = await runBrief({
+      runGh: gh.runGh,
+      issueNumber: 1731,
+      log: () => {},
+    });
+  } catch {
+    threw = true;
+  }
+  assert(!threw, "a 404 on the update target must not throw (no compensation)");
+  assertEqual(result.settledTerminal, true);
+  assertEqual(result.written, false);
+  // Not re-created, no body write.
+  assertEqual(created(gh).length, 0);
+  assertEqual(findBriefComments(gh.state.comments).length, 0);
+  assertEqual(wroteBody(gh), false);
+});
+
 // ---------------------------------------------------------------------------
 // Wiring: prompt, doc, workflow, and the single-body-writer invariant.
 // ---------------------------------------------------------------------------
@@ -966,6 +1058,37 @@ await test("a failing brief step re-queues the stub instead of stranding it", ()
     if (line !== "exit 1") return;
     assertEqual(meaningful[i - 1], "requeue_for_retry");
   });
+});
+
+await test("the brief compensation no-ops on a terminal stub, never stranding it (#1769 round 7)", () => {
+  const workflow = readRepoFile(".github/workflows/sentry-triage-agent.yml");
+  const step = workflow.slice(
+    workflow.indexOf("- name: Render or clear the needs-human brief"),
+    workflow.indexOf("- name: Close queue stub"),
+  );
+  // On a script failure, the compensation re-reads the terminal signals and
+  // NO-OPS (exit 0) when the archive settled the stub — so it never adds
+  // sentry:needs-triage to a closed/archived stub, which would strand a
+  // closed+archived+needs-triage stub no stage can act on.
+  assert(
+    step.includes("--json state"),
+    "the compensation must re-read the stub state before re-queuing",
+  );
+  assert(
+    step.includes('.name == "sentry:archived"'),
+    "the compensation must check the terminal archive marker",
+  );
+  const meaningful = step
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "" && !line.startsWith("#"));
+  const exit0 = meaningful.indexOf("exit 0");
+  const requeueCall = meaningful.indexOf("requeue_for_retry");
+  assert(exit0 >= 0, "expected an exit-0 no-op path for a terminal stub");
+  assert(
+    exit0 < requeueCall,
+    "the terminal no-op (exit 0) must precede requeue_for_retry, so a terminal stub is never re-queued",
+  );
 });
 
 await test("the brief leg is not a stub-body writer, and owns its marker alone", () => {
