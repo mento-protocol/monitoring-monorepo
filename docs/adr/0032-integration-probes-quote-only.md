@@ -3,7 +3,7 @@ title: Integration probes are quote-only, evidence-gated, and TTL-degraded
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-24
+last_verified: 2026-08-11
 scope: integration-probes
 date: 2026-06
 doc_type: adr
