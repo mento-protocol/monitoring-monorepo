@@ -459,6 +459,17 @@ function toCount(value) {
   return Number.isFinite(n) ? n : 0;
 }
 
+// `toCount` deliberately fails open to 0 so the public yaml always renders a
+// number. That makes it lossy in exactly the way the deterministic noise rule
+// (#1614 part 3) must not be: "Sentry reported nobody affected" and "Sentry
+// reported nothing" both arrive as 0, and only the first is evidence. This
+// preserves the distinction alongside it. `null`/`""` are NOT known values,
+// though `Number()` maps both to 0.
+export function isKnownCount(value) {
+  if (value === undefined || value === null || value === "") return false;
+  return Number.isFinite(Number(value));
+}
+
 export function mapSentryIssue(raw) {
   return {
     id: String(raw?.id ?? ""),
@@ -470,6 +481,9 @@ export function mapSentryIssue(raw) {
     project: raw?.project?.slug ?? raw?.project?.name ?? "unknown",
     events: toCount(raw?.count),
     users: toCount(raw?.userCount),
+    // Not in METADATA_FIELDS, so it never renders in the public stub body —
+    // it exists only so the noise rule can tell 0 from unknown.
+    usersKnown: isKnownCount(raw?.userCount),
     firstSeen: raw?.firstSeen ?? null,
     lastSeen: raw?.lastSeen ?? null,
     permalink: raw?.permalink ?? "",
@@ -722,23 +736,6 @@ async function createQueueIssue(options, sentryIssue) {
   const isNoise = classifyNoise(sentryIssue.title);
   const labels = buildQueueLabels(isNoise);
   const body = buildIssueBody(toMetadata(sentryIssue));
-  // Shadow mode (#1614 part 3): report what the deterministic rule WOULD have
-  // settled without an agent run, and change nothing. The stub is still created
-  // and still triaged normally. Read these lines against the verdicts the agent
-  // actually returns before anyone considers enabling the rule — the title is
-  // NOT logged (public repo, raw Sentry payload), only the SHORT-ID.
-  if (
-    !SETTLE_NOISE_ENABLED &&
-    classifyDeterministicNoise({
-      title: sentryIssue.title,
-      users: sentryIssue.users,
-      lastSeen: sentryIssue.lastSeen,
-    })
-  ) {
-    process.stdout.write(
-      `::notice::sentry-triage: ${sentryIssue.shortId} matches the deterministic noise rule (0 users, quiet ${NOISE_QUIET_DAYS}d); shadow mode, triaging normally\n`,
-    );
-  }
   await runGh(
     [
       "issue",
@@ -1065,6 +1062,25 @@ export async function runIngest(options, deps = {}) {
         archiveBaselineIssueId: baseline?.sentryIssueId ?? null,
         sentryIssueId: sentryIssue.id,
       });
+      // Shadow mode (#1614 part 3) sits HERE, not at creation: an issue is
+      // created the day it is first seen, so it can never be quiet-for-N-days
+      // yet, and by the time it is quiet it takes the skip path above and is
+      // never re-examined. Evaluating at creation would therefore log almost
+      // nothing — the measurement this rule is gated on would come back empty
+      // and read as "no candidates" rather than "never looked". stderr, not
+      // stdout: `--json` callers parse stdout.
+      if (
+        !SETTLE_NOISE_ENABLED &&
+        classifyDeterministicNoise({
+          title: sentryIssue.title,
+          users: sentryIssue.usersKnown ? sentryIssue.users : undefined,
+          lastSeen: sentryIssue.lastSeen,
+        })
+      ) {
+        process.stderr.write(
+          `::notice::sentry-triage: ${sentryIssue.shortId} matches the deterministic noise rule (0 users, quiet ${NOISE_QUIET_DAYS}d, action=${decision.action}); shadow mode, no behaviour change\n`,
+        );
+      }
       if (decision.action === "skip") {
         counts.skippedExisting += 1;
       } else if (decision.action === "create") {

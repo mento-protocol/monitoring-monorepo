@@ -3142,6 +3142,32 @@ await test("unknown counts and timestamps never read as harmless", () => {
   assertEqual(classifyDeterministicNoise(), false);
 });
 
+await test("mapSentryIssue preserves unknown user counts for the noise rule", () => {
+  // toCount fails open to 0 so the public yaml always renders a number, which
+  // erases the distinction the rule depends on. Without usersKnown the guard in
+  // classifyDeterministicNoise is unreachable in production — it only ever sees
+  // an already-coerced 0 — so this is the test that makes that guard real.
+  assertEqual(mapSentryIssue({ userCount: 0 }).usersKnown, true);
+  assertEqual(mapSentryIssue({ userCount: "3" }).usersKnown, true);
+  for (const raw of [{}, { userCount: null }, { userCount: "" }]) {
+    assertEqual(mapSentryIssue(raw).usersKnown, false);
+    // The lossy field still renders 0, which is why the flag has to exist.
+    assertEqual(mapSentryIssue(raw).users, 0);
+  }
+});
+
+await test("usersKnown never reaches the public stub body", () => {
+  // The stub is a PUBLIC issue; METADATA_FIELDS is the allowlist that keeps it
+  // to Sentry-assigned identifiers. A new mapped field must not ride along.
+  const body = buildIssueBody(
+    toMetadata(mapSentryIssue({ shortId: "ABC-1", userCount: undefined })),
+  );
+  assert(
+    !body.includes("usersKnown"),
+    "usersKnown is an internal signal and must not render in the public queue stub",
+  );
+});
+
 await test("an error still arriving is never noise, however quiet it looks", () => {
   // last_seen in the FUTURE (clock skew between Sentry and the runner) must not
   // subtract into a passing window.
