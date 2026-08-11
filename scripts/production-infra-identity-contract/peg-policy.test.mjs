@@ -35,18 +35,45 @@ function withConcreteGeneration(files, generation) {
   );
 }
 
-function withTemplateRollout(files) {
-  return mutate(
-    mutate(
-      files,
-      "terraform/metrics-bridge.tf",
-      "  metrics_bridge_template_rollout_active = false",
-      "  metrics_bridge_template_rollout_active = true",
-    ),
-    "terraform/metrics-bridge.tf",
-    "      template[0].revision,\n",
-    "",
+function withTemplateRolloutMarker(files, value) {
+  const marker = files["terraform/metrics-bridge.tf"].match(
+    /^ {2}metrics_bridge_template_rollout_active = (true|false)$/mu,
   );
+  assert(marker, "fixture rollout marker missing");
+  return mutate(
+    files,
+    "terraform/metrics-bridge.tf",
+    marker[0],
+    `  metrics_bridge_template_rollout_active = ${value}`,
+  );
+}
+
+function withTemplateRollout(files) {
+  const markedFiles = withTemplateRolloutMarker(files, true);
+  return markedFiles["terraform/metrics-bridge.tf"].includes(
+    "      template[0].revision,\n",
+  )
+    ? mutate(
+        markedFiles,
+        "terraform/metrics-bridge.tf",
+        "      template[0].revision,\n",
+        "",
+      )
+    : markedFiles;
+}
+
+function withTemplateSteadyState(files) {
+  const markedFiles = withTemplateRolloutMarker(files, false);
+  return markedFiles["terraform/metrics-bridge.tf"].includes(
+    "      template[0].revision,\n",
+  )
+    ? markedFiles
+    : mutate(
+        markedFiles,
+        "terraform/metrics-bridge.tf",
+        "      template[0].containers[0].image,\n",
+        "      template[0].containers[0].image,\n      template[0].revision,\n",
+      );
 }
 
 const activeGenerationFiles = withConcreteGeneration(
@@ -57,6 +84,12 @@ assert.deepEqual(
   validateProductionInfraIdentityContract(activeGenerationFiles),
   [],
 );
+
+const steadyStateFiles = withTemplateSteadyState(validFiles);
+assert.deepEqual(validateProductionInfraIdentityContract(steadyStateFiles), []);
+
+const rolloutFiles = withTemplateRollout(steadyStateFiles);
+assert.deepEqual(validateProductionInfraIdentityContract(rolloutFiles), []);
 
 const maximumGenerationFiles = withConcreteGeneration(
   validFiles,
@@ -69,7 +102,9 @@ assert.deepEqual(
 
 assert.deepEqual(
   validateProductionInfraIdentityContract(
-    withTemplateRollout(withConcreteGeneration(validFiles, "1750000000000000")),
+    withTemplateRollout(
+      withConcreteGeneration(steadyStateFiles, "1750000000000000"),
+    ),
   ),
   [],
 );
@@ -629,7 +664,7 @@ variable "peg_policy_runtime_generation" {
 
 expectFailure(
   mutate(
-    validFiles,
+    steadyStateFiles,
     "terraform/metrics-bridge.tf",
     "      template[0].revision,\n",
     "",
@@ -639,7 +674,7 @@ expectFailure(
 
 expectFailure(
   mutate(
-    validFiles,
+    steadyStateFiles,
     "terraform/metrics-bridge.tf",
     "    ignore_changes = [\n      template[0].containers[0].image,\n      template[0].revision,",
     "    replace_triggered_by = [template[0].revision]\n\n    ignore_changes = [\n      template[0].containers[0].image,",
@@ -649,7 +684,7 @@ expectFailure(
 
 expectFailure(
   mutate(
-    validFiles,
+    steadyStateFiles,
     "terraform/metrics-bridge.tf",
     "  metrics_bridge_template_rollout_active = false",
     "  metrics_bridge_template_rollout_active = true",
@@ -659,7 +694,7 @@ expectFailure(
 
 expectFailure(
   mutate(
-    validFiles,
+    steadyStateFiles,
     "terraform/metrics-bridge.tf",
     "  metrics_bridge_template_rollout_active = false",
     '  metrics_bridge_template_rollout_active = "false"',
@@ -669,7 +704,7 @@ expectFailure(
 
 expectFailure(
   mutate(
-    validFiles,
+    steadyStateFiles,
     "terraform/metrics-bridge.tf",
     "  metrics_bridge_template_rollout_active = false\n",
     "",
@@ -679,7 +714,7 @@ expectFailure(
 
 expectFailure(
   mutate(
-    validFiles,
+    steadyStateFiles,
     "terraform/metrics-bridge.tf",
     "  metrics_bridge_template_rollout_active = false",
     "  metrics_bridge_template_rollout_active = false\n  metrics_bridge_template_rollout_active = true",
@@ -688,7 +723,7 @@ expectFailure(
 );
 
 const oneLineIgnoreChangesFiles = mutate(
-  validFiles,
+  steadyStateFiles,
   "terraform/metrics-bridge.tf",
   `    ignore_changes = [
       template[0].containers[0].image,
@@ -706,16 +741,10 @@ assert(
 );
 
 const rolloutOneLineIgnoreChangesFiles = mutate(
-  mutate(
-    validFiles,
-    "terraform/metrics-bridge.tf",
-    "  metrics_bridge_template_rollout_active = false",
-    "  metrics_bridge_template_rollout_active = true",
-  ),
+  rolloutFiles,
   "terraform/metrics-bridge.tf",
   `    ignore_changes = [
       template[0].containers[0].image,
-      template[0].revision,
       client,
       client_version,
       scaling[0].manual_instance_count,
@@ -730,7 +759,7 @@ expectFailure(
 
 expectFailure(
   mutate(
-    withConcreteGeneration(validFiles, "1750000000000000"),
+    withConcreteGeneration(steadyStateFiles, "1750000000000000"),
     "terraform/metrics-bridge.tf",
     "      template[0].revision,\n      client,",
     "      template[0].revision,\n      template[0].containers[0].env[0].value,\n      client,",
@@ -740,7 +769,7 @@ expectFailure(
 
 expectFailure(
   mutate(
-    validFiles,
+    steadyStateFiles,
     "terraform/metrics-bridge.tf",
     `    ignore_changes = [
       template[0].containers[0].image,
