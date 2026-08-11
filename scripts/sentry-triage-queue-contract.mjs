@@ -437,7 +437,18 @@ export function selectInheritableSibling(duplicateOf, siblings) {
     const labels = (sib.labels ?? []).map((l) =>
       typeof l === "string" ? l : (l?.name ?? ""),
     );
-    if (labels.includes(INHERITABLE_VERDICT_LABEL)) {
+    // EXACTLY one verdict label, and it must be the inheritable one. A stub
+    // carrying two is reachable — a human edit, or a pre-shed stub from before
+    // #1745 (sentry-triage-digest.mjs documents the same state) — and its
+    // judgement is then ambiguous, not "upstream plus extra". Inheriting from
+    // an ambiguous sibling would settle THIS escalation on a coin flip.
+    const verdictLabels = labels.filter((name) =>
+      VERDICT_LABELS.includes(name),
+    );
+    if (
+      verdictLabels.length === 1 &&
+      verdictLabels[0] === INHERITABLE_VERDICT_LABEL
+    ) {
       return { shortId, verdict: INHERITABLE_VERDICT };
     }
   }

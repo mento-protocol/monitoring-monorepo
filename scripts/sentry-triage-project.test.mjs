@@ -3099,6 +3099,27 @@ await test("never inherits a verdict that can write outside the queue", () => {
   }
 });
 
+await test("never inherits from a double-labelled sibling", () => {
+  // Reachable via a human edit or a pre-#1745 stub (sentry-triage-digest.mjs
+  // documents the same state). Two verdict labels means the sibling's judgement
+  // is ambiguous, not "upstream plus extra" — settling THIS escalation on it
+  // would be a coin flip.
+  assertEqual(
+    selectInheritableSibling(
+      ["GOV-56"],
+      [
+        SIB(
+          "GOV-56",
+          "CLOSED",
+          "sentry:verdict-upstream",
+          "sentry:verdict-code-fix",
+        ),
+      ],
+    ),
+    null,
+  );
+});
+
 await test("never inherits from an OPEN sibling", () => {
   // An open sibling is mid-flight: its verdict label can still be shed by the
   // re-queue compensation, so reading it is a race, not a judgement.
@@ -3182,6 +3203,44 @@ await test("runParseOnly redirects a needs-human escalation to its family verdic
   // an inherited verdict cannot reach the cross-repo write path.
   assertEqual(out.projectable, false);
   assert(calls.includes("list"), "expected the family listing");
+});
+
+await test("a sibling search never resolves a prefix to the wrong stub", async () => {
+  // `--search "GOV-5 in:title"` matches GOV-57 too. The parsed SHORT-ID is
+  // re-checked so a family can never inherit from a stub it did not name.
+  const runGh = async (args) => {
+    if (args[1] === "view") {
+      return JSON.stringify({
+        number: 702,
+        title: "[sentry] GOV-59 (governance-mento-org, error)",
+        body: "",
+        url: "https://github.com/o/r/issues/702",
+        state: "OPEN",
+        labels: [{ name: "sentry-triage" }],
+        comments: [
+          {
+            url: "https://github.com/o/r/issues/702#issuecomment-9",
+            body: needsHumanVerdictComment(["GOV-5"]),
+            author: { login: "github-actions" },
+          },
+        ],
+      });
+    }
+    // The search for GOV-5 returns the longer id, which must be rejected.
+    return JSON.stringify([
+      {
+        title: "[sentry] GOV-57 (governance-mento-org, error)",
+        state: "CLOSED",
+        labels: [{ name: "sentry:verdict-upstream" }],
+      },
+    ]);
+  };
+  const out = await runParseOnly(
+    { localRepo: "o/r", queueIssue: 702, priorVerdictCommentId: null },
+    { runGh },
+  );
+  assertEqual(out.verdict, "needs-human");
+  assertEqual(out.inheritedFrom, null);
 });
 
 await test("a failed sibling listing keeps the agent's own escalation", async () => {

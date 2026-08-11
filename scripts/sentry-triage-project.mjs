@@ -62,6 +62,7 @@ import {
   PROJECTED_COMMENT_PREFIX,
   PROJECTED_LABEL,
   resolveVerdict,
+  sanitizeDuplicateIds,
   selectVerdictComment,
   VALID_VERDICTS,
   validateAffectedRepo,
@@ -165,60 +166,71 @@ async function readQueueIssue(localRun, repo, number) {
 /**
  * Read the queue stubs for a family's declared duplicates (#1614 part 2).
  *
- * One local listing, not one lookup per sibling: the cap is small but a
- * per-sibling `gh issue view` would put up to MAX_DUPLICATE_LOOKUPS extra
- * round-trips inside the label step, which runs before the stub has a verdict
- * label and must not become slow or flaky. `--state all` is required — the
- * inheritable sibling is by definition CLOSED.
+ * One SEARCH per declared sibling, not one broad listing. A `gh issue list
+ * --limit 200` is newest-first, so once the queue passes 200 stubs an older
+ * judged family silently falls outside the window and its siblings escalate
+ * again — the exact failure this feature exists to prevent, arriving quietly
+ * as the repo grows. `duplicate_of` is already capped at MAX_DUPLICATE_LOOKUPS,
+ * so this is a bounded handful of calls, and only on a needs-human verdict
+ * that declares duplicates at all.
  *
- * Failure is NOT fatal: inheritance is an optimisation over escalating, so a
- * listing error falls back to the agent's own `needs-human`. The stub still
- * gets a decision-ready brief; it just does not get collapsed into its family.
+ * Failure is NOT fatal: inheritance is an optimisation over escalating, so any
+ * error falls back to the agent's own `needs-human`. The stub still gets a
+ * decision-ready brief; it just does not get collapsed into its family.
  */
 async function readSiblingVerdicts(localRun, repo, duplicateOf) {
-  const wanted = new Set(duplicateOf ?? []);
-  if (wanted.size === 0) return [];
-  let stdout;
-  try {
-    stdout = await localRun([
-      "issue",
-      "list",
-      "-R",
-      repo,
-      "--label",
-      "sentry-triage",
-      "--state",
-      "all",
-      "--limit",
-      "200",
-      "--json",
-      "title,state,labels",
-    ]);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    process.stderr.write(
-      `::warning::Could not list queue stubs to check family inheritance (${message}); keeping the agent's own verdict.\n`,
-    );
-    return [];
-  }
-  let rows;
-  try {
-    rows = JSON.parse(stdout);
-  } catch (err) {
-    // Same visibility as the listing failure above. A `gh` output-format change
-    // would otherwise disable inheritance permanently and silently, with
-    // nothing in the logs to explain why families stopped collapsing.
-    const message = err instanceof Error ? err.message : String(err);
-    process.stderr.write(
-      `::warning::Could not parse the queue stub listing for family inheritance (${message}); keeping the agent's own verdict.\n`,
-    );
-    return [];
-  }
+  const wanted = sanitizeDuplicateIds(duplicateOf).slice(
+    0,
+    MAX_DUPLICATE_LOOKUPS,
+  );
   const out = [];
-  for (const row of Array.isArray(rows) ? rows : []) {
-    const shortId = parseShortId(row?.title);
-    if (!shortId || !wanted.has(shortId)) continue;
-    out.push({ shortId, state: row?.state, labels: row?.labels ?? [] });
+  for (const shortId of wanted) {
+    let stdout;
+    try {
+      stdout = await localRun([
+        "issue",
+        "list",
+        "-R",
+        repo,
+        "--search",
+        // The queue title is `[sentry] <SHORT-ID> (...)`, so an in:title search
+        // for the id finds the stub at any age. `--state all` because the
+        // inheritable sibling is by definition CLOSED.
+        `${shortId} in:title`,
+        "--state",
+        "all",
+        "--limit",
+        "20",
+        "--json",
+        "title,state,labels",
+      ]);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      process.stderr.write(
+        `::warning::Could not search for family sibling ${shortId} (${message}); keeping the agent's own verdict.\n`,
+      );
+      return [];
+    }
+    let rows;
+    try {
+      rows = JSON.parse(stdout);
+    } catch (err) {
+      // Same visibility as a search failure. A `gh` output-format change would
+      // otherwise disable inheritance permanently and silently, with nothing in
+      // the logs to explain why families stopped collapsing.
+      const message = err instanceof Error ? err.message : String(err);
+      process.stderr.write(
+        `::warning::Could not parse the sibling search for ${shortId} (${message}); keeping the agent's own verdict.\n`,
+      );
+      return [];
+    }
+    for (const row of Array.isArray(rows) ? rows : []) {
+      // Search is substring-ish, so re-check the parsed SHORT-ID rather than
+      // trusting the match: `GOV-5` must never resolve to `GOV-57`.
+      if (parseShortId(row?.title) !== shortId) continue;
+      out.push({ shortId, state: row?.state, labels: row?.labels ?? [] });
+      break;
+    }
   }
   return out;
 }

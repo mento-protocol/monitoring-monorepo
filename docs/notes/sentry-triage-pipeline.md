@@ -507,6 +507,21 @@ the label and transition below:
 | `upstream-transient` | `sentry:verdict-upstream`    | Close as completed | None                                                                                                                               |
 | `needs-human`        | `sentry:verdict-needs-human` | Keep open          | Human answers the recorded question and decides the next action                                                                    |
 
+**One exception, and it is the only place the applied label differs from the
+stored verdict comment.** A `needs-human` verdict whose `duplicate_of` names a
+queue stub that is already **closed** carrying exactly one verdict label, and
+that label is `sentry:verdict-upstream`, is settled as `upstream-transient`
+instead of escalating — the family was already judged, and a second ask adds no
+decision (#1614). The label step logs a `::notice::` naming the sibling it
+inherited from, so a closed stub whose comment still reads `needs-human` is
+explained by that line rather than being a defect.
+
+Only `upstream-transient` is inheritable. `code-fix` and `config-fix` project
+into another team's repo — and a local `code-fix` can enter autofix — so
+inheriting either would cause a write for a stub no agent examined, on the
+strength of an agent-authored `duplicate_of`. `needs-human` is never inherited:
+an unanswered escalation is not a judgement.
+
 A stub carries exactly one `sentry:verdict-*` label. The label edit adds the
 new one and removes every other verdict label in the same call, so
 re-dispatching an already-verdicted stub — the usual case after a human answers
