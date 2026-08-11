@@ -30,13 +30,14 @@ ownership from directory names.
 pnpm tf list
 pnpm tf validate <stack-id>
 pnpm tf plan <stack-id>
-pnpm tf apply <stack-id> [--force-local-apply]
+pnpm tf apply <stack-id> [--force-local-apply] [terraform args...]
 ```
 
 Existing aliases remain:
 
 ```bash
 pnpm infra:plan
+pnpm infra:apply -- -auto-approve
 pnpm alerts:rules:plan
 pnpm alerts:infra:plan
 pnpm aegis:tf:plan
@@ -51,6 +52,31 @@ For stacks with `ci.apply == "push-main-production-infra-environment"`, local
 apply requires a clean `main` at `origin/main` unless the operator deliberately
 passes `--force-local-apply`. Normally, merge and let GitHub Actions apply
 through `production-infra` approval.
+
+The manual `platform` stack has a stricter wrapper. Plan and apply both create a
+private temporary saved plan from the verified current-`main` snapshot, capture
+its JSON in memory, and check the Metrics Bridge service against the
+source-selected stable or rollout mode. The standalone plan is a preflight and
+is deleted; a later apply creates a fresh plan. Apply requires the literal
+`-auto-approve` argument only as proof that the operator already received human
+approval. The wrapper removes that flag, re-supplies variable inputs required
+for ephemeral values, and applies the exact checked plan. A no-change plan
+skips apply. The private directory is mode `0700`, the binary plan is mode
+`0600`, and both are deleted after success or failure; the JSON is never
+written, printed, uploaded, or cached. Every phase also forces `-input=false`,
+the default workspace, and a private `TF_DATA_DIR` under the committed-source
+snapshot, so interactive input or inherited workspace state cannot change the
+checked execution.
+
+The wrapper rejects caller-owned plan files, destructive and replacement
+modes, arbitrary targets, `-lock=false`, injected `TF_CLI_ARGS*`, and a
+non-default `TF_WORKSPACE`. The only `-target` and `-refresh=false` exception is
+the exact ADR 0055 controller-role recovery, whose whole managed diff may only
+create that role. The Metrics Bridge check does not approve unrelated platform
+changes. Human review of the earlier preflight and explicit apply approval
+remain mandatory, but only the machine policy sees the exact plan applied.
+[ADR 0060](adr/0060-exact-plan-guard-for-manual-platform-applies.md)
+owns the exact-plan boundary.
 
 `peg-policy-publication` permits only backend-free local validation with
 `pnpm tf validate peg-policy-publication`. Local plan and apply are disabled,
@@ -95,8 +121,9 @@ Alloy's full write-only input, IAM, deploy, and rollback contract lives in
 [`aegis/grafana-agent/README.md`](../aegis/grafana-agent/README.md). Platform
 plan/apply rejects unsafe logging, requires freshly fetched clean `main`, and
 runs its verified snapshot with gitignored tfvars outside. Review the manual
-plan and get explicit approval before apply; never seed via CLI or use
-`--migrate`.
+source snapshot; it copies each variable file once into the private plan
+directory for plan and apply. Review the manual plan and get explicit approval before
+`pnpm infra:apply -- -auto-approve`; never seed via CLI or use `--migrate`.
 
 On `main`, the workflow posts a secretless Slack summary before approval.
 Environment protection blocks the apply job, so the operator approves the
@@ -129,10 +156,13 @@ read-boundary audits also completed. Never add basic `roles/viewer`; limit
 object and secret payload reads to state, deployment source, and managed
 secrets.
 
-ADR 0047 also selects the final no-artifact apply contract: make a private plan
-after approval, run fail-closed policy over its JSON, then apply those exact
-bytes. Issue #1576 owns the dual-run migration. Until it lands, the current
-apply-time re-plan and drift window remain in force.
+ADR 0047 selects the final no-artifact protected-stack apply contract: make a
+private plan after approval, run fail-closed policy over its JSON, then apply
+those exact bytes. ADR 0060 implements the first narrow slice for manual
+platform plan/apply by guarding the Metrics Bridge template and ADR 0055
+recovery. Issue #1576 still owns the broader dual-run policy for every retained
+protected-stack mutation. The other apply paths retain their documented
+apply-time re-plan window until that work lands.
 
 ## Identity bootstrap, routing cutover, and authority removal
 
@@ -146,12 +176,24 @@ attaches neither Cloud Run nor Grafana consumers. The reviewed runtime
 activation attached Cloud Run; the separate alerts-rules source change and
 approved apply activate Grafana. Terraform derives the pinned URL and
 `gcp-metadata` mode from that literal.
-`null` retains `template[0].revision` in `ignore_changes`; the completed first
-activation removed it, and later concrete pins keep revision changes managed so
-each handoff creates a Cloud Run revision. Buckets, runtime, and publisher are in
-`mento-monitoring`; publication plan and reader are in the seed project. Only
-the exact publication workflow selects that read-only chain. Runtime and reader
-have direct bucket-scoped Object Viewer; publisher has direct Object Admin.
+Metrics Bridge ignores `template[0].revision` in steady state so routine plans
+do not clear the generated name stamped by deploys. Any Terraform-owned
+template change, including a policy-generation handoff, sets
+`metrics_bridge_template_rollout_active = true` and removes that ignore in the
+same reviewed change. Provider 6.50 then omits the old name and Cloud Run can
+mint the new revision. After the approved apply and runtime proof, a separate
+stabilization change restores the marker to `false` and the ignore. Buckets,
+runtime, and publisher are in `mento-monitoring`; publication plan and reader
+are in the seed project. Only the exact publication workflow selects that
+read-only chain. Runtime and reader have direct bucket-scoped Object Viewer;
+publisher has direct Object Admin.
+
+Pause unrelated full platform applies while the rollout marker is `true`. If
+the rollout apply or runtime proof fails, leave the revision ignore absent,
+inspect the live revision and state, and produce a new reviewed plan. Complete
+the rollout or explicitly roll back its template change before restoring the
+steady-state marker and ignore. A successful rollout's immediate stabilization
+changes source only and needs no apply.
 
 Authoritative bucket policies keep direct grants exact.
 `pegPolicyBucketController` gives org-Terraform only bucket get/update and

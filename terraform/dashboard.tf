@@ -289,8 +289,9 @@ resource "vercel_project_domain" "monitoring" {
 }
 
 # ── Local .vercel/project.json ────────────────────────────────────────────────
-# Keeps the Vercel CLI linked to the correct project after creation/recreation.
-# This file is gitignored but must exist locally for `vercel deploy` to work.
+# Declares the expected Vercel CLI link metadata. Guarded platform apply runs
+# inside a private committed-source snapshot, so a new operator checkout still
+# uses `vercel link` to create its gitignored local copy before manual deploy.
 
 resource "local_file" "vercel_project_json" {
   content = jsonencode({

@@ -16,6 +16,7 @@ import "./deploy-staging-contract.test.mjs";
 import "./production-infra-identity-contract/index.test.mjs";
 import "./sentry-provider-contract.test.mjs";
 import "./check-peg-policy-publication.test.mjs";
+import "./check-metrics-bridge-template-plan.test.mjs";
 
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -24,6 +25,27 @@ const repoRoot = path.resolve(
 const script = path.join(repoRoot, "scripts/tf-stacks.mjs");
 const originMainFetchCommand =
   "fetch --quiet origin refs/heads/main:refs/remotes/origin/main";
+const defaultPlatformPlan = {
+  format_version: "1.2",
+  terraform_version: "1.14.0",
+  applyable: true,
+  complete: true,
+  errored: false,
+  resource_changes: [
+    {
+      address: "google_cloud_run_v2_service.metrics_bridge",
+      mode: "managed",
+      type: "google_cloud_run_v2_service",
+      name: "metrics_bridge",
+      change: {
+        actions: ["no-op"],
+        before: { template: [{ revision: "metrics-bridge-r-test" }] },
+        after: { template: [{ revision: "metrics-bridge-r-test" }] },
+        after_unknown: {},
+      },
+    },
+  ],
+};
 
 function runRaw(args, options = {}) {
   return spawnSync(process.execPath, [script, ...args], {
@@ -82,20 +104,66 @@ function makeFakeTools(tempDir) {
   const binDir = path.join(tempDir, "bin");
   const terraformLog = path.join(tempDir, "terraform.log");
   const terraformCwdLog = path.join(tempDir, "terraform-cwd.log");
+  const terraformEnvironmentLog = path.join(
+    tempDir,
+    "terraform-environment.log",
+  );
+  const planModeLog = path.join(tempDir, "plan-mode.log");
   const gitLog = path.join(tempDir, "git.log");
   mkdirSync(binDir);
 
   writeExecutable(
     path.join(binDir, "terraform"),
     `#!/usr/bin/env node
-const { appendFileSync } = require("node:fs");
+const { appendFileSync, readdirSync, statSync, writeFileSync } = require("node:fs");
+const { dirname } = require("node:path");
+const args = process.argv.slice(2);
 const log = process.env.TF_STACKS_TEST_TERRAFORM_LOG;
 if (log) {
-  appendFileSync(log, JSON.stringify(process.argv.slice(2)) + "\\n");
+  appendFileSync(log, JSON.stringify(args) + "\\n");
 }
 const cwdLog = process.env.TF_STACKS_TEST_TERRAFORM_CWD_LOG;
 if (cwdLog) {
   appendFileSync(cwdLog, process.cwd() + "\\n");
+}
+const environmentLog = process.env.TF_STACKS_TEST_TERRAFORM_ENV_LOG;
+if (environmentLog) {
+  appendFileSync(
+    environmentLog,
+    JSON.stringify({
+      dataDir: process.env.TF_DATA_DIR,
+      workspace: process.env.TF_WORKSPACE,
+    }) + "\\n",
+  );
+}
+const command = args[1];
+if (process.env.TF_STACKS_TEST_FAIL_TERRAFORM_COMMAND === command) {
+  process.stderr.write("synthetic terraform failure\\n");
+  process.exit(93);
+}
+if (command === "plan") {
+  const out = args.find((arg) => arg.startsWith("-out="));
+  if (out) writeFileSync(out.slice("-out=".length), "private plan fixture");
+}
+if (command === "show") {
+  const planPath = args.at(-1);
+  const modeLog = process.env.TF_STACKS_TEST_PLAN_MODE_LOG;
+  if (modeLog) {
+    appendFileSync(
+      modeLog,
+      JSON.stringify({
+        directory: statSync(dirname(planPath)).mode & 0o777,
+        file: statSync(planPath).mode & 0o777,
+        variables: readdirSync(dirname(planPath))
+          .filter((name) => name.startsWith("variables-"))
+          .map((name) => statSync(dirname(planPath) + "/" + name).mode & 0o777),
+      }) + "\\n",
+    );
+  }
+  process.stdout.write(
+    process.env.TF_STACKS_TEST_PLAN_JSON ??
+      ${JSON.stringify(JSON.stringify(defaultPlatformPlan))},
+  );
 }
 `,
   );
@@ -145,9 +213,18 @@ if (args[0] === "-C" && args[2] === "ls-files") {
   args[2] === "--name-only" &&
   args[3] === "-z"
 ) {
-  process.stdout.write("terraform/main.tf\\0");
+  process.stdout.write("terraform/main.tf\\0terraform/metrics-bridge.tf\\0");
 } else if (args[0] === "show" && args[1]?.endsWith(":terraform/main.tf")) {
   process.stdout.write("terraform {}\\n");
+} else if (
+  args[0] === "show" &&
+  args[1]?.endsWith(":terraform/metrics-bridge.tf")
+) {
+  process.stdout.write(
+    "locals {\\n  metrics_bridge_template_rollout_active = " +
+      (process.env.TF_STACKS_TEST_ROLLOUT_ACTIVE ?? "false") +
+      "\\n}\\n",
+  );
 } else {
   process.stderr.write("unexpected git command: " + command + "\\n");
   process.exit(92);
@@ -159,11 +236,15 @@ if (args[0] === "-C" && args[2] === "ls-files") {
     env: {
       PATH: `${binDir}${path.delimiter}${process.env.PATH}`,
       TF_STACKS_TEST_GIT_LOG: gitLog,
+      TF_STACKS_TEST_PLAN_MODE_LOG: planModeLog,
       TF_STACKS_TEST_TERRAFORM_CWD_LOG: terraformCwdLog,
+      TF_STACKS_TEST_TERRAFORM_ENV_LOG: terraformEnvironmentLog,
       TF_STACKS_TEST_TERRAFORM_LOG: terraformLog,
     },
     gitLog,
+    planModeLog,
     terraformCwdLog,
+    terraformEnvironmentLog,
     terraformLog,
   };
 }
@@ -288,6 +369,55 @@ function assertApplyCallWithoutForce(logFile) {
   );
 }
 
+function platformPrivatePlanPath(logFile) {
+  const planCall = terraformCalls(logFile).find((args) => args[1] === "plan");
+  const outArg = planCall?.find((arg) => arg.startsWith("-out="));
+  assert(outArg, `expected private platform plan: ${JSON.stringify(planCall)}`);
+  return outArg.slice("-out=".length);
+}
+
+function assertExactSavedPlanBinding(logFile, shouldApply = true) {
+  const calls = terraformCalls(logFile);
+  const planPath = platformPrivatePlanPath(logFile);
+  const showCall = calls.find((args) => args[1] === "show");
+  assert(
+    showCall?.at(-1) === planPath && showCall.includes("-json"),
+    `terraform show must inspect the private saved plan: ${JSON.stringify(showCall)}`,
+  );
+  const applyCall = calls.find((args) => args[1] === "apply");
+  if (shouldApply) {
+    assert(
+      applyCall?.at(-1) === planPath,
+      `terraform apply must consume the validated saved plan: ${JSON.stringify(applyCall)}`,
+    );
+  } else {
+    assert(!applyCall, "guarded or empty platform plan must not run apply");
+  }
+  assert(!existsSync(planPath), "private platform plan must be removed");
+  assert(
+    !existsSync(path.dirname(planPath)),
+    "private platform plan directory must be removed",
+  );
+}
+
+function assertPrivatePlanModes(modeLog) {
+  const entries = readFileSync(modeLog, "utf8")
+    .trim()
+    .split(/\r?\n/u)
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+  const mode = entries.at(-1);
+  assert(
+    mode?.directory === 0o700,
+    `private plan directory mode: ${mode?.directory}`,
+  );
+  assert(mode?.file === 0o600, `private plan file mode: ${mode?.file}`);
+  assert(
+    mode?.variables?.every((value) => value === 0o600),
+    `private variable file modes: ${JSON.stringify(mode?.variables)}`,
+  );
+}
+
 function assertTerraformUsesCommittedSnapshot(logFile, message) {
   const sourcePath = `-chdir=${path.join(repoRoot, "terraform")}`;
   const calls = terraformCalls(logFile);
@@ -306,6 +436,38 @@ function assertTerraformUsesCommittedSnapshot(logFile, message) {
   assert(
     !existsSync(snapshotStackPath),
     `${message}: temporary source snapshot should be removed`,
+  );
+}
+
+function terraformEnvironments(logFile) {
+  const contents = readFileSync(logFile, "utf8").trim();
+  return contents
+    ? contents.split(/\r?\n/u).map((line) => JSON.parse(line))
+    : [];
+}
+
+function assertPlatformTerraformUsesPrivateDefaultWorkspace(
+  terraformLog,
+  environmentLog,
+  message,
+) {
+  const calls = terraformCalls(terraformLog);
+  const environments = terraformEnvironments(environmentLog);
+  assert(
+    calls.length === environments.length && calls.length > 0,
+    `${message}: expected one environment record per Terraform invocation`,
+  );
+  const snapshotStackPath = calls[0][0].slice("-chdir=".length);
+  const expectedDataDir = path.join(
+    path.dirname(snapshotStackPath),
+    ".terraform-data",
+  );
+  assert(
+    environments.every(
+      ({ dataDir, workspace }) =>
+        dataDir === expectedDataDir && workspace === "default",
+    ),
+    `${message}: ${JSON.stringify(environments)}`,
   );
 }
 
@@ -534,12 +696,19 @@ function runApplyGuardTests(tempDir) {
   assertApplyCallWithoutForce(fakeTools.terraformLog);
   resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
 
-  run(["plan", "alerts-rules", "-out=tfplan"], {
-    env: {
-      ...baseEnv,
-      TF_STACKS_TEST_FAIL_ON_GIT: "1",
+  run(
+    [
+      "plan",
+      "alerts-rules",
+      `-out=${path.join(tempDir, "alerts-rules.tfplan")}`,
+    ],
+    {
+      env: {
+        ...baseEnv,
+        TF_STACKS_TEST_FAIL_ON_GIT: "1",
+      },
     },
-  });
+  );
   assertTerraformCommands(
     fakeTools.terraformLog,
     ["init", "plan"],
@@ -606,9 +775,11 @@ function runApplyGuardTests(tempDir) {
   });
   assertTerraformCommands(
     fakeTools.terraformLog,
-    ["init", "apply"],
+    ["init", "plan", "show", "apply"],
     "safe current-main platform apply should run terraform",
   );
+  assertExactSavedPlanBinding(fakeTools.terraformLog);
+  assertPrivatePlanModes(fakeTools.planModeLog);
   assertGitCallsInclude(
     fakeTools.gitLog,
     originMainFetchCommand,
@@ -655,12 +826,12 @@ function runApplyGuardTests(tempDir) {
   );
   resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
 
-  run(["plan", "platform", "-var-file=operator.tfvars"], {
+  run(["plan", "platform", "-var-file=terraform.tfvars.example"], {
     env: baseEnv,
   });
   assertTerraformCommands(
     fakeTools.terraformLog,
-    ["init", "plan"],
+    ["init", "plan", "show"],
     "safe current-main platform plan should run terraform",
   );
   assertGitCallsInclude(
@@ -685,15 +856,367 @@ function runApplyGuardTests(tempDir) {
   const platformPlanCall = terraformCalls(fakeTools.terraformLog).find(
     (args) => args[1] === "plan",
   );
+  const platformPlanVarFile = platformPlanCall.find((arg) =>
+    arg.startsWith("-var-file="),
+  );
   assert(
-    platformPlanCall.includes(
-      `-var-file=${path.join(repoRoot, "terraform/operator.tfvars")}`,
-    ),
-    `platform plan should keep operator inputs outside the source snapshot: ${JSON.stringify(
-      platformPlanCall,
-    )}`,
+    platformPlanVarFile?.includes("tf-stacks-platform-plan.") &&
+      !platformPlanVarFile.includes("terraform.tfvars.example"),
+    `platform plan should snapshot operator inputs outside the source snapshot: ${JSON.stringify(platformPlanCall)}`,
+  );
+  assertExactSavedPlanBinding(fakeTools.terraformLog, false);
+  assertPrivatePlanModes(fakeTools.planModeLog);
+  resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
+}
+
+function runPlatformPlanPolicyTests(tempDir) {
+  const fixtureRoot = path.join(tempDir, "platform-plan-policy");
+  mkdirSync(fixtureRoot);
+  const fakeTools = makeFakeTools(fixtureRoot);
+  const baseEnv = fakeTools.env;
+  const operatorVarFile = path.join(fixtureRoot, "operator.tfvars");
+  writeFileSync(operatorVarFile, 'ephemeral_probe = "present"\n');
+
+  let result = runFail(["apply", "platform"], { env: baseEnv });
+  assertIncludes(
+    result.stderr,
+    "requires exactly one -auto-approve acknowledgement",
+    "saved-plan apply must require explicit acknowledgement",
+  );
+  assertNoTerraformCalls(
+    fakeTools.terraformLog,
+    "unacknowledged platform apply must not run Terraform",
   );
   resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
+
+  result = runFail(["apply", "platform", "-auto-approve", "-auto-approve"], {
+    env: baseEnv,
+  });
+  assertIncludes(
+    result.stderr,
+    "requires exactly one -auto-approve acknowledgement",
+    "duplicate apply acknowledgement must fail closed",
+  );
+  assertNoTerraformCalls(
+    fakeTools.terraformLog,
+    "duplicate acknowledgement must not run Terraform",
+  );
+  resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
+
+  for (const [name, value] of [
+    ["TF_CLI_ARGS", "-refresh=false"],
+    ["TF_CLI_ARGS_plan", "-target=google_project_service.run"],
+    ["TF_CLI_ARGS_show", "-json=false"],
+    ["TF_CLI_ARGS_apply", "-lock=false"],
+  ]) {
+    result = runFail(["plan", "platform"], {
+      env: { ...baseEnv, [name]: value },
+    });
+    assertIncludes(
+      result.stderr,
+      "refusing platform Terraform with injected CLI arguments",
+      `${name} must fail closed`,
+    );
+    assertNoTerraformCalls(
+      fakeTools.terraformLog,
+      `${name} must fail before Terraform`,
+    );
+    resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
+  }
+
+  result = runFail(["plan", "platform"], {
+    env: { ...baseEnv, TF_WORKSPACE: "shadow" },
+  });
+  assertIncludes(
+    result.stderr,
+    "outside the default workspace",
+    "non-default platform workspace must fail closed",
+  );
+  assertNoTerraformCalls(
+    fakeTools.terraformLog,
+    "non-default workspace must fail before Terraform",
+  );
+  resetLogs(
+    fakeTools.terraformLog,
+    fakeTools.gitLog,
+    fakeTools.terraformEnvironmentLog,
+  );
+
+  const inheritedDataDir = path.join(fixtureRoot, "inherited-terraform-data");
+  mkdirSync(inheritedDataDir);
+  writeFileSync(path.join(inheritedDataDir, "environment"), "shadow\n");
+  run(["plan", "platform"], {
+    env: {
+      ...baseEnv,
+      TF_DATA_DIR: inheritedDataDir,
+    },
+  });
+  assertTerraformCommands(
+    fakeTools.terraformLog,
+    ["init", "plan", "show"],
+    "platform plan must not inherit a selected workspace",
+  );
+  assertPlatformTerraformUsesPrivateDefaultWorkspace(
+    fakeTools.terraformLog,
+    fakeTools.terraformEnvironmentLog,
+    "platform Terraform must use the source snapshot's private default workspace data directory",
+  );
+  resetLogs(
+    fakeTools.terraformLog,
+    fakeTools.gitLog,
+    fakeTools.terraformEnvironmentLog,
+  );
+
+  for (const args of [
+    ["-invoke=action.test.example"],
+    ["-replace=google_project.monitoring"],
+    ["-destroy"],
+    ["-refresh-only"],
+    ["-out=caller.tfplan"],
+    ["-json"],
+    ["-detailed-exitcode"],
+    ["-lock=false"],
+    ["-input=true"],
+    ["caller.tfplan"],
+  ]) {
+    result = runFail(["plan", "platform", ...args], { env: baseEnv });
+    assertIncludes(
+      result.stderr,
+      "unsupported platform Terraform argument",
+      `${args[0]} must fail closed`,
+    );
+    assertNoTerraformCalls(
+      fakeTools.terraformLog,
+      `${args[0]} must fail before Terraform`,
+    );
+    resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
+  }
+
+  run(
+    [
+      "plan",
+      "platform",
+      "--",
+      "-var",
+      "probe=-target=google_project_service.run",
+    ],
+    { env: baseEnv },
+  );
+  const separatorPlanCall = terraformCalls(fakeTools.terraformLog).find(
+    (args) => args[1] === "plan",
+  );
+  assert(
+    separatorPlanCall.includes("probe=-target=google_project_service.run"),
+    "-var values must remain opaque after consuming one leading separator",
+  );
+  assertExactSavedPlanBinding(fakeTools.terraformLog, false);
+  resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
+
+  result = runFail(["plan", "platform", "-no-color", "--"], {
+    env: baseEnv,
+  });
+  assertIncludes(
+    result.stderr,
+    "at most one leading -- separator",
+    "midstream separators must fail closed",
+  );
+  assertNoTerraformCalls(
+    fakeTools.terraformLog,
+    "midstream separator must fail before Terraform",
+  );
+  resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
+
+  const secretSentinel = "PLAN_JSON_SECRET_MUST_NOT_LEAK";
+  const unsafeStablePlan = structuredClone(defaultPlatformPlan);
+  unsafeStablePlan.variables = { secret: { value: secretSentinel } };
+  unsafeStablePlan.resource_changes[0].change.actions = ["update"];
+  unsafeStablePlan.resource_changes[0].change.before.template[0].containers = [
+    { env: [{ name: "PEG_POLICY_URL", value: "generation-a" }] },
+  ];
+  unsafeStablePlan.resource_changes[0].change.after.template[0].containers = [
+    { env: [{ name: "PEG_POLICY_URL", value: secretSentinel }] },
+  ];
+  result = runFail(
+    ["apply", "platform", "-auto-approve", `-var-file=${operatorVarFile}`],
+    {
+      env: {
+        ...baseEnv,
+        TF_STACKS_TEST_PLAN_JSON: JSON.stringify(unsafeStablePlan),
+      },
+    },
+  );
+  assertIncludes(
+    result.stderr,
+    "must not change or obscure the service template",
+    "stable template mutation must fail closed",
+  );
+  assert(
+    !result.stdout.includes(secretSentinel) &&
+      !result.stderr.includes(secretSentinel),
+    "captured plan JSON values must never reach wrapper output",
+  );
+  assertTerraformCommands(
+    fakeTools.terraformLog,
+    ["init", "plan", "show"],
+    "invalid saved plan must stop before apply",
+  );
+  const rejectedPlanCall = terraformCalls(fakeTools.terraformLog).find(
+    (args) => args[1] === "plan",
+  );
+  const rejectedVarFile = rejectedPlanCall.find((arg) =>
+    arg.startsWith("-var-file="),
+  );
+  assert(
+    rejectedVarFile?.includes("tf-stacks-platform-plan.") &&
+      !rejectedVarFile.includes(operatorVarFile),
+    "a private copy of operator tfvars must reach the validated plan",
+  );
+  assertExactSavedPlanBinding(fakeTools.terraformLog, false);
+  resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
+
+  const noChangesPlan = structuredClone(defaultPlatformPlan);
+  noChangesPlan.applyable = false;
+  run(["apply", "platform", "-auto-approve"], {
+    env: {
+      ...baseEnv,
+      TF_STACKS_TEST_PLAN_JSON: JSON.stringify(noChangesPlan),
+    },
+  });
+  assertTerraformCommands(
+    fakeTools.terraformLog,
+    ["init", "plan", "show"],
+    "non-applyable no-op plan must skip apply",
+  );
+  assertExactSavedPlanBinding(fakeTools.terraformLog, false);
+  resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
+
+  const recoveryPlan = {
+    ...structuredClone(defaultPlatformPlan),
+    resource_changes: [
+      {
+        address: "google_project_iam_custom_role.peg_policy_bucket_controller",
+        mode: "managed",
+        type: "google_project_iam_custom_role",
+        name: "peg_policy_bucket_controller",
+        change: { actions: ["create"], before: null, after: {} },
+      },
+    ],
+  };
+  const recoveryArgs = [
+    "plan",
+    "platform",
+    "-refresh=false",
+    "-target=google_project_iam_custom_role.peg_policy_bucket_controller",
+  ];
+  run(recoveryArgs, {
+    env: {
+      ...baseEnv,
+      TF_STACKS_TEST_PLAN_JSON: JSON.stringify(recoveryPlan),
+    },
+  });
+  assertTerraformCommands(
+    fakeTools.terraformLog,
+    ["init", "plan", "show"],
+    "exact ADR 0055 recovery plan should pass",
+  );
+  assertExactSavedPlanBinding(fakeTools.terraformLog, false);
+  resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
+
+  const expandedRecoveryPlan = structuredClone(recoveryPlan);
+  expandedRecoveryPlan.resource_changes.push({
+    address: "google_project_service.storage",
+    mode: "managed",
+    type: "google_project_service",
+    name: "storage",
+    change: { actions: ["create"], before: null, after: {} },
+  });
+  result = runFail(recoveryArgs, {
+    env: {
+      ...baseEnv,
+      TF_STACKS_TEST_PLAN_JSON: JSON.stringify(expandedRecoveryPlan),
+    },
+  });
+  assertIncludes(
+    result.stderr,
+    "may only create the Peg policy bucket controller role",
+    "expanded recovery dependency mutations must fail closed",
+  );
+  assertExactSavedPlanBinding(fakeTools.terraformLog, false);
+  resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
+
+  result = runFail(recoveryArgs, {
+    env: {
+      ...baseEnv,
+      TF_STACKS_TEST_PLAN_JSON: JSON.stringify(recoveryPlan),
+      TF_STACKS_TEST_ROLLOUT_ACTIVE: "true",
+    },
+  });
+  assertIncludes(
+    result.stderr,
+    "rollout mode forbids targeted platform recovery",
+    "rollout mode must pause targeted recovery applies",
+  );
+  assertExactSavedPlanBinding(fakeTools.terraformLog, false);
+  resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
+
+  run(
+    [
+      "apply",
+      "platform",
+      "--",
+      "-auto-approve",
+      `-var-file=${operatorVarFile}`,
+      "-var",
+      "ephemeral_probe=present",
+      "-lock-timeout=10m",
+      "-no-color",
+    ],
+    { env: baseEnv },
+  );
+  const safeOptionCalls = terraformCalls(fakeTools.terraformLog);
+  const safeOptionPlan = safeOptionCalls.find((args) => args[1] === "plan");
+  const safeOptionApply = safeOptionCalls.find((args) => args[1] === "apply");
+  const planVarFile = safeOptionPlan.find((arg) =>
+    arg.startsWith("-var-file="),
+  );
+  const applyVarFile = safeOptionApply.find((arg) =>
+    arg.startsWith("-var-file="),
+  );
+  assert(
+    safeOptionPlan.filter((arg) => arg === "-input=false").length === 1 &&
+      safeOptionApply.filter((arg) => arg === "-input=false").length === 1 &&
+      safeOptionApply.includes("-lock-timeout=10m") &&
+      safeOptionApply.includes("-no-color") &&
+      planVarFile === applyVarFile &&
+      planVarFile?.includes("tf-stacks-platform-plan.") &&
+      !planVarFile.includes(operatorVarFile) &&
+      safeOptionApply.includes("ephemeral_probe=present") &&
+      !safeOptionApply.includes("-auto-approve"),
+    "safe execution flags and ephemeral inputs must reach saved-plan apply without the acknowledgement flag",
+  );
+  assertExactSavedPlanBinding(fakeTools.terraformLog);
+  resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
+
+  result = runFail(["plan", "platform"], {
+    env: { ...baseEnv, TF_STACKS_TEST_FAIL_TERRAFORM_COMMAND: "show" },
+  });
+  assertIncludes(
+    result.stderr,
+    "terraform exited with status 93",
+    "show failure should stay bounded",
+  );
+  assertExactSavedPlanBinding(fakeTools.terraformLog, false);
+  resetLogs(fakeTools.terraformLog, fakeTools.gitLog);
+
+  result = runFail(["apply", "platform", "-auto-approve"], {
+    env: { ...baseEnv, TF_STACKS_TEST_FAIL_TERRAFORM_COMMAND: "apply" },
+  });
+  assertIncludes(
+    result.stderr,
+    "terraform exited with status 93",
+    "apply failure should be reported",
+  );
+  assertExactSavedPlanBinding(fakeTools.terraformLog);
 }
 
 function runWriteOnlyLoggingGuardTests(tempDir) {
@@ -771,7 +1294,7 @@ function runWriteOnlyLoggingGuardTests(tempDir) {
   });
   assertTerraformCommands(
     fakeTools.terraformLog,
-    ["init", "plan"],
+    ["init", "plan", "show"],
     "TF_LOG_PATH alone should remain allowed because it does not enable logging",
   );
   assertGitCallsInclude(
@@ -795,7 +1318,7 @@ function runWriteOnlyLoggingGuardTests(tempDir) {
   });
   assertTerraformCommands(
     fakeTools.terraformLog,
-    ["init", "plan"],
+    ["init", "plan", "show"],
     "explicitly disabled Terraform logging should be accepted",
   );
   assertGitCallsInclude(
@@ -1064,6 +1587,7 @@ try {
 
   runValidateFormatTest(tempDir);
   runApplyGuardTests(tempDir);
+  runPlatformPlanPolicyTests(tempDir);
   runWriteOnlyLoggingGuardTests(tempDir);
 } finally {
   rmSync(tempDir, { recursive: true, force: true });

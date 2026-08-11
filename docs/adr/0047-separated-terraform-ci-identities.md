@@ -211,6 +211,16 @@ choosing it while the repository has one maintainer because its second-person
 control is unavailable and its remote plan custody adds an operating system
 that the current stacks do not otherwise need.
 
+### Amendment — first exact-plan policy slice
+
+[ADR 0060](0060-exact-plan-guard-for-manual-platform-applies.md) applies this
+private-plan pattern to manual platform plan/apply for the Metrics Bridge
+template and the exact ADR 0055 recovery target. It closes that narrow
+source-marker drift gap without claiming the broad protected-stack policy
+above. [Issue #1576](https://github.com/mento-protocol/monitoring-monorepo/issues/1576)
+still owns dual-run coverage and cutover for every retained protected-stack
+mutation.
+
 ## Alternatives considered
 
 - **Keep one write-capable deployer for service deploys, plans, and applies** —

@@ -116,7 +116,8 @@ by the `platform` stack:
 feeds
 `terraform/github-variables.tf`'s `github_actions_variable
 .terraform_apply_slack_channel`. To reroute the notification, set the tfvar
-and run `pnpm tf apply platform` (manual-apply stack, human-approved local
+and run `pnpm tf apply platform -- -auto-approve` (manual-apply stack,
+human-approved local
 apply — see `docs/terraform.md`); if the new channel is private, `/invite`
 the bot as above. The platform PAT needs `Secrets: Read/write`,
 `Variables: Read/write`, and `Administration: Read/write` — GitHub scopes repo
