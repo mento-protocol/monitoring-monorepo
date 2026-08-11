@@ -227,13 +227,10 @@ function stripTrailingYamlComment(text) {
 function parseInlineList(rest) {
   const trimmed = String(rest ?? "").trim();
   if (trimmed.startsWith("[")) {
-    // Parse the bracketed segment, tolerating ONLY a trailing yaml comment
-    // after the closing bracket — the verdict contract's own documented
-    // example is `duplicate_of: [] # list of Sentry SHORT-IDs (e.g.
-    // GOV…-51), …`, and an end-of-line-anchored match would fail on it,
-    // silently dropping the duplicates. Any other trailing garbage rejects
-    // the whole list (these IDs drive duplicate coalescing, so malformed
-    // agent output must not be normalized into valid-looking values).
+    // Parse the bracketed segment, tolerating ONLY a trailing yaml comment after
+    // `]` (the documented example is `duplicate_of: [] # …`, which an EOL-anchored
+    // match would drop); any other trailing garbage rejects the whole list, so
+    // malformed agent output is never normalized into valid-looking IDs.
     const close = trimmed.indexOf("]");
     if (close === -1) return [];
     const remainder = trimmed.slice(close + 1);
@@ -258,7 +255,8 @@ function collectDashList(lines, start) {
     if (line.trim() === "") continue;
     const dash = /^\s+-\s+(.+?)\s*$/.exec(line);
     if (dash) {
-      items.push(dash[1].replace(/^["']|["']$/g, ""));
+      // Decode like a flow item (#1769 round 17), not just strip outer quotes.
+      items.push(decodeScalar(dash[1]));
       continue;
     }
     if (/^\s/.test(line)) continue; // other indented content — skip
@@ -317,8 +315,7 @@ export const MAX_BRIEF_LIST_ITEMS = 5;
  * away — each emitter neutralizes+escapes them at render. Returns `{items,
  * next}` mirroring collectDashList so the caller advances the line cursor. */
 // The COMPLETE YAML 1.1/1.2 double-quoted single-char escape set. DECODING (not
-// backslash-dropping) is the point: a dropped `→` became a literal `u2192`
-// and `\n` a literal `n` (#1769 round 13). Hex forms (`\x`/`\u`/`\U`) decode below.
+// backslash-dropping) is the point (#1769 round 13); hex `\x`/`\u`/`\U` below.
 const YAML_DQ_ESCAPES = {
   0: "\0", // null (U+0000)
   a: "\x07", // bell
@@ -364,14 +361,12 @@ export function decodeDoubleQuoteEscape(s, i) {
 }
 
 // One dependency-free, single-pass parser for an inline YAML flow sequence of
-// strings — the workflows run these scripts with NO install, so the closure must
-// stay third-party-free (#1769 round 11 P1: a js-yaml import broke prod). It
-// covers all three scalar styles: double-quoted (escapes above), single-quoted
-// (`''` -> one `'`), and plain (quotes/backslashes LITERAL, running to the next
-// top-level `,`/`]`); the style is set by the item's FIRST character, so a quote
-// inside a plain scalar (`Yes it's fine`) never mis-splits it. Any non-scalar
-// item — a nested `[`/`{`, or an anchor `&`/alias `*`/tag `!` — REJECTS the whole
-// sequence (caller falls back to one bounded item) rather than misparse it.
+// strings (the workflows run with NO install — #1769 round 11 P1). It covers all
+// three scalar styles below; the style is set by the item's FIRST character, so a
+// quote inside a plain scalar never mis-splits it, and any non-scalar item (a
+// nested `[`/`{`, or an `&`/`*`/`!` node property) REJECTS the whole sequence.
+// decodeScalar reuses these readers for dash items, so both list forms decode
+// identically (#1769 round 17).
 
 /** Read a double-quoted scalar at `s[i]` (the opening quote), or null. */
 function parseDoubleQuotedScalar(s, i) {
@@ -414,12 +409,8 @@ function parseSingleQuotedScalar(s, i) {
   return null; // unterminated
 }
 
-/**
- * Read a plain (unquoted) scalar at `s[i]`. It runs until the next top-level
- * flow indicator (`,` or `]`); quotes, apostrophes, and backslashes inside are
- * literal (no escape processing, no delimiter meaning). A `[`, `{`, or `}`
- * makes it a nested/mapping construct, so the whole sequence is rejected.
- */
+/** Read a plain (unquoted) scalar at `s[i]`: runs to the next top-level `,`/`]`,
+ * quotes/apostrophes/backslashes literal; a `[`/`{`/`}` rejects the sequence. */
 function parsePlainScalar(s, i) {
   let j = i;
   while (j < s.length) {
@@ -442,6 +433,20 @@ function parseFlowItem(s, i) {
     return null;
   }
   return parsePlainScalar(s, i);
+}
+
+// Decode ONE complete YAML scalar TOKEN (a `- item` dash value or a same-line
+// scalar) through the SAME readers the flow parser uses, so a quoted dash item
+// decodes IDENTICALLY to a quoted flow item (#1769 round 17). Plain = literal; a
+// malformed quoted token keeps its content (outer quotes stripped), uncorrupted.
+export function decodeScalar(raw) {
+  const s = String(raw ?? "").trim();
+  const read = { '"': parseDoubleQuotedScalar, "'": parseSingleQuotedScalar }[
+    s[0]
+  ];
+  if (!read) return s; // plain scalar -> literal
+  const parsed = read(s, 0);
+  return parsed && parsed.next === s.length ? parsed.value : stripYamlQuotes(s);
 }
 
 function parseInlineFlowSequence(text) {
@@ -487,12 +492,9 @@ function parseInlineFlowSequence(text) {
 
 function parseFreeTextList(lines, i, rest) {
   const trimmed = String(rest ?? "").trim();
-  // A comment-only remainder (`how_to_check: # the concrete steps that answer
-  // it`) is a documented-but-empty key: YAML drops the trailing comment, and the
-  // real list is the indented dash block below. Without this, the sample comment
-  // would be recorded as the sole item and the dash items dropped — so an agent
-  // copying the doc example verbatim would publish the sample comments instead of
-  // the real checks/outcomes/evidence (#1769 round 5).
+  // A comment-only remainder (`how_to_check: # …`) is a documented-but-empty key:
+  // YAML drops the comment and the real list is the dash block below; recording
+  // the sample comment as the sole item would bury the real items (#1769 round 5).
   const isCommentOnly =
     trimmed !== "" && stripTrailingYamlComment(trimmed).trim() === "";
   if (trimmed !== "" && !isCommentOnly) {
@@ -502,7 +504,8 @@ function parseFreeTextList(lines, i, rest) {
       const items = parseInlineFlowSequence(trimmed);
       return { items: items ?? [stripYamlQuotes(trimmed)], next: i + 1 };
     }
-    return { items: [stripYamlQuotes(trimmed)], next: i + 1 };
+    // A same-line scalar (`how_to_check: "Yes → fix"`) decodes like a flow item.
+    return { items: [decodeScalar(trimmed)], next: i + 1 };
   }
   return collectDashList(lines, i);
 }
@@ -561,13 +564,10 @@ export function parseVerdictYaml(block) {
       const token = /^([a-z]+)/.exec(rest);
       out.confidence = token ? token[1] : null;
     } else if (key === "affected_repo") {
-      // EXACT whole-value match (after quote strip and a BOUNDARY-VALID
-      // trailing-comment strip — `<repo>#garbage` is one malformed scalar,
-      // not a repo plus comment) — never substring extraction: pulling an
-      // allowlisted slug out of surrounding text would turn e.g.
-      // "not mento-protocol/frontend-monorepo" into a projection target.
-      // Anything that isn't a bare owner/name slug parses as empty
-      // (-> treated as unrecognized, no projection).
+      // EXACT whole-value match (after quote + boundary-valid trailing-comment
+      // strip), never substring extraction: pulling an allowlisted slug out of
+      // surrounding text would turn e.g. "not mento-protocol/frontend-monorepo"
+      // into a projection target. A non-slug value parses as empty (unrecognized).
       const value = stripYamlQuotes(stripTrailingYamlComment(rest).trim());
       out.affected_repo = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(value)
         ? value

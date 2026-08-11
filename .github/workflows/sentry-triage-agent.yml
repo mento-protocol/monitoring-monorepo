@@ -908,7 +908,7 @@ jobs:
               # through the ONE re-queue chokepoint (bookkeeping cause), never an
               # open-coded label swap. It is idempotent and OPEN-safe; a re-queue
               # that itself fails is surfaced but must not stop the close-block.
-              if ! node scripts/sentry-triage-requeue.mjs \
+              if ! node scripts/sentry-triage-brief-clear-recovery.mjs \
                   --issue "${QUEUE_ISSUE_NUMBER}" \
                   --repo "${GITHUB_REPOSITORY}"; then
                 echo "::error::Re-queue of issue #${QUEUE_ISSUE_NUMBER} after the clear failure ALSO failed; it may need manual attention (reopen + sentry:needs-triage)."

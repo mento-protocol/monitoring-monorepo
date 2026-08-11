@@ -41,6 +41,7 @@ import {
 } from "./sentry-triage-brief.mjs";
 import {
   decodeDoubleQuoteEscape,
+  decodeScalar,
   extractPermalink,
   MAX_BRIEF_LIST_ITEMS,
   MAX_BRIEF_TEXT_LEN,
@@ -455,6 +456,32 @@ await test("the flow parser handles all three scalar styles and rejects non-scal
   rejects("[&anchor Yes, No]", "anchor must reject");
   rejects("[*ref, No]", "alias must reject");
   rejects("[!!str Yes, No]", "tag must reject");
+});
+
+await test("dash-list items decode the SAME as their flow equivalents (#1769 round 17)", () => {
+  // The BLOCK/dash form and the inline FLOW form now share ONE scalar decoder,
+  // so a double-quoted item (with an escape), a single-quoted item, and a plain
+  // item decode identically in both — never left as `→` or a doubled `''`.
+  const dashYaml = [
+    "decision_branches:",
+    '  - "Yes \\u2192 config-fix"',
+    "  - 'It''s fixed -> close'",
+    "  - maybe later",
+  ].join("\n");
+  const flowYaml =
+    "decision_branches: [\"Yes \\u2192 config-fix\", 'It''s fixed -> close', maybe later]";
+  const dash = parseVerdictYaml(dashYaml).decision_branches;
+  const flow = parseVerdictYaml(flowYaml).decision_branches;
+  const expected = ["Yes → config-fix", "It's fixed -> close", "maybe later"];
+  assertEqual(JSON.stringify(dash), JSON.stringify(expected));
+  assertEqual(JSON.stringify(flow), JSON.stringify(expected));
+
+  // decodeScalar is the shared primitive both callers route through.
+  assertEqual(decodeScalar('"Yes \\u2192 fix"'), "Yes → fix");
+  assertEqual(decodeScalar("'It''s fixed'"), "It's fixed");
+  assertEqual(decodeScalar("plain text"), "plain text");
+  // A malformed quoted token is kept (outer quotes stripped), not corrupted.
+  assertEqual(decodeScalar('"a\\qb"'), "a\\qb");
 });
 
 await test("inline list items keep brackets inside quotes (#1769 round 10)", () => {
@@ -1578,8 +1605,8 @@ await test("a RENDER failure is best-effort; a CLEAR failure blocks the close AN
   // The CLEAR-failure exit RESTORES selectability through the ONE re-queue
   // chokepoint — never a bare exit, never an open-coded label swap.
   assert(
-    step.includes("node scripts/sentry-triage-requeue.mjs"),
-    "the clear-failure exit must route through the re-queue chokepoint",
+    step.includes("node scripts/sentry-triage-brief-clear-recovery.mjs"),
+    "the clear-failure exit must route through the re-queue chokepoint CLI",
   );
   assert(
     !step.includes("requeue_for_retry") &&
@@ -1681,6 +1708,7 @@ await test("the pipeline's shared modules stay under the file-size hard cap", ()
     "scripts/sentry-triage-brief-render.mjs",
     "scripts/sentry-triage-queue-contract.mjs",
     "scripts/sentry-triage-requeue.mjs",
+    "scripts/sentry-triage-brief-clear-recovery.mjs",
   ]
     .map((path) => [path, readRepoFile(path).split("\n").length])
     .filter(([, lines]) => lines > 1000)
@@ -1732,6 +1760,7 @@ await test("every workflow-runtime module imports only relative files and node: 
     "sentry-triage-project.mjs", // verdict + project jobs
     "sentry-triage-archive.mjs", // archive job
     "sentry-triage-agent-comment.mjs", // staged agent write wrapper
+    "sentry-triage-brief-clear-recovery.mjs", // brief clear-failure re-queue CLI
   ]) {
     for (const file of closureOf(entry)) closure.add(file);
   }

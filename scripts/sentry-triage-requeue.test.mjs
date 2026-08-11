@@ -24,21 +24,23 @@ import {
 } from "./sentry-triage-project-core.mjs";
 import { NEEDS_TRIAGE_LABEL } from "./sentry-triage-queue-contract.mjs";
 import {
-  buildBriefClearRecoveryComment,
   buildRegressedComment,
   buildRequeueAddLabelArgs,
   buildRequeueShedLabelArgs,
   buildRequeueFence,
   buildStrandedRecoveryComment,
   hasAdmissibleVerdict,
-  parseRequeueArgs,
   REQUEUE_CAUSE_BOOKKEEPING,
   REQUEUE_CAUSE_SENTRY_EVIDENCE,
   REQUEUE_ON_FAILURE_VERIFY_END_STATE,
   requeueFences,
   requeueQueueStub,
-  runClearFailureRequeue,
 } from "./sentry-triage-requeue.mjs";
+import {
+  buildBriefClearRecoveryComment,
+  parseRequeueArgs,
+  runClearFailureRequeue,
+} from "./sentry-triage-brief-clear-recovery.mjs";
 
 let passed = 0;
 let failed = 0;
@@ -734,7 +736,7 @@ await test("no re-queue path rewrites the stub body (#1692)", async () => {
 // entry drives it back to selectable through the chokepoint, OPEN-safe.
 // ---------------------------------------------------------------------------
 
-function makeClearFailureGh(initial) {
+function makeClearFailureGh(initial, { failOn = () => null } = {}) {
   const state = {
     state: initial.state ?? "OPEN",
     labels: [...(initial.labels ?? [])],
@@ -743,6 +745,8 @@ function makeClearFailureGh(initial) {
   const calls = [];
   const runGh = async (args) => {
     calls.push(args);
+    const failure = failOn(args);
+    if (failure) throw new Error(failure);
     if (args[0] === "issue" && args[1] === "view") {
       return JSON.stringify({
         state: state.state,
@@ -829,6 +833,58 @@ await test("parseRequeueArgs requires a numeric issue and a repo", () => {
     }
     assert(threw, `parseRequeueArgs(${JSON.stringify(bad)}) must throw`);
   }
+});
+
+await test("the advisory note failing never skips selectability verification (#1769 round 17)", async () => {
+  // The load-bearing label restoration succeeds; only the ADVISORY bookkeeping
+  // note post fails. Under verify-end-state the note error must NOT escape before
+  // ensureSelectableForTriage runs — the stub IS selectable, so this is success.
+  const gh = makeClearFailureGh(
+    { state: "OPEN", labels: ["sentry-triage", "sentry:verdict-upstream"] },
+    {
+      failOn: (args) =>
+        args[1] === "comment" ? "HTTP 500 server error" : null,
+    },
+  );
+  const result = await runClearFailureRequeue({
+    runGh: gh.runGh,
+    repo: REPO,
+    issueNumber: 1731,
+  });
+  assertEqual(result.requeued, true);
+  assert(
+    gh.state.labels.includes(NEEDS_TRIAGE_LABEL),
+    "sentry:needs-triage must be restored even though the note failed",
+  );
+  assert(
+    !gh.state.labels.includes("sentry:verdict-upstream"),
+    "the verdict label must be shed",
+  );
+  // The note never landed, but selectability was still confirmed.
+  assertEqual(gh.state.comments.length, 0);
+});
+
+await test("a label restoration that cannot be verified selectable is a HARD failure (#1769 round 17)", async () => {
+  // The load-bearing add-label mutation keeps failing, so the stub never carries
+  // sentry:needs-triage: ensureSelectableForTriage cannot confirm it selectable
+  // and must THROW, never report success on an unverified strand.
+  const gh = makeClearFailureGh(
+    { state: "OPEN", labels: ["sentry-triage", "sentry:verdict-upstream"] },
+    {
+      failOn: (args) =>
+        args[1] === "edit" && args.includes("--add-label")
+          ? "HTTP 503 unavailable"
+          : null,
+    },
+  );
+  await assertRejects(
+    runClearFailureRequeue({ runGh: gh.runGh, repo: REPO, issueNumber: 1731 }),
+    /not selectable for triage/,
+  );
+  assert(
+    !gh.state.labels.includes(NEEDS_TRIAGE_LABEL),
+    "the stub never became selectable (the add-label kept failing)",
+  );
 });
 
 if (failed > 0) {

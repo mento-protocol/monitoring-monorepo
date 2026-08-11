@@ -2388,10 +2388,11 @@ while IFS= read -r path; do
         scripts/sentry-mcp-broker.mjs|scripts/sentry-mcp-broker.test.mjs)
           add_command "pnpm sentry:broker:test" "Sentry credential broker changed"
           ;;
-        scripts/sentry-triage-requeue.mjs|scripts/sentry-triage-requeue.test.mjs|scripts/sentry-triage-queue-contract.mjs)
-          # The single re-queue chokepoint and the queue contract it reads. Both
-          # sites that re-queue a stub run through it, so its suite is never the
-          # whole story — run theirs too.
+        scripts/sentry-triage-requeue.mjs|scripts/sentry-triage-requeue.test.mjs|scripts/sentry-triage-queue-contract.mjs|scripts/sentry-triage-brief-clear-recovery.mjs)
+          # The single re-queue chokepoint, the queue contract it reads, and the
+          # brief clear-failure CLI that wraps it (#1769 round 17). Both sites that
+          # re-queue a stub run through the chokepoint, so its suite is never the
+          # whole story — run theirs too. The CLI's tests live in the requeue suite.
           add_command "pnpm sentry:requeue:test" "Sentry re-queue chokepoint changed"
           add_command "pnpm sentry:ingest:test" "Sentry re-queue chokepoint changed"
           add_command "pnpm sentry:archive:test" "Sentry re-queue chokepoint changed"
