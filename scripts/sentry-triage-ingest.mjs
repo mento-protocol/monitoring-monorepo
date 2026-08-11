@@ -174,17 +174,26 @@ export function classifyNoise(rawTitle) {
 // cannot be carried without a second per-issue request. The two signals here
 // need no new API surface.
 //
-// OFF by default — see SETTLE_NOISE_ENABLED. While off, the ingest logs what
-// this WOULD have settled so the blast radius is measured before it is trusted.
+// This predicate SETTLES NOTHING. There is no automatic-settlement path in the
+// pipeline and this constant is not a switch that creates one — it only decides
+// whether matching candidates are logged. Adding settlement means writing a
+// deterministic verdict into the label step, which is a real behaviour change
+// to a pipeline whose whole value is that a human or an agent looked; it is a
+// separate change, not a flag flip.
 export const NOISE_QUIET_DAYS = 7;
 
-// The kill switch for the rule above. Flipping this to true lets the ingest
-// settle matching issues WITHOUT an agent verdict, which is a real behaviour
-// change to a pipeline whose whole value is that a human or an agent looked.
-// Do not flip it on reasoning alone — read the shadow-mode notices from a few
-// weeks of runs against the verdicts the agent actually returned, and confirm
-// the rule never fires on something the agent called code-fix or config-fix.
-export const SETTLE_NOISE_ENABLED = false;
+// Logging-only. Set false to silence the candidate notices; nothing else reads
+// it, and nothing about the pipeline's behaviour depends on it.
+export const LOG_NOISE_CANDIDATES = true;
+
+// KNOWN SAMPLING BIAS, stated because the whole point of these notices is to be
+// evidence later. `buildNewIssuesQuery` scans `firstSeen:-8d`, so an issue that
+// stays active for more than a day before going quiet is never in `merged` by
+// the time it could satisfy a 7-day quiet window — only regressed issues return
+// after that. The logged candidates therefore skew toward short-lived issues,
+// and the true match rate is HIGHER than these notices show. Do not read a
+// small count here as "the rule rarely fires"; widening the lookback would be
+// needed to measure that, and that changes what the ingest scans.
 
 export function classifyDeterministicNoise({
   title,
@@ -1070,7 +1079,7 @@ export async function runIngest(options, deps = {}) {
       // and read as "no candidates" rather than "never looked". stderr, not
       // stdout: `--json` callers parse stdout.
       if (
-        !SETTLE_NOISE_ENABLED &&
+        LOG_NOISE_CANDIDATES &&
         classifyDeterministicNoise({
           title: sentryIssue.title,
           users: sentryIssue.usersKnown ? sentryIssue.users : undefined,
@@ -1078,7 +1087,7 @@ export async function runIngest(options, deps = {}) {
         })
       ) {
         process.stderr.write(
-          `::notice::sentry-triage: ${sentryIssue.shortId} matches the deterministic noise rule (0 users, quiet ${NOISE_QUIET_DAYS}d, action=${decision.action}); shadow mode, no behaviour change\n`,
+          `::notice::sentry-triage: ${sentryIssue.shortId} matches the deterministic noise rule (0 users, quiet ${NOISE_QUIET_DAYS}d, action=${decision.action}); candidate only, nothing settled\n`,
         );
       }
       if (decision.action === "skip") {

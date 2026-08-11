@@ -17,7 +17,6 @@ import {
   classifyDeterministicNoise,
   classifyNoise,
   NOISE_QUIET_DAYS,
-  SETTLE_NOISE_ENABLED,
   decideDedupAction,
   defangBackticks,
   defangMentions,
@@ -3099,8 +3098,16 @@ const QUIET_MS = NOISE_QUIET_DAYS * 24 * 60 * 60 * 1000;
 const NOW = Date.parse("2026-08-11T00:00:00Z");
 const quiet = (ms) => new Date(NOW - ms).toISOString();
 
-await test("the deterministic noise rule ships disabled", () => {
-  assertEqual(SETTLE_NOISE_ENABLED, false);
+await test("the noise predicate settles nothing — no code path acts on it", () => {
+  // The constant only gates a log line. If a future change makes it gate real
+  // settlement, this test should be replaced by tests of THAT behaviour — it
+  // exists to stop the constant being mistaken for an activation switch.
+  const src = readFileSync(
+    new URL("./sentry-triage-ingest.mjs", import.meta.url),
+    "utf8",
+  );
+  const reads = src.match(/LOG_NOISE_CANDIDATES/g) ?? [];
+  assertEqual(reads.length, 2);
 });
 
 await test("the noise rule needs all three signals, not any one", () => {
