@@ -26,6 +26,17 @@ claude_settings_backup="$(mktemp)"
 codex_hooks_fixture="$(mktemp)"
 claude_settings_fixture="$(mktemp)"
 untracked_skill_artifact=".claude/skills/.agent-quality-gate-test.tmp"
+# A real symlink under scripts/ is needed to exercise the gate's `-L` symlink
+# routing (Codex 3754355168); the extensionless path is registered for cleanup
+# so a failed assertion cannot leave it in the working tree.
+sentry_symlink_probe="scripts/.sentry-symlink-probe.test.tmp"
+# Finding 3754704280: a change beneath an EXISTING scripts/ directory symlink's
+# real target must route the check too. This needs a real directory symlink under
+# scripts/ pointing at a repo-relative directory (the gate resolves the target
+# with `pwd -P`), so a target dir at the repo root and the link are both
+# registered for cleanup.
+sentry_symlink_target_dir=".sentry-symlink-target.test.tmp"
+sentry_symlink_to_target="scripts/.sentry-symlink-to-target.test.tmp"
 cp .codex/hooks.json "$codex_hooks_backup"
 cp .claude/settings.json "$claude_settings_backup"
 cp "$codex_hooks_backup" "$codex_hooks_fixture"
@@ -36,7 +47,7 @@ restore_hook_configs() {
   cp "$claude_settings_backup" "$claude_settings_fixture"
 }
 
-trap 'restore_hook_configs; rm -rf "$gate_cache_dir"; rm -f "$paths_file" "$output_file" "$turbo_facts_file" "$output_file.pnpm-args" "$untracked_skill_artifact" "$codex_hooks_backup" "$claude_settings_backup" "$codex_hooks_fixture" "$claude_settings_fixture"' EXIT
+trap 'restore_hook_configs; rm -rf "$gate_cache_dir" "$sentry_symlink_target_dir"; rm -f "$paths_file" "$output_file" "$turbo_facts_file" "$output_file.pnpm-args" "$untracked_skill_artifact" "$sentry_symlink_probe" "$sentry_symlink_to_target" "$codex_hooks_backup" "$claude_settings_backup" "$codex_hooks_fixture" "$claude_settings_fixture"' EXIT
 
 fail() {
   # Stdout AND stderr: some CI log captures drop the suite's stderr, which
@@ -2483,6 +2494,74 @@ assert_contains "+ pnpm agent:prewarm:test"
 assert_contains "All mapped commands passed."
 assert_not_contains "parallel marker was not created"
 
+# A package.json edit confined to allowlisted aliases classifies as
+# root-tooling-scripts and is exempt from --allow-package-script-changes. That
+# exemption is only safe while every allowlisted alias is pinned to an exact
+# command, so the pin validator has to be a fail-fast PREREQUISITE: if it runs
+# in the same pool as the aliases, an edit appending `&& <anything>` to a
+# trusted alias executes on the developer's machine before the gate reports the
+# unpinned command. The stub pnpm here touches a marker; it must never run.
+pin_prerequisite_repo="$(mktemp -d)"
+pin_prerequisite_marker="$pin_prerequisite_repo/pool-marker"
+(
+  cd "$pin_prerequisite_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  mkdir -p bin scripts tools
+  cat > package.json <<'JSON'
+{
+  "name": "quality-gate-pin-fixture",
+  "scripts": {
+    "sentry:project:test": "node ok.mjs"
+  }
+}
+JSON
+  cat > scripts/check-agent-quality-gate-package-scripts.sh <<'STUB'
+#!/usr/bin/env bash
+echo 'package.json scripts.sentry:project:test must be "node ok.mjs"'
+exit 1
+STUB
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  cat > bin/pnpm <<'STUB'
+#!/usr/bin/env bash
+: > "${POOL_MARKER:?}"
+STUB
+  chmod +x bin/pnpm tools/trunk scripts/check-agent-quality-gate-package-scripts.sh
+  git add .
+  git commit -qm init
+  cat > package.json <<'JSON'
+{
+  "name": "quality-gate-pin-fixture",
+  "scripts": {
+    "sentry:project:test": "node ok.mjs && echo appended"
+  }
+}
+JSON
+  set +e
+  POOL_MARKER="$pin_prerequisite_marker" \
+    PATH="$pin_prerequisite_repo/bin:$PATH" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD \
+    --run \
+    --parallel 4 \
+    > "$output_file" 2>&1
+  exit_code=$?
+  set -e
+  [[ "$exit_code" -ne 0 ]]
+)
+if [[ -f "$pin_prerequisite_marker" ]]; then
+  rm -rf "$pin_prerequisite_repo"
+  fail "the quality pool ran a trusted pnpm alias even though the pin validator failed"
+fi
+rm -rf "$pin_prerequisite_repo"
+assert_contains "+ bash scripts/check-agent-quality-gate-package-scripts.sh"
+assert_contains "Stopping after first failed mapped command (--fail-fast)."
+assert_not_contains "Running quality commands with parallelism 4."
+
 autoreview_progress_repo="$(mktemp -d)"
 (
   cd "$autoreview_progress_repo"
@@ -3646,6 +3725,96 @@ assert_contains "- pnpm sentry:archive:test (Sentry triage archive helper change
 
 run_gate "scripts/sentry-triage-archive.test.mjs"
 assert_contains "- pnpm sentry:archive:test (Sentry triage archive helper changed)"
+
+# check-sentry-suites-in-ci.test.mjs asserts that every Sentry suite runs in
+# CI. Every file it reads must route it, or the drift it exists to catch is
+# only caught after push. Its first home was an arm nested under `scripts/*.sh`,
+# where a `.mjs` path could never reach it — hence a case per reader here.
+sentry_ci_check="- node scripts/check-sentry-suites-in-ci.test.mjs (Sentry CI-coverage check reads this file)"
+
+run_gate "scripts/check-sentry-suites-in-ci.test.mjs"
+assert_contains "$sentry_ci_check"
+
+run_gate "scripts/check-sentry-suites-in-ci-core.mjs"
+assert_contains "$sentry_ci_check"
+
+# The core-grammar and probes siblings are read the same way; the glob covers
+# every `check-sentry-suites-in-ci*.mjs`, not just the two named modules.
+run_gate "scripts/check-sentry-suites-in-ci-core-commands.mjs"
+assert_contains "$sentry_ci_check"
+
+run_gate "scripts/check-sentry-suites-in-ci-probes.mjs"
+assert_contains "$sentry_ci_check"
+
+# The check parses EVERY workflow (contextOwnershipBlockers proves no decoy job
+# owns the `ci` check-run name), so a non-ci workflow edit must route it too.
+run_gate ".github/workflows/sentry-triage-agent.yml"
+assert_contains "$sentry_ci_check"
+
+# The env scan recurses into the composite actions the trusted jobs pull in, so
+# editing a local action.yml must route it — the reader the one-level scan and
+# the ci.yml-only arm both missed.
+run_gate ".github/actions/pnpm-install/action.yml"
+assert_contains "$sentry_ci_check"
+
+run_gate "package.json"
+assert_contains "$sentry_ci_check"
+
+run_gate "scripts/agent-quality-gate.sh"
+assert_contains "$sentry_ci_check"
+
+run_gate "scripts/check-agent-quality-gate-package-scripts.sh"
+assert_contains "$sentry_ci_check"
+
+run_gate "scripts/tf-stacks.test.mjs"
+assert_contains "$sentry_ci_check"
+
+# A suite that lands without a dedicated arm of its own still routes.
+run_gate "scripts/sentry-not-yet-written.test.mjs"
+assert_contains "$sentry_ci_check"
+
+# A directory symlink under scripts/ routes the check even though its path is
+# extensionless and matches none of the suite globs: findSentrySuites follows
+# the link, so the check must run to enumerate any suite behind it (Codex
+# 3754355168). Needs a real symlink in the tree because the gate reads `-L`.
+symlink_target="$(mktemp -d)"
+ln -sfn "$symlink_target" "$sentry_symlink_probe"
+run_gate "$sentry_symlink_probe"
+assert_contains "- node scripts/check-sentry-suites-in-ci.test.mjs (symlink under scripts/ can expose an unwired Sentry suite)"
+rm -f "$sentry_symlink_probe"
+rm -rf "$symlink_target"
+
+# The mirror case: a change BENEATH an existing scripts/ directory symlink's real
+# TARGET routes the check too. findSentrySuites follows the committed link and
+# would demand a suite added under the target, yet that path matches neither
+# scripts/* nor the rootScripts filter — so both this gate and CI would skip
+# without this routing (Codex 3754704280). Needs a real link to a repo-relative
+# directory because the gate resolves the target with `pwd -P`. The changed path
+# under the target need not exist; only the link and its target must.
+mkdir -p "$sentry_symlink_target_dir"
+ln -sfn "../$sentry_symlink_target_dir" "$sentry_symlink_to_target"
+run_gate "$sentry_symlink_target_dir/sentry-new.test.mjs"
+assert_contains "- node scripts/check-sentry-suites-in-ci.test.mjs (change beneath a scripts/ symlink target can expose an unwired Sentry suite)"
+rm -f "$sentry_symlink_to_target"
+rm -rf "$sentry_symlink_target_dir"
+
+# findSentrySuites enumerates recursively, so a nested suite is one the check
+# will demand a CI step for. Routing has to reach the same depth or the drift
+# is only caught after push.
+run_gate "scripts/nested/sentry-new.test.mjs"
+assert_contains "$sentry_ci_check"
+
+run_gate "scripts/a/b/sentry-deep.test.mjs"
+assert_contains "$sentry_ci_check"
+
+# An existing suite keeps its specific helper command and gains this one.
+run_gate "scripts/sentry-triage-requeue.test.mjs"
+assert_contains "- pnpm sentry:requeue:test (Sentry re-queue chokepoint changed)"
+assert_contains "$sentry_ci_check"
+
+# ci.yml routes it too, under its own more specific reason.
+run_gate ".github/workflows/ci.yml"
+assert_contains "- node scripts/check-sentry-suites-in-ci.test.mjs (central CI workflow changed)"
 
 run_gate "scripts/pr-feedback-state-claude.mjs"
 assert_contains "- pnpm pr:feedback-state:test (PR feedback-state helper changed)"
