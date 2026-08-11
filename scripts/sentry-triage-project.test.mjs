@@ -2983,13 +2983,6 @@ await test("parseArgs rejects a non-integer issue and unknown options", () => {
   assertThrows(() => parseArgs(["--nope"], {}), /Unknown option/);
 });
 
-if (failed > 0) {
-  process.stderr.write(`${failed} failed, ${passed} passed\n`);
-  process.exitCode = 1;
-} else {
-  process.stdout.write(`${passed} passed\n`);
-}
-
 await test("runProjectionBatch self-heals the sentry:projected label from LABEL_DEFINITIONS", async () => {
   const stubs = { 500: queueIssue({ number: 500 }) };
   const { runGh, calls } = makeRunGh({ stubs, createdUrl: CREATED_URL });
@@ -3034,3 +3027,10 @@ await test("runProjectionBatch survives a failing label ensure", async () => {
   );
   assertEqual(rows[0].status, "projected");
 });
+
+if (failed > 0) {
+  process.stderr.write(`${failed} failed, ${passed} passed\n`);
+  process.exitCode = 1;
+} else {
+  process.stdout.write(`${passed} passed\n`);
+}
