@@ -764,7 +764,7 @@ classify_root_package_json_changes() {
         echo "workspace"
         return
         ;;
-      /scripts/agent:quality-gate|/scripts/agent:quality-gate:test|/scripts/agent:prewarm|/scripts/agent:prewarm:test|/scripts/agent:review-materiality|/scripts/agent:review-materiality:test|/scripts/agent:context-check|/scripts/agent:context-budget|/scripts/agent:context-budget:test|/scripts/docs:index|/scripts/docs:index:test|/scripts/docs:audit|/scripts/docs:audit:test|/scripts/docs:garden|/scripts/docs:garden:test|/scripts/docs:navigation-eval|/scripts/docs:navigation-eval:test|/scripts/agent:autoreview|/scripts/issue:board|/scripts/issue:board:test|/scripts/issue:claim|/scripts/issue:review|/scripts/issue:release|/scripts/sentry:ingest|/scripts/sentry:ingest:test|/scripts/sentry:digest|/scripts/sentry:digest:test|/scripts/sentry:brief|/scripts/sentry:brief:test|/scripts/sentry:autofix:select|/scripts/sentry:autofix:select:test|/scripts/sentry:autofix:finalize:test|/scripts/sentry:archive|/scripts/sentry:archive:test|/scripts/sentry:broker:test|/scripts/pr:feedback-state|/scripts/pr:feedback-state:test|/scripts/pr:ready-state|/scripts/pr:ready-state:test|/scripts/tf|/scripts/tf:test|/scripts/alerts:rules:lint|/scripts/alerts:rules:lint:test|/scripts/lockfile:lint|/scripts/lockfile:lint:test|/scripts/skew:check|/scripts/skew:check:test|/scripts/override:prune-report|/scripts/override:prune-report:test|/scripts/adr:check|/scripts/adr:check:test|/scripts/sanitize:test)
+      /scripts/agent:quality-gate|/scripts/agent:quality-gate:test|/scripts/agent:prewarm|/scripts/agent:prewarm:test|/scripts/agent:review-materiality|/scripts/agent:review-materiality:test|/scripts/agent:context-check|/scripts/agent:context-budget|/scripts/agent:context-budget:test|/scripts/docs:index|/scripts/docs:index:test|/scripts/docs:audit|/scripts/docs:audit:test|/scripts/docs:garden|/scripts/docs:garden:test|/scripts/docs:navigation-eval|/scripts/docs:navigation-eval:test|/scripts/agent:autoreview|/scripts/issue:board|/scripts/issue:board:test|/scripts/issue:claim|/scripts/issue:review|/scripts/issue:release|/scripts/sentry:ingest|/scripts/sentry:ingest:test|/scripts/sentry:digest|/scripts/sentry:digest:test|/scripts/sentry:project|/scripts/sentry:project:test|/scripts/sentry:brief|/scripts/sentry:brief:test|/scripts/sentry:autofix:select|/scripts/sentry:autofix:select:test|/scripts/sentry:autofix:finalize:test|/scripts/sentry:archive|/scripts/sentry:archive:test|/scripts/sentry:broker:test|/scripts/sentry:requeue:test|/scripts/pr:feedback-state|/scripts/pr:feedback-state:test|/scripts/pr:ready-state|/scripts/pr:ready-state:test|/scripts/tf|/scripts/tf:test|/scripts/alerts:rules:lint|/scripts/alerts:rules:lint:test|/scripts/lockfile:lint|/scripts/lockfile:lint:test|/scripts/skew:check|/scripts/skew:check:test|/scripts/override:prune-report|/scripts/override:prune-report:test|/scripts/adr:check|/scripts/adr:check:test|/scripts/sanitize:test)
         saw_tooling_script=true
         ;;
       /scripts)
@@ -1266,6 +1266,8 @@ add_root_tooling_package_script_checks() {
   add_command "pnpm sentry:autofix:finalize:test" "$reason"
   add_command "pnpm sentry:archive:test" "$reason"
   add_command "pnpm sentry:broker:test" "$reason"
+  add_command "pnpm sentry:requeue:test" "$reason"
+  add_command "node scripts/check-sentry-suites-in-ci.test.mjs" "$reason"
   add_command "node scripts/pr-feedback-state.test.mjs" "$reason"
   add_command "node scripts/pr-ready-state.test.mjs" "$reason"
   add_command "node scripts/terraform-fmt-check.test.mjs" "$reason"
@@ -1569,6 +1571,35 @@ compact_turbo_quality_commands() {
     quality_commands+=("pnpm exec turbo run ${value}${package_filters} --cache=local:rw|${turbo_group_reasons[$group_index]}")
   done
 }
+
+# Directory symlinks under scripts/ expose Sentry suites whose real files live
+# OUTSIDE scripts/. findSentrySuites (in check-sentry-suites-in-ci.test.mjs)
+# follows such a link and enumerates scripts/<link>/sentry-*.test.mjs, but the
+# real file's committed path is the symlink TARGET (e.g. fixtures/sentry-x.test.mjs)
+# — which matches neither scripts/* nor the CI rootScripts filter. Adding a suite
+# under a PREVIOUSLY committed link therefore changes neither the link nor any
+# scripts/** path, so both this gate and the path-gated CI job would skip the
+# coverage check while the check itself would demand that suite (Codex 3754704280).
+# Resolve every existing scripts/ directory symlink to its repo-relative target
+# once, so the per-path loop below can route the check for a change beneath a
+# target too. Guarded, like the routing that consumes it, so the gate's own unit
+# tests (run against stub fixture repos) are unaffected.
+scripts_symlink_targets=()
+if [[ "$script_source_dir" == "$repo_root/scripts" && -d "$repo_root/scripts" ]]; then
+  repo_root_physical="$(cd "$repo_root" && pwd -P)"
+  while IFS= read -r gate_symlink; do
+    # Only a symlink that resolves to a directory exposes a suite tree; `-d`
+    # follows the link. A target outside the repo cannot hold a committed suite,
+    # so keep only targets under the repo root.
+    [[ -d "$gate_symlink" ]] || continue
+    gate_symlink_target="$(cd "$gate_symlink" && pwd -P)" || continue
+    case "$gate_symlink_target/" in
+      "$repo_root_physical"/*)
+        scripts_symlink_targets+=("${gate_symlink_target#"$repo_root_physical"/}")
+        ;;
+    esac
+  done < <(find "$repo_root/scripts" -type l 2>/dev/null || true)
+fi
 
 while IFS= read -r path; do
   case "$path" in
@@ -1937,6 +1968,9 @@ while IFS= read -r path; do
           add_surface "workspace"
           add_preflight_command "pnpm install --frozen-lockfile" "central CI workflow changed"
           add_workspace_quality_commands "central CI workflow changed"
+          # This workflow is the check's input: it asserts every Sentry suite
+          # has a step in the `scripts` job.
+          add_command "node scripts/check-sentry-suites-in-ci.test.mjs" "central CI workflow changed"
           add_command "pnpm tf:test" "Terraform registry-backed CI workflow changed"
           add_terraform_validate_commands "terraform" "Terraform registry-backed CI workflow changed"
           add_terraform_validate_commands "alerts/rules" "Terraform registry-backed CI workflow changed"
@@ -2573,6 +2607,77 @@ while IFS= read -r path; do
       add_command "pnpm tf:test" "production infrastructure identity contract surface changed"
       ;;
   esac
+  # `check-sentry-suites-in-ci.test.mjs` asserts that every Sentry suite runs in
+  # CI. Its invariants are claims ABOUT the files below, so editing one of them
+  # is exactly when it must run. Routing lives here rather than in the extension
+  # cases above for two reasons: the readers span `.sh`, `.mjs`, `.yml`, and
+  # `package.json`, and the first matching arm in those cases wins — every
+  # existing `scripts/sentry-*.test.mjs` already matches a dedicated arm, so an
+  # arm nested there would never see them. A new suite need not touch
+  # package.json or ci.yml to exist, so the glob covers suites with no arm yet.
+  # `add_command` deduplicates, so ci.yml keeps its more specific reason above.
+  #
+  # `.github/workflows/*` and `.github/actions/*` cover every reader the check
+  # opens beyond ci.yml: `contextOwnershipBlockers` parses EVERY workflow to
+  # prove no decoy job owns the `ci` check-run name, and the env scan recurses
+  # into the composite `action.yml` files the trusted jobs pull in. Editing one
+  # of those must run the check, or the drift it exists to catch surfaces only
+  # after push. `scripts/check-sentry-suites-in-ci*.mjs` covers this file, the
+  # core, and its `-core-commands` / `-probes` siblings alike.
+  #
+  # Two suite globs because `findSentrySuites` in the check enumerates
+  # recursively — a suite in a subdirectory is one the check will demand a CI
+  # step for, so it has to route the check too. `scripts/*/sentry-*.test.mjs`
+  # covers every depth: a `case` pattern is not pathname expansion, so `*`
+  # matches `/`. (`**` would behave identically here and only invite a reader to
+  # assume globstar semantics bash does not implement.) The same `*`-matches-`/`
+  # rule is why `.github/actions/*` reaches a nested `action.yml`.
+  #
+  # Repository-specific, like the `pnpm tf:test` sweep below: the gate unit
+  # tests run this script against stub fixture repositories that own neither
+  # the check nor the suites it enumerates.
+  if [[ "$script_source_dir" == "$repo_root/scripts" ]]; then
+    case "$path" in
+      .github/workflows/* | \
+        .github/actions/* | \
+        package.json | \
+        scripts/agent-quality-gate.sh | \
+        scripts/check-agent-quality-gate-package-scripts.sh | \
+        scripts/check-sentry-suites-in-ci*.mjs | \
+        scripts/sentry-*.test.mjs | \
+        scripts/*/sentry-*.test.mjs | \
+        scripts/tf-stacks.test.mjs)
+        add_command "node scripts/check-sentry-suites-in-ci.test.mjs" "Sentry CI-coverage check reads this file"
+        ;;
+    esac
+    # A directory symlink under scripts/ exposes suites the extension patterns
+    # above (and the CI `rootScripts` filter) never see: `findSentrySuites`
+    # follows the link and enumerates `scripts/<link>/sentry-*.test.mjs`, but the
+    # changed paths are the extensionless link itself and its target outside
+    # scripts/, matching neither. Route the check for ANY symlink under scripts/
+    # so the suite it exposes is proven wired rather than silently skipped (Codex
+    # 3754355168). `-L` reads the working tree, matching what the check walks.
+    case "$path" in
+      scripts/*)
+        if [[ -L "$repo_root/$path" ]]; then
+          add_command "node scripts/check-sentry-suites-in-ci.test.mjs" "symlink under scripts/ can expose an unwired Sentry suite"
+        fi
+        ;;
+    esac
+    # The mirror case: a change BENEATH an existing scripts/ directory symlink's
+    # real target (resolved once, above). Such a path is a suite findSentrySuites
+    # enumerates through the link, yet it matches neither scripts/* above nor the
+    # rootScripts CI filter — so without this the check would skip while still
+    # demanding the suite (Codex 3754704280).
+    for scripts_symlink_target in "${scripts_symlink_targets[@]+"${scripts_symlink_targets[@]}"}"; do
+      case "$path" in
+        "$scripts_symlink_target"/*)
+          add_command "node scripts/check-sentry-suites-in-ci.test.mjs" "change beneath a scripts/ symlink target can expose an unwired Sentry suite"
+          break
+          ;;
+      esac
+    done
+  fi
   if [[ "$terraform_stack_paths_count" -gt 0 ]]; then
     for terraform_stack_path in "${terraform_stack_paths[@]}"; do
       case "$path" in
@@ -3289,10 +3394,26 @@ run_mapped_command_to_files() {
 
 is_quality_setup_command() {
   local command="$1"
-  # These commands have side effects that later quality checks depend on, so
-  # they must finish before the independent quality pool starts. Keep this list
-  # in sync with new setup-style commands added by the path mapper above.
+  # These commands have side effects that later quality checks depend on, or
+  # gate whether later commands may run at all, so they must finish before the
+  # independent quality pool starts. Keep this list in sync with new
+  # setup-style commands added by the path mapper above.
   case "$command" in
+    "bash scripts/check-agent-quality-gate-package-scripts.sh")
+      # A SAFETY prerequisite, not a build one. The `root-tooling-scripts`
+      # classification skips the `--allow-package-script-changes` refusal for a
+      # package.json edit that touches only allowlisted aliases, which is only
+      # sound while this validator pins each of those aliases to an exact
+      # command. `add_root_tooling_package_script_checks` queues the validator
+      # into the SAME pool as `pnpm sentry:requeue:test` and friends, so before
+      # this arm existed an edit appending `&& <anything>` to a trusted alias
+      # ran that alias concurrently with the check meant to reject it — and
+      # keep-going meant a failed validator only incremented the failure count.
+      # As a setup command it runs in run_prerequisite_phase, which is fail-fast
+      # and stamp-exempt, so an unpinned or drifted alias aborts the run before
+      # any `pnpm <alias>` executes and `--skip-if-fresh` cannot skip it.
+      return 0
+      ;;
     "pnpm --filter @mento-protocol/config build")
       return 0
       ;;
@@ -3597,21 +3718,32 @@ run_prerequisite_phase() {
 
 run_quality_phase() {
   local setup_entries=()
+  local rest_entries=()
   local serial_entries=()
   local parallel_entries=()
   local entry
   local command
 
-  if [[ "$fail_fast" == "1" || "$fail_fast" == "true" || "$quality_parallelism" -le 1 ]]; then
-    run_mapped_entries_sequential "quality" "${quality_commands[@]+"${quality_commands[@]}"}"
-    return
-  fi
-
+  # Split setup out FIRST, so it reaches run_prerequisite_phase on every path.
+  # While the partition lived below the sequential early-return, --parallel 1
+  # and the hook's keep-going setting let a failed setup command's dependents
+  # run anyway: `terraform validate` after a failed `terraform init`, the
+  # typechecks after a failed shared-config build, and the trusted `pnpm
+  # <alias>` commands after the failed package-script validator that exists to
+  # gate them.
+  #
+  # The sequential path keeps the mapper's original ordering for everything
+  # else. Serial-vs-parallel is a concurrency partition, not a priority one, so
+  # reordering it here would change which command a --fail-fast run reports
+  # first for no gain.
   for entry in "${quality_commands[@]+"${quality_commands[@]}"}"; do
     command="${entry%%|*}"
     if is_quality_setup_command "$command"; then
       setup_entries+=("$entry")
-    elif is_quality_serial_command "$command"; then
+      continue
+    fi
+    rest_entries+=("$entry")
+    if is_quality_serial_command "$command"; then
       serial_entries+=("$entry")
     else
       parallel_entries+=("$entry")
@@ -3619,6 +3751,12 @@ run_quality_phase() {
   done
 
   run_prerequisite_phase "quality setup" "${setup_entries[@]+"${setup_entries[@]}"}"
+
+  if [[ "$fail_fast" == "1" || "$fail_fast" == "true" || "$quality_parallelism" -le 1 ]]; then
+    run_mapped_entries_sequential "quality" "${rest_entries[@]+"${rest_entries[@]}"}"
+    return
+  fi
+
   run_mapped_entries_sequential "quality serialized" "${serial_entries[@]+"${serial_entries[@]}"}"
   run_mapped_entries_parallel "quality" "$quality_parallelism" "${parallel_entries[@]+"${parallel_entries[@]}"}"
 }

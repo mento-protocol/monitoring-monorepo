@@ -1097,18 +1097,43 @@ permission or the environment-secret writes 403 (`terraform/providers.tf`).
 
 ## Verification
 
-These checks are offline unless noted:
+These checks are offline unless noted. CI runs all of them in the required
+`Lint + test root scripts` job, one step per suite, so a red check names the leg
+that broke; `scripts/check-sentry-suites-in-ci.test.mjs` fails if a new suite
+lands without a step there.
+
+That check parses ci.yml rather than searching it, so a step only counts when
+it runs the suite as its whole command. Adding an `if:`, a
+`continue-on-error:`, a `working-directory:`, an `env:`, a `|| true`, or an
+extra argument makes the step stop counting, and the failure names which one.
+
+The CI step for each Sentry suite is a DIRECT `node scripts/<file>` invocation
+(`node --test scripts/<file>` for the broker), never a `pnpm <alias>`. The
+pnpm-run path carries two config-level fail-opens a parser cannot see — a
+`scriptShell` override false-greens the alias, and a `presentry:*:test`
+lifecycle hook runs before it and can empty the suite — so the checker rejects an
+alias-based Sentry step and requires the direct form. Reproduce the CI steps
+with:
 
 ```bash
-pnpm sentry:ingest:test
-pnpm sentry:digest:test
-pnpm sentry:project:test
-pnpm sentry:brief:test
-pnpm sentry:autofix:select:test
-pnpm sentry:autofix:finalize:test
-pnpm sentry:archive:test
-pnpm sentry:requeue:test
+node scripts/sentry-triage-ingest.test.mjs
+node scripts/sentry-triage-digest.test.mjs
+node scripts/sentry-triage-project.test.mjs
+node scripts/sentry-triage-brief.test.mjs
+node scripts/sentry-autofix-select.test.mjs
+node scripts/sentry-autofix-finalize.test.mjs
+node scripts/sentry-triage-archive.test.mjs
+node --test scripts/sentry-mcp-broker.test.mjs
+node scripts/sentry-triage-requeue.test.mjs
+node scripts/sentry-triage-agent-comment.test.mjs
+node scripts/check-sentry-suites-in-ci.test.mjs
+```
 
+The `pnpm sentry:*:test` aliases still run these suites for interactive use and
+in the local pre-push gate; CI's direct invocation is the backstop, and the pin
+validator keeps the aliases the gate trusts safe.
+
+```bash
 # Read-only previews that require local credentials:
 pnpm sentry:ingest --dry-run --lookback-days 8
 SENTRY_TRIAGE_ISSUES='[123,456]' pnpm sentry:digest --channel '#engineering'

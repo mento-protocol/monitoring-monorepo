@@ -7,6 +7,12 @@ const fs = require("node:fs");
 const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
 const scripts = pkg.scripts ?? {};
 const expectedScripts = {
+  // The one sanctioned lifecycle hook. pnpm runs it during `pnpm install`, so
+  // the scripts job (and every other install) executes it. Pinning its exact
+  // command here means a mutation to something else — the truncate-the-suites
+  // payload Codex 3754887736 describes — fails this validator; the hook-rejection
+  // loop below rejects any OTHER lifecycle hook a package-only PR might add.
+  postinstall: "pnpm --filter @mento-protocol/config build",
   "agent:quality-gate": "./scripts/agent-quality-gate.sh",
   "agent:quality-gate:test": "bash scripts/agent-quality-gate.test.sh",
   "agent:prewarm": "node scripts/agent-prewarm.mjs",
@@ -37,6 +43,17 @@ const expectedScripts = {
   "sentry:ingest:test": "node scripts/sentry-triage-ingest.test.mjs",
   "sentry:digest": "node scripts/sentry-triage-digest.mjs",
   "sentry:digest:test": "node scripts/sentry-triage-digest.test.mjs",
+  "sentry:project": "node scripts/sentry-triage-project.mjs",
+  "sentry:project:test": "node scripts/sentry-triage-project.test.mjs",
+  "sentry:brief": "node scripts/sentry-triage-brief.mjs",
+  "sentry:brief:test": "node scripts/sentry-triage-brief.test.mjs",
+  "sentry:autofix:select": "node scripts/sentry-autofix-select.mjs",
+  "sentry:autofix:select:test": "node scripts/sentry-autofix-select.test.mjs",
+  "sentry:autofix:finalize:test": "node scripts/sentry-autofix-finalize.test.mjs",
+  "sentry:archive": "node scripts/sentry-triage-archive.mjs",
+  "sentry:archive:test": "node scripts/sentry-triage-archive.test.mjs",
+  "sentry:broker:test": "node --test scripts/sentry-mcp-broker.test.mjs",
+  "sentry:requeue:test": "node scripts/sentry-triage-requeue.test.mjs",
   "pr:feedback-state": "node scripts/pr-feedback-state.mjs",
   "pr:feedback-state:test": "node scripts/pr-feedback-state.test.mjs",
   "pr:ready-state": "node scripts/pr-ready-state.mjs",
@@ -59,5 +76,45 @@ for (const [name, expected] of Object.entries(expectedScripts)) {
     console.error(`package.json scripts.${name} must be ${JSON.stringify(expected)}`);
     process.exitCode = 1;
   }
+}
+
+// Reject unsanctioned lifecycle hooks. `pnpm install` runs the install/publish
+// hooks (preinstall, install, postinstall, prepare, prepublish[Only], pre/post
+// pack); pnpm runs a `pre<x>`/`post<x>` hook automatically around any script
+// `<x>` it invokes. Either kind runs trusted code the static coverage scan in
+// check-sentry-suites-in-ci cannot see — a root `postinstall` that truncates the
+// Sentry suites and this validator, or a `presentry:*:test` that empties a suite
+// before its (now direct) CI step. The scripts job runs the validator BEFORE
+// pnpm-install, so a hook a package-only PR adds is rejected here before install
+// would execute it (Codex 3754887736). Only the exact hooks pinned in
+// expectedScripts above are allowed; every other lifecycle-shaped script fails.
+const INSTALL_PUBLISH_HOOKS = new Set([
+  "preinstall",
+  "install",
+  "postinstall",
+  "prepare",
+  "prepublish",
+  "prepublishOnly",
+  "prepack",
+  "postpack",
+]);
+const scriptNames = new Set(Object.keys(scripts));
+for (const [name, command] of Object.entries(scripts)) {
+  let isHook = INSTALL_PUBLISH_HOOKS.has(name);
+  if (!isHook) {
+    // A `pre<x>`/`post<x>` hook auto-runs only when `<x>` is itself a script, so
+    // this matches `presentry:ingest:test` (its `sentry:ingest:test` sibling
+    // exists) without flagging an unrelated name like `agent:prewarm`.
+    const affix = /^(pre|post)(.+)$/.exec(name);
+    if (affix && scriptNames.has(affix[2])) isHook = true;
+  }
+  if (!isHook) continue;
+  if (expectedScripts[name] === command) continue; // the sanctioned, pinned hook
+  console.error(
+    `package.json scripts.${name} is a lifecycle hook (${JSON.stringify(command)}) that runs ` +
+      "automatically during install or around a trusted alias; remove it or pin it in " +
+      "scripts/check-agent-quality-gate-package-scripts.sh with the other sanctioned hooks",
+  );
+  process.exitCode = 1;
 }
 NODE
