@@ -15,6 +15,9 @@
  * rejects a hook, and reject a committed scripts/ directory symlink whose target
  * escapes the tree the CI paths-filter routes.
  *
+ * The gate probe is the third execution surface, and its invariants live next
+ * door in check-sentry-suites-in-ci-gate-probe.test.mjs.
+ *
  * Split out of the main check to keep both files under the repo's 1,000-line cap;
  * the main test file imports this module, so `node
  * scripts/check-sentry-suites-in-ci.test.mjs` runs these too.

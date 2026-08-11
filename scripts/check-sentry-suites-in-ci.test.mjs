@@ -101,6 +101,10 @@ import "./check-sentry-suites-in-ci-gate-job.test.mjs";
 // RUN, by a direct `node <suite>` rather than a subvertible pnpm alias, plus the
 // exemption route and the gate's allowlist and pins.
 import "./check-sentry-suites-in-ci-coverage.test.mjs";
+// The gate-routing probe's own invariants, split out for the same reason: how
+// the classifier is lifted out, and how it is re-run once lifted.
+import "./check-sentry-suites-in-ci-gate-extract.test.mjs";
+import "./check-sentry-suites-in-ci-gate-probe.test.mjs";
 import {
   CI,
   collectCompositeActions,
@@ -696,6 +700,11 @@ test("the checker's own files stay under the file-size hard cap", () => {
     SELF,
     "scripts/check-sentry-suites-in-ci-core-commands.mjs",
     "scripts/check-sentry-suites-in-ci-probes.mjs",
+    "scripts/check-sentry-suites-in-ci-gate-probe.mjs",
+    "scripts/check-sentry-suites-in-ci-gate-probe.test.mjs",
+    "scripts/check-sentry-suites-in-ci-gate-extract.mjs",
+    "scripts/check-sentry-suites-in-ci-gate-extract.test.mjs",
+    "scripts/check-sentry-suites-in-ci-gate-fixtures.mjs",
     "scripts/check-sentry-suites-in-ci-lifecycle.test.mjs",
     "scripts/check-sentry-suites-in-ci-gate-job.test.mjs",
     "scripts/check-sentry-suites-in-ci-coverage.test.mjs",
