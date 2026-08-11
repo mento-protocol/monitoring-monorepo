@@ -504,6 +504,10 @@ describe("PegMonitoringPageClient", () => {
       );
       expect(supporting?.textContent).toContain("Unavailable");
       expect(supporting?.textContent).not.toContain("Partial liquidity");
+      expect(supporting?.textContent).not.toContain("partial fill");
+      expect(supporting?.textContent).not.toContain(
+        "filled 20,000 of 50,000 EUROP (40%)",
+      );
     },
   );
   it("expires source evidence while its package is still current", () => {

@@ -61,9 +61,9 @@ function supportingSourceStatus(
   nowMs: number,
   confirmedAtMs: number,
   stale: boolean,
+  partialLiquidity: boolean,
 ): React.ComponentProps<typeof StatusPill> {
-  if (hasPartialLiquidity(source, nowMs, stale))
-    return { label: "Partial liquidity", tone: "warn" };
+  if (partialLiquidity) return { label: "Partial liquidity", tone: "warn" };
   if (!sourceHasUnavailableEvidence(source, stale ? confirmedAtMs : nowMs))
     return {
       label: stale ? "Last confirmed" : "Available",
@@ -82,8 +82,7 @@ function supportingSaleDetail(
     source.filledFraction !== null
   )
     return ` · filled ${formatNumber(source.referenceSize * source.filledFraction)} of ${formatNumber(source.referenceSize)} ${source.baseCurrency} (${formatFraction(source.filledFraction)})`;
-  if (source.capped)
-    return ` · partial fill: ${formatFraction(source.filledFraction)} of the test sale`;
+  if (source.capped) return "";
   return source.referenceSize === null
     ? ""
     : ` for a ${formatNumber(source.referenceSize)} ${source.baseCurrency} test sale`;
@@ -138,7 +137,13 @@ function SupportingSource({
 }): React.JSX.Element {
   const checkedAge = observationAge(source, nowMs);
   const partialLiquidity = hasPartialLiquidity(source, nowMs, stale);
-  const status = supportingSourceStatus(source, nowMs, confirmedAtMs, stale);
+  const status = supportingSourceStatus(
+    source,
+    nowMs,
+    confirmedAtMs,
+    stale,
+    partialLiquidity,
+  );
   const priceCurrency = source.convertVia?.toCurrency ?? source.quoteCurrency;
   return (
     <article
