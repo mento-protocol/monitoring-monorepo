@@ -100,11 +100,12 @@ const PROBE_TIMEOUT_MS = 30_000;
  * @param {string[]} args
  * @param {object} options
  */
-const runProbeShell = (bash, args, options) => {
-  const result = spawnSync(bash, args, {
+const runProbeShell = (bash, args, { dirs, ...options }) => {
+  const result = spawnSync(resolveInterpreter(bash), args, {
     ...options,
     encoding: "utf8",
-    env: probeEnv(),
+    cwd: dirs.empty,
+    env: probeEnv(dirs),
     detached: true,
   });
   if (result.error?.code === "ETIMEDOUT" && typeof result.pid === "number") {
@@ -118,40 +119,95 @@ const runProbeShell = (bash, args, options) => {
 };
 
 /**
- * The variables a probe shell is allowed to inherit. Everything else is dropped.
+ * A fixed environment for every probe shell, inheriting NOTHING.
  *
- *   PATH   — Node resolves the `bash` executable through it. The program itself
- *            overwrites `$PATH` with an empty directory before running anything.
- *   HOME   — bash reads it while starting up.
- *   TMPDIR — bash 3.2 writes each heredoc to a temp file, so a classifier
- *            containing one cannot run without a writable temp directory.
+ * The verdict has to be a function of the classifier and the change paths the
+ * probe supplies. Any inherited value makes it a function of who ran the check
+ * instead: a classifier that branches on `CI`, or on `HOME`, would be read one
+ * way on a laptop and another on a runner, and the probe would call both
+ * correct. Allowlisting the NAMES was not enough — passing their operator values
+ * through narrowed the surface without closing it.
+ *
+ * So every variable the shell gets is one the probe chose:
+ *
+ *   PATH   — the empty directory, which is what the program sets internally too.
+ *   HOME   — a probe-created directory. Nothing should read it; now nothing can
+ *            learn anything from it if it does.
+ *   TMPDIR — a probe-created directory. bash 3.2 writes every heredoc to a temp
+ *            file, so owning this isolates those files instead of scattering
+ *            them through the operator's temp directory.
+ *   LC_ALL — `C`, so bash's own diagnostics are in a language the assertions read.
+ *
+ * With this, the working directory and the timeout, the probe's inputs are the
+ * classifier's text and the synthetic paths. Two things still vary by machine
+ * and are named rather than left unstated. The bash BUILD is one: the probe runs
+ * whichever interpreter it is pointed at, and 3.2 and 5.x have genuinely
+ * disagreed about these fixtures, which is why the tests drive every bash
+ * installed rather than assuming one. The other is the literal VALUE of `HOME`
+ * and `TMPDIR`, which is a fresh temp path per run — a classifier reading either
+ * gets a different string each time, so it can learn nothing stable from them,
+ * but it would not get a constant either.
+ *
+ * @param {{ empty: string, home: string, temp: string }} dirs
  */
-const PROBE_ENV_ALLOWLIST = ["PATH", "HOME", "TMPDIR"];
+const probeEnv = ({ empty, home, temp }) => ({
+  LC_ALL: "C",
+  PATH: empty,
+  HOME: home,
+  TMPDIR: temp,
+});
 
 /**
- * A fixed, minimal environment for every probe shell.
+ * The three probe-owned directories a shell runs against, created under `dir`.
  *
- * The verdict has to be a function of the change paths the probe supplies. An
- * inherited variable makes it a function of who ran the check instead: a
- * classifier that branches on `CI` or `GITHUB_ACTIONS` — an ordinary thing for a
- * shell function to do — would be read one way on a laptop and another on a
- * runner, and the probe would call both correct. That is non-determinism in a
- * check whose whole job is to answer the same way every time.
- *
- * Allowing a fixed set rather than subtracting known-bad names is the point:
- * `BASH_ENV`, `ENV`, `BASH_FUNC_*`, `SHELLOPTS` and `BASHOPTS` were each found
- * one at a time, and a subtraction list only ever grows. Nothing outside the
- * list above can reach the classifier, whatever it is called.
- *
- * `LC_ALL` is set rather than inherited, so bash's own diagnostics are in a
- * language the assertions can read.
+ * @param {string} dir
  */
-const probeEnv = () => {
-  const env = { LC_ALL: "C" };
-  for (const name of PROBE_ENV_ALLOWLIST) {
-    if (process.env[name] !== undefined) env[name] = process.env[name];
+const probeDirs = (dir) => {
+  const dirs = {
+    empty: join(dir, "empty"),
+    home: join(dir, "home"),
+    temp: join(dir, "tmp"),
+  };
+  for (const path of Object.values(dirs)) mkdirSync(path);
+  return dirs;
+};
+
+/** Resolved absolute path of each interpreter this process has been asked for. */
+const resolvedInterpreters = new Map();
+
+/**
+ * The absolute path of a bash, so the probe shells can run with a `$PATH` of
+ * their own without changing WHICH bash runs.
+ *
+ * Node resolves a bare `bash` through the CHILD's `$PATH`: give the child a
+ * probe-owned one and the lookup fails with ENOENT; give it none and the lookup
+ * silently falls back to the system default, which is `/bin/bash` — on macOS
+ * that is 3.2, so a developer's newer bash would be swapped out from under the
+ * check without a word. Resolving once against the operator's `$PATH`, and using
+ * the absolute answer everywhere after, keeps the interpreter and drops the
+ * variable.
+ *
+ * @param {string} bash
+ */
+const resolveInterpreter = (bash) => {
+  if (!resolvedInterpreters.has(bash)) {
+    const found = spawnSync(bash, ["-c", 'printf "%s" "$BASH"'], {
+      encoding: "utf8",
+      env: { PATH: process.env.PATH ?? "" },
+      timeout: PROBE_TIMEOUT_MS,
+    });
+    assert.ok(
+      !found.error && found.status === 0,
+      `could not resolve the \`${bash}\` interpreter: ${found.error ?? `exit ${found.status}`}`,
+    );
+    const resolved = found.stdout.trim();
+    assert.ok(
+      resolved.startsWith("/"),
+      `\`${bash}\` reported its own path as ${JSON.stringify(resolved)}, which is not absolute`,
+    );
+    resolvedInterpreters.set(bash, resolved);
   }
-  return env;
+  return resolvedInterpreters.get(bash);
 };
 
 /**
@@ -525,13 +581,21 @@ export function bashFunctionSource(script, name, label, bash = "bash") {
   try {
     const tailPath = join(dir, "tail.sh");
     writeFileSync(tailPath, tail);
-    const empty = join(dir, "empty");
-    mkdirSync(empty);
+    const dirs = probeDirs(dir);
     const max = Math.min(tailLines.length, MAX_FUNCTION_LINES);
     const scan = runProbeShell(
       bash,
-      ["-s", "--", name, tailPath, dir, "candidate.sh", String(max), empty],
-      { input: FUNCTION_END_SCAN, cwd: empty, timeout: PROBE_TIMEOUT_MS },
+      [
+        "-s",
+        "--",
+        name,
+        tailPath,
+        dir,
+        "candidate.sh",
+        String(max),
+        dirs.empty,
+      ],
+      { input: FUNCTION_END_SCAN, dirs, timeout: PROBE_TIMEOUT_MS },
     );
     // The candidate that completes the definition also runs whatever top-level
     // code shared its last line, so this scan is not immune to a loop either.
@@ -573,7 +637,7 @@ export function bashFunctionSource(script, name, label, bash = "bash") {
     const text = `${[...head, lastLine.slice(0, endColumn)].join("\n")}\n`;
     const parse = runProbeShell(bash, ["-n"], {
       input: text,
-      cwd: empty,
+      dirs,
       timeout: PROBE_TIMEOUT_MS,
     });
     assert.equal(
@@ -707,8 +771,7 @@ export function gateClassifications(
   const dir = mkdtempSync(join(tmpdir(), "gate-classify-"));
   let run;
   try {
-    const empty = join(dir, "empty");
-    mkdirSync(empty);
+    const dirs = probeDirs(dir);
     const program = `
 set -uo pipefail
 # \`hash -p /bin/cat cat\` binds a name straight to a path, so the empty PATH
@@ -716,7 +779,7 @@ set -uo pipefail
 # halves at once, and not a command modifier, so unwrapping cannot reach it.
 # Turning hashing off makes \`hash -p\` fail and the lookup miss, on 3.2 and 5.x.
 set +h
-${restrictPath(empty)}
+${restrictPath(dirs.empty)}
 # The guard's own channel, duplicated from the real stderr while redirections
 # are still allowed and before any classifier code can touch it.
 exec 9>&2
@@ -765,7 +828,7 @@ done
       // nothing, and `test -e` finds nothing, because there is nothing there.
       // The classifier's only legitimate input is the stubbed
       // `json_change_paths`, so it has no business reading the tree anyway.
-      cwd: empty,
+      dirs,
       timeout: timeoutMs,
     });
   } finally {

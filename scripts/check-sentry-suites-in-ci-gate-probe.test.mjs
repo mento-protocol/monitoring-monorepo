@@ -587,40 +587,63 @@ test("the gate probe's verdict does not depend on who ran it", () => {
   // environment made the probe answer one way on a laptop and another on a
   // runner, and call both correct. No imported function needed: a plain
   // variable was enough to change the accepted verdict.
-  const script = gateFixture({
-    inner: `  if [[ -n "\${AMBIENT_CLASS:-}" ]]; then
-    echo "workspace"
-    return
+  //
+  // `HOME` and `TMPDIR` are covered too, and they are the reason this reads by
+  // NAME rather than by a fixed fixture: allowlisting those two names while
+  // still passing the operator's VALUES through narrowed the surface without
+  // closing it. Both flips use real directories, since Node reads `TMPDIR` for
+  // its own `mkdtemp`.
+  const first = mkdtempSync(join(tmpdir(), "gate-probe-ambient-a-"));
+  const second = mkdtempSync(join(tmpdir(), "gate-probe-ambient-b-"));
+  try {
+    for (const name of ["AMBIENT_CLASS", "HOME", "TMPDIR"]) {
+      const script = gateFixture({
+        inner: `  if [[ "\${${name}:-}" == "${first}" ]]; then
+    saw_tooling=false
   fi`,
-  });
-  for (const [, { candidate, version }] of installedBashes()) {
-    const withoutVar = gateClassifications([TRUSTED_PATH], {
-      script,
-      label: `ambient variable unset under bash ${version}`,
-      bash: candidate,
-    });
-    process.env.AMBIENT_CLASS = "workspace";
-    let withVar;
-    try {
-      withVar = gateClassifications([TRUSTED_PATH], {
-        script,
-        label: `ambient variable set under bash ${version}`,
-        bash: candidate,
       });
-    } finally {
-      delete process.env.AMBIENT_CLASS;
+      const original = process.env[name];
+      const seen = [];
+      try {
+        for (const value of [first, second]) {
+          process.env[name] = value;
+          for (const [, { candidate, version }] of installedBashes()) {
+            seen.push([
+              version,
+              [
+                ...gateClassifications([TRUSTED_PATH], {
+                  script,
+                  label: `${name} under bash ${version}`,
+                  bash: candidate,
+                }),
+              ],
+            ]);
+          }
+        }
+      } finally {
+        if (original === undefined) delete process.env[name];
+        else process.env[name] = original;
+      }
+      const half = seen.length / 2;
+      assert.deepEqual(
+        seen.slice(0, half),
+        seen.slice(half),
+        `changing \`${name}\` in the parent changed the probe's verdict`,
+      );
+      for (const [version, verdicts] of seen) {
+        assert.deepEqual(
+          verdicts,
+          [[TRUSTED_PATH, "root-tooling-scripts"]],
+          `bash ${version} misread the \`${name}\` fixture`,
+        );
+      }
     }
-    assert.deepEqual(
-      [...withVar],
-      [...withoutVar],
-      `bash ${version} let the parent environment change the verdict`,
-    );
-    assert.deepEqual(
-      [...withoutVar],
-      [[TRUSTED_PATH, "root-tooling-scripts"]],
-      `bash ${version} misread the ambient-variable fixture`,
-    );
+  } finally {
+    rmSync(first, { recursive: true, force: true });
+    rmSync(second, { recursive: true, force: true });
+  }
 
+  for (const [, { candidate, version }] of installedBashes()) {
     // The case that would break if the real classifier read an ambient
     // variable: it must still verdict correctly on the minimal environment.
     assert.deepEqual(
