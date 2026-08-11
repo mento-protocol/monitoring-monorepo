@@ -17,10 +17,7 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-import {
-  isValidShortId,
-  selectMarkedComment,
-} from "./sentry-triage-project-core.mjs";
+import { selectMarkedComment } from "./sentry-triage-project-core.mjs";
 import {
   ARCHIVED_LABEL,
   LABEL_DEFINITIONS,
@@ -158,60 +155,6 @@ const NOISE_PATTERNS = [
 export function classifyNoise(rawTitle) {
   const title = String(rawTitle ?? "");
   return NOISE_PATTERNS.some((pattern) => pattern.test(title));
-}
-
-// Deterministic settlement candidate (#1614 part 3). `classifyNoise` alone is
-// only a title match, which is far too weak to skip a triage on — it fires on
-// the same "Failed to fetch" that a real regression produces. This narrows it
-// with two independent signals from the queue contract:
-//
-//   - `users === 0` — nobody was affected. A real user-facing bug reports a
-//     user count; the org's operational noise consistently does not.
-//   - stale `last_seen` — the error stopped happening on its own. A live
-//     problem keeps arriving, so silence over the window is the strongest
-//     available evidence that there is nothing left to fix.
-//
-// `environment` is deliberately NOT used, though the issue text suggests a
-// preview-vs-production rule: Sentry's issue-list endpoint returns no
-// environment on the issue object (it is an event-level tag), so the field
-// cannot be carried without a second per-issue request. The two signals here
-// need no new API surface.
-//
-// This predicate SETTLES NOTHING. There is no automatic-settlement path in the
-// pipeline and this constant is not a switch that creates one — it only decides
-// whether matching candidates are logged. Adding settlement means writing a
-// deterministic verdict into the label step, which is a real behaviour change
-// to a pipeline whose whole value is that a human or an agent looked; it is a
-// separate change, not a flag flip.
-export const NOISE_QUIET_DAYS = 7;
-
-// Logging-only. Set false to silence the candidate notices; nothing else reads
-// it, and nothing about the pipeline's behaviour depends on it.
-export const LOG_NOISE_CANDIDATES = true;
-
-// KNOWN SAMPLING BIAS, stated because the whole point of these notices is to be
-// evidence later. `buildNewIssuesQuery` scans `firstSeen:-8d`, so an issue that
-// stays active for more than a day before going quiet is never in `merged` by
-// the time it could satisfy a 7-day quiet window — only regressed issues return
-// after that. The logged candidates therefore skew toward short-lived issues,
-// and the true match rate is HIGHER than these notices show. Do not read a
-// small count here as "the rule rarely fires"; widening the lookback would be
-// needed to measure that, and that changes what the ingest scans.
-
-export function classifyDeterministicNoise({
-  title,
-  users,
-  lastSeen,
-  now = Date.now(),
-} = {}) {
-  if (!classifyNoise(title)) return false;
-  // Absent or unparsable counts must not read as "nobody affected": a missing
-  // field is unknown, and unknown is not evidence of harmlessness.
-  if (!Number.isFinite(users) || users !== 0) return false;
-  const seen = Date.parse(String(lastSeen ?? ""));
-  if (!Number.isFinite(seen)) return false;
-  const quietMs = NOISE_QUIET_DAYS * 24 * 60 * 60 * 1000;
-  return now - seen >= quietMs;
 }
 
 export function buildQueueLabels(isNoise) {
@@ -471,17 +414,6 @@ function toCount(value) {
   return Number.isFinite(n) ? n : 0;
 }
 
-// `toCount` deliberately fails open to 0 so the public yaml always renders a
-// number. That makes it lossy in exactly the way the deterministic noise rule
-// (#1614 part 3) must not be: "Sentry reported nobody affected" and "Sentry
-// reported nothing" both arrive as 0, and only the first is evidence. This
-// preserves the distinction alongside it. `null`/`""` are NOT known values,
-// though `Number()` maps both to 0.
-export function isKnownCount(value) {
-  if (value === undefined || value === null || value === "") return false;
-  return Number.isFinite(Number(value));
-}
-
 export function mapSentryIssue(raw) {
   return {
     id: String(raw?.id ?? ""),
@@ -493,9 +425,6 @@ export function mapSentryIssue(raw) {
     project: raw?.project?.slug ?? raw?.project?.name ?? "unknown",
     events: toCount(raw?.count),
     users: toCount(raw?.userCount),
-    // Not in METADATA_FIELDS, so it never renders in the public stub body —
-    // it exists only so the noise rule can tell 0 from unknown.
-    usersKnown: isKnownCount(raw?.userCount),
     firstSeen: raw?.firstSeen ?? null,
     lastSeen: raw?.lastSeen ?? null,
     permalink: raw?.permalink ?? "",
@@ -1074,32 +1003,6 @@ export async function runIngest(options, deps = {}) {
         archiveBaselineIssueId: baseline?.sentryIssueId ?? null,
         sentryIssueId: sentryIssue.id,
       });
-      // Shadow mode (#1614 part 3) sits HERE, not at creation: an issue is
-      // created the day it is first seen, so it can never be quiet-for-N-days
-      // yet, and by the time it is quiet it takes the skip path above and is
-      // never re-examined. Evaluating at creation would therefore log almost
-      // nothing — the measurement this rule is gated on would come back empty
-      // and read as "no candidates" rather than "never looked". stderr, not
-      // stdout: `--json` callers parse stdout.
-      // `shortId` reaches this line straight off the Sentry payload, and a
-      // `::notice::` is a WORKFLOW COMMAND: a newline in it would let crafted
-      // Sentry data emit its own `::error::`/`::add-mask::`/`::stop-commands::`
-      // into the Actions log. `isValidShortId` admits no newline or colon, so
-      // gating on it keeps this diagnostic from becoming an injection point.
-      // An invalid short id is not a usable candidate record anyway.
-      if (
-        LOG_NOISE_CANDIDATES &&
-        isValidShortId(sentryIssue.shortId) &&
-        classifyDeterministicNoise({
-          title: sentryIssue.title,
-          users: sentryIssue.usersKnown ? sentryIssue.users : undefined,
-          lastSeen: sentryIssue.lastSeen,
-        })
-      ) {
-        process.stderr.write(
-          `::notice::sentry-triage: ${sentryIssue.shortId} matches the deterministic noise rule (0 users, quiet ${NOISE_QUIET_DAYS}d, action=${decision.action}); candidate only, nothing settled\n`,
-        );
-      }
       if (decision.action === "skip") {
         counts.skippedExisting += 1;
       } else if (decision.action === "create") {
