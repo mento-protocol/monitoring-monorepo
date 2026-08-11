@@ -10,7 +10,7 @@ locals {
   # After protected publication, set this source-controlled literal to the
   # positive peg_policy_generation output and review the resulting platform
   # plan. Null keeps both PEG_POLICY_* values absent and the peg loop dormant.
-  peg_policy_runtime_generation = "1785276001213660"
+  peg_policy_runtime_generation = "1786443055965590"
 
   peg_policy_runtime_url = local.peg_policy_runtime_generation == null ? null : "https://storage.googleapis.com/download/storage/v1/b/${google_storage_bucket.peg_policy.name}/o/peg-policy%2Fcurrent.json?alt=media&generation=${local.peg_policy_runtime_generation}"
 

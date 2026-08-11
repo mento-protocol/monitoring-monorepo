@@ -3,7 +3,7 @@ title: Peg monitoring alert source validation and activation
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-10
+last_verified: 2026-08-11
 doc_type: runbook
 scope: alerts/peg-monitoring
 review_interval_days: 90
@@ -37,12 +37,13 @@ are live in Grafana for the policy version published at that time
 [#1685](https://github.com/mento-protocol/monitoring-monorepo/pull/1685)).
 `terraform/peg-policy.tf` owns the policy identities and bucket IAM. Controller
 recovery and bootstrap-grant removal are complete.
-The protected `Peg Policy Publication` root published
-`mento-monitoring-peg-policy/peg-policy/current.json` at generation
+The first protected `Peg Policy Publication` root created
+`mento-monitoring-peg-policy/peg-policy/current.json` generation
 `1785276001213660`. Authenticated, generation-pinned delivery and live producer
-telemetry are proven on `metrics-bridge-r-47264e8-30405040839`, which serves
-active policy `europ-2026-07-22-v1-f6cdaa2681ab92ce9d90572a4d29d32f`. The
-production dashboard prerequisite is also proven at
+telemetry for that attachment are proven on
+`metrics-bridge-r-47264e8-30405040839`, which serves active policy
+`europ-2026-07-22-v1-f6cdaa2681ab92ce9d90572a4d29d32f`. The production dashboard
+prerequisite is also proven at
 `https://monitoring.mento.org/peg-monitoring`: the live current package renders
 without console errors. The reviewed source activation sets the
 source-controlled `local.peg_alerts_enabled` switch to the literal `true`. That
@@ -51,24 +52,25 @@ rule group; it is not a workflow, variable, or policy-artifact switch. This
 source change does not prove the consumers exist in Grafana or that their
 queries have live data.
 
-This source cleanup sets `previous` to `null`. It does not itself remove
-retained Grafana rules, publish a new immutable policy generation, or attach
-that generation to Metrics Bridge. Do not claim active-only production
-operation until the human-approved `alerts-rules` cleanup, protected
-publication, reviewed runtime-generation attachment, and post-change
-producer/Grafana checks complete in that order.
+The later protected publication created the active-only `previous: null` object
+at generation `1786443055965590`. This reviewed platform rollout changes the
+source-controlled runtime pin to that generation, sets
+`metrics_bridge_template_rollout_active` to `true`, and removes the generated
+revision-name ignore. It does not attach the new generation to Metrics Bridge.
+Do not claim active-only production operation until the approved platform apply
+and post-change producer/Grafana proof complete.
 
 Source validators now require every policy source to declare
-`listingAbsentConsecutiveChecks`, and the checked-in policy keeps `previous`
-as `null`. Metrics Bridge retains a runtime-only compatibility shim for the
-exact legacy previous version
+`listingAbsentConsecutiveChecks`, and the published policy has `previous` as
+`null`. Metrics Bridge retains a runtime-only compatibility shim for the exact
+legacy previous version
 `europ-2026-07-22-v1-a69b99aad61649957a2639dc8348b05f`, which defaults the
-missing threshold to `2` while Cloud Run remains pinned to the production
-generation containing that predecessor. The bridge normalizes the value into
-decision packages, so the dashboard schema remains strict. Remove the shim in
-a follow-up PR after the `previous: null` generation is published, pinned, and
-live-verified; [#1750](https://github.com/mento-protocol/monitoring-monorepo/issues/1750)
-tracks that removal.
+missing threshold to `2` while the active-only runtime generation awaits its
+approved attachment and live proof. The bridge normalizes the value into decision
+packages, so the dashboard schema remains strict. Remove the shim in a follow-up
+PR after the `previous: null` generation is attached and live-verified;
+[#1750](https://github.com/mento-protocol/monitoring-monorepo/issues/1750) tracks
+that removal.
 
 The production identity bootstrap in
 [#1566](https://github.com/mento-protocol/monitoring-monorepo/pull/1566) is
