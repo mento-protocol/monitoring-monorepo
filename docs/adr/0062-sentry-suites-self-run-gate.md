@@ -248,11 +248,28 @@ suite runner keeps the window closed and still gives the static checker its
 The suites now run unconditionally on every push rather than when the
 `rootScripts` paths filter matches, which retires the whole filter-narrowing
 bypass class at runtime and makes the static drift net unskippable for the first
-time. Compute is roughly flat: the gate takes about six wall-clock seconds — of
-which ~0.6s is its own watch-set derivation and per-suite snapshots, and the rest
-is the suites, two of which spawn the whole gate against ~30 fixture roots — and
-the job costs one runner boot; on a public repository those GitHub-hosted minutes
-are free.
+time. The gate takes about 7.6 wall-clock seconds — of which ~1.3s is its own
+watch-set derivation, per-suite snapshots and their digests, and the rest is the
+suites, two of which spawn the whole gate against ~30 fixture roots — and the job
+costs one runner boot; on a public repository those GitHub-hosted minutes are
+free.
+
+**That runtime has roughly doubled across four review rounds, and each step was
+chosen rather than accumulated.** 3.6s as first written; 5.3s when the import
+scanner became V8's parser, which needs a child process; 5.7s when each suite
+gained its own snapshot; 7.6s when declared directories began to be copied whole
+and every snapshot digested. Every increase bought a hole closed, and the
+alternatives were measured rather than assumed — full-tree snapshots would have
+cost 18.8s, file-by-file parsing 1.75s. The record is here because a required
+check that every PR pays is exactly the kind of cost that later reads as "CI got
+slow" with the reason long forgotten.
+
+The next round that would push it past roughly ten seconds should stop and decide
+whether to bound it rather than pay it forever. The obvious first move is
+parallelising the per-suite snapshot copies, which are independent by
+construction; the second is that the suites now dominate, and the two that spawn
+the whole gate against ~30 fixture roots are the largest single item. Neither is
+worth doing mid-review, when correctness is still moving.
 
 Manifest floors churn. A legitimate test deletion reds the gate until the JSON is
 edited. Floors use `>=`, so adding tests never breaks anyone, and the runner
