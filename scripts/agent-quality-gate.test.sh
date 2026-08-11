@@ -3737,9 +3737,39 @@ assert_contains "- pnpm sentry:project:test (Sentry triage projection helper cha
 run_gate "scripts/sentry-triage-project-core.mjs"
 assert_contains "- pnpm sentry:project:test (Sentry triage projection helper changed)"
 assert_contains "- node scripts/sentry-triage-agent-comment.test.mjs (Sentry triage projection helper changed)"
+# Both brief emitters and the archive leg consume this module's exports (the
+# verdict parser + shared selection, and the marker/trusted-author contract), so
+# a change here must run their focused suites too (#1769 round 15).
+assert_contains "- pnpm sentry:brief:test (Sentry triage projection helper changed)"
+assert_contains "- pnpm sentry:archive:test (Sentry triage projection helper changed)"
 
 run_gate "scripts/sentry-triage-project.test.mjs"
 assert_contains "- pnpm sentry:project:test (Sentry triage projection helper changed)"
+
+# The needs-human brief (#1748) reads the verdict contract, the prompt that
+# produces it, the note that documents it, and the workflow step that runs it —
+# every one of those must route its suite, or the drift lands unnoticed.
+run_gate "scripts/sentry-triage-brief.mjs"
+assert_contains "- pnpm sentry:brief:test (Sentry needs-human brief helper changed)"
+assert_contains "- pnpm sentry:digest:test (Sentry needs-human brief helper changed)"
+# The brief leg is a shared dependency of BOTH legs that call clearBriefComments,
+# so a brief change must run each one's focused suite (#1769 round 15): the
+# archive leg (settleQueueStub) and the projection leg (runProjectionBatch),
+# whose close guard clears a stale brief before it closes the stub.
+assert_contains "- pnpm sentry:archive:test (Sentry needs-human brief helper changed)"
+assert_contains "- pnpm sentry:project:test (Sentry needs-human brief helper changed)"
+
+run_gate "scripts/sentry-triage-brief.test.mjs"
+assert_contains "- pnpm sentry:brief:test (Sentry needs-human brief helper changed)"
+
+run_gate ".github/prompts/sentry-triage.md"
+assert_contains "- pnpm sentry:brief:test (Sentry triage prompt changed)"
+
+run_gate "docs/notes/sentry-triage-pipeline.md"
+assert_contains "- pnpm sentry:brief:test (Sentry verdict contract note changed)"
+
+run_gate ".github/workflows/sentry-triage-agent.yml"
+assert_contains "- pnpm sentry:brief:test (Sentry triage agent workflow changed)"
 
 run_gate "scripts/sentry-triage-agent-comment.mjs"
 assert_contains "- node scripts/sentry-triage-agent-comment.test.mjs (Sentry triage agent comment wrapper changed)"

@@ -3072,7 +3072,16 @@ await test("a round that DOES post a verdict still settles the swept stub (#1717
     ...fake.get(42).comments,
     verdictCommentBody("needs-human").replace(
       "duplicate_of: []",
-      "duplicate_of: []\nhuman_question: |\n  Decide whether to roll back or wait for upstream.",
+      [
+        "duplicate_of: []",
+        "human_question: |",
+        "  Decide whether to roll back or wait for upstream.",
+        "how_to_check:",
+        "  - inspect the deploy log",
+        "decision_branches:",
+        "  - Yes -> roll back",
+        "  - No -> wait",
+      ].join("\n"),
     ),
   ]);
   const result = await triageRoundHelpers(after).settle(prior["42"]);

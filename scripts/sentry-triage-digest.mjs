@@ -62,11 +62,14 @@ import { APPROVED_ARCHIVE_LABEL } from "./sentry-triage-ingest.mjs";
 // diverge from what the pipeline decided. The permalink extractor + the
 // projected-comment prefix are contract constants owned by the same module.
 import {
+  boundBriefList,
+  boundBriefText,
   extractPermalink,
   isTrustedComment,
   parseVerdictComment,
   PROJECTED_COMMENT_PREFIX,
   REGRESSION_PREFIX,
+  selectNeedsHumanBriefFields,
   selectVerdictComment,
 } from "./sentry-triage-project-core.mjs";
 
@@ -140,12 +143,12 @@ const SECTION_TITLES = {
 // block limit (batch is capped at 10 issues upstream).
 const MAX_SUMMARY_LEN = 300;
 
-// Hard bound on each needs-human brief field (decision/hypotheses/investigated/
-// why-escalated). Bounded BEFORE escaping, so even an all-`<` value expands to
-// at most ~4x = 1600 chars — a single brief line stays far under the
-// per-section budget (a brief is scannable; full detail lives on the linked
-// queue issue).
-const MAX_BRIEF_LEN = 400;
+// The per-field bound for needs-human briefs is NOT defined here: it is
+// `MAX_BRIEF_TEXT_LEN` in sentry-triage-project-core.mjs, shared with the queue
+// stub's brief COMMENT (#1748) so the two emitters cannot drift. Bounding
+// happens BEFORE escaping, so even an all-`<` value expands to at most ~4x =
+// 1600 chars — a single brief line stays far under the per-section budget (a
+// brief is scannable; full detail lives on the linked queue issue).
 
 // ---------------------------------------------------------------------------
 // Untrusted-text neutralization + Slack escaping.
@@ -189,25 +192,17 @@ export function formatSummaryForSlack(text) {
 }
 
 /** Same sanitize->bound->escape pipeline as formatSummaryForSlack, at the
- * (shorter) brief-field bound. Used for every free-form needs-human field. */
+ * (shorter) brief-field bound. Sanitize+bound come from the shared core so the
+ * Slack brief and the queue-issue brief agree; only the escape is Slack's. */
 export function formatBriefText(text) {
-  const clean = sanitizeSummary(text);
-  const bounded =
-    clean.length > MAX_BRIEF_LEN
-      ? `${clean.slice(0, MAX_BRIEF_LEN).trimEnd()}…`
-      : clean;
-  return escapeSlackText(bounded);
+  return escapeSlackText(boundBriefText(text));
 }
 
 /** Render a free-text brief list (hypotheses / investigated) as one escaped,
  * bounded line — items joined with "; " so the whole line still obeys the
  * brief-field bound. Empty in -> "" (the caller omits the line). */
 export function formatBriefList(items) {
-  const joined = (Array.isArray(items) ? items : [])
-    .map((item) => sanitizeSummary(item))
-    .filter(Boolean)
-    .join("; ");
-  return joined ? formatBriefText(joined) : "";
+  return escapeSlackText(boundBriefList(items));
 }
 
 // ---------------------------------------------------------------------------
@@ -409,8 +404,13 @@ export function classifyIssue(issue) {
     verdict: bucket === FAILED_BUCKET ? null : bucket,
     confidence: parsed.confidence,
     summary: parsed.summary,
-    // needs-human decision-ready brief.
+    // needs-human decision-ready brief. The full contract rides along even
+    // though the Slack render below shows a subset (#1748) — carrying it here
+    // keeps "which fields exist" a contract question and "which fields show"
+    // a render one.
     humanQuestion: parsed.humanQuestion ?? "",
+    howToCheck: parsed.howToCheck ?? [],
+    decisionBranches: parsed.decisionBranches ?? [],
     hypotheses: parsed.hypotheses ?? [],
     investigated: parsed.investigated ?? [],
     escalationReason: parsed.escalationReason ?? "",
@@ -467,7 +467,13 @@ function idAndProject(entry, { linkUrl } = {}) {
  * hypotheses / investigated / why-escalated render only when present. The id
  * links straight to the Sentry issue (falling back to the queue issue when no
  * permalink was recorded) — the queue issue stays reachable via the Links
- * sub-bullet. */
+ * sub-bullet.
+ *
+ * Deliberately NOT rendered here: `how_to_check` and `decision_branches`
+ * (#1748). Those are the instruction half of the brief, and the surface a
+ * person acts on is the queue issue this line links to — Slack is the nudge.
+ * They still flow through the shared selection below, so adding them to this
+ * digest later is a render change, not a contract change. */
 function renderNeedsHumanBrief(entry) {
   const { linked } = idAndProject(entry, {
     linkUrl: entry.sentryPermalink || entry.url,
@@ -475,20 +481,24 @@ function renderNeedsHumanBrief(entry) {
   const confidence = entry.confidence ?? "unknown";
   const lines = [`• *${linked}* · confidence: ${confidence}`];
 
-  const decision = entry.humanQuestion
-    ? formatBriefText(entry.humanQuestion)
+  // Shared selection + bound (sentry-triage-project-core.mjs); only the Slack
+  // escape below is this emitter's own.
+  const fields = selectNeedsHumanBriefFields(entry);
+
+  const decision = fields.question
+    ? escapeSlackText(fields.question)
     : "_(no decision recorded — re-triage)_";
   lines.push(`    ◦ *Decision needed:* ${decision}`);
 
-  const hypotheses = formatBriefList(entry.hypotheses);
+  const hypotheses = formatBriefList(fields.hypotheses);
   if (hypotheses) lines.push(`    ◦ *Hypotheses:* ${hypotheses}`);
 
-  const investigated = formatBriefList(entry.investigated);
+  const investigated = formatBriefList(fields.investigated);
   if (investigated) lines.push(`    ◦ *Already investigated:* ${investigated}`);
 
-  if (entry.escalationReason) {
+  if (fields.escalationReason) {
     lines.push(
-      `    ◦ *Why escalated:* ${formatBriefText(entry.escalationReason)}`,
+      `    ◦ *Why escalated:* ${escapeSlackText(fields.escalationReason)}`,
     );
   }
 

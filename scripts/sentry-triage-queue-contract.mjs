@@ -217,6 +217,15 @@ export const REOPEN_SHED_LABELS = [
   ARCHIVED_LABEL,
 ];
 
+// The needs-human brief (issue #1748) is NOT here, and no longer touches this
+// body. It lives as a dedicated, updated-in-place COMMENT on the stub, its
+// marker and lifecycle owned by scripts/sentry-triage-brief.mjs. Rendering it
+// into the body made it a second writer of a surface the archive leg owns, and
+// no label check could keep the two apart through the archive's unlabeled
+// settlement window (PR #1769). A comment races nothing: the archive stays the
+// SOLE stub-body writer (see the trust-boundary note below), and stale-brief
+// removal is deleting that comment, independent of any label.
+
 // ---------------------------------------------------------------------------
 // Archive freshness baseline (issue #1371).
 // ---------------------------------------------------------------------------
@@ -242,10 +251,13 @@ export const REOPEN_SHED_LABELS = [
 // regression of that Sentry issue is skipped indefinitely. The agent's allowlist
 // grants no tool that edits an issue body (`Read,Grep,Glob` + three scoped
 // `gh issue` subcommands; the autofix agent gets file-edit tools and no shell at
-// all), and no script or workflow step ever rewrites a stub body except the
-// archive leg's own deterministic, zero-LLM write. Moving the field into the body
-// therefore removes the forgery surface instead of trying to authenticate inside
-// it, which a shared-secret signature could only match, never beat.
+// all), and the ONLY step that rewrites a stub body is a deterministic, zero-LLM
+// one running on a trusted runner: the archive leg's baseline write. It is the
+// single stub-body writer (PR #1766) — the needs-human brief renders as a
+// COMMENT, not into this body (#1748/#1769), so it adds no second writer to
+// race here. Moving the field into the body therefore removes the forgery
+// surface instead of trying to authenticate inside it, which a shared-secret
+// signature could only match, never beat.
 export const ARCHIVE_BASELINE_FIELD = "archive_baseline_last_seen";
 export const ARCHIVE_BASELINE_ID_FIELD = "archive_baseline_sentry_issue_id";
 

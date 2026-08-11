@@ -1112,6 +1112,21 @@ jobs:
         # (issue #1564): ok/drift/malformed classification + CLI exit codes for
         # the daily "default workflow-token permission stays read-only" check.
         run: node scripts/check-workflow-permissions-drift.test.mjs
+      - name: Sentry needs-human brief suite
+        # Behavioral coverage of scripts/sentry-triage-brief.mjs (issue #1748,
+        # redesigned #1769): the rendered brief's fixed order and neutralization,
+        # the updated-in-place COMMENT lifecycle (created on needs-human, updated
+        # on re-triage, deleted on any other verdict), and — the part only a test
+        # can hold — that the leg NEVER writes the stub body, so it cannot drop
+        # the archive freshness baseline in the archive's unlabeled settlement
+        # window. It also asserts the prompt, the pipeline note and the triage
+        # workflow still agree with the contract it renders.
+        #
+        # Invoked as a DIRECT `node scripts/<suite>` (not `pnpm sentry:brief:test`):
+        # scripts/check-sentry-suites-in-ci.test.mjs (issue #1721) rejects the
+        # pnpm-alias form for every Sentry suite because a `scriptShell` override
+        # or a `presentry:*:test` lifecycle hook can false-green or empty it.
+        run: node scripts/sentry-triage-brief.test.mjs
       - name: Override prune report self-tests
         # Behavioral coverage of scripts/override-prune-report.mjs (verdict
         # heuristic, lockfile parsing, git-blame age check). The report

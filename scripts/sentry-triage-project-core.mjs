@@ -84,90 +84,48 @@ export const VERDICT_TO_LABEL = {
   "needs-human": "sentry:verdict-needs-human",
 };
 
-// Sentry SHORT-IDs look like `GOVERNANCE-MENTO-ORG-51` — always
-// `<PROJECT-SLUG>-<SUFFIX>` where the suffix is Sentry's base-36 issue
-// counter (numeric early on, alphanumeric later: `APP-MENTO-ORG-2S`).
-// Requiring the trailing `-<alnum>` (not just a safe charset) keeps bare
-// common words like "Sentry" from validating, since every accepted value can
-// drive an owning-repo search — validate the shape before it goes into an
-// HTML-comment marker or a search query; it is Sentry-assigned but still
-// transits an untrusted channel. Do NOT require a decimal-only suffix: that
-// would make base-36 short IDs permanently unprojectable.
-const SHORT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*-[A-Za-z0-9]+$/;
-
-const FOOTER =
-  "Filed by the Mento Sentry triage pipeline (ADR 0036 / ADR 0038 — verdict " +
-  "projection). Machine-filed from a triage verdict; advisory only, so confirm " +
-  "the root cause in Sentry before acting. The HTML comment marker at the top " +
-  "keys automatic de-duplication — please keep it.";
-
 // ---------------------------------------------------------------------------
-// Untrusted-text neutralization (mirrors the ingest's helpers).
+// Lowest layer, re-exported so this module stays the verdict contract's single
+// import surface: scripts/sentry-triage-text.mjs — untrusted-text
+// neutralization/bounding AND SHORT-ID validation (#1748, extended #1769). It
+// imports nothing, so every layer can sit on it without a cycle.
+//
+// The projected-issue rendering (owning-repo body/title, alias comment,
+// idempotency marker + back-link matchers) is a SECOND file-size split,
+// scripts/sentry-triage-projection.mjs (#1769) — but it is deliberately NOT
+// re-exported here. Only the projection LEG (scripts/sentry-triage-project.mjs)
+// needs it, and it imports it directly. Re-exporting it here would pull the
+// renderer into the runtime closure of every project-core importer, including
+// the untrusted triage agent's write wrapper (sentry-triage-agent-comment.mjs),
+// whose staged closure is kept minimal on purpose (a test in
+// sentry-triage-agent-comment.test.mjs pins it). sentry-triage-projection.mjs
+// sits ON this contract (it imports the SHORT-ID helpers from the text layer),
+// and this file does not import it back, so there is no cycle either way.
 // ---------------------------------------------------------------------------
 
-/** Strip control chars/newlines and collapse whitespace to a single line. */
-export function sanitizeFreeText(text) {
-  return (
-    String(text ?? "")
-      // eslint-disable-next-line no-control-regex -- stripping control chars from untrusted agent text is the whole point here
-      .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "")
-      .replace(/[\r\n\t]+/g, " ")
-      .replace(/\s+/g, " ")
-      .trim()
-  );
-}
+export {
+  boundBriefList,
+  boundBriefText,
+  defangBackticks,
+  defangHtmlComments,
+  defangMentions,
+  isValidShortId,
+  MAX_BRIEF_TEXT_LEN,
+  neutralizeBlock,
+  neutralizeUntrusted,
+  sanitizeDuplicateIds,
+  sanitizeFreeText,
+  truncate,
+} from "./sentry-triage-text.mjs";
 
-/** Replace every backtick with a look-alike so an attacker-controlled value can
- * never close a markdown code fence / inline-code span early. */
-export function defangBackticks(text) {
-  return String(text ?? "").replace(/`/g, "ˋ");
-}
-
-/** Insert a zero-width space after every `@` so `@user` / `@org/team` in
- * agent-reachable text can never become a live GitHub mention once embedded in
- * an issue body. Visual fidelity is preserved for review. */
-export function defangMentions(text) {
-  return String(text ?? "").replace(/@/g, "@\u200B");
-}
-
-/** Break every HTML-comment opener (`<!--` -> `<!` + zero-width space + `--`)
- * so agent text can never embed a marker-shaped sequence \u2014 e.g. a spoofed
- * `<!-- sentry-projection:v1 OTHER-ID -->` inside a rendered verdict field \u2014
- * into a projected issue body. The idempotency back-link marker must only
- * ever exist where buildProjectedBody itself emits it (the first body line);
- * this is defense in depth behind the first-line anchoring of
- * bodyBacklinksShortId. */
-export function defangHtmlComments(text) {
-  return String(text ?? "").replace(/<!--/g, "<!\u200B--");
-}
-
-/** Single-line neutralization for titles and inline fields. */
-export function neutralizeUntrusted(text) {
-  return defangMentions(
-    defangBackticks(defangHtmlComments(sanitizeFreeText(text))),
-  );
-}
-
-/** Multi-line neutralization for block fields (root cause / proposed action):
- * strip control chars but KEEP newlines, defang backticks + mentions + HTML
- * comments, and hard bound both line count and length. Rendered inside a
- * fenced block by the caller so any surviving markdown is inert. */
-export function neutralizeBlock(text, { maxLen = 600, maxLines = 8 } = {}) {
-  let s = String(text ?? "")
-    // eslint-disable-next-line no-control-regex -- keep \n (0x0a) + \t (0x09); strip the rest
-    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "")
-    .replace(/\r/g, "");
-  s = defangMentions(defangBackticks(defangHtmlComments(s)));
-  s = s.split("\n").slice(0, maxLines).join("\n");
-  if (s.length > maxLen) s = `${s.slice(0, maxLen).trimEnd()}…`;
-  return s.trim();
-}
-
-export function truncate(text, maxLen) {
-  const clean = String(text ?? "");
-  if (clean.length <= maxLen) return clean;
-  return `${clean.slice(0, maxLen).trimEnd()}…`;
-}
+// `export … from` re-exports without binding the names locally, and the parsing
+// and validation below use several of them.
+import {
+  boundBriefText,
+  sanitizeDuplicateIds,
+  sanitizeFreeText,
+  truncate,
+} from "./sentry-triage-text.mjs";
 
 function stripYamlQuotes(value) {
   const v = String(value ?? "").trim();
@@ -193,14 +151,9 @@ export function parseShortId(title) {
   return match ? match[1] : null;
 }
 
-export function isValidShortId(shortId) {
-  return (
-    typeof shortId === "string" &&
-    shortId.length > 0 &&
-    shortId.length <= 120 &&
-    SHORT_ID_PATTERN.test(shortId)
-  );
-}
+// `isValidShortId` now lives in sentry-triage-text.mjs (re-exported above): the
+// projection renderer needs it too, and keeping it on the lowest layer lets that
+// module sit on the text layer without importing this contract.
 
 // A validated permalink is later embedded in Slack mrkdwn link syntax
 // (`<url|text>`, in the digest's `link()`), so `<`, `>`, `|` in the URL would
@@ -274,13 +227,10 @@ function stripTrailingYamlComment(text) {
 function parseInlineList(rest) {
   const trimmed = String(rest ?? "").trim();
   if (trimmed.startsWith("[")) {
-    // Parse the bracketed segment, tolerating ONLY a trailing yaml comment
-    // after the closing bracket — the verdict contract's own documented
-    // example is `duplicate_of: [] # list of Sentry SHORT-IDs (e.g.
-    // GOV…-51), …`, and an end-of-line-anchored match would fail on it,
-    // silently dropping the duplicates. Any other trailing garbage rejects
-    // the whole list (these IDs drive duplicate coalescing, so malformed
-    // agent output must not be normalized into valid-looking values).
+    // Parse the bracketed segment, tolerating ONLY a trailing yaml comment after
+    // `]` (the documented example is `duplicate_of: [] # …`, which an EOL-anchored
+    // match would drop); any other trailing garbage rejects the whole list, so
+    // malformed agent output is never normalized into valid-looking IDs.
     const close = trimmed.indexOf("]");
     if (close === -1) return [];
     const remainder = trimmed.slice(close + 1);
@@ -305,7 +255,8 @@ function collectDashList(lines, start) {
     if (line.trim() === "") continue;
     const dash = /^\s+-\s+(.+?)\s*$/.exec(line);
     if (dash) {
-      items.push(dash[1].replace(/^["']|["']$/g, ""));
+      // Decode like a flow item (#1769 round 17), not just strip outer quotes.
+      items.push(decodeScalar(dash[1]));
       continue;
     }
     if (/^\s/.test(line)) continue; // other indented content — skip
@@ -349,58 +300,230 @@ function collectBlockScalar(lines, start, rest) {
 // consume budget and push a real duplicate past the cap.
 export const MAX_DUPLICATE_LOOKUPS = 5;
 
-// Hard bound on how many free-text brief-list items (needs-human `hypotheses`
-// / `investigated`) are retained. These are agent-produced from untrusted
-// Sentry content and consumed ONLY by the outcome digest's needs-human brief
-// (they never reach an owning-repo issue — needs-human never projects), so a
-// scannable handful is enough; per-item text is neutralized+bounded by the
-// digest at render time.
+// Hard bound on how many free-text brief-list items (needs-human
+// `how_to_check` / `decision_branches` / `hypotheses` / `investigated`) are
+// retained. These are agent-produced from untrusted Sentry content and consumed
+// ONLY by the two needs-human brief emitters — the outcome digest and the queue
+// stub's brief comment (they never reach an owning-repo issue: needs-human
+// never projects) — so a scannable handful is enough; per-item text is
+// neutralized+bounded by each emitter at render time.
 export const MAX_BRIEF_LIST_ITEMS = 5;
 
-/** Parse a free-text yaml list value (needs-human `hypotheses`/`investigated`):
- * an inline `[a, b]`, a single inline scalar, or a block `- item` list. Unlike
+/** Parse a free-text yaml list value (any needs-human brief list): an inline
+ * `[a, b]`, a single inline scalar, or a block `- item` list. Unlike
  * sanitizeDuplicateIds these entries are prose, so nothing is shape-validated
- * away — the digest neutralizes+escapes them at render. Returns `{items,
+ * away — each emitter neutralizes+escapes them at render. Returns `{items,
  * next}` mirroring collectDashList so the caller advances the line cursor. */
+// The COMPLETE YAML 1.1/1.2 double-quoted single-char escape set. DECODING (not
+// backslash-dropping) is the point (#1769 round 13); hex `\x`/`\u`/`\U` below.
+const YAML_DQ_ESCAPES = {
+  0: "\0", // null (U+0000)
+  a: "\x07", // bell
+  b: "\b", // backspace
+  t: "\t", // tab
+  n: "\n", // line feed
+  v: "\v", // vertical tab
+  f: "\f", // form feed
+  r: "\r", // carriage return
+  e: "\x1b", // escape
+  " ": " ", // escaped space -> space
+  '"': '"', // double quote
+  "/": "/", // slash
+  "\\": "\\", // backslash
+  N: "\x85", // next line (NEL)
+  _: "\xa0", // non-breaking space
+  L: "\u2028", // line separator
+  P: "\u2029", // paragraph separator
+};
+const YAML_DQ_HEX = { x: 2, u: 4, U: 8 };
+
+/**
+ * Decode ONE YAML double-quoted escape at `s[i]` (`s[i]` is the backslash).
+ * Returns `{ text, next }` (next = index just past the escape) or null for an
+ * unknown/invalid escape — the caller then rejects the whole inline sequence
+ * rather than silently corrupting it.
+ */
+export function decodeDoubleQuoteEscape(s, i) {
+  const e = s[i + 1];
+  if (e === undefined) return null; // trailing backslash
+  if (Object.hasOwn(YAML_DQ_HEX, e)) {
+    const len = YAML_DQ_HEX[e];
+    const hex = s.slice(i + 2, i + 2 + len);
+    if (hex.length !== len || !/^[0-9a-fA-F]+$/.test(hex)) return null;
+    const code = Number.parseInt(hex, 16);
+    if (code > 0x10ffff) return null;
+    return { text: String.fromCodePoint(code), next: i + 2 + len };
+  }
+  if (Object.hasOwn(YAML_DQ_ESCAPES, e)) {
+    return { text: YAML_DQ_ESCAPES[e], next: i + 2 };
+  }
+  return null; // unknown escape
+}
+
+// One dependency-free, single-pass parser for an inline YAML flow sequence of
+// strings (the workflows run with NO install — #1769 round 11 P1). It covers all
+// three scalar styles below; the style is set by the item's FIRST character, so a
+// quote inside a plain scalar never mis-splits it, and any non-scalar item (a
+// nested `[`/`{`, or an `&`/`*`/`!` node property) REJECTS the whole sequence.
+// decodeScalar reuses these readers for dash items, so both list forms decode
+// identically (#1769 round 17).
+
+/** Read a double-quoted scalar at `s[i]` (the opening quote), or null. */
+function parseDoubleQuotedScalar(s, i) {
+  let buf = "";
+  for (let j = i + 1; j < s.length; ) {
+    const c = s[j];
+    if (c === "\\") {
+      // DECODE (never drop the backslash); an invalid escape rejects the whole.
+      const decoded = decodeDoubleQuoteEscape(s, j);
+      if (decoded === null) return null;
+      buf += decoded.text;
+      j = decoded.next;
+    } else if (c === '"') {
+      return { value: buf, next: j + 1 };
+    } else {
+      buf += c;
+      j += 1;
+    }
+  }
+  return null; // unterminated
+}
+
+/** Read a single-quoted scalar at `s[i]` (the opening quote), or null. */
+function parseSingleQuotedScalar(s, i) {
+  let buf = "";
+  for (let j = i + 1; j < s.length; ) {
+    const c = s[j];
+    if (c === "'") {
+      if (s[j + 1] === "'") {
+        buf += "'"; // doubled single-quote -> one literal quote
+        j += 2;
+      } else {
+        return { value: buf, next: j + 1 };
+      }
+    } else {
+      buf += c;
+      j += 1;
+    }
+  }
+  return null; // unterminated
+}
+
+/** Read a plain (unquoted) scalar at `s[i]`: runs to the next top-level `,`/`]`,
+ * quotes/apostrophes/backslashes literal; a `[`/`{`/`}` rejects the sequence. */
+function parsePlainScalar(s, i) {
+  let j = i;
+  while (j < s.length) {
+    const c = s[j];
+    if (c === "," || c === "]") break;
+    if (c === "[" || c === "{" || c === "}") return null;
+    j += 1;
+  }
+  return { value: s.slice(i, j).trim(), next: j };
+}
+
+/** Read ONE flow item at `s[i]` (first non-whitespace char), or null to reject. */
+function parseFlowItem(s, i) {
+  const ch = s[i];
+  if (ch === '"') return parseDoubleQuotedScalar(s, i);
+  if (ch === "'") return parseSingleQuotedScalar(s, i);
+  // Nested collections and node properties are not string scalars: reject the
+  // whole sequence rather than misparse a construct this field can't hold.
+  if (ch === "[" || ch === "{" || ch === "&" || ch === "*" || ch === "!") {
+    return null;
+  }
+  return parsePlainScalar(s, i);
+}
+
+// Decode ONE complete YAML scalar TOKEN (a `- item` dash value or a same-line
+// scalar) through the SAME readers the flow parser uses, so a quoted dash item
+// decodes IDENTICALLY to a quoted flow item (#1769 round 17). Plain = literal; a
+// malformed quoted token keeps its content (outer quotes stripped), uncorrupted.
+export function decodeScalar(raw) {
+  const s = String(raw ?? "").trim();
+  const read = { '"': parseDoubleQuotedScalar, "'": parseSingleQuotedScalar }[
+    s[0]
+  ];
+  if (!read) return s; // plain scalar -> literal
+  const parsed = read(s, 0);
+  return parsed && parsed.next === s.length ? parsed.value : stripYamlQuotes(s);
+}
+
+function parseInlineFlowSequence(text) {
+  const s = String(text ?? "").trim();
+  if (!s.startsWith("[")) return null;
+  const items = [];
+  let i = 1; // past the opening `[`
+  for (;;) {
+    while (i < s.length && /\s/.test(s[i])) i += 1; // inter-item whitespace
+    if (i >= s.length) return null; // no closing `]` -> unterminated
+    if (s[i] === "]") {
+      i += 1;
+      break;
+    }
+    if (s[i] === ",") {
+      i += 1; // leading/consecutive/trailing comma -> empty item, dropped below
+      continue;
+    }
+    const item = parseFlowItem(s, i);
+    if (item === null) return null;
+    items.push(item.value);
+    i = item.next;
+    while (i < s.length && /\s/.test(s[i])) i += 1; // whitespace after the scalar
+    if (i >= s.length) return null; // unterminated
+    if (s[i] === ",") {
+      i += 1;
+      continue;
+    }
+    if (s[i] === "]") {
+      i += 1;
+      break;
+    }
+    return null; // junk after a scalar (e.g. `"a" b`) -> not a clean sequence
+  }
+  // After the matching `]`, tolerate only trailing whitespace or a comment.
+  while (i < s.length) {
+    if (s[i] === "#") break;
+    if (!/\s/.test(s[i])) return null;
+    i += 1;
+  }
+  return items.map((item) => item.trim()).filter(Boolean);
+}
+
 function parseFreeTextList(lines, i, rest) {
   const trimmed = String(rest ?? "").trim();
-  if (trimmed !== "") {
+  // A comment-only remainder (`how_to_check: # …`) is a documented-but-empty key:
+  // YAML drops the comment and the real list is the dash block below; recording
+  // the sample comment as the sole item would bury the real items (#1769 round 5).
+  const isCommentOnly =
+    trimmed !== "" && stripTrailingYamlComment(trimmed).trim() === "";
+  if (trimmed !== "" && !isCommentOnly) {
     if (trimmed.startsWith("[")) {
-      const close = trimmed.indexOf("]");
-      const inner = close === -1 ? trimmed.slice(1) : trimmed.slice(1, close);
-      const items = inner
-        .split(",")
-        .map((s) => stripYamlQuotes(s.trim()))
-        .filter(Boolean);
-      return { items, next: i + 1 };
+      // A valid flow sequence IS the list; a malformed one becomes a single
+      // item, never silently truncated at a bracket/comma inside a quote.
+      const items = parseInlineFlowSequence(trimmed);
+      return { items: items ?? [stripYamlQuotes(trimmed)], next: i + 1 };
     }
-    return { items: [stripYamlQuotes(trimmed)], next: i + 1 };
+    // A same-line scalar (`how_to_check: "Yes → fix"`) decodes like a flow item.
+    return { items: [decodeScalar(trimmed)], next: i + 1 };
   }
   return collectDashList(lines, i);
 }
 
-/** Trim, drop empties, and cap a free-text brief list for memory safety. */
+// Trim, cap, and drop items empty AFTER neutralization (not a bare `Boolean`):
+// the escape decoder yields control-only items (`["\a"]`, `["\0"]`) that strip to
+// "" at render, which would settle a needs-human verdict then show an empty
+// section. Every brief list field routes through this one helper (#1769 r15).
 export function sanitizeBriefList(list) {
   return (Array.isArray(list) ? list : [])
     .map((value) => String(value ?? "").trim())
-    .filter(Boolean)
+    .filter((value) => sanitizeFreeText(value) !== "")
     .slice(0, MAX_BRIEF_LIST_ITEMS);
 }
 
-/** Only keep unique values that look like Sentry SHORT-IDs, bounded for
- * rendering/memory (the LOOKUP budget is MAX_DUPLICATE_LOOKUPS, applied
- * later); drop everything else so a hostile duplicate list can neither inject
- * markup nor bloat the projected body. */
-export function sanitizeDuplicateIds(list) {
-  const unique = [
-    ...new Set(
-      (Array.isArray(list) ? list : []).map((value) =>
-        String(value ?? "").trim(),
-      ),
-    ),
-  ];
-  return unique.filter(isValidShortId).slice(0, 20);
-}
+// `sanitizeDuplicateIds` now lives in sentry-triage-text.mjs (re-exported
+// above), beside `isValidShortId` it depends on; parseVerdictYaml below still
+// calls it through the local import.
 
 /**
  * Line-oriented, tolerant parse of the verdict yaml — deliberately NOT a real
@@ -422,6 +545,8 @@ export function parseVerdictYaml(block) {
     // needs-human decision-ready brief fields (optional-absent for other
     // verdicts; resolveVerdict requires human_question for needs-human).
     human_question: "",
+    how_to_check: [],
+    decision_branches: [],
     hypotheses: [],
     investigated: [],
     escalation_reason: "",
@@ -439,13 +564,10 @@ export function parseVerdictYaml(block) {
       const token = /^([a-z]+)/.exec(rest);
       out.confidence = token ? token[1] : null;
     } else if (key === "affected_repo") {
-      // EXACT whole-value match (after quote strip and a BOUNDARY-VALID
-      // trailing-comment strip — `<repo>#garbage` is one malformed scalar,
-      // not a repo plus comment) — never substring extraction: pulling an
-      // allowlisted slug out of surrounding text would turn e.g.
-      // "not mento-protocol/frontend-monorepo" into a projection target.
-      // Anything that isn't a bare owner/name slug parses as empty
-      // (-> treated as unrecognized, no projection).
+      // EXACT whole-value match (after quote + boundary-valid trailing-comment
+      // strip), never substring extraction: pulling an allowlisted slug out of
+      // surrounding text would turn e.g. "not mento-protocol/frontend-monorepo"
+      // into a projection target. A non-slug value parses as empty (unrecognized).
       const value = stripYamlQuotes(stripTrailingYamlComment(rest).trim());
       out.affected_repo = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(value)
         ? value
@@ -469,13 +591,20 @@ export function parseVerdictYaml(block) {
         out.duplicate_of = items;
         i = next - 1;
       }
-    } else if (key === "hypotheses" || key === "investigated") {
+    } else if (
+      key === "hypotheses" ||
+      key === "investigated" ||
+      key === "how_to_check" ||
+      key === "decision_branches"
+    ) {
       const { items, next } = parseFreeTextList(lines, i, rest);
       out[key] = items;
       i = next - 1;
     }
   }
   out.duplicate_of = sanitizeDuplicateIds(out.duplicate_of);
+  out.how_to_check = sanitizeBriefList(out.how_to_check);
+  out.decision_branches = sanitizeBriefList(out.decision_branches);
   out.hypotheses = sanitizeBriefList(out.hypotheses);
   out.investigated = sanitizeBriefList(out.investigated);
   return out;
@@ -499,9 +628,36 @@ export function parseVerdictComment(commentBody) {
     duplicateOf: parsed.duplicate_of,
     // needs-human decision-ready brief fields (empty for other verdicts).
     humanQuestion: parsed.human_question,
+    howToCheck: parsed.how_to_check,
+    decisionBranches: parsed.decision_branches,
     hypotheses: parsed.hypotheses,
     investigated: parsed.investigated,
     escalationReason: parsed.escalation_reason,
+  };
+}
+
+/**
+ * The SINGLE field selection behind every needs-human brief: which parsed
+ * verdict fields a brief may render, in which shape, under which bound.
+ * Returns sanitized single-line strings plus the raw-but-capped item lists the
+ * GitHub emitter renders as bullets (each item still bounded individually).
+ *
+ * Sharing this is the point (#1748): the Slack digest and the queue-issue brief
+ * are two emitters over ONE selection, so a field added to the verdict contract
+ * cannot land on one surface and silently miss the other, and a bound cannot
+ * drift between them. Escaping stays per-surface — Slack mrkdwn and GitHub
+ * markdown neutralize different characters.
+ */
+export function selectNeedsHumanBriefFields(parsed) {
+  return {
+    question: boundBriefText(parsed?.humanQuestion),
+    howToCheck: sanitizeBriefList(parsed?.howToCheck).map(boundBriefText),
+    decisionBranches: sanitizeBriefList(parsed?.decisionBranches).map(
+      boundBriefText,
+    ),
+    hypotheses: sanitizeBriefList(parsed?.hypotheses).map(boundBriefText),
+    investigated: sanitizeBriefList(parsed?.investigated).map(boundBriefText),
+    escalationReason: boundBriefText(parsed?.escalationReason),
   };
 }
 
@@ -777,13 +933,24 @@ export function resolveVerdict(issue, queueIssueNumber, options = {}) {
   // absent `human_question` OR a blatant non-decision placeholder — and the
   // next scheduled run re-triages it, the same fail-loud contract as a
   // missing/invalid verdict above.
-  if (
-    parsed.verdict === "needs-human" &&
-    !isDecisionReadyQuestion(parsed.humanQuestion)
-  ) {
-    throw new Error(
-      `needs-human verdict on issue #${queueIssueNumber} has no decision-ready 'human_question' (missing or a non-decision placeholder like "please look"); a needs-human escalation must name the exact question/decision a human must answer. Leaving sentry:needs-triage in place for re-triage.`,
-    );
+  if (parsed.verdict === "needs-human") {
+    if (!isDecisionReadyQuestion(parsed.humanQuestion)) {
+      throw new Error(
+        `needs-human verdict on issue #${queueIssueNumber} has no decision-ready 'human_question' (missing or a non-decision placeholder like "please look"); a needs-human escalation must name the exact question/decision a human must answer. Leaving sentry:needs-triage in place for re-triage.`,
+      );
+    }
+    // A decision-ready escalation also needs the INSTRUCTION half: at least one
+    // how_to_check step AND one decision_branch that SURVIVE neutralization —
+    // sanitizeBriefList drops control-only items that would render empty, so a
+    // question with no real checks/dispositions is rejected (#1769 rounds 11, 15).
+    if (
+      sanitizeBriefList(parsed.howToCheck).length === 0 ||
+      sanitizeBriefList(parsed.decisionBranches).length === 0
+    ) {
+      throw new Error(
+        `needs-human verdict on issue #${queueIssueNumber} is an incomplete brief: it must carry at least one 'how_to_check' step AND at least one 'decision_branch' (a question with no checks or dispositions is not decision-ready). Leaving sentry:needs-triage in place for re-triage.`,
+      );
+    }
   }
   return {
     parsed,
@@ -796,7 +963,10 @@ export function resolveVerdict(issue, queueIssueNumber, options = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// Allowlist validation + idempotency marker.
+// Allowlist validation. The projected-issue rendering, the alias comment, and
+// the idempotency marker/back-link matchers moved to
+// sentry-triage-projection.mjs (#1769) and are re-exported at the top of this
+// file, so callers still reach them through the verdict contract unchanged.
 // ---------------------------------------------------------------------------
 
 /**
@@ -825,205 +995,4 @@ export function validateAffectedRepo(repo) {
     warning: `affected_repo ${value ? `'${truncate(value, 80)}'` : "(empty)"} is not in the projection allowlist; treating as ${LOCAL_REPO} and not projecting.`,
     reason: "unrecognized-repo",
   };
-}
-
-export function buildProjectionMarker(shortId) {
-  return `<!-- sentry-projection:v1 ${shortId} -->`;
-}
-
-const MARKER_LINE_PATTERN = /^<!-- sentry-projection:v1 (\S+) -->$/;
-
-/**
- * The SHORT-IDs in the body's LEADING marker block: consecutive
- * `<!-- sentry-projection:v1 … -->` lines at the very top of the body (after
- * optional leading blanks) — buildProjectedBody emits exactly one, and the
- * block form tolerates future multi-marker bodies. The first non-blank
- * non-marker line ends the block, so a marker-shaped sequence embedded in a
- * rendered free-text field further down can never register.
- */
-export function leadingProjectionMarkers(body) {
-  const markers = [];
-  for (const raw of String(body ?? "").split(/\r?\n/)) {
-    const line = raw.trim();
-    if (line === "") {
-      if (markers.length === 0) continue; // leading blanks before the block
-      break; // blank after the block ends it (our own format)
-    }
-    const match = MARKER_LINE_PATTERN.exec(line);
-    if (!match || !isValidShortId(match[1])) break;
-    markers.push(match[1]);
-  }
-  return markers;
-}
-
-/**
- * True when `body` is a genuine projection back-link for `shortId`. Markers
- * are only accepted at their fixed structural position — the leading marker
- * block — never via a broad substring search: a marker-shaped sequence
- * embedded in a rendered free-text field of an UNRELATED projected issue
- * must not satisfy the idempotency check for a different SHORT-ID (which
- * would close that stub as "reused" without filing anything). Rendered
- * fields additionally defang `<!--` (defangHtmlComments) so such a sequence
- * cannot survive rendering intact in the first place. Coalesced duplicates
- * are matched separately via projector-authored alias COMMENTS
- * (commentBacklinksShortId below).
- */
-export function bodyBacklinksShortId(body, shortId) {
-  if (!isValidShortId(shortId)) return false;
-  return leadingProjectionMarkers(body).includes(shortId);
-}
-
-/**
- * Build the duplicate-coalescing ALIAS COMMENT: the marker anchored as the
- * comment's first line (the authoritative alias predicate,
- * commentBacklinksShortId) followed by a visible note carrying the SHORT-ID,
- * the footer phrase, and the queue-stub back-link (so the search pre-filter —
- * which matches visible text — finds the aliased id) — PLUS the new
- * occurrence's full rendered verdict fields. The verdict contract defines
- * `duplicate_of` as a same-culprit/message FAMILY signal, not a confirmed
- * exact duplicate, so coalescing must not discard the new finding's
- * substance: the summary/root cause/proposed action land here (neutralized
- * and bounded exactly like the projected body), and the note invites the team
- * to split the entry into its own issue if it is actually distinct.
- *
- * An alias is a COMMENT, never a body edit, deliberately: comment creation is
- * an atomic APPEND, so two parallel matrix jobs coalescing different
- * SHORT-IDs onto the same issue can never lose each other's alias the way
- * concurrent read-modify-write body edits could (GitHub has no conditional
- * body update to CAS against). It is also the ONLY coalescing side effect, so
- * a partial failure can never strand a half-recorded alias. `shortId` is
- * shape-validated, `verdict`/`confidence` are closed enums, and
- * `queueIssueUrl` is a trusted GitHub-API/self-built URL.
- */
-// Fixed lead-in of the alias comment's visible note. Shared with the entry
-// module's dedicated alias search (`"<prefix> <shortId>" in:comments`) so the
-// searchable phrase and the rendered text can never drift apart.
-export const ALIAS_NOTE_PREFIX = "Also tracking Sentry";
-
-export function buildAliasComment({
-  shortId,
-  queueIssueUrl,
-  verdict,
-  confidence,
-  summary,
-  rootCause,
-  proposedAction,
-}) {
-  return [
-    buildProjectionMarker(shortId),
-    "",
-    `${ALIAS_NOTE_PREFIX} \`${shortId}\` — the Mento Sentry triage pipeline ` +
-      "marked it a duplicate of this issue's underlying error (same " +
-      "culprit/message family; if it is actually distinct, split it into its " +
-      "own issue). " +
-      `Queue stub: ${queueIssueUrl}`,
-    "",
-    `**Triage verdict:** \`${verdict}\`${confidence ? ` (confidence: \`${confidence}\`)` : ""}`,
-    "",
-    "**Summary**",
-    "",
-    fencedBlock(summary),
-    "",
-    "**Root cause**",
-    "",
-    fencedBlock(rootCause),
-    "",
-    "**Proposed action**",
-    "",
-    fencedBlock(proposedAction),
-  ].join("\n");
-}
-
-/** True when a COMMENT is a genuine alias record for `shortId`: the marker
- * must be the comment's first non-empty line (the caller additionally
- * verifies the comment author is the projector identity). */
-export function commentBacklinksShortId(commentBody, shortId) {
-  if (!isValidShortId(shortId)) return false;
-  const first = String(commentBody ?? "")
-    .split(/\r?\n/)
-    .find((line) => line.trim() !== "");
-  return first !== undefined && first.trim() === buildProjectionMarker(shortId);
-}
-
-// ---------------------------------------------------------------------------
-// Projected-issue rendering.
-// ---------------------------------------------------------------------------
-
-export function buildProjectedTitle(summary) {
-  const clean = neutralizeUntrusted(summary);
-  const base = clean || "(no summary provided)";
-  return `Sentry: ${truncate(base, 200)}`;
-}
-
-// Every free-text field the body/alias renders — summary INCLUDED — goes
-// through this fenced, inert treatment: fencing is what stops markdown
-// (images, task lists, links, inline HTML) from rendering live in the
-// owning-repo issue, and neutralizeBlock bounds it (600 chars / 8 lines) and
-// defangs backticks so the fence can't be closed early. Everything else is
-// already bounded: title caps at 200, duplicates at 20 shape-validated
-// SHORT-IDs, shortId at 120, verdict/confidence are closed enums, and the
-// permalink is a Stage-A-bounded validated URL.
-function fencedBlock(text) {
-  const body = neutralizeBlock(text);
-  if (!body) return "_(none provided)_";
-  return ["```text", body, "```"].join("\n");
-}
-
-/**
- * Build the projected owning-repo issue body. `shortId`, `verdict`,
- * `confidence` are validated/closed-set (safe as inline code); `permalink` is a
- * validated https sentry.io URL; `queueIssueUrl` is a trusted github.com URL
- * built from the workflow's own repo/issue. Every other field is agent-derived
- * and neutralized before it lands here.
- */
-export function buildProjectedBody({
-  shortId,
-  verdict,
-  confidence,
-  summary,
-  rootCause,
-  proposedAction,
-  duplicateOf,
-  permalink,
-  queueIssueUrl,
-}) {
-  const dupIds = sanitizeDuplicateIds(duplicateOf);
-  const dupText = dupIds.length
-    ? dupIds.map((id) => `\`${id}\``).join(", ")
-    : "none";
-
-  const parts = [
-    buildProjectionMarker(shortId),
-    "",
-    "> Filed automatically by the Mento **Sentry triage pipeline** from an agent triage verdict.",
-    "> Verdict fields only — no raw Sentry payload is copied here. Confirm in Sentry before acting.",
-    "",
-    `**Sentry issue:** \`${shortId}\``,
-    `**Triage verdict:** \`${verdict}\`${confidence ? ` (confidence: \`${confidence}\`)` : ""}`,
-    "",
-    "**Summary**",
-    "",
-    fencedBlock(summary),
-    "",
-    "**Root cause**",
-    "",
-    fencedBlock(rootCause),
-    "",
-    "**Proposed action**",
-    "",
-    fencedBlock(proposedAction),
-    "",
-    `**Possible duplicate Sentry issues:** ${dupText}`,
-    "",
-    "**Links**",
-    "",
-  ];
-  if (permalink) parts.push(`- [View the error in Sentry](${permalink})`);
-  parts.push(`- Central triage queue stub: ${queueIssueUrl}`);
-  parts.push("");
-  parts.push("---");
-  parts.push("");
-  parts.push(FOOTER);
-  parts.push("");
-  return parts.join("\n");
 }

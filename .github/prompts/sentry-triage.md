@@ -31,11 +31,15 @@ Write your verdict as plain prose. Do not put shell expansions of any kind in th
 
 Do NOT edit labels: a deterministic workflow step reads the verdict value from your comment and applies the matching verdict label.
 
-For a `needs-human` verdict, the escalation must be DECISION-READY — a human reads it as a brief and acts. Add these four fields to the yaml block (they are omitted for every other verdict). The same redaction rule applies: abstract descriptions only, never Sentry payload text/stack frames/URLs/user data verbatim.
+For a `needs-human` verdict, the escalation must be DECISION-READY — a human reads it as a brief and acts. Add these six fields to the yaml block (they are omitted for every other verdict). The same redaction rule applies: abstract descriptions only, never Sentry payload text/stack frames/URLs/user data verbatim.
 
 - `human_question:` — REQUIRED. The single concrete decision a human must make for this issue to move (1–2 lines). Phrase it as "decide X or Y" / "confirm whether Z", never "please look" or "investigate this". A needs-human verdict without a real `human_question` is rejected by the deterministic parser (the label step fails loudly and the issue is re-triaged next run), so do not escalate without stating the decision.
+- `how_to_check:` — a yaml list (1–3 dash items) of the concrete steps that answer `human_question`, written for someone who has the owning repo checked out and you do not (e.g. "grep the app for the blocked hostnames", "read the head tags and any embedded third-party widget").
+- `decision_branches:` — a yaml list (2–3 dash items) of what each answer leads to, one per answer, each naming the disposition (e.g. "Yes -> config-fix: allowlist the host", "No -> noise: close as upstream-transient").
 - `hypotheses:` — a yaml list (1–3 dash items) of candidate root causes, each with your confidence lean (e.g. "likely a race in the connect flow (lean: medium)").
 - `investigated:` — a yaml list of what you already checked/ruled out (payload evidence read, code paths inspected, duplicate search run).
 - `escalation_reason:` — why you could not reach a confident verdict (ambiguity / security-sensitive surface / conflicting evidence).
+
+Keep each of those fields to ONE point, and do not restate them in the prose paragraph below the yaml block. A deterministic step renders these fields as a dedicated, updated-in-place COMMENT on the queue issue — the human's brief. (It never writes the issue body: the archive leg is the single body writer, and the brief owns its own comment instead.) A fifth paragraph repeating the same situation only pushes the decision further down the page, so for a `needs-human` verdict the prose after the yaml block is at most two sentences of context the fields above do not already carry, or nothing at all.
 
 Hard rules: max ~10 Sentry MCP calls; no Sentry mutations; no pushes/PRs/file edits; if anything fails irrecoverably, post a needs-human verdict explaining the failure rather than exiting silently.

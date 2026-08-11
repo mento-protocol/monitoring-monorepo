@@ -36,6 +36,11 @@ import {
   requeueFences,
   requeueQueueStub,
 } from "./sentry-triage-requeue.mjs";
+import {
+  buildBriefClearRecoveryComment,
+  parseRequeueArgs,
+  runClearFailureRequeue,
+} from "./sentry-triage-brief-clear-recovery.mjs";
 
 let passed = 0;
 let failed = 0;
@@ -722,6 +727,164 @@ await test("no re-queue path rewrites the stub body (#1692)", async () => {
       );
     }
   }
+});
+
+// ---------------------------------------------------------------------------
+// The clear-failure re-queue CLI (#1769 round 16). A needs-human stub
+// re-dispatched to a settled verdict whose brief CLEAR fails is left open,
+// verdict-labeled and off sentry:needs-triage — a strand no stage sees. This
+// entry drives it back to selectable through the chokepoint, OPEN-safe.
+// ---------------------------------------------------------------------------
+
+function makeClearFailureGh(initial, { failOn = () => null } = {}) {
+  const state = {
+    state: initial.state ?? "OPEN",
+    labels: [...(initial.labels ?? [])],
+    comments: [],
+  };
+  const calls = [];
+  const runGh = async (args) => {
+    calls.push(args);
+    const failure = failOn(args);
+    if (failure) throw new Error(failure);
+    if (args[0] === "issue" && args[1] === "view") {
+      return JSON.stringify({
+        state: state.state,
+        labels: state.labels.map((name) => ({ name })),
+      });
+    }
+    if (args[0] === "issue" && args[1] === "edit") {
+      const addAt = args.indexOf("--add-label");
+      if (addAt !== -1) {
+        for (const name of args[addAt + 1].split(",")) {
+          if (name && !state.labels.includes(name)) state.labels.push(name);
+        }
+      }
+      const removeAt = args.indexOf("--remove-label");
+      if (removeAt !== -1) {
+        const remove = new Set(args[removeAt + 1].split(","));
+        state.labels = state.labels.filter((name) => !remove.has(name));
+      }
+      return "";
+    }
+    if (args[0] === "issue" && args[1] === "comment") {
+      state.comments.push(args[args.indexOf("--body") + 1]);
+      return "";
+    }
+    if (args[0] === "issue" && args[1] === "reopen") {
+      state.state = "OPEN";
+      return "";
+    }
+    return "";
+  };
+  return { state, calls, runGh };
+}
+
+await test("runClearFailureRequeue restores needs-triage and sheds the verdict on an OPEN stub (#1769 round 16)", async () => {
+  const gh = makeClearFailureGh({
+    state: "OPEN",
+    labels: ["sentry-triage", "sentry:verdict-upstream"],
+  });
+  const result = await runClearFailureRequeue({
+    runGh: gh.runGh,
+    repo: REPO,
+    issueNumber: 1731,
+  });
+  assertEqual(result.requeued, true);
+  assert(
+    gh.state.labels.includes(NEEDS_TRIAGE_LABEL),
+    "sentry:needs-triage must be restored",
+  );
+  assert(
+    !gh.state.labels.includes("sentry:verdict-upstream"),
+    "the just-applied verdict label must be shed",
+  );
+  assertEqual(gh.state.state, "OPEN");
+  // A bookkeeping note rides with the labels; it is NOT a regression fence.
+  assertEqual(gh.state.comments.length, 1);
+  assertEqual(gh.state.comments[0], buildBriefClearRecoveryComment());
+  assert(
+    !gh.state.comments[0].startsWith(REGRESSION_PREFIX),
+    "the recovery note must never be a regression fence",
+  );
+  // An already-open stub is confirmed selectable, never spuriously reopened.
+  assert(
+    !gh.calls.some((a) => a[0] === "issue" && a[1] === "reopen"),
+    "an already-open stub must not be reopened",
+  );
+});
+
+await test("parseRequeueArgs requires a numeric issue and a repo", () => {
+  const ok = parseRequeueArgs(["--issue", "1731", "--repo", "o/r"]);
+  assertEqual(ok.issueNumber, 1731);
+  assertEqual(ok.repo, "o/r");
+  for (const bad of [
+    [],
+    ["--issue", "x", "--repo", "o/r"],
+    ["--issue", "1731"],
+    ["--repo", "o/r"],
+    ["--bogus"],
+  ]) {
+    let threw = false;
+    try {
+      parseRequeueArgs(bad);
+    } catch {
+      threw = true;
+    }
+    assert(threw, `parseRequeueArgs(${JSON.stringify(bad)}) must throw`);
+  }
+});
+
+await test("the advisory note failing never skips selectability verification (#1769 round 17)", async () => {
+  // The load-bearing label restoration succeeds; only the ADVISORY bookkeeping
+  // note post fails. Under verify-end-state the note error must NOT escape before
+  // ensureSelectableForTriage runs — the stub IS selectable, so this is success.
+  const gh = makeClearFailureGh(
+    { state: "OPEN", labels: ["sentry-triage", "sentry:verdict-upstream"] },
+    {
+      failOn: (args) =>
+        args[1] === "comment" ? "HTTP 500 server error" : null,
+    },
+  );
+  const result = await runClearFailureRequeue({
+    runGh: gh.runGh,
+    repo: REPO,
+    issueNumber: 1731,
+  });
+  assertEqual(result.requeued, true);
+  assert(
+    gh.state.labels.includes(NEEDS_TRIAGE_LABEL),
+    "sentry:needs-triage must be restored even though the note failed",
+  );
+  assert(
+    !gh.state.labels.includes("sentry:verdict-upstream"),
+    "the verdict label must be shed",
+  );
+  // The note never landed, but selectability was still confirmed.
+  assertEqual(gh.state.comments.length, 0);
+});
+
+await test("a label restoration that cannot be verified selectable is a HARD failure (#1769 round 17)", async () => {
+  // The load-bearing add-label mutation keeps failing, so the stub never carries
+  // sentry:needs-triage: ensureSelectableForTriage cannot confirm it selectable
+  // and must THROW, never report success on an unverified strand.
+  const gh = makeClearFailureGh(
+    { state: "OPEN", labels: ["sentry-triage", "sentry:verdict-upstream"] },
+    {
+      failOn: (args) =>
+        args[1] === "edit" && args.includes("--add-label")
+          ? "HTTP 503 unavailable"
+          : null,
+    },
+  );
+  await assertRejects(
+    runClearFailureRequeue({ runGh: gh.runGh, repo: REPO, issueNumber: 1731 }),
+    /not selectable for triage/,
+  );
+  assert(
+    !gh.state.labels.includes(NEEDS_TRIAGE_LABEL),
+    "the stub never became selectable (the add-label kept failing)",
+  );
 });
 
 if (failed > 0) {

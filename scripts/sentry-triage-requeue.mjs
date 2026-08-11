@@ -576,24 +576,31 @@ export async function requeueQueueStub(
 
   // The bookkeeping note describes the repair rather than gating it, so it rides
   // with the label write it explains. (A fencing cause has no note: its comment
-  // IS the fence, and that one has to precede the labels.)
-  //
-  // A failure here propagates on BOTH failure modes. That is right for the one
-  // caller that passes a note — the sweep, on `abort`, where the whole sequence
-  // retries next run — and would be wrong for a future one on
-  // `verify-end-state`: the note is no part of the end-state invariant, so
-  // throwing past the verifier would skip a real guard over a comment. Route it
-  // like `labelError` if such a caller ever appears.
+  // IS the fence, which must precede the labels.) The note is ADVISORY — the
+  // label restoration is load-bearing — so under `verify-end-state` a failed post
+  // is a NOTICE, never a throw: throwing here would skip the end-state
+  // verification below and leave a possibly-stranded stub reported as success
+  // (#1769 round 17 — the clear-failure CLI is the caller the note-below-comment
+  // anticipated). On `abort` it still propagates, so the sweep retries next run.
   if (note) {
-    await writeGh([
-      "issue",
-      "comment",
-      String(issueNumber),
-      "-R",
-      repo,
-      "--body",
-      note,
-    ]);
+    try {
+      await writeGh([
+        "issue",
+        "comment",
+        String(issueNumber),
+        "-R",
+        repo,
+        "--body",
+        note,
+      ]);
+    } catch (err) {
+      if (!verifyEndState) throw err;
+      process.stderr.write(
+        `::notice::Re-queue bookkeeping note on #${issueNumber} reported a failure (${
+          err instanceof Error ? err.message : String(err)
+        }); it is advisory, so the end-state verification below still runs.\n`,
+      );
+    }
   }
 
   // INVARIANT 3, second half — the STATE CHANGE GOES LAST. The closed->open

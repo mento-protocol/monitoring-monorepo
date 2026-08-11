@@ -37,6 +37,7 @@ import {
   VERDICT_MARKER,
   VERDICT_TO_LABEL,
 } from "./sentry-triage-project.mjs";
+import { BRIEF_COMMENT_MARKER } from "./sentry-triage-brief.mjs";
 
 let passed = 0;
 let failed = 0;
@@ -115,6 +116,8 @@ function verdictComment({
   proposedAction = "  Some abstract action.",
   duplicates = "[]",
   humanQuestion = null,
+  howToCheck = null,
+  decisionBranches = null,
   hypotheses = null,
   investigated = null,
   escalationReason = null,
@@ -135,6 +138,15 @@ function verdictComment({
   ];
   if (humanQuestion != null) {
     lines.push("human_question: |", `  ${humanQuestion}`);
+  }
+  if (howToCheck != null) {
+    lines.push("how_to_check:", ...howToCheck.map((h) => `  - ${h}`));
+  }
+  if (decisionBranches != null) {
+    lines.push(
+      "decision_branches:",
+      ...decisionBranches.map((b) => `  - ${b}`),
+    );
   }
   if (hypotheses != null) {
     lines.push("hypotheses:", ...hypotheses.map((h) => `  - ${h}`));
@@ -254,6 +266,10 @@ function makeRunGh({
     }
     if (a0 === "label" && a1 === "create") {
       // runProjectionBatch's idempotent self-heal of sentry:projected.
+      return "";
+    }
+    if (a0 === "api" && a1 === "-X" && args[2] === "DELETE") {
+      // clearBriefComments deleting a stale brief before the stub is closed.
       return "";
     }
     throw new Error(`unexpected gh call: ${args.join(" ")}`);
@@ -1885,6 +1901,8 @@ await test("runProjection skips a non-actionable verdict (needs-human)", async (
         verdictComment({
           verdict: "needs-human",
           humanQuestion: "Decide whether to rotate the key or wait.",
+          howToCheck: ["inspect the handler"],
+          decisionBranches: ["Yes -> rotate", "No -> wait"],
         }),
         "2026-07-17T10:00:00Z",
       ),
@@ -2384,6 +2402,8 @@ await test("runParseOnly accepts a needs-human verdict WITH human_question", asy
           verdict: "needs-human",
           humanQuestion:
             "Decide whether to rotate the key or wait for upstream.",
+          howToCheck: ["inspect the handler"],
+          decisionBranches: ["Yes -> rotate", "No -> wait"],
         }),
         "2026-07-17T10:00:00Z",
       ),
@@ -2646,6 +2666,48 @@ await test("parseArgs validates the prior-verdict token against its closed set",
 // ---------------------------------------------------------------------------
 // --batch (the serialized project job's driver)
 // ---------------------------------------------------------------------------
+
+await test("runProjectionBatch clears a stale brief before projecting/closing (#1769 round 11 P2)", async () => {
+  // A stub re-triaged needs-human -> code-fix whose brief-clear failed in the
+  // matrix reaches the project job still carrying the "Decision needed" comment.
+  // The project job closes projected stubs, so it must clear the brief FIRST or
+  // it would close the stub still showing an obsolete decision.
+  const issue = queueIssue({
+    number: 500,
+    labels: ["sentry-triage", "sentry:verdict-code-fix"],
+    comments: [
+      botComment(
+        verdictComment({ verdict: "code-fix" }),
+        "2026-07-17T10:00:00Z",
+      ),
+      {
+        author: { login: "github-actions" },
+        createdAt: "2026-07-16T10:00:00Z",
+        body: `${BRIEF_COMMENT_MARKER}\n\n> **Decision needed**`,
+        url: "https://github.com/mento-protocol/monitoring-monorepo/issues/500#issuecomment-770001",
+      },
+    ],
+  });
+  const { runGh, calls } = makeRunGh({ issue, createdUrl: CREATED_URL });
+  const rows = await runProjectionBatch(
+    {
+      localRepo: "mento-protocol/monitoring-monorepo",
+      queueIssues: [500],
+      projectionToken: PAT,
+    },
+    { runGh },
+  );
+  // The stub still projects (it IS a code-fix), and the brief was DELETED before
+  // the workflow closes it.
+  assertEqual(rows[0].status, "projected");
+  const del = calls.find(
+    (c) =>
+      c.args[0] === "api" &&
+      c.args.includes("DELETE") &&
+      String(c.args[3]).includes("/issues/comments/770001"),
+  );
+  assert(del, "the stale brief must be deleted before the stub is closed");
+});
 
 await test("batch mode: same-run duplicate family coalesces via the in-run registry (one create)", async () => {
   // Stub 500 (APP-MENTO-ORG-12) and stub 501 (APP-MENTO-ORG-77, verdict lists

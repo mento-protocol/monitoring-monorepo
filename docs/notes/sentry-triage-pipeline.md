@@ -246,20 +246,107 @@ proposed_action: |
 duplicate_of: [] # Sentry SHORT-IDs only
 ```
 
-A `needs-human` verdict also includes a concrete `human_question`, one to
-three `hypotheses`, an `investigated` list, and an
-`escalation_reason`. A missing or placeholder `human_question` is invalid:
-an escalation must be decision-ready, not “please look.”
+A `needs-human` verdict also includes a concrete `human_question`, a
+`how_to_check` list, a `decision_branches` list, one to three `hypotheses`, an
+`investigated` list, and an `escalation_reason`. A missing or placeholder
+`human_question` is invalid: an escalation must be decision-ready, not “please
+look.”
 
-The agent posts that comment through `scripts/sentry-triage-agent-comment.mjs`,
-its only write path. The wrapper accepts no issue argument, and does not take
-the target from the environment either: bash arithmetic expansion assigns, so a
-body containing `$((SENTRY_TRIAGE_COMMENT_ISSUE=1234))` rewrites the exported
-variable while the agent's own command line is expanded, before Node starts.
-The authoritative target is a JSON file that a trusted step pins under
-`$RUNNER_TEMP` before the agent runs, left mode 0444 inside a mode 0555
-directory. The env var survives as a cross-check only, and a disagreement
-between the two refuses loudly rather than picking a winner.
+```yaml
+human_question: |
+  <the single decision a human must make>
+how_to_check:
+  - <a concrete step that answers the question>
+decision_branches:
+  - "Yes -> config-fix: <disposition>"
+  - "No -> noise: close as upstream-transient"
+hypotheses:
+  - <a candidate root cause, with a confidence lean>
+investigated:
+  - <what was already checked or ruled out>
+escalation_reason: |
+  <why a confident verdict was not reachable>
+```
+
+`how_to_check` and `decision_branches` exist because the brief below is
+deterministic: nothing else in the contract carries the instruction half of a
+decision, so without them a rendered brief can only restate the situation.
+Every list is capped at `MAX_BRIEF_LIST_ITEMS` (in
+`scripts/sentry-triage-project-core.mjs`), and every field is bounded at
+`MAX_BRIEF_TEXT_LEN` before either emitter escapes it. The bounds and the
+untrusted-text neutralization live in `scripts/sentry-triage-text.mjs` — the
+pipeline's lowest layer, importing nothing — and are re-exported by the verdict
+contract, so every caller keeps one import surface and the two briefs cannot
+drift. For a `needs-human` verdict the prose after the YAML block is at most
+two sentences: the fields are the brief, and a paragraph restating them only
+pushes the decision further down the page.
+
+### The needs-human brief
+
+`scripts/sentry-triage-brief.mjs` renders those fields as a dedicated,
+updated-in-place **comment** on the queue stub, in a fixed order — question, how
+to check, what each answer leads to, evidence collapsed underneath. The
+`verdict` job runs it right after the label swap, so a stub a person is asked to
+decide carries the decision beside its YAML. The digest's Slack brief
+(`renderNeedsHumanBrief` in `scripts/sentry-triage-digest.mjs`) is the second
+emitter over the same shared field selection; only the escaping differs —
+Slack gets `escapeSlackText`, GitHub gets `escapeGithubMarkdown`, which
+backslash-escapes every active markdown character so agent-authored text can
+never render a link, image, tag or entity beside the pipeline's own controls.
+
+**A comment, not the stub body.** An earlier revision rendered the brief into
+the body and tried to keep it clear of the archive leg — the body's writer —
+through label observation. That could not hold (PR #1769): the archive's
+settlement deletes `sentry:approved-archive` **before** it writes its freshness
+baseline and adds `sentry:archived` only **after** the close, so between them
+the stub carries neither coordination label and a whole-body edit could clobber
+the baseline in a window no label check sees. A comment races nothing. The
+archive stays the **single stub-body writer** (PR #1766); the brief cannot drop
+the baseline in any interleaving because it never touches the body.
+
+**The comment exists if and only if a live `needs-human` verdict describes the
+stub.** That lifecycle is one rule, because a rendering that outlives what it
+renders reads as current to whoever opens the issue:
+
+- a `needs-human` verdict creates the comment, or updates it in place if it is
+  already there — never a second copy;
+- **any other verdict deletes it**, regardless of any label the stub carries —
+  which is why the workflow step is ungated. The script resolves the verdict
+  itself, so gating the step added nothing and cost a stale "Decision needed"
+  brief on every stub re-triaged to `code-fix`, `config-fix` or
+  `upstream-transient` — including one still carrying a stale
+  `sentry:approved-archive`, where the old body version yielded and left the
+  brief in place for a later close to bury;
+- a re-queue does **not** clear it: the re-queue chokepoint leaves the marked
+  brief comment untouched. It writes no stub BODY — that is the invariant
+  `scripts/sentry-triage-requeue.test.mjs` pins (issue #1692) — but it may post
+  its OWN comment: a regression-fence comment for a `sentry-evidence` re-queue,
+  a bookkeeping note otherwise (see the regression fence below). So a re-queued
+  stub keeps its old brief until the next round's verdict lands — on a stub
+  already labelled `sentry:needs-triage`.
+
+Nothing machine-readable moves. The verdict YAML stays in the verdict comment,
+where the label step, the projection, the digest and the autofix selector read
+it; the stub's metadata YAML stays where `extractPermalink` and
+`parseArchiveBaseline` read it. The brief comment is anchored by
+`<!-- sentry-triage-brief:v1 -->` and selected by trusted author plus that
+marker, so a re-triage replaces it rather than stacking a copy and a drive-by
+commenter cannot make the leg PATCH or DELETE their comment. It emits no fenced
+block, so `parseVerdictComment` never mistakes it for a verdict. Every rendered
+field is single-line, neutralized, bounded and markdown-escaped; a comment that
+could be misread by a prefix-anchored consumer fails closed.
+
+The agent posts its verdict comment — never the brief, which `runBrief` writes
+separately through its own `gh` calls — through
+`scripts/sentry-triage-agent-comment.mjs`, its only write path. The wrapper
+accepts no issue argument, and does not take the target from the environment
+either: bash arithmetic expansion assigns, so a body containing
+`$((SENTRY_TRIAGE_COMMENT_ISSUE=1234))` rewrites the exported variable while
+the agent's own command line is expanded, before Node starts. The authoritative
+target is a JSON file that a trusted step pins under `$RUNNER_TEMP` before the
+agent runs, left mode 0444 inside a mode 0555 directory. The env var survives
+as a cross-check only, and a disagreement between the two refuses loudly rather
+than picking a winner.
 
 Those modes are load-bearing, because **the agent can write files**. Claude
 Code's permission rules match a command carrying an output redirection
@@ -1033,6 +1120,7 @@ with:
 node scripts/sentry-triage-ingest.test.mjs
 node scripts/sentry-triage-digest.test.mjs
 node scripts/sentry-triage-project.test.mjs
+node scripts/sentry-triage-brief.test.mjs
 node scripts/sentry-autofix-select.test.mjs
 node scripts/sentry-autofix-finalize.test.mjs
 node scripts/sentry-triage-archive.test.mjs
@@ -1051,6 +1139,7 @@ validator keeps the aliases the gate trusts safe.
 pnpm sentry:ingest --dry-run --lookback-days 8
 SENTRY_TRIAGE_ISSUES='[123,456]' pnpm sentry:digest --channel '#engineering'
 pnpm sentry:autofix:select --cap 2
+pnpm sentry:brief --issue 1731 --dry-run
 ```
 
 For any contract change, also run the matching workflow/script tests,

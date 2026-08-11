@@ -47,6 +47,7 @@ import {
   selectVerdictComment,
   VERDICT_MARKER,
 } from "./sentry-triage-project-core.mjs";
+import { BRIEF_COMMENT_MARKER } from "./sentry-triage-brief.mjs";
 
 let passed = 0;
 let failed = 0;
@@ -163,6 +164,11 @@ function makeStub({
   body = stubBody(),
   state = "OPEN",
   comments = [],
+  labels = [
+    { name: "sentry-triage" },
+    { name: "sentry:approved-archive" },
+    { name: "sentry:verdict-upstream" },
+  ],
 } = {}) {
   return {
     number,
@@ -170,11 +176,7 @@ function makeStub({
     body,
     url: QUEUE_URL,
     state,
-    labels: [
-      { name: "sentry-triage" },
-      { name: "sentry:approved-archive" },
-      { name: "sentry:verdict-upstream" },
-    ],
+    labels,
     comments,
   };
 }
@@ -244,6 +246,18 @@ function makeRunGh({
   const apply = (args) => {
     const [a0, a1] = args;
     if (a0 === "label" && a1 === "create") return "";
+    if (
+      a0 === "api" &&
+      a1 === "-X" &&
+      args[2] === "DELETE" &&
+      String(args[3]).includes("/issues/comments/")
+    ) {
+      const id = String(args[3]).split("/").pop();
+      model.comments = model.comments.filter(
+        (c) => !String(c.url ?? "").endsWith(`#issuecomment-${id}`),
+      );
+      return "";
+    }
     if (a0 === "api" && a1 === "-X") {
       const name = String(args[3]).split("/labels/")[1];
       if (approvalLabelGone || !model.labels.includes(name)) {
@@ -840,6 +854,68 @@ await test("runArchive happy path archives and settles the queue stub", async ()
   assert(
     !ghCalls.some((args) => args.some((a) => String(a).includes(TOKEN))),
     "the Sentry token must never reach a gh call",
+  );
+});
+
+await test("archiving a needs-human stub clears its stale brief comment (#1769 round 5)", async () => {
+  // A human applies sentry:approved-archive DIRECTLY to a needs-human stub. The
+  // archive path closes it and adds sentry:archived WITHOUT changing the verdict
+  // or running the brief leg — so without a terminal-transition clear, the
+  // marked "Decision needed" comment would sit on the closed archive forever.
+  const briefComment = {
+    body: `${BRIEF_COMMENT_MARKER}\n\n> **Decision needed** \`GOVERNANCE-MENTO-ORG-51\``,
+    author: { login: "github-actions" },
+    createdAt: "2026-07-20T00:00:00Z",
+    url: "https://github.com/mento-protocol/monitoring-monorepo/issues/42#issuecomment-555001",
+  };
+  const stub = makeStub({
+    labels: [
+      { name: "sentry-triage" },
+      { name: "sentry:approved-archive" },
+      { name: "sentry:verdict-needs-human" },
+    ],
+    comments: [briefComment],
+  });
+  const { runGh, calls: ghCalls, model } = makeRunGh({ stub });
+  const { fetchImpl } = makeFetch();
+
+  const result = await runArchive(baseOptions(), {
+    runGh,
+    fetchImpl,
+    now: FIXED_NOW,
+  });
+  assertEqual(result.status, "archived");
+
+  // The stub settled: closed + sentry:archived.
+  assertEqual(model.state, "CLOSED");
+  assert(model.labels.includes("sentry:archived"), "terminal marker applied");
+
+  // The stale brief comment is GONE — deleted via the REST comments endpoint,
+  // never via a body write, so the archive stays the only stub-body writer.
+  assert(
+    !model.comments.some((c) =>
+      String(c.body).startsWith(BRIEF_COMMENT_MARKER),
+    ),
+    "the needs-human brief comment must be cleared on archive settlement",
+  );
+  const briefDelete = ghCalls.find(
+    (a) =>
+      a[0] === "api" &&
+      a[2] === "DELETE" &&
+      String(a[3]).includes("/issues/comments/555001"),
+  );
+  assert(
+    briefDelete,
+    "the brief is deleted via the comments REST endpoint, not a body edit",
+  );
+  const bodyEdits = ghCalls.filter(
+    (a) => a[0] === "issue" && a[1] === "edit" && a.includes("--body"),
+  );
+  assert(
+    bodyEdits.every(
+      (a) => !String(a[a.indexOf("--body") + 1]).includes("Decision needed"),
+    ),
+    "no body edit carries the brief — deletion is comment-only",
   );
 });
 
