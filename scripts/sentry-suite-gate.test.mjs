@@ -20,7 +20,13 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -29,6 +35,7 @@ import {
   digestFile,
   digestWatchSet,
   findSentrySuites,
+  gateInputs,
   judgeSuite,
   parseCountLine,
   parseNodeTest,
@@ -111,16 +118,54 @@ function nodeTestSuite(count) {
 }
 
 /** Spawn the real gate against a fixture root. */
+/**
+ * Spawn the real gate against a fixture root, in an environment scrubbed of
+ * every variable the gate consults.
+ *
+ * Derived from the gate's own `process.env` reads rather than guessed, which is
+ * the same discipline the watch set now uses:
+ *
+ *   SENTRY_SUITE_GATE_ROOT — set here, to the fixture;
+ *   GITHUB_STEP_SUMMARY    — REDIRECTED to a temp file, not deleted, so the
+ *                            fixtures still exercise the summary-writing path
+ *                            instead of silently skipping it;
+ *   NODE_OPTIONS/NODE_PATH — cleared, so a developer's ambient value neither
+ *                            trips the gate's refuse-to-start guard in every
+ *                            fixture nor changes what the children run.
+ *
+ * Redirecting the summary is the load-bearing part. Inside the `sentry-suites`
+ * job `process.env.GITHUB_STEP_SUMMARY` points at the real summary, so before
+ * this every fixture gate appended its table to it: 94 lines across 11 tables,
+ * including 9 `failed the gate` and 4 `TAMPERED` rows, in a job that SUCCEEDED.
+ * An operator reading that cannot tell fixture output from the real verdict.
+ *
+ * `extraEnv` is applied last, so a test that deliberately sets NODE_OPTIONS
+ * still can.
+ */
 function runGate(root, extraEnv = {}) {
+  const env = { ...process.env, SENTRY_SUITE_GATE_ROOT: root };
+  delete env.NODE_OPTIONS;
+  delete env.NODE_PATH;
+  const summaryPath = join(root, "fixture-step-summary.md");
+  env.GITHUB_STEP_SUMMARY = summaryPath;
   const child = spawnSync("node", [GATE], {
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
-    env: { ...process.env, SENTRY_SUITE_GATE_ROOT: root, ...extraEnv },
+    env: { ...env, ...extraEnv },
   });
+  let summary = "";
+  try {
+    summary = readFileSync(summaryPath, "utf8");
+  } catch {
+    // The gate writes a summary only when it gets that far; absence is a fact
+    // the caller can assert on, not an error here.
+  }
   return {
     status: child.status,
     stdout: child.stdout || "",
     stderr: child.stderr || "",
+    summary,
+    summaryPath,
   };
 }
 
@@ -590,6 +635,204 @@ await test("staticImportSpecifiers ignores mentions in comments", async () => {
     ),
     "only real imports",
   );
+});
+
+await test("a gate run writes exactly ONE table to the step summary", async () => {
+  const root = makeRoot();
+  try {
+    // Codex 3760509528. Fixture gates inherited the real GITHUB_STEP_SUMMARY
+    // and appended to it: 94 lines across 11 tables, 9 `failed the gate` rows
+    // and 4 `TAMPERED` rows, in a job that succeeded. The summary is the only
+    // operator-facing output this job produces, so fixture tables in it are a
+    // correctness problem, not noise. One gate run must produce one table.
+    writeSuite(root, "sentry-alpha.test.mjs", countLineSuite(2));
+    writeManifest(root, {
+      "scripts/sentry-alpha.test.mjs": { reporter: "count-line", floor: 2 },
+    });
+    const { status, summary } = runGate(root);
+    assertEqual(status, 0, "control run should pass");
+    const tables = (summary.match(/^## Sentry-suite gate$/gm) || []).length;
+    assertEqual(
+      tables,
+      1,
+      `expected exactly one table, summary was:\n${summary}`,
+    );
+    assert(
+      summary.includes("scripts/sentry-alpha.test.mjs"),
+      "the table should be the real one for this run",
+    );
+  } finally {
+    cleanup(root);
+  }
+});
+
+await test("fixture gates never write to the ambient step summary", async () => {
+  const root = makeRoot();
+  const ambient = join(root, "ambient-summary.md");
+  const saved = process.env.GITHUB_STEP_SUMMARY;
+  try {
+    writeFileSync(ambient, "");
+    // Simulate running inside the sentry-suites job, where this points at the
+    // real summary; runGate must redirect its children away from it.
+    process.env.GITHUB_STEP_SUMMARY = ambient;
+    writeSuite(root, "sentry-alpha.test.mjs", countLineSuite(1));
+    writeManifest(root, {
+      "scripts/sentry-alpha.test.mjs": { reporter: "count-line", floor: 1 },
+    });
+    const { summary } = runGate(root);
+    assert(
+      summary.includes("## Sentry-suite gate"),
+      "the fixture still wrote a summary",
+    );
+    assertEqual(
+      readFileSync(ambient, "utf8"),
+      "",
+      "the ambient summary must be untouched by a fixture gate",
+    );
+  } finally {
+    if (saved === undefined) delete process.env.GITHUB_STEP_SUMMARY;
+    else process.env.GITHUB_STEP_SUMMARY = saved;
+    cleanup(root);
+  }
+});
+
+await test("the watch set equals every input the gate reads to decide", async () => {
+  // The general form of Codex 3760509524: the watch set was twice decided by
+  // listing files that felt load-bearing, and twice missed one. It is now
+  // DERIVED from the manifest, so any entry that brings a new decision input
+  // brings it into the watch set too. Asserted against an exempt entry, whose
+  // route trusts both an importer and package.json.
+  const manifest = {
+    suites: {
+      "scripts/sentry-a.test.mjs": { reporter: "count-line", floor: 1 },
+      "scripts/sentry-provider-contract.test.mjs": {
+        reporter: "exit-only",
+        exempt: {
+          runBy: "production-infra-contract",
+          via: "pnpm tf:test",
+          importer: "scripts/tf-stacks.test.mjs",
+        },
+      },
+    },
+  };
+  assertEqual(
+    JSON.stringify(gateInputs(manifest)),
+    JSON.stringify([
+      "package.json",
+      "scripts/sentry-a.test.mjs",
+      "scripts/sentry-provider-contract.test.mjs",
+      "scripts/sentry-suite-gate.mjs",
+      "scripts/sentry-suite-manifest.json",
+      "scripts/tf-stacks.test.mjs",
+    ]),
+    "the derived input set",
+  );
+  // And the digest baseline must watch exactly that set, not a subset.
+  const root = makeRoot();
+  try {
+    const watched = [...digestWatchSet(manifest, root).keys()].sort();
+    assertEqual(
+      JSON.stringify(watched),
+      JSON.stringify(gateInputs(manifest)),
+      "the watch set must equal the derived inputs",
+    );
+  } finally {
+    cleanup(root);
+  }
+});
+
+await test("red: a suite forging an exemption's route evidence is caught", async () => {
+  const root = makeRoot();
+  try {
+    // The route is evidence about code this gate never runs. An earlier suite
+    // restoring the import in the writable checkout made a throwing exempt
+    // suite read as intact — gate exit 0 — while the production job would never
+    // have run it.
+    writeSuite(
+      root,
+      "sentry-aaa-forger.test.mjs",
+      [
+        'import { writeFileSync } from "node:fs";',
+        'import { fileURLToPath } from "node:url";',
+        'writeFileSync(fileURLToPath(new URL("./tf-stacks.test.mjs", import.meta.url)),',
+        "  'import \"./sentry-provider-contract.test.mjs\";\\n');",
+        'process.stdout.write("ok forger\\n");',
+        'process.stdout.write("1 passed\\n");',
+        "",
+      ].join("\n"),
+    );
+    writeSuite(
+      root,
+      "sentry-provider-contract.test.mjs",
+      'throw new Error("provider contract suite is broken");\n',
+    );
+    writeFileSync(
+      join(root, "scripts", "tf-stacks.test.mjs"),
+      "// no import of the suite\n",
+    );
+    writeFileSync(
+      join(root, "package.json"),
+      JSON.stringify({
+        scripts: { "tf:test": "node scripts/tf-stacks.test.mjs" },
+      }),
+    );
+    writeManifest(root, {
+      "scripts/sentry-aaa-forger.test.mjs": {
+        reporter: "count-line",
+        floor: 1,
+      },
+      "scripts/sentry-provider-contract.test.mjs": {
+        reporter: "exit-only",
+        exempt: {
+          runBy: "production-infra-contract",
+          via: "pnpm tf:test",
+          importer: "scripts/tf-stacks.test.mjs",
+        },
+      },
+    });
+    const { status, stdout } = runGate(root);
+    assert(status !== 0, "a forged route must red the gate");
+    assert(
+      stdout.includes("modified the evidence for it"),
+      `should refuse the exemption: ${stdout}`,
+    );
+  } finally {
+    cleanup(root);
+  }
+});
+
+await test("red: a suite created mid-run is caught by re-enumeration", async () => {
+  const root = makeRoot();
+  try {
+    // Set equality runs once, before any child; a digest sweep over KNOWN files
+    // cannot see a file that did not exist when the baseline was taken.
+    writeSuite(
+      root,
+      "sentry-aaa-spawner.test.mjs",
+      [
+        'import { writeFileSync } from "node:fs";',
+        'import { fileURLToPath } from "node:url";',
+        'writeFileSync(fileURLToPath(new URL("./sentry-zzz-new.test.mjs", import.meta.url)), "// smuggled\\n");',
+        'process.stdout.write("ok spawner\\n");',
+        'process.stdout.write("1 passed\\n");',
+        "",
+      ].join("\n"),
+    );
+    writeManifest(root, {
+      "scripts/sentry-aaa-spawner.test.mjs": {
+        reporter: "count-line",
+        floor: 1,
+      },
+    });
+    const { status, stdout } = runGate(root);
+    assert(status !== 0, "a suite created mid-run must red the gate");
+    assert(
+      stdout.includes("changed while the gate was running"),
+      `should report the enumeration change: ${stdout}`,
+    );
+  } finally {
+    cleanup(root);
+  }
 });
 
 // ── (b) R1: NODE_OPTIONS neutering, and the env -u latch that defeats it ──────

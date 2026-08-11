@@ -76,6 +76,9 @@ class GateError extends Error {}
  */
 const GATE_LABEL = "scripts/sentry-suite-gate.mjs";
 
+/** The second half of every exemption route proof: it must run the importer. */
+const PACKAGE_JSON_LABEL = "package.json";
+
 /**
  * The manifest schema, as an ALLOWLIST.
  *
@@ -161,11 +164,52 @@ export function digestFile(path) {
  * @param {string} root
  * @returns {Map<string, string | null>} repo-relative path to digest
  */
-export function digestWatchSet(suites, root) {
-  const watched = [...suites, MANIFEST_LABEL, GATE_LABEL];
+export function digestWatchSet(manifest, root) {
   return new Map(
-    watched.map((relative) => [relative, digestFile(join(root, relative))]),
+    gateInputs(manifest).map((relative) => [
+      relative,
+      digestFile(join(root, relative)),
+    ]),
   );
+}
+
+/**
+ * Every file the gate READS in order to decide anything, derived from the
+ * manifest rather than listed by hand.
+ *
+ * The watch set was twice decided by asking "which files feel load-bearing",
+ * and twice missed one: the exemption route trusts BOTH the importer named in
+ * the entry and `package.json` (it must contain a script that runs that
+ * importer), and neither was watched — so an earlier alphabetic suite could
+ * restore the import in the job's writable checkout and forge an intact route
+ * for a suite the production job never runs (measured: gate exit 0 on a
+ * throwing exempt suite).
+ *
+ * The right question is what the gate consults to reach a verdict, so this
+ * derives that set from the decision inputs themselves:
+ *
+ *   - the manifest — decides the expected set, floors, reporters, exemptions;
+ *   - the gate's own source — decides how every result is judged;
+ *   - every manifest-listed suite — the thing whose output is the verdict;
+ *   - per exempt entry, its `importer` and `package.json` — the only evidence
+ *     that an unrun suite still runs somewhere else.
+ *
+ * Anything added to the manifest that brings a new input with it lands in the
+ * watch set automatically, which is the property the hand-written list lacked.
+ *
+ * @param {{ suites: Record<string, any> }} manifest
+ * @returns {string[]} repo-relative paths, sorted
+ */
+export function gateInputs(manifest) {
+  const inputs = new Set([MANIFEST_LABEL, GATE_LABEL]);
+  for (const [suite, entry] of Object.entries(manifest?.suites ?? {})) {
+    inputs.add(suite);
+    if (!entry?.exempt) continue;
+    // Both halves of the route proof, per ADR 0062.
+    inputs.add(entry.exempt.importer);
+    inputs.add(PACKAGE_JSON_LABEL);
+  }
+  return [...inputs].sort();
 }
 
 /**
@@ -735,13 +779,28 @@ export function main() {
   // name the suite and the point it was caught), and every digest is re-verified
   // after the last child (so a rewrite is caught no matter the ordering — an
   // attacker rewriting a suite that already ran is still caught by the sweep).
-  const baseline = digestWatchSet(manifestKeys, ROOT);
+  const baseline = digestWatchSet(manifest, ROOT);
 
   const rows = [];
   let failures = 0;
   for (const suite of manifestKeys) {
     const entry = manifest.suites[suite];
     if (entry.exempt) {
+      // The route is evidence about code this gate never runs, so its inputs
+      // must be the ones committed, not ones an earlier suite just rewrote.
+      const routeDrift = digestDrift(baseline, ROOT, [
+        entry.exempt.importer,
+        PACKAGE_JSON_LABEL,
+      ]);
+      if (routeDrift.length > 0) {
+        rows.push({
+          suite,
+          status: "TAMPERED",
+          detail: `${routeDrift.join("; ")} — refusing to accept the exemption; an earlier suite in this gate run modified the evidence for it`,
+        });
+        failures += 1;
+        continue;
+      }
       const reasons = verifyExemptRoute(suite, entry.exempt, ROOT);
       rows.push({
         suite,
@@ -796,6 +855,35 @@ export function main() {
   // watched file after the last child. A suite that rewrote one which already
   // ran, or that rewrote the manifest or this runner, is caught here even
   // though no per-spawn check could have seen it.
+  // Enumeration is a decision input too: set equality was computed once, before
+  // any child ran, so a suite CREATED mid-run would never be reconciled and a
+  // digest sweep over known files cannot see it. Re-enumerate and compare.
+  try {
+    const after = findSentrySuites(SCRIPTS_DIR);
+    const { equal, onDiskNotInManifest, inManifestNotOnDisk } = reconcile(
+      after,
+      manifestKeys,
+    );
+    if (!equal) {
+      rows.push({
+        suite: MANIFEST_LABEL,
+        status: "TAMPERED",
+        detail:
+          `the set of scripts/sentry-*.test.mjs changed while the gate was running ` +
+          `(appeared: ${JSON.stringify(onDiskNotInManifest)}, vanished: ${JSON.stringify(inManifestNotOnDisk)}) — ` +
+          "a suite added or removed mid-run was never reconciled against the manifest",
+      });
+      failures += 1;
+    }
+  } catch (err) {
+    rows.push({
+      suite: MANIFEST_LABEL,
+      status: "TAMPERED",
+      detail: `re-enumerating the suites after the run failed: ${err.message}`,
+    });
+    failures += 1;
+  }
+
   const finalDrift = digestDrift(baseline, ROOT);
   for (const change of finalDrift) {
     rows.push({
