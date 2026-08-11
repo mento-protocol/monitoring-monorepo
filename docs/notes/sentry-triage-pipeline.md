@@ -311,12 +311,21 @@ renders reads as current to whoever opens the issue:
 - a `needs-human` verdict creates the comment, or updates it in place if it is
   already there — never a second copy;
 - **any other verdict deletes it**, regardless of any label the stub carries —
-  which is why the workflow step is ungated. The script resolves the verdict
-  itself, so gating the step added nothing and cost a stale "Decision needed"
+  which is why the workflow step is ungated. The step passes
+  `--effective-verdict` — the verdict the label step actually applied — so
+  gating the step added nothing and cost a stale "Decision needed"
   brief on every stub re-triaged to `code-fix`, `config-fix` or
   `upstream-transient` — including one still carrying a stale
   `sentry:approved-archive`, where the old body version yielded and left the
   brief in place for a later close to bury;
+  **`--effective-verdict` is load-bearing, not a convenience.** The script can
+  still resolve the verdict itself, and does when invoked directly, but the
+  workflow must pass what the LABEL step applied: family inheritance (#1614) can
+  settle a stub whose stored verdict comment still reads `needs-human`, and a
+  second resolver reading that comment would render a "Decision needed" brief onto
+  a stub about to close. One authority, one outcome — do not remove the flag to
+  "simplify" the call.
+
 - a re-queue does **not** clear it: the re-queue chokepoint leaves the marked
   brief comment untouched. It writes no stub BODY — that is the invariant
   `scripts/sentry-triage-requeue.test.mjs` pins (issue #1692) — but it may post

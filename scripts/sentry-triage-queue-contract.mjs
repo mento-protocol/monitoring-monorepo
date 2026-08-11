@@ -422,15 +422,18 @@ export const INHERITABLE_VERDICT_LABEL = VERDICT_TO_LABEL[INHERITABLE_VERDICT];
  * label. First match in `duplicateOf` order wins, so the result does not
  * depend on GitHub's listing order.
  */
-export function selectInheritableSibling(duplicateOf, siblings) {
+export function selectInheritableSibling(duplicateOf, siblings, selfShortId) {
   const bySid = new Map();
   for (const s of siblings ?? []) {
     if (s?.shortId && !bySid.has(s.shortId)) bySid.set(s.shortId, s);
   }
-  for (const shortId of sanitizeDuplicateIds(duplicateOf).slice(
-    0,
-    MAX_DUPLICATE_LOOKUPS,
-  )) {
+  // Self-exclusion BEFORE the cap, matching the projection path's rule
+  // (sentry-triage-project-core.mjs, MAX_DUPLICATE_LOOKUPS): a stub that names
+  // itself would otherwise spend budget on a self-reference and push the only
+  // judged sibling past the cap — escalating the very family this collapses.
+  for (const shortId of sanitizeDuplicateIds(duplicateOf)
+    .filter((id) => id !== selfShortId)
+    .slice(0, MAX_DUPLICATE_LOOKUPS)) {
     const sib = bySid.get(shortId);
     if (!sib) continue;
     if (String(sib.state).toUpperCase() !== "CLOSED") continue;

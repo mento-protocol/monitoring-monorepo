@@ -856,8 +856,10 @@ jobs:
       # regardless of any label. Gating this step on `needs-human` — as it was —
       # meant a stub re-triaged from needs-human to code-fix / config-fix /
       # upstream-transient kept a "Decision needed" brief forever, describing a
-      # decision nobody has to make. The verdict it reads is resolved by the
-      # script itself, so the step needs no verdict input to decide.
+      # decision nobody has to make. It decides from --effective-verdict below
+      # — what the LABEL step applied — because family inheritance (#1614) can
+      # settle a stub whose verdict comment still reads needs-human, and a
+      # second resolver reading that comment would brief a stub about to close.
       #
       # RENDER is best-effort, CLEAR is not (#1769 rounds 8 + 10). The failure
       # splits on the verdict:

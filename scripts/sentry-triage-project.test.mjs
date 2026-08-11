@@ -3153,6 +3153,27 @@ await test("inheritance is capped and ordered by duplicate_of, not by listing", 
   assertEqual(selectInheritableSibling(many, onlyLastLabelled), null);
 });
 
+await test("a self-reference never consumes the lookup budget", () => {
+  // The agent can name the stub's own SHORT-ID in duplicate_of. Excluding it
+  // AFTER the cap would let it spend one of five slots and push the only judged
+  // sibling out of range — escalating the family this exists to collapse. The
+  // projection path already orders these the same way.
+  const dups = ["SELF-1", "A-2", "A-3", "A-4", "A-5", "A-6"];
+  const siblings = [
+    SIB("A-6", "CLOSED", "sentry:verdict-upstream"),
+    ...["A-2", "A-3", "A-4", "A-5"].map((id) =>
+      SIB(id, "CLOSED", "sentry-triage"),
+    ),
+  ];
+  // With the self-reference excluded first, A-6 is the 5th considered id.
+  assertEqual(
+    selectInheritableSibling(dups, siblings, "SELF-1")?.shortId,
+    "A-6",
+  );
+  // Without the exclusion it would sit past the cap and inherit nothing.
+  assertEqual(selectInheritableSibling(dups, siblings, null), null);
+});
+
 await test("a malformed or unknown duplicate_of inherits nothing", () => {
   for (const dups of [[], null, undefined, ["not a short id"], ["GOV-99"]]) {
     assertEqual(

@@ -178,11 +178,10 @@ async function readQueueIssue(localRun, repo, number) {
  * error falls back to the agent's own `needs-human`. The stub still gets a
  * decision-ready brief; it just does not get collapsed into its family.
  */
-async function readSiblingVerdicts(localRun, repo, duplicateOf) {
-  const wanted = sanitizeDuplicateIds(duplicateOf).slice(
-    0,
-    MAX_DUPLICATE_LOOKUPS,
-  );
+async function readSiblingVerdicts(localRun, repo, duplicateOf, selfShortId) {
+  const wanted = sanitizeDuplicateIds(duplicateOf)
+    .filter((id) => id !== selfShortId)
+    .slice(0, MAX_DUPLICATE_LOOKUPS);
   const out = [];
   for (const shortId of wanted) {
     let stdout;
@@ -192,6 +191,13 @@ async function readSiblingVerdicts(localRun, repo, duplicateOf) {
         "list",
         "-R",
         repo,
+        "--label",
+        // THIS REPO IS PUBLIC. Without this filter any user can open an issue
+        // titled `[sentry] <SHORT-ID> (...)` and either shadow the genuine
+        // sibling or, carrying the upstream label, become the judgment source
+        // for someone else's escalation. The label is applied only by the
+        // ingest, so it is the fence between a queue stub and a lookalike.
+        "sentry-triage",
         "--search",
         // The queue title is `[sentry] <SHORT-ID> (...)`, so an in:title search
         // for the id finds the stub at any age. `--state all` because the
@@ -511,13 +517,16 @@ export async function runParseOnly(options, deps = {}) {
   // for why only that one verdict is inheritable.
   let inheritedFrom = null;
   if (verdict === "needs-human" && parsed.duplicateOf?.length) {
+    const selfShortId = parseShortId(issue.title);
     const sibling = selectInheritableSibling(
       parsed.duplicateOf,
       await readSiblingVerdicts(
         localRun,
         options.localRepo,
         parsed.duplicateOf,
+        selfShortId,
       ),
+      selfShortId,
     );
     if (sibling) {
       inheritedFrom = sibling.shortId;
