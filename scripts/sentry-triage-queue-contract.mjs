@@ -422,6 +422,39 @@ export const INHERITABLE_VERDICT_LABEL = VERDICT_TO_LABEL[INHERITABLE_VERDICT];
  * label. First match in `duplicateOf` order wins, so the result does not
  * depend on GitHub's listing order.
  */
+// A security-sensitive escalation is never inheritable, whatever its family
+// decided. `.github/prompts/sentry-triage.md` tells the agent exactly this —
+// "never inherit past a security-sensitive surface", because there the human is
+// deciding DISPOSITION, not diagnosis — and a deterministic path that ignored
+// it would contradict the instruction the agent is following.
+//
+// The signal is the agent's own brief text, which is free-form, so this matches
+// conservatively and FAILS TOWARD THE ESCALATION: a false positive costs one
+// human read (the pre-inheritance behaviour), a false negative closes a live
+// security question. Widen this list before narrowing it.
+const SECURITY_SENSITIVE_MARKERS = [
+  "auth",
+  "credential",
+  "key",
+  "login",
+  "password",
+  "payment",
+  "permission",
+  "secret",
+  "session",
+  "sign",
+  "token",
+  "wallet",
+];
+
+export function mentionsSecuritySensitiveSurface(...texts) {
+  const haystack = texts
+    .flat()
+    .map((v) => String(v ?? "").toLowerCase())
+    .join(" ");
+  return SECURITY_SENSITIVE_MARKERS.some((m) => haystack.includes(m));
+}
+
 export function selectInheritableSibling(duplicateOf, siblings, selfShortId) {
   const bySid = new Map();
   for (const s of siblings ?? []) {

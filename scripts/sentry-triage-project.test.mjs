@@ -41,6 +41,7 @@ import {
 import { BRIEF_COMMENT_MARKER } from "./sentry-triage-brief.mjs";
 import {
   INHERITABLE_VERDICT,
+  mentionsSecuritySensitiveSurface,
   selectInheritableSibling,
 } from "./sentry-triage-queue-contract.mjs";
 
@@ -3321,6 +3322,66 @@ await test("a sibling reopened between search and settle is not inherited", asyn
   assertEqual(views.length, 1, "the sibling must actually be re-read");
   assertEqual(out.verdict, "needs-human");
   assertEqual(out.inheritedFrom, null);
+});
+
+await test("a security-sensitive escalation is never inherited away", async () => {
+  // The prompt tells the agent "never inherit past a security-sensitive
+  // surface" — there the human decides DISPOSITION, not diagnosis. A
+  // deterministic path that ignored that would contradict the instruction the
+  // agent is following, and close a live security question.
+  let searched = false;
+  const runGh = async (args) => {
+    if (args[1] === "list") searched = true;
+    if (args[1] === "view") {
+      return JSON.stringify({
+        number: 704,
+        title: "[sentry] GOV-61 (governance-mento-org, error)",
+        body: "",
+        url: "https://github.com/o/r/issues/704",
+        state: "OPEN",
+        labels: [{ name: "sentry-triage" }],
+        comments: [
+          {
+            url: "https://github.com/o/r/issues/704#issuecomment-9",
+            body: verdictComment({
+              verdict: "needs-human",
+              duplicates: JSON.stringify(["GOV-56"]),
+              humanQuestion: "decide whether to rotate the signing key",
+              howToCheck: ["read the wallet connect flow"],
+              decisionBranches: ["Yes -> rotate", "No -> close"],
+              hypotheses: ["a stale auth token (lean: medium)"],
+              investigated: ["read the payload"],
+              escalationReason: "security-sensitive surface",
+            }),
+            author: { login: "github-actions" },
+          },
+        ],
+      });
+    }
+    return JSON.stringify([]);
+  };
+  const out = await runParseOnly(
+    { localRepo: "o/r", queueIssue: 704, priorVerdictCommentId: null },
+    { runGh },
+  );
+  assertEqual(out.verdict, "needs-human");
+  assertEqual(out.inheritedFrom, null);
+  // Refused BEFORE any lookup: the family is never even consulted.
+  assertEqual(searched, false);
+});
+
+await test("the security refusal reads the whole brief, not one field", () => {
+  assertEqual(mentionsSecuritySensitiveSurface("ambiguity"), false);
+  assertEqual(mentionsSecuritySensitiveSurface("", "", []), false);
+  // Any of the brief fields can carry it.
+  assertEqual(
+    mentionsSecuritySensitiveSurface("", "rotate the API token"),
+    true,
+  );
+  assertEqual(
+    mentionsSecuritySensitiveSurface("", "", ["a wallet signature race"]),
+    true,
+  );
 });
 
 await test("a failed sibling listing keeps the agent's own escalation", async () => {

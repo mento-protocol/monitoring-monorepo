@@ -93,7 +93,10 @@ import {
   commentBacklinksShortId,
 } from "./sentry-triage-projection.mjs";
 import { LABEL_DEFINITIONS, VERDICT_LABELS } from "./sentry-triage-ingest.mjs";
-import { selectInheritableSibling } from "./sentry-triage-queue-contract.mjs";
+import {
+  mentionsSecuritySensitiveSurface,
+  selectInheritableSibling,
+} from "./sentry-triage-queue-contract.mjs";
 // Clear any stale needs-human brief before this job CLOSES a projected stub: a
 // stub re-triaged needs-human -> code-fix/config-fix whose brief-clear failed in
 // the matrix would otherwise be projected and closed here still showing the
@@ -584,7 +587,21 @@ export async function runParseOnly(options, deps = {}) {
   // its own is never overridden by a sibling's. See selectInheritableSibling
   // for why only that one verdict is inheritable.
   let inheritedFrom = null;
-  if (verdict === "needs-human" && parsed.duplicateOf?.length) {
+  const securitySensitive = mentionsSecuritySensitiveSurface(
+    parsed.escalationReason,
+    parsed.humanQuestion,
+    parsed.hypotheses ?? [],
+  );
+  if (securitySensitive) {
+    process.stderr.write(
+      `::notice::Issue #${options.queueIssue} escalation reads as security-sensitive; not inheriting a family verdict.\n`,
+    );
+  }
+  if (
+    verdict === "needs-human" &&
+    !securitySensitive &&
+    parsed.duplicateOf?.length
+  ) {
     const selfShortId = parseShortId(issue.title);
     const sibling = selectInheritableSibling(
       parsed.duplicateOf,
