@@ -3485,6 +3485,9 @@ assert_contains "- node --test scripts/upstash-mcp-config.test.mjs (Upstash MCP 
 run_gate ".codex/upstash-mcp.example.toml"
 assert_contains "- node --test scripts/upstash-mcp-config.test.mjs (Upstash MCP transport contract changed)"
 
+run_gate ".gitattributes"
+assert_contains "- node --test scripts/upstash-mcp-config.test.mjs (Upstash MCP transport contract changed)"
+
 run_gate ".agents/skills/forensic-report/references/upload.md"
 assert_contains "- node --test scripts/upstash-mcp-config.test.mjs (Upstash MCP transport contract changed)"
 

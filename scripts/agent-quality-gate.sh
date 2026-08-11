@@ -1603,7 +1603,7 @@ while IFS= read -r path; do
       ;;
   esac
   case "$path" in
-    .codex/config.toml|.codex/upstash-mcp.example.toml|.agents/skills/forensic-report/*|.claude/skills/forensic-report/*|docs/adr/0030-iac-before-cli-secrets.md|docs/adr/0060-upstash-management-key-bootstrap.md|docs/deployment.md|docs/notes/codex-agent-skills.md|docs/notes/upstash-mcp-operator.md|package.json|pnpm-lock.yaml|scripts/build-upstash-mcp-runtime.mjs|scripts/render-upstash-mcp-config.mjs|scripts/upstash-mcp-launcher.mjs|terraform/terraform.tfvars.example|terraform/variables.tf)
+    .gitattributes|.codex/config.toml|.codex/upstash-mcp.example.toml|.agents/skills/forensic-report/*|.claude/skills/forensic-report/*|docs/adr/0030-iac-before-cli-secrets.md|docs/adr/0060-upstash-management-key-bootstrap.md|docs/deployment.md|docs/notes/codex-agent-skills.md|docs/notes/upstash-mcp-operator.md|package.json|pnpm-lock.yaml|scripts/build-upstash-mcp-runtime.mjs|scripts/render-upstash-mcp-config.mjs|scripts/upstash-mcp-launcher.mjs|terraform/terraform.tfvars.example|terraform/variables.tf)
       add_command "node --test scripts/upstash-mcp-config.test.mjs" "Upstash MCP transport contract changed"
       ;;
   esac
