@@ -239,6 +239,12 @@ the App Engine source bucket because the CLI can replace or clean up cached
 hash-named objects. AppSpot can view those objects. Default Compute has no direct
 App Engine source-bucket grant in this stack.
 
+App Engine also writes its service-owned
+`staging.mento-monitoring.appspot.com` bucket during a deploy. The default
+AppSpot service account has Storage Admin on that one bucket only, as required
+for that internal staging path. It has no project-wide Storage Admin grant and
+does not receive Storage Admin on either Terraform-managed source bucket.
+
 The routine deployer and `gcp_dev_members` have Service Account User only on the
 dedicated Metrics Bridge runtime identity and dedicated builder. They have no
 default-Compute or project-wide Service Account User grant.

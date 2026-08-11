@@ -3,7 +3,7 @@ title: Routine GCP deploys use explicit source-staging buckets
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-10
+last_verified: 2026-08-11
 scope: terraform/infra
 date: 2026-07
 doc_type: adr
@@ -33,6 +33,15 @@ uploads a uniquely named archive. App Engine lists a content-addressed cache
 and can re-upload, replace, or clean up a hash-named object near lifecycle
 expiry. App Engine also requires a `US`-compatible bucket for the immutable
 `us-central` application, while Metrics Bridge builds run in `var.gcp_region`.
+Even with `gcloud app deploy --bucket`, App Engine writes its service-owned
+`staging.<project>.appspot.com` bucket while deploying a version. Google
+documents `roles/storage.admin` for the default AppSpot service account when
+that internal staging path is denied. Aegis deploys failed on this path from
+July 30 through August 11 even though AppSpot still inherited project Editor
+and the bucket's legacy owner grant. Those IAM roles do not include object
+permissions such as `storage.objects.get` and `storage.objects.update`; the
+direct bucket-scoped Storage Admin grant supplies Google's documented
+permission set.
 
 The Alloy Cloud Build path is pinned to the dedicated
 `grafana_agent_builder` service account. ADR 0058's applied foundation provides
@@ -74,6 +83,12 @@ on the App Engine bucket. AppSpot receives object view. No direct staging grant
 is project-wide, and default Compute has no direct App Engine source-bucket
 grant in this stack.
 
+The default AppSpot service account also receives `roles/storage.admin` on only
+`staging.<project>.appspot.com`, the App Engine service-owned staging bucket.
+Cloud Storage limits a bucket-scoped grant to that bucket and its objects. This
+supported exception covers App Engine's internal staging path; it does not
+apply to the Terraform-managed App Engine source bucket or any project scope.
+
 The routine deployer and `gcp_dev_members` receive Service Account User on the
 dedicated Metrics Bridge runtime identity. ADR 0058 additionally grants them
 Service Account User on the dedicated builder only; neither receives
@@ -102,6 +117,9 @@ approved apply.
   different locations, retention windows, and write permissions.
 - **Give App Engine uploaders object create only** — rejected because App
   Engine's source cache can replace or remove an existing hash-named object.
+- **Use legacy bucket reader plus object admin for App Engine's default staging
+  bucket** — rejected because Google's documented remedy for the service-owned
+  staging path is Storage Admin, which is supported at the one-bucket scope.
 - **Pass `gcloud app deploy --no-cache`** — rejected because it controls the
   build cache, not the source-bucket listing and upload path, and would discard
   useful build reuse.
@@ -121,6 +139,8 @@ approved apply.
   sensitive buckets cannot inherit.
 - App Engine uploaders retain stronger object authority, but only on a
   short-lived source bucket.
+- The default AppSpot service account has Storage Admin only on its
+  service-owned staging bucket. It has no project-wide Storage Admin grant.
 - The dedicated Alloy and Metrics Bridge builders have exact staging grants.
   The cleanup leaves default Compute outside the direct source-bucket Object
   Viewer set; its separate project-level Editor role remains outside this ADR.
@@ -150,5 +170,7 @@ approved apply.
   [`terraform/deploy-staging.tf`](../../terraform/deploy-staging.tf)
 - [Cloud Build source staging reference](https://cloud.google.com/sdk/gcloud/reference/builds/submit)
 - [App Engine deployment bucket reference](https://cloud.google.com/sdk/gcloud/reference/app/deploy)
+- [App Engine deployment troubleshooting](https://cloud.google.com/appengine/docs/standard/troubleshooter/deployment)
 - [Cloud Storage IAM roles](https://cloud.google.com/storage/docs/access-control/iam-roles)
+- [Aegis staging-access recovery issue](https://github.com/mento-protocol/monitoring-monorepo/issues/1789)
 - [Issue #1444](https://github.com/mento-protocol/monitoring-monorepo/issues/1444)

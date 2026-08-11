@@ -3,7 +3,7 @@ title: Terraform and Cloud Run Checklist
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-10
+last_verified: 2026-08-11
 doc_type: checklist
 scope: terraform/infra
 review_interval_days: 90
@@ -103,6 +103,9 @@ trimmed build context:
 - [ ] Bucket-scope upload IAM: Cloud Build callers get bucket read/object create,
       build identities get object view, and App Engine uploaders get bucket
       read/Object Admin.
+- [ ] App Engine's default AppSpot service account gets Storage Admin only on
+      its service-owned `staging.<project>.appspot.com` bucket. Do not widen it
+      to project scope or the Terraform-managed source buckets.
 - [ ] Use `CLOUD_LOGGING_ONLY` unless a retained log bucket exists.
 
 ## 5. IAM ordering + dependencies

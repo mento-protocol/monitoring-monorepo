@@ -480,6 +480,14 @@ resource "google_service_account_iam_member" "dev_metrics_bridge_builder_service
   depends_on = [google_service_account.metrics_bridge_builder]
 }
 
+resource "google_storage_bucket_iam_member" "app_engine_default_staging_admin" {
+  bucket = "staging.\${google_project.monitoring.project_id}.appspot.com"
+  role   = "roles/storage.admin"
+  member = "serviceAccount:\${local.aegis_app_engine_default_service_account}"
+
+  depends_on = [google_app_engine_application.aegis]
+}
+
 moved {
   from = google_service_account_iam_member.ci_default_compute_service_account_user
   to   = google_service_account_iam_member.ci_metrics_bridge_runtime_service_account_user

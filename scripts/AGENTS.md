@@ -3,7 +3,7 @@ title: Scripts Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-10
+last_verified: 2026-08-11
 doc_type: agent-instructions
 scope: scripts
 review_interval_days: 90
@@ -52,8 +52,10 @@ garden_lane: agent-entry-points
   Metrics Bridge submit paths to the checked-in `cloudbuild.yaml`, rejects CLI
   service-account overrides, and verifies that config's exact builder identity
   and logging mode. It keeps direct Cloud Build source-object reads limited to
-  the Alloy and Metrics Bridge builders, excluding default Compute. It also
-  requires the direct Metrics Bridge bootstrap to
+  the Alloy and Metrics Bridge builders, excluding default Compute. It pins the
+  default AppSpot service account's Storage Admin grant to only its
+  service-owned `staging.<project>.appspot.com` bucket and requires the direct
+  Metrics Bridge bootstrap to
   reconcile the builder's project roles, repository writer, developer act-as
   bindings, build-log reader, exact dedicated-builder source readers, and
   Peg-policy bucket IAM dependency before submitting and rolling out a build.

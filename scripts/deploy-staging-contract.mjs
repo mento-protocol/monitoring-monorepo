@@ -214,6 +214,44 @@ function validateTerraform(files, errors) {
     errors,
   );
   validateCloudBuildSourceExecutors(blocks, errors);
+  validateAppEngineDefaultStagingAdmin(blocks, errors);
+}
+
+function validateAppEngineDefaultStagingAdmin(blocks, errors) {
+  const label = `${TERRAFORM_FILE}: App Engine default staging admin`;
+  const grant = requireBlock(
+    blocks,
+    TERRAFORM_FILE,
+    "google_storage_bucket_iam_member",
+    "app_engine_default_staging_admin",
+    errors,
+    label,
+  );
+  if (!grant) return;
+
+  expectNoResourceMultiplicity(grant, errors, label);
+  expectString(
+    grant,
+    "bucket",
+    "staging.${google_project.monitoring.project_id}.appspot.com",
+    errors,
+    label,
+  );
+  expectString(grant, "role", "roles/storage.admin", errors, label);
+  expectExpression(
+    grant,
+    "member",
+    '"serviceAccount:${local.aegis_app_engine_default_service_account}"',
+    errors,
+    label,
+  );
+  expectExpression(
+    grant,
+    "depends_on",
+    "[google_app_engine_application.aegis]",
+    errors,
+    label,
+  );
 }
 
 function validateCloudBuildSourceExecutors(blocks, errors) {
