@@ -3734,6 +3734,13 @@ assert_contains "- pnpm sentry:project:test (Sentry re-queue chokepoint changed)
 run_gate "scripts/sentry-triage-project.mjs"
 assert_contains "- pnpm sentry:project:test (Sentry triage projection helper changed)"
 
+# The inheritance lookups live in their own module (#1614 part 2) but their
+# tests live in the project suite, so the routing must carry them: without this
+# pin a change to the sibling search or its revalidation passes the gate on
+# `lint:scripts` alone, never running the tests written for that behaviour.
+run_gate "scripts/sentry-triage-inherit.mjs"
+assert_contains "- pnpm sentry:project:test (Sentry triage projection helper changed)"
+
 run_gate "scripts/sentry-triage-project-core.mjs"
 assert_contains "- pnpm sentry:project:test (Sentry triage projection helper changed)"
 assert_contains "- node scripts/sentry-triage-agent-comment.test.mjs (Sentry triage projection helper changed)"

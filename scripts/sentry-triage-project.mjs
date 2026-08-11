@@ -93,7 +93,7 @@ import {
 } from "./sentry-triage-projection.mjs";
 import { LABEL_DEFINITIONS, VERDICT_LABELS } from "./sentry-triage-ingest.mjs";
 import {
-  mentionsSecuritySensitiveSurface,
+  isInheritanceEligibleEscalation,
   selectInheritableSibling,
 } from "./sentry-triage-queue-contract.mjs";
 import {
@@ -409,9 +409,14 @@ async function markStubProjected(localRun, localRepo, issue, projectedUrl) {
  * this verdict is actionable AND its `affected_repo` is an allowlisted
  * EXTERNAL owning repo. The matrix close step uses `projectable` to decide
  * whether to close the stub itself (upstream/local/unrecognized) or defer it
- * to the serialized `project` job (external actionable). Read-only — one
- * `gh issue view` with the ambient token; the projection PAT is never needed
- * here. Throws on missing/stale/invalid verdicts so the label step fails
+ * to the serialized `project` job (external actionable). Read-only with the
+ * ambient token; the projection PAT is never needed here.
+ *
+ * I/O budget, because this runs inside the verdict-label step's compensation
+ * window and its latency is that step's latency: one `gh issue view` always,
+ * plus — ONLY for an inheritance-eligible `needs-human` that declares
+ * duplicates (#1614) — up to MAX_DUPLICATE_LOOKUPS sibling searches and one
+ * confirmation view. Ordinary verdicts still cost exactly one call. Throws on missing/stale/invalid verdicts so the label step fails
  * loudly and leaves `sentry:needs-triage` in place for retry.
  *
  * It also emits `shed`: the comma-joined verdict labels the label step must
@@ -444,21 +449,21 @@ export async function runParseOnly(options, deps = {}) {
   // its own is never overridden by a sibling's. See selectInheritableSibling
   // for why only that one verdict is inheritable.
   let inheritedFrom = null;
-  const securitySensitive = mentionsSecuritySensitiveSurface(
+  // Positive eligibility, not a blocklist: only an AMBIGUITY escalation can be
+  // answered by a sibling's judgement. Security-sensitive and
+  // conflicting-evidence reasons are decisions the prompt reserves for a human,
+  // and an unrecognised reason is ineligible rather than assumed safe.
+  const inheritable = isInheritanceEligibleEscalation(
     parsed.escalationReason,
     parsed.humanQuestion,
     parsed.hypotheses ?? [],
   );
-  if (securitySensitive) {
+  if (verdict === "needs-human" && !inheritable) {
     process.stderr.write(
-      `::notice::Issue #${options.queueIssue} escalation reads as security-sensitive; not inheriting a family verdict.\n`,
+      `::notice::Issue #${options.queueIssue} escalation is not inheritance-eligible (its reason must read as ambiguity, and must not read as security-sensitive); keeping the escalation.\n`,
     );
   }
-  if (
-    verdict === "needs-human" &&
-    !securitySensitive &&
-    parsed.duplicateOf?.length
-  ) {
+  if (verdict === "needs-human" && inheritable && parsed.duplicateOf?.length) {
     const selfShortId = parseShortId(issue.title);
     const sibling = selectInheritableSibling(
       parsed.duplicateOf,

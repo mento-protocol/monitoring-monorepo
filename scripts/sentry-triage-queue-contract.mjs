@@ -462,6 +462,28 @@ export function mentionsSecuritySensitiveSurface(...texts) {
   return SECURITY_SENSITIVE_MARKERS.some((m) => haystack.includes(m));
 }
 
+// The prompt gives `escalation_reason` three values -- ambiguity,
+// security-sensitive surface, conflicting evidence -- and a sibling's verdict
+// may override NONE of the last two. A blocklist cannot express that: it must
+// enumerate every phrasing an agent might use for a reason it must not
+// override, and it was wrong twice (no "security" term, then no
+// conflicting-evidence term).
+//
+// Inverted to a positive check: inheritance requires a match on AMBIGUITY, the
+// one reason a family's judgement actually answers -- the agent could not tell
+// what this is, and a sibling already established what it is. Anything else,
+// including an unrecognised or empty reason, refuses. Unknown is not eligible.
+export function isInheritanceEligibleEscalation(
+  escalationReason,
+  ...otherTexts
+) {
+  const reason = String(escalationReason ?? "").toLowerCase();
+  if (!/ambig/.test(reason)) return false;
+  // Belt and braces: an "ambiguity" reason whose brief still reads
+  // security-sensitive is refused. The two are not exclusive in free text.
+  return !mentionsSecuritySensitiveSurface(reason, ...otherTexts);
+}
+
 export function selectInheritableSibling(duplicateOf, siblings, selfShortId) {
   const bySid = new Map();
   for (const s of siblings ?? []) {

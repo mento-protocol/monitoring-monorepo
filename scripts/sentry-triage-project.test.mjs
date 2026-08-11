@@ -41,6 +41,7 @@ import {
 import { BRIEF_COMMENT_MARKER } from "./sentry-triage-brief.mjs";
 import {
   INHERITABLE_VERDICT,
+  isInheritanceEligibleEscalation,
   mentionsSecuritySensitiveSurface,
   selectInheritableSibling,
 } from "./sentry-triage-queue-contract.mjs";
@@ -3385,6 +3386,27 @@ await test("the security refusal recognises the contract's own literal reason", 
       "decide whether the SSO failure needs incident response",
     ),
     true,
+  );
+});
+
+await test("inheritance eligibility is positive, so unknown reasons refuse", () => {
+  // The prompt's three reasons: only ambiguity is answerable by a sibling.
+  assertEqual(isInheritanceEligibleEscalation("ambiguity"), true);
+  assertEqual(
+    isInheritanceEligibleEscalation("security-sensitive surface"),
+    false,
+  );
+  // The second exception the prompt states — follow your own contradicting
+  // evidence — which a blocklist of security words did not catch.
+  assertEqual(isInheritanceEligibleEscalation("conflicting evidence"), false);
+  // Unrecognised, empty and missing all refuse rather than being assumed safe.
+  for (const reason of ["", null, undefined, "because I said so"]) {
+    assertEqual(isInheritanceEligibleEscalation(reason), false);
+  }
+  // Ambiguity whose brief still reads security-sensitive is still refused.
+  assertEqual(
+    isInheritanceEligibleEscalation("ambiguity", "rotate the signing key"),
+    false,
   );
 });
 
