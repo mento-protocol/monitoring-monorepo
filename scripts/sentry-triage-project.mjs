@@ -206,7 +206,12 @@ async function readSiblingVerdicts(localRun, repo, duplicateOf, selfShortId) {
         "--state",
         "all",
         "--limit",
-        "20",
+        // GitHub title search is token-based, so `GOV-5` also matches `GOV-50`
+        // and `GOV-500` — real shapes, since Sentry short-ids grow in length.
+        // 100 gives 5x headroom over the observed queue and stays ONE bounded
+        // call; paginating until found would put an unbounded loop inside the
+        // label step, whose failure mode is worse than the miss it prevents.
+        "100",
         "--json",
         "title,state,labels",
       ]);
@@ -230,12 +235,23 @@ async function readSiblingVerdicts(localRun, repo, duplicateOf, selfShortId) {
       );
       return [];
     }
+    let found = false;
     for (const row of Array.isArray(rows) ? rows : []) {
-      // Search is substring-ish, so re-check the parsed SHORT-ID rather than
+      // Token search is not exact, so re-check the parsed SHORT-ID rather than
       // trusting the match: `GOV-5` must never resolve to `GOV-57`.
       if (parseShortId(row?.title) !== shortId) continue;
       out.push({ shortId, state: row?.state, labels: row?.labels ?? [] });
+      found = true;
       break;
+    }
+    // Say so when a declared sibling is not resolved. The consequence is only
+    // that this stub escalates — the pre-inheritance behaviour — but a silent
+    // miss and a genuinely absent sibling look identical in the log, and this
+    // is the line that tells them apart if families stop collapsing.
+    if (!found) {
+      process.stderr.write(
+        `::notice::Family sibling ${shortId} not found among queue stubs (returned ${Array.isArray(rows) ? rows.length : 0} rows); not inheriting from it.\n`,
+      );
     }
   }
   return out;
