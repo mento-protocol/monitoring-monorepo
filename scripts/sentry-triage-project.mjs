@@ -91,6 +91,13 @@ import {
   commentBacklinksShortId,
 } from "./sentry-triage-projection.mjs";
 import { LABEL_DEFINITIONS, VERDICT_LABELS } from "./sentry-triage-ingest.mjs";
+// Clear any stale needs-human brief before this job CLOSES a projected stub: a
+// stub re-triaged needs-human -> code-fix/config-fix whose brief-clear failed in
+// the matrix would otherwise be projected and closed here still showing the
+// obsolete "Decision needed" (#1769 round 11 P2). Idempotent — a normal
+// projectable stub never carries a brief — and a failure marks the row failed
+// (the workflow restores needs-triage instead of closing).
+import { clearBriefComments } from "./sentry-triage-brief.mjs";
 
 // ---------------------------------------------------------------------------
 // GitHub I/O (via `gh`, mirroring the ingest/digest scripts). `runGh` is
@@ -802,6 +809,21 @@ export async function runProjectionBatch(options, deps = {}) {
         continue;
       }
       verdict = ACTIONABLE_LABEL_TO_VERDICT[label];
+      // Clear any stale needs-human brief BEFORE this stub is projected and
+      // closed. A projectable stub should never carry one (needs-human does not
+      // project), so this is normally a no-op — but if the stub was re-triaged
+      // from needs-human and the matrix brief-clear failed, closing it here would
+      // preserve the obsolete "Decision needed" on the closed stub (#1769 round
+      // 11 P2). If the clear itself fails it throws, and the per-row catch marks
+      // the row failed so the workflow restores sentry:needs-triage instead of
+      // closing on a stale brief.
+      await clearBriefComments({
+        runGh: localRun,
+        repo: options.localRepo,
+        issueNumber: number,
+        comments: stub.comments,
+        log: (message) => process.stderr.write(`${message}\n`),
+      });
       const result = await runProjection(
         {
           ...options,

@@ -10,12 +10,6 @@
  * ("Verdict projection").
  */
 
-// Used ONLY to parse a single inline flow sequence for the brief lists
-// (`parseInlineFlowSequence`), under the FAILSAFE schema so untrusted agent text
-// can only yield strings. The verdict block as a whole is still parsed
-// line-by-line by design — never hand this loader the full untrusted document.
-import { FAILSAFE_SCHEMA, load as loadYaml } from "js-yaml";
-
 export const DEFAULT_REPO = "mento-protocol/monitoring-monorepo";
 export const LOCAL_REPO = DEFAULT_REPO;
 
@@ -323,28 +317,82 @@ export const MAX_BRIEF_LIST_ITEMS = 5;
  * away — each emitter neutralizes+escapes them at render. Returns `{items,
  * next}` mirroring collectDashList so the caller advances the line cursor. */
 /**
- * Parse an inline YAML FLOW SEQUENCE (`["a", "b, c", 'd']`) with the real YAML
- * library, under the FAILSAFE schema so an untrusted agent string can only ever
- * yield plain strings/seqs/maps — no type coercion, no dates, no custom tags,
- * no code. This replaces three rounds of hand-rolled comma/quote/bracket
- * scanning (#1769 rounds 8-10): quoted commas, escaped quotes, and brackets
- * INSIDE a quoted item are all the parser's job now, so a value like
- * `["inspect array[index] handling", "read logs"]` stays two items. It is a
- * TARGETED use of the loader on ONE bounded flow scalar — the whole verdict
- * block is still parsed line-by-line by design (untrusted; see the module note).
- * Returns the trimmed string items, or null when `text` is not a single valid
- * flow sequence (the caller then keeps the remainder as one item rather than
- * guessing at a delimiter).
+ * Parse a single inline YAML FLOW SEQUENCE (`["a", "b, c", 'd']`) with ONE
+ * dependency-free, single-pass state machine. The Sentry workflows run these
+ * scripts after `setup-node` WITHOUT an install, and the agent wrapper is staged
+ * outside any `node_modules`, so the runtime closure MUST stay third-party-free
+ * (#1769 round 11, P1 — a js-yaml import broke triage + archive in prod). One
+ * correct implementation replaces three rounds of incremental hand-rolled edges
+ * (#1769 rounds 8-10): it tracks double- and single-quoted strings, `\` escapes
+ * (double-quote), doubled-quote escapes (`''`/`""`), bracket DEPTH (so a `]`
+ * inside a quoted item or a nested bracket never ends the sequence), and
+ * surrounding whitespace. STRICT about the tail: after the closing `]` only
+ * whitespace or a `#` comment may follow, so a prose scalar that merely starts
+ * with `[` is rejected rather than truncated. Returns the trimmed string items,
+ * or null when `text` is not a single valid flow sequence (the caller keeps the
+ * remainder as one item). Never throws.
  */
 function parseInlineFlowSequence(text) {
-  let doc;
-  try {
-    doc = loadYaml(text, { schema: FAILSAFE_SCHEMA });
-  } catch {
-    return null;
+  const s = String(text ?? "").trim();
+  if (!s.startsWith("[")) return null;
+  const items = [];
+  let buf = "";
+  let quote = null; // '"' | "'" | null
+  let depth = 0;
+  let closed = false;
+  for (let i = 0; i < s.length; i += 1) {
+    const ch = s[i];
+    if (closed) {
+      // After the matching `]`, tolerate only trailing whitespace or a comment.
+      if (ch === "#") break;
+      if (/\s/.test(ch)) continue;
+      return null; // trailing non-comment content -> not a clean flow sequence
+    }
+    if (quote === '"') {
+      if (ch === "\\" && i + 1 < s.length) {
+        buf += s[i + 1]; // backslash escape: next char is literal (incl. `"`)
+        i += 1;
+      } else if (ch === '"') {
+        quote = null;
+      } else {
+        buf += ch;
+      }
+      continue;
+    }
+    if (quote === "'") {
+      if (ch === "'" && s[i + 1] === "'") {
+        buf += "'"; // doubled single-quote -> one literal quote
+        i += 1;
+      } else if (ch === "'") {
+        quote = null;
+      } else {
+        buf += ch;
+      }
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+    } else if (ch === "[") {
+      depth += 1;
+      if (depth > 1) buf += ch; // a nested opening bracket is item content
+    } else if (ch === "]") {
+      depth -= 1;
+      if (depth === 0) {
+        items.push(buf.trim());
+        buf = "";
+        closed = true;
+      } else {
+        buf += ch; // a nested closing bracket is item content
+      }
+    } else if (ch === "," && depth === 1) {
+      items.push(buf.trim());
+      buf = "";
+    } else {
+      buf += ch;
+    }
   }
-  if (!Array.isArray(doc)) return null;
-  return doc.map((item) => String(item ?? "").trim()).filter(Boolean);
+  if (!closed) return null; // unterminated sequence -> malformed
+  return items.map((item) => item.trim()).filter(Boolean);
 }
 
 function parseFreeTextList(lines, i, rest) {
@@ -792,13 +840,26 @@ export function resolveVerdict(issue, queueIssueNumber, options = {}) {
   // absent `human_question` OR a blatant non-decision placeholder — and the
   // next scheduled run re-triages it, the same fail-loud contract as a
   // missing/invalid verdict above.
-  if (
-    parsed.verdict === "needs-human" &&
-    !isDecisionReadyQuestion(parsed.humanQuestion)
-  ) {
-    throw new Error(
-      `needs-human verdict on issue #${queueIssueNumber} has no decision-ready 'human_question' (missing or a non-decision placeholder like "please look"); a needs-human escalation must name the exact question/decision a human must answer. Leaving sentry:needs-triage in place for re-triage.`,
-    );
+  if (parsed.verdict === "needs-human") {
+    if (!isDecisionReadyQuestion(parsed.humanQuestion)) {
+      throw new Error(
+        `needs-human verdict on issue #${queueIssueNumber} has no decision-ready 'human_question' (missing or a non-decision placeholder like "please look"); a needs-human escalation must name the exact question/decision a human must answer. Leaving sentry:needs-triage in place for re-triage.`,
+      );
+    }
+    // A decision-ready escalation also needs the INSTRUCTION half: at least one
+    // how_to_check step AND at least one decision_branch. Without them the brief
+    // renders a question with no checks and no dispositions — a permanently open
+    // escalation that tells a human nothing actionable (#1769 round 11). Reject
+    // so the workflow's --parse-only label step keeps sentry:needs-triage and the
+    // next round re-triages, rather than settling an incomplete brief.
+    if (
+      sanitizeBriefList(parsed.howToCheck).length === 0 ||
+      sanitizeBriefList(parsed.decisionBranches).length === 0
+    ) {
+      throw new Error(
+        `needs-human verdict on issue #${queueIssueNumber} is an incomplete brief: it must carry at least one 'how_to_check' step AND at least one 'decision_branch' (a question with no checks or dispositions is not decision-ready). Leaving sentry:needs-triage in place for re-triage.`,
+      );
+    }
   }
   return {
     parsed,

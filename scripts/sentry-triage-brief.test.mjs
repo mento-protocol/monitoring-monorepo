@@ -47,6 +47,7 @@ import {
   parseVerdictComment,
   parseVerdictYaml,
   REGRESSION_PREFIX,
+  resolveVerdict,
   selectNeedsHumanBriefFields,
   VERDICT_MARKER,
 } from "./sentry-triage-project-core.mjs";
@@ -138,6 +139,22 @@ const VERDICT_YAML = [
 
 function verdictComment(yaml = VERDICT_YAML) {
   return [VERDICT_MARKER, "", "```yaml", yaml, "```", ""].join("\n");
+}
+
+/** A COMPLETE needs-human verdict yaml: question + at least one how_to_check
+ * step and one decision_branch, so `resolveVerdict`'s completeness gate accepts
+ * it (#1769 round 11). Use for runBrief tests that only vary the question. */
+function needsHumanYaml(question) {
+  return [
+    "verdict: needs-human",
+    "confidence: high",
+    `human_question: ${question}`,
+    "how_to_check:",
+    "  - inspect the handler",
+    "decision_branches:",
+    "  - Yes -> config-fix: fix it",
+    "  - No -> upstream-transient: close",
+  ].join("\n");
 }
 
 function verdictCommentObject(
@@ -361,6 +378,55 @@ await test("the new fields are empty for a verdict that omits them", () => {
   );
   assertEqual(parsed.howToCheck.length, 0);
   assertEqual(parsed.decisionBranches.length, 0);
+});
+
+await test("resolveVerdict rejects an incomplete needs-human brief (#1769 round 11)", () => {
+  // A needs-human escalation with a question but no checks or dispositions is
+  // not decision-ready: resolveVerdict must reject it so --parse-only keeps
+  // sentry:needs-triage rather than settling a permanently-open, empty brief.
+  const rejects = (yaml, why) => {
+    let message = "";
+    try {
+      resolveVerdict(stubIssue(yaml), 1731);
+    } catch (err) {
+      message = err instanceof Error ? err.message : String(err);
+    }
+    assert(/incomplete brief/.test(message), why);
+  };
+  rejects(
+    [
+      "verdict: needs-human",
+      "confidence: low",
+      "human_question: Decide whether to rotate the key",
+      "decision_branches:",
+      "  - Yes -> rotate",
+      "  - No -> leave it",
+    ].join("\n"),
+    "a needs-human verdict with no how_to_check must be rejected",
+  );
+  rejects(
+    [
+      "verdict: needs-human",
+      "confidence: low",
+      "human_question: Decide whether to rotate the key",
+      "how_to_check:",
+      "  - inspect the handler",
+    ].join("\n"),
+    "a needs-human verdict with no decision_branches must be rejected",
+  );
+  rejects(
+    [
+      "verdict: needs-human",
+      "confidence: low",
+      "human_question: Decide whether to rotate the key",
+      "how_to_check: []",
+      "decision_branches: []",
+    ].join("\n"),
+    "empty how_to_check / decision_branches lists must be rejected",
+  );
+  // A COMPLETE needs-human verdict still resolves.
+  const ok = resolveVerdict(stubIssue(needsHumanYaml("Decide X")), 1731);
+  assertEqual(ok.verdict, "needs-human");
 });
 
 await test("a comment on the key line does not swallow the dash items (#1769 round 5)", () => {
@@ -725,11 +791,7 @@ await test("runBrief creates the brief comment through --body-file -, never argv
 });
 
 await test("a second needs-human round updates the comment in place via PATCH", async () => {
-  const yaml = [
-    "verdict: needs-human",
-    "confidence: high",
-    "human_question: A second round asks something else",
-  ].join("\n");
+  const yaml = needsHumanYaml("A second round asks something else");
   const gh = makeRunGh({
     ...stubIssue(yaml),
     comments: [
@@ -895,11 +957,7 @@ await test("the comment survives one full verdict transition cycle", async () =>
   // Re-triage to a fresh needs-human: updated in place, still exactly one.
   gh.state.comments.push(
     verdictCommentObject(
-      [
-        "verdict: needs-human",
-        "confidence: high",
-        "human_question: A second round asks something else",
-      ].join("\n"),
+      needsHumanYaml("A second round asks something else"),
       "2026-08-11T10:00:00Z",
     ),
   );
@@ -1333,6 +1391,61 @@ await test("the brief leg stays under the 600-line soft cap (#1769 round 9)", ()
     const lines = readRepoFile(path).split("\n").length;
     assert(lines <= 600, `${path} is ${lines} lines, over the 600 soft cap`);
   }
+});
+
+await test("every workflow-runtime module imports only relative files and node: builtins (#1769 round 11 P1)", () => {
+  // The Sentry workflows run these scripts after setup-node WITHOUT an install,
+  // and the agent wrapper is staged outside any node_modules — so a bare /
+  // third-party import (like the js-yaml one that broke triage + archive in
+  // prod) throws ERR_MODULE_NOT_FOUND at load time. The gate has node_modules
+  // and did not catch it; this STATIC check does, and runs on every PR via the
+  // unconditional brief suite. Every module reachable from a live workflow entry
+  // point must import only `./…` files or `node:` builtins.
+  const scriptsDir = join(repoRoot, "scripts");
+  // `import`/`export … from "./x"` — the edges we follow to build the closure.
+  const relFrom =
+    /(?:^|\n)\s*(?:import|export)[\s\S]*?from\s+["'](\.\/[^"']+)["']/g;
+  const closureOf = (entry) => {
+    const seen = new Set();
+    const queue = [entry];
+    while (queue.length) {
+      const file = queue.pop();
+      if (seen.has(file)) continue;
+      seen.add(file);
+      const src = readFileSync(join(scriptsDir, file), "utf8");
+      for (const m of src.matchAll(relFrom)) {
+        queue.push(m[1].replace(/^\.\//, ""));
+      }
+    }
+    return seen;
+  };
+  const closure = new Set();
+  for (const entry of [
+    "sentry-triage-project.mjs", // verdict + project jobs
+    "sentry-triage-archive.mjs", // archive job
+    "sentry-triage-agent-comment.mjs", // staged agent write wrapper
+  ]) {
+    for (const file of closureOf(entry)) closure.add(file);
+  }
+
+  // Any import specifier the module pulls in, `from`-style or side-effect.
+  const anyFrom =
+    /(?:^|\n)\s*(?:import|export)[\s\S]*?from\s+["']([^"']+)["']/g;
+  const sideEffect = /(?:^|\n)\s*import\s+["']([^"']+)["']/g;
+  const runtimeSafe = (spec) =>
+    spec.startsWith(".") || spec.startsWith("node:");
+  const offenders = [];
+  for (const file of closure) {
+    const src = readFileSync(join(scriptsDir, file), "utf8");
+    for (const m of src.matchAll(anyFrom)) {
+      if (!runtimeSafe(m[1])) offenders.push(`${file} -> ${m[1]}`);
+    }
+    for (const m of src.matchAll(sideEffect)) {
+      if (!runtimeSafe(m[1]))
+        offenders.push(`${file} -> ${m[1]} (side-effect)`);
+    }
+  }
+  assertEqual(offenders.join(", "), "");
 });
 
 await test("the moved text helpers stay importable from the verdict contract", () => {
