@@ -3,7 +3,7 @@ title: Terraform Stacks
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-10
+last_verified: 2026-08-11
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -86,12 +86,17 @@ owns the exact-plan boundary.
 
 `peg-policy-publication` permits only backend-free local validation with
 `pnpm tf validate peg-policy-publication`. Local plan and apply are disabled,
-including `--force-local-apply`. Controller recovery and first publication are
-complete: `mento-monitoring-peg-policy/peg-policy/current.json` is generation
-`1785276001213660` and the runtime attachment pins it. For a future publication,
-dispatch `Peg Policy Publication` from `main`, inspect its read-only plan, then
-choose `apply` and approve the `production-infra` Environment. Its output feeds
-a separately reviewed runtime rollover.
+including `--force-local-apply`. Controller recovery and the first protected
+publication are complete: it created
+`mento-monitoring-peg-policy/peg-policy/current.json` generation
+`1785276001213660`, which the first runtime attachment used. The later protected
+publication produced generation `1786443055965590`. This reviewed platform
+rollout selects that published generation for the runtime; publication alone
+does not attach it to Cloud Run. An approved platform apply and runtime proof
+remain required. For a future publication, dispatch `Peg Policy Publication`
+from `main`, inspect its read-only plan, then choose `apply` and approve the
+`production-infra` Environment. Its output feeds a separately reviewed runtime
+rollover.
 
 ## CI Model
 
@@ -176,12 +181,13 @@ Routing and IAM audit complete. Removal: `0 added, 1 changed, 1 destroyed`;
 plan clean; IAM has no `metrics-bridge-deployer` Token Creator grant. Platform
 owns private buckets and identities; protected `peg-policy-publication` writes
 the policy object.
-Metrics Bridge uses the dedicated runtime identity and pins generation
-`1785276001213660` through paired `PEG_POLICY_*` values. Publication itself
-attaches neither Cloud Run nor Grafana consumers. The reviewed runtime
-activation attached Cloud Run; the separate alerts-rules source change and
-approved apply activate Grafana. Terraform derives the pinned URL and
-`gcp-metadata` mode from that literal.
+Metrics Bridge uses the dedicated runtime identity. The first runtime attachment
+pinned generation `1785276001213660` through paired `PEG_POLICY_*` values; the
+current reviewed rollout changes the source literal to published generation
+`1786443055965590`. Publication itself attaches neither Cloud Run nor Grafana
+consumers. The approved platform apply and runtime proof attach the new pin; the
+separate alerts-rules source change and approved apply activate Grafana.
+Terraform derives the pinned URL and `gcp-metadata` mode from that literal.
 Metrics Bridge ignores `template[0].revision` in steady state so routine plans
 do not clear the generated name stamped by deploys. Any Terraform-owned
 template change, including a policy-generation handoff, sets
