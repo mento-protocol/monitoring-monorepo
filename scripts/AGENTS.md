@@ -45,7 +45,7 @@ garden_lane: agent-entry-points
   both phases, and deletes its temporary files. Never accept a caller plan path or print,
   upload, or cache either plan form. The guarded first-service bootstrap plans
   below are a separate deploy-only exception. See
-  [ADR 0060](../docs/adr/0060-exact-plan-guard-for-manual-platform-applies.md).
+  [ADR 0061](../docs/adr/0061-exact-plan-guard-for-manual-platform-applies.md).
 - `pnpm tf:test` owns the deployment source-staging contract. It allows exactly
   five literal checked-in `gcloud builds submit` / `gcloud app deploy`
   callsites, including their source-staging flag and value. It also pins both

@@ -90,7 +90,7 @@ After the approved apply and runtime proof, a separate stabilization change
 restores the marker to `false` and the ignore. Unrelated full platform applies
 pause between those phases; a failed rollout stays in rollout mode until a
 reviewed completion or rollback.
-[ADR 0060](0060-exact-plan-guard-for-manual-platform-applies.md) checks the
+[ADR 0061](0061-exact-plan-guard-for-manual-platform-applies.md) checks the
 source-selected phase against the exact platform plan. [Issue
 #1778](https://github.com/mento-protocol/monitoring-monorepo/issues/1778)
 records the drift and the correction.

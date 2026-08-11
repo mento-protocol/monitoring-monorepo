@@ -44,6 +44,12 @@ pnpm aegis:tf:plan
 pnpm gov-watchdog:tf:plan
 ```
 
+The `platform` stack's Upstash provider email and management key are bootstrap
+inputs: the provider cannot create the credential it needs before planning.
+[ADR 0060](adr/0060-upstash-management-key-bootstrap.md) owns the narrow
+human-only console integration, separate keys, and rotation order. Agents never
+create, replace, or revoke those keys.
+
 Without a stack, `pnpm tf validate` validates every registered stack. It formats
 tracked and non-ignored untracked Terraform, then runs backend-free init and
 validate. Gitignored operator `*.tfvars` stay outside that source check.
@@ -75,7 +81,7 @@ the exact ADR 0055 controller-role recovery, whose whole managed diff may only
 create that role. The Metrics Bridge check does not approve unrelated platform
 changes. Human review of the earlier preflight and explicit apply approval
 remain mandatory, but only the machine policy sees the exact plan applied.
-[ADR 0060](adr/0060-exact-plan-guard-for-manual-platform-applies.md)
+[ADR 0061](adr/0061-exact-plan-guard-for-manual-platform-applies.md)
 owns the exact-plan boundary.
 
 `peg-policy-publication` permits only backend-free local validation with
@@ -158,7 +164,7 @@ secrets.
 
 ADR 0047 selects the final no-artifact protected-stack apply contract: make a
 private plan after approval, run fail-closed policy over its JSON, then apply
-those exact bytes. ADR 0060 implements the first narrow slice for manual
+those exact bytes. ADR 0061 implements the first narrow slice for manual
 platform plan/apply by guarding the Metrics Bridge template and ADR 0055
 recovery. Issue #1576 still owns the broader dual-run policy for every retained
 protected-stack mutation. The other apply paths retain their documented

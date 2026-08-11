@@ -1634,6 +1634,11 @@ while IFS= read -r path; do
       ;;
   esac
   case "$path" in
+    .gitattributes|.codex/config.toml|.codex/upstash-mcp.example.toml|.agents/skills/forensic-report/*|.claude/skills/forensic-report/*|docs/adr/0030-iac-before-cli-secrets.md|docs/adr/0060-upstash-management-key-bootstrap.md|docs/deployment.md|docs/notes/codex-agent-skills.md|docs/notes/upstash-mcp-operator.md|package.json|pnpm-lock.yaml|scripts/build-upstash-mcp-runtime.mjs|scripts/render-upstash-mcp-config.mjs|scripts/upstash-mcp-launcher.mjs|terraform/terraform.tfvars.example|terraform/variables.tf)
+      add_command "node --test scripts/upstash-mcp-config.test.mjs" "Upstash MCP transport contract changed"
+      ;;
+  esac
+  case "$path" in
     package.json)
       root_package_json_class="$(get_root_package_json_class)"
       case "$root_package_json_class" in
@@ -2256,6 +2261,9 @@ while IFS= read -r path; do
         scripts/check-agent-context.mjs|scripts/check-agent-context-helpers.mjs|scripts/check-agent-context.test.mjs)
           add_command "pnpm agent:context-check" "agent context checker changed"
           add_command "node scripts/check-agent-context.test.mjs" "agent context checker changed"
+          ;;
+        scripts/build-upstash-mcp-runtime.mjs|scripts/render-upstash-mcp-config.mjs|scripts/upstash-mcp-config.test.mjs|scripts/upstash-mcp-launcher.mjs)
+          add_command "node --test scripts/upstash-mcp-config.test.mjs" "Upstash MCP transport contract changed"
           ;;
         scripts/file-size-watchlist.mjs|scripts/file-size-watchlist-issue.mjs|scripts/file-size-watchlist.test.mjs)
           add_command "node --test scripts/file-size-watchlist.test.mjs" "file-size watchlist automation changed"

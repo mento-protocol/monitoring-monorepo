@@ -213,7 +213,7 @@ that the current stacks do not otherwise need.
 
 ### Amendment — first exact-plan policy slice
 
-[ADR 0060](0060-exact-plan-guard-for-manual-platform-applies.md) applies this
+[ADR 0061](0061-exact-plan-guard-for-manual-platform-applies.md) applies this
 private-plan pattern to manual platform plan/apply for the Metrics Bridge
 template and the exact ADR 0055 recovery target. It closes that narrow
 source-marker drift gap without claiming the broad protected-stack policy

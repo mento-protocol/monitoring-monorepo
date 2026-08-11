@@ -16,6 +16,15 @@ Deep procedure for Steps 1 and 1.5 of [`SKILL.md`](../SKILL.md). The chain
 doctrine and the contract-target identity rule live in `SKILL.md`; this file is
 the mechanics.
 
+## Transport branch
+
+Run the tool-catalog preflight in `SKILL.md` before this file. When either
+reviewed Upstash tool is unavailable, still run chain initialization and
+provenance capture below, then skip production database discovery and all Step
+1.5 cache reads. Continue at Step 1.6 without a `DATABASE_ID`; record every
+skipped Upstash source as `NOT-ATTEMPTED`, not `EMPTY`. An attended local upload
+must rerun the skipped reads before deriving CAS state.
+
 ## Step 1 — Bootstrap
 
 ```bash
@@ -56,7 +65,7 @@ Pin the attribution-anchoring storage reads with
 `<sig>` placeholder so bash doesn't read it as a redirection) so a future reader
 gets the same bytes.
 
-## Production database discovery
+## Production database discovery (only after the preflight passes)
 
 Discover the production database with
 `mcp__upstash__redis_database_list_databases`: require exactly one database
@@ -79,7 +88,7 @@ mcp__upstash__redis_database_run_redis_commands({
 If a report exists, parse it for `version` and `createdAt` — you'll preserve
 them on upload.
 
-## Step 1.5 — Check the Upstash caches first
+## Step 1.5 — Check the Upstash caches first (only after the preflight passes)
 
 Before making any live Arkham calls, check the five existing caches. Prefer a
 current cache hit; use the live connector only when it is available and the

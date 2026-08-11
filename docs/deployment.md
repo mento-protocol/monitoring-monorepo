@@ -407,7 +407,7 @@ human approval after reviewing `pnpm infra:plan`. That command deletes its
 preflight plan. The later apply creates a fresh plan, checks it by machine, and
 applies those checked bytes without another prompt; the human approval is not
 an exact-plan review. See
-[ADR 0060](adr/0060-exact-plan-guard-for-manual-platform-applies.md).
+[ADR 0061](adr/0061-exact-plan-guard-for-manual-platform-applies.md).
 
 Protocol Grafana alerts and global Grafana routing use the separate
 `alerts-rules` stack (`pnpm alerts:rules:plan`), which also owns the Aegis
@@ -558,7 +558,10 @@ Run this once when setting up from scratch or recreating the Vercel project.
 - [Google Cloud SDK](https://cloud.google.com/sdk/docs/install) — authenticated with ADC (`gcloud auth application-default login`). Your account needs `storage.objects.get`, `storage.objects.create`, and `storage.objects.list` on the `mento-terraform-tfstate-6ed6` GCS bucket (role: `roles/storage.objectUser` on the bucket, or broader project-level `roles/storage.admin`)
 - [Vercel CLI](https://vercel.com/docs/cli) (for blob store creation)
 - Vercel API token (create at [vercel.com/account/tokens](https://vercel.com/account/tokens))
-- Upstash account + API key ([console.upstash.com → Account → API Keys](https://console.upstash.com/account/api))
+- Upstash account + Terraform bootstrap key. An authorized human creates and
+  rotates this console-owned provider credential under
+  [ADR 0060](adr/0060-upstash-management-key-bootstrap.md); agents never perform
+  the console mutation.
 
 ### Steps
 

@@ -153,7 +153,8 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0055](0055-peg-policy-bucket-controller-recovery.md)         | Peg bucket IAM reconciliation uses a narrow controller and bounded recovery                                       |
 | [0057](0057-peg-observation-advancement.md)                   | Repeated provider observations retain bounded health, never sample authority                                      |
 | [0058](0058-metrics-bridge-dedicated-cloud-build-executor.md) | Metrics Bridge uses a dedicated Cloud Build executor                                                              |
-| [0060](0060-exact-plan-guard-for-manual-platform-applies.md)  | Manual platform applies check and consume one private exact plan                                                  |
+| [0060](0060-upstash-management-key-bootstrap.md)              | Upstash management API keys use a human-owned bootstrap integration                                               |
+| [0061](0061-exact-plan-guard-for-manual-platform-applies.md)  | Manual platform applies check and consume one private exact plan                                                  |
 
 ### governance-watchdog
 

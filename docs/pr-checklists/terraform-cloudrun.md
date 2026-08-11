@@ -52,7 +52,7 @@ For every `google_cloud_run_v2_service`:
       expected `stable` or `rollout` mode. It checks the saved plan, so a
       tfvar-driven template change cannot bypass the source marker. Never use
       raw `terraform plan/apply` to bypass this check. See
-      [ADR 0060](../adr/0060-exact-plan-guard-for-manual-platform-applies.md).
+      [ADR 0061](../adr/0061-exact-plan-guard-for-manual-platform-applies.md).
 - [ ] Default/bootstrap `image` MUST be pinned and respond to the configured
       probe path. The current digest-pinned `gcr.io/cloudrun/hello` image uses a
       catch-all handler and therefore serves `/health`; re-verify this contract

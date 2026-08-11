@@ -55,7 +55,8 @@ github_token = "ghp_..."
 # terraform_apply_slack_channel = "#deploys"
 
 # ── Upstash ───────────────────────────────────────────────────────────────────
-# API credentials at: console.upstash.com → Account → API Keys
+# Human-owned provider bootstrap credentials. Creation and rotation follow
+# docs/adr/0060-upstash-management-key-bootstrap.md; agents never mutate keys.
 upstash_email   = "your@email.com"
 upstash_api_key = "..."
 

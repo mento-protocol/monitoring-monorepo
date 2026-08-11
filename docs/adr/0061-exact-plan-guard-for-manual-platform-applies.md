@@ -11,7 +11,7 @@ review_interval_days: 90
 garden_lane: adrs-architecture
 ---
 
-# ADR 0060 — Manual platform applies use an exact private plan guard
+# ADR 0061 — Manual platform applies use an exact private plan guard
 
 **Status:** Accepted (Aug 2026), in force.
 **Scope:** terraform/infra

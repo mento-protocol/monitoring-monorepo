@@ -53,7 +53,7 @@ image pull depend on the exact boundaries.
   `main` checkout whose HEAD matches freshly fetched `origin/main`;
   `--force-local-apply` does not bypass this secret-input guard. The wrapper
   executes the verified commit from a temporary source snapshot; gitignored
-  tfvars stay outside that committed snapshot. [ADR 0060](../docs/adr/0060-exact-plan-guard-for-manual-platform-applies.md)
+  tfvars stay outside that committed snapshot. [ADR 0061](../docs/adr/0061-exact-plan-guard-for-manual-platform-applies.md)
   owns the private exact-plan, variable snapshot, and argument boundary; never
   bypass the wrapper or supply a caller-owned plan.
 - Alloy deploy operators receive the metadata-only

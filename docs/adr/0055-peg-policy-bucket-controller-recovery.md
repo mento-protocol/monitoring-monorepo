@@ -93,7 +93,7 @@ The IAM query must print nothing and the full plan must be clean before policy
 publication resumes. Preserve the target plan, full apply, removal, absence
 check, and clean plan as recovery evidence.
 
-[ADR 0060](0060-exact-plan-guard-for-manual-platform-applies.md) makes this the
+[ADR 0061](0061-exact-plan-guard-for-manual-platform-applies.md) makes this the
 only platform target exception. The wrapper inspects the entire managed diff
 and accepts it only when the custom role is the sole non-no-op resource and its
 action is create. It then applies the exact checked plan.

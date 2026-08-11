@@ -96,6 +96,7 @@ Authority: canonical
 - [`docs/notes/sentry-triage-pipeline.md`](notes/sentry-triage-pipeline.md)
 - [`docs/notes/slack-github-subscriptions.md`](notes/slack-github-subscriptions.md)
 - [`docs/notes/spoken-attention-nudge.md`](notes/spoken-attention-nudge.md)
+- [`docs/notes/upstash-mcp-operator.md`](notes/upstash-mcp-operator.md)
 - [`docs/notes/worktree-and-web-setup.md`](notes/worktree-and-web-setup.md)
 - [`docs/terraform.md`](terraform.md)
 - [`governance-watchdog/ADDING_EVENTS.md`](../governance-watchdog/ADDING_EVENTS.md)
@@ -185,7 +186,8 @@ Authority: canonical
 - [`docs/adr/0057-peg-observation-advancement.md`](adr/0057-peg-observation-advancement.md) — Repeated Peg provider observations retain bounded health, never sample authority
 - [`docs/adr/0058-metrics-bridge-dedicated-cloud-build-executor.md`](adr/0058-metrics-bridge-dedicated-cloud-build-executor.md) — Metrics Bridge uses a dedicated Cloud Build executor
 - [`docs/adr/0059-repo-owned-file-size-watchlist-scheduler.md`](adr/0059-repo-owned-file-size-watchlist-scheduler.md) — File-size watchlist scheduling is repository-owned and issue-only
-- [`docs/adr/0060-exact-plan-guard-for-manual-platform-applies.md`](adr/0060-exact-plan-guard-for-manual-platform-applies.md) — Manual platform applies use an exact private plan guard
+- [`docs/adr/0060-upstash-management-key-bootstrap.md`](adr/0060-upstash-management-key-bootstrap.md) — Upstash management API keys use a human-owned bootstrap integration
+- [`docs/adr/0061-exact-plan-guard-for-manual-platform-applies.md`](adr/0061-exact-plan-guard-for-manual-platform-applies.md) — Manual platform applies use an exact private plan guard
 
 Authority: non-canonical
 
