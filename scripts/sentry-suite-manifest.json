@@ -24,7 +24,7 @@
     },
     "scripts/sentry-suite-gate.test.mjs": {
       "reporter": "count-line",
-      "floor": 27
+      "floor": 32
     },
     "scripts/sentry-triage-agent-comment.test.mjs": {
       "reporter": "node-test",

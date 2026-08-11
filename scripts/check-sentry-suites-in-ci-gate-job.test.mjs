@@ -106,7 +106,47 @@ export function gateJobBlockers(workflow) {
     );
   }
 
-  // 6. The gate runs, as its whole command, with the tamper variables stripped.
+  // 6. Nothing in this job may tolerate its own failure. `continue-on-error`
+  // makes a red gate report success, so the `ci` sentinel never blocks the
+  // merge and a floor breach or a failed assertion ships — the same class the
+  // sentinel predicates already reject one level up, applied here. Checked on
+  // the job AND on every step rather than only on the step matching the gate
+  // command, so it holds however the gate step is identified.
+  if (job["continue-on-error"] !== undefined) {
+    blockers.push(
+      `the \`${GATE_JOB}\` job sets \`continue-on-error\` — a failing gate would then ` +
+        "report success and the required `ci` context would stay green",
+    );
+  }
+  for (const [index, step] of (Array.isArray(job.steps)
+    ? job.steps
+    : []
+  ).entries()) {
+    if (step?.["continue-on-error"] === undefined) continue;
+    const label = step?.name ?? step?.uses ?? `step ${index + 1}`;
+    blockers.push(
+      `step \`${label}\` in \`${GATE_JOB}\` sets \`continue-on-error\` — no step here may ` +
+        "tolerate its own failure; the gate's verdict is the job's verdict",
+    );
+  }
+
+  // 7. The checkout must be the PR revision of THIS repository. `with.ref` or
+  // `with.repository` redirects the job to validate other code — pointing `ref`
+  // at `main` makes every suite run the base branch, so a PR deleting a test
+  // case passes the gate while the diff under review is never executed.
+  const checkout = (Array.isArray(job.steps) ? job.steps : []).find((step) =>
+    String(step?.uses ?? "").startsWith("actions/checkout@"),
+  );
+  for (const key of ["ref", "repository"]) {
+    if (checkout?.with?.[key] === undefined) continue;
+    blockers.push(
+      `the \`${GATE_JOB}\` checkout sets \`with.${key}: ${checkout.with[key]}\` — it must take ` +
+        "neither, so the job always runs the suites from the pull request's own revision of " +
+        "this repository rather than validating some other code",
+    );
+  }
+
+  // 8. The gate runs, as its whole command, with the tamper variables stripped.
   const steps = Array.isArray(job.steps) ? job.steps : [];
   const gateIndex = steps.findIndex(
     (step) => String(step?.run ?? "").trim() === GATE_COMMAND,
@@ -119,7 +159,7 @@ export function gateJobBlockers(workflow) {
     return blockers;
   }
 
-  // 7. Nothing PR-authored executes before it. Only the two pinned upstream
+  // 9. Nothing PR-authored executes before it. Only the two pinned upstream
   // actions may precede the gate; a `run:` step, a local composite action, or
   // any other `uses:` ahead of it is PR-authored code in the R1 window.
   for (const [index, step] of steps.slice(0, gateIndex).entries()) {
@@ -146,7 +186,7 @@ export function gateJobBlockers(workflow) {
     }
   }
 
-  // 8. The gate step itself carries no env.
+  // 10. The gate step itself carries no env.
   if (steps[gateIndex]?.env !== undefined) {
     blockers.push(
       "the gate step declares a step-level `env:` — the gate must start from a clean " +
@@ -235,6 +275,39 @@ export const GATE_JOB_MUTATIONS = [
     "a deleted gate step",
     (w) => {
       w.jobs[GATE_JOB].steps = w.jobs[GATE_JOB].steps.filter((s) => !s.run);
+    },
+  ],
+  [
+    "`continue-on-error` on the gate step",
+    (w) => {
+      const step = w.jobs[GATE_JOB].steps.find((s) => s.run);
+      step["continue-on-error"] = true;
+    },
+  ],
+  [
+    "`continue-on-error` on the job",
+    (w) => (w.jobs[GATE_JOB]["continue-on-error"] = true),
+  ],
+  [
+    "`continue-on-error` on the checkout step",
+    (w) => (w.jobs[GATE_JOB].steps[0]["continue-on-error"] = true),
+  ],
+  [
+    "a checkout pinned to `main` instead of the PR revision",
+    (w) => {
+      const checkout = w.jobs[GATE_JOB].steps.find((s) =>
+        String(s.uses ?? "").startsWith("actions/checkout@"),
+      );
+      checkout.with = { ...checkout.with, ref: "main" };
+    },
+  ],
+  [
+    "a checkout redirected to another repository",
+    (w) => {
+      const checkout = w.jobs[GATE_JOB].steps.find((s) =>
+        String(s.uses ?? "").startsWith("actions/checkout@"),
+      );
+      checkout.with = { ...checkout.with, repository: "attacker/fork" };
     },
   ],
 ];

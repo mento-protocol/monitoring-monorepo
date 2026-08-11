@@ -25,6 +25,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  digestDrift,
+  digestFile,
+  digestWatchSet,
   findSentrySuites,
   judgeSuite,
   parseCountLine,
@@ -283,6 +286,171 @@ await test("red (a): a node:test suite that really fails is rejected", async () 
     });
     const { status } = runGate(root);
     assert(status !== 0, "a failing node:test suite must red the gate");
+  } finally {
+    cleanup(root);
+  }
+});
+
+// ── (a2) suite-rewrite: one child must not be able to forge another's result ──
+
+await test("red: an earlier suite rewriting a later one is caught before it runs", async () => {
+  const root = makeRoot();
+  try {
+    // Codex 3759964336. Every child shares the writable checkout, so without
+    // digest verification an alphabetically earlier suite can overwrite a later
+    // FAILING suite with a program emitting the expected `ok` lines and a
+    // matching summary — and both report passing at exit 0, voiding the gate's
+    // central claim that each result came from that suite.
+    writeSuite(
+      root,
+      "sentry-aaa-attacker.test.mjs",
+      [
+        'import { writeFileSync } from "node:fs";',
+        'import { fileURLToPath } from "node:url";',
+        'writeFileSync(fileURLToPath(new URL("./sentry-zzz-victim.test.mjs", import.meta.url)),',
+        '  \'process.stdout.write("ok forged\\\\n");process.stdout.write("1 passed\\\\n");\');',
+        'process.stdout.write("ok attacker\\n");',
+        'process.stdout.write("1 passed\\n");',
+        "",
+      ].join("\n"),
+    );
+    writeSuite(
+      root,
+      "sentry-zzz-victim.test.mjs",
+      [
+        'process.stdout.write("ok one\\n");',
+        'process.stderr.write("not ok two\\n  a real regression\\n");',
+        'process.stderr.write("1 failed, 1 passed\\n");',
+        "process.exitCode = 1;",
+        "",
+      ].join("\n"),
+    );
+    writeManifest(root, {
+      "scripts/sentry-aaa-attacker.test.mjs": {
+        reporter: "count-line",
+        floor: 1,
+      },
+      "scripts/sentry-zzz-victim.test.mjs": {
+        reporter: "count-line",
+        floor: 1,
+      },
+    });
+    const { status, stdout } = runGate(root);
+    assert(status !== 0, "a rewritten suite must red the gate");
+    assert(stdout.includes("TAMPERED"), "should mark the suite tampered");
+    assert(
+      stdout.includes("sentry-zzz-victim.test.mjs was REWRITTEN"),
+      "should name the rewritten suite",
+    );
+  } finally {
+    cleanup(root);
+  }
+});
+
+await test("red: a suite rewriting one that ALREADY ran is caught by the final sweep", async () => {
+  const root = makeRoot();
+  try {
+    // The ordering no per-spawn check can see: the attacker runs last and
+    // rewrites an earlier suite after its result was recorded. Only re-verifying
+    // every digest after the last child catches it.
+    writeSuite(
+      root,
+      "sentry-aaa-early.test.mjs",
+      [
+        'process.stdout.write("ok early\\n");',
+        'process.stdout.write("1 passed\\n");',
+        "",
+      ].join("\n"),
+    );
+    writeSuite(
+      root,
+      "sentry-zzz-late.test.mjs",
+      [
+        'import { writeFileSync } from "node:fs";',
+        'import { fileURLToPath } from "node:url";',
+        'writeFileSync(fileURLToPath(new URL("./sentry-aaa-early.test.mjs", import.meta.url)), "// tampered\\n");',
+        'process.stdout.write("ok late\\n");',
+        'process.stdout.write("1 passed\\n");',
+        "",
+      ].join("\n"),
+    );
+    writeManifest(root, {
+      "scripts/sentry-aaa-early.test.mjs": { reporter: "count-line", floor: 1 },
+      "scripts/sentry-zzz-late.test.mjs": { reporter: "count-line", floor: 1 },
+    });
+    const { status, stdout } = runGate(root);
+    assert(status !== 0, "a post-hoc rewrite must red the gate");
+    assert(
+      stdout.includes("sentry-aaa-early.test.mjs was REWRITTEN"),
+      "the sweep should name the suite rewritten after it ran",
+    );
+  } finally {
+    cleanup(root);
+  }
+});
+
+await test("red: a suite rewriting the manifest is caught", async () => {
+  const root = makeRoot();
+  try {
+    writeSuite(
+      root,
+      "sentry-m.test.mjs",
+      [
+        'import { writeFileSync } from "node:fs";',
+        'import { fileURLToPath } from "node:url";',
+        'writeFileSync(fileURLToPath(new URL("./sentry-suite-manifest.json", import.meta.url)), JSON.stringify({ suites: {} }));',
+        'process.stdout.write("ok m\\n");',
+        'process.stdout.write("1 passed\\n");',
+        "",
+      ].join("\n"),
+    );
+    writeManifest(root, {
+      "scripts/sentry-m.test.mjs": { reporter: "count-line", floor: 1 },
+    });
+    const { status, stdout } = runGate(root);
+    assert(status !== 0, "rewriting the manifest must red the gate");
+    assert(
+      stdout.includes("sentry-suite-manifest.json was REWRITTEN"),
+      "should name the manifest",
+    );
+  } finally {
+    cleanup(root);
+  }
+});
+
+await test("digestDrift reports created, deleted, and rewritten files", async () => {
+  const root = makeRoot();
+  try {
+    writeSuite(root, "sentry-a.test.mjs", "// original\n");
+    const baseline = new Map([
+      [
+        "scripts/sentry-a.test.mjs",
+        digestFile(join(root, "scripts/sentry-a.test.mjs")),
+      ],
+      ["scripts/sentry-gone.test.mjs", "deadbeef"],
+      ["scripts/sentry-new.test.mjs", null],
+    ]);
+    writeSuite(root, "sentry-a.test.mjs", "// rewritten\n");
+    writeSuite(root, "sentry-new.test.mjs", "// appeared\n");
+    const drift = digestDrift(baseline, root);
+    assertEqual(drift.length, 3, `expected three drifts: ${drift.join("; ")}`);
+    assert(
+      drift.some((d) => d.includes("REWRITTEN")) &&
+        drift.some((d) => d.includes("DELETED")) &&
+        drift.some((d) => d.includes("CREATED")),
+      `expected one of each: ${drift.join("; ")}`,
+    );
+  } finally {
+    cleanup(root);
+  }
+});
+
+await test("digestDrift is silent when nothing changed", async () => {
+  const root = makeRoot();
+  try {
+    writeSuite(root, "sentry-a.test.mjs", "// stable\n");
+    const baseline = digestWatchSet(["scripts/sentry-a.test.mjs"], root);
+    assertEqual(digestDrift(baseline, root).length, 0, "no drift expected");
   } finally {
     cleanup(root);
   }

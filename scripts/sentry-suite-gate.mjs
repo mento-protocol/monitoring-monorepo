@@ -36,6 +36,7 @@
  */
 
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   appendFileSync,
   readFileSync,
@@ -67,6 +68,80 @@ const NODE_TEST_REPORTER_ARGS = [
 
 /** A fatal, structural failure the gate cannot proceed past (env, manifest, set drift). */
 class GateError extends Error {}
+
+/**
+ * The gate's own source, repo-relative. Hashed alongside the suites: a suite
+ * that rewrites the runner mid-flight would otherwise change how its own
+ * successors are judged.
+ */
+const GATE_LABEL = "scripts/sentry-suite-gate.mjs";
+
+/**
+ * SHA-256 of a file's bytes, or `null` when it cannot be read (deleted mid-run
+ * is itself a tamper signal, so the caller reports the difference rather than
+ * throwing here).
+ *
+ * @param {string} path
+ * @returns {string | null}
+ */
+export function digestFile(path) {
+  try {
+    return createHash("sha256").update(readFileSync(path)).digest("hex");
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Digest every file whose bytes must not change while the gate runs: each
+ * manifest-listed suite, the manifest itself, and the gate's own source.
+ *
+ * Every child shares one writable checkout, so without this an alphabetically
+ * earlier suite can overwrite a later one with a program that prints the
+ * expected `ok` lines and a matching summary — both then report passing and the
+ * gate's central claim, that each suite's result came from that suite, is void.
+ * Reproduced before this existed: a `sentry-aaa-attacker` suite rewrote
+ * `sentry-zzz-victim` (a genuinely failing suite) and the gate exited 0 with
+ * both rows `ok`.
+ *
+ * @param {string[]} suites repo-relative suite paths
+ * @param {string} root
+ * @returns {Map<string, string | null>} repo-relative path to digest
+ */
+export function digestWatchSet(suites, root) {
+  const watched = [...suites, MANIFEST_LABEL, GATE_LABEL];
+  return new Map(
+    watched.map((relative) => [relative, digestFile(join(root, relative))]),
+  );
+}
+
+/**
+ * Compare current bytes against the pre-run snapshot.
+ *
+ * @param {Map<string, string | null>} baseline
+ * @param {string} root
+ * @param {string[]} [only] restrict the check to these paths; default all
+ * @returns {string[]} human-readable descriptions of every file that changed
+ */
+export function digestDrift(baseline, root, only) {
+  const paths = only ?? [...baseline.keys()];
+  const drift = [];
+  for (const relative of paths) {
+    const before = baseline.get(relative);
+    const now = digestFile(join(root, relative));
+    if (before === now) continue;
+    if (now === null) {
+      drift.push(`${relative} was DELETED while the gate was running`);
+    } else if (before === null) {
+      drift.push(`${relative} was CREATED while the gate was running`);
+    } else {
+      drift.push(
+        `${relative} was REWRITTEN while the gate was running (${before.slice(0, 12)} → ${now.slice(0, 12)})`,
+      );
+    }
+  }
+  return drift;
+}
 
 /**
  * Every `sentry-*.test.mjs` under `dir`, at any depth, as a repo-relative path
@@ -513,6 +588,14 @@ export function main() {
   }
 
   // (3)(4) Execute non-exempt suites; re-verify exempt routes.
+  //
+  // Snapshot every watched file BEFORE any child runs. Each child then gets its
+  // own file re-checked immediately before its spawn (so a tamper message can
+  // name the suite and the point it was caught), and every digest is re-verified
+  // after the last child (so a rewrite is caught no matter the ordering — an
+  // attacker rewriting a suite that already ran is still caught by the sweep).
+  const baseline = digestWatchSet(manifestKeys, ROOT);
+
   const rows = [];
   let failures = 0;
   for (const suite of manifestKeys) {
@@ -527,6 +610,18 @@ export function main() {
           `runs in ${entry.exempt.runBy || "another job"}`,
       });
       if (reasons.length) failures += 1;
+      continue;
+    }
+    // Re-check THIS suite's bytes immediately before spawning it: if an earlier
+    // suite rewrote it, the result about to be produced is not this suite's.
+    const preSpawnDrift = digestDrift(baseline, ROOT, [suite]);
+    if (preSpawnDrift.length > 0) {
+      rows.push({
+        suite,
+        status: "TAMPERED",
+        detail: `${preSpawnDrift.join("; ")} — refusing to run it; an earlier suite in this gate run modified it`,
+      });
+      failures += 1;
       continue;
     }
     const result = runSuite(suite, entry, { root: ROOT });
@@ -554,6 +649,20 @@ export function main() {
         );
       }
     }
+  }
+
+  // The sweep that makes the guarantee ordering-independent: re-verify EVERY
+  // watched file after the last child. A suite that rewrote one which already
+  // ran, or that rewrote the manifest or this runner, is caught here even
+  // though no per-spawn check could have seen it.
+  const finalDrift = digestDrift(baseline, ROOT);
+  for (const change of finalDrift) {
+    rows.push({
+      suite: change.split(" ")[0],
+      status: "TAMPERED",
+      detail: `${change} — a suite modified a watched file; every result in this run is untrustworthy`,
+    });
+    failures += 1;
   }
 
   const table = [
