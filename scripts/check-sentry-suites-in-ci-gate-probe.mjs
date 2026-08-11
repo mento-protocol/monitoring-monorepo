@@ -118,31 +118,38 @@ const runProbeShell = (bash, args, options) => {
 };
 
 /**
- * The environment for every probe shell: this process's, minus the ways an
- * ambient shell can define code before the probe's own setup runs.
+ * The variables a probe shell is allowed to inherit. Everything else is dropped.
  *
- * Non-interactive bash sources `$BASH_ENV` and imports exported functions from
- * the environment at STARTUP — before the program below empties PATH or installs
- * the guard. Whatever they define is then a shell function, so `command -v`
- * reports it available and the guard waves it through. The classifier's verdict
- * would depend on the operator's shell setup rather than on the gate.
+ *   PATH   — Node resolves the `bash` executable through it. The program itself
+ *            overwrites `$PATH` with an empty directory before running anything.
+ *   HOME   — bash reads it while starting up.
+ *   TMPDIR — bash 3.2 writes each heredoc to a temp file, so a classifier
+ *            containing one cannot run without a writable temp directory.
+ */
+const PROBE_ENV_ALLOWLIST = ["PATH", "HOME", "TMPDIR"];
+
+/**
+ * A fixed, minimal environment for every probe shell.
  *
- * `SHELLOPTS`/`BASHOPTS` are dropped for the same reason: bash reads them at
- * startup, so they change how the probe shell behaves before it can say
- * otherwise.
+ * The verdict has to be a function of the change paths the probe supplies. An
+ * inherited variable makes it a function of who ran the check instead: a
+ * classifier that branches on `CI` or `GITHUB_ACTIONS` — an ordinary thing for a
+ * shell function to do — would be read one way on a laptop and another on a
+ * runner, and the probe would call both correct. That is non-determinism in a
+ * check whose whole job is to answer the same way every time.
+ *
+ * Allowing a fixed set rather than subtracting known-bad names is the point:
+ * `BASH_ENV`, `ENV`, `BASH_FUNC_*`, `SHELLOPTS` and `BASHOPTS` were each found
+ * one at a time, and a subtraction list only ever grows. Nothing outside the
+ * list above can reach the classifier, whatever it is called.
+ *
+ * `LC_ALL` is set rather than inherited, so bash's own diagnostics are in a
+ * language the assertions can read.
  */
 const probeEnv = () => {
-  const env = { ...process.env };
-  for (const name of Object.keys(env)) {
-    if (
-      name === "BASH_ENV" ||
-      name === "ENV" ||
-      name === "SHELLOPTS" ||
-      name === "BASHOPTS" ||
-      name.startsWith("BASH_FUNC_")
-    ) {
-      delete env[name];
-    }
+  const env = { LC_ALL: "C" };
+  for (const name of PROBE_ENV_ALLOWLIST) {
+    if (process.env[name] !== undefined) env[name] = process.env[name];
   }
   return env;
 };
@@ -322,6 +329,19 @@ const PATH_ESCAPE = /(?:^|[\s;&|(`])command[ \t]+-[A-Za-z]*p/;
  * own loop uses to consume `json_change_paths`. Whatever `<` is left reads
  * something this probe did not supply. The matching is textual, so it errs loud:
  * a `<` inside a string literal is reported and has to be reworded.
+ *
+ * Named residual: the `[[ … ]]` strip is coarse, so `[[ -n "$(< /etc/hostname)" ]]`
+ * escapes it — the whole conditional is removed before the `<` inside it is
+ * looked at — and `$(< file)` runs no command, so the DEBUG guard does not see it
+ * either. Measured, so the boundary is known rather than guessed: every plain
+ * `< file` an ordinary classifier could write is still caught, including one
+ * attached to a conditional (`[[ -n "$x" ]] < config`), one beside it
+ * (`[[ -n "$x" ]] && read y < config`), one on the enclosing loop
+ * (`while [[ … ]]; do :; done < config`), and `$(< file)` OUTSIDE a conditional.
+ * Only `$(< file)` nested inside one slips, and closing that means reasoning
+ * about shell syntax forms rather than closing a class. The empty `cwd` already
+ * closes the version an ordinary edit reaches, since that one names a relative
+ * path; this needs an absolute path to a host file.
  *
  * @param {string} source
  * @returns {Array<[number, string]>} [1-based line number, line]

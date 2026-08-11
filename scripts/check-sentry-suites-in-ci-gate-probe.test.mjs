@@ -581,6 +581,64 @@ test("the gate probe bounds a classifier that never terminates", () => {
   );
 });
 
+test("the gate probe's verdict does not depend on who ran it", () => {
+  // Branching on an ambient variable is an ordinary thing for a shell function
+  // to do — `CI`, `GITHUB_ACTIONS`, a tool flag. Inheriting the parent's
+  // environment made the probe answer one way on a laptop and another on a
+  // runner, and call both correct. No imported function needed: a plain
+  // variable was enough to change the accepted verdict.
+  const script = gateFixture({
+    inner: `  if [[ -n "\${AMBIENT_CLASS:-}" ]]; then
+    echo "workspace"
+    return
+  fi`,
+  });
+  for (const [, { candidate, version }] of installedBashes()) {
+    const withoutVar = gateClassifications([TRUSTED_PATH], {
+      script,
+      label: `ambient variable unset under bash ${version}`,
+      bash: candidate,
+    });
+    process.env.AMBIENT_CLASS = "workspace";
+    let withVar;
+    try {
+      withVar = gateClassifications([TRUSTED_PATH], {
+        script,
+        label: `ambient variable set under bash ${version}`,
+        bash: candidate,
+      });
+    } finally {
+      delete process.env.AMBIENT_CLASS;
+    }
+    assert.deepEqual(
+      [...withVar],
+      [...withoutVar],
+      `bash ${version} let the parent environment change the verdict`,
+    );
+    assert.deepEqual(
+      [...withoutVar],
+      [[TRUSTED_PATH, "root-tooling-scripts"]],
+      `bash ${version} misread the ambient-variable fixture`,
+    );
+
+    // The case that would break if the real classifier read an ambient
+    // variable: it must still verdict correctly on the minimal environment.
+    assert.deepEqual(
+      [
+        ...gateClassifications(
+          ["/scripts/tf:test", "/scripts/__not_an_allowlisted_alias__"],
+          { bash: candidate },
+        ),
+      ],
+      [
+        ["/scripts/tf:test", "root-tooling-scripts"],
+        ["/scripts/__not_an_allowlisted_alias__", "package-scripts"],
+      ],
+      `the real gate classifier reads something outside the probe's minimal environment under bash ${version}`,
+    );
+  }
+});
+
 test("the gate probe ignores bash startup hooks in its environment", () => {
   // Non-interactive bash sources $BASH_ENV and imports exported functions at
   // STARTUP — before the probe empties PATH or installs the guard. Whatever they
