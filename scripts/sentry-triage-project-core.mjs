@@ -316,27 +316,9 @@ export const MAX_BRIEF_LIST_ITEMS = 5;
  * sanitizeDuplicateIds these entries are prose, so nothing is shape-validated
  * away — each emitter neutralizes+escapes them at render. Returns `{items,
  * next}` mirroring collectDashList so the caller advances the line cursor. */
-/**
- * Parse a single inline YAML FLOW SEQUENCE (`["a", "b, c", 'd']`) with ONE
- * dependency-free, single-pass state machine. The Sentry workflows run these
- * scripts after `setup-node` WITHOUT an install, and the agent wrapper is staged
- * outside any `node_modules`, so the runtime closure MUST stay third-party-free
- * (#1769 round 11, P1 — a js-yaml import broke triage + archive in prod). One
- * correct implementation replaces three rounds of incremental hand-rolled edges
- * (#1769 rounds 8-10): it tracks double- and single-quoted strings, `\` escapes
- * (double-quote), doubled-quote escapes (`''`/`""`), bracket DEPTH (so a `]`
- * inside a quoted item or a nested bracket never ends the sequence), and
- * surrounding whitespace. STRICT about the tail: after the closing `]` only
- * whitespace or a `#` comment may follow, so a prose scalar that merely starts
- * with `[` is rejected rather than truncated. Returns the trimmed string items,
- * or null when `text` is not a single valid flow sequence (the caller keeps the
- * remainder as one item). Never throws.
- */
-// The COMPLETE YAML 1.1/1.2 double-quoted single-character escape set. DECODING
-// (not backslash-dropping) is the whole point: a dropped backslash turned a
-// `→` arrow into a literal `u2192` and `\n` into a literal `n`, mangling
-// public decision text (#1769 round 13). Enumerated exhaustively so no "next
-// escape" is left; the hex forms (`\x`/`\u`/`\U`) are handled in the decoder.
+// The COMPLETE YAML 1.1/1.2 double-quoted single-char escape set. DECODING (not
+// backslash-dropping) is the point: a dropped `→` became a literal `u2192`
+// and `\n` a literal `n` (#1769 round 13). Hex forms (`\x`/`\u`/`\U`) decode below.
 const YAML_DQ_ESCAPES = {
   0: "\0", // null (U+0000)
   a: "\x07", // bell
@@ -381,70 +363,125 @@ export function decodeDoubleQuoteEscape(s, i) {
   return null; // unknown escape
 }
 
+// One dependency-free, single-pass parser for an inline YAML flow sequence of
+// strings — the workflows run these scripts with NO install, so the closure must
+// stay third-party-free (#1769 round 11 P1: a js-yaml import broke prod). It
+// covers all three scalar styles: double-quoted (escapes above), single-quoted
+// (`''` -> one `'`), and plain (quotes/backslashes LITERAL, running to the next
+// top-level `,`/`]`); the style is set by the item's FIRST character, so a quote
+// inside a plain scalar (`Yes it's fine`) never mis-splits it. Any non-scalar
+// item — a nested `[`/`{`, or an anchor `&`/alias `*`/tag `!` — REJECTS the whole
+// sequence (caller falls back to one bounded item) rather than misparse it.
+
+/** Read a double-quoted scalar at `s[i]` (the opening quote), or null. */
+function parseDoubleQuotedScalar(s, i) {
+  let buf = "";
+  for (let j = i + 1; j < s.length; ) {
+    const c = s[j];
+    if (c === "\\") {
+      // DECODE (never drop the backslash); an invalid escape rejects the whole.
+      const decoded = decodeDoubleQuoteEscape(s, j);
+      if (decoded === null) return null;
+      buf += decoded.text;
+      j = decoded.next;
+    } else if (c === '"') {
+      return { value: buf, next: j + 1 };
+    } else {
+      buf += c;
+      j += 1;
+    }
+  }
+  return null; // unterminated
+}
+
+/** Read a single-quoted scalar at `s[i]` (the opening quote), or null. */
+function parseSingleQuotedScalar(s, i) {
+  let buf = "";
+  for (let j = i + 1; j < s.length; ) {
+    const c = s[j];
+    if (c === "'") {
+      if (s[j + 1] === "'") {
+        buf += "'"; // doubled single-quote -> one literal quote
+        j += 2;
+      } else {
+        return { value: buf, next: j + 1 };
+      }
+    } else {
+      buf += c;
+      j += 1;
+    }
+  }
+  return null; // unterminated
+}
+
+/**
+ * Read a plain (unquoted) scalar at `s[i]`. It runs until the next top-level
+ * flow indicator (`,` or `]`); quotes, apostrophes, and backslashes inside are
+ * literal (no escape processing, no delimiter meaning). A `[`, `{`, or `}`
+ * makes it a nested/mapping construct, so the whole sequence is rejected.
+ */
+function parsePlainScalar(s, i) {
+  let j = i;
+  while (j < s.length) {
+    const c = s[j];
+    if (c === "," || c === "]") break;
+    if (c === "[" || c === "{" || c === "}") return null;
+    j += 1;
+  }
+  return { value: s.slice(i, j).trim(), next: j };
+}
+
+/** Read ONE flow item at `s[i]` (first non-whitespace char), or null to reject. */
+function parseFlowItem(s, i) {
+  const ch = s[i];
+  if (ch === '"') return parseDoubleQuotedScalar(s, i);
+  if (ch === "'") return parseSingleQuotedScalar(s, i);
+  // Nested collections and node properties are not string scalars: reject the
+  // whole sequence rather than misparse a construct this field can't hold.
+  if (ch === "[" || ch === "{" || ch === "&" || ch === "*" || ch === "!") {
+    return null;
+  }
+  return parsePlainScalar(s, i);
+}
+
 function parseInlineFlowSequence(text) {
   const s = String(text ?? "").trim();
   if (!s.startsWith("[")) return null;
   const items = [];
-  let buf = "";
-  let quote = null; // '"' | "'" | null
-  let depth = 0;
-  let closed = false;
-  for (let i = 0; i < s.length; i += 1) {
-    const ch = s[i];
-    if (closed) {
-      // After the matching `]`, tolerate only trailing whitespace or a comment.
-      if (ch === "#") break;
-      if (/\s/.test(ch)) continue;
-      return null; // trailing non-comment content -> not a clean flow sequence
+  let i = 1; // past the opening `[`
+  for (;;) {
+    while (i < s.length && /\s/.test(s[i])) i += 1; // inter-item whitespace
+    if (i >= s.length) return null; // no closing `]` -> unterminated
+    if (s[i] === "]") {
+      i += 1;
+      break;
     }
-    if (quote === '"') {
-      if (ch === "\\") {
-        // DECODE the escape (not drop the backslash): an unknown/invalid escape
-        // rejects the whole inline sequence rather than corrupting it.
-        const decoded = decodeDoubleQuoteEscape(s, i);
-        if (decoded === null) return null;
-        buf += decoded.text;
-        i = decoded.next - 1; // the loop's i += 1 lands just past the escape
-      } else if (ch === '"') {
-        quote = null;
-      } else {
-        buf += ch;
-      }
+    if (s[i] === ",") {
+      i += 1; // leading/consecutive/trailing comma -> empty item, dropped below
       continue;
     }
-    if (quote === "'") {
-      if (ch === "'" && s[i + 1] === "'") {
-        buf += "'"; // doubled single-quote -> one literal quote
-        i += 1;
-      } else if (ch === "'") {
-        quote = null;
-      } else {
-        buf += ch;
-      }
+    const item = parseFlowItem(s, i);
+    if (item === null) return null;
+    items.push(item.value);
+    i = item.next;
+    while (i < s.length && /\s/.test(s[i])) i += 1; // whitespace after the scalar
+    if (i >= s.length) return null; // unterminated
+    if (s[i] === ",") {
+      i += 1;
       continue;
     }
-    if (ch === '"' || ch === "'") {
-      quote = ch;
-    } else if (ch === "[") {
-      depth += 1;
-      if (depth > 1) buf += ch; // a nested opening bracket is item content
-    } else if (ch === "]") {
-      depth -= 1;
-      if (depth === 0) {
-        items.push(buf.trim());
-        buf = "";
-        closed = true;
-      } else {
-        buf += ch; // a nested closing bracket is item content
-      }
-    } else if (ch === "," && depth === 1) {
-      items.push(buf.trim());
-      buf = "";
-    } else {
-      buf += ch;
+    if (s[i] === "]") {
+      i += 1;
+      break;
     }
+    return null; // junk after a scalar (e.g. `"a" b`) -> not a clean sequence
   }
-  if (!closed) return null; // unterminated sequence -> malformed
+  // After the matching `]`, tolerate only trailing whitespace or a comment.
+  while (i < s.length) {
+    if (s[i] === "#") break;
+    if (!/\s/.test(s[i])) return null;
+    i += 1;
+  }
   return items.map((item) => item.trim()).filter(Boolean);
 }
 

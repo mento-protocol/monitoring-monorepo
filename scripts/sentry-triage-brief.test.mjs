@@ -414,6 +414,45 @@ await test("the double-quoted escape decoder covers the FULL YAML set (#1769 rou
   assertEqual(arrow.decision_branches[1], "No \u2192 close");
 });
 
+await test("the flow parser handles all three scalar styles and rejects non-scalars (#1769 round 14)", () => {
+  // PLAIN (unquoted) scalar: an embedded apostrophe or double-quote is LITERAL
+  // text, not a delimiter, so the item is not mis-split or mishandled.
+  const apostrophe = parseVerdictYaml("decision_branches: [Yes it's fine, No]");
+  assertEqual(apostrophe.decision_branches.length, 2);
+  assertEqual(apostrophe.decision_branches[0], "Yes it's fine");
+  assertEqual(apostrophe.decision_branches[1], "No");
+
+  const dquote = parseVerdictYaml(
+    'how_to_check: [check the "status" field, then read logs]',
+  );
+  assertEqual(dquote.how_to_check.length, 2);
+  assertEqual(dquote.how_to_check[0], 'check the "status" field');
+  assertEqual(dquote.how_to_check[1], "then read logs");
+
+  // All THREE scalar styles in one sequence: double-quoted, single-quoted (the
+  // comma inside the quotes is literal, not a separator), and plain.
+  const mixed = parseVerdictYaml(
+    "decision_branches: [\"Yes: keep it\", 'No, drop it', maybe later]",
+  );
+  assertEqual(mixed.decision_branches.length, 3);
+  assertEqual(mixed.decision_branches[0], "Yes: keep it");
+  assertEqual(mixed.decision_branches[1], "No, drop it");
+  assertEqual(mixed.decision_branches[2], "maybe later");
+
+  // A flow construct that is NOT a sequence-of-scalars is REJECTED (safe
+  // single-item fallback), never misparsed. Every non-scalar form is covered:
+  // nested sequence, nested mapping, anchor, alias, and tag.
+  const rejects = (yaml, why) => {
+    const parsed = parseVerdictYaml(`decision_branches: ${yaml}`);
+    assert(parsed.decision_branches.length === 1, why);
+  };
+  rejects("[Yes, [nested, seq], No]", "nested sequence must reject");
+  rejects("[Yes, {k: v}, No]", "nested mapping must reject");
+  rejects("[&anchor Yes, No]", "anchor must reject");
+  rejects("[*ref, No]", "alias must reject");
+  rejects("[!!str Yes, No]", "tag must reject");
+});
+
 await test("inline list items keep brackets inside quotes (#1769 round 10)", () => {
   // A `]` inside a quoted item must NOT be taken as the end of the sequence
   // (the hand-rolled bracket scan did that); the real YAML parser handles it.
