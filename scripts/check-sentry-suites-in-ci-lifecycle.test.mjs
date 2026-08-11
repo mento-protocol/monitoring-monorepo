@@ -15,6 +15,14 @@
  * rejects a hook, and reject a committed scripts/ directory symlink whose target
  * escapes the tree the CI paths-filter routes.
  *
+ * The third execution surface is the gate probe itself. `gateClassifications`
+ * lifts `classify_root_package_json_changes` out of agent-quality-gate.sh and
+ * re-runs it, so the probe's own reading of that file is load-bearing: a wrong
+ * span, an unstubbed helper, or a misparsed verdict line makes the allowlist
+ * assertion in the main check pass while proving nothing. The fixtures below are
+ * synthetic gate scripts, each shaped so the OLD textual terminator gets it
+ * wrong, and the tests pin every one to a loud failure or a correct verdict.
+ *
  * Split out of the main check to keep both files under the repo's 1,000-line cap;
  * the main test file imports this module, so `node
  * scripts/check-sentry-suites-in-ci.test.mjs` runs these too.
@@ -33,8 +41,11 @@ import { join } from "node:path";
 import test from "node:test";
 import { pinValidationOrderBlockers } from "./check-sentry-suites-in-ci-core.mjs";
 import {
+  bashFunctionSource,
   CI,
   escapingScriptSymlinks,
+  GATE_CLASSIFIER,
+  gateClassifications,
   INSTALL_ACTION,
   PIN_VALIDATOR_COMMAND,
   PKG,
@@ -165,4 +176,293 @@ test("no committed scripts/ directory symlink escapes the CI-routed tree", () =>
   } finally {
     rmSync(base, { recursive: true, force: true });
   }
+});
+
+const TRUSTED_PATH = "/scripts/agent:quality-gate";
+const UNTRUSTED_PATH = "/scripts/__not_an_allowlisted_alias__";
+
+/**
+ * A synthetic agent-quality-gate.sh: a `json_change_paths` the probe stubs over,
+ * one classifier with the real one's shape, and slots for the variations each
+ * test needs. Built from one template so the difference under test is the only
+ * difference in the file.
+ */
+const gateFixture = ({
+  prelude = "",
+  header = `${GATE_CLASSIFIER}() {`,
+  inner = "",
+  verdict = `  if [[ "$saw_tooling" == true ]]; then
+    echo "root-tooling-scripts"
+  else
+    echo "package-scripts"
+  fi`,
+  closer = "}",
+  trailer = 'root_package_json_class=""',
+}) => `#!/usr/bin/env bash
+set -euo pipefail
+
+json_change_paths() {
+  echo "__unknown__"
+}
+${prelude}
+${header}
+  local change
+  local saw_tooling=false
+  while IFS= read -r change; do
+    [[ -n "$change" ]] || continue
+    case "$change" in
+      ${TRUSTED_PATH}) saw_tooling=true ;;
+    esac
+  done < <(json_change_paths "package.json")
+${inner}
+${verdict}
+${closer}
+
+${trailer}
+`;
+
+/**
+ * The terminator this probe used to use: the first line that is exactly `}` at
+ * column 0. Kept here, in the test rather than the probe, so each fixture below
+ * has to prove it actually discriminates — a fixture the old rule reads
+ * correctly would pin nothing.
+ */
+const legacyFunctionSource = (script) => {
+  const header = `\n${GATE_CLASSIFIER}() {\n`;
+  const start = script.indexOf(header);
+  if (start < 0) return null;
+  const rest = script.slice(start + 1);
+  const end = rest.indexOf("\n}\n");
+  return end > 0 ? rest.slice(0, end + 3) : null;
+};
+
+test("the gate-function extractor ends the function where bash ends it", () => {
+  // Control: on the shape the gate has today the old rule was right, so any
+  // difference below comes from the fixture, not from the two rules disagreeing
+  // about ordinary text.
+  const clean = gateFixture({});
+  assert.equal(
+    bashFunctionSource(clean, GATE_CLASSIFIER, "clean"),
+    legacyFunctionSource(clean),
+    "the extractor disagrees with the old terminator on a gate with nothing unusual in it",
+  );
+
+  // TRUNCATION. A heredoc whose content has `}` at column 0 ends the old span
+  // inside the heredoc — a prefix of the function.
+  const heredoc = gateFixture({
+    inner: `  cat > /dev/null <<'NOTE'
+Reviewers keep proposing this shape. It is wrong:
+}
+NOTE`,
+  });
+  const heredocSource = bashFunctionSource(heredoc, GATE_CLASSIFIER, "heredoc");
+  assert.ok(
+    heredocSource.includes("\nNOTE\n"),
+    `the extractor stopped inside the heredoc: ${JSON.stringify(heredocSource)}`,
+  );
+  assert.notEqual(
+    heredocSource,
+    legacyFunctionSource(heredoc),
+    "the old terminator read the heredoc fixture correctly, so it pins nothing",
+  );
+
+  // OVER-CAPTURE. One trailing space on the closing brace and `\n}\n` skips it,
+  // locking on to the next column-0 `}` — the function plus everything between.
+  const trailing = gateFixture({
+    closer: "} ",
+    trailer: `echo "__after_the_function__"
+
+later_helper() {
+  :
+}`,
+  });
+  const trailingSource = bashFunctionSource(
+    trailing,
+    GATE_CLASSIFIER,
+    "trailing",
+  );
+  assert.ok(
+    !trailingSource.includes("__after_the_function__"),
+    `the extractor swallowed code that follows the function: ${JSON.stringify(trailingSource)}`,
+  );
+  assert.ok(
+    legacyFunctionSource(trailing).includes("__after_the_function__"),
+    "the old terminator read the trailing-space fixture correctly, so it pins nothing",
+  );
+
+  // The `function` keyword is a definition the old exact-string header missed
+  // entirely, which read as "the function is gone" rather than as a variant.
+  const keyword = gateFixture({
+    header: `function ${GATE_CLASSIFIER}() {`,
+  });
+  assert.ok(
+    bashFunctionSource(keyword, GATE_CLASSIFIER, "keyword").startsWith(
+      `function ${GATE_CLASSIFIER}() {`,
+    ),
+    "the extractor cannot read a `function`-keyword definition",
+  );
+  assert.equal(
+    legacyFunctionSource(keyword),
+    null,
+    "the old header string read the `function`-keyword fixture, so it pins nothing",
+  );
+});
+
+test("the gate probe classifies a gate the old terminator could not read", () => {
+  // The point of the two fixtures above is not that they fail loudly — it is
+  // that the probe keeps WORKING on them. Both classify correctly.
+  for (const [label, script] of [
+    [
+      "heredoc",
+      gateFixture({
+        inner: `  cat > /dev/null <<'NOTE'
+}
+NOTE`,
+      }),
+    ],
+    [
+      "function keyword",
+      gateFixture({ header: `function ${GATE_CLASSIFIER} {` }),
+    ],
+  ]) {
+    const verdicts = gateClassifications([TRUSTED_PATH, UNTRUSTED_PATH], {
+      script,
+      label,
+    });
+    assert.deepEqual(
+      [...verdicts],
+      [
+        [TRUSTED_PATH, "root-tooling-scripts"],
+        [UNTRUSTED_PATH, "package-scripts"],
+      ],
+      `the probe misread the ${label} gate`,
+    );
+  }
+});
+
+test("the gate probe fails closed on a body it cannot fully provide for", () => {
+  // A helper the probe does not stub runs as a missing command inside `$(…)`,
+  // where the non-zero exit dies with the subshell: the old probe returned
+  // `package-scripts` for an allowlisted alias and exited 0.
+  const unstubbed = gateFixture({
+    prelude: `tooling_alias_allowlist() {
+  printf '%s\\n' "${TRUSTED_PATH}"
+}`,
+    // The verdict depends on the helper's output, so losing it flips an
+    // allowlisted alias to `package-scripts` — the shape of a silent pass.
+    inner: `  local allow=""
+  allow="$(tooling_alias_allowlist)"
+  if [[ "$allow" != *"agent:quality-gate"* ]]; then
+    saw_tooling=false
+  fi`,
+  });
+  assert.notEqual(
+    legacyFunctionSource(unstubbed),
+    null,
+    "the unstubbed-helper fixture no longer parses — it would prove nothing",
+  );
+  assert.throws(
+    () =>
+      gateClassifications([TRUSTED_PATH], {
+        script: unstubbed,
+        label: "unstubbed helper",
+      }),
+    /tooling_alias_allowlist/,
+    "the probe ran a gate helper it does not stub",
+  );
+
+  // A command that is not a gate function at all never reaches the read-time
+  // check above; `command_not_found_handle` is the layer that catches it.
+  assert.throws(
+    () =>
+      gateClassifications([TRUSTED_PATH], {
+        script: gateFixture({
+          inner: `  __no_such_command_anywhere__ || true`,
+        }),
+        label: "missing binary",
+      }),
+    /__probe_missing_command__/,
+    "the probe ran a command that does not exist and reported a verdict anyway",
+  );
+});
+
+test("the gate probe fails closed on output it cannot account for", () => {
+  // An arm that prints nothing used to land in the map as `""`, and a class the
+  // probe does not know used to land as itself — both read as a verdict.
+  assert.throws(
+    () =>
+      gateClassifications([TRUSTED_PATH, UNTRUSTED_PATH], {
+        script: gateFixture({
+          verdict: `  if [[ "$saw_tooling" == true ]]; then
+    echo "root-tooling-scripts"
+  fi`,
+        }),
+        label: "silent arm",
+      }),
+    /not one of its classes/,
+    "the probe accepted an empty verdict",
+  );
+  assert.throws(
+    () =>
+      gateClassifications([UNTRUSTED_PATH], {
+        script: gateFixture({
+          verdict: `  echo "brand-new-class"`,
+        }),
+        label: "new class",
+      }),
+    /not one of its classes/,
+    "the probe accepted a class it has never been told about",
+  );
+
+  // A nested redefinition is indented, so the old column-0 header string could
+  // not see the second definition it warns about.
+  const nested = gateFixture({
+    trailer: `wrapper() {
+  ${GATE_CLASSIFIER}() {
+    echo "workspace"
+  }
+}`,
+  });
+  assert.notEqual(
+    legacyFunctionSource(nested),
+    null,
+    "the nested-redefinition fixture no longer parses — it would prove nothing",
+  );
+  assert.throws(
+    () =>
+      gateClassifications([TRUSTED_PATH], { script: nested, label: "nested" }),
+    /defines `classify_root_package_json_changes` 2 times/,
+    "the probe picked one of two definitions of the classifier",
+  );
+});
+
+test("the gate probe rejects a request it would have to misparse", () => {
+  // The wire format is one tab-separated line per path. A path carrying a tab
+  // used to split into a different path and a fabricated verdict, and the path
+  // actually asked about came back `undefined`.
+  for (const [label, request] of [
+    ["a tab", [`/scripts/a\tb`]],
+    ["a newline", [`/scripts/a\nb`]],
+  ]) {
+    assert.throws(
+      () => gateClassifications(request),
+      /carries a tab or newline/,
+      `the probe accepted a path containing ${label}`,
+    );
+  }
+  assert.throws(
+    () => gateClassifications([TRUSTED_PATH, TRUSTED_PATH]),
+    /duplicate path/,
+    "the probe accepted a duplicate path, whose verdicts would collapse",
+  );
+  assert.throws(
+    () => gateClassifications([]),
+    /at least one path/,
+    "the probe accepted an empty request, which would vacuously pass its caller",
+  );
+  assert.throws(
+    () => gateClassifications([""]),
+    /empty path/,
+    "the probe accepted an empty path",
+  );
 });

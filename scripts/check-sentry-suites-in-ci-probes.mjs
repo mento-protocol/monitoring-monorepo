@@ -3,7 +3,9 @@
  * filesystem walkers behind scripts/check-sentry-suites-in-ci.test.mjs.
  *
  * Split out of the test file to keep both under the repo's 1,000-line cap. The
- * pure predicates live in check-sentry-suites-in-ci-core.mjs; the `test()`
+ * pure predicates live in check-sentry-suites-in-ci-core.mjs; the gate-routing
+ * probe lives in check-sentry-suites-in-ci-gate-probe.mjs and is re-exported
+ * here, so the tests still import every probe from one façade; the `test()`
  * blocks stay in the test file next door, which runs them. Nothing here is a
  * test — this module gathers the structures those tests judge, plus the
  * fixtures and mutation specs (`compositeFixture`, `SENTINEL_MUTATIONS`) heavy
@@ -34,7 +36,6 @@ export const ROOT = fileURLToPath(new URL("..", import.meta.url));
 export const SCRIPTS_DIR = join(ROOT, "scripts");
 export const WORKFLOWS_DIR = join(ROOT, ".github", "workflows");
 export const CI_PATH = join(WORKFLOWS_DIR, "ci.yml");
-export const GATE_PATH = join(SCRIPTS_DIR, "agent-quality-gate.sh");
 export const VALIDATOR_PATH = join(
   SCRIPTS_DIR,
   "check-agent-quality-gate-package-scripts.sh",
@@ -65,11 +66,24 @@ export const CORE_COMMANDS =
 /** This module: the file reads and probes the check runs. */
 export const PROBES = "scripts/check-sentry-suites-in-ci-probes.mjs";
 
+/** The sibling module that lifts the gate's classifier out and re-runs it. */
+export const GATE_PROBE = "scripts/check-sentry-suites-in-ci-gate-probe.mjs";
+
+// The gate probe owns the gate file it reads; re-exported here so the tests
+// keep importing every probe from one façade.
+export {
+  bashFunctionSource,
+  GATE,
+  GATE_CLASSIFIER,
+  gateClassifications,
+  GATE_PATH,
+  GATE_ROOT_PACKAGE_JSON_CLASSES,
+} from "./check-sentry-suites-in-ci-gate-probe.mjs";
+
 // A throw here is the intended failure mode for a malformed workflow.
 export const CI = load(readFileSync(CI_PATH, "utf8"), { schema: CORE_SCHEMA });
 export const PKG = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"));
 export const PKG_SCRIPTS = PKG.scripts ?? {};
-export const GATE = readFileSync(GATE_PATH, "utf8");
 
 /**
  * Every workflow under .github/workflows, parsed. The `ci` check-run name must
@@ -517,6 +531,7 @@ const STATIC_PROBE_INPUTS = new Map([
   [".github/workflows/ci.yml", "the workflow every invariant here walks"],
   ["package.json", "the alias map `aliasesFor` resolves suites through"],
   ["scripts/agent-quality-gate.sh", "`gateClassifications` runs its `case`"],
+  [GATE_PROBE, "the probe that lifts the gate's classifier out and re-runs it"],
   [
     "scripts/check-agent-quality-gate-package-scripts.sh",
     "`validatorPins` runs it to enumerate the pins it enforces",
@@ -563,61 +578,6 @@ process.stdout.write(
     { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
   );
   return JSON.parse(out);
-}
-
-/**
- * Run the gate's own `case` statement over each path and report how it
- * classifies them. bash parses its own source and does its own pattern
- * matching, so a commented-out entry, an entry moved to a different arm, and
- * an arm whose body changed all show up as a different classification.
- *
- * @param {string[]} paths
- * @returns {Map<string, string>}
- */
-export function gateClassifications(paths) {
-  const header = "\nclassify_root_package_json_changes() {\n";
-  const first = GATE.indexOf(header);
-  assert.ok(
-    first >= 0,
-    `classify_root_package_json_changes is gone from ${GATE_PATH}`,
-  );
-  assert.equal(
-    GATE.lastIndexOf(header),
-    first,
-    "classify_root_package_json_changes is defined more than once — this probe would read the wrong one",
-  );
-  const rest = GATE.slice(first + 1);
-  const end = rest.indexOf("\n}\n");
-  assert.ok(
-    end > 0,
-    "classify_root_package_json_changes has no closing brace at column 0",
-  );
-  const fnSource = rest.slice(0, end + 3);
-
-  // `json_change_paths` reads git; the probe feeds the function one synthetic
-  // change path instead. Process substitution forks the shell, so the loop
-  // variable is visible inside the stub.
-  const program = `
-set -uo pipefail
-${fnSource}
-json_change_paths() { printf '%s\\n' "$__probe_path"; }
-declare -F classify_root_package_json_changes > /dev/null || { echo "__probe_broken__"; exit 3; }
-for __probe_path in "$@"; do
-  printf '%s\\t%s\\n' "$__probe_path" "$(classify_root_package_json_changes)"
-done
-`;
-  const out = execFileSync("bash", ["-s", "--", ...paths], {
-    input: program,
-    encoding: "utf8",
-    stdio: ["pipe", "pipe", "pipe"],
-  });
-  const classifications = new Map();
-  for (const line of out.split("\n")) {
-    if (line.trim() === "") continue;
-    const [path, verdict] = line.split("\t");
-    classifications.set(path, verdict);
-  }
-  return classifications;
 }
 
 /**
