@@ -411,7 +411,7 @@ describe("PegMonitoringPageClient", () => {
       "At the last confirmed check, net pool inflow was at 80% of the active on-chain trading limit. Warn at 80%.",
     );
   });
-  it("labels capped supporting-market prices as partial fills", () => {
+  it("labels fresh listed capped supporting-market prices as partial liquidity", () => {
     const response = makePegMonitoringResponse();
     const item = response.packages[0]!;
     state.current = {
@@ -421,8 +421,14 @@ describe("PegMonitoringPageClient", () => {
           {
             ...item,
             sources: item.sources.map((source) =>
-              source.id === "kraken_eur"
-                ? { ...source, capped: true, filledFraction: 0.4 }
+              source.id === "kraken_eur" || source.id === "kraken_usd"
+                ? {
+                    ...source,
+                    capped: true,
+                    filledFraction: 0.4,
+                    listingState: "listed",
+                    listingCheckedAt: response.producedAt - 8,
+                  }
                 : source,
             ),
           },
@@ -436,11 +442,115 @@ describe("PegMonitoringPageClient", () => {
     const supporting = container.querySelector(
       '[data-testid="peg-supporting-source-kraken_eur"]',
     );
+    expect(supporting?.textContent).toContain("Partial liquidity");
     expect(supporting?.textContent).toContain(
-      "partial fill: 40% of the test sale",
+      "0.9968 EUR per EUROP · filled 20,000 of 50,000 EUROP (40%) · checked 28s ago",
     );
+    const convertedSupporting = container.querySelector(
+      '[data-testid="peg-supporting-source-kraken_usd"]',
+    );
+    expect(convertedSupporting?.textContent).toContain("Partial liquidity");
+    expect(convertedSupporting?.textContent).toContain(
+      "Converted from USD to EUR using rate feed 0xec5748…c318ca on chain 137.",
+    );
+  });
+  it.each([
+    ["unhealthy", { healthy: false }],
+    ["unlisted", { listingState: null }],
+    ["listing check missing", { listingCheckedAt: null }],
+    ["listing halted", { listingState: "halted" }],
+    ["listing absent", { listingState: "absent" }],
+    ["venue halted", { venueState: "halted" }],
+    ["price observation missing", { observationAt: null }],
+    ["executable price missing", { executablePrice: null }],
+    ["filled fraction missing", { filledFraction: null }],
+    ["reference size missing", { referenceSize: null }],
+    [
+      "listing check stale",
+      { listingCheckedAt: PEG_FIXTURE_PRODUCED_AT - 301 },
+    ],
+    [
+      "price observation stale",
+      { observationAt: PEG_FIXTURE_PRODUCED_AT - 301 },
+    ],
+  ] as const)(
+    "keeps %s capped supporting-market evidence unavailable",
+    (_, overrides) => {
+      const response = makePegMonitoringResponse();
+      const item = response.packages[0]!;
+      state.current = {
+        data: {
+          ...response,
+          packages: [
+            {
+              ...item,
+              sources: item.sources.map((source) =>
+                source.id === "kraken_eur"
+                  ? {
+                      ...source,
+                      capped: true,
+                      filledFraction: 0.4,
+                      listingState: "listed",
+                      listingCheckedAt: response.producedAt - 8,
+                      ...overrides,
+                    }
+                  : source,
+              ),
+            },
+          ],
+        },
+        isLoading: false,
+        hasError: false,
+      };
+
+      render();
+      const supporting = container.querySelector(
+        '[data-testid="peg-supporting-source-kraken_eur"]',
+      );
+      expect(supporting?.textContent).toContain("Unavailable");
+      expect(supporting?.textContent).not.toContain("Partial liquidity");
+      expect(supporting?.textContent).not.toContain("partial fill");
+      expect(supporting?.textContent).not.toContain(
+        "filled 20,000 of 50,000 EUROP (40%)",
+      );
+    },
+  );
+  it("suppresses capped fill details when the package is stale", () => {
+    const response = makePegMonitoringResponse();
+    const item = response.packages[0]!;
+    state.current = {
+      data: {
+        ...response,
+        packages: [
+          {
+            ...item,
+            sources: item.sources.map((source) =>
+              source.id === "kraken_eur"
+                ? {
+                    ...source,
+                    capped: true,
+                    filledFraction: 0.4,
+                    listingState: "listed",
+                    listingCheckedAt: response.producedAt - 8,
+                  }
+                : source,
+            ),
+          },
+        ],
+      },
+      isLoading: false,
+      hasError: true,
+    };
+
+    render();
+    const supporting = container.querySelector(
+      '[data-testid="peg-supporting-source-kraken_eur"]',
+    );
+    expect(supporting?.textContent).toContain("Unavailable");
+    expect(supporting?.textContent).not.toContain("Partial liquidity");
+    expect(supporting?.textContent).not.toContain("partial fill");
     expect(supporting?.textContent).not.toContain(
-      "for a 50,000 EUROP test sale",
+      "filled 20,000 of 50,000 EUROP (40%)",
     );
   });
   it("expires source evidence while its package is still current", () => {

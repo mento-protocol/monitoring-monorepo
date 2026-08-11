@@ -31,6 +31,63 @@ function conversionText(source: PegSource): string | null {
     : `Converted from ${conversion.fromCurrency} to ${conversion.toCurrency} using rate feed ${shortAddress(conversion.rateFeedId)} on chain ${conversion.chainId}.`;
 }
 
+function hasPartialLiquidity(
+  source: PegSource,
+  nowMs: number,
+  stale: boolean,
+): boolean {
+  if (stale) return false;
+  if (
+    !source.healthy ||
+    source.capped !== true ||
+    source.listingState !== "listed" ||
+    source.listingCheckedAt === null ||
+    source.venueState === "halted" ||
+    source.observationAt === null ||
+    source.executablePrice === null ||
+    source.filledFraction === null ||
+    source.referenceSize === null
+  )
+    return false;
+  const staleAfterMs = source.policy.staleAfterSeconds * 1_000;
+  return (
+    nowMs - source.listingCheckedAt * 1_000 <= staleAfterMs &&
+    nowMs - source.observationAt * 1_000 <= staleAfterMs
+  );
+}
+
+function supportingSourceStatus(
+  source: PegSource,
+  nowMs: number,
+  confirmedAtMs: number,
+  stale: boolean,
+  partialLiquidity: boolean,
+): React.ComponentProps<typeof StatusPill> {
+  if (partialLiquidity) return { label: "Partial liquidity", tone: "warn" };
+  if (!sourceHasUnavailableEvidence(source, stale ? confirmedAtMs : nowMs))
+    return {
+      label: stale ? "Last confirmed" : "Available",
+      tone: stale ? "neutral" : "good",
+    };
+  return { label: "Unavailable", tone: "warn" };
+}
+
+function supportingSaleDetail(
+  source: PegSource,
+  partialLiquidity: boolean,
+): string {
+  if (
+    partialLiquidity &&
+    source.referenceSize !== null &&
+    source.filledFraction !== null
+  )
+    return ` · filled ${formatNumber(source.referenceSize * source.filledFraction)} of ${formatNumber(source.referenceSize)} ${source.baseCurrency} (${formatFraction(source.filledFraction)})`;
+  if (source.capped) return "";
+  return source.referenceSize === null
+    ? ""
+    : ` for a ${formatNumber(source.referenceSize)} ${source.baseCurrency} test sale`;
+}
+
 export function SaleMeasurement({
   source,
   nowMs,
@@ -79,9 +136,13 @@ function SupportingSource({
   stale: boolean;
 }): React.JSX.Element {
   const checkedAge = observationAge(source, nowMs);
-  const usable = !sourceHasUnavailableEvidence(
+  const partialLiquidity = hasPartialLiquidity(source, nowMs, stale);
+  const status = supportingSourceStatus(
     source,
-    stale ? confirmedAtMs : nowMs,
+    nowMs,
+    confirmedAtMs,
+    stale,
+    partialLiquidity,
   );
   const priceCurrency = source.convertVia?.toCurrency ?? source.quoteCurrency;
   return (
@@ -93,12 +154,7 @@ function SupportingSource({
         <p className="break-words text-sm font-medium text-slate-100">
           {marketName(source)}
         </p>
-        <StatusPill
-          label={
-            usable ? (stale ? "Last confirmed" : "Available") : "Unavailable"
-          }
-          tone={usable ? (stale ? "neutral" : "good") : "warn"}
-        />
+        <StatusPill {...status} />
       </div>
       {source.executablePrice === null ? (
         <p className="mt-2 text-xs leading-5 text-slate-300">
@@ -109,11 +165,7 @@ function SupportingSource({
           {stale ? "At the last confirmed check: " : ""}
           {formatNumber(source.executablePrice)} {priceCurrency} per{" "}
           {source.baseCurrency}
-          {source.capped
-            ? ` · partial fill: ${formatFraction(source.filledFraction)} of the test sale`
-            : source.referenceSize === null
-              ? ""
-              : ` for a ${formatNumber(source.referenceSize)} ${source.baseCurrency} test sale`}
+          {supportingSaleDetail(source, partialLiquidity)}
           {checkedAge === null ? "" : ` · checked ${checkedAge} ago`}
         </p>
       )}
