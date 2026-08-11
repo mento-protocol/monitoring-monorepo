@@ -459,7 +459,12 @@ describe("PegMonitoringPageClient", () => {
     ["unlisted", { listingState: null }],
     ["listing check missing", { listingCheckedAt: null }],
     ["listing halted", { listingState: "halted" }],
+    ["listing absent", { listingState: "absent" }],
     ["venue halted", { venueState: "halted" }],
+    ["price observation missing", { observationAt: null }],
+    ["executable price missing", { executablePrice: null }],
+    ["filled fraction missing", { filledFraction: null }],
+    ["reference size missing", { referenceSize: null }],
     [
       "listing check stale",
       { listingCheckedAt: PEG_FIXTURE_PRODUCED_AT - 301 },
@@ -510,6 +515,44 @@ describe("PegMonitoringPageClient", () => {
       );
     },
   );
+  it("suppresses capped fill details when the package is stale", () => {
+    const response = makePegMonitoringResponse();
+    const item = response.packages[0]!;
+    state.current = {
+      data: {
+        ...response,
+        packages: [
+          {
+            ...item,
+            sources: item.sources.map((source) =>
+              source.id === "kraken_eur"
+                ? {
+                    ...source,
+                    capped: true,
+                    filledFraction: 0.4,
+                    listingState: "listed",
+                    listingCheckedAt: response.producedAt - 8,
+                  }
+                : source,
+            ),
+          },
+        ],
+      },
+      isLoading: false,
+      hasError: true,
+    };
+
+    render();
+    const supporting = container.querySelector(
+      '[data-testid="peg-supporting-source-kraken_eur"]',
+    );
+    expect(supporting?.textContent).toContain("Unavailable");
+    expect(supporting?.textContent).not.toContain("Partial liquidity");
+    expect(supporting?.textContent).not.toContain("partial fill");
+    expect(supporting?.textContent).not.toContain(
+      "filled 20,000 of 50,000 EUROP (40%)",
+    );
+  });
   it("expires source evidence while its package is still current", () => {
     const response = makePegMonitoringResponse();
     const item = response.packages[0]!;
