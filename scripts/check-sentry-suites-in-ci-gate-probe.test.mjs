@@ -452,9 +452,17 @@ test("the gate probe rejects `command -p`, which outruns its empty PATH", () => 
   // utilities", so it reaches a binary whatever the probe sets `$PATH` to.
   // There is nothing to validate behind it — the escape is the invocation — so
   // it is rejected at read time, by the line, on every bash.
+  //
+  // Quoted and escaped forms included: this scan reads the same normalized copy
+  // the helper-name search does, because they ask the same question about the
+  // same text and one seeing through quoting while the other did not was an
+  // inconsistency in this file rather than a decision. The last two sit in a
+  // branch no synthetic path enters, so the runtime guard never fires either.
   for (const inner of [
     `  command -p cat /etc/passwd > /dev/null`,
     `  command -p cat /no/such/file 2> /dev/null`,
+    `  if [[ "$saw_tooling" == "never" ]]; then\n    "command" -p cat /etc/passwd\n  fi`,
+    `  if [[ "$saw_tooling" == "never" ]]; then\n    \\command -p cat /etc/passwd\n  fi`,
   ]) {
     for (const [, { candidate, version }] of installedBashes()) {
       assert.throws(
@@ -662,6 +670,53 @@ test("the gate probe's verdict does not depend on who ran it", () => {
   }
 });
 
+test("the gate probe pins the variables bash invents for itself", () => {
+  // No environment can reach these: bash creates them after startup. `OSTYPE`
+  // reads `darwin25` under 3.2, `darwin25.4.0` under 5.3 and `linux-gnu` on a
+  // runner, so before they were pinned this fixture classified differently on
+  // each interpreter here — the same defect a laptop-versus-runner split is.
+  const script = gateFixture({
+    inner: `  case "\${OSTYPE:-}" in
+    darwin* | linux*) saw_tooling=false ;;
+  esac`,
+  });
+  const verdicts = installedBashes().map(([, { candidate, version }]) => [
+    version,
+    [
+      ...gateClassifications([TRUSTED_PATH], {
+        script,
+        label: `OSTYPE under bash ${version}`,
+        bash: candidate,
+      }),
+    ],
+  ]);
+  for (const [version, verdict] of verdicts) {
+    assert.deepEqual(
+      verdict,
+      [[TRUSTED_PATH, "root-tooling-scripts"]],
+      `bash ${version} let the classifier read a machine-describing variable`,
+    );
+  }
+
+  // And the pinned values must reach a subshell and a function, since that is
+  // where the classifier's own work happens.
+  const reported = gateClassifications([TRUSTED_PATH], {
+    script: gateFixture({
+      inner: `  local seen
+  seen="$(printf '%s' "$OSTYPE")"
+  if [[ "$seen" != "__probe_fixed__" ]]; then
+    saw_tooling=false
+  fi`,
+    }),
+    label: "OSTYPE inside a subshell",
+  });
+  assert.deepEqual(
+    [...reported],
+    [[TRUSTED_PATH, "root-tooling-scripts"]],
+    "the pinned value did not reach a command substitution inside the classifier",
+  );
+});
+
 test("the gate probe ignores bash startup hooks in its environment", () => {
   // Non-interactive bash sources $BASH_ENV and imports exported functions at
   // STARTUP — before the probe empties PATH or installs the guard. Whatever they
@@ -688,6 +743,13 @@ test("the gate probe ignores bash startup hooks in its environment", () => {
   ];
   try {
     for (const [label, vars] of injections) {
+      // Snapshot and restore, rather than delete. Deleting unconditionally
+      // strips a `BASH_ENV` the test process legitimately had, leaving every
+      // later test in this same required suite running in an environment this
+      // one changed. `undefined` means absent, and has to go back to absent.
+      const before = new Map(
+        Object.keys(vars).map((name) => [name, process.env[name]]),
+      );
       Object.assign(process.env, vars);
       try {
         assert.throws(
@@ -697,7 +759,10 @@ test("the gate probe ignores bash startup hooks in its environment", () => {
           `the probe let ${label} define a helper it then accepted`,
         );
       } finally {
-        for (const name of Object.keys(vars)) delete process.env[name];
+        for (const [name, value] of before) {
+          if (value === undefined) delete process.env[name];
+          else process.env[name] = value;
+        }
       }
     }
   } finally {

@@ -158,6 +158,37 @@ const probeEnv = ({ empty, home, temp }) => ({
 });
 
 /**
+ * Pin the variables bash invents for itself, which no environment can reach.
+ *
+ * `probeEnv` decides what the shell is GIVEN; bash then creates its own, and
+ * several of them describe the machine. `OSTYPE` reads `darwin25.4.0` here,
+ * `darwin25` under 3.2 and `linux-gnu` on a runner, so a classifier branching on
+ * it — an ordinary thing to write, since macOS and GNU tooling differ — is
+ * machine-specific however clean the environment is. Enumerated with `compgen -v`
+ * on both interpreters rather than guessed; these are the ones that both describe
+ * the machine and can be reassigned. Assigning a sentinel rather than unsetting
+ * keeps a `case "$OSTYPE" in …` reaching its default arm instead of tripping
+ * `set -u`, and the value says where it came from if it ever surfaces.
+ *
+ * `BASH_LOADABLES_PATH` is here because it points into the interpreter's install
+ * tree; `enable -f` is already refused by restricted mode, so this is only tidy.
+ *
+ * Redirecting the group's stderr matters: the assignments run before `set -r`
+ * (which forbids redirection), and a bash that treats one of these as readonly
+ * should be stepped over rather than allowed to write to the stderr the caller
+ * asserts is empty.
+ */
+const FIX_SHELL_CREATED_VARS = `{
+  OSTYPE=__probe_fixed__
+  HOSTTYPE=__probe_fixed__
+  MACHTYPE=__probe_fixed__
+  HOSTNAME=__probe_fixed__
+  SHELL=__probe_fixed__
+  TERM=__probe_fixed__
+  BASH_LOADABLES_PATH=__probe_fixed__
+} 2> /dev/null`;
+
+/**
  * The three probe-owned directories a shell runs against, created under `dir`.
  *
  * @param {string} dir
@@ -317,13 +348,25 @@ __probe_guard() {
   local __word
   local __modifier=""
   local __found
+  local __dq
+  local __sq
   while :; do
     __word="\${__rest%%[[:space:]]*}"
     case "$__word" in
       "") return 0 ;;
       # A redirection or operator is not a command word (\`exec > /dev/null\`).
       [\\<\\>\\&\\|\\;]*) return 0 ;;
-      *=*) ;;
+      # A \`VAR=value\` prefix, but only when the word is whole. In
+      # \`seen="$(printf '%s' "$x")"\` the first word is \`seen="$(printf\` — a
+      # fragment of one assignment, not a prefix to a command — so stripping it
+      # would leave \`'%s'\` looking like a command and flag an honest classifier.
+      # Unbalanced quoting is how a fragment is recognised: the value runs past
+      # the space, so there is no command word on this line to check.
+      *=*)
+        __dq="\${__word//[!\\"]/}"
+        __sq="\${__word//[!\\']/}"
+        if ((\${#__dq} % 2 || \${#__sq} % 2)); then return 0; fi
+        ;;
       command | builtin | exec) __modifier="$__word" ;;
       -*)
         [ -n "$__modifier" ] || break
@@ -371,33 +414,24 @@ const PATH_ESCAPE = /(?:^|[\s;&|(`])command[ \t]+-[A-Za-z]*p/;
  * stop — it slips that check only because a redirection is not a command, an
  * accident of where the guard looks rather than a decision.
  *
- * This is read at extraction time rather than watched at run time. `$BASH_COMMAND`
- * does carry the redirection for a SIMPLE command (`IFS= read -r v < /etc/passwd`
- * appears in full, on 3.2 and 5.3), but a compound command's redirection is not
- * there: `while IFS= read -r l; do :; done < /etc/passwd` reports only
- * `IFS= read -r l`. A DEBUG-trap check would therefore be half-blind, and the
- * half it misses is the shape the classifier actually uses for its loop.
+ * Read at extraction time rather than watched at run time, because
+ * `$BASH_COMMAND` carries a SIMPLE command's redirection but not a compound
+ * one's: `while IFS= read -r l; do :; done < /etc/passwd` reports only
+ * `IFS= read -r l` on both interpreters, and that missing half is the shape the
+ * classifier's own loop uses.
  *
- * `inputRedirections` returns the offending lines. It strips what is legitimately
- * inline first: `[[ … ]]` and `(( … ))`, where `<` is a comparison rather than a
- * redirection; here-strings and heredocs, which read text from the script itself
- * and reach nothing outside it; and `< <(…)`, the process substitution the gate's
- * own loop uses to consume `json_change_paths`. Whatever `<` is left reads
- * something this probe did not supply. The matching is textual, so it errs loud:
- * a `<` inside a string literal is reported and has to be reworded.
+ * What is stripped before looking for a `<` is what legitimately reads inline:
+ * `[[ … ]]` and `(( … ))`, where `<` compares; here-strings and heredocs, which
+ * read text out of the script; and `< <(…)`, the gate loop's own input. The
+ * matching is textual, so it errs loud — a `<` in a string literal is reported.
  *
  * Named residual: the `[[ … ]]` strip is coarse, so `[[ -n "$(< /etc/hostname)" ]]`
- * escapes it — the whole conditional is removed before the `<` inside it is
- * looked at — and `$(< file)` runs no command, so the DEBUG guard does not see it
- * either. Measured, so the boundary is known rather than guessed: every plain
- * `< file` an ordinary classifier could write is still caught, including one
- * attached to a conditional (`[[ -n "$x" ]] < config`), one beside it
- * (`[[ -n "$x" ]] && read y < config`), one on the enclosing loop
- * (`while [[ … ]]; do :; done < config`), and `$(< file)` OUTSIDE a conditional.
- * Only `$(< file)` nested inside one slips, and closing that means reasoning
- * about shell syntax forms rather than closing a class. The empty `cwd` already
- * closes the version an ordinary edit reaches, since that one names a relative
- * path; this needs an absolute path to a host file.
+ * escapes it, and `$(< file)` runs no command so the guard misses it too. The
+ * boundary was measured: every plain `< file` an ordinary classifier could write
+ * is still caught — on the conditional, beside it, on the enclosing loop — as is
+ * `$(< file)` OUTSIDE a conditional. Only the nested form slips, it needs an
+ * absolute path, and closing it means enumerating syntax forms rather than
+ * closing a class; the empty `cwd` already covers the relative-path version.
  *
  * @param {string} source
  * @returns {Array<[number, string]>} [1-based line number, line]
@@ -715,9 +749,23 @@ export function gateClassifications(
 
   const fnSource = bashFunctionSource(script, GATE_CLASSIFIER, label, bash);
 
+  // `"new_helper"` and `\new_helper` are ordinary calls that a left-boundary
+  // match misses, because the character before the name is a quote or a
+  // backslash. Removing those characters catches both. Line breaks survive, so
+  // line numbers still line up with the original. Both read-time scans below use
+  // it: they ask the same question about the same text, and one of them seeing
+  // through quoting while the other did not was an inconsistency, not a policy.
+  // A name inside a string is then a false positive — loud, and fixed by naming
+  // the helper in GATE_PROBE_STUBS or rewording, which is the safe direction.
+  const unquoted = fnSource.replace(/["'\\]/g, "");
+
   const escape = fnSource
     .split("\n")
-    .findIndex((line) => PATH_ESCAPE.test(line));
+    .findIndex(
+      (line, index) =>
+        PATH_ESCAPE.test(line) ||
+        PATH_ESCAPE.test(unquoted.split("\n")[index] ?? ""),
+    );
   assert.equal(
     escape,
     -1,
@@ -745,13 +793,6 @@ export function gateClassifications(
     [...script.matchAll(BASH_DEFINITION)].map(definedName),
   );
   gateFunctions.delete(GATE_CLASSIFIER);
-  // `"new_helper"` and `\new_helper` are ordinary calls that a left-boundary
-  // match misses, because the character before the name is a quote or a
-  // backslash rather than a separator. Searching a copy with those characters
-  // removed catches both, and stacking it with the original loses nothing. A
-  // helper named inside a string is then a false positive — loud, and fixed by
-  // naming it in GATE_PROBE_STUBS, which is the safe direction to be wrong in.
-  const unquoted = fnSource.replace(/["'\\]/g, "");
   const called = [...gateFunctions]
     .filter((helper) => {
       const call = new RegExp(
@@ -779,6 +820,7 @@ set -uo pipefail
 # halves at once, and not a command modifier, so unwrapping cannot reach it.
 # Turning hashing off makes \`hash -p\` fail and the lookup miss, on 3.2 and 5.x.
 set +h
+${FIX_SHELL_CREATED_VARS}
 ${restrictPath(dirs.empty)}
 # The guard's own channel, duplicated from the real stderr while redirections
 # are still allowed and before any classifier code can touch it.
