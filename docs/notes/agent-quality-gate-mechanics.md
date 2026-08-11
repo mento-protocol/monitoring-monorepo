@@ -166,8 +166,11 @@ Trunk scan.
 routes to the arm it is supposed to. The probe runs it with an empty `$PATH`
 under `set -r`, so the function must reach nothing but shell builtins, keywords
 and `json_change_paths` — no external command, and no output redirection, which
-restricted mode forbids. Editing it to need either fails that check with an
-explanation; change the probe in the same PR or keep the classifier free of both.
+restricted mode forbids. Its verdict must also be a function of the change paths
+alone, so it may not read anything the probe did not supply: `< <(json_change_paths …)`,
+heredocs and here-strings are fine, a redirection from a file is not. Editing it
+to need any of those fails the check with an explanation; change the probe in the
+same PR or keep the classifier free of them.
 
 ### Scoped local test runs (Refs #1413)
 

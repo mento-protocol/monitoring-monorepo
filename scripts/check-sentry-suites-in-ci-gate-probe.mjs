@@ -71,6 +71,21 @@ const MISSING_COMMAND_MARKER = "__probe_missing_command__";
 const NONZERO_EXIT_MARKER = "__probe_nonzero_exit__";
 
 /**
+ * Appended when the classifier reads something the probe did not supply. Same
+ * job as the restricted-mode text below: say whose rule this is and what to do,
+ * so the reader does not go looking for a bug in the gate.
+ */
+const READ_ONLY_STUB_EXPLANATION =
+  `\n\nThe probe re-runs \`${GATE_CLASSIFIER}\` against synthetic change paths, so its verdict has to be a ` +
+  "function of those paths and nothing else. A redirection that reads a file makes it a function of the " +
+  "machine — the same drift the stubbed-helper check exists to stop, reaching the classifier through a " +
+  "redirection instead of a command. Allowed: `< <(json_change_paths …)`, heredocs and here-strings, which " +
+  "read text out of the script itself. The fix is to take the input from `json_change_paths` (which the " +
+  "probe stubs) rather than from the filesystem. If the classifier genuinely must read a file, this probe " +
+  "has to stub that too — see scripts/check-sentry-suites-in-ci-gate-probe.mjs. Note this check is textual, " +
+  "so a `<` inside a string literal is reported as well and simply needs rewording.";
+
+/**
  * Appended when bash refuses something because the probe restricted the shell.
  * The bash diagnostic locates the line but not the reason, and "restricted"
  * reads as a broken probe to whoever meets it years from now.
@@ -208,6 +223,48 @@ __probe_guard() {
 const PATH_ESCAPE = /(?:^|[\s;&|(`])command[ \t]+-[A-Za-z]*p/;
 
 /**
+ * An input redirection that reads something other than the stub.
+ *
+ * The verdict is supposed to be a function of the synthetic change paths this
+ * probe feeds in, and nothing else. A `read` from a file makes it a function of
+ * the machine instead, which is the same drift the helper-set check exists to
+ * stop — it slips that check only because a redirection is not a command, an
+ * accident of where the guard looks rather than a decision.
+ *
+ * This is read at extraction time rather than watched at run time. `$BASH_COMMAND`
+ * does carry the redirection for a SIMPLE command (`IFS= read -r v < /etc/passwd`
+ * appears in full, on 3.2 and 5.3), but a compound command's redirection is not
+ * there: `while IFS= read -r l; do :; done < /etc/passwd` reports only
+ * `IFS= read -r l`. A DEBUG-trap check would therefore be half-blind, and the
+ * half it misses is the shape the classifier actually uses for its loop.
+ *
+ * `inputRedirections` returns the offending lines. It strips what is legitimately
+ * inline first: `[[ … ]]` and `(( … ))`, where `<` is a comparison rather than a
+ * redirection; here-strings and heredocs, which read text from the script itself
+ * and reach nothing outside it; and `< <(…)`, the process substitution the gate's
+ * own loop uses to consume `json_change_paths`. Whatever `<` is left reads
+ * something this probe did not supply. The matching is textual, so it errs loud:
+ * a `<` inside a string literal is reported and has to be reworded.
+ *
+ * @param {string} source
+ * @returns {Array<[number, string]>} [1-based line number, line]
+ */
+export function inputRedirections(source) {
+  return source
+    .split("\n")
+    .map((line, index) => [index + 1, line])
+    .filter(([, line]) =>
+      line
+        .replace(/\[\[.*?\]\]/g, "")
+        .replace(/\(\(.*?\)\)/g, "")
+        .replace(/<<</g, "")
+        .replace(/<<-?/g, "")
+        .replace(/<\s*<\(/g, "")
+        .includes("<"),
+    );
+}
+
+/**
  * How far past a definition the end-of-function scan will look. The gate's
  * classifier is ~50 lines and the scan rewrites a growing candidate per line, so
  * an unbounded walk over a gate whose function never closes would grind through
@@ -270,6 +327,15 @@ const definedName = (match) => match[1] ?? match[2];
  * which is exactly the trailer above. Restricted mode is what makes that
  * harmless: no output redirection, no `/` in a command name, and nothing on
  * PATH to find.
+ *
+ * Named residual: a same-line trailer on the closing brace runs ONCE here, while
+ * the scan determines the closing column, and restricted mode bounds it rather
+ * than preventing it — `kill`, for instance, is a builtin and stays available.
+ * Closing that would mean finding the column without sourcing the line at all.
+ * It is accepted because reaching it needs a destructive command written onto
+ * the closing-brace line of this repo's own reviewed gate script, which is the
+ * threat model the PR for this probe states: drift and mistake, not an author
+ * who could edit this file just as easily.
  */
 const FUNCTION_END_SCAN = `
 set -uo pipefail
@@ -479,6 +545,15 @@ export function gateClassifications(
     `\`${GATE_CLASSIFIER}\` in ${label} runs \`command -p\`, which uses a default PATH that finds the standard ` +
       `utilities whatever the probe sets \`$PATH\` to, so the probe cannot bound what it executes: ` +
       `line ${escape + 1} is ${JSON.stringify(fnSource.split("\n")[escape])}`,
+  );
+
+  const reads = inputRedirections(fnSource);
+  assert.deepEqual(
+    reads,
+    [],
+    `\`${GATE_CLASSIFIER}\` in ${label} reads something the probe did not supply: ` +
+      `${reads.map(([line, text]) => `line ${line} is ${JSON.stringify(text.trim())}`).join("; ")}.` +
+      READ_ONLY_STUB_EXPLANATION,
   );
 
   // A helper the body calls but the probe does not define runs as a missing

@@ -78,6 +78,7 @@ export {
   gateClassifications,
   GATE_PATH,
   GATE_ROOT_PACKAGE_JSON_CLASSES,
+  inputRedirections,
 } from "./check-sentry-suites-in-ci-gate-probe.mjs";
 
 // A throw here is the intended failure mode for a malformed workflow.

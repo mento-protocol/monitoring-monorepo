@@ -46,8 +46,11 @@ import {
   bashFunctionSource,
   CI,
   escapingScriptSymlinks,
+  GATE,
   GATE_CLASSIFIER,
   gateClassifications,
+  GATE_PATH,
+  inputRedirections,
   INSTALL_ACTION,
   PIN_VALIDATOR_COMMAND,
   PKG,
@@ -632,6 +635,59 @@ test("the gate probe refuses an executable path and a classifier that fails", ()
         }),
       /returned non-zero/,
       `bash ${version} accepted a class from a classifier that then failed`,
+    );
+  }
+});
+
+test("the gate probe rejects a classifier that reads anything it did not supply", () => {
+  // The verdict has to be a function of the synthetic change paths and nothing
+  // else. A `read` from a file makes it a function of the machine — the drift
+  // the stubbed-helper check exists to stop, arriving through a redirection
+  // rather than a command, which is why that check never saw it.
+  //
+  // Checked by reading, not by watching. `$BASH_COMMAND` carries the redirection
+  // for a SIMPLE command on both interpreters, but a compound's redirection is
+  // absent: `while IFS= read -r l; do :; done < /etc/passwd` reports only
+  // `IFS= read -r l`. That missing half is the shape the classifier's own loop
+  // uses, so a run-time guard would be blind to exactly the wrong case.
+  for (const inner of [
+    `  local value
+  IFS= read -r value < /etc/passwd`,
+    `  local l
+  while IFS= read -r l; do :; done < /etc/passwd`,
+  ]) {
+    assert.throws(
+      () =>
+        gateClassifications([TRUSTED_PATH], {
+          script: gateFixture({ inner }),
+          label: "file read",
+        }),
+      /reads something the probe did not supply/,
+      "the probe let the classifier's verdict depend on a file",
+    );
+  }
+
+  // The case most likely to break: the real gate's own loop takes its input
+  // from a process substitution, and heredocs read text out of the script
+  // itself. Both must stay accepted, or this check reds every honest gate.
+  assert.deepEqual(
+    inputRedirections(bashFunctionSource(GATE, GATE_CLASSIFIER, GATE_PATH)),
+    [],
+    "the real gate's `done < <(json_change_paths …)` is being read as an outside read",
+  );
+  for (const inner of [
+    `  local extra
+  while IFS= read -r extra; do :; done < <(json_change_paths "package.json")`,
+    `  : <<'NOTE'
+inline text, read out of the script itself
+NOTE`,
+    `  local here
+  here="$(cat <<<"inline")"`,
+  ]) {
+    assert.deepEqual(
+      inputRedirections(`f() {\n${inner}\n}\n`),
+      [],
+      `a legitimate inline read was rejected: ${JSON.stringify(inner)}`,
     );
   }
 });
