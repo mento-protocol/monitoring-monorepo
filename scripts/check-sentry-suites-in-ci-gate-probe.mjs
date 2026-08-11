@@ -57,6 +57,22 @@
  *   A same-line trailer on the closing brace runs once while the extractor finds
  *   the closing column, bounded by restricted mode and the empty PATH rather
  *   than prevented; see check-sentry-suites-in-ci-gate-extract.mjs.
+ *
+ *   The textual guard alone, on bash 3.2 with a command's stderr closed. This is
+ *   the enabler behind a family of reports rather than a doorway of its own, and
+ *   it is worth stating once. Three layers normally see an unprovided command:
+ *   `command_not_found_handle` (bash 4.0+), bash's own `command not found` on
+ *   stderr, and this module's DEBUG-trap guard. On 3.2 the first does not exist,
+ *   and `2>&-` removes the second — so a `LABEL=… cat …` shape is detected only
+ *   if the guard's own word splitting is right, and every mis-split there has
+ *   been silent under exactly those two conditions. `trap - DEBUG` inside the
+ *   classifier removes the guard as well, leaving nothing; that needs a
+ *   classifier manipulating its own trap, which no honest edit does. The guard
+ *   is textual because the alternative is `case`-aware parsing of bash source,
+ *   which is the class of heuristic that produced most of the defects already
+ *   fixed here. A backstop that does not parse at all — reporting any non-zero
+ *   command exit — would close the family; see the note on `set -e`/ERR-trap
+ *   semantics in the PR discussion before attempting it.
  */
 
 import assert from "node:assert/strict";
@@ -256,11 +272,31 @@ __probe_take() {
     __c="\${__s:0:1}"
     __s="\${__s:1}"
     if [ -n "$__q" ]; then
+      # Inside double quotes a backslash still escapes the closing quote, so it
+      # has to consume the next character or the word ends early — which is how
+      # \`LABEL="x \\" : y" cat\` used to end at the escaped quote, leaving \`:\`
+      # to look like the command and \`cat\` unchecked. Single quotes escape
+      # nothing, so the backslash there is an ordinary character.
+      if [ "$__q" = '"' ] && [ "$__c" = '\\' ] && [ -n "$__s" ]; then
+        __word="$__word$__c\${__s:0:1}"
+        __s="\${__s:1}"
+        continue
+      fi
       __word="$__word$__c"
       if [ "$__c" = "$__q" ]; then __q=""; fi
       continue
     fi
     case "$__c" in
+      # Unquoted, a backslash escapes whatever follows — including a space, a
+      # quote, and a \`$\` that would otherwise open a substitution.
+      '\\')
+        if [ -n "$__s" ]; then
+          __word="$__word$__c\${__s:0:1}"
+          __s="\${__s:1}"
+        else
+          __word="$__word$__c"
+        fi
+        ;;
       '"' | "'")
         __q="$__c"
         __word="$__word$__c"

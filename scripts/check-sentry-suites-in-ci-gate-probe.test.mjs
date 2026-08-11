@@ -349,13 +349,12 @@ test("the gate probe fails closed on a body it cannot fully provide for", () => 
 });
 
 test("the gate probe sees through every wrapper a command can hide behind", () => {
-  // The guard reads a command word, so anything that WRAPS the real command
-  // hides it. `command`, `builtin` and `exec` are the whole set of bash command
-  // modifiers; the other routes to a command re-enter the DEBUG trap on their
-  // own, which is why unwrapping those three is a rule rather than a list that
-  // grows. Each row is asserted on every installed bash, because two of them
-  // behaved differently on 3.2 and 5.3 before this: `command cat` was caught on
-  // 5.3 only, by `command_not_found_handle`, which 3.2 does not have.
+  // The guard reads a command word, so anything WRAPPING the real command hides
+  // it. `command`, `builtin` and `exec` are the whole set of bash command
+  // modifiers; every other route re-enters the DEBUG trap on its own, which
+  // makes unwrapping those three a rule rather than a list that grows. Each row
+  // runs on every installed bash: several were caught on 5.3 only, by
+  // `command_not_found_handle`, which 3.2 does not have.
   const hidden = [
     ["command", `  command cat /no/such/file 2> /dev/null`],
     // A value with a space in it: the first space falls inside the assignment,
@@ -363,6 +362,9 @@ test("the gate probe sees through every wrapper a command can hide behind", () =
     // entirely. Ordinary shell, and bash 3.2 proves who caught it — it has no
     // `command_not_found_handle`, so before this the marker never appeared.
     ["an assignment prefix", `  LABEL="two words" cat /missing`],
+    // On 3.2 with `2>&-` this had no detector at all: no handler, no diagnostic
+    // on the closed stderr, and a scanner that stopped at the escaped quote.
+    ["an escaped quote", `  LABEL="x \\" : y" cat /missing 2>&-`],
     ["exec in a subshell", `  ( exec cat /no/such/file 2> /dev/null )`],
     ["the time keyword", `  time cat /no/such/file 2> /dev/null`],
     ["eval", `  eval "cat /no/such/file 2> /dev/null"`],
