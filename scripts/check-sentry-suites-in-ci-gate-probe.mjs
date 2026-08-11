@@ -71,6 +71,83 @@ const MISSING_COMMAND_MARKER = "__probe_missing_command__";
 const NONZERO_EXIT_MARKER = "__probe_nonzero_exit__";
 
 /**
+ * How long any probe shell may run before it is killed and reported.
+ *
+ * The classifier is a `case` statement over a handful of synthetic paths, and
+ * the extraction sources ~50 candidate prefixes. Measured against the real gate
+ * they take 130ms and 75ms. 30 seconds is roughly 200x the slower of the two,
+ * which a loaded CI runner cannot plausibly need and a `while :; do :; done`
+ * cannot plausibly finish inside. Without a bound, such a loop hangs the routing
+ * test until whatever outer limit the job has, reported as a job timeout rather
+ * than as a broken classifier.
+ */
+const PROBE_TIMEOUT_MS = 30_000;
+
+/**
+ * Run a probe shell with a deadline, and make the deadline reach its children.
+ *
+ * `spawnSync`'s own `timeout` signals the shell it started and nothing else. The
+ * classifier runs inside a `$(…)`, which is a separate process: killing the
+ * parent leaves it spinning, reparented to init, burning a core until someone
+ * notices. Measured, not assumed — a `while :; do :; done` fixture left two such
+ * processes behind at 43% CPU each.
+ *
+ * So the shell is started `detached`, which makes it a process-group leader, and
+ * on timeout the whole group is killed by negative pid. Everything the probe
+ * started is in that group; nothing else is.
+ *
+ * @param {string} bash
+ * @param {string[]} args
+ * @param {object} options
+ */
+const runProbeShell = (bash, args, options) => {
+  const result = spawnSync(bash, args, {
+    ...options,
+    encoding: "utf8",
+    env: probeEnv(),
+    detached: true,
+  });
+  if (result.error?.code === "ETIMEDOUT" && typeof result.pid === "number") {
+    try {
+      process.kill(-result.pid, "SIGKILL");
+    } catch {
+      // The group is already gone, which is the outcome this wanted.
+    }
+  }
+  return result;
+};
+
+/**
+ * The environment for every probe shell: this process's, minus the ways an
+ * ambient shell can define code before the probe's own setup runs.
+ *
+ * Non-interactive bash sources `$BASH_ENV` and imports exported functions from
+ * the environment at STARTUP — before the program below empties PATH or installs
+ * the guard. Whatever they define is then a shell function, so `command -v`
+ * reports it available and the guard waves it through. The classifier's verdict
+ * would depend on the operator's shell setup rather than on the gate.
+ *
+ * `SHELLOPTS`/`BASHOPTS` are dropped for the same reason: bash reads them at
+ * startup, so they change how the probe shell behaves before it can say
+ * otherwise.
+ */
+const probeEnv = () => {
+  const env = { ...process.env };
+  for (const name of Object.keys(env)) {
+    if (
+      name === "BASH_ENV" ||
+      name === "ENV" ||
+      name === "SHELLOPTS" ||
+      name === "BASHOPTS" ||
+      name.startsWith("BASH_FUNC_")
+    ) {
+      delete env[name];
+    }
+  }
+  return env;
+};
+
+/**
  * Appended when the classifier reads something the probe did not supply. Same
  * job as the restricted-mode text below: say whose rule this is and what to do,
  * so the reader does not go looking for a bug in the gate.
@@ -431,10 +508,17 @@ export function bashFunctionSource(script, name, label, bash = "bash") {
     const empty = join(dir, "empty");
     mkdirSync(empty);
     const max = Math.min(tailLines.length, MAX_FUNCTION_LINES);
-    const scan = spawnSync(
+    const scan = runProbeShell(
       bash,
       ["-s", "--", name, tailPath, dir, "candidate.sh", String(max), empty],
-      { input: FUNCTION_END_SCAN, encoding: "utf8" },
+      { input: FUNCTION_END_SCAN, cwd: empty, timeout: PROBE_TIMEOUT_MS },
+    );
+    // The candidate that completes the definition also runs whatever top-level
+    // code shared its last line, so this scan is not immune to a loop either.
+    assert.notEqual(
+      scan.error?.code,
+      "ETIMEDOUT",
+      `finding where \`${name}\` ends in ${label} did not finish within ${PROBE_TIMEOUT_MS}ms — a candidate the scan sourced did not terminate`,
     );
     assert.equal(
       scan.status,
@@ -467,7 +551,11 @@ export function bashFunctionSource(script, name, label, bash = "bash") {
 
     const head = tailLines.slice(0, endLine - 1);
     const text = `${[...head, lastLine.slice(0, endColumn)].join("\n")}\n`;
-    const parse = spawnSync(bash, ["-n"], { input: text, encoding: "utf8" });
+    const parse = runProbeShell(bash, ["-n"], {
+      input: text,
+      cwd: empty,
+      timeout: PROBE_TIMEOUT_MS,
+    });
     assert.equal(
       parse.status,
       0,
@@ -502,14 +590,21 @@ export function bashFunctionSource(script, name, label, bash = "bash") {
  *
  * @param {string[]} paths distinct, free of tabs and newlines — the wire format
  *   is tab-separated, so a path carrying either is rejected, not misparsed
- * @param {{ script?: string, label?: string, bash?: string }} [options] override
- *   the script to read, so the regression tests can drive this whole path with a
- *   fixture, and the interpreter, so they can drive it with every installed bash
+ * @param {{ script?: string, label?: string, bash?: string, timeoutMs?: number }}
+ *   [options] override the script to read, so the regression tests can drive
+ *   this whole path with a fixture; the interpreter, so they can drive it with
+ *   every installed bash; and the timeout, so the test for a nonterminating
+ *   classifier need not wait the full production bound to prove it
  * @returns {Map<string, string>}
  */
 export function gateClassifications(
   paths,
-  { script = GATE, label = GATE_PATH, bash = "bash" } = {},
+  {
+    script = GATE,
+    label = GATE_PATH,
+    bash = "bash",
+    timeoutMs = PROBE_TIMEOUT_MS,
+  } = {},
 ) {
   assert.ok(
     Array.isArray(paths) && paths.length > 0,
@@ -566,12 +661,21 @@ export function gateClassifications(
     [...script.matchAll(BASH_DEFINITION)].map(definedName),
   );
   gateFunctions.delete(GATE_CLASSIFIER);
+  // `"new_helper"` and `\new_helper` are ordinary calls that a left-boundary
+  // match misses, because the character before the name is a quote or a
+  // backslash rather than a separator. Searching a copy with those characters
+  // removed catches both, and stacking it with the original loses nothing. A
+  // helper named inside a string is then a false positive — loud, and fixed by
+  // naming it in GATE_PROBE_STUBS, which is the safe direction to be wrong in.
+  const unquoted = fnSource.replace(/["'\\]/g, "");
   const called = [...gateFunctions]
-    .filter((helper) =>
-      new RegExp(`(?:^|[\\s;&|(\`])${helper}(?![A-Za-z0-9_])`, "m").test(
-        fnSource,
-      ),
-    )
+    .filter((helper) => {
+      const call = new RegExp(
+        `(?:^|[\\s;&|(\`])${helper}(?![A-Za-z0-9_])`,
+        "m",
+      );
+      return call.test(fnSource) || call.test(unquoted);
+    })
     .sort();
   assert.deepEqual(
     called,
@@ -633,13 +737,30 @@ for __probe_path in "$@"; do
   fi
 done
 `;
-    run = spawnSync(bash, ["-s", "--", ...paths], {
+    run = runProbeShell(bash, ["-s", "--", ...paths], {
       input: program,
-      encoding: "utf8",
+      // A fresh empty directory, so the checkout is not reachable at all. This
+      // is what closes ambient filesystem reads without naming the primitives
+      // that can make them: `[[ -f package.json ]]` is false, a glob matches
+      // nothing, and `test -e` finds nothing, because there is nothing there.
+      // The classifier's only legitimate input is the stubbed
+      // `json_change_paths`, so it has no business reading the tree anyway.
+      cwd: empty,
+      timeout: timeoutMs,
     });
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+  // A timeout also arrives as a signal, so it is read first — otherwise a
+  // classifier that never terminates would be reported as one that ran a
+  // command the probe does not provide.
+  assert.notEqual(
+    run.error?.code,
+    "ETIMEDOUT",
+    `\`${GATE_CLASSIFIER}\` from ${label} did not terminate within ${timeoutMs}ms. A classifier is a \`case\` ` +
+      "over the change paths and should finish in milliseconds; look for a loop in it that never ends, or a " +
+      "`read` waiting on input the probe does not supply.",
+  );
   assert.equal(
     run.error,
     undefined,

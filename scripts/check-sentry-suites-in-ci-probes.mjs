@@ -69,6 +69,10 @@ export const PROBES = "scripts/check-sentry-suites-in-ci-probes.mjs";
 /** The sibling module that lifts the gate's classifier out and re-runs it. */
 export const GATE_PROBE = "scripts/check-sentry-suites-in-ci-gate-probe.mjs";
 
+/** The sibling test module holding that probe's own invariants. */
+export const GATE_PROBE_TESTS =
+  "scripts/check-sentry-suites-in-ci-gate-probe.test.mjs";
+
 // The gate probe owns the gate file it reads; re-exported here so the tests
 // keep importing every probe from one façade.
 export {
@@ -533,6 +537,7 @@ const STATIC_PROBE_INPUTS = new Map([
   ["package.json", "the alias map `aliasesFor` resolves suites through"],
   ["scripts/agent-quality-gate.sh", "`gateClassifications` runs its `case`"],
   [GATE_PROBE, "the probe that lifts the gate's classifier out and re-runs it"],
+  [GATE_PROBE_TESTS, "that probe's own invariants, which this check runs"],
   [
     "scripts/check-agent-quality-gate-package-scripts.sh",
     "`validatorPins` runs it to enumerate the pins it enforces",

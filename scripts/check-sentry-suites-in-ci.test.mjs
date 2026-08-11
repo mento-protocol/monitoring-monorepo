@@ -97,6 +97,8 @@ import { countLines, HARD_CAP } from "./file-size-watchlist.mjs";
 // the line cap. Importing it registers its `test()`s in this run, so the single
 // `node scripts/check-sentry-suites-in-ci.test.mjs` CI step runs them too.
 import "./check-sentry-suites-in-ci-lifecycle.test.mjs";
+// The gate-routing probe's own invariants, split out for the same reason.
+import "./check-sentry-suites-in-ci-gate-probe.test.mjs";
 import {
   CI,
   collectCompositeActions,
@@ -972,6 +974,7 @@ test("the checker's own files stay under the file-size hard cap", () => {
     "scripts/check-sentry-suites-in-ci-core-commands.mjs",
     "scripts/check-sentry-suites-in-ci-probes.mjs",
     "scripts/check-sentry-suites-in-ci-gate-probe.mjs",
+    "scripts/check-sentry-suites-in-ci-gate-probe.test.mjs",
     "scripts/check-sentry-suites-in-ci-lifecycle.test.mjs",
   ];
   const over = files
