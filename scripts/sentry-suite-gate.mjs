@@ -210,17 +210,31 @@ export function reconcile(found, manifestKeys) {
 export function parseCountLine(stdout, stderr) {
   const combined = `${stdout}\n${stderr}`;
   const caseLines = (stdout.match(/^ok /gm) || []).length;
+  // Counted across BOTH streams: the harness writes `not ok` to stderr, but a
+  // suite that prints one to stdout is exactly the shape being defended against.
+  // One line per failure, so this reconciles exactly against the summary.
+  const failLines = (combined.match(/^not ok /gm) || []).length;
   const passFail = combined.match(/^(\d+) passed, (\d+) failed$/m);
   if (passFail) {
-    return { pass: Number(passFail[1]), fail: Number(passFail[2]), caseLines };
+    return {
+      pass: Number(passFail[1]),
+      fail: Number(passFail[2]),
+      caseLines,
+      failLines,
+    };
   }
   const failPass = combined.match(/^(\d+) failed, (\d+) passed$/m);
   if (failPass) {
-    return { pass: Number(failPass[2]), fail: Number(failPass[1]), caseLines };
+    return {
+      pass: Number(failPass[2]),
+      fail: Number(failPass[1]),
+      caseLines,
+      failLines,
+    };
   }
   const passOnly = combined.match(/^(\d+) passed$/m);
   if (passOnly) {
-    return { pass: Number(passOnly[1]), fail: 0, caseLines };
+    return { pass: Number(passOnly[1]), fail: 0, caseLines, failLines };
   }
   throw new GateError(
     "count-line output has no `<n> passed`, `<m> failed, <n> passed`, or `<n> passed, <m> failed` summary line",
@@ -238,6 +252,13 @@ export function parseCountLine(stdout, stderr) {
 export function parseNodeTest(stdout, stderr) {
   const combined = `${stdout}\n${stderr}`;
   const caseLines = (combined.match(/^✔ /gm) || []).length;
+  // `failLines` here is a PRESENCE signal, not a count that reconciles against
+  // the summary: the spec reporter prints each failure inline AND repeats it
+  // under a `✖ failing tests:` header, so one real failure emits three `✖`
+  // lines (measured). What is exact is the zero case — a run reporting
+  // `ℹ fail 0` emits no `✖` line at all — so `judgeSuite` requires that
+  // direction rather than an equality the format cannot support.
+  const failLines = (combined.match(/^✖ /gm) || []).length;
   const passMatch = combined.match(/^ℹ pass (\d+)$/m);
   const failMatch = combined.match(/^ℹ fail (\d+)$/m);
   if (!passMatch || !failMatch) {
@@ -249,6 +270,8 @@ export function parseNodeTest(stdout, stderr) {
     pass: Number(passMatch[1]),
     fail: Number(failMatch[1]),
     caseLines,
+    failLines,
+    exactFailLines: false,
   };
 }
 
@@ -323,6 +346,30 @@ export function judgeSuite(result, entry) {
     return reasons; // no counts to judge
   }
   if (result.fail !== 0) reasons.push(`${result.fail} test(s) reported failed`);
+
+  // Reconcile the FAILURE side against emitted lines, the mirror of the
+  // `pass == caseLines` check below. Without it the summary was trusted alone
+  // for failures, so a suite printing `ok before`, `1 passed`, then
+  // `not ok failure after summary` was accepted at pass=1/lines=1 — the gate
+  // reproducing the very "summary does not describe what ran" defect it exists
+  // to catch. Any emitted failure line rejects the suite whatever the summary
+  // claims; a zero-failure summary must come with zero failure lines.
+  if (result.failLines > 0) {
+    reasons.push(
+      `${result.failLines} failure line(s) emitted while the summary reported fail=${result.fail} — ` +
+        "a failure printed after the summary still means the suite failed",
+    );
+  }
+  // Where one emitted line means exactly one failure (the count-line harness),
+  // require the two numbers to agree outright. The node:test spec reporter
+  // repeats failures in a trailing block, so it opts out via `exactFailLines`
+  // and is covered by the zero-case rule above.
+  if (result.exactFailLines !== false && result.failLines !== result.fail) {
+    reasons.push(
+      `the summary reported fail=${result.fail} but ${result.failLines} failure line(s) were emitted`,
+    );
+  }
+
   if (result.pass < entry.floor) {
     reasons.push(
       `pass ${result.pass} < floor ${entry.floor} — if tests were intentionally deleted, lower the floor for ${result.suite} in ${MANIFEST_LABEL} to ${result.pass}; otherwise a test stopped running and that is the bug.`,

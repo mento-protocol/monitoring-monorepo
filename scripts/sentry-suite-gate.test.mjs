@@ -207,6 +207,87 @@ await test("red (a): a hollow suite whose summary overcounts fails pass==lines",
   }
 });
 
+await test("red (a): a failure emitted AFTER the summary still fails the gate", async () => {
+  const root = makeRoot();
+  try {
+    // Codex 3759734266, verbatim. The summary is printed before a later failing
+    // test, so it reports fail=0 and pass=1 with exactly one `ok` line. Every
+    // count-based check agrees with itself; only reconciling the FAILURE side
+    // against emitted lines catches it. Before the fix this returned exit 0 with
+    // `pass=1 floor=1 lines=1` — the gate reproducing the defect it exists to
+    // catch.
+    writeSuite(
+      root,
+      "sentry-alpha.test.mjs",
+      [
+        'process.stdout.write("ok before\\n");',
+        'process.stdout.write("1 passed\\n");',
+        'process.stdout.write("not ok failure after summary\\n");',
+        "",
+      ].join("\n"),
+    );
+    writeManifest(root, {
+      "scripts/sentry-alpha.test.mjs": { reporter: "count-line", floor: 1 },
+    });
+    const { status, stdout } = runGate(root);
+    assert(status !== 0, "a failure after the summary must red the gate");
+    assert(
+      stdout.includes("failure line(s) emitted"),
+      "should cite the emitted failure line, not just the summary",
+    );
+  } finally {
+    cleanup(root);
+  }
+});
+
+await test("red (a): a `not ok` on stderr fails even when the summary says fail=0", async () => {
+  const root = makeRoot();
+  try {
+    // The real harness writes `not ok` to stderr, so the reconciliation has to
+    // read both streams, not stdout alone.
+    writeSuite(
+      root,
+      "sentry-alpha.test.mjs",
+      [
+        'process.stdout.write("ok one\\n");',
+        'process.stderr.write("not ok two\\n  boom\\n");',
+        'process.stdout.write("1 passed\\n");',
+        "",
+      ].join("\n"),
+    );
+    writeManifest(root, {
+      "scripts/sentry-alpha.test.mjs": { reporter: "count-line", floor: 1 },
+    });
+    const { status } = runGate(root);
+    assert(status !== 0, "a stderr `not ok` must red the gate");
+  } finally {
+    cleanup(root);
+  }
+});
+
+await test("red (a): a node:test suite that really fails is rejected", async () => {
+  const root = makeRoot();
+  try {
+    writeSuite(
+      root,
+      "sentry-nodetest.test.mjs",
+      [
+        'import { test } from "node:test";',
+        'test("a", () => {});',
+        'test("b", () => { throw new Error("boom"); });',
+        "",
+      ].join("\n"),
+    );
+    writeManifest(root, {
+      "scripts/sentry-nodetest.test.mjs": { reporter: "node-test", floor: 1 },
+    });
+    const { status } = runGate(root);
+    assert(status !== 0, "a failing node:test suite must red the gate");
+  } finally {
+    cleanup(root);
+  }
+});
+
 // ── (b) R1: NODE_OPTIONS neutering, and the env -u latch that defeats it ──────
 
 await test("red (b): NODE_OPTIONS=--import…exit(0) neuters a plain `node` run (attack is real)", async () => {
@@ -450,6 +531,50 @@ await test("parseCountLine throws when there is no summary line (fail closed)", 
     threw = true;
   }
   assert(threw, "a missing summary must throw");
+});
+
+await test("parseCountLine counts emitted `not ok` lines across both streams", async () => {
+  const r = parseCountLine("ok a\nnot ok b\n1 passed\n", "not ok c\n");
+  assertEqual(r.pass, 1, "pass");
+  assertEqual(r.fail, 0, "summary fail");
+  assertEqual(r.failLines, 2, "failLines counts stdout + stderr");
+});
+
+await test("judgeSuite rejects a summary that disagrees with emitted failures", async () => {
+  const reasons = judgeSuite(
+    { exit: 0, pass: 1, fail: 0, caseLines: 1, failLines: 1 },
+    { floor: 1 },
+  );
+  assert(reasons.length > 0, "must reject");
+  assert(
+    reasons.some((r) => r.includes("failure line(s) emitted")),
+    `should cite the emitted failure: ${reasons.join("; ")}`,
+  );
+});
+
+await test("judgeSuite accepts a clean count-line result", async () => {
+  const reasons = judgeSuite(
+    { exit: 0, pass: 3, fail: 0, caseLines: 3, failLines: 0 },
+    { floor: 3 },
+  );
+  assertEqual(reasons.length, 0, `expected no reasons: ${reasons.join("; ")}`);
+});
+
+await test("judgeSuite does not demand exact failure-line equality for node:test", async () => {
+  // The spec reporter repeats each failure under a `✖ failing tests:` header,
+  // so one failure emits three `✖` lines; only the zero case is exact.
+  const reasons = judgeSuite(
+    {
+      exit: 0,
+      pass: 2,
+      fail: 0,
+      caseLines: 2,
+      failLines: 0,
+      exactFailLines: false,
+    },
+    { floor: 2 },
+  );
+  assertEqual(reasons.length, 0, `expected no reasons: ${reasons.join("; ")}`);
 });
 
 await test("parseNodeTest reads `ℹ pass`/`ℹ fail` and counts ✔ lines", async () => {
