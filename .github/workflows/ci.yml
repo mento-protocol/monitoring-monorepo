@@ -1181,6 +1181,12 @@ jobs:
         # redundant until PR C removes the duplicated suite steps from this job.
         # See issue #1779 and ADR 0062.
         run: node scripts/sentry-suite-gate.test.mjs
+      - name: Sentry-suite gate integrity self-test
+        # The gate's integrity half (digest verification, watch-set derivation,
+        # step-summary isolation), split out when its sibling crossed the
+        # 1,000-line cap. Also a scripts/sentry-*.test.mjs, so the same #1721
+        # coverage rule requires a direct invocation here.
+        run: node scripts/sentry-suite-gate-integrity.test.mjs
       - name: Sentry suite CI coverage assertion
         # The meta-check that keeps this gap from recurring: every
         # scripts/sentry-*.test.mjs must be invoked by this job as a direct

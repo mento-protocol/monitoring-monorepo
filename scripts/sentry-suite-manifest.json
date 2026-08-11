@@ -22,9 +22,13 @@
         "importer": "scripts/tf-stacks.test.mjs"
       }
     },
+    "scripts/sentry-suite-gate-integrity.test.mjs": {
+      "reporter": "count-line",
+      "floor": 10
+    },
     "scripts/sentry-suite-gate.test.mjs": {
       "reporter": "count-line",
-      "floor": 42
+      "floor": 32
     },
     "scripts/sentry-triage-agent-comment.test.mjs": {
       "reporter": "node-test",
