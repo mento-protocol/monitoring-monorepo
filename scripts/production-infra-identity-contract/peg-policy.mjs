@@ -119,6 +119,28 @@ function exactStringList(block, attribute) {
   return values.length > 0 ? values : undefined;
 }
 
+function lifecycleIgnoredTraversals(lifecycle) {
+  const source = commentMaskedHcl(lifecycle?.code ?? "");
+  const matches = [
+    ...source.matchAll(
+      /(?:^|\n)[ \t]*ignore_changes[ \t]*=[ \t]*\[[ \t]*\n([\s\S]*?)^[ \t]*\][ \t]*$/gmu,
+    ),
+  ];
+  if (matches.length !== 1) return undefined;
+
+  const traversals = matches[0][1]
+    .split(",")
+    .map((value) => normalizeExpression(value))
+    .filter(Boolean);
+  return traversals.every((value) =>
+    /^[A-Za-z_][A-Za-z0-9_]*(?:(?:\.[A-Za-z_][A-Za-z0-9_]*)|(?:\[[0-9]+\]))*$/u.test(
+      value,
+    ),
+  )
+    ? traversals
+    : undefined;
+}
+
 function requireData(blocks, name, errors, label) {
   const matches = blocks.filter(
     (block) =>
@@ -970,6 +992,34 @@ function isValidRuntimeGenerationLiteral(block) {
 
 function validatePegPolicyRuntimeAttachment(files, topLevelBlocks, errors) {
   const label = "terraform: Peg policy runtime attachment";
+  const rolloutLocals = topLevelBlocks.filter(
+    (block) =>
+      block.filePath === "terraform/metrics-bridge.tf" &&
+      block.kind === "locals" &&
+      block.code.includes("metrics_bridge_template_rollout_active"),
+  );
+  let templateRolloutActive;
+  if (rolloutLocals.length !== 1) {
+    errors.push(`${label}: must declare exactly one template rollout marker`);
+  } else {
+    const source = rolloutLocals[0].code;
+    const marker = normalizeExpression(
+      attributeExpression(
+        rolloutLocals[0],
+        "metrics_bridge_template_rollout_active",
+      ),
+    );
+    if (
+      assignmentCount(source, "metrics_bridge_template_rollout_active") !== 1 ||
+      (marker !== "true" && marker !== "false")
+    ) {
+      errors.push(
+        `${label}: template rollout marker must be declared exactly once as true or false`,
+      );
+    } else {
+      templateRolloutActive = marker === "true";
+    }
+  }
   const runtimeLocals = topLevelBlocks.filter(
     (block) =>
       block.filePath === "terraform/peg-policy.tf" &&
@@ -1089,25 +1139,49 @@ function validatePegPolicyRuntimeAttachment(files, topLevelBlocks, errors) {
     errors.push(`${label}: must contain exactly one lifecycle block`);
     return;
   }
-  const ignoresTemplateRevision = commentMaskedHcl(lifecycles[0].code).includes(
-    "template[0].revision",
-  );
-  if (
-    attributeExpression(runtimeLocals[0], "peg_policy_runtime_generation") ===
-      "null" &&
-    !ignoresTemplateRevision
-  ) {
+  const ignoredTraversals = lifecycleIgnoredTraversals(lifecycles[0]);
+  const ignoresAll =
+    normalizeExpression(
+      attributeExpression(lifecycles[0], "ignore_changes"),
+    ) === "all";
+  if (!ignoresAll && ignoredTraversals === undefined) {
     errors.push(
-      `${label}: must ignore template revision while generation is null`,
+      `${label}: ignore_changes must be one static multiline traversal list`,
     );
   }
-  if (
-    attributeExpression(runtimeLocals[0], "peg_policy_runtime_generation") !==
-      "null" &&
-    ignoresTemplateRevision
-  ) {
+  const ignoresTemplateRevision = ignoredTraversals?.includes(
+    "template[0].revision",
+  );
+  if (templateRolloutActive === false && !ignoresTemplateRevision) {
     errors.push(
-      `${label}: must not ignore template revision while applying a concrete generation`,
+      `${label}: steady state must ignore the generated template revision name`,
+    );
+  }
+  if (templateRolloutActive === true && ignoresTemplateRevision) {
+    errors.push(
+      `${label}: template rollout must not retain the generated revision name`,
+    );
+  }
+  const ignoredPolicyEnvironment = ignoresAll
+    ? "all"
+    : ignoredTraversals?.find((traversal) => {
+        const broadTemplateAncestors = new Set([
+          "template",
+          "template[0]",
+          "template[0].containers",
+          "template[0].containers[0]",
+        ]);
+        const policyEnvironment = "template[0].containers[0].env";
+        return (
+          broadTemplateAncestors.has(traversal) ||
+          traversal === policyEnvironment ||
+          traversal.startsWith(`${policyEnvironment}.`) ||
+          traversal.startsWith(`${policyEnvironment}[`)
+        );
+      });
+  if (ignoredPolicyEnvironment) {
+    errors.push(
+      `${label}: must keep the paired policy environment managed; ignore_changes contains ${ignoredPolicyEnvironment}`,
     );
   }
   const preconditions = nestedBlocks(lifecycles[0], "precondition");

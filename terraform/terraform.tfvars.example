@@ -217,8 +217,11 @@ gcp_billing_account = "..."
 # ephemeral: Terraform passes them only to the Google provider's write-only
 # `secret_data_wo` argument, so they are omitted from plan and state. Copy this
 # stanza into gitignored `terraform.tfvars` or an `*.auto.tfvars` file; both are
-# auto-loaded by Terraform. Never replace the tracked example values, pass the
-# values on a command line, or place them in a saved plan. Keep TF_LOG,
+# auto-loaded by Terraform. Never replace the tracked example values or pass the
+# values on a command line. The platform wrapper makes one private mode-0600
+# copy for both plan and exact-plan apply because ephemeral values are omitted
+# from its private temporary saved plan. Never create, retain, upload, or print a plan
+# yourself. Keep TF_LOG,
 # TF_LOG_CORE, TF_LOG_PROVIDER*, TF_LOG_SDK, and TF_LOG_SDK_PROTO unset or OFF
 # for platform plan/apply. Every other TF_LOG_SDK_*, including
 # TF_LOG_SDK_PROTO_DATA_DIR, must be unset or empty. TF_LOG_PATH alone is

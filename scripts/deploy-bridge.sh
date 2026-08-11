@@ -82,10 +82,9 @@ fi
 
 # Step 1a: Reconcile the GCP APIs, build/runtime IAM, source staging, and the
 # Peg-policy bucket IAM dependency used by both first-time and routine deploys.
-# Keep the Cloud Run service out of this apply: its revision stays
-# Terraform-managed for reviewed Peg-policy rollovers, so targeting an existing
-# service after a gcloud rollout would mint a redundant Terraform revision
-# before the intended image rollout below.
+# Keep the Cloud Run service out of this routine bootstrap apply. Full platform
+# review owns its two-phase service-shape rollouts; the deploy path owns image
+# and generated revision-name bookkeeping before the intended image rollout.
 # Target the two dedicated source-reader instances, not their whole for_each
 # collection. A broad target could enact a pending sibling removal before its
 # separately approved full platform apply.

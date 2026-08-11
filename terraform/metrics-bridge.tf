@@ -75,6 +75,15 @@ resource "google_artifact_registry_repository_iam_member" "metrics_bridge_builde
 # live revision back to the bootstrap placeholder or restarts the alerting
 # pipeline for an unrelated platform change.
 
+locals {
+  # Contract-only lifecycle marker. A Terraform-owned template change sets this
+  # to true and removes the revision ignore in the same reviewed rollout. After
+  # apply and runtime proof, a separate stabilization change restores false and
+  # the ignore so routine platform applies do not mint duplicate revisions.
+  # Pause unrelated platform applies while this marker is true.
+  metrics_bridge_template_rollout_active = false
+}
+
 resource "google_cloud_run_v2_service" "metrics_bridge" {
   project             = google_project.monitoring.project_id
   name                = "metrics-bridge"
@@ -167,12 +176,19 @@ resource "google_cloud_run_v2_service" "metrics_bridge" {
       error_message = "peg_policy_runtime_generation must be null or a positive GCS generation within signed 64-bit range."
     }
 
-    # The deploy path stamps image, client metadata, and service-level scaling
-    # defaults. Revision changes remain managed so this reviewed generation
-    # handoff creates a new revision. Per-revision template[0].scaling and
-    # service-level scaling_mode remain managed.
+    # The deploy path stamps the image, generated revision name, client
+    # metadata, and service-level scaling defaults. In steady state the
+    # generated name is ignored. Any Terraform-owned template rollout must set
+    # metrics_bridge_template_rollout_active=true and remove only the revision
+    # entry below; otherwise provider 6.50 can send the retained old name with
+    # changed template content and Cloud Run rejects it with 409. Restore the
+    # marker and ignore in a separate change after apply and runtime proof;
+    # pause unrelated platform applies until that stabilization lands.
+    # Per-revision template[0].scaling and service-level scaling_mode remain
+    # managed in both phases.
     ignore_changes = [
       template[0].containers[0].image,
+      template[0].revision,
       client,
       client_version,
       scaling[0].manual_instance_count,

@@ -62,16 +62,18 @@ recovery exception, not a retained project-level grant.
 ## Recovery procedure
 
 From clean current `main`, record explicit approval and the temporary grant's
-expiry. The target plan must add only the custom role.
+expiry. The target plan must add only the custom role. Terraform marks this
+exact target plan `complete: false`; the guard accepts that incomplete envelope
+only for this recovery target and its exact create action.
 
 ```bash
 pnpm tf plan platform -- -refresh=false -target=google_project_iam_custom_role.peg_policy_bucket_controller
-pnpm tf apply platform -- -refresh=false -target=google_project_iam_custom_role.peg_policy_bucket_controller
+pnpm tf apply platform -- -auto-approve -refresh=false -target=google_project_iam_custom_role.peg_policy_bucket_controller
 gcloud projects add-iam-policy-binding mento-monitoring \
   --member="serviceAccount:org-terraform@mento-terraform-seed-ffac.iam.gserviceaccount.com" \
   --role="projects/mento-monitoring/roles/pegPolicyBucketController"
 pnpm tf plan platform
-pnpm tf apply platform
+pnpm tf apply platform -- -auto-approve
 ```
 
 After both bucket policies reconcile, remove the project grant immediately:
@@ -90,6 +92,11 @@ pnpm tf plan platform
 The IAM query must print nothing and the full plan must be clean before policy
 publication resumes. Preserve the target plan, full apply, removal, absence
 check, and clean plan as recovery evidence.
+
+[ADR 0061](0061-exact-plan-guard-for-manual-platform-applies.md) makes this the
+only platform target exception. The wrapper inspects the entire managed diff
+and accepts it only when the custom role is the sole non-no-op resource and its
+action is create. It then applies the exact checked plan.
 
 ## Alternatives considered
 

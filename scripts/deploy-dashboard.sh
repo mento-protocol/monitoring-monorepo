@@ -5,7 +5,9 @@
 # included in the upload and `pnpm install` succeeds on Vercel's build servers.
 #
 # Project setup (creation, rootDirectory, env vars, GitHub secrets) is managed
-# by Terraform. Run `terraform apply` in terraform/ before the first deploy.
+# by Terraform. The approved platform apply also writes `.vercel/project.json`
+# in that checkout. If it is missing, run `vercel link` and select the existing
+# mentolabs/monitoring-dashboard project.
 #
 # Usage:
 #   ./scripts/deploy-dashboard.sh
@@ -37,7 +39,7 @@ VERCEL_TOKEN_ARGS=()
 [[ -n "${VERCEL_TOKEN:-}" ]] && VERCEL_TOKEN_ARGS=(--token "$VERCEL_TOKEN")
 
 [[ -d "$VERCEL_DIR" ]] \
-  || die ".vercel/ not found. Run 'terraform apply' in terraform/ first."
+  || die ".vercel/ not found. Run 'vercel link' and select the existing mentolabs/monitoring-dashboard project."
 
 log "Checking Vercel authentication…"
 vercel whoami "${VERCEL_TOKEN_ARGS[@]}" 2>/dev/null \
@@ -45,8 +47,8 @@ vercel whoami "${VERCEL_TOKEN_ARGS[@]}" 2>/dev/null \
 ok "Logged in as $(vercel whoami "${VERCEL_TOKEN_ARGS[@]}" 2>/dev/null)"
 
 # ── Deploy ────────────────────────────────────────────────────────────────────
-# No --scope: vercel deploy reads project/team from .vercel/project.json,
-# which is written by Terraform's local_file resource.
+# No --scope: vercel deploy reads project/team from the locally linked
+# .vercel/project.json.
 
 # shellcheck source=scripts/lib/deploy-guard.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/deploy-guard.sh"

@@ -919,7 +919,7 @@ To change a stage:
 1. update only the relevant tfvars;
 2. run `pnpm infra:plan` and inspect the platform-stack diff;
 3. obtain explicit human approval;
-4. run `pnpm tf apply platform` from a clean `main` checkout;
+4. run `pnpm tf apply platform -- -auto-approve` from a clean `main` checkout;
 5. verify a bounded live case and the expected observability record.
 
 To pause ingest/triage, autofix, or archive, set that stage's named
@@ -968,7 +968,8 @@ secrets are live, so roll it out Terraform-FIRST:
    and that the expected environment secrets are present. The identity contract
    hash-pins both the environment and the deployment-policy blocks, so a
    _source_ change to either fails CI; a live settings change made in GitHub's UI
-   is caught only by the next manual `pnpm tf apply platform` (no drift job
+   is caught only by the next manual
+   `pnpm tf apply platform -- -auto-approve` (no drift job
    monitors the platform stack's environment settings).
 3. Prove the gate, do not assume it: from a throwaway branch, have a non-admin
    writer push a workflow that declares `environment: sentry-pipeline` and

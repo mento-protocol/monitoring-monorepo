@@ -289,8 +289,9 @@ resource "vercel_project_domain" "monitoring" {
 }
 
 # ── Local .vercel/project.json ────────────────────────────────────────────────
-# Keeps the Vercel CLI linked to the correct project after creation/recreation.
-# This file is gitignored but must exist locally for `vercel deploy` to work.
+# Declares the expected Vercel CLI link metadata. Guarded platform apply reads
+# Terraform source from a private snapshot but keeps the process cwd at the
+# repository root, so this gitignored file is written to the operator checkout.
 
 resource "local_file" "vercel_project_json" {
   content = jsonencode({

@@ -3,7 +3,7 @@ title: Peg policy stays private in the monitoring project
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-28
+last_verified: 2026-08-10
 scope: metrics-bridge / alerts / terraform/infra
 date: 2026-07
 doc_type: adr
@@ -76,6 +76,25 @@ policies reconcile. Recovery and bootstrap removal are complete; the protected
 workflow has published the policy and the runtime has its generation-pinned
 attachment.
 
+## Amendment — generated Cloud Run revision names
+
+The runtime generation remains Terraform-owned through the paired environment.
+Cloud Run's generated revision name is deploy bookkeeping and stays in
+`ignore_changes` only in steady state. Any Terraform-owned template change sets
+`metrics_bridge_template_rollout_active = true` and removes that ignore in the
+same reviewed rollout. Google provider 6.50 otherwise sends the retained old
+name with changed template content, which Cloud Run can reject with HTTP 409.
+[Upstream issue #14569](https://github.com/hashicorp/terraform-provider-google/issues/14569)
+reproduces that mixed Terraform and `gcloud` sequence.
+After the approved apply and runtime proof, a separate stabilization change
+restores the marker to `false` and the ignore. Unrelated full platform applies
+pause between those phases; a failed rollout stays in rollout mode until a
+reviewed completion or rollback.
+[ADR 0061](0061-exact-plan-guard-for-manual-platform-applies.md) checks the
+source-selected phase against the exact platform plan. [Issue
+#1778](https://github.com/mento-protocol/monitoring-monorepo/issues/1778)
+records the drift and the correction.
+
 ## Alternatives considered
 
 - **Separate GCP project** — rejected. It creates bootstrap, billing, API,
@@ -103,8 +122,10 @@ attachment.
   `mento-monitoring-peg-policy/peg-policy/current.json` generation
   `1785276001213660`; the reviewed runtime attachment pins it and mints
   `metrics-bridge-r-47264e8-30405040839`. Future rollovers replace the current
-  quoted generation in a reviewed runtime change and keep revision changes
-  managed. Publication and runtime attachment do not apply Grafana consumers.
+  quoted generation in a reviewed template-rollout phase with revision-name
+  management enabled, then return to the steady-state ignore in a separate
+  stabilization phase after apply and runtime proof. Publication and runtime
+  attachment do not apply Grafana consumers.
 
 ## Evidence
 

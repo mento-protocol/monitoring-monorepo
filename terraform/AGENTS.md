@@ -3,7 +3,7 @@ title: Terraform Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-29
+last_verified: 2026-08-10
 doc_type: agent-instructions
 scope: terraform
 review_interval_days: 90
@@ -38,7 +38,11 @@ image pull depend on the exact boundaries.
 ## Operating Rules
 
 - Use `pnpm tf list` to confirm stack ownership before moving resources.
-- Run `pnpm infra:plan` or `pnpm tf plan platform` before any apply.
+- Run `pnpm infra:plan` or `pnpm tf plan platform` before any apply. After
+  explicit human approval, run
+  `pnpm infra:apply -- -auto-approve` or
+  `pnpm tf apply platform -- -auto-approve`; never run raw platform
+  `terraform apply`.
 - Never run `terraform apply` without explicit human approval.
 - Platform plan/apply must run with `TF_LOG`, `TF_LOG_CORE`,
   `TF_LOG_PROVIDER`, every `TF_LOG_PROVIDER_*`, `TF_LOG_SDK`, and
@@ -49,7 +53,9 @@ image pull depend on the exact boundaries.
   `main` checkout whose HEAD matches freshly fetched `origin/main`;
   `--force-local-apply` does not bypass this secret-input guard. The wrapper
   executes the verified commit from a temporary source snapshot; gitignored
-  tfvars stay external and are passed by absolute file path.
+  tfvars stay outside that committed snapshot. [ADR 0061](../docs/adr/0061-exact-plan-guard-for-manual-platform-applies.md)
+  owns the private exact-plan, variable snapshot, and argument boundary; never
+  bypass the wrapper or supply a caller-owned plan.
 - Alloy deploy operators receive the metadata-only
   `grafanaAgentPreflightReader` custom role: enough for the mandatory live
   preflight, never enough to read secret payloads. Its description carries
@@ -67,9 +73,18 @@ image pull depend on the exact boundaries.
 - Keep the Alloy `us.gcr.io` repository state-managed with `prevent_destroy`.
 - Cloud Run services use `/health`, not `/healthz`.
 - For deploy-owned Cloud Run images, retain the necessary
-  `lifecycle.ignore_changes` for the image and provider bookkeeping drift. If a
-  change alters Terraform-owned template shape (env, probes, resources, or
-  template scaling), re-audit `template[0].revision` for that PR.
+  `lifecycle.ignore_changes` for the image and provider bookkeeping drift. In
+  steady state, also ignore the generated revision name. Before any
+  Terraform-owned template change (env, probes, resources, service account, or
+  template scaling), set `metrics_bridge_template_rollout_active = true` and
+  remove only the revision ignore in the same PR. After the approved apply and
+  runtime proof, use a separate stabilization PR to restore the marker to
+  `false` and the revision ignore. Pause unrelated platform applies while the
+  marker is `true`. If apply or proof fails, inspect live state and either
+  complete or explicitly roll back the template change before stabilization;
+  never restore the ignore over a pending template change. The platform plan
+  checker enforces the selected mode against the actual saved plan, including
+  variable-file-driven template changes.
 - Project-level IAM changes must be ordered behind required bootstrap/API enablement dependencies.
 - Keep routine Cloud Build and App Engine uploads on the explicit buckets and
   scoped roles in

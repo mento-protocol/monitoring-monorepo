@@ -2355,6 +2355,14 @@ assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate node scripts/t
 assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate node scripts/terraform-fmt-check.mjs alerts/infra (Terraform stack wrapper changed)"
 assert_contains "- TF_DATA_DIR=aegis/terraform/.terraform-agent-gate node scripts/terraform-fmt-check.mjs aegis/terraform (Terraform stack wrapper changed)"
 
+run_gate "scripts/tf-platform-plan-guard.mjs"
+assert_contains "- pnpm tf:test (Terraform stack wrapper changed)"
+assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate node scripts/terraform-fmt-check.mjs terraform (Terraform stack wrapper changed)"
+
+run_gate "scripts/check-metrics-bridge-template-plan.mjs"
+assert_contains "- pnpm tf:test (Terraform stack wrapper changed)"
+assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate node scripts/terraform-fmt-check.mjs terraform (Terraform stack wrapper changed)"
+
 for deploy_staging_contract_case in \
   '.github/workflows/metrics-bridge.yml|docs/pr-checklists/terraform-cloudrun.md (metrics bridge Cloud Run workflow changed)' \
   'scripts/deploy-bridge.sh|node scripts/check-deploy-root-anchors.test.mjs (deploy wrapper changed)' \

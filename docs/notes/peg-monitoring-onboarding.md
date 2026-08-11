@@ -288,9 +288,12 @@ Use this order for the first activation topology:
 5. Through the owning platform path, pin the runtime to the exact B generation
    by replacing the current source-controlled
    `local.peg_policy_runtime_generation` literal (`null` for first activation)
-   with the protected publisher's exact quoted positive output and removing
-   `template[0].revision` from `ignore_changes` in the same reviewed change,
-   then verify metadata authentication.
+   with the protected publisher's exact quoted positive output. In that same
+   rollout, set `metrics_bridge_template_rollout_active = true` and remove
+   `template[0].revision` from `ignore_changes`, then verify metadata
+   authentication. After the approved apply and runtime proof, use a separate
+   stabilization change to restore the marker to `false` and the ignore. Pause
+   unrelated full platform applies while the marker is `true`.
    During rollout, old A-registry replicas serve retained A while B-registry
    replicas serve active B and retained A. An unpinned `current.json` URL, a
    `-var` override, or a provider-CLI overwrite is forbidden.
@@ -329,10 +332,18 @@ rules unevaluable.
 For a failed active runtime pin, keep the runtime pinned and select the last
 known-good published generation with recorded producer, API, and metric proof.
 Replace the concrete source literal with that exact quoted generation in a
-reviewed platform change, keep `template[0].revision` removed, review and apply
-the platform plan, then verify the new revision, producer acknowledgement,
-`/health`, policy API, and Peg metrics. Never set the literal to `null` or edit
-Cloud Run environment values manually.
+reviewed platform change, set `metrics_bridge_template_rollout_active = true`,
+remove `template[0].revision` from `ignore_changes`, review and apply the
+platform plan, then verify the new revision, producer acknowledgement,
+`/health`, policy API, and Peg metrics. Restore the marker to `false` and the
+ignore in a separate stabilization change. Never set the literal to `null` or
+edit Cloud Run environment values manually.
+
+If a runtime-pin apply or proof fails, keep the rollout marker `true` and the
+revision ignore absent. Inspect the live revision and state, then use a new
+reviewed plan to complete the pin or explicitly roll back its template change.
+Restore steady state only after the live template matches the reviewed result;
+pause unrelated full platform applies until then.
 
 Do not reuse steps 2–9 after the first activation sets
 `local.peg_alerts_enabled` to `true`. A later policy change currently changes

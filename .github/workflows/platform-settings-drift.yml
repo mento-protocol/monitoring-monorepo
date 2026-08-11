@@ -169,7 +169,7 @@ jobs:
               `pinned in Terraform (\`github_workflow_repository_permissions.default_read\`, ` +
               `#1557). Either it was reverted out-of-band, or there is code on ` +
               `\`main\` that has not been applied. Re-assert it with ` +
-              `\`pnpm tf apply platform\` from a clean \`main\` checkout.\n\n` +
+              `\`pnpm tf apply platform -- -auto-approve\` from a clean \`main\` checkout after explicit human approval.\n\n` +
               `**Why it matters:** \`scripts/check-autofix-ci-trust.mjs\` assumes a ` +
               `job with no explicit \`permissions:\` has no write scope, which holds ` +
               `only while the repo default workflow-token permission is \`read\`.\n\n` +

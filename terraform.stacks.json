@@ -22,7 +22,10 @@
       "changedPathPatterns": [
         "terraform/**",
         "terraform.stacks.json",
+        "scripts/check-metrics-bridge-template-plan.mjs",
+        "scripts/check-metrics-bridge-template-plan.test.mjs",
         "scripts/terraform-fmt-check.mjs",
+        "scripts/tf-platform-plan-guard.mjs",
         "scripts/tf-stacks.mjs",
         ".github/workflows/ci.yml",
         ".github/workflows/infra.yml"

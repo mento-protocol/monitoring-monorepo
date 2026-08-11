@@ -249,11 +249,28 @@ In a separate reviewed platform change, replace the current source literal
 `terraform/peg-policy.tf` with that exact positive decimal output, for example
 `peg_policy_runtime_generation = "1750000000000000"`. Do not pass it with
 `-var`, set a Cloud Run environment value manually, or substitute the
-publication URL. The platform code reconstructs the canonical URL, so the
-reviewed plan shows the paired attachment and a fresh Cloud Run revision. The
-first activation also removes `template[0].revision` from `ignore_changes`;
-later concrete-to-concrete rollovers leave it managed so each handoff creates a
-new revision.
+publication URL. The platform code reconstructs the canonical URL. In the same
+reviewed rollout, set `metrics_bridge_template_rollout_active = true` and
+remove `template[0].revision` from `ignore_changes`. The plan must show both the
+paired environment change and the old revision name clearing to `null`.
+Provider 6.50 otherwise sends the retained old name with changed template
+content, which Cloud Run rejects with HTTP 409 instead of minting a revision.
+After the approved apply and runtime proof, use a separate stabilization change
+to set the marker back to `false` and restore the revision ignore. That source
+stabilization needs no apply. Pause unrelated full platform applies while the
+marker is `true`.
+
+The platform wrapper checks this source marker against the saved plan it will
+apply. Stable mode rejects any known or unknown service-template change.
+Rollout mode requires one known in-place template change, the old generated
+revision name clearing to `null`, and no retained copy of that old name. This
+catches tfvar-driven changes that a source-only review cannot see.
+
+If the rollout apply or runtime proof fails, keep the marker `true` and the
+revision ignore absent while inspecting the live revision and Terraform state.
+Use a new reviewed plan either to complete the rollout or to roll back its
+template change. Restore the steady-state marker and ignore only after the live
+template matches the reviewed outcome.
 
 ### Runtime-pin rollback
 
@@ -261,8 +278,11 @@ Keep a failed runtime pinned; never set the generation back to `null`. Retrieve
 the last known-good positive generation from the protected publication record
 and select only one with recorded producer, API, and metrics proof. In a
 reviewed platform change, replace the current quoted source literal with that
-exact quoted generation. Leave `template[0].revision` unmanaged in this
-concrete-to-concrete change so Cloud Run mints the rollback revision.
+exact quoted generation, set `metrics_bridge_template_rollout_active = true`,
+and remove the generated `template[0].revision` name from `ignore_changes`.
+After the approved rollback apply and runtime proof, restore the marker to
+`false` and the ignore in a separate stabilization change. Pause unrelated
+full platform applies until that stabilization lands.
 
 Run a clean current-main platform plan, review the literal, pinned URL, runtime
 identity, paired environment, and new Cloud Run revision, then obtain explicit
@@ -374,8 +394,20 @@ script can be reviewed and tested with dashboard changes.
 pnpm tf list       # show all registered Terraform stacks
 pnpm infra:init    # first time, or after provider changes
 pnpm infra:plan    # preview changes
-pnpm infra:apply   # apply changes
+pnpm infra:apply -- -auto-approve # apply after explicit human approval
 ```
+
+Platform plan/apply runs from a verified current-`main` snapshot. The wrapper
+creates a private plan, checks the actual Metrics Bridge template change against
+the selected stable or rollout mode, and applies that exact plan. It re-supplies
+ephemeral inputs from the same private variable-file copies and deletes every
+copy with the plan on exit.
+The acknowledgement flag never authorizes an apply by itself; obtain explicit
+human approval after reviewing `pnpm infra:plan`. That command deletes its
+preflight plan. The later apply creates a fresh plan, checks it by machine, and
+applies those checked bytes without another prompt; the human approval is not
+an exact-plan review. See
+[ADR 0061](adr/0061-exact-plan-guard-for-manual-platform-applies.md).
 
 Protocol Grafana alerts and global Grafana routing use the separate
 `alerts-rules` stack (`pnpm alerts:rules:plan`), which also owns the Aegis
@@ -573,12 +605,14 @@ Read the complete plan and get explicit human approval before applying.
 **6. Apply**
 
 ```bash
-pnpm infra:apply
+pnpm infra:apply -- -auto-approve
 ```
 
 Terraform creates the Upstash Redis database, Vercel project,
-Terraform-managed environment variables, custom domain, and
-`.vercel/project.json`.
+Terraform-managed environment variables, and custom domain. It also writes the
+gitignored `.vercel/project.json` link metadata to the operator checkout. If
+that file is missing or stale, run `vercel link` and select the existing
+`mentolabs/monitoring-dashboard` project.
 
 **7. Trigger first deploy**
 
@@ -589,7 +623,7 @@ pnpm deploy:dashboard
 ```
 
 The wrapper anchors the deploy at the monorepo root, checks that the worktree
-is clean, verifies Vercel authentication, and uses the Terraform-written
+is clean, verifies Vercel authentication, and uses the locally linked
 `.vercel/project.json`. Do not run a raw deploy from `ui-dashboard/`; its
 package directory does not match the Git integration's repository-root upload
 layout.

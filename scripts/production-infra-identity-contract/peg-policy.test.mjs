@@ -28,11 +28,20 @@ assert.deepEqual(validateProductionInfraIdentityContract(validFiles), []);
 
 function withConcreteGeneration(files, generation) {
   return mutate(
+    files,
+    "terraform/peg-policy.tf",
+    "  peg_policy_runtime_generation = null",
+    `  peg_policy_runtime_generation = "${generation}"`,
+  );
+}
+
+function withTemplateRollout(files) {
+  return mutate(
     mutate(
       files,
-      "terraform/peg-policy.tf",
-      "  peg_policy_runtime_generation = null",
-      `  peg_policy_runtime_generation = "${generation}"`,
+      "terraform/metrics-bridge.tf",
+      "  metrics_bridge_template_rollout_active = false",
+      "  metrics_bridge_template_rollout_active = true",
     ),
     "terraform/metrics-bridge.tf",
     "      template[0].revision,\n",
@@ -55,6 +64,13 @@ const maximumGenerationFiles = withConcreteGeneration(
 );
 assert.deepEqual(
   validateProductionInfraIdentityContract(maximumGenerationFiles),
+  [],
+);
+
+assert.deepEqual(
+  validateProductionInfraIdentityContract(
+    withTemplateRollout(withConcreteGeneration(validFiles, "1750000000000000")),
+  ),
   [],
 );
 
@@ -618,17 +634,125 @@ expectFailure(
     "      template[0].revision,\n",
     "",
   ),
-  "Peg policy runtime attachment: must ignore template revision while generation is null",
+  "Peg policy runtime attachment: steady state must ignore the generated template revision name",
+);
+
+expectFailure(
+  mutate(
+    validFiles,
+    "terraform/metrics-bridge.tf",
+    "    ignore_changes = [\n      template[0].containers[0].image,\n      template[0].revision,",
+    "    replace_triggered_by = [template[0].revision]\n\n    ignore_changes = [\n      template[0].containers[0].image,",
+  ),
+  "Peg policy runtime attachment: steady state must ignore the generated template revision name",
+);
+
+expectFailure(
+  mutate(
+    validFiles,
+    "terraform/metrics-bridge.tf",
+    "  metrics_bridge_template_rollout_active = false",
+    "  metrics_bridge_template_rollout_active = true",
+  ),
+  "Peg policy runtime attachment: template rollout must not retain the generated revision name",
+);
+
+expectFailure(
+  mutate(
+    validFiles,
+    "terraform/metrics-bridge.tf",
+    "  metrics_bridge_template_rollout_active = false",
+    '  metrics_bridge_template_rollout_active = "false"',
+  ),
+  "Peg policy runtime attachment: template rollout marker must be declared exactly once as true or false",
+);
+
+expectFailure(
+  mutate(
+    validFiles,
+    "terraform/metrics-bridge.tf",
+    "  metrics_bridge_template_rollout_active = false\n",
+    "",
+  ),
+  "Peg policy runtime attachment: must declare exactly one template rollout marker",
+);
+
+expectFailure(
+  mutate(
+    validFiles,
+    "terraform/metrics-bridge.tf",
+    "  metrics_bridge_template_rollout_active = false",
+    "  metrics_bridge_template_rollout_active = false\n  metrics_bridge_template_rollout_active = true",
+  ),
+  "Peg policy runtime attachment: template rollout marker must be declared exactly once as true or false",
+);
+
+const oneLineIgnoreChangesFiles = mutate(
+  validFiles,
+  "terraform/metrics-bridge.tf",
+  `    ignore_changes = [
+      template[0].containers[0].image,
+      template[0].revision,
+      client,
+      client_version,
+      scaling[0].manual_instance_count,
+      scaling[0].min_instance_count,
+    ]`,
+  "    ignore_changes = [template[0].containers[0].image, template[0].revision, client, client_version, scaling[0].manual_instance_count, scaling[0].min_instance_count]",
+);
+assert(
+  validateProductionInfraIdentityContract(oneLineIgnoreChangesFiles).length > 0,
+  "one-line ignore_changes must fail closed instead of bypassing the scoped parser",
+);
+
+const rolloutOneLineIgnoreChangesFiles = mutate(
+  mutate(
+    validFiles,
+    "terraform/metrics-bridge.tf",
+    "  metrics_bridge_template_rollout_active = false",
+    "  metrics_bridge_template_rollout_active = true",
+  ),
+  "terraform/metrics-bridge.tf",
+  `    ignore_changes = [
+      template[0].containers[0].image,
+      template[0].revision,
+      client,
+      client_version,
+      scaling[0].manual_instance_count,
+      scaling[0].min_instance_count,
+    ]`,
+  "    ignore_changes = [template[0].containers[0].image, client]",
+);
+expectFailure(
+  rolloutOneLineIgnoreChangesFiles,
+  "Peg policy runtime attachment: ignore_changes must be one static multiline traversal list",
 );
 
 expectFailure(
   mutate(
     withConcreteGeneration(validFiles, "1750000000000000"),
     "terraform/metrics-bridge.tf",
-    "      client,",
     "      template[0].revision,\n      client,",
+    "      template[0].revision,\n      template[0].containers[0].env[0].value,\n      client,",
   ),
-  "Peg policy runtime attachment: must not ignore template revision while applying a concrete generation",
+  "Peg policy runtime attachment: must keep the paired policy environment managed",
+);
+
+expectFailure(
+  mutate(
+    validFiles,
+    "terraform/metrics-bridge.tf",
+    `    ignore_changes = [
+      template[0].containers[0].image,
+      template[0].revision,
+      client,
+      client_version,
+      scaling[0].manual_instance_count,
+      scaling[0].min_instance_count,
+    ]`,
+    "    ignore_changes = all",
+  ),
+  "Peg policy runtime attachment: must keep the paired policy environment managed",
 );
 
 process.stdout.write("Peg policy identity contract tests passed.\n");
