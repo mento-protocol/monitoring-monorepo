@@ -136,10 +136,19 @@ function reviewedSnapshotRepoRoot(args) {
   return repoRoot;
 }
 
-const invokedPath = process.argv[1]
-  ? realpathSync(resolve(process.argv[1]))
-  : "";
-if (realpathSync(fileURLToPath(import.meta.url)) === invokedPath) {
+function isDirectInvocation(moduleUrl, argvPath) {
+  if (!argvPath) return false;
+  try {
+    return (
+      realpathSync(fileURLToPath(moduleUrl)) === realpathSync(resolve(argvPath))
+    );
+  } catch (error) {
+    if (error.code === "ENOENT") return false;
+    throw error;
+  }
+}
+
+if (isDirectInvocation(import.meta.url, process.argv[1])) {
   Promise.resolve()
     .then(() => reviewedSnapshotRepoRoot(process.argv.slice(2)))
     .then((repoRoot) => renderLocalUpstashMcpConfig({ repoRoot }))

@@ -231,6 +231,18 @@ test("config generation loads the complete local module closure from a reviewed 
     });
     assertPersonalExample(source);
 
+    const importedRun = spawnSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "--eval",
+        `await import(${JSON.stringify(pathToFileURL(resolve(snapshotScripts, moduleNames[0])).href)});`,
+        "missing-host-program",
+      ],
+      { cwd: snapshotRoot, encoding: "utf8", env: {} },
+    );
+    assert.equal(importedRun.status, 0, importedRun.stderr);
+
     const mutableRoot = resolve(snapshotRoot, "mutable-checkout");
     const mutableScripts = resolve(mutableRoot, "scripts");
     const sentinelPath = resolve(snapshotRoot, "mutable-builder-ran");
