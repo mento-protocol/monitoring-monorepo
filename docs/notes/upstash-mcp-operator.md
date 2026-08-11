@@ -28,7 +28,8 @@ esbuild binary copied into a private temporary directory, and rejects any
 output that differs from the reviewed runtime SHA-256. It syncs a private
 temporary runtime file and atomically publishes it under
 `~/.codex/mcp-runtimes/`, so an interrupted write cannot poison the stable
-runtime path.
+runtime path. The generator itself runs from the immutable Git object for a
+human-reviewed commit, not from mutable working-tree source.
 
 The personal config uses absolute paths for Node, the repository-owned
 launcher, and that personal runtime. It also stores an inline verifier outside
@@ -91,11 +92,21 @@ controls rather than substitutes for provider-side least privilege.
 
 ## Configure local Codex
 
-Generate the `mcp_servers.upstash` tables from the checkout that will own this
-transport:
+Choose the full commit SHA that a human reviewed on GitHub. Load the complete
+local generator module closure from that immutable Git object, then point the
+reviewed snapshot at the checkout that will own the transport:
 
 ```bash
-node scripts/render-upstash-mcp-config.mjs
+REVIEWED_HEAD=PASTE_REVIEWED_FULL_COMMIT_SHA_HERE
+REVIEWED_SNAPSHOT=$(mktemp -d)
+git cat-file -e "$REVIEWED_HEAD^{commit}"
+set -o pipefail
+git archive --format=tar "$REVIEWED_HEAD" \
+  scripts/render-upstash-mcp-config.mjs \
+  scripts/build-upstash-mcp-runtime.mjs \
+  scripts/upstash-mcp-launcher.mjs | tar -x -C "$REVIEWED_SNAPSHOT"
+node "$REVIEWED_SNAPSHOT/scripts/render-upstash-mcp-config.mjs" \
+  --repo-root "$PWD"
 ```
 
 The command also creates the reviewed, credential-free runtime under
@@ -104,8 +115,13 @@ credential-free config output into `~/.codex/config.toml`. The checked-in
 [`.codex/upstash-mcp.example.toml`](../../.codex/upstash-mcp.example.toml) shows
 the output shape but contains placeholder paths. Keep `enabled = false` as the
 normal state. Regenerate the table after moving the checkout or Node binary.
-After an intentional launcher, server, dependency, or bundler edit, review the
-change, update the affected pinned hashes, and regenerate the table. Generation
+The reviewed renderer rejects direct execution from its owning `scripts/`
+directory before loading the builder. The immutable Git object, not that
+self-check, is the trust boundary against unreviewed working-tree changes. The
+temporary snapshot contains source only and no credential. Let the system
+temporary-directory cleanup remove it. After an intentional launcher, server,
+dependency, or bundler edit, review the change, update the affected pinned
+hashes, choose the new reviewed commit SHA, and regenerate the table. Generation
 refuses a changed esbuild package manifest or native binary before execution,
 and refuses a dependency closure that does not match the reviewed runtime hash.
 Do not add an Upstash table to the repository's `.codex/config.toml`. The

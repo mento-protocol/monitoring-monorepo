@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
 import {
   chmod,
+  copyFile,
   mkdir,
   mkdtemp,
   readFile,
@@ -16,7 +17,7 @@ import {
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, resolve } from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import yaml from "js-yaml";
 import { parse as parseToml } from "smol-toml";
 import {
@@ -197,6 +198,69 @@ test("renderer anchors executables and prepares the reviewed personal runtime", 
     if (process.platform !== "win32") assert.equal(metadata.mode & 0o077, 0);
   } finally {
     await rm(runtimeDirectory, { force: true, recursive: true });
+  }
+});
+
+test("config generation loads the complete local module closure from a reviewed snapshot", async () => {
+  const snapshotRoot = await mkdtemp(
+    resolve(tmpdir(), "upstash-mcp-generator-snapshot-"),
+  );
+  const snapshotScripts = resolve(snapshotRoot, "scripts");
+  const runtimeDirectory = resolve(snapshotRoot, "runtime");
+  const moduleNames = [
+    "render-upstash-mcp-config.mjs",
+    "build-upstash-mcp-runtime.mjs",
+    "upstash-mcp-launcher.mjs",
+  ];
+  try {
+    await mkdir(snapshotScripts);
+    await Promise.all(
+      moduleNames.map((name) =>
+        copyFile(
+          resolve(ROOT, "scripts", name),
+          resolve(snapshotScripts, name),
+        ),
+      ),
+    );
+    const snapshot = await import(
+      `${pathToFileURL(resolve(snapshotScripts, moduleNames[0])).href}?reviewed-snapshot`
+    );
+    const source = await snapshot.renderLocalUpstashMcpConfig({
+      repoRoot: ROOT,
+      runtimeDirectory,
+    });
+    assertPersonalExample(source);
+
+    const mutableRoot = resolve(snapshotRoot, "mutable-checkout");
+    const mutableScripts = resolve(mutableRoot, "scripts");
+    const sentinelPath = resolve(snapshotRoot, "mutable-builder-ran");
+    await mkdir(mutableScripts, { recursive: true });
+    await copyFile(
+      resolve(ROOT, "scripts/render-upstash-mcp-config.mjs"),
+      resolve(mutableScripts, "render-upstash-mcp-config.mjs"),
+    );
+    await writeFile(
+      resolve(mutableScripts, "build-upstash-mcp-runtime.mjs"),
+      `import { writeFileSync } from "node:fs"; writeFileSync(${JSON.stringify(sentinelPath)}, "unsafe");\n`,
+    );
+    const directRun = spawnSync(
+      process.execPath,
+      [
+        resolve(mutableScripts, "render-upstash-mcp-config.mjs"),
+        "--repo-root",
+        mutableRoot,
+      ],
+      { encoding: "utf8", env: {} },
+    );
+    assert.notEqual(directRun.status, 0);
+    assert.equal(directRun.stdout, "");
+    assert.match(
+      directRun.stderr,
+      /run the config generator from an immutable reviewed commit snapshot/,
+    );
+    await assert.rejects(readFile(sentinelPath), { code: "ENOENT" });
+  } finally {
+    await rm(snapshotRoot, { force: true, recursive: true });
   }
 });
 
@@ -498,13 +562,36 @@ test("workspace dependency and lockfile pin the reviewed artifact", async () => 
 });
 
 test("operator and upload guidance carry the pin, ownership, and Cloud boundary", async () => {
-  const [operator, upload] = await Promise.all([
-    readFile(resolve(ROOT, "docs/notes/upstash-mcp-operator.md"), "utf8"),
-    readFile(
-      resolve(ROOT, ".agents/skills/forensic-report/references/upload.md"),
-      "utf8",
-    ),
-  ]);
+  const [operator, upload, codexSkill, claudeSkill, codexChain, claudeChain] =
+    await Promise.all([
+      readFile(resolve(ROOT, "docs/notes/upstash-mcp-operator.md"), "utf8"),
+      readFile(
+        resolve(ROOT, ".agents/skills/forensic-report/references/upload.md"),
+        "utf8",
+      ),
+      readFile(
+        resolve(ROOT, ".agents/skills/forensic-report/SKILL.md"),
+        "utf8",
+      ),
+      readFile(
+        resolve(ROOT, ".claude/skills/forensic-report/SKILL.md"),
+        "utf8",
+      ),
+      readFile(
+        resolve(
+          ROOT,
+          ".agents/skills/forensic-report/references/chain-setup.md",
+        ),
+        "utf8",
+      ),
+      readFile(
+        resolve(
+          ROOT,
+          ".claude/skills/forensic-report/references/chain-setup.md",
+        ),
+        "utf8",
+      ),
+    ]);
 
   assert.ok(operator.includes(PINNED_PACKAGE));
   assert.match(operator, /sha512-LN5yao74QQZTjGmo/);
@@ -512,9 +599,22 @@ test("operator and upload guidance carry the pin, ownership, and Cloud boundary"
   assert.match(operator, /Codex Cloud/);
   assert.match(operator, /reviewed native esbuild binary/i);
   assert.match(operator, /atomically publishes/i);
+  assert.match(operator, /git archive --format=tar "\$REVIEWED_HEAD"/);
+  assert.match(operator, /--repo-root "\$PWD"/);
+  assert.doesNotMatch(
+    operator,
+    /^node scripts\/render-upstash-mcp-config\.mjs$/m,
+  );
   assert.match(operator, /scripts\/upstash-mcp-config\.test\.mjs/);
   assert.match(upload, /upstash-mcp-operator\.md/);
   for (const tool of EXPECTED_TOOLS) assert.match(upload, new RegExp(tool));
+  for (const skill of [codexSkill, claudeSkill]) {
+    assert.match(skill, /Transport availability preflight — before Step 1/);
+    assert.match(skill, /continue the local draft without Upstash/i);
+    assert.match(skill, /fresh report read owns `version` and `createdAt`/);
+  }
+  assert.equal(codexChain, claudeChain);
+  assert.match(codexChain, /Continue at Step 1\.6 without a `DATABASE_ID`/);
 });
 
 test("contract rejects direct launchers and credential-bearing arguments", () => {

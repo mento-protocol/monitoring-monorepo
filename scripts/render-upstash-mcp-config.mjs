@@ -3,10 +3,10 @@
 import { createHash } from "node:crypto";
 import { readFileSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
-import { prepareUpstashMcpRuntime } from "./build-upstash-mcp-runtime.mjs";
+import { fileURLToPath } from "node:url";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
+const ROOT = resolve(SCRIPT_DIR, "..");
 
 export const UPSTASH_MCP_LAUNCHER_SHA256 =
   "651e4a9194348728f492274e9346172a3bbd51039883480e46c196cbb33f3a1f";
@@ -96,12 +96,20 @@ approval_mode = "prompt"
 `;
 }
 
-export async function renderLocalUpstashMcpConfig({ runtimeDirectory } = {}) {
+export async function renderLocalUpstashMcpConfig({
+  repoRoot = ROOT,
+  runtimeDirectory,
+} = {}) {
   const launcherPath = realpathSync(
-    resolve(SCRIPT_DIR, "upstash-mcp-launcher.mjs"),
+    resolve(repoRoot, "scripts/upstash-mcp-launcher.mjs"),
   );
   verifyUpstashMcpLauncher({ launcherPath });
-  const runtimePath = await prepareUpstashMcpRuntime({ runtimeDirectory });
+  const { prepareUpstashMcpRuntime } =
+    await import("./build-upstash-mcp-runtime.mjs");
+  const runtimePath = await prepareUpstashMcpRuntime({
+    repoRoot,
+    runtimeDirectory,
+  });
   return renderUpstashMcpConfig({
     launcherPath,
     nodePath: realpathSync(process.execPath),
@@ -109,11 +117,32 @@ export async function renderLocalUpstashMcpConfig({ runtimeDirectory } = {}) {
   });
 }
 
+function reviewedSnapshotRepoRoot(args) {
+  if (args.length !== 2 || args[0] !== "--repo-root") {
+    throw new Error(
+      "usage: render-upstash-mcp-config.mjs --repo-root <absolute-checkout>",
+    );
+  }
+  if (!isAbsolute(args[1])) {
+    throw new Error("the Upstash MCP repository root must be absolute");
+  }
+  const repoRoot = realpathSync(args[1]);
+  const checkoutScripts = realpathSync(resolve(repoRoot, "scripts"));
+  if (realpathSync(SCRIPT_DIR) === checkoutScripts) {
+    throw new Error(
+      "run the config generator from an immutable reviewed commit snapshot",
+    );
+  }
+  return repoRoot;
+}
+
 const invokedPath = process.argv[1]
-  ? pathToFileURL(resolve(process.argv[1])).href
+  ? realpathSync(resolve(process.argv[1]))
   : "";
-if (import.meta.url === invokedPath) {
-  renderLocalUpstashMcpConfig()
+if (realpathSync(fileURLToPath(import.meta.url)) === invokedPath) {
+  Promise.resolve()
+    .then(() => reviewedSnapshotRepoRoot(process.argv.slice(2)))
+    .then((repoRoot) => renderLocalUpstashMcpConfig({ repoRoot }))
     .then((config) => process.stdout.write(config))
     .catch((error) => {
       console.error(`Refusing to configure Upstash MCP: ${error.message}`);
