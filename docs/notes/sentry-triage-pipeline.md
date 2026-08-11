@@ -1111,8 +1111,12 @@ which reconciles the `scripts/sentry-*.test.mjs` files against
 and, for each non-exempt suite, asserts child exit 0, parsed `fail == 0`, parsed
 `pass >= floor`, and `pass ==` the per-case lines it emitted — so a suite that
 exits 0 without asserting fails the gate. The gate is dependency-free, runs with
-no `pnpm install` before it, and its own suite
-(`scripts/sentry-suite-gate.test.mjs`) is enumerated and run like any other. The
+no `pnpm install` before it, and its own two suites
+(`scripts/sentry-suite-gate.test.mjs` and
+`scripts/sentry-suite-gate-integrity.test.mjs`) are enumerated and run like any
+other. It also watches every file whose content could change a suite's result —
+each suite's transitive first-party imports included — and fails closed if any
+of them changes mid-run. The
 per-suite steps in `Lint + test root scripts` and the `check-sentry-suites-in-ci`
 checker stay in place; both jobs run the suites for now.
 
@@ -1146,6 +1150,7 @@ node scripts/check-sentry-suites-in-ci.test.mjs
 # `env -u` prefix matches the CI step and is what lets these run under an
 # ambient NODE_OPTIONS — without it the gate refuses to start by design:
 /usr/bin/env -u NODE_OPTIONS -u NODE_PATH node scripts/sentry-suite-gate.test.mjs
+/usr/bin/env -u NODE_OPTIONS -u NODE_PATH node scripts/sentry-suite-gate-integrity.test.mjs
 /usr/bin/env -u NODE_OPTIONS -u NODE_PATH node scripts/sentry-suite-gate.mjs
 ```
 

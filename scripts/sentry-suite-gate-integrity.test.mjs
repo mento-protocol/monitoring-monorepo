@@ -40,6 +40,7 @@ import {
   digestFile,
   digestWatchSet,
   gateInputs,
+  successAttestation,
 } from "./sentry-suite-gate.mjs";
 
 const { test, assert, assertEqual, summarize } = makeHarness();
@@ -202,7 +203,14 @@ await test("digestDrift is silent when nothing changed", async () => {
   const root = makeRoot();
   try {
     writeSuite(root, "sentry-a.test.mjs", "// stable\n");
-    const baseline = digestWatchSet(["scripts/sentry-a.test.mjs"], root);
+    const baseline = digestWatchSet(
+      {
+        suites: {
+          "scripts/sentry-a.test.mjs": { reporter: "count-line", floor: 1 },
+        },
+      },
+      root,
+    );
     assertEqual(digestDrift(baseline, root).length, 0, "no drift expected");
   } finally {
     cleanup(root);
@@ -269,48 +277,175 @@ await test("fixture gates never write to the ambient step summary", async () => 
 });
 
 await test("the watch set equals every input the gate reads to decide", async () => {
-  // The general form of Codex 3760509524: the watch set was twice decided by
-  // listing files that felt load-bearing, and twice missed one. It is now
-  // DERIVED from the manifest, so any entry that brings a new decision input
-  // brings it into the watch set too. Asserted against an exempt entry, whose
-  // route trusts both an importer and package.json.
-  const manifest = {
-    suites: {
-      "scripts/sentry-a.test.mjs": { reporter: "count-line", floor: 1 },
-      "scripts/sentry-provider-contract.test.mjs": {
-        reporter: "exit-only",
-        exempt: {
-          runBy: "production-infra-contract",
-          via: "pnpm tf:test",
-          importer: "scripts/tf-stacks.test.mjs",
-        },
-      },
-    },
-  };
-  assertEqual(
-    JSON.stringify(gateInputs(manifest)),
-    JSON.stringify([
-      "package.json",
-      "scripts/sentry-a.test.mjs",
-      "scripts/sentry-provider-contract.test.mjs",
-      "scripts/sentry-suite-gate.mjs",
-      "scripts/sentry-suite-manifest.json",
-      "scripts/tf-stacks.test.mjs",
-    ]),
-    "the derived input set",
-  );
-  // And the digest baseline must watch exactly that set, not a subset.
+  // The general form of Codex 3760509524 and 3760861940: the watch set was
+  // decided three times by listing files that felt load-bearing, and missed one
+  // each time. It is now DERIVED — from the manifest AND from each suite's
+  // transitive first-party imports — so any entry that brings a new decision
+  // input brings it into the watch set too.
   const root = makeRoot();
   try {
+    // A suite importing a helper that imports a second helper: the closure must
+    // reach BOTH, or a rewrite of the deeper one goes unnoticed.
+    writeSuite(root, "sentry-a.test.mjs", 'import "./helper-one.mjs";\n');
+    writeFileSync(
+      join(root, "scripts", "helper-one.mjs"),
+      'import "./helper-two.mjs";\nexport const A = 1;\n',
+    );
+    writeFileSync(
+      join(root, "scripts", "helper-two.mjs"),
+      "export const B = 2;\n",
+    );
+    writeFileSync(
+      join(root, "scripts", "sentry-provider-contract.test.mjs"),
+      "// exempt\n",
+    );
+    writeFileSync(
+      join(root, "scripts", "tf-stacks.test.mjs"),
+      'import "./sentry-provider-contract.test.mjs";\n',
+    );
+    const manifest = {
+      suites: {
+        "scripts/sentry-a.test.mjs": { reporter: "count-line", floor: 1 },
+        "scripts/sentry-provider-contract.test.mjs": {
+          reporter: "exit-only",
+          exempt: {
+            runBy: "production-infra-contract",
+            via: "pnpm tf:test",
+            importer: "scripts/tf-stacks.test.mjs",
+          },
+        },
+      },
+    };
+    assertEqual(
+      JSON.stringify(gateInputs(manifest, root)),
+      JSON.stringify([
+        "package.json",
+        "scripts/helper-one.mjs",
+        "scripts/helper-two.mjs",
+        "scripts/sentry-a.test.mjs",
+        "scripts/sentry-provider-contract.test.mjs",
+        "scripts/sentry-suite-gate.mjs",
+        "scripts/sentry-suite-manifest.json",
+        "scripts/tf-stacks.test.mjs",
+      ]),
+      "the derived input set, including the transitive import closure",
+    );
+    // And the digest baseline must watch exactly that set, not a subset.
     const watched = [...digestWatchSet(manifest, root).keys()].sort();
     assertEqual(
       JSON.stringify(watched),
-      JSON.stringify(gateInputs(manifest)),
+      JSON.stringify(gateInputs(manifest, root)),
       "the watch set must equal the derived inputs",
     );
   } finally {
     cleanup(root);
   }
+});
+
+await test("gateInputs refuses to run without a root rather than deriving less", async () => {
+  // Omitting the root would make every import closure read nothing and silently
+  // shrink the set back to the pre-closure one — the regression the closure
+  // exists to prevent, arriving as a convenience default.
+  let threw = false;
+  try {
+    gateInputs({ suites: {} });
+  } catch {
+    threw = true;
+  }
+  assert(threw, "a missing root must throw, not degrade");
+});
+
+await test("red: a suite rewriting another suite's imported helper is caught", async () => {
+  const root = makeRoot();
+  try {
+    // Codex 3760861940. The helper is not a suite, so no digest covered it
+    // before the closure: `alpha` rewrote it, and `beta` — which FAILS against
+    // the committed helper — reported ok at exit 0.
+    writeSuite(
+      root,
+      "sentry-alpha.test.mjs",
+      [
+        'import { writeFileSync } from "node:fs";',
+        'import { fileURLToPath } from "node:url";',
+        'writeFileSync(fileURLToPath(new URL("./victim-helper.mjs", import.meta.url)),',
+        "  'export const VALUE = \"forged\";\\n');",
+        'process.stdout.write("ok alpha\\n");',
+        'process.stdout.write("1 passed\\n");',
+        "",
+      ].join("\n"),
+    );
+    writeSuite(
+      root,
+      "sentry-beta.test.mjs",
+      [
+        'import { VALUE } from "./victim-helper.mjs";',
+        'if (VALUE === "forged") {',
+        '  process.stdout.write("ok beta\\n");',
+        '  process.stdout.write("1 passed\\n");',
+        "} else {",
+        '  process.stderr.write("not ok beta\\n  regression\\n");',
+        '  process.stderr.write("1 failed, 0 passed\\n");',
+        "  process.exitCode = 1;",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(
+      join(root, "scripts", "victim-helper.mjs"),
+      'export const VALUE = "committed";\n',
+    );
+    writeManifest(root, {
+      "scripts/sentry-alpha.test.mjs": { reporter: "count-line", floor: 1 },
+      "scripts/sentry-beta.test.mjs": { reporter: "count-line", floor: 1 },
+    });
+    const { status, stdout } = runGate(root);
+    assert(status !== 0, "rewriting an imported helper must red the gate");
+    assert(
+      stdout.includes("victim-helper.mjs was REWRITTEN"),
+      `should name the helper: ${stdout}`,
+    );
+  } finally {
+    cleanup(root);
+  }
+});
+
+await test("red: a relative import escaping the repository fails closed", async () => {
+  const root = makeRoot();
+  try {
+    writeSuite(root, "sentry-a.test.mjs", 'import "../../outside.mjs";\n');
+    writeManifest(root, {
+      "scripts/sentry-a.test.mjs": { reporter: "count-line", floor: 1 },
+    });
+    const { status, stderr } = runGate(root);
+    assert(status !== 0, "an escaping import must red the gate");
+    assert(
+      stderr.includes("resolve outside the repository"),
+      `should say it cannot watch it: ${stderr}`,
+    );
+  } finally {
+    cleanup(root);
+  }
+});
+
+await test("the success attestation states what ran and what only had its route checked", async () => {
+  // Codex 3760861962. The footer claimed all N entries were "asserted from
+  // their own output" while the exempt entry was never spawned — a false
+  // statement in the operator-facing output of a required check.
+  assertEqual(
+    successAttestation(12, 1),
+    "12 suites ran and were asserted from their own output; 1 entry was NOT run here — only the route to the job that does run it was verified.",
+    "mixed run",
+  );
+  assertEqual(
+    successAttestation(3, 0),
+    "3 suites ran and were asserted from their own output.",
+    "nothing exempt",
+  );
+  assertEqual(
+    successAttestation(1, 1),
+    "1 suite ran and was asserted from its own output; 1 entry was NOT run here — only the route to the job that does run it was verified.",
+    "singular agreement",
+  );
 });
 
 await test("red: a suite forging an exemption's route evidence is caught", async () => {

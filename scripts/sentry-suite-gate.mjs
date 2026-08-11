@@ -36,7 +36,6 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import {
   appendFileSync,
   readFileSync,
@@ -47,18 +46,34 @@ import {
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+// The integrity layer — "is this run trustworthy as a whole" — lives next door
+// so both files stay under the repo's line cap. Re-exported because the gate is
+// the public entry point its suites import from.
+import {
+  digestDrift,
+  digestFile,
+  digestWatchSet,
+  gateInputs,
+  localImportClosure,
+  MANIFEST_LABEL,
+  PACKAGE_JSON_LABEL,
+  topLevelImportSpecifiers,
+} from "./sentry-suite-gate-integrity.mjs";
+
+export {
+  digestDrift,
+  digestFile,
+  digestWatchSet,
+  gateInputs,
+  localImportClosure,
+  topLevelImportSpecifiers,
+};
+
 const ROOT = process.env.SENTRY_SUITE_GATE_ROOT
   ? realpathSync(process.env.SENTRY_SUITE_GATE_ROOT)
   : fileURLToPath(new URL("..", import.meta.url));
 const SCRIPTS_DIR = join(ROOT, "scripts");
 const MANIFEST_PATH = join(SCRIPTS_DIR, "sentry-suite-manifest.json");
-
-/**
- * Stable repo-relative name for the manifest, named in every failure message so
- * a contributor who adds, renames, splits, or shrinks a suite sees exactly which
- * file to edit — the absolute MANIFEST_PATH differs under a fixture root.
- */
-const MANIFEST_LABEL = "scripts/sentry-suite-manifest.json";
 
 /** Node flags that force a deterministic node:test spec report regardless of TTY or minor version. */
 const NODE_TEST_REPORTER_ARGS = [
@@ -68,16 +83,6 @@ const NODE_TEST_REPORTER_ARGS = [
 
 /** A fatal, structural failure the gate cannot proceed past (env, manifest, set drift). */
 class GateError extends Error {}
-
-/**
- * The gate's own source, repo-relative. Hashed alongside the suites: a suite
- * that rewrites the runner mid-flight would otherwise change how its own
- * successors are judged.
- */
-const GATE_LABEL = "scripts/sentry-suite-gate.mjs";
-
-/** The second half of every exemption route proof: it must run the importer. */
-const PACKAGE_JSON_LABEL = "package.json";
 
 /**
  * The manifest schema, as an ALLOWLIST.
@@ -130,114 +135,6 @@ export function staticImportSpecifiers(source) {
     specifiers.push(match[1] ?? match[2]);
   }
   return specifiers;
-}
-
-/**
- * SHA-256 of a file's bytes, or `null` when it cannot be read (deleted mid-run
- * is itself a tamper signal, so the caller reports the difference rather than
- * throwing here).
- *
- * @param {string} path
- * @returns {string | null}
- */
-export function digestFile(path) {
-  try {
-    return createHash("sha256").update(readFileSync(path)).digest("hex");
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Digest every file whose bytes must not change while the gate runs: each
- * manifest-listed suite, the manifest itself, and the gate's own source.
- *
- * Every child shares one writable checkout, so without this an alphabetically
- * earlier suite can overwrite a later one with a program that prints the
- * expected `ok` lines and a matching summary — both then report passing and the
- * gate's central claim, that each suite's result came from that suite, is void.
- * Reproduced before this existed: a `sentry-aaa-attacker` suite rewrote
- * `sentry-zzz-victim` (a genuinely failing suite) and the gate exited 0 with
- * both rows `ok`.
- *
- * @param {string[]} suites repo-relative suite paths
- * @param {string} root
- * @returns {Map<string, string | null>} repo-relative path to digest
- */
-export function digestWatchSet(manifest, root) {
-  return new Map(
-    gateInputs(manifest).map((relative) => [
-      relative,
-      digestFile(join(root, relative)),
-    ]),
-  );
-}
-
-/**
- * Every file the gate READS in order to decide anything, derived from the
- * manifest rather than listed by hand.
- *
- * The watch set was twice decided by asking "which files feel load-bearing",
- * and twice missed one: the exemption route trusts BOTH the importer named in
- * the entry and `package.json` (it must contain a script that runs that
- * importer), and neither was watched — so an earlier alphabetic suite could
- * restore the import in the job's writable checkout and forge an intact route
- * for a suite the production job never runs (measured: gate exit 0 on a
- * throwing exempt suite).
- *
- * The right question is what the gate consults to reach a verdict, so this
- * derives that set from the decision inputs themselves:
- *
- *   - the manifest — decides the expected set, floors, reporters, exemptions;
- *   - the gate's own source — decides how every result is judged;
- *   - every manifest-listed suite — the thing whose output is the verdict;
- *   - per exempt entry, its `importer` and `package.json` — the only evidence
- *     that an unrun suite still runs somewhere else.
- *
- * Anything added to the manifest that brings a new input with it lands in the
- * watch set automatically, which is the property the hand-written list lacked.
- *
- * @param {{ suites: Record<string, any> }} manifest
- * @returns {string[]} repo-relative paths, sorted
- */
-export function gateInputs(manifest) {
-  const inputs = new Set([MANIFEST_LABEL, GATE_LABEL]);
-  for (const [suite, entry] of Object.entries(manifest?.suites ?? {})) {
-    inputs.add(suite);
-    if (!entry?.exempt) continue;
-    // Both halves of the route proof, per ADR 0062.
-    inputs.add(entry.exempt.importer);
-    inputs.add(PACKAGE_JSON_LABEL);
-  }
-  return [...inputs].sort();
-}
-
-/**
- * Compare current bytes against the pre-run snapshot.
- *
- * @param {Map<string, string | null>} baseline
- * @param {string} root
- * @param {string[]} [only] restrict the check to these paths; default all
- * @returns {string[]} human-readable descriptions of every file that changed
- */
-export function digestDrift(baseline, root, only) {
-  const paths = only ?? [...baseline.keys()];
-  const drift = [];
-  for (const relative of paths) {
-    const before = baseline.get(relative);
-    const now = digestFile(join(root, relative));
-    if (before === now) continue;
-    if (now === null) {
-      drift.push(`${relative} was DELETED while the gate was running`);
-    } else if (before === null) {
-      drift.push(`${relative} was CREATED while the gate was running`);
-    } else {
-      drift.push(
-        `${relative} was REWRITTEN while the gate was running (${before.slice(0, 12)} → ${now.slice(0, 12)})`,
-      );
-    }
-  }
-  return drift;
 }
 
 /**
@@ -671,18 +568,59 @@ export function verifyExemptRoute(suite, exempt, root) {
     const runner = new RegExp(
       `(^|&&|\\|\\||;)\\s*node\\s+(--[\\w-]+(=\\S+)?\\s+)*${escapeForRegExp(exempt.importer)}(\\s|$)`,
     );
-    const routed = Object.values(pkg.scripts || {}).some(
-      (cmd) => typeof cmd === "string" && runner.test(cmd),
-    );
-    if (!routed) {
+    // The manifest names the exact command the owning job runs, so validate
+    // THAT alias rather than "some script somewhere runs the importer". Scanning
+    // every script accepted an unused `decoy` while the named `tf:test` had been
+    // turned into `echo skipped` — the owning job would have run the no-op and
+    // the suite would never have executed anywhere (measured: gate exit 0 on a
+    // provider suite that throws on load).
+    const via = String(exempt.via ?? "");
+    const alias = via.startsWith("pnpm ")
+      ? via.slice("pnpm ".length).trim()
+      : "";
+    if (alias === "") {
       reasons.push(
-        `no package.json script runs \`node ${exempt.importer}\`; \`${exempt.via || "the exempt route"}\` proves nothing`,
+        `the exempt route's \`via\` is ${JSON.stringify(via)}, which is not a \`pnpm <script>\` ` +
+          "invocation; the route must name the exact command the owning job runs",
       );
+    } else {
+      const command = pkg.scripts?.[alias];
+      if (typeof command !== "string") {
+        reasons.push(
+          `package.json has no \`${alias}\` script, so \`${via}\` — the command ` +
+            `\`${exempt.runBy || "the owning job"}\` runs — cannot run ${exempt.importer}`,
+        );
+      } else if (!runner.test(command)) {
+        reasons.push(
+          `the \`${alias}\` script is ${JSON.stringify(command)}, which does not run ` +
+            `\`node ${exempt.importer}\`; \`${via}\` is the ONLY command ` +
+            `\`${exempt.runBy || "the owning job"}\` runs, so another script running the importer ` +
+            "does not keep the suite covered",
+        );
+      }
     }
   } catch (err) {
     reasons.push(`package.json unreadable for route check: ${err.message}`);
   }
   return reasons;
+}
+
+/**
+ * The success line, stating separately what was RUN and what was only
+ * route-verified. Exported so its wording is testable.
+ *
+ * @param {number} ran suites spawned and asserted from their own output
+ * @param {number} exempted entries not spawned here, whose route was checked
+ */
+export function successAttestation(ran, exempted) {
+  const spawned = `${ran} suite${ran === 1 ? "" : "s"} ran and ${
+    ran === 1 ? "was" : "were"
+  } asserted from ${ran === 1 ? "its" : "their"} own output`;
+  if (exempted === 0) return `${spawned}.`;
+  return (
+    `${spawned}; ${exempted} entr${exempted === 1 ? "y was" : "ies were"} NOT run here — ` +
+    `only the route to the job that does run ${exempted === 1 ? "it" : "them"} was verified.`
+  );
 }
 
 /** Emit `text` to stdout and, when running under Actions, to the step summary. */
@@ -783,6 +721,9 @@ export function main() {
 
   const rows = [];
   let failures = 0;
+  // Counted separately so the success line can state what was actually done.
+  let ran = 0;
+  let exempted = 0;
   for (const suite of manifestKeys) {
     const entry = manifest.suites[suite];
     if (entry.exempt) {
@@ -807,9 +748,10 @@ export function main() {
         status: reasons.length ? "ROUTE-BROKEN" : "exempt",
         detail:
           reasons.join("; ") ||
-          `runs in ${entry.exempt.runBy || "another job"}`,
+          `NOT run here; route to ${entry.exempt.runBy || "another job"} verified`,
       });
       if (reasons.length) failures += 1;
+      else exempted += 1;
       continue;
     }
     // Re-check THIS suite's bytes immediately before spawning it: if an earlier
@@ -833,6 +775,7 @@ export function main() {
         ? reasons.join("; ")
         : `pass=${result.pass} floor=${entry.floor} lines=${result.caseLines}`,
     });
+    if (reasons.length === 0) ran += 1;
     if (reasons.length) {
       failures += 1;
       // A summary row names WHICH suite broke but never why, which leaves a
@@ -902,8 +845,13 @@ export function main() {
     "| ----- | ------ | ------ |",
     ...rows.map((r) => `| ${r.suite} | ${r.status} | ${r.detail} |`),
     "",
+    // The attestation must be true of a normal run without the reader knowing
+    // what "exempt" means. It previously said all N entries were "asserted from
+    // their own output" while the exempt entry was never spawned at all — a
+    // false statement in the operator-facing output of a required check, and
+    // one a reviewer took at face value.
     failures === 0
-      ? `All ${rows.length} manifest entries reconciled and asserted from their own output.`
+      ? successAttestation(ran, exempted)
       : `${failures} suite(s) failed the gate.`,
     "",
   ].join("\n");

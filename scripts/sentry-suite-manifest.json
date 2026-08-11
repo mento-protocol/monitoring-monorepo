@@ -24,7 +24,7 @@
     },
     "scripts/sentry-suite-gate-integrity.test.mjs": {
       "reporter": "count-line",
-      "floor": 10
+      "floor": 14
     },
     "scripts/sentry-suite-gate.test.mjs": {
       "reporter": "count-line",

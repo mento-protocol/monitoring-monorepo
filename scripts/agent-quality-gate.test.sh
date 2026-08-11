@@ -3831,6 +3831,19 @@ assert_contains "$sentry_gate_run"
 run_gate "scripts/sentry-triage-archive.test.mjs"
 assert_contains "$sentry_gate_run"
 
+# EVERY file the round-8 split created must route the gate, not just the ones
+# that happen to match `sentry-*.test.mjs`. The fixtures module owns fixture
+# environment isolation, the step-summary redirection and the shared harness, and
+# it scheduled neither gate suite until the arm was widened to
+# `sentry-suite-gate*.mjs` — the second routing gap a split has introduced.
+run_gate "scripts/sentry-suite-gate-fixtures.mjs"
+assert_contains "$sentry_gate_test"
+assert_contains "$sentry_gate_run"
+
+run_gate "scripts/sentry-suite-gate-integrity.test.mjs"
+assert_contains "$sentry_gate_test"
+assert_contains "$sentry_gate_run"
+
 # check-sentry-suites-in-ci.test.mjs asserts that every Sentry suite runs in
 # CI. Every file it reads must route it, or the drift it exists to catch is
 # only caught after push. Its first home was an arm nested under `scripts/*.sh`,

@@ -2706,10 +2706,16 @@ while IFS= read -r path; do
     # ambient `NODE_OPTIONS=--no-warnings` cannot run the gate at all — it
     # refuses to start before executing a single suite — and half the
     # self-test's fixtures fail for that same reason. The gate costs ~3s.
+    # `scripts/sentry-suite-gate*.mjs` rather than the gate script alone: the
+    # round-8 split created sentry-suite-gate-fixtures.mjs, which this arm did
+    # not match, so a change to it scheduled Trunk and lint:scripts but NEITHER
+    # gate suite — and that file owns fixture environment isolation, the
+    # step-summary redirection and the shared harness. The prefix glob covers
+    # every current and future gate module, so the next split cannot reopen it.
     case "$path" in
       scripts/sentry-*.test.mjs | \
         scripts/*/sentry-*.test.mjs | \
-        scripts/sentry-suite-gate.mjs | \
+        scripts/sentry-suite-gate*.mjs | \
         scripts/sentry-suite-manifest.json)
         add_command "/usr/bin/env -u NODE_OPTIONS -u NODE_PATH node scripts/sentry-suite-gate.test.mjs" "Sentry-suite gate, manifest, or a manifest-owned suite changed"
         add_command "/usr/bin/env -u NODE_OPTIONS -u NODE_PATH node scripts/sentry-suite-gate.mjs" "Sentry-suite gate, manifest, or a manifest-owned suite changed (validate the committed manifest against the real suites)"
