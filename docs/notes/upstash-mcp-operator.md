@@ -23,9 +23,12 @@ or the authenticated dashboard editor.
 The workspace pins `@upstash/mcp-server@0.2.4` and `esbuild@0.28.1` in
 `package.json` and `pnpm-lock.yaml`. Normal repository setup installs those
 reviewed artifacts. Config generation verifies the server entrypoint, bundles
-its complete non-builtin dependency closure, rejects any output that differs
-from the reviewed runtime SHA-256, and writes that credential-free runtime to a
-private file under `~/.codex/mcp-runtimes/`.
+its complete non-builtin dependency closure with an exact reviewed native
+esbuild binary copied into a private temporary directory, and rejects any
+output that differs from the reviewed runtime SHA-256. It syncs a private
+temporary runtime file and atomically publishes it under
+`~/.codex/mcp-runtimes/`, so an interrupted write cannot poison the stable
+runtime path.
 
 The personal config uses absolute paths for Node, the repository-owned
 launcher, and that personal runtime. It also stores an inline verifier outside
@@ -103,11 +106,13 @@ the output shape but contains placeholder paths. Keep `enabled = false` as the
 normal state. Regenerate the table after moving the checkout or Node binary.
 After an intentional launcher, server, dependency, or bundler edit, review the
 change, update the affected pinned hashes, and regenerate the table. Generation
-refuses a dependency closure that does not match the reviewed runtime hash. Do
-not add an Upstash table to the repository's `.codex/config.toml`. The absolute
-launcher remains bound to this checkout even when Codex starts from a different
-working directory. If the checkout changes the launcher or the personal runtime
-afterward, startup stops before changed code can read the injected account key.
+refuses a changed esbuild package manifest or native binary before execution,
+and refuses a dependency closure that does not match the reviewed runtime hash.
+Do not add an Upstash table to the repository's `.codex/config.toml`. The
+absolute launcher remains bound to this checkout even when Codex starts from a
+different working directory. Git pins the hashed launcher to LF bytes. If the
+checkout changes the launcher or the personal runtime afterward, startup stops
+before changed code can read the injected account key.
 
 For an attended upload session, use the approved secret-manager integration to
 inject `UPSTASH_EMAIL` and `UPSTASH_API_KEY` into the Codex process and enable
@@ -143,6 +148,8 @@ shared log, record only these facts after redaction:
   checkout code;
 - config generation verifies and bundles the reviewed entrypoint and its full
   non-builtin dependency closure;
+- config generation runs only a reviewed native esbuild binary snapshot and
+  atomically publishes the private runtime;
 - the launcher verifies and executes the reviewed runtime byte snapshot without
   loading workspace `node_modules`;
 - credential flags are absent;

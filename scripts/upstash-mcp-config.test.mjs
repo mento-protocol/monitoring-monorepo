@@ -7,13 +7,14 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  readdir,
   realpath,
   rm,
   stat,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, isAbsolute, resolve } from "node:path";
+import { basename, dirname, isAbsolute, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import yaml from "js-yaml";
@@ -21,6 +22,7 @@ import { parse as parseToml } from "smol-toml";
 import {
   buildUpstashMcpRuntime,
   prepareUpstashMcpRuntime,
+  verifyEsbuildBinary,
 } from "./build-upstash-mcp-runtime.mjs";
 import {
   createTerminationForwarder,
@@ -270,6 +272,83 @@ test("runtime build closes over every non-builtin server dependency", async () =
   assert.ok(runtime.externalImports.length > 0);
 });
 
+test("runtime build executes only a reviewed esbuild native snapshot", async () => {
+  const verifiedBinary = await verifyEsbuildBinary();
+  assert.equal(
+    createHash("sha256").update(verifiedBinary.bytes).digest("hex"),
+    verifiedBinary.expectedSha256,
+  );
+
+  const builderSource = await readFile(
+    resolve(ROOT, "scripts/build-upstash-mcp-runtime.mjs"),
+    "utf8",
+  );
+  assert.doesNotMatch(builderSource, /from ["']esbuild["']/);
+});
+
+test("runtime build refuses a changed esbuild native binary", async () => {
+  const fixtureRoot = await mkdtemp(
+    resolve(tmpdir(), "upstash-esbuild-tamper-"),
+  );
+  const verifiedBinary = await verifyEsbuildBinary();
+  const esbuildRoot = resolve(fixtureRoot, "node_modules/esbuild");
+  const platformRoot = resolve(
+    esbuildRoot,
+    "node_modules",
+    verifiedBinary.packageName,
+  );
+  try {
+    await mkdir(resolve(platformRoot, dirname(verifiedBinary.subpath)), {
+      recursive: true,
+    });
+    await writeFile(
+      resolve(esbuildRoot, "package.json"),
+      await readFile(resolve(ROOT, "node_modules/esbuild/package.json")),
+    );
+    await writeFile(
+      resolve(platformRoot, "package.json"),
+      JSON.stringify({
+        name: verifiedBinary.packageName,
+        version: ESBUILD_VERSION,
+      }),
+    );
+    await writeFile(
+      resolve(platformRoot, verifiedBinary.subpath),
+      "tampered esbuild binary",
+      { mode: 0o700 },
+    );
+
+    await assert.rejects(
+      verifyEsbuildBinary({ repoRoot: fixtureRoot }),
+      /native binary does not match the reviewed artifact/,
+    );
+  } finally {
+    await rm(fixtureRoot, { force: true, recursive: true });
+  }
+});
+
+test("runtime publication is atomic across concurrent setup", async () => {
+  const runtimeDirectory = await mkdtemp(
+    resolve(tmpdir(), "upstash-mcp-atomic-runtime-"),
+  );
+  try {
+    const runtimePaths = await Promise.all([
+      prepareUpstashMcpRuntime({ runtimeDirectory }),
+      prepareUpstashMcpRuntime({ runtimeDirectory }),
+    ]);
+    assert.equal(runtimePaths[0], runtimePaths[1]);
+    assert.deepEqual(await readdir(runtimeDirectory), [
+      basename(runtimePaths[0]),
+    ]);
+    assert.equal(
+      verifyUpstashMcpRuntime({ runtimePath: runtimePaths[0] }).sha256,
+      UPSTASH_MCP_RUNTIME_SHA256,
+    );
+  } finally {
+    await rm(runtimeDirectory, { force: true, recursive: true });
+  }
+});
+
 test("launcher refuses a changed dependency-closed runtime", async () => {
   const fixtureRoot = await mkdtemp(resolve(tmpdir(), "upstash-mcp-runtime-"));
   const runtimePath = resolve(fixtureRoot, "runtime.mjs");
@@ -387,6 +466,15 @@ test("shared project config stays valid without a partial Upstash entry", async 
   assertCloudSafeProjectConfig(source);
 });
 
+test("Git pins the reviewed launcher to LF bytes", async () => {
+  const attributes = await readFile(resolve(ROOT, ".gitattributes"), "utf8");
+  assert.ok(
+    attributes
+      .split(/\r?\n/)
+      .includes("scripts/upstash-mcp-launcher.mjs text eol=lf"),
+  );
+});
+
 test("workspace dependency and lockfile pin the reviewed artifact", async () => {
   const [packageSource, lockSource] = await Promise.all([
     readFile(resolve(ROOT, "package.json"), "utf8"),
@@ -422,6 +510,8 @@ test("operator and upload guidance carry the pin, ownership, and Cloud boundary"
   assert.match(operator, /sha512-LN5yao74QQZTjGmo/);
   assert.match(operator, /explicit human approval/i);
   assert.match(operator, /Codex Cloud/);
+  assert.match(operator, /reviewed native esbuild binary/i);
+  assert.match(operator, /atomically publishes/i);
   assert.match(operator, /scripts\/upstash-mcp-config\.test\.mjs/);
   assert.match(upload, /upstash-mcp-operator\.md/);
   for (const tool of EXPECTED_TOOLS) assert.match(upload, new RegExp(tool));
