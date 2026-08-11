@@ -280,8 +280,18 @@ export async function clearBriefComments({
 }) {
   let removed = 0;
   for (const comment of findBriefComments(comments)) {
-    await deleteBriefComment(runGh, repo, briefCommentId(comment));
-    removed += 1;
+    try {
+      await deleteBriefComment(runGh, repo, briefCommentId(comment));
+      removed += 1;
+    } catch (err) {
+      // A 404 means the comment is ALREADY gone — the clear's whole goal — so a
+      // concurrent delete is SUCCESS, not a failure. Without this, the projection
+      // leg marks the row failed and re-queues, and the archive leg logs a
+      // misleading "stale brief could not be cleared" warning, for a stub whose
+      // brief is already gone (#1769 round 13). Same 404-as-success rule the
+      // verdict-change clear path already applies; any other error still throws.
+      if (!isNotFoundError(err)) throw err;
+    }
   }
   if (removed) {
     log(

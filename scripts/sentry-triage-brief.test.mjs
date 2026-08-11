@@ -40,6 +40,7 @@ import {
   runBrief,
 } from "./sentry-triage-brief.mjs";
 import {
+  decodeDoubleQuoteEscape,
   extractPermalink,
   MAX_BRIEF_LIST_ITEMS,
   MAX_BRIEF_TEXT_LEN,
@@ -354,6 +355,63 @@ await test("inline list items honor escaped/doubled quotes (#1769 round 9)", () 
   assertEqual(doubled.how_to_check.length, 2);
   assertEqual(doubled.how_to_check[0], "it's here, look");
   assertEqual(doubled.how_to_check[1], "then here");
+});
+
+await test("the double-quoted escape decoder covers the FULL YAML set (#1769 round 13)", () => {
+  // EVERY escape in the YAML 1.1/1.2 double-quoted set is decoded to its correct
+  // character — not the backslash silently dropped (which turned a `\u2192`
+  // arrow into `u2192` and `\n` into a literal `n`). Exhaustive, so there is no
+  // "next escape" for a future round to find.
+  const decode = (seq) => {
+    const out = decodeDoubleQuoteEscape(`\\${seq}`, 0);
+    assert(out, `escape \\${seq} must decode`);
+    return out.text;
+  };
+  const cases = [
+    ["0", "\0"],
+    ["a", "\x07"],
+    ["b", "\b"],
+    ["t", "\t"],
+    ["n", "\n"],
+    ["v", "\v"],
+    ["f", "\f"],
+    ["r", "\r"],
+    ["e", "\x1b"],
+    ['"', '"'],
+    ["/", "/"],
+    ["\\", "\\"],
+    ["N", "\x85"],
+    ["_", "\xa0"],
+    ["L", "\u2028"],
+    ["P", "\u2029"],
+    [" ", " "],
+  ];
+  for (const [seq, expected] of cases) {
+    assertEqual(decode(seq), expected);
+  }
+  // Hex forms: \xXX, \uXXXX, \UXXXXXXXX (incl. an astral codepoint).
+  assertEqual(decodeDoubleQuoteEscape("\\x41", 0).text, "A");
+  assertEqual(decodeDoubleQuoteEscape("\\u2192", 0).text, "\u2192");
+  assertEqual(decodeDoubleQuoteEscape("\\U0001F600", 0).text, "\u{1f600}");
+  // `next` advances past the whole escape so the scanner never re-reads it.
+  assertEqual(decodeDoubleQuoteEscape("\\U0001F600", 0).next, 10);
+
+  // Invalid / unknown escapes are REJECTED (null), never silently stripped.
+  assertEqual(decodeDoubleQuoteEscape("\\q", 0), null); // unknown letter
+  assertEqual(decodeDoubleQuoteEscape("\\x4", 0), null); // short hex
+  assertEqual(decodeDoubleQuoteEscape("\\xZZ", 0), null); // non-hex
+  assertEqual(decodeDoubleQuoteEscape("\\u192", 0), null); // short \u
+  assertEqual(decodeDoubleQuoteEscape("\\", 0), null); // trailing backslash
+
+  // End to end: a rejected escape falls back to a safe single item (never a
+  // corrupted split), and a valid escape decodes in place.
+  const rejected = parseVerdictYaml('how_to_check: ["a\\qb", "c"]');
+  assertEqual(rejected.how_to_check.length, 1);
+  const arrow = parseVerdictYaml(
+    'decision_branches: ["Yes \\u2192 config-fix", "No \\u2192 close"]',
+  );
+  assertEqual(arrow.decision_branches[0], "Yes \u2192 config-fix");
+  assertEqual(arrow.decision_branches[1], "No \u2192 close");
 });
 
 await test("inline list items keep brackets inside quotes (#1769 round 10)", () => {
@@ -1023,6 +1081,61 @@ await test("clearBriefComments deletes marked comments and no-ops when absent (#
   });
   assertEqual(removed2, 0);
   assertEqual(gh2.calls.length, 0);
+});
+
+await test("clearBriefComments treats a delete 404 as success, not a failure (#1769 round 13)", async () => {
+  // The comment is already gone = the clear's goal = success. A 404 must NOT
+  // throw, or the projection leg marks the row failed and re-queues and the
+  // archive leg logs a misleading stale-brief warning. Any OTHER error throws.
+  let attempts = 0;
+  const runGh = async (args) => {
+    if (args[0] === "api" && args.includes("DELETE")) {
+      attempts += 1;
+      throw new Error(
+        "gh api repos/o/r/issues/comments/5501 failed with exit 1:\ngh: Not Found (HTTP 404)",
+      );
+    }
+    return "";
+  };
+  let threw = false;
+  let removed;
+  try {
+    removed = await clearBriefComments({
+      runGh,
+      repo: "o/r",
+      issueNumber: 1731,
+      comments: [briefCommentObject(renderFixture(), 5501)],
+      log: () => {},
+    });
+  } catch {
+    threw = true;
+  }
+  assert(!threw, "a 404 on the clear delete must not throw");
+  assertEqual(attempts, 1); // it attempted the delete
+  assertEqual(removed, 0); // already gone -> nothing this run removed, but OK
+
+  // A non-404 error still surfaces.
+  const boom = async (args) => {
+    if (args[0] === "api" && args.includes("DELETE")) {
+      throw new Error(
+        "gh api ... failed with exit 1:\ngh: Server Error (HTTP 500)",
+      );
+    }
+    return "";
+  };
+  let threw500 = false;
+  try {
+    await clearBriefComments({
+      runGh: boom,
+      repo: "o/r",
+      issueNumber: 1731,
+      comments: [briefCommentObject(renderFixture(), 5502)],
+      log: () => {},
+    });
+  } catch {
+    threw500 = true;
+  }
+  assert(threw500, "a non-404 clear error must still surface");
 });
 
 // ---------------------------------------------------------------------------

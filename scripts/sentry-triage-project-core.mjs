@@ -332,6 +332,55 @@ export const MAX_BRIEF_LIST_ITEMS = 5;
  * or null when `text` is not a single valid flow sequence (the caller keeps the
  * remainder as one item). Never throws.
  */
+// The COMPLETE YAML 1.1/1.2 double-quoted single-character escape set. DECODING
+// (not backslash-dropping) is the whole point: a dropped backslash turned a
+// `→` arrow into a literal `u2192` and `\n` into a literal `n`, mangling
+// public decision text (#1769 round 13). Enumerated exhaustively so no "next
+// escape" is left; the hex forms (`\x`/`\u`/`\U`) are handled in the decoder.
+const YAML_DQ_ESCAPES = {
+  0: "\0", // null (U+0000)
+  a: "\x07", // bell
+  b: "\b", // backspace
+  t: "\t", // tab
+  n: "\n", // line feed
+  v: "\v", // vertical tab
+  f: "\f", // form feed
+  r: "\r", // carriage return
+  e: "\x1b", // escape
+  " ": " ", // escaped space -> space
+  '"': '"', // double quote
+  "/": "/", // slash
+  "\\": "\\", // backslash
+  N: "\x85", // next line (NEL)
+  _: "\xa0", // non-breaking space
+  L: "\u2028", // line separator
+  P: "\u2029", // paragraph separator
+};
+const YAML_DQ_HEX = { x: 2, u: 4, U: 8 };
+
+/**
+ * Decode ONE YAML double-quoted escape at `s[i]` (`s[i]` is the backslash).
+ * Returns `{ text, next }` (next = index just past the escape) or null for an
+ * unknown/invalid escape — the caller then rejects the whole inline sequence
+ * rather than silently corrupting it.
+ */
+export function decodeDoubleQuoteEscape(s, i) {
+  const e = s[i + 1];
+  if (e === undefined) return null; // trailing backslash
+  if (Object.hasOwn(YAML_DQ_HEX, e)) {
+    const len = YAML_DQ_HEX[e];
+    const hex = s.slice(i + 2, i + 2 + len);
+    if (hex.length !== len || !/^[0-9a-fA-F]+$/.test(hex)) return null;
+    const code = Number.parseInt(hex, 16);
+    if (code > 0x10ffff) return null;
+    return { text: String.fromCodePoint(code), next: i + 2 + len };
+  }
+  if (Object.hasOwn(YAML_DQ_ESCAPES, e)) {
+    return { text: YAML_DQ_ESCAPES[e], next: i + 2 };
+  }
+  return null; // unknown escape
+}
+
 function parseInlineFlowSequence(text) {
   const s = String(text ?? "").trim();
   if (!s.startsWith("[")) return null;
@@ -349,9 +398,13 @@ function parseInlineFlowSequence(text) {
       return null; // trailing non-comment content -> not a clean flow sequence
     }
     if (quote === '"') {
-      if (ch === "\\" && i + 1 < s.length) {
-        buf += s[i + 1]; // backslash escape: next char is literal (incl. `"`)
-        i += 1;
+      if (ch === "\\") {
+        // DECODE the escape (not drop the backslash): an unknown/invalid escape
+        // rejects the whole inline sequence rather than corrupting it.
+        const decoded = decodeDoubleQuoteEscape(s, i);
+        if (decoded === null) return null;
+        buf += decoded.text;
+        i = decoded.next - 1; // the loop's i += 1 lands just past the escape
       } else if (ch === '"') {
         quote = null;
       } else {
