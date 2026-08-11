@@ -16,6 +16,10 @@
  * ways to break the job that it must reject, run against a `structuredClone` of
  * the real workflow the same way `SENTINEL_MUTATIONS` are.
  *
+ * The job's own shape is asserted by EXACT EQUALITY against `CANONICAL_JOB`
+ * rather than by enumerating forbidden properties — see the note there for why
+ * the blocklist could not converge and what that costs.
+ *
  * Split into its own module so the entry point and the core stay under the
  * repo's 1,000-line cap; the main test file imports this module, so `node
  * scripts/check-sentry-suites-in-ci.test.mjs` runs these too.
@@ -35,17 +39,140 @@ export const GATE_COMMAND =
   "/usr/bin/env -u NODE_OPTIONS -u NODE_PATH node scripts/sentry-suite-gate.mjs";
 
 /**
- * The only actions allowed to execute before the gate command. Both are
- * upstream and SHA-pinned; they are the two non-PR-authored things trusted
- * ahead of the suites. Anything else before the gate reopens the R1 window,
- * where a step writing `NODE_OPTIONS=--import=…` to `$GITHUB_ENV` neuters every
- * later suite in the job into a false-green no-op.
+ * The canonical `sentry-suites` job, in full.
+ *
+ * This is an ALLOWLIST, not a list of rejected properties, and that inversion is
+ * the point. Five rounds of "reject the next bad key" could not converge: the
+ * space of workflow keys is open and GitHub keeps adding to it, so a blocklist
+ * missed workflow-level `env` (which `env -u` preserves, redirecting the gate at
+ * a committed fake root), `working-directory` on the gate step, a SECOND
+ * checkout pinned to `main`, an `if:` on the step rather than the job,
+ * `container`, `defaults.run.shell`, and a step-level `shell` — all measured as
+ * GREEN before this rewrite.
+ *
+ * The suite set already reconciles by exact set equality rather than "no suite
+ * is missing"; this applies the same discipline one level up. Anything the
+ * canonical shape does not list is rejected whatever it is called, so the next
+ * key nobody has thought of is closed in advance.
+ *
+ * The cost is deliberate: a legitimate change to this job must update this
+ * structure, which forces it to be re-proven in review rather than absorbed
+ * silently. That is the same trade the suite-set equality makes. Dependabot
+ * bumps to either action SHA need a paired edit here.
  */
-export const PRE_GATE_ACTIONS = ["actions/checkout@", "actions/setup-node@"];
+export const CANONICAL_JOB = {
+  name: "Sentry suites",
+  "runs-on": "ubuntu-latest",
+  "timeout-minutes": 5,
+  permissions: { contents: "read" },
+  steps: [
+    {
+      uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+      with: { "persist-credentials": false },
+    },
+    {
+      uses: "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
+      with: { "node-version-file": ".node-version" },
+    },
+    { name: "Run and assert the Sentry suites", run: GATE_COMMAND },
+  ],
+};
+
+/**
+ * Workflow-level keys that would reach this job's runtime if present. Finding 1
+ * came from outside the job block entirely — a workflow-level
+ * `env: SENTRY_SUITE_GATE_ROOT` survives `env -u` and points the gate at a
+ * committed fake manifest — so the assertion cannot stop at the job boundary.
+ */
+export const FORBIDDEN_WORKFLOW_KEYS = ["env", "defaults"];
+
+/** True for a plain object (not an array, not null). */
+function isRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Compare `actual` against the canonical `expected` by EXACT structure: same key
+ * set at every level, same scalar values, same array length and order. Every
+ * difference becomes one human-readable blocker naming the path.
+ *
+ * @param {unknown} actual
+ * @param {unknown} expected
+ * @param {string} path
+ * @param {string[]} blockers
+ */
+function assertExactShape(actual, expected, path, blockers) {
+  if (isRecord(expected)) {
+    if (!isRecord(actual)) {
+      blockers.push(
+        `${path} must be a mapping, found ${JSON.stringify(actual)}`,
+      );
+      return;
+    }
+    const actualKeys = Object.keys(actual).sort();
+    const expectedKeys = Object.keys(expected).sort();
+    for (const key of actualKeys) {
+      if (!expectedKeys.includes(key)) {
+        blockers.push(
+          `${path}.${key} is not part of the canonical \`${GATE_JOB}\` shape — this job is ` +
+            "pinned by allowlist, so anything not listed is rejected; if the addition is " +
+            "legitimate, add it to CANONICAL_JOB so the change is reviewed on its merits",
+        );
+      }
+    }
+    for (const key of expectedKeys) {
+      if (!actualKeys.includes(key)) {
+        blockers.push(`${path}.${key} is missing from the \`${GATE_JOB}\` job`);
+        continue;
+      }
+      assertExactShape(actual[key], expected[key], `${path}.${key}`, blockers);
+    }
+    return;
+  }
+
+  if (Array.isArray(expected)) {
+    if (!Array.isArray(actual)) {
+      blockers.push(`${path} must be a list, found ${JSON.stringify(actual)}`);
+      return;
+    }
+    if (actual.length !== expected.length) {
+      blockers.push(
+        `${path} has ${actual.length} entr${actual.length === 1 ? "y" : "ies"}, the canonical ` +
+          `shape has exactly ${expected.length} — an inserted step runs PR-authored code in ` +
+          "the job, and a removed one drops something the gate depends on",
+      );
+    }
+    for (
+      let index = 0;
+      index < Math.max(actual.length, expected.length);
+      index += 1
+    ) {
+      if (index >= actual.length || index >= expected.length) continue;
+      assertExactShape(
+        actual[index],
+        expected[index],
+        `${path}[${index}]`,
+        blockers,
+      );
+    }
+    return;
+  }
+
+  if (actual !== expected) {
+    blockers.push(
+      `${path} is ${JSON.stringify(actual)}, the canonical shape requires ${JSON.stringify(expected)}`,
+    );
+  }
+}
 
 /**
  * Everything that stops the `sentry-suites` job from being an unconditional,
  * merge-blocking run of the suite gate with no PR-authored code in front of it.
+ *
+ * The job's own shape is asserted by exact equality against `CANONICAL_JOB`
+ * (see the note there). The remaining checks are about how the SENTINEL treats
+ * the job, which lives outside the job block and so cannot be expressed as part
+ * of its structure.
  *
  * @param {Record<string, any>} workflow
  * @returns {string[]} blockers; empty means the job is intact
@@ -55,8 +182,9 @@ export function gateJobBlockers(workflow) {
   const jobs = workflow?.jobs;
   const job = jobs?.[GATE_JOB];
 
-  // 1. It exists at all. This is the deletion that nothing else catches.
-  if (!job || typeof job !== "object") {
+  // Existence first: this is the deletion nothing else catches, and every other
+  // assertion below would be vacuous without it.
+  if (!isRecord(job)) {
     return [
       `the \`${GATE_JOB}\` job is gone from ci.yml — it is the only thing that runs the ` +
         "Sentry suites and proves from their output that they asserted; nothing else " +
@@ -64,17 +192,24 @@ export function gateJobBlockers(workflow) {
     ];
   }
 
-  // 2. Unconditional. GitHub reports a skipped required check as satisfied, so
-  // any `if:` is a merge-gate hole rather than a scheduling nicety.
-  if (job.if !== undefined) {
+  // The whole job, by exact structure. Closes every "property nobody thought to
+  // reject" in one assertion: an `if:` on the job or on any step, a
+  // `working-directory`, a `container`, a `continue-on-error`, an `env:` at
+  // either level, an extra checkout, a reordered or inserted step, a changed
+  // action SHA, a `with.ref`, or a key GitHub has not shipped yet.
+  assertExactShape(job, CANONICAL_JOB, GATE_JOB, blockers);
+
+  // Workflow-level keys that reach this job's runtime from outside its block.
+  for (const key of FORBIDDEN_WORKFLOW_KEYS) {
+    if (workflow?.[key] === undefined) continue;
     blockers.push(
-      `the \`${GATE_JOB}\` job carries \`if: ${job.if}\` — it must be unconditional, because ` +
-        "a skipped job reports success and would satisfy both the `ci` sentinel and a " +
-        "required status check without running a single suite",
+      `the workflow declares a top-level \`${key}:\` — it would reach the \`${GATE_JOB}\` job ` +
+        "and every suite it spawns; a workflow-level `env` survives the step's `env -u` and " +
+        "can point the gate at a different root entirely",
     );
   }
 
-  // 3. The sentinel depends on it, or its result never reaches the required
+  // The sentinel must depend on it, or its result never reaches the required
   // `ci` context.
   const needs = jobs?.ci?.needs ?? [];
   const needsList = Array.isArray(needs) ? needs : [needs];
@@ -85,7 +220,7 @@ export function gateJobBlockers(workflow) {
     );
   }
 
-  // 4. Never skippable/failable by the sentinel's allowlists.
+  // Never skippable or failable by the sentinel's allowlists.
   const allsGreen = allsGreenStep(workflow);
   for (const key of ["allowed-skips", "allowed-failures"]) {
     const listed = parseActionList(allsGreen?.with?.[key]);
@@ -95,103 +230,6 @@ export function gateJobBlockers(workflow) {
           "tolerated, the treatment `production-infra-contract` already receives",
       );
     }
-  }
-
-  // 5. No job-level env. An `env:` on the job reaches every step, which is the
-  // injection the gate's own refuse-to-start guard exists to catch.
-  if (job.env !== undefined) {
-    blockers.push(
-      `the \`${GATE_JOB}\` job declares a job-level \`env:\` — it must not, because a ` +
-        "job-level variable reaches the gate step and every suite it spawns",
-    );
-  }
-
-  // 6. Nothing in this job may tolerate its own failure. `continue-on-error`
-  // makes a red gate report success, so the `ci` sentinel never blocks the
-  // merge and a floor breach or a failed assertion ships — the same class the
-  // sentinel predicates already reject one level up, applied here. Checked on
-  // the job AND on every step rather than only on the step matching the gate
-  // command, so it holds however the gate step is identified.
-  if (job["continue-on-error"] !== undefined) {
-    blockers.push(
-      `the \`${GATE_JOB}\` job sets \`continue-on-error\` — a failing gate would then ` +
-        "report success and the required `ci` context would stay green",
-    );
-  }
-  for (const [index, step] of (Array.isArray(job.steps)
-    ? job.steps
-    : []
-  ).entries()) {
-    if (step?.["continue-on-error"] === undefined) continue;
-    const label = step?.name ?? step?.uses ?? `step ${index + 1}`;
-    blockers.push(
-      `step \`${label}\` in \`${GATE_JOB}\` sets \`continue-on-error\` — no step here may ` +
-        "tolerate its own failure; the gate's verdict is the job's verdict",
-    );
-  }
-
-  // 7. The checkout must be the PR revision of THIS repository. `with.ref` or
-  // `with.repository` redirects the job to validate other code — pointing `ref`
-  // at `main` makes every suite run the base branch, so a PR deleting a test
-  // case passes the gate while the diff under review is never executed.
-  const checkout = (Array.isArray(job.steps) ? job.steps : []).find((step) =>
-    String(step?.uses ?? "").startsWith("actions/checkout@"),
-  );
-  for (const key of ["ref", "repository"]) {
-    if (checkout?.with?.[key] === undefined) continue;
-    blockers.push(
-      `the \`${GATE_JOB}\` checkout sets \`with.${key}: ${checkout.with[key]}\` — it must take ` +
-        "neither, so the job always runs the suites from the pull request's own revision of " +
-        "this repository rather than validating some other code",
-    );
-  }
-
-  // 8. The gate runs, as its whole command, with the tamper variables stripped.
-  const steps = Array.isArray(job.steps) ? job.steps : [];
-  const gateIndex = steps.findIndex(
-    (step) => String(step?.run ?? "").trim() === GATE_COMMAND,
-  );
-  if (gateIndex === -1) {
-    blockers.push(
-      `no step in \`${GATE_JOB}\` runs \`${GATE_COMMAND}\` as its whole command — an ` +
-        "added argument, a `|| true`, or a changed `env -u` prefix all stop it counting",
-    );
-    return blockers;
-  }
-
-  // 9. Nothing PR-authored executes before it. Only the two pinned upstream
-  // actions may precede the gate; a `run:` step, a local composite action, or
-  // any other `uses:` ahead of it is PR-authored code in the R1 window.
-  for (const [index, step] of steps.slice(0, gateIndex).entries()) {
-    const uses = String(step?.uses ?? "");
-    const label = step?.name ?? (uses || `step ${index + 1}`);
-    if (step?.run !== undefined) {
-      blockers.push(
-        `\`${GATE_JOB}\` runs a \`run:\` step (${label}) BEFORE the gate — no PR-authored ` +
-          "command may execute first; such a step can append `NODE_OPTIONS=--import=…` to " +
-          "$GITHUB_ENV and neuter every suite the gate then runs",
-      );
-    } else if (!PRE_GATE_ACTIONS.some((prefix) => uses.startsWith(prefix))) {
-      blockers.push(
-        `\`${GATE_JOB}\` uses \`${uses}\` BEFORE the gate — only ${PRE_GATE_ACTIONS.join(
-          " and ",
-        )} may precede it; anything else (a local composite action especially) is ` +
-          "PR-authored code running ahead of the suites",
-      );
-    }
-    if (step?.env !== undefined) {
-      blockers.push(
-        `a step before the gate (${label}) declares \`env:\` — it must not, for the same reason`,
-      );
-    }
-  }
-
-  // 10. The gate step itself carries no env.
-  if (steps[gateIndex]?.env !== undefined) {
-    blockers.push(
-      "the gate step declares a step-level `env:` — the gate must start from a clean " +
-        "environment, which is why it refuses to run when NODE_OPTIONS or NODE_PATH is set",
-    );
   }
 
   return blockers;
@@ -309,6 +347,83 @@ export const GATE_JOB_MUTATIONS = [
       );
       checkout.with = { ...checkout.with, repository: "attacker/fork" };
     },
+  ],
+
+  // ── Round 7: the six the blocklist missed, all measured GREEN before the
+  // allowlist rewrite. Each is a property nobody had thought to reject.
+  [
+    "a workflow-level `env` redirecting the gate's root",
+    (w) => ((w.env ??= {}).SENTRY_SUITE_GATE_ROOT = "fixtures/fake-root"),
+  ],
+  [
+    "`working-directory` on the gate step",
+    (w) => {
+      const step = w.jobs[GATE_JOB].steps.find((s) => s.run);
+      step["working-directory"] = "fixtures/fake-root";
+    },
+  ],
+  [
+    "a SECOND checkout pinned to `main` before the gate",
+    (w) =>
+      w.jobs[GATE_JOB].steps.splice(2, 0, {
+        uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        with: { ref: "main" },
+      }),
+  ],
+  [
+    "an `if:` on the gate STEP rather than the job",
+    (w) => {
+      const step = w.jobs[GATE_JOB].steps.find((s) => s.run);
+      step.if = "false";
+    },
+  ],
+
+  // ── Shapes the blocklist could never have enumerated. These are the point of
+  // the inversion: nothing here was ever written down as forbidden, and the
+  // allowlist rejects them because they are simply not in the canonical shape.
+  [
+    "an unrecognised job key (`container`)",
+    (w) => (w.jobs[GATE_JOB].container = "ghcr.io/attacker/img"),
+  ],
+  [
+    "an unrecognised job key (`defaults.run.shell`)",
+    (w) => (w.jobs[GATE_JOB].defaults = { run: { shell: "bash -c 'true' #" } }),
+  ],
+  [
+    "an unrecognised step key (`shell`)",
+    (w) => {
+      const step = w.jobs[GATE_JOB].steps.find((s) => s.run);
+      step.shell = "bash -c 'exit 0' #";
+    },
+  ],
+  [
+    "a workflow-level `defaults`",
+    (w) => (w.defaults = { run: { "working-directory": "fixtures/fake" } }),
+  ],
+  [
+    "a bumped checkout SHA without a paired pin edit",
+    (w) => {
+      const checkout = w.jobs[GATE_JOB].steps.find((s) =>
+        String(s.uses ?? "").startsWith("actions/checkout@"),
+      );
+      checkout.uses =
+        "actions/checkout@0000000000000000000000000000000000000000";
+    },
+  ],
+  [
+    "a reordered step list (setup-node before checkout)",
+    (w) => {
+      const steps = w.jobs[GATE_JOB].steps;
+      [steps[0], steps[1]] = [steps[1], steps[0]];
+    },
+  ],
+  [
+    "a widened `permissions`",
+    (w) => (w.jobs[GATE_JOB].permissions = { contents: "write" }),
+  ],
+  [
+    "a renamed job (the check-run name the ruleset would require)",
+    (w) => (w.jobs[GATE_JOB].name = "Sentry suites (advisory)"),
   ],
 ];
 

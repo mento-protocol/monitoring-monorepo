@@ -77,6 +77,59 @@ class GateError extends Error {}
 const GATE_LABEL = "scripts/sentry-suite-gate.mjs";
 
 /**
+ * The manifest schema, as an ALLOWLIST.
+ *
+ * Same inversion as the CI-job pin: enumerating bad values could not converge,
+ * because every field here is honoured verbatim by the runner. `nodeArgs` is
+ * spread into node's argv and `exempt` skips execution outright, so both were
+ * usable to pass a throwing suite (both measured). A field the schema does not
+ * list cannot influence a run, whatever a future edit calls it.
+ */
+const MANIFEST_TOP_LEVEL_KEYS = ["_readme", "suites"];
+const ENTRY_KEYS = ["reporter", "floor", "nodeArgs", "exempt"];
+
+/** The only `nodeArgs` the design needs: the node:test runner. */
+const SUPPORTED_NODE_ARGS = ["--test"];
+
+/** The one suite that may be exempt, and the exact route ADR 0062 records. */
+const EXEMPT_SUITE = "scripts/sentry-provider-contract.test.mjs";
+const EXEMPT_ROUTE = {
+  runBy: "production-infra-contract",
+  via: "pnpm tf:test",
+  importer: "scripts/tf-stacks.test.mjs",
+};
+
+/** Escape a literal for embedding in a RegExp. */
+function escapeForRegExp(literal) {
+  return literal.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Static `import` specifiers of a module, with comments stripped first.
+ *
+ * The route check used to substring-match the suite's basename against the
+ * importer's raw text, which a comment mentioning the path satisfied (measured:
+ * a one-line comment plus an `echo` package script passed the whole exemption).
+ * Parsing the actual import statements is what makes the route real.
+ *
+ * @param {string} source
+ * @returns {string[]}
+ */
+export function staticImportSpecifiers(source) {
+  const withoutComments = source
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/(^|[^:])\/\/.*$/gm, "$1");
+  const specifiers = [];
+  const pattern =
+    /\bimport\s+(?:[^'"()]*?\sfrom\s*)?['"]([^'"]+)['"]|\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
+  let match;
+  while ((match = pattern.exec(withoutComments)) !== null) {
+    specifiers.push(match[1] ?? match[2]);
+  }
+  return specifiers;
+}
+
+/**
  * SHA-256 of a file's bytes, or `null` when it cannot be read (deleted mid-run
  * is itself a tamper signal, so the caller reports the difference rather than
  * throwing here).
@@ -218,12 +271,36 @@ export function loadManifest(path = MANIFEST_PATH) {
       `${MANIFEST_LABEL} has no "suites" object. Give it a top-level "suites" map of "scripts/sentry-<x>.test.mjs" to its reporter and floor.`,
     );
   }
+  // Top-level keys by allowlist, same discipline as the suite set itself.
+  for (const key of Object.keys(parsed)) {
+    if (MANIFEST_TOP_LEVEL_KEYS.includes(key)) continue;
+    throw new GateError(
+      `${MANIFEST_LABEL} has an unrecognised top-level key "${key}" — only ${MANIFEST_TOP_LEVEL_KEYS.map(
+        (k) => `"${k}"`,
+      ).join(" and ")} are allowed.`,
+    );
+  }
+
   for (const [key, entry] of Object.entries(parsed.suites)) {
-    if (!entry || typeof entry !== "object") {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
       throw new GateError(
         `the entry for ${key} in ${MANIFEST_LABEL} is not an object — give it { "reporter": …, "floor": … }.`,
       );
     }
+
+    // Per-entry keys by allowlist. A field nobody has thought of cannot change
+    // how a suite is run if the schema refuses to carry it.
+    for (const field of Object.keys(entry)) {
+      if (ENTRY_KEYS.includes(field)) continue;
+      throw new GateError(
+        `${key} has an unrecognised field "${field}" in ${MANIFEST_LABEL} — entries carry only ${ENTRY_KEYS.map(
+          (f) => `"${f}"`,
+        ).join(
+          ", ",
+        )}; anything else is rejected rather than silently honoured.`,
+      );
+    }
+
     const reporters = ["count-line", "node-test", "exit-only"];
     if (!reporters.includes(entry.reporter)) {
       throw new GateError(
@@ -232,10 +309,65 @@ export function loadManifest(path = MANIFEST_PATH) {
           .join(", ")}.`,
       );
     }
-    if (entry.exempt) {
-      if (typeof entry.exempt.importer !== "string") {
+
+    // `nodeArgs` is spread verbatim into the spawn, so an arbitrary value is
+    // arbitrary control over node's argv: `["--eval", "console.log('1 passed')"]`
+    // makes node treat the suite PATH as a positional argument and never run it,
+    // so a throwing suite is judged green (measured). Only the one invocation
+    // the design actually needs is permitted, matched exactly.
+    if (entry.nodeArgs !== undefined) {
+      const encoded = JSON.stringify(entry.nodeArgs);
+      if (encoded !== JSON.stringify(SUPPORTED_NODE_ARGS)) {
         throw new GateError(
-          `the exempt entry for ${key} in ${MANIFEST_LABEL} is missing an "importer" — name the file whose static import keeps the suite running in another job.`,
+          `${key} sets "nodeArgs": ${encoded} in ${MANIFEST_LABEL} — the only supported value is ` +
+            `${JSON.stringify(SUPPORTED_NODE_ARGS)} (the node:test runner). nodeArgs is passed straight to ` +
+            "node, so anything else can stop the suite from running at all.",
+        );
+      }
+      if (entry.reporter !== "node-test") {
+        throw new GateError(
+          `${key} sets "nodeArgs" with reporter "${entry.reporter}" in ${MANIFEST_LABEL} — ` +
+            `${JSON.stringify(SUPPORTED_NODE_ARGS)} is only meaningful for the "node-test" reporter.`,
+        );
+      }
+    }
+
+    if (entry.exempt !== undefined) {
+      // Exemption skips execution and every count check, so it is the single
+      // most powerful field here: marking any suite exempt hides it entirely
+      // (measured — a throwing suite reported `exempt` at exit 0). It is
+      // therefore permitted for exactly one suite, with exactly the route ADR
+      // 0062 records, compared structurally rather than field-by-field.
+      if (key !== EXEMPT_SUITE) {
+        throw new GateError(
+          `${key} is marked "exempt" in ${MANIFEST_LABEL}, but exemption is reserved for ` +
+            `${EXEMPT_SUITE} alone. Every other suite must be RUN by the gate; exempting one ` +
+            "skips its execution and all of its count checks.",
+        );
+      }
+      const encoded = JSON.stringify(
+        entry.exempt,
+        Object.keys(EXEMPT_ROUTE).sort(),
+      );
+      const expected = JSON.stringify(
+        EXEMPT_ROUTE,
+        Object.keys(EXEMPT_ROUTE).sort(),
+      );
+      if (
+        encoded !== expected ||
+        Object.keys(entry.exempt).sort().join() !==
+          Object.keys(EXEMPT_ROUTE).sort().join()
+      ) {
+        throw new GateError(
+          `${key}'s "exempt" route in ${MANIFEST_LABEL} is ${JSON.stringify(entry.exempt)}, but the only ` +
+            `route ADR 0062 records is ${expected}. The route is matched exactly, so it cannot be ` +
+            "pointed at a different job or importer.",
+        );
+      }
+      if (entry.floor !== undefined) {
+        throw new GateError(
+          `${key} is exempt but also carries a "floor" in ${MANIFEST_LABEL} — an exempt suite is ` +
+            "never run here, so a floor on it would be meaningless.",
         );
       }
     } else if (!Number.isInteger(entry.floor) || entry.floor < 1) {
@@ -478,20 +610,29 @@ export function verifyExemptRoute(suite, exempt, root) {
     reasons.push(`importer ${exempt.importer} unreadable: ${err.message}`);
     return reasons;
   }
+  // A real static import, not a mention. Substring-matching the raw text was
+  // satisfied by a comment naming the path.
   const base = suite.slice(suite.lastIndexOf("/") + 1);
-  if (!importerText.includes(`./${base}`)) {
+  const specifiers = staticImportSpecifiers(importerText);
+  if (!specifiers.includes(`./${base}`)) {
     reasons.push(
-      `importer ${exempt.importer} no longer imports ./${base}; the exemption is dead`,
+      `importer ${exempt.importer} has no static import of ./${base} (its imports are ` +
+        `${JSON.stringify(specifiers)}); the exemption is dead`,
     );
   }
   try {
     const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+    // The script must actually RUN the importer with node, not merely mention
+    // it — `echo scripts/tf-stacks.test.mjs` satisfied a substring check.
+    const runner = new RegExp(
+      `(^|&&|\\|\\||;)\\s*node\\s+(--[\\w-]+(=\\S+)?\\s+)*${escapeForRegExp(exempt.importer)}(\\s|$)`,
+    );
     const routed = Object.values(pkg.scripts || {}).some(
-      (cmd) => typeof cmd === "string" && cmd.includes(exempt.importer),
+      (cmd) => typeof cmd === "string" && runner.test(cmd),
     );
     if (!routed) {
       reasons.push(
-        `no package.json script runs ${exempt.importer}; \`${exempt.via || "the exempt route"}\` proves nothing`,
+        `no package.json script runs \`node ${exempt.importer}\`; \`${exempt.via || "the exempt route"}\` proves nothing`,
       );
     }
   } catch (err) {

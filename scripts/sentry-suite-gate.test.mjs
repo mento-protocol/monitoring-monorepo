@@ -34,6 +34,7 @@ import {
   parseNodeTest,
   reconcile,
   runSuite,
+  staticImportSpecifiers,
 } from "./sentry-suite-gate.mjs";
 
 let passed = 0;
@@ -454,6 +455,141 @@ await test("digestDrift is silent when nothing changed", async () => {
   } finally {
     cleanup(root);
   }
+});
+
+// ── (a3) manifest schema: an allowlist, so unknown fields cannot steer a run ──
+
+/** A suite that always throws, so any "green" verdict on it is a false green. */
+const THROWING_SUITE = 'throw new Error("this suite must fail the gate");\n';
+
+await test("red: `nodeArgs` cannot be used to stop a suite running", async () => {
+  const root = makeRoot();
+  try {
+    // Codex 3760239539. nodeArgs is spread verbatim into node's argv, so
+    // `--eval` made node treat the suite PATH as a positional argument and never
+    // run it: the throwing suite below was judged `pass=1 floor=1 lines=1`, exit 0.
+    writeSuite(root, "sentry-broken.test.mjs", THROWING_SUITE);
+    writeManifest(root, {
+      "scripts/sentry-broken.test.mjs": {
+        reporter: "count-line",
+        floor: 1,
+        nodeArgs: ["--eval", "console.log('ok fake'); console.log('1 passed')"],
+      },
+    });
+    const { status, stderr } = runGate(root);
+    assert(status !== 0, "an arbitrary nodeArgs must red the gate");
+    assert(
+      stderr.includes('the only supported value is ["--test"]'),
+      `should name the one supported value: ${stderr}`,
+    );
+  } finally {
+    cleanup(root);
+  }
+});
+
+await test("red: `exempt` cannot be used to skip an arbitrary suite", async () => {
+  const root = makeRoot();
+  try {
+    // Codex 3760239548. Exemption skips execution AND every count check, and the
+    // route was only substring-matched, so a comment naming the path plus an
+    // `echo` script satisfied it — the throwing suite reported `exempt`, exit 0.
+    writeSuite(root, "sentry-broken.test.mjs", THROWING_SUITE);
+    writeFileSync(
+      join(root, "scripts", "fake-importer.mjs"),
+      "// a comment that merely mentions ./sentry-broken.test.mjs\n",
+    );
+    writeFileSync(
+      join(root, "package.json"),
+      JSON.stringify({ scripts: { fake: "echo scripts/fake-importer.mjs" } }),
+    );
+    writeManifest(root, {
+      "scripts/sentry-broken.test.mjs": {
+        reporter: "exit-only",
+        exempt: {
+          runBy: "some-job",
+          via: "pnpm fake",
+          importer: "scripts/fake-importer.mjs",
+        },
+      },
+    });
+    const { status, stderr } = runGate(root);
+    assert(status !== 0, "exempting an arbitrary suite must red the gate");
+    assert(
+      stderr.includes("exemption is reserved for"),
+      `should reserve exemption to the one suite: ${stderr}`,
+    );
+  } finally {
+    cleanup(root);
+  }
+});
+
+await test("red: an unrecognised manifest field is rejected outright", async () => {
+  const root = makeRoot();
+  try {
+    // The inversion itself: nobody wrote down "reject `env`". The schema is an
+    // allowlist, so a field it does not carry cannot influence a run whatever a
+    // future edit calls it.
+    writeSuite(root, "sentry-alpha.test.mjs", countLineSuite(1));
+    writeManifest(root, {
+      "scripts/sentry-alpha.test.mjs": {
+        reporter: "count-line",
+        floor: 1,
+        env: { NODE_OPTIONS: "--import=./x.mjs" },
+      },
+    });
+    const { status, stderr } = runGate(root);
+    assert(status !== 0, "an unknown entry field must red the gate");
+    assert(
+      stderr.includes('unrecognised field "env"'),
+      `should name the field: ${stderr}`,
+    );
+  } finally {
+    cleanup(root);
+  }
+});
+
+await test("red: an unrecognised top-level manifest key is rejected", async () => {
+  const root = makeRoot();
+  try {
+    writeSuite(root, "sentry-alpha.test.mjs", countLineSuite(1));
+    writeFileSync(
+      join(root, "scripts", "sentry-suite-manifest.json"),
+      JSON.stringify({
+        suites: {
+          "scripts/sentry-alpha.test.mjs": { reporter: "count-line", floor: 1 },
+        },
+        defaults: { nodeArgs: ["--eval", "0"] },
+      }),
+    );
+    const { status, stderr } = runGate(root);
+    assert(status !== 0, "an unknown top-level key must red the gate");
+    assert(
+      stderr.includes("unrecognised top-level key"),
+      `should name the key: ${stderr}`,
+    );
+  } finally {
+    cleanup(root);
+  }
+});
+
+await test("staticImportSpecifiers ignores mentions in comments", async () => {
+  const specifiers = staticImportSpecifiers(
+    [
+      '// import "./commented-out.mjs";',
+      '/* import "./blocked.mjs"; */',
+      'import "./real-side-effect.mjs";',
+      'import { x } from "./named.mjs";',
+      'const y = await import("./dynamic.mjs");',
+      "",
+    ].join("\n"),
+  );
+  assertEqual(
+    JSON.stringify(specifiers.sort()),
+    JSON.stringify(
+      ["./dynamic.mjs", "./named.mjs", "./real-side-effect.mjs"].sort(),
+    ),
+    "only real imports",
+  );
 });
 
 // ── (b) R1: NODE_OPTIONS neutering, and the env -u latch that defeats it ──────

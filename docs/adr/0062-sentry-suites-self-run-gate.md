@@ -168,14 +168,33 @@ and the pin literals are the only thing stopping a fork swap; Dependabot bumps
 now require a paired edit.
 
 The gate cannot detect its own deletion, so the static checker carries that.
-`scripts/check-sentry-suites-in-ci-gate-job.test.mjs` pins the job's load-bearing
-wiring — that it exists, carries no `if:`, sits in `ci.needs`, is absent from the
-sentinel's `allowed-skips` and `allowed-failures`, holds no job- or step-level
-`env:`, runs the gate as its whole command with the `env -u` prefix, and lets
-nothing but the two pinned upstream actions execute before it. A mutation spec
-per property, run against a clone of the real workflow, proves each one is
-rejected. Without it every check in the repository stayed green with the whole
-job deleted.
+`scripts/check-sentry-suites-in-ci-gate-job.test.mjs` pins the job. Without it
+every check in the repository stayed green with the whole job deleted.
+
+**Both pins are allowlists, not blocklists, and that is load-bearing.** The job
+is asserted by exact equality against a canonical structure — the exact set of
+job-level keys, the exact number and order of steps, and per step the exact key
+set and values — and the manifest against a strict schema, with `nodeArgs`
+permitted only as the one supported invocation and `exempt` only for the single
+provider-contract suite with the route recorded here, matched exactly rather
+than by substring. Anything not listed is rejected whatever it is called.
+
+The reason is empirical. Five review rounds of "reject the next bad property"
+did not converge: workflow-level `env` (which survives the step's `env -u` and
+can point the gate at a committed fake root), `working-directory` on the gate
+step, a second `actions/checkout` pinned to `main`, an `if:` on the step rather
+than the job, `container`, `defaults.run.shell`, a step-level `shell`, an
+arbitrary `nodeArgs` that makes node never run the suite, and `exempt` on any
+suite at all were each measured green against the blocklist. The space of
+workflow keys and manifest fields is open and GitHub keeps extending it, so
+enumerating rejections is structurally unable to finish. The suite set already
+reconciles by exact set equality rather than "no suite is missing"; the pins
+apply that same discipline one level up.
+
+The cost is deliberate: a legitimate change to the job or the manifest schema
+must update the canonical structure, which forces it to be re-proven in review
+rather than absorbed silently. Dependabot bumps to either action SHA need a
+paired edit. That is the same trade the suite-set equality already makes.
 
 The residual that remains is narrower: `ci` is the only required Actions context,
 so a diff that deletes both the job and its pin is still green. Adding
