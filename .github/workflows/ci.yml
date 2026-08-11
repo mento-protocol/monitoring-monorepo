@@ -1173,6 +1173,14 @@ jobs:
       - name: Sentry triage agent comment suite
         # Invoked by path, the way every suite above now is.
         run: node scripts/sentry-triage-agent-comment.test.mjs
+      - name: Sentry-suite gate self-test
+        # scripts/sentry-suite-gate.test.mjs is a scripts/sentry-*.test.mjs, so
+        # check-sentry-suites-in-ci.test.mjs (issue #1721) requires THIS job to
+        # invoke it directly. The new unconditional `sentry-suites` job also runs
+        # it — the gate enumerates and runs its own suite — so the run is
+        # redundant until PR C removes the duplicated suite steps from this job.
+        # See issue #1779 and ADR 0062.
+        run: node scripts/sentry-suite-gate.test.mjs
       - name: Sentry suite CI coverage assertion
         # The meta-check that keeps this gap from recurring: every
         # scripts/sentry-*.test.mjs must be invoked by this job as a direct
@@ -1200,6 +1208,40 @@ jobs:
         run: pnpm tf:test
       - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
         if: always()
+
+  sentry-suites:
+    name: Sentry suites
+    # Unconditional by design (no `if:`): a skipped required check counts as
+    # satisfied, so this job — like production-infra-contract — must never be
+    # skippable. It runs the Sentry suites itself and proves, from their own
+    # output, that each asserted (issue #1779, ADR 0062); the #1754 checker only
+    # proves CI *would* run them.
+    #
+    # The step list is closed-world and its order is load-bearing. The two
+    # upstream, SHA-pinned actions are the only things trusted before the gate.
+    # `scripts/sentry-suite-gate.mjs` is the FIRST and ONLY PR-authored code that
+    # runs before the suites: there is deliberately no `pnpm install` (its
+    # composite action's postinstall is PR-authored code that would run first)
+    # and no other pre-suite step, which closes the R1 window where such a step
+    # could append `NODE_OPTIONS=--import=…process.exit(0)` to $GITHUB_ENV and
+    # neuter every later suite into a false-green no-op. The gate and every
+    # scripts/sentry-*.mjs it spawns import only `node:` builtins, so no install
+    # is needed. `env -u NODE_OPTIONS` strips a poisoned value from the gate's
+    # own env for defense in depth; the gate additionally refuses to start if
+    # NODE_OPTIONS or NODE_PATH is set and re-strips both per spawned suite.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+      - name: Run and assert the Sentry suites
+        run: /usr/bin/env -u NODE_OPTIONS node scripts/sentry-suite-gate.mjs
 
   autoreview-suite:
     name: Autoreview adversarial suite
@@ -1345,6 +1387,7 @@ jobs:
         deps,
         scripts,
         production-infra-contract,
+        sentry-suites,
         autoreview-suite,
         autoreview-root-runtime,
         version-skew,
