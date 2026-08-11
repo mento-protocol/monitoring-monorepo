@@ -282,4 +282,29 @@ The current fixture therefore accepts that document as the shortest route and
 retains `indexer-envio/AGENTS.md` followed by the README as the valid full
 edit-time routing chain. The frozen baseline and its fixtures remain unchanged.
 Issue [#1788](https://github.com/mento-protocol/monitoring-monorepo/issues/1788)
-tracks this contract correction and its required post-merge fresh evaluation.
+landed the accepted-route correction in PR
+[#1794](https://github.com/mento-protocol/monitoring-monorepo/pull/1794).
+
+### 2026-08 post-route result
+
+The required clean-default-branch follow-up is
+[`documentation-navigation-2026-08-post-route.json`](documentation-navigation-2026-08-post-route.json).
+It evaluated merged commit
+`8ed8bb04c677e96fc8d9795a9879d0824e99e572` with `gpt-5.6-sol` at low
+effort after the cheaper model failed exact evidence validation.
+
+| Measure                             | 2026-08 pre-change | 2026-08 post-route |
+| ----------------------------------- | -----------------: | -----------------: |
+| Routing accuracy                    |              94.4% |               100% |
+| Unqualified non-canonical sources   |                  0 |                  0 |
+| Answer evidence                     |               100% |               100% |
+| Shortest useful path                |              94.4% |              88.9% |
+| Bootstrap bytes                     |             28,161 |             28,161 |
+| Unique suite bytes                  |  247,648 / 262,000 |  258,542 / 262,000 |
+| Questions over the per-question cap |                  0 |                  0 |
+
+The result passed all 18 routes and used the retained
+`indexer-envio/AGENTS.md` to `indexer-envio/README.md` chain for
+`package-indexer-add-contract`. The deterministic fixture regression separately
+proves that the README-only route is accepted as the shortest valid path. The
+fresh run does not claim that the evaluator chose that shorter alternative.
