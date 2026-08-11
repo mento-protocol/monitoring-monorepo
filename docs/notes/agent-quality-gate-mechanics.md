@@ -161,6 +161,17 @@ package-script risk flag, so `--run` continues to refuse until
 `--allow-package-script-changes`, and `package.json` still gets a full-repo
 Trunk scan.
 
+`classify_root_package_json_changes` is lifted out of this script and re-run by
+`scripts/check-sentry-suites-in-ci-gate-probe.mjs`, which proves each alias still
+routes to the arm it is supposed to. The probe runs it with an empty `$PATH`
+under `set -r`, so the function must reach nothing but shell builtins, keywords
+and `json_change_paths` — no external command, and no output redirection, which
+restricted mode forbids. Its verdict must also be a function of the change paths
+alone, so it may not read anything the probe did not supply: `< <(json_change_paths …)`,
+heredocs and here-strings are fine, a redirection from a file is not. Editing it
+to need any of those fails the check with an explanation; change the probe in the
+same PR or keep the classifier free of them.
+
 ### Scoped local test runs (Refs #1413)
 
 A per-package quality bundle normally runs `pnpm --filter <pkg> test:coverage`
