@@ -118,6 +118,13 @@ const MISSING_COMMAND_MARKER = "__probe_missing_command__";
 const NONZERO_EXIT_MARKER = "__probe_nonzero_exit__";
 
 /**
+ * Printed when the classifier calls a stub outside the contract the real helper
+ * enforces. Distinct from the missing-command marker because the cause is the
+ * opposite: the command WAS provided, and used in a way the gate would reject.
+ */
+const STUB_CONTRACT_MARKER = "__probe_stub_contract__";
+
+/**
  * Pin the variables bash invents for itself, which no environment can reach.
  *
  * `probeEnv` decides what the shell is GIVEN; bash then creates its own, and
@@ -239,16 +246,21 @@ const restrictPath = (dir) => {
  *     no matter what the probe sets `$PATH` to. There is nothing to validate —
  *     the escape is the invocation.
  */
-const PROBE_COMMAND_GUARD = `__probe_refuse() {
+const PROBE_COMMAND_GUARD = `__probe_report() {
   # fd 9 is the probe's real stderr, duplicated before the classifier could
-  # redirect anything, so the name reaches the caller out of any \`$(…)\` or
+  # redirect anything, so the message reaches the caller out of any \`$(…)\` or
   # \`< <(…)\` that would otherwise consume it. A dup of an already-open fd is
   # the one output redirection restricted mode still allows.
-  printf '%s %s\\n' '${MISSING_COMMAND_MARKER}' "$1" >&9
+  printf '%s %s\\n' "$1" "$2" >&9
   # Then stop the shell, so a classifier that closed fd 9 cannot buy silence
   # either. SIGTERM rather than SIGKILL: bash flushes on its way out.
   kill -TERM "$$"
 }
+
+__probe_refuse() { __probe_report '${MISSING_COMMAND_MARKER}' "$1"; }
+
+# A stub called outside the contract its real counterpart enforces.
+__probe_stub_contract() { __probe_report '${STUB_CONTRACT_MARKER}' "$1"; }
 
 # Split one word off "$1" into __word, leaving the remainder in __rest.
 #
@@ -427,7 +439,26 @@ export function inputRedirections(source) {
 const GATE_PROBE_STUBS = new Map([
   [
     "json_change_paths",
-    `json_change_paths() { printf '%s\\n' "$__probe_path"; }`,
+    // The real helper opens with \`local path="$1"\` under \`set -u\` and diffs
+    // THAT file, so calling it with no argument aborts the gate and calling it
+    // with another name reads a different manifest. A stub that ignores its
+    // arguments accepts both, and the probe then reports a clean verdict for a
+    // classifier the gate would fail on — green on a broken gate, which is the
+    // shape this whole family of findings takes. A stub has to be at least as
+    // strict as the thing it replaces.
+    //
+    // The second half of the contract is the probe's, not the gate's: the
+    // synthetic change paths fed in describe package.json, so asking for any
+    // other file means the answer would not be about what was asked.
+    `json_change_paths() {
+  if [ "$#" -ne 1 ]; then
+    __probe_stub_contract "json_change_paths received $# arguments; the gate helper reads its first positional under set -u, so the gate would abort here"
+  fi
+  if [ "$1" != package.json ]; then
+    __probe_stub_contract "json_change_paths was asked for [$1]; this probe only stands for the diff of package.json, so any other file would be answered with the wrong data"
+  fi
+  printf '%s\\n' "$__probe_path"
+}`,
   ],
 ]);
 
@@ -633,15 +664,26 @@ done
     `the probe shell did not run: ${run.error}`,
   );
   // Whatever the guard managed to say, on fd 9 or wherever else survived.
-  const refusals = [
+  const reported = (marker) => [
     ...new Set(
       [
         ...`${run.stdout}${run.stderr}`.matchAll(
-          new RegExp(`^${MISSING_COMMAND_MARKER} .*$`, "gm"),
+          new RegExp(`^${marker} .*$`, "gm"),
         ),
       ].map((match) => match[0].trim()),
     ),
   ];
+  const refusals = reported(MISSING_COMMAND_MARKER);
+
+  // A stub used outside its contract is checked before the signal, because it
+  // also terminates the shell and its cause is the more specific one.
+  const contractBreaches = reported(STUB_CONTRACT_MARKER);
+  assert.deepEqual(
+    contractBreaches,
+    [],
+    `\`${GATE_CLASSIFIER}\` from ${label} used a helper this probe stubs in a way the real gate's helper would reject, ` +
+      `so a clean verdict here would be a verdict for a classifier the gate fails on: ${contractBreaches.join("; ")}`,
+  );
 
   // The signal first: it is the report of last resort, and the only one a
   // construct around the offending command cannot swallow. A signalled child

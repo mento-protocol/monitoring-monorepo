@@ -672,6 +672,73 @@ test("a restricted-mode refusal explains itself, not just what bash said", () =>
   }
 });
 
+test("a stub is at least as strict as the helper it stands in for", () => {
+  // The real `json_change_paths` opens with `local path="$1"` under `set -u`
+  // and diffs THAT file. A stub that ignores its arguments accepts a classifier
+  // the gate would abort on, and one that reads a different manifest — the
+  // probe then reports a clean verdict for a broken gate. A stub that is more
+  // permissive than its counterpart is a false-green machine for exactly the
+  // contract changes this probe exists to catch.
+  const callingWith = (call) => `#!/usr/bin/env bash
+set -euo pipefail
+
+json_change_paths() {
+  local path="$1"
+  echo "__unknown__"
+}
+
+${GATE_CLASSIFIER}() {
+  local change
+  local saw_tooling=false
+  while IFS= read -r change; do
+    [[ -n "$change" ]] || continue
+    case "$change" in
+      ${TRUSTED_PATH}) saw_tooling=true ;;
+    esac
+  done < <(${call})
+  if [[ "$saw_tooling" == true ]]; then
+    echo "root-tooling-scripts"
+  else
+    echo "package-scripts"
+  fi
+}
+
+root_package_json_class=""
+`;
+  for (const [, { candidate, version }] of installedBashes()) {
+    for (const [label, call] of [
+      ["no argument at all", "json_change_paths"],
+      ["a different manifest", 'json_change_paths "pnpm-lock.yaml"'],
+      ["two arguments", 'json_change_paths "package.json" extra'],
+    ]) {
+      assert.throws(
+        () =>
+          gateClassifications([TRUSTED_PATH], {
+            script: callingWith(call),
+            label: `${label} under bash ${version}`,
+            bash: candidate,
+          }),
+        /__probe_stub_contract__/,
+        `bash ${version} accepted a classifier calling the stub with ${label}`,
+      );
+    }
+
+    // The call the gate actually makes must still work, or this rejects honest
+    // classifiers — the failure mode that matters more than the gap.
+    assert.deepEqual(
+      [
+        ...gateClassifications([TRUSTED_PATH], {
+          script: callingWith('json_change_paths "package.json"'),
+          label: `correct call under bash ${version}`,
+          bash: candidate,
+        }),
+      ],
+      [[TRUSTED_PATH, "root-tooling-scripts"]],
+      `bash ${version} rejected the call the real gate makes`,
+    );
+  }
+});
+
 test("the gate probe fails closed on output it cannot account for", () => {
   // An arm that prints nothing used to land in the map as `""`, and a class the
   // probe does not know used to land as itself — both read as a verdict.

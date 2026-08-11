@@ -329,12 +329,33 @@ export function bashFunctionSource(script, name, label, bash = "bash") {
       dirs,
       timeout: PROBE_TIMEOUT_MS,
     });
+    const enclosed = `${label} defines \`${name}\` inside another construct rather than at top level, so the gate never defines it where it is called, and this probe would report verdicts for a function the gate does not have.`;
     assert.equal(
       prefix.status,
       0,
-      `${label} defines \`${name}\` inside another construct rather than at top level, so the gate never defines it ` +
-        `where it is called, and this probe would report verdicts for a function the gate does not have. bash reads ` +
-        `the text before it as incomplete: ${prefix.stderr.trim().split("\n").pop()}`,
+      `${enclosed} bash reads the text before it as incomplete: ${prefix.stderr.trim().split("\n").pop()}`,
+    );
+
+    // Parsing is necessary but not sufficient: a prefix ending inside a heredoc
+    // parses fine, because everything after the opener is body text. So ask a
+    // second question — append something that MUST be a syntax error at top
+    // level and require bash to say so. If the appended text is swallowed, the
+    // prefix left a heredoc open and the definition is inside it.
+    //
+    // The obvious form of this check would be "did bash warn?", which is what
+    // the extracted-text check below uses. That one is a 5.x-only answer:
+    // measured, bash 5.3 warns `here-document … delimited by end-of-file` while
+    // 3.2 exits 0 with EMPTY stderr, and 3.2 is the interpreter this probe most
+    // needs to be right on. Asking about the swallow works on both.
+    const closed = runProbeShell(bash, ["-n"], {
+      input: `${script.slice(0, definition.index)}\nfi\n`,
+      dirs,
+      timeout: PROBE_TIMEOUT_MS,
+    });
+    assert.notEqual(
+      closed.status,
+      0,
+      `${enclosed} The text before it leaves a heredoc open, so the definition is inside that heredoc: bash swallowed a deliberate syntax error appended after it instead of reporting one.`,
     );
 
     const max = Math.min(tailLines.length, MAX_FUNCTION_LINES);

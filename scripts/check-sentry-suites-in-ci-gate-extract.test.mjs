@@ -217,6 +217,11 @@ ${close}
       ["a function, header at column 0", "wrapper() {", "  :\n}"],
       ["an if block", "if true; then", "fi"],
       ["a while loop", "while false; do", "done"],
+      // A heredoc parses fine — everything after the opener is body text — so
+      // "does the prefix parse?" says top level. bash 5.3 warns about the
+      // unterminated heredoc, but 3.2 exits 0 with empty stderr, so the warning
+      // is not the discriminator; the swallowed syntax error is.
+      ["a heredoc", ": <<'PAYLOAD'", "PAYLOAD"],
     ]) {
       assert.throws(
         () =>
