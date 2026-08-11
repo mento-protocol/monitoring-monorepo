@@ -903,8 +903,63 @@ test("route order and shortest useful path are measured independently", () => {
   const answer = result.answers.find(
     (candidate) => candidate.question_id === "package-indexer-add-contract",
   );
-  answer.chosen_documents.reverse();
   let scored = score(result);
+  let questionReport = scored.report.questions.find(
+    (question) => question.question_id === answer.question_id,
+  );
+  assert.deepEqual(answer.chosen_documents, ["indexer-envio/README.md"]);
+  assert.equal(questionReport.routing_correct, true);
+  assert.equal(questionReport.shortest_route, true);
+
+  answer.chosen_documents = [
+    "indexer-envio/AGENTS.md",
+    "indexer-envio/README.md",
+  ];
+  answer.evidence.unshift({
+    path: "indexer-envio/AGENTS.md",
+    line_start: 1,
+    line_end: 1,
+    supports:
+      "The scoped package instructions route contract-add work to the package README.",
+  });
+  answer.loaded_sources.push(source("indexer-envio/AGENTS.md"));
+  answer.authority_qualifications.push(
+    qualification("indexer-envio/AGENTS.md"),
+  );
+  scored = score(result);
+  questionReport = scored.report.questions.find(
+    (question) => question.question_id === answer.question_id,
+  );
+  assert.equal(questionReport.routing_correct, true);
+  assert.equal(questionReport.shortest_route, false);
+
+  const orderedSuite = structuredClone(context.suite);
+  const orderedQuestion = orderedSuite.questions.find(
+    (question) => question.id === answer.question_id,
+  );
+  orderedQuestion.accepted_routes = [
+    ["indexer-envio/AGENTS.md", "indexer-envio/README.md"],
+  ];
+  result.fixture_digest = fixtureDigest(orderedSuite);
+  scored = scoreNavigationResult({
+    suite: orderedSuite,
+    result,
+    inventory: context.inventory,
+    repoRoot,
+  });
+  questionReport = scored.report.questions.find(
+    (question) => question.question_id === answer.question_id,
+  );
+  assert.equal(questionReport.routing_correct, true);
+  assert.equal(questionReport.shortest_route, true);
+
+  answer.chosen_documents.reverse();
+  scored = scoreNavigationResult({
+    suite: orderedSuite,
+    result,
+    inventory: context.inventory,
+    repoRoot,
+  });
   const reversedReport = scored.report.questions.find(
     (question) => question.question_id === answer.question_id,
   );
@@ -913,19 +968,6 @@ test("route order and shortest useful path are measured independently", () => {
   assert.equal(scored.report.routing_accuracy_percent, 94.4);
   assert.equal(scored.report.answer_evidence_percent, 100);
   assert.equal(scored.report.passed, true);
-  answer.chosen_documents.reverse();
-  answer.chosen_documents.push("docs/context-standards.md");
-  answer.loaded_sources.push(source("docs/context-standards.md"));
-  answer.authority_qualifications.push(
-    qualification("docs/context-standards.md"),
-  );
-  scored = score(result);
-  assert.equal(
-    scored.report.questions.find(
-      (question) => question.question_id === answer.question_id,
-    ).shortest_route,
-    false,
-  );
 });
 
 test("navigation issue markers are structural and de-duplicate REST pages", () => {

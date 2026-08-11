@@ -33,6 +33,7 @@
       "category": "packages",
       "question": "You are adding a new indexed contract and event. Which current package documentation defines the config, ABI, handler-entry-point, codegen, and hosted-build mirror procedure?",
       "accepted_routes": [
+        ["indexer-envio/README.md"],
         ["indexer-envio/AGENTS.md", "indexer-envio/README.md"]
       ],
       "sources_requiring_verification": [
