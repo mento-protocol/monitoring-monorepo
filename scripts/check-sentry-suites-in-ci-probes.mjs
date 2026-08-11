@@ -40,12 +40,6 @@ export const VALIDATOR_PATH = join(
   "check-agent-quality-gate-package-scripts.sh",
 );
 
-/** The pin validator invocation the `scripts` job must run before any alias. */
-export const PIN_VALIDATOR_COMMAND = [
-  "bash",
-  "scripts/check-agent-quality-gate-package-scripts.sh",
-];
-
 /** The test file, so the check can assert its own CI step still exists. */
 export const SELF = "scripts/check-sentry-suites-in-ci.test.mjs";
 

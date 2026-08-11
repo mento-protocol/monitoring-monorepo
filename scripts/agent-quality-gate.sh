@@ -1571,6 +1571,35 @@ compact_turbo_quality_commands() {
   done
 }
 
+# Directory symlinks under scripts/ expose Sentry suites whose real files live
+# OUTSIDE scripts/. findSentrySuites (in check-sentry-suites-in-ci.test.mjs)
+# follows such a link and enumerates scripts/<link>/sentry-*.test.mjs, but the
+# real file's committed path is the symlink TARGET (e.g. fixtures/sentry-x.test.mjs)
+# — which matches neither scripts/* nor the CI rootScripts filter. Adding a suite
+# under a PREVIOUSLY committed link therefore changes neither the link nor any
+# scripts/** path, so both this gate and the path-gated CI job would skip the
+# coverage check while the check itself would demand that suite (Codex 3754704280).
+# Resolve every existing scripts/ directory symlink to its repo-relative target
+# once, so the per-path loop below can route the check for a change beneath a
+# target too. Guarded, like the routing that consumes it, so the gate's own unit
+# tests (run against stub fixture repos) are unaffected.
+scripts_symlink_targets=()
+if [[ "$script_source_dir" == "$repo_root/scripts" && -d "$repo_root/scripts" ]]; then
+  repo_root_physical="$(cd "$repo_root" && pwd -P)"
+  while IFS= read -r gate_symlink; do
+    # Only a symlink that resolves to a directory exposes a suite tree; `-d`
+    # follows the link. A target outside the repo cannot hold a committed suite,
+    # so keep only targets under the repo root.
+    [[ -d "$gate_symlink" ]] || continue
+    gate_symlink_target="$(cd "$gate_symlink" && pwd -P)" || continue
+    case "$gate_symlink_target/" in
+      "$repo_root_physical"/*)
+        scripts_symlink_targets+=("${gate_symlink_target#"$repo_root_physical"/}")
+        ;;
+    esac
+  done < <(find "$repo_root/scripts" -type l 2>/dev/null || true)
+fi
+
 while IFS= read -r path; do
   case "$path" in
     *.md)
@@ -2583,6 +2612,19 @@ while IFS= read -r path; do
         fi
         ;;
     esac
+    # The mirror case: a change BENEATH an existing scripts/ directory symlink's
+    # real target (resolved once, above). Such a path is a suite findSentrySuites
+    # enumerates through the link, yet it matches neither scripts/* above nor the
+    # rootScripts CI filter — so without this the check would skip while still
+    # demanding the suite (Codex 3754704280).
+    for scripts_symlink_target in "${scripts_symlink_targets[@]+"${scripts_symlink_targets[@]}"}"; do
+      case "$path" in
+        "$scripts_symlink_target"/*)
+          add_command "node scripts/check-sentry-suites-in-ci.test.mjs" "change beneath a scripts/ symlink target can expose an unwired Sentry suite"
+          break
+          ;;
+      esac
+    done
   fi
   if [[ "$terraform_stack_paths_count" -gt 0 ]]; then
     for terraform_stack_path in "${terraform_stack_paths[@]}"; do

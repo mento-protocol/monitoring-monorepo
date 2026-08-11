@@ -974,13 +974,14 @@ jobs:
           fetch-depth: 0
       - uses: ./.github/actions/pnpm-install
       - name: Validate trusted package-script pins
-        # Fail fast before any `pnpm <alias>` step runs. The gate's tooling
-        # allowlist TRUSTS these aliases, and the pin validator is what keeps
-        # that trust safe: a drifted `sentry:*:test` (e.g. an appended `&&
-        # <command>`) would otherwise run its extra command before the coverage
-        # meta-check below reds the job. The local pre-push gate runs this
-        # validator first for the same reason; check-sentry-suites-in-ci.test.mjs
-        # asserts this step precedes every trusted alias invocation.
+        # Fail fast before any `pnpm <alias>` step below runs. This job still
+        # invokes trusted aliases directly — `pnpm lint:scripts`,
+        # `pnpm agent:quality-gate:test`, the `docs:*` and `agent:context-*`
+        # suites — and the local gate's tooling allowlist trusts them; the pin
+        # validator keeps that trust safe by rejecting a drifted command (e.g. an
+        # appended `&& <command>`) before it executes. The Sentry suites no
+        # longer route through pnpm at all — they run as direct `node <suite>`
+        # commands below — so this step no longer guards them.
         run: bash scripts/check-agent-quality-gate-package-scripts.sh
       - name: ESLint root scripts
         run: pnpm lint:scripts
@@ -1107,34 +1108,44 @@ jobs:
       # Until this block existed they ran only in the local pre-push hook, so a
       # contributor who bypassed the hook could merge a regression in any of
       # them. One step per suite: a red check names the leg that broke.
+      #
+      # Each suite is invoked DIRECTLY as `node scripts/<suite>`, not through a
+      # `pnpm <alias>` — the exact command each `sentry:*:test` alias expands to.
+      # The pnpm-run path carried two config-level fail-opens: a `scriptShell:
+      # /bin/true` in pnpm-workspace.yaml false-greens every alias (Codex
+      # 3754704267), and a `presentry:*:test` lifecycle hook runs before the
+      # alias and can empty a suite (Codex 3754704278). A direct node command
+      # consults neither knob, so removing the indirection closes both — see
+      # scripts/check-sentry-suites-in-ci.test.mjs, which now requires the
+      # direct form and rejects a step that reverts to an alias.
       - name: Sentry triage ingest suite
-        run: pnpm sentry:ingest:test
+        run: node scripts/sentry-triage-ingest.test.mjs
       - name: Sentry triage digest suite
-        run: pnpm sentry:digest:test
+        run: node scripts/sentry-triage-digest.test.mjs
       - name: Sentry triage projection suite
-        run: pnpm sentry:project:test
+        run: node scripts/sentry-triage-project.test.mjs
       - name: Sentry autofix select suite
-        run: pnpm sentry:autofix:select:test
+        run: node scripts/sentry-autofix-select.test.mjs
       - name: Sentry autofix finalize suite
-        run: pnpm sentry:autofix:finalize:test
+        run: node scripts/sentry-autofix-finalize.test.mjs
       - name: Sentry triage archive suite
-        run: pnpm sentry:archive:test
+        run: node scripts/sentry-triage-archive.test.mjs
       - name: Sentry credential broker suite
         # Also parses .github/workflows/sentry-triage-agent.yml (token
         # placement, the --mcp-config shape, the single port literal). The
         # rootScripts filter already covers .github/workflows/**, so a
         # workflow-only edit still reaches this step.
-        run: pnpm sentry:broker:test
+        run: node --test scripts/sentry-mcp-broker.test.mjs
       - name: Sentry re-queue chokepoint suite
-        run: pnpm sentry:requeue:test
+        run: node scripts/sentry-triage-requeue.test.mjs
       - name: Sentry triage agent comment suite
-        # No pnpm alias — invoked by path, the way the local gate runs it.
+        # Invoked by path, the way every suite above now is.
         run: node scripts/sentry-triage-agent-comment.test.mjs
       - name: Sentry suite CI coverage assertion
         # The meta-check that keeps this gap from recurring: every
-        # scripts/sentry-*.test.mjs must be invoked by this job, every
-        # sentry:*:test alias must resolve to one of those files, and the local
-        # gate's tooling allowlist must list every sentry:* script.
+        # scripts/sentry-*.test.mjs must be invoked by this job as a direct
+        # `node <suite>` command (never a pnpm alias), and the local gate's
+        # tooling allowlist must list every sentry:* script it still runs.
         run: node scripts/check-sentry-suites-in-ci.test.mjs
       - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
         if: always()

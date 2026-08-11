@@ -40,17 +40,22 @@
  *
  * Three invariants, each guarding a different way the wiring rots:
  *
- *   1. Every `scripts/sentry-*.test.mjs` is invoked by the `scripts` job —
- *      through a `pnpm <alias>` whose package.json command runs the file, or
- *      by a direct `node scripts/<file>`. A suite may be exempted only by
- *      naming the CI job that does run it, and the exemption is re-proven
- *      below rather than trusted.
+ *   1. Every `scripts/sentry-*.test.mjs` is invoked by the `scripts` job as a
+ *      DIRECT `node scripts/<file>` command (never a `pnpm <alias>`). The
+ *      pnpm-run path carries two config-level fail-opens a parser cannot see —
+ *      a `scriptShell: /bin/true` false-greens the alias (Codex 3754704267),
+ *      and a `presentry:*:test` lifecycle hook runs before it and can empty the
+ *      suite (Codex 3754704278) — so the check rejects the alias form and
+ *      requires the direct one. A suite may be exempted only by naming the CI
+ *      job that does run it, and the exemption is re-proven below.
  *   2. Every `sentry:*:test` package script resolves to a file this check
- *      enumerates, so a suite cannot dodge invariant 1 by living elsewhere.
+ *      enumerates, so a stray alias cannot point at a non-suite file.
  *   3. The local gate's tooling allowlist in scripts/agent-quality-gate.sh
  *      lists every `sentry:*` script, and every listed script is pinned to an
- *      exact command by check-agent-quality-gate-package-scripts.sh. The
- *      allowlist grants trust; the pin is what makes that trust safe.
+ *      exact command by check-agent-quality-gate-package-scripts.sh. The local
+ *      gate still runs the `pnpm sentry:*:test` aliases (developer
+ *      convenience, with CI's direct invocation as the backstop); the
+ *      allowlist grants that trust and the pin is what makes it safe.
  *
  * Run: `node scripts/check-sentry-suites-in-ci.test.mjs`
  * CI:  .github/workflows/ci.yml  (scripts job)
@@ -78,7 +83,6 @@ import {
   invocationsOf,
   jobBlockers,
   nearMisses,
-  pinValidationOrderBlockers,
   provenCommands,
   requiredPathsMissing,
   runsCommand,
@@ -96,7 +100,6 @@ import {
   dropFilterPath,
   findSentrySuites,
   gateClassifications,
-  PIN_VALIDATOR_COMMAND,
   PKG_SCRIPTS,
   PROBE_INPUTS,
   REQUIRED_ROOT_SCRIPT_PATHS,
@@ -120,6 +123,22 @@ import {
 // mutation probes that prove each predicate rejects, not only accepts.
 
 // ── invariants ───────────────────────────────────────────────────────────────
+
+/**
+ * Is `file` run by the `scripts` job as a whole-command DIRECT node invocation
+ * (`node <file>` or `node --test <file>`)? Shared by invariant 1 and its
+ * rejection probe so both exercise the same rule: coverage is proven by the CI
+ * command alone and never by a `pnpm <alias>`, the path a `scriptShell`
+ * override or a `presentry:*:test` lifecycle hook subverts. It reads no
+ * package.json alias, so neither knob can change the verdict.
+ *
+ * @param {Record<string, any>} workflow
+ * @param {string} file
+ */
+function suiteRunDirectly(workflow, file) {
+  const commands = provenCommands(workflow, "scripts");
+  return suiteTargets(file).some((target) => runsCommand(commands, target));
+}
 
 test("this file still imports the predicates it asserts with", () => {
   // Deleting the import throws, which is already fail-closed. The case this
@@ -254,18 +273,17 @@ test("the trigger check rejects a `pull_request` trigger that can miss main", ()
   }
 });
 
-test("every Sentry suite is invoked by the ci.yml `scripts` job", () => {
-  const commands = provenCommands(CI, "scripts");
+test("every Sentry suite is invoked directly by the ci.yml `scripts` job", () => {
+  // Direct `node scripts/<suite>` (or `node --test …`), never `pnpm <alias>`.
+  // The pnpm-run path is the one a `scriptShell` override or a `presentry:*:test`
+  // lifecycle hook subvert (Codex 3754704267, 3754704278); a direct node command
+  // is on neither knob's path, so requiring it closes both fail-opens.
   const missing = SENTRY_SUITES.filter(
-    (file) =>
-      !RUN_BY_ANOTHER_JOB.has(file) &&
-      !invocationsOf(PKG_SCRIPTS, file).some((target) =>
-        runsCommand(commands, target),
-      ),
+    (file) => !RUN_BY_ANOTHER_JOB.has(file) && !suiteRunDirectly(CI, file),
   );
   const detail = missing
     .flatMap((file) =>
-      nearMisses(CI, "scripts", invocationsOf(PKG_SCRIPTS, file)).map(
+      nearMisses(CI, "scripts", suiteTargets(file)).map(
         (note) => `  ${file}: ${note}`,
       ),
     )
@@ -273,10 +291,60 @@ test("every Sentry suite is invoked by the ci.yml `scripts` job", () => {
   assert.deepEqual(
     missing,
     [],
-    `these Sentry suites run nowhere in CI: ${missing.join(", ")}.\n${detail}\n` +
-      "Add a step to the `scripts` job in .github/workflows/ci.yml that runs the " +
-      "suite as its whole command, or add an entry to RUN_BY_ANOTHER_JOB naming " +
-      "the job that does run it.",
+    `these Sentry suites are not invoked directly in CI: ${missing.join(", ")}.\n${detail}\n` +
+      "Add a step to the `scripts` job in .github/workflows/ci.yml that runs " +
+      "`node <suite>` as its whole command (not a pnpm alias), or add an entry " +
+      "to RUN_BY_ANOTHER_JOB naming the job that does run it.",
+  );
+});
+
+test("the checker rejects a Sentry step that reverts to a pnpm alias", () => {
+  // A `scriptShell: /bin/true` (pnpm-workspace.yaml) makes `pnpm <alias>` exit 0
+  // without running the suite; a `presentry:*:test` hook empties it before it
+  // runs. Both act ONLY on the `pnpm run` path. So the coverage proof must
+  // reject a step that runs a suite via its pnpm alias and accept only the
+  // direct node command. Swap each suite's real step for its alias and assert
+  // the suite reads as uncovered — the same predicate invariant 1 uses.
+  let proven = 0;
+  for (const file of SENTRY_SUITES) {
+    if (RUN_BY_ANOTHER_JOB.has(file)) continue;
+    const aliases = aliasesFor(PKG_SCRIPTS, file);
+    if (aliases.length === 0) continue; // no alias form to revert to
+    const directRuns = suiteTargets(file).map((target) => target.join(" "));
+    const workflow = structuredClone(CI);
+    const step = workflow.jobs.scripts.steps.find(
+      (candidate) =>
+        typeof candidate?.run === "string" &&
+        directRuns.includes(candidate.run.trim()),
+    );
+    assert.ok(step, `no direct step found for ${file} to mutate`);
+    step.run = `pnpm ${aliases[0]}`;
+    assert.equal(
+      suiteRunDirectly(workflow, file),
+      false,
+      `the checker still counts ${file} as covered after its step reverted to \`pnpm ${aliases[0]}\``,
+    );
+    proven += 1;
+  }
+  assert.ok(proven > 0, "no Sentry suite with an alias was available to probe");
+});
+
+test("a presentry lifecycle hook cannot empty a directly-invoked Sentry suite", () => {
+  // `pnpm run sentry:ingest:test` fires `presentry:ingest:test` first, which a
+  // malicious PR can point at `cp /dev/null <suite>` (Codex 3754704278). Because
+  // the CI step runs `node scripts/sentry-triage-ingest.test.mjs` directly, no
+  // lifecycle hook is on its path — and suiteRunDirectly reads that CI command,
+  // never a package.json alias, so no `presentry:*:test` hook can change the
+  // verdict. Prove the representative suite is covered by the direct command.
+  const file = "scripts/sentry-triage-ingest.test.mjs";
+  assert.ok(
+    SENTRY_SUITES.includes(file),
+    `${file} is gone — pick another representative suite`,
+  );
+  assert.ok(
+    suiteRunDirectly(CI, file),
+    `${file} is not invoked as a direct node command in the scripts job, so a ` +
+      "presentry:*:test lifecycle hook could still empty it",
   );
 });
 
@@ -624,30 +692,31 @@ test("this check itself runs in the ci.yml `scripts` job", () => {
 test("a step proves a suite only when the suite is its whole command", () => {
   // provenCommands must reject a step whose body runs more than the target: a
   // sibling bare-word line can rebind it without being a shell keyword —
-  // `cd <dir>` moves which package.json `pnpm <alias>` resolves, `PATH=`/`hash`
-  // shadows the binary, `cp /dev/null <suite>` truncates the suite file — and
-  // `runsCommand` would otherwise match the target sitting among them. All three
-  // are shellcheck-clean, so only this rule catches them.
+  // `cd <dir>` moves the working directory, `PATH=`/`hash` shadows the binary,
+  // `cp /dev/null <suite>` truncates the suite file before `node` reads it — and
+  // `runsCommand` would otherwise match the direct command sitting among them.
+  // All are shellcheck-clean, so only the exactly-one-command rule catches them.
+  const anchor = "node scripts/sentry-triage-ingest.test.mjs";
   const bodies = [
-    "cd ui-dashboard\npnpm sentry:ingest:test",
-    "hash -p /bin/true pnpm\npnpm sentry:ingest:test",
-    "PATH=/tmp/shim:/usr/bin\npnpm sentry:ingest:test",
-    "cp /dev/null scripts/sentry-triage-ingest.test.mjs\npnpm sentry:ingest:test",
+    `cd ui-dashboard\n${anchor}`,
+    `hash -p /bin/true node\n${anchor}`,
+    `PATH=/tmp/shim:/usr/bin\n${anchor}`,
+    `cp /dev/null scripts/sentry-triage-ingest.test.mjs\n${anchor}`,
   ];
   for (const body of bodies) {
     const workflow = structuredClone(CI);
     const step = workflow.jobs.scripts.steps.find(
-      (candidate) => candidate.run === "pnpm sentry:ingest:test",
+      (candidate) => candidate.run === anchor,
     );
     assert.ok(
       step,
-      "anchor step `pnpm sentry:ingest:test` is gone — this probe would prove nothing",
+      `anchor step \`${anchor}\` is gone — this probe would prove nothing`,
     );
     step.run = body;
     assert.equal(
       runsCommand(provenCommands(workflow, "scripts"), [
-        "pnpm",
-        "sentry:ingest:test",
+        "node",
+        "scripts/sentry-triage-ingest.test.mjs",
       ]),
       false,
       `provenCommands accepted a step whose body is ${JSON.stringify(body)}`,
@@ -859,70 +928,6 @@ test("the required `ci` check-run name is owned by exactly the sentinel", () => 
     contextOwnershipBlockers(orphaned, "ci", owner),
     [],
     "the ownership check accepts a workflow set where no job owns the `ci` name",
-  );
-});
-
-test("the `scripts` job validates alias pins before invoking them", () => {
-  // The gate trusts the sentry aliases; the pin validator is what keeps that
-  // trust safe. In CI it must run BEFORE any `pnpm <alias>` step, or a drifted
-  // alias runs its appended command before the meta-check (last step) reds the
-  // job. This mirrors the local gate's fail-fast ordering.
-  const aliasTargets = Object.keys(PKG_SCRIPTS)
-    .filter((name) => name.startsWith("sentry:") && name.endsWith(":test"))
-    .flatMap((name) => [
-      ["pnpm", name],
-      ["pnpm", "run", name],
-    ]);
-  assert.ok(aliasTargets.length > 0, "no sentry:*:test aliases to guard");
-  assert.deepEqual(
-    pinValidationOrderBlockers(
-      CI,
-      "scripts",
-      PIN_VALIDATOR_COMMAND,
-      aliasTargets,
-    ),
-    [],
-    "the `scripts` job invokes a trusted alias before validating its pin",
-  );
-
-  const validatorRun = PIN_VALIDATOR_COMMAND.join(" ");
-
-  // Probe 1: drop the validator step entirely.
-  const withoutValidator = structuredClone(CI);
-  withoutValidator.jobs.scripts.steps =
-    withoutValidator.jobs.scripts.steps.filter(
-      (step) => step.run !== validatorRun,
-    );
-  assert.notDeepEqual(
-    pinValidationOrderBlockers(
-      withoutValidator,
-      "scripts",
-      PIN_VALIDATOR_COMMAND,
-      aliasTargets,
-    ),
-    [],
-    "the order check accepts a `scripts` job with no pin validator step",
-  );
-
-  // Probe 2: move the validator to the end, after the aliases.
-  const reordered = structuredClone(CI);
-  const steps = reordered.jobs.scripts.steps;
-  const validatorAt = steps.findIndex((step) => step.run === validatorRun);
-  assert.ok(
-    validatorAt >= 0,
-    "pin validator step is gone — probe would prove nothing",
-  );
-  const [validatorStep] = steps.splice(validatorAt, 1);
-  steps.push(validatorStep);
-  assert.notDeepEqual(
-    pinValidationOrderBlockers(
-      reordered,
-      "scripts",
-      PIN_VALIDATOR_COMMAND,
-      aliasTargets,
-    ),
-    [],
-    "the order check accepts a validator step that runs after the aliases",
   );
 });
 

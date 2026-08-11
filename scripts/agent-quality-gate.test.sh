@@ -30,6 +30,13 @@ untracked_skill_artifact=".claude/skills/.agent-quality-gate-test.tmp"
 # routing (Codex 3754355168); the extensionless path is registered for cleanup
 # so a failed assertion cannot leave it in the working tree.
 sentry_symlink_probe="scripts/.sentry-symlink-probe.test.tmp"
+# Finding 3754704280: a change beneath an EXISTING scripts/ directory symlink's
+# real target must route the check too. This needs a real directory symlink under
+# scripts/ pointing at a repo-relative directory (the gate resolves the target
+# with `pwd -P`), so a target dir at the repo root and the link are both
+# registered for cleanup.
+sentry_symlink_target_dir=".sentry-symlink-target.test.tmp"
+sentry_symlink_to_target="scripts/.sentry-symlink-to-target.test.tmp"
 cp .codex/hooks.json "$codex_hooks_backup"
 cp .claude/settings.json "$claude_settings_backup"
 cp "$codex_hooks_backup" "$codex_hooks_fixture"
@@ -40,7 +47,7 @@ restore_hook_configs() {
   cp "$claude_settings_backup" "$claude_settings_fixture"
 }
 
-trap 'restore_hook_configs; rm -rf "$gate_cache_dir"; rm -f "$paths_file" "$output_file" "$turbo_facts_file" "$output_file.pnpm-args" "$untracked_skill_artifact" "$sentry_symlink_probe" "$codex_hooks_backup" "$claude_settings_backup" "$codex_hooks_fixture" "$claude_settings_fixture"' EXIT
+trap 'restore_hook_configs; rm -rf "$gate_cache_dir" "$sentry_symlink_target_dir"; rm -f "$paths_file" "$output_file" "$turbo_facts_file" "$output_file.pnpm-args" "$untracked_skill_artifact" "$sentry_symlink_probe" "$sentry_symlink_to_target" "$codex_hooks_backup" "$claude_settings_backup" "$codex_hooks_fixture" "$claude_settings_fixture"' EXIT
 
 fail() {
   # Stdout AND stderr: some CI log captures drop the suite's stderr, which
@@ -3761,6 +3768,20 @@ run_gate "$sentry_symlink_probe"
 assert_contains "- node scripts/check-sentry-suites-in-ci.test.mjs (symlink under scripts/ can expose an unwired Sentry suite)"
 rm -f "$sentry_symlink_probe"
 rm -rf "$symlink_target"
+
+# The mirror case: a change BENEATH an existing scripts/ directory symlink's real
+# TARGET routes the check too. findSentrySuites follows the committed link and
+# would demand a suite added under the target, yet that path matches neither
+# scripts/* nor the rootScripts filter — so both this gate and CI would skip
+# without this routing (Codex 3754704280). Needs a real link to a repo-relative
+# directory because the gate resolves the target with `pwd -P`. The changed path
+# under the target need not exist; only the link and its target must.
+mkdir -p "$sentry_symlink_target_dir"
+ln -sfn "../$sentry_symlink_target_dir" "$sentry_symlink_to_target"
+run_gate "$sentry_symlink_target_dir/sentry-new.test.mjs"
+assert_contains "- node scripts/check-sentry-suites-in-ci.test.mjs (change beneath a scripts/ symlink target can expose an unwired Sentry suite)"
+rm -f "$sentry_symlink_to_target"
+rm -rf "$sentry_symlink_target_dir"
 
 # findSentrySuites enumerates recursively, so a nested suite is one the check
 # will demand a CI step for. Routing has to reach the same depth or the drift
