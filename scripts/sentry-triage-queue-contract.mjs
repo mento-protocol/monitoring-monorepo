@@ -452,7 +452,9 @@ export function selectInheritableSibling(duplicateOf, siblings, selfShortId) {
       verdictLabels.length === 1 &&
       verdictLabels[0] === INHERITABLE_VERDICT_LABEL
     ) {
-      return { shortId, verdict: INHERITABLE_VERDICT };
+      // `number` rides along so the caller can re-confirm this exact stub
+      // before committing — without it the re-read has nothing to look up.
+      return { shortId, number: sib.number, verdict: INHERITABLE_VERDICT };
     }
   }
   return null;

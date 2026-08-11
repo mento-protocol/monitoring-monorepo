@@ -3189,6 +3189,13 @@ await test("runParseOnly redirects a needs-human escalation to its family verdic
   const calls = [];
   const runGh = async (args) => {
     calls.push(args[1]);
+    // The sibling re-confirmation (#1800) views the sibling by number.
+    if (args[1] === "view" && args[2] === "801") {
+      return JSON.stringify({
+        state: "CLOSED",
+        labels: [{ name: "sentry:verdict-upstream" }],
+      });
+    }
     if (args[1] === "view") {
       return JSON.stringify({
         number: 700,
@@ -3208,6 +3215,7 @@ await test("runParseOnly redirects a needs-human escalation to its family verdic
     }
     return JSON.stringify([
       {
+        number: 801,
         title: "[sentry] GOV-56 (governance-mento-org, error)",
         state: "CLOSED",
         labels: [{ name: "sentry:verdict-upstream" }],
@@ -3260,6 +3268,57 @@ await test("a sibling search never resolves a prefix to the wrong stub", async (
     { localRepo: "o/r", queueIssue: 702, priorVerdictCommentId: null },
     { runGh },
   );
+  assertEqual(out.verdict, "needs-human");
+  assertEqual(out.inheritedFrom, null);
+});
+
+await test("a sibling reopened between search and settle is not inherited", async () => {
+  // The TOCTOU: ingest runs in its own concurrency group and can re-queue the
+  // sibling for a regression after the search sees it closed. This test also
+  // guards the re-read itself — an earlier revision passed the sibling without
+  // its issue number, so the confirmation silently never ran and the guard was
+  // decorative.
+  const views = [];
+  const runGh = async (args) => {
+    if (args[1] === "view" && args[2] === "801") {
+      views.push("sibling");
+      // Regression landed: ingest reopened it and shed the verdict label.
+      return JSON.stringify({
+        state: "OPEN",
+        labels: [{ name: "sentry:needs-triage" }],
+      });
+    }
+    if (args[1] === "view") {
+      return JSON.stringify({
+        number: 703,
+        title: "[sentry] GOV-60 (governance-mento-org, error)",
+        body: "",
+        url: "https://github.com/o/r/issues/703",
+        state: "OPEN",
+        labels: [{ name: "sentry-triage" }],
+        comments: [
+          {
+            url: "https://github.com/o/r/issues/703#issuecomment-9",
+            body: needsHumanVerdictComment(["GOV-56"]),
+            author: { login: "github-actions" },
+          },
+        ],
+      });
+    }
+    return JSON.stringify([
+      {
+        number: 801,
+        title: "[sentry] GOV-56 (governance-mento-org, error)",
+        state: "CLOSED",
+        labels: [{ name: "sentry:verdict-upstream" }],
+      },
+    ]);
+  };
+  const out = await runParseOnly(
+    { localRepo: "o/r", queueIssue: 703, priorVerdictCommentId: null },
+    { runGh },
+  );
+  assertEqual(views.length, 1, "the sibling must actually be re-read");
   assertEqual(out.verdict, "needs-human");
   assertEqual(out.inheritedFrom, null);
 });

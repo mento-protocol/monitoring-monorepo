@@ -213,7 +213,7 @@ async function readSiblingVerdicts(localRun, repo, duplicateOf, selfShortId) {
         // label step, whose failure mode is worse than the miss it prevents.
         "100",
         "--json",
-        "title,state,labels",
+        "number,title,state,labels",
       ]);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -240,7 +240,12 @@ async function readSiblingVerdicts(localRun, repo, duplicateOf, selfShortId) {
       // Token search is not exact, so re-check the parsed SHORT-ID rather than
       // trusting the match: `GOV-5` must never resolve to `GOV-57`.
       if (parseShortId(row?.title) !== shortId) continue;
-      out.push({ shortId, state: row?.state, labels: row?.labels ?? [] });
+      out.push({
+        shortId,
+        number: row?.number,
+        state: row?.state,
+        labels: row?.labels ?? [],
+      });
       found = true;
       break;
     }
@@ -255,6 +260,53 @@ async function readSiblingVerdicts(localRun, repo, duplicateOf, selfShortId) {
     }
   }
   return out;
+}
+
+/**
+ * Confirm a selected sibling is STILL closed with exactly the inheritable
+ * verdict (#1614). This narrows the window between selection and settlement; it
+ * does not close it, and cannot — the sibling can change state after any read.
+ *
+ * The residual is deliberately bounded rather than eliminated: if a regression
+ * reopens the sibling just after this check, THIS stub closes as
+ * `upstream-transient`, and ingest reopens it on the next event for its own
+ * Sentry issue (the closed-match regression rule). The escalation is deferred
+ * until the error recurs, not destroyed — and an error that never recurs is the
+ * one `upstream-transient` describes.
+ */
+async function siblingStillSettled(localRun, repo, sibling) {
+  if (!Number.isInteger(sibling?.number)) return false;
+  try {
+    const stdout = await localRun([
+      "issue",
+      "view",
+      String(sibling.number),
+      "-R",
+      repo,
+      "--json",
+      "state,labels",
+    ]);
+    const data = JSON.parse(stdout);
+    return Boolean(
+      selectInheritableSibling(
+        [sibling.shortId],
+        [
+          {
+            shortId: sibling.shortId,
+            state: data?.state,
+            labels: data?.labels ?? [],
+          },
+        ],
+        null,
+      ),
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    process.stderr.write(
+      `::warning::Could not re-confirm family sibling ${sibling.shortId} before inheriting (${message}); keeping the agent's own verdict.\n`,
+    );
+    return false;
+  }
 }
 
 // Fixed, markup-free phrase from the projected-issue footer, ANDed with the
@@ -544,7 +596,16 @@ export async function runParseOnly(options, deps = {}) {
       ),
       selfShortId,
     );
-    if (sibling) {
+    // Re-read the sibling immediately before committing. Ingest runs in its own
+    // concurrency group, so between the search above and this settlement it can
+    // re-queue the sibling for a regression — shedding its verdict label and
+    // reopening it — and we would then close THIS stub on a judgement that no
+    // longer exists. Fail closed: anything other than a confirmed still-closed,
+    // still-upstream sibling keeps the agent's own escalation.
+    if (
+      sibling &&
+      (await siblingStillSettled(localRun, options.localRepo, sibling))
+    ) {
       inheritedFrom = sibling.shortId;
       verdict = sibling.verdict;
       label = VERDICT_TO_LABEL[verdict];
