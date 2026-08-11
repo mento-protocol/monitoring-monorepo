@@ -3,7 +3,7 @@ title: Documentation Navigation Evaluation
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-29
+last_verified: 2026-08-11
 doc_type: runbook
 scope: ci/process
 review_interval_days: 90
@@ -266,6 +266,20 @@ unqualified non-canonical sources and no question over the context cap.
 Independent review reached the same conclusion: both full-run misses were
 evaluator retrieval mistakes, so no documentation defect issue was required.
 
-Because two full runs have now missed `package-indexer-add-contract`, a third
-independent full-run miss must trigger a fresh review of the accepted route and
-fixture after the required targeted escalation.
+### 2026-08 accepted-route review
+
+The [August evaluation issue](https://github.com/mento-protocol/monitoring-monorepo/issues/1728)
+evaluated default-branch commit
+`028c2222b0f5dfca431eab7c5ffd25e963371445` with `gpt-5.6-sol` at low effort.
+It passed the suite target with 94.4% routing accuracy, zero unqualified
+non-canonical sources, 100% answer evidence, 94.4% shortest useful paths,
+28,161 bootstrap bytes, and 247,648 of 262,000 unique suite bytes. The sole
+miss was `package-indexer-add-contract`, its third independent full-run miss.
+
+The required targeted escalation and independent high-effort review found that
+`indexer-envio/README.md` is canonical and fully owns the requested procedure.
+The current fixture therefore accepts that document as the shortest route and
+retains `indexer-envio/AGENTS.md` followed by the README as the valid full
+edit-time routing chain. The frozen baseline and its fixtures remain unchanged.
+Issue [#1788](https://github.com/mento-protocol/monitoring-monorepo/issues/1788)
+tracks this contract correction and its required post-merge fresh evaluation.
