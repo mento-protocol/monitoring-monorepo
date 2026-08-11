@@ -15,6 +15,7 @@
 import assert from "node:assert/strict";
 import { CORE_SCHEMA, load } from "js-yaml";
 import {
+  isCommand,
   parseShellScript,
   runsCommand,
 } from "./check-sentry-suites-in-ci-core-commands.mjs";
@@ -664,6 +665,87 @@ export function contextOwnershipBlockers(workflows, context, owner) {
       `the required \`${context}\` check-run name is published by ${owners.length} job(s) ` +
         `(${owners.join(", ") || "none"}); exactly one — ${owner} — may, or the required context can resolve to a decoy`,
     );
+  }
+  return blockers;
+}
+
+/**
+ * Blockers when a job runs untrusted execution before validating it. The pin
+ * validator (check-agent-quality-gate-package-scripts.sh) is what makes the
+ * job's trust safe: it pins each trusted alias to an exact command, so a drifted
+ * `"docs:index": "node … && curl evil"` is rejected, and it rejects an
+ * unsanctioned lifecycle hook a package-only PR adds. Both guarantees hold only
+ * while the validator runs FIRST — before it, two surfaces would run unchecked:
+ *
+ *   - `installAction` (`pnpm install`) runs the root lifecycle hooks; a
+ *     `postinstall` that truncates the suites and this validator would execute
+ *     before validation (Codex 3754887736), so the validator must precede it.
+ *   - a trusted `pnpm <alias>` step runs its (possibly drifted) command; the
+ *     meta-check re-checks the pins but runs last, so an earlier alias would run
+ *     an appended command before the pins are checked.
+ *
+ * @param {Record<string, any>} workflow
+ * @param {string} name the job whose step order is judged
+ * @param {string[]} validatorTarget the pin validator command, matched whole
+ * @param {Set<string>} trustedAliases pinned alias names to guard
+ * @param {string} installAction the local install action's `uses:` value
+ */
+export function pinValidationOrderBlockers(
+  workflow,
+  name,
+  validatorTarget,
+  trustedAliases,
+  installAction,
+) {
+  const steps = ciJob(workflow, name).steps ?? [];
+  let validatorIndex = -1;
+  let installIndex = -1;
+  const aliasHits = [];
+  for (let index = 0; index < steps.length; index += 1) {
+    const step = steps[index];
+    if (!isPlainObject(step)) continue;
+    if (typeof step.uses === "string") {
+      if (step.uses === installAction && installIndex < 0) installIndex = index;
+      continue;
+    }
+    if (typeof step.run !== "string" || stepBlockers(step).length > 0) continue;
+    const { commands, blocker } = parseShellScript(step.run);
+    if (blocker) continue;
+    if (
+      validatorIndex < 0 &&
+      commands.length === 1 &&
+      isCommand(commands[0], validatorTarget)
+    ) {
+      validatorIndex = index;
+    }
+    for (const command of commands) {
+      if (command[0] !== "pnpm") continue;
+      const alias = command[1] === "run" ? command[2] : command[1];
+      if (typeof alias === "string" && trustedAliases.has(alias)) {
+        aliasHits.push({ index, run: command.join(" ") });
+      }
+    }
+  }
+  if (validatorIndex < 0) {
+    return [
+      `the \`${name}\` job never runs \`${validatorTarget.join(" ")}\` as a whole step command, ` +
+        "so it runs pnpm-install and trusted aliases without rejecting lifecycle hooks or validating pins first",
+    ];
+  }
+  const blockers = [];
+  if (installIndex >= 0 && installIndex < validatorIndex) {
+    blockers.push(
+      `the \`${name}\` job runs \`${installAction}\` (step ${installIndex}) before the pin validator ` +
+        `(step ${validatorIndex}) — a root install lifecycle hook would run before the validator rejects it`,
+    );
+  }
+  for (const hit of aliasHits) {
+    if (hit.index < validatorIndex) {
+      blockers.push(
+        `the \`${name}\` job runs \`${hit.run}\` (step ${hit.index}) before the pin validator ` +
+          `(step ${validatorIndex}) — a drifted alias would run its appended command before the pins are checked`,
+      );
+    }
   }
   return blockers;
 }

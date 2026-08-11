@@ -92,6 +92,11 @@ import {
   workflowBlockers,
 } from "./check-sentry-suites-in-ci-core.mjs";
 import { countLines, HARD_CAP } from "./file-size-watchlist.mjs";
+// The execution-surface invariants (pin/hook ordering, lifecycle-hook rejection,
+// escaping-symlink rejection) live in a sibling module to keep both files under
+// the line cap. Importing it registers its `test()`s in this run, so the single
+// `node scripts/check-sentry-suites-in-ci.test.mjs` CI step runs them too.
+import "./check-sentry-suites-in-ci-lifecycle.test.mjs";
 import {
   CI,
   collectCompositeActions,
@@ -966,6 +971,7 @@ test("the checker's own files stay under the file-size hard cap", () => {
     SELF,
     "scripts/check-sentry-suites-in-ci-core-commands.mjs",
     "scripts/check-sentry-suites-in-ci-probes.mjs",
+    "scripts/check-sentry-suites-in-ci-lifecycle.test.mjs",
   ];
   const over = files
     .map((file) => ({

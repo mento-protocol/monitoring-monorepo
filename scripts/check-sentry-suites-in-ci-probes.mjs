@@ -25,7 +25,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CORE_SCHEMA, dump, load } from "js-yaml";
 import { isPlainObject } from "./check-sentry-suites-in-ci-core.mjs";
@@ -40,8 +40,20 @@ export const VALIDATOR_PATH = join(
   "check-agent-quality-gate-package-scripts.sh",
 );
 
+/** The pin validator invocation the `scripts` job must run before install and any alias. */
+export const PIN_VALIDATOR_COMMAND = [
+  "bash",
+  "scripts/check-agent-quality-gate-package-scripts.sh",
+];
+
+/** The local install action the `scripts` job must run AFTER the pin validator. */
+export const INSTALL_ACTION = "./.github/actions/pnpm-install";
+
 /** The test file, so the check can assert its own CI step still exists. */
 export const SELF = "scripts/check-sentry-suites-in-ci.test.mjs";
+
+/** The sibling test module holding the execution-surface invariants. */
+export const LIFECYCLE = "scripts/check-sentry-suites-in-ci-lifecycle.test.mjs";
 
 /** The module holding every predicate the check asserts with. */
 export const CORE = "scripts/check-sentry-suites-in-ci-core.mjs";
@@ -353,6 +365,86 @@ export function findSentrySuites(
 export const SENTRY_SUITES = findSentrySuites(SCRIPTS_DIR);
 
 /**
+ * Committed directory symlinks under scripts/ whose real target escapes the
+ * scripts/ tree. `findSentrySuites` follows such a link and enumerates the suite
+ * behind it, but the suite's real path is the symlink TARGET (e.g.
+ * fixtures/sentry-x.test.mjs) — which matches neither `scripts/**` nor the
+ * static `rootScripts` filter in ci.yml. Adding a suite beneath a previously
+ * committed link would then run the checker locally yet skip the whole path-gated
+ * `scripts` job in CI, shipping the unwired suite (Codex 3754887739). CI's
+ * paths-filter cannot resolve a symlink, so the fail-closed answer is to reject
+ * the link: with none present, every enumerated suite lives under a real
+ * `scripts/**` path the filter already routes. A directory symlink whose target
+ * stays inside scripts/ is harmless (still covered by `scripts/**`) and allowed.
+ *
+ * @param {string} dir
+ * @param {string} prefix
+ * @param {string | null} scriptsRoot resolved scripts/ root; set on recursion
+ * @returns {Array<[string, string]>} [repo-relative link path, resolved target]
+ */
+export function escapingScriptSymlinks(
+  dir,
+  prefix = "scripts",
+  scriptsRoot = null,
+) {
+  const root = scriptsRoot ?? realpathSync(dir);
+  const escaping = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    const relative = `${prefix}/${entry.name}`;
+    if (entry.isSymbolicLink()) {
+      // A file symlink cannot expose a suite tree; `findSentrySuites` follows
+      // only directory links. A broken link throws there and is that check's
+      // concern, so skip an unresolvable one here rather than double-reporting.
+      let target;
+      try {
+        if (!statSync(full).isDirectory()) continue;
+        target = realpathSync(full);
+      } catch {
+        continue;
+      }
+      if (target !== root && !target.startsWith(root + sep)) {
+        escaping.push([relative, target]);
+      }
+    } else if (entry.isDirectory()) {
+      escaping.push(...escapingScriptSymlinks(full, relative, root));
+    }
+  }
+  return escaping.sort();
+}
+
+/**
+ * Run check-agent-quality-gate-package-scripts.sh against a synthetic
+ * package.json and report whether it accepted. Lets the lifecycle invariants
+ * prove the validator rejects an unsanctioned lifecycle hook (and accepts the
+ * real, clean manifest) without running the whole gate.
+ *
+ * @param {Record<string, unknown>} pkg
+ * @returns {{ ok: boolean, output: string }}
+ */
+export function runPackageScriptValidator(pkg) {
+  const dir = mkdtempSync(join(tmpdir(), "pkg-script-validator-"));
+  try {
+    writeFileSync(join(dir, "package.json"), `${JSON.stringify(pkg)}\n`);
+    try {
+      const stdout = execFileSync("bash", [VALIDATOR_PATH], {
+        cwd: dir,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      return { ok: true, output: stdout };
+    } catch (error) {
+      return {
+        ok: false,
+        output: `${error.stdout ?? ""}${error.stderr ?? ""}`,
+      };
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/**
  * Sentry-named suites that another CI job owns. The value names the route;
  * `the exemption for sentry-provider-contract still holds` re-proves it. An
  * exemption whose route disappeared is a hole, not an exemption.
@@ -431,6 +523,7 @@ const STATIC_PROBE_INPUTS = new Map([
   ],
   ["scripts/tf-stacks.test.mjs", "`staticImports` parses its import list"],
   [SELF, "this check itself"],
+  [LIFECYCLE, "the execution-surface invariants this check imports and runs"],
   [CORE, "every predicate this check asserts with"],
   [CORE_COMMANDS, "the command-grammar predicates the core re-exports"],
   [PROBES, "the file reads and probes this check runs"],

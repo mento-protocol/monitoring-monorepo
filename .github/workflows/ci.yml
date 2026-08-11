@@ -972,17 +972,31 @@ jobs:
           # Baseline validation reads source blobs from its claimed pre-baseline
           # commit so results remain reproducible after later doc changes.
           fetch-depth: 0
-      - uses: ./.github/actions/pnpm-install
       - name: Validate trusted package-script pins
-        # Fail fast before any `pnpm <alias>` step below runs. This job still
-        # invokes trusted aliases directly — `pnpm lint:scripts`,
-        # `pnpm agent:quality-gate:test`, the `docs:*` and `agent:context-*`
-        # suites — and the local gate's tooling allowlist trusts them; the pin
-        # validator keeps that trust safe by rejecting a drifted command (e.g. an
-        # appended `&& <command>`) before it executes. The Sentry suites no
-        # longer route through pnpm at all — they run as direct `node <suite>`
-        # commands below — so this step no longer guards them.
+        # Runs BEFORE pnpm-install, and before any `pnpm <alias>` step below, so
+        # it guards two execution surfaces this job would otherwise trust blind:
+        #
+        #   INSTALL — `pnpm install` runs the root lifecycle hooks (postinstall
+        #   and friends). A package-only PR could add a `postinstall` that
+        #   truncates the Sentry suites and this validator, false-greening the
+        #   direct `node <suite>` steps and the coverage assertion (Codex
+        #   3754887736). Validating first rejects any unsanctioned hook before
+        #   install would execute it. `--ignore-scripts` is NOT used because the
+        #   sanctioned `postinstall` builds @mento-protocol/config, whose dist the
+        #   `Peg registry integrity` step below imports; this is the fail-close
+        #   route that finding calls for instead. The validator needs only Node's
+        #   built-in `fs`, so it runs before setup-node like the terraform job's
+        #   pre-install `node` step.
+        #
+        #   RUN — this job still invokes trusted aliases directly (`pnpm
+        #   lint:scripts`, `pnpm agent:quality-gate:test`, the `docs:*` and
+        #   `agent:context-*` suites); the pin validator keeps that trust safe by
+        #   rejecting a drifted command (e.g. an appended `&& <command>`) before
+        #   it executes. The Sentry suites no longer route through pnpm — they run
+        #   as direct `node <suite>` commands below — so this step no longer
+        #   guards them. check-sentry-suites-in-ci.test.mjs pins this ordering.
         run: bash scripts/check-agent-quality-gate-package-scripts.sh
+      - uses: ./.github/actions/pnpm-install
       - name: ESLint root scripts
         run: pnpm lint:scripts
       - name: Peg registry integrity
