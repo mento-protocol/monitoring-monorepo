@@ -3,7 +3,7 @@ title: stETH actuals use a launch-aligned sub-daily wallet balance sampler
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-24
+last_verified: 2026-08-11
 scope: indexer-envio
 date: 2026-07
 doc_type: adr

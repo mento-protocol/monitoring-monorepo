@@ -3,7 +3,7 @@ title: Sentry triage/autofix runs as a staged GitHub Actions agent pipeline with
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-24
+last_verified: 2026-08-11
 scope: ci/process
 date: 2026-07
 doc_type: adr

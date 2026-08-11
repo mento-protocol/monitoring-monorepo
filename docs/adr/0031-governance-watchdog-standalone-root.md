@@ -3,7 +3,7 @@ title: governance-watchdog deploys as a standalone source root in its own GCP pr
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-24
+last_verified: 2026-08-11
 scope: governance-watchdog
 date: 2026-06
 doc_type: adr

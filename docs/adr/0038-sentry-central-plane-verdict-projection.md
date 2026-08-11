@@ -3,7 +3,7 @@ title: Central Sentry triage plane with owning-repo verdict projection
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-24
+last_verified: 2026-08-11
 scope: ci/process
 date: 2026-07
 doc_type: adr
@@ -16,6 +16,11 @@ garden_lane: adrs-architecture
 **Status:** Accepted (Jul 2026), in force. Refines
 [ADR 0036](0036-sentry-triage-pipeline.md) Stage C ("phased mutations").
 **Scope:** ci/process
+
+**Current refinement:** [ADR 0050](0050-environment-scoped-pipeline-secrets.md)
+moved `SENTRY_PROJECTION_TOKEN` from repository scope to the main-only
+`sentry-pipeline` GitHub Environment. The fixed three-repository Issues-write
+boundary and token isolation from the triage agent remain in force.
 
 ## Context
 
@@ -160,3 +165,5 @@ deterministic step.**
   and monitoring-monorepo#1302.
 - Pipeline tracker [#1282](https://github.com/mento-protocol/monitoring-monorepo/issues/1282);
   refines [ADR 0036](0036-sentry-triage-pipeline.md) Stage C.
+- Current credential placement: `terraform/github-environment.tf` and
+  [ADR 0050](0050-environment-scoped-pipeline-secrets.md).

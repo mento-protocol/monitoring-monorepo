@@ -3,7 +3,7 @@ title: Native GraphQL transport and client-side Zod Mini for the dashboard
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-24
+last_verified: 2026-08-11
 scope: ui-dashboard
 date: 2026-07
 doc_type: adr

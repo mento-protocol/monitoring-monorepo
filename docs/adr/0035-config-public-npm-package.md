@@ -3,7 +3,7 @@ title: shared-config publishes as the public @mento-protocol/config package
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-24
+last_verified: 2026-08-11
 scope: shared-config
 date: 2026-07
 doc_type: adr
@@ -37,7 +37,7 @@ and pack the artifact; untagged workflow runs do not publish.
 ## Current operational status
 
 The decision remains in force, but the release path is not healthy end to end.
-As verified on 2026-07-24, npm still serves `0.1.0` while the repository and tag
+As verified on 2026-08-11, npm still serves `0.1.0` while the repository and tag
 `config-v0.2.0` identify `0.2.0`. Workflow run `29831994804` built and verified
 the package, signed provenance, then failed at `npm publish` with npm `E404` /
 missing permission. Issue [#1573](https://github.com/mento-protocol/monitoring-monorepo/issues/1573)
@@ -82,4 +82,4 @@ claim that every matching tag publishes successfully.
 - `.github/workflows/publish-config.yml`
 - [`shared-config/AGENTS.md`](../../shared-config/AGENTS.md)
 - Failed `config-v0.2.0` publish run `29831994804`; live npm version check on
-  2026-07-24; recovery issue [#1573](https://github.com/mento-protocol/monitoring-monorepo/issues/1573)
+  2026-08-11; recovery issue [#1573](https://github.com/mento-protocol/monitoring-monorepo/issues/1573)
