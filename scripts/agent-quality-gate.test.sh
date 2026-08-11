@@ -3783,6 +3783,23 @@ assert_contains "- pnpm sentry:archive:test (Sentry triage archive helper change
 run_gate "scripts/sentry-triage-archive.test.mjs"
 assert_contains "- pnpm sentry:archive:test (Sentry triage archive helper changed)"
 
+# The self-run Sentry-suite gate (#1779, ADR 0062) asserts, at runtime, that the
+# suites actually ran. A contributor who edits the gate script, its own suite, or
+# the manifest it reconciles against must run scripts/sentry-suite-gate.test.mjs
+# locally — or the gate could ship broken. The manifest .json is included on
+# purpose: the gate reconciles set membership and per-suite floors against it, so
+# a floor edit is exactly the kind of change that must run the gate test.
+sentry_gate_test="- node scripts/sentry-suite-gate.test.mjs (Sentry-suite gate, manifest, or its test changed)"
+
+run_gate "scripts/sentry-suite-gate.mjs"
+assert_contains "$sentry_gate_test"
+
+run_gate "scripts/sentry-suite-gate.test.mjs"
+assert_contains "$sentry_gate_test"
+
+run_gate "scripts/sentry-suite-manifest.json"
+assert_contains "$sentry_gate_test"
+
 # check-sentry-suites-in-ci.test.mjs asserts that every Sentry suite runs in
 # CI. Every file it reads must route it, or the drift it exists to catch is
 # only caught after push. Its first home was an arm nested under `scripts/*.sh`,

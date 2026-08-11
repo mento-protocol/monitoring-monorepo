@@ -58,13 +58,13 @@ its `allowed-skips` — the treatment `production-infra-contract` already gets.
 
 The job's step list is closed-world and its order is load-bearing:
 
-| #   | Step                                                                   | Why it is where it is                                                         | Lands in  |
-| --- | ---------------------------------------------------------------------- | ----------------------------------------------------------------------------- | --------- |
-| 1   | `actions/checkout` (SHA-pinned, `persist-credentials: false`)          | Upstream, one of exactly two non-PR-authored things trusted before the suites | this PR   |
-| 2   | `actions/setup-node` (SHA-pinned, `node-version-file: .node-version`)  | Same                                                                          | this PR   |
-| 3   | `run: /usr/bin/env -u NODE_OPTIONS node scripts/sentry-suite-gate.mjs` | The first and only PR-authored code before the suites                         | this PR   |
-| 4   | `uses: ./.github/actions/pnpm-install`                                 | After the suites, so its `postinstall` cannot reach them                      | follow-up |
-| 5   | `run: node scripts/check-sentry-suites-in-ci.test.mjs`                 | Needs `js-yaml`; after the suites for the same reason                         | follow-up |
+| #   | Step                                                                                | Why it is where it is                                                                                              | Lands in  |
+| --- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | --------- |
+| 1   | `actions/checkout` (SHA-pinned, `persist-credentials: false`)                       | Upstream, one of exactly two non-PR-authored things trusted before the suites                                      | this PR   |
+| 2   | `actions/setup-node` (SHA-pinned, `node-version-file: .node-version`)               | Same                                                                                                               | this PR   |
+| 3   | `run: /usr/bin/env -u NODE_OPTIONS -u NODE_PATH node scripts/sentry-suite-gate.mjs` | The first and only PR-authored code before the suites; strips both vars, symmetric with the gate's per-child spawn | this PR   |
+| 4   | `uses: ./.github/actions/pnpm-install`                                              | After the suites, so its `postinstall` cannot reach them                                                           | follow-up |
+| 5   | `run: node scripts/check-sentry-suites-in-ci.test.mjs`                              | Needs `js-yaml`; after the suites for the same reason                                                              | follow-up |
 
 Steps 1-3 are the security-critical core and land here: no PR-authored step runs
 before the gate, so the R1 window is closed. The static checker keeps running in

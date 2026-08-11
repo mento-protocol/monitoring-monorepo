@@ -1241,7 +1241,7 @@ jobs:
         with:
           node-version-file: .node-version
       - name: Run and assert the Sentry suites
-        run: /usr/bin/env -u NODE_OPTIONS node scripts/sentry-suite-gate.mjs
+        run: /usr/bin/env -u NODE_OPTIONS -u NODE_PATH node scripts/sentry-suite-gate.mjs
 
   autoreview-suite:
     name: Autoreview adversarial suite

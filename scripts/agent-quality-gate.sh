@@ -2267,6 +2267,15 @@ while IFS= read -r path; do
           ;;
       esac
       ;;
+    scripts/sentry-suite-manifest.json)
+      # The manifest the self-run Sentry-suite gate reconciles against (#1779,
+      # ADR 0062). A .json edit never reaches the scripts/*.mjs focused case, so
+      # route the gate test here: a lowered floor or a suite dropped from the
+      # manifest is exactly what the gate test must catch locally. Same reason
+      # string as the gate/test arm so both read as one focused mapping.
+      add_surface "scripts"
+      add_command "node scripts/sentry-suite-gate.test.mjs" "Sentry-suite gate, manifest, or its test changed"
+      ;;
     scripts/*.mjs|scripts/*.cjs|scripts/*.js|eslint.config.mjs)
       # `.dependency-cruiser.cjs` is handled fully by its dedicated case
       # block above (runs `pnpm code-health:deps` + `pnpm lint:scripts`).
@@ -2405,6 +2414,14 @@ while IFS= read -r path; do
           # derived from and the projection suite pins against the other two
           # verdict-label maps.
           add_command "pnpm sentry:project:test" "Sentry re-queue chokepoint changed"
+          ;;
+        scripts/sentry-suite-gate.mjs|scripts/sentry-suite-gate.test.mjs)
+          # The self-run Sentry-suite gate (#1779, ADR 0062) and its own suite.
+          # The manifest it reconciles against is a .json and never reaches this
+          # scripts/*.mjs case, so it is routed by its own outer arm below with
+          # the same reason string. The gate test spawns the real gate against
+          # fixtures, so it covers the gate script and this test.
+          add_command "node scripts/sentry-suite-gate.test.mjs" "Sentry-suite gate, manifest, or its test changed"
           ;;
         scripts/pr-feedback-state.mjs|scripts/pr-feedback-state-core.mjs|scripts/pr-feedback-state-claude.mjs|scripts/pr-feedback-state.test.mjs)
           add_command "pnpm pr:feedback-state:test" "PR feedback-state helper changed"
