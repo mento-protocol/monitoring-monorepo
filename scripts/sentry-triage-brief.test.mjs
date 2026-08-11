@@ -1539,12 +1539,14 @@ await test("the verdict job runs the brief leg on EVERY verdict", () => {
   );
 });
 
-await test("render failure is best-effort but a CLEAR failure blocks the close (#1769 round 10)", () => {
+await test("a RENDER failure is best-effort; a CLEAR failure blocks the close AND restores selectability (#1769 rounds 10 + 16)", () => {
   // Split failure semantics: a needs-human RENDER failure logs and continues
   // (the escalation is already in the verdict label + comment, stub stays open);
-  // a CLEAR failure (any other verdict) fails the step to BLOCK the close, so
-  // the stub is never closed still showing a stale "Decision needed". Neither
-  // path re-queues — that block was the round 6-8 race/ordering source.
+  // a CLEAR failure (any other verdict) fails the step to BLOCK the close, so the
+  // stub is never closed still showing a stale "Decision needed". Because the
+  // verdict step already removed sentry:needs-triage, the CLEAR-failure exit ALSO
+  // restores selectability through the single re-queue chokepoint — a bare exit
+  // would strand the open, verdict-labeled stub (#1769 round 16).
   const workflow = readRepoFile(".github/workflows/sentry-triage-agent.yml");
   const step = workflow.slice(
     workflow.indexOf("- name: Render or clear the needs-human brief"),
@@ -1573,14 +1575,17 @@ await test("render failure is best-effort but a CLEAR failure blocks the close (
     meaningful.includes("exit 1"),
     "a CLEAR failure must exit 1 to block the close step",
   );
-  // No re-queue and no terminal-state re-read — the compensation class stays gone.
+  // The CLEAR-failure exit RESTORES selectability through the ONE re-queue
+  // chokepoint — never a bare exit, never an open-coded label swap.
   assert(
-    !step.includes("requeue_for_retry"),
-    "the brief step must not re-queue (that class was removed)",
+    step.includes("node scripts/sentry-triage-requeue.mjs"),
+    "the clear-failure exit must route through the re-queue chokepoint",
   );
   assert(
-    !step.includes("--json state"),
-    "no terminal-state re-read remains in the brief step",
+    !step.includes("requeue_for_retry") &&
+      !step.includes("--add-label") &&
+      !step.includes("--remove-label"),
+    "the brief step must not open-code a re-queue; it uses the chokepoint CLI",
   );
 });
 

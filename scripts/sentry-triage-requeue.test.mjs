@@ -24,17 +24,20 @@ import {
 } from "./sentry-triage-project-core.mjs";
 import { NEEDS_TRIAGE_LABEL } from "./sentry-triage-queue-contract.mjs";
 import {
+  buildBriefClearRecoveryComment,
   buildRegressedComment,
   buildRequeueAddLabelArgs,
   buildRequeueShedLabelArgs,
   buildRequeueFence,
   buildStrandedRecoveryComment,
   hasAdmissibleVerdict,
+  parseRequeueArgs,
   REQUEUE_CAUSE_BOOKKEEPING,
   REQUEUE_CAUSE_SENTRY_EVIDENCE,
   REQUEUE_ON_FAILURE_VERIFY_END_STATE,
   requeueFences,
   requeueQueueStub,
+  runClearFailureRequeue,
 } from "./sentry-triage-requeue.mjs";
 
 let passed = 0;
@@ -721,6 +724,110 @@ await test("no re-queue path rewrites the stub body (#1692)", async () => {
         `a re-queue wrote a body outside a comment: ${args.join(" ")}`,
       );
     }
+  }
+});
+
+// ---------------------------------------------------------------------------
+// The clear-failure re-queue CLI (#1769 round 16). A needs-human stub
+// re-dispatched to a settled verdict whose brief CLEAR fails is left open,
+// verdict-labeled and off sentry:needs-triage — a strand no stage sees. This
+// entry drives it back to selectable through the chokepoint, OPEN-safe.
+// ---------------------------------------------------------------------------
+
+function makeClearFailureGh(initial) {
+  const state = {
+    state: initial.state ?? "OPEN",
+    labels: [...(initial.labels ?? [])],
+    comments: [],
+  };
+  const calls = [];
+  const runGh = async (args) => {
+    calls.push(args);
+    if (args[0] === "issue" && args[1] === "view") {
+      return JSON.stringify({
+        state: state.state,
+        labels: state.labels.map((name) => ({ name })),
+      });
+    }
+    if (args[0] === "issue" && args[1] === "edit") {
+      const addAt = args.indexOf("--add-label");
+      if (addAt !== -1) {
+        for (const name of args[addAt + 1].split(",")) {
+          if (name && !state.labels.includes(name)) state.labels.push(name);
+        }
+      }
+      const removeAt = args.indexOf("--remove-label");
+      if (removeAt !== -1) {
+        const remove = new Set(args[removeAt + 1].split(","));
+        state.labels = state.labels.filter((name) => !remove.has(name));
+      }
+      return "";
+    }
+    if (args[0] === "issue" && args[1] === "comment") {
+      state.comments.push(args[args.indexOf("--body") + 1]);
+      return "";
+    }
+    if (args[0] === "issue" && args[1] === "reopen") {
+      state.state = "OPEN";
+      return "";
+    }
+    return "";
+  };
+  return { state, calls, runGh };
+}
+
+await test("runClearFailureRequeue restores needs-triage and sheds the verdict on an OPEN stub (#1769 round 16)", async () => {
+  const gh = makeClearFailureGh({
+    state: "OPEN",
+    labels: ["sentry-triage", "sentry:verdict-upstream"],
+  });
+  const result = await runClearFailureRequeue({
+    runGh: gh.runGh,
+    repo: REPO,
+    issueNumber: 1731,
+  });
+  assertEqual(result.requeued, true);
+  assert(
+    gh.state.labels.includes(NEEDS_TRIAGE_LABEL),
+    "sentry:needs-triage must be restored",
+  );
+  assert(
+    !gh.state.labels.includes("sentry:verdict-upstream"),
+    "the just-applied verdict label must be shed",
+  );
+  assertEqual(gh.state.state, "OPEN");
+  // A bookkeeping note rides with the labels; it is NOT a regression fence.
+  assertEqual(gh.state.comments.length, 1);
+  assertEqual(gh.state.comments[0], buildBriefClearRecoveryComment());
+  assert(
+    !gh.state.comments[0].startsWith(REGRESSION_PREFIX),
+    "the recovery note must never be a regression fence",
+  );
+  // An already-open stub is confirmed selectable, never spuriously reopened.
+  assert(
+    !gh.calls.some((a) => a[0] === "issue" && a[1] === "reopen"),
+    "an already-open stub must not be reopened",
+  );
+});
+
+await test("parseRequeueArgs requires a numeric issue and a repo", () => {
+  const ok = parseRequeueArgs(["--issue", "1731", "--repo", "o/r"]);
+  assertEqual(ok.issueNumber, 1731);
+  assertEqual(ok.repo, "o/r");
+  for (const bad of [
+    [],
+    ["--issue", "x", "--repo", "o/r"],
+    ["--issue", "1731"],
+    ["--repo", "o/r"],
+    ["--bogus"],
+  ]) {
+    let threw = false;
+    try {
+      parseRequeueArgs(bad);
+    } catch {
+      threw = true;
+    }
+    assert(threw, `parseRequeueArgs(${JSON.stringify(bad)}) must throw`);
   }
 });
 

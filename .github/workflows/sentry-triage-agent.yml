@@ -871,10 +871,18 @@ jobs:
       #     the stale "Decision needed" comment — and the ordinary close path has
       #     NO later cleanup. A swallowed clear is therefore not advisory. Fail to
       #     BLOCK the close (this step failing skips the close step), so the stub
-      #     is never closed on an obsolete decision. The failure is surfaced (red
-      #     job) and the stub stays OPEN, not buried; a regression re-queues it via
-      #     ingest. We deliberately do NOT re-queue here — that re-queue block was
-      #     the recurring race/ordering source of rounds 6-8.
+      #     is never closed on an obsolete decision. But the verdict step already
+      #     removed sentry:needs-triage and applied the verdict label, so blocking
+      #     the close ALONE would strand an open, verdict-labeled stub with no
+      #     retry path — the scheduled selector admits only sentry:needs-triage,
+      #     the project job skips a non-actionable/local outcome, and ingest's
+      #     regression gate only reopens CLOSED stubs (#1769 round 16). So the
+      #     clear-failure branch also RESTORES selectability through the single
+      #     re-queue chokepoint (scripts/sentry-triage-requeue.mjs, BOOKKEEPING
+      #     cause — nothing in Sentry moved), never an open-coded label swap:
+      #     block-the-close AND restore-select together. The chokepoint is
+      #     idempotent and OPEN-safe (verify-end-state reopens only a closed stub),
+      #     and the next round's brief step reconciles the still-stale brief.
       # A 404 while clearing (the comment already gone) is success, handled in
       # runBrief, so a concurrent delete does not trip this.
       # -----------------------------------------------------------------------
@@ -893,7 +901,18 @@ jobs:
             if [ "${VERDICT}" = "needs-human" ]; then
               echo "::warning::Could not render the needs-human brief on issue #${QUEUE_ISSUE_NUMBER} (see the log above); the verdict label and verdict comment already carry the escalation, so leaving the open stub and continuing (best-effort)."
             else
-              echo "::error::Could not clear the stale needs-human brief on issue #${QUEUE_ISSUE_NUMBER} (verdict is now ${VERDICT}); failing to BLOCK the close step so the stub is never closed showing an obsolete decision."
+              echo "::error::Could not clear the stale needs-human brief on issue #${QUEUE_ISSUE_NUMBER} (verdict is now ${VERDICT}); restoring queue selectability through the re-queue chokepoint, then failing to BLOCK the close step so the stub is never closed showing an obsolete decision."
+              # The verdict step already removed sentry:needs-triage and applied
+              # the verdict label, so a bare exit would strand this open,
+              # verdict-labeled stub (#1769 round 16). Restore selectability
+              # through the ONE re-queue chokepoint (bookkeeping cause), never an
+              # open-coded label swap. It is idempotent and OPEN-safe; a re-queue
+              # that itself fails is surfaced but must not stop the close-block.
+              if ! node scripts/sentry-triage-requeue.mjs \
+                  --issue "${QUEUE_ISSUE_NUMBER}" \
+                  --repo "${GITHUB_REPOSITORY}"; then
+                echo "::error::Re-queue of issue #${QUEUE_ISSUE_NUMBER} after the clear failure ALSO failed; it may need manual attention (reopen + sentry:needs-triage)."
+              fi
               exit 1
             fi
           fi
