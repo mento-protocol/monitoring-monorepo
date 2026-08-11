@@ -5,7 +5,7 @@ title: Forensic Report Skill
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-23
+last_verified: 2026-08-10
 doc_type: skill
 scope: repo-wide
 review_interval_days: 90
@@ -85,13 +85,31 @@ section as evidence comes in, don't wait until the end. A step whose heading
 names a file under `references/` keeps its deep procedure there; every other
 step carries its full procedure here.
 
+### Transport availability preflight — before Step 1
+
+Inspect the session tool catalog for both
+`mcp__upstash__redis_database_list_databases` and
+`mcp__upstash__redis_database_run_redis_commands` before bootstrap. Do not use
+a Redis command as the availability probe.
+
+- If both tools are available, run the production database and cache reads in
+  Steps 1 and 1.5.
+- If either tool is unavailable, continue the local draft without Upstash.
+  Skip database discovery, the existing report/label reads, and all five cache
+  reads. Derive the working nickname from other evidence and mark those Upstash
+  sources `NOT-ATTEMPTED — local-only transport unavailable in this session`,
+  never `EMPTY`.
+- Before an attended local upload, rerun Steps 1 and 1.5 with both tools
+  available. The fresh report read owns `version` and `createdAt` for CAS; do
+  not carry a Cloud assumption into the write.
+
 ### Step 1 — Bootstrap → `references/chain-setup.md`
 
-Lowercase the address, set `CHAIN`, and derive `CHAIN_ID` / `RPC` / `DUNE_NS` / `DL_NS` from it in **one** case switch so a non-Celo investigation can't silently read Celo data. Capture provenance up front — `HEAD_BLOCK`, RPC endpoint, `cast --version`, and the UTC timestamp of each Sim/DefiLlama query — because mutable-state reads are only reproducible pinned to a block. Then discover the `address-labels` database by exact name (never hardcode its opaque id) and `HGET` both `reports` and `labels` for the address: an existing report means you're updating, and an existing label sets the H1 nickname.
+Lowercase the address, set `CHAIN`, and derive `CHAIN_ID` / `RPC` / `DUNE_NS` / `DL_NS` from it in **one** case switch so a non-Celo investigation can't silently read Celo data. Capture provenance up front — `HEAD_BLOCK`, RPC endpoint, `cast --version`, and the UTC timestamp of each Sim/DefiLlama query — because mutable-state reads are only reproducible pinned to a block. When the transport preflight passed, discover the `address-labels` database by exact name (never hardcode its opaque id) and `HGET` both `reports` and `labels` for the address: an existing report means you're updating, and an existing label sets the H1 nickname.
 
 ### Step 1.5 — Check Upstash caches first → `references/chain-setup.md`
 
-Five Arkham-derived caches live in that same database — three address-keyed (`intel_deep`, `intel_transfers`, `intel_wealth`) and two entity-slug-keyed (`intel_entities`, `intel_entity_cps`, joined via `intel_deep`'s `arkhamEntity.id`). Prefer a current cache hit over a live call. **These caches ARE the cross-chain identity leg**: they see the chains Arkham covers, not Celo/Monad, so for a Celo-native address an empty result is itself the finding, not a failure. Consume them subject to the contract-target identity rule above.
+When the transport preflight passed, five Arkham-derived caches live in that same database — three address-keyed (`intel_deep`, `intel_transfers`, `intel_wealth`) and two entity-slug-keyed (`intel_entities`, `intel_entity_cps`, joined via `intel_deep`'s `arkhamEntity.id`). Prefer a current cache hit over a live call. **These caches ARE the cross-chain identity leg**: they see the chains Arkham covers, not Celo/Monad, so for a Celo-native address an empty result is itself the finding, not a failure. Consume them subject to the contract-target identity rule above.
 
 ### Step 1.6 — Mento indexer fingerprint → `references/indexer-queries.md`
 
@@ -229,8 +247,9 @@ _Investigation date: YYYY-MM-DD._
 
 ### Step 10 — Push to production → `references/upload.md`
 
-By default the skill stops at the local draft and asks the user to review; upload only on `--upload` or an explicit equivalent. Three safety properties are non-negotiable and live here, not only in the reference file:
+By default the skill stops at the local draft and asks the user to review; upload only on `--upload` or an explicit equivalent. These safety properties are non-negotiable and live here, not only in the reference file:
 
+- The MCP upload is local-only and must use the pinned personal setup in [`docs/notes/upstash-mcp-operator.md`](../../../docs/notes/upstash-mcp-operator.md). If its two reviewed tools are unavailable, do not request credentials or edit shared config; stop and route the upload to an attended local session or the authenticated editor.
 - Keep `mcp__upstash__redis_database_run_redis_commands` out of repo-shared auto-allow lists. **The MCP approval prompt is the production write guard for this path.**
 - **Derive `AUTHOR_EMAIL` from `git config user.email` at runtime** — never hardcode it, or every teammate's reports get mis-attributed and PII lands in git. `git config` is local and unauthenticated, so **show the derived email and have the user confirm** it matches their workspace identity before sending the EVAL.
 - Re-read the record immediately before writing and pass the derived expected version to the CAS Lua upsert: `""` means **create-only** (fail if another writer creates it first); otherwise the fresh base version. On a conflict, stop, show it, and ask — **never auto-retry with a new base version.**

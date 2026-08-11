@@ -3559,6 +3559,25 @@ assert_contains "- pnpm agent:context-budget --strict (agent instruction budget 
 run_gate ".codex/config.toml"
 assert_contains "- agent-context"
 assert_contains "- pnpm agent:context-budget --strict (agent instruction budget input changed)"
+assert_contains "- node --test scripts/upstash-mcp-config.test.mjs (Upstash MCP transport contract changed)"
+
+run_gate ".codex/upstash-mcp.example.toml"
+assert_contains "- node --test scripts/upstash-mcp-config.test.mjs (Upstash MCP transport contract changed)"
+
+run_gate ".gitattributes"
+assert_contains "- node --test scripts/upstash-mcp-config.test.mjs (Upstash MCP transport contract changed)"
+
+run_gate ".agents/skills/forensic-report/references/upload.md"
+assert_contains "- node --test scripts/upstash-mcp-config.test.mjs (Upstash MCP transport contract changed)"
+
+run_gate "docs/notes/upstash-mcp-operator.md"
+assert_contains "- node --test scripts/upstash-mcp-config.test.mjs (Upstash MCP transport contract changed)"
+
+run_gate "terraform/variables.tf"
+assert_contains "- node --test scripts/upstash-mcp-config.test.mjs (Upstash MCP transport contract changed)"
+
+run_gate "pnpm-lock.yaml"
+assert_contains "- node --test scripts/upstash-mcp-config.test.mjs (Upstash MCP transport contract changed)"
 
 # Any docs markdown may carry canonical: true frontmatter (discovery in
 # check-agent-context.mjs), so a discovered doc path must route through the
@@ -3922,6 +3941,22 @@ assert_contains "- node scripts/check-agent-context.test.mjs (agent context chec
 run_gate "scripts/check-agent-context.test.mjs"
 assert_contains "- pnpm agent:context-check (agent context checker changed)"
 assert_contains "- node scripts/check-agent-context.test.mjs (agent context checker changed)"
+
+run_gate "scripts/build-upstash-mcp-runtime.mjs"
+assert_contains "- pnpm lint:scripts (root build script changed)"
+assert_contains "- node --test scripts/upstash-mcp-config.test.mjs (Upstash MCP transport contract changed)"
+
+run_gate "scripts/upstash-mcp-config.test.mjs"
+assert_contains "- pnpm lint:scripts (root build script changed)"
+assert_contains "- node --test scripts/upstash-mcp-config.test.mjs (Upstash MCP transport contract changed)"
+
+run_gate "scripts/upstash-mcp-launcher.mjs"
+assert_contains "- pnpm lint:scripts (root build script changed)"
+assert_contains "- node --test scripts/upstash-mcp-config.test.mjs (Upstash MCP transport contract changed)"
+
+run_gate "scripts/render-upstash-mcp-config.mjs"
+assert_contains "- pnpm lint:scripts (root build script changed)"
+assert_contains "- node --test scripts/upstash-mcp-config.test.mjs (Upstash MCP transport contract changed)"
 
 run_gate "scripts/docs-index.mjs"
 assert_contains "- pnpm docs:index:test (documentation catalog helper changed)"

@@ -3,7 +3,7 @@ title: All secrets are managed by IaC; agents never touch them with CLI commands
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-26
+last_verified: 2026-08-10
 scope: terraform/infra
 date: 2026-05
 doc_type: adr
@@ -53,8 +53,9 @@ stop and add the IaC path (or ask), rather than using a CLI workaround.
   `TF_LOG_SDK_PROTO_DATA_DIR`, must be unset or empty because `OFF` names a
   protocol-dump directory there. Plan/apply only from clean current `main`, and
   create a replacement secret version before disabling its predecessor.
-- The Vercel Blob OIDC variables are the one integration-owned exception, documented
-  as such.
+- Documented integration-owned exceptions are the Vercel Blob OIDC variables
+  and the human-owned Upstash provider-key bootstrap in
+  [ADR 0060](0060-upstash-management-key-bootstrap.md).
 
 ## Evidence
 

@@ -3,7 +3,7 @@ title: Forensic Report — Production Upload Procedure
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-23
+last_verified: 2026-08-10
 doc_type: skill
 scope: repo-wide
 review_interval_days: 90
@@ -14,6 +14,21 @@ garden_lane: agent-entry-points
 
 Deep procedure for Step 10 of [`SKILL.md`](../SKILL.md). Upload happens only on
 `--upload` or an explicit user confirmation; the local draft is the default.
+
+## Transport preflight
+
+This upload runs only from an attended local session configured through
+[`docs/notes/upstash-mcp-operator.md`](../../../../docs/notes/upstash-mcp-operator.md).
+Require both reviewed tools:
+
+- `mcp__upstash__redis_database_list_databases`
+- `mcp__upstash__redis_database_run_redis_commands`
+
+If either tool is unavailable, stop. Do not ask the user to paste credentials,
+add credential flags, enable debug logs, or add an Upstash entry to shared
+`.codex/config.toml`. A Codex Cloud investigation must leave the report as a
+local draft and hand upload to an attended local session or the authenticated
+dashboard editor.
 
 ## Write guard
 

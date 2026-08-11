@@ -33,6 +33,12 @@ values, headers, and tokens, out of the repository. Secret provisioning and
 rotation remain in the owning IaC path under
 [ADR 0030](../adr/0030-iac-before-cli-secrets.md).
 
+The optional forensic-upload Upstash server is deliberately personal and local
+only. Its reviewed package pin, credential-name forwarding, Cloud boundary,
+human-owned key lifecycle, and focused validation live in
+[`upstash-mcp-operator.md`](upstash-mcp-operator.md). Do not add its transport or
+an enabled-only toggle to `.codex/config.toml`.
+
 Treat MCP diagnostics as secret-adjacent. Do not use `codex mcp list` in shared
 logs when a personal server may contain credential-bearing arguments; inspect
 only redacted structural fields such as server name, enabled state, and

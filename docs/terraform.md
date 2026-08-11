@@ -43,6 +43,12 @@ pnpm aegis:tf:plan
 pnpm gov-watchdog:tf:plan
 ```
 
+The `platform` stack's Upstash provider email and management key are bootstrap
+inputs: the provider cannot create the credential it needs before planning.
+[ADR 0060](adr/0060-upstash-management-key-bootstrap.md) owns the narrow
+human-only console integration, separate keys, and rotation order. Agents never
+create, replace, or revoke those keys.
+
 Without a stack, `pnpm tf validate` validates every registered stack. It formats
 tracked and non-ignored untracked Terraform, then runs backend-free init and
 validate. Gitignored operator `*.tfvars` stay outside that source check.

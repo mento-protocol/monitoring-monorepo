@@ -98,13 +98,13 @@ variable "terraform_apply_slack_channel" {
 # ── Upstash ───────────────────────────────────────────────────────────────────
 
 variable "upstash_email" {
-  description = "Upstash account email. Found at console.upstash.com → Account → API Keys."
+  description = "Upstash provider account email. Human-owned bootstrap and rotation follow ADR 0060."
   type        = string
   sensitive   = true
 }
 
 variable "upstash_api_key" {
-  description = "Upstash API key. Found at console.upstash.com → Account → API Keys."
+  description = "Sensitive Upstash provider bootstrap key. Human-owned creation and rotation follow ADR 0060."
   type        = string
   sensitive   = true
 }
