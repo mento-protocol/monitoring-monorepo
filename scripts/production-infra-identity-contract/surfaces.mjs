@@ -198,8 +198,8 @@ const SENSITIVE_VARIABLE_BLOCK_SHAPE_SPECIFICATIONS = [
   "terraform/variables.tf:variable.sentry_projection_token|2791657f2b818f285126d753536ef4a784bad811b0dc25e53cd961fa6e1d4ad2",
   "terraform/variables.tf:variable.sentry_triage_token|e4d064cd3cd8ac893f3efb6da539ea9c5160d1252b9cae43af3d896cb525e264",
   "terraform/variables.tf:variable.squid_integrator_id|d09ebf1128e1b0a4c5899bdd8f660bd187f0c973b46546176ca828cded8e2859",
-  "terraform/variables.tf:variable.upstash_api_key|b3da6ecb3c585b0439eb0ca846bf16537b60bffc415a2209bd3035f14500d312",
-  "terraform/variables.tf:variable.upstash_email|b41b9ad0d597437427842dc56055da7b5a739bb8d9ca9b6348c6de5e19fd13a7",
+  "terraform/variables.tf:variable.upstash_api_key|c844f169217421242c134c704fa549c7180ac4a82e4ae3a91cda93c705f0c0de",
+  "terraform/variables.tf:variable.upstash_email|f5602ce3dc7496b3ed2a97126344f0f8bfe063a0b84018b35cc01413c5b1c9d8",
   "terraform/variables.tf:variable.vercel_token|8003fd3cc54069bc187247d46f23fcfabc973c62f69441c6df94cd6fc9395297",
 ];
 
