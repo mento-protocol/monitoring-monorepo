@@ -753,6 +753,35 @@ expectFailure(
   "terraform/deploy-staging.tf:google_storage_bucket_iam_member.cloud_build_source_executor_object_viewer: IAM grant sinks must match its exact audited shape",
 );
 
+const appEngineDefaultStagingAdminGrant = `resource "google_storage_bucket_iam_member" "app_engine_default_staging_admin" {
+  bucket = "staging.\${google_project.monitoring.project_id}.appspot.com"
+  role   = "roles/storage.admin"
+  member = "serviceAccount:\${local.aegis_app_engine_default_service_account}"
+
+  depends_on = [google_app_engine_application.aegis]
+}`;
+assert(
+  cloudBuildExecutorFiles["terraform/deploy-staging.tf"].includes(
+    appEngineDefaultStagingAdminGrant,
+  ),
+  "App Engine default staging admin grant must be present",
+);
+expectFailure(
+  {
+    ...cloudBuildExecutorFiles,
+    "terraform/deploy-staging.tf": cloudBuildExecutorFiles[
+      "terraform/deploy-staging.tf"
+    ].replace(
+      appEngineDefaultStagingAdminGrant,
+      appEngineDefaultStagingAdminGrant.replace(
+        '  role   = "roles/storage.admin"',
+        '  role   = "roles/storage.objectAdmin"',
+      ),
+    ),
+  },
+  "terraform/deploy-staging.tf:google_storage_bucket_iam_member.app_engine_default_staging_admin: IAM grant sinks must match its exact audited shape",
+);
+
 const githubVariableCollisionFiles = liveRepositoryFiles();
 const sentryArchiveVariable = `  variable_name = "SENTRY_ARCHIVE_ENABLED"
   value         = var.sentry_archive_enabled`;
