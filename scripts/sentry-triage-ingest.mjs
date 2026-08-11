@@ -157,6 +157,51 @@ export function classifyNoise(rawTitle) {
   return NOISE_PATTERNS.some((pattern) => pattern.test(title));
 }
 
+// Deterministic settlement candidate (#1614 part 3). `classifyNoise` alone is
+// only a title match, which is far too weak to skip a triage on — it fires on
+// the same "Failed to fetch" that a real regression produces. This narrows it
+// with two independent signals from the queue contract:
+//
+//   - `users === 0` — nobody was affected. A real user-facing bug reports a
+//     user count; the org's operational noise consistently does not.
+//   - stale `last_seen` — the error stopped happening on its own. A live
+//     problem keeps arriving, so silence over the window is the strongest
+//     available evidence that there is nothing left to fix.
+//
+// `environment` is deliberately NOT used, though the issue text suggests a
+// preview-vs-production rule: Sentry's issue-list endpoint returns no
+// environment on the issue object (it is an event-level tag), so the field
+// cannot be carried without a second per-issue request. The two signals here
+// need no new API surface.
+//
+// OFF by default — see SETTLE_NOISE_ENABLED. While off, the ingest logs what
+// this WOULD have settled so the blast radius is measured before it is trusted.
+export const NOISE_QUIET_DAYS = 7;
+
+// The kill switch for the rule above. Flipping this to true lets the ingest
+// settle matching issues WITHOUT an agent verdict, which is a real behaviour
+// change to a pipeline whose whole value is that a human or an agent looked.
+// Do not flip it on reasoning alone — read the shadow-mode notices from a few
+// weeks of runs against the verdicts the agent actually returned, and confirm
+// the rule never fires on something the agent called code-fix or config-fix.
+export const SETTLE_NOISE_ENABLED = false;
+
+export function classifyDeterministicNoise({
+  title,
+  users,
+  lastSeen,
+  now = Date.now(),
+} = {}) {
+  if (!classifyNoise(title)) return false;
+  // Absent or unparsable counts must not read as "nobody affected": a missing
+  // field is unknown, and unknown is not evidence of harmlessness.
+  if (!Number.isFinite(users) || users !== 0) return false;
+  const seen = Date.parse(String(lastSeen ?? ""));
+  if (!Number.isFinite(seen)) return false;
+  const quietMs = NOISE_QUIET_DAYS * 24 * 60 * 60 * 1000;
+  return now - seen >= quietMs;
+}
+
 export function buildQueueLabels(isNoise) {
   const labels = ["sentry-triage", NEEDS_TRIAGE_LABEL];
   if (isNoise) labels.push("sentry:candidate-noise");
@@ -677,6 +722,23 @@ async function createQueueIssue(options, sentryIssue) {
   const isNoise = classifyNoise(sentryIssue.title);
   const labels = buildQueueLabels(isNoise);
   const body = buildIssueBody(toMetadata(sentryIssue));
+  // Shadow mode (#1614 part 3): report what the deterministic rule WOULD have
+  // settled without an agent run, and change nothing. The stub is still created
+  // and still triaged normally. Read these lines against the verdicts the agent
+  // actually returns before anyone considers enabling the rule — the title is
+  // NOT logged (public repo, raw Sentry payload), only the SHORT-ID.
+  if (
+    !SETTLE_NOISE_ENABLED &&
+    classifyDeterministicNoise({
+      title: sentryIssue.title,
+      users: sentryIssue.users,
+      lastSeen: sentryIssue.lastSeen,
+    })
+  ) {
+    process.stdout.write(
+      `::notice::sentry-triage: ${sentryIssue.shortId} matches the deterministic noise rule (0 users, quiet ${NOISE_QUIET_DAYS}d); shadow mode, triaging normally\n`,
+    );
+  }
   await runGh(
     [
       "issue",

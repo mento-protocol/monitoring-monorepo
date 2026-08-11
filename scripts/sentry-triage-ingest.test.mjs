@@ -14,7 +14,10 @@ import {
   buildRequeueShedLabelArgs,
   buildRunRecordBody,
   buildStrandedRecoveryComment,
+  classifyDeterministicNoise,
   classifyNoise,
+  NOISE_QUIET_DAYS,
+  SETTLE_NOISE_ENABLED,
   decideDedupAction,
   defangBackticks,
   defangMentions,
@@ -3087,6 +3090,70 @@ await test("a round that DOES post a verdict still settles the swept stub (#1717
   const result = await triageRoundHelpers(after).settle(prior["42"]);
   assertEqual(result.verdict, "needs-human");
   assertEqual(result.label, "sentry:verdict-needs-human");
+});
+
+// #1614 part 3. The rule settles issues WITHOUT an agent verdict once enabled,
+// so every test here is about what it must REFUSE to classify. A false negative
+// costs one unnecessary triage; a false positive silently drops a real error.
+const QUIET_MS = NOISE_QUIET_DAYS * 24 * 60 * 60 * 1000;
+const NOW = Date.parse("2026-08-11T00:00:00Z");
+const quiet = (ms) => new Date(NOW - ms).toISOString();
+
+await test("the deterministic noise rule ships disabled", () => {
+  assertEqual(SETTLE_NOISE_ENABLED, false);
+});
+
+await test("the noise rule needs all three signals, not any one", () => {
+  const base = {
+    title: "Failed to fetch",
+    users: 0,
+    lastSeen: quiet(QUIET_MS + 1000),
+    now: NOW,
+  };
+  assertEqual(classifyDeterministicNoise(base), true);
+
+  // Each signal alone must be insufficient.
+  assertEqual(
+    classifyDeterministicNoise({ ...base, title: "TypeError: x is not a fn" }),
+    false,
+  );
+  assertEqual(classifyDeterministicNoise({ ...base, users: 1 }), false);
+  assertEqual(
+    classifyDeterministicNoise({ ...base, lastSeen: quiet(QUIET_MS - 1000) }),
+    false,
+  );
+});
+
+await test("unknown counts and timestamps never read as harmless", () => {
+  const base = {
+    title: "Failed to fetch",
+    users: 0,
+    lastSeen: quiet(QUIET_MS + 1000),
+    now: NOW,
+  };
+  // A missing/unparsable field is UNKNOWN. Treating unknown as zero-users or
+  // as long-quiet would settle an issue on absent evidence.
+  for (const users of [undefined, null, NaN, "0", -1]) {
+    assertEqual(classifyDeterministicNoise({ ...base, users }), false);
+  }
+  for (const lastSeen of [undefined, null, "", "not-a-date"]) {
+    assertEqual(classifyDeterministicNoise({ ...base, lastSeen }), false);
+  }
+  assertEqual(classifyDeterministicNoise(), false);
+});
+
+await test("an error still arriving is never noise, however quiet it looks", () => {
+  // last_seen in the FUTURE (clock skew between Sentry and the runner) must not
+  // subtract into a passing window.
+  assertEqual(
+    classifyDeterministicNoise({
+      title: "AbortError",
+      users: 0,
+      lastSeen: new Date(NOW + 60_000).toISOString(),
+      now: NOW,
+    }),
+    false,
+  );
 });
 
 if (failed > 0) {
