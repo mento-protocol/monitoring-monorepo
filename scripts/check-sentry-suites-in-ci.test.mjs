@@ -97,6 +97,10 @@ import { countLines, HARD_CAP } from "./file-size-watchlist.mjs";
 // the line cap. Importing it registers its `test()`s in this run, so the single
 // `node scripts/check-sentry-suites-in-ci.test.mjs` CI step runs them too.
 import "./check-sentry-suites-in-ci-lifecycle.test.mjs";
+// The structural pin on the unconditional `sentry-suites` gate job (ADR 0062),
+// for the same reason: the runtime gate cannot detect its own deletion, so the
+// static checker carries it, and importing it registers those `test()`s here.
+import "./check-sentry-suites-in-ci-gate-job.test.mjs";
 import {
   CI,
   collectCompositeActions,
@@ -972,6 +976,7 @@ test("the checker's own files stay under the file-size hard cap", () => {
     "scripts/check-sentry-suites-in-ci-core-commands.mjs",
     "scripts/check-sentry-suites-in-ci-probes.mjs",
     "scripts/check-sentry-suites-in-ci-lifecycle.test.mjs",
+    "scripts/check-sentry-suites-in-ci-gate-job.test.mjs",
   ];
   const over = files
     .map((file) => ({

@@ -1142,9 +1142,11 @@ node scripts/sentry-triage-requeue.test.mjs
 node scripts/sentry-triage-agent-comment.test.mjs
 node scripts/check-sentry-suites-in-ci.test.mjs
 # The self-run gate's own suite (a scripts/sentry-*.test.mjs), then the gate
-# itself, which runs every suite above and asserts each one actually ran:
-node scripts/sentry-suite-gate.test.mjs
-node scripts/sentry-suite-gate.mjs
+# itself, which runs every suite above and asserts each one actually ran. The
+# `env -u` prefix matches the CI step and is what lets these run under an
+# ambient NODE_OPTIONS — without it the gate refuses to start by design:
+/usr/bin/env -u NODE_OPTIONS -u NODE_PATH node scripts/sentry-suite-gate.test.mjs
+/usr/bin/env -u NODE_OPTIONS -u NODE_PATH node scripts/sentry-suite-gate.mjs
 ```
 
 The `pnpm sentry:*:test` aliases still run these suites for interactive use and

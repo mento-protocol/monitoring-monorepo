@@ -167,9 +167,18 @@ Two upstream actions still execute before the suites. Their SHAs are PR-editable
 and the pin literals are the only thing stopping a fork swap; Dependabot bumps
 now require a paired edit.
 
-The irreducible residual is unchanged in kind and smaller in surface: a single
-diff deleting the gate job and loosening its checker is green, because `ci` is
-the only required Actions context and nothing detects its own absence. Adding
+The gate cannot detect its own deletion, so the static checker carries that.
+`scripts/check-sentry-suites-in-ci-gate-job.test.mjs` pins the job's load-bearing
+wiring — that it exists, carries no `if:`, sits in `ci.needs`, is absent from the
+sentinel's `allowed-skips` and `allowed-failures`, holds no job- or step-level
+`env:`, runs the gate as its whole command with the `env -u` prefix, and lets
+nothing but the two pinned upstream actions execute before it. A mutation spec
+per property, run against a clone of the real workflow, proves each one is
+rejected. Without it every check in the repository stayed green with the whole
+job deleted.
+
+The residual that remains is narrower: `ci` is the only required Actions context,
+so a diff that deletes both the job and its pin is still green. Adding
 `Sentry suites` as a required status check in the branch ruleset is the only
 close, and it is an out-of-repo settings change. If it is made, the job must
 never acquire an `if:` — GitHub treats a skipped required check as satisfied.
@@ -192,11 +201,18 @@ reshaped several suites.
    suite, and the unconditional `sentry-suites` job wired into `ci.needs` and out
    of `allowed-skips`; add a direct step to the `scripts` job invoking the gate's
    own suite so the #1754 coverage checker stays green. The suites briefly run in
-   both jobs, so a mistake reds nothing that was green.
+   both jobs, so a mistake reds nothing that was green. The structural pin on the
+   gate job ships here too, in the existing checker
+   (`check-sentry-suites-in-ci-gate-job.test.mjs`) — deferring it would have left
+   a window where deleting the job was green, which is the exact false-green the
+   job exists to close. The local quality gate routes the gate for every
+   manifest-owned suite, since editing any of them moves that suite's pass count
+   against its committed floor.
 2. **PR C.** Delete the suite steps and the checker step from `scripts`;
-   relocate and narrow the #1754 checker into the gate job after `pnpm-install`
-   (steps 4-5 above); update `docs/notes/sentry-triage-pipeline.md` and
-   `docs/notes/agent-quality-gate-mechanics.md`.
+   relocate the #1754 checker into the gate job after `pnpm-install` (steps 4-5
+   above) and narrow its charter to the gate's shape; update
+   `docs/notes/agent-quality-gate-mechanics.md`. The gate-job pin moves with the
+   checker rather than being written there.
 3. **PR D.** Gate-probe robustness pass, with the manifest as the single source
    for `sentry:*` alias-to-suite resolution.
 4. **Operator, out of repo.** Add `Sentry suites` to the branch ruleset's

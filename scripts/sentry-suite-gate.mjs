@@ -491,7 +491,22 @@ export function main() {
         ? reasons.join("; ")
         : `pass=${result.pass} floor=${entry.floor} lines=${result.caseLines}`,
     });
-    if (reasons.length) failures += 1;
+    if (reasons.length) {
+      failures += 1;
+      // A summary row names WHICH suite broke but never why, which leaves a
+      // contributor re-running the suite by hand to find out. Echo the failing
+      // suite's own diagnostics — the `not ok` / `✖` lines and any stack — so
+      // the gate's output is self-contained.
+      const detail = `${result.stdout}\n${result.stderr}`
+        .split("\n")
+        .filter((line) => /^(not ok |✖|\s+(Error|AssertionError))/.test(line))
+        .slice(0, 20);
+      if (detail.length > 0) {
+        process.stderr.write(
+          `\n--- ${suite} reported:\n${detail.join("\n")}\n`,
+        );
+      }
+    }
   }
 
   const table = [

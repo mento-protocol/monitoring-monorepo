@@ -2269,17 +2269,10 @@ while IFS= read -r path; do
       ;;
     scripts/sentry-suite-manifest.json)
       # The manifest the self-run Sentry-suite gate reconciles against (#1779,
-      # ADR 0062). A .json edit never reaches the scripts/*.mjs focused case, so
-      # route both commands here, with the same reason strings as that arm.
-      #
-      # The real gate is the load-bearing one for a manifest edit: the self-test
-      # builds throwaway fixture manifests in a temp dir and never reads the
-      # committed file, so a bad floor, an unknown reporter, or a dead exemption
-      # here passes it and only fails after push. Only `sentry-suite-gate.mjs`
-      # reconciles THIS manifest against the real suites. It takes ~3s.
+      # ADR 0062). A .json edit reaches no other scripts/ arm, so claim the
+      # surface here; the repo-specific block below routes the two gate commands
+      # for this file along with every manifest-owned suite.
       add_surface "scripts"
-      add_command "node scripts/sentry-suite-gate.test.mjs" "Sentry-suite gate, manifest, or its test changed"
-      add_command "node scripts/sentry-suite-gate.mjs" "Sentry-suite gate, manifest, or its test changed (validate the committed manifest against the real suites)"
       ;;
     scripts/*.mjs|scripts/*.cjs|scripts/*.js|eslint.config.mjs)
       # `.dependency-cruiser.cjs` is handled fully by its dedicated case
@@ -2419,24 +2412,6 @@ while IFS= read -r path; do
           # derived from and the projection suite pins against the other two
           # verdict-label maps.
           add_command "pnpm sentry:project:test" "Sentry re-queue chokepoint changed"
-          ;;
-        scripts/sentry-suite-gate.mjs|scripts/sentry-suite-gate.test.mjs)
-          # The self-run Sentry-suite gate (#1779, ADR 0062) and its own suite.
-          # The manifest it reconciles against is a .json and never reaches this
-          # scripts/*.mjs case, so it is routed by its own outer arm below with
-          # the same reason strings.
-          #
-          # BOTH commands are required, and neither substitutes for the other.
-          # The self-test only proves the gate's LOGIC against throwaway fixture
-          # manifests in a temp dir — it never reads the committed manifest, so a
-          # bad floor, an unknown reporter, or a dead exemption in the real one
-          # sails past it. The real gate is what validates the committed manifest
-          # against the real suites, and it is also the only check that runs
-          # sentry-suite-gate.test.mjs the way CI does (the test file is itself a
-          # scripts/sentry-*.test.mjs the gate enumerates, so editing it moves the
-          # gate's own pass count against its floor). It takes ~3s.
-          add_command "node scripts/sentry-suite-gate.test.mjs" "Sentry-suite gate, manifest, or its test changed"
-          add_command "node scripts/sentry-suite-gate.mjs" "Sentry-suite gate, manifest, or its test changed (validate the committed manifest against the real suites)"
           ;;
         scripts/pr-feedback-state.mjs|scripts/pr-feedback-state-core.mjs|scripts/pr-feedback-state-claude.mjs|scripts/pr-feedback-state.test.mjs)
           add_command "pnpm pr:feedback-state:test" "PR feedback-state helper changed"
@@ -2707,6 +2682,37 @@ while IFS= read -r path; do
         scripts/*/sentry-*.test.mjs | \
         scripts/tf-stacks.test.mjs)
         add_command "node scripts/check-sentry-suites-in-ci.test.mjs" "Sentry CI-coverage check reads this file"
+        ;;
+    esac
+    # The self-run Sentry-suite gate (#1779, ADR 0062) runs EVERY suite the
+    # manifest owns and asserts each one's pass count against its committed
+    # floor, so every manifest-owned suite routes it — not just the gate's own
+    # files. Deleting a test from, say, sentry-triage-requeue.test.mjs leaves
+    # `pnpm sentry:requeue:test` green (30 passed, exit 0) while the gate reds on
+    # `pass 30 < floor 31`; without this arm the local gate misses that and it
+    # only surfaces after push. The same glob pair as above covers suites at any
+    # depth, and the gate's own three files ride along so all of them route the
+    # identical pair of commands.
+    #
+    # Both commands are kept because neither substitutes for the other: the
+    # self-test proves the gate's LOGIC against throwaway fixture manifests in a
+    # temp dir and never reads the committed one, while the real gate is what
+    # validates the committed manifest against the real suites. `add_command`
+    # deduplicates on the exact command string, so a path matching both this arm
+    # and another one still schedules each command once.
+    #
+    # Both run under `/usr/bin/env -u NODE_OPTIONS -u NODE_PATH`, matching the
+    # CI entry point. Without it a developer carrying a perfectly legitimate
+    # ambient `NODE_OPTIONS=--no-warnings` cannot run the gate at all — it
+    # refuses to start before executing a single suite — and half the
+    # self-test's fixtures fail for that same reason. The gate costs ~3s.
+    case "$path" in
+      scripts/sentry-*.test.mjs | \
+        scripts/*/sentry-*.test.mjs | \
+        scripts/sentry-suite-gate.mjs | \
+        scripts/sentry-suite-manifest.json)
+        add_command "/usr/bin/env -u NODE_OPTIONS -u NODE_PATH node scripts/sentry-suite-gate.test.mjs" "Sentry-suite gate, manifest, or a manifest-owned suite changed"
+        add_command "/usr/bin/env -u NODE_OPTIONS -u NODE_PATH node scripts/sentry-suite-gate.mjs" "Sentry-suite gate, manifest, or a manifest-owned suite changed (validate the committed manifest against the real suites)"
         ;;
     esac
     # A directory symlink under scripts/ exposes suites the extension patterns
