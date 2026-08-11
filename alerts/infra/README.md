@@ -248,9 +248,12 @@ cloud-routine experiment ran for weeks producing nothing and nobody noticed.
   publishes hourly, so 3h fires after three consecutive missed publishes and 5h
   after five. What this alarm protects is a monitoring gap, not an outage: a
   dead watcher means the 26h freshness threshold is unguarded, while the
-  pipeline itself may be perfectly healthy. Two extra hours of detection on
-  that is cheap; a 03:00 page on a transient blip that would have cleared
-  itself is not. Note the ~3h drift figure quoted for the ingest cron above is
+  pipeline itself may be perfectly healthy. The policy is `severity = WARNING`
+  into `#alerts-infra` with no paging integration wired, so **neither latency
+  changes what anyone does at 03:00** — and that symmetry, not risk, is the
+  argument. Moving a Slack message two hours earlier does not justify retuning
+  an alarm that has been proven end to end. Note the ~3h drift figure quoted
+  for the ingest cron above is
   **GitHub Actions'** scheduler and does not apply here — this watcher runs on
   GCP Cloud Scheduler, observed firing within seconds of its cron. Decided on
   #1777; reopen that issue rather than shortening anything here

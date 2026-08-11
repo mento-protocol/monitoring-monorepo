@@ -408,14 +408,13 @@ resource "google_monitoring_alert_policy" "sentry_ingest_staleness_policy" {
       # Reads as 3h; the real latency is 5h. The aggregation below means an
       # aligned point persists while its trailing 7200s window still contains
       # the last raw publish, so this timer only starts 2h after the watcher
-      # goes quiet. 5h is deliberate, not a defect: hourly publishing means 3h
-      # fires after three consecutive missed publishes and 5h after five, and
-      # what this guards is a monitoring gap rather than an outage — the
-      # pipeline can be healthy while the watcher is dead. Two extra hours
-      # there is cheaper than a 03:00 page on a blip. Do not shorten this, and
-      # do not drop the aggregations block to reach the advertised 3h — that
-      # trade was decided on #1777. See alerts/infra/README.md § "After apply:
-      # prove the switch fires" step 3.
+      # goes quiet. 5h is deliberate, not a defect: this policy is WARNING into
+      # #alerts-infra with no paging wired, so neither 3h nor 5h changes what
+      # anyone does — and retuning a proven alarm to move a Slack message two
+      # hours earlier is not worth it. Do not shorten this, and do not drop the
+      # aggregations block to reach the advertised 3h — that trade was decided
+      # on #1777. See alerts/infra/README.md § "After apply: prove the switch
+      # fires" step 3.
       duration = "10800s"
 
       aggregations {
