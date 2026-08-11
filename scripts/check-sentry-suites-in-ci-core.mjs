@@ -576,6 +576,42 @@ export function sentinelBlockers(workflow, trustedJobs) {
   return blockers;
 }
 
+/** Escape a literal string for embedding in a `RegExp`. */
+function escapeRegExpLiteral(text) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Could a job `name:` — a template the runner substitutes `${{ }}` expressions
+ * into before publishing the check run — produce `target`? Every expression is
+ * over-approximated as an arbitrary string, so a `false` return PROVES the
+ * published name can never be `target`, whatever the expressions evaluate to; a
+ * name with no expression is proven distinct exactly when it differs literally.
+ * This is what lets the ownership scan fail closed on a dynamic name it cannot
+ * evaluate (`${{ 'ci' }}`) while still clearing a statically distinct one
+ * (`Drift Plan (${{ matrix.id }})`).
+ *
+ * @param {string} template
+ * @param {string} target
+ */
+function nameCouldEqual(template, target) {
+  let pattern = "";
+  let index = 0;
+  while (index < template.length) {
+    const open = template.indexOf("${{", index);
+    if (open < 0) {
+      pattern += escapeRegExpLiteral(template.slice(index));
+      break;
+    }
+    pattern += escapeRegExpLiteral(template.slice(index, open));
+    const close = template.indexOf("}}", open + 3);
+    pattern += "[\\s\\S]*";
+    if (close < 0) break; // unterminated: the rest is inside the expression
+    index = close + 2;
+  }
+  return new RegExp(`^${pattern}$`).test(target);
+}
+
 /**
  * The check-run name a job publishes is its `name:`, defaulting to its key. The
  * required `ci` status context is matched by that name across every workflow,
@@ -584,12 +620,21 @@ export function sentinelBlockers(workflow, trustedJobs) {
  * sentinel and give the name to a trivial always-green job in another workflow
  * and the required context resolves to the decoy.
  *
+ * A job key is a static YAML identifier, but an explicit `name:` may be a
+ * `${{ }}` template the runner evaluates. This scan cannot evaluate it, so it
+ * cannot prove such a name is not `context`. Any dynamic name whose literal
+ * skeleton still admits `context` is rejected outright — a statically distinct
+ * one (`Drift Plan (${{ matrix.id }})`) clears via `nameCouldEqual`. Without
+ * this, a decoy `name: ${{ 'ci' }}` job publishes the required context while
+ * this comparison reads its unevaluated text and never counts it.
+ *
  * @param {Array<{ path: string, workflow: Record<string, any> }>} workflows
  * @param {string} context the required check-run name, e.g. `ci`
  * @param {string} owner the `path#jobKey` that must be its sole producer
  */
 export function contextOwnershipBlockers(workflows, context, owner) {
   const owners = [];
+  const ambiguous = [];
   for (const { path, workflow } of workflows) {
     if (!isPlainObject(workflow?.jobs)) continue;
     for (const [key, job] of Object.entries(workflow.jobs)) {
@@ -597,15 +642,31 @@ export function contextOwnershipBlockers(workflows, context, owner) {
       // A reusable-workflow job (`uses:`) publishes its own called jobs' check
       // runs, not one named after this key, so it cannot claim the context.
       if (typeof job.uses === "string") continue;
-      const name = typeof job.name === "string" ? job.name : key;
-      if (name === context) owners.push(`${path}#${key}`);
+      const declared = typeof job.name === "string" ? job.name : key;
+      if (declared.includes("${{")) {
+        if (nameCouldEqual(declared, context)) {
+          ambiguous.push(`${path}#${key} (name: ${declared})`);
+        }
+        continue;
+      }
+      if (declared === context) owners.push(`${path}#${key}`);
     }
   }
-  if (owners.length === 1 && owners[0] === owner) return [];
-  return [
-    `the required \`${context}\` check-run name is published by ${owners.length} job(s) ` +
-      `(${owners.join(", ") || "none"}); exactly one — ${owner} — may, or the required context can resolve to a decoy`,
-  ];
+  const blockers = [];
+  if (ambiguous.length > 0) {
+    blockers.push(
+      `the required \`${context}\` check-run name may be claimed by ${ambiguous.length} job(s) with a ` +
+        `\`\${{ }}\` name this scan cannot evaluate (${ambiguous.join(", ")}); give each a static name ` +
+        `provably distinct from \`${context}\``,
+    );
+  }
+  if (!(owners.length === 1 && owners[0] === owner)) {
+    blockers.push(
+      `the required \`${context}\` check-run name is published by ${owners.length} job(s) ` +
+        `(${owners.join(", ") || "none"}); exactly one — ${owner} — may, or the required context can resolve to a decoy`,
+    );
+  }
+  return blockers;
 }
 
 /**
@@ -752,20 +813,36 @@ export function triggerBlockers(workflow) {
  * an inner YAML document, and the key it defines is a list of paths.
  *
  * @param {Record<string, any>} workflow
+ * @param {string} guardedJob the job whose `if:` and `needs:` are judged
  * @param {string} guard the gated job's `if:` expression
  * @param {string[]} required
  */
-export function requiredPathsMissing(workflow, guard, required) {
+export function requiredPathsMissing(workflow, guardedJob, guard, required) {
   const gate =
     /^\s*(?:\$\{\{\s*)?needs\.([A-Za-z0-9_-]+)\.outputs\.([A-Za-z0-9_-]+)\s*==\s*'true'\s*(?:\}\})?\s*$/.exec(
       guard,
     );
   if (!gate) {
     return [
-      `the \`scripts\` job guard \`${guard}\` is not a form this test can follow — extend the grammar and re-prove it`,
+      `the \`${guardedJob}\` job guard \`${guard}\` is not a form this test can follow — extend the grammar and re-prove it`,
     ];
   }
   const [, gateJob, outputName] = gate;
+
+  // The guard reads `needs.<gateJob>.outputs.…`, which is only populated when
+  // the guarded job actually lists `<gateJob>` in its own `needs`. Drop that
+  // edge and the context is empty, the guard is never `'true'`, and the job
+  // skips on EVERY PR — while the sentinel lists it under `allowed-skips`, so
+  // nothing reports the silence. Proving the filter still covers every input is
+  // moot unless the filter's output still reaches the job.
+  const guardedNeeds = needsList(ciJob(workflow, guardedJob).needs);
+  if (!guardedNeeds.includes(gateJob)) {
+    return [
+      `the \`${guardedJob}\` job's guard reads \`needs.${gateJob}.outputs.${outputName}\`, but ` +
+        `\`${guardedJob}.needs\` does not list \`${gateJob}\` (${JSON.stringify(guardedNeeds)}); the ` +
+        `\`needs.${gateJob}\` context is then empty, so the guard is never true and the job skips on every PR`,
+    ];
+  }
 
   const producer = ciJob(workflow, gateJob);
   const expression = producer.outputs?.[outputName];

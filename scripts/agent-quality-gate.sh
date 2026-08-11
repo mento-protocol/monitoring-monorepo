@@ -2569,6 +2569,20 @@ while IFS= read -r path; do
         add_command "node scripts/check-sentry-suites-in-ci.test.mjs" "Sentry CI-coverage check reads this file"
         ;;
     esac
+    # A directory symlink under scripts/ exposes suites the extension patterns
+    # above (and the CI `rootScripts` filter) never see: `findSentrySuites`
+    # follows the link and enumerates `scripts/<link>/sentry-*.test.mjs`, but the
+    # changed paths are the extensionless link itself and its target outside
+    # scripts/, matching neither. Route the check for ANY symlink under scripts/
+    # so the suite it exposes is proven wired rather than silently skipped (Codex
+    # 3754355168). `-L` reads the working tree, matching what the check walks.
+    case "$path" in
+      scripts/*)
+        if [[ -L "$repo_root/$path" ]]; then
+          add_command "node scripts/check-sentry-suites-in-ci.test.mjs" "symlink under scripts/ can expose an unwired Sentry suite"
+        fi
+        ;;
+    esac
   fi
   if [[ "$terraform_stack_paths_count" -gt 0 ]]; then
     for terraform_stack_path in "${terraform_stack_paths[@]}"; do

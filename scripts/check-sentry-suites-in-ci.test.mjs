@@ -89,9 +89,9 @@ import {
 } from "./check-sentry-suites-in-ci-core.mjs";
 import { countLines, HARD_CAP } from "./file-size-watchlist.mjs";
 import {
-  allsGreenStep,
   CI,
   collectCompositeActions,
+  compositeFixture,
   CORE,
   dropFilterPath,
   findSentrySuites,
@@ -104,6 +104,7 @@ import {
   RUN_BY_ANOTHER_JOB,
   SCRIPTS_DIR,
   SELF,
+  SENTINEL_MUTATIONS,
   SENTRY_SUITES,
   staticImports,
   TRUSTED_JOBS,
@@ -158,6 +159,34 @@ test("the ci.yml jobs this file trusts still run and still fail on failure", () 
   }
 });
 
+test("the trust check rejects a trusted job that stops running its own steps", () => {
+  // A trusted job feeding the sentinel must run its steps on this runner and red
+  // the job on failure. Converting it to a reusable-workflow call or a container
+  // job moves or changes the runtime the suites see; a matrix can expand to zero
+  // jobs (a skip); an environment gate can hold or reject the run. Each must
+  // block — these are the constructs a later round would otherwise slip in.
+  const mutations = [
+    [
+      "a reusable-workflow call",
+      (j) => (j.uses = "org/wf/.github/workflows/x.yml@main"),
+    ],
+    ["a container", (j) => (j.container = "node:20")],
+    ["a matrix strategy", (j) => (j.strategy = { matrix: { shard: [1, 2] } })],
+    ["an environment gate", (j) => (j.environment = "production")],
+  ];
+  for (const [label, mutate] of mutations) {
+    for (const name of TRUSTED_JOBS.keys()) {
+      const workflow = structuredClone(CI);
+      mutate(workflow.jobs[name]);
+      assert.notDeepEqual(
+        jobBlockers(workflow, name, TRUSTED_JOBS),
+        [],
+        `jobBlockers accepts a \`${name}\` job with ${label}`,
+      );
+    }
+  }
+});
+
 test("the `ci` sentinel still requires those jobs", () => {
   assert.deepEqual(
     sentinelBlockers(CI, TRUSTED_JOBS),
@@ -168,86 +197,10 @@ test("the `ci` sentinel still requires those jobs", () => {
 
 test("the sentinel check rejects a workflow whose `ci` job stops gating", () => {
   // Mutation probes: the assertion above passes on the real workflow, which
-  // proves nothing about what it REJECTS. Each clone breaks the sentinel one
-  // way and must be caught, so a later edit that weakens the check fails here.
-  const mutations = [
-    ["`if: false`", (w) => (w.jobs.ci.if = "false")],
-    ["a dropped `if: always()`", (w) => delete w.jobs.ci.if],
-    [
-      "a `needs` without `scripts`",
-      (w) => (w.jobs.ci.needs = w.jobs.ci.needs.filter((n) => n !== "scripts")),
-    ],
-    ["`continue-on-error`", (w) => (w.jobs.ci["continue-on-error"] = true)],
-    [
-      "`scripts` under `allowed-failures`",
-      (w) => {
-        allsGreenStep(w).with["allowed-failures"] = "scripts";
-      },
-    ],
-    [
-      "a JSON-encoded `allowed-failures` the comma split cannot read",
-      // The alls-green action `json.loads()` this first, so it is a real
-      // one-element allowlist to the runner; a comma-only reader sees one
-      // opaque token and tolerates nothing. This is the merge-gate hole.
-      (w) => {
-        allsGreenStep(w).with["allowed-failures"] = '["scripts"]';
-      },
-    ],
-    [
-      "`production-infra-contract` under a JSON `allowed-failures`",
-      (w) => {
-        allsGreenStep(w).with["allowed-failures"] =
-          '["production-infra-contract"]';
-      },
-    ],
-    [
-      "`changes` tolerated as a failure",
-      // `changes` decides whether every path-gated job runs; tolerating its
-      // failure turns a red detector into silent skips of every Sentry suite.
-      (w) => {
-        allsGreenStep(w).with["allowed-failures"] = "changes";
-      },
-    ],
-    [
-      "a case-variant `JOBS` overriding `jobs`",
-      // The runner matches `with:` keys case-insensitively and the last wins,
-      // so `jobs` still literally reads `${{ toJSON(needs) }}` while `JOBS`
-      // feeds the action a hand-picked all-green matrix.
-      (w) => {
-        allsGreenStep(w).with.JOBS = '{"changes":{"result":"success"}}';
-      },
-    ],
-    [
-      "a renamed sentinel job",
-      // The required context is matched by check-run name; renaming it leaves
-      // `jobs.ci` keyed the same while it publishes a different context.
-      (w) => (w.jobs.ci.name = "ci-aggregate"),
-    ],
-    [
-      "path-gated `scripts` dropped from `allowed-skips`",
-      // `scripts` is path-gated, so it reports "skipped" on any PR outside its
-      // filter. alls-green turns a skip of a job NOT in `allowed-skips` into a
-      // gate failure, so dropping it here reds the required `ci` for every such
-      // PR — while the edit that drops it activates the filter, so the change's
-      // own PR runs the job and never sees the red.
-      (w) => {
-        const step = allsGreenStep(w);
-        step.with["allowed-skips"] = step.with["allowed-skips"]
-          .split(",")
-          .filter((job) => job.trim() !== "scripts")
-          .join(",");
-      },
-    ],
-    [
-      "a JSON-encoded `allowed-skips` without `scripts`",
-      // The action `json.loads()` this first, so a comma-only reader would see
-      // one opaque token and wrongly believe `scripts` is still listed.
-      (w) => {
-        allsGreenStep(w).with["allowed-skips"] = '["ui","indexer"]';
-      },
-    ],
-  ];
-  for (const [label, mutate] of mutations) {
+  // proves nothing about what it REJECTS. Each clone in SENTINEL_MUTATIONS (in
+  // the probes module, to keep this file under the line cap) breaks the sentinel
+  // one way and must be caught, so a later edit that weakens the check fails.
+  for (const [label, mutate] of SENTINEL_MUTATIONS) {
     const workflow = structuredClone(CI);
     mutate(workflow);
     assert.notDeepEqual(
@@ -477,6 +430,7 @@ test("the `scripts` job stays reachable from the paths its suites guard", () => 
   assert.deepEqual(
     requiredPathsMissing(
       CI,
+      "scripts",
       TRUSTED_JOBS.get("scripts"),
       REQUIRED_ROOT_SCRIPT_PATHS,
     ),
@@ -484,6 +438,27 @@ test("the `scripts` job stays reachable from the paths its suites guard", () => 
     "the paths filter behind the `scripts` job no longer covers every input its " +
       "suites read, so a PR touching only those files skips the job and every " +
       "Sentry suite in it",
+  );
+});
+
+test("the reachability check rejects dropping the guard producer from `needs`", () => {
+  // Removing `jobs.scripts.needs: changes` while the `if:
+  // needs.changes.outputs.rootScripts == 'true'` guard stays leaves the
+  // `needs.changes` context empty, so the guard is never true and the job skips
+  // on every PR — and the sentinel lists `scripts` under `allowed-skips`, so
+  // nothing reports it. jobBlockers and sentinelBlockers stay green; only the
+  // needs-edge proof catches it.
+  const workflow = structuredClone(CI);
+  delete workflow.jobs.scripts.needs;
+  assert.notDeepEqual(
+    requiredPathsMissing(
+      workflow,
+      "scripts",
+      TRUSTED_JOBS.get("scripts"),
+      REQUIRED_ROOT_SCRIPT_PATHS,
+    ),
+    [],
+    "the reachability check accepts a `scripts` job that no longer needs `changes`",
   );
 });
 
@@ -521,6 +496,7 @@ test("the reachability check rejects a filter that drops a required path", () =>
     assert.deepEqual(
       requiredPathsMissing(
         workflow,
+        "scripts",
         TRUSTED_JOBS.get("scripts"),
         REQUIRED_ROOT_SCRIPT_PATHS,
       ),
@@ -588,6 +564,7 @@ test("the reachability check rejects a filter that drops a required path", () =>
     assert.notDeepEqual(
       requiredPathsMissing(
         workflow,
+        "scripts",
         TRUSTED_JOBS.get("scripts"),
         REQUIRED_ROOT_SCRIPT_PATHS,
       ),
@@ -691,13 +668,18 @@ test("a trusted job may not mutate the runner environment for later steps", () =
       [],
       `the \`${name}\` job already writes the runner environment`,
     );
+    const composites = collectCompositeActions(job);
     assert.deepEqual(
-      envMutationBlockers(
-        collectCompositeActions(job).steps,
-        `\`${name}\` composite step`,
-      ),
+      envMutationBlockers(composites.steps, `\`${name}\` composite step`),
       [],
       `a local composite action used by \`${name}\` writes the runner environment`,
+    );
+    // Every local action the trusted job pulls in must be an analyzable
+    // composite; a JS/Docker action would carry an unreadable env-write vector.
+    assert.deepEqual(
+      composites.blockers,
+      [],
+      `\`${name}\` pulls in a local action this scan cannot prove safe`,
     );
   }
 
@@ -731,49 +713,34 @@ test("a trusted job may not mutate the runner environment for later steps", () =
   }
 });
 
-test("the composite scan recurses through nested local actions", () => {
+test("the composite scan recurses nested actions and rejects non-composite ones", () => {
   // A one-level scan is bypassed by a composite that itself `uses:` another
-  // local composite: the env write hides one action deeper. Build a synthetic
-  // tree — job → level1 → level2, the write two levels down — and prove
-  // `collectCompositeActions` walks to it. On disk, no repo action touched, so
-  // the recursion is exercised without giving the real workflow a nested
-  // action to protect.
-  const base = mkdtempSync(join(tmpdir(), "sentry-nested-action-"));
+  // local composite (the env write hides one action deeper), and a metadata-only
+  // scan is bypassed by a JavaScript/Docker action whose entrypoint code writes
+  // `$GITHUB_ENV` with no `run:` for the scan to read. The fixture — job →
+  // level1 → level2 — exercises both on disk without giving a real repo action a
+  // nested child to protect.
+  const { base, job, write, cleanup } = compositeFixture();
   try {
-    const write = (rel, doc) => {
-      const full = join(base, rel);
-      mkdirSync(join(full, ".."), { recursive: true });
-      writeFileSync(full, doc);
-    };
-    write(
-      ".github/actions/level1/action.yml",
-      dump({
-        name: "level1",
-        runs: {
-          using: "composite",
-          steps: [{ uses: "./.github/actions/level2" }],
-        },
-      }),
-    );
-    const job = { steps: [{ uses: "./.github/actions/level1" }] };
-
-    // Control: with a clean leaf, the two-level walk finds no env write and
-    // reports both action.yml files it opened.
-    write(
-      ".github/actions/level2/action.yml",
-      dump({
-        name: "level2",
-        runs: {
-          using: "composite",
-          steps: [{ run: "echo hello", shell: "bash" }],
-        },
-      }),
-    );
+    // Control: a clean composite leaf yields no env write, no blocker, and both
+    // action.yml files reported.
+    write(".github/actions/level2/action.yml", {
+      name: "level2",
+      runs: {
+        using: "composite",
+        steps: [{ run: "echo hello", shell: "bash" }],
+      },
+    });
     const clean = collectCompositeActions(job, base);
     assert.deepEqual(
       envMutationBlockers(clean.steps, "nested composite"),
       [],
       "the recursion invented an env write that the clean leaf never made",
+    );
+    assert.deepEqual(
+      clean.blockers,
+      [],
+      "a clean composite chain produced a blocker",
     );
     assert.deepEqual(
       clean.files.sort(),
@@ -784,22 +751,19 @@ test("the composite scan recurses through nested local actions", () => {
       "the recursion did not report every action.yml it opened",
     );
 
-    // The mutation: a `$GITHUB_ENV` write two levels deep must be caught.
-    write(
-      ".github/actions/level2/action.yml",
-      dump({
-        name: "level2",
-        runs: {
-          using: "composite",
-          steps: [
-            {
-              run: 'echo "NODE_OPTIONS=--import=./evil.mjs" >> "$GITHUB_ENV"',
-              shell: "bash",
-            },
-          ],
-        },
-      }),
-    );
+    // A `$GITHUB_ENV` write two composites deep must be caught.
+    write(".github/actions/level2/action.yml", {
+      name: "level2",
+      runs: {
+        using: "composite",
+        steps: [
+          {
+            run: 'echo "NODE_OPTIONS=--import=./evil.mjs" >> "$GITHUB_ENV"',
+            shell: "bash",
+          },
+        ],
+      },
+    });
     assert.notDeepEqual(
       envMutationBlockers(
         collectCompositeActions(job, base).steps,
@@ -808,8 +772,23 @@ test("the composite scan recurses through nested local actions", () => {
       [],
       "a $GITHUB_ENV write two composites deep escaped the recursive scan",
     );
+
+    // A non-composite leaf (JS or Docker) cannot be statically analyzed for env
+    // writes, so the scan must reject it outright rather than silently accept an
+    // absent `runs.steps`.
+    for (const using of ["node20", "docker"]) {
+      write(".github/actions/level2/action.yml", {
+        name: "level2",
+        runs: { using, main: "index.js" },
+      });
+      assert.notDeepEqual(
+        collectCompositeActions(job, base).blockers,
+        [],
+        `the composite scan accepts a \`using: ${using}\` local action`,
+      );
+    }
   } finally {
-    rmSync(base, { recursive: true, force: true });
+    cleanup();
   }
 });
 
@@ -834,6 +813,28 @@ test("the required `ci` check-run name is owned by exactly the sentinel", () => 
     contextOwnershipBlockers([...WORKFLOWS, decoy], "ci", owner),
     [],
     "the ownership check accepts a second job publishing the `ci` check-run name",
+  );
+
+  // A decoy whose `name:` is a `${{ }}` expression that could evaluate to `ci`
+  // must fail too: this scan cannot evaluate it, so it cannot prove the job is
+  // not a second owner of the required context.
+  const dynamicDecoy = {
+    path: ".github/workflows/dynamic.yml",
+    workflow: {
+      on: { pull_request: { branches: ["main"] } },
+      jobs: {
+        sentinel: {
+          name: "${{ 'ci' }}",
+          "runs-on": "ubuntu-latest",
+          steps: [],
+        },
+      },
+    },
+  };
+  assert.notDeepEqual(
+    contextOwnershipBlockers([...WORKFLOWS, dynamicDecoy], "ci", owner),
+    [],
+    "the ownership check accepts a job whose `${{ }}` name could evaluate to `ci`",
   );
 
   // Renaming the real sentinel's key so no job owns the name must also fail.

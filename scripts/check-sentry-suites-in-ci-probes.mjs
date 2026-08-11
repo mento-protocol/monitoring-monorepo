@@ -4,15 +4,18 @@
  *
  * Split out of the test file to keep both under the repo's 1,000-line cap. The
  * pure predicates live in check-sentry-suites-in-ci-core.mjs; the `test()`
- * blocks and the `structuredClone` mutation probes stay in the test file next
- * door. Nothing here is a test — this module only gathers the structures those
- * tests judge, so a mutation probe can run a real predicate against a broken
- * clone of the real workflow rather than a drifting fixture.
+ * blocks stay in the test file next door, which runs them. Nothing here is a
+ * test — this module gathers the structures those tests judge, plus the
+ * fixtures and mutation specs (`compositeFixture`, `SENTINEL_MUTATIONS`) heavy
+ * enough that keeping them here holds the entry point under the cap. A mutation
+ * spec only rewrites a `structuredClone` of the real workflow, so the test can
+ * run a real predicate against a broken clone rather than a drifting fixture.
  */
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import {
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
@@ -91,19 +94,29 @@ export const WORKFLOWS = readdirSync(WORKFLOWS_DIR, { withFileTypes: true })
  * of looping. Third-party `uses:` (SHA-pinned, covered by
  * check-github-action-pins.mjs) are out of scope.
  *
- * Returns the flattened composite steps and the repo-relative `action.yml`
- * files opened, so a caller can both scan the steps for env writes and prove
- * every file it read is routed back into CI and the local gate.
+ * Returns the flattened composite steps, the repo-relative `action.yml` files
+ * opened, and blockers for any local action this scan cannot soundly analyze,
+ * so a caller can scan the steps for env writes, prove every file it read is
+ * routed back into CI and the local gate, and fail closed on the rest.
+ *
+ * Only a `composite` action is analyzable: its `runs.steps` are plain `run:`
+ * lines the env scan can read. A JavaScript (`using: node*`) or Docker
+ * (`using: docker`) action has no `runs.steps` — its entrypoint code can
+ * `core.exportVariable` / write `$GITHUB_ENV` for every later suite, invisibly
+ * to this static scan — so a non-composite local action in a trusted job's
+ * chain is a blocker, not a silent accept. Third-party `uses:` (SHA-pinned,
+ * covered by check-github-action-pins.mjs) are out of scope and not descended.
  *
  * @param {Record<string, any>} job
  * @param {string} [root] the repo root the `./` paths resolve against;
  *   overridable so a synthetic tree can exercise the recursion without adding a
  *   real nested action to the repo.
- * @returns {{ steps: Record<string, any>[], files: string[] }}
+ * @returns {{ steps: Record<string, any>[], files: string[], blockers: string[] }}
  */
 export function collectCompositeActions(job, root = ROOT) {
   const steps = [];
   const files = [];
+  const blockers = [];
   const visited = new Set();
 
   const readAction = (usesPath) => {
@@ -135,6 +148,15 @@ export function collectCompositeActions(job, root = ROOT) {
     visited.add(found.resolved);
     files.push(found.relative);
     const action = load(found.source, { schema: CORE_SCHEMA });
+    const using = action?.runs?.using;
+    if (using !== "composite") {
+      blockers.push(
+        `local action \`${usesPath}\` runs \`using: ${using ?? "(unset)"}\`, not \`composite\` — its ` +
+          "JavaScript/Docker entrypoint can write `$GITHUB_ENV`/`$GITHUB_PATH` for every later step, " +
+          "which this static scan cannot read; only a composite of analyzable steps is accepted",
+      );
+      return; // a non-composite action has no `runs.steps` to walk
+    }
     for (const step of action?.runs?.steps ?? []) {
       if (!isPlainObject(step)) continue;
       steps.push(step);
@@ -149,7 +171,33 @@ export function collectCompositeActions(job, root = ROOT) {
     if (!step.uses.startsWith("./")) continue;
     descend(step.uses);
   }
-  return { steps, files };
+  return { steps, files, blockers };
+}
+
+/**
+ * A two-level composite fixture (job → level1 → level2) under a fresh temp dir,
+ * returned as `{ base, job, write, cleanup }`. `write(rel, doc)` writes an
+ * `action.yml` (object dumped to YAML, or a raw string), so a test can set
+ * level2's `runs` to exercise the recursive env scan and the non-composite
+ * rejection without giving a real repo action a nested child to protect.
+ */
+export function compositeFixture() {
+  const base = mkdtempSync(join(tmpdir(), "sentry-action-fixture-"));
+  const write = (rel, doc) => {
+    const full = join(base, rel);
+    mkdirSync(join(full, ".."), { recursive: true });
+    writeFileSync(full, typeof doc === "string" ? doc : dump(doc));
+  };
+  write(".github/actions/level1/action.yml", {
+    name: "level1",
+    runs: { using: "composite", steps: [{ uses: "./.github/actions/level2" }] },
+  });
+  return {
+    base,
+    job: { steps: [{ uses: "./.github/actions/level1" }] },
+    write,
+    cleanup: () => rmSync(base, { recursive: true, force: true }),
+  };
 }
 
 /** The alls-green step of a (cloned) workflow's `ci` sentinel. */
@@ -158,6 +206,103 @@ export function allsGreenStep(workflow) {
     String(step.uses ?? "").startsWith("re-actors/alls-green@"),
   );
 }
+
+/**
+ * Ways to break the `ci` sentinel so it no longer turns a red trusted job into
+ * a red required check. Each `[label, mutate]` runs against a `structuredClone`
+ * of the real workflow in the test next door: `sentinelBlockers` must reject
+ * every one, or a later edit that weakens the check goes uncaught. The specs
+ * are data (they only rewrite a cloned workflow through `allsGreenStep`); the
+ * test file owns the `test()`/`assert` that runs them. Kept here so the entry
+ * point stays under the 1,000-line cap.
+ */
+export const SENTINEL_MUTATIONS = [
+  ["`if: false`", (w) => (w.jobs.ci.if = "false")],
+  ["a dropped `if: always()`", (w) => delete w.jobs.ci.if],
+  [
+    "a `needs` without `scripts`",
+    (w) => (w.jobs.ci.needs = w.jobs.ci.needs.filter((n) => n !== "scripts")),
+  ],
+  ["`continue-on-error`", (w) => (w.jobs.ci["continue-on-error"] = true)],
+  [
+    "`scripts` under `allowed-failures`",
+    (w) => {
+      allsGreenStep(w).with["allowed-failures"] = "scripts";
+    },
+  ],
+  [
+    "a JSON-encoded `allowed-failures` the comma split cannot read",
+    // The alls-green action `json.loads()` this first, so it is a real
+    // one-element allowlist to the runner; a comma-only reader sees one opaque
+    // token and tolerates nothing. This is the merge-gate hole.
+    (w) => {
+      allsGreenStep(w).with["allowed-failures"] = '["scripts"]';
+    },
+  ],
+  [
+    "`production-infra-contract` under a JSON `allowed-failures`",
+    (w) => {
+      allsGreenStep(w).with["allowed-failures"] =
+        '["production-infra-contract"]';
+    },
+  ],
+  [
+    "`changes` tolerated as a failure",
+    // `changes` decides whether every path-gated job runs; tolerating its
+    // failure turns a red detector into silent skips of every Sentry suite.
+    (w) => {
+      allsGreenStep(w).with["allowed-failures"] = "changes";
+    },
+  ],
+  [
+    "a case-variant `JOBS` overriding `jobs`",
+    // The runner matches `with:` keys case-insensitively and the last wins, so
+    // `jobs` still literally reads `${{ toJSON(needs) }}` while `JOBS` feeds the
+    // action a hand-picked all-green matrix.
+    (w) => {
+      allsGreenStep(w).with.JOBS = '{"changes":{"result":"success"}}';
+    },
+  ],
+  [
+    "a renamed sentinel job",
+    // The required context is matched by check-run name; renaming it leaves
+    // `jobs.ci` keyed the same while it publishes a different context.
+    (w) => (w.jobs.ci.name = "ci-aggregate"),
+  ],
+  [
+    "path-gated `scripts` dropped from `allowed-skips`",
+    // `scripts` is path-gated, so it reports "skipped" on any PR outside its
+    // filter. alls-green turns a skip of a job NOT in `allowed-skips` into a gate
+    // failure, so dropping it here reds the required `ci` for every such PR —
+    // while the edit that drops it activates the filter, so the change's own PR
+    // runs the job and never sees the red.
+    (w) => {
+      const step = allsGreenStep(w);
+      step.with["allowed-skips"] = step.with["allowed-skips"]
+        .split(",")
+        .filter((job) => job.trim() !== "scripts")
+        .join(",");
+    },
+  ],
+  [
+    "a JSON-encoded `allowed-skips` without `scripts`",
+    // The action `json.loads()` this first, so a comma-only reader would see one
+    // opaque token and wrongly believe `scripts` is still listed.
+    (w) => {
+      allsGreenStep(w).with["allowed-skips"] = '["ui","indexer"]';
+    },
+  ],
+  [
+    "a sentinel converted to a reusable-workflow call",
+    // `jobs.ci.uses:` moves the aggregation into a file this scan cannot read,
+    // so its alls-green step is gone — the one step that reds `ci` on a red job.
+    // No inline step means no proof it still gates.
+    (w) => {
+      w.jobs.ci.uses = "org/aggregate/.github/workflows/ci.yml@main";
+      delete w.jobs.ci.steps;
+    },
+  ],
+];
 
 /**
  * Every `sentry-*.test.mjs` under scripts/, at any depth, as a repo-relative
@@ -258,6 +403,13 @@ export const TRUSTED_JOBS = new Map([
  * reason: the env scan reads an `action.yml`, so an edit to one must re-run it.
  */
 export const REQUIRED_ROOT_SCRIPT_PATHS = [
+  // `scripts/**` covers every path under scripts/ at any depth, INCLUDING the
+  // extensionless directory symlinks the `*.mjs`/`*.sh` globs miss. A suite
+  // reachable only through such a symlink is one `findSentrySuites` enumerates
+  // (it follows the link), so its addition must run the `scripts` job — and
+  // hence this checker — or the whole job skips and the unwired suite ships
+  // (Codex 3754355168). The extension globs stay for documentation of intent.
+  "scripts/**",
   "scripts/**/*.mjs",
   "scripts/**/*.sh",
   ".github/workflows/**",

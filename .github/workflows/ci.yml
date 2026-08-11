@@ -240,6 +240,14 @@ jobs:
             # merge unnoticed — see PR-423 codex finding (Keep root scripts
             # under ESLint).
             rootScripts:
+              # `scripts/**` matches every path under scripts/ at any depth,
+              # including the extensionless directory symlinks the extension
+              # globs below miss. A Sentry suite reachable only through such a
+              # symlink is one check-sentry-suites-in-ci enumerates (it follows
+              # the link), so its addition must run this job or the suite ships
+              # unwired behind a skipped job (Codex 3754355168). The extension
+              # globs stay to document the common cases this filter targets.
+              - scripts/**
               - scripts/**/*.mjs
               - scripts/**/*.cjs
               - scripts/**/*.js

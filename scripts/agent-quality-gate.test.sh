@@ -26,6 +26,10 @@ claude_settings_backup="$(mktemp)"
 codex_hooks_fixture="$(mktemp)"
 claude_settings_fixture="$(mktemp)"
 untracked_skill_artifact=".claude/skills/.agent-quality-gate-test.tmp"
+# A real symlink under scripts/ is needed to exercise the gate's `-L` symlink
+# routing (Codex 3754355168); the extensionless path is registered for cleanup
+# so a failed assertion cannot leave it in the working tree.
+sentry_symlink_probe="scripts/.sentry-symlink-probe.test.tmp"
 cp .codex/hooks.json "$codex_hooks_backup"
 cp .claude/settings.json "$claude_settings_backup"
 cp "$codex_hooks_backup" "$codex_hooks_fixture"
@@ -36,7 +40,7 @@ restore_hook_configs() {
   cp "$claude_settings_backup" "$claude_settings_fixture"
 }
 
-trap 'restore_hook_configs; rm -rf "$gate_cache_dir"; rm -f "$paths_file" "$output_file" "$turbo_facts_file" "$output_file.pnpm-args" "$untracked_skill_artifact" "$codex_hooks_backup" "$claude_settings_backup" "$codex_hooks_fixture" "$claude_settings_fixture"' EXIT
+trap 'restore_hook_configs; rm -rf "$gate_cache_dir"; rm -f "$paths_file" "$output_file" "$turbo_facts_file" "$output_file.pnpm-args" "$untracked_skill_artifact" "$sentry_symlink_probe" "$codex_hooks_backup" "$claude_settings_backup" "$codex_hooks_fixture" "$claude_settings_fixture"' EXIT
 
 fail() {
   # Stdout AND stderr: some CI log captures drop the suite's stderr, which
@@ -3746,6 +3750,17 @@ assert_contains "$sentry_ci_check"
 # A suite that lands without a dedicated arm of its own still routes.
 run_gate "scripts/sentry-not-yet-written.test.mjs"
 assert_contains "$sentry_ci_check"
+
+# A directory symlink under scripts/ routes the check even though its path is
+# extensionless and matches none of the suite globs: findSentrySuites follows
+# the link, so the check must run to enumerate any suite behind it (Codex
+# 3754355168). Needs a real symlink in the tree because the gate reads `-L`.
+symlink_target="$(mktemp -d)"
+ln -sfn "$symlink_target" "$sentry_symlink_probe"
+run_gate "$sentry_symlink_probe"
+assert_contains "- node scripts/check-sentry-suites-in-ci.test.mjs (symlink under scripts/ can expose an unwired Sentry suite)"
+rm -f "$sentry_symlink_probe"
+rm -rf "$symlink_target"
 
 # findSentrySuites enumerates recursively, so a nested suite is one the check
 # will demand a CI step for. Routing has to reach the same depth or the drift
