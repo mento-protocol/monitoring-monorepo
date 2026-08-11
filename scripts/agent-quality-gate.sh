@@ -2343,8 +2343,10 @@ while IFS= read -r path; do
           add_command "pnpm sentry:requeue:test" "Sentry re-queue chokepoint changed"
           add_command "pnpm sentry:ingest:test" "Sentry re-queue chokepoint changed"
           add_command "pnpm sentry:archive:test" "Sentry re-queue chokepoint changed"
-          # The brief writes the stub BODY the archive baseline lives in, and
-          # asserts every contract reader still sees it afterwards.
+          # The brief leg maintains a dedicated COMMENT on the stub (the archive
+          # leg is the SOLE body writer, #1766). Its suite is routed here because
+          # a queue-contract change can shift the re-queue lifecycle the brief
+          # and archive legs both observe.
           add_command "pnpm sentry:brief:test" "Sentry re-queue chokepoint changed"
           # The contract owns VERDICT_LABELS, which the verdict step's shed is
           # derived from and the projection suite pins against the other two

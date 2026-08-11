@@ -333,8 +333,17 @@ export async function runBrief({
     }
     let written = false;
     for (const comment of existing) {
-      await deleteBriefComment(runGh, repo, briefCommentId(comment));
-      written = true;
+      try {
+        await deleteBriefComment(runGh, repo, briefCommentId(comment));
+        written = true;
+      } catch (err) {
+        // A 404 means the comment is ALREADY gone — the clear's whole goal — so
+        // a concurrent delete is success, not a failure. Any other error is a
+        // real clear failure and must surface: the workflow step fails on it to
+        // BLOCK the close, so the stub is never closed still showing the stale
+        // brief (#1769 round 10). The clear is NOT best-effort like the render.
+        if (!isNotFoundError(err)) throw err;
+      }
     }
     log(
       written
@@ -386,17 +395,27 @@ export async function runBrief({
       await updateBriefComment(runGh, repo, briefCommentId(primary), block);
       written = true;
     } catch (err) {
-      // The archive leg deleted the brief between our read and this update
-      // (round 5 cleanup) — it already did the right thing. A 404 here is a
-      // no-op SUCCESS, not a failure: throwing would trip the workflow
-      // compensation, which would add sentry:needs-triage to a stub the archive
-      // just settled (#1769 round 7). Do not re-create it either — re-creating
-      // is the very race the post-write settlement below exists to undo.
       if (!isNotFoundError(err)) throw err;
+      // The target comment is gone between our read and this PATCH. Only accept
+      // that as SETTLED when the stub is actually terminal — the archive leg
+      // deleting the brief on settlement (#1769 round 7). Re-read the terminal
+      // signals to tell that apart from a maintainer/other actor deleting the
+      // brief on an OPEN, unarchived stub: assuming settlement there would leave
+      // a live needs-human stub with no decision-ready comment and no retry, so
+      // CREATE it fresh instead (#1769 round 10). The post-write settlement
+      // below still runs, so a recreate that itself goes terminal self-heals.
+      const state = await readStubTerminalState(runGh, repo, issueNumber);
+      if (state.closed || state.archived) {
+        log(
+          `::notice::Issue #${issueNumber}: the brief comment was already deleted and the stub is terminal (state=${state.state}, archived=${state.archived}); treating as a no-op.`,
+        );
+        return { written: false, verdict, settledTerminal: true };
+      }
       log(
-        `::notice::Issue #${issueNumber}: the brief comment was already deleted before this update (archive settlement); treating as a no-op.`,
+        `::notice::Issue #${issueNumber}: the brief comment was deleted on an open stub; recreating it.`,
       );
-      return { written: false, verdict, settledTerminal: true };
+      await createBriefComment(runGh, repo, issueNumber, block);
+      written = true;
     }
   }
   // Never leave two "Decision needed" comments on one stub.

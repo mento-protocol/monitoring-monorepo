@@ -339,6 +339,22 @@ await test("inline list items honor escaped/doubled quotes (#1769 round 9)", () 
   assertEqual(doubled.how_to_check[1], "then here");
 });
 
+await test("inline list items keep brackets inside quotes (#1769 round 10)", () => {
+  // A `]` inside a quoted item must NOT be taken as the end of the sequence
+  // (the hand-rolled bracket scan did that); the real YAML parser handles it.
+  const parsed = parseVerdictYaml(
+    'how_to_check: ["inspect array[index] handling", "read logs"]',
+  );
+  assertEqual(parsed.how_to_check.length, 2);
+  assertEqual(parsed.how_to_check[0], "inspect array[index] handling");
+  assertEqual(parsed.how_to_check[1], "read logs");
+
+  // A malformed flow sequence (unterminated) is NOT silently truncated at a
+  // bracket — it degrades to a single bounded item rather than dropping content.
+  const malformed = parseVerdictYaml('decision_branches: ["Yes -> a", "No');
+  assertEqual(malformed.decision_branches.length, 1);
+});
+
 await test("the new fields are empty for a verdict that omits them", () => {
   const parsed = parseVerdictComment(
     verdictComment("verdict: code-fix\nconfidence: high"),
@@ -1060,11 +1076,20 @@ await test("a stub that goes terminal between the guard and the write self-heals
   assertEqual(wroteBody(gh), false);
 });
 
-await test("an update whose target was deleted concludes success, no compensation (round 7)", async () => {
-  // Primary brief exists with STALE content (so the update path is taken), but
-  // the archive deletes it just before the PATCH lands -> 404. That is a no-op
-  // success (archive already did the right thing), NOT a throw that would trip
-  // the workflow compensation, and the brief is NOT re-created.
+const deleteBriefOnPatch = (args, state) => {
+  if (args[0] === "api" && args.includes("PATCH")) {
+    state.comments = state.comments.filter(
+      (c) => !String(c.body).startsWith(BRIEF_COMMENT_MARKER),
+    );
+  }
+};
+
+await test("an update-target 404 on an OPEN stub RECREATES the brief (#1769 round 10)", async () => {
+  // The brief exists with STALE content (so the update path is taken), and a
+  // maintainer/other actor deletes it just before the PATCH -> 404. On an OPEN,
+  // unarchived stub this is NOT archive settlement: assuming settled would strand
+  // a live needs-human stub with no decision-ready comment, so the leg re-reads
+  // the terminal state, sees OPEN, and recreates the brief.
   const gh = makeRunGh(
     {
       ...stubIssue(),
@@ -1073,34 +1098,53 @@ await test("an update whose target was deleted concludes success, no compensatio
         verdictCommentObject(),
       ],
     },
+    { beforeCall: deleteBriefOnPatch },
+  );
+  const result = await runBrief({
+    runGh: gh.runGh,
+    issueNumber: 1731,
+    log: () => {},
+  });
+  assertEqual(result.written, true);
+  assertEqual(result.settledTerminal, undefined);
+  assertEqual(created(gh).length, 1);
+  assertEqual(findBriefComments(gh.state.comments).length, 1);
+  assertEqual(wroteBody(gh), false);
+});
+
+await test("an update-target 404 on a stub that WENT terminal is accepted as settled (#1769 round 10)", async () => {
+  // The pre-write guard saw OPEN, then the archive closed+archived the stub and
+  // deleted the brief before the PATCH (round 7). The post-404 re-read sees the
+  // terminal state, so the leg accepts it and does NOT recreate on the archive.
+  const gh = makeRunGh(
     {
-      beforeCall: (args, state) => {
-        if (args[0] === "api" && args.includes("PATCH")) {
-          state.comments = state.comments.filter(
-            (c) => !String(c.body).startsWith(BRIEF_COMMENT_MARKER),
-          );
+      ...stubIssue(),
+      comments: [
+        briefCommentObject(`${BRIEF_COMMENT_MARKER}\n\n> stale brief`, 9402),
+        verdictCommentObject(),
+      ],
+    },
+    {
+      beforeCall: deleteBriefOnPatch,
+      // view #1 initial read, #2 pre-write guard (OPEN so the update is reached),
+      // #3 the post-404 re-read -> flip terminal here.
+      onView: (n, state) => {
+        if (n === 3) {
+          state.state = "CLOSED";
+          state.labels = [{ name: "sentry:archived" }];
         }
       },
     },
   );
-  let threw = false;
-  let result;
-  try {
-    result = await runBrief({
-      runGh: gh.runGh,
-      issueNumber: 1731,
-      log: () => {},
-    });
-  } catch {
-    threw = true;
-  }
-  assert(!threw, "a 404 on the update target must not throw (no compensation)");
+  const result = await runBrief({
+    runGh: gh.runGh,
+    issueNumber: 1731,
+    log: () => {},
+  });
   assertEqual(result.settledTerminal, true);
   assertEqual(result.written, false);
-  // Not re-created, no body write.
   assertEqual(created(gh).length, 0);
   assertEqual(findBriefComments(gh.state.comments).length, 0);
-  assertEqual(wroteBody(gh), false);
 });
 
 // ---------------------------------------------------------------------------
@@ -1150,12 +1194,12 @@ await test("the verdict job runs the brief leg on EVERY verdict", () => {
   );
 });
 
-await test("the brief step is best-effort and never re-queues on its own failure (#1769 round 8)", () => {
-  // The brief is an advisory rendering on top of a stub the verdict step already
-  // settled (verdict label + verdict comment). A render/clear failure must log
-  // and continue (exit 0) — no re-queue, no compensation — so the close/project
-  // legs settle the stub normally. Removing the compensation removes the whole
-  // class of race/ordering/fail-open edges (#1769 rounds 6-8).
+await test("render failure is best-effort but a CLEAR failure blocks the close (#1769 round 10)", () => {
+  // Split failure semantics: a needs-human RENDER failure logs and continues
+  // (the escalation is already in the verdict label + comment, stub stays open);
+  // a CLEAR failure (any other verdict) fails the step to BLOCK the close, so
+  // the stub is never closed still showing a stale "Decision needed". Neither
+  // path re-queues — that block was the round 6-8 race/ordering source.
   const workflow = readRepoFile(".github/workflows/sentry-triage-agent.yml");
   const step = workflow.slice(
     workflow.indexOf("- name: Render or clear the needs-human brief"),
@@ -1165,26 +1209,34 @@ await test("the brief step is best-effort and never re-queues on its own failure
     step.includes("node scripts/sentry-triage-brief.mjs"),
     "expected the brief leg to be invoked",
   );
+  // The failure branches on the resolved verdict, carried as a step input.
+  assert(
+    step.includes("VERDICT: ${{ steps.verdict.outputs.verdict }}"),
+    "the step must know the verdict to split render vs clear",
+  );
+  assert(
+    step.includes('[ "${VERDICT}" = "needs-human" ]'),
+    "the failure path must branch on needs-human (render) vs other (clear)",
+  );
+  // Render failure is best-effort (a warning, no exit 1); clear failure exits 1.
+  assert(/::warning::/.test(step), "expected a best-effort warning for render");
   const meaningful = step
     .split("\n")
     .map((line) => line.trim())
     .filter((line) => line !== "" && !line.startsWith("#"));
-  // No re-queue helper, no failing exit, no terminal-state re-read — the whole
-  // compensation class is gone.
+  assert(
+    meaningful.includes("exit 1"),
+    "a CLEAR failure must exit 1 to block the close step",
+  );
+  // No re-queue and no terminal-state re-read — the compensation class stays gone.
   assert(
     !step.includes("requeue_for_retry"),
-    "the best-effort brief step must not re-queue",
-  );
-  assert(
-    !meaningful.includes("exit 1"),
-    "a brief render/clear failure must not fail the job",
+    "the brief step must not re-queue (that class was removed)",
   );
   assert(
     !step.includes("--json state"),
-    "no terminal-state re-read remains (no compensation to guard)",
+    "no terminal-state re-read remains in the brief step",
   );
-  // The failure path logs a warning and continues.
-  assert(/::warning::/.test(step), "expected a best-effort warning on failure");
 });
 
 await test("the verdict step keeps its own re-queue compensation (not reversed by round 8)", () => {
@@ -1202,6 +1254,22 @@ await test("the verdict step keeps its own re-queue compensation (not reversed b
   assert(
     verdictJob.includes('--add-label "sentry:needs-triage"'),
     "the verdict step's compensation must restore sentry:needs-triage",
+  );
+});
+
+await test("live script comments describe the brief as a comment, not a body write (#1769 round 10)", () => {
+  // The routing guidance and the digest note are live script entry points; a
+  // stale "writes the stub BODY" / "issue-body brief" description would lead a
+  // later change to reason about a body-write dependency that no longer exists.
+  const gate = readRepoFile("scripts/agent-quality-gate.sh");
+  const digest = readRepoFile("scripts/sentry-triage-digest.mjs");
+  assert(
+    !/brief writes the stub BODY/i.test(gate),
+    "the gate routing comment must not say the brief writes the stub body",
+  );
+  assert(
+    !/issue-body brief/i.test(digest),
+    "the digest comment must not call the brief an issue-body brief",
   );
 });
 

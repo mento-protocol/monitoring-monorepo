@@ -10,6 +10,12 @@
  * ("Verdict projection").
  */
 
+// Used ONLY to parse a single inline flow sequence for the brief lists
+// (`parseInlineFlowSequence`), under the FAILSAFE schema so untrusted agent text
+// can only yield strings. The verdict block as a whole is still parsed
+// line-by-line by design — never hand this loader the full untrusted document.
+import { FAILSAFE_SCHEMA, load as loadYaml } from "js-yaml";
+
 export const DEFAULT_REPO = "mento-protocol/monitoring-monorepo";
 export const LOCAL_REPO = DEFAULT_REPO;
 
@@ -317,47 +323,28 @@ export const MAX_BRIEF_LIST_ITEMS = 5;
  * away — each emitter neutralizes+escapes them at render. Returns `{items,
  * next}` mirroring collectDashList so the caller advances the line cursor. */
 /**
- * Split a YAML flow-sequence body (`a, "b, c", 'd'`) on commas OUTSIDE quotes,
- * so a comma inside a quoted brief item is preserved rather than splitting the
- * item into rendered bullets (#1769 round 8: a `decision_branches` value like
- * `"Yes -> allow A, B"` must stay one branch). Escapes are honored so an item
- * can contain the quote character itself (#1769 round 9): inside a double-quoted
- * item a backslash escapes the next char (YAML `"\""`), and a doubled quote of
- * either kind is a literal quote (YAML `'' `/`""`) — neither ends the item.
- * Quote chars are consumed, each item is trimmed, and empties dropped.
+ * Parse an inline YAML FLOW SEQUENCE (`["a", "b, c", 'd']`) with the real YAML
+ * library, under the FAILSAFE schema so an untrusted agent string can only ever
+ * yield plain strings/seqs/maps — no type coercion, no dates, no custom tags,
+ * no code. This replaces three rounds of hand-rolled comma/quote/bracket
+ * scanning (#1769 rounds 8-10): quoted commas, escaped quotes, and brackets
+ * INSIDE a quoted item are all the parser's job now, so a value like
+ * `["inspect array[index] handling", "read logs"]` stays two items. It is a
+ * TARGETED use of the loader on ONE bounded flow scalar — the whole verdict
+ * block is still parsed line-by-line by design (untrusted; see the module note).
+ * Returns the trimmed string items, or null when `text` is not a single valid
+ * flow sequence (the caller then keeps the remainder as one item rather than
+ * guessing at a delimiter).
  */
-function splitQuotedListItems(inner) {
-  const items = [];
-  let buf = "";
-  let quote = null;
-  const s = String(inner ?? "");
-  for (let i = 0; i < s.length; i += 1) {
-    const ch = s[i];
-    if (quote) {
-      if (quote === '"' && ch === "\\" && i + 1 < s.length) {
-        // Double-quote backslash escape: the next char is literal (incl. `"`).
-        buf += s[i + 1];
-        i += 1;
-      } else if (ch === quote && s[i + 1] === quote) {
-        // Doubled quote inside a quote of the same kind -> one literal quote.
-        buf += ch;
-        i += 1;
-      } else if (ch === quote) {
-        quote = null;
-      } else {
-        buf += ch;
-      }
-    } else if (ch === '"' || ch === "'") {
-      quote = ch;
-    } else if (ch === ",") {
-      items.push(buf.trim());
-      buf = "";
-    } else {
-      buf += ch;
-    }
+function parseInlineFlowSequence(text) {
+  let doc;
+  try {
+    doc = loadYaml(text, { schema: FAILSAFE_SCHEMA });
+  } catch {
+    return null;
   }
-  items.push(buf.trim());
-  return items.filter(Boolean);
+  if (!Array.isArray(doc)) return null;
+  return doc.map((item) => String(item ?? "").trim()).filter(Boolean);
 }
 
 function parseFreeTextList(lines, i, rest) {
@@ -372,10 +359,10 @@ function parseFreeTextList(lines, i, rest) {
     trimmed !== "" && stripTrailingYamlComment(trimmed).trim() === "";
   if (trimmed !== "" && !isCommentOnly) {
     if (trimmed.startsWith("[")) {
-      const close = trimmed.indexOf("]");
-      const inner = close === -1 ? trimmed.slice(1) : trimmed.slice(1, close);
-      // Quote-aware split: a comma inside a quoted item stays part of it.
-      return { items: splitQuotedListItems(inner), next: i + 1 };
+      // A valid flow sequence IS the list; a malformed one becomes a single
+      // item, never silently truncated at a bracket/comma inside a quote.
+      const items = parseInlineFlowSequence(trimmed);
+      return { items: items ?? [stripYamlQuotes(trimmed)], next: i + 1 };
     }
     return { items: [stripYamlQuotes(trimmed)], next: i + 1 };
   }

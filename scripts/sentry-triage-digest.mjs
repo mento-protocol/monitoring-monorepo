@@ -145,7 +145,7 @@ const MAX_SUMMARY_LEN = 300;
 
 // The per-field bound for needs-human briefs is NOT defined here: it is
 // `MAX_BRIEF_TEXT_LEN` in sentry-triage-project-core.mjs, shared with the queue
-// stub's issue-body brief (#1748) so the two emitters cannot drift. Bounding
+// stub's brief COMMENT (#1748) so the two emitters cannot drift. Bounding
 // happens BEFORE escaping, so even an all-`<` value expands to at most ~4x =
 // 1600 chars — a single brief line stays far under the per-section budget (a
 // brief is scannable; full detail lives on the linked queue issue).

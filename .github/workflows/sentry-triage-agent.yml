@@ -859,26 +859,29 @@ jobs:
       # decision nobody has to make. The verdict it reads is resolved by the
       # script itself, so the step needs no verdict input to decide.
       #
-      # BEST-EFFORT (#1769 round 8). The verdict step already applied the verdict
-      # label and posted the raw verdict comment — the actual escalation — and it
-      # keeps its OWN requeue_for_retry for a VERDICT failure (untouched). This
-      # brief is an advisory decision-ready RENDERING on top of that settled
-      # state, so a failure HERE must not fail the job or re-queue: exiting 0
-      # leaves the stub in its already-correct post-verdict state — open for
-      # needs-human with its verdict comment, or settled by the close step below
-      # for every other verdict — and lets the close/project/digest legs run.
-      # There is no stranding to compensate for: we are not bare-exiting off
-      # `sentry:needs-triage`, we are letting the normal step flow settle the
-      # stub. The earlier re-queue compensation was itself a recurring source of
-      # race/ordering/fail-open edges (#1769 rounds 6-8, all in that block);
-      # dropping it removes that whole class. runBrief still renders on
-      # needs-human and CLEARS on every other verdict on success, and the archive
-      # leg clears any brief on settlement (#1769 round 5), so this does not
-      # revive a stale brief on the common path.
+      # RENDER is best-effort, CLEAR is not (#1769 rounds 8 + 10). The failure
+      # splits on the verdict:
+      #   - needs-human (RENDER): the verdict step already applied the verdict
+      #     label and posted the raw verdict comment — the actual escalation — and
+      #     the stub stays OPEN. A missing advisory rendering is not worth failing
+      #     the job or re-queuing, so log and exit 0. (The verdict step keeps its
+      #     OWN requeue_for_retry for a VERDICT failure, untouched.)
+      #   - any other verdict (CLEAR): the stub is being re-triaged AWAY from
+      #     needs-human and the close step below would then close it still showing
+      #     the stale "Decision needed" comment — and the ordinary close path has
+      #     NO later cleanup. A swallowed clear is therefore not advisory. Fail to
+      #     BLOCK the close (this step failing skips the close step), so the stub
+      #     is never closed on an obsolete decision. The failure is surfaced (red
+      #     job) and the stub stays OPEN, not buried; a regression re-queues it via
+      #     ingest. We deliberately do NOT re-queue here — that re-queue block was
+      #     the recurring race/ordering source of rounds 6-8.
+      # A 404 while clearing (the comment already gone) is success, handled in
+      # runBrief, so a concurrent delete does not trip this.
       # -----------------------------------------------------------------------
-      - name: Render or clear the needs-human brief (deterministic, best-effort)
+      - name: Render or clear the needs-human brief (deterministic)
         env:
           QUEUE_ISSUE_NUMBER: ${{ matrix.issue }}
+          VERDICT: ${{ steps.verdict.outputs.verdict }}
         run: |
           set -euo pipefail
           # Plain scripts/ is correct HERE for the same reason as the label
@@ -887,7 +890,12 @@ jobs:
           if ! node scripts/sentry-triage-brief.mjs \
               --issue "${QUEUE_ISSUE_NUMBER}" \
               --repo "${GITHUB_REPOSITORY}"; then
-            echo "::warning::Could not render/clear the needs-human brief on issue #${QUEUE_ISSUE_NUMBER} (see the log above). The verdict label and verdict comment already carry the escalation, so this advisory brief is best-effort — leaving the stub in its post-verdict state and continuing."
+            if [ "${VERDICT}" = "needs-human" ]; then
+              echo "::warning::Could not render the needs-human brief on issue #${QUEUE_ISSUE_NUMBER} (see the log above); the verdict label and verdict comment already carry the escalation, so leaving the open stub and continuing (best-effort)."
+            else
+              echo "::error::Could not clear the stale needs-human brief on issue #${QUEUE_ISSUE_NUMBER} (verdict is now ${VERDICT}); failing to BLOCK the close step so the stub is never closed showing an obsolete decision."
+              exit 1
+            fi
           fi
 
       # -----------------------------------------------------------------------

@@ -626,7 +626,11 @@ function verdictPostConditionBlock() {
     WORKFLOW.indexOf("\n  project:"),
   );
   const start = job.indexOf('--remove-label "sentry:needs-triage,${shed}"');
-  const end = job.indexOf("- name: Close queue stub");
+  // End at the brief step, NOT the close step: the brief step has its own,
+  // deliberately different failure semantics (#1769 round 10 — a CLEAR failure
+  // exits 1 to BLOCK the close without re-queuing). This block is the VERDICT
+  // step's post-condition, whose invariant is "every exit re-queues".
+  const end = job.indexOf("- name: Render or clear the needs-human brief");
   assert.ok(
     start > 0 && end > start,
     "the verdict label step's post-condition block was not found",
