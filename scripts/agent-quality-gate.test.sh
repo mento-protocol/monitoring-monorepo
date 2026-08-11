@@ -3844,6 +3844,15 @@ run_gate "scripts/sentry-suite-gate-integrity.test.mjs"
 assert_contains "$sentry_gate_test"
 assert_contains "$sentry_gate_run"
 
+# The shared V8 import parser sits under neither the `sentry-*` nor the
+# `check-sentry-suites-in-ci*` prefix, yet it decides the gate's watch set and
+# exemption proof AND the coverage check's import proof. Extracted, it scheduled
+# only Trunk, lint:scripts and tf:test — the third routing gap a file-creating
+# change has opened here (Codex 3761572721). It must route BOTH consumers.
+run_gate "scripts/static-imports.mjs"
+assert_contains "$sentry_gate_test"
+assert_contains "$sentry_gate_run"
+
 # check-sentry-suites-in-ci.test.mjs asserts that every Sentry suite runs in
 # CI. Every file it reads must route it, or the drift it exists to catch is
 # only caught after push. Its first home was an arm nested under `scripts/*.sh`,
@@ -3863,6 +3872,18 @@ assert_contains "$sentry_ci_check"
 
 run_gate "scripts/check-sentry-suites-in-ci-probes.mjs"
 assert_contains "$sentry_ci_check"
+
+# `staticImports` is the check's import proof, imported from outside the prefix.
+run_gate "scripts/static-imports.mjs"
+assert_contains "$sentry_ci_check"
+
+# The gate's exemption proof parses the `tf:test` alias with the checker's shell
+# grammar, so this module decides a gate verdict despite its checker name — the
+# fourth gap of this shape, found by sweeping the dry-run over every path the
+# round touched rather than by reading the globs.
+run_gate "scripts/check-sentry-suites-in-ci-core-commands.mjs"
+assert_contains "$sentry_gate_test"
+assert_contains "$sentry_gate_run"
 
 # The check parses EVERY workflow (contextOwnershipBlockers proves no decoy job
 # owns the `ci` check-run name), so a non-ci workflow edit must route it too.

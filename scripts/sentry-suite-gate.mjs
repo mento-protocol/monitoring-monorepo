@@ -15,11 +15,17 @@
  *      the tamper vector the per-child `env -u` latch below defends against, so
  *      losing the latch or setting the var on the gate itself is caught here.
  *   3. Each non-exempt suite is spawned under
- *      `/usr/bin/env -u NODE_OPTIONS -u NODE_PATH node <suite>` and must satisfy
- *      ALL of: child exit 0, parsed `fail == 0`, parsed `pass >= floor`, and
+ *      `/usr/bin/env -u NODE_OPTIONS -u NODE_PATH node <suite>`, from its OWN
+ *      immutable snapshot of the derived input set, and must satisfy ALL of:
+ *      child exit 0, parsed `fail == 0`, parsed `pass >= floor`, and
  *      `pass == the number of per-case lines the suite actually emitted`
  *      (`^ok ` for the homegrown count-line harness, `^✔ ` for node:test). Any
- *      parse failure or missing suite fails closed.
+ *      parse failure or missing suite fails closed. Every snapshot is taken
+ *      before the first child starts, so no suite can reach another's inputs —
+ *      the guarantee digests could only approximate, since a rewrite that
+ *      restored the original bytes before the final sweep was invisible to
+ *      them. A suite's non-module reads are declared in the manifest and land
+ *      in its snapshot; an undeclared one is simply absent, so the suite fails.
  *   4. Each exempt suite's route is re-verified: its documented importer still
  *      statically imports it (V8's module requests, so an unreached
  *      `import()` proves nothing) and the exact package.json alias the owning
@@ -41,12 +47,16 @@
 import { spawnSync } from "node:child_process";
 import {
   appendFileSync,
+  existsSync,
+  mkdtempSync,
   readFileSync,
   readdirSync,
   realpathSync,
+  rmSync,
   statSync,
 } from "node:fs";
-import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { isAbsolute, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // The integrity layer — "is this run trustworthy as a whole" — lives next door
@@ -60,7 +70,7 @@ import {
   importClosure,
   localImportClosure,
   MANIFEST_LABEL,
-  PACKAGE_JSON_LABEL,
+  snapshotInputs,
 } from "./sentry-suite-gate-integrity.mjs";
 // V8's own dependency list, shared with the CI-coverage checker so there is one
 // implementation of "what does this module import" rather than two that drift.
@@ -76,6 +86,7 @@ export {
   gateInputs,
   importClosure,
   localImportClosure,
+  snapshotInputs,
   staticImports,
 };
 
@@ -104,7 +115,7 @@ class GateError extends Error {}
  * list cannot influence a run, whatever a future edit calls it.
  */
 const MANIFEST_TOP_LEVEL_KEYS = ["_readme", "suites"];
-const ENTRY_KEYS = ["reporter", "floor", "nodeArgs", "exempt"];
+const ENTRY_KEYS = ["reporter", "floor", "nodeArgs", "exempt", "reads"];
 
 /** The only `nodeArgs` the design needs: the node:test runner. */
 const SUPPORTED_NODE_ARGS = ["--test"];
@@ -250,6 +261,40 @@ export function loadManifest(path = MANIFEST_PATH) {
           `${key} sets "nodeArgs" with reporter "${entry.reporter}" in ${MANIFEST_LABEL} — ` +
             `${JSON.stringify(SUPPORTED_NODE_ARGS)} is only meaningful for the "node-test" reporter.`,
         );
+      }
+    }
+
+    // `reads` names the repository files a suite opens directly, which no
+    // import closure can derive. Each one joins the watch set AND that suite's
+    // snapshot, so the declaration is self-enforcing rather than documentation:
+    // declare too little and the suite fails on the missing file; declare a
+    // path that does not exist and the gate says so here.
+    if (entry.reads !== undefined) {
+      if (
+        !Array.isArray(entry.reads) ||
+        entry.reads.some((r) => typeof r !== "string" || r === "")
+      ) {
+        throw new GateError(
+          `${key} has a "reads" that is not an array of repo-relative paths in ${MANIFEST_LABEL} ` +
+            `(got ${JSON.stringify(entry.reads)}).`,
+        );
+      }
+      for (const read of entry.reads) {
+        // A snapshot is built by joining these onto a temp directory, so an
+        // absolute path or one climbing out would write outside it.
+        if (isAbsolute(read) || normalize(read).startsWith("..")) {
+          throw new GateError(
+            `${key} declares a "reads" entry ${JSON.stringify(read)} in ${MANIFEST_LABEL} that is not ` +
+              "inside the repository; declared reads are repo-relative paths.",
+          );
+        }
+        if (!existsSync(join(ROOT, read))) {
+          throw new GateError(
+            `${key} declares a "reads" entry ${JSON.stringify(read)} in ${MANIFEST_LABEL}, but no such ` +
+              "file exists — remove it, or fix the path; a declared read that is absent would be " +
+              "absent from the suite's snapshot too.",
+          );
+        }
       }
     }
 
@@ -701,12 +746,36 @@ export function main() {
 
   // (3)(4) Execute non-exempt suites; re-verify exempt routes.
   //
-  // Snapshot every watched file BEFORE any child runs. Each child then gets its
-  // own file re-checked immediately before its spawn (so a tamper message can
-  // name the suite and the point it was caught), and every digest is re-verified
-  // after the last child (so a rewrite is caught no matter the ordering — an
-  // attacker rewriting a suite that already ran is still caught by the sweep).
-  const baseline = digestWatchSet(manifest, ROOT);
+  // Each entry gets its OWN copy of the derived input set, and every copy is
+  // taken before the FIRST child starts. That is the whole guarantee: a child
+  // cannot reach another child's inputs, so there is no interference to detect
+  // — not a persistent rewrite, and not a transient one that restores the
+  // original bytes before the sweep looks (which digests could never catch).
+  // Taking the copies lazily would reopen it: an earlier suite could poison the
+  // shared checkout and a later snapshot would copy the poison faithfully.
+  let inputs;
+  let snapshotBase;
+  const snapshots = new Map();
+  try {
+    inputs = gateInputs(manifest, ROOT);
+    snapshotBase = mkdtempSync(join(tmpdir(), "sentry-suite-gate-"));
+    for (const [suite, entry] of Object.entries(manifest.suites)) {
+      const files = [...inputs, ...(entry.reads ?? [])];
+      const dest = join(snapshotBase, suite.replace(/[^A-Za-z0-9]+/g, "_"));
+      snapshots.set(suite, snapshotInputs(files, ROOT, dest));
+    }
+  } catch (err) {
+    process.stderr.write(`sentry-suite-gate: ${err.message}\n`);
+    process.exitCode = 1;
+    return;
+  }
+
+  // Still taken, and still swept at the end — but as a tamper ALARM on the
+  // shared checkout rather than as the guarantee. Nothing this run decides is
+  // read from the checkout after this point, so a child writing there cannot
+  // change a verdict; it is still something an operator must see, because a
+  // suite that writes to the repository is doing something no suite should.
+  const baseline = digestWatchSet(manifest, ROOT, inputs);
 
   const rows = [];
   let failures = 0;
@@ -716,22 +785,15 @@ export function main() {
   for (const suite of manifestKeys) {
     const entry = manifest.suites[suite];
     if (entry.exempt) {
-      // The route is evidence about code this gate never runs, so its inputs
-      // must be the ones committed, not ones an earlier suite just rewrote.
-      const routeDrift = digestDrift(baseline, ROOT, [
-        entry.exempt.importer,
-        PACKAGE_JSON_LABEL,
-      ]);
-      if (routeDrift.length > 0) {
-        rows.push({
-          suite,
-          status: "TAMPERED",
-          detail: `${routeDrift.join("; ")} — refusing to accept the exemption; an earlier suite in this gate run modified the evidence for it`,
-        });
-        failures += 1;
-        continue;
-      }
-      const reasons = verifyExemptRoute(suite, entry.exempt, ROOT);
+      // Read from the snapshot, like every suite: the route is evidence about
+      // code this gate never runs, and the snapshot was taken before any child
+      // could touch the importer or package.json. The digest pre-check this
+      // replaces could only catch a rewrite that persisted.
+      const reasons = verifyExemptRoute(
+        suite,
+        entry.exempt,
+        snapshots.get(suite),
+      );
       rows.push({
         suite,
         status: reasons.length ? "ROUTE-BROKEN" : "exempt",
@@ -743,19 +805,8 @@ export function main() {
       else exempted += 1;
       continue;
     }
-    // Re-check THIS suite's bytes immediately before spawning it: if an earlier
-    // suite rewrote it, the result about to be produced is not this suite's.
-    const preSpawnDrift = digestDrift(baseline, ROOT, [suite]);
-    if (preSpawnDrift.length > 0) {
-      rows.push({
-        suite,
-        status: "TAMPERED",
-        detail: `${preSpawnDrift.join("; ")} — refusing to run it; an earlier suite in this gate run modified it`,
-      });
-      failures += 1;
-      continue;
-    }
-    const result = runSuite(suite, entry, { root: ROOT });
+    // From its own snapshot, so the result is this suite's by construction.
+    const result = runSuite(suite, entry, { root: snapshots.get(suite) });
     const reasons = judgeSuite(result, entry);
     rows.push({
       suite,
@@ -771,9 +822,19 @@ export function main() {
       // contributor re-running the suite by hand to find out. Echo the failing
       // suite's own diagnostics — the `not ok` / `✖` lines and any stack — so
       // the gate's output is self-contained.
+      // A suite that DIES rather than reporting failures prints its error at
+      // column 0, which the indented-`Error` pattern missed — so a suite killed
+      // by an undeclared runtime read showed only "no summary line" and the
+      // contributor had no way to see the `ENOENT` that explains it. That
+      // legibility is load-bearing now that a missing declared read is how the
+      // manifest's `reads` list stays complete.
       const detail = `${result.stdout}\n${result.stderr}`
         .split("\n")
-        .filter((line) => /^(not ok |✖|\s+(Error|AssertionError))/.test(line))
+        .filter((line) =>
+          /^(not ok |✖|\s*(Error|AssertionError|TypeError|ReferenceError|SyntaxError)\b)/.test(
+            line,
+          ),
+        )
         .slice(0, 20);
       if (detail.length > 0) {
         process.stderr.write(
@@ -783,13 +844,9 @@ export function main() {
     }
   }
 
-  // The sweep that makes the guarantee ordering-independent: re-verify EVERY
-  // watched file after the last child. A suite that rewrote one which already
-  // ran, or that rewrote the manifest or this runner, is caught here even
-  // though no per-spawn check could have seen it.
   // Enumeration is a decision input too: set equality was computed once, before
-  // any child ran, so a suite CREATED mid-run would never be reconciled and a
-  // digest sweep over known files cannot see it. Re-enumerate and compare.
+  // any child ran, so a suite CREATED mid-run in the shared checkout would never
+  // be reconciled and a digest sweep over known files cannot see it.
   try {
     const after = findSentrySuites(SCRIPTS_DIR);
     const { equal, onDiskNotInManifest, inManifestNotOnDisk } = reconcile(
@@ -816,15 +873,21 @@ export function main() {
     failures += 1;
   }
 
+  // The tamper alarm on the shared checkout. No verdict above depended on it —
+  // every child read its own snapshot — but a suite that wrote to the
+  // repository did something no suite should, and the next run would inherit
+  // it, so the gate reds and names the file.
   const finalDrift = digestDrift(baseline, ROOT);
   for (const change of finalDrift) {
     rows.push({
       suite: change.split(" ")[0],
       status: "TAMPERED",
-      detail: `${change} — a suite modified a watched file; every result in this run is untrustworthy`,
+      detail: `${change} — a suite wrote to the shared checkout; this run's results came from per-suite snapshots, but the checkout is no longer the committed tree`,
     });
     failures += 1;
   }
+
+  rmSync(snapshotBase, { recursive: true, force: true });
 
   const table = [
     "",

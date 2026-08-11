@@ -53,16 +53,17 @@ const { test, assert, assertEqual, summarize } = makeHarness();
 /** This repository, for the cases that must hold of the committed tree. */
 const REAL_ROOT = fileURLToPath(new URL("..", import.meta.url));
 
-// ── (a2) suite-rewrite: one child must not be able to forge another's result ──
+// ── (a2) suite isolation: one child must not be able to reach another's inputs ─
 
-await test("red: an earlier suite rewriting a later one is caught before it runs", async () => {
+await test("an earlier suite rewriting a later one changes nothing — the victim's real result stands", async () => {
   const root = makeRoot();
   try {
-    // Codex 3759964336. Every child shares the writable checkout, so without
-    // digest verification an alphabetically earlier suite can overwrite a later
-    // FAILING suite with a program emitting the expected `ok` lines and a
-    // matching summary — and both report passing at exit 0, voiding the gate's
-    // central claim that each result came from that suite.
+    // Codex 3759964336, then 3761572724. The first round caught this rewrite
+    // with digests; the second showed digests could not catch the transient
+    // form of it. Each suite now runs from its own snapshot, taken before any
+    // child starts, so the attacker's `writeFileSync` lands in ITS OWN copy of
+    // the victim — a file nothing else reads. The victim, a genuinely failing
+    // suite, runs from a pristine copy and reports its real failure.
     writeSuite(
       root,
       "sentry-aaa-attacker.test.mjs",
@@ -98,23 +99,25 @@ await test("red: an earlier suite rewriting a later one is caught before it runs
       },
     });
     const { status, stdout } = runGate(root);
-    assert(status !== 0, "a rewritten suite must red the gate");
-    assert(stdout.includes("TAMPERED"), "should mark the suite tampered");
+    assert(status !== 0, "the victim really fails, so the gate must red");
     assert(
-      stdout.includes("sentry-zzz-victim.test.mjs was REWRITTEN"),
-      "should name the rewritten suite",
+      !stdout.includes("ok forged"),
+      `the forged program must never have run: ${stdout}`,
+    );
+    assert(
+      /sentry-zzz-victim\.test\.mjs \| FAIL/.test(stdout),
+      `the victim's own failure must be the reported result: ${stdout}`,
     );
   } finally {
     cleanup(root);
   }
 });
 
-await test("red: a suite rewriting one that ALREADY ran is caught by the final sweep", async () => {
+await test("a suite rewriting one that ALREADY ran changes nothing", async () => {
   const root = makeRoot();
   try {
-    // The ordering no per-spawn check can see: the attacker runs last and
-    // rewrites an earlier suite after its result was recorded. Only re-verifying
-    // every digest after the last child catches it.
+    // The ordering no per-spawn digest could see. It no longer needs seeing:
+    // the early suite finished reading a tree the late one cannot address.
     writeSuite(
       root,
       "sentry-aaa-early.test.mjs",
@@ -141,39 +144,49 @@ await test("red: a suite rewriting one that ALREADY ran is caught by the final s
       "scripts/sentry-zzz-late.test.mjs": { reporter: "count-line", floor: 1 },
     });
     const { status, stdout } = runGate(root);
-    assert(status !== 0, "a post-hoc rewrite must red the gate");
+    assertEqual(status, 0, `both suites really passed: ${stdout}`);
     assert(
-      stdout.includes("sentry-aaa-early.test.mjs was REWRITTEN"),
-      "the sweep should name the suite rewritten after it ran",
+      !stdout.includes("TAMPERED"),
+      `nothing shared was touched: ${stdout}`,
     );
   } finally {
     cleanup(root);
   }
 });
 
-await test("red: a suite rewriting the manifest is caught", async () => {
+await test("red: a suite that writes to the SHARED CHECKOUT is caught by the sweep", async () => {
   const root = makeRoot();
   try {
+    // The residual the snapshots do not remove. A child cannot address another
+    // child's snapshot, but in CI it does know the checkout — `GITHUB_WORKSPACE`
+    // is in its environment — so it can still write there. Nothing this run
+    // decides is read from the checkout after the snapshots are taken, so it
+    // cannot forge a result; it would poison the NEXT run and it is not
+    // something any suite should do, so the sweep reds and names the file.
     writeSuite(
       root,
-      "sentry-m.test.mjs",
+      "sentry-writer.test.mjs",
       [
         'import { writeFileSync } from "node:fs";',
-        'import { fileURLToPath } from "node:url";',
-        'writeFileSync(fileURLToPath(new URL("./sentry-suite-manifest.json", import.meta.url)), JSON.stringify({ suites: {} }));',
-        'process.stdout.write("ok m\\n");',
+        // The absolute path stands in for a suite reading GITHUB_WORKSPACE.
+        `writeFileSync(${JSON.stringify(join(root, "scripts", "sentry-suite-manifest.json"))}, JSON.stringify({ suites: {} }));`,
+        'process.stdout.write("ok w\\n");',
         'process.stdout.write("1 passed\\n");',
         "",
       ].join("\n"),
     );
     writeManifest(root, {
-      "scripts/sentry-m.test.mjs": { reporter: "count-line", floor: 1 },
+      "scripts/sentry-writer.test.mjs": { reporter: "count-line", floor: 1 },
     });
     const { status, stdout } = runGate(root);
-    assert(status !== 0, "rewriting the manifest must red the gate");
+    assert(status !== 0, "writing to the checkout must red the gate");
     assert(
       stdout.includes("sentry-suite-manifest.json was REWRITTEN"),
-      "should name the manifest",
+      `the sweep should name the file: ${stdout}`,
+    );
+    assert(
+      stdout.includes("wrote to the shared checkout"),
+      `and say what it means: ${stdout}`,
     );
   } finally {
     cleanup(root);
@@ -476,20 +489,25 @@ await test("gateInputs refuses to run without a root rather than deriving less",
   assert(threw, "a missing root must throw, not degrade");
 });
 
-await test("red: a suite rewriting another suite's imported helper is caught", async () => {
+await test("a suite rewriting another's imported helper changes nothing, even transiently", async () => {
   const root = makeRoot();
   try {
-    // Codex 3760861940. The helper is not a suite, so no digest covered it
-    // before the closure: `alpha` rewrote it, and `beta` — which FAILS against
-    // the committed helper — reported ok at exit 0.
+    // Codex 3760861940 then 3761572724. `alpha` rewrites the helper `beta`
+    // imports AND restores the committed bytes before exiting — the transient
+    // form, which left every digest matching its baseline and the gate at exit
+    // 0. There is nothing to restore now: `alpha` rewrote its own copy, and
+    // `beta` reads a helper `alpha` never had a path to.
     writeSuite(
       root,
       "sentry-alpha.test.mjs",
       [
         'import { writeFileSync } from "node:fs";',
         'import { fileURLToPath } from "node:url";',
-        'writeFileSync(fileURLToPath(new URL("./victim-helper.mjs", import.meta.url)),',
-        "  'export const VALUE = \"forged\";\\n');",
+        'const helper = fileURLToPath(new URL("./victim-helper.mjs", import.meta.url));',
+        // The transient rewrite: forge, then put the committed bytes back, so a
+        // before/after digest sees an unchanged file.
+        "writeFileSync(helper, 'export const VALUE = \"forged\";\\n');",
+        "writeFileSync(helper, 'export const VALUE = \"committed\";\\n');",
         'process.stdout.write("ok alpha\\n");',
         'process.stdout.write("1 passed\\n");',
         "",
@@ -520,10 +538,122 @@ await test("red: a suite rewriting another suite's imported helper is caught", a
       "scripts/sentry-beta.test.mjs": { reporter: "count-line", floor: 1 },
     });
     const { status, stdout } = runGate(root);
-    assert(status !== 0, "rewriting an imported helper must red the gate");
     assert(
-      stdout.includes("victim-helper.mjs was REWRITTEN"),
-      `should name the helper: ${stdout}`,
+      status !== 0,
+      "beta fails against the committed helper, so the gate must red",
+    );
+    assert(
+      !stdout.includes("ok beta"),
+      `beta must not have seen the forged value: ${stdout}`,
+    );
+    assert(
+      /sentry-beta\.test\.mjs \| FAIL/.test(stdout),
+      `beta's real failure must be the reported result: ${stdout}`,
+    );
+    assert(
+      !stdout.includes("TAMPERED"),
+      `the checkout itself was never touched: ${stdout}`,
+    );
+  } finally {
+    cleanup(root);
+  }
+});
+
+await test("red: a suite reading a repository file it did not declare fails on the missing file", async () => {
+  const root = makeRoot();
+  try {
+    // Codex 3761572727 named one such read (`sentry-mcp-broker.test.mjs` opens
+    // `.github/workflows/sentry-triage-agent.yml`); running every suite from a
+    // sparse snapshot found six across three suites. This is what keeps the
+    // declaration honest — an undeclared read is not "undetectable", it is a
+    // hard failure, because the file is simply not in the snapshot.
+    writeFileSync(join(root, "policy.json"), '{"limit":1}\n');
+    writeSuite(
+      root,
+      "sentry-reader.test.mjs",
+      [
+        'import { readFileSync } from "node:fs";',
+        'import { fileURLToPath } from "node:url";',
+        'const policy = JSON.parse(readFileSync(fileURLToPath(new URL("../policy.json", import.meta.url)), "utf8"));',
+        'if (policy.limit !== 1) throw new Error("forged policy");',
+        'process.stdout.write("ok reader\\n");',
+        'process.stdout.write("1 passed\\n");',
+        "",
+      ].join("\n"),
+    );
+    writeManifest(root, {
+      "scripts/sentry-reader.test.mjs": { reporter: "count-line", floor: 1 },
+    });
+    const undeclared = runGate(root);
+    assert(
+      undeclared.status !== 0,
+      "an undeclared runtime read must red the gate",
+    );
+    assert(
+      `${undeclared.stdout}${undeclared.stderr}`.includes("ENOENT"),
+      `the suite should fail on the absent file: ${undeclared.stdout}`,
+    );
+
+    // Declared, it is copied in and the suite passes — so the declaration is
+    // the whole difference, and a reviewer sees every non-module input.
+    writeManifest(root, {
+      "scripts/sentry-reader.test.mjs": {
+        reporter: "count-line",
+        floor: 1,
+        reads: ["policy.json"],
+      },
+    });
+    const declared = runGate(root);
+    assertEqual(
+      declared.status,
+      0,
+      `declaring the read should make it pass: ${declared.stdout}${declared.stderr}`,
+    );
+  } finally {
+    cleanup(root);
+  }
+});
+
+await test("red: a declared read that does not exist is rejected at load", async () => {
+  const root = makeRoot();
+  try {
+    writeSuite(root, "sentry-a.test.mjs", countLineSuite(1));
+    writeManifest(root, {
+      "scripts/sentry-a.test.mjs": {
+        reporter: "count-line",
+        floor: 1,
+        reads: ["docs/not-here.md"],
+      },
+    });
+    const { status, stderr } = runGate(root);
+    assert(status !== 0, "a phantom declared read must red the gate");
+    assert(
+      stderr.includes("but no such file exists"),
+      `should name the missing declaration: ${stderr}`,
+    );
+  } finally {
+    cleanup(root);
+  }
+});
+
+await test("red: a declared read cannot climb out of the repository", async () => {
+  const root = makeRoot();
+  try {
+    // Snapshots are built by joining these onto a temp directory, so a path
+    // that escapes would write outside it.
+    writeSuite(root, "sentry-a.test.mjs", countLineSuite(1));
+    writeManifest(root, {
+      "scripts/sentry-a.test.mjs": {
+        reporter: "count-line",
+        floor: 1,
+        reads: ["../../etc/hosts"],
+      },
+    });
+    const { status, stderr } = runGate(root);
+    assert(status !== 0, "an escaping declared read must red the gate");
+    assert(
+      stderr.includes("not inside the repository"),
+      `should refuse the path: ${stderr}`,
     );
   } finally {
     cleanup(root);
@@ -591,13 +721,14 @@ await test("the success attestation states what ran and what only had its route 
   );
 });
 
-await test("red: a suite forging an exemption's route evidence is caught", async () => {
+await test("red: a suite forging an exemption's route evidence cannot reach the evidence", async () => {
   const root = makeRoot();
   try {
     // The route is evidence about code this gate never runs. An earlier suite
     // restoring the import in the writable checkout made a throwing exempt
     // suite read as intact — gate exit 0 — while the production job would never
-    // have run it.
+    // have run it. The route is now read from the exempt entry's own snapshot,
+    // taken before the forger ran, so the forgery lands nowhere that is read.
     writeSuite(
       root,
       "sentry-aaa-forger.test.mjs",
@@ -641,10 +772,11 @@ await test("red: a suite forging an exemption's route evidence is caught", async
       },
     });
     const { status, stdout } = runGate(root);
-    assert(status !== 0, "a forged route must red the gate");
+    assert(status !== 0, "a dead route must red the gate");
     assert(
-      stdout.includes("modified the evidence for it"),
-      `should refuse the exemption: ${stdout}`,
+      stdout.includes("ROUTE-BROKEN") &&
+        stdout.includes("has no static import of"),
+      `the route must still read as dead: ${stdout}`,
     );
   } finally {
     cleanup(root);
@@ -655,14 +787,15 @@ await test("red: a suite created mid-run is caught by re-enumeration", async () 
   const root = makeRoot();
   try {
     // Set equality runs once, before any child; a digest sweep over KNOWN files
-    // cannot see a file that did not exist when the baseline was taken.
+    // cannot see a file that did not exist when the baseline was taken. The
+    // spawner writes to the CHECKOUT by absolute path — the one surface a child
+    // can still reach, standing in for a suite that reads GITHUB_WORKSPACE.
     writeSuite(
       root,
       "sentry-aaa-spawner.test.mjs",
       [
         'import { writeFileSync } from "node:fs";',
-        'import { fileURLToPath } from "node:url";',
-        'writeFileSync(fileURLToPath(new URL("./sentry-zzz-new.test.mjs", import.meta.url)), "// smuggled\\n");',
+        `writeFileSync(${JSON.stringify(join(root, "scripts", "sentry-zzz-new.test.mjs"))}, "// smuggled\\n");`,
         'process.stdout.write("ok spawner\\n");',
         'process.stdout.write("1 passed\\n");',
         "",

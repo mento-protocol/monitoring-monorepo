@@ -84,11 +84,12 @@ the suites needs no install. It:
    catching removal of the `env -u` prefix or an attempt to drive the gate under
    the very injection it defends against;
 3. spawns each non-exempt manifest suite as
-   `/usr/bin/env -u NODE_OPTIONS -u NODE_PATH node <nodeArgs> <suite>` and
-   asserts, per suite: child exit 0, parsed `fail == 0`, parsed `pass >=` the
-   manifest floor, and parsed `pass ==` the number of per-case lines the suite
-   emitted (lines matching `^ok` for the homegrown harness, `^✔` for `node:test`
-   under a forced spec reporter). Any parse failure or missing suite fails closed;
+   `/usr/bin/env -u NODE_OPTIONS -u NODE_PATH node <nodeArgs> <suite>`, from that
+   suite's own snapshot, and asserts, per suite: child exit 0, parsed
+   `fail == 0`, parsed `pass >=` the manifest floor, and parsed `pass ==` the
+   number of per-case lines the suite emitted (lines matching `^ok` for the
+   homegrown harness, `^✔` for `node:test` under a forced spec reporter). Any
+   parse failure or missing suite fails closed;
 4. re-verifies each exemption's route without running it — that
    `scripts/tf-stacks.test.mjs` still statically imports
    `scripts/sentry-provider-contract.test.mjs`, and that the exact package.json
@@ -99,8 +100,9 @@ the suites needs no install. It:
 
 The committed manifest is the closed-world expected set. Per suite it carries
 `path`, `reporter` (`count-line` | `node-test` | `exit-only`), optional
-`nodeArgs` (the broker's `--test`), a pass-count `floor`, and — for the one
-non-gate suite — an `exempt` route with its importer. Floors use `>=` semantics.
+`nodeArgs` (the broker's `--test`), a pass-count `floor`, optional `reads` (the
+repository files it opens rather than imports), and — for the one non-gate suite
+— an `exempt` route with its importer. Floors use `>=` semantics.
 
 `scripts/sentry-suite-gate.test.mjs` is the runner's own suite, named `sentry-*`
 so `findSentrySuites` enumerates it and the gate runs it — neutering the runner
@@ -108,14 +110,37 @@ now also requires faking its own suite's count and per-case lines. Because it is
 enumerated, the still-in-place `scripts` job gains a direct step invoking it,
 which keeps the #1754 coverage checker green until that checker relocates.
 
-**Every suite shares one writable checkout, so the gate digests a derived watch
-set.** Without it an alphabetically earlier suite rewrites a later one — or a
-helper it imports, or the manifest, or the exemption's route evidence — and both
-report passing (each of those was measured green before its digest existed). The
-set is derived, never listed: the manifest, this runner and its own imports,
-every manifest-listed suite, each suite's transitive first-party import closure,
-and per exempt entry its importer plus `package.json`. A hand-written list was
-wrong three times running.
+**Each suite runs from its own immutable snapshot of the derived input set, all
+taken before the first child starts.** Without isolation an alphabetically
+earlier suite rewrites a later one — or a helper it imports, or the manifest, or
+the exemption's route evidence — and both report passing (each was measured green
+before it was closed). Digests were the first answer and they could only ever
+DETECT interference, and only interference that persisted: a suite that replaced
+a watched helper with a module restoring the original bytes during import, then
+exporting a forged value, left every digest matching its baseline and the gate at
+exit 0. Before/after hashes cannot see a transient rewrite. Separate directories
+can, because there is nothing to see.
+
+The input set is derived, never listed: the manifest, this runner and its own
+imports, every manifest-listed suite, each suite's transitive first-party import
+closure, its declared non-module `reads`, and per exempt entry its importer plus
+`package.json`. A hand-written list was wrong three times running.
+
+**Snapshots are SPARSE, and that is a feature twice over.** Copying the tracked
+tree (2,124 files, 29MB) measured 1.48s once and 18.8s for thirteen — more than
+three times the gate's entire runtime. Copying the ~65-file derived set measured
+20ms and 241ms. The sparseness also makes the `reads` declaration self-enforcing:
+a suite that opens a repository file it did not declare finds it absent and
+fails, so the list cannot silently rot. Review reported one such read; running
+every suite from a sparse snapshot found six, across three suites.
+
+**The residual is a suite writing to the shared checkout.** A child cannot
+address another child's snapshot, but in CI it knows the checkout —
+`GITHUB_WORKSPACE` is in its environment — so it can still write there. Nothing
+this run decides is read from the checkout once the snapshots are taken, so such
+a write cannot forge a result; it would poison the NEXT run. The post-run digest
+sweep and the re-enumeration remain for exactly that, demoted from the guarantee
+to a tamper alarm, and the gate reds and names the file.
 
 **The gate asks V8 what a module imports, and the shell what a script runs. It
 does not match text for either.** `scripts/static-imports.mjs` returns
@@ -153,6 +178,19 @@ Introspection therefore proves only that a step with a given name concluded
 the suites run inside the gate's own process there is no sibling job left to
 introspect.
 
+**Full-tree snapshots, and the digest-only pair** — the two candidates weighed
+against sparse snapshots. Copying the whole tracked tree per suite gives the same
+isolation with nothing to declare, and was rejected on cost alone: 18.8s for
+thirteen, against a 5.3s gate. Keeping digests and merely widening them —
+verifying the entire input set before every spawn instead of the suite file, plus
+declaring runtime reads — was rejected because it leaves the hole it is meant to
+cover. A pre-spawn check catches a malicious helper that is still on disk when
+the next child starts; it cannot catch one that restored the committed bytes
+before exiting, which is the reproduction that prompted this. Declaring reads
+under that design would also be unenforceable: nothing fails when a suite reads a
+file it did not declare, so the list rots silently. Sparse snapshots cost 241ms,
+close the transient case by construction, and make the declaration self-checking.
+
 **Proof-artifact gate** — a shared counting harness stamps
 `{suite, tests, assertions, hollow, nonce}` per suite, uploaded as an artifact
 and verified in `ci`. Rejected as primary because it is forgeable by the vector
@@ -180,10 +218,11 @@ suite runner keeps the window closed and still gives the static checker its
 The suites now run unconditionally on every push rather than when the
 `rootScripts` paths filter matches, which retires the whole filter-narrowing
 bypass class at runtime and makes the static drift net unskippable for the first
-time. Compute is roughly flat: the gate takes about five wall-clock seconds — of
-which ~0.2s is its own watch-set derivation and the rest is the suites, two of
-which spawn the whole gate against ~30 fixture roots — and the job costs one
-runner boot; on a public repository those GitHub-hosted minutes are free.
+time. Compute is roughly flat: the gate takes about six wall-clock seconds — of
+which ~0.6s is its own watch-set derivation and per-suite snapshots, and the rest
+is the suites, two of which spawn the whole gate against ~30 fixture roots — and
+the job costs one runner boot; on a public repository those GitHub-hosted minutes
+are free.
 
 Manifest floors churn. A legitimate test deletion reds the gate until the JSON is
 edited. Floors use `>=`, so adding tests never breaks anyone, and the runner
@@ -283,4 +322,6 @@ without a manifest edit fails set equality; a suite under its floor reds; and
 - R2 defect and fix: `node scripts/sentry-triage-project.test.mjs | grep -c '^ok '` returned 112 against a reported `110 passed` before PR #1787 moved the summary block to the file's end; the count now reads 112, which the gate's floor requires.
 - Dependency-freedom: the 34 modules the gate loads or spawns — itself, its imports, every non-exempt suite and their transitive first-party imports — import only `node:` builtins and repo-local siblings, checked by walking `staticImports` over that closure. (The exempt importer's own closure does reach `js-yaml`; the gate digests those files, it never loads them.) The checker's `js-yaml` import is why the checker stays a step 4-5 job.
 - The gate green against the real suites: `node scripts/sentry-suite-gate.mjs` reconciles all thirteen `scripts/sentry-*.test.mjs`, asserts the twelve non-exempt suites from their output, and re-verifies the provider-contract exemption route.
-- Each negative path reds the gate: `node scripts/sentry-suite-gate.test.mjs`.
+- Each negative path reds the gate: `node scripts/sentry-suite-gate.test.mjs` and `node scripts/sentry-suite-gate-integrity.test.mjs`.
+- Snapshot cost, measured on this repository: full tracked tree 1.48s each / 18.8s for thirteen; derived input set 20ms each / 241ms for thirteen. The gate's own overhead went 0.21s → 0.60s, its total 5.3s → 5.7s.
+- Declared reads are complete because incompleteness fails: running every suite from a sparse snapshot converged on six reads across three suites, one of which review had found by inspection.

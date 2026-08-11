@@ -2678,6 +2678,7 @@ while IFS= read -r path; do
         scripts/agent-quality-gate.sh | \
         scripts/check-agent-quality-gate-package-scripts.sh | \
         scripts/check-sentry-suites-in-ci*.mjs | \
+        scripts/static-imports.mjs | \
         scripts/sentry-*.test.mjs | \
         scripts/*/sentry-*.test.mjs | \
         scripts/tf-stacks.test.mjs)
@@ -2712,10 +2713,29 @@ while IFS= read -r path; do
     # gate suite — and that file owns fixture environment isolation, the
     # step-summary redirection and the shared harness. The prefix glob covers
     # every current and future gate module, so the next split cannot reopen it.
+    #
+    # `scripts/static-imports.mjs` is named outright because it sits under
+    # neither prefix and yet decides both consumers' answers: the gate's watch
+    # set and exemption proof, and the CI-coverage check's import proof. It
+    # scheduled only Trunk, lint:scripts and tf:test when it was extracted, so a
+    # behavioural parser change was validated by neither gate suite nor the
+    # checker (Codex 3761572721). It is listed in the coverage-check arm above
+    # for the same reason. A shared module belongs in every arm that reads it,
+    # whatever it is called.
+    #
+    # `check-sentry-suites-in-ci-core-commands.mjs` is here on the same ground,
+    # found by the dry-run sweep that closed the one above: the gate's exemption
+    # proof now parses the `tf:test` alias with that module's shell grammar, so
+    # a change to it changes a gate verdict while its name still says "checker".
+    # Four gaps of this shape have now come from naming files rather than
+    # deriving readers; the gate's own watch set is the derived answer, and
+    # teaching this mapping to consult it is the standing fix (#1803).
     case "$path" in
       scripts/sentry-*.test.mjs | \
         scripts/*/sentry-*.test.mjs | \
         scripts/sentry-suite-gate*.mjs | \
+        scripts/static-imports.mjs | \
+        scripts/check-sentry-suites-in-ci-core-commands.mjs | \
         scripts/sentry-suite-manifest.json)
         add_command "/usr/bin/env -u NODE_OPTIONS -u NODE_PATH node scripts/sentry-suite-gate.test.mjs" "Sentry-suite gate, manifest, or a manifest-owned suite changed"
         add_command "/usr/bin/env -u NODE_OPTIONS -u NODE_PATH node scripts/sentry-suite-gate.mjs" "Sentry-suite gate, manifest, or a manifest-owned suite changed (validate the committed manifest against the real suites)"

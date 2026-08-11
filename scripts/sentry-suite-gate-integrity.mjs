@@ -16,7 +16,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, isAbsolute, join, normalize } from "node:path";
 
 import { staticImportsOf } from "./static-imports.mjs";
@@ -60,13 +60,18 @@ export function digestFile(path) {
  * `sentry-zzz-victim` (a genuinely failing suite) and the gate exited 0 with
  * both rows `ok`.
  *
- * @param {string[]} suites repo-relative suite paths
+ * `inputs` is accepted so a caller that already derived the set does not derive
+ * it twice: the closure costs ~185ms of child processes on the real manifest,
+ * and the gate needs the same list for its per-suite snapshots.
+ *
+ * @param {{ suites: Record<string, any> }} manifest
  * @param {string} root
+ * @param {string[]} [inputs] precomputed `gateInputs(manifest, root)`
  * @returns {Map<string, string | null>} repo-relative path to digest
  */
-export function digestWatchSet(manifest, root) {
+export function digestWatchSet(manifest, root, inputs) {
   return new Map(
-    gateInputs(manifest, root).map((relative) => [
+    (inputs ?? gateInputs(manifest, root)).map((relative) => [
       relative,
       digestFile(join(root, relative)),
     ]),
@@ -121,6 +126,12 @@ export function gateInputs(manifest, root) {
     // A suite's verdict is only as trustworthy as everything that determines
     // its output, which includes every module it pulls in, transitively.
     entryPoints.push(suite);
+    // …and every repository file it READS. Imports are derivable; runtime reads
+    // are not, so the manifest declares them and the snapshot makes the
+    // declaration self-enforcing: a suite reading a file it did not declare
+    // finds it absent and fails (Codex 3761572727 reported one such read; the
+    // sparse snapshot found six across three suites).
+    for (const read of entry?.reads ?? []) inputs.add(read);
     if (!entry?.exempt) continue;
     // Both halves of the route proof, per ADR 0062.
     inputs.add(entry.exempt.importer);
@@ -228,6 +239,48 @@ export function importClosure(entries, root) {
  */
 export function localImportClosure(relative, root) {
   return importClosure([relative], root);
+}
+
+/**
+ * Copy `files` out of `root` into a fresh directory: one suite's immutable view
+ * of the committed tree.
+ *
+ * This is what makes a suite's result its own. Digests could only ever DETECT
+ * interference, and only interference that persisted: an earlier suite that
+ * replaced a watched helper with a module restoring the original bytes during
+ * import, then exporting a forged value, left the final digest matching the
+ * baseline and the gate exiting 0 (Codex 3761572724). Before/after hashes
+ * cannot see a transient rewrite. Separate directories can — because there is
+ * nothing to see. Every child reads a tree no other child can reach.
+ *
+ * Snapshots are taken for ALL suites before the FIRST child starts. Taken
+ * lazily, an earlier suite could poison the shared checkout and a later
+ * snapshot would faithfully copy the poison.
+ *
+ * Only the derived input set is copied, not the 2,124-file tracked tree: the
+ * full copy measured 1.48s each and 18.8s for thirteen, against 20ms and 241ms
+ * for these ~65 files. The sparseness is also what makes an undeclared runtime
+ * read fail loudly instead of silently succeeding.
+ *
+ * @param {string[]} files repo-relative paths
+ * @param {string} root
+ * @param {string} dest existing directory to fill
+ * @returns {string} dest
+ */
+export function snapshotInputs(files, root, dest) {
+  for (const relative of files) {
+    const target = join(dest, relative);
+    mkdirSync(dirname(target), { recursive: true });
+    try {
+      copyFileSync(join(root, relative), target);
+    } catch (err) {
+      // A watched file that cannot be copied is a watched file the suite would
+      // read as absent. Say so here rather than letting it surface as a
+      // confusing failure inside the child.
+      if (err.code !== "ENOENT") throw err;
+    }
+  }
+  return dest;
 }
 
 /**
