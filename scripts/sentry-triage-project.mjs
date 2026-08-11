@@ -204,7 +204,14 @@ async function readSiblingVerdicts(localRun, repo, duplicateOf) {
   let rows;
   try {
     rows = JSON.parse(stdout);
-  } catch {
+  } catch (err) {
+    // Same visibility as the listing failure above. A `gh` output-format change
+    // would otherwise disable inheritance permanently and silently, with
+    // nothing in the logs to explain why families stopped collapsing.
+    const message = err instanceof Error ? err.message : String(err);
+    process.stderr.write(
+      `::warning::Could not parse the queue stub listing for family inheritance (${message}); keeping the agent's own verdict.\n`,
+    );
     return [];
   }
   const out = [];

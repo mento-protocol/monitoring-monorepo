@@ -66,6 +66,7 @@ import {
   isTrustedComment,
   parseShortId,
   resolveVerdict,
+  VALID_VERDICTS,
   verdictCommentIdFromUrl,
 } from "./sentry-triage-project-core.mjs";
 // The terminal marker the write-side guard refuses to write past — one source of
@@ -361,10 +362,15 @@ export async function runBrief({
   repo = DEFAULT_REPO,
   issueNumber,
   dryRun = false,
+  effectiveVerdict = null,
   log = console.log,
 } = {}) {
   const issue = await readQueueIssue(runGh, repo, issueNumber);
-  const { parsed, verdict } = resolveVerdict(issue, issueNumber);
+  const resolved = resolveVerdict(issue, issueNumber);
+  const parsed = resolved.parsed;
+  // What the LABEL step applied. Family inheritance (#1614) can redirect a
+  // needs-human comment, and a second resolver would then brief a settled stub.
+  const verdict = effectiveVerdict ?? resolved.verdict;
   const existing = findBriefComments(issue.comments);
 
   if (verdict !== "needs-human") {
@@ -547,7 +553,12 @@ export async function runBrief({
 // ---------------------------------------------------------------------------
 
 export function parseArgs(argv) {
-  const args = { repo: DEFAULT_REPO, issueNumber: null, dryRun: false };
+  const args = {
+    repo: DEFAULT_REPO,
+    issueNumber: null,
+    dryRun: false,
+    effectiveVerdict: null,
+  };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "--issue") {
@@ -556,6 +567,14 @@ export function parseArgs(argv) {
       args.repo = argv[++i];
     } else if (arg === "--dry-run") {
       args.dryRun = true;
+    } else if (arg === "--effective-verdict") {
+      const value = argv[++i]; // closed enum: unknown values fail loud
+      if (!VALID_VERDICTS.includes(value)) {
+        throw new Error(
+          `--effective-verdict must be one of ${VALID_VERDICTS.join(", ")}, got: ${value}`,
+        );
+      }
+      args.effectiveVerdict = value;
     } else {
       throw new Error(`Unknown argument: ${arg}`);
     }

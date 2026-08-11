@@ -895,9 +895,15 @@ jobs:
           # Plain scripts/ is correct HERE for the same reason as the label
           # step above: this job has its own runner and its own pristine
           # checkout, which the agent never touched.
+          # Pass the verdict the LABEL step actually applied. Family
+          # inheritance (#1614) can redirect a needs-human comment to its
+          # family's verdict, and this leg re-resolving the same comment would
+          # then render a "Decision needed" brief onto a stub about to close.
+          # Closed enum from the parser, never agent text.
           if ! node scripts/sentry-triage-brief.mjs \
               --issue "${QUEUE_ISSUE_NUMBER}" \
-              --repo "${GITHUB_REPOSITORY}"; then
+              --repo "${GITHUB_REPOSITORY}" \
+              --effective-verdict "${VERDICT}"; then
             if [ "${VERDICT}" = "needs-human" ]; then
               echo "::warning::Could not render the needs-human brief on issue #${QUEUE_ISSUE_NUMBER} (see the log above); the verdict label and verdict comment already carry the escalation, so leaving the open stub and continuing (best-effort)."
             else

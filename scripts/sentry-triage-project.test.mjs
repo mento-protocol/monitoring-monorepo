@@ -23,6 +23,7 @@ import {
   parseArgs,
   parseShortId,
   parseVerdictComment,
+  PROJECTABLE_VERDICTS,
   PROJECTED_LABEL,
   runParseOnly,
   runPriorVerdicts,
@@ -38,7 +39,10 @@ import {
   VERDICT_TO_LABEL,
 } from "./sentry-triage-project.mjs";
 import { BRIEF_COMMENT_MARKER } from "./sentry-triage-brief.mjs";
-import { selectInheritableSibling } from "./sentry-triage-queue-contract.mjs";
+import {
+  INHERITABLE_VERDICT,
+  selectInheritableSibling,
+} from "./sentry-triage-queue-contract.mjs";
 
 let passed = 0;
 let failed = 0;
@@ -3053,6 +3057,18 @@ const SIB = (shortId, state, ...labels) => ({
   shortId,
   state,
   labels: labels.map((name) => ({ name })),
+});
+
+await test("the inheritable verdict can never reach the cross-repo write path", () => {
+  // The load-bearing invariant of the whole design. Inheritance keys on an
+  // agent-authored field, so it is only safe while the verdict it can apply
+  // writes nothing outside this queue. Adding INHERITABLE_VERDICT to
+  // PROJECTABLE_VERDICTS later would silently turn every inherited settlement
+  // into an issue filed in another team's repo.
+  assert(
+    !PROJECTABLE_VERDICTS.includes(INHERITABLE_VERDICT),
+    `${INHERITABLE_VERDICT} is inheritable, so it must NOT be projectable — inheritance would otherwise write into an owning repo for a stub no agent examined`,
+  );
 });
 
 await test("inherits upstream-transient from a closed family sibling", () => {

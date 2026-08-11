@@ -19,6 +19,7 @@
 import {
   extractYamlBlock,
   MAX_DUPLICATE_LOOKUPS,
+  VERDICT_TO_LABEL,
 } from "./sentry-triage-project-core.mjs";
 import { sanitizeDuplicateIds } from "./sentry-triage-text.mjs";
 
@@ -407,7 +408,10 @@ export function withArchiveBaseline(body, baseline) {
 // re-opened issue if Sentry regresses it — recoverable, and the regression path
 // already exists.
 export const INHERITABLE_VERDICT = "upstream-transient";
-export const INHERITABLE_VERDICT_LABEL = "sentry:verdict-upstream";
+// Derived, never a second literal: the tests build sibling labels from this
+// same constant, so a hand-copied string would drift with VERDICT_TO_LABEL and
+// silently stop matching real siblings with nothing failing.
+export const INHERITABLE_VERDICT_LABEL = VERDICT_TO_LABEL[INHERITABLE_VERDICT];
 
 /**
  * Pure: pick the sibling this stub may inherit from, or null.

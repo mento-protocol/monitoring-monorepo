@@ -1846,6 +1846,52 @@ await test("the triage prompt documents the rest of the verdict contract", () =>
   }
 });
 
+// #1614: the label step is the single authority on which verdict settled the
+// stub. Without this override two resolvers read the same comment and can
+// disagree, which is how an inherited settlement ends up closed while still
+// showing "Decision needed".
+await test("an inherited verdict clears the brief instead of rendering one", async () => {
+  const yaml = needsHumanYaml("Decide whether to allowlist the host");
+  const gh = makeRunGh({
+    ...stubIssue(yaml),
+    comments: [
+      briefCommentObject(renderFixture(), 6100),
+      verdictCommentObject(yaml),
+    ],
+  });
+  const result = await runBrief({
+    runGh: gh.runGh,
+    issueNumber: 1731,
+    effectiveVerdict: "upstream-transient",
+    log: () => {},
+  });
+  // Treated exactly like any other non-needs-human verdict: the stale brief is
+  // DELETED and no new one is written, so the stub cannot close showing an
+  // obsolete ask the family already answered. (`written` in the clear branch
+  // means "a delete happened" — the render path is the one that creates.)
+  assertEqual(created(gh).length, 0);
+  assertEqual(patched(gh).length, 0);
+  assertEqual(deleted(gh).length, 1);
+  assertEqual(result.verdict, "upstream-transient");
+});
+
+await test("parseArgs rejects an effective verdict outside the closed enum", () => {
+  let threw = false;
+  try {
+    parseArgs(["--issue", "1", "--effective-verdict", "made-up"]);
+  } catch {
+    threw = true;
+  }
+  assert(threw, "an unrecognised --effective-verdict must fail loudly");
+  assertEqual(
+    parseArgs(["--issue", "1", "--effective-verdict", "upstream-transient"])
+      .effectiveVerdict,
+    "upstream-transient",
+  );
+  // Absent flag stays null so a manual invocation still re-derives.
+  assertEqual(parseArgs(["--issue", "1"]).effectiveVerdict, null);
+});
+
 if (failed > 0) {
   process.stderr.write(`${failed} failed, ${passed} passed\n`);
   process.exitCode = 1;
