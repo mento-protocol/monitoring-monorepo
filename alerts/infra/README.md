@@ -245,11 +245,15 @@ cloud-routine experiment ran for weeks producing nothing and nobody noticed.
 - **5h is the chosen latency, not a defect to fix.** Dropping the
   `aggregations` block from `condition_absent` would bring detection to the 3h
   the field advertises; we keep the aggregation deliberately. The watcher
-  publishes hourly, so 3h fires after three consecutive missed runs and 5h
-  after five, and Cloud Scheduler on this repo drifts up to ~3h behind cron —
-  tightening buys a couple of hours on a dead watcher at the cost of paging on
-  a scheduler stall that would have resolved itself. Decided on #1777; reopen
-  that issue rather than shortening anything here
+  publishes hourly, so 3h fires after three consecutive missed publishes and 5h
+  after five. What this alarm protects is a monitoring gap, not an outage: a
+  dead watcher means the 26h freshness threshold is unguarded, while the
+  pipeline itself may be perfectly healthy. Two extra hours of detection on
+  that is cheap; a 03:00 page on a transient blip that would have cleared
+  itself is not. Note the ~3h drift figure quoted for the ingest cron above is
+  **GitHub Actions'** scheduler and does not apply here — this watcher runs on
+  GCP Cloud Scheduler, observed firing within seconds of its cron. Decided on
+  #1777; reopen that issue rather than shortening anything here
 - The threshold deliberately does not set `evaluation_missing_data`. Freshness
   is an absolute age rather than a delta, so a gap loses no information: the
   first point after any gap carries the true age and crosses 26h on its own if
