@@ -86,6 +86,14 @@ export const CANONICAL_JOB = {
  */
 export const FORBIDDEN_WORKFLOW_KEYS = ["env", "defaults"];
 
+/**
+ * Where to make the paired edit, named in every mismatch message. Whoever trips
+ * this assertion is usually not its author — most often a dependency bump — so
+ * the message has to point at the file and constant to change.
+ */
+const CANONICAL_JOB_NAME =
+  "CANONICAL_JOB (scripts/check-sentry-suites-in-ci-gate-job.test.mjs)";
+
 /** True for a plain object (not an array, not null). */
 function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -116,7 +124,8 @@ function assertExactShape(actual, expected, path, blockers) {
         blockers.push(
           `${path}.${key} is not part of the canonical \`${GATE_JOB}\` shape — this job is ` +
             "pinned by allowlist, so anything not listed is rejected; if the addition is " +
-            "legitimate, add it to CANONICAL_JOB so the change is reviewed on its merits",
+            `legitimate, add it to ${CANONICAL_JOB_NAME} in the same commit so the change is ` +
+            "reviewed on its merits",
         );
       }
     }
@@ -159,8 +168,22 @@ function assertExactShape(actual, expected, path, blockers) {
   }
 
   if (actual !== expected) {
+    // A pinned action SHA is the one mismatch a routine dependency PR will hit,
+    // and whoever hits it did not write this check. Spell out the fix and the
+    // reason, or the quickest way to make the assertion stop complaining is to
+    // loosen the pin — which is the one change it exists to prevent.
+    const isActionPin = path.endsWith(".uses");
+    const guidance = isActionPin
+      ? " — this is a SHA pin, not a version range. If you are bumping the action " +
+        `(Dependabot or otherwise), make the paired edit: set this entry in ${CANONICAL_JOB_NAME} ` +
+        "to the new SHA in the same commit. Do NOT relax the comparison to a prefix or a version " +
+        "tag: the two upstream actions are the only code that runs before the gate in a job whose " +
+        "whole premise is that nothing PR-authored runs first, so changing which code that is has " +
+        "to be re-proven by a human rather than ride in on a routine dependency PR."
+      : ` — if the change is legitimate, update ${CANONICAL_JOB_NAME} to match in the same commit, ` +
+        "so the new shape is reviewed on its merits rather than absorbed silently";
     blockers.push(
-      `${path} is ${JSON.stringify(actual)}, the canonical shape requires ${JSON.stringify(expected)}`,
+      `${path} is ${JSON.stringify(actual)}, the canonical shape requires ${JSON.stringify(expected)}${guidance}`,
     );
   }
 }

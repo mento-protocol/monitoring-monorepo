@@ -977,6 +977,12 @@ test("the checker's own files stay under the file-size hard cap", () => {
     "scripts/check-sentry-suites-in-ci-probes.mjs",
     "scripts/check-sentry-suites-in-ci-lifecycle.test.mjs",
     "scripts/check-sentry-suites-in-ci-gate-job.test.mjs",
+    // The runtime gate and its own suite. They were outside this list while
+    // growing to 833 and 935 lines, so the cap they are subject to was not
+    // actually enforced on them — the same unwatched-drift class this whole
+    // check exists to catch, in the checker's own house.
+    "scripts/sentry-suite-gate.mjs",
+    "scripts/sentry-suite-gate.test.mjs",
   ];
   const over = files
     .map((file) => ({
