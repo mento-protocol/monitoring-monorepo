@@ -5,8 +5,9 @@
 # included in the upload and `pnpm install` succeeds on Vercel's build servers.
 #
 # Project setup (creation, rootDirectory, env vars, GitHub secrets) is managed
-# by Terraform. After the approved platform apply, run `vercel link` on a new
-# checkout and select the existing mentolabs/monitoring-dashboard project.
+# by Terraform. The approved platform apply also writes `.vercel/project.json`
+# in that checkout. If it is missing, run `vercel link` and select the existing
+# mentolabs/monitoring-dashboard project.
 #
 # Usage:
 #   ./scripts/deploy-dashboard.sh

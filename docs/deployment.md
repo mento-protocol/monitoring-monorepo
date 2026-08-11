@@ -606,11 +606,10 @@ pnpm infra:apply -- -auto-approve
 ```
 
 Terraform creates the Upstash Redis database, Vercel project,
-Terraform-managed environment variables, and custom domain. Platform apply runs
-from a private committed-source snapshot, so its `local_file` does not persist
-in the operator checkout. On a new checkout, run `vercel link` and select the
-existing `mentolabs/monitoring-dashboard` project to create
-`.vercel/project.json` locally.
+Terraform-managed environment variables, and custom domain. It also writes the
+gitignored `.vercel/project.json` link metadata to the operator checkout. If
+that file is missing or stale, run `vercel link` and select the existing
+`mentolabs/monitoring-dashboard` project.
 
 **7. Trigger first deploy**
 

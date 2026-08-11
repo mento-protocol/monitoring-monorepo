@@ -289,9 +289,9 @@ resource "vercel_project_domain" "monitoring" {
 }
 
 # ── Local .vercel/project.json ────────────────────────────────────────────────
-# Declares the expected Vercel CLI link metadata. Guarded platform apply runs
-# inside a private committed-source snapshot, so a new operator checkout still
-# uses `vercel link` to create its gitignored local copy before manual deploy.
+# Declares the expected Vercel CLI link metadata. Guarded platform apply reads
+# Terraform source from a private snapshot but keeps the process cwd at the
+# repository root, so this gitignored file is written to the operator checkout.
 
 resource "local_file" "vercel_project_json" {
   content = jsonencode({
