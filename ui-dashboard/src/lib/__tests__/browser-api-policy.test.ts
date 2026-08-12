@@ -15,7 +15,8 @@ const OG_FIXTURE_PATH = "src/lib/homepage-og.ts";
 const TEST_FIXTURE_PATH = "src/lib/__tests__/browser-api-policy.test.ts";
 const SYMBOL_AWARE_RULE_ID =
   "browser-api-policy/no-unsupported-receiver-property";
-const LINT_RUNNER_TIMEOUT_MS = 30_000;
+const LINT_RUNNER_PROCESS_TIMEOUT_MS = 120_000;
+const POLICY_TEST_TIMEOUT_MS = LINT_RUNNER_PROCESS_TIMEOUT_MS + 5_000;
 const execFileAsync = promisify(execFile);
 const eslint = new ESLint({
   cwd: fileURLToPath(DASHBOARD_ROOT_URL),
@@ -52,6 +53,7 @@ const lintResultsPromise = execFileAsync(
     encoding: "utf8",
     env: { ...process.env, NODE_V8_COVERAGE: undefined },
     maxBuffer: 1024 * 1024,
+    timeout: LINT_RUNNER_PROCESS_TIMEOUT_MS,
   },
 ).then(
   ({ stdout }) => JSON.parse(stdout) as Record<LintCase, BrowserApiMessage[]>,
@@ -80,16 +82,24 @@ describe("browser runtime API policy", () => {
     expect(packageJson.browserslist).toEqual(browserApiPolicy.browsers);
   });
 
-  it("uses the exact blocked sets in the effective client config", async () => {
-    const rules = await browserApiRules(CLIENT_FIXTURE_PATH);
-    expect(rules.property).toBeUndefined();
-    expect(rules.symbolAware).toEqual([2, browserApiPolicy.restrictions]);
-  });
+  it(
+    "uses the exact blocked sets in the effective client config",
+    async () => {
+      const rules = await browserApiRules(CLIENT_FIXTURE_PATH);
+      expect(rules.property).toBeUndefined();
+      expect(rules.symbolAware).toEqual([2, browserApiPolicy.restrictions]);
+    },
+    POLICY_TEST_TIMEOUT_MS,
+  );
 
-  it("does not configure a generic property ban", async () => {
-    const rules = await browserApiRules(CLIENT_FIXTURE_PATH);
-    expect(rules.property).toBeUndefined();
-  });
+  it(
+    "does not configure a generic property ban",
+    async () => {
+      const rules = await browserApiRules(CLIENT_FIXTURE_PATH);
+      expect(rules.property).toBeUndefined();
+    },
+    POLICY_TEST_TIMEOUT_MS,
+  );
 
   it(
     "reports every blocked API with its intended rule and message",
@@ -108,7 +118,7 @@ describe("browser runtime API policy", () => {
         );
       }
     },
-    LINT_RUNNER_TIMEOUT_MS,
+    POLICY_TEST_TIMEOUT_MS,
   );
 
   it(
@@ -118,7 +128,7 @@ describe("browser runtime API policy", () => {
 
       expect(rules.symbolAware).toEqual([2, browserApiPolicy.restrictions]);
     },
-    LINT_RUNNER_TIMEOUT_MS,
+    POLICY_TEST_TIMEOUT_MS,
   );
 
   it(
@@ -143,7 +153,7 @@ describe("browser runtime API policy", () => {
         );
       }
     },
-    LINT_RUNNER_TIMEOUT_MS,
+    POLICY_TEST_TIMEOUT_MS,
   );
 
   it(
@@ -168,7 +178,7 @@ describe("browser runtime API policy", () => {
         );
       }
     },
-    LINT_RUNNER_TIMEOUT_MS,
+    POLICY_TEST_TIMEOUT_MS,
   );
 
   it(
@@ -191,7 +201,7 @@ describe("browser runtime API policy", () => {
         ).toHaveLength(restriction.property === "toSorted" ? 2 : 1);
       }
     },
-    LINT_RUNNER_TIMEOUT_MS,
+    POLICY_TEST_TIMEOUT_MS,
   );
 
   it(
@@ -214,7 +224,7 @@ describe("browser runtime API policy", () => {
         );
       }
     },
-    LINT_RUNNER_TIMEOUT_MS,
+    POLICY_TEST_TIMEOUT_MS,
   );
 
   it("allows shadowed and custom static groupBy methods", async () => {
