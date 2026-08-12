@@ -83,12 +83,17 @@ permissions:
 jobs:
   # ---------------------------------------------------------------------------
   # select: pick the capped batch of code-fix queue stubs owned by THIS repo
-  # that do not yet have a fix PR, and emit them as a matrix. ALWAYS runs and
+  # that do not yet have a fix PR — one per duplicate_of family, so five stubs
+  # of one root cause cost one run, not five — and emit them as a matrix.
+  # ALWAYS runs and
   # ALWAYS emits a valid JSON array — the kill switch and the secret/App guards
   # live in the first step, so a disabled or unprovisioned state is a clean
   # no-op (`[]`, exit 0), never a failure and never an empty matrix expression
   # downstream. The selection logic (verdict re-parse, exact-local repo check,
-  # dedup, cap) lives in scripts/sentry-autofix-select.mjs (+ tests), not inline.
+  # dedup, duplicate_of family collapse, cap) lives in
+  # scripts/sentry-autofix-select.mjs (+ tests), not inline. The cap counts
+  # CANDIDATES: one duplicate_of family consumes one slot however many stubs it
+  # spans (issue #1784).
   # ---------------------------------------------------------------------------
   select:
     runs-on: ubuntu-latest

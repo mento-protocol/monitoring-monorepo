@@ -21,6 +21,11 @@
  *     an unfixable stub. A merged/closed PR does NOT block: once a fixed issue
  *     regresses (ingest sheds the autofix markers on reopen), the stub is
  *     re-attemptable by design.
+ *   - FAMILY COLLAPSE (issue #1784): stubs whose verdicts place them in one
+ *     `duplicate_of` family consume ONE run between them, not one each. The
+ *     grouping, the transitive union and the representative rule live in
+ *     scripts/sentry-autofix-family.mjs; this module supplies the live state it
+ *     decides over. Deferral writes nothing.
  *   - Oldest-first, hard-capped at `--cap` (default 2) per run (quota cap).
  *
  * Pure of the kill switch / secret guards — the workflow's select job runs
@@ -48,6 +53,12 @@ import {
   PROJECTED_LABEL,
 } from "./sentry-triage-ingest.mjs";
 import { autofixBranchName } from "./sentry-autofix-finalize.mjs";
+import {
+  collapseDuplicateFamilies,
+  DEFER_FAMILY_DUPLICATE,
+  DEFER_FAMILY_HANDLED,
+  DEFER_FAMILY_RECONCILING,
+} from "./sentry-autofix-family.mjs";
 
 // Only `code-fix` verdicts are fixable in code; the select label already
 // filters to these, but the re-parse cross-checks the verdict value too.
@@ -192,6 +203,55 @@ async function listCodeFixStubs(runGh, repo) {
   );
 }
 
+/**
+ * SHORT-IDs of local stubs that already carry a TERMINAL autofix marker
+ * (`sentry:fix-pr-opened` / `sentry:fix-refused`) — the family-collapse input
+ * that `listCodeFixStubs` structurally cannot provide, because it excludes
+ * exactly these stubs from the candidate window.
+ *
+ * Without it, a refused representative strands its family: on the run after
+ * `ANALYTICS-MENTO-ORG-2E` (#1304) was refused, its four siblings are the only
+ * family members left in the window, each pointing back at a stub the selector
+ * can no longer see — so they come back one per run and re-burn the cap on a
+ * root cause the leg already declined. That is the exact 5-runs-for-1-cause
+ * failure this reads live state to close.
+ *
+ * One query per marker (never the `label:"a","b"` OR syntax): if that syntax
+ * were ever mis-parsed the query would return nothing, and this input fails
+ * OPEN — an empty handled set means no family is blocked, i.e. straight back to
+ * the bug. Two unambiguous queries cost one extra call on runs that have a
+ * family at all, and the selector only issues them then.
+ *
+ * Titles only — the SHORT-ID is parsed out of the queue title (contract v2) and
+ * shape-validated, so nothing here is trusted beyond its shape.
+ */
+async function listHandledShortIds(runGh, repo) {
+  const shortIds = new Set();
+  for (const marker of [FIX_PR_OPENED_LABEL, FIX_REFUSED_LABEL]) {
+    const stdout = await runGh([
+      "issue",
+      "list",
+      "--repo",
+      repo,
+      "--state",
+      "all",
+      "--search",
+      `sort:created-desc label:"${marker}" ${LOCAL_SENTRY_PROJECT} in:title`,
+      "--json",
+      "number,title",
+      "--limit",
+      String(LIST_LIMIT),
+    ]);
+    const parsed = JSON.parse(stdout);
+    for (const issue of Array.isArray(parsed) ? parsed : []) {
+      if (parseProject(issue.title ?? "") !== LOCAL_SENTRY_PROJECT) continue;
+      const shortId = parseShortId(issue.title ?? "");
+      if (isValidShortId(shortId)) shortIds.add(shortId);
+    }
+  }
+  return [...shortIds];
+}
+
 /** Read a queue stub's title/labels/comments so it can be evaluated in full. */
 async function readStub(runGh, repo, number) {
   const stdout = await runGh([
@@ -248,11 +308,17 @@ async function openAutofixPrExists(runGh, repo, shortId) {
 }
 
 /**
- * Evaluate ONE candidate stub against every autofix filter. Returns
- * `{ issue, shortId }` when it should be fixed, or `null` (with a stderr note)
- * otherwise. `stub` needs `{ number, title, labels }`; the verdict comments are
- * read here. Never throws — a parse failure is a skip, so the select job always
- * emits a valid array.
+ * Evaluate ONE candidate stub against every autofix filter. Returns a CANDIDATE
+ * record `{ entry, shortId, duplicateOf, reconcile }` when the stub passes, or
+ * `null` (with a stderr note) otherwise. `stub` needs `{ number, title, labels
+ * }`; the verdict comments are read here. Never throws — a parse failure is a
+ * skip, so the select job always emits a valid array.
+ *
+ * `entry` is the matrix entry EXACTLY as the workflow consumes it; the sibling
+ * fields are selection-time metadata (issue #1784) and never reach stdout. The
+ * split keeps the emitted contract byte-identical while giving family collapse
+ * the `duplicate_of` the same authoritative parser already produced — no second
+ * parser, and no new read.
  */
 async function evaluateCandidate(runGh, repo, stub) {
   // Dedup by label first (cheapest, no extra API call). Both autofix markers
@@ -330,7 +396,12 @@ async function evaluateCandidate(runGh, repo, stub) {
     process.stderr.write(
       `reconcile #${stub.number}: an open autofix PR exists for ${shortId} but the stub lacks its marker; routing to no-agent reconciliation.\n`,
     );
-    return { issue: stub.number, shortId, reconcile: true };
+    return {
+      entry: { issue: stub.number, shortId, reconcile: true },
+      shortId,
+      duplicateOf: parsed.duplicateOf,
+      reconcile: true,
+    };
   }
 
   // Generation token (issue #1506): the numeric id of the verdict comment this
@@ -346,18 +417,55 @@ async function evaluateCandidate(runGh, repo, stub) {
     process.stderr.write(
       `warn #${stub.number}: could not derive a verdict-comment id (url=${verdictCommentUrl}); emitting without a generation token.\n`,
     );
-    return { issue: stub.number, shortId };
+    return {
+      entry: { issue: stub.number, shortId },
+      shortId,
+      duplicateOf: parsed.duplicateOf,
+      reconcile: false,
+    };
   }
-  return { issue: stub.number, shortId, verdictCommentId };
+  return {
+    entry: { issue: stub.number, shortId, verdictCommentId },
+    shortId,
+    duplicateOf: parsed.duplicateOf,
+    reconcile: false,
+  };
 }
+
+/** Render a SHORT-ID into a diagnostic line. The value reaches stderr, which
+ * GitHub Actions scans for `::workflow commands::` — so a newline inside it
+ * would let agent-authored `duplicate_of` text inject one. `isValidShortId`
+ * admits no newline (nor anything outside `[A-Za-z0-9._-]`), and this is the
+ * one place a family id is interpolated, so the check sits here rather than
+ * being assumed of the caller. */
+function safeShortId(shortId) {
+  return isValidShortId(shortId) ? shortId : "(unprintable short-id)";
+}
+
+/** One note per deferral reason, keyed by the collapse's own constants so a
+ * reason added there cannot silently inherit another's wording. An unmapped
+ * reason still prints — as itself, not as somebody else's explanation. */
+const DEFER_NOTES = {
+  [DEFER_FAMILY_DUPLICATE]: (decision) =>
+    `same duplicate_of family as ${safeShortId(decision.representative)}, which represents the family this run`,
+  [DEFER_FAMILY_HANDLED]: (decision) =>
+    `its duplicate_of family already has an autofix attempt on ${safeShortId(decision.representative)} (a regression sheds that marker)`,
+  [DEFER_FAMILY_RECONCILING]: () =>
+    "its duplicate_of family already has an open autofix PR being reconciled this run",
+};
 
 /**
  * Select queue stubs to attempt a scoped fix PR for. Batch mode (default):
- * up to `cap` oldest `sentry:verdict-code-fix` stubs owned by this repo.
- * Single mode (`options.issue`): evaluate only that issue (the single-issue
- * `workflow_dispatch` live run) through the SAME filters — so a dispatch can
- * never fix an ineligible issue, but an eligible one opens a real PR. Returns
- * `[{ issue, shortId }]`.
+ * up to `cap` oldest `sentry:verdict-code-fix` stubs owned by this repo, ONE
+ * per `duplicate_of` family (issue #1784). Single mode (`options.issue`):
+ * evaluate only that issue (the single-issue `workflow_dispatch` live run)
+ * through the SAME filters — so a dispatch can never fix an ineligible issue,
+ * but an eligible one opens a real PR. Returns `[{ issue, shortId }]`.
+ *
+ * Family collapse is deliberately BATCH-ONLY. A dispatch names one issue
+ * explicitly, and an operator who names a family member after reviewing the
+ * refusal is overriding the heuristic on purpose — a `duplicate_of` entry is a
+ * family SIGNAL, not a confirmed duplicate, so the explicit request wins.
  */
 export async function selectAutofixCandidates(options, deps = {}) {
   const runGh = deps.runGh ?? defaultRunGh;
@@ -366,12 +474,12 @@ export async function selectAutofixCandidates(options, deps = {}) {
   // Single-issue live run: evaluate exactly the requested issue.
   if (options.issue != null) {
     const stub = await readStub(runGh, repo, options.issue);
-    const entry = await evaluateCandidate(runGh, repo, {
+    const candidate = await evaluateCandidate(runGh, repo, {
       number: stub.number,
       title: stub.title,
       labels: stub.labels,
     });
-    return entry ? [entry] : [];
+    return candidate ? [candidate.entry] : [];
   }
 
   const cap =
@@ -379,11 +487,45 @@ export async function selectAutofixCandidates(options, deps = {}) {
       ? options.cap
       : DEFAULT_CAP;
   const stubs = await listCodeFixStubs(runGh, repo);
-  const selected = [];
+
+  // Evaluate the WHOLE window before choosing, not just the first `cap`: the
+  // family union is transitive, so a stub further down the window can join two
+  // earlier ones (or attach to a family through an id that is not itself a
+  // candidate), and a decision taken before that stub is read can be wrong.
+  // The window is already narrowed server-side to unhandled, local, code-fix
+  // stubs and hard-capped at LIST_LIMIT, so this is a bounded number of reads.
+  const candidates = [];
   for (const stub of stubs) {
-    if (selected.length >= cap) break;
-    const entry = await evaluateCandidate(runGh, repo, stub);
-    if (entry) selected.push(entry);
+    const candidate = await evaluateCandidate(runGh, repo, stub);
+    if (candidate) candidates.push(candidate);
+  }
+
+  // No candidate declares a family -> nothing to collapse, and the extra
+  // handled-sibling reads are not worth issuing. This is also what keeps the
+  // no-duplicates path's `gh` call profile identical to the pre-#1784 one.
+  const hasFamilySignal = candidates.some(
+    (candidate) => (candidate.duplicateOf ?? []).length > 0,
+  );
+  const handledShortIds = hasFamilySignal
+    ? await listHandledShortIds(runGh, repo)
+    : [];
+
+  const decisions = collapseDuplicateFamilies(candidates, { handledShortIds });
+  const selected = [];
+  for (const decision of decisions) {
+    const number = decision.candidate.entry.issue;
+    if (!decision.selected) {
+      // Deferral writes NOTHING — no label, no comment, no marker. The member
+      // stays exactly as selectable as its live state makes it on the next run,
+      // which is what lets a genuine regression (ingest sheds the sibling's
+      // autofix marker) bring the family straight back.
+      process.stderr.write(
+        `defer #${number}: ${DEFER_NOTES[decision.reason]?.(decision) ?? `deferred (${decision.reason})`}; not marked, re-evaluated next run.\n`,
+      );
+      continue;
+    }
+    if (selected.length >= cap) continue;
+    selected.push(decision.candidate.entry);
   }
   return selected;
 }
@@ -420,11 +562,14 @@ function usage() {
 
 Prints a JSON array of { "issue": <number>, "shortId": "<SHORT-ID>" } matrix
 entries — the oldest capped batch of code-fix queue stubs owned by this repo
-that do not yet have a fix PR. Diagnostics go to stderr.
+that do not yet have a fix PR, collapsed to ONE candidate per \`duplicate_of\`
+family. Diagnostics go to stderr.
 
 Options:
   --repo <owner/name>  Repo the queue stubs live in (default: ${DEFAULT_REPO}).
-  --cap <n>            Max stubs to select per run (positive int; default ${DEFAULT_CAP}).
+  --cap <n>            Max CANDIDATES to select per run — one duplicate_of family
+                       counts once, however many stubs it spans (positive int;
+                       default ${DEFAULT_CAP}).
   --issue <n>          Single-issue live run: evaluate ONLY this issue through the
                        same filters (the workflow_dispatch path). Opens a real
                        fix PR if the issue is eligible. Overrides --cap.

@@ -6,7 +6,15 @@ import {
   parseArgs,
   selectAutofixCandidates,
 } from "./sentry-autofix-select.mjs";
-import { VERDICT_MARKER } from "./sentry-triage-project-core.mjs";
+import {
+  MAX_DUPLICATE_LOOKUPS,
+  VERDICT_MARKER,
+} from "./sentry-triage-project-core.mjs";
+import {
+  collapseDuplicateFamilies,
+  declaredFamilyIds,
+  MAX_FAMILY_MEMBERS,
+} from "./sentry-autofix-family.mjs";
 import {
   FIX_PR_OPENED_LABEL,
   FIX_REFUSED_LABEL,
@@ -37,13 +45,24 @@ function assertDeepEqual(actual, expected) {
   if (a !== e) throw new Error(`expected ${e}, got ${a}`);
 }
 
+function assertEqual(actual, expected, message) {
+  if (actual !== expected) {
+    throw new Error(
+      `${message ?? "mismatch"}: expected ${expected}, got ${actual}`,
+    );
+  }
+}
+
 const BOT = { login: "github-actions" };
 
-/** Build a bot-authored verdict comment for a code-fix stub. */
+/** Build a bot-authored verdict comment for a code-fix stub. `duplicates`
+ * renders in the SAME shape the live #1304-family verdicts carry — an inline
+ * flow sequence of double-quoted SHORT-IDs. */
 function verdictComment({
   affectedRepo = "mento-protocol/monitoring-monorepo",
   verdict = "code-fix",
   createdAt = "2026-07-18T00:00:00Z",
+  duplicates = [],
 } = {}) {
   const body = [
     VERDICT_MARKER,
@@ -57,7 +76,7 @@ function verdictComment({
     "  Abstract root cause.",
     "proposed_action: |",
     "  Abstract action.",
-    "duplicate_of: []",
+    `duplicate_of: [${duplicates.map((id) => `"${id}"`).join(", ")}]`,
     "```",
     "",
     "Diagnosis prose.",
@@ -99,13 +118,34 @@ function branchToShortId(branch) {
     .toUpperCase();
 }
 
-function makeRunGh({ stubs = [], prShortIds = [] } = {}) {
+/**
+ * `handled`: stubs that already carry a TERMINAL autofix marker — the
+ * `sentry:fix-pr-opened` / `sentry:fix-refused` siblings the candidate window
+ * excludes by construction, which the family collapse reads back through its
+ * own per-marker query (issue #1784). Each entry is `{ shortId, label }`.
+ */
+function makeRunGh({ stubs = [], prShortIds = [], handled = [] } = {}) {
   const calls = [];
   const byNumber = new Map(stubs.map((s) => [String(s.number), s]));
   const runGh = async (args) => {
     calls.push(args);
     const [a0, a1] = args;
     if (a0 === "issue" && a1 === "list") {
+      const searchIdx = args.indexOf("--search");
+      const search = searchIdx === -1 ? "" : args[searchIdx + 1];
+      // The handled-sibling query asks for a POSITIVE autofix marker label; the
+      // candidate window asks for its NEGATION. Route on that difference.
+      const marker = /(?:^|\s)label:"(sentry:fix-[a-z-]+)"/.exec(search);
+      if (marker) {
+        return JSON.stringify(
+          handled
+            .filter((h) => h.label === marker[1])
+            .map((h, i) => ({
+              number: 9000 + i,
+              title: `[sentry] ${h.shortId} (analytics-mento-org, error)`,
+            })),
+        );
+      }
       return JSON.stringify(
         stubs.map((s) => ({
           number: s.number,
@@ -467,6 +507,367 @@ await test("parseArgs defaults and validation", () => {
     threw = true;
   }
   assert(threw, "--cap 0 rejected");
+});
+
+// ---------------------------------------------------------------------------
+// duplicate_of FAMILY collapse (issue #1784).
+//
+// OLD PATH FIRST: every test above drives an EMPTY `duplicate_of`, so the whole
+// pre-#1784 contract (ordering, cap, starvation guard, reconcile, dedup,
+// generation token, single-issue dispatch) is already pinned through the
+// production entry point against the rerouted code. The two tests immediately
+// below pin the parts of that contract the collapse could plausibly perturb:
+// the gh call profile, and the interaction with the other filters.
+// ---------------------------------------------------------------------------
+
+// The REAL #1304 family (analytics-mento-org, 2026-07-16). Directional by
+// construction: 2E's verdict lists SIX duplicates, and each of the others lists
+// only 2E. Note MAX_DUPLICATE_LOOKUPS (5) truncates 2E's six-entry list, so 2B
+// is reachable ONLY through its own back-pointer.
+const FAMILY_2E_DUPLICATES = [
+  "ANALYTICS-MENTO-ORG-2F",
+  "ANALYTICS-MENTO-ORG-29",
+  "ANALYTICS-MENTO-ORG-2A",
+  "ANALYTICS-MENTO-ORG-2D",
+  "ANALYTICS-MENTO-ORG-2C",
+  "ANALYTICS-MENTO-ORG-2B",
+];
+
+/** One member of the real family: `[sentry] <SHORT-ID>` with the verdict that
+ * member actually carried. */
+function familyStub(number, shortId, createdAt, duplicates) {
+  return stub({
+    number,
+    shortId,
+    createdAt,
+    comments: [verdictComment({ createdAt, duplicates })],
+  });
+}
+
+/** The anchor (#1304 / ANALYTICS-MENTO-ORG-2E) plus its five back-pointing
+ * siblings, in the order the queue created them. */
+function realFamilyStubs() {
+  return [
+    familyStub(
+      1304,
+      "ANALYTICS-MENTO-ORG-2E",
+      "2026-07-16T17:27:24Z",
+      FAMILY_2E_DUPLICATES,
+    ),
+    familyStub(1313, "ANALYTICS-MENTO-ORG-2F", "2026-07-16T17:27:37Z", [
+      "ANALYTICS-MENTO-ORG-2E",
+    ]),
+    familyStub(1316, "ANALYTICS-MENTO-ORG-29", "2026-07-16T17:27:41Z", [
+      "ANALYTICS-MENTO-ORG-2E",
+    ]),
+    familyStub(1326, "ANALYTICS-MENTO-ORG-2A", "2026-07-16T17:27:54Z", [
+      "ANALYTICS-MENTO-ORG-2E",
+    ]),
+    familyStub(1328, "ANALYTICS-MENTO-ORG-2D", "2026-07-16T17:27:56Z", [
+      "ANALYTICS-MENTO-ORG-2E",
+    ]),
+  ];
+}
+
+/** The four siblings WITHOUT the anchor — the shape the window actually has on
+ * the run after 2E was handled: four stubs joined only through an id that is
+ * not itself a candidate. */
+function orphanedFamilyStubs() {
+  return realFamilyStubs().slice(1);
+}
+
+await test("OLD PATH: with no duplicate_of, selection order, cap and the gh call profile are unchanged", async () => {
+  const stubs = [
+    stub({
+      number: 10,
+      shortId: "APP-MENTO-ORG-2S",
+      createdAt: "2026-07-10T00:00:00Z",
+    }),
+    stub({
+      number: 11,
+      shortId: "APP-MENTO-ORG-3T",
+      createdAt: "2026-07-11T00:00:00Z",
+    }),
+    stub({
+      number: 12,
+      shortId: "APP-MENTO-ORG-4U",
+      createdAt: "2026-07-12T00:00:00Z",
+    }),
+  ];
+  const { runGh, calls } = makeRunGh({ stubs });
+  const selected = await selectAutofixCandidates(
+    { repo: "o/r", cap: 2 },
+    { runGh },
+  );
+  assertDeepEqual(selected, [
+    { issue: 10, shortId: "APP-MENTO-ORG-2S" },
+    { issue: 11, shortId: "APP-MENTO-ORG-3T" },
+  ]);
+  // No candidate declares a family, so the collapse must not issue its
+  // handled-sibling reads at all: exactly the ONE candidate-window list call.
+  const lists = calls.filter((c) => c[0] === "issue" && c[1] === "list");
+  assertEqual(lists.length, 1, "exactly one issue list call");
+});
+
+await test("OLD PATH: with no duplicate_of, the label dedup and the external-repo gate still filter first", async () => {
+  const stubs = [
+    stub({
+      number: 200,
+      shortId: "APP-MENTO-ORG-AA",
+      labels: [AUTOFIX_SELECT_LABEL, FIX_REFUSED_LABEL],
+      createdAt: "2026-07-10T00:00:00Z",
+    }),
+    stub({
+      number: 201,
+      shortId: "APP-MENTO-ORG-BB",
+      createdAt: "2026-07-11T00:00:00Z",
+      comments: [
+        verdictComment({ affectedRepo: "mento-protocol/minipay-dapp" }),
+      ],
+    }),
+    stub({
+      number: 202,
+      shortId: "APP-MENTO-ORG-CC",
+      createdAt: "2026-07-12T00:00:00Z",
+    }),
+  ];
+  const { runGh, calls } = makeRunGh({ stubs });
+  const selected = await selectAutofixCandidates({ repo: "o/r" }, { runGh });
+  assertDeepEqual(selected, [{ issue: 202, shortId: "APP-MENTO-ORG-CC" }]);
+  const lists = calls.filter((c) => c[0] === "issue" && c[1] === "list");
+  assertEqual(lists.length, 1, "no family queries without a family signal");
+});
+
+await test("the real #1304 family consumes ONE autofix run, on the stub the others point at", async () => {
+  const { runGh } = makeRunGh({ stubs: realFamilyStubs() });
+  const selected = await selectAutofixCandidates(
+    { repo: "o/r", cap: 2 },
+    { runGh },
+  );
+  // Five stubs, one root cause, one candidate — and the representative is 2E
+  // (in-degree 4), not merely the oldest.
+  assertDeepEqual(selected, [
+    { issue: 1304, shortId: "ANALYTICS-MENTO-ORG-2E" },
+  ]);
+});
+
+await test("the family graph is collapsed TRANSITIVELY, so one direction cannot split it", async () => {
+  // 2B sits past MAX_DUPLICATE_LOOKUPS in 2E's six-entry list, so following 2E's
+  // declared duplicates alone never reaches it; its own back-pointer does.
+  // Following either direction in isolation yields two candidates, not one.
+  const stubs = [
+    ...realFamilyStubs(),
+    familyStub(1330, "ANALYTICS-MENTO-ORG-2B", "2026-07-16T17:28:10Z", [
+      "ANALYTICS-MENTO-ORG-2E",
+    ]),
+  ];
+  const { runGh } = makeRunGh({ stubs });
+  const selected = await selectAutofixCandidates(
+    { repo: "o/r", cap: 2 },
+    { runGh },
+  );
+  assertDeepEqual(selected, [
+    { issue: 1304, shortId: "ANALYTICS-MENTO-ORG-2E" },
+  ]);
+});
+
+await test("siblings joined only through a NON-candidate id are still one family", async () => {
+  // The anchor is not in the window (it carries no marker here — it simply is
+  // not a candidate). The four siblings share no declared id with each other,
+  // only with 2E, so nothing but a transitive union over ids can join them.
+  const { runGh } = makeRunGh({ stubs: orphanedFamilyStubs() });
+  const selected = await selectAutofixCandidates(
+    { repo: "o/r", cap: 2 },
+    { runGh },
+  );
+  // No member has in-degree from a candidate, so the tie falls back to oldest.
+  assertDeepEqual(selected, [
+    { issue: 1313, shortId: "ANALYTICS-MENTO-ORG-2F" },
+  ]);
+});
+
+await test("a REFUSED representative does not hand the family back member-by-member", async () => {
+  // The exact path the only real data took: 2E ends sentry:fix-refused, which
+  // takes it OUT of the candidate window, leaving its four siblings. Pre-#1784
+  // that spent four more runs on one root cause.
+  const { runGh } = makeRunGh({
+    stubs: orphanedFamilyStubs(),
+    handled: [{ shortId: "ANALYTICS-MENTO-ORG-2E", label: FIX_REFUSED_LABEL }],
+  });
+  const selected = await selectAutofixCandidates(
+    { repo: "o/r", cap: 2 },
+    { runGh },
+  );
+  assertDeepEqual(selected, []);
+});
+
+await test("a family whose representative already has a fix PR opens no second one", async () => {
+  const { runGh } = makeRunGh({
+    stubs: orphanedFamilyStubs(),
+    handled: [
+      { shortId: "ANALYTICS-MENTO-ORG-2E", label: FIX_PR_OPENED_LABEL },
+    ],
+  });
+  const selected = await selectAutofixCandidates({ repo: "o/r" }, { runGh });
+  assertDeepEqual(selected, []);
+});
+
+await test("deferral is NOT permanent: the family returns once the blocking marker is shed", async () => {
+  // Run A: 2E is refused, so the whole family stands down.
+  const blocked = makeRunGh({
+    stubs: orphanedFamilyStubs(),
+    handled: [{ shortId: "ANALYTICS-MENTO-ORG-2E", label: FIX_REFUSED_LABEL }],
+  });
+  assertDeepEqual(
+    await selectAutofixCandidates({ repo: "o/r", cap: 2 }, blocked),
+    [],
+  );
+  // Deferral must persist NOTHING on the deferred stubs — the selector is a
+  // read-only step, and a marker written here would be the permanent discard
+  // the verdict contract forbids (duplicate_of is a family signal, not a
+  // confirmed duplicate). The mock throws on any call it does not model, so
+  // this asserts the shape of every call that was made.
+  for (const call of blocked.calls) {
+    assert(
+      (call[0] === "issue" && (call[1] === "list" || call[1] === "view")) ||
+        (call[0] === "pr" && call[1] === "list"),
+      `selector must issue reads only, got: ${call.join(" ")}`,
+    );
+  }
+  // Run B: a genuine regression re-queued 2E, which sheds its autofix markers
+  // (REOPEN_SHED_LABELS) — the same four stubs are selectable again, with no
+  // state to clear anywhere.
+  const reopened = makeRunGh({ stubs: orphanedFamilyStubs(), handled: [] });
+  assertDeepEqual(
+    await selectAutofixCandidates({ repo: "o/r", cap: 2 }, reopened),
+    [{ issue: 1313, shortId: "ANALYTICS-MENTO-ORG-2F" }],
+  );
+});
+
+await test("the representative is chosen by in-degree, not by position in the window", async () => {
+  // Same family, anchor NOT first in the window. Oldest-first tie-breaking
+  // alone would pick 2F; the in-degree rule still picks 2E.
+  const [anchor, ...rest] = realFamilyStubs();
+  const stubs = [rest[0], rest[1], anchor, rest[2], rest[3]];
+  const { runGh } = makeRunGh({ stubs });
+  const selected = await selectAutofixCandidates(
+    { repo: "o/r", cap: 2 },
+    { runGh },
+  );
+  assertDeepEqual(selected, [
+    { issue: 1304, shortId: "ANALYTICS-MENTO-ORG-2E" },
+  ]);
+});
+
+await test("a RECONCILE member is never collapsed away, and its family opens no second PR", async () => {
+  // A reconcile entry runs no agent — it relinks a prior run's open PR — so it
+  // must survive the collapse (dropping it strands that stub's queue
+  // side-effects forever). Its family already has an open fix PR, so no sibling
+  // may open another.
+  const { runGh } = makeRunGh({
+    stubs: realFamilyStubs(),
+    prShortIds: ["ANALYTICS-MENTO-ORG-2F"],
+  });
+  const selected = await selectAutofixCandidates(
+    { repo: "o/r", cap: 2 },
+    { runGh },
+  );
+  assertDeepEqual(selected, [
+    { issue: 1313, shortId: "ANALYTICS-MENTO-ORG-2F", reconcile: true },
+  ]);
+});
+
+await test("two independent families each get their own candidate", async () => {
+  const stubs = [
+    ...realFamilyStubs().slice(0, 2),
+    familyStub(1400, "ANALYTICS-MENTO-ORG-77", "2026-07-17T00:00:00Z", [
+      "ANALYTICS-MENTO-ORG-78",
+    ]),
+    familyStub(1401, "ANALYTICS-MENTO-ORG-78", "2026-07-17T00:01:00Z", [
+      "ANALYTICS-MENTO-ORG-77",
+    ]),
+  ];
+  const { runGh } = makeRunGh({ stubs });
+  const selected = await selectAutofixCandidates(
+    { repo: "o/r", cap: 5 },
+    { runGh },
+  );
+  assertDeepEqual(selected, [
+    { issue: 1304, shortId: "ANALYTICS-MENTO-ORG-2E" },
+    { issue: 1400, shortId: "ANALYTICS-MENTO-ORG-77" },
+  ]);
+});
+
+await test("single-issue dispatch overrides the family collapse (explicit human intent)", async () => {
+  // An operator who names a family member after reviewing the refusal is
+  // overriding a SIGNAL, not a confirmed duplicate — the dispatch path keeps
+  // its pre-#1784 behaviour exactly.
+  const { runGh, calls } = makeRunGh({
+    stubs: orphanedFamilyStubs(),
+    handled: [{ shortId: "ANALYTICS-MENTO-ORG-2E", label: FIX_REFUSED_LABEL }],
+  });
+  const selected = await selectAutofixCandidates(
+    { repo: "o/r", issue: 1316 },
+    { runGh },
+  );
+  assertDeepEqual(selected, [
+    { issue: 1316, shortId: "ANALYTICS-MENTO-ORG-29" },
+  ]);
+  assert(
+    !calls.some((c) => c[0] === "issue" && c[1] === "list"),
+    "dispatch must not run the batch or family queries",
+  );
+});
+
+// --- the pure collapse module's own bounds -------------------------------
+
+await test("declaredFamilyIds drops the stub's OWN id before spending the lookup budget", () => {
+  const self = "ANALYTICS-MENTO-ORG-2E";
+  const ids = declaredFamilyIds(self, [
+    self,
+    "APP-1",
+    "APP-2",
+    "APP-3",
+    "APP-4",
+    "APP-5",
+  ]);
+  // Capping before the self-exclusion would push APP-5 past the budget.
+  assertDeepEqual(ids, ["APP-1", "APP-2", "APP-3", "APP-4", "APP-5"]);
+  assertEqual(ids.length, MAX_DUPLICATE_LOOKUPS, "budget is the fan-out bound");
+});
+
+await test("a family that would exceed MAX_FAMILY_MEMBERS refuses the merge rather than growing", () => {
+  // Agent-authored lists chained end to end must not be able to union the whole
+  // queue into one family and defer everything behind a single representative.
+  // Failing toward MORE candidates is the safe direction (the run cap still
+  // holds); failing toward fewer would silently starve the queue.
+  const candidates = [];
+  for (let i = 0; i < MAX_FAMILY_MEMBERS + 10; i += 1) {
+    candidates.push({
+      shortId: `APP-${i}`,
+      duplicateOf: [`APP-${i + 1}`],
+      entry: { issue: i },
+    });
+  }
+  const decisions = collapseDuplicateFamilies(candidates, {});
+  const selected = decisions.filter((d) => d.selected).length;
+  assert(selected > 1, `the chain must not collapse to one, got ${selected}`);
+});
+
+await test("a shape-invalid handled SHORT-ID cannot block a family", () => {
+  // The handled set drives a DEFERRAL, so a malformed id must be inert rather
+  // than standing a family down — and it must never reach a rendered line.
+  const candidates = [
+    { shortId: "APP-1", duplicateOf: ["APP-2"], entry: { issue: 1 } },
+  ];
+  const blocked = collapseDuplicateFamilies(candidates, {
+    handledShortIds: ["APP-2"],
+  });
+  assertEqual(blocked[0].selected, false, "a valid handled id blocks");
+  const inert = collapseDuplicateFamilies(candidates, {
+    handledShortIds: ["APP 2\n::error::injected"],
+  });
+  assertEqual(inert[0].selected, true, "a malformed handled id is inert");
 });
 
 process.stdout.write(`\n${passed} passed, ${failed} failed\n`);

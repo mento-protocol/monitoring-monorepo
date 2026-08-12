@@ -635,13 +635,36 @@ fails so the next `main` run can project it safely.
 ### Local autofix PRs
 
 Autofix considers only local `code-fix` stubs without an existing fix PR,
-caps each run at two, and uses a GitHub App scoped to Contents and Pull
+caps each run at two CANDIDATES — not two stubs, see the family collapse
+below — and uses a GitHub App scoped to Contents and Pull
 requests on this repository. The fix agent receives no Sentry credential.
 Deterministic selection and finalization enforce the issue/branch/diff
 contract. `ui-dashboard/vercel.json` denies `git.deploymentEnabled` for
 `sentry-autofix/*`, so an autofix branch's untrusted diff never gets a Vercel
 deployment (and its production-linked secrets) before human review — a trust
 boundary earlier than the path-aware skip script (ADR 0019, issue #1452).
+
+**One candidate per `duplicate_of` family** (issue #1784). Stubs whose verdicts
+place them in one Sentry issue family consume ONE autofix run between them, not
+one each: #1304, #1313, #1316, #1326 and #1328 all resolved to
+`ANALYTICS-MENTO-ORG-2E` and all five ended `sentry:fix-refused` — five runs and
+five refusal records for one root cause. The selector groups candidates by the
+`duplicate_of` the verdict already carries, unioned TRANSITIVELY over SHORT-IDs
+(the graph is directional — #1304 listed six duplicates while the others pointed
+back only at `2E`, and a member id may connect two candidates without being one
+itself), and picks the stub the others point at, falling back to the oldest. A
+family whose SHORT-IDs include one already carrying `sentry:fix-pr-opened` or
+`sentry:fix-refused` stands down entirely, which is what stops a refused
+representative from handing the family back one member per run.
+
+Deferral is **not** permanent and writes nothing — no label, no comment, no
+marker. `duplicate_of` is a family signal, not a confirmed duplicate, so a
+deferred member must stay able to come back: the next run recomputes the whole
+decision from live state, and a genuine regression re-queues the blocking stub
+through `requeueQueueStub`, which sheds its autofix markers (`REOPEN_SHED_LABELS`)
+and frees the family. Selection stays read-only; it never re-queues anything
+itself. The single-issue `workflow_dispatch` path skips the collapse — naming
+one issue is explicit human intent that overrides a heuristic signal.
 
 The LLM agent runs in a **read-only `agent` job** (contents:read + issues:read,
 no App token) and hands its whole working tree to a separate **trusted
