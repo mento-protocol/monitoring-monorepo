@@ -213,7 +213,40 @@ rollovers. Per-policy consumer activation remains out of scope: when Grafana
 consumers are already enabled, do not combine a policy rollover with consumer
 changes or bypass the protected publication and runtime-pinning sequence.
 
-## 5. Interpret scheduled re-census
+## 5. Respond to a critical peg page
+
+Critical Peg alerts page Splunk On-Call and mention `@support-engineer` in
+`#alerts-critical`. The current support engineer coordinates the response until
+another responder explicitly takes over. The alert starts a human decision
+process; it does not authorize a protocol change by itself.
+
+1. Acknowledge the page in `#alerts-critical`, start or link the incident
+   thread, and state who is coordinating.
+2. Capture the alert, current decision package, and Grafana history. Check the
+   exact policy and source, executable price, fill, spread, structural flow,
+   freshness, and source health. Query the deep venue directly and compare the
+   independent sources so stale or partial data is not mistaken for a de-peg.
+   Do not edit policy or silence the alert during triage.
+3. Read the affected rate and breaker contracts at a current safely confirmed
+   block. Record the chain, block, contract addresses, current on-chain control
+   owner, and whether that owner is the operative Safe. Do not rely on a saved
+   owner address.
+4. Give the evidence and proposed response to the current on-chain control
+   owner. The humans controlling the Safe decide whether to change the breaker
+   or trading state; `@support-engineer` coordinates and records the decision.
+   Execute an approved action only through the normal Safe proposal and signing
+   flow. If the control path is unclear or unavailable, keep escalating in the
+   incident thread and make no control change.
+5. After execution, wait for the chain's normal finality and record the Safe
+   proposal or transaction link, transaction hash, chain, block, action,
+   decision owner, and time in the incident thread.
+6. Keep the incident open until direct on-chain reads match the decision, the
+   producer package is fresh, the dashboard shows the same current state, and
+   the critical alert resolves for the expected reason. Record those recovery
+   checks. Route any lasting source, policy, or alert change through the normal
+   reviewed deployment path.
+
+## 6. Interpret scheduled re-census
 
 The scheduled re-census is the authoritative exact-pair listing lookup at the
 start of every policy-due configured-source poll. It validates configured
@@ -252,7 +285,7 @@ tracks that removal.
 A source restoration is not enough by itself. Repeat the executable-depth and
 coverage gates before restoring alert authority.
 
-## 6. Respond to registry rot and clean up policy
+## 7. Respond to registry rot and clean up policy
 
 1. Acknowledge the alert and inspect the decision package plus Grafana history.
 2. Query the provider's authoritative listing directly. Distinguish absent,
