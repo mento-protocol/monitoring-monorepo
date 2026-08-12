@@ -491,5 +491,5 @@ fresh same-block input includes the numeric budget, enforceable controls,
 explicit certificate expiries, and a boundary-aligned EURm calculation. Its
 TradingLimitsV2 capacity output alone never proves the loss-budget gate. The
 current evaluator cannot grant readiness: it remains Blocked until an
-executable model authenticates the inputs and reproduces every sequential
+executable model authenticates the inputs and executes every sequential
 protected-boundary transition.

@@ -96,9 +96,11 @@ pnpm integrations:probe        # Quote-only Mento v3 route coverage snapshot
 pnpm integrations:probe --write-upstash  # Publish latest snapshot for /integrations
 pnpm integrations:probe:test   # Unit tests for probe adapters/parsers
 
-# EUROP operational admission (the tracked 2026-08-11 evidence snapshot is intentionally Blocked)
-node scripts/europ-operational-admission.mjs --snapshot scripts/fixtures/europ-operational-admission/2026-08-11.json  # Expected exit 1 + JSON Blocked; exit 2 means unreadable/invalid JSON
-node --test scripts/europ-operational-admission.test.mjs  # Regression tests for the fail-closed capacity and budget checks
+# EUROP operational admission (the tracked 2026-08-11 evidence snapshot remains Blocked)
+node scripts/europ-operational-admission.mjs --snapshot scripts/fixtures/europ-operational-admission/2026-08-11.json  # Expected exit 1 + BLOCKED/not_evaluable/unattested
+node --test scripts/europ-operational-admission.test.mjs  # Regression tests for fail-closed evaluator provenance and arithmetic diagnostics
+POLYGON_RPC_URL=https://polygon-rpc.example scripts/europ-operational-admission-proof.sh  # Runs two fresh localhost-only Anvil diagnostic scenarios; output is unattested
+node --test scripts/europ-operational-admission-proof.test.mjs  # Static runner safety, arithmetic, manifest, halt, and restore contract
 
 # Agent issue workboard
 # (Claude cloud sessions without the capability gate: MCP fallback in

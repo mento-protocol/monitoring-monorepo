@@ -4047,11 +4047,31 @@ assert_contains "- node scripts/check-peg-registry-integrity.test.mjs (peg regis
 run_gate "scripts/europ-operational-admission.mjs"
 assert_contains "- node --test scripts/europ-operational-admission.test.mjs (EUROP operational-admission evaluator changed)"
 
+run_gate "scripts/europ-operational-admission-contract.mjs"
+assert_contains "- node --test scripts/europ-operational-admission.test.mjs (EUROP operational-admission evaluator changed)"
+
+run_gate "scripts/europ-operational-admission-evidence.mjs"
+assert_contains "- node --test scripts/europ-operational-admission.test.mjs (EUROP operational-admission evaluator changed)"
+
+run_gate "scripts/europ-operational-admission-controls.mjs"
+assert_contains "- node --test scripts/europ-operational-admission.test.mjs (EUROP operational-admission evaluator changed)"
+
+run_gate "scripts/europ-operational-admission-witness.mjs"
+assert_contains "- node --test scripts/europ-operational-admission.test.mjs (EUROP operational-admission evaluator changed)"
+
 run_gate "scripts/europ-operational-admission.test.mjs"
 assert_contains "- node --test scripts/europ-operational-admission.test.mjs (EUROP operational-admission evaluator changed)"
 
 run_gate "scripts/fixtures/europ-operational-admission/2026-08-11.json"
 assert_contains "- node --test scripts/europ-operational-admission.test.mjs (EUROP operational-admission evaluator changed)"
+
+run_gate "scripts/europ-operational-admission-proof.sh"
+assert_contains "- bash -n scripts/europ-operational-admission-proof.sh (shell script changed)"
+assert_contains "- node --test scripts/europ-operational-admission-proof.test.mjs (EUROP local-fork proof runner changed)"
+
+run_gate "scripts/europ-operational-admission-proof.test.mjs"
+assert_contains "- pnpm lint:scripts (root build script changed)"
+assert_contains "- node --test scripts/europ-operational-admission-proof.test.mjs (EUROP local-fork proof runner changed)"
 
 run_gate "scripts/check-pr-description.mjs"
 assert_contains "- node scripts/check-pr-description.test.mjs (PR description validator changed)"

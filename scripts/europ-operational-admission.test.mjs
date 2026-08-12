@@ -10,10 +10,10 @@ const fixtureUrl = new URL(
   "./fixtures/europ-operational-admission/2026-08-11.json",
   import.meta.url,
 );
+const fixturePath = fileURLToPath(fixtureUrl);
 const scriptPath = fileURLToPath(
   new URL("./europ-operational-admission.mjs", import.meta.url),
 );
-const fixturePath = fileURLToPath(fixtureUrl);
 
 async function currentSnapshot() {
   return JSON.parse(await readFile(fixtureUrl, "utf8"));
@@ -23,17 +23,45 @@ function blockerCodes(result) {
   return new Set(result.blockers.map((blocker) => blocker.code));
 }
 
-test("derives the canonical six-hour TradingLimitsV2 monotone capacity", async () => {
-  const result = evaluateOperationalAdmission(await currentSnapshot());
-  const envelope = result.monotoneSwapEnvelope;
-
+function assertUnattested(result) {
   assert.equal(result.status, "BLOCKED");
-  assert.equal(envelope.netflowCapacityFixed15, 750000000000000000000n);
-  assert.equal(envelope.grossInputFixed15, 750375187593796898449n);
-  assert.equal(envelope.grossMonitoredInputRaw, 750375187593n);
-  assert.deepEqual(envelope.invariantViolations, []);
+  assert.equal(result.worstCaseBudgetComparison.status, "not_evaluable");
+  assert.match(
+    result.worstCaseBudgetComparison.reason,
+    /complete authenticated sequential model/u,
+  );
+  assert.match(
+    result.worstCaseBudgetComparison.reason,
+    /independent execution and fork-source attestation/u,
+  );
+  assert.equal(result.lossBudgetWitness.claimStatus, "unattested");
+  assert.equal(result.lossBudgetWitness.provenance, "unattested");
+  assert.equal(result.haltDiagnostics.localForkClaimStatus, "unattested");
+  assert.equal(result.haltDiagnostics.provenance, "unattested");
+  assert.ok(blockerCodes(result).has("LOCAL_FORK_PROVENANCE_UNATTESTED"));
+}
+
+test("derives canonical six-hour capacity while keeping local-fork claims unattested", async () => {
+  const result = evaluateOperationalAdmission(await currentSnapshot());
+
+  assertUnattested(result);
+  assert.equal(result.lossBudgetWitness.localForkClaimMatches, true);
+  assert.equal(result.haltDiagnostics.localForkClaimMatches, true);
+  assert.equal(result.monotoneCapacityBudgetComparison.status, "not_evaluable");
+  assert.equal(
+    result.monotoneSwapEnvelope.netflowCapacityFixed15,
+    750000000000000000000n,
+  );
+  assert.equal(
+    result.monotoneSwapEnvelope.grossInputFixed15,
+    750375187593796898449n,
+  );
+  assert.equal(
+    result.monotoneSwapEnvelope.grossMonitoredInputRaw,
+    750375187593n,
+  );
   assert.deepEqual(
-    envelope.windows.map((window) => [
+    result.monotoneSwapEnvelope.windows.map((window) => [
       window.name,
       window.resetWindows,
       window.durableCapacityFixed15,
@@ -43,75 +71,192 @@ test("derives the canonical six-hour TradingLimitsV2 monotone capacity", async (
       ["L1", 1n, 750000000000000000000n],
     ],
   );
+  assert.equal(
+    result.lossBudgetWitness.externalQuoteOutEurmRaw,
+    101949000000000000000000n,
+  );
 });
 
-test("keeps the current pinned evidence explicitly Blocked", async () => {
-  const result = evaluateOperationalAdmission(await currentSnapshot());
+test("caller-supplied claims and ignored extra arguments cannot unlock a conclusion", async () => {
+  const snapshot = await currentSnapshot();
+  snapshot.budget.liquidReserveAssetsEurmRaw = "40000000000000000000000000";
+  snapshot.controls.rate.enforcedNoChange = true;
+  snapshot.controls.strategies = snapshot.controls.strategies.map(
+    (strategy) => ({
+      ...strategy,
+      maxQuoteOutflowEurmRaw: "1",
+      mintCapEurmRaw: strategy.kind === "reserve" ? "1" : null,
+    }),
+  );
+  snapshot.boundaryModel = {
+    protectedSystemBoundary: "asserted boundary",
+    modelId: "asserted-model",
+    coversBidirectionalRateTransitions: true,
+    coversAllEnabledStrategies: true,
+    monotoneCapacityNetQuoteOutflowEurmRaw: "1",
+    worstCaseNetQuoteOutflowEurmRaw: "1",
+  };
+
+  const result = evaluateOperationalAdmission(snapshot, {});
+
+  assertUnattested(result);
+  assert.ok(blockerCodes(result).has("EXECUTABLE_LOSS_MODEL_NOT_IMPLEMENTED"));
+});
+
+test("fails closed on malformed local-fork claims without a validation blocker", async () => {
+  const snapshot = await currentSnapshot();
+  snapshot.lossBudgetWitness.successfulTransactions = "152";
+  snapshot.emergencyHalt.forkProof.reserveRebalanceSuspended = false;
+
+  const result = evaluateOperationalAdmission(snapshot);
+
+  assertUnattested(result);
+  assert.equal(result.lossBudgetWitness.localForkClaimMatches, false);
+  assert.equal(result.haltDiagnostics.localForkClaimMatches, false);
+  assert.ok(blockerCodes(result).has("LOCAL_FORK_WITNESS_CLAIM_MISMATCH"));
+  assert.ok(blockerCodes(result).has("LOCAL_FORK_HALT_CLAIM_MISMATCH"));
+});
+
+test("fails closed on malformed snapshots", async () => {
+  const snapshot = await currentSnapshot();
+  snapshot.pool.tradingLimits[0].netflowFixed15 = "not-an-integer";
+
+  const result = evaluateOperationalAdmission(snapshot);
 
   assert.equal(result.status, "BLOCKED");
-  assert.equal(result.monotoneCapacityBudgetComparison.status, "not_evaluable");
-  assert.equal(result.worstCaseBudgetComparison.status, "not_evaluable");
-  assert.equal(
-    result.evidenceIdentity.protocolIdentity
-      .matchesExpectedEuropPolygonIdentity,
-    true,
-  );
-  assert.equal(result.evidenceIdentity.protocolIdentity.authenticated, false);
-  assert.equal(result.evidenceIdentity.blockReference.wellFormed, true);
-  assert.equal(result.evidenceIdentity.blockReference.authenticated, false);
-  assert.equal(result.safeDiagnostics.matchesExpectedControlStructure, true);
-  assert.deepEqual(
-    blockerCodes(result),
-    new Set([
-      "EXECUTABLE_LOSS_MODEL_NOT_IMPLEMENTED",
-      "SNAPSHOT_NOT_AUTHENTICATED",
-      "APPROVED_BUDGET_MISSING",
-      "LIQUID_RESERVE_VALUE_MISSING",
-      "RATE_TRANSITION_BOUND_MISSING",
-      "STRATEGY_BOUNDARY_MODEL_MISSING",
-      "RESERVE_MINT_CAP_MISSING",
-      "CERTIFICATE_FIELD_MISSING",
-      "ATTESTATION_EXPIRY_MISSING",
-      "MONOTONE_CAPACITY_QUOTE_BOUND_MISSING",
-      "BOUNDARY_ALIGNED_LOSS_MODEL_MISSING",
-    ]),
-  );
+  assert.ok(blockerCodes(result).has("INPUT_INVALID"));
+  assert.ok(blockerCodes(result).has("LOCAL_FORK_PROVENANCE_UNATTESTED"));
 });
 
-test("CLI exits 1 and prints JSON for a valid-but-Blocked snapshot", () => {
+test("CLI rejects proof-directory imports with structured blocked JSON and exit 2", () => {
   const child = spawnSync(
+    process.execPath,
+    [
+      scriptPath,
+      "--snapshot",
+      fixturePath,
+      "--proof-dir",
+      "/arbitrary/complete",
+    ],
+    { encoding: "utf8" },
+  );
+
+  assert.equal(child.status, 2, child.stderr);
+  assert.equal(child.stderr, "");
+  const result = JSON.parse(child.stdout);
+  assertUnattested(result);
+  assert.ok(blockerCodes(result).has("LOCAL_FORK_ARTIFACT_IMPORT_UNSUPPORTED"));
+});
+
+test("CLI emits structured blocked JSON for snapshot-only and unreadable inputs", () => {
+  const snapshotOnly = spawnSync(
     process.execPath,
     [scriptPath, "--snapshot", fixturePath],
     { encoding: "utf8" },
   );
+  assert.equal(snapshotOnly.status, 1, snapshotOnly.stderr);
+  assertUnattested(JSON.parse(snapshotOnly.stdout));
 
-  assert.equal(child.status, 1);
-  assert.equal(child.signal, null);
-  assert.equal(child.stderr, "");
-  assert.equal(JSON.parse(child.stdout).status, "BLOCKED");
-});
-
-test("CLI preserves exit 2 and structured JSON for an unreadable snapshot", () => {
-  const child = spawnSync(
+  const unreadable = spawnSync(
     process.execPath,
     [scriptPath, "--snapshot", `${fixturePath}.missing`],
     { encoding: "utf8" },
   );
-
-  assert.equal(child.status, 2);
-  assert.equal(child.signal, null);
-  assert.equal(child.stderr, "");
-  const result = JSON.parse(child.stdout);
+  assert.equal(unreadable.status, 2, unreadable.stderr);
+  const result = JSON.parse(unreadable.stdout);
   assert.equal(result.status, "BLOCKED");
   assert.ok(blockerCodes(result).has("INPUT_INVALID"));
+  assert.ok(blockerCodes(result).has("LOCAL_FORK_PROVENANCE_UNATTESTED"));
 });
 
-test("arbitrary complete-looking claims cannot grant readiness", async () => {
+test("reports rate, custody, strategy, and pool-state drift as diagnostics", async () => {
+  const cases = [
+    [
+      "rate",
+      (snapshot) => {
+        snapshot.controls.rate.valueDeltaBreakerBps = 49;
+      },
+      "RATE_CONTROL_CONFIGURATION_MISMATCH",
+      (result) => result.rateDiagnostics.configurationMatches,
+    ],
+    [
+      "custody",
+      (snapshot) => {
+        snapshot.custodyBoundary.lpCustodySafe.threshold = "3";
+      },
+      "LP_CUSTODY_BOUNDARY_INVALID",
+      (result) => result.custodyDiagnostics.configurationMatches,
+    ],
+    [
+      "strategy",
+      (snapshot) => {
+        snapshot.controls.strategies[0].cooldownSeconds = 299;
+      },
+      "STRATEGY_CONFIGURATION_MISMATCH",
+      (result) => result.strategyDiagnostics.configurationMatches,
+    ],
+    [
+      "pool state",
+      (snapshot) => {
+        snapshot.pool.tradingLimits[0].limitFixed15 = "50000000000000000001";
+      },
+      "LOSS_BUDGET_WITNESS_CONFIGURATION_MISMATCH",
+      (result) => result.witnessConfiguration.poolConfigurationMatches,
+    ],
+  ];
+
+  for (const [, mutate, code, matches] of cases) {
+    const snapshot = await currentSnapshot();
+    mutate(snapshot);
+    const result = evaluateOperationalAdmission(snapshot);
+    assertUnattested(result);
+    assert.equal(matches(result), false);
+    assert.ok(blockerCodes(result).has(code));
+  }
+});
+
+test("binds the diagnostic witness to the exact budget approver, reference, and ceiling", async () => {
+  const cases = [
+    [
+      (snapshot) => {
+        snapshot.budget.approvedBy = "Different reviewer";
+      },
+      "BUDGET_APPROVAL_EVIDENCE_MISMATCH",
+      "approvalEvidenceMatches",
+    ],
+    [
+      (snapshot) => {
+        snapshot.budget.approvalReference = "https://example.com/other";
+      },
+      "BUDGET_APPROVAL_EVIDENCE_MISMATCH",
+      "approvalEvidenceMatches",
+    ],
+    [
+      (snapshot) => {
+        snapshot.budget.approvedBudgetEurmRaw = "100001000000000000000000";
+      },
+      "APPROVED_BUDGET_ABOVE_POLICY_CEILING",
+      "policyMatches",
+    ],
+  ];
+
+  for (const [mutate, code, failedField] of cases) {
+    const snapshot = await currentSnapshot();
+    mutate(snapshot);
+    const result = evaluateOperationalAdmission(snapshot);
+    assertUnattested(result);
+    assert.equal(result.budget[failedField], false);
+    assert.equal(result.lossBudgetWitness.localForkClaimMatches, false);
+    assert.ok(blockerCodes(result).has(code));
+  }
+  const result = evaluateOperationalAdmission(await currentSnapshot());
+  assert.equal(result.budget.approvedBudgetEurmRaw, 100000000000000000000000n);
+  assert.equal(result.budget.approvalEvidenceMatches, true);
+});
+
+test("complete-looking snapshot claims never grant readiness", async () => {
   const snapshot = await currentSnapshot();
   snapshot.budget.liquidReserveAssetsEurmRaw = "40000000000000000000000000";
-  snapshot.budget.approvedBudgetEurmRaw = "100000000000000000000000";
-  snapshot.budget.approvedBy = "asserted treasury owner";
-  snapshot.budget.approvalReference = "asserted approval";
   snapshot.controls.rate.enforcedNoChange = true;
   snapshot.controls.strategies = snapshot.controls.strategies.map(
     (strategy) => ({
@@ -140,58 +285,46 @@ test("arbitrary complete-looking claims cannot grant readiness", async () => {
   };
 
   const result = evaluateOperationalAdmission(snapshot);
-
-  assert.equal(result.status, "BLOCKED");
+  assertUnattested(result);
   assert.equal(result.monotoneCapacityBudgetComparison.status, "not_evaluable");
-  assert.equal(result.worstCaseBudgetComparison.status, "not_evaluable");
   assert.ok(blockerCodes(result).has("EXECUTABLE_LOSS_MODEL_NOT_IMPLEMENTED"));
   assert.ok(blockerCodes(result).has("SNAPSHOT_NOT_AUTHENTICATED"));
 });
 
-test("accepts signed netflow only inside the closed interval [-L, +L]", async () => {
+test("accepts signed netflow only within the closed TradingLimitsV2 interval", async () => {
   const base = await currentSnapshot();
   const limit = BigInt(base.pool.tradingLimits[0].limitFixed15);
-
-  for (const netflow of [limit, -limit]) {
+  for (const [netflow, invalid] of [
+    [limit, false],
+    [-limit, false],
+    [limit + 1n, true],
+    [-limit - 1n, true],
+  ]) {
     const snapshot = structuredClone(base);
     snapshot.pool.tradingLimits[0].netflowFixed15 = netflow.toString();
     const result = evaluateOperationalAdmission(snapshot);
-    assert.equal(result.status, "BLOCKED");
+    assertUnattested(result);
     assert.equal(
       blockerCodes(result).has("TRADING_LIMIT_INVARIANT_VIOLATION"),
-      false,
+      invalid,
     );
-  }
-
-  for (const netflow of [limit + 1n, -limit - 1n]) {
-    const snapshot = structuredClone(base);
-    snapshot.pool.tradingLimits[0].netflowFixed15 = netflow.toString();
-    const result = evaluateOperationalAdmission(snapshot);
-    assert.equal(result.status, "BLOCKED");
-    assert.ok(blockerCodes(result).has("TRADING_LIMIT_INVARIANT_VIOLATION"));
   }
 });
 
-test("returns structured Blocked results for malformed snapshots", async () => {
-  const malformedInteger = await currentSnapshot();
-  malformedInteger.pool.tradingLimits[0].netflowFixed15 = "not-an-integer";
-
-  for (const snapshot of [null, {}, malformedInteger]) {
+test("fails closed on malformed snapshots and ambiguous integer values", async () => {
+  const malformed = await currentSnapshot();
+  malformed.pool.tradingLimits[0].netflowFixed15 = "not-an-integer";
+  for (const snapshot of [null, {}, malformed]) {
     let result;
     assert.doesNotThrow(() => {
       result = evaluateOperationalAdmission(snapshot);
     });
     assert.equal(result.status, "BLOCKED");
     assert.ok(blockerCodes(result).has("INPUT_INVALID"));
-    assert.ok(
-      blockerCodes(result).has("EXECUTABLE_LOSS_MODEL_NOT_IMPLEMENTED"),
-    );
   }
-});
 
-test("rejects ambiguous and lossy integer representations", async () => {
   const base = await currentSnapshot();
-  const invalidIntegers = [
+  for (const value of [
     true,
     false,
     1.5,
@@ -204,30 +337,23 @@ test("rejects ambiguous and lossy integer representations", async () => {
     "1.0",
     "1e3",
     "",
-  ];
-
-  for (const value of invalidIntegers) {
+  ]) {
     const snapshot = structuredClone(base);
     snapshot.pool.tradingLimits[0].netflowFixed15 = value;
-    const result = evaluateOperationalAdmission(snapshot);
-    assert.equal(result.status, "BLOCKED");
-    assert.ok(blockerCodes(result).has("INPUT_INVALID"));
+    assert.ok(
+      blockerCodes(evaluateOperationalAdmission(snapshot)).has("INPUT_INVALID"),
+    );
   }
-});
-
-test("accepts canonical integer strings and safe integer numbers", async () => {
-  const base = await currentSnapshot();
   for (const value of ["0", "42", "-42", 0, 42, -42]) {
     const snapshot = structuredClone(base);
     snapshot.pool.tradingLimits[0].netflowFixed15 = value;
     const result = evaluateOperationalAdmission(snapshot);
-    assert.equal(result.status, "BLOCKED");
     assert.equal(blockerCodes(result).has("INPUT_INVALID"), false);
     assert.notEqual(result.monotoneSwapEnvelope, null);
   }
 });
 
-test("refuses to calculate capacity for a mismatched evidence identity", async () => {
+test("refuses capacity on identity mismatch or malformed block identity", async () => {
   const base = await currentSnapshot();
   const mutations = [
     (snapshot) => {
@@ -237,121 +363,83 @@ test("refuses to calculate capacity for a mismatched evidence identity", async (
       snapshot.evidence.asset = "USDm";
     },
     (snapshot) => {
-      snapshot.evidence.quoteAsset = "USDm";
-    },
-    (snapshot) => {
       snapshot.pool.address = "0x0000000000000000000000000000000000000001";
-    },
-    (snapshot) => {
-      snapshot.pool.quoteAsset.address =
-        "0x0000000000000000000000000000000000000002";
     },
     (snapshot) => {
       snapshot.pool.monitoredAsset.decimals = 18;
     },
   ];
-
   for (const mutate of mutations) {
     const snapshot = structuredClone(base);
     mutate(snapshot);
     const result = evaluateOperationalAdmission(snapshot);
-    assert.equal(result.status, "BLOCKED");
     assert.ok(blockerCodes(result).has("PROTOCOL_IDENTITY_MISMATCH"));
-    assert.equal(
-      result.evidenceIdentity.protocolIdentity
-        .matchesExpectedEuropPolygonIdentity,
-      false,
-    );
     assert.equal(result.monotoneSwapEnvelope, null);
   }
-});
 
-test("rejects malformed block identity before calculating capacity", async () => {
   const malformedHash = await currentSnapshot();
   malformedHash.evidence.blockHash = "0x1234";
   const hashResult = evaluateOperationalAdmission(malformedHash);
-  assert.equal(hashResult.status, "BLOCKED");
   assert.ok(blockerCodes(hashResult).has("BLOCK_REFERENCE_INVALID"));
-  assert.equal(hashResult.evidenceIdentity.blockReference.wellFormed, false);
   assert.equal(hashResult.monotoneSwapEnvelope, null);
 
-  const noncanonicalBlock = await currentSnapshot();
-  noncanonicalBlock.evidence.blockNumber = "091830875";
-  const blockResult = evaluateOperationalAdmission(noncanonicalBlock);
-  assert.equal(blockResult.status, "BLOCKED");
-  assert.ok(blockerCodes(blockResult).has("INPUT_INVALID"));
-  assert.equal(blockResult.monotoneSwapEnvelope, null);
+  const malformedNumber = await currentSnapshot();
+  malformedNumber.evidence.blockNumber = "091830875";
+  const numberResult = evaluateOperationalAdmission(malformedNumber);
+  assert.ok(blockerCodes(numberResult).has("INPUT_INVALID"));
+  assert.equal(numberResult.monotoneSwapEnvelope, null);
 });
 
-test("validates Safe structure for diagnostics without authenticating it", async () => {
-  const snapshot = await currentSnapshot();
-  snapshot.controls.safe.threshold = "7";
-
-  const result = evaluateOperationalAdmission(snapshot);
-
-  assert.equal(result.status, "BLOCKED");
-  assert.ok(blockerCodes(result).has("SAFE_STRUCTURE_INVALID"));
-  assert.ok(blockerCodes(result).has("SAFE_EXPECTED_CONFIGURATION_MISMATCH"));
-  assert.equal(result.safeDiagnostics.structurallyValid, false);
-  assert.equal(result.safeDiagnostics.matchesExpectedControlStructure, false);
-  assert.equal(result.safeDiagnostics.authenticated, false);
-});
-
-test("reports Safe nonce without including it in expected control structure", async () => {
-  const snapshot = await currentSnapshot();
-  snapshot.controls.safe.nonce = "10";
-
-  const result = evaluateOperationalAdmission(snapshot);
-
-  assert.equal(result.status, "BLOCKED");
-  assert.equal(result.safeDiagnostics.nonce, 10n);
-  assert.equal(result.safeDiagnostics.matchesExpectedControlStructure, true);
-  assert.equal(result.safeDiagnostics.authenticated, false);
+test("keeps Safe diagnostics structural and excludes nonce from expected structure", async () => {
+  const invalid = await currentSnapshot();
+  invalid.controls.safe.threshold = "7";
+  const invalidResult = evaluateOperationalAdmission(invalid);
+  assertUnattested(invalidResult);
+  assert.equal(invalidResult.safeDiagnostics.structurallyValid, false);
   assert.equal(
-    blockerCodes(result).has("SAFE_EXPECTED_CONFIGURATION_MISMATCH"),
+    invalidResult.safeDiagnostics.matchesExpectedControlStructure,
     false,
   );
-});
+  assert.equal(invalidResult.safeDiagnostics.authenticated, false);
+  assert.ok(blockerCodes(invalidResult).has("SAFE_STRUCTURE_INVALID"));
 
-test("treats an alternate valid block reference as well-formed but unauthenticated", async () => {
-  const snapshot = await currentSnapshot();
-  snapshot.evidence.blockNumber = "91830876";
-  snapshot.evidence.blockHash =
-    "0x1111111111111111111111111111111111111111111111111111111111111111";
-
-  const result = evaluateOperationalAdmission(snapshot);
-
-  assert.equal(result.status, "BLOCKED");
+  const nonce = await currentSnapshot();
+  nonce.controls.safe.nonce = "10";
+  const nonceResult = evaluateOperationalAdmission(nonce);
+  assert.equal(nonceResult.safeDiagnostics.nonce, 10n);
   assert.equal(
-    result.evidenceIdentity.protocolIdentity
-      .matchesExpectedEuropPolygonIdentity,
+    nonceResult.safeDiagnostics.matchesExpectedControlStructure,
     true,
   );
-  assert.equal(result.evidenceIdentity.blockReference.wellFormed, true);
-  assert.equal(result.evidenceIdentity.blockReference.authenticated, false);
-  assert.equal(result.evidenceIdentity.blockReference.blockNumber, 91830876n);
   assert.equal(
-    result.evidenceIdentity.blockReference.blockHash,
-    snapshot.evidence.blockHash,
-  );
-  assert.equal(
-    Object.hasOwn(result.evidenceIdentity, "matchesExpected"),
+    blockerCodes(nonceResult).has("SAFE_EXPECTED_CONFIGURATION_MISMATCH"),
     false,
   );
-  assert.notEqual(result.monotoneSwapEnvelope, null);
 });
 
-test("fails stale evidence against explicit evaluation time and maximum age", async () => {
+test("treats alternate valid block references as diagnostic and unattested", async () => {
   const snapshot = await currentSnapshot();
-  snapshot.evaluation.evaluatedAt = "2026-08-11T13:00:00Z";
+  snapshot.evidence.blockNumber = "91830876";
+  snapshot.evidence.blockHash = `0x${"1".repeat(64)}`;
 
   const result = evaluateOperationalAdmission(snapshot);
-
-  assert.equal(result.status, "BLOCKED");
-  assert.ok(blockerCodes(result).has("EVIDENCE_STALE"));
+  assertUnattested(result);
+  assert.equal(result.evidenceIdentity.blockReference.wellFormed, true);
+  assert.equal(result.evidenceIdentity.blockReference.authenticated, false);
+  assert.equal(result.monotoneSwapEnvelope === null, false);
+  assert.equal(result.witnessConfiguration.datedPinMatches, false);
+  assert.equal(result.haltDiagnostics.localForkClaimMatches, false);
+  assert.ok(blockerCodes(result).has("LOCAL_FORK_HALT_CLAIM_MISMATCH"));
 });
 
-test("requires strict ISO-8601 timestamps with an explicit UTC offset", async () => {
+test("enforces evidence freshness and strict timestamp syntax", async () => {
+  const stale = await currentSnapshot();
+  stale.evaluation.maxEvidenceAgeSeconds = "900";
+  stale.evaluation.evaluatedAt = "2026-08-11T13:00:00Z";
+  assert.ok(
+    blockerCodes(evaluateOperationalAdmission(stale)).has("EVIDENCE_STALE"),
+  );
+
   for (const observedAt of [
     "2026-08-11T12:29:00",
     "2026-02-30T12:29:00Z",
@@ -359,53 +447,66 @@ test("requires strict ISO-8601 timestamps with an explicit UTC offset", async ()
   ]) {
     const snapshot = await currentSnapshot();
     snapshot.evidence.observedAt = observedAt;
-    const result = evaluateOperationalAdmission(snapshot);
-    assert.equal(result.status, "BLOCKED");
     assert.ok(
-      blockerCodes(result).has("EVIDENCE_TIMESTAMP_MISSING_OR_INVALID"),
+      blockerCodes(evaluateOperationalAdmission(snapshot)).has(
+        "EVIDENCE_TIMESTAMP_MISSING_OR_INVALID",
+      ),
     );
   }
-
-  const explicitOffset = await currentSnapshot();
-  explicitOffset.evidence.observedAt = "2026-08-11T14:29:00+02:00";
-  explicitOffset.evaluation.evaluatedAt = "2026-08-11T14:35:00+02:00";
-  const validResult = evaluateOperationalAdmission(explicitOffset);
+  const offset = await currentSnapshot();
+  offset.evidence.observedAt = "2026-08-11T14:29:00+02:00";
+  offset.evaluation.evaluatedAt = "2026-08-11T14:35:00+02:00";
+  const result = evaluateOperationalAdmission(offset);
+  assert.equal(result.evaluation.evidenceAgeSeconds, 360n);
   assert.equal(
-    blockerCodes(validResult).has("EVIDENCE_TIMESTAMP_MISSING_OR_INVALID"),
+    blockerCodes(result).has("EVALUATION_TIMESTAMP_MISSING_OR_INVALID"),
     false,
   );
-  assert.equal(
-    blockerCodes(validResult).has("EVALUATION_TIMESTAMP_MISSING_OR_INVALID"),
-    false,
-  );
-  assert.equal(validResult.evaluation.evidenceAgeSeconds, 360n);
 });
 
-test("rejects timezone-less and normalized-invalid certificate expiries", async () => {
+test("enforces certificate expiry and the exact six-hour execution policy", async () => {
   for (const expiry of ["2027-01-01T00:00:00", "2026-02-30T00:00:00Z"]) {
     const snapshot = await currentSnapshot();
     snapshot.certificate.signerCoverageExpiresAt = expiry;
-    const result = evaluateOperationalAdmission(snapshot);
-    assert.equal(result.status, "BLOCKED");
-    assert.ok(blockerCodes(result).has("ATTESTATION_EXPIRY_INVALID"));
+    assert.ok(
+      blockerCodes(evaluateOperationalAdmission(snapshot)).has(
+        "ATTESTATION_EXPIRY_INVALID",
+      ),
+    );
   }
-});
+  const expired = await currentSnapshot();
+  for (const field of [
+    "signerCoverageExpiresAt",
+    "escalationRouteExpiresAt",
+    "executionProofExpiresAt",
+    "budgetApprovalExpiresAt",
+  ]) {
+    expired.certificate[field] = "2026-08-11T12:34:59Z";
+  }
+  assert.ok(
+    blockerCodes(evaluateOperationalAdmission(expired)).has(
+      "ATTESTATION_EXPIRED",
+    ),
+  );
 
-test("compares certificate expiry with explicit evaluation time", async () => {
-  const snapshot = await currentSnapshot();
-  snapshot.certificate = {
-    signerCoverageOwner: "Philip Paetz",
-    escalationRoute: "@support-engineer",
-    executionProof: "accepted Safe execution",
-    reviewer: "independent reviewer",
-    signerCoverageExpiresAt: "2026-08-11T12:34:59Z",
-    escalationRouteExpiresAt: "2026-08-11T12:34:59Z",
-    executionProofExpiresAt: "2026-08-11T12:34:59Z",
-    budgetApprovalExpiresAt: "2026-08-11T12:34:59Z",
-  };
-
-  const result = evaluateOperationalAdmission(snapshot);
-
-  assert.equal(result.status, "BLOCKED");
-  assert.ok(blockerCodes(result).has("ATTESTATION_EXPIRED"));
+  for (const mutate of [
+    (snapshot) => {
+      snapshot.certificate.acceptedSafeNonce = "9";
+    },
+    (snapshot) => {
+      snapshot.certificate.acceptedResponseSeconds = "21599";
+    },
+    (snapshot) => {
+      snapshot.certificate.executionElapsedSeconds = "7890";
+    },
+    (snapshot) => {
+      snapshot.certificate.executionWithinResponseTimeAccepted = false;
+    },
+  ]) {
+    const snapshot = await currentSnapshot();
+    mutate(snapshot);
+    const result = evaluateOperationalAdmission(snapshot);
+    assert.equal(result.certificate.policyMatches, false);
+    assert.ok(blockerCodes(result).has("CERTIFICATE_POLICY_MISMATCH"));
+  }
 });

@@ -2256,6 +2256,9 @@ while IFS= read -r path; do
         scripts/sanitize-terraform-output.sh)
           add_command "pnpm sanitize:test" "Terraform output sanitizer changed"
           ;;
+        scripts/europ-operational-admission-proof.sh)
+          add_command "node --test scripts/europ-operational-admission-proof.test.mjs" "EUROP local-fork proof runner changed"
+          ;;
       esac
       case "$path" in
         scripts/check-agent-quality-gate-package-scripts.sh)
@@ -2513,8 +2516,11 @@ while IFS= read -r path; do
           add_command "node scripts/check-peg-registry-integrity.mjs" "peg registry integrity checker changed"
           add_command "node scripts/check-peg-registry-integrity.test.mjs" "peg registry integrity checker changed"
           ;;
-        scripts/europ-operational-admission.mjs|scripts/europ-operational-admission.test.mjs)
+        scripts/europ-operational-admission.mjs|scripts/europ-operational-admission-contract.mjs|scripts/europ-operational-admission-evidence.mjs|scripts/europ-operational-admission-controls.mjs|scripts/europ-operational-admission-witness.mjs|scripts/europ-operational-admission.test.mjs)
           add_command "node --test scripts/europ-operational-admission.test.mjs" "EUROP operational-admission evaluator changed"
+          ;;
+        scripts/europ-operational-admission-proof.sh|scripts/europ-operational-admission-proof.test.mjs)
+          add_command "node --test scripts/europ-operational-admission-proof.test.mjs" "EUROP local-fork proof runner changed"
           ;;
         scripts/check-pr-description.mjs|scripts/check-pr-description.test.mjs)
           add_command "node scripts/check-pr-description.test.mjs" "PR description validator changed"

@@ -999,6 +999,12 @@ jobs:
         run: node scripts/check-peg-registry-integrity.mjs
       - name: Peg registry integrity checker suite
         run: node scripts/check-peg-registry-integrity.test.mjs
+      - name: EUROP operational-admission evaluator suite
+        run: node --test scripts/europ-operational-admission.test.mjs
+      - name: EUROP local-fork proof runner contract
+        # Static-only: the runner itself needs an operator-supplied read-only
+        # Polygon source and must never run against CI or production.
+        run: node --test scripts/europ-operational-admission-proof.test.mjs
       - name: Lighthouse config assertion suite
         # Exercises route matching, per-route threshold boundaries, and
         # multi-run aggregation through the installed LHCI CLI. Keep this in

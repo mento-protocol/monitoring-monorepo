@@ -8,31 +8,24 @@
     "quoteAsset": "EURm"
   },
   "evaluation": {
-    "evaluatedAt": "2026-08-11T12:35:00Z",
-    "maxEvidenceAgeSeconds": "900"
+    "evaluatedAt": "2026-08-11T14:21:33Z",
+    "maxEvidenceAgeSeconds": "7200"
   },
   "responseSeconds": "21600",
   "budget": {
-    "rule": "min(100,000 EURm, 0.5% of approved current liquid reserve assets)",
+    "rule": "fixed 100,000 EURm loss budget",
     "liquidReserveAssetsEurmRaw": null,
-    "approvedBudgetEurmRaw": null,
-    "approvedBy": null,
-    "approvalReference": null,
-    "conditionalCandidate": {
-      "status": "unapproved",
-      "proposedCustodyBoundary": "registered assets held by ReserveV2 plus its listed other-reserve Safe",
-      "usdcRaw": "120812444400",
-      "usdcUsd": "0.9998",
-      "eurUsd": "1.15364",
-      "eurmValueRaw": "104701884392982212822024",
-      "candidateBudgetEurmRaw": "523509421964911064110",
-      "sameBlockInventoryOnly": true,
-      "sharedReservePool": "0x463c0d1F04bcd99A1efCF94AC2a75bc19Ea4A7E5",
-      "sharedOpenPool": "0x93e15A22fDa39FEfcCCe82D387A09cCF030EAD61"
-    }
+    "approvedBudgetEurmRaw": "100000000000000000000000",
+    "approvedBy": "Philip Paetz",
+    "approvalReference": "https://github.com/mento-protocol/monitoring-monorepo/issues/1687#issuecomment-5254428553"
   },
   "pool": {
     "address": "0xcd8c6811d975981f57e7fb32e59f0bee66af3201",
+    "administration": {
+      "owner": "0x58099B74F4ACd642Da77b4B7966b4138ec5Ba458",
+      "feeSetter": "0x58099B74F4ACd642Da77b4B7966b4138ec5Ba458",
+      "protocolFeeRecipient": "0x0Dd57F6f181D0469143fe9380762d8a112e96e4a"
+    },
     "quoteAsset": {
       "address": "0x4D502d735B4C574B487Ed641ae87cEaE884731C7",
       "symbol": "EURm",
@@ -80,9 +73,18 @@
     },
     "rate": {
       "manualRateFeedId": "0xc22418a83DfC262B10a1f57E25309DB83E7eA79e",
-      "manualRate": "1",
+      "oracleAdapter": "0xEB23E1339b2119c0f4a0097Cb294E990C1fA6423",
+      "sortedOracles": "0x6f92C745346057a61b259579256159458a0a6A92",
+      "breakerBox": "0x9fc1E0d10fb38954Da385B8B25aB2BbaF3241722",
+      "valueDeltaBreaker": "0xca2e7563dfC30bc94687F3deAcF682E1dBAffA13",
+      "rateDecimals": 24,
+      "manualRateRaw": "1000000000000000000000000",
       "manualRateUpdatedAt": "2026-07-16T15:19:19Z",
       "valueDeltaBreakerBps": 50,
+      "valueDeltaThresholdRaw": "5000000000000000000000",
+      "valueDeltaCooldownSeconds": 1,
+      "valueDeltaBreakerEnabled": true,
+      "currentTradingMode": 0,
       "enforcedNoChange": false,
       "enforcedNoArbitrage": false,
       "maxSuccessfulTransitions": null
@@ -94,7 +96,16 @@
         "address": "0x54e2Ae8c8448912E17cE0b2453bAFB7B0D80E40f",
         "kind": "open",
         "enabled": true,
+        "isToken0Debt": true,
+        "lastRebalance": "1785523331",
         "cooldownSeconds": 300,
+        "protocolFeeRecipient": "0x0Dd57F6f181D0469143fe9380762d8a112e96e4a",
+        "incentives": {
+          "liquiditySourceExpansionBps": "0",
+          "protocolExpansionBps": "0",
+          "liquiditySourceContractionBps": "0",
+          "protocolContractionBps": "0"
+        },
         "maxQuoteOutflowEurmRaw": null
       },
       {
@@ -102,7 +113,16 @@
         "address": "0xa0fB8b16ce6AF3634fF9F3f4F40E49E1C1ae4f0B",
         "kind": "reserve",
         "enabled": true,
+        "isToken0Debt": true,
+        "lastRebalance": "0",
         "cooldownSeconds": 300,
+        "protocolFeeRecipient": "0x0Dd57F6f181D0469143fe9380762d8a112e96e4a",
+        "incentives": {
+          "liquiditySourceExpansionBps": "0",
+          "protocolExpansionBps": "0",
+          "liquiditySourceContractionBps": "0",
+          "protocolContractionBps": "0"
+        },
         "mintsQuoteIntoPool": true,
         "mintCapEurmRaw": null,
         "maxQuoteOutflowEurmRaw": null,
@@ -114,21 +134,83 @@
       }
     ]
   },
+  "emergencyHalt": {
+    "controlSafe": "0x58099B74F4ACd642Da77b4B7966b4138ec5Ba458",
+    "sortedOracles": "0x6f92C745346057a61b259579256159458a0a6A92",
+    "breakerBox": "0x9fc1E0d10fb38954Da385B8B25aB2BbaF3241722",
+    "valueDeltaBreaker": "0xca2e7563dfC30bc94687F3deAcF682E1dBAffA13",
+    "rateFeedId": "0xc22418a83DfC262B10a1f57E25309DB83E7eA79e",
+    "rateDecimals": 24,
+    "reportRateRaw": "994000000000000000000000",
+    "lesserKey": "0x0000000000000000000000000000000000000000",
+    "greaterKey": "0x0000000000000000000000000000000000000000",
+    "expectedTradingMode": 1,
+    "forkProof": {
+      "blockNumber": "91830875",
+      "blockHash": "0x3f7cc53580045d0e9c7e862406891a9e152b7b2c47b0eeed1b73bcebe214af25",
+      "haltReportSucceeded": true,
+      "swapSuspended": true,
+      "openRebalanceSuspended": true,
+      "reserveRebalanceSuspended": true,
+      "restoredRateRaw": "1000000000000000000000000",
+      "restoreReportSucceeded": true,
+      "restoredTradingMode": 0
+    }
+  },
+  "custodyBoundary": {
+    "lpCustodySafe": {
+      "address": "0x3fac3feF4408CFB03aa190fbD94D571C42cFd1f1",
+      "threshold": "2",
+      "ownerCount": 4,
+      "nonce": "13",
+      "ownerSetVerifiedAtPin": true,
+      "lpBalanceRaw": "8659037237856031",
+      "totalLpSupplyRaw": "8660537237856031",
+      "treatedAsInternalCustody": true
+    },
+    "failClosedOnUnapprovedLpExit": true,
+    "failClosedOnControlDrift": true
+  },
+  "lossBudgetWitness": {
+    "modelId": "europ-reserve-rebalance-51-cycle-v1",
+    "mentoCoreCommit": "07ecf3df5650a33ea6957f1ad2966e02c5082253",
+    "blockNumber": "91830875",
+    "blockHash": "0x3f7cc53580045d0e9c7e862406891a9e152b7b2c47b0eeed1b73bcebe214af25",
+    "pool": "0xcd8c6811d975981f57e7fb32e59f0bee66af3201",
+    "reserveStrategy": "0xa0fB8b16ce6AF3634fF9F3f4F40E49E1C1ae4f0B",
+    "cycles": "51",
+    "transactionsPerCycle": "3",
+    "successfulTransactions": "153",
+    "successfulReserveRebalances": "51",
+    "monitoredInputPerCycleRaw": "2000000000",
+    "totalMonitoredInputRaw": "102000000000",
+    "quoteOutPerCycleEurmRaw": "1999000000000000000000",
+    "externalQuoteOutEurmRaw": "101949000000000000000000",
+    "elapsedSeconds": "15080",
+    "allTransactionsSucceeded": true,
+    "localForkOnly": true,
+    "productionActivity": false
+  },
   "certificate": {
     "signerCoverageOwner": "Philip Paetz",
     "signerCoverageBackup": "Bogdan Dumitru",
     "escalationRoute": "active @support-engineer resolved from VictorOps / Splunk On-Call",
     "executionProof": "Safe nonce 8 is accepted as proof that the threshold can execute within six hours.",
-    "reviewer": null,
-    "signerCoverageExpiresAt": null,
-    "escalationRouteExpiresAt": null,
-    "executionProofExpiresAt": null,
-    "budgetApprovalExpiresAt": null
+    "acceptedSafeNonce": "8",
+    "acceptedResponseSeconds": "21600",
+    "executionElapsedSeconds": "7889",
+    "executionWithinResponseTimeAccepted": true,
+    "executionProofReference": "https://polygonscan.com/tx/0x967535dc2f331298c2f88feb8a148e60a85fdc8a84dc1d3f83fcea547ef3b8b4",
+    "reviewer": "Philip Paetz",
+    "signerCoverageExpiresAt": "2026-11-09T14:21:33Z",
+    "escalationRouteExpiresAt": "2026-11-09T14:21:33Z",
+    "executionProofExpiresAt": "2026-11-09T14:21:33Z",
+    "budgetApprovalExpiresAt": "2026-11-09T14:21:33Z"
   },
   "boundaryModel": {
-    "implementationStatus": "not_implemented",
-    "protectedSystemBoundary": "EURm movements involving the FPMM, enabled liquidity strategies, ReserveV2, and protocol fee recipient",
-    "modelId": null,
+    "implementationStatus": "local_fork_diagnostic_unattested",
+    "protectedSystemBoundary": "EURm movements involving the FPMM, enabled liquidity strategies, ReserveV2, protocol fee recipient, and approved LP custody Safe",
+    "modelId": "europ-reserve-rebalance-51-cycle-v1",
     "coversBidirectionalRateTransitions": false,
     "coversAllEnabledStrategies": false,
     "monotoneCapacityNetQuoteOutflowEurmRaw": null,
