@@ -3,7 +3,7 @@ title: Peg monitoring alert source validation and activation
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-11
+last_verified: 2026-08-12
 doc_type: runbook
 scope: alerts/peg-monitoring
 review_interval_days: 90
@@ -135,7 +135,7 @@ delisting. `Peg Registry Rot`, `Peg Critical Path Unreachable`, and
 `Peg Indexed Pool Unreachable` use `for = "0s"`, `no_data_state = "OK"`,
 warning severity, and the direct `#alerts-infra` contact point. They never
 page. The [onboarding and re-census runbook](peg-monitoring-onboarding.md)
-owns source admission, response, and cleanup.
+owns source onboarding, re-census, replacement, and cleanup.
 
 Under [ADR 0057](../adr/0057-peg-observation-advancement.md), a repeated
 provider observation may retain source health only while its provider timestamp

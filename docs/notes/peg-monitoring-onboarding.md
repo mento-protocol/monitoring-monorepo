@@ -3,7 +3,7 @@ title: Peg monitoring onboarding and re-census
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-10
+last_verified: 2026-08-12
 doc_type: runbook
 scope: metrics-bridge / alerts / ui-dashboard
 review_interval_days: 90
@@ -12,23 +12,23 @@ garden_lane: operator-runbooks
 
 # Peg monitoring onboarding and re-census
 
-Admit an oracle-less asset only after its identity, executable price discovery,
-independent structural coverage, breaker response, and worst-case drain budget
-are evidenced. Unknown owner, signer, timing, or loss inputs block onboarding;
-the monitoring repository must not invent them.
+Onboard an oracle-less asset only after its identity, executable price sources,
+independent structural coverage, policy, producer, dashboard, and alert paths
+are verified. This runbook proves that the peg tracker can measure and alert;
+it does not certify protocol loss tolerance or emergency-response capacity.
 
 The architecture is fixed by ADRs
 [0042](../adr/0042-metrics-bridge-external-price-poller.md),
 [0043](../adr/0043-peg-registry-service-local.md),
 [0044](../adr/0044-peg-thresholds-gated-rules-plane.md),
 [0045](../adr/0045-peg-paging-semantics.md),
+[0049](../adr/0049-peg-decision-package-read-model.md),
 [0054](../adr/0054-same-project-peg-policy-artifact.md), and
-[0049](../adr/0049-peg-decision-package-read-model.md), and
 [0057](../adr/0057-peg-observation-advancement.md).
 
 ## Completion states
 
-- **Blocked:** one or more mandatory identity, coverage, control, SLA, or loss
+- **Blocked:** one or more mandatory identity, source, coverage-class, or policy
   fields is missing, contradictory, or unsupported by current evidence.
 - **Configured:** source-controlled registry, policy, producer, rules, and
   dashboard changes exist, but live producer and alert proof is incomplete.
@@ -52,7 +52,6 @@ one onboarding record containing:
 | Token identity      | Chain ID, checksum address, decimals, name, symbol, and canonical shared-config entry                           |
 | Peg and redemption  | Peg currency, legal redemption unit, minimum, eligibility, settlement time, suspension terms, and evidence date |
 | Monitor identity    | Chain, FPMM address, monitored token, manual rate-feed ID, and current breaker contract                         |
-| Control identity    | Current on-chain owner or Safe for the rate and breaker path, read at a pinned block                            |
 | Source identities   | Provider-specific exact pair identifiers; ticker aliases are discovery hints only                               |
 
 Reject the record when contract and issuer evidence conflict, the token is not
@@ -114,150 +113,7 @@ If the asset cannot meet an existing class, stop. A new class needs reviewed
 policy and architecture before onboarding; do not weaken a validator or
 relabel a source to make the declaration pass.
 
-## 4. Prove breaker control and response SLA
-
-Record current on-chain control at a pinned block, then obtain explicit owner
-approval for:
-
-| Mandatory field             | Required evidence                                                                                        |
-| --------------------------- | -------------------------------------------------------------------------------------------------------- |
-| Breaker and rate-feed owner | On-chain read at the recorded chain and block                                                            |
-| Safe address and threshold  | On-chain Safe owners and threshold at that block; list accountable role, not private signer details      |
-| Signer coverage             | Coverage hours, holidays, fallback coverage, and the owner who attests it                                |
-| End-to-end response SLA     | Worst approved time from alert delivery through diagnosis, proposal, signatures, execution, and finality |
-| Escalation owner and route  | Named accountable team or role plus the maintained escalation runbook or channel                         |
-| Execution proof             | Recent drill or transaction proving the required threshold can act inside the SLA                        |
-
-The signer SLA is a safety input, not a monitoring default. Missing signer
-coverage, escalation ownership, or execution proof leaves the asset Blocked.
-Do not infer an SLA from a Safe threshold, a past fast transaction, or alert
-delivery time alone.
-
-## 5. Bound drain over the response interval
-
-Read every trading-limit input live at one pinned block and record:
-
-- `d_FPMM` from
-  `FPMM.getTradingLimits(monitoredToken).config.decimals`, plus an independent
-  `ERC20.decimals()` read; require an exact match or mark the asset **Blocked**;
-- positive enforced L0 and L1 limits in TradingLimitsV2's 15-decimal internal
-  scale, converted to token units;
-- each window duration and pinned `netflow` and `lastUpdated` state for
-  incident-specific diagnostics;
-- pool reserves, manual rate, fee parameters, and the exact quote method;
-- the approved end-to-end signer response SLA `S`; and
-- the treasury/risk-approved survivable quote-asset loss budget `B`.
-
-For persistent **Live** admission, prove the TradingLimitsV2 contract invariant
-`-L_i <= n_i <= L_i` for every positive enforced window `i`; otherwise mark the
-asset **Blocked**. Keep `L_i`, `n_i`, and window duration `W_i` in the contract's
-fixed-15 internal scale. `D_net(S)` is a bound on fee-adjusted netflow, not a
-raw monitored-token amount:
-
-```text
-D_live,i(S) = 2L_i + L_i * ceil(S / W_i)
-D_net(S) = min(D_live,i(S) for every positive enforced window i)
-```
-
-`2L_i` covers the reachable active state `n_i = -L_i`; the ceiling term covers
-a reset immediately after the incident begins. At equality the old window is
-still active, and reset requires strict expiry. Pinned `n_i` and timestamps can
-support incident-specific diagnostics, but must never reduce persistent
-admission capacity. Disabled zero-valued windows do not constrain the minimum.
-If no positive limit is enforced, onboarding fails.
-
-`D_net(S)`, `A_max`, and `G_mono` bound only cumulative fee-adjusted FPMM swap
-netflow. `FPMM.swap` applies TradingLimitsV2, while `FPMM.rebalance` does not.
-Never use these values as a whole-system quote-asset loss cap. An Open strategy
-contraction can transfer the debt token from the pool to its permissionless
-caller, and a Reserve strategy expansion can mint the debt token into the pool.
-Model each strategy rebalance as a separate transition and include its actual
-protected-boundary transfers, even when its configured incentive is zero. A
-strategy being unreachable at the pin because of its price threshold is a
-pinned diagnostic, not a durable exclusion.
-
-Read both fees at the same pin and set `F = lpFee + protocolFee` in basis
-points. Require `0 <= F < Q`, use `C = D_net(S)`, `Q = 10,000`, and use only
-the verified `d_FPMM` as `d`; never convert capacity through decimal floats or
-apply the fee before fixed-15 scaling.
-
-For `d <= 15`, calculate:
-
-```text
-A_max = floor(C * Q / (Q - F))
-G_mono = floor(A_max / 10^(15 - d))
-```
-
-`G_mono` bounds monotone monitored-token inflow only. For `d > 15`, default to
-**Blocked**. An exception needs a reviewed, independently enforceable bound
-`N` on successful calls that covers every swap during `S`, including zero-netflow
-and batched calls. With `k = 10^(d - 15)`, calculate
-`G_N = k * A_max + N * (k - 1)`. Do not quote `G_N` as one swap; model every
-successful transition sequentially.
-
-Signed netflow permits counterflows to reopen capacity. Before relying on a
-monotone bound, require either a proof that no reachable reverse swap,
-rebalance, incentive-bearing transfer, or rate transition can leave the system
-at the same or lower signed netflow with more accumulated net quote-asset loss
-than the monotone path, or a bounded bidirectional sequential state model.
-That model must start from every reachable pre-incident **Live** state, not
-only the pin, and maximize loss across mutable pool reserve, rate, fee, limit,
-enabled strategy, cooldown, and source-liquidity state. If a mutable state can
-leave the modeled envelope without enforced fail-closed revocation or
-reapproval, maximize across its reachable range or keep the asset **Blocked**.
-Without that proof or model, or with a positive effective rebate, mark the asset
-**Blocked**.
-
-Bind either an enforced no-change or no-arbitrage rate condition while trading
-remains bidirectional, or an enforced maximum number of successful rate
-transitions during `S`. Without one, alternating tradable rates plus signed
-counterflows can accumulate quote-asset loss while returning netflow to the same
-state.
-
-At the pin, enumerate every enabled strategy from
-`LiquidityStrategyUpdated` history through that block; do not rely on one
-`rebalancerAddress`.
-For each strategy, record the per-pool
-`liquiditySourceIncentiveExpansion`, `liquiditySourceIncentiveContraction`,
-`protocolIncentiveExpansion`, `protocolIncentiveContraction`,
-`protocolFeeRecipient`, cooldown, reachability, source liquidity, and actual
-transfers. Mark the asset **Blocked** if any strategy cannot be conservatively
-reproduced. `FPMM.rebalanceIncentive` is an exchange-rate discount/tolerance,
-not a separate payout: model its effect through actual transfers and never
-double-count it. A static pool-reserve snapshot caps loss only when every
-enabled strategy proves unavailable during the response interval.
-
-For each sequentially reachable swap, call
-`FPMM.getAmountOut(amountIn, tokenIn)` from the modeled state, using that
-transition's actual input amount and token. A monitored-to-quote leg uses the
-monitored token; a reverse leg uses the quote token. Advance pool, limit, and
-strategy state after every successful swap or rebalance. The quote already
-applies the total fee; do not subtract `F` a second time. Define loss as
-**net** quote-asset outflow across a documented protected-system boundary:
-include quote inputs and outputs, mint/burn, and actual strategy transfers. Do
-not use a gross output sum. The model must place flows across the relevant
-window boundaries and cannot replace a sequence with one oversized swap when
-reserves or a strategy can change state.
-
-Record the calls or deterministic calculation. If an exact quote cannot be
-reproduced, use the manual par purchase value plus a documented conservative
-margin and keep the limitation explicit. The gate passes only when:
-
-```text
-worst_case_net_quote_outflow(sequential state model) <= B
-```
-
-The accountable treasury/risk owner must supply and approve `B`. Monitoring
-engineers must not derive it from current TVL, trading limits, or intuition.
-Persistent **Live** admission is a fail-closed certificate over the approved
-Safe and signer coverage, escalation route, execution proof, `S`, `B`, and
-modeled on-chain state ranges. Give every human attestation an explicit expiry.
-Before serving **Live**, require every certificate input to remain within its
-approved range and every attestation to remain current; otherwise serve
-**Blocked** until reapproval repeats the pinned reads and loss calculation. If
-that validity check cannot be enforced, onboarding remains **Blocked**.
-
-## 6. Roll out the first activation producer-first
+## 4. Roll out the first activation producer-first
 
 Use this sequence for the one-time first activation. It starts while
 `local.peg_alerts_enabled` is `false` and ends with step 9's reviewed source
@@ -357,7 +213,7 @@ rollovers. Per-policy consumer activation remains out of scope: when Grafana
 consumers are already enabled, do not combine a policy rollover with consumer
 changes or bypass the protected publication and runtime-pinning sequence.
 
-## 7. Interpret scheduled re-census
+## 5. Interpret scheduled re-census
 
 The scheduled re-census is the authoritative exact-pair listing lookup at the
 start of every policy-due configured-source poll. It validates configured
@@ -396,100 +252,25 @@ tracks that removal.
 A source restoration is not enough by itself. Repeat the executable-depth and
 coverage gates before restoring alert authority.
 
-## 8. Respond to registry rot and clean up policy
+## 6. Respond to registry rot and clean up policy
 
 1. Acknowledge the alert and inspect the decision package plus Grafana history.
 2. Query the provider's authoritative listing directly. Distinguish absent,
    halted, empty-book, and transport failure before changing configuration.
-3. For a missing deep source, treat critical monitoring as unreachable. Engage
-   the recorded escalation owner, assess current pool exposure and breaker
-   readiness, and open the re-onboarding change. Do not delete the source only
-   to silence the alert.
+3. For a missing deep source, treat critical monitoring as unreachable and
+   open the re-onboarding change. Do not delete the source only to silence the
+   alert.
 4. Census and validate a replacement. Stage and deploy its adapter support with
-   registry and policy topology A unchanged, as in Section 6 stage 1.
+   registry and policy topology A unchanged, as in Section 4 stage 1.
 5. Keep registry and policy topology A unchanged until the replacement's
    additive A-to-B publication, runtime pin, and producer proof are scheduled.
    Do not change Grafana consumers through the publication workflow.
-6. Use the recorded escalation, breaker, and exposure controls while monitoring
-   stays degraded. Do not delete the old source only to silence the alert.
+6. Keep the monitoring incident open until the replacement source is live and
+   the affected alerts have recovered. Do not delete the old source only to
+   silence the alert.
 
 The replacement path adds the replacement through an additive A-to-B rollover,
 clears `previous` only after acknowledgement and a full decision-history
 window, and retires the old source through a later B-to-C rollover. Use the
-protected publication and runtime-pinning sequence in Section 6; consumer
+protected publication and runtime-pinning sequence in Section 4; consumer
 activation stays a separate reviewed change.
-
-## EUROP seeded record and mandatory blockers
-
-The repository currently declares the following configuration. These values
-identify what to verify; they do not prove that live venue, signer, or
-trading-limit state is unchanged.
-
-| Field                      | Repository evidence                                                                                                                                                                    |
-| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Asset and peg              | `europ-schuman`, EUR                                                                                                                                                                   |
-| Token                      | Polygon `137`, `0x888883b5f5d21fb10dfeb70e8f9722b9fb0e5e51`                                                                                                                            |
-| Monitor                    | EURm/EUROP pool `0xcd8c6811d975981f57e7fb32e59f0bee66af3201`; manual feed `0xc22418a83dfc262b10a1f57e25309db83e7ea79e`                                                                 |
-| Coverage class             | `cex-book+indexed-pool`                                                                                                                                                                |
-| Deep source                | Bitvavo `EUROP-EUR` (`bitvavo_eur`)                                                                                                                                                    |
-| Non-deep sources           | Kraken `EUROP/EUR` (`kraken_eur`) and display-only `EUROP/USD` (`kraken_usd`) with the configured Polygon EUR/USD conversion feed                                                      |
-| Rejected sources           | Bit2Me `EUROP/EUR` for tiny/frequently stale book; Curve `EUROP/EURC` for zero observed volume; XRPL `XRP/EUROP` and `EUROP/RLUSD` for unsupported indexer/canonical identity coverage |
-| Documented control address | Polygon migration multisig `0x58099B74F4ACd642Da77b4B7966b4138ec5Ba458`; re-read current ownership before relying on it                                                                |
-
-### Dated verification snapshot
-
-The implementation census collected the following candidate evidence on
-2026-07-22 at Polygon block `90702630` (`2026-07-22T22:22:22Z`). Re-read every
-mutable value before production activation.
-
-- [Schuman's legal center](https://schuman.io/legal-center/) identified Salvus
-  SAS, trading as Schuman Financial, as the issuer, with registration
-  `920 017 134` and ACPR register number `739803`. The then-current
-  [white paper](https://schuman.io/wp-content/uploads/EUROP-White-Paper.pdf),
-  redemption policy, and
-  [official contract list](https://schuman.io/smart-contracts/) described par
-  redemption with no minimum and matched the Polygon token address.
-- `SortedOracles.owner()`, `BreakerBox.owner()`, and
-  `ValueDeltaBreaker.owner()` returned the documented migration Safe. The Safe
-  had threshold `4` and these six owners at the pinned block:
-  `0xb1074D0F9E54763e073C7Fdb25B622B4326327Cb`,
-  `0x95be2b73D313768D3B2DfEeca3213Ed0a6434060`,
-  `0x66B94446F5fF3f0d8673C1f502A298B50ba2f0ce`,
-  `0x6Dec25D7bE9BF6C6Fc302977629f2E801e98611c`,
-  `0x7A678c8F9E8a7ac08c8c6f34d38126F3219958f2`, and
-  `0x628FFA32ab958c5b9Ce74D8b81D73F335c3776B0`.
-- The EUROP/EUR ValueDeltaBreaker was enabled in trading mode `0`, with a
-  50-bps effective threshold and `1e24` reference value.
-- `getTradingLimits(EUROP)` returned 50,000 EUROP per five minutes and 250,000
-  EUROP per day in token units. Both last-updated values were outside their
-  windows at the pinned block and positive-inflow saturation was zero.
-
-This snapshot closes identity, control-address, Safe owner-set and threshold,
-and live-limit discovery only for that dated block. EUROP remains **Blocked**
-until accountable owners supply and approve:
-
-- **Signer coverage and end-to-end response SLA:** coverage hours, fallback,
-  holidays, and a worst approved diagnosis-to-finality time.
-- **Escalation owner and maintained route:** a named accountable team or role
-  and the route responders will use.
-- **Execution proof:** a recent drill or transaction showing that four current
-  signers can complete the breaker path inside the approved SLA.
-- **Boundary-aligned drain calculation:** after `S` is approved, refresh the
-  pool, fee, rate, reserve-access, and trading-limit reads, then calculate the
-  exact worst-case quote outflow.
-- **Approved survivable quote-asset loss budget:** treasury/risk must supply
-  `B`; monitoring must not infer it from pool liquidity or trading limits.
-
-Do not copy the dated market-depth figures from
-[`docs/PLAN-peg-monitoring.md`](../PLAN-peg-monitoring.md) into an approval.
-Repeat the census and attach current evidence.
-
-The current six-hour EUROP operational-admission record is in
-[EUROP operational admission evidence](europ-operational-admission.md). Its
-deterministic evaluator preserves the current **Blocked** decision until a
-fresh same-block input includes the numeric budget, enforceable controls,
-explicit certificate expiries, and a boundary-aligned EURm calculation. Its
-TradingLimitsV2 capacity output alone never proves the loss-budget gate. The
-current evaluator cannot grant readiness: it remains Blocked until an
-executable model authenticates the inputs and reproduces every sequential
-protected-boundary transition.

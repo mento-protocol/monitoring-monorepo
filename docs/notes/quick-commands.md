@@ -96,10 +96,6 @@ pnpm integrations:probe        # Quote-only Mento v3 route coverage snapshot
 pnpm integrations:probe --write-upstash  # Publish latest snapshot for /integrations
 pnpm integrations:probe:test   # Unit tests for probe adapters/parsers
 
-# EUROP operational admission (the tracked 2026-08-11 evidence snapshot is intentionally Blocked)
-node scripts/europ-operational-admission.mjs --snapshot scripts/fixtures/europ-operational-admission/2026-08-11.json  # Expected exit 1 + JSON Blocked; exit 2 means unreadable/invalid JSON
-node --test scripts/europ-operational-admission.test.mjs  # Regression tests for the fail-closed capacity and budget checks
-
 # Agent issue workboard
 # (Claude cloud sessions without the capability gate: MCP fallback in
 # docs/notes/github-tooling-surfaces.md)
