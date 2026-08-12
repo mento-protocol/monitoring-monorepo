@@ -26,7 +26,8 @@ boundary and token isolation from the triage agent remain in force.
 
 ADR 0036 runs Sentry triage as a staged GitHub Actions pipeline in **this**
 repo, with GitHub Issues as the durable queue: one deterministic ingest turns
-every new/regressed Sentry issue org-wide into a redacted queue stub here, and a
+every new, regressed, or escalating Sentry issue org-wide into a redacted queue
+stub here, and a
 read-only agent posts a structured verdict (`code-fix` / `config-fix` /
 `upstream-transient` / `needs-human`). ADR 0036 named Stage C ("phased
 mutations") but deliberately left its shape open until the first live run

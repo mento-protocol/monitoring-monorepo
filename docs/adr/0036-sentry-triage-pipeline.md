@@ -52,7 +52,8 @@ repo, with GitHub Issues as the durable queue and Claude Code as the engine;
 trust is earned in phases, and Codex remains the independent PR reviewer.**
 
 - **Stage A — deterministic ingest (no LLM):** a scheduled script turns every
-  new/regressed Sentry issue org-wide into exactly one labeled queue issue
+  new, regressed, or escalating Sentry issue org-wide into exactly one labeled
+  queue issue
   (`sentry-triage`), idempotent by Sentry short-ID. The queue reuses the
   ADR 0006 machinery for state, dedup, audit, and recovery — no bespoke DB.
   **This repo is public, so queue issues carry only non-sensitive coordinates**

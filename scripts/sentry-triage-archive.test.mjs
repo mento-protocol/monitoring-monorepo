@@ -2677,8 +2677,8 @@ await test("an unusable or foreign baseline counts as absent", async () => {
 
 await test("a retry refuses outright when Sentry moved past the recorded baseline", async () => {
   // Positive evidence of an untriaged event. Stamping the newer timestamp would
-  // bury it: an archived issue matches neither ingest query, so nothing would
-  // ever reopen the stub for it.
+  // bury it: an archived issue matches NO ingest query — all three are
+  // `is:unresolved` (#1765) — so nothing would ever reopen the stub for it.
   const recorded = "2026-07-19T11:59:00.000Z";
   const stub = makeStub({
     state: "CLOSED",

@@ -14,7 +14,13 @@ import {
   buildRequeueShedLabelArgs,
   buildRunRecordBody,
   buildStrandedRecoveryComment,
+  ARCHIVED_LABEL,
   classifyNoise,
+  defaultFetchMergedSentryIssues,
+  ESCALATING_ISSUES_QUERY,
+  REOPEN_CAUSE_ESCALATING as ESCALATING_REOPEN_CAUSE,
+  REOPEN_CAUSE_REGRESSED as REGRESSED_REOPEN_CAUSE,
+  REGRESSED_ISSUES_QUERY,
   decideDedupAction,
   defangBackticks,
   defangMentions,
@@ -1271,7 +1277,12 @@ await test("run record body includes counts and the rolling-comment marker", () 
   assert(body.includes("Fetched: 5"), "missing fetched count");
   assert(body.includes("Created: 2"), "missing created count");
   assert(body.includes("Skipped (existing): 2"), "missing skipped count");
-  assert(body.includes("Reopened (regressed): 1"), "missing reopened count");
+  // Both regressed and escalating land in this counter (#1765); the label must
+  // not tell an operator a reopen was a regression when it was an escalation.
+  assert(
+    body.includes("Reopened (regressed or escalating): 1"),
+    "missing reopened count",
+  );
   assert(
     body.includes("Recovered (stranded needs-triage): 3"),
     "missing recovered count",
@@ -3087,6 +3098,192 @@ await test("a round that DOES post a verdict still settles the swept stub (#1717
   const result = await triageRoundHelpers(after).settle(prior["42"]);
   assertEqual(result.verdict, "needs-human");
   assertEqual(result.label, "sentry:verdict-needs-human");
+});
+
+// #1765. The archive leg only ever sets `archived_until_escalating`, and Sentry
+// surfaces that as substatus `escalating` — a DISTINCT filter from
+// `is:regressed`. With only the two original queries an escalated archived
+// issue entered no fetch set at all, so the reopen machinery built by #1371,
+// #1692 and #1693 was unreachable for exactly the issues the archive produces.
+// These drive the real fetch, not a hand-built merge, because the gap was in
+// the query SET and nothing that stubbed the merge could ever have seen it.
+function sentryFetchStub(byQuery) {
+  const seen = [];
+  const fetchImpl = async (url) => {
+    const query = new URL(url).searchParams.get("query");
+    seen.push(query);
+    return {
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      json: async () => byQuery[query] ?? [],
+      headers: { get: () => null },
+    };
+  };
+  return { fetchImpl, seen };
+}
+
+await test("ingest fetches escalating issues, not only regressed ones", async () => {
+  const { fetchImpl, seen } = sentryFetchStub({});
+  await defaultFetchMergedSentryIssues({
+    org: "mento-labs",
+    sentryBaseUrl: "https://us.sentry.io",
+    sentryToken: "t",
+    lookbackDays: 8,
+    fetchImpl,
+  });
+  assert(
+    seen.includes(ESCALATING_ISSUES_QUERY),
+    `expected an ${ESCALATING_ISSUES_QUERY} query; saw ${JSON.stringify(seen)}`,
+  );
+  // The other two must survive: escalating is an ADDITION, not a replacement.
+  assert(seen.includes(REGRESSED_ISSUES_QUERY), "regressed query must remain");
+  assert(
+    seen.some((q) => q.startsWith("is:unresolved firstSeen:")),
+    "firstSeen query must remain",
+  );
+});
+
+await test("an escalated archived issue reaches a reopen decision", async () => {
+  // Fetch-to-decision, the path #1765 says nothing covers: the issue is
+  // returned ONLY by the escalating query, exactly as Sentry would.
+  const escalated = {
+    id: "900",
+    shortId: "GOV-900",
+    title: "boom",
+    project: { slug: "governance-mento-org" },
+    lastSeen: "2026-08-12T10:00:00Z",
+  };
+  const { fetchImpl } = sentryFetchStub({
+    [ESCALATING_ISSUES_QUERY]: [escalated],
+  });
+  const merged = await defaultFetchMergedSentryIssues({
+    org: "mento-labs",
+    sentryBaseUrl: "https://us.sentry.io",
+    sentryToken: "t",
+    lookbackDays: 8,
+    fetchImpl,
+  });
+
+  const entry = merged.get("900");
+  assert(entry, "the escalated issue must be in the merged set at all");
+  assertEqual(entry.isRegressed, true);
+  // Asserted through the PRODUCTION fetch path, not a hand-built merge. An
+  // earlier revision wired the cause only into the direct-reopen tests, so the
+  // fetch path silently kept collapsing both sets and nothing failed.
+  assertEqual(entry.reopenCause, ESCALATING_REOPEN_CAUSE);
+
+  // And it must survive the archive freshness gate: events after the recorded
+  // baseline are what the reopen exists for.
+  const decision = decideDedupAction({
+    existingIssue: {
+      state: "CLOSED",
+      closedAt: "2026-08-10T12:00:00Z",
+      labels: [ARCHIVED_LABEL],
+    },
+    isRegressed: entry.isRegressed,
+    lastSeen: entry.lastSeen,
+    archiveBaseline: "2026-08-10T11:00:00Z",
+    archiveBaselineIssueId: "900",
+    sentryIssueId: "900",
+  });
+  assertEqual(decision.action, "reopen");
+});
+
+await test("an escalation-only reopen is not audited as a regression", async () => {
+  // #1765 follow-through: the summary counter was fixed first, but the
+  // PER-ISSUE comment is what a person reads on the stub. The fence LINE stays
+  // exactly as it is — it is the machine-read contract — so the provenance has
+  // to arrive as prose beneath it.
+  const posted = [];
+  const runGh = async (args) => {
+    if (args[0] === "issue" && args[1] === "comment") {
+      posted.push(args[args.indexOf("--body") + 1]);
+    }
+    if (args[0] === "issue" && args[1] === "view") return JSON.stringify([]);
+    return "";
+  };
+  await reopenQueueIssue(
+    { repo: "o/r", dryRun: false },
+    { number: 42 },
+    {
+      lastSeen: "2026-08-12T10:00:00Z",
+      reopenCause: ESCALATING_REOPEN_CAUSE,
+    },
+    { runGh, claim: () => {} },
+  );
+  const fence = posted.find((b) => b.includes("Regressed in Sentry"));
+  assert(fence, "the machine-read fence line must still be posted verbatim");
+  assert(
+    fence.includes("escalating, not regressed"),
+    "an escalation must say so beneath the fence, not read as a regression",
+  );
+});
+
+await test("a regressed reopen carries no escalation prose", async () => {
+  const posted = [];
+  const runGh = async (args) => {
+    if (args[0] === "issue" && args[1] === "comment") {
+      posted.push(args[args.indexOf("--body") + 1]);
+    }
+    if (args[0] === "issue" && args[1] === "view") return JSON.stringify([]);
+    return "";
+  };
+  await reopenQueueIssue(
+    { repo: "o/r", dryRun: false },
+    { number: 43 },
+    { lastSeen: "2026-08-12T10:00:00Z", reopenCause: REGRESSED_REOPEN_CAUSE },
+    { runGh, claim: () => {} },
+  );
+  const fence = posted.find((b) => b.includes("Regressed in Sentry"));
+  assert(fence, "expected the fence");
+  assert(
+    !fence.includes("escalating, not regressed"),
+    "a genuine regression must not claim it was an escalation",
+  );
+});
+
+await test("adding the escalating pass does not disable regression reopens", async () => {
+  // The regression I shipped and did not catch: the escalating pass feeds pass
+  // one's OUTPUT back in as `newIssues`, and the merge used to force
+  // `isRegressed: false` for that argument. A regressed-only issue therefore
+  // came out of the fetch with its flag wiped, `decideDedupAction` answered
+  // "closed, not regressed", and every regression reopen silently stopped —
+  // while all the escalation tests kept passing.
+  const regressedOnly = {
+    id: "700",
+    shortId: "GOV-700",
+    title: "boom",
+    project: { slug: "governance-mento-org" },
+    lastSeen: "2026-08-12T10:00:00Z",
+  };
+  const { fetchImpl } = sentryFetchStub({
+    [REGRESSED_ISSUES_QUERY]: [regressedOnly],
+  });
+  const merged = await defaultFetchMergedSentryIssues({
+    org: "mento-labs",
+    sentryBaseUrl: "https://us.sentry.io",
+    sentryToken: "t",
+    lookbackDays: 8,
+    fetchImpl,
+  });
+
+  const entry = merged.get("700");
+  assert(entry, "the regressed issue must survive the escalating pass");
+  assertEqual(entry.isRegressed, true);
+  assertEqual(entry.reopenCause, REGRESSED_REOPEN_CAUSE);
+
+  // And it must still reach the reopen it always did.
+  const decision = decideDedupAction({
+    existingIssue: {
+      state: "CLOSED",
+      closedAt: "2026-08-10T12:00:00Z",
+      labels: [],
+    },
+    isRegressed: entry.isRegressed,
+    lastSeen: entry.lastSeen,
+  });
+  assertEqual(decision.action, "reopen");
 });
 
 if (failed > 0) {

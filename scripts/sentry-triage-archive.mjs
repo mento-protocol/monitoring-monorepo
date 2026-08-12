@@ -616,7 +616,7 @@ export function buildStaleRetryRefusalComment(shortId, recorded, observed) {
     `baseline this stub recorded (${yamlScalar(recorded ?? "")}). Settling now`,
     "would stamp the newer timestamp as the baseline, and the reopen gate would",
     "then never fire for the event in between — it would be archived and",
-    "invisible to both ingest queries, which only match unresolved issues.",
+    "invisible to every ingest query, which all match only unresolved issues.",
     "",
     "Nothing was changed, and the `sentry:approved-archive` label was removed.",
     "Re-applying it will refuse again — the recorded baseline is still older and",
@@ -1012,9 +1012,10 @@ export function settlementHeld({ state, labels, body } = {}, expected = null) {
  * produced — the state a human already approved. Reverting it bought nothing and
  * cost a check-then-PUT race against Sentry's own transitions, where the GET can
  * still read `archived_until_escalating` while Sentry is concurrently flipping a
- * freshly-escalated issue to `unresolved/regressed`; the PUT then erases that
- * regression signal, and since ingest finds old issues only through
- * `is:regressed`, the event vanishes from both systems. Removing the revert
+ * freshly-escalated issue to `unresolved`; the PUT then erases that signal.
+ * Ingest finds old issues through `is:regressed` AND `is:escalating` (#1765),
+ * but an issue forced back to archived matches neither — every ingest query is
+ * `is:unresolved` — so the event still vanishes from both systems. Removing the revert
  * removes that failure mode instead of guarding it.
  *
  * Returns a report; the caller decides how loud to be. Never throws on a
