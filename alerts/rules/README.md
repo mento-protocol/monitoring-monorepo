@@ -92,7 +92,10 @@ All three rule classes use `for = "0s"`, `no_data_state = "OK"`, and the
 warning-only `#alerts-infra` contact point. Missing or stale listing evidence
 is unknown rather than delisting, and none of these rules pages. The
 [onboarding and re-census runbook](../../docs/notes/peg-monitoring-onboarding.md)
-owns source admission, exact-pair re-census, operator response, and cleanup.
+owns source admission, exact-pair re-census, and cleanup. Its
+[critical-page response](../../docs/notes/peg-monitoring-onboarding.md#5-respond-to-a-critical-peg-page)
+owns the human handoff from `@support-engineer` triage through Safe execution
+and recovery verification.
 
 ## Producer-first rollout and rollback
 
