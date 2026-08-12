@@ -83,8 +83,9 @@ permissions:
 jobs:
   # ---------------------------------------------------------------------------
   # select: pick the capped batch of code-fix queue stubs owned by THIS repo
-  # that do not yet have a fix PR — one per duplicate_of family, so five stubs
-  # of one root cause cost one run, not five — and emit them as a matrix.
+  # that claim fix_scope: mechanical and do not yet have a fix PR — one per
+  # duplicate_of family, so five stubs of one root cause cost one run, not
+  # five — and emit them as a matrix.
   # ALWAYS runs and
   # ALWAYS emits a valid JSON array — the kill switch and the secret/App guards
   # live in the first step, so a disabled or unprovisioned state is a clean

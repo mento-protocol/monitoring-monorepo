@@ -97,12 +97,12 @@ map is possible. Its actionable verdict does not project: it takes
 `skipped-repo`, and the stub closes with a note naming the unrecognised repo.
 Adding a project means adding it to the allowlist, not only to Sentry.
 
-| Verdict              | `analytics-mento-org` (local)                                                   | Every other project (external)                        |
-| -------------------- | ------------------------------------------------------------------------------- | ----------------------------------------------------- |
-| `code-fix`           | **Autofix-eligible** — the only path in the pipeline that writes code           | Projects an issue into the owning repo. Never autofix |
-| `config-fix`         | Record only: no projection (this repo is not an allowlisted target), no autofix | Projects an issue into the owning repo                |
-| `upstream-transient` | Closes. Nothing downstream                                                      | Same                                                  |
-| `needs-human`        | Stays open with a decision-ready brief                                          | Same                                                  |
+| Verdict              | `analytics-mento-org` (local)                                                      | Every other project (external)                        |
+| -------------------- | ---------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| `code-fix`           | **Autofix-eligible with `fix_scope: mechanical`** — the only path that writes code | Projects an issue into the owning repo. Never autofix |
+| `config-fix`         | Record only: no projection (this repo is not an allowlisted target), no autofix    | Projects an issue into the owning repo                |
+| `upstream-transient` | Closes. Nothing downstream                                                         | Same                                                  |
+| `needs-human`        | Stays open with a decision-ready brief                                             | Same                                                  |
 
 Autofix outcomes, for a local `code-fix` (`sentry-autofix-finalize.mjs`):
 
@@ -294,7 +294,22 @@ root_cause: |
 proposed_action: |
   <one to three redacted lines>
 duplicate_of: [] # Sentry SHORT-IDs only
+fix_scope: mechanical # code-fix only: mechanical | architectural
 ```
+
+A `code-fix` verdict also carries `fix_scope`, because the verdict alone answers
+only "is the cause in our code?" and the autofix leg needs "does a scoped fix
+exist?" (issue #1785). `mechanical` is a bounded edit to files the agent can
+name, reviewable without a design discussion; `architectural` moves a boundary,
+spans modules, or needs the design decision taken first. `normalizeFixScope` in
+`scripts/sentry-triage-project-core.mjs` is the single owner of the rule and
+**fails closed**: absent, empty, or anything outside those two words normalizes
+to `architectural`. Every verdict written before the field existed therefore
+reads as `architectural`, which is intended — autofix selects nothing until the
+prompt produces the field. The asymmetry is deliberate: a missed `mechanical`
+costs one un-attempted fix, while a wrong `mechanical` spends an agent run on a
+refactor it must then refuse, which is the failure the five strategy-probe stubs
+already produced.
 
 A `needs-human` verdict also includes a concrete `human_question`, a
 `how_to_check` list, a `decision_branches` list, one to three `hypotheses`, an
@@ -634,7 +649,8 @@ fails so the next `main` run can project it safely.
 
 ### Local autofix PRs
 
-Autofix considers only local `code-fix` stubs without an existing fix PR,
+Autofix considers only local `code-fix` stubs that claim `fix_scope: mechanical`
+and have no existing fix PR,
 caps each run at two CANDIDATES — not two stubs, see the family collapse
 below — and uses a GitHub App scoped to Contents and Pull
 requests on this repository. The fix agent receives no Sentry credential.
@@ -643,6 +659,18 @@ contract. `ui-dashboard/vercel.json` denies `git.deploymentEnabled` for
 `sentry-autofix/*`, so an autofix branch's untrusted diff never gets a Vercel
 deployment (and its production-linked secrets) before human review — a trust
 boundary earlier than the path-aware skip script (ADR 0019, issue #1452).
+
+**Only `fix_scope: mechanical` is selectable** (issue #1785). A `code-fix`
+verdict whose scope is `architectural` — including every verdict that omits the
+field, which fails closed — is skipped with a stderr note and left **unmarked**:
+no `sentry:fix-refused`, no new label, no comment. A refusal marker is terminal
+until a human clears it and would stand the stub's whole duplicate family down
+behind it, so marking here would turn a correct "this needs a human" into the
+same accumulated-refusal state the field exists to end. The stub keeps
+`sentry:verdict-code-fix` and becomes selectable again the moment a re-triage
+supplies `fix_scope: mechanical`. The gate sits after the reconcile branch:
+reconciliation runs no agent and opens no PR, so a PR that already exists still
+gets its queue bookkeeping repaired even if its verdict's scope changed under it.
 
 **One candidate per `duplicate_of` family** (issue #1784). Stubs whose verdicts
 place them in one Sentry issue family consume ONE autofix run between them, not

@@ -14,16 +14,20 @@ import {
   defangMentions,
   extractPermalink,
   extractYamlBlock,
+  FIX_SCOPE_ARCHITECTURAL,
+  FIX_SCOPE_MECHANICAL,
   isDecisionReadyQuestion,
   isTrustedComment,
   isValidShortId,
   leadingProjectionMarkers,
   neutralizeBlock,
   neutralizeUntrusted,
+  normalizeFixScope,
   parseArgs,
   parseShortId,
   parseVerdictComment,
   PROJECTED_LABEL,
+  resolveVerdict,
   runParseOnly,
   runPriorVerdicts,
   runProjection,
@@ -115,6 +119,9 @@ function verdictComment({
   rootCause = "  Some abstract root cause.\n  Second line.",
   proposedAction = "  Some abstract action.",
   duplicates = "[]",
+  // `fix_scope` (issue #1785): null omits the line, which is the shape every
+  // verdict written before the field existed has — and must fail closed.
+  fixScope = null,
   humanQuestion = null,
   howToCheck = null,
   decisionBranches = null,
@@ -136,6 +143,9 @@ function verdictComment({
     proposedAction,
     `duplicate_of: ${duplicates}`,
   ];
+  if (fixScope != null) {
+    lines.push(`fix_scope: ${fixScope}`);
+  }
   if (humanQuestion != null) {
     lines.push("human_question: |", `  ${humanQuestion}`);
   }
@@ -524,6 +534,114 @@ await test("parseVerdictComment tolerates trailing yaml comments on duplicate_of
     "duplicate_of: [APP-1] this is not valid YAML",
   );
   assertDeepEqual(parseVerdictComment(garbage).duplicateOf, []);
+});
+
+// ---------------------------------------------------------------------------
+// fix_scope: the code-fix scope enum (issue #1785).
+// ---------------------------------------------------------------------------
+
+await test("parseVerdictComment reads fix_scope as its closed enum", () => {
+  assertEqual(
+    parseVerdictComment(verdictComment({ fixScope: FIX_SCOPE_MECHANICAL }))
+      .fixScope,
+    FIX_SCOPE_MECHANICAL,
+  );
+  assertEqual(
+    parseVerdictComment(verdictComment({ fixScope: FIX_SCOPE_ARCHITECTURAL }))
+      .fixScope,
+    FIX_SCOPE_ARCHITECTURAL,
+  );
+  // Quotes and a boundary-valid trailing comment — the documented example
+  // shape in docs/notes/sentry-triage-pipeline.md — must still read as the enum.
+  assertEqual(
+    parseVerdictComment(
+      verdictComment({
+        fixScope: "mechanical # code-fix only: mechanical | architectural",
+      }),
+    ).fixScope,
+    FIX_SCOPE_MECHANICAL,
+  );
+  assertEqual(
+    parseVerdictComment(verdictComment({ fixScope: '"mechanical"' })).fixScope,
+    FIX_SCOPE_MECHANICAL,
+  );
+});
+
+await test("fix_scope FAILS CLOSED to architectural on absent, empty or unrecognised", () => {
+  // The load-bearing rule: a missed `mechanical` costs one un-attempted fix, a
+  // wrong `mechanical` spends an agent run on a refactor. Every one of these is
+  // NOT a claim that a scoped fix exists, so none may read as one.
+  const notMechanical = [
+    null, // the field is absent entirely — every pre-#1785 verdict
+    "", // present but empty
+    "scoped", // a plausible synonym that is not in the enum
+    "Non-urgent: the code already fails open", // the real #1304/#1313 prose
+    "mechanical refactor of the cache layer", // STARTS with the enum word
+    "architectural, but mostly mechanical", // ends with it
+    "[mechanical]", // a list, not a scalar
+    "mechanical/architectural", // both, i.e. undecided
+  ];
+  for (const fixScope of notMechanical) {
+    assertEqual(
+      parseVerdictComment(verdictComment({ fixScope })).fixScope,
+      FIX_SCOPE_ARCHITECTURAL,
+      `expected ${JSON.stringify(fixScope)} to fail closed`,
+    );
+  }
+});
+
+await test("normalizeFixScope is the single owner of the fail-closed default", () => {
+  // Nothing else may re-derive a fallback: one owner is what makes the default
+  // testable by mutation rather than by reading every call site.
+  assertEqual(normalizeFixScope("mechanical"), FIX_SCOPE_MECHANICAL);
+  assertEqual(normalizeFixScope("architectural"), FIX_SCOPE_ARCHITECTURAL);
+  // Trim + case are normalization, not ambiguity: "Mechanical" is a clear claim.
+  assertEqual(normalizeFixScope("  MECHANICAL \t"), FIX_SCOPE_MECHANICAL);
+  // Non-strings and junk fail closed rather than throwing.
+  for (const value of [
+    null,
+    undefined,
+    0,
+    {},
+    [],
+    ["mechanical"],
+    "mech",
+    "mechanicalish",
+  ]) {
+    assertEqual(
+      normalizeFixScope(value),
+      FIX_SCOPE_ARCHITECTURAL,
+      `expected ${JSON.stringify(value ?? String(value))} to fail closed`,
+    );
+  }
+});
+
+await test("resolveVerdict exposes fix_scope alongside the sibling parsed fields", () => {
+  // The autofix selector reads the field off THIS resolution, the same
+  // authoritative one the label step uses — not a second parse of its own.
+  const mechanical = resolveVerdict(
+    queueIssue({
+      comments: [
+        botComment(
+          verdictComment({
+            verdict: "code-fix",
+            affectedRepo: "mento-protocol/monitoring-monorepo",
+            fixScope: FIX_SCOPE_MECHANICAL,
+          }),
+          "2026-07-17T10:00:00Z",
+        ),
+      ],
+    }),
+    500,
+  );
+  assertEqual(mechanical.verdict, "code-fix");
+  assertEqual(mechanical.parsed.fixScope, FIX_SCOPE_MECHANICAL);
+  // And an old verdict resolves normally — it just carries the closed default,
+  // so the change settles and labels exactly as before; only autofix narrows.
+  const legacy = resolveVerdict(queueIssue(), 500);
+  assertEqual(legacy.verdict, "code-fix");
+  assertEqual(legacy.label, "sentry:verdict-code-fix");
+  assertEqual(legacy.parsed.fixScope, FIX_SCOPE_ARCHITECTURAL);
 });
 
 await test("affected_repo must be the exact whole value — no substring extraction", () => {

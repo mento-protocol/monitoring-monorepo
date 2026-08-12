@@ -52,6 +52,7 @@ import {
   resolveVerdict,
   sanitizeBriefList,
   selectNeedsHumanBriefFields,
+  VALID_FIX_SCOPES,
   VALID_VERDICTS,
   VERDICT_MARKER,
 } from "./sentry-triage-project-core.mjs";
@@ -1854,6 +1855,29 @@ await test("the triage prompt documents the rest of the verdict contract", () =>
       `expected the prompt's classify block to offer \`${verdict}\` — it is in VALID_VERDICTS, so the parser accepts it, but the agent never emits a verdict this block does not name`,
     );
   }
+
+  // fix_scope (issue #1785) is the autofix eligibility gate, and it fails
+  // CLOSED: a verdict that omits it reads as `architectural` and is never
+  // selected. So an undocumented field is not a hole in one brief — it is
+  // autofix selecting nothing, silently, for as long as the prompt stays quiet.
+  // Nothing but this test reads the prompt file.
+  assert(
+    prompt.includes("`fix_scope:`"),
+    "expected the prompt to ask for `fix_scope:` — the selector gates on it and an absent field fails closed, so an undocumented field means autofix never selects anything",
+  );
+  for (const scope of VALID_FIX_SCOPES) {
+    assert(
+      new RegExp(`^- \`${scope}\``, "m").test(prompt),
+      `expected the prompt to define \`${scope}\` — it is in VALID_FIX_SCOPES, and the agent cannot write a value the prompt never names`,
+    );
+  }
+  // The values are defined by the DISCRIMINATING QUESTION, not by adjectives:
+  // "bounded"/"small" are judgement calls an agent resolves toward optimism,
+  // which is how five architectural refactors arrived as code-fix candidates.
+  assert(
+    /name the files/i.test(prompt) && /design discussion/i.test(prompt),
+    "expected the prompt to define fix_scope by the discriminating question (name the files / reviewable without a design discussion), not by adjectives",
+  );
 });
 
 if (failed > 0) {

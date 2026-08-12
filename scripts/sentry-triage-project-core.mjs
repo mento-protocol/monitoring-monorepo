@@ -109,35 +109,32 @@ export {
   defangBackticks,
   defangHtmlComments,
   defangMentions,
+  FIX_SCOPE_ARCHITECTURAL,
+  FIX_SCOPE_MECHANICAL,
   isValidShortId,
   MAX_BRIEF_TEXT_LEN,
   neutralizeBlock,
   neutralizeUntrusted,
+  normalizeFixScope,
   sanitizeDuplicateIds,
   sanitizeFreeText,
+  stripTrailingYamlComment,
+  stripYamlQuotes,
   truncate,
+  VALID_FIX_SCOPES,
 } from "./sentry-triage-text.mjs";
 
 // `export … from` re-exports without binding the names locally, and the parsing
 // and validation below use several of them.
 import {
   boundBriefText,
+  normalizeFixScope,
   sanitizeDuplicateIds,
   sanitizeFreeText,
+  stripTrailingYamlComment,
+  stripYamlQuotes,
   truncate,
 } from "./sentry-triage-text.mjs";
-
-function stripYamlQuotes(value) {
-  const v = String(value ?? "").trim();
-  if (
-    v.length >= 2 &&
-    ((v.startsWith('"') && v.endsWith('"')) ||
-      (v.startsWith("'") && v.endsWith("'")))
-  ) {
-    return v.slice(1, -1);
-  }
-  return v;
-}
 
 // ---------------------------------------------------------------------------
 // Pure parsing: queue title, permalink, verdict comment (richer than digest).
@@ -207,21 +204,6 @@ function splitListItems(raw) {
         .trim(),
     )
     .filter(Boolean);
-}
-
-/** Strip a trailing yaml comment — but only a `#` that opens one at a valid
- * boundary (preceded by whitespace, or the whole value). A bare `foo#bar` is
- * part of the scalar in yaml, and truncating it would normalize malformed
- * values into valid-looking ones (e.g. `<repo>#garbage` must NOT become an
- * allowlisted repo). */
-function stripTrailingYamlComment(text) {
-  const s = String(text ?? "");
-  for (let i = 0; i < s.length; i += 1) {
-    if (s[i] === "#" && (i === 0 || /\s/.test(s[i - 1]))) {
-      return s.slice(0, i);
-    }
-  }
-  return s;
 }
 
 function parseInlineList(rest) {
@@ -530,7 +512,8 @@ export function sanitizeBriefList(list) {
  * yaml loader (the block is untrusted agent text). Reads verdict/confidence as
  * their leading enum token, affected_repo as the first `owner/name` slug,
  * summary as its full line value, root_cause/proposed_action as block scalars,
- * and duplicate_of as an inline `[...]` or a `- item` list.
+ * duplicate_of as an inline `[...]` or a `- item` list, and fix_scope as a
+ * whole-value token normalized onto its closed enum (fail-closed).
  */
 export function parseVerdictYaml(block) {
   const lines = String(block ?? "").split(/\r?\n/);
@@ -542,6 +525,9 @@ export function parseVerdictYaml(block) {
     root_cause: "",
     proposed_action: "",
     duplicate_of: [],
+    // Set for `code-fix` verdicts; normalized (fail-closed) below, so an absent
+    // key leaves the raw empty string and resolves to `architectural`.
+    fix_scope: "",
     // needs-human decision-ready brief fields (optional-absent for other
     // verdicts; resolveVerdict requires human_question for needs-human).
     human_question: "",
@@ -583,6 +569,14 @@ export function parseVerdictYaml(block) {
       const { text, next } = collectBlockScalar(lines, i, rest);
       out[key] = text;
       i = next - 1;
+    } else if (key === "fix_scope") {
+      // EXACT whole-value match (after quote + boundary-valid trailing-comment
+      // strip), never the leading-token extraction `verdict`/`confidence` use:
+      // the observed architectural verdicts opened their prose with
+      // "Non-urgent: …", and a prefix parse would let `mechanical refactor of
+      // the cache layer` read as `mechanical`. Anything that is not exactly one
+      // enum word normalizes to `architectural` below.
+      out.fix_scope = stripYamlQuotes(stripTrailingYamlComment(rest).trim());
     } else if (key === "duplicate_of") {
       if (rest.trim() !== "") {
         out.duplicate_of = parseInlineList(rest);
@@ -603,6 +597,7 @@ export function parseVerdictYaml(block) {
     }
   }
   out.duplicate_of = sanitizeDuplicateIds(out.duplicate_of);
+  out.fix_scope = normalizeFixScope(out.fix_scope);
   out.how_to_check = sanitizeBriefList(out.how_to_check);
   out.decision_branches = sanitizeBriefList(out.decision_branches);
   out.hypotheses = sanitizeBriefList(out.hypotheses);
@@ -626,6 +621,9 @@ export function parseVerdictComment(commentBody) {
     rootCause: parsed.root_cause,
     proposedAction: parsed.proposed_action,
     duplicateOf: parsed.duplicate_of,
+    // Already on the closed enum (parseVerdictYaml normalized it once); this is
+    // a rename only, so the fail-closed default has a single owner.
+    fixScope: parsed.fix_scope,
     // needs-human decision-ready brief fields (empty for other verdicts).
     humanQuestion: parsed.human_question,
     howToCheck: parsed.how_to_check,

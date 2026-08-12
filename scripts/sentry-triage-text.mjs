@@ -10,8 +10,9 @@
  * contract, the queue contract, the projection renderer and both brief emitters
  * all sit on top of them.
  *
- * Split out of `sentry-triage-project-core.mjs` (#1748, extended #1769) as that
- * file kept brushing the 1,000-line hard cap in
+ * Split out of `sentry-triage-project-core.mjs` (#1748, extended #1769 and
+ * #1785 — which moved the two yaml-scalar strip helpers and added the
+ * `fix_scope` enum) as that file kept brushing the 1,000-line hard cap in
  * docs/pr-checklists/recurring-review-patterns.md. It is a MOVE, not a rewrite:
  * `sentry-triage-project-core.mjs` re-exports every name below, so no importer
  * or test changed. Keeping the re-export is deliberate — the verdict contract
@@ -147,6 +148,67 @@ export function isValidShortId(shortId) {
     shortId.length <= 120 &&
     SHORT_ID_PATTERN.test(shortId)
   );
+}
+
+/** Strip one layer of matching yaml quotes from a scalar value. */
+export function stripYamlQuotes(value) {
+  const v = String(value ?? "").trim();
+  if (
+    v.length >= 2 &&
+    ((v.startsWith('"') && v.endsWith('"')) ||
+      (v.startsWith("'") && v.endsWith("'")))
+  ) {
+    return v.slice(1, -1);
+  }
+  return v;
+}
+
+/** Strip a trailing yaml comment — but only a `#` that opens one at a valid
+ * boundary (preceded by whitespace, or the whole value). A bare `foo#bar` is
+ * part of the scalar in yaml, and truncating it would normalize malformed
+ * values into valid-looking ones (e.g. `<repo>#garbage` must NOT become an
+ * allowlisted repo). */
+export function stripTrailingYamlComment(text) {
+  const s = String(text ?? "");
+  for (let i = 0; i < s.length; i += 1) {
+    if (s[i] === "#" && (i === 0 || /\s/.test(s[i - 1]))) {
+      return s.slice(0, i);
+    }
+  }
+  return s;
+}
+
+// `fix_scope` splits what `code-fix` used to conflate (issue #1785): the
+// verdict answers "is the cause in OUR code?", this field answers "does a
+// SCOPED fix exist?". They diverged on the only real data we have — all five
+// refused candidates were `code-fix` whose proposed action was "move the
+// strategy-probe cache/dedup to a shared/server-side layer", an architecture
+// change handed to an agent capped at a scoped diff.
+export const FIX_SCOPE_MECHANICAL = "mechanical";
+export const FIX_SCOPE_ARCHITECTURAL = "architectural";
+export const VALID_FIX_SCOPES = [FIX_SCOPE_MECHANICAL, FIX_SCOPE_ARCHITECTURAL];
+
+/**
+ * Normalize the untrusted, agent-authored `fix_scope` onto the closed enum.
+ *
+ * FAILS CLOSED to `architectural` — absent, empty, or anything outside the two
+ * words. The asymmetry is deliberate: a missed `mechanical` costs one
+ * un-attempted fix, while a wrong `mechanical` spends an agent run on a
+ * refactor it must then refuse, which is the failure already observed. Every
+ * verdict written before the field existed therefore lands on `architectural`,
+ * which is the intended behaviour — autofix selects nothing until the prompt
+ * starts producing the field.
+ *
+ * This is the ONE place the default lives; `parseVerdictYaml` calls it once, so
+ * no consumer can re-derive a different fallback.
+ */
+export function normalizeFixScope(value) {
+  // Strings only, deliberately no `String(value)` coercion: `["mechanical"]`
+  // stringifies to `mechanical`, so a list-shaped value would read as a scalar
+  // claim. A non-string is a shape the contract never promised — fail closed.
+  if (typeof value !== "string") return FIX_SCOPE_ARCHITECTURAL;
+  const token = value.trim().toLowerCase();
+  return VALID_FIX_SCOPES.includes(token) ? token : FIX_SCOPE_ARCHITECTURAL;
 }
 
 /** Only keep unique values that look like Sentry SHORT-IDs, bounded for

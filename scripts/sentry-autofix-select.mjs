@@ -21,6 +21,10 @@
  *     an unfixable stub. A merged/closed PR does NOT block: once a fixed issue
  *     regresses (ingest sheds the autofix markers on reopen), the stub is
  *     re-attemptable by design.
+ *   - FIX SCOPE (issue #1785): only a verdict claiming `fix_scope: mechanical`
+ *     starts a fix attempt. `architectural` — the fail-closed value for an
+ *     absent or unrecognized field — is skipped and left unmarked, so it stays
+ *     visible as human work instead of accumulating a refusal.
  *   - FAMILY COLLAPSE (issue #1784): stubs whose verdicts place them in one
  *     `duplicate_of` family consume ONE run between them, not one each. The
  *     grouping, the transitive union and the representative rule live in
@@ -40,6 +44,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   DEFAULT_REPO,
+  FIX_SCOPE_MECHANICAL,
   isValidShortId,
   parseShortId,
   resolveVerdict,
@@ -485,6 +490,32 @@ async function evaluateCandidate(runGh, repo, stub) {
     };
   }
 
+  // fix_scope gate (issue #1785). `code-fix` says the cause is in our code; it
+  // does NOT say a scoped fix exists. Only a verdict that claims `mechanical`
+  // starts a fix attempt — `architectural`, which is also what an absent,
+  // empty, or unrecognized value normalizes to (`normalizeFixScope` fails
+  // closed), is a human backlog item. It is SKIPPED, deliberately WITHOUT
+  // FIX_REFUSED_LABEL: a refusal marker is terminal until a human clears it and
+  // would stand the stub's whole duplicate family down behind it, which is how
+  // five real stubs burned five agent runs on one architecture change. Leaving
+  // the stub unmarked keeps it visible as `sentry:verdict-code-fix` work and
+  // re-selectable the moment a re-triage supplies `fix_scope: mechanical`.
+  //
+  // Placed AFTER the reconcile branch on purpose: reconciliation runs no agent
+  // and opens no PR, it repairs the queue bookkeeping for a PR that ALREADY
+  // exists. Gating it here would strand such a PR unlinked forever if a
+  // re-triage flipped its verdict's scope between the two runs.
+  //
+  // `parsed.fixScope` is closed-enum by construction, and the SHORT-ID goes
+  // through `safeShortId` — stderr is scanned for `::workflow commands::`, and
+  // this line is agent-derived text reaching it.
+  if (parsed.fixScope !== FIX_SCOPE_MECHANICAL) {
+    process.stderr.write(
+      `skip #${stub.number}: fix_scope for ${safeShortId(shortId)} is ${parsed.fixScope}, not ${FIX_SCOPE_MECHANICAL}; leaving it as human work (no refusal marker).\n`,
+    );
+    return null;
+  }
+
   // Generation token (issue #1506): the numeric id of the verdict comment this
   // fix is based on, threaded through the matrix to finalize so it can refuse to
   // mark the stub fixed if a re-triage REPLACED the verdict comment (ABA) during
@@ -681,8 +712,8 @@ function usage() {
 
 Prints a JSON array of { "issue": <number>, "shortId": "<SHORT-ID>" } matrix
 entries — the oldest capped batch of code-fix queue stubs owned by this repo
-that do not yet have a fix PR, collapsed to ONE candidate per \`duplicate_of\`
-family. Diagnostics go to stderr.
+that claim \`fix_scope: mechanical\` and do not yet have a fix PR, collapsed to
+ONE candidate per \`duplicate_of\` family. Diagnostics go to stderr.
 
 Options:
   --repo <owner/name>  Repo the queue stubs live in (default: ${DEFAULT_REPO}).
