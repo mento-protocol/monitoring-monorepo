@@ -21,14 +21,16 @@
  *     an unfixable stub. A merged/closed PR does NOT block: once a fixed issue
  *     regresses (ingest sheds the autofix markers on reopen), the stub is
  *     re-attemptable by design.
- *   - FIX SCOPE (issue #1785): only a verdict claiming `fix_scope: mechanical`
- *     starts a fix attempt. `architectural` — the fail-closed value for an
- *     absent or unrecognized field — is skipped and left unmarked, so no
- *     terminal refusal accumulates on a stub a human still has to judge. The
- *     skip is REPORTED (`skipped`), because it writes nothing: an unreported
- *     stand-down renders on the tracker as an idle leg. The skipped stub still
- *     joins the family union below — dropping it would delete its
- *     `duplicate_of` edges and fan its family back out.
+ *   - FIX SCOPE (issue #1785/#1812): only a verdict claiming `fix_scope:
+ *     mechanical` starts a fix attempt. A local `architectural` verdict — the
+ *     fail-closed value for an absent or unrecognized field — settles OPEN under
+ *     `sentry:fix-scope-architectural` and is excluded from the candidate window
+ *     at query time; a LEGACY or hand-removed straggler that still reaches the
+ *     gate is skipped WITHOUT a terminal refusal marker (which would stand its
+ *     whole family down). The skip is REPORTED (`skipped`) because it writes
+ *     nothing here, and the record-run job backfills the exclusion label onto
+ *     the straggler. The skipped stub still joins the family union below —
+ *     dropping it would delete its `duplicate_of` edges and fan its family out.
  *   - FAMILY COLLAPSE (issue #1784): stubs whose verdicts place them in one
  *     `duplicate_of` family consume ONE run between them, not one each. The
  *     grouping, the transitive union and the representative rule live in
@@ -236,15 +238,17 @@ async function evaluateCandidate(runGh, repo, stub) {
   // does NOT say a scoped fix exists. Only a verdict that claims `mechanical`
   // starts a fix attempt — `architectural`, which is also what an absent,
   // empty, or unrecognized value normalizes to (`normalizeFixScope` fails
-  // closed), is a human backlog item. It is SKIPPED, deliberately WITHOUT
-  // FIX_REFUSED_LABEL: a refusal marker is terminal until a human clears it and
-  // would stand the stub's whole duplicate family down behind it, which is how
-  // five real stubs burned five agent runs on one architecture change. Leaving
-  // the stub unmarked keeps it re-selectable the moment a re-triage supplies
-  // `fix_scope: mechanical`. It does NOT leave it waiting in the queue: a local
-  // code-fix stub is CLOSED when its verdict lands, so the human backlog is the
-  // run record's skip line plus the digest's routed-section note — which is why
-  // this returns a reportable record instead of dropping the stub.
+  // closed), is a human backlog item. Fresh architectural verdicts settle OPEN
+  // under `sentry:fix-scope-architectural` and are excluded from the candidate
+  // window at query time (issue #1812), so the stubs that reach THIS gate are
+  // the legacy/hand-removed stragglers the label does not yet cover. They are
+  // SKIPPED, deliberately WITHOUT FIX_REFUSED_LABEL: a refusal marker is terminal
+  // until a human clears it and would stand the stub's whole duplicate family
+  // down behind it, which is how five real stubs burned five agent runs on one
+  // architecture change. The skip writes nothing here; the record-run job
+  // backfills the exclusion label onto these stragglers so the next run excludes
+  // them at the source, and this returns a reportable record so the count is
+  // never silent.
   //
   // Placed AFTER the reconcile branch on purpose: reconciliation runs no agent
   // and opens no PR, it repairs the queue bookkeeping for a PR that ALREADY

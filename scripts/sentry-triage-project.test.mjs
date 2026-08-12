@@ -2632,6 +2632,158 @@ await test("runParseOnly accepts a needs-human verdict WITH human_question", asy
 });
 
 // ---------------------------------------------------------------------------
+// fix_scope architectural hold (#1812). A LOCAL code-fix whose fix_scope is
+// architectural is settled OPEN under sentry:fix-scope-architectural; the
+// hold label rides the SAME atomic add-label and the shed carries it EXACTLY
+// when the hold does not apply (the un-strand direction).
+// ---------------------------------------------------------------------------
+
+const LOCAL_REPO_SLUG = "mento-protocol/monitoring-monorepo";
+
+await test("runParseOnly holds a LOCAL architectural code-fix: two-name label, hold true, hold NOT shed", async () => {
+  const issue = queueIssue({
+    comments: [
+      botComment(
+        verdictComment({
+          verdict: "code-fix",
+          affectedRepo: LOCAL_REPO_SLUG,
+          fixScope: FIX_SCOPE_ARCHITECTURAL,
+        }),
+        "2026-07-17T10:00:00Z",
+      ),
+    ],
+  });
+  const result = await runParseOnly(
+    { localRepo: LOCAL_REPO_SLUG, queueIssue: 500 },
+    { runGh: makeRunGh({ issue }).runGh },
+  );
+  assertEqual(result.verdict, "code-fix");
+  assertEqual(result.architecturalHold, true);
+  // The ADD list is the two-name comma list, hold label second.
+  assertEqual(
+    result.label,
+    "sentry:verdict-code-fix,sentry:fix-scope-architectural",
+  );
+  // Local code-fix is never projectable.
+  assertEqual(result.projectable, false);
+  // The hold label is being ADDED, so it must NOT also be in the shed list
+  // (one name never in both --add-label and --remove-label).
+  assert(
+    !result.shed.split(",").includes(FIX_SCOPE_ARCHITECTURAL_LABEL),
+    `held stub must not shed the hold label it is adding: ${result.shed}`,
+  );
+  // shed is the OTHER verdict labels only.
+  assertDeepEqual(result.shed.split(",").sort(), [
+    "sentry:verdict-config-fix",
+    "sentry:verdict-needs-human",
+    "sentry:verdict-upstream",
+  ]);
+});
+
+await test("runParseOnly does NOT hold a LOCAL MECHANICAL code-fix: bare label, hold false, hold IS shed (stranded-stub regression pin)", async () => {
+  const issue = queueIssue({
+    comments: [
+      botComment(
+        verdictComment({
+          verdict: "code-fix",
+          affectedRepo: LOCAL_REPO_SLUG,
+          fixScope: FIX_SCOPE_MECHANICAL,
+        }),
+        "2026-07-17T10:00:00Z",
+      ),
+    ],
+  });
+  const result = await runParseOnly(
+    { localRepo: LOCAL_REPO_SLUG, queueIssue: 500 },
+    { runGh: makeRunGh({ issue }).runGh },
+  );
+  assertEqual(result.architecturalHold, false);
+  assertEqual(result.label, "sentry:verdict-code-fix");
+  // A re-dispatched stub whose fresh verdict flips to mechanical must un-strand:
+  // the hold label lands in the SHED list so the same atomic edit removes it.
+  assert(
+    result.shed.split(",").includes(FIX_SCOPE_ARCHITECTURAL_LABEL),
+    `a non-held stub must shed the hold label to un-strand: ${result.shed}`,
+  );
+});
+
+await test("runParseOnly does NOT hold a LOCAL architectural CONFIG-fix (verdict gate, not scope alone)", async () => {
+  const issue = queueIssue({
+    comments: [
+      botComment(
+        verdictComment({
+          verdict: "config-fix",
+          affectedRepo: LOCAL_REPO_SLUG,
+          fixScope: FIX_SCOPE_ARCHITECTURAL,
+        }),
+        "2026-07-17T10:00:00Z",
+      ),
+    ],
+  });
+  const result = await runParseOnly(
+    { localRepo: LOCAL_REPO_SLUG, queueIssue: 500 },
+    { runGh: makeRunGh({ issue }).runGh },
+  );
+  // config-fix carries no fix_scope contract; only code-fix holds.
+  assertEqual(result.architecturalHold, false);
+  assertEqual(result.label, "sentry:verdict-config-fix");
+  assert(
+    result.shed.split(",").includes(FIX_SCOPE_ARCHITECTURAL_LABEL),
+    "config-fix sheds the hold label (hold does not apply)",
+  );
+});
+
+await test("runParseOnly does NOT hold an EXTERNAL architectural code-fix: hold false, projectable true (projection leg untouched)", async () => {
+  const issue = queueIssue({
+    comments: [
+      botComment(
+        verdictComment({
+          verdict: "code-fix",
+          affectedRepo: "mento-protocol/frontend-monorepo",
+          fixScope: FIX_SCOPE_ARCHITECTURAL,
+        }),
+        "2026-07-17T10:00:00Z",
+      ),
+    ],
+  });
+  const result = await runParseOnly(
+    { localRepo: LOCAL_REPO_SLUG, queueIssue: 500 },
+    { runGh: makeRunGh({ issue }).runGh },
+  );
+  // An external code-fix reads as architectural too (fix_scope is local-only),
+  // but the hold is LOCAL-only — it stays projectable and unheld.
+  assertEqual(result.architecturalHold, false);
+  assertEqual(result.projectable, true);
+  assertEqual(result.label, "sentry:verdict-code-fix");
+});
+
+await test("runParseOnly holds when a REPEATED fix_scope key fails closed to architectural", async () => {
+  const issue = queueIssue({
+    comments: [
+      botComment(
+        verdictComment({
+          verdict: "code-fix",
+          affectedRepo: LOCAL_REPO_SLUG,
+          // Two fix_scope keys: parseVerdictYaml fails this closed to
+          // architectural, so the hold must engage (fail-closed = held).
+          fixScope: "mechanical\nfix_scope: mechanical",
+        }),
+        "2026-07-17T10:00:00Z",
+      ),
+    ],
+  });
+  const result = await runParseOnly(
+    { localRepo: LOCAL_REPO_SLUG, queueIssue: 500 },
+    { runGh: makeRunGh({ issue }).runGh },
+  );
+  assertEqual(result.architecturalHold, true);
+  assertEqual(
+    result.label,
+    "sentry:verdict-code-fix,sentry:fix-scope-architectural",
+  );
+});
+
+// ---------------------------------------------------------------------------
 // Round binding: the verdict job may only settle a stub on a verdict comment
 // THIS triage round produced (issue #1717).
 // ---------------------------------------------------------------------------
@@ -3103,6 +3255,63 @@ await test("batch mode skips closed, needs-triage, and non-actionable stubs unto
       .every((c) => c.token === null && c.args[1] === "view"),
     "expected ambient reads only",
   );
+});
+
+await test("runProjectionBatch guards a held architectural stub to skipped-state; WITHOUT the label it reds as skipped-repo (#1812)", async () => {
+  const localArchitectural = (extraLabels) =>
+    queueIssue({
+      number: 1,
+      shortId: "ANALYTICS-MENTO-ORG-9A",
+      labels: ["sentry-triage", "sentry:verdict-code-fix", ...extraLabels],
+      comments: [
+        botComment(
+          verdictComment({
+            verdict: "code-fix",
+            affectedRepo: "mento-protocol/monitoring-monorepo",
+            fixScope: FIX_SCOPE_ARCHITECTURAL,
+          }),
+          "2026-07-17T10:00:00Z",
+        ),
+      ],
+    });
+
+  // WITH the hold label: the guard short-circuits to a BENIGN skipped-state
+  // before runProjection runs. The batch project workflow's skipped-state arm
+  // continues, so the job stays green on every architectural verdict.
+  {
+    const held = localArchitectural([FIX_SCOPE_ARCHITECTURAL_LABEL]);
+    const { runGh } = makeRunGh({ stubs: { 1: held } });
+    const rows = await runProjectionBatch(
+      {
+        localRepo: "mento-protocol/monitoring-monorepo",
+        queueIssues: [1],
+        projectionToken: PAT,
+      },
+      { runGh },
+    );
+    assertDeepEqual(
+      rows.map((r) => [r.status, r.reason]),
+      [["skipped-state", "architectural-open"]],
+    );
+  }
+
+  // WITHOUT the hold label (CONTROL): the stub reaches runProjection, which
+  // returns skipped-repo for a local owning repo — the status the workflow's
+  // `*)` arm treats as failed. This is what the guard exists to prevent, and
+  // proves the guard (not something else) does the work.
+  {
+    const unheld = localArchitectural([]);
+    const { runGh } = makeRunGh({ stubs: { 1: unheld } });
+    const rows = await runProjectionBatch(
+      {
+        localRepo: "mento-protocol/monitoring-monorepo",
+        queueIssues: [1],
+        projectionToken: PAT,
+      },
+      { runGh },
+    );
+    assertEqual(rows[0].status, "skipped-repo");
+  }
 });
 
 await test("batch mode isolates per-issue failures and continues", async () => {

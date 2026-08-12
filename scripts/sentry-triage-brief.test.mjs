@@ -1636,6 +1636,77 @@ await test("the verdict step keeps its own re-queue compensation (not reversed b
   );
 });
 
+await test("the close step leaves a LOCAL architectural code-fix OPEN (#1812 settlement)", () => {
+  // Negative-control target: without this early-exit the close step falls through
+  // to `gh issue close`, closing the very stub #1812 exists to keep open as human
+  // design work. The verdict step already applied the hold label on the same
+  // atomic edit; the close step must read architectural_hold and exit 0.
+  const workflow = readRepoFile(".github/workflows/sentry-triage-agent.yml");
+  const closeStep = workflow.slice(
+    workflow.indexOf("- name: Close queue stub"),
+  );
+  // The close step reads the verdict step's architectural_hold output.
+  assert(
+    closeStep.includes(
+      "ARCHITECTURAL_HOLD: ${{ steps.verdict.outputs.architectural_hold }}",
+    ),
+    "the close step must receive architectural_hold from the verdict step",
+  );
+  // The early-exit: a code-fix whose hold is true is left OPEN (exit 0), never
+  // closed. This is the exact shape of the needs-human early-exit above it.
+  assert(
+    /\[ "\$\{VERDICT\}" = "code-fix" \] && \[ "\$\{ARCHITECTURAL_HOLD\}" = "true" \]/.test(
+      closeStep,
+    ),
+    "the close step must guard code-fix + architectural_hold",
+  );
+  // The guarded block echoes the open-under-label note and then exits 0 (left
+  // OPEN) before the block's `fi`.
+  assert(
+    /\[ "\$\{ARCHITECTURAL_HOLD\}" = "true" \]; then[\s\S]{0,400}?exit 0/.test(
+      closeStep,
+    ),
+    "a held architectural stub must exit 0 (left OPEN), never reach the close",
+  );
+});
+
+await test("the verdict step emits and shape-checks architectural_hold on the single atomic edit (#1812)", () => {
+  const workflow = readRepoFile(".github/workflows/sentry-triage-agent.yml");
+  const verdictStep = workflow.slice(
+    workflow.indexOf("- name: Apply verdict label"),
+    workflow.indexOf("- name: Render or clear the needs-human brief"),
+  );
+  // The hold flag is parsed from the parser output and shape-guarded to the
+  // closed boolean (never interpolated into a command).
+  assert(
+    verdictStep.includes("jq -r '.architecturalHold'"),
+    "the verdict step must read architecturalHold from the parse output",
+  );
+  assert(
+    /architectural_hold.*=~.*\^\(true\|false\)\$/s.test(verdictStep),
+    "architectural_hold must be shape-checked to true/false",
+  );
+  assert(
+    verdictStep.includes('echo "architectural_hold=${architectural_hold}"'),
+    "architectural_hold must be exported to the close step",
+  );
+  // The hold rides the SAME single atomic edit: there is exactly one add-label
+  // gh issue edit in the verdict step, and the label the parser hands over
+  // already carries the hold name in its comma list.
+  const addLabelEdits = verdictStep.match(/--add-label "\$\{label\}"/g) ?? [];
+  assert(
+    addLabelEdits.length === 1,
+    "the hold must ride the single atomic --add-label, not a second edit",
+  );
+  // The post-condition survivor filter still counts ONLY sentry:verdict-* labels,
+  // so the hold label (outside that namespace) never trips the double-verdict
+  // guard.
+  assert(
+    verdictStep.includes('select(startswith("sentry:verdict-"))'),
+    "the post-condition must count only the sentry:verdict-* namespace",
+  );
+});
+
 await test("live script comments describe the brief as a comment, not a body write (#1769 round 10)", () => {
   // The routing guidance and the digest note are live script entry points; a
   // stale "writes the stub BODY" / "issue-body brief" description would lead a

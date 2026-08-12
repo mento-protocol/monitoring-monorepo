@@ -25,6 +25,7 @@ import {
   defangBackticks,
   defangMentions,
   extractShortIdFromTitle,
+  FIX_SCOPE_ARCHITECTURAL_LABEL,
   ghPaginate,
   indexQueueIssuesByShortId,
   isSafeNextPageUrl,
@@ -1433,6 +1434,33 @@ await test("verdict label set is derived from the label definitions", () => {
     "sentry:verdict-upstream",
     "sentry:verdict-needs-human",
   ]);
+});
+
+await test("the architectural hold label sits OUTSIDE the sentry:verdict-* namespace (#1812 settlement post-condition)", () => {
+  // The settlement step's post-condition reread counts ONLY labels starting with
+  // `sentry:verdict-`, and refuses (re-queues) a stub carrying >1. The hold label
+  // rides the SAME atomic edit as the verdict label, so it MUST NOT match that
+  // prefix or every held stub would read as double-verdicted and be re-queued.
+  assert(
+    !FIX_SCOPE_ARCHITECTURAL_LABEL.startsWith("sentry:verdict-"),
+    `the hold label must not match the counted verdict prefix: ${FIX_SCOPE_ARCHITECTURAL_LABEL}`,
+  );
+  assert(
+    !VERDICT_LABELS.includes(FIX_SCOPE_ARCHITECTURAL_LABEL),
+    "the hold label must not be in the verdict namespace",
+  );
+  // Concretely: a held stub carrying verdict-code-fix + the hold label counts as
+  // exactly ONE verdict label under the survivor filter.
+  const heldLabels = ["sentry:verdict-code-fix", FIX_SCOPE_ARCHITECTURAL_LABEL];
+  const survivors = heldLabels.filter((name) =>
+    name.startsWith("sentry:verdict-"),
+  );
+  assertEqual(survivors.length, 1);
+  // It IS shed on regression so the fresh round re-decides scope.
+  assert(
+    REOPEN_SHED_LABELS.includes(FIX_SCOPE_ARCHITECTURAL_LABEL),
+    "the hold label must be shed on regression",
+  );
 });
 
 await test("reopen shed set is every verdict label plus projected + autofix + archive markers", () => {

@@ -608,12 +608,16 @@ function renderDeferredIssues(deferredIssues) {
  * to make detectable.
  *
  * `skipped` is the SECOND stand-down class, on the same argument (issue #1785):
- * a `fix_scope: architectural` verdict is skipped and left unmarked on purpose,
- * so it writes nothing either — and since every verdict predating the field
- * normalizes to `architectural`, an unreported skip makes "triage is correctly
- * classifying architectural" and "the prompt change never shipped" render the
- * same. Both counters are separate lines because they lift on different events:
- * a deferral lifts when a sibling's marker goes, a skip only on re-triage.
+ * a `fix_scope: architectural` verdict the selector skips writes nothing to the
+ * queue from the select leg. Fresh architectural verdicts settle OPEN under
+ * `sentry:fix-scope-architectural` and are excluded from the window at query
+ * time (issue #1812), so this counter now tracks the LEGACY stragglers the
+ * record-run backfill has not yet labeled — and since every verdict predating
+ * the field normalizes to `architectural`, an unreported skip makes "triage is
+ * correctly classifying architectural" and "the prompt change never shipped"
+ * render the same. Both counters are separate lines because they lift on
+ * different events: a deferral lifts when a sibling's marker goes, a skip when
+ * the backfill labels it (or a re-triage clears it).
  */
 export function buildAutofixRunRecordBody({
   timestampIso,

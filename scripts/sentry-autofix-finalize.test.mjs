@@ -35,7 +35,17 @@ import { selectMarkedComment } from "./sentry-triage-project-core.mjs";
 import {
   FIX_PR_OPENED_LABEL,
   FIX_REFUSED_LABEL,
+  FIX_SCOPE_ARCHITECTURAL_LABEL,
 } from "./sentry-triage-ingest.mjs";
+// The record-run backfill labeler (#1812) is a new record-run-job module; its
+// tests live in this suite, which already covers the record-run body.
+import {
+  backfillArchitecturalLabels,
+  MAX_BACKFILL_LABELS,
+  planArchitecturalBackfill,
+  SKIP_FIX_SCOPE_ARCHITECTURAL,
+  skipReportFromIssueList,
+} from "./sentry-autofix-record-labels.mjs";
 
 let passed = 0;
 let failed = 0;
@@ -62,6 +72,12 @@ function assertEqual(actual, expected) {
       `expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`,
     );
   }
+}
+
+function assertDeepEqual(actual, expected) {
+  const a = JSON.stringify(actual);
+  const e = JSON.stringify(expected);
+  if (a !== e) throw new Error(`expected ${e}, got ${a}`);
 }
 
 function captureCli(argv) {
@@ -557,12 +573,12 @@ await test("run record distinguishes a family-SUPPRESSED queue from an empty one
 
 await test("run record distinguishes a SCOPE-suppressed queue from an empty one", () => {
   // The second stand-down class (issue #1785), on the same argument as the
-  // first. A `fix_scope: architectural` verdict is skipped and left unmarked on
-  // purpose, so it writes nothing to the queue either — and EVERY verdict
-  // predating the field normalizes to `architectural`, which makes this the
-  // steady state right after the gate ships. Unreported, "triage is correctly
-  // classifying architectural" and "the prompt change never landed" render the
-  // same line.
+  // first. The selector skips a `fix_scope: architectural` stub and writes
+  // nothing to the queue from the select leg — fresh ones settle OPEN under
+  // sentry:fix-scope-architectural and are window-excluded (#1812), so this
+  // counts the LEGACY stragglers the backfill has not labeled yet. Unreported,
+  // "triage is correctly classifying architectural" and "the prompt change never
+  // landed" render the same line.
   const idle = buildAutofixRunRecordBody({
     timestampIso: "2026-07-19T08:30:00Z",
     trigger: "schedule",
@@ -1211,6 +1227,124 @@ await test("guard catches underscore-containing / underscore-split credential fi
       0,
     "SCREAMING_SNAKE const path allowed",
   );
+});
+
+// ---------------------------------------------------------------------------
+// Record-run architectural backfill labeler (#1812). Drains the legacy
+// architectural backlog by labeling the stubs the selector skipped, so the next
+// run excludes them at query time.
+// ---------------------------------------------------------------------------
+
+const architecturalSkip = (issue) => ({
+  issue,
+  reason: SKIP_FIX_SCOPE_ARCHITECTURAL,
+});
+
+await test("backfill: self-heal-creates the label FIRST, then one ^[0-9]+$-validated --add-label per stub", async () => {
+  const calls = [];
+  const runGh = async (args) => {
+    calls.push(args);
+    return "{}";
+  };
+  const skip = [
+    architecturalSkip("10"),
+    architecturalSkip("22"),
+    architecturalSkip("10"), // duplicate collapses
+  ];
+  const res = await backfillArchitecturalLabels(
+    skip,
+    { repo: "o/r" },
+    { runGh },
+  );
+  // The FIRST gh call is the self-heal label create (from LABEL_DEFINITIONS).
+  assertEqual(calls[0][0], "label");
+  assertEqual(calls[0][1], "create");
+  assertEqual(calls[0][2], FIX_SCOPE_ARCHITECTURAL_LABEL);
+  assert(calls[0].includes("--force"), "self-heal create must be --force");
+  // Then exactly one --add-label edit per distinct valid number, in order.
+  const edits = calls
+    .slice(1)
+    .filter((c) => c[0] === "issue" && c[1] === "edit");
+  assertDeepEqual(
+    edits.map((c) => c[2]),
+    ["10", "22"],
+  );
+  for (const c of edits) {
+    assertEqual(c[c.indexOf("--add-label") + 1], FIX_SCOPE_ARCHITECTURAL_LABEL);
+  }
+  assertDeepEqual(res.labeled, ["10", "22"]);
+});
+
+await test("backfill: a malformed (non-integer) issue number is REFUSED, never interpolated into a gh argv", async () => {
+  const calls = [];
+  const runGh = async (args) => {
+    calls.push(args);
+    return "{}";
+  };
+  const skip = [
+    architecturalSkip("7"),
+    architecturalSkip("not-a-number"),
+    architecturalSkip("9; rm -rf /"),
+  ];
+  const res = await backfillArchitecturalLabels(
+    skip,
+    { repo: "o/r" },
+    { runGh },
+  );
+  const edits = calls.filter((c) => c[0] === "issue" && c[1] === "edit");
+  assertDeepEqual(
+    edits.map((c) => c[2]),
+    ["7"],
+  );
+  assertDeepEqual(res.refused, ["not-a-number", "9; rm -rf /"]);
+});
+
+await test("backfill: only fix-scope-architectural skips are labeled (a future skip reason is ignored)", () => {
+  const plan = planArchitecturalBackfill([
+    architecturalSkip("1"),
+    { issue: "2", reason: "some-other-skip" },
+    architecturalSkip("3"),
+  ]);
+  assertDeepEqual(plan.numbers, ["1", "3"]);
+});
+
+await test("backfill: idempotent — re-running produces the identical --add-label edits", async () => {
+  const run = async () => {
+    const calls = [];
+    const runGh = async (args) => {
+      calls.push(args);
+      return "{}";
+    };
+    await backfillArchitecturalLabels(
+      [architecturalSkip("5"), architecturalSkip("6")],
+      { repo: "o/r" },
+      { runGh },
+    );
+    return calls
+      .filter((c) => c[0] === "issue" && c[1] === "edit")
+      .map((c) => c.join(" "));
+  };
+  assertDeepEqual(await run(), await run());
+});
+
+await test("backfill: caps the per-run write volume at MAX_BACKFILL_LABELS, overflow labeled later", () => {
+  const many = [];
+  for (let i = 0; i < MAX_BACKFILL_LABELS + 5; i += 1) {
+    many.push(architecturalSkip(String(1000 + i)));
+  }
+  const plan = planArchitecturalBackfill(many);
+  assertEqual(plan.numbers.length, MAX_BACKFILL_LABELS);
+  assertEqual(plan.overflow, 5);
+});
+
+await test("backfill: the CLI's space-separated issue list rebuilds an all-architectural skip report", () => {
+  const report = skipReportFromIssueList("10 22 33");
+  assertDeepEqual(report, [
+    architecturalSkip("10"),
+    architecturalSkip("22"),
+    architecturalSkip("33"),
+  ]);
+  assertDeepEqual(skipReportFromIssueList(""), []);
 });
 
 process.stdout.write(`\n${passed} passed, ${failed} failed\n`);

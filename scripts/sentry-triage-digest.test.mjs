@@ -930,6 +930,95 @@ await test("buildDigest renders sections in order (needs-human first) and omits 
   assert(text.includes("*Decision needed:*"), "expected the needs-human brief");
 });
 
+// Byte-identical render snapshot (#1812 file split). Pins the whole Slack block
+// array across the digest -> digest-render extraction so a future refactor of the
+// render layer cannot silently drift the output. Covers one entry per section,
+// including the new "Open design work" architectural grouping.
+const RENDER_SNAPSHOT =
+  '[{"type":"section","text":{"type":"mrkdwn","text":"*Sentry triage — 6 issues triaged*","verbatim":true}},{"type":"section","text":{"type":"mrkdwn","text":"*⚠️ Needs human — decisions required (1)*\\n• *<https://github.com/mento-protocol/monitoring-monorepo/issues/1|NH-1>* · confidence: medium\\n    ◦ *Decision needed:* Decide it.\\n    ◦ *Links:* <https://github.com/mento-protocol/monitoring-monorepo/issues/1|queue issue>","verbatim":true}},{"type":"section","text":{"type":"mrkdwn","text":"*🤖 Autofixed (1)*\\n• <https://github.com/mento-protocol/monitoring-monorepo/issues/2|AF-1> (app-mento-org) — A short summary → <https://github.com/mento-protocol/mento-web/pull/9|fix PR>","verbatim":true}},{"type":"section","text":{"type":"mrkdwn","text":"*📮 Routed to owning repo (1)*\\n• <https://github.com/mento-protocol/monitoring-monorepo/issues/3|RT-1> (app-mento-org) — A short summary → <https://github.com/mento-protocol/mento-web/issues/42|owning-repo issue>","verbatim":true}},{"type":"section","text":{"type":"mrkdwn","text":"*🏗 Open design work — no autofix (1)*\\n• <https://github.com/mento-protocol/monitoring-monorepo/issues/4|ARCH-1> (app-mento-org) — A short summary → <https://github.com/mento-protocol/monitoring-monorepo/issues/4|triage verdict> _(open under `sentry:fix-scope-architectural` — human design work, no autofix)_","verbatim":true}},{"type":"section","text":{"type":"mrkdwn","text":"*🙅 Wontfix / transient (1)*\\n• <https://github.com/mento-protocol/monitoring-monorepo/issues/5|UP-1> (app-mento-org) — A short summary [confidence: medium]","verbatim":true}},{"type":"section","text":{"type":"mrkdwn","text":"*🛑 Failed triage (1)*\\n• <https://github.com/mento-protocol/monitoring-monorepo/issues/6|FAIL-1> (app-mento-org) — triage incomplete (still `sentry:needs-triage`)","verbatim":true}},{"type":"section","text":{"type":"mrkdwn","text":"_To archive a *🙅 Wontfix / transient* issue in Sentry: add `sentry:approved-archive` to its queue issue._","verbatim":true}}]';
+
+await test("digest render snapshot is byte-identical across the file split (#1812)", () => {
+  const AUTOFIX_PR = "https://github.com/mento-protocol/mento-web/pull/9";
+  const OWNING_ISSUE = "https://github.com/mento-protocol/mento-web/issues/42";
+  const payload = buildDigest(
+    [
+      issueFixture({
+        number: 1,
+        shortId: "NH-1",
+        labels: ["sentry:verdict-needs-human"],
+        body: "",
+        comments: [
+          {
+            body: verdictComment({
+              verdict: "needs-human",
+              humanQuestion: "Decide it.",
+            }),
+          },
+        ],
+      }),
+      issueFixture({
+        number: 2,
+        shortId: "AF-1",
+        body: "",
+        labels: ["sentry:verdict-code-fix"],
+        comments: [
+          {
+            body: verdictComment({
+              verdict: "code-fix",
+              affectedRepo: "mento-protocol/mento-web",
+            }),
+          },
+          { body: `${AUTOFIX_COMMENT_PREFIX}${AUTOFIX_PR}` },
+        ],
+      }),
+      issueFixture({
+        number: 3,
+        shortId: "RT-1",
+        body: "",
+        labels: ["sentry:verdict-code-fix"],
+        comments: [
+          {
+            body: verdictComment({
+              verdict: "code-fix",
+              affectedRepo: "mento-protocol/mento-web",
+            }),
+          },
+          { body: `${PROJECTED_COMMENT_PREFIX}${OWNING_ISSUE}` },
+        ],
+      }),
+      issueFixture({
+        number: 4,
+        shortId: "ARCH-1",
+        body: "",
+        labels: ["sentry:verdict-code-fix", "sentry:fix-scope-architectural"],
+        comments: [
+          {
+            body: verdictComment({
+              verdict: "code-fix",
+              affectedRepo: "mento-protocol/monitoring-monorepo",
+            }),
+          },
+        ],
+      }),
+      issueFixture({
+        number: 5,
+        shortId: "UP-1",
+        body: "",
+        labels: ["sentry:verdict-upstream"],
+        comments: [{ body: verdictComment({ verdict: "upstream-transient" }) }],
+      }),
+      issueFixture({
+        number: 6,
+        shortId: "FAIL-1",
+        body: "",
+        labels: ["sentry:needs-triage"],
+      }),
+    ],
+    { channel: "#engineering" },
+  );
+  assertEqual(JSON.stringify(payload.blocks), RENDER_SNAPSHOT);
+});
+
 await test("buildDigest renders a routed line linking the projected owning-repo issue", () => {
   const payload = buildDigest(
     [
