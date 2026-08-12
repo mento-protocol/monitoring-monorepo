@@ -13,6 +13,7 @@ import {
   LOCAL_SENTRY_PROJECT,
   MAX_HANDLED_ID_QUERIES,
   MAX_REVERSE_PROBE_QUERIES,
+  REVERSE_SEARCH_LIMIT,
 } from "./sentry-autofix-queue-io.mjs";
 import {
   isValidShortId,
@@ -199,18 +200,25 @@ function makeRunGh({
       const commentsProbe = /"([^"]+)"\s+in:comments/.exec(search);
       if (commentsProbe) {
         const qid = commentsProbe[1].toUpperCase();
+        const matched = handledStubs.filter((h) =>
+          [...h.declares, ...h.mentions]
+            .map((x) => String(x).toUpperCase())
+            .includes(qid),
+        );
+        // GitHub returns at most `--limit` rows BEFORE any client-side filter,
+        // so a hit past the page boundary is genuinely unread — model that
+        // truncation. The #1810 follow-up raised the reverse probe's `--limit`
+        // to REVERSE_SEARCH_LIMIT precisely so a terminal sibling on page 2 is
+        // not silently dropped; a suite that ignored `--limit` could never
+        // reproduce that miss.
+        const limitIdx = args.indexOf("--limit");
+        const limit = limitIdx === -1 ? Infinity : Number(args[limitIdx + 1]);
         return JSON.stringify(
-          handledStubs
-            .filter((h) =>
-              [...h.declares, ...h.mentions]
-                .map((x) => String(x).toUpperCase())
-                .includes(qid),
-            )
-            .map((h) => ({
-              number: h.number,
-              title: handledTitle(h),
-              labels: [h.label, "sentry-triage"].map((name) => ({ name })),
-            })),
+          matched.slice(0, limit).map((h) => ({
+            number: h.number,
+            title: handledTitle(h),
+            labels: [h.label, "sentry-triage"].map((name) => ({ name })),
+          })),
         );
       }
       // Per-declared-id handled lookup (bug C): `"<ID>" in:title`. Return handled
@@ -1356,6 +1364,101 @@ await test("bug B hub topology: A and a handled sibling joined only through a no
   assert(
     reverseSearchedFor(calls, "ANALYTICS-MENTO-ORG-HC"),
     "the hub id C must be probed, not just the candidate id A",
+  );
+});
+
+await test("bug B (#1810 follow-up): the terminal blocker on PAGE 2 of the reverse search still stands the finalist down", async () => {
+  // The reverse `in:comments` probe pages the API. Before this fix the per-search
+  // `--limit` was 20, so a terminal sibling that landed past the first page went
+  // unread and the finalist burned an autofix run — the #1808 truncation class.
+  // Topology: A declares nothing, so only the reverse probe can reach its family.
+  // The search returns 29 bare mentions of A (fence-rejected: no verdict edge)
+  // FIRST, then the single handled sibling B that actually declares [A] and holds
+  // a terminal marker — so B is the 30th row, on page 2 of a 20-row page. With
+  // --limit REVERSE_SEARCH_LIMIT (100) B is returned and A stands down.
+  //
+  // NEGATIVE CONTROL (revert the source `--limit` to 20): the mock truncates the
+  // returned rows to the passed `--limit`, so a 20-row page drops B (row 30) and
+  // A is (wrongly) selected — the family burns a run. That mutation is anchored
+  // twice below: the probe must request at least the 30 rows needed to clear the
+  // page, AND B must actually be the last row (assert-fail if the fixture drifts
+  // so the blocker is not genuinely on page 2).
+  const A = stub({ number: 800, shortId: "ANALYTICS-MENTO-ORG-PA" });
+  const noise = Array.from({ length: 29 }, (_, i) => ({
+    number: 8100 + i,
+    shortId: `ANALYTICS-MENTO-ORG-N${i}`,
+    label: FIX_REFUSED_LABEL,
+    declares: [],
+    mentions: ["ANALYTICS-MENTO-ORG-PA"],
+  }));
+  const blocker = {
+    number: 8200,
+    shortId: "ANALYTICS-MENTO-ORG-PB",
+    label: FIX_PR_OPENED_LABEL,
+    declares: ["ANALYTICS-MENTO-ORG-PA"],
+  };
+  const handled = [...noise, blocker];
+  // Fixture anchor: the blocker is genuinely past a 20-row page — the exact
+  // condition the old --limit 20 dropped.
+  assert(
+    handled.indexOf(blocker) >= 20,
+    "the terminal blocker must sit past the first page for the control to bite",
+  );
+  const { runGh, calls } = makeRunGh({ stubs: [A], handled });
+  const { entries, deferred } = await selectAutofixRun(
+    { repo: "o/r", cap: 2 },
+    { runGh },
+  );
+  assertDeepEqual(entries, []);
+  assertDeepEqual(deferred, [{ issue: 800, reason: DEFER_FAMILY_HANDLED }]);
+  // Anchor the fix's value, not just consistency: a probe that asked for 20
+  // (the reverted source) could not reach row 30, so require real page-2 reach.
+  const probe = calls.find(
+    (c) =>
+      c[0] === "issue" &&
+      c[1] === "list" &&
+      String(c[c.indexOf("--search") + 1] ?? "").includes(
+        `"ANALYTICS-MENTO-ORG-PA" in:comments`,
+      ),
+  );
+  assert(probe, "the reverse probe ran");
+  const probeLimit = Number(probe[probe.indexOf("--limit") + 1]);
+  assertEqual(
+    String(probeLimit),
+    String(REVERSE_SEARCH_LIMIT),
+    "the reverse probe must request REVERSE_SEARCH_LIMIT rows",
+  );
+  assert(
+    probeLimit >= 30,
+    `the reverse probe --limit must clear page 2 (>=30), got ${probeLimit}`,
+  );
+});
+
+await test("bug B (#1810 follow-up): a FULL reverse page flips the truncated flag onto the run record", async () => {
+  // A full page means `--limit` capped what the API returned before any filter,
+  // so an unread page 2 may hold a sibling. The fix surfaces that on the same
+  // run-record line the probe-budget truncation uses (truncations.reverseBudget)
+  // rather than paginating. Here A declares nothing and the probe comes back with
+  // exactly REVERSE_SEARCH_LIMIT bare mentions (no verdict edge, so A is still
+  // selected) — the flag must be set anyway.
+  const A = stub({ number: 810, shortId: "ANALYTICS-MENTO-ORG-QA" });
+  const fullPage = Array.from({ length: REVERSE_SEARCH_LIMIT }, (_, i) => ({
+    number: 8300 + i,
+    shortId: `ANALYTICS-MENTO-ORG-Q${i}`,
+    label: FIX_REFUSED_LABEL,
+    declares: [],
+    mentions: ["ANALYTICS-MENTO-ORG-QA"],
+  }));
+  const { runGh } = makeRunGh({ stubs: [A], handled: fullPage });
+  const { entries, truncations } = await selectAutofixRun(
+    { repo: "o/r", cap: 2 },
+    { runGh },
+  );
+  assertDeepEqual(entries, [{ issue: 810, shortId: "ANALYTICS-MENTO-ORG-QA" }]);
+  assertEqual(
+    truncations.reverseBudget,
+    true,
+    "a full reverse page must surface as a truncation on the run record",
   );
 });
 

@@ -329,6 +329,19 @@ async function readVerdictCached(runGh, repo, number, cache) {
 export const MAX_REVERSE_PROBE_QUERIES = 40;
 
 /**
+ * Per-search page size for the reverse `in:comments` probes. 5x headroom over the
+ * live queue scale, the same class of fix as #1808: a `--limit` sized to today's
+ * ledger silently drops page-2 hits, so a terminal sibling that falls past the
+ * first page is missed and its candidate burns another autofix run. The bound
+ * stays finite by design — we do NOT paginate-until-found. Instead a search that
+ * comes back with a FULL page (`hits.length >= REVERSE_SEARCH_LIMIT`, meaning
+ * there may be a page 2 we never read) flips the function's `truncated` flag, so
+ * the existing run-record surface reports the shortfall exactly as the probe
+ * budget does — bounded-and-surfaced, matching #1808.
+ */
+export const REVERSE_SEARCH_LIMIT = 100;
+
+/**
  * Reverse-verify the FINALISTS' families (PR #1810 bug B). The forward
  * `duplicate_of` graph misses two shapes the collapse must still catch: a
  * finalist that declares NOTHING but is named by a handled sibling, and a hub id
@@ -356,8 +369,11 @@ export const MAX_REVERSE_PROBE_QUERIES = 40;
  * fixpoint iterations so no id is queried twice AND so the per-run
  * MAX_REVERSE_PROBE_QUERIES budget bounds the whole fixpoint, not one call.
  * Returns `{ edges: [[hitKey, declaredKey]], blockers: [hitKey], truncated }` —
- * `truncated` true when the probe budget was reached (some finalists left
- * unverified, failing toward MORE candidates).
+ * `truncated` true when EITHER the per-run probe budget was reached (some
+ * finalists left unverified) OR a single probe came back with a full
+ * REVERSE_SEARCH_LIMIT page (a sibling may sit on an unread page 2). Both leave
+ * the fixpoint incomplete, failing toward MORE candidates, and both surface on
+ * the same run-record line.
  */
 export async function reverseVerifyFamilies(
   runGh,
@@ -400,7 +416,7 @@ export async function reverseVerifyFamilies(
         "--json",
         "number,title,labels",
         "--limit",
-        "20",
+        String(REVERSE_SEARCH_LIMIT),
       ]);
       hits = JSON.parse(stdout);
     } catch (err) {
@@ -409,6 +425,13 @@ export async function reverseVerifyFamilies(
         `note: reverse family search for ${probeId} failed (${message}); skipping this probe.\n`,
       );
       continue;
+    }
+    // A full page means `--limit` capped what the API returned before any
+    // client-side filter ran: a page-2 hit — possibly the terminal sibling —
+    // went unread. Surface it (do NOT paginate); the finalist gets one bounded,
+    // self-terminating extra attempt rather than a silent miss (the #1808 class).
+    if (Array.isArray(hits) && hits.length >= REVERSE_SEARCH_LIMIT) {
+      truncated = true;
     }
     for (const hit of Array.isArray(hits) ? hits : []) {
       const hitShortId = parseShortId(hit.title ?? "");

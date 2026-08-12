@@ -723,22 +723,30 @@ could fan out to ~80 secondary-rate-limited SEARCH queries per iteration ×
 from 5) so that ceiling keeps headroom for checkout, setup, and API-latency spikes
 rather than being sized to hope. The read budget truncates the window's **newest**
 tail (it is oldest-first), and any approach toward the eval cap is surfaced on the
-tracker as `Window: N stubs, evaluated M` in the run record. The two lookup
-budgets fail toward MORE candidates (a family that should stand down is
+tracker as `Window: N stubs, evaluated M` in the run record. Each reverse
+`in:comments` search itself reads a bounded page — `REVERSE_SEARCH_LIMIT` (100),
+5x headroom over the queue scale — rather than paginating to exhaustion (PR #1810
+follow-up); a search that comes back a full page deep flags the same reverse
+truncation, since a sibling could sit on an unread page 2 (the #1808 class). The
+two lookup budgets fail toward MORE candidates (a family that should stand down is
 re-attempted, never wrongly closed), and each truncation is surfaced too —
-`Handled-id lookups truncated: N …`, `Reverse family probe truncated: …`, or
-`Reverse family verification did not converge …` — so a bounded re-attempt is
-never the silent, healthy-looking one the Window line exists to eliminate.
+`Handled-id lookups truncated: N …`, `Reverse family probe truncated: …` (probe
+budget **or** a full search page), or `Reverse family verification did not
+converge …` — so a bounded re-attempt is never the silent, healthy-looking one the
+Window line exists to eliminate.
 
 The selector reads only PRs whose head branch is in **this** repo.
 `gh pr list --head` matches by branch name, which fork PRs also carry, so on a
 public repo with a deterministic `sentry-autofix/<short-id>` branch anyone could
 otherwise present a PR that the leg reads as its own prior fix — which would
 comment that PR's url onto the queue stub, apply the terminal marker, and stand
-the stub's whole family down behind it. Both the selector's dedup and the
-finalize reconcile step require `isCrossRepository: false` **and** a matching
-head-repository owner, and both read a page rather than a single row so a spoof
-cannot hide a real PR behind it.
+the stub's whole family down behind it. Every branch-name PR read requires
+`isCrossRepository: false` **and** a matching head-repository owner, and reads a
+page rather than a single row so a spoof cannot hide a real PR behind it — the
+selector's dedup, the normal finalize path's relink-under-marker and dup-guard
+reads (PR #1810 follow-up), and the finalize reconcile step alike. A fork PR on
+the branch name is treated as **not ours**: the normal path opens our own PR
+instead of adopting it, and neither reconcile path relinks to it.
 
 The LLM agent runs in a **read-only `agent` job** (contents:read + issues:read,
 no App token) and hands its whole working tree to a separate **trusted

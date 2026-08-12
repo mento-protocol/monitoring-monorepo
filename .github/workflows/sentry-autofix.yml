@@ -739,9 +739,23 @@ jobs:
             # Match the deterministic autofix head branch, not a text search: a
             # free-text SHORT-ID query can hit an unrelated open PR that merely
             # cites the Sentry issue and relink the stub to the wrong PR.
+            #
+            # `--head` matches by branch NAME, which FORK PRs also carry, and this
+            # repo is public with a deterministic autofix branch name — so anyone
+            # can push `sentry-autofix/<short-id>` on a fork and open a PR at main
+            # before this candidate finalizes. Require the head repo to be THIS
+            # repo (both signals must affirm it, the same fence as the reconcile
+            # step and the selector's `isOwnHeadPr`) before relinking the stub to
+            # it; a fork PR is treated as NOT ours, so relink finds nothing.
             reconciled_pr=$(GH_TOKEN="${APP_TOKEN}" gh pr list \
-              --repo "${REPO}" --head "${branch}" --state open \
-              --json url --jq '.[0].url // ""')
+              --repo "${REPO}" --head "${branch}" --state open --limit 20 \
+              --json url,isCrossRepository,headRepositoryOwner \
+              | jq -r --arg owner "${REPO%%/*}" \
+                  '[ .[]
+                     | select(.isCrossRepository == false)
+                     | select(((.headRepositoryOwner.login // "") | ascii_downcase)
+                              == ($owner | ascii_downcase)) ]
+                   | .[0].url // ""')
             if [ -n "${reconciled_pr}" ]; then
               echo "::notice::#${QUEUE_ISSUE} already marked fix-pr-opened; relinking ${reconciled_pr}, no new PR."
               gh issue comment "${QUEUE_ISSUE}" --repo "${REPO}" \
@@ -759,9 +773,23 @@ jobs:
           # an orphan and reused (see the force-push note below), so a regressed,
           # re-triaged issue can be fixed again. `gh` reads the API (never git
           # config), so this cannot be redirected by the tainted repo.
+          #
+          # Same fork fence as the relink and reconcile paths: `--head` matches by
+          # branch NAME, which a FORK PR on the deterministic `sentry-autofix/...`
+          # name also carries. Require the head repo to be THIS repo (both signals
+          # affirm it) so an outsider's fork PR is never trusted as our prior fix
+          # and adopted as the dedup — that would mark the stub fixed against the
+          # fork PR and stand its whole family down. A fork PR is NOT ours, so it
+          # leaves `existing_pr` empty and this run opens our own PR below.
           existing_pr=$(GH_TOKEN="${APP_TOKEN}" gh pr list \
-            --repo "${REPO}" --head "${branch}" --state open \
-            --json url --jq '.[0].url // ""')
+            --repo "${REPO}" --head "${branch}" --state open --limit 20 \
+            --json url,isCrossRepository,headRepositoryOwner \
+            | jq -r --arg owner "${REPO%%/*}" \
+                '[ .[]
+                   | select(.isCrossRepository == false)
+                   | select(((.headRepositoryOwner.login // "") | ascii_downcase)
+                            == ($owner | ascii_downcase)) ]
+                 | .[0].url // ""')
 
           # Whether THIS run opened the PR — only a PR we opened here may be
           # withdrawn by the final stale-verdict guard below; a pre-existing PR
