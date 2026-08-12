@@ -182,9 +182,11 @@ exist because contention — not flakiness — produced the failures in issue
 (`$HOME/.cache/agent-quality-gate/run.lock`, falling back to
 `$TMPDIR/agent-quality-gate-<uid>`; override with
 `AGENT_QUALITY_GATE_LOCK_DIR`) before it executes anything, and releases it on
-exit. `mkdir(2)` is the primitive because macOS has no `flock(1)` and the repo's
-floor is Bash 3.2. A second run prints the holder's PID, host, and worktree,
-then waits — bounded by `--lock-wait` / `AGENT_QUALITY_GATE_LOCK_WAIT_SECONDS`,
+exit. `mkdir(2)` and `O_EXCL` are the primitives because macOS has no
+`flock(1)`, BSD `mv` has no `-T` — `mv src dir` moves `src` _inside_ an
+existing `dir` instead of failing, so a rename can never be a conditional
+claim here — and the repo's floor is Bash 3.2. A second run prints the
+holder's PID, host, and worktree, then waits — bounded by `--lock-wait` / `AGENT_QUALITY_GATE_LOCK_WAIT_SECONDS`,
 1800 seconds by default — and exits 2 naming that holder if the wait runs out.
 Nothing that will not execute mapped commands ever competes for the lock: a dry
 run, a `--skip-if-fresh` cache hit, and a package-script refusal all exit
@@ -192,11 +194,35 @@ before it. After waiting, a `--skip-if-fresh` run re-checks freshness, so the
 pre-push hook that queued behind a manual warm-up run reuses that run's stamp
 instead of repeating its work.
 
+The invariant the lock keeps is: **at every instant at most one process
+believes it holds it, and no waiter ever removes or renames another run's
+lock.** Three rules carry that. A holder is made in two atomic steps — win
+`mkdir` on the lock path, then create `owner` with `O_EXCL` — so a creator
+descheduled between them finds its exclusive write refused and queues instead
+of running beside whoever took over. A waiter that judges a lock stale must
+first win a `mkdir` election on `run.lock/reclaim`, then **re-read the owner
+record and confirm it is still the same dead identity it judged**; a verdict
+formed before winning the election is worthless, because another reclaimer may
+have taken the lock over in between. Only then does it drop that record and
+claim, again with `O_EXCL`. Nothing renames or deletes a lock directory except
+the run that owns it.
+
 A killed holder cannot release its own lock, so recovery is explicit rather
 than time-based: the lock records the holder's PID, and a waiter that finds
-that PID gone renames the lock aside and takes it. `kill -9` on a gate run
-therefore costs the next run one line of output, never manual cleanup. Two
-escape hatches start immediately: `--no-lock` (or `AGENT_QUALITY_GATE_LOCK=0`),
+that PID gone takes the lock over in place. `kill -9` on a gate run therefore
+costs the next run one line of output, never manual cleanup. The one state
+that does need a hand is a reclaimer `kill -9`ed inside the milliseconds it
+holds `run.lock/reclaim` — no waiter can break that marker without reopening
+the race it exists to close, so the gate fails closed after five polls and
+prints the exact `rm -rf` to run. A signal the process can catch clears the
+marker on the way out, which leaves `SIGKILL` as the only way in.
+
+A lock whose owner record never appeared — a run killed between `mkdir` and
+its write leaves exactly that — counts as abandoned after a 30-second grace.
+That path is still reachable, so it stays, but it no longer carries any
+correctness weight; it only keeps churn down.
+
+Two escape hatches start immediately: `--no-lock` (or `AGENT_QUALITY_GATE_LOCK=0`),
 and an inherited `AGENT_QUALITY_GATE_LOCK_HELD`, which is how the gate's
 self-test drives the gate against fixture repos from inside a gate run without
 deadlocking behind its own ancestor. The self-test exports

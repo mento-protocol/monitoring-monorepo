@@ -4981,4 +4981,123 @@ STUB
 )
 rm -rf "$gate_lock_repo" "$gate_lock_root"
 
+# Reclaiming a lock spans two decisions — "this lock is stale" and "take it" —
+# and creating one spans two more: win `mkdir`, then record ownership. Both
+# windows are sub-millisecond in production, which is why the gate exposes
+# test-only delays that hold them open. What has to hold either way: exactly
+# one run executes mapped commands at a time. The fixture's only mapped command
+# is a trunk stub recording when it starts and stops, so two overlapping
+# records are the failure these two cases exist to catch.
+gate_race_repo="$(mktemp -d)"
+gate_race_root="$(mktemp -d)"
+gate_race_log="$gate_race_repo/race.log"
+(
+  cd "$gate_race_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  printf 'fixture\n' > fixture.txt
+  mkdir -p tools
+  cat > tools/trunk <<STUB
+#!/usr/bin/env bash
+printf 'enter %s %s\n' "\$\$" "\$(date +%s)" >> "$gate_race_log"
+sleep 4
+printf 'exit %s %s\n' "\$\$" "\$(date +%s)" >> "$gate_race_log"
+exit 0
+STUB
+  chmod +x tools/trunk
+  git add .
+  git commit -qm init
+  printf 'changed\n' >> fixture.txt
+
+  race_waiter() {
+    # AGENT_QUALITY_GATE_LOCK_HELD is cleared for the same reason as above: an
+    # inherited marker would make every assertion here pass vacuously.
+    AGENT_QUALITY_GATE_LOCK=1 \
+      AGENT_QUALITY_GATE_LOCK_HELD='' \
+      AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+      AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=4 \
+      AGENT_QUALITY_GATE_LOCK_RECLAIM_DELAY_SECONDS="$2" \
+      AGENT_QUALITY_GATE_LOCK_CLAIM_DELAY_SECONDS="$3" \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+      --base HEAD --run --lock-wait 120 \
+      > "$gate_race_repo/$1.out" 2>&1 || true
+  }
+
+  assert_runs_did_not_overlap() {
+    local label="$1"
+    local overlapping starts
+    overlapping="$(awk '
+      /^enter/ { start[$2] = $3; order[++n] = $2 }
+      /^exit/ { stop[$2] = $3 }
+      END {
+        for (i = 1; i <= n; i++) {
+          for (j = i + 1; j <= n; j++) {
+            p = order[i]
+            q = order[j]
+            if ((p in stop) && (q in stop) && start[p] < stop[q] && start[q] < stop[p]) {
+              print p " " q
+            }
+          }
+        }
+      }
+    ' "$gate_race_log")"
+    [[ -z "$overlapping" ]] ||
+      fail "${label}: two gate runs executed mapped commands at once (${overlapping})"
+    starts="$(awk '/^enter/ { c++ } END { print c + 0 }' "$gate_race_log")"
+    [[ "$starts" -eq 2 ]] ||
+      fail "${label}: expected both runs to execute the mapped command, saw ${starts}"
+  }
+
+  # One stale lock, two waiters. The late waiter forms its verdict first, then
+  # stalls past the point where the early one has already taken the lock over,
+  # so its reclaim decision is obsolete when it finally acts on it.
+  sleep 0 &
+  race_dead_pid=$!
+  wait "$race_dead_pid" 2>/dev/null || true
+  mkdir -p "$gate_race_root/run.lock"
+  {
+    printf 'pid=%s\n' "$race_dead_pid"
+    printf 'host=%s\n' "$(uname -n)"
+    printf 'started_at=%s\n' "$(date +%s)"
+    printf 'worktree=%s\n' "$gate_race_repo"
+    printf 'token=fixture-holder\n'
+  } > "$gate_race_root/run.lock/owner"
+  : > "$gate_race_log"
+  race_waiter late 6 0 &
+  race_late=$!
+  sleep 2
+  race_waiter early 0 0 &
+  race_early=$!
+  wait "$race_late" 2>/dev/null || true
+  wait "$race_early" 2>/dev/null || true
+  assert_runs_did_not_overlap "stale lock, two waiters"
+  race_reclaims="$(
+    cat "$gate_race_repo/early.out" "$gate_race_repo/late.out" |
+      awk '/reclaiming it/ { c++ } END { print c + 0 }'
+  )"
+  [[ "$race_reclaims" -eq 1 ]] ||
+    fail "expected exactly one run to reclaim the stale lock, got ${race_reclaims}"
+
+  # A creator descheduled between `mkdir` and recording ownership. The waiter
+  # reclaims the ownerless lock legitimately; the creator must discover on
+  # resume that the lock is no longer its own instead of running beside it.
+  rm -rf "$gate_race_root/run.lock"
+  : > "$gate_race_log"
+  race_waiter stalled 0 8 &
+  race_stalled=$!
+  sleep 1
+  race_waiter reclaimer 0 0 &
+  race_reclaimer=$!
+  wait "$race_stalled" 2>/dev/null || true
+  wait "$race_reclaimer" 2>/dev/null || true
+  assert_runs_did_not_overlap "stalled creator"
+  grep -q "recorded ownership of .* first; queueing behind it" \
+    "$gate_race_repo/stalled.out" ||
+    fail "a creator whose lock was reclaimed mid-claim must queue, not run"
+  [[ ! -d "$gate_race_root/run.lock" ]] ||
+    fail "both race runs finished; the lock must not be left behind"
+)
+rm -rf "$gate_race_repo" "$gate_race_root"
+
 echo "agent quality gate tests passed"

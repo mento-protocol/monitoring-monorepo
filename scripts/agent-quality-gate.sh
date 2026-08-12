@@ -431,18 +431,35 @@ teardown_active_timeouts() {
 # time. The intra-run half of the same problem is the exclusive phase in
 # run_quality_phase; a lock alone cannot help a suite starved inside ONE run.
 #
-# mkdir(2) is the primitive: it is atomic, flock(1) does not exist on macOS,
-# and the repo's floor is Bash 3.2. A killed holder cannot clean up after
-# itself, so recovery is explicit rather than time-based — the owner file names
-# the holder's PID and a waiter that finds it dead moves the lock aside.
+# mkdir(2) and O_EXCL are the primitives: both are atomic, flock(1) does not
+# exist on macOS, and the repo's floor is Bash 3.2. Renaming is deliberately
+# absent — BSD `mv` has no -T, and `mv src dir` when dir exists moves src
+# *inside* it instead of failing, so a rename can never be a conditional claim
+# here. The invariant the code below keeps is: at every instant at most one
+# process believes it holds the lock, and no waiter ever removes or renames a
+# lock directory. A holder is made by two atomic steps — win `mkdir` on the
+# lock path, then create the owner file with O_EXCL — and a reclaimer replaces
+# only an owner record it has proved dead, under a `mkdir` election of its own.
 # ---------------------------------------------------------------------------
 gate_lock_dir=""
 gate_lock_token=""
-# A lock directory whose owner file never appeared belongs to a run killed
-# between mkdir and the write. Wait this long before treating it as abandoned,
-# so a live holder that is merely mid-write is not evicted.
-gate_lock_owner_grace_seconds=30
+gate_lock_reclaim_marker=""
+# A lock directory whose owner file never appeared belongs to a run stalled or
+# killed between mkdir and the write. Wait this long before treating it as
+# abandoned. Correctness no longer rests on this number: a creator that resumes
+# after its lock was reclaimed fails its own O_EXCL owner write and queues
+# instead of running. The grace only keeps churn down.
+gate_lock_owner_grace_seconds="${AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS:-30}"
 gate_lock_poll_seconds=5
+
+# Test-only. The self-test sets these to widen two otherwise sub-millisecond
+# windows so the interleavings they permit can be exercised deterministically.
+# Nothing in normal operation sets them, and neither changes lock semantics.
+gate_lock_test_delay() {
+  local seconds="${1:-}"
+  [[ "$seconds" =~ ^[1-9][0-9]*$ ]] || return 0
+  sleep "$seconds"
+}
 
 resolve_gate_lock_root() {
   local candidates=()
@@ -470,6 +487,53 @@ gate_lock_owner_field() {
   sed -n "s/^${field}=//p" "$lock_dir/owner" 2>/dev/null | head -n1
 }
 
+# Does the lock still carry the exact record a waiter judged stale, and is that
+# record still dead? Called only by the winner of the reclaim election, whose
+# verdict was formed before it won. An ownerless lock is identified by the
+# absence of a record, and stays reclaimable only while it is still absent.
+gate_lock_record_still_stale() {
+  local lock="$1"
+  local decided_pid="$2"
+  local decided_token="$3"
+  local current_pid current_token
+  current_pid="$(gate_lock_owner_field "$lock" pid)"
+  current_token="$(gate_lock_owner_field "$lock" token)"
+  [[ "$current_pid" == "$decided_pid" ]] || return 1
+  [[ "$current_token" == "$decided_token" ]] || return 1
+  [[ -n "$current_pid" ]] || return 0
+  kill -0 "$current_pid" 2>/dev/null && return 1
+  return 0
+}
+
+# The only way a process comes to hold the lock. The owner write is O_EXCL
+# (`set -C`), which is what makes a stalled creator safe: if a reclaimer
+# recorded itself while this process sat descheduled between `mkdir` and here,
+# this write fails and the caller never believes it holds anything. Reading the
+# token back turns any residual displacement into a failed claim instead of a
+# second concurrent run.
+claim_gate_run_lock() {
+  local lock="$1"
+  local token="$2"
+  local wrote=0
+  set -C
+  if {
+    printf 'pid=%s\n' "$$"
+    printf 'host=%s\n' "$(uname -n)"
+    printf 'started_at=%s\n' "$(date +%s)"
+    printf 'worktree=%s\n' "$repo_root"
+    printf 'token=%s\n' "$token"
+  } > "$lock/owner" 2>/dev/null; then
+    wrote=1
+  fi
+  set +C
+  [[ "$wrote" -eq 1 ]] || return 1
+  [[ "$(gate_lock_owner_field "$lock" token)" == "$token" ]] || return 1
+  gate_lock_dir="$lock"
+  gate_lock_token="$token"
+  export AGENT_QUALITY_GATE_LOCK_HELD="$token"
+  return 0
+}
+
 release_gate_run_lock() {
   local recorded
   [[ -n "$gate_lock_dir" ]] || return 0
@@ -484,10 +548,11 @@ release_gate_run_lock() {
 }
 
 acquire_gate_run_lock() {
-  local root lock owner_pid owner_host owner_worktree stale_reason
+  local root lock owner_pid owner_host owner_worktree owner_token stale_reason
+  local reclaimer_pid
   local waited=0
   local announced=0
-  local reclaims=0
+  local wedged=0
   local ownerless_since=""
   local this_host
   case "$gate_lock_enabled" in
@@ -508,26 +573,24 @@ acquire_gate_run_lock() {
 
   while :; do
     if mkdir "$lock" 2>/dev/null; then
-      gate_lock_dir="$lock"
-      gate_lock_token="${this_host}-$$-$(date +%s)"
-      {
-        printf 'pid=%s\n' "$$"
-        printf 'host=%s\n' "$this_host"
-        printf 'started_at=%s\n' "$(date +%s)"
-        printf 'worktree=%s\n' "$repo_root"
-        printf 'token=%s\n' "$gate_lock_token"
-      } > "$lock/owner"
-      export AGENT_QUALITY_GATE_LOCK_HELD="$gate_lock_token"
-      if [[ "$announced" -eq 1 ]]; then
-        echo "Acquired the gate run lock after ${waited}s."
-        echo
+      gate_lock_test_delay "${AGENT_QUALITY_GATE_LOCK_CLAIM_DELAY_SECONDS:-}"
+      if claim_gate_run_lock "$lock" "${this_host}-$$-$(date +%s)"; then
+        if [[ "$announced" -eq 1 ]]; then
+          echo "Acquired the gate run lock after ${waited}s."
+          echo
+        fi
+        return 0
       fi
-      return 0
+      # We created the directory but never recorded ownership: a waiter
+      # reclaimed it while this process was descheduled, and it is that run's
+      # lock now. Touch nothing and queue like any other waiter.
+      echo "Another run recorded ownership of ${lock} first; queueing behind it." >&2
     fi
 
     owner_pid="$(gate_lock_owner_field "$lock" pid)"
     owner_host="$(gate_lock_owner_field "$lock" host)"
     owner_worktree="$(gate_lock_owner_field "$lock" worktree)"
+    owner_token="$(gate_lock_owner_field "$lock" token)"
     stale_reason=""
     [[ -n "$owner_pid" ]] && ownerless_since=""
     if [[ -z "$owner_pid" ]]; then
@@ -546,20 +609,61 @@ acquire_gate_run_lock() {
       stale_reason="holder pid ${owner_pid} is gone"
     fi
 
+    [[ -n "$stale_reason" ]] || wedged=0
+
     if [[ -n "$stale_reason" ]]; then
-      reclaims=$((reclaims + 1))
-      if [[ "$reclaims" -gt 5 ]]; then
-        echo "error: gate run lock at ${lock} could not be reclaimed after ${reclaims} attempts." >&2
-        exit 2
+      gate_lock_test_delay "${AGENT_QUALITY_GATE_LOCK_RECLAIM_DELAY_SECONDS:-}"
+      # Take the lock over in place. `mkdir` elects exactly one reclaimer, and
+      # no waiter ever renames or removes the lock directory, so a second
+      # waiter carrying the same stale verdict cannot destroy a lock that has
+      # gone live since it decided. The loser below re-reads and waits.
+      if mkdir "$lock/reclaim" 2>/dev/null; then
+        gate_lock_reclaim_marker="$lock/reclaim"
+        printf 'pid=%s\n' "$$" > "$lock/reclaim/owner"
+        # Re-read the record under the election before touching it. The verdict
+        # above was formed before we won the marker, and another reclaimer may
+        # have taken the lock over since. Acting on a verdict that has gone
+        # stale is precisely what lets a waiter delete a live holder's record.
+        if gate_lock_record_still_stale "$lock" "$owner_pid" "$owner_token"; then
+          echo "Gate run lock at ${lock} is stale (${stale_reason}); reclaiming it." >&2
+          # Drop only a record we just re-proved dead. An ownerless lock has
+          # none to drop, and leaving it absent is what keeps a stalled
+          # creator's O_EXCL write honest: whoever writes first holds the lock.
+          [[ -z "$owner_pid" ]] || rm -f "$lock/owner"
+          if claim_gate_run_lock "$lock" "${this_host}-$$-$(date +%s)"; then
+            rm -rf "$gate_lock_reclaim_marker"
+            gate_lock_reclaim_marker=""
+            if [[ "$announced" -eq 1 ]]; then
+              echo "Acquired the gate run lock after ${waited}s."
+              echo
+            fi
+            return 0
+          fi
+        fi
+        # Either another run reclaimed it first, or the creator we were about
+        # to evict resumed and recorded itself. Both mean: not ours, wait.
+        rm -rf "$gate_lock_reclaim_marker"
+        gate_lock_reclaim_marker=""
+      elif [[ -d "$lock/reclaim" ]]; then
+        # A live reclaimer finishes in milliseconds. One killed inside that
+        # window leaves a marker that no waiter can break without reopening
+        # the race it exists to close, so this fails closed and names the fix.
+        reclaimer_pid="$(gate_lock_owner_field "$lock/reclaim" pid)"
+        if [[ -n "$reclaimer_pid" ]] && kill -0 "$reclaimer_pid" 2>/dev/null; then
+          wedged=0
+        else
+          wedged=$((wedged + 1))
+          if [[ "$wedged" -gt 5 ]]; then
+            echo "error: gate run lock at ${lock} is wedged: its holder is gone and the reclaimer taking it over (pid ${reclaimer_pid:-unknown}) died mid-takeover." >&2
+            echo "Nothing is running behind it. Clear it with: rm -rf ${lock}" >&2
+            exit 2
+          fi
+        fi
       fi
-      echo "Gate run lock at ${lock} is stale (${stale_reason}); reclaiming it." >&2
-      # Rename-then-delete so two waiters cannot both delete: whoever wins the
-      # mv owns the removal, and the loser's next mkdir simply succeeds or
-      # observes the new holder.
-      if mv "$lock" "${lock}.stale.$$" 2>/dev/null; then
-        rm -rf "${lock}.stale.$$"
-      fi
-      continue
+      # Whatever happened above, the holder of record may have changed.
+      owner_pid="$(gate_lock_owner_field "$lock" pid)"
+      owner_host="$(gate_lock_owner_field "$lock" host)"
+      owner_worktree="$(gate_lock_owner_field "$lock" worktree)"
     fi
 
     if [[ "$announced" -eq 0 ]]; then
@@ -591,6 +695,12 @@ cleanup_tmpfiles() {
   teardown_active_timeouts
   if [[ ${#tmpfiles[@]} -gt 0 ]]; then
     rm -f "${tmpfiles[@]+"${tmpfiles[@]}"}"
+  fi
+  # A reclaim in flight is milliseconds long, but a signal can still land in
+  # it. Clearing the marker here keeps the wedged state SIGKILL-only.
+  if [[ -n "$gate_lock_reclaim_marker" ]]; then
+    rm -rf "$gate_lock_reclaim_marker"
+    gate_lock_reclaim_marker=""
   fi
   # Released last: the lock must outlive worker teardown, or the next run
   # starts while this one's mapped commands are still dying.
