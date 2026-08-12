@@ -1680,9 +1680,11 @@ await test("the brief leg is not a stub-body writer, and owns its marker alone",
   ]);
   const scriptsDir = join(repoRoot, "scripts");
   const offenders = [];
+  let scanned = 0;
   for (const file of readdirSync(scriptsDir)) {
     if (!file.endsWith(".mjs") || file.endsWith(".test.mjs")) continue;
     if (briefLegFiles.has(file)) continue;
+    scanned += 1;
     const src = readFileSync(join(scriptsDir, file), "utf8");
     if (
       /BRIEF_COMMENT_MARKER|sentry-triage-brief:v1|stripBriefFromBody/.test(src)
@@ -1690,6 +1692,14 @@ await test("the brief leg is not a stub-body writer, and owns its marker alone",
       offenders.push(file);
     }
   }
+  // A directory scan that sees almost nothing PASSES, having checked almost
+  // nothing. Inside the suite gate's per-suite snapshot only 25 of 92 modules
+  // were once visible (Codex 3761902959), so state a floor and make a partial
+  // view loud rather than silently green.
+  assert(
+    scanned >= 60,
+    `only ${scanned} non-test scripts/*.mjs were scanned — this check is running against a partial view of scripts/, so its result means nothing`,
+  );
   assertEqual(offenders.join(", "), "");
   const brief = readFileSync(
     join(scriptsDir, "sentry-triage-brief.mjs"),

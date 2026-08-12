@@ -1,0 +1,76 @@
+{
+  "_readme": "Closed-world set of Sentry test suites the sentry-suites CI gate runs and asserts (issue #1779, ADR 0062). scripts/sentry-suite-gate.mjs reconciles this against findSentrySuites() by exact set equality in both directions, then for each non-exempt suite spawns `env -u NODE_OPTIONS -u NODE_PATH node <nodeArgs> <suite>` and asserts exit 0, fail == 0, pass >= floor, and pass == the per-case lines it emitted. Every entry runs from its OWN snapshot of the derived input set, all taken before the first child starts, so no suite can reach another's inputs. reads: repository files the suite opens directly rather than imports — no closure can derive those, so they are declared here and copied into that suite's snapshot; a read left undeclared is absent from the snapshot and the suite fails on it, which is how this list stays complete. reporter: count-line = the homegrown `ok <name>` / `<n> passed` harness (per-case marker `^ok `); node-test = node:test run under the spec reporter (per-case marker `^✔ `, summary `ℹ pass`/`ℹ fail`); exit-only = no per-case counts, exempt from the gate and re-verified by route. floor uses >= semantics: adding tests never breaks the gate; a deletion reds it until the floor is lowered here, which is a security-relevant review signal. A floor must EQUAL its suite's current pass count when introduced or re-measured — starting one below means the gate ships unable to detect a single deletion in that suite. Later upward drift from added tests is fine and is not churn worth chasing; a floor below the count is a hole.",
+  "suites": {
+    "scripts/sentry-autofix-finalize.test.mjs": {
+      "reporter": "count-line",
+      "floor": 44
+    },
+    "scripts/sentry-autofix-select.test.mjs": {
+      "reporter": "count-line",
+      "floor": 19
+    },
+    "scripts/sentry-mcp-broker.test.mjs": {
+      "reporter": "node-test",
+      "nodeArgs": ["--test"],
+      "floor": 40,
+      "reads": [".github/workflows/sentry-triage-agent.yml"]
+    },
+    "scripts/sentry-provider-contract.test.mjs": {
+      "reporter": "exit-only",
+      "exempt": {
+        "runBy": "production-infra-contract",
+        "via": "pnpm tf:test",
+        "importer": "scripts/tf-stacks.test.mjs"
+      }
+    },
+    "scripts/sentry-suite-gate-integrity.test.mjs": {
+      "reporter": "count-line",
+      "floor": 20
+    },
+    "scripts/sentry-suite-gate-isolation.test.mjs": {
+      "reporter": "count-line",
+      "floor": 6
+    },
+    "scripts/sentry-suite-gate.test.mjs": {
+      "reporter": "count-line",
+      "floor": 35
+    },
+    "scripts/sentry-triage-agent-comment.test.mjs": {
+      "reporter": "node-test",
+      "floor": 40,
+      "reads": [".github/workflows/sentry-triage-agent.yml"]
+    },
+    "scripts/sentry-triage-archive.test.mjs": {
+      "reporter": "count-line",
+      "floor": 118
+    },
+    "scripts/sentry-triage-brief.test.mjs": {
+      "reporter": "count-line",
+      "floor": 55,
+      "reads": [
+        ".github/prompts/sentry-triage.md",
+        ".github/workflows/sentry-triage-agent.yml",
+        "docs/notes/sentry-triage-pipeline.md",
+        "scripts/agent-quality-gate.sh"
+      ],
+      "readsDirs": ["scripts"]
+    },
+    "scripts/sentry-triage-digest.test.mjs": {
+      "reporter": "count-line",
+      "floor": 64
+    },
+    "scripts/sentry-triage-ingest.test.mjs": {
+      "reporter": "count-line",
+      "floor": 110
+    },
+    "scripts/sentry-triage-project.test.mjs": {
+      "reporter": "count-line",
+      "floor": 112
+    },
+    "scripts/sentry-triage-requeue.test.mjs": {
+      "reporter": "count-line",
+      "floor": 31,
+      "readsDirs": ["scripts"]
+    }
+  }
+}

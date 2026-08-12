@@ -2267,6 +2267,13 @@ while IFS= read -r path; do
           ;;
       esac
       ;;
+    scripts/sentry-suite-manifest.json)
+      # The manifest the self-run Sentry-suite gate reconciles against (#1779,
+      # ADR 0062). A .json edit reaches no other scripts/ arm, so claim the
+      # surface here; the repo-specific block below routes the two gate commands
+      # for this file along with every manifest-owned suite.
+      add_surface "scripts"
+      ;;
     scripts/*.mjs|scripts/*.cjs|scripts/*.js|eslint.config.mjs)
       # `.dependency-cruiser.cjs` is handled fully by its dedicated case
       # block above (runs `pnpm code-health:deps` + `pnpm lint:scripts`).
@@ -2671,10 +2678,67 @@ while IFS= read -r path; do
         scripts/agent-quality-gate.sh | \
         scripts/check-agent-quality-gate-package-scripts.sh | \
         scripts/check-sentry-suites-in-ci*.mjs | \
+        scripts/static-imports.mjs | \
         scripts/sentry-*.test.mjs | \
         scripts/*/sentry-*.test.mjs | \
         scripts/tf-stacks.test.mjs)
         add_command "node scripts/check-sentry-suites-in-ci.test.mjs" "Sentry CI-coverage check reads this file"
+        ;;
+    esac
+    # The self-run Sentry-suite gate (#1779, ADR 0062) runs EVERY suite the
+    # manifest owns and asserts each one's pass count against its committed
+    # floor, so every manifest-owned suite routes it — not just the gate's own
+    # files. Deleting a test from, say, sentry-triage-requeue.test.mjs leaves
+    # `pnpm sentry:requeue:test` green (30 passed, exit 0) while the gate reds on
+    # `pass 30 < floor 31`; without this arm the local gate misses that and it
+    # only surfaces after push. The same glob pair as above covers suites at any
+    # depth, and the gate's own three files ride along so all of them route the
+    # identical pair of commands.
+    #
+    # Both commands are kept because neither substitutes for the other: the
+    # self-test proves the gate's LOGIC against throwaway fixture manifests in a
+    # temp dir and never reads the committed one, while the real gate is what
+    # validates the committed manifest against the real suites. `add_command`
+    # deduplicates on the exact command string, so a path matching both this arm
+    # and another one still schedules each command once.
+    #
+    # Both run under `/usr/bin/env -u NODE_OPTIONS -u NODE_PATH`, matching the
+    # CI entry point. Without it a developer carrying a perfectly legitimate
+    # ambient `NODE_OPTIONS=--no-warnings` cannot run the gate at all — it
+    # refuses to start before executing a single suite — and half the
+    # self-test's fixtures fail for that same reason. The gate costs ~3s.
+    # `scripts/sentry-suite-gate*.mjs` rather than the gate script alone: the
+    # round-8 split created sentry-suite-gate-fixtures.mjs, which this arm did
+    # not match, so a change to it scheduled Trunk and lint:scripts but NEITHER
+    # gate suite — and that file owns fixture environment isolation, the
+    # step-summary redirection and the shared harness. The prefix glob covers
+    # every current and future gate module, so the next split cannot reopen it.
+    #
+    # `scripts/static-imports.mjs` is named outright because it sits under
+    # neither prefix and yet decides both consumers' answers: the gate's watch
+    # set and exemption proof, and the CI-coverage check's import proof. It
+    # scheduled only Trunk, lint:scripts and tf:test when it was extracted, so a
+    # behavioural parser change was validated by neither gate suite nor the
+    # checker (Codex 3761572721). It is listed in the coverage-check arm above
+    # for the same reason. A shared module belongs in every arm that reads it,
+    # whatever it is called.
+    #
+    # `check-sentry-suites-in-ci-core-commands.mjs` is here on the same ground,
+    # found by the dry-run sweep that closed the one above: the gate's exemption
+    # proof now parses the `tf:test` alias with that module's shell grammar, so
+    # a change to it changes a gate verdict while its name still says "checker".
+    # Four gaps of this shape have now come from naming files rather than
+    # deriving readers; the gate's own watch set is the derived answer, and
+    # teaching this mapping to consult it is the standing fix (#1803).
+    case "$path" in
+      scripts/sentry-*.test.mjs | \
+        scripts/*/sentry-*.test.mjs | \
+        scripts/sentry-suite-gate*.mjs | \
+        scripts/static-imports.mjs | \
+        scripts/check-sentry-suites-in-ci-core-commands.mjs | \
+        scripts/sentry-suite-manifest.json)
+        add_command "/usr/bin/env -u NODE_OPTIONS -u NODE_PATH node scripts/sentry-suite-gate.test.mjs" "Sentry-suite gate, manifest, or a manifest-owned suite changed"
+        add_command "/usr/bin/env -u NODE_OPTIONS -u NODE_PATH node scripts/sentry-suite-gate.mjs" "Sentry-suite gate, manifest, or a manifest-owned suite changed (validate the committed manifest against the real suites)"
         ;;
     esac
     # A directory symlink under scripts/ exposes suites the extension patterns

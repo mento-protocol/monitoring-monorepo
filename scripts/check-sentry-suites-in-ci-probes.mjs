@@ -31,6 +31,11 @@ import { join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CORE_SCHEMA, dump, load } from "js-yaml";
 import { isPlainObject } from "./check-sentry-suites-in-ci-core.mjs";
+// One implementation of "what does this module import", shared with the
+// sentry-suite gate; see scripts/static-imports.mjs for why it is not a regex.
+import { staticImports } from "./static-imports.mjs";
+
+export { staticImports };
 
 export const ROOT = fileURLToPath(new URL("..", import.meta.url));
 export const SCRIPTS_DIR = join(ROOT, "scripts");
@@ -65,6 +70,9 @@ export const CORE_COMMANDS =
 
 /** This module: the file reads and probes the check runs. */
 export const PROBES = "scripts/check-sentry-suites-in-ci-probes.mjs";
+
+/** The shared V8 import parser both this check and the gate ask for imports. */
+export const STATIC_IMPORTS = "scripts/static-imports.mjs";
 
 /** The sibling module that lifts the gate's classifier out and re-runs it. */
 export const GATE_PROBE = "scripts/check-sentry-suites-in-ci-gate-probe.mjs";
@@ -564,6 +572,7 @@ const STATIC_PROBE_INPUTS = new Map([
   [CORE, "every predicate this check asserts with"],
   [CORE_COMMANDS, "the command-grammar predicates the core re-exports"],
   [PROBES, "the file reads and probes this check runs"],
+  [STATIC_IMPORTS, "`staticImports` itself — V8's dependency list, shared"],
 ]);
 
 export const PROBE_INPUTS = new Map([
@@ -575,32 +584,6 @@ export const PROBE_INPUTS = new Map([
     ]),
   ),
 ]);
-
-/**
- * The static import specifiers of an ES module, straight from V8's parser.
- * Nothing is executed and no text is matched, so a commented-out import (line
- * or block), an import inside a string or template literal, and an unreached
- * dynamic `import()` are all absent — correctly.
- *
- * @param {string} path
- */
-export function staticImports(path) {
-  const program = `
-const vm = require("node:vm");
-const fs = require("node:fs");
-// Node strips the shebang when it loads a file; vm.SourceTextModule does not.
-const source = fs.readFileSync(process.argv[1], "utf8").replace(/^#![^\\n]*/, "");
-process.stdout.write(
-  JSON.stringify(new vm.SourceTextModule(source, { identifier: process.argv[1] }).dependencySpecifiers),
-);
-`;
-  const out = execFileSync(
-    process.execPath,
-    ["--experimental-vm-modules", "--no-warnings", "-e", program, path],
-    { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
-  );
-  return JSON.parse(out);
-}
 
 /**
  * The exact commands check-agent-quality-gate-package-scripts.sh pins, read

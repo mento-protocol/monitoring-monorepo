@@ -189,6 +189,7 @@ Authority: canonical
 - [`docs/adr/0059-repo-owned-file-size-watchlist-scheduler.md`](adr/0059-repo-owned-file-size-watchlist-scheduler.md) — File-size watchlist scheduling is repository-owned and issue-only
 - [`docs/adr/0060-upstash-management-key-bootstrap.md`](adr/0060-upstash-management-key-bootstrap.md) — Upstash management API keys use a human-owned bootstrap integration
 - [`docs/adr/0061-exact-plan-guard-for-manual-platform-applies.md`](adr/0061-exact-plan-guard-for-manual-platform-applies.md) — Manual platform applies use an exact private plan guard
+- [`docs/adr/0062-sentry-suites-self-run-gate.md`](adr/0062-sentry-suites-self-run-gate.md) — An unconditional gate job runs the Sentry suites and proves from their output that they asserted
 
 Authority: non-canonical
 

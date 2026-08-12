@@ -3783,6 +3783,76 @@ assert_contains "- pnpm sentry:archive:test (Sentry triage archive helper change
 run_gate "scripts/sentry-triage-archive.test.mjs"
 assert_contains "- pnpm sentry:archive:test (Sentry triage archive helper changed)"
 
+# The self-run Sentry-suite gate (#1779, ADR 0062) asserts, at runtime, that the
+# suites actually ran. A contributor who edits the gate script, its own suite, or
+# the manifest it reconciles against must run scripts/sentry-suite-gate.test.mjs
+# locally — or the gate could ship broken. The manifest .json is included on
+# purpose: the gate reconciles set membership and per-suite floors against it, so
+# a floor edit is exactly the kind of change that must run the gate test.
+# Both gate commands must be routed, for the gate's own files AND for every
+# manifest-owned suite. Neither command substitutes for the other: the self-test
+# only exercises the gate's logic against throwaway fixture manifests in a temp
+# dir and never reads the committed scripts/sentry-suite-manifest.json, while
+# only the real gate reconciles that file against the real suites. Proven with
+# the requeue floor bumped 31 -> 999: `sentry-suite-gate.test.mjs` still exits 0
+# while `sentry-suite-gate.mjs` exits 1 and names the suite.
+#
+# Both carry the `/usr/bin/env -u NODE_OPTIONS -u NODE_PATH` prefix so they match
+# the CI entry point and still run for a developer with an ambient NODE_OPTIONS —
+# without it the gate refuses to start and 10 of the self-test's 20 cases fail.
+sentry_gate_env="/usr/bin/env -u NODE_OPTIONS -u NODE_PATH"
+sentry_gate_reason="Sentry-suite gate, manifest, or a manifest-owned suite changed"
+sentry_gate_test="- $sentry_gate_env node scripts/sentry-suite-gate.test.mjs ($sentry_gate_reason)"
+sentry_gate_run="- $sentry_gate_env node scripts/sentry-suite-gate.mjs ($sentry_gate_reason (validate the committed manifest against the real suites))"
+
+run_gate "scripts/sentry-suite-gate.mjs"
+assert_contains "$sentry_gate_test"
+assert_contains "$sentry_gate_run"
+
+run_gate "scripts/sentry-suite-gate.test.mjs"
+assert_contains "$sentry_gate_test"
+assert_contains "$sentry_gate_run"
+
+run_gate "scripts/sentry-suite-manifest.json"
+assert_contains "$sentry_gate_test"
+assert_contains "$sentry_gate_run"
+
+# A manifest-owned suite that is NOT one of the gate's own files: editing it
+# moves its pass count against its committed floor, so it must route the gate
+# too. Deleting one test here leaves `pnpm sentry:requeue:test` green at
+# "30 passed" while the gate reds on `pass 30 < floor 31`.
+run_gate "scripts/sentry-triage-requeue.test.mjs"
+assert_contains "- pnpm sentry:requeue:test (Sentry re-queue chokepoint changed)"
+assert_contains "$sentry_gate_test"
+assert_contains "$sentry_gate_run"
+
+# A second, unrelated manifest-owned suite, to prove the routing is the generic
+# glob and not a per-suite arm.
+run_gate "scripts/sentry-triage-archive.test.mjs"
+assert_contains "$sentry_gate_run"
+
+# EVERY file the round-8 split created must route the gate, not just the ones
+# that happen to match `sentry-*.test.mjs`. The fixtures module owns fixture
+# environment isolation, the step-summary redirection and the shared harness, and
+# it scheduled neither gate suite until the arm was widened to
+# `sentry-suite-gate*.mjs` — the second routing gap a split has introduced.
+run_gate "scripts/sentry-suite-gate-fixtures.mjs"
+assert_contains "$sentry_gate_test"
+assert_contains "$sentry_gate_run"
+
+run_gate "scripts/sentry-suite-gate-integrity.test.mjs"
+assert_contains "$sentry_gate_test"
+assert_contains "$sentry_gate_run"
+
+# The shared V8 import parser sits under neither the `sentry-*` nor the
+# `check-sentry-suites-in-ci*` prefix, yet it decides the gate's watch set and
+# exemption proof AND the coverage check's import proof. Extracted, it scheduled
+# only Trunk, lint:scripts and tf:test — the third routing gap a file-creating
+# change has opened here (Codex 3761572721). It must route BOTH consumers.
+run_gate "scripts/static-imports.mjs"
+assert_contains "$sentry_gate_test"
+assert_contains "$sentry_gate_run"
+
 # check-sentry-suites-in-ci.test.mjs asserts that every Sentry suite runs in
 # CI. Every file it reads must route it, or the drift it exists to catch is
 # only caught after push. Its first home was an arm nested under `scripts/*.sh`,
@@ -3802,6 +3872,18 @@ assert_contains "$sentry_ci_check"
 
 run_gate "scripts/check-sentry-suites-in-ci-probes.mjs"
 assert_contains "$sentry_ci_check"
+
+# `staticImports` is the check's import proof, imported from outside the prefix.
+run_gate "scripts/static-imports.mjs"
+assert_contains "$sentry_ci_check"
+
+# The gate's exemption proof parses the `tf:test` alias with the checker's shell
+# grammar, so this module decides a gate verdict despite its checker name — the
+# fourth gap of this shape, found by sweeping the dry-run over every path the
+# round touched rather than by reading the globs.
+run_gate "scripts/check-sentry-suites-in-ci-core-commands.mjs"
+assert_contains "$sentry_gate_test"
+assert_contains "$sentry_gate_run"
 
 # The check parses EVERY workflow (contextOwnershipBlockers proves no decoy job
 # owns the `ci` check-run name), so a non-ci workflow edit must route it too.
