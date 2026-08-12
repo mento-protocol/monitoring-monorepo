@@ -703,9 +703,11 @@ await test("buildDigest produces a valid chat.postMessage payload shape", () => 
     payload.blocks[0].text.text.includes("Sentry triage — 1 issue triaged"),
     "expected header text",
   );
+  // Slack stamps every message natively; a second timestamp in the body is a
+  // line every reader skips. Asserted absent so it does not creep back.
   assert(
-    payload.blocks[0].text.text.includes("2026-07-17 14:20 UTC"),
-    "expected UTC timestamp",
+    !/\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC/.test(payload.blocks[0].text.text),
+    "expected NO UTC timestamp in the header",
   );
   JSON.parse(JSON.stringify(payload));
 });
@@ -1060,6 +1062,8 @@ await test("wontfix line links the queue-issue rationale with confidence", () =>
     { channel: "#engineering", now: NOW },
   );
   const text = allText(payload);
+  // `UP-14` does not start with `APP-MENTO-ORG-`, so the project still renders:
+  // it is information here, not a repeat of the id.
   assert(
     text.includes(
       "• <https://github.com/mento-protocol/monitoring-monorepo/issues/14|UP-14> (app-mento-org) — third-party outage (high)",
@@ -1067,10 +1071,8 @@ await test("wontfix line links the queue-issue rationale with confidence", () =>
     "expected the wontfix line linking the queue issue",
   );
   assert(
-    text.includes(
-      "    ◦ To archive in Sentry: add `sentry:approved-archive` to the queue issue above.",
-    ),
-    "expected a sub-bullet nudging the existing human-gated archive label",
+    !text.includes("◦ To archive in Sentry:"),
+    "the archive nudge must not repeat per entry — it is one footer per digest",
   );
 });
 
@@ -1451,6 +1453,93 @@ await test("buildDigest fails closed: a queue URL with Slack link-control chars 
       "<https://github.com/mento-protocol/monitoring-monorepo/issues/8|",
     ),
     "a clean queue URL should render as a Slack link",
+  );
+});
+
+await test("the project renders only when the SHORT-ID does not already say it", () => {
+  // `GOVERNANCE-MENTO-ORG-5H (governance-mento-org)` says it twice. But a
+  // project's slug and its SHORT-ID prefix can diverge — renaming a slug does
+  // not rewrite existing ids — and there the project is the only place the
+  // owning project appears, so it must survive.
+  const redundant = allText(
+    buildDigest(
+      [
+        issueFixture({
+          number: 1,
+          shortId: "GOVERNANCE-MENTO-ORG-5H",
+          project: "governance-mento-org",
+          labels: ["sentry:verdict-upstream"],
+          comments: [
+            { body: verdictComment({ verdict: "upstream-transient" }) },
+          ],
+        }),
+      ],
+      { channel: "#c", now: NOW },
+    ),
+  );
+  assert(redundant.includes("GOVERNANCE-MENTO-ORG-5H"), "the id must render");
+  assert(
+    !redundant.includes("(governance-mento-org)"),
+    "the project must not repeat what the id already spells out",
+  );
+
+  const divergent = allText(
+    buildDigest(
+      [
+        issueFixture({
+          number: 2,
+          shortId: "LEGACY-7",
+          project: "governance-mento-org",
+          labels: ["sentry:verdict-upstream"],
+          comments: [
+            { body: verdictComment({ verdict: "upstream-transient" }) },
+          ],
+        }),
+      ],
+      { channel: "#c", now: NOW },
+    ),
+  );
+  assert(
+    divergent.includes("(governance-mento-org)"),
+    "a project the id does NOT spell out is information and must render",
+  );
+});
+
+await test("the archive nudge appears once, and only when something is archivable", () => {
+  const many = allText(
+    buildDigest(
+      [1, 2, 3].map((n) =>
+        issueFixture({
+          number: n,
+          shortId: `UP-${n}`,
+          labels: ["sentry:verdict-upstream"],
+          comments: [
+            { body: verdictComment({ verdict: "upstream-transient" }) },
+          ],
+        }),
+      ),
+      { channel: "#c", now: NOW },
+    ),
+  );
+  // Three archivable issues, one sentence about archiving.
+  assertEqual(many.split("To archive").length - 1, 1);
+
+  const none = allText(
+    buildDigest(
+      [
+        issueFixture({
+          number: 9,
+          shortId: "CF-9",
+          labels: ["sentry:verdict-code-fix"],
+          comments: [{ body: verdictComment({ verdict: "code-fix" }) }],
+        }),
+      ],
+      { channel: "#c", now: NOW },
+    ),
+  );
+  assert(
+    !none.includes("To archive"),
+    "no archivable entries means no archive nudge at all",
   );
 });
 
