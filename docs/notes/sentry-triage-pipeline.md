@@ -92,6 +92,11 @@ decides**. Depth for each cell is in the sections below; this is the index.
 `minipay-dapp` to their own repos. That list is fixed in `ALLOWED_OWNING_REPOS`
 and mirrored in `.github/prompts/sentry-triage.md`.
 
+Ingest queues **every** project in the Sentry org, so a project outside that
+map is possible. Its actionable verdict does not project: it takes
+`skipped-repo`, and the stub closes with a note naming the unrecognised repo.
+Adding a project means adding it to the allowlist, not only to Sentry.
+
 | Verdict              | `analytics-mento-org` (local)                                                   | Every other project (external)                        |
 | -------------------- | ------------------------------------------------------------------------------- | ----------------------------------------------------- |
 | `code-fix`           | **Autofix-eligible** — the only path in the pipeline that writes code           | Projects an issue into the owning repo. Never autofix |
