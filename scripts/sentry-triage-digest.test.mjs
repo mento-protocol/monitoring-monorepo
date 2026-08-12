@@ -675,8 +675,6 @@ await test("LABEL_TO_VERDICT encodes the upstream label/value asymmetry", () => 
 // Digest payload assembly (shape, counts, section ordering/omission)
 // ---------------------------------------------------------------------------
 
-const NOW = new Date("2026-07-17T14:20:33.000Z");
-
 /** All block text joined — handy for order/substring assertions. */
 function allText(payload) {
   return payload.blocks.map((block) => block.text.text).join("\n");
@@ -692,7 +690,7 @@ await test("buildDigest produces a valid chat.postMessage payload shape", () => 
         comments: [{ body: verdictComment({ summary: "null deref" }) }],
       }),
     ],
-    { channel: "#engineering", now: NOW },
+    { channel: "#engineering" },
   );
   assertEqual(payload.channel, "#engineering");
   assertEqual(payload.text, "Sentry triage — 1 issue triaged");
@@ -703,9 +701,11 @@ await test("buildDigest produces a valid chat.postMessage payload shape", () => 
     payload.blocks[0].text.text.includes("Sentry triage — 1 issue triaged"),
     "expected header text",
   );
+  // Slack stamps every message natively; a second timestamp in the body is a
+  // line every reader skips. Asserted absent so it does not creep back.
   assert(
-    payload.blocks[0].text.text.includes("2026-07-17 14:20 UTC"),
-    "expected UTC timestamp",
+    !/\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC/.test(payload.blocks[0].text.text),
+    "expected NO UTC timestamp in the header",
   );
   JSON.parse(JSON.stringify(payload));
 });
@@ -720,7 +720,7 @@ await test("every mrkdwn text object sets verbatim: true (no Slack auto-parsing)
       }),
       issueFixture({ number: 2, labels: [NEEDS_TRIAGE_LABEL] }),
     ],
-    { channel: "#engineering", now: NOW },
+    { channel: "#engineering" },
   );
   assert(payload.blocks.length >= 2, "expected header + section blocks");
   for (const block of payload.blocks) {
@@ -762,7 +762,7 @@ await test("buildDigest renders sections in order (needs-human first) and omits 
         comments: [{ body: verdictComment({ verdict: "code-fix" }) }],
       }),
     ],
-    { channel: "#engineering", now: NOW },
+    { channel: "#engineering" },
   );
   const text = allText(payload);
   const nh = text.indexOf("Needs human — decisions required");
@@ -798,7 +798,7 @@ await test("buildDigest renders a routed line linking the projected owning-repo 
         ],
       }),
     ],
-    { channel: "#engineering", now: NOW },
+    { channel: "#engineering" },
   );
   const text = allText(payload);
   assert(
@@ -830,7 +830,7 @@ await test("routed section falls back to the queue-issue verdict when projection
         comments: [{ body: verdictComment({ verdict: "code-fix" }) }],
       }),
     ],
-    { channel: "#engineering", now: NOW },
+    { channel: "#engineering" },
   );
   const text = allText(payload);
   assert(
@@ -856,7 +856,7 @@ await test("autofixed section renders only when fix-PR data exists, linking the 
         ],
       }),
     ],
-    { channel: "#engineering", now: NOW },
+    { channel: "#engineering" },
   );
   const text = allText(withFix);
   assert(text.includes("🤖 Autofixed (1)"), "expected the autofixed section");
@@ -896,7 +896,7 @@ await test("section header count reflects multiple entries in the same bucket", 
         labels: ["sentry:verdict-upstream"],
       }),
     ],
-    { channel: "#engineering", now: NOW },
+    { channel: "#engineering" },
   );
   const text = allText(payload);
   assert(
@@ -933,7 +933,7 @@ await test("buildDigest renders a decision-ready needs-human brief with all fiel
         ],
       }),
     ],
-    { channel: "#engineering", now: NOW },
+    { channel: "#engineering" },
   );
   const text = allText(payload);
   assert(
@@ -985,7 +985,7 @@ await test("needs-human brief shows a placeholder when human_question is somehow
         comments: [{ body: verdictComment({ verdict: "needs-human" }) }],
       }),
     ],
-    { channel: "#engineering", now: NOW },
+    { channel: "#engineering" },
   );
   assert(
     allText(payload).includes("_(no decision recorded — re-triage)_"),
@@ -1013,7 +1013,7 @@ await test("needs-human brief escapes every agent-derived field", () => {
         ],
       }),
     ],
-    { channel: "#engineering", now: NOW },
+    { channel: "#engineering" },
   );
   const text = allText(payload);
   assert(
@@ -1057,9 +1057,11 @@ await test("wontfix line links the queue-issue rationale with confidence", () =>
         ],
       }),
     ],
-    { channel: "#engineering", now: NOW },
+    { channel: "#engineering" },
   );
   const text = allText(payload);
+  // `UP-14` does not start with `APP-MENTO-ORG-`, so the project still renders:
+  // it is information here, not a repeat of the id.
   assert(
     text.includes(
       "• <https://github.com/mento-protocol/monitoring-monorepo/issues/14|UP-14> (app-mento-org) — third-party outage (high)",
@@ -1067,10 +1069,8 @@ await test("wontfix line links the queue-issue rationale with confidence", () =>
     "expected the wontfix line linking the queue issue",
   );
   assert(
-    text.includes(
-      "    ◦ To archive in Sentry: add `sentry:approved-archive` to the queue issue above.",
-    ),
-    "expected a sub-bullet nudging the existing human-gated archive label",
+    !text.includes("◦ To archive in Sentry:"),
+    "the archive nudge must not repeat per entry — it is one footer per digest",
   );
 });
 
@@ -1083,7 +1083,7 @@ await test("buildDigest renders a distinct failed-triage line with no verdict", 
         labels: [NEEDS_TRIAGE_LABEL],
       }),
     ],
-    { channel: "#engineering", now: NOW },
+    { channel: "#engineering" },
   );
   const text = allText(payload);
   assert(text.includes("🛑 Failed triage (1)"), "expected the failed section");
@@ -1097,7 +1097,7 @@ await test("buildDigest renders a distinct failed-triage line with no verdict", 
 await test("routed line shows a placeholder when a verdict issue has no parseable summary", () => {
   const payload = buildDigest(
     [issueFixture({ number: 3, labels: ["sentry:verdict-code-fix"] })],
-    { channel: "#engineering", now: NOW },
+    { channel: "#engineering" },
   );
   assert(
     allText(payload).includes("_(no summary)_"),
@@ -1131,7 +1131,7 @@ await test("parseIssueNumbers fails loud on non-arrays and bad members", () => {
 });
 
 await test("buildDigest tolerates an empty batch (defensive; job is gated upstream)", () => {
-  const payload = buildDigest([], { channel: "#engineering", now: NOW });
+  const payload = buildDigest([], { channel: "#engineering" });
   assertEqual(payload.text, "Sentry triage — 0 issues triaged");
   // No section blocks when nothing was triaged — just the header.
   assertEqual(payload.blocks.length, 1);
@@ -1161,7 +1161,7 @@ await test("buildDigest splits a worst-case 6-issue routed batch across sections
       comments: [{ body: verdictComment({ summary: "<".repeat(300) }) }],
     }),
   );
-  const payload = buildDigest(issues, { channel: "#engineering", now: NOW });
+  const payload = buildDigest(issues, { channel: "#engineering" });
 
   const sectionBlocks = payload.blocks.slice(1);
   assert(
@@ -1204,7 +1204,7 @@ await test("buildDigest keeps long needs-human briefs under the per-section cap"
       ],
     }),
   );
-  const payload = buildDigest(issues, { channel: "#engineering", now: NOW });
+  const payload = buildDigest(issues, { channel: "#engineering" });
   for (const block of payload.blocks) {
     assert(
       block.text.text.length <= MAX_SECTION_TEXT_LEN,
@@ -1265,7 +1265,7 @@ await test("needs-human briefs never split across Slack blocks mid-entry", () =>
       ],
     }),
   );
-  const payload = buildDigest(issues, { channel: "#engineering", now: NOW });
+  const payload = buildDigest(issues, { channel: "#engineering" });
   const briefBlocks = payload.blocks
     .slice(1)
     .map((block) => block.text.text)
@@ -1345,7 +1345,7 @@ await test("collectIssues fetches each issue via the injected gh runner", async 
   assertEqual(calls[0][repoFlagIndex + 1], "o/r");
   assertEqual(calls[1][calls[1].indexOf("--repo") + 1], "o/r");
 
-  const payload = buildDigest(issues, { channel: "#engineering", now: NOW });
+  const payload = buildDigest(issues, { channel: "#engineering" });
   assertEqual(payload.text, "Sentry triage — 2 issues triaged");
 });
 
@@ -1424,7 +1424,7 @@ await test("buildDigest fails closed: a queue URL with Slack link-control chars 
     }),
     url: "https://github.com/mento-protocol/monitoring-monorepo/issues/7|@channel>",
   };
-  const text = allText(buildDigest([poisoned], { channel: "#eng", now: NOW }));
+  const text = allText(buildDigest([poisoned], { channel: "#eng" }));
   // Fail closed: the unsafe URL is dropped entirely (no link splice), not
   // embedded — so neither the URL nor a `<...|` breakout reaches Slack.
   assert(!text.includes("github.com"), "unsafe queue URL must not be linked");
@@ -1443,7 +1443,7 @@ await test("buildDigest fails closed: a queue URL with Slack link-control chars 
           comments: [{ body: verdictComment({ summary: "boom" }) }],
         }),
       ],
-      { channel: "#eng", now: NOW },
+      { channel: "#eng" },
     ),
   );
   assert(
@@ -1451,6 +1451,104 @@ await test("buildDigest fails closed: a queue URL with Slack link-control chars 
       "<https://github.com/mento-protocol/monitoring-monorepo/issues/8|",
     ),
     "a clean queue URL should render as a Slack link",
+  );
+});
+
+await test("the project renders only when the SHORT-ID does not already say it", () => {
+  // `GOVERNANCE-MENTO-ORG-5H (governance-mento-org)` says it twice. But a
+  // project's slug and its SHORT-ID prefix can diverge — renaming a slug does
+  // not rewrite existing ids — and there the project is the only place the
+  // owning project appears, so it must survive.
+  const redundant = allText(
+    buildDigest(
+      [
+        issueFixture({
+          number: 1,
+          shortId: "GOVERNANCE-MENTO-ORG-5H",
+          project: "governance-mento-org",
+          labels: ["sentry:verdict-upstream"],
+          comments: [
+            { body: verdictComment({ verdict: "upstream-transient" }) },
+          ],
+        }),
+      ],
+      { channel: "#c" },
+    ),
+  );
+  assert(redundant.includes("GOVERNANCE-MENTO-ORG-5H"), "the id must render");
+  assert(
+    !redundant.includes("(governance-mento-org)"),
+    "the project must not repeat what the id already spells out",
+  );
+  // The assertion above passes for `ID ()` too — dropping the project must
+  // remove the parenthetical, not leave punctuation where it used to be.
+  // Three reviewers caught exactly that, past a weaker version of this test.
+  assert(
+    !/GOVERNANCE-MENTO-ORG-5H\S*\s*\(\)/.test(redundant),
+    "dropping the project must not leave empty parentheses",
+  );
+  assert(
+    redundant.includes("GOVERNANCE-MENTO-ORG-5H> — "),
+    "the id must be followed straight by the summary separator",
+  );
+
+  const divergent = allText(
+    buildDigest(
+      [
+        issueFixture({
+          number: 2,
+          shortId: "LEGACY-7",
+          project: "governance-mento-org",
+          labels: ["sentry:verdict-upstream"],
+          comments: [
+            { body: verdictComment({ verdict: "upstream-transient" }) },
+          ],
+        }),
+      ],
+      { channel: "#c" },
+    ),
+  );
+  assert(
+    divergent.includes("(governance-mento-org)"),
+    "a project the id does NOT spell out is information and must render",
+  );
+});
+
+await test("the archive nudge appears once, and only when something is archivable", () => {
+  const many = allText(
+    buildDigest(
+      [1, 2, 3].map((n) =>
+        issueFixture({
+          number: n,
+          shortId: `UP-${n}`,
+          labels: ["sentry:verdict-upstream"],
+          comments: [
+            { body: verdictComment({ verdict: "upstream-transient" }) },
+          ],
+        }),
+      ),
+      { channel: "#c" },
+    ),
+  );
+  // Three archivable issues, one sentence about archiving.
+  assertEqual(many.split("To archive").length - 1, 1);
+
+  const none = allText(
+    buildDigest(
+      [
+        issueFixture({
+          number: 9,
+          shortId: "CF-9",
+          labels: ["sentry:verdict-code-fix"],
+          comments: [{ body: verdictComment({ verdict: "code-fix" }) }],
+        }),
+      ],
+      { channel: "#c" },
+    ),
+  );
+  assert(
+    !none.includes("To archive"),
+    "no archivable entries means no archive nudge at all",
   );
 });
 

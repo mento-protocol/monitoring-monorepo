@@ -425,12 +425,6 @@ export function classifyIssue(issue) {
 // Slack payload assembly.
 // ---------------------------------------------------------------------------
 
-function formatUtcTimestamp(date) {
-  // 2026-07-17T14:20:33.123Z -> "2026-07-17 14:20 UTC"
-  const iso = new Date(date).toISOString();
-  return `${iso.slice(0, 16).replace("T", " ")} UTC`;
-}
-
 function issueCountText(total) {
   return `${total} issue${total === 1 ? "" : "s"} triaged`;
 }
@@ -458,7 +452,24 @@ function idAndProject(entry, { linkUrl } = {}) {
   const idText = escapeSlackText(entry.shortId);
   const url = linkUrl ?? entry.url;
   const linked = isHttpsUrl(url) ? `<${url}|${idText}>` : idText;
-  return { linked, project: escapeSlackText(entry.project) };
+  // A Sentry SHORT-ID is prefixed with the project's short name, which for
+  // every current project is the upper-cased slug — `GOVERNANCE-MENTO-ORG-5H`
+  // in `governance-mento-org`. Rendering both says it twice. Sentry lets a
+  // project's slug and short name diverge (a slug rename does not rewrite
+  // existing short-ids), so this drops the repeat only when it IS a repeat and
+  // keeps the project whenever it would otherwise be lost.
+  const project = escapeSlackText(entry.project);
+  const redundant =
+    project &&
+    String(entry.shortId ?? "")
+      .toUpperCase()
+      .startsWith(`${project.toUpperCase()}-`);
+  // A ready-to-render SUFFIX, not a bare value: every renderer used to wrap
+  // this in parentheses unconditionally, so returning "" for the redundant case
+  // produced `ID ()` — punctuation where the repeat used to be. Owning the
+  // parentheses here makes that shape unrepresentable.
+  const shown = redundant ? "" : project;
+  return { linked, project: shown, projectSuffix: shown ? ` (${shown})` : "" };
 }
 
 /** A needs-human decision-ready brief: a level-1 bullet for the issue, then
@@ -515,32 +526,27 @@ function renderNeedsHumanBrief(entry) {
  * <arrow>`, where <arrow> is the linked outcome (fix PR / owning-repo issue /
  * queue-verdict fallback). */
 function renderArrowLine(entry, arrowUrl, arrowLabel) {
-  const { linked, project } = idAndProject(entry);
+  const { linked, projectSuffix } = idAndProject(entry);
   const summary = entry.summary
     ? formatSummaryForSlack(entry.summary)
     : "_(no summary)_";
-  return `• ${linked} (${project}) — ${summary} → ${link(arrowUrl, arrowLabel)}`;
+  return `• ${linked}${projectSuffix} — ${summary} → ${link(arrowUrl, arrowLabel)}`;
 }
 
 function renderWontfixLine(entry) {
-  const { linked, project } = idAndProject(entry);
+  const { linked, projectSuffix } = idAndProject(entry);
   const confidence = entry.confidence ?? "unknown";
   const summary = entry.summary
     ? formatSummaryForSlack(entry.summary)
     : "_(no summary)_";
   // The SHORT-ID links the queue issue, which holds the verdict comment (the
   // rationale). Confidence rides along.
-  const line = `• ${linked} (${project}) — ${summary} (${confidence})`;
-  if (!isHttpsUrl(entry.url)) return line;
-  // Archiving stays human-gated (ADR 0036 trust boundary): this is a nudge
-  // toward the existing `sentry:approved-archive` label flow on the queue
-  // issue, never an automatic Sentry mutation from the digest.
-  return `${line}\n    ◦ To archive in Sentry: add \`${APPROVED_ARCHIVE_LABEL}\` to the queue issue above.`;
+  return `• ${linked}${projectSuffix} — ${summary} (${confidence})`;
 }
 
 function renderFailedLine(entry) {
-  const { linked, project } = idAndProject(entry);
-  return `• ${linked} (${project}) — triage incomplete (still \`${NEEDS_TRIAGE_LABEL}\`)`;
+  const { linked, projectSuffix } = idAndProject(entry);
+  return `• ${linked}${projectSuffix} — triage incomplete (still \`${NEEDS_TRIAGE_LABEL}\`)`;
 }
 
 /** The body lines for one section (excluding its header), one line per entry.
@@ -667,15 +673,20 @@ export function doubleVerdictWarnings(issues) {
 
 /**
  * Build the deterministic Slack `chat.postMessage` payload for one batch.
- * `channel` is passed in (hardcoded by the workflow); `now` is injectable for
- * tests. Pure — no I/O, no escaping omissions: every free-form value is routed
- * through the escape/format helpers here.
+ * `channel` is passed in (hardcoded by the workflow). Pure — no I/O, no
+ * escaping omissions: every free-form value is routed through the
+ * escape/format helpers here.
+ *
+ * The payload carries no clock: Slack stamps every message itself, so the
+ * digest renders nothing time-dependent and needs no injectable `now`.
  */
-export function buildDigest(issues, { channel, now = new Date() } = {}) {
+export function buildDigest(issues, { channel } = {}) {
   const entries = (issues ?? []).map(classifyIssue);
 
   const total = entries.length;
-  const headerText = `*Sentry triage — ${issueCountText(total)}*\n${formatUtcTimestamp(now)}`;
+  // No timestamp: Slack renders its own next to the app name, and a second
+  // one in the body is a line every reader skips.
+  const headerText = `*Sentry triage — ${issueCountText(total)}*`;
 
   const blocks = [mrkdwnSection(headerText)];
 
@@ -701,6 +712,20 @@ export function buildDigest(issues, { channel, now = new Date() } = {}) {
     for (const chunk of chunks) {
       blocks.push(mrkdwnSection(chunk));
     }
+  }
+
+  // The archive nudge, ONCE. It used to hang off every wontfix line, which in a
+  // six-issue digest repeated the same sentence six times and buried the lines
+  // that differ. It is guidance about a flow, not a fact about an issue, so it
+  // belongs at the end and only when the digest actually contains something
+  // archivable. Archiving stays human-gated (ADR 0036): this points at the
+  // `sentry:approved-archive` label flow, never a Sentry mutation from here.
+  if ((bySection.get(WONTFIX_SECTION) ?? []).length > 0) {
+    blocks.push(
+      mrkdwnSection(
+        `_To archive a *${SECTION_TITLES[WONTFIX_SECTION]}* issue in Sentry: add \`${APPROVED_ARCHIVE_LABEL}\` to its queue issue._`,
+      ),
+    );
   }
 
   return {
