@@ -569,11 +569,44 @@ function oneLine(value, fallback) {
   return s || fallback;
 }
 
+// How many deferred issue numbers the record names before it stops. The list is
+// an operator affordance (each one is a candidate for the single-issue
+// `workflow_dispatch` override), not an inventory — the count above it is the
+// signal, and an unbounded list on a public rolling comment is just noise.
+const MAX_RECORDED_DEFERRED_ISSUES = 10;
+
+/**
+ * ` (#1313, #1316, …)` for a deferred-issue list, or "" when there is none.
+ *
+ * Whitelist-parsed, not sanitized: the input arrives through the workflow env as
+ * a free-form string, so anything that is not a bare positive integer is
+ * DROPPED rather than escaped. That is what keeps this line safe on a public
+ * tracker comment even though the deferral it describes was triggered by
+ * agent-authored `duplicate_of` text — the numbers themselves come from GitHub,
+ * and nothing else survives the filter.
+ */
+function renderDeferredIssues(deferredIssues) {
+  const numbers = String(deferredIssues ?? "")
+    .split(/[\s,]+/)
+    .map((token) => token.replace(/^#/, ""))
+    .filter((token) => /^[0-9]+$/.test(token) && Number(token) > 0)
+    .slice(0, MAX_RECORDED_DEFERRED_ISSUES);
+  if (numbers.length === 0) return "";
+  return ` (${numbers.map((n) => `#${n}`).join(", ")})`;
+}
+
 /**
  * Build the autofix run-record comment body — same shape/family as the ingest
  * run record so the two rolling comments on the tracker read consistently.
  * `trigger` and `disposition` are workflow-controlled; the counters are coerced
  * to non-negative integers.
+ *
+ * `deferred` is the duplicate_of family collapse's stand-down count (PR
+ * #1810). Without it a run that suppressed its entire window rendered
+ * identically to one with an empty queue — `Candidates selected: 0` and nothing
+ * else — so a permanently family-starved queue looked like a healthy idle leg,
+ * which is precisely the failure mode ADR 0036's observability invariant exists
+ * to make detectable.
  */
 export function buildAutofixRunRecordBody({
   timestampIso,
@@ -583,6 +616,8 @@ export function buildAutofixRunRecordBody({
   opened,
   refused,
   incomplete,
+  deferred,
+  deferredIssues,
 }) {
   return [
     AUTOFIX_RUN_RECORD_MARKER,
@@ -595,6 +630,7 @@ export function buildAutofixRunRecordBody({
     `- Fix PRs opened: ${nonNegativeInt(opened)}`,
     `- Refused (no PR): ${nonNegativeInt(refused)}`,
     `- Incomplete / errored: ${nonNegativeInt(incomplete)}`,
+    `- Deferred (duplicate_of family): ${nonNegativeInt(deferred)}${renderDeferredIssues(deferredIssues)}`,
   ].join("\n");
 }
 
@@ -869,6 +905,8 @@ export function runCli(argv, { stdout = process.stdout } = {}) {
           opened: readFlag(args, "--opened"),
           refused: readFlag(args, "--refused"),
           incomplete: readFlag(args, "--incomplete"),
+          deferred: readFlag(args, "--deferred"),
+          deferredIssues: readFlag(args, "--deferred-issues"),
         })}\n`,
       );
       return;

@@ -3,16 +3,23 @@ import {
   AUTOFIX_SELECT_LABEL,
   DEFAULT_CAP,
   emitVerdict,
+  isOwnHeadPr,
+  LOCAL_SENTRY_PROJECT,
+  MAX_CANDIDATE_EVALUATIONS,
   parseArgs,
   selectAutofixCandidates,
+  selectAutofixRun,
 } from "./sentry-autofix-select.mjs";
 import {
+  isValidShortId,
   MAX_DUPLICATE_LOOKUPS,
   VERDICT_MARKER,
 } from "./sentry-triage-project-core.mjs";
 import {
   collapseDuplicateFamilies,
   declaredFamilyIds,
+  DEFER_FAMILY_DUPLICATE,
+  DEFER_FAMILY_HANDLED,
   MAX_FAMILY_MEMBERS,
 } from "./sentry-autofix-family.mjs";
 import {
@@ -111,6 +118,14 @@ function stub({
  *                  PR; the selector matches by the deterministic head branch
  *                  `sentry-autofix/<short-id-lower>`, NOT by a text search, so a
  *                  human/unrelated PR that merely cites the id cannot match)
+ *                  or `forkPrShortIds` (a SPOOF: `--head` matches by branch
+ *                  NAME, and fork PRs carry their own, so anyone can push
+ *                  `sentry-autofix/<short-id>` on a fork of this public repo
+ *                  and open a PR at main — verified live against cli/cli, where
+ *                  `--head feat/uptime-command` returns a PR with
+ *                  `isCrossRepository: true`). Rows carry the real response
+ *                  shape so the ownership fence is exercised, and a spoof is
+ *                  emitted FIRST so a fence that only read row 0 would fail.
  */
 function branchToShortId(branch) {
   return String(branch)
@@ -124,7 +139,15 @@ function branchToShortId(branch) {
  * excludes by construction, which the family collapse reads back through its
  * own per-marker query (issue #1784). Each entry is `{ shortId, label }`.
  */
-function makeRunGh({ stubs = [], prShortIds = [], handled = [] } = {}) {
+function makeRunGh({
+  stubs = [],
+  prShortIds = [],
+  forkPrShortIds = [],
+  handled = [],
+  repo = "o/r",
+  prListError = null,
+} = {}) {
+  const owner = repo.split("/")[0];
   const calls = [];
   const byNumber = new Map(stubs.map((s) => [String(s.number), s]));
   const runGh = async (args) => {
@@ -166,13 +189,29 @@ function makeRunGh({ stubs = [], prShortIds = [], handled = [] } = {}) {
       });
     }
     if (a0 === "pr" && a1 === "list") {
+      if (prListError) throw new Error(prListError);
       // The selector matches the deterministic head branch (never --search).
       const headIdx = args.indexOf("--head");
       const shortId =
         headIdx === -1 ? null : branchToShortId(args[headIdx + 1]);
-      return JSON.stringify(
-        shortId && prShortIds.includes(shortId) ? [{ number: 1 }] : [],
-      );
+      const rows = [];
+      // Spoof first: a fence that trusted `.[0]` (or asked for `--limit 1`)
+      // would both accept this row AND hide a real PR behind it.
+      if (shortId && forkPrShortIds.includes(shortId)) {
+        rows.push({
+          number: 99,
+          isCrossRepository: true,
+          headRepositoryOwner: { login: "outsider" },
+        });
+      }
+      if (shortId && prShortIds.includes(shortId)) {
+        rows.push({
+          number: 1,
+          isCrossRepository: false,
+          headRepositoryOwner: { login: owner },
+        });
+      }
+      return JSON.stringify(rows);
     }
     throw new Error(`unexpected gh call: ${args.join(" ")}`);
   };
@@ -221,6 +260,13 @@ await test("batch list excludes handled AND projected stubs server-side", async 
     '-label:"sentry:fix-pr-opened"',
     '-label:"sentry:fix-refused"',
     '-label:"sentry:projected"',
+    // An archived Sentry issue was deliberately silenced by the archive loop,
+    // so it must not consume an autofix run — and nothing else ever removes it
+    // from this window, so it would otherwise cost a full `issue view` on every
+    // run forever. A regression sheds `sentry:archived` (REOPEN_SHED_LABELS)
+    // along with the verdict label, which is what makes the stub a candidate
+    // again.
+    '-label:"sentry:archived"',
   ]) {
     assert(search.includes(excluded), `search must contain ${excluded}`);
   }
@@ -282,6 +328,107 @@ await test("emits a RECONCILE entry when an OPEN autofix PR exists but the stub 
     head === "sentry-autofix/app-mento-org-7x",
     `pr query must match the deterministic head branch, got ${head}`,
   );
+});
+
+await test("a FORK PR on the autofix branch name is not ours: no reconcile, the stub stays fixable", async () => {
+  // `gh pr list --head` matches by branch NAME, and fork PRs carry their own —
+  // verified live: `gh pr list -R cli/cli --head feat/uptime-command --state
+  // open` returns a PR with `isCrossRepository: true` owned by an unrelated
+  // user. This repo is public, queue-stub titles are public, and
+  // `sentry-autofix/<short-id-lower>` is deterministic, so anyone can produce
+  // this row. Reading it as our prior fix PR hands an outsider the reconcile
+  // write path — a comment carrying their PR url onto the queue issue plus the
+  // terminal `sentry:fix-pr-opened` marker, which is terminal until a human
+  // clears it — and the family collapse then stands the whole family down
+  // behind that marker.
+  const stubs = [stub({ number: 40, shortId: "APP-MENTO-ORG-9Z" })];
+  const { runGh, calls } = makeRunGh({
+    stubs,
+    forkPrShortIds: ["APP-MENTO-ORG-9Z"],
+  });
+  const selected = await selectAutofixCandidates({ repo: "o/r" }, { runGh });
+  assertDeepEqual(selected, [{ issue: 40, shortId: "APP-MENTO-ORG-9Z" }]);
+  assert(
+    !("reconcile" in selected[0]),
+    "a fork PR must not route the stub to the reconcile write path",
+  );
+  // Ownership has to be READ, so the query must ask for the fields that decide
+  // it — a fence that never requested them could not fail closed.
+  const prCall = calls.find((c) => c[0] === "pr" && c[1] === "list");
+  const json = prCall[prCall.indexOf("--json") + 1];
+  for (const field of ["isCrossRepository", "headRepositoryOwner"]) {
+    assert(json.includes(field), `pr query must request ${field}, got ${json}`);
+  }
+});
+
+await test("a spoofed fork PR cannot hide our real one behind it", async () => {
+  // The pre-fence query took `--limit 1`. Since forks share the branch-name
+  // namespace, a spoof row can fill that single slot — the fence would then
+  // report "no PR of ours", the leg would try to open a second one, and the
+  // orphaned stub would never be reconciled. Take a page and pick ours out.
+  const stubs = [stub({ number: 41, shortId: "APP-MENTO-ORG-1A" })];
+  const { runGh, calls } = makeRunGh({
+    stubs,
+    forkPrShortIds: ["APP-MENTO-ORG-1A"],
+    prShortIds: ["APP-MENTO-ORG-1A"],
+  });
+  const selected = await selectAutofixCandidates({ repo: "o/r" }, { runGh });
+  assertDeepEqual(selected, [
+    { issue: 41, shortId: "APP-MENTO-ORG-1A", reconcile: true },
+  ]);
+  const prCall = calls.find((c) => c[0] === "pr" && c[1] === "list");
+  assert(
+    Number(prCall[prCall.indexOf("--limit") + 1]) > 1,
+    "a single-row window can be filled by a spoof",
+  );
+});
+
+await test("isOwnHeadPr fails CLOSED on a missing or mismatched head owner", () => {
+  const ours = {
+    isCrossRepository: false,
+    headRepositoryOwner: { login: "Mento-Protocol" },
+  };
+  assertEqual(
+    isOwnHeadPr(ours, "mento-protocol/monitoring-monorepo"),
+    true,
+    "owner comparison is case-insensitive",
+  );
+  for (const [label, pr] of [
+    ["fork", { isCrossRepository: true, headRepositoryOwner: { login: "x" } }],
+    [
+      "owner mismatch",
+      { isCrossRepository: false, headRepositoryOwner: { login: "x" } },
+    ],
+    ["no owner field", { isCrossRepository: false }],
+    [
+      "no cross-repo field",
+      { headRepositoryOwner: { login: "mento-protocol" } },
+    ],
+    ["empty row", {}],
+    ["null row", null],
+  ]) {
+    assertEqual(
+      isOwnHeadPr(pr, "mento-protocol/monitoring-monorepo"),
+      false,
+      `${label} must not read as ours`,
+    );
+  }
+  assertEqual(isOwnHeadPr(ours, ""), false, "an unparsable repo is not ours");
+});
+
+await test("a transient open-PR read failure skips ONE stub, never the whole leg", async () => {
+  // This read is issued once per surviving stub — a whole-window count now, not
+  // a capped one. It sat outside the fail-soft try/catch that covers the stub
+  // read, so one `gh` rejection rejected out of the selector, exited nonzero and
+  // failed the select step under `set -euo pipefail` — breaking the workflow
+  // header's "ALWAYS emits a valid JSON array … never a failure" invariant.
+  const stubs = [stub({ number: 42, shortId: "APP-MENTO-ORG-2B" })];
+  const { runGh } = makeRunGh({
+    stubs,
+    prListError: "gh pr list failed with exit 1: API rate limit exceeded",
+  });
+  const selected = await selectAutofixCandidates({ repo: "o/r" }, { runGh });
+  assertDeepEqual(selected, []);
 });
 
 await test("a normal (non-orphan) selection carries no reconcile flag", async () => {
@@ -507,6 +654,18 @@ await test("parseArgs defaults and validation", () => {
     threw = true;
   }
   assert(threw, "--cap 0 rejected");
+  assertEqual(defaults.deferredOut, null, "no deferral report by default");
+  assertEqual(
+    parseArgs(["--deferred-out", "/tmp/d.json"]).deferredOut,
+    "/tmp/d.json",
+  );
+  let missingValue = false;
+  try {
+    parseArgs(["--deferred-out"]);
+  } catch {
+    missingValue = true;
+  }
+  assert(missingValue, "--deferred-out requires a path");
 });
 
 // ---------------------------------------------------------------------------
@@ -607,6 +766,63 @@ await test("OLD PATH: with no duplicate_of, selection order, cap and the gh call
   // handled-sibling reads at all: exactly the ONE candidate-window list call.
   const lists = calls.filter((c) => c[0] === "issue" && c[1] === "list");
   assertEqual(lists.length, 1, "exactly one issue list call");
+  // Count the reads the rerouted loop actually changed. Family collapse needs
+  // the WHOLE evaluated window before it can decide, so the per-stub reads are
+  // no longer capped at `cap` — assert the exact profile rather than a claim
+  // these assertions cannot see. An earlier version of this test checked only
+  // `lists.length`, which stays 1 under an arbitrarily large read
+  // amplification, so the one regression guard offered for this path was blind
+  // to the regression the path took.
+  assertDeepEqual(
+    calls
+      .filter((c) => c[0] === "issue" && c[1] === "view")
+      .map((c) => Number(c[2])),
+    [10, 11, 12],
+  );
+  assertEqual(
+    calls.filter((c) => c[0] === "pr" && c[1] === "list").length,
+    3,
+    "one open-PR read per surviving stub",
+  );
+});
+
+await test("the per-run read budget bounds the window, keeping the OLDEST stubs", async () => {
+  // Deferral writes nothing, so a collapsed family leaves permanent window
+  // residents that are re-read every run; the window only grows, and every
+  // evaluation is a sequential `gh` subprocess inside a 5-minute job. Bound the
+  // READ, not the selection — and truncate the NEWEST tail, since the oldest
+  // candidates are the ones `sort:created-asc` protects.
+  const stubs = [];
+  for (let i = 0; i < MAX_CANDIDATE_EVALUATIONS + 12; i += 1) {
+    stubs.push(
+      stub({
+        number: 3000 + i,
+        shortId: `APP-MENTO-ORG-${i}`,
+        createdAt: `2026-07-18T00:${String(i).padStart(2, "0")}:00Z`,
+      }),
+    );
+  }
+  const { runGh, calls } = makeRunGh({ stubs });
+  const selected = await selectAutofixCandidates(
+    { repo: "o/r", cap: 2 },
+    { runGh },
+  );
+  assertDeepEqual(selected, [
+    { issue: 3000, shortId: "APP-MENTO-ORG-0" },
+    { issue: 3001, shortId: "APP-MENTO-ORG-1" },
+  ]);
+  const views = calls.filter((c) => c[0] === "issue" && c[1] === "view");
+  assertEqual(
+    views.length,
+    MAX_CANDIDATE_EVALUATIONS,
+    "reads are capped by the budget, not by the window",
+  );
+  assertEqual(Number(views[0][2]), 3000, "the budget keeps the oldest stub");
+  assertEqual(
+    Number(views[views.length - 1][2]),
+    3000 + MAX_CANDIDATE_EVALUATIONS - 1,
+    "the budget drops the newest tail",
+  );
 });
 
 await test("OLD PATH: with no duplicate_of, the label dedup and the external-repo gate still filter first", async () => {
@@ -701,6 +917,65 @@ await test("a REFUSED representative does not hand the family back member-by-mem
   assertDeepEqual(selected, []);
 });
 
+await test("a fully-deferred run REPORTS its deferrals, so it cannot read as an empty queue", async () => {
+  // Deferral writes nothing to the queue, so before this the only trace was a
+  // stderr line in a 90-day workflow log: a run that suppressed its whole
+  // window rendered on the tracker as `State: active, Candidates selected: 0` —
+  // byte-identical to "nothing was queued". That is the ADR 0036 observability
+  // invariant inverted, and it left the documented single-issue dispatch
+  // override unusable because nobody could tell which issue to name.
+  const { runGh } = makeRunGh({
+    stubs: orphanedFamilyStubs(),
+    handled: [{ shortId: "ANALYTICS-MENTO-ORG-2E", label: FIX_REFUSED_LABEL }],
+  });
+  const { entries, deferred } = await selectAutofixRun(
+    { repo: "o/r", cap: 2 },
+    { runGh },
+  );
+  assertDeepEqual(entries, []);
+  assertDeepEqual(deferred, [
+    { issue: 1313, reason: DEFER_FAMILY_HANDLED },
+    { issue: 1316, reason: DEFER_FAMILY_HANDLED },
+    { issue: 1326, reason: DEFER_FAMILY_HANDLED },
+    { issue: 1328, reason: DEFER_FAMILY_HANDLED },
+  ]);
+  // The reason is a closed enum from the collapse module, never agent text.
+  for (const row of deferred) {
+    assert(
+      Number.isInteger(row.issue) && row.issue > 0,
+      "issue numbers come from GitHub, not from duplicate_of",
+    );
+  }
+});
+
+await test("a partially-deferred run reports the members the representative displaced", async () => {
+  const { runGh } = makeRunGh({ stubs: realFamilyStubs() });
+  const { entries, deferred } = await selectAutofixRun(
+    { repo: "o/r", cap: 2 },
+    { runGh },
+  );
+  assertDeepEqual(entries, [
+    { issue: 1304, shortId: "ANALYTICS-MENTO-ORG-2E" },
+  ]);
+  assertDeepEqual(
+    deferred.map((d) => d.issue),
+    [1313, 1316, 1326, 1328],
+  );
+  assertEqual(deferred[0].reason, DEFER_FAMILY_DUPLICATE);
+});
+
+await test("a run with nothing to collapse reports no deferrals", async () => {
+  const { runGh } = makeRunGh({
+    stubs: [stub({ number: 50, shortId: "APP-MENTO-ORG-3C" })],
+  });
+  const { entries, deferred } = await selectAutofixRun(
+    { repo: "o/r", cap: 2 },
+    { runGh },
+  );
+  assertEqual(entries.length, 1);
+  assertDeepEqual(deferred, []);
+});
+
 await test("a family whose representative already has a fix PR opens no second one", async () => {
   const { runGh } = makeRunGh({
     stubs: orphanedFamilyStubs(),
@@ -712,7 +987,11 @@ await test("a family whose representative already has a fix PR opens no second o
   assertDeepEqual(selected, []);
 });
 
-await test("deferral is NOT permanent: the family returns once the blocking marker is shed", async () => {
+await test("a family-handled deferral lifts exactly when the blocking marker is shed", async () => {
+  // Scoped deliberately: this proves the REGRESSION branch, and that is the
+  // only branch that lifts a DEFER_FAMILY_HANDLED block. A blocker that was
+  // fixed and stayed fixed, or refused and stayed quiet, keeps blocking — which
+  // is why the run record now carries the deferred count and issue numbers.
   // Run A: 2E is refused, so the whole family stands down.
   const blocked = makeRunGh({
     stubs: orphanedFamilyStubs(),
@@ -744,9 +1023,9 @@ await test("deferral is NOT permanent: the family returns once the blocking mark
   );
 });
 
-await test("the representative is chosen by in-degree, not by position in the window", async () => {
-  // Same family, anchor NOT first in the window. Oldest-first tie-breaking
-  // alone would pick 2F; the in-degree rule still picks 2E.
+await test("the representative is the family's OLDEST member, whatever order the list arrives in", async () => {
+  // Same family, anchor NOT first in the list `gh` returned. The selector sorts
+  // the window by createdAt, so the representative is still 2E — the oldest.
   const [anchor, ...rest] = realFamilyStubs();
   const stubs = [rest[0], rest[1], anchor, rest[2], rest[3]];
   const { runGh } = makeRunGh({ stubs });
@@ -756,6 +1035,67 @@ await test("the representative is chosen by in-degree, not by position in the wi
   );
   assertDeepEqual(selected, [
     { issue: 1304, shortId: "ANALYTICS-MENTO-ORG-2E" },
+  ]);
+});
+
+await test("agent-authored pointer COUNTS cannot move the representative off the oldest stub", async () => {
+  // The representative decides which stub's verdict the fix agent reads and
+  // which stub consumes the finalize job's App-token push + PR create. Ranking
+  // that by in-degree — a raw count of how many verdicts name an id — hands the
+  // choice to whoever can create the most Sentry issues: N noise stubs naming
+  // each other outrank the real bug, take the run, get refused, and then block
+  // the whole family. `createdAt` is the one ordering agent text cannot set.
+  const real = familyStub(
+    1500,
+    "ANALYTICS-MENTO-ORG-R1",
+    "2026-07-01T00:00:00Z",
+    ["ANALYTICS-MENTO-ORG-N0"],
+  );
+  const noise = [0, 1, 2, 3, 4].map((i) =>
+    familyStub(
+      1600 + i,
+      `ANALYTICS-MENTO-ORG-N${i}`,
+      `2026-07-0${2 + i}T00:00:00Z`,
+      ["ANALYTICS-MENTO-ORG-N0", "ANALYTICS-MENTO-ORG-R1"],
+    ),
+  );
+  const { runGh } = makeRunGh({ stubs: [real, ...noise] });
+  const selected = await selectAutofixCandidates(
+    { repo: "o/r", cap: 2 },
+    { runGh },
+  );
+  // N0 carries five inbound pointers to R1's one; the oldest stub wins anyway.
+  assertDeepEqual(selected, [
+    { issue: 1500, shortId: "ANALYTICS-MENTO-ORG-R1" },
+  ]);
+});
+
+await test("a family takes its OLDEST member's queue slot, so newer independents cannot push it past the cap", async () => {
+  // Decisions come back in input order and the cap is applied over that order,
+  // so a family represented by a LATE member occupied that member's slot. With
+  // >= cap newer independent candidates in between, the family lost the race on
+  // every run — and because the window is recomputed identically each time, the
+  // queue's OLDEST candidate was never fixed. That is exactly what
+  // `sort:created-asc` exists to prevent.
+  const P = "ANALYTICS-MENTO-ORG";
+  const stubs = [
+    familyStub(1, `${P}-A1`, "2026-07-01T00:00:00Z", [`${P}-A9`]),
+    familyStub(2, `${P}-B2`, "2026-07-02T00:00:00Z", []),
+    familyStub(3, `${P}-B3`, "2026-07-03T00:00:00Z", []),
+    familyStub(4, `${P}-A8`, "2026-07-04T00:00:00Z", [`${P}-A9`]),
+    // The most-pointed-at member of the family sits LAST in the window.
+    familyStub(5, `${P}-A9`, "2026-07-05T00:00:00Z", [`${P}-A1`]),
+  ];
+  const { runGh } = makeRunGh({ stubs });
+  const selected = await selectAutofixCandidates(
+    { repo: "o/r", cap: 2 },
+    { runGh },
+  );
+  // The oldest candidate in the queue keeps the first slot; the family's other
+  // two members defer behind it.
+  assertDeepEqual(selected, [
+    { issue: 1, shortId: `${P}-A1` },
+    { issue: 2, shortId: `${P}-B2` },
   ]);
 });
 
@@ -822,15 +1162,12 @@ await test("single-issue dispatch overrides the family collapse (explicit human 
 // --- the pure collapse module's own bounds -------------------------------
 
 await test("declaredFamilyIds drops the stub's OWN id before spending the lookup budget", () => {
-  const self = "ANALYTICS-MENTO-ORG-2E";
-  const ids = declaredFamilyIds(self, [
+  const self = "APP-2E";
+  const ids = declaredFamilyIds(
     self,
-    "APP-1",
-    "APP-2",
-    "APP-3",
-    "APP-4",
-    "APP-5",
-  ]);
+    [self, "APP-1", "APP-2", "APP-3", "APP-4", "APP-5"],
+    "APP",
+  );
   // Capping before the self-exclusion would push APP-5 past the budget.
   assertDeepEqual(ids, ["APP-1", "APP-2", "APP-3", "APP-4", "APP-5"]);
   assertEqual(ids.length, MAX_DUPLICATE_LOOKUPS, "budget is the fan-out bound");
@@ -849,7 +1186,7 @@ await test("a family that would exceed MAX_FAMILY_MEMBERS refuses the merge rath
       entry: { issue: i },
     });
   }
-  const decisions = collapseDuplicateFamilies(candidates, {});
+  const decisions = collapseDuplicateFamilies(candidates, { project: "APP" });
   const selected = decisions.filter((d) => d.selected).length;
   assert(selected > 1, `the chain must not collapse to one, got ${selected}`);
 });
@@ -862,12 +1199,69 @@ await test("a shape-invalid handled SHORT-ID cannot block a family", () => {
   ];
   const blocked = collapseDuplicateFamilies(candidates, {
     handledShortIds: ["APP-2"],
+    project: "APP",
   });
   assertEqual(blocked[0].selected, false, "a valid handled id blocks");
   const inert = collapseDuplicateFamilies(candidates, {
     handledShortIds: ["APP 2\n::error::injected"],
+    project: "APP",
   });
   assertEqual(inert[0].selected, true, "a malformed handled id is inert");
+});
+
+await test("family ids are PROJECT-SCOPED: a foreign or bare-slug id joins nothing", () => {
+  // `isValidShortId` accepts any hyphenated token, including the bare project
+  // slug — so without scoping, one degenerate or foreign id in each verdict
+  // unions unrelated candidates into a single starved family.
+  assert(isValidShortId("ANALYTICS-MENTO-ORG"), "the bare slug does validate");
+  assertDeepEqual(
+    declaredFamilyIds(
+      "ANALYTICS-MENTO-ORG-D1",
+      [
+        "APP-MENTO-ORG-7X", // another Sentry project
+        "ANALYTICS-MENTO-ORG", // the bare project slug
+        "ANALYTICS-MENTO-ORG-D2", // a real sibling
+      ],
+      LOCAL_SENTRY_PROJECT,
+    ),
+    ["ANALYTICS-MENTO-ORG-D2"],
+  );
+  // Off-project ids are dropped BEFORE the budget, so a list padded with them
+  // cannot starve real siblings out of MAX_DUPLICATE_LOOKUPS.
+  const padded = declaredFamilyIds(
+    "ANALYTICS-MENTO-ORG-D1",
+    [
+      "APP-MENTO-ORG-1",
+      "APP-MENTO-ORG-2",
+      "APP-MENTO-ORG-3",
+      "APP-MENTO-ORG-4",
+      "APP-MENTO-ORG-5",
+      "ANALYTICS-MENTO-ORG-D2",
+    ],
+    LOCAL_SENTRY_PROJECT,
+  );
+  assertDeepEqual(padded, ["ANALYTICS-MENTO-ORG-D2"]);
+  // Scoping applies to BLOCKERS too, in the same direction.
+  const candidates = [
+    {
+      shortId: "ANALYTICS-MENTO-ORG-D1",
+      duplicateOf: ["ANALYTICS-MENTO-ORG-D2"],
+      entry: { issue: 1 },
+    },
+  ];
+  assertEqual(
+    collapseDuplicateFamilies(candidates, {
+      handledShortIds: ["ANALYTICS-MENTO-ORG"],
+      project: LOCAL_SENTRY_PROJECT,
+    })[0].selected,
+    true,
+    "the bare slug must not block as a handled id",
+  );
+  // A missing project fails toward MORE candidates, never fewer.
+  assertDeepEqual(
+    declaredFamilyIds("ANALYTICS-MENTO-ORG-D1", ["ANALYTICS-MENTO-ORG-D2"], ""),
+    [],
+  );
 });
 
 process.stdout.write(`\n${passed} passed, ${failed} failed\n`);

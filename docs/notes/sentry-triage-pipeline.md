@@ -652,19 +652,52 @@ five refusal records for one root cause. The selector groups candidates by the
 `duplicate_of` the verdict already carries, unioned TRANSITIVELY over SHORT-IDs
 (the graph is directional — #1304 listed six duplicates while the others pointed
 back only at `2E`, and a member id may connect two candidates without being one
-itself), and picks the stub the others point at, falling back to the oldest. A
-family whose SHORT-IDs include one already carrying `sentry:fix-pr-opened` or
-`sentry:fix-refused` stands down entirely, which is what stops a refused
-representative from handing the family back one member per run.
+itself), and picks the family's **oldest** candidate. A family whose SHORT-IDs
+include one already carrying `sentry:fix-pr-opened` or `sentry:fix-refused`
+stands down entirely, which is what stops a refused representative from handing
+the family back one member per run.
 
-Deferral is **not** permanent and writes nothing — no label, no comment, no
-marker. `duplicate_of` is a family signal, not a confirmed duplicate, so a
-deferred member must stay able to come back: the next run recomputes the whole
-decision from live state, and a genuine regression re-queues the blocking stub
-through `requeueQueueStub`, which sheds its autofix markers (`REOPEN_SHED_LABELS`)
-and frees the family. Selection stays read-only; it never re-queues anything
-itself. The single-issue `workflow_dispatch` path skips the collapse — naming
-one issue is explicit human intent that overrides a heuristic signal.
+Two bounds keep an agent-authored `duplicate_of` list from reaching further than
+that. Family ids are **project-scoped**: only `ANALYTICS-MENTO-ORG-<suffix>` ids
+join or block, because `isValidShortId` accepts any hyphenated token — including
+a foreign project's id and the bare project slug itself, either of which would
+otherwise union unrelated bugs into one starved family. And the representative is
+the family's oldest member, never a ranking over the pointer graph: in-degree is
+a count an attacker sets by creating more Sentry issues that name their chosen
+id, while `createdAt` is GitHub's. Because the selector applies its cap in window
+order, oldest-first representation is also what gives a family the queue slot of
+its OLDEST member — otherwise newer independent candidates could push a family
+past the cap on every run and permanently starve the queue's oldest candidate,
+which is exactly what `sort:created-asc` exists to prevent. Family membership may
+suppress a candidate; it can never reorder the queue.
+
+Deferral writes nothing — no label, no comment, no marker — and the next run
+recomputes the whole decision from live state. It is **not** self-expiring,
+though: a `sentry:fix-pr-opened` / `sentry:fix-refused` block lifts only when
+that marker goes away, which happens when the blocking stub's Sentry issue
+regresses and `requeueQueueStub` sheds it (`REOPEN_SHED_LABELS`), or when a human
+removes it. A blocker that is fixed and stays fixed, or refused and stays quiet,
+keeps blocking — and `duplicate_of` is a family signal, not a confirmed
+duplicate, so a wrong grouping can suppress a genuinely distinct stub for as long
+as that holds. Every deferral is therefore **reported**: the select job emits a
+count and the deferred issue numbers, and the tracker run record renders them as
+`Deferred (duplicate_of family): N (#…)`. Without that line a run that stood its
+whole window down read as `Candidates selected: 0` — byte-identical to an empty
+queue, i.e. a permanently starved leg looking like a healthy idle one. An
+operator who sees a standing deferred count overrides it with the single-issue
+`workflow_dispatch`, which skips the collapse entirely: naming one issue is
+explicit human intent that beats a heuristic signal. Selection itself stays
+read-only and never re-queues anything.
+
+The selector reads only PRs whose head branch is in **this** repo.
+`gh pr list --head` matches by branch name, which fork PRs also carry, so on a
+public repo with a deterministic `sentry-autofix/<short-id>` branch anyone could
+otherwise present a PR that the leg reads as its own prior fix — which would
+comment that PR's url onto the queue stub, apply the terminal marker, and stand
+the stub's whole family down behind it. Both the selector's dedup and the
+finalize reconcile step require `isCrossRepository: false` **and** a matching
+head-repository owner, and both read a page rather than a single row so a spoof
+cannot hide a real PR behind it.
 
 The LLM agent runs in a **read-only `agent` job** (contents:read + issues:read,
 no App token) and hands its whole working tree to a separate **trusted

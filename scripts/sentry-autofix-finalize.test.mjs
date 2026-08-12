@@ -506,6 +506,102 @@ await test("run record body coerces missing/bad counters and labels safely", () 
   assert(body.includes("Candidates selected: 0"), "bad candidate count -> 0");
   assert(body.includes("Fix PRs opened: 0"), "negative opened -> 0");
   assert(body.includes("Refused (no PR): 0"), "missing refused -> 0");
+  assert(body.includes("Deferred (duplicate_of family): 0"), "missing -> 0");
+});
+
+await test("run record distinguishes a family-SUPPRESSED queue from an empty one", () => {
+  // Deferral writes nothing to the queue, so this line is the only durable
+  // trace. Without it, a run that stood its entire window down behind one
+  // refused sibling rendered byte-identically to "nothing was queued" — a
+  // permanently starved leg reading as a healthy idle one, which inverts the
+  // ADR 0036 observability invariant this record exists to serve.
+  const idle = buildAutofixRunRecordBody({
+    timestampIso: "2026-07-19T08:30:00Z",
+    trigger: "schedule",
+    disposition: "active",
+    candidates: 0,
+    opened: 0,
+    refused: 0,
+    incomplete: 0,
+    deferred: 0,
+  });
+  const starved = buildAutofixRunRecordBody({
+    timestampIso: "2026-07-19T08:30:00Z",
+    trigger: "schedule",
+    disposition: "active",
+    candidates: 0,
+    opened: 0,
+    refused: 0,
+    incomplete: 0,
+    deferred: 4,
+    deferredIssues: "1313 1316 1326 1328",
+  });
+  assert(
+    idle !== starved,
+    "an all-deferred run must not render as an idle one",
+  );
+  assert(
+    starved.includes(
+      "Deferred (duplicate_of family): 4 (#1313, #1316, #1326, #1328)",
+    ),
+    `deferred line names the issues, got: ${starved}`,
+  );
+  // The numbers are the operator's input to the single-issue dispatch override,
+  // so an absent list must not fabricate one.
+  assert(
+    idle.includes("Deferred (duplicate_of family): 0\n") ||
+      idle.endsWith("Deferred (duplicate_of family): 0"),
+    "no issue list when nothing was deferred",
+  );
+});
+
+await test("run record deferred-issue list is whitelist-parsed, not escaped", () => {
+  // The list reaches this line because agent-authored `duplicate_of` text
+  // triggered a deferral, and it lands on a PUBLIC tracker comment. Only bare
+  // positive integers survive — anything else is DROPPED, so no markup, no
+  // mention, and no `::workflow command::` line can be smuggled through.
+  const body = buildAutofixRunRecordBody({
+    timestampIso: "2026-07-19T08:30:00Z",
+    trigger: "schedule",
+    disposition: "active",
+    candidates: 0,
+    opened: 0,
+    refused: 0,
+    incomplete: 0,
+    deferred: 2,
+    deferredIssues: "1313 @everyone <img> 0 -5 1e3 ::error::x [x](y) 1316",
+  });
+  const line = body
+    .split("\n")
+    .find((l) => l.startsWith("- Deferred (duplicate_of family):"));
+  assertEqual(line, "- Deferred (duplicate_of family): 2 (#1313, #1316)");
+});
+
+await test("run record caps the deferred-issue list rather than pasting the whole queue", () => {
+  const many = Array.from({ length: 40 }, (_, i) => String(2000 + i)).join(" ");
+  const body = buildAutofixRunRecordBody({
+    timestampIso: "2026-07-19T08:30:00Z",
+    trigger: "schedule",
+    disposition: "active",
+    candidates: 0,
+    opened: 0,
+    refused: 0,
+    incomplete: 0,
+    deferred: 40,
+    deferredIssues: many,
+  });
+  const line = body
+    .split("\n")
+    .find((l) => l.startsWith("- Deferred (duplicate_of family):"));
+  assertEqual(
+    (line.match(/#\d+/g) ?? []).length,
+    10,
+    "the count is the signal; the list is an affordance",
+  );
+  assert(
+    line.startsWith("- Deferred (duplicate_of family): 40 ("),
+    "count kept",
+  );
 });
 
 // Comments as the raw REST endpoint returns them: pipeline-authored comments
@@ -603,10 +699,17 @@ await test("CLI autofix-comment / branch / label-def / refused-label-def / run-r
     "1",
     "--incomplete",
     "0",
+    "--deferred",
+    "3",
+    "--deferred-issues",
+    "1313 1316 1326",
   ]);
   assert(
     record.includes(AUTOFIX_RUN_RECORD_MARKER) &&
-      record.includes("Fix PRs opened: 1"),
+      record.includes("Fix PRs opened: 1") &&
+      record.includes(
+        "Deferred (duplicate_of family): 3 (#1313, #1316, #1326)",
+      ),
     "CLI run-record assembles",
   );
   const body = captureCli([

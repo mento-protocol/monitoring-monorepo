@@ -35,6 +35,7 @@
  */
 
 import { spawn } from "node:child_process";
+import { writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -47,6 +48,7 @@ import {
   verdictCommentIdFromUrl,
 } from "./sentry-triage-project-core.mjs";
 import {
+  ARCHIVED_LABEL,
   CODE_FIX_VERDICT_LABEL,
   FIX_PR_OPENED_LABEL,
   FIX_REFUSED_LABEL,
@@ -98,6 +100,22 @@ export const DEFAULT_CAP = 2;
 // only a safety ceiling — not the throttle. Oldest-first, so genuinely old
 // candidates are never starved by newer ones.
 const LIST_LIMIT = 200;
+
+// How many window stubs one run may READ. The family union is transitive, so
+// selection can no longer stop at the first `cap` stubs — but "evaluate the
+// whole window" makes the run's `gh` cost scale with LIST_LIMIT (one `issue
+// view` plus one `pr list` each, ~400 sequential subprocesses at the ceiling)
+// inside a `timeout-minutes: 5` job, and family deferral writes nothing, so a
+// collapsed family of K leaves K-1 PERMANENT window residents that are re-read
+// every run. That is monotonic growth driven from outside: every new error
+// fingerprint an unauthenticated dashboard visitor produces can add one.
+//
+// Bound the READ instead of the selection. The window is oldest-first, so this
+// truncates the NEWEST tail — the oldest candidates, the ones `sort:created-asc`
+// exists to protect, are always inside the budget. A truncated family is the
+// same situation MAX_DUPLICATE_LOOKUPS already creates (a member the run cannot
+// see), and it fails toward MORE candidates, never fewer.
+export const MAX_CANDIDATE_EVALUATIONS = 50;
 
 // ---------------------------------------------------------------------------
 // GitHub I/O (via `gh`, mirroring the ingest/digest/project scripts). `runGh`
@@ -162,7 +180,14 @@ async function listCodeFixStubs(runGh, repo) {
     //   - Handled/external markers: `fix-pr-opened` (a PR was opened) and
     //     `fix-refused` (an attempt declined) are terminal until a human clears
     //     them or a regression sheds them; `sentry:projected` marks external
-    //     code-fix stubs whose verdict was projected into the owning repo.
+    //     code-fix stubs whose verdict was projected into the owning repo;
+    //     `sentry:archived` marks a stub whose Sentry issue is archived
+    //     (archived_until_escalating) — spending an autofix run on an issue the
+    //     archive loop deliberately silenced is wrong on its own, and because
+    //     nothing else ever removes it from this window (a regression sheds it
+    //     via REOPEN_SHED_LABELS along with the verdict label, which then makes
+    //     the stub a fresh candidate), an archived stub would otherwise cost a
+    //     full `issue view` on every run forever.
     //   - Owning PROJECT, by title: the `sentry:projected` exclusion alone is
     //     not enough — the projection workflow's documented `skipped-no-token`
     //     path CLOSES external code-fix stubs while KEEPING the verdict label
@@ -175,7 +200,7 @@ async function listCodeFixStubs(runGh, repo) {
     //     `parseProject === LOCAL_SENTRY_PROJECT` check below stays as the
     //     precise gate (this server filter only needs to keep the WINDOW local).
     "--search",
-    `sort:created-asc -label:"${FIX_PR_OPENED_LABEL}" -label:"${FIX_REFUSED_LABEL}" -label:"${PROJECTED_LABEL}" ${LOCAL_SENTRY_PROJECT} in:title`,
+    `sort:created-asc -label:"${FIX_PR_OPENED_LABEL}" -label:"${FIX_REFUSED_LABEL}" -label:"${PROJECTED_LABEL}" -label:"${ARCHIVED_LABEL}" ${LOCAL_SENTRY_PROJECT} in:title`,
     "--json",
     "number,title,labels,createdAt",
     "--limit",
@@ -275,6 +300,38 @@ async function readStub(runGh, repo, number) {
   };
 }
 
+// `gh pr list --head <branch>` matches by branch NAME, and a pull request opened
+// from a FORK carries its own head branch name — so `--head` returns fork PRs
+// too. Verified live against a public repo: `gh pr list -R cli/cli --head
+// feat/uptime-command --state open --json isCrossRepository,headRepositoryOwner`
+// returns `{"isCrossRepository":true,"headRepositoryOwner":{"login":
+// "seanturner83"}}`. This repo is public, queue-stub titles are public, and
+// `autofixBranchName` is deterministic, so ANY GitHub user can fork it, push
+// `sentry-autofix/<short-id-lower>`, and open a PR at main. Without this fence
+// that PR is read as OUR prior fix PR: the stub routes to the reconcile path,
+// which comments the attacker's PR url onto the queue issue and applies
+// `sentry:fix-pr-opened` — terminal until a human clears it — and the family
+// collapse then stands the whole duplicate family down behind it.
+//
+// The head branch is one-to-one with the SHORT-ID only WITHIN this repo, so
+// ownership has to be asserted, not assumed. Both signals must affirm it.
+const HEAD_OWNERSHIP_FIELDS = "number,isCrossRepository,headRepositoryOwner";
+
+/** True when `pr` is a same-repo PR of `repo` — i.e. one this pipeline could
+ * have opened. Fails CLOSED: a missing or unexpected field is "not ours", which
+ * costs at most a re-attempt on a branch that already has our PR (`gh pr create`
+ * refuses a second one) and never hands an outsider the reconcile write path. */
+export function isOwnHeadPr(pr, repo) {
+  const owner = String(repo ?? "")
+    .split("/")[0]
+    .toLowerCase();
+  if (!owner) return false;
+  return (
+    pr?.isCrossRepository === false &&
+    String(pr?.headRepositoryOwner?.login ?? "").toLowerCase() === owner
+  );
+}
+
 /** True when an OPEN autofix PR already exists for this SHORT-ID — the autofix
  * leg must never open a second fix PR for a Sentry issue that already has one.
  * Matched by the DETERMINISTIC head branch (`sentry-autofix/<short-id-lower>`),
@@ -282,12 +339,15 @@ async function readStub(runGh, repo, number) {
  * whose body/title merely mentions the id (a human PR, a dependency bump, an
  * unrelated fix that cites the Sentry issue), which would both falsely dedup an
  * eligible stub out of selection AND — via the reconcile path — mislabel the
- * stub `sentry:fix-pr-opened` pointing at that unrelated PR. The head branch is
- * in our own namespace and one-to-one with the SHORT-ID, so a `--head` match is
- * exact and cannot be spoofed by PR prose. `--state open` only: a merged/closed
- * PR is not a live dedup (a regressed, re-triaged issue must be re-attemptable).
- * The branch name is derived from the shape-validated SHORT-ID and transits
- * `gh` as an argv element, so it can't inject. */
+ * stub `sentry:fix-pr-opened` pointing at that unrelated PR. `--state open`
+ * only: a merged/closed PR is not a live dedup (a regressed, re-triaged issue
+ * must be re-attemptable). The branch name is derived from the shape-validated
+ * SHORT-ID and transits `gh` as an argv element, so it can't inject.
+ *
+ * NOT `--limit 1`: fork PRs share the branch-name namespace (see above), so a
+ * single-row window can be filled by a spoof and hide our own PR behind it —
+ * which would make the leg try to open a second one. Take a small page and let
+ * `isOwnHeadPr` pick ours out of it. */
 async function openAutofixPrExists(runGh, repo, shortId) {
   const stdout = await runGh([
     "pr",
@@ -299,12 +359,14 @@ async function openAutofixPrExists(runGh, repo, shortId) {
     "--state",
     "open",
     "--json",
-    "number",
+    HEAD_OWNERSHIP_FIELDS,
     "--limit",
-    "1",
+    "20",
   ]);
   const parsed = JSON.parse(stdout);
-  return Array.isArray(parsed) && parsed.length > 0;
+  return (Array.isArray(parsed) ? parsed : []).some((pr) =>
+    isOwnHeadPr(pr, repo),
+  );
 }
 
 /**
@@ -392,7 +454,26 @@ async function evaluateCandidate(runGh, repo, stub) {
   // routes reconcile entries to a no-agent step that (re-)applies the marker +
   // comment against the existing PR, never opening a duplicate and never
   // re-running the agent (which could otherwise mislabel it `fix-refused`).
-  if (await openAutofixPrExists(runGh, repo, shortId)) {
+  //
+  // Fail-SOFT, exactly like the `readStub` read above. This call is issued once
+  // per surviving stub — a whole-window count now, not a capped one — so a
+  // single transient `gh` rejection anywhere in the window used to reject out of
+  // `selectAutofixCandidates`, exit nonzero, and fail the select step under
+  // `set -euo pipefail`. That breaks the invariant the workflow's own header
+  // asserts ("ALWAYS emits a valid JSON array … never a failure"). Skipping the
+  // one stub is the safe direction: no fix is attempted, no reconcile is
+  // claimed, and the next run re-reads it from live state.
+  let hasOpenAutofixPr;
+  try {
+    hasOpenAutofixPr = await openAutofixPrExists(runGh, repo, shortId);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    process.stderr.write(
+      `skip #${stub.number}: could not read open autofix PRs for ${shortId}: ${message}\n`,
+    );
+    return null;
+  }
+  if (hasOpenAutofixPr) {
     process.stderr.write(
       `reconcile #${stub.number}: an open autofix PR exists for ${shortId} but the stub lacks its marker; routing to no-agent reconciliation.\n`,
     );
@@ -455,19 +536,32 @@ const DEFER_NOTES = {
 };
 
 /**
- * Select queue stubs to attempt a scoped fix PR for. Batch mode (default):
- * up to `cap` oldest `sentry:verdict-code-fix` stubs owned by this repo, ONE
- * per `duplicate_of` family (issue #1784). Single mode (`options.issue`):
- * evaluate only that issue (the single-issue `workflow_dispatch` live run)
- * through the SAME filters — so a dispatch can never fix an ineligible issue,
- * but an eligible one opens a real PR. Returns `[{ issue, shortId }]`.
+ * Run the selection and report BOTH halves of its outcome: the matrix entries,
+ * and every candidate the family collapse stood down.
+ *
+ * The deferred half exists because deferral writes nothing — no label, no
+ * comment, no marker — so before this the only trace was a stderr line inside a
+ * workflow log. A run that deferred its entire window (the exact state a refused
+ * sibling produces) rendered on the tracker as `State: active, Candidates
+ * selected: 0`, byte-identical to "the queue is empty". That defeats the ADR
+ * 0036 observability invariant the record job serves — a permanently
+ * family-starved queue read as a healthy idle leg, which is the #1758
+ * misdiagnosis this whole leg exists to make impossible — and it left the
+ * documented remedy (single-issue `workflow_dispatch`) unusable, because nobody
+ * could tell which issue to name. Both fields go into the run record.
+ *
+ * Batch mode (default): up to `cap` oldest `sentry:verdict-code-fix` stubs owned
+ * by this repo, ONE per `duplicate_of` family (issue #1784). Single mode
+ * (`options.issue`): evaluate only that issue (the single-issue
+ * `workflow_dispatch` live run) through the SAME filters — so a dispatch can
+ * never fix an ineligible issue, but an eligible one opens a real PR.
  *
  * Family collapse is deliberately BATCH-ONLY. A dispatch names one issue
  * explicitly, and an operator who names a family member after reviewing the
  * refusal is overriding the heuristic on purpose — a `duplicate_of` entry is a
  * family SIGNAL, not a confirmed duplicate, so the explicit request wins.
  */
-export async function selectAutofixCandidates(options, deps = {}) {
+export async function selectAutofixRun(options, deps = {}) {
   const runGh = deps.runGh ?? defaultRunGh;
   const repo = options.repo ?? DEFAULT_REPO;
 
@@ -479,7 +573,7 @@ export async function selectAutofixCandidates(options, deps = {}) {
       title: stub.title,
       labels: stub.labels,
     });
-    return candidate ? [candidate.entry] : [];
+    return { entries: candidate ? [candidate.entry] : [], deferred: [] };
   }
 
   const cap =
@@ -488,14 +582,21 @@ export async function selectAutofixCandidates(options, deps = {}) {
       : DEFAULT_CAP;
   const stubs = await listCodeFixStubs(runGh, repo);
 
-  // Evaluate the WHOLE window before choosing, not just the first `cap`: the
-  // family union is transitive, so a stub further down the window can join two
-  // earlier ones (or attach to a family through an id that is not itself a
-  // candidate), and a decision taken before that stub is read can be wrong.
-  // The window is already narrowed server-side to unhandled, local, code-fix
-  // stubs and hard-capped at LIST_LIMIT, so this is a bounded number of reads.
+  // Evaluate the window before choosing, not just the first `cap`: the family
+  // union is transitive, so a stub further down the window can join two earlier
+  // ones (or attach to a family through an id that is not itself a candidate),
+  // and a decision taken before that stub is read can be wrong. Bounded by
+  // MAX_CANDIDATE_EVALUATIONS (oldest-first, so the budget only ever drops the
+  // newest tail) rather than by LIST_LIMIT, so the run's `gh` cost cannot grow
+  // with a window that has no mechanism to shrink.
+  const evaluable = stubs.slice(0, MAX_CANDIDATE_EVALUATIONS);
+  if (stubs.length > evaluable.length) {
+    process.stderr.write(
+      `note: window has ${stubs.length} stubs; evaluating the oldest ${evaluable.length} (MAX_CANDIDATE_EVALUATIONS).\n`,
+    );
+  }
   const candidates = [];
-  for (const stub of stubs) {
+  for (const stub of evaluable) {
     const candidate = await evaluateCandidate(runGh, repo, stub);
     if (candidate) candidates.push(candidate);
   }
@@ -510,24 +611,42 @@ export async function selectAutofixCandidates(options, deps = {}) {
     ? await listHandledShortIds(runGh, repo)
     : [];
 
-  const decisions = collapseDuplicateFamilies(candidates, { handledShortIds });
-  const selected = [];
+  const decisions = collapseDuplicateFamilies(candidates, {
+    handledShortIds,
+    // Family ids are agent-authored free text. Scoping every joiner AND every
+    // blocker to this project is what stops a foreign-project id — or the bare
+    // project slug, which `isValidShortId` accepts — from unioning unrelated
+    // local candidates into one starved family.
+    project: LOCAL_SENTRY_PROJECT,
+  });
+  const entries = [];
+  const deferred = [];
   for (const decision of decisions) {
     const number = decision.candidate.entry.issue;
     if (!decision.selected) {
-      // Deferral writes NOTHING — no label, no comment, no marker. The member
-      // stays exactly as selectable as its live state makes it on the next run,
-      // which is what lets a genuine regression (ingest sheds the sibling's
-      // autofix marker) bring the family straight back.
+      // Deferral writes NOTHING to the queue — no label, no comment, no marker.
+      // The member stays exactly as selectable as its live state makes it on the
+      // next run, which is what lets a genuine regression (ingest sheds the
+      // sibling's autofix marker) bring the family straight back. It IS reported
+      // out, though: the run record carries the count and the issue numbers so
+      // "everything suppressed" never reads as "nothing queued".
       process.stderr.write(
         `defer #${number}: ${DEFER_NOTES[decision.reason]?.(decision) ?? `deferred (${decision.reason})`}; not marked, re-evaluated next run.\n`,
       );
+      deferred.push({ issue: number, reason: decision.reason });
       continue;
     }
-    if (selected.length >= cap) continue;
-    selected.push(decision.candidate.entry);
+    if (entries.length >= cap) continue;
+    entries.push(decision.candidate.entry);
   }
-  return selected;
+  return { entries, deferred };
+}
+
+/** Matrix entries only — the emitted contract, unchanged. `selectAutofixRun`
+ * carries the deferral report the run record needs alongside it. */
+export async function selectAutofixCandidates(options, deps = {}) {
+  const { entries } = await selectAutofixRun(options, deps);
+  return entries;
 }
 
 /**
@@ -573,6 +692,10 @@ Options:
   --issue <n>          Single-issue live run: evaluate ONLY this issue through the
                        same filters (the workflow_dispatch path). Opens a real
                        fix PR if the issue is eligible. Overrides --cap.
+  --deferred-out <p>   Write the duplicate_of DEFERRAL report — a JSON array of
+                       { "issue": <number>, "reason": "<enum>" } — to this path,
+                       so the run record can distinguish an empty queue from one
+                       whose candidates were all stood down. Stdout is unchanged.
   --emit-verdict       With --issue: print the trusted (fence-selected) verdict
                        comment body for that issue and exit (the workflow
                        snapshots it to a file the fix agent reads, so the agent
@@ -587,6 +710,7 @@ export function parseArgs(argv) {
     cap: DEFAULT_CAP,
     issue: null,
     emitVerdict: false,
+    deferredOut: null,
     help: false,
   };
   const args = [...argv];
@@ -620,6 +744,9 @@ export function parseArgs(argv) {
       case "--emit-verdict":
         options.emitVerdict = true;
         break;
+      case "--deferred-out":
+        options.deferredOut = readValue();
+        break;
       case "-h":
       case "--help":
         options.help = true;
@@ -644,8 +771,21 @@ async function main() {
     process.stdout.write(await emitVerdict(options));
     return;
   }
-  const selected = await selectAutofixCandidates(options);
-  process.stdout.write(`${JSON.stringify(selected)}\n`);
+  const { entries, deferred } = await selectAutofixRun(options);
+  // Report BEFORE stdout: the workflow captures stdout into a shell variable, so
+  // a failed report write must not be able to lose the entries too. It is
+  // best-effort — the run record degrades to "0 deferred", never to a dead leg.
+  if (options.deferredOut) {
+    try {
+      writeFileSync(options.deferredOut, `${JSON.stringify(deferred)}\n`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      process.stderr.write(
+        `warn: could not write the deferral report: ${message}\n`,
+      );
+    }
+  }
+  process.stdout.write(`${JSON.stringify(entries)}\n`);
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

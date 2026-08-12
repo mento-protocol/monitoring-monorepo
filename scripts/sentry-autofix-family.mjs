@@ -25,30 +25,50 @@
  *     children joined only through it), so the union runs over ids, not over
  *     candidates.
  *
- *  2. Representative = the stub the others point AT (highest in-degree among
- *     the family's candidates), falling back to the OLDEST candidate — the
- *     caller passes the list oldest-first, so "earliest index" is "oldest".
+ *  2. Representative = the OLDEST candidate in the family. The caller passes the
+ *     list oldest-first, so that is simply the family's earliest index, and it
+ *     is the ONE ordering agent text cannot forge: `createdAt` is GitHub's.
+ *     An earlier revision ranked by in-degree (how many verdicts name an id),
+ *     which is a raw count an attacker sets by creating more Sentry issues that
+ *     name their chosen id — five noise stubs pointing at each other outrank a
+ *     real bug and take the family's run. In-degree also broke the queue's
+ *     oldest-first guarantee outright: decisions come back in INPUT order and
+ *     the caller applies its cap over that order, so a family represented by a
+ *     LATE member occupied that member's slot, and newer independent candidates
+ *     could push the whole family past the cap on every run — permanently
+ *     starving the queue's oldest candidate, which is exactly what
+ *     `sort:created-asc` exists to prevent. Oldest-first restores it by
+ *     construction: the family's decision sits at its oldest member's index.
+ *     Family membership may therefore SUPPRESS a candidate, but never REORDER
+ *     the queue.
  *
- *  3. Deferral is NOT permanent, and writes NOTHING. `duplicate_of` is a
- *     same-culprit/message FAMILY signal, not a confirmed-duplicate assertion
- *     (scripts/sentry-triage-project-core.mjs states this at its definition), so
- *     a deferred member must stay able to reopen when it genuinely regresses.
- *     A deferred member is simply not emitted this run: no label, no comment,
- *     no marker. Its selectability is recomputed from live state on the next
- *     run, and ingest's regression path (REOPEN_SHED_LABELS) sheds the sibling
- *     marker that blocked it — so the family reopens by construction, with no
- *     new machinery and no second re-queue owner.
+ *  3. Deferral writes NOTHING, and lifts when the blocking state does.
+ *     `duplicate_of` is a same-culprit/message FAMILY signal, not a
+ *     confirmed-duplicate assertion (scripts/sentry-triage-project-core.mjs
+ *     states this at its definition), so a deferred member must stay able to
+ *     reopen. A deferred member is simply not emitted this run: no label, no
+ *     comment, no marker. Its selectability is recomputed from live state on the
+ *     next run. What that does NOT mean is "temporary by construction": a
+ *     DEFER_FAMILY_HANDLED block lifts only when the blocking stub's terminal
+ *     marker goes away — ingest's regression path (REOPEN_SHED_LABELS) sheds it
+ *     when that Sentry issue regresses, or a human removes it. A blocker that is
+ *     fixed and stays fixed, or refused and stays quiet, keeps blocking. The
+ *     caller therefore REPORTS every deferral into the run record (PR #1810),
+ *     so a family-starved queue is distinguishable from an idle one and an
+ *     operator can override with a single-issue dispatch.
  *
  * TRUST. `duplicate_of` is agent-authored and therefore untrusted, and this
  * module acts on it. Every effect it can have is SUPPRESSIVE: the worst a
  * hostile or simply wrong list achieves is that a stub does not get an autofix
  * attempt this run. It cannot cause a write, cannot select a stub that failed
- * any other filter, cannot widen the cap, and cannot reach an issue outside the
- * queue — the caller emits nothing but the entries it built before asking. That
- * asymmetry is deliberate: over-collapsing costs a delayed fix an operator can
- * force with a single-issue dispatch, while under-collapsing costs a real run
- * per stub. The ids themselves are shape-validated (`isValidShortId`) at every
- * entry point here, so none can carry a newline into a rendered log line.
+ * any other filter, cannot widen the cap, cannot reorder the queue, and cannot
+ * reach an issue outside the queue — the caller emits nothing but the entries it
+ * built before asking. That asymmetry is deliberate: over-collapsing costs a
+ * delayed fix an operator can force with a single-issue dispatch, while
+ * under-collapsing costs a real run per stub. The ids themselves are
+ * shape-validated (`isValidShortId`) AND project-scoped (`isLocalFamilyId`) at
+ * every entry point here, so none can carry a newline into a rendered log line
+ * and none can join two candidates through a foreign or degenerate id.
  */
 
 import {
@@ -84,19 +104,51 @@ export function familyKey(shortId) {
 }
 
 /**
- * The bounded set of OTHER family ids one candidate declares. Mirrors the
- * projection leg's consumption rule exactly: drop the stub's own SHORT-ID
- * FIRST, then apply the MAX_DUPLICATE_LOOKUPS budget — capping before the
- * self-exclusion would let a self-reference eat the budget and push a real
- * family member past the cap. Shape-invalid entries are dropped (the parser's
- * `sanitizeDuplicateIds` already did this; re-checking here keeps the module
- * safe for any caller).
+ * True when a SHORT-ID belongs to `project` — `<PROJECT-SLUG>-<SUFFIX>`, with a
+ * non-empty suffix.
+ *
+ * `isValidShortId` alone is far too loose to gate family membership. Its pattern
+ * (`^[A-Za-z0-9][A-Za-z0-9._-]*-[A-Za-z0-9]+$`) accepts ANY hyphenated token, so
+ * without this two unrelated local candidates union into one family through:
+ *   - a FOREIGN-project id (`APP-MENTO-ORG-7X`) — and the union is asymmetric,
+ *     because the caller's handled-marker read is already project-filtered, so a
+ *     foreign id can only ever widen a family, never block one; and
+ *   - the bare project SLUG itself (`ANALYTICS-MENTO-ORG`), which validates —
+ *     one degenerate token in six verdicts collapses six independent bugs into
+ *     one family, served one per run, forever.
+ * Neither id can ever be a candidate (the selector only ever evaluates stubs of
+ * THIS project), so their only possible role is as a joiner between real
+ * candidates — precisely the over-collapse this refuses. Scoping loses nothing
+ * real and makes both inert.
  */
-export function declaredFamilyIds(shortId, duplicateOf) {
+export function isLocalFamilyId(id, project) {
+  if (!isValidShortId(id)) return false;
+  const slug = familyKey(project);
+  if (!slug) return false;
+  const prefix = `${slug}-`;
+  const key = familyKey(id);
+  return key.length > prefix.length && key.startsWith(prefix);
+}
+
+/**
+ * The bounded set of OTHER family ids one candidate declares, restricted to
+ * `project`. Mirrors the projection leg's consumption rule exactly: drop the
+ * stub's own SHORT-ID FIRST, then apply the MAX_DUPLICATE_LOOKUPS budget —
+ * capping before the self-exclusion would let a self-reference eat the budget
+ * and push a real family member past the cap. Off-project and shape-invalid
+ * entries are dropped BEFORE the budget too, so a list padded with foreign ids
+ * cannot starve a real sibling out of it.
+ *
+ * `project` is REQUIRED. An absent or unusable one yields NO links at all, which
+ * fails toward more candidates (each still capped by the run's `--cap`) — the
+ * same safe direction MAX_FAMILY_MEMBERS takes, because over-collapsing silently
+ * starves the queue while under-collapsing costs at most one run.
+ */
+export function declaredFamilyIds(shortId, duplicateOf, project) {
   const self = familyKey(shortId);
   const out = new Set();
   for (const raw of Array.isArray(duplicateOf) ? duplicateOf : []) {
-    if (!isValidShortId(raw)) continue;
+    if (!isLocalFamilyId(raw, project)) continue;
     const key = familyKey(raw);
     if (key === self) continue;
     out.add(key);
@@ -159,6 +211,8 @@ function makeUnionFind() {
  * are filtered out of the candidate window by the selector's own query, so
  * without this set a refused representative's four siblings would come back
  * one per run — the exact 5-runs-for-1-cause failure.
+ * `options.project`: the Sentry project every family id must belong to (see
+ * `isLocalFamilyId`). REQUIRED — absent, nothing joins and nothing blocks.
  *
  * Returns one decision per input candidate, IN INPUT ORDER:
  *   `{ candidate, selected, reason, representative }`
@@ -166,23 +220,26 @@ function makeUnionFind() {
  */
 export function collapseDuplicateFamilies(candidates, options = {}) {
   const list = Array.isArray(candidates) ? candidates : [];
+  const project = options.project;
+  // Scoped the same way the joiners are: a blocker is a stub of THIS project by
+  // construction (the caller's marker query filters on it), so an id that fails
+  // the scope check is not a blocker either — one rule, both directions.
   const handled = new Set(
     [...(options.handledShortIds ?? [])]
-      .filter((id) => isValidShortId(id))
+      .filter((id) => isLocalFamilyId(id, project))
       .map(familyKey),
   );
 
   const uf = makeUnionFind();
-  const inDegree = new Map();
   for (const candidate of list) {
     const key = familyKey(candidate.shortId);
     uf.add(key);
     for (const dup of declaredFamilyIds(
       candidate.shortId,
       candidate.duplicateOf,
+      project,
     )) {
       uf.union(key, dup);
-      inDegree.set(dup, (inDegree.get(dup) ?? 0) + 1);
     }
   }
 
@@ -234,17 +291,13 @@ export function collapseDuplicateFamilies(candidates, options = {}) {
       }
       continue;
     }
-    // Representative: highest in-degree (the stub the others point AT), ties
-    // broken by input order — which is oldest-first.
-    let representative = members[0];
-    let best = inDegree.get(familyKey(representative.shortId)) ?? 0;
-    for (const candidate of members.slice(1)) {
-      const degree = inDegree.get(familyKey(candidate.shortId)) ?? 0;
-      if (degree > best) {
-        best = degree;
-        representative = candidate;
-      }
-    }
+    // Representative: the family's OLDEST candidate — its earliest input index,
+    // because the caller passes the window oldest-first. Deliberately NOT a
+    // ranking over the agent-authored graph: `createdAt` is the one ordering
+    // untrusted text cannot set, and keeping the representative at the family's
+    // earliest index is what preserves the caller's oldest-first cap (property 2
+    // in this module's header).
+    const representative = members[0];
     for (const candidate of members) {
       decisions.set(
         candidate,
