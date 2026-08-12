@@ -69,7 +69,7 @@
     },
     "scripts/sentry-triage-requeue.test.mjs": {
       "reporter": "count-line",
-      "floor": 38,
+      "floor": 40,
       "readsDirs": ["scripts"]
     }
   }

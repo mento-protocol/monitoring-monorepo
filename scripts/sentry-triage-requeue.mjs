@@ -596,8 +596,11 @@ export async function requeueQueueStub(
     if (!verifyEndState) throw err;
     // Must NOT propagate past the end-state verification below — that is exactly
     // what let a throw skip the guard. Record it and keep going; the verifier
-    // re-adds `sentry:needs-triage` itself, so the stub still becomes selectable,
-    // and any unshed marker surfaces as a RED run afterwards.
+    // re-adds `sentry:needs-triage` itself, so the stub still becomes selectable.
+    //
+    // NOTE the sequencing hazard this creates, handled after the verification
+    // below: the two writes share one try, so an ADD that reports failure jumps
+    // past the SHED entirely — it is never attempted, not merely failed.
     labelError = err instanceof Error ? err.message : String(err);
     process.stderr.write(
       `::notice::Re-queue label edit on #${issueNumber} reported a failure (${labelError}); the end-state verification below still runs.\n`,
@@ -648,6 +651,50 @@ export async function requeueQueueStub(
   }
 
   if (verifyEndState) {
+    // RE-ATTEMPT THE SHED against observed state, once, before judging.
+    //
+    // The add and the shed share one try, so an add that REPORTS failure jumps
+    // past the shed: it is never attempted, not merely failed. The verification
+    // above then restores selectability by re-adding the label — right for the
+    // queue, and the wrong place to stop, because it turns the failure into the
+    // worst of the available end states. Stranded-and-loud is inert: nothing
+    // selects the stub, so nothing acts on its stale markers. Selectable-and-loud
+    // is RUNNABLE: the next round picks up a stub still wearing
+    // `sentry:approved-archive` — a human approval this re-queue was supposed to
+    // consume, which a later archive dispatch would spend again — plus autofix
+    // markers that suppress the next fix attempt and verdict labels that
+    // misclassify it downstream.
+    //
+    // So shed from what was actually OBSERVED, then re-observe and judge that.
+    // Bounded at one extra attempt, like every other retry here, and the check
+    // below still THROWS on anything that survives — the transient case
+    // self-heals, the persistent one stays loud.
+    const staleAfterVerify = REOPEN_SHED_LABELS.filter((name) =>
+      verified.labels.includes(name),
+    );
+    if (staleAfterVerify.length) {
+      try {
+        process.stderr.write(
+          `::notice::Stale markers still on #${issueNumber} after selectability was restored (${staleAfterVerify.join(", ")}); re-attempting the shed.\n`,
+        );
+        await writeGh(buildRequeueShedLabelArgs(issueNumber, repo));
+        // Re-read rather than assume: this write can lose its response too. Merge
+        // so a reader that serves no comments cannot erase the ones the fence
+        // check below judges.
+        verified = { ...verified, ...(await readStub(issueNumber)) };
+      } catch (err) {
+        // Keep going to the check below — it is the thing that decides, and it
+        // must run even when this retry fails.
+        const retryError = err instanceof Error ? err.message : String(err);
+        labelError = labelError
+          ? `${labelError}; shed retry: ${retryError}`
+          : `shed retry: ${retryError}`;
+        process.stderr.write(
+          `::notice::Shed retry on #${issueNumber} reported a failure (${retryError}); the end-state verification below still decides.\n`,
+        );
+      }
+    }
+
     // Judge the fence and the shed from the SAME verification read, for the same
     // reason: a write can land and lose its response, so its return proves
     // nothing in either direction. The stub is selectable by now — the invariant

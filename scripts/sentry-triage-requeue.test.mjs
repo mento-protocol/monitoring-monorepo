@@ -675,6 +675,115 @@ await test("verify-end-state fails RED on a marker the shed left behind", async 
   );
 });
 
+await test("a reported add failure still gets the markers shed once selectability is back", async () => {
+  // THE SEQUENCING HAZARD. The add and the shed share one try, so an add that
+  // REPORTS failure jumps past the shed — never attempted, not merely failed.
+  // `ensureSelectableForTriage` then re-adds the label and the stub is
+  // SELECTABLE again, which is the worst place to stop: a stranded stub is
+  // inert, but a selectable one still wearing `sentry:approved-archive` hands
+  // the next archive dispatch a human approval this re-queue was meant to
+  // consume, and its autofix markers suppress the next fix attempt.
+  const live = {
+    state: "OPEN",
+    labels: [
+      "sentry-triage",
+      "sentry:verdict-upstream",
+      "sentry:projected",
+      "sentry:approved-archive",
+      "sentry:fix-pr-opened",
+    ],
+    comments: [],
+  };
+  let addAttempts = 0;
+  const w = makeWriter({
+    failOn: (args) => {
+      // Only the chokepoint's OWN add reports failure; the verifier's retry
+      // succeeds. That is the transient case this must self-heal.
+      if (args.includes("--add-label")) {
+        addAttempts += 1;
+        return addAttempts === 1 ? "gh issue edit: 502" : null;
+      }
+      return null;
+    },
+  });
+  const writeGh = async (args) => {
+    const out = await w.writeGh(args);
+    if (args.includes("--add-label"))
+      for (const n of args[args.indexOf("--add-label") + 1].split(","))
+        if (!live.labels.includes(n)) live.labels.push(n);
+    if (args.includes("--remove-label")) {
+      const rm = new Set(args[args.indexOf("--remove-label") + 1].split(","));
+      live.labels = live.labels.filter((n) => !rm.has(n));
+    }
+    return out;
+  };
+
+  // No throw: the retry healed it, so the run is honest about being fine.
+  await requeueQueueStub(
+    { writeGh, readStub: async () => live },
+    {
+      repo: REPO,
+      issueNumber: 42,
+      cause: REQUEUE_CAUSE_BOOKKEEPING,
+      note: buildStrandedRecoveryComment(),
+      onFailure: REQUEUE_ON_FAILURE_VERIFY_END_STATE,
+      fallbackState: "OPEN",
+    },
+  );
+
+  assert(
+    w.calls.some((args) => args.includes("--remove-label")),
+    "the skipped shed must be re-attempted after selectability is restored",
+  );
+  assertDeepEqual(live.labels, ["sentry-triage", NEEDS_TRIAGE_LABEL]);
+  assert(
+    !live.labels.includes("sentry:approved-archive"),
+    "a consumed archive approval must never survive onto a selectable stub",
+  );
+});
+
+await test("a shed that never lands still fails RED rather than healing on paper", async () => {
+  // The retry is BOUNDED and the check still decides. A stub whose markers
+  // genuinely survive must stay loud — self-healing the transient case must not
+  // become quietly tolerating the persistent one.
+  const live = {
+    state: "OPEN",
+    labels: ["sentry-triage", NEEDS_TRIAGE_LABEL, "sentry:approved-archive"],
+    comments: [],
+  };
+  const w = makeWriter({
+    failOn: (args) =>
+      args.includes("--remove-label") ? "gh issue edit: 500" : null,
+  });
+  await assertRejects(
+    requeueQueueStub(
+      { writeGh: w.writeGh, readStub: async () => live },
+      {
+        repo: REPO,
+        issueNumber: 42,
+        cause: REQUEUE_CAUSE_BOOKKEEPING,
+        note: buildStrandedRecoveryComment(),
+        onFailure: REQUEUE_ON_FAILURE_VERIFY_END_STATE,
+        fallbackState: "OPEN",
+      },
+    ),
+    /these stale markers survived: sentry:approved-archive/,
+  );
+  const shedAttempts = w.calls.filter((args) =>
+    args.includes("--remove-label"),
+  ).length;
+  assert(
+    shedAttempts >= 1 && shedAttempts <= 2,
+    `the shed retry must be bounded, saw ${shedAttempts} attempts`,
+  );
+  // The note is intent-worded, so a stub left carrying markers is not sitting
+  // under a comment claiming they were removed.
+  assert(
+    !buildStrandedRecoveryComment().includes("have been shed"),
+    "the note must not attest a shed that did not land",
+  );
+});
+
 // ---------------------------------------------------------------------------
 // The stub BODY is nobody's to rewrite here.
 // ---------------------------------------------------------------------------
