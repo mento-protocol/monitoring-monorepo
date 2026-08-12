@@ -576,8 +576,8 @@ export async function defaultFetchMergedSentryIssues(options) {
   ]);
   // Merged in two passes, not one concatenation: a single call would apply the
   // default cause to both sets and an escalation-only reopen would be audited
-  // as a regression again. Regressed merges first, so an issue returned by BOTH
-  // queries keeps the stronger claim.
+  // as a regression again. Regressed merges first, so an issue in BOTH
+  // reopen candidate sets keeps the stronger claim.
   const withRegressed = mergeSentryIssues(
     newIssues,
     regressedIssues,

@@ -616,7 +616,7 @@ export function buildStaleRetryRefusalComment(shortId, recorded, observed) {
     `baseline this stub recorded (${yamlScalar(recorded ?? "")}). Settling now`,
     "would stamp the newer timestamp as the baseline, and the reopen gate would",
     "then never fire for the event in between — it would be archived and",
-    "invisible to both ingest queries, which only match unresolved issues.",
+    "invisible to every ingest query, which all match only unresolved issues.",
     "",
     "Nothing was changed, and the `sentry:approved-archive` label was removed.",
     "Re-applying it will refuse again — the recorded baseline is still older and",

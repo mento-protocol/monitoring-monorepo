@@ -836,7 +836,7 @@ path, and because settlement consumes the approval before it writes the body, th
 stub cannot yet carry a baseline — so that retry is REFUSED as
 `skipped-unbaselined-retry` rather than recording its own read time. Nothing in
 the dead run's window is absorbed, but nothing is recovered either: the Sentry
-issue stays archived and is invisible to both ingest queries until someone acts.
+issue stays archived and is invisible to every ingest query until someone acts.
 Closing that would take a durable intent record written before the PUT, which is
 not what this change does. The mitigation is operational: a killed archive run
 leaves a red or cancelled run in Actions — un-archive the Sentry issue so ingest
@@ -1109,8 +1109,8 @@ permission or the environment-secret writes 403 (`terraform/providers.tf`).
     **un-archive the Sentry issue**. Leaving the approval off is not enough on
     its own: ingest skips an open stub, the triage agent selects on open stubs
     carrying `sentry:needs-triage` — so a closed one stays invisible however it
-    is labelled — and while the issue stays archived it matches neither ingest
-    query, so nothing re-surfaces it. Un-archiving puts it back in front of the
+    is labelled — and while the issue stays archived it matches no ingest query
+    (all of them are `is:unresolved`), so nothing re-surfaces it. Un-archiving puts it back in front of the
     pipeline,
     after which the next archive records a baseline it can stand behind.
 
