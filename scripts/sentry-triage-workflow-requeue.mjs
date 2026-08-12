@@ -111,11 +111,12 @@ export function buildRequeueNote(reason) {
     );
   }
   return (
-    `Sentry triage is re-queuing this queue stub: ${cause}. Its stale verdict, ` +
-    "projection and autofix markers have been shed and `sentry:needs-triage` " +
-    "restored, so the next scheduled run re-triages it and reconciles whatever " +
-    "the failed step left behind. This note can appear more than once if the " +
-    "re-queue keeps failing."
+    `Sentry triage is re-queuing this queue stub: ${cause}. It is restoring ` +
+    "`sentry:needs-triage` and shedding the stale verdict, projection and " +
+    "autofix markers, so the next scheduled run re-triages it and reconciles " +
+    "whatever the failed step left behind. If any of those writes does not " +
+    "land, the run goes red naming what survived. This note can appear more " +
+    "than once if the re-queue keeps failing."
   );
 }
 

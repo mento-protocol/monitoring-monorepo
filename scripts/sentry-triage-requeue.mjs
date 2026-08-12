@@ -139,10 +139,10 @@ export function buildStrandedRecoveryComment() {
   return (
     "Sentry triage ingest is recovering this queue stub: it was closed while " +
     "still carrying `sentry:needs-triage`, a pairing no pipeline stage can " +
-    "see — the triage selector lists open stubs only. Its stale verdict, " +
-    "projection and autofix markers have been shed, and a reopen follows this " +
-    "note. If that reopen fails the stub stays closed and the next scheduled " +
-    "run retries, so this note can appear more than once."
+    "see — the triage selector lists open stubs only. It is shedding the stale " +
+    "verdict, projection and autofix markers, and a reopen follows this note. " +
+    "If that reopen fails the stub stays closed and the next scheduled run " +
+    "retries, so this note can appear more than once."
   );
 }
 

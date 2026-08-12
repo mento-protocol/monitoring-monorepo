@@ -1067,6 +1067,53 @@ await test("the terminal revalidation FAILS CLOSED: an unreadable stub is never 
   );
 });
 
+await test("every note this chokepoint posts reads as intent, never as a completed write", () => {
+  // Ordering makes this a correctness question, not a style one. The note is
+  // posted AFTER the label edit — whose error is CAUGHT rather than thrown, so
+  // the sequence continues — and BEFORE the end-state verification. A note
+  // attesting that markers "have been shed" and `sentry:needs-triage` was
+  // "restored" can therefore sit on a stub the verifier then reports as still
+  // carrying stale markers, or as stranded. Operator-facing output that asserts
+  // a write which did not land is a wrong attestation, so the wording has to be
+  // true under every outcome — including the one where every write failed.
+  //
+  // The stranded-recovery note is the same shape from ingest's side (its reopen
+  // follows the note), so both are pinned here rather than only the one that
+  // was flagged.
+  const completedClaims = [
+    "have been shed",
+    "has been shed",
+    "were shed",
+    "have been restored",
+    "has been restored",
+    "restored, so",
+  ];
+  const notes = [
+    ...REQUEUE_REASONS.map((reason) => [reason, buildRequeueNote(reason)]),
+    ["stranded-recovery", buildStrandedRecoveryComment()],
+  ];
+  for (const [label, note] of notes) {
+    for (const claim of completedClaims) {
+      assert(
+        !note.includes(claim),
+        `the ${label} note claims a completed write ("${claim}"); phrase it as intent`,
+      );
+    }
+    assert(
+      /\bshedding\b/.test(note),
+      `the ${label} note must describe the shed as in progress`,
+    );
+  }
+  // …and the re-queue notes must say what they are putting back, so intent
+  // wording does not quietly become vagueness.
+  for (const reason of REQUEUE_REASONS) {
+    assert(
+      /\bis restoring\b/.test(buildRequeueNote(reason)),
+      `the ${reason} note must name the needs-triage restoration as intent`,
+    );
+  }
+});
+
 await test("every re-queue reason renders a distinct bookkeeping note; an unknown one refuses", () => {
   // The reason is the ONLY thing a compensating exit declares, so an unnamed one
   // must throw BEFORE any I/O rather than inherit some default shed policy.
