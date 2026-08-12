@@ -1275,7 +1275,12 @@ await test("run record body includes counts and the rolling-comment marker", () 
   assert(body.includes("Fetched: 5"), "missing fetched count");
   assert(body.includes("Created: 2"), "missing created count");
   assert(body.includes("Skipped (existing): 2"), "missing skipped count");
-  assert(body.includes("Reopened (regressed): 1"), "missing reopened count");
+  // Both regressed and escalating land in this counter (#1765); the label must
+  // not tell an operator a reopen was a regression when it was an escalation.
+  assert(
+    body.includes("Reopened (regressed or escalating): 1"),
+    "missing reopened count",
+  );
   assert(
     body.includes("Recovered (stranded needs-triage): 3"),
     "missing recovered count",

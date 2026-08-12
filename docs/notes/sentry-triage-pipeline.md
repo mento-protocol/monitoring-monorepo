@@ -152,8 +152,10 @@ Cases that are not a verdict:
 
 ## Queue contract
 
-Ingest queries unresolved new and regressed issues for the `mento-labs`
-organization. The project set, mapping, pagination, default lookback, and noise
+Ingest queries unresolved issues for the `mento-labs` organization on three
+axes: newly seen, regressed, and **escalating**. The last is separate because
+Sentry's grammar treats `is:regressed` and `is:escalating` as distinct filters
+and the archive leg only ever produces the second (#1765). The project set, mapping, pagination, default lookback, and noise
 heuristics are owned by `scripts/sentry-triage-ingest.mjs`; do not duplicate
 those lists here.
 
@@ -792,7 +794,8 @@ refuses in both directions where it has none:
 Neither path mutates anything; both remove the approval so a bare re-dispatch
 cannot skip the decision, and both write the refusal on the stub. Recovery is to
 un-archive the Sentry issue and let it re-triage — the event is invisible to
-ingest while it stays archived, since both queries match only unresolved issues.
+ingest while it stays archived, since every ingest query matches only unresolved
+issues.
 
 **Queue rollback reconciles; it does not replay.** Every failure from the Sentry
 PUT onward re-reads the stub and corrects only what live state actually shows to
@@ -854,10 +857,11 @@ asymmetry is deliberate. A failed settlement leaves an archive whose premise
 still holds — the human approved it and nothing contradicted that. A freshness
 refusal is the opposite: it is positive evidence that an event landed which the
 approver never saw, so the approval's premise is void. Leaving the archive there
-would bury that event, because an `archived_until_escalating` issue matches
-neither ingest query (both are `is:unresolved`) and a single already-counted
-event does not reliably trip Sentry's escalation forecast. Reverting puts it back
-in front of both.
+would bury that event, because a still-archived issue matches no ingest query
+(all of them are `is:unresolved`) and a single already-counted event does not
+reliably trip Sentry's escalation forecast — so the `is:escalating` query that
+does catch an escalated archive (#1765) never fires either. Reverting puts the
+event back in front of ingest.
 
 **There are two baselines, and they answer different questions.** The live read
 above is what THIS RUN observed, and only this run's own gates may use it: the

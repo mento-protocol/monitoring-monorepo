@@ -383,7 +383,10 @@ export function buildRunRecordBody(counts, timestampIso) {
     `- Fetched: ${counts.fetched}`,
     `- Created: ${counts.created}`,
     `- Skipped (existing): ${counts.skippedExisting}`,
-    `- Reopened (regressed): ${counts.reopened}`,
+    // "regressed or escalating": both reach this counter (#1765), and an
+    // operator reading the record must not conclude a reopen was a
+    // regression when Sentry actually escalated an archived issue.
+    `- Reopened (regressed or escalating): ${counts.reopened}`,
     `- Recovered (stranded needs-triage): ${counts.recovered}`,
     `- Errors: ${counts.errors}`,
   ].join("\n");
