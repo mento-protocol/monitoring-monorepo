@@ -3,7 +3,7 @@ title: Peg monitoring onboarding and re-census
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-10
+last_verified: 2026-08-12
 doc_type: runbook
 scope: metrics-bridge / alerts / ui-dashboard
 review_interval_days: 90
@@ -465,20 +465,26 @@ mutable value before production activation.
   windows at the pinned block and positive-inflow saturation was zero.
 
 This snapshot closes identity, control-address, Safe owner-set and threshold,
-and live-limit discovery only for that dated block. EUROP remains **Blocked**
-until accountable owners supply and approve:
+and live-limit discovery only for that dated block. The later owner decisions
+in [issue #1687](https://github.com/mento-protocol/monitoring-monorepo/issues/1687)
+approve Philip Paetz with Bogdan Dumitru as backup for signer coverage, the
+active `@support-engineer` as the escalation route, `S = 6 hours`, Safe nonce 8
+as execution evidence, and `B = 100,000 EURm`. Philip is the independent
+reviewer. Signer coverage, the escalation route, execution evidence, and
+budget approval expire at `2026-11-09T14:21:33Z`.
 
-- **Signer coverage and end-to-end response SLA:** coverage hours, fallback,
-  holidays, and a worst approved diagnosis-to-finality time.
-- **Escalation owner and maintained route:** a named accountable team or role
-  and the route responders will use.
-- **Execution proof:** a recent drill or transaction showing that four current
-  signers can complete the breaker path inside the approved SLA.
-- **Boundary-aligned drain calculation:** after `S` is approved, refresh the
-  pool, fee, rate, reserve-access, and trading-limit reads, then calculate the
-  exact worst-case quote outflow.
-- **Approved survivable quote-asset loss budget:** treasury/risk must supply
-  `B`; monitoring must not infer it from pool liquidity or trading limits.
+EUROP remains **Blocked** on the following evidence and control gaps:
+
+- **Authenticated complete loss model:** authenticate current on-chain state,
+  contract identities, fork source, and execution, then model every reachable
+  swap, rate change, strategy rebalance, Reserve mint-to-exit path, and LP exit
+  across the protected boundary for the full six-hour response period.
+- **Enforceable loss control:** enforce a rolling six-hour, per-pool net
+  external EURm-outflow ceiling of at most `100,000 EURm` across that full
+  boundary. The current configuration has no such guard.
+- **Boundary-aligned decision:** use the authenticated model to prove
+  `worst_case_net_EURm_outflow <= 100,000 EURm`. TradingLimitsV2 capacity and
+  unattested local-fork output cannot establish this result.
 
 Do not copy the dated market-depth figures from
 [`docs/PLAN-peg-monitoring.md`](../PLAN-peg-monitoring.md) into an approval.
@@ -486,10 +492,11 @@ Repeat the census and attach current evidence.
 
 The current six-hour EUROP operational-admission record is in
 [EUROP operational admission evidence](europ-operational-admission.md). Its
-deterministic evaluator preserves the current **Blocked** decision until a
-fresh same-block input includes the numeric budget, enforceable controls,
-explicit certificate expiries, and a boundary-aligned EURm calculation. Its
-TradingLimitsV2 capacity output alone never proves the loss-budget gate. The
-current evaluator cannot grant readiness: it remains Blocked until an
-executable model authenticates the inputs and executes every sequential
-protected-boundary transition.
+checked-in input records the numeric budget and certificate expiries as
+unattested claims. Its deterministic evaluator preserves the current
+**Blocked** decision because it cannot authenticate those inputs or execute a
+complete boundary-aligned model. TradingLimitsV2 capacity alone never proves
+the loss-budget gate. Admission requires authenticated current state,
+independent execution and fork-source provenance, the enforceable control
+above, and a complete model that executes every sequential protected-boundary
+transition.
