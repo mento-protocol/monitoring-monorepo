@@ -3243,6 +3243,49 @@ await test("a regressed reopen carries no escalation prose", async () => {
   );
 });
 
+await test("adding the escalating pass does not disable regression reopens", async () => {
+  // The regression I shipped and did not catch: the escalating pass feeds pass
+  // one's OUTPUT back in as `newIssues`, and the merge used to force
+  // `isRegressed: false` for that argument. A regressed-only issue therefore
+  // came out of the fetch with its flag wiped, `decideDedupAction` answered
+  // "closed, not regressed", and every regression reopen silently stopped —
+  // while all the escalation tests kept passing.
+  const regressedOnly = {
+    id: "700",
+    shortId: "GOV-700",
+    title: "boom",
+    project: { slug: "governance-mento-org" },
+    lastSeen: "2026-08-12T10:00:00Z",
+  };
+  const { fetchImpl } = sentryFetchStub({
+    [REGRESSED_ISSUES_QUERY]: [regressedOnly],
+  });
+  const merged = await defaultFetchMergedSentryIssues({
+    org: "mento-labs",
+    sentryBaseUrl: "https://us.sentry.io",
+    sentryToken: "t",
+    lookbackDays: 8,
+    fetchImpl,
+  });
+
+  const entry = merged.get("700");
+  assert(entry, "the regressed issue must survive the escalating pass");
+  assertEqual(entry.isRegressed, true);
+  assertEqual(entry.reopenCause, REGRESSED_REOPEN_CAUSE);
+
+  // And it must still reach the reopen it always did.
+  const decision = decideDedupAction({
+    existingIssue: {
+      state: "CLOSED",
+      closedAt: "2026-08-10T12:00:00Z",
+      labels: [],
+    },
+    isRegressed: entry.isRegressed,
+    lastSeen: entry.lastSeen,
+  });
+  assertEqual(decision.action, "reopen");
+});
+
 if (failed > 0) {
   process.stderr.write(`${failed} failed, ${passed} passed\n`);
   process.exitCode = 1;

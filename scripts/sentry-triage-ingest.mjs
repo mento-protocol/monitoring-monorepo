@@ -470,7 +470,13 @@ export function mergeSentryIssues(
 ) {
   const byId = new Map();
   for (const issue of newIssues ?? []) {
-    byId.set(issue.id, { ...issue, isRegressed: false });
+    // PRESERVE an already-set flag rather than forcing false. The escalating
+    // pass feeds this function pass one's OUTPUT as `newIssues`, so forcing
+    // false here wiped `isRegressed` from every regressed-only issue and
+    // silently disabled the regression reopen path entirely — a worse failure
+    // than the escalation gap this all exists to close. A raw Sentry payload
+    // never carries the field, so this is a no-op on the first pass.
+    byId.set(issue.id, { ...issue, isRegressed: issue.isRegressed === true });
   }
   for (const issue of reopenCandidates ?? []) {
     const existing = byId.get(issue.id);
