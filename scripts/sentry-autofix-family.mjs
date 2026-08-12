@@ -23,7 +23,12 @@
  *     itself a candidate still CONNECTS (`2E` may already carry a terminal
  *     marker and be filtered out of the window entirely, leaving its four
  *     children joined only through it), so the union runs over ids, not over
- *     candidates.
+ *     candidates. For the same reason a candidate the CALLER has already ruled
+ *     out (`eligible: false` — e.g. a `fix_scope: architectural` verdict, issue
+ *     #1785) is still passed in and still contributes its ids: dropping it
+ *     would DELETE its edges, and a family whose only edge-carrier was ruled
+ *     out silently fans back out into one agent run per member. It contributes
+ *     edges and nothing else — never selected, never counted as a deferral.
  *
  *  2. Representative = the OLDEST candidate in the family. The caller passes the
  *     list oldest-first, so that is simply the family's earliest index, and it
@@ -204,8 +209,11 @@ function makeUnionFind() {
  * Collapse an oldest-first candidate list to one selectable candidate per
  * duplicate family.
  *
- * `candidates`: `[{ shortId, duplicateOf, reconcile }]` — whatever else the
- * caller carries on each record is passed straight back untouched.
+ * `candidates`: `[{ shortId, duplicateOf, reconcile, eligible }]` — whatever
+ * else the caller carries on each record is passed straight back untouched.
+ * `eligible: false` marks a record the caller already ruled out: it joins the
+ * union (so its `duplicate_of` edges survive) but is never grouped, selected or
+ * deferred. Anything else, including an absent `eligible`, is a live candidate.
  * `options.handledShortIds`: SHORT-IDs of stubs that already carry a terminal
  * autofix marker (`sentry:fix-pr-opened` / `sentry:fix-refused`). Those stubs
  * are filtered out of the candidate window by the selector's own query, so
@@ -259,7 +267,7 @@ export function collapseDuplicateFamilies(candidates, options = {}) {
   // order within each family.
   const families = new Map();
   for (const candidate of list) {
-    if (candidate.reconcile) continue;
+    if (candidate.reconcile || candidate.eligible === false) continue;
     const root = uf.find(familyKey(candidate.shortId));
     if (!families.has(root)) families.set(root, []);
     families.get(root).push(candidate);
@@ -309,6 +317,20 @@ export function collapseDuplicateFamilies(candidates, options = {}) {
               representative: representative.shortId,
             },
       );
+    }
+  }
+
+  // An ineligible record contributed its edges above and stops there. Decide it
+  // EXPLICITLY: the fallback below selects, so leaving it undecided would emit
+  // exactly the candidate the caller ruled out. `reason` stays null — the reason
+  // is the caller's (this module only owns family reasons), and it reports it.
+  for (const candidate of list) {
+    if (candidate.eligible === false) {
+      decisions.set(candidate, {
+        selected: false,
+        reason: null,
+        representative: null,
+      });
     }
   }
 

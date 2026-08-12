@@ -178,6 +178,45 @@ export function stripTrailingYamlComment(text) {
   return s;
 }
 
+/**
+ * Collect a yaml BLOCK SCALAR (`key: |` / `key: >`), returning `{ text, next }`
+ * where `next` is the index of the first line that is NOT part of it. A value on
+ * the same line is not a block indicator and comes back as a plain,
+ * quote-stripped scalar.
+ *
+ * It terminates at the first line that does not start with whitespace — plain
+ * yaml, and the reason a caller must treat a REPEATED key as hostile rather than
+ * as an overwrite: the block content here is agent-transcribed Sentry text, so a
+ * column-0 line inside it ends the scalar and is handed straight back to the
+ * caller's key loop (`parseVerdictYaml` fails `fix_scope` closed on a repeat for
+ * exactly this reason).
+ */
+export function collectBlockScalar(lines, start, rest) {
+  const trimmed = rest.trim();
+  if (!/^[|>][+-]?$/.test(trimmed)) {
+    // Inline scalar on the same line, not a block indicator.
+    return { text: stripYamlQuotes(trimmed), next: start + 1 };
+  }
+  const collected = [];
+  let j = start + 1;
+  for (; j < lines.length; j += 1) {
+    const line = lines[j];
+    if (line.trim() === "") {
+      collected.push("");
+      continue;
+    }
+    if (/^\s/.test(line)) {
+      collected.push(line.replace(/^[ \t]+/, ""));
+      continue;
+    }
+    break;
+  }
+  while (collected.length && collected[collected.length - 1] === "") {
+    collected.pop();
+  }
+  return { text: collected.join("\n"), next: j };
+}
+
 // `fix_scope` splits what `code-fix` used to conflate (issue #1785): the
 // verdict answers "is the cause in OUR code?", this field answers "does a
 // SCOPED fix exist?". They diverged on the only real data we have — all five
@@ -200,7 +239,8 @@ export const VALID_FIX_SCOPES = [FIX_SCOPE_MECHANICAL, FIX_SCOPE_ARCHITECTURAL];
  * starts producing the field.
  *
  * This is the ONE place the default lives; `parseVerdictYaml` calls it once, so
- * no consumer can re-derive a different fallback.
+ * no consumer can re-derive a different fallback — including for the REPEATED
+ * key, which that caller routes here as `""` rather than resolving itself.
  */
 export function normalizeFixScope(value) {
   // Strings only, deliberately no `String(value)` coercion: `["mechanical"]`

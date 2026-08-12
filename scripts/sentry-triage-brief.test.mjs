@@ -1878,6 +1878,56 @@ await test("the triage prompt documents the rest of the verdict contract", () =>
     /name the files/i.test(prompt) && /design discussion/i.test(prompt),
     "expected the prompt to define fix_scope by the discriminating question (name the files / reviewable without a design discussion), not by adjectives",
   );
+
+  // Naming the field is not enough to make the agent EMIT it, and the two
+  // clauses that do are both one edit away from vanishing. Verified by mutation:
+  // softening "REQUIRED whenever `verdict: code-fix`" to "optional on a
+  // `code-fix` verdict" AND dropping fix_scope from the posting sentence's key
+  // list left every suite green — the agent then omits the field, every verdict
+  // fails closed, and autofix selects nothing while CI stays quiet.
+  assert(
+    /REQUIRED[^.]{0,80}`?verdict: code-fix`?/i.test(
+      flatten(prompt).slice(flatten(prompt).indexOf("fix_scope")),
+    ),
+    "expected the prompt to mark `fix_scope` REQUIRED for a code-fix verdict — an optional field is one the agent omits under turn pressure, and an omitted one fails closed",
+  );
+  const postingSentence = flatten(prompt)
+    .split(/(?<=\.)\s/)
+    .find((s) => /post EXACTLY ONE comment/i.test(s));
+  assert(
+    postingSentence != null && /fix_scope/.test(postingSentence),
+    "expected the `post EXACTLY ONE comment` contract sentence to enumerate fix_scope — that list is what the agent copies when it composes the yaml block",
+  );
+});
+
+// Wrap-aware: this file's claims wrap mid-sentence in the prompt and the doc,
+// and a line-based match silently passes on a stale one that crossed a break.
+function flatten(text) {
+  return String(text).replace(/\s+/g, " ");
+}
+
+await test("the contract document pins the safe default and normalizeFixScope's owner", () => {
+  // A template exists to be copied and edited field by field, and a field the
+  // agent did not deliberate on keeps whatever the template said. `fix_scope` is
+  // the one contract field whose two values are asymmetric — one of them is the
+  // only token that unlocks an automated code-writing run — so the sample value
+  // must not be the permissive one.
+  const doc = flatten(readRepoFile("docs/notes/sentry-triage-pipeline.md"));
+  assert(
+    !/fix_scope: mechanical #/.test(doc),
+    "the verdict template must not pre-fill `fix_scope: mechanical` — a copied-but-unedited field would ship the permissive value on an architectural root cause",
+  );
+  assert(
+    /fix_scope: <mechanical \| architectural>/.test(doc),
+    "expected the verdict template to render fix_scope as a placeholder",
+  );
+  // The doc is canonical context for future sessions, and the fail-closed
+  // default is exactly what a future change must not re-derive — so it has to
+  // point at the module that OWNS it, not the one re-exporting the name.
+  assert(
+    /normalizeFixScope[^.]{0,120}sentry-triage-text\.mjs/.test(doc),
+    "expected the doc to name scripts/sentry-triage-text.mjs as normalizeFixScope's home",
+  );
 });
 
 if (failed > 0) {

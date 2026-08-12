@@ -90,6 +90,11 @@ function verdictComment({
   hypotheses = null,
   investigated = null,
   escalationReason = null,
+  // Defaults mirror the pre-#1785 shape every stored verdict has: this repo as
+  // the owning repo, and NO `fix_scope` line — which fails closed to
+  // `architectural`.
+  affectedRepo = "mento-protocol/monitoring-monorepo",
+  fixScope = null,
 } = {}) {
   const lines = [
     VERDICT_MARKER,
@@ -97,8 +102,9 @@ function verdictComment({
     "```yaml",
     `verdict: ${verdict} # code-fix | config-fix | upstream-transient | needs-human`,
     `confidence: ${confidence} # high | medium | low`,
-    "affected_repo: mento-protocol/monitoring-monorepo",
+    `affected_repo: ${affectedRepo}`,
     `summary: ${summary}`,
+    ...(fixScope == null ? [] : [`fix_scope: ${fixScope}`]),
     "root_cause: |",
     "  Some abstract root cause.",
     "proposed_action: |",
@@ -510,6 +516,123 @@ function issueFixture({
     comments: comments.map((comment) => ({ author: BOT_AUTHOR, ...comment })),
   };
 }
+
+// ---------------------------------------------------------------------------
+// fix_scope on the human surface (issue #1785). The digest and the autofix
+// selector are two consumers of ONE verdict contract; a field that gates the
+// selector must not land there alone and leave this surface asserting the
+// opposite of what happened.
+// ---------------------------------------------------------------------------
+
+await test("classifyIssue carries fix_scope and whether the verdict named THIS repo", () => {
+  const mechanical = classifyIssue(
+    issueFixture({
+      labels: ["sentry-triage", "sentry:verdict-code-fix"],
+      comments: [{ body: verdictComment({ fixScope: "mechanical" }) }],
+    }),
+  );
+  assertEqual(mechanical.fixScope, "mechanical");
+  assertEqual(mechanical.owningRepoIsLocal, true);
+
+  // No `fix_scope` line: the shape every stored verdict has. Fails closed.
+  const legacy = classifyIssue(
+    issueFixture({
+      labels: ["sentry-triage", "sentry:verdict-code-fix"],
+      comments: [{ body: verdictComment({}) }],
+    }),
+  );
+  assertEqual(legacy.fixScope, "architectural");
+
+  // An EXTERNAL owning repo also reads as architectural (the field is
+  // local-only), so the flag is what keeps the two apart.
+  const external = classifyIssue(
+    issueFixture({
+      labels: ["sentry-triage", "sentry:verdict-code-fix"],
+      comments: [
+        { body: verdictComment({ affectedRepo: "mento-protocol/mento-web" }) },
+      ],
+    }),
+  );
+  assertEqual(external.owningRepoIsLocal, false);
+
+  // No verdict comment at all: unreadable, not inferred.
+  const unread = classifyIssue(
+    issueFixture({ labels: ["sentry-triage", "sentry:verdict-code-fix"] }),
+  );
+  assertEqual(unread.fixScope, null);
+  assertEqual(unread.owningRepoIsLocal, false);
+});
+
+await test("the routed section marks a local code-fix autofix will never attempt", () => {
+  // A local code-fix never projects, and an architectural one is never
+  // selected — so without this the last and only statement a human ever sees
+  // about it is a heading claiming it was handed to a team that does not exist.
+  // The stub is CLOSED at verdict time, so nothing lists it again.
+  const payload = buildDigest(
+    [
+      issueFixture({
+        number: 1,
+        shortId: "ANALYTICS-MENTO-ORG-2E",
+        labels: ["sentry:verdict-code-fix"],
+        comments: [{ body: verdictComment({}) }],
+      }),
+    ],
+    { channel: "#engineering" },
+  );
+  const text = allText(payload);
+  assert(text.includes("Routed to owning repo"), "expected the routed section");
+  assert(
+    text.includes("architectural — human backlog"),
+    `expected the architectural note, got: ${text}`,
+  );
+});
+
+await test("the routed section does NOT mark a genuinely routed external code-fix", () => {
+  // `fix_scope` is local-only, so every external code-fix also reads as
+  // `architectural`. Annotating on the scope alone would stamp "human backlog"
+  // on every issue the pipeline really did route — the opposite mistake.
+  const payload = buildDigest(
+    [
+      issueFixture({
+        number: 2,
+        shortId: "APP-MENTO-ORG-7X",
+        labels: ["sentry:verdict-code-fix"],
+        comments: [
+          {
+            body: verdictComment({ affectedRepo: "mento-protocol/mento-web" }),
+          },
+          { body: `${PROJECTED_COMMENT_PREFIX}${PROJECTED_URL}` },
+        ],
+      }),
+    ],
+    { channel: "#engineering" },
+  );
+  const text = allText(payload);
+  assert(text.includes("Routed to owning repo"), "expected the routed section");
+  assert(
+    !text.includes("architectural — human backlog"),
+    `a routed external code-fix must not be marked, got: ${text}`,
+  );
+});
+
+await test("the routed section does NOT mark a local MECHANICAL code-fix", () => {
+  // That one IS autofix-eligible; it just has no fix PR yet.
+  const payload = buildDigest(
+    [
+      issueFixture({
+        number: 3,
+        shortId: "ANALYTICS-MENTO-ORG-2F",
+        labels: ["sentry:verdict-code-fix"],
+        comments: [{ body: verdictComment({ fixScope: "mechanical" }) }],
+      }),
+    ],
+    { channel: "#engineering" },
+  );
+  assert(
+    !allText(payload).includes("architectural — human backlog"),
+    "a mechanical local code-fix must not be marked as human backlog",
+  );
+});
 
 await test("classifyIssue buckets by the verdict label, not the comment text", () => {
   const entry = classifyIssue(

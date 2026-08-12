@@ -294,7 +294,7 @@ root_cause: |
 proposed_action: |
   <one to three redacted lines>
 duplicate_of: [] # Sentry SHORT-IDs only
-fix_scope: mechanical # code-fix only: mechanical | architectural
+fix_scope: <mechanical | architectural> # code-fix only
 ```
 
 A `code-fix` verdict also carries `fix_scope`, because the verdict alone answers
@@ -302,10 +302,18 @@ only "is the cause in our code?" and the autofix leg needs "does a scoped fix
 exist?" (issue #1785). `mechanical` is a bounded edit to files the agent can
 name, reviewable without a design discussion; `architectural` moves a boundary,
 spans modules, or needs the design decision taken first. `normalizeFixScope` in
-`scripts/sentry-triage-project-core.mjs` is the single owner of the rule and
-**fails closed**: absent, empty, or anything outside those two words normalizes
-to `architectural`. Every verdict written before the field existed therefore
-reads as `architectural`, which is intended — autofix selects nothing until the
+`scripts/sentry-triage-text.mjs` (re-exported from
+`scripts/sentry-triage-project-core.mjs`) is the single owner of the rule and
+**fails closed**: absent, empty, anything outside those two words, or a REPEATED
+`fix_scope:` key normalizes to `architectural`. The repeat rule is not
+theoretical: a block scalar ends at the first column-0 line, so agent-transcribed
+Sentry text inside `root_cause` can escape as a `fix_scope:` line, and a
+last-wins parse would let it overwrite the honest value. This is also why the
+template above carries a PLACEHOLDER rather than a sample value — of the
+contract's fields this is the only one whose two values are asymmetric, and a
+field nobody deliberated on keeps whatever the template said. Every verdict
+written before the field existed therefore reads as `architectural`, which is
+intended — autofix selects nothing until the
 prompt produces the field. The asymmetry is deliberate: a missed `mechanical`
 costs one un-attempted fix, while a wrong `mechanical` spends an agent run on a
 refactor it must then refuse, which is the failure the five strategy-probe stubs
@@ -650,7 +658,8 @@ fails so the next `main` run can project it safely.
 ### Local autofix PRs
 
 Autofix considers only local `code-fix` stubs that claim `fix_scope: mechanical`
-and have no existing fix PR,
+and have no existing fix PR, reports every stub it stood down — on either axis —
+into the run record,
 caps each run at two CANDIDATES — not two stubs, see the family collapse
 below — and uses a GitHub App scoped to Contents and Pull
 requests on this repository. The fix agent receives no Sentry credential.
@@ -666,11 +675,44 @@ field, which fails closed — is skipped with a stderr note and left **unmarked*
 no `sentry:fix-refused`, no new label, no comment. A refusal marker is terminal
 until a human clears it and would stand the stub's whole duplicate family down
 behind it, so marking here would turn a correct "this needs a human" into the
-same accumulated-refusal state the field exists to end. The stub keeps
-`sentry:verdict-code-fix` and becomes selectable again the moment a re-triage
-supplies `fix_scope: mechanical`. The gate sits after the reconcile branch:
-reconciliation runs no agent and opens no PR, so a PR that already exists still
-gets its queue bookkeeping repaired even if its verdict's scope changed under it.
+same accumulated-refusal state the field exists to end. The gate sits after the
+reconcile branch: reconciliation runs no agent and opens no PR, so a PR that
+already exists still gets its queue bookkeeping repaired even if its verdict's
+scope changed under it.
+
+Unmarked does NOT mean the stub waits in the queue. A local `code-fix` stub is
+CLOSED the moment its verdict lands (the `verdict` job's close step — a
+verdicted queue issue is a closed ledger entry, not an archive record), so an
+architectural skip leaves a closed issue carrying `sentry:verdict-code-fix`.
+Two surfaces keep it visible, and they are the whole of the human backlog:
+
+- the autofix **run record** on tracker issue #1282 counts it and names it —
+  `- Skipped (fix_scope: architectural): N (#…)`. This is why the skip is
+  reported at all: it writes nothing to the queue, and every verdict predating
+  the field reads as `architectural`, so an unreported skip renders as
+  `Candidates selected: 0, Deferred: 0` — byte-identical to an empty queue, and
+  indistinguishable from "the prompt change never shipped" or "the parse broke".
+  That is the #1758 misdiagnosis this leg exists to make impossible.
+- the Slack **digest** marks it in the routed section rather than letting the
+  `📮 Routed to owning repo` heading assert it was handed to a team (a local
+  verdict never projects — nothing was routed anywhere).
+
+**Operator affordance — there is none yet, and that is a known gap.** A
+single-issue `workflow_dispatch` does NOT override the gate: the scope is a claim
+about the fix, not a heuristic about which family member to pick, so overriding
+it would spend exactly the agent run the field exists to prevent. What DOES clear
+an architectural skip is a fresh verdict, and today the only path to one is a
+Sentry regression — ingest reopens the stub and sheds the verdict label
+(`REOPEN_SHED_LABELS`), and the next triage round re-decides it. Re-queueing has
+one owner (`requeueQueueStub` in `scripts/sentry-triage-requeue.mjs`), which is a
+pure chokepoint module with no argv shell, and the one CLI that wraps it
+(`sentry-triage-brief-clear-recovery.mjs`) posts a note describing a
+brief-clear failure — so it is not the generic re-triage button either. A human
+who judges a stub mechanical therefore has to wait for a regression. Issue #1813
+tracks giving the class a real affordance; the same issue covers the other half
+of the problem, which is that a skipped stub never leaves the selector's
+`MAX_CANDIDATE_EVALUATIONS` read window, so a backlog that reaches it starves
+newer candidates.
 
 **One candidate per `duplicate_of` family** (issue #1784). Stubs whose verdicts
 place them in one Sentry issue family consume ONE autofix run between them, not

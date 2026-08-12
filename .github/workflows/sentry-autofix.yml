@@ -95,9 +95,11 @@ jobs:
   # scripts/sentry-autofix-select.mjs (+ tests), not inline. The cap counts
   # CANDIDATES: one duplicate_of family consumes one slot however many stubs it
   # spans (issue #1784). Family collapse DEFERS the rest without writing
-  # anything to the queue, so this job also emits the deferred count and issue
-  # numbers — the record job is the only durable trace of a suppressed queue,
-  # and without it "everything stood down" reads exactly like "nothing queued".
+  # anything to the queue, and the fix_scope gate SKIPS an architectural verdict
+  # without writing anything either (issue #1785), so this job also emits both
+  # stand-down counts and their issue numbers — the record job is the only
+  # durable trace of a suppressed queue, and without them "everything stood
+  # down" reads exactly like "nothing queued".
   # ---------------------------------------------------------------------------
   select:
     runs-on: ubuntu-latest
@@ -123,6 +125,13 @@ jobs:
       # suppressed queue from an empty one — the record job renders both.
       deferred: ${{ steps.select.outputs.deferred }}
       deferred_issues: ${{ steps.select.outputs.deferred_issues }}
+      # How many candidates the fix_scope gate skipped as `architectural`, and
+      # which. Skipping writes nothing to the queue EITHER — deliberately, since
+      # a refusal marker is terminal — so this is that class's only durable
+      # trace. Every verdict predating the field reads as architectural, which
+      # makes an unreported skip indistinguishable from a leg that never shipped.
+      skipped: ${{ steps.select.outputs.skipped }}
+      skipped_issues: ${{ steps.select.outputs.skipped_issues }}
       # Why this run did or did not select anything, for the tracker run record
       # (record-run job): off-main | disabled | unprovisioned | active.
       disposition: ${{ steps.select.outputs.disposition }}
@@ -158,6 +167,13 @@ jobs:
           # read a real 0 rather than an absent file.
           deferred_report="${RUNNER_TEMP}/autofix-deferred.json"
           printf '[]' > "${deferred_report}"
+          # Same for the fix_scope gate. Seeded empty for the same reason, and
+          # written by BOTH selector paths below: unlike family deferral (batch
+          # only), a single-issue dispatch can be skipped on scope too, and the
+          # dispatch is the documented remedy for a stalled leg — a silent
+          # remedy for a silent stall is how #1758 stayed undiagnosed.
+          skipped_report="${RUNNER_TEMP}/autofix-skipped.json"
+          printf '[]' > "${skipped_report}"
           # Why this run did or did not select anything — recorded verbatim on
           # the tracker issue by the record-run job (ADR 0036 observability).
           disposition='active'
@@ -185,7 +201,8 @@ jobs:
             if [[ "${DISPATCH_ISSUE}" =~ ^[0-9]+$ ]]; then
               entries=$(node scripts/sentry-autofix-select.mjs \
                 --repo "${GITHUB_REPOSITORY}" \
-                --issue "${DISPATCH_ISSUE}")
+                --issue "${DISPATCH_ISSUE}" \
+                --skipped-out "${skipped_report}")
             else
               echo "::error::workflow_dispatch input issue_number must be a plain integer"
               exit 1
@@ -196,7 +213,8 @@ jobs:
             entries=$(node scripts/sentry-autofix-select.mjs \
               --repo "${GITHUB_REPOSITORY}" \
               --cap 2 \
-              --deferred-out "${deferred_report}")
+              --deferred-out "${deferred_report}" \
+              --skipped-out "${skipped_report}")
           fi
 
           count=$(printf '%s' "${entries}" | jq 'length')
@@ -206,14 +224,19 @@ jobs:
           deferred=$(jq 'length' "${deferred_report}")
           deferred_issues=$(jq -r '[.[].issue | numbers | floor | tostring] | join(" ")' \
             "${deferred_report}")
+          skipped=$(jq 'length' "${skipped_report}")
+          skipped_issues=$(jq -r '[.[].issue | numbers | floor | tostring] | join(" ")' \
+            "${skipped_report}")
           {
             echo "entries=${entries}"
             echo "count=${count}"
             echo "deferred=${deferred}"
             echo "deferred_issues=${deferred_issues}"
+            echo "skipped=${skipped}"
+            echo "skipped_issues=${skipped_issues}"
             echo "disposition=${disposition}"
           } >> "${GITHUB_OUTPUT}"
-          echo "Selected ${count} candidate(s), deferred ${deferred} [${disposition}]: ${entries}"
+          echo "Selected ${count} candidate(s), deferred ${deferred}, skipped ${skipped} [${disposition}]: ${entries}"
 
   # ---------------------------------------------------------------------------
   # autofix: one claude-code-action fix + deterministic PR per selected stub.
@@ -1020,11 +1043,12 @@ jobs:
   # fail the run (continue-on-error), and it needs only issues:write — no Claude
   # or App credential. Opened/refused are read back from the selected stubs'
   # labels (fix-pr-opened / fix-refused), so this job needs no matrix-output
-  # plumbing. Deferred CANNOT be read back that way — family deferral writes
-  # nothing to the queue by design — so it is threaded from the select job's
-  # outputs; a run whose whole window was suppressed must not render as an idle
-  # one. The rolling comment is keyed by its own marker, distinct from the
-  # ingest's, so the two records coexist on the tracker.
+  # plumbing. Deferred and skipped CANNOT be read back that way — family
+  # deferral and the fix_scope gate both write nothing to the queue by design —
+  # so they are threaded from the select job's outputs; a run whose whole window
+  # was suppressed must not render as an idle one. The rolling comment is keyed
+  # by its own marker, distinct from the ingest's, so the two records coexist on
+  # the tracker.
   # ---------------------------------------------------------------------------
   record-run:
     needs: [select, agent, finalize]
@@ -1059,6 +1083,8 @@ jobs:
           COUNT: ${{ needs.select.outputs.count }}
           DEFERRED: ${{ needs.select.outputs.deferred }}
           DEFERRED_ISSUES: ${{ needs.select.outputs.deferred_issues }}
+          SKIPPED: ${{ needs.select.outputs.skipped }}
+          SKIPPED_ISSUES: ${{ needs.select.outputs.skipped_issues }}
           DISPOSITION: ${{ needs.select.outputs.disposition }}
           SELECT_RESULT: ${{ needs.select.result }}
           TRIGGER: ${{ github.event_name }}
@@ -1070,6 +1096,8 @@ jobs:
           count="${COUNT:-0}"
           deferred="${DEFERRED:-0}"
           deferred_issues="${DEFERRED_ISSUES:-}"
+          skipped="${SKIPPED:-0}"
+          skipped_issues="${SKIPPED_ISSUES:-}"
           # If selection itself failed/cancelled, record THAT (not a stale
           # snapshot) so the tracker shows the systemic failure mode.
           if [ "${SELECT_RESULT}" != "success" ]; then
@@ -1077,6 +1105,8 @@ jobs:
             count=0
             deferred=0
             deferred_issues=""
+            skipped=0
+            skipped_issues=""
           fi
 
           # Tally opened/refused/incomplete from each selected stub's current
@@ -1115,7 +1145,9 @@ jobs:
             --refused "${refused}" \
             --incomplete "${incomplete}" \
             --deferred "${deferred}" \
-            --deferred-issues "${deferred_issues}")
+            --deferred-issues "${deferred_issues}" \
+            --skipped "${skipped}" \
+            --skipped-issues "${skipped_issues}")
 
           # Rolling comment: PATCH the existing marker-bearing comment if present,
           # else create it. Selection is author-fenced + prefix-anchored

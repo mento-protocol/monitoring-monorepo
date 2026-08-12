@@ -106,6 +106,7 @@ export const VERDICT_TO_LABEL = {
 export {
   boundBriefList,
   boundBriefText,
+  collectBlockScalar,
   defangBackticks,
   defangHtmlComments,
   defangMentions,
@@ -128,6 +129,7 @@ export {
 // and validation below use several of them.
 import {
   boundBriefText,
+  collectBlockScalar,
   normalizeFixScope,
   sanitizeDuplicateIds,
   sanitizeFreeText,
@@ -245,32 +247,6 @@ function collectDashList(lines, start) {
     break;
   }
   return { items, next: j };
-}
-
-function collectBlockScalar(lines, start, rest) {
-  const trimmed = rest.trim();
-  if (!/^[|>][+-]?$/.test(trimmed)) {
-    // Inline scalar on the same line, not a block indicator.
-    return { text: stripYamlQuotes(trimmed), next: start + 1 };
-  }
-  const collected = [];
-  let j = start + 1;
-  for (; j < lines.length; j += 1) {
-    const line = lines[j];
-    if (line.trim() === "") {
-      collected.push("");
-      continue;
-    }
-    if (/^\s/.test(line)) {
-      collected.push(line.replace(/^[ \t]+/, ""));
-      continue;
-    }
-    break;
-  }
-  while (collected.length && collected[collected.length - 1] === "") {
-    collected.pop();
-  }
-  return { text: collected.join("\n"), next: j };
 }
 
 // Hard budget on how many duplicate SHORT-IDs may drive owning-repo lookups.
@@ -537,6 +513,15 @@ export function parseVerdictYaml(block) {
     investigated: [],
     escalation_reason: "",
   };
+  // How many `fix_scope:` key lines the block carried. More than one FAILS
+  // CLOSED (issue #1785). A last-wins assignment is the default a line-oriented
+  // parse falls into, and here it is exploitable: `collectBlockScalar` ends a
+  // block scalar at the first column-0 line, so agent-transcribed Sentry text
+  // inside `root_cause`/`proposed_action` — which an unauthenticated dashboard
+  // visitor supplies — can escape as a `fix_scope: mechanical` key line and
+  // override the honest value. Two occurrences in EITHER order normalize to
+  // `architectural`, so position in the template stops being load-bearing.
+  let fixScopeKeyLines = 0;
   for (let i = 0; i < lines.length; i += 1) {
     const match = /^([a-z_]+):[ \t]*(.*)$/.exec(lines[i]);
     if (!match) continue;
@@ -570,6 +555,7 @@ export function parseVerdictYaml(block) {
       out[key] = text;
       i = next - 1;
     } else if (key === "fix_scope") {
+      fixScopeKeyLines += 1;
       // EXACT whole-value match (after quote + boundary-valid trailing-comment
       // strip), never the leading-token extraction `verdict`/`confidence` use:
       // the observed architectural verdicts opened their prose with
@@ -597,7 +583,7 @@ export function parseVerdictYaml(block) {
     }
   }
   out.duplicate_of = sanitizeDuplicateIds(out.duplicate_of);
-  out.fix_scope = normalizeFixScope(out.fix_scope);
+  out.fix_scope = normalizeFixScope(fixScopeKeyLines > 1 ? "" : out.fix_scope);
   out.how_to_check = sanitizeBriefList(out.how_to_check);
   out.decision_branches = sanitizeBriefList(out.decision_branches);
   out.hypotheses = sanitizeBriefList(out.hypotheses);

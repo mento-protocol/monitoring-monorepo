@@ -23,8 +23,12 @@
  *     re-attemptable by design.
  *   - FIX SCOPE (issue #1785): only a verdict claiming `fix_scope: mechanical`
  *     starts a fix attempt. `architectural` — the fail-closed value for an
- *     absent or unrecognized field — is skipped and left unmarked, so it stays
- *     visible as human work instead of accumulating a refusal.
+ *     absent or unrecognized field — is skipped and left unmarked, so no
+ *     terminal refusal accumulates on a stub a human still has to judge. The
+ *     skip is REPORTED (`skipped`), because it writes nothing: an unreported
+ *     stand-down renders on the tracker as an idle leg. The skipped stub still
+ *     joins the family union below — dropping it would delete its
+ *     `duplicate_of` edges and fan its family back out.
  *   - FAMILY COLLAPSE (issue #1784): stubs whose verdicts place them in one
  *     `duplicate_of` family consume ONE run between them, not one each. The
  *     grouping, the transitive union and the representative rule live in
@@ -99,6 +103,11 @@ export function parseProject(title) {
 }
 
 export const DEFAULT_CAP = 2;
+
+/** Why a candidate was skipped without any queue write. Distinct from the
+ * family DEFER_* reasons: a deferral lifts when a sibling's state changes,
+ * whereas this one lifts only when a re-triage supplies a new verdict. */
+export const SKIP_FIX_SCOPE_ARCHITECTURAL = "fix-scope-architectural";
 
 // Generous list window: with fixed stubs excluded server-side and the project
 // pre-filter above, the eligible-and-unfixed local set stays tiny, so this is
@@ -376,8 +385,11 @@ async function openAutofixPrExists(runGh, repo, shortId) {
 
 /**
  * Evaluate ONE candidate stub against every autofix filter. Returns a CANDIDATE
- * record `{ entry, shortId, duplicateOf, reconcile }` when the stub passes, or
- * `null` (with a stderr note) otherwise. `stub` needs `{ number, title, labels
+ * record `{ entry, issue, shortId, duplicateOf, reconcile }` when the stub
+ * passes, an INELIGIBLE record `{ issue, shortId, duplicateOf, eligible: false,
+ * skipReason }` when only the `fix_scope` gate refused it (no `entry` — it
+ * contributes family edges and a report line, never a matrix row), or `null`
+ * (with a stderr note) otherwise. `stub` needs `{ number, title, labels
  * }`; the verdict comments are read here. Never throws — a parse failure is a
  * skip, so the select job always emits a valid array.
  *
@@ -484,6 +496,7 @@ async function evaluateCandidate(runGh, repo, stub) {
     );
     return {
       entry: { issue: stub.number, shortId, reconcile: true },
+      issue: stub.number,
       shortId,
       duplicateOf: parsed.duplicateOf,
       reconcile: true,
@@ -498,8 +511,11 @@ async function evaluateCandidate(runGh, repo, stub) {
   // FIX_REFUSED_LABEL: a refusal marker is terminal until a human clears it and
   // would stand the stub's whole duplicate family down behind it, which is how
   // five real stubs burned five agent runs on one architecture change. Leaving
-  // the stub unmarked keeps it visible as `sentry:verdict-code-fix` work and
-  // re-selectable the moment a re-triage supplies `fix_scope: mechanical`.
+  // the stub unmarked keeps it re-selectable the moment a re-triage supplies
+  // `fix_scope: mechanical`. It does NOT leave it waiting in the queue: a local
+  // code-fix stub is CLOSED when its verdict lands, so the human backlog is the
+  // run record's skip line plus the digest's routed-section note — which is why
+  // this returns a reportable record instead of dropping the stub.
   //
   // Placed AFTER the reconcile branch on purpose: reconciliation runs no agent
   // and opens no PR, it repairs the queue bookkeeping for a PR that ALREADY
@@ -509,11 +525,28 @@ async function evaluateCandidate(runGh, repo, stub) {
   // `parsed.fixScope` is closed-enum by construction, and the SHORT-ID goes
   // through `safeShortId` — stderr is scanned for `::workflow commands::`, and
   // this line is agent-derived text reaching it.
+  //
+  // Returns an INELIGIBLE record rather than `null`, for two reasons that a bare
+  // drop got wrong. (1) Its `duplicate_of` edges stay in the family graph: an
+  // architectural stub is often the anchor its siblings hang off, and deleting
+  // it fans one root cause back out into one agent run per sibling — or lets a
+  // family whose refused member is only reachable THROUGH it come back for a
+  // fresh run. (2) The skip is reportable, so a window standing entirely down on
+  // scope stops rendering as `Candidates selected: 0` — indistinguishable from
+  // an empty queue, the #1758 misdiagnosis. It carries no `entry`: there is
+  // nothing here the matrix may ever consume.
   if (parsed.fixScope !== FIX_SCOPE_MECHANICAL) {
     process.stderr.write(
-      `skip #${stub.number}: fix_scope for ${safeShortId(shortId)} is ${parsed.fixScope}, not ${FIX_SCOPE_MECHANICAL}; leaving it as human work (no refusal marker).\n`,
+      `skip #${stub.number}: fix_scope for ${safeShortId(shortId)} is ${parsed.fixScope}, not ${FIX_SCOPE_MECHANICAL}; no refusal marker, reported as a fix_scope skip.\n`,
     );
-    return null;
+    return {
+      issue: stub.number,
+      shortId,
+      duplicateOf: parsed.duplicateOf,
+      reconcile: false,
+      eligible: false,
+      skipReason: SKIP_FIX_SCOPE_ARCHITECTURAL,
+    };
   }
 
   // Generation token (issue #1506): the numeric id of the verdict comment this
@@ -531,6 +564,7 @@ async function evaluateCandidate(runGh, repo, stub) {
     );
     return {
       entry: { issue: stub.number, shortId },
+      issue: stub.number,
       shortId,
       duplicateOf: parsed.duplicateOf,
       reconcile: false,
@@ -538,6 +572,7 @@ async function evaluateCandidate(runGh, repo, stub) {
   }
   return {
     entry: { issue: stub.number, shortId, verdictCommentId },
+    issue: stub.number,
     shortId,
     duplicateOf: parsed.duplicateOf,
     reconcile: false,
@@ -567,8 +602,9 @@ const DEFER_NOTES = {
 };
 
 /**
- * Run the selection and report BOTH halves of its outcome: the matrix entries,
- * and every candidate the family collapse stood down.
+ * Run the selection and report EVERY half of its outcome: the matrix entries,
+ * every candidate the family collapse stood down, and every stub the `fix_scope`
+ * gate skipped.
  *
  * The deferred half exists because deferral writes nothing — no label, no
  * comment, no marker — so before this the only trace was a stderr line inside a
@@ -579,7 +615,17 @@ const DEFER_NOTES = {
  * family-starved queue read as a healthy idle leg, which is the #1758
  * misdiagnosis this whole leg exists to make impossible — and it left the
  * documented remedy (single-issue `workflow_dispatch`) unusable, because nobody
- * could tell which issue to name. Both fields go into the run record.
+ * could tell which issue to name. All three fields go into the run record.
+ *
+ * `skipped` exists for the same reason, one stand-down class later (issue
+ * #1785): a `fix_scope: architectural` verdict writes nothing either — no
+ * marker, deliberately, because a refusal marker is terminal and would stand its
+ * whole family down — and `architectural` is what EVERY verdict predating the
+ * field normalizes to. Unreported, the steady state after this ships is
+ * `Candidates selected: 0, Deferred: 0`, which is byte-identical to an idle
+ * queue and cannot be told apart from "the prompt change never landed" or "the
+ * parse broke" without opening Actions logs. That is the #1758 misdiagnosis
+ * exactly.
  *
  * Batch mode (default): up to `cap` oldest `sentry:verdict-code-fix` stubs owned
  * by this repo, ONE per `duplicate_of` family (issue #1784). Single mode
@@ -596,7 +642,11 @@ export async function selectAutofixRun(options, deps = {}) {
   const runGh = deps.runGh ?? defaultRunGh;
   const repo = options.repo ?? DEFAULT_REPO;
 
-  // Single-issue live run: evaluate exactly the requested issue.
+  // Single-issue live run: evaluate exactly the requested issue. A dispatch
+  // cannot override the fix_scope gate (that is the point of the gate), so the
+  // skip is reported here too — otherwise the documented remedy for a stalled
+  // leg is itself silent, and an operator who dispatches an architectural stub
+  // sees the same empty array as for an ineligible one.
   if (options.issue != null) {
     const stub = await readStub(runGh, repo, options.issue);
     const candidate = await evaluateCandidate(runGh, repo, {
@@ -604,7 +654,16 @@ export async function selectAutofixRun(options, deps = {}) {
       title: stub.title,
       labels: stub.labels,
     });
-    return { entries: candidate ? [candidate.entry] : [], deferred: [] };
+    const selectable = candidate != null && candidate.eligible !== false;
+    return {
+      entries: selectable ? [candidate.entry] : [],
+      deferred: [],
+      skipped: selectable
+        ? []
+        : candidate == null
+          ? []
+          : [{ issue: candidate.issue, reason: candidate.skipReason }],
+    };
   }
 
   const cap =
@@ -652,8 +711,16 @@ export async function selectAutofixRun(options, deps = {}) {
   });
   const entries = [];
   const deferred = [];
+  const skipped = [];
   for (const decision of decisions) {
-    const number = decision.candidate.entry.issue;
+    const number = decision.candidate.issue;
+    // Ruled out before the collapse ran (fix_scope). It joined the union so its
+    // family edges survived, but it is not a family deferral and must not be
+    // reported as one: the two lift on different events.
+    if (decision.candidate.eligible === false) {
+      skipped.push({ issue: number, reason: decision.candidate.skipReason });
+      continue;
+    }
     if (!decision.selected) {
       // Deferral writes NOTHING to the queue — no label, no comment, no marker.
       // The member stays exactly as selectable as its live state makes it on the
@@ -670,11 +737,12 @@ export async function selectAutofixRun(options, deps = {}) {
     if (entries.length >= cap) continue;
     entries.push(decision.candidate.entry);
   }
-  return { entries, deferred };
+  return { entries, deferred, skipped };
 }
 
 /** Matrix entries only — the emitted contract, unchanged. `selectAutofixRun`
- * carries the deferral report the run record needs alongside it. */
+ * carries the deferral and fix_scope-skip reports the run record needs
+ * alongside it. */
 export async function selectAutofixCandidates(options, deps = {}) {
   const { entries } = await selectAutofixRun(options, deps);
   return entries;
@@ -727,6 +795,10 @@ Options:
                        { "issue": <number>, "reason": "<enum>" } — to this path,
                        so the run record can distinguish an empty queue from one
                        whose candidates were all stood down. Stdout is unchanged.
+  --skipped-out <p>    Write the fix_scope SKIP report, same shape, to this path.
+                       An architectural verdict writes nothing to the queue, so
+                       without it a window standing entirely down on scope is
+                       indistinguishable from an empty one. Stdout is unchanged.
   --emit-verdict       With --issue: print the trusted (fence-selected) verdict
                        comment body for that issue and exit (the workflow
                        snapshots it to a file the fix agent reads, so the agent
@@ -742,6 +814,7 @@ export function parseArgs(argv) {
     issue: null,
     emitVerdict: false,
     deferredOut: null,
+    skippedOut: null,
     help: false,
   };
   const args = [...argv];
@@ -778,6 +851,9 @@ export function parseArgs(argv) {
       case "--deferred-out":
         options.deferredOut = readValue();
         break;
+      case "--skipped-out":
+        options.skippedOut = readValue();
+        break;
       case "-h":
       case "--help":
         options.help = true;
@@ -787,6 +863,21 @@ export function parseArgs(argv) {
     }
   }
   return options;
+}
+
+/** Best-effort JSON report write. A failed write degrades ONE counter on the
+ * run record; it must never fail the select step, whose whole contract is that
+ * it always emits a valid array. */
+function writeReport(path, report, label) {
+  if (!path) return;
+  try {
+    writeFileSync(path, `${JSON.stringify(report ?? [])}\n`);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    process.stderr.write(
+      `warn: could not write the ${label} report: ${message}\n`,
+    );
+  }
 }
 
 async function main() {
@@ -802,20 +893,12 @@ async function main() {
     process.stdout.write(await emitVerdict(options));
     return;
   }
-  const { entries, deferred } = await selectAutofixRun(options);
+  const { entries, deferred, skipped } = await selectAutofixRun(options);
   // Report BEFORE stdout: the workflow captures stdout into a shell variable, so
-  // a failed report write must not be able to lose the entries too. It is
-  // best-effort — the run record degrades to "0 deferred", never to a dead leg.
-  if (options.deferredOut) {
-    try {
-      writeFileSync(options.deferredOut, `${JSON.stringify(deferred)}\n`);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      process.stderr.write(
-        `warn: could not write the deferral report: ${message}\n`,
-      );
-    }
-  }
+  // a failed report write must not be able to lose the entries too. Both are
+  // best-effort — the run record degrades to "0", never to a dead leg.
+  writeReport(options.deferredOut, deferred, "deferral");
+  writeReport(options.skippedOut, skipped, "fix_scope skip");
   process.stdout.write(`${JSON.stringify(entries)}\n`);
 }
 

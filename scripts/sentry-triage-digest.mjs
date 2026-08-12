@@ -14,7 +14,9 @@
  *      exists — see the #1278 emission interface below).
  *   3. 📮 Routed to owning repo                (code/config-fix verdicts, each
  *      linking the PROJECTED owning-repo issue; falls back to the queue-issue
- *      verdict when projection was skipped).
+ *      verdict when projection was skipped — a LOCAL code-fix never projects,
+ *      and one the autofix leg will never attempt is marked as such rather
+ *      than left reading as handed to a team that does not exist).
  *   4. 🙅 Wontfix / transient                  (upstream-transient verdicts,
  *      each linking the rationale on the queue issue, with a nudge toward the
  *      existing `sentry:approved-archive` label flow for that stub).
@@ -65,12 +67,14 @@ import {
   boundBriefList,
   boundBriefText,
   extractPermalink,
+  FIX_SCOPE_ARCHITECTURAL,
   isTrustedComment,
   parseVerdictComment,
   PROJECTED_COMMENT_PREFIX,
   REGRESSION_PREFIX,
   selectNeedsHumanBriefFields,
   selectVerdictComment,
+  validateAffectedRepo,
 } from "./sentry-triage-project-core.mjs";
 
 // Re-export the authoritative parser under the digest's historical name so
@@ -332,15 +336,42 @@ export function extractAutofixUrl(comments) {
 // Classification: one collected issue -> one digest entry.
 // ---------------------------------------------------------------------------
 
+// No verdict comment on the stub. `affectedRepo`/`fixScope` stay unreadable
+// rather than defaulted: the fix_scope annotation below must describe a verdict
+// that was actually read, never one inferred from a missing comment.
 const EMPTY_PARSED = {
   verdict: null,
   confidence: null,
+  affectedRepo: "",
+  fixScope: null,
   summary: "",
   humanQuestion: "",
   hypotheses: [],
   investigated: [],
   escalationReason: "",
 };
+
+// Appended to a routed line the autofix leg will never act on. The Routed
+// heading is a claim about where the work went; for this class nothing went
+// anywhere, so the line has to say so.
+const ARCHITECTURAL_NOTE = "_(architectural — human backlog, no autofix)_";
+
+/** True when a routed entry is a LOCAL `code-fix` scoped `architectural`
+ * (issue #1785) — including every verdict that omits `fix_scope`, which fails
+ * closed. This is the one class the digest would otherwise misreport outright:
+ * a local verdict never projects, the selector will never attempt it, and the
+ * stub is CLOSED at verdict time, so the routed line is the last and only
+ * statement a human ever sees about it. Scoped to the LOCAL owning repo on
+ * purpose — an external code-fix also reads as `architectural` (the field is
+ * local-only), and annotating those would mislabel every genuinely routed
+ * issue. */
+function isArchitecturalLocalCodeFix(entry) {
+  return (
+    entry?.bucket === "code-fix" &&
+    entry?.owningRepoIsLocal === true &&
+    entry?.fixScope === FIX_SCOPE_ARCHITECTURAL
+  );
+}
 
 /** Which outcome section an entry renders in. Bucket is the verdict; a
  * code/config-fix with recorded fix-PR data (#1278) goes to Autofixed, else
@@ -403,6 +434,14 @@ export function classifyIssue(issue) {
     section: sectionForEntry(bucket, autofixUrl),
     verdict: bucket === FAILED_BUCKET ? null : bucket,
     confidence: parsed.confidence,
+    // The verdict contract's `fix_scope` (issue #1785) and whether the verdict
+    // named THIS repo. Carried here for the same reason the needs-human brief
+    // is: the digest and the selector are two consumers of one contract, so a
+    // field that gates the selector cannot land on it alone and leave the human
+    // surface asserting the opposite.
+    fixScope: parsed.fixScope ?? null,
+    owningRepoIsLocal:
+      validateAffectedRepo(parsed.affectedRepo).reason === "local-repo",
     summary: parsed.summary,
     // needs-human decision-ready brief. The full contract rides along even
     // though the Slack render below shows a subset (#1748) — carrying it here
@@ -562,13 +601,16 @@ function renderSectionBodyLines(section, entries) {
         renderArrowLine(entry, entry.autofixUrl, "fix PR"),
       );
     case ROUTED_SECTION:
-      return entries.map((entry) =>
-        entry.projectedUrl
+      return entries.map((entry) => {
+        const line = entry.projectedUrl
           ? renderArrowLine(entry, entry.projectedUrl, "owning-repo issue")
           : // Projection skipped (no token / local / unrecognized repo): fall
             // back to the queue-issue verdict.
-            renderArrowLine(entry, entry.url, "triage verdict"),
-      );
+            renderArrowLine(entry, entry.url, "triage verdict");
+        return isArchitecturalLocalCodeFix(entry)
+          ? `${line} ${ARCHITECTURAL_NOTE}`
+          : line;
+      });
     case WONTFIX_SECTION:
       return entries.map(renderWontfixLine);
     case FAILED_SECTION:
