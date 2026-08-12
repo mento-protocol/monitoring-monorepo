@@ -11,9 +11,9 @@
  *
  * Both are closed by the pin validator (check-agent-quality-gate-package-scripts.sh)
  * running FIRST: it pins each trusted alias to an exact command and rejects any
- * unsanctioned lifecycle hook. These tests pin that ordering, prove the validator
- * rejects a hook, and reject a committed scripts/ directory symlink whose target
- * escapes the tree the CI paths-filter routes.
+ * unsanctioned lifecycle hook. These tests pin that ordering and prove the
+ * validator rejects a hook. That validator is what makes the local gate's trust
+ * in the `sentry:*` aliases safe, which is why this checker carries it.
  *
  * The gate probe is the third execution surface, and its invariants live next
  * door in check-sentry-suites-in-ci-gate-probe.test.mjs.
@@ -24,25 +24,14 @@
  */
 
 import assert from "node:assert/strict";
-import {
-  mkdirSync,
-  mkdtempSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import test from "node:test";
 import { pinValidationOrderBlockers } from "./check-sentry-suites-in-ci-core.mjs";
 import {
   CI,
-  escapingScriptSymlinks,
   INSTALL_ACTION,
   PIN_VALIDATOR_COMMAND,
   PKG,
   runPackageScriptValidator,
-  SCRIPTS_DIR,
   validatorPins,
 } from "./check-sentry-suites-in-ci-probes.mjs";
 
@@ -133,39 +122,11 @@ test("the pin validator rejects an unsanctioned install lifecycle hook", () => {
   }
 });
 
-test("no committed scripts/ directory symlink escapes the CI-routed tree", () => {
-  // A directory symlink under scripts/ pointing outside it exposes a suite whose
-  // real path the static `rootScripts` filter cannot route, so the path-gated
-  // `scripts` job would skip while the checker still demands the suite (Codex
-  // 3754887739). None may exist.
-  assert.deepEqual(
-    escapingScriptSymlinks(SCRIPTS_DIR),
-    [],
-    "a committed scripts/ directory symlink resolves outside scripts/",
-  );
-
-  // Mutation: a synthetic tree with `scripts/linked -> ../fixtures` is flagged,
-  // while a within-scripts link is not — proving the check rejects only the
-  // escaping case, on fixtures so no repo file is touched.
-  const base = mkdtempSync(join(tmpdir(), "sentry-escape-probe-"));
-  try {
-    const scripts = join(base, "scripts");
-    const inside = join(scripts, "real-dir");
-    const outside = join(base, "fixtures");
-    mkdirSync(inside, { recursive: true });
-    mkdirSync(outside, { recursive: true });
-    writeFileSync(join(outside, "sentry-hidden.test.mjs"), "// suite\n");
-    symlinkSync(outside, join(scripts, "escaping"));
-    symlinkSync(inside, join(scripts, "contained"));
-
-    const escaping = escapingScriptSymlinks(scripts);
-    assert.equal(
-      escaping.length,
-      1,
-      `expected only the escaping link flagged, got ${JSON.stringify(escaping)}`,
-    );
-    assert.equal(escaping[0][0], "scripts/escaping");
-  } finally {
-    rmSync(base, { recursive: true, force: true });
-  }
-});
+// The escaping-symlink rejection lived here until issue #1779 PR C. It refused
+// a committed `scripts/<link>` resolving outside scripts/, because such a link
+// exposes suites whose real path the static `rootScripts` filter cannot route:
+// adding one under a previously committed link skipped the path-gated `scripts`
+// job while the checker still demanded the suite (Codex 3754887739). The
+// unconditional `sentry-suites` gate removed the premise. It enumerates through
+// the same link, reconciles what it finds against the manifest by exact set
+// equality, and RUNS the suite — from a job with no paths filter to escape.

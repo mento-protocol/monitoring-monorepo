@@ -27,7 +27,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, sep } from "node:path";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CORE_SCHEMA, dump, load } from "js-yaml";
 import { isPlainObject } from "./check-sentry-suites-in-ci-core.mjs";
@@ -257,14 +257,17 @@ export const SENTINEL_MUTATIONS = [
   ["`if: false`", (w) => (w.jobs.ci.if = "false")],
   ["a dropped `if: always()`", (w) => delete w.jobs.ci.if],
   [
-    "a `needs` without `scripts`",
-    (w) => (w.jobs.ci.needs = w.jobs.ci.needs.filter((n) => n !== "scripts")),
+    "a `needs` without `production-infra-contract`",
+    (w) =>
+      (w.jobs.ci.needs = w.jobs.ci.needs.filter(
+        (n) => n !== "production-infra-contract",
+      )),
   ],
   ["`continue-on-error`", (w) => (w.jobs.ci["continue-on-error"] = true)],
   [
-    "`scripts` under `allowed-failures`",
+    "`production-infra-contract` under `allowed-failures`",
     (w) => {
-      allsGreenStep(w).with["allowed-failures"] = "scripts";
+      allsGreenStep(w).with["allowed-failures"] = "production-infra-contract";
     },
   ],
   [
@@ -307,26 +310,13 @@ export const SENTINEL_MUTATIONS = [
     (w) => (w.jobs.ci.name = "ci-aggregate"),
   ],
   [
-    "path-gated `scripts` dropped from `allowed-skips`",
-    // `scripts` is path-gated, so it reports "skipped" on any PR outside its
-    // filter. alls-green turns a skip of a job NOT in `allowed-skips` into a gate
-    // failure, so dropping it here reds the required `ci` for every such PR —
-    // while the edit that drops it activates the filter, so the change's own PR
-    // runs the job and never sees the red.
+    "a case-variant `ALLOWED-SKIPS` overriding `allowed-skips`",
+    // The runner matches `with:` keys case-insensitively and the last wins, so
+    // a decoy key makes `sentry-suites` skippable while the real `allowed-skips`
+    // still reads clean — and `gateJobBlockers` reads only the lowercase key.
+    // The collision check here is what stops that reaching the merge gate.
     (w) => {
-      const step = allsGreenStep(w);
-      step.with["allowed-skips"] = step.with["allowed-skips"]
-        .split(",")
-        .filter((job) => job.trim() !== "scripts")
-        .join(",");
-    },
-  ],
-  [
-    "a JSON-encoded `allowed-skips` without `scripts`",
-    // The action `json.loads()` this first, so a comma-only reader would see one
-    // opaque token and wrongly believe `scripts` is still listed.
-    (w) => {
-      allsGreenStep(w).with["allowed-skips"] = '["ui","indexer"]';
+      allsGreenStep(w).with["ALLOWED-SKIPS"] = "sentry-suites";
     },
   ],
   [
@@ -396,55 +386,6 @@ export function findSentrySuites(
 export const SENTRY_SUITES = findSentrySuites(SCRIPTS_DIR);
 
 /**
- * Committed directory symlinks under scripts/ whose real target escapes the
- * scripts/ tree. `findSentrySuites` follows such a link and enumerates the suite
- * behind it, but the suite's real path is the symlink TARGET (e.g.
- * fixtures/sentry-x.test.mjs) — which matches neither `scripts/**` nor the
- * static `rootScripts` filter in ci.yml. Adding a suite beneath a previously
- * committed link would then run the checker locally yet skip the whole path-gated
- * `scripts` job in CI, shipping the unwired suite (Codex 3754887739). CI's
- * paths-filter cannot resolve a symlink, so the fail-closed answer is to reject
- * the link: with none present, every enumerated suite lives under a real
- * `scripts/**` path the filter already routes. A directory symlink whose target
- * stays inside scripts/ is harmless (still covered by `scripts/**`) and allowed.
- *
- * @param {string} dir
- * @param {string} prefix
- * @param {string | null} scriptsRoot resolved scripts/ root; set on recursion
- * @returns {Array<[string, string]>} [repo-relative link path, resolved target]
- */
-export function escapingScriptSymlinks(
-  dir,
-  prefix = "scripts",
-  scriptsRoot = null,
-) {
-  const root = scriptsRoot ?? realpathSync(dir);
-  const escaping = [];
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    const full = join(dir, entry.name);
-    const relative = `${prefix}/${entry.name}`;
-    if (entry.isSymbolicLink()) {
-      // A file symlink cannot expose a suite tree; `findSentrySuites` follows
-      // only directory links. A broken link throws there and is that check's
-      // concern, so skip an unresolvable one here rather than double-reporting.
-      let target;
-      try {
-        if (!statSync(full).isDirectory()) continue;
-        target = realpathSync(full);
-      } catch {
-        continue;
-      }
-      if (target !== root && !target.startsWith(root + sep)) {
-        escaping.push([relative, target]);
-      }
-    } else if (entry.isDirectory()) {
-      escaping.push(...escapingScriptSymlinks(full, relative, root));
-    }
-  }
-  return escaping.sort();
-}
-
-/**
  * Run check-agent-quality-gate-package-scripts.sh against a synthetic
  * package.json and report whether it accepted. Lets the lifecycle invariants
  * prove the validator rejects an unsanctioned lifecycle hook (and accepts the
@@ -492,98 +433,35 @@ export const RUN_BY_ANOTHER_JOB = new Map([
  * The jobs this file trusts to run its assertions, and the ONLY `if:` each may
  * carry. `null` means the job must be unconditional.
  *
- * `scripts` is path-gated, so its guard is pinned to an exact string and
- * `the scripts job stays reachable from the paths its suites guard` follows
- * that string through the paths filter. Any edit to the guard fails here and
- * has to be re-proven, which is the point. A non-null guard also marks the job
- * as one that legitimately skips, so `sentinelBlockers` requires it under the
- * sentinel's `allowed-skips`.
- */
-export const TRUSTED_JOBS = new Map([
-  ["scripts", "needs.changes.outputs.rootScripts == 'true'"],
-  ["production-infra-contract", null],
-]);
-
-/**
- * Paths whose edits must re-run the `scripts` job. Every one is an input to a
- * suite that job owns: the suites themselves, the workflow files
- * sentry-mcp-broker.test.mjs parses, the shell scripts this check runs as
- * probes — `gateClassifications` executes agent-quality-gate.sh's own `case`
- * statement and `validatorPins` runs check-agent-quality-gate-package-scripts.sh
- * — the local composite actions the env scan now recurses into, and the
- * manifest holding the aliases the CI steps invoke.
+ * One entry, and the narrowing is the point (issue #1779, PR C).
+ * `production-infra-contract` is here because it runs the one suite the runtime
+ * gate does not — `sentry-provider-contract.test.mjs`, via `pnpm tf:test` — so
+ * the exemption is only as good as that job's trustworthiness.
  *
- * The `.sh` entry matters most where it is least visible: without it, a PR
- * editing only the gate's tooling allowlist or the pin validator would skip the
- * `scripts` job, and the `ci` sentinel lists `scripts` under `allowed-skips`,
- * so nothing would report the gap. `.github/actions/**` is here for the same
- * reason: the env scan reads an `action.yml`, so an edit to one must re-run it.
- */
-export const REQUIRED_ROOT_SCRIPT_PATHS = [
-  // `scripts/**` covers every path under scripts/ at any depth, INCLUDING the
-  // extensionless directory symlinks the `*.mjs`/`*.sh` globs miss. A suite
-  // reachable only through such a symlink is one `findSentrySuites` enumerates
-  // (it follows the link), so its addition must run the `scripts` job — and
-  // hence this checker — or the whole job skips and the unwired suite ships
-  // (Codex 3754355168). The extension globs stay for documentation of intent.
-  "scripts/**",
-  "scripts/**/*.mjs",
-  "scripts/**/*.sh",
-  ".github/workflows/**",
-  ".github/actions/**",
-  "package.json",
-];
-
-/**
- * Every file this check parses or executes to reach a verdict, with the reader
- * that consumes it. `the required paths route every file this check reads`
- * asserts each one is covered by REQUIRED_ROOT_SCRIPT_PATHS: an input the
- * filter does not route is an input whose edit skips the whole `scripts` job.
+ * `scripts` left when the Sentry suites and this checker did: that job no
+ * longer runs a line of Sentry code, so asserting its shape here asserted
+ * nothing about the Sentry legs.
  *
- * The composite `action.yml` files are appended below rather than hard-coded:
- * `collectCompositeActions` discovers exactly what the env scan opens, so a job
- * that adds or nests a composite cannot slip a reader past the filter.
+ * `sentry-suites` is deliberately NOT here. Its whole structure is pinned by
+ * exact equality against `CANONICAL_JOB`
+ * (check-sentry-suites-in-ci-gate-job.test.mjs), which rejects every construct
+ * `jobBlockers` looks for — `uses:`, `container`, `strategy`, `environment`,
+ * `continue-on-error`, an `if:`, an `env:` at either level — plus everything it
+ * does not, since anything outside the canonical shape is rejected whatever it
+ * is called. Its only local composite is `./.github/actions/pnpm-install`,
+ * which this map already routes through `production-infra-contract`, and
+ * `gateJobBlockers` separately requires the sentinel to need it and to tolerate
+ * neither its skip nor its failure. Listing it twice would add a weaker copy.
  */
-const STATIC_PROBE_INPUTS = new Map([
-  [".github/workflows/ci.yml", "the workflow every invariant here walks"],
-  ["package.json", "the alias map `aliasesFor` resolves suites through"],
-  ["scripts/agent-quality-gate.sh", "`gateClassifications` runs its `case`"],
-  [GATE_PROBE, "the probe that lifts the gate's classifier out and re-runs it"],
-  [GATE_PROBE_TESTS, "that probe's own invariants, which this check runs"],
-  [
-    GATE_EXTRACT,
-    "the extractor and probe shells `gateClassifications` runs on",
-  ],
-  [
-    "scripts/check-sentry-suites-in-ci-gate-extract.test.mjs",
-    "the extractor's own invariants, which this check runs",
-  ],
-  [
-    "scripts/check-sentry-suites-in-ci-gate-fixtures.mjs",
-    "the fixtures both gate-probe test modules share",
-  ],
-  [
-    "scripts/check-agent-quality-gate-package-scripts.sh",
-    "`validatorPins` runs it to enumerate the pins it enforces",
-  ],
-  ["scripts/tf-stacks.test.mjs", "`staticImports` parses its import list"],
-  [SELF, "this check itself"],
-  [LIFECYCLE, "the execution-surface invariants this check imports and runs"],
-  [CORE, "every predicate this check asserts with"],
-  [CORE_COMMANDS, "the command-grammar predicates the core re-exports"],
-  [PROBES, "the file reads and probes this check runs"],
-  [STATIC_IMPORTS, "`staticImports` itself — V8's dependency list, shared"],
-]);
+export const TRUSTED_JOBS = new Map([["production-infra-contract", null]]);
 
-export const PROBE_INPUTS = new Map([
-  ...STATIC_PROBE_INPUTS,
-  ...[...TRUSTED_JOBS.keys()].flatMap((name) =>
-    collectCompositeActions(CI.jobs[name]).files.map((file) => [
-      file,
-      `a composite action the \`${name}\` job runs, scanned for \`$GITHUB_ENV\` writes`,
-    ]),
-  ),
-]);
+// The `rootScripts` paths-filter reachability proof lived here until issue
+// #1779 PR C. It existed because this checker ran in the path-gated `scripts`
+// job: every file it read had to be routed by the filter, or an edit to that
+// file skipped the whole job and the `ci` sentinel tolerated the skip. The
+// checker now runs in the unconditional `sentry-suites` job, which has no
+// filter and no `if:` to narrow, so there is no longer a set of paths that must
+// reach it — a dashboard-only or indexer-only diff runs it like any other.
 
 /**
  * The exact commands check-agent-quality-gate-package-scripts.sh pins, read
@@ -625,31 +503,4 @@ export function validatorPins() {
     pins.set(match[1], JSON.parse(match[2]));
   }
   return pins;
-}
-
-/**
- * Remove `target` from every list in every `dorny/paths-filter` step's inner
- * `filters` document. Generic on purpose: the probe below must not re-implement
- * the guard→output→step→document walk it is testing.
- *
- * @param {Record<string, any>} workflow
- * @param {string} target
- */
-export function dropFilterPath(workflow, target) {
-  let removed = 0;
-  for (const job of Object.values(workflow.jobs ?? {})) {
-    for (const step of job.steps ?? []) {
-      if (!isPlainObject(step)) continue;
-      if (!String(step.uses ?? "").startsWith("dorny/paths-filter@")) continue;
-      const filters = load(step.with?.filters, { schema: CORE_SCHEMA });
-      if (!isPlainObject(filters)) continue;
-      for (const [key, paths] of Object.entries(filters)) {
-        if (!Array.isArray(paths) || !paths.includes(target)) continue;
-        filters[key] = paths.filter((entry) => entry !== target);
-        removed += 1;
-      }
-      step.with.filters = dump(filters);
-    }
-  }
-  return removed;
 }

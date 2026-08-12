@@ -13,7 +13,6 @@
  */
 
 import assert from "node:assert/strict";
-import { CORE_SCHEMA, load } from "js-yaml";
 import {
   isCommand,
   parseShellScript,
@@ -41,39 +40,6 @@ const PROVEN_INERT_ENV = new Set();
 /** @param {unknown} value */
 export function isPlainObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-/**
- * A paths-filter glob as a regular expression. Only the four forms this repo's
- * filter uses need to be right — `**` across directories, `*` within one, and
- * literal names — so this is a coverage check on our own constant, not a
- * general glob engine.
- *
- * @param {string} glob
- */
-export function globToRegExp(glob) {
-  let pattern = "";
-  for (let i = 0; i < glob.length; i += 1) {
-    const character = glob[i];
-    if (character === "*") {
-      if (glob[i + 1] === "*" && glob[i + 2] === "/") {
-        pattern += "(?:[^/]*/)*";
-        i += 2;
-      } else if (glob[i + 1] === "*") {
-        pattern += ".*";
-        i += 1;
-      } else {
-        pattern += "[^/]*";
-      }
-    } else if (character === "?") {
-      pattern += "[^/]";
-    } else if (/[.+^${}()|[\]\\]/.test(character)) {
-      pattern += `\\${character}`;
-    } else {
-      pattern += character;
-    }
-  }
-  return new RegExp(`^${pattern}$`);
 }
 
 // ── ci.yml structure ─────────────────────────────────────────────────────────
@@ -828,129 +794,12 @@ export function triggerBlockers(workflow) {
   return blockers;
 }
 
-/**
- * Which of `required` the path filter behind `guard` no longer lists, or why
- * the chain from the guard to that filter could not be followed.
- *
- * Steps existing in a job is not enough. The `scripts` job is path-gated, and
- * the `ci` sentinel lists it under `allowed-skips`, so if the filter loses a
- * path, a PR touching only that path skips the whole job and every suite in it
- * — silently, and this file would not run to complain either.
- *
- * The whole chain is followed from the parsed workflow: the job's `if:` names
- * an output of a job, that output names a step, that step's `filters` value is
- * an inner YAML document, and the key it defines is a list of paths.
- *
- * @param {Record<string, any>} workflow
- * @param {string} guardedJob the job whose `if:` and `needs:` are judged
- * @param {string} guard the gated job's `if:` expression
- * @param {string[]} required
- */
-export function requiredPathsMissing(workflow, guardedJob, guard, required) {
-  const gate =
-    /^\s*(?:\$\{\{\s*)?needs\.([A-Za-z0-9_-]+)\.outputs\.([A-Za-z0-9_-]+)\s*==\s*'true'\s*(?:\}\})?\s*$/.exec(
-      guard,
-    );
-  if (!gate) {
-    return [
-      `the \`${guardedJob}\` job guard \`${guard}\` is not a form this test can follow — extend the grammar and re-prove it`,
-    ];
-  }
-  const [, gateJob, outputName] = gate;
-
-  // The guard reads `needs.<gateJob>.outputs.…`, which is only populated when
-  // the guarded job actually lists `<gateJob>` in its own `needs`. Drop that
-  // edge and the context is empty, the guard is never `'true'`, and the job
-  // skips on EVERY PR — while the sentinel lists it under `allowed-skips`, so
-  // nothing reports the silence. Proving the filter still covers every input is
-  // moot unless the filter's output still reaches the job.
-  const guardedNeeds = needsList(ciJob(workflow, guardedJob).needs);
-  if (!guardedNeeds.includes(gateJob)) {
-    return [
-      `the \`${guardedJob}\` job's guard reads \`needs.${gateJob}.outputs.${outputName}\`, but ` +
-        `\`${guardedJob}.needs\` does not list \`${gateJob}\` (${JSON.stringify(guardedNeeds)}); the ` +
-        `\`needs.${gateJob}\` context is then empty, so the guard is never true and the job skips on every PR`,
-    ];
-  }
-
-  const producer = ciJob(workflow, gateJob);
-  const expression = producer.outputs?.[outputName];
-  if (typeof expression !== "string") {
-    return [
-      `the \`${gateJob}\` job declares no \`${outputName}\` output, so the \`scripts\` job's guard is never true`,
-    ];
-  }
-  const wired =
-    /^\$\{\{\s*steps\.([A-Za-z0-9_-]+)\.outputs\.([A-Za-z0-9_-]+)\s*\}\}$/.exec(
-      expression.trim(),
-    );
-  if (!wired) {
-    return [
-      `\`${gateJob}.outputs.${outputName}\` is \`${expression}\`, which this test cannot trace to a step`,
-    ];
-  }
-  const [, stepId, filterKey] = wired;
-
-  const filterStep = (producer.steps ?? []).find(
-    (step) => isPlainObject(step) && step.id === stepId,
-  );
-  if (!filterStep) {
-    return [`the \`${gateJob}\` job has no step with \`id: ${stepId}\``];
-  }
-  if (
-    typeof filterStep.uses !== "string" ||
-    !filterStep.uses.startsWith("dorny/paths-filter@")
-  ) {
-    return [
-      `step \`${stepId}\` is \`${filterStep.uses}\`, not the paths filter this test knows how to read`,
-    ];
-  }
-  const stepIssues = stepBlockers(filterStep);
-  if (stepIssues.length > 0) {
-    return stepIssues.map(
-      (blocker) =>
-        `step \`${stepId}\` has ${blocker}, so \`${outputName}\` may be empty and the \`scripts\` job would skip`,
-    );
-  }
-  // `base:`/`ref:` change what the filter diffs against — `base: HEAD` reports
-  // no changed files and every output goes false. Only `filters:` is proven.
-  const inputs = Object.keys(filterStep.with ?? {});
-  if (inputs.length !== 1 || inputs[0] !== "filters") {
-    return [
-      `step \`${stepId}\` passes inputs beyond \`filters:\` (${JSON.stringify(inputs)}), which can change what it compares`,
-    ];
-  }
-
-  // The value is a YAML string that itself holds a YAML document.
-  const filters = load(filterStep.with?.filters, { schema: CORE_SCHEMA });
-  if (!isPlainObject(filters)) {
-    return [`step \`${stepId}\` has no parsable \`filters:\` document`];
-  }
-  const paths = filters[filterKey];
-  if (!Array.isArray(paths)) {
-    return [
-      `the \`${filterKey}\` filter is ${JSON.stringify(paths)}, not a list of paths`,
-    ];
-  }
-
-  // dorny/paths-filter globs may be negated with a leading `!`, and a negation
-  // cancels an earlier positive for the files it matches: `["scripts/**/*.mjs",
-  // "!scripts/**"]` still literally lists the required path, so `includes()`
-  // reads it as covered while edits under scripts/ no longer trigger the job.
-  // This repo's filters use positive rules only, so any `!` entry is rejected
-  // outright rather than matched against each required path.
-  const negated = paths.filter(
-    (entry) => typeof entry === "string" && entry.startsWith("!"),
-  );
-  if (negated.length > 0) {
-    return [
-      `the \`${filterKey}\` filter uses negative patterns ${JSON.stringify(negated)}, ` +
-        "which can cancel a required path even when it is listed",
-    ];
-  }
-
-  return required.filter((entry) => !paths.includes(entry));
-}
+// `requiredPathsMissing` — the guard → output → paths-filter chain walk — was
+// retired with the rest of the reachability proof in issue #1779 PR C. It
+// existed because this checker ran inside the path-gated `scripts` job, so a
+// filter that stopped routing one of its inputs skipped the job silently. The
+// checker now runs in the unconditional `sentry-suites` job, which has no
+// filter to follow.
 
 // The command-grammar and package.json-alias predicates were moved to
 // check-sentry-suites-in-ci-core-commands.mjs and re-exported at the top of
