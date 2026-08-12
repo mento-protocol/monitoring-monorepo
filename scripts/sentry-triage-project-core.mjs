@@ -118,6 +118,13 @@ export {
   truncate,
 } from "./sentry-triage-text.mjs";
 
+// The needs-human ESCALATION contract, split into
+// scripts/sentry-triage-escalation-contract.mjs when this file reached the
+// 1000-line hard cap. It judges already-parsed, already-neutralized verdict
+// fields and imports only the text layer, so it adds no cycle and no runtime
+// dependency; re-exported here so the verdict contract stays one import surface.
+export { isDecisionReadyQuestion } from "./sentry-triage-escalation-contract.mjs";
+
 // `export … from` re-exports without binding the names locally, and the parsing
 // and validation below use several of them.
 import {
@@ -126,6 +133,7 @@ import {
   sanitizeFreeText,
   truncate,
 } from "./sentry-triage-text.mjs";
+import { isDecisionReadyQuestion } from "./sentry-triage-escalation-contract.mjs";
 
 function stripYamlQuotes(value) {
   const v = String(value ?? "").trim();
@@ -832,56 +840,6 @@ export function priorVerdictRefusal(priorToken, selectedUrl) {
   return selectedId === priorToken
     ? `the newest usable verdict comment (${selectedId}) is the one that was already on the stub before this triage round — the round posted no verdict of its own`
     : `the newest usable verdict comment (${selectedId}) predates the one recorded before this triage round (${priorToken})`;
-}
-
-// Blatant non-decision placeholders that defeat the point of a needs-human
-// escalation — "please look" is not a decision. This is a DETERMINISTIC
-// BACKSTOP against the laziest bypasses, not a full decision-quality judge (a
-// parser can't reliably assess that — the prompt makes decision quality the
-// agent's responsibility). Matched EXACTLY against the normalized question
-// (lowercased, trailing punctuation stripped) so a real "decide X or Y" that
-// merely CONTAINS one of these words is never falsely rejected.
-const NON_DECISION_QUESTIONS = new Set([
-  "",
-  "?",
-  "look",
-  "look into this",
-  "take a look",
-  "please look",
-  "please look into this",
-  "please investigate",
-  "investigate",
-  "investigate this",
-  "needs investigation",
-  "needs looking into",
-  "needs human",
-  "needs human review",
-  "needs review",
-  "review",
-  "review this",
-  "check this",
-  "tbd",
-  "todo",
-  "n/a",
-  "na",
-  "none",
-  "unknown",
-  "unsure",
-]);
-
-/** Normalize a human_question for the placeholder check: single-line, lowered,
- * trailing sentence punctuation stripped. */
-function normalizeHumanQuestion(text) {
-  return sanitizeFreeText(text)
-    .toLowerCase()
-    .replace(/[.!?]+$/, "")
-    .trim();
-}
-
-/** True when a needs-human `human_question` is a real decision request (present
- * and not a blatant non-decision placeholder). */
-export function isDecisionReadyQuestion(text) {
-  return !NON_DECISION_QUESTIONS.has(normalizeHumanQuestion(text));
 }
 
 /**

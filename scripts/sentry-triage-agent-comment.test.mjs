@@ -509,6 +509,11 @@ test("the wrapper's runtime closure is exactly what the workflow stages", () => 
   const closure = importClosure("sentry-triage-agent-comment.mjs");
   assert.deepEqual(closure, [
     "sentry-triage-agent-comment.mjs",
+    // The needs-human escalation rules the verdict contract re-exports (#1782
+    // split, when project-core hit the 1000-line hard cap). Pure predicates over
+    // parsed fields, but the verdict contract imports them, so they are staged
+    // with it.
+    "sentry-triage-escalation-contract.mjs",
     "sentry-triage-project-core.mjs",
     // The neutralization helpers the verdict contract re-exports (#1748 split);
     // the wrapper reaches them through that module, so they are part of the

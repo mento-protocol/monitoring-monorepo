@@ -1714,6 +1714,7 @@ await test("the brief leg is not a stub-body writer, and owns its marker alone",
 await test("the pipeline's shared modules stay under the file-size hard cap", () => {
   const oversized = [
     "scripts/sentry-triage-project-core.mjs",
+    "scripts/sentry-triage-escalation-contract.mjs",
     "scripts/sentry-triage-text.mjs",
     "scripts/sentry-triage-brief.mjs",
     "scripts/sentry-triage-brief-render.mjs",
