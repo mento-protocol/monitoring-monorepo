@@ -520,20 +520,30 @@ gate_lock_owner_field() {
 }
 
 # The kernel's own start-time string for a PID, used verbatim. Comparing it as
-# a string keeps this free of date parsing and self-consistent per host; the
-# only thing that matters is that the same command produced both sides.
+# a string keeps this free of date parsing; what makes that sound is pinning
+# the formatting environment, because `ps` renders lstart in the caller's TZ
+# and locale — `TZ=America/New_York` moves the clock, and a non-C LC_ALL
+# rewrites the whole format ("Mi. 12 Aug."). Two runs with different
+# environments would otherwise read one live process as two identities and
+# reclaim a lock out from under it. Recorded under the same pin it is compared
+# with, and stored as `start_utc` so a record from a gate that predates this
+# pinning is simply not read as one (see gate_lock_holder_is_live).
 gate_lock_process_start() {
   local pid="$1"
   [[ -n "$pid" ]] || return 0
-  ps -o lstart= -p "$pid" 2>/dev/null | head -n1
+  TZ=UTC LC_ALL=C ps -o lstart= -p "$pid" 2>/dev/null | head -n1
 }
 
 # Is this PID still the process that recorded itself? `kill -0` alone cannot
 # say: PIDs are reused, and a recycled one would make every later run wait on
 # an unrelated process until --lock-wait expired — the opposite of unattended
 # recovery. When a start time is unavailable on either side (a sandbox without
-# ps, an older lock), this falls back to PID existence, which is the safe
-# direction: we keep waiting rather than evict a run that may be alive.
+# ps, a lock written before `start_utc` existed), this falls back to PID
+# existence, which is the safe direction: we keep waiting rather than evict a
+# run that may be alive. That fallback is also what makes a mixed-version
+# window safe in both directions — neither gate can read the other's
+# start-time field, so each degrades to "assume live" and times out, and a
+# false stale on a live holder stays impossible.
 gate_lock_holder_is_live() {
   local pid="$1"
   local recorded_start="$2"
@@ -557,7 +567,7 @@ gate_lock_record_still_stale() {
   local current_pid current_token current_start
   current_pid="$(gate_lock_field_from_file "$record" pid)"
   current_token="$(gate_lock_field_from_file "$record" token)"
-  current_start="$(gate_lock_field_from_file "$record" start)"
+  current_start="$(gate_lock_field_from_file "$record" start_utc)"
   [[ "$current_pid" == "$decided_pid" ]] || return 1
   [[ "$current_token" == "$decided_token" ]] || return 1
   [[ "$current_start" == "$decided_start" ]] || return 1
@@ -591,7 +601,7 @@ claim_gate_run_lock() {
     printf 'pid=%s\n' "$$"
     printf 'host=%s\n' "$(uname -n)"
     printf 'started_at=%s\n' "$(date +%s)"
-    printf 'start=%s\n' "$(gate_lock_process_start $$)"
+    printf 'start_utc=%s\n' "$(gate_lock_process_start $$)"
     printf 'worktree=%s\n' "$repo_root"
     # Written last on purpose: a record without a token is one whose write did
     # not finish, and readers below treat it as no record at all.
@@ -624,7 +634,7 @@ release_gate_run_lock() {
 
 acquire_gate_run_lock() {
   local root lock owner_pid owner_host owner_worktree owner_token owner_start
-  local stale_reason
+  local stale_reason nap remaining
   local waited=0
   local announced=0
   local ownerless_since=""
@@ -665,7 +675,7 @@ acquire_gate_run_lock() {
     owner_host="$(gate_lock_owner_field "$lock" host)"
     owner_worktree="$(gate_lock_owner_field "$lock" worktree)"
     owner_token="$(gate_lock_owner_field "$lock" token)"
-    owner_start="$(gate_lock_owner_field "$lock" start)"
+    owner_start="$(gate_lock_owner_field "$lock" start_utc)"
     stale_reason=""
     [[ -n "$owner_token" ]] && ownerless_since=""
     if [[ -z "$owner_token" ]]; then
@@ -766,8 +776,15 @@ acquire_gate_run_lock() {
       echo "Pushing? Warm the stamps with 'pnpm agent:quality-gate --run' first, then push: --skip-if-fresh cache-hits and exits before this lock." >&2
       exit 2
     fi
-    sleep "$gate_lock_poll_seconds"
-    waited=$((waited + gate_lock_poll_seconds))
+    # Never sleep past the budget: with a wait shorter than — or not divisible
+    # by — the poll interval, a full-interval sleep would overshoot and then
+    # report the overshoot as the elapsed time. Capping keeps `--lock-wait 1`
+    # honest at one second, and leaves ordinary waits at a full interval.
+    nap="$gate_lock_poll_seconds"
+    remaining=$((gate_lock_wait_seconds - waited))
+    [[ "$nap" -le "$remaining" ]] || nap="$remaining"
+    sleep "$nap"
+    waited=$((waited + nap))
   done
 }
 

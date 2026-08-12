@@ -5109,7 +5109,9 @@ STUB
   # later run waits on an unrelated process until --lock-wait expires — the
   # opposite of unattended recovery. Both directions matter: reclaim a record
   # whose PID has been reused, and never evict a holder that is genuinely it.
-  race_lock_start="$(ps -o lstart= -p $$ 2>/dev/null | head -n1)"
+  # Recorded exactly as the gate records it. `ps` renders lstart in the
+  # caller's TZ and locale, so the pin is part of the identity, not decoration.
+  race_lock_start="$(TZ=UTC LC_ALL=C ps -o lstart= -p $$ 2>/dev/null | head -n1)"
   if [[ -n "$race_lock_start" ]]; then
     rm -rf "$gate_race_root/run.lock"
     : > "$gate_race_log"
@@ -5120,7 +5122,7 @@ STUB
       printf 'pid=%s\n' "$$"
       printf 'host=%s\n' "$(uname -n)"
       printf 'started_at=%s\n' "$(date +%s)"
-      printf 'start=%s\n' "Thu Jan  1 00:00:00 1970"
+      printf 'start_utc=%s\n' "Thu Jan  1 00:00:00 1970"
       printf 'worktree=%s\n' "$gate_race_repo"
       printf 'token=recycled-pid\n'
     } > "$gate_race_root/run.lock/owner"
@@ -5131,8 +5133,42 @@ STUB
     [[ ! -d "$gate_race_root/run.lock" ]] ||
       fail "the run that reclaimed a reused-PID lock must release it"
 
-    # The control: same live PID, but the start time this process really has.
-    # That is the holder, and it must be respected until the wait runs out.
+    # The control: same live PID, the start time this process really has — and
+    # a waiter running in a different timezone and locale from the one that
+    # recorded it. `ps` renders lstart in the caller's environment, so an
+    # unpinned comparison reads one live process as two identities and evicts
+    # a holder mid-run. Each waiter here must sit and wait instead.
+    for race_tz in "UTC:C" "America/New_York:C" "Asia/Tokyo:de_DE.UTF-8"; do
+      mkdir -p "$gate_race_root/run.lock"
+      {
+        printf 'pid=%s\n' "$$"
+        printf 'host=%s\n' "$(uname -n)"
+        printf 'started_at=%s\n' "$(date +%s)"
+        printf 'start_utc=%s\n' "$race_lock_start"
+        printf 'worktree=%s\n' "$gate_race_repo"
+        printf 'token=real-holder\n'
+      } > "$gate_race_root/run.lock/owner"
+      TZ="${race_tz%%:*}" \
+        LC_ALL="${race_tz##*:}" \
+        AGENT_QUALITY_GATE_LOCK=1 \
+        AGENT_QUALITY_GATE_LOCK_HELD='' \
+        AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+        AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+        "$repo_root/scripts/agent-quality-gate.sh" \
+        --base HEAD --run --lock-wait 2 \
+        > "$gate_race_repo/genuine.out" 2>&1 || true
+      grep -q "timed out after" "$gate_race_repo/genuine.out" ||
+        fail "a holder whose recorded start time still matches must be waited for (${race_tz})"
+      grep -q "reclaiming it" "$gate_race_repo/genuine.out" &&
+        fail "a live holder must never be reclaimed over a timezone or locale difference (${race_tz})"
+      [[ -d "$gate_race_root/run.lock" ]] ||
+        fail "a waiter must leave a genuine holder's lock in place (${race_tz})"
+      rm -rf "$gate_race_root/run.lock"
+    done
+
+    # A record from a gate that predates the pinned field carries no readable
+    # start time. Liveness must fall back to PID existence and WAIT, never
+    # decide a live holder is stale because it cannot read its identity.
     mkdir -p "$gate_race_root/run.lock"
     {
       printf 'pid=%s\n' "$$"
@@ -5140,7 +5176,7 @@ STUB
       printf 'started_at=%s\n' "$(date +%s)"
       printf 'start=%s\n' "$race_lock_start"
       printf 'worktree=%s\n' "$gate_race_repo"
-      printf 'token=real-holder\n'
+      printf 'token=legacy-record\n'
     } > "$gate_race_root/run.lock/owner"
     AGENT_QUALITY_GATE_LOCK=1 \
       AGENT_QUALITY_GATE_LOCK_HELD='' \
@@ -5148,13 +5184,36 @@ STUB
       AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
       "$repo_root/scripts/agent-quality-gate.sh" \
       --base HEAD --run --lock-wait 2 \
-      > "$gate_race_repo/genuine.out" 2>&1 || true
-    grep -q "timed out after" "$gate_race_repo/genuine.out" ||
-      fail "a holder whose recorded start time still matches must be waited for"
-    grep -q "reclaiming it" "$gate_race_repo/genuine.out" &&
-      fail "a live holder with a matching start time must never be reclaimed"
+      > "$gate_race_repo/legacy.out" 2>&1 || true
+    grep -q "reclaiming it" "$gate_race_repo/legacy.out" &&
+      fail "an unreadable start time must fail safe to waiting, not to reclaiming"
     [[ -d "$gate_race_root/run.lock" ]] ||
-      fail "a waiter must leave a genuine holder's lock in place"
+      fail "a waiter must leave a pre-pinning holder's lock in place"
+    rm -rf "$gate_race_root/run.lock"
+
+    # The budget is a promise: a wait shorter than the poll interval must not
+    # sleep past it and then report the overshoot as the elapsed time.
+    mkdir -p "$gate_race_root/run.lock"
+    {
+      printf 'pid=%s\n' "$$"
+      printf 'host=%s\n' "$(uname -n)"
+      printf 'started_at=%s\n' "$(date +%s)"
+      printf 'start_utc=%s\n' "$race_lock_start"
+      printf 'worktree=%s\n' "$gate_race_repo"
+      printf 'token=real-holder\n'
+    } > "$gate_race_root/run.lock/owner"
+    race_wait_started="$(date +%s)"
+    AGENT_QUALITY_GATE_LOCK=1 \
+      AGENT_QUALITY_GATE_LOCK_HELD='' \
+      AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+      AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=5 \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+      --base HEAD --run --lock-wait 1 \
+      > "$gate_race_repo/shortwait.out" 2>&1 || true
+    grep -q "timed out after 1s" "$gate_race_repo/shortwait.out" ||
+      fail "a 1s budget under a 5s poll must report the budget it actually kept"
+    [[ $(($(date +%s) - race_wait_started)) -lt 5 ]] ||
+      fail "a 1s budget under a 5s poll must not sleep a full interval"
     rm -rf "$gate_race_root/run.lock"
   fi
 
