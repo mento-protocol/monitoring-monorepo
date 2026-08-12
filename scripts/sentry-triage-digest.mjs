@@ -540,8 +540,10 @@ function renderWontfixLine(entry) {
     ? formatSummaryForSlack(entry.summary)
     : "_(no summary)_";
   // The SHORT-ID links the queue issue, which holds the verdict comment (the
-  // rationale). Confidence rides along.
-  return `• ${linked}${projectSuffix} — ${summary} (${confidence})`;
+  // rationale). Confidence is LABELLED, not a bare parenthetical: on its own
+  // `(medium)` reads as part of the summary sentence rather than as the agent's
+  // self-assessment of its own verdict.
+  return `• ${linked}${projectSuffix} — ${summary} [confidence: ${confidence}]`;
 }
 
 function renderFailedLine(entry) {

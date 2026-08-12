@@ -1064,7 +1064,7 @@ await test("wontfix line links the queue-issue rationale with confidence", () =>
   // it is information here, not a repeat of the id.
   assert(
     text.includes(
-      "• <https://github.com/mento-protocol/monitoring-monorepo/issues/14|UP-14> (app-mento-org) — third-party outage (high)",
+      "• <https://github.com/mento-protocol/monitoring-monorepo/issues/14|UP-14> (app-mento-org) — third-party outage [confidence: high]",
     ),
     "expected the wontfix line linking the queue issue",
   );
@@ -1549,6 +1549,37 @@ await test("the archive nudge appears once, and only when something is archivabl
   assert(
     !none.includes("To archive"),
     "no archivable entries means no archive nudge at all",
+  );
+});
+
+await test("confidence is labelled, never a bare parenthetical", () => {
+  // `— summary (medium)` reads as part of the sentence. The value is the
+  // agent's self-assessment of its own verdict, so it has to say what it is.
+  const text = allText(
+    buildDigest(
+      [
+        issueFixture({
+          number: 21,
+          shortId: "UP-21",
+          labels: ["sentry:verdict-upstream"],
+          comments: [
+            {
+              body: verdictComment({
+                verdict: "upstream-transient",
+                confidence: "medium",
+                summary: "a third-party outage",
+              }),
+            },
+          ],
+        }),
+      ],
+      { channel: "#c" },
+    ),
+  );
+  assert(text.includes("[confidence: medium]"), "expected a labelled value");
+  assert(
+    !/outage \(medium\)/.test(text),
+    "the bare parenthetical must not come back",
   );
 });
 
