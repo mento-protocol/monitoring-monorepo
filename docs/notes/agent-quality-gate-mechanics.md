@@ -182,11 +182,13 @@ exist because contention — not flakiness — produced the failures in issue
 (`$HOME/.cache/agent-quality-gate/run.lock`, falling back to
 `$TMPDIR/agent-quality-gate-<uid>`; override with
 `AGENT_QUALITY_GATE_LOCK_DIR`) before it executes anything, and releases it on
-exit. `mkdir(2)` and `O_EXCL` are the primitives because macOS has no
-`flock(1)`, BSD `mv` has no `-T` — `mv src dir` moves `src` _inside_ an
-existing `dir` instead of failing, so a rename can never be a conditional
-claim here — and the repo's floor is Bash 3.2. A second run prints the
-holder's PID, host, and worktree, then waits — bounded by `--lock-wait` / `AGENT_QUALITY_GATE_LOCK_WAIT_SECONDS`,
+exit. `mkdir(2)`, `O_EXCL` and `rename(2)` are the primitives because macOS has
+no `flock(1)` and the repo's floor is Bash 3.2. Renaming applies to the owner
+_file_ only: `mv src dir` moves `src` _inside_ an existing `dir` instead of
+failing, so a rename is never a conditional claim on a directory here — but
+renaming a regular file away fails with `ENOENT` for whoever arrives second,
+which is exactly the test-and-set the reclaim path needs. A second run prints
+the holder's PID, host, and worktree, then waits — bounded by `--lock-wait` / `AGENT_QUALITY_GATE_LOCK_WAIT_SECONDS`,
 1800 seconds by default — and exits 2 naming that holder if the wait runs out.
 Nothing that will not execute mapped commands ever competes for the lock: a dry
 run, a `--skip-if-fresh` cache hit, and a package-script refusal all exit
@@ -199,23 +201,32 @@ believes it holds it, and no waiter ever removes or renames another run's
 lock.** Three rules carry that. A holder is made in two atomic steps — win
 `mkdir` on the lock path, then create `owner` with `O_EXCL` — so a creator
 descheduled between them finds its exclusive write refused and queues instead
-of running beside whoever took over. A waiter that judges a lock stale must
-first win a `mkdir` election on `run.lock/reclaim`, then **re-read the owner
-record and confirm it is still the same dead identity it judged**; a verdict
-formed before winning the election is worthless, because another reclaimer may
-have taken the lock over in between. Only then does it drop that record and
-claim, again with `O_EXCL`. Nothing renames or deletes a lock directory except
-the run that owns it.
+of running beside whoever took over. A waiter that judges a lock stale takes
+that record away by rename before it may write its own, and exactly one waiter
+can win a given record because the source vanishes with the rename; it then
+**re-reads what it took and proceeds only if it is still the identity it
+judged**, because a verdict formed before winning is worthless. A record taken
+by mistake goes back through `ln`, which refuses an occupied path, so a record
+written in the meantime is never clobbered. Nothing renames or deletes a lock
+directory except the run that owns it.
+
+Liveness is an identity check, not a PID check. `kill -0` succeeds on whatever
+inherited a dead holder's PID, and a recycled PID would make every later run
+wait on an unrelated process until `--lock-wait` expired — the opposite of
+unattended recovery. So the owner record stores the kernel's own start-time
+string for the holder (`ps -o lstart=`), compared verbatim: same PID and same
+start string means the holder, same PID with a different start string means
+the PID was reused and the lock is stale. Where no start time is available on
+either side — a sandbox without `ps`, a lock written by an older gate — this
+falls back to PID existence, which errs toward waiting rather than evicting.
 
 A killed holder cannot release its own lock, so recovery is explicit rather
-than time-based: the lock records the holder's PID, and a waiter that finds
-that PID gone takes the lock over in place. `kill -9` on a gate run therefore
-costs the next run one line of output, never manual cleanup. The one state
-that does need a hand is a reclaimer `kill -9`ed inside the milliseconds it
-holds `run.lock/reclaim` — no waiter can break that marker without reopening
-the race it exists to close, so the gate fails closed after five polls and
-prints the exact `rm -rf` to run. A signal the process can catch clears the
-marker on the way out, which leaves `SIGKILL` as the only way in.
+than time-based: a waiter that finds the recorded holder gone takes the record
+away and claims. `kill -9` on a gate run therefore costs the next run one line
+of output, never manual cleanup, and there is no state a signal can leave that
+needs a hand: the temp path a reclaim renames into is registered with the exit
+trap **before** the rename creates it, and cleanup restores rather than deletes,
+so an interrupted reclaim puts the record back exactly as it found it.
 
 A lock whose owner record never appeared — a run killed between `mkdir` and
 its write leaves exactly that — counts as abandoned after a 30-second grace.

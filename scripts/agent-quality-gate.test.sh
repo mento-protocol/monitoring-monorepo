@@ -5097,6 +5097,134 @@ STUB
     fail "a creator whose lock was reclaimed mid-claim must queue, not run"
   [[ ! -d "$gate_race_root/run.lock" ]] ||
     fail "both race runs finished; the lock must not be left behind"
+
+  # `kill -0` cannot tell a holder from whatever inherited its PID after it
+  # died. A recycled PID reads as alive, so without a start-time identity every
+  # later run waits on an unrelated process until --lock-wait expires — the
+  # opposite of unattended recovery. Both directions matter: reclaim a record
+  # whose PID has been reused, and never evict a holder that is genuinely it.
+  race_lock_start="$(ps -o lstart= -p $$ 2>/dev/null | head -n1)"
+  if [[ -n "$race_lock_start" ]]; then
+    rm -rf "$gate_race_root/run.lock"
+    : > "$gate_race_log"
+    mkdir -p "$gate_race_root/run.lock"
+    {
+      # This shell is alive, so `kill -0` succeeds — but it is not the process
+      # the record describes, and the recorded start time says so.
+      printf 'pid=%s\n' "$$"
+      printf 'host=%s\n' "$(uname -n)"
+      printf 'started_at=%s\n' "$(date +%s)"
+      printf 'start=%s\n' "Thu Jan  1 00:00:00 1970"
+      printf 'worktree=%s\n' "$gate_race_repo"
+      printf 'token=recycled-pid\n'
+    } > "$gate_race_root/run.lock/owner"
+    race_waiter recycled 0 0
+    grep -q "pid $$ now belongs to a different process" \
+      "$gate_race_repo/recycled.out" ||
+      fail "a reused PID must read as stale, not as the original holder"
+    [[ ! -d "$gate_race_root/run.lock" ]] ||
+      fail "the run that reclaimed a reused-PID lock must release it"
+
+    # The control: same live PID, but the start time this process really has.
+    # That is the holder, and it must be respected until the wait runs out.
+    mkdir -p "$gate_race_root/run.lock"
+    {
+      printf 'pid=%s\n' "$$"
+      printf 'host=%s\n' "$(uname -n)"
+      printf 'started_at=%s\n' "$(date +%s)"
+      printf 'start=%s\n' "$race_lock_start"
+      printf 'worktree=%s\n' "$gate_race_repo"
+      printf 'token=real-holder\n'
+    } > "$gate_race_root/run.lock/owner"
+    AGENT_QUALITY_GATE_LOCK=1 \
+      AGENT_QUALITY_GATE_LOCK_HELD='' \
+      AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+      --base HEAD --run --lock-wait 5 \
+      > "$gate_race_repo/genuine.out" 2>&1 || true
+    grep -q "timed out after" "$gate_race_repo/genuine.out" ||
+      fail "a holder whose recorded start time still matches must be waited for"
+    grep -q "reclaiming it" "$gate_race_repo/genuine.out" &&
+      fail "a live holder with a matching start time must never be reclaimed"
+    [[ -d "$gate_race_root/run.lock" ]] ||
+      fail "a waiter must leave a genuine holder's lock in place"
+    rm -rf "$gate_race_root/run.lock"
+  fi
+
+  # A reclaim takes the dead record away by rename before writing its own. The
+  # temp path is registered with the exit trap before that rename creates it,
+  # so a signal landing anywhere in the window cannot orphan it — and cleanup
+  # puts the record back rather than deleting it, because a record taken but
+  # not yet judged may still name a live holder.
+  taken_record_present() {
+    [[ -n "$(find "$gate_race_root/run.lock" -name 'owner.reclaiming.*' 2>/dev/null)" ]]
+  }
+
+  await_taken_record() {
+    local i=0
+    while [[ $i -lt 60 ]]; do
+      taken_record_present && return 0
+      sleep 0.5
+      i=$((i + 1))
+    done
+    return 1
+  }
+
+  interrupt_reclaim() {
+    local tag="$1"
+    local reclaim_delay="$2"
+    local taken_delay="$3"
+    local pid
+    rm -rf "$gate_race_root/run.lock"
+    mkdir -p "$gate_race_root/run.lock"
+    {
+      printf 'pid=%s\n' "$race_dead_pid"
+      printf 'host=%s\n' "$(uname -n)"
+      printf 'started_at=%s\n' "$(date +%s)"
+      printf 'worktree=%s\n' "$gate_race_repo"
+      printf 'token=fixture-holder\n'
+    } > "$gate_race_root/run.lock/owner"
+    AGENT_QUALITY_GATE_LOCK=1 \
+      AGENT_QUALITY_GATE_LOCK_HELD='' \
+      AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+      AGENT_QUALITY_GATE_LOCK_RECLAIM_DELAY_SECONDS="$reclaim_delay" \
+      AGENT_QUALITY_GATE_LOCK_TAKEN_DELAY_SECONDS="$taken_delay" \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+      --base HEAD --run --lock-wait 60 \
+      > "$gate_race_repo/$tag.out" 2>&1 &
+    pid=$!
+    if [[ "$taken_delay" != "0" ]]; then
+      # Kill it precisely while it holds the record, or the assertions below
+      # would pass without the window ever being entered.
+      await_taken_record ||
+        fail "${tag}: the reclaim never reached the window this test interrupts"
+    else
+      sleep 3
+      ! taken_record_present ||
+        fail "${tag}: expected the record to be untouched at this point"
+    fi
+    kill -TERM "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+    ! taken_record_present ||
+      fail "${tag}: an interrupted reclaim must not orphan its temp record"
+    [[ -r "$gate_race_root/run.lock/owner" ]] ||
+      fail "${tag}: an interrupted reclaim must leave the owner record in place"
+    [[ "$(sed -n 's/^token=//p' "$gate_race_root/run.lock/owner" | head -n1)" == "fixture-holder" ]] ||
+      fail "${tag}: the restored record must be the one the reclaim took"
+  }
+
+  # Interrupted before the rename: nothing was created, and the path already
+  # registered with the trap must not confuse cleanup.
+  interrupt_reclaim interrupted-before 8 0
+  # Interrupted while holding the record it took: cleanup restores it.
+  interrupt_reclaim interrupted-holding 0 8
+
+  # And the lock still recovers normally afterwards.
+  race_waiter recovered 0 0
+  grep -q "reclaiming it" "$gate_race_repo/recovered.out" ||
+    fail "a lock left by an interrupted reclaim must still be reclaimable"
+  [[ ! -d "$gate_race_root/run.lock" ]] ||
+    fail "the recovering run must release the lock it acquired"
 )
 rm -rf "$gate_race_repo" "$gate_race_root"
 
