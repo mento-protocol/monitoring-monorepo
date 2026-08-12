@@ -473,7 +473,10 @@ restore_gate_lock_record() {
 # after its lock was reclaimed fails its own O_EXCL owner write and queues
 # instead of running. The grace only keeps churn down.
 gate_lock_owner_grace_seconds="${AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS:-30}"
-gate_lock_poll_seconds=5
+# Whole seconds: the wait budget is accounted in integer seconds. Tunable for
+# the same reason as the grace — the self-test asserts that waiting happens,
+# not that it takes five seconds a round.
+gate_lock_poll_seconds="${AGENT_QUALITY_GATE_LOCK_POLL_SECONDS:-5}"
 
 # Test-only. The self-test sets these to widen otherwise sub-millisecond
 # windows so the interleavings they permit can be exercised deterministically.

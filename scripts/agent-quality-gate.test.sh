@@ -4896,8 +4896,9 @@ STUB
     AGENT_QUALITY_GATE_LOCK=1 \
       AGENT_QUALITY_GATE_LOCK_HELD='' \
       AGENT_QUALITY_GATE_LOCK_DIR="$gate_lock_root" \
+      AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
       "$repo_root/scripts/agent-quality-gate.sh" \
-      --base HEAD --run --lock-wait 5 "$@" \
+      --base HEAD --run --lock-wait 2 "$@" \
       > "$output_file" 2>&1
     local exit_code=$?
     set -e
@@ -4998,11 +4999,15 @@ gate_race_log="$gate_race_repo/race.log"
   git config user.name "Quality Gate Test"
   printf 'fixture\n' > fixture.txt
   mkdir -p tools
+  # The two contention cases need this to outlast the stagger between their
+  # waiters, or two unexcluded runs would simply miss each other and the
+  # assertion would pass on broken code. Every other case only needs the gate
+  # to execute something, so they run it at its cheap default.
   cat > tools/trunk <<STUB
 #!/usr/bin/env bash
-printf 'enter %s %s\n' "\$\$" "\$(date +%s)" >> "$gate_race_log"
-sleep 4
-printf 'exit %s %s\n' "\$\$" "\$(date +%s)" >> "$gate_race_log"
+printf 'enter %s\n' "\$\$" >> "$gate_race_log"
+sleep "\${RACE_STUB_SECONDS:-1}"
+printf 'exit %s\n' "\$\$" >> "$gate_race_log"
 exit 0
 STUB
   chmod +x tools/trunk
@@ -5012,11 +5017,16 @@ STUB
 
   race_waiter() {
     # AGENT_QUALITY_GATE_LOCK_HELD is cleared for the same reason as above: an
-    # inherited marker would make every assertion here pass vacuously.
-    AGENT_QUALITY_GATE_LOCK=1 \
+    # inherited marker would make every assertion here pass vacuously. The
+    # grace and poll are shrunk to keep this suite inside its CI job budget:
+    # every case below asserts that waiting and grace-respecting happen, never
+    # that they take the production number of seconds.
+    RACE_STUB_SECONDS="${4:-1}" \
+      AGENT_QUALITY_GATE_LOCK=1 \
       AGENT_QUALITY_GATE_LOCK_HELD='' \
       AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
-      AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=4 \
+      AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
+      AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
       AGENT_QUALITY_GATE_LOCK_RECLAIM_DELAY_SECONDS="$2" \
       AGENT_QUALITY_GATE_LOCK_CLAIM_DELAY_SECONDS="$3" \
       "$repo_root/scripts/agent-quality-gate.sh" \
@@ -5027,20 +5037,16 @@ STUB
   assert_runs_did_not_overlap() {
     local label="$1"
     local overlapping starts
+    # Nesting in the shared append-only log, not elapsed time: an `enter` while
+    # another run is still between its own enter and exit is an overlap, at any
+    # clock resolution. That keeps the fixture command short without weakening
+    # the assertion.
     overlapping="$(awk '
-      /^enter/ { start[$2] = $3; order[++n] = $2 }
-      /^exit/ { stop[$2] = $3 }
-      END {
-        for (i = 1; i <= n; i++) {
-          for (j = i + 1; j <= n; j++) {
-            p = order[i]
-            q = order[j]
-            if ((p in stop) && (q in stop) && start[p] < stop[q] && start[q] < stop[p]) {
-              print p " " q
-            }
-          }
-        }
+      /^enter/ {
+        if (depth > 0) { print "nested at " $2 }
+        depth++
       }
+      /^exit/ { depth-- }
     ' "$gate_race_log")"
     [[ -z "$overlapping" ]] ||
       fail "${label}: two gate runs executed mapped commands at once (${overlapping})"
@@ -5064,10 +5070,10 @@ STUB
     printf 'token=fixture-holder\n'
   } > "$gate_race_root/run.lock/owner"
   : > "$gate_race_log"
-  race_waiter late 6 0 &
+  race_waiter late 4 0 4 &
   race_late=$!
   sleep 2
-  race_waiter early 0 0 &
+  race_waiter early 0 0 4 &
   race_early=$!
   wait "$race_late" 2>/dev/null || true
   wait "$race_early" 2>/dev/null || true
@@ -5084,10 +5090,10 @@ STUB
   # resume that the lock is no longer its own instead of running beside it.
   rm -rf "$gate_race_root/run.lock"
   : > "$gate_race_log"
-  race_waiter stalled 0 8 &
+  race_waiter stalled 0 5 4 &
   race_stalled=$!
   sleep 1
-  race_waiter reclaimer 0 0 &
+  race_waiter reclaimer 0 0 4 &
   race_reclaimer=$!
   wait "$race_stalled" 2>/dev/null || true
   wait "$race_reclaimer" 2>/dev/null || true
@@ -5139,8 +5145,9 @@ STUB
     AGENT_QUALITY_GATE_LOCK=1 \
       AGENT_QUALITY_GATE_LOCK_HELD='' \
       AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+      AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
       "$repo_root/scripts/agent-quality-gate.sh" \
-      --base HEAD --run --lock-wait 5 \
+      --base HEAD --run --lock-wait 2 \
       > "$gate_race_repo/genuine.out" 2>&1 || true
     grep -q "timed out after" "$gate_race_repo/genuine.out" ||
       fail "a holder whose recorded start time still matches must be waited for"
@@ -5206,6 +5213,7 @@ STUB
     AGENT_QUALITY_GATE_LOCK=1 \
       AGENT_QUALITY_GATE_LOCK_HELD='' \
       AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+      AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
       AGENT_QUALITY_GATE_LOCK_RECLAIM_DELAY_SECONDS="$reclaim_delay" \
       AGENT_QUALITY_GATE_LOCK_TAKEN_DELAY_SECONDS="$taken_delay" \
       "$repo_root/scripts/agent-quality-gate.sh" \
@@ -5218,7 +5226,7 @@ STUB
       await_taken_record ||
         fail "${tag}: the reclaim never reached the window this test interrupts"
     else
-      sleep 3
+      sleep 2
       ! taken_record_present ||
         fail "${tag}: expected the record to be untouched at this point"
     fi
@@ -5234,9 +5242,9 @@ STUB
 
   # Interrupted before the rename: nothing was created, and the path already
   # registered with the trap must not confuse cleanup.
-  interrupt_reclaim interrupted-before 8 0
+  interrupt_reclaim interrupted-before 5 0
   # Interrupted while holding the record it took: cleanup restores it.
-  interrupt_reclaim interrupted-holding 0 8
+  interrupt_reclaim interrupted-holding 0 5
 
   # And the lock still recovers normally afterwards.
   race_waiter recovered 0 0
