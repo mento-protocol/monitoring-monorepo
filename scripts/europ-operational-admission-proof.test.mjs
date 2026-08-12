@@ -106,6 +106,16 @@ test("EUROP proof runner owns its execution endpoint and never embeds signing ma
     /\$\{[^}]+,,\}/u,
     "the runner must remain Bash 3.2-compatible",
   );
+  assert.doesNotMatch(
+    source,
+    /\bseq\b/u,
+    "the runner must not require a non-Bash sequence utility",
+  );
+  assert.match(
+    source,
+    /cycle=1\n {2}while \[\[ "\$cycle" -le "\$proof_cycles" \]\]; do/u,
+  );
+  assert.match(source, /cycle="\$\(\(cycle \+ 1\)\)"/u);
   assert.match(source, /trap cleanup EXIT INT TERM/u);
   assert.match(source, /\.tmp\/europ-operational-admission-proof/u);
 });

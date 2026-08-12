@@ -397,7 +397,8 @@ run_witness_scenario() {
   start_fresh_fork "witness" "$proof_witness_port"
   prepare_witness_seed
 
-  for cycle in $(seq 1 "$proof_cycles"); do
+  cycle=1
+  while [[ "$cycle" -le "$proof_cycles" ]]; do
     cycle_timestamp="$((proof_start_timestamp + (cycle - 1) * proof_cycle_seconds))"
     quote="$(read_uint "$proof_pool" 'getAmountOut(uint256,address)(uint256)' "$proof_europ_input_per_cycle" "$proof_europ")"
     [[ "$quote" == "$proof_eurm_output_per_cycle" ]] || fail "cycle $cycle quote was not exactly 1,999 EURm"
@@ -411,6 +412,7 @@ run_witness_scenario() {
     fi
     cast call --rpc-url "$proof_rpc" "$proof_reserve_strategy" 'rebalance(address)' "$proof_pool" >/dev/null
     send_unlocked_at "$rebalance_timestamp" "reserve-rebalance" "$proof_trader" "$proof_reserve_strategy" 'rebalance(address)' "$proof_pool"
+    cycle="$((cycle + 1))"
   done
 
   final_timestamp="$proof_last_timestamp"
