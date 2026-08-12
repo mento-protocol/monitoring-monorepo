@@ -1536,6 +1536,35 @@ await test("the triage prompt asks for the two new fields", () => {
   }
 });
 
+await test("the triage prompt states a fix_scope: architectural verdict leaves the stub OPEN as human design work (#1812 Finding 4)", () => {
+  // The classifier must understand the CONSEQUENCE of writing `architectural`:
+  // the stub is not closed and not autofixed — settlement leaves it OPEN under
+  // sentry:fix-scope-architectural as human backlog. A prompt still telling the
+  // agent the stub "closes as a ledger entry" (the pre-#1812 behaviour) would
+  // misdescribe the outcome it is choosing. Collapse whitespace so the assertion
+  // survives line wrapping in the prose bullet.
+  const prompt = readRepoFile(".github/prompts/sentry-triage.md").replace(
+    /\s+/g,
+    " ",
+  );
+  assert(
+    prompt.includes("sentry:fix-scope-architectural"),
+    "the prompt must name the sentry:fix-scope-architectural settlement label",
+  );
+  assert(
+    prompt.includes("leaves it OPEN as human design work"),
+    "the prompt must state the architectural stub stays OPEN as human design work",
+  );
+  assert(
+    prompt.includes("the stub is NOT closed"),
+    "the prompt must state the architectural stub is NOT closed",
+  );
+  assert(
+    prompt.includes("never autofixed"),
+    "the prompt must state the architectural stub is never autofixed",
+  );
+});
+
 await test("the pipeline doc records the two new fields and the brief leg", () => {
   const doc = readRepoFile("docs/notes/sentry-triage-pipeline.md");
   for (const needle of [

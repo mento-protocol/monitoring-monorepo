@@ -390,11 +390,15 @@ export const MAX_REVERSE_VERIFY_READS = 40;
  * terminal sibling Q pulls Q into P's family, where the caller's handled-recheck
  * can then read Q's own marker and stand the family down; probing P alone left
  * Q's edge on the floor). An admitted hit that ALSO carries a terminal marker
- * becomes a BLOCKER (its key joins handledShortIds) directly — UNLESS it carries
- * the architectural hold, in which case it stays a pure CONNECTOR (#1812): edges
- * only, never a blocker, because an architectural stub holds no terminal
- * decision. That restores the edge-carrier role the window's label exclusion
- * removed from the family graph.
+ * (fix-pr-opened / fix-refused) becomes a BLOCKER (its key joins
+ * handledShortIds) directly: a present terminal marker WINS over the
+ * architectural hold (#1812 Finding 3), because it means a real terminal
+ * outcome — an open PR, or a refusal — and a mechanical sibling must not start a
+ * duplicate. The architectural hold makes a stub a pure CONNECTOR — edges only,
+ * never a blocker — ONLY when NEITHER terminal marker is present; its edges
+ * still restore the edge-carrier role the window's label exclusion removed from
+ * the family graph (an excluded architectural anchor declaring [A, C] still
+ * unions its mechanical siblings into one family).
  *
  * Fail-SOFT, same direction as `openAutofixPrExists`: a `gh` failure on one
  * probe skips that probe this run (at worst one self-terminating extra attempt),
@@ -516,18 +520,20 @@ export async function reverseVerifyFamilies(
       const labels = (hit.labels ?? [])
         .map((label) => (typeof label === "string" ? label : label?.name))
         .filter(Boolean);
-      // A hit carrying the architectural hold is a pure CONNECTOR (#1812): its
-      // edges join its mechanical siblings into one family — restoring the
-      // fan-out the window's label exclusion removed (an excluded architectural
-      // anchor declaring [A, C] must still union its siblings) — but it holds no
-      // terminal decision, so it must NEVER stand the family down. Checked FIRST,
-      // so the connector role wins even over a stale terminal marker: only the
-      // sibling that actually reaches a terminal outcome (fix-pr-opened /
-      // fix-refused) blocks the family.
+      // Terminal marker WINS over the architectural hold (#1812 Finding 3): a
+      // present fix-pr-opened / fix-refused means this sibling reached a real
+      // terminal outcome — an open PR, or a refusal — so the family stands down
+      // and a mechanical sibling must NOT start a duplicate. The hold makes a
+      // stub a pure CONNECTOR — edges only, never a blocker — ONLY when NEITHER
+      // terminal marker is present; the edges above are pushed regardless, so an
+      // excluded architectural anchor declaring [A, C] still unions its
+      // mechanical siblings into one family (the fan-out the window's label
+      // exclusion removed). A stub carrying BOTH a terminal marker AND the hold
+      // therefore blocks on the terminal marker — the architectural label never
+      // downgrades a present terminal outcome to a mere connector.
       if (
-        !labels.includes(FIX_SCOPE_ARCHITECTURAL_LABEL) &&
-        (labels.includes(FIX_PR_OPENED_LABEL) ||
-          labels.includes(FIX_REFUSED_LABEL))
+        labels.includes(FIX_PR_OPENED_LABEL) ||
+        labels.includes(FIX_REFUSED_LABEL)
       ) {
         blockers.add(hitKey);
       }

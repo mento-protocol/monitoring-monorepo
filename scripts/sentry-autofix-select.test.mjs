@@ -156,7 +156,9 @@ function branchToShortId(branch) {
  * `handled`: stubs that already carry a TERMINAL autofix marker — the
  * `sentry:fix-pr-opened` / `sentry:fix-refused` siblings the candidate window
  * excludes by construction, which the family collapse reads back through its
- * own per-marker query (issue #1784). Each entry is `{ shortId, label }`.
+ * own per-marker query (issue #1784). Each entry is `{ shortId, label }`, or
+ * `{ shortId, labels: [...] }` to carry MORE than one marker — e.g. a terminal
+ * marker AND the architectural hold together (#1812 Finding 3).
  */
 function makeRunGh({
   stubs = [],
@@ -184,7 +186,10 @@ function makeRunGh({
     number: h.number ?? 9000 + i,
     shortId: h.shortId,
     project: h.project ?? "analytics-mento-org",
-    label: h.label,
+    // A sibling can carry more than one autofix label — e.g. a terminal marker
+    // AND the architectural hold (#1812 Finding 3). `labels` (array) models
+    // that; `label` (single) stays for the common one-marker fixtures.
+    labelNames: h.labels ?? (h.label == null ? [] : [h.label]),
     declares: h.declares ?? [],
     mentions: h.mentions ?? [],
     matchTitleFor: h.matchTitleFor ?? h.shortId,
@@ -197,7 +202,7 @@ function makeRunGh({
     byNumber.set(String(h.number), {
       number: h.number,
       title: handledTitle(h),
-      labels: [h.label, "sentry-triage"],
+      labels: [...h.labelNames, "sentry-triage"],
       comments: [verdictComment({ duplicates: h.declares })],
     });
   }
@@ -231,7 +236,9 @@ function makeRunGh({
           matched.slice(0, limit).map((h) => ({
             number: h.number,
             title: handledTitle(h),
-            labels: [h.label, "sentry-triage"].map((name) => ({ name })),
+            labels: [...h.labelNames, "sentry-triage"].map((name) => ({
+              name,
+            })),
           })),
         );
       }
@@ -246,7 +253,9 @@ function makeRunGh({
             .map((h) => ({
               number: h.number,
               title: handledTitle(h),
-              labels: [h.label, "sentry-triage"].map((name) => ({ name })),
+              labels: [...h.labelNames, "sentry-triage"].map((name) => ({
+                name,
+              })),
             })),
         );
       }
@@ -2436,6 +2445,82 @@ await test("CONNECTOR: an architectural-LABELED anchor surfaced via reverse sear
   assertDeepEqual(run2.deferred, [
     { issue: 502, reason: DEFER_FAMILY_HANDLED },
   ]);
+});
+
+await test("TERMINAL-WINS: a reverse-surfaced sibling carrying BOTH a terminal marker AND the architectural hold BLOCKS the family (#1812 Finding 3)", async () => {
+  // Finding 3: a PRESENT terminal marker means a real terminal outcome — here an
+  // open fix PR — so the family must stand down regardless of the architectural
+  // hold; the hold makes a stub a pure connector ONLY when NEITHER terminal
+  // marker is present. B declares finalist A and carries BOTH
+  // sentry:fix-pr-opened AND sentry:fix-scope-architectural. A declares nothing,
+  // so ONLY the reverse in:comments probe can reach B — the exact leg the dropped
+  // `!architecturalLabel` guard lived on.
+  //
+  // The reverse `in:comments` hit carries B's CURRENT labels inline (read from
+  // the same response), so `reverseVerifyFamilies` can and must decide the block
+  // from them. The downstream handled-recheck that re-reads a surfaced member's
+  // marker is a SEPARATE `in:title` query, subject to GitHub's title-index lag on
+  // a freshly-labeled stub — modeled here with `matchTitleFor` pointing away, so
+  // an `in:title` search for B's own id returns nothing. That isolates the fix:
+  // the reverse blocker is the SOLE catch, and restoring the guard both drops it
+  // AND leaves the lagging title-recheck empty, wrongly selecting A.
+  const A = stub({ number: 760, shortId: "ANALYTICS-MENTO-ORG-TA" });
+  const bothLabels = [
+    {
+      shortId: "ANALYTICS-MENTO-ORG-TB",
+      labels: [FIX_PR_OPENED_LABEL, FIX_SCOPE_ARCHITECTURAL_LABEL],
+      declares: ["ANALYTICS-MENTO-ORG-TA"],
+      // in:title for TB is a tokenized/index-lag miss, so the title-recheck
+      // backstop cannot re-catch it — only the inline reverse labels can.
+      matchTitleFor: "ANALYTICS-MENTO-ORG-ZZ",
+    },
+  ];
+  // Fixture anchor: the blocker genuinely carries BOTH markers, so restoring the
+  // `!architecturalLabel` guard would treat it as a pure connector and bite this
+  // assertion — not a vacuous pass.
+  assert(
+    bothLabels[0].labels.includes(FIX_PR_OPENED_LABEL) &&
+      bothLabels[0].labels.includes(FIX_SCOPE_ARCHITECTURAL_LABEL),
+    "the blocker fixture must carry both the terminal marker and the hold",
+  );
+  const held = makeRunGh({ stubs: [A], handled: bothLabels });
+  const run = await selectAutofixRun(
+    { repo: "o/r", cap: 2 },
+    { runGh: held.runGh },
+  );
+  assertDeepEqual(run.entries, []);
+  assertDeepEqual(run.deferred, [{ issue: 760, reason: DEFER_FAMILY_HANDLED }]);
+  assert(
+    reverseSearchedFor(held.calls, "ANALYTICS-MENTO-ORG-TA"),
+    "the reverse probe must have surfaced the both-labels sibling",
+  );
+
+  // Live counter-arm through the same production entry point: strip the terminal
+  // marker so B carries ONLY the hold. Now B is a genuine pure connector — edges
+  // only — so A is (correctly) SELECTED. The terminal marker is the load-bearing
+  // difference between the two arms; the source-revert control below proves the
+  // guard, not the fixture, is what turns the block on and off.
+  const holdOnly = [
+    {
+      shortId: "ANALYTICS-MENTO-ORG-TB",
+      labels: [FIX_SCOPE_ARCHITECTURAL_LABEL],
+      declares: ["ANALYTICS-MENTO-ORG-TA"],
+      matchTitleFor: "ANALYTICS-MENTO-ORG-ZZ",
+    },
+  ];
+  const connector = makeRunGh({ stubs: [A], handled: holdOnly });
+  const run2 = await selectAutofixRun(
+    { repo: "o/r", cap: 2 },
+    { runGh: connector.runGh },
+  );
+  assertDeepEqual(run2.entries, [
+    { issue: 760, shortId: "ANALYTICS-MENTO-ORG-TA" },
+  ]);
+  assertDeepEqual(run2.deferred, []);
+  assert(
+    reverseSearchedFor(connector.calls, "ANALYTICS-MENTO-ORG-TA"),
+    "the reverse probe still runs in the connector-only control arm",
+  );
 });
 
 await test("a mechanical candidate flows through family dedupe AND the fix_scope gate together", async () => {
