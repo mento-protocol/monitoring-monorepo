@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 import { LABEL_TO_VERDICT } from "./sentry-triage-digest.mjs";
-import { VERDICT_LABELS } from "./sentry-triage-ingest.mjs";
+import {
+  FIX_SCOPE_ARCHITECTURAL_LABEL,
+  VERDICT_LABELS,
+} from "./sentry-triage-ingest.mjs";
 import {
   ALLOWED_OWNING_REPOS,
   bodyBacklinksShortId,
@@ -2381,7 +2384,10 @@ await test("runParseOnly returns the validated verdict + mapped label + projecta
     verdict: "code-fix",
     label: "sentry:verdict-code-fix",
     projectable: true,
-    shed: "sentry:verdict-config-fix,sentry:verdict-upstream,sentry:verdict-needs-human",
+    // External allowlisted code-fix: no hold. The shed carries the architectural
+    // label because the hold does NOT apply (it un-strands a re-dispatch).
+    shed: "sentry:verdict-config-fix,sentry:verdict-upstream,sentry:verdict-needs-human,sentry:fix-scope-architectural",
+    architecturalHold: false,
   });
   // Read-only: exactly one `gh issue view` with the ambient token.
   assertEqual(calls.length, 1);
@@ -2424,7 +2430,8 @@ await test("runParseOnly maps upstream-transient to the asymmetric label", async
     verdict: "upstream-transient",
     label: "sentry:verdict-upstream",
     projectable: false,
-    shed: "sentry:verdict-code-fix,sentry:verdict-config-fix,sentry:verdict-needs-human",
+    shed: "sentry:verdict-code-fix,sentry:verdict-config-fix,sentry:verdict-needs-human,sentry:fix-scope-architectural",
+    architecturalHold: false,
   });
 });
 
@@ -2448,7 +2455,10 @@ await test("runParseOnly sheds every verdict label except the one being applied"
   );
   assertEqual(result.label, "sentry:verdict-config-fix");
   const shed = result.shed.split(",");
+  // config-fix is not the architectural hold, so the shed carries the hold label
+  // too (un-strand direction). It sorts before the verdict names ('f' < 'v').
   assertDeepEqual(shed.sort(), [
+    "sentry:fix-scope-architectural",
     "sentry:verdict-code-fix",
     "sentry:verdict-needs-human",
     "sentry:verdict-upstream",
@@ -2462,7 +2472,7 @@ await test("runParseOnly sheds every verdict label except the one being applied"
 // REOPEN_SHED_LABELS is the superset the re-queue chokepoint uses. Handing it
 // to this step would strip the autofix dedup markers (re-fixing an already
 // fixed stub) and the archive audit markers.
-await test("runParseOnly sheds ONLY the verdict namespace", async () => {
+await test("runParseOnly sheds ONLY the verdict namespace plus the architectural hold", async () => {
   const { runGh } = makeRunGh({ issue: queueIssue() });
   const result = await runParseOnly(
     { localRepo: "mento-protocol/monitoring-monorepo", queueIssue: 500 },
@@ -2470,8 +2480,23 @@ await test("runParseOnly sheds ONLY the verdict namespace", async () => {
   );
   for (const name of result.shed.split(",")) {
     assert(
-      name.startsWith("sentry:verdict-"),
-      `shed carries a non-verdict label: ${name}`,
+      name.startsWith("sentry:verdict-") ||
+        name === FIX_SCOPE_ARCHITECTURAL_LABEL,
+      `shed carries a label outside the verdict namespace and the architectural hold: ${name}`,
+    );
+  }
+  // Never the autofix dedup markers, the projection marker, or the archive audit
+  // markers — handing REOPEN_SHED_LABELS to this step would strip those.
+  for (const forbidden of [
+    "sentry:projected",
+    "sentry:fix-pr-opened",
+    "sentry:fix-refused",
+    "sentry:approved-archive",
+    "sentry:archived",
+  ]) {
+    assert(
+      !result.shed.split(",").includes(forbidden),
+      `shed must not carry ${forbidden}`,
     );
   }
 });
@@ -2601,7 +2626,8 @@ await test("runParseOnly accepts a needs-human verdict WITH human_question", asy
     verdict: "needs-human",
     label: "sentry:verdict-needs-human",
     projectable: false,
-    shed: "sentry:verdict-code-fix,sentry:verdict-config-fix,sentry:verdict-upstream",
+    shed: "sentry:verdict-code-fix,sentry:verdict-config-fix,sentry:verdict-upstream,sentry:fix-scope-architectural",
+    architecturalHold: false,
   });
 });
 

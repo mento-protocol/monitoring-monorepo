@@ -2,31 +2,35 @@
 import {
   AUTOFIX_COMMENT_PREFIX,
   buildDigest,
-  chunkBriefs,
-  chunkLines,
   classifyIssue,
   collectIssues,
   doubleVerdictWarnings,
-  escapeSlackText,
   extractAutofixUrl,
   extractPermalink,
   extractProjectedUrl,
   extractVerdictYamlBlock,
   findLatestVerdictComment,
-  formatBriefList,
-  formatBriefText,
-  formatSummaryForSlack,
   LABEL_TO_VERDICT,
-  MAX_SECTION_TEXT_LEN,
   NEEDS_TRIAGE_LABEL,
   parseArgs,
   parseIssueNumbers,
   parseQueueTitle,
   parseVerdictComment,
   PROJECTED_COMMENT_PREFIX,
-  sanitizeSummary,
   VERDICT_MARKER,
 } from "./sentry-triage-digest.mjs";
+// The pure Slack-render layer moved to its own module (#1812 file split); the
+// tests import the moved units directly, no re-export shim.
+import {
+  chunkBriefs,
+  chunkLines,
+  escapeSlackText,
+  formatBriefList,
+  formatBriefText,
+  formatSummaryForSlack,
+  MAX_SECTION_TEXT_LEN,
+  sanitizeSummary,
+} from "./sentry-triage-digest-render.mjs";
 
 let passed = 0;
 let failed = 0;
@@ -563,11 +567,11 @@ await test("classifyIssue carries fix_scope and whether the verdict named THIS r
   assertEqual(unread.owningRepoIsLocal, false);
 });
 
-await test("the routed section marks a local code-fix autofix will never attempt", () => {
-  // A local code-fix never projects, and an architectural one is never
-  // selected — so without this the last and only statement a human ever sees
-  // about it is a heading claiming it was handed to a team that does not exist.
-  // The stub is CLOSED at verdict time, so nothing lists it again.
+await test("a local architectural code-fix renders in its OWN Open design work section, not Routed", () => {
+  // A local code-fix never projects, and an architectural one is never selected
+  // — it HOLDS OPEN under sentry:fix-scope-architectural as human design work
+  // (#1812, operator resolution #3), so it gets its own section rather than a
+  // Routed heading claiming it was handed to a team that does not exist.
   const payload = buildDigest(
     [
       issueFixture({
@@ -580,10 +584,17 @@ await test("the routed section marks a local code-fix autofix will never attempt
     { channel: "#engineering" },
   );
   const text = allText(payload);
-  assert(text.includes("Routed to owning repo"), "expected the routed section");
   assert(
-    text.includes("architectural — human backlog"),
-    `expected the architectural note, got: ${text}`,
+    text.includes("Open design work"),
+    `expected the Open design work section, got: ${text}`,
+  );
+  assert(
+    !text.includes("Routed to owning repo"),
+    "a local architectural code-fix must NOT render in the Routed section",
+  );
+  assert(
+    text.includes("open under `sentry:fix-scope-architectural`"),
+    `expected the open-under-label architectural note, got: ${text}`,
   );
 });
 
@@ -700,11 +711,19 @@ await test("classifyIssue routes an actionable verdict with fix-PR data to the a
 });
 
 await test("classifyIssue picks up a projected-issue pointer for the routed link", () => {
+  // Only an EXTERNAL code-fix genuinely projects and routes; a local one holds
+  // under sentry:fix-scope-architectural in its own section (#1812), so this
+  // projected-pointer case uses an external owning repo.
   const entry = classifyIssue(
     issueFixture({
       labels: ["sentry-triage", "sentry:verdict-code-fix"],
       comments: [
-        { body: verdictComment({ verdict: "code-fix" }) },
+        {
+          body: verdictComment({
+            verdict: "code-fix",
+            affectedRepo: "mento-protocol/mento-web",
+          }),
+        },
         { body: `${PROJECTED_COMMENT_PREFIX}${PROJECTED_URL}` },
       ],
     }),
@@ -882,7 +901,16 @@ await test("buildDigest renders sections in order (needs-human first) and omits 
         number: 4,
         shortId: "CF-1",
         labels: ["sentry:verdict-code-fix"],
-        comments: [{ body: verdictComment({ verdict: "code-fix" }) }],
+        // External owning repo so it genuinely ROUTES (a local code-fix would
+        // hold under sentry:fix-scope-architectural in its own section, #1812).
+        comments: [
+          {
+            body: verdictComment({
+              verdict: "code-fix",
+              affectedRepo: "mento-protocol/mento-web",
+            }),
+          },
+        ],
       }),
     ],
     { channel: "#engineering" },

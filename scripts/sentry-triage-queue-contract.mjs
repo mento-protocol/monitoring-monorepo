@@ -130,6 +130,12 @@ export const LABEL_DEFINITIONS = [
       "Autofix declined to open a PR (no change/guard-refused); remove to retry (ADR 0036 Phase 2b)",
   },
   {
+    name: "sentry:fix-scope-architectural",
+    color: "a371f7",
+    description:
+      "Local code-fix, fix_scope architectural — open human design work; autofix never selects it (#1812)",
+  },
+  {
     name: "sentry:approved-archive",
     color: "1a7f37",
     description:
@@ -173,6 +179,25 @@ export const FIX_PR_OPENED_LABEL = "sentry:fix-pr-opened";
 // self-healed by the autofix workflow's refused path before it labels the stub.
 export const FIX_REFUSED_LABEL = "sentry:fix-refused";
 
+// A `code-fix` verdict whose `fix_scope` is `architectural` (issue #1785/#1812):
+// the cause is in this repo's code, but the fix is open human design work, not a
+// mechanical diff an agent can safely author. The settlement step
+// (.github/workflows/sentry-triage-agent.yml) rides this label onto the SAME
+// atomic `gh issue edit` as the verdict label and leaves the stub OPEN; the
+// autofix select step (`listCodeFixStubs`) excludes it at query time so the
+// architectural backlog never fills the candidate window (issue #1813). It
+// conveys exactly one state — this stub's CURRENT verdict is local code-fix,
+// fix_scope architectural — and is NEVER terminal: it is shed on regression and
+// on any re-verdict (REOPEN_SHED_LABELS below), never read by the terminal-ledger
+// lookups, and human-removable. It sits OUTSIDE the `sentry:verdict-*` namespace
+// on purpose, so the settlement post-condition still counts exactly one verdict
+// label (VERDICT_LABELS filters on the `sentry:verdict-` prefix). Bootstrapped
+// from LABEL_DEFINITIONS above and self-healed by the autofix record-run backfill
+// before it labels a legacy stub. Removing this label is NOT the operator
+// affordance — the verdict re-parse still refuses and the record-run re-applies
+// it; re-triage via workflow_dispatch is.
+export const FIX_SCOPE_ARCHITECTURAL_LABEL = "sentry:fix-scope-architectural";
+
 // Phase 2a human-approved archive loop (ADR 0036 Stage C,
 // scripts/sentry-triage-archive.mjs + .github/workflows/sentry-triage-archive.yml).
 // APPROVED_ARCHIVE_LABEL is the human-applied approval marker that triggers the
@@ -213,6 +238,14 @@ export const REOPEN_SHED_LABELS = [
   PROJECTED_LABEL,
   FIX_PR_OPENED_LABEL,
   FIX_REFUSED_LABEL,
+  // The architectural hold marks the CURRENT verdict's scope; a regression means
+  // a fresh occurrence that must be re-triaged from scratch, so the fresh round
+  // re-decides scope. Shedding it here is also what makes live-recompute the sole
+  // authority for family stand-down (a durable sibling label would strand the
+  // family when the blocker re-verdicts — see the deferred-family note in the
+  // pipeline doc). Removing an absent label is a no-op, so a non-architectural
+  // stub pays nothing for this entry.
+  FIX_SCOPE_ARCHITECTURAL_LABEL,
   APPROVED_ARCHIVE_LABEL,
   ARCHIVED_LABEL,
 ];

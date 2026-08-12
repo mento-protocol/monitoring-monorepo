@@ -24,6 +24,7 @@ import {
   CODE_FIX_VERDICT_LABEL,
   FIX_PR_OPENED_LABEL,
   FIX_REFUSED_LABEL,
+  FIX_SCOPE_ARCHITECTURAL_LABEL,
   PROJECTED_LABEL,
 } from "./sentry-triage-ingest.mjs";
 import { autofixBranchName } from "./sentry-autofix-finalize.mjs";
@@ -148,8 +149,19 @@ export async function listCodeFixStubs(runGh, repo) {
     //     projects — matches only this project's stubs. The exact client-side
     //     `parseProject === LOCAL_SENTRY_PROJECT` check below stays as the
     //     precise gate (this server filter only needs to keep the WINDOW local).
+    //   - fix_scope architectural (#1812): a local code-fix verdict whose scope
+    //     is architectural is open human design work the autofix leg never
+    //     selects. Settlement labels it `sentry:fix-scope-architectural` and the
+    //     record-run backfill labels the legacy stubs, so this fifth `-label:`
+    //     term excludes the whole architectural class — the fail-closed value
+    //     every pre-#1785 verdict normalizes to — at the SOURCE. Without it that
+    //     class is the only monotonic growth driver left in the window (#1813):
+    //     it is skipped on scope every run and never gets a terminal marker, so
+    //     it would accumulate forever and, oldest-first, starve fresh candidates.
+    //     evaluateCandidate's fix_scope re-parse stays the authority, so a stale
+    //     or missing label costs one reported skip, never a wrong selection.
     "--search",
-    `sort:created-asc -label:"${FIX_PR_OPENED_LABEL}" -label:"${FIX_REFUSED_LABEL}" -label:"${PROJECTED_LABEL}" -label:"${ARCHIVED_LABEL}" ${LOCAL_SENTRY_PROJECT} in:title`,
+    `sort:created-asc -label:"${FIX_PR_OPENED_LABEL}" -label:"${FIX_REFUSED_LABEL}" -label:"${PROJECTED_LABEL}" -label:"${ARCHIVED_LABEL}" -label:"${FIX_SCOPE_ARCHITECTURAL_LABEL}" ${LOCAL_SENTRY_PROJECT} in:title`,
     "--json",
     "number,title,labels,createdAt",
     "--limit",
@@ -348,7 +360,11 @@ export const MAX_REVERSE_PROBE_QUERIES = 40;
  * terminal sibling Q pulls Q into P's family, where the caller's handled-recheck
  * can then read Q's own marker and stand the family down; probing P alone left
  * Q's edge on the floor). An admitted hit that ALSO carries a terminal marker
- * becomes a BLOCKER (its key joins handledShortIds) directly.
+ * becomes a BLOCKER (its key joins handledShortIds) directly — UNLESS it carries
+ * the architectural hold, in which case it stays a pure CONNECTOR (#1812): edges
+ * only, never a blocker, because an architectural stub holds no terminal
+ * decision. That restores the edge-carrier role the window's label exclusion
+ * removed from the family graph.
  *
  * Fail-SOFT, same direction as `openAutofixPrExists`: a `gh` failure on one
  * probe skips that probe this run (at worst one self-terminating extra attempt),
@@ -437,9 +453,18 @@ export async function reverseVerifyFamilies(
       const labels = (hit.labels ?? [])
         .map((label) => (typeof label === "string" ? label : label?.name))
         .filter(Boolean);
+      // A hit carrying the architectural hold is a pure CONNECTOR (#1812): its
+      // edges join its mechanical siblings into one family — restoring the
+      // fan-out the window's label exclusion removed (an excluded architectural
+      // anchor declaring [A, C] must still union its siblings) — but it holds no
+      // terminal decision, so it must NEVER stand the family down. Checked FIRST,
+      // so the connector role wins even over a stale terminal marker: only the
+      // sibling that actually reaches a terminal outcome (fix-pr-opened /
+      // fix-refused) blocks the family.
       if (
-        labels.includes(FIX_PR_OPENED_LABEL) ||
-        labels.includes(FIX_REFUSED_LABEL)
+        !labels.includes(FIX_SCOPE_ARCHITECTURAL_LABEL) &&
+        (labels.includes(FIX_PR_OPENED_LABEL) ||
+          labels.includes(FIX_REFUSED_LABEL))
       ) {
         blockers.add(hitKey);
       }

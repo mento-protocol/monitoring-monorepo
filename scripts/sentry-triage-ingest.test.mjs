@@ -1437,10 +1437,12 @@ await test("verdict label set is derived from the label definitions", () => {
 
 await test("reopen shed set is every verdict label plus projected + autofix + archive markers", () => {
   // A reopened regression is a NEW occurrence: it must not keep reading as
-  // verdicted, projected, autofixed/refused, or approved-for-archive/archived —
-  // every one of those described the old occurrence (PR #1356 review). A stale
-  // autofix marker also blocks re-autofix, and a stale archive approval must not
-  // carry a human sign-off into a fresh occurrence.
+  // verdicted, projected, autofixed/refused, held-architectural, or
+  // approved-for-archive/archived — every one of those described the old
+  // occurrence (PR #1356 review). A stale autofix marker also blocks re-autofix,
+  // the fix-scope hold must clear so the fresh round re-decides scope (#1812),
+  // and a stale archive approval must not carry a human sign-off into a fresh
+  // occurrence.
   assertDeepEqual(REOPEN_SHED_LABELS, [
     "sentry:verdict-code-fix",
     "sentry:verdict-config-fix",
@@ -1449,6 +1451,7 @@ await test("reopen shed set is every verdict label plus projected + autofix + ar
     "sentry:projected",
     "sentry:fix-pr-opened",
     "sentry:fix-refused",
+    "sentry:fix-scope-architectural",
     "sentry:approved-archive",
     "sentry:archived",
   ]);
@@ -1475,7 +1478,7 @@ await test("reopen label edit re-queues triage and sheds stale verdict + project
     "-R",
     "owner/repo",
     "--remove-label",
-    "sentry:verdict-code-fix,sentry:verdict-config-fix,sentry:verdict-upstream,sentry:verdict-needs-human,sentry:projected,sentry:fix-pr-opened,sentry:fix-refused,sentry:approved-archive,sentry:archived",
+    "sentry:verdict-code-fix,sentry:verdict-config-fix,sentry:verdict-upstream,sentry:verdict-needs-human,sentry:projected,sentry:fix-pr-opened,sentry:fix-refused,sentry:fix-scope-architectural,sentry:approved-archive,sentry:archived",
   ]);
 });
 

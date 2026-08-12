@@ -95,11 +95,14 @@ jobs:
   # scripts/sentry-autofix-select.mjs (+ tests), not inline. The cap counts
   # CANDIDATES: one duplicate_of family consumes one slot however many stubs it
   # spans (issue #1784). Family collapse DEFERS the rest without writing
-  # anything to the queue, and the fix_scope gate SKIPS an architectural verdict
-  # without writing anything either (issue #1785), so this job also emits both
-  # stand-down counts and their issue numbers — the record job is the only
-  # durable trace of a suppressed queue, and without them "everything stood
-  # down" reads exactly like "nothing queued".
+  # anything to the queue. Fresh architectural verdicts are excluded from the
+  # candidate window at query time (settlement labels them
+  # sentry:fix-scope-architectural, #1812); the fix_scope gate still SKIPS any
+  # legacy architectural stub the window admits without writing anything (issue
+  # #1785), and the record-run job then backfills the label so the next run
+  # excludes it too. This job emits both stand-down counts and their issue
+  # numbers — the record job is the only durable trace of a suppressed queue,
+  # and without them "everything stood down" reads exactly like "nothing queued".
   # ---------------------------------------------------------------------------
   select:
     runs-on: ubuntu-latest
@@ -1248,3 +1251,43 @@ jobs:
             gh issue comment "${TRACKER_ISSUE}" --repo "${REPO}" \
               --body "${body}" >/dev/null 2>&1 || true
           fi
+
+      # Backfill sentry:fix-scope-architectural onto the LEGACY local code-fix
+      # stubs this run skipped as fix_scope: architectural (#1812). Fresh
+      # architectural verdicts are labeled at settlement and excluded from the
+      # candidate window at query time; legacy stubs (verdicted before the label
+      # existed) carry no label, so the selector re-reads and re-skips them every
+      # run — the one monotonic growth driver #1813 measured. Labeling them here
+      # (this is the record-run job, main-only with issues:write — the select job
+      # stays issues:read) drains that backlog at up to 50/run. Best-effort: the
+      # module self-heal-creates the label, adds it idempotently, and never
+      # throws; continue-on-error means a persistent failure just leaves the
+      # stubs re-evaluated next run (a permanently nonzero skipped count), never a
+      # silent strand. Legacy stubs stay CLOSED — this only adds a window
+      # exclusion, no reopen (regression reopens via the ingest path).
+      - name: Backfill architectural labels (best-effort)
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SKIPPED_ISSUES: ${{ needs.select.outputs.skipped_issues }}
+          DISPOSITION: ${{ needs.select.outputs.disposition }}
+          SELECT_RESULT: ${{ needs.select.result }}
+        run: |
+          set -uo pipefail
+          # Only when the select job actually ran and reported architectural
+          # skips: a failed/off-main/disabled select reports nothing, so there is
+          # nothing to backfill and no reason to touch the label at all.
+          if [ "${SELECT_RESULT}" != "success" ] || [ "${DISPOSITION:-}" != "active" ]; then
+            echo "select was ${SELECT_RESULT}/${DISPOSITION:-unknown}; no architectural backfill this run."
+            exit 0
+          fi
+          if [ -z "${SKIPPED_ISSUES:-}" ]; then
+            echo "No fix_scope: architectural skips this run; nothing to backfill."
+            exit 0
+          fi
+          # The numbers are the select job's own validated integer output; the
+          # module re-validates each against ^[0-9]+$ before it reaches a gh argv.
+          node scripts/sentry-autofix-record-labels.mjs \
+            --repo "${REPO}" \
+            --issues "${SKIPPED_ISSUES}" || true

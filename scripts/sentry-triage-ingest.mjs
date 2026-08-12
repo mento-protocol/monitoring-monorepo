@@ -50,6 +50,7 @@ export {
   defangMentions,
   FIX_PR_OPENED_LABEL,
   FIX_REFUSED_LABEL,
+  FIX_SCOPE_ARCHITECTURAL_LABEL,
   LABEL_DEFINITIONS,
   NEEDS_TRIAGE_LABEL,
   neutralizeUntrusted,
