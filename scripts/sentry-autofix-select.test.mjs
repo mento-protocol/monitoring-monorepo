@@ -1,15 +1,17 @@
 #!/usr/bin/env node
 import {
-  AUTOFIX_SELECT_LABEL,
   DEFAULT_CAP,
   emitVerdict,
-  isOwnHeadPr,
-  LOCAL_SENTRY_PROJECT,
   MAX_CANDIDATE_EVALUATIONS,
   parseArgs,
   selectAutofixCandidates,
   selectAutofixRun,
 } from "./sentry-autofix-select.mjs";
+import {
+  AUTOFIX_SELECT_LABEL,
+  isOwnHeadPr,
+  LOCAL_SENTRY_PROJECT,
+} from "./sentry-autofix-queue-io.mjs";
 import {
   isValidShortId,
   MAX_DUPLICATE_LOOKUPS,
