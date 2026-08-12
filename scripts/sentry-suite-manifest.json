@@ -46,7 +46,7 @@
     },
     "scripts/sentry-triage-brief.test.mjs": {
       "reporter": "count-line",
-      "floor": 55,
+      "floor": 56,
       "reads": [
         ".github/prompts/sentry-triage.md",
         ".github/workflows/sentry-triage-agent.yml",
@@ -69,7 +69,7 @@
     },
     "scripts/sentry-triage-requeue.test.mjs": {
       "reporter": "count-line",
-      "floor": 31,
+      "floor": 36,
       "readsDirs": ["scripts"]
     }
   }

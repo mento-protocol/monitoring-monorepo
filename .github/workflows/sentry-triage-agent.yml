@@ -774,28 +774,28 @@ jobs:
           # downstream would: the close step never runs, the project job skips
           # a stub that is not needs-triage, and the scheduled selector only
           # admits sentry:needs-triage — a bare `exit 1` here would strand an
-          # open, verdict-labeled stub with no retry path at all. Same
-          # compensation as the close step below (restore sentry:needs-triage,
-          # shed the verdict label + any stale sentry:projected, absent-label
-          # removal being a no-op), with the WHOLE verdict namespace in the
-          # removal list because this is the one branch where more than one of
-          # them can be on the stub, and a re-queued stub must carry none. Both
-          # terms are the parser's closed enum — never a re-read label name,
-          # never a second literal list. Unguarded like the close step's
-          # compensation: this step is failing either way, and a compensation
-          # that itself fails should fail loudly under set -e.
-          # `sentry:approved-archive` is in the removal list for the reason
-          # REOPEN_SHED_LABELS gives (scripts/sentry-triage-queue-contract.mjs):
-          # a re-queued stub must not carry a human's archive approval into the
-          # round that follows, or the archive workflow's dispatch path — which
-          # takes approval + any verdict label as its whole precondition — can
-          # archive a freshly triaged occurrence nobody approved. Shedding an
-          # approval is always allowed; ADDING one never is.
+          # open, verdict-labeled stub with no retry path at all.
+          #
+          # Every compensating exit in this workflow routes through the ONE
+          # re-queue chokepoint (scripts/sentry-triage-requeue.mjs, BOOKKEEPING
+          # cause — nothing in Sentry moved), via its workflow CLI, and never an
+          # open-coded label swap (#1782). The CLI owns the shed set
+          # (REOPEN_SHED_LABELS, which covers the whole verdict namespace — this
+          # is the one branch where more than one of them can be on the stub —
+          # plus the projection, autofix and archive markers), the add-then-shed
+          # ordering, the bookkeeping note, the end-state verification, and the
+          # terminal revalidation that declines rather than reopening a stub the
+          # archive leg settled underneath this step. Shedding an approval marker
+          # is always allowed; ADDING one never is.
+          #
+          # Unguarded like the close step's compensation: this step is failing
+          # either way, and a compensation that itself fails should fail loudly
+          # under set -e.
           requeue_for_retry() {
-            gh issue edit "${QUEUE_ISSUE_NUMBER}" \
+            node scripts/sentry-triage-workflow-requeue.mjs \
+              --issue "${QUEUE_ISSUE_NUMBER}" \
               --repo "${GITHUB_REPOSITORY}" \
-              --remove-label "${label},${shed},sentry:projected,sentry:approved-archive" \
-              --add-label "sentry:needs-triage"
+              --reason verdict-unsettled
           }
           # Post-condition, re-read from GitHub rather than assumed: refuse to
           # hand a double-verdicted stub to the close/project/digest legs. Only
@@ -823,15 +823,13 @@ jobs:
           fi
           # Hand the VALIDATED verdict + mapped label (closed enums, never
           # agent-authored text) + projectability to the close step below.
-          # `shed` rides along because the brief step below sits in the same
-          # needs-triage-removed window and owes the same compensation, and a
-          # shell function cannot cross a step boundary. Carrying the closed
-          # enum is what stops that step re-deriving a second literal copy of
-          # the verdict namespace.
+          # `shed` does NOT ride along any more: the later steps' compensations
+          # run through the re-queue CLI, which derives the shed set from
+          # REOPEN_SHED_LABELS itself, so nothing downstream needs a copy of the
+          # verdict namespace (#1782).
           {
             echo "verdict=${verdict}"
             echo "label=${label}"
-            echo "shed=${shed}"
             echo "projectable=${projectable}"
           } >> "${GITHUB_OUTPUT}"
 
@@ -907,11 +905,16 @@ jobs:
               # the verdict label, so a bare exit would strand this open,
               # verdict-labeled stub (#1769 round 16). Restore selectability
               # through the ONE re-queue chokepoint (bookkeeping cause), never an
-              # open-coded label swap. It is idempotent and OPEN-safe; a re-queue
+              # open-coded label swap. It is idempotent and OPEN-safe, and its
+              # terminal revalidation DECLINES when sentry-triage-archive settled
+              # the stub while this step was failing — a re-queue there would shed
+              # `sentry:archived` and reopen a retry stub over an already-archived
+              # Sentry issue that consumed a human approval (#1782). A re-queue
               # that itself fails is surfaced but must not stop the close-block.
-              if ! node scripts/sentry-triage-brief-clear-recovery.mjs \
+              if ! node scripts/sentry-triage-workflow-requeue.mjs \
                   --issue "${QUEUE_ISSUE_NUMBER}" \
-                  --repo "${GITHUB_REPOSITORY}"; then
+                  --repo "${GITHUB_REPOSITORY}" \
+                  --reason brief-clear-failure; then
                 echo "::error::Re-queue of issue #${QUEUE_ISSUE_NUMBER} after the clear failure ALSO failed; it may need manual attention (reopen + sentry:needs-triage)."
               fi
               exit 1
@@ -956,31 +959,33 @@ jobs:
           esac
           # If the close fails after the label swap, the issue would be
           # stranded: open, verdict-labeled, no longer selectable and outside
-          # the regression-reopen path. Compensate by restoring
-          # sentry:needs-triage AND removing the verdict label (a retry may
-          # land a DIFFERENT verdict, and two verdict labels would misclassify
-          # the issue for the digest and human label filters) AND shedding any
-          # stale sentry:projected (removing an absent label is a no-op), then
-          # fail the job loudly so the main-failure notifier fires.
+          # the regression-reopen path. Compensate through the ONE re-queue
+          # chokepoint's workflow CLI (#1782) — it restores sentry:needs-triage
+          # and sheds the previous round's markers (the verdict label, since a
+          # retry may land a DIFFERENT one and two would misclassify the issue
+          # for the digest and human label filters, plus any stale
+          # sentry:projected and autofix/archive markers) — then fail the job
+          # loudly so the main-failure notifier fires.
           #
-          # A REPORTED close failure is not proof the close did not happen: if
-          # the mutation landed and only its response was lost, this
-          # compensation puts sentry:needs-triage on a CLOSED stub — a pairing
-          # the selector above (--state open) and ingest's regression gate both
-          # miss. GitHub has no conditional close, so this step cannot avoid
-          # writing it; ingest repairs it from observed state on its next run
-          # (isStrandedNeedsTriage in scripts/sentry-triage-ingest.mjs). Do not
-          # "fix" that by re-reading state here — the repair belongs at one
-          # place that covers every producer, including hand-editing.
+          # A REPORTED close failure is not proof the close did not happen: the
+          # mutation can land and only lose its response. That is exactly what
+          # the CLI's TERMINAL revalidation is for — it re-reads the stub and
+          # DECLINES on a CLOSED or sentry:archived one, so a lost close response
+          # leaves the stub correctly settled instead of manufacturing the
+          # closed-plus-needs-triage pairing no pipeline stage can see. Ingest's
+          # stranded-stub sweep (isStrandedNeedsTriage in
+          # scripts/sentry-triage-ingest.mjs) still repairs that pairing from the
+          # producers that can still write it — the archive leg's refusal, a
+          # crash inside ingest's own reopen, a hand-edit.
           if ! gh issue close "${QUEUE_ISSUE_NUMBER}" \
             --repo "${GITHUB_REPOSITORY}" \
             --reason completed \
             --comment "Triage complete: ${VERDICT}.${projection_note} Ledger entry closed; reopens automatically on Sentry regression."; then
-            echo "::error::Failed to close issue #${QUEUE_ISSUE_NUMBER}; restoring sentry:needs-triage (and shedding ${VERDICT_LABEL} + sentry:projected) for retry."
-            gh issue edit "${QUEUE_ISSUE_NUMBER}" \
+            echo "::error::Failed to close issue #${QUEUE_ISSUE_NUMBER}; re-queuing it through the re-queue chokepoint (restore sentry:needs-triage, shed ${VERDICT_LABEL} + the other stale markers) for retry."
+            node scripts/sentry-triage-workflow-requeue.mjs \
+              --issue "${QUEUE_ISSUE_NUMBER}" \
               --repo "${GITHUB_REPOSITORY}" \
-              --remove-label "${VERDICT_LABEL},sentry:projected" \
-              --add-label "sentry:needs-triage"
+              --reason close-failure
             exit 1
           fi
           echo "Closed issue #${QUEUE_ISSUE_NUMBER} (verdict: ${VERDICT})."
@@ -1006,9 +1011,10 @@ jobs:
   #     the batch still projects.
   # Per-row outcomes: projected/reused stubs are closed here with the
   # projected URL in the fixed closing comment; skipped-no-token (main) closes
-  # with the visible "not provisioned" note; failed rows get the standard
-  # compensation (restore sentry:needs-triage, shed verdict + projected
-  # labels) and turn the job red so the main-failure notifier fires.
+  # with the visible "not provisioned" note; failed rows re-queue through the
+  # single chokepoint's workflow CLI (restore sentry:needs-triage, shed the
+  # previous round's markers) and turn the job red so the main-failure notifier
+  # fires.
   # ---------------------------------------------------------------------------
   project:
     needs: [select, triage, verdict]
@@ -1058,19 +1064,32 @@ jobs:
           # (The batch script self-heals the sentry:projected label from
           # Stage A's LABEL_DEFINITIONS before settling — see
           # runProjectionBatch in scripts/sentry-triage-project.mjs.)
+          # Every compensating exit in this job re-queues through the ONE
+          # chokepoint's workflow CLI (#1782), never an open-coded label swap:
+          # it owns the shed set (REOPEN_SHED_LABELS — so a row that carries no
+          # `label` still sheds correctly), the add-then-shed ordering, the
+          # bookkeeping note, the end-state verification, and the terminal
+          # revalidation that declines rather than reopening a stub the archive
+          # leg — or a close whose response was lost — already settled.
+          #
+          # GUARDED, so it never aborts the loop under set -e: later rows have
+          # already had owning-repo side effects and MUST still be settled below.
+          # A compensation failure turns the job red and is called out for manual
+          # repair instead of stranding the rest of the batch.
+          requeue_row() {
+            if ! node scripts/sentry-triage-workflow-requeue.mjs \
+              --issue "$1" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --reason "$2"; then
+              echo "::error::Compensation failed for issue #$1 — manually restore sentry:needs-triage and shed the stale verdict/projection markers."
+            fi
+          }
           failed=0
           while IFS= read -r row; do
             n=$(jq -r '.issue' <<<"${row}")
             status=$(jq -r '.status' <<<"${row}")
             url=$(jq -r '.url // ""' <<<"${row}")
             verdict=$(jq -r '.verdict // ""' <<<"${row}")
-            label=$(jq -r '.label // ""' <<<"${row}")
-            # Compensation label set: shed the verdict label when known, and
-            # any sentry:projected either way (absent-label removal is a no-op).
-            labels_to_remove="sentry:projected"
-            if [ -n "${label}" ]; then
-              labels_to_remove="${label},sentry:projected"
-            fi
             case "${status}" in
               skipped-state)
                 # Closed / needs-triage / non-actionable — settled elsewhere.
@@ -1082,17 +1101,7 @@ jobs:
               skipped-no-token)
                 if [ "${GITHUB_REF}" != "refs/heads/main" ]; then
                   echo "::error::Non-main ref (${GITHUB_REF}): cannot project the actionable external verdict on issue #${n} (SENTRY_PROJECTION_TOKEN is only exposed on main; see #1289). Restoring sentry:needs-triage so the next main-ref run retries."
-                  # Compensation is guarded (never aborts the loop under
-                  # set -e): later rows have already had owning-repo side
-                  # effects and MUST still be settled below — a compensation
-                  # failure here turns the job red and is called out for
-                  # manual repair instead of stranding the rest of the batch.
-                  if ! gh issue edit "${n}" \
-                    --repo "${GITHUB_REPOSITORY}" \
-                    --remove-label "${labels_to_remove}" \
-                    --add-label "sentry:needs-triage"; then
-                    echo "::error::Compensation failed for issue #${n} — manually restore sentry:needs-triage (and remove ${labels_to_remove})."
-                  fi
+                  requeue_row "${n}" projection-unavailable
                   failed=1
                   continue
                 fi
@@ -1100,13 +1109,8 @@ jobs:
                 ;;
               failed)
                 msg=$(jq -r '.message // "unknown"' <<<"${row}")
-                echo "::error::Projection failed for issue #${n}: ${msg}. Restoring sentry:needs-triage (and shedding ${labels_to_remove}) for retry."
-                if ! gh issue edit "${n}" \
-                  --repo "${GITHUB_REPOSITORY}" \
-                  --remove-label "${labels_to_remove}" \
-                  --add-label "sentry:needs-triage"; then
-                  echo "::error::Compensation failed for issue #${n} — manually restore sentry:needs-triage (and remove ${labels_to_remove})."
-                fi
+                echo "::error::Projection failed for issue #${n}: ${msg}. Re-queuing it through the re-queue chokepoint for retry."
+                requeue_row "${n}" projection-failure
                 failed=1
                 continue
                 ;;
@@ -1121,21 +1125,15 @@ jobs:
             esac
             # Close the projected stub (same fixed comment + compensation
             # semantics as the matrix close step, including the lost-close-
-            # response case it documents — a compensated close that actually
-            # landed leaves a CLOSED stub wearing sentry:needs-triage, which
-            # ingest's stranded-stub sweep repairs; the compensation edit is
-            # guarded so one failure cannot abort settlement of later rows).
+            # response case it documents — which the CLI's terminal
+            # revalidation now declines on rather than re-queuing a stub that is
+            # already closed).
             if ! gh issue close "${n}" \
               --repo "${GITHUB_REPOSITORY}" \
               --reason completed \
               --comment "Triage complete: ${verdict}.${note} Ledger entry closed; reopens automatically on Sentry regression."; then
-              echo "::error::Failed to close issue #${n}; restoring sentry:needs-triage (and shedding ${labels_to_remove}) for retry."
-              if ! gh issue edit "${n}" \
-                --repo "${GITHUB_REPOSITORY}" \
-                --remove-label "${labels_to_remove}" \
-                --add-label "sentry:needs-triage"; then
-                echo "::error::Compensation failed for issue #${n} — manually restore sentry:needs-triage (and remove ${labels_to_remove})."
-              fi
+              echo "::error::Failed to close issue #${n}; re-queuing it through the re-queue chokepoint for retry."
+              requeue_row "${n}" close-failure
               failed=1
               continue
             fi

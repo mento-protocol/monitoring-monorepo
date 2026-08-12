@@ -55,7 +55,11 @@ import {
   VALID_VERDICTS,
   VERDICT_MARKER,
 } from "./sentry-triage-project-core.mjs";
-import { parseArchiveBaseline } from "./sentry-triage-queue-contract.mjs";
+import {
+  NEEDS_TRIAGE_LABEL,
+  parseArchiveBaseline,
+} from "./sentry-triage-queue-contract.mjs";
+import { REQUEUE_REASONS } from "./sentry-triage-workflow-requeue.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -1606,8 +1610,12 @@ await test("a RENDER failure is best-effort; a CLEAR failure blocks the close AN
   // The CLEAR-failure exit RESTORES selectability through the ONE re-queue
   // chokepoint — never a bare exit, never an open-coded label swap.
   assert(
-    step.includes("node scripts/sentry-triage-brief-clear-recovery.mjs"),
+    step.includes("node scripts/sentry-triage-workflow-requeue.mjs"),
     "the clear-failure exit must route through the re-queue chokepoint CLI",
+  );
+  assert(
+    step.includes("--reason brief-clear-failure"),
+    "the clear-failure exit must name the exit it is compensating for",
   );
   assert(
     !step.includes("requeue_for_retry") &&
@@ -1619,7 +1627,8 @@ await test("a RENDER failure is best-effort; a CLEAR failure blocks the close AN
 
 await test("the verdict step keeps its own re-queue compensation (not reversed by round 8)", () => {
   // Best-effort applies ONLY to the brief step. The verdict step still re-queues
-  // on a VERDICT failure — that guarantee (#1764/#1745) is untouched.
+  // on a VERDICT failure — that guarantee (#1764/#1745) is untouched, it just
+  // runs through the chokepoint CLI now (#1782).
   const workflow = readRepoFile(".github/workflows/sentry-triage-agent.yml");
   const verdictJob = workflow.slice(
     workflow.indexOf("- name: Apply verdict label"),
@@ -1630,9 +1639,74 @@ await test("the verdict step keeps its own re-queue compensation (not reversed b
     "the verdict step must keep its re-queue compensation",
   );
   assert(
-    verdictJob.includes('--add-label "sentry:needs-triage"'),
-    "the verdict step's compensation must restore sentry:needs-triage",
+    verdictJob.includes("node scripts/sentry-triage-workflow-requeue.mjs") &&
+      verdictJob.includes("--reason verdict-unsettled"),
+    "the verdict step's compensation must run through the re-queue chokepoint CLI",
   );
+  // Both exits below the label swap call it — the re-read failure and the
+  // more-than-one-verdict-label refusal.
+  assertEqual(
+    verdictJob.split("requeue_for_retry\n").length - 1,
+    2,
+    "both post-swap exits in the verdict step must compensate",
+  );
+});
+
+await test("NO exit in the triage workflow open-codes a re-queue (#1782)", () => {
+  // THE chokepoint invariant, enforced on the file rather than on the four
+  // exits we happened to convert. Restoring `sentry:needs-triage` is what makes
+  // a stub selectable again, so any `--add-label` carrying it is a re-queue —
+  // and a re-queue that is not the CLI has its own shed set, its own ordering,
+  // and no terminal guard. That is exactly the divergence #1769 round 16 found
+  // and this test makes unrepeatable: reintroduce one open-coded swap anywhere
+  // in the workflow and this reds.
+  //
+  // The forward transition is NOT a re-queue and stays legal: the verdict step
+  // REMOVES `sentry:needs-triage` and adds the verdict label.
+  const workflow = readRepoFile(".github/workflows/sentry-triage-agent.yml");
+  const openCoded = [];
+  for (const [, arg] of workflow.matchAll(/--add-label\s+(\S+)/g)) {
+    if (arg.replace(/["']/g, "").split(",").includes(NEEDS_TRIAGE_LABEL)) {
+      openCoded.push(arg);
+    }
+  }
+  assertEqual(
+    openCoded.join(", "),
+    "",
+    `every exit that restores ${NEEDS_TRIAGE_LABEL} must go through node scripts/sentry-triage-workflow-requeue.mjs`,
+  );
+  // …and the CLI is really wired in, so "no open-coded swaps" can never be
+  // satisfied by a workflow that simply stopped compensating. Each invocation
+  // names a reason the CLI accepts (the project job's per-row helper forwards
+  // one, so its literal reasons are checked at the call sites below).
+  const cliCalls = workflow
+    .split("node scripts/sentry-triage-workflow-requeue.mjs")
+    .slice(1);
+  assert(
+    cliCalls.length >= 4,
+    `expected every compensating exit to invoke the re-queue CLI, found ${cliCalls.length}`,
+  );
+  for (const tail of cliCalls) {
+    const named = /--reason\s+"?(\$2|[a-z-]+)"?/.exec(tail.slice(0, 300));
+    assert(named, "each re-queue CLI invocation must name a --reason");
+    assert(
+      named[1] === "$2" || REQUEUE_REASONS.includes(named[1]),
+      `--reason ${named[1]} is not one of ${REQUEUE_REASONS.join(", ")}`,
+    );
+  }
+  const rowReasons = [
+    ...workflow.matchAll(/requeue_row\s+"\$\{n\}"\s+([a-z-]+)/g),
+  ].map((m) => m[1]);
+  assert(
+    rowReasons.length >= 3,
+    `expected the project job's per-row exits to re-queue, found ${rowReasons.length}`,
+  );
+  for (const reason of rowReasons) {
+    assert(
+      REQUEUE_REASONS.includes(reason),
+      `requeue_row reason ${reason} is not one of ${REQUEUE_REASONS.join(", ")}`,
+    );
+  }
 });
 
 await test("live script comments describe the brief as a comment, not a body write (#1769 round 10)", () => {
@@ -1720,7 +1794,7 @@ await test("the pipeline's shared modules stay under the file-size hard cap", ()
     "scripts/sentry-triage-brief-render.mjs",
     "scripts/sentry-triage-queue-contract.mjs",
     "scripts/sentry-triage-requeue.mjs",
-    "scripts/sentry-triage-brief-clear-recovery.mjs",
+    "scripts/sentry-triage-workflow-requeue.mjs",
   ]
     .map((path) => [path, readRepoFile(path).split("\n").length])
     .filter(([, lines]) => lines > 1000)
@@ -1772,7 +1846,7 @@ await test("every workflow-runtime module imports only relative files and node: 
     "sentry-triage-project.mjs", // verdict + project jobs
     "sentry-triage-archive.mjs", // archive job
     "sentry-triage-agent-comment.mjs", // staged agent write wrapper
-    "sentry-triage-brief-clear-recovery.mjs", // brief clear-failure re-queue CLI
+    "sentry-triage-workflow-requeue.mjs", // the workflow compensation re-queue CLI
   ]) {
     for (const file of closureOf(entry)) closure.add(file);
   }
