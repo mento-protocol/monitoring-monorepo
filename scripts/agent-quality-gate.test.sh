@@ -4936,6 +4936,9 @@ STUB
   assert_contains "Waiting for the agent quality gate run lock"
   assert_contains "held by pid ${live_holder_pid}"
   assert_contains "timed out after"
+  # The pre-push hook cannot pass --no-lock, so the timeout must also name the
+  # recovery that works from a failed push.
+  assert_contains "--skip-if-fresh cache-hits and exits before this lock"
   [[ -d "$gate_lock_root/run.lock" ]] ||
     fail "a run that never acquired the lock must not delete the holder's lock"
 

@@ -203,6 +203,13 @@ deadlocking behind its own ancestor. The self-test exports
 `AGENT_QUALITY_GATE_LOCK=0` for the same reason: its fixture runs are not this
 machine's gate, and must neither queue behind a real one nor block it.
 
+The pre-push hook reaches neither hatch — it runs a fixed command line and
+Trunk strips the environment those variables would arrive in — so when a hook's
+wait times out, recover in band by warming the stamps first
+(`pnpm agent:quality-gate --run`, which queues behind the holder, or
+`--no-lock` if you accept the contention) and then pushing: the hook's
+`--skip-if-fresh` cache-hits and exits before it ever takes the lock.
+
 **Heavy suites do not share the worker pool.** The quality phase runs in four
 parts: ordered setup prerequisites, the serialized dashboard build/browser
 group, the parallel pool, and an exclusive phase that starts only after the

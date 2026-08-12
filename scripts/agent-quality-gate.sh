@@ -575,7 +575,11 @@ acquire_gate_run_lock() {
 
     if [[ "$waited" -ge "$gate_lock_wait_seconds" ]]; then
       echo "error: timed out after ${waited}s waiting for the gate run lock at ${lock}." >&2
-      echo "Holder pid ${owner_pid:-unknown} is still alive. Wait for it to finish, or re-run with --no-lock to accept the contention." >&2
+      echo "Holder pid ${owner_pid:-unknown} is still alive; let it finish, then retry." >&2
+      echo "Running the gate directly? --no-lock starts anyway and accepts the contention." >&2
+      # The pre-push hook passes a fixed command line and Trunk strips the
+      # environment, so neither escape hatch is reachable from a failed push.
+      echo "Pushing? Warm the stamps with 'pnpm agent:quality-gate --run' first, then push: --skip-if-fresh cache-hits and exits before this lock." >&2
       exit 2
     fi
     sleep "$gate_lock_poll_seconds"
