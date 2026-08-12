@@ -13,6 +13,7 @@ import {
   LOCAL_SENTRY_PROJECT,
   MAX_HANDLED_ID_QUERIES,
   MAX_REVERSE_PROBE_QUERIES,
+  MAX_REVERSE_VERIFY_READS,
   REVERSE_SEARCH_LIMIT,
 } from "./sentry-autofix-queue-io.mjs";
 import {
@@ -1534,9 +1535,11 @@ await test("bug C exact-parse fence: a tokenized near-miss title does not block"
 
 // The documented per-run gh ceiling (docs/notes/sentry-triage-pipeline.md
 // § "Cost bound"): 1 window list + MAX_CANDIDATE_EVALUATIONS × 2 reads +
-// MAX_HANDLED_ID_QUERIES + MAX_REVERSE_PROBE_QUERIES + ~40 cached verify reads
-// ≈ 220. Load-bearing: the worst-case test below drives EVERY leg to its cap, so
-// removing a cap breaches this number.
+// MAX_HANDLED_ID_QUERIES + MAX_REVERSE_PROBE_QUERIES + MAX_REVERSE_VERIFY_READS
+// cached verify reads ≈ 221. Load-bearing: the worst-case tests below drive EVERY
+// leg to its cap, so removing a cap breaches this number. The verify-read leg is
+// the one an empty-`handled` window leaves at zero — its own saturating pin lives
+// in "cost pin: the reverse verify-read fan-out is capped" below.
 const DOCUMENTED_GH_CEILING = 225;
 
 await test("cost pin: an EMPTY-family 50-stub window issues no per-id or reverse work", async () => {
@@ -1624,6 +1627,16 @@ function titleSearchCount(calls) {
   ).length;
 }
 
+// `gh issue view` reads spent verifying reverse `in:comments` HITS: makeRunGh
+// numbers handled/hit stubs at 9000+, so a view of one is a reverse verify read.
+// (Candidate stubs in these pins carry sub-9000 numbers, so their own evaluation
+// reads never count here.)
+function reverseVerifyReadCount(calls) {
+  return calls.filter(
+    (c) => c[0] === "issue" && c[1] === "view" && Number(c[2]) >= 9000,
+  ).length;
+}
+
 await test("cost pin: a worst-case large-family window drives and bounds every per-run budget", async () => {
   const stubs = worstCaseWindow();
   const { runGh, calls } = makeRunGh({ stubs });
@@ -1654,6 +1667,61 @@ await test("cost pin: a worst-case large-family window drives and bounds every p
   assert(
     titleSearchCount(calls) === MAX_HANDLED_ID_QUERIES,
     `the handled loop must saturate its budget, got ${titleSearchCount(calls)}`,
+  );
+});
+
+await test("cost pin: the reverse verify-read fan-out is capped at MAX_REVERSE_VERIFY_READS", async () => {
+  // The bound the empty-`handled` worst-case pins above CANNOT reach: with no
+  // handled stubs every reverse probe returns [], so ZERO verify reads run and the
+  // ceiling's "cached verify reads" term is never exercised. MAX_REVERSE_PROBE_QUERIES
+  // caps only the SEARCHES; each search returns up to REVERSE_SEARCH_LIMIT (100)
+  // rows, and every unseen row costs one `gh issue view` before the fence can
+  // reject it. Without the read cap a single full-page probe fans out to 100
+  // subprocesses (and 40 probes to 4000) — the leg this pins.
+  //
+  // Topology: one finalist A that declares nothing (so only the reverse probe
+  // reaches its family), and a FULL REVERSE_SEARCH_LIMIT page of DISTINCT stubs
+  // that each merely MENTION A in a comment (no verdict edge, so the fence admits
+  // none — A stays selected). Every row is a distinct 9000+ number, so each is a
+  // cache-miss read; the cap must stop the fan-out at MAX_REVERSE_VERIFY_READS.
+  //
+  // NEGATIVE CONTROL (delete the `verifyBudget.remaining` guard in
+  // reverseVerifyFamilies): every one of the REVERSE_SEARCH_LIMIT rows is read, so
+  // reverseVerifyReadCount jumps to 100 and the `=== MAX_REVERSE_VERIFY_READS`
+  // assertion fails — proving the cap is what does the bounding.
+  const A = stub({ number: 800, shortId: "ANALYTICS-MENTO-ORG-RA" });
+  const fullPage = Array.from({ length: REVERSE_SEARCH_LIMIT }, (_, i) => ({
+    number: 9000 + i,
+    shortId: `ANALYTICS-MENTO-ORG-R${i}`,
+    label: FIX_REFUSED_LABEL,
+    declares: [],
+    mentions: ["ANALYTICS-MENTO-ORG-RA"],
+  }));
+  // The page must genuinely exceed the read cap, or it proves nothing.
+  assert(
+    fullPage.length > MAX_REVERSE_VERIFY_READS,
+    "the reverse page must exceed the verify-read budget for the cap to bite",
+  );
+  const { runGh, calls } = makeRunGh({ stubs: [A], handled: fullPage });
+  const { entries, truncations } = await selectAutofixRun(
+    { repo: "o/r", cap: 2 },
+    { runGh },
+  );
+  // Bare mentions forge no edge, so A is still selected — the truncation is a
+  // benign, self-terminating cost, never a wrong close.
+  assertDeepEqual(entries, [{ issue: 800, shortId: "ANALYTICS-MENTO-ORG-RA" }]);
+  assertEqual(
+    reverseVerifyReadCount(calls),
+    MAX_REVERSE_VERIFY_READS,
+    `the verify-read fan-out must saturate AND stop at its budget, got ${reverseVerifyReadCount(calls)}`,
+  );
+  assert(
+    truncations.reverseBudget === true,
+    "the capped verify-read fan-out must surface as a truncation on the run record",
+  );
+  assert(
+    calls.length <= DOCUMENTED_GH_CEILING,
+    `verify-read-saturating gh volume must stay under the ceiling, got ${calls.length}`,
   );
 });
 

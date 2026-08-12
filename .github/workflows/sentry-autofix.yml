@@ -103,9 +103,12 @@ jobs:
     # 10, not 5 (PR #1810): the per-declared-id handled lookups and the reverse
     # family search add bounded `gh` volume on top of the per-candidate reads.
     # Every leg is capped (MAX_CANDIDATE_EVALUATIONS, MAX_HANDLED_ID_QUERIES,
-    # MAX_REVERSE_PROBE_QUERIES), so the hard ceiling is ~220 serial subprocesses
-    # (documented in the pipeline note § "Cost bound"); 10 leaves headroom for
-    # checkout/setup and API-latency spikes instead of sizing to hope.
+    # MAX_REVERSE_PROBE_QUERIES, and MAX_REVERSE_VERIFY_READS — the reverse
+    # in:comments searches each page up to REVERSE_SEARCH_LIMIT hits, and every
+    # unseen hit costs one verdict re-read, so that leg needs its own read cap),
+    # so the hard ceiling is ~221 serial subprocesses (documented in the pipeline
+    # note § "Cost bound"); 10 leaves headroom for checkout/setup and API-latency
+    # spikes instead of sizing to hope.
     timeout-minutes: 10
     # sentry-pipeline Environment (issue #1289): AUTOFIX_APP_PRIVATE_KEY is now an
     # environment secret, so this job MUST declare the environment for its

@@ -66,6 +66,7 @@ import {
   listHandledShortIds,
   LOCAL_SENTRY_PROJECT,
   MAX_HANDLED_ID_QUERIES,
+  MAX_REVERSE_VERIFY_READS,
   openAutofixPrExists,
   readStub,
   reverseVerifyFamilies,
@@ -316,6 +317,11 @@ async function resolveFamilies(runGh, repo, candidates, cap) {
   const handledBudget = { remaining: MAX_HANDLED_ID_QUERIES, overflow: 0 };
   const stubCache = new Map();
   const alreadyProbed = new Set();
+  // One per-RUN verify-read budget for the reverse leg, shared across the fixpoint
+  // so the total `gh issue view` fan-out over hit-verification is bounded (the
+  // bug-B mirror of the probe-search cap: each search returns up to
+  // REVERSE_SEARCH_LIMIT rows and every unseen row costs a verdict re-read).
+  const reverseVerifyBudget = { remaining: MAX_REVERSE_VERIFY_READS };
   let reverseBudgetTruncated = false;
   let reverseNonconvergent = false;
 
@@ -387,6 +393,7 @@ async function resolveFamilies(runGh, repo, candidates, cap) {
         project,
         stubCache,
         alreadyProbed,
+        verifyBudget: reverseVerifyBudget,
       });
       edges = result.edges;
       blockers = result.blockers;

@@ -712,12 +712,19 @@ scales with the list ceiling. Every leg of the per-run `gh` cost is now bounded 
 a named cap, so the ceiling is a real bound, not an average: one window list +
 `MAX_CANDIDATE_EVALUATIONS` (50) × 2 reads (issue view + PR list) +
 `MAX_HANDLED_ID_QUERIES` (40) per-declared-id lookups + `MAX_REVERSE_PROBE_QUERIES`
-(40) reverse `in:comments` searches + up to ~40 cached verify reads — ≈ 220
-serial subprocesses worst case. The reverse budget is the bug-B mirror of the
-handled-id one: `probeIds` is the union of a cap-2 finalist set's family members,
-and a family can hold up to `MAX_FAMILY_MEMBERS` (40) ids, so without it a run
-could fan out to ~80 secondary-rate-limited SEARCH queries per iteration ×
-`MAX_REVERSE_ITERATIONS`; capped, it stays a bound. `LIST_LIMIT` (200) is a
+(40) reverse `in:comments` searches + `MAX_REVERSE_VERIFY_READS` (40) cached verify
+reads — ≈ 221 serial subprocesses worst case. Two of those legs are the bug-B
+mirror of the handled-id one. `probeIds` is the union of a cap-2 finalist set's
+family members, and a family can hold up to `MAX_FAMILY_MEMBERS` (40) ids, so
+without the search budget a run could fan out to ~80 secondary-rate-limited SEARCH
+queries per iteration × `MAX_REVERSE_ITERATIONS`; capped, it stays a bound. Each of
+those searches then returns up to `REVERSE_SEARCH_LIMIT` (100) rows, and every
+unseen row costs one authoritative verdict re-read before the fence can reject it,
+so without the verify-read budget the admit leg fans out to
+`MAX_REVERSE_PROBE_QUERIES` × `REVERSE_SEARCH_LIMIT` (4000) `gh issue view`
+subprocesses — `MAX_REVERSE_VERIFY_READS` bounds the distinct cache-miss reads
+across the whole fixpoint so the "cached verify reads" term is a real cap, not an
+average. `LIST_LIMIT` (200) is a
 **safety ceiling, not the throttle**; the throttle is the exclusion set plus
 `MAX_CANDIDATE_EVALUATIONS`. The select job's `timeout-minutes` is **10** (raised
 from 5) so that ceiling keeps headroom for checkout, setup, and API-latency spikes
@@ -727,13 +734,14 @@ tracker as `Window: N stubs, evaluated M` in the run record. Each reverse
 `in:comments` search itself reads a bounded page — `REVERSE_SEARCH_LIMIT` (100),
 5x headroom over the queue scale — rather than paginating to exhaustion (PR #1810
 follow-up); a search that comes back a full page deep flags the same reverse
-truncation, since a sibling could sit on an unread page 2 (the #1808 class). The
-two lookup budgets fail toward MORE candidates (a family that should stand down is
+truncation, since a sibling could sit on an unread page 2 (the #1808 class), and so
+does a run that exhausts `MAX_REVERSE_VERIFY_READS` before reading every hit. All
+lookup budgets fail toward MORE candidates (a family that should stand down is
 re-attempted, never wrongly closed), and each truncation is surfaced too —
 `Handled-id lookups truncated: N …`, `Reverse family probe truncated: …` (probe
-budget **or** a full search page), or `Reverse family verification did not
-converge …` — so a bounded re-attempt is never the silent, healthy-looking one the
-Window line exists to eliminate.
+budget, verify-read budget, **or** a full search page), or `Reverse family
+verification did not converge …` — so a bounded re-attempt is never the silent,
+healthy-looking one the Window line exists to eliminate.
 
 The selector reads only PRs whose head branch is in **this** repo.
 `gh pr list --head` matches by branch name, which fork PRs also carry, so on a
