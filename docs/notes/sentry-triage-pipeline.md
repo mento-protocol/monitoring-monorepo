@@ -81,6 +81,49 @@ by `.github/workflows/claude.yml` on feature-branch `pull_request` events, which
 main-only environment would break); it is inference-only, so its residual
 exposure is bounded to inference-quota abuse.
 
+## What happens to an issue
+
+Two things decide the outcome: **where the code lives** and **what the agent
+decides**. Depth for each cell is in the sections below; this is the index.
+
+`analytics-mento-org` is the only project whose source is in this repo
+(`ui-dashboard/`). `app-mento-org`, `governance-mento-org` and
+`reserve-mento-org` map to `frontend-monorepo`; `analytics-api` and
+`minipay-dapp` to their own repos. That list is fixed in `ALLOWED_OWNING_REPOS`
+and mirrored in `.github/prompts/sentry-triage.md`.
+
+| Verdict              | `analytics-mento-org` (local)                                                   | Every other project (external)                        |
+| -------------------- | ------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| `code-fix`           | **Autofix-eligible** — the only path in the pipeline that writes code           | Projects an issue into the owning repo. Never autofix |
+| `config-fix`         | Record only: no projection (this repo is not an allowlisted target), no autofix | Projects an issue into the owning repo                |
+| `upstream-transient` | Closes. Nothing downstream                                                      | Same                                                  |
+| `needs-human`        | Stays open with a decision-ready brief                                          | Same                                                  |
+
+Autofix outcomes, for a local `code-fix` (`sentry-autofix-finalize.mjs`):
+
+| Agent produced                                                                                                     | Result                                               |
+| ------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------- |
+| A diff within `MAX_CHANGED_FILES`, no forbidden path, no symlink                                                   | PR opened, `sentry:fix-pr-opened`. Never auto-merges |
+| A larger diff, or one touching `FORBIDDEN_PREFIXES` (`.github/`, `terraform/`, `tools/`, lockfiles, `vercel.json`) | `sentry:fix-refused`                                 |
+| No changes                                                                                                         | `sentry:fix-refused`                                 |
+
+`sentry:fix-refused` is terminal — selection never reconsiders that stub. The
+forbidden prefixes are also why `config-fix` is not autofixable: the files a
+configuration fix would change are the ones the guard rejects, and the rest
+(env vars, third-party dashboards) are not in the repo at all.
+
+Cases that are not a verdict:
+
+| Situation                                      | Handling                                                                                                                                                          |
+| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The Sentry issue recurs after its stub closed  | Ingest reopens it when `lastSeen` is newer than `closedAt`, and it re-triages. This is the safety net under every close above                                     |
+| A human wants it archived in Sentry            | Only via the `sentry:approved-archive` label. Never automatic, for any verdict                                                                                    |
+| Sentry unreadable, or the turn budget runs out | The agent posts `needs-human` saying so, rather than failing silently                                                                                             |
+| No verdict, or one from a stale round          | The label step fails loudly and leaves `sentry:needs-triage` for the next run                                                                                     |
+| `SENTRY_PROJECTION_TOKEN` absent               | An external actionable verdict gets **neither routing nor an open escalation** — the stub closes with a skipped note and resurfaces only on regression. Known gap |
+| Filed on a weekend                             | Ingest runs daily; the triage agent runs weekdays only. A missing weekend verdict is not a defect                                                                 |
+| `sentry:candidate-noise`                       | Written by ingest from a title match and read by nothing today                                                                                                    |
+
 ## Non-negotiable invariants
 
 - This repository is public. Queue issues and verdicts must never reproduce
