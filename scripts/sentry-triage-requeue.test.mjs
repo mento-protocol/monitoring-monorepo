@@ -42,6 +42,7 @@ import {
   parseRequeueArgs,
   REQUEUE_REASON_BRIEF_CLEAR,
   REQUEUE_REASON_CLOSE_FAILURE,
+  REQUEUE_REASON_VERDICT_UNSETTLED,
   REQUEUE_REASONS,
   runWorkflowRequeue,
 } from "./sentry-triage-workflow-requeue.mjs";
@@ -1003,10 +1004,45 @@ await test("a close whose response was lost leaves the stub CLOSED, not re-queue
   );
 });
 
+await test("a TRANSIENT revalidation read failure retries and re-queues normally (#1782)", async () => {
+  // The verdict step's first compensating exit runs BECAUSE a `gh` read on this
+  // stub just failed, and the compensation's opening act is another read of the
+  // same stub — correlated, usually transient. Unretried, that blip aborted the
+  // compensation and left the stub OPEN + verdict-labeled + not needs-triage: a
+  // shape no sweeper selects. One bounded retry is what closes that.
+  let views = 0;
+  const gh = makeClearFailureGh(
+    { state: "OPEN", labels: ["sentry-triage", "sentry:verdict-upstream"] },
+    {
+      failOn: (args) => {
+        if (args[1] !== "view") return null;
+        views += 1;
+        return views === 1 ? "HTTP 502 bad gateway" : null;
+      },
+    },
+  );
+  const result = await runWorkflowRequeue({
+    runGh: gh.runGh,
+    repo: REPO,
+    issueNumber: 1731,
+    reason: REQUEUE_REASON_VERDICT_UNSETTLED,
+  });
+  assertEqual(result.requeued, true);
+  assert(
+    gh.state.labels.includes(NEEDS_TRIAGE_LABEL),
+    "a stub whose revalidation read recovered must land back in the queue",
+  );
+  assert(
+    !gh.state.labels.includes("sentry:verdict-upstream"),
+    "the stale verdict must still be shed on the retried path",
+  );
+});
+
 await test("the terminal revalidation FAILS CLOSED: an unreadable stub is never re-queued (#1782)", async () => {
   // The chokepoint's invariant 7 — a failed read is not permission to proceed.
   // It propagates, the workflow reports the manual repair and the run goes red,
-  // rather than mutating a stub whose terminal state could not be observed.
+  // rather than mutating a stub whose terminal state could not be observed. The
+  // retry above is BOUNDED, so a persistent outage still lands here.
   const gh = makeClearFailureGh(
     { state: "OPEN", labels: ["sentry-triage", "sentry:verdict-upstream"] },
     { failOn: (args) => (args[1] === "view" ? "HTTP 502 bad gateway" : null) },
@@ -1023,6 +1059,11 @@ await test("the terminal revalidation FAILS CLOSED: an unreadable stub is never 
   assert(
     !gh.calls.some((a) => a[1] === "edit" || a[1] === "reopen"),
     "no write may precede a terminal revalidation that could not be taken",
+  );
+  assertEqual(
+    gh.calls.filter((a) => a[1] === "view").length,
+    2,
+    "the revalidating read retries exactly once before failing closed",
   );
 });
 

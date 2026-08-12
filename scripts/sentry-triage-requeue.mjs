@@ -297,6 +297,34 @@ async function admissibleVerdictSurvives(readStub, issueNumber) {
  * state from what was actually observed rather than from what its own writes
  * reported — the same ambiguous-response discipline the archive reconciler uses.
  */
+/**
+ * The revalidating read of invariant 7, with the SAME bounded retry
+ * `ensureSelectableForTriage` gives its own reads (#1782). The asymmetry was the
+ * defect: the verdict step's first compensating exit fires precisely BECAUSE a
+ * `gh` read on that stub just failed, so the compensation's opening read is
+ * correlated with a failure that is usually transient — and one unretried
+ * attempt turned that blip into an abort.
+ *
+ * Bounded, and it changes nothing about the direction of failure: a read that
+ * fails every attempt still THROWS, before any write, so a premise that could
+ * not be revalidated is never assumed. It narrows the window; it does not open
+ * a door to a blind re-queue.
+ */
+async function readForRevalidation(readStub, issueNumber, attempts = 2) {
+  let lastError = null;
+  for (let round = 1; round <= attempts; round += 1) {
+    try {
+      return await readStub(issueNumber);
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      process.stderr.write(
+        `::notice::Could not read #${issueNumber} to revalidate the re-queue premise (${lastError.message}); attempt ${round} of ${attempts}.\n`,
+      );
+    }
+  }
+  throw lastError;
+}
+
 export async function ensureSelectableForTriage(
   { writeGh, readStub },
   { repo, issueNumber, fallbackState = "CLOSED", attempts = 2 },
@@ -456,9 +484,11 @@ export async function requeueQueueStub(
   // INVARIANT 7 — revalidate a snapshot-derived premise against live state.
   // A failed read is NOT permission to proceed: it propagates, the stub stays as
   // it is and visible to the next run, and the run goes nonzero. Recovering blind
-  // is how a snapshot-driven mutation becomes a snapshot-driven mistake.
+  // is how a snapshot-driven mutation becomes a snapshot-driven mistake. The read
+  // retries within a bound first (see `readForRevalidation`) — a caller reaching
+  // here often does so because a read just failed.
   if (revalidate) {
-    const live = await readStub(issueNumber);
+    const live = await readForRevalidation(readStub, issueNumber);
     if (!revalidate.check(live)) {
       process.stderr.write(`::notice::${revalidate.declineNote(live)}\n`);
       return {
