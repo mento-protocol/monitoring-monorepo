@@ -451,6 +451,9 @@ gate_lock_token=""
 # and it can never name another run's file.
 gate_lock_reclaim_tmp=""
 gate_lock_reclaim_origin=""
+# Private file a claim builds its record in before publishing it. Same rule:
+# PID-suffixed, so registering it before creation is safe.
+gate_lock_claim_tmp=""
 
 # Put a record we took back where it came from, then drop our name for it.
 # `ln` refuses an occupied path, so a record written while we held this copy is
@@ -555,32 +558,47 @@ gate_lock_record_still_stale() {
   [[ "$current_pid" == "$decided_pid" ]] || return 1
   [[ "$current_token" == "$decided_token" ]] || return 1
   [[ "$current_start" == "$decided_start" ]] || return 1
+  # A record with no token never finished being written, so it is not a claim
+  # at all and its PID field may itself be a truncated value — asking whether
+  # that PID is alive would be asking about a number nobody wrote. The grace
+  # this record already outlived is what makes discarding it safe.
+  [[ -n "$current_token" ]] || return 0
   ! gate_lock_holder_is_live "$current_pid" "$current_start"
 }
 
-# The only way a process comes to hold the lock. The owner write is O_EXCL
-# (`set -C`), which is what makes a stalled creator safe: if a reclaimer
-# recorded itself while this process sat descheduled between `mkdir` and here,
-# this write fails and the caller never believes it holds anything. Reading the
+# The only way a process comes to hold the lock. The record is built in a
+# private file and published with `ln`, so a reader never sees a half-written
+# one: either the complete record is there or nothing is. `ln` refuses an
+# occupied path, which is what makes a stalled creator safe — if a reclaimer
+# published while this process sat descheduled between `mkdir` and here, this
+# publish fails and the caller never believes it holds anything. Reading the
 # token back turns any residual displacement into a failed claim instead of a
 # second concurrent run.
 claim_gate_run_lock() {
   local lock="$1"
   local token="$2"
-  local wrote=0
-  set -C
+  local staged="$lock/owner.claiming.$$"
+  local published=0
+  # Registered before it exists, like every other file this path creates. Any
+  # file already there was left by a dead process that happened to share our
+  # PID, so it is ours to remove.
+  gate_lock_claim_tmp="$staged"
+  rm -f "$staged"
   if {
     printf 'pid=%s\n' "$$"
     printf 'host=%s\n' "$(uname -n)"
     printf 'started_at=%s\n' "$(date +%s)"
     printf 'start=%s\n' "$(gate_lock_process_start $$)"
     printf 'worktree=%s\n' "$repo_root"
+    # Written last on purpose: a record without a token is one whose write did
+    # not finish, and readers below treat it as no record at all.
     printf 'token=%s\n' "$token"
-  } > "$lock/owner" 2>/dev/null; then
-    wrote=1
+  } > "$staged" 2>/dev/null; then
+    ln "$staged" "$lock/owner" 2>/dev/null && published=1
   fi
-  set +C
-  [[ "$wrote" -eq 1 ]] || return 1
+  rm -f "$staged"
+  gate_lock_claim_tmp=""
+  [[ "$published" -eq 1 ]] || return 1
   [[ "$(gate_lock_owner_field "$lock" token)" == "$token" ]] || return 1
   gate_lock_dir="$lock"
   gate_lock_token="$token"
@@ -646,14 +664,17 @@ acquire_gate_run_lock() {
     owner_token="$(gate_lock_owner_field "$lock" token)"
     owner_start="$(gate_lock_owner_field "$lock" start)"
     stale_reason=""
-    [[ -n "$owner_pid" ]] && ownerless_since=""
-    if [[ -z "$owner_pid" ]]; then
-      # Timed from our own first sighting rather than a filesystem timestamp:
-      # the holder is exactly the process that has not written its owner file
-      # yet, so there is nothing of its to read.
+    [[ -n "$owner_token" ]] && ownerless_since=""
+    if [[ -z "$owner_token" ]]; then
+      # No complete record: either no file at all, or one a run was killed
+      # part-way through writing. The token is written last, so its absence
+      # means the write never finished and nothing in the file can be trusted
+      # — not even the PID, which may itself be a truncated value. Timed from
+      # our own first sighting rather than a filesystem timestamp, because the
+      # holder is exactly the process that has not published a record yet.
       [[ -n "$ownerless_since" ]] || ownerless_since="$(date +%s)"
       if [[ $(($(date +%s) - ownerless_since)) -ge "$gate_lock_owner_grace_seconds" ]]; then
-        stale_reason="its holder never recorded a PID"
+        stale_reason="its holder never recorded a complete identity"
       fi
     elif [[ -n "$owner_host" && "$owner_host" != "$this_host" ]]; then
       # Only reachable if the lock root is on shared storage. Another host's
@@ -669,10 +690,10 @@ acquire_gate_run_lock() {
 
     if [[ -n "$stale_reason" ]]; then
       gate_lock_test_delay "${AGENT_QUALITY_GATE_LOCK_RECLAIM_DELAY_SECONDS:-}"
-      if [[ -z "$owner_pid" ]]; then
-        # Ownerless: there is no record to take away, so the exclusive create
-        # is the whole contest. Whoever wins it holds the lock; everyone else,
-        # including the creator that stalled, finds their write refused.
+      if [[ ! -e "$lock/owner" ]]; then
+        # Nothing in the way: publishing the record is the whole contest.
+        # Whoever links it into place first holds the lock; everyone else,
+        # including the creator that stalled, finds their publish refused.
         if claim_gate_run_lock "$lock" "${this_host}-$$-$(date +%s)"; then
           echo "Gate run lock at ${lock} is stale (${stale_reason}); reclaiming it." >&2
           if [[ "$announced" -eq 1 ]]; then
@@ -682,12 +703,14 @@ acquire_gate_run_lock() {
           return 0
         fi
       else
-        # Take the dead record away by rename. rename(2) is atomic and the
-        # source vanishes with it, so exactly one waiter can win a given
-        # record and everyone arriving later fails with ENOENT — no waiter
-        # can act on a verdict that another has already acted on. Registered
-        # with the exit trap before it exists: the path carries our PID, so
-        # cleanup can never race the rename, and never names another run.
+        # Something is in the way: a dead holder's record, or one a killed run
+        # left half-written. Either has to be taken away by rename before a
+        # claim can publish, because `ln` refuses an occupied path. rename(2)
+        # is atomic and the source vanishes with it, so exactly one waiter can
+        # win a given record and everyone arriving later fails with ENOENT —
+        # no waiter can act on a verdict another has already acted on.
+        # Registered with the exit trap before it exists: the path carries our
+        # PID, so cleanup can never race the rename, nor name another run.
         gate_lock_reclaim_origin="$lock/owner"
         gate_lock_reclaim_tmp="${lock}/owner.reclaiming.$$"
         if mv "$lock/owner" "$gate_lock_reclaim_tmp" 2>/dev/null; then
@@ -755,6 +778,12 @@ cleanup_tmpfiles() {
   # sees it whether or not it exists — and it restores rather than deletes,
   # because a record taken but not yet judged may still name a live holder.
   restore_gate_lock_record
+  # A half-built claim record is private to this process and was never linked
+  # into place, so it is simply dropped.
+  if [[ -n "$gate_lock_claim_tmp" ]]; then
+    rm -f "$gate_lock_claim_tmp"
+    gate_lock_claim_tmp=""
+  fi
   # Released last: the lock must outlive worker teardown, or the next run
   # starts while this one's mapped commands are still dying.
   release_gate_run_lock

@@ -5151,6 +5151,25 @@ STUB
     rm -rf "$gate_race_root/run.lock"
   fi
 
+  # A run killed part-way through publishing its record leaves a file that
+  # parses as no holder at all. It must be reclaimable: the claim links a
+  # finished record into place and cannot overwrite whatever is sitting there,
+  # so a leftover the reclaim path skips would wedge every later run until
+  # --lock-wait expired. The token is written last, which is what makes an
+  # unfinished record recognisable — including one whose PID field is itself a
+  # truncated value that happens to name a live process.
+  for race_leftover in "" "pid=99" "pid=$$"; do
+    rm -rf "$gate_race_root/run.lock"
+    : > "$gate_race_log"
+    mkdir -p "$gate_race_root/run.lock"
+    printf '%s' "$race_leftover" > "$gate_race_root/run.lock/owner"
+    race_waiter leftover 0 0
+    grep -q "never recorded a complete identity" "$gate_race_repo/leftover.out" ||
+      fail "an unfinished owner record ([${race_leftover}]) must read as no holder"
+    [[ ! -d "$gate_race_root/run.lock" ]] ||
+      fail "the run that reclaimed an unfinished record ([${race_leftover}]) must release it"
+  done
+
   # A reclaim takes the dead record away by rename before writing its own. The
   # temp path is registered with the exit trap before that rename creates it,
   # so a signal landing anywhere in the window cannot orphan it — and cleanup

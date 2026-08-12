@@ -182,13 +182,15 @@ exist because contention — not flakiness — produced the failures in issue
 (`$HOME/.cache/agent-quality-gate/run.lock`, falling back to
 `$TMPDIR/agent-quality-gate-<uid>`; override with
 `AGENT_QUALITY_GATE_LOCK_DIR`) before it executes anything, and releases it on
-exit. `mkdir(2)`, `O_EXCL` and `rename(2)` are the primitives because macOS has
-no `flock(1)` and the repo's floor is Bash 3.2. Renaming applies to the owner
-_file_ only: `mv src dir` moves `src` _inside_ an existing `dir` instead of
-failing, so a rename is never a conditional claim on a directory here — but
-renaming a regular file away fails with `ENOENT` for whoever arrives second,
-which is exactly the test-and-set the reclaim path needs. A second run prints
-the holder's PID, host, and worktree, then waits — bounded by `--lock-wait` / `AGENT_QUALITY_GATE_LOCK_WAIT_SECONDS`,
+exit. `mkdir(2)`, `link(2)` and `rename(2)` are the primitives because macOS
+has no `flock(1)` and the repo's floor is Bash 3.2. Each is doing one job:
+`mkdir` creates the lock, `link` publishes a finished owner record and refuses
+an occupied path, and `rename` takes a record away — atomically, with the
+source vanishing, so whoever arrives second fails with `ENOENT`. Neither
+`link` nor `rename` is ever applied to the lock _directory_: `mv src dir`
+moves `src` _inside_ an existing `dir` instead of failing, so a rename could
+never be a conditional claim there. A second run prints the holder's PID,
+host, and worktree, then waits — bounded by `--lock-wait` / `AGENT_QUALITY_GATE_LOCK_WAIT_SECONDS`,
 1800 seconds by default — and exits 2 naming that holder if the wait runs out.
 Nothing that will not execute mapped commands ever competes for the lock: a dry
 run, a `--skip-if-fresh` cache hit, and a package-script refusal all exit
@@ -199,9 +201,15 @@ instead of repeating its work.
 The invariant the lock keeps is: **at every instant at most one process
 believes it holds it, and no waiter ever removes or renames another run's
 lock.** Three rules carry that. A holder is made in two atomic steps — win
-`mkdir` on the lock path, then create `owner` with `O_EXCL` — so a creator
-descheduled between them finds its exclusive write refused and queues instead
-of running beside whoever took over. A waiter that judges a lock stale takes
+`mkdir` on the lock path, then build the record in a private file and `link`
+it into place — so a creator descheduled between them finds its publish
+refused and queues instead of running beside whoever took over. Publishing
+whole is what keeps that check honest: a reader never sees a half-written
+record, and a record that _is_ half-written could only have come from a run
+killed mid-write, which is why the `token` field is written last and a record
+without one counts as no record at all — reclaimable after the grace, PID
+field and all, because nothing in an unfinished record can be trusted. A
+waiter that judges a lock stale takes
 that record away by rename before it may write its own, and exactly one waiter
 can win a given record because the source vanishes with the rename; it then
 **re-reads what it took and proceeds only if it is still the identity it
@@ -228,10 +236,14 @@ needs a hand: the temp path a reclaim renames into is registered with the exit
 trap **before** the rename creates it, and cleanup restores rather than deletes,
 so an interrupted reclaim puts the record back exactly as it found it.
 
-A lock whose owner record never appeared — a run killed between `mkdir` and
-its write leaves exactly that — counts as abandoned after a 30-second grace.
-That path is still reachable, so it stays, but it no longer carries any
-correctness weight; it only keeps churn down.
+A lock with no usable owner record — no file at all, or an unfinished one from
+a run killed mid-write — counts as abandoned after a 30-second grace, measured
+from the waiter's own first sighting. Both halves of publishing a record sit
+inside that same accounting, and a live claimer cannot be condemned by it
+anyway: if its record is discarded while it sleeps, its own `link` fails or
+its read-back mismatches, and it queues rather than runs. The grace path is
+still reachable, so it stays, but it carries no correctness weight; it only
+keeps churn down.
 
 Two escape hatches start immediately: `--no-lock` (or `AGENT_QUALITY_GATE_LOCK=0`),
 and an inherited `AGENT_QUALITY_GATE_LOCK_HELD`, which is how the gate's
