@@ -23,12 +23,11 @@
  */
 
 import { join } from "node:path";
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import {
   cleanup,
-  countLineSuite,
   makeHarness,
   makeRoot,
   runGate,
@@ -198,40 +197,89 @@ await test("red: a suite cannot reach a sibling snapshot by deriving its name", 
   }
 });
 
-await test("a suite cannot enumerate the snapshot base to find its siblings", async () => {
+await test("enumerating the base is refused, or — under UID 0 — the poisoning it enables is caught", async () => {
   const root = makeRoot();
   try {
-    // Random names stop derivation but not listing, so the base is traversable
-    // and not readable. This suite PASSES only if `readdir` on its own parent
-    // is refused — if it ever succeeds it emits `not ok` and reds the gate.
+    // Codex 3762140261. The base is mode 0111: traversable, not listable. That
+    // is a DISCRETIONARY permission, and UID 0 bypasses it by POSIX design — so
+    // in a root-owned container (ordinary for agent and CI images) the listing
+    // succeeds. Asserting "listing is refused" therefore made the required gate
+    // unusable under root, which is a failure to run, not a hardening question.
+    //
+    // The mode bits were always defence in depth. What must hold everywhere is
+    // the GUARANTEE: each snapshot is verified immediately before its child, and
+    // a poisoner has already exited by then. So this case asserts whichever
+    // claim is true of the environment it runs in, and asserts one in both —
+    // skipping under root would leave root environments untested, which is how
+    // this comes back.
+    //
+    // The attacker escalates rather than reporting: if it CAN list the base it
+    // poisons every sibling's copy of the victim, so the pre-spawn check is what
+    // has to stop it. Either way the forgery must never run.
     writeSuite(
       root,
       "sentry-a-lister.test.mjs",
       [
-        'import { readdirSync } from "node:fs";',
-        'import { dirname } from "node:path";',
+        'import { readdirSync, writeFileSync } from "node:fs";',
+        'import { dirname, join } from "node:path";',
+        "const base = dirname(process.cwd());",
         "let listed = null;",
         "try {",
-        "  listed = readdirSync(dirname(process.cwd()));",
-        "} catch (err) {",
-        '  process.stdout.write("ok siblings are not enumerable (" + err.code + ")\\n");',
-        '  process.stdout.write("1 passed\\n");',
+        "  listed = readdirSync(base);",
+        "} catch {",
+        "  listed = null;",
         "}",
         "if (listed !== null) {",
-        '  process.stderr.write("not ok siblings ARE enumerable: " + JSON.stringify(listed) + "\\n");',
-        '  process.stderr.write("1 failed, 0 passed\\n");',
-        "  process.exitCode = 1;",
+        "  for (const name of listed) {",
+        "    try {",
+        '      writeFileSync(join(base, name, "scripts", "sentry-b-victim.test.mjs"),',
+        '        \'process.stdout.write("ok forged\\\\n");process.stdout.write("1 passed\\\\n");\');',
+        "    } catch {}",
+        "  }",
         "}",
+        // The gate prints its table, not each suite's per-case lines, so the
+        // verdict goes somewhere the test can read it. An unwatched new file at
+        // the fixture root: the digest sweep walks the baseline's keys and
+        // re-enumeration looks only at scripts/sentry-*.test.mjs, so neither
+        // sees it.
+        `writeFileSync(${JSON.stringify(join(root, "lister-verdict.txt"))}, listed === null ? "unlistable" : "listable");`,
+        'process.stdout.write("ok lister\\n");',
+        'process.stdout.write("1 passed\\n");',
         "",
       ].join("\n"),
     );
-    writeSuite(root, "sentry-b-other.test.mjs", countLineSuite(1));
+    // Genuinely fails; only the forgery would make it report a pass.
+    writeSuite(
+      root,
+      "sentry-b-victim.test.mjs",
+      'throw new Error("the committed victim really fails");\n',
+    );
     writeManifest(root, {
       "scripts/sentry-a-lister.test.mjs": { reporter: "count-line", floor: 1 },
-      "scripts/sentry-b-other.test.mjs": { reporter: "count-line", floor: 1 },
+      "scripts/sentry-b-victim.test.mjs": { reporter: "count-line", floor: 1 },
     });
     const { status, stdout } = runGate(root);
-    assertEqual(status, 0, `listing the base must be refused: ${stdout}`);
+    assert(status !== 0, `the victim really throws, so the gate must red`);
+    assert(
+      !stdout.includes("ok forged"),
+      `the forged program must never run, at any privilege: ${stdout}`,
+    );
+    const verdict = readFileSync(join(root, "lister-verdict.txt"), "utf8");
+    if (verdict === "listable") {
+      // UID 0, or any identity the mode bits do not bind. The permission layer
+      // is inert and the pre-spawn verification is carrying the guarantee.
+      assert(
+        stdout.includes("TAMPERED"),
+        `with the base listable, the pre-spawn check must catch the poisoning: ${stdout}`,
+      );
+    } else {
+      // Unprivileged: the mode bits held, so nothing reached the victim and its
+      // own failure is the reported result.
+      assert(
+        /sentry-b-victim\.test\.mjs \| FAIL/.test(stdout),
+        `with the base unlistable, the victim's own failure must stand: ${stdout}`,
+      );
+    }
   } finally {
     cleanup(root);
   }

@@ -164,6 +164,19 @@ Note this is not the model deleted above: that one hashed the shared checkout
 after every child had finished, where a rewrite could be undone before the sweep
 looked.
 
+**Under UID 0 the mode bits are inert, and that is POSIX, not a defect.** Root
+bypasses discretionary directory permissions, so in a root-owned container — an
+ordinary shape for agent and CI images — a child can list the base and reach a
+sibling's path. The guarantee is unaffected: the victim's snapshot is verified
+immediately before its child runs, and the poisoner has already exited, so the
+run reds with `TAMPERED` instead of accepting a forged pass. Only the layer that
+was always defence in depth is lost. Chasing real isolation for UID 0 would mean
+dropping to an unprivileged identity or per-suite containers, which is out of all
+proportion to what it buys over the pre-spawn check. The isolation suite asserts
+the claim that is true of the environment it runs in — enumeration refused when
+unprivileged, poisoning caught when not — and asserts one in both, because a case
+that skipped under root would leave root environments untested.
+
 **The residual is a suite writing to the shared checkout.** A child cannot
 address another child's snapshot, but in CI it knows the checkout —
 `GITHUB_WORKSPACE` is in its environment — so it can still write there. Nothing

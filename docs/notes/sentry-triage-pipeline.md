@@ -1111,14 +1111,25 @@ which reconciles the `scripts/sentry-*.test.mjs` files against
 and, for each non-exempt suite, asserts child exit 0, parsed `fail == 0`, parsed
 `pass >= floor`, and `pass ==` the per-case lines it emitted — so a suite that
 exits 0 without asserting fails the gate. The gate is dependency-free, runs with
-no `pnpm install` before it, and its own two suites
-(`scripts/sentry-suite-gate.test.mjs` and
-`scripts/sentry-suite-gate-integrity.test.mjs`) are enumerated and run like any
-other. It also watches every file whose content could change a suite's result —
-each suite's transitive first-party imports included — and fails closed if any
-of them changes mid-run. The
-per-suite steps in `Lint + test root scripts` and the `check-sentry-suites-in-ci`
-checker stay in place; both jobs run the suites for now.
+no `pnpm install` before it, and its own three suites
+(`scripts/sentry-suite-gate.test.mjs`,
+`scripts/sentry-suite-gate-integrity.test.mjs` and
+`scripts/sentry-suite-gate-isolation.test.mjs`) are enumerated and run like any
+other.
+
+Each suite runs from its OWN copy of the derived input set, and every copy is
+taken before the first child starts, so no suite can reach another's inputs. The
+set is derived rather than listed: the manifest, the runner and its own imports,
+every listed suite, each suite's transitive first-party imports (V8's dependency
+list, not a text scan), plus per entry its declared `reads` (files it opens) and
+`readsDirs` (directories it enumerates, copied whole). A file a suite reads
+without declaring is absent from its snapshot, so the suite fails — which is what
+keeps those lists honest. Each snapshot is digested when taken and re-verified
+immediately before its child runs, and the shared checkout is swept afterwards,
+so a suite that writes there is named even though it can no longer change a
+verdict. The per-suite steps in `Lint + test root scripts` and the
+`check-sentry-suites-in-ci` checker stay in place; both jobs run the suites for
+now.
 
 That check parses ci.yml rather than searching it, so a step only counts when
 it runs the suite as its whole command. Adding an `if:`, a
@@ -1145,12 +1156,13 @@ node --test scripts/sentry-mcp-broker.test.mjs
 node scripts/sentry-triage-requeue.test.mjs
 node scripts/sentry-triage-agent-comment.test.mjs
 node scripts/check-sentry-suites-in-ci.test.mjs
-# The self-run gate's own suite (a scripts/sentry-*.test.mjs), then the gate
-# itself, which runs every suite above and asserts each one actually ran. The
-# `env -u` prefix matches the CI step and is what lets these run under an
-# ambient NODE_OPTIONS — without it the gate refuses to start by design:
+# The self-run gate's own three suites (each a scripts/sentry-*.test.mjs), then
+# the gate itself, which runs every suite above and asserts each one actually
+# ran. The `env -u` prefix matches the CI step and is what lets these run under
+# an ambient NODE_OPTIONS — without it the gate refuses to start by design:
 /usr/bin/env -u NODE_OPTIONS -u NODE_PATH node scripts/sentry-suite-gate.test.mjs
 /usr/bin/env -u NODE_OPTIONS -u NODE_PATH node scripts/sentry-suite-gate-integrity.test.mjs
+/usr/bin/env -u NODE_OPTIONS -u NODE_PATH node scripts/sentry-suite-gate-isolation.test.mjs
 /usr/bin/env -u NODE_OPTIONS -u NODE_PATH node scripts/sentry-suite-gate.mjs
 ```
 
