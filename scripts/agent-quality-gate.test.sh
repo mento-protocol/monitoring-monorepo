@@ -5305,12 +5305,107 @@ STUB
   # Interrupted while holding the record it took: cleanup restores it.
   interrupt_reclaim interrupted-holding 0 5
 
-  # And the lock still recovers normally afterwards.
+  # The lock those interrupted reclaims left behind is still reclaimable.
   race_waiter recovered 0 0
   grep -q "reclaiming it" "$gate_race_repo/recovered.out" ||
     fail "a lock left by an interrupted reclaim must still be reclaimable"
   [[ ! -d "$gate_race_root/run.lock" ]] ||
     fail "the recovering run must release the lock it acquired"
+
+  # A reclaim killed between taking a record and judging it parks that record
+  # under owner.reclaiming.*, where nothing looks for it. When the record it
+  # took belongs to a LIVE holder — its verdict was formed before another run
+  # took the lock over — the lock reads as ownerless and the next waiter starts
+  # beside a running holder. A remnant naming a live process is the owner
+  # record, misfiled, and has to be read as one.
+  if [[ -n "$race_lock_start" ]]; then
+    rm -rf "$gate_race_root/run.lock"
+    : > "$gate_race_log"
+    mkdir -p "$gate_race_root/run.lock"
+    {
+      printf 'pid=%s\n' "$$"
+      printf 'host=%s\n' "$(uname -n)"
+      printf 'started_at=%s\n' "$(date +%s)"
+      printf 'start_utc=%s\n' "$race_lock_start"
+      printf 'worktree=%s\n' "$gate_race_repo"
+      printf 'token=live-holder-record\n'
+    } > "$gate_race_root/run.lock/owner.reclaiming.99999"
+    # A short budget on purpose: recovering the remnant means finding a LIVE
+    # holder, so this run is supposed to wait and give up, not acquire.
+    AGENT_QUALITY_GATE_LOCK=1 \
+      AGENT_QUALITY_GATE_LOCK_HELD='' \
+      AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+      AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
+      AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+      --base HEAD --run --lock-wait 2 \
+      > "$gate_race_repo/hidden.out" 2>&1 || true
+    grep -q "Recovered the record of live holder pid $$" \
+      "$gate_race_repo/hidden.out" ||
+      fail "a remnant naming a live holder must be recovered, not ignored"
+    grep -q "reclaiming it" "$gate_race_repo/hidden.out" &&
+      fail "a lock whose holder is only visible in a remnant must not be reclaimed"
+    [[ "$(sed -n 's/^token=//p' "$gate_race_root/run.lock/owner" | head -n1)" == "live-holder-record" ]] ||
+      fail "the recovered remnant must become the owner record"
+    [[ -z "$(find "$gate_race_root/run.lock" -name 'owner.reclaiming.*' 2>/dev/null)" ]] ||
+      fail "a recovered remnant must not be left behind to be read twice"
+    rm -rf "$gate_race_root/run.lock"
+
+    # The converse: a remnant naming a process that is gone is spent, and must
+    # not keep a free lock looking occupied.
+    mkdir -p "$gate_race_root/run.lock"
+    {
+      printf 'pid=%s\n' "$race_dead_pid"
+      printf 'host=%s\n' "$(uname -n)"
+      printf 'started_at=%s\n' "$(date +%s)"
+      printf 'worktree=%s\n' "$gate_race_repo"
+      printf 'token=dead-holder-record\n'
+    } > "$gate_race_root/run.lock/owner.reclaiming.99998"
+    race_waiter spent 0 0
+    grep -q "Recovered the record of live holder" "$gate_race_repo/spent.out" &&
+      fail "a remnant naming a dead process must not be resurrected"
+    [[ ! -d "$gate_race_root/run.lock" ]] ||
+      fail "a lock left holding only a spent remnant must be reclaimed and released"
+  fi
+
+  # Crash-point sweep. Every boundary where this path creates, links, renames
+  # or removes something is a place a SIGKILL can land, and each of the rounds
+  # of review on this PR found one of them. The gate names those boundaries so
+  # the suite can kill a run at each and assert the next one still recovers —
+  # so a future change to this path is checked against the enumeration rather
+  # than rediscovered. The mechanics note lists what each state looks like.
+  for race_crash_point in after-mkdir after-staged after-link after-take; do
+    rm -rf "$gate_race_root/run.lock"
+    : > "$gate_race_log"
+    if [[ "$race_crash_point" == "after-take" ]]; then
+      # Reached only with a record to take: plant a spent one.
+      mkdir -p "$gate_race_root/run.lock"
+      {
+        printf 'pid=%s\n' "$race_dead_pid"
+        printf 'host=%s\n' "$(uname -n)"
+        printf 'started_at=%s\n' "$(date +%s)"
+        printf 'worktree=%s\n' "$gate_race_repo"
+        printf 'token=fixture-holder\n'
+      } > "$gate_race_root/run.lock/owner"
+    fi
+    AGENT_QUALITY_GATE_LOCK=1 \
+      AGENT_QUALITY_GATE_LOCK_HELD='' \
+      AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+      AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
+      AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+      AGENT_QUALITY_GATE_LOCK_CRASH_AT="$race_crash_point" \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+      --base HEAD --run --lock-wait 30 \
+      > "$gate_race_repo/crash-$race_crash_point.out" 2>&1 || true
+    # The next run has to reach mapped commands and clean up after itself,
+    # whatever the crash left behind.
+    race_waiter "after-$race_crash_point" 0 0
+    grep -q "All mapped commands passed" \
+      "$gate_race_repo/after-$race_crash_point.out" ||
+      fail "a run crashed at ${race_crash_point} must not wedge the next one"
+    [[ ! -d "$gate_race_root/run.lock" ]] ||
+      fail "the run recovering from a crash at ${race_crash_point} must release the lock"
+  done
 )
 rm -rf "$gate_race_repo" "$gate_race_root"
 

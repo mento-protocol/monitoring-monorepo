@@ -455,6 +455,35 @@ gate_lock_reclaim_origin=""
 # PID-suffixed, so registering it before creation is safe.
 gate_lock_claim_tmp=""
 
+# A reclaim that is SIGKILLed between taking a record and judging it leaves
+# that record parked under owner.reclaiming.*, where nothing looks for it. If
+# the record it took belongs to a LIVE holder — which happens when its verdict
+# was formed before another run took the lock over — the lock reads as
+# ownerless and the next waiter starts beside a running holder. So a lock with
+# no record is not evidence of an absent holder until the remnants have been
+# read: a remnant naming a live process IS the owner record, misfiled.
+gate_lock_recover_hidden_record() {
+  local lock="$1"
+  local remnant pid start recovered=1
+  for remnant in "$lock"/owner.reclaiming.*; do
+    [[ -e "$remnant" ]] || continue
+    pid="$(gate_lock_field_from_file "$remnant" pid)"
+    start="$(gate_lock_field_from_file "$remnant" start_utc)"
+    if gate_lock_holder_is_live "$pid" "$start"; then
+      # `ln` refuses an occupied path, so a record published while we were
+      # reading loses nothing: ours is then the stale copy and just goes away.
+      if ln "$remnant" "$lock/owner" 2>/dev/null; then
+        echo "Recovered the record of live holder pid ${pid} from an interrupted reclaim." >&2
+        recovered=0
+      fi
+    fi
+    # Whatever it named, this copy has served its purpose: either it is now
+    # linked as the owner record, or it describes a holder that is gone.
+    rm -f "$remnant"
+  done
+  return "$recovered"
+}
+
 # Put a record we took back where it came from, then drop our name for it.
 # `ln` refuses an occupied path, so a record written while we held this copy is
 # never clobbered — ours is simply the stale one, and it goes away.
@@ -487,6 +516,15 @@ gate_lock_test_delay() {
   local seconds="${1:-}"
   [[ "$seconds" =~ ^[1-9][0-9]*$ ]] || return 0
   sleep "$seconds"
+}
+
+# Test-only. Names the write boundaries a crash can land between, so the
+# self-test can kill a run at each one and assert the next run recovers. SIGKILL
+# rather than exit, because the point is to skip the exit trap the way a real
+# `kill -9`, an OOM kill or a power loss would. Unset in normal operation.
+gate_lock_test_crash() {
+  [[ "${AGENT_QUALITY_GATE_LOCK_CRASH_AT:-}" == "$1" ]] || return 0
+  kill -9 $$
 }
 
 resolve_gate_lock_root() {
@@ -607,8 +645,10 @@ claim_gate_run_lock() {
     # not finish, and readers below treat it as no record at all.
     printf 'token=%s\n' "$token"
   } > "$staged" 2>/dev/null; then
+    gate_lock_test_crash after-staged
     ln "$staged" "$lock/owner" 2>/dev/null && published=1
   fi
+  gate_lock_test_crash after-link
   rm -f "$staged"
   gate_lock_claim_tmp=""
   [[ "$published" -eq 1 ]] || return 1
@@ -657,6 +697,7 @@ acquire_gate_run_lock() {
 
   while :; do
     if mkdir "$lock" 2>/dev/null; then
+      gate_lock_test_crash after-mkdir
       gate_lock_test_delay "${AGENT_QUALITY_GATE_LOCK_CLAIM_DELAY_SECONDS:-}"
       if claim_gate_run_lock "$lock" "${this_host}-$$-$(date +%s)"; then
         if [[ "$announced" -eq 1 ]]; then
@@ -676,6 +717,18 @@ acquire_gate_run_lock() {
     owner_worktree="$(gate_lock_owner_field "$lock" worktree)"
     owner_token="$(gate_lock_owner_field "$lock" token)"
     owner_start="$(gate_lock_owner_field "$lock" start_utc)"
+    if [[ -z "$owner_token" ]]; then
+      # Before believing there is no holder, read the remnants of any reclaim
+      # that was killed mid-take. One of them may be the holder's own record.
+      if gate_lock_recover_hidden_record "$lock"; then
+        owner_pid="$(gate_lock_owner_field "$lock" pid)"
+        owner_host="$(gate_lock_owner_field "$lock" host)"
+        owner_worktree="$(gate_lock_owner_field "$lock" worktree)"
+        owner_token="$(gate_lock_owner_field "$lock" token)"
+        owner_start="$(gate_lock_owner_field "$lock" start_utc)"
+      fi
+    fi
+
     stale_reason=""
     [[ -n "$owner_token" ]] && ownerless_since=""
     if [[ -z "$owner_token" ]]; then
@@ -727,6 +780,7 @@ acquire_gate_run_lock() {
         gate_lock_reclaim_origin="$lock/owner"
         gate_lock_reclaim_tmp="${lock}/owner.reclaiming.$$"
         if mv "$lock/owner" "$gate_lock_reclaim_tmp" 2>/dev/null; then
+          gate_lock_test_crash after-take
           gate_lock_test_delay "${AGENT_QUALITY_GATE_LOCK_TAKEN_DELAY_SECONDS:-}"
           if gate_lock_record_still_stale \
             "$gate_lock_reclaim_tmp" "$owner_pid" "$owner_token" "$owner_start"; then

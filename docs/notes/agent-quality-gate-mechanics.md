@@ -236,6 +236,39 @@ needs a hand: the temp path a reclaim renames into is registered with the exit
 trap **before** the rename creates it, and cleanup restores rather than deletes,
 so an interrupted reclaim puts the record back exactly as it found it.
 
+#### Crash points
+
+A signal can land between any two of the filesystem operations above, and a
+`kill -9` skips the exit trap entirely, so the safe-state argument has to be
+made per boundary rather than per function. The boundaries are finite; this is
+all of them. Safe means: at most one process believes it holds the lock, no
+record naming a live holder is invisible to the next reader, and no state
+requires manual cleanup.
+
+| Crash lands                                                                  | State left behind                                    | Next run                                                                                        |
+| ---------------------------------------------------------------------------- | ---------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| before `mkdir run.lock`                                                      | nothing                                              | takes the lock normally                                                                         |
+| after `mkdir`, before the record is staged                                   | lock directory, no record                            | no complete record, so after the grace it publishes its own                                     |
+| after staging, before `link`                                                 | `owner.claiming.<pid>` only                          | same as above; the staged file is private and inert, and goes when the lock does                |
+| after `link`, before the staged copy is unlinked                             | complete record plus an inert `owner.claiming.<pid>` | reads the record; reclaims it if its holder is gone                                             |
+| while the holder runs mapped commands                                        | complete record naming a dead process                | takes the record by rename and claims                                                           |
+| after `mv owner → owner.reclaiming.<pid>`, before the taken record is judged | no `owner`, one remnant                              | reads the remnant first: a live identity is linked back as the record, a spent one is discarded |
+| after judging a taken record stale, before the new record is published       | no `owner`, no remnant                               | no complete record, so after the grace it publishes its own                                     |
+| after a taken record is judged NOT stale, before it is put back              | same as the take boundary above                      | same as the take boundary above                                                                 |
+| during `rm -rf` in release                                                   | lock directory partially gone                        | either it is absent (take it) or record-less (grace, then publish)                              |
+
+Two rules make that table hold. Every file this path creates is named with its
+creator's PID and registered with the exit trap **before** it exists, so no
+cleanup can race its own creation or touch another run's file. And a lock with
+no record is not evidence of an absent holder until the remnants have been
+read — a remnant naming a live process is the owner record, misfiled, and gets
+linked back rather than swept away.
+
+The self-test sweeps these boundaries by killing a run at each named crash
+point and asserting the next run still reaches its mapped commands and
+releases the lock. Adding an operation to this path means adding its boundary
+to the table and to that sweep.
+
 A lock with no usable owner record — no file at all, or an unfinished one from
 a run killed mid-write — counts as abandoned after a 30-second grace, measured
 from the waiter's own first sighting. Both halves of publishing a record sit
