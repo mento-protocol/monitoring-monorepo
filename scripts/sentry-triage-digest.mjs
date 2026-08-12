@@ -464,7 +464,12 @@ function idAndProject(entry, { linkUrl } = {}) {
     String(entry.shortId ?? "")
       .toUpperCase()
       .startsWith(`${project.toUpperCase()}-`);
-  return { linked, project: redundant ? "" : project };
+  // A ready-to-render SUFFIX, not a bare value: every renderer used to wrap
+  // this in parentheses unconditionally, so returning "" for the redundant case
+  // produced `ID ()` — punctuation where the repeat used to be. Owning the
+  // parentheses here makes that shape unrepresentable.
+  const shown = redundant ? "" : project;
+  return { linked, project: shown, projectSuffix: shown ? ` (${shown})` : "" };
 }
 
 /** A needs-human decision-ready brief: a level-1 bullet for the issue, then
@@ -521,29 +526,27 @@ function renderNeedsHumanBrief(entry) {
  * <arrow>`, where <arrow> is the linked outcome (fix PR / owning-repo issue /
  * queue-verdict fallback). */
 function renderArrowLine(entry, arrowUrl, arrowLabel) {
-  const { linked, project } = idAndProject(entry);
+  const { linked, projectSuffix } = idAndProject(entry);
   const summary = entry.summary
     ? formatSummaryForSlack(entry.summary)
     : "_(no summary)_";
-  return `• ${linked} (${project}) — ${summary} → ${link(arrowUrl, arrowLabel)}`;
+  return `• ${linked}${projectSuffix} — ${summary} → ${link(arrowUrl, arrowLabel)}`;
 }
 
 function renderWontfixLine(entry) {
-  const { linked, project } = idAndProject(entry);
+  const { linked, projectSuffix } = idAndProject(entry);
   const confidence = entry.confidence ?? "unknown";
   const summary = entry.summary
     ? formatSummaryForSlack(entry.summary)
     : "_(no summary)_";
   // The SHORT-ID links the queue issue, which holds the verdict comment (the
   // rationale). Confidence rides along.
-  const line = `• ${linked} (${project}) — ${summary} (${confidence})`;
-  if (!isHttpsUrl(entry.url)) return line;
-  return line;
+  return `• ${linked}${projectSuffix} — ${summary} (${confidence})`;
 }
 
 function renderFailedLine(entry) {
-  const { linked, project } = idAndProject(entry);
-  return `• ${linked} (${project}) — triage incomplete (still \`${NEEDS_TRIAGE_LABEL}\`)`;
+  const { linked, projectSuffix } = idAndProject(entry);
+  return `• ${linked}${projectSuffix} — triage incomplete (still \`${NEEDS_TRIAGE_LABEL}\`)`;
 }
 
 /** The body lines for one section (excluding its header), one line per entry.
@@ -720,7 +723,7 @@ export function buildDigest(issues, { channel } = {}) {
   if ((bySection.get(WONTFIX_SECTION) ?? []).length > 0) {
     blocks.push(
       mrkdwnSection(
-        `_To archive any of these in Sentry: add \`${APPROVED_ARCHIVE_LABEL}\` to its queue issue._`,
+        `_To archive a *${SECTION_TITLES[WONTFIX_SECTION]}* issue in Sentry: add \`${APPROVED_ARCHIVE_LABEL}\` to its queue issue._`,
       ),
     );
   }
