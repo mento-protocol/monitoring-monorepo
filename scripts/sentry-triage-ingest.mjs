@@ -764,15 +764,22 @@ async function createQueueIssue(options, sentryIssue) {
  * `closedAt`. A stub in this pairing is therefore invisible to every stage —
  * labeled as awaiting a verdict that nothing will ever produce.
  *
- * Several stages can produce it, and the list is open-ended. Both
- * `gh issue close` compensation paths in `.github/workflows/sentry-triage-agent.yml`
- * (the `verdict` job's close step and the `project` job's per-row close) restore
- * `sentry:needs-triage` when the close REPORTS failure — correct when the close
- * did not happen, wrong when only its response was lost, because a rejected
- * command is not proof its remote mutation did not happen. The archive leg's
- * live-regression refusal re-queues a stub it never reopens, and this script's
- * own reopen sequence writes the label before the state change, so a crash
- * between the two leaves the same pairing behind. A human can hand-edit it in.
+ * Several stages can produce it, and the list is open-ended. The archive leg's
+ * live-regression refusal re-queues a stub it never reopens; this script's own
+ * reopen sequence writes the label before the state change, so a crash between
+ * the two leaves the same pairing behind; a human can hand-edit it in; and
+ * stubs stranded before #1782 still wear it, because nothing retroactively
+ * repaired them.
+ *
+ * The triage agent workflow's close compensations are NO LONGER on that list
+ * (#1782). Both used to restore `sentry:needs-triage` whenever the close
+ * REPORTED failure — correct when the close did not happen, wrong when only its
+ * response was lost, since a rejected command is not proof its remote mutation
+ * did not happen. They now route through the re-queue chokepoint, whose
+ * terminal revalidation re-reads the stub and DECLINES on a CLOSED one, which
+ * is exactly what a landed-but-unacknowledged close leaves behind. That removes
+ * a producer; it does not remove the need for this sweep, which repairs the
+ * shape whoever wrote it.
  *
  * So the pairing is repaired HERE, from observed state, rather than guarded at
  * each producer: recovery covers every producer that exists today and every one
