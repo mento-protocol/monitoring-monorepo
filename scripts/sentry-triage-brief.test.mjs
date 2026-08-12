@@ -1746,7 +1746,15 @@ await test("NO exit in the triage workflow open-codes a re-queue (#1782)", () =>
   //
   // The forward transition is NOT a re-queue and stays legal: the verdict step
   // REMOVES `sentry:needs-triage` and adds the verdict label.
-  const workflow = readRepoFile(".github/workflows/sentry-triage-agent.yml");
+  //
+  // Shell line continuations are JOINED first. A `run:` block scalar may write
+  // one argv pair across two lines, and `trunk fmt`, shfmt, actionlint,
+  // shellcheck and yamllint all leave that form alone — so a scan that let
+  // `\s+` run past the newline would capture the backslash as the label and
+  // wave a full open-coded swap through.
+  const workflow = readRepoFile(
+    ".github/workflows/sentry-triage-agent.yml",
+  ).replace(/\\\s*\n\s*/g, " ");
   const openCoded = [];
   for (const [, arg] of workflow.matchAll(/--add-label\s+(\S+)/g)) {
     if (arg.replace(/["']/g, "").split(",").includes(NEEDS_TRIAGE_LABEL)) {
@@ -1757,6 +1765,32 @@ await test("NO exit in the triage workflow open-codes a re-queue (#1782)", () =>
     openCoded.join(", "),
     "",
     `every exit that restores ${NEEDS_TRIAGE_LABEL} must go through node scripts/sentry-triage-workflow-requeue.mjs`,
+  );
+  // The same invariant again, structurally rather than by token shape: in every
+  // `gh issue edit`, the segment an `--add-label` governs — up to the next flag
+  // — must not name the label at all. It does not care how the argument is
+  // quoted, spaced or comma-joined, so it holds even where the token scan above
+  // could be talked out of a match. REMOVING the label is a different segment
+  // and stays legal, which is what keeps the forward verdict swap passing.
+  const addTargets = [];
+  for (const command of workflow.split("\n")) {
+    if (!/\bgh issue edit\b/.test(command)) continue;
+    for (const [, segment] of command.matchAll(
+      /--add-label\s+(.*?)(?=\s+--|$)/g,
+    )) {
+      addTargets.push(segment.trim());
+    }
+  }
+  // Non-vacuity: the forward verdict swap is an `--add-label`, so a scan that
+  // found nothing found the wrong file rather than a clean workflow.
+  assert(
+    addTargets.length >= 1,
+    "expected the forward verdict swap's --add-label to be visible to this scan",
+  );
+  assertEqual(
+    addTargets.filter((seg) => seg.includes(NEEDS_TRIAGE_LABEL)).join(", "),
+    "",
+    `no gh issue edit may ADD ${NEEDS_TRIAGE_LABEL}; restoring it is the re-queue CLI's job alone`,
   );
   // …and the CLI is really wired in, so "no open-coded swaps" can never be
   // satisfied by a workflow that simply stopped compensating. Each invocation
