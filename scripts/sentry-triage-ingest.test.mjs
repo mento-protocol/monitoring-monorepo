@@ -18,6 +18,8 @@ import {
   classifyNoise,
   defaultFetchMergedSentryIssues,
   ESCALATING_ISSUES_QUERY,
+  REOPEN_CAUSE_ESCALATING as ESCALATING_REOPEN_CAUSE,
+  REOPEN_CAUSE_REGRESSED as REGRESSED_REOPEN_CAUSE,
   REGRESSED_ISSUES_QUERY,
   decideDedupAction,
   defangBackticks,
@@ -3182,6 +3184,59 @@ await test("an escalated archived issue reaches a reopen decision", async () => 
     sentryIssueId: "900",
   });
   assertEqual(decision.action, "reopen");
+});
+
+await test("an escalation-only reopen is not audited as a regression", async () => {
+  // #1765 follow-through: the summary counter was fixed first, but the
+  // PER-ISSUE comment is what a person reads on the stub. The fence LINE stays
+  // exactly as it is — it is the machine-read contract — so the provenance has
+  // to arrive as prose beneath it.
+  const posted = [];
+  const runGh = async (args) => {
+    if (args[0] === "issue" && args[1] === "comment") {
+      posted.push(args[args.indexOf("--body") + 1]);
+    }
+    if (args[0] === "issue" && args[1] === "view") return JSON.stringify([]);
+    return "";
+  };
+  await reopenQueueIssue(
+    { repo: "o/r", dryRun: false },
+    { number: 42 },
+    {
+      lastSeen: "2026-08-12T10:00:00Z",
+      reopenCause: ESCALATING_REOPEN_CAUSE,
+    },
+    { runGh, claim: () => {} },
+  );
+  const fence = posted.find((b) => b.includes("Regressed in Sentry"));
+  assert(fence, "the machine-read fence line must still be posted verbatim");
+  assert(
+    fence.includes("escalated this issue out of"),
+    "an escalation must say so beneath the fence, not read as a regression",
+  );
+});
+
+await test("a regressed reopen carries no escalation prose", async () => {
+  const posted = [];
+  const runGh = async (args) => {
+    if (args[0] === "issue" && args[1] === "comment") {
+      posted.push(args[args.indexOf("--body") + 1]);
+    }
+    if (args[0] === "issue" && args[1] === "view") return JSON.stringify([]);
+    return "";
+  };
+  await reopenQueueIssue(
+    { repo: "o/r", dryRun: false },
+    { number: 43 },
+    { lastSeen: "2026-08-12T10:00:00Z", reopenCause: REGRESSED_REOPEN_CAUSE },
+    { runGh, claim: () => {} },
+  );
+  const fence = posted.find((b) => b.includes("Regressed in Sentry"));
+  assert(fence, "expected the fence");
+  assert(
+    !fence.includes("escalated this issue out of"),
+    "a genuine regression must not claim it was an escalation",
+  );
 });
 
 if (failed > 0) {

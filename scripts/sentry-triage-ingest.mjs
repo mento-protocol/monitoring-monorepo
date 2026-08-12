@@ -450,23 +450,38 @@ export function mapSentryIssue(raw) {
   };
 }
 
+// Why a stub is being reopened. `decideDedupAction` treats these identically —
+// it asks only "is this active again?" — but the per-issue audit comment must
+// not tell a reader that Sentry regressed an issue it actually escalated
+// (#1765), so the provenance survives the merge instead of collapsing into the
+// boolean.
+export const REOPEN_CAUSE_REGRESSED = "regressed";
+export const REOPEN_CAUSE_ESCALATING = "escalating";
+
 /**
- * `reopenCandidates` is every issue Sentry currently considers live again —
- * both `is:regressed` and `is:escalating` (#1765). They collapse to one flag
- * because `decideDedupAction` asks only "is this active again?".
+ * `reopenCandidates` is every issue Sentry currently considers live again.
+ * Pass `cause` so an escalation is recorded as one; an issue returned by BOTH
+ * queries keeps the first cause seen, which is the regressed one.
  */
-export function mergeSentryIssues(newIssues, reopenCandidates) {
+export function mergeSentryIssues(
+  newIssues,
+  reopenCandidates,
+  cause = REOPEN_CAUSE_REGRESSED,
+) {
   const byId = new Map();
   for (const issue of newIssues ?? []) {
     byId.set(issue.id, { ...issue, isRegressed: false });
   }
   for (const issue of reopenCandidates ?? []) {
     const existing = byId.get(issue.id);
+    // An issue already marked by an earlier candidate set keeps that cause: the
+    // regressed query is merged first, and "regressed" is the stronger claim.
+    const reopenCause = existing?.reopenCause ?? cause;
     byId.set(
       issue.id,
       existing
-        ? { ...existing, isRegressed: true }
-        : { ...issue, isRegressed: true },
+        ? { ...existing, isRegressed: true, reopenCause }
+        : { ...issue, isRegressed: true, reopenCause },
     );
   }
   return byId;
@@ -905,6 +920,16 @@ export async function reopenQueueIssue(
       cause: REQUEUE_CAUSE_SENTRY_EVIDENCE,
       lastSeen: sentryIssue.lastSeen,
       dedupeFence: true,
+      // The fence LINE is the machine-read contract and stays exactly as it is;
+      // provenance goes in the prose the chokepoint renders beneath it. Without
+      // this an escalated archive is audited as "Regressed in Sentry", which is
+      // the one distinction an operator reading this stub needs (#1765).
+      fenceProse:
+        sentryIssue.reopenCause === REOPEN_CAUSE_ESCALATING
+          ? [
+              "Sentry escalated this issue out of `archived_until_escalating` — it was not a regression.",
+            ]
+          : null,
     },
   );
 }
