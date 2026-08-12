@@ -2716,9 +2716,6 @@ while IFS= read -r path; do
           add_command "node scripts/check-peg-registry-integrity.mjs" "peg registry integrity checker changed"
           add_command "node scripts/check-peg-registry-integrity.test.mjs" "peg registry integrity checker changed"
           ;;
-        scripts/europ-operational-admission.mjs|scripts/europ-operational-admission.test.mjs)
-          add_command "node --test scripts/europ-operational-admission.test.mjs" "EUROP operational-admission evaluator changed"
-          ;;
         scripts/check-pr-description.mjs|scripts/check-pr-description.test.mjs)
           add_command "node scripts/check-pr-description.test.mjs" "PR description validator changed"
           ;;
@@ -2845,11 +2842,6 @@ while IFS= read -r path; do
           add_adr_reminder "top-level package.json changed — ADR reminder (a new package/service likely needs an ADR)"
           ;;
       esac
-      ;;
-  esac
-  case "$path" in
-    scripts/fixtures/europ-operational-admission/*)
-      add_command "node --test scripts/europ-operational-admission.test.mjs" "EUROP operational-admission evaluator changed"
       ;;
   esac
   # `pnpm tf:test` owns the fail-closed production identity contract. Route

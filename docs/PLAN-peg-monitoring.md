@@ -196,9 +196,7 @@ Ladder (EUROP initial values; per-asset data):
    sources and why; declare `coverageClass`; onboarding fails if critical
    is unreachable or price/structural signals are circular (DEX-primary)
    without an explicit reviewed per-class policy.
-3. Non-code gates: documented breaker-multisig signer SLA; verify pool
-   trading limits bound drain to a survivable rate for that SLA.
-4. Scheduled re-census diffs live venue listings vs registry (feeds the
+3. Scheduled re-census diffs live venue listings vs registry (feeds the
    evacuation-vs-delisting discrimination and registry-rot alerts).
 
 ### EUROP instantiation
