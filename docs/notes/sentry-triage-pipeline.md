@@ -666,8 +666,12 @@ comments for the family's member ids, admitting an edge only after re-parsing th
 hit's verdict through the same authorship fence — which catches the two links the
 forward `duplicate_of` graph cannot see: a handled sibling that names a finalist
 which declares nothing itself, and a hub id two stubs share through an issue that
-is not a candidate. Both reads are keyed on ids, so nothing depends on where a
-stub sorts in the window.
+is not a candidate. An admitted hub joins its WHOLE declared family (not just the
+probed id), so a terminal sibling the hub names alongside the finalist is pulled
+into the family; the fixpoint then re-checks that reverse-surfaced id's own
+marker by title, since its edge is exactly the one the forward pass never
+declared and reverse-probing it alone would never reach. Both reads are keyed on
+ids, so nothing depends on where a stub sorts in the window.
 
 Two bounds keep an agent-authored `duplicate_of` list from reaching further than
 that. Family ids are **project-scoped**: only `ANALYTICS-MENTO-ORG-<suffix>` ids
@@ -704,18 +708,27 @@ read-only and never re-queues anything.
 **Cost bound** (PR #1810). Terminal, projected, archived, and external-project
 stubs are all excluded server-side before `--limit` applies, so the eligible
 window stays single-digit at steady state and the leg's `gh` volume no longer
-scales with the list ceiling. The hard ceiling per run is one window list +
+scales with the list ceiling. Every leg of the per-run `gh` cost is now bounded by
+a named cap, so the ceiling is a real bound, not an average: one window list +
 `MAX_CANDIDATE_EVALUATIONS` (50) × 2 reads (issue view + PR list) +
-`MAX_HANDLED_ID_QUERIES` (40) per-declared-id lookups + roughly a dozen reverse
-searches (four fixpoint iterations over a cap-2 finalist set's family ids) +
-about ten cached verify reads — ≈ 165 serial subprocesses, ~3 min at ~1s each.
-`LIST_LIMIT` (200) is a **safety ceiling, not the throttle**; the throttle is the
-exclusion set plus `MAX_CANDIDATE_EVALUATIONS`. The select job's `timeout-minutes`
-is **10** (raised from 5) so that ceiling keeps headroom for checkout, setup, and
-API-latency spikes rather than being sized to hope. The read budget truncates the
-window's **newest** tail (it is oldest-first), and any approach toward the eval
-cap is surfaced on the tracker as `Window: N stubs, evaluated M` in the run
-record — weeks ahead of a silent truncation.
+`MAX_HANDLED_ID_QUERIES` (40) per-declared-id lookups + `MAX_REVERSE_PROBE_QUERIES`
+(40) reverse `in:comments` searches + up to ~40 cached verify reads — ≈ 220
+serial subprocesses worst case. The reverse budget is the bug-B mirror of the
+handled-id one: `probeIds` is the union of a cap-2 finalist set's family members,
+and a family can hold up to `MAX_FAMILY_MEMBERS` (40) ids, so without it a run
+could fan out to ~80 secondary-rate-limited SEARCH queries per iteration ×
+`MAX_REVERSE_ITERATIONS`; capped, it stays a bound. `LIST_LIMIT` (200) is a
+**safety ceiling, not the throttle**; the throttle is the exclusion set plus
+`MAX_CANDIDATE_EVALUATIONS`. The select job's `timeout-minutes` is **10** (raised
+from 5) so that ceiling keeps headroom for checkout, setup, and API-latency spikes
+rather than being sized to hope. The read budget truncates the window's **newest**
+tail (it is oldest-first), and any approach toward the eval cap is surfaced on the
+tracker as `Window: N stubs, evaluated M` in the run record. The two lookup
+budgets fail toward MORE candidates (a family that should stand down is
+re-attempted, never wrongly closed), and each truncation is surfaced too —
+`Handled-id lookups truncated: N …`, `Reverse family probe truncated: …`, or
+`Reverse family verification did not converge …` — so a bounded re-attempt is
+never the silent, healthy-looking one the Window line exists to eliminate.
 
 The selector reads only PRs whose head branch is in **this** repo.
 `gh pr list --head` matches by branch name, which fork PRs also carry, so on a

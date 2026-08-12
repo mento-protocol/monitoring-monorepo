@@ -640,6 +640,71 @@ await test("run record renders the Window tripwire only when the window exceeds 
   assert(!noWindow.includes("Window:"), "no Window line without window fields");
 });
 
+await test("run record renders each cost-budget truncation only when its budget was hit", () => {
+  // PR #1810 follow-up: a family-dedupe lookup a per-run budget capped, so a stub
+  // that should have stood down may re-attempt. Each fails toward MORE candidates
+  // (never a wrong close), but the bounded re-attempt must not be silent — that
+  // is exactly the byte-identical-to-healthy state the Window line exists to
+  // remove. The lines render ONLY when the budget was actually hit, so the steady
+  // state carries no noise. Flags arrive from the workflow env as strings.
+  const clean = buildAutofixRunRecordBody({
+    timestampIso: "2026-07-19T08:30:00Z",
+    trigger: "schedule",
+    disposition: "active",
+    candidates: 2,
+    handledOverflow: 0,
+    reverseTruncated: "false",
+    reverseNonconvergent: "false",
+  });
+  assert(
+    !clean.includes("truncated") && !clean.includes("did not converge"),
+    "no truncation line in the steady state",
+  );
+  const hit = buildAutofixRunRecordBody({
+    timestampIso: "2026-07-19T08:30:00Z",
+    trigger: "schedule",
+    disposition: "active",
+    candidates: 2,
+    handledOverflow: 198,
+    reverseTruncated: "true",
+    reverseNonconvergent: "true",
+  });
+  assert(
+    hit.includes(
+      "- Handled-id lookups truncated: 198 over the MAX_HANDLED_ID_QUERIES budget (treated as not-handled)",
+    ),
+    `handled-overflow line renders with its count, got: ${hit}`,
+  );
+  assert(
+    hit.includes(
+      "- Reverse family probe truncated: hit the MAX_REVERSE_PROBE_QUERIES budget (some finalists left unverified)",
+    ),
+    `reverse-probe truncation line renders, got: ${hit}`,
+  );
+  assert(
+    hit.includes(
+      "- Reverse family verification did not converge within MAX_REVERSE_ITERATIONS",
+    ),
+    `non-convergence line renders, got: ${hit}`,
+  );
+  // A garbage/absent overflow coerces to 0 -> no line (back-compat with callers
+  // that do not thread the truncations), and the boolean flags accept only the
+  // literal "true".
+  const garbage = buildAutofixRunRecordBody({
+    timestampIso: "2026-07-19T08:30:00Z",
+    trigger: "schedule",
+    disposition: "active",
+    candidates: 2,
+    handledOverflow: "not-a-number",
+    reverseTruncated: "TRUE",
+    reverseNonconvergent: undefined,
+  });
+  assert(
+    !garbage.includes("truncated") && !garbage.includes("did not converge"),
+    "garbage/absent truncation fields render no line",
+  );
+});
+
 // Comments as the raw REST endpoint returns them: pipeline-authored comments
 // resolve to the Actions bot login "github-actions[bot]".
 function trackerComment(id, body, login) {

@@ -27,7 +27,11 @@ import {
   PROJECTED_LABEL,
 } from "./sentry-triage-ingest.mjs";
 import { autofixBranchName } from "./sentry-autofix-finalize.mjs";
-import { familyKey, isLocalFamilyId } from "./sentry-autofix-family.mjs";
+import {
+  declaredFamilyIds,
+  familyKey,
+  isLocalFamilyId,
+} from "./sentry-autofix-family.mjs";
 
 // The queue-membership label every triage stub carries (the queue contract's
 // `LABEL_DEFINITIONS` self-heals it). Both per-id lookups below narrow their
@@ -174,11 +178,14 @@ export async function listCodeFixStubs(runGh, repo) {
 }
 
 /**
- * How many distinct declared family ids one run may look up. Each candidate's
- * fan-out is already MAX_DUPLICATE_LOOKUPS-bounded, but the distinct union
- * across a full window could still be large; overflow ids are treated as
- * NOT-handled — failing toward MORE candidates, the family module's documented
- * safe direction — with a stderr note.
+ * How many distinct declared family ids one run may look up — a per-RUN budget,
+ * shared across the initial declared-id pass AND the fixpoint's re-checks of
+ * reverse-surfaced hub ids (see `resolveFamilies`). Each candidate's fan-out is
+ * already MAX_DUPLICATE_LOOKUPS-bounded, but the distinct union across a full
+ * window (plus the ids the reverse probe surfaces) could still be large; overflow
+ * ids are treated as NOT-handled — failing toward MORE candidates, the family
+ * module's documented safe direction — with a stderr note AND a run-record line
+ * (the overflow count is threaded out through the shared `budget`).
  */
 export const MAX_HANDLED_ID_QUERIES = 40;
 
@@ -208,22 +215,42 @@ export const MAX_HANDLED_ID_QUERIES = 40;
  * tokenized search, so a fuzzy near-miss (a different suffix that tokenizes the
  * same) is dropped.
  */
-export async function listHandledShortIds(runGh, repo, declaredIds) {
+export async function listHandledShortIds(
+  runGh,
+  repo,
+  declaredIds,
+  options = {},
+) {
+  // `queried` (already-looked-up ids) and `budget` (remaining allowance +
+  // accumulated overflow) are shared across the run's calls, so a second pass on
+  // reverse-surfaced ids neither re-queries an id nor exceeds the per-run cap.
+  // Absent (a standalone call), each defaults fresh, preserving the single-call
+  // cap-at-40 behaviour exactly.
+  const queried = options.queried instanceof Set ? options.queried : new Set();
+  const budget = options.budget ?? {
+    remaining: MAX_HANDLED_ID_QUERIES,
+    overflow: 0,
+  };
   const ids = [
     ...new Set(
       (Array.isArray(declaredIds) ? declaredIds : [])
         .map((id) => familyKey(id))
         .filter((id) => id.length > 0),
     ),
-  ];
-  const queryIds = ids.slice(0, MAX_HANDLED_ID_QUERIES);
+  ].filter((id) => !queried.has(id));
+  const capacity = Math.max(0, budget.remaining ?? 0);
+  const queryIds = ids.slice(0, capacity);
   if (ids.length > queryIds.length) {
+    const dropped = ids.length - queryIds.length;
+    budget.overflow = (budget.overflow ?? 0) + dropped;
     process.stderr.write(
-      `note: ${ids.length} distinct declared family ids exceed MAX_HANDLED_ID_QUERIES (${MAX_HANDLED_ID_QUERIES}); ${ids.length - queryIds.length} are treated as not-handled this run (fails toward MORE candidates).\n`,
+      `note: ${ids.length} distinct declared family ids exceed the per-run MAX_HANDLED_ID_QUERIES budget (${MAX_HANDLED_ID_QUERIES}); ${dropped} are treated as not-handled this run (fails toward MORE candidates).\n`,
     );
   }
+  budget.remaining = capacity - queryIds.length;
   const handled = new Set();
   for (const id of queryIds) {
+    queried.add(id);
     const stdout = await runGh([
       "issue",
       "list",
@@ -286,6 +313,22 @@ async function readVerdictCached(runGh, repo, number, cache) {
 }
 
 /**
+ * How many distinct reverse `in:comments` probes one RUN may issue — the bug-B
+ * mirror of MAX_HANDLED_ID_QUERIES, and the missing sibling of it before PR
+ * #1810's follow-up. `probeIds` is the union of the finalists' family members,
+ * and a family can hold up to MAX_FAMILY_MEMBERS ids, so a cap-2 finalist set of
+ * two large duplicate families could otherwise fan out to ~80 `in:comments`
+ * SEARCH queries per iteration (secondary-rate-limited, not the ~1s REST call the
+ * cost ceiling assumed) with no bound but MAX_FAMILY_MEMBERS × cap ×
+ * MAX_REVERSE_ITERATIONS. Bounding it here — counting distinct probes across the
+ * whole fixpoint via the shared `alreadyProbed` set — makes the documented gh
+ * ceiling a real bound. Overflow probe ids are treated as NOT-probed (no edge,
+ * no blocker), which fails toward MORE candidates — the same safe direction the
+ * handled-id budget takes — with a stderr note and a run-record line.
+ */
+export const MAX_REVERSE_PROBE_QUERIES = 40;
+
+/**
  * Reverse-verify the FINALISTS' families (PR #1810 bug B). The forward
  * `duplicate_of` graph misses two shapes the collapse must still catch: a
  * finalist that declares NOTHING but is named by a handled sibling, and a hub id
@@ -296,18 +339,25 @@ async function readVerdictCached(runGh, repo, number, cache) {
  *
  * A hit is admitted ONLY after the authoritative recheck: its verdict is
  * re-parsed through the same fence, and the probed id must actually appear in
- * that parsed `duplicate_of` (isLocalFamilyId + familyKey equality) with a
- * title that parses to a valid SHORT-ID — a casual comment mention can never
- * forge an edge. An admitted edge joins the two ids into the collapse's union
- * (via `options.handledEdges`); an admitted hit that ALSO carries a terminal
- * marker becomes a BLOCKER (its key joins handledShortIds), standing the family
- * down.
+ * that parsed `duplicate_of` (via `declaredFamilyIds` — the same project-scoped,
+ * self-excluding, MAX_DUPLICATE_LOOKUPS-bounded set the forward path consumes),
+ * with a title that parses to a valid SHORT-ID — a casual comment mention can
+ * never forge an edge. An admitted hit joins the hub's WHOLE declared family
+ * into the collapse's union (an edge from the hit to each of its local declared
+ * ids, not just the probed one — so a hub H that names both the finalist P and a
+ * terminal sibling Q pulls Q into P's family, where the caller's handled-recheck
+ * can then read Q's own marker and stand the family down; probing P alone left
+ * Q's edge on the floor). An admitted hit that ALSO carries a terminal marker
+ * becomes a BLOCKER (its key joins handledShortIds) directly.
  *
  * Fail-SOFT, same direction as `openAutofixPrExists`: a `gh` failure on one
  * probe skips that probe this run (at worst one self-terminating extra attempt),
  * never rejecting out of selection. `alreadyProbed` carries across the caller's
- * fixpoint iterations so no id is queried twice. Returns
- * `{ edges: [[probeKey, hitKey]], blockers: [hitKey] }`.
+ * fixpoint iterations so no id is queried twice AND so the per-run
+ * MAX_REVERSE_PROBE_QUERIES budget bounds the whole fixpoint, not one call.
+ * Returns `{ edges: [[hitKey, declaredKey]], blockers: [hitKey], truncated }` —
+ * `truncated` true when the probe budget was reached (some finalists left
+ * unverified, failing toward MORE candidates).
  */
 export async function reverseVerifyFamilies(
   runGh,
@@ -320,6 +370,7 @@ export async function reverseVerifyFamilies(
   const probed = options.alreadyProbed ?? new Set();
   const edges = [];
   const blockers = new Set();
+  let truncated = false;
   for (const rawId of Array.isArray(probeIds) ? probeIds : []) {
     const probeId = familyKey(rawId);
     // Foreign-project, bare-slug, or shape-invalid ids never probe: they cannot
@@ -327,6 +378,13 @@ export async function reverseVerifyFamilies(
     // note below, where a newline would inject a workflow command.
     if (!isLocalFamilyId(probeId, project)) continue;
     if (probed.has(probeId)) continue;
+    // Per-run probe budget (counts distinct LOCAL probes across the fixpoint via
+    // the shared `probed` set). At the ceiling, stop probing and treat the rest
+    // as not-probed — fewer blockers, MORE candidates, the safe direction.
+    if (probed.size >= MAX_REVERSE_PROBE_QUERIES) {
+      truncated = true;
+      break;
+    }
     probed.add(probeId);
     let hits;
     try {
@@ -364,11 +422,18 @@ export async function reverseVerifyFamilies(
         stubCache,
       );
       if (!parsed) continue;
-      const declaresProbe = (parsed.duplicateOf ?? []).some(
-        (dup) => isLocalFamilyId(dup, project) && familyKey(dup) === probeId,
+      // The hub's WHOLE declared local family (project-scoped, self-excluded,
+      // MAX_DUPLICATE_LOOKUPS-bounded — the forward path's exact rule). The probe
+      // is admitted only if the hub genuinely names it; then EVERY declared id
+      // joins the hub, so a terminal sibling the hub names alongside the finalist
+      // is pulled into the same family for the caller's handled-recheck.
+      const hubFamily = declaredFamilyIds(
+        hitShortId,
+        parsed.duplicateOf ?? [],
+        project,
       );
-      if (!declaresProbe) continue;
-      edges.push([probeId, hitKey]);
+      if (!hubFamily.includes(probeId)) continue;
+      for (const declaredKey of hubFamily) edges.push([hitKey, declaredKey]);
       const labels = (hit.labels ?? [])
         .map((label) => (typeof label === "string" ? label : label?.name))
         .filter(Boolean);
@@ -380,7 +445,12 @@ export async function reverseVerifyFamilies(
       }
     }
   }
-  return { edges, blockers: [...blockers] };
+  if (truncated) {
+    process.stderr.write(
+      `note: reverse family verification hit the per-run MAX_REVERSE_PROBE_QUERIES budget (${MAX_REVERSE_PROBE_QUERIES}); the remaining probe ids are treated as not-probed this run (fails toward MORE candidates).\n`,
+    );
+  }
+  return { edges, blockers: [...blockers], truncated };
 }
 
 /** Read a queue stub's title/labels/comments so it can be evaluated in full. */

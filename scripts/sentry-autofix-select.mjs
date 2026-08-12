@@ -56,6 +56,8 @@ import {
   DEFER_FAMILY_DUPLICATE,
   DEFER_FAMILY_HANDLED,
   DEFER_FAMILY_RECONCILING,
+  familyKey,
+  isLocalFamilyId,
 } from "./sentry-autofix-family.mjs";
 import {
   AUTOFIX_SELECT_LABEL,
@@ -63,6 +65,7 @@ import {
   listCodeFixStubs,
   listHandledShortIds,
   LOCAL_SENTRY_PROJECT,
+  MAX_HANDLED_ID_QUERIES,
   openAutofixPrExists,
   readStub,
   reverseVerifyFamilies,
@@ -271,18 +274,29 @@ const DEFER_NOTES = {
 const MAX_REVERSE_ITERATIONS = 4;
 
 /**
- * Collapse the candidate window to per-family decisions, closing the two family
+ * Collapse the candidate window to per-family decisions, closing the family
  * edges the forward `duplicate_of` graph cannot see on its own:
  *   - bug C: a TERMINAL sibling that the candidate window excludes, found by
  *     querying each DECLARED family id directly (no bounded recent list, so a
  *     blocker deep in the ledger is still found);
  *   - bug B: a REVERSE edge — a handled sibling or hub id that names a finalist
  *     — found by probing each finalist's family member ids via `in:comments`,
- *     then folding the verified edges/blockers back in and re-collapsing.
- * Returns the collapse decisions (see `collapseDuplicateFamilies`).
+ *     then folding the verified edges/blockers back in and re-collapsing. An
+ *     admitted hub joins its WHOLE declared family, so a terminal sibling the hub
+ *     names alongside the finalist is pulled into the family; the per-iteration
+ *     handled-recheck then reads that reverse-surfaced id's own marker (its edge
+ *     is otherwise the one the forward pass never declared and the reverse pass
+ *     would drop).
+ * Both budgets fail toward MORE candidates and thread their truncation out.
+ * Returns `{ decisions, truncations }` — `truncations` carries the handled-id
+ * overflow count and the reverse-probe / non-convergence flags for the run
+ * record, so a bounded re-attempt is never silent.
  */
 async function resolveFamilies(runGh, repo, candidates, cap) {
   const project = LOCAL_SENTRY_PROJECT;
+  const candidateKeys = new Set(
+    candidates.map((candidate) => familyKey(candidate.shortId)),
+  );
 
   // bug C handled set, keyed per DECLARED family id (the distinct, project-scoped
   // and MAX_DUPLICATE_LOOKUPS-bounded union of every candidate's duplicate_of).
@@ -295,12 +309,23 @@ async function resolveFamilies(runGh, repo, candidates, cap) {
       ),
     ),
   ];
-  let handledShortIds = declaredIds.length
-    ? await listHandledShortIds(runGh, repo, declaredIds)
-    : [];
-  const handledEdges = [];
+  // One per-RUN handled-id budget, shared by the initial declared-id pass and the
+  // fixpoint's re-checks of reverse-surfaced hub ids, so the total stays bounded
+  // and its overflow surfaces on the tracker.
+  const handledQueried = new Set();
+  const handledBudget = { remaining: MAX_HANDLED_ID_QUERIES, overflow: 0 };
   const stubCache = new Map();
   const alreadyProbed = new Set();
+  let reverseBudgetTruncated = false;
+  let reverseNonconvergent = false;
+
+  let handledShortIds = declaredIds.length
+    ? await listHandledShortIds(runGh, repo, declaredIds, {
+        queried: handledQueried,
+        budget: handledBudget,
+      })
+    : [];
+  const handledEdges = [];
 
   // Family ids are agent-authored free text. Scoping every joiner AND every
   // blocker to this project is what stops a foreign-project id — or the bare
@@ -328,33 +353,73 @@ async function resolveFamilies(runGh, repo, candidates, cap) {
         finalists.push(decision);
       }
     }
-    const probeIds = [
+    const memberIds = [
       ...new Set(finalists.flatMap((decision) => decision.members ?? [])),
-    ].filter((id) => !alreadyProbed.has(id));
-    if (probeIds.length === 0) break;
+    ];
 
-    const { edges, blockers } = await reverseVerifyFamilies(
-      runGh,
-      repo,
-      probeIds,
-      { project, stubCache, alreadyProbed },
+    // Handled-recheck the family member ids the initial declared-id pass never
+    // saw — the non-candidate hub ids the reverse edges surface (a terminal
+    // sibling a hub names alongside the finalist, whose marker lives on its OWN
+    // stub, not on any hit). Candidate ids are never terminal by construction;
+    // already-handled and already-queried ids add nothing; foreign-project ids
+    // stay inert. Shares the per-run handled budget, so it fails toward MORE
+    // candidates rather than unbounded gh volume.
+    const recheckIds = memberIds.filter(
+      (id) =>
+        !candidateKeys.has(id) &&
+        !handledShortIds.includes(id) &&
+        !handledQueried.has(id) &&
+        isLocalFamilyId(id, project),
     );
-    const newBlockers = blockers.filter((id) => !handledShortIds.includes(id));
+    const newlyHandled =
+      recheckIds.length > 0 && handledBudget.remaining > 0
+        ? await listHandledShortIds(runGh, repo, recheckIds, {
+            queried: handledQueried,
+            budget: handledBudget,
+          })
+        : [];
+
+    const probeIds = memberIds.filter((id) => !alreadyProbed.has(id));
+    let edges = [];
+    let blockers = [];
+    if (probeIds.length > 0) {
+      const result = await reverseVerifyFamilies(runGh, repo, probeIds, {
+        project,
+        stubCache,
+        alreadyProbed,
+      });
+      edges = result.edges;
+      blockers = result.blockers;
+      if (result.truncated) reverseBudgetTruncated = true;
+    }
+
+    const foldedBlockers = [...new Set([...blockers, ...newlyHandled])];
+    const newBlockers = foldedBlockers.filter(
+      (id) => !handledShortIds.includes(id),
+    );
     // Nothing new to fold -> the finalist set is stable.
     if (edges.length === 0 && newBlockers.length === 0) break;
 
-    handledShortIds = [...new Set([...handledShortIds, ...blockers])];
+    handledShortIds = [...new Set([...handledShortIds, ...foldedBlockers])];
     handledEdges.push(...edges);
     decisions = collapse();
 
     if (iteration >= MAX_REVERSE_ITERATIONS) {
+      reverseNonconvergent = true;
       process.stderr.write(
         `note: reverse family verification did not reach a fixpoint in ${MAX_REVERSE_ITERATIONS} iterations; proceeding with the current candidates (fails open).\n`,
       );
       break;
     }
   }
-  return decisions;
+  return {
+    decisions,
+    truncations: {
+      handledOverflow: handledBudget.overflow,
+      reverseBudget: reverseBudgetTruncated,
+      reverseNonconvergent,
+    },
+  };
 }
 
 /**
@@ -396,11 +461,17 @@ export async function selectAutofixRun(options, deps = {}) {
       labels: stub.labels,
     });
     // No list window in single-issue mode: one stub considered, one evaluated,
-    // so the Window tripwire never fires (total == evaluated).
+    // so the Window tripwire never fires (total == evaluated), and the family
+    // collapse is skipped entirely, so no cost budget can truncate.
     return {
       entries: candidate ? [candidate.entry] : [],
       deferred: [],
       window: { total: 1, evaluated: 1 },
+      truncations: {
+        handledOverflow: 0,
+        reverseBudget: false,
+        reverseNonconvergent: false,
+      },
     };
   }
 
@@ -434,7 +505,12 @@ export async function selectAutofixRun(options, deps = {}) {
     if (candidate) candidates.push(candidate);
   }
 
-  const decisions = await resolveFamilies(runGh, repo, candidates, cap);
+  const { decisions, truncations } = await resolveFamilies(
+    runGh,
+    repo,
+    candidates,
+    cap,
+  );
   const entries = [];
   const deferred = [];
   for (const decision of decisions) {
@@ -455,7 +531,7 @@ export async function selectAutofixRun(options, deps = {}) {
     if (entries.length >= cap) continue;
     entries.push(decision.candidate.entry);
   }
-  return { entries, deferred, window };
+  return { entries, deferred, window, truncations };
 }
 
 /** Matrix entries only — the emitted contract, unchanged. `selectAutofixRun`
@@ -515,6 +591,11 @@ Options:
   --window-out <p>     Write the Window tripwire — { "total": <n>, "evaluated":
                        <n> } — to this path, so the run record can surface a list
                        window that exceeded the eval cap. Stdout is unchanged.
+  --truncations-out <p> Write the cost-budget truncations — { "handledOverflow":
+                       <n>, "reverseBudget": <bool>, "reverseNonconvergent":
+                       <bool> } — to this path, so the run record can surface a
+                       bounded re-attempt (a family that should have stood down
+                       but a budget capped its lookup). Stdout is unchanged.
   --emit-verdict       With --issue: print the trusted (fence-selected) verdict
                        comment body for that issue and exit (the workflow
                        snapshots it to a file the fix agent reads, so the agent
@@ -531,6 +612,7 @@ export function parseArgs(argv) {
     emitVerdict: false,
     deferredOut: null,
     windowOut: null,
+    truncationsOut: null,
     help: false,
   };
   const args = [...argv];
@@ -570,6 +652,9 @@ export function parseArgs(argv) {
       case "--window-out":
         options.windowOut = readValue();
         break;
+      case "--truncations-out":
+        options.truncationsOut = readValue();
+        break;
       case "-h":
       case "--help":
         options.help = true;
@@ -594,11 +679,12 @@ async function main() {
     process.stdout.write(await emitVerdict(options));
     return;
   }
-  const { entries, deferred, window } = await selectAutofixRun(options);
+  const { entries, deferred, window, truncations } =
+    await selectAutofixRun(options);
   // Report BEFORE stdout: the workflow captures stdout into a shell variable, so
-  // a failed report write must not be able to lose the entries too. Both are
-  // best-effort — the run record degrades to "0 deferred" / no Window line,
-  // never to a dead leg.
+  // a failed report write must not be able to lose the entries too. All are
+  // best-effort — the run record degrades to "0 deferred" / no Window line / no
+  // truncation line, never to a dead leg.
   if (options.deferredOut) {
     try {
       writeFileSync(options.deferredOut, `${JSON.stringify(deferred)}\n`);
@@ -616,6 +702,19 @@ async function main() {
       const message = err instanceof Error ? err.message : String(err);
       process.stderr.write(
         `warn: could not write the window report: ${message}\n`,
+      );
+    }
+  }
+  if (options.truncationsOut) {
+    try {
+      writeFileSync(
+        options.truncationsOut,
+        `${JSON.stringify(truncations ?? {})}\n`,
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      process.stderr.write(
+        `warn: could not write the truncations report: ${message}\n`,
       );
     }
   }
