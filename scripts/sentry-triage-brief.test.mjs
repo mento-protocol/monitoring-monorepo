@@ -42,9 +42,11 @@ import {
 import {
   decodeDoubleQuoteEscape,
   decodeScalar,
+  escalationCompletenessRefusal,
   extractPermalink,
   MAX_BRIEF_LIST_ITEMS,
   MAX_BRIEF_TEXT_LEN,
+  MIN_DECISION_BRANCHES,
   parseShortId,
   parseVerdictComment,
   parseVerdictYaml,
@@ -560,6 +562,87 @@ await test("resolveVerdict rejects an incomplete needs-human brief (#1769 round 
   // A COMPLETE needs-human verdict still resolves.
   const ok = resolveVerdict(stubIssue(needsHumanYaml("Decide X")), 1731);
   assertEqual(ok.verdict, "needs-human");
+});
+
+await test("a ONE-branch escalation is not decision-ready (#1782)", () => {
+  // A decision has at least two answers, and .github/prompts/sentry-triage.md
+  // asks for one branch per answer. A single branch is the shape that quietly
+  // defeats the escalation: the brief says what happens if the answer is yes, is
+  // silent on no, and SETTLES anyway — a human is left with nothing to act on
+  // for the uncovered outcome and no retry follows, because the verdict resolved
+  // cleanly.
+  const oneBranch = [
+    "verdict: needs-human",
+    "confidence: low",
+    "human_question: Decide whether to rotate the key",
+    "how_to_check:",
+    "  - read the key's last-used timestamp",
+    "decision_branches:",
+    "  - Yes -> config-fix: rotate it",
+  ].join("\n");
+  let message = "";
+  try {
+    resolveVerdict(stubIssue(oneBranch), 1731);
+  } catch (err) {
+    message = err instanceof Error ? err.message : String(err);
+  }
+  assert(
+    /incomplete brief/.test(message) && /decision_branches/.test(message),
+    `a one-branch escalation must be refused, got: ${message || "no error"}`,
+  );
+  assert(
+    /sentry:needs-triage/.test(message),
+    "the refusal must say the stub stays queued for re-triage",
+  );
+
+  // Counted AFTER neutralization: a second branch that renders empty does not
+  // make the escalation decision-ready, so the gate and the renderer agree.
+  const neutralizedAway = [
+    "verdict: needs-human",
+    "confidence: low",
+    "human_question: Decide whether to rotate the key",
+    "how_to_check:",
+    "  - read the key's last-used timestamp",
+    'decision_branches: ["Yes -> rotate", "\\0"]',
+  ].join("\n");
+  let secondMessage = "";
+  try {
+    resolveVerdict(stubIssue(neutralizedAway), 1731);
+  } catch (err) {
+    secondMessage = err instanceof Error ? err.message : String(err);
+  }
+  assert(
+    /incomplete brief/.test(secondMessage),
+    `a branch that neutralizes to empty must not count, got: ${secondMessage || "no error"}`,
+  );
+
+  // TWO real branches resolve, and the rule itself is the escalation contract's.
+  assertEqual(MIN_DECISION_BRANCHES, 2);
+  assertEqual(
+    escalationCompletenessRefusal({
+      howToCheckCount: 1,
+      decisionBranchCount: MIN_DECISION_BRANCHES,
+    }),
+    null,
+  );
+  assertEqual(
+    resolveVerdict(stubIssue(needsHumanYaml("Decide X")), 1731).verdict,
+    "needs-human",
+  );
+});
+
+await test("the prompt asks for the 2-3 decision branches the gate enforces (#1782)", () => {
+  // Nothing parses the prompt, so the gate and the instruction it enforces are
+  // held together by this check: a prompt that asked for one branch would make
+  // every escalation fail the gate instead of the agent writing a better brief.
+  const prompt = readRepoFile(".github/prompts/sentry-triage.md");
+  const line = prompt
+    .split("\n")
+    .find((text) => text.startsWith("- `decision_branches:`"));
+  assert(line, "the prompt must document `decision_branches:`");
+  const range = /\((\d+)[–-](\d+) dash items\)/.exec(line);
+  assert(range, `expected a dash-item count in: ${line}`);
+  assertEqual(Number(range[1]), MIN_DECISION_BRANCHES);
 });
 
 await test("brief list items that neutralize to empty are dropped from every field (#1769 round 15)", () => {

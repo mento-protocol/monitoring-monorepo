@@ -1064,6 +1064,7 @@ jobs:
           # (The batch script self-heals the sentry:projected label from
           # Stage A's LABEL_DEFINITIONS before settling — see
           # runProjectionBatch in scripts/sentry-triage-project.mjs.)
+
           # Every compensating exit in this job re-queues through the ONE
           # chokepoint's workflow CLI (#1782), never an open-coded label swap:
           # it owns the shed set (REOPEN_SHED_LABELS — so a row that carries no

@@ -332,7 +332,15 @@ escalation_reason: |
 
 `how_to_check` and `decision_branches` exist because the brief below is
 deterministic: nothing else in the contract carries the instruction half of a
-decision, so without them a rendered brief can only restate the situation.
+decision, so without them a rendered brief can only restate the situation. Both
+are enforced, counted after neutralization, by
+`escalationCompletenessRefusal` in
+`scripts/sentry-triage-escalation-contract.mjs`: at least one `how_to_check`
+step, and at least **two** `decision_branches` — a decision has at least two
+answers, and a one-branch escalation settles with the brief silent on the other
+one and no retry, because the verdict resolved cleanly. Failing either is the
+same fail-loud contract as a missing verdict: the label step exits nonzero and
+`sentry:needs-triage` stays on for the next run.
 Every list is capped at `MAX_BRIEF_LIST_ITEMS` (in
 `scripts/sentry-triage-project-core.mjs`), and every field is bounded at
 `MAX_BRIEF_TEXT_LEN` before either emitter escapes it. The bounds and the
