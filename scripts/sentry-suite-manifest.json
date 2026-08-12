@@ -3,7 +3,8 @@
   "suites": {
     "scripts/sentry-autofix-finalize.test.mjs": {
       "reporter": "count-line",
-      "floor": 44
+      "floor": 44,
+      "reads": [".github/workflows/sentry-autofix.yml"]
     },
     "scripts/sentry-autofix-select.test.mjs": {
       "reporter": "count-line",

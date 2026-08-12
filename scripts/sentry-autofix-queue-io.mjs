@@ -341,6 +341,36 @@ async function readVerdictCached(runGh, repo, number, cache) {
 export const MAX_REVERSE_PROBE_QUERIES = 40;
 
 /**
+ * Per-search page size for the reverse `in:comments` probes. 5x headroom over the
+ * live queue scale, the same class of fix as #1808: a `--limit` sized to today's
+ * ledger silently drops page-2 hits, so a terminal sibling that falls past the
+ * first page is missed and its candidate burns another autofix run. The bound
+ * stays finite by design — we do NOT paginate-until-found. Instead a search that
+ * comes back with a FULL page (`hits.length >= REVERSE_SEARCH_LIMIT`, meaning
+ * there may be a page 2 we never read) flips the function's `truncated` flag, so
+ * the existing run-record surface reports the shortfall exactly as the probe
+ * budget does — bounded-and-surfaced, matching #1808.
+ */
+export const REVERSE_SEARCH_LIMIT = 100;
+
+/**
+ * How many DISTINCT stub reads (`gh issue view` via `readVerdictCached`) the whole
+ * reverse fixpoint may spend admitting hits. MAX_REVERSE_PROBE_QUERIES bounds the
+ * `in:comments` SEARCHES, but each search returns up to REVERSE_SEARCH_LIMIT (100)
+ * rows and every unseen row costs one authoritative verdict re-read before the
+ * fence can reject it — so without this the verify-read leg fans out to
+ * MAX_REVERSE_PROBE_QUERIES × REVERSE_SEARCH_LIMIT (40 × 100 = 4000) subprocesses,
+ * and the pipeline note's "~40 cached verify reads" ceiling term is a hope, not a
+ * bound. Bounding it here — counting only cache-MISS reads across the fixpoint via
+ * the shared `verifyBudget`, so a re-encountered stub stays free — makes the
+ * documented gh ceiling real for this leg too. At the ceiling the remaining hits
+ * are treated as NOT-admitted (no edge, no blocker), which fails toward MORE
+ * candidates — the same safe direction the probe and handled-id budgets take — and
+ * flips the same `truncated` flag so the shortfall surfaces on the run record.
+ */
+export const MAX_REVERSE_VERIFY_READS = 40;
+
+/**
  * Reverse-verify the FINALISTS' families (PR #1810 bug B). The forward
  * `duplicate_of` graph misses two shapes the collapse must still catch: a
  * finalist that declares NOTHING but is named by a handled sibling, and a hub id
@@ -370,10 +400,17 @@ export const MAX_REVERSE_PROBE_QUERIES = 40;
  * probe skips that probe this run (at worst one self-terminating extra attempt),
  * never rejecting out of selection. `alreadyProbed` carries across the caller's
  * fixpoint iterations so no id is queried twice AND so the per-run
- * MAX_REVERSE_PROBE_QUERIES budget bounds the whole fixpoint, not one call.
- * Returns `{ edges: [[hitKey, declaredKey]], blockers: [hitKey], truncated }` —
- * `truncated` true when the probe budget was reached (some finalists left
- * unverified, failing toward MORE candidates).
+ * MAX_REVERSE_PROBE_QUERIES budget bounds the whole fixpoint, not one call;
+ * `verifyBudget` likewise carries across iterations so the per-run
+ * MAX_REVERSE_VERIFY_READS cap bounds the hit-verification reads across the whole
+ * fixpoint, not one probe. Returns
+ * `{ edges: [[hitKey, declaredKey]], blockers: [hitKey], truncated }` —
+ * `truncated` true when the per-run probe budget was reached (some finalists left
+ * unverified), OR a single probe came back with a full REVERSE_SEARCH_LIMIT page
+ * (a sibling may sit on an unread page 2), OR the per-run verify-read budget was
+ * exhausted (some hits left unread and so un-admitted). All three leave the
+ * fixpoint incomplete, failing toward MORE candidates, and all surface on the
+ * same run-record line.
  */
 export async function reverseVerifyFamilies(
   runGh,
@@ -384,6 +421,12 @@ export async function reverseVerifyFamilies(
   const project = options.project;
   const stubCache = options.stubCache ?? new Map();
   const probed = options.alreadyProbed ?? new Set();
+  // Shared across the caller's fixpoint iterations (like `probed`), so the
+  // per-run verify-read cap bounds the whole reverse leg, not one call. Absent
+  // (a standalone call), it defaults fresh, preserving cap-at-N per call.
+  const verifyBudget = options.verifyBudget ?? {
+    remaining: MAX_REVERSE_VERIFY_READS,
+  };
   const edges = [];
   const blockers = new Set();
   let truncated = false;
@@ -416,7 +459,7 @@ export async function reverseVerifyFamilies(
         "--json",
         "number,title,labels",
         "--limit",
-        "20",
+        String(REVERSE_SEARCH_LIMIT),
       ]);
       hits = JSON.parse(stdout);
     } catch (err) {
@@ -426,11 +469,31 @@ export async function reverseVerifyFamilies(
       );
       continue;
     }
+    // A full page means `--limit` capped what the API returned before any
+    // client-side filter ran: a page-2 hit — possibly the terminal sibling —
+    // went unread. Surface it (do NOT paginate); the finalist gets one bounded,
+    // self-terminating extra attempt rather than a silent miss (the #1808 class).
+    if (Array.isArray(hits) && hits.length >= REVERSE_SEARCH_LIMIT) {
+      truncated = true;
+    }
     for (const hit of Array.isArray(hits) ? hits : []) {
       const hitShortId = parseShortId(hit.title ?? "");
       if (!isValidShortId(hitShortId)) continue;
       const hitKey = familyKey(hitShortId);
       if (hitKey === probeId) continue;
+      // Per-run verify-read budget: a hit already in the cache is free (no
+      // subprocess), but an UNSEEN one costs a `gh issue view`. At the cap, leave
+      // the remaining unseen hits unread — un-admitted, so fewer blockers and
+      // MORE candidates — and surface it on the run record. `stubCache.has` mirrors
+      // `readVerdictCached`'s own cache check exactly, so the budget is charged for
+      // precisely the calls that spawn a subprocess.
+      if (!stubCache.has(String(hit.number))) {
+        if (verifyBudget.remaining <= 0) {
+          truncated = true;
+          continue;
+        }
+        verifyBudget.remaining -= 1;
+      }
       const parsed = await readVerdictCached(
         runGh,
         repo,
@@ -472,7 +535,7 @@ export async function reverseVerifyFamilies(
   }
   if (truncated) {
     process.stderr.write(
-      `note: reverse family verification hit the per-run MAX_REVERSE_PROBE_QUERIES budget (${MAX_REVERSE_PROBE_QUERIES}); the remaining probe ids are treated as not-probed this run (fails toward MORE candidates).\n`,
+      `note: reverse family verification was truncated this run — the per-run probe budget (${MAX_REVERSE_PROBE_QUERIES}) or verify-read budget (${MAX_REVERSE_VERIFY_READS}) was reached, or a probe returned a full page; the unreached hits/probes are treated as not-admitted (fails toward MORE candidates).\n`,
     );
   }
   return { edges, blockers: [...blockers], truncated };

@@ -14,6 +14,8 @@ import {
   LOCAL_SENTRY_PROJECT,
   MAX_HANDLED_ID_QUERIES,
   MAX_REVERSE_PROBE_QUERIES,
+  MAX_REVERSE_VERIFY_READS,
+  REVERSE_SEARCH_LIMIT,
 } from "./sentry-autofix-queue-io.mjs";
 import {
   FIX_SCOPE_ARCHITECTURAL,
@@ -212,18 +214,25 @@ function makeRunGh({
       const commentsProbe = /"([^"]+)"\s+in:comments/.exec(search);
       if (commentsProbe) {
         const qid = commentsProbe[1].toUpperCase();
+        const matched = handledStubs.filter((h) =>
+          [...h.declares, ...h.mentions]
+            .map((x) => String(x).toUpperCase())
+            .includes(qid),
+        );
+        // GitHub returns at most `--limit` rows BEFORE any client-side filter,
+        // so a hit past the page boundary is genuinely unread — model that
+        // truncation. The #1810 follow-up raised the reverse probe's `--limit`
+        // to REVERSE_SEARCH_LIMIT precisely so a terminal sibling on page 2 is
+        // not silently dropped; a suite that ignored `--limit` could never
+        // reproduce that miss.
+        const limitIdx = args.indexOf("--limit");
+        const limit = limitIdx === -1 ? Infinity : Number(args[limitIdx + 1]);
         return JSON.stringify(
-          handledStubs
-            .filter((h) =>
-              [...h.declares, ...h.mentions]
-                .map((x) => String(x).toUpperCase())
-                .includes(qid),
-            )
-            .map((h) => ({
-              number: h.number,
-              title: handledTitle(h),
-              labels: [h.label, "sentry-triage"].map((name) => ({ name })),
-            })),
+          matched.slice(0, limit).map((h) => ({
+            number: h.number,
+            title: handledTitle(h),
+            labels: [h.label, "sentry-triage"].map((name) => ({ name })),
+          })),
         );
       }
       // Per-declared-id handled lookup (bug C): `"<ID>" in:title`. Return handled
@@ -1397,6 +1406,101 @@ await test("bug B hub topology: A and a handled sibling joined only through a no
   );
 });
 
+await test("bug B (#1810 follow-up): the terminal blocker on PAGE 2 of the reverse search still stands the finalist down", async () => {
+  // The reverse `in:comments` probe pages the API. Before this fix the per-search
+  // `--limit` was 20, so a terminal sibling that landed past the first page went
+  // unread and the finalist burned an autofix run — the #1808 truncation class.
+  // Topology: A declares nothing, so only the reverse probe can reach its family.
+  // The search returns 29 bare mentions of A (fence-rejected: no verdict edge)
+  // FIRST, then the single handled sibling B that actually declares [A] and holds
+  // a terminal marker — so B is the 30th row, on page 2 of a 20-row page. With
+  // --limit REVERSE_SEARCH_LIMIT (100) B is returned and A stands down.
+  //
+  // NEGATIVE CONTROL (revert the source `--limit` to 20): the mock truncates the
+  // returned rows to the passed `--limit`, so a 20-row page drops B (row 30) and
+  // A is (wrongly) selected — the family burns a run. That mutation is anchored
+  // twice below: the probe must request at least the 30 rows needed to clear the
+  // page, AND B must actually be the last row (assert-fail if the fixture drifts
+  // so the blocker is not genuinely on page 2).
+  const A = stub({ number: 800, shortId: "ANALYTICS-MENTO-ORG-PA" });
+  const noise = Array.from({ length: 29 }, (_, i) => ({
+    number: 8100 + i,
+    shortId: `ANALYTICS-MENTO-ORG-N${i}`,
+    label: FIX_REFUSED_LABEL,
+    declares: [],
+    mentions: ["ANALYTICS-MENTO-ORG-PA"],
+  }));
+  const blocker = {
+    number: 8200,
+    shortId: "ANALYTICS-MENTO-ORG-PB",
+    label: FIX_PR_OPENED_LABEL,
+    declares: ["ANALYTICS-MENTO-ORG-PA"],
+  };
+  const handled = [...noise, blocker];
+  // Fixture anchor: the blocker is genuinely past a 20-row page — the exact
+  // condition the old --limit 20 dropped.
+  assert(
+    handled.indexOf(blocker) >= 20,
+    "the terminal blocker must sit past the first page for the control to bite",
+  );
+  const { runGh, calls } = makeRunGh({ stubs: [A], handled });
+  const { entries, deferred } = await selectAutofixRun(
+    { repo: "o/r", cap: 2 },
+    { runGh },
+  );
+  assertDeepEqual(entries, []);
+  assertDeepEqual(deferred, [{ issue: 800, reason: DEFER_FAMILY_HANDLED }]);
+  // Anchor the fix's value, not just consistency: a probe that asked for 20
+  // (the reverted source) could not reach row 30, so require real page-2 reach.
+  const probe = calls.find(
+    (c) =>
+      c[0] === "issue" &&
+      c[1] === "list" &&
+      String(c[c.indexOf("--search") + 1] ?? "").includes(
+        `"ANALYTICS-MENTO-ORG-PA" in:comments`,
+      ),
+  );
+  assert(probe, "the reverse probe ran");
+  const probeLimit = Number(probe[probe.indexOf("--limit") + 1]);
+  assertEqual(
+    String(probeLimit),
+    String(REVERSE_SEARCH_LIMIT),
+    "the reverse probe must request REVERSE_SEARCH_LIMIT rows",
+  );
+  assert(
+    probeLimit >= 30,
+    `the reverse probe --limit must clear page 2 (>=30), got ${probeLimit}`,
+  );
+});
+
+await test("bug B (#1810 follow-up): a FULL reverse page flips the truncated flag onto the run record", async () => {
+  // A full page means `--limit` capped what the API returned before any filter,
+  // so an unread page 2 may hold a sibling. The fix surfaces that on the same
+  // run-record line the probe-budget truncation uses (truncations.reverseBudget)
+  // rather than paginating. Here A declares nothing and the probe comes back with
+  // exactly REVERSE_SEARCH_LIMIT bare mentions (no verdict edge, so A is still
+  // selected) — the flag must be set anyway.
+  const A = stub({ number: 810, shortId: "ANALYTICS-MENTO-ORG-QA" });
+  const fullPage = Array.from({ length: REVERSE_SEARCH_LIMIT }, (_, i) => ({
+    number: 8300 + i,
+    shortId: `ANALYTICS-MENTO-ORG-Q${i}`,
+    label: FIX_REFUSED_LABEL,
+    declares: [],
+    mentions: ["ANALYTICS-MENTO-ORG-QA"],
+  }));
+  const { runGh } = makeRunGh({ stubs: [A], handled: fullPage });
+  const { entries, truncations } = await selectAutofixRun(
+    { repo: "o/r", cap: 2 },
+    { runGh },
+  );
+  assertDeepEqual(entries, [{ issue: 810, shortId: "ANALYTICS-MENTO-ORG-QA" }]);
+  assertEqual(
+    truncations.reverseBudget,
+    true,
+    "a full reverse page must surface as a truncation on the run record",
+  );
+});
+
 await test("bug C: a declared terminal sibling is found by its own id, and no bulk 200-list is issued", async () => {
   // The candidate declares [OLD]; OLD carries a terminal marker but is not in
   // the window. The per-declared-id in:title query keyed on OLD finds it however
@@ -1469,9 +1573,11 @@ await test("bug C exact-parse fence: a tokenized near-miss title does not block"
 
 // The documented per-run gh ceiling (docs/notes/sentry-triage-pipeline.md
 // § "Cost bound"): 1 window list + MAX_CANDIDATE_EVALUATIONS × 2 reads +
-// MAX_HANDLED_ID_QUERIES + MAX_REVERSE_PROBE_QUERIES + ~40 cached verify reads
-// ≈ 220. Load-bearing: the worst-case test below drives EVERY leg to its cap, so
-// removing a cap breaches this number.
+// MAX_HANDLED_ID_QUERIES + MAX_REVERSE_PROBE_QUERIES + MAX_REVERSE_VERIFY_READS
+// cached verify reads ≈ 221. Load-bearing: the worst-case tests below drive EVERY
+// leg to its cap, so removing a cap breaches this number. The verify-read leg is
+// the one an empty-`handled` window leaves at zero — its own saturating pin lives
+// in "cost pin: the reverse verify-read fan-out is capped" below.
 const DOCUMENTED_GH_CEILING = 225;
 
 await test("cost pin: an EMPTY-family 50-stub window issues no per-id or reverse work", async () => {
@@ -1559,6 +1665,16 @@ function titleSearchCount(calls) {
   ).length;
 }
 
+// `gh issue view` reads spent verifying reverse `in:comments` HITS: makeRunGh
+// numbers handled/hit stubs at 9000+, so a view of one is a reverse verify read.
+// (Candidate stubs in these pins carry sub-9000 numbers, so their own evaluation
+// reads never count here.)
+function reverseVerifyReadCount(calls) {
+  return calls.filter(
+    (c) => c[0] === "issue" && c[1] === "view" && Number(c[2]) >= 9000,
+  ).length;
+}
+
 await test("cost pin: a worst-case large-family window drives and bounds every per-run budget", async () => {
   const stubs = worstCaseWindow();
   const { runGh, calls } = makeRunGh({ stubs });
@@ -1589,6 +1705,61 @@ await test("cost pin: a worst-case large-family window drives and bounds every p
   assert(
     titleSearchCount(calls) === MAX_HANDLED_ID_QUERIES,
     `the handled loop must saturate its budget, got ${titleSearchCount(calls)}`,
+  );
+});
+
+await test("cost pin: the reverse verify-read fan-out is capped at MAX_REVERSE_VERIFY_READS", async () => {
+  // The bound the empty-`handled` worst-case pins above CANNOT reach: with no
+  // handled stubs every reverse probe returns [], so ZERO verify reads run and the
+  // ceiling's "cached verify reads" term is never exercised. MAX_REVERSE_PROBE_QUERIES
+  // caps only the SEARCHES; each search returns up to REVERSE_SEARCH_LIMIT (100)
+  // rows, and every unseen row costs one `gh issue view` before the fence can
+  // reject it. Without the read cap a single full-page probe fans out to 100
+  // subprocesses (and 40 probes to 4000) — the leg this pins.
+  //
+  // Topology: one finalist A that declares nothing (so only the reverse probe
+  // reaches its family), and a FULL REVERSE_SEARCH_LIMIT page of DISTINCT stubs
+  // that each merely MENTION A in a comment (no verdict edge, so the fence admits
+  // none — A stays selected). Every row is a distinct 9000+ number, so each is a
+  // cache-miss read; the cap must stop the fan-out at MAX_REVERSE_VERIFY_READS.
+  //
+  // NEGATIVE CONTROL (delete the `verifyBudget.remaining` guard in
+  // reverseVerifyFamilies): every one of the REVERSE_SEARCH_LIMIT rows is read, so
+  // reverseVerifyReadCount jumps to 100 and the `=== MAX_REVERSE_VERIFY_READS`
+  // assertion fails — proving the cap is what does the bounding.
+  const A = stub({ number: 800, shortId: "ANALYTICS-MENTO-ORG-RA" });
+  const fullPage = Array.from({ length: REVERSE_SEARCH_LIMIT }, (_, i) => ({
+    number: 9000 + i,
+    shortId: `ANALYTICS-MENTO-ORG-R${i}`,
+    label: FIX_REFUSED_LABEL,
+    declares: [],
+    mentions: ["ANALYTICS-MENTO-ORG-RA"],
+  }));
+  // The page must genuinely exceed the read cap, or it proves nothing.
+  assert(
+    fullPage.length > MAX_REVERSE_VERIFY_READS,
+    "the reverse page must exceed the verify-read budget for the cap to bite",
+  );
+  const { runGh, calls } = makeRunGh({ stubs: [A], handled: fullPage });
+  const { entries, truncations } = await selectAutofixRun(
+    { repo: "o/r", cap: 2 },
+    { runGh },
+  );
+  // Bare mentions forge no edge, so A is still selected — the truncation is a
+  // benign, self-terminating cost, never a wrong close.
+  assertDeepEqual(entries, [{ issue: 800, shortId: "ANALYTICS-MENTO-ORG-RA" }]);
+  assertEqual(
+    reverseVerifyReadCount(calls),
+    MAX_REVERSE_VERIFY_READS,
+    `the verify-read fan-out must saturate AND stop at its budget, got ${reverseVerifyReadCount(calls)}`,
+  );
+  assert(
+    truncations.reverseBudget === true,
+    "the capped verify-read fan-out must surface as a truncation on the run record",
+  );
+  assert(
+    calls.length <= DOCUMENTED_GH_CEILING,
+    `verify-read-saturating gh volume must stay under the ceiling, got ${calls.length}`,
   );
 });
 
