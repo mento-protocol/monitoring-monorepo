@@ -39,6 +39,17 @@ export const GATE_COMMAND =
   "/usr/bin/env -u NODE_OPTIONS -u NODE_PATH node scripts/sentry-suite-gate.mjs";
 
 /**
+ * The command the checker step must run, as its whole command. This file is
+ * part of that checker, so the assertion is bootstrapped either way — but
+ * pinning the step inside the canonical shape is strictly stronger than the
+ * separate "this check runs in CI" probe it replaced: exact equality also
+ * rejects an appended `|| true`, an `if:`, a `working-directory:` and an `env:`
+ * on the step.
+ */
+export const CHECKER_COMMAND =
+  "node scripts/check-sentry-suites-in-ci.test.mjs";
+
+/**
  * The canonical `sentry-suites` job, in full.
  *
  * This is an ALLOWLIST, not a list of rejected properties, and that inversion is
@@ -75,6 +86,12 @@ export const CANONICAL_JOB = {
       with: { "node-version-file": ".node-version" },
     },
     { name: "Run and assert the Sentry suites", run: GATE_COMMAND },
+    // Steps 4-5 (issue #1779, PR C). Both run AFTER the gate: the install's
+    // composite `postinstall` is PR-authored code, and putting it in front of
+    // the gate would restore the R1 window this job exists to close. Their
+    // position is pinned by the array-order equality above, not by a comment.
+    { uses: "./.github/actions/pnpm-install" },
+    { name: "Sentry CI wiring assertion", run: CHECKER_COMMAND },
   ],
 };
 
