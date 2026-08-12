@@ -627,8 +627,13 @@ export function buildAutofixRunRecordBody({
   deferredIssues,
   skipped,
   skippedIssues,
+  windowTotal,
+  windowEvaluated,
+  handledOverflow,
+  reverseTruncated,
+  reverseNonconvergent,
 }) {
-  return [
+  const lines = [
     AUTOFIX_RUN_RECORD_MARKER,
     "",
     `**Sentry autofix — last run:** ${oneLine(timestampIso, "unknown")}`,
@@ -641,7 +646,43 @@ export function buildAutofixRunRecordBody({
     `- Incomplete / errored: ${nonNegativeInt(incomplete)}`,
     `- Deferred (duplicate_of family): ${nonNegativeInt(deferred)}${renderDeferredIssues(deferredIssues)}`,
     `- Skipped (fix_scope: architectural): ${nonNegativeInt(skipped)}${renderDeferredIssues(skippedIssues)}`,
-  ].join("\n");
+  ];
+  // Window tripwire (PR #1810): rendered ONLY when the list window exceeded the
+  // evaluation cap (total > evaluated). The selector bounds the READ at
+  // MAX_CANDIDATE_EVALUATIONS, so a growing window would otherwise truncate its
+  // newest tail silently; this line surfaces the approach on the tracker weeks
+  // ahead of the cap, which is #1813's fallback remedy shipped alongside the
+  // fix. When the window fits (the steady state), the line is absent.
+  const windowTotalN = nonNegativeInt(windowTotal);
+  const windowEvaluatedN = nonNegativeInt(windowEvaluated);
+  if (windowTotalN > windowEvaluatedN) {
+    lines.push(
+      `- Window: ${windowTotalN} stubs, evaluated ${windowEvaluatedN}`,
+    );
+  }
+  // Cost-budget truncations (PR #1810 follow-up): a family-dedupe lookup a per-run
+  // budget capped, so a stub that SHOULD have stood down may re-attempt this run.
+  // Each fails toward MORE candidates (never a wrong close), but the re-attempt
+  // must not be silent — that byte-identical-to-healthy re-attempt is exactly
+  // what the Window line was introduced to eliminate. Rendered only when nonzero,
+  // so the steady state carries no noise line.
+  const handledOverflowN = nonNegativeInt(handledOverflow);
+  if (handledOverflowN > 0) {
+    lines.push(
+      `- Handled-id lookups truncated: ${handledOverflowN} over the MAX_HANDLED_ID_QUERIES budget (treated as not-handled)`,
+    );
+  }
+  if (reverseTruncated === true || reverseTruncated === "true") {
+    lines.push(
+      "- Reverse family probe truncated: hit the MAX_REVERSE_PROBE_QUERIES budget (some finalists left unverified)",
+    );
+  }
+  if (reverseNonconvergent === true || reverseNonconvergent === "true") {
+    lines.push(
+      "- Reverse family verification did not converge within MAX_REVERSE_ITERATIONS",
+    );
+  }
+  return lines.join("\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -778,8 +819,14 @@ Commands:
       Print the comment posted when a fix PR opened this run is closed because
       the verdict was shed during the push/PR-create span.
   run-record --timestamp <iso> --trigger <t> --disposition <d> \\
-             --candidates <n> --opened <n> --refused <n> --incomplete <n>
+             --candidates <n> --opened <n> --refused <n> --incomplete <n> \\
+             [--deferred <n>] [--deferred-issues "<n n …>"] \\
+             [--window-total <n>] [--window-evaluated <n>] \\
+             [--handled-overflow <n>] [--reverse-truncated <bool>] \\
+             [--reverse-nonconvergent <bool>]
       Print the tracker run-record comment body (rolling comment, marker-keyed).
+      The Window line renders only when --window-total exceeds --window-evaluated;
+      each truncation line renders only when its budget was actually hit.
   select-run-record-id --comments-file <path>
       Print the numeric id of the tracker issue's existing rolling run-record
       comment (trusted-author + prefix-anchored, selectMarkedComment),
@@ -919,6 +966,11 @@ export function runCli(argv, { stdout = process.stdout } = {}) {
           deferredIssues: readFlag(args, "--deferred-issues"),
           skipped: readFlag(args, "--skipped"),
           skippedIssues: readFlag(args, "--skipped-issues"),
+          windowTotal: readFlag(args, "--window-total"),
+          windowEvaluated: readFlag(args, "--window-evaluated"),
+          handledOverflow: readFlag(args, "--handled-overflow"),
+          reverseTruncated: readFlag(args, "--reverse-truncated"),
+          reverseNonconvergent: readFlag(args, "--reverse-nonconvergent"),
         })}\n`,
       );
       return;

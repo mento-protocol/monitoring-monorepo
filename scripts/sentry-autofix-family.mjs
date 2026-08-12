@@ -219,12 +219,16 @@ function makeUnionFind() {
  * are filtered out of the candidate window by the selector's own query, so
  * without this set a refused representative's four siblings would come back
  * one per run — the exact 5-runs-for-1-cause failure.
+ * `options.handledEdges`: reverse-verified `[idA, idB]` family links the
+ * forward `duplicate_of` graph misses (PR #1810 bug B) — each joins its two ids
+ * into the union like a declared id, with both ends gated by isLocalFamilyId.
  * `options.project`: the Sentry project every family id must belong to (see
  * `isLocalFamilyId`). REQUIRED — absent, nothing joins and nothing blocks.
  *
  * Returns one decision per input candidate, IN INPUT ORDER:
- *   `{ candidate, selected, reason, representative }`
- * — `reason`/`representative` are null on a selected candidate.
+ *   `{ candidate, selected, reason, representative, members }`
+ * — `reason`/`representative` are null on a selected candidate; `members` is the
+ * candidate's family member-id set (union-root members, sorted).
  */
 export function collapseDuplicateFamilies(candidates, options = {}) {
   const list = Array.isArray(candidates) ? candidates : [];
@@ -249,6 +253,28 @@ export function collapseDuplicateFamilies(candidates, options = {}) {
     )) {
       uf.union(key, dup);
     }
+  }
+
+  // Reverse-verified edges (PR #1810 bug B). The selector's reverse
+  // `in:comments` search finds family links the forward `duplicate_of` graph
+  // cannot: a handled sibling whose verdict names a finalist, or a hub id two
+  // stubs share through an issue that is not itself a candidate. Each admitted
+  // edge is an authenticated `[idA, idB]` pair (the selector re-parses both
+  // ends' verdicts before passing it here), and joins its two ids into the
+  // union exactly as a declared id would. Both endpoints pass through
+  // isLocalFamilyId, so a foreign-project id, the bare project slug, or a
+  // shape-invalid token stays inert — the same over-collapse guard the declared
+  // path applies, re-verified here against this new input.
+  for (const edge of Array.isArray(options.handledEdges)
+    ? options.handledEdges
+    : []) {
+    const [a, b] = Array.isArray(edge) ? edge : [];
+    if (!isLocalFamilyId(a, project) || !isLocalFamilyId(b, project)) continue;
+    const keyA = familyKey(a);
+    const keyB = familyKey(b);
+    uf.add(keyA);
+    uf.add(keyB);
+    uf.union(keyA, keyB);
   }
 
   // A RECONCILE entry is not a fix attempt — it relinks a PRIOR run's open PR
@@ -340,6 +366,12 @@ export function collapseDuplicateFamilies(candidates, options = {}) {
       reason: null,
       representative: null,
     };
-    return { candidate, ...decision };
+    // The family's full member-id set: union-root members, i.e. candidate ids
+    // AND any declared/edge hub ids, including ones with no stub in the window.
+    // The caller reverse-verifies a finalist by probing exactly these ids, so
+    // the hub topology (a finalist and a handled sibling both declaring a
+    // non-candidate C) is covered — probing C is what reaches the sibling.
+    const members = [...uf.membersOf(familyKey(candidate.shortId))].sort();
+    return { candidate, ...decision, members };
   });
 }

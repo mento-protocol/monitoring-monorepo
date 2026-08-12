@@ -1,16 +1,20 @@
 #!/usr/bin/env node
 import {
-  AUTOFIX_SELECT_LABEL,
   DEFAULT_CAP,
   emitVerdict,
-  isOwnHeadPr,
-  LOCAL_SENTRY_PROJECT,
   MAX_CANDIDATE_EVALUATIONS,
   parseArgs,
   selectAutofixCandidates,
   selectAutofixRun,
   SKIP_FIX_SCOPE_ARCHITECTURAL,
 } from "./sentry-autofix-select.mjs";
+import {
+  AUTOFIX_SELECT_LABEL,
+  isOwnHeadPr,
+  LOCAL_SENTRY_PROJECT,
+  MAX_HANDLED_ID_QUERIES,
+  MAX_REVERSE_PROBE_QUERIES,
+} from "./sentry-autofix-queue-io.mjs";
 import {
   FIX_SCOPE_ARCHITECTURAL,
   FIX_SCOPE_MECHANICAL,
@@ -161,26 +165,82 @@ function makeRunGh({
 } = {}) {
   const owner = repo.split("/")[0];
   const calls = [];
+  // Handled siblings are stubs the candidate window EXCLUDES (they carry a
+  // terminal autofix marker), but which the family collapse still reads back —
+  // per declared id via `in:title` (bug C) and via the reverse `in:comments`
+  // probe (bug B). Model each as a fully view-readable stub so the fence
+  // re-parse runs against a real verdict:
+  //   - `declares`   ids in its verdict's duplicate_of (a REAL family edge);
+  //   - `mentions`   ids that appear only in a bare comment (a mention the
+  //                  fence must REJECT — no verdict edge);
+  //   - `matchTitleFor` the id whose `in:title` search surfaces it, defaulting
+  //                  to its own short-id; set it to a DIFFERENT id to model
+  //                  GitHub's tokenized fuzzy match, which the exact-parse fence
+  //                  must drop.
+  const handledStubs = handled.map((h, i) => ({
+    number: h.number ?? 9000 + i,
+    shortId: h.shortId,
+    project: h.project ?? "analytics-mento-org",
+    label: h.label,
+    declares: h.declares ?? [],
+    mentions: h.mentions ?? [],
+    matchTitleFor: h.matchTitleFor ?? h.shortId,
+  }));
+  const handledTitle = (h) => `[sentry] ${h.shortId} (${h.project}, error)`;
   const byNumber = new Map(stubs.map((s) => [String(s.number), s]));
+  for (const h of handledStubs) {
+    // View-readable: labels carry the terminal marker + the queue label, and the
+    // verdict comment declares `declares`, so resolveVerdict sees a real edge.
+    byNumber.set(String(h.number), {
+      number: h.number,
+      title: handledTitle(h),
+      labels: [h.label, "sentry-triage"],
+      comments: [verdictComment({ duplicates: h.declares })],
+    });
+  }
   const runGh = async (args) => {
     calls.push(args);
     const [a0, a1] = args;
     if (a0 === "issue" && a1 === "list") {
       const searchIdx = args.indexOf("--search");
       const search = searchIdx === -1 ? "" : args[searchIdx + 1];
-      // The handled-sibling query asks for a POSITIVE autofix marker label; the
-      // candidate window asks for its NEGATION. Route on that difference.
-      const marker = /(?:^|\s)label:"(sentry:fix-[a-z-]+)"/.exec(search);
-      if (marker) {
+      // Reverse family probe (bug B): `"<ID>" in:comments`. Return handled stubs
+      // whose comments reference the probed id — through a real verdict edge
+      // (`declares`) OR a bare mention (`mentions`); the selector's fence
+      // re-parse is what decides which becomes an admitted edge.
+      const commentsProbe = /"([^"]+)"\s+in:comments/.exec(search);
+      if (commentsProbe) {
+        const qid = commentsProbe[1].toUpperCase();
         return JSON.stringify(
-          handled
-            .filter((h) => h.label === marker[1])
-            .map((h, i) => ({
-              number: 9000 + i,
-              title: `[sentry] ${h.shortId} (analytics-mento-org, error)`,
+          handledStubs
+            .filter((h) =>
+              [...h.declares, ...h.mentions]
+                .map((x) => String(x).toUpperCase())
+                .includes(qid),
+            )
+            .map((h) => ({
+              number: h.number,
+              title: handledTitle(h),
+              labels: [h.label, "sentry-triage"].map((name) => ({ name })),
             })),
         );
       }
+      // Per-declared-id handled lookup (bug C): `"<ID>" in:title`. Return handled
+      // stubs the tokenized search would surface for this id.
+      const titleProbe = /"([^"]+)"\s+in:title/.exec(search);
+      if (titleProbe) {
+        const qid = titleProbe[1].toUpperCase();
+        return JSON.stringify(
+          handledStubs
+            .filter((h) => String(h.matchTitleFor).toUpperCase() === qid)
+            .map((h) => ({
+              number: h.number,
+              title: handledTitle(h),
+              labels: [h.label, "sentry-triage"].map((name) => ({ name })),
+            })),
+        );
+      }
+      // Candidate window (`sort:created-asc … <slug> in:title`).
       return JSON.stringify(
         stubs.map((s) => ({
           number: s.number,
@@ -678,6 +738,11 @@ await test("parseArgs defaults and validation", () => {
     missingValue = true;
   }
   assert(missingValue, "--deferred-out requires a path");
+  assertEqual(defaults.windowOut, null, "no window report by default");
+  assertEqual(
+    parseArgs(["--window-out", "/tmp/w.json"]).windowOut,
+    "/tmp/w.json",
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -1193,6 +1258,489 @@ await test("single-issue dispatch overrides the family collapse (explicit human 
   assert(
     !calls.some((c) => c[0] === "issue" && c[1] === "list"),
     "dispatch must not run the batch or family queries",
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Reverse family verification (PR #1810 bug B) and per-declared-id handled
+// lookups (bug C). Every case drives selectAutofixRun through the production
+// entry point with the search-interpreting mock above — never a query-string
+// equality assertion.
+// ---------------------------------------------------------------------------
+
+/** True when the run issued a reverse `"<id>" in:comments` probe. */
+function reverseSearchedFor(calls, shortId) {
+  return calls.some(
+    (c) =>
+      c[0] === "issue" &&
+      c[1] === "list" &&
+      String(c[c.indexOf("--search") + 1] ?? "").includes(
+        `"${shortId}" in:comments`,
+      ),
+  );
+}
+
+await test("bug B: a finalist that declares NOTHING defers behind a handled sibling found by reverse search", async () => {
+  // A declares no duplicate_of at all, so the forward graph never reaches its
+  // family. The reverse in:comments probe finds handled B, whose FENCED verdict
+  // declares [A] and which carries a terminal marker -> A defers behind B. This
+  // is bug B's exact topology: the edge is invisible to the forward graph.
+  const A = stub({ number: 700, shortId: "ANALYTICS-MENTO-ORG-AA" });
+  const { runGh, calls } = makeRunGh({
+    stubs: [A],
+    handled: [
+      {
+        shortId: "ANALYTICS-MENTO-ORG-BB",
+        label: FIX_PR_OPENED_LABEL,
+        declares: ["ANALYTICS-MENTO-ORG-AA"],
+      },
+    ],
+  });
+  const { entries, deferred } = await selectAutofixRun(
+    { repo: "o/r", cap: 2 },
+    { runGh },
+  );
+  assertDeepEqual(entries, []);
+  assertDeepEqual(deferred, [{ issue: 700, reason: DEFER_FAMILY_HANDLED }]);
+  assert(
+    reverseSearchedFor(calls, "ANALYTICS-MENTO-ORG-AA"),
+    "the reverse search must run even though A declared zero edges",
+  );
+});
+
+await test("bug B control: a bare (non-verdict) comment mention does not forge an edge", async () => {
+  // B is returned by the reverse search (it mentions A) but its FENCED verdict
+  // declares nothing, so the authoritative re-parse rejects the edge and A is
+  // selected. The search still ran — the fence, not the search, is the gate.
+  const A = stub({ number: 710, shortId: "ANALYTICS-MENTO-ORG-AC" });
+  const { runGh, calls } = makeRunGh({
+    stubs: [A],
+    handled: [
+      {
+        shortId: "ANALYTICS-MENTO-ORG-BC",
+        label: FIX_REFUSED_LABEL,
+        declares: [],
+        mentions: ["ANALYTICS-MENTO-ORG-AC"],
+      },
+    ],
+  });
+  const selected = await selectAutofixCandidates(
+    { repo: "o/r", cap: 2 },
+    { runGh },
+  );
+  assertDeepEqual(selected, [
+    { issue: 710, shortId: "ANALYTICS-MENTO-ORG-AC" },
+  ]);
+  assert(
+    reverseSearchedFor(calls, "ANALYTICS-MENTO-ORG-AC"),
+    "the reverse search still runs in the control arm",
+  );
+});
+
+await test("bug B control: a hit whose verdict names a DIFFERENT id does not forge an edge", async () => {
+  // B carries a real verdict edge, but to ZZ, not to A; A only appears in a
+  // mention. The probed id must be IN the parsed duplicate_of, so A is selected.
+  const A = stub({ number: 720, shortId: "ANALYTICS-MENTO-ORG-AD" });
+  const { runGh, calls } = makeRunGh({
+    stubs: [A],
+    handled: [
+      {
+        shortId: "ANALYTICS-MENTO-ORG-BD",
+        label: FIX_REFUSED_LABEL,
+        declares: ["ANALYTICS-MENTO-ORG-ZZ"],
+        mentions: ["ANALYTICS-MENTO-ORG-AD"],
+      },
+    ],
+  });
+  const selected = await selectAutofixCandidates(
+    { repo: "o/r", cap: 2 },
+    { runGh },
+  );
+  assertDeepEqual(selected, [
+    { issue: 720, shortId: "ANALYTICS-MENTO-ORG-AD" },
+  ]);
+  assert(
+    reverseSearchedFor(calls, "ANALYTICS-MENTO-ORG-AD"),
+    "the reverse search still runs in the control arm",
+  );
+});
+
+await test("bug B hub topology: A and a handled sibling joined only through a non-candidate C", async () => {
+  // A declares [C]; handled B declares [C]; there is no C stub. The bug-C per-id
+  // lookup for C finds nothing (no C stub), so A survives as a finalist; the
+  // reverse probe of the FAMILY MEMBER C — not just the finalist id A — finds B,
+  // whose terminal marker then stands A down. Probing finalist ids alone would
+  // miss this.
+  const A = familyStub(730, "ANALYTICS-MENTO-ORG-HA", "2026-07-18T00:00:00Z", [
+    "ANALYTICS-MENTO-ORG-HC",
+  ]);
+  const { runGh, calls } = makeRunGh({
+    stubs: [A],
+    handled: [
+      {
+        shortId: "ANALYTICS-MENTO-ORG-HB",
+        label: FIX_PR_OPENED_LABEL,
+        declares: ["ANALYTICS-MENTO-ORG-HC"],
+      },
+    ],
+  });
+  const { entries, deferred } = await selectAutofixRun(
+    { repo: "o/r", cap: 2 },
+    { runGh },
+  );
+  assertDeepEqual(entries, []);
+  assertDeepEqual(deferred, [{ issue: 730, reason: DEFER_FAMILY_HANDLED }]);
+  assert(
+    reverseSearchedFor(calls, "ANALYTICS-MENTO-ORG-HC"),
+    "the hub id C must be probed, not just the candidate id A",
+  );
+});
+
+await test("bug C: a declared terminal sibling is found by its own id, and no bulk 200-list is issued", async () => {
+  // The candidate declares [OLD]; OLD carries a terminal marker but is not in
+  // the window. The per-declared-id in:title query keyed on OLD finds it however
+  // deep it sits in the ledger; the deleted bulk sort:created-desc marker list
+  // is never issued.
+  const candidate = familyStub(
+    740,
+    "ANALYTICS-MENTO-ORG-NEW",
+    "2026-07-18T00:00:00Z",
+    ["ANALYTICS-MENTO-ORG-OLD"],
+  );
+  const { runGh, calls } = makeRunGh({
+    stubs: [candidate],
+    handled: [{ shortId: "ANALYTICS-MENTO-ORG-OLD", label: FIX_REFUSED_LABEL }],
+  });
+  const { entries, deferred } = await selectAutofixRun(
+    { repo: "o/r", cap: 2 },
+    { runGh },
+  );
+  assertDeepEqual(entries, []);
+  assertDeepEqual(deferred, [{ issue: 740, reason: DEFER_FAMILY_HANDLED }]);
+  assert(
+    calls.some(
+      (c) =>
+        c[0] === "issue" &&
+        c[1] === "list" &&
+        String(c[c.indexOf("--search") + 1] ?? "").includes(
+          `"ANALYTICS-MENTO-ORG-OLD" in:title`,
+        ),
+    ),
+    "the handled lookup queries the declared id directly",
+  );
+  assert(
+    !calls.some((c) => {
+      const i = c.indexOf("--search");
+      return i !== -1 && String(c[i + 1] ?? "").includes("sort:created-desc");
+    }),
+    "the deleted bulk sort:created-desc marker list must not be issued",
+  );
+});
+
+await test("bug C exact-parse fence: a tokenized near-miss title does not block", async () => {
+  // The tokenized search surfaces a stub whose title parses to a DIFFERENT
+  // short-id than the queried OLD; the parsed-short-id recheck drops it, so the
+  // candidate is NOT blocked.
+  const candidate = familyStub(
+    750,
+    "ANALYTICS-MENTO-ORG-NW",
+    "2026-07-18T00:00:00Z",
+    ["ANALYTICS-MENTO-ORG-OLD"],
+  );
+  const { runGh } = makeRunGh({
+    stubs: [candidate],
+    handled: [
+      {
+        shortId: "ANALYTICS-MENTO-ORG-DIFF",
+        label: FIX_REFUSED_LABEL,
+        matchTitleFor: "ANALYTICS-MENTO-ORG-OLD",
+      },
+    ],
+  });
+  const selected = await selectAutofixCandidates(
+    { repo: "o/r", cap: 2 },
+    { runGh },
+  );
+  assertDeepEqual(selected, [
+    { issue: 750, shortId: "ANALYTICS-MENTO-ORG-NW" },
+  ]);
+});
+
+// The documented per-run gh ceiling (docs/notes/sentry-triage-pipeline.md
+// § "Cost bound"): 1 window list + MAX_CANDIDATE_EVALUATIONS × 2 reads +
+// MAX_HANDLED_ID_QUERIES + MAX_REVERSE_PROBE_QUERIES + ~40 cached verify reads
+// ≈ 220. Load-bearing: the worst-case test below drives EVERY leg to its cap, so
+// removing a cap breaches this number.
+const DOCUMENTED_GH_CEILING = 225;
+
+await test("cost pin: an EMPTY-family 50-stub window issues no per-id or reverse work", async () => {
+  // Baseline only: default stubs declare nothing, so declaredIds is empty (zero
+  // in:title lookups) and every family is a singleton (each finalist's members =
+  // its own id). This pins the empty-window profile — ~1 window + 50 views + 50
+  // pr lists — but it CANNOT exercise the per-id or reverse loops, so it is not
+  // the regression guard for their caps; the worst-case window below is.
+  const stubs = [];
+  for (let i = 0; i < MAX_CANDIDATE_EVALUATIONS; i += 1) {
+    stubs.push(
+      stub({
+        number: 4000 + i,
+        shortId: `ANALYTICS-MENTO-ORG-C${i}`,
+        createdAt: `2026-07-18T00:${String(i).padStart(2, "0")}:00Z`,
+      }),
+    );
+  }
+  const { runGh, calls } = makeRunGh({ stubs });
+  await selectAutofixCandidates({ repo: "o/r", cap: 2 }, { runGh });
+  assert(
+    calls.length <= DOCUMENTED_GH_CEILING,
+    `empty-family gh volume must stay under the ceiling, got ${calls.length}`,
+  );
+});
+
+/**
+ * A worst-case window that drives the per-run budgets to their caps: two large
+ * LOCAL duplicate families (whose representatives are the cap-2 finalists) with a
+ * combined >MAX_REVERSE_PROBE_QUERIES member ids, plus enough distinct declared
+ * hub ids across the whole window to exceed MAX_HANDLED_ID_QUERIES. This is the
+ * shape finding 4 named as invisible to the old empty-family cost pin.
+ */
+function worstCaseWindow() {
+  const stubs = [];
+  let created = 0;
+  const at = () => `2026-07-18T00:${String(created++).padStart(2, "0")}:00Z`;
+  // A big family: `n` candidates each declaring a SHARED common id (so they all
+  // union into one family) plus 4 unique hubs — MAX_DUPLICATE_LOOKUPS (5) ids
+  // each. Members = n candidates + 1 common + 4n hubs; n=7 -> 36, under
+  // MAX_FAMILY_MEMBERS (40).
+  const bigFamily = (tag, n) => {
+    const common = `ANALYTICS-MENTO-ORG-CM${tag}`;
+    for (let i = 0; i < n; i += 1) {
+      const hubs = [0, 1, 2, 3].map(
+        (j) => `ANALYTICS-MENTO-ORG-H${tag}${i}${j}`,
+      );
+      stubs.push(
+        familyStub(
+          9000 + stubs.length,
+          `ANALYTICS-MENTO-ORG-F${tag}${i}`,
+          at(),
+          [common, ...hubs],
+        ),
+      );
+    }
+  };
+  bigFamily("A", 7); // oldest -> finalist #1, 36 members
+  bigFamily("B", 7); // next -> finalist #2, 36 members (72 combined > 40)
+  // Singletons: each its own family (5 unique hubs), padding the window to the
+  // eval cap and the distinct-declared-id count far past MAX_HANDLED_ID_QUERIES.
+  while (stubs.length < MAX_CANDIDATE_EVALUATIONS) {
+    const i = stubs.length;
+    const hubs = [0, 1, 2, 3, 4].map((j) => `ANALYTICS-MENTO-ORG-S${i}${j}`);
+    stubs.push(familyStub(9000 + i, `ANALYTICS-MENTO-ORG-G${i}`, at(), hubs));
+  }
+  return stubs;
+}
+
+function reverseSearchCount(calls) {
+  return calls.filter(
+    (c) =>
+      c[0] === "issue" &&
+      c[1] === "list" &&
+      /"[^"]+"\s+in:comments/.test(String(c[c.indexOf("--search") + 1] ?? "")),
+  ).length;
+}
+
+function titleSearchCount(calls) {
+  return calls.filter(
+    (c) =>
+      c[0] === "issue" &&
+      c[1] === "list" &&
+      /"[^"]+"\s+in:title/.test(String(c[c.indexOf("--search") + 1] ?? "")),
+  ).length;
+}
+
+await test("cost pin: a worst-case large-family window drives and bounds every per-run budget", async () => {
+  const stubs = worstCaseWindow();
+  const { runGh, calls } = makeRunGh({ stubs });
+  await selectAutofixCandidates({ repo: "o/r", cap: 2 }, { runGh });
+  // Load-bearing bounds. Without MAX_REVERSE_PROBE_QUERIES the two 36-member
+  // finalist families fan out to 72 in:comments searches; without
+  // MAX_HANDLED_ID_QUERIES the ~238 distinct declared ids each fire an in:title
+  // search. Either breaches at least one assertion below — the caps are what
+  // keep this window inside the ceiling.
+  assert(
+    reverseSearchCount(calls) <= MAX_REVERSE_PROBE_QUERIES,
+    `reverse in:comments searches must be capped at ${MAX_REVERSE_PROBE_QUERIES}, got ${reverseSearchCount(calls)}`,
+  );
+  assert(
+    titleSearchCount(calls) <= MAX_HANDLED_ID_QUERIES,
+    `handled in:title searches must be capped at ${MAX_HANDLED_ID_QUERIES}, got ${titleSearchCount(calls)}`,
+  );
+  assert(
+    calls.length <= DOCUMENTED_GH_CEILING,
+    `worst-case gh volume must stay under the documented ceiling, got ${calls.length}`,
+  );
+  // The window must actually EXERCISE both loops, or the bounds prove nothing —
+  // the exact defect (finding 4) the empty-family pin had.
+  assert(
+    reverseSearchCount(calls) === MAX_REVERSE_PROBE_QUERIES,
+    `the reverse loop must saturate its budget, got ${reverseSearchCount(calls)}`,
+  );
+  assert(
+    titleSearchCount(calls) === MAX_HANDLED_ID_QUERIES,
+    `the handled loop must saturate its budget, got ${titleSearchCount(calls)}`,
+  );
+});
+
+await test("bug B follow-up: a terminal sibling reachable only through a read hub's OTHER edge still stands the finalist down", async () => {
+  // Finalist P declares NOTHING. A non-candidate hub H (in the ledger, not the
+  // window) declares BOTH P and a terminal sibling Q; Q declares nothing and is
+  // referenced by nobody but H. Probing P admits H — but H's edge to Q is the one
+  // a finalist-only reverse search drops, and Q's fix-refused marker lives on Q's
+  // OWN stub, which no reverse hit surfaces. The fix folds the admitted hub's
+  // WHOLE declared family in (so Q joins P's family) and re-checks Q's own marker
+  // by title, standing P down instead of burning a redundant attempt.
+  const P = stub({ number: 800, shortId: "ANALYTICS-MENTO-ORG-PP" });
+  const { runGh, calls } = makeRunGh({
+    stubs: [P],
+    handled: [
+      {
+        // Non-terminal hub: carries the verdict label, NOT a terminal marker, so
+        // it is a CONNECTOR (edges only), never a blocker itself.
+        shortId: "ANALYTICS-MENTO-ORG-HH",
+        label: AUTOFIX_SELECT_LABEL,
+        declares: ["ANALYTICS-MENTO-ORG-PP", "ANALYTICS-MENTO-ORG-QQ"],
+      },
+      {
+        // The real blocker: terminal, declares nothing, referenced by nobody but
+        // the hub — so only a title lookup on its own id can find its marker.
+        shortId: "ANALYTICS-MENTO-ORG-QQ",
+        label: FIX_REFUSED_LABEL,
+        declares: [],
+      },
+    ],
+  });
+  const { entries, deferred } = await selectAutofixRun(
+    { repo: "o/r", cap: 2 },
+    { runGh },
+  );
+  assertDeepEqual(entries, []);
+  assertDeepEqual(deferred, [{ issue: 800, reason: DEFER_FAMILY_HANDLED }]);
+  assert(
+    reverseSearchedFor(calls, "ANALYTICS-MENTO-ORG-PP"),
+    "the finalist P must be reverse-probed",
+  );
+  // The blocker Q is reached ONLY by re-checking its own marker by title after
+  // the hub's edge surfaced it — the leg the fix adds.
+  assert(
+    titleSearchCount(calls) > 0 &&
+      calls.some(
+        (c) =>
+          c[0] === "issue" &&
+          c[1] === "list" &&
+          String(c[c.indexOf("--search") + 1] ?? "").includes(
+            `"ANALYTICS-MENTO-ORG-QQ" in:title`,
+          ),
+      ),
+    "Q's own marker must be re-checked by title",
+  );
+});
+
+await test("run record surfaces the reverse-probe and handled-id budget truncations (never silent)", async () => {
+  // A worst-case window saturates BOTH budgets, so both truncations must reach
+  // the run record. Deferral already surfaces on the tracker; these two capped
+  // lookups are the OTHER way a family that should stand down is re-attempted —
+  // a bounded, self-terminating cost, but it must not be byte-identical to a
+  // healthy run.
+  const { runGh } = makeRunGh({ stubs: worstCaseWindow() });
+  const { truncations } = await selectAutofixRun(
+    { repo: "o/r", cap: 2 },
+    { runGh },
+  );
+  assert(
+    truncations.reverseBudget === true,
+    "the reverse-probe budget truncation must surface",
+  );
+  assert(
+    truncations.handledOverflow > 0,
+    `the handled-id overflow count must surface, got ${truncations.handledOverflow}`,
+  );
+  assert(
+    truncations.reverseNonconvergent === false,
+    "this window converges, so the non-convergence flag stays false",
+  );
+});
+
+await test("run record truncations are all-clear on an empty-family window and the dispatch path", async () => {
+  // The steady state carries no truncation, so the record renders no noise line;
+  // and single-issue dispatch skips the collapse entirely, so it never truncates.
+  const stubs = [stub({ number: 810, shortId: "ANALYTICS-MENTO-ORG-ZA" })];
+  const { runGh } = makeRunGh({ stubs });
+  const batch = await selectAutofixRun({ repo: "o/r", cap: 2 }, { runGh });
+  assertDeepEqual(batch.truncations, {
+    handledOverflow: 0,
+    reverseBudget: false,
+    reverseNonconvergent: false,
+  });
+  const dispatch = await selectAutofixRun(
+    { repo: "o/r", issue: 810 },
+    { runGh },
+  );
+  assertDeepEqual(dispatch.truncations, {
+    handledOverflow: 0,
+    reverseBudget: false,
+    reverseNonconvergent: false,
+  });
+});
+
+await test("window report: a run surfaces total and evaluated when the window exceeds the eval cap", async () => {
+  const stubs = [];
+  for (let i = 0; i < MAX_CANDIDATE_EVALUATIONS + 1; i += 1) {
+    stubs.push(
+      stub({
+        number: 5000 + i,
+        shortId: `ANALYTICS-MENTO-ORG-W${i}`,
+        createdAt: `2026-07-18T00:${String(i).padStart(2, "0")}:00Z`,
+      }),
+    );
+  }
+  const { runGh } = makeRunGh({ stubs });
+  const { window } = await selectAutofixRun({ repo: "o/r", cap: 2 }, { runGh });
+  assertDeepEqual(window, {
+    total: MAX_CANDIDATE_EVALUATIONS + 1,
+    evaluated: MAX_CANDIDATE_EVALUATIONS,
+  });
+});
+
+await test("over-collapse invariant: foreign ids in options.handledEdges stay inert", () => {
+  // The reverse-edge input is subject to the same project scope as declared ids
+  // (f_new_rules_must_be_tested_against_the_invariant): a foreign-project or
+  // bare-slug edge must not union unrelated local candidates.
+  const candidates = [
+    { shortId: "ANALYTICS-MENTO-ORG-E1", duplicateOf: [], entry: { issue: 1 } },
+    { shortId: "ANALYTICS-MENTO-ORG-E2", duplicateOf: [], entry: { issue: 2 } },
+  ];
+  const foreign = collapseDuplicateFamilies(candidates, {
+    project: LOCAL_SENTRY_PROJECT,
+    handledEdges: [
+      ["APP-MENTO-ORG-7X", "ANALYTICS-MENTO-ORG-E1"], // foreign project
+      ["ANALYTICS-MENTO-ORG", "ANALYTICS-MENTO-ORG-E2"], // bare slug
+    ],
+  });
+  assertEqual(
+    foreign.filter((d) => d.selected).length,
+    2,
+    "foreign / bare-slug edges must not join the two candidates",
+  );
+  // A LOCAL edge between the two DOES join them — proving the inertness above is
+  // the scope check doing work, not a dead input.
+  const local = collapseDuplicateFamilies(candidates, {
+    project: LOCAL_SENTRY_PROJECT,
+    handledEdges: [["ANALYTICS-MENTO-ORG-E1", "ANALYTICS-MENTO-ORG-E2"]],
+  });
+  assertEqual(
+    local.filter((d) => d.selected).length,
+    1,
+    "a local edge joins the two into one family",
   );
 });
 
