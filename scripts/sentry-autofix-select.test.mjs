@@ -151,26 +151,82 @@ function makeRunGh({
 } = {}) {
   const owner = repo.split("/")[0];
   const calls = [];
+  // Handled siblings are stubs the candidate window EXCLUDES (they carry a
+  // terminal autofix marker), but which the family collapse still reads back —
+  // per declared id via `in:title` (bug C) and via the reverse `in:comments`
+  // probe (bug B). Model each as a fully view-readable stub so the fence
+  // re-parse runs against a real verdict:
+  //   - `declares`   ids in its verdict's duplicate_of (a REAL family edge);
+  //   - `mentions`   ids that appear only in a bare comment (a mention the
+  //                  fence must REJECT — no verdict edge);
+  //   - `matchTitleFor` the id whose `in:title` search surfaces it, defaulting
+  //                  to its own short-id; set it to a DIFFERENT id to model
+  //                  GitHub's tokenized fuzzy match, which the exact-parse fence
+  //                  must drop.
+  const handledStubs = handled.map((h, i) => ({
+    number: h.number ?? 9000 + i,
+    shortId: h.shortId,
+    project: h.project ?? "analytics-mento-org",
+    label: h.label,
+    declares: h.declares ?? [],
+    mentions: h.mentions ?? [],
+    matchTitleFor: h.matchTitleFor ?? h.shortId,
+  }));
+  const handledTitle = (h) => `[sentry] ${h.shortId} (${h.project}, error)`;
   const byNumber = new Map(stubs.map((s) => [String(s.number), s]));
+  for (const h of handledStubs) {
+    // View-readable: labels carry the terminal marker + the queue label, and the
+    // verdict comment declares `declares`, so resolveVerdict sees a real edge.
+    byNumber.set(String(h.number), {
+      number: h.number,
+      title: handledTitle(h),
+      labels: [h.label, "sentry-triage"],
+      comments: [verdictComment({ duplicates: h.declares })],
+    });
+  }
   const runGh = async (args) => {
     calls.push(args);
     const [a0, a1] = args;
     if (a0 === "issue" && a1 === "list") {
       const searchIdx = args.indexOf("--search");
       const search = searchIdx === -1 ? "" : args[searchIdx + 1];
-      // The handled-sibling query asks for a POSITIVE autofix marker label; the
-      // candidate window asks for its NEGATION. Route on that difference.
-      const marker = /(?:^|\s)label:"(sentry:fix-[a-z-]+)"/.exec(search);
-      if (marker) {
+      // Reverse family probe (bug B): `"<ID>" in:comments`. Return handled stubs
+      // whose comments reference the probed id — through a real verdict edge
+      // (`declares`) OR a bare mention (`mentions`); the selector's fence
+      // re-parse is what decides which becomes an admitted edge.
+      const commentsProbe = /"([^"]+)"\s+in:comments/.exec(search);
+      if (commentsProbe) {
+        const qid = commentsProbe[1].toUpperCase();
         return JSON.stringify(
-          handled
-            .filter((h) => h.label === marker[1])
-            .map((h, i) => ({
-              number: 9000 + i,
-              title: `[sentry] ${h.shortId} (analytics-mento-org, error)`,
+          handledStubs
+            .filter((h) =>
+              [...h.declares, ...h.mentions]
+                .map((x) => String(x).toUpperCase())
+                .includes(qid),
+            )
+            .map((h) => ({
+              number: h.number,
+              title: handledTitle(h),
+              labels: [h.label, "sentry-triage"].map((name) => ({ name })),
             })),
         );
       }
+      // Per-declared-id handled lookup (bug C): `"<ID>" in:title`. Return handled
+      // stubs the tokenized search would surface for this id.
+      const titleProbe = /"([^"]+)"\s+in:title/.exec(search);
+      if (titleProbe) {
+        const qid = titleProbe[1].toUpperCase();
+        return JSON.stringify(
+          handledStubs
+            .filter((h) => String(h.matchTitleFor).toUpperCase() === qid)
+            .map((h) => ({
+              number: h.number,
+              title: handledTitle(h),
+              labels: [h.label, "sentry-triage"].map((name) => ({ name })),
+            })),
+        );
+      }
+      // Candidate window (`sort:created-asc … <slug> in:title`).
       return JSON.stringify(
         stubs.map((s) => ({
           number: s.number,
@@ -668,6 +724,11 @@ await test("parseArgs defaults and validation", () => {
     missingValue = true;
   }
   assert(missingValue, "--deferred-out requires a path");
+  assertEqual(defaults.windowOut, null, "no window report by default");
+  assertEqual(
+    parseArgs(["--window-out", "/tmp/w.json"]).windowOut,
+    "/tmp/w.json",
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -1158,6 +1219,286 @@ await test("single-issue dispatch overrides the family collapse (explicit human 
   assert(
     !calls.some((c) => c[0] === "issue" && c[1] === "list"),
     "dispatch must not run the batch or family queries",
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Reverse family verification (PR #1810 bug B) and per-declared-id handled
+// lookups (bug C). Every case drives selectAutofixRun through the production
+// entry point with the search-interpreting mock above — never a query-string
+// equality assertion.
+// ---------------------------------------------------------------------------
+
+/** True when the run issued a reverse `"<id>" in:comments` probe. */
+function reverseSearchedFor(calls, shortId) {
+  return calls.some(
+    (c) =>
+      c[0] === "issue" &&
+      c[1] === "list" &&
+      String(c[c.indexOf("--search") + 1] ?? "").includes(
+        `"${shortId}" in:comments`,
+      ),
+  );
+}
+
+await test("bug B: a finalist that declares NOTHING defers behind a handled sibling found by reverse search", async () => {
+  // A declares no duplicate_of at all, so the forward graph never reaches its
+  // family. The reverse in:comments probe finds handled B, whose FENCED verdict
+  // declares [A] and which carries a terminal marker -> A defers behind B. This
+  // is bug B's exact topology: the edge is invisible to the forward graph.
+  const A = stub({ number: 700, shortId: "ANALYTICS-MENTO-ORG-AA" });
+  const { runGh, calls } = makeRunGh({
+    stubs: [A],
+    handled: [
+      {
+        shortId: "ANALYTICS-MENTO-ORG-BB",
+        label: FIX_PR_OPENED_LABEL,
+        declares: ["ANALYTICS-MENTO-ORG-AA"],
+      },
+    ],
+  });
+  const { entries, deferred } = await selectAutofixRun(
+    { repo: "o/r", cap: 2 },
+    { runGh },
+  );
+  assertDeepEqual(entries, []);
+  assertDeepEqual(deferred, [{ issue: 700, reason: DEFER_FAMILY_HANDLED }]);
+  assert(
+    reverseSearchedFor(calls, "ANALYTICS-MENTO-ORG-AA"),
+    "the reverse search must run even though A declared zero edges",
+  );
+});
+
+await test("bug B control: a bare (non-verdict) comment mention does not forge an edge", async () => {
+  // B is returned by the reverse search (it mentions A) but its FENCED verdict
+  // declares nothing, so the authoritative re-parse rejects the edge and A is
+  // selected. The search still ran — the fence, not the search, is the gate.
+  const A = stub({ number: 710, shortId: "ANALYTICS-MENTO-ORG-AC" });
+  const { runGh, calls } = makeRunGh({
+    stubs: [A],
+    handled: [
+      {
+        shortId: "ANALYTICS-MENTO-ORG-BC",
+        label: FIX_REFUSED_LABEL,
+        declares: [],
+        mentions: ["ANALYTICS-MENTO-ORG-AC"],
+      },
+    ],
+  });
+  const selected = await selectAutofixCandidates(
+    { repo: "o/r", cap: 2 },
+    { runGh },
+  );
+  assertDeepEqual(selected, [
+    { issue: 710, shortId: "ANALYTICS-MENTO-ORG-AC" },
+  ]);
+  assert(
+    reverseSearchedFor(calls, "ANALYTICS-MENTO-ORG-AC"),
+    "the reverse search still runs in the control arm",
+  );
+});
+
+await test("bug B control: a hit whose verdict names a DIFFERENT id does not forge an edge", async () => {
+  // B carries a real verdict edge, but to ZZ, not to A; A only appears in a
+  // mention. The probed id must be IN the parsed duplicate_of, so A is selected.
+  const A = stub({ number: 720, shortId: "ANALYTICS-MENTO-ORG-AD" });
+  const { runGh, calls } = makeRunGh({
+    stubs: [A],
+    handled: [
+      {
+        shortId: "ANALYTICS-MENTO-ORG-BD",
+        label: FIX_REFUSED_LABEL,
+        declares: ["ANALYTICS-MENTO-ORG-ZZ"],
+        mentions: ["ANALYTICS-MENTO-ORG-AD"],
+      },
+    ],
+  });
+  const selected = await selectAutofixCandidates(
+    { repo: "o/r", cap: 2 },
+    { runGh },
+  );
+  assertDeepEqual(selected, [
+    { issue: 720, shortId: "ANALYTICS-MENTO-ORG-AD" },
+  ]);
+  assert(
+    reverseSearchedFor(calls, "ANALYTICS-MENTO-ORG-AD"),
+    "the reverse search still runs in the control arm",
+  );
+});
+
+await test("bug B hub topology: A and a handled sibling joined only through a non-candidate C", async () => {
+  // A declares [C]; handled B declares [C]; there is no C stub. The bug-C per-id
+  // lookup for C finds nothing (no C stub), so A survives as a finalist; the
+  // reverse probe of the FAMILY MEMBER C — not just the finalist id A — finds B,
+  // whose terminal marker then stands A down. Probing finalist ids alone would
+  // miss this.
+  const A = familyStub(730, "ANALYTICS-MENTO-ORG-HA", "2026-07-18T00:00:00Z", [
+    "ANALYTICS-MENTO-ORG-HC",
+  ]);
+  const { runGh, calls } = makeRunGh({
+    stubs: [A],
+    handled: [
+      {
+        shortId: "ANALYTICS-MENTO-ORG-HB",
+        label: FIX_PR_OPENED_LABEL,
+        declares: ["ANALYTICS-MENTO-ORG-HC"],
+      },
+    ],
+  });
+  const { entries, deferred } = await selectAutofixRun(
+    { repo: "o/r", cap: 2 },
+    { runGh },
+  );
+  assertDeepEqual(entries, []);
+  assertDeepEqual(deferred, [{ issue: 730, reason: DEFER_FAMILY_HANDLED }]);
+  assert(
+    reverseSearchedFor(calls, "ANALYTICS-MENTO-ORG-HC"),
+    "the hub id C must be probed, not just the candidate id A",
+  );
+});
+
+await test("bug C: a declared terminal sibling is found by its own id, and no bulk 200-list is issued", async () => {
+  // The candidate declares [OLD]; OLD carries a terminal marker but is not in
+  // the window. The per-declared-id in:title query keyed on OLD finds it however
+  // deep it sits in the ledger; the deleted bulk sort:created-desc marker list
+  // is never issued.
+  const candidate = familyStub(
+    740,
+    "ANALYTICS-MENTO-ORG-NEW",
+    "2026-07-18T00:00:00Z",
+    ["ANALYTICS-MENTO-ORG-OLD"],
+  );
+  const { runGh, calls } = makeRunGh({
+    stubs: [candidate],
+    handled: [{ shortId: "ANALYTICS-MENTO-ORG-OLD", label: FIX_REFUSED_LABEL }],
+  });
+  const { entries, deferred } = await selectAutofixRun(
+    { repo: "o/r", cap: 2 },
+    { runGh },
+  );
+  assertDeepEqual(entries, []);
+  assertDeepEqual(deferred, [{ issue: 740, reason: DEFER_FAMILY_HANDLED }]);
+  assert(
+    calls.some(
+      (c) =>
+        c[0] === "issue" &&
+        c[1] === "list" &&
+        String(c[c.indexOf("--search") + 1] ?? "").includes(
+          `"ANALYTICS-MENTO-ORG-OLD" in:title`,
+        ),
+    ),
+    "the handled lookup queries the declared id directly",
+  );
+  assert(
+    !calls.some((c) => {
+      const i = c.indexOf("--search");
+      return i !== -1 && String(c[i + 1] ?? "").includes("sort:created-desc");
+    }),
+    "the deleted bulk sort:created-desc marker list must not be issued",
+  );
+});
+
+await test("bug C exact-parse fence: a tokenized near-miss title does not block", async () => {
+  // The tokenized search surfaces a stub whose title parses to a DIFFERENT
+  // short-id than the queried OLD; the parsed-short-id recheck drops it, so the
+  // candidate is NOT blocked.
+  const candidate = familyStub(
+    750,
+    "ANALYTICS-MENTO-ORG-NW",
+    "2026-07-18T00:00:00Z",
+    ["ANALYTICS-MENTO-ORG-OLD"],
+  );
+  const { runGh } = makeRunGh({
+    stubs: [candidate],
+    handled: [
+      {
+        shortId: "ANALYTICS-MENTO-ORG-DIFF",
+        label: FIX_REFUSED_LABEL,
+        matchTitleFor: "ANALYTICS-MENTO-ORG-OLD",
+      },
+    ],
+  });
+  const selected = await selectAutofixCandidates(
+    { repo: "o/r", cap: 2 },
+    { runGh },
+  );
+  assertDeepEqual(selected, [
+    { issue: 750, shortId: "ANALYTICS-MENTO-ORG-NW" },
+  ]);
+});
+
+await test("cost pin: a full 50-stub window stays under the documented gh ceiling", async () => {
+  const stubs = [];
+  for (let i = 0; i < MAX_CANDIDATE_EVALUATIONS; i += 1) {
+    stubs.push(
+      stub({
+        number: 4000 + i,
+        shortId: `ANALYTICS-MENTO-ORG-C${i}`,
+        createdAt: `2026-07-18T00:${String(i).padStart(2, "0")}:00Z`,
+      }),
+    );
+  }
+  const { runGh, calls } = makeRunGh({ stubs });
+  await selectAutofixCandidates({ repo: "o/r", cap: 2 }, { runGh });
+  // 1 window + 50 issue views + 50 pr lists + <=a handful of reverse probes,
+  // comfortably under the ~165 serial-subprocess ceiling documented in the
+  // pipeline note. A regression that re-introduced per-window or unbounded
+  // per-id/reverse queries would blow past this.
+  assert(
+    calls.length <= 165,
+    `full-window gh volume must stay under the ceiling, got ${calls.length}`,
+  );
+});
+
+await test("window report: a run surfaces total and evaluated when the window exceeds the eval cap", async () => {
+  const stubs = [];
+  for (let i = 0; i < MAX_CANDIDATE_EVALUATIONS + 1; i += 1) {
+    stubs.push(
+      stub({
+        number: 5000 + i,
+        shortId: `ANALYTICS-MENTO-ORG-W${i}`,
+        createdAt: `2026-07-18T00:${String(i).padStart(2, "0")}:00Z`,
+      }),
+    );
+  }
+  const { runGh } = makeRunGh({ stubs });
+  const { window } = await selectAutofixRun({ repo: "o/r", cap: 2 }, { runGh });
+  assertDeepEqual(window, {
+    total: MAX_CANDIDATE_EVALUATIONS + 1,
+    evaluated: MAX_CANDIDATE_EVALUATIONS,
+  });
+});
+
+await test("over-collapse invariant: foreign ids in options.handledEdges stay inert", () => {
+  // The reverse-edge input is subject to the same project scope as declared ids
+  // (f_new_rules_must_be_tested_against_the_invariant): a foreign-project or
+  // bare-slug edge must not union unrelated local candidates.
+  const candidates = [
+    { shortId: "ANALYTICS-MENTO-ORG-E1", duplicateOf: [], entry: { issue: 1 } },
+    { shortId: "ANALYTICS-MENTO-ORG-E2", duplicateOf: [], entry: { issue: 2 } },
+  ];
+  const foreign = collapseDuplicateFamilies(candidates, {
+    project: LOCAL_SENTRY_PROJECT,
+    handledEdges: [
+      ["APP-MENTO-ORG-7X", "ANALYTICS-MENTO-ORG-E1"], // foreign project
+      ["ANALYTICS-MENTO-ORG", "ANALYTICS-MENTO-ORG-E2"], // bare slug
+    ],
+  });
+  assertEqual(
+    foreign.filter((d) => d.selected).length,
+    2,
+    "foreign / bare-slug edges must not join the two candidates",
+  );
+  // A LOCAL edge between the two DOES join them — proving the inertness above is
+  // the scope check doing work, not a dead input.
+  const local = collapseDuplicateFamilies(candidates, {
+    project: LOCAL_SENTRY_PROJECT,
+    handledEdges: [["ANALYTICS-MENTO-ORG-E1", "ANALYTICS-MENTO-ORG-E2"]],
+  });
+  assertEqual(
+    local.filter((d) => d.selected).length,
+    1,
+    "a local edge joins the two into one family",
   );
 });
 

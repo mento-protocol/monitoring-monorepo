@@ -100,7 +100,12 @@ jobs:
   # ---------------------------------------------------------------------------
   select:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # 10, not 5 (PR #1810): the per-declared-id handled lookups and the reverse
+    # family search add bounded `gh` volume on top of the per-candidate reads.
+    # The hard ceiling is ~165 serial subprocesses (documented in the pipeline
+    # note § "Local autofix PRs"), ~3 min at ~1s each; 10 leaves headroom for
+    # checkout/setup and API latency spikes instead of sizing to hope.
+    timeout-minutes: 10
     # sentry-pipeline Environment (issue #1289): AUTOFIX_APP_PRIVATE_KEY is now an
     # environment secret, so this job MUST declare the environment for its
     # presence check to see it; the main-only deployment-branch policy also
@@ -122,6 +127,12 @@ jobs:
       # suppressed queue from an empty one — the record job renders both.
       deferred: ${{ steps.select.outputs.deferred }}
       deferred_issues: ${{ steps.select.outputs.deferred_issues }}
+      # The list-window tripwire (PR #1810): total stubs the window held vs how
+      # many the eval cap let this run READ. The record job renders "Window: N
+      # stubs, evaluated M" when N>M, so an approach toward the cap is surfaced
+      # on the tracker weeks ahead of a silent truncation.
+      window_total: ${{ steps.select.outputs.window_total }}
+      window_evaluated: ${{ steps.select.outputs.window_evaluated }}
       # Why this run did or did not select anything, for the tracker run record
       # (record-run job): off-main | disabled | unprovisioned | active.
       disposition: ${{ steps.select.outputs.disposition }}
@@ -157,6 +168,12 @@ jobs:
           # read a real 0 rather than an absent file.
           deferred_report="${RUNNER_TEMP}/autofix-deferred.json"
           printf '[]' > "${deferred_report}"
+          # The list-window tripwire (PR #1810). Seed it empty: every branch that
+          # does not run the batch selector legitimately has no window, and the
+          # record job must read a real 0/0 (no Window line) rather than an
+          # absent file.
+          window_report="${RUNNER_TEMP}/autofix-window.json"
+          printf '{}' > "${window_report}"
           # Why this run did or did not select anything — recorded verbatim on
           # the tracker issue by the record-run job (ADR 0036 observability).
           disposition='active'
@@ -195,7 +212,8 @@ jobs:
             entries=$(node scripts/sentry-autofix-select.mjs \
               --repo "${GITHUB_REPOSITORY}" \
               --cap 2 \
-              --deferred-out "${deferred_report}")
+              --deferred-out "${deferred_report}" \
+              --window-out "${window_report}")
           fi
 
           count=$(printf '%s' "${entries}" | jq 'length')
@@ -205,14 +223,20 @@ jobs:
           deferred=$(jq 'length' "${deferred_report}")
           deferred_issues=$(jq -r '[.[].issue | numbers | floor | tostring] | join(" ")' \
             "${deferred_report}")
+          # Window tripwire, floored to non-negative integers (our own JSON, but
+          # keep the record-job contract integer-only).
+          window_total=$(jq -r '(.total // 0) | floor' "${window_report}")
+          window_evaluated=$(jq -r '(.evaluated // 0) | floor' "${window_report}")
           {
             echo "entries=${entries}"
             echo "count=${count}"
             echo "deferred=${deferred}"
             echo "deferred_issues=${deferred_issues}"
+            echo "window_total=${window_total}"
+            echo "window_evaluated=${window_evaluated}"
             echo "disposition=${disposition}"
           } >> "${GITHUB_OUTPUT}"
-          echo "Selected ${count} candidate(s), deferred ${deferred} [${disposition}]: ${entries}"
+          echo "Selected ${count} candidate(s), deferred ${deferred}, window ${window_evaluated}/${window_total} [${disposition}]: ${entries}"
 
   # ---------------------------------------------------------------------------
   # autofix: one claude-code-action fix + deterministic PR per selected stub.
@@ -1058,6 +1082,8 @@ jobs:
           COUNT: ${{ needs.select.outputs.count }}
           DEFERRED: ${{ needs.select.outputs.deferred }}
           DEFERRED_ISSUES: ${{ needs.select.outputs.deferred_issues }}
+          WINDOW_TOTAL: ${{ needs.select.outputs.window_total }}
+          WINDOW_EVALUATED: ${{ needs.select.outputs.window_evaluated }}
           DISPOSITION: ${{ needs.select.outputs.disposition }}
           SELECT_RESULT: ${{ needs.select.result }}
           TRIGGER: ${{ github.event_name }}
@@ -1069,6 +1095,8 @@ jobs:
           count="${COUNT:-0}"
           deferred="${DEFERRED:-0}"
           deferred_issues="${DEFERRED_ISSUES:-}"
+          window_total="${WINDOW_TOTAL:-0}"
+          window_evaluated="${WINDOW_EVALUATED:-0}"
           # If selection itself failed/cancelled, record THAT (not a stale
           # snapshot) so the tracker shows the systemic failure mode.
           if [ "${SELECT_RESULT}" != "success" ]; then
@@ -1076,6 +1104,8 @@ jobs:
             count=0
             deferred=0
             deferred_issues=""
+            window_total=0
+            window_evaluated=0
           fi
 
           # Tally opened/refused/incomplete from each selected stub's current
@@ -1114,7 +1144,9 @@ jobs:
             --refused "${refused}" \
             --incomplete "${incomplete}" \
             --deferred "${deferred}" \
-            --deferred-issues "${deferred_issues}")
+            --deferred-issues "${deferred_issues}" \
+            --window-total "${window_total}" \
+            --window-evaluated "${window_evaluated}")
 
           # Rolling comment: PATCH the existing marker-bearing comment if present,
           # else create it. Selection is author-fenced + prefix-anchored

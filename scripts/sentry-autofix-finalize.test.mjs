@@ -604,6 +604,42 @@ await test("run record caps the deferred-issue list rather than pasting the whol
   );
 });
 
+await test("run record renders the Window tripwire only when the window exceeds the eval cap", () => {
+  // PR #1810: a growing list window truncates its newest tail at the eval cap.
+  // The record surfaces the approach ONLY when total > evaluated, so the steady
+  // state (window fits) carries no noise line.
+  const fits = buildAutofixRunRecordBody({
+    timestampIso: "2026-07-19T08:30:00Z",
+    trigger: "schedule",
+    disposition: "active",
+    candidates: 2,
+    windowTotal: 8,
+    windowEvaluated: 50,
+  });
+  assert(!fits.includes("Window:"), "no Window line when the window fits");
+  const truncated = buildAutofixRunRecordBody({
+    timestampIso: "2026-07-19T08:30:00Z",
+    trigger: "schedule",
+    disposition: "active",
+    candidates: 2,
+    windowTotal: 63,
+    windowEvaluated: 50,
+  });
+  assert(
+    truncated.includes("- Window: 63 stubs, evaluated 50"),
+    `Window line renders when total exceeds evaluated, got: ${truncated}`,
+  );
+  // Absent/garbage window fields coerce to 0/0 -> no line (back-compat with
+  // callers that do not thread the window).
+  const noWindow = buildAutofixRunRecordBody({
+    timestampIso: "2026-07-19T08:30:00Z",
+    trigger: "schedule",
+    disposition: "active",
+    candidates: 2,
+  });
+  assert(!noWindow.includes("Window:"), "no Window line without window fields");
+});
+
 // Comments as the raw REST endpoint returns them: pipeline-authored comments
 // resolve to the Actions bot login "github-actions[bot]".
 function trackerComment(id, body, login) {

@@ -652,10 +652,22 @@ five refusal records for one root cause. The selector groups candidates by the
 `duplicate_of` the verdict already carries, unioned TRANSITIVELY over SHORT-IDs
 (the graph is directional — #1304 listed six duplicates while the others pointed
 back only at `2E`, and a member id may connect two candidates without being one
-itself), and picks the family's **oldest** candidate. A family whose SHORT-IDs
-include one already carrying `sentry:fix-pr-opened` or `sentry:fix-refused`
-stands down entirely, which is what stops a refused representative from handing
+itself), and picks the family's **oldest** candidate. A family stands down
+entirely when any of its SHORT-IDs already carries `sentry:fix-pr-opened` or
+`sentry:fix-refused`, which is what stops a refused representative from handing
 the family back one member per run.
+
+Those terminal siblings are excluded from the candidate window, so the selector
+reads them back keyed on the referenced id — never a recent slice of the ledger
+(PR #1810). It queries each **declared** family id by title, so a blocker sitting
+arbitrarily deep in the ledger is still found (a fixed slice would miss one past
+its edge). And it **reverse-verifies** each finalist's family by searching issue
+comments for the family's member ids, admitting an edge only after re-parsing the
+hit's verdict through the same authorship fence — which catches the two links the
+forward `duplicate_of` graph cannot see: a handled sibling that names a finalist
+which declares nothing itself, and a hub id two stubs share through an issue that
+is not a candidate. Both reads are keyed on ids, so nothing depends on where a
+stub sorts in the window.
 
 Two bounds keep an agent-authored `duplicate_of` list from reaching further than
 that. Family ids are **project-scoped**: only `ANALYTICS-MENTO-ORG-<suffix>` ids
@@ -688,6 +700,22 @@ operator who sees a standing deferred count overrides it with the single-issue
 `workflow_dispatch`, which skips the collapse entirely: naming one issue is
 explicit human intent that beats a heuristic signal. Selection itself stays
 read-only and never re-queues anything.
+
+**Cost bound** (PR #1810). Terminal, projected, archived, and external-project
+stubs are all excluded server-side before `--limit` applies, so the eligible
+window stays single-digit at steady state and the leg's `gh` volume no longer
+scales with the list ceiling. The hard ceiling per run is one window list +
+`MAX_CANDIDATE_EVALUATIONS` (50) × 2 reads (issue view + PR list) +
+`MAX_HANDLED_ID_QUERIES` (40) per-declared-id lookups + roughly a dozen reverse
+searches (four fixpoint iterations over a cap-2 finalist set's family ids) +
+about ten cached verify reads — ≈ 165 serial subprocesses, ~3 min at ~1s each.
+`LIST_LIMIT` (200) is a **safety ceiling, not the throttle**; the throttle is the
+exclusion set plus `MAX_CANDIDATE_EVALUATIONS`. The select job's `timeout-minutes`
+is **10** (raised from 5) so that ceiling keeps headroom for checkout, setup, and
+API-latency spikes rather than being sized to hope. The read budget truncates the
+window's **newest** tail (it is oldest-first), and any approach toward the eval
+cap is surfaced on the tracker as `Window: N stubs, evaluated M` in the run
+record — weeks ahead of a silent truncation.
 
 The selector reads only PRs whose head branch is in **this** repo.
 `gh pr list --head` matches by branch name, which fork PRs also carry, so on a

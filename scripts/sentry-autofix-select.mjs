@@ -52,6 +52,7 @@ import {
 } from "./sentry-triage-ingest.mjs";
 import {
   collapseDuplicateFamilies,
+  declaredFamilyIds,
   DEFER_FAMILY_DUPLICATE,
   DEFER_FAMILY_HANDLED,
   DEFER_FAMILY_RECONCILING,
@@ -64,6 +65,7 @@ import {
   LOCAL_SENTRY_PROJECT,
   openAutofixPrExists,
   readStub,
+  reverseVerifyFamilies,
 } from "./sentry-autofix-queue-io.mjs";
 
 // Only `code-fix` verdicts are fixable in code; the select label already
@@ -259,6 +261,102 @@ const DEFER_NOTES = {
     "its duplicate_of family already has an open autofix PR being reconciled this run",
 };
 
+// Reverse-verify fixpoint ceiling (PR #1810 bug B). A newly discovered blocker
+// defers a finalist, which promotes the next candidate, which has its own family
+// to probe — so the collapse must re-run until the finalist set is stable. The
+// `alreadyProbed` set makes each id cost one search at most, so this ceiling is
+// only a backstop; on hit it emits a stderr note and proceeds with the current
+// candidates (fails OPEN — toward MORE candidates, the family module's safe
+// direction).
+const MAX_REVERSE_ITERATIONS = 4;
+
+/**
+ * Collapse the candidate window to per-family decisions, closing the two family
+ * edges the forward `duplicate_of` graph cannot see on its own:
+ *   - bug C: a TERMINAL sibling that the candidate window excludes, found by
+ *     querying each DECLARED family id directly (no bounded recent list, so a
+ *     blocker deep in the ledger is still found);
+ *   - bug B: a REVERSE edge — a handled sibling or hub id that names a finalist
+ *     — found by probing each finalist's family member ids via `in:comments`,
+ *     then folding the verified edges/blockers back in and re-collapsing.
+ * Returns the collapse decisions (see `collapseDuplicateFamilies`).
+ */
+async function resolveFamilies(runGh, repo, candidates, cap) {
+  const project = LOCAL_SENTRY_PROJECT;
+
+  // bug C handled set, keyed per DECLARED family id (the distinct, project-scoped
+  // and MAX_DUPLICATE_LOOKUPS-bounded union of every candidate's duplicate_of).
+  // Gated on "any declared id exists": a window that declares nothing issues
+  // zero handled queries, preserving the empty-window cost profile.
+  const declaredIds = [
+    ...new Set(
+      candidates.flatMap((candidate) =>
+        declaredFamilyIds(candidate.shortId, candidate.duplicateOf, project),
+      ),
+    ),
+  ];
+  let handledShortIds = declaredIds.length
+    ? await listHandledShortIds(runGh, repo, declaredIds)
+    : [];
+  const handledEdges = [];
+  const stubCache = new Map();
+  const alreadyProbed = new Set();
+
+  // Family ids are agent-authored free text. Scoping every joiner AND every
+  // blocker to this project is what stops a foreign-project id — or the bare
+  // project slug, which `isValidShortId` accepts — from unioning unrelated local
+  // candidates into one starved family.
+  const collapse = () =>
+    collapseDuplicateFamilies(candidates, {
+      handledShortIds,
+      handledEdges,
+      project,
+    });
+
+  let decisions = collapse();
+
+  for (let iteration = 1; candidates.length > 0; iteration += 1) {
+    // The would-be matrix entries this collapse produced: selected,
+    // non-reconcile, within the cap — precisely the finalists whose families the
+    // reverse check must verify. bug B's topology is a finalist that declares
+    // nothing yet is named by a handled sibling, so the check runs whenever a
+    // finalist exists, not only when a candidate declared an edge.
+    const finalists = [];
+    for (const decision of decisions) {
+      if (finalists.length >= cap) break;
+      if (decision.selected && !decision.candidate.reconcile) {
+        finalists.push(decision);
+      }
+    }
+    const probeIds = [
+      ...new Set(finalists.flatMap((decision) => decision.members ?? [])),
+    ].filter((id) => !alreadyProbed.has(id));
+    if (probeIds.length === 0) break;
+
+    const { edges, blockers } = await reverseVerifyFamilies(
+      runGh,
+      repo,
+      probeIds,
+      { project, stubCache, alreadyProbed },
+    );
+    const newBlockers = blockers.filter((id) => !handledShortIds.includes(id));
+    // Nothing new to fold -> the finalist set is stable.
+    if (edges.length === 0 && newBlockers.length === 0) break;
+
+    handledShortIds = [...new Set([...handledShortIds, ...blockers])];
+    handledEdges.push(...edges);
+    decisions = collapse();
+
+    if (iteration >= MAX_REVERSE_ITERATIONS) {
+      process.stderr.write(
+        `note: reverse family verification did not reach a fixpoint in ${MAX_REVERSE_ITERATIONS} iterations; proceeding with the current candidates (fails open).\n`,
+      );
+      break;
+    }
+  }
+  return decisions;
+}
+
 /**
  * Run the selection and report BOTH halves of its outcome: the matrix entries,
  * and every candidate the family collapse stood down.
@@ -297,7 +395,13 @@ export async function selectAutofixRun(options, deps = {}) {
       title: stub.title,
       labels: stub.labels,
     });
-    return { entries: candidate ? [candidate.entry] : [], deferred: [] };
+    // No list window in single-issue mode: one stub considered, one evaluated,
+    // so the Window tripwire never fires (total == evaluated).
+    return {
+      entries: candidate ? [candidate.entry] : [],
+      deferred: [],
+      window: { total: 1, evaluated: 1 },
+    };
   }
 
   const cap =
@@ -319,30 +423,18 @@ export async function selectAutofixRun(options, deps = {}) {
       `note: window has ${stubs.length} stubs; evaluating the oldest ${evaluable.length} (MAX_CANDIDATE_EVALUATIONS).\n`,
     );
   }
+  // The Window tripwire (PR #1810 cost bound): the record job renders "Window: N
+  // stubs, evaluated M" when N>M, so any approach toward the eval cap is
+  // reported on the tracker weeks ahead — never a silent truncation.
+  const window = { total: stubs.length, evaluated: evaluable.length };
+
   const candidates = [];
   for (const stub of evaluable) {
     const candidate = await evaluateCandidate(runGh, repo, stub);
     if (candidate) candidates.push(candidate);
   }
 
-  // No candidate declares a family -> nothing to collapse, and the extra
-  // handled-sibling reads are not worth issuing. This is also what keeps the
-  // no-duplicates path's `gh` call profile identical to the pre-#1784 one.
-  const hasFamilySignal = candidates.some(
-    (candidate) => (candidate.duplicateOf ?? []).length > 0,
-  );
-  const handledShortIds = hasFamilySignal
-    ? await listHandledShortIds(runGh, repo)
-    : [];
-
-  const decisions = collapseDuplicateFamilies(candidates, {
-    handledShortIds,
-    // Family ids are agent-authored free text. Scoping every joiner AND every
-    // blocker to this project is what stops a foreign-project id — or the bare
-    // project slug, which `isValidShortId` accepts — from unioning unrelated
-    // local candidates into one starved family.
-    project: LOCAL_SENTRY_PROJECT,
-  });
+  const decisions = await resolveFamilies(runGh, repo, candidates, cap);
   const entries = [];
   const deferred = [];
   for (const decision of decisions) {
@@ -363,7 +455,7 @@ export async function selectAutofixRun(options, deps = {}) {
     if (entries.length >= cap) continue;
     entries.push(decision.candidate.entry);
   }
-  return { entries, deferred };
+  return { entries, deferred, window };
 }
 
 /** Matrix entries only — the emitted contract, unchanged. `selectAutofixRun`
@@ -420,6 +512,9 @@ Options:
                        { "issue": <number>, "reason": "<enum>" } — to this path,
                        so the run record can distinguish an empty queue from one
                        whose candidates were all stood down. Stdout is unchanged.
+  --window-out <p>     Write the Window tripwire — { "total": <n>, "evaluated":
+                       <n> } — to this path, so the run record can surface a list
+                       window that exceeded the eval cap. Stdout is unchanged.
   --emit-verdict       With --issue: print the trusted (fence-selected) verdict
                        comment body for that issue and exit (the workflow
                        snapshots it to a file the fix agent reads, so the agent
@@ -435,6 +530,7 @@ export function parseArgs(argv) {
     issue: null,
     emitVerdict: false,
     deferredOut: null,
+    windowOut: null,
     help: false,
   };
   const args = [...argv];
@@ -471,6 +567,9 @@ export function parseArgs(argv) {
       case "--deferred-out":
         options.deferredOut = readValue();
         break;
+      case "--window-out":
+        options.windowOut = readValue();
+        break;
       case "-h":
       case "--help":
         options.help = true;
@@ -495,10 +594,11 @@ async function main() {
     process.stdout.write(await emitVerdict(options));
     return;
   }
-  const { entries, deferred } = await selectAutofixRun(options);
+  const { entries, deferred, window } = await selectAutofixRun(options);
   // Report BEFORE stdout: the workflow captures stdout into a shell variable, so
-  // a failed report write must not be able to lose the entries too. It is
-  // best-effort — the run record degrades to "0 deferred", never to a dead leg.
+  // a failed report write must not be able to lose the entries too. Both are
+  // best-effort — the run record degrades to "0 deferred" / no Window line,
+  // never to a dead leg.
   if (options.deferredOut) {
     try {
       writeFileSync(options.deferredOut, `${JSON.stringify(deferred)}\n`);
@@ -506,6 +606,16 @@ async function main() {
       const message = err instanceof Error ? err.message : String(err);
       process.stderr.write(
         `warn: could not write the deferral report: ${message}\n`,
+      );
+    }
+  }
+  if (options.windowOut) {
+    try {
+      writeFileSync(options.windowOut, `${JSON.stringify(window ?? {})}\n`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      process.stderr.write(
+        `warn: could not write the window report: ${message}\n`,
       );
     }
   }

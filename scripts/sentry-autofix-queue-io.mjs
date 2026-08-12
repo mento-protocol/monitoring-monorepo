@@ -14,7 +14,11 @@
 
 import { spawn } from "node:child_process";
 
-import { isValidShortId, parseShortId } from "./sentry-triage-project-core.mjs";
+import {
+  isValidShortId,
+  parseShortId,
+  resolveVerdict,
+} from "./sentry-triage-project-core.mjs";
 import {
   ARCHIVED_LABEL,
   CODE_FIX_VERDICT_LABEL,
@@ -23,6 +27,12 @@ import {
   PROJECTED_LABEL,
 } from "./sentry-triage-ingest.mjs";
 import { autofixBranchName } from "./sentry-autofix-finalize.mjs";
+import { familyKey, isLocalFamilyId } from "./sentry-autofix-family.mjs";
+
+// The queue-membership label every triage stub carries (the queue contract's
+// `LABEL_DEFINITIONS` self-heals it). Both per-id lookups below narrow their
+// search to it so a random issue that merely quotes a SHORT-ID cannot match.
+const SENTRY_TRIAGE_QUEUE_LABEL = "sentry-triage";
 
 // The verdict label the select scans for — re-exported from the ingest's single
 // source of truth (`code-fix` maps to this label), so a future rename can't
@@ -164,30 +174,56 @@ export async function listCodeFixStubs(runGh, repo) {
 }
 
 /**
- * SHORT-IDs of local stubs that already carry a TERMINAL autofix marker
- * (`sentry:fix-pr-opened` / `sentry:fix-refused`) — the family-collapse input
- * that `listCodeFixStubs` structurally cannot provide, because it excludes
- * exactly these stubs from the candidate window.
- *
- * Without it, a refused representative strands its family: on the run after
- * `ANALYTICS-MENTO-ORG-2E` (#1304) was refused, its four siblings are the only
- * family members left in the window, each pointing back at a stub the selector
- * can no longer see — so they come back one per run and re-burn the cap on a
- * root cause the leg already declined. That is the exact 5-runs-for-1-cause
- * failure this reads live state to close.
- *
- * One query per marker (never the `label:"a","b"` OR syntax): if that syntax
- * were ever mis-parsed the query would return nothing, and this input fails
- * OPEN — an empty handled set means no family is blocked, i.e. straight back to
- * the bug. Two unambiguous queries cost one extra call on runs that have a
- * family at all, and the selector only issues them then.
- *
- * Titles only — the SHORT-ID is parsed out of the queue title (contract v2) and
- * shape-validated, so nothing here is trusted beyond its shape.
+ * How many distinct declared family ids one run may look up. Each candidate's
+ * fan-out is already MAX_DUPLICATE_LOOKUPS-bounded, but the distinct union
+ * across a full window could still be large; overflow ids are treated as
+ * NOT-handled — failing toward MORE candidates, the family module's documented
+ * safe direction — with a stderr note.
  */
-export async function listHandledShortIds(runGh, repo) {
-  const shortIds = new Set();
-  for (const marker of [FIX_PR_OPENED_LABEL, FIX_REFUSED_LABEL]) {
+export const MAX_HANDLED_ID_QUERIES = 40;
+
+/**
+ * Family keys that already carry a TERMINAL autofix marker
+ * (`sentry:fix-pr-opened` / `sentry:fix-refused`) — the family-collapse input
+ * `listCodeFixStubs` structurally cannot provide, because it excludes exactly
+ * these stubs from the candidate window. Without it, a refused representative
+ * strands its family: after `ANALYTICS-MENTO-ORG-2E` (#1304) was refused, its
+ * four siblings are the only members left in the window, each pointing back at a
+ * stub the selector can no longer see, so they return one per run and re-burn
+ * the cap on a root cause the leg already declined.
+ *
+ * Keyed on the DECLARED id, not a position in a recent window (PR #1810 bug C).
+ * The prior design listed both terminal-marker sets in bulk
+ * (`sort:created-desc --limit 200`) and read a candidate's siblings out of that
+ * recent slice — so a blocker sitting past row 200 (a terminal sibling deep in
+ * the ledger) was invisible and its family re-attempted forever. Here each
+ * declared id `<ID>` runs ONE query `"<ID>" in:title label:"sentry-triage"`,
+ * then the exactly-matching stub's labels decide it: keyed on the referenced id,
+ * a terminal sibling 500 stubs deep is still found, and truncation is
+ * structurally impossible at any ledger size.
+ *
+ * ONE query covers BOTH markers with no OR-label syntax: the search narrows to
+ * queue stubs of this family, and the marker check is client-side off the
+ * returned labels. The parsed-short-id + project recheck fences GitHub's
+ * tokenized search, so a fuzzy near-miss (a different suffix that tokenizes the
+ * same) is dropped.
+ */
+export async function listHandledShortIds(runGh, repo, declaredIds) {
+  const ids = [
+    ...new Set(
+      (Array.isArray(declaredIds) ? declaredIds : [])
+        .map((id) => familyKey(id))
+        .filter((id) => id.length > 0),
+    ),
+  ];
+  const queryIds = ids.slice(0, MAX_HANDLED_ID_QUERIES);
+  if (ids.length > queryIds.length) {
+    process.stderr.write(
+      `note: ${ids.length} distinct declared family ids exceed MAX_HANDLED_ID_QUERIES (${MAX_HANDLED_ID_QUERIES}); ${ids.length - queryIds.length} are treated as not-handled this run (fails toward MORE candidates).\n`,
+    );
+  }
+  const handled = new Set();
+  for (const id of queryIds) {
     const stdout = await runGh([
       "issue",
       "list",
@@ -196,20 +232,155 @@ export async function listHandledShortIds(runGh, repo) {
       "--state",
       "all",
       "--search",
-      `sort:created-desc label:"${marker}" ${LOCAL_SENTRY_PROJECT} in:title`,
+      `"${id}" in:title label:"${SENTRY_TRIAGE_QUEUE_LABEL}"`,
       "--json",
-      "number,title",
+      "number,title,labels",
       "--limit",
-      String(LIST_LIMIT),
+      "20",
     ]);
-    const parsed = JSON.parse(stdout);
+    let parsed;
+    try {
+      parsed = JSON.parse(stdout);
+    } catch {
+      parsed = [];
+    }
     for (const issue of Array.isArray(parsed) ? parsed : []) {
-      if (parseProject(issue.title ?? "") !== LOCAL_SENTRY_PROJECT) continue;
-      const shortId = parseShortId(issue.title ?? "");
-      if (isValidShortId(shortId)) shortIds.add(shortId);
+      const title = issue.title ?? "";
+      // Exact-parse fence over GitHub's tokenized search: the parsed short-id
+      // AND the parsed project must match this id exactly.
+      if (familyKey(parseShortId(title)) !== id) continue;
+      if (parseProject(title) !== LOCAL_SENTRY_PROJECT) continue;
+      const labels = (issue.labels ?? [])
+        .map((label) => (typeof label === "string" ? label : label?.name))
+        .filter(Boolean);
+      if (
+        labels.includes(FIX_PR_OPENED_LABEL) ||
+        labels.includes(FIX_REFUSED_LABEL)
+      ) {
+        handled.add(id);
+        break;
+      }
     }
   }
-  return [...shortIds];
+  return [...handled];
+}
+
+/**
+ * Read a stub and resolve its verdict through the SAME authorship/regression
+ * fence the label step uses, memoised by issue number for the run. Returns the
+ * parsed verdict, or `null` when the stub cannot be read or carries no usable
+ * fenced verdict (a comment mention that is not a real verdict). Never throws.
+ */
+async function readVerdictCached(runGh, repo, number, cache) {
+  const key = String(number);
+  if (cache.has(key)) return cache.get(key);
+  let parsed;
+  try {
+    const full = await readStub(runGh, repo, number);
+    parsed = resolveVerdict(full, number).parsed;
+  } catch {
+    parsed = null;
+  }
+  cache.set(key, parsed);
+  return parsed;
+}
+
+/**
+ * Reverse-verify the FINALISTS' families (PR #1810 bug B). The forward
+ * `duplicate_of` graph misses two shapes the collapse must still catch: a
+ * finalist that declares NOTHING but is named by a handled sibling, and a hub id
+ * two stubs share through an issue that is not a candidate. For each probe id
+ * (the finalists' family member ids), ONE search
+ * `"<ID>" in:comments label:"sentry-triage"` surfaces the stubs whose comments
+ * reference it.
+ *
+ * A hit is admitted ONLY after the authoritative recheck: its verdict is
+ * re-parsed through the same fence, and the probed id must actually appear in
+ * that parsed `duplicate_of` (isLocalFamilyId + familyKey equality) with a
+ * title that parses to a valid SHORT-ID — a casual comment mention can never
+ * forge an edge. An admitted edge joins the two ids into the collapse's union
+ * (via `options.handledEdges`); an admitted hit that ALSO carries a terminal
+ * marker becomes a BLOCKER (its key joins handledShortIds), standing the family
+ * down.
+ *
+ * Fail-SOFT, same direction as `openAutofixPrExists`: a `gh` failure on one
+ * probe skips that probe this run (at worst one self-terminating extra attempt),
+ * never rejecting out of selection. `alreadyProbed` carries across the caller's
+ * fixpoint iterations so no id is queried twice. Returns
+ * `{ edges: [[probeKey, hitKey]], blockers: [hitKey] }`.
+ */
+export async function reverseVerifyFamilies(
+  runGh,
+  repo,
+  probeIds,
+  options = {},
+) {
+  const project = options.project;
+  const stubCache = options.stubCache ?? new Map();
+  const probed = options.alreadyProbed ?? new Set();
+  const edges = [];
+  const blockers = new Set();
+  for (const rawId of Array.isArray(probeIds) ? probeIds : []) {
+    const probeId = familyKey(rawId);
+    // Foreign-project, bare-slug, or shape-invalid ids never probe: they cannot
+    // be a local family member, and the key is also interpolated into a stderr
+    // note below, where a newline would inject a workflow command.
+    if (!isLocalFamilyId(probeId, project)) continue;
+    if (probed.has(probeId)) continue;
+    probed.add(probeId);
+    let hits;
+    try {
+      const stdout = await runGh([
+        "issue",
+        "list",
+        "--repo",
+        repo,
+        "--state",
+        "all",
+        "--search",
+        `"${probeId}" in:comments label:"${SENTRY_TRIAGE_QUEUE_LABEL}"`,
+        "--json",
+        "number,title,labels",
+        "--limit",
+        "20",
+      ]);
+      hits = JSON.parse(stdout);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      process.stderr.write(
+        `note: reverse family search for ${probeId} failed (${message}); skipping this probe.\n`,
+      );
+      continue;
+    }
+    for (const hit of Array.isArray(hits) ? hits : []) {
+      const hitShortId = parseShortId(hit.title ?? "");
+      if (!isValidShortId(hitShortId)) continue;
+      const hitKey = familyKey(hitShortId);
+      if (hitKey === probeId) continue;
+      const parsed = await readVerdictCached(
+        runGh,
+        repo,
+        hit.number,
+        stubCache,
+      );
+      if (!parsed) continue;
+      const declaresProbe = (parsed.duplicateOf ?? []).some(
+        (dup) => isLocalFamilyId(dup, project) && familyKey(dup) === probeId,
+      );
+      if (!declaresProbe) continue;
+      edges.push([probeId, hitKey]);
+      const labels = (hit.labels ?? [])
+        .map((label) => (typeof label === "string" ? label : label?.name))
+        .filter(Boolean);
+      if (
+        labels.includes(FIX_PR_OPENED_LABEL) ||
+        labels.includes(FIX_REFUSED_LABEL)
+      ) {
+        blockers.add(hitKey);
+      }
+    }
+  }
+  return { edges, blockers: [...blockers] };
 }
 
 /** Read a queue stub's title/labels/comments so it can be evaluated in full. */
