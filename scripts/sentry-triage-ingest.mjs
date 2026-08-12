@@ -91,6 +91,21 @@ export function buildNewIssuesQuery(lookbackDays = DEFAULT_LOOKBACK_DAYS) {
 
 export const REGRESSED_ISSUES_QUERY = "is:unresolved is:regressed";
 
+// `is:regressed` and `is:escalating` are DISTINCT filters in Sentry's search
+// grammar, and the archive leg only ever sets `archived_until_escalating` (ADR
+// 0036, never a hard resolve). So a pipeline-archived issue that Sentry later
+// escalates becomes `is:unresolved` with substatus `escalating` — matching
+// neither the firstSeen window (it is long-lived) nor the regressed query. It
+// entered no fetch set, `decideDedupAction` was never called for it, and the
+// archive freshness baseline that exists to reopen it (#1371, #1692, #1693) was
+// unreachable for exactly the issues the archive leg produces (#1765).
+//
+// Kept as a separate query rather than `(is:regressed OR is:escalating)`: the
+// boolean form is a search-grammar dependency that would fail SILENTLY — an
+// unsupported query returns no rows, and no rows is indistinguishable from a
+// genuine absence of escalations — rebuilding this same blind spot.
+export const ESCALATING_ISSUES_QUERY = "is:unresolved is:escalating";
+
 /**
  * CLI flag wins over the env var; default 8. Fails loud on anything that is
  * not an integer in [1, 90] — a typo'd override should turn the run red, not
@@ -432,12 +447,17 @@ export function mapSentryIssue(raw) {
   };
 }
 
-export function mergeSentryIssues(newIssues, regressedIssues) {
+/**
+ * `reopenCandidates` is every issue Sentry currently considers live again —
+ * both `is:regressed` and `is:escalating` (#1765). They collapse to one flag
+ * because `decideDedupAction` asks only "is this active again?".
+ */
+export function mergeSentryIssues(newIssues, reopenCandidates) {
   const byId = new Map();
   for (const issue of newIssues ?? []) {
     byId.set(issue.id, { ...issue, isRegressed: false });
   }
-  for (const issue of regressedIssues ?? []) {
+  for (const issue of reopenCandidates ?? []) {
     const existing = byId.get(issue.id);
     byId.set(
       issue.id,
@@ -510,21 +530,32 @@ async function fetchAllSentryIssues({
   return collected.map(mapSentryIssue);
 }
 
-async function defaultFetchMergedSentryIssues(options) {
+// Exported for the fetch-to-decision test (#1765): while this was private, no
+// test could reach the query SET, which is exactly where the blind spot lived.
+export async function defaultFetchMergedSentryIssues(options) {
   const common = {
     org: options.org,
     baseUrl: options.sentryBaseUrl,
     token: options.sentryToken,
-    fetchImpl: fetch,
+    // Injectable so the query SET is testable without a network call. It was
+    // hardcoded, which is why nothing could cover the gap in #1765 — and why a
+    // test written against it silently reached the real Sentry API.
+    fetchImpl: options.fetchImpl ?? fetch,
   };
-  const [newIssues, regressedIssues] = await Promise.all([
+  const [newIssues, regressedIssues, escalatingIssues] = await Promise.all([
     fetchAllSentryIssues({
       ...common,
       query: buildNewIssuesQuery(options.lookbackDays),
     }),
     fetchAllSentryIssues({ ...common, query: REGRESSED_ISSUES_QUERY }),
+    fetchAllSentryIssues({ ...common, query: ESCALATING_ISSUES_QUERY }),
   ]);
-  return mergeSentryIssues(newIssues, regressedIssues);
+  // Both regressed and escalating are "Sentry says this is live again", which
+  // is the only distinction `decideDedupAction` draws.
+  return mergeSentryIssues(newIssues, [
+    ...regressedIssues,
+    ...escalatingIssues,
+  ]);
 }
 
 // ---------------------------------------------------------------------------

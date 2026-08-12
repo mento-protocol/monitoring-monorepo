@@ -768,10 +768,12 @@ and then failed to settle its queue stub has left Sentry in exactly the state a
 SUCCESSFUL archive would have produced — the state a human already approved.
 Reverting it bought nothing and cost a check-then-PUT race against Sentry's own
 transitions: the check can still read `archived_until_escalating` while Sentry is
-concurrently flipping a freshly-escalated issue to `unresolved/regressed`, and
-the PUT then erases that regression signal. Since ingest finds old issues only
-through `is:regressed`, the event would vanish from both systems. Only the queue
-stub is rolled back.
+concurrently flipping a freshly-escalated issue to `unresolved`, and the PUT
+then erases that signal. Ingest finds old issues through `is:regressed` **and
+`is:escalating`** — two separate queries, because Sentry's grammar treats them
+as distinct filters and the archive leg only ever produces the second (#1765).
+Erase the signal and the event vanishes from both systems regardless. Only the
+queue stub is rolled back.
 
 That makes re-approval the standard recovery, so it carries its own guard. A run
 over an issue that is ALREADY archived needs a baseline it can stand behind, and

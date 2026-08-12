@@ -14,7 +14,11 @@ import {
   buildRequeueShedLabelArgs,
   buildRunRecordBody,
   buildStrandedRecoveryComment,
+  ARCHIVED_LABEL,
   classifyNoise,
+  defaultFetchMergedSentryIssues,
+  ESCALATING_ISSUES_QUERY,
+  REGRESSED_ISSUES_QUERY,
   decideDedupAction,
   defangBackticks,
   defangMentions,
@@ -3087,6 +3091,92 @@ await test("a round that DOES post a verdict still settles the swept stub (#1717
   const result = await triageRoundHelpers(after).settle(prior["42"]);
   assertEqual(result.verdict, "needs-human");
   assertEqual(result.label, "sentry:verdict-needs-human");
+});
+
+// #1765. The archive leg only ever sets `archived_until_escalating`, and Sentry
+// surfaces that as substatus `escalating` — a DISTINCT filter from
+// `is:regressed`. With only the two original queries an escalated archived
+// issue entered no fetch set at all, so the reopen machinery built by #1371,
+// #1692 and #1693 was unreachable for exactly the issues the archive produces.
+// These drive the real fetch, not a hand-built merge, because the gap was in
+// the query SET and nothing that stubbed the merge could ever have seen it.
+function sentryFetchStub(byQuery) {
+  const seen = [];
+  const fetchImpl = async (url) => {
+    const query = new URL(url).searchParams.get("query");
+    seen.push(query);
+    return {
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      json: async () => byQuery[query] ?? [],
+      headers: { get: () => null },
+    };
+  };
+  return { fetchImpl, seen };
+}
+
+await test("ingest fetches escalating issues, not only regressed ones", async () => {
+  const { fetchImpl, seen } = sentryFetchStub({});
+  await defaultFetchMergedSentryIssues({
+    org: "mento-labs",
+    sentryBaseUrl: "https://us.sentry.io",
+    sentryToken: "t",
+    lookbackDays: 8,
+    fetchImpl,
+  });
+  assert(
+    seen.includes(ESCALATING_ISSUES_QUERY),
+    `expected an ${ESCALATING_ISSUES_QUERY} query; saw ${JSON.stringify(seen)}`,
+  );
+  // The other two must survive: escalating is an ADDITION, not a replacement.
+  assert(seen.includes(REGRESSED_ISSUES_QUERY), "regressed query must remain");
+  assert(
+    seen.some((q) => q.startsWith("is:unresolved firstSeen:")),
+    "firstSeen query must remain",
+  );
+});
+
+await test("an escalated archived issue reaches a reopen decision", async () => {
+  // Fetch-to-decision, the path #1765 says nothing covers: the issue is
+  // returned ONLY by the escalating query, exactly as Sentry would.
+  const escalated = {
+    id: "900",
+    shortId: "GOV-900",
+    title: "boom",
+    project: { slug: "governance-mento-org" },
+    lastSeen: "2026-08-12T10:00:00Z",
+  };
+  const { fetchImpl } = sentryFetchStub({
+    [ESCALATING_ISSUES_QUERY]: [escalated],
+  });
+  const merged = await defaultFetchMergedSentryIssues({
+    org: "mento-labs",
+    sentryBaseUrl: "https://us.sentry.io",
+    sentryToken: "t",
+    lookbackDays: 8,
+    fetchImpl,
+  });
+
+  const entry = merged.get("900");
+  assert(entry, "the escalated issue must be in the merged set at all");
+  assertEqual(entry.isRegressed, true);
+
+  // And it must survive the archive freshness gate: events after the recorded
+  // baseline are what the reopen exists for.
+  const decision = decideDedupAction({
+    existingIssue: {
+      state: "CLOSED",
+      closedAt: "2026-08-10T12:00:00Z",
+      labels: [ARCHIVED_LABEL],
+    },
+    isRegressed: entry.isRegressed,
+    lastSeen: entry.lastSeen,
+    archiveBaseline: "2026-08-10T11:00:00Z",
+    archiveBaselineIssueId: "900",
+    sentryIssueId: "900",
+  });
+  assertEqual(decision.action, "reopen");
 });
 
 if (failed > 0) {
