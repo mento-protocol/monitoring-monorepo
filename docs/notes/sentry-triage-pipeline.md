@@ -152,8 +152,10 @@ Cases that are not a verdict:
 
 ## Queue contract
 
-Ingest queries unresolved new and regressed issues for the `mento-labs`
-organization. The project set, mapping, pagination, default lookback, and noise
+Ingest queries unresolved issues for the `mento-labs` organization on three
+axes: newly seen, regressed, and **escalating**. The last is separate because
+Sentry's grammar treats `is:regressed` and `is:escalating` as distinct filters
+and the archive leg only ever produces the second (#1765). The project set, mapping, pagination, default lookback, and noise
 heuristics are owned by `scripts/sentry-triage-ingest.mjs`; do not duplicate
 those lists here.
 
@@ -768,10 +770,12 @@ and then failed to settle its queue stub has left Sentry in exactly the state a
 SUCCESSFUL archive would have produced — the state a human already approved.
 Reverting it bought nothing and cost a check-then-PUT race against Sentry's own
 transitions: the check can still read `archived_until_escalating` while Sentry is
-concurrently flipping a freshly-escalated issue to `unresolved/regressed`, and
-the PUT then erases that regression signal. Since ingest finds old issues only
-through `is:regressed`, the event would vanish from both systems. Only the queue
-stub is rolled back.
+concurrently flipping a freshly-escalated issue to `unresolved`, and the PUT
+then erases that signal. Ingest finds old issues through `is:regressed` **and
+`is:escalating`** — two separate queries, because Sentry's grammar treats them
+as distinct filters and the archive leg only ever produces the second (#1765).
+Erase the signal and the event vanishes from both systems regardless. Only the
+queue stub is rolled back.
 
 That makes re-approval the standard recovery, so it carries its own guard. A run
 over an issue that is ALREADY archived needs a baseline it can stand behind, and
@@ -790,7 +794,8 @@ refuses in both directions where it has none:
 Neither path mutates anything; both remove the approval so a bare re-dispatch
 cannot skip the decision, and both write the refusal on the stub. Recovery is to
 un-archive the Sentry issue and let it re-triage — the event is invisible to
-ingest while it stays archived, since both queries match only unresolved issues.
+ingest while it stays archived, since every ingest query matches only unresolved
+issues.
 
 **Queue rollback reconciles; it does not replay.** Every failure from the Sentry
 PUT onward re-reads the stub and corrects only what live state actually shows to
@@ -831,7 +836,7 @@ path, and because settlement consumes the approval before it writes the body, th
 stub cannot yet carry a baseline — so that retry is REFUSED as
 `skipped-unbaselined-retry` rather than recording its own read time. Nothing in
 the dead run's window is absorbed, but nothing is recovered either: the Sentry
-issue stays archived and is invisible to both ingest queries until someone acts.
+issue stays archived and is invisible to every ingest query until someone acts.
 Closing that would take a durable intent record written before the PUT, which is
 not what this change does. The mitigation is operational: a killed archive run
 leaves a red or cancelled run in Actions — un-archive the Sentry issue so ingest
@@ -852,10 +857,11 @@ asymmetry is deliberate. A failed settlement leaves an archive whose premise
 still holds — the human approved it and nothing contradicted that. A freshness
 refusal is the opposite: it is positive evidence that an event landed which the
 approver never saw, so the approval's premise is void. Leaving the archive there
-would bury that event, because an `archived_until_escalating` issue matches
-neither ingest query (both are `is:unresolved`) and a single already-counted
-event does not reliably trip Sentry's escalation forecast. Reverting puts it back
-in front of both.
+would bury that event, because a still-archived issue matches no ingest query
+(all of them are `is:unresolved`) and a single already-counted event does not
+reliably trip Sentry's escalation forecast — so the `is:escalating` query that
+does catch an escalated archive (#1765) never fires either. Reverting puts the
+event back in front of ingest.
 
 **There are two baselines, and they answer different questions.** The live read
 above is what THIS RUN observed, and only this run's own gates may use it: the
@@ -1103,8 +1109,8 @@ permission or the environment-secret writes 403 (`terraform/providers.tf`).
     **un-archive the Sentry issue**. Leaving the approval off is not enough on
     its own: ingest skips an open stub, the triage agent selects on open stubs
     carrying `sentry:needs-triage` — so a closed one stays invisible however it
-    is labelled — and while the issue stays archived it matches neither ingest
-    query, so nothing re-surfaces it. Un-archiving puts it back in front of the
+    is labelled — and while the issue stays archived it matches no ingest query
+    (all of them are `is:unresolved`), so nothing re-surfaces it. Un-archiving puts it back in front of the
     pipeline,
     after which the next archive records a baseline it can stand behind.
 

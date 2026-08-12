@@ -2,8 +2,8 @@
 /**
  * Stage A of the Sentry triage pipeline (ADR 0036,
  * docs/adr/0036-sentry-triage-pipeline.md): a deterministic, no-LLM ingest
- * that turns every new or regressed Sentry issue across the `mento-labs` org
- * into exactly one labeled GitHub queue issue in this repo, idempotent by
+ * that turns every new, regressed, or escalating Sentry issue across the
+ * `mento-labs` org into one labeled GitHub queue issue, idempotent by
  * Sentry short ID. Read-only against Sentry (GET only) — never resolves,
  * archives, assigns, or otherwise mutates a Sentry issue.
  *
@@ -90,6 +90,21 @@ export function buildNewIssuesQuery(lookbackDays = DEFAULT_LOOKBACK_DAYS) {
 }
 
 export const REGRESSED_ISSUES_QUERY = "is:unresolved is:regressed";
+
+// `is:regressed` and `is:escalating` are DISTINCT filters in Sentry's search
+// grammar, and the archive leg only ever sets `archived_until_escalating` (ADR
+// 0036, never a hard resolve). So a pipeline-archived issue that Sentry later
+// escalates becomes `is:unresolved` with substatus `escalating` — matching
+// neither the firstSeen window (it is long-lived) nor the regressed query. It
+// entered no fetch set, `decideDedupAction` was never called for it, and the
+// archive freshness baseline that exists to reopen it (#1371, #1692, #1693) was
+// unreachable for exactly the issues the archive leg produces (#1765).
+//
+// Kept as a separate query rather than `(is:regressed OR is:escalating)`: the
+// boolean form is a search-grammar dependency that would fail SILENTLY — an
+// unsupported query returns no rows, and no rows is indistinguishable from a
+// genuine absence of escalations — rebuilding this same blind spot.
+export const ESCALATING_ISSUES_QUERY = "is:unresolved is:escalating";
 
 /**
  * CLI flag wins over the env var; default 8. Fails loud on anything that is
@@ -368,7 +383,10 @@ export function buildRunRecordBody(counts, timestampIso) {
     `- Fetched: ${counts.fetched}`,
     `- Created: ${counts.created}`,
     `- Skipped (existing): ${counts.skippedExisting}`,
-    `- Reopened (regressed): ${counts.reopened}`,
+    // "regressed or escalating": both reach this counter (#1765), and an
+    // operator reading the record must not conclude a reopen was a
+    // regression when Sentry actually escalated an archived issue.
+    `- Reopened (regressed or escalating): ${counts.reopened}`,
     `- Recovered (stranded needs-triage): ${counts.recovered}`,
     `- Errors: ${counts.errors}`,
   ].join("\n");
@@ -432,18 +450,44 @@ export function mapSentryIssue(raw) {
   };
 }
 
-export function mergeSentryIssues(newIssues, regressedIssues) {
+// Why a stub is being reopened. `decideDedupAction` treats these identically —
+// it asks only "is this active again?" — but the per-issue audit comment must
+// not tell a reader that Sentry regressed an issue it actually escalated
+// (#1765), so the provenance survives the merge instead of collapsing into the
+// boolean.
+export const REOPEN_CAUSE_REGRESSED = "regressed";
+export const REOPEN_CAUSE_ESCALATING = "escalating";
+
+/**
+ * `reopenCandidates` is every issue Sentry currently considers live again.
+ * Pass `cause` so an escalation is recorded as one; an issue returned by BOTH
+ * queries keeps the first cause seen, which is the regressed one.
+ */
+export function mergeSentryIssues(
+  newIssues,
+  reopenCandidates,
+  cause = REOPEN_CAUSE_REGRESSED,
+) {
   const byId = new Map();
   for (const issue of newIssues ?? []) {
-    byId.set(issue.id, { ...issue, isRegressed: false });
+    // PRESERVE an already-set flag rather than forcing false. The escalating
+    // pass feeds this function pass one's OUTPUT as `newIssues`, so forcing
+    // false here wiped `isRegressed` from every regressed-only issue and
+    // silently disabled the regression reopen path entirely — a worse failure
+    // than the escalation gap this all exists to close. A raw Sentry payload
+    // never carries the field, so this is a no-op on the first pass.
+    byId.set(issue.id, { ...issue, isRegressed: issue.isRegressed === true });
   }
-  for (const issue of regressedIssues ?? []) {
+  for (const issue of reopenCandidates ?? []) {
     const existing = byId.get(issue.id);
+    // An issue already marked by an earlier candidate set keeps that cause: the
+    // regressed query is merged first, and "regressed" is the stronger claim.
+    const reopenCause = existing?.reopenCause ?? cause;
     byId.set(
       issue.id,
       existing
-        ? { ...existing, isRegressed: true }
-        : { ...issue, isRegressed: true },
+        ? { ...existing, isRegressed: true, reopenCause }
+        : { ...issue, isRegressed: true, reopenCause },
     );
   }
   return byId;
@@ -510,21 +554,40 @@ async function fetchAllSentryIssues({
   return collected.map(mapSentryIssue);
 }
 
-async function defaultFetchMergedSentryIssues(options) {
+// Exported for the fetch-to-decision test (#1765): while this was private, no
+// test could reach the query SET, which is exactly where the blind spot lived.
+export async function defaultFetchMergedSentryIssues(options) {
   const common = {
     org: options.org,
     baseUrl: options.sentryBaseUrl,
     token: options.sentryToken,
-    fetchImpl: fetch,
+    // Injectable so the query SET is testable without a network call. It was
+    // hardcoded, which is why nothing could cover the gap in #1765 — and why a
+    // test written against it silently reached the real Sentry API.
+    fetchImpl: options.fetchImpl ?? fetch,
   };
-  const [newIssues, regressedIssues] = await Promise.all([
+  const [newIssues, regressedIssues, escalatingIssues] = await Promise.all([
     fetchAllSentryIssues({
       ...common,
       query: buildNewIssuesQuery(options.lookbackDays),
     }),
     fetchAllSentryIssues({ ...common, query: REGRESSED_ISSUES_QUERY }),
+    fetchAllSentryIssues({ ...common, query: ESCALATING_ISSUES_QUERY }),
   ]);
-  return mergeSentryIssues(newIssues, regressedIssues);
+  // Merged in two passes, not one concatenation: a single call would apply the
+  // default cause to both sets and an escalation-only reopen would be audited
+  // as a regression again. Regressed merges first, so an issue in BOTH
+  // reopen candidate sets keeps the stronger claim.
+  const withRegressed = mergeSentryIssues(
+    newIssues,
+    regressedIssues,
+    REOPEN_CAUSE_REGRESSED,
+  );
+  return mergeSentryIssues(
+    [...withRegressed.values()],
+    escalatingIssues,
+    REOPEN_CAUSE_ESCALATING,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -871,6 +934,14 @@ export async function reopenQueueIssue(
       cause: REQUEUE_CAUSE_SENTRY_EVIDENCE,
       lastSeen: sentryIssue.lastSeen,
       dedupeFence: true,
+      // The fence LINE is the machine-read contract and stays exactly as it is;
+      // provenance goes in the prose the chokepoint renders beneath it. Without
+      // this an escalated archive is audited as "Regressed in Sentry", which is
+      // the one distinction an operator reading this stub needs (#1765).
+      fenceProse:
+        sentryIssue.reopenCause === REOPEN_CAUSE_ESCALATING
+          ? ["Sentry marked this issue as escalating, not regressed."]
+          : null,
     },
   );
 }
