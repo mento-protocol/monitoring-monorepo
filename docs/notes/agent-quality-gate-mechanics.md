@@ -3,7 +3,7 @@ title: Agent Quality Gate — Mechanics
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-29
+last_verified: 2026-08-12
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -172,6 +172,61 @@ heredocs and here-strings are fine, a redirection from a file is not. Editing it
 to need any of those fails the check with an explanation; change the probe in the
 same PR or keep the classifier free of them.
 
+### Scheduling contract (Refs #1802)
+
+The gate owns the machine while it runs. Two rules make that true, and both
+exist because contention — not flakiness — produced the failures in issue
+#1802.
+
+**One `--run` gate at a time, machine-wide.** `--run` takes a mkdir lock
+(`$HOME/.cache/agent-quality-gate/run.lock`, falling back to
+`$TMPDIR/agent-quality-gate-<uid>`; override with
+`AGENT_QUALITY_GATE_LOCK_DIR`) before it executes anything, and releases it on
+exit. `mkdir(2)` is the primitive because macOS has no `flock(1)` and the repo's
+floor is Bash 3.2. A second run prints the holder's PID, host, and worktree,
+then waits — bounded by `--lock-wait` / `AGENT_QUALITY_GATE_LOCK_WAIT_SECONDS`,
+1800 seconds by default — and exits 2 naming that holder if the wait runs out.
+Nothing that will not execute mapped commands ever competes for the lock: a dry
+run, a `--skip-if-fresh` cache hit, and a package-script refusal all exit
+before it. After waiting, a `--skip-if-fresh` run re-checks freshness, so the
+pre-push hook that queued behind a manual warm-up run reuses that run's stamp
+instead of repeating its work.
+
+A killed holder cannot release its own lock, so recovery is explicit rather
+than time-based: the lock records the holder's PID, and a waiter that finds
+that PID gone renames the lock aside and takes it. `kill -9` on a gate run
+therefore costs the next run one line of output, never manual cleanup. Two
+escape hatches start immediately: `--no-lock` (or `AGENT_QUALITY_GATE_LOCK=0`),
+and an inherited `AGENT_QUALITY_GATE_LOCK_HELD`, which is how the gate's
+self-test drives the gate against fixture repos from inside a gate run without
+deadlocking behind its own ancestor. The self-test exports
+`AGENT_QUALITY_GATE_LOCK=0` for the same reason: its fixture runs are not this
+machine's gate, and must neither queue behind a real one nor block it.
+
+**Heavy suites do not share the worker pool.** The quality phase runs in four
+parts: ordered setup prerequisites, the serialized dashboard build/browser
+group, the parallel pool, and an exclusive phase that starts only after the
+pool has drained. `is_quality_exclusive_command` holds that last set. Today it
+is the dashboard's Vitest suite — `pnpm --filter @mento-protocol/ui-dashboard
+test:coverage` and the scoped `vitest related` substitute that can replace it.
+
+The reason, measured on a 12-core mac: that suite forks its own Vitest workers
+across every core, and inside it `browser-api-policy.test.ts` spawns
+`scripts/browser-api-policy-lint-runner.mjs`, a single ESLint program load that
+costs ~17 seconds of CPU whatever else is happening. Wall clock is what moved —
+the same subprocess took ~19s uncontended and 29–38s with a load average around
+30 — so a wall-clock test budget expired while the work itself was unchanged.
+That is starvation, not a flaky assertion, which is why the remedy is to stop
+co-scheduling the suite rather than to widen the budget until the starvation
+stops being visible. The suite's fixture wait now lives in a `beforeAll` sized
+to that measurement, so a slow lint runner reports as a slow lint runner
+instead of as a policy assertion failure in whichever test happened to reach it
+first.
+
+Add to the exclusive set only with a measurement: every entry is wall time the
+pool can no longer overlap. The exclusive phase runs last precisely so cheap
+lint/typecheck feedback still arrives first.
+
 ### Scoped local test runs (Refs #1413)
 
 A per-package quality bundle normally runs `pnpm --filter <pkg> test:coverage`
@@ -218,10 +273,12 @@ replacement provisioner map to
 also executes that shell fixture in CI.
 
 The [PR operating card](pr-operating-card.md#the-loop) owns ordinary gate and
-closeout sequencing. Do not run a dashboard server, browser suite, or second
-gate in the same worktree. Browser tests and size-limit both run `next build`
-and can rewrite `next-env.d.ts`; run focused checks first, then let one gate
-own the mapped batch. For a non-trivial batch, freeze the card's scope baseline
+closeout sequencing. A second `--run` gate no longer needs a convention: the
+run lock above queues it behind the first one, on any worktree. What is still
+yours to avoid is a dashboard server or browser suite you started yourself
+alongside a gate — the lock does not know about those. Browser tests and
+size-limit both run `next build` and can rewrite `next-env.d.ts`; run focused
+checks first, then let one gate own the mapped batch. For a non-trivial batch, freeze the card's scope baseline
 and run autoreview after the gate; after accepted fixes, rerun focused checks
 and autoreview.
 

@@ -39,6 +39,11 @@ Options:
                  With --run, kill any single mapped command that runs longer
                  than n seconds and report it as a failure. Default: 900. The
                  timeout is per command, never for the whole run.
+  --lock-wait <n>
+                 With --run, wait at most n seconds for another gate run on
+                 this machine to finish before starting. Default: 1800.
+  --no-lock      With --run, skip cross-run mutual exclusion and start even
+                 while another gate run is executing mapped commands.
   -h, --help     Show this help.
 
 Environment:
@@ -55,6 +60,14 @@ Environment:
                       Same behavior as --full-local-tests when set to 1 or true.
   AGENT_QUALITY_COMMAND_TIMEOUT_SECONDS
                       Same behavior as --command-timeout. Default: 900.
+  AGENT_QUALITY_GATE_LOCK
+                      Set to 0 or false for the same effect as --no-lock.
+  AGENT_QUALITY_GATE_LOCK_WAIT_SECONDS
+                      Same behavior as --lock-wait. Default: 1800.
+  AGENT_QUALITY_GATE_LOCK_DIR
+                      Directory holding the cross-run lock. Default:
+                      $HOME/.cache/agent-quality-gate, falling back to
+                      $TMPDIR/agent-quality-gate-<uid>.
 USAGE
 }
 
@@ -68,6 +81,8 @@ skip_if_fresh="${AGENT_QUALITY_SKIP_IF_FRESH:-false}"
 quality_parallelism="${AGENT_QUALITY_PARALLELISM:-auto}"
 full_local_tests="${AGENT_GATE_FULL_TESTS:-false}"
 command_timeout_seconds="${AGENT_QUALITY_COMMAND_TIMEOUT_SECONDS:-900}"
+gate_lock_enabled="${AGENT_QUALITY_GATE_LOCK:-1}"
+gate_lock_wait_seconds="${AGENT_QUALITY_GATE_LOCK_WAIT_SECONDS:-1800}"
 if [[ -z "$allow_package_script_changes" ]]; then
   allow_package_script_changes="$(git config --bool --get agent.qualityGate.allowPackageScriptChanges 2>/dev/null || true)"
 fi
@@ -134,6 +149,18 @@ while [[ $# -gt 0 ]]; do
       fi
       shift 2
       ;;
+    --lock-wait)
+      gate_lock_wait_seconds="${2:-}"
+      if [[ -z "$gate_lock_wait_seconds" ]]; then
+        echo "error: --lock-wait requires a non-negative integer" >&2
+        exit 2
+      fi
+      shift 2
+      ;;
+    --no-lock)
+      gate_lock_enabled="0"
+      shift
+      ;;
     --parallel|--jobs)
       quality_parallelism="${2:-}"
       if [[ -z "$quality_parallelism" ]]; then
@@ -181,6 +208,11 @@ fi
 
 if [[ ! "$command_timeout_seconds" =~ ^[0-9]+$ || "$command_timeout_seconds" -lt 1 ]]; then
   echo "error: --command-timeout requires a positive integer" >&2
+  exit 2
+fi
+
+if [[ ! "$gate_lock_wait_seconds" =~ ^[0-9]+$ ]]; then
+  echo "error: --lock-wait requires a non-negative integer" >&2
   exit 2
 fi
 
@@ -387,11 +419,178 @@ teardown_active_timeouts() {
   done
 }
 
+# ---------------------------------------------------------------------------
+# Cross-run mutual exclusion (GitHub issue #1802).
+#
+# Two gate runs on one machine oversubscribe it, and that is the normal case
+# here: several agents share this host, and the pre-push hook starts a run of
+# its own while a manual warm-up run is still going. The suites that lost were
+# the ones holding a wall-clock budget (ui-dashboard's browser-api-policy lint
+# runner) or a bound port, but the contention itself is machine-wide, so the
+# remedy is machine-wide: only one `--run` gate executes mapped commands at a
+# time. The intra-run half of the same problem is the exclusive phase in
+# run_quality_phase; a lock alone cannot help a suite starved inside ONE run.
+#
+# mkdir(2) is the primitive: it is atomic, flock(1) does not exist on macOS,
+# and the repo's floor is Bash 3.2. A killed holder cannot clean up after
+# itself, so recovery is explicit rather than time-based — the owner file names
+# the holder's PID and a waiter that finds it dead moves the lock aside.
+# ---------------------------------------------------------------------------
+gate_lock_dir=""
+gate_lock_token=""
+# A lock directory whose owner file never appeared belongs to a run killed
+# between mkdir and the write. Wait this long before treating it as abandoned,
+# so a live holder that is merely mid-write is not evicted.
+gate_lock_owner_grace_seconds=30
+gate_lock_poll_seconds=5
+
+resolve_gate_lock_root() {
+  local candidates=()
+  local candidate
+  [[ -n "${AGENT_QUALITY_GATE_LOCK_DIR:-}" ]] &&
+    candidates+=("$AGENT_QUALITY_GATE_LOCK_DIR")
+  [[ -n "${HOME:-}" ]] && candidates+=("$HOME/.cache/agent-quality-gate")
+  # Both fallbacks are per-user, which is what makes the PID liveness probe
+  # below sound: `kill -0` cannot distinguish another user's live process from
+  # a dead one, so the lock must never be shared across users.
+  candidates+=("${TMPDIR:-/tmp}/agent-quality-gate-$(id -u)")
+  for candidate in "${candidates[@]}"; do
+    if mkdir -p "$candidate" 2>/dev/null && [[ -w "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+gate_lock_owner_field() {
+  local lock_dir="$1"
+  local field="$2"
+  [[ -r "$lock_dir/owner" ]] || return 0
+  sed -n "s/^${field}=//p" "$lock_dir/owner" 2>/dev/null | head -n1
+}
+
+release_gate_run_lock() {
+  local recorded
+  [[ -n "$gate_lock_dir" ]] || return 0
+  recorded="$(gate_lock_owner_field "$gate_lock_dir" token)"
+  # Our lock may have been reclaimed as stale and re-taken by another run while
+  # this one was stopped (SIGSTOP, a long swap). Deleting by path would then
+  # delete somebody else's lock, so release only what still names us.
+  if [[ "$recorded" == "$gate_lock_token" ]]; then
+    rm -rf "$gate_lock_dir"
+  fi
+  gate_lock_dir=""
+}
+
+acquire_gate_run_lock() {
+  local root lock owner_pid owner_host owner_worktree stale_reason
+  local waited=0
+  local announced=0
+  local reclaims=0
+  local ownerless_since=""
+  local this_host
+  case "$gate_lock_enabled" in
+    0|false|no) return 0 ;;
+  esac
+  if [[ -n "${AGENT_QUALITY_GATE_LOCK_HELD:-}" ]]; then
+    # A gate running inside a gate — the self-test drives the gate against
+    # fixture repos — already holds this machine's lock through its parent.
+    # Waiting for our own ancestor would deadlock.
+    return 0
+  fi
+  if ! root="$(resolve_gate_lock_root)"; then
+    echo "warning: no writable lock directory; running without cross-run exclusion." >&2
+    return 0
+  fi
+  lock="$root/run.lock"
+  this_host="$(uname -n)"
+
+  while :; do
+    if mkdir "$lock" 2>/dev/null; then
+      gate_lock_dir="$lock"
+      gate_lock_token="${this_host}-$$-$(date +%s)"
+      {
+        printf 'pid=%s\n' "$$"
+        printf 'host=%s\n' "$this_host"
+        printf 'started_at=%s\n' "$(date +%s)"
+        printf 'worktree=%s\n' "$repo_root"
+        printf 'token=%s\n' "$gate_lock_token"
+      } > "$lock/owner"
+      export AGENT_QUALITY_GATE_LOCK_HELD="$gate_lock_token"
+      if [[ "$announced" -eq 1 ]]; then
+        echo "Acquired the gate run lock after ${waited}s."
+        echo
+      fi
+      return 0
+    fi
+
+    owner_pid="$(gate_lock_owner_field "$lock" pid)"
+    owner_host="$(gate_lock_owner_field "$lock" host)"
+    owner_worktree="$(gate_lock_owner_field "$lock" worktree)"
+    stale_reason=""
+    [[ -n "$owner_pid" ]] && ownerless_since=""
+    if [[ -z "$owner_pid" ]]; then
+      # Timed from our own first sighting rather than a filesystem timestamp:
+      # the holder is exactly the process that has not written its owner file
+      # yet, so there is nothing of its to read.
+      [[ -n "$ownerless_since" ]] || ownerless_since="$(date +%s)"
+      if [[ $(($(date +%s) - ownerless_since)) -ge "$gate_lock_owner_grace_seconds" ]]; then
+        stale_reason="its holder never recorded a PID"
+      fi
+    elif [[ -n "$owner_host" && "$owner_host" != "$this_host" ]]; then
+      # Only reachable if the lock root is on shared storage. Another host's
+      # PIDs mean nothing here, so wait it out rather than guess.
+      :
+    elif ! kill -0 "$owner_pid" 2>/dev/null; then
+      stale_reason="holder pid ${owner_pid} is gone"
+    fi
+
+    if [[ -n "$stale_reason" ]]; then
+      reclaims=$((reclaims + 1))
+      if [[ "$reclaims" -gt 5 ]]; then
+        echo "error: gate run lock at ${lock} could not be reclaimed after ${reclaims} attempts." >&2
+        exit 2
+      fi
+      echo "Gate run lock at ${lock} is stale (${stale_reason}); reclaiming it." >&2
+      # Rename-then-delete so two waiters cannot both delete: whoever wins the
+      # mv owns the removal, and the loser's next mkdir simply succeeds or
+      # observes the new holder.
+      if mv "$lock" "${lock}.stale.$$" 2>/dev/null; then
+        rm -rf "${lock}.stale.$$"
+      fi
+      continue
+    fi
+
+    if [[ "$announced" -eq 0 ]]; then
+      echo
+      echo "Waiting for the agent quality gate run lock: ${lock}"
+      echo "  held by pid ${owner_pid:-unknown} on ${owner_host:-unknown} in ${owner_worktree:-unknown}"
+      echo "  one gate run executes mapped commands at a time so runs cannot starve each other (GitHub issue #1802)."
+      echo "  waiting up to ${gate_lock_wait_seconds}s; interrupt to abort, or re-run with --no-lock."
+      announced=1
+    elif [[ $((waited % 30)) -eq 0 ]]; then
+      echo "  … still waiting after ${waited}s (holder pid ${owner_pid:-unknown})."
+    fi
+
+    if [[ "$waited" -ge "$gate_lock_wait_seconds" ]]; then
+      echo "error: timed out after ${waited}s waiting for the gate run lock at ${lock}." >&2
+      echo "Holder pid ${owner_pid:-unknown} is still alive. Wait for it to finish, or re-run with --no-lock to accept the contention." >&2
+      exit 2
+    fi
+    sleep "$gate_lock_poll_seconds"
+    waited=$((waited + gate_lock_poll_seconds))
+  done
+}
+
 cleanup_tmpfiles() {
   teardown_active_timeouts
   if [[ ${#tmpfiles[@]} -gt 0 ]]; then
     rm -f "${tmpfiles[@]+"${tmpfiles[@]}"}"
   fi
+  # Released last: the lock must outlive worker teardown, or the next run
+  # starts while this one's mapped commands are still dying.
+  release_gate_run_lock
 }
 trap cleanup_tmpfiles EXIT
 
@@ -3037,6 +3236,22 @@ if [[ "$package_script_risk_changed" == true && "$allow_package_script_changes" 
   exit 2
 fi
 
+# Take the machine's run lock only once this run is definitely going to execute
+# something: a dry run, a fresh-stamp skip, and a package-script refusal all
+# exit above without ever competing for the machine.
+acquire_gate_run_lock
+
+# Re-check freshness after the wait. The run we queued behind may have stamped
+# this exact fingerprint while we waited — the pre-push hook queued behind the
+# manual warm-up run is precisely that case — and re-running its work would
+# throw away the reason the hook passes --skip-if-fresh at all.
+if [[ "$skip_if_fresh" == "1" || "$skip_if_fresh" == "true" ]]; then
+  if is_fresh_success_stamp; then
+    echo "A concurrent agent quality gate run left a fresh success stamp; skipping mapped commands."
+    exit 0
+  fi
+fi
+
 failures=0
 command_summaries=()
 
@@ -3577,6 +3792,34 @@ is_quality_serial_command() {
   return 1
 }
 
+is_quality_exclusive_command() {
+  local command="$1"
+  # Suites that must not share the worker pool with anything (GitHub issue
+  # #1802). The dashboard's Vitest suite forks its own workers across every
+  # core AND spawns `scripts/browser-api-policy-lint-runner.mjs`, an ESLint
+  # program load that costs ~17s of CPU and is bounded by a wall-clock test
+  # timeout. Running it beside three other pool members turns that fixed CPU
+  # cost into a wall time that outruns its budget: measured on a 12-core mac,
+  # the runner takes ~19s uncontended and 29-38s while the machine carries a
+  # load average around 30. The failure is a genuine starvation, not a flaky
+  # assertion, so the fix is to stop co-scheduling it rather than to widen the
+  # budget until the starvation is invisible.
+  #
+  # These run in their own phase AFTER the pool drains, so cheap lint/typecheck
+  # feedback still arrives first. Add a command here only with a measurement:
+  # every entry is wall time the pool can no longer overlap.
+  case "$command" in
+    "pnpm --filter @mento-protocol/ui-dashboard test:coverage")
+      return 0
+      ;;
+    "pnpm --filter @mento-protocol/ui-dashboard exec vitest related --run "*)
+      return 0
+      ;;
+  esac
+
+  return 1
+}
+
 run_mapped_entries_sequential() {
   local entry
   local command
@@ -3841,6 +4084,7 @@ run_quality_phase() {
   local rest_entries=()
   local serial_entries=()
   local parallel_entries=()
+  local exclusive_entries=()
   local entry
   local command
 
@@ -3865,6 +4109,8 @@ run_quality_phase() {
     rest_entries+=("$entry")
     if is_quality_serial_command "$command"; then
       serial_entries+=("$entry")
+    elif is_quality_exclusive_command "$command"; then
+      exclusive_entries+=("$entry")
     else
       parallel_entries+=("$entry")
     fi
@@ -3879,6 +4125,12 @@ run_quality_phase() {
 
   run_mapped_entries_sequential "quality serialized" "${serial_entries[@]+"${serial_entries[@]}"}"
   run_mapped_entries_parallel "quality" "$quality_parallelism" "${parallel_entries[@]+"${parallel_entries[@]}"}"
+
+  if [[ "${#exclusive_entries[@]}" -gt 0 ]]; then
+    echo
+    echo "Running ${#exclusive_entries[@]} quality command(s) exclusively; the parallel pool has drained."
+    run_mapped_entries_sequential "quality exclusive" "${exclusive_entries[@]}"
+  fi
 }
 
 # Drop per-command stamps that don't match this run's fingerprint (any changed

@@ -17,6 +17,12 @@ trap 'echo "agent-quality-gate test suite aborted: line $LINENO: $BASH_COMMAND (
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
+# Every fixture gate run below drives `--run` against a throwaway repo. None of
+# them is the machine's real gate, so none should queue behind one — or make a
+# real one queue behind them (GitHub issue #1802). The lock tests near the end
+# re-enable exclusion explicitly against their own lock directory.
+export AGENT_QUALITY_GATE_LOCK=0
+
 paths_file="$(mktemp)"
 output_file="$(mktemp)"
 gate_cache_dir="$(mktemp -d)"
@@ -4864,5 +4870,121 @@ STUB
     fail "expected the quality command to be reused on the second run"
 )
 rm -rf "$prereq_reuse_repo"
+
+# --- Cross-run mutual exclusion (GitHub issue #1802) -------------------------
+# Two gate runs on one machine starve each other, and the pre-push hook starts
+# one of its own while a manual run is still going, so `--run` takes a
+# machine-wide mkdir lock. What has to hold: a live holder makes the second run
+# wait rather than race, a holder that was killed never wedges the next run,
+# and both escape hatches (--no-lock, an inherited nested-run marker) still
+# start immediately.
+gate_lock_repo="$(mktemp -d)"
+gate_lock_root="$(mktemp -d)"
+(
+  cd "$gate_lock_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  printf 'fixture\n' > fixture.txt
+  mkdir -p tools
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  chmod +x tools/trunk
+  git add .
+  git commit -qm init
+  printf 'changed\n' >> fixture.txt
+
+  run_locked_gate() {
+    # AGENT_QUALITY_GATE_LOCK_HELD is cleared deliberately: when this suite runs
+    # as a mapped command of a real gate it inherits the outer run's marker,
+    # and every contention assertion below would pass vacuously through the
+    # nested-run escape hatch.
+    set +e
+    AGENT_QUALITY_GATE_LOCK=1 \
+      AGENT_QUALITY_GATE_LOCK_HELD='' \
+      AGENT_QUALITY_GATE_LOCK_DIR="$gate_lock_root" \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+      --base HEAD --run --lock-wait 5 "$@" \
+      > "$output_file" 2>&1
+    local exit_code=$?
+    set -e
+    printf '%s\n' "$exit_code"
+  }
+
+  write_lock_owner() {
+    mkdir -p "$gate_lock_root/run.lock"
+    {
+      printf 'pid=%s\n' "$1"
+      printf 'host=%s\n' "$(uname -n)"
+      printf 'started_at=%s\n' "$(date +%s)"
+      printf 'worktree=%s\n' "$gate_lock_repo"
+      printf 'token=fixture-holder\n'
+    } > "$gate_lock_root/run.lock/owner"
+  }
+
+  # A live holder: the second run announces who it is waiting for, keeps
+  # waiting, and gives up with a bounded, actionable failure instead of hanging.
+  sleep 120 &
+  live_holder_pid=$!
+  write_lock_owner "$live_holder_pid"
+  lock_exit="$(run_locked_gate)"
+  kill "$live_holder_pid" 2>/dev/null || true
+  [[ "$lock_exit" == "2" ]] ||
+    fail "expected a contended gate run to exit 2 after --lock-wait, got $lock_exit"
+  assert_contains "Waiting for the agent quality gate run lock"
+  assert_contains "held by pid ${live_holder_pid}"
+  assert_contains "timed out after"
+  [[ -d "$gate_lock_root/run.lock" ]] ||
+    fail "a run that never acquired the lock must not delete the holder's lock"
+
+  # An inherited nested-run marker (the gate's own self-test runs the gate)
+  # starts immediately instead of deadlocking behind its own ancestor.
+  sleep 120 &
+  nested_holder_pid=$!
+  write_lock_owner "$nested_holder_pid"
+  set +e
+  AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD=outer-run \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_lock_root" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 5 \
+    > "$output_file" 2>&1
+  nested_exit=$?
+  set -e
+  kill "$nested_holder_pid" 2>/dev/null || true
+  [[ "$nested_exit" == "0" ]] ||
+    fail "expected a nested gate run to ignore the lock, got $nested_exit"
+  assert_not_contains "Waiting for the agent quality gate run lock"
+
+  # --no-lock is the documented escape hatch: it starts despite a live holder
+  # and leaves that holder's lock alone.
+  sleep 120 &
+  bypass_holder_pid=$!
+  write_lock_owner "$bypass_holder_pid"
+  bypass_exit="$(run_locked_gate --no-lock)"
+  kill "$bypass_holder_pid" 2>/dev/null || true
+  [[ "$bypass_exit" == "0" ]] ||
+    fail "expected --no-lock to run despite a live holder, got $bypass_exit"
+  assert_not_contains "Waiting for the agent quality gate run lock"
+  [[ -d "$gate_lock_root/run.lock" ]] ||
+    fail "--no-lock must not delete another run's lock"
+
+  # A killed holder (SIGKILL leaves the directory behind, EXIT trap and all)
+  # must never wedge the next run: it reclaims the lock unattended, then
+  # releases its own on the way out.
+  sleep 0 &
+  dead_holder_pid=$!
+  wait "$dead_holder_pid" 2>/dev/null || true
+  write_lock_owner "$dead_holder_pid"
+  stale_exit="$(run_locked_gate)"
+  [[ "$stale_exit" == "0" ]] ||
+    fail "expected a stale lock to be reclaimed without manual cleanup, got $stale_exit"
+  assert_contains "is stale (holder pid ${dead_holder_pid} is gone); reclaiming it."
+  [[ ! -d "$gate_lock_root/run.lock" ]] ||
+    fail "a successful run must release the lock it acquired"
+)
+rm -rf "$gate_lock_repo" "$gate_lock_root"
 
 echo "agent quality gate tests passed"

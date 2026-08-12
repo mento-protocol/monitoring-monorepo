@@ -3,7 +3,7 @@ title: PR Operating Card
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-10
+last_verified: 2026-08-12
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -63,9 +63,10 @@ authority.
    package-manager, or lockfile changes until their lifecycle risk is reviewed
    and explicitly acknowledged** — do not bypass the refusal; review the surface
    and pass `--allow-package-script-changes`. Do not run a competing dashboard
-   server, browser suite, or second gate in the same worktree. Background the
-   `--run` gate and the `git push`; a 600s foreground kill discards the freshness
-   stamp. Authority:
+   server or browser suite alongside the gate; a second `--run` gate is handled
+   for you — it takes a machine-wide lock and queues behind the first, naming
+   the holder while it waits. Background the `--run` gate and the `git push`; a
+   600s foreground kill discards the freshness stamp. Authority:
    [`agent-quality-gate-mechanics.md`](agent-quality-gate-mechanics.md).
 
 4. **Autoreview.** Freeze the scope baseline first — the initial request,
@@ -175,8 +176,9 @@ These bind regardless of which step you are on:
 - **Package-script, package-manager, and lockfile changes require explicit
   acknowledgement** through the gate; never bypass the refusal.
 - **Background long `--run` gates and pushes**; do not run them in a 600s
-  foreground that a kill would truncate, and do not start a second gate or
-  dashboard suite in the same worktree.
+  foreground that a kill would truncate, and do not start a dashboard server or
+  browser suite alongside a gate. A second `--run` gate queues on the gate's own
+  machine-wide lock instead of racing.
 - **Secrets are IaC-owned and Terraform apply needs human approval** — plan
   first, never one-off `gh secret set` / `vercel env add` /
   `gcloud secrets versions add`.

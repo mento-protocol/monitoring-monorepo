@@ -3,7 +3,7 @@ import { execFile } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import browserApiPolicy from "../../../browser-api-policy.json";
 
 const DASHBOARD_ROOT_URL = new URL("../../../", import.meta.url);
@@ -15,7 +15,19 @@ const OG_FIXTURE_PATH = "src/lib/homepage-og.ts";
 const TEST_FIXTURE_PATH = "src/lib/__tests__/browser-api-policy.test.ts";
 const SYMBOL_AWARE_RULE_ID =
   "browser-api-policy/no-unsupported-receiver-property";
-const LINT_RUNNER_TIMEOUT_MS = 30_000;
+// One ESLint program load lints every fixture below, in a subprocess shared by
+// the whole file. Its cost is CPU-bound and near-constant (~17s of user time on
+// a 12-core mac); what varies is how much of a core it gets. Measured while the
+// machine carried a load average around 30 — the normal state of a host several
+// agents share — the same subprocess took 29-38s of wall clock, so the old
+// per-test 30s budget failed for reasons that had nothing to do with the
+// policy under test (GitHub issue #1802). The gate now runs this suite in its
+// own exclusive phase; this budget covers the machine ALSO being busy with work
+// the gate does not schedule, while still failing a runner that hangs.
+const LINT_RUNNER_TIMEOUT_MS = 120_000;
+// In-process `calculateConfigForFile` on a cold ESLint cache: measured ~3.8s
+// under the same load, milliseconds once warm.
+const CONFIG_LOOKUP_TIMEOUT_MS = 30_000;
 const execFileAsync = promisify(execFile);
 const eslint = new ESLint({
   cwd: fileURLToPath(DASHBOARD_ROOT_URL),
@@ -67,11 +79,21 @@ async function browserApiRules(filePath: string) {
   };
 }
 
+let lintResults: Record<LintCase, BrowserApiMessage[]>;
+
 async function browserApiMessages(lintCase: LintCase) {
-  return (await lintResultsPromise)[lintCase];
+  return lintResults[lintCase];
 }
 
 describe("browser runtime API policy", () => {
+  // The lint runner is a fixture, not one test's work. Awaiting it inside
+  // whichever test happened to reach it first charged that test's timeout for a
+  // subprocess shared by six of them, and reported a starved machine as a
+  // policy assertion failure. Waiting here names the real thing that was slow.
+  beforeAll(async () => {
+    lintResults = await lintResultsPromise;
+  }, LINT_RUNNER_TIMEOUT_MS);
+
   it("pins the Next.js 16 browser floor", () => {
     const packageJson = JSON.parse(
       readFileSync(new URL("package.json", DASHBOARD_ROOT_URL), "utf8"),
@@ -91,25 +113,21 @@ describe("browser runtime API policy", () => {
     expect(rules.property).toBeUndefined();
   });
 
-  it(
-    "reports every blocked API with its intended rule and message",
-    async () => {
-      const messages = await browserApiMessages("blocked");
+  it("reports every blocked API with its intended rule and message", async () => {
+    const messages = await browserApiMessages("blocked");
 
-      expect(messages).toHaveLength(browserApiPolicy.restrictions.length);
-      for (const restriction of browserApiPolicy.restrictions) {
-        expect(messages).toEqual(
-          expect.arrayContaining([
-            expect.objectContaining({
-              ruleId: SYMBOL_AWARE_RULE_ID,
-              message: expect.stringContaining(restriction.message),
-            }),
-          ]),
-        );
-      }
-    },
-    LINT_RUNNER_TIMEOUT_MS,
-  );
+    expect(messages).toHaveLength(browserApiPolicy.restrictions.length);
+    for (const restriction of browserApiPolicy.restrictions) {
+      expect(messages).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            ruleId: SYMBOL_AWARE_RULE_ID,
+            message: expect.stringContaining(restriction.message),
+          }),
+        ]),
+      );
+    }
+  });
 
   it(
     "applies the policy to browser dependencies at the package root",
@@ -118,104 +136,88 @@ describe("browser runtime API policy", () => {
 
       expect(rules.symbolAware).toEqual([2, browserApiPolicy.restrictions]);
     },
-    LINT_RUNNER_TIMEOUT_MS,
+    CONFIG_LOOKUP_TIMEOUT_MS,
   );
 
-  it(
-    "reports unsupported change-by-copy methods on typed arrays",
-    async () => {
-      const messages = await browserApiMessages("typedArrayBlocked");
-      const properties = new Set(["toSorted", "toReversed", "with"]);
-      const restrictions = browserApiPolicy.restrictions.filter(
-        (restriction) =>
-          "receiver" in restriction && properties.has(restriction.property),
+  it("reports unsupported change-by-copy methods on typed arrays", async () => {
+    const messages = await browserApiMessages("typedArrayBlocked");
+    const properties = new Set(["toSorted", "toReversed", "with"]);
+    const restrictions = browserApiPolicy.restrictions.filter(
+      (restriction) =>
+        "receiver" in restriction && properties.has(restriction.property),
+    );
+
+    expect(messages).toHaveLength(restrictions.length);
+    for (const restriction of restrictions) {
+      expect(messages).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            ruleId: SYMBOL_AWARE_RULE_ID,
+            message: expect.stringContaining(restriction.message),
+          }),
+        ]),
       );
+    }
+  });
 
-      expect(messages).toHaveLength(restrictions.length);
-      for (const restriction of restrictions) {
-        expect(messages).toEqual(
-          expect.arrayContaining([
-            expect.objectContaining({
-              ruleId: SYMBOL_AWARE_RULE_ID,
-              message: expect.stringContaining(restriction.message),
-            }),
-          ]),
-        );
-      }
-    },
-    LINT_RUNNER_TIMEOUT_MS,
-  );
+  it("reports blocked methods extracted through destructuring", async () => {
+    const messages = await browserApiMessages("destructuredBlocked");
+    const properties = new Set(["toSorted", "toReversed", "isWellFormed"]);
+    const restrictions = browserApiPolicy.restrictions.filter(
+      (restriction) =>
+        "receiver" in restriction && properties.has(restriction.property),
+    );
 
-  it(
-    "reports blocked methods extracted through destructuring",
-    async () => {
-      const messages = await browserApiMessages("destructuredBlocked");
-      const properties = new Set(["toSorted", "toReversed", "isWellFormed"]);
-      const restrictions = browserApiPolicy.restrictions.filter(
-        (restriction) =>
-          "receiver" in restriction && properties.has(restriction.property),
+    expect(messages).toHaveLength(restrictions.length);
+    for (const restriction of restrictions) {
+      expect(messages).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            ruleId: SYMBOL_AWARE_RULE_ID,
+            message: expect.stringContaining(restriction.message),
+          }),
+        ]),
       );
+    }
+  });
 
-      expect(messages).toHaveLength(restrictions.length);
-      for (const restriction of restrictions) {
-        expect(messages).toEqual(
-          expect.arrayContaining([
-            expect.objectContaining({
-              ruleId: SYMBOL_AWARE_RULE_ID,
-              message: expect.stringContaining(restriction.message),
-            }),
-          ]),
-        );
-      }
-    },
-    LINT_RUNNER_TIMEOUT_MS,
-  );
+  it("reports blocked APIs through statically known computed keys", async () => {
+    const messages = await browserApiMessages("computedBlocked");
+    const exercisedProperties = new Set([
+      "toSorted",
+      "toReversed",
+      "toSpliced",
+      "groupBy",
+      "toWellFormed",
+    ]);
 
-  it(
-    "reports blocked APIs through statically known computed keys",
-    async () => {
-      const messages = await browserApiMessages("computedBlocked");
-      const exercisedProperties = new Set([
-        "toSorted",
-        "toReversed",
-        "toSpliced",
-        "groupBy",
-        "toWellFormed",
-      ]);
+    expect(messages).toHaveLength(7);
+    for (const restriction of browserApiPolicy.restrictions) {
+      if (!exercisedProperties.has(restriction.property)) continue;
+      expect(
+        messages.filter((message) => message.message === restriction.message),
+      ).toHaveLength(restriction.property === "toSorted" ? 2 : 1);
+    }
+  });
 
-      expect(messages).toHaveLength(7);
-      for (const restriction of browserApiPolicy.restrictions) {
-        if (!exercisedProperties.has(restriction.property)) continue;
-        expect(
-          messages.filter((message) => message.message === restriction.message),
-        ).toHaveLength(restriction.property === "toSorted" ? 2 : 1);
-      }
-    },
-    LINT_RUNNER_TIMEOUT_MS,
-  );
+  it("reports static built-ins through direct, aliased, qualified, and destructured access", async () => {
+    const messages = await browserApiMessages("staticBlocked");
+    const restrictions = browserApiPolicy.restrictions.filter(
+      (restriction) => "object" in restriction,
+    );
 
-  it(
-    "reports static built-ins through direct, aliased, qualified, and destructured access",
-    async () => {
-      const messages = await browserApiMessages("staticBlocked");
-      const restrictions = browserApiPolicy.restrictions.filter(
-        (restriction) => "object" in restriction,
+    expect(messages).toHaveLength(restrictions.length * 4);
+    for (const restriction of restrictions) {
+      expect(
+        messages.filter((message) => message.message === restriction.message),
+      ).toHaveLength(4);
+      expect(messages).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ ruleId: SYMBOL_AWARE_RULE_ID }),
+        ]),
       );
-
-      expect(messages).toHaveLength(restrictions.length * 4);
-      for (const restriction of restrictions) {
-        expect(
-          messages.filter((message) => message.message === restriction.message),
-        ).toHaveLength(4);
-        expect(messages).toEqual(
-          expect.arrayContaining([
-            expect.objectContaining({ ruleId: SYMBOL_AWARE_RULE_ID }),
-          ]),
-        );
-      }
-    },
-    LINT_RUNNER_TIMEOUT_MS,
-  );
+    }
+  });
 
   it("allows shadowed and custom static groupBy methods", async () => {
     const messages = await browserApiMessages("staticAllowed");
