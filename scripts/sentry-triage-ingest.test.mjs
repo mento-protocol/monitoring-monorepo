@@ -3168,6 +3168,10 @@ await test("an escalated archived issue reaches a reopen decision", async () => 
   const entry = merged.get("900");
   assert(entry, "the escalated issue must be in the merged set at all");
   assertEqual(entry.isRegressed, true);
+  // Asserted through the PRODUCTION fetch path, not a hand-built merge. An
+  // earlier revision wired the cause only into the direct-reopen tests, so the
+  // fetch path silently kept collapsing both sets and nothing failed.
+  assertEqual(entry.reopenCause, ESCALATING_REOPEN_CAUSE);
 
   // And it must survive the archive freshness gate: events after the recorded
   // baseline are what the reopen exists for.
@@ -3211,7 +3215,7 @@ await test("an escalation-only reopen is not audited as a regression", async () 
   const fence = posted.find((b) => b.includes("Regressed in Sentry"));
   assert(fence, "the machine-read fence line must still be posted verbatim");
   assert(
-    fence.includes("escalated this issue out of"),
+    fence.includes("escalating, not regressed"),
     "an escalation must say so beneath the fence, not read as a regression",
   );
 });
@@ -3234,7 +3238,7 @@ await test("a regressed reopen carries no escalation prose", async () => {
   const fence = posted.find((b) => b.includes("Regressed in Sentry"));
   assert(fence, "expected the fence");
   assert(
-    !fence.includes("escalated this issue out of"),
+    !fence.includes("escalating, not regressed"),
     "a genuine regression must not claim it was an escalation",
   );
 });

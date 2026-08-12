@@ -2,8 +2,8 @@
 /**
  * Stage A of the Sentry triage pipeline (ADR 0036,
  * docs/adr/0036-sentry-triage-pipeline.md): a deterministic, no-LLM ingest
- * that turns every new or regressed Sentry issue across the `mento-labs` org
- * into exactly one labeled GitHub queue issue in this repo, idempotent by
+ * that turns every new, regressed, or escalating Sentry issue across the
+ * `mento-labs` org into one labeled GitHub queue issue, idempotent by
  * Sentry short ID. Read-only against Sentry (GET only) — never resolves,
  * archives, assigns, or otherwise mutates a Sentry issue.
  *
@@ -568,12 +568,20 @@ export async function defaultFetchMergedSentryIssues(options) {
     fetchAllSentryIssues({ ...common, query: REGRESSED_ISSUES_QUERY }),
     fetchAllSentryIssues({ ...common, query: ESCALATING_ISSUES_QUERY }),
   ]);
-  // Both regressed and escalating are "Sentry says this is live again", which
-  // is the only distinction `decideDedupAction` draws.
-  return mergeSentryIssues(newIssues, [
-    ...regressedIssues,
-    ...escalatingIssues,
-  ]);
+  // Merged in two passes, not one concatenation: a single call would apply the
+  // default cause to both sets and an escalation-only reopen would be audited
+  // as a regression again. Regressed merges first, so an issue returned by BOTH
+  // queries keeps the stronger claim.
+  const withRegressed = mergeSentryIssues(
+    newIssues,
+    regressedIssues,
+    REOPEN_CAUSE_REGRESSED,
+  );
+  return mergeSentryIssues(
+    [...withRegressed.values()],
+    escalatingIssues,
+    REOPEN_CAUSE_ESCALATING,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -926,9 +934,7 @@ export async function reopenQueueIssue(
       // the one distinction an operator reading this stub needs (#1765).
       fenceProse:
         sentryIssue.reopenCause === REOPEN_CAUSE_ESCALATING
-          ? [
-              "Sentry escalated this issue out of `archived_until_escalating` — it was not a regression.",
-            ]
+          ? ["Sentry marked this issue as escalating, not regressed."]
           : null,
     },
   );

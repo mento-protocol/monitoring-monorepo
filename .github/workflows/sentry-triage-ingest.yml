@@ -2,7 +2,7 @@ name: Sentry Triage Ingest
 
 # Stage A of the Sentry triage pipeline (ADR 0036,
 # docs/adr/0036-sentry-triage-pipeline.md): a deterministic, no-LLM ingest that
-# turns every new/regressed Sentry issue across the `mento-labs` org (6
+# turns every new/regressed/escalating Sentry issue across the `mento-labs` org (6
 # projects, 4 repos) into exactly one labeled GitHub queue issue in this repo,
 # idempotent by Sentry short ID. Read-only against Sentry — GET only, never
 # resolves/archives/assigns.
