@@ -3,7 +3,7 @@ title: An unconditional gate job runs the Sentry suites and proves from their ou
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-11
+last_verified: 2026-08-12
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -28,9 +28,10 @@ and both are structural rather than fixable by more static analysis.
 composite `action.yml` files. It never opens the content of a script a step
 invokes. A trusted step `run: bash x.sh` whose script appends
 `NODE_OPTIONS=--import=…` to `$GITHUB_ENV` neuters every later suite in the same
-job into a false-green no-op. The vector is live today: the `scripts` job's first
-PR-authored step is `run: bash scripts/check-agent-quality-gate-package-scripts.sh`,
-which executes before all ten suites. Reading invoked-script content is not a
+job into a false-green no-op. The vector was live when this was written: the
+`scripts` job's first PR-authored step was
+`run: bash scripts/check-agent-quality-gate-package-scripts.sh`, which executed
+before all ten suites it then held. Reading invoked-script content is not a
 fix — it false-positives on every legitimate script and regresses infinitely
 through whatever those scripts invoke.
 
@@ -58,19 +59,18 @@ its `allowed-skips` — the treatment `production-infra-contract` already gets.
 
 The job's step list is closed-world and its order is load-bearing:
 
-| #   | Step                                                                                | Why it is where it is                                                                                              | Lands in  |
-| --- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | --------- |
-| 1   | `actions/checkout` (SHA-pinned, `persist-credentials: false`)                       | Upstream, one of exactly two non-PR-authored things trusted before the suites                                      | this PR   |
-| 2   | `actions/setup-node` (SHA-pinned, `node-version-file: .node-version`)               | Same                                                                                                               | this PR   |
-| 3   | `run: /usr/bin/env -u NODE_OPTIONS -u NODE_PATH node scripts/sentry-suite-gate.mjs` | The first and only PR-authored code before the suites; strips both vars, symmetric with the gate's per-child spawn | this PR   |
-| 4   | `uses: ./.github/actions/pnpm-install`                                              | After the suites, so its `postinstall` cannot reach them                                                           | follow-up |
-| 5   | `run: node scripts/check-sentry-suites-in-ci.test.mjs`                              | Needs `js-yaml`; after the suites for the same reason                                                              | follow-up |
+| #   | Step                                                                                | Why it is where it is                                                                                              | Lands in |
+| --- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | -------- |
+| 1   | `actions/checkout` (SHA-pinned, `persist-credentials: false`)                       | Upstream, one of exactly two non-PR-authored things trusted before the suites                                      | this PR  |
+| 2   | `actions/setup-node` (SHA-pinned, `node-version-file: .node-version`)               | Same                                                                                                               | this PR  |
+| 3   | `run: /usr/bin/env -u NODE_OPTIONS -u NODE_PATH node scripts/sentry-suite-gate.mjs` | The first and only PR-authored code before the suites; strips both vars, symmetric with the gate's per-child spawn | this PR  |
+| 4   | `uses: ./.github/actions/pnpm-install`                                              | After the suites, so its `postinstall` cannot reach them                                                           | PR C     |
+| 5   | `run: node scripts/check-sentry-suites-in-ci.test.mjs`                              | Needs `js-yaml`; after the suites for the same reason                                                              | PR C     |
 
-Steps 1-3 are the security-critical core and land here: no PR-authored step runs
-before the gate, so the R1 window is closed. The static checker keeps running in
-the path-gated `scripts` job until the follow-up PR relocates it into steps 4-5
-and removes the now-duplicated suite steps; redundant runs until then break
-nothing that was green.
+Steps 1-3 are the security-critical core: no PR-authored step runs before the
+gate, so the R1 window is closed. Steps 4-5 landed in PR C, which also deleted
+the duplicated suite steps from the `scripts` job and narrowed the checker's
+charter — see "What PR C retired, and why" below.
 
 `scripts/sentry-suite-gate.mjs` is dependency-free, which is what makes step 3
 possible: every `scripts/sentry-*.mjs` imports only `node:` builtins, so running
@@ -107,9 +107,7 @@ route with its importer. Floors use `>=` semantics.
 
 `scripts/sentry-suite-gate.test.mjs` is the runner's own suite, named `sentry-*`
 so `findSentrySuites` enumerates it and the gate runs it — neutering the runner
-now also requires faking its own suite's count and per-case lines. Because it is
-enumerated, the still-in-place `scripts` job gains a direct step invoking it,
-which keeps the #1754 coverage checker green until that checker relocates.
+now also requires faking its own suite's count and per-case lines.
 
 **Each suite runs from its own immutable snapshot of the derived input set, all
 taken before the first child starts.** Without isolation an alphabetically
@@ -303,6 +301,63 @@ The gate cannot detect its own deletion, so the static checker carries that.
 `scripts/check-sentry-suites-in-ci-gate-job.test.mjs` pins the job. Without it
 every check in the repository stayed green with the whole job deleted.
 
+### What PR C retired, and why
+
+This ADR left the checker's narrowing open. PR C decided it per assertion. The
+rule applied: an assertion goes only when the runtime gate makes a strictly
+stronger claim about the same thing, or when its premise no longer exists.
+
+**Retired — "every suite is invoked by the `scripts` job as a direct
+`node <suite>`", with its pnpm-alias and `presentry:*:test` rejection probes.**
+The gate spawns each non-exempt suite itself, as a `node` child under `env -u`,
+from the manifest it reconciles by exact set equality, and asserts exit 0,
+`fail == 0`, `pass >= floor` and `pass ==` per-case lines. No pnpm alias is on
+that path for any non-exempt suite, so neither config-level fail-open the probes
+covered is reachable, and "a step exists" is strictly weaker than "the suite ran
+and asserted".
+
+**Retired — the whole `rootScripts` reachability proof**
+(`requiredPathsMissing`, `REQUIRED_ROOT_SCRIPT_PATHS`, `PROBE_INPUTS`,
+`dropFilterPath`, `globToRegExp` and the four tests over them). It existed only
+because the checker ran behind a paths filter: every file it read had to be
+routed, or an edit to that file skipped the job silently. The job it runs in now
+has no filter and no `if:`. Measured against the real filter with picomatch, the
+old arrangement skipped the checker for dashboard-only, indexer-only and
+non-Markdown doc-asset diffs; Markdown-only diffs did reach it, because the
+filter lists `**/*.md`.
+
+**Retired — "this check itself runs in the ci.yml `scripts` job".** The checker
+step is now inside `CANONICAL_JOB`, asserted by exact equality, which also
+rejects an appended `|| true`, an `if:`, a `working-directory:` and an `env:` on
+that step — none of which the whole-command probe saw.
+
+**Retired — the escaping-symlink rejection.** Its premise was that a suite
+behind a directory symlink the paths filter cannot resolve ships unwired behind
+a skipped job. The gate follows the same link, reconciles what it finds by set
+equality, and runs the suite, from a job that never skips.
+
+**Retired — `scripts` as a trusted job**, and `sentry-suites` deliberately not
+added in its place. `scripts` runs no Sentry code any more. `sentry-suites` is
+pinned key for key by `CANONICAL_JOB`, which rejects every construct
+`jobBlockers` looks for and everything it does not; its only local composite is
+`pnpm-install`, still scanned through `production-infra-contract`.
+
+**Kept.** The gate-job pin, because a runtime gate cannot detect its own
+deletion. The sentinel, trigger and check-run-ownership assertions, because a
+gate whose result never reaches the required `ci` context proves nothing. The
+exemption's CI half — the gate verifies the `via` alias's command, but only the
+checker verifies that an unconditional job runs it. The env-mutation and
+composite scan on `production-infra-contract`, whose install runs before the one
+suite the gate does not. The alias-resolution and local-allowlist invariants and
+the pin-validator ordering, which are outside the gate's world entirely.
+
+**Residual PR C accepts.** The checker now runs after a PR-authored
+`postinstall`. A `$GITHUB_ENV` `NODE_OPTIONS` poison written there silences the
+checker, and the static composite scan cannot report a write that silences its
+own detector. The gate runs before that install and is unaffected, which is the
+whole reason for the ordering: the gate is the security-critical half, the
+checker is the drift net.
+
 **Both pins are allowlists, not blocklists, and that is load-bearing.** The job
 is asserted by exact equality against a canonical structure — the exact set of
 job-level keys, the exact number and order of steps, and per step the exact key
@@ -348,22 +403,21 @@ reshaped several suites.
    `scripts/sentry-triage-project.test.mjs` to the end of the file (reported
    count 110 → 112). Without it the gate's `pass == per-case-line` check reds on
    that suite, so it is a prerequisite of this PR, not part of it.
-1. **This PR (B).** Add the manifest, `scripts/sentry-suite-gate.mjs`, its own
+1. **PR B (merged).** Add the manifest, `scripts/sentry-suite-gate.mjs`, its own
    suite, and the unconditional `sentry-suites` job wired into `ci.needs` and out
    of `allowed-skips`; add a direct step to the `scripts` job invoking the gate's
-   own suite so the #1754 coverage checker stays green. The suites briefly run in
-   both jobs, so a mistake reds nothing that was green. The structural pin on the
+   own suite so the #1754 coverage checker stays green. The suites briefly ran in
+   both jobs, so a mistake could not red anything already green. The pin on the
    gate job ships here too, in the existing checker
    (`check-sentry-suites-in-ci-gate-job.test.mjs`) — deferring it would have left
    a window where deleting the job was green, which is the exact false-green the
    job exists to close. The local quality gate routes the gate for every
    manifest-owned suite, since editing any of them moves that suite's pass count
    against its committed floor.
-2. **PR C.** Delete the suite steps and the checker step from `scripts`;
-   relocate the #1754 checker into the gate job after `pnpm-install` (steps 4-5
-   above) and narrow its charter to the gate's shape; update
-   `docs/notes/agent-quality-gate-mechanics.md`. The gate-job pin moves with the
-   checker rather than being written there.
+2. **This PR (C).** Deletes the suite steps and the checker step from
+   `scripts`; relocates the #1754 checker into the gate job after
+   `pnpm-install` (steps 4-5 above) and narrows its charter to the gate's shape,
+   recorded above.
 3. **PR D.** Gate-probe robustness pass, with the manifest as the single source
    for `sentry:*` alias-to-suite resolution.
 4. **Operator, out of repo.** Add `Sentry suites` to the branch ruleset's

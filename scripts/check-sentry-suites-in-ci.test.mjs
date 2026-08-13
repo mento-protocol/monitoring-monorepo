@@ -1,25 +1,47 @@
 #!/usr/bin/env node
 /**
- * Structural assertion: every Sentry suite is reachable from CI, not only from
- * the local pre-push gate.
+ * Structural assertion: the machinery that runs the Sentry suites in CI is
+ * still wired, and still reaches the merge gate.
  *
  * Issue #1721: eight `sentry:*:test` scripts — roughly 400 assertions — were
- * enforced by the pre-push hook alone. `.github/workflows/ci.yml` invoked none
- * of them, so a contributor who bypassed the hook could merge a regression in
- * the triage or autofix leg against a fully green required check. Wiring the
- * suites fixed that instance. This file stops it recurring: the next suite
- * that lands without a CI step fails here, on the `scripts` job that is
- * already required.
+ * enforced by the pre-push hook alone, so a contributor who bypassed the hook
+ * could merge a regression against a fully green required check. This file was
+ * written to prove from configuration text that CI *would* run them.
+ *
+ * Issue #1779 replaced that claim with a stronger one: the unconditional
+ * `sentry-suites` job RUNS the suites and proves from their own output that
+ * each asserted (ADR 0062). What a runtime gate cannot prove is its own
+ * existence — delete the job and every check in the repository stays green — so
+ * this file now carries the three things the gate cannot see:
+ *
+ *   1. The `sentry-suites` job is intact, unconditional, shaped exactly as
+ *      ADR 0062 requires, and its result reaches the required `ci` context
+ *      (check-sentry-suites-in-ci-gate-job.test.mjs, and the sentinel, trigger
+ *      and check-run-ownership assertions here).
+ *   2. The one suite the gate does not run — sentry-provider-contract, reached
+ *      by import from tf-stacks.test.mjs — really is run by an unconditional
+ *      job, and that job is trustworthy.
+ *   3. The local gate's tooling allowlist in scripts/agent-quality-gate.sh
+ *      lists every `sentry:*` script, and every listed script is pinned to an
+ *      exact command by check-agent-quality-gate-package-scripts.sh. The local
+ *      gate runs the `pnpm sentry:*:test` aliases (developer convenience, with
+ *      the CI gate as the backstop); the allowlist grants that trust and the
+ *      pin is what makes it safe.
+ *
+ * PR C of #1779 relocated this file from the path-gated `scripts` job into
+ * `sentry-suites`, which never skips — a dashboard-only, indexer-only or
+ * non-Markdown doc-asset diff used to skip it entirely, measured against the
+ * real filter — and retired the assertions the runtime gate subsumes: that every
+ * suite has a direct `node <suite>` step, and the whole `rootScripts` filter
+ * reachability proof that only mattered while this ran behind a filter.
  *
  * EVERY assertion reads a parsed structure. Six review rounds against the
  * text-matching version of this file found the same defect in a new place each
- * time — a commented-out step, a commented-out import, a commented-out filter
- * path, an `echo` naming a suite, an `if: false`, a `|| true`. Each is
- * invisible to a parser and each defeated a substring search. So:
+ * time — a commented-out step, a commented-out import, an `echo` naming a
+ * suite, an `if: false`, a `|| true`. Each is invisible to a parser and each
+ * defeated a substring search. So:
  *
  *   ci.yml               js-yaml, then walked as objects
- *   the paths filter     js-yaml again, on the inner YAML document that lives
- *                        inside the filter step's string value
  *   `run:` commands      tokenized against a plain-word grammar and matched
  *                        whole, never by prefix
  *   tf-stacks.test.mjs   V8's own parser (vm.SourceTextModule) reports the
@@ -27,8 +49,7 @@
  *   the gate allowlist   bash evaluates its own `case` statement
  *   the validator pins   the validator reports them itself
  *
- * An unparsable ci.yml throws here, and that is correct: this same job runs
- * scripts/check-autofix-ci-trust.mjs, which already fails closed on one.
+ * An unparsable ci.yml throws here, and that is correct.
  *
  * The predicates live in scripts/check-sentry-suites-in-ci-core.mjs and take
  * the structure they judge as an argument rather than reading a module-level
@@ -38,27 +59,8 @@
  * mutation probes are what prove it rejects. This file owns the file reads, the
  * external-process probes, the repo-specific constants, and every `test()`.
  *
- * Three invariants, each guarding a different way the wiring rots:
- *
- *   1. Every `scripts/sentry-*.test.mjs` is invoked by the `scripts` job as a
- *      DIRECT `node scripts/<file>` command (never a `pnpm <alias>`). The
- *      pnpm-run path carries two config-level fail-opens a parser cannot see —
- *      a `scriptShell: /bin/true` false-greens the alias (Codex 3754704267),
- *      and a `presentry:*:test` lifecycle hook runs before it and can empty the
- *      suite (Codex 3754704278) — so the check rejects the alias form and
- *      requires the direct one. A suite may be exempted only by naming the CI
- *      job that does run it, and the exemption is re-proven below.
- *   2. Every `sentry:*:test` package script resolves to a file this check
- *      enumerates, so a stray alias cannot point at a non-suite file.
- *   3. The local gate's tooling allowlist in scripts/agent-quality-gate.sh
- *      lists every `sentry:*` script, and every listed script is pinned to an
- *      exact command by check-agent-quality-gate-package-scripts.sh. The local
- *      gate still runs the `pnpm sentry:*:test` aliases (developer
- *      convenience, with CI's direct invocation as the backstop); the
- *      allowlist grants that trust and the pin is what makes it safe.
- *
  * Run: `node scripts/check-sentry-suites-in-ci.test.mjs`
- * CI:  .github/workflows/ci.yml  (scripts job)
+ * CI:  .github/workflows/ci.yml  (sentry-suites job)
  */
 
 import assert from "node:assert/strict";
@@ -73,15 +75,11 @@ import {
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import test from "node:test";
-import { CORE_SCHEMA, dump, load } from "js-yaml";
 import {
   contextOwnershipBlockers,
   envMutationBlockers,
-  globToRegExp,
   jobBlockers,
-  nearMisses,
   provenCommands,
-  requiredPathsMissing,
   runsCommand,
   sentinelBlockers,
   triggerBlockers,
@@ -110,10 +108,7 @@ import {
   collectCompositeActions,
   compositeFixture,
   CORE,
-  dropFilterPath,
   findSentrySuites,
-  PROBE_INPUTS,
-  REQUIRED_ROOT_SCRIPT_PATHS,
   ROOT,
   SELF,
   SENTINEL_MUTATIONS,
@@ -264,182 +259,25 @@ test("the trigger check rejects a `pull_request` trigger that can miss main", ()
   }
 });
 
-test("the `scripts` job stays reachable from the paths its suites guard", () => {
-  assert.deepEqual(
-    requiredPathsMissing(
-      CI,
-      "scripts",
-      TRUSTED_JOBS.get("scripts"),
-      REQUIRED_ROOT_SCRIPT_PATHS,
-    ),
-    [],
-    "the paths filter behind the `scripts` job no longer covers every input its " +
-      "suites read, so a PR touching only those files skips the job and every " +
-      "Sentry suite in it",
-  );
-});
-
-test("the reachability check rejects dropping the guard producer from `needs`", () => {
-  // Removing `jobs.scripts.needs: changes` while the `if:
-  // needs.changes.outputs.rootScripts == 'true'` guard stays leaves the
-  // `needs.changes` context empty, so the guard is never true and the job skips
-  // on every PR — and the sentinel lists `scripts` under `allowed-skips`, so
-  // nothing reports it. jobBlockers and sentinelBlockers stay green; only the
-  // needs-edge proof catches it.
-  const workflow = structuredClone(CI);
-  delete workflow.jobs.scripts.needs;
-  assert.notDeepEqual(
-    requiredPathsMissing(
-      workflow,
-      "scripts",
-      TRUSTED_JOBS.get("scripts"),
-      REQUIRED_ROOT_SCRIPT_PATHS,
-    ),
-    [],
-    "the reachability check accepts a `scripts` job that no longer needs `changes`",
-  );
-});
-
-test("the required paths route every file this check reads", () => {
-  // The gap this closes was invisible from either side alone: the check reads
-  // two `.sh` files as probes, the filter routed only `.mjs`, and the `ci`
-  // sentinel lists `scripts` under `allowed-skips` — so a PR editing only the
-  // gate's allowlist or the pin validator skipped the job that would have
-  // caught it, and no check reported a thing.
-  const unrouted = [...PROBE_INPUTS].filter(
-    ([path]) =>
-      !REQUIRED_ROOT_SCRIPT_PATHS.some((glob) => globToRegExp(glob).test(path)),
-  );
-  assert.deepEqual(
-    unrouted.map(([path]) => path),
-    [],
-    "REQUIRED_ROOT_SCRIPT_PATHS does not route " +
-      unrouted.map(([path, reader]) => `${path} (${reader})`).join(", ") +
-      " — an edit to one of those files would skip the `scripts` job, and the " +
-      "`ci` sentinel allows that skip",
-  );
-});
-
-test("the reachability check rejects a filter that drops a required path", () => {
-  // Mutation probes on a cloned workflow. The first is the one that matters:
-  // the gate and the pin validator are `.sh`, so without `scripts/**/*.sh` in
-  // the filter a PR editing only those files skips the `scripts` job — and the
-  // `ci` sentinel allows that skip, so nothing reports it.
-  for (const required of REQUIRED_ROOT_SCRIPT_PATHS) {
-    const workflow = structuredClone(CI);
-    assert.ok(
-      dropFilterPath(workflow, required) > 0,
-      `no paths filter in ci.yml lists \`${required}\`, so this probe would prove nothing`,
-    );
-    assert.deepEqual(
-      requiredPathsMissing(
-        workflow,
-        "scripts",
-        TRUSTED_JOBS.get("scripts"),
-        REQUIRED_ROOT_SCRIPT_PATHS,
-      ),
-      [required],
-      `the reachability check accepts a filter with \`${required}\` removed`,
-    );
-  }
-
-  // The chain itself must fail closed, not just the final list comparison.
-  const chainMutations = [
-    [
-      "a filter step that can be skipped",
-      (w) => {
-        for (const job of Object.values(w.jobs)) {
-          for (const step of job.steps ?? []) {
-            if (String(step.uses ?? "").startsWith("dorny/paths-filter@")) {
-              step.if = "false";
-            }
-          }
-        }
-      },
-    ],
-    [
-      "a filter step passing `base:` alongside `filters:`",
-      (w) => {
-        for (const job of Object.values(w.jobs)) {
-          for (const step of job.steps ?? []) {
-            if (String(step.uses ?? "").startsWith("dorny/paths-filter@")) {
-              step.with.base = "HEAD";
-            }
-          }
-        }
-      },
-    ],
-    [
-      "a negated glob that cancels a required path it still lists",
-      // dorny/paths-filter honours `!` negation, so `!scripts/**` cancels the
-      // required `scripts/**/*.mjs`/`.sh` entries while they stay literally
-      // present — a PR touching only scripts/ then skips the job.
-      (w) => {
-        let added = 0;
-        for (const job of Object.values(w.jobs)) {
-          for (const step of job.steps ?? []) {
-            if (!String(step.uses ?? "").startsWith("dorny/paths-filter@")) {
-              continue;
-            }
-            const filters = load(step.with.filters, { schema: CORE_SCHEMA });
-            if (Array.isArray(filters.rootScripts)) {
-              filters.rootScripts.push("!scripts/**");
-              added += 1;
-            }
-            step.with.filters = dump(filters);
-          }
-        }
-        assert.ok(
-          added > 0,
-          "no `rootScripts` filter to negate — probe is inert",
-        );
-      },
-    ],
-  ];
-  for (const [label, mutate] of chainMutations) {
-    const workflow = structuredClone(CI);
-    mutate(workflow);
-    assert.notDeepEqual(
-      requiredPathsMissing(
-        workflow,
-        "scripts",
-        TRUSTED_JOBS.get("scripts"),
-        REQUIRED_ROOT_SCRIPT_PATHS,
-      ),
-      [],
-      `the reachability check accepts ${label}`,
-    );
-  }
-});
-
-test("this check itself runs in the ci.yml `scripts` job", () => {
-  // Without this, the meta-check could be dropped from CI and every invariant
-  // above would go quiet.
-  const commands = provenCommands(CI, "scripts");
-  assert.ok(
-    runsCommand(commands, ["node", SELF]),
-    `the \`scripts\` job must run \`node ${SELF}\` as a whole step command: ` +
-      `${nearMisses(CI, "scripts", [["node", SELF]]).join("; ") || "no step mentions it"}`,
-  );
-});
-
 test("a step proves a suite only when the suite is its whole command", () => {
-  // provenCommands must reject a step whose body runs more than the target: a
-  // sibling bare-word line can rebind it without being a shell keyword —
-  // `cd <dir>` moves the working directory, `PATH=`/`hash` shadows the binary,
-  // `cp /dev/null <suite>` truncates the suite file before `node` reads it — and
-  // `runsCommand` would otherwise match the direct command sitting among them.
-  // All are shellcheck-clean, so only the exactly-one-command rule catches them.
-  const anchor = "node scripts/sentry-triage-ingest.test.mjs";
+  // `provenCommands` is what proves the exempt suite's route — that
+  // `production-infra-contract` really runs tf-stacks.test.mjs — so it must
+  // reject a step whose body runs more than the target: a sibling bare-word line
+  // can rebind it without being a shell keyword — `cd <dir>` moves the working
+  // directory, `PATH=`/`hash` shadows the binary, `cp /dev/null <file>`
+  // truncates the target before `node` reads it — and `runsCommand` would
+  // otherwise match the command sitting among them. All are shellcheck-clean, so
+  // only the exactly-one-command rule catches them.
+  const anchor = "pnpm tf:test";
   const bodies = [
     `cd ui-dashboard\n${anchor}`,
-    `hash -p /bin/true node\n${anchor}`,
+    `hash -p /bin/true pnpm\n${anchor}`,
     `PATH=/tmp/shim:/usr/bin\n${anchor}`,
-    `cp /dev/null scripts/sentry-triage-ingest.test.mjs\n${anchor}`,
+    `cp /dev/null scripts/tf-stacks.test.mjs\n${anchor}`,
   ];
   for (const body of bodies) {
     const workflow = structuredClone(CI);
-    const step = workflow.jobs.scripts.steps.find(
+    const step = workflow.jobs["production-infra-contract"].steps.find(
       (candidate) => candidate.run === anchor,
     );
     assert.ok(
@@ -448,9 +286,9 @@ test("a step proves a suite only when the suite is its whole command", () => {
     );
     step.run = body;
     assert.equal(
-      runsCommand(provenCommands(workflow, "scripts"), [
-        "node",
-        "scripts/sentry-triage-ingest.test.mjs",
+      runsCommand(provenCommands(workflow, "production-infra-contract"), [
+        "pnpm",
+        "tf:test",
       ]),
       false,
       `provenCommands accepted a step whose body is ${JSON.stringify(body)}`,
@@ -462,8 +300,10 @@ test("a trusted job may not mutate the runner environment for later steps", () =
   // A `>> $GITHUB_ENV` / `>> $GITHUB_PATH` write reaches every later step with
   // the same force as a job-level `env:` — which this file rejects — but
   // imperative and unparsable, so the declarative `env:` checks never see it.
-  // Both trusted jobs, and the local composite actions they pull in, must be
-  // clean today, and the blocker must reject each vector.
+  // The trusted job, and the local composite actions it pulls in, must be clean
+  // today, and the blocker must reject each vector. `production-infra-contract`
+  // installs before it runs the exempt suite, so a write in that composite would
+  // neuter the one suite the runtime gate does not run.
   for (const name of TRUSTED_JOBS.keys()) {
     const job = CI.jobs[name];
     assert.deepEqual(
@@ -500,13 +340,15 @@ test("a trusted job may not mutate the runner environment for later steps", () =
     },
   ];
   for (const vector of vectors) {
-    const workflow = structuredClone(CI);
-    workflow.jobs.scripts.steps.splice(2, 0, vector);
-    assert.notDeepEqual(
-      jobBlockers(workflow, "scripts", TRUSTED_JOBS),
-      [],
-      `jobBlockers accepts a \`scripts\` job with a ${vector.name} step`,
-    );
+    for (const name of TRUSTED_JOBS.keys()) {
+      const workflow = structuredClone(CI);
+      workflow.jobs[name].steps.splice(1, 0, vector);
+      assert.notDeepEqual(
+        jobBlockers(workflow, name, TRUSTED_JOBS),
+        [],
+        `jobBlockers accepts a \`${name}\` job with a ${vector.name} step`,
+      );
+    }
     // The same write inside a composite action must also be caught.
     assert.notDeepEqual(
       envMutationBlockers([vector], "composite"),

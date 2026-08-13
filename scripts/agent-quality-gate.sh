@@ -1573,15 +1573,18 @@ compact_turbo_quality_commands() {
 }
 
 # Directory symlinks under scripts/ expose Sentry suites whose real files live
-# OUTSIDE scripts/. findSentrySuites (in check-sentry-suites-in-ci.test.mjs)
-# follows such a link and enumerates scripts/<link>/sentry-*.test.mjs, but the
-# real file's committed path is the symlink TARGET (e.g. fixtures/sentry-x.test.mjs)
-# — which matches neither scripts/* nor the CI rootScripts filter. Adding a suite
-# under a PREVIOUSLY committed link therefore changes neither the link nor any
-# scripts/** path, so both this gate and the path-gated CI job would skip the
-# coverage check while the check itself would demand that suite (Codex 3754704280).
+# OUTSIDE scripts/. Both enumerators — findSentrySuites in the CI-coverage
+# checker, and the gate's own walker — follow such a link and enumerate
+# scripts/<link>/sentry-*.test.mjs, but the real file's committed path is the
+# symlink TARGET (e.g. fixtures/sentry-x.test.mjs), which matches neither
+# scripts/* nor the CI rootScripts filter. Adding a suite under a PREVIOUSLY
+# committed link therefore changes neither the link nor any scripts/** path, so
+# this gate would skip both checks while the suite ships without the manifest
+# entry the CI gate demands (Codex 3754704280, 3766397748). CI itself is now
+# covered — the `sentry-suites` job is unconditional — so this is about the local
+# gate reporting green on a change only CI would catch.
 # Resolve every existing scripts/ directory symlink to its repo-relative target
-# once, so the per-path loop below can route the check for a change beneath a
+# once, so the per-path loop below can route both checks for a change beneath a
 # target too. Guarded, like the routing that consumes it, so the gate's own unit
 # tests (run against stub fixture repos) are unaffected.
 scripts_symlink_targets=()
@@ -1600,6 +1603,20 @@ if [[ "$script_source_dir" == "$repo_root/scripts" && -d "$repo_root/scripts" ]]
     esac
   done < <(find "$repo_root/scripts" -type l 2>/dev/null || true)
 fi
+
+# The self-run Sentry-suite gate pair (#1779, ADR 0062), scheduled from one
+# place because four verbatim copies of these command strings are four places to
+# drift — `add_command` deduplicates on the exact string, so a copy that falls
+# out of step silently schedules a second, different command instead of failing.
+# Neither command substitutes for the other: the self-test proves the gate's
+# logic against throwaway fixture manifests in a temp dir and never reads the
+# committed one, while only the real gate reconciles that manifest against the
+# real suites. Both carry the CI entry point's `env -u` prefix so a developer
+# with an ambient NODE_OPTIONS can run them at all.
+add_sentry_suite_gate_commands() {
+  add_command "/usr/bin/env -u NODE_OPTIONS -u NODE_PATH node scripts/sentry-suite-gate.test.mjs" "$1"
+  add_command "/usr/bin/env -u NODE_OPTIONS -u NODE_PATH node scripts/sentry-suite-gate.mjs" "$1 (validate the committed manifest against the real suites)"
+}
 
 while IFS= read -r path; do
   case "$path" in
@@ -2386,11 +2403,12 @@ while IFS= read -r path; do
         scripts/sentry-autofix-select.mjs|scripts/sentry-autofix-select.test.mjs)
           add_command "pnpm sentry:autofix:select:test" "Sentry autofix select helper changed"
           ;;
-        scripts/sentry-autofix-queue-io.mjs|scripts/sentry-autofix-family-resolve.mjs)
+        scripts/sentry-autofix-queue-io.mjs|scripts/sentry-autofix-family-resolve.mjs|scripts/sentry-autofix-reverse-verify.mjs)
           # The selection leg's gh I/O layer (openAutofixPrExists / isOwnHeadPr /
-          # the family-collapse reads) and the live-state family resolver
-          # extracted from the selector. Both are exercised by the select suite,
-          # which mocks runGh and drives the full flow end to end.
+          # the family-collapse reads), the live-state family resolver, and the
+          # reverse `in:comments` verification leg — all extracted from the
+          # selector. Each is exercised by the select suite, which mocks runGh and
+          # drives the full flow end to end.
           add_command "pnpm sentry:autofix:select:test" "Sentry autofix selection helper changed"
           ;;
         scripts/sentry-autofix-finalize.mjs|scripts/sentry-autofix-finalize.test.mjs)
@@ -2515,9 +2533,6 @@ while IFS= read -r path; do
         scripts/check-peg-registry-integrity.mjs|scripts/check-peg-registry-integrity.test.mjs)
           add_command "node scripts/check-peg-registry-integrity.mjs" "peg registry integrity checker changed"
           add_command "node scripts/check-peg-registry-integrity.test.mjs" "peg registry integrity checker changed"
-          ;;
-        scripts/europ-operational-admission.mjs|scripts/europ-operational-admission.test.mjs)
-          add_command "node --test scripts/europ-operational-admission.test.mjs" "EUROP operational-admission evaluator changed"
           ;;
         scripts/check-pr-description.mjs|scripts/check-pr-description.test.mjs)
           add_command "node scripts/check-pr-description.test.mjs" "PR description validator changed"
@@ -2647,11 +2662,6 @@ while IFS= read -r path; do
       esac
       ;;
   esac
-  case "$path" in
-    scripts/fixtures/europ-operational-admission/*)
-      add_command "node --test scripts/europ-operational-admission.test.mjs" "EUROP operational-admission evaluator changed"
-      ;;
-  esac
   # `pnpm tf:test` owns the fail-closed production identity contract. Route
   # every complete-inventory input plus the contract implementation itself.
   # Keep this after the specialized cases so ci.yml/infra.yml retain their
@@ -2757,33 +2767,45 @@ while IFS= read -r path; do
         scripts/static-imports.mjs | \
         scripts/check-sentry-suites-in-ci-core-commands.mjs | \
         scripts/sentry-suite-manifest.json)
-        add_command "/usr/bin/env -u NODE_OPTIONS -u NODE_PATH node scripts/sentry-suite-gate.test.mjs" "Sentry-suite gate, manifest, or a manifest-owned suite changed"
-        add_command "/usr/bin/env -u NODE_OPTIONS -u NODE_PATH node scripts/sentry-suite-gate.mjs" "Sentry-suite gate, manifest, or a manifest-owned suite changed (validate the committed manifest against the real suites)"
+        add_sentry_suite_gate_commands "Sentry-suite gate, manifest, or a manifest-owned suite changed"
         ;;
     esac
     # A directory symlink under scripts/ exposes suites the extension patterns
     # above (and the CI `rootScripts` filter) never see: `findSentrySuites`
     # follows the link and enumerates `scripts/<link>/sentry-*.test.mjs`, but the
     # changed paths are the extensionless link itself and its target outside
-    # scripts/, matching neither. Route the check for ANY symlink under scripts/
-    # so the suite it exposes is proven wired rather than silently skipped (Codex
-    # 3754355168). `-L` reads the working tree, matching what the check walks.
+    # scripts/, matching neither. Route BOTH Sentry checks for ANY symlink under
+    # scripts/ so the suite it exposes is proven wired rather than silently
+    # skipped (Codex 3754355168). `-L` reads the working tree, matching what both
+    # enumerators walk.
+    #
+    # The gate pair is what makes this arm load-bearing now. Until #1779 PR C the
+    # checker demanded a direct CI step for every enumerated suite, so it red on
+    # its own; PR C retired that assertion because the unconditional CI gate runs
+    # each suite instead — but the gate is a DIFFERENT command, and this arm was
+    # still scheduling only the checker. A suite added beneath such a link then
+    # left the checker green while the missing manifest entry reds only after
+    # push (Codex 3766397748). Coverage moved jobs; the routing has to move with
+    # it.
     case "$path" in
       scripts/*)
         if [[ -L "$repo_root/$path" ]]; then
           add_command "node scripts/check-sentry-suites-in-ci.test.mjs" "symlink under scripts/ can expose an unwired Sentry suite"
+          add_sentry_suite_gate_commands "symlink under scripts/ can expose an unwired Sentry suite"
         fi
         ;;
     esac
     # The mirror case: a change BENEATH an existing scripts/ directory symlink's
     # real target (resolved once, above). Such a path is a suite findSentrySuites
-    # enumerates through the link, yet it matches neither scripts/* above nor the
-    # rootScripts CI filter — so without this the check would skip while still
-    # demanding the suite (Codex 3754704280).
+    # and the gate's enumerator both reach through the link, yet it matches
+    # neither scripts/* above nor the rootScripts CI filter — so without this the
+    # local gate would skip both checks while the suite goes unwired (Codex
+    # 3754704280, 3766397748).
     for scripts_symlink_target in "${scripts_symlink_targets[@]+"${scripts_symlink_targets[@]}"}"; do
       case "$path" in
         "$scripts_symlink_target"/*)
           add_command "node scripts/check-sentry-suites-in-ci.test.mjs" "change beneath a scripts/ symlink target can expose an unwired Sentry suite"
+          add_sentry_suite_gate_commands "change beneath a scripts/ symlink target can expose an unwired Sentry suite"
           break
           ;;
       esac

@@ -245,11 +245,8 @@ jobs:
             rootScripts:
               # `scripts/**` matches every path under scripts/ at any depth,
               # including the extensionless directory symlinks the extension
-              # globs below miss. A Sentry suite reachable only through such a
-              # symlink is one check-sentry-suites-in-ci enumerates (it follows
-              # the link), so its addition must run this job or the suite ships
-              # unwired behind a skipped job (Codex 3754355168). The extension
-              # globs stay to document the common cases this filter targets.
+              # globs below miss. The extension globs stay to document the
+              # common cases this filter targets.
               - scripts/**
               - scripts/**/*.mjs
               - scripts/**/*.cjs
@@ -290,17 +287,14 @@ jobs:
               # Notifier coverage check re-runs when any workflow changes —
               # a new workflow with push-main or schedule must be caught even
               # if only the new workflow file is touched (no script change).
-              # Two further suites in this job read workflow files rather than
-              # scripts: check-autofix-ci-trust.mjs scans every workflow for
-              # PR-reachable secrets, and sentry-mcp-broker.test.mjs parses
-              # sentry-triage-agent.yml. Narrowing this glob would let a
-              # workflow-only edit skip the suites that exist to guard it.
+              # check-autofix-ci-trust.mjs also reads workflow files rather than
+              # scripts, scanning every one for PR-reachable secrets. Narrowing
+              # this glob would let a workflow-only edit skip the checks that
+              # exist to guard it.
               - .github/workflows/**
-              # check-sentry-suites-in-ci recurses into the composite actions
-              # the trusted jobs pull in, scanning each action.yml for a
-              # `$GITHUB_ENV` write that would neuter the Sentry suites. An edit
-              # to any local action must re-run it, so this covers all of them,
-              # not only pnpm-install.
+              # Local composite actions feed this job's steps — the install
+              # action and the ESLint-baseline resolver below. An edit to any of
+              # them must re-run it, so this covers all of them.
               - .github/actions/**
               # The baseline-resolve composite exports ESLINT_BASELINE_MAIN,
               # consumed by scripts/eslint-baseline-diff.mjs — the scripts
@@ -981,23 +975,22 @@ jobs:
         #
         #   INSTALL — `pnpm install` runs the root lifecycle hooks (postinstall
         #   and friends). A package-only PR could add a `postinstall` that
-        #   truncates the Sentry suites and this validator, false-greening the
-        #   direct `node <suite>` steps and the coverage assertion (Codex
-        #   3754887736). Validating first rejects any unsanctioned hook before
-        #   install would execute it. `--ignore-scripts` is NOT used because the
-        #   sanctioned `postinstall` builds @mento-protocol/config, whose dist the
+        #   truncates this validator and the suites below it (Codex 3754887736).
+        #   Validating first rejects any unsanctioned hook before install would
+        #   execute it. `--ignore-scripts` is NOT used because the sanctioned
+        #   `postinstall` builds @mento-protocol/config, whose dist the
         #   `Peg registry integrity` step below imports; this is the fail-close
         #   route that finding calls for instead. The validator needs only Node's
         #   built-in `fs`, so it runs before setup-node like the terraform job's
         #   pre-install `node` step.
         #
-        #   RUN — this job still invokes trusted aliases directly (`pnpm
-        #   lint:scripts`, `pnpm agent:quality-gate:test`, the `docs:*` and
-        #   `agent:context-*` suites); the pin validator keeps that trust safe by
-        #   rejecting a drifted command (e.g. an appended `&& <command>`) before
-        #   it executes. The Sentry suites no longer route through pnpm — they run
-        #   as direct `node <suite>` commands below — so this step no longer
-        #   guards them. check-sentry-suites-in-ci.test.mjs pins this ordering.
+        #   RUN — this job invokes trusted aliases directly (`pnpm lint:scripts`,
+        #   `pnpm agent:quality-gate:test`, the `docs:*` and `agent:context-*`
+        #   suites); the pin validator keeps that trust safe by rejecting a
+        #   drifted command (e.g. an appended `&& <command>`) before it executes.
+        #   check-sentry-suites-in-ci.test.mjs pins this ordering, because the
+        #   `sentry:*` aliases the local quality gate trusts are pinned by the
+        #   same validator.
         run: bash scripts/check-agent-quality-gate-package-scripts.sh
       - uses: ./.github/actions/pnpm-install
       - name: ESLint root scripts
@@ -1112,98 +1105,17 @@ jobs:
         # (issue #1564): ok/drift/malformed classification + CLI exit codes for
         # the daily "default workflow-token permission stays read-only" check.
         run: node scripts/check-workflow-permissions-drift.test.mjs
-      - name: Sentry needs-human brief suite
-        # Behavioral coverage of scripts/sentry-triage-brief.mjs (issue #1748,
-        # redesigned #1769): the rendered brief's fixed order and neutralization,
-        # the updated-in-place COMMENT lifecycle (created on needs-human, updated
-        # on re-triage, deleted on any other verdict), and — the part only a test
-        # can hold — that the leg NEVER writes the stub body, so it cannot drop
-        # the archive freshness baseline in the archive's unlabeled settlement
-        # window. It also asserts the prompt, the pipeline note and the triage
-        # workflow still agree with the contract it renders.
-        #
-        # Invoked as a DIRECT `node scripts/<suite>` (not `pnpm sentry:brief:test`):
-        # scripts/check-sentry-suites-in-ci.test.mjs (issue #1721) rejects the
-        # pnpm-alias form for every Sentry suite because a `scriptShell` override
-        # or a `presentry:*:test` lifecycle hook can false-green or empty it.
-        run: node scripts/sentry-triage-brief.test.mjs
       - name: Override prune report self-tests
         # Behavioral coverage of scripts/override-prune-report.mjs (verdict
         # heuristic, lockfile parsing, git-blame age check). The report
         # itself only runs weekly via supply-chain.yml; this required job is
         # what catches a regression in the script on every PR.
         run: node scripts/override-prune-report.test.mjs
-      # ── Sentry triage and autofix suites (issue #1721) ──────────────────────
-      # These guard the machine-authored triage and autofix legs: queue
-      # transitions, digest and projection shape, autofix selection and
-      # finalize, archive, the credential broker, and the re-queue chokepoint.
-      # Until this block existed they ran only in the local pre-push hook, so a
-      # contributor who bypassed the hook could merge a regression in any of
-      # them. One step per suite: a red check names the leg that broke.
-      #
-      # Each suite is invoked DIRECTLY as `node scripts/<suite>`, not through a
-      # `pnpm <alias>` — the exact command each `sentry:*:test` alias expands to.
-      # The pnpm-run path carried two config-level fail-opens: a `scriptShell:
-      # /bin/true` in pnpm-workspace.yaml false-greens every alias (Codex
-      # 3754704267), and a `presentry:*:test` lifecycle hook runs before the
-      # alias and can empty a suite (Codex 3754704278). A direct node command
-      # consults neither knob, so removing the indirection closes both — see
-      # scripts/check-sentry-suites-in-ci.test.mjs, which now requires the
-      # direct form and rejects a step that reverts to an alias.
-      - name: Sentry triage ingest suite
-        run: node scripts/sentry-triage-ingest.test.mjs
-      - name: Sentry triage digest suite
-        run: node scripts/sentry-triage-digest.test.mjs
-      - name: Sentry triage projection suite
-        run: node scripts/sentry-triage-project.test.mjs
-      - name: Sentry autofix select suite
-        run: node scripts/sentry-autofix-select.test.mjs
-      - name: Sentry autofix finalize suite
-        run: node scripts/sentry-autofix-finalize.test.mjs
-      - name: Sentry autofix run-record suite
-        # The tracker run-record body builder, extracted from finalize.mjs when it
-        # crossed the 1,000-line cap; a scripts/sentry-*.test.mjs, so the #1721
-        # coverage rule requires a direct invocation here.
-        run: node scripts/sentry-autofix-run-record.test.mjs
-      - name: Sentry triage archive suite
-        run: node scripts/sentry-triage-archive.test.mjs
-      - name: Sentry credential broker suite
-        # Also parses .github/workflows/sentry-triage-agent.yml (token
-        # placement, the --mcp-config shape, the single port literal). The
-        # rootScripts filter already covers .github/workflows/**, so a
-        # workflow-only edit still reaches this step.
-        run: node --test scripts/sentry-mcp-broker.test.mjs
-      - name: Sentry re-queue chokepoint suite
-        run: node scripts/sentry-triage-requeue.test.mjs
-      - name: Sentry triage agent comment suite
-        # Invoked by path, the way every suite above now is.
-        run: node scripts/sentry-triage-agent-comment.test.mjs
-      - name: Sentry-suite gate self-test
-        # scripts/sentry-suite-gate.test.mjs is a scripts/sentry-*.test.mjs, so
-        # check-sentry-suites-in-ci.test.mjs (issue #1721) requires THIS job to
-        # invoke it directly. The new unconditional `sentry-suites` job also runs
-        # it — the gate enumerates and runs its own suite — so the run is
-        # redundant until PR C removes the duplicated suite steps from this job.
-        # See issue #1779 and ADR 0062.
-        run: node scripts/sentry-suite-gate.test.mjs
-      - name: Sentry-suite gate integrity self-test
-        # The gate's integrity half (digest verification, watch-set derivation,
-        # step-summary isolation), split out when its sibling crossed the
-        # 1,000-line cap. Also a scripts/sentry-*.test.mjs, so the same #1721
-        # coverage rule requires a direct invocation here.
-        run: node scripts/sentry-suite-gate-integrity.test.mjs
-      - name: Sentry-suite gate isolation self-test
-        # The gate's isolation half (per-suite snapshots, sibling-snapshot and
-        # shared-checkout tampering), split out when the integrity file reached
-        # the 1,000-line cap in turn. Also a scripts/sentry-*.test.mjs, so the
-        # same #1721 coverage rule requires a direct invocation here.
-        run: node scripts/sentry-suite-gate-isolation.test.mjs
-      - name: Sentry suite CI coverage assertion
-        # The meta-check that keeps this gap from recurring: every
-        # scripts/sentry-*.test.mjs must be invoked by this job as a direct
-        # `node <suite>` command (never a pnpm alias), and the local gate's
-        # tooling allowlist must list every sentry:* script it still runs.
-        run: node scripts/check-sentry-suites-in-ci.test.mjs
+      # The Sentry suites used to run here, one step each (issue #1721). They
+      # now run in the unconditional `sentry-suites` job, which also proves from
+      # their own output that each one asserted (issue #1779, ADR 0062) — a
+      # strictly stronger claim than a step existing. Running them in both jobs
+      # cost a second copy of the whole set and let the two paths disagree.
       - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
         if: always()
 
@@ -1237,14 +1149,14 @@ jobs:
     # The step list is closed-world and its order is load-bearing. The two
     # upstream, SHA-pinned actions are the only things trusted before the gate.
     # `scripts/sentry-suite-gate.mjs` is the FIRST and ONLY PR-authored code that
-    # runs before the suites: there is deliberately no `pnpm install` (its
-    # composite action's postinstall is PR-authored code that would run first)
-    # and no other pre-suite step, which closes the R1 window where such a step
-    # could append `NODE_OPTIONS=--import=…process.exit(0)` to $GITHUB_ENV and
-    # neuter every later suite into a false-green no-op. The gate and every
-    # scripts/sentry-*.mjs it spawns import only `node:` builtins, so no install
-    # is needed. `env -u NODE_OPTIONS` strips a poisoned value from the gate's
-    # own env for defense in depth; the gate additionally refuses to start if
+    # runs before the suites: `pnpm install` is deliberately ordered AFTER it
+    # (the composite action's postinstall is PR-authored code) and there is no
+    # other pre-gate step, which closes the R1 window where such a step could
+    # append `NODE_OPTIONS=--import=…process.exit(0)` to $GITHUB_ENV and neuter
+    # every later suite into a false-green no-op. The gate and every
+    # scripts/sentry-*.mjs it spawns import only `node:` builtins, so it needs no
+    # install. `env -u NODE_OPTIONS` strips a poisoned value from the gate's own
+    # env for defense in depth; the gate additionally refuses to start if
     # NODE_OPTIONS or NODE_PATH is set and re-strips both per spawned suite.
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -1259,6 +1171,21 @@ jobs:
           node-version-file: .node-version
       - name: Run and assert the Sentry suites
         run: /usr/bin/env -u NODE_OPTIONS -u NODE_PATH node scripts/sentry-suite-gate.mjs
+      # Steps 4-5 run AFTER the gate, and only after it. The install's composite
+      # `postinstall` is PR-authored code, so putting it first would restore the
+      # R1 window the job exists to close; ordering it here keeps that window
+      # shut and still gives the checker the `js-yaml` it needs.
+      - uses: ./.github/actions/pnpm-install
+      - name: Sentry CI wiring assertion
+        # The static half of the pair (issue #1721, relocated by #1779 PR C).
+        # The gate above proves the suites ran; it cannot prove its own job still
+        # exists, is unconditional, and still reaches the required `ci` context —
+        # so this pins that, re-proves the one suite the gate does not run
+        # (sentry-provider-contract, via `pnpm tf:test`), and holds the local
+        # gate's `sentry:*` allowlist to its pins. It ran in the path-gated
+        # `scripts` job until this PR, where a dashboard-only, indexer-only or
+        # non-Markdown doc-asset diff skipped it entirely.
+        run: node scripts/check-sentry-suites-in-ci.test.mjs
 
   autoreview-suite:
     name: Autoreview adversarial suite

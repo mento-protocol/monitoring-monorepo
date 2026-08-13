@@ -1,18 +1,27 @@
 /**
- * The suite-coverage and package-script contracts behind
+ * The exemption route and the package-script contracts behind
  * scripts/check-sentry-suites-in-ci.test.mjs.
  *
  * Split out when the entry point reached the repo's 1,000-line hard cap (issue
- * #1803). A pure move: no case renamed, no assertion changed.
+ * #1803).
  *
- * This half asserts that every Sentry suite is actually RUN, and that the
- * commands proving it cannot be subverted through package.json — direct
- * `node <suite>` invocation rather than a `pnpm <alias>`, the alias and
- * lifecycle fail-opens that closes, the provider-contract exemption route, and
- * the local gate's tooling allowlist with its exact-command pins. The entry
- * point keeps the ci.yml workflow-shape assertions (trusted jobs, sentinel,
- * triggers, reachability, env mutation, composite recursion, check-run
- * ownership) and the self/meta checks.
+ * This half asserts the things about running the suites that the runtime gate
+ * cannot see: the provider-contract exemption's CI route (the gate checks the
+ * alias command, but never that a real, unconditional job runs it), that no
+ * `sentry:*:test` alias points somewhere unenumerated, and the local gate's
+ * tooling allowlist with its exact-command pins. The entry point keeps the
+ * ci.yml workflow-shape assertions (trusted job, sentinel, triggers, env
+ * mutation, composite recursion, check-run ownership) and the self/meta checks.
+ *
+ * Issue #1779 PR C retired what used to be this file's main invariant — that
+ * every suite has a direct `node <suite>` step in the `scripts` job, plus the
+ * pnpm-alias and `presentry:*:test` rejection probes behind it. The
+ * `sentry-suites` gate now runs each suite itself, as a `node` child under
+ * `env -u`, reconciled against the manifest by exact set equality, and asserts
+ * from the child's own output that it passed. No pnpm alias is on that path for
+ * any non-exempt suite, so neither fail-open the probes covered is reachable,
+ * and "a step exists" is a strictly weaker claim than "the suite ran and
+ * asserted".
  *
  * The entry point imports this module, so the single
  * `node scripts/check-sentry-suites-in-ci.test.mjs` CI step still runs it.
@@ -42,97 +51,6 @@ import {
   VALIDATOR_PATH,
   validatorPins,
 } from "./check-sentry-suites-in-ci-probes.mjs";
-
-/**
- * Is `file` run by the `scripts` job as a whole-command DIRECT node invocation
- * (`node <file>` or `node --test <file>`)? Shared by invariant 1 and its
- * rejection probe so both exercise the same rule: coverage is proven by the CI
- * command alone and never by a `pnpm <alias>`, the path a `scriptShell`
- * override or a `presentry:*:test` lifecycle hook subverts. It reads no
- * package.json alias, so neither knob can change the verdict.
- *
- * @param {Record<string, any>} workflow
- * @param {string} file
- */
-export function suiteRunDirectly(workflow, file) {
-  const commands = provenCommands(workflow, "scripts");
-  return suiteTargets(file).some((target) => runsCommand(commands, target));
-}
-
-test("every Sentry suite is invoked directly by the ci.yml `scripts` job", () => {
-  // Direct `node scripts/<suite>` (or `node --test …`), never `pnpm <alias>`.
-  // The pnpm-run path is the one a `scriptShell` override or a `presentry:*:test`
-  // lifecycle hook subvert (Codex 3754704267, 3754704278); a direct node command
-  // is on neither knob's path, so requiring it closes both fail-opens.
-  const missing = SENTRY_SUITES.filter(
-    (file) => !RUN_BY_ANOTHER_JOB.has(file) && !suiteRunDirectly(CI, file),
-  );
-  const detail = missing
-    .flatMap((file) =>
-      nearMisses(CI, "scripts", suiteTargets(file)).map(
-        (note) => `  ${file}: ${note}`,
-      ),
-    )
-    .join("\n");
-  assert.deepEqual(
-    missing,
-    [],
-    `these Sentry suites are not invoked directly in CI: ${missing.join(", ")}.\n${detail}\n` +
-      "Add a step to the `scripts` job in .github/workflows/ci.yml that runs " +
-      "`node <suite>` as its whole command (not a pnpm alias), or add an entry " +
-      "to RUN_BY_ANOTHER_JOB naming the job that does run it.",
-  );
-});
-
-test("the checker rejects a Sentry step that reverts to a pnpm alias", () => {
-  // A `scriptShell: /bin/true` (pnpm-workspace.yaml) makes `pnpm <alias>` exit 0
-  // without running the suite; a `presentry:*:test` hook empties it before it
-  // runs. Both act ONLY on the `pnpm run` path. So the coverage proof must
-  // reject a step that runs a suite via its pnpm alias and accept only the
-  // direct node command. Swap each suite's real step for its alias and assert
-  // the suite reads as uncovered — the same predicate invariant 1 uses.
-  let proven = 0;
-  for (const file of SENTRY_SUITES) {
-    if (RUN_BY_ANOTHER_JOB.has(file)) continue;
-    const aliases = aliasesFor(PKG_SCRIPTS, file);
-    if (aliases.length === 0) continue; // no alias form to revert to
-    const directRuns = suiteTargets(file).map((target) => target.join(" "));
-    const workflow = structuredClone(CI);
-    const step = workflow.jobs.scripts.steps.find(
-      (candidate) =>
-        typeof candidate?.run === "string" &&
-        directRuns.includes(candidate.run.trim()),
-    );
-    assert.ok(step, `no direct step found for ${file} to mutate`);
-    step.run = `pnpm ${aliases[0]}`;
-    assert.equal(
-      suiteRunDirectly(workflow, file),
-      false,
-      `the checker still counts ${file} as covered after its step reverted to \`pnpm ${aliases[0]}\``,
-    );
-    proven += 1;
-  }
-  assert.ok(proven > 0, "no Sentry suite with an alias was available to probe");
-});
-
-test("a presentry lifecycle hook cannot empty a directly-invoked Sentry suite", () => {
-  // `pnpm run sentry:ingest:test` fires `presentry:ingest:test` first, which a
-  // malicious PR can point at `cp /dev/null <suite>` (Codex 3754704278). Because
-  // the CI step runs `node scripts/sentry-triage-ingest.test.mjs` directly, no
-  // lifecycle hook is on its path — and suiteRunDirectly reads that CI command,
-  // never a package.json alias, so no `presentry:*:test` hook can change the
-  // verdict. Prove the representative suite is covered by the direct command.
-  const file = "scripts/sentry-triage-ingest.test.mjs";
-  assert.ok(
-    SENTRY_SUITES.includes(file),
-    `${file} is gone — pick another representative suite`,
-  );
-  assert.ok(
-    suiteRunDirectly(CI, file),
-    `${file} is not invoked as a direct node command in the scripts job, so a ` +
-      "presentry:*:test lifecycle hook could still empty it",
-  );
-});
 
 test("the exemption for sentry-provider-contract still holds", () => {
   for (const [file, route] of RUN_BY_ANOTHER_JOB) {
