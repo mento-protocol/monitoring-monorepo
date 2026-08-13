@@ -187,11 +187,19 @@ function MonitorBreakdown({
             {state.monitor.poolAddress.slice(-6)}
           </Link>
           <span>
-            {/* Same honesty rule as the row cell: an expired or absent
-                measurement must not read as a live percentage. */}
-            {structuralCurrent && state.saturation !== null
+            {/* Same honesty rule as the row cell: an expired, incomplete, or
+                absent measurement must not read as a live percentage. */}
+            {structuralCurrent &&
+            !state.monitor.structuralQuerySaturated &&
+            state.saturation !== null
               ? `trading limit ${formatFraction(state.saturation)} of ${formatFraction(warnFraction)} warn`
-              : `trading limit — (${structuralCurrent ? "no measurement" : "check expired"})`}
+              : `trading limit — (${
+                  !structuralCurrent
+                    ? "check expired"
+                    : state.monitor.structuralQuerySaturated
+                      ? "check incomplete"
+                      : "no measurement"
+                })`}
           </span>
           <span className="flex items-center gap-1.5">
             <SeverityDot tone={state.breaker.tone} />

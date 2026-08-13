@@ -218,17 +218,21 @@ function TradingLimitCell({
   const target = mostSaturatedMonitor(states);
   const saturation =
     asset.asset.structural.structuralSaturation ?? target?.saturation ?? null;
-  // A missing or expired measurement must not read as a safe 0%: the fraction
-  // renders only when structural evidence is current and a saturation exists.
-  const measured = structuralCurrent && saturation !== null;
-  const value =
-    structuralCurrent && saturation !== null ? formatFraction(saturation) : "—";
+  const queryIncomplete =
+    asset.asset.structural.structuralQuerySaturated ||
+    target?.monitor.structuralQuerySaturated === true;
+  // A missing, expired, or incomplete measurement must not read as a safe
+  // percentage: a saturated bounded query cannot prove the aggregate result.
+  const measured = structuralCurrent && !queryIncomplete && saturation !== null;
+  const value = measured ? formatFraction(saturation) : "—";
   const tooltip = measured
     ? tradingLimitTooltip(asset.asset.policy.structuralWarnFraction)
     : `${
-        structuralCurrent
-          ? "No trading-limit measurement is available from the indexed pool."
-          : "The structural evidence behind this measurement has expired."
+        !structuralCurrent
+          ? "The structural evidence behind this measurement has expired."
+          : queryIncomplete
+            ? "The pool query reached its result limit, so no complete trading-limit measurement is available."
+            : "No trading-limit measurement is available from the indexed pool."
       } ${tradingLimitTooltip(asset.asset.policy.structuralWarnFraction)}`;
   // The link is the tooltip trigger itself: wrapping it in a button would nest
   // two interactive controls.

@@ -326,7 +326,7 @@ export function safeguardState(
     };
   if (monitor.structuralQuerySaturated)
     return {
-      label: "Check expired",
+      label: "Check incomplete",
       tone: "warning",
       detail: stale
         ? "At the last confirmed check, the pool query reached its result limit."

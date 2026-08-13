@@ -383,6 +383,43 @@ describe("PegMonitoringPageClient board", () => {
     expect(row.textContent).not.toContain("42%");
   });
 
+  it("does not present incomplete structural queries as numeric trading limits", () => {
+    const response = makePegMonitoringResponse();
+    const item = response.packages[0]!;
+    const monitor = item.monitors[0]!;
+    loaded({
+      ...response,
+      packages: [
+        {
+          ...item,
+          structural: {
+            ...item.structural,
+            structuralQuerySaturated: true,
+          },
+          monitors: [
+            { ...monitor, structuralQuerySaturated: true },
+            {
+              ...monitor,
+              poolAddress: "0x5555555555555555555555555555555555555555",
+              structuralSaturation: 0.91,
+              structuralQuerySaturated: true,
+            },
+          ],
+        },
+      ],
+    });
+    render();
+    const row = query('[data-testid="peg-row-europ-schuman"]')!;
+    expect(row.textContent).toContain("Check incomplete");
+    expect(row.textContent).not.toContain("42%");
+
+    click(row);
+    const panel = query('[data-testid="peg-panel-europ-schuman"]')!;
+    expect(panel.textContent).toContain("trading limit — (check incomplete)");
+    expect(panel.textContent).not.toContain("42%");
+    expect(panel.textContent).not.toContain("91%");
+  });
+
   it("keeps the recent-alerts container with its Grafana fallback", () => {
     loaded();
     render();

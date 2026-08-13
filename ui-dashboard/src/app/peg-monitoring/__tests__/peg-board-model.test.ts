@@ -158,7 +158,7 @@ describe("safeguardState", () => {
     [
       "saturated query",
       { ...monitor, structuralQuerySaturated: true },
-      "Check expired",
+      "Check incomplete",
     ],
   ];
   it.each(cases)("labels %s", (_name, input, label) => {
