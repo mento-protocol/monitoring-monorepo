@@ -2,31 +2,35 @@
 import {
   AUTOFIX_COMMENT_PREFIX,
   buildDigest,
-  chunkBriefs,
-  chunkLines,
   classifyIssue,
   collectIssues,
   doubleVerdictWarnings,
-  escapeSlackText,
   extractAutofixUrl,
   extractPermalink,
   extractProjectedUrl,
   extractVerdictYamlBlock,
   findLatestVerdictComment,
-  formatBriefList,
-  formatBriefText,
-  formatSummaryForSlack,
   LABEL_TO_VERDICT,
-  MAX_SECTION_TEXT_LEN,
   NEEDS_TRIAGE_LABEL,
   parseArgs,
   parseIssueNumbers,
   parseQueueTitle,
   parseVerdictComment,
   PROJECTED_COMMENT_PREFIX,
-  sanitizeSummary,
   VERDICT_MARKER,
 } from "./sentry-triage-digest.mjs";
+// The pure Slack-render layer moved to its own module (#1812 file split); the
+// tests import the moved units directly, no re-export shim.
+import {
+  chunkBriefs,
+  chunkLines,
+  escapeSlackText,
+  formatBriefList,
+  formatBriefText,
+  formatSummaryForSlack,
+  MAX_SECTION_TEXT_LEN,
+  sanitizeSummary,
+} from "./sentry-triage-digest-render.mjs";
 
 let passed = 0;
 let failed = 0;
@@ -90,6 +94,11 @@ function verdictComment({
   hypotheses = null,
   investigated = null,
   escalationReason = null,
+  // Defaults mirror the pre-#1785 shape every stored verdict has: this repo as
+  // the owning repo, and NO `fix_scope` line — which fails closed to
+  // `architectural`.
+  affectedRepo = "mento-protocol/monitoring-monorepo",
+  fixScope = null,
 } = {}) {
   const lines = [
     VERDICT_MARKER,
@@ -97,8 +106,9 @@ function verdictComment({
     "```yaml",
     `verdict: ${verdict} # code-fix | config-fix | upstream-transient | needs-human`,
     `confidence: ${confidence} # high | medium | low`,
-    "affected_repo: mento-protocol/monitoring-monorepo",
+    `affected_repo: ${affectedRepo}`,
     `summary: ${summary}`,
+    ...(fixScope == null ? [] : [`fix_scope: ${fixScope}`]),
     "root_cause: |",
     "  Some abstract root cause.",
     "proposed_action: |",
@@ -511,6 +521,130 @@ function issueFixture({
   };
 }
 
+// ---------------------------------------------------------------------------
+// fix_scope on the human surface (issue #1785). The digest and the autofix
+// selector are two consumers of ONE verdict contract; a field that gates the
+// selector must not land there alone and leave this surface asserting the
+// opposite of what happened.
+// ---------------------------------------------------------------------------
+
+await test("classifyIssue carries fix_scope and whether the verdict named THIS repo", () => {
+  const mechanical = classifyIssue(
+    issueFixture({
+      labels: ["sentry-triage", "sentry:verdict-code-fix"],
+      comments: [{ body: verdictComment({ fixScope: "mechanical" }) }],
+    }),
+  );
+  assertEqual(mechanical.fixScope, "mechanical");
+  assertEqual(mechanical.owningRepoIsLocal, true);
+
+  // No `fix_scope` line: the shape every stored verdict has. Fails closed.
+  const legacy = classifyIssue(
+    issueFixture({
+      labels: ["sentry-triage", "sentry:verdict-code-fix"],
+      comments: [{ body: verdictComment({}) }],
+    }),
+  );
+  assertEqual(legacy.fixScope, "architectural");
+
+  // An EXTERNAL owning repo also reads as architectural (the field is
+  // local-only), so the flag is what keeps the two apart.
+  const external = classifyIssue(
+    issueFixture({
+      labels: ["sentry-triage", "sentry:verdict-code-fix"],
+      comments: [
+        { body: verdictComment({ affectedRepo: "mento-protocol/mento-web" }) },
+      ],
+    }),
+  );
+  assertEqual(external.owningRepoIsLocal, false);
+
+  // No verdict comment at all: unreadable, not inferred.
+  const unread = classifyIssue(
+    issueFixture({ labels: ["sentry-triage", "sentry:verdict-code-fix"] }),
+  );
+  assertEqual(unread.fixScope, null);
+  assertEqual(unread.owningRepoIsLocal, false);
+});
+
+await test("a local architectural code-fix renders in its OWN Open design work section, not Routed", () => {
+  // A local code-fix never projects, and an architectural one is never selected
+  // — it HOLDS OPEN under sentry:fix-scope-architectural as human design work
+  // (#1812, operator resolution #3), so it gets its own section rather than a
+  // Routed heading claiming it was handed to a team that does not exist.
+  const payload = buildDigest(
+    [
+      issueFixture({
+        number: 1,
+        shortId: "ANALYTICS-MENTO-ORG-2E",
+        labels: ["sentry:verdict-code-fix"],
+        comments: [{ body: verdictComment({}) }],
+      }),
+    ],
+    { channel: "#engineering" },
+  );
+  const text = allText(payload);
+  assert(
+    text.includes("Open design work"),
+    `expected the Open design work section, got: ${text}`,
+  );
+  assert(
+    !text.includes("Routed to owning repo"),
+    "a local architectural code-fix must NOT render in the Routed section",
+  );
+  assert(
+    text.includes("open under `sentry:fix-scope-architectural`"),
+    `expected the open-under-label architectural note, got: ${text}`,
+  );
+});
+
+await test("the routed section does NOT mark a genuinely routed external code-fix", () => {
+  // `fix_scope` is local-only, so every external code-fix also reads as
+  // `architectural`. Annotating on the scope alone would stamp "human backlog"
+  // on every issue the pipeline really did route — the opposite mistake.
+  const payload = buildDigest(
+    [
+      issueFixture({
+        number: 2,
+        shortId: "APP-MENTO-ORG-7X",
+        labels: ["sentry:verdict-code-fix"],
+        comments: [
+          {
+            body: verdictComment({ affectedRepo: "mento-protocol/mento-web" }),
+          },
+          { body: `${PROJECTED_COMMENT_PREFIX}${PROJECTED_URL}` },
+        ],
+      }),
+    ],
+    { channel: "#engineering" },
+  );
+  const text = allText(payload);
+  assert(text.includes("Routed to owning repo"), "expected the routed section");
+  assert(
+    !text.includes("architectural — human backlog"),
+    `a routed external code-fix must not be marked, got: ${text}`,
+  );
+});
+
+await test("the routed section does NOT mark a local MECHANICAL code-fix", () => {
+  // That one IS autofix-eligible; it just has no fix PR yet.
+  const payload = buildDigest(
+    [
+      issueFixture({
+        number: 3,
+        shortId: "ANALYTICS-MENTO-ORG-2F",
+        labels: ["sentry:verdict-code-fix"],
+        comments: [{ body: verdictComment({ fixScope: "mechanical" }) }],
+      }),
+    ],
+    { channel: "#engineering" },
+  );
+  assert(
+    !allText(payload).includes("architectural — human backlog"),
+    "a mechanical local code-fix must not be marked as human backlog",
+  );
+});
+
 await test("classifyIssue buckets by the verdict label, not the comment text", () => {
   const entry = classifyIssue(
     issueFixture({
@@ -576,12 +710,53 @@ await test("classifyIssue routes an actionable verdict with fix-PR data to the a
   assertEqual(entry.autofixUrl, FIX_PR_URL);
 });
 
+await test("classifyIssue routes a re-triaged-architectural stub to Open design work over its stale autofix marker (#1812)", () => {
+  // An already-autofixed stub re-triaged as architectural: the workflow adds the
+  // sentry:fix-scope-architectural hold but leaves the old `Autofixed by PR:`
+  // marker in place (no regression re-queued it, so the marker is not shed). The
+  // LIVE hold label is authoritative — this is open design work now, not an
+  // autofixed item — so it must NOT stay in the Autofixed section.
+  const entry = classifyIssue(
+    issueFixture({
+      labels: [
+        "sentry-triage",
+        "sentry:verdict-code-fix",
+        "sentry:fix-scope-architectural",
+      ],
+      comments: [
+        // The marker was written while the verdict was mechanical; the label,
+        // not the parsed scope, is what now routes it to Open design work.
+        {
+          body: verdictComment({ verdict: "code-fix", fixScope: "mechanical" }),
+        },
+        { body: `${AUTOFIX_COMMENT_PREFIX}${FIX_PR_URL}` },
+      ],
+    }),
+  );
+  // Negative control: the live-label precedence is the ONLY thing keeping this
+  // out of Autofixed — drop `if (architecturalHold)` from sectionForEntry and a
+  // mechanical verdict + autofix marker lands in "autofixed" (the #1812 bug).
+  assertEqual(entry.section, "architectural");
+  assert(
+    entry.section !== "autofixed",
+    "the live architectural hold label must beat the stale autofix pointer",
+  );
+});
+
 await test("classifyIssue picks up a projected-issue pointer for the routed link", () => {
+  // Only an EXTERNAL code-fix genuinely projects and routes; a local one holds
+  // under sentry:fix-scope-architectural in its own section (#1812), so this
+  // projected-pointer case uses an external owning repo.
   const entry = classifyIssue(
     issueFixture({
       labels: ["sentry-triage", "sentry:verdict-code-fix"],
       comments: [
-        { body: verdictComment({ verdict: "code-fix" }) },
+        {
+          body: verdictComment({
+            verdict: "code-fix",
+            affectedRepo: "mento-protocol/mento-web",
+          }),
+        },
         { body: `${PROJECTED_COMMENT_PREFIX}${PROJECTED_URL}` },
       ],
     }),
@@ -759,7 +934,16 @@ await test("buildDigest renders sections in order (needs-human first) and omits 
         number: 4,
         shortId: "CF-1",
         labels: ["sentry:verdict-code-fix"],
-        comments: [{ body: verdictComment({ verdict: "code-fix" }) }],
+        // External owning repo so it genuinely ROUTES (a local code-fix would
+        // hold under sentry:fix-scope-architectural in its own section, #1812).
+        comments: [
+          {
+            body: verdictComment({
+              verdict: "code-fix",
+              affectedRepo: "mento-protocol/mento-web",
+            }),
+          },
+        ],
       }),
     ],
     { channel: "#engineering" },
@@ -777,6 +961,95 @@ await test("buildDigest renders sections in order (needs-human first) and omits 
   assert(!text.includes("🤖 Autofixed"), "expected empty autofixed omitted");
   // needs-human renders as a decision-ready brief, not a one-liner.
   assert(text.includes("*Decision needed:*"), "expected the needs-human brief");
+});
+
+// Byte-identical render snapshot (#1812 file split). Pins the whole Slack block
+// array across the digest -> digest-render extraction so a future refactor of the
+// render layer cannot silently drift the output. Covers one entry per section,
+// including the new "Open design work" architectural grouping.
+const RENDER_SNAPSHOT =
+  '[{"type":"section","text":{"type":"mrkdwn","text":"*Sentry triage — 6 issues triaged*","verbatim":true}},{"type":"section","text":{"type":"mrkdwn","text":"*⚠️ Needs human — decisions required (1)*\\n• *<https://github.com/mento-protocol/monitoring-monorepo/issues/1|NH-1>* · confidence: medium\\n    ◦ *Decision needed:* Decide it.\\n    ◦ *Links:* <https://github.com/mento-protocol/monitoring-monorepo/issues/1|queue issue>","verbatim":true}},{"type":"section","text":{"type":"mrkdwn","text":"*🤖 Autofixed (1)*\\n• <https://github.com/mento-protocol/monitoring-monorepo/issues/2|AF-1> (app-mento-org) — A short summary → <https://github.com/mento-protocol/mento-web/pull/9|fix PR>","verbatim":true}},{"type":"section","text":{"type":"mrkdwn","text":"*📮 Routed to owning repo (1)*\\n• <https://github.com/mento-protocol/monitoring-monorepo/issues/3|RT-1> (app-mento-org) — A short summary → <https://github.com/mento-protocol/mento-web/issues/42|owning-repo issue>","verbatim":true}},{"type":"section","text":{"type":"mrkdwn","text":"*🏗 Open design work — no autofix (1)*\\n• <https://github.com/mento-protocol/monitoring-monorepo/issues/4|ARCH-1> (app-mento-org) — A short summary → <https://github.com/mento-protocol/monitoring-monorepo/issues/4|triage verdict> _(open under `sentry:fix-scope-architectural` — human design work, no autofix)_","verbatim":true}},{"type":"section","text":{"type":"mrkdwn","text":"*🙅 Wontfix / transient (1)*\\n• <https://github.com/mento-protocol/monitoring-monorepo/issues/5|UP-1> (app-mento-org) — A short summary [confidence: medium]","verbatim":true}},{"type":"section","text":{"type":"mrkdwn","text":"*🛑 Failed triage (1)*\\n• <https://github.com/mento-protocol/monitoring-monorepo/issues/6|FAIL-1> (app-mento-org) — triage incomplete (still `sentry:needs-triage`)","verbatim":true}},{"type":"section","text":{"type":"mrkdwn","text":"_To archive a *🙅 Wontfix / transient* issue in Sentry: add `sentry:approved-archive` to its queue issue._","verbatim":true}}]';
+
+await test("digest render snapshot is byte-identical across the file split (#1812)", () => {
+  const AUTOFIX_PR = "https://github.com/mento-protocol/mento-web/pull/9";
+  const OWNING_ISSUE = "https://github.com/mento-protocol/mento-web/issues/42";
+  const payload = buildDigest(
+    [
+      issueFixture({
+        number: 1,
+        shortId: "NH-1",
+        labels: ["sentry:verdict-needs-human"],
+        body: "",
+        comments: [
+          {
+            body: verdictComment({
+              verdict: "needs-human",
+              humanQuestion: "Decide it.",
+            }),
+          },
+        ],
+      }),
+      issueFixture({
+        number: 2,
+        shortId: "AF-1",
+        body: "",
+        labels: ["sentry:verdict-code-fix"],
+        comments: [
+          {
+            body: verdictComment({
+              verdict: "code-fix",
+              affectedRepo: "mento-protocol/mento-web",
+            }),
+          },
+          { body: `${AUTOFIX_COMMENT_PREFIX}${AUTOFIX_PR}` },
+        ],
+      }),
+      issueFixture({
+        number: 3,
+        shortId: "RT-1",
+        body: "",
+        labels: ["sentry:verdict-code-fix"],
+        comments: [
+          {
+            body: verdictComment({
+              verdict: "code-fix",
+              affectedRepo: "mento-protocol/mento-web",
+            }),
+          },
+          { body: `${PROJECTED_COMMENT_PREFIX}${OWNING_ISSUE}` },
+        ],
+      }),
+      issueFixture({
+        number: 4,
+        shortId: "ARCH-1",
+        body: "",
+        labels: ["sentry:verdict-code-fix", "sentry:fix-scope-architectural"],
+        comments: [
+          {
+            body: verdictComment({
+              verdict: "code-fix",
+              affectedRepo: "mento-protocol/monitoring-monorepo",
+            }),
+          },
+        ],
+      }),
+      issueFixture({
+        number: 5,
+        shortId: "UP-1",
+        body: "",
+        labels: ["sentry:verdict-upstream"],
+        comments: [{ body: verdictComment({ verdict: "upstream-transient" }) }],
+      }),
+      issueFixture({
+        number: 6,
+        shortId: "FAIL-1",
+        body: "",
+        labels: ["sentry:needs-triage"],
+      }),
+    ],
+    { channel: "#engineering" },
+  );
+  assertEqual(JSON.stringify(payload.blocks), RENDER_SNAPSHOT);
 });
 
 await test("buildDigest renders a routed line linking the projected owning-repo issue", () => {

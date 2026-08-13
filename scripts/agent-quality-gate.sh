@@ -3445,7 +3445,10 @@ while IFS= read -r path; do
         scripts/sentry-triage-ingest.mjs|scripts/sentry-triage-ingest.test.mjs)
           add_command "pnpm sentry:ingest:test" "Sentry triage ingest helper changed"
           ;;
-        scripts/sentry-triage-digest.mjs|scripts/sentry-triage-digest.test.mjs)
+        scripts/sentry-triage-digest.mjs|scripts/sentry-triage-digest-render.mjs|scripts/sentry-triage-digest.test.mjs)
+          # digest-render.mjs is the pure Slack-render + section-taxonomy layer
+          # split out of digest.mjs (#1812); the digest suite covers both, so a
+          # render-only change must still run the snapshot / Slack-safety tests.
           add_command "pnpm sentry:digest:test" "Sentry triage digest helper changed"
           # The two needs-human brief emitters share their field selection and
           # bounds; the queue-issue one also reads the digest's autofix prefix.
@@ -3488,7 +3491,7 @@ while IFS= read -r path; do
         scripts/sentry-autofix-select.mjs|scripts/sentry-autofix-select.test.mjs)
           add_command "pnpm sentry:autofix:select:test" "Sentry autofix select helper changed"
           ;;
-        scripts/sentry-autofix-queue-io.mjs|scripts/sentry-autofix-family-resolve.mjs|scripts/sentry-autofix-reverse-verify.mjs|scripts/sentry-autofix-family.mjs)
+        scripts/sentry-autofix-queue-io.mjs|scripts/sentry-autofix-family-resolve.mjs|scripts/sentry-autofix-reverse-verify.mjs|scripts/sentry-autofix-family.mjs|scripts/sentry-autofix-candidate.mjs)
           # The selection leg's gh I/O layer (openAutofixPrExists / isOwnHeadPr /
           # the family-collapse reads), the live-state family resolver, the
           # reverse `in:comments` verification leg, and the pure union-find
@@ -3507,6 +3510,14 @@ while IFS= read -r path; do
           # `run-record` CLI subcommand, so its wiring rides on this module.
           add_command "pnpm sentry:autofix:run-record:test" "Sentry autofix run-record builder changed"
           add_command "pnpm sentry:autofix:finalize:test" "Sentry autofix run-record builder changed"
+          ;;
+        scripts/sentry-autofix-record-labels.mjs|scripts/sentry-autofix-hold-revalidate.mjs)
+          # The record-run architectural backfill labeler (#1812) and the
+          # revalidation/compensation layer extracted from it. Their tests live
+          # in the finalize suite (the record-run job that owns this write),
+          # which exercises the plan, the pre/post live-scope checks, the label
+          # writes and the withdrawal + terminal-guarded re-queue.
+          add_command "pnpm sentry:autofix:finalize:test" "Sentry autofix record-run backfill labeler changed"
           ;;
         scripts/sentry-triage-archive.mjs|scripts/sentry-triage-archive.test.mjs)
           add_command "pnpm sentry:archive:test" "Sentry triage archive helper changed"

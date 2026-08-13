@@ -73,6 +73,17 @@ export function truncateTitle(text, maxLen = 90) {
 // list every label inline).
 export const NEEDS_TRIAGE_LABEL = "sentry:needs-triage";
 
+// DURABLE QUEUE MEMBERSHIP. Stage B's selector requires this label AND
+// `sentry:needs-triage`, so a stub without it is invisible to triage no matter
+// what else it carries — which makes removing it the strongest withdrawal
+// gesture this namespace has, and the only one available for a stub that has no
+// `sentry:needs-triage` left to remove. Anything that re-enrolls a stub must
+// therefore check it against LIVE state first. `scripts/sentry-autofix-queue-io.mjs`
+// keeps its own `SENTRY_TRIAGE_QUEUE_LABEL` twin for its search strings, and the
+// LABEL_DEFINITIONS entry below keeps its literal because the bootstrap must
+// list every label inline.
+export const QUEUE_LABEL = "sentry-triage";
+
 // Idempotently created/updated on every run (`gh label create --force`).
 export const LABEL_DEFINITIONS = [
   {
@@ -130,6 +141,12 @@ export const LABEL_DEFINITIONS = [
       "Autofix declined to open a PR (no change/guard-refused); remove to retry (ADR 0036 Phase 2b)",
   },
   {
+    name: "sentry:fix-scope-architectural",
+    color: "a371f7",
+    description:
+      "Local code-fix, fix_scope architectural — open human design work; autofix never selects it (#1812)",
+  },
+  {
     name: "sentry:approved-archive",
     color: "1a7f37",
     description:
@@ -173,6 +190,25 @@ export const FIX_PR_OPENED_LABEL = "sentry:fix-pr-opened";
 // self-healed by the autofix workflow's refused path before it labels the stub.
 export const FIX_REFUSED_LABEL = "sentry:fix-refused";
 
+// A `code-fix` verdict whose `fix_scope` is `architectural` (issue #1785/#1812):
+// the cause is in this repo's code, but the fix is open human design work, not a
+// mechanical diff an agent can safely author. The settlement step
+// (.github/workflows/sentry-triage-agent.yml) rides this label onto the SAME
+// atomic `gh issue edit` as the verdict label and leaves the stub OPEN; the
+// autofix select step (`listCodeFixStubs`) excludes it at query time so the
+// architectural backlog never fills the candidate window (issue #1813). It
+// conveys exactly one state — this stub's CURRENT verdict is local code-fix,
+// fix_scope architectural — and is NEVER terminal: it is shed on regression and
+// on any re-verdict (REOPEN_SHED_LABELS below), never read by the terminal-ledger
+// lookups, and human-removable. It sits OUTSIDE the `sentry:verdict-*` namespace
+// on purpose, so the settlement post-condition still counts exactly one verdict
+// label (VERDICT_LABELS filters on the `sentry:verdict-` prefix). Bootstrapped
+// from LABEL_DEFINITIONS above and self-healed by the autofix record-run backfill
+// before it labels a legacy stub. Removing this label is NOT the operator
+// affordance — the verdict re-parse still refuses and the record-run re-applies
+// it; re-triage via workflow_dispatch is.
+export const FIX_SCOPE_ARCHITECTURAL_LABEL = "sentry:fix-scope-architectural";
+
 // Phase 2a human-approved archive loop (ADR 0036 Stage C,
 // scripts/sentry-triage-archive.mjs + .github/workflows/sentry-triage-archive.yml).
 // APPROVED_ARCHIVE_LABEL is the human-applied approval marker that triggers the
@@ -190,6 +226,29 @@ export const ARCHIVED_LABEL = "sentry:archived";
 export const VERDICT_LABELS = LABEL_DEFINITIONS.map(
   (label) => label.name,
 ).filter((name) => name.startsWith("sentry:verdict-"));
+
+// The one verdict whose stub RESTS open. `.github/workflows/sentry-triage-agent.yml`
+// closes every other bucket in its close step; `needs-human` exits that step
+// early and leaves the stub open for a human to answer. So open +
+// `sentry:verdict-needs-human` + no `sentry:needs-triage` is a resting state,
+// not a strand, and anything sweeping the open-but-unselectable shape must skip
+// it — re-queuing it would strip the question a human was asked and re-triage
+// the stub on a loop.
+export const NEEDS_HUMAN_VERDICT_LABEL = "sentry:verdict-needs-human";
+
+// The verdicts whose stub is SUPPOSED to end up closed. A stub still open on one
+// of these, with no `sentry:needs-triage`, has a round that never settled it —
+// the shape ingest's stranded sweep repairs (issue #1817).
+export const SETTLING_VERDICT_LABELS = VERDICT_LABELS.filter(
+  (name) => name !== NEEDS_HUMAN_VERDICT_LABEL,
+);
+
+// The two unselectable shapes ingest's stranded sweep repairs. The PREDICATES
+// live with the sweep (`strandedShapeOf` in scripts/sentry-triage-ingest.mjs);
+// the names live here because the re-queue chokepoint renders a note per shape
+// and must not import ingest — ingest imports it.
+export const STRAND_SHAPE_CLOSED_NEEDS_TRIAGE = "closed-needs-triage";
+export const STRAND_SHAPE_OPEN_VERDICT = "open-verdict";
 
 // Labels a re-queue must shed: the stale verdict labels, the stale
 // `sentry:projected` marker (ADR 0038), the stale autofix markers
@@ -213,6 +272,14 @@ export const REOPEN_SHED_LABELS = [
   PROJECTED_LABEL,
   FIX_PR_OPENED_LABEL,
   FIX_REFUSED_LABEL,
+  // The architectural hold marks the CURRENT verdict's scope; a regression means
+  // a fresh occurrence that must be re-triaged from scratch, so the fresh round
+  // re-decides scope. Shedding it here is also what makes live-recompute the sole
+  // authority for family stand-down (a durable sibling label would strand the
+  // family when the blocker re-verdicts — see the deferred-family note in the
+  // pipeline doc). Removing an absent label is a no-op, so a non-architectural
+  // stub pays nothing for this entry.
+  FIX_SCOPE_ARCHITECTURAL_LABEL,
   APPROVED_ARCHIVE_LABEL,
   ARCHIVED_LABEL,
 ];

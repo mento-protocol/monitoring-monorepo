@@ -672,6 +672,31 @@ the adapter defaults to the helper's local deterministic engine because nested
 `codex exec` is unavailable there. An explicit engine selection through
 `--engine codex`, `--engine claude`, or `AUTOREVIEW_ENGINE` takes precedence
 and fails closed if that engine is unavailable; it never silently falls back.
+
+The helper resolves each external CLI in one order: an absolute path in
+`AUTOREVIEW_<COMMAND>_BIN` (`AUTOREVIEW_CODEX_BIN`, `AUTOREVIEW_CLAUDE_BIN`),
+then `PATH`, then the well-known install directories `/opt/homebrew/bin`,
+`/usr/local/bin`, and `~/.local/bin`. That last list keeps the reviewer working
+from agent-isolation and CI shells whose `PATH` omits the local package
+manager's bin directory; set `AUTOREVIEW_EXTRA_BIN_DIRS` to replace it, or to an
+empty value to search `PATH` alone. Every candidate still passes the same
+trusted-executable checks, so the wider search never widens what the reviewer
+will execute. An engine that resolves to nothing fails with the override
+variable and the probed paths instead of a bare command-not-found exit. Set
+`AUTOREVIEW_TRACE_COMMANDS=1` to log which candidate won.
+
+A resolved codex that exits 127 **and** cannot report `--version` in the same
+isolated environment is a launcher shim, not a working engine: shims re-resolve
+the real CLI from a `PATH` the reviewer deliberately withholds, so the search
+drops that candidate and continues. An engine that answers `--version` keeps its
+own exit 127 as a review failure, and the search never silently swaps in a
+different installation behind it. The probe spawns through the same
+snapshot-revalidating path as every other trusted executable, captures no pipes
+a descendant could hold open, and is bounded at 15 seconds by a `SIGKILL` sweep
+of its own process group. A probe that times out counts as failed, and the
+message says so. When every candidate is a shim, one message names each with the
+reason its probe failed and carries the engine's error.
+
 Set `AUTOREVIEW_HELPER` only when intentionally testing or replacing the
 pinned repo helper with a compatible implementation of its CLI contract.
 Prepared-bundle replacements receive only the final prompt handoff and must

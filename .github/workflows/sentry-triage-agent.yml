@@ -725,7 +725,9 @@ jobs:
           # the newest "Regressed in Sentry (last seen " reopen comment counts,
           # so a stale pre-regression verdict never re-labels a regressed
           # issue), validates the verdict against the closed four-value enum,
-          # and emits {"verdict","label","projectable","shed"} JSON. The comment
+          # and emits {"verdict","label","projectable","shed","architecturalHold"}
+          # JSON (on a local code-fix + fix_scope:architectural verdict `label`
+          # is the two-name comma list and architecturalHold is true). The comment
           # body is agent-authored from untrusted Sentry data — it is only ever
           # parsed as data, never interpolated into a command, and the emitted
           # values are closed-enum. Missing/stale/invalid verdict -> nonzero exit ->
@@ -764,6 +766,19 @@ jobs:
           # label the stub does not carry is a no-op, so the first-pass case is
           # unaffected. Closed enum from a closed enum — never agent text.
           shed=$(jq -r '.shed' "${parse_file}")
+          # The architectural hold (#1812): a local code-fix + fix_scope
+          # architectural verdict. `label` above already carries
+          # sentry:fix-scope-architectural (the parser appended it to the comma
+          # list), so it rides the SAME atomic edit below. This flag tells the
+          # close step to leave the stub OPEN. Shape-guarded to the closed
+          # boolean in the style of the prior-verdict guard — the value is our own
+          # parser's output, but a malformed one must never reach the close step's
+          # `[ = "true" ]` branch, and it is never interpolated into a command.
+          architectural_hold=$(jq -r '.architecturalHold' "${parse_file}")
+          if ! [[ "${architectural_hold}" =~ ^(true|false)$ ]]; then
+            echo "::error::architecturalHold for issue #${QUEUE_ISSUE_NUMBER} is '${architectural_hold}', not true/false; leaving sentry:needs-triage in place for retry."
+            exit 1
+          fi
           gh issue edit "${QUEUE_ISSUE_NUMBER}" \
             --repo "${GITHUB_REPOSITORY}" \
             --remove-label "sentry:needs-triage,${shed}" \
@@ -831,6 +846,7 @@ jobs:
             echo "verdict=${verdict}"
             echo "label=${label}"
             echo "projectable=${projectable}"
+            echo "architectural_hold=${architectural_hold}"
           } >> "${GITHUB_OUTPUT}"
 
       # -----------------------------------------------------------------------
@@ -923,11 +939,14 @@ jobs:
 
       # -----------------------------------------------------------------------
       # Queue hygiene (#1338/#1354): a verdicted queue issue is a closed ledger
-      # entry, not an archive record. This step settles every bucket EXCEPT
-      # actionable EXTERNAL verdicts, which are deferred (left open,
-      # verdict-labeled) to the serialized `project` job below — projection and
-      # its close must run one-at-a-time to kill the same-run duplicate-family
-      # race, and the projection PAT must never reach these matrix jobs. The
+      # entry, not an archive record. This step settles every bucket EXCEPT two
+      # that stay OPEN: actionable EXTERNAL verdicts, which are deferred (left
+      # open, verdict-labeled) to the serialized `project` job below — projection
+      # and its close must run one-at-a-time to kill the same-run duplicate-family
+      # race, and the projection PAT must never reach these matrix jobs — and
+      # local architectural code-fix (#1812), which stays open under
+      # sentry:fix-scope-architectural as human design work (autofix excludes it
+      # at query time). The
       # comment text is fixed; the only variables are closed-enum values —
       # never agent-authored text. Regression reopens closed issues
       # automatically (Stage A's reopen path in scripts/sentry-triage-ingest.mjs)
@@ -939,6 +958,7 @@ jobs:
           VERDICT: ${{ steps.verdict.outputs.verdict }}
           VERDICT_LABEL: ${{ steps.verdict.outputs.label }}
           PROJECTABLE: ${{ steps.verdict.outputs.projectable }}
+          ARCHITECTURAL_HOLD: ${{ steps.verdict.outputs.architectural_hold }}
         run: |
           set -euo pipefail
           projection_note=""
@@ -946,6 +966,17 @@ jobs:
             code-fix | config-fix)
               if [ "${PROJECTABLE}" = "true" ]; then
                 echo "Issue #${QUEUE_ISSUE_NUMBER} has an actionable external verdict; leaving it open for the serialized project job."
+                exit 0
+              fi
+              # Architectural hold (#1812): a LOCAL code-fix whose fix_scope is
+              # architectural is open human design work. The verdict step already
+              # applied sentry:verdict-code-fix + sentry:fix-scope-architectural in
+              # one atomic edit; leave the stub OPEN as the visible backlog rather
+              # than closing it. The exact shape of the needs-human exit above.
+              # (A crash between that label edit and here leaves an open,
+              # verdict+hold-labeled stub, which IS the intended terminal state.)
+              if [ "${VERDICT}" = "code-fix" ] && [ "${ARCHITECTURAL_HOLD}" = "true" ]; then
+                echo "Issue #${QUEUE_ISSUE_NUMBER} is a local code-fix with fix_scope: architectural; left OPEN under sentry:fix-scope-architectural for a human design decision."
                 exit 0
               fi
               # Actionable but LOCAL/unrecognized affected_repo: nothing to

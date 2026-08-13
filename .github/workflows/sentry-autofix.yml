@@ -83,8 +83,9 @@ permissions:
 jobs:
   # ---------------------------------------------------------------------------
   # select: pick the capped batch of code-fix queue stubs owned by THIS repo
-  # that do not yet have a fix PR — one per duplicate_of family, so five stubs
-  # of one root cause cost one run, not five — and emit them as a matrix.
+  # that claim fix_scope: mechanical and do not yet have a fix PR — one per
+  # duplicate_of family, so five stubs of one root cause cost one run, not
+  # five — and emit them as a matrix.
   # ALWAYS runs and
   # ALWAYS emits a valid JSON array — the kill switch and the secret/App guards
   # live in the first step, so a disabled or unprovisioned state is a clean
@@ -94,9 +95,14 @@ jobs:
   # scripts/sentry-autofix-select.mjs (+ tests), not inline. The cap counts
   # CANDIDATES: one duplicate_of family consumes one slot however many stubs it
   # spans (issue #1784). Family collapse DEFERS the rest without writing
-  # anything to the queue, so this job also emits the deferred count and issue
+  # anything to the queue. Fresh architectural verdicts are excluded from the
+  # candidate window at query time (settlement labels them
+  # sentry:fix-scope-architectural, #1812); the fix_scope gate still SKIPS any
+  # legacy architectural stub the window admits without writing anything (issue
+  # #1785), and the record-run job then backfills the label so the next run
+  # excludes it too. This job emits both stand-down counts and their issue
   # numbers — the record job is the only durable trace of a suppressed queue,
-  # and without it "everything stood down" reads exactly like "nothing queued".
+  # and without them "everything stood down" reads exactly like "nothing queued".
   # ---------------------------------------------------------------------------
   select:
     runs-on: ubuntu-latest
@@ -131,6 +137,15 @@ jobs:
       # suppressed queue from an empty one — the record job renders both.
       deferred: ${{ steps.select.outputs.deferred }}
       deferred_issues: ${{ steps.select.outputs.deferred_issues }}
+      # How many candidates the fix_scope gate skipped as `architectural`, and
+      # which. Skipping writes nothing to the queue EITHER — deliberately, since
+      # a refusal marker is terminal — so this is that class's only durable
+      # trace. Every verdict predating the field reads as architectural, which
+      # makes an unreported skip indistinguishable from a leg that never shipped.
+      # The record-run job also backfills the sentry:fix-scope-architectural
+      # label onto these stubs so next run excludes them at query time.
+      skipped: ${{ steps.select.outputs.skipped }}
+      skipped_issues: ${{ steps.select.outputs.skipped_issues }}
       # The list-window tripwire (PR #1810): total stubs the window held vs how
       # many the eval cap let this run READ. The record job renders "Window: N
       # stubs, evaluated M" when N>M, so an approach toward the cap is surfaced
@@ -180,6 +195,13 @@ jobs:
           # read a real 0 rather than an absent file.
           deferred_report="${RUNNER_TEMP}/autofix-deferred.json"
           printf '[]' > "${deferred_report}"
+          # Same for the fix_scope gate. Seeded empty for the same reason, and
+          # written by BOTH selector paths below: unlike family deferral (batch
+          # only), a single-issue dispatch can be skipped on scope too, and the
+          # dispatch is the documented remedy for a stalled leg — a silent
+          # remedy for a silent stall is how #1758 stayed undiagnosed.
+          skipped_report="${RUNNER_TEMP}/autofix-skipped.json"
+          printf '[]' > "${skipped_report}"
           # The list-window tripwire (PR #1810). Seed it empty: every branch that
           # does not run the batch selector legitimately has no window, and the
           # record job must read a real 0/0 (no Window line) rather than an
@@ -219,7 +241,8 @@ jobs:
             if [[ "${DISPATCH_ISSUE}" =~ ^[0-9]+$ ]]; then
               entries=$(node scripts/sentry-autofix-select.mjs \
                 --repo "${GITHUB_REPOSITORY}" \
-                --issue "${DISPATCH_ISSUE}")
+                --issue "${DISPATCH_ISSUE}" \
+                --skipped-out "${skipped_report}")
             else
               echo "::error::workflow_dispatch input issue_number must be a plain integer"
               exit 1
@@ -231,6 +254,7 @@ jobs:
               --repo "${GITHUB_REPOSITORY}" \
               --cap 2 \
               --deferred-out "${deferred_report}" \
+              --skipped-out "${skipped_report}" \
               --window-out "${window_report}" \
               --truncations-out "${truncations_report}")
           fi
@@ -242,6 +266,9 @@ jobs:
           deferred=$(jq 'length' "${deferred_report}")
           deferred_issues=$(jq -r '[.[].issue | numbers | floor | tostring] | join(" ")' \
             "${deferred_report}")
+          skipped=$(jq 'length' "${skipped_report}")
+          skipped_issues=$(jq -r '[.[].issue | numbers | floor | tostring] | join(" ")' \
+            "${skipped_report}")
           # Window tripwire, floored to non-negative integers (our own JSON, but
           # keep the record-job contract integer-only).
           window_total=$(jq -r '(.total // 0) | floor' "${window_report}")
@@ -257,6 +284,8 @@ jobs:
             echo "count=${count}"
             echo "deferred=${deferred}"
             echo "deferred_issues=${deferred_issues}"
+            echo "skipped=${skipped}"
+            echo "skipped_issues=${skipped_issues}"
             echo "window_total=${window_total}"
             echo "window_evaluated=${window_evaluated}"
             echo "handled_overflow=${handled_overflow}"
@@ -264,7 +293,7 @@ jobs:
             echo "reverse_nonconvergent=${reverse_nonconvergent}"
             echo "disposition=${disposition}"
           } >> "${GITHUB_OUTPUT}"
-          echo "Selected ${count} candidate(s), deferred ${deferred}, window ${window_evaluated}/${window_total} [${disposition}]: ${entries}"
+          echo "Selected ${count} candidate(s), deferred ${deferred}, skipped ${skipped}, window ${window_evaluated}/${window_total} [${disposition}]: ${entries}"
 
   # ---------------------------------------------------------------------------
   # autofix: one claude-code-action fix + deterministic PR per selected stub.
@@ -1115,11 +1144,12 @@ jobs:
   # fail the run (continue-on-error), and it needs only issues:write — no Claude
   # or App credential. Opened/refused are read back from the selected stubs'
   # labels (fix-pr-opened / fix-refused), so this job needs no matrix-output
-  # plumbing. Deferred CANNOT be read back that way — family deferral writes
-  # nothing to the queue by design — so it is threaded from the select job's
-  # outputs; a run whose whole window was suppressed must not render as an idle
-  # one. The rolling comment is keyed by its own marker, distinct from the
-  # ingest's, so the two records coexist on the tracker.
+  # plumbing. Deferred and skipped CANNOT be read back that way — family
+  # deferral and the fix_scope gate both write nothing to the queue by design —
+  # so they are threaded from the select job's outputs; a run whose whole window
+  # was suppressed must not render as an idle one. The rolling comment is keyed
+  # by its own marker, distinct from the ingest's, so the two records coexist on
+  # the tracker.
   # ---------------------------------------------------------------------------
   record-run:
     needs: [select, agent, finalize]
@@ -1154,6 +1184,8 @@ jobs:
           COUNT: ${{ needs.select.outputs.count }}
           DEFERRED: ${{ needs.select.outputs.deferred }}
           DEFERRED_ISSUES: ${{ needs.select.outputs.deferred_issues }}
+          SKIPPED: ${{ needs.select.outputs.skipped }}
+          SKIPPED_ISSUES: ${{ needs.select.outputs.skipped_issues }}
           WINDOW_TOTAL: ${{ needs.select.outputs.window_total }}
           WINDOW_EVALUATED: ${{ needs.select.outputs.window_evaluated }}
           HANDLED_OVERFLOW: ${{ needs.select.outputs.handled_overflow }}
@@ -1170,6 +1202,8 @@ jobs:
           count="${COUNT:-0}"
           deferred="${DEFERRED:-0}"
           deferred_issues="${DEFERRED_ISSUES:-}"
+          skipped="${SKIPPED:-0}"
+          skipped_issues="${SKIPPED_ISSUES:-}"
           window_total="${WINDOW_TOTAL:-0}"
           window_evaluated="${WINDOW_EVALUATED:-0}"
           handled_overflow="${HANDLED_OVERFLOW:-0}"
@@ -1182,6 +1216,8 @@ jobs:
             count=0
             deferred=0
             deferred_issues=""
+            skipped=0
+            skipped_issues=""
             window_total=0
             window_evaluated=0
             handled_overflow=0
@@ -1226,6 +1262,8 @@ jobs:
             --incomplete "${incomplete}" \
             --deferred "${deferred}" \
             --deferred-issues "${deferred_issues}" \
+            --skipped "${skipped}" \
+            --skipped-issues "${skipped_issues}" \
             --window-total "${window_total}" \
             --window-evaluated "${window_evaluated}" \
             --handled-overflow "${handled_overflow}" \
@@ -1260,3 +1298,43 @@ jobs:
             gh issue comment "${TRACKER_ISSUE}" --repo "${REPO}" \
               --body "${body}" >/dev/null 2>&1 || true
           fi
+
+      # Backfill sentry:fix-scope-architectural onto the LEGACY local code-fix
+      # stubs this run skipped as fix_scope: architectural (#1812). Fresh
+      # architectural verdicts are labeled at settlement and excluded from the
+      # candidate window at query time; legacy stubs (verdicted before the label
+      # existed) carry no label, so the selector re-reads and re-skips them every
+      # run — the one monotonic growth driver #1813 measured. Labeling them here
+      # (this is the record-run job, main-only with issues:write — the select job
+      # stays issues:read) drains that backlog at up to 50/run. Best-effort: the
+      # module self-heal-creates the label, adds it idempotently, and never
+      # throws; continue-on-error means a persistent failure just leaves the
+      # stubs re-evaluated next run (a permanently nonzero skipped count), never a
+      # silent strand. Legacy stubs stay CLOSED — this only adds a window
+      # exclusion, no reopen (regression reopens via the ingest path).
+      - name: Backfill architectural labels (best-effort)
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SKIPPED_ISSUES: ${{ needs.select.outputs.skipped_issues }}
+          DISPOSITION: ${{ needs.select.outputs.disposition }}
+          SELECT_RESULT: ${{ needs.select.result }}
+        run: |
+          set -uo pipefail
+          # Only when the select job actually ran and reported architectural
+          # skips: a failed/off-main/disabled select reports nothing, so there is
+          # nothing to backfill and no reason to touch the label at all.
+          if [ "${SELECT_RESULT}" != "success" ] || [ "${DISPOSITION:-}" != "active" ]; then
+            echo "select was ${SELECT_RESULT}/${DISPOSITION:-unknown}; no architectural backfill this run."
+            exit 0
+          fi
+          if [ -z "${SKIPPED_ISSUES:-}" ]; then
+            echo "No fix_scope: architectural skips this run; nothing to backfill."
+            exit 0
+          fi
+          # The numbers are the select job's own validated integer output; the
+          # module re-validates each against ^[0-9]+$ before it reaches a gh argv.
+          node scripts/sentry-autofix-record-labels.mjs \
+            --repo "${REPO}" \
+            --issues "${SKIPPED_ISSUES}" || true

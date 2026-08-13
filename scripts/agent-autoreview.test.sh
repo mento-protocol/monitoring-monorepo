@@ -1882,6 +1882,7 @@ run_node_helper_in_repo_expect_failure() {
       "HOME=$HOME" \
       "TMPDIR=${TMPDIR:-/tmp}" \
       "GIT_CONFIG_GLOBAL=/dev/null" \
+      "AUTOREVIEW_EXTRA_BIN_DIRS=" \
       "$node_bin" "$repo_root/scripts/agent-autoreview.mjs" \
       "$@" >"$stdout" 2>"$stderr"
   ) || status=$?
@@ -2222,6 +2223,217 @@ run_requested_codex_missing_regression() {
   run_node_helper_in_repo_expect_failure "$review_repo" --mode local --engine codex
   expect_stdout_contains "autoreview target: local"
   expect_stderr_contains "codex CLI is not available"
+  expect_stderr_contains "set AUTOREVIEW_CODEX_BIN to its absolute path"
+  expect_stderr_contains "Probed:"
+  expect_stdout_not_contains "autoreview clean"
+}
+
+run_codex_resolution_helper() {
+  local review_repo="$1"
+  local search_path="$2"
+  shift 2
+  : >"$stdout"
+  : >"$stderr"
+  local status=0
+  (
+    cd "$review_repo"
+    env -i \
+      "PATH=$search_path" \
+      "HOME=$HOME" \
+      "TMPDIR=${TMPDIR:-/tmp}" \
+      "GIT_CONFIG_GLOBAL=/dev/null" \
+      "$@" \
+      "$node_bin" "$repo_root/scripts/agent-autoreview.mjs" \
+      --mode local --engine codex >"$stdout" 2>"$stderr"
+  ) || status=$?
+  return "$status"
+}
+
+# The reviewer must resolve its engine from a shell whose PATH omits the local
+# package manager's bin directory; agent-isolation shells routinely do, and a
+# missed codex used to force a slow remote review instead.
+run_codex_binary_resolution_regression() {
+  local review_repo="$tmp_dir/codex-binary-resolution"
+  local fake_bin="$tmp_dir/codex-binary-resolution-bin"
+  local shim_bin="$tmp_dir/codex-binary-resolution-shim"
+  local failing_bin="$tmp_dir/codex-binary-resolution-failing"
+  local hanging_bin="$tmp_dir/codex-binary-resolution-hanging"
+  local probe_started
+  local probe_elapsed
+  local status=0
+
+  init_review_repo "$review_repo"
+  printf 'base\n' >"$review_repo/README.md"
+  commit_review_repo "$review_repo" init
+  printf 'change\n' >>"$review_repo/README.md"
+
+  mkdir "$fake_bin"
+  cat >"$fake_bin/codex" <<'CODEX'
+#!/bin/bash
+output=""
+while [[ "$#" -gt 0 ]]; do
+  case "$1" in
+    -o)
+      output="$2"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+cat >/dev/null
+printf '%s\n' '{"findings":[],"overall_correctness":"patch is correct","overall_explanation":"clean","overall_confidence":0.9}' >"$output"
+CODEX
+  chmod +x "$fake_bin/codex"
+
+  # A launcher shim: it resolves and runs, then cannot find the real codex in
+  # the sanitized environment the reviewer hands its engine.
+  mkdir "$shim_bin"
+  cat >"$shim_bin/codex" <<'CODEX'
+#!/bin/bash
+printf 'Error: codex not found in PATH\n' >&2
+exit 127
+CODEX
+  chmod +x "$shim_bin/codex"
+
+  # A working engine that answers --version and still exits 127 on the review.
+  mkdir "$failing_bin"
+  cat >"$failing_bin/codex" <<'CODEX'
+#!/bin/bash
+if [[ "${1:-}" == "--version" ]]; then
+  printf 'codex-cli 9.9.9\n'
+  exit 0
+fi
+printf 'internal helper missing\n' >&2
+exit 127
+CODEX
+  chmod +x "$failing_bin/codex"
+
+  # A shim whose --version ignores SIGTERM and leaves a descendant running.
+  # Only a SIGKILL sweep of the whole group can bound this probe.
+  mkdir "$hanging_bin"
+  cat >"$hanging_bin/codex" <<'CODEX'
+#!/bin/bash
+if [[ "${1:-}" == "--version" ]]; then
+  trap '' TERM INT
+  sleep 90 &
+  sleep 90
+  exit 0
+fi
+printf 'Error: codex not found in PATH\n' >&2
+exit 127
+CODEX
+  chmod +x "$hanging_bin/codex"
+
+  # PATH has no codex, so the configured well-known install directory decides.
+  run_codex_resolution_helper "$review_repo" "$hermetic_git_bin" \
+    "AUTOREVIEW_EXTRA_BIN_DIRS=$fake_bin" \
+    "AUTOREVIEW_TRACE_COMMANDS=1"
+  expect_stdout_contains "autoreview clean"
+  expect_stderr_contains "resolved codex via well-known install location"
+  expect_stderr_contains "codex-binary-resolution-bin/codex"
+
+  # An explicit override decides before any search directory.
+  run_codex_resolution_helper "$review_repo" "$hermetic_git_bin" \
+    "AUTOREVIEW_CODEX_BIN=$fake_bin/codex" \
+    "AUTOREVIEW_TRACE_COMMANDS=1"
+  expect_stdout_contains "autoreview clean"
+  expect_stderr_contains "resolved codex via AUTOREVIEW_CODEX_BIN"
+
+  # Resolution stays quiet unless the trace is requested.
+  run_codex_resolution_helper "$review_repo" "$hermetic_git_bin" \
+    "AUTOREVIEW_CODEX_BIN=$fake_bin/codex"
+  expect_stdout_contains "autoreview clean"
+  expect_empty_stderr
+
+  # A shim that exits 127 is an unresolved engine, not a review failure: the
+  # search moves on to the next candidate instead of aborting the review.
+  run_codex_resolution_helper "$review_repo" "$shim_bin:$hermetic_git_bin" \
+    "AUTOREVIEW_EXTRA_BIN_DIRS=$fake_bin" \
+    "AUTOREVIEW_TRACE_COMMANDS=1"
+  expect_stdout_contains "autoreview clean"
+  expect_stderr_contains "resolved codex via PATH"
+  expect_stderr_contains "resolved codex via well-known install location"
+
+  # When every candidate is such a shim, one message names them and keeps the
+  # engine's own error rather than claiming the CLI was never found.
+  status=0
+  run_codex_resolution_helper "$review_repo" "$shim_bin:$hermetic_git_bin" \
+    "AUTOREVIEW_EXTRA_BIN_DIRS=" || status=$?
+  if [[ "$status" -eq 0 ]]; then
+    printf 'expected an all-shim codex search to fail\n' >&2
+    exit 1
+  fi
+  expect_stderr_contains \
+    "codex CLI cannot run in the reviewer's isolated environment"
+  expect_stderr_contains "codex-binary-resolution-shim/codex exited 127 and"
+  expect_stderr_contains "its --version probe exited 127"
+  expect_stderr_contains "Engine error:"
+  expect_stdout_not_contains "autoreview clean"
+
+  # A probe that ignores SIGTERM and leaves a descendant behind must not wedge
+  # the review: the bounded SIGKILL sweep ends it and the timeout is named.
+  status=0
+  probe_started="$(date +%s)"
+  run_codex_resolution_helper "$review_repo" "$hanging_bin:$hermetic_git_bin" \
+    "AUTOREVIEW_EXTRA_BIN_DIRS=" || status=$?
+  probe_elapsed="$(($(date +%s) - probe_started))"
+  if [[ "$status" -eq 0 ]]; then
+    printf 'expected a hanging codex --version probe to fail the search\n' >&2
+    exit 1
+  fi
+  if [[ "$probe_elapsed" -ge 60 ]]; then
+    printf 'codex --version probe outlived its timeout: %ss\n' \
+      "$probe_elapsed" >&2
+    exit 1
+  fi
+  expect_stderr_contains "its --version probe timed out after"
+  expect_stderr_contains "codex-binary-resolution-hanging/codex"
+  expect_stdout_not_contains "autoreview clean"
+
+  # An engine that can report its version keeps its own exit 127 as a review
+  # failure: the search must not discard it and try a different installation.
+  status=0
+  run_codex_resolution_helper "$review_repo" "$failing_bin:$hermetic_git_bin" \
+    "AUTOREVIEW_EXTRA_BIN_DIRS=$fake_bin" || status=$?
+  if [[ "$status" -eq 0 ]]; then
+    printf 'expected a genuine codex exit 127 to fail the review\n' >&2
+    exit 1
+  fi
+  expect_stderr_contains "codex-binary-resolution-failing/codex failed (127)"
+  expect_stderr_contains "internal helper missing"
+  expect_stdout_not_contains "autoreview clean"
+
+  # An unusable override reports itself instead of exiting 127.
+  status=0
+  run_codex_resolution_helper "$review_repo" "$hermetic_git_bin" \
+    "AUTOREVIEW_CODEX_BIN=$tmp_dir/absent-codex-override" || status=$?
+  if [[ "$status" -eq 0 ]]; then
+    printf 'expected an unusable AUTOREVIEW_CODEX_BIN override to fail\n' >&2
+    exit 1
+  fi
+  if [[ "$status" -eq 127 ]]; then
+    printf 'unusable AUTOREVIEW_CODEX_BIN override exited 127 without guidance\n' >&2
+    exit 1
+  fi
+  expect_stderr_contains \
+    "AUTOREVIEW_CODEX_BIN does not point at a trusted absolute executable"
+  expect_stderr_contains "Probed: $tmp_dir/absent-codex-override"
+  expect_stdout_not_contains "autoreview clean"
+
+  # A relative override never falls back to a search path either.
+  status=0
+  run_codex_resolution_helper "$review_repo" "$hermetic_git_bin" \
+    "AUTOREVIEW_CODEX_BIN=codex" \
+    "AUTOREVIEW_EXTRA_BIN_DIRS=$fake_bin" || status=$?
+  if [[ "$status" -eq 0 ]]; then
+    printf 'expected a relative AUTOREVIEW_CODEX_BIN override to fail\n' >&2
+    exit 1
+  fi
+  expect_stderr_contains \
+    "AUTOREVIEW_CODEX_BIN does not point at a trusted absolute executable"
+  expect_stderr_contains "Probed: codex"
   expect_stdout_not_contains "autoreview clean"
 }
 
@@ -6097,6 +6309,7 @@ CODEX
       "HOME=$HOME" \
       "TMPDIR=${TMPDIR:-/tmp}" \
       "GIT_CONFIG_GLOBAL=/dev/null" \
+      "AUTOREVIEW_EXTRA_BIN_DIRS=" \
       "$node_exec" "$repo_root/scripts/agent-autoreview.mjs" \
       --mode local \
       --engine codex >"$stdout" 2>"$stderr"
@@ -6108,6 +6321,32 @@ CODEX
   expect_stderr_contains "codex CLI is not available"
   if [[ -e "$group_codex_marker" || -e "$world_codex_marker" ]]; then
     printf 'codex script under shared-writable ancestry executed\n' >&2
+    exit 1
+  fi
+}
+
+# Sealed-snapshot revalidation is an invariant only if every synchronous spawn
+# of a resolved executable honours it. spawnTrustedSync is that chokepoint; a
+# bare spawnSync of a resolved path would execute a snapshot nobody rechecked.
+run_trusted_sync_spawn_invariant_regression() {
+  local helper_source="$repo_root/scripts/agent-autoreview.mjs"
+  local offenders
+
+  offenders="$(
+    grep -nE '(^|[^A-Za-z])spawnSync\(' "$helper_source" |
+      grep -vE '^[0-9]+:[[:space:]]*//' |
+      grep -vE '^[0-9]+:import ' |
+      grep -vE 'spawnSync\("/bin/ls"' |
+      grep -vE '^[0-9]+:[[:space:]]*return spawnSync\(command, args, options\);$' ||
+      true
+  )"
+  if [[ -n "$offenders" ]]; then
+    printf 'autoreview helper spawns a resolved executable outside spawnTrustedSync, skipping snapshot revalidation:\n%s\n' \
+      "$offenders" >&2
+    exit 1
+  fi
+  if ! grep -q 'spawnTrustedSync(executable, \["--version"\]' "$helper_source"; then
+    printf 'the engine version probe no longer spawns through spawnTrustedSync\n' >&2
     exit 1
   fi
 }
@@ -6388,6 +6627,7 @@ run_untrusted_cleanup_retention_regression() {
 
 run_engine_isolation_family() {
   run_requested_codex_missing_regression
+  run_codex_binary_resolution_regression
   run_suite_family_diagnostic_regression
   run_claude_no_tools_regression
   run_codex_isolation_regression
@@ -6439,6 +6679,7 @@ run_runtime_trust_family() {
   run_unsafe_script_fallback_regressions
   run_privileged_shebang_startup_regression
   run_hostile_volta_environment_regression
+  run_trusted_sync_spawn_invariant_regression
 }
 
 run_bundle_integrity_family() {

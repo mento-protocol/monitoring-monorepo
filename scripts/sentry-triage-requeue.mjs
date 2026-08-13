@@ -60,7 +60,10 @@
 import {
   NEEDS_TRIAGE_LABEL,
   neutralizeUntrusted,
+  QUEUE_LABEL,
   REOPEN_SHED_LABELS,
+  STRAND_SHAPE_CLOSED_NEEDS_TRIAGE,
+  STRAND_SHAPE_OPEN_VERDICT,
   truncateTitle,
 } from "./sentry-triage-queue-contract.mjs";
 import {
@@ -134,16 +137,42 @@ export function buildRegressedComment(lastSeen) {
  * keeps failing to reopen SHOULD accumulate a note per attempt, because that
  * repetition is the honest signal. So the text says what this run is doing and
  * what a failure means, and reads correctly either way.
+ *
+ * One note per stranded SHAPE. They describe different damage — a stub closed
+ * while still queued, versus one verdicted and never settled (issue #1817) — and
+ * an operator reading the stub has to be able to tell which happened. An unknown
+ * shape throws, before any I/O, for the same reason `buildRequeueNote` does: a
+ * caller that cannot name the shape has not decided anything.
  */
-export function buildStrandedRecoveryComment() {
-  return (
+const STRANDED_RECOVERY_NOTES = {
+  [STRAND_SHAPE_CLOSED_NEEDS_TRIAGE]:
     "Sentry triage ingest is recovering this queue stub: it was closed while " +
     "still carrying `sentry:needs-triage`, a pairing no pipeline stage can " +
     "see — the triage selector lists open stubs only. It is shedding the stale " +
     "verdict, projection and autofix markers, and a reopen follows this note. " +
     "If that reopen fails the stub stays closed and the next scheduled run " +
-    "retries, so this note can appear more than once."
-  );
+    "retries, so this note can appear more than once.",
+  [STRAND_SHAPE_OPEN_VERDICT]:
+    "Sentry triage ingest is recovering this queue stub: it has sat open with " +
+    "a verdict label and no `sentry:needs-triage` since a triage round applied " +
+    "that verdict and never settled it — a shape no pipeline stage can see, " +
+    "because the triage selector needs the label and every later step skips a " +
+    "stub that is not queued. It is restoring `sentry:needs-triage` and " +
+    "shedding the stale verdict, projection and autofix markers, so the next " +
+    "scheduled run re-triages it. If any of those writes does not land, the " +
+    "run goes red naming what survived, so this note can appear more than once.",
+};
+
+export function buildStrandedRecoveryComment(
+  shape = STRAND_SHAPE_CLOSED_NEEDS_TRIAGE,
+) {
+  const note = STRANDED_RECOVERY_NOTES[shape];
+  if (!note) {
+    throw new Error(
+      `Unknown stranded shape ${JSON.stringify(shape)}; a recovery must name one of ${Object.keys(STRANDED_RECOVERY_NOTES).join(", ")}.`,
+    );
+  }
+  return note;
 }
 
 /**
@@ -189,13 +218,32 @@ export function hasAdmissibleVerdict(comments) {
   return selectVerdictComment(comments ?? []).body !== null;
 }
 
-/** The pair Stage B's selector matches: `--state open` AND
- * `sentry:needs-triage`. A stub missing either is invisible to triage, and — if
- * its `closedAt` postdates the regression — to ingest as well. */
+/**
+ * Everything Stage B's selector matches, and it takes THREE things, not two:
+ * `--label sentry-triage --label sentry:needs-triage --state open`
+ * (.github/workflows/sentry-triage-agent.yml). A stub missing any of them is
+ * invisible to triage, and — if its `closedAt` postdates the regression — to
+ * ingest as well.
+ *
+ * `sentry-triage` was missing here while the docstring claimed this was the
+ * selector, which made it a predicate that could report a stub selectable when
+ * Stage B would never see it (issue #1817). It is the END-STATE test every
+ * `verify-end-state` re-queue is judged by, so the omission let a re-queue shed a
+ * stub's verdict, leave it unselectable, and still report success — the exact
+ * outcome the verification exists to catch. Every caller wanted the real
+ * selector; none wanted the pair.
+ *
+ * The verifier CORRECTS the other two — it reopens a closed stub and re-adds
+ * `sentry:needs-triage` — and deliberately does NOT correct this one. Removing
+ * `sentry-triage` is how a human retires a stub for good, so putting it back
+ * would overrule the withdrawal. Its absence is reported, never repaired.
+ */
 export function isSelectableForTriage({ state, labels } = {}) {
+  const names = Array.isArray(labels) ? labels : [];
   return (
     String(state ?? "").toUpperCase() !== "CLOSED" &&
-    (Array.isArray(labels) ? labels : []).includes(NEEDS_TRIAGE_LABEL)
+    names.includes(QUEUE_LABEL) &&
+    names.includes(NEEDS_TRIAGE_LABEL)
   );
 }
 
@@ -351,6 +399,17 @@ export async function ensureSelectableForTriage(
     const live = await observe();
     if (live && isSelectableForTriage(live)) return live;
 
+    // WITHDRAWN: stop, and write nothing more. `sentry-triage` gone from a read
+    // we actually took means a human retired this stub while the re-queue was
+    // in flight. Neither correction below can make it selectable again — only
+    // re-adding the label would, and doing that would overrule the withdrawal —
+    // so continuing would just be more writes on an issue somebody removed from
+    // the queue. Fall through to the failure below, which says what was seen.
+    // A FAILED read is different and keeps the old behaviour: `live` is null, we
+    // know nothing about membership, and correcting from `fallbackState` is
+    // still the right guess.
+    if (live && !(live.labels ?? []).includes(QUEUE_LABEL)) break;
+
     // Correct whatever is — or, with no read, may be — wrong. Both writes are
     // idempotent, so a repeat costs nothing and a lost response is harmless.
     const looksClosed = live
@@ -402,11 +461,28 @@ export async function ensureSelectableForTriage(
   const seen = observed
     ? `state=${observed.state}, labels=${observed.labels.join("|")}`
     : `unreadable (${readError})`;
+
+  // Membership gone is a DIFFERENT operator story from the rest, and telling
+  // them apart is the whole value of the message: nothing here is broken, a
+  // human retired the stub mid-re-queue and this run had already shed its
+  // previous-round markers by then. Say that, and do not ask anyone to undo the
+  // withdrawal by re-adding the label.
+  const withdrawn =
+    observed !== null && !(observed.labels ?? []).includes(QUEUE_LABEL);
+  if (withdrawn) {
+    process.stderr.write(
+      `::error::Queue stub #${issueNumber} lost ${QUEUE_LABEL} while it was being re-queued for triage (${seen}), so it is no longer in the queue and Stage B will never select it. This run had already shed its previous-round markers (${REOPEN_SHED_LABELS.join(", ")}). Nothing is re-adding ${QUEUE_LABEL} — removing it is how a stub is retired. If the removal was a mistake, re-add ${QUEUE_LABEL} and ${NEEDS_TRIAGE_LABEL} by hand.\n`,
+    );
+    throw new Error(
+      `Queue stub #${issueNumber} left the queue (${QUEUE_LABEL} removed) during a re-queue for triage (${seen}).`,
+    );
+  }
+
   process.stderr.write(
-    `::error::Queue stub #${issueNumber} could not be confirmed open and carrying ${NEEDS_TRIAGE_LABEL} after refusing to archive over a live regression (${seen}). It is STRANDED — Stage B selects only open stubs, and ingest will skip it while its closedAt postdates the regression. Reopen it by hand.\n`,
+    `::error::Queue stub #${issueNumber} could not be confirmed open and carrying ${NEEDS_TRIAGE_LABEL} while being re-queued for triage (${seen}). It is STRANDED — restore it by hand: reopen it if it is closed, add ${NEEDS_TRIAGE_LABEL}, and remove any stale marker from the previous round (${REOPEN_SHED_LABELS.join(", ")}).\n`,
   );
   throw new Error(
-    `Queue stub #${issueNumber} is not selectable for triage after a live-regression refusal (${seen}).`,
+    `Queue stub #${issueNumber} is not selectable for triage after a re-queue (${seen}).`,
   );
 }
 

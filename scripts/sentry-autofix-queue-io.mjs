@@ -20,6 +20,7 @@ import {
   CODE_FIX_VERDICT_LABEL,
   FIX_PR_OPENED_LABEL,
   FIX_REFUSED_LABEL,
+  FIX_SCOPE_ARCHITECTURAL_LABEL,
   PROJECTED_LABEL,
 } from "./sentry-triage-ingest.mjs";
 import { autofixBranchName } from "./sentry-autofix-finalize.mjs";
@@ -143,8 +144,19 @@ export async function listCodeFixStubs(runGh, repo) {
     //     projects — matches only this project's stubs. The exact client-side
     //     `parseProject === LOCAL_SENTRY_PROJECT` check below stays as the
     //     precise gate (this server filter only needs to keep the WINDOW local).
+    //   - fix_scope architectural (#1812): a local code-fix verdict whose scope
+    //     is architectural is open human design work the autofix leg never
+    //     selects. Settlement labels it `sentry:fix-scope-architectural` and the
+    //     record-run backfill labels the legacy stubs, so this fifth `-label:`
+    //     term excludes the whole architectural class — the fail-closed value
+    //     every pre-#1785 verdict normalizes to — at the SOURCE. Without it that
+    //     class is the only monotonic growth driver left in the window (#1813):
+    //     it is skipped on scope every run and never gets a terminal marker, so
+    //     it would accumulate forever and, oldest-first, starve fresh candidates.
+    //     evaluateCandidate's fix_scope re-parse stays the authority, so a stale
+    //     or missing label costs one reported skip, never a wrong selection.
     "--search",
-    `sort:created-asc -label:"${FIX_PR_OPENED_LABEL}" -label:"${FIX_REFUSED_LABEL}" -label:"${PROJECTED_LABEL}" -label:"${ARCHIVED_LABEL}" ${LOCAL_SENTRY_PROJECT} in:title`,
+    `sort:created-asc -label:"${FIX_PR_OPENED_LABEL}" -label:"${FIX_REFUSED_LABEL}" -label:"${PROJECTED_LABEL}" -label:"${ARCHIVED_LABEL}" -label:"${FIX_SCOPE_ARCHITECTURAL_LABEL}" ${LOCAL_SENTRY_PROJECT} in:title`,
     "--json",
     "number,title,labels,createdAt",
     "--limit",

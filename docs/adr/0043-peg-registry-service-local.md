@@ -123,7 +123,8 @@ unpublished.
 
 ## Evidence
 
-- `docs/PLAN-peg-monitoring.md` (schema sketch and review findings)
+- [PR #1445](https://github.com/mento-protocol/monitoring-monorepo/pull/1445)
+  (original schema sketch and review findings)
 - `metrics-bridge/peg-registry.json` and
   `metrics-bridge/src/peg/registry.ts` (implemented topology and schema)
 - `metrics-bridge/test/peg-registry.test.ts`

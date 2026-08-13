@@ -823,6 +823,8 @@ export function runCli(argv, { stdout = process.stdout } = {}) {
           incomplete: readFlag(args, "--incomplete"),
           deferred: readFlag(args, "--deferred"),
           deferredIssues: readFlag(args, "--deferred-issues"),
+          skipped: readFlag(args, "--skipped"),
+          skippedIssues: readFlag(args, "--skipped-issues"),
           windowTotal: readFlag(args, "--window-total"),
           windowEvaluated: readFlag(args, "--window-evaluated"),
           handledOverflow: readFlag(args, "--handled-overflow"),

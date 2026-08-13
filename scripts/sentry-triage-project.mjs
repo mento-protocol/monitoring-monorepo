@@ -52,6 +52,7 @@ export * from "./sentry-triage-project-core.mjs";
 import {
   DEFAULT_REPO,
   extractPermalink,
+  FIX_SCOPE_ARCHITECTURAL,
   isPriorVerdictToken,
   isValidShortId,
   MAX_DUPLICATE_LOOKUPS,
@@ -90,7 +91,11 @@ import {
   buildProjectedTitle,
   commentBacklinksShortId,
 } from "./sentry-triage-projection.mjs";
-import { LABEL_DEFINITIONS, VERDICT_LABELS } from "./sentry-triage-ingest.mjs";
+import {
+  FIX_SCOPE_ARCHITECTURAL_LABEL,
+  LABEL_DEFINITIONS,
+  VERDICT_LABELS,
+} from "./sentry-triage-ingest.mjs";
 // Clear any stale needs-human brief before this job CLOSES a projected stub: a
 // stub re-triaged needs-human -> code-fix/config-fix whose brief-clear failed in
 // the matrix would otherwise be projected and closed here still showing the
@@ -413,6 +418,17 @@ async function markStubProjected(localRun, localRepo, issue, projectedUrl) {
  * one GitHub happens to order first. Bash cannot import a JS constant, so the
  * list travels through this single authoritative parser's output rather than
  * becoming a second literal list in the workflow.
+ *
+ * `label` is a COMMA LIST, not always one name (issue #1812): a local `code-fix`
+ * verdict whose `fix_scope` is `architectural` adds
+ * `sentry:fix-scope-architectural` beside the verdict label, riding the same
+ * atomic `--add-label`. `architecturalHold` (boolean) tells the close step to
+ * leave that stub OPEN as human design work rather than closing it. The hold
+ * label sits OUTSIDE the `sentry:verdict-*` namespace, so the label step's
+ * post-condition reread still counts exactly one verdict label; `shed` carries
+ * the hold label EXACTLY when the hold does not apply, so a re-dispatched stub
+ * whose scope flips to mechanical un-strands in the same edit and no name ever
+ * lands in both lists.
  */
 export async function runParseOnly(options, deps = {}) {
   const runGh = deps.runGh ?? defaultRunGh;
@@ -429,14 +445,39 @@ export async function runParseOnly(options, deps = {}) {
   const { parsed, verdict, label } = resolveVerdict(issue, options.queueIssue, {
     priorVerdictCommentId: options.priorVerdictCommentId,
   });
+  // Hoist `repoCheck` out of the projectable branch: PROJECTABLE_VERDICTS holds
+  // code-fix, so the architectural-hold gate below (which is code-fix only) always
+  // has it computed on that path — computing it once here keeps the selector's
+  // gate (evaluateCandidate) and this settlement gate reading the exact same
+  // reason, so they can never disagree about which stub holds.
   let projectable = false;
+  let repoCheck = null;
   if (PROJECTABLE_VERDICTS.includes(verdict)) {
-    const repoCheck = validateAffectedRepo(parsed.affectedRepo);
+    repoCheck = validateAffectedRepo(parsed.affectedRepo);
     if (repoCheck.warning) {
       process.stderr.write(`::warning::${repoCheck.warning}\n`);
     }
     projectable = repoCheck.projectable;
   }
+  // The architectural hold (issue #1812): a LOCAL `code-fix` verdict whose
+  // `fix_scope` is `architectural` is open human design work, not a mechanical
+  // diff — the autofix leg must never select it, and the stub stays OPEN as the
+  // visible human backlog. The gate is the EXACT triple evaluateCandidate uses
+  // (verdict === code-fix, local owning repo, scope architectural), so the
+  // selector and settlement can never disagree.
+  const architecturalHold =
+    verdict === "code-fix" &&
+    repoCheck?.reason === "local-repo" &&
+    parsed.fixScope === FIX_SCOPE_ARCHITECTURAL;
+  // `label` is the comma-joined ADD list for the label step's single
+  // `gh issue edit --add-label`: the bare verdict label, or — on the hold — the
+  // verdict label PLUS `sentry:fix-scope-architectural`. gh accepts a comma list
+  // in one --add-label value, so the hold label rides the SAME atomic edit; it
+  // sits OUTSIDE the `sentry:verdict-*` namespace, so the settlement
+  // post-condition still counts exactly one verdict label.
+  const addLabel = architecturalHold
+    ? `${label},${FIX_SCOPE_ARCHITECTURAL_LABEL}`
+    : label;
   // The VERDICT namespace only — deliberately not REOPEN_SHED_LABELS, which
   // also carries `sentry:projected` and the autofix/archive markers. Shedding
   // the autofix markers here would un-dedup the select step and let the same
@@ -446,8 +487,16 @@ export async function runParseOnly(options, deps = {}) {
   // stub does not carry is a no-op — the same property
   // `buildReopenLabelEditArgs` relies on — so the first-pass case (no verdict
   // label yet) costs nothing.
-  const shed = VERDICT_LABELS.filter((name) => name !== label).join(",");
-  return { verdict, label, projectable, shed };
+  //
+  // Append `sentry:fix-scope-architectural` to the shed list EXACTLY when the
+  // hold does NOT apply: a re-dispatched stub whose fresh verdict flips to
+  // mechanical (or off code-fix) then un-strands in the same edit, and one name
+  // never lands in both `--add-label` and `--remove-label`. When the hold DOES
+  // apply the label is in the add list only, so it is deliberately absent here.
+  const shedLabels = VERDICT_LABELS.filter((name) => name !== label);
+  if (!architecturalHold) shedLabels.push(FIX_SCOPE_ARCHITECTURAL_LABEL);
+  const shed = shedLabels.join(",");
+  return { verdict, label: addLabel, projectable, shed, architecturalHold };
 }
 
 /**
@@ -796,6 +845,23 @@ export async function runProjectionBatch(options, deps = {}) {
         });
         continue;
       }
+      // Architectural hold (issue #1812): a held stub is OPEN and carries the
+      // actionable `sentry:verdict-code-fix` label, so without this guard it
+      // reaches runProjection, which returns `skipped-repo` for a local owning
+      // repo — and the batch project workflow reds on `skipped-repo`. The hold
+      // label rides the SAME atomic edit as the verdict label minutes earlier in
+      // this run, and the batch only ever holds the current run's issues, so the
+      // label is a reliable in-run signal. Skip it as a benign state (the
+      // workflow's `skipped-state` arm continues) — the stub stays open as human
+      // design work, which is the intended terminal shape.
+      if (stub.labels.includes(FIX_SCOPE_ARCHITECTURAL_LABEL)) {
+        results.push({
+          issue: number,
+          status: "skipped-state",
+          reason: "architectural-open",
+        });
+        continue;
+      }
       label =
         stub.labels.find((name) =>
           Object.hasOwn(ACTIONABLE_LABEL_TO_VERDICT, name),
@@ -878,11 +944,15 @@ Options:
   --issues <json>      JSON array of queue-issue numbers (batch mode).
   --repo <owner/name>  Repo the queue stub lives in (default: ${DEFAULT_REPO}).
   --parse-only         Resolve and print the validated verdict + mapped label +
-                       projectability ({"verdict","label","projectable"} JSON)
-                       without projecting. Used by the workflow's label step so
-                       labeling and projection share ONE parser. Fails (exit 1)
-                       on a missing, stale pre-regression, or invalid verdict
-                       comment.
+                       projectability + shed list + architecturalHold
+                       ({"verdict","label","projectable","shed","architecturalHold"}
+                       JSON) without projecting. \`label\` is a comma list on a
+                       local code-fix + fix_scope:architectural verdict (adds
+                       sentry:fix-scope-architectural), and architecturalHold then
+                       tells the close step to leave the stub open. Used by the
+                       workflow's label step so labeling and projection share ONE
+                       parser. Fails (exit 1) on a missing, stale pre-regression,
+                       or invalid verdict comment.
   --prior-verdicts     Print {"<issue>": "<comment-id>|${PRIOR_VERDICT_NONE}|${PRIOR_VERDICT_UNKNOWN}"} for
                        --issues: the verdict comment already on each stub. Run
                        by the SELECT job, before the triage agent, to record

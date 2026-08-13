@@ -4,10 +4,16 @@
 // Every step in that workflow between the verdict label swap and the ledger
 // close runs on a stub whose `sentry:needs-triage` has already been removed. So
 // every FAILING exit in that window owes the same thing: put the stub back in
-// the queue. Nothing downstream would — the scheduled selector admits only
-// open + `sentry:needs-triage`, the project job skips a stub that is not
-// needs-triage, and ingest's regression gate only reopens CLOSED stubs — so a
-// bare exit strands an open, verdict-labeled stub with no retry path at all.
+// the queue. Nothing downstream would do it promptly — the scheduled selector
+// admits only open + `sentry:needs-triage`, the project job skips a stub that is
+// not needs-triage, and ingest's regression gate only reopens CLOSED stubs — so
+// a bare exit strands an open, verdict-labeled stub.
+//
+// Ingest's stranded sweep is the BACKSTOP for that shape, not a substitute for
+// this CLI (issue #1817): it repairs the stub only after a full day of idleness,
+// because the same shape is what a live triage round looks like between its
+// verdict label and its close. Compensating here is what keeps the stub out of
+// that window in the first place, in seconds rather than a day.
 //
 // Those exits used to open-code the label swap, one copy each (#1769 round 16
 // converted the first of them, and #1782 the rest). Open-coding is how the

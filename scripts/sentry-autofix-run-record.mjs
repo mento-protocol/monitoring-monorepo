@@ -32,21 +32,20 @@ function oneLine(value, fallback) {
   return s || fallback;
 }
 
-// How many deferred issue numbers the record names before it stops. The list is
-// an operator affordance (each one is a candidate for the single-issue
-// `workflow_dispatch` override), not an inventory — the count above it is the
+// How many stood-down issue numbers ONE record line names before it stops. The
+// list is an operator affordance, not an inventory — the count beside it is the
 // signal, and an unbounded list on a public rolling comment is just noise.
 const MAX_RECORDED_DEFERRED_ISSUES = 10;
 
 /**
- * ` (#1313, #1316, …)` for a deferred-issue list, or "" when there is none.
+ * ` (#1313, #1316, …)` for a stood-down issue list, or "" when there is none.
  *
  * Whitelist-parsed, not sanitized: the input arrives through the workflow env as
  * a free-form string, so anything that is not a bare positive integer is
  * DROPPED rather than escaped. That is what keeps this line safe on a public
- * tracker comment even though the deferral it describes was triggered by
- * agent-authored `duplicate_of` text — the numbers themselves come from GitHub,
- * and nothing else survives the filter.
+ * tracker comment even though BOTH stand-downs it renders were triggered by
+ * agent-authored text — `duplicate_of` for a deferral, `fix_scope` for a skip —
+ * the numbers themselves come from GitHub, and nothing else survives the filter.
  */
 function renderDeferredIssues(deferredIssues) {
   const numbers = String(deferredIssues ?? "")
@@ -70,6 +69,18 @@ function renderDeferredIssues(deferredIssues) {
  * else — so a permanently family-starved queue looked like a healthy idle leg,
  * which is precisely the failure mode ADR 0036's observability invariant exists
  * to make detectable.
+ *
+ * `skipped` is the SECOND stand-down class, on the same argument (issue #1785):
+ * a `fix_scope: architectural` verdict the selector skips writes nothing to the
+ * queue from the select leg. Fresh architectural verdicts settle OPEN under
+ * `sentry:fix-scope-architectural` and are excluded from the window at query
+ * time (issue #1812), so this counter now tracks the LEGACY stragglers the
+ * record-run backfill has not yet labeled — and since every verdict predating
+ * the field normalizes to `architectural`, an unreported skip makes "triage is
+ * correctly classifying architectural" and "the prompt change never shipped"
+ * render the same. Both counters are separate lines because they lift on
+ * different events: a deferral lifts when a sibling's marker goes, a skip when
+ * the backfill labels it (or a re-triage clears it).
  */
 export function buildAutofixRunRecordBody({
   timestampIso,
@@ -81,6 +92,8 @@ export function buildAutofixRunRecordBody({
   incomplete,
   deferred,
   deferredIssues,
+  skipped,
+  skippedIssues,
   windowTotal,
   windowEvaluated,
   handledOverflow,
@@ -99,6 +112,7 @@ export function buildAutofixRunRecordBody({
     `- Refused (no PR): ${nonNegativeInt(refused)}`,
     `- Incomplete / errored: ${nonNegativeInt(incomplete)}`,
     `- Deferred (duplicate_of family): ${nonNegativeInt(deferred)}${renderDeferredIssues(deferredIssues)}`,
+    `- Skipped (fix_scope: architectural): ${nonNegativeInt(skipped)}${renderDeferredIssues(skippedIssues)}`,
   ];
   // Window tripwire (PR #1810): rendered ONLY when the list window exceeded the
   // evaluation cap (total > evaluated). The selector bounds the READ at

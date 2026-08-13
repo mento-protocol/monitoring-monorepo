@@ -75,9 +75,12 @@ deterministic step.**
   `config-fix` verdict whose `affected_repo` is an EXTERNAL owning repo, it
   files an issue in that repo, labels the stub `sentry:projected`, comments
   the projected URL, and closes the stub. The matrix settles local actionable
-  and `upstream-transient` stubs, leaves `needs-human` open, and defers external
-  actionable stubs to this job. `needs-human` and `upstream-transient` are never
-  projected.
+  and `upstream-transient` stubs and defers external actionable stubs to this
+  job, but leaves TWO classes OPEN: `needs-human`, and a local `code-fix` whose
+  `fix_scope` is `architectural` — open human design work held under
+  `sentry:fix-scope-architectural` and excluded from the autofix candidate window
+  at query time (issue #1812), so projection and queue-hygiene work must not
+  auto-close it. `needs-human` and `upstream-transient` are never projected.
 - **The trust boundary is a fixed allowlist plus authorship.** `affected_repo`
   is untrusted agent text, validated against exactly `frontend-monorepo`,
   `mento-analytics-api`, `minipay-dapp`; anything else (including this repo) is a

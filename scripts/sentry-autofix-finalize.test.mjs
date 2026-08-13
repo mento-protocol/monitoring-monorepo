@@ -35,11 +35,25 @@ import {
 // and the untrusted-author selection fence.
 import { AUTOFIX_RUN_RECORD_MARKER } from "./sentry-autofix-run-record.mjs";
 import { AUTOFIX_COMMENT_PREFIX } from "./sentry-triage-digest.mjs";
-import { selectMarkedComment } from "./sentry-triage-project-core.mjs";
+import {
+  FIX_SCOPE_MECHANICAL,
+  selectMarkedComment,
+  VERDICT_MARKER,
+} from "./sentry-triage-project-core.mjs";
 import {
   FIX_PR_OPENED_LABEL,
   FIX_REFUSED_LABEL,
+  FIX_SCOPE_ARCHITECTURAL_LABEL,
 } from "./sentry-triage-ingest.mjs";
+// The record-run backfill labeler (#1812) is a new record-run-job module; its
+// tests live in this suite, which already covers the record-run body.
+import {
+  backfillArchitecturalLabels,
+  MAX_BACKFILL_LABELS,
+  planArchitecturalBackfill,
+  SKIP_FIX_SCOPE_ARCHITECTURAL,
+  skipReportFromIssueList,
+} from "./sentry-autofix-record-labels.mjs";
 
 let passed = 0;
 let failed = 0;
@@ -66,6 +80,12 @@ function assertEqual(actual, expected) {
       `expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`,
     );
   }
+}
+
+function assertDeepEqual(actual, expected) {
+  const a = JSON.stringify(actual);
+  const e = JSON.stringify(expected);
+  if (a !== e) throw new Error(`expected ${e}, got ${a}`);
 }
 
 function captureCli(argv) {
@@ -907,6 +927,721 @@ await test("guard catches underscore-containing / underscore-split credential fi
     filesWithCredentialShapedName(["src/AUTH_CONFIG_CONSTANTS.ts"]).length ===
       0,
     "SCREAMING_SNAKE const path allowed",
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Record-run architectural backfill labeler (#1812). Drains the legacy
+// architectural backlog by labeling the stubs the selector skipped, so the next
+// run excludes them at query time.
+// ---------------------------------------------------------------------------
+
+const architecturalSkip = (issue) => ({
+  issue,
+  reason: SKIP_FIX_SCOPE_ARCHITECTURAL,
+});
+
+const BOT = { login: "github-actions[bot]" };
+const NEEDS_TRIAGE = "sentry:needs-triage";
+
+// A `gh issue view --json …` body carrying ONE trusted verdict comment — the
+// shape `readStub`/`resolveVerdict` re-read during the backfill revalidation.
+// `fixScope: null` omits the line (normalizes to architectural, the pre-#1785
+// shape); FIX_SCOPE_MECHANICAL makes the stub selectable again. `affectedRepo`
+// defaults to this repo; set it to an allowlisted-external repo to model a
+// re-triage that moved the owning repo off-local.
+function verdictView(
+  number,
+  {
+    verdict = "code-fix",
+    fixScope = null,
+    affectedRepo = "mento-protocol/monitoring-monorepo",
+    labels = null,
+  } = {},
+) {
+  const body = [
+    VERDICT_MARKER,
+    "",
+    "```yaml",
+    `verdict: ${verdict}`,
+    "confidence: medium",
+    `affected_repo: ${affectedRepo}`,
+    "summary: A scoped bug",
+    "root_cause: |",
+    "  Abstract root cause.",
+    "proposed_action: |",
+    "  Abstract action.",
+    "duplicate_of: []",
+    ...(fixScope === null ? [] : [`fix_scope: ${fixScope}`]),
+    "```",
+    "",
+    "Diagnosis prose.",
+  ].join("\n");
+  return JSON.stringify({
+    number: Number(number),
+    title: `[sentry] APP-MENTO-ORG-${number} (analytics-mento-org, error)`,
+    body: "",
+    // The re-queue chokepoint reads STATE too (its selectable pair is
+    // open + sentry:needs-triage), so the fixture carries both.
+    state: "OPEN",
+    labels: (labels ?? ["sentry-triage"]).map((name) => ({ name })),
+    comments: [{ author: BOT, body, createdAt: "2026-07-18T00:00:00Z" }],
+  });
+}
+
+// runGh mock for the backfill loop: `label create` and `issue edit` succeed;
+// `issue view` returns the configured LIVE verdict per number so the
+// revalidation re-read runs for real. `scopeByNumber` maps a number string to a
+// `verdictView` spec, or the sentinel "gone" (no verdict comment) / "error" (the
+// read throws). A number not in the map defaults to still-architectural.
+//
+// The write is bracketed by TWO reads (the #1389-shaped pre/post guard), so a
+// spec may also be an ARRAY of specs consumed one per read for that number: the
+// first entry answers the pre-write check, the second the post-write check. That
+// is how the TOCTOU window is modelled — the state moves between the two reads.
+// A one-entry array (or a plain spec) answers every read the same way.
+// `removeFails` makes the compensating `--remove-label` edit throw.
+// A withdrawal also RE-QUEUES the stub through the chokepoint, which issues its
+// own label edits and then READS the stub back to confirm the selectable pair
+// (open + sentry:needs-triage). So the mock tracks live labels per issue and
+// answers `issue view` from them — otherwise the chokepoint's end-state
+// verification could never observe the label it just wrote. `requeueFails` makes
+// the needs-triage add fail, which is what drives the chokepoint to throw.
+// `terminalByNumber` flips a stub to a settled state for every read AFTER the
+// post-write check — modelling projection or the archive leg completing in the
+// gap before the compensating re-queue. `{ state, labels }` are merged into the
+// view the chokepoint's revalidation reads. `terminalReadFails` makes that
+// revalidation read throw instead.
+function makeBackfillRunGh({
+  scopeByNumber = {},
+  calls = [],
+  removeFails = false,
+  requeueFails = false,
+  terminalByNumber = {},
+  terminalReadFails = false,
+} = {}) {
+  const reads = new Map();
+  const labelsByNumber = new Map();
+  const labelsOf = (number) => {
+    if (!labelsByNumber.has(number)) {
+      labelsByNumber.set(number, new Set(["sentry-triage"]));
+    }
+    return labelsByNumber.get(number);
+  };
+  const runGh = async (args) => {
+    calls.push(args);
+    const [a0, a1] = args;
+    if (a0 === "issue" && a1 === "edit") {
+      const number = String(args[2]);
+      const addIdx = args.indexOf("--add-label");
+      const removeIdx = args.indexOf("--remove-label");
+      if (removeFails && removeIdx !== -1) {
+        throw new Error("gh issue edit --remove-label failed: boom");
+      }
+      if (requeueFails && addIdx !== -1 && args[addIdx + 1] === NEEDS_TRIAGE) {
+        throw new Error("gh issue edit --add-label failed: boom");
+      }
+      if (addIdx !== -1) {
+        for (const name of String(args[addIdx + 1]).split(",")) {
+          labelsOf(number).add(name);
+        }
+      }
+      if (removeIdx !== -1) {
+        for (const name of String(args[removeIdx + 1]).split(",")) {
+          labelsOf(number).delete(name);
+        }
+      }
+      return "{}";
+    }
+    if (a0 === "issue" && a1 === "view") {
+      const number = String(args[2]);
+      const configured = scopeByNumber[number] ?? {};
+      let spec = configured;
+      if (Array.isArray(configured)) {
+        const seen = reads.get(number) ?? 0;
+        reads.set(number, seen + 1);
+        spec = configured[Math.min(seen, configured.length - 1)];
+      }
+      const live = [...labelsOf(number)];
+      // Reads 1 and 2 are the guard's pre/post pair; anything after is the
+      // re-queue chokepoint's own revalidation/verification read, which is where
+      // a stub that went terminal in the gap becomes visible.
+      const seenSoFar = reads.get(number) ?? 0;
+      const terminal = terminalByNumber[number];
+      if (terminal && seenSoFar > 2) {
+        if (terminalReadFails) {
+          throw new Error("gh issue view failed: boom");
+        }
+        return JSON.stringify({
+          number: Number(number),
+          title: "t",
+          body: "",
+          state: terminal.state ?? "CLOSED",
+          labels: [...live, ...(terminal.labels ?? [])].map((name) => ({
+            name,
+          })),
+          comments: [],
+        });
+      }
+      if (spec === "error") throw new Error("gh issue view failed: boom");
+      if (spec === "gone") {
+        return JSON.stringify({
+          number: Number(number),
+          title: "t",
+          body: "",
+          state: "OPEN",
+          labels: live.map((name) => ({ name })),
+          comments: [],
+        });
+      }
+      return verdictView(number, { ...spec, labels: live });
+    }
+    return "{}";
+  };
+  return { runGh, calls };
+}
+
+await test("backfill: self-heal-creates the label FIRST, then one ^[0-9]+$-validated --add-label per stub", async () => {
+  // Every stub is still live-architectural, so all pass revalidation and label.
+  const { runGh, calls } = makeBackfillRunGh();
+  const skip = [
+    architecturalSkip("10"),
+    architecturalSkip("22"),
+    architecturalSkip("10"), // duplicate collapses
+  ];
+  const res = await backfillArchitecturalLabels(
+    skip,
+    { repo: "o/r" },
+    { runGh },
+  );
+  // The FIRST gh call is the self-heal label create (from LABEL_DEFINITIONS).
+  assertEqual(calls[0][0], "label");
+  assertEqual(calls[0][1], "create");
+  assertEqual(calls[0][2], FIX_SCOPE_ARCHITECTURAL_LABEL);
+  assert(calls[0].includes("--force"), "self-heal create must be --force");
+  // Then exactly one --add-label edit per distinct valid number, in order.
+  const edits = calls
+    .slice(1)
+    .filter((c) => c[0] === "issue" && c[1] === "edit");
+  assertDeepEqual(
+    edits.map((c) => c[2]),
+    ["10", "22"],
+  );
+  for (const c of edits) {
+    assertEqual(c[c.indexOf("--add-label") + 1], FIX_SCOPE_ARCHITECTURAL_LABEL);
+  }
+  assertDeepEqual(res.labeled, ["10", "22"]);
+});
+
+await test("backfill: a malformed (non-integer) issue number is REFUSED, never interpolated into a gh argv", async () => {
+  const { runGh, calls } = makeBackfillRunGh();
+  const skip = [
+    architecturalSkip("7"),
+    architecturalSkip("not-a-number"),
+    architecturalSkip("9; rm -rf /"),
+  ];
+  const res = await backfillArchitecturalLabels(
+    skip,
+    { repo: "o/r" },
+    { runGh },
+  );
+  const edits = calls.filter((c) => c[0] === "issue" && c[1] === "edit");
+  assertDeepEqual(
+    edits.map((c) => c[2]),
+    ["7"],
+  );
+  assertDeepEqual(res.refused, ["not-a-number", "9; rm -rf /"]);
+});
+
+await test("backfill: only fix-scope-architectural skips are labeled (a future skip reason is ignored)", () => {
+  const plan = planArchitecturalBackfill([
+    architecturalSkip("1"),
+    { issue: "2", reason: "some-other-skip" },
+    architecturalSkip("3"),
+  ]);
+  assertDeepEqual(plan.numbers, ["1", "3"]);
+});
+
+await test("backfill: idempotent — re-running produces the identical --add-label edits", async () => {
+  const run = async () => {
+    const { runGh, calls } = makeBackfillRunGh();
+    await backfillArchitecturalLabels(
+      [architecturalSkip("5"), architecturalSkip("6")],
+      { repo: "o/r" },
+      { runGh },
+    );
+    return calls
+      .filter((c) => c[0] === "issue" && c[1] === "edit")
+      .map((c) => c.join(" "));
+  };
+  assertDeepEqual(await run(), await run());
+});
+
+await test("backfill: caps the per-run write volume at MAX_BACKFILL_LABELS, overflow labeled later", () => {
+  const many = [];
+  for (let i = 0; i < MAX_BACKFILL_LABELS + 5; i += 1) {
+    many.push(architecturalSkip(String(1000 + i)));
+  }
+  const plan = planArchitecturalBackfill(many);
+  assertEqual(plan.numbers.length, MAX_BACKFILL_LABELS);
+  assertEqual(plan.overflow, 5);
+});
+
+await test("backfill: the CLI's space-separated issue list rebuilds an all-architectural skip report", () => {
+  const report = skipReportFromIssueList("10 22 33");
+  assertDeepEqual(report, [
+    architecturalSkip("10"),
+    architecturalSkip("22"),
+    architecturalSkip("33"),
+  ]);
+  assertDeepEqual(skipReportFromIssueList(""), []);
+});
+
+await test("backfill: revalidates each stub's LIVE scope before labeling — stale/gone/unreadable are left selectable (#1812 race)", async () => {
+  // The skip report is a snapshot from the select run. Between select and this
+  // record run each stub can move: #10 is still architectural (label it), #22 was
+  // re-triaged to mechanical (must NOT be re-excluded off the stale snapshot), #33
+  // lost its verdict comment, #44 fails to read. The last three fail CLOSED: no
+  // label, so they stay selectable and self-heal next run.
+  const calls = [];
+  const { runGh } = makeBackfillRunGh({
+    calls,
+    scopeByNumber: {
+      10: { fixScope: null },
+      22: { fixScope: FIX_SCOPE_MECHANICAL },
+      33: "gone",
+      44: "error",
+    },
+  });
+  const res = await backfillArchitecturalLabels(
+    [
+      architecturalSkip("10"),
+      architecturalSkip("22"),
+      architecturalSkip("33"),
+      architecturalSkip("44"),
+    ],
+    { repo: "o/r" },
+    { runGh },
+  );
+  assertDeepEqual(res.labeled, ["10"]);
+  assertDeepEqual(res.revalidated, ["22", "33", "44"]);
+  // Only the still-architectural stub got an --add-label edit; the stale ones did
+  // not (the whole point — a now-mechanical stub must not be re-excluded).
+  const editedNumbers = calls
+    .filter((c) => c[0] === "issue" && c[1] === "edit")
+    .map((c) => c[2]);
+  assertDeepEqual(editedNumbers, ["10"]);
+});
+
+await test("backfill NEGATIVE CONTROL: a stub whose live verdict is now mechanical is NEVER re-labeled (reds if the re-read is dropped)", async () => {
+  // Drop the revalidation re-read and #77 gets the stale architectural label back
+  // — the exact race Finding 1 closes. So this asserts the absence of that write:
+  // remove `liveArchitecturalScope` from the loop and both assertions go red.
+  const calls = [];
+  const { runGh } = makeBackfillRunGh({
+    calls,
+    scopeByNumber: { 77: { fixScope: FIX_SCOPE_MECHANICAL } },
+  });
+  const res = await backfillArchitecturalLabels(
+    [architecturalSkip("77")],
+    { repo: "o/r" },
+    { runGh },
+  );
+  assertDeepEqual(res.labeled, []);
+  assertDeepEqual(res.revalidated, ["77"]);
+  assert(
+    !calls.some((c) => c[0] === "issue" && c[1] === "edit" && c[2] === "77"),
+    "a now-mechanical stub must receive no --add-label edit",
+  );
+});
+
+await test("backfill: a stub re-triaged to an allowlisted-EXTERNAL repo is not labeled (the hold is local-only)", async () => {
+  // The sentry:fix-scope-architectural hold is a LOCAL-only window exclusion.
+  // A local architectural stub re-triaged to an external allowlisted owning repo
+  // (still code-fix + architectural) must NOT get it: the hold would make
+  // runProjectionBatch's skipped-state guard drop the external issue from
+  // projection with no retry label. So the revalidation re-confirms the owning
+  // repo, exactly as the selector's evaluateCandidate does.
+  const calls = [];
+  const { runGh } = makeBackfillRunGh({
+    calls,
+    scopeByNumber: {
+      // Still LOCAL architectural -> labeled.
+      88: { fixScope: null },
+      // code-fix + architectural, but now an allowlisted-external repo -> NOT.
+      89: { fixScope: null, affectedRepo: "mento-protocol/frontend-monorepo" },
+    },
+  });
+  const res = await backfillArchitecturalLabels(
+    [architecturalSkip("88"), architecturalSkip("89")],
+    { repo: "o/r" },
+    { runGh },
+  );
+  assertDeepEqual(res.labeled, ["88"]);
+  assertDeepEqual(res.revalidated, ["89"]);
+  // Negative control: the ONLY thing keeping #89 unlabeled is the live repo
+  // re-check. Drop it from liveArchitecturalScope and #89 (code-fix +
+  // architectural) is labeled — this asserts the external stub gets no edit.
+  assertDeepEqual(
+    calls.filter((c) => c[0] === "issue" && c[1] === "edit").map((c) => c[2]),
+    ["88"],
+  );
+});
+
+// --- post-write TOCTOU guard (#1389-shaped) ---------------------------------
+//
+// The pre-write check alone cannot close the window between the read and the
+// `--add-label` edit: triage runs in its own concurrency group, so a re-triage
+// landing there has settlement REMOVE the hold and this backfill ADD IT BACK.
+// For an external code-fix that is a permanent strand (projection reads the
+// re-added hold as skipped-state and files nothing; the stub keeps no retry
+// label). So the write is bracketed by the same live check on both sides, and a
+// post-check that does not re-confirm architectural withdraws the label again.
+
+/** Run `fn` with process.stderr.write captured, so a test can assert on the
+ * notes the backfill emits (the loud ::error:: for a stuck label). */
+async function captureStderr(fn) {
+  const original = process.stderr.write.bind(process.stderr);
+  let text = "";
+  process.stderr.write = (chunk) => {
+    text += String(chunk);
+    return true;
+  };
+  try {
+    const result = await fn();
+    return { result, stderr: text };
+  } finally {
+    process.stderr.write = original;
+  }
+}
+
+/** The edits issued for one issue that target the ARCHITECTURAL HOLD exactly, in
+ * order. Scoped to that label on purpose: a withdrawal also re-queues the stub,
+ * and the chokepoint issues its own `--add-label sentry:needs-triage` plus a
+ * comma-joined shed list — neither of which is this guard's add/remove pair. */
+function labelEdits(calls, number) {
+  const out = [];
+  for (const c of calls) {
+    if (!(c[0] === "issue" && c[1] === "edit" && c[2] === String(number))) {
+      continue;
+    }
+    const addIdx = c.indexOf("--add-label");
+    const removeIdx = c.indexOf("--remove-label");
+    if (addIdx !== -1 && c[addIdx + 1] === FIX_SCOPE_ARCHITECTURAL_LABEL) {
+      out.push("add");
+    }
+    if (
+      removeIdx !== -1 &&
+      c[removeIdx + 1] === FIX_SCOPE_ARCHITECTURAL_LABEL
+    ) {
+      out.push("remove");
+    }
+  }
+  return out;
+}
+
+/** True when the stub was reopened — the write a terminal-state decline must
+ * never make (it would reverse a projection or a human-approved archive). */
+function reopenedFor(calls, number) {
+  return calls.some(
+    (c) => c[0] === "issue" && c[1] === "reopen" && c[2] === String(number),
+  );
+}
+
+/** True when the re-queue chokepoint ran for this issue: it is the only caller
+ * that adds `sentry:needs-triage`. */
+function requeuedFor(calls, number) {
+  return calls.some((c) => {
+    if (!(c[0] === "issue" && c[1] === "edit" && c[2] === String(number))) {
+      return false;
+    }
+    const addIdx = c.indexOf("--add-label");
+    return addIdx !== -1 && c[addIdx + 1] === NEEDS_TRIAGE;
+  });
+}
+
+await test("backfill TOCTOU: state moves to mechanical between the pre-read and the write — label added, then REMOVED", async () => {
+  // Pre-write read says architectural (so the write proceeds); by the post-write
+  // read a concurrent re-triage has made it mechanical. The label must be taken
+  // back off, leaving the stub selectable and re-evaluated next run.
+  const calls = [];
+  const { runGh } = makeBackfillRunGh({
+    calls,
+    scopeByNumber: {
+      101: [{ fixScope: null }, { fixScope: FIX_SCOPE_MECHANICAL }],
+    },
+  });
+  const res = await backfillArchitecturalLabels(
+    [architecturalSkip("101")],
+    { repo: "o/r" },
+    { runGh },
+  );
+  assertDeepEqual(res.labeled, []);
+  assertDeepEqual(res.withdrawn, ["101"]);
+  assertDeepEqual(res.withdrawFailed, []);
+  // Negative control: delete the post-write check and this is ["add"] — the
+  // stale hold stays on a now-mechanical stub, the strand this guard prevents.
+  assertDeepEqual(labelEdits(calls, 101), ["add", "remove"]);
+  // Removing the label is not enough: projection may already have skipped this
+  // stub on the stale hold, so it must be put back through triage. Negative
+  // control: drop the requeueQueueStub call and both of these go red.
+  assertDeepEqual(res.requeued, ["101"]);
+  assert(requeuedFor(calls, 101), "the withdrawn stub must be re-queued");
+  // The CAUSE is load-bearing, so assert its observable consequence: a
+  // bookkeeping re-queue posts the explanatory note and NO regression fence.
+  // Fencing here would mark the operator's fresh verdict stale and discard the
+  // very re-triage this stub should settle on.
+  const comments = calls
+    .filter((c) => c[0] === "issue" && c[1] === "comment" && c[2] === "101")
+    .map((c) => c[c.indexOf("--body") + 1]);
+  assert(
+    comments.some((b) => b.includes("withdrew the")),
+    `expected the withdrawal bookkeeping note, got: ${JSON.stringify(comments)}`,
+  );
+  assert(
+    !comments.some((b) => b.includes("Regressed in Sentry")),
+    "a bookkeeping re-queue must not post a regression fence",
+  );
+});
+
+await test("backfill TOCTOU: a post-check READ ERROR removes the label too (fail-closed, self-healing)", async () => {
+  // Same fail-closed stance as the pre-write half: unconfirmed means do not
+  // hold. The selector re-parses fix_scope next run, reports the skip, and this
+  // backfill re-adds the label — so removing costs at most one wasted cycle,
+  // while leaving an unverifiable hold risks the permanent strand.
+  const calls = [];
+  const { runGh } = makeBackfillRunGh({
+    calls,
+    // Read 1 (pre-write) confirms architectural; read 2 (post-write) fails —
+    // the unconfirmed branch. Read 3 is the re-queue chokepoint's own
+    // verification read, modelled as recovered: the blip was transient, and the
+    // stub it now sees was re-triaged mechanical.
+    scopeByNumber: {
+      102: [{ fixScope: null }, "error", { fixScope: FIX_SCOPE_MECHANICAL }],
+    },
+  });
+  const res = await backfillArchitecturalLabels(
+    [architecturalSkip("102")],
+    { repo: "o/r" },
+    { runGh },
+  );
+  assertDeepEqual(res.labeled, []);
+  assertDeepEqual(res.withdrawn, ["102"]);
+  assertDeepEqual(labelEdits(calls, 102), ["add", "remove"]);
+  // The unconfirmed branch withdraws too, so it must re-queue on the same
+  // argument as the selectable one.
+  assertDeepEqual(res.requeued, ["102"]);
+  assert(requeuedFor(calls, 102), "the withdrawn stub must be re-queued");
+});
+
+await test("backfill TOCTOU: the steady state keeps the label — exactly one edit, no removal", async () => {
+  // Still architectural at BOTH reads: the guard must be silent here, or every
+  // healthy backfill would churn a label on and off.
+  const calls = [];
+  const { runGh } = makeBackfillRunGh({
+    calls,
+    scopeByNumber: { 103: [{ fixScope: null }, { fixScope: null }] },
+  });
+  const res = await backfillArchitecturalLabels(
+    [architecturalSkip("103")],
+    { repo: "o/r" },
+    { runGh },
+  );
+  assertDeepEqual(res.labeled, ["103"]);
+  assertDeepEqual(res.withdrawn, []);
+  assertDeepEqual(res.withdrawFailed, []);
+  assertDeepEqual(labelEdits(calls, 103), ["add"]);
+  // No churn on the healthy path: a kept hold must NOT re-queue the stub, or
+  // every backfill would bounce its own stubs back through triage.
+  assertDeepEqual(res.requeued, []);
+  assert(
+    !requeuedFor(calls, 103),
+    "a healthy backfill must not re-queue the stub",
+  );
+  // Two reads bracket the one write (pre + post), the documented cost.
+  assertEqual(
+    calls.filter((c) => c[0] === "issue" && c[1] === "view" && c[2] === "103")
+      .length,
+    2,
+  );
+});
+
+await test("backfill TOCTOU: a FAILING compensating removal is surfaced, never silent", async () => {
+  // A hold that cannot be withdrawn is exactly the strand the guard exists to
+  // prevent, and the record-run job is continue-on-error — so it must reach both
+  // stderr (as ::error::) and the returned summary.
+  const calls = [];
+  const { runGh } = makeBackfillRunGh({
+    calls,
+    removeFails: true,
+    scopeByNumber: {
+      104: [{ fixScope: null }, { fixScope: FIX_SCOPE_MECHANICAL }],
+    },
+  });
+  const { result: res, stderr } = await captureStderr(() =>
+    backfillArchitecturalLabels(
+      [architecturalSkip("104")],
+      { repo: "o/r" },
+      { runGh },
+    ),
+  );
+  assertDeepEqual(res.labeled, []);
+  assertDeepEqual(res.withdrawn, []);
+  // Negative control: swallow the removal error (drop withdrawFailed / the
+  // ::error:: write) and both of these go red.
+  assertDeepEqual(res.withdrawFailed, ["104"]);
+  assert(
+    stderr.includes("::error::") && stderr.includes("#104"),
+    `expected a loud ::error:: for the stuck label, got: ${stderr}`,
+  );
+});
+
+// --- terminal-state guard on the compensating re-queue ----------------------
+//
+// The compensation is snapshot-driven too, so settlement can COMPLETE between
+// the withdrawal and the re-queue. A bookkeeping re-queue reopens the stub and
+// sheds sentry:projected / sentry:archived via REOPEN_SHED_LABELS, so running it
+// against a settled stub would reverse a successful projection or a
+// human-approved archive. Reuse the triage workflow's terminal predicate and
+// DECLINE instead — no compensation is owed once the pipeline reached the
+// outcome on its own. The hold removal still stands: the window query already
+// excludes a projected/archived stub through its own `-label:` negation, so
+// taking our stale hold off one changes nothing about selection.
+
+await test("backfill terminal guard: a stub CLOSED and projected after the withdrawal declines the re-queue", async () => {
+  const calls = [];
+  const { runGh } = makeBackfillRunGh({
+    calls,
+    scopeByNumber: {
+      201: [{ fixScope: null }, { fixScope: FIX_SCOPE_MECHANICAL }],
+    },
+    terminalByNumber: {
+      201: { state: "CLOSED", labels: ["sentry:projected"] },
+    },
+  });
+  const res = await backfillArchitecturalLabels(
+    [architecturalSkip("201")],
+    { repo: "o/r" },
+    { runGh },
+  );
+  // The stale hold still comes off — harmless on a terminal stub, and correct.
+  assertDeepEqual(res.withdrawn, ["201"]);
+  assertDeepEqual(labelEdits(calls, 201), ["add", "remove"]);
+  // Negative control: drop the `revalidate` guard and this re-queues — reopening
+  // a projected stub and shedding sentry:projected.
+  assertDeepEqual(res.requeueDeclined, ["201"]);
+  assertDeepEqual(res.requeued, []);
+  assert(!reopenedFor(calls, 201), "a settled stub must never be reopened");
+  assert(!requeuedFor(calls, 201), "a settled stub must not be re-queued");
+});
+
+await test("backfill terminal guard: a stub carrying sentry:archived declines the re-queue", async () => {
+  // The archive marker is human-approved. Reversing it is the worst outcome in
+  // this whole chain, so it gets its own arm.
+  const calls = [];
+  const { runGh } = makeBackfillRunGh({
+    calls,
+    scopeByNumber: {
+      202: [{ fixScope: null }, { fixScope: FIX_SCOPE_MECHANICAL }],
+    },
+    terminalByNumber: { 202: { state: "CLOSED", labels: ["sentry:archived"] } },
+  });
+  const res = await backfillArchitecturalLabels(
+    [architecturalSkip("202")],
+    { repo: "o/r" },
+    { runGh },
+  );
+  assertDeepEqual(res.requeueDeclined, ["202"]);
+  assertDeepEqual(res.requeued, []);
+  assert(!reopenedFor(calls, 202), "an archived stub must never be reopened");
+});
+
+await test("backfill terminal guard: a still-OPEN skipped stub is still re-queued (no regression)", async () => {
+  // The normal compensation case must survive the guard: this is the strand the
+  // previous commit closed, and the guard must not swallow it.
+  const calls = [];
+  const { runGh } = makeBackfillRunGh({
+    calls,
+    scopeByNumber: {
+      203: [{ fixScope: null }, { fixScope: FIX_SCOPE_MECHANICAL }],
+    },
+    // No terminalByNumber entry: the stub stays open and unsettled.
+  });
+  const res = await backfillArchitecturalLabels(
+    [architecturalSkip("203")],
+    { repo: "o/r" },
+    { runGh },
+  );
+  assertDeepEqual(res.requeued, ["203"]);
+  assertDeepEqual(res.requeueDeclined, []);
+  assert(requeuedFor(calls, 203), "an open skipped stub must be re-queued");
+});
+
+await test("backfill terminal guard: a FAILING terminal re-read does not re-queue, and is loud", async () => {
+  // Safe direction: an unconfirmable terminal state must NOT be reopened —
+  // wrongly reversing an approved archive is worse than one missed
+  // compensation, which the next run's backfill re-detects from the same skip
+  // report. The chokepoint propagates the failed revalidation read, so this
+  // lands in the loud requeueFailed bucket rather than silently proceeding.
+  const calls = [];
+  const { runGh } = makeBackfillRunGh({
+    calls,
+    scopeByNumber: {
+      204: [{ fixScope: null }, { fixScope: FIX_SCOPE_MECHANICAL }],
+    },
+    terminalByNumber: { 204: { state: "CLOSED", labels: ["sentry:archived"] } },
+    terminalReadFails: true,
+  });
+  const { result: res, stderr } = await captureStderr(() =>
+    backfillArchitecturalLabels(
+      [architecturalSkip("204")],
+      { repo: "o/r" },
+      { runGh },
+    ),
+  );
+  assertDeepEqual(res.requeued, []);
+  assertDeepEqual(res.requeueDeclined, []);
+  assertDeepEqual(res.requeueFailed, ["204"]);
+  assert(
+    !reopenedFor(calls, 204),
+    "an unconfirmable stub must not be reopened",
+  );
+  assert(
+    stderr.includes("::error::"),
+    `expected a loud ::error:: for the failed re-queue, got: ${stderr}`,
+  );
+});
+
+await test("backfill TOCTOU: a FAILING re-queue after a successful withdrawal is surfaced, never silent", async () => {
+  // The label came off, so autofix selection is unblocked — but if projection
+  // already passed this stub over on the stale hold, only the re-queue brings it
+  // back. A re-queue that never lands is therefore its own strand, and the
+  // record-run job is continue-on-error, so it must reach stderr and the summary.
+  const calls = [];
+  const { runGh } = makeBackfillRunGh({
+    calls,
+    requeueFails: true,
+    scopeByNumber: {
+      105: [{ fixScope: null }, { fixScope: FIX_SCOPE_MECHANICAL }],
+    },
+  });
+  const { result: res, stderr } = await captureStderr(() =>
+    backfillArchitecturalLabels(
+      [architecturalSkip("105")],
+      { repo: "o/r" },
+      { runGh },
+    ),
+  );
+  // The withdrawal itself succeeded — the stale hold is off.
+  assertDeepEqual(res.withdrawn, ["105"]);
+  assertDeepEqual(labelEdits(calls, 105), ["add", "remove"]);
+  // Negative control: swallow the re-queue error (drop requeueFailed / the
+  // ::error:: write) and both of these go red.
+  assertDeepEqual(res.requeued, []);
+  assertDeepEqual(res.requeueFailed, ["105"]);
+  assert(
+    stderr.includes("::error::") && stderr.includes("re-queue"),
+    `expected a loud ::error:: for the failed re-queue, got: ${stderr}`,
   );
 });
 
