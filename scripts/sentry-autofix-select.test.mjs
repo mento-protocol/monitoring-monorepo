@@ -3371,6 +3371,67 @@ await test("SECOND LOOK: a zero-selection FULL window reaches past the list ceil
   );
 });
 
+await test("SECOND LOOK: the FULL-page signal is taken off RAW rows, not the project-filtered ones", async () => {
+  // `--limit` is applied server-side, BEFORE the client-side
+  // `parseProject === LOCAL_SENTRY_PROJECT` gate. So a genuinely full page can
+  // come back short once foreign-project rows are dropped, and a `full` signal
+  // keyed on the filtered length would read "there is nothing more" on exactly
+  // the window that has the most hidden behind it.
+  //
+  // NEGATIVE CONTROL: change `full` in listCodeFixStubsPage from
+  // `list.length >= limit` to `stubs.length >= limit` and this returns [] — the
+  // starvation survives untouched, and NO other test notices.
+  const stubs = [];
+  for (let i = 0; i < LIST_LIMIT - 5; i += 1) {
+    stubs.push(
+      familyStub(
+        8300 + i,
+        `ANALYTICS-MENTO-ORG-P${i}`,
+        orderedCreatedAt(i),
+        [],
+        FIX_SCOPE_ARCHITECTURAL,
+      ),
+    );
+  }
+  // Five rows the server returns (they match the tokenized `<slug> in:title`
+  // filter) but the exact project gate drops.
+  for (let i = 0; i < 5; i += 1) {
+    stubs.push({
+      number: 8000 + i,
+      shortId: `APP-MENTO-ORG-X${i}`,
+      title: `[sentry] APP-MENTO-ORG-X${i} (app-mento-org, error)`,
+      labels: [AUTOFIX_SELECT_LABEL, "sentry-triage"],
+      createdAt: orderedCreatedAt(LIST_LIMIT - 5 + i),
+      comments: [verdictComment()],
+    });
+  }
+  stubs.push(
+    stub({
+      number: 8999,
+      shortId: "ANALYTICS-MENTO-ORG-PZ",
+      createdAt: orderedCreatedAt(LIST_LIMIT + 1),
+    }),
+  );
+  const { runGh } = makeRunGh({ stubs });
+  const { entries, window } = await selectAutofixRun(
+    { repo: "o/r", cap: 2 },
+    { runGh },
+  );
+  assertEqual(
+    window.total,
+    LIST_LIMIT - 5,
+    "the project gate really did shorten the page",
+  );
+  assertEqual(
+    window.secondLook,
+    true,
+    "a RAW-full page still takes a second look",
+  );
+  assertDeepEqual(entries, [
+    { issue: 8999, shortId: "ANALYTICS-MENTO-ORG-PZ" },
+  ]);
+});
+
 await test("SECOND LOOK: a healthy run that selected anything never fires it (it must cost nothing)", async () => {
   // The whole licence for adding a second pass is that a normal run pays zero
   // for it. One selectable stub at the head of the window is enough.
