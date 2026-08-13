@@ -179,14 +179,13 @@ required source-staging flag/value. [ADR 0053](adr/0053-explicit-deployment-sour
 defines the supported static discovery syntax and its deliberate indirect and
 dynamic proof limits.
 
-The source-staging migration is complete: both buckets and their scoped IAM are
-applied, all five deployment paths were canaried, and the broad project-level
-Storage Admin, Storage Object Admin, and Service Account User fallbacks were
-removed and audited. App Engine's default AppSpot service account retains
-Storage Admin only on its service-owned
-`staging.mento-monitoring.appspot.com` bucket for App Engine's internal deploy
-staging. [ADR 0053](adr/0053-explicit-deployment-source-staging.md) records
-that permission split and completed sequence.
+The source-staging migration keeps both buckets and every deploy caller on
+scoped IAM. Broad project-level Storage Admin, Storage Object Admin, and Service
+Account User fallbacks stay removed. App Engine uploaders and the default
+AppSpot service account receive Storage Admin only on the service-owned
+`staging.mento-monitoring.appspot.com` bucket for version submission and App
+Engine's internal deploy staging. [ADR 0053](adr/0053-explicit-deployment-source-staging.md)
+records that permission split.
 
 The Metrics Bridge builder foundation is applied, its effective IAM is
 verified, `cloudbuild.yaml` pins both submit paths to it, and both route canaries

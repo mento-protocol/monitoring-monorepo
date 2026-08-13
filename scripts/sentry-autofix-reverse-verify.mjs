@@ -37,7 +37,7 @@ import {
  * parsed verdict, or `null` when the stub cannot be read or carries no usable
  * fenced verdict (a comment mention that is not a real verdict). Never throws.
  */
-async function readVerdictCached(runGh, repo, number, cache) {
+async function readVerdictCached(runGh, repo, number, cache, failedReads) {
   const key = String(number);
   if (cache.has(key)) return cache.get(key);
   let parsed;
@@ -46,6 +46,12 @@ async function readVerdictCached(runGh, repo, number, cache) {
     parsed = resolveVerdict(full, number).parsed;
   } catch {
     parsed = null;
+    // A FAILED read is cached as `null` so one broken stub cannot be re-read once
+    // per fixpoint iteration — but that null is spend, not knowledge, and it is
+    // indistinguishable from the legitimate "read fine, carries no fenced
+    // verdict". Recording the key here is what lets the caller keep the negative
+    // cache inside this pass and refuse to SEED it into the next one.
+    failedReads?.add(key);
   }
   cache.set(key, parsed);
   return parsed;
@@ -130,8 +136,10 @@ export const MAX_REVERSE_VERIFY_READS = 40;
  * Fail-SOFT, same direction as `openAutofixPrExists`: a `gh` failure on one
  * probe skips that probe this run (at worst one self-terminating extra attempt),
  * never rejecting out of selection. `alreadyProbed` carries across the caller's
- * fixpoint iterations so no id is queried twice AND so the per-run
- * MAX_REVERSE_PROBE_QUERIES budget bounds the whole fixpoint, not one call;
+ * fixpoint iterations (and, for the selector's second look, across PASSES) so no
+ * id is queried twice; the separate `probeBudget` counter is what bounds the
+ * per-run MAX_REVERSE_PROBE_QUERIES spend across the whole fixpoint, kept apart
+ * from the dedupe set so a seeded set cannot read as a spent budget;
  * `verifyBudget` likewise carries across iterations so the per-run
  * MAX_REVERSE_VERIFY_READS cap bounds the hit-verification reads across the whole
  * fixpoint, not one probe. Returns
@@ -152,12 +160,36 @@ export async function reverseVerifyFamilies(
   const project = options.project;
   const stubCache = options.stubCache ?? new Map();
   const probed = options.alreadyProbed ?? new Set();
+  // The ANSWERED subset of `probed`: probes whose search came back AND whose
+  // every hit was verified within budget. `probed` alone is a re-attempt guard
+  // and absorbs probes that failed or were left half-read — spend, not
+  // knowledge — so only this set may be seeded into a pass with a fresh budget.
+  // (A probe cut off by the PROBE budget never reaches `probed` at all: the
+  // ceiling check breaks before the add.) Optional: a standalone call keeps its
+  // previous behaviour exactly.
+  const answeredProbes = options.answeredProbes ?? null;
+  const failedStubReads = options.failedStubReads ?? new Set();
   // Shared across the caller's fixpoint iterations (like `probed`), so the
   // per-run verify-read cap bounds the whole reverse leg, not one call. Absent
   // (a standalone call), it defaults fresh, preserving cap-at-N per call.
   const verifyBudget = options.verifyBudget ?? {
     remaining: MAX_REVERSE_VERIFY_READS,
   };
+  // `maxProbes` overrides the per-run probe cap for ONE resolve pass — the
+  // selector's bounded second look runs on a smaller allowance because the first
+  // pass already spent the module default. Absent, the default applies.
+  const maxProbes = Number.isInteger(options.maxProbes)
+    ? options.maxProbes
+    : MAX_REVERSE_PROBE_QUERIES;
+  // The budget is a COUNTER, not `probed.size`. The two were the same while
+  // `alreadyProbed` started empty on every resolve pass, but the selector's
+  // second look now SEEDS it with the first pass's probed ids (so it does not
+  // re-issue searches the run already paid for) — and with `probed.size` as the
+  // meter, a seeded set of 40 would read as "budget already spent" and the
+  // second look would probe NOTHING while reporting `truncated`. Shared across
+  // the caller's fixpoint iterations exactly like `verifyBudget`, so the per-run
+  // cap still bounds the whole reverse leg rather than one call.
+  const probeBudget = options.probeBudget ?? { remaining: maxProbes };
   const edges = [];
   const blockers = new Set();
   let truncated = false;
@@ -168,13 +200,14 @@ export async function reverseVerifyFamilies(
     // note below, where a newline would inject a workflow command.
     if (!isLocalFamilyId(probeId, project)) continue;
     if (probed.has(probeId)) continue;
-    // Per-run probe budget (counts distinct LOCAL probes across the fixpoint via
-    // the shared `probed` set). At the ceiling, stop probing and treat the rest
-    // as not-probed — fewer blockers, MORE candidates, the safe direction.
-    if (probed.size >= MAX_REVERSE_PROBE_QUERIES) {
+    // Per-run probe budget (counts distinct LOCAL probes ISSUED across the
+    // fixpoint). At the ceiling, stop probing and treat the rest as not-probed —
+    // fewer blockers, MORE candidates, the safe direction.
+    if (probeBudget.remaining <= 0) {
       truncated = true;
       break;
     }
+    probeBudget.remaining -= 1;
     probed.add(probeId);
     let hits;
     try {
@@ -207,6 +240,16 @@ export async function reverseVerifyFamilies(
     if (Array.isArray(hits) && hits.length >= REVERSE_SEARCH_LIMIT) {
       truncated = true;
     }
+    // Whether THIS probe left any hit unresolved — starved of verify budget, or
+    // read and thrown. Either way the probe's own answer is incomplete: the hit
+    // it could not read may be the terminal sibling, and only re-probing on a
+    // fresh budget can reach it.
+    //
+    // A full page above does NOT count. That truncation is structural — the API
+    // returned `--limit` rows and page 2 is unreachable by design — so a re-probe
+    // would return the identical page and learn nothing; spending a fresh
+    // budget on it would be pure waste.
+    let hitUnresolved = false;
     for (const hit of Array.isArray(hits) ? hits : []) {
       const hitShortId = parseShortId(hit.title ?? "");
       if (!isValidShortId(hitShortId)) continue;
@@ -221,6 +264,7 @@ export async function reverseVerifyFamilies(
       if (!stubCache.has(String(hit.number))) {
         if (verifyBudget.remaining <= 0) {
           truncated = true;
+          hitUnresolved = true;
           continue;
         }
         verifyBudget.remaining -= 1;
@@ -230,7 +274,14 @@ export async function reverseVerifyFamilies(
         repo,
         hit.number,
         stubCache,
+        failedStubReads,
       );
+      // A THROWN read leaves this hit unresolved too — and unlike a hit that
+      // read fine and simply carries no fenced verdict (also `parsed == null`,
+      // and a real answer), it is worth retrying. Checked on the shared set, so
+      // a hit whose read failed in an earlier iteration and now returns from the
+      // negative cache still marks THIS probe incomplete.
+      if (failedStubReads.has(String(hit.number))) hitUnresolved = true;
       if (!parsed) continue;
       // The hub's WHOLE declared local family (project-scoped, self-excluded,
       // MAX_DUPLICATE_LOOKUPS-bounded — the forward path's exact rule). The probe
@@ -265,10 +316,14 @@ export async function reverseVerifyFamilies(
         blockers.add(hitKey);
       }
     }
+    // The probe is ANSWERED only now: its search returned AND every hit it
+    // surfaced was resolved. A `continue` on search failure above never reaches
+    // this line, which is the point.
+    if (!hitUnresolved) answeredProbes?.add(probeId);
   }
   if (truncated) {
     process.stderr.write(
-      `note: reverse family verification was truncated this run — the per-run probe budget (${MAX_REVERSE_PROBE_QUERIES}) or verify-read budget (${MAX_REVERSE_VERIFY_READS}) was reached, or a probe returned a full page; the unreached hits/probes are treated as not-admitted (fails toward MORE candidates).\n`,
+      `note: reverse family verification was truncated this pass — the probe budget (${maxProbes}) or verify-read budget was reached, or a probe returned a full page; the unreached hits/probes are treated as not-admitted (fails toward MORE candidates).\n`,
     );
   }
   return { edges, blockers: [...blockers], truncated };

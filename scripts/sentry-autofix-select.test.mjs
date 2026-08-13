@@ -1,25 +1,42 @@
 #!/usr/bin/env node
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import {
   DEFAULT_CAP,
   emitVerdict,
   MAX_CANDIDATE_EVALUATIONS,
+  MAX_SECOND_LOOK_EVALUATIONS,
   parseArgs,
+  SECOND_LOOK_FAMILY_BUDGETS,
+  SECOND_LOOK_LIST_ROWS,
+  secondLookCeilingWarning,
   selectAutofixCandidates,
   selectAutofixRun,
   SKIP_FIX_SCOPE_ARCHITECTURAL,
+  windowCeilingWarning,
+  writeReport,
+  writeRunReports,
 } from "./sentry-autofix-select.mjs";
 import {
   AUTOFIX_SELECT_LABEL,
+  ghFailureText,
   isOwnHeadPr,
-  listHandledShortIds,
+  isRateLimitFailure,
+  LIST_LIMIT,
   LOCAL_SENTRY_PROJECT,
-  MAX_HANDLED_ID_QUERIES,
   openAutofixPrExists,
 } from "./sentry-autofix-queue-io.mjs";
+import {
+  listHandledShortIds,
+  MAX_HANDLED_ID_QUERIES,
+} from "./sentry-autofix-family-handled.mjs";
 import {
   MAX_REVERSE_PROBE_QUERIES,
   MAX_REVERSE_VERIFY_READS,
   REVERSE_SEARCH_LIMIT,
+  reverseVerifyFamilies,
 } from "./sentry-autofix-reverse-verify.mjs";
 import {
   FIX_SCOPE_ARCHITECTURAL,
@@ -35,6 +52,7 @@ import {
   DEFER_FAMILY_HANDLED,
   MAX_FAMILY_MEMBERS,
 } from "./sentry-autofix-family.mjs";
+import { resolveFamilies } from "./sentry-autofix-family-resolve.mjs";
 import {
   FIX_PR_OPENED_LABEL,
   FIX_REFUSED_LABEL,
@@ -75,6 +93,25 @@ function assertEqual(actual, expected, message) {
 }
 
 const BOT = { login: "github-actions" };
+
+/** The `--limit` a window query carried. Both mocks apply it to the rows they
+ * return, exactly as the API does — before any client-side filter. */
+function windowLimit(args) {
+  const i = args.indexOf("--limit");
+  return i === -1 ? Infinity : Number(args[i + 1]);
+}
+
+/** A `createdAt` for the i-th fixture stub that sorts LEXICOGRAPHICALLY in `i`.
+ * The selector sorts the window with `localeCompare`, so the older
+ * `00:${i}:00Z` form broke once a fixture passed 60 items (`00:100:00Z` sorts
+ * before `00:87:00Z`) — and the window is now MAX_CANDIDATE_EVALUATIONS = 200
+ * wide, so every whole-window fixture is past that. Minutes + seconds keep it a
+ * real timestamp and correctly ordered up to 3600 stubs. */
+function orderedCreatedAt(i, day = "18") {
+  const minutes = String(Math.floor(i / 60)).padStart(2, "0");
+  const seconds = String(i % 60).padStart(2, "0");
+  return `2026-07-${day}T00:${minutes}:${seconds}Z`;
+}
 
 /** Build a bot-authored verdict comment for a code-fix stub. `duplicates`
  * renders in the SAME shape the live #1304-family verdicts carry — an inline
@@ -175,6 +212,10 @@ function makeRunGh({
   repo = "o/r",
   openPrError = null,
   handledLookupErrorIds = [],
+  // What a failing per-id lookup THROWS. The text is load-bearing now: a
+  // rate-limit-shaped message must degrade the run (fail closed), while an
+  // ordinary transient must keep its fail-soft behaviour untouched.
+  handledLookupErrorMessage = "gh issue list failed with exit 1: API rate limit exceeded",
 } = {}) {
   const owner = repo.split("/")[0];
   const calls = [];
@@ -263,9 +304,7 @@ function makeRunGh({
             .map((x) => String(x).toUpperCase())
             .includes(qid)
         ) {
-          throw new Error(
-            `gh issue list "${qid}" in:title failed with exit 1: API rate limit exceeded`,
-          );
+          throw new Error(handledLookupErrorMessage);
         }
         return JSON.stringify(
           handledStubs
@@ -279,9 +318,12 @@ function makeRunGh({
             })),
         );
       }
-      // Candidate window (`sort:created-asc … <slug> in:title`).
+      // Candidate window (`sort:created-asc … <slug> in:title`). `--limit` caps
+      // what the API RETURNS, before any client-side filter — model that, or a
+      // suite can never reproduce the truncation LIST_LIMIT actually imposes,
+      // nor the "full page, there may be more" signal the second look keys on.
       return JSON.stringify(
-        stubs.map((s) => ({
+        stubs.slice(0, windowLimit(args)).map((s) => ({
           number: s.number,
           title: s.title,
           createdAt: s.createdAt,
@@ -706,14 +748,26 @@ await test("a transient open-PR read failure skips ONE stub, never the whole leg
   // read, so one `gh` rejection rejected out of the selector, exited nonzero and
   // failed the select step under `set -euo pipefail` — breaking the workflow
   // header's "ALWAYS emits a valid JSON array … never a failure" invariant.
+  //
+  // The message is deliberately NOT rate-limit shaped: a throttled read is a
+  // different failure class that must fail CLOSED for the whole run (see the
+  // degraded-run tests below), and this one pins that ordinary transients keep
+  // their per-stub fail-soft behaviour.
   const stubs = [stub({ number: 42, shortId: "APP-MENTO-ORG-2B" })];
   const { runGh } = makeRunGh({
     stubs,
-    openPrError:
-      "gh api repos/o/r/pulls failed with exit 1: API rate limit exceeded",
+    openPrError: "gh api repos/o/r/pulls failed with exit 1: read ECONNRESET",
   });
-  const selected = await selectAutofixCandidates({ repo: "o/r" }, { runGh });
-  assertDeepEqual(selected, []);
+  const { entries, truncations } = await selectAutofixRun(
+    { repo: "o/r" },
+    { runGh },
+  );
+  assertDeepEqual(entries, []);
+  assertEqual(
+    truncations.rateLimited,
+    0,
+    "an ordinary transient must NOT degrade the run",
+  );
 });
 
 await test("a normal (non-orphan) selection carries no reconcile flag", async () => {
@@ -1114,7 +1168,7 @@ await test("the per-run read budget bounds the window, keeping the OLDEST stubs"
       stub({
         number: 3000 + i,
         shortId: `APP-MENTO-ORG-${i}`,
-        createdAt: `2026-07-18T00:${String(i).padStart(2, "0")}:00Z`,
+        createdAt: orderedCreatedAt(i),
       }),
     );
   }
@@ -1781,27 +1835,35 @@ await test("bug C exact-parse fence: a tokenized near-miss title does not block"
 });
 
 // The documented per-run gh ceiling (docs/notes/sentry-triage-pipeline.md
-// § "Cost bound"): 1 window list + MAX_CANDIDATE_EVALUATIONS × 2 reads +
-// MAX_HANDLED_ID_QUERIES + MAX_REVERSE_PROBE_QUERIES + MAX_REVERSE_VERIFY_READS
-// cached verify reads ≈ 221. Load-bearing: the worst-case tests below drive EVERY
-// leg to its cap, so removing a cap breaches this number. The verify-read leg is
-// the one an empty-`handled` window leaves at zero — its own saturating pin lives
-// in "cost pin: the reverse verify-read fan-out is capped" below.
-const DOCUMENTED_GH_CEILING = 225;
+// § "Cost bound"): 1 window list + MAX_CANDIDATE_EVALUATIONS (200) × 2 reads +
+// MAX_HANDLED_ID_QUERIES (40) + MAX_REVERSE_PROBE_QUERIES (40) +
+// MAX_REVERSE_VERIFY_READS (40) cached verify reads = 521, with a little slack.
+// Load-bearing: the worst-case tests below drive EVERY leg to its cap, so
+// removing a cap breaches this number. The verify-read leg is the one an
+// empty-`handled` window leaves at zero — its own saturating pin lives in
+// "cost pin: the reverse verify-read fan-out is capped" below.
+const DOCUMENTED_GH_CEILING = 525;
 
-await test("cost pin: an EMPTY-family 50-stub window issues no per-id or reverse work", async () => {
+// The same ceiling for a run that ALSO takes the bounded second look: + 1 list
+// + MAX_SECOND_LOOK_EVALUATIONS (100) × 2 reads + 60 second-look family budget
+// = 782. This is the number the 25-minute select timeout is sized against — at
+// a pessimistic 1.0 s/call it is ~13 minutes, ~52% of the job budget. A change
+// that breaches it has re-opened the timeout arithmetic.
+const DOCUMENTED_GH_CEILING_WITH_SECOND_LOOK = 790;
+
+await test("cost pin: an EMPTY-family full window issues no per-id or reverse work", async () => {
   // Baseline only: default stubs declare nothing, so declaredIds is empty (zero
   // in:title lookups) and every family is a singleton (each finalist's members =
-  // its own id). This pins the empty-window profile — ~1 window + 50 views + 50
-  // pr lists — but it CANNOT exercise the per-id or reverse loops, so it is not
-  // the regression guard for their caps; the worst-case window below is.
+  // its own id). This pins the empty-window profile — ~1 window + 200 views +
+  // 200 pr lists — but it CANNOT exercise the per-id or reverse loops, so it is
+  // not the regression guard for their caps; the worst-case window below is.
   const stubs = [];
   for (let i = 0; i < MAX_CANDIDATE_EVALUATIONS; i += 1) {
     stubs.push(
       stub({
         number: 4000 + i,
         shortId: `ANALYTICS-MENTO-ORG-C${i}`,
-        createdAt: `2026-07-18T00:${String(i).padStart(2, "0")}:00Z`,
+        createdAt: orderedCreatedAt(i),
       }),
     );
   }
@@ -1823,7 +1885,7 @@ await test("cost pin: an EMPTY-family 50-stub window issues no per-id or reverse
 function worstCaseWindow() {
   const stubs = [];
   let created = 0;
-  const at = () => `2026-07-18T00:${String(created++).padStart(2, "0")}:00Z`;
+  const at = () => orderedCreatedAt(created++);
   // A big family: `n` candidates each declaring a SHARED common id (so they all
   // union into one family) plus 4 unique hubs — MAX_DUPLICATE_LOOKUPS (5) ids
   // each. Members = n candidates + 1 common + 4n hubs; n=7 -> 36, under
@@ -1875,12 +1937,23 @@ function budgetFillerStubs(n) {
       familyStub(
         600 + i,
         `ANALYTICS-MENTO-ORG-BC${i}`,
-        `2026-07-05T00:${String(i).padStart(2, "0")}:00Z`,
+        orderedCreatedAt(i, "05"),
         declares,
       ),
     );
   }
   return stubs;
+}
+
+/** Candidate-window list calls only (`sort:created-asc …`), never the per-id
+ * family probes, which are also `issue list`. */
+function windowListCount(calls) {
+  return calls.filter(
+    (c) =>
+      c[0] === "issue" &&
+      c[1] === "list" &&
+      /sort:created-asc/.test(String(c[c.indexOf("--search") + 1] ?? "")),
+  ).length;
 }
 
 function reverseSearchCount(calls) {
@@ -2182,6 +2255,7 @@ await test("run record truncations are all-clear on an empty-family window and t
     handledOverflow: 0,
     reverseBudget: false,
     reverseNonconvergent: false,
+    rateLimited: 0,
   });
   const dispatch = await selectAutofixRun(
     { repo: "o/r", issue: 810 },
@@ -2191,26 +2265,34 @@ await test("run record truncations are all-clear on an empty-family window and t
     handledOverflow: 0,
     reverseBudget: false,
     reverseNonconvergent: false,
+    rateLimited: 0,
   });
 });
 
-await test("window report: a run surfaces total and evaluated when the window exceeds the eval cap", async () => {
+await test("window report: a full, selecting window reports total/evaluated, no second look, and a measured gh count", async () => {
   const stubs = [];
   for (let i = 0; i < MAX_CANDIDATE_EVALUATIONS + 1; i += 1) {
     stubs.push(
       stub({
         number: 5000 + i,
         shortId: `ANALYTICS-MENTO-ORG-W${i}`,
-        createdAt: `2026-07-18T00:${String(i).padStart(2, "0")}:00Z`,
+        createdAt: orderedCreatedAt(i),
       }),
     );
   }
   const { runGh } = makeRunGh({ stubs });
   const { window } = await selectAutofixRun({ repo: "o/r", cap: 2 }, { runGh });
-  assertDeepEqual(window, {
-    total: MAX_CANDIDATE_EVALUATIONS + 1,
-    evaluated: MAX_CANDIDATE_EVALUATIONS,
-  });
+  // LIST_LIMIT is applied by the API BEFORE the eval slice, so the 201st stub
+  // never reaches the client: total == evaluated == the ceiling. This is why
+  // MAX_CANDIDATE_EVALUATIONS may not exceed LIST_LIMIT — see the pin below.
+  assertEqual(window.total, MAX_CANDIDATE_EVALUATIONS);
+  assertEqual(window.evaluated, MAX_CANDIDATE_EVALUATIONS);
+  // This run SELECTED, so the second look must not fire — it costs nothing on a
+  // healthy run, which is the whole condition on adding it.
+  assertEqual(window.secondLook, false, "a selecting run takes no second look");
+  assertEqual(window.secondLookTotal, 0);
+  assertEqual(window.secondLookEvaluated, 0);
+  assert(window.ghCalls > 0, "the run must report a measured gh call count");
 });
 
 await test("over-collapse invariant: foreign ids in options.handledEdges stay inert", () => {
@@ -2578,9 +2660,9 @@ function makeNegationInterpretingRunGh({
       if (dropArchitecturalNegation) {
         negated = negated.filter((n) => n !== FIX_SCOPE_ARCHITECTURAL_LABEL);
       }
-      const rows = stubs.filter(
-        (s) => !negated.some((neg) => s.labels.includes(neg)),
-      );
+      const rows = stubs
+        .filter((s) => !negated.some((neg) => s.labels.includes(neg)))
+        .slice(0, windowLimit(args));
       return JSON.stringify(
         rows.map((s) => ({
           number: s.number,
@@ -2609,12 +2691,13 @@ function makeNegationInterpretingRunGh({
   return { runGh, calls };
 }
 
-/** 50 OLDER labeled-architectural stubs + 1 NEWER mechanical stub. Oldest-first,
- * the architectural 50 fill the whole MAX_CANDIDATE_EVALUATIONS window ahead of
- * the mechanical one — the exact #1813 starvation shape. */
+/** MAX_CANDIDATE_EVALUATIONS OLDER labeled-architectural stubs + 1 NEWER
+ * mechanical stub. Oldest-first, the architectural block fills the whole window
+ * ahead of the mechanical one — the exact #1813 starvation shape. Sized to the
+ * eval cap, not a literal 50, so the shape survives a window raise. */
 function starvationStubs() {
   const arch = [];
-  for (let i = 0; i < 50; i += 1) {
+  for (let i = 0; i < MAX_CANDIDATE_EVALUATIONS; i += 1) {
     const n = 200 + i;
     arch.push(
       stub({
@@ -2640,7 +2723,7 @@ function starvationStubs() {
   return { arch, all: [...arch, mechanical] };
 }
 
-await test("STARVATION REPRO: the label negation keeps 50 architectural stubs out of the window; only the mechanical selects, zero views on the 50 (#1812/#1813)", async () => {
+await test("STARVATION REPRO: the label negation keeps a full window of architectural stubs out; only the mechanical selects, zero views on them (#1812/#1813)", async () => {
   const { arch, all } = starvationStubs();
   const { runGh, calls } = makeNegationInterpretingRunGh({ stubs: all });
   const { entries } = await selectAutofixRun(
@@ -2648,7 +2731,7 @@ await test("STARVATION REPRO: the label negation keeps 50 architectural stubs ou
     { runGh },
   );
   assertDeepEqual(entries, [{ issue: 999, shortId: "ANALYTICS-MENTO-ORG-M1" }]);
-  // The 50 architectural stubs never enter the window, so not one is READ.
+  // The architectural block never enters the window, so not one is READ.
   const archNumbers = new Set(arch.map((s) => String(s.number)));
   const viewedArch = calls.filter(
     (c) => c[0] === "issue" && c[1] === "view" && archNumbers.has(String(c[2])),
@@ -2660,21 +2743,52 @@ await test("STARVATION REPRO: the label negation keeps 50 architectural stubs ou
   );
 });
 
-await test("CONTROL: dropping the architectural negation lets the 50 refill the window and starve the mechanical -> [] (reproduces #1813)", async () => {
-  const { all } = starvationStubs();
+await test("CONTROL: dropping the architectural negation refills the window and starves the mechanical out of the FIRST pass; only the second look reaches it (#1813)", async () => {
+  const { arch, all } = starvationStubs();
   // The ONLY change: the query no longer excludes the architectural label.
-  const { runGh } = makeNegationInterpretingRunGh({
+  const { runGh, calls } = makeNegationInterpretingRunGh({
     stubs: all,
     dropArchitecturalNegation: true,
   });
-  const { entries } = await selectAutofixRun(
+  const { entries, window, skipped } = await selectAutofixRun(
     { repo: "o/r", cap: 2 },
     { runGh },
   );
-  // Oldest-first, the 50 architectural stubs fill MAX_CANDIDATE_EVALUATIONS and
-  // are all skipped on scope; the newer mechanical stub is truncated out of the
-  // eval window entirely. Nothing selects — the exact starvation #1812 removes.
-  assertDeepEqual(entries, []);
+  // Oldest-first, the architectural block fills the WHOLE list ceiling and every
+  // member is skipped on scope; the newer mechanical stub is past `--limit`, so
+  // the first pass literally cannot see it. Before the bounded second look
+  // existed this run selected NOTHING — forever, every run, since deferral and
+  // scope skips both write nothing. That is #1813's starvation.
+  assertEqual(
+    skipped.length,
+    MAX_CANDIDATE_EVALUATIONS,
+    "the whole window is skipped on scope",
+  );
+  assertEqual(window.evaluated, MAX_CANDIDATE_EVALUATIONS);
+  // What recovers it is the second look, and it says so.
+  assertEqual(
+    window.secondLook,
+    true,
+    "a zero-selection FULL window takes a second look",
+  );
+  assertEqual(window.secondLookEvaluated, 1, "exactly the one further stub");
+  assertDeepEqual(entries, [{ issue: 999, shortId: "ANALYTICS-MENTO-ORG-M1" }]);
+  // The mechanical stub is read ONLY after the second look's own list call, so
+  // the recovery genuinely comes from there and not from a wider first window.
+  assertEqual(
+    windowListCount(calls),
+    2,
+    "one first-pass window list + one second-look window list",
+  );
+  const archNumbers = new Set(arch.map((st) => String(st.number)));
+  const viewOrder = calls
+    .filter((c) => c[0] === "issue" && c[1] === "view")
+    .map((c) => String(c[2]));
+  assertEqual(
+    viewOrder.indexOf("999"),
+    archNumbers.size,
+    "the mechanical stub is read only after the whole first-pass window",
+  );
 });
 
 await test("BACKSTOP: a window stub with the hold label hand-removed but an architectural verdict is still skipped, never selected (#1812)", async () => {
@@ -3158,6 +3272,1833 @@ await test("parseArgs accepts --skipped-out beside --deferred-out", async () => 
   assertEqual(options.skippedOut, "/tmp/s.json");
   // Absent by default: a caller that does not ask for the report gets no file.
   assertEqual(parseArgs([]).skippedOut, null);
+});
+
+// ---------------------------------------------------------------------------
+// The window ceiling, the bounded second look, the gh-call instrumentation, and
+// failing CLOSED on throttling.
+// ---------------------------------------------------------------------------
+
+await test("PIN: MAX_CANDIDATE_EVALUATIONS may never exceed LIST_LIMIT (a raise above it is a strict no-op)", () => {
+  // `gh issue list --limit LIST_LIMIT` caps what the API RETURNS, and that
+  // happens BEFORE the eval slice. So a window raised above the list ceiling
+  // reads exactly LIST_LIMIT rows, reports `total == evaluated`, and NOTHING
+  // says the raise did nothing — the silent no-op this pin exists to prevent.
+  // The two constants must move together.
+  assert(
+    MAX_CANDIDATE_EVALUATIONS <= LIST_LIMIT,
+    `MAX_CANDIDATE_EVALUATIONS (${MAX_CANDIDATE_EVALUATIONS}) must not exceed LIST_LIMIT (${LIST_LIMIT}) — raise LIST_LIMIT too or the window raise is a no-op`,
+  );
+});
+
+await test("windowCeilingWarning is silent at the shipped pair and LOUD on a mismatch", () => {
+  // The run-time half of the pin above. It warns rather than throws: the select
+  // step's contract is that it always emits a valid JSON array and never fails,
+  // so a static config mistake must not be able to break the leg.
+  assertEqual(windowCeilingWarning(), null, "the shipped pair is consistent");
+  assertEqual(windowCeilingWarning(200, 200), null, "equal is fine");
+  const warning = windowCeilingWarning(400, 200);
+  assert(warning != null, "a window above the list ceiling must warn");
+  assert(
+    warning.includes("400") && warning.includes("200"),
+    `the warning must name BOTH numbers, got: ${warning}`,
+  );
+});
+
+/**
+ * A FULL first window in which NOTHING is selectable (every stub is skipped on
+ * fix_scope), plus `further` selectable stubs sitting PAST the list ceiling.
+ * This is the starvation signature exactly: the run selects nothing, writes
+ * nothing, and the next run reads the same window — so without a second look the
+ * further stubs are never evaluated, at any point, ever.
+ *
+ * `hubsPerWindowStub` gives the blocked window stubs declared family ids, which
+ * is what drives the first pass's handled-id budget (an architectural stub still
+ * contributes its family edges).
+ */
+function starvedWindowStubs({
+  further = 1,
+  hubsPerWindowStub = 0,
+  hubsPerFurtherStub = 0,
+} = {}) {
+  const stubs = [];
+  for (let i = 0; i < LIST_LIMIT; i += 1) {
+    const hubs = Array.from(
+      { length: hubsPerWindowStub },
+      (_, j) => `ANALYTICS-MENTO-ORG-WH${i}X${j}`,
+    );
+    stubs.push(
+      familyStub(
+        7000 + i,
+        `ANALYTICS-MENTO-ORG-Z${i}`,
+        orderedCreatedAt(i),
+        hubs,
+        FIX_SCOPE_ARCHITECTURAL,
+      ),
+    );
+  }
+  for (let i = 0; i < further; i += 1) {
+    const hubs = Array.from(
+      { length: hubsPerFurtherStub },
+      (_, j) => `ANALYTICS-MENTO-ORG-FH${i}X${j}`,
+    );
+    stubs.push(
+      familyStub(
+        7500 + i,
+        `ANALYTICS-MENTO-ORG-Y${i}`,
+        orderedCreatedAt(LIST_LIMIT + i),
+        hubs,
+      ),
+    );
+  }
+  return stubs;
+}
+
+await test("SECOND LOOK: a zero-selection FULL window reaches past the list ceiling and selects", async () => {
+  // NEGATIVE CONTROL: change the fire condition in selectAutofixRun from
+  // `entries.length === 0 && page.full` to `false` (or drop `page.full`'s
+  // `rawCount >= limit` in listCodeFixStubsPage) and this returns [] — the
+  // permanent starvation the second look exists to break.
+  const stubs = starvedWindowStubs({ further: 3 });
+  const { runGh, calls } = makeRunGh({ stubs });
+  const { entries, window, skipped } = await selectAutofixRun(
+    { repo: "o/r", cap: 2 },
+    { runGh },
+  );
+  assertEqual(
+    skipped.length,
+    LIST_LIMIT,
+    "the whole first window stands down on scope",
+  );
+  assertEqual(window.secondLook, true, "the second look must have run");
+  assertEqual(window.secondLookTotal, 3);
+  assertEqual(window.secondLookEvaluated, 3);
+  assertDeepEqual(entries, [
+    { issue: 7500, shortId: "ANALYTICS-MENTO-ORG-Y0" },
+    { issue: 7501, shortId: "ANALYTICS-MENTO-ORG-Y1" },
+  ]);
+  assertEqual(
+    windowListCount(calls),
+    2,
+    "exactly ONE extra window list — the second look is not a retry loop",
+  );
+});
+
+await test("SECOND LOOK: the FULL-page signal is taken off RAW rows, not the project-filtered ones", async () => {
+  // `--limit` is applied server-side, BEFORE the client-side
+  // `parseProject === LOCAL_SENTRY_PROJECT` gate. So a genuinely full page can
+  // come back short once foreign-project rows are dropped, and a `full` signal
+  // keyed on the filtered length would read "there is nothing more" on exactly
+  // the window that has the most hidden behind it.
+  //
+  // NEGATIVE CONTROL: change `full` in listCodeFixStubsPage from
+  // `list.length >= limit` to `stubs.length >= limit` and this returns [] — the
+  // starvation survives untouched, and NO other test notices.
+  const stubs = [];
+  for (let i = 0; i < LIST_LIMIT - 5; i += 1) {
+    stubs.push(
+      familyStub(
+        8300 + i,
+        `ANALYTICS-MENTO-ORG-P${i}`,
+        orderedCreatedAt(i),
+        [],
+        FIX_SCOPE_ARCHITECTURAL,
+      ),
+    );
+  }
+  // Five rows the server returns (they match the tokenized `<slug> in:title`
+  // filter) but the exact project gate drops.
+  for (let i = 0; i < 5; i += 1) {
+    stubs.push({
+      number: 8000 + i,
+      shortId: `APP-MENTO-ORG-X${i}`,
+      title: `[sentry] APP-MENTO-ORG-X${i} (app-mento-org, error)`,
+      labels: [AUTOFIX_SELECT_LABEL, "sentry-triage"],
+      createdAt: orderedCreatedAt(LIST_LIMIT - 5 + i),
+      comments: [verdictComment()],
+    });
+  }
+  stubs.push(
+    stub({
+      number: 8999,
+      shortId: "ANALYTICS-MENTO-ORG-PZ",
+      createdAt: orderedCreatedAt(LIST_LIMIT + 1),
+    }),
+  );
+  const { runGh } = makeRunGh({ stubs });
+  const { entries, window } = await selectAutofixRun(
+    { repo: "o/r", cap: 2 },
+    { runGh },
+  );
+  assertEqual(
+    window.total,
+    LIST_LIMIT - 5,
+    "the project gate really did shorten the page",
+  );
+  assertEqual(
+    window.secondLook,
+    true,
+    "a RAW-full page still takes a second look",
+  );
+  assertDeepEqual(entries, [
+    { issue: 8999, shortId: "ANALYTICS-MENTO-ORG-PZ" },
+  ]);
+});
+
+await test("SECOND LOOK: a healthy run that selected anything never fires it (it must cost nothing)", async () => {
+  // The whole licence for adding a second pass is that a normal run pays zero
+  // for it. One selectable stub at the head of the window is enough.
+  const stubs = starvedWindowStubs({ further: 3 });
+  stubs.unshift(
+    stub({
+      number: 6999,
+      shortId: "ANALYTICS-MENTO-ORG-OK",
+      createdAt: "2026-07-01T00:00:00Z",
+    }),
+  );
+  const { runGh, calls } = makeRunGh({ stubs });
+  const { entries, window } = await selectAutofixRun(
+    { repo: "o/r", cap: 2 },
+    { runGh },
+  );
+  assertDeepEqual(entries, [
+    { issue: 6999, shortId: "ANALYTICS-MENTO-ORG-OK" },
+  ]);
+  assertEqual(window.secondLook, false, "a selecting run takes no second look");
+  assertEqual(
+    windowListCount(calls),
+    1,
+    "no second window list is issued on a healthy run",
+  );
+});
+
+await test("SECOND LOOK: a window that is NOT full never fires it (there is nothing past the ceiling)", async () => {
+  // Zero selections alone is not the signature — a SHORT page means the run
+  // already saw every stub there is, so a second look could only re-read them.
+  const stubs = [];
+  for (let i = 0; i < 5; i += 1) {
+    stubs.push(
+      familyStub(
+        7800 + i,
+        `ANALYTICS-MENTO-ORG-N${i}`,
+        orderedCreatedAt(i),
+        [],
+        FIX_SCOPE_ARCHITECTURAL,
+      ),
+    );
+  }
+  const { runGh, calls } = makeRunGh({ stubs });
+  const { entries, window } = await selectAutofixRun(
+    { repo: "o/r", cap: 2 },
+    { runGh },
+  );
+  assertDeepEqual(entries, []);
+  assertEqual(
+    window.secondLook,
+    false,
+    "a short page cannot hide further stubs",
+  );
+  assertEqual(windowListCount(calls), 1);
+});
+
+await test("SECOND LOOK: its OWN shortfall is reported through `full`, which does NOT saturate", async () => {
+  // The second look stops at its own row ceiling, so it can leave stubs unread
+  // exactly like the first window — and must say so on the same surface. The
+  // counts CANNOT carry that: `secondLookTotal` is clamped by
+  // SECOND_LOOK_LIST_ROWS by construction, so it reads identically whether 5 or
+  // 5,000 further stubs sit past the ceiling. `full` (raw rows >= the row cap)
+  // is the signal that distinguishes them, and the run record's regrowth
+  // tripwire is built on it.
+  //
+  // NEGATIVE CONTROL: stop returning `full` from resolveSecondLook (or drop
+  // `window.secondLookFull = second.full === true`) and the first assertion goes
+  // false — the tracker then reads "reached the end of the queue" on the run
+  // with the most hidden behind it.
+  const many = starvedWindowStubs({ further: SECOND_LOOK_LIST_ROWS + 5 });
+  const { window: deep } = await selectAutofixRun(
+    { repo: "o/r", cap: 2 },
+    { runGh: makeRunGh({ stubs: many }).runGh },
+  );
+  assertEqual(deep.secondLook, true);
+  assertEqual(
+    deep.secondLookTotal,
+    SECOND_LOOK_LIST_ROWS,
+    "the second look reads at most its own row cap",
+  );
+  assertEqual(
+    deep.secondLookFull,
+    true,
+    "more rows sit past even the second look",
+  );
+
+  // The contrast that makes the flag mean something: a second look that reached
+  // the actual end of the queue must NOT raise it.
+  const few = starvedWindowStubs({ further: 3 });
+  const { window: shallow } = await selectAutofixRun(
+    { repo: "o/r", cap: 2 },
+    { runGh: makeRunGh({ stubs: few }).runGh },
+  );
+  assertEqual(shallow.secondLook, true);
+  assertEqual(
+    shallow.secondLookFull,
+    false,
+    "a short second-look page means the run really did reach the end",
+  );
+});
+
+await test("SECOND LOOK: `full` is a SENTINEL fact — a queue EXACTLY at the ceiling is not 'more remains'", async () => {
+  // The boundary the plain `rawCount >= limit` form gets wrong, and the whole
+  // reason this pass reads ONE row past its own ceiling. `full` is published on
+  // the tracker as `— and MORE rows sit past even that`, the standing regrowth
+  // tripwire: a definite claim that the queue is outgrowing one run's reach.
+  // At EXACTLY `skip + SECOND_LOOK_LIST_ROWS` raw rows nothing sits past the
+  // second look, so the claim is false — and false PERMANENTLY, because that
+  // state is stable: the operator is told to act on growth that is not there.
+  //
+  // NEGATIVE CONTROL: drop `sentinel: true` from resolveSecondLook's list call,
+  // or revert `full` in listCodeFixStubsPage to `list.length >= limit`, and the
+  // exactly-at-the-ceiling assertion below flips to true while the one-row-past
+  // assertion stays true — the flag stops distinguishing the two states at all.
+  const skip = Math.min(MAX_CANDIDATE_EVALUATIONS, LIST_LIMIT);
+  assertEqual(
+    skip,
+    LIST_LIMIT,
+    "starvedWindowStubs fills exactly LIST_LIMIT window rows, so the offset must be that",
+  );
+
+  // Exactly at the ceiling: skip + SECOND_LOOK_LIST_ROWS raw rows, none beyond.
+  const { window: exact } = await selectAutofixRun(
+    { repo: "o/r", cap: 2 },
+    {
+      runGh: makeRunGh({
+        stubs: starvedWindowStubs({ further: SECOND_LOOK_LIST_ROWS }),
+      }).runGh,
+    },
+  );
+  assertEqual(exact.secondLook, true, "the second look must have run");
+  assertEqual(
+    exact.secondLookTotal,
+    SECOND_LOOK_LIST_ROWS,
+    "and it must have read its whole row cap, or the boundary is not exercised",
+  );
+  assertEqual(
+    exact.secondLookFull,
+    false,
+    "a queue that ENDS at the ceiling must not be reported as having more past it",
+  );
+
+  // One row beyond: the sentinel comes back, and the claim becomes true.
+  const { window: past } = await selectAutofixRun(
+    { repo: "o/r", cap: 2 },
+    {
+      runGh: makeRunGh({
+        stubs: starvedWindowStubs({ further: SECOND_LOOK_LIST_ROWS + 1 }),
+      }).runGh,
+    },
+  );
+  assertEqual(
+    past.secondLookTotal,
+    SECOND_LOOK_LIST_ROWS,
+    "the counts are identical either side of the boundary — only `full` moves",
+  );
+  assertEqual(
+    past.secondLookFull,
+    true,
+    "ONE row past the ceiling must be reported as more remaining",
+  );
+});
+
+await test("PIN: MAX_SECOND_LOOK_EVALUATIONS may never exceed SECOND_LOOK_LIST_ROWS (the same no-op trap, on the pass this leg added)", () => {
+  // The invariant that `MAX_CANDIDATE_EVALUATIONS <= LIST_LIMIT` pins is
+  // GENERIC — the row cap is applied server-side BEFORE the evaluation slice —
+  // but the guard for it was not: the second look shipped its own row cap with
+  // no pin and no run-time check, so raising its evaluation cap to 300 would
+  // silently read the same rows. That is precisely the failure mode this whole
+  // change exists to make impossible, reintroduced in the module it added.
+  assert(
+    MAX_SECOND_LOOK_EVALUATIONS <= SECOND_LOOK_LIST_ROWS,
+    `MAX_SECOND_LOOK_EVALUATIONS (${MAX_SECOND_LOOK_EVALUATIONS}) must not exceed SECOND_LOOK_LIST_ROWS (${SECOND_LOOK_LIST_ROWS}) — raise the row cap too or the raise is a no-op`,
+  );
+  assertEqual(
+    secondLookCeilingWarning(),
+    null,
+    "the shipped pair is consistent",
+  );
+  assertEqual(secondLookCeilingWarning(100, 100), null, "equal is fine");
+  const warning = secondLookCeilingWarning(300, 100);
+  assert(
+    typeof warning === "string" &&
+      warning.includes("300") &&
+      warning.includes("100"),
+    `a raise above the row cap must warn and name both numbers, got: ${warning}`,
+  );
+});
+
+await test("SECOND LOOK: the list it issues asks for exactly the rows past what the FIRST pass consumed", async () => {
+  // Two things no assertion on `calls.length` can see, because the mock returns
+  // a whole array from one call and `calls.length` is structurally invariant to
+  // `--limit`:
+  //   1. the `--limit` is the only term that makes gh INVOCATIONS and API
+  //      REQUESTS differ, so the cost pin below is blind to it;
+  //   2. the offset must derive from what the first pass actually consumed, not
+  //      from LIST_LIMIT. They are equal today, but under a LOWER eval cap a
+  //      LIST_LIMIT skip would jump the rows between the two — read by neither
+  //      pass, a permanent hole in the middle of the window.
+  //   3. the trailing `+ 1` is the SENTINEL row that makes `full` a fact rather
+  //      than a guess, and it is the entire API-request delta the cost bound
+  //      documents (301 rows = 4 pages, not 3).
+  //
+  // NEGATIVE CONTROL: change `skipRawRows` back to `LIST_LIMIT` while lowering
+  // MAX_CANDIDATE_EVALUATIONS, or drop `skipRawRows` so the second look re-reads
+  // from row 0, and the offset assertion below fails; drop `sentinel: true` and
+  // the same assertion fails on the `+ 1`.
+  const stubs = starvedWindowStubs({ further: 3 });
+  const { runGh, calls } = makeRunGh({ stubs });
+  await selectAutofixRun({ repo: "o/r", cap: 2 }, { runGh });
+  const windowLists = calls.filter(
+    (c) =>
+      c[0] === "issue" &&
+      c[1] === "list" &&
+      /sort:created-asc/.test(String(c[c.indexOf("--search") + 1] ?? "")),
+  );
+  assertEqual(windowLists.length, 2, "one first-pass list, one second look");
+  const expectedSkip = Math.min(MAX_CANDIDATE_EVALUATIONS, LIST_LIMIT);
+  assertEqual(
+    windowLimit(windowLists[0]),
+    LIST_LIMIT,
+    "the first pass asks for the list ceiling",
+  );
+  assertEqual(
+    windowLimit(windowLists[1]),
+    expectedSkip + SECOND_LOOK_LIST_ROWS + 1,
+    "the second look asks for the first pass's offset PLUS its own row cap PLUS the sentinel row",
+  );
+});
+
+await test("SECOND LOOK: it runs on its OWN family budgets, not the first pass's", async () => {
+  // The first pass has SPENT the per-run budgets by the time this runs, so
+  // reusing them would silently double the run's worst-case gh volume — the
+  // exact thing the timeout arithmetic is sized against.
+  //
+  // NEGATIVE CONTROL: drop the `budgets: SECOND_LOOK_FAMILY_BUDGETS` argument in
+  // selectAutofixRun's second-look `resolveFamilies` call and the handled
+  // in:title count jumps from 20 to MAX_HANDLED_ID_QUERIES (40), failing the
+  // assertion below.
+  const stubs = starvedWindowStubs({
+    further: MAX_SECOND_LOOK_EVALUATIONS,
+    hubsPerFurtherStub: 5,
+  });
+  const { runGh, calls } = makeRunGh({ stubs });
+  const { window } = await selectAutofixRun({ repo: "o/r", cap: 2 }, { runGh });
+  assertEqual(window.secondLook, true);
+  // The window stubs declare nothing, so every in:title search below belongs to
+  // the second look.
+  assertEqual(
+    titleSearchCount(calls),
+    SECOND_LOOK_FAMILY_BUDGETS.handled,
+    `the second look must saturate AND stop at its own handled budget (${SECOND_LOOK_FAMILY_BUDGETS.handled}), got ${titleSearchCount(calls)}`,
+  );
+  assert(
+    SECOND_LOOK_FAMILY_BUDGETS.handled < MAX_HANDLED_ID_QUERIES,
+    "the second-look budget must be strictly smaller, or this proves nothing",
+  );
+});
+
+await test("cost pin: a full first pass PLUS a second look stays under the 25-minute timeout arithmetic", async () => {
+  // The constraint the second look was sized against: first pass + second look
+  // worst case must fit well inside `timeout-minutes: 25` at a pessimistic
+  // ~1 s/call, every call being serial. The first pass here saturates its
+  // handled-id budget (each blocked window stub declares 5 hubs) and the second
+  // look saturates its own.
+  const stubs = starvedWindowStubs({
+    further: MAX_SECOND_LOOK_EVALUATIONS,
+    hubsPerWindowStub: 5,
+    hubsPerFurtherStub: 5,
+  });
+  const { runGh, calls } = makeRunGh({ stubs });
+  const { window } = await selectAutofixRun({ repo: "o/r", cap: 2 }, { runGh });
+  assertEqual(
+    window.secondLook,
+    true,
+    "this pin must actually take a second look",
+  );
+  assert(
+    calls.length > DOCUMENTED_GH_CEILING,
+    `the second look must genuinely add spend, or the pin is vacuous (got ${calls.length})`,
+  );
+  assert(
+    calls.length <= DOCUMENTED_GH_CEILING_WITH_SECOND_LOOK,
+    `first pass + second look must stay under ${DOCUMENTED_GH_CEILING_WITH_SECOND_LOOK} serial gh calls, got ${calls.length}`,
+  );
+});
+
+await test("INSTRUMENTATION: the run reports the gh invocation count it actually made", async () => {
+  // The per-run gh ceiling was arithmetic over caps that nothing measured. This
+  // makes it an observed number on the run record, so drift shows up before a
+  // timeout does.
+  //
+  // NEGATIVE CONTROL: drop `state.ghCalls += 1` from instrumentRunGh and this
+  // reports 0 against a nonzero real count.
+  const stubs = [
+    stub({ number: 8100, shortId: "ANALYTICS-MENTO-ORG-I1" }),
+    stub({ number: 8101, shortId: "ANALYTICS-MENTO-ORG-I2" }),
+  ];
+  const { runGh, calls } = makeRunGh({ stubs });
+  const { window } = await selectAutofixRun({ repo: "o/r", cap: 2 }, { runGh });
+  assert(calls.length > 0, "the fixture must issue real calls");
+  assertEqual(
+    window.ghCalls,
+    calls.length,
+    "the reported count must equal the invocations actually made",
+  );
+});
+
+await test("isRateLimitFailure matches what gh actually prints, and nothing else", () => {
+  // gh puts the whole HTTP/GraphQL error body into its stderr, which
+  // defaultRunGh folds into the rejection message.
+  for (const message of [
+    "gh api repos/o/r/pulls failed with exit 1:\nHTTP 403: API rate limit exceeded for user ID 1234. (https://api.github.com/rate_limit)",
+    "gh api repos/o/r/pulls failed with exit 1:\nHTTP 403: You have exceeded a secondary rate limit and have been temporarily blocked from content creation.",
+    "gh issue list failed with exit 1:\nHTTP 429 Too Many Requests",
+    "gh issue list failed with exit 1:\nGraphQL: API rate limit exceeded for user ID 1234. (rateLimitExceeded)",
+    "gh api failed with exit 1:\nYou have triggered an abuse detection mechanism.",
+  ]) {
+    assert(isRateLimitFailure(message), `must match: ${message}`);
+  }
+  for (const message of [
+    "gh api repos/o/r/pulls failed with exit 1: read ECONNRESET",
+    "gh issue view 5 failed with exit 1:\nHTTP 404: Not Found",
+    "gh issue list failed with exit 1:\nHTTP 502 Bad Gateway",
+    "gh: command not found",
+    "",
+  ]) {
+    assert(
+      !isRateLimitFailure(message),
+      `must NOT match (it would degrade ordinary transients): ${message}`,
+    );
+  }
+});
+
+/** A candidate whose family sibling already carries a TERMINAL marker — so the
+ * ONLY thing standing between this run and a duplicate autofix PR is the
+ * handled-id lookup that finds the sibling. */
+function dedupeBlockedFixture(handledLookupErrorMessage) {
+  const candidate = familyStub(
+    8200,
+    "ANALYTICS-MENTO-ORG-DL",
+    "2026-07-10T00:00:00Z",
+    ["ANALYTICS-MENTO-ORG-DS"],
+  );
+  return makeRunGh({
+    stubs: [candidate],
+    handled: [{ shortId: "ANALYTICS-MENTO-ORG-DS", label: FIX_REFUSED_LABEL }],
+    handledLookupErrorIds: ["ANALYTICS-MENTO-ORG-DS"],
+    handledLookupErrorMessage,
+  });
+}
+
+await test("DANGER CONTROL: a fail-soft dedupe read that returns nothing SELECTS the stub (this is the duplicate-PR path)", async () => {
+  // Establishes the hazard the fail-closed change exists for: every dedupe read
+  // fails soft toward MORE candidates, so a read that does not answer looks
+  // exactly like "no blocker". With an ordinary transient that is the right
+  // trade (one self-terminating extra attempt) and stays unchanged.
+  const { runGh } = dedupeBlockedFixture(
+    "gh issue list failed with exit 1: read ECONNRESET",
+  );
+  const { entries, truncations } = await selectAutofixRun(
+    { repo: "o/r", cap: 2 },
+    { runGh },
+  );
+  assertDeepEqual(entries, [
+    { issue: 8200, shortId: "ANALYTICS-MENTO-ORG-DL" },
+  ]);
+  assertEqual(
+    truncations.rateLimited,
+    0,
+    "an ordinary transient is not a degradation",
+  );
+});
+
+await test("FAIL CLOSED: the SAME read failing with a rate limit emits ZERO entries and reports the degradation", async () => {
+  // Identical topology, identical fail-soft plumbing — only the failure TEXT
+  // differs. A throttled run cannot tell "no prior PR / no terminal sibling"
+  // from "GitHub refused to answer", so it must not select at all; otherwise it
+  // opens a duplicate autofix PR and still looks green.
+  //
+  // NEGATIVE CONTROL: drop the `isRateLimitFailure` branch in instrumentRunGh
+  // (or the `state.rateLimited > 0` bail in selectAutofixRun) and this returns
+  // the SAME entry the control above does — the duplicate.
+  const { runGh } = dedupeBlockedFixture(
+    "gh issue list failed with exit 1:\nHTTP 403: You have exceeded a secondary rate limit and have been temporarily blocked from content creation.",
+  );
+  const { entries, truncations } = await selectAutofixRun(
+    { repo: "o/r", cap: 2 },
+    { runGh },
+  );
+  // The invariant the workflow header asserts: ALWAYS a valid array, NEVER a
+  // throw. "Fail closed" here is an empty array plus a loud report.
+  assert(Array.isArray(entries), "the leg must still emit a valid array");
+  assertDeepEqual(entries, []);
+  assert(
+    truncations.rateLimited > 0,
+    "the degradation must be reported, not silent",
+  );
+});
+
+await test("FAIL CLOSED: a rate-limited single-issue dispatch emits ZERO entries too", async () => {
+  // The dispatch path dedupes on the SAME open-PR read, so a throttled one can
+  // open a duplicate just as easily. The documented remedy for a stalled leg
+  // must not become the way a duplicate gets in.
+  const stubs = [stub({ number: 8300, shortId: "ANALYTICS-MENTO-ORG-DP" })];
+  const { runGh } = makeRunGh({
+    stubs,
+    openPrError:
+      "gh api repos/o/r/pulls failed with exit 1:\nHTTP 403: API rate limit exceeded for user ID 1234.",
+  });
+  const { entries, truncations } = await selectAutofixRun(
+    { repo: "o/r", issue: 8300 },
+    { runGh },
+  );
+  assertDeepEqual(entries, []);
+  assert(truncations.rateLimited > 0, "the dispatch degradation is reported");
+});
+
+await test("FAIL CLOSED: a degraded first pass never spends a second look", async () => {
+  // The first pass's dedupe reads are already untrustworthy; a second look could
+  // only widen the blast radius while burning the budget that made the raise
+  // affordable.
+  const stubs = starvedWindowStubs({ further: 3 });
+  const { runGh, calls } = makeRunGh({
+    stubs,
+    openPrError:
+      "gh api repos/o/r/pulls failed with exit 1:\nHTTP 403: API rate limit exceeded for user ID 1234.",
+  });
+  const { entries, window } = await selectAutofixRun(
+    { repo: "o/r", cap: 2 },
+    { runGh },
+  );
+  assertDeepEqual(entries, []);
+  assertEqual(window.secondLook, false, "a degraded run takes no second look");
+  assertEqual(
+    windowListCount(calls),
+    1,
+    "no second window list is issued once the run is degraded",
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Hardening round: the second look's throw site, the throttle latch, the
+// knowledge it inherits, and the CLI layer that carries the degraded signal.
+// ---------------------------------------------------------------------------
+
+function isWindowListArgs(args) {
+  return (
+    args[0] === "issue" &&
+    args[1] === "list" &&
+    /sort:created-asc/.test(String(args[args.indexOf("--search") + 1] ?? ""))
+  );
+}
+
+/**
+ * A FULL, entirely-unselectable first window whose head stub declares BLK (a
+ * sibling that already carries a TERMINAL marker), plus five selectable stubs
+ * past the ceiling. The LAST of those five also declares BLK — so it is a member
+ * of a family this same run has already proven is handled.
+ *
+ * The four before it exist to spend the second look's whole handled-id budget
+ * (MAX_DUPLICATE_LOOKUPS = 5 declared ids each × 4 = 20 =
+ * SECOND_LOOK_FAMILY_BUDGETS.handled), which is what makes BLK unreachable to a
+ * second look that has to re-derive it from scratch.
+ */
+function inheritedBlockerFixture() {
+  const stubs = [];
+  for (let i = 0; i < LIST_LIMIT; i += 1) {
+    stubs.push(
+      familyStub(
+        7100 + i,
+        `ANALYTICS-MENTO-ORG-B${i}`,
+        orderedCreatedAt(i),
+        i === 0 ? ["ANALYTICS-MENTO-ORG-BLK"] : [],
+        FIX_SCOPE_ARCHITECTURAL,
+      ),
+    );
+  }
+  for (let i = 0; i < 4; i += 1) {
+    stubs.push(
+      familyStub(
+        7600 + i,
+        `ANALYTICS-MENTO-ORG-G${i}`,
+        orderedCreatedAt(LIST_LIMIT + i),
+        Array.from(
+          { length: MAX_DUPLICATE_LOOKUPS },
+          (_, j) => `ANALYTICS-MENTO-ORG-GH${i}X${j}`,
+        ),
+      ),
+    );
+  }
+  stubs.push(
+    familyStub(
+      7699,
+      "ANALYTICS-MENTO-ORG-GZ",
+      orderedCreatedAt(LIST_LIMIT + 4),
+      ["ANALYTICS-MENTO-ORG-BLK"],
+    ),
+  );
+  return makeRunGh({
+    stubs,
+    handled: [{ shortId: "ANALYTICS-MENTO-ORG-BLK", label: FIX_REFUSED_LABEL }],
+  });
+}
+
+await test("SECOND LOOK: it inherits the first pass's proven blockers instead of re-deriving them on half the budget", async () => {
+  // The precondition for a second look is that the first pass found a blocker
+  // for EVERYTHING — so the run has already PROVEN those blockers exist. Handing
+  // a smaller budget the same work from scratch is strictly weaker, and every
+  // budget in the family resolver fails OPEN toward MORE candidates: a blocker it
+  // cannot afford to look up is reported as "not handled". Here BLK is the 21st
+  // declared id the second look would have to query on a budget of 20, so without
+  // the seed #7699 is selected — a second autofix PR for a family whose sibling
+  // this same run just read a REFUSED marker off. No rate limit, no transient,
+  // and no way to see it afterwards except a truncation flag on the run record,
+  // rendered after the PR is already open.
+  //
+  // NEGATIVE CONTROL: drop `seed: resolved` from the resolveSecondLook call in
+  // selectAutofixRun (or stop returning `resolved` from resolveFamilies) and
+  // #7699 appears in `entries` — the duplicate.
+  const { runGh } = inheritedBlockerFixture();
+  const { entries, deferred } = await selectAutofixRun(
+    { repo: "o/r", cap: 6 },
+    { runGh },
+  );
+  const selectedIssues = entries.map((e) => e.issue);
+  assertDeepEqual(
+    selectedIssues,
+    [7600, 7601, 7602, 7603],
+    "the four unblocked further stubs are selected",
+  );
+  assert(
+    !selectedIssues.includes(7699),
+    "a stub whose family the FIRST pass proved handled must never be selected by the second look",
+  );
+  assert(
+    deferred.some((d) => d.issue === 7699),
+    `the inherited blocker must be reported as a deferral, got: ${JSON.stringify(deferred)}`,
+  );
+});
+
+/**
+ * The starvation shape that ALSO exercises the reverse leg: a first pass with
+ * real finalists whose families the reverse `in:comments` probe then stands
+ * ENTIRELY down, so the run selects nothing off a page that is full of RAW rows
+ * (mostly foreign-project ones the client filter drops). That is the only way to
+ * reach a second look with a populated `alreadyProbed` set — which is exactly
+ * the state the seed creates.
+ */
+function reverseStoodDownFixture({ locals = 6, further = 5 } = {}) {
+  const stubs = [];
+  const handled = [];
+  for (let i = 0; i < locals; i += 1) {
+    stubs.push(
+      familyStub(
+        7200 + i,
+        `ANALYTICS-MENTO-ORG-R${i}`,
+        orderedCreatedAt(i),
+        Array.from(
+          { length: MAX_DUPLICATE_LOOKUPS },
+          (_, j) => `ANALYTICS-MENTO-ORG-RH${i}X${j}`,
+        ),
+      ),
+    );
+    // A TERMINAL sibling reachable only through the reverse probe: it names the
+    // family's first hub in its own verdict, so the probe admits the edge and
+    // its refusal marker stands the whole family down.
+    handled.push({
+      shortId: `ANALYTICS-MENTO-ORG-RT${i}`,
+      label: FIX_REFUSED_LABEL,
+      declares: [`ANALYTICS-MENTO-ORG-RH${i}X0`],
+    });
+  }
+  // Foreign-project rows: the server returns them (they match the tokenized
+  // `<slug> in:title` filter), the exact project gate drops them. They are what
+  // makes the page RAW-full without adding candidates.
+  for (let i = 0; stubs.length < LIST_LIMIT; i += 1) {
+    stubs.push({
+      number: 7300 + i,
+      shortId: `APP-MENTO-ORG-R${i}`,
+      title: `[sentry] APP-MENTO-ORG-R${i} (app-mento-org, error)`,
+      labels: [AUTOFIX_SELECT_LABEL, "sentry-triage"],
+      createdAt: orderedCreatedAt(locals + i),
+      comments: [verdictComment()],
+    });
+  }
+  for (let i = 0; i < further; i += 1) {
+    stubs.push(
+      familyStub(
+        7400 + i,
+        `ANALYTICS-MENTO-ORG-S${i}`,
+        orderedCreatedAt(LIST_LIMIT + i),
+        Array.from(
+          { length: MAX_DUPLICATE_LOOKUPS },
+          (_, j) => `ANALYTICS-MENTO-ORG-SH${i}X${j}`,
+        ),
+      ),
+    );
+  }
+  return makeRunGh({ stubs, handled });
+}
+
+/** `in:title` handled lookups issued for ONE specific family id. The bare
+ * `titleSearchCount` cannot tell which id a search was for, and the seed bugs
+ * below are entirely about WHICH ids get re-asked across a budget boundary. */
+function titleSearchCountFor(calls, id) {
+  return calls.filter(
+    (c) =>
+      c[0] === "issue" &&
+      c[1] === "list" &&
+      String(c[c.indexOf("--search") + 1] ?? "").includes(`"${id}" in:title`),
+  ).length;
+}
+
+/** The index of the SECOND candidate-window list — i.e. where the second look
+ * begins. Everything before it is the first pass. */
+function secondLookStartsAt(calls) {
+  return calls.findIndex(
+    (c, i) => isWindowListArgs(c) && calls.slice(0, i).some(isWindowListArgs),
+  );
+}
+
+// The id the first pass drops for budget. Window stub 150's first hub: the
+// declared-id order is window order, so the 40-lookup budget is spent long
+// before this one, and it is never read by the first pass.
+const DROPPED_HUB_ID = "ANALYTICS-MENTO-ORG-DH150X0";
+
+/**
+ * A FULL, entirely-unselectable window whose stubs declare FAR more distinct
+ * family ids than MAX_HANDLED_ID_QUERIES (200 × 5 = 1000 against a budget of
+ * 40), so 960 of them are dropped unread. Past the ceiling sits one selectable
+ * stub declaring one of those DROPPED ids — and that id's sibling carries a
+ * TERMINAL marker, so the only thing standing between this run and a second
+ * autofix PR for an already-refused family is a lookup the first pass could not
+ * afford and the second look must therefore still make.
+ */
+function droppedIdBlockerFixture() {
+  const stubs = [];
+  for (let i = 0; i < LIST_LIMIT; i += 1) {
+    stubs.push(
+      familyStub(
+        7100 + i,
+        `ANALYTICS-MENTO-ORG-D${i}`,
+        orderedCreatedAt(i),
+        Array.from(
+          { length: MAX_DUPLICATE_LOOKUPS },
+          (_, j) => `ANALYTICS-MENTO-ORG-DH${i}X${j}`,
+        ),
+        FIX_SCOPE_ARCHITECTURAL,
+      ),
+    );
+  }
+  stubs.push(
+    familyStub(7699, "ANALYTICS-MENTO-ORG-DZ", orderedCreatedAt(LIST_LIMIT), [
+      DROPPED_HUB_ID,
+    ]),
+  );
+  return makeRunGh({
+    stubs,
+    handled: [{ shortId: DROPPED_HUB_ID, label: FIX_REFUSED_LABEL }],
+  });
+}
+
+await test("SEED: an id the first pass DROPPED for budget is re-lookable by the second look, so no duplicate slips through", async () => {
+  // The interaction bug between two individually-correct changes. To keep the
+  // per-run overflow counting each distinct un-runnable id ONCE rather than once
+  // per fixpoint iteration, `listHandledShortIds` folds every DROPPED id into its
+  // re-attempt guard — correct while a budget only shrinks within one pass. The
+  // second look then began SEEDING that guard while running on FRESH budgets, so
+  // never-read ids arrived labelled "already resolved": the pass spent none of
+  // its new allowance on them and selected a stub whose sibling holds a terminal
+  // refusal. A duplicate autofix PR, with no rate limit anywhere in the story —
+  // the exact hazard the fail-closed work exists to prevent, reached from the
+  // other side.
+  //
+  // NEGATIVE CONTROL: seed the wider set again — `new Set(seed.handledQueried)`
+  // in resolveFamilies, i.e. carry dropped ids across the pass boundary — and
+  // #7699 appears in `entries` with zero second-look lookups for its hub.
+  const { runGh, calls } = droppedIdBlockerFixture();
+  const { entries, deferred, truncations } = await selectAutofixRun(
+    { repo: "o/r", cap: 6 },
+    { runGh },
+  );
+
+  // The fixture must actually starve the first pass, or this proves nothing.
+  assert(
+    truncations.handledOverflow > 0,
+    "the first pass must overflow its handled budget for this to be the dropped-id path",
+  );
+  const secondListAt = secondLookStartsAt(calls);
+  assert(secondListAt > 0, "the second look must have run");
+  assertEqual(
+    titleSearchCountFor(calls.slice(0, secondListAt), DROPPED_HUB_ID),
+    0,
+    "the first pass must never have read this id — it was dropped for budget",
+  );
+
+  // The fix: a fresh budget retries exactly the work the first pass could not
+  // afford, so the terminal sibling is found.
+  assertEqual(
+    titleSearchCountFor(calls.slice(secondListAt), DROPPED_HUB_ID),
+    1,
+    "the second look must spend its OWN budget looking up the id nobody read",
+  );
+  assert(
+    !entries.some((e) => e.issue === 7699),
+    `a stub whose family carries a terminal refusal must never be selected, got: ${JSON.stringify(entries)}`,
+  );
+  assert(
+    deferred.some((d) => d.issue === 7699),
+    `and the stand-down must be reported, got: ${JSON.stringify(deferred)}`,
+  );
+});
+
+await test("SEED REGRESSION: a dropped id is counted into overflow ONCE per run, however many passes re-surface it", async () => {
+  // The invariant the seeded set was introduced to protect, pinned directly on
+  // the helper so it cannot regress behind a fixture. The fixpoint re-surfaces
+  // the same recheck ids every iteration; without the dropped ids in the
+  // re-attempt guard, each one is counted into `overflow` once per pass and the
+  // run record reports a multiple of the real number. Splitting `answered` out
+  // must NOT weaken this: the guard still absorbs dropped ids, only the SEED is
+  // narrowed.
+  //
+  // NEGATIVE CONTROL: drop the `for (const droppedId of droppedIds)
+  // queried.add(droppedId);` loop in listHandledShortIds and overflow doubles to
+  // 4 — or make the re-attempt filter read `answered` instead of `queried`, the
+  // plausible wrong shape of this round's fix, and it doubles the same way.
+  const ids = ["ANALYTICS-MENTO-ORG-OA", "ANALYTICS-MENTO-ORG-OB"];
+  const { runGh, calls } = makeRunGh({ stubs: [] });
+  const queried = new Set();
+  const answered = new Set();
+  const budget = { remaining: 0, overflow: 0 };
+  for (let pass = 0; pass < 2; pass += 1) {
+    await listHandledShortIds(runGh, "o/r", ids, {
+      queried,
+      answered,
+      budget,
+    });
+  }
+  assertEqual(
+    budget.overflow,
+    ids.length,
+    "each DISTINCT un-runnable id must count exactly once per run",
+  );
+  assertEqual(calls.length, 0, "and no lookup may be issued at zero capacity");
+  assertEqual(
+    answered.size,
+    0,
+    "nothing was answered — a dropped id is spend, never knowledge",
+  );
+});
+
+await test("SEED: an id the first pass ANSWERED is NOT re-read by the second look (seeding still pays)", async () => {
+  // The other half of the same boundary, and the reason the fix narrows the seed
+  // instead of deleting it. An id whose lookup actually came back is real
+  // knowledge: re-asking costs the second look budget it needs for the ids
+  // nobody has read yet. Here the whole window shares ONE declared hub, so the
+  // first pass answers it well inside its budget, and the stub past the ceiling
+  // declares the same hub.
+  //
+  // NEGATIVE CONTROL: stop seeding the answered set — `const handledQueried =
+  // new Set()` in resolveFamilies — and the count below goes to 2.
+  const SEEDED_HUB_ID = "ANALYTICS-MENTO-ORG-SEEDEDHUB";
+  const stubs = [];
+  for (let i = 0; i < LIST_LIMIT; i += 1) {
+    stubs.push(
+      familyStub(
+        7800 + i,
+        `ANALYTICS-MENTO-ORG-E${i}`,
+        orderedCreatedAt(i),
+        [SEEDED_HUB_ID],
+        FIX_SCOPE_ARCHITECTURAL,
+      ),
+    );
+  }
+  stubs.push(
+    familyStub(8399, "ANALYTICS-MENTO-ORG-EZ", orderedCreatedAt(LIST_LIMIT), [
+      SEEDED_HUB_ID,
+    ]),
+  );
+  // No `handled` entry: the hub exists and answers "no terminal marker".
+  const { runGh, calls } = makeRunGh({ stubs });
+  const { entries } = await selectAutofixRun(
+    { repo: "o/r", cap: 6 },
+    { runGh },
+  );
+  assert(secondLookStartsAt(calls) > 0, "the second look must have run");
+  assertEqual(
+    titleSearchCountFor(calls, SEEDED_HUB_ID),
+    1,
+    "an answered id must be looked up ONCE per run, not once per pass",
+  );
+  assert(
+    entries.some((e) => e.issue === 8399),
+    "and nothing blocks it, so the stub past the ceiling is still selected",
+  );
+});
+
+await test("SEED: a probe that FAILED or was left half-read is guarded but never seeded (the same bug, other hats)", async () => {
+  // The reverse leg carries the identical hazard on two more structures. A
+  // probe id enters `alreadyProbed` BEFORE its search runs, and a hit's stub
+  // read is negative-cached as `null` on failure — both right as within-pass
+  // re-attempt guards, both spend rather than knowledge. Seeded into a pass with
+  // fresh budgets they say "already resolved" about work nobody completed, and a
+  // terminal sibling behind an unread hit lets a duplicate fix PR through
+  // exactly as the handled-id case does.
+  //
+  // (The PROBE budget is already safe: its ceiling check breaks BEFORE the add,
+  // so a probe it refuses never enters the guard at all. Pinned below.)
+  //
+  // NEGATIVE CONTROL: seed the wide sets — `answeredProbes` fed from `probed`,
+  // or `resolved.stubCache` unfiltered — and the assertions below flip: the
+  // failed, starved and unread-hit probes all read as answered.
+  const hub = (n, shortId) => ({
+    number: n,
+    title: `[sentry] ${shortId} (analytics-mento-org, error)`,
+    labels: [],
+  });
+  const runGh = async (args) => {
+    const search = String(args[args.indexOf("--search") + 1] ?? "");
+    if (args[1] === "view") {
+      // The hit surfaced by STARVE2 cannot be read.
+      if (String(args[2]) === "9200") {
+        throw new Error("gh issue view 9200 failed with exit 1:\nHTTP 502");
+      }
+      return JSON.stringify({
+        number: Number(args[2]),
+        title: "[sentry] ANALYTICS-MENTO-ORG-HUBX (analytics-mento-org, error)",
+        body: "",
+        labels: [],
+        comments: [verdictComment({ duplicates: [] })],
+      });
+    }
+    if (/PROBEBAD/.test(search)) {
+      throw new Error("gh issue list failed with exit 1:\nread ECONNRESET");
+    }
+    if (/PROBESTARVE/.test(search)) {
+      return JSON.stringify([hub(9100, "ANALYTICS-MENTO-ORG-HUB1")]);
+    }
+    if (/PROBEREAD/.test(search)) {
+      return JSON.stringify([hub(9200, "ANALYTICS-MENTO-ORG-HUB2")]);
+    }
+    return JSON.stringify([]);
+  };
+
+  const ids = [
+    "ANALYTICS-MENTO-ORG-PROBEOK",
+    "ANALYTICS-MENTO-ORG-PROBEBAD",
+    "ANALYTICS-MENTO-ORG-PROBEREAD",
+  ];
+  const probed = new Set();
+  const answeredProbes = new Set();
+  const failedStubReads = new Set();
+  await reverseVerifyFamilies(runGh, "o/r", ids, {
+    project: LOCAL_SENTRY_PROJECT,
+    alreadyProbed: probed,
+    answeredProbes,
+    failedStubReads,
+    probeBudget: { remaining: 10 },
+    verifyBudget: { remaining: 10 },
+  });
+  assertEqual(probed.size, 3, "all three are guarded against re-attempt");
+  assertDeepEqual(
+    [...answeredProbes],
+    ["ANALYTICS-MENTO-ORG-PROBEOK"],
+    "only the probe that searched AND resolved every hit is seed-worthy",
+  );
+  assert(
+    failedStubReads.has("9200"),
+    "the thrown hit read is recorded so its null cache entry is not seeded",
+  );
+
+  // Verify-budget starvation, on its own: the search returns a hit the pass
+  // cannot afford to read.
+  const starvedProbed = new Set();
+  const starvedAnswered = new Set();
+  await reverseVerifyFamilies(
+    runGh,
+    "o/r",
+    ["ANALYTICS-MENTO-ORG-PROBESTARVE"],
+    {
+      project: LOCAL_SENTRY_PROJECT,
+      alreadyProbed: starvedProbed,
+      answeredProbes: starvedAnswered,
+      probeBudget: { remaining: 10 },
+      verifyBudget: { remaining: 0 },
+    },
+  );
+  assertEqual(starvedProbed.size, 1, "still guarded within the pass");
+  assertEqual(
+    starvedAnswered.size,
+    0,
+    "a probe whose hit went unread for want of budget is not an answer",
+  );
+
+  // And the PROBE ceiling, which was already correct: a probe it refuses never
+  // enters the guard, so nothing has to un-record it.
+  const cappedProbed = new Set();
+  const cappedAnswered = new Set();
+  await reverseVerifyFamilies(runGh, "o/r", ids, {
+    project: LOCAL_SENTRY_PROJECT,
+    alreadyProbed: cappedProbed,
+    answeredProbes: cappedAnswered,
+    probeBudget: { remaining: 0 },
+    verifyBudget: { remaining: 10 },
+  });
+  assertEqual(
+    cappedProbed.size,
+    0,
+    "a probe refused by the ceiling is never recorded as probed at all",
+  );
+});
+
+await test("SEED: a stub read that THREW is not carried into the next pass's cache", async () => {
+  // The last hat, and the one that makes the probe fix worth anything. Re-probing
+  // an unresolved id on a fresh budget only helps if the hit it could not read is
+  // actually re-readable — and `readVerdictCached` negative-caches a THROWN read
+  // as `null`, indistinguishable from the legitimate "read fine, no fenced
+  // verdict". Seed that null and the second look re-probes, finds the same hit,
+  // pays no verify budget for it (the cache claims a hit), and re-derives
+  // "not admitted" from a read that never happened.
+  //
+  // NEGATIVE CONTROL: return `stubCache` unfiltered from resolveFamilies and the
+  // first assertion below flips.
+  const runGh = async (args) => {
+    if (args[0] === "issue" && args[1] === "view") {
+      if (String(args[2]) === "9200") {
+        throw new Error("gh issue view 9200 failed with exit 1:\nHTTP 502");
+      }
+      return JSON.stringify({
+        number: Number(args[2]),
+        title:
+          "[sentry] ANALYTICS-MENTO-ORG-HUBOK (analytics-mento-org, error)",
+        body: "",
+        labels: [],
+        comments: [verdictComment({ duplicates: ["ANALYTICS-MENTO-ORG-CA"] })],
+      });
+    }
+    const search = String(args[args.indexOf("--search") + 1] ?? "");
+    if (/in:comments/.test(search)) {
+      return JSON.stringify([
+        {
+          number: 9200,
+          title:
+            "[sentry] ANALYTICS-MENTO-ORG-HUBBAD (analytics-mento-org, error)",
+          labels: [],
+        },
+        {
+          number: 9300,
+          title:
+            "[sentry] ANALYTICS-MENTO-ORG-HUBOK (analytics-mento-org, error)",
+          labels: [],
+        },
+      ]);
+    }
+    return JSON.stringify([]);
+  };
+  const candidates = [
+    {
+      entry: { issue: 500, shortId: "ANALYTICS-MENTO-ORG-CA" },
+      issue: 500,
+      shortId: "ANALYTICS-MENTO-ORG-CA",
+      duplicateOf: [],
+      reconcile: false,
+    },
+  ];
+  const { resolved } = await resolveFamilies(runGh, "o/r", candidates, 2);
+  assert(
+    !resolved.stubCache.has("9200"),
+    "a read that threw is spend, not knowledge — it must not reach the seed",
+  );
+  assert(
+    resolved.stubCache.has("9300"),
+    "a read that succeeded IS knowledge and must still be carried",
+  );
+  assertEqual(
+    resolved.probesAnswered.size,
+    0,
+    "and the probe that surfaced the unread hit is not answered either",
+  );
+});
+
+await test("SECOND LOOK: the ids the first pass PROBED are skipped, but its probe SPEND is not charged to the second look", async () => {
+  // The seed carries knowledge, never spend. `alreadyProbed` is a dedupe set —
+  // seeding it is what stops the second look re-issuing searches the run already
+  // paid for — but the probe budget used to be metered as `alreadyProbed.size`,
+  // so a seeded set larger than the second look's cap reads as "budget already
+  // spent" and the pass probes NOTHING while reporting itself truncated. That
+  // turns the seed, whose whole purpose is to make this pass stronger, into the
+  // thing that blinds it.
+  //
+  // NEGATIVE CONTROL: change the budget check in reverseVerifyFamilies back to
+  // `probed.size >= maxProbes` and the second look's probe count below drops to
+  // 0 while the first pass's stays exactly the same.
+  const { runGh, calls } = reverseStoodDownFixture();
+  const { entries, window } = await selectAutofixRun(
+    { repo: "o/r", cap: 2 },
+    { runGh },
+  );
+  assertEqual(window.secondLook, true, "this pin must take a second look");
+  const secondListAt = calls.findIndex(
+    (c, i) => isWindowListArgs(c) && calls.slice(0, i).some(isWindowListArgs),
+  );
+  assert(secondListAt > 0, "the second look's own list must be locatable");
+  const firstPassProbes = reverseSearchCount(calls.slice(0, secondListAt));
+  const secondLookProbes = reverseSearchCount(calls.slice(secondListAt));
+  assert(
+    firstPassProbes > SECOND_LOOK_FAMILY_BUDGETS.probe,
+    `the first pass must probe MORE ids than the second look's whole budget, or this proves nothing (got ${firstPassProbes})`,
+  );
+  assert(
+    secondLookProbes > 0,
+    "the second look must get its own probe allowance despite the seeded set",
+  );
+  assertDeepEqual(
+    entries.map((e) => e.issue),
+    [7400, 7401],
+    "and it still reaches the selectable stubs past the ceiling",
+  );
+});
+
+await test("SECOND LOOK: a failing list read does NOT fail the step — the first pass's result stands", async () => {
+  // The second look's list is the ONE gh call in this leg with no fail-soft
+  // handler under it, and this leg put it on the FREQUENT path: once the queue
+  // is >= LIST_LIMIT rows, every no-selection run depends on it. Unhandled, its
+  // rejection reaches main(), sets exit 1, and kills the select step under
+  // `set -euo pipefail` — destroying the whole run record, the deferral and skip
+  // reports, and the DEGRADED line, on a run that before this change exited 0
+  // with a clean `[]`.
+  //
+  // NEGATIVE CONTROL: remove the try/catch around resolveSecondLook in
+  // selectAutofixRun and this test throws instead of returning.
+  const { runGh: base } = makeRunGh({
+    stubs: starvedWindowStubs({ further: 3 }),
+  });
+  let windowLists = 0;
+  const runGh = async (args) => {
+    if (isWindowListArgs(args)) {
+      windowLists += 1;
+      if (windowLists === 2) {
+        throw new Error("gh issue list failed with exit 1:\nread ECONNRESET");
+      }
+    }
+    return base(args);
+  };
+  const { entries, skipped, window, truncations } = await selectAutofixRun(
+    { repo: "o/r", cap: 2 },
+    { runGh },
+  );
+  assertDeepEqual(entries, [], "nothing was selectable, and nothing throws");
+  assertEqual(
+    skipped.length,
+    LIST_LIMIT,
+    "the first pass's report survives the second look's failure intact",
+  );
+  assertEqual(window.secondLook, true, "the attempt is still recorded");
+  assertEqual(
+    window.secondLookFailed,
+    true,
+    "and so is the fact that it could not read — never a silent zero",
+  );
+  assertEqual(
+    truncations.rateLimited,
+    0,
+    "an ordinary transient here is not a throttle",
+  );
+});
+
+await test("SECOND LOOK: a RATE-LIMITED list read degrades the run instead of failing the step", async () => {
+  // The worse half of the same throw site: a 403 there propagated out of
+  // selectAutofixRun before `degraded()` could ever run, so the step died and
+  // `rate_limited` / the DEGRADED run-record line never rendered — the run went
+  // out as a select failure with no record of WHY.
+  const { runGh: base } = makeRunGh({
+    stubs: starvedWindowStubs({ further: 3 }),
+  });
+  let windowLists = 0;
+  const runGh = async (args) => {
+    if (isWindowListArgs(args)) {
+      windowLists += 1;
+      if (windowLists === 2) {
+        const err = new Error("gh issue list failed with exit 1");
+        err.ghStderr = "HTTP 403: API rate limit exceeded for user ID 1234.";
+        throw err;
+      }
+    }
+    return base(args);
+  };
+  const { entries, window, truncations } = await selectAutofixRun(
+    { repo: "o/r", cap: 2 },
+    { runGh },
+  );
+  assert(Array.isArray(entries), "the always-emits-an-array contract holds");
+  assertDeepEqual(entries, []);
+  assertEqual(window.secondLookFailed, true);
+  assert(
+    truncations.rateLimited > 0,
+    "the throttle must reach the disposition flip, not die with the step",
+  );
+});
+
+/** A rejection shaped like the one `defaultRunGh` builds for a throttled call:
+ * the argv-carrying message plus gh's own stderr on `ghStderr`, which is the
+ * only half `isRateLimitFailure` may be run against. */
+function throttleError(argv = "gh issue list --repo o/r") {
+  const err = new Error(`${argv} failed with exit 1`);
+  err.ghStderr = "HTTP 403: API rate limit exceeded for user ID 1234.";
+  return err;
+}
+
+/** Round-trip a run through the report writer the CLI uses, so a fail-closed
+ * assertion covers the channel the disposition flip ACTUALLY rides — the
+ * truncations file — instead of only the returned object. Returns the parsed
+ * file plus whether the degraded signal survived. */
+function writeAndReadTruncations(run) {
+  const dir = mkdtempSync(join(tmpdir(), "autofix-select-failclosed-"));
+  try {
+    const truncationsOut = join(dir, "truncations.json");
+    const { lostDegradedSignal } = writeRunReports({ truncationsOut }, run);
+    return {
+      lostDegradedSignal,
+      written: JSON.parse(readFileSync(truncationsOut, "utf8")),
+    };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+await test("FAIL CLOSED: a THROTTLED FIRST window list degrades the run instead of failing the step", async () => {
+  // The third and last unhandled throw site, and the one on the most common
+  // path: the batch run's very FIRST read. `instrumentRunGh` counts the throttle
+  // and RETHROWS by design (so every fail-soft handler downstream keeps its
+  // exact behaviour), so the rejection left `selectAutofixRun` untouched, `main`
+  // set exit 1, and the step died under `set -euo pipefail` — taking the JSON
+  // array, the `::error::` line, `truncations.rateLimited` and the
+  // `degraded-rate-limited` disposition with it. The run went out as a select
+  // FAILURE with no record of why, which is the exact inverse of the contract
+  // this leg is built on. The second look's list was already wrapped for this
+  // reason; this one and the dispatch read were missed.
+  //
+  // NEGATIVE CONTROL: remove the try/catch around `listCodeFixStubsPage` in
+  // selectAutofixRun and this test throws instead of returning.
+  const { runGh: base } = makeRunGh({
+    stubs: starvedWindowStubs({ further: 3 }),
+  });
+  const runGh = async (args) => {
+    if (isWindowListArgs(args)) throw throttleError();
+    return base(args);
+  };
+  const { result, stderr } = await captureStderr(() =>
+    selectAutofixRun({ repo: "o/r", cap: 2 }, { runGh }),
+  );
+  // The invariant the workflow header asserts: ALWAYS a valid array, NEVER a
+  // throw. Reaching this line at all is half the assertion.
+  assert(
+    Array.isArray(result.entries),
+    "the leg must still emit a valid array",
+  );
+  assertDeepEqual(result.entries, []);
+  assert(
+    result.truncations.rateLimited > 0,
+    "the degradation must be reported, not silent",
+  );
+  assertEqual(
+    result.window.total,
+    0,
+    "a window that was never read must not claim stubs it did not see",
+  );
+  assertEqual(result.window.evaluated, 0);
+  assertEqual(result.window.ghCalls, 1, "and the one issued read is counted");
+  assert(
+    stderr.includes("::error::selection DEGRADED"),
+    `the loud report must still be written, got: ${stderr}`,
+  );
+  // exit 0: `main` fails the step only when the degraded signal is LOST, so the
+  // report has to survive the file layer too — that is the channel the
+  // disposition flip rides.
+  const { lostDegradedSignal, written } = writeAndReadTruncations(result);
+  assertEqual(lostDegradedSignal, false, "the degraded run still exits 0");
+  assert(
+    written.rateLimited > 0,
+    `the truncations file must carry the throttle, got: ${JSON.stringify(written)}`,
+  );
+});
+
+await test("FAIL CLOSED: a THROTTLED dispatch readStub degrades the run instead of failing the step", async () => {
+  // The dispatch path's first read, same shape and the same stakes: the
+  // documented remedy for a stalled leg must not be the one path that turns a
+  // throttle into a dead step with no run record.
+  //
+  // NEGATIVE CONTROL: remove the try/catch around `readStub` in the
+  // `options.issue != null` branch and this test throws instead of returning.
+  const { runGh: base } = makeRunGh({
+    stubs: [stub({ number: 8400, shortId: "ANALYTICS-MENTO-ORG-DR" })],
+  });
+  const runGh = async (args) => {
+    if (args[0] === "issue" && args[1] === "view") {
+      throw throttleError("gh issue view 8400 --repo o/r");
+    }
+    return base(args);
+  };
+  const { result, stderr } = await captureStderr(() =>
+    selectAutofixRun({ repo: "o/r", issue: 8400 }, { runGh }),
+  );
+  assert(
+    Array.isArray(result.entries),
+    "the leg must still emit a valid array",
+  );
+  assertDeepEqual(result.entries, []);
+  assert(result.truncations.rateLimited > 0, "the degradation is reported");
+  assertEqual(
+    result.window.evaluated,
+    0,
+    "the stub was never read, so it was never evaluated",
+  );
+  assert(
+    stderr.includes("::error::selection DEGRADED"),
+    `the loud report must still be written, got: ${stderr}`,
+  );
+  const { lostDegradedSignal, written } = writeAndReadTruncations(result);
+  assertEqual(lostDegradedSignal, false, "the degraded run still exits 0");
+  assert(written.rateLimited > 0, "the truncations file carries the throttle");
+});
+
+await test("FAIL CLOSED: a NON-throttle failure on those same reads still FAILS the step, unchanged", async () => {
+  // The scoping half, and the reason the two catches above test
+  // `state.rateLimited` rather than swallowing everything. A rate limit is the
+  // dedupe hazard this leg fails closed against — the read did not answer, and
+  // selecting on that opens duplicate PRs — so it degrades and reports. A
+  // TOTAL failure of the same read (transport gone, malformed body, dead token)
+  // is a different thing: nothing was read, so nothing can be wrongly selected,
+  // there is no window to report on, and a dead step is the louder and more
+  // actionable signal than a green run rendering as an idle queue. That is the
+  // behaviour on main and this round deliberately preserves it.
+  //
+  // NEGATIVE CONTROL: change either new catch to swallow unconditionally (drop
+  // its `if (state.rateLimited === 0) throw err;`) and every assertion below
+  // flips — each call resolves to a clean `[]` and the failure goes silent.
+  const stubs = starvedWindowStubs({ further: 3 });
+  const rejects = async (runGh, options, what) => {
+    let threw = false;
+    try {
+      await selectAutofixRun(options, { runGh });
+    } catch {
+      threw = true;
+    }
+    assert(threw, `${what} must still reject`);
+  };
+
+  // Transport failure on the first window list.
+  const { runGh: listBase } = makeRunGh({ stubs });
+  await rejects(
+    async (args) => {
+      if (isWindowListArgs(args)) {
+        throw new Error("gh issue list failed with exit 1:\nread ECONNRESET");
+      }
+      return listBase(args);
+    },
+    { repo: "o/r", cap: 2 },
+    "a transport failure on the window list",
+  );
+
+  // Malformed body on the same read: never a `gh` rejection at all, so the
+  // throttle latch cannot have fired and the JSON.parse throw must propagate.
+  const { runGh: jsonBase } = makeRunGh({ stubs });
+  await rejects(
+    async (args) => (isWindowListArgs(args) ? "not json" : jsonBase(args)),
+    { repo: "o/r", cap: 2 },
+    "a malformed window list body",
+  );
+
+  // And the dispatch read.
+  const { runGh: dispatchBase } = makeRunGh({
+    stubs: [stub({ number: 8401, shortId: "ANALYTICS-MENTO-ORG-DQ" })],
+  });
+  await rejects(
+    async (args) => {
+      if (args[0] === "issue" && args[1] === "view") {
+        throw new Error("gh issue view 8401 failed with exit 1:\nHTTP 404");
+      }
+      return dispatchBase(args);
+    },
+    { repo: "o/r", issue: 8401 },
+    "a 404 on the dispatch stub read",
+  );
+});
+
+await test("FAIL CLOSED: a throttled run stops ISSUING reads, it does not spend the rest of the window into an active limit", async () => {
+  // Fail-closed at the token level, not only at the selection. GitHub's
+  // secondary limits EXTEND on continued requests and escalate to abuse
+  // detection, and this is the repo-shared free-plan GITHUB_TOKEN. Before the
+  // latch, one 403 at the head of a 200-wide window was followed by ~400 more
+  // subprocesses before the run stood down.
+  //
+  // NEGATIVE CONTROL: remove the `state.rateLimited > 0` short-circuit at the
+  // top of instrumentRunGh (and the matching break in the evaluation loop) and
+  // the call count jumps to the full window's ~400.
+  const { runGh, calls } = makeRunGh({
+    stubs: starvedWindowStubs({ further: 3 }),
+    openPrError:
+      "gh api repos/o/r/pulls failed with exit 1:\nHTTP 403: API rate limit exceeded for user ID 1234.",
+  });
+  const { entries, window, truncations } = await selectAutofixRun(
+    { repo: "o/r", cap: 2 },
+    { runGh },
+  );
+  assertDeepEqual(entries, []);
+  assertEqual(truncations.rateLimited, 1, "exactly ONE real throttle event");
+  assert(
+    calls.length <= 5,
+    `a throttled run must stop issuing reads, got ${calls.length} (unlatched it made 2 x ${MAX_CANDIDATE_EVALUATIONS} + more)`,
+  );
+  assertEqual(
+    window.ghCalls,
+    calls.length,
+    "latched (never issued) reads must not inflate the measured invocation count",
+  );
+});
+
+await test("FAIL CLOSED: the latch holds where the loop break cannot — a throttle DURING family resolution", async () => {
+  // The two mechanisms are not interchangeable, and this is the half only the
+  // latch covers. The evaluation loop has already finished here; what remains is
+  // the family budget, up to MAX_HANDLED_ID_QUERIES in:title searches plus the
+  // reverse probes and verify reads on top. Breaking a loop the run has left
+  // does nothing for that, and every one of those reads is separately
+  // try/caught, so without the latch each simply fails soft and the next one
+  // fires into the same active limit.
+  //
+  // NEGATIVE CONTROL: remove the `state.rateLimited > 0` short-circuit at the
+  // top of instrumentRunGh and the in:title count below jumps from 1 to
+  // MAX_HANDLED_ID_QUERIES.
+  const stubs = [];
+  const hubIds = [];
+  for (let i = 0; i < 30; i += 1) {
+    const hubs = Array.from(
+      { length: MAX_DUPLICATE_LOOKUPS },
+      (_, j) => `ANALYTICS-MENTO-ORG-LH${i}X${j}`,
+    );
+    hubIds.push(...hubs);
+    stubs.push(
+      familyStub(
+        7900 + i,
+        `ANALYTICS-MENTO-ORG-L${i}`,
+        orderedCreatedAt(i),
+        hubs,
+      ),
+    );
+  }
+  const { runGh, calls } = makeRunGh({
+    stubs,
+    handledLookupErrorIds: hubIds,
+    handledLookupErrorMessage:
+      "gh issue list failed with exit 1:\nHTTP 403: API rate limit exceeded for user ID 1234.",
+  });
+  const { entries, truncations } = await selectAutofixRun(
+    { repo: "o/r", cap: 2 },
+    { runGh },
+  );
+  assertDeepEqual(entries, [], "the run still fails closed");
+  assertEqual(truncations.rateLimited, 1, "exactly ONE real throttle event");
+  assertEqual(
+    titleSearchCount(calls),
+    1,
+    `the throttled family pass must issue no further lookups, got ${titleSearchCount(calls)} of a ${MAX_HANDLED_ID_QUERIES} budget`,
+  );
+  assertEqual(
+    reverseSearchCount(calls),
+    0,
+    "and no reverse probe may fire after the limit is known",
+  );
+});
+
+await test("FAIL CLOSED: the throttled window evaluation LEAVES, it does not grind out a skip line per remaining stub", async () => {
+  // The latch makes the remaining reads free, so this is legibility rather than
+  // spend — but 200 `skip #N` lines burying the one `::error::` that explains
+  // the run is its own failure to communicate, on the surface an operator reads
+  // when the tracker says DEGRADED.
+  //
+  // NEGATIVE CONTROL: remove the `state.rateLimited > 0` break from the window
+  // evaluation loop in selectAutofixRun and the skip-line count below goes to
+  // the whole window's ${LIST_LIMIT}.
+  const { runGh } = makeRunGh({
+    stubs: starvedWindowStubs({ further: 3 }),
+    openPrError:
+      "gh api repos/o/r/pulls failed with exit 1:\nHTTP 403: API rate limit exceeded for user ID 1234.",
+  });
+  const { stderr } = await captureStderr(() =>
+    selectAutofixRun({ repo: "o/r", cap: 2 }, { runGh }),
+  );
+  const skipLines = stderr
+    .split("\n")
+    .filter((line) => line.startsWith("skip #")).length;
+  assert(
+    skipLines <= 2,
+    `a throttled run must leave the window loop, got ${skipLines} skip lines`,
+  );
+  assert(
+    stderr.includes("stopping the window evaluation"),
+    "and it must say why it left",
+  );
+});
+
+await test("INSTRUMENTATION: the operator summary line reports the count actually EMITTED, not the pre-degradation one", async () => {
+  // `finish()` is passed AS THE ARGUMENT to `degraded()`, which only then
+  // replaces `entries` with []. A summary built inside `finish()` therefore said
+  // `entries=2` on a run that emitted zero — on exactly the fail-closed path,
+  // the one an operator greps this line to understand.
+  //
+  // NEGATIVE CONTROL: move the `summarize(...)` call back inside `finish()` (so
+  // it reads `entries.length` before degradation) and the assertion below sees
+  // a nonzero count.
+  const { runGh } = dedupeBlockedFixture(
+    "gh issue list failed with exit 1:\nHTTP 403: You have exceeded a secondary rate limit and have been temporarily blocked from content creation.",
+  );
+  const { result, stderr } = await captureStderr(() =>
+    selectAutofixRun({ repo: "o/r", cap: 2 }, { runGh }),
+  );
+  assertDeepEqual(result.entries, []);
+  const summary = stderr
+    .split("\n")
+    .filter((line) => line.startsWith("gh-calls="));
+  assertEqual(summary.length, 1, `exactly one summary line, got: ${summary}`);
+  assert(
+    /\bentries=0$/.test(summary[0]),
+    `the summary must report the emitted count, got: ${summary[0]}`,
+  );
+});
+
+await test("isRateLimitFailure: the bare HTTP 403 permissions branch is load-bearing on its own", async () => {
+  // Every other positive case in this suite that contains "HTTP 403" ALSO
+  // contains "rate limit" wording, so deleting the `/\bHTTP 403\b/` pattern left
+  // the whole suite green — while a real `HTTP 403: Bad credentials` (an App
+  // token that lost its installation, the shape this leg is most likely to meet)
+  // would stop degrading the run. Matching it is a deliberate trade: a
+  // permissions failure and a throttle both mean "this read did not answer the
+  // dedupe question", and the only safe action for either is the same one.
+  //
+  // NEGATIVE CONTROL: delete `/\bHTTP 403\b/` from RATE_LIMIT_PATTERNS and this
+  // test reds while every other test in the suite stays green.
+  assert(
+    isRateLimitFailure("HTTP 403: Bad credentials"),
+    "a bare 403 with no throttle wording must still stand the run down",
+  );
+  assert(
+    isRateLimitFailure("HTTP 403: Resource not accessible by integration"),
+    "the App-permissions shape must too",
+  );
+  assert(
+    !isRateLimitFailure("HTTP 401: Bad credentials"),
+    "and it must be the 403 specifically, not any auth-shaped error",
+  );
+});
+
+await test("isRateLimitFailure is classified on gh's STDERR, never on the argv the message also carries", async () => {
+  // `defaultRunGh` builds `gh <argv> failed with exit N:\n<stderr>`, and argv
+  // carries AGENT-authored text: family ids come from an LLM's `duplicate_of`
+  // and are interpolated into the `in:title` / `in:comments` searches, with a
+  // charset (`[A-Za-z0-9._-]`) that admits `RATELIMITEXCEEDED` as a legal id.
+  // Classified against the whole message, any unrelated failure of that one
+  // probe — 404, 502, ECONNRESET — would stand the entire run down.
+  //
+  // NEGATIVE CONTROL: make ghFailureText return `err.message` and the first
+  // assertion below flips.
+  const err = new Error(
+    'gh issue list --repo o/r --search "ANALYTICS-MENTO-ORG-RATELIMITEXCEEDED" in:title failed with exit 1:\nHTTP 404: Not Found',
+  );
+  err.ghStderr = "HTTP 404: Not Found";
+  assert(
+    !isRateLimitFailure(ghFailureText(err)),
+    "an unrelated 404 on a probe for an awkwardly-named family id is not a throttle",
+  );
+  assert(
+    isRateLimitFailure(err.message),
+    "the hazard is real: the same message classified WHOLE does match",
+  );
+  // Rejections with no captured stderr (a spawn error, or a test double) keep
+  // the old behaviour exactly.
+  const plain = new Error(
+    "gh api failed with exit 1:\nHTTP 429 Too Many Requests",
+  );
+  assert(
+    isRateLimitFailure(ghFailureText(plain)),
+    "a rejection without ghStderr still classifies on its message",
+  );
+});
+
+await test("CLI: --truncations-out round-trips, and the files it writes carry the exact keys the workflow's jq reads", async () => {
+  // The file layer is the ACTUAL bridge between the selector's return value and
+  // the tracker: the workflow reads `.rateLimited`, `.secondLookFull` and the
+  // rest with jq. Every other test here asserts the returned OBJECT, so a
+  // key-name or serialization bug in this layer would pass all of them and
+  // silently zero the whole run record. `--truncations-out` in particular had no
+  // test presence at all, and it is the flag the degraded disposition rides on.
+  const parsed = parseArgs([
+    "--repo",
+    "o/r",
+    "--truncations-out",
+    "/tmp/t.json",
+    "--window-out",
+    "/tmp/w.json",
+  ]);
+  assertEqual(parsed.truncationsOut, "/tmp/t.json");
+  assertEqual(parsed.windowOut, "/tmp/w.json");
+
+  const dir = mkdtempSync(join(tmpdir(), "autofix-select-"));
+  try {
+    const windowOut = join(dir, "window.json");
+    const truncationsOut = join(dir, "truncations.json");
+    const deferredOut = join(dir, "deferred.json");
+    const { lostDegradedSignal } = writeRunReports(
+      {
+        deferredOut,
+        skippedOut: join(dir, "skipped.json"),
+        windowOut,
+        truncationsOut,
+      },
+      {
+        entries: [],
+        deferred: [{ issue: 12, reason: DEFER_FAMILY_HANDLED }],
+        skipped: [],
+        window: {
+          total: 200,
+          evaluated: 200,
+          secondLook: true,
+          secondLookTotal: 100,
+          secondLookEvaluated: 100,
+          secondLookFull: true,
+          secondLookFailed: false,
+          ghCalls: 782,
+        },
+        truncations: {
+          handledOverflow: 0,
+          reverseBudget: false,
+          reverseNonconvergent: false,
+          rateLimited: 0,
+        },
+      },
+    );
+    assertEqual(lostDegradedSignal, false, "a clean write loses nothing");
+    const written = JSON.parse(readFileSync(windowOut, "utf8"));
+    assertEqual(written.secondLookFull, true);
+    assertEqual(written.secondLookFailed, false);
+    assertEqual(written.ghCalls, 782);
+    assertEqual(
+      JSON.parse(readFileSync(truncationsOut, "utf8")).rateLimited,
+      0,
+    );
+    assertDeepEqual(JSON.parse(readFileSync(deferredOut, "utf8")), [
+      { issue: 12, reason: DEFER_FAMILY_HANDLED },
+    ]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+await test("CLI: a DEGRADED run whose truncations report cannot be written fails LOUD rather than rendering as idle", async () => {
+  // `rateLimited` reaches the workflow through exactly one channel — this file —
+  // and the disposition flip to `degraded-rate-limited` rides on it. Every other
+  // field degrades to "0" or a missing line; this one is the safety signal. Lose
+  // it and the tracker says `State: active, Candidates selected: 0`, the #1758
+  // misreading, AND the record job's label backfill gate opens on reads the run
+  // itself declared unreliable. So this one write is not best-effort: the step
+  // fails instead. The array contract still held — it is written, and it is `[]`,
+  // so no PR can come out of the run either way.
+  //
+  // NEGATIVE CONTROL: make writeRunReports always report
+  // `lostDegradedSignal: false` and the first assertion below flips.
+  const unwritable = join(tmpdir(), "autofix-select-missing-dir", "t.json");
+  const degradedRun = {
+    entries: [],
+    deferred: [],
+    skipped: [],
+    window: {},
+    truncations: { rateLimited: 3 },
+  };
+  const { result, stderr } = await captureStderr(() =>
+    writeRunReports({ truncationsOut: unwritable }, degradedRun),
+  );
+  assertEqual(
+    result.lostDegradedSignal,
+    true,
+    "a lost degraded signal must be reported to the caller",
+  );
+  assert(
+    /could not write the truncations report/.test(stderr),
+    `the write failure must still be logged, got: ${stderr}`,
+  );
+  // A HEALTHY run losing the same file is NOT fatal: there is no signal to lose,
+  // and the always-emits-an-array-and-exit-0 contract stays absolute everywhere
+  // else.
+  const healthy = await captureStderr(() =>
+    writeRunReports(
+      { truncationsOut: unwritable },
+      { ...degradedRun, truncations: { rateLimited: 0 } },
+    ),
+  );
+  assertEqual(
+    healthy.result.lostDegradedSignal,
+    false,
+    "a healthy run's lost report must never fail the step",
+  );
+  assertEqual(
+    writeReport(unwritable, {}, "truncations"),
+    false,
+    "writeReport reports its own failure",
+  );
+});
+
+await test("the selection leg's modules stay under the 600-line soft cap", () => {
+  // scripts/ has no max-lines lint and sits outside the file-size watchlist's
+  // package scopes (scripts/file-size-watchlist.mjs), so the 600-line soft cap in
+  // docs/pr-checklists/recurring-review-patterns.md is only enforced where a
+  // suite pins it. The triage legs pin their own in sentry-triage-brief.test.mjs;
+  // this leg had NO pin, which is how sentry-autofix-queue-io.mjs reached 583 —
+  // 17 lines of headroom — before anyone looked. Pinned HERE rather than added to
+  // that list because the gate routes every module below to THIS suite: a pin in
+  // a suite an autofix change never runs would not fire on the change that
+  // breaks it.
+  //
+  // Every module the select leg owns belongs on this list — an omission is how
+  // the next one drifts. sentry-autofix-finalize.mjs is deliberately absent: it
+  // belongs to the finalize leg, is already past this cap (the 1,000-line hard
+  // cap governs it), and appears in this suite's import closure only because
+  // queue-io reads `autofixBranchName` from it.
+  const paths = [
+    "sentry-autofix-candidate.mjs",
+    "sentry-autofix-decisions.mjs",
+    "sentry-autofix-family-handled.mjs",
+    "sentry-autofix-family-resolve.mjs",
+    "sentry-autofix-family.mjs",
+    "sentry-autofix-queue-io.mjs",
+    "sentry-autofix-reverse-verify.mjs",
+    "sentry-autofix-second-look.mjs",
+    "sentry-autofix-select-cli.mjs",
+    "sentry-autofix-select-instrument.mjs",
+    "sentry-autofix-select.mjs",
+  ];
+  // Resolved against THIS file rather than a repo root: the Sentry-suite gate
+  // runs each suite from its own snapshot of the derived import set, and every
+  // module above is in that closure, so a sibling-relative read works there and
+  // needs no `reads` declaration in scripts/sentry-suite-manifest.json.
+  const oversized = paths
+    .map((path) => [
+      path,
+      readFileSync(new URL(`./${path}`, import.meta.url), "utf8").split("\n")
+        .length,
+    ])
+    .filter(([, lines]) => lines > 600)
+    .map(([path, lines]) => `${path}:${lines}`);
+  assertEqual(
+    oversized.join(", "),
+    "",
+    "these selection-leg modules crossed the 600-line soft cap; split them",
+  );
 });
 
 process.stdout.write(`\n${passed} passed, ${failed} failed\n`);

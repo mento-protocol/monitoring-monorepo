@@ -5,7 +5,7 @@ title: Babysit PR Skill
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-22
+last_verified: 2026-08-13
 doc_type: skill
 scope: repo-wide
 review_interval_days: 90
@@ -93,6 +93,23 @@ different budget. Report state changes only when something becomes actionable:
 required CI failure, merge conflict, unreplied review comment, unresolved
 thread, Codex approval missing after current-head review, all-clear, merged, or
 closed.
+
+That low-noise rule applies only to unsolicited polling updates. When the user
+asks for status, answer immediately with the PR URL or number, bound head SHA,
+latest feedback/readiness/check result and observation time, current action and
+owner, any blocker or wait, and the next action or deadline. Then keep the
+watcher running.
+
+## Multiple PRs
+
+Give each independent PR its own watcher worker or subagent. Bind every worker
+to that PR's exact repository, number, head, and an isolated worktree before it
+can edit. The lead owns user-facing status, cross-PR dependencies, patch review,
+and approval boundaries while the watchers stay active. A watcher reports an
+actionable transition promptly and either repairs it or hands it to an
+available repair worker; do not leave open feedback aging while every capable
+agent waits. Serialize only overlapping or dependent fixes. On cloud surfaces,
+keep one subscription or check-in loop per PR under the same ownership model.
 
 ## Act On Required Blockers
 

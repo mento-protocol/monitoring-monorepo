@@ -3,7 +3,7 @@ title: PR Operating Card
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-10
+last_verified: 2026-08-13
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -12,13 +12,13 @@ garden_lane: operator-runbooks
 
 # PR Operating Card
 
-The one-card loop for taking an agent task from claim to merge. It replaces the
-old habit of reading the full stack of operating runbooks up front: work the
-steps here, and open an authority doc only when a specific step's decision needs
-its depth. Each step is terse on purpose and names its owning authority. Root
-[`AGENTS.md`](../../AGENTS.md) routes here first; the hard invariants below and
-in the Non-negotiables section are binding even when you never open an
-authority.
+The one-card loop for taking an agent task from claim through any required
+production closeout. It replaces the old habit of reading the full stack of
+operating runbooks up front: work the steps here, and open an authority doc only
+when a specific step's decision needs its depth. Each step is terse on purpose
+and names its owning authority. Root [`AGENTS.md`](../../AGENTS.md) routes here
+first; the hard invariants below and in the Non-negotiables section are binding
+even when you never open an authority.
 
 ## The loop
 
@@ -159,8 +159,19 @@ review` requests. Authority:
 8. **Merge hygiene.** **Never merge a PR without the user's explicit, direct
    approval of that specific merge.** Green CI, bot approvals, a READY
    ready-state, and "ship it" do not authorize a merge. Drive the PR to ready,
-   present the evidence, then stop and ask. After merge, sync the issue state
-   and workboard per [`agent-issue-workflow.md`](agent-issue-workflow.md).
+   present the evidence, then stop and ask. If the merge itself satisfies Done
+   means, sync the issue state and workboard afterward per
+   [`agent-issue-workflow.md`](agent-issue-workflow.md). If live proof remains,
+   continue to production closeout first.
+
+9. **Production closeout when required.** When Done means includes deployed or
+   live behavior, merge is an intermediate state. Monitor the owning deployment
+   to a terminal result, obtain any separate apply or promotion approval, and
+   run the owning package's production checks. Report merge, deployment, and
+   live proof as separate facts; a successful workflow alone does not prove the
+   runtime behavior. Use `Refs #N` instead of `Closes #N` when proof can happen
+   only after merge. Close the issue and run `pnpm issue:board sync` only after
+   the live acceptance criteria pass.
 
 ## Non-negotiables
 
@@ -183,10 +194,11 @@ These bind regardless of which step you are on:
 
 ## Authority map
 
-| Step                     | Authority doc                                                        |
-| ------------------------ | -------------------------------------------------------------------- |
-| Claim, defer, merge-sync | [`agent-issue-workflow.md`](agent-issue-workflow.md)                 |
-| Gate, autoreview         | [`agent-quality-gate-mechanics.md`](agent-quality-gate-mechanics.md) |
-| Ready-state              | [`pr-ready-state.md`](pr-ready-state.md)                             |
-| Docs and drift           | [`../context-standards.md`](../context-standards.md)                 |
-| Ship, babysit            | `ship` and `babysit-pr` skills                                       |
+| Step                     | Authority doc                                                         |
+| ------------------------ | --------------------------------------------------------------------- |
+| Claim, defer, merge-sync | [`agent-issue-workflow.md`](agent-issue-workflow.md)                  |
+| Gate, autoreview         | [`agent-quality-gate-mechanics.md`](agent-quality-gate-mechanics.md)  |
+| Ready-state              | [`pr-ready-state.md`](pr-ready-state.md)                              |
+| Docs and drift           | [`../context-standards.md`](../context-standards.md)                  |
+| Ship, babysit            | `ship` and `babysit-pr` skills                                        |
+| Production closeout      | [`../deployment.md`](../deployment.md) and the owning package runbook |
