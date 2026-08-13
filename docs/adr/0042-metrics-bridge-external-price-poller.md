@@ -14,9 +14,8 @@ garden_lane: adrs-architecture
 # ADR 0042 — metrics-bridge hosts the external market-price peg poller
 
 **Status:** Accepted (Jul 2026), in force. The isolated poller landed in
-PR #1497; protected policy publication and alert activation remain separate
-rollout phases in
-[`docs/PLAN-peg-monitoring.md`](../PLAN-peg-monitoring.md).
+PR #1497. Current production and rollout state lives in
+[`docs/notes/peg-monitoring.md`](../notes/peg-monitoring.md).
 **Scope:** metrics-bridge
 
 ## Context
@@ -144,7 +143,8 @@ monitoring, extending — not replacing — ADR 0027's scope:
 
 ## Evidence
 
-- `docs/PLAN-peg-monitoring.md` (design, venue evidence, phasing)
+- [PR #1445](https://github.com/mento-protocol/monitoring-monorepo/pull/1445)
+  (original design review, venue evidence, and phasing)
 - `metrics-bridge/src/poller.ts`, `metrics-bridge/src/cdp-metrics.ts`
   (isolated-loop and gauge-lifecycle precedents)
 - `metrics-bridge/src/main.ts`, `metrics-bridge/src/peg/runtime.ts`

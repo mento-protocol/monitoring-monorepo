@@ -180,8 +180,8 @@ Phase 3 must implement the following protected artifact and rules contract:
 
 ## Evidence
 
-- `docs/PLAN-peg-monitoring.md` (review findings that reversed the
-  thresholds-as-metrics lean)
+- [PR #1445](https://github.com/mento-protocol/monitoring-monorepo/pull/1445)
+  (review findings that reversed the thresholds-as-metrics lean)
 - `alerts/rules/peg-thresholds.json` (dormant source policy)
 - `metrics-bridge/src/peg/policy.ts`,
   `metrics-bridge/src/peg/compatibility.ts`, and

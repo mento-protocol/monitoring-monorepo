@@ -232,4 +232,3 @@ Authority: non-canonical
 - [`docs/notes/terraform-cicd-hardening-decisions-2026-05.md`](notes/terraform-cicd-hardening-decisions-2026-05.md) (archived)
 - [`docs/notes/ui-dashboard-performance-plan.md`](notes/ui-dashboard-performance-plan.md) (archived)
 - [`docs/PLAN-ai-review-process.md`](PLAN-ai-review-process.md) (archived)
-- [`docs/PLAN-peg-monitoring.md`](PLAN-peg-monitoring.md)

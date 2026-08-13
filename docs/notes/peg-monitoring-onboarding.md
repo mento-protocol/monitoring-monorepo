@@ -3,7 +3,7 @@ title: Peg monitoring onboarding and re-census
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-12
+last_verified: 2026-08-13
 doc_type: runbook
 scope: metrics-bridge / alerts / ui-dashboard
 review_interval_days: 90
@@ -14,8 +14,8 @@ garden_lane: operator-runbooks
 
 Onboard an oracle-less asset only after its identity, executable price sources,
 independent structural coverage, policy, producer, dashboard, and alert paths
-are verified. This runbook proves that the peg tracker can measure and alert;
-it does not certify protocol loss tolerance or emergency-response capacity.
+are verified. Use this runbook to verify measurement, alert delivery, and the
+human response handoff.
 
 The architecture is fixed by ADRs
 [0042](../adr/0042-metrics-bridge-external-price-poller.md),
