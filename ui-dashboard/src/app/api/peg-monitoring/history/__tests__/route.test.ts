@@ -142,7 +142,29 @@ describe("POST /api/peg-monitoring/history", () => {
     });
   });
 
-  it("rejects unbounded labels, unknown ranges, and extra parameters", async () => {
+  it("pins a retained package query to its confirmed timestamp", async () => {
+    const confirmedAt = (NOW_MS - 60_000) / 1_000;
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(json({ results: { A: { frames: [] } } }));
+
+    const response = await POST(
+      request({ ...baseQuery, to: String(confirmedAt) }),
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      from: confirmedAt - 7 * 86_400,
+      to: confirmedAt,
+    });
+    const body = JSON.parse(String(fetchMock.mock.calls[0]![1]?.body)) as {
+      from: string;
+      to: string;
+    };
+    expect(body.from).toBe(String(NOW_MS - 60_000 - 7 * 86_400_000));
+    expect(body.to).toBe(String(NOW_MS - 60_000));
+  });
+
+  it("rejects unbounded labels, unknown ranges, invalid end times, and extra parameters", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch");
     expect(
       (await POST(request({ ...baseQuery, asset: 'europ"} or vector(1)' })))
@@ -151,6 +173,11 @@ describe("POST /api/peg-monitoring/history", () => {
     expect((await POST(request({ ...baseQuery, range: "365d" }))).status).toBe(
       400,
     );
+    expect(
+      (await POST(request({ ...baseQuery, to: String(NOW_MS / 1_000 + 1) })))
+        .status,
+    ).toBe(400);
+    expect((await POST(request({ ...baseQuery, to: "1.5" }))).status).toBe(400);
     expect(
       (await POST(request({ ...baseQuery, unexpected: "value" }))).status,
     ).toBe(400);

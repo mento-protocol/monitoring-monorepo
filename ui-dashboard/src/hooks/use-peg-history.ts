@@ -24,16 +24,20 @@ export type PegHistoryResult = {
 export function pegHistoryUrl(
   identity: PegHistoryIdentity,
   range: PegHistoryRange,
+  toSeconds?: number,
 ): string {
   const query = new URLSearchParams({ ...identity, range });
+  if (toSeconds !== undefined) query.set("to", String(toSeconds));
   return `/api/peg-monitoring/history?${query.toString()}`;
 }
 
 export function usePegHistory(
   identity: PegHistoryIdentity | null,
   range: PegHistoryRange,
+  toSeconds?: number,
 ): PegHistoryResult {
-  const key = identity === null ? null : pegHistoryUrl(identity, range);
+  const key =
+    identity === null ? null : pegHistoryUrl(identity, range, toSeconds);
   const { data, error, isLoading } = useSWR<PegHistoryResponse>(
     key,
     (url: string) =>
@@ -42,7 +46,12 @@ export function usePegHistory(
         method: "POST",
       }),
     {
-      refreshInterval: PEG_HISTORY_RANGES[range].stepSeconds * 1_000,
+      // A retained package pins history to its confirmed timestamp. That
+      // historical window is immutable, so only live windows need polling.
+      refreshInterval:
+        toSeconds === undefined
+          ? PEG_HISTORY_RANGES[range].stepSeconds * 1_000
+          : 0,
       revalidateOnFocus: false,
       revalidateOnReconnect: false,
       refreshWhenHidden: false,

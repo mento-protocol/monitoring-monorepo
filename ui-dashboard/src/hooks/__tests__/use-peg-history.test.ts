@@ -30,10 +30,11 @@ const data: PegHistoryResponse = {
 };
 
 let selectedIdentity: PegHistoryIdentity | null = identity;
+let selectedToSeconds: number | undefined;
 let result: ReturnType<typeof usePegHistory> | null = null;
 
 function Probe(): null {
-  result = usePegHistory(selectedIdentity, "7d");
+  result = usePegHistory(selectedIdentity, "7d", selectedToSeconds);
   return null;
 }
 
@@ -57,6 +58,7 @@ beforeEach(() => {
   swr.mockReset();
   swr.mockReturnValue({ data: undefined, error: undefined, isLoading: true });
   selectedIdentity = identity;
+  selectedToSeconds = undefined;
   result = null;
 });
 
@@ -86,6 +88,15 @@ describe("usePegHistory", () => {
     const probe = render();
     expect(probe.key).toBeNull();
     expect(result).toEqual({ data: null, hasError: false, isLoading: false });
+  });
+
+  it("pins retained history to a confirmed endpoint without polling it", () => {
+    selectedToSeconds = 1_786_604_800;
+    const probe = render();
+    expect(probe.key).toBe(
+      "/api/peg-monitoring/history?asset=europ-schuman&source=bitvavo_eur&policyVersion=europ-v1&range=7d&to=1786604800",
+    );
+    expect(probe.config.refreshInterval).toBe(0);
   });
 
   it("reports a revalidation error alongside retained data", () => {

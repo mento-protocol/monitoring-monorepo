@@ -36,6 +36,7 @@ test("renders the status board, expands a row panel, and retains stale evidence"
     releaseFirstResponse = resolve;
   });
   const historyRequests: Record<string, number> = {};
+  const historyRequestEnds: Array<string | null> = [];
   await page.route("**/api/peg-monitoring", async (route) => {
     request += 1;
     if (request === 1) {
@@ -53,6 +54,7 @@ test("renders the status board, expands a row panel, and retains stale evidence"
     expect(route.request().method()).toBe("POST");
     const url = new URL(route.request().url());
     const range = url.searchParams.get("range") ?? "7d";
+    historyRequestEnds.push(url.searchParams.get("to"));
     historyRequests[range] = (historyRequests[range] ?? 0) + 1;
     const windowSeconds =
       range === "24h" ? 86_400 : range === "30d" ? 30 * 86_400 : 7 * 86_400;
@@ -184,6 +186,7 @@ test("renders the status board, expands a row panel, and retains stale evidence"
   await expect(page.getByTestId("peg-panel-europ-schuman")).toContainText(
     "Showing the last confirmed check",
   );
+  await expect.poll(() => historyRequestEnds.at(-1)).toBe(String(now));
 });
 
 test("keeps the board scrollable without pushing the page wider on mobile", async ({

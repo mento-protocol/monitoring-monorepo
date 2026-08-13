@@ -24,12 +24,16 @@ const state = vi.hoisted(() => ({
     isLoading: false,
     hasError: true,
   } as PegHistoryResult,
+  historyRequest: null as readonly unknown[] | null,
 }));
 vi.mock("@/hooks/use-peg-monitoring", () => ({
   usePegMonitoring: () => state.current,
 }));
 vi.mock("@/hooks/use-peg-history", () => ({
-  usePegHistory: () => state.history,
+  usePegHistory: (...args: readonly unknown[]) => {
+    state.historyRequest = args;
+    return state.history;
+  },
 }));
 vi.mock("next/link", () => ({
   default: ({
@@ -57,6 +61,7 @@ beforeEach(() => {
   vi.setSystemTime(PEG_FIXTURE_PRODUCED_AT * 1000 + 20_000);
   state.current = { data: null, isLoading: true, hasError: false };
   state.history = { data: null, isLoading: false, hasError: true };
+  state.historyRequest = null;
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -212,6 +217,9 @@ describe("PegMonitoringPageClient board", () => {
         .textContent,
     ).toContain("DISPLAY ONLY");
     expect(panel.querySelectorAll("[aria-pressed]")).toHaveLength(3);
+    expect(
+      panel.querySelector('figure [role="status"]')!.textContent,
+    ).toContain("Peg history over 7d unavailable");
   });
 
   it("wires validated history into the expanded asset chart", () => {
@@ -347,6 +355,7 @@ describe("PegMonitoringPageClient board", () => {
     expect(
       query('[data-testid="peg-panel-europ-schuman"]')!.textContent,
     ).toContain("Showing the last confirmed check, produced 20s ago.");
+    expect(state.historyRequest?.[2]).toBe(PEG_FIXTURE_PRODUCED_AT);
   });
 
   it("keeps a previous-policy notice in the affected row's panel", () => {

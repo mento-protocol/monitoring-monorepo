@@ -24,6 +24,13 @@ const querySchema = z
     source: label,
     policyVersion: label,
     range: z.enum(PEG_HISTORY_RANGE_OPTIONS),
+    /** Optional confirmed package timestamp, expressed as Unix seconds. */
+    to: z
+      .string()
+      .regex(/^[1-9]\d{0,12}$/)
+      .transform(Number)
+      .refine(Number.isSafeInteger)
+      .optional(),
   })
   .strict();
 const grafanaFieldSchema = z
@@ -266,12 +273,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     Object.fromEntries(request.nextUrl.searchParams.entries()),
   );
   if (!input.success) return errorResponse("Invalid peg history query", 400);
+  const requestNowMs = Date.now();
+  const toMs =
+    input.data.to === undefined ? requestNowMs : input.data.to * 1_000;
+  if (toMs > requestNowMs)
+    return errorResponse("Invalid peg history query", 400);
   const endpoint = resolveGrafanaQueryEndpoint(process.env.GRAFANA_QUERY_URL);
   const token = process.env.GRAFANA_QUERY_TOKEN?.trim();
   if (endpoint === null || !token)
     return errorResponse("Peg history is not configured", 503);
   const settings = PEG_HISTORY_RANGES[input.data.range];
-  const toMs = Date.now();
   const fromMs = toMs - settings.windowSeconds * 1_000;
   try {
     const upstream = await fetch(endpoint, {

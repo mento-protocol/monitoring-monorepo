@@ -143,8 +143,9 @@ export function RowPanel({
                 : asset.thresholdTone
             }
             measurement={measurementLabel(primary)}
-            nowMs={nowMs}
+            nowMs={stale ? producedAt * 1_000 : nowMs}
             historyIdentity={historyIdentity(asset, policyVersion)}
+            historyEndSeconds={stale ? producedAt : undefined}
           />
         </div>
         <p className="sr-only">{`${asset.assetName} is ${distanceLabel(asset)}.`}</p>
