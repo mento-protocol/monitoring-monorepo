@@ -1,11 +1,11 @@
 ---
 name: ship
-description: '[repo-skill] Ship monitoring-monorepo changes through the repo''s Codex-compatible workflow: preflight, quality gate, closeout review, commit, push, PR create/update, and readiness babysitting. Use when the user says "ship it", "/ship", "push this", "open a PR", "create a PR", "publish this", or "send it" in this repo.'
+description: '[repo-skill] Ship monitoring-monorepo changes through the repo''s Codex-compatible workflow: preflight, quality gate, closeout review, commit, push, PR create/update, readiness babysitting, and required production closeout. Use when the user says "ship it", "/ship", "push this", "open a PR", "create a PR", "publish this", or "send it" in this repo.'
 title: Ship Skill
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-23
+last_verified: 2026-08-13
 doc_type: skill
 scope: repo-wide
 review_interval_days: 90
@@ -168,7 +168,7 @@ only when the user explicitly asks for draft/PR-only handling or when required
 validation/review is intentionally still pending, and state that reason in the
 PR body and final summary.
 
-## Post-Push
+## Post-Push And Closeout
 
 Follow the operating card's Babysit and Ready-state steps: run
 `pnpm --silent pr:feedback-state` first, then `pnpm pr:ready-state`, both bound
@@ -176,5 +176,12 @@ with `--repo "$BASE_REPO"` because checkout inference can inspect the wrong
 same-number PR. `docs/notes/pr-ready-state.md` owns that contract. In a Claude
 cloud session without the capability gate the probes cannot run: use the
 `babysit-pr` skill's cloud watch loop and label its result MCP-emulated. If the
-user asked for the complete ship loop, run `babysit-pr` until the PR reaches
-all-clear, merged, closed, or a clear deadline/escalation state.
+user asked for the complete ship loop, run `babysit-pr` through current-head
+all-clear, then present the evidence and wait for the operating card's explicit,
+direct merge approval. After that approved merge, resume the loop when Done
+means includes deployment or live proof: monitor the deployment, obtain any
+separate apply or promotion approval, run the owning package's production
+checks, and verify the live acceptance criteria. Pre-merge all-clear is not
+completion while that proof remains. Stop only after required production
+closeout completes, after merge or closure when no closeout is required, or at
+a clear deadline or escalation state.
