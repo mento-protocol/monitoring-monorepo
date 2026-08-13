@@ -5921,6 +5921,44 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   fi
   rm -rf "$gate_race_root/run.lock"
 
+  # The condemned list is the only thing that tells the next holder a dead run's
+  # commands are outstanding, and on a shared lock root it can belong to another
+  # user. A run that cannot append to it must not discard the record and take
+  # over: that is how it would come to execute beside those commands.
+  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned"
+  rm -f "$gate_race_root"/captured.*
+  : > "$gate_race_log"
+  mkdir -p "$gate_race_root/run.lock"
+  {
+    printf 'pid=%s\n' "$race_dead_pid"
+    printf 'host=%s\n' "$(uname -n)"
+    printf 'started_at=%s\n' "$(date +%s)"
+    printf 'worktree=%s\n' "$gate_race_repo"
+    printf 'token=unwritable-obligation\n'
+  } > "$gate_race_root/run.lock/owner"
+  : > "$gate_race_root/condemned"
+  chmod 444 "$gate_race_root/condemned"
+  AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+    AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 20 \
+    > "$gate_race_out/unwritable-condemned.out" 2>&1 &&
+    race_unwritable_exit=0 || race_unwritable_exit=$?
+  chmod 644 "$gate_race_root/condemned" 2>/dev/null || true
+  [[ "$race_unwritable_exit" == "2" ]] ||
+    fail "a run that cannot record the obligation must fail closed, got exit ${race_unwritable_exit}"
+  grep -q "could not record the previous run's commands as outstanding" \
+    "$gate_race_out/unwritable-condemned.out" ||
+    fail "failing closed on an unrecordable obligation must say so"
+  [[ -z "$(awk '/^enter/ { print $2; exit }' "$gate_race_log")" ]] ||
+    fail "a run that could not record the obligation executed a mapped command anyway"
+  [[ -e "$gate_race_root/run.lock/owner" ]] ||
+    fail "the record naming those commands must survive a failed obligation write"
+  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned"
+
   # Crash-point sweep. Every boundary where this path creates, links, renames
   # or removes something is a place a SIGKILL can land, and each of the rounds
   # of review on this PR found one of them. The gate names those boundaries so

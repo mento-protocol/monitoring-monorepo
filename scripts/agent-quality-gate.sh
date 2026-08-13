@@ -524,7 +524,8 @@ gate_lock_recover_hidden_record() {
     else
       # Dead holder — but "dead run" is not the same as "nothing running". Its
       # commands outlive it, and this record is the last thing that names them.
-      gate_lock_condemn_before_discard "$remnant"
+      # So the delete happens only once the obligation is written down.
+      gate_lock_condemn_before_discard "$remnant" || gate_lock_obligation_unwritable
       rm -f "$remnant"
     fi
   done
@@ -541,7 +542,16 @@ restore_gate_lock_record() {
       # The slot is occupied, so this copy is superseded and about to be
       # dropped rather than put back. It can still name a run whose commands
       # are alive, so the obligation is written down before it goes.
-      gate_lock_condemn_before_discard "$gate_lock_reclaim_tmp"
+      if ! gate_lock_condemn_before_discard "$gate_lock_reclaim_tmp"; then
+        # Nowhere to write it down, so the record itself has to survive: it is
+        # the only thing naming that run's commands, and the next run's
+        # hidden-record recovery reads it from exactly where it lies. This runs
+        # while unwinding, so it reports and leaves rather than exiting again.
+        echo "error: could not record ${gate_lock_reclaim_tmp} as outstanding; left in place for the next run." >&2
+        gate_lock_reclaim_tmp=""
+        gate_lock_reclaim_origin=""
+        return 1
+      fi
     fi
   fi
   rm -f "$gate_lock_reclaim_tmp"
@@ -589,12 +599,30 @@ gate_lock_condemned_path() {
 # single short line is one append. Duplicates are harmless — draining a token
 # whose processes are already gone is a no-op — which is the right failure
 # direction for the crash between this write and the publish it precedes.
+#
+# The write failing is a different matter from crashing after it: a crash still
+# leaves the obligation on disk, whereas a failed append leaves nothing at all.
+# So this reports failure and every caller stops rather than carrying on. The
+# reachable case is not a full disk but a shared lock root, where the condemned
+# file belongs to another user and this run simply cannot append to it.
 record_condemned_run() {
   local token="$1"
   local path
   [[ -n "$token" ]] || return 0
-  path="$(gate_lock_condemned_path)" || return 0
-  printf '%s\n' "$token" >> "$path" 2>/dev/null || true
+  path="$(gate_lock_condemned_path)" || return 1
+  printf '%s\n' "$token" >> "$path" 2>/dev/null || return 1
+}
+
+# The condemned list is the only thing that tells the next holder a dead run's
+# commands are still outstanding. Losing a write to it means taking the lock
+# over and starting mapped commands beside those commands — the cross-run
+# overlap this whole path exists to prevent — so a run that cannot record the
+# obligation stops here, with the record it was about to discard left in place.
+gate_lock_obligation_unwritable() {
+  echo "error: could not record the previous run's commands as outstanding in ${gate_lock_root_dir:-unknown}/condemned." >&2
+  echo "Nothing would drain them, so this run would execute alongside them." >&2
+  echo "Nothing has been executed. Fix that path — permissions, or free space — then re-run." >&2
+  exit 2
 }
 
 # Every run drains the whole outstanding set before executing anything, not
@@ -810,6 +838,9 @@ gate_drain_seen=""
 # Where the captured tree is written down, if anywhere. Set before capturing
 # starts, so each process is recorded as it is discovered.
 gate_drain_capture_file=""
+# Set when an append to that file failed, so the drain can refuse to signal
+# with nothing durable behind it.
+gate_drain_capture_unpersisted=0
 
 # Recorded in place of a start time on a host that cannot produce one at all —
 # a sandbox without `ps`. It has to be distinguishable from an empty identity,
@@ -879,9 +910,12 @@ capture_process_tree() {
 "
   # One `printf` of a short line through an append-mode descriptor is a single
   # write, so concurrent or interrupted appends cannot interleave a half line.
-  [[ -z "$gate_drain_capture_file" ]] ||
-    printf '%s\n' "$entry" >> "$gate_drain_capture_file" 2>/dev/null ||
-    true
+  # A write that fails is remembered rather than ignored: the caller checks it
+  # before signalling, because signalling is what destroys the alternative.
+  if [[ -n "$gate_drain_capture_file" ]] &&
+    ! printf '%s\n' "$entry" >> "$gate_drain_capture_file" 2>/dev/null; then
+    gate_drain_capture_unpersisted=1
+  fi
 }
 
 drain_condemned_run_commands() {
@@ -905,6 +939,7 @@ drain_condemned_run_commands() {
   [[ -z "$gate_lock_root_dir" ]] || captured_file="${gate_lock_root_dir}/captured.${token}"
   # Every process found from here on is appended as it is discovered.
   gate_drain_capture_file="$captured_file"
+  gate_drain_capture_unpersisted=0
   # Start from what an earlier drain wrote down before it was interrupted. Its
   # tagged processes are very likely already gone — killing them is what the
   # first pass does — so a fresh tag scan on its own would come back empty and
@@ -930,6 +965,19 @@ drain_condemned_run_commands() {
   if [[ -z "${gate_drain_capture//[[:space:]]/}" ]]; then
     [[ -z "$captured_file" ]] || rm -f "$captured_file"
     return 0
+  fi
+
+  # The tag is the only handle on these processes that this run did not write
+  # itself, and the first signal kills the tag carrier. Signalling with the
+  # captured list unwritten would leave a run that dies mid-drain with neither:
+  # an empty tag scan reads as "nothing running" to whoever comes next. So a
+  # capture that could not be persisted stops the run here, before the handle
+  # is destroyed and while the processes are still findable by tag.
+  if [[ "$gate_drain_capture_unpersisted" -ne 0 ]]; then
+    echo "error: could not write the captured process list to ${captured_file}." >&2
+    echo "Signalling now would destroy the tag those processes are still findable by, with nothing on disk to hand on." >&2
+    echo "Nothing has been executed. Fix that path — permissions, or free space — then re-run." >&2
+    exit 2
   fi
 
   echo "The run this lock was taken from left commands running; stopping them before starting anything."
@@ -996,6 +1044,16 @@ EOF
       [[ -z "$unverified" ]] ||
         echo "error: processes from the previous run could not be identified after ${waited}s, so none were signalled: ${unverified}" >&2
       echo "Nothing has been executed. Investigate those processes, then re-run." >&2
+      exit 2
+    fi
+
+    # Same rule between passes: a re-walk that found a forked child but could
+    # not write it down must not be followed by another signal round, which
+    # would kill that child's parent and leave it unrecorded.
+    if [[ "$gate_drain_capture_unpersisted" -ne 0 ]]; then
+      echo "error: could not write the captured process list to ${captured_file} while draining." >&2
+      echo "error: still alive: ${alive:-none}${unverified:+, unverified: ${unverified}}" >&2
+      echo "Nothing has been executed. Investigate those processes, fix that path, then re-run." >&2
       exit 2
     fi
 
@@ -1203,7 +1261,14 @@ acquire_gate_run_lock() {
             # are gone just before this run's own commands. Not here: draining
             # between judging the record and publishing would hand another
             # waiter the same verdict and the same window to act on it.
-            record_condemned_run "$owner_token_value"
+            # Nothing below this line is reversible: the record is deleted and
+            # this run publishes its own. So the obligation is written first,
+            # and a write that fails puts the record back and stops the run
+            # rather than taking over with no successor for those commands.
+            if ! record_condemned_run "$owner_token_value"; then
+              restore_gate_lock_record || true
+              gate_lock_obligation_unwritable
+            fi
             rm -f "$gate_lock_reclaim_tmp"
             gate_lock_reclaim_tmp=""
             gate_lock_reclaim_origin=""
@@ -1216,8 +1281,10 @@ acquire_gate_run_lock() {
             fi
           else
             # We took a record that is not the one we judged — another run
-            # reclaimed the lock while we decided. Put it back and wait.
-            restore_gate_lock_record
+            # reclaimed the lock while we decided. Put it back and wait. If it
+            # could not be put back or written down it stays where it is, named
+            # in the output, for the next run's hidden-record recovery.
+            restore_gate_lock_record || true
           fi
         fi
         gate_lock_reclaim_tmp=""
@@ -1271,7 +1338,10 @@ cleanup_tmpfiles() {
   # it. The temp path is registered before the rename that creates it, so this
   # sees it whether or not it exists — and it restores rather than deletes,
   # because a record taken but not yet judged may still name a live holder.
-  restore_gate_lock_record
+  # A restore that could not write the obligation down has already reported it
+  # and kept the record; teardown continues either way, because skipping the
+  # release below would leave the lock behind.
+  restore_gate_lock_record || true
   # A half-built claim record is private to this process and was never linked
   # into place, so it is simply dropped.
   if [[ -n "$gate_lock_claim_tmp" ]]; then

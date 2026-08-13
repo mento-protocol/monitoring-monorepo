@@ -378,6 +378,19 @@ of them.
    process in it is confirmed gone. A successor unions that file with its own
    tag scan.
 
+   **A write that fails is not a write that crashed.** Crashing after the
+   append still leaves the obligation on disk for whoever comes next; the
+   append failing leaves nothing at all, so it cannot be swallowed the way a
+   best-effort write usually is. The reachable case is not a full disk but a
+   shared lock root, where `condemned` was created by another user and this run
+   simply cannot append to it. Both writes therefore report failure and both
+   callers stop: a reclaimer that cannot condemn puts the record back where it
+   found it and exits rather than taking over, and a drain that cannot persist
+   its capture refuses to signal — before the first signal, while the tag it
+   would destroy is still the handle on those processes. The one exception is
+   teardown, which is already unwinding: it leaves the record in place, names
+   it, and carries on to release the lock.
+
    **Obligation evidence is never rewritten in place.** A `>` redirection
    truncates the file the moment it opens, so a rewrite has a window in which
    the copy on disk is empty — and these files exist precisely to be read by
@@ -440,10 +453,12 @@ The self-test sweeps the crash boundaries by killing a run at each named point
 and asserting the next run still reaches its mapped commands and releases the
 lock, and pins the interleavings — two waiters on one stale record, a stalled
 creator, a cached ownerless verdict, and a displaced holder — as separate
-cases. A command that forks a fresh child on every `TERM`, and a waiter held
-under `SIGSTOP` past its own budget, are pinned there too: the first asserts no
-forked survivor outlives the drain, the second that the reported wait matches
-the wall clock. Adding an operation to this path means adding its boundary to
+cases. A command that forks a fresh child on every `TERM`, a waiter held under
+`SIGSTOP` past its own budget, and a reclaimer facing a `condemned` file it
+cannot append to are pinned there too: the first asserts no forked survivor
+outlives the drain, the second that the reported wait matches the wall clock,
+the third that the run exits without executing and leaves the record it was
+about to discard. Adding an operation to this path means adding its boundary to
 the table and to that sweep.
 
 A lock with no usable owner record — no file at all, or an unfinished one from
