@@ -2406,7 +2406,7 @@ while IFS= read -r path; do
         scripts/sentry-autofix-select.mjs|scripts/sentry-autofix-select.test.mjs)
           add_command "pnpm sentry:autofix:select:test" "Sentry autofix select helper changed"
           ;;
-        scripts/sentry-autofix-queue-io.mjs|scripts/sentry-autofix-family-resolve.mjs|scripts/sentry-autofix-reverse-verify.mjs|scripts/sentry-autofix-family.mjs)
+        scripts/sentry-autofix-queue-io.mjs|scripts/sentry-autofix-family-resolve.mjs|scripts/sentry-autofix-reverse-verify.mjs|scripts/sentry-autofix-family.mjs|scripts/sentry-autofix-candidate.mjs)
           # The selection leg's gh I/O layer (openAutofixPrExists / isOwnHeadPr /
           # the family-collapse reads), the live-state family resolver, the
           # reverse `in:comments` verification leg, and the pure union-find
@@ -2426,10 +2426,12 @@ while IFS= read -r path; do
           add_command "pnpm sentry:autofix:run-record:test" "Sentry autofix run-record builder changed"
           add_command "pnpm sentry:autofix:finalize:test" "Sentry autofix run-record builder changed"
           ;;
-        scripts/sentry-autofix-record-labels.mjs)
-          # The record-run architectural backfill labeler (#1812). Its tests live
-          # in the finalize suite (the record-run job that owns this write), which
-          # exercises the plan, the revalidation re-read, and the label writes.
+        scripts/sentry-autofix-record-labels.mjs|scripts/sentry-autofix-hold-revalidate.mjs)
+          # The record-run architectural backfill labeler (#1812) and the
+          # revalidation/compensation layer extracted from it. Their tests live
+          # in the finalize suite (the record-run job that owns this write),
+          # which exercises the plan, the pre/post live-scope checks, the label
+          # writes and the withdrawal + terminal-guarded re-queue.
           add_command "pnpm sentry:autofix:finalize:test" "Sentry autofix record-run backfill labeler changed"
           ;;
         scripts/sentry-triage-archive.mjs|scripts/sentry-triage-archive.test.mjs)
