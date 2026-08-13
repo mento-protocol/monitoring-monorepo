@@ -26,6 +26,14 @@ terraform {
       source  = "hashicorp/google"
       version = "~> 6.50.0"
     }
+    grafana = {
+      source = "grafana/grafana"
+      # Same constraint the other two Grafana-provider stacks declare
+      # (`alerts/rules`, `aegis/terraform`), so a major-line bump is one
+      # reviewed decision across all three. Each stack's lock file still pins
+      # its own resolved 4.x patch.
+      version = "~> 4.36"
+    }
     github = {
       source = "integrations/github"
       # `~> 6.12` because `github_actions_organization_secret.value` was
@@ -74,4 +82,15 @@ provider "google" {
 provider "github" {
   owner = var.github_owner
   token = var.github_token
+}
+
+# Grafana provider — this stack does not manage alert rules, folders, or
+# dashboards (those belong to `alerts/rules` and `aegis/terraform`). It uses the
+# provider for exactly one thing: minting the read-only Grafana identity the
+# dashboard needs, so that credential can be wired straight into the Vercel
+# project this stack already owns. See `grafana-read-access.tf` and
+# [ADR 0063](../docs/adr/0063-dashboard-grafana-history-read-access.md).
+provider "grafana" {
+  url  = var.grafana_url
+  auth = var.grafana_provisioning_token
 }

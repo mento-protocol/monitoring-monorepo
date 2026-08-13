@@ -84,6 +84,36 @@ resource "vercel_project_environment_variable" "metrics_bridge_url" {
   target     = ["production", "preview"]
 }
 
+# Server-only Grafana Cloud origin and read token for the dashboard's peg
+# history and alert state history routes. Deliberately not `NEXT_PUBLIC_*`: the
+# browser calls same-origin dashboard routes, and the token never enters a
+# client bundle. `grafana-read-access.tf` mints the Viewer identity behind it.
+#
+# Both targets, matching `METRICS_BRIDGE_URL` and `UPSTASH_REDIS_REST_TOKEN`.
+# Preview deployments must be able to render the history chart — that preview is
+# where dashboard UI changes get verified before merge. The controls that make
+# shared preview credentials acceptable are the ones in the auth posture comment
+# below: Vercel SSO gates every preview, Git fork protection blocks fork PR
+# deployments. This credential is also strictly weaker than what preview already
+# holds — read-only against Mento's own monitoring telemetry, where the Upstash
+# token on the same targets can write dashboard state.
+resource "vercel_project_environment_variable" "grafana_query_url" {
+  project_id = vercel_project.dashboard.id
+  team_id    = var.vercel_team_id
+  key        = "GRAFANA_QUERY_URL"
+  value      = var.grafana_url
+  target     = ["production", "preview"]
+}
+
+resource "vercel_project_environment_variable" "grafana_query_token" {
+  project_id = vercel_project.dashboard.id
+  team_id    = var.vercel_team_id
+  key        = "GRAFANA_QUERY_TOKEN"
+  value      = grafana_service_account_token.dashboard_reader.key
+  target     = ["production", "preview"]
+  sensitive  = true
+}
+
 resource "vercel_project_environment_variable" "hasura_testnet_url" {
   count      = var.hasura_testnet_url == "" ? 0 : 1
   project_id = vercel_project.dashboard.id

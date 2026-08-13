@@ -114,6 +114,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0037](0037-dashboard-graphql-zod-mini.md)               | Native GraphQL transport + Zod Mini for browser-reachable validation                  |
 | [0039](0039-multistrategy-pools-historical-fx-volume.md) | Pool detail renders every active strategy from the indexed many-to-many registry      |
 | [0051](0051-dashboard-volume-scale-bounds.md)            | Dashboard volume composition has per-chain and total re-review bounds                 |
+| [0063](0063-dashboard-grafana-history-read-access.md)    | Peg history reads Grafana Cloud through a dedicated read-only token                   |
 
 ### aegis
 
@@ -156,6 +157,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0058](0058-metrics-bridge-dedicated-cloud-build-executor.md) | Metrics Bridge uses a dedicated Cloud Build executor                                                              |
 | [0060](0060-upstash-management-key-bootstrap.md)              | Upstash management API keys use a human-owned bootstrap integration                                               |
 | [0061](0061-exact-plan-guard-for-manual-platform-applies.md)  | Manual platform applies check and consume one private exact plan                                                  |
+| [0063](0063-dashboard-grafana-history-read-access.md)         | The platform stack mints the dashboard's read-only Grafana identity and token                                     |
 
 ### governance-watchdog
 
