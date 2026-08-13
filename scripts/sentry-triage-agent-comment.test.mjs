@@ -509,6 +509,11 @@ test("the wrapper's runtime closure is exactly what the workflow stages", () => 
   const closure = importClosure("sentry-triage-agent-comment.mjs");
   assert.deepEqual(closure, [
     "sentry-triage-agent-comment.mjs",
+    // The needs-human escalation rules the verdict contract re-exports (#1782
+    // split, when project-core hit the 1000-line hard cap). Pure predicates over
+    // parsed fields, but the verdict contract imports them, so they are staged
+    // with it.
+    "sentry-triage-escalation-contract.mjs",
     "sentry-triage-project-core.mjs",
     // The neutralization helpers the verdict contract re-exports (#1748 split);
     // the wrapper reaches them through that module, so they are part of the
@@ -642,22 +647,25 @@ test("a failed verdict post-condition re-queues the stub instead of stranding it
   const block = verdictPostConditionBlock();
   const lines = block.split("\n");
 
-  // The compensation: the close step's shape (restore sentry:needs-triage,
-  // shed the verdict label + any stale sentry:projected), widened to the whole
-  // verdict namespace because this is the one branch where a stub can be
-  // wearing more than one verdict label — and a re-queued stub carries none.
+  // The compensation is a RE-QUEUE, so it runs the one chokepoint CLI (#1782)
+  // rather than its own label swap: the CLI owns the shed set
+  // (REOPEN_SHED_LABELS — the whole verdict namespace, which matters here
+  // because this is the one branch where a stub can be wearing more than one
+  // verdict label, plus the projection, autofix and archive markers), the
+  // ordering, and the terminal revalidation.
   const open = lines.findIndex(
     (line) => line.trim() === "requeue_for_retry() {",
   );
   assert.ok(open >= 0, "the verdict post-condition has no re-queue helper");
   const close = lines.findIndex((line, i) => i > open && line.trim() === "}");
   const helper = lines.slice(open, close).join("\n");
-  assert.match(helper, /gh issue edit "\$\{QUEUE_ISSUE_NUMBER\}"/);
-  assert.match(
-    helper,
-    /--remove-label "\$\{label\},\$\{shed\},sentry:projected,sentry:approved-archive"/,
+  assert.match(helper, /node scripts\/sentry-triage-workflow-requeue\.mjs/);
+  assert.match(helper, /--issue "\$\{QUEUE_ISSUE_NUMBER\}"/);
+  assert.match(helper, /--reason verdict-unsettled/);
+  assert.ok(
+    !/--add-label|--remove-label/.test(helper),
+    "the compensation must not open-code a label swap",
   );
-  assert.match(helper, /--add-label "sentry:needs-triage"/);
   // The approval is shed for the reason REOPEN_SHED_LABELS gives: the archive
   // workflow's dispatch path takes approval + any verdict label as its whole
   // precondition, so a re-queued stub that keeps a human's approval can have

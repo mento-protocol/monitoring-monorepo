@@ -1622,7 +1622,7 @@ classify_root_package_json_changes() {
         echo "workspace"
         return
         ;;
-      /scripts/agent:quality-gate|/scripts/agent:quality-gate:test|/scripts/agent:prewarm|/scripts/agent:prewarm:test|/scripts/agent:review-materiality|/scripts/agent:review-materiality:test|/scripts/agent:context-check|/scripts/agent:context-budget|/scripts/agent:context-budget:test|/scripts/docs:index|/scripts/docs:index:test|/scripts/docs:audit|/scripts/docs:audit:test|/scripts/docs:garden|/scripts/docs:garden:test|/scripts/docs:navigation-eval|/scripts/docs:navigation-eval:test|/scripts/agent:autoreview|/scripts/issue:board|/scripts/issue:board:test|/scripts/issue:claim|/scripts/issue:review|/scripts/issue:release|/scripts/sentry:ingest|/scripts/sentry:ingest:test|/scripts/sentry:digest|/scripts/sentry:digest:test|/scripts/sentry:project|/scripts/sentry:project:test|/scripts/sentry:brief|/scripts/sentry:brief:test|/scripts/sentry:autofix:select|/scripts/sentry:autofix:select:test|/scripts/sentry:autofix:finalize:test|/scripts/sentry:archive|/scripts/sentry:archive:test|/scripts/sentry:broker:test|/scripts/sentry:requeue:test|/scripts/pr:feedback-state|/scripts/pr:feedback-state:test|/scripts/pr:ready-state|/scripts/pr:ready-state:test|/scripts/tf|/scripts/tf:test|/scripts/alerts:rules:lint|/scripts/alerts:rules:lint:test|/scripts/lockfile:lint|/scripts/lockfile:lint:test|/scripts/skew:check|/scripts/skew:check:test|/scripts/override:prune-report|/scripts/override:prune-report:test|/scripts/adr:check|/scripts/adr:check:test|/scripts/sanitize:test)
+      /scripts/agent:quality-gate|/scripts/agent:quality-gate:test|/scripts/agent:prewarm|/scripts/agent:prewarm:test|/scripts/agent:review-materiality|/scripts/agent:review-materiality:test|/scripts/agent:context-check|/scripts/agent:context-budget|/scripts/agent:context-budget:test|/scripts/docs:index|/scripts/docs:index:test|/scripts/docs:audit|/scripts/docs:audit:test|/scripts/docs:garden|/scripts/docs:garden:test|/scripts/docs:navigation-eval|/scripts/docs:navigation-eval:test|/scripts/agent:autoreview|/scripts/issue:board|/scripts/issue:board:test|/scripts/issue:claim|/scripts/issue:review|/scripts/issue:release|/scripts/sentry:ingest|/scripts/sentry:ingest:test|/scripts/sentry:digest|/scripts/sentry:digest:test|/scripts/sentry:project|/scripts/sentry:project:test|/scripts/sentry:brief|/scripts/sentry:brief:test|/scripts/sentry:autofix:select|/scripts/sentry:autofix:select:test|/scripts/sentry:autofix:finalize:test|/scripts/sentry:autofix:run-record:test|/scripts/sentry:archive|/scripts/sentry:archive:test|/scripts/sentry:broker:test|/scripts/sentry:requeue:test|/scripts/pr:feedback-state|/scripts/pr:feedback-state:test|/scripts/pr:ready-state|/scripts/pr:ready-state:test|/scripts/tf|/scripts/tf:test|/scripts/alerts:rules:lint|/scripts/alerts:rules:lint:test|/scripts/lockfile:lint|/scripts/lockfile:lint:test|/scripts/skew:check|/scripts/skew:check:test|/scripts/override:prune-report|/scripts/override:prune-report:test|/scripts/adr:check|/scripts/adr:check:test|/scripts/sanitize:test)
         saw_tooling_script=true
         ;;
       /scripts)
@@ -3241,7 +3241,7 @@ while IFS= read -r path; do
           add_command "pnpm sentry:archive:test" "Sentry needs-human brief helper changed"
           add_command "pnpm sentry:project:test" "Sentry needs-human brief helper changed"
           ;;
-        scripts/sentry-triage-project.mjs|scripts/sentry-triage-project-core.mjs|scripts/sentry-triage-project.test.mjs|scripts/sentry-triage-text.mjs|scripts/sentry-triage-projection.mjs)
+        scripts/sentry-triage-project.mjs|scripts/sentry-triage-project-core.mjs|scripts/sentry-triage-project.test.mjs|scripts/sentry-triage-text.mjs|scripts/sentry-triage-projection.mjs|scripts/sentry-triage-escalation-contract.mjs)
           add_command "pnpm sentry:project:test" "Sentry triage projection helper changed"
           # The agent's comment wrapper imports the shared marker contract from
           # sentry-triage-project-core.mjs, so its fences ride on this module.
@@ -3261,8 +3261,25 @@ while IFS= read -r path; do
         scripts/sentry-autofix-select.mjs|scripts/sentry-autofix-select.test.mjs)
           add_command "pnpm sentry:autofix:select:test" "Sentry autofix select helper changed"
           ;;
+        scripts/sentry-autofix-queue-io.mjs|scripts/sentry-autofix-family-resolve.mjs|scripts/sentry-autofix-reverse-verify.mjs|scripts/sentry-autofix-family.mjs)
+          # The selection leg's gh I/O layer (openAutofixPrExists / isOwnHeadPr /
+          # the family-collapse reads), the live-state family resolver, the
+          # reverse `in:comments` verification leg, and the pure union-find
+          # family module (transitive union / project scoping / MAX_FAMILY_MEMBERS
+          # / representative rule) — all consumed by the selector. Each is
+          # exercised by the select suite, which mocks runGh and drives the full
+          # flow end to end.
+          add_command "pnpm sentry:autofix:select:test" "Sentry autofix selection helper changed"
+          ;;
         scripts/sentry-autofix-finalize.mjs|scripts/sentry-autofix-finalize.test.mjs)
           add_command "pnpm sentry:autofix:finalize:test" "Sentry autofix finalize helper changed"
+          ;;
+        scripts/sentry-autofix-run-record.mjs|scripts/sentry-autofix-run-record.test.mjs)
+          # The tracker run-record body builder, extracted from finalize.mjs.
+          # Run its own suite AND finalize's — finalize imports it for the
+          # `run-record` CLI subcommand, so its wiring rides on this module.
+          add_command "pnpm sentry:autofix:run-record:test" "Sentry autofix run-record builder changed"
+          add_command "pnpm sentry:autofix:finalize:test" "Sentry autofix run-record builder changed"
           ;;
         scripts/sentry-triage-archive.mjs|scripts/sentry-triage-archive.test.mjs)
           add_command "pnpm sentry:archive:test" "Sentry triage archive helper changed"
@@ -3270,11 +3287,12 @@ while IFS= read -r path; do
         scripts/sentry-mcp-broker.mjs|scripts/sentry-mcp-broker.test.mjs)
           add_command "pnpm sentry:broker:test" "Sentry credential broker changed"
           ;;
-        scripts/sentry-triage-requeue.mjs|scripts/sentry-triage-requeue.test.mjs|scripts/sentry-triage-queue-contract.mjs|scripts/sentry-triage-brief-clear-recovery.mjs)
+        scripts/sentry-triage-requeue.mjs|scripts/sentry-triage-requeue.test.mjs|scripts/sentry-triage-queue-contract.mjs|scripts/sentry-triage-workflow-requeue.mjs)
           # The single re-queue chokepoint, the queue contract it reads, and the
-          # brief clear-failure CLI that wraps it (#1769 round 17). Both sites that
-          # re-queue a stub run through the chokepoint, so its suite is never the
-          # whole story — run theirs too. The CLI's tests live in the requeue suite.
+          # workflow CLI that wraps it for every compensating exit in the triage
+          # agent workflow (#1769 round 17, #1782). Every site that re-queues a stub
+          # runs through the chokepoint, so its suite is never the whole story —
+          # run theirs too. The CLI's tests live in the requeue suite.
           add_command "pnpm sentry:requeue:test" "Sentry re-queue chokepoint changed"
           add_command "pnpm sentry:ingest:test" "Sentry re-queue chokepoint changed"
           add_command "pnpm sentry:archive:test" "Sentry re-queue chokepoint changed"

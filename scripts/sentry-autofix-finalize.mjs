@@ -25,8 +25,9 @@
  *     and `sentry:fix-refused` label definitions from the ingest's
  *     LABEL_DEFINITIONS (single source of truth), so the workflow can self-heal
  *     the label before applying it.
- *   - `buildAutofixRunRecordBody(...)` — the tracker run-record comment body
- *     (mirrors the ingest run record), for the workflow's always-run record job.
+ *   - the tracker run-record comment body (`buildAutofixRunRecordBody`, now in
+ *     sentry-autofix-run-record.mjs) is rendered by this module's `run-record`
+ *     CLI subcommand for the workflow's always-run record job.
  *
  * Every credential is confined to the workflow's deterministic steps: the LLM
  * step holds no write token, so nothing here can be reached with agent-supplied
@@ -51,6 +52,10 @@ import {
   selectVerdictComment,
   verdictCommentIdFromUrl,
 } from "./sentry-triage-project-core.mjs";
+import {
+  AUTOFIX_RUN_RECORD_MARKER,
+  buildAutofixRunRecordBody,
+} from "./sentry-autofix-run-record.mjs";
 
 // The agent's diff may touch at most this many files. A real fix commonly spans
 // the change plus its tests and a couple of related call sites, so the ceiling
@@ -540,65 +545,6 @@ export function buildStaleVerdictCloseComment() {
 }
 
 // ---------------------------------------------------------------------------
-// Tracker run record. Mirrors the ingest's rolling-comment run record
-// (buildRunRecordBody / RUN_RECORD_MARKER, sentry-triage-ingest.mjs) so the
-// autofix leg also leaves a durable per-run record on the pipeline tracker
-// issue — the ADR 0036 observability invariant (every run leaves a record, so a
-// silently-dead schedule is detectable even when the leg is disabled,
-// unprovisioned, or finds zero candidates). This module BUILDS the body and
-// SELECTS the existing comment to update (both pure); the workflow's
-// always-run record job does the best-effort rolling-comment upsert via the
-// `select-run-record-id` CLI command below.
-// ---------------------------------------------------------------------------
-
-export const AUTOFIX_RUN_RECORD_MARKER =
-  "<!-- sentry-autofix:run-record:v1 -->";
-
-function nonNegativeInt(value) {
-  const n = Number(value);
-  return Number.isInteger(n) && n >= 0 ? n : 0;
-}
-
-/** One-line, control-char-free rendering of a workflow-controlled label
- * (trigger/disposition are not agent/Sentry-derived, but this comment lands on
- * a public issue, so keep it single-line as defense in depth). */
-function oneLine(value, fallback) {
-  const s = String(value ?? "")
-    .replace(/[\r\n\t]+/g, " ")
-    .trim();
-  return s || fallback;
-}
-
-/**
- * Build the autofix run-record comment body — same shape/family as the ingest
- * run record so the two rolling comments on the tracker read consistently.
- * `trigger` and `disposition` are workflow-controlled; the counters are coerced
- * to non-negative integers.
- */
-export function buildAutofixRunRecordBody({
-  timestampIso,
-  trigger,
-  disposition,
-  candidates,
-  opened,
-  refused,
-  incomplete,
-}) {
-  return [
-    AUTOFIX_RUN_RECORD_MARKER,
-    "",
-    `**Sentry autofix — last run:** ${oneLine(timestampIso, "unknown")}`,
-    "",
-    `- Trigger: ${oneLine(trigger, "unknown")}`,
-    `- State: ${oneLine(disposition, "unknown")}`,
-    `- Candidates selected: ${nonNegativeInt(candidates)}`,
-    `- Fix PRs opened: ${nonNegativeInt(opened)}`,
-    `- Refused (no PR): ${nonNegativeInt(refused)}`,
-    `- Incomplete / errored: ${nonNegativeInt(incomplete)}`,
-  ].join("\n");
-}
-
-// ---------------------------------------------------------------------------
 // Agent free-text is NEVER published.
 //
 // The fix agent's summary is untrusted second-order Sentry data, and it runs
@@ -732,8 +678,14 @@ Commands:
       Print the comment posted when a fix PR opened this run is closed because
       the verdict was shed during the push/PR-create span.
   run-record --timestamp <iso> --trigger <t> --disposition <d> \\
-             --candidates <n> --opened <n> --refused <n> --incomplete <n>
+             --candidates <n> --opened <n> --refused <n> --incomplete <n> \\
+             [--deferred <n>] [--deferred-issues "<n n …>"] \\
+             [--window-total <n>] [--window-evaluated <n>] \\
+             [--handled-overflow <n>] [--reverse-truncated <bool>] \\
+             [--reverse-nonconvergent <bool>]
       Print the tracker run-record comment body (rolling comment, marker-keyed).
+      The Window line renders only when --window-total exceeds --window-evaluated;
+      each truncation line renders only when its budget was actually hit.
   select-run-record-id --comments-file <path>
       Print the numeric id of the tracker issue's existing rolling run-record
       comment (trusted-author + prefix-anchored, selectMarkedComment),
@@ -869,6 +821,13 @@ export function runCli(argv, { stdout = process.stdout } = {}) {
           opened: readFlag(args, "--opened"),
           refused: readFlag(args, "--refused"),
           incomplete: readFlag(args, "--incomplete"),
+          deferred: readFlag(args, "--deferred"),
+          deferredIssues: readFlag(args, "--deferred-issues"),
+          windowTotal: readFlag(args, "--window-total"),
+          windowEvaluated: readFlag(args, "--window-evaluated"),
+          handledOverflow: readFlag(args, "--handled-overflow"),
+          reverseTruncated: readFlag(args, "--reverse-truncated"),
+          reverseNonconvergent: readFlag(args, "--reverse-nonconvergent"),
         })}\n`,
       );
       return;
