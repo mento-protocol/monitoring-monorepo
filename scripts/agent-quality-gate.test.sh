@@ -4928,7 +4928,7 @@ STUB
       printf 'host=%s\n' "$(uname -n)"
       printf 'started_at=%s\n' "$(date +%s)"
       printf 'worktree=%s\n' "$gate_lock_repo"
-      printf 'token=fixture-holder\n'
+      printf 'token=fixture-holder-1-1\n'
     } > "$gate_lock_root/run.lock/owner"
   }
 
@@ -4949,6 +4949,29 @@ STUB
   assert_contains "--skip-if-fresh cache-hits and exits before this lock"
   [[ -d "$gate_lock_root/run.lock" ]] ||
     fail "a run that never acquired the lock must not delete the holder's lock"
+
+  # A dead holder whose record carries a token the gate would never generate
+  # is waited out, never reclaimed: reclaiming would later drain by that
+  # token, matching processes with a value another writer chose. On a shared
+  # root that record can be crafted, so fail-closed here means the timeout.
+  sleep 0 &
+  malformed_dead_pid=$!
+  wait "$malformed_dead_pid" 2>/dev/null || true
+  mkdir -p "$gate_lock_root/run.lock"
+  {
+    printf 'pid=%s\n' "$malformed_dead_pid"
+    printf 'host=%s\n' "$(uname -n)"
+    printf 'started_at=%s\n' "$(date +%s)"
+    printf 'worktree=%s\n' "$gate_lock_repo"
+    printf 'token=crafted.*\n'
+  } > "$gate_lock_root/run.lock/owner"
+  lock_exit="$(run_locked_gate)"
+  [[ "$lock_exit" == "2" ]] ||
+    fail "a malformed-token record must be waited out and fail closed, got $lock_exit"
+  assert_contains "timed out after"
+  [[ -d "$gate_lock_root/run.lock" ]] ||
+    fail "a malformed-token record must never be reclaimed"
+  rm -rf "$gate_lock_root/run.lock"
 
   # An inherited nested-run marker (the gate's own self-test runs the gate)
   # starts immediately instead of deadlocking behind its own ancestor.
@@ -5112,7 +5135,7 @@ STUB
     printf 'host=%s\n' "$(uname -n)"
     printf 'started_at=%s\n' "$(date +%s)"
     printf 'worktree=%s\n' "$gate_race_repo"
-    printf 'token=fixture-holder\n'
+    printf 'token=fixture-holder-1-1\n'
   } > "$gate_race_root/run.lock/owner"
   : > "$gate_race_log"
   race_waiter late 4 0 4 &
@@ -5312,7 +5335,7 @@ STUB
       printf 'host=%s\n' "$(uname -n)"
       printf 'started_at=%s\n' "$(date +%s)"
       printf 'worktree=%s\n' "$gate_race_repo"
-      printf 'token=fixture-holder\n'
+      printf 'token=fixture-holder-1-1\n'
     } > "$gate_race_root/run.lock/owner"
     AGENT_QUALITY_GATE_LOCK=1 \
       AGENT_QUALITY_GATE_LOCK_HELD='' \
@@ -5340,7 +5363,7 @@ STUB
       fail "${tag}: an interrupted reclaim must not orphan its temp record"
     [[ -r "$gate_race_root/run.lock/owner" ]] ||
       fail "${tag}: an interrupted reclaim must leave the owner record in place"
-    [[ "$(sed -n 's/^token=//p' "$gate_race_root/run.lock/owner" | head -n1)" == "fixture-holder" ]] ||
+    [[ "$(sed -n 's/^token=//p' "$gate_race_root/run.lock/owner" | head -n1)" == "fixture-holder-1-1" ]] ||
       fail "${tag}: the restored record must be the one the reclaim took"
   }
 
@@ -5373,7 +5396,7 @@ STUB
       printf 'started_at=%s\n' "$(date +%s)"
       printf 'start_utc=%s\n' "$race_lock_start"
       printf 'worktree=%s\n' "$gate_race_repo"
-      printf 'token=live-holder-record\n'
+      printf 'token=live-holder-record-1-1\n'
     } > "$gate_race_root/run.lock/owner.reclaiming.99999"
     # A short budget on purpose: recovering the remnant means finding a LIVE
     # holder, so this run is supposed to wait and give up, not acquire.
@@ -5390,7 +5413,7 @@ STUB
       fail "a remnant naming a live holder must be recovered, not ignored"
     grep -q "reclaiming it" "$gate_race_out/hidden.out" &&
       fail "a lock whose holder is only visible in a remnant must not be reclaimed"
-    [[ "$(sed -n 's/^token=//p' "$gate_race_root/run.lock/owner" | head -n1)" == "live-holder-record" ]] ||
+    [[ "$(sed -n 's/^token=//p' "$gate_race_root/run.lock/owner" | head -n1)" == "live-holder-record-1-1" ]] ||
       fail "the recovered remnant must become the owner record"
     [[ -z "$(find "$gate_race_root/run.lock" -name 'owner.reclaiming.*' 2>/dev/null)" ]] ||
       fail "a recovered remnant must not be left behind to be read twice"
@@ -5481,7 +5504,7 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     printf 'host=%s\n' "$(uname -n)"
     printf 'started_at=%s\n' "$(date +%s)"
     printf 'worktree=%s\n' "$gate_race_repo"
-    printf 'token=somebody-else\n'
+    printf 'token=somebody-else-1-1\n'
   } > "$gate_race_root/run.lock/owner"
   wait "$race_displaced" 2>/dev/null && race_displaced_exit=0 || race_displaced_exit=$?
   [[ "$race_displaced_exit" == "2" ]] ||
@@ -5490,7 +5513,7 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     fail "a displaced holder must say so before stopping"
   [[ ! -s "$gate_race_log" ]] ||
     fail "a displaced holder must stop before executing any mapped command"
-  [[ "$(sed -n 's/^token=//p' "$gate_race_root/run.lock/owner" | head -n1)" == "somebody-else" ]] ||
+  [[ "$(sed -n 's/^token=//p' "$gate_race_root/run.lock/owner" | head -n1)" == "somebody-else-1-1" ]] ||
     fail "a displaced holder must not delete the record that replaced its own"
   rm -rf "$gate_race_root/run.lock"
 
@@ -5991,7 +6014,7 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     printf 'started_at=%s\n' "$(date +%s)"
     printf 'start_utc=%s\n' "$(TZ=UTC LC_ALL=C ps -o lstart= -p "$race_stopped_holder" 2>/dev/null | head -n1)"
     printf 'worktree=%s\n' "$gate_race_repo"
-    printf 'token=live-holder\n'
+    printf 'token=live-holder-1-1\n'
   } > "$gate_race_root/run.lock/owner"
   AGENT_QUALITY_GATE_LOCK=1 \
     AGENT_QUALITY_GATE_LOCK_HELD='' \
@@ -6043,7 +6066,7 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   printf '#!/bin/bash\nexit 2\n' > "$race_stub_bin/pgrep"
   chmod +x "$race_stub_bin/pgrep"
   mkdir -p "$gate_race_root/condemned.d"
-  printf 'fixture-unscannable\n' > "$gate_race_root/condemned.d/fixture-unscannable"
+  printf 'fixture-unscannable-1-1\n' > "$gate_race_root/condemned.d/fixture-unscannable-1-1"
   PATH="$race_stub_bin:$PATH" \
     AGENT_QUALITY_GATE_LOCK=1 \
     AGENT_QUALITY_GATE_LOCK_HELD='' \
@@ -6107,7 +6130,7 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     printf 'host=%s\n' "$(uname -n)"
     printf 'started_at=%s\n' "$(date +%s)"
     printf 'worktree=%s\n' "$gate_race_repo"
-    printf 'token=unwritable-obligation\n'
+    printf 'token=unwritable-obligation-1-1\n'
   } > "$gate_race_root/run.lock/owner"
   mkdir -p "$gate_race_root/condemned.d"
   chmod 555 "$gate_race_root/condemned.d"
@@ -6305,7 +6328,7 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
         printf 'host=%s\n' "$(uname -n)"
         printf 'started_at=%s\n' "$(date +%s)"
         printf 'worktree=%s\n' "$gate_race_repo"
-        printf 'token=fixture-holder\n'
+        printf 'token=fixture-holder-1-1\n'
       } > "$gate_race_root/run.lock/owner"
     fi
     AGENT_QUALITY_GATE_LOCK=1 \
