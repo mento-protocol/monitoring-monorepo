@@ -105,7 +105,7 @@ overrides:
   "@lhci/utils>js-yaml": 4.3.1
   "js-yaml@>=4.0.0 <4.3.1": 4.3.1
   # GHSA-2v37-7h3g-55p8: 3.3.17 fixes zero-size generator hangs.
-  "nanoid@<3.3.17": 3.3.17
+  "nanoid@<3.3.18": 3.3.18
   "protobufjs@>=7.0.0 <7.6.5": 7.6.5
   "qs@<6.15.2": 6.15.2
   "cookie@<0.7.0": 0.7.2
@@ -161,3 +161,10 @@ allowBuilds:
   "rescript": true
   "sharp": false
   "unrs-resolver": false
+auditConfig:
+  # GHSA-jmr9-qjv8-65gv (extract-zip <=2.0.1, symlink path traversal) has NO
+  # patched release. Reached only via @lhci/cli -> lighthouse -> puppeteer,
+  # which extract Chrome archives from Google's CDN in dev/CI — never
+  # untrusted zips at runtime. Remove the moment upstream ships a fix.
+  ignoreGhsas:
+    - GHSA-jmr9-qjv8-65gv
