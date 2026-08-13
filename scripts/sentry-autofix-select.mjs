@@ -44,13 +44,9 @@
  * stdout (diagnostics on stderr).
  */
 
-import { writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import {
-  DEFAULT_REPO,
-  selectVerdictComment,
-} from "./sentry-triage-project-core.mjs";
+import { DEFAULT_REPO } from "./sentry-triage-project-core.mjs";
 // The decision -> report classifier, shared by the first pass and the second
 // look so both label a stand-down identically (a deferral and a fix_scope skip
 // lift on different events, and send an operator to different remedies).
@@ -66,12 +62,35 @@ import {
 } from "./sentry-autofix-second-look.mjs";
 import {
   defaultRunGh,
-  ghFailureText,
-  isRateLimitFailure,
   listCodeFixStubsPage,
   LIST_LIMIT,
   readStub,
 } from "./sentry-autofix-queue-io.mjs";
+// The run's budget and instrumentation, extracted so this module stays under the
+// 600-line soft cap: the per-run read bound and its no-op guard, the `gh`
+// counter, the throttle latch, the zero-state record shapes and the two lines a
+// run writes about itself. This module owns what a run DECIDES; that one owns
+// what bounds it, measures it, and stands it down.
+import {
+  degradeReport,
+  emptyWindow,
+  instrumentRunGh,
+  MAX_CANDIDATE_EVALUATIONS,
+  newRunState,
+  noTruncations,
+  summarizeRun,
+  windowCeilingWarning,
+} from "./sentry-autofix-select-instrument.mjs";
+// The CLI surface, extracted for the same reason: the option contract, the help
+// text, the report files the tracker reads back, and `--emit-verdict`. A leaf —
+// it imports nothing from here — so the re-exports below cannot form a cycle.
+import {
+  DEFAULT_CAP,
+  emitVerdict,
+  parseArgs,
+  usage,
+  writeRunReports,
+} from "./sentry-autofix-select-cli.mjs";
 // The per-stub eligibility layer, extracted so this module stays under the
 // 600-line soft cap: every filter that decides whether ONE stub may start a fix
 // attempt lives there, this module owns the window and the family collapse.
@@ -98,155 +117,25 @@ export {
   SECOND_LOOK_LIST_ROWS,
 } from "./sentry-autofix-second-look.mjs";
 
-export const DEFAULT_CAP = 2;
+/** Re-exported from the extracted CLI layer, same reason again: the workflow
+ * runs this file and the suites import these names from it, so the module
+ * boundary is an internal detail and must stay one. */
+export {
+  DEFAULT_CAP,
+  emitVerdict,
+  parseArgs,
+  writeReport,
+  writeRunReports,
+} from "./sentry-autofix-select-cli.mjs";
 
-// How many window stubs one run may READ. The family union is transitive, so
-// selection can no longer stop at the first `cap` stubs — but "evaluate the
-// whole window" makes the run's `gh` cost scale with LIST_LIMIT (one `issue
-// view` plus one `pr list` each, ~400 sequential subprocesses at the ceiling)
-// inside the select job's `timeout-minutes` budget, and family deferral writes
-// nothing, so a collapsed family of K leaves K-1 PERMANENT window residents that
-// are re-read every run. That is monotonic growth driven from outside: every new
-// error fingerprint an unauthenticated dashboard visitor produces can add one.
-//
-// Bound the READ instead of the selection. The window is oldest-first, so this
-// truncates the NEWEST tail — the oldest candidates, the ones `sort:created-asc`
-// exists to protect, are always inside the budget. A truncated family is the
-// same situation MAX_DUPLICATE_LOOKUPS already creates (a member the run cannot
-// see), and it fails toward MORE candidates, never fewer.
-//
-// `LIST_LIMIT` (sentry-autofix-queue-io.mjs, 200) is the HARD upper bound on
-// this constant. `gh issue list --limit` caps what the API RETURNS, and that
-// happens BEFORE the slice below runs, so raising this value above LIST_LIMIT is
-// a strict NO-OP — the run reads exactly LIST_LIMIT rows either way, the Window
-// tripwire reports `total == evaluated`, and nothing anywhere says the raise did
-// nothing. THE TWO MUST MOVE TOGETHER. `windowCeilingWarning` re-checks the pair
-// at run time and a suite test pins `MAX_CANDIDATE_EVALUATIONS <= LIST_LIMIT`,
-// because a silent no-op is precisely the failure a "we widened the window"
-// change must not ship as.
-//
-// 200, not 50: 50 left 150 rows of a full window unread every run, which —
-// combined with family deferral writing nothing — is the starvation
-// sentry-autofix-second-look.mjs exists to break. The cost is bounded and paid
-// for: the select job's `timeout-minutes` is 25, and 1 list + 2×200 + 120 = 521
-// serial `gh` INVOCATIONS at a pessimistic ~1 s/call is ~9 minutes. (522 API
-// REQUESTS — the list invocation paginates at 100 rows. The two units are
-// tracked separately; see sentry-autofix-second-look.mjs § COST ARITHMETIC.)
-export const MAX_CANDIDATE_EVALUATIONS = 200;
-
-/**
- * A run-time note when the evaluation window is configured above the list
- * ceiling that is applied first — the mismatch that makes a raise a silent
- * no-op. Pure (and exported) so the check is a real, testable behaviour rather
- * than an assertion nobody can exercise: a THROW here would break the select
- * step's "always emits a valid JSON array, never fails" invariant over a static
- * config mistake, so this is loud, not fatal. Returns the note, or null.
- */
-export function windowCeilingWarning(
-  evaluations = MAX_CANDIDATE_EVALUATIONS,
-  listLimit = LIST_LIMIT,
-) {
-  if (!(evaluations > listLimit)) return null;
-  return `warn: MAX_CANDIDATE_EVALUATIONS (${evaluations}) exceeds LIST_LIMIT (${listLimit}), which the API applies FIRST — the window is really ${listLimit} and raising the evaluation cap alone does nothing. Raise LIST_LIMIT too.\n`;
-}
-
-/**
- * Wrap the run's `gh` driver so ONE place sees every invocation the select leg
- * makes. Three jobs, all otherwise unmeasurable:
- *
- * 1. COUNT. The per-run `gh` volume is a documented ceiling that nothing
- *    actually measured — every cost claim in the pipeline note was arithmetic
- *    over caps. `state.ghCalls` makes it an observed number on the run record,
- *    so drift shows up before a timeout does.
- *
- * 2. FAIL CLOSED ON THROTTLING. Nearly every read in this leg fails SOFT toward
- *    MORE candidates — `readStub`, `openAutofixPrExists`, the handled-id
- *    lookups, the reverse probes all treat a rejection as "no blocker found".
- *    But the blockers they look for ARE the dedupe signals, so a rate-limited
- *    read is indistinguishable from a clean one, and a throttled run can open
- *    DUPLICATE autofix PRs while looking perfectly green. Intercepting here
- *    catches EVERY read — including ones added later — without threading a sink
- *    through four modules, and it re-throws so each existing fail-soft path
- *    behaves exactly as before locally; the caller then refuses to SELECT on the
- *    data those paths produced.
- *
- * 3. STOP SPENDING ONCE THROTTLED. The decision in (2) is taken at pass
- *    boundaries, but the loops that reach them are long: the per-stub loop alone
- *    is 2 × MAX_CANDIDATE_EVALUATIONS calls. Without this, one 403 at the head
- *    of the window is followed by ~400 more requests fired into an ACTIVE
- *    throttle before the run stands down — and GitHub's secondary limits EXTEND
- *    on continued requests and escalate to abuse detection, on a repo-shared
- *    free-plan `GITHUB_TOKEN` every other workflow draws from. "Fail closed"
- *    that spends 400 more requests is not closed at the token level. So the
- *    first rate-limit-shaped failure latches, and every later call rejects
- *    IMMEDIATELY without spawning `gh`. The same one place, for the same reason
- *    it is one place: it covers reads added later, for free.
- *
- *    It is a rejection, not a silent empty result, precisely so every existing
- *    fail-soft handler runs its normal path — and the run stands down anyway,
- *    because `state.rateLimited` is already nonzero by then. Latched calls are
- *    NOT counted: `ghCalls` must stay a count of real invocations (it is the
- *    drift detector for the timeout arithmetic), and `rateLimited` must stay a
- *    count of real throttle events, not of loop iterations after the first.
- *
- * Non-rate-limit transients keep their existing fail-soft behaviour untouched:
- * only `isRateLimitFailure` text degrades the run.
- */
-function instrumentRunGh(baseRunGh, state) {
-  return async (args) => {
-    if (state.rateLimited > 0) {
-      // Deliberately argv-free and rate-limit-shape-free: this text reaches
-      // `ghFailureText`, and a message that matched `isRateLimitFailure` would
-      // inflate the throttle count with one entry per latched call.
-      throw new Error(
-        "selection stood down: an earlier gh read failed rate-limit-shaped, so this read was not issued",
-      );
-    }
-    state.ghCalls += 1;
-    try {
-      return await baseRunGh(args);
-    } catch (err) {
-      // Classify gh's STDERR, not the whole rejection message: the message
-      // carries the argv, and argv carries agent-authored family ids.
-      const text = ghFailureText(err);
-      if (isRateLimitFailure(text)) {
-        state.rateLimited += 1;
-        if (state.rateLimited === 1) {
-          process.stderr.write(
-            `::error::rate-limit-shaped gh failure during selection: ${text.split("\n")[0]}; no further gh reads will be issued this run.\n`,
-          );
-        }
-      }
-      throw err;
-    }
-  };
-}
-
-/** The Window tripwire record at its zero state — every field the workflow's
- * `jq` reads, before anything has been counted. One source rather than a literal
- * per return path: the workflow reads these key names, so a typo in one copy
- * silently zeroes a line of the run record and no test that asserts the returned
- * OBJECT would see it. */
-const emptyWindow = () => ({
-  total: 0,
-  evaluated: 0,
-  secondLook: false,
-  secondLookTotal: 0,
-  secondLookEvaluated: 0,
-  secondLookFull: false,
-  secondLookFailed: false,
-  ghCalls: 0,
-});
-
-/** The truncation record with nothing cut — the baseline the paths that never
- * reach the family resolver return. Same reason as `emptyWindow`: `rateLimited`
- * in particular is the one key the degraded disposition rides on. */
-const noTruncations = () => ({
-  handledOverflow: 0,
-  reverseBudget: false,
-  reverseNonconvergent: false,
-  rateLimited: 0,
-});
+/** Re-exported from the extracted budget/instrumentation layer. The window's
+ * read cap and its no-op guard are part of the SELECTION contract — the select
+ * suite pins `MAX_CANDIDATE_EVALUATIONS <= LIST_LIMIT` and the finalize suite
+ * derives the timeout arithmetic from it — so both keep reading them here. */
+export {
+  MAX_CANDIDATE_EVALUATIONS,
+  windowCeilingWarning,
+} from "./sentry-autofix-select-instrument.mjs";
 
 /**
  * Run the selection and report EVERY half of its outcome: the matrix entries,
@@ -286,7 +175,7 @@ const noTruncations = () => ({
  * family SIGNAL, not a confirmed duplicate, so the explicit request wins.
  */
 export async function selectAutofixRun(options, deps = {}) {
-  const state = { ghCalls: 0, rateLimited: 0 };
+  const state = newRunState();
   const runGh = instrumentRunGh(deps.runGh ?? defaultRunGh, state);
   const repo = options.repo ?? DEFAULT_REPO;
 
@@ -295,30 +184,9 @@ export async function selectAutofixRun(options, deps = {}) {
   const secondLookWarning = secondLookCeilingWarning();
   if (secondLookWarning) process.stderr.write(secondLookWarning);
 
-  /**
-   * Fail CLOSED on throttling. Every read this leg issues answers a dedupe or
-   * blocker question, and every one of them fails SOFT toward MORE candidates,
-   * so a rate-limited run cannot tell "no prior PR" from "GitHub refused to
-   * tell me" — and would open a DUPLICATE autofix PR looking green. So the run
-   * does not SELECT on data it knows is unreliable.
-   *
-   * "Fail closed" here means ZERO matrix entries plus a loud report, NOT a
-   * throw: the workflow's select step asserts it always emits a valid JSON
-   * array and never fails (the leg runs under `set -euo pipefail`), so throwing
-   * would break the contract this whole job is built around. The stand-down
-   * reports are still returned — they cost nothing and an operator reading the
-   * tracker needs the whole picture — but the degraded line dominates them.
-   */
-  const degraded = (report) => {
-    process.stderr.write(
-      `::error::selection DEGRADED: ${state.rateLimited} rate-limit-shaped gh read failure(s); emitting ZERO entries rather than selecting on unreliable dedupe data.\n`,
-    );
-    return {
-      ...report,
-      entries: [],
-      truncations: { ...report.truncations, rateLimited: state.rateLimited },
-    };
-  };
+  // Fail CLOSED: zero matrix entries plus a loud report, never a throw. Bound to
+  // this run's `state` so the call sites below read as the decision they are.
+  const degraded = (report) => degradeReport(state, report);
 
   // Single-issue live run: evaluate exactly the requested issue. A dispatch
   // cannot override the fix_scope gate (that is the point of the gate), so the
@@ -407,16 +275,9 @@ export async function selectAutofixRun(options, deps = {}) {
   // to degrade onto instead of taking the whole run record down with it.
   const window = emptyWindow();
 
-  // The single greppable operator line for the run. It is emitted by the CALLER
-  // with the count that was actually emitted, not built inside `finish()`:
-  // `degraded()` replaces `entries` with `[]` AFTER `finish()` returns, so a
-  // line built there reported `entries=2` on runs that emitted zero — on exactly
-  // the fail-closed path, the one an operator greps this line to understand.
-  const summarize = (emitted) => {
-    process.stderr.write(
-      `gh-calls=${state.ghCalls} window=${window.evaluated}/${window.total} second-look=${window.secondLook ? `${window.secondLookEvaluated}/${window.secondLookTotal}${window.secondLookFull ? "+" : ""}${window.secondLookFailed ? " (failed)" : ""}` : "no"} entries=${emitted}\n`,
-    );
-  };
+  // The run's one greppable operator line. Takes the count actually EMITTED, so
+  // a degraded run cannot report the entries it computed before standing down.
+  const summarize = (emitted) => summarizeRun(state, window, emitted);
 
   // The FIRST window list, and — like the dispatch `readStub` above and the
   // second look's own list below — a `gh` call with no fail-soft handler under
@@ -593,202 +454,13 @@ export async function selectAutofixCandidates(options, deps = {}) {
   return entries;
 }
 
-/**
- * Emit the trusted, fence-selected verdict comment body for one issue, so the
- * workflow can snapshot it to a file the fix agent reads — instead of giving the
- * agent a `gh` tool + GitHub token (which a prompt-injected agent could try to
- * exfiltrate from its process env). Uses the SAME authorship/regression fence
- * as the label + projection steps. Throws if there is no usable verdict.
- */
-export async function emitVerdict(options, deps = {}) {
-  const runGh = deps.runGh ?? defaultRunGh;
-  const stub = await readStub(
-    runGh,
-    options.repo ?? DEFAULT_REPO,
-    options.issue,
-  );
-  const selected = selectVerdictComment(stub.comments);
-  if (!selected.body) {
-    throw new Error(
-      `No usable verdict comment on issue #${options.issue} (${selected.reason}).`,
-    );
-  }
-  return selected.body;
-}
-
 // ---------------------------------------------------------------------------
-// CLI
+// CLI ENTRY. The option contract, the help text, the report writers and
+// `--emit-verdict` live in sentry-autofix-select-cli.mjs; `main` stays here
+// because it is the one function that needs both halves, and because the
+// workflow invokes THIS file (three call sites in .github/workflows/
+// sentry-autofix.yml) — the executable entry point must not move.
 // ---------------------------------------------------------------------------
-
-function usage() {
-  return `Usage: pnpm sentry:autofix:select [--repo <owner/name>] [--cap <n>]
-
-Prints a JSON array of { "issue": <number>, "shortId": "<SHORT-ID>" } matrix
-entries — the oldest capped batch of code-fix queue stubs owned by this repo
-that claim \`fix_scope: mechanical\` and do not yet have a fix PR, collapsed to
-ONE candidate per \`duplicate_of\` family. Diagnostics go to stderr.
-
-Options:
-  --repo <owner/name>  Repo the queue stubs live in (default: ${DEFAULT_REPO}).
-  --cap <n>            Max CANDIDATES to select per run — one duplicate_of family
-                       counts once, however many stubs it spans (positive int;
-                       default ${DEFAULT_CAP}).
-  --issue <n>          Single-issue live run: evaluate ONLY this issue through the
-                       same filters (the workflow_dispatch path). Opens a real
-                       fix PR if the issue is eligible. Overrides --cap.
-  --deferred-out <p>   Write the duplicate_of DEFERRAL report — a JSON array of
-                       { "issue": <number>, "reason": "<enum>" } — to this path,
-                       so the run record can distinguish an empty queue from one
-                       whose candidates were all stood down. Stdout is unchanged.
-  --skipped-out <p>    Write the fix_scope SKIP report, same shape, to this path.
-                       An architectural verdict writes nothing to the queue, so
-                       without it a window standing entirely down on scope is
-                       indistinguishable from an empty one. Stdout is unchanged.
-  --window-out <p>     Write the Window tripwire — { "total": <n>, "evaluated":
-                       <n>, "secondLook": <bool>, "secondLookTotal": <n>,
-                       "secondLookEvaluated": <n>, "secondLookFull": <bool>,
-                       "secondLookFailed": <bool>, "ghCalls": <n> } — to this
-                       path, so the run record can surface a list window that
-                       exceeded the eval cap, a bounded second look (that it ran,
-                       whether MORE rows still sat past even it, and whether its
-                       own read failed), and the run's measured \`gh\` invocation
-                       count. Stdout is unchanged.
-  --truncations-out <p> Write the cost-budget truncations — { "handledOverflow":
-                       <n>, "reverseBudget": <bool>, "reverseNonconvergent":
-                       <bool>, "rateLimited": <n> } — to this path, so the run
-                       record can surface a bounded re-attempt (a family that
-                       should have stood down but a budget capped its lookup) and
-                       a DEGRADED run (rate-limit-shaped gh failures, which force
-                       zero entries). Stdout is unchanged.
-  --emit-verdict       With --issue: print the trusted (fence-selected) verdict
-                       comment body for that issue and exit (the workflow
-                       snapshots it to a file the fix agent reads, so the agent
-                       needs no gh tool or token).
-  -h, --help           Show this help.
-`;
-}
-
-export function parseArgs(argv) {
-  const options = {
-    repo: DEFAULT_REPO,
-    cap: DEFAULT_CAP,
-    issue: null,
-    emitVerdict: false,
-    deferredOut: null,
-    skippedOut: null,
-    windowOut: null,
-    truncationsOut: null,
-    help: false,
-  };
-  const args = [...argv];
-  for (let i = 0; i < args.length; i += 1) {
-    const arg = args[i];
-    const readValue = () => {
-      const value = args[++i];
-      if (value == null) throw new Error(`${arg} requires a value`);
-      return value;
-    };
-    switch (arg) {
-      case "--repo":
-        options.repo = readValue();
-        break;
-      case "--cap": {
-        const value = Number(readValue());
-        if (!Number.isInteger(value) || value <= 0) {
-          throw new Error("--cap must be a positive integer");
-        }
-        options.cap = value;
-        break;
-      }
-      case "--issue": {
-        const value = Number(readValue());
-        if (!Number.isInteger(value) || value <= 0) {
-          throw new Error("--issue must be a positive integer");
-        }
-        options.issue = value;
-        break;
-      }
-      case "--emit-verdict":
-        options.emitVerdict = true;
-        break;
-      case "--deferred-out":
-        options.deferredOut = readValue();
-        break;
-      case "--skipped-out":
-        options.skippedOut = readValue();
-        break;
-      case "--window-out":
-        options.windowOut = readValue();
-        break;
-      case "--truncations-out":
-        options.truncationsOut = readValue();
-        break;
-      case "-h":
-      case "--help":
-        options.help = true;
-        break;
-      default:
-        throw new Error(`Unknown option: ${arg}\n\n${usage()}`);
-    }
-  }
-  return options;
-}
-
-/** Best-effort JSON report write. A failed write degrades ONE counter on the
- * run record; it must never fail the select step, whose whole contract is that
- * it always emits a valid array. Returns whether the file was written — one
- * caller (the degraded signal) has to know. Exported because `main` is the only
- * bridge between the selector's return value and the `jq` reads the workflow
- * builds the tracker record from, and a key-name or serialization bug here is
- * invisible to every test that exercises `selectAutofixRun` alone. */
-export function writeReport(path, report, label) {
-  if (!path) return true;
-  try {
-    writeFileSync(path, `${JSON.stringify(report ?? [])}\n`);
-    return true;
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    process.stderr.write(
-      `warn: could not write the ${label} report: ${message}\n`,
-    );
-    return false;
-  }
-}
-
-/**
- * Write every report file the workflow reads, and answer the one question the
- * caller must act on: was a DEGRADED run's signal lost?
- *
- * `rateLimited` reaches the workflow through exactly one channel — the
- * truncations file — and the workflow flips `disposition` to
- * `degraded-rate-limited` off it. Every OTHER field on these files is a
- * nice-to-have that degrades to "0" or a missing line. This one is the safety
- * signal: lose it and `rate_limited` reads 0, the disposition stays `active`,
- * the tracker renders a suppressed run as a healthy idle one — the #1758
- * misdiagnosis — and the record job's label backfill gate opens on reads the run
- * itself declared unreliable. So a best-effort write is the wrong contract for
- * that one case, and the caller fails the step instead. Exported for the same
- * reason `writeReport` is.
- */
-export function writeRunReports(options, run) {
-  // Report BEFORE stdout: the workflow captures stdout into a shell variable, so
-  // a failed report write must not be able to lose the entries too. All are
-  // best-effort — the run record degrades to "0" / no Window line / no
-  // truncation line, never to a dead leg.
-  writeReport(options.deferredOut, run.deferred, "deferral");
-  writeReport(options.skippedOut, run.skipped, "fix_scope skip");
-  writeReport(options.windowOut, run.window ?? {}, "window");
-  const truncations = run.truncations ?? {};
-  const wroteTruncations = writeReport(
-    options.truncationsOut,
-    truncations,
-    "truncations",
-  );
-  return {
-    lostDegradedSignal:
-      Number(truncations.rateLimited ?? 0) > 0 && !wroteTruncations,
-  };
-}
 
 async function main() {
   const options = parseArgs(process.argv.slice(2));

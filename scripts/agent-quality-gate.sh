@@ -2406,6 +2406,28 @@ while IFS= read -r path; do
         scripts/sentry-autofix-select.mjs|scripts/sentry-autofix-select.test.mjs)
           add_command "pnpm sentry:autofix:select:test" "Sentry autofix select helper changed"
           ;;
+        scripts/sentry-autofix-select-cli.mjs|scripts/sentry-autofix-decisions.mjs)
+          # The selector's CLI surface (option contract, help text, the report
+          # files the tracker reads back, --emit-verdict) and the decision ->
+          # report classifier both passes share. Neither owns a cost cap; both
+          # are exercised end to end by the select suite, which drives the CLI
+          # layer through writeRunReports and the classifier through the family
+          # collapse.
+          add_command "pnpm sentry:autofix:select:test" "Sentry autofix selection helper changed"
+          ;;
+        scripts/sentry-autofix-select-instrument.mjs|scripts/sentry-autofix-second-look.mjs)
+          # The selector's budget + instrumentation layer (the per-run read cap
+          # and its no-op guard, the gh counter, the throttle latch, the DEGRADED
+          # and summary lines) and the bounded second look.
+          add_command "pnpm sentry:autofix:select:test" "Sentry autofix selection helper changed"
+          # These two OWN caps the finalize suite pins the select job's
+          # timeout-minutes against — MAX_CANDIDATE_EVALUATIONS here,
+          # MAX_SECOND_LOOK_EVALUATIONS + SECOND_LOOK_FAMILY_BUDGETS there. That
+          # pin derives the budget from the LIVE constants, so raising one
+          # without re-checking the timeout has to fail in the gate, not in
+          # production on the path the second look exists to create.
+          add_command "pnpm sentry:autofix:finalize:test" "Sentry autofix per-run cost cap changed"
+          ;;
         scripts/sentry-autofix-queue-io.mjs|scripts/sentry-autofix-family-resolve.mjs|scripts/sentry-autofix-reverse-verify.mjs|scripts/sentry-autofix-family.mjs|scripts/sentry-autofix-candidate.mjs)
           # The selection leg's gh I/O layer (openAutofixPrExists / isOwnHeadPr /
           # the family-collapse reads), the live-state family resolver, the
