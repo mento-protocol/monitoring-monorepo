@@ -145,6 +145,28 @@ test("excepts the unpatched extract-zip advisory only on LHCI toolchain paths", 
   assert(exitCode === 0, `expected exit 0, got ${exitCode}: ${stderr}`);
 });
 
+test("a newer extract-zip version on the LHCI path still fails the gate", () => {
+  const { exitCode, stderr } = run({
+    advisories: {
+      792: {
+        module_name: "extract-zip",
+        severity: "high",
+        github_advisory_id: "GHSA-jmr9-qjv8-65gv",
+        findings: [
+          {
+            version: "2.0.2",
+            paths: [
+              "ui-dashboard>@lhci/cli>lighthouse>puppeteer-core>@puppeteer/browsers>extract-zip",
+            ],
+          },
+        ],
+      },
+    },
+  });
+  assert(exitCode !== 0, "expected non-zero exit");
+  assert(stderr.includes("extract-zip@2.0.2"), `stderr: ${stderr}`);
+});
+
 test("a runtime puppeteer route without @lhci/cli still fails the gate", () => {
   const { exitCode, stderr } = run({
     advisories: {

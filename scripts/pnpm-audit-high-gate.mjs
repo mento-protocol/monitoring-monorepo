@@ -17,35 +17,49 @@ const HIGH_SEVERITIES = new Set(["high", "critical"]);
  * Path-scoped advisory exceptions. pnpm's own ignoreGhsas is advisory-wide,
  * which would also mask a FUTURE production dependency picking up the same
  * vulnerable package — so exceptions live here instead, and a finding is
- * excepted only when its dependency path matches the allowed route. Any
- * other route to the same advisory still fails the gate.
+ * excepted only when its dependency path matches the allowed route AND its
+ * resolved package@version equals the exact one this exception was written
+ * for. A newly released version, or the same advisory on any other route,
+ * still fails the gate.
  *
- * @type {Record<string, {pathPattern: RegExp; reason: string}>}
+ * @type {Record<string, {pathPattern: RegExp; module: string; version: string; reason: string}>}
  */
 const ADVISORY_EXCEPTIONS = {
-  // extract-zip <= 2.0.1 symlink path traversal; NO patched release exists.
+  // extract-zip 2.0.1 symlink path traversal; NO patched release exists.
   // Reached only through the Lighthouse CI toolchain, which extracts Chrome
   // archives from Google's CDN in dev/CI — never untrusted zips at runtime.
-  // Remove the moment upstream ships a fix.
+  // Remove the moment upstream ships a fix; if a NEWER extract-zip appears
+  // on this path the version guard reopens the gate, which is what we want.
   "GHSA-jmr9-qjv8-65gv": {
     // Anchored on the @lhci/cli path segment specifically: a runtime
     // dependency that pulls puppeteer directly (service>puppeteer>…) must
     // still fail the gate — only the Lighthouse CI toolchain route is the
     // dev/CI-only case this exception describes.
     pathPattern: /(^|>)@lhci\/cli>/,
+    module: "extract-zip",
+    version: "2.0.1",
     reason: "unpatched upstream; only reachable via the @lhci/cli toolchain",
   },
 };
 
 /**
  * @param {string[]} ids
+ * @param {string} moduleName
+ * @param {string} version
  * @param {string} path
  * @returns {boolean}
  */
-function isExceptedFinding(ids, path) {
+function isExceptedFinding(ids, moduleName, version, path) {
   for (const id of ids) {
     const exception = ADVISORY_EXCEPTIONS[id];
-    if (exception && exception.pathPattern.test(path)) return true;
+    if (
+      exception &&
+      exception.module === moduleName &&
+      exception.version === version &&
+      exception.pathPattern.test(path)
+    ) {
+      return true;
+    }
   }
   return false;
 }
@@ -214,8 +228,8 @@ function evaluateReport(report) {
     const severity = advisory.severity ?? "unknown-severity";
 
     for (const { finding, path } of findingPaths(advisory)) {
-      if (isExceptedFinding(ids, path)) continue;
       const version = finding.version ?? "unknown-version";
+      if (isExceptedFinding(ids, moduleName, version, path)) continue;
       const summary = `${id} ${severity} ${moduleName}@${version} via ${path}`;
       disallowed.push(summary);
     }
