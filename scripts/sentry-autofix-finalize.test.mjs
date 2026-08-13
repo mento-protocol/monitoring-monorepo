@@ -989,13 +989,37 @@ function verdictView(
 // revalidation re-read runs for real. `scopeByNumber` maps a number string to a
 // `verdictView` spec, or the sentinel "gone" (no verdict comment) / "error" (the
 // read throws). A number not in the map defaults to still-architectural.
-function makeBackfillRunGh({ scopeByNumber = {}, calls = [] } = {}) {
+//
+// The write is bracketed by TWO reads (the #1389-shaped pre/post guard), so a
+// spec may also be an ARRAY of specs consumed one per read for that number: the
+// first entry answers the pre-write check, the second the post-write check. That
+// is how the TOCTOU window is modelled — the state moves between the two reads.
+// A one-entry array (or a plain spec) answers every read the same way.
+// `removeFails` makes the compensating `--remove-label` edit throw.
+function makeBackfillRunGh({
+  scopeByNumber = {},
+  calls = [],
+  removeFails = false,
+} = {}) {
+  const reads = new Map();
   const runGh = async (args) => {
     calls.push(args);
     const [a0, a1] = args;
+    if (a0 === "issue" && a1 === "edit") {
+      if (removeFails && args.includes("--remove-label")) {
+        throw new Error("gh issue edit --remove-label failed: boom");
+      }
+      return "{}";
+    }
     if (a0 === "issue" && a1 === "view") {
       const number = String(args[2]);
-      const spec = scopeByNumber[number] ?? {};
+      const configured = scopeByNumber[number] ?? {};
+      let spec = configured;
+      if (Array.isArray(configured)) {
+        const seen = reads.get(number) ?? 0;
+        reads.set(number, seen + 1);
+        spec = configured[Math.min(seen, configured.length - 1)];
+      }
       if (spec === "error") throw new Error("gh issue view failed: boom");
       if (spec === "gone") {
         return JSON.stringify({
@@ -1197,6 +1221,141 @@ await test("backfill: a stub re-triaged to an allowlisted-EXTERNAL repo is not l
   assertDeepEqual(
     calls.filter((c) => c[0] === "issue" && c[1] === "edit").map((c) => c[2]),
     ["88"],
+  );
+});
+
+// --- post-write TOCTOU guard (#1389-shaped) ---------------------------------
+//
+// The pre-write check alone cannot close the window between the read and the
+// `--add-label` edit: triage runs in its own concurrency group, so a re-triage
+// landing there has settlement REMOVE the hold and this backfill ADD IT BACK.
+// For an external code-fix that is a permanent strand (projection reads the
+// re-added hold as skipped-state and files nothing; the stub keeps no retry
+// label). So the write is bracketed by the same live check on both sides, and a
+// post-check that does not re-confirm architectural withdraws the label again.
+
+/** Run `fn` with process.stderr.write captured, so a test can assert on the
+ * notes the backfill emits (the loud ::error:: for a stuck label). */
+async function captureStderr(fn) {
+  const original = process.stderr.write.bind(process.stderr);
+  let text = "";
+  process.stderr.write = (chunk) => {
+    text += String(chunk);
+    return true;
+  };
+  try {
+    const result = await fn();
+    return { result, stderr: text };
+  } finally {
+    process.stderr.write = original;
+  }
+}
+
+/** The `--add-label` / `--remove-label` edits issued for one issue, in order. */
+function labelEdits(calls, number) {
+  return calls
+    .filter(
+      (c) => c[0] === "issue" && c[1] === "edit" && c[2] === String(number),
+    )
+    .map((c) => (c.includes("--remove-label") ? "remove" : "add"));
+}
+
+await test("backfill TOCTOU: state moves to mechanical between the pre-read and the write — label added, then REMOVED", async () => {
+  // Pre-write read says architectural (so the write proceeds); by the post-write
+  // read a concurrent re-triage has made it mechanical. The label must be taken
+  // back off, leaving the stub selectable and re-evaluated next run.
+  const calls = [];
+  const { runGh } = makeBackfillRunGh({
+    calls,
+    scopeByNumber: {
+      101: [{ fixScope: null }, { fixScope: FIX_SCOPE_MECHANICAL }],
+    },
+  });
+  const res = await backfillArchitecturalLabels(
+    [architecturalSkip("101")],
+    { repo: "o/r" },
+    { runGh },
+  );
+  assertDeepEqual(res.labeled, []);
+  assertDeepEqual(res.withdrawn, ["101"]);
+  assertDeepEqual(res.withdrawFailed, []);
+  // Negative control: delete the post-write check and this is ["add"] — the
+  // stale hold stays on a now-mechanical stub, the strand this guard prevents.
+  assertDeepEqual(labelEdits(calls, 101), ["add", "remove"]);
+});
+
+await test("backfill TOCTOU: a post-check READ ERROR removes the label too (fail-closed, self-healing)", async () => {
+  // Same fail-closed stance as the pre-write half: unconfirmed means do not
+  // hold. The selector re-parses fix_scope next run, reports the skip, and this
+  // backfill re-adds the label — so removing costs at most one wasted cycle,
+  // while leaving an unverifiable hold risks the permanent strand.
+  const calls = [];
+  const { runGh } = makeBackfillRunGh({
+    calls,
+    scopeByNumber: { 102: [{ fixScope: null }, "error"] },
+  });
+  const res = await backfillArchitecturalLabels(
+    [architecturalSkip("102")],
+    { repo: "o/r" },
+    { runGh },
+  );
+  assertDeepEqual(res.labeled, []);
+  assertDeepEqual(res.withdrawn, ["102"]);
+  assertDeepEqual(labelEdits(calls, 102), ["add", "remove"]);
+});
+
+await test("backfill TOCTOU: the steady state keeps the label — exactly one edit, no removal", async () => {
+  // Still architectural at BOTH reads: the guard must be silent here, or every
+  // healthy backfill would churn a label on and off.
+  const calls = [];
+  const { runGh } = makeBackfillRunGh({
+    calls,
+    scopeByNumber: { 103: [{ fixScope: null }, { fixScope: null }] },
+  });
+  const res = await backfillArchitecturalLabels(
+    [architecturalSkip("103")],
+    { repo: "o/r" },
+    { runGh },
+  );
+  assertDeepEqual(res.labeled, ["103"]);
+  assertDeepEqual(res.withdrawn, []);
+  assertDeepEqual(res.withdrawFailed, []);
+  assertDeepEqual(labelEdits(calls, 103), ["add"]);
+  // Two reads bracket the one write (pre + post), the documented cost.
+  assertEqual(
+    calls.filter((c) => c[0] === "issue" && c[1] === "view" && c[2] === "103")
+      .length,
+    2,
+  );
+});
+
+await test("backfill TOCTOU: a FAILING compensating removal is surfaced, never silent", async () => {
+  // A hold that cannot be withdrawn is exactly the strand the guard exists to
+  // prevent, and the record-run job is continue-on-error — so it must reach both
+  // stderr (as ::error::) and the returned summary.
+  const calls = [];
+  const { runGh } = makeBackfillRunGh({
+    calls,
+    removeFails: true,
+    scopeByNumber: {
+      104: [{ fixScope: null }, { fixScope: FIX_SCOPE_MECHANICAL }],
+    },
+  });
+  const { result: res, stderr } = await captureStderr(() =>
+    backfillArchitecturalLabels(
+      [architecturalSkip("104")],
+      { repo: "o/r" },
+      { runGh },
+    ),
+  );
+  assertDeepEqual(res.labeled, []);
+  assertDeepEqual(res.withdrawn, []);
+  // Negative control: swallow the removal error (drop withdrawFailed / the
+  // ::error:: write) and both of these go red.
+  assertDeepEqual(res.withdrawFailed, ["104"]);
+  assert(
+    stderr.includes("::error::") && stderr.includes("#104"),
+    `expected a loud ::error:: for the stuck label, got: ${stderr}`,
   );
 });
 

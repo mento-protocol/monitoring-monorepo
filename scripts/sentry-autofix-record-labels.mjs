@@ -69,6 +69,10 @@ const AUTOFIX_VERDICT = "code-fix";
 // belt-and-braces bound that keeps the write volume aligned with the documented
 // cost ceiling; overflow ids are simply labeled on a later run (they re-enter the
 // skip report until labeled). Oldest-first order is preserved from the report.
+// Each backfilled stub now costs read + write + read (the pre- and post-write
+// halves of the TOCTOU guard below), plus one more write when the post-check
+// forces a compensating removal — so this bound governs three-to-four gh calls
+// per stub, not one.
 export const MAX_BACKFILL_LABELS = 50;
 
 export const DEFAULT_REPO = "mento-protocol/monitoring-monorepo";
@@ -208,12 +212,26 @@ async function liveArchitecturalScope(runGh, repo, number) {
  * is now gone/unreadable, is left UNLABELED (and so stays selectable) — the label
  * is a snapshot-driven write and must not outlive the snapshot's truth.
  *
+ * The label write is bracketed by the SAME live check on both sides — the #1389
+ * stale-verdict guard's shape. The post-write half compensates for the TOCTOU the
+ * pre-write half alone cannot close: triage runs on its own concurrency group, so
+ * a re-triage landing between the read and the edit would have settlement remove
+ * the hold and this write re-add it, stranding an external code-fix (projection
+ * reads the re-added hold as skipped-state and files nothing, and the stub keeps
+ * no retry label). When the post-write check does not re-confirm architectural —
+ * including a read/parse failure, same fail-closed stance as the pre-write half —
+ * the label just added is REMOVED again.
+ *
  * Every gh call is fail-SOFT and independent: a failed label-create is logged and
  * the per-issue edits still run (they self-heal on a later run if the label truly
  * does not exist); a failed re-read or edit skips that one issue (it re-enters the
  * skip report next run). Never throws — the record-run job is best-effort. Returns
- * `{ labeled, failed, revalidated, refused, overflow }` where `revalidated` holds
- * the numbers dropped because the live verdict no longer confirms architectural.
+ * `{ labeled, failed, revalidated, withdrawn, withdrawFailed, refused, overflow }`:
+ * `revalidated` holds the numbers dropped before the write because the live
+ * verdict no longer confirmed architectural, `withdrawn` the numbers whose label
+ * was added and then removed by the post-write guard, and `withdrawFailed` the
+ * numbers whose compensating removal itself failed (loud — a stuck hold is the
+ * strand this guard exists to prevent).
  */
 export async function backfillArchitecturalLabels(
   skipped,
@@ -266,8 +284,11 @@ export async function backfillArchitecturalLabels(
   const labeled = [];
   const failed = [];
   const revalidated = [];
+  const withdrawn = [];
+  const withdrawFailed = [];
   for (const number of plan.numbers) {
-    // Revalidate against LIVE state before writing the snapshot-driven label.
+    // PRE-write check: revalidate against LIVE state before writing the
+    // snapshot-driven label.
     const live = await liveArchitecturalScope(runGh, repo, number);
     if (live.state !== "architectural") {
       if (live.state === "selectable") {
@@ -292,19 +313,71 @@ export async function backfillArchitecturalLabels(
         "--add-label",
         FIX_SCOPE_ARCHITECTURAL_LABEL,
       ]);
-      labeled.push(number);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       process.stderr.write(
         `warn: could not backfill ${FIX_SCOPE_ARCHITECTURAL_LABEL} onto #${number}: ${message}\n`,
       );
       failed.push(number);
+      continue;
+    }
+
+    // POST-write compensating verification — the #1389 stale-verdict guard's
+    // shape, applied to this write. GitHub labels have no atomic
+    // compare-and-set, and triage runs on its own concurrency group, so an
+    // operator re-triage between the pre-write read and the edit above can have
+    // triage settlement REMOVE the hold and this stale write ADD IT BACK. For an
+    // external code-fix that is a permanent strand: the triage close step leaves
+    // the stub open for projection, but runProjectionBatch sees the re-added hold
+    // and returns skipped-state, so the owning-repo issue is never created and
+    // the stub carries neither sentry:needs-triage nor any other retry path. So
+    // re-read the same authoritative state AFTER the write and compensate.
+    //
+    // `unconfirmed` (read/parse failure on the post-check) removes the label too:
+    // that matches the PRE-write fail-closed stance — unconfirmed means do NOT
+    // hold — and it self-heals, because the selector re-parses fix_scope next
+    // run, reports the skip, and this backfill re-adds the label. Leaving an
+    // unverifiable hold in place risks the permanent strand above; removing it
+    // costs at most one wasted evaluate-and-relabel cycle.
+    const after = await liveArchitecturalScope(runGh, repo, number);
+    if (after.state === "architectural") {
+      labeled.push(number);
+      continue;
+    }
+    process.stderr.write(
+      after.state === "selectable"
+        ? `note: #${number} stopped resolving to a local architectural code-fix between the pre-write check and the label write (concurrent re-triage); removing the ${FIX_SCOPE_ARCHITECTURAL_LABEL} label we just added.\n`
+        : `note: could not re-confirm a live architectural fix_scope for #${number} after the write (${after.message}); failing closed and removing the ${FIX_SCOPE_ARCHITECTURAL_LABEL} label we just added.\n`,
+    );
+    try {
+      await runGh([
+        "issue",
+        "edit",
+        number,
+        "--repo",
+        repo,
+        "--remove-label",
+        FIX_SCOPE_ARCHITECTURAL_LABEL,
+      ]);
+      withdrawn.push(number);
+    } catch (err) {
+      // A hold that cannot be withdrawn is exactly the strand this guard exists
+      // to prevent, and the record-run job is continue-on-error — so it must not
+      // pass silently. `::error::` annotates the run; the number also rides out
+      // in the returned summary for the caller's log line.
+      const message = err instanceof Error ? err.message : String(err);
+      process.stderr.write(
+        `::error::could not remove the stale ${FIX_SCOPE_ARCHITECTURAL_LABEL} label from #${number} after a failed post-write check (${message}); the stub may be held out of both autofix selection and projection until a human clears the label.\n`,
+      );
+      withdrawFailed.push(number);
     }
   }
   return {
     labeled,
     failed,
     revalidated,
+    withdrawn,
+    withdrawFailed,
     refused: plan.refused,
     overflow: plan.overflow,
   };
@@ -411,6 +484,8 @@ async function main() {
     `Backfilled ${FIX_SCOPE_ARCHITECTURAL_LABEL} onto ${result.labeled.length} stub(s)` +
       `${result.failed.length ? `, ${result.failed.length} failed` : ""}` +
       `${result.revalidated.length ? `, ${result.revalidated.length} left unlabeled (live scope no longer architectural)` : ""}` +
+      `${result.withdrawn.length ? `, ${result.withdrawn.length} withdrawn after the post-write check` : ""}` +
+      `${result.withdrawFailed.length ? `, ${result.withdrawFailed.length} STUCK (withdrawal failed)` : ""}` +
       `${result.refused.length ? `, ${result.refused.length} refused` : ""}.\n`,
   );
 }
