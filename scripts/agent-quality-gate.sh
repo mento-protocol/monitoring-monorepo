@@ -629,17 +629,74 @@ gate_lock_obligation_unwritable() {
 # just the holder it personally condemned. That is what makes a chain of
 # crashes safe: a third run inherits both the run it reclaimed and whatever
 # that run had not finished clearing.
-drain_condemned_runs() {
-  local path token
-  path="$(gate_lock_condemned_path)" || return 0
-  [[ -r "$path" ]] || return 0
-  while IFS= read -r token; do
-    [[ -n "$token" ]] || continue
-    drain_condemned_run_commands "$token"
-  done < "$path"
+gate_lock_obligation_unreadable() {
+  echo "error: the outstanding-commands list at ${1} exists but cannot be read." >&2
+  echo "It names commands a dead run left behind, and skipping it would start this run alongside them." >&2
+  echo "Nothing has been executed. Fix that path — permissions — then re-run." >&2
+  exit 2
+}
+
+# Drain every token in one taken list, then remove it. The list is re-read
+# until two passes running see the same number of lines: an appender that
+# opened the file by name before it was renamed away can still be between its
+# open and its write, and its line would otherwise arrive after the read and
+# be deleted unread. That set is bounded and shrinking — the name it opened
+# refers to a new file now — so the re-read terminates. Tokens already drained
+# are skipped; draining one twice is harmless but not free.
+gate_lock_drain_taken_list() {
+  local list="$1"
+  local token drained="" lines=0 previous=-1
+  [[ -e "$list" ]] || return 0
+  [[ -r "$list" ]] || gate_lock_obligation_unreadable "$list"
+  while [[ "$lines" -ne "$previous" ]]; do
+    previous="$lines"
+    lines=0
+    while IFS= read -r token; do
+      [[ -n "$token" ]] || continue
+      lines=$((lines + 1))
+      case " ${drained} " in
+        *" ${token} "*) continue ;;
+      esac
+      drain_condemned_run_commands "$token"
+      drained="${drained}${token} "
+    done < "$list"
+  done
   # Removed only here, with every token confirmed gone. A drain that cannot
   # confirm exits instead, leaving the list for whoever comes next.
-  rm -f "$path"
+  gate_lock_test_delay "${AGENT_QUALITY_GATE_LOCK_DRAIN_UNLINK_DELAY_SECONDS:-}"
+  rm -f "$list"
+}
+
+drain_condemned_runs() {
+  local path taken remnant
+  path="$(gate_lock_condemned_path)" || return 0
+
+  # A drainer killed mid-drain leaves the list it took parked under
+  # condemned.draining.*, where nothing else looks — the same hazard as a
+  # reclaim interrupted with the owner record in hand. Those obligations are
+  # still outstanding, so they are drained here, before our own. Nothing
+  # deletes these on the way out: being left behind is what hands them on.
+  for remnant in "${path}".draining.*; do
+    [[ -e "$remnant" ]] || continue
+    gate_lock_drain_taken_list "$remnant"
+  done
+
+  [[ -e "$path" ]] || return 0
+  [[ -r "$path" ]] || gate_lock_obligation_unreadable "$path"
+  # Taken by rename rather than read and then unlinked. Only the lock holder
+  # drains, but any run can append: a waiter condemning a dead remnant, or one
+  # unwinding with a record it could not put back. A token appended between
+  # the read and the delete would be removed having never been drained, and
+  # its commands are exactly the ones nothing else knows about. After the
+  # rename those appends create a fresh list for the next run instead.
+  taken="${path}.draining.$$"
+  if ! mv "$path" "$taken" 2>/dev/null; then
+    # Nothing else removes this file, so a rename that fails means the lock
+    # root will not let this run take the list — and a list it cannot take is
+    # one it cannot promise to drain.
+    gate_lock_obligation_unreadable "$path"
+  fi
+  gate_lock_drain_taken_list "$taken"
 }
 
 # Upper bound on confirming a dead run's commands are gone — a bound on the
@@ -944,7 +1001,12 @@ drain_condemned_run_commands() {
   # tagged processes are very likely already gone — killing them is what the
   # first pass does — so a fresh tag scan on its own would come back empty and
   # call the job finished while an untagged descendant carried on.
-  if [[ -n "$captured_file" && -r "$captured_file" ]]; then
+  if [[ -n "$captured_file" && -e "$captured_file" ]]; then
+    # Unreadable is not empty. Starting from nothing here would lose the
+    # descendants an interrupted drain recorded, and their tagged wrapper is
+    # already dead by then — so the tag scan below would come back empty and
+    # this run would call the job done with those processes still running.
+    [[ -r "$captured_file" ]] || gate_lock_obligation_unreadable "$captured_file"
     gate_drain_capture="$(cat "$captured_file" 2>/dev/null)
 "
   fi

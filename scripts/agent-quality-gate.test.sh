@@ -5959,6 +5959,122 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     fail "the record naming those commands must survive a failed obligation write"
   rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned"
 
+  # Unreadable is not empty. Both obligation files can be created by another
+  # user on a shared lock root, and reading one as "nothing outstanding" is how
+  # a run comes to execute beside commands it never drained.
+  for race_unreadable_case in condemned captured; do
+    rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned"
+    rm -f "$gate_race_root"/captured.* "$gate_race_root"/condemned.draining.*
+    : > "$gate_race_log"
+    printf 'fixture-unreadable\n' > "$gate_race_root/condemned"
+    if [[ "$race_unreadable_case" == condemned ]]; then
+      race_unreadable_file="$gate_race_root/condemned"
+    else
+      race_unreadable_file="$gate_race_root/captured.fixture-unreadable"
+      printf '99999|\n' > "$race_unreadable_file"
+    fi
+    chmod 000 "$race_unreadable_file"
+    AGENT_QUALITY_GATE_LOCK=1 \
+      AGENT_QUALITY_GATE_LOCK_HELD='' \
+      AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+      AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+      --base HEAD --run --lock-wait 20 \
+      > "$gate_race_out/unreadable-${race_unreadable_case}.out" 2>&1 &&
+      race_unreadable_exit=0 || race_unreadable_exit=$?
+    chmod 644 "$race_unreadable_file" 2>/dev/null || true
+    [[ "$race_unreadable_exit" == "2" ]] ||
+      fail "an unreadable ${race_unreadable_case} list must fail closed, got exit ${race_unreadable_exit}"
+    grep -q "exists but cannot be read" \
+      "$gate_race_out/unreadable-${race_unreadable_case}.out" ||
+      fail "failing closed on an unreadable ${race_unreadable_case} list must say so"
+    [[ -z "$(awk '/^enter/ { print $2; exit }' "$gate_race_log")" ]] ||
+      fail "a run that could not read the ${race_unreadable_case} list executed a mapped command anyway"
+  done
+  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned"
+  rm -f "$gate_race_root"/captured.*
+
+  # A drainer killed with the list in its hands leaves it parked under
+  # condemned.draining.*, where only this recovery looks. Those obligations are
+  # still outstanding, so a later run has to find and discharge them.
+  rm -f "$gate_race_root"/condemned.draining.*
+  : > "$gate_race_log"
+  bash -c 'eval "$1"; exit $?' "agentqg:fixture-taken-remnant" 'sleep 60' &
+  race_taken_proc=$!
+  sleep 1
+  if [[ -n "$(pgrep -f "agentqg:fixture-taken-remnant" 2>/dev/null | head -n1 || true)" ]]; then
+    printf 'fixture-taken-remnant\n' > "$gate_race_root/condemned.draining.99999"
+    AGENT_QUALITY_GATE_LOCK=1 \
+      AGENT_QUALITY_GATE_LOCK_HELD='' \
+      AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+      AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+      AGENT_QUALITY_GATE_LOCK_ORPHAN_DRAIN_SECONDS=30 \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+      --base HEAD --run --lock-wait 30 \
+      > "$gate_race_out/taken-remnant.out" 2>&1 || true
+    kill -0 "$race_taken_proc" 2>/dev/null &&
+      fail "an obligation list left by a killed drainer was never drained"
+    [[ ! -e "$gate_race_root/condemned.draining.99999" ]] ||
+      fail "a drained obligation list must not be left behind to be drained forever"
+  fi
+  kill -9 "$race_taken_proc" 2>/dev/null || true
+  wait "$race_taken_proc" 2>/dev/null || true
+  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned"
+  rm -f "$gate_race_root"/captured.* "$gate_race_root"/condemned.draining.*
+
+  # Any run can append an obligation while the holder is draining. The reader
+  # holds its fd open, so an append during the drain is still seen; the one at
+  # risk lands after EOF and before the list is removed. Taking the list by
+  # rename sends that append to a fresh list instead of into the file about to
+  # be unlinked. The window is microseconds in production, so it is widened
+  # here the way the rest of these interleavings are.
+  : > "$gate_race_log"
+  bash -c 'eval "$1"; exit $?' "agentqg:fixture-drained-first" 'sleep 60' &
+  race_unlink_first=$!
+  # The late obligation names a live process of its own, so the assertion does
+  # not depend on when the append lands: either the token is still listed for
+  # the next run, or this run drained it. Only "token gone, process alive" is
+  # the loss this case exists to catch.
+  bash -c 'eval "$1"; exit $?' "agentqg:fixture-arrived-late" 'sleep 90' &
+  race_unlink_late=$!
+  sleep 1
+  if [[ -n "$(pgrep -f "agentqg:fixture-drained-first" 2>/dev/null | head -n1 || true)" ]]; then
+    printf 'fixture-drained-first\n' > "$gate_race_root/condemned"
+    AGENT_QUALITY_GATE_LOCK=1 \
+      AGENT_QUALITY_GATE_LOCK_HELD='' \
+      AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+      AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+      AGENT_QUALITY_GATE_LOCK_ORPHAN_DRAIN_SECONDS=30 \
+      AGENT_QUALITY_GATE_LOCK_DRAIN_UNLINK_DELAY_SECONDS=6 \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+      --base HEAD --run --lock-wait 30 \
+      > "$gate_race_out/unlink-window.out" 2>&1 &
+    race_unlink_wrapper=$!
+    # The capture file appears when that token's drain starts and is removed
+    # when it is discharged, which is where the list has been read to EOF.
+    race_waited=0
+    while [[ ! -e "$gate_race_root/captured.fixture-drained-first" && "$race_waited" -lt 400 ]]; do
+      sleep 0.5
+      race_waited=$((race_waited + 1))
+    done
+    race_waited=0
+    while [[ -e "$gate_race_root/captured.fixture-drained-first" && "$race_waited" -lt 120 ]]; do
+      sleep 0.5
+      race_waited=$((race_waited + 1))
+    done
+    printf 'fixture-arrived-late\n' >> "$gate_race_root/condemned"
+    wait "$race_unlink_wrapper" 2>/dev/null || true
+    if ! grep -q "fixture-arrived-late" "$gate_race_root/condemned" 2>/dev/null; then
+      kill -0 "$race_unlink_late" 2>/dev/null &&
+        fail "an obligation appended before the list was removed was deleted unread, and its command is still running"
+    fi
+  fi
+  kill -9 "$race_unlink_first" "$race_unlink_late" 2>/dev/null || true
+  wait "$race_unlink_first" 2>/dev/null || true
+  wait "$race_unlink_late" 2>/dev/null || true
+  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned"
+  rm -f "$gate_race_root"/captured.* "$gate_race_root"/condemned.draining.*
+
   # Crash-point sweep. Every boundary where this path creates, links, renames
   # or removes something is a place a SIGKILL can land, and each of the rounds
   # of review on this PR found one of them. The gate names those boundaries so

@@ -391,6 +391,19 @@ of them.
    teardown, which is already unwinding: it leaves the record in place, names
    it, and carries on to release the lock.
 
+   **Unreadable is not empty, and the list is consumed by rename.** The same
+   shared root that makes an append fail makes a read fail, and treating an
+   unreadable list as an absent one is how a run comes to execute beside
+   commands it never drained — so both reads fail closed too. The list is then
+   taken with `mv` rather than read and unlinked: only the holder drains, but
+   any run appends, so an obligation arriving after the reader reached EOF and
+   before the unlink would have been deleted having never been drained. After
+   the rename such appends create a fresh list for the next run. The taken copy
+   is re-read until two passes agree on its length, which covers an appender
+   caught between opening the old name and writing to it, and a drainer killed
+   with a list in its hands leaves it under `condemned.draining.<pid>` for the
+   same recovery pass that reads `owner.reclaiming.<pid>` remnants.
+
    **Obligation evidence is never rewritten in place.** A `>` redirection
    truncates the file the moment it opens, so a rewrite has a window in which
    the copy on disk is empty — and these files exist precisely to be read by
@@ -404,7 +417,8 @@ of them.
    that claim: `condemned` and `captured.<token>` are appended to; the owner
    record is built in a private per-PID file and published with `ln`, so its
    one `>` is to something nobody else reads; `owner.reclaiming.<pid>` is
-   created by rename. Nothing under the lock root is rewritten in place.
+   created by rename; `condemned.draining.<pid>` likewise. Nothing under the
+   lock root is rewritten in place.
 
    The audit that goes with this rule, over the current code: the things that
    gate a destructive or permissive act are the staleness verdict
@@ -458,8 +472,10 @@ cases. A command that forks a fresh child on every `TERM`, a waiter held under
 cannot append to are pinned there too: the first asserts no forked survivor
 outlives the drain, the second that the reported wait matches the wall clock,
 the third that the run exits without executing and leaves the record it was
-about to discard. Adding an operation to this path means adding its boundary to
-the table and to that sweep.
+about to discard. Unreadable obligation files, a list left behind by a killed
+drainer, and an obligation appended in the window before a drained list is
+removed are pinned alongside them. Adding an operation to this path means
+adding its boundary to the table and to that sweep.
 
 A lock with no usable owner record — no file at all, or an unfinished one from
 a run killed mid-write — counts as abandoned after a 30-second grace, measured
