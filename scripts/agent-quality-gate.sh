@@ -641,7 +641,12 @@ gate_lock_field_from_file() {
   local record="$1"
   local field="$2"
   [[ -r "$record" ]] || return 0
-  sed -n "s/^${field}=//p" "$record" 2>/dev/null | head -n1
+  # `|| true` for the same reason as everywhere else on this path, and here it
+  # matters most: this reads records that other runs rename out from under it
+  # by design. The file can vanish between the test above and the read below,
+  # and under `set -e` with `pipefail` that failure would propagate out of the
+  # command substitution every caller uses and kill the gate silently.
+  sed -n "s/^${field}=//p" "$record" 2>/dev/null | head -n1 || true
 }
 
 gate_lock_owner_field() {
@@ -775,6 +780,19 @@ claim_gate_run_lock() {
 # the identity now is what lets the drain tell "this PID is still the process
 # we condemned" from "this PID was reused while we worked".
 gate_drain_capture=""
+
+# The captured tree is obligation-evidence too, and the same rule applies to it
+# as to the condemned token: the moment the first signal goes out, this process
+# is the only one that knows what it was about to kill. Written down before
+# that, a successor inherits the list; without it, the successor's tag scan
+# finds nothing — the first pass killed the tag carrier — and reads that as
+# nothing left to do while an untagged descendant keeps running.
+gate_drain_persist_capture() {
+  local path="$1"
+  [[ -n "$path" ]] || return 0
+  printf '%s' "$gate_drain_capture" > "$path" 2>/dev/null || true
+}
+
 capture_process_tree() {
   local root_pid="$1"
   local child
@@ -787,7 +805,7 @@ capture_process_tree() {
 
 drain_condemned_run_commands() {
   local token="$1"
-  local wrapper entry pid recorded current alive recycled
+  local wrapper entry pid recorded current alive recycled captured_file
   local waited=0
   local announced=0
   local escalated=0
@@ -800,10 +818,24 @@ drain_condemned_run_commands() {
   # running". The captured set, not a re-scan, is what the drain confirms
   # against.
   gate_drain_capture=""
+  captured_file=""
+  [[ -z "$gate_lock_root_dir" ]] || captured_file="${gate_lock_root_dir}/captured.${token}"
+  # Start from what an earlier drain wrote down before it was interrupted. Its
+  # tagged processes are very likely already gone — killing them is what the
+  # first pass does — so a fresh tag scan on its own would come back empty and
+  # call the job finished while an untagged descendant carried on.
+  if [[ -n "$captured_file" && -r "$captured_file" ]]; then
+    gate_drain_capture="$(cat "$captured_file" 2>/dev/null)
+"
+  fi
   for wrapper in $(pgrep -f "agentqg:${token}" 2>/dev/null || true); do
     capture_process_tree "$wrapper"
   done
-  [[ -n "$gate_drain_capture" ]] || return 0
+  if [[ -z "${gate_drain_capture//[[:space:]]/}" ]]; then
+    [[ -z "$captured_file" ]] || rm -f "$captured_file"
+    return 0
+  fi
+  gate_drain_persist_capture "$captured_file"
 
   echo "The run this lock was taken from left commands running; stopping them before starting anything."
   announced=1
@@ -846,6 +878,9 @@ EOF
         kill -TERM "$pid" 2>/dev/null || true
       fi
     done
+    # After the first pass the tag carrier is usually dead, which is exactly
+    # the state a successor has to be able to inherit.
+    [[ "$waited" -ne 0 ]] || gate_lock_test_crash after-drain-term
     sleep 1
     waited=$((waited + 1))
     # Give TERM a few seconds to be honoured before insisting.
@@ -859,8 +894,13 @@ EOF
       for pid in $alive; do
         capture_process_tree "$pid"
       done
+      gate_drain_persist_capture "$captured_file"
     fi
   done
+
+  # Discharged: every process in the captured set is gone or belongs to
+  # somebody else now, so the list has nothing left to hand on.
+  [[ -z "$captured_file" ]] || rm -f "$captured_file"
 
   if [[ -n "$recycled" ]]; then
     echo "Left alone: pid(s) ${recycled}now belong to unrelated processes."
