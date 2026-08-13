@@ -869,6 +869,14 @@ drain_condemned_runs() {
         [[ -e "$entry" ]] || continue
         gate_lock_obligation_unreadable "$entry"
       fi
+      # Owned by us, or not an obligation: only this uid's runs write these,
+      # and a fabricated entry would steer the drain by another writer's
+      # chosen token. Refused loudly, like a malformed one.
+      if [[ ! -O "$claimed" ]]; then
+        echo "error: obligation record ${claimed} is not owned by this user." >&2
+        echo "Nothing has been executed. Inspect and remove that record, then re-run." >&2
+        exit 2
+      fi
       entry_token_value="$(head -n1 "$claimed" 2>/dev/null || true)"
       if [[ -z "$entry_token_value" ]]; then
         entry_token_value="${claimed##*/}"
@@ -1293,6 +1301,18 @@ drain_condemned_run_commands() {
   # first pass does — so a fresh tag scan on its own would come back empty and
   # call the job finished while an untagged descendant carried on.
   if [[ -n "$captured_file" && -e "$captured_file" ]]; then
+    # Owned by us, or not evidence. The identity strings inside are public
+    # (ps shows any process's start time), so another writer on a shared
+    # root could fabricate a snapshot naming a victim PID with its genuine
+    # identity — and this run would kill by it. What cannot be fabricated is
+    # the file's owner: only this uid's runs write these, so an inherited
+    # snapshot someone else owns is refused, run stopped, file named.
+    if [[ ! -O "$captured_file" ]]; then
+      echo "error: ${captured_file} is not owned by this user, so it is not this gate's evidence." >&2
+      echo "On a shared lock root that is a fabricated snapshot; killing by it could signal a stranger." >&2
+      echo "Nothing has been executed. Inspect and remove that file, then re-run." >&2
+      exit 2
+    fi
     # Unreadable is not empty. Starting from nothing here would lose the
     # descendants an interrupted drain recorded, and their tagged wrapper is
     # already dead by then — so the tag scan below would come back empty and
