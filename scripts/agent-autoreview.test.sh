@@ -2230,14 +2230,15 @@ run_requested_codex_missing_regression() {
 
 run_codex_resolution_helper() {
   local review_repo="$1"
-  shift
+  local search_path="$2"
+  shift 2
   : >"$stdout"
   : >"$stderr"
   local status=0
   (
     cd "$review_repo"
     env -i \
-      "PATH=$hermetic_git_bin" \
+      "PATH=$search_path" \
       "HOME=$HOME" \
       "TMPDIR=${TMPDIR:-/tmp}" \
       "GIT_CONFIG_GLOBAL=/dev/null" \
@@ -2254,6 +2255,7 @@ run_codex_resolution_helper() {
 run_codex_binary_resolution_regression() {
   local review_repo="$tmp_dir/codex-binary-resolution"
   local fake_bin="$tmp_dir/codex-binary-resolution-bin"
+  local shim_bin="$tmp_dir/codex-binary-resolution-shim"
   local status=0
 
   init_review_repo "$review_repo"
@@ -2281,8 +2283,18 @@ printf '%s\n' '{"findings":[],"overall_correctness":"patch is correct","overall_
 CODEX
   chmod +x "$fake_bin/codex"
 
+  # A launcher shim: it resolves and runs, then cannot find the real codex in
+  # the sanitized environment the reviewer hands its engine.
+  mkdir "$shim_bin"
+  cat >"$shim_bin/codex" <<'CODEX'
+#!/bin/bash
+printf 'Error: codex not found in PATH\n' >&2
+exit 127
+CODEX
+  chmod +x "$shim_bin/codex"
+
   # PATH has no codex, so the configured well-known install directory decides.
-  run_codex_resolution_helper "$review_repo" \
+  run_codex_resolution_helper "$review_repo" "$hermetic_git_bin" \
     "AUTOREVIEW_EXTRA_BIN_DIRS=$fake_bin" \
     "AUTOREVIEW_TRACE_COMMANDS=1"
   expect_stdout_contains "autoreview clean"
@@ -2290,21 +2302,43 @@ CODEX
   expect_stderr_contains "codex-binary-resolution-bin/codex"
 
   # An explicit override decides before any search directory.
-  run_codex_resolution_helper "$review_repo" \
+  run_codex_resolution_helper "$review_repo" "$hermetic_git_bin" \
     "AUTOREVIEW_CODEX_BIN=$fake_bin/codex" \
     "AUTOREVIEW_TRACE_COMMANDS=1"
   expect_stdout_contains "autoreview clean"
   expect_stderr_contains "resolved codex via AUTOREVIEW_CODEX_BIN"
 
   # Resolution stays quiet unless the trace is requested.
-  run_codex_resolution_helper "$review_repo" \
+  run_codex_resolution_helper "$review_repo" "$hermetic_git_bin" \
     "AUTOREVIEW_CODEX_BIN=$fake_bin/codex"
   expect_stdout_contains "autoreview clean"
   expect_empty_stderr
 
+  # A shim that exits 127 is an unresolved engine, not a review failure: the
+  # search moves on to the next candidate instead of aborting the review.
+  run_codex_resolution_helper "$review_repo" "$shim_bin:$hermetic_git_bin" \
+    "AUTOREVIEW_EXTRA_BIN_DIRS=$fake_bin" \
+    "AUTOREVIEW_TRACE_COMMANDS=1"
+  expect_stdout_contains "autoreview clean"
+  expect_stderr_contains "resolved codex via PATH"
+  expect_stderr_contains "resolved codex via well-known install location"
+
+  # When every candidate is such a shim, one message names them.
+  status=0
+  run_codex_resolution_helper "$review_repo" "$shim_bin:$hermetic_git_bin" \
+    "AUTOREVIEW_EXTRA_BIN_DIRS=" || status=$?
+  if [[ "$status" -eq 0 ]]; then
+    printf 'expected an all-shim codex search to fail\n' >&2
+    exit 1
+  fi
+  expect_stderr_contains "codex CLI is not available"
+  expect_stderr_contains "Skipped after exit 127"
+  expect_stderr_contains "codex-binary-resolution-shim/codex"
+  expect_stdout_not_contains "autoreview clean"
+
   # An unusable override reports itself instead of exiting 127.
   status=0
-  run_codex_resolution_helper "$review_repo" \
+  run_codex_resolution_helper "$review_repo" "$hermetic_git_bin" \
     "AUTOREVIEW_CODEX_BIN=$tmp_dir/absent-codex-override" || status=$?
   if [[ "$status" -eq 0 ]]; then
     printf 'expected an unusable AUTOREVIEW_CODEX_BIN override to fail\n' >&2
@@ -2321,7 +2355,7 @@ CODEX
 
   # A relative override never falls back to a search path either.
   status=0
-  run_codex_resolution_helper "$review_repo" \
+  run_codex_resolution_helper "$review_repo" "$hermetic_git_bin" \
     "AUTOREVIEW_CODEX_BIN=codex" \
     "AUTOREVIEW_EXTRA_BIN_DIRS=$fake_bin" || status=$?
   if [[ "$status" -eq 0 ]]; then

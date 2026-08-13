@@ -1203,37 +1203,54 @@ function traceCommandResolution(command, candidate, resolved, source) {
   );
 }
 
-function unavailableCommandMessage(command) {
+function unavailableCommandMessage(command, launcherFailures = []) {
   const { candidates, overrideVariable, overrideValue } =
     trustedCommandCandidates(command);
   const probed = candidates.map(({ candidate }) => candidate).join(", ");
   const variable = commandOverrideVariable(command);
+  const skipped = launcherFailures.length
+    ? ` Skipped after exit 127, unable to find their own target: ${launcherFailures.join(", ")}.`
+    : "";
   if (overrideVariable) {
-    return `${command} CLI is not available: ${variable} does not point at a trusted absolute executable. Probed: ${probed || overrideValue}`;
+    return `${command} CLI is not available: ${variable} does not point at a trusted absolute executable. Probed: ${probed || overrideValue}.${skipped}`;
   }
-  return `${command} CLI is not available outside the reviewed repo. Install it, or set ${variable} to its absolute path. Probed: ${probed || "<no absolute search directories>"}`;
+  return `${command} CLI is not available outside the reviewed repo. Install it, or set ${variable} to its absolute path. Probed: ${probed || "<no absolute search directories>"}.${skipped}`;
 }
 
-function resolveTrustedCommand(command, rejectRoot, { required = true } = {}) {
+// Yields every trusted executable the search order offers, best first, so a
+// caller can move past one that resolves but cannot run.
+function* trustedCommandResolutions(command, rejectRoot) {
   const { candidates } = trustedCommandCandidates(command);
   const root = realpathSync(rejectRoot);
   for (const { candidate, source } of candidates) {
     if (rejectedTrustedExecutableCandidates.has(candidate)) continue;
+    let resolved;
     try {
       accessSync(candidate, fsConstants.X_OK);
-      const resolved = trustedExecutableCandidate(
+      resolved = trustedExecutableCandidate(
         candidate,
         root,
         path.basename(command) || "executable",
         { allowSnapshot: path.basename(command) !== "git" },
       );
-      traceCommandResolution(command, candidate, resolved, source);
-      return resolved;
     } catch {
       rejectedTrustedExecutableCandidates.add(candidate);
       // Keep searching a bounded, absolute search list for an external
       // executable.
+      continue;
     }
+    traceCommandResolution(command, candidate, resolved, source);
+    yield { candidate, executable: resolved };
+  }
+}
+
+function rejectResolvedCommandCandidate(candidate) {
+  rejectedTrustedExecutableCandidates.add(candidate);
+}
+
+function resolveTrustedCommand(command, rejectRoot, { required = true } = {}) {
+  for (const { executable } of trustedCommandResolutions(command, rejectRoot)) {
+    return executable;
   }
   if (required) {
     throw new Error(unavailableCommandMessage(command));
@@ -3181,11 +3198,11 @@ function runCommandWithInput(
         return;
       }
       if (code !== 0) {
-        rejectOnce(
-          new Error(
-            `${command} failed (${code ?? signal}): ${stderr || stdout}`,
-          ),
+        const failure = new Error(
+          `${command} failed (${code ?? signal}): ${stderr || stdout}`,
         );
+        failure.exitCode = code ?? null;
+        rejectOnce(failure);
         return;
       }
       if (stdinWriteError) {
@@ -3214,15 +3231,32 @@ function tomlInlineTable(values) {
 }
 
 async function runCodex(repo, args, prompt) {
-  const codex = resolveTrustedCommand("codex", repo, { required: false });
-  if (!codex) {
-    throw new Error(unavailableCommandMessage("codex"));
-  }
   if (!args.tools) {
     throw new Error(
       "--no-tools is not supported for Codex; use read-only sandbox",
     );
   }
+  const launcherFailures = [];
+  for (const { candidate, executable } of trustedCommandResolutions(
+    "codex",
+    repo,
+  )) {
+    try {
+      return await runCodexExecutable(executable, repo, args, prompt);
+    } catch (error) {
+      if (error?.exitCode !== 127) throw error;
+      // Exit 127 means this codex could not find its own target. That is a
+      // launcher shim relying on a caller PATH the reviewer deliberately does
+      // not hand to the engine, so it is an unresolved engine, not a review
+      // failure: drop it and keep searching.
+      rejectResolvedCommandCandidate(candidate);
+      launcherFailures.push(candidate);
+    }
+  }
+  throw new Error(unavailableCommandMessage("codex", launcherFailures));
+}
+
+async function runCodexExecutable(codex, repo, args, prompt) {
   const tempRoot = safeTempRoot(repo);
   const tempDir = createRegisteredEngineRuntimeDirectory(
     tempRoot,
