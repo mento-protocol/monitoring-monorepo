@@ -859,8 +859,10 @@ was CLOSED at verdict time; the record-run backfill only adds the
 window-exclusion label at up to 50/run, never reopens. A regression reopens any
 that still fire via the normal ingest path (`REOPEN_SHED_LABELS` sheds the hold
 so the fresh round re-decides scope). This closes issue #1813: the architectural
-class no longer fills the selector's read window, and the `Window: N stubs,
-evaluated M` line (below) is the standing tripwire for any regrowth.
+class no longer fills the selector's read window. With the window now equal to
+`LIST_LIMIT`, the standing tripwire for regrowth is the bounded second look's
+`Second look: …` run-record line — a full window that selects nothing is exactly
+what fires it.
 
 A residue this design does NOT drain, stated not hidden: a stub with no parseable
 SHORT-ID, an unparsable verdict, a verdict that is not `code-fix`, or a
@@ -869,7 +871,9 @@ foreign/unrecognized `affected_repo` is dropped by `evaluateCandidate` (returns
 yet it keeps its `verdict-code-fix` + `autofix-select` labels and the oldest-first
 query returns it every run. A pile of these can occupy the whole
 `MAX_CANDIDATE_EVALUATIONS` slice while the run record names no reason; the only
-signal is the select step's stderr `skip #N:` note. It is not the architectural
+signal is the select step's stderr `skip #N:` note. A pile large enough to fill
+the whole window does at least surface indirectly now — it makes the run take a
+bounded second look, which the run record names. It is not the architectural
 class and gets no hold label — a triage error whose fix does not live here. A
 run-record reporting path for this residue is a deliberate follow-up if real
 starvation is observed: it would have to thread these heterogeneous skip reasons
@@ -938,15 +942,19 @@ operator who sees a standing deferred count overrides it with the single-issue
 explicit human intent that beats a heuristic signal. Selection itself stays
 read-only and never re-queues anything.
 
-**Cost bound** (PR #1810). Terminal, projected, archived, and external-project
-stubs are all excluded server-side before `--limit` applies, so the eligible
-window stays single-digit at steady state and the leg's `gh` volume no longer
-scales with the list ceiling. Every leg of the per-run `gh` cost is now bounded by
-a named cap, so the ceiling is a real bound, not an average: one window list +
-`MAX_CANDIDATE_EVALUATIONS` (50) × 2 reads (issue view + PR list) +
+**Cost bound** (PR #1810, re-sized when the window went to 200). Terminal,
+projected, archived, and external-project stubs are all excluded server-side
+before `--limit` applies, so the eligible window stays single-digit at steady
+state and the leg's `gh` volume no longer scales with the list ceiling. Every leg
+of the per-run `gh` cost is bounded by a named cap, so the ceiling is a real
+bound, not an average: one window list (2 API pages at 200 rows) +
+`MAX_CANDIDATE_EVALUATIONS` (200) × 2 reads (issue view + PR list) +
 `MAX_HANDLED_ID_QUERIES` (40) per-declared-id lookups + `MAX_REVERSE_PROBE_QUERIES`
 (40) reverse `in:comments` searches + `MAX_REVERSE_VERIFY_READS` (40) cached verify
-reads — ≈ 221 serial subprocesses worst case. Two of those legs are the bug-B
+reads — **≈ 522** serial subprocesses worst case for the first pass, and **≈ 786**
+if the bounded second look also runs (below). Every call is serial — there is no
+`Promise.all` anywhere in this leg — so at a pessimistic ~1 s/call that worst case
+is ~13 minutes. Two of those legs are the bug-B
 mirror of the handled-id one. `probeIds` is the union of a cap-2 finalist set's
 family members, and a family can hold up to `MAX_FAMILY_MEMBERS` (40) ids, so
 without the search budget a run could fan out to ~80 secondary-rate-limited SEARCH
@@ -957,13 +965,33 @@ so without the verify-read budget the admit leg fans out to
 `MAX_REVERSE_PROBE_QUERIES` × `REVERSE_SEARCH_LIMIT` (4000) `gh issue view`
 subprocesses — `MAX_REVERSE_VERIFY_READS` bounds the distinct cache-miss reads
 across the whole fixpoint so the "cached verify reads" term is a real cap, not an
-average. `LIST_LIMIT` (200) is a
-**safety ceiling, not the throttle**; the throttle is the exclusion set plus
-`MAX_CANDIDATE_EVALUATIONS`. The select job's `timeout-minutes` is **10** (raised
-from 5) so that ceiling keeps headroom for checkout, setup, and API-latency spikes
-rather than being sized to hope. The read budget truncates the window's **newest**
-tail (it is oldest-first), and any approach toward the eval cap is surfaced on the
-tracker as `Window: N stubs, evaluated M` in the run record. Each reverse
+average.
+
+`LIST_LIMIT` (200) is the **hard upper bound on the window**, not a decoration:
+`--limit` caps what the API RETURNS, and that happens BEFORE
+`MAX_CANDIDATE_EVALUATIONS` slices the rows. Raising the evaluation cap above the
+list limit is therefore a strict **no-op** — the run reads exactly `LIST_LIMIT`
+rows either way and nothing says so. **The two must move together.** A suite test
+pins `MAX_CANDIDATE_EVALUATIONS <= LIST_LIMIT` and `windowCeilingWarning` re-checks
+the pair at run time (it warns, it does not throw — a static config mistake must
+not break the always-emits-an-array contract). They are equal today, at 200, which
+is why the `Window: N stubs, evaluated M` line no longer fires: the exclusion set
+is what keeps the eligible window small, and the second look below is what covers
+the case where 200 rows are not enough.
+
+The select job's `timeout-minutes` is **25** (raised from 10 with the window), so
+the ~786-call worst case fits at ~52% of the budget with room for checkout, setup,
+and API-latency spikes rather than being sized to hope. The timeout, not any rate
+limit, is the binding constraint: `gh issue list --search` routes to GraphQL and
+the raise adds only `issue view` + `gh api …/pulls` volume, and CI minutes are free
+on this public repo's `ubuntu-latest`. What the run's real budget consumption looks
+like is now measured rather than assumed — the job echoes `gh api rate_limit`
+immediately before and after the select step (`rate-budget before …` /
+`rate-budget after …`, one greppable line each), and the selector counts its own
+`gh` invocations and reports them as `gh reads: N` on the tracker.
+
+The read budget truncates the window's **newest** tail (it is oldest-first). Each
+reverse
 `in:comments` search itself reads a bounded page — `REVERSE_SEARCH_LIMIT` (100),
 5x headroom over the queue scale — rather than paginating to exhaustion (PR #1810
 follow-up); a search that comes back a full page deep flags the same reverse
@@ -976,6 +1004,56 @@ re-attempted, never wrongly closed), and each truncation is surfaced too —
 page can each raise it), or `Reverse family verification did not converge …` — so
 a bounded re-attempt is never the silent, healthy-looking one the Window line
 exists to eliminate.
+
+**Bounded second look** (the starvation fix). Family deferral writes nothing, so
+a window whose every stub is a deferred family member returns byte-identical next
+run — and a selectable stub sitting one row past the list ceiling is never
+evaluated, at any point, ever. When the first pass yields **zero** selectable
+entries **and** the list came back **full** (`rawCount >= LIST_LIMIT`, so more may
+exist), the selector takes ONE bounded pass over the rows beyond that ceiling: a
+single `gh issue list --limit LIST_LIMIT + SECOND_LOOK_LIST_ROWS` with the first
+`LIST_LIMIT` **raw** rows dropped client-side (raw, because `--limit` is applied
+server-side before the project filter, so a filtered-row skip would not line up).
+It evaluates at most `MAX_SECOND_LOOK_EVALUATIONS` (100) of them and resolves
+families over them on its OWN halved budgets (20 handled-id / 20 reverse probe /
+20 verify read) — the first pass has already spent the per-run ones.
+
+It costs a healthy run **nothing**: anything selected in the first pass and the
+second look never fires. Both facts reach the tracker — `Second look: N further
+stubs past the window, evaluated M`, with `(capped by
+MAX_SECOND_LOOK_EVALUATIONS)` when it truncated — so the extra spend is never
+silent and neither is a truncation of its own. The arithmetic that sizes it: 522
+(first pass) + 4 list pages + 2×100 reads + 60 family budget = **786** serial
+calls, ~13 min at 1.0 s/call, ~52% of the 25-minute job budget.
+
+**Fail closed on rate limiting.** Nearly every read in this leg fails SOFT toward
+MORE candidates — `readStub` and `openAutofixPrExists` in
+`scripts/sentry-autofix-candidate.mjs`, the per-id handled lookups in
+`scripts/sentry-autofix-queue-io.mjs`, the reverse probes in
+`scripts/sentry-autofix-reverse-verify.mjs`. That is the right trade for a
+transient blip (one self-terminating extra attempt), but the blockers those reads
+look for ARE the dedupe signals, so a throttled read is indistinguishable from
+"no blocker found" — and a rate-limited run can open **duplicate** autofix PRs
+and still look green. A 200-wide window raises that probability.
+
+So the run's `gh` driver is wrapped once, and a rate-limit-shaped rejection marks
+the whole run DEGRADED. The shapes are what `gh` actually prints, folded into its
+rejection message: `HTTP 403: API rate limit exceeded …`, `HTTP 403: You have
+exceeded a secondary rate limit …`, `HTTP 429 Too Many Requests`, `GraphQL: API
+rate limit exceeded … (rateLimitExceeded)`, and `You have triggered an abuse
+detection mechanism`. A bare `HTTP 403` permissions failure matches too, on
+purpose: both mean the read did not answer the dedupe question, and both warrant
+the same action.
+
+A degraded run emits **zero** matrix entries and says so loudly — the select job's
+disposition becomes `degraded-rate-limited` and the run record carries a
+`**DEGRADED (rate limited):** N gh read(s) …` line. It does **not** throw: the
+select step must ALWAYS emit a valid JSON array and never fail the step (it runs
+under `set -euo pipefail` and the matrix consumes its stdout), so fail-closed here
+means `[]` plus a loud report. The degraded disposition also suppresses the
+architectural label backfill, since that write would be driven by skips computed
+off reads that may never have answered. Non-rate-limit transients keep their
+existing per-read fail-soft behaviour, unchanged.
 
 The selector reads only PRs whose head branch is in **this** repo. A branch-name
 match returns fork PRs too — they carry the same head branch — so on a public
