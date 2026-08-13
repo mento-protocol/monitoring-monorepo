@@ -50,10 +50,8 @@ import { fileURLToPath } from "node:url";
 export * from "./sentry-triage-project-core.mjs";
 
 import {
-  DEFAULT_REPO,
   extractPermalink,
   FIX_SCOPE_ARCHITECTURAL,
-  isPriorVerdictToken,
   isValidShortId,
   MAX_DUPLICATE_LOOKUPS,
   parseShortId,
@@ -64,7 +62,6 @@ import {
   PROJECTED_LABEL,
   resolveVerdict,
   selectVerdictComment,
-  VALID_VERDICTS,
   validateAffectedRepo,
   verdictCommentIdFromUrl,
 } from "./sentry-triage-project-core.mjs";
@@ -93,9 +90,27 @@ import {
 } from "./sentry-triage-projection.mjs";
 import {
   FIX_SCOPE_ARCHITECTURAL_LABEL,
-  LABEL_DEFINITIONS,
   VERDICT_LABELS,
 } from "./sentry-triage-ingest.mjs";
+// The argv surface and the label self-heal are siblings, split out of this file
+// (#1827) to bring it back under the 1,000-line hard cap. Both are re-exported
+// so the import surface tests and consumers use through this entry module is
+// unchanged, and so the leg keeps ONE implementation of each.
+export {
+  ensureQueueLabels,
+  parseEnsureLabelNames,
+  runEnsureLabels,
+} from "./sentry-triage-label-ensure.mjs";
+import {
+  ensureQueueLabels,
+  runEnsureLabels,
+} from "./sentry-triage-label-ensure.mjs";
+export {
+  parseArgs,
+  parseIssueNumbers,
+  usage,
+} from "./sentry-triage-project-cli.mjs";
+import { parseArgs, usage } from "./sentry-triage-project-cli.mjs";
 // Clear any stale needs-human brief before this job CLOSES a projected stub: a
 // stub re-triaged needs-human -> code-fix/config-fix whose brief-clear failed in
 // the matrix would otherwise be projected and closed here still showing the
@@ -800,29 +815,7 @@ export async function runProjectionBatch(options, deps = {}) {
   // both the stub labeling and the compensation removals on first activation.
   // Best-effort: if the ensure itself fails, per-row settling fails loudly
   // with compensation as before.
-  const projectedDef = LABEL_DEFINITIONS.find(
-    (def) => def.name === PROJECTED_LABEL,
-  );
-  if (projectedDef) {
-    try {
-      await localRun([
-        "label",
-        "create",
-        projectedDef.name,
-        "--repo",
-        options.localRepo,
-        "--color",
-        projectedDef.color,
-        "--description",
-        projectedDef.description,
-        "--force",
-      ]);
-    } catch (error) {
-      process.stderr.write(
-        `warning: could not ensure label ${PROJECTED_LABEL}: ${error.message}\n`,
-      );
-    }
-  }
+  await ensureQueueLabels(localRun, options.localRepo, [PROJECTED_LABEL]);
 
   for (const number of options.queueIssues) {
     let verdict = null;
@@ -918,183 +911,9 @@ export async function runProjectionBatch(options, deps = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// CLI
+// CLI. The argv surface lives in ./sentry-triage-project-cli.mjs; this file
+// keeps the dispatch, which is the only part that needs the mode drivers above.
 // ---------------------------------------------------------------------------
-
-function usage() {
-  return `Usage: pnpm sentry:project --issue <queue-issue-number> [options]
-
-Deterministically projects an actionable (code-fix/config-fix) triage verdict
-for an EXTERNAL owning repo into a human-readable issue in that repo, labels the
-queue stub ${PROJECTED_LABEL}, and comments the projected issue URL. Prints a
-single-line JSON result ({"status": "...", "url": "..."}) to stdout; diagnostics
-and workflow annotations go to stderr.
-
-Statuses: projected | reused | skipped-verdict | skipped-repo | skipped-no-token
-(batch rows additionally: skipped-state | failed)
-
-Options:
-  --issue <number>     Queue issue number to project (positive int; required
-                       unless --batch).
-  --batch              Serialized batch mode (the workflow's project job):
-                       process --issues one at a time in ONE process, sharing
-                       an in-run registry so duplicate-family SHORT-IDs can
-                       never double-file while GitHub search still lags issue
-                       creation. Emits a JSON array of per-issue result rows.
-  --issues <json>      JSON array of queue-issue numbers (batch mode).
-  --repo <owner/name>  Repo the queue stub lives in (default: ${DEFAULT_REPO}).
-  --parse-only         Resolve and print the validated verdict + mapped label +
-                       projectability + shed list + architecturalHold
-                       ({"verdict","label","projectable","shed","architecturalHold"}
-                       JSON) without projecting. \`label\` is a comma list on a
-                       local code-fix + fix_scope:architectural verdict (adds
-                       sentry:fix-scope-architectural), and architecturalHold then
-                       tells the close step to leave the stub open. Used by the
-                       workflow's label step so labeling and projection share ONE
-                       parser. Fails (exit 1) on a missing, stale pre-regression,
-                       or invalid verdict comment.
-  --prior-verdicts     Print {"<issue>": "<comment-id>|${PRIOR_VERDICT_NONE}|${PRIOR_VERDICT_UNKNOWN}"} for
-                       --issues: the verdict comment already on each stub. Run
-                       by the SELECT job, before the triage agent, to record
-                       what the round started from (issue #1717).
-  --prior-verdict-comment <token>
-                       With --parse-only: the id --prior-verdicts recorded for
-                       this stub (or ${PRIOR_VERDICT_NONE} / ${PRIOR_VERDICT_UNKNOWN}). The resolution
-                       then refuses (exit 1) unless the verdict comment it
-                       selects is strictly newer, so a triage round that posted
-                       nothing cannot settle the stub on the previous round's
-                       verdict.
-  --verdict <value>    Already-validated verdict from the label step. When set,
-                       the script fails loud if its own parse of the newest
-                       verdict comment disagrees (never a silent skip).
-  -h, --help           Show this help.
-
-Env:
-  SENTRY_PROJECTION_TOKEN  Fine-grained PAT (Issues R/W on the three owning
-                           repos) for the cross-repo create/search. Absent ->
-                           graceful no-op (status skipped-no-token).
-  GH_TOKEN                 Ambient github.token for local queue-stub mutations.
-`;
-}
-
-/** Parse a `--issues` JSON array of positive integers (the select job's
- * output). Fails loud on anything else. */
-export function parseIssueNumbers(raw) {
-  if (raw == null || String(raw).trim() === "") return [];
-  let parsed;
-  try {
-    parsed = JSON.parse(String(raw));
-  } catch {
-    throw new Error(
-      `--issues must be a JSON array of issue numbers, got: ${raw}`,
-    );
-  }
-  if (!Array.isArray(parsed)) {
-    throw new Error("--issues must be a JSON array of issue numbers");
-  }
-  return parsed.map((value) => {
-    if (!Number.isInteger(value) || value <= 0) {
-      throw new Error(`Invalid issue number: ${JSON.stringify(value)}`);
-    }
-    return value;
-  });
-}
-
-export function parseArgs(argv, env = process.env) {
-  const options = {
-    localRepo: DEFAULT_REPO,
-    queueIssue: null,
-    queueIssues: [],
-    batch: false,
-    parseOnly: false,
-    priorVerdicts: false,
-    priorVerdictCommentId: null,
-    expectedVerdict: null,
-    help: false,
-  };
-  let issuesRaw = null;
-  const args = [...argv];
-  for (let i = 0; i < args.length; i += 1) {
-    const arg = args[i];
-    const readValue = () => {
-      const value = args[++i];
-      if (value == null) throw new Error(`${arg} requires a value`);
-      return value;
-    };
-    switch (arg) {
-      case "--issue":
-        options.queueIssue = Number(readValue());
-        break;
-      case "--issues":
-        issuesRaw = readValue();
-        break;
-      case "--batch":
-        options.batch = true;
-        break;
-      case "--repo":
-        options.localRepo = readValue();
-        break;
-      case "--parse-only":
-        options.parseOnly = true;
-        break;
-      case "--prior-verdicts":
-        options.priorVerdicts = true;
-        break;
-      case "--prior-verdict-comment": {
-        // A bare comment id, `none`, or `unknown` — the closed set
-        // `--prior-verdicts` emits. Anything else is a wiring bug between the
-        // two jobs, and a wiring bug that silently degraded to "unbound" would
-        // remove the fence without saying so, so it fails loud here.
-        const value = readValue();
-        if (!isPriorVerdictToken(value)) {
-          throw new Error(
-            `--prior-verdict-comment must be a numeric comment id, ${PRIOR_VERDICT_NONE}, or ${PRIOR_VERDICT_UNKNOWN}, got: ${value}`,
-          );
-        }
-        options.priorVerdictCommentId = value;
-        break;
-      }
-      case "--verdict": {
-        // Comes from the label step's closed-enum output; anything else is a
-        // wiring bug — fail loud rather than carrying an invalid expectation.
-        const value = readValue();
-        if (!VALID_VERDICTS.includes(value)) {
-          throw new Error(
-            `--verdict must be one of ${VALID_VERDICTS.join(", ")}, got: ${value}`,
-          );
-        }
-        options.expectedVerdict = value;
-        break;
-      }
-      case "-h":
-      case "--help":
-        options.help = true;
-        break;
-      default:
-        throw new Error(`Unknown option: ${arg}\n\n${usage()}`);
-    }
-  }
-  if (!options.help) {
-    // Only --parse-only consumes the token. Accepting it on a projection run
-    // would silently drop the fence, which is the one failure mode the flag
-    // exists to prevent — so an unconsumed token is a wiring bug, not a no-op.
-    if (options.priorVerdictCommentId !== null && !options.parseOnly) {
-      throw new Error(
-        "--prior-verdict-comment is only consumed by --parse-only; pass both or neither",
-      );
-    }
-    if (options.batch || options.priorVerdicts) {
-      options.queueIssues = parseIssueNumbers(issuesRaw);
-    } else if (
-      !Number.isInteger(options.queueIssue) ||
-      options.queueIssue <= 0
-    ) {
-      throw new Error("--issue must be a positive integer");
-    }
-  }
-  options.projectionToken = (env.SENTRY_PROJECTION_TOKEN ?? "").trim();
-  return options;
-}
 
 async function main() {
   const options = parseArgs(process.argv.slice(2));
@@ -1103,7 +922,11 @@ async function main() {
     return;
   }
   let result;
-  if (options.batch) {
+  if (options.ensureLabels) {
+    // The self-heal module owns no runner, so the leg's `gh` wrapper is handed
+    // in here rather than defaulted there.
+    result = await runEnsureLabels(options, { runGh: defaultRunGh });
+  } else if (options.batch) {
     result = await runProjectionBatch(options);
   } else if (options.priorVerdicts) {
     result = await runPriorVerdicts(options);
