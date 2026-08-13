@@ -81,7 +81,7 @@ locals {
   # apply and runtime proof, a separate stabilization change restores false and
   # the ignore so routine platform applies do not mint duplicate revisions.
   # Pause unrelated platform applies while this marker is true.
-  metrics_bridge_template_rollout_active = true
+  metrics_bridge_template_rollout_active = false
 }
 
 resource "google_cloud_run_v2_service" "metrics_bridge" {
@@ -188,6 +188,7 @@ resource "google_cloud_run_v2_service" "metrics_bridge" {
     # managed in both phases.
     ignore_changes = [
       template[0].containers[0].image,
+      template[0].revision,
       client,
       client_version,
       scaling[0].manual_instance_count,
