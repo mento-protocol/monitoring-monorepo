@@ -1268,6 +1268,22 @@ drain_condemned_run_commands() {
   gate_drain_seen=""
   captured_file=""
   [[ -z "$gate_lock_root_dir" ]] || captured_file="${gate_lock_root_dir}/captured.${token}"
+  if [[ -n "$captured_file" ]]; then
+    # A symlink here is not ours — this gate only ever creates these as
+    # regular files, and appending through a planted link would write
+    # whatever it points at with this user's permissions.
+    if [[ -L "$captured_file" ]]; then
+      gate_lock_obligation_unreadable "$captured_file"
+    fi
+    if [[ ! -e "$captured_file" ]]; then
+      # Created exclusively before the first append, so every later >> lands
+      # in a regular file this run made; noclobber refuses a path planted
+      # between the check above and here, symlinks included.
+      if ! (set -C && : > "$captured_file") 2>/dev/null; then
+        gate_lock_obligation_unreadable "$captured_file"
+      fi
+    fi
+  fi
   # Every process found from here on is appended as it is discovered.
   gate_drain_capture_file="$captured_file"
   gate_drain_capture_unpersisted=0
