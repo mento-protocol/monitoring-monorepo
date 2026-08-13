@@ -718,29 +718,58 @@ gate_lock_obligation_unreadable() {
 # crashes safe: a third run inherits both the run it reclaimed and whatever
 # that run had not finished clearing.
 #
-# Nothing is taken away first and nothing is deleted unread. Each file is
-# removed only after its own token is confirmed discharged, and nobody ever
-# writes to a file already published, so removing one cannot race a writer. A
-# drainer killed part way leaves the rest of the directory exactly as it was.
+# Nothing is deleted unread. Each file is claimed by rename before it is read,
+# so the name it was published under is free again immediately and the copy
+# being drained is one nobody else can replace: a second condemnation of the
+# same run publishes a fresh file rather than swapping the one in hand. The
+# claimed copy is removed only once its own processes are confirmed gone, and a
+# drainer killed part way leaves it in the directory for the next run, which
+# reads the token from the file's contents rather than its name.
+#
+# The scan repeats until a pass finds nothing, because obligations are still
+# being published while this one drains — a waiter condemning a remnant of some
+# third run does not wait for the lock. What it cannot close is the gap between
+# the last empty pass and the first mapped command: publishing and holding the
+# lock are not ordered against each other, and no arrangement of files in this
+# shell makes them so.
 drain_condemned_runs() {
-  local dir entry entry_token_value
+  local dir entry claimed entry_token_value drained_any
   dir="$(gate_lock_condemned_dir)" || return 0
   [[ -d "$dir" ]] || return 0
   [[ -r "$dir" && -x "$dir" ]] || gate_lock_obligation_unreadable "$dir"
-  for entry in "$dir"/*; do
-    # The glob skips staging files, whose names begin with a dot. That is what
-    # they are named for: a run that died mid-write leaves one behind, and the
-    # record it was derived from is still there, so the obligation reaches us
-    # through the recovery pass rather than as a half-written token here.
-    [[ -e "$entry" ]] || continue
-    [[ -r "$entry" ]] || gate_lock_obligation_unreadable "$entry"
-    entry_token_value="$(head -n1 "$entry" 2>/dev/null || true)"
-    [[ -n "$entry_token_value" ]] || entry_token_value="${entry##*/}"
-    drain_condemned_run_commands "$entry_token_value"
-    # Removed only here, with every process confirmed gone. A drain that
-    # cannot confirm exits instead, leaving the rest for whoever comes next.
-    gate_lock_test_delay "${AGENT_QUALITY_GATE_LOCK_DRAIN_UNLINK_DELAY_SECONDS:-}"
-    rm -f "$entry"
+  while :; do
+    drained_any=0
+    for entry in "$dir"/*; do
+      # The glob skips staging files, whose names begin with a dot. That is
+      # what they are named for: a run that died mid-write leaves one behind,
+      # and the record it was derived from is still there, so the obligation
+      # reaches us through the recovery pass rather than as a half-written
+      # token here.
+      [[ -e "$entry" ]] || continue
+      [[ -r "$entry" ]] || gate_lock_obligation_unreadable "$entry"
+      claimed="${entry}.draining.$$"
+      if ! mv "$entry" "$claimed" 2>/dev/null; then
+        # Gone between the glob and here is fine — nothing else deletes these,
+        # so it was replaced, and the replacement is picked up by the next
+        # pass. Still there and unclaimable is not fine: an obligation this run
+        # cannot take is one it cannot promise to discharge.
+        [[ -e "$entry" ]] || continue
+        gate_lock_obligation_unreadable "$entry"
+      fi
+      entry_token_value="$(head -n1 "$claimed" 2>/dev/null || true)"
+      if [[ -z "$entry_token_value" ]]; then
+        entry_token_value="${claimed##*/}"
+        entry_token_value="${entry_token_value%.draining."$$"}"
+      fi
+      drain_condemned_run_commands "$entry_token_value"
+      # Removed only here, with every process confirmed gone, and by a name
+      # only this drainer can have created. A drain that cannot confirm exits
+      # instead, leaving the rest for whoever comes next.
+      gate_lock_test_delay "${AGENT_QUALITY_GATE_LOCK_DRAIN_UNLINK_DELAY_SECONDS:-}"
+      rm -f "$claimed"
+      drained_any=1
+    done
+    [[ "$drained_any" -eq 1 ]] || break
   done
 }
 

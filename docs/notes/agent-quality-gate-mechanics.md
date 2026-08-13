@@ -376,9 +376,22 @@ of them.
    unread, and that line is the only thing naming those commands. With a file
    each, nobody writes to a published file: it is built under a private
    `.staging.<pid>` name and moved into place whole, so a reader sees the
-   complete token or no file, and the drainer removes only what it has read to
-   the end. An obligation published during a drain is a new file — picked up by
-   that drain or inherited by the next.
+   complete token or no file. The drainer then claims each file by renaming it
+   to `<token>.draining.<pid>` before reading it, which frees the published
+   name at once and means the copy in hand is one nothing can replace —
+   otherwise a second condemnation of the same run could swap the entry between
+   the read and the unlink, and the unlink would delete an obligation nobody
+   had drained. A drainer killed while holding a claimed file leaves it in the
+   directory; the next run reads the token from the file's contents rather than
+   its name, so the suffix costs nothing.
+
+   The scan repeats until a pass finds nothing, because obligations are still
+   being published while the drain runs: a waiter condemning some third run's
+   remnant does not wait for the lock. What that does not close is the gap
+   between the last empty pass and the first mapped command. Publishing an
+   obligation and holding the lock are not ordered against each other, and no
+   arrangement of files at this shell's floor makes them so — recorded here
+   because it is the residual, not because it is closed.
 
    The same applies to the captured tree, one level down. A drain's first pass
    kills the tag carrier, so from that moment the only record of what it was
