@@ -97,15 +97,33 @@ tldr: **ruleset-required** workflows (`ci`, `Code Quality`, the Vercel checks) M
 - If a setup/cache script uses marker files or input hashes to skip work, the skip condition MUST verify the actual output that downstream commands need, not just the marker. Examples: dependency skips should verify a representative package resolves, Playwright skips should verify the browser executable exists, and codegen skips should verify the generated facade file exists.
 - Write marker files only after every validation step represented by that marker has passed. A failed post-install validation must not leave a fresh marker that makes the next run skip the install or rebuild path.
 
+### Provisioner before consumer
+
+- A change that references a value **another job creates** — a label, a queue, a bucket, a schema column, a secret name — MUST survive the window between merge and that provisioner's next scheduled run. Review the deploy ordering, not only the code.
+- Prefer making the consumer **self-heal**: create-if-missing from the single source of truth immediately before the write that needs it, the way the autofix, projection and archive paths already do. An asymmetry — three paths self-heal and one doesn't — is the tell.
+- Removals need self-healing as much as additions. The paths that already self-healed only ever _added_, which is why nobody had considered the remove leg.
+- A command that both adds and removes is not atomic against the API: a partial apply leaves a state neither branch expects. Guard it and route the failure to the compensation path, and define that compensation _above_ the call — `set -e` aborts before a function declared later exists.
+- Why this exists: on 2026-08-13, PR #1812 added `sentry:fix-scope-architectural` to the verdict step's shed list, but only the ingest job creates labels and it had last run before the merge. The next triage run's `gh issue edit` applied its `--add-label`, failed the `--remove-label` on the unknown name, and exited non-zero — leaving the stub carrying both labels and breaking settlement for **every** non-architectural verdict until ingest next ran. It surfaced as a single failed issue only because one stub was in that batch. Fixed in #1827.
+
 ### File-size budget
 
 - Source files MUST stay under **600 lines** (soft cap, advisory). If your change would push a file over 600 lines, split it in the same PR — extract sub-components, helpers, or per-domain modules. Don't append "just one more thing" to a file that's already drifting up.
+- Split with real headroom, not to the line. A split landing at 598/600 is one commit from re-crossing: on PR #1829 the selector was split to 598 and the next commit in the same PR pushed it back over, costing an extra review round. Aim to land roughly 100 lines clear.
+- **Net drift versus the merge base decides defend-vs-split.** The cap is a drift guard, not an absolute. A file your change _reduces_ does not need re-splitting even if it is still over the cap (`sentry-triage-digest.mjs` 933 → 699 and `sentry-autofix-finalize.mjs` 930 → 889 both stood on that reasoning). A file your change pushes _up_ past a cap must be split in the same PR (`sentry-triage-project.mjs` 1,127 → 1,226 and `sentry-autofix-select.mjs` 442 → 828 both were). Don't preemptively split a file your change didn't move.
 - Hard cap is **1,000 lines**, enforced by `max-lines` in each package's `eslint.config.mjs` (incl. `indexer-envio` since 2026-05-04). CI blocks merges past this. Per-file escape via `// eslint-disable-next-line max-lines` with a comment explaining why the file genuinely needs to stay big.
 - Watchlist/reporting scope MUST be derived from the actual package `eslint.config.*` `max-lines` coverage, not blanket test/spec heuristics. Aegis relaxes complexity rules for `src/**/*.spec.ts` but still enforces `max-lines`, so Aegis specs stay in the watchlist.
 - Exemptions (rule disabled): `**/__tests__/**`, `**/*.test.{ts,tsx}`, `**/src/lib/types.ts` (pure type definitions), `indexer-envio/test/Test.ts` (envio-generated harness).
 - **Unused-imports gate**: `eslint-plugin-unused-imports` is wired into every package's config with `unused-imports/no-unused-imports: "error"`. Refactor PRs that move blocks between modules can't leave dead imports behind — `--fix` removes them mechanically.
 - Files near the line budget are tracked in `docs/notes/file-size-watch.md`; refresh with `node scripts/file-size-watchlist.mjs` before starting a split so growth doesn't slip past unnoticed. `.github/workflows/file-size-watchlist.yml` owns the monthly issue-only check against current `main`; keep external copies disabled, use `--format issue` for GitHub Issues, and never route reports to `BACKLOG.md`.
 - Why this exists: PR #263 split `ui-dashboard/src/app/pool/[poolId]/page.tsx` from 2,831 → 470 lines after a year of unchecked growth. The refactor was a 4-day project; appending one more tab inline was a 30-minute task. Each individual decision was rational; the cumulative drift was not.
+
+### New source modules — routing and coverage
+
+- After adding a module, verify its quality-gate routing by dry-running **that module's path on its own**. A sibling path in the same commit pulls the suites in anyway and masks a module that matches no case at all: `sentry-autofix-second-look.mjs` and `sentry-autofix-decisions.mjs` shipped matching nothing, so a change touching only one of them ran zero suites.
+- Check whether a constant the new module owns is a term in another suite's assertion, and route to both. `MAX_HANDLED_ID_QUERIES` feeds the finalize suite's timeout pin while living in a module routed only to the selector suite.
+- Add the module to the machine-enforced file-size test covering its area. If review is what catches a cap breach, the machinery didn't — the autofix modules were absent from that list while the triage ones were on it.
+- Sentry legs only: do NOT add a new `scripts/sentry-*.test.mjs` for a split. A new suite file triggers the registration cascade (manifest floor, a `ci.yml` step, gate routing). Put the tests in an existing suite.
+- For a pure split, prove behaviour is unchanged rather than asserting it: drive the CLI across its paths against a stub binary, run the same harness against `git archive` of the pre-split tree, and diff stdout, stderr, exit codes and every generated file.
 
 ### Security / CSP
 
