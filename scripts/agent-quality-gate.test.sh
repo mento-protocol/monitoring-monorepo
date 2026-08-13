@@ -4897,7 +4897,6 @@ STUB
       AGENT_QUALITY_GATE_LOCK_HELD='' \
       AGENT_QUALITY_GATE_LOCK_DIR="$gate_lock_root" \
       AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
-      AGENT_QUALITY_GATE_LOCK_ORPHAN_SETTLE_SECONDS=1 \
       "$repo_root/scripts/agent-quality-gate.sh" \
       --base HEAD --run --lock-wait 2 "$@" \
       > "$output_file" 2>&1
@@ -5028,7 +5027,6 @@ STUB
       AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
       AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
       AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
-      AGENT_QUALITY_GATE_LOCK_ORPHAN_SETTLE_SECONDS="${6:-1}" \
       AGENT_QUALITY_GATE_LOCK_RECLAIM_DELAY_SECONDS="$2" \
       AGENT_QUALITY_GATE_LOCK_CLAIM_DELAY_SECONDS="$3" \
       AGENT_QUALITY_GATE_LOCK_TAKEN_DELAY_SECONDS="${5:-0}" \
@@ -5453,11 +5451,13 @@ STUB
 
   # A gate killed mid-command does not take that command with it: mapped
   # commands are backgrounded, so they outlive their shell while the lock they
-  # held becomes reclaimable. The command's own watchdog is the only thing left
-  # that knows the two belong together, so it kills the command when its gate
-  # disappears — and a reclaimer waits that out before starting its own work.
-  # Measured against the clock rather than the shared log, because a killed
-  # command never writes its own exit line.
+  # held becomes reclaimable. The next run must not start until those commands
+  # are confirmed gone — confirmed by looking for them, because the watchdog
+  # that would clean them up can be descheduled by the same pressure that
+  # killed the gate, or suspended with the machine. Run twice: once with the
+  # watchdog able to help, and once with it SIGSTOPped so it cannot. Measured
+  # against the clock, because a killed command never writes its exit line.
+  for race_watchdog_state in running suspended; do
   rm -rf "$gate_race_root/run.lock"
   : > "$gate_race_log"
   RACE_STUB_SECONDS=30 \
@@ -5477,6 +5477,15 @@ STUB
   race_orphan_pid="$(awk '/^enter/ { print $2; exit }' "$gate_race_log")"
   [[ -n "$race_orphan_pid" ]] ||
     fail "the orphan case never saw a mapped command start"
+  # Suspending the watchdog is what "descheduled" means here: nothing is left
+  # that would clean up after the gate, so the next run has to do it itself.
+  race_watchdogs=""
+  if [[ "$race_watchdog_state" == "suspended" ]]; then
+    race_watchdogs="$(pgrep -f "collect_tree" 2>/dev/null | tr '\n' ' ')"
+    [[ -n "$race_watchdogs" ]] ||
+      fail "the suspended-watchdog case found no watchdog to suspend"
+    for race_wd in $race_watchdogs; do kill -STOP "$race_wd" 2>/dev/null || true; done
+  fi
   # Kill the gate SHELL — the PID it recorded — not the wrapper around it.
   race_victim_pid="$(sed -n 's/^pid=//p' "$gate_race_root/run.lock/owner" | head -n1)"
   kill -9 "$race_victim_pid" 2>/dev/null || true
@@ -5489,10 +5498,6 @@ STUB
     date +%s > "$gate_race_repo/orphan_died"
   ) &
   race_orphan_watcher=$!
-  # This is the case that asserts the settle, so it runs with the gate's own
-  # default rather than the shrunken one the other cases use — invoked
-  # directly, because leaving an override empty would read as unset and hand
-  # it the short value.
   RACE_STUB_SECONDS=2 \
     AGENT_QUALITY_GATE_LOCK=1 \
     AGENT_QUALITY_GATE_LOCK_HELD='' \
@@ -5510,8 +5515,14 @@ STUB
   [[ "$race_orphan_died" -ne 0 ]] ||
     fail "a command whose gate was killed must not keep running"
   [[ "$race_next_started" -ge "$race_orphan_died" ]] ||
-    fail "the next run started $((race_orphan_died - race_next_started))s before the orphaned command died"
+    fail "watchdog ${race_watchdog_state}: the next run started $((race_orphan_died - race_next_started))s before the orphaned command died"
+  # Nothing stays suspended on the machine afterwards.
+  for race_wd in $race_watchdogs; do
+    kill -CONT "$race_wd" 2>/dev/null || true
+    kill -KILL "$race_wd" 2>/dev/null || true
+  done
   rm -rf "$gate_race_root/run.lock"
+  done
 
   # Crash-point sweep. Every boundary where this path creates, links, renames
   # or removes something is a place a SIGKILL can land, and each of the rounds

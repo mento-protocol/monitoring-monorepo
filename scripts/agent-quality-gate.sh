@@ -509,16 +509,27 @@ gate_lock_owner_grace_seconds="${AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS:-30
 # the same reason as the grace — the self-test asserts that waiting happens,
 # not that it takes five seconds a round.
 gate_lock_poll_seconds="${AGENT_QUALITY_GATE_LOCK_POLL_SECONDS:-5}"
-# How long to let a dead holder's commands finish dying before taking over. A
-# gate killed mid-command leaves that command running — it is backgrounded, so
-# it outlives its shell — and each command's watchdog notices its gate is gone
-# and kills it. Worst case that is a poll (2s) plus the TERM-to-KILL grace (3s)
-# for anything that ignores TERM, so ten is that window doubled: the path is
-# rare enough that margin costs nothing and a race here costs correctness.
-# Only the dead-record path waits; a lock with no record belongs to a run that
-# never reached a command.
-gate_lock_orphan_settle_seconds="${AGENT_QUALITY_GATE_LOCK_ORPHAN_SETTLE_SECONDS:-10}"
-gate_lock_reclaimed_dead_holder=0
+# Every process this run starts for a mapped command carries this string in its
+# own argv. It is the run's lock token, so it is unique per run and per machine,
+# and it exists exactly as long as the process does — nothing to register, no
+# file to keep in step, and no window where a child exists untracked. A run that
+# holds no lock (--no-lock, or a nested run) still tags, with its PID, so the
+# pattern never matches something it should not.
+gate_run_command_tag() {
+  printf 'agentqg:%s' "${gate_lock_token:-nolock-$$}"
+}
+
+# The token of a dead run this one took the lock from, so its leftovers can be
+# confirmed gone before this run executes anything.
+gate_lock_condemned_token=""
+
+# Upper bound on confirming a dead run's commands are gone — a bound on the
+# check, not the mechanism. The check itself is positive: look for processes
+# carrying that run's tag and wait until there are none. A fixed delay cannot
+# make that promise, because the thing it waits for (each command's watchdog
+# noticing its gate died) can itself be descheduled by the same host pressure
+# that killed the gate, or suspended with the laptop.
+gate_lock_orphan_drain_bound_seconds="${AGENT_QUALITY_GATE_LOCK_ORPHAN_DRAIN_SECONDS:-120}"
 
 # Test-only. The self-test sets these to widen otherwise sub-millisecond
 # windows so the interleavings they permit can be exercised deterministically.
@@ -681,6 +692,54 @@ claim_gate_run_lock() {
 # our own record back here turns that into one loud abort instead of two runs
 # on one machine. Release stays token-guarded, so stopping here cannot delete
 # the lock of whoever holds it now.
+# Confirm a dead run's mapped commands are gone, and make them gone if they are
+# not. Its processes carry its token in their argv, so this asks the machine
+# directly rather than trusting a timer: nothing tagged means nothing to wait
+# for — including the common case where the run died before starting a command,
+# which now costs no wait at all. Anything still tagged is signalled and then
+# waited for, because a signal delivered is not a process reaped.
+drain_condemned_run_commands() {
+  local token="$1"
+  local survivors
+  local waited=0
+  local announced=0
+  local escalated=0
+  local pid
+  [[ -n "$token" ]] || return 0
+
+  while :; do
+    survivors="$(pgrep -f "agentqg:${token}" 2>/dev/null || true)"
+    [[ -n "$survivors" ]] || break
+    if [[ "$announced" -eq 0 ]]; then
+      echo "The run this lock was taken from left commands running; stopping them before starting anything."
+      announced=1
+    fi
+    if [[ "$waited" -ge "$gate_lock_orphan_drain_bound_seconds" ]]; then
+      # Refusing to run is the whole point: proceeding here is exactly the
+      # cross-run overlap the lock exists to prevent.
+      echo "error: commands from the previous run are still alive after ${waited}s: $(printf '%s' "$survivors" | tr '\n' ' ')" >&2
+      echo "Nothing has been executed. Investigate those processes, then re-run." >&2
+      exit 2
+    fi
+    for pid in $survivors; do
+      if [[ "$escalated" -eq 1 ]]; then
+        kill_process_tree "$pid" KILL 2>/dev/null || true
+      else
+        kill_process_tree "$pid" TERM 2>/dev/null || true
+      fi
+    done
+    sleep 1
+    waited=$((waited + 1))
+    # Give TERM a few seconds to be honoured before insisting.
+    [[ "$waited" -lt 4 ]] || escalated=1
+  done
+
+  if [[ "$announced" -eq 1 ]]; then
+    echo "Previous run's commands are gone; continuing."
+    echo
+  fi
+}
+
 assert_gate_run_lock_still_ours() {
   local recorded
   [[ -n "$gate_lock_dir" ]] || return 0
@@ -827,11 +886,12 @@ acquire_gate_run_lock() {
             "$gate_lock_reclaim_tmp" "$owner_pid" "$owner_token" "$owner_start"; then
             echo "Gate run lock at ${lock} is stale (${stale_reason}); reclaiming it." >&2
             # The holder is gone, but a gate killed mid-command leaves that
-            # command running. Remember that, and wait it out later — just
-            # before this run's own commands, not here: sleeping between
-            # judging the record and publishing would hand another waiter the
-            # same verdict and the same six seconds to act on it.
-            gate_lock_reclaimed_dead_holder=1
+            # command running. Remember whose it was — its processes carry that
+            # token — and confirm they are gone just before this run's own
+            # commands, not here: draining between judging the record and
+            # publishing would hand another waiter the same verdict and the
+            # same window to act on it.
+            gate_lock_condemned_token="$owner_token"
             rm -f "$gate_lock_reclaim_tmp"
             gate_lock_reclaim_tmp=""
             gate_lock_reclaim_origin=""
@@ -3755,7 +3815,13 @@ run_with_timeout() {
   # timeout signal is CONTENT (non-empty), written by the watchdog.
   timeout_marker="$(mktemp "$scratch_dir/command-timeout.XXXXXX")"
 
-  bash -c "$command" &
+  # Tagged, and deliberately not exec'd: `bash -c "$command"` replaces itself
+  # with the command for a simple command line, which would take the tag with
+  # it. Keeping the wrapper alive costs one process and buys two things — the
+  # command is a child that can be walked, and the wrapper carries this run's
+  # token in its own argv, so a later run can find this run's survivors by
+  # identity instead of waiting a guessed number of seconds for them.
+  bash -c 'eval "$1"; exit $?' "$(gate_run_command_tag)" "$command" &
   cmd_pid=$!
   # Run the watchdog via `bash -c` (which execs) rather than a `( … ) &`
   # subshell. A forked subshell inherits bash's saved copy of the caller's
@@ -3828,7 +3894,7 @@ EOF_KILL
     # re-walk would miss it. The KILL pass targets the saved list.
     kill_tree "$cmd_pid"
     exit 0
-  ' _ "$cmd_pid" "$command_timeout_seconds" "$timeout_marker" "$$" >/dev/null 2>&1 &
+  ' "$(gate_run_command_tag)" "$cmd_pid" "$command_timeout_seconds" "$timeout_marker" "$$" >/dev/null 2>&1 &
   watchdog_pid=$!
   active_timeout_pids=("$cmd_pid" "$watchdog_pid")
 
@@ -4481,16 +4547,12 @@ prune_command_stamps
 # room enough for another run to have taken it over.
 assert_gate_run_lock_still_ours
 
-# This run took the lock from a holder that died. That holder's mapped command
-# may still be running — commands are backgrounded and outlive their shell —
-# and its watchdog needs a poll plus a TERM-to-KILL grace to notice and clear
-# it. Wait that out here, where it costs only the run that reclaimed and only
-# once, rather than between judging the record and publishing.
-if [[ "$gate_lock_reclaimed_dead_holder" -eq 1 &&
-  "$gate_lock_orphan_settle_seconds" =~ ^[1-9][0-9]*$ ]]; then
-  echo "Waiting ${gate_lock_orphan_settle_seconds}s for any command that outlived the run this lock was taken from."
-  sleep "$gate_lock_orphan_settle_seconds"
-fi
+# This run took the lock from a holder that died. That holder's mapped commands
+# may still be running — commands are backgrounded and outlive their shell — so
+# confirm they are gone before executing anything. Asked of the machine, not of
+# a clock: the watchdogs that would clean them up can be descheduled by the same
+# pressure that killed the gate, or suspended along with the laptop.
+drain_condemned_run_commands "$gate_lock_condemned_token"
 
 run_prerequisite_phase "preflight" "${preflight_commands[@]+"${preflight_commands[@]}"}"
 run_prerequisite_phase "codegen" "${codegen_commands[@]+"${codegen_commands[@]}"}"
