@@ -503,8 +503,10 @@ export const SUPPORTING_MARKETS_TOOLTIP =
   // Alert semantics per alerts/rules/peg-policy-locals.tf: peg STATUS comes
   // only from the primary (deep) market, but every non-display source also
   // generates market-warning rules — so the copy must not claim supporting
-  // venues cannot alert; only display-only venues are inert.
-  "Supporting markets corroborate the primary market but cannot set peg status — that verdict comes only from the primary market's price. Secondary venues can still raise market warnings; display-only venues influence neither status nor alerts. Hover each row's tag for its role (thin depth, feed conversion).";
+  // venues cannot alert. Display-only venues raise no market warnings, yet
+  // they stay in `peg_active_non_deep_sources` and keep an
+  // `active-registry-rot-*` listing rule, so they are not inert either.
+  "Supporting markets corroborate the primary market but cannot set peg status — that verdict comes only from the primary market's price. Secondary venues can still raise market warnings; display-only venues cannot. Hover each row's tag for its role (thin depth, context only).";
 
 export function offScaleRailTooltip(
   distanceBps: number,
@@ -519,11 +521,23 @@ export type SupportingRole = {
   tooltip: string;
 };
 
-function displayOnlyTooltip(source: PegSource): string {
+/**
+ * How a converted venue reaches the peg currency, or "" when it already quotes
+ * the peg. Shared by both role tooltips because conversion is orthogonal to
+ * alert authority: a converted venue explains its feed whichever tag it wears.
+ */
+function conversionPrefix(source: PegSource): string {
   const conversion = source.convertVia;
-  if (conversion === null)
-    return "Shown purely for context — it influences neither peg status nor alerts.";
-  return `Quoted in ${conversion.fromCurrency} and converted to ${conversion.toCurrency} via the ${conversion.toCurrency}/${conversion.fromCurrency} feed. Shown purely for context — it influences neither peg status nor alerts.`;
+  if (conversion === null) return "";
+  return `Quoted in ${conversion.fromCurrency} and converted to ${conversion.toCurrency} via the ${conversion.toCurrency}/${conversion.fromCurrency} feed. `;
+}
+
+function displayOnlyTooltip(source: PegSource): string {
+  // `peg_active_authoritative_sources` excludes display authority, so these
+  // venues raise no market warnings. They stay in `peg_active_non_deep_sources`
+  // and keep an `active-registry-rot-*` listing rule, so this must not claim
+  // that they influence no alerts at all.
+  return `${conversionPrefix(source)}Shown purely for context — it cannot set peg status or raise market warnings.`;
 }
 
 const plainNumber = new Intl.NumberFormat("en-US");
@@ -534,11 +548,10 @@ function depthOnlyTooltip(source: PegSource): string {
     source.capped === true ||
     (source.filledFraction !== null && source.filledFraction < 1);
   if (thin && source.referenceSize !== null && source.filledFraction !== null)
-    return `${venue}'s order book is too thin to absorb the ${plainNumber.format(source.referenceSize)} ${source.baseCurrency} test sale (only ~${formatFraction(source.filledFraction)} fills), so its price reflects missing liquidity rather than the peg. The monitor uses it only as evidence of market depth — it can never set peg status.`;
-  return `${venue} is not the policy-selected venue for this peg, so its price reflects its own book rather than the peg. The monitor uses it only as evidence of market depth — it can never set peg status.`;
+    return `${conversionPrefix(source)}${venue}'s order book is too thin to absorb the ${plainNumber.format(source.referenceSize)} ${source.baseCurrency} test sale (only ~${formatFraction(source.filledFraction)} fills), so its price reflects missing liquidity rather than the peg. The monitor uses it only as evidence of market depth — it can never set peg status.`;
+  return `${conversionPrefix(source)}${venue} is not the policy-selected venue for this peg, so its price reflects its own book rather than the peg. The monitor uses it only as evidence of market depth — it can never set peg status.`;
 }
 
-/** Supporting venues cannot set peg status; the tag says which kind. */
 /**
  * Why a supporting venue's numbers cannot be shown, or null when they can.
  * Mirrors `sourceHasUnavailableEvidence` (the deleted evidence view's rule)
@@ -582,8 +595,18 @@ export function supportingSourceUnusableReason(
   return null;
 }
 
+/**
+ * Supporting venues cannot set peg status; the tag says which kind.
+ *
+ * Classify by alert authority alone. `convertVia` says how a venue reaches the
+ * peg currency, not whether it can alert: the rules plane builds
+ * `peg_active_authoritative_sources` from `authority != "display"`
+ * (alerts/rules/peg-policy-locals.tf), so a converted secondary venue still
+ * raises market warnings and must not be tagged DISPLAY ONLY. The conversion
+ * rides in the tooltip prefix instead.
+ */
 export function supportingRole(source: PegSource): SupportingRole {
-  return source.authority === "display" || source.convertVia !== null
+  return source.authority === "display"
     ? { tag: "DISPLAY ONLY", tooltip: displayOnlyTooltip(source) }
     : { tag: "DEPTH ONLY", tooltip: depthOnlyTooltip(source) };
 }

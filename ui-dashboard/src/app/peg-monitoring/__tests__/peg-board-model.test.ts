@@ -322,8 +322,32 @@ describe("supporting markets", () => {
     const role = supportingRole(pkg.sources[2]!);
     expect(role.tag).toBe("DISPLAY ONLY");
     expect(role.tooltip).toBe(
-      "Quoted in USD and converted to EUR via the EUR/USD feed. Shown purely for context — it influences neither peg status nor alerts.",
+      "Quoted in USD and converted to EUR via the EUR/USD feed. Shown purely for context — it cannot set peg status or raise market warnings.",
     );
+  });
+
+  // alerts/rules/peg-policy-locals.tf builds the authoritative set from
+  // `authority != "display"`, so conversion alone must not demote a secondary
+  // venue to DISPLAY ONLY — it would claim no market warnings while the rules
+  // plane still generates them for that source.
+  it("keeps a converted secondary venue depth only and still names the feed", () => {
+    const convertedSecondary: PegSource = {
+      ...pkg.sources[1]!,
+      convertVia: pkg.sources[2]!.convertVia,
+    };
+    const role = supportingRole(convertedSecondary);
+    expect(role.tag).toBe("DEPTH ONLY");
+    expect(role.tooltip).toContain(
+      "Quoted in USD and converted to EUR via the EUR/USD feed.",
+    );
+    expect(role.tooltip).toContain("can never set peg status");
+    expect(role.tooltip).not.toContain("raise market warnings");
+  });
+
+  it("does not claim display-only venues influence no alerts at all", () => {
+    // They keep an `active-registry-rot-*` listing rule in the rules plane.
+    const role = supportingRole(pkg.sources[2]!);
+    expect(role.tooltip).not.toContain("nor alerts");
   });
 
   it("explains a thin book with its own fill fraction", () => {
