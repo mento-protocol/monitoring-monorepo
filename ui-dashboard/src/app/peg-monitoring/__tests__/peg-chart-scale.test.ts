@@ -5,7 +5,7 @@ import {
   nearestPointIndex,
   pegChartBands,
   pegChartScale,
-  pointX,
+  pointXAt,
 } from "../_lib/peg-chart-scale";
 
 const policy = makePegMonitoringResponse().packages[0]!.policy;
@@ -68,19 +68,26 @@ describe("pegChartBands", () => {
 });
 
 describe("series geometry", () => {
-  it("spreads points evenly across the plot and pins the last one at the edge", () => {
-    expect(pointX(0, 5)).toBe(0);
-    expect(pointX(4, 5)).toBe(PEG_CHART.plotWidth);
-    expect(pointX(2, 5)).toBe(PEG_CHART.plotWidth / 2);
-    expect(pointX(0, 1)).toBe(PEG_CHART.plotWidth);
+  it("positions readings by timestamp so polling gaps keep their width", () => {
+    // Window 0..1000s: readings at 0, 250, and 1000 — the 750s gap between
+    // the last two occupies three quarters of the plot, not one array step.
+    expect(pointXAt(0, 0, 1_000)).toBe(0);
+    expect(pointXAt(250, 0, 1_000)).toBe(PEG_CHART.plotWidth * 0.25);
+    expect(pointXAt(1_000, 0, 1_000)).toBe(PEG_CHART.plotWidth);
+    // Out-of-window timestamps clamp to the plot edges.
+    expect(pointXAt(-50, 0, 1_000)).toBe(0);
+    expect(pointXAt(2_000, 0, 1_000)).toBe(PEG_CHART.plotWidth);
+    // A degenerate window pins to the right edge rather than dividing by zero.
+    expect(pointXAt(500, 1_000, 1_000)).toBe(PEG_CHART.plotWidth);
   });
 
-  it("snaps a pointer position to the nearest reading", () => {
-    expect(nearestPointIndex(0, 5)).toBe(0);
-    expect(nearestPointIndex(PEG_CHART.plotWidth, 5)).toBe(4);
-    expect(nearestPointIndex(PEG_CHART.plotWidth * 0.51, 5)).toBe(2);
-    expect(nearestPointIndex(-40, 5)).toBe(0);
-    expect(nearestPointIndex(5_000, 5)).toBe(4);
-    expect(nearestPointIndex(123, 1)).toBe(0);
+  it("snaps a pointer position to the nearest reading's actual x", () => {
+    const xs = [0, 190, 200, PEG_CHART.plotWidth];
+    expect(nearestPointIndex(0, xs)).toBe(0);
+    expect(nearestPointIndex(196, xs)).toBe(2);
+    expect(nearestPointIndex(191, xs)).toBe(1);
+    expect(nearestPointIndex(5_000, xs)).toBe(3);
+    expect(nearestPointIndex(-40, xs)).toBe(0);
+    expect(nearestPointIndex(123, [700])).toBe(0);
   });
 });

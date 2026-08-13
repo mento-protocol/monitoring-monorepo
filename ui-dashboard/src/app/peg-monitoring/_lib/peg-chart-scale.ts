@@ -131,17 +131,37 @@ export type PegHistoryPoint = {
   event?: string;
 };
 
-/** Evenly spaced x positions across the plot for a fixed-length series. */
-export function pointX(index: number, count: number): number {
-  if (count <= 1) return PEG_CHART.plotWidth;
-  return (index / (count - 1)) * PEG_CHART.plotWidth;
+/**
+ * X positions come from each reading's timestamp over the visible window, not
+ * from its array index: with missed or irregular polls, index spacing would
+ * render a long gap as one polling interval wide and distort the apparent
+ * duration and slope of a depeg.
+ */
+export function pointXAt(
+  atSeconds: number,
+  windowStartSeconds: number,
+  windowEndSeconds: number,
+): number {
+  if (windowEndSeconds <= windowStartSeconds) return PEG_CHART.plotWidth;
+  const ratio = clamp(
+    (atSeconds - windowStartSeconds) / (windowEndSeconds - windowStartSeconds),
+    0,
+    1,
+  );
+  return ratio * PEG_CHART.plotWidth;
 }
 
 /** Nearest series index for a pointer position expressed in viewBox units. */
-export function nearestPointIndex(x: number, count: number): number {
-  if (count <= 1) return 0;
-  const ratio = clamp(x / PEG_CHART.plotWidth, 0, 1);
-  return Math.round(ratio * (count - 1));
+export function nearestPointIndex(
+  x: number,
+  pointXs: readonly number[],
+): number {
+  let nearest = 0;
+  for (let index = 1; index < pointXs.length; index++) {
+    if (Math.abs(pointXs[index]! - x) < Math.abs(pointXs[nearest]! - x))
+      nearest = index;
+  }
+  return nearest;
 }
 
 export const PEG_CHART_RANGES = ["24h", "7d", "30d"] as const;

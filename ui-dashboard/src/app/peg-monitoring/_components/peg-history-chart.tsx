@@ -9,7 +9,7 @@ import {
   nearestPointIndex,
   pegChartBands,
   pegChartScale,
-  pointX,
+  pointXAt,
   type PegChartRange,
   type PegHistoryPoint,
 } from "../_lib/peg-chart-scale";
@@ -76,45 +76,24 @@ export function PegHistoryChart({
   // hover/reading list.
   const cutoffSeconds = (nowMs - RANGE_MS[range]) / 1_000;
   const points = (series ?? []).filter((point) => point.at >= cutoffSeconds);
+  // Timestamp-derived x positions: a gap between polls occupies its real
+  // share of the window instead of collapsing to one array step.
+  const pointXs = points.map((point) =>
+    pointXAt(point.at, cutoffSeconds, nowMs / 1_000),
+  );
   const scale = pegChartScale(policy);
   const nowY = nowBps === null ? null : scale.y(nowBps);
 
   return (
     <figure className="m-0">
-      <figcaption className="mb-3 flex flex-wrap items-center justify-between gap-3">
-        <span className="min-w-0">
-          <span className="text-[13px] font-[650] text-foreground">
-            Peg History
-          </span>
-          <span className="ml-2 text-[12px] text-muted-foreground">
-            · Primary Market · {measurement}
-          </span>
-        </span>
-        <span className="flex shrink-0 gap-1.5">
-          {PEG_CHART_RANGES.map((option) => (
-            <button
-              key={option}
-              type="button"
-              aria-pressed={option === range}
-              onClick={() => setRange(option)}
-              className={`border px-[9px] py-[2px] text-[10.5px] ${
-                option === range
-                  ? "border-[var(--border-secondary)] font-[650] text-foreground"
-                  : "border-border text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {option}
-            </button>
-          ))}
-        </span>
-      </figcaption>
+      <ChartHeader measurement={measurement} range={range} onRange={setRange} />
       <div
         onPointerMove={(event) => {
           if (points.length === 0) return;
           const box = event.currentTarget.getBoundingClientRect();
           const x =
             ((event.clientX - box.left) / box.width) * PEG_CHART.viewBoxWidth;
-          setHovered(nearestPointIndex(x, points.length));
+          setHovered(nearestPointIndex(x, pointXs));
         }}
         onPointerLeave={() => setHovered(null)}
       >
@@ -125,7 +104,7 @@ export function PegHistoryChart({
           className="block w-full"
         >
           <ChartBands policy={policy} />
-          <ChartSeries points={points} scale={scale} tone={tone} />
+          <ChartSeries points={points} xs={pointXs} scale={scale} tone={tone} />
           <ChartGutter
             policy={policy}
             nowBps={nowBps}
@@ -143,13 +122,14 @@ export function PegHistoryChart({
               History unavailable
             </text>
           ) : (
-            <ChartAxis points={points} />
+            <ChartAxis points={points} xs={pointXs} />
           )}
-          {hovered === null || points[hovered] === undefined ? null : (
+          {hovered === null ||
+          points[hovered] === undefined ||
+          pointXs[hovered] === undefined ? null : (
             <HoverCallout
               point={points[hovered]}
-              index={hovered}
-              count={points.length}
+              x={pointXs[hovered]}
               scale={scale}
             />
           )}
@@ -163,6 +143,46 @@ export function PegHistoryChart({
         </ul>
       )}
     </figure>
+  );
+}
+
+function ChartHeader({
+  measurement,
+  range,
+  onRange,
+}: {
+  measurement: string;
+  range: PegChartRange;
+  onRange: (range: PegChartRange) => void;
+}): React.JSX.Element {
+  return (
+    <figcaption className="mb-3 flex flex-wrap items-center justify-between gap-3">
+      <span className="min-w-0">
+        <span className="text-[13px] font-[650] text-foreground">
+          Peg History
+        </span>
+        <span className="ml-2 text-[12px] text-muted-foreground">
+          · Primary Market · {measurement}
+        </span>
+      </span>
+      <span className="flex shrink-0 gap-1.5">
+        {PEG_CHART_RANGES.map((option) => (
+          <button
+            key={option}
+            type="button"
+            aria-pressed={option === range}
+            onClick={() => onRange(option)}
+            className={`border px-[9px] py-[2px] text-[10.5px] ${
+              option === range
+                ? "border-[var(--border-secondary)] font-[650] text-foreground"
+                : "border-border text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            {option}
+          </button>
+        ))}
+      </span>
+    </figcaption>
   );
 }
 
@@ -230,18 +250,18 @@ function ChartBands({
 
 function ChartSeries({
   points,
+  xs,
   scale,
   tone,
 }: {
   points: readonly PegHistoryPoint[];
+  xs: readonly number[];
   scale: ReturnType<typeof pegChartScale>;
   tone: PegBoardTone;
 }): React.JSX.Element | null {
   if (points.length === 0) return null;
   const path = points
-    .map(
-      (point, index) => `${pointX(index, points.length)},${scale.y(point.bps)}`,
-    )
+    .map((point, index) => `${xs[index]!},${scale.y(point.bps)}`)
     .join(" ");
   return (
     <polyline
@@ -256,15 +276,17 @@ function ChartSeries({
 
 function ChartAxis({
   points,
+  xs,
 }: {
   points: readonly PegHistoryPoint[];
+  xs: readonly number[];
 }): React.JSX.Element {
   const ticks = [0, 0.33, 0.66, 1].map((ratio) => {
     const index = Math.min(
       points.length - 1,
       Math.round(ratio * (points.length - 1)),
     );
-    return { index, x: pointX(index, points.length) };
+    return { index, x: xs[index]! };
   });
   return (
     <g>
@@ -384,18 +406,15 @@ function ChartGutter({
 
 function HoverCallout({
   point,
-  index,
-  count,
+  x,
   scale,
 }: {
   point: PegHistoryPoint;
-  index: number;
-  count: number;
+  x: number;
   scale: ReturnType<typeof pegChartScale>;
 }): React.JSX.Element {
   const label = pointLabel(point);
   const width = Math.min(320, Math.max(180, label.length * 6.1));
-  const x = pointX(index, count);
   const boxX = Math.min(
     PEG_CHART.plotWidth - width,
     Math.max(0, x - width / 2),
