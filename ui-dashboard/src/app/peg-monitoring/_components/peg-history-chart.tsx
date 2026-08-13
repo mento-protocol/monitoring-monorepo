@@ -1,6 +1,11 @@
 "use client";
 
 import { useState } from "react";
+import {
+  usePegHistory,
+  type PegHistoryIdentity,
+  type PegHistoryResult,
+} from "@/hooks/use-peg-history";
 import type { PegAssetPackage } from "@/lib/peg-monitoring";
 import {
   PEG_CHART,
@@ -59,7 +64,37 @@ type ChartProps = {
   measurement: string;
   nowMs: number;
   series?: readonly PegHistoryPoint[] | undefined;
+  historyIdentity?: PegHistoryIdentity | null | undefined;
 };
+
+type HistoryState = "loading" | "ready" | "empty" | "stale" | "unavailable";
+
+function resolvedHistory(
+  series: readonly PegHistoryPoint[] | undefined,
+  history: PegHistoryResult,
+): {
+  points: readonly PegHistoryPoint[];
+  state: HistoryState;
+} {
+  if (series !== undefined)
+    return { points: series, state: series.length === 0 ? "empty" : "ready" };
+  if (history.data !== null) {
+    const points = history.data.points;
+    return {
+      points,
+      state: history.hasError
+        ? "stale"
+        : points.length === 0
+          ? "empty"
+          : "ready",
+    };
+  }
+  if (history.hasError) return { points: [], state: "unavailable" };
+  return {
+    points: [],
+    state: history.isLoading ? "loading" : "unavailable",
+  };
+}
 
 export function PegHistoryChart({
   policy,
@@ -68,14 +103,17 @@ export function PegHistoryChart({
   measurement,
   nowMs,
   series,
+  historyIdentity = null,
 }: ChartProps): React.JSX.Element {
   const [range, setRange] = useState<PegChartRange>(PEG_CHART_DEFAULT_RANGE);
   const [hovered, setHovered] = useState<number | null>(null);
+  const history = usePegHistory(historyIdentity, range);
+  const resolved = resolvedHistory(series, history);
   // The selected range is a promise to the reader: whatever the feed supplies,
   // only readings inside the window may plot, feed the axis, or reach the
   // hover/reading list.
   const cutoffSeconds = (nowMs - RANGE_MS[range]) / 1_000;
-  const points = (series ?? []).filter((point) => point.at >= cutoffSeconds);
+  const points = resolved.points.filter((point) => point.at >= cutoffSeconds);
   // Timestamp-derived x positions: a gap between polls occupies its real
   // share of the window instead of collapsing to one array step.
   const pointXs = points.map((point) =>
@@ -86,7 +124,19 @@ export function PegHistoryChart({
 
   return (
     <figure className="m-0">
-      <ChartHeader measurement={measurement} range={range} onRange={setRange} />
+      <ChartHeader
+        measurement={measurement}
+        range={range}
+        onRange={(next) => {
+          setHovered(null);
+          setRange(next);
+        }}
+      />
+      {resolved.state === "stale" ? (
+        <p role="status" className="-mt-2 mb-2 text-[11px] text-amber-700">
+          History refresh failed · showing last confirmed readings
+        </p>
+      ) : null}
       <div
         onPointerMove={(event) => {
           if (points.length === 0) return;
@@ -100,7 +150,7 @@ export function PegHistoryChart({
         <svg
           viewBox={`0 0 ${PEG_CHART.viewBoxWidth} ${PEG_CHART.viewBoxHeight}`}
           role="img"
-          aria-label={chartLabel(nowBps, range, points.length)}
+          aria-label={chartLabel(nowBps, range, points.length, resolved.state)}
           className="block w-full"
         >
           <ChartBands policy={policy} />
@@ -119,7 +169,7 @@ export function PegHistoryChart({
               fontSize={12}
               fill={PEG_COLOR.muted}
             >
-              History unavailable
+              {emptyHistoryMessage(resolved.state)}
             </text>
           ) : (
             <ChartAxis points={points} xs={pointXs} />
@@ -190,14 +240,30 @@ function chartLabel(
   nowBps: number | null,
   range: PegChartRange,
   count: number,
+  state: HistoryState,
 ): string {
   const current =
     nowBps === null
       ? "the current deviation is unavailable"
       : `now ${deviationPhrase(nowBps)}`;
-  return count === 0
-    ? `Peg history over ${range}. History is unavailable, so only the alert bands and ${current} are drawn.`
-    : `Peg history over ${range}: ${count} readings, ${current}.`;
+  if (count > 0)
+    return state === "stale"
+      ? `Peg history over ${range}: ${count} last confirmed readings; refresh failed, ${current}.`
+      : `Peg history over ${range}: ${count} readings, ${current}.`;
+  if (state === "loading")
+    return `Peg history over ${range}. History is loading, so only the alert bands and ${current} are drawn.`;
+  if (state === "unavailable")
+    return `Peg history over ${range}. History is unavailable, so only the alert bands and ${current} are drawn.`;
+  if (state === "stale")
+    return `Peg history over ${range}. The refresh failed and there are no last confirmed readings in this window, so only the alert bands and ${current} are drawn.`;
+  return `Peg history over ${range}. No readings were returned in this window, so only the alert bands and ${current} are drawn.`;
+}
+
+function emptyHistoryMessage(state: HistoryState): string {
+  if (state === "loading") return "Loading history";
+  if (state === "unavailable") return "History unavailable";
+  if (state === "stale") return "No last confirmed readings in this window";
+  return "No readings in this window";
 }
 
 function ChartBands({
@@ -260,6 +326,16 @@ function ChartSeries({
   tone: PegBoardTone;
 }): React.JSX.Element | null {
   if (points.length === 0) return null;
+  if (points.length === 1)
+    return (
+      <circle
+        data-testid="peg-history-single-point"
+        cx={xs[0]!}
+        cy={scale.y(points[0]!.bps)}
+        r={3.5}
+        fill={PEG_TONE_COLOR[tone]}
+      />
+    );
   const path = points
     .map((point, index) => `${xs[index]!},${scale.y(point.bps)}`)
     .join(" ");
@@ -286,13 +362,13 @@ function ChartAxis({
       points.length - 1,
       Math.round(ratio * (points.length - 1)),
     );
-    return { index, x: xs[index]! };
+    return { index, ratio, x: xs[index]! };
   });
   return (
     <g>
       {ticks.map((tick) => (
         <text
-          key={tick.index}
+          key={tick.ratio}
           x={Math.min(PEG_CHART.plotWidth - 12, Math.max(12, tick.x))}
           y={PEG_CHART.axisY}
           textAnchor="middle"

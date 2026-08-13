@@ -35,6 +35,7 @@ test("renders the status board, expands a row panel, and retains stale evidence"
   const firstResponseGate = new Promise<void>((resolve) => {
     releaseFirstResponse = resolve;
   });
+  const historyRequests: Record<string, number> = {};
   await page.route("**/api/peg-monitoring", async (route) => {
     request += 1;
     if (request === 1) {
@@ -46,6 +47,30 @@ test("renders the status board, expands a row panel, and retains stale evidence"
       status: 503,
       contentType: "application/json",
       body: '{"error":"offline"}',
+    });
+  });
+  await page.route("**/api/peg-monitoring/history?*", async (route) => {
+    expect(route.request().method()).toBe("POST");
+    const url = new URL(route.request().url());
+    const range = url.searchParams.get("range") ?? "7d";
+    historyRequests[range] = (historyRequests[range] ?? 0) + 1;
+    const windowSeconds =
+      range === "24h" ? 86_400 : range === "30d" ? 30 * 86_400 : 7 * 86_400;
+    const stepSeconds = range === "24h" ? 300 : range === "30d" ? 7_200 : 1_800;
+    await route.fulfill({
+      json: {
+        asset: "europ-schuman",
+        source: "bitvavo_eur",
+        policyVersion: payload.producedPolicyVersion,
+        range,
+        from: now - windowSeconds,
+        to: now,
+        stepSeconds,
+        points: [
+          { at: now - Math.min(windowSeconds, 3_600), bps: -4 },
+          { at: now, bps: 1.5 },
+        ],
+      },
     });
   });
   await page.goto("/peg-monitoring");
@@ -114,7 +139,16 @@ test("renders the status board, expands a row panel, and retains stale evidence"
   ).toHaveAttribute("aria-expanded", "true");
   await expect(panel).toContainText("Supporting Markets");
   await expect(panel).toContainText("Peg History");
-  await expect(panel).toContainText("History unavailable");
+  await expect(
+    panel.getByRole("img", { name: /Peg history over 7d: 2 readings/ }),
+  ).toBeVisible();
+  await panel.getByRole("button", { name: "24h" }).click();
+  await expect(
+    panel.getByRole("img", { name: /Peg history over 24h: 2 readings/ }),
+  ).toBeVisible();
+  expect(historyRequests["24h"]).toBe(1);
+  await page.clock.runFor(300_000);
+  await expect.poll(() => historyRequests["24h"]).toBeGreaterThan(1);
   await expect(
     panel.getByTestId("peg-supporting-source-kraken_eur"),
   ).toContainText("DEPTH ONLY");
@@ -160,6 +194,14 @@ test("keeps the board scrollable without pushing the page wider on mobile", asyn
   await page.route("**/api/peg-monitoring", async (route) => {
     await route.fulfill({ json: payload });
   });
+  await page.route("**/api/peg-monitoring/history?*", async (route) => {
+    expect(route.request().method()).toBe("POST");
+    await route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: '{"error":"history offline"}',
+    });
+  });
   await page.goto("/peg-monitoring");
 
   await expect(page.getByTestId("peg-row-europ-schuman")).toBeVisible();
@@ -168,6 +210,9 @@ test("keeps the board scrollable without pushing the page wider on mobile", asyn
     .getByText("EUROP / EUR", { exact: true })
     .click();
   await expect(page.getByTestId("peg-panel-europ-schuman")).toBeVisible();
+  await expect(page.getByTestId("peg-panel-europ-schuman")).toContainText(
+    "History unavailable",
+  );
 
   const horizontalOverflow = await page.evaluate(
     () =>

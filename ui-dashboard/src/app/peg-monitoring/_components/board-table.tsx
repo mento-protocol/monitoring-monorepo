@@ -29,6 +29,7 @@ export function BoardTable({
   stale,
   previousPolicy,
   ageLabel,
+  policyVersion,
 }: {
   presentation: PegMonitoringPresentation;
   nowMs: number;
@@ -36,6 +37,7 @@ export function BoardTable({
   stale: boolean;
   previousPolicy: boolean;
   ageLabel: string;
+  policyVersion: string;
 }): React.JSX.Element {
   const [openRows, setOpenRows] = useState<ReadonlySet<string>>(
     () => new Set<string>(),
@@ -107,6 +109,7 @@ export function BoardTable({
                     previousPolicy={previousPolicy}
                     ageLabel={ageLabel}
                     structuralCurrent={structuralCurrent}
+                    policyVersion={policyVersion}
                   />
                 ) : null}
               </Fragment>

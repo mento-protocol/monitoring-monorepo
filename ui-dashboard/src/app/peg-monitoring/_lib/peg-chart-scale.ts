@@ -1,4 +1,10 @@
 import type { PegAssetPackage } from "@/lib/peg-monitoring";
+import {
+  PEG_HISTORY_RANGE_OPTIONS,
+  type PegHistoryRange,
+} from "@/lib/peg-history";
+
+export type { PegHistoryPoint } from "@/lib/peg-history";
 
 /**
  * Chart geometry, read off the 2a mockup's SVG. The plot occupies x 0–760, the
@@ -122,15 +128,6 @@ const RAIL_FILL: Record<string, string> = {
   red: "oklch(54.7% 0.193 26.4 / 0.4)",
 };
 
-export type PegHistoryPoint = {
-  /** Unix seconds. */
-  at: number;
-  /** Signed deviation from target; negative is below target. */
-  bps: number;
-  /** Alert name when a state transition fired at this reading. */
-  event?: string;
-};
-
 /**
  * X positions come from each reading's timestamp over the visible window, not
  * from its array index: with missed or irregular polls, index spacing would
@@ -164,6 +161,6 @@ export function nearestPointIndex(
   return nearest;
 }
 
-export const PEG_CHART_RANGES = ["24h", "7d", "30d"] as const;
-export type PegChartRange = (typeof PEG_CHART_RANGES)[number];
+export const PEG_CHART_RANGES = PEG_HISTORY_RANGE_OPTIONS;
+export type PegChartRange = PegHistoryRange;
 export const PEG_CHART_DEFAULT_RANGE: PegChartRange = "7d";

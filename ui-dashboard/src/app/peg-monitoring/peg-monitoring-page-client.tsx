@@ -69,6 +69,7 @@ export function PegMonitoringPageClient(): React.JSX.Element {
               stale={state.kind === "stale"}
               previousPolicy={usesPreviousPolicy}
               ageLabel={formatAge(state.ageMs)}
+              policyVersion={state.data.producedPolicyVersion}
             />
             <RecentAlerts nowMs={nowMs} />
           </>
