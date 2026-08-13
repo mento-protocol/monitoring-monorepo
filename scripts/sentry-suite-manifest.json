@@ -66,7 +66,7 @@
     },
     "scripts/sentry-triage-ingest.test.mjs": {
       "reporter": "count-line",
-      "floor": 110
+      "floor": 128
     },
     "scripts/sentry-triage-project.test.mjs": {
       "reporter": "count-line",

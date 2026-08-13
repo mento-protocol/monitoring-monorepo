@@ -1854,7 +1854,10 @@ await test("a genuinely failing reopen strands the stub and fails RED", async ()
   assert(errorLine.includes("STRANDED"), "says the stub is stranded");
   assert(errorLine.includes("state=CLOSED"), "names the observed state");
   assert(
-    errorLine.includes("Reopen it by hand"),
+    // The verifier is shared by three callers now (#1817), so its instruction
+    // is caller-neutral: what to restore, not which refusal produced the stub.
+    errorLine.includes("restore it by hand") &&
+      errorLine.includes("reopen it if it is closed"),
     "tells the operator what to do",
   );
 });

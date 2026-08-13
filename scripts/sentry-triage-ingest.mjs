@@ -19,18 +19,25 @@ import { fileURLToPath } from "node:url";
 
 import { selectMarkedComment } from "./sentry-triage-project-core.mjs";
 import {
+  APPROVED_ARCHIVE_LABEL,
   ARCHIVED_LABEL,
   LABEL_DEFINITIONS,
+  NEEDS_HUMAN_VERDICT_LABEL,
   NEEDS_TRIAGE_LABEL,
   neutralizeUntrusted,
   parseArchiveBaseline,
   reopenBaselineOf,
+  SETTLING_VERDICT_LABELS,
+  STRAND_SHAPE_CLOSED_NEEDS_TRIAGE,
+  STRAND_SHAPE_OPEN_VERDICT,
   truncateTitle,
 } from "./sentry-triage-queue-contract.mjs";
 import {
   buildStrandedRecoveryComment,
   REQUEUE_CAUSE_BOOKKEEPING,
   REQUEUE_CAUSE_SENTRY_EVIDENCE,
+  REQUEUE_ON_FAILURE_ABORT,
+  REQUEUE_ON_FAILURE_VERIFY_END_STATE,
   requeueQueueStub,
 } from "./sentry-triage-requeue.mjs";
 
@@ -51,6 +58,7 @@ export {
   FIX_PR_OPENED_LABEL,
   FIX_REFUSED_LABEL,
   LABEL_DEFINITIONS,
+  NEEDS_HUMAN_VERDICT_LABEL,
   NEEDS_TRIAGE_LABEL,
   neutralizeUntrusted,
   parseArchiveBaseline,
@@ -58,6 +66,9 @@ export {
   reopenBaselineOf,
   REOPEN_SHED_LABELS,
   sanitizeFreeText,
+  SETTLING_VERDICT_LABELS,
+  STRAND_SHAPE_CLOSED_NEEDS_TRIAGE,
+  STRAND_SHAPE_OPEN_VERDICT,
   truncateTitle,
   VERDICT_LABELS,
   withArchiveBaseline,
@@ -388,6 +399,11 @@ export function buildRunRecordBody(counts, timestampIso) {
     // regression when Sentry actually escalated an archived issue.
     `- Reopened (regressed or escalating): ${counts.reopened}`,
     `- Recovered (stranded needs-triage): ${counts.recovered}`,
+    // The two strands are counted apart because they diagnose different things:
+    // the line above is a stub closed while still queued, this one a round that
+    // verdicted a stub and never settled it (issue #1817). A run recovering the
+    // second repeatedly says the triage workflow's compensations are failing.
+    `- Recovered (stranded open verdict): ${counts.recoveredOpenVerdict ?? 0}`,
     `- Errors: ${counts.errors}`,
   ].join("\n");
 }
@@ -664,8 +680,9 @@ async function ensureLabelsExist(options) {
 // PRs, `closed_at` for the regression-reopen timestamp gate, `labels` — read by
 // the archive-baseline branch to recognize a `sentry:archived` stub and by the
 // stranded-stub sweep to spot a closed one still wearing `sentry:needs-triage` —
-// and `body`, which carries that baseline) into the shape decideDedupAction and
-// isStrandedNeedsTriage expect. The REST list returns all five, so neither the
+// `updated_at`, the sweep's idleness clock for the OPEN strand shape, and
+// `body`, which carries that baseline) into the shape decideDedupAction and
+// strandedShapeOf expect. The REST list returns all six, so neither the
 // baseline read nor the sweep costs an extra request. Exported for tests.
 export function normalizeRestIssues(pages) {
   return (pages ?? [])
@@ -676,6 +693,7 @@ export function normalizeRestIssues(pages) {
       title: issue.title ?? "",
       state: String(issue.state ?? "").toUpperCase(),
       closedAt: issue.closed_at ?? null,
+      updatedAt: issue.updated_at ?? null,
       body: issue.body ?? "",
       labels: (issue.labels ?? [])
         .map((label) => (typeof label === "string" ? label : label?.name))
@@ -807,7 +825,135 @@ export function isStrandedNeedsTriage(issue) {
   );
 }
 
-/** Live state of one queue stub, for the sweep's pre-mutation revalidation. */
+/**
+ * The OTHER unselectable shape, and the mirror image of the one above: OPEN,
+ * carrying a settling `sentry:verdict-*`, and NOT carrying `sentry:needs-triage`
+ * (issue #1817).
+ *
+ * The verdict step swaps `sentry:needs-triage` off and the verdict label on
+ * before anything closes the stub, so every failing exit in that window owes the
+ * stub a re-queue. Those exits route through the chokepoint's workflow CLI,
+ * whose revalidating read has a bounded retry — but a PERSISTENT GitHub read
+ * outage still makes every attempt fail, and by design that throws before any
+ * write. The run is red and the stub is left exactly here: open, so Stage B's
+ * `--state open` + `sentry:needs-triage` selector misses it; not needs-triage,
+ * so the project job skips it and `isStrandedNeedsTriage` above is the opposite
+ * pairing. Nothing selected it until this arm existed.
+ *
+ * THE FALSE POSITIVE THIS MUST NOT MAKE. A stub mid-flight between its verdict
+ * label and its close carries exactly this shape for real, and re-queuing it
+ * would fight a live run. Three narrowings keep them apart:
+ *
+ *   - IDLENESS. `updatedAt` must be at least `minIdleMs` old. A stub a workflow
+ *     is acting on was just written to. No timestamp, or one that does not
+ *     parse, means no observation of idleness, so it FAILS CLOSED and is left
+ *     alone rather than swept blind.
+ *   - `needs-human` IS A RESTING STATE, not a strand: the close step leaves that
+ *     bucket open for a human to answer, so it is excluded (via
+ *     SETTLING_VERDICT_LABELS) and a stub wearing it is skipped outright — two
+ *     deliberately overlapping guards, because each covers a case the other only
+ *     covers by accident. The exclusion alone would admit a DOUBLE-verdicted stub
+ *     carrying `needs-human` beside a settling verdict; the skip alone would
+ *     admit a future verdict that also rests open. Removing either one keeps the
+ *     tests green; removing both reds them.
+ *   - TERMINAL AND APPROVED stubs are not this sweep's to touch. `sentry:archived`
+ *     is the archive leg's terminal marker (the same signal `isTerminalStub`
+ *     reads), and `sentry:approved-archive` is a LIVE human approval the archive
+ *     workflow — its own concurrency group — is acting on right now. Both are in
+ *     REOPEN_SHED_LABELS, so re-queuing would spend them.
+ *
+ *     The window between this read and the shed stays OPEN, and deliberately so:
+ *     it is the same window `runWorkflowRequeue`'s terminal guard documents and
+ *     declines to close, because the only thing that would close it is a shared
+ *     concurrency group across ingest and archive — which this pipeline rejected
+ *     on its own terms, since GitHub keeps one pending run per group and would
+ *     silently drop a second human-approved archive queued behind an ingest run
+ *     (see the archive races section of docs/notes/sentry-triage-pipeline.md).
+ *     An approval that lands inside the window is shed, the archive run that the
+ *     label event started then refuses out loud on its own guard, and the human
+ *     re-applies the label. Loud and recoverable, against a race the threshold
+ *     above already makes require a stub untouched for a day.
+ *
+ * ONE PRODUCER IS ADMITTED DELIBERATELY. The archive leg's freshness refusal
+ * ends in this exact shape — approval shed, verdict kept, stub left open — and
+ * `scripts/sentry-triage-archive.mjs` says it wants "a fresh approval rather
+ * than a full re-triage". Recovering it anyway is right, and for the refusal's
+ * OWN reason: it fires because a Sentry event landed during the archive, so the
+ * verdict on that stub now predates a live occurrence and no stage would ever
+ * re-triage it (ingest skips an open match). A re-triage produces a verdict for
+ * the current occurrence, which is what a human should be re-approving. The
+ * pre-event verdict cannot settle that round either — this re-queue posts no
+ * fence, but the round binding (#1717) refuses any verdict comment that is not
+ * strictly newer than the one `select` recorded. What the human loses is one
+ * triage round of delay; touching the stub at all resets the idle clock.
+ *
+ * THE THRESHOLD. A stub's clock starts when ITS verdict label lands, so the
+ * window to clear is only what can still happen to it after that. The declared
+ * part is small: the verdict matrix runs at `max-parallel: 2` over a batch
+ * capped at 10, so at most four further waves of a 10-minute job, plus the
+ * `project` job's 15 minutes — roughly 55 minutes. The undeclared part is runner
+ * queueing between those jobs, which no timeout bounds, and that is the part a
+ * threshold has to answer.
+ *
+ * A DAY answers it, where a small multiple of the declared time would not. A
+ * live run reaching this threshold needs a 15-minute job to sit queued for a
+ * full day — and the triage workflow holds `concurrency: sentry-triage-agent`
+ * with `cancel-in-progress: false`, so a run stuck that long has already blocked
+ * the next scheduled run and become an operational failure someone is looking
+ * at. It is not an unnoticed background state the sweep could quietly race.
+ *
+ * The cost is latency, and only on a stub whose run already went red: ingest
+ * runs twice a day, so a strand from the weekday 07:55 triage run becomes
+ * eligible the next morning and is repaired within about thirty hours, without a
+ * human. Set against "never", that is the right trade — the workflow's own
+ * compensation is still the fast path, in seconds, and this is the backstop for
+ * when it could not run at all.
+ *
+ * Even so the sweep does not RELY on the threshold alone: both racing directions
+ * degrade into states something already repairs. A re-queue that raced the
+ * `project` job leaves a stub that job's `--batch` mode SKIPS (it skips
+ * needs-triage stubs), and one that raced the `verdict` job's close leaves the
+ * closed-plus-needs-triage pairing the sweep arm above repairs.
+ *
+ * A HUMAN working the stub withdraws it from the sweep for free: a comment or a
+ * label edit moves `updated_at`, so anyone reading or annotating a strand keeps
+ * it out of this path for another day without knowing the rule exists.
+ */
+export const STRANDED_OPEN_VERDICT_MIN_IDLE_MS = 24 * 60 * 60 * 1000;
+
+export function isStrandedOpenVerdict(
+  issue,
+  { now = new Date(), minIdleMs = STRANDED_OPEN_VERDICT_MIN_IDLE_MS } = {},
+) {
+  if (String(issue?.state ?? "").toUpperCase() === "CLOSED") return false;
+  const labels = issue?.labels ?? [];
+  if (labels.includes(NEEDS_TRIAGE_LABEL)) return false;
+  if (labels.includes(NEEDS_HUMAN_VERDICT_LABEL)) return false;
+  if (labels.includes(ARCHIVED_LABEL)) return false;
+  if (labels.includes(APPROVED_ARCHIVE_LABEL)) return false;
+  if (!SETTLING_VERDICT_LABELS.some((name) => labels.includes(name))) {
+    return false;
+  }
+  const updatedAt = Date.parse(issue?.updatedAt ?? "");
+  if (Number.isNaN(updatedAt)) return false;
+  return now.getTime() - updatedAt >= minIdleMs;
+}
+
+/**
+ * Which stranded shape this stub is in, or null for every healthy one. The names
+ * (STRAND_SHAPE_*) live in the queue contract because the chokepoint renders a
+ * note per shape; the predicates live here, with the sweep that applies them.
+ */
+export function strandedShapeOf(issue, options = {}) {
+  if (isStrandedNeedsTriage(issue)) return STRAND_SHAPE_CLOSED_NEEDS_TRIAGE;
+  if (isStrandedOpenVerdict(issue, options)) return STRAND_SHAPE_OPEN_VERDICT;
+  return null;
+}
+
+/** Live state of one queue stub, for the sweep's pre-mutation revalidation.
+ * `updatedAt` rides along because the OPEN shape's premise INCLUDES idleness:
+ * a comment posted since the snapshot changes no label and no state, yet it is
+ * proof something is still working on the stub. */
 async function readQueueIssueState(options, issueNumber, runner) {
   const run = runner ?? ((args) => runGh(args, {}));
   const stdout = await run([
@@ -817,12 +963,13 @@ async function readQueueIssueState(options, issueNumber, runner) {
     "-R",
     options.repo,
     "--json",
-    "number,state,labels",
+    "number,state,labels,updatedAt",
   ]);
   const data = stdout && stdout.trim() ? JSON.parse(stdout) : {};
   return {
     number: data.number,
     state: String(data.state ?? "").toUpperCase(),
+    updatedAt: data.updatedAt ?? null,
     labels: (data.labels ?? [])
       .map((label) => (typeof label === "string" ? label : label?.name))
       .filter(Boolean),
@@ -833,8 +980,13 @@ async function readQueueIssueState(options, issueNumber, runner) {
  * `runGh` is injectable so the test can drive this exact sequence against a
  * stateful fake instead of re-implementing it.
  *
+ * `shape` names which strand the snapshot matched (default: the closed pairing).
+ * It selects the note and the failure policy, and the revalidating read requires
+ * the SAME shape to still hold live — a stub that changed shape since the
+ * snapshot belongs to whoever changed it.
+ *
  * Returns `{ recovered }` — false when the live re-read no longer shows the
- * stranded pairing, which is a normal no-op, not a failure.
+ * stranded shape, which is a normal no-op, not a failure.
  */
 export async function recoverStrandedQueueIssue(
   options,
@@ -842,6 +994,25 @@ export async function recoverStrandedQueueIssue(
   deps = {},
 ) {
   const run = deps.runGh ?? runGh;
+  const shape = deps.shape ?? STRAND_SHAPE_CLOSED_NEEDS_TRIAGE;
+  const isOpenShape = shape === STRAND_SHAPE_OPEN_VERDICT;
+  const shapeOptions = deps.now ? { now: deps.now() } : {};
+
+  // The open shape is verified, the closed one aborts, and the difference is the
+  // stub's own state. On the closed path every interruption lands somewhere
+  // inert: the state change goes last, so a stub whose shed failed is still
+  // CLOSED and invisible to Stage B until the next run retries. An OPEN stub has
+  // no such cover — restoring `sentry:needs-triage` makes it selectable
+  // immediately, so a failed shed would hand the next triage round a stub still
+  // wearing the previous round's markers. `verify-end-state` is what the sibling
+  // OPEN-stub caller (the workflow compensation CLI) uses for exactly this
+  // reason: it re-attempts the shed against observed state and throws naming
+  // whatever survived.
+  //
+  // Under --dry-run that verification would assert writes that deliberately did
+  // not happen, so the dry run would go red on a stub it never touched. Fall
+  // back to the abort policy, which makes no post-hoc claim.
+  const verifyEndState = isOpenShape && !options.dryRun;
 
   // BOOKKEEPING cause, declared rather than reconstructed: nothing about the
   // Sentry issue changed, so the chokepoint posts NO fence and the verdict
@@ -868,15 +1039,22 @@ export async function recoverStrandedQueueIssue(
       repo: options.repo,
       issueNumber: existingIssue.number,
       cause: REQUEUE_CAUSE_BOOKKEEPING,
-      note: buildStrandedRecoveryComment(),
+      note: buildStrandedRecoveryComment(shape),
       revalidate: {
-        check: isStrandedNeedsTriage,
+        check: (live) => strandedShapeOf(live, shapeOptions) === shape,
         declineNote: (live) =>
-          `Queue issue #${existingIssue.number} is no longer closed-and-needing-triage (state=${live.state}, labels=${live.labels.join(",") || "none"}); leaving it as the current state describes.`,
+          `Queue issue #${existingIssue.number} is no longer stranded as ${shape} (state=${live.state}, labels=${live.labels.join(",") || "none"}); leaving it as the current state describes.`,
       },
+      onFailure: verifyEndState
+        ? REQUEUE_ON_FAILURE_VERIFY_END_STATE
+        : REQUEUE_ON_FAILURE_ABORT,
+      // Only consulted by the end-state verification, and only to decide whether
+      // to attempt a reopen when a read fails. This stub was observed OPEN, so
+      // saying so is what keeps the verifier from reopening what is already open.
+      fallbackState: isOpenShape ? "OPEN" : "CLOSED",
     },
   );
-  // False when the live re-read no longer shows the stranded pairing, which is a
+  // False when the live re-read no longer shows the stranded shape, which is a
   // normal no-op, not a failure.
   return { recovered: outcome.requeued };
 }
@@ -1024,6 +1202,7 @@ export async function runIngest(options, deps = {}) {
     skippedExisting: 0,
     reopened: 0,
     recovered: 0,
+    recoveredOpenVerdict: 0,
     errors: 0,
   };
 
@@ -1119,19 +1298,35 @@ export async function runIngest(options, deps = {}) {
     }
   }
 
-  // Stranded-stub sweep (see isStrandedNeedsTriage). It runs over the QUEUE,
-  // not over this run's Sentry results: a stranded stub's Sentry issue is
-  // usually outside the firstSeen lookback and not regressed, so the loop above
-  // never visits it. Same per-item error handling as the loop — one unrecovered
-  // stub must not abort the rest, and the run still exits nonzero.
+  // Stranded-stub sweep (see strandedShapeOf, and the two predicates it calls).
+  // It runs over the QUEUE, not over this run's Sentry results: a stranded
+  // stub's Sentry issue is usually outside the firstSeen lookback and not
+  // regressed, so the loop above never visits it. Same per-item error handling
+  // as the loop — one unrecovered stub must not abort the rest, and the run
+  // still exits nonzero.
+  //
+  // One instant for the whole sweep, taken here rather than per stub, so the
+  // idleness threshold cannot mean something slightly different for the first
+  // stub than for the last.
+  const sweptAt = now();
   for (const existingIssue of existingIssues) {
     if (claimedBySentryPath.has(existingIssue.number)) continue;
-    if (!isStrandedNeedsTriage(existingIssue)) continue;
+    const shape = strandedShapeOf(existingIssue, { now: sweptAt });
+    if (!shape) continue;
     try {
       // A revalidation no-op is not a recovery; only count real ones so the run
       // record cannot read as activity that never happened.
-      const outcome = await recoverStranded(options, existingIssue);
-      if (outcome?.recovered !== false) counts.recovered += 1;
+      const outcome = await recoverStranded(options, existingIssue, {
+        shape,
+        now: () => sweptAt,
+      });
+      if (outcome?.recovered !== false) {
+        if (shape === STRAND_SHAPE_OPEN_VERDICT) {
+          counts.recoveredOpenVerdict += 1;
+        } else {
+          counts.recovered += 1;
+        }
+      }
     } catch (err) {
       counts.errors += 1;
       const message = err instanceof Error ? err.message : String(err);
@@ -1249,7 +1444,7 @@ async function main() {
     process.stdout.write(`${JSON.stringify(counts, null, 2)}\n`);
   } else {
     process.stdout.write(
-      `Sentry triage ingest: fetched=${counts.fetched} created=${counts.created} skipped-existing=${counts.skippedExisting} reopened=${counts.reopened} recovered=${counts.recovered} errors=${counts.errors}\n`,
+      `Sentry triage ingest: fetched=${counts.fetched} created=${counts.created} skipped-existing=${counts.skippedExisting} reopened=${counts.reopened} recovered=${counts.recovered} recovered-open-verdict=${counts.recoveredOpenVerdict} errors=${counts.errors}\n`,
     );
   }
   // Per-issue mutation failures are tolerated inside the loop (one bad issue

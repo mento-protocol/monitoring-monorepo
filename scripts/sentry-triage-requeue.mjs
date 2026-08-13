@@ -61,6 +61,8 @@ import {
   NEEDS_TRIAGE_LABEL,
   neutralizeUntrusted,
   REOPEN_SHED_LABELS,
+  STRAND_SHAPE_CLOSED_NEEDS_TRIAGE,
+  STRAND_SHAPE_OPEN_VERDICT,
   truncateTitle,
 } from "./sentry-triage-queue-contract.mjs";
 import {
@@ -134,16 +136,42 @@ export function buildRegressedComment(lastSeen) {
  * keeps failing to reopen SHOULD accumulate a note per attempt, because that
  * repetition is the honest signal. So the text says what this run is doing and
  * what a failure means, and reads correctly either way.
+ *
+ * One note per stranded SHAPE. They describe different damage — a stub closed
+ * while still queued, versus one verdicted and never settled (issue #1817) — and
+ * an operator reading the stub has to be able to tell which happened. An unknown
+ * shape throws, before any I/O, for the same reason `buildRequeueNote` does: a
+ * caller that cannot name the shape has not decided anything.
  */
-export function buildStrandedRecoveryComment() {
-  return (
+const STRANDED_RECOVERY_NOTES = {
+  [STRAND_SHAPE_CLOSED_NEEDS_TRIAGE]:
     "Sentry triage ingest is recovering this queue stub: it was closed while " +
     "still carrying `sentry:needs-triage`, a pairing no pipeline stage can " +
     "see — the triage selector lists open stubs only. It is shedding the stale " +
     "verdict, projection and autofix markers, and a reopen follows this note. " +
     "If that reopen fails the stub stays closed and the next scheduled run " +
-    "retries, so this note can appear more than once."
-  );
+    "retries, so this note can appear more than once.",
+  [STRAND_SHAPE_OPEN_VERDICT]:
+    "Sentry triage ingest is recovering this queue stub: it has sat open with " +
+    "a verdict label and no `sentry:needs-triage` since a triage round applied " +
+    "that verdict and never settled it — a shape no pipeline stage can see, " +
+    "because the triage selector needs the label and every later step skips a " +
+    "stub that is not queued. It is restoring `sentry:needs-triage` and " +
+    "shedding the stale verdict, projection and autofix markers, so the next " +
+    "scheduled run re-triages it. If any of those writes does not land, the " +
+    "run goes red naming what survived, so this note can appear more than once.",
+};
+
+export function buildStrandedRecoveryComment(
+  shape = STRAND_SHAPE_CLOSED_NEEDS_TRIAGE,
+) {
+  const note = STRANDED_RECOVERY_NOTES[shape];
+  if (!note) {
+    throw new Error(
+      `Unknown stranded shape ${JSON.stringify(shape)}; a recovery must name one of ${Object.keys(STRANDED_RECOVERY_NOTES).join(", ")}.`,
+    );
+  }
+  return note;
 }
 
 /**
@@ -403,10 +431,10 @@ export async function ensureSelectableForTriage(
     ? `state=${observed.state}, labels=${observed.labels.join("|")}`
     : `unreadable (${readError})`;
   process.stderr.write(
-    `::error::Queue stub #${issueNumber} could not be confirmed open and carrying ${NEEDS_TRIAGE_LABEL} after refusing to archive over a live regression (${seen}). It is STRANDED — Stage B selects only open stubs, and ingest will skip it while its closedAt postdates the regression. Reopen it by hand.\n`,
+    `::error::Queue stub #${issueNumber} could not be confirmed open and carrying ${NEEDS_TRIAGE_LABEL} while being re-queued for triage (${seen}). It is STRANDED — restore it by hand: reopen it if it is closed, add ${NEEDS_TRIAGE_LABEL}, and remove any stale marker from the previous round (${REOPEN_SHED_LABELS.join(", ")}).\n`,
   );
   throw new Error(
-    `Queue stub #${issueNumber} is not selectable for triage after a live-regression refusal (${seen}).`,
+    `Queue stub #${issueNumber} is not selectable for triage after a re-queue (${seen}).`,
   );
 }
 

@@ -14,6 +14,7 @@ import {
   buildRequeueShedLabelArgs,
   buildRunRecordBody,
   buildStrandedRecoveryComment,
+  APPROVED_ARCHIVE_LABEL,
   ARCHIVED_LABEL,
   classifyNoise,
   defaultFetchMergedSentryIssues,
@@ -29,9 +30,11 @@ import {
   indexQueueIssuesByShortId,
   isSafeNextPageUrl,
   isStrandedNeedsTriage,
+  isStrandedOpenVerdict,
   LABEL_DEFINITIONS,
   mapSentryIssue,
   mergeSentryIssues,
+  NEEDS_HUMAN_VERDICT_LABEL,
   NEEDS_TRIAGE_LABEL,
   normalizeRestIssues,
   parseArchiveBaseline,
@@ -47,6 +50,10 @@ import {
   RUN_RECORD_MARKER,
   runIngest,
   sanitizeFreeText,
+  STRAND_SHAPE_CLOSED_NEEDS_TRIAGE,
+  STRAND_SHAPE_OPEN_VERDICT,
+  STRANDED_OPEN_VERDICT_MIN_IDLE_MS,
+  strandedShapeOf,
   toMetadata,
   truncateTitle,
   VERDICT_LABELS,
@@ -1163,7 +1170,7 @@ await test("ghPaginate fails loud on runaway pagination and non-array responses"
   assert(/non-array/.test(threw.message), "wrong non-array error");
 });
 
-await test("REST issue normalization flattens pages, drops PRs, uppercases state, carries closed_at + labels + body", () => {
+await test("REST issue normalization flattens pages, drops PRs, uppercases state, carries closed_at + updated_at + labels + body", () => {
   const normalized = normalizeRestIssues([
     [
       {
@@ -1177,6 +1184,9 @@ await test("REST issue normalization flattens pages, drops PRs, uppercases state
         title: "[sentry] X-2: b",
         state: "closed",
         closed_at: "2026-07-16T12:00:00Z",
+        // The sweep's idleness clock for the OPEN strand shape rides in the
+        // same list response — no extra request, and no sweep without it.
+        updated_at: "2026-07-16T12:00:00Z",
         labels: [{ name: "sentry-triage" }, { name: "sentry:archived" }],
         // The REST list already returns the body, so the archive baseline
         // costs no extra request — and lives nowhere a comment can reach.
@@ -1207,6 +1217,7 @@ await test("REST issue normalization flattens pages, drops PRs, uppercases state
       title: "[sentry] X-1: a",
       state: "OPEN",
       closedAt: null,
+      updatedAt: null,
       body: "",
       labels: ["sentry-triage", "sentry:needs-triage"],
     },
@@ -1215,6 +1226,7 @@ await test("REST issue normalization flattens pages, drops PRs, uppercases state
       title: "[sentry] X-2: b",
       state: "CLOSED",
       closedAt: "2026-07-16T12:00:00Z",
+      updatedAt: "2026-07-16T12:00:00Z",
       body: '```yaml\narchive_baseline_last_seen: "2026-07-16T11:00:00Z"\n```',
       labels: ["sentry-triage", "sentry:archived"],
     },
@@ -1223,6 +1235,7 @@ await test("REST issue normalization flattens pages, drops PRs, uppercases state
       title: "[sentry] X-4: c",
       state: "CLOSED",
       closedAt: null,
+      updatedAt: null,
       body: "",
       labels: ["sentry-triage", "sentry:needs-triage"],
     },
@@ -1282,6 +1295,12 @@ await test("run record body includes counts and the rolling-comment marker", () 
   assert(
     body.includes("Reopened (regressed or escalating): 1"),
     "missing reopened count",
+  );
+  // A counts object from before the second strand counter existed must still
+  // render a number here — an operator reading "undefined" learns nothing.
+  assert(
+    body.includes("Recovered (stranded open verdict): 0"),
+    "missing open-verdict recovery count",
   );
   assert(
     body.includes("Recovered (stranded needs-triage): 3"),
@@ -1851,6 +1870,10 @@ function makeFakeGitHub({
       issue.number,
       {
         closedAt: null,
+        // The sweep's idleness clock for the OPEN strand shape. Defaults far
+        // enough before every fixture's `now` that a test only sets it when
+        // idleness is the thing under test.
+        updatedAt: "2026-07-01T00:00:00Z",
         // Bodies only — the comments the pipeline itself writes, which keeps the
         // assertions readable. `untrustedComments` models what anyone with a
         // comment box can add on this PUBLIC repo; the read below is what
@@ -1942,6 +1965,7 @@ function makeFakeGitHub({
       return JSON.stringify({
         number: issue?.number,
         state: issue?.state,
+        updatedAt: issue?.updatedAt ?? null,
         labels: (issue?.labels ?? []).map((name) => ({ name })),
       });
     }
@@ -1965,6 +1989,7 @@ function makeFakeGitHub({
         title: issue.title,
         state: issue.state,
         closedAt: issue.closedAt,
+        updatedAt: issue.updatedAt,
         labels: [...issue.labels],
       })),
     /** Stage B's selector: `--label sentry-triage --label ... --state open`. */
@@ -1995,8 +2020,14 @@ function ingestDeps(fake, overrides = {}) {
     reopenIssue: async () => {
       throw new Error("unexpected regression reopen in this scenario");
     },
-    recoverStranded: (options, issue) =>
-      recoverStrandedQueueIssue(options, issue, { runGh: fake.runGh }),
+    // The sweep hands down the shape it matched and the instant it matched it
+    // at; forward both, or the recovery falls back to the closed-pairing policy
+    // and real wall-clock time.
+    recoverStranded: (options, issue, sweep) =>
+      recoverStrandedQueueIssue(options, issue, {
+        ...sweep,
+        runGh: fake.runGh,
+      }),
     postRunRecord: async () => {},
     now: () => new Date("2026-07-21T05:30:00.000Z"),
     ...overrides,
@@ -2317,6 +2348,381 @@ await test("a stub reopened by the regression path is not swept a second time", 
   assertEqual(counts.reopened, 1);
   assertEqual(counts.recovered, 0);
   assertEqual(fake.get(200).state, "OPEN");
+});
+
+// ---------------------------------------------------------------------------
+// The OTHER unselectable shape: OPEN + verdict + no `sentry:needs-triage`
+// (issue #1817).
+//
+// The verdict step swaps the queue label off before anything closes the stub,
+// so every failing exit in that window owes the stub a re-queue. Those exits go
+// through the chokepoint's workflow CLI, whose revalidating read retries within
+// a bound and then THROWS — right, and it leaves the stub open, verdicted and
+// unqueued when the read outage is persistent. Stage B selects open stubs that
+// carry the label; the closed-pairing sweep matches the opposite pairing. Until
+// this arm, nothing selected it.
+// ---------------------------------------------------------------------------
+
+const SWEEP_NOW = new Date("2026-07-21T05:30:00.000Z");
+/** Idle by more than the threshold, relative to SWEEP_NOW. */
+const IDLE_SINCE = "2026-07-19T00:00:00Z";
+/** Touched moments ago: a stub a workflow is still working on. */
+const JUST_TOUCHED = "2026-07-21T05:29:00Z";
+
+const strandedOpenStub = (labels, updatedAt = IDLE_SINCE) => ({
+  number: 42,
+  title: buildQueueTitle("X-42", "web", "error"),
+  state: "OPEN",
+  updatedAt,
+  labels: ["sentry-triage", ...labels],
+});
+
+await test("isStrandedOpenVerdict matches only an idle, unqueued, settling-verdict stub", () => {
+  const at = { now: SWEEP_NOW };
+  const shape = (labels, updatedAt = IDLE_SINCE) =>
+    isStrandedOpenVerdict(strandedOpenStub(labels, updatedAt), at);
+
+  assert(
+    shape(["sentry:verdict-upstream"]),
+    "open + a settling verdict + no needs-triage, idle, is the strand",
+  );
+  assert(
+    shape(["sentry:verdict-code-fix", PROJECTED_LABEL]),
+    "a projected row whose close never landed is the same strand",
+  );
+  assert(
+    !shape([NEEDS_TRIAGE_LABEL, "sentry:verdict-upstream"]),
+    "a stub still carrying the queue label is selectable, not stranded",
+  );
+  assert(
+    !shape(["sentry:candidate-noise"]),
+    "an open stub with no verdict at all is an ordinary queue member",
+  );
+  // The false positive that would matter most: `needs-human` RESTS open, by
+  // design, and re-queuing it would delete the question a human was asked.
+  assert(
+    !shape([NEEDS_HUMAN_VERDICT_LABEL]),
+    "a needs-human stub is awaiting a human, not stranded",
+  );
+  assert(
+    !shape([NEEDS_HUMAN_VERDICT_LABEL, "sentry:verdict-upstream"]),
+    "a double-verdicted stub carrying needs-human is still not this sweep's",
+  );
+  // Terminal, and a live human approval: both are in REOPEN_SHED_LABELS, so a
+  // re-queue would spend them.
+  assert(
+    !shape(["sentry:verdict-upstream", ARCHIVED_LABEL]),
+    "an archived stub must never be resurrected",
+  );
+  assert(
+    !shape(["sentry:verdict-upstream", APPROVED_ARCHIVE_LABEL]),
+    "a stub the archive workflow is acting on is not this sweep's to shed",
+  );
+  // Idleness, both directions, and the fail-closed case.
+  assert(
+    !shape(["sentry:verdict-upstream"], JUST_TOUCHED),
+    "a stub written to moments ago may still be mid-flight",
+  );
+  assert(
+    !shape(["sentry:verdict-upstream"], null),
+    "no idleness observation means no sweep",
+  );
+  assert(
+    !shape(["sentry:verdict-upstream"], "not-a-timestamp"),
+    "an unparsable timestamp is not an observation either",
+  );
+  assert(
+    !isStrandedOpenVerdict(
+      {
+        state: "CLOSED",
+        labels: ["sentry:verdict-upstream"],
+        updatedAt: IDLE_SINCE,
+      },
+      at,
+    ),
+    "a settled stub is not this shape",
+  );
+  // The threshold is a real bound, not a formality: exactly at it counts. It is
+  // pinned because it is load-bearing — a live run reaching it needs a
+  // 15-minute job queued for a full day, which the triage workflow's own
+  // concurrency group would have turned into a visible operational failure long
+  // before. Lowering it silently is what this assertion exists to stop.
+  assertEqual(STRANDED_OPEN_VERDICT_MIN_IDLE_MS, 24 * 60 * 60 * 1000);
+  assert(
+    isStrandedOpenVerdict(
+      strandedOpenStub(
+        ["sentry:verdict-upstream"],
+        new Date(
+          SWEEP_NOW.getTime() - STRANDED_OPEN_VERDICT_MIN_IDLE_MS,
+        ).toISOString(),
+      ),
+      at,
+    ),
+    "a stub idle for exactly the threshold is stranded",
+  );
+});
+
+await test("strandedShapeOf names both shapes and nothing else", () => {
+  const at = { now: SWEEP_NOW };
+  assertEqual(
+    strandedShapeOf(
+      { state: "CLOSED", labels: ["sentry-triage", NEEDS_TRIAGE_LABEL] },
+      at,
+    ),
+    STRAND_SHAPE_CLOSED_NEEDS_TRIAGE,
+  );
+  assertEqual(
+    strandedShapeOf(strandedOpenStub(["sentry:verdict-upstream"]), at),
+    STRAND_SHAPE_OPEN_VERDICT,
+  );
+  assertEqual(
+    strandedShapeOf(
+      { state: "OPEN", labels: ["sentry-triage", NEEDS_TRIAGE_LABEL] },
+      at,
+    ),
+    null,
+  );
+});
+
+await test("ingest recovers a stub a failed compensation left open and unqueued", async () => {
+  const fake = makeFakeGitHub({
+    issues: [strandedOpenStub(["sentry:verdict-code-fix", PROJECTED_LABEL])],
+  });
+
+  // Invisible to Stage B: open, but without the label its selector requires.
+  assertDeepEqual(fake.selectable(), []);
+
+  const counts = await runIngest(
+    { repo: REPO, trackerIssue: 1282 },
+    ingestDeps(fake, { now: () => SWEEP_NOW }),
+  );
+
+  assertEqual(counts.recoveredOpenVerdict, 1);
+  // Counted apart from the closed pairing: the two diagnose different failures.
+  assertEqual(counts.recovered, 0);
+  assertEqual(counts.errors, 0);
+  const issue = fake.get(42);
+  assertEqual(issue.state, "OPEN");
+  assertDeepEqual(issue.labels, ["sentry-triage", NEEDS_TRIAGE_LABEL]);
+  assertDeepEqual(issue.comments, [
+    buildStrandedRecoveryComment(STRAND_SHAPE_OPEN_VERDICT),
+  ]);
+  assertDeepEqual(fake.selectable(), [42]);
+  // Through the chokepoint, in its order: revalidate, restore the queue label,
+  // shed the previous round's markers, note, and VERIFY the end state. No
+  // reopen — the stub was already open, and the verifier reopens only a closed
+  // one.
+  assertDeepEqual(
+    fake.calls.map((args) => args[1]),
+    ["view", "edit", "edit", "comment", "view"],
+  );
+  assertDeepEqual(fake.calls[1], buildRequeueAddLabelArgs(42, REPO));
+  assertDeepEqual(fake.calls[2], buildRequeueShedLabelArgs(42, REPO));
+  // Fence-free, like every bookkeeping recovery: nothing in Sentry moved, so a
+  // verdict already posted for this stub stays admissible.
+  assert(
+    !issue.comments.some((body) =>
+      body.startsWith("Regressed in Sentry (last seen "),
+    ),
+    "a bookkeeping recovery must not post the staleness fence",
+  );
+});
+
+await test("the open-verdict recovery terminates: a second ingest run is a no-op", async () => {
+  const fake = makeFakeGitHub({
+    issues: [strandedOpenStub(["sentry:verdict-upstream"])],
+  });
+  const deps = () => ingestDeps(fake, { now: () => SWEEP_NOW });
+
+  const first = await runIngest({ repo: REPO, trackerIssue: 1282 }, deps());
+  const second = await runIngest({ repo: REPO, trackerIssue: 1282 }, deps());
+
+  assertEqual(first.recoveredOpenVerdict, 1);
+  // The shed removed the verdict label, so the shape is gone and the sweep
+  // cannot cycle a stub it already fixed.
+  assertEqual(second.recoveredOpenVerdict, 0);
+  assertEqual(second.recovered, 0);
+  assertEqual(fake.get(42).comments.length, 1);
+});
+
+await test("the sweep leaves a stub still mid-flight between its verdict and its close", async () => {
+  // The shape is real here — it is what a live triage round looks like between
+  // the label swap and the close. Only idleness tells the two apart.
+  const fake = makeFakeGitHub({
+    issues: [strandedOpenStub(["sentry:verdict-upstream"], JUST_TOUCHED)],
+  });
+
+  const counts = await runIngest(
+    { repo: REPO, trackerIssue: 1282 },
+    ingestDeps(fake, { now: () => SWEEP_NOW }),
+  );
+
+  assertEqual(counts.recoveredOpenVerdict, 0);
+  assertEqual(counts.errors, 0);
+  // Not even a read: the snapshot alone settles it.
+  assertDeepEqual(fake.calls, []);
+});
+
+for (const resting of [
+  {
+    name: "a needs-human stub waiting on its human",
+    labels: [NEEDS_HUMAN_VERDICT_LABEL],
+  },
+  {
+    name: "a stub the archive workflow holds a live approval for",
+    labels: ["sentry:verdict-upstream", APPROVED_ARCHIVE_LABEL],
+  },
+  {
+    name: "a stub whose Sentry issue is already archived",
+    labels: ["sentry:verdict-upstream", ARCHIVED_LABEL],
+  },
+]) {
+  await test(`the open-verdict sweep does not touch ${resting.name}`, async () => {
+    const fake = makeFakeGitHub({ issues: [strandedOpenStub(resting.labels)] });
+
+    const counts = await runIngest(
+      { repo: REPO, trackerIssue: 1282 },
+      ingestDeps(fake, { now: () => SWEEP_NOW }),
+    );
+
+    assertEqual(counts.recoveredOpenVerdict, 0);
+    assertEqual(counts.errors, 0);
+    assertDeepEqual(fake.calls, []);
+    assertDeepEqual(fake.get(42).labels, ["sentry-triage", ...resting.labels]);
+  });
+}
+
+await test("the open-verdict sweep revalidates: a compensation that landed first wins", async () => {
+  // The snapshot is taken before the whole Sentry loop, so the compensation this
+  // arm exists to finish can complete in between. The live read must decide.
+  const fake = makeFakeGitHub({
+    issues: [strandedOpenStub(["sentry:verdict-upstream"])],
+  });
+  const staleSnapshot = fake.snapshot();
+  fake.get(42).labels = ["sentry-triage", NEEDS_TRIAGE_LABEL];
+
+  const counts = await runIngest(
+    { repo: REPO, trackerIssue: 1282 },
+    ingestDeps(fake, {
+      listQueueIssues: async () => staleSnapshot,
+      now: () => SWEEP_NOW,
+    }),
+  );
+
+  assertEqual(counts.recoveredOpenVerdict, 0);
+  assertEqual(counts.errors, 0);
+  assertDeepEqual(fake.get(42).comments, []);
+  // Read, then nothing: no write was attempted at all.
+  assertDeepEqual(
+    fake.calls.map((args) => args[1]),
+    ["view"],
+  );
+});
+
+await test("a comment posted since the snapshot withdraws the stub from the sweep", async () => {
+  // Idleness is part of the premise, so it is REVALIDATED like the rest of it.
+  // A bare comment moves no label and no state, yet it is proof something is
+  // still working on the stub.
+  const fake = makeFakeGitHub({
+    issues: [strandedOpenStub(["sentry:verdict-upstream"])],
+  });
+  const staleSnapshot = fake.snapshot();
+  fake.get(42).updatedAt = JUST_TOUCHED;
+
+  const counts = await runIngest(
+    { repo: REPO, trackerIssue: 1282 },
+    ingestDeps(fake, {
+      listQueueIssues: async () => staleSnapshot,
+      now: () => SWEEP_NOW,
+    }),
+  );
+
+  assertEqual(counts.recoveredOpenVerdict, 0);
+  assertEqual(counts.errors, 0);
+  assertDeepEqual(
+    fake.calls.map((args) => args[1]),
+    ["view"],
+  );
+});
+
+await test("an open-verdict recovery whose shed fails is loud, not silently selectable", async () => {
+  // The OPEN shape has no cover the closed one has: restoring the queue label
+  // makes the stub selectable IMMEDIATELY, so a shed that never lands would hand
+  // the next triage round a stub still wearing the previous round's markers.
+  // `verify-end-state` re-attempts the shed against observed state and then
+  // throws naming what survived — the run goes red rather than green over it.
+  const fake = makeFakeGitHub({
+    issues: [strandedOpenStub(["sentry:verdict-upstream", PROJECTED_LABEL])],
+    rejectOn: (args) => args.includes("--remove-label"),
+  });
+
+  const counts = await runIngest(
+    { repo: REPO, trackerIssue: 1282 },
+    ingestDeps(fake, { now: () => SWEEP_NOW }),
+  );
+
+  assertEqual(counts.recoveredOpenVerdict, 0);
+  assertEqual(counts.errors, 1);
+  const issue = fake.get(42);
+  // Selectable again — the invariant this path owes — and the stale markers it
+  // could not shed are what the run is red about.
+  assert(issue.labels.includes(NEEDS_TRIAGE_LABEL));
+  assert(issue.labels.includes(PROJECTED_LABEL));
+  // The shed was attempted twice: once in the sequence, once against the
+  // verification read.
+  assertEqual(
+    fake.calls.filter((args) => args.includes("--remove-label")).length,
+    2,
+  );
+});
+
+await test("--dry-run reports the repair without asserting writes it never made", async () => {
+  // The end-state verification reads the stub back to prove the writes landed.
+  // Under --dry-run none of them do, so that assertion would fail a run that
+  // deliberately changed nothing. Modelled with the real runGh contract: a
+  // mutating call under dryRun resolves without touching the fake.
+  const fake = makeFakeGitHub({
+    issues: [strandedOpenStub(["sentry:verdict-upstream"])],
+  });
+  const runGh = (args, opts = {}) =>
+    opts.dryRun && opts.mutates ? Promise.resolve("") : fake.runGh(args);
+
+  const counts = await runIngest(
+    { repo: REPO, trackerIssue: 1282, dryRun: true },
+    ingestDeps(fake, {
+      now: () => SWEEP_NOW,
+      recoverStranded: (options, issue, sweep) =>
+        recoverStrandedQueueIssue(options, issue, { ...sweep, runGh }),
+    }),
+  );
+
+  assertEqual(counts.recoveredOpenVerdict, 1);
+  assertEqual(counts.errors, 0);
+  // Nothing was written, and the only real call was the revalidating read.
+  const issue = fake.get(42);
+  assertDeepEqual(issue.labels, ["sentry-triage", "sentry:verdict-upstream"]);
+  assertDeepEqual(issue.comments, []);
+  assertDeepEqual(
+    fake.calls.map((args) => args[1]),
+    ["view"],
+  );
+});
+
+await test("the run record counts the two strands apart", () => {
+  const body = buildRunRecordBody(
+    {
+      fetched: 1,
+      created: 0,
+      skippedExisting: 0,
+      reopened: 0,
+      recovered: 2,
+      recoveredOpenVerdict: 3,
+      errors: 0,
+    },
+    "2026-07-21T05:30:00.000Z",
+  );
+  assert(body.includes("Recovered (stranded needs-triage): 2"));
+  assert(body.includes("Recovered (stranded open verdict): 3"));
 });
 
 // ---------------------------------------------------------------------------
