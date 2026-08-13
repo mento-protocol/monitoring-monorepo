@@ -2256,6 +2256,7 @@ run_codex_binary_resolution_regression() {
   local review_repo="$tmp_dir/codex-binary-resolution"
   local fake_bin="$tmp_dir/codex-binary-resolution-bin"
   local shim_bin="$tmp_dir/codex-binary-resolution-shim"
+  local failing_bin="$tmp_dir/codex-binary-resolution-failing"
   local status=0
 
   init_review_repo "$review_repo"
@@ -2293,6 +2294,19 @@ exit 127
 CODEX
   chmod +x "$shim_bin/codex"
 
+  # A working engine that answers --version and still exits 127 on the review.
+  mkdir "$failing_bin"
+  cat >"$failing_bin/codex" <<'CODEX'
+#!/bin/bash
+if [[ "${1:-}" == "--version" ]]; then
+  printf 'codex-cli 9.9.9\n'
+  exit 0
+fi
+printf 'internal helper missing\n' >&2
+exit 127
+CODEX
+  chmod +x "$failing_bin/codex"
+
   # PATH has no codex, so the configured well-known install directory decides.
   run_codex_resolution_helper "$review_repo" "$hermetic_git_bin" \
     "AUTOREVIEW_EXTRA_BIN_DIRS=$fake_bin" \
@@ -2323,7 +2337,8 @@ CODEX
   expect_stderr_contains "resolved codex via PATH"
   expect_stderr_contains "resolved codex via well-known install location"
 
-  # When every candidate is such a shim, one message names them.
+  # When every candidate is such a shim, one message names them and keeps the
+  # engine's own error rather than claiming the CLI was never found.
   status=0
   run_codex_resolution_helper "$review_repo" "$shim_bin:$hermetic_git_bin" \
     "AUTOREVIEW_EXTRA_BIN_DIRS=" || status=$?
@@ -2331,9 +2346,23 @@ CODEX
     printf 'expected an all-shim codex search to fail\n' >&2
     exit 1
   fi
-  expect_stderr_contains "codex CLI is not available"
-  expect_stderr_contains "Skipped after exit 127"
+  expect_stderr_contains \
+    "codex CLI cannot run in the reviewer's isolated environment"
   expect_stderr_contains "codex-binary-resolution-shim/codex"
+  expect_stderr_contains "Engine error:"
+  expect_stdout_not_contains "autoreview clean"
+
+  # An engine that can report its version keeps its own exit 127 as a review
+  # failure: the search must not discard it and try a different installation.
+  status=0
+  run_codex_resolution_helper "$review_repo" "$failing_bin:$hermetic_git_bin" \
+    "AUTOREVIEW_EXTRA_BIN_DIRS=$fake_bin" || status=$?
+  if [[ "$status" -eq 0 ]]; then
+    printf 'expected a genuine codex exit 127 to fail the review\n' >&2
+    exit 1
+  fi
+  expect_stderr_contains "codex-binary-resolution-failing/codex failed (127)"
+  expect_stderr_contains "internal helper missing"
   expect_stdout_not_contains "autoreview clean"
 
   # An unusable override reports itself instead of exiting 127.

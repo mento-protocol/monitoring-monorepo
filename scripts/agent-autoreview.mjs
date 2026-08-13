@@ -113,6 +113,7 @@ const FROZEN_TARGET_MODES = new Set([
 const MAX_GIT_OUTPUT_BYTES = MAX_REVIEW_INPUT_BYTES + 12 * 1024 * 1024;
 const MAX_TRUSTED_ENGINE_FILE_BYTES = 16 * 1024 * 1024;
 const CLAUDE_SAFE_MODE_MIN_VERSION = [2, 1, 169];
+const ENGINE_VERSION_PROBE_TIMEOUT_MS = 15_000;
 const AWS_CREDENTIAL_CONFIG_KEYS = new Set([
   "AWS_CONFIG_FILE",
   "AWS_SHARED_CREDENTIALS_FILE",
@@ -1203,18 +1204,15 @@ function traceCommandResolution(command, candidate, resolved, source) {
   );
 }
 
-function unavailableCommandMessage(command, launcherFailures = []) {
+function unavailableCommandMessage(command) {
   const { candidates, overrideVariable, overrideValue } =
     trustedCommandCandidates(command);
   const probed = candidates.map(({ candidate }) => candidate).join(", ");
   const variable = commandOverrideVariable(command);
-  const skipped = launcherFailures.length
-    ? ` Skipped after exit 127, unable to find their own target: ${launcherFailures.join(", ")}.`
-    : "";
   if (overrideVariable) {
-    return `${command} CLI is not available: ${variable} does not point at a trusted absolute executable. Probed: ${probed || overrideValue}.${skipped}`;
+    return `${command} CLI is not available: ${variable} does not point at a trusted absolute executable. Probed: ${probed || overrideValue}`;
   }
-  return `${command} CLI is not available outside the reviewed repo. Install it, or set ${variable} to its absolute path. Probed: ${probed || "<no absolute search directories>"}.${skipped}`;
+  return `${command} CLI is not available outside the reviewed repo. Install it, or set ${variable} to its absolute path. Probed: ${probed || "<no absolute search directories>"}`;
 }
 
 // Yields every trusted executable the search order offers, best first, so a
@@ -3230,13 +3228,38 @@ function tomlInlineTable(values) {
     .join(", ")}}`;
 }
 
+// A launcher shim exits 127 because it re-resolves the real CLI from a PATH the
+// reviewer deliberately does not hand to its engine. A working engine can also
+// exit 127 for its own reasons, so confirm the executable cannot even report its
+// version in that same environment before calling it unusable.
+function engineExecutableRuns(executable, cwd, env) {
+  try {
+    const probe = spawnSync(executable, ["--version"], {
+      cwd,
+      encoding: "utf8",
+      env,
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: ENGINE_VERSION_PROBE_TIMEOUT_MS,
+    });
+    return !probe.error && probe.status === 0;
+  } catch {
+    return false;
+  }
+}
+
+function unusableEngineLauncherMessage(command, launchers, engineError) {
+  const variable = commandOverrideVariable(command);
+  return `${command} CLI cannot run in the reviewer's isolated environment: ${launchers.join(", ")} exited 127 and could not report a version, which is how a launcher shim behaves. Point ${variable} at the real ${command} executable. Engine error: ${engineError}`;
+}
+
 async function runCodex(repo, args, prompt) {
   if (!args.tools) {
     throw new Error(
       "--no-tools is not supported for Codex; use read-only sandbox",
     );
   }
-  const launcherFailures = [];
+  const unusableLaunchers = [];
+  let firstLauncherError = null;
   for (const { candidate, executable } of trustedCommandResolutions(
     "codex",
     repo,
@@ -3244,16 +3267,24 @@ async function runCodex(repo, args, prompt) {
     try {
       return await runCodexExecutable(executable, repo, args, prompt);
     } catch (error) {
-      if (error?.exitCode !== 127) throw error;
-      // Exit 127 means this codex could not find its own target. That is a
-      // launcher shim relying on a caller PATH the reviewer deliberately does
-      // not hand to the engine, so it is an unresolved engine, not a review
-      // failure: drop it and keep searching.
+      // Every other failure, including a genuine engine exit 127, still fails
+      // the review with the engine's own error.
+      if (!error?.launcherUnusable) throw error;
       rejectResolvedCommandCandidate(candidate);
-      launcherFailures.push(candidate);
+      unusableLaunchers.push(candidate);
+      firstLauncherError ??= error;
     }
   }
-  throw new Error(unavailableCommandMessage("codex", launcherFailures));
+  if (unusableLaunchers.length > 0) {
+    throw new Error(
+      unusableEngineLauncherMessage(
+        "codex",
+        unusableLaunchers,
+        firstLauncherError.message,
+      ),
+    );
+  }
+  throw new Error(unavailableCommandMessage("codex"));
 }
 
 async function runCodexExecutable(codex, repo, args, prompt) {
@@ -3336,18 +3367,24 @@ async function runCodexExecutable(codex, repo, args, prompt) {
       codexArgs.push("-c", `model_reasoning_effort="${args.thinking}"`);
     }
     codexArgs.push("-");
-    const result = await runCommandWithInput(
-      codex,
-      codexArgs,
-      workspace,
-      prompt,
-      {
-        env: safeEngineEnv(repo, "codex", tempDir),
+    const engineEnv = safeEngineEnv(repo, "codex", tempDir);
+    let result;
+    try {
+      result = await runCommandWithInput(codex, codexArgs, workspace, prompt, {
+        env: engineEnv,
         label: "codex",
         stream: args.streamEngineOutput,
         timeoutSeconds: args.timeoutSeconds,
-      },
-    );
+      });
+    } catch (error) {
+      if (
+        error?.exitCode === 127 &&
+        !engineExecutableRuns(codex, workspace, engineEnv)
+      ) {
+        error.launcherUnusable = true;
+      }
+      throw error;
+    }
     return existsSync(outputPath)
       ? readFileSync(outputPath, "utf8")
       : result.stdout;

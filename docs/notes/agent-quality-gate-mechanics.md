@@ -311,11 +311,13 @@ will execute. An engine that resolves to nothing fails with the override
 variable and the probed paths instead of a bare command-not-found exit. Set
 `AUTOREVIEW_TRACE_COMMANDS=1` to log which candidate won.
 
-A resolved codex that exits 127 is treated as unresolved rather than as a failed
-review. Launcher shims re-resolve the real CLI from `PATH`, and the reviewer
-hands its engine a sanitized environment on purpose, so such a shim can never
-work; the search drops it and continues to the next candidate. When every
-candidate behaves that way, one message names them all.
+A resolved codex that exits 127 **and** cannot report `--version` in the same
+isolated environment is a launcher shim, not a working engine: shims re-resolve
+the real CLI from a `PATH` the reviewer deliberately withholds, so the search
+drops that candidate and continues. An engine that answers `--version` keeps its
+own exit 127 as a review failure, and the search never silently swaps in a
+different installation behind it. When every candidate is a shim, one message
+names them and carries the engine's error.
 
 Set `AUTOREVIEW_HELPER` only when intentionally testing or replacing the
 pinned repo helper with a compatible implementation of its CLI contract.
