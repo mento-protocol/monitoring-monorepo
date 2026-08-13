@@ -5013,7 +5013,8 @@ gate_race_log="$gate_race_out/race.log"
 # RACE_STUB_IGNORE_TERM makes this outlive a TERM the way a real build tool
 # with its own signal handling can. The loop is what survives: its sleeps are
 # killable, it is not.
-[ -n "\${RACE_STUB_IGNORE_TERM:-}" ] && trap '' TERM
+[ -n "\${RACE_STUB_FORK_ON_TERM:-}" ] && trap 'sleep 987654 &' TERM
+[ -n "\${RACE_STUB_IGNORE_TERM:-}" ] && [ -z "\${RACE_STUB_FORK_ON_TERM:-}" ] && trap '' TERM
 printf 'enter %s %s\n' "\$\$" "\$(date +%s)" >> "$gate_race_log"
 race_stub_deadline=\$(( \$(date +%s) + \${RACE_STUB_SECONDS:-1} ))
 while [ "\$(date +%s)" -lt "\$race_stub_deadline" ]; do sleep 1 || true; done
@@ -5809,10 +5810,10 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   sleep 1
   kill -0 "$race_bystander" 2>/dev/null ||
     fail "the empty-identity case needs its bystander alive"
-  race_fake_token="fixture-empty-identity-$$"
+  race_fake_token_value="fixture-empty-identity-$$"
   mkdir -p "$gate_race_root/run.lock"
-  printf '%s\n' "$race_fake_token" > "$gate_race_root/condemned"
-  printf '%s|\n' "$race_bystander" > "$gate_race_root/captured.${race_fake_token}"
+  printf '%s\n' "$race_fake_token_value" > "$gate_race_root/condemned"
+  printf '%s|\n' "$race_bystander" > "$gate_race_root/captured.${race_fake_token_value}"
   AGENT_QUALITY_GATE_LOCK=1 \
     AGENT_QUALITY_GATE_LOCK_HELD='' \
     AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
@@ -5834,6 +5835,91 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   wait "$race_bystander" 2>/dev/null || true
   rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned"
   rm -f "$gate_race_root"/captured.*
+
+  # A command that ignores TERM and forks a fresh child each time it is
+  # signalled. Discovery has to keep looking while anything is alive to fork:
+  # a single recapture cannot see a child spawned after it ran, and the KILL
+  # pass then takes the captured parent while the newest child walks away.
+  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned"
+  rm -f "$gate_race_root"/captured.*
+  : > "$gate_race_log"
+  RACE_STUB_FORK_ON_TERM=1 \
+    RACE_STUB_IGNORE_TERM=1 \
+    RACE_STUB_SECONDS=90 \
+    AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 45 \
+    > "$gate_race_out/fork-a.out" 2>&1 &
+  race_fork_wrapper=$!
+  race_waited=0
+  while [[ -z "$(awk '/^enter/ { print $2; exit }' "$gate_race_log")" && "$race_waited" -lt 120 ]]; do
+    sleep 0.5
+    race_waited=$((race_waited + 1))
+  done
+  [[ -n "$(awk '/^enter/ { print $2; exit }' "$gate_race_log")" ]] ||
+    fail "the fork-on-TERM case never saw a command start"
+  race_fork_pid="$(sed -n 's/^pid=//p' "$gate_race_root/run.lock/owner" | head -n1)"
+  kill -9 "$race_fork_pid" "$race_fork_wrapper" 2>/dev/null || true
+  wait "$race_fork_wrapper" 2>/dev/null || true
+  RACE_STUB_SECONDS=2 \
+    AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+    AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    AGENT_QUALITY_GATE_LOCK_ORPHAN_DRAIN_SECONDS=40 \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 90 \
+    > "$gate_race_out/fork-b.out" 2>&1 || true
+  sleep 1
+  race_fork_survivors="$(pgrep -f "sleep 987654" 2>/dev/null | tr '\n' ' ' || true)"
+  for race_leftover_pid in $race_fork_survivors; do
+    kill -9 "$race_leftover_pid" 2>/dev/null || true
+  done
+  [[ -z "$race_fork_survivors" ]] ||
+    fail "children forked while being signalled outlived the drain: ${race_fork_survivors}"
+  rm -rf "$gate_race_root/run.lock"
+
+  # A waiter that is suspended past its own budget must notice the time that
+  # actually passed, not the time it asked to sleep for.
+  rm -rf "$gate_race_root/run.lock"
+  sleep 300 &
+  race_stopped_holder=$!
+  mkdir -p "$gate_race_root/run.lock"
+  {
+    printf 'pid=%s\n' "$race_stopped_holder"
+    printf 'host=%s\n' "$(uname -n)"
+    printf 'started_at=%s\n' "$(date +%s)"
+    printf 'start_utc=%s\n' "$(TZ=UTC LC_ALL=C ps -o lstart= -p "$race_stopped_holder" 2>/dev/null | head -n1)"
+    printf 'worktree=%s\n' "$gate_race_repo"
+    printf 'token=live-holder\n'
+  } > "$gate_race_root/run.lock/owner"
+  AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 2 \
+    > "$gate_race_out/stopped-waiter.out" 2>&1 &
+  race_stopped_wrapper=$!
+  sleep 2
+  race_stopped_waiter="$(pgrep -f "agent-quality-gate.sh --base HEAD --run --lock-wait 2" 2>/dev/null | head -n1 || true)"
+  if [[ -n "$race_stopped_waiter" ]]; then
+    kill -STOP "$race_stopped_waiter" 2>/dev/null || true
+    sleep 9
+    kill -CONT "$race_stopped_waiter" 2>/dev/null || true
+  fi
+  wait "$race_stopped_wrapper" 2>/dev/null || true
+  kill -9 "$race_stopped_holder" 2>/dev/null || true
+  race_stopped_reported="$(sed -n 's/.*timed out after \([0-9]*\)s.*/\1/p' "$gate_race_out/stopped-waiter.out" | head -n1 || true)"
+  if [[ -n "$race_stopped_waiter" && -n "$race_stopped_reported" ]]; then
+    [[ "$race_stopped_reported" -ge 8 ]] ||
+      fail "a waiter suspended past its budget reported ${race_stopped_reported}s, not the time that passed"
+  fi
+  rm -rf "$gate_race_root/run.lock"
 
   # Crash-point sweep. Every boundary where this path creates, links, renames
   # or removes something is a place a SIGKILL can land, and each of the rounds

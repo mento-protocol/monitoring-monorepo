@@ -27,6 +27,10 @@ const SYMBOL_AWARE_RULE_ID =
 const LINT_RUNNER_TIMEOUT_MS = 120_000;
 // In-process `calculateConfigForFile` on a cold ESLint cache: measured ~3.8s
 // under the same load, milliseconds once warm.
+// Every test that reaches `calculateConfigForFile` carries this, not just the
+// one that first needed it: the cost is the same wherever it is paid, and a
+// sibling left on vitest's 5s default is the same starvation-reported-as-
+// assertion-failure this suite exists to stop misreporting (issue #1819).
 const CONFIG_LOOKUP_TIMEOUT_MS = 30_000;
 const execFileAsync = promisify(execFile);
 const eslint = new ESLint({
@@ -102,16 +106,24 @@ describe("browser runtime API policy", () => {
     expect(packageJson.browserslist).toEqual(browserApiPolicy.browsers);
   });
 
-  it("uses the exact blocked sets in the effective client config", async () => {
-    const rules = await browserApiRules(CLIENT_FIXTURE_PATH);
-    expect(rules.property).toBeUndefined();
-    expect(rules.symbolAware).toEqual([2, browserApiPolicy.restrictions]);
-  });
+  it(
+    "uses the exact blocked sets in the effective client config",
+    async () => {
+      const rules = await browserApiRules(CLIENT_FIXTURE_PATH);
+      expect(rules.property).toBeUndefined();
+      expect(rules.symbolAware).toEqual([2, browserApiPolicy.restrictions]);
+    },
+    CONFIG_LOOKUP_TIMEOUT_MS,
+  );
 
-  it("does not configure a generic property ban", async () => {
-    const rules = await browserApiRules(CLIENT_FIXTURE_PATH);
-    expect(rules.property).toBeUndefined();
-  });
+  it(
+    "does not configure a generic property ban",
+    async () => {
+      const rules = await browserApiRules(CLIENT_FIXTURE_PATH);
+      expect(rules.property).toBeUndefined();
+    },
+    CONFIG_LOOKUP_TIMEOUT_MS,
+  );
 
   it("reports every blocked API with its intended rule and message", async () => {
     const messages = await browserApiMessages("blocked");
@@ -254,5 +266,6 @@ describe("browser runtime API policy", () => {
       expect(rules.symbolAware).toBeUndefined();
       expect(messages).toEqual([]);
     },
+    CONFIG_LOOKUP_TIMEOUT_MS,
   );
 });
