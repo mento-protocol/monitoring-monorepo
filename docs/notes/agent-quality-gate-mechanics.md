@@ -257,17 +257,42 @@ requires manual cleanup.
 | after a taken record is judged NOT stale, before it is put back              | same as the take boundary above                      | same as the take boundary above                                                                 |
 | during `rm -rf` in release                                                   | lock directory partially gone                        | either it is absent (take it) or record-less (grace, then publish)                              |
 
-Two rules make that table hold. Every file this path creates is named with its
-creator's PID and registered with the exit trap **before** it exists, so no
-cleanup can race its own creation or touch another run's file. And a lock with
-no record is not evidence of an absent holder until the remnants have been
-read — a remnant naming a live process is the owner record, misfiled, and gets
-linked back rather than swept away.
+#### The rules the table rests on
 
-The self-test sweeps these boundaries by killing a run at each named crash
-point and asserting the next run still reaches its mapped commands and
-releases the lock. Adding an operation to this path means adding its boundary
-to the table and to that sweep.
+Crashes are only half of it. The other half is ordinary interleaving: two runs
+can each hold a verdict formed before the world changed, and act on it after.
+Four rules cover both, and every fix on this path has been an instance of one
+of them.
+
+1. **Every file this path creates carries its creator's PID and is registered
+   with the exit trap before it exists.** Cleanup can then never race its own
+   creation, and never names another run's file.
+2. **A lock with no record is not evidence of an absent holder until the
+   remnants have been read.** A remnant naming a live process is the owner
+   record, misfiled; it gets linked back. Only a remnant whose recorded
+   identity is verified dead may be deleted — and a claim settles remnants
+   immediately before publishing, not once at the top of a poll.
+3. **A verdict is evidence, never authority.** Ownerless, stale, spent-remnant:
+   each is re-checked immediately before the act it authorises, because the
+   gap between deciding and acting is exactly where another run publishes.
+4. **A holder re-reads its own record before executing anything.** Acquiring
+   the lock and reaching the first mapped command are separated by real work.
+   Anything that unseats the record in between — a waiter acting on a stale
+   verdict, a hand-deleted lock — is caught here and the run stops with
+   `this run no longer holds the gate run lock`, having executed nothing.
+
+Rule 4 is the one that does not depend on getting an interleaving right, and
+it is why the others are allowed to be merely careful: they keep runs from
+tripping over each other, while rule 4 makes any residual displacement a single
+loud abort instead of two runs on one machine. Release stays token-guarded, so
+a run that stops there cannot delete the lock of whoever holds it now.
+
+The self-test sweeps the crash boundaries by killing a run at each named point
+and asserting the next run still reaches its mapped commands and releases the
+lock, and pins the interleavings — two waiters on one stale record, a stalled
+creator, a cached ownerless verdict, and a displaced holder — as separate
+cases. Adding an operation to this path means adding its boundary to the table
+and to that sweep.
 
 A lock with no usable owner record — no file at all, or an unfinished one from
 a run killed mid-write — counts as abandoned after a 30-second grace, measured

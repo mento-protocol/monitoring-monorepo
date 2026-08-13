@@ -474,12 +474,15 @@ gate_lock_recover_hidden_record() {
       # reading loses nothing: ours is then the stale copy and just goes away.
       if ln "$remnant" "$lock/owner" 2>/dev/null; then
         echo "Recovered the record of live holder pid ${pid} from an interrupted reclaim." >&2
+        rm -f "$remnant"
         recovered=0
       fi
+      # If the link failed the canonical path already holds something. This
+      # copy still names a live process, so it stays: a record naming a live
+      # holder is evidence, and only a verified-dead one may be deleted.
+    else
+      rm -f "$remnant"
     fi
-    # Whatever it named, this copy has served its purpose: either it is now
-    # linked as the owner record, or it describes a holder that is gone.
-    rm -f "$remnant"
   done
   return "$recovered"
 }
@@ -659,6 +662,26 @@ claim_gate_run_lock() {
   return 0
 }
 
+# The backstop, and the only rule here that does not depend on getting an
+# interleaving right. Everything above tries to make displacement impossible;
+# this makes it detectable. Acquiring the lock and reaching the first mapped
+# command are separated by real work, and anything that unseats this run's
+# record in between — a waiter acting on a verdict formed before we published,
+# a hand-deleted lock — leaves us believing we hold a lock we do not. Reading
+# our own record back here turns that into one loud abort instead of two runs
+# on one machine. Release stays token-guarded, so stopping here cannot delete
+# the lock of whoever holds it now.
+assert_gate_run_lock_still_ours() {
+  local recorded
+  [[ -n "$gate_lock_dir" ]] || return 0
+  recorded="$(gate_lock_owner_field "$gate_lock_dir" token)"
+  [[ "$recorded" == "$gate_lock_token" ]] && return 0
+  echo "error: this run no longer holds the gate run lock at ${gate_lock_dir}." >&2
+  echo "Another run took it over before this one reached its mapped commands." >&2
+  echo "Nothing has been executed. Re-run, and it will queue behind the current holder." >&2
+  exit 2
+}
+
 release_gate_run_lock() {
   local recorded
   [[ -n "$gate_lock_dir" ]] || return 0
@@ -756,7 +779,15 @@ acquire_gate_run_lock() {
 
     if [[ -n "$stale_reason" ]]; then
       gate_lock_test_delay "${AGENT_QUALITY_GATE_LOCK_RECLAIM_DELAY_SECONDS:-}"
-      if [[ ! -e "$lock/owner" ]]; then
+      # The verdict above was formed before the delay; re-settle the remnants
+      # right here, because a record in flight under a remnant means an empty
+      # canonical path is not evidence that the lock is free. If that restores
+      # a live holder, this verdict is void and we go back to waiting.
+      if gate_lock_recover_hidden_record "$lock"; then
+        owner_pid="$(gate_lock_owner_field "$lock" pid)"
+        owner_host="$(gate_lock_owner_field "$lock" host)"
+        owner_worktree="$(gate_lock_owner_field "$lock" worktree)"
+      elif [[ ! -e "$lock/owner" ]]; then
         # Nothing in the way: publishing the record is the whole contest.
         # Whoever links it into place first holds the lock; everyone else,
         # including the creator that stalled, finds their publish refused.
@@ -3502,6 +3533,9 @@ fi
 # something: a dry run, a fresh-stamp skip, and a package-script refusal all
 # exit above without ever competing for the machine.
 acquire_gate_run_lock
+# Test-only: widens the gap between holding the lock and checking we still do,
+# which is otherwise as short as the mapping work between them.
+gate_lock_test_delay "${AGENT_QUALITY_GATE_LOCK_HELD_DELAY_SECONDS:-}"
 
 # Re-check freshness after the wait. The run we queued behind may have stamped
 # this exact fingerprint while we waited — the pre-push hook queued behind the
@@ -4399,6 +4433,11 @@ run_quality_phase() {
 # validated file invalidates all of them) or that aged past the TTL, so the file
 # stays bounded and only genuine resume candidates remain.
 prune_command_stamps
+
+# Last thing before anything is executed: confirm this run still holds the lock
+# it took. Mapping and stamp work happen between acquiring and here, which is
+# room enough for another run to have taken it over.
+assert_gate_run_lock_still_ours
 
 run_prerequisite_phase "preflight" "${preflight_commands[@]+"${preflight_commands[@]}"}"
 run_prerequisite_phase "codegen" "${codegen_commands[@]+"${codegen_commands[@]}"}"

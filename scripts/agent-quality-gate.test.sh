@@ -5029,6 +5029,7 @@ STUB
       AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
       AGENT_QUALITY_GATE_LOCK_RECLAIM_DELAY_SECONDS="$2" \
       AGENT_QUALITY_GATE_LOCK_CLAIM_DELAY_SECONDS="$3" \
+      AGENT_QUALITY_GATE_LOCK_TAKEN_DELAY_SECONDS="${5:-0}" \
       "$repo_root/scripts/agent-quality-gate.sh" \
       --base HEAD --run --lock-wait 120 \
       > "$gate_race_repo/$1.out" 2>&1 || true
@@ -5050,9 +5051,12 @@ STUB
     ' "$gate_race_log")"
     [[ -z "$overlapping" ]] ||
       fail "${label}: two gate runs executed mapped commands at once (${overlapping})"
+    # An expected count of 0 means "do not check": where the backstop can fire,
+    # stopping a displaced run is as correct as running it, so the number that
+    # reach a mapped command is not the invariant — not overlapping is.
     starts="$(awk '/^enter/ { c++ } END { print c + 0 }' "$gate_race_log")"
-    [[ "$starts" -eq 2 ]] ||
-      fail "${label}: expected both runs to execute the mapped command, saw ${starts}"
+    [[ "${2:-2}" -eq 0 || "$starts" -eq "${2:-2}" ]] ||
+      fail "${label}: expected ${2:-2} run(s) to execute the mapped command, saw ${starts}"
   }
 
   # One stale lock, two waiters. The late waiter forms its verdict first, then
@@ -5367,6 +5371,77 @@ STUB
     [[ ! -d "$gate_race_root/run.lock" ]] ||
       fail "a lock left holding only a spent remnant must be reclaimed and released"
   fi
+
+  # A verdict is only ever evidence, never authority. A creator stalls past the
+  # grace, two waiters both conclude the lock is ownerless, and by the time they
+  # act the creator has published: one of them takes that live record away to
+  # inspect it, and the other finds the canonical path empty. Without settling
+  # the remnants immediately before publishing, the second waiter claims a lock
+  # whose holder is merely in flight, and three runs execute at once.
+  rm -rf "$gate_race_root/run.lock"
+  : > "$gate_race_log"
+  race_waiter creator 0 5 8 0 &
+  race_creator=$!
+  sleep 1
+  race_waiter takerA 6 0 3 4 &
+  race_taker_a=$!
+  race_waiter takerB 7 0 3 0 &
+  race_taker_b=$!
+  wait "$race_creator" 2>/dev/null || true
+  wait "$race_taker_a" 2>/dev/null || true
+  wait "$race_taker_b" 2>/dev/null || true
+  assert_runs_did_not_overlap "cached ownerless verdict" 0
+  # Every one of the three must have either executed alone or stopped saying
+  # why. A run that quietly does neither would mean work was skipped without
+  # anyone noticing, which is its own bug.
+  race_accounted="$(awk '/^enter/ { c++ } END { print c + 0 }' "$gate_race_log")"
+  for race_tag in creator takerA takerB; do
+    grep -q "no longer holds the gate run lock" "$gate_race_repo/$race_tag.out" &&
+      race_accounted=$((race_accounted + 1))
+  done
+  [[ "$race_accounted" -eq 3 ]] ||
+    fail "cached ownerless verdict: all three runs must execute or abort loudly, accounted ${race_accounted}"
+  rm -rf "$gate_race_root/run.lock"
+
+  # The backstop. Everything above narrows the interleavings; this one makes a
+  # displacement that slips through detectable rather than fatal. A run whose
+  # record is replaced between taking the lock and reaching its first mapped
+  # command must stop, and must not delete the record that replaced it.
+  : > "$gate_race_log"
+  RACE_STUB_SECONDS=1 \
+    AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD_DELAY_SECONDS=6 \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 30 \
+    > "$gate_race_repo/displaced.out" 2>&1 &
+  race_displaced=$!
+  race_waited=0
+  while [[ ! -r "$gate_race_root/run.lock/owner" && "$race_waited" -lt 30 ]]; do
+    sleep 0.5
+    race_waited=$((race_waited + 1))
+  done
+  [[ -r "$gate_race_root/run.lock/owner" ]] ||
+    fail "the displaced-holder case never saw the run publish its record"
+  {
+    printf 'pid=%s\n' "$$"
+    printf 'host=%s\n' "$(uname -n)"
+    printf 'started_at=%s\n' "$(date +%s)"
+    printf 'worktree=%s\n' "$gate_race_repo"
+    printf 'token=somebody-else\n'
+  } > "$gate_race_root/run.lock/owner"
+  wait "$race_displaced" 2>/dev/null && race_displaced_exit=0 || race_displaced_exit=$?
+  [[ "$race_displaced_exit" == "2" ]] ||
+    fail "a displaced holder must stop with exit 2, got ${race_displaced_exit}"
+  grep -q "no longer holds the gate run lock" "$gate_race_repo/displaced.out" ||
+    fail "a displaced holder must say so before stopping"
+  [[ ! -s "$gate_race_log" ]] ||
+    fail "a displaced holder must stop before executing any mapped command"
+  [[ "$(sed -n 's/^token=//p' "$gate_race_root/run.lock/owner" | head -n1)" == "somebody-else" ]] ||
+    fail "a displaced holder must not delete the record that replaced its own"
+  rm -rf "$gate_race_root/run.lock"
 
   # Crash-point sweep. Every boundary where this path creates, links, renames
   # or removes something is a place a SIGKILL can land, and each of the rounds
