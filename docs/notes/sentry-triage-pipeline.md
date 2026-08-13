@@ -744,17 +744,25 @@ page can each raise it), or `Reverse family verification did not converge …` �
 a bounded re-attempt is never the silent, healthy-looking one the Window line
 exists to eliminate.
 
-The selector reads only PRs whose head branch is in **this** repo.
-`gh pr list --head` matches by branch name, which fork PRs also carry, so on a
-public repo with a deterministic `sentry-autofix/<short-id>` branch anyone could
-otherwise present a PR that the leg reads as its own prior fix — which would
+The selector reads only PRs whose head branch is in **this** repo. A branch-name
+match returns fork PRs too — they carry the same head branch — so on a public
+repo with a deterministic `sentry-autofix/<short-id>` branch anyone could
+otherwise present a PR that the leg reads as its own prior fix, which would
 comment that PR's url onto the queue stub, apply the terminal marker, and stand
-the stub's whole family down behind it. Every branch-name PR read requires
-`isCrossRepository: false` **and** a matching head-repository owner, and reads a
-page rather than a single row so a spoof cannot hide a real PR behind it — the
-selector's dedup, the normal finalize path's relink-under-marker and dup-guard
-reads (PR #1810 follow-up), and the finalize reconcile step alike. A fork PR on
-the branch name is treated as **not ours**: the normal path opens our own PR
+the stub's whole family down behind it. So every ownership read hits the REST
+pulls endpoint with an **owner-qualified** filter,
+`GET /repos/{owner}/{repo}/pulls?head=<owner>:<branch>&base=main&state=open`:
+GitHub excludes forks **server-side** (a fork's head-repo owner differs), so no
+page of spoof PRs can hide the real one, and `base=main` pins the base the leg
+always opens against — open-PR uniqueness is per head+base, so at most one row
+returns. Each returned row is still re-checked as defense in depth, against the
+REST shape: `.head.repo.fork === false` **and** `.head.repo.owner.login` equal to
+`<owner>` (lowercased), failing **closed** on any missing field. The endpoint
+returns neither `isCrossRepository` nor `headRepositoryOwner`, so never reach for
+those. This holds for all four lookups: the selector's dedup
+(`openAutofixPrExists`), the normal finalize path's relink-under-marker and
+dup-guard reads (PR #1810 follow-up), and the finalize reconcile step. A fork PR
+on the branch name is treated as **not ours**: the normal path opens our own PR
 instead of adopting it, and neither reconcile path relinks to it.
 
 The LLM agent runs in a **read-only `agent` job** (contents:read + issues:read,
