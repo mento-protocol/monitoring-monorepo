@@ -5531,15 +5531,19 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     fail "the orphan case never saw a mapped command start"
   # Suspending the watchdog is what "descheduled" means here: nothing is left
   # that would clean up after the gate, so the next run has to do it itself.
+  # Kill the gate SHELL — the PID it recorded — not the wrapper around it.
+  race_victim_pid="$(sed -n 's/^pid=//p' "$gate_race_root/run.lock/owner" | head -n1)"
   race_watchdogs=""
   if [[ "$race_watchdog_state" == "suspended" ]]; then
-    race_watchdogs="$(pgrep -f "collect_tree" 2>/dev/null | tr '\n' ' ')"
+    # Anchored to THIS gate by parentage: the watchdog is a child of the gate
+    # shell, which is still alive here. A bare "collect_tree" match is every
+    # watchdog on the machine — suspending those would disable unrelated
+    # runs' timeouts mid-flight.
+    race_watchdogs="$(pgrep -P "$race_victim_pid" -f "collect_tree" 2>/dev/null | tr '\n' ' ')"
     [[ -n "$race_watchdogs" ]] ||
       fail "the suspended-watchdog case found no watchdog to suspend"
     for race_wd in $race_watchdogs; do kill -STOP "$race_wd" 2>/dev/null || true; done
   fi
-  # Kill the gate SHELL — the PID it recorded — not the wrapper around it.
-  race_victim_pid="$(sed -n 's/^pid=//p' "$gate_race_root/run.lock/owner" | head -n1)"
   kill -9 "$race_victim_pid" 2>/dev/null || true
   kill -9 "$race_victim_wrapper" 2>/dev/null || true
   wait "$race_victim_wrapper" 2>/dev/null || true
@@ -5603,9 +5607,12 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   race_chain_orphan="$(awk '/^enter/ { print $2; exit }' "$gate_race_log")"
   [[ -n "$race_chain_orphan" ]] ||
     fail "the crash-chain case never saw A start a command"
-  race_chain_watchdogs="$(pgrep -f "collect_tree" 2>/dev/null | tr '\n' ' ')"
-  for race_wd in $race_chain_watchdogs; do kill -STOP "$race_wd" 2>/dev/null || true; done
   race_chain_a_pid="$(sed -n 's/^pid=//p' "$gate_race_root/run.lock/owner" | head -n1)"
+  # Anchored to A's gate by parentage (A is still alive here) — a bare
+  # "collect_tree" match is every watchdog on the machine, including
+  # unrelated runs'.
+  race_chain_watchdogs="$(pgrep -P "$race_chain_a_pid" -f "collect_tree" 2>/dev/null | tr '\n' ' ')"
+  for race_wd in $race_chain_watchdogs; do kill -STOP "$race_wd" 2>/dev/null || true; done
   kill -9 "$race_chain_a_pid" "$race_chain_a_wrapper" 2>/dev/null || true
   wait "$race_chain_a_wrapper" 2>/dev/null || true
 
@@ -5780,9 +5787,12 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   race_remnant_orphan="$(awk '/^enter/ { print $2; exit }' "$gate_race_log")"
   [[ -n "$race_remnant_orphan" ]] ||
     fail "the remnant-token case never saw a command start"
-  race_remnant_watchdogs="$(pgrep -f "collect_tree" 2>/dev/null | tr '\n' ' ')"
-  for race_wd in $race_remnant_watchdogs; do kill -STOP "$race_wd" 2>/dev/null || true; done
   race_remnant_a_pid="$(sed -n 's/^pid=//p' "$gate_race_root/run.lock/owner" | head -n1)"
+  # Anchored to A's gate by parentage (A is still alive here) — a bare
+  # "collect_tree" match is every watchdog on the machine, including
+  # unrelated runs'.
+  race_remnant_watchdogs="$(pgrep -P "$race_remnant_a_pid" -f "collect_tree" 2>/dev/null | tr '\n' ' ')"
+  for race_wd in $race_remnant_watchdogs; do kill -STOP "$race_wd" 2>/dev/null || true; done
   kill -9 "$race_remnant_a_pid" "$race_remnant_a_wrapper" 2>/dev/null || true
   wait "$race_remnant_a_wrapper" 2>/dev/null || true
 
