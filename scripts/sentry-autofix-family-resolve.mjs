@@ -140,8 +140,18 @@ export async function resolveFamilies(runGh, repo, candidates, cap) {
         !handledQueried.has(id) &&
         isLocalFamilyId(id, project),
     );
+    // Run the budgeted recheck whenever there ARE rechecks — even at zero
+    // remaining capacity. The helper can't do lookups it has no budget for, but
+    // it MUST still RECORD the overflow (increment handledOverflow) so an un-run
+    // recheck surfaces on the run record instead of a SILENT truncation. Skipping
+    // it at zero capacity (the prior `&& handledBudget.remaining > 0` guard) is
+    // exactly that silent truncation: a nonterminal hub H that links finalist P
+    // to a terminal sibling Q puts Q in recheckIds, and dropping the recheck
+    // leaves Q's marker unread, redundantly selects P, AND reports overflow 0 —
+    // byte-identical to a healthy run, the failure mode this PR's Window /
+    // reverse-probe surfacing exists to eliminate.
     const newlyHandled =
-      recheckIds.length > 0 && handledBudget.remaining > 0
+      recheckIds.length > 0
         ? await listHandledShortIds(runGh, repo, recheckIds, {
             queried: handledQueried,
             budget: handledBudget,

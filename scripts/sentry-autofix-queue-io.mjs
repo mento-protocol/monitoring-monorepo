@@ -235,31 +235,56 @@ export async function listHandledShortIds(
   ].filter((id) => !queried.has(id));
   const capacity = Math.max(0, budget.remaining ?? 0);
   const queryIds = ids.slice(0, capacity);
-  if (ids.length > queryIds.length) {
-    const dropped = ids.length - queryIds.length;
-    budget.overflow = (budget.overflow ?? 0) + dropped;
+  const droppedIds = ids.slice(queryIds.length);
+  if (droppedIds.length > 0) {
+    budget.overflow = (budget.overflow ?? 0) + droppedIds.length;
+    // Mark the un-run ids as queried too. The budget is shared across the run's
+    // calls — the declared-id pass AND the fixpoint's rechecks — and a recheck
+    // re-surfaces the same member ids every iteration; without this, one
+    // un-runnable id would be re-counted into overflow once per iteration. The
+    // per-run overflow must reflect each DISTINCT un-runnable id once. It is also
+    // correct on its face: the budget is spent, so a later pass must not
+    // re-attempt these ids either.
+    for (const droppedId of droppedIds) queried.add(droppedId);
     process.stderr.write(
-      `note: ${ids.length} distinct declared family ids exceed the per-run MAX_HANDLED_ID_QUERIES budget (${MAX_HANDLED_ID_QUERIES}); ${dropped} are treated as not-handled this run (fails toward MORE candidates).\n`,
+      `note: ${ids.length} distinct declared family ids exceed the per-run MAX_HANDLED_ID_QUERIES budget (${MAX_HANDLED_ID_QUERIES}); ${droppedIds.length} are treated as not-handled this run (fails toward MORE candidates).\n`,
     );
   }
   budget.remaining = capacity - queryIds.length;
   const handled = new Set();
   for (const id of queryIds) {
     queried.add(id);
-    const stdout = await runGh([
-      "issue",
-      "list",
-      "--repo",
-      repo,
-      "--state",
-      "all",
-      "--search",
-      `"${id}" in:title label:"${SENTRY_TRIAGE_QUEUE_LABEL}"`,
-      "--json",
-      "number,title,labels",
-      "--limit",
-      "20",
-    ]);
+    let stdout;
+    try {
+      stdout = await runGh([
+        "issue",
+        "list",
+        "--repo",
+        repo,
+        "--state",
+        "all",
+        "--search",
+        `"${id}" in:title label:"${SENTRY_TRIAGE_QUEUE_LABEL}"`,
+        "--json",
+        "number,title,labels",
+        "--limit",
+        "20",
+      ]);
+    } catch (err) {
+      // Fail-SOFT per id, matching the reverse `in:comments` probe: a transient
+      // GitHub/subprocess failure on ONE lookup must not reject the whole call
+      // and abort the select job under `set -euo pipefail` — that breaks the
+      // "select ALWAYS emits a valid JSON array … never a failure" invariant the
+      // workflow header asserts. Treat THIS id as not-handled this run (it stays
+      // a candidate — fails toward MORE candidates) and continue so the other ids
+      // still resolve. The id is already marked `queried` and budget-spent above,
+      // so it is not re-attempted.
+      const message = err instanceof Error ? err.message : String(err);
+      process.stderr.write(
+        `skip handled-id lookup for ${id}: ${message}; treated as not-handled this run (fails toward MORE candidates).\n`,
+      );
+      continue;
+    }
     let parsed;
     try {
       parsed = JSON.parse(stdout);
