@@ -519,9 +519,51 @@ gate_run_command_tag() {
   printf 'agentqg:%s' "${gate_lock_token:-nolock-$$}"
 }
 
-# The token of a dead run this one took the lock from, so its leftovers can be
-# confirmed gone before this run executes anything.
-gate_lock_condemned_token=""
+# The lock root, kept once resolved: the condemned list lives beside the lock
+# rather than inside it, because the lock directory is what gets reclaimed and
+# the obligation has to outlive that.
+gate_lock_root_dir=""
+
+gate_lock_condemned_path() {
+  [[ -n "$gate_lock_root_dir" ]] || return 1
+  printf '%s/condemned' "$gate_lock_root_dir"
+}
+
+# Write down that a dead run's commands are somebody's problem now, BEFORE
+# taking over from it. Holding that only in a shell variable makes it a promise
+# this process cannot keep: a run killed between publishing its record and
+# draining leaves the previous run's survivors with nobody who knows about
+# them. On disk, the next run inherits the obligation instead.
+#
+# Appended inside the reclaim election, which is already serialised by the
+# rename test-and-set: whoever won the record is the only writer here, and a
+# single short line is one append. Duplicates are harmless — draining a token
+# whose processes are already gone is a no-op — which is the right failure
+# direction for the crash between this write and the publish it precedes.
+record_condemned_run() {
+  local token="$1"
+  local path
+  [[ -n "$token" ]] || return 0
+  path="$(gate_lock_condemned_path)" || return 0
+  printf '%s\n' "$token" >> "$path" 2>/dev/null || true
+}
+
+# Every run drains the whole outstanding set before executing anything, not
+# just the holder it personally condemned. That is what makes a chain of
+# crashes safe: a third run inherits both the run it reclaimed and whatever
+# that run had not finished clearing.
+drain_condemned_runs() {
+  local path token
+  path="$(gate_lock_condemned_path)" || return 0
+  [[ -r "$path" ]] || return 0
+  while IFS= read -r token; do
+    [[ -n "$token" ]] || continue
+    drain_condemned_run_commands "$token"
+  done < "$path"
+  # Removed only here, with every token confirmed gone. A drain that cannot
+  # confirm exits instead, leaving the list for whoever comes next.
+  rm -f "$path"
+}
 
 # Upper bound on confirming a dead run's commands are gone — a bound on the
 # check, not the mechanism. The check itself is positive: look for processes
@@ -785,6 +827,7 @@ acquire_gate_run_lock() {
     return 0
   fi
   lock="$root/run.lock"
+  gate_lock_root_dir="$root"
   this_host="$(uname -n)"
 
   while :; do
@@ -886,12 +929,12 @@ acquire_gate_run_lock() {
             "$gate_lock_reclaim_tmp" "$owner_pid" "$owner_token" "$owner_start"; then
             echo "Gate run lock at ${lock} is stale (${stale_reason}); reclaiming it." >&2
             # The holder is gone, but a gate killed mid-command leaves that
-            # command running. Remember whose it was — its processes carry that
-            # token — and confirm they are gone just before this run's own
-            # commands, not here: draining between judging the record and
-            # publishing would hand another waiter the same verdict and the
-            # same window to act on it.
-            gate_lock_condemned_token="$owner_token"
+            # command running. Write down whose it was — on disk, before taking
+            # over, so the obligation survives this process — and confirm they
+            # are gone just before this run's own commands. Not here: draining
+            # between judging the record and publishing would hand another
+            # waiter the same verdict and the same window to act on it.
+            record_condemned_run "$owner_token"
             rm -f "$gate_lock_reclaim_tmp"
             gate_lock_reclaim_tmp=""
             gate_lock_reclaim_origin=""
@@ -4552,7 +4595,7 @@ assert_gate_run_lock_still_ours
 # confirm they are gone before executing anything. Asked of the machine, not of
 # a clock: the watchdogs that would clean them up can be descheduled by the same
 # pressure that killed the gate, or suspended along with the laptop.
-drain_condemned_run_commands "$gate_lock_condemned_token"
+drain_condemned_runs
 
 run_prerequisite_phase "preflight" "${preflight_commands[@]+"${preflight_commands[@]}"}"
 run_prerequisite_phase "codegen" "${codegen_commands[@]+"${codegen_commands[@]}"}"

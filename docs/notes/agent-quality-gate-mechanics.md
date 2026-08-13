@@ -257,6 +257,8 @@ requires manual cleanup.
 | after judging a taken record stale, before the new record is published            | no `owner`, no remnant                                                                                                              | no complete record, so after the grace it publishes its own                                                                      |
 | after a taken record is judged NOT stale, before it is put back                   | same as the take boundary above                                                                                                     | same as the take boundary above                                                                                                  |
 | during `rm -rf` in release                                                        | lock directory partially gone                                                                                                       | either it is absent (take it) or record-less (grace, then publish)                                                               |
+| after noting a condemned run, before publishing the replacement                   | the condemned list names a run whose record is still in place                                                                       | reclaims that record again and notes the same token twice; draining a token whose processes are gone is a no-op                  |
+| after publishing a replacement, before draining what it condemned                 | the condemned list names a run nobody is clearing                                                                                   | inherits the whole list, not just the holder it reclaimed, so a chain of crashes loses nothing                                   |
 
 #### The rules the table rests on
 
@@ -300,10 +302,22 @@ of them.
    disappeared, which is the quicker path in the ordinary case. It is not the
    guarantee: a watchdog can be descheduled by the same host pressure that
    killed the gate, or suspended with the laptop, and a timer sized to it
-   would be waiting on something that may not run. `AGENT_QUALITY_GATE_LOCK_
-ORPHAN_DRAIN_SECONDS` (120s) bounds the confirmation, not the mechanism:
-   reaching it means commands from a dead run are still alive, and the gate
-   refuses to run rather than start beside them.
+   would be waiting on something that may not run.
+   `AGENT_QUALITY_GATE_LOCK_ORPHAN_DRAIN_SECONDS` (120s) bounds the
+   confirmation, not the mechanism: reaching it means commands from a dead run
+   are still alive, and the gate refuses to run rather than start beside them.
+
+6. **An obligation one run owes the next lives on disk, not in a variable.**
+   Taking a lock from a dead holder makes this run responsible for that
+   holder's leftovers, and a process that is itself killed cannot hand a shell
+   variable to its successor. The condemned run's token is appended to
+   `condemned` in the lock **root** — beside the lock, because the lock
+   directory is the thing being reclaimed — before the replacement record is
+   published, and removed only once its processes are confirmed gone. Every
+   run drains the entire outstanding list rather than only the holder it
+   reclaimed, so a chain of crashed reclaimers accumulates obligations instead
+   of dropping them. Written-then-crashed costs a redundant no-op drain; the
+   opposite order costs the overlap, which is why the write comes first.
 
 Rule 4 is the one that does not depend on getting an interleaving right, and
 it is why the others are allowed to be merely careful: they keep runs from

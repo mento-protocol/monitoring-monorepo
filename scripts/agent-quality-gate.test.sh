@@ -5524,6 +5524,95 @@ STUB
   rm -rf "$gate_race_root/run.lock"
   done
 
+  # A chain of crashes. A is killed mid-command with its watchdog suspended, so
+  # nothing self-cleans; B reclaims A and publishes, then is killed before it
+  # can drain A; C reclaims B. If the obligation to drain A lived only in B's
+  # shell variable it died with B, and C runs beside A's survivor. Every run
+  # drains the whole outstanding set, so C inherits A's along with B's.
+  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned"
+  : > "$gate_race_log"
+  RACE_STUB_SECONDS=45 \
+    AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 60 \
+    > "$gate_race_repo/chain-a.out" 2>&1 &
+  race_chain_a_wrapper=$!
+  race_waited=0
+  while [[ -z "$(awk '/^enter/ { print $2; exit }' "$gate_race_log")" && "$race_waited" -lt 120 ]]; do
+    sleep 0.5
+    race_waited=$((race_waited + 1))
+  done
+  race_chain_orphan="$(awk '/^enter/ { print $2; exit }' "$gate_race_log")"
+  [[ -n "$race_chain_orphan" ]] ||
+    fail "the crash-chain case never saw A start a command"
+  race_chain_watchdogs="$(pgrep -f "collect_tree" 2>/dev/null | tr '\n' ' ')"
+  for race_wd in $race_chain_watchdogs; do kill -STOP "$race_wd" 2>/dev/null || true; done
+  race_chain_a_pid="$(sed -n 's/^pid=//p' "$gate_race_root/run.lock/owner" | head -n1)"
+  kill -9 "$race_chain_a_pid" "$race_chain_a_wrapper" 2>/dev/null || true
+  wait "$race_chain_a_wrapper" 2>/dev/null || true
+
+  # B: reclaims A, publishes, and dies inside the window before draining.
+  RACE_STUB_SECONDS=3 \
+    AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+    AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD_DELAY_SECONDS=25 \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 60 \
+    > "$gate_race_repo/chain-b.out" 2>&1 &
+  race_chain_b_wrapper=$!
+  race_waited=0
+  race_chain_b_pid=""
+  while [[ "$race_waited" -lt 180 ]]; do
+    race_chain_b_pid="$(sed -n 's/^pid=//p' "$gate_race_root/run.lock/owner" 2>/dev/null | head -n1)"
+    [[ -n "$race_chain_b_pid" && "$race_chain_b_pid" != "$race_chain_a_pid" ]] && break
+    sleep 0.5
+    race_waited=$((race_waited + 1))
+  done
+  [[ -n "$race_chain_b_pid" && "$race_chain_b_pid" != "$race_chain_a_pid" ]] ||
+    fail "the crash-chain case never saw B publish its record"
+  [[ -r "$gate_race_root/condemned" ]] ||
+    fail "B must record what it condemned before taking over, not after"
+  kill -9 "$race_chain_b_pid" "$race_chain_b_wrapper" 2>/dev/null || true
+  wait "$race_chain_b_wrapper" 2>/dev/null || true
+  kill -0 "$race_chain_orphan" 2>/dev/null ||
+    fail "the crash-chain case needs A's command alive to mean anything"
+  (
+    while kill -0 "$race_chain_orphan" 2>/dev/null; do sleep 0.5; done
+    date +%s > "$gate_race_repo/chain_died"
+  ) &
+  race_chain_watcher=$!
+  RACE_STUB_SECONDS=2 \
+    AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+    AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 120 \
+    > "$gate_race_repo/chain-c.out" 2>&1 || true
+  wait "$race_chain_watcher" 2>/dev/null || true
+  race_chain_died="$(cat "$gate_race_repo/chain_died" 2>/dev/null || echo 0)"
+  race_chain_c_started="$(awk '/^enter/ { if (NR > 1) { print $3; exit } }' "$gate_race_log")"
+  [[ -n "$race_chain_c_started" ]] ||
+    fail "the run inheriting a crash chain must still execute"
+  [[ "$race_chain_died" -ne 0 ]] ||
+    fail "a command inherited through a crash chain must not keep running"
+  [[ "$race_chain_c_started" -ge "$race_chain_died" ]] ||
+    fail "the inheriting run started $((race_chain_died - race_chain_c_started))s before the first run's command died"
+  [[ ! -e "$gate_race_root/condemned" ]] ||
+    fail "a drained condemned list must be cleared once its tokens are confirmed gone"
+  for race_wd in $race_chain_watchdogs; do
+    kill -CONT "$race_wd" 2>/dev/null || true
+    kill -KILL "$race_wd" 2>/dev/null || true
+  done
+  rm -rf "$gate_race_root/run.lock"
+
   # Crash-point sweep. Every boundary where this path creates, links, renames
   # or removes something is a place a SIGKILL can land, and each of the rounds
   # of review on this PR found one of them. The gate names those boundaries so
