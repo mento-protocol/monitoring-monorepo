@@ -409,6 +409,24 @@ export function alertRulesText(
   ].join(" ");
 }
 
+/**
+ * The thresholds that actually fire: a converted deep source adds its
+ * `conversionErrorBps` allowance to every price threshold (mirrored by the
+ * Grafana PromQL), and the presentation layer already carries those effective
+ * values — raw `policy` numbers would show operators boundaries lower than
+ * the ones that alert.
+ */
+export function effectiveAssetPolicy(
+  asset: PegAssetPresentation,
+): PegAssetPackage["policy"] {
+  return {
+    ...asset.asset.policy,
+    warnDeviationBps: asset.downsideWarningThresholdBps,
+    criticalDeviationBps: asset.downsideCriticalThresholdBps,
+    premiumWarnBps: asset.premiumWarningThresholdBps,
+  };
+}
+
 export type HeaderAlertRules = {
   cadence: string;
   tooltipLabel: string;
@@ -433,7 +451,7 @@ export function headerAlertRules(
     return {
       label: pegPairLabel(asset),
       interval,
-      text: alertRulesText(asset.asset.policy, interval),
+      text: alertRulesText(effectiveAssetPolicy(asset), interval),
     };
   });
   if (entries.length === 0)
@@ -482,14 +500,18 @@ export function tradingLimitTooltip(warnFraction: number): string {
 }
 
 export const SUPPORTING_MARKETS_TOOLTIP =
-  "Supporting markets corroborate the primary market but carry no alert authority — peg status and alerts are computed only from the primary market's price. Hover each row's tag for why (thin depth, feed conversion).";
+  // Alert semantics per alerts/rules/peg-policy-locals.tf: peg STATUS comes
+  // only from the primary (deep) market, but every non-display source also
+  // generates market-warning rules — so the copy must not claim supporting
+  // venues cannot alert; only display-only venues are inert.
+  "Supporting markets corroborate the primary market but cannot set peg status — that verdict comes only from the primary market's price. Secondary venues can still raise market warnings; display-only venues influence neither status nor alerts. Hover each row's tag for its role (thin depth, feed conversion).";
 
 export function offScaleRailTooltip(
   distanceBps: number,
   direction: "below" | "above",
 ): string {
   const edge = direction === "below" ? "«" : "»";
-  return `This venue's price is ${formatDeviationBps(distanceBps)} ${direction} target — beyond the rail's alert scale, so the marker pins at the edge (${edge}). Red = off the peg range on that venue. Dashed = it still cannot trigger alerts.`;
+  return `This venue's price is ${formatDeviationBps(distanceBps)} ${direction} target — beyond the rail's alert scale, so the marker pins at the edge (${edge}). Red = off the peg range on that venue. Dashed = it still cannot set peg status.`;
 }
 
 export type SupportingRole = {
@@ -516,7 +538,7 @@ function depthOnlyTooltip(source: PegSource): string {
   return `${venue} is not the policy-selected venue for this peg, so its price reflects its own book rather than the peg. The monitor uses it only as evidence of market depth — it can never set peg status.`;
 }
 
-/** Supporting venues carry no alert authority; the tag says which kind. */
+/** Supporting venues cannot set peg status; the tag says which kind. */
 /**
  * Why a supporting venue's numbers cannot be shown, or null when they can.
  * Mirrors `sourceHasUnavailableEvidence` (the deleted evidence view's rule)

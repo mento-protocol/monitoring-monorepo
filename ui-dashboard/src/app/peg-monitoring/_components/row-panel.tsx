@@ -7,6 +7,7 @@ import { formatFraction } from "../_lib/peg-board-format";
 import {
   PEG_COLOR,
   distanceLabel,
+  effectiveAssetPolicy,
   monitorStates,
   type MonitorState,
 } from "../_lib/peg-board-model";
@@ -116,7 +117,9 @@ export function RowPanel({
         </div>
         <div className="mt-4">
           <PegHistoryChart
-            policy={asset.asset.policy}
+            // Effective thresholds (incl. any conversion allowance) so the
+            // chart's bands sit exactly where the alert rules fire.
+            policy={effectiveAssetPolicy(asset)}
             nowBps={signedNowBps}
             tone={
               asset.thresholdTone === "uncertain"

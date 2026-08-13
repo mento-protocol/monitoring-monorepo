@@ -237,6 +237,9 @@ describe("headerAlertRules", () => {
           tone: "critical",
           currentCritical: true,
           asset: { ...pkg, policy: otherPolicy },
+          // headerAlertRules reads the presentation's EFFECTIVE thresholds
+          // (conversion allowance included), so divergence is expressed there.
+          downsideCriticalThresholdBps: 75,
           deepSource: otherSource,
         }),
         asset({}),
@@ -255,6 +258,23 @@ describe("headerAlertRules", () => {
     const rules = headerAlertRules(presentation([asset({})]));
     expect(rules.tooltipLabel).toBe("Alert rules for this peg");
     expect(rules.rules[0]!.label).toBeNull();
+  });
+
+  it("interpolates effective thresholds, not raw policy values", () => {
+    // A converted deep source adds its conversion allowance: the presentation
+    // carries 25→31 bps, and the header copy must follow it.
+    const rules = headerAlertRules(
+      presentation([
+        asset({
+          downsideWarningThresholdBps: 31,
+          premiumWarningThresholdBps: 31,
+          downsideCriticalThresholdBps: 56,
+        }),
+      ]),
+    );
+    expect(rules.rules[0]!.text).toContain("≥ 31 bps below");
+    expect(rules.rules[0]!.text).toContain("≥ 56 bps below");
+    expect(rules.rules[0]!.text).not.toContain("25 bps");
   });
 });
 
