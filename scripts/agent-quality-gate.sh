@@ -778,9 +778,11 @@ resolve_gate_lock_root() {
   [[ -n "${AGENT_QUALITY_GATE_LOCK_DIR:-}" ]] &&
     candidates+=("$AGENT_QUALITY_GATE_LOCK_DIR")
   [[ -n "${HOME:-}" ]] && candidates+=("$HOME/.cache/agent-quality-gate")
-  # Both fallbacks are per-user, which is what makes the PID liveness probe
-  # below sound: `kill -0` cannot distinguish another user's live process from
-  # a dead one, so the lock must never be shared across users.
+  # Both fallbacks are per-user, so by default no two users share a lock. The
+  # explicit override can point anywhere, including a directory two users
+  # share, which is why the liveness probe answers existence with `ps` rather
+  # than trusting `kill -0` — that call cannot tell another user's live
+  # process from one that has exited.
   candidates+=("${TMPDIR:-/tmp}/agent-quality-gate-$(id -u)")
   for candidate in "${candidates[@]}"; do
     if mkdir -p "$candidate" 2>/dev/null && [[ -w "$candidate" ]]; then
@@ -842,7 +844,14 @@ gate_lock_holder_is_live() {
   local recorded_start="$2"
   local current_start
   [[ -n "$pid" ]] || return 1
-  kill -0 "$pid" 2>/dev/null || return 1
+  # `kill -0` fails two ways that mean opposite things: no such process, and a
+  # live process this user may not signal. A lock root shared between users
+  # makes the second ordinary, and reading it as "gone" would reclaim a lock
+  # whose holder is still running. `ps` answers existence across users, so it
+  # decides, and `kill -0` only spares the `ps` call in the common case.
+  if ! kill -0 "$pid" 2>/dev/null; then
+    ps -p "$pid" > /dev/null 2>&1 || return 1
+  fi
   [[ -n "$recorded_start" ]] || return 0
   current_start="$(gate_lock_process_start "$pid")"
   [[ -n "$current_start" ]] || return 0
@@ -1261,8 +1270,17 @@ acquire_gate_run_lock() {
     return 0
   fi
   if ! root="$(resolve_gate_lock_root)"; then
-    echo "warning: no writable lock directory; running without cross-run exclusion." >&2
-    return 0
+    # Defence in depth rather than a reachable state today: the last candidate
+    # is the repo scratch directory, and a run whose scratch directory is
+    # unwritable has already failed before reaching this. It is written to fail
+    # closed anyway, because running on would silently give an ordinary `--run`
+    # the semantics of the explicit escape hatch, which is how the port
+    # conflicts and mutual starvation this lock exists for come back. Exclusion
+    # is the default, so losing it is the caller's decision to make out loud.
+    echo "error: no writable lock directory, so this run cannot take the gate run lock." >&2
+    echo "Set AGENT_QUALITY_GATE_LOCK_DIR to a writable path, or re-run with --no-lock to accept the contention." >&2
+    echo "Nothing has been executed." >&2
+    exit 2
   fi
   lock="$root/run.lock"
   gate_lock_root_dir="$root"

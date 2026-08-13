@@ -5978,6 +5978,37 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   fi
   rm -rf "$gate_race_root/run.lock"
 
+  # A holder owned by another user is live even though this run may not signal
+  # it: `kill -0` fails with EPERM exactly as it does for a process that is
+  # gone, and reading that as gone reclaims a lock whose holder is running.
+  # PID 1 is the portable stand-in — always alive, never ours to signal.
+  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
+  : > "$gate_race_log"
+  if ! kill -0 1 2>/dev/null; then
+    mkdir -p "$gate_race_root/run.lock"
+    {
+      printf 'pid=1\n'
+      printf 'host=%s\n' "$(uname -n)"
+      printf 'started_at=%s\n' "$(date +%s)"
+      printf 'start_utc=%s\n' "$(TZ=UTC LC_ALL=C ps -o lstart= -p 1 2>/dev/null | head -n1)"
+      printf 'worktree=%s\n' "$gate_race_repo"
+      printf 'token=other-user-holder\n'
+    } > "$gate_race_root/run.lock/owner"
+    AGENT_QUALITY_GATE_LOCK=1 \
+      AGENT_QUALITY_GATE_LOCK_HELD='' \
+      AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+      AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
+      AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+      --base HEAD --run --lock-wait 6 \
+      > "$gate_race_out/foreign-holder.out" 2>&1 || true
+    grep -q "reclaiming it" "$gate_race_out/foreign-holder.out" &&
+      fail "a holder this user cannot signal was treated as dead and reclaimed"
+    [[ -z "$(awk '/^enter/ { print $2; exit }' "$gate_race_log")" ]] ||
+      fail "a run executed while a live holder it could not signal held the lock"
+  fi
+  rm -rf "$gate_race_root/run.lock"
+
   # The obligation directory is the only thing that tells the next holder a
   # dead run's commands are outstanding, and on a shared lock root it can
   # belong to another user. A run that cannot write into it must not discard
