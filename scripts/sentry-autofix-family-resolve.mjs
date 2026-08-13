@@ -55,8 +55,28 @@ const MAX_REVERSE_ITERATIONS = 4;
  * Returns `{ decisions, truncations }` — `truncations` carries the handled-id
  * overflow count and the reverse-probe / non-convergence flags for the run
  * record, so a bounded re-attempt is never silent.
+ *
+ * `options.budgets` ({ handled, probe, verify }) overrides the three per-RUN
+ * caps for ONE call. The selector's bounded second look needs it: the first
+ * pass has already SPENT the module defaults, so a second pass reusing them
+ * would double the run's worst-case `gh` volume. Absent, the defaults apply and
+ * behaviour is byte-identical to before the option existed.
  */
-export async function resolveFamilies(runGh, repo, candidates, cap) {
+export async function resolveFamilies(
+  runGh,
+  repo,
+  candidates,
+  cap,
+  options = {},
+) {
+  const budgets = options.budgets ?? {};
+  const handledCap = Number.isInteger(budgets.handled)
+    ? budgets.handled
+    : MAX_HANDLED_ID_QUERIES;
+  const verifyCap = Number.isInteger(budgets.verify)
+    ? budgets.verify
+    : MAX_REVERSE_VERIFY_READS;
+  const probeCap = Number.isInteger(budgets.probe) ? budgets.probe : undefined;
   const project = LOCAL_SENTRY_PROJECT;
   const candidateKeys = new Set(
     candidates.map((candidate) => familyKey(candidate.shortId)),
@@ -77,14 +97,14 @@ export async function resolveFamilies(runGh, repo, candidates, cap) {
   // fixpoint's re-checks of reverse-surfaced hub ids, so the total stays bounded
   // and its overflow surfaces on the tracker.
   const handledQueried = new Set();
-  const handledBudget = { remaining: MAX_HANDLED_ID_QUERIES, overflow: 0 };
+  const handledBudget = { remaining: handledCap, overflow: 0 };
   const stubCache = new Map();
   const alreadyProbed = new Set();
   // One per-RUN verify-read budget for the reverse leg, shared across the fixpoint
   // so the total `gh issue view` fan-out over hit-verification is bounded (the
   // bug-B mirror of the probe-search cap: each search returns up to
   // REVERSE_SEARCH_LIMIT rows and every unseen row costs a verdict re-read).
-  const reverseVerifyBudget = { remaining: MAX_REVERSE_VERIFY_READS };
+  const reverseVerifyBudget = { remaining: verifyCap };
   let reverseBudgetTruncated = false;
   let reverseNonconvergent = false;
 
@@ -167,6 +187,7 @@ export async function resolveFamilies(runGh, repo, candidates, cap) {
         stubCache,
         alreadyProbed,
         verifyBudget: reverseVerifyBudget,
+        maxProbes: probeCap,
       });
       edges = result.edges;
       blockers = result.blockers;

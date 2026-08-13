@@ -65,7 +65,57 @@ export function parseProject(title) {
 // pre-filter above, the eligible-and-unfixed local set stays tiny, so this is
 // only a safety ceiling — not the throttle. Oldest-first, so genuinely old
 // candidates are never starved by newer ones.
-const LIST_LIMIT = 200;
+//
+// It is also the HARD upper bound on the selector's evaluation window. `--limit`
+// caps what the API RETURNS, and that happens BEFORE
+// `MAX_CANDIDATE_EVALUATIONS` (sentry-autofix-select.mjs) slices the returned
+// rows — so raising that constant above this one is a strict NO-OP, and the two
+// must move together. The invariant is pinned by a test
+// (`MAX_CANDIDATE_EVALUATIONS <= LIST_LIMIT` in sentry-autofix-select.test.mjs)
+// and re-checked at run time by `windowCeilingWarning`, because a silent no-op
+// is exactly the failure a "we raised the window" change must not ship as.
+// Exported for both.
+export const LIST_LIMIT = 200;
+
+// Rate-limit-shaped `gh` failure text. EVERY read the select leg issues is a
+// dedupe/blocker signal (a prior fix PR, a terminal sibling's marker, a verdict),
+// and every one of them fails SOFT toward MORE candidates — so a rejection the
+// caller cannot tell apart from "no blocker found" makes a throttled run open
+// DUPLICATE autofix PRs and still look green. These patterns are what `gh`
+// actually prints on the wire:
+//   - `gh api` surfaces the HTTP status verbatim: `HTTP 403: API rate limit
+//     exceeded for user ID 1234. (https://api.github.com/…)`, and
+//     `HTTP 403: You have exceeded a secondary rate limit and have been
+//     temporarily blocked from content creation.` GitHub also serves plain
+//     `HTTP 429 Too Many Requests` on some abuse paths.
+//   - `gh issue list --search` routes to GraphQL, whose throttle body reads
+//     `GraphQL: API rate limit exceeded for user ID 1234. (rateLimitExceeded)`.
+//   - Older/abuse-detection responses read `You have triggered an abuse
+//     detection mechanism`.
+// `defaultRunGh` puts gh's whole stderr into the rejection message, so matching
+// the message text covers all of them.
+//
+// A bare `HTTP 403` that is really a PERMISSIONS failure matches too. That is
+// deliberate: both mean "this read did not answer the dedupe question", and the
+// only action either warrants is the same one — stop selecting on unreliable
+// data. Fail closed, not clever.
+const RATE_LIMIT_PATTERNS = [
+  /\bHTTP 403\b/,
+  /\bHTTP 429\b/,
+  /rate limit/i,
+  /rateLimitExceeded/i,
+  /abuse detection/i,
+  /too many requests/i,
+];
+
+/** True when a `gh` failure message is rate-limit / throttle shaped — i.e. the
+ * read did NOT answer the dedupe question it was issued for, as opposed to
+ * answering "no blocker". Pure and exported so the selector can classify a
+ * rejection from ANY read without each call site re-implementing the match. */
+export function isRateLimitFailure(message) {
+  const text = String(message ?? "");
+  return RATE_LIMIT_PATTERNS.some((pattern) => pattern.test(text));
+}
 
 export function defaultRunGh(args) {
   return new Promise((resolve, reject) => {
@@ -107,8 +157,28 @@ export function defaultRunGh(args) {
  *     the returned title) drops EXTERNAL-repo code-fix stubs before their
  *     verdict is ever read.
  * Oldest-first via `sort:created-asc`, capped at LIST_LIMIT as a safety ceiling.
+ *
+ * `options.limit` widens that ceiling and `options.skip` drops the oldest N RAW
+ * rows before the client-side project filter — the pair the selector's bounded
+ * SECOND LOOK uses to reach rows past the first window when the first window
+ * selected nothing (see MAX_SECOND_LOOK_EVALUATIONS). `skip` counts RAW rows on
+ * purpose: it must line up with the first pass's own `--limit`, which the API
+ * applies before any client-side filter, so counting filtered rows would
+ * re-read or skip stubs depending on how many the project filter dropped.
+ *
+ * Returns `{ stubs, rawCount, full }` — `full` (rawCount >= limit) is the
+ * "there may be more" signal, taken off the RAW row count for the same reason.
+ * The filtered `stubs` length cannot carry it: the project filter can drop rows,
+ * so a genuinely full page can come back short and a second look that keyed on
+ * it would never fire.
  */
-export async function listCodeFixStubs(runGh, repo) {
+export async function listCodeFixStubsPage(runGh, repo, options = {}) {
+  const limit =
+    Number.isInteger(options.limit) && options.limit > 0
+      ? options.limit
+      : LIST_LIMIT;
+  const skip =
+    Number.isInteger(options.skip) && options.skip > 0 ? options.skip : 0;
   const stdout = await runGh([
     "issue",
     "list",
@@ -160,28 +230,36 @@ export async function listCodeFixStubs(runGh, repo) {
     "--json",
     "number,title,labels,createdAt",
     "--limit",
-    String(LIST_LIMIT),
+    String(limit),
   ]);
   const parsed = JSON.parse(stdout);
   const list = Array.isArray(parsed) ? parsed : [];
-  return (
-    list
-      .map((issue) => ({
-        number: issue.number,
-        title: issue.title ?? "",
-        createdAt: issue.createdAt ?? "",
-        labels: (issue.labels ?? [])
-          .map((label) => (typeof label === "string" ? label : label?.name))
-          .filter(Boolean),
-      }))
-      // Exact owning-project gate — the server-side `<slug> in:title` filter
-      // keeps the WINDOW local (tokenized, so approximate); this parses the
-      // exact project out of the title and drops any tokenized false-positive.
-      .filter((issue) => parseProject(issue.title) === LOCAL_SENTRY_PROJECT)
-      // `--search sort:created-asc` returns oldest-first, but keep the client-side
-      // sort as defense-in-depth (same pattern as the triage select job).
-      .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)))
-  );
+  const stubs = list
+    .slice(skip)
+    .map((issue) => ({
+      number: issue.number,
+      title: issue.title ?? "",
+      createdAt: issue.createdAt ?? "",
+      labels: (issue.labels ?? [])
+        .map((label) => (typeof label === "string" ? label : label?.name))
+        .filter(Boolean),
+    }))
+    // Exact owning-project gate — the server-side `<slug> in:title` filter
+    // keeps the WINDOW local (tokenized, so approximate); this parses the
+    // exact project out of the title and drops any tokenized false-positive.
+    .filter((issue) => parseProject(issue.title) === LOCAL_SENTRY_PROJECT)
+    // `--search sort:created-asc` returns oldest-first, but keep the client-side
+    // sort as defense-in-depth (same pattern as the triage select job).
+    .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+  return { stubs, rawCount: list.length, full: list.length >= limit };
+}
+
+/** The filtered window only — the shape every caller but the second look wants.
+ * Thin wrapper over `listCodeFixStubsPage`, kept because it is the name the
+ * selector and the suites have always imported. */
+export async function listCodeFixStubs(runGh, repo, options = {}) {
+  const { stubs } = await listCodeFixStubsPage(runGh, repo, options);
+  return stubs;
 }
 
 /**
@@ -259,7 +337,11 @@ export async function listHandledShortIds(
     // re-attempt these ids either.
     for (const droppedId of droppedIds) queried.add(droppedId);
     process.stderr.write(
-      `note: ${ids.length} distinct declared family ids exceed the per-run MAX_HANDLED_ID_QUERIES budget (${MAX_HANDLED_ID_QUERIES}); ${droppedIds.length} are treated as not-handled this run (fails toward MORE candidates).\n`,
+      // The budget is passed in, so name what is LEFT rather than the module
+      // constant: the selector's bounded second look runs this same helper on a
+      // smaller allowance, and printing MAX_HANDLED_ID_QUERIES there would point
+      // an operator at a number the pass never had.
+      `note: ${ids.length} distinct declared family ids exceed this pass's remaining handled-id lookup budget (${capacity} left, per-run cap ${MAX_HANDLED_ID_QUERIES}); ${droppedIds.length} are treated as not-handled this run (fails toward MORE candidates).\n`,
     );
   }
   budget.remaining = capacity - queryIds.length;

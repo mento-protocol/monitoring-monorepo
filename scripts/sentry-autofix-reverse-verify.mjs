@@ -158,6 +158,12 @@ export async function reverseVerifyFamilies(
   const verifyBudget = options.verifyBudget ?? {
     remaining: MAX_REVERSE_VERIFY_READS,
   };
+  // `maxProbes` overrides the per-run probe cap for ONE resolve pass — the
+  // selector's bounded second look runs on a smaller allowance because the first
+  // pass already spent the module default. Absent, the default applies.
+  const maxProbes = Number.isInteger(options.maxProbes)
+    ? options.maxProbes
+    : MAX_REVERSE_PROBE_QUERIES;
   const edges = [];
   const blockers = new Set();
   let truncated = false;
@@ -171,7 +177,7 @@ export async function reverseVerifyFamilies(
     // Per-run probe budget (counts distinct LOCAL probes across the fixpoint via
     // the shared `probed` set). At the ceiling, stop probing and treat the rest
     // as not-probed — fewer blockers, MORE candidates, the safe direction.
-    if (probed.size >= MAX_REVERSE_PROBE_QUERIES) {
+    if (probed.size >= maxProbes) {
       truncated = true;
       break;
     }
@@ -268,7 +274,7 @@ export async function reverseVerifyFamilies(
   }
   if (truncated) {
     process.stderr.write(
-      `note: reverse family verification was truncated this run — the per-run probe budget (${MAX_REVERSE_PROBE_QUERIES}) or verify-read budget (${MAX_REVERSE_VERIFY_READS}) was reached, or a probe returned a full page; the unreached hits/probes are treated as not-admitted (fails toward MORE candidates).\n`,
+      `note: reverse family verification was truncated this pass — the probe budget (${maxProbes}) or verify-read budget was reached, or a probe returned a full page; the unreached hits/probes are treated as not-admitted (fails toward MORE candidates).\n`,
     );
   }
   return { edges, blockers: [...blockers], truncated };

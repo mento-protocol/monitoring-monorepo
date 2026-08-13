@@ -343,5 +343,117 @@ await test("run record renders each cost-budget truncation only when its budget 
   );
 });
 
+await test("run record renders the bounded second look only when it actually ran", () => {
+  // The second look is extra `gh` spend on a run that already found nothing, so
+  // it must never be silent — and it carries an evaluation ceiling of its own,
+  // so `evaluated < total` on the same line is its own truncation report.
+  //
+  // NEGATIVE CONTROL: drop the `if (secondLook === true …)` guard in
+  // buildAutofixRunRecordBody and the steady-state assertion below (no line when
+  // it did not run) fails.
+  const idle = buildAutofixRunRecordBody({
+    timestampIso: "2026-07-19T08:30:00Z",
+    trigger: "schedule",
+    disposition: "active",
+    candidates: 0,
+  });
+  assert(
+    !idle.includes("Second look"),
+    "no second-look line when it did not run",
+  );
+  const ran = buildAutofixRunRecordBody({
+    timestampIso: "2026-07-19T08:30:00Z",
+    trigger: "schedule",
+    disposition: "active",
+    candidates: 1,
+    secondLook: "true",
+    secondLookTotal: 7,
+    secondLookEvaluated: 7,
+  });
+  assert(
+    ran.includes("- Second look: 7 further stubs past the window, evaluated 7"),
+    `second-look line renders, got: ${ran}`,
+  );
+  assert(
+    !ran.includes("MAX_SECOND_LOOK_EVALUATIONS"),
+    "an untruncated second look must not claim a cap it never hit",
+  );
+  const capped = buildAutofixRunRecordBody({
+    timestampIso: "2026-07-19T08:30:00Z",
+    trigger: "schedule",
+    disposition: "active",
+    candidates: 1,
+    secondLook: true,
+    secondLookTotal: 105,
+    secondLookEvaluated: 100,
+  });
+  assert(
+    capped.includes(
+      "- Second look: 105 further stubs past the window, evaluated 100 (capped by MAX_SECOND_LOOK_EVALUATIONS)",
+    ),
+    `a truncated second look names its cap, got: ${capped}`,
+  );
+});
+
+await test("run record renders the measured gh read count when there is one", () => {
+  // The per-run cost ceiling was arithmetic nothing ever counted; this is the
+  // observed number, so drift lands on the tracker before it lands as a timeout.
+  const measured = buildAutofixRunRecordBody({
+    timestampIso: "2026-07-19T08:30:00Z",
+    trigger: "schedule",
+    disposition: "active",
+    candidates: 2,
+    ghCalls: 522,
+  });
+  assert(measured.includes("- gh reads: 522"), `got: ${measured}`);
+  const none = buildAutofixRunRecordBody({
+    timestampIso: "2026-07-19T08:30:00Z",
+    trigger: "schedule",
+    disposition: "off-main",
+    candidates: 0,
+  });
+  assert(
+    !none.includes("gh reads"),
+    "a leg that issued no reads carries no count line",
+  );
+});
+
+await test("run record renders a LOUD degraded line when reads were rate limited", () => {
+  // Fail-closed's whole point is that the suppression is visible: a run that
+  // emitted zero entries because GitHub throttled it must not render identically
+  // to an idle one — that is the #1758 misdiagnosis in a new costume, and here it
+  // would be hiding a state in which a duplicate PR was NARROWLY avoided.
+  //
+  // NEGATIVE CONTROL: drop the `rateLimitedN > 0` push and the assertion below
+  // fails while every other line still renders — proving this line is the only
+  // durable trace of the degradation.
+  const degraded = buildAutofixRunRecordBody({
+    timestampIso: "2026-07-19T08:30:00Z",
+    trigger: "schedule",
+    disposition: "degraded-rate-limited",
+    candidates: 0,
+    rateLimited: 3,
+  });
+  assert(
+    degraded.includes("**DEGRADED (rate limited):** 3 gh read(s)"),
+    `degraded line renders with its count, got: ${degraded}`,
+  );
+  assert(
+    degraded.includes("0 entries emitted"),
+    "the degraded line must state that selection was suppressed",
+  );
+  const clean = buildAutofixRunRecordBody({
+    timestampIso: "2026-07-19T08:30:00Z",
+    trigger: "schedule",
+    disposition: "active",
+    candidates: 2,
+    rateLimited: 0,
+  });
+  assert(
+    !clean.includes("DEGRADED"),
+    "the steady state carries no degraded line",
+  );
+});
+
 process.stdout.write(`\n${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exitCode = 1;

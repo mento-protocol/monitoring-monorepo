@@ -103,19 +103,41 @@ jobs:
   # excludes it too. This job emits both stand-down counts and their issue
   # numbers — the record job is the only durable trace of a suppressed queue,
   # and without them "everything stood down" reads exactly like "nothing queued".
+  #
+  # SECOND LOOK: when the first pass selects NOTHING and the list came back FULL,
+  # the selector takes ONE bounded pass over the rows past the list ceiling. That
+  # is the only escape from the starvation shape where a whole window is deferred
+  # family members: deferral writes nothing, so the same window returns forever
+  # and a selectable stub one row past it is never evaluated at all. It has its
+  # own evaluation ceiling and its own family budgets, costs NOTHING on a run
+  # that selected anything, and reports both that it ran and any truncation.
+  #
+  # FAIL CLOSED ON THROTTLING: every read this leg issues is a dedupe/blocker
+  # signal, and every one fails SOFT toward MORE candidates — so a 403/429 is
+  # indistinguishable from "no blocker found" and a throttled run could open
+  # DUPLICATE fix PRs while looking green. On a rate-limit-shaped failure the
+  # selector emits ZERO entries and the disposition becomes
+  # `degraded-rate-limited`. It still emits a valid JSON array and still exits 0:
+  # the always-emits-an-array contract above is not negotiable.
   # ---------------------------------------------------------------------------
   select:
     runs-on: ubuntu-latest
-    # 10, not 5 (PR #1810): the per-declared-id handled lookups and the reverse
-    # family search add bounded `gh` volume on top of the per-candidate reads.
-    # Every leg is capped (MAX_CANDIDATE_EVALUATIONS, MAX_HANDLED_ID_QUERIES,
-    # MAX_REVERSE_PROBE_QUERIES, and MAX_REVERSE_VERIFY_READS — the reverse
-    # in:comments searches each page up to REVERSE_SEARCH_LIMIT hits, and every
-    # unseen hit costs one verdict re-read, so that leg needs its own read cap),
-    # so the hard ceiling is ~221 serial subprocesses (documented in the pipeline
-    # note § "Cost bound"); 10 leaves headroom for checkout/setup and API-latency
-    # spikes instead of sizing to hope.
-    timeout-minutes: 10
+    # 25, not 10: MAX_CANDIDATE_EVALUATIONS is now 200 (the real LIST_LIMIT
+    # ceiling, which the API applies first — a smaller value just left rows
+    # unread), and a run that selects nothing off a FULL page takes ONE bounded
+    # second look past that ceiling. Every leg is still capped
+    # (MAX_CANDIDATE_EVALUATIONS, MAX_HANDLED_ID_QUERIES,
+    # MAX_REVERSE_PROBE_QUERIES, MAX_REVERSE_VERIFY_READS, and the second look's
+    # own MAX_SECOND_LOOK_EVALUATIONS + halved family budgets), so the worst case
+    # is arithmetic, not hope: 2 list pages + 2×200 per-stub reads + 120 family
+    # budget = 522 for the first pass, + 4 list pages + 2×100 + 60 = 264 for the
+    # second look → ~786 SERIAL `gh` calls (no Promise.all anywhere in this leg).
+    # At a pessimistic ~1 s/call that is ~13 min, ~52% of this budget, leaving
+    # room for checkout/setup and API-latency spikes. The timeout — not any rate
+    # limit — is the binding constraint here, and CI minutes are free on a public
+    # repo's ubuntu-latest, so the headroom costs nothing. See the pipeline note
+    # § "Cost bound".
+    timeout-minutes: 25
     # sentry-pipeline Environment (issue #1289): AUTOFIX_APP_PRIVATE_KEY is now an
     # environment secret, so this job MUST declare the environment for its
     # presence check to see it; the main-only deployment-branch policy also
@@ -152,6 +174,25 @@ jobs:
       # on the tracker weeks ahead of a silent truncation.
       window_total: ${{ steps.select.outputs.window_total }}
       window_evaluated: ${{ steps.select.outputs.window_evaluated }}
+      # The bounded SECOND LOOK: whether it ran, and how far it got. It fires
+      # only when the first pass selected NOTHING off a FULL list page — the
+      # starvation state where selectable stubs sit past the list ceiling and no
+      # run would otherwise ever reach them. It is extra `gh` spend and it has an
+      # evaluation ceiling of its own, so both facts are recorded: never a silent
+      # extra cost, never a silent truncation.
+      second_look: ${{ steps.select.outputs.second_look }}
+      second_look_total: ${{ steps.select.outputs.second_look_total }}
+      second_look_evaluated: ${{ steps.select.outputs.second_look_evaluated }}
+      # Measured `gh` invocations for the run. The per-run ceiling used to be
+      # arithmetic over caps that nothing counted; this makes it a tracked number
+      # so drift surfaces before a timeout does.
+      gh_calls: ${{ steps.select.outputs.gh_calls }}
+      # Rate-limit-shaped read failures. Nonzero means the run FAILED CLOSED:
+      # every dedupe read fails soft toward MORE candidates, so a throttled run
+      # cannot tell "no prior fix PR" from "GitHub refused to answer" and would
+      # open DUPLICATE autofix PRs looking green. The selector emits `[]` instead
+      # (never a step failure — the always-emits-an-array contract holds).
+      rate_limited: ${{ steps.select.outputs.rate_limited }}
       # Cost-budget truncations (PR #1810 follow-up): the handled-id overflow
       # count and the reverse-probe / non-convergence flags. Each marks a family
       # that should have stood down but a per-run budget capped its lookup, so it
@@ -171,6 +212,23 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version
+
+      # The repo's REAL remaining GITHUB_TOKEN budget at the moment this leg
+      # runs, before and after. The org is on the free plan (1,000 core req/hr
+      # per repo and 1,000 GraphQL points/hr, SHARED with every other workflow),
+      # and this leg's window is now 200 wide — so "how much budget was actually
+      # left at 08:30 UTC" stopped being a thing to reason about and became a
+      # thing to measure. One greppable line each, and never a job failure: a
+      # metering read must not be able to break the leg it meters.
+      - name: Rate budget before select
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          gh api rate_limit --jq \
+            '"rate-budget before core=\(.resources.core.remaining)/\(.resources.core.limit) graphql=\(.resources.graphql.remaining)/\(.resources.graphql.limit) search=\(.resources.search.remaining)/\(.resources.search.limit) core_reset=\(.resources.core.reset)"' \
+            || echo "rate-budget before unavailable"
 
       - name: Select autofix candidates (kill-switch + App guarded)
         id: select
@@ -273,12 +331,28 @@ jobs:
           # keep the record-job contract integer-only).
           window_total=$(jq -r '(.total // 0) | floor' "${window_report}")
           window_evaluated=$(jq -r '(.evaluated // 0) | floor' "${window_report}")
+          # The bounded second look and the measured gh volume ride the same
+          # report file, normalized to the record job's integer/boolean contract.
+          second_look=$(jq -r 'if (.secondLook // false) then "true" else "false" end' "${window_report}")
+          second_look_total=$(jq -r '(.secondLookTotal // 0) | floor' "${window_report}")
+          second_look_evaluated=$(jq -r '(.secondLookEvaluated // 0) | floor' "${window_report}")
+          gh_calls=$(jq -r '(.ghCalls // 0) | floor' "${window_report}")
           # Cost-budget truncations: the handled-id overflow COUNT plus two
           # boolean flags, normalized here so the record-job contract stays
           # integer/^(true|false)$-only (our own JSON, but keep it strict).
           handled_overflow=$(jq -r '(.handledOverflow // 0) | floor' "${truncations_report}")
           reverse_truncated=$(jq -r 'if (.reverseBudget // false) then "true" else "false" end' "${truncations_report}")
           reverse_nonconvergent=$(jq -r 'if (.reverseNonconvergent // false) then "true" else "false" end' "${truncations_report}")
+          # Rate-limit-shaped read failures. The selector already emitted `[]`
+          # (fail CLOSED — see the job header), so this only has to make the
+          # reason loud: flip the disposition so the tracker's `State:` line says
+          # it outright instead of rendering a suppressed run as a healthy idle
+          # one, which is the #1758 misdiagnosis this leg exists to prevent.
+          rate_limited=$(jq -r '(.rateLimited // 0) | floor' "${truncations_report}")
+          if [ "${rate_limited}" != "0" ] && [ "${disposition}" = "active" ]; then
+            disposition='degraded-rate-limited'
+            echo "::error::Selection degraded: ${rate_limited} rate-limit-shaped gh read failure(s); emitted 0 candidates rather than selecting on unreliable dedupe data."
+          fi
           {
             echo "entries=${entries}"
             echo "count=${count}"
@@ -288,12 +362,31 @@ jobs:
             echo "skipped_issues=${skipped_issues}"
             echo "window_total=${window_total}"
             echo "window_evaluated=${window_evaluated}"
+            echo "second_look=${second_look}"
+            echo "second_look_total=${second_look_total}"
+            echo "second_look_evaluated=${second_look_evaluated}"
+            echo "gh_calls=${gh_calls}"
             echo "handled_overflow=${handled_overflow}"
             echo "reverse_truncated=${reverse_truncated}"
             echo "reverse_nonconvergent=${reverse_nonconvergent}"
+            echo "rate_limited=${rate_limited}"
             echo "disposition=${disposition}"
           } >> "${GITHUB_OUTPUT}"
-          echo "Selected ${count} candidate(s), deferred ${deferred}, skipped ${skipped}, window ${window_evaluated}/${window_total} [${disposition}]: ${entries}"
+          echo "Selected ${count} candidate(s), deferred ${deferred}, skipped ${skipped}, window ${window_evaluated}/${window_total}, second-look ${second_look} ${second_look_evaluated}/${second_look_total}, gh-calls ${gh_calls}, rate-limited ${rate_limited} [${disposition}]: ${entries}"
+
+      # After, so the pair brackets exactly this leg's spend and the delta is a
+      # tracked number. `always()` — a degraded or failed select is precisely
+      # when the remaining budget matters most.
+      - name: Rate budget after select
+        if: ${{ always() }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          gh api rate_limit --jq \
+            '"rate-budget after core=\(.resources.core.remaining)/\(.resources.core.limit) graphql=\(.resources.graphql.remaining)/\(.resources.graphql.limit) search=\(.resources.search.remaining)/\(.resources.search.limit) core_reset=\(.resources.core.reset)"' \
+            || echo "rate-budget after unavailable"
 
   # ---------------------------------------------------------------------------
   # autofix: one claude-code-action fix + deterministic PR per selected stub.
@@ -1188,6 +1281,11 @@ jobs:
           SKIPPED_ISSUES: ${{ needs.select.outputs.skipped_issues }}
           WINDOW_TOTAL: ${{ needs.select.outputs.window_total }}
           WINDOW_EVALUATED: ${{ needs.select.outputs.window_evaluated }}
+          SECOND_LOOK: ${{ needs.select.outputs.second_look }}
+          SECOND_LOOK_TOTAL: ${{ needs.select.outputs.second_look_total }}
+          SECOND_LOOK_EVALUATED: ${{ needs.select.outputs.second_look_evaluated }}
+          GH_CALLS: ${{ needs.select.outputs.gh_calls }}
+          RATE_LIMITED: ${{ needs.select.outputs.rate_limited }}
           HANDLED_OVERFLOW: ${{ needs.select.outputs.handled_overflow }}
           REVERSE_TRUNCATED: ${{ needs.select.outputs.reverse_truncated }}
           REVERSE_NONCONVERGENT: ${{ needs.select.outputs.reverse_nonconvergent }}
@@ -1206,6 +1304,11 @@ jobs:
           skipped_issues="${SKIPPED_ISSUES:-}"
           window_total="${WINDOW_TOTAL:-0}"
           window_evaluated="${WINDOW_EVALUATED:-0}"
+          second_look="${SECOND_LOOK:-false}"
+          second_look_total="${SECOND_LOOK_TOTAL:-0}"
+          second_look_evaluated="${SECOND_LOOK_EVALUATED:-0}"
+          gh_calls="${GH_CALLS:-0}"
+          rate_limited="${RATE_LIMITED:-0}"
           handled_overflow="${HANDLED_OVERFLOW:-0}"
           reverse_truncated="${REVERSE_TRUNCATED:-false}"
           reverse_nonconvergent="${REVERSE_NONCONVERGENT:-false}"
@@ -1220,6 +1323,11 @@ jobs:
             skipped_issues=""
             window_total=0
             window_evaluated=0
+            second_look=false
+            second_look_total=0
+            second_look_evaluated=0
+            gh_calls=0
+            rate_limited=0
             handled_overflow=0
             reverse_truncated=false
             reverse_nonconvergent=false
@@ -1266,6 +1374,11 @@ jobs:
             --skipped-issues "${skipped_issues}" \
             --window-total "${window_total}" \
             --window-evaluated "${window_evaluated}" \
+            --second-look "${second_look}" \
+            --second-look-total "${second_look_total}" \
+            --second-look-evaluated "${second_look_evaluated}" \
+            --gh-calls "${gh_calls}" \
+            --rate-limited "${rate_limited}" \
             --handled-overflow "${handled_overflow}" \
             --reverse-truncated "${reverse_truncated}" \
             --reverse-nonconvergent "${reverse_nonconvergent}")
@@ -1325,6 +1438,9 @@ jobs:
           # Only when the select job actually ran and reported architectural
           # skips: a failed/off-main/disabled select reports nothing, so there is
           # nothing to backfill and no reason to touch the label at all.
+          # `degraded-rate-limited` is deliberately covered by the `!= active`
+          # test: a throttled run's skip list was computed off reads that may not
+          # have answered, so it must not drive a label WRITE either.
           if [ "${SELECT_RESULT}" != "success" ] || [ "${DISPOSITION:-}" != "active" ]; then
             echo "select was ${SELECT_RESULT}/${DISPOSITION:-unknown}; no architectural backfill this run."
             exit 0
