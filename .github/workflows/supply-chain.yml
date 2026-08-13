@@ -333,10 +333,12 @@ jobs:
               `\`pnpm audit --audit-level=moderate\` on the root and standalone ` +
               `deploy lockfiles reports:\n\n` +
               `${lines.join("\n")}\n\n` +
-              `**Rule:** override floors in \`package.json\` \`pnpm.overrides\` ` +
-              `only act at lockfile (re)resolution. If an advisory's patch line ` +
-              `supersedes a floor, bump the override and run \`pnpm install\` to ` +
-              `re-resolve. Prefer range-scoped exact pins ` +
+              `**Rule:** inspect every dependency root and update only roots whose ` +
+              `lockfiles resolve an affected version. Overrides live in each affected ` +
+              `root's \`pnpm-workspace.yaml\`. Update the override and lockfile ` +
+              `together: in that root, run \`pnpm install --lockfile-only\`, inspect ` +
+              `the lockfile diff for unrelated version changes, then verify with ` +
+              `\`pnpm install --frozen-lockfile\`. Prefer range-scoped exact pins ` +
               `(\`pkg@<x.y.z: x.y.z\`) for anything with major-incompat risk.\n\n` +
               marker;
 
