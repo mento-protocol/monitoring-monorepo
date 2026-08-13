@@ -1756,12 +1756,112 @@ await test("the verdict step keeps its own re-queue compensation (not reversed b
       verdictJob.includes("--reason verdict-unsettled"),
     "the verdict step's compensation must run through the re-queue chokepoint CLI",
   );
-  // Both exits below the label swap call it — the re-read failure and the
+  // Three exits call it: the label swap itself, the re-read failure and the
   // more-than-one-verdict-label refusal.
   assertEqual(
     verdictJob.split("requeue_for_retry\n").length - 1,
-    2,
-    "both post-swap exits in the verdict step must compensate",
+    3,
+    "the label swap and both post-swap exits in the verdict step must compensate",
+  );
+});
+
+await test("the verdict step self-heals every label its edit names, BEFORE the edit", () => {
+  // Only the ingest job CREATES labels, so any name added to LABEL_DEFINITIONS
+  // is absent from the repo until ingest next runs — and gh fails the whole
+  // `issue edit` on a repo-nonexistent name, on --remove-label exactly as on
+  // --add-label. `sentry:fix-scope-architectural` (#1812) reached the shed list
+  // of every non-architectural verdict hours before that bootstrap, and the
+  // settlement leg died on it (issue #1811, 2026-08-13). The other three
+  // settlement paths already self-heal from the same single source; this asserts
+  // the last one does, in the only order that helps.
+  const workflow = readRepoFile(".github/workflows/sentry-triage-agent.yml");
+  const verdictJob = workflow.slice(
+    workflow.indexOf("- name: Apply verdict label"),
+    workflow.indexOf("- name: Render or clear the needs-human brief"),
+  );
+  const ensureAt = verdictJob.indexOf("--ensure-labels");
+  const editAt = verdictJob.indexOf("gh issue edit");
+  assert(ensureAt !== -1, "expected the verdict step to ensure its labels");
+  assert(editAt !== -1, "expected the verdict label edit");
+  assert(
+    ensureAt < editAt,
+    "the label ensure must run BEFORE the edit it protects",
+  );
+  // Through the single-source helper, never a hand-rolled `gh label create`
+  // with its own color and description.
+  assert(
+    /node scripts\/sentry-triage-project\.mjs\s+--ensure-labels/.test(
+      verdictJob.replace(/\\\s*\n\s*/g, " "),
+    ),
+    "the ensure must run the shared self-heal, not an open-coded label create",
+  );
+  // Coverage, derived from the edit itself: every label the edit names — both
+  // sides — must be in the ensured set. Drop one and this reds.
+  const joined = verdictJob.replace(/\\\s*\n\s*/g, " ").split("\n");
+  const ensureLine = joined.find((line) => line.includes("--ensure-labels"));
+  const editLine = joined.find((line) => line.includes("gh issue edit"));
+  const splitNames = (raw) =>
+    raw
+      .split(",")
+      .map((name) => name.trim())
+      .filter(Boolean);
+  const ensured = new Set(
+    splitNames(/--ensure-labels\s+"([^"]*)"/.exec(ensureLine)[1]),
+  );
+  const referenced = new Set();
+  for (const [, segment] of editLine.matchAll(
+    /--(?:add|remove)-label\s+"([^"]*)"/g,
+  )) {
+    for (const name of splitNames(segment)) referenced.add(name);
+  }
+  assert(
+    referenced.has(NEEDS_TRIAGE_LABEL),
+    "expected the edit to shed sentry:needs-triage (scan found the wrong line)",
+  );
+  for (const name of referenced) {
+    assert(
+      ensured.has(name),
+      `the edit names ${name} but the ensure does not cover it`,
+    );
+  }
+});
+
+await test("the verdict step defines its compensation ABOVE the label edit and guards the edit with it", () => {
+  // The edit is itself an exit that owes a re-queue. `gh` sends --add-label and
+  // --remove-label as discrete mutations and fails the command on a label the
+  // repo does not have, so a failure can leave the stub carrying the verdict
+  // label AND sentry:needs-triage. With `requeue_for_retry` defined BELOW the
+  // edit, `set -e` aborted the step before any compensation existed — the
+  // 2026-08-13 failure on issue #1811. Ordering by index, not presence: a
+  // definition that drifts back below the edit reds this.
+  const workflow = readRepoFile(".github/workflows/sentry-triage-agent.yml");
+  const verdictJob = workflow.slice(
+    workflow.indexOf("- name: Apply verdict label"),
+    workflow.indexOf("- name: Render or clear the needs-human brief"),
+  );
+  const definedAt = verdictJob.indexOf("requeue_for_retry() {");
+  const editAt = verdictJob.indexOf("gh issue edit");
+  assert(definedAt !== -1, "expected the compensation to be defined");
+  assert(editAt !== -1, "expected the verdict label edit");
+  assert(
+    definedAt < editAt,
+    "requeue_for_retry must be defined before the label edit it compensates for",
+  );
+  // The edit runs in a condition, so its failure routes to the compensation
+  // instead of aborting the step under set -e.
+  const guarded = verdictJob
+    .replace(/\\\s*\n\s*/g, " ")
+    .split("\n")
+    .find((line) => line.includes("gh issue edit"));
+  assert(
+    /^\s*if ! gh issue edit\b/.test(guarded),
+    `the verdict label edit must be guarded, got: ${guarded?.trim()}`,
+  );
+  const failureBranch = verdictJob.slice(editAt);
+  assert(
+    failureBranch.indexOf("requeue_for_retry\n") <
+      failureBranch.indexOf("Applied ${label}"),
+    "the edit's failure branch must re-queue before the success log",
   );
 });
 

@@ -771,6 +771,74 @@ const ACTIONABLE_LABEL_TO_VERDICT = {
 };
 
 /**
+ * SELF-HEAL a named set of labels from the single source of truth (Stage A's
+ * LABEL_DEFINITIONS), the pattern every other settlement path in this pipeline
+ * already uses before it writes labels (`.github/workflows/sentry-autofix.yml`
+ * via `sentry-autofix-finalize.mjs label-def`, `ensureArchiveLabels` in
+ * `scripts/sentry-triage-archive.mjs`, and the batch below).
+ *
+ * The reason it exists: only the ingest job CREATES the label set, so any label
+ * added to LABEL_DEFINITIONS is absent from the repo until ingest next runs —
+ * and `gh` errors on a repo-nonexistent label, on `--remove-label` exactly as on
+ * `--add-label`. A consumer that ships ahead of that bootstrap fails on a name
+ * it was right to use.
+ *
+ * BEST-EFFORT per label: a create that fails warns and the loop continues, so
+ * the ensure never becomes the thing that kills a settlement; the write it was
+ * protecting still fails loudly, with compensation. A name absent from
+ * LABEL_DEFINITIONS is drift in the single source, so it is reported as a
+ * workflow annotation rather than silently skipped.
+ *
+ * Returns `{ ensured, unknown, failed }` — name lists, for the CLI's JSON.
+ */
+async function ensureQueueLabels(localRun, repo, names) {
+  const result = { ensured: [], unknown: [], failed: [] };
+  for (const name of [...new Set(names)]) {
+    const def = LABEL_DEFINITIONS.find((entry) => entry.name === name);
+    if (!def) {
+      process.stderr.write(
+        `::warning::${name} is not in LABEL_DEFINITIONS, so it cannot be self-healed; the label single-source drifted.\n`,
+      );
+      result.unknown.push(name);
+      continue;
+    }
+    try {
+      await localRun([
+        "label",
+        "create",
+        def.name,
+        "--repo",
+        repo,
+        "--color",
+        def.color,
+        "--description",
+        def.description,
+        "--force",
+      ]);
+      result.ensured.push(name);
+    } catch (error) {
+      process.stderr.write(
+        `warning: could not ensure label ${name}: ${error.message}\n`,
+      );
+      result.failed.push(name);
+    }
+  }
+  return result;
+}
+
+/**
+ * `--ensure-labels` mode: the settlement step's pre-flight. The verdict step in
+ * `.github/workflows/sentry-triage-agent.yml` runs it with every label its one
+ * `gh issue edit` names — the verdict label being added, the whole shed list,
+ * and `sentry:needs-triage` — immediately before that edit.
+ */
+export async function runEnsureLabels(options, deps = {}) {
+  const runGh = deps.runGh ?? defaultRunGh;
+  const localRun = (args) => runGh(args, {});
+  return ensureQueueLabels(localRun, options.localRepo, options.ensureLabels);
+}
+
+/**
  * `--batch` mode: the serialized `project` job's driver. Processes the run's
  * queue issues ONE AT A TIME in a single node process, which kills the
  * same-run duplicate-family race by construction — no two projections are
@@ -800,29 +868,7 @@ export async function runProjectionBatch(options, deps = {}) {
   // both the stub labeling and the compensation removals on first activation.
   // Best-effort: if the ensure itself fails, per-row settling fails loudly
   // with compensation as before.
-  const projectedDef = LABEL_DEFINITIONS.find(
-    (def) => def.name === PROJECTED_LABEL,
-  );
-  if (projectedDef) {
-    try {
-      await localRun([
-        "label",
-        "create",
-        projectedDef.name,
-        "--repo",
-        options.localRepo,
-        "--color",
-        projectedDef.color,
-        "--description",
-        projectedDef.description,
-        "--force",
-      ]);
-    } catch (error) {
-      process.stderr.write(
-        `warning: could not ensure label ${PROJECTED_LABEL}: ${error.message}\n`,
-      );
-    }
-  }
+  await ensureQueueLabels(localRun, options.localRepo, [PROJECTED_LABEL]);
 
   for (const number of options.queueIssues) {
     let verdict = null;
@@ -967,6 +1013,15 @@ Options:
   --verdict <value>    Already-validated verdict from the label step. When set,
                        the script fails loud if its own parse of the newest
                        verdict comment disagrees (never a silent skip).
+  --ensure-labels <names>
+                       Comma list of labels to self-heal from Stage A's
+                       LABEL_DEFINITIONS (\`gh label create --force\`) before a
+                       caller writes them. Run by the workflow's label step with
+                       every name its \`gh issue edit\` uses — added, shed, and
+                       \`sentry:needs-triage\` — because gh fails the whole edit
+                       on a label the repo does not have, on --remove-label just
+                       as on --add-label. Needs no --issue; best-effort per
+                       label, so it exits 0 even when a create fails.
   -h, --help           Show this help.
 
 Env:
@@ -1010,6 +1065,7 @@ export function parseArgs(argv, env = process.env) {
     priorVerdicts: false,
     priorVerdictCommentId: null,
     expectedVerdict: null,
+    ensureLabels: null,
     help: false,
   };
   let issuesRaw = null;
@@ -1066,6 +1122,22 @@ export function parseArgs(argv, env = process.env) {
         options.expectedVerdict = value;
         break;
       }
+      case "--ensure-labels": {
+        // A comma list, the shape the workflow already builds for
+        // `--remove-label`; empty segments are dropped so an empty shed list
+        // costs nothing. An EMPTY set is a wiring bug — a step that ensures
+        // nothing would silently reintroduce the failure this mode exists to
+        // prevent — so it fails loud here rather than no-opping.
+        const names = readValue()
+          .split(",")
+          .map((name) => name.trim())
+          .filter((name) => name !== "");
+        if (names.length === 0) {
+          throw new Error("--ensure-labels requires at least one label name");
+        }
+        options.ensureLabels = names;
+        break;
+      }
       case "-h":
       case "--help":
         options.help = true;
@@ -1083,11 +1155,23 @@ export function parseArgs(argv, env = process.env) {
         "--prior-verdict-comment is only consumed by --parse-only; pass both or neither",
       );
     }
+    // Label self-heal is its own mode: it touches no stub, so it takes no
+    // issue. Combining it with a resolving mode would hide which one the caller
+    // meant — and the label step runs the two as separate, ordered invocations
+    // on purpose (ensure, THEN edit), so nothing legitimately needs both.
+    if (
+      options.ensureLabels !== null &&
+      (options.batch || options.parseOnly || options.priorVerdicts)
+    ) {
+      throw new Error(
+        "--ensure-labels is a standalone mode; run it in its own invocation",
+      );
+    }
     if (options.batch || options.priorVerdicts) {
       options.queueIssues = parseIssueNumbers(issuesRaw);
     } else if (
-      !Number.isInteger(options.queueIssue) ||
-      options.queueIssue <= 0
+      options.ensureLabels === null &&
+      (!Number.isInteger(options.queueIssue) || options.queueIssue <= 0)
     ) {
       throw new Error("--issue must be a positive integer");
     }
@@ -1103,7 +1187,9 @@ async function main() {
     return;
   }
   let result;
-  if (options.batch) {
+  if (options.ensureLabels) {
+    result = await runEnsureLabels(options);
+  } else if (options.batch) {
     result = await runProjectionBatch(options);
   } else if (options.priorVerdicts) {
     result = await runPriorVerdicts(options);

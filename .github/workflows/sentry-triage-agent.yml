@@ -779,17 +779,21 @@ jobs:
             echo "::error::architecturalHold for issue #${QUEUE_ISSUE_NUMBER} is '${architectural_hold}', not true/false; leaving sentry:needs-triage in place for retry."
             exit 1
           fi
-          gh issue edit "${QUEUE_ISSUE_NUMBER}" \
-            --repo "${GITHUB_REPOSITORY}" \
-            --remove-label "sentry:needs-triage,${shed}" \
-            --add-label "${label}"
-          echo "Applied ${label} to issue #${QUEUE_ISSUE_NUMBER}."
-          # The edit above already took sentry:needs-triage OFF, so every exit
-          # below it must put the stub back in the queue first. Nothing
+          # The label edit below takes sentry:needs-triage OFF, so it and every
+          # exit after it must put the stub back in the queue first. Nothing
           # downstream would: the close step never runs, the project job skips
           # a stub that is not needs-triage, and the scheduled selector only
-          # admits sentry:needs-triage — a bare `exit 1` here would strand an
+          # admits sentry:needs-triage — a bare `exit 1` there would strand an
           # open, verdict-labeled stub with no retry path at all.
+          #
+          # Defined ABOVE the edit because the EDIT ITSELF is one of those
+          # exits. `gh` sends --add-label and --remove-label as discrete
+          # mutations and fails the whole command on a label the repo does not
+          # have; the add can therefore land while the command exits nonzero,
+          # leaving the stub carrying the verdict label AND sentry:needs-triage.
+          # Defined below the edit — as it was — `set -e` killed the step before
+          # any compensation existed to call (the run on 2026-08-13, issue
+          # #1811).
           #
           # Every compensating exit in this workflow routes through the ONE
           # re-queue chokepoint (scripts/sentry-triage-requeue.mjs, BOOKKEEPING
@@ -812,12 +816,48 @@ jobs:
               --repo "${GITHUB_REPOSITORY}" \
               --reason verdict-unsettled
           }
+          # SELF-HEAL every label the edit names — added AND shed, plus
+          # sentry:needs-triage — from Stage A's LABEL_DEFINITIONS, before the
+          # edit. Only the ingest job CREATES that label set, so a label added to
+          # the definitions is absent from the repo until ingest next runs, and
+          # `gh` errors on a repo-nonexistent name for --remove-label exactly as
+          # for --add-label. That is what broke this step on 2026-08-13:
+          # sentry:fix-scope-architectural (#1812) reached the shed list — which
+          # every non-architectural verdict carries — hours before the next
+          # ingest bootstrapped it, so the edit added the verdict label, failed
+          # on the unknown removal, and left issue #1811 double-labeled.
+          #
+          # The three other settlement paths already do this before they write
+          # labels (.github/workflows/sentry-autofix.yml via
+          # `sentry-autofix-finalize.mjs label-def`, runProjectionBatch in
+          # scripts/sentry-triage-project.mjs, ensureArchiveLabels in
+          # scripts/sentry-triage-archive.mjs); this step was the last one that
+          # did not. Best-effort per label, like theirs: the mode warns and
+          # continues on a create it cannot make, so the ensure never becomes the
+          # thing that kills settlement — a name that still does not exist fails
+          # the guarded edit below, which compensates. Its JSON summary goes to a
+          # temp file so it stays out of this step's log; what a reader needs —
+          # a create that failed, a name missing from the definitions — is a
+          # stderr warning annotation.
+          node scripts/sentry-triage-project.mjs \
+            --ensure-labels "${label},${shed},sentry:needs-triage" \
+            --repo "${GITHUB_REPOSITORY}" \
+            > "${RUNNER_TEMP}/verdict-label-ensure.json"
+          if ! gh issue edit "${QUEUE_ISSUE_NUMBER}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --remove-label "sentry:needs-triage,${shed}" \
+            --add-label "${label}"; then
+            echo "::error::Applying ${label} to issue #${QUEUE_ISSUE_NUMBER} failed (see the gh error above); the add and the removals are discrete mutations, so the stub may hold the verdict label and sentry:needs-triage at once. Re-queuing it so the next scheduled run re-triages it from a known state."
+            requeue_for_retry
+            exit 1
+          fi
+          echo "Applied ${label} to issue #${QUEUE_ISSUE_NUMBER}."
           # Post-condition, re-read from GitHub rather than assumed: refuse to
           # hand a double-verdicted stub to the close/project/digest legs. Only
-          # >1 fails — the edit above already exits nonzero if the --add-label
-          # did not land, so zero is not reachable here. Fail CLOSED on a read
-          # failure too: an unverifiable stub is treated as a violation and
-          # re-queued, never waved through. Re-queueing is safe to replay: the
+          # >1 fails — the guarded edit above already exits nonzero if the
+          # --add-label did not land, so zero is not reachable here. Fail CLOSED
+          # on a read failure too: an unverifiable stub is treated as a violation
+          # and re-queued, never waved through. Re-queueing is safe to replay: the
           # shed makes the whole step idempotent, so the retry run applies the
           # verdict onto a stub in exactly the state this run found it in.
           labels_file="${RUNNER_TEMP}/verdict-labels.json"
