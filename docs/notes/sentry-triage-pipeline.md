@@ -199,7 +199,17 @@ bulk:
 That write order is load-bearing at both ends, and no stage writes it by hand.
 Every re-queue in the pipeline runs through one function,
 `requeueQueueStub` in `scripts/sentry-triage-requeue.mjs`, which takes the CAUSE
-as an argument and decides the fence from it. The fence goes first so no
+as an argument and decides the fence from it. The triage agent workflow reaches
+it through `scripts/sentry-triage-workflow-requeue.mjs`, the CLI every
+compensating exit in that workflow calls with a `--reason`; an open-coded label
+swap anywhere in the workflow reds a shape test in
+`scripts/sentry-triage-brief.test.mjs`. Because every caller's premise is a
+snapshot of a failure it already observed, that CLI revalidates live state and
+DECLINES when the stub has gone terminal — CLOSED, or carrying
+`sentry:archived` because the archive leg completed in between — rather than
+shedding the archive marker and reopening a retry stub over an archived Sentry
+issue that has consumed a human approval. A failed revalidation read propagates:
+the run goes red and names the manual repair. The fence goes first so no
 interruption can leave a stub re-queued for triage without it; the state change
 goes last so none can leave it open but unselectable. Inside the label step the
 restore and the shed are two ordered `gh issue edit` calls, never one call
@@ -224,11 +234,13 @@ results: a closed stub that still carries `sentry:needs-triage` is reopened,
 its stale verdict/projection/autofix/archive labels shed, and a fixed recovery
 note posted. That pairing is unreachable, never a resting state — Stage B
 selects open stubs only, and the regression gate above reopens a closed stub
-only on fresh Sentry events. Several stages can write it (both `gh issue close`
-compensation paths in the triage agent workflow when a close lands but its
-response is lost, the archive leg's live-regression refusal, a crash inside
-ingest's own reopen sequence, a hand-edit), so it is repaired once here from
-observed state rather than guarded at each producer. Declining a stub means
+only on fresh Sentry events. Several stages can still write it (the archive
+leg's live-regression refusal, a crash inside ingest's own reopen sequence, a
+hand-edit), so it is repaired once here from observed state rather than guarded
+at each producer. The triage agent workflow's own close compensations no longer
+produce it: they run through the re-queue CLI, whose terminal revalidation
+declines on a stub that reads CLOSED — which is exactly what a close that landed
+and lost its response leaves behind. Declining a stub means
 removing `sentry:needs-triage`, not closing the stub while it still carries the
 label.
 
@@ -320,7 +332,15 @@ escalation_reason: |
 
 `how_to_check` and `decision_branches` exist because the brief below is
 deterministic: nothing else in the contract carries the instruction half of a
-decision, so without them a rendered brief can only restate the situation.
+decision, so without them a rendered brief can only restate the situation. Both
+are enforced, counted after neutralization, by
+`escalationCompletenessRefusal` in
+`scripts/sentry-triage-escalation-contract.mjs`: at least one `how_to_check`
+step, and at least **two** `decision_branches` — a decision has at least two
+answers, and a one-branch escalation settles with the brief silent on the other
+one and no retry, because the verdict resolved cleanly. Failing either is the
+same fail-loud contract as a missing verdict: the label step exits nonzero and
+`sentry:needs-triage` stays on for the next run.
 Every list is capped at `MAX_BRIEF_LIST_ITEMS` (in
 `scripts/sentry-triage-project-core.mjs`), and every field is bounded at
 `MAX_BRIEF_TEXT_LEN` before either emitter escapes it. The bounds and the
@@ -562,14 +582,16 @@ new one and removes every other verdict label in the same call, so
 re-dispatching an already-verdicted stub — the usual case after a human answers
 a `needs-human` escalation — replaces the old verdict instead of stacking a
 second one. The step then re-reads the stub and fails its own matrix job if the
-read fails or more than one verdict label survives — restoring
-`sentry:needs-triage` and shedding the verdict labels first, the same
-compensation the close and projection failure paths make, so the stub goes back
-in the queue instead of being stranded open with no retry path. The shed list
-comes from the same `--parse-only` output
-as the label, and covers the verdict namespace only: the wider re-queue shed
-also clears the projection, autofix, and archive markers, which must survive a
-verdict change. The digest warns about a double-verdicted stub but never fails
+read fails or more than one verdict label survives — re-queuing the stub first,
+the same compensation the brief-clear, close and projection failure paths make,
+so it goes back in the queue instead of being stranded open with no retry path.
+Every one of those exits runs the re-queue CLI rather than its own label swap
+(see the re-queue chokepoint above), so they all shed the same set — the verdict
+namespace plus the projection, autofix and archive markers — because a stub
+awaiting a fresh verdict must carry no trace of how the previous round was
+handled. Only the forward verdict swap keeps those markers, and its shed list
+comes from the same `--parse-only` output as the label.
+The digest warns about a double-verdicted stub but never fails
 on one — it is the batch's single daily notification.
 
 Every deterministic close records that the ledger issue will reopen on a

@@ -1815,9 +1815,14 @@ await test("a per-issue error is counted without aborting the whole run", async 
 // ---------------------------------------------------------------------------
 // Stranded `CLOSED + sentry:needs-triage` recovery (issue #1706).
 //
-// The scenario is a LOST CLOSE RESPONSE: `gh issue close` lands server-side and
-// only its response is lost, so the caller sees a rejection and runs its
-// compensation. A rejected command is not proof its remote mutation did not
+// The sweep is deliberately PRODUCER-AGNOSTIC: it repairs the pairing from
+// observed state, so it covers every producer that exists today and every one
+// added later. The cases below therefore assert the repair, not any particular
+// writer's argv sequence.
+//
+// The class of bug that writes the pairing is an AMBIGUOUS RESPONSE: a mutation
+// lands server-side and only its response is lost, so the caller sees a
+// rejection — and a rejected command is not proof its remote mutation did not
 // happen. The fake below is stateful and its `ambiguousOn` hook applies the
 // mutation and THEN throws, which is exactly that. Every assertion is on the
 // observable end state — never on which call rejected.
@@ -1973,44 +1978,6 @@ function makeFakeGitHub({
         )
         .map((issue) => issue.number),
   };
-}
-
-/**
- * The close-then-compensate shell both producer sites in
- * `.github/workflows/sentry-triage-agent.yml` run. They differ only in which
- * job hosts them (the `verdict` job's "Close queue stub" step and the `project`
- * job's per-row close) and in the exact `labels_to_remove` string; the failure
- * semantics — restore `sentry:needs-triage`, shed the verdict label and
- * `sentry:projected`, fail loud — are identical, so one helper models both.
- */
-async function closeWithCompensation(runGh, { number, labelsToRemove }) {
-  try {
-    await runGh([
-      "issue",
-      "close",
-      String(number),
-      "--repo",
-      REPO,
-      "--reason",
-      "completed",
-      "--comment",
-      "Triage complete: upstream. Ledger entry closed; reopens automatically on Sentry regression.",
-    ]);
-    return "closed";
-  } catch {
-    await runGh([
-      "issue",
-      "edit",
-      String(number),
-      "--repo",
-      REPO,
-      "--remove-label",
-      labelsToRemove,
-      "--add-label",
-      NEEDS_TRIAGE_LABEL,
-    ]);
-    return "compensated";
-  }
 }
 
 /** Ingest deps that see NO Sentry results at all. A stranded stub's Sentry
@@ -2187,45 +2154,50 @@ await test("stranded recovery re-queues, sheds stale markers, and changes state 
   );
 });
 
+// The producers that can STILL write the pairing. The triage workflow's two
+// close compensations used to head this list and no longer do (#1782): they
+// route through the re-queue chokepoint, whose terminal revalidation declines
+// on a CLOSED stub, so a landed-but-unacknowledged close now leaves the stub
+// settled rather than stranded. Their removal is asserted where that behaviour
+// lives — scripts/sentry-triage-requeue.test.mjs, "a close whose response was
+// lost leaves the stub CLOSED, not re-queued (#1782)".
+//
+// What survives is the point of the sweep: it repairs the shape from OBSERVED
+// state, so it does not care which of these wrote it, nor whether a producer
+// added later is on the list at all. Each case starts from the end state rather
+// than re-implementing a writer that lives in another module; reachability of
+// the crash case is proven next door by "stranded recovery re-queues, sheds
+// stale markers, and changes state last", which pins the write ordering that
+// makes a crash between the two leave exactly this pairing.
 for (const producer of [
   {
-    name: "the verdict job's close step",
-    labelsToRemove: "sentry:verdict-upstream,sentry:projected",
+    // Re-queues a stub it never reopens (it must not resurrect a stub whose
+    // Sentry issue is live-regressed while a human approval is outstanding).
+    name: "the archive leg's live-regression refusal",
+    labels: ["sentry-triage", "sentry:verdict-upstream", "sentry:projected"],
   },
   {
-    name: "the project job's per-row close",
-    labelsToRemove: "sentry:verdict-code-fix,sentry:projected",
+    // This script's own reopen writes the label BEFORE the state change, so a
+    // crash between the two leaves the label on a still-closed stub.
+    name: "a crash inside ingest's own reopen sequence",
+    labels: ["sentry-triage", "sentry:verdict-code-fix", "sentry:projected"],
   },
 ]) {
-  await test(`ingest recovers a stub stranded by a lost close response at ${producer.name}`, async () => {
-    const verdictLabel = producer.labelsToRemove.split(",")[0];
+  await test(`ingest recovers a stub stranded by ${producer.name}`, async () => {
     const fake = makeFakeGitHub({
       issues: [
         {
           number: 42,
           title: buildQueueTitle("X-42", "web", "error"),
-          state: "OPEN",
-          labels: ["sentry-triage", verdictLabel],
+          // The stranded pairing itself: CLOSED, yet still labeled as awaiting
+          // a verdict nothing will ever produce.
+          state: "CLOSED",
+          labels: [...producer.labels, NEEDS_TRIAGE_LABEL],
         },
       ],
-      // The close is the ambiguous call: it lands, then its response is lost.
-      ambiguousOn: (args) => args[1] === "close",
     });
 
-    const outcome = await closeWithCompensation(fake.runGh, {
-      number: 42,
-      labelsToRemove: producer.labelsToRemove,
-    });
-
-    // End state after the lost response: the stub is CLOSED (the mutation
-    // landed) AND wearing sentry:needs-triage (the compensation ran on the
-    // rejection). That pairing is invisible to Stage B.
-    assertEqual(outcome, "compensated");
-    assertEqual(fake.get(42).state, "CLOSED");
-    assert(
-      fake.get(42).labels.includes(NEEDS_TRIAGE_LABEL),
-      "compensation should have restored the needs-triage label",
-    );
+    // Invisible to Stage B, which lists open stubs only.
     assertDeepEqual(fake.selectable(), []);
 
     const counts = await runIngest(
@@ -2233,7 +2205,8 @@ for (const producer of [
       ingestDeps(fake),
     );
 
-    // The next scheduled ingest repairs it from observed state.
+    // The next scheduled ingest repairs it from observed state, shedding the
+    // stale verdict and projection markers on the way back into the queue.
     assertEqual(counts.recovered, 1);
     assertEqual(counts.errors, 0);
     const issue = fake.get(42);
