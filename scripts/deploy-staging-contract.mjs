@@ -215,6 +215,7 @@ function validateTerraform(files, errors) {
   );
   validateCloudBuildSourceExecutors(blocks, errors);
   validateAppEngineDefaultStagingAdmin(blocks, errors);
+  validateAppEngineDefaultStagingUploaderAdmin(blocks, errors);
 }
 
 function validateAppEngineDefaultStagingAdmin(blocks, errors) {
@@ -245,6 +246,43 @@ function validateAppEngineDefaultStagingAdmin(blocks, errors) {
     errors,
     label,
   );
+  expectExpression(
+    grant,
+    "depends_on",
+    "[google_app_engine_application.aegis]",
+    errors,
+    label,
+  );
+}
+
+function validateAppEngineDefaultStagingUploaderAdmin(blocks, errors) {
+  const label = `${TERRAFORM_FILE}: App Engine default staging uploader admin`;
+  const grant = requireBlock(
+    blocks,
+    TERRAFORM_FILE,
+    "google_storage_bucket_iam_member",
+    "app_engine_default_staging_uploader_admin",
+    errors,
+    label,
+  );
+  if (!grant) return;
+
+  expectExpression(
+    grant,
+    "for_each",
+    "local.app_engine_source_uploaders",
+    errors,
+    label,
+  );
+  expectString(
+    grant,
+    "bucket",
+    "staging.${google_project.monitoring.project_id}.appspot.com",
+    errors,
+    label,
+  );
+  expectString(grant, "role", "roles/storage.admin", errors, label);
+  expectExpression(grant, "member", "each.value", errors, label);
   expectExpression(
     grant,
     "depends_on",

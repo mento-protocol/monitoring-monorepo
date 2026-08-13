@@ -3,7 +3,7 @@ title: Routine GCP deploys use explicit source-staging buckets
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-11
+last_verified: 2026-08-13
 scope: terraform/infra
 date: 2026-07
 doc_type: adr
@@ -35,13 +35,13 @@ expiry. App Engine also requires a `US`-compatible bucket for the immutable
 `us-central` application, while Metrics Bridge builds run in `var.gcp_region`.
 Even with `gcloud app deploy --bucket`, App Engine writes its service-owned
 `staging.<project>.appspot.com` bucket while deploying a version. Google
-documents `roles/storage.admin` for the default AppSpot service account when
-that internal staging path is denied. Aegis deploys failed on this path from
-July 30 through August 11 even though AppSpot still inherited project Editor
-and the bucket's legacy owner grant. Those IAM roles do not include object
-permissions such as `storage.objects.get` and `storage.objects.update`; the
-direct bucket-scoped Storage Admin grant supplies Google's documented
-permission set.
+documents `roles/storage.admin` when that internal staging path is denied.
+Aegis deploys failed on this path after the routine deployer lost project-wide
+Storage Admin. A bucket-scoped AppSpot grant alone did not recover the deploy:
+the rerun still failed, and its `CreateVersion` audit event identified the
+routine deployer as the request principal. Both the `gcloud` caller and AppSpot
+therefore need the documented permission set on this one bucket. They do not
+need it at project scope.
 
 The Alloy Cloud Build path is pinned to the dedicated
 `grafana_agent_builder` service account. ADR 0058's applied foundation provides
@@ -83,11 +83,12 @@ on the App Engine bucket. AppSpot receives object view. No direct staging grant
 is project-wide, and default Compute has no direct App Engine source-bucket
 grant in this stack.
 
-The default AppSpot service account also receives `roles/storage.admin` on only
-`staging.<project>.appspot.com`, the App Engine service-owned staging bucket.
-Cloud Storage limits a bucket-scoped grant to that bucket and its objects. This
-supported exception covers App Engine's internal staging path; it does not
-apply to the Terraform-managed App Engine source bucket or any project scope.
+The App Engine uploaders and default AppSpot service account also receive
+`roles/storage.admin` on only `staging.<project>.appspot.com`, the App Engine
+service-owned staging bucket. Cloud Storage limits these grants to that bucket
+and its objects. This supported exception covers version submission and App
+Engine's internal staging path; it does not apply to either Terraform-managed
+source bucket or any project scope.
 
 The routine deployer and `gcp_dev_members` receive Service Account User on the
 dedicated Metrics Bridge runtime identity. ADR 0058 additionally grants them
@@ -117,6 +118,10 @@ approved apply.
   different locations, retention windows, and write permissions.
 - **Give App Engine uploaders object create only** — rejected because App
   Engine's source cache can replace or remove an existing hash-named object.
+- **Grant only the default AppSpot service account on the service-owned staging
+  bucket** — rejected because a live rerun retained the same denial after that
+  grant was applied; the failed `CreateVersion` audit event named the routine
+  deployer as the caller.
 - **Use legacy bucket reader plus object admin for App Engine's default staging
   bucket** — rejected because Google's documented remedy for the service-owned
   staging path is Storage Admin, which is supported at the one-bucket scope.
@@ -137,10 +142,11 @@ approved apply.
 
 - Routine source uploads have a small, named storage boundary that future
   sensitive buckets cannot inherit.
-- App Engine uploaders retain stronger object authority, but only on a
-  short-lived source bucket.
-- The default AppSpot service account has Storage Admin only on its
-  service-owned staging bucket. It has no project-wide Storage Admin grant.
+- App Engine uploaders retain stronger object authority on the short-lived
+  explicit source bucket and Storage Admin on only App Engine's service-owned
+  staging bucket.
+- The default AppSpot service account also has Storage Admin only on the
+  service-owned staging bucket. No uploader or AppSpot grant is project-wide.
 - The dedicated Alloy and Metrics Bridge builders have exact staging grants.
   The cleanup leaves default Compute outside the direct source-bucket Object
   Viewer set; its separate project-level Editor role remains outside this ADR.

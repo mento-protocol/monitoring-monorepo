@@ -488,6 +488,16 @@ resource "google_storage_bucket_iam_member" "app_engine_default_staging_admin" {
   depends_on = [google_app_engine_application.aegis]
 }
 
+resource "google_storage_bucket_iam_member" "app_engine_default_staging_uploader_admin" {
+  for_each = local.app_engine_source_uploaders
+
+  bucket = "staging.\${google_project.monitoring.project_id}.appspot.com"
+  role   = "roles/storage.admin"
+  member = each.value
+
+  depends_on = [google_app_engine_application.aegis]
+}
+
 moved {
   from = google_service_account_iam_member.ci_default_compute_service_account_user
   to   = google_service_account_iam_member.ci_metrics_bridge_runtime_service_account_user
