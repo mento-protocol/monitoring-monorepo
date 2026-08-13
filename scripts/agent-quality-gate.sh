@@ -780,6 +780,9 @@ claim_gate_run_lock() {
 # the identity now is what lets the drain tell "this PID is still the process
 # we condemned" from "this PID was reused while we worked".
 gate_drain_capture=""
+# Where the captured tree is written down, if anywhere. Set before capturing
+# starts, so each process is recorded as it is discovered.
+gate_drain_capture_file=""
 
 # The captured tree is obligation-evidence too, and the same rule applies to it
 # as to the condemned token: the moment the first signal goes out, this process
@@ -787,20 +790,29 @@ gate_drain_capture=""
 # that, a successor inherits the list; without it, the successor's tag scan
 # finds nothing — the first pass killed the tag carrier — and reads that as
 # nothing left to do while an untagged descendant keeps running.
-gate_drain_persist_capture() {
-  local path="$1"
-  [[ -n "$path" ]] || return 0
-  printf '%s' "$gate_drain_capture" > "$path" 2>/dev/null || true
-}
-
+#
+# Recorded by appending one short line per process, never by rewriting the
+# file. A `>` redirection truncates the moment it opens, so a rewrite has a
+# window where the snapshot on disk is empty — and this is exactly the file a
+# successor consults when nothing carries the tag any more. Appending removes
+# that window rather than narrowing it: the list can only grow, so an
+# interrupted drain leaves fewer entries than it eventually would have, never
+# fewer than it had already committed to. Since a capture always completes
+# before the first signal, anything already signalled is already on disk.
 capture_process_tree() {
   local root_pid="$1"
-  local child
+  local child entry
   for child in $(pgrep -P "$root_pid" 2>/dev/null || true); do
     capture_process_tree "$child"
   done
-  gate_drain_capture="${gate_drain_capture}${root_pid}|$(gate_lock_process_start "$root_pid")
+  entry="${root_pid}|$(gate_lock_process_start "$root_pid")"
+  gate_drain_capture="${gate_drain_capture}${entry}
 "
+  # One `printf` of a short line through an append-mode descriptor is a single
+  # write, so concurrent or interrupted appends cannot interleave a half line.
+  [[ -z "$gate_drain_capture_file" ]] ||
+    printf '%s\n' "$entry" >> "$gate_drain_capture_file" 2>/dev/null ||
+    true
 }
 
 drain_condemned_run_commands() {
@@ -820,6 +832,8 @@ drain_condemned_run_commands() {
   gate_drain_capture=""
   captured_file=""
   [[ -z "$gate_lock_root_dir" ]] || captured_file="${gate_lock_root_dir}/captured.${token}"
+  # Every process found from here on is appended as it is discovered.
+  gate_drain_capture_file="$captured_file"
   # Start from what an earlier drain wrote down before it was interrupted. Its
   # tagged processes are very likely already gone — killing them is what the
   # first pass does — so a fresh tag scan on its own would come back empty and
@@ -835,7 +849,6 @@ drain_condemned_run_commands() {
     [[ -z "$captured_file" ]] || rm -f "$captured_file"
     return 0
   fi
-  gate_drain_persist_capture "$captured_file"
 
   echo "The run this lock was taken from left commands running; stopping them before starting anything."
   announced=1
@@ -845,6 +858,12 @@ drain_condemned_run_commands() {
     alive=""
     while IFS='|' read -r pid recorded; do
       [[ -n "$pid" ]] || continue
+      # Only signal something that reads as a PID. Appends are single short
+      # writes so a half-written line should be impossible, and this is the
+      # backstop for that being wrong: a truncated line could otherwise name
+      # some unrelated process, and killing a stranger is worse than missing a
+      # survivor the tag scan would find anyway.
+      [[ "$pid" =~ ^[0-9]+$ ]] || continue
       kill -0 "$pid" 2>/dev/null || continue
       current="$(gate_lock_process_start "$pid")"
       if [[ -n "$recorded" && -n "$current" && "$current" != "$recorded" ]]; then
@@ -894,7 +913,6 @@ EOF
       for pid in $alive; do
         capture_process_tree "$pid"
       done
-      gate_drain_persist_capture "$captured_file"
     fi
   done
 

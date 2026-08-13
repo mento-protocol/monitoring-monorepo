@@ -5679,8 +5679,16 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     "$repo_root/scripts/agent-quality-gate.sh" \
     --base HEAD --run --lock-wait 45 \
     > "$gate_race_out/drain-b.out" 2>&1 || true
-  [[ -n "$(find "$gate_race_root" -name 'captured.*' 2>/dev/null)" ]] ||
+  race_captured_file="$(find "$gate_race_root" -name 'captured.*' 2>/dev/null | head -n1)"
+  [[ -n "$race_captured_file" ]] ||
     fail "a drain must write down what it captured before it signals anything"
+  # Non-empty is the point: the snapshot is only ever appended to, so an
+  # interrupted drain cannot leave the successor an empty list. A rewrite
+  # would, because a `>` redirection truncates the moment it opens.
+  [[ -s "$race_captured_file" ]] ||
+    fail "an interrupted drain must not leave an empty captured set behind"
+  grep -qE '^[0-9]+\|' "$race_captured_file" ||
+    fail "the captured set must name processes, not fragments"
   kill -0 "$race_drain_orphan" 2>/dev/null ||
     fail "the interrupted-drain case needs its TERM-ignoring command alive to mean anything"
   (

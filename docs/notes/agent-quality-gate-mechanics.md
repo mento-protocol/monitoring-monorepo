@@ -330,6 +330,21 @@ of them.
    process in it is confirmed gone. A successor unions that file with its own
    tag scan.
 
+   **Obligation evidence is never rewritten in place.** A `>` redirection
+   truncates the file the moment it opens, so a rewrite has a window in which
+   the copy on disk is empty — and these files exist precisely to be read by
+   whoever comes after a process that died at a bad moment. Both lists are
+   therefore append-only, one short line per write, which is a single write
+   through an append descriptor and so cannot interleave a half line. The
+   readers tolerate duplicates, because re-checking a process that is already
+   gone costs nothing, and skip any line whose PID field is not a number — a
+   torn line should be impossible, and killing a stranger is a worse outcome
+   than missing a survivor the tag scan would find anyway. The census behind
+   that claim: `condemned` and `captured.<token>` are appended to; the owner
+   record is built in a private per-PID file and published with `ln`, so its
+   one `>` is to something nobody else reads; `owner.reclaiming.<pid>` is
+   created by rename. Nothing under the lock root is rewritten in place.
+
    The audit that goes with this rule, over the current code: the things that
    gate a destructive or permissive act are the staleness verdict
    (re-validated under the election immediately before acting, and the act
