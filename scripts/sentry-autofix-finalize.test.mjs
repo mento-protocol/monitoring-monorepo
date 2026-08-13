@@ -34,6 +34,19 @@ import {
 // the body); the marker is used here to test the CLI's rolling-comment upsert
 // and the untrusted-author selection fence.
 import { AUTOFIX_RUN_RECORD_MARKER } from "./sentry-autofix-run-record.mjs";
+// The select leg's per-run cost caps. This suite already reads the autofix
+// workflow, so it is where the job budget those caps are sized against can be
+// pinned against the caps themselves — see the timeout test at the end.
+import { MAX_CANDIDATE_EVALUATIONS } from "./sentry-autofix-select.mjs";
+import {
+  MAX_SECOND_LOOK_EVALUATIONS,
+  SECOND_LOOK_FAMILY_BUDGETS,
+} from "./sentry-autofix-second-look.mjs";
+import { MAX_HANDLED_ID_QUERIES } from "./sentry-autofix-queue-io.mjs";
+import {
+  MAX_REVERSE_PROBE_QUERIES,
+  MAX_REVERSE_VERIFY_READS,
+} from "./sentry-autofix-reverse-verify.mjs";
 import { AUTOFIX_COMMENT_PREFIX } from "./sentry-triage-digest.mjs";
 import {
   FIX_SCOPE_MECHANICAL,
@@ -1783,6 +1796,45 @@ await test("fork-fence negative control: the pre-fix bare jq TRUSTS the fork PR"
       "the shipped fence must not be the bare, fork-trusting read",
     );
   }
+});
+
+await test("the select job's timeout-minutes is pinned to the selection caps it is sized against", () => {
+  // The one change in the window/second-look work with no test at all: a bare
+  // YAML scalar. `timeout-minutes` is the REAL binding constraint on this leg —
+  // every gh call it makes is serial, so the worst case is wall clock, not a
+  // rate limit — and the caps below are what make that worst case finite. The
+  // two are a pair, and nothing connected them: reverting the timeout to its old
+  // 10 would ship past every suite and then kill the job on precisely the path
+  // the second look exists to create (a full window that selects nothing).
+  //
+  // Derived from the LIVE constants rather than restating 782, so raising a cap
+  // without re-checking the budget fails here instead of in production.
+  const perRunGhCalls =
+    1 + // window list
+    2 * MAX_CANDIDATE_EVALUATIONS + // issue view + pulls, per stub
+    MAX_HANDLED_ID_QUERIES +
+    MAX_REVERSE_PROBE_QUERIES +
+    MAX_REVERSE_VERIFY_READS +
+    1 + // the second look's own list
+    2 * MAX_SECOND_LOOK_EVALUATIONS +
+    SECOND_LOOK_FAMILY_BUDGETS.handled +
+    SECOND_LOOK_FAMILY_BUDGETS.probe +
+    SECOND_LOOK_FAMILY_BUDGETS.verify;
+  // A pessimistic 1.0 s per serial call, and the documented rule that the leg
+  // must fit inside 60% of the job budget so checkout, setup and latency spikes
+  // have room.
+  const requiredMinutes = perRunGhCalls / 60 / 0.6;
+
+  const selectJob = /\n {2}select:\n([\s\S]*?)\n {2}[a-z][\w-]*:\n/.exec(
+    `${AUTOFIX_WORKFLOW}\n  zzz:\n`,
+  );
+  assert(selectJob, "the select job must be locatable in the workflow");
+  const timeout = /^\s{4}timeout-minutes:\s*(\d+)\s*$/m.exec(selectJob[1]);
+  assert(timeout, "the select job must declare a timeout-minutes");
+  assert(
+    Number(timeout[1]) >= requiredMinutes,
+    `select timeout-minutes is ${timeout[1]}, but the capped worst case is ${perRunGhCalls} serial gh calls = ${(perRunGhCalls / 60).toFixed(1)} min, which needs at least ${Math.ceil(requiredMinutes)} to stay under 60% of the budget`,
+  );
 });
 
 process.stdout.write(`\n${passed} passed, ${failed} failed\n`);

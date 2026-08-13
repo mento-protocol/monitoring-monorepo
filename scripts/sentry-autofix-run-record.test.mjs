@@ -395,17 +395,69 @@ await test("run record renders the bounded second look only when it actually ran
   );
 });
 
-await test("run record renders the measured gh read count when there is one", () => {
+await test("run record: the second look's REGROWTH tripwire is `full`, which the counts cannot carry", () => {
+  // With the eval cap equal to the list ceiling the Window line above is inert,
+  // and the pipeline note names this line the standing tripwire for queue
+  // regrowth. The COUNTS cannot do that job: the second look's own row cap
+  // clamps `secondLookTotal`, so `100 further stubs, evaluated 100` reads
+  // identically whether 100 or 5,000 stubs sit past the ceiling — a tripwire
+  // that cannot distinguish bounded from unbounded. `secondLookFull` is the
+  // signal that can.
+  //
+  // NEGATIVE CONTROL: drop the `secondLookFull` branch from the suffix in
+  // buildAutofixRunRecordBody and the first assertion below fails while the
+  // saturated counts still render exactly as before.
+  const base = {
+    timestampIso: "2026-07-19T08:30:00Z",
+    trigger: "schedule",
+    disposition: "active",
+    candidates: 0,
+    secondLook: true,
+    secondLookTotal: 100,
+    secondLookEvaluated: 100,
+  };
+  const more = buildAutofixRunRecordBody({ ...base, secondLookFull: "true" });
+  assert(
+    more.includes("and MORE rows sit past even that"),
+    `a full second-look page must say the queue is outgrowing one run, got: ${more}`,
+  );
+  const drained = buildAutofixRunRecordBody({ ...base, secondLookFull: false });
+  assert(
+    !drained.includes("MORE rows sit past"),
+    "a second look that reached the end of the queue must not claim regrowth",
+  );
+  // A FAILED second look outranks both: it saw nothing at all, so the zeros
+  // beside it mean "unknown", not "empty".
+  const failed = buildAutofixRunRecordBody({
+    ...base,
+    secondLookTotal: 0,
+    secondLookEvaluated: 0,
+    secondLookFull: false,
+    secondLookFailed: "true",
+  });
+  assert(
+    failed.includes("the second look's own list read FAILED"),
+    `a failed second look must say so, got: ${failed}`,
+  );
+});
+
+await test("run record names the UNIT of the measured gh count, because two units are in play", () => {
   // The per-run cost ceiling was arithmetic nothing ever counted; this is the
   // observed number, so drift lands on the tracker before it lands as a timeout.
+  // The counter counts INVOCATIONS (serial subprocesses — the unit the job
+  // timeout is spent in), while the rate-budget arithmetic in the pipeline note
+  // counts API REQUESTS, and one `gh issue list --limit 200` is one invocation
+  // but two requests. Labelled "gh reads" the number was silently compared
+  // against a ceiling in the other unit, which is a drift detector that cannot
+  // detect drift.
   const measured = buildAutofixRunRecordBody({
     timestampIso: "2026-07-19T08:30:00Z",
     trigger: "schedule",
     disposition: "active",
     candidates: 2,
-    ghCalls: 522,
+    ghCalls: 521,
   });
-  assert(measured.includes("- gh reads: 522"), `got: ${measured}`);
+  assert(measured.includes("- gh invocations: 521"), `got: ${measured}`);
   const none = buildAutofixRunRecordBody({
     timestampIso: "2026-07-19T08:30:00Z",
     trigger: "schedule",
@@ -413,7 +465,7 @@ await test("run record renders the measured gh read count when there is one", ()
     candidates: 0,
   });
   assert(
-    !none.includes("gh reads"),
+    !none.includes("gh invocations"),
     "a leg that issued no reads carries no count line",
   );
 });

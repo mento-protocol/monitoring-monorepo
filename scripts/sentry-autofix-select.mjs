@@ -61,10 +61,12 @@ import { resolveFamilies } from "./sentry-autofix-family-resolve.mjs";
 // past the ceiling?" pass, its own ceilings, and the cost arithmetic behind them.
 import {
   resolveSecondLook,
+  secondLookCeilingWarning,
   SECOND_LOOK_LIST_ROWS,
 } from "./sentry-autofix-second-look.mjs";
 import {
   defaultRunGh,
+  ghFailureText,
   isRateLimitFailure,
   listCodeFixStubsPage,
   LIST_LIMIT,
@@ -91,6 +93,7 @@ export { SKIP_FIX_SCOPE_ARCHITECTURAL } from "./sentry-autofix-candidate.mjs";
  * from here. Its mechanics live in sentry-autofix-second-look.mjs. */
 export {
   MAX_SECOND_LOOK_EVALUATIONS,
+  secondLookCeilingWarning,
   SECOND_LOOK_FAMILY_BUDGETS,
   SECOND_LOOK_LIST_ROWS,
 } from "./sentry-autofix-second-look.mjs";
@@ -101,10 +104,10 @@ export const DEFAULT_CAP = 2;
 // selection can no longer stop at the first `cap` stubs — but "evaluate the
 // whole window" makes the run's `gh` cost scale with LIST_LIMIT (one `issue
 // view` plus one `pr list` each, ~400 sequential subprocesses at the ceiling)
-// inside a `timeout-minutes: 5` job, and family deferral writes nothing, so a
-// collapsed family of K leaves K-1 PERMANENT window residents that are re-read
-// every run. That is monotonic growth driven from outside: every new error
-// fingerprint an unauthenticated dashboard visitor produces can add one.
+// inside the select job's `timeout-minutes` budget, and family deferral writes
+// nothing, so a collapsed family of K leaves K-1 PERMANENT window residents that
+// are re-read every run. That is monotonic growth driven from outside: every new
+// error fingerprint an unauthenticated dashboard visitor produces can add one.
 //
 // Bound the READ instead of the selection. The window is oldest-first, so this
 // truncates the NEWEST tail — the oldest candidates, the ones `sort:created-asc`
@@ -125,8 +128,10 @@ export const DEFAULT_CAP = 2;
 // 200, not 50: 50 left 150 rows of a full window unread every run, which —
 // combined with family deferral writing nothing — is the starvation
 // sentry-autofix-second-look.mjs exists to break. The cost is bounded and paid
-// for: the select job's `timeout-minutes` is 25, and 2 + 2×200 + 120 ≈ 522
-// serial `gh` calls at a pessimistic ~1 s/call is ~9 minutes.
+// for: the select job's `timeout-minutes` is 25, and 1 list + 2×200 + 120 = 521
+// serial `gh` INVOCATIONS at a pessimistic ~1 s/call is ~9 minutes. (522 API
+// REQUESTS — the list invocation paginates at 100 rows. The two units are
+// tracked separately; see sentry-autofix-second-look.mjs § COST ARITHMETIC.)
 export const MAX_CANDIDATE_EVALUATIONS = 200;
 
 /**
@@ -147,7 +152,7 @@ export function windowCeilingWarning(
 
 /**
  * Wrap the run's `gh` driver so ONE place sees every invocation the select leg
- * makes. Two jobs, both otherwise unmeasurable:
+ * makes. Three jobs, all otherwise unmeasurable:
  *
  * 1. COUNT. The per-run `gh` volume is a documented ceiling that nothing
  *    actually measured — every cost claim in the pipeline note was arithmetic
@@ -165,21 +170,50 @@ export function windowCeilingWarning(
  *    behaves exactly as before locally; the caller then refuses to SELECT on the
  *    data those paths produced.
  *
+ * 3. STOP SPENDING ONCE THROTTLED. The decision in (2) is taken at pass
+ *    boundaries, but the loops that reach them are long: the per-stub loop alone
+ *    is 2 × MAX_CANDIDATE_EVALUATIONS calls. Without this, one 403 at the head
+ *    of the window is followed by ~400 more requests fired into an ACTIVE
+ *    throttle before the run stands down — and GitHub's secondary limits EXTEND
+ *    on continued requests and escalate to abuse detection, on a repo-shared
+ *    free-plan `GITHUB_TOKEN` every other workflow draws from. "Fail closed"
+ *    that spends 400 more requests is not closed at the token level. So the
+ *    first rate-limit-shaped failure latches, and every later call rejects
+ *    IMMEDIATELY without spawning `gh`. The same one place, for the same reason
+ *    it is one place: it covers reads added later, for free.
+ *
+ *    It is a rejection, not a silent empty result, precisely so every existing
+ *    fail-soft handler runs its normal path — and the run stands down anyway,
+ *    because `state.rateLimited` is already nonzero by then. Latched calls are
+ *    NOT counted: `ghCalls` must stay a count of real invocations (it is the
+ *    drift detector for the timeout arithmetic), and `rateLimited` must stay a
+ *    count of real throttle events, not of loop iterations after the first.
+ *
  * Non-rate-limit transients keep their existing fail-soft behaviour untouched:
  * only `isRateLimitFailure` text degrades the run.
  */
 function instrumentRunGh(baseRunGh, state) {
   return async (args) => {
+    if (state.rateLimited > 0) {
+      // Deliberately argv-free and rate-limit-shape-free: this text reaches
+      // `ghFailureText`, and a message that matched `isRateLimitFailure` would
+      // inflate the throttle count with one entry per latched call.
+      throw new Error(
+        "selection stood down: an earlier gh read failed rate-limit-shaped, so this read was not issued",
+      );
+    }
     state.ghCalls += 1;
     try {
       return await baseRunGh(args);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      if (isRateLimitFailure(message)) {
+      // Classify gh's STDERR, not the whole rejection message: the message
+      // carries the argv, and argv carries agent-authored family ids.
+      const text = ghFailureText(err);
+      if (isRateLimitFailure(text)) {
         state.rateLimited += 1;
         if (state.rateLimited === 1) {
           process.stderr.write(
-            `::error::rate-limit-shaped gh failure during selection: ${message.split("\n")[0]}\n`,
+            `::error::rate-limit-shaped gh failure during selection: ${text.split("\n")[0]}; no further gh reads will be issued this run.\n`,
           );
         }
       }
@@ -232,6 +266,8 @@ export async function selectAutofixRun(options, deps = {}) {
 
   const ceilingWarning = windowCeilingWarning();
   if (ceilingWarning) process.stderr.write(ceilingWarning);
+  const secondLookWarning = secondLookCeilingWarning();
+  if (secondLookWarning) process.stderr.write(secondLookWarning);
 
   /**
    * Fail CLOSED on throttling. Every read this leg issues answers a dedupe or
@@ -292,6 +328,8 @@ export async function selectAutofixRun(options, deps = {}) {
         secondLook: false,
         secondLookTotal: 0,
         secondLookEvaluated: 0,
+        secondLookFull: false,
+        secondLookFailed: false,
         ghCalls: state.ghCalls,
       },
       truncations: {
@@ -335,16 +373,29 @@ export async function selectAutofixRun(options, deps = {}) {
     secondLook: false,
     secondLookTotal: 0,
     secondLookEvaluated: 0,
+    secondLookFull: false,
+    secondLookFailed: false,
     ghCalls: 0,
   };
 
   const candidates = [];
   for (const stub of evaluable) {
+    // Stop the moment the run is throttled. `instrumentRunGh` already latches
+    // every later read into an immediate rejection, so this is not what makes
+    // the spend stop — but the evaluation loop would still grind through the
+    // remaining ~200 stubs printing a skip line each, and the run has already
+    // decided it will emit nothing. Leave loudly instead.
+    if (state.rateLimited > 0) {
+      process.stderr.write(
+        `note: stopping the window evaluation at ${candidates.length} candidate(s) — the run is rate limited and will emit zero entries.\n`,
+      );
+      break;
+    }
     const candidate = await evaluateCandidate(runGh, repo, stub);
     if (candidate) candidates.push(candidate);
   }
 
-  const { decisions, truncations } = await resolveFamilies(
+  const { decisions, truncations, resolved } = await resolveFamilies(
     runGh,
     repo,
     candidates,
@@ -356,17 +407,30 @@ export async function selectAutofixRun(options, deps = {}) {
   const skipped = first.skipped;
   const runTruncations = { ...truncations, rateLimited: 0 };
 
+  // The single greppable operator line for the run. It is emitted by the CALLER
+  // with the count that was actually emitted, not built inside `finish()`:
+  // `degraded()` replaces `entries` with `[]` AFTER `finish()` returns, so a
+  // line built there reported `entries=2` on runs that emitted zero — on exactly
+  // the fail-closed path, the one an operator greps this line to understand.
+  const summarize = (emitted) => {
+    process.stderr.write(
+      `gh-calls=${state.ghCalls} window=${window.evaluated}/${window.total} second-look=${window.secondLook ? `${window.secondLookEvaluated}/${window.secondLookTotal}${window.secondLookFull ? "+" : ""}${window.secondLookFailed ? " (failed)" : ""}` : "no"} entries=${emitted}\n`,
+    );
+  };
+
   const finish = () => {
     window.ghCalls = state.ghCalls;
-    process.stderr.write(
-      `gh-calls=${state.ghCalls} window=${window.evaluated}/${window.total} second-look=${window.secondLook ? `${window.secondLookEvaluated}/${window.secondLookTotal}` : "no"} entries=${entries.length}\n`,
-    );
     return { entries, deferred, skipped, window, truncations: runTruncations };
+  };
+  const finishDegraded = () => {
+    const report = degraded(finish());
+    summarize(report.entries.length);
+    return report;
   };
 
   // Bail before spending anything more: the first pass's dedupe reads are
   // already untrustworthy, so a second look would only widen the blast radius.
-  if (state.rateLimited > 0) return degraded(finish());
+  if (state.rateLimited > 0) return finishDegraded();
 
   // The bounded SECOND LOOK. Fires only on the starvation signature — nothing
   // selectable in the whole window AND a FULL list page, so selectable rows may
@@ -377,28 +441,70 @@ export async function selectAutofixRun(options, deps = {}) {
     process.stderr.write(
       `note: first pass selected nothing from a FULL list page (${page.rawCount} rows); taking ONE bounded second look at the next ${SECOND_LOOK_LIST_ROWS} rows.\n`,
     );
-    const second = await resolveSecondLook(runGh, repo, cap);
-    // Its own total-vs-evaluated is its own truncation, surfaced exactly like
-    // the Window tripwire: this pass must never silently stop short either.
-    window.secondLookTotal = second.total;
-    window.secondLookEvaluated = second.evaluated;
-    // Partitioned through the SAME classifier the first pass used, so a
-    // second-look family deferral is never reported as a fix_scope skip.
-    const secondParts = partitionDecisions(second.decisions, cap);
-    entries.push(...secondParts.entries);
-    deferred.push(...secondParts.deferred);
-    skipped.push(...secondParts.skipped);
-    runTruncations.handledOverflow += second.truncations.handledOverflow ?? 0;
-    runTruncations.reverseBudget =
-      runTruncations.reverseBudget || second.truncations.reverseBudget;
-    runTruncations.reverseNonconvergent =
-      runTruncations.reverseNonconvergent ||
-      second.truncations.reverseNonconvergent;
+    let second = null;
+    try {
+      second = await resolveSecondLook(runGh, repo, cap, {
+        // The RAW offset the first pass consumed, NOT LIST_LIMIT: the two are
+        // equal only while MAX_CANDIDATE_EVALUATIONS === LIST_LIMIT, and a
+        // LIST_LIMIT skip under a LOWER eval cap would leave the rows between
+        // them read by neither pass — a permanent hole in the middle of the
+        // window. `min` because the API applies LIST_LIMIT first, so the first
+        // pass can never have consumed more raw rows than that; and because N
+        // filtered stubs span at least N raw rows, this can only overlap the
+        // first pass, never jump past it.
+        skipRawRows: Math.min(MAX_CANDIDATE_EVALUATIONS, LIST_LIMIT),
+        // Start from what the first pass PROVED rather than re-deriving it on
+        // half the budget — see resolveFamilies' `options.seed`. Without this
+        // the second look can select a stub whose family this same run already
+        // stood down, which is a duplicate autofix PR with no rate limit
+        // anywhere in the story.
+        seed: resolved,
+      });
+    } catch (err) {
+      // The second look's list read is the ONE `gh` call in this leg with no
+      // fail-soft handler under it, and this PR put it on the frequent path:
+      // once the queue is >= LIST_LIMIT rows, EVERY no-selection run depends on
+      // it. Unhandled, a rejection propagates to `main`, sets exit 1, and kills
+      // the step under `set -euo pipefail` — taking the whole run record with
+      // it, including the DEGRADED line a throttled run needs most. So it is
+      // caught: the FIRST pass completed and its report is valid and complete
+      // (it selected nothing by precondition, so no entry is lost), and the
+      // only thing missing is the look past the ceiling. Say so, and let the
+      // rate-limit check below degrade the run if that is why it failed.
+      const message = err instanceof Error ? err.message : String(err);
+      window.secondLookFailed = true;
+      process.stderr.write(
+        `::warning::the bounded second look could not read past the list ceiling: ${message.split("\n")[0]}; the first pass's result stands.\n`,
+      );
+    }
+    if (second) {
+      window.secondLookTotal = second.total;
+      window.secondLookEvaluated = second.evaluated;
+      // The honest "there is MORE past even this" signal, taken off the raw row
+      // count. `total` saturates at SECOND_LOOK_LIST_ROWS by construction, so on
+      // its own it reads the same at 100 further stubs and at 5,000 — and the
+      // pipeline note names this line the standing tripwire for queue regrowth.
+      window.secondLookFull = second.full === true;
+      // Partitioned through the SAME classifier the first pass used, so a
+      // second-look family deferral is never reported as a fix_scope skip.
+      const secondParts = partitionDecisions(second.decisions, cap);
+      entries.push(...secondParts.entries);
+      deferred.push(...secondParts.deferred);
+      skipped.push(...secondParts.skipped);
+      runTruncations.handledOverflow += second.truncations.handledOverflow ?? 0;
+      runTruncations.reverseBudget =
+        runTruncations.reverseBudget || second.truncations.reverseBudget;
+      runTruncations.reverseNonconvergent =
+        runTruncations.reverseNonconvergent ||
+        second.truncations.reverseNonconvergent;
+    }
 
-    if (state.rateLimited > 0) return degraded(finish());
+    if (state.rateLimited > 0) return finishDegraded();
   }
 
-  return finish();
+  const report = finish();
+  summarize(report.entries.length);
+  return report;
 }
 
 /** Matrix entries only — the emitted contract, unchanged. `selectAutofixRun`
@@ -462,11 +568,13 @@ Options:
                        indistinguishable from an empty one. Stdout is unchanged.
   --window-out <p>     Write the Window tripwire — { "total": <n>, "evaluated":
                        <n>, "secondLook": <bool>, "secondLookTotal": <n>,
-                       "secondLookEvaluated": <n>, "ghCalls": <n> } — to this
+                       "secondLookEvaluated": <n>, "secondLookFull": <bool>,
+                       "secondLookFailed": <bool>, "ghCalls": <n> } — to this
                        path, so the run record can surface a list window that
-                       exceeded the eval cap, a bounded second look (that it ran
-                       AND whether it truncated), and the run's measured \`gh\`
-                       volume. Stdout is unchanged.
+                       exceeded the eval cap, a bounded second look (that it ran,
+                       whether MORE rows still sat past even it, and whether its
+                       own read failed), and the run's measured \`gh\` invocation
+                       count. Stdout is unchanged.
   --truncations-out <p> Write the cost-budget truncations — { "handledOverflow":
                        <n>, "reverseBudget": <bool>, "reverseNonconvergent":
                        <bool>, "rateLimited": <n> } — to this path, so the run
@@ -550,17 +658,58 @@ export function parseArgs(argv) {
 
 /** Best-effort JSON report write. A failed write degrades ONE counter on the
  * run record; it must never fail the select step, whose whole contract is that
- * it always emits a valid array. */
-function writeReport(path, report, label) {
-  if (!path) return;
+ * it always emits a valid array. Returns whether the file was written — one
+ * caller (the degraded signal) has to know. Exported because `main` is the only
+ * bridge between the selector's return value and the `jq` reads the workflow
+ * builds the tracker record from, and a key-name or serialization bug here is
+ * invisible to every test that exercises `selectAutofixRun` alone. */
+export function writeReport(path, report, label) {
+  if (!path) return true;
   try {
     writeFileSync(path, `${JSON.stringify(report ?? [])}\n`);
+    return true;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     process.stderr.write(
       `warn: could not write the ${label} report: ${message}\n`,
     );
+    return false;
   }
+}
+
+/**
+ * Write every report file the workflow reads, and answer the one question the
+ * caller must act on: was a DEGRADED run's signal lost?
+ *
+ * `rateLimited` reaches the workflow through exactly one channel — the
+ * truncations file — and the workflow flips `disposition` to
+ * `degraded-rate-limited` off it. Every OTHER field on these files is a
+ * nice-to-have that degrades to "0" or a missing line. This one is the safety
+ * signal: lose it and `rate_limited` reads 0, the disposition stays `active`,
+ * the tracker renders a suppressed run as a healthy idle one — the #1758
+ * misdiagnosis — and the record job's label backfill gate opens on reads the run
+ * itself declared unreliable. So a best-effort write is the wrong contract for
+ * that one case, and the caller fails the step instead. Exported for the same
+ * reason `writeReport` is.
+ */
+export function writeRunReports(options, run) {
+  // Report BEFORE stdout: the workflow captures stdout into a shell variable, so
+  // a failed report write must not be able to lose the entries too. All are
+  // best-effort — the run record degrades to "0" / no Window line / no
+  // truncation line, never to a dead leg.
+  writeReport(options.deferredOut, run.deferred, "deferral");
+  writeReport(options.skippedOut, run.skipped, "fix_scope skip");
+  writeReport(options.windowOut, run.window ?? {}, "window");
+  const truncations = run.truncations ?? {};
+  const wroteTruncations = writeReport(
+    options.truncationsOut,
+    truncations,
+    "truncations",
+  );
+  return {
+    lostDegradedSignal:
+      Number(truncations.rateLimited ?? 0) > 0 && !wroteTruncations,
+  };
 }
 
 async function main() {
@@ -576,17 +725,20 @@ async function main() {
     process.stdout.write(await emitVerdict(options));
     return;
   }
-  const { entries, deferred, skipped, window, truncations } =
-    await selectAutofixRun(options);
-  // Report BEFORE stdout: the workflow captures stdout into a shell variable, so
-  // a failed report write must not be able to lose the entries too. All are
-  // best-effort — the run record degrades to "0" / no Window line / no
-  // truncation line, never to a dead leg.
-  writeReport(options.deferredOut, deferred, "deferral");
-  writeReport(options.skippedOut, skipped, "fix_scope skip");
-  writeReport(options.windowOut, window ?? {}, "window");
-  writeReport(options.truncationsOut, truncations ?? {}, "truncations");
-  process.stdout.write(`${JSON.stringify(entries)}\n`);
+  const run = await selectAutofixRun(options);
+  const { lostDegradedSignal } = writeRunReports(options, run);
+  process.stdout.write(`${JSON.stringify(run.entries)}\n`);
+  if (lostDegradedSignal) {
+    // The array contract still held — it was written above, and it is `[]`, so
+    // no PR can be opened from this run either way. What cannot hold is silence:
+    // failing the step is the only remaining way to say "this run stood down"
+    // once the file that says it is gone. Loud beats a green tracker line that
+    // is not true.
+    process.stderr.write(
+      "::error::selection was DEGRADED but the truncations report could not be written, so the run would render as a healthy idle one; failing the step instead.\n",
+    );
+    process.exitCode = 1;
+  }
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

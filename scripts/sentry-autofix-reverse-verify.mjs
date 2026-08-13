@@ -130,8 +130,10 @@ export const MAX_REVERSE_VERIFY_READS = 40;
  * Fail-SOFT, same direction as `openAutofixPrExists`: a `gh` failure on one
  * probe skips that probe this run (at worst one self-terminating extra attempt),
  * never rejecting out of selection. `alreadyProbed` carries across the caller's
- * fixpoint iterations so no id is queried twice AND so the per-run
- * MAX_REVERSE_PROBE_QUERIES budget bounds the whole fixpoint, not one call;
+ * fixpoint iterations (and, for the selector's second look, across PASSES) so no
+ * id is queried twice; the separate `probeBudget` counter is what bounds the
+ * per-run MAX_REVERSE_PROBE_QUERIES spend across the whole fixpoint, kept apart
+ * from the dedupe set so a seeded set cannot read as a spent budget;
  * `verifyBudget` likewise carries across iterations so the per-run
  * MAX_REVERSE_VERIFY_READS cap bounds the hit-verification reads across the whole
  * fixpoint, not one probe. Returns
@@ -164,6 +166,15 @@ export async function reverseVerifyFamilies(
   const maxProbes = Number.isInteger(options.maxProbes)
     ? options.maxProbes
     : MAX_REVERSE_PROBE_QUERIES;
+  // The budget is a COUNTER, not `probed.size`. The two were the same while
+  // `alreadyProbed` started empty on every resolve pass, but the selector's
+  // second look now SEEDS it with the first pass's probed ids (so it does not
+  // re-issue searches the run already paid for) — and with `probed.size` as the
+  // meter, a seeded set of 40 would read as "budget already spent" and the
+  // second look would probe NOTHING while reporting `truncated`. Shared across
+  // the caller's fixpoint iterations exactly like `verifyBudget`, so the per-run
+  // cap still bounds the whole reverse leg rather than one call.
+  const probeBudget = options.probeBudget ?? { remaining: maxProbes };
   const edges = [];
   const blockers = new Set();
   let truncated = false;
@@ -174,13 +185,14 @@ export async function reverseVerifyFamilies(
     // note below, where a newline would inject a workflow command.
     if (!isLocalFamilyId(probeId, project)) continue;
     if (probed.has(probeId)) continue;
-    // Per-run probe budget (counts distinct LOCAL probes across the fixpoint via
-    // the shared `probed` set). At the ceiling, stop probing and treat the rest
-    // as not-probed — fewer blockers, MORE candidates, the safe direction.
-    if (probed.size >= maxProbes) {
+    // Per-run probe budget (counts distinct LOCAL probes ISSUED across the
+    // fixpoint). At the ceiling, stop probing and treat the rest as not-probed —
+    // fewer blockers, MORE candidates, the safe direction.
+    if (probeBudget.remaining <= 0) {
       truncated = true;
       break;
     }
+    probeBudget.remaining -= 1;
     probed.add(probeId);
     let hits;
     try {

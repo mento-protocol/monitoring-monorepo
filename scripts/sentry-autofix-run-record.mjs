@@ -99,6 +99,8 @@ export function buildAutofixRunRecordBody({
   secondLook,
   secondLookTotal,
   secondLookEvaluated,
+  secondLookFull,
+  secondLookFailed,
   ghCalls,
   rateLimited,
   handledOverflow,
@@ -149,25 +151,39 @@ export function buildAutofixRunRecordBody({
   // The bounded SECOND LOOK (this leg's starvation fix). It fires only when the
   // first pass selected NOTHING from a FULL list page — i.e. selectable stubs may
   // sit past the list ceiling that no run would otherwise ever reach. It is extra
-  // `gh` spend, so it is never silent; and it carries its own evaluation ceiling,
-  // so `evaluated < total` on this line is its own truncation, reported exactly
-  // like the Window tripwire.
+  // `gh` spend, so it is never silent.
+  //
+  // This is also the standing tripwire for queue REGROWTH, now that the eval cap
+  // equals the list ceiling and the Window line above is inert. That job needs
+  // `secondLookFull`, not the counts: the second look's row cap clamps
+  // `secondLookTotal` by construction, so the counts alone read identically
+  // whether 100 stubs or 5,000 sit past the ceiling. `full` is what separates
+  // "the run reached the end of the queue" from "the queue is growing past what
+  // one run can see", and it is the second look's own truncation signal —
+  // `evaluated < total` is the strictly weaker one it replaces.
   if (secondLook === true || secondLook === "true") {
     const secondTotalN = nonNegativeInt(secondLookTotal);
     const secondEvaluatedN = nonNegativeInt(secondLookEvaluated);
+    const suffix =
+      secondLookFailed === true || secondLookFailed === "true"
+        ? " — the second look's own list read FAILED, so nothing past the window was seen this run"
+        : secondLookFull === true || secondLookFull === "true"
+          ? " — and MORE rows sit past even that (the queue is outgrowing one run's reach)"
+          : secondTotalN > secondEvaluatedN
+            ? " (capped by MAX_SECOND_LOOK_EVALUATIONS)"
+            : "";
     lines.push(
-      `- Second look: ${secondTotalN} further stubs past the window, evaluated ${secondEvaluatedN}${
-        secondTotalN > secondEvaluatedN
-          ? " (capped by MAX_SECOND_LOOK_EVALUATIONS)"
-          : ""
-      }`,
+      `- Second look: ${secondTotalN} further stubs past the window, evaluated ${secondEvaluatedN}${suffix}`,
     );
   }
-  // Measured `gh` invocations. The per-run cost ceiling was arithmetic over caps
-  // that nothing ever counted; this makes it an observed number, so drift shows
-  // up on the tracker before it shows up as a timed-out job.
+  // Measured `gh` INVOCATIONS — serial subprocesses, the unit the job timeout is
+  // sized in. Deliberately not "requests": one `gh issue list --limit 200` is a
+  // single invocation but two API requests, so the rate-limit arithmetic in
+  // docs/notes/sentry-triage-pipeline.md § "Cost bound" runs in the other unit.
+  // Naming the unit here is what keeps this a drift detector rather than a number
+  // compared against a ceiling it can never reach.
   const ghCallsN = nonNegativeInt(ghCalls);
-  if (ghCallsN > 0) lines.push(`- gh reads: ${ghCallsN}`);
+  if (ghCallsN > 0) lines.push(`- gh invocations: ${ghCallsN}`);
   // Cost-budget truncations (PR #1810 follow-up): a family-dedupe lookup a per-run
   // budget capped, so a stub that SHOULD have stood down may re-attempt this run.
   // Each fails toward MORE candidates (never a wrong close), but the re-attempt

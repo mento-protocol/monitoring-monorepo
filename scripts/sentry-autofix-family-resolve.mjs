@@ -24,6 +24,7 @@ import {
   MAX_HANDLED_ID_QUERIES,
 } from "./sentry-autofix-queue-io.mjs";
 import {
+  MAX_REVERSE_PROBE_QUERIES,
   MAX_REVERSE_VERIFY_READS,
   reverseVerifyFamilies,
 } from "./sentry-autofix-reverse-verify.mjs";
@@ -61,6 +62,21 @@ const MAX_REVERSE_ITERATIONS = 4;
  * pass has already SPENT the module defaults, so a second pass reusing them
  * would double the run's worst-case `gh` volume. Absent, the defaults apply and
  * behaviour is byte-identical to before the option existed.
+ *
+ * `options.seed` carries a PRIOR pass's resolved state into this one — the
+ * `resolved` object this function returns. Only the selector's second look uses
+ * it, and it is what keeps that pass from being strictly weaker than the pass it
+ * follows. The precondition for a second look is that the first pass found a
+ * blocker for EVERYTHING, so the run has already PROVEN those blockers exist;
+ * without the seed the second look throws that proof away and asks a half-sized
+ * budget to re-derive it from scratch, and every budget here fails OPEN toward
+ * MORE candidates — so a family whose terminal sibling the first pass surfaced at
+ * probe 25 is unreachable at 20 probes, and the second look selects a stub whose
+ * family the same run just stood down. That is a duplicate autofix PR with no
+ * rate limit involved. Seeding is also strictly cheaper: `handledQueried`,
+ * `alreadyProbed` and `stubCache` make the second look skip reads the first pass
+ * already paid for. Budgets are NOT seeded — they are fresh allowances for the
+ * ids this pass is the first to see.
  */
 export async function resolveFamilies(
   runGh,
@@ -76,7 +92,10 @@ export async function resolveFamilies(
   const verifyCap = Number.isInteger(budgets.verify)
     ? budgets.verify
     : MAX_REVERSE_VERIFY_READS;
-  const probeCap = Number.isInteger(budgets.probe) ? budgets.probe : undefined;
+  const probeCap = Number.isInteger(budgets.probe)
+    ? budgets.probe
+    : MAX_REVERSE_PROBE_QUERIES;
+  const seed = options.seed ?? {};
   const project = LOCAL_SENTRY_PROJECT;
   const candidateKeys = new Set(
     candidates.map((candidate) => familyKey(candidate.shortId)),
@@ -96,10 +115,14 @@ export async function resolveFamilies(
   // One per-RUN handled-id budget, shared by the initial declared-id pass and the
   // fixpoint's re-checks of reverse-surfaced hub ids, so the total stays bounded
   // and its overflow surfaces on the tracker.
-  const handledQueried = new Set();
+  // Seeded from a prior pass where one exists (see `options.seed`), fresh
+  // otherwise. The BUDGETS below are always fresh: the seed carries knowledge,
+  // never spend.
+  const handledQueried = new Set(seed.handledQueried ?? []);
   const handledBudget = { remaining: handledCap, overflow: 0 };
-  const stubCache = new Map();
-  const alreadyProbed = new Set();
+  const probeBudget = { remaining: probeCap };
+  const stubCache = seed.stubCache instanceof Map ? seed.stubCache : new Map();
+  const alreadyProbed = new Set(seed.alreadyProbed ?? []);
   // One per-RUN verify-read budget for the reverse leg, shared across the fixpoint
   // so the total `gh issue view` fan-out over hit-verification is bounded (the
   // bug-B mirror of the probe-search cap: each search returns up to
@@ -108,13 +131,20 @@ export async function resolveFamilies(
   let reverseBudgetTruncated = false;
   let reverseNonconvergent = false;
 
-  let handledShortIds = declaredIds.length
-    ? await listHandledShortIds(runGh, repo, declaredIds, {
-        queried: handledQueried,
-        budget: handledBudget,
-      })
-    : [];
-  const handledEdges = [];
+  // The seeded blockers/edges are the prior pass's PROVEN findings, folded in
+  // before the first collapse so this pass never has to re-derive them (and, on
+  // a smaller budget, fail to).
+  let handledShortIds = [...new Set(seed.handledShortIds ?? [])];
+  if (declaredIds.length) {
+    const found = await listHandledShortIds(runGh, repo, declaredIds, {
+      queried: handledQueried,
+      budget: handledBudget,
+    });
+    handledShortIds = [...new Set([...handledShortIds, ...found])];
+  }
+  const handledEdges = [
+    ...(Array.isArray(seed.handledEdges) ? seed.handledEdges : []),
+  ];
 
   // Family ids are agent-authored free text. Scoping every joiner AND every
   // blocker to this project is what stops a foreign-project id — or the bare
@@ -187,6 +217,7 @@ export async function resolveFamilies(
         stubCache,
         alreadyProbed,
         verifyBudget: reverseVerifyBudget,
+        probeBudget,
         maxProbes: probeCap,
       });
       edges = result.edges;
@@ -219,6 +250,16 @@ export async function resolveFamilies(
       handledOverflow: handledBudget.overflow,
       reverseBudget: reverseBudgetTruncated,
       reverseNonconvergent,
+    },
+    // Everything this pass LEARNED, in the shape `options.seed` accepts. The
+    // selector hands it to the second look so that pass starts from this one's
+    // blockers and edges instead of re-deriving them on a smaller budget.
+    resolved: {
+      handledShortIds,
+      handledEdges,
+      handledQueried,
+      stubCache,
+      alreadyProbed,
     },
   };
 }

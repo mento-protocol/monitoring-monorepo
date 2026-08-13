@@ -92,8 +92,8 @@ export const LIST_LIMIT = 200;
 //     `GraphQL: API rate limit exceeded for user ID 1234. (rateLimitExceeded)`.
 //   - Older/abuse-detection responses read `You have triggered an abuse
 //     detection mechanism`.
-// `defaultRunGh` puts gh's whole stderr into the rejection message, so matching
-// the message text covers all of them.
+// Match these against gh's STDERR only, never the rejection message as a whole —
+// see `ghFailureText`.
 //
 // A bare `HTTP 403` that is really a PERMISSIONS failure matches too. That is
 // deliberate: both mean "this read did not answer the dedupe question", and the
@@ -117,6 +117,28 @@ export function isRateLimitFailure(message) {
   return RATE_LIMIT_PATTERNS.some((pattern) => pattern.test(text));
 }
 
+/**
+ * The text a `gh` rejection should be CLASSIFIED on: gh's own stderr when the
+ * rejection carries it, the whole message otherwise.
+ *
+ * `defaultRunGh` builds its message as `gh <argv> failed with exit N:\n<stderr>`,
+ * so classifying the message directly matches the ARGV too — and argv carries
+ * agent-authored text. Family ids come from an LLM's `duplicate_of` (charset
+ * `[A-Za-z0-9._-]`, so `RATELIMITEXCEEDED` is a legal id) and are interpolated
+ * into the `in:title` / `in:comments` searches. A stub declaring such an id would
+ * turn ANY unrelated failure of its own probe — 404, 502, ECONNRESET — into a
+ * whole-run stand-down. Scoping the match to the stderr half closes that: the
+ * rejection carries the raw stderr on `ghStderr`, and only that is classified.
+ * Rejections without the property (a spawn error, or a test double throwing a
+ * plain Error) fall back to the message, so existing behaviour is unchanged
+ * wherever there is no argv to confuse it with.
+ */
+export function ghFailureText(err) {
+  const stderr = err?.ghStderr;
+  if (typeof stderr === "string") return stderr;
+  return err instanceof Error ? err.message : String(err ?? "");
+}
+
 export function defaultRunGh(args) {
   return new Promise((resolve, reject) => {
     const child = spawn("gh", args, { stdio: ["ignore", "pipe", "pipe"] });
@@ -135,11 +157,15 @@ export function defaultRunGh(args) {
     });
     child.on("close", (status) => {
       if (status !== 0) {
-        reject(
-          new Error(
-            `gh ${args.join(" ")} failed with exit ${status}:\n${stderr}`,
-          ),
+        const err = new Error(
+          `gh ${args.join(" ")} failed with exit ${status}:\n${stderr}`,
         );
+        // The message keeps the argv (an operator reading the log needs to know
+        // WHICH read failed); `ghStderr` carries gh's half alone, because that
+        // is the only half `isRateLimitFailure` may be run against. See
+        // `ghFailureText`.
+        err.ghStderr = stderr;
+        reject(err);
         return;
       }
       resolve(stdout);

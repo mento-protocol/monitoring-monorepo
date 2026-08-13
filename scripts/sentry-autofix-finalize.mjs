@@ -682,7 +682,8 @@ Commands:
              [--deferred <n>] [--deferred-issues "<n n …>"] \\
              [--window-total <n>] [--window-evaluated <n>] \\
              [--second-look <bool>] [--second-look-total <n>] \\
-             [--second-look-evaluated <n>] [--gh-calls <n>] \\
+             [--second-look-evaluated <n>] [--second-look-full <bool>] \\
+             [--second-look-failed <bool>] [--gh-calls <n>] \\
              [--rate-limited <n>] \\
              [--handled-overflow <n>] [--reverse-truncated <bool>] \\
              [--reverse-nonconvergent <bool>]
@@ -835,6 +836,8 @@ export function runCli(argv, { stdout = process.stdout } = {}) {
           secondLook: readFlag(args, "--second-look"),
           secondLookTotal: readFlag(args, "--second-look-total"),
           secondLookEvaluated: readFlag(args, "--second-look-evaluated"),
+          secondLookFull: readFlag(args, "--second-look-full"),
+          secondLookFailed: readFlag(args, "--second-look-failed"),
           ghCalls: readFlag(args, "--gh-calls"),
           rateLimited: readFlag(args, "--rate-limited"),
           handledOverflow: readFlag(args, "--handled-overflow"),
