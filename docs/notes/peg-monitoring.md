@@ -3,7 +3,7 @@ title: Peg monitoring alert source validation and activation
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-12
+last_verified: 2026-08-13
 doc_type: runbook
 scope: alerts/peg-monitoring
 review_interval_days: 90
@@ -39,11 +39,14 @@ are live in Grafana for the policy version published at that time
 recovery and bootstrap-grant removal are complete.
 The first protected `Peg Policy Publication` root created
 `mento-monitoring-peg-policy/peg-policy/current.json` generation
-`1785276001213660`. Authenticated, generation-pinned delivery and live producer
-telemetry for that attachment are proven on
-`metrics-bridge-r-47264e8-30405040839`, which serves active policy
-`europ-2026-07-22-v1-f6cdaa2681ab92ce9d90572a4d29d32f`. The production dashboard
-prerequisite is also proven at
+`1785276001213660`. The later protected publication created active-only
+generation `1786443055965590`, with `previous: null`. The approved platform
+apply attached that exact generation to Metrics Bridge revision
+`metrics-bridge-00196-6hg`. Post-apply proof confirmed active policy
+`europ-2026-07-22-v1-f6cdaa2681ab92ce9d90572a4d29d32f`, current producer and API
+packages, exactly one policy-version metric, no legacy-version labels, and all
+17 Peg Grafana rules with health `ok`, unpaused, and Normal. The production
+dashboard is also proven at
 `https://monitoring.mento.org/peg-monitoring`: the live current package renders
 without console errors. The reviewed source activation sets the
 source-controlled `local.peg_alerts_enabled` switch to the literal `true`. That
@@ -52,25 +55,12 @@ rule group; it is not a workflow, variable, or policy-artifact switch. This
 source change does not prove the consumers exist in Grafana or that their
 queries have live data.
 
-The later protected publication created the active-only `previous: null` object
-at generation `1786443055965590`. This reviewed platform rollout changes the
-source-controlled runtime pin to that generation, sets
-`metrics_bridge_template_rollout_active` to `true`, and removes the generated
-revision-name ignore. It does not attach the new generation to Metrics Bridge.
-Do not claim active-only production operation until the approved platform apply
-and post-change producer/Grafana proof complete.
-
-Source validators now require every policy source to declare
-`listingAbsentConsecutiveChecks`, and the published policy has `previous` as
-`null`. Metrics Bridge retains a runtime-only compatibility shim for the exact
-legacy previous version
-`europ-2026-07-22-v1-a69b99aad61649957a2639dc8348b05f`, which defaults the
-missing threshold to `2` while the active-only runtime generation awaits its
-approved attachment and live proof. The bridge normalizes the value into decision
-packages, so the dashboard schema remains strict. Remove the shim in a follow-up
-PR after the `previous: null` generation is attached and live-verified;
-[#1750](https://github.com/mento-protocol/monitoring-monorepo/issues/1750) tracks
-that removal.
+Source validators require every policy source to declare an integer
+`listingAbsentConsecutiveChecks` value from 2 through 1000. Metrics Bridge
+applies the same strict requirement to active and retained-previous policy
+sources; it has no legacy-version default. The published and attached policy
+has `previous: null`, so production currently emits active-only policy and
+decision-package data.
 
 The production identity bootstrap in
 [#1566](https://github.com/mento-protocol/monitoring-monorepo/pull/1566) is
@@ -164,30 +154,6 @@ secret-backed contact-point dependencies. The first complete remote diff is
 therefore the trusted-main plan after merge. Keep its `production-infra` apply
 blocked, inspect the full plan, and do not treat a targeted PR plan as proof of
 the peg rule resources.
-
-## Predecessor cleanup deployment proof
-
-After this source change merges, keep the policy predecessor cleanup in the
-following order:
-
-1. Let the automatic Metrics Bridge workflow deploy the compatibility-retaining
-   revision from `main`. Verify it still loads the pinned legacy generation and
-   continues publishing current Peg polls and decision packages.
-2. Inspect the trusted-main `alerts-rules` plan, then explicitly approve its
-   `production-infra` apply. Confirm retained-previous rules are removed and
-   active rules remain evaluable in Grafana. Removing consumers before their
-   producer series follows the rollback dependency order.
-3. Inspect the trusted-main publication plan, then explicitly approve its
-   `production-infra` apply to publish the `previous: null` artifact.
-4. Review the platform change that pins Metrics Bridge to that exact positive
-   generation, apply it through its owning approved path, and verify the
-   producer reports only the active policy.
-5. After active-only production is live-verified, remove the exact legacy
-   runtime shim through [#1750](https://github.com/mento-protocol/monitoring-monorepo/issues/1750).
-
-Never run these applies from an agent session. A merged source change, a policy
-publication, or a runtime attachment alone is insufficient proof of
-active-only operation.
 
 ## Production activation preconditions
 

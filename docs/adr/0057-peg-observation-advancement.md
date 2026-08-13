@@ -3,7 +3,7 @@ title: Repeated Peg provider observations retain bounded health, never sample au
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-10
+last_verified: 2026-08-13
 scope: metrics-bridge / alerts
 date: 2026-08
 doc_type: adr
@@ -15,6 +15,9 @@ garden_lane: adrs-architecture
 
 **Status:** Accepted (Aug 2026), in force. This record narrows the
 observation-advancement clause in [ADR 0044](0044-peg-thresholds-gated-rules-plane.md).
+The predecessor cleanup named in the consequences later completed; the current
+active-only proof is recorded in
+[`docs/notes/peg-monitoring.md`](../notes/peg-monitoring.md).
 **Scope:** metrics-bridge / alerts
 
 ## Context
