@@ -6010,6 +6010,38 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   fi
   rm -rf "$gate_race_root/run.lock"
 
+  # A scan that fails is not a scan that finds nothing. With `pgrep` exiting 2
+  # — a real failure, not "no match" — a run inheriting an obligation cannot
+  # tell whether anything is left, and must refuse to execute rather than
+  # discharge it. This also pins that the failure survives the command
+  # substitution the scan runs in, which is where the first version of it died.
+  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
+  rm -f "$gate_race_root"/captured.* "$gate_race_root"/holder.*
+  : > "$gate_race_log"
+  race_stub_bin="$gate_race_out/failing-scan-bin"
+  mkdir -p "$race_stub_bin"
+  printf '#!/bin/bash\nexit 2\n' > "$race_stub_bin/pgrep"
+  chmod +x "$race_stub_bin/pgrep"
+  mkdir -p "$gate_race_root/condemned.d"
+  printf 'fixture-unscannable\n' > "$gate_race_root/condemned.d/fixture-unscannable"
+  PATH="$race_stub_bin:$PATH" \
+    AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    AGENT_QUALITY_GATE_LOCK_ORPHAN_DRAIN_SECONDS=6 \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 20 \
+    > "$gate_race_out/failing-scan.out" 2>&1 &&
+    race_scan_exit=0 || race_scan_exit=$?
+  [[ "$race_scan_exit" == "2" ]] ||
+    fail "a drain whose scans keep failing must fail closed, got exit ${race_scan_exit}"
+  grep -q "kept failing" "$gate_race_out/failing-scan.out" ||
+    fail "failing closed on an unanswerable scan must say so"
+  [[ -z "$(awk '/^enter/ { print $2; exit }' "$gate_race_log")" ]] ||
+    fail "a run whose scans kept failing executed a mapped command anyway"
+  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
+
   # A holder owned by another user is live even though this run may not signal
   # it: `kill -0` fails with EPERM exactly as it does for a process that is
   # gone, and reading that as gone reclaims a lock whose holder is running.

@@ -617,7 +617,7 @@ gate_run_tagged_pids() {
   # match and above that for a real failure, and reading the second as the first
   # would discharge an obligation on the strength of a question never answered.
   found="$(pgrep -f "agentqg:${token}" 2>/dev/null)" && status=0 || status=$?
-  [[ "$status" -le 1 ]] || gate_drain_scan_failed=1
+  [[ "$status" -le 1 ]] || printf '%s\n' "$gate_drain_scan_error"
   [[ -z "$found" ]] || printf '%s\n' "$found"
   if [[ -d /proc ]]; then
     for environ in /proc/[0-9]*/environ; do
@@ -634,7 +634,7 @@ gate_run_tagged_pids() {
   if [[ -n "$gate_lock_root_dir" && -e "$marker" ]] &&
     command -v lsof > /dev/null 2>&1; then
     found="$(lsof -w -t -- "$marker" 2>/dev/null)" && status=0 || status=$?
-    [[ "$status" -le 1 ]] || gate_drain_scan_failed=1
+    [[ "$status" -le 1 ]] || printf '%s\n' "$gate_drain_scan_error"
     [[ -z "$found" ]] || printf '%s\n' "$found"
   fi
 }
@@ -992,8 +992,12 @@ gate_drain_capture_file=""
 # with nothing durable behind it.
 gate_drain_capture_unpersisted=0
 # Set when a discovery scan failed rather than came back empty, so an
-# unanswered question is never read as "nothing left running".
+# unanswered question is never read as "nothing left running". The scan itself
+# runs in a command substitution, so it cannot set this — a subshell's
+# assignments die with it. It emits the marker below in its output instead, and
+# the wrapper that reads that output is what sets the flag.
 gate_drain_scan_failed=0
+gate_drain_scan_error="agentqg-scan-failed"
 # The PIDs this run's handles named on the current pass, read by the
 # membership check deep inside the recursive walk.
 gate_drain_tagged_now=""
@@ -1033,6 +1037,21 @@ gate_lock_identity_source_available() {
 # successor consults when nothing carries the tag any more. Appending removes
 # that window rather than narrowing it: the list can only grow, so an
 # interrupted drain leaves fewer entries than it eventually would have, never
+# Refresh the set of PIDs this run's handles name, in the caller's shell, and
+# remember whether the scan behind it failed. Everything that reads that set
+# goes through here, so a failure cannot be lost by being noticed inside a
+# subshell.
+gate_drain_refresh_tagged() {
+  local token="$1"
+  gate_drain_tagged_now="$(gate_run_tagged_pids "$token")"
+  case " ${gate_drain_tagged_now} " in
+    *" ${gate_drain_scan_error} "*)
+      gate_drain_scan_failed=1
+      gate_drain_tagged_now="${gate_drain_tagged_now//${gate_drain_scan_error}/}"
+      ;;
+  esac
+}
+
 # Is this PID still one of ours, asked after its identity was read? Two answers
 # count: it still carries one of the run's handles, or it is still a child of
 # the process the walk reached it through. Either is enough, and both are
@@ -1150,12 +1169,12 @@ drain_condemned_run_commands() {
   # first signal kills the tagged wrapper and with it the only handle to
   # anything the walk did not already record. Two walks are not a proof, but
   # they cost 200ms on a path that runs only after a crash.
-  gate_drain_tagged_now="$(gate_run_tagged_pids "$token")"
+  gate_drain_refresh_tagged "$token"
   for wrapper in $gate_drain_tagged_now; do
     capture_process_tree "$wrapper"
   done
   sleep 0.2
-  gate_drain_tagged_now="$(gate_run_tagged_pids "$token")"
+  gate_drain_refresh_tagged "$token"
   for wrapper in $gate_drain_tagged_now; do
     capture_process_tree "$wrapper"
   done
@@ -1187,7 +1206,7 @@ drain_condemned_run_commands() {
     alive_identities=""
     unverified=""
     gate_drain_scan_failed=0
-    gate_drain_tagged_now="$(gate_run_tagged_pids "$token")"
+    gate_drain_refresh_tagged "$token"
     while IFS='|' read -r pid recorded; do
       [[ -n "$pid" ]] || continue
       # Only signal something that reads as a PID. Appends are single short
@@ -1319,7 +1338,7 @@ EOF
     # Re-asked of the token as well, not only of the survivors: a command that
     # forks a replacement and then exits leaves nothing to walk down from, and
     # the replacement is discoverable only by the token it inherited.
-    gate_drain_tagged_now="$(gate_run_tagged_pids "$token")"
+    gate_drain_refresh_tagged "$token"
     for pid in $alive $gate_drain_tagged_now; do
       capture_process_tree "$pid"
     done
