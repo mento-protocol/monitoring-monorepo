@@ -363,12 +363,20 @@ export async function listHandledShortIds(
   declaredIds,
   options = {},
 ) {
-  // `queried` (already-looked-up ids) and `budget` (remaining allowance +
-  // accumulated overflow) are shared across the run's calls, so a second pass on
-  // reverse-surfaced ids neither re-queries an id nor exceeds the per-run cap.
-  // Absent (a standalone call), each defaults fresh, preserving the single-call
-  // cap-at-40 behaviour exactly.
+  // `queried` (ids this pass must not re-attempt — answered, dropped OR failed)
+  // and `budget` (remaining allowance + accumulated overflow) are shared across
+  // the run's calls, so a second pass on reverse-surfaced ids neither re-queries
+  // an id nor exceeds the per-run cap. Absent (a standalone call), each defaults
+  // fresh, preserving the single-call cap-at-40 behaviour exactly.
+  //
+  // `answered` is the STRICT SUBSET of `queried` whose lookup actually came back
+  // and could be read — knowledge, where the rest of `queried` is merely spend
+  // (it deliberately absorbs ids this call never issued; see the overflow
+  // branch). Only that subset may cross into a pass with a FRESH budget. Why
+  // that matters: sentry-autofix-family-resolve.mjs § ANSWERED vs SPENT.
   const queried = options.queried instanceof Set ? options.queried : new Set();
+  const answered =
+    options.answered instanceof Set ? options.answered : new Set();
   const budget = options.budget ?? {
     remaining: MAX_HANDLED_ID_QUERIES,
     overflow: 0,
@@ -440,8 +448,15 @@ export async function listHandledShortIds(
     try {
       parsed = JSON.parse(stdout);
     } catch {
-      parsed = [];
+      // A body we cannot read did not ANSWER the lookup any more than a failed
+      // read did, so this id stays out of `answered`. Behaviourally identical to
+      // the previous `parsed = []` (the loop below ran zero times either way).
+      continue;
     }
+    // ANSWERED: the lookup ran and came back readable. Both outcomes count —
+    // "this id carries a terminal marker" and "it does not" are equally real
+    // answers, and re-asking on a later pass would only re-spend budget.
+    answered.add(id);
     for (const issue of Array.isArray(parsed) ? parsed : []) {
       const title = issue.title ?? "";
       // Exact-parse fence over GitHub's tokenized search: the parsed short-id

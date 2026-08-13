@@ -1055,6 +1055,23 @@ every budget here fails OPEN toward MORE candidates, so a family whose terminal
 sibling the first pass found at probe 25 would be unreachable at 20 — and the
 second look would select a stub the same run had just stood down.
 
+The seed carries **answered** work only, and that distinction is load-bearing in
+both directions. Each of the resolver's dedupe structures has a wider in-pass
+twin that also absorbs ids the pass **dropped** for budget, **failed** to read,
+or left half-read: `listHandledShortIds` folds every overflowed id into its
+re-attempt guard so the per-run overflow counts each distinct un-runnable id once
+rather than once per fixpoint iteration; a probe id is recorded before its search
+runs; a thrown stub read is negative-cached as `null`. All three are right within
+one pass, where a budget only shrinks — and wrong the moment a pass with a FRESH
+budget inherits them, because they then claim work nobody completed was
+resolved. The second look would spend none of its new allowance on those ids and
+select a stub whose sibling carries a terminal marker no read ever looked at: a
+duplicate autofix PR reached from the opposite side to the throttle case. So the
+resolver returns only the answered subsets, and the in-pass guards start from
+them. Seed too little and the second look re-derives proven blockers on half a
+budget; seed too much and it skips work nobody did. Both land on the same
+duplicate PR.
+
 `SECOND_LOOK_LIST_ROWS` **equals** `MAX_SECOND_LOOK_EVALUATIONS`, bound by the same
 no-op invariant as `MAX_CANDIDATE_EVALUATIONS`/`LIST_LIMIT` (the row cap is applied
 first, so raising the evaluation cap alone would read the same rows and say

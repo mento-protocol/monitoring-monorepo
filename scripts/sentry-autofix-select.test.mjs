@@ -34,6 +34,7 @@ import {
   MAX_REVERSE_PROBE_QUERIES,
   MAX_REVERSE_VERIFY_READS,
   REVERSE_SEARCH_LIMIT,
+  reverseVerifyFamilies,
 } from "./sentry-autofix-reverse-verify.mjs";
 import {
   FIX_SCOPE_ARCHITECTURAL,
@@ -49,6 +50,7 @@ import {
   DEFER_FAMILY_HANDLED,
   MAX_FAMILY_MEMBERS,
 } from "./sentry-autofix-family.mjs";
+import { resolveFamilies } from "./sentry-autofix-family-resolve.mjs";
 import {
   FIX_PR_OPENED_LABEL,
   FIX_REFUSED_LABEL,
@@ -4042,6 +4044,386 @@ function reverseStoodDownFixture({ locals = 6, further = 5 } = {}) {
   }
   return makeRunGh({ stubs, handled });
 }
+
+/** `in:title` handled lookups issued for ONE specific family id. The bare
+ * `titleSearchCount` cannot tell which id a search was for, and the seed bugs
+ * below are entirely about WHICH ids get re-asked across a budget boundary. */
+function titleSearchCountFor(calls, id) {
+  return calls.filter(
+    (c) =>
+      c[0] === "issue" &&
+      c[1] === "list" &&
+      String(c[c.indexOf("--search") + 1] ?? "").includes(`"${id}" in:title`),
+  ).length;
+}
+
+/** The index of the SECOND candidate-window list — i.e. where the second look
+ * begins. Everything before it is the first pass. */
+function secondLookStartsAt(calls) {
+  return calls.findIndex(
+    (c, i) => isWindowListArgs(c) && calls.slice(0, i).some(isWindowListArgs),
+  );
+}
+
+// The id the first pass drops for budget. Window stub 150's first hub: the
+// declared-id order is window order, so the 40-lookup budget is spent long
+// before this one, and it is never read by the first pass.
+const DROPPED_HUB_ID = "ANALYTICS-MENTO-ORG-DH150X0";
+
+/**
+ * A FULL, entirely-unselectable window whose stubs declare FAR more distinct
+ * family ids than MAX_HANDLED_ID_QUERIES (200 × 5 = 1000 against a budget of
+ * 40), so 960 of them are dropped unread. Past the ceiling sits one selectable
+ * stub declaring one of those DROPPED ids — and that id's sibling carries a
+ * TERMINAL marker, so the only thing standing between this run and a second
+ * autofix PR for an already-refused family is a lookup the first pass could not
+ * afford and the second look must therefore still make.
+ */
+function droppedIdBlockerFixture() {
+  const stubs = [];
+  for (let i = 0; i < LIST_LIMIT; i += 1) {
+    stubs.push(
+      familyStub(
+        7100 + i,
+        `ANALYTICS-MENTO-ORG-D${i}`,
+        orderedCreatedAt(i),
+        Array.from(
+          { length: MAX_DUPLICATE_LOOKUPS },
+          (_, j) => `ANALYTICS-MENTO-ORG-DH${i}X${j}`,
+        ),
+        FIX_SCOPE_ARCHITECTURAL,
+      ),
+    );
+  }
+  stubs.push(
+    familyStub(7699, "ANALYTICS-MENTO-ORG-DZ", orderedCreatedAt(LIST_LIMIT), [
+      DROPPED_HUB_ID,
+    ]),
+  );
+  return makeRunGh({
+    stubs,
+    handled: [{ shortId: DROPPED_HUB_ID, label: FIX_REFUSED_LABEL }],
+  });
+}
+
+await test("SEED: an id the first pass DROPPED for budget is re-lookable by the second look, so no duplicate slips through", async () => {
+  // The interaction bug between two individually-correct changes. To keep the
+  // per-run overflow counting each distinct un-runnable id ONCE rather than once
+  // per fixpoint iteration, `listHandledShortIds` folds every DROPPED id into its
+  // re-attempt guard — correct while a budget only shrinks within one pass. The
+  // second look then began SEEDING that guard while running on FRESH budgets, so
+  // never-read ids arrived labelled "already resolved": the pass spent none of
+  // its new allowance on them and selected a stub whose sibling holds a terminal
+  // refusal. A duplicate autofix PR, with no rate limit anywhere in the story —
+  // the exact hazard the fail-closed work exists to prevent, reached from the
+  // other side.
+  //
+  // NEGATIVE CONTROL: seed the wider set again — `new Set(seed.handledQueried)`
+  // in resolveFamilies, i.e. carry dropped ids across the pass boundary — and
+  // #7699 appears in `entries` with zero second-look lookups for its hub.
+  const { runGh, calls } = droppedIdBlockerFixture();
+  const { entries, deferred, truncations } = await selectAutofixRun(
+    { repo: "o/r", cap: 6 },
+    { runGh },
+  );
+
+  // The fixture must actually starve the first pass, or this proves nothing.
+  assert(
+    truncations.handledOverflow > 0,
+    "the first pass must overflow its handled budget for this to be the dropped-id path",
+  );
+  const secondListAt = secondLookStartsAt(calls);
+  assert(secondListAt > 0, "the second look must have run");
+  assertEqual(
+    titleSearchCountFor(calls.slice(0, secondListAt), DROPPED_HUB_ID),
+    0,
+    "the first pass must never have read this id — it was dropped for budget",
+  );
+
+  // The fix: a fresh budget retries exactly the work the first pass could not
+  // afford, so the terminal sibling is found.
+  assertEqual(
+    titleSearchCountFor(calls.slice(secondListAt), DROPPED_HUB_ID),
+    1,
+    "the second look must spend its OWN budget looking up the id nobody read",
+  );
+  assert(
+    !entries.some((e) => e.issue === 7699),
+    `a stub whose family carries a terminal refusal must never be selected, got: ${JSON.stringify(entries)}`,
+  );
+  assert(
+    deferred.some((d) => d.issue === 7699),
+    `and the stand-down must be reported, got: ${JSON.stringify(deferred)}`,
+  );
+});
+
+await test("SEED REGRESSION: a dropped id is counted into overflow ONCE per run, however many passes re-surface it", async () => {
+  // The invariant the seeded set was introduced to protect, pinned directly on
+  // the helper so it cannot regress behind a fixture. The fixpoint re-surfaces
+  // the same recheck ids every iteration; without the dropped ids in the
+  // re-attempt guard, each one is counted into `overflow` once per pass and the
+  // run record reports a multiple of the real number. Splitting `answered` out
+  // must NOT weaken this: the guard still absorbs dropped ids, only the SEED is
+  // narrowed.
+  //
+  // NEGATIVE CONTROL: drop the `for (const droppedId of droppedIds)
+  // queried.add(droppedId);` loop in listHandledShortIds and overflow doubles to
+  // 4 — or make the re-attempt filter read `answered` instead of `queried`, the
+  // plausible wrong shape of this round's fix, and it doubles the same way.
+  const ids = ["ANALYTICS-MENTO-ORG-OA", "ANALYTICS-MENTO-ORG-OB"];
+  const { runGh, calls } = makeRunGh({ stubs: [] });
+  const queried = new Set();
+  const answered = new Set();
+  const budget = { remaining: 0, overflow: 0 };
+  for (let pass = 0; pass < 2; pass += 1) {
+    await listHandledShortIds(runGh, "o/r", ids, {
+      queried,
+      answered,
+      budget,
+    });
+  }
+  assertEqual(
+    budget.overflow,
+    ids.length,
+    "each DISTINCT un-runnable id must count exactly once per run",
+  );
+  assertEqual(calls.length, 0, "and no lookup may be issued at zero capacity");
+  assertEqual(
+    answered.size,
+    0,
+    "nothing was answered — a dropped id is spend, never knowledge",
+  );
+});
+
+await test("SEED: an id the first pass ANSWERED is NOT re-read by the second look (seeding still pays)", async () => {
+  // The other half of the same boundary, and the reason the fix narrows the seed
+  // instead of deleting it. An id whose lookup actually came back is real
+  // knowledge: re-asking costs the second look budget it needs for the ids
+  // nobody has read yet. Here the whole window shares ONE declared hub, so the
+  // first pass answers it well inside its budget, and the stub past the ceiling
+  // declares the same hub.
+  //
+  // NEGATIVE CONTROL: stop seeding the answered set — `const handledQueried =
+  // new Set()` in resolveFamilies — and the count below goes to 2.
+  const SEEDED_HUB_ID = "ANALYTICS-MENTO-ORG-SEEDEDHUB";
+  const stubs = [];
+  for (let i = 0; i < LIST_LIMIT; i += 1) {
+    stubs.push(
+      familyStub(
+        7800 + i,
+        `ANALYTICS-MENTO-ORG-E${i}`,
+        orderedCreatedAt(i),
+        [SEEDED_HUB_ID],
+        FIX_SCOPE_ARCHITECTURAL,
+      ),
+    );
+  }
+  stubs.push(
+    familyStub(8399, "ANALYTICS-MENTO-ORG-EZ", orderedCreatedAt(LIST_LIMIT), [
+      SEEDED_HUB_ID,
+    ]),
+  );
+  // No `handled` entry: the hub exists and answers "no terminal marker".
+  const { runGh, calls } = makeRunGh({ stubs });
+  const { entries } = await selectAutofixRun(
+    { repo: "o/r", cap: 6 },
+    { runGh },
+  );
+  assert(secondLookStartsAt(calls) > 0, "the second look must have run");
+  assertEqual(
+    titleSearchCountFor(calls, SEEDED_HUB_ID),
+    1,
+    "an answered id must be looked up ONCE per run, not once per pass",
+  );
+  assert(
+    entries.some((e) => e.issue === 8399),
+    "and nothing blocks it, so the stub past the ceiling is still selected",
+  );
+});
+
+await test("SEED: a probe that FAILED or was left half-read is guarded but never seeded (the same bug, other hats)", async () => {
+  // The reverse leg carries the identical hazard on two more structures. A
+  // probe id enters `alreadyProbed` BEFORE its search runs, and a hit's stub
+  // read is negative-cached as `null` on failure — both right as within-pass
+  // re-attempt guards, both spend rather than knowledge. Seeded into a pass with
+  // fresh budgets they say "already resolved" about work nobody completed, and a
+  // terminal sibling behind an unread hit lets a duplicate fix PR through
+  // exactly as the handled-id case does.
+  //
+  // (The PROBE budget is already safe: its ceiling check breaks BEFORE the add,
+  // so a probe it refuses never enters the guard at all. Pinned below.)
+  //
+  // NEGATIVE CONTROL: seed the wide sets — `answeredProbes` fed from `probed`,
+  // or `resolved.stubCache` unfiltered — and the assertions below flip: the
+  // failed, starved and unread-hit probes all read as answered.
+  const hub = (n, shortId) => ({
+    number: n,
+    title: `[sentry] ${shortId} (analytics-mento-org, error)`,
+    labels: [],
+  });
+  const runGh = async (args) => {
+    const search = String(args[args.indexOf("--search") + 1] ?? "");
+    if (args[1] === "view") {
+      // The hit surfaced by STARVE2 cannot be read.
+      if (String(args[2]) === "9200") {
+        throw new Error("gh issue view 9200 failed with exit 1:\nHTTP 502");
+      }
+      return JSON.stringify({
+        number: Number(args[2]),
+        title: "[sentry] ANALYTICS-MENTO-ORG-HUBX (analytics-mento-org, error)",
+        body: "",
+        labels: [],
+        comments: [verdictComment({ duplicates: [] })],
+      });
+    }
+    if (/PROBEBAD/.test(search)) {
+      throw new Error("gh issue list failed with exit 1:\nread ECONNRESET");
+    }
+    if (/PROBESTARVE/.test(search)) {
+      return JSON.stringify([hub(9100, "ANALYTICS-MENTO-ORG-HUB1")]);
+    }
+    if (/PROBEREAD/.test(search)) {
+      return JSON.stringify([hub(9200, "ANALYTICS-MENTO-ORG-HUB2")]);
+    }
+    return JSON.stringify([]);
+  };
+
+  const ids = [
+    "ANALYTICS-MENTO-ORG-PROBEOK",
+    "ANALYTICS-MENTO-ORG-PROBEBAD",
+    "ANALYTICS-MENTO-ORG-PROBEREAD",
+  ];
+  const probed = new Set();
+  const answeredProbes = new Set();
+  const failedStubReads = new Set();
+  await reverseVerifyFamilies(runGh, "o/r", ids, {
+    project: LOCAL_SENTRY_PROJECT,
+    alreadyProbed: probed,
+    answeredProbes,
+    failedStubReads,
+    probeBudget: { remaining: 10 },
+    verifyBudget: { remaining: 10 },
+  });
+  assertEqual(probed.size, 3, "all three are guarded against re-attempt");
+  assertDeepEqual(
+    [...answeredProbes],
+    ["ANALYTICS-MENTO-ORG-PROBEOK"],
+    "only the probe that searched AND resolved every hit is seed-worthy",
+  );
+  assert(
+    failedStubReads.has("9200"),
+    "the thrown hit read is recorded so its null cache entry is not seeded",
+  );
+
+  // Verify-budget starvation, on its own: the search returns a hit the pass
+  // cannot afford to read.
+  const starvedProbed = new Set();
+  const starvedAnswered = new Set();
+  await reverseVerifyFamilies(
+    runGh,
+    "o/r",
+    ["ANALYTICS-MENTO-ORG-PROBESTARVE"],
+    {
+      project: LOCAL_SENTRY_PROJECT,
+      alreadyProbed: starvedProbed,
+      answeredProbes: starvedAnswered,
+      probeBudget: { remaining: 10 },
+      verifyBudget: { remaining: 0 },
+    },
+  );
+  assertEqual(starvedProbed.size, 1, "still guarded within the pass");
+  assertEqual(
+    starvedAnswered.size,
+    0,
+    "a probe whose hit went unread for want of budget is not an answer",
+  );
+
+  // And the PROBE ceiling, which was already correct: a probe it refuses never
+  // enters the guard, so nothing has to un-record it.
+  const cappedProbed = new Set();
+  const cappedAnswered = new Set();
+  await reverseVerifyFamilies(runGh, "o/r", ids, {
+    project: LOCAL_SENTRY_PROJECT,
+    alreadyProbed: cappedProbed,
+    answeredProbes: cappedAnswered,
+    probeBudget: { remaining: 0 },
+    verifyBudget: { remaining: 10 },
+  });
+  assertEqual(
+    cappedProbed.size,
+    0,
+    "a probe refused by the ceiling is never recorded as probed at all",
+  );
+});
+
+await test("SEED: a stub read that THREW is not carried into the next pass's cache", async () => {
+  // The last hat, and the one that makes the probe fix worth anything. Re-probing
+  // an unresolved id on a fresh budget only helps if the hit it could not read is
+  // actually re-readable — and `readVerdictCached` negative-caches a THROWN read
+  // as `null`, indistinguishable from the legitimate "read fine, no fenced
+  // verdict". Seed that null and the second look re-probes, finds the same hit,
+  // pays no verify budget for it (the cache claims a hit), and re-derives
+  // "not admitted" from a read that never happened.
+  //
+  // NEGATIVE CONTROL: return `stubCache` unfiltered from resolveFamilies and the
+  // first assertion below flips.
+  const runGh = async (args) => {
+    if (args[0] === "issue" && args[1] === "view") {
+      if (String(args[2]) === "9200") {
+        throw new Error("gh issue view 9200 failed with exit 1:\nHTTP 502");
+      }
+      return JSON.stringify({
+        number: Number(args[2]),
+        title:
+          "[sentry] ANALYTICS-MENTO-ORG-HUBOK (analytics-mento-org, error)",
+        body: "",
+        labels: [],
+        comments: [verdictComment({ duplicates: ["ANALYTICS-MENTO-ORG-CA"] })],
+      });
+    }
+    const search = String(args[args.indexOf("--search") + 1] ?? "");
+    if (/in:comments/.test(search)) {
+      return JSON.stringify([
+        {
+          number: 9200,
+          title:
+            "[sentry] ANALYTICS-MENTO-ORG-HUBBAD (analytics-mento-org, error)",
+          labels: [],
+        },
+        {
+          number: 9300,
+          title:
+            "[sentry] ANALYTICS-MENTO-ORG-HUBOK (analytics-mento-org, error)",
+          labels: [],
+        },
+      ]);
+    }
+    return JSON.stringify([]);
+  };
+  const candidates = [
+    {
+      entry: { issue: 500, shortId: "ANALYTICS-MENTO-ORG-CA" },
+      issue: 500,
+      shortId: "ANALYTICS-MENTO-ORG-CA",
+      duplicateOf: [],
+      reconcile: false,
+    },
+  ];
+  const { resolved } = await resolveFamilies(runGh, "o/r", candidates, 2);
+  assert(
+    !resolved.stubCache.has("9200"),
+    "a read that threw is spend, not knowledge — it must not reach the seed",
+  );
+  assert(
+    resolved.stubCache.has("9300"),
+    "a read that succeeded IS knowledge and must still be carried",
+  );
+  assertEqual(
+    resolved.probesAnswered.size,
+    0,
+    "and the probe that surfaced the unread hit is not answered either",
+  );
+});
 
 await test("SECOND LOOK: the ids the first pass PROBED are skipped, but its probe SPEND is not charged to the second look", async () => {
   // The seed carries knowledge, never spend. `alreadyProbed` is a dedupe set —

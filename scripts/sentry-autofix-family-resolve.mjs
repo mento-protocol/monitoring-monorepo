@@ -73,10 +73,16 @@ const MAX_REVERSE_ITERATIONS = 4;
  * MORE candidates — so a family whose terminal sibling the first pass surfaced at
  * probe 25 is unreachable at 20 probes, and the second look selects a stub whose
  * family the same run just stood down. That is a duplicate autofix PR with no
- * rate limit involved. Seeding is also strictly cheaper: `handledQueried`,
- * `alreadyProbed` and `stubCache` make the second look skip reads the first pass
+ * rate limit involved. Seeding is also strictly cheaper: `handledAnswered`,
+ * `probesAnswered` and `stubCache` make the second look skip reads the first pass
  * already paid for. Budgets are NOT seeded — they are fresh allowances for the
  * ids this pass is the first to see.
+ *
+ * The seed carries ANSWERED work only. Every set here has a wider in-pass twin
+ * that also suppresses ids the pass DROPPED for budget or FAILED to read; those
+ * twins never leave the pass. Seeding spend as if it were knowledge is the
+ * inverse of the bug seeding exists to fix, and lands in the same place — a
+ * duplicate autofix PR — from the other direction.
  */
 export async function resolveFamilies(
   runGh,
@@ -112,17 +118,33 @@ export async function resolveFamilies(
       ),
     ),
   ];
-  // One per-RUN handled-id budget, shared by the initial declared-id pass and the
-  // fixpoint's re-checks of reverse-surfaced hub ids, so the total stays bounded
-  // and its overflow surfaces on the tracker.
-  // Seeded from a prior pass where one exists (see `options.seed`), fresh
-  // otherwise. The BUDGETS below are always fresh: the seed carries knowledge,
-  // never spend.
-  const handledQueried = new Set(seed.handledQueried ?? []);
+  // ANSWERED vs SPENT. Each pair below is the same distinction: the first member
+  // is what this pass may not re-attempt (answered, dropped for budget, or
+  // failed), the second is the strict subset that was actually ANSWERED and is
+  // therefore knowledge a later pass may inherit. Only the answered halves reach
+  // `resolved`, and each within-pass set STARTS from the seeded answered one —
+  // so a fresh budget retries exactly what nobody ever read.
+  //
+  // Getting this wrong is a duplicate autofix PR. `listHandledShortIds` folds
+  // every OVERFLOWED id into `queried` on purpose, so the per-run overflow counts
+  // each distinct un-runnable id once instead of once per fixpoint iteration —
+  // correct while a budget only shrinks within one pass, and silently wrong the
+  // moment a pass with a FRESH budget inherits it: the second look would treat
+  // never-read ids as resolved, spend none of its new allowance on them, and
+  // select a stub whose sibling carries a terminal marker nobody ever looked at.
+  const handledAnswered = new Set(seed.handledAnswered ?? []);
+  const handledQueried = new Set(handledAnswered);
   const handledBudget = { remaining: handledCap, overflow: 0 };
   const probeBudget = { remaining: probeCap };
-  const stubCache = seed.stubCache instanceof Map ? seed.stubCache : new Map();
-  const alreadyProbed = new Set(seed.alreadyProbed ?? []);
+  // The stub cache negative-caches a FAILED read as `null` so one broken stub is
+  // not re-read once per fixpoint iteration. That null is spend; `failedStubReads`
+  // records which keys it covers so they can be dropped from the seed while the
+  // in-pass cache keeps its bound.
+  const failedStubReads = new Set();
+  const stubCache =
+    seed.stubCache instanceof Map ? new Map(seed.stubCache) : new Map();
+  const probesAnswered = new Set(seed.probesAnswered ?? []);
+  const alreadyProbed = new Set(probesAnswered);
   // One per-RUN verify-read budget for the reverse leg, shared across the fixpoint
   // so the total `gh issue view` fan-out over hit-verification is bounded (the
   // bug-B mirror of the probe-search cap: each search returns up to
@@ -138,6 +160,7 @@ export async function resolveFamilies(
   if (declaredIds.length) {
     const found = await listHandledShortIds(runGh, repo, declaredIds, {
       queried: handledQueried,
+      answered: handledAnswered,
       budget: handledBudget,
     });
     handledShortIds = [...new Set([...handledShortIds, ...found])];
@@ -204,6 +227,7 @@ export async function resolveFamilies(
       recheckIds.length > 0
         ? await listHandledShortIds(runGh, repo, recheckIds, {
             queried: handledQueried,
+            answered: handledAnswered,
             budget: handledBudget,
           })
         : [];
@@ -216,6 +240,8 @@ export async function resolveFamilies(
         project,
         stubCache,
         alreadyProbed,
+        answeredProbes: probesAnswered,
+        failedStubReads,
         verifyBudget: reverseVerifyBudget,
         probeBudget,
         maxProbes: probeCap,
@@ -251,15 +277,23 @@ export async function resolveFamilies(
       reverseBudget: reverseBudgetTruncated,
       reverseNonconvergent,
     },
-    // Everything this pass LEARNED, in the shape `options.seed` accepts. The
-    // selector hands it to the second look so that pass starts from this one's
-    // blockers and edges instead of re-deriving them on a smaller budget.
+    // Everything this pass LEARNED — and ONLY that — in the shape `options.seed`
+    // accepts. The selector hands it to the second look so that pass starts from
+    // this one's blockers and edges instead of re-deriving them on a smaller
+    // budget. Deliberately absent: every id this pass dropped for budget, every
+    // lookup and probe that failed, and every stub read that threw. Those are
+    // spend, and the second look's budgets are FRESH, so it must be free to
+    // retry exactly the work this pass could not afford. Carrying them would
+    // read as "already resolved" and let a stub whose sibling holds a terminal
+    // marker through as a duplicate fix PR.
     resolved: {
       handledShortIds,
       handledEdges,
-      handledQueried,
-      stubCache,
-      alreadyProbed,
+      handledAnswered,
+      probesAnswered,
+      stubCache: new Map(
+        [...stubCache].filter(([key]) => !failedStubReads.has(key)),
+      ),
     },
   };
 }
