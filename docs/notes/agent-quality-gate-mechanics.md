@@ -890,12 +890,20 @@ generated code, built packages) are invisible to the source fingerprint, so a
 stamp could skip them after their outputs were deleted. The Trunk check, the
 gate self-test, and the advisory ADR reminder also always re-run.
 
-Each mapped command has a watchdog (default 900 seconds; override with
+Each mapped command has a watchdog (default 1500 seconds; override with
 `--command-timeout <n>` or `AGENT_QUALITY_COMMAND_TIMEOUT_SECONDS`). On timeout
 it TERM→KILLs the process tree, reports
 `Command timed out after <n>s: <command>`, and logs durations status `fail`. A
 self-daemonizing child can escape the tree (none do). The timeout never bounds
 the whole run.
+
+That default was 900 until this gate's own self-test became the longest mapped
+command: it runs 525s alone and past 900s inside a full gate run, where it
+competes with everything else on the machine, and most of that time is spent
+asserting that runs queue rather than race — length that cannot be trimmed
+without the assertions ceasing to bind. The cap is a backstop against a hung
+command rather than a performance budget; `durations.jsonl` is where a command
+that has grown too slow gets noticed.
 
 Package-local gate tasks for `lint`, `typecheck`, `knip`, dashboard size-limit,
 local dashboard browser tests, and dashboard React Doctor checks run through

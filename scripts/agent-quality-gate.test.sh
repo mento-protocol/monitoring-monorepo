@@ -5978,7 +5978,7 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
     AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
     "$repo_root/scripts/agent-quality-gate.sh" \
-    --base HEAD --run --lock-wait 25 \
+    --base HEAD --run --lock-wait 14 \
     > "$gate_race_out/stopped-waiter.out" 2>&1 &
   race_stopped_wrapper=$!
   # The budget is far longer than the suspension so the waiter is certainly
@@ -5988,7 +5988,7 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   race_waited=0
   race_stopped_waiter=""
   while [[ -z "$race_stopped_waiter" && "$race_waited" -lt 60 ]]; do
-    race_stopped_waiter="$(pgrep -f "agent-quality-gate.sh --base HEAD --run --lock-wait 25" 2>/dev/null | head -n1 || true)"
+    race_stopped_waiter="$(pgrep -f "agent-quality-gate.sh --base HEAD --run --lock-wait 14" 2>/dev/null | head -n1 || true)"
     [[ -n "$race_stopped_waiter" ]] && break
     sleep 0.5
     race_waited=$((race_waited + 1))
@@ -5997,7 +5997,7 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     fail "the suspended-waiter case never found its waiter, so it proved nothing"
   kill -STOP "$race_stopped_waiter" 2>/dev/null ||
     fail "the suspended-waiter case could not suspend its waiter"
-  sleep 12
+  sleep 8
   kill -CONT "$race_stopped_waiter" 2>/dev/null || true
   wait "$race_stopped_wrapper" 2>/dev/null || true
   kill -9 "$race_stopped_holder" 2>/dev/null || true
@@ -6005,7 +6005,7 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   [[ -n "$race_stopped_reported" ]] ||
     fail "a waiter suspended past its budget must still report a timeout"
   if [[ -n "$race_stopped_waiter" && -n "$race_stopped_reported" ]]; then
-    [[ "$race_stopped_reported" -ge 11 ]] ||
+    [[ "$race_stopped_reported" -ge 7 ]] ||
       fail "a waiter suspended past its budget reported ${race_stopped_reported}s, not the time that passed"
   fi
   rm -rf "$gate_race_root/run.lock"
@@ -6201,7 +6201,7 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
       AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
       AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
       AGENT_QUALITY_GATE_LOCK_ORPHAN_DRAIN_SECONDS=30 \
-      AGENT_QUALITY_GATE_LOCK_DRAIN_UNLINK_DELAY_SECONDS=6 \
+      AGENT_QUALITY_GATE_LOCK_DRAIN_UNLINK_DELAY_SECONDS=4 \
       "$repo_root/scripts/agent-quality-gate.sh" \
       --base HEAD --run --lock-wait 30 \
       > "$gate_race_out/unlink-window.out" 2>&1 &

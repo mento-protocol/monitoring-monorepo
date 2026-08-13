@@ -80,7 +80,15 @@ fail_fast="${AGENT_QUALITY_FAIL_FAST:-false}"
 skip_if_fresh="${AGENT_QUALITY_SKIP_IF_FRESH:-false}"
 quality_parallelism="${AGENT_QUALITY_PARALLELISM:-auto}"
 full_local_tests="${AGENT_GATE_FULL_TESTS:-false}"
-command_timeout_seconds="${AGENT_QUALITY_COMMAND_TIMEOUT_SECONDS:-900}"
+# 900 was the bound until this gate's own self-test became the longest mapped
+# command. That suite spends most of its time asserting that runs queue rather
+# than race, so its length is load-bearing rather than slack: measured at 525s
+# alone and past 900s inside a full gate run, where it competes with everything
+# else on the machine. The cap is a backstop against a hung command, not a
+# performance budget, so it moves to the smallest number that clears the
+# measurement with room — the durations log is where a command that has grown
+# too slow gets noticed.
+command_timeout_seconds="${AGENT_QUALITY_COMMAND_TIMEOUT_SECONDS:-1500}"
 gate_lock_enabled="${AGENT_QUALITY_GATE_LOCK:-1}"
 
 # Reads one of the lock's tunable numbers. An override that is set but EMPTY is
@@ -416,9 +424,20 @@ teardown_active_timeouts() {
   # saved pid list, not a fresh walk. Parallel workers do not need a snapshot:
   # their registered process groups remain addressable after reparenting.
   local -a tree=()
+  local -a tree_identities=()
+  local host_identities=""
+  # Probing our own PID answers whether this host can identify processes at
+  # all. Without that probe, "no identity recorded" would be indistinguishable
+  # from "host cannot record identities", and the KILL pass below would either
+  # skip every survivor on an identity-less host or trust bare PIDs on a host
+  # that could have done better.
+  [[ -z "$(gate_lock_process_start $$)" ]] || host_identities=1
   for pid in "${roots[@]+"${roots[@]}"}"; do
     while IFS= read -r child_pid; do
-      [[ -n "$child_pid" ]] && tree+=("$child_pid")
+      if [[ -n "$child_pid" ]]; then
+        tree+=("$child_pid")
+        tree_identities+=("$(gate_lock_process_start "$child_pid")")
+      fi
     done < <(collect_process_tree "$pid")
   done
   for pid in "${tree[@]+"${tree[@]}"}"; do
@@ -432,9 +451,32 @@ teardown_active_timeouts() {
   # mapped command (or descendant) running just because it wasn't the
   # timeout path that tore it down.
   sleep 3
+  local teardown_idx=0
+  local teardown_recorded teardown_current
   for pid in "${tree[@]+"${tree[@]}"}"; do
+    teardown_recorded="${tree_identities[$teardown_idx]-}"
+    teardown_idx=$((teardown_idx + 1))
+    if [[ -n "$host_identities" ]]; then
+      # Three seconds is long enough for a PID to be recycled, and KILL cannot
+      # be taken back. The number must still name the process captured above:
+      # an empty recorded identity means it was already gone at the snapshot,
+      # and a mismatch means it is somebody else now — either way this signal
+      # is not ours to send. Where the host has no identity source at all, the
+      # PID is the only selector there is, and these are this run's own
+      # children inside a three-second window, so PID alone is the lesser
+      # risk there.
+      [[ -n "$teardown_recorded" ]] || continue
+      teardown_current="$(gate_lock_process_start "$pid")"
+      [[ "$teardown_current" == "$teardown_recorded" ]] || continue
+    fi
     kill "-KILL" "$pid" 2>/dev/null || true
   done
+  # The group pass stays PID-group-only by design: a group id is not a
+  # process, so it has no start time to pin, and skipping the group KILL when
+  # its leader has died would orphan exactly the reparented survivors this
+  # pass exists to reach. Reuse needs the recycled pid to become a group
+  # LEADER inside the same three seconds, a strictly narrower window than the
+  # per-PID case above.
   for pgid in "${worker_pgids[@]+"${worker_pgids[@]}"}"; do
     kill -KILL -- "-$pgid" 2>/dev/null || true
     # The group leader is the direct child the gate can reap. If it already
