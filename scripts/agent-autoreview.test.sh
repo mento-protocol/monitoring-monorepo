@@ -1882,6 +1882,7 @@ run_node_helper_in_repo_expect_failure() {
       "HOME=$HOME" \
       "TMPDIR=${TMPDIR:-/tmp}" \
       "GIT_CONFIG_GLOBAL=/dev/null" \
+      "AUTOREVIEW_EXTRA_BIN_DIRS=" \
       "$node_bin" "$repo_root/scripts/agent-autoreview.mjs" \
       "$@" >"$stdout" 2>"$stderr"
   ) || status=$?
@@ -2222,6 +2223,114 @@ run_requested_codex_missing_regression() {
   run_node_helper_in_repo_expect_failure "$review_repo" --mode local --engine codex
   expect_stdout_contains "autoreview target: local"
   expect_stderr_contains "codex CLI is not available"
+  expect_stderr_contains "set AUTOREVIEW_CODEX_BIN to its absolute path"
+  expect_stderr_contains "Probed:"
+  expect_stdout_not_contains "autoreview clean"
+}
+
+run_codex_resolution_helper() {
+  local review_repo="$1"
+  shift
+  : >"$stdout"
+  : >"$stderr"
+  local status=0
+  (
+    cd "$review_repo"
+    env -i \
+      "PATH=$hermetic_git_bin" \
+      "HOME=$HOME" \
+      "TMPDIR=${TMPDIR:-/tmp}" \
+      "GIT_CONFIG_GLOBAL=/dev/null" \
+      "$@" \
+      "$node_bin" "$repo_root/scripts/agent-autoreview.mjs" \
+      --mode local --engine codex >"$stdout" 2>"$stderr"
+  ) || status=$?
+  return "$status"
+}
+
+# The reviewer must resolve its engine from a shell whose PATH omits the local
+# package manager's bin directory; agent-isolation shells routinely do, and a
+# missed codex used to force a slow remote review instead.
+run_codex_binary_resolution_regression() {
+  local review_repo="$tmp_dir/codex-binary-resolution"
+  local fake_bin="$tmp_dir/codex-binary-resolution-bin"
+  local status=0
+
+  init_review_repo "$review_repo"
+  printf 'base\n' >"$review_repo/README.md"
+  commit_review_repo "$review_repo" init
+  printf 'change\n' >>"$review_repo/README.md"
+
+  mkdir "$fake_bin"
+  cat >"$fake_bin/codex" <<'CODEX'
+#!/bin/bash
+output=""
+while [[ "$#" -gt 0 ]]; do
+  case "$1" in
+    -o)
+      output="$2"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+cat >/dev/null
+printf '%s\n' '{"findings":[],"overall_correctness":"patch is correct","overall_explanation":"clean","overall_confidence":0.9}' >"$output"
+CODEX
+  chmod +x "$fake_bin/codex"
+
+  # PATH has no codex, so the configured well-known install directory decides.
+  run_codex_resolution_helper "$review_repo" \
+    "AUTOREVIEW_EXTRA_BIN_DIRS=$fake_bin" \
+    "AUTOREVIEW_TRACE_COMMANDS=1"
+  expect_stdout_contains "autoreview clean"
+  expect_stderr_contains "resolved codex via well-known install location"
+  expect_stderr_contains "codex-binary-resolution-bin/codex"
+
+  # An explicit override decides before any search directory.
+  run_codex_resolution_helper "$review_repo" \
+    "AUTOREVIEW_CODEX_BIN=$fake_bin/codex" \
+    "AUTOREVIEW_TRACE_COMMANDS=1"
+  expect_stdout_contains "autoreview clean"
+  expect_stderr_contains "resolved codex via AUTOREVIEW_CODEX_BIN"
+
+  # Resolution stays quiet unless the trace is requested.
+  run_codex_resolution_helper "$review_repo" \
+    "AUTOREVIEW_CODEX_BIN=$fake_bin/codex"
+  expect_stdout_contains "autoreview clean"
+  expect_empty_stderr
+
+  # An unusable override reports itself instead of exiting 127.
+  status=0
+  run_codex_resolution_helper "$review_repo" \
+    "AUTOREVIEW_CODEX_BIN=$tmp_dir/absent-codex-override" || status=$?
+  if [[ "$status" -eq 0 ]]; then
+    printf 'expected an unusable AUTOREVIEW_CODEX_BIN override to fail\n' >&2
+    exit 1
+  fi
+  if [[ "$status" -eq 127 ]]; then
+    printf 'unusable AUTOREVIEW_CODEX_BIN override exited 127 without guidance\n' >&2
+    exit 1
+  fi
+  expect_stderr_contains \
+    "AUTOREVIEW_CODEX_BIN does not point at a trusted absolute executable"
+  expect_stderr_contains "Probed: $tmp_dir/absent-codex-override"
+  expect_stdout_not_contains "autoreview clean"
+
+  # A relative override never falls back to a search path either.
+  status=0
+  run_codex_resolution_helper "$review_repo" \
+    "AUTOREVIEW_CODEX_BIN=codex" \
+    "AUTOREVIEW_EXTRA_BIN_DIRS=$fake_bin" || status=$?
+  if [[ "$status" -eq 0 ]]; then
+    printf 'expected a relative AUTOREVIEW_CODEX_BIN override to fail\n' >&2
+    exit 1
+  fi
+  expect_stderr_contains \
+    "AUTOREVIEW_CODEX_BIN does not point at a trusted absolute executable"
+  expect_stderr_contains "Probed: codex"
   expect_stdout_not_contains "autoreview clean"
 }
 
@@ -6097,6 +6206,7 @@ CODEX
       "HOME=$HOME" \
       "TMPDIR=${TMPDIR:-/tmp}" \
       "GIT_CONFIG_GLOBAL=/dev/null" \
+      "AUTOREVIEW_EXTRA_BIN_DIRS=" \
       "$node_exec" "$repo_root/scripts/agent-autoreview.mjs" \
       --mode local \
       --engine codex >"$stdout" 2>"$stderr"
@@ -6388,6 +6498,7 @@ run_untrusted_cleanup_retention_regression() {
 
 run_engine_isolation_family() {
   run_requested_codex_missing_regression
+  run_codex_binary_resolution_regression
   run_suite_family_diagnostic_regression
   run_claude_no_tools_regression
   run_codex_isolation_regression

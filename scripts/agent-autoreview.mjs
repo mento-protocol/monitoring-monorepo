@@ -1126,33 +1126,117 @@ function trustedExecutableCandidate(
   }
 }
 
+function commandOverrideVariable(command) {
+  const name = path
+    .basename(command)
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "_");
+  return `AUTOREVIEW_${name}_BIN`;
+}
+
+// Agent-isolation and CI shells routinely inherit a PATH without the local
+// package manager's bin directory, which used to make an installed reviewer CLI
+// look missing. Probing these after PATH keeps the reviewer usable from any
+// shell; every candidate still passes the same trusted-executable checks, so a
+// wider search never widens what the reviewer is willing to execute.
+function wellKnownCommandDirectories() {
+  const configured = process.env.AUTOREVIEW_EXTRA_BIN_DIRS;
+  const entries =
+    configured === undefined
+      ? ["/opt/homebrew/bin", "/usr/local/bin", homeBinDirectory()]
+      : configured.split(path.delimiter);
+  return entries.filter((entry) => entry && path.isAbsolute(entry));
+}
+
+function homeBinDirectory() {
+  const home = process.env.HOME;
+  return home && path.isAbsolute(home) ? path.join(home, ".local", "bin") : "";
+}
+
+function trustedCommandCandidates(command) {
+  if (path.isAbsolute(command)) {
+    return { candidates: [{ candidate: command, source: "absolute path" }] };
+  }
+  const overrideVariable = commandOverrideVariable(command);
+  const override = process.env[overrideVariable];
+  if (override) {
+    // An explicit override is authoritative: a typo must surface as its own
+    // error rather than silently reviving whatever the caller's PATH offers.
+    return {
+      candidates: path.isAbsolute(override)
+        ? [{ candidate: override, source: overrideVariable }]
+        : [],
+      overrideVariable,
+      overrideValue: override,
+    };
+  }
+  const seen = new Set();
+  const candidates = [];
+  const searchDirectories = [
+    ...(process.env.PATH || "").split(path.delimiter).map((entry) => ({
+      directory: entry,
+      source: "PATH",
+    })),
+    ...wellKnownCommandDirectories().map((directory) => ({
+      directory,
+      source: "well-known install location",
+    })),
+  ];
+  for (const { directory, source } of searchDirectories) {
+    if (!directory || !path.isAbsolute(directory)) continue;
+    const candidate = path.join(directory, command);
+    if (seen.has(candidate)) continue;
+    seen.add(candidate);
+    candidates.push({ candidate, source });
+  }
+  return { candidates };
+}
+
+function traceCommandResolution(command, candidate, resolved, source) {
+  if (!process.env.AUTOREVIEW_TRACE_COMMANDS) return;
+  // Report the probed location, not just the launch target: an executable with
+  // Homebrew-style ancestry launches from a sealed snapshot, and only the
+  // probed path tells an operator which search step won.
+  const launch = resolved === candidate ? "" : ` -> ${resolved}`;
+  console.error(
+    `agent:autoreview: resolved ${command} via ${source}: ${candidate}${launch}`,
+  );
+}
+
+function unavailableCommandMessage(command) {
+  const { candidates, overrideVariable, overrideValue } =
+    trustedCommandCandidates(command);
+  const probed = candidates.map(({ candidate }) => candidate).join(", ");
+  const variable = commandOverrideVariable(command);
+  if (overrideVariable) {
+    return `${command} CLI is not available: ${variable} does not point at a trusted absolute executable. Probed: ${probed || overrideValue}`;
+  }
+  return `${command} CLI is not available outside the reviewed repo. Install it, or set ${variable} to its absolute path. Probed: ${probed || "<no absolute search directories>"}`;
+}
+
 function resolveTrustedCommand(command, rejectRoot, { required = true } = {}) {
-  const candidates = path.isAbsolute(command)
-    ? [command]
-    : (process.env.PATH || "")
-        .split(path.delimiter)
-        .filter((entry) => entry && path.isAbsolute(entry))
-        .map((entry) => path.join(entry, command));
+  const { candidates } = trustedCommandCandidates(command);
   const root = realpathSync(rejectRoot);
-  for (const candidate of candidates) {
+  for (const { candidate, source } of candidates) {
     if (rejectedTrustedExecutableCandidates.has(candidate)) continue;
     try {
       accessSync(candidate, fsConstants.X_OK);
-      return trustedExecutableCandidate(
+      const resolved = trustedExecutableCandidate(
         candidate,
         root,
         path.basename(command) || "executable",
         { allowSnapshot: path.basename(command) !== "git" },
       );
+      traceCommandResolution(command, candidate, resolved, source);
+      return resolved;
     } catch {
       rejectedTrustedExecutableCandidates.add(candidate);
-      // Keep searching a bounded, absolute PATH for an external executable.
+      // Keep searching a bounded, absolute search list for an external
+      // executable.
     }
   }
   if (required) {
-    throw new Error(
-      `${command} CLI is not available outside the reviewed repo`,
-    );
+    throw new Error(unavailableCommandMessage(command));
   }
   return null;
 }
@@ -3132,7 +3216,7 @@ function tomlInlineTable(values) {
 async function runCodex(repo, args, prompt) {
   const codex = resolveTrustedCommand("codex", repo, { required: false });
   if (!codex) {
-    throw new Error("codex CLI is not available");
+    throw new Error(unavailableCommandMessage("codex"));
   }
   if (!args.tools) {
     throw new Error(
@@ -3302,7 +3386,7 @@ async function ensureClaudeIsolationSupported(claude, repo, env, cwd) {
 async function runClaude(repo, args, prompt) {
   const claude = resolveTrustedCommand("claude", repo, { required: false });
   if (!claude) {
-    throw new Error("claude CLI is not available");
+    throw new Error(unavailableCommandMessage("claude"));
   }
   const tempRoot = safeTempRoot(repo);
   const tempDir = createRegisteredEngineRuntimeDirectory(

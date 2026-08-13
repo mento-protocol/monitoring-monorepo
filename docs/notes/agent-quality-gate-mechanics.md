@@ -298,6 +298,19 @@ the adapter defaults to the helper's local deterministic engine because nested
 `codex exec` is unavailable there. An explicit engine selection through
 `--engine codex`, `--engine claude`, or `AUTOREVIEW_ENGINE` takes precedence
 and fails closed if that engine is unavailable; it never silently falls back.
+
+The helper resolves each external CLI in one order: an absolute path in
+`AUTOREVIEW_<COMMAND>_BIN` (`AUTOREVIEW_CODEX_BIN`, `AUTOREVIEW_CLAUDE_BIN`),
+then `PATH`, then the well-known install directories `/opt/homebrew/bin`,
+`/usr/local/bin`, and `~/.local/bin`. That last list keeps the reviewer working
+from agent-isolation and CI shells whose `PATH` omits the local package
+manager's bin directory; set `AUTOREVIEW_EXTRA_BIN_DIRS` to replace it, or to an
+empty value to search `PATH` alone. Every candidate still passes the same
+trusted-executable checks, so the wider search never widens what the reviewer
+will execute. An engine that resolves to nothing fails with the override
+variable and the probed paths instead of a bare command-not-found exit. Set
+`AUTOREVIEW_TRACE_COMMANDS=1` to log which candidate won.
+
 Set `AUTOREVIEW_HELPER` only when intentionally testing or replacing the
 pinned repo helper with a compatible implementation of its CLI contract.
 Prepared-bundle replacements receive only the final prompt handoff and must
