@@ -3,7 +3,7 @@ title: Monitoring Monorepo Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-29
+last_verified: 2026-08-13
 doc_type: agent-instructions
 scope: repo-wide
 review_interval_days: 90
@@ -18,7 +18,7 @@ live in [`SPEC.md`](SPEC.md).
 ## Operating Rule (read this before opening PRs)
 
 The full claim → implement → gate → autoreview → ship → babysit → ready-state →
-merge loop, with its non-negotiables, is one card:
+merge loop, plus production closeout when required, is one card:
 [`docs/notes/pr-operating-card.md`](docs/notes/pr-operating-card.md). Read it
 first; open the authority docs it names only when a step needs their depth.
 
