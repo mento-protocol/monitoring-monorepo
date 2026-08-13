@@ -235,9 +235,14 @@ await test("run record renders each cost-budget truncation only when its budget 
   );
   assert(
     hit.includes(
-      "- Reverse family probe truncated: hit the MAX_REVERSE_PROBE_QUERIES budget (some finalists left unverified)",
+      "- Reverse family verification truncated: a per-run budget or search-page limit was reached, so some finalists were left unverified (treated as not-admitted)",
     ),
-    `reverse-probe truncation line renders, got: ${hit}`,
+    `reverse-truncation line renders cause-neutrally, got: ${hit}`,
+  );
+  // The line must NOT name a single specific budget — the flag has three causes.
+  assert(
+    !hit.includes("hit the MAX_REVERSE_PROBE_QUERIES budget"),
+    "the reverse-truncation line must not assert one specific cause",
   );
   assert(
     hit.includes(

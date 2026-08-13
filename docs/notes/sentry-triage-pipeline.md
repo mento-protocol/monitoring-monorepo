@@ -738,10 +738,11 @@ truncation, since a sibling could sit on an unread page 2 (the #1808 class), and
 does a run that exhausts `MAX_REVERSE_VERIFY_READS` before reading every hit. All
 lookup budgets fail toward MORE candidates (a family that should stand down is
 re-attempted, never wrongly closed), and each truncation is surfaced too —
-`Handled-id lookups truncated: N …`, `Reverse family probe truncated: …` (probe
-budget, verify-read budget, **or** a full search page), or `Reverse family
-verification did not converge …` — so a bounded re-attempt is never the silent,
-healthy-looking one the Window line exists to eliminate.
+`Handled-id lookups truncated: N …`, `Reverse family verification truncated: …`
+(cause-neutral: the probe budget, the verify-read budget, **or** a full search
+page can each raise it), or `Reverse family verification did not converge …` — so
+a bounded re-attempt is never the silent, healthy-looking one the Window line
+exists to eliminate.
 
 The selector reads only PRs whose head branch is in **this** repo.
 `gh pr list --head` matches by branch name, which fork PRs also carry, so on a

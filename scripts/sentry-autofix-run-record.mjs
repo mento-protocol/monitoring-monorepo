@@ -126,8 +126,14 @@ export function buildAutofixRunRecordBody({
     );
   }
   if (reverseTruncated === true || reverseTruncated === "true") {
+    // Cause-NEUTRAL: reverseVerifyFamilies raises this one flag for ANY of three
+    // limits — the per-run probe budget (MAX_REVERSE_PROBE_QUERIES), the per-run
+    // verify-read budget (MAX_REVERSE_VERIFY_READS), or a full reverse-search page
+    // (a possible unread page 2). Naming a single budget here could point an
+    // operator at the wrong one, so the line states only THAT verification was
+    // truncated, matching the multi-cause stderr note the leg already emits.
     lines.push(
-      "- Reverse family probe truncated: hit the MAX_REVERSE_PROBE_QUERIES budget (some finalists left unverified)",
+      "- Reverse family verification truncated: a per-run budget or search-page limit was reached, so some finalists were left unverified (treated as not-admitted)",
     );
   }
   if (reverseNonconvergent === true || reverseNonconvergent === "true") {

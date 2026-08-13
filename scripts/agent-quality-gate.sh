@@ -2403,12 +2403,14 @@ while IFS= read -r path; do
         scripts/sentry-autofix-select.mjs|scripts/sentry-autofix-select.test.mjs)
           add_command "pnpm sentry:autofix:select:test" "Sentry autofix select helper changed"
           ;;
-        scripts/sentry-autofix-queue-io.mjs|scripts/sentry-autofix-family-resolve.mjs|scripts/sentry-autofix-reverse-verify.mjs)
+        scripts/sentry-autofix-queue-io.mjs|scripts/sentry-autofix-family-resolve.mjs|scripts/sentry-autofix-reverse-verify.mjs|scripts/sentry-autofix-family.mjs)
           # The selection leg's gh I/O layer (openAutofixPrExists / isOwnHeadPr /
-          # the family-collapse reads), the live-state family resolver, and the
-          # reverse `in:comments` verification leg — all extracted from the
-          # selector. Each is exercised by the select suite, which mocks runGh and
-          # drives the full flow end to end.
+          # the family-collapse reads), the live-state family resolver, the
+          # reverse `in:comments` verification leg, and the pure union-find
+          # family module (transitive union / project scoping / MAX_FAMILY_MEMBERS
+          # / representative rule) — all consumed by the selector. Each is
+          # exercised by the select suite, which mocks runGh and drives the full
+          # flow end to end.
           add_command "pnpm sentry:autofix:select:test" "Sentry autofix selection helper changed"
           ;;
         scripts/sentry-autofix-finalize.mjs|scripts/sentry-autofix-finalize.test.mjs)
