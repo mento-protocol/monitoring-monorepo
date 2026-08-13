@@ -6,6 +6,7 @@ import {
   PEG_RAIL_SCALE_BPS,
   alertRulesText,
   headerAlertRules,
+  offScaleRailTooltip,
   boardSummary,
   boardTone,
   distanceLabelFor,
@@ -329,9 +330,22 @@ describe("supporting markets", () => {
     const fresh = pkg.sources[1]!;
     const at = (fresh.observationAt ?? 0) * 1_000 + 5_000;
     expect(supportingSourceUnusableReason(fresh, at)).toBeNull();
+    // Capped is usable only with listing provenance and fill metadata; the
+    // fixture's legacy null listing pair alone is not enough.
     expect(
-      supportingSourceUnusableReason({ ...fresh, capped: true }, at),
+      supportingSourceUnusableReason(
+        {
+          ...fresh,
+          capped: true,
+          listingState: "listed",
+          listingCheckedAt: fresh.observationAt,
+        },
+        at,
+      ),
     ).toBeNull();
+    expect(supportingSourceUnusableReason({ ...fresh, capped: true }, at)).toBe(
+      "no current listing check",
+    );
     expect(
       supportingSourceUnusableReason({ ...fresh, healthy: false }, at),
     ).toBe("no healthy observation");
@@ -359,12 +373,53 @@ describe("supporting markets", () => {
     expect(
       supportingSourceUnusableReason({ ...fresh, executablePrice: null }, at),
     ).toBe("no current observation");
+    // Capped venues additionally need their provenance: a listed, fresh
+    // listing check and the fill metadata that explains the partial fill.
+    const capped = {
+      ...fresh,
+      capped: true,
+      listingState: "listed" as const,
+      listingCheckedAt: fresh.observationAt,
+    };
+    expect(
+      supportingSourceUnusableReason({ ...capped, listingState: null }, at),
+    ).toBe("no current listing check");
+    expect(
+      supportingSourceUnusableReason({ ...capped, listingCheckedAt: null }, at),
+    ).toBe("no current listing check");
+    expect(
+      supportingSourceUnusableReason(
+        capped,
+        at + capped.policy.staleAfterSeconds * 1_000 + 1_000,
+      ),
+    ).toBe("check expired");
+    expect(
+      supportingSourceUnusableReason(
+        {
+          ...capped,
+          listingCheckedAt:
+            (capped.observationAt ?? 0) - capped.policy.staleAfterSeconds - 10,
+        },
+        at,
+      ),
+    ).toBe("no current listing check");
+    expect(
+      supportingSourceUnusableReason({ ...capped, filledFraction: null }, at),
+    ).toBe("partial fill unexplained");
+    expect(
+      supportingSourceUnusableReason({ ...capped, referenceSize: null }, at),
+    ).toBe("partial fill unexplained");
     expect(
       supportingSourceUnusableReason(
         fresh,
         at + fresh.policy.staleAfterSeconds * 1_000 + 1_000,
       ),
     ).toBe("check expired");
+  });
+
+  it("points the off-scale tooltip's edge glyph at the marker's side", () => {
+    expect(offScaleRailTooltip(134, "below")).toContain("edge («)");
+    expect(offScaleRailTooltip(134, "above")).toContain("edge (»)");
   });
 
   it("derives a signed distance from the venue's own price", () => {

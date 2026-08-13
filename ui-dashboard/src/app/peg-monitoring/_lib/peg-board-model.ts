@@ -488,7 +488,8 @@ export function offScaleRailTooltip(
   distanceBps: number,
   direction: "below" | "above",
 ): string {
-  return `This venue's price is ${formatDeviationBps(distanceBps)} ${direction} target — beyond the rail's alert scale, so the marker pins at the edge («). Red = off the peg range on that venue. Dashed = it still cannot trigger alerts.`;
+  const edge = direction === "below" ? "«" : "»";
+  return `This venue's price is ${formatDeviationBps(distanceBps)} ${direction} target — beyond the rail's alert scale, so the marker pins at the edge (${edge}). Red = off the peg range on that venue. Dashed = it still cannot trigger alerts.`;
 }
 
 export type SupportingRole = {
@@ -539,11 +540,23 @@ export function supportingSourceUnusableReason(
   if (!source.healthy) return "no healthy observation";
   if (source.observationAt === null || source.executablePrice === null)
     return "no current observation";
-  if (
-    evidenceAtMs - source.observationAt * 1_000 >
-    source.policy.staleAfterSeconds * 1_000
-  )
+  const staleAfterMs = source.policy.staleAfterSeconds * 1_000;
+  if (evidenceAtMs - source.observationAt * 1_000 > staleAfterMs)
     return "check expired";
+  // A capped venue is presentable only with its provenance: proof the listing
+  // is real and fresh, plus the fill metadata that explains the partial fill
+  // (the deleted evidence view's hasPartialLiquidity gate). Without those, a
+  // thin-book price would read as trustworthy DEPTH ONLY context.
+  if (source.capped === true) {
+    if (
+      source.listingState !== "listed" ||
+      source.listingCheckedAt === null ||
+      evidenceAtMs - source.listingCheckedAt * 1_000 > staleAfterMs
+    )
+      return "no current listing check";
+    if (source.filledFraction === null || source.referenceSize === null)
+      return "partial fill unexplained";
+  }
   return null;
 }
 
