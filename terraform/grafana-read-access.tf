@@ -45,8 +45,8 @@ resource "grafana_service_account" "dashboard_reader" {
 # `-replace` is not available on this stack. Without a source-driven trigger the
 # only way to roll this credential would be a manual Grafana console action —
 # exactly what [ADR 0030](../docs/adr/0030-iac-before-cli-secrets.md) forbids.
-# Increment the counter through an approved current-`main` plan/apply; the same
-# apply mints the replacement and pushes it to Vercel.
+# Increment the counter through an approved current-`main` plan/apply, then
+# redeploy the dashboard (see below).
 resource "terraform_data" "grafana_dashboard_reader_token_rotation" {
   input = var.grafana_dashboard_reader_token_rotation_counter
 }
@@ -56,10 +56,21 @@ resource "terraform_data" "grafana_dashboard_reader_token_rotation" {
 # and the failure would look like a Grafana outage rather than an expiry. The
 # counter above is the deliberate, reviewed rotation path instead.
 #
-# Replacement destroys the old token before creating the new one — Grafana
-# scopes token names to their service account, so `create_before_destroy` would
-# collide on the name. The gap is bounded by the apply and lands only on the
-# history endpoints, which ADR 0063 requires the board to survive.
+# ROTATION IS APPLY **PLUS** REDEPLOY. Replacement destroys the old token before
+# creating the new one — Grafana scopes token names to their service account, so
+# `create_before_destroy` would collide on the name. Writing a Vercel
+# environment variable does not reach the running deployment either; only the
+# next deployment reads it. Between the apply and that deployment, production
+# still presents the revoked token and every history read fails. The redeploy is
+# a step of the rotation, not a follow-up — `var.auth_secret_prev` documents the
+# same two-step shape for the sibling Vercel secrets, and `docs/deployment.md`
+# carries the ordered procedure.
+#
+# The window is deliberate. The reason to roll this credential is that it
+# leaked, and revoking it immediately is the point; keeping the previous token
+# alive across the redeploy would keep a known-exposed credential valid for the
+# whole window. The cost stays inside the history endpoints, which ADR 0063
+# requires the board to survive, and never touches current-state peg evidence.
 resource "grafana_service_account_token" "dashboard_reader" {
   name               = "monitoring-dashboard-reader"
   service_account_id = grafana_service_account.dashboard_reader.id

@@ -464,10 +464,13 @@ variable "grafana_dashboard_reader_token_rotation_counter" {
   description = <<-EOT
     Reviewed non-secret rotation counter for
     `grafana_service_account_token.dashboard_reader`. Start at 1; increment it
-    through an approved current-main plan/apply to force Terraform to mint a
-    replacement token and push it to Vercel in the same apply. This is the only
-    rotation path: `scripts/tf-platform-plan-guard.mjs` rejects every platform
-    Terraform argument outside its allowlist, so `-replace` is unavailable.
+    through an approved current-main plan/apply to mint a replacement token and
+    write it to the Vercel project, THEN redeploy the dashboard so an active
+    deployment stops presenting the revoked token — the apply alone leaves
+    history failing, exactly as documented for auth_secret_prev. This is the
+    only rotation path: `scripts/tf-platform-plan-guard.mjs` rejects every
+    platform Terraform argument outside its allowlist, so `-replace` is
+    unavailable.
   EOT
   type        = number
   default     = 1

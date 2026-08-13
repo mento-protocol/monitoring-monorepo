@@ -458,12 +458,24 @@ does not activate the proxy in production.
 stack mints in `terraform/grafana-read-access.tf`; the same apply pushes it to
 Vercel. It is separate from the Admin token that provisions Grafana — never
 paste the provisioning token here, and never rotate either one with a CLI or the
-Grafana console. To roll the dashboard token, increment
-`grafana_dashboard_reader_token_rotation_counter` and take the ordinary approved
-plan/apply path; the platform argument allowlist rejects `-replace`.
+Grafana console.
 [ADR 0063](adr/0063-dashboard-grafana-history-read-access.md) owns the boundary:
 current-state peg evidence keeps coming from the Metrics Bridge decision
 package, and only history reads use this credential.
+
+Rotating it takes an apply **and** a redeploy, in that order:
+
+1. Increment `grafana_dashboard_reader_token_rotation_counter` in the operator's
+   gitignored `terraform/terraform.tfvars`.
+2. Run the ordinary approved `pnpm infra:plan` → `pnpm infra:apply` path. The
+   platform argument allowlist rejects `-replace`, so the counter is the only
+   trigger. This revokes the old token and writes the new one to the project.
+3. Redeploy the dashboard. Until a deployment is created after step 2, the
+   running one still holds the revoked token and every history read fails — the
+   same reason `auth_secret_prev` requires a redeploy on both ends of its
+   window. Peg current state is unaffected; only the history endpoints degrade.
+
+Skipping step 3 leaves history broken indefinitely, not until the next apply.
 
 ### Aggregator Integration Probes
 

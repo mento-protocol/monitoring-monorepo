@@ -136,8 +136,8 @@ image pull depend on the exact boundaries.
 - The Grafana provider here mints only the dashboard's read-only identity in
   `grafana-read-access.tf`. Keep it on `Viewer`, add no Grafana rules or
   dashboards, keep the Admin `grafana_provisioning_token` out of every secret
-  sink, and rotate the minted token through its counter — `-replace` is not an
-  allowed platform argument.
+  sink, and rotate the minted token by counter plus redeploy — never
+  `-replace`, never the console, and never apply without the redeploy.
   [ADR 0063](../docs/adr/0063-dashboard-grafana-history-read-access.md).
 - Access logs are audit telemetry, never an authorization control.
 

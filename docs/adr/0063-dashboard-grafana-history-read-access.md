@@ -83,7 +83,13 @@ Rotation is a reviewed counter, `grafana_dashboard_reader_token_rotation_counter
 a strict allowlist, so `-replace` is unavailable on this stack, and
 [ADR 0030](0030-iac-before-cli-secrets.md) rules out rolling the credential by
 hand in the Grafana console. Incrementing the counter mints the replacement and
-pushes it to Vercel in the same apply.
+writes it to the Vercel project; a dashboard redeploy is the second half of the
+rotation, because a Vercel environment write never reaches an already-running
+deployment. Between the two, production presents a revoked token and history
+fails. That window is accepted deliberately: the reason to roll this credential
+is exposure, so immediate revocation is the point, and retaining the previous
+token across the window would keep a known-exposed credential valid. The cost is
+confined to the history endpoints by the failure-domain rule below.
 
 History is an isolated failure domain. A Grafana outage, a revoked token, or a
 5xx from a history route must leave the current-state board rendering from the
