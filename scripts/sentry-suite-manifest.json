@@ -3,11 +3,16 @@
   "suites": {
     "scripts/sentry-autofix-finalize.test.mjs": {
       "reporter": "count-line",
-      "floor": 44
+      "floor": 44,
+      "reads": [".github/workflows/sentry-autofix.yml"]
     },
     "scripts/sentry-autofix-select.test.mjs": {
       "reporter": "count-line",
       "floor": 19
+    },
+    "scripts/sentry-autofix-run-record.test.mjs": {
+      "reporter": "count-line",
+      "floor": 7
     },
     "scripts/sentry-mcp-broker.test.mjs": {
       "reporter": "node-test",

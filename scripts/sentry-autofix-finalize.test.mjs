@@ -3,20 +3,20 @@ import {
   mkdtempSync,
   mkdirSync,
   writeFileSync,
+  readFileSync,
   symlinkSync,
   unlinkSync,
   rmSync,
 } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
   autofixBranchName,
   AUTOFIX_BRANCH_PREFIX,
-  AUTOFIX_RUN_RECORD_MARKER,
   buildAnalysisComment,
   buildAutofixComment,
-  buildAutofixRunRecordBody,
   buildPrBody,
   buildStaleVerdictCloseComment,
   diffTrees,
@@ -30,6 +30,10 @@ import {
   redactCredentialShaped,
   runCli,
 } from "./sentry-autofix-finalize.mjs";
+// The run-record marker moved to its own module (the finalize CLI still renders
+// the body); the marker is used here to test the CLI's rolling-comment upsert
+// and the untrusted-author selection fence.
+import { AUTOFIX_RUN_RECORD_MARKER } from "./sentry-autofix-run-record.mjs";
 import { AUTOFIX_COMMENT_PREFIX } from "./sentry-triage-digest.mjs";
 import { selectMarkedComment } from "./sentry-triage-project-core.mjs";
 import {
@@ -473,41 +477,6 @@ await test("fix-refused label def comes from the ingest single source", () => {
   );
 });
 
-await test("run record body carries the marker, trigger, state, and tallies", () => {
-  const body = buildAutofixRunRecordBody({
-    timestampIso: "2026-07-19T08:30:00Z",
-    trigger: "schedule",
-    disposition: "active",
-    candidates: 2,
-    opened: 1,
-    refused: 1,
-    incomplete: 0,
-  });
-  assert(body.includes(AUTOFIX_RUN_RECORD_MARKER), "rolling-comment marker");
-  assert(body.includes("2026-07-19T08:30:00Z"), "timestamp");
-  assert(body.includes("Trigger: schedule"), "trigger");
-  assert(body.includes("State: active"), "disposition");
-  assert(body.includes("Candidates selected: 2"), "candidate count");
-  assert(body.includes("Fix PRs opened: 1"), "opened count");
-  assert(body.includes("Refused (no PR): 1"), "refused count");
-  assert(body.includes("Incomplete / errored: 0"), "incomplete count");
-});
-
-await test("run record body coerces missing/bad counters and labels safely", () => {
-  const body = buildAutofixRunRecordBody({
-    timestampIso: "",
-    trigger: "",
-    disposition: undefined,
-    candidates: "not-a-number",
-    opened: -3,
-  });
-  assert(body.includes("Trigger: unknown"), "missing trigger falls back");
-  assert(body.includes("State: unknown"), "missing disposition falls back");
-  assert(body.includes("Candidates selected: 0"), "bad candidate count -> 0");
-  assert(body.includes("Fix PRs opened: 0"), "negative opened -> 0");
-  assert(body.includes("Refused (no PR): 0"), "missing refused -> 0");
-});
-
 // Comments as the raw REST endpoint returns them: pipeline-authored comments
 // resolve to the Actions bot login "github-actions[bot]".
 function trackerComment(id, body, login) {
@@ -603,10 +572,17 @@ await test("CLI autofix-comment / branch / label-def / refused-label-def / run-r
     "1",
     "--incomplete",
     "0",
+    "--deferred",
+    "3",
+    "--deferred-issues",
+    "1313 1316 1326",
   ]);
   assert(
     record.includes(AUTOFIX_RUN_RECORD_MARKER) &&
-      record.includes("Fix PRs opened: 1"),
+      record.includes("Fix PRs opened: 1") &&
+      record.includes(
+        "Deferred (duplicate_of family): 3 (#1313, #1316, #1326)",
+      ),
     "CLI run-record assembles",
   );
   const body = captureCli([
@@ -932,6 +908,146 @@ await test("guard catches underscore-containing / underscore-split credential fi
       0,
     "SCREAMING_SNAKE const path allowed",
   );
+});
+
+// --- fork-PR ownership fence across the WHOLE finalize workflow (#1810; P1) ----
+//
+// A branch-NAME-only read (`gh pr list --head <branch>`) returns FORK PRs too,
+// and a capped page could be filled by newer fork PRs that hide our own row — so
+// on this public repo anyone can push `sentry-autofix/<short-id>` on a fork and
+// open a PR at main before a candidate finalizes. Every open-PR ownership lookup
+// in this workflow now queries the OWNER-QUALIFIED REST head filter
+// (`GET repos/${REPO}/pulls?head=${REPO%%/*}:${branch}&base=main&state=open`),
+// which excludes forks server-side and pins the base the autofix leg always uses
+// (GitHub's open-PR uniqueness is per head+base), and keeps the jq
+// `.head.repo.fork`/owner check as defense in depth. There are THREE such reads —
+// the relink-under-marker read and the dup-guard read in the "Open fix PR from a
+// pristine clone" step, PLUS the read in the separate "Reconcile orphaned fix PR"
+// step (an earlier revision converted only the first two and left this one on the
+// truncatable `gh pr list`). These tests pin that ALL THREE carry the fence, by
+// extracting the actual jq programs from the workflow and running them through
+// real `jq` — not by string-matching the query, which the selector suite's own
+// comments call a broken control.
+
+const AUTOFIX_WORKFLOW = readFileSync(
+  new URL("../.github/workflows/sentry-autofix.yml", import.meta.url),
+  "utf8",
+);
+
+// Executable lines of the whole workflow (comments stripped): the workflow's
+// prose explains the OLD `gh pr list` behavior, so the truncatable-read tripwire
+// must not see those mentions.
+function workflowCode() {
+  return AUTOFIX_WORKFLOW.split("\n")
+    .filter((line) => !/^\s*#/.test(line))
+    .join("\n");
+}
+
+// The org owner is spliced into the fence jq via a shell breakout
+// (`("` + `'"${REPO%%/*}"'` + `"` -> `("mento-protocol"`), so a real jq receives
+// it as a string literal. Reconstruct that EFFECTIVE program for the test.
+const SHELL_OWNER_TOKEN = `'"\${REPO%%/*}"'`;
+
+function effectiveProgram(raw, owner = "mento-protocol") {
+  return raw.split(SHELL_OWNER_TOKEN).join(owner);
+}
+
+/** Every jq ownership-fence program the workflow feeds an owner-qualified
+ * `gh api ... pulls` result into. Anchored on the `pulls?head=` query so the
+ * unrelated `gh api /users/... --jq '.id'` read is never captured. */
+function fenceProgramsIn(body) {
+  const re = /pulls\?head=[\s\S]*?--jq '([\s\S]*?)'\)/g;
+  const programs = [];
+  for (const m of body.matchAll(re)) programs.push(m[1]);
+  return programs;
+}
+
+const FORK_PR = [
+  {
+    html_url: "https://github.com/outsider/monitoring-monorepo/pull/9",
+    head: { repo: { fork: true, owner: { login: "outsider" } } },
+  },
+];
+// Mixed-case owner to exercise the fence's ascii_downcase.
+const OWN_PR = [
+  {
+    html_url: "https://github.com/mento-protocol/monitoring-monorepo/pull/5",
+    head: { repo: { fork: false, owner: { login: "Mento-Protocol" } } },
+  },
+];
+
+function runFence(program, input, owner = "mento-protocol") {
+  return execFileSync("jq", ["-r", effectiveProgram(program, owner)], {
+    input: JSON.stringify(input),
+    encoding: "utf8",
+  }).trim();
+}
+
+await test("every open-PR lookup in the finalize workflow is owner-qualified and fenced (all THREE sites)", () => {
+  const programs = fenceProgramsIn(AUTOFIX_WORKFLOW);
+  assertEqual(
+    programs.length,
+    3,
+    "the relink, dup-guard, AND reconcile-orphaned reads are each owner-qualified",
+  );
+  const code = workflowCode();
+  // Every executable owner-qualified read pins the head branch AND base=main.
+  const ownerQualified =
+    code.split("pulls?head=${REPO%%/*}:${branch}&base=main&state=open").length -
+    1;
+  assertEqual(
+    ownerQualified,
+    3,
+    "all three reads owner-qualify the head branch and pin base=main",
+  );
+  // Regression tripwire: NO fork-truncatable `gh pr list` read may remain
+  // anywhere in the workflow's executable body (the reconcile step was the gap).
+  assert(
+    !code.includes("gh pr list"),
+    "the fork-truncatable `gh pr list --head` read must not remain in the workflow",
+  );
+  for (const program of programs) {
+    assert(
+      program.includes(".head.repo.fork") &&
+        program.includes(".head.repo.owner.login") &&
+        program.includes("ascii_downcase"),
+      "each fence checks head-repo ownership (fork == false + owner match)",
+    );
+  }
+});
+
+await test("fork fence: a fork PR on the autofix branch is NOT ours; our own PR is kept even behind a spoof (all THREE reads)", () => {
+  const programs = fenceProgramsIn(AUTOFIX_WORKFLOW);
+  // Not vacuous if a strip removes a fence: all three reads must carry one.
+  assertEqual(programs.length, 3);
+  for (const program of programs) {
+    // Fork PR -> empty: the read finds nothing ours to relink/dedup against.
+    assertEqual(runFence(program, FORK_PR), "");
+    // Our own same-repo PR -> its url.
+    assertEqual(runFence(program, OWN_PR), OWN_PR[0].html_url);
+    // Even with a fork spoof present, the jq fence keeps only ours (defense in
+    // depth over whatever rows arrive; the owner-qualified query already drops
+    // forks server-side).
+    assertEqual(runFence(program, [...FORK_PR, ...OWN_PR]), OWN_PR[0].html_url);
+  }
+});
+
+await test("fork-fence negative control: the pre-fix bare jq TRUSTS the fork PR", () => {
+  // The bare read the fix replaced (REST `.html_url` field). Run on live jq over
+  // the same fork input, it returns the fork's url — which the finalize path
+  // would relink the stub to or adopt as its dedup. Anchored: no shipped (fenced)
+  // program is this bare jq, so a revert to it at ANY of the three reads restores
+  // this trust and reds the assertions above.
+  const bare = '.[0].html_url // ""';
+  assertEqual(runFence(bare, FORK_PR), FORK_PR[0].html_url);
+  const programs = fenceProgramsIn(AUTOFIX_WORKFLOW);
+  assertEqual(programs.length, 3);
+  for (const program of programs) {
+    assert(
+      effectiveProgram(program).replace(/\s+/g, " ").trim() !== bare,
+      "the shipped fence must not be the bare, fork-trusting read",
+    );
+  }
 });
 
 process.stdout.write(`\n${passed} passed, ${failed} failed\n`);

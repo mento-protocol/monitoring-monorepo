@@ -83,16 +83,33 @@ permissions:
 jobs:
   # ---------------------------------------------------------------------------
   # select: pick the capped batch of code-fix queue stubs owned by THIS repo
-  # that do not yet have a fix PR, and emit them as a matrix. ALWAYS runs and
+  # that do not yet have a fix PR — one per duplicate_of family, so five stubs
+  # of one root cause cost one run, not five — and emit them as a matrix.
+  # ALWAYS runs and
   # ALWAYS emits a valid JSON array — the kill switch and the secret/App guards
   # live in the first step, so a disabled or unprovisioned state is a clean
   # no-op (`[]`, exit 0), never a failure and never an empty matrix expression
   # downstream. The selection logic (verdict re-parse, exact-local repo check,
-  # dedup, cap) lives in scripts/sentry-autofix-select.mjs (+ tests), not inline.
+  # dedup, duplicate_of family collapse, cap) lives in
+  # scripts/sentry-autofix-select.mjs (+ tests), not inline. The cap counts
+  # CANDIDATES: one duplicate_of family consumes one slot however many stubs it
+  # spans (issue #1784). Family collapse DEFERS the rest without writing
+  # anything to the queue, so this job also emits the deferred count and issue
+  # numbers — the record job is the only durable trace of a suppressed queue,
+  # and without it "everything stood down" reads exactly like "nothing queued".
   # ---------------------------------------------------------------------------
   select:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # 10, not 5 (PR #1810): the per-declared-id handled lookups and the reverse
+    # family search add bounded `gh` volume on top of the per-candidate reads.
+    # Every leg is capped (MAX_CANDIDATE_EVALUATIONS, MAX_HANDLED_ID_QUERIES,
+    # MAX_REVERSE_PROBE_QUERIES, and MAX_REVERSE_VERIFY_READS — the reverse
+    # in:comments searches each page up to REVERSE_SEARCH_LIMIT hits, and every
+    # unseen hit costs one verdict re-read, so that leg needs its own read cap),
+    # so the hard ceiling is ~221 serial subprocesses (documented in the pipeline
+    # note § "Cost bound"); 10 leaves headroom for checkout/setup and API-latency
+    # spikes instead of sizing to hope.
+    timeout-minutes: 10
     # sentry-pipeline Environment (issue #1289): AUTOFIX_APP_PRIVATE_KEY is now an
     # environment secret, so this job MUST declare the environment for its
     # presence check to see it; the main-only deployment-branch policy also
@@ -102,12 +119,32 @@ jobs:
     permissions:
       contents: read
       issues: read
-      # The dedup check calls `gh pr list`; unspecified GITHUB_TOKEN scopes
+      # The dedup check reads pulls via `gh api`; unspecified GITHUB_TOKEN scopes
       # default to none, so the PR read must be granted explicitly.
       pull-requests: read
     outputs:
       entries: ${{ steps.select.outputs.entries }}
       count: ${{ steps.select.outputs.count }}
+      # How many candidates the duplicate_of family collapse stood down, and
+      # which issues they were (space-separated integers). Deferral writes
+      # nothing to the queue, so without these the tracker cannot tell a
+      # suppressed queue from an empty one — the record job renders both.
+      deferred: ${{ steps.select.outputs.deferred }}
+      deferred_issues: ${{ steps.select.outputs.deferred_issues }}
+      # The list-window tripwire (PR #1810): total stubs the window held vs how
+      # many the eval cap let this run READ. The record job renders "Window: N
+      # stubs, evaluated M" when N>M, so an approach toward the cap is surfaced
+      # on the tracker weeks ahead of a silent truncation.
+      window_total: ${{ steps.select.outputs.window_total }}
+      window_evaluated: ${{ steps.select.outputs.window_evaluated }}
+      # Cost-budget truncations (PR #1810 follow-up): the handled-id overflow
+      # count and the reverse-probe / non-convergence flags. Each marks a family
+      # that should have stood down but a per-run budget capped its lookup, so it
+      # may re-attempt — the record job renders a line so the bounded re-attempt
+      # is never a silent, healthy-looking one.
+      handled_overflow: ${{ steps.select.outputs.handled_overflow }}
+      reverse_truncated: ${{ steps.select.outputs.reverse_truncated }}
+      reverse_nonconvergent: ${{ steps.select.outputs.reverse_nonconvergent }}
       # Why this run did or did not select anything, for the tracker run record
       # (record-run job): off-main | disabled | unprovisioned | active.
       disposition: ${{ steps.select.outputs.disposition }}
@@ -136,6 +173,25 @@ jobs:
           # Always emit a valid JSON array so the downstream matrix never sees
           # an empty string.
           entries='[]'
+          # duplicate_of family collapse defers candidates WITHOUT writing
+          # anything to the queue, so the run record is the only durable trace.
+          # Seed the report empty here: every branch below that does not run the
+          # batch selector legitimately defers nothing, and the record job must
+          # read a real 0 rather than an absent file.
+          deferred_report="${RUNNER_TEMP}/autofix-deferred.json"
+          printf '[]' > "${deferred_report}"
+          # The list-window tripwire (PR #1810). Seed it empty: every branch that
+          # does not run the batch selector legitimately has no window, and the
+          # record job must read a real 0/0 (no Window line) rather than an
+          # absent file.
+          window_report="${RUNNER_TEMP}/autofix-window.json"
+          printf '{}' > "${window_report}"
+          # Cost-budget truncations (PR #1810 follow-up): a family-dedupe lookup a
+          # per-run budget capped, so a stub that should have stood down may
+          # re-attempt this run. Seed it empty for every branch that does not run
+          # the batch selector, so the record job reads a real "no truncation".
+          truncations_report="${RUNNER_TEMP}/autofix-truncations.json"
+          printf '{}' > "${truncations_report}"
           # Why this run did or did not select anything — recorded verbatim on
           # the tracker issue by the record-run job (ADR 0036 observability).
           disposition='active'
@@ -173,16 +229,42 @@ jobs:
             # without re-checking the daily envelope against the Max window).
             entries=$(node scripts/sentry-autofix-select.mjs \
               --repo "${GITHUB_REPOSITORY}" \
-              --cap 2)
+              --cap 2 \
+              --deferred-out "${deferred_report}" \
+              --window-out "${window_report}" \
+              --truncations-out "${truncations_report}")
           fi
 
           count=$(printf '%s' "${entries}" | jq 'length')
+          # Deferred stubs are the difference between "the queue is empty" and
+          # "every candidate is suppressed behind one refused sibling". Both
+          # previously rendered as `Candidates selected: 0`.
+          deferred=$(jq 'length' "${deferred_report}")
+          deferred_issues=$(jq -r '[.[].issue | numbers | floor | tostring] | join(" ")' \
+            "${deferred_report}")
+          # Window tripwire, floored to non-negative integers (our own JSON, but
+          # keep the record-job contract integer-only).
+          window_total=$(jq -r '(.total // 0) | floor' "${window_report}")
+          window_evaluated=$(jq -r '(.evaluated // 0) | floor' "${window_report}")
+          # Cost-budget truncations: the handled-id overflow COUNT plus two
+          # boolean flags, normalized here so the record-job contract stays
+          # integer/^(true|false)$-only (our own JSON, but keep it strict).
+          handled_overflow=$(jq -r '(.handledOverflow // 0) | floor' "${truncations_report}")
+          reverse_truncated=$(jq -r 'if (.reverseBudget // false) then "true" else "false" end' "${truncations_report}")
+          reverse_nonconvergent=$(jq -r 'if (.reverseNonconvergent // false) then "true" else "false" end' "${truncations_report}")
           {
             echo "entries=${entries}"
             echo "count=${count}"
+            echo "deferred=${deferred}"
+            echo "deferred_issues=${deferred_issues}"
+            echo "window_total=${window_total}"
+            echo "window_evaluated=${window_evaluated}"
+            echo "handled_overflow=${handled_overflow}"
+            echo "reverse_truncated=${reverse_truncated}"
+            echo "reverse_nonconvergent=${reverse_nonconvergent}"
             echo "disposition=${disposition}"
           } >> "${GITHUB_OUTPUT}"
-          echo "Selected ${count} candidate(s) [${disposition}]: ${entries}"
+          echo "Selected ${count} candidate(s), deferred ${deferred}, window ${window_evaluated}/${window_total} [${disposition}]: ${entries}"
 
   # ---------------------------------------------------------------------------
   # autofix: one claude-code-action fix + deterministic PR per selected stub.
@@ -660,9 +742,26 @@ jobs:
             # Match the deterministic autofix head branch, not a text search: a
             # free-text SHORT-ID query can hit an unrelated open PR that merely
             # cites the Sentry issue and relink the stub to the wrong PR.
-            reconciled_pr=$(GH_TOKEN="${APP_TOKEN}" gh pr list \
-              --repo "${REPO}" --head "${branch}" --state open \
-              --json url --jq '.[0].url // ""')
+            #
+            # A branch-NAME-only match returns FORK PRs too (they carry their own
+            # head branch), and this repo is public with a deterministic autofix
+            # branch name — so anyone can push `sentry-autofix/<short-id>` on a
+            # fork and open a PR at main before this candidate finalizes. The
+            # owner-qualified REST head filter `head=<owner>:<branch>&base=main`
+            # excludes forks SERVER-SIDE (a fork's head-repo owner differs), so it
+            # cannot be truncated by a flood of fork PRs the way a capped `gh pr
+            # list` page can, and `base=main` (GitHub's open-PR uniqueness is per
+            # head+base) means at most our own autofix PR returns; the client-side
+            # `.head.repo.fork`/owner recheck (the same fence as the selector's
+            # `isOwnHeadPr`) stays as defense in depth. A fork PR never matches, so
+            # relink finds nothing.
+            reconciled_pr=$(GH_TOKEN="${APP_TOKEN}" gh api \
+              "repos/${REPO}/pulls?head=${REPO%%/*}:${branch}&base=main&state=open" \
+              --jq '[ .[]
+                      | select(.head.repo.fork == false)
+                      | select(((.head.repo.owner.login // "") | ascii_downcase)
+                               == ("'"${REPO%%/*}"'" | ascii_downcase)) ]
+                    | .[0].html_url // ""')
             if [ -n "${reconciled_pr}" ]; then
               echo "::notice::#${QUEUE_ISSUE} already marked fix-pr-opened; relinking ${reconciled_pr}, no new PR."
               gh issue comment "${QUEUE_ISSUE}" --repo "${REPO}" \
@@ -680,9 +779,26 @@ jobs:
           # an orphan and reused (see the force-push note below), so a regressed,
           # re-triaged issue can be fixed again. `gh` reads the API (never git
           # config), so this cannot be redirected by the tainted repo.
-          existing_pr=$(GH_TOKEN="${APP_TOKEN}" gh pr list \
-            --repo "${REPO}" --head "${branch}" --state open \
-            --json url --jq '.[0].url // ""')
+          #
+          # Same fork fence as the relink and reconcile paths. A branch-NAME-only
+          # match returns a FORK PR on the deterministic `sentry-autofix/...` name
+          # too, and a capped `gh pr list --limit N` page could be filled by newer
+          # fork PRs that push our own row off it — leaving `existing_pr` empty and
+          # force-pushing over a real PR under review, OR adopting the fork PR as
+          # the dedup and marking the stub fixed against it. The owner-qualified
+          # REST head filter `head=<owner>:<branch>&base=main` excludes forks
+          # SERVER-SIDE, so no page exists to truncate, and `base=main` (GitHub's
+          # open-PR uniqueness is per head+base) means at most our own autofix PR
+          # returns; the client-side `.head.repo.fork`/owner recheck stays as
+          # defense in depth. A fork PR never matches, so it leaves `existing_pr`
+          # empty and this run opens our own PR below.
+          existing_pr=$(GH_TOKEN="${APP_TOKEN}" gh api \
+            "repos/${REPO}/pulls?head=${REPO%%/*}:${branch}&base=main&state=open" \
+            --jq '[ .[]
+                    | select(.head.repo.fork == false)
+                    | select(((.head.repo.owner.login // "") | ascii_downcase)
+                             == ("'"${REPO%%/*}"'" | ascii_downcase)) ]
+                  | .[0].html_url // ""')
 
           # Whether THIS run opened the PR — only a PR we opened here may be
           # withdrawn by the final stale-verdict guard below; a pre-existing PR
@@ -719,16 +835,23 @@ jobs:
             # Commit as the App bot identity (user id resolved for the noreply
             # email, per the create-github-app-token README) so the push is
             # App-attributed and downstream required CI fires. Force-push covers
-            # two orphan cases, both safe because the branch holds no OPEN PR,
-            # lives in our own `sentry-autofix/` namespace, and runs are
-            # concurrency-serialized (nothing under review is clobbered):
+            # two orphan cases, both safe because the branch holds no OPEN PR of
+            # ours, lives in our own `sentry-autofix/` namespace, and runs are
+            # concurrency-serialized (nothing under review is clobbered). "No OPEN
+            # PR of ours" is established by the owner-qualified `existing_pr` query
+            # above, which forks cannot truncate — a capped `gh pr list` page could
+            # be filled by fork PRs that hide our own row and make this force-push
+            # clobber a live PR, but `head=<owner>:<branch>&base=main` excludes
+            # forks server-side, so an empty result genuinely means no open
+            # same-repo PR to main:
             #   1. a prior run pushed but its `gh pr create` failed, leaving a
             #      branch with no PR; and
             #   2. a prior run's PR merged/closed and the Sentry issue later
             #      regressed — the regression reopen shed the autofix markers
             #      (ingest REOPEN_SHED_LABELS), the SHORT-ID no longer sits in an
-            #      OPEN PR, and the existing-PR check above is `--state open`, so
-            #      the stale merged/closed branch is reused for the fresh fix.
+            #      OPEN PR, and the owner-qualified existing-PR check above is
+            #      `state=open`, so the stale merged/closed branch is reused for
+            #      the fresh fix.
             # Either way THIS run's guard-approved diff is what gets pushed; the
             # PR body is a deterministic template (no per-run agent text), so it
             # stays consistent with whatever diff is force-published.
@@ -943,10 +1066,28 @@ jobs:
           # that merely cites the Sentry issue), open-only — same contract as
           # the selector's dedup. No agent ran for a reconcile entry, so the
           # checkout is untrusted-free and the repo's real helper is safe to run.
+          #
+          # A branch-NAME-only match returns FORK PRs too (they carry their own
+          # head branch), and this repo is public with a deterministic autofix
+          # branch name — so anyone can push `sentry-autofix/<short-id>` on a fork
+          # and open a PR at main. The owner-qualified REST head filter
+          # `head=<owner>:<branch>&base=main` excludes forks SERVER-SIDE (a fork's
+          # head-repo owner differs) and pins the base the autofix leg always uses,
+          # so it cannot be truncated by a flood of fork PRs the way a capped `gh
+          # pr list` page can, and at most one row (GitHub's per head+base PR
+          # uniqueness) comes back. The client-side `.head.repo.fork`/owner recheck
+          # (same fence as the selector's `isOwnHeadPr`) stays as defense in depth
+          # before this step comments the url onto a queue issue and applies the
+          # terminal marker. Without it an outsider gets a queue write and, through
+          # the duplicate_of family collapse, stands that stub's whole family down.
           branch=$(node scripts/sentry-autofix-finalize.mjs branch --short-id "${SHORT_ID}")
-          pr_url=$(gh pr list --repo "${REPO}" \
-            --head "${branch}" --state open \
-            --json url --jq '.[0].url // ""')
+          pr_url=$(gh api \
+            "repos/${REPO}/pulls?head=${REPO%%/*}:${branch}&base=main&state=open" \
+            --jq '[ .[]
+                    | select(.head.repo.fork == false)
+                    | select(((.head.repo.owner.login // "") | ascii_downcase)
+                             == ("'"${REPO%%/*}"'" | ascii_downcase)) ]
+                  | .[0].html_url // ""')
           if [ -z "${pr_url}" ]; then
             echo "::notice::#${QUEUE_ISSUE} reconcile: no open PR on ${branch} (merged/closed?); nothing to do."
             exit 0
@@ -974,7 +1115,10 @@ jobs:
   # fail the run (continue-on-error), and it needs only issues:write — no Claude
   # or App credential. Opened/refused are read back from the selected stubs'
   # labels (fix-pr-opened / fix-refused), so this job needs no matrix-output
-  # plumbing. The rolling comment is keyed by its own marker, distinct from the
+  # plumbing. Deferred CANNOT be read back that way — family deferral writes
+  # nothing to the queue by design — so it is threaded from the select job's
+  # outputs; a run whose whole window was suppressed must not render as an idle
+  # one. The rolling comment is keyed by its own marker, distinct from the
   # ingest's, so the two records coexist on the tracker.
   # ---------------------------------------------------------------------------
   record-run:
@@ -1008,6 +1152,13 @@ jobs:
           TRACKER_ISSUE: "1282"
           ENTRIES: ${{ needs.select.outputs.entries }}
           COUNT: ${{ needs.select.outputs.count }}
+          DEFERRED: ${{ needs.select.outputs.deferred }}
+          DEFERRED_ISSUES: ${{ needs.select.outputs.deferred_issues }}
+          WINDOW_TOTAL: ${{ needs.select.outputs.window_total }}
+          WINDOW_EVALUATED: ${{ needs.select.outputs.window_evaluated }}
+          HANDLED_OVERFLOW: ${{ needs.select.outputs.handled_overflow }}
+          REVERSE_TRUNCATED: ${{ needs.select.outputs.reverse_truncated }}
+          REVERSE_NONCONVERGENT: ${{ needs.select.outputs.reverse_nonconvergent }}
           DISPOSITION: ${{ needs.select.outputs.disposition }}
           SELECT_RESULT: ${{ needs.select.result }}
           TRIGGER: ${{ github.event_name }}
@@ -1017,11 +1168,25 @@ jobs:
 
           disposition="${DISPOSITION:-unknown}"
           count="${COUNT:-0}"
+          deferred="${DEFERRED:-0}"
+          deferred_issues="${DEFERRED_ISSUES:-}"
+          window_total="${WINDOW_TOTAL:-0}"
+          window_evaluated="${WINDOW_EVALUATED:-0}"
+          handled_overflow="${HANDLED_OVERFLOW:-0}"
+          reverse_truncated="${REVERSE_TRUNCATED:-false}"
+          reverse_nonconvergent="${REVERSE_NONCONVERGENT:-false}"
           # If selection itself failed/cancelled, record THAT (not a stale
           # snapshot) so the tracker shows the systemic failure mode.
           if [ "${SELECT_RESULT}" != "success" ]; then
             disposition="select-${SELECT_RESULT}"
             count=0
+            deferred=0
+            deferred_issues=""
+            window_total=0
+            window_evaluated=0
+            handled_overflow=0
+            reverse_truncated=false
+            reverse_nonconvergent=false
           fi
 
           # Tally opened/refused/incomplete from each selected stub's current
@@ -1058,7 +1223,14 @@ jobs:
             --candidates "${count}" \
             --opened "${opened}" \
             --refused "${refused}" \
-            --incomplete "${incomplete}")
+            --incomplete "${incomplete}" \
+            --deferred "${deferred}" \
+            --deferred-issues "${deferred_issues}" \
+            --window-total "${window_total}" \
+            --window-evaluated "${window_evaluated}" \
+            --handled-overflow "${handled_overflow}" \
+            --reverse-truncated "${reverse_truncated}" \
+            --reverse-nonconvergent "${reverse_nonconvergent}")
 
           # Rolling comment: PATCH the existing marker-bearing comment if present,
           # else create it. Selection is author-fenced + prefix-anchored
