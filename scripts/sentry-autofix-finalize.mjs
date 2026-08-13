@@ -681,11 +681,17 @@ Commands:
              --candidates <n> --opened <n> --refused <n> --incomplete <n> \\
              [--deferred <n>] [--deferred-issues "<n n …>"] \\
              [--window-total <n>] [--window-evaluated <n>] \\
+             [--second-look <bool>] [--second-look-total <n>] \\
+             [--second-look-evaluated <n>] [--second-look-full <bool>] \\
+             [--second-look-failed <bool>] [--gh-calls <n>] \\
+             [--rate-limited <n>] \\
              [--handled-overflow <n>] [--reverse-truncated <bool>] \\
              [--reverse-nonconvergent <bool>]
       Print the tracker run-record comment body (rolling comment, marker-keyed).
       The Window line renders only when --window-total exceeds --window-evaluated;
-      each truncation line renders only when its budget was actually hit.
+      the Second look line only when the bounded second look actually ran; the
+      DEGRADED line only when --rate-limited is nonzero; each truncation line
+      only when its budget was actually hit.
   select-run-record-id --comments-file <path>
       Print the numeric id of the tracker issue's existing rolling run-record
       comment (trusted-author + prefix-anchored, selectMarkedComment),
@@ -827,6 +833,13 @@ export function runCli(argv, { stdout = process.stdout } = {}) {
           skippedIssues: readFlag(args, "--skipped-issues"),
           windowTotal: readFlag(args, "--window-total"),
           windowEvaluated: readFlag(args, "--window-evaluated"),
+          secondLook: readFlag(args, "--second-look"),
+          secondLookTotal: readFlag(args, "--second-look-total"),
+          secondLookEvaluated: readFlag(args, "--second-look-evaluated"),
+          secondLookFull: readFlag(args, "--second-look-full"),
+          secondLookFailed: readFlag(args, "--second-look-failed"),
+          ghCalls: readFlag(args, "--gh-calls"),
+          rateLimited: readFlag(args, "--rate-limited"),
           handledOverflow: readFlag(args, "--handled-overflow"),
           reverseTruncated: readFlag(args, "--reverse-truncated"),
           reverseNonconvergent: readFlag(args, "--reverse-nonconvergent"),

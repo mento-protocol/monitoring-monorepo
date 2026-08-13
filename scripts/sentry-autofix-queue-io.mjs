@@ -65,7 +65,79 @@ export function parseProject(title) {
 // pre-filter above, the eligible-and-unfixed local set stays tiny, so this is
 // only a safety ceiling — not the throttle. Oldest-first, so genuinely old
 // candidates are never starved by newer ones.
-const LIST_LIMIT = 200;
+//
+// It is also the HARD upper bound on the selector's evaluation window. `--limit`
+// caps what the API RETURNS, and that happens BEFORE
+// `MAX_CANDIDATE_EVALUATIONS` (sentry-autofix-select.mjs) slices the returned
+// rows — so raising that constant above this one is a strict NO-OP, and the two
+// must move together. The invariant is pinned by a test
+// (`MAX_CANDIDATE_EVALUATIONS <= LIST_LIMIT` in sentry-autofix-select.test.mjs)
+// and re-checked at run time by `windowCeilingWarning`, because a silent no-op
+// is exactly the failure a "we raised the window" change must not ship as.
+// Exported for both.
+export const LIST_LIMIT = 200;
+
+// Rate-limit-shaped `gh` failure text. EVERY read the select leg issues is a
+// dedupe/blocker signal (a prior fix PR, a terminal sibling's marker, a verdict),
+// and every one of them fails SOFT toward MORE candidates — so a rejection the
+// caller cannot tell apart from "no blocker found" makes a throttled run open
+// DUPLICATE autofix PRs and still look green. These patterns are what `gh`
+// actually prints on the wire:
+//   - `gh api` surfaces the HTTP status verbatim: `HTTP 403: API rate limit
+//     exceeded for user ID 1234. (https://api.github.com/…)`, and
+//     `HTTP 403: You have exceeded a secondary rate limit and have been
+//     temporarily blocked from content creation.` GitHub also serves plain
+//     `HTTP 429 Too Many Requests` on some abuse paths.
+//   - `gh issue list --search` routes to GraphQL, whose throttle body reads
+//     `GraphQL: API rate limit exceeded for user ID 1234. (rateLimitExceeded)`.
+//   - Older/abuse-detection responses read `You have triggered an abuse
+//     detection mechanism`.
+// Match these against gh's STDERR only, never the rejection message as a whole —
+// see `ghFailureText`.
+//
+// A bare `HTTP 403` that is really a PERMISSIONS failure matches too. That is
+// deliberate: both mean "this read did not answer the dedupe question", and the
+// only action either warrants is the same one — stop selecting on unreliable
+// data. Fail closed, not clever.
+const RATE_LIMIT_PATTERNS = [
+  /\bHTTP 403\b/,
+  /\bHTTP 429\b/,
+  /rate limit/i,
+  /rateLimitExceeded/i,
+  /abuse detection/i,
+  /too many requests/i,
+];
+
+/** True when a `gh` failure message is rate-limit / throttle shaped — i.e. the
+ * read did NOT answer the dedupe question it was issued for, as opposed to
+ * answering "no blocker". Pure and exported so the selector can classify a
+ * rejection from ANY read without each call site re-implementing the match. */
+export function isRateLimitFailure(message) {
+  const text = String(message ?? "");
+  return RATE_LIMIT_PATTERNS.some((pattern) => pattern.test(text));
+}
+
+/**
+ * The text a `gh` rejection should be CLASSIFIED on: gh's own stderr when the
+ * rejection carries it, the whole message otherwise.
+ *
+ * `defaultRunGh` builds its message as `gh <argv> failed with exit N:\n<stderr>`,
+ * so classifying the message directly matches the ARGV too — and argv carries
+ * agent-authored text. Family ids come from an LLM's `duplicate_of` (charset
+ * `[A-Za-z0-9._-]`, so `RATELIMITEXCEEDED` is a legal id) and are interpolated
+ * into the `in:title` / `in:comments` searches. A stub declaring such an id would
+ * turn ANY unrelated failure of its own probe — 404, 502, ECONNRESET — into a
+ * whole-run stand-down. Scoping the match to the stderr half closes that: the
+ * rejection carries the raw stderr on `ghStderr`, and only that is classified.
+ * Rejections without the property (a spawn error, or a test double throwing a
+ * plain Error) fall back to the message, so existing behaviour is unchanged
+ * wherever there is no argv to confuse it with.
+ */
+export function ghFailureText(err) {
+  const stderr = err?.ghStderr;
+  if (typeof stderr === "string") return stderr;
+  return err instanceof Error ? err.message : String(err ?? "");
+}
 
 export function defaultRunGh(args) {
   return new Promise((resolve, reject) => {
@@ -85,11 +157,15 @@ export function defaultRunGh(args) {
     });
     child.on("close", (status) => {
       if (status !== 0) {
-        reject(
-          new Error(
-            `gh ${args.join(" ")} failed with exit ${status}:\n${stderr}`,
-          ),
+        const err = new Error(
+          `gh ${args.join(" ")} failed with exit ${status}:\n${stderr}`,
         );
+        // The message keeps the argv (an operator reading the log needs to know
+        // WHICH read failed); `ghStderr` carries gh's half alone, because that
+        // is the only half `isRateLimitFailure` may be run against. See
+        // `ghFailureText`.
+        err.ghStderr = stderr;
+        reject(err);
         return;
       }
       resolve(stdout);
@@ -107,8 +183,47 @@ export function defaultRunGh(args) {
  *     the returned title) drops EXTERNAL-repo code-fix stubs before their
  *     verdict is ever read.
  * Oldest-first via `sort:created-asc`, capped at LIST_LIMIT as a safety ceiling.
+ *
+ * `options.limit` widens that ceiling and `options.skip` drops the oldest N RAW
+ * rows before the client-side project filter — the pair the selector's bounded
+ * SECOND LOOK uses to reach rows past the first window when the first window
+ * selected nothing (see MAX_SECOND_LOOK_EVALUATIONS). `skip` counts RAW rows on
+ * purpose: it must line up with the first pass's own `--limit`, which the API
+ * applies before any client-side filter, so counting filtered rows would
+ * re-read or skip stubs depending on how many the project filter dropped.
+ *
+ * Returns `{ stubs, rawCount, full }` — `full` is the "is there anything past
+ * this page?" signal, taken off the RAW row count. The filtered `stubs` length
+ * cannot carry it: the project filter can drop rows, so a genuinely full page
+ * can come back short and a second look that keyed on it would never fire.
+ *
+ * `full` has TWO strengths, and the caller picks by what it does with the answer.
+ * By default it is `rawCount >= limit` — "the page came back full, so rows MAY
+ * sit past it". That is right for a TRIGGER (being wrong costs one extra list
+ * call) and wrong for a CLAIM: at EXACTLY `limit` rows it asserts more remain
+ * when nothing does.
+ *
+ * `options.sentinel` buys the definite answer. The query asks for ONE row past
+ * the ceiling, that row is dropped before anything reads or counts it, and
+ * `full` becomes "a row beyond the ceiling really did come back". Cost: ONE
+ * extra API REQUEST on the calls that opt in, and zero extra `gh` invocations
+ * and zero extra per-stub reads — `gh issue list` paginates at 100 rows per
+ * request, so a 300-row ask (3 requests) becomes a 301-row ask (4, the last
+ * holding just the sentinel). Opt-in for exactly that reason: the second look
+ * PUBLISHES its `full` on the operator-facing tracker as the standing regrowth
+ * tripwire, so it pays; the first pass only uses `full` to decide whether to
+ * take a second look at all, and being conservative there costs one extra list
+ * call on a run that already selected nothing — cheaper than the extra request
+ * on EVERY run.
  */
-export async function listCodeFixStubs(runGh, repo) {
+export async function listCodeFixStubsPage(runGh, repo, options = {}) {
+  const limit =
+    Number.isInteger(options.limit) && options.limit > 0
+      ? options.limit
+      : LIST_LIMIT;
+  const skip =
+    Number.isInteger(options.skip) && options.skip > 0 ? options.skip : 0;
+  const sentinel = options.sentinel === true;
   const stdout = await runGh([
     "issue",
     "list",
@@ -160,28 +275,48 @@ export async function listCodeFixStubs(runGh, repo) {
     "--json",
     "number,title,labels,createdAt",
     "--limit",
-    String(LIST_LIMIT),
+    String(sentinel ? limit + 1 : limit),
   ]);
   const parsed = JSON.parse(stdout);
-  const list = Array.isArray(parsed) ? parsed : [];
-  return (
-    list
-      .map((issue) => ({
-        number: issue.number,
-        title: issue.title ?? "",
-        createdAt: issue.createdAt ?? "",
-        labels: (issue.labels ?? [])
-          .map((label) => (typeof label === "string" ? label : label?.name))
-          .filter(Boolean),
-      }))
-      // Exact owning-project gate — the server-side `<slug> in:title` filter
-      // keeps the WINDOW local (tokenized, so approximate); this parses the
-      // exact project out of the title and drops any tokenized false-positive.
-      .filter((issue) => parseProject(issue.title) === LOCAL_SENTRY_PROJECT)
-      // `--search sort:created-asc` returns oldest-first, but keep the client-side
-      // sort as defense-in-depth (same pattern as the triage select job).
-      .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)))
-  );
+  const returned = Array.isArray(parsed) ? parsed : [];
+  // The sentinel is COUNTED, never used. Trimming it here — before the skip, the
+  // project filter and the sort — is what keeps `limit` an honest ceiling: the
+  // page still delivers at most `limit` raw rows, so `rawCount`, the evaluable
+  // stubs and every per-stub read budget downstream are byte-identical to the
+  // same call without it.
+  const list = sentinel ? returned.slice(0, limit) : returned;
+  const stubs = list
+    .slice(skip)
+    .map((issue) => ({
+      number: issue.number,
+      title: issue.title ?? "",
+      createdAt: issue.createdAt ?? "",
+      labels: (issue.labels ?? [])
+        .map((label) => (typeof label === "string" ? label : label?.name))
+        .filter(Boolean),
+    }))
+    // Exact owning-project gate — the server-side `<slug> in:title` filter
+    // keeps the WINDOW local (tokenized, so approximate); this parses the
+    // exact project out of the title and drops any tokenized false-positive.
+    .filter((issue) => parseProject(issue.title) === LOCAL_SENTRY_PROJECT)
+    // `--search sort:created-asc` returns oldest-first, but keep the client-side
+    // sort as defense-in-depth (same pattern as the triage select job).
+    .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+  return {
+    stubs,
+    rawCount: list.length,
+    // With the sentinel, `full` is a fact: a row past the ceiling came back.
+    // Without it, it is the weaker "the page filled up, so more MAY exist".
+    full: sentinel ? returned.length > limit : list.length >= limit,
+  };
+}
+
+/** The filtered window only — the shape every caller but the second look wants.
+ * Thin wrapper over `listCodeFixStubsPage`, kept because it is the name the
+ * selector and the suites have always imported. */
+export async function listCodeFixStubs(runGh, repo, options = {}) {
+  const { stubs } = await listCodeFixStubsPage(runGh, repo, options);
+  return stubs;
 }
 
 /**
@@ -228,12 +363,20 @@ export async function listHandledShortIds(
   declaredIds,
   options = {},
 ) {
-  // `queried` (already-looked-up ids) and `budget` (remaining allowance +
-  // accumulated overflow) are shared across the run's calls, so a second pass on
-  // reverse-surfaced ids neither re-queries an id nor exceeds the per-run cap.
-  // Absent (a standalone call), each defaults fresh, preserving the single-call
-  // cap-at-40 behaviour exactly.
+  // `queried` (ids this pass must not re-attempt — answered, dropped OR failed)
+  // and `budget` (remaining allowance + accumulated overflow) are shared across
+  // the run's calls, so a second pass on reverse-surfaced ids neither re-queries
+  // an id nor exceeds the per-run cap. Absent (a standalone call), each defaults
+  // fresh, preserving the single-call cap-at-40 behaviour exactly.
+  //
+  // `answered` is the STRICT SUBSET of `queried` whose lookup actually came back
+  // and could be read — knowledge, where the rest of `queried` is merely spend
+  // (it deliberately absorbs ids this call never issued; see the overflow
+  // branch). Only that subset may cross into a pass with a FRESH budget. Why
+  // that matters: sentry-autofix-family-resolve.mjs § ANSWERED vs SPENT.
   const queried = options.queried instanceof Set ? options.queried : new Set();
+  const answered =
+    options.answered instanceof Set ? options.answered : new Set();
   const budget = options.budget ?? {
     remaining: MAX_HANDLED_ID_QUERIES,
     overflow: 0,
@@ -259,7 +402,11 @@ export async function listHandledShortIds(
     // re-attempt these ids either.
     for (const droppedId of droppedIds) queried.add(droppedId);
     process.stderr.write(
-      `note: ${ids.length} distinct declared family ids exceed the per-run MAX_HANDLED_ID_QUERIES budget (${MAX_HANDLED_ID_QUERIES}); ${droppedIds.length} are treated as not-handled this run (fails toward MORE candidates).\n`,
+      // The budget is passed in, so name what is LEFT rather than the module
+      // constant: the selector's bounded second look runs this same helper on a
+      // smaller allowance, and printing MAX_HANDLED_ID_QUERIES there would point
+      // an operator at a number the pass never had.
+      `note: ${ids.length} distinct declared family ids exceed this pass's remaining handled-id lookup budget (${capacity} left, per-run cap ${MAX_HANDLED_ID_QUERIES}); ${droppedIds.length} are treated as not-handled this run (fails toward MORE candidates).\n`,
     );
   }
   budget.remaining = capacity - queryIds.length;
@@ -301,8 +448,15 @@ export async function listHandledShortIds(
     try {
       parsed = JSON.parse(stdout);
     } catch {
-      parsed = [];
+      // A body we cannot read did not ANSWER the lookup any more than a failed
+      // read did, so this id stays out of `answered`. Behaviourally identical to
+      // the previous `parsed = []` (the loop below ran zero times either way).
+      continue;
     }
+    // ANSWERED: the lookup ran and came back readable. Both outcomes count —
+    // "this id carries a terminal marker" and "it does not" are equally real
+    // answers, and re-asking on a later pass would only re-spend budget.
+    answered.add(id);
     for (const issue of Array.isArray(parsed) ? parsed : []) {
       const title = issue.title ?? "";
       // Exact-parse fence over GitHub's tokenized search: the parsed short-id

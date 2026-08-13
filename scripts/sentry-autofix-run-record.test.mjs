@@ -343,5 +343,169 @@ await test("run record renders each cost-budget truncation only when its budget 
   );
 });
 
+await test("run record renders the bounded second look only when it actually ran", () => {
+  // The second look is extra `gh` spend on a run that already found nothing, so
+  // it must never be silent — and it carries an evaluation ceiling of its own,
+  // so `evaluated < total` on the same line is its own truncation report.
+  //
+  // NEGATIVE CONTROL: drop the `if (secondLook === true …)` guard in
+  // buildAutofixRunRecordBody and the steady-state assertion below (no line when
+  // it did not run) fails.
+  const idle = buildAutofixRunRecordBody({
+    timestampIso: "2026-07-19T08:30:00Z",
+    trigger: "schedule",
+    disposition: "active",
+    candidates: 0,
+  });
+  assert(
+    !idle.includes("Second look"),
+    "no second-look line when it did not run",
+  );
+  const ran = buildAutofixRunRecordBody({
+    timestampIso: "2026-07-19T08:30:00Z",
+    trigger: "schedule",
+    disposition: "active",
+    candidates: 1,
+    secondLook: "true",
+    secondLookTotal: 7,
+    secondLookEvaluated: 7,
+  });
+  assert(
+    ran.includes("- Second look: 7 further stubs past the window, evaluated 7"),
+    `second-look line renders, got: ${ran}`,
+  );
+  assert(
+    !ran.includes("MAX_SECOND_LOOK_EVALUATIONS"),
+    "an untruncated second look must not claim a cap it never hit",
+  );
+  const capped = buildAutofixRunRecordBody({
+    timestampIso: "2026-07-19T08:30:00Z",
+    trigger: "schedule",
+    disposition: "active",
+    candidates: 1,
+    secondLook: true,
+    secondLookTotal: 105,
+    secondLookEvaluated: 100,
+  });
+  assert(
+    capped.includes(
+      "- Second look: 105 further stubs past the window, evaluated 100 (capped by MAX_SECOND_LOOK_EVALUATIONS)",
+    ),
+    `a truncated second look names its cap, got: ${capped}`,
+  );
+});
+
+await test("run record: the second look's REGROWTH tripwire is `full`, which the counts cannot carry", () => {
+  // With the eval cap equal to the list ceiling the Window line above is inert,
+  // and the pipeline note names this line the standing tripwire for queue
+  // regrowth. The COUNTS cannot do that job: the second look's own row cap
+  // clamps `secondLookTotal`, so `100 further stubs, evaluated 100` reads
+  // identically whether 100 or 5,000 stubs sit past the ceiling — a tripwire
+  // that cannot distinguish bounded from unbounded. `secondLookFull` is the
+  // signal that can.
+  //
+  // NEGATIVE CONTROL: drop the `secondLookFull` branch from the suffix in
+  // buildAutofixRunRecordBody and the first assertion below fails while the
+  // saturated counts still render exactly as before.
+  const base = {
+    timestampIso: "2026-07-19T08:30:00Z",
+    trigger: "schedule",
+    disposition: "active",
+    candidates: 0,
+    secondLook: true,
+    secondLookTotal: 100,
+    secondLookEvaluated: 100,
+  };
+  const more = buildAutofixRunRecordBody({ ...base, secondLookFull: "true" });
+  assert(
+    more.includes("and MORE rows sit past even that"),
+    `a full second-look page must say the queue is outgrowing one run, got: ${more}`,
+  );
+  const drained = buildAutofixRunRecordBody({ ...base, secondLookFull: false });
+  assert(
+    !drained.includes("MORE rows sit past"),
+    "a second look that reached the end of the queue must not claim regrowth",
+  );
+  // A FAILED second look outranks both: it saw nothing at all, so the zeros
+  // beside it mean "unknown", not "empty".
+  const failed = buildAutofixRunRecordBody({
+    ...base,
+    secondLookTotal: 0,
+    secondLookEvaluated: 0,
+    secondLookFull: false,
+    secondLookFailed: "true",
+  });
+  assert(
+    failed.includes("the second look's own list read FAILED"),
+    `a failed second look must say so, got: ${failed}`,
+  );
+});
+
+await test("run record names the UNIT of the measured gh count, because two units are in play", () => {
+  // The per-run cost ceiling was arithmetic nothing ever counted; this is the
+  // observed number, so drift lands on the tracker before it lands as a timeout.
+  // The counter counts INVOCATIONS (serial subprocesses — the unit the job
+  // timeout is spent in), while the rate-budget arithmetic in the pipeline note
+  // counts API REQUESTS, and one `gh issue list --limit 200` is one invocation
+  // but two requests. Labelled "gh reads" the number was silently compared
+  // against a ceiling in the other unit, which is a drift detector that cannot
+  // detect drift.
+  const measured = buildAutofixRunRecordBody({
+    timestampIso: "2026-07-19T08:30:00Z",
+    trigger: "schedule",
+    disposition: "active",
+    candidates: 2,
+    ghCalls: 521,
+  });
+  assert(measured.includes("- gh invocations: 521"), `got: ${measured}`);
+  const none = buildAutofixRunRecordBody({
+    timestampIso: "2026-07-19T08:30:00Z",
+    trigger: "schedule",
+    disposition: "off-main",
+    candidates: 0,
+  });
+  assert(
+    !none.includes("gh invocations"),
+    "a leg that issued no reads carries no count line",
+  );
+});
+
+await test("run record renders a LOUD degraded line when reads were rate limited", () => {
+  // Fail-closed's whole point is that the suppression is visible: a run that
+  // emitted zero entries because GitHub throttled it must not render identically
+  // to an idle one — that is the #1758 misdiagnosis in a new costume, and here it
+  // would be hiding a state in which a duplicate PR was NARROWLY avoided.
+  //
+  // NEGATIVE CONTROL: drop the `rateLimitedN > 0` push and the assertion below
+  // fails while every other line still renders — proving this line is the only
+  // durable trace of the degradation.
+  const degraded = buildAutofixRunRecordBody({
+    timestampIso: "2026-07-19T08:30:00Z",
+    trigger: "schedule",
+    disposition: "degraded-rate-limited",
+    candidates: 0,
+    rateLimited: 3,
+  });
+  assert(
+    degraded.includes("**DEGRADED (rate limited):** 3 gh read(s)"),
+    `degraded line renders with its count, got: ${degraded}`,
+  );
+  assert(
+    degraded.includes("0 entries emitted"),
+    "the degraded line must state that selection was suppressed",
+  );
+  const clean = buildAutofixRunRecordBody({
+    timestampIso: "2026-07-19T08:30:00Z",
+    trigger: "schedule",
+    disposition: "active",
+    candidates: 2,
+    rateLimited: 0,
+  });
+  assert(
+    !clean.includes("DEGRADED"),
+    "the steady state carries no degraded line",
+  );
+});
+
 process.stdout.write(`\n${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exitCode = 1;
