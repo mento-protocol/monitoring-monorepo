@@ -805,6 +805,28 @@ gate_drain_capture=""
 # starts, so each process is recorded as it is discovered.
 gate_drain_capture_file=""
 
+# Recorded in place of a start time on a host that cannot produce one at all —
+# a sandbox without `ps`. It has to be distinguishable from an empty identity,
+# because the two mean opposite things: this one says "nobody here can be
+# identified, the tag is the only selector", while an empty one says "this
+# particular read failed", and reads that fail must never authorise a signal.
+gate_lock_identity_unavailable="<no-identity-source>"
+gate_lock_identity_source=""
+
+# Can this host identify processes at all? Asked about our own PID, which is
+# alive by construction, so an empty answer means the source is missing rather
+# than the process being gone. Cached: the answer cannot change mid-run.
+gate_lock_identity_source_available() {
+  if [[ -z "$gate_lock_identity_source" ]]; then
+    if [[ -n "$(gate_lock_process_start $$)" ]]; then
+      gate_lock_identity_source="yes"
+    else
+      gate_lock_identity_source="no"
+    fi
+  fi
+  [[ "$gate_lock_identity_source" == "yes" ]]
+}
+
 # The captured tree is obligation-evidence too, and the same rule applies to it
 # as to the condemned token: the moment the first signal goes out, this process
 # is the only one that knows what it was about to kill. Written down before
@@ -822,11 +844,22 @@ gate_drain_capture_file=""
 # before the first signal, anything already signalled is already on disk.
 capture_process_tree() {
   local root_pid="$1"
-  local child entry
+  local child entry start
   for child in $(pgrep -P "$root_pid" 2>/dev/null || true); do
     capture_process_tree "$child"
   done
-  entry="${root_pid}|$(gate_lock_process_start "$root_pid")"
+  start="$(gate_lock_process_start "$root_pid")"
+  if [[ -z "$start" ]]; then
+    if gate_lock_identity_source_available; then
+      # The walk saw it, the identity read did not: it exited in between. A
+      # process that is already gone is nothing to signal and nothing to wait
+      # for, and recording it without an identity would later authorise a
+      # signal at whatever inherits its PID.
+      return 0
+    fi
+    start="$gate_lock_identity_unavailable"
+  fi
+  entry="${root_pid}|${start}"
   gate_drain_capture="${gate_drain_capture}${entry}
 "
   # One `printf` of a short line through an append-mode descriptor is a single
@@ -838,7 +871,7 @@ capture_process_tree() {
 
 drain_condemned_run_commands() {
   local token="$1"
-  local wrapper entry pid recorded current alive recycled captured_file
+  local wrapper entry pid recorded current alive recycled unverified captured_file
   local waited=0
   local announced=0
   local escalated=0
@@ -888,6 +921,7 @@ drain_condemned_run_commands() {
 
   while :; do
     alive=""
+    unverified=""
     while IFS='|' read -r pid recorded; do
       [[ -n "$pid" ]] || continue
       # Only signal something that reads as a PID. Appends are single short
@@ -897,10 +931,31 @@ drain_condemned_run_commands() {
       # survivor the tag scan would find anyway.
       [[ "$pid" =~ ^[0-9]+$ ]] || continue
       kill -0 "$pid" 2>/dev/null || continue
+      if [[ "$recorded" == "$gate_lock_identity_unavailable" ]]; then
+        # This host cannot identify processes at all, so the tag that led us
+        # to this tree is the only selector there is. Signalling on PID alone
+        # is the pre-identity behaviour, kept only where nothing better exists.
+        alive="${alive}${pid} "
+        continue
+      fi
       current="$(gate_lock_process_start "$pid")"
-      if [[ -n "$recorded" && -n "$current" && "$current" != "$recorded" ]]; then
+      if [[ -z "$recorded" || -z "$current" ]]; then
+        # An identity we cannot read is not an identity that matches. Empty
+        # must mean "cannot verify, never signal" — read as "matches anything"
+        # it would authorise killing whatever inherited this PID. It still
+        # counts as outstanding, so the drain keeps waiting on it rather than
+        # calling the run clear, and fails closed at the bound if it persists.
+        case " ${unverified} " in
+          *" ${pid} "*) : ;;
+          *) unverified="${unverified}${pid} " ;;
+        esac
+        continue
+      fi
+      if [[ "$current" != "$recorded" ]]; then
         # The PID exists but is somebody else now. Signalling it would be
         # killing a stranger's process, so it is left alone and named below.
+        # Nothing of the dead run survives under it, so it does not hold the
+        # drain open either.
         case " ${recycled} " in
           *" ${pid} "*) : ;;
           *) recycled="${recycled}${pid} " ;;
@@ -912,12 +967,17 @@ drain_condemned_run_commands() {
 $gate_drain_capture
 EOF
 
-    [[ -n "$alive" ]] || break
+    # Unverifiable entries keep the drain open even though nothing is sent to
+    # them: "we could not check" is not "it is gone".
+    [[ -n "$alive" || -n "$unverified" ]] || break
 
     if [[ "$waited" -ge "$gate_lock_orphan_drain_bound_seconds" ]]; then
       # Refusing to run is the whole point: proceeding here is exactly the
       # cross-run overlap the lock exists to prevent.
-      echo "error: commands from the previous run are still alive after ${waited}s: ${alive}" >&2
+      [[ -z "$alive" ]] ||
+        echo "error: commands from the previous run are still alive after ${waited}s: ${alive}" >&2
+      [[ -z "$unverified" ]] ||
+        echo "error: processes from the previous run could not be identified after ${waited}s, so none were signalled: ${unverified}" >&2
       echo "Nothing has been executed. Investigate those processes, then re-run." >&2
       exit 2
     fi

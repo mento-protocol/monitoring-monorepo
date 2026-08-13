@@ -228,6 +228,25 @@ the PID was reused and the lock is stale. Where no start time is available on
 either side — a sandbox without `ps`, a lock written by an older gate — this
 falls back to PID existence, which errs toward waiting rather than evicting.
 
+**An identity that cannot be read is not an identity that matches**, and which
+way "cannot read" should fall depends on what the answer authorises. Three
+places ask whether a PID is still the process that recorded itself — the wait
+loop's verdict, the re-read after a reclaim wins a record, and remnant
+evaluation — and for all three the conservative answer is _live_, because it
+means leave the lock alone. The drain asks the opposite question: not "may I
+leave this alone" but "may I kill this". There an unreadable identity must mean
+**never signal**, or an entry recorded without one would authorise killing
+whatever inherited its PID. So the drain signals only when the recorded and
+current identities are both present and equal; an entry it cannot verify is
+skipped, named, and still counts as outstanding, so the drain keeps waiting on
+it and fails closed at the bound rather than calling the run clear. That trade
+is deliberate — an orphan whose identity read keeps failing is never killed and
+holds the gate at exit 2 instead, because a run that refuses to start is
+recoverable and a stranger's killed process is not. A capture drops entries
+whose identity read came back empty, since the process was already gone, and a
+host with no identity source at all records `<no-identity-source>` — the one
+case that still signals on PID alone, because nothing better exists there.
+
 A killed holder cannot release its own lock, so recovery is explicit rather
 than time-based: a waiter that finds the recorded holder gone takes the record
 away and claims. `kill -9` on a gate run therefore costs the next run one line

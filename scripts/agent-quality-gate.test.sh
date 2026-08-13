@@ -5794,6 +5794,47 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   done
   rm -rf "$gate_race_root/run.lock"
 
+  # An identity that cannot be read is not an identity that matches. A capture
+  # records an empty start time when the process exits between the tree walk
+  # and the identity read, and treating that as "matches anything" would
+  # authorise signalling whatever holds the PID now. The bystander below
+  # survives TERM and writes down that it was signalled, so the evidence
+  # survives either outcome.
+  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned"
+  rm -f "$gate_race_root"/captured.*
+  race_receipt="$gate_race_out/bystander-receipt"
+  : > "$race_receipt"
+  bash -c 'trap "printf TERMED >> \"$1\"" TERM; for _ in $(seq 1 60); do sleep 1; done' _ "$race_receipt" &
+  race_bystander=$!
+  sleep 1
+  kill -0 "$race_bystander" 2>/dev/null ||
+    fail "the empty-identity case needs its bystander alive"
+  race_fake_token="fixture-empty-identity-$$"
+  mkdir -p "$gate_race_root/run.lock"
+  printf '%s\n' "$race_fake_token" > "$gate_race_root/condemned"
+  printf '%s|\n' "$race_bystander" > "$gate_race_root/captured.${race_fake_token}"
+  AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+    AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    AGENT_QUALITY_GATE_LOCK_ORPHAN_DRAIN_SECONDS=4 \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 30 \
+    > "$gate_race_out/empty-identity.out" 2>&1 && race_empty_exit=0 || race_empty_exit=$?
+  [[ ! -s "$race_receipt" ]] ||
+    fail "a process whose recorded identity is empty must never be signalled"
+  kill -0 "$race_bystander" 2>/dev/null ||
+    fail "a process whose recorded identity is empty must never be killed"
+  [[ "$race_empty_exit" == "2" ]] ||
+    fail "an unverifiable process must hold the drain and fail closed, got exit ${race_empty_exit}"
+  grep -q "could not be identified" "$gate_race_out/empty-identity.out" ||
+    fail "failing closed on an unverifiable process must say so"
+  kill -9 "$race_bystander" 2>/dev/null || true
+  wait "$race_bystander" 2>/dev/null || true
+  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned"
+  rm -f "$gate_race_root"/captured.*
+
   # Crash-point sweep. Every boundary where this path creates, links, renames
   # or removes something is a place a SIGKILL can land, and each of the rounds
   # of review on this PR found one of them. The gate names those boundaries so
