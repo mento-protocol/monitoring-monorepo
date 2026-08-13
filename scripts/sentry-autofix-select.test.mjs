@@ -11,6 +11,7 @@ import {
 import {
   AUTOFIX_SELECT_LABEL,
   isOwnHeadPr,
+  listHandledShortIds,
   LOCAL_SENTRY_PROJECT,
   MAX_HANDLED_ID_QUERIES,
   openAutofixPrExists,
@@ -173,6 +174,7 @@ function makeRunGh({
   handled = [],
   repo = "o/r",
   openPrError = null,
+  handledLookupErrorIds = [],
 } = {}) {
   const owner = repo.split("/")[0];
   const calls = [];
@@ -253,6 +255,18 @@ function makeRunGh({
       const titleProbe = /"([^"]+)"\s+in:title/.exec(search);
       if (titleProbe) {
         const qid = titleProbe[1].toUpperCase();
+        // Model a transient GitHub/subprocess failure on ONE id's lookup: the
+        // per-id read must fail SOFT (that id treated as not-handled) rather than
+        // reject the whole call and abort the select job.
+        if (
+          handledLookupErrorIds
+            .map((x) => String(x).toUpperCase())
+            .includes(qid)
+        ) {
+          throw new Error(
+            `gh issue list "${qid}" in:title failed with exit 1: API rate limit exceeded`,
+          );
+        }
         return JSON.stringify(
           handledStubs
             .filter((h) => String(h.matchTitleFor).toUpperCase() === qid)
@@ -1842,6 +1856,33 @@ function worstCaseWindow() {
   return stubs;
 }
 
+/**
+ * `n` filler candidates whose declared duplicate_of ids number EXACTLY `n*5`
+ * distinct local ids (MAX_DUPLICATE_LOOKUPS each), and which are handled by
+ * NOBODY — so the initial declared-id pass spends `n*5` lookups with ZERO
+ * overflow of its own. Used to drive the shared handled budget to exactly
+ * MAX_HANDLED_ID_QUERIES (remaining 0, overflow 0) before a later recheck, so any
+ * overflow the assertion sees comes ONLY from the zero-capacity recheck. Created
+ * newer than a fixed anchor so a chosen finalist can still be the oldest stub.
+ */
+function budgetFillerStubs(n) {
+  const stubs = [];
+  for (let i = 0; i < n; i += 1) {
+    const declares = [0, 1, 2, 3, 4].map(
+      (j) => `ANALYTICS-MENTO-ORG-BF${i}${j}`,
+    );
+    stubs.push(
+      familyStub(
+        600 + i,
+        `ANALYTICS-MENTO-ORG-BC${i}`,
+        `2026-07-05T00:${String(i).padStart(2, "0")}:00Z`,
+        declares,
+      ),
+    );
+  }
+  return stubs;
+}
+
 function reverseSearchCount(calls) {
   return calls.filter(
     (c) =>
@@ -2034,6 +2075,100 @@ await test("run record surfaces the reverse-probe and handled-id budget truncati
   assert(
     truncations.reverseNonconvergent === false,
     "this window converges, so the non-convergence flag stays false",
+  );
+});
+
+await test("listHandledShortIds fails SOFT per id: one lookup throwing keeps the others resolving (never rejects the call)", async () => {
+  // The per-id `in:title` await used to be uncaught, so one transient gh failure
+  // rejected the whole call and aborted the select job under `set -euo pipefail`
+  // — breaking "select ALWAYS emits a valid JSON array, never fails". Now each id
+  // fails soft (like the reverse `in:comments` probe): the failing id is treated
+  // as NOT handled and every other id still resolves.
+  //
+  // NEGATIVE CONTROL: remove the try/catch around the per-id `runGh` in
+  // listHandledShortIds and this `await` rejects — the test throws instead of
+  // returning, proving the catch is what preserves the never-fails invariant.
+  const { runGh } = makeRunGh({
+    handled: [{ shortId: "ANALYTICS-MENTO-ORG-3F", label: FIX_REFUSED_LABEL }],
+    handledLookupErrorIds: ["ANALYTICS-MENTO-ORG-2E"],
+  });
+  const handled = await listHandledShortIds(runGh, "o/r", [
+    "ANALYTICS-MENTO-ORG-2E", // its in:title lookup throws
+    "ANALYTICS-MENTO-ORG-3F", // handled (fix-refused) — resolved AFTER the throw
+    "ANALYTICS-MENTO-ORG-4G", // not handled
+  ]);
+  assert(Array.isArray(handled), "returns a valid array, never rejects");
+  assert(
+    !handled.includes("ANALYTICS-MENTO-ORG-2E"),
+    "the throwing id is treated as not-handled (fails toward MORE candidates)",
+  );
+  assert(
+    handled.includes("ANALYTICS-MENTO-ORG-3F"),
+    "a handled sibling after the failing id still resolves",
+  );
+});
+
+await test("a recheck at an EXHAUSTED handled budget surfaces overflow, never a silent truncation", async () => {
+  // Budget-exhausted variant of the hub topology. 40 distinct declared ids spend
+  // the whole MAX_HANDLED_ID_QUERIES budget in the initial pass (overflow 0,
+  // remaining 0). Then finalist P (oldest, declares nothing) is reverse-probed
+  // and admits a NONTERMINAL hub H that declares both P and a terminal sibling Q;
+  // Q joins P's family and enters the recheck at ZERO remaining capacity. The
+  // recheck cannot look Q up, but it MUST record the overflow so the un-run
+  // recheck surfaces on the run record. The pre-fix `&& remaining > 0` guard
+  // skipped the recheck entirely — leaving Q's marker unread, redundantly
+  // selecting P, and reporting overflow 0: a silent truncation.
+  //
+  // NEGATIVE CONTROL: restore the `&& handledBudget.remaining > 0` guard in
+  // resolveFamilies and handledOverflow drops to 0 while P is still selected —
+  // the exact silent truncation this asserts against.
+  const P = stub({
+    number: 700,
+    shortId: "ANALYTICS-MENTO-ORG-PP",
+    createdAt: "2026-07-01T00:00:00Z", // OLDEST -> finalist #1, so P is reverse-probed
+  });
+  const fillers = budgetFillerStubs(MAX_HANDLED_ID_QUERIES / 5); // 8 x 5 = 40 declared
+  const { runGh, calls } = makeRunGh({
+    stubs: [P, ...fillers],
+    handled: [
+      {
+        // Nonterminal connector hub: carries the verdict label, NOT a terminal
+        // marker, so it contributes edges only (never a blocker itself).
+        shortId: "ANALYTICS-MENTO-ORG-HH",
+        label: AUTOFIX_SELECT_LABEL,
+        declares: ["ANALYTICS-MENTO-ORG-PP", "ANALYTICS-MENTO-ORG-QQ"],
+      },
+      {
+        // The terminal blocker, reachable only through the hub's OTHER edge, so
+        // only a title recheck on Q's own id could read its marker.
+        shortId: "ANALYTICS-MENTO-ORG-QQ",
+        label: FIX_REFUSED_LABEL,
+        declares: [],
+      },
+    ],
+  });
+  const { entries, truncations } = await selectAutofixRun(
+    { repo: "o/r", cap: 2 },
+    { runGh },
+  );
+  // The declared pass alone spent the whole handled budget (40 distinct ids), so
+  // the Q recheck runs at zero remaining capacity.
+  assertEqual(
+    titleSearchCount(calls),
+    MAX_HANDLED_ID_QUERIES,
+    `the declared pass must spend the whole handled budget, got ${titleSearchCount(calls)}`,
+  );
+  // The surfacing the fix exists for: the un-run recheck is recorded, not silent.
+  assert(
+    truncations.handledOverflow > 0,
+    `a recheck at exhausted budget must surface as overflow, got ${truncations.handledOverflow}`,
+  );
+  // Q's marker was unreadable at zero budget, so P is still (redundantly)
+  // selected — which is why surfacing the truncation matters: a bounded,
+  // self-terminating re-attempt must not read as a healthy run.
+  assert(
+    entries.some((e) => e.shortId === "ANALYTICS-MENTO-ORG-PP"),
+    "P is still selected (the redundant attempt), so the truncation must be surfaced",
   );
 });
 
