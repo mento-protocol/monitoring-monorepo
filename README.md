@@ -269,6 +269,8 @@ Create `indexer-envio/.env` from `indexer-envio/.env.example`:
 | `HASURA_UPSTREAM_URL_CELO_MAINNET_LOCAL`   | Optional upstream URL override for local mainnet Hasura proxy (default `http://localhost:8080/v1/graphql`) |
 | `UPSTASH_REDIS_REST_URL`                   | Address labels storage (Upstash Redis)                                                                     |
 | `UPSTASH_REDIS_REST_TOKEN`                 | Address labels Redis auth token                                                                            |
+| `GRAFANA_QUERY_URL`                        | Server-only Grafana Cloud origin for peg history and alert state history (Terraform-managed)               |
+| `GRAFANA_QUERY_TOKEN`                      | Server-only Grafana Viewer service-account token for those reads (Terraform-managed)                       |
 | `AUTH_SECRET`                              | Auth.js JWT secret; required for local simulated login and real OAuth sessions                             |
 | `AUTH_GOOGLE_ID`                           | Google OAuth client id; non-empty placeholder is enough for local simulated login                          |
 | `AUTH_GOOGLE_SECRET`                       | Google OAuth client secret; non-empty placeholder is enough for local simulated login                      |

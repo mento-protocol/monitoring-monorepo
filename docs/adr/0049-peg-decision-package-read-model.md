@@ -3,7 +3,7 @@ title: Peg decisions use a bounded Metrics Bridge read model
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-24
+last_verified: 2026-08-13
 scope: metrics-bridge / ui-dashboard
 date: 2026-07
 doc_type: adr
@@ -13,7 +13,10 @@ garden_lane: adrs-architecture
 
 # ADR 0049 — Peg decisions use a bounded Metrics Bridge read model
 
-**Status:** Accepted (Jul 2026). **Scope:** metrics-bridge / ui-dashboard.
+**Status:** Accepted (Jul 2026), in force for current-state evidence. Amended by
+[ADR 0063](0063-dashboard-grafana-history-read-access.md), which routes
+historical series and alert state history to Grafana Cloud.
+**Scope:** metrics-bridge / ui-dashboard.
 
 ## Context
 
@@ -79,6 +82,21 @@ increments only on authoritative `absent`, resets on authoritative `listed` or
   a second observation path with different timing and failure semantics.
 - **Persist unbounded history in the bridge** — current incident evidence does
   not justify a second datastore or a history-retention contract.
+
+## Amendment — ADR 0063
+
+The bounded current-state read model stands unchanged, and the decision package
+remains the only input to the current-state board. "Query Grafana or providers
+from the dashboard" was rejected above for _current_ evidence, where a second
+observation path changes timing and failure semantics.
+[ADR 0063](0063-dashboard-grafana-history-read-access.md) narrows that rejection
+to what it was always about. Historical deviation series and alert state history
+are read from Grafana Cloud, the store this ADR already names authoritative for
+duration, coverage, and pending/firing state, through a dedicated Viewer-role
+service account token that the `platform` stack mints and delivers to the
+dashboard as server-only environment variables. Those reads live in an isolated
+failure domain: when history is unavailable the current-state board still
+renders from the decision package.
 
 ## Consequences
 

@@ -17,14 +17,14 @@ garden_lane: agent-entry-points
 ## Scope
 
 `terraform/` is the `platform` stack registered in `terraform.stacks.json`. It
-manages the monitoring dashboard, Upstash, the monitoring GCP project and APIs,
-private Peg-policy storage, Metrics Bridge Cloud Run shape, Aegis App
-Engine/Grafana Alloy bootstrap, deploy source buckets, the separated
-Terraform/service-deploy Workload Identity Federation chains, and repo-level
-GitHub Actions secrets and variables. Alerts live elsewhere: `alerts/rules/`
-owns protocol and Aegis Grafana rules plus global routing, `alerts/infra/` owns
-event-driven delivery, and `aegis/terraform/` owns the Aegis dashboard and
-folder.
+manages the monitoring dashboard, the dashboard's read-only Grafana service
+account and token, Upstash, the monitoring GCP project and APIs, private
+Peg-policy storage, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana
+Alloy bootstrap, deploy source buckets, the separated Terraform/service-deploy
+Workload Identity Federation chains, and repo-level GitHub Actions secrets and
+variables. Alerts live elsewhere: `alerts/rules/` owns protocol and Aegis
+Grafana rules plus global routing, `alerts/infra/` owns event-driven delivery,
+and `aegis/terraform/` owns the Aegis dashboard and folder.
 
 Alloy values are sensitive, ephemeral operator inputs that terminate at Google
 provider 6.50.x write-only Secret Manager arguments; only their rotation
@@ -133,6 +133,12 @@ image pull depend on the exact boundaries.
   [`docs/terraform.md`](../docs/terraform.md),
   [ADR 0054](../docs/adr/0054-same-project-peg-policy-artifact.md), and
   [ADR 0055](../docs/adr/0055-peg-policy-bucket-controller-recovery.md).
+- The Grafana provider here mints only the dashboard's read-only identity in
+  `grafana-read-access.tf`. Keep it on `Viewer`, add no Grafana rules or
+  dashboards, keep the Admin `grafana_provisioning_token` out of every secret
+  sink, and rotate the minted token by counter plus redeploy — never
+  `-replace`, never the console, and never apply without the redeploy.
+  [ADR 0063](../docs/adr/0063-dashboard-grafana-history-read-access.md).
 - Access logs are audit telemetry, never an authorization control.
 
 ## Verification

@@ -189,6 +189,28 @@ upstash_api_key = "..."
 # arkham_api_key — leave empty until provisioned.
 # dune_api_key = "..."
 
+# ── Grafana Cloud ─────────────────────────────────────────────────────────────
+# Admin-role service account token for the Grafana Cloud stack — the SAME
+# organization credential `alerts/rules` and `aegis` take as
+# `grafana_service_account_token`. Create / rotate at:
+#   Grafana Cloud → Administration → Service accounts → Add token.
+# Required: this stack's Grafana provider mints the dashboard's read-only Viewer
+# identity (`grafana-read-access.tf`) with it. It configures the provider and
+# nothing else — it is never written to a Vercel env var, a GitHub secret, or
+# Secret Manager. The Viewer token Terraform creates is what reaches the
+# dashboard; never paste this Admin token there.
+grafana_provisioning_token = "glsa_REPLACE_ME"
+
+# Stack URL — default is already set in variables.tf; override only if it moves.
+# Also becomes the dashboard's GRAFANA_QUERY_URL.
+# grafana_url = "https://clabsmento.grafana.net"
+
+# Non-secret rotation counter for the dashboard's Viewer token. Start at 1 for
+# the first approved apply. Increment it to mint a replacement token and push it
+# to Vercel in the same apply — the platform argument allowlist rejects
+# `-replace`, so this counter is the only rotation path.
+# grafana_dashboard_reader_token_rotation_counter = 1
+
 # ── Google Cloud (metrics-bridge) ─────────────────────────────────────────────
 # Find with: gcloud organizations list
 gcp_org_id = "..."
