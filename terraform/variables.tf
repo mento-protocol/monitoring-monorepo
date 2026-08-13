@@ -431,6 +431,56 @@ variable "dune_api_key" {
   default     = ""
 }
 
+# ── Grafana Cloud ─────────────────────────────────────────────────────────────
+
+variable "grafana_url" {
+  description = "Grafana Cloud stack URL. Also the origin the dashboard queries for peg history and alert state history (GRAFANA_QUERY_URL)."
+  type        = string
+  default     = "https://clabsmento.grafana.net"
+
+  validation {
+    condition     = startswith(var.grafana_url, "https://")
+    error_message = "grafana_url must be an HTTPS origin; the dashboard sends a bearer token to it."
+  }
+}
+
+variable "grafana_provisioning_token" {
+  description = <<-EOT
+    Admin-role Grafana Cloud service account token (glsa_...) used ONLY to
+    configure this stack's Grafana provider, which mints the read-only
+    dashboard identity in `grafana-read-access.tf`. Same organization
+    credential the `alerts/rules` and `aegis` stacks take as
+    `grafana_service_account_token`; the name differs here so it cannot be
+    confused with the Viewer token this stack creates and ships to Vercel.
+    Set in the gitignored terraform.tfvars. It is never written to a Vercel
+    environment variable, a GitHub secret, or Secret Manager.
+    Rotate from Grafana Cloud → Administration → Service accounts.
+  EOT
+  type        = string
+  sensitive   = true
+}
+
+variable "grafana_dashboard_reader_token_rotation_counter" {
+  description = <<-EOT
+    Reviewed non-secret rotation counter for
+    `grafana_service_account_token.dashboard_reader`. Start at 1; increment it
+    through an approved current-main plan/apply to mint a replacement token and
+    write it to the Vercel project, THEN redeploy the dashboard so an active
+    deployment stops presenting the revoked token — the apply alone leaves
+    history failing, exactly as documented for auth_secret_prev. This is the
+    only rotation path: `scripts/tf-platform-plan-guard.mjs` rejects every
+    platform Terraform argument outside its allowlist, so `-replace` is
+    unavailable.
+  EOT
+  type        = number
+  default     = 1
+
+  validation {
+    condition     = var.grafana_dashboard_reader_token_rotation_counter >= 1 && var.grafana_dashboard_reader_token_rotation_counter == floor(var.grafana_dashboard_reader_token_rotation_counter)
+    error_message = "grafana_dashboard_reader_token_rotation_counter must be a positive integer."
+  }
+}
+
 # ── Google Cloud (metrics-bridge) ─────────────────────────────────────────────
 
 variable "terraform_service_account" {

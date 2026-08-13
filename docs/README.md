@@ -189,6 +189,7 @@ Authority: canonical
 - [`docs/adr/0060-upstash-management-key-bootstrap.md`](adr/0060-upstash-management-key-bootstrap.md) — Upstash management API keys use a human-owned bootstrap integration
 - [`docs/adr/0061-exact-plan-guard-for-manual-platform-applies.md`](adr/0061-exact-plan-guard-for-manual-platform-applies.md) — Manual platform applies use an exact private plan guard
 - [`docs/adr/0062-sentry-suites-self-run-gate.md`](adr/0062-sentry-suites-self-run-gate.md) — An unconditional gate job runs the Sentry suites and proves from their output that they asserted
+- [`docs/adr/0063-dashboard-grafana-history-read-access.md`](adr/0063-dashboard-grafana-history-read-access.md) — Peg history reads Grafana Cloud through a dedicated read-only token
 
 Authority: non-canonical
 

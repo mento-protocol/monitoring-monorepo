@@ -384,7 +384,8 @@ The project is named `monitoring-dashboard` and lives at [monitoring.mento.org](
 Terraform stack ownership is registered in [`terraform.stacks.json`](../terraform.stacks.json) and summarized in [`docs/terraform.md`](./terraform.md). The dashboard/platform stack lives in [`terraform/`](../terraform/). The team-level Vercel Blob store is managed through Vercel Storage and linked to the project outside Terraform. The platform stack covers:
 
 - Vercel project creation and configuration (`root_directory`, Git integration)
-- All Terraform-managed environment variables (Hasura URLs, Upstash Redis credentials)
+- All Terraform-managed environment variables (Hasura URLs, Upstash Redis credentials, Grafana history read access)
+- The dashboard's read-only Grafana service account and token (`grafana-read-access.tf`); alert rules, folders, and Grafana dashboards stay in `alerts/rules` and `aegis/terraform`
 - Custom domain (`monitoring.mento.org`)
 - Upstash Redis database (dashboard-managed labels, reports, intelligence, and
   integration state)
@@ -441,6 +442,8 @@ document the source of truth here, and wait for a human-approved plan/apply.
 | `NEXT_PUBLIC_SHOW_TESTNET_NETWORKS`   | `terraform.tfvars`       | Optional `true` flag that exposes hosted testnet networks             |
 | `UPSTASH_REDIS_REST_URL`              | Terraform output         | Dashboard-managed Redis — auto-set from DB                            |
 | `UPSTASH_REDIS_REST_TOKEN`            | Terraform output         | Dashboard-managed Redis token — auto-set                              |
+| `GRAFANA_QUERY_URL`                   | `terraform.tfvars`       | Server-only Grafana Cloud origin for peg history and alert history    |
+| `GRAFANA_QUERY_TOKEN`                 | Terraform output         | Server-only Grafana Viewer token — auto-set from the minted token     |
 | `BLOB_STORE_ID`                       | Vercel store integration | Blob OIDC store id for backup and restore routes                      |
 | `BLOB_WEBHOOK_PUBLIC_KEY`             | Vercel store integration | Blob OIDC public key for the connected store                          |
 
@@ -449,6 +452,29 @@ Terraform derives `METRICS_BRIDGE_URL` from
 plan and apply own the Vercel environment update, and the dashboard deployment
 workflow owns the deployment that consumes it. The checked-in resource alone
 does not activate the proxy in production.
+
+`GRAFANA_QUERY_TOKEN` is the Viewer-role service-account token the platform
+stack mints in `terraform/grafana-read-access.tf`; the same apply pushes it to
+Vercel. It is separate from the Admin token that provisions Grafana — never
+paste the provisioning token here, and never rotate either one with a CLI or the
+Grafana console.
+[ADR 0063](adr/0063-dashboard-grafana-history-read-access.md) owns the boundary:
+current-state peg evidence keeps coming from the Metrics Bridge decision
+package, and only history reads use this credential.
+
+Rotating it takes an apply **and** a redeploy, in that order:
+
+1. Increment `grafana_dashboard_reader_token_rotation_counter` in the operator's
+   gitignored `terraform/terraform.tfvars`.
+2. Run the ordinary approved `pnpm infra:plan` → `pnpm infra:apply` path. The
+   platform argument allowlist rejects `-replace`, so the counter is the only
+   trigger. This revokes the old token and writes the new one to the project.
+3. Redeploy the dashboard. Until a deployment is created after step 2, the
+   running one still holds the revoked token and every history read fails — the
+   same reason `auth_secret_prev` requires a redeploy on both ends of its
+   window. Peg current state is unaffected; only the history endpoints degrade.
+
+Skipping step 3 leaves history broken indefinitely, not until the next apply.
 
 ### Aggregator Integration Probes
 
