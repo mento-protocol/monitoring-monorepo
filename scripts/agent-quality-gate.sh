@@ -636,7 +636,17 @@ gate_run_ensure_marker() {
   local marker
   [[ -z "$gate_run_marker_file" ]] || return 0
   marker="$(gate_run_marker_path)" || return 0
-  printf '%s\n' "$gate_lock_token" > "$marker" 2>/dev/null || return 0
+  # Fail closed, not best-effort. On a host without /proc this marker's
+  # inherited descriptor is the only durable handle to a command that forks a
+  # replacement and exits, so starting the command without it would quietly
+  # forfeit the discovery the drain depends on. Same rule as the obligation
+  # files: stop before the act, while stopping is still safe.
+  if ! printf '%s\n' "$gate_lock_token" > "$marker" 2>/dev/null; then
+    echo "error: could not write the run marker at ${marker}." >&2
+    echo "Without it, a command that outlives a killed gate cannot be found by the next run." >&2
+    echo "Nothing has been executed. Fix that path — permissions, or free space — then re-run." >&2
+    exit 2
+  fi
   gate_run_marker_file="$marker"
 }
 
@@ -4347,6 +4357,12 @@ fi
 # something: a dry run, a fresh-stamp skip, and a package-script refusal all
 # exit above without ever competing for the machine.
 acquire_gate_run_lock
+# The run marker is written here, while the gate's own stderr is still live
+# and the exit is unambiguously the gate's: inside run_with_timeout the
+# per-command capture would swallow the message, and a parallel worker's exit
+# is not the run's. Failing here also means failing before ANY command, which
+# is the whole point.
+gate_run_ensure_marker
 # Test-only: widens the gap between holding the lock and checking we still do,
 # which is otherwise as short as the mapping work between them.
 gate_lock_test_delay "${AGENT_QUALITY_GATE_LOCK_HELD_DELAY_SECONDS:-}"
@@ -4568,7 +4584,16 @@ run_with_timeout() {
   gate_run_ensure_marker
   AGENTQG_RUN="$(gate_run_command_tag)" \
     bash -c '
-      if [[ -n "$2" && -r "$2" ]]; then exec 9< "$2"; fi
+      if [[ -n "$2" ]]; then
+        # A marker this wrapper was given but cannot hold open is a refusal,
+        # not a shrug: without the descriptor, a replacement this command
+        # forks is invisible to the next run.
+        if [[ ! -r "$2" ]]; then
+          echo "error: cannot open the run marker $2; refusing to start the command" >&2
+          exit 127
+        fi
+        exec 9< "$2"
+      fi
       eval "$1"
       exit $?
     ' "$(gate_run_command_tag)" "$command" "$gate_run_marker_file" &

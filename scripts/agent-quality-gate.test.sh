@@ -6132,6 +6132,42 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     fail "the record naming those commands must survive a failed obligation write"
   rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
 
+  # The run marker is the inherited-descriptor handle a fork-and-exit
+  # replacement is found by on hosts without /proc. A run that cannot write it
+  # must stop before its first command rather than quietly forfeit that
+  # discovery. The claim delay opens a deterministic window: run.lock exists,
+  # the claim writes inside it, and only the marker needs the root itself.
+  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
+  rm -f "$gate_race_root"/captured.* "$gate_race_root"/holder.*
+  : > "$gate_race_log"
+  AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    AGENT_QUALITY_GATE_LOCK_CLAIM_DELAY_SECONDS=3 \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 20 \
+    > "$gate_race_out/unwritable-marker.out" 2>&1 &
+  race_marker_wrapper=$!
+  race_waited=0
+  while [[ ! -d "$gate_race_root/run.lock" && "$race_waited" -lt 60 ]]; do
+    sleep 0.2
+    race_waited=$((race_waited + 1))
+  done
+  [[ -d "$gate_race_root/run.lock" ]] ||
+    fail "the unwritable-marker case never saw the lock claimed"
+  chmod 555 "$gate_race_root"
+  wait "$race_marker_wrapper" 2>/dev/null && race_marker_exit=0 || race_marker_exit=$?
+  chmod 755 "$gate_race_root" 2>/dev/null || true
+  [[ "$race_marker_exit" -ne 0 ]] ||
+    fail "a run that cannot write its marker must fail closed, got exit 0"
+  grep -q "could not write the run marker" "$gate_race_out/unwritable-marker.out" ||
+    fail "failing closed on an unwritable marker must say so"
+  [[ -z "$(awk '/^enter/ { print $2; exit }' "$gate_race_log")" ]] ||
+    fail "a run that could not write its marker executed a mapped command anyway"
+  rm -rf "$gate_race_root/run.lock"
+  rm -f "$gate_race_root"/holder.*
+
   # Unreadable is not empty. Both obligation files can be created by another
   # user on a shared lock root, and reading one as "nothing outstanding" is how
   # a run comes to execute beside commands it never drained.
