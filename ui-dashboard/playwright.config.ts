@@ -5,6 +5,7 @@ import { pathToFileURL } from "node:url";
 import {
   FIXTURE_DIST_DIR,
   FIXTURE_HASURA_PORT,
+  identityHealthUrl,
 } from "./scripts/fixture-constants.mjs";
 
 const nextPort = Number(process.env.PLAYWRIGHT_NEXT_PORT ?? 3210);
@@ -16,11 +17,17 @@ const nextPort = Number(process.env.PLAYWRIGHT_NEXT_PORT ?? 3210);
 const fixturePort = FIXTURE_HASURA_PORT;
 const fixtureUrl = `http://127.0.0.1:${fixturePort}`;
 const nextUrl = `http://127.0.0.1:${nextPort}`;
-// The fixture Hasura server listens on a fixed port baked into the build, so a
-// healthy one left over from a prior run (or a sibling worktree) is safe to
-// reuse rather than hard-fail on. Opt out with PLAYWRIGHT_REUSE_FIXTURE_SERVER=false.
+const fixtureServerIdentity = process.env.PLAYWRIGHT_FIXTURE_SERVER_IDENTITY;
+if (!fixtureServerIdentity) {
+  throw new Error(
+    "PLAYWRIGHT_FIXTURE_SERVER_IDENTITY is required; run pnpm test:browser",
+  );
+}
+// run-browser-tests.mjs verifies identity before enabling reuse. The qualified
+// health path also makes Playwright's own poll fail closed if a different
+// server takes the fixed port after that preflight.
 const reuseFixtureServer =
-  process.env.PLAYWRIGHT_REUSE_FIXTURE_SERVER !== "false";
+  process.env.PLAYWRIGHT_REUSE_FIXTURE_SERVER === "true";
 // Browser tests serve a production `next build` via `next start` (the runner
 // sets NEXT_DIST_DIR=.next-fixture), not a `next dev` server.
 const nextCommand =
@@ -106,7 +113,7 @@ export default defineConfig({
   webServer: [
     {
       command: `node tests/browser/fixtures/hasura-fixture-server.mjs --port ${fixturePort}`,
-      url: `${fixtureUrl}/health`,
+      url: identityHealthUrl(fixtureUrl, fixtureServerIdentity),
       reuseExistingServer: reuseFixtureServer,
       timeout: 15_000,
     },

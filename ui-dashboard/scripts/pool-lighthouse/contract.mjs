@@ -1,5 +1,6 @@
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { FIXTURE_LIGHTHOUSE_SCENARIO } from "../fixture-constants.mjs";
 
 const helperDir = dirname(fileURLToPath(import.meta.url));
 
@@ -24,7 +25,7 @@ export const defaultOutputDir = resolve(
 export const CANONICAL_POOL_PATH =
   "/pool/42220-0x462fe04b4fd719cbd04c0310365d421d02aaa19e";
 export const TARGET_QUERY = "lhci=fixture";
-export const FIXTURE_SCENARIO = "lighthouse-pool";
+export const FIXTURE_SCENARIO = FIXTURE_LIGHTHOUSE_SCENARIO;
 export const CLIENT_BREAKER_DELAY_MS = 2200;
 export const FIXTURE_GRAPHQL_DELAY_FLOOR_MS = 1700;
 export const EXPECTED_BREAKER_TEXT = "ref 1.171560 / actual 1.175000";

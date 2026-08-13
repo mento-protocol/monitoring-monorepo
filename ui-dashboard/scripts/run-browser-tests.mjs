@@ -1,12 +1,20 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
 import { createServer } from "node:net";
-import { buildFixtureApp, fixtureBuildExists } from "./fixture-build.mjs";
+import { buildFixtureApp } from "./fixture-build.mjs";
 import {
   FIXTURE_DIST_DIR,
   FIXTURE_HASURA_PORT,
   FIXTURE_HASURA_URL,
+  identityHealthUrl,
 } from "./fixture-constants.mjs";
+import {
+  currentFixtureBuildHash,
+  currentFixtureServerIdentity,
+  fixtureBuildDecision,
+  fixtureServerRuntimeOptions,
+  probeFixtureServer,
+} from "./fixture-identity.mjs";
 
 // Browser tests run against a production `next build` (fixture mode) served by
 // `next start`, never a `next dev` server. The build lives in `.next-fixture`
@@ -75,6 +83,41 @@ const browserTestEnv = {
     process.env.PLAYWRIGHT_NEXT_TIMEOUT_MS ?? "120000",
 };
 
+async function verifyFixtureServerReuse() {
+  const runtimeOptions = fixtureServerRuntimeOptions();
+  const expectedIdentity = await currentFixtureServerIdentity(runtimeOptions);
+  const healthUrl = identityHealthUrl(
+    `http://127.0.0.1:${FIXTURE_HASURA_PORT}`,
+    expectedIdentity,
+  );
+  const decision = await probeFixtureServer({
+    healthUrl,
+    expectedIdentity,
+  });
+  if (decision.action === "refuse") {
+    throw new Error(
+      `refusing fixture server on ${FIXTURE_HASURA_PORT}: ${decision.reason}; ` +
+        "stop the existing process or use its matching checkout",
+    );
+  }
+  if (
+    decision.action === "reuse" &&
+    process.env.PLAYWRIGHT_REUSE_FIXTURE_SERVER === "false"
+  ) {
+    throw new Error(
+      `fixture server on ${FIXTURE_HASURA_PORT} matches this checkout, but ` +
+        "PLAYWRIGHT_REUSE_FIXTURE_SERVER=false; stop it before running",
+    );
+  }
+  browserTestEnv.PLAYWRIGHT_FIXTURE_SERVER_IDENTITY = expectedIdentity;
+  browserTestEnv.PLAYWRIGHT_REUSE_FIXTURE_SERVER =
+    decision.action === "reuse" ? "true" : "false";
+  browserTestEnv.HASURA_FIXTURE_SCENARIO = runtimeOptions.scenario;
+  browserTestEnv.HASURA_FIXTURE_CLIENT_DELAY_MS = String(
+    runtimeOptions.clientDelayMs,
+  );
+}
+
 function runPlaywright() {
   return new Promise((resolve, reject) => {
     const child = spawn(
@@ -103,12 +146,18 @@ try {
     // here would hard-fail on that same panic before Playwright ever starts
     // the substitute command, defeating the fallback entirely.
     exitCode = 0;
-  } else if (forceRebuild || !fixtureBuildExists()) {
-    exitCode = await buildFixtureApp();
   } else {
-    exitCode = 0;
+    const fixtureBuildHash = await currentFixtureBuildHash();
+    const decision = forceRebuild
+      ? { action: "rebuild" }
+      : await fixtureBuildDecision({ expectedHash: fixtureBuildHash });
+    exitCode =
+      decision.action === "rebuild"
+        ? await buildFixtureApp({ fixtureBuildHash })
+        : 0;
   }
   if (exitCode === 0) {
+    await verifyFixtureServerReuse();
     exitCode = await runPlaywright();
   }
 } catch (error) {

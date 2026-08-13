@@ -3,14 +3,18 @@ import http from "node:http";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
+import { FIXTURE_LIGHTHOUSE_SCENARIO } from "../../../scripts/fixture-constants.mjs";
+import {
+  currentFixtureServerIdentity,
+  fixtureServerRuntimeOptions,
+} from "../../../scripts/fixture-identity.mjs";
 
 const isMain =
   process.argv[1] !== undefined &&
   resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 const DAY_SECONDS = 86_400;
 const FIXED_1 = "1000000000000000000000000";
-const DEFAULT_SCENARIO = "default";
-const LIGHTHOUSE_POOL_SCENARIO = "lighthouse-pool";
+const LIGHTHOUSE_POOL_SCENARIO = FIXTURE_LIGHTHOUSE_SCENARIO;
 const LIGHTHOUSE_POOL_REFERENCE_RATE_FEED_ID =
   "0xf4f9bbda9cd6841fcb9b1510f9269e2db42a6e3a";
 
@@ -898,11 +902,7 @@ function operationName(query) {
 }
 
 function fixtureScenario(value) {
-  const scenario = value || DEFAULT_SCENARIO;
-  if (scenario !== DEFAULT_SCENARIO && scenario !== LIGHTHOUSE_POOL_SCENARIO) {
-    throw new Error(`Unknown Hasura fixture scenario: ${scenario}`);
-  }
-  return scenario;
+  return fixtureServerRuntimeOptions({ scenario: value }).scenario;
 }
 
 function poolForScenario(pool, scenario) {
@@ -1376,25 +1376,38 @@ function sendJson(res, status, body) {
   res.end(JSON.stringify(body));
 }
 
-function parseClientDelayMs(value) {
-  const delayMs = Number(value ?? 0);
-  if (!Number.isSafeInteger(delayMs) || delayMs < 0) {
-    throw new Error(
-      `HASURA_FIXTURE_CLIENT_DELAY_MS must be a non-negative integer, got ${value}`,
-    );
-  }
-  return delayMs;
+export function fixtureHealthResponse({
+  requestedIdentity,
+  fixtureServerIdentity,
+  errorCount = 0,
+  delayedPoolBreakerCount = 0,
+}) {
+  const identityMatches =
+    requestedIdentity === null || requestedIdentity === fixtureServerIdentity;
+  return {
+    status: identityMatches ? 200 : 409,
+    body: {
+      ok: true,
+      fixtureServerIdentity,
+      errorCount,
+      delayedPoolBreakerCount,
+    },
+  };
 }
 
-function startServer(
+export async function startFixtureServer(
   port,
   {
     scenario = process.env.HASURA_FIXTURE_SCENARIO,
     clientDelayMs = process.env.HASURA_FIXTURE_CLIENT_DELAY_MS,
   } = {},
 ) {
-  const activeScenario = fixtureScenario(scenario);
-  const activeClientDelayMs = parseClientDelayMs(clientDelayMs);
+  const { scenario: activeScenario, clientDelayMs: activeClientDelayMs } =
+    fixtureServerRuntimeOptions({ scenario, clientDelayMs });
+  const fixtureServerIdentity = await currentFixtureServerIdentity({
+    scenario: activeScenario,
+    clientDelayMs: activeClientDelayMs,
+  });
   let errorCount = 0;
   let delayedPoolBreakerCount = 0;
   const server = http.createServer((req, res) => {
@@ -1402,12 +1415,22 @@ function startServer(
       sendJson(res, 204, {});
       return;
     }
-    if (req.url === "/health") {
-      sendJson(res, 200, {
-        ok: true,
+    const requestUrl = new URL(req.url ?? "/", `http://${req.headers.host}`);
+    if (
+      requestUrl.pathname === "/health" ||
+      requestUrl.pathname.startsWith("/health/")
+    ) {
+      const requestedIdentity =
+        requestUrl.pathname === "/health"
+          ? null
+          : requestUrl.pathname.slice("/health/".length);
+      const health = fixtureHealthResponse({
+        requestedIdentity,
+        fixtureServerIdentity,
         errorCount,
         delayedPoolBreakerCount,
       });
+      sendJson(res, health.status, health.body);
       return;
     }
     if (req.url !== "/graphql" || req.method !== "POST") {
@@ -1459,17 +1482,19 @@ function startServer(
     });
   });
 
-  server.listen(port, "127.0.0.1", () => {
-    process.stdout.write(
-      `Hasura fixture server listening on ${port} (${activeScenario})\n`,
-    );
+  await new Promise((resolvePromise, reject) => {
+    server.once("error", reject);
+    server.listen(port, "127.0.0.1", () => {
+      server.off("error", reject);
+      const address = server.address();
+      const activePort = typeof address === "object" ? address?.port : port;
+      process.stdout.write(
+        `Hasura fixture server listening on ${activePort} (${activeScenario})\n`,
+      );
+      resolvePromise();
+    });
   });
-
-  process.on("SIGTERM", () => {
-    server.close(() => process.exit(0));
-  });
-
-  return server;
+  return { server, fixtureServerIdentity, activeScenario, activeClientDelayMs };
 }
 
 if (isMain) {
@@ -1479,5 +1504,8 @@ if (isMain) {
     },
   });
 
-  startServer(Number(values.port));
+  const { server } = await startFixtureServer(Number(values.port));
+  process.on("SIGTERM", () => {
+    server.close(() => process.exit(0));
+  });
 }
