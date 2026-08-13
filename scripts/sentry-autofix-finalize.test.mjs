@@ -1007,11 +1007,18 @@ function verdictView(
 // answers `issue view` from them — otherwise the chokepoint's end-state
 // verification could never observe the label it just wrote. `requeueFails` makes
 // the needs-triage add fail, which is what drives the chokepoint to throw.
+// `terminalByNumber` flips a stub to a settled state for every read AFTER the
+// post-write check — modelling projection or the archive leg completing in the
+// gap before the compensating re-queue. `{ state, labels }` are merged into the
+// view the chokepoint's revalidation reads. `terminalReadFails` makes that
+// revalidation read throw instead.
 function makeBackfillRunGh({
   scopeByNumber = {},
   calls = [],
   removeFails = false,
   requeueFails = false,
+  terminalByNumber = {},
+  terminalReadFails = false,
 } = {}) {
   const reads = new Map();
   const labelsByNumber = new Map();
@@ -1056,6 +1063,26 @@ function makeBackfillRunGh({
         spec = configured[Math.min(seen, configured.length - 1)];
       }
       const live = [...labelsOf(number)];
+      // Reads 1 and 2 are the guard's pre/post pair; anything after is the
+      // re-queue chokepoint's own revalidation/verification read, which is where
+      // a stub that went terminal in the gap becomes visible.
+      const seenSoFar = reads.get(number) ?? 0;
+      const terminal = terminalByNumber[number];
+      if (terminal && seenSoFar > 2) {
+        if (terminalReadFails) {
+          throw new Error("gh issue view failed: boom");
+        }
+        return JSON.stringify({
+          number: Number(number),
+          title: "t",
+          body: "",
+          state: terminal.state ?? "CLOSED",
+          labels: [...live, ...(terminal.labels ?? [])].map((name) => ({
+            name,
+          })),
+          comments: [],
+        });
+      }
       if (spec === "error") throw new Error("gh issue view failed: boom");
       if (spec === "gone") {
         return JSON.stringify({
@@ -1313,6 +1340,14 @@ function labelEdits(calls, number) {
   return out;
 }
 
+/** True when the stub was reopened — the write a terminal-state decline must
+ * never make (it would reverse a projection or a human-approved archive). */
+function reopenedFor(calls, number) {
+  return calls.some(
+    (c) => c[0] === "issue" && c[1] === "reopen" && c[2] === String(number),
+  );
+}
+
 /** True when the re-queue chokepoint ran for this issue: it is the only caller
  * that adds `sentry:needs-triage`. */
 function requeuedFor(calls, number) {
@@ -1458,6 +1493,122 @@ await test("backfill TOCTOU: a FAILING compensating removal is surfaced, never s
   assert(
     stderr.includes("::error::") && stderr.includes("#104"),
     `expected a loud ::error:: for the stuck label, got: ${stderr}`,
+  );
+});
+
+// --- terminal-state guard on the compensating re-queue ----------------------
+//
+// The compensation is snapshot-driven too, so settlement can COMPLETE between
+// the withdrawal and the re-queue. A bookkeeping re-queue reopens the stub and
+// sheds sentry:projected / sentry:archived via REOPEN_SHED_LABELS, so running it
+// against a settled stub would reverse a successful projection or a
+// human-approved archive. Reuse the triage workflow's terminal predicate and
+// DECLINE instead — no compensation is owed once the pipeline reached the
+// outcome on its own. The hold removal still stands: the window query already
+// excludes a projected/archived stub through its own `-label:` negation, so
+// taking our stale hold off one changes nothing about selection.
+
+await test("backfill terminal guard: a stub CLOSED and projected after the withdrawal declines the re-queue", async () => {
+  const calls = [];
+  const { runGh } = makeBackfillRunGh({
+    calls,
+    scopeByNumber: {
+      201: [{ fixScope: null }, { fixScope: FIX_SCOPE_MECHANICAL }],
+    },
+    terminalByNumber: {
+      201: { state: "CLOSED", labels: ["sentry:projected"] },
+    },
+  });
+  const res = await backfillArchitecturalLabels(
+    [architecturalSkip("201")],
+    { repo: "o/r" },
+    { runGh },
+  );
+  // The stale hold still comes off — harmless on a terminal stub, and correct.
+  assertDeepEqual(res.withdrawn, ["201"]);
+  assertDeepEqual(labelEdits(calls, 201), ["add", "remove"]);
+  // Negative control: drop the `revalidate` guard and this re-queues — reopening
+  // a projected stub and shedding sentry:projected.
+  assertDeepEqual(res.requeueDeclined, ["201"]);
+  assertDeepEqual(res.requeued, []);
+  assert(!reopenedFor(calls, 201), "a settled stub must never be reopened");
+  assert(!requeuedFor(calls, 201), "a settled stub must not be re-queued");
+});
+
+await test("backfill terminal guard: a stub carrying sentry:archived declines the re-queue", async () => {
+  // The archive marker is human-approved. Reversing it is the worst outcome in
+  // this whole chain, so it gets its own arm.
+  const calls = [];
+  const { runGh } = makeBackfillRunGh({
+    calls,
+    scopeByNumber: {
+      202: [{ fixScope: null }, { fixScope: FIX_SCOPE_MECHANICAL }],
+    },
+    terminalByNumber: { 202: { state: "CLOSED", labels: ["sentry:archived"] } },
+  });
+  const res = await backfillArchitecturalLabels(
+    [architecturalSkip("202")],
+    { repo: "o/r" },
+    { runGh },
+  );
+  assertDeepEqual(res.requeueDeclined, ["202"]);
+  assertDeepEqual(res.requeued, []);
+  assert(!reopenedFor(calls, 202), "an archived stub must never be reopened");
+});
+
+await test("backfill terminal guard: a still-OPEN skipped stub is still re-queued (no regression)", async () => {
+  // The normal compensation case must survive the guard: this is the strand the
+  // previous commit closed, and the guard must not swallow it.
+  const calls = [];
+  const { runGh } = makeBackfillRunGh({
+    calls,
+    scopeByNumber: {
+      203: [{ fixScope: null }, { fixScope: FIX_SCOPE_MECHANICAL }],
+    },
+    // No terminalByNumber entry: the stub stays open and unsettled.
+  });
+  const res = await backfillArchitecturalLabels(
+    [architecturalSkip("203")],
+    { repo: "o/r" },
+    { runGh },
+  );
+  assertDeepEqual(res.requeued, ["203"]);
+  assertDeepEqual(res.requeueDeclined, []);
+  assert(requeuedFor(calls, 203), "an open skipped stub must be re-queued");
+});
+
+await test("backfill terminal guard: a FAILING terminal re-read does not re-queue, and is loud", async () => {
+  // Safe direction: an unconfirmable terminal state must NOT be reopened —
+  // wrongly reversing an approved archive is worse than one missed
+  // compensation, which the next run's backfill re-detects from the same skip
+  // report. The chokepoint propagates the failed revalidation read, so this
+  // lands in the loud requeueFailed bucket rather than silently proceeding.
+  const calls = [];
+  const { runGh } = makeBackfillRunGh({
+    calls,
+    scopeByNumber: {
+      204: [{ fixScope: null }, { fixScope: FIX_SCOPE_MECHANICAL }],
+    },
+    terminalByNumber: { 204: { state: "CLOSED", labels: ["sentry:archived"] } },
+    terminalReadFails: true,
+  });
+  const { result: res, stderr } = await captureStderr(() =>
+    backfillArchitecturalLabels(
+      [architecturalSkip("204")],
+      { repo: "o/r" },
+      { runGh },
+    ),
+  );
+  assertDeepEqual(res.requeued, []);
+  assertDeepEqual(res.requeueDeclined, []);
+  assertDeepEqual(res.requeueFailed, ["204"]);
+  assert(
+    !reopenedFor(calls, 204),
+    "an unconfirmable stub must not be reopened",
+  );
+  assert(
+    stderr.includes("::error::"),
+    `expected a loud ::error:: for the failed re-queue, got: ${stderr}`,
   );
 });
 

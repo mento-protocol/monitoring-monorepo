@@ -58,6 +58,10 @@ import {
   REQUEUE_ON_FAILURE_VERIFY_END_STATE,
   requeueQueueStub,
 } from "./sentry-triage-requeue.mjs";
+// The SAME terminal-state predicate the triage workflow's compensating re-queue
+// guards on (`runWorkflowRequeue`). Reused rather than re-derived so "settled,
+// and not ours to reopen" has one definition.
+import { isTerminalStub } from "./sentry-triage-workflow-requeue.mjs";
 
 // The selector's fix_scope skip reason (scripts/sentry-autofix-select.mjs
 // SKIP_FIX_SCOPE_ARCHITECTURAL). Kept as its own literal here so a rename there
@@ -285,7 +289,9 @@ function buildWithdrawnHoldNote() {
  * `withdrawn` the numbers whose label was added and then removed by the
  * post-write guard, `withdrawFailed` the numbers whose compensating removal
  * itself failed (loud — a stuck hold is the strand this guard exists to
- * prevent), `requeued` the withdrawn numbers put back through triage, and
+ * prevent), `requeued` the withdrawn numbers put back through triage,
+ * `requeueDeclined` the withdrawn numbers whose stub had already gone TERMINAL
+ * (closed, or `sentry:archived`) so no compensation was owed, and
  * `requeueFailed` the withdrawn numbers whose re-queue did not land (also loud:
  * projection may already have skipped them on the stale hold).
  */
@@ -343,6 +349,7 @@ export async function backfillArchitecturalLabels(
   const withdrawn = [];
   const withdrawFailed = [];
   const requeued = [];
+  const requeueDeclined = [];
   const requeueFailed = [];
   for (const number of plan.numbers) {
     // PRE-write check: revalidate against LIVE state before writing the
@@ -447,8 +454,24 @@ export async function backfillArchitecturalLabels(
     // VERIFY_END_STATE because this path has no reconciler behind it: the
     // chokepoint drives the stub to the selectable pair and READS it back, so a
     // partially-applied re-queue is corrected rather than reported as success.
+    //
+    // TERMINAL GUARD. Our premise is a snapshot too: we observed a stale hold and
+    // decided to compensate. Projection and the archive leg hold their own
+    // concurrency groups, so settlement can COMPLETE in that gap — and a
+    // bookkeeping re-queue would then reopen a closed stub and shed
+    // `sentry:projected` / `sentry:archived` through REOPEN_SHED_LABELS,
+    // reversing a successful projection or a human-approved archive. So
+    // revalidate against the same terminal predicate the triage workflow's
+    // compensating re-queue uses and DECLINE when settlement has won: no
+    // compensation is owed, because the outcome we were protecting has already
+    // been reached by the pipeline itself. A declined re-queue is a correct
+    // outcome, not a failure. A FAILED terminal read propagates out of the
+    // chokepoint into the catch below — deliberately the safe direction: we do
+    // not reopen a stub we could not confirm is non-terminal, since wrongly
+    // reversing an approved archive is worse than one missed compensation, which
+    // the next run's backfill re-detects from the same skip report.
     try {
-      await requeueQueueStub(
+      const outcome = await requeueQueueStub(
         {
           writeGh: (args) => runGh(args),
           readStub: (n) => readStubWithState(runGh, repo, n),
@@ -458,10 +481,23 @@ export async function backfillArchitecturalLabels(
           issueNumber: number,
           cause: REQUEUE_CAUSE_BOOKKEEPING,
           note: buildWithdrawnHoldNote(),
+          revalidate: {
+            check: (live) => !isTerminalStub(live),
+            declineNote: (live) =>
+              `Queue stub #${number} went terminal before the withdrawn-hold re-queue could run (state=${live.state}, labels=${live.labels.join(",") || "none"}); settlement completed on its own, so no compensation is owed and it is left settled rather than reopened over a projected or archived occurrence.`,
+          },
           onFailure: REQUEUE_ON_FAILURE_VERIFY_END_STATE,
         },
       );
-      requeued.push(number);
+      if (
+        outcome?.requeued === false &&
+        outcome.reason === "revalidated-away"
+      ) {
+        // The chokepoint already printed the decline note above.
+        requeueDeclined.push(number);
+      } else {
+        requeued.push(number);
+      }
     } catch (err) {
       // Same discipline as a failed withdrawal: the stub is now unlabeled but may
       // have been passed over by projection, so a re-queue that never landed is a
@@ -481,6 +517,7 @@ export async function backfillArchitecturalLabels(
     withdrawn,
     withdrawFailed,
     requeued,
+    requeueDeclined,
     requeueFailed,
     refused: plan.refused,
     overflow: plan.overflow,
@@ -591,6 +628,7 @@ async function main() {
       `${result.withdrawn.length ? `, ${result.withdrawn.length} withdrawn after the post-write check` : ""}` +
       `${result.withdrawFailed.length ? `, ${result.withdrawFailed.length} STUCK (withdrawal failed)` : ""}` +
       `${result.requeued.length ? `, ${result.requeued.length} re-queued for triage` : ""}` +
+      `${result.requeueDeclined.length ? `, ${result.requeueDeclined.length} re-queue declined (already settled)` : ""}` +
       `${result.requeueFailed.length ? `, ${result.requeueFailed.length} NOT re-queued (re-queue failed)` : ""}` +
       `${result.refused.length ? `, ${result.refused.length} refused` : ""}.\n`,
   );
