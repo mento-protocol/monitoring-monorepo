@@ -24,12 +24,14 @@ import {
   ghFailureText,
   isOwnHeadPr,
   isRateLimitFailure,
-  listHandledShortIds,
   LIST_LIMIT,
   LOCAL_SENTRY_PROJECT,
-  MAX_HANDLED_ID_QUERIES,
   openAutofixPrExists,
 } from "./sentry-autofix-queue-io.mjs";
+import {
+  listHandledShortIds,
+  MAX_HANDLED_ID_QUERIES,
+} from "./sentry-autofix-family-handled.mjs";
 import {
   MAX_REVERSE_PROBE_QUERIES,
   MAX_REVERSE_VERIFY_READS,
@@ -5048,6 +5050,54 @@ await test("CLI: a DEGRADED run whose truncations report cannot be written fails
     writeReport(unwritable, {}, "truncations"),
     false,
     "writeReport reports its own failure",
+  );
+});
+
+await test("the selection leg's modules stay under the 600-line soft cap", () => {
+  // scripts/ has no max-lines lint and sits outside the file-size watchlist's
+  // package scopes (scripts/file-size-watchlist.mjs), so the 600-line soft cap in
+  // docs/pr-checklists/recurring-review-patterns.md is only enforced where a
+  // suite pins it. The triage legs pin their own in sentry-triage-brief.test.mjs;
+  // this leg had NO pin, which is how sentry-autofix-queue-io.mjs reached 583 —
+  // 17 lines of headroom — before anyone looked. Pinned HERE rather than added to
+  // that list because the gate routes every module below to THIS suite: a pin in
+  // a suite an autofix change never runs would not fire on the change that
+  // breaks it.
+  //
+  // Every module the select leg owns belongs on this list — an omission is how
+  // the next one drifts. sentry-autofix-finalize.mjs is deliberately absent: it
+  // belongs to the finalize leg, is already past this cap (the 1,000-line hard
+  // cap governs it), and appears in this suite's import closure only because
+  // queue-io reads `autofixBranchName` from it.
+  const paths = [
+    "sentry-autofix-candidate.mjs",
+    "sentry-autofix-decisions.mjs",
+    "sentry-autofix-family-handled.mjs",
+    "sentry-autofix-family-resolve.mjs",
+    "sentry-autofix-family.mjs",
+    "sentry-autofix-queue-io.mjs",
+    "sentry-autofix-reverse-verify.mjs",
+    "sentry-autofix-second-look.mjs",
+    "sentry-autofix-select-cli.mjs",
+    "sentry-autofix-select-instrument.mjs",
+    "sentry-autofix-select.mjs",
+  ];
+  // Resolved against THIS file rather than a repo root: the Sentry-suite gate
+  // runs each suite from its own snapshot of the derived import set, and every
+  // module above is in that closure, so a sibling-relative read works there and
+  // needs no `reads` declaration in scripts/sentry-suite-manifest.json.
+  const oversized = paths
+    .map((path) => [
+      path,
+      readFileSync(new URL(`./${path}`, import.meta.url), "utf8").split("\n")
+        .length,
+    ])
+    .filter(([, lines]) => lines > 600)
+    .map(([path, lines]) => `${path}:${lines}`);
+  assertEqual(
+    oversized.join(", "),
+    "",
+    "these selection-leg modules crossed the 600-line soft cap; split them",
   );
 });
 
