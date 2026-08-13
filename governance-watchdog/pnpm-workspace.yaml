@@ -42,7 +42,7 @@ overrides:
   "protobufjs@>=7.0.0 <7.6.5": 7.6.5
   "js-yaml@>=4.0.0 <4.3.1": 4.3.1
   # GHSA-2v37-7h3g-55p8: 3.3.17 fixes zero-size generator hangs.
-  "nanoid@<3.3.17": 3.3.17
+  "nanoid@<3.3.18": 3.3.18
   # isows resolves ws@8.20.1 through viem; 8.21.0 contains the GHSA-96hv-2xvq-fx4p
   # fix and stays compatible with isows' ws peer range.
   "ws@<8.21.0": 8.21.0
