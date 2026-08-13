@@ -3,7 +3,7 @@ title: Agent Issue Workflow
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-22
+last_verified: 2026-08-13
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -42,8 +42,8 @@ State labels are mutually exclusive:
 - `agent-ready` — the issue body is enough for an agent to implement.
 - `agent-active` — an agent has claimed the issue and is working before or while
   opening a PR.
-- `in-pr` — an implementation PR is open; agents should not pick this up as new
-  work.
+- `in-pr` — an implementation PR is open, or its approved merge still needs
+  production closeout; agents should not pick this up as new work.
 
 Routing labels:
 
@@ -70,15 +70,20 @@ Routing labels:
    the Project has an `In Review` status option. With the default GitHub status
    options, it falls back to `In Progress`.
 6. On merge, GitHub closes issues referenced with closing keywords. Run
-   `pnpm issue:board sync` after merge, or on a schedule, to move closed
-   `in-pr` issues that are already on Project #12 to `Done` and clear the
-   queue label.
+   `pnpm issue:board sync` after merge, or on a schedule, to move those closed
+   `in-pr` issues on Project #12 to `Done` and clear the queue label. When Done
+   means still requires post-merge production proof, use `Refs`, keep the issue
+   open and `in-pr`, and retain its current owner through the live checks. Close
+   the issue and run board sync only after its live acceptance criteria pass.
 7. If the PR closes unmerged, run `pnpm issue:release --issue <issue>` and
    restore `agent-ready` only when the remaining work is still clear; otherwise
    run `pnpm issue:release --issue <issue> --needs-grooming`.
 
-For partial work, keep the issue open. Remove `in-pr` after merge and set
+For other partial work, keep the issue open. Remove `in-pr` after merge and set
 `agent-ready` or `needs-grooming` based on the remaining acceptance criteria.
+Do not release a production-closeout issue merely because its PR merged; retain
+`in-pr` until live proof passes or the owner explicitly releases work they
+cannot continue.
 
 If a follow-up PR fully closes an issue that is already labeled `in-pr` from an
 earlier partial PR, `pnpm issue:review` will refuse because the issue is no
