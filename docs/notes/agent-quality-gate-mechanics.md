@@ -413,9 +413,22 @@ of them.
    every PID with its pinned start string, and then judges itself finished
    only when every process in that captured set is gone. A PID that still
    exists but no longer matches its recorded start time was reused by someone
-   else; it is left alone and named in the output rather than signalled. One
-   re-capture after the first pass picks up anything spawned between the walk
-   and the signal, whose parent is by definition already captured.
+   else; it is left alone and named in the output rather than signalled. The
+   walk repeats on every pass of the drain and stops recording a PID once it
+   has been seen, so the census converges instead of freezing: a command whose
+   `TERM` handler forks a replacement produces a child that did not exist when
+   the first walk ran, and a capture taken once would kill the parent it knew
+   about and leave that child running untagged into the next run.
+
+8. **Elapsed time comes from the clock, not from counting sleeps.** A loop that
+   adds its own poll interval per iteration is measuring what it asked for. Any
+   process can be descheduled, suspended, or stopped for longer than it slept —
+   `SIGSTOP`, a laptop lid, a loaded runner — and such a loop resumes believing
+   almost no time has passed. It then outlives the deadline it announced and
+   reports a duration that never happened, which is worse than being late:
+   every wait, drain, and watchdog budget in this path is also the evidence
+   printed when one expires. Each of those loops reads `date +%s` once before
+   it starts and subtracts at the top of every iteration.
 
 Rule 4 is the one that does not depend on getting an interleaving right, and
 it is why the others are allowed to be merely careful: they keep runs from
@@ -427,8 +440,11 @@ The self-test sweeps the crash boundaries by killing a run at each named point
 and asserting the next run still reaches its mapped commands and releases the
 lock, and pins the interleavings — two waiters on one stale record, a stalled
 creator, a cached ownerless verdict, and a displaced holder — as separate
-cases. Adding an operation to this path means adding its boundary to the table
-and to that sweep.
+cases. A command that forks a fresh child on every `TERM`, and a waiter held
+under `SIGSTOP` past its own budget, are pinned there too: the first asserts no
+forked survivor outlives the drain, the second that the reported wait matches
+the wall clock. Adding an operation to this path means adding its boundary to
+the table and to that sweep.
 
 A lock with no usable owner record — no file at all, or an unfinished one from
 a run killed mid-write — counts as abandoned after a 30-second grace, measured
