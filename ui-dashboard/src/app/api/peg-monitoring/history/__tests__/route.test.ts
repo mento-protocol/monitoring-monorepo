@@ -244,6 +244,22 @@ describe("POST /api/peg-monitoring/history", () => {
     expect((await POST(request())).status).toBe(502);
     expect((await POST(request())).status).toBe(502);
   });
+
+  it("preserves an extreme finite premium instead of hiding incident data", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      json({
+        results: {
+          A: { frames: [frame([NOW_MS], [25_000])] },
+        },
+      }),
+    );
+
+    const response = await POST(request());
+    expect(response.status).toBe(200);
+    expect((await response.json()).points).toEqual([
+      { at: NOW_MS / 1_000, bps: 25_000 },
+    ]);
+  });
 });
 
 async function postWithEmptyFetch(

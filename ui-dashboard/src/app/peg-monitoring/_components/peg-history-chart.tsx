@@ -134,7 +134,10 @@ export function PegHistoryChart({
       />
       {resolved.state === "stale" ? (
         <p role="status" className="-mt-2 mb-2 text-[11px] text-amber-700">
-          History refresh failed · showing last confirmed readings
+          History refresh failed ·{" "}
+          {points.length === 0
+            ? "no last confirmed readings in this window"
+            : "showing last confirmed readings"}
         </p>
       ) : null}
       <div
@@ -357,7 +360,8 @@ function ChartAxis({
   points: readonly PegHistoryPoint[];
   xs: readonly number[];
 }): React.JSX.Element {
-  const ticks = [0, 0.33, 0.66, 1].map((ratio) => {
+  const ratios = points.length === 1 ? [0] : [0, 0.33, 0.66, 1];
+  const ticks = ratios.map((ratio) => {
     const index = Math.min(
       points.length - 1,
       Math.round(ratio * (points.length - 1)),
@@ -369,6 +373,7 @@ function ChartAxis({
       {ticks.map((tick) => (
         <text
           key={tick.ratio}
+          data-testid="peg-history-axis-tick"
           x={Math.min(PEG_CHART.plotWidth - 12, Math.max(12, tick.x))}
           y={PEG_CHART.axisY}
           textAnchor="middle"

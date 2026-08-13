@@ -253,8 +253,15 @@ describe("PegMonitoringPageClient board", () => {
     state.history = {
       ...state.history,
       data: { ...state.history.data!, points: [] },
-      hasError: false,
     };
+    render();
+    expect(
+      query('[data-testid="peg-panel-europ-schuman"]')!.textContent,
+    ).toContain(
+      "History refresh failed · no last confirmed readings in this window",
+    );
+
+    state.history = { ...state.history, hasError: false };
     render();
     expect(query('[aria-label*="Peg history over 7d"]')!.textContent).toContain(
       "No readings in this window",
@@ -269,6 +276,9 @@ describe("PegMonitoringPageClient board", () => {
     };
     render();
     expect(query('[data-testid="peg-history-single-point"]')).not.toBeNull();
+    expect(
+      container.querySelectorAll('[data-testid="peg-history-axis-tick"]'),
+    ).toHaveLength(1);
   });
 
   it("pins an off-scale supporting venue at the rail edge", () => {

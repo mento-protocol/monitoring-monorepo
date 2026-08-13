@@ -182,8 +182,7 @@ function parsePoint(
     atMs < fromMs ||
     atMs > toMs ||
     typeof bps !== "number" ||
-    !Number.isFinite(bps) ||
-    Math.abs(bps) > 10_000
+    !Number.isFinite(bps)
   )
     throw new InvalidUpstreamResponseError();
   return { at: atMs / 1_000, bps };
