@@ -641,10 +641,16 @@ gate_run_ensure_marker() {
   # replacement and exits, so starting the command without it would quietly
   # forfeit the discovery the drain depends on. Same rule as the obligation
   # files: stop before the act, while stopping is still safe.
-  if ! printf '%s\n' "$gate_lock_token" > "$marker" 2>/dev/null; then
-    echo "error: could not write the run marker at ${marker}." >&2
+  # O_EXCL via noclobber, like the owner record: `>` would follow a symlink
+  # another writer on a shared root pre-planted under this run's token and
+  # truncate whatever it points at with this user's permissions. Exclusive
+  # creation refuses an existing path outright — symlinks, dangling ones
+  # included, by kernel contract — and a token is unique to this run, so
+  # anything already sitting at this name is not ours to replace.
+  if ! (set -C && printf '%s\n' "$gate_lock_token" > "$marker") 2>/dev/null; then
+    echo "error: could not create the run marker at ${marker} (it may already exist)." >&2
     echo "Without it, a command that outlives a killed gate cannot be found by the next run." >&2
-    echo "Nothing has been executed. Fix that path — permissions, or free space — then re-run." >&2
+    echo "Nothing has been executed. Fix that path — permissions, free space, or a leftover file — then re-run." >&2
     exit 2
   fi
   gate_run_marker_file="$marker"

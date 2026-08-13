@@ -6194,7 +6194,7 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   chmod 755 "$gate_race_root" 2>/dev/null || true
   [[ "$race_marker_exit" -ne 0 ]] ||
     fail "a run that cannot write its marker must fail closed, got exit 0"
-  grep -q "could not write the run marker" "$gate_race_out/unwritable-marker.out" ||
+  grep -q "could not create the run marker" "$gate_race_out/unwritable-marker.out" ||
     fail "failing closed on an unwritable marker must say so"
   [[ -z "$(awk '/^enter/ { print $2; exit }' "$gate_race_log")" ]] ||
     fail "a run that could not write its marker executed a mapped command anyway"
