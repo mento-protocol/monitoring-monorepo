@@ -5014,7 +5014,10 @@ gate_race_log="$gate_race_out/race.log"
 # with its own signal handling can. The loop is what survives: its sleeps are
 # killable, it is not.
 [ -n "\${RACE_STUB_FORK_ON_TERM:-}" ] && trap 'sleep 987654 &' TERM
-[ -n "\${RACE_STUB_IGNORE_TERM:-}" ] && [ -z "\${RACE_STUB_FORK_ON_TERM:-}" ] && trap '' TERM
+# RACE_STUB_FORK_AND_EXIT leaves a replacement behind and then goes away, so
+# the replacement is reparented with no tagged ancestor left to walk down from.
+[ -n "\${RACE_STUB_FORK_AND_EXIT:-}" ] && trap 'sleep 987655 & exit 0' TERM
+[ -n "\${RACE_STUB_IGNORE_TERM:-}" ] && [ -z "\${RACE_STUB_FORK_ON_TERM:-}" ] && [ -z "\${RACE_STUB_FORK_AND_EXIT:-}" ] && trap '' TERM
 printf 'enter %s %s\n' "\$\$" "\$(date +%s)" >> "$gate_race_log"
 race_stub_deadline=\$(( \$(date +%s) + \${RACE_STUB_SECONDS:-1} ))
 while [ "\$(date +%s)" -lt "\$race_stub_deadline" ]; do sleep 1 || true; done
@@ -5884,6 +5887,52 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   [[ -z "$race_fork_survivors" ]] ||
     fail "children forked while being signalled outlived the drain: ${race_fork_survivors}"
   rm -rf "$gate_race_root/run.lock"
+
+  # The same shape, except the command exits after forking. Its replacement is
+  # reparented, carries no argv tag, and has no tagged ancestor to be walked
+  # down from — so only a handle the replacement inherited can still find it.
+  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
+  rm -f "$gate_race_root"/captured.* "$gate_race_root"/holder.*
+  : > "$gate_race_log"
+  RACE_STUB_FORK_AND_EXIT=1 \
+    RACE_STUB_SECONDS=90 \
+    AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 45 \
+    > "$gate_race_out/forkexit-a.out" 2>&1 &
+  race_forkexit_wrapper=$!
+  race_waited=0
+  while [[ -z "$(awk '/^enter/ { print $2; exit }' "$gate_race_log")" && "$race_waited" -lt 240 ]]; do
+    sleep 0.5
+    race_waited=$((race_waited + 1))
+  done
+  [[ -n "$(awk '/^enter/ { print $2; exit }' "$gate_race_log")" ]] ||
+    fail "the fork-and-exit case never saw a command start"
+  race_forkexit_pid="$(sed -n 's/^pid=//p' "$gate_race_root/run.lock/owner" | head -n1)"
+  kill -9 "$race_forkexit_pid" "$race_forkexit_wrapper" 2>/dev/null || true
+  wait "$race_forkexit_wrapper" 2>/dev/null || true
+  RACE_STUB_SECONDS=2 \
+    AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+    AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    AGENT_QUALITY_GATE_LOCK_ORPHAN_DRAIN_SECONDS=40 \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 90 \
+    > "$gate_race_out/forkexit-b.out" 2>&1 || true
+  sleep 1
+  race_forkexit_survivors="$(pgrep -f "sleep 987655" 2>/dev/null | tr '\n' ' ' || true)"
+  for race_leftover_pid in $race_forkexit_survivors; do
+    kill -9 "$race_leftover_pid" 2>/dev/null || true
+  done
+  [[ -z "$race_forkexit_survivors" ]] ||
+    fail "a replacement forked by a command that then exited outlived the drain: ${race_forkexit_survivors}"
+  rm -rf "$gate_race_root/run.lock"
+  rm -f "$gate_race_root"/holder.*
 
   # A waiter that is suspended past its own budget must notice the time that
   # actually passed, not the time it asked to sleep for.

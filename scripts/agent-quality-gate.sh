@@ -578,6 +578,57 @@ gate_run_command_tag() {
   printf 'agentqg:%s' "${gate_lock_token:-nolock-$$}"
 }
 
+# A file every mapped command of this run holds open. Descendants inherit open
+# descriptors and keep them after their parent exits, so this is a handle on a
+# process that no longer has a tagged ancestor to be walked down from. Its path
+# carries the run's token, so unlike a PID or a process group it can never come
+# to name a stranger.
+gate_run_marker_path() {
+  [[ -n "$gate_lock_root_dir" && -n "$gate_lock_token" ]] || return 1
+  printf '%s/holder.%s' "$gate_lock_root_dir" "$gate_lock_token"
+}
+
+gate_run_marker_file=""
+
+gate_run_ensure_marker() {
+  local marker
+  [[ -z "$gate_run_marker_file" ]] || return 0
+  marker="$(gate_run_marker_path)" || return 0
+  printf '%s\n' "$gate_lock_token" > "$marker" 2>/dev/null || return 0
+  gate_run_marker_file="$marker"
+}
+
+# Every process still carrying a run's handle. The argv tag names only the
+# wrapper and dies with it, which is why two inherited handles back it up: the
+# environment, readable on a host with /proc, and the open descriptor on the
+# run's marker file, readable wherever `lsof` exists. Both survive a command
+# that forks a replacement and then exits — the replacement is reparented, has
+# no tagged ancestor left, and is invisible to a tree walk. Neither can land on
+# a stranger, because both are named by a token unique to one run.
+#
+# Only this user's processes are scanned, which is the same scope the rest of
+# this path can signal, and duplicates cost nothing: the capture records a PID
+# once. Where neither inherited handle is readable the argv tag stands alone,
+# which is the pre-existing behaviour.
+gate_run_tagged_pids() {
+  local token="$1"
+  local environ pid marker
+  pgrep -f "agentqg:${token}" 2>/dev/null || true
+  if [[ -d /proc ]]; then
+    for environ in /proc/[0-9]*/environ; do
+      [[ -r "$environ" ]] || continue
+      grep -qa "AGENTQG_RUN=agentqg:${token}" "$environ" 2>/dev/null || continue
+      pid="${environ#/proc/}"
+      printf '%s\n' "${pid%/environ}"
+    done
+  fi
+  marker="${gate_lock_root_dir}/holder.${token}"
+  if [[ -n "$gate_lock_root_dir" && -e "$marker" ]] &&
+    command -v lsof > /dev/null 2>&1; then
+    lsof -w -t -- "$marker" 2>/dev/null || true
+  fi
+}
+
 # The lock root, kept once resolved: outstanding obligations live beside the
 # lock rather than inside it, because the lock directory is what gets reclaimed
 # and the obligation has to outlive that.
@@ -1011,15 +1062,16 @@ drain_condemned_run_commands() {
   # first signal kills the tagged wrapper and with it the only handle to
   # anything the walk did not already record. Two walks are not a proof, but
   # they cost 200ms on a path that runs only after a crash.
-  for wrapper in $(pgrep -f "agentqg:${token}" 2>/dev/null || true); do
+  for wrapper in $(gate_run_tagged_pids "$token"); do
     capture_process_tree "$wrapper"
   done
   sleep 0.2
-  for wrapper in $(pgrep -f "agentqg:${token}" 2>/dev/null || true); do
+  for wrapper in $(gate_run_tagged_pids "$token"); do
     capture_process_tree "$wrapper"
   done
   if [[ -z "${gate_drain_capture//[[:space:]]/}" ]]; then
     [[ -z "$captured_file" ]] || rm -f "$captured_file"
+    [[ -z "$gate_lock_root_dir" ]] || rm -f "${gate_lock_root_dir}/holder.${token}"
     return 0
   fi
 
@@ -1139,7 +1191,11 @@ EOF
     # grows, PIDs are recorded once, and the whole loop is bounded — so it ends
     # either when a pass adds nothing and everything found is gone, or at the
     # bound, which fails closed.
-    for pid in $alive; do
+    #
+    # Re-asked of the token as well, not only of the survivors: a command that
+    # forks a replacement and then exits leaves nothing to walk down from, and
+    # the replacement is discoverable only by the token it inherited.
+    for pid in $alive $(gate_run_tagged_pids "$token"); do
       capture_process_tree "$pid"
     done
   done
@@ -1147,6 +1203,7 @@ EOF
   # Discharged: every process in the captured set is gone or belongs to
   # somebody else now, so the list has nothing left to hand on.
   [[ -z "$captured_file" ]] || rm -f "$captured_file"
+  [[ -z "$gate_lock_root_dir" ]] || rm -f "${gate_lock_root_dir}/holder.${token}"
 
   if [[ -n "$recycled" ]]; then
     echo "Left alone: pid(s) ${recycled}now belong to unrelated processes."
@@ -1409,6 +1466,13 @@ cleanup_tmpfiles() {
   if [[ -n "$gate_lock_condemn_tmp" ]]; then
     rm -f "$gate_lock_condemn_tmp"
     gate_lock_condemn_tmp=""
+  fi
+  # Dropped after the workers are down, so it is gone only once nothing of ours
+  # is left holding it. A run that dies before this leaves it behind on
+  # purpose: that is the handle its successor needs.
+  if [[ -n "$gate_run_marker_file" ]]; then
+    rm -f "$gate_run_marker_file"
+    gate_run_marker_file=""
   fi
   # Released last: the lock must outlive worker teardown, or the next run
   # starts while this one's mapped commands are still dying.
@@ -4284,7 +4348,19 @@ run_with_timeout() {
   # command is a child that can be walked, and the wrapper carries this run's
   # token in its own argv, so a later run can find this run's survivors by
   # identity instead of waiting a guessed number of seconds for them.
-  bash -c 'eval "$1"; exit $?' "$(gate_run_command_tag)" "$command" &
+  # Two inherited handles back that tag up, because the tag dies with the
+  # wrapper: the token in the environment, and an open descriptor on the run's
+  # marker file. A command that forks a replacement and then exits leaves that
+  # replacement reparented with no tagged ancestor to walk from, and only
+  # something inherited can still name it. Both are keyed to this run's token,
+  # so neither can come to name a stranger.
+  gate_run_ensure_marker
+  AGENTQG_RUN="$(gate_run_command_tag)" \
+    bash -c '
+      if [[ -n "$2" && -r "$2" ]]; then exec 9< "$2"; fi
+      eval "$1"
+      exit $?
+    ' "$(gate_run_command_tag)" "$command" "$gate_run_marker_file" &
   cmd_pid=$!
   # Run the watchdog via `bash -c` (which execs) rather than a `( … ) &`
   # subshell. A forked subshell inherits bash's saved copy of the caller's

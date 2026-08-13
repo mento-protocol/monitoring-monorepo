@@ -452,6 +452,19 @@ of them.
    the first walk ran, and a capture taken once would kill the parent it knew
    about and leave that child running untagged into the next run.
 
+   Discovery cannot rest on the argv tag alone, because the tag dies with the
+   wrapper. A command that forks a replacement and then **exits** leaves that
+   replacement reparented, untagged, and with no ancestor left to walk down
+   from. So each mapped command starts with two handles its descendants
+   inherit and keep: the run's token in the environment, readable through
+   `/proc/<pid>/environ` where that exists, and an open descriptor on the run's
+   `holder.<token>` marker file, readable through `lsof` where that exists.
+   Both are named by a token unique to one run, so unlike a PID or a process
+   group neither can come to name a stranger. Each drain pass asks all three —
+   argv, environment, descriptor — and captures whatever is new. Where no
+   inherited handle is readable the argv tag stands alone, and a command of
+   that shape can still escape; nothing at this shell's floor closes that.
+
 8. **Elapsed time comes from the clock, not from counting sleeps.** A loop that
    adds its own poll interval per iteration is measuring what it asked for. Any
    process can be descheduled, suspended, or stopped for longer than it slept —
@@ -475,7 +488,9 @@ creator, a cached ownerless verdict, and a displaced holder — as separate
 cases. A command that forks a fresh child on every `TERM`, a waiter held under
 `SIGSTOP` past its own budget, and a reclaimer facing an obligation directory it
 cannot write into are pinned there too: the first asserts no forked survivor
-outlives the drain, the second that the reported wait matches the wall clock,
+outlives the drain — in two shapes, one where the forking command keeps running
+and one where it exits and orphans its replacement — the second that the
+reported wait matches the wall clock,
 the third that the run exits without executing and leaves the record it was
 about to discard. Unreadable obligation files, an obligation left behind by a
 dead drainer, and one published while a drain is running are pinned alongside
