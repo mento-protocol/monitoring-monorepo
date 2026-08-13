@@ -113,6 +113,7 @@ const FROZEN_TARGET_MODES = new Set([
 const MAX_GIT_OUTPUT_BYTES = MAX_REVIEW_INPUT_BYTES + 12 * 1024 * 1024;
 const MAX_TRUSTED_ENGINE_FILE_BYTES = 16 * 1024 * 1024;
 const CLAUDE_SAFE_MODE_MIN_VERSION = [2, 1, 169];
+const ENGINE_VERSION_PROBE_TIMEOUT_MS = 15_000;
 const AWS_CREDENTIAL_CONFIG_KEYS = new Set([
   "AWS_CONFIG_FILE",
   "AWS_SHARED_CREDENTIALS_FILE",
@@ -1126,19 +1127,105 @@ function trustedExecutableCandidate(
   }
 }
 
-function resolveTrustedCommand(command, rejectRoot, { required = true } = {}) {
-  const candidates = path.isAbsolute(command)
-    ? [command]
-    : (process.env.PATH || "")
-        .split(path.delimiter)
-        .filter((entry) => entry && path.isAbsolute(entry))
-        .map((entry) => path.join(entry, command));
+function commandOverrideVariable(command) {
+  const name = path
+    .basename(command)
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "_");
+  return `AUTOREVIEW_${name}_BIN`;
+}
+
+// Agent-isolation and CI shells routinely inherit a PATH without the local
+// package manager's bin directory, which used to make an installed reviewer CLI
+// look missing. Probing these after PATH keeps the reviewer usable from any
+// shell; every candidate still passes the same trusted-executable checks, so a
+// wider search never widens what the reviewer is willing to execute.
+function wellKnownCommandDirectories() {
+  const configured = process.env.AUTOREVIEW_EXTRA_BIN_DIRS;
+  const entries =
+    configured === undefined
+      ? ["/opt/homebrew/bin", "/usr/local/bin", homeBinDirectory()]
+      : configured.split(path.delimiter);
+  return entries.filter((entry) => entry && path.isAbsolute(entry));
+}
+
+function homeBinDirectory() {
+  const home = process.env.HOME;
+  return home && path.isAbsolute(home) ? path.join(home, ".local", "bin") : "";
+}
+
+function trustedCommandCandidates(command) {
+  if (path.isAbsolute(command)) {
+    return { candidates: [{ candidate: command, source: "absolute path" }] };
+  }
+  const overrideVariable = commandOverrideVariable(command);
+  const override = process.env[overrideVariable];
+  if (override) {
+    // An explicit override is authoritative: a typo must surface as its own
+    // error rather than silently reviving whatever the caller's PATH offers.
+    return {
+      candidates: path.isAbsolute(override)
+        ? [{ candidate: override, source: overrideVariable }]
+        : [],
+      overrideVariable,
+      overrideValue: override,
+    };
+  }
+  const seen = new Set();
+  const candidates = [];
+  const searchDirectories = [
+    ...(process.env.PATH || "").split(path.delimiter).map((entry) => ({
+      directory: entry,
+      source: "PATH",
+    })),
+    ...wellKnownCommandDirectories().map((directory) => ({
+      directory,
+      source: "well-known install location",
+    })),
+  ];
+  for (const { directory, source } of searchDirectories) {
+    if (!directory || !path.isAbsolute(directory)) continue;
+    const candidate = path.join(directory, command);
+    if (seen.has(candidate)) continue;
+    seen.add(candidate);
+    candidates.push({ candidate, source });
+  }
+  return { candidates };
+}
+
+function traceCommandResolution(command, candidate, resolved, source) {
+  if (!process.env.AUTOREVIEW_TRACE_COMMANDS) return;
+  // Report the probed location, not just the launch target: an executable with
+  // Homebrew-style ancestry launches from a sealed snapshot, and only the
+  // probed path tells an operator which search step won.
+  const launch = resolved === candidate ? "" : ` -> ${resolved}`;
+  console.error(
+    `agent:autoreview: resolved ${command} via ${source}: ${candidate}${launch}`,
+  );
+}
+
+function unavailableCommandMessage(command) {
+  const { candidates, overrideVariable, overrideValue } =
+    trustedCommandCandidates(command);
+  const probed = candidates.map(({ candidate }) => candidate).join(", ");
+  const variable = commandOverrideVariable(command);
+  if (overrideVariable) {
+    return `${command} CLI is not available: ${variable} does not point at a trusted absolute executable. Probed: ${probed || overrideValue}`;
+  }
+  return `${command} CLI is not available outside the reviewed repo. Install it, or set ${variable} to its absolute path. Probed: ${probed || "<no absolute search directories>"}`;
+}
+
+// Yields every trusted executable the search order offers, best first, so a
+// caller can move past one that resolves but cannot run.
+function* trustedCommandResolutions(command, rejectRoot) {
+  const { candidates } = trustedCommandCandidates(command);
   const root = realpathSync(rejectRoot);
-  for (const candidate of candidates) {
+  for (const { candidate, source } of candidates) {
     if (rejectedTrustedExecutableCandidates.has(candidate)) continue;
+    let resolved;
     try {
       accessSync(candidate, fsConstants.X_OK);
-      return trustedExecutableCandidate(
+      resolved = trustedExecutableCandidate(
         candidate,
         root,
         path.basename(command) || "executable",
@@ -1146,13 +1233,25 @@ function resolveTrustedCommand(command, rejectRoot, { required = true } = {}) {
       );
     } catch {
       rejectedTrustedExecutableCandidates.add(candidate);
-      // Keep searching a bounded, absolute PATH for an external executable.
+      // Keep searching a bounded, absolute search list for an external
+      // executable.
+      continue;
     }
+    traceCommandResolution(command, candidate, resolved, source);
+    yield { candidate, executable: resolved };
+  }
+}
+
+function rejectResolvedCommandCandidate(candidate) {
+  rejectedTrustedExecutableCandidates.add(candidate);
+}
+
+function resolveTrustedCommand(command, rejectRoot, { required = true } = {}) {
+  for (const { executable } of trustedCommandResolutions(command, rejectRoot)) {
+    return executable;
   }
   if (required) {
-    throw new Error(
-      `${command} CLI is not available outside the reviewed repo`,
-    );
+    throw new Error(unavailableCommandMessage(command));
   }
   return null;
 }
@@ -3097,11 +3196,11 @@ function runCommandWithInput(
         return;
       }
       if (code !== 0) {
-        rejectOnce(
-          new Error(
-            `${command} failed (${code ?? signal}): ${stderr || stdout}`,
-          ),
+        const failure = new Error(
+          `${command} failed (${code ?? signal}): ${stderr || stdout}`,
         );
+        failure.exitCode = code ?? null;
+        rejectOnce(failure);
         return;
       }
       if (stdinWriteError) {
@@ -3129,16 +3228,87 @@ function tomlInlineTable(values) {
     .join(", ")}}`;
 }
 
-async function runCodex(repo, args, prompt) {
-  const codex = resolveTrustedCommand("codex", repo, { required: false });
-  if (!codex) {
-    throw new Error("codex CLI is not available");
+// A launcher shim exits 127 because it re-resolves the real CLI from a PATH the
+// reviewer deliberately does not hand to its engine. A working engine can also
+// exit 127 for its own reasons, so confirm the executable cannot even report its
+// version in that same environment before calling it unusable. Returns null when
+// the probe succeeds, otherwise the reason it failed.
+function engineVersionProbeFailure(executable, cwd, env) {
+  const seconds = ENGINE_VERSION_PROBE_TIMEOUT_MS / 1000;
+  let probe;
+  try {
+    probe = spawnTrustedSync(executable, ["--version"], {
+      cwd,
+      env,
+      // No pipes: spawnSync waits for the captured stdio to close, so a
+      // descendant still holding one would outlast the timeout and wedge the
+      // review. Only the exit status matters here.
+      stdio: ["ignore", "ignore", "ignore"],
+      timeout: ENGINE_VERSION_PROBE_TIMEOUT_MS,
+      // SIGKILL cannot be caught or ignored, and detached: true makes the
+      // child its own group leader so the sweep below reaches its descendants.
+      killSignal: "SIGKILL",
+      detached: true,
+    });
+  } catch (error) {
+    return `its --version probe could not start: ${error.message}`;
   }
+  if (probe.error?.code === "ETIMEDOUT" || probe.signal === "SIGKILL") {
+    killProcessGroup(probe.pid);
+    return `its --version probe timed out after ${seconds}s`;
+  }
+  if (probe.error) {
+    return `its --version probe failed: ${probe.error.message}`;
+  }
+  if (probe.status !== 0) {
+    return `its --version probe exited ${probe.status}`;
+  }
+  return null;
+}
+
+function unusableEngineLauncherMessage(command, launchers, engineError) {
+  const variable = commandOverrideVariable(command);
+  return `${command} CLI cannot run in the reviewer's isolated environment: ${launchers.join("; ")}, which is how a launcher shim behaves. Point ${variable} at the real ${command} executable. Engine error: ${engineError}`;
+}
+
+async function runCodex(repo, args, prompt) {
   if (!args.tools) {
     throw new Error(
       "--no-tools is not supported for Codex; use read-only sandbox",
     );
   }
+  const unusableLaunchers = [];
+  let firstLauncherError = null;
+  for (const { candidate, executable } of trustedCommandResolutions(
+    "codex",
+    repo,
+  )) {
+    try {
+      return await runCodexExecutable(executable, repo, args, prompt);
+    } catch (error) {
+      // Every other failure, including a genuine engine exit 127, still fails
+      // the review with the engine's own error.
+      if (!error?.launcherUnusable) throw error;
+      rejectResolvedCommandCandidate(candidate);
+      unusableLaunchers.push(
+        `${candidate} exited 127 and ${error.launcherProbeFailure}`,
+      );
+      firstLauncherError ??= error;
+    }
+  }
+  if (unusableLaunchers.length > 0) {
+    throw new Error(
+      unusableEngineLauncherMessage(
+        "codex",
+        unusableLaunchers,
+        firstLauncherError.message,
+      ),
+    );
+  }
+  throw new Error(unavailableCommandMessage("codex"));
+}
+
+async function runCodexExecutable(codex, repo, args, prompt) {
   const tempRoot = safeTempRoot(repo);
   const tempDir = createRegisteredEngineRuntimeDirectory(
     tempRoot,
@@ -3218,18 +3388,29 @@ async function runCodex(repo, args, prompt) {
       codexArgs.push("-c", `model_reasoning_effort="${args.thinking}"`);
     }
     codexArgs.push("-");
-    const result = await runCommandWithInput(
-      codex,
-      codexArgs,
-      workspace,
-      prompt,
-      {
-        env: safeEngineEnv(repo, "codex", tempDir),
+    const engineEnv = safeEngineEnv(repo, "codex", tempDir);
+    let result;
+    try {
+      result = await runCommandWithInput(codex, codexArgs, workspace, prompt, {
+        env: engineEnv,
         label: "codex",
         stream: args.streamEngineOutput,
         timeoutSeconds: args.timeoutSeconds,
-      },
-    );
+      });
+    } catch (error) {
+      if (error?.exitCode === 127) {
+        const probeFailure = engineVersionProbeFailure(
+          codex,
+          workspace,
+          engineEnv,
+        );
+        if (probeFailure) {
+          error.launcherUnusable = true;
+          error.launcherProbeFailure = probeFailure;
+        }
+      }
+      throw error;
+    }
     return existsSync(outputPath)
       ? readFileSync(outputPath, "utf8")
       : result.stdout;
@@ -3302,7 +3483,7 @@ async function ensureClaudeIsolationSupported(claude, repo, env, cwd) {
 async function runClaude(repo, args, prompt) {
   const claude = resolveTrustedCommand("claude", repo, { required: false });
   if (!claude) {
-    throw new Error("claude CLI is not available");
+    throw new Error(unavailableCommandMessage("claude"));
   }
   const tempRoot = safeTempRoot(repo);
   const tempDir = createRegisteredEngineRuntimeDirectory(

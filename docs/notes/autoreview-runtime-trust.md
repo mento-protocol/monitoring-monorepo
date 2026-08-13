@@ -79,7 +79,10 @@ interpreter startup-injection variables, so ambient hooks cannot run before the
 pinned helper. An explicit helper from a separate checkout remains an explicit
 trust decision. The adapter also requires the physical checkout root to match
 Git's top level, removes reviewed-repo directories from its executable search
-path, and runs bare shell utilities from the system path. Direct Git, Node,
+path, and runs bare shell utilities from the system path. The helper searches
+`AUTOREVIEW_<COMMAND>_BIN`, then that path, then well-known install directories
+so a thin caller `PATH` cannot hide an installed engine; those extra directories
+are search order only and grant no trust of their own. Direct Git, Node,
 GitHub CLI, and semantic-engine executables and every canonical ancestor must be
 owned by the current user or root and must not be group/other-writable. Node
 discovery never executes a version-manager shim: Volta is queried through a
