@@ -262,6 +262,35 @@ requires manual cleanup.
 | after capturing a dead run's process tree, before the first signal                | the captured set is on disk, nothing has been signalled yet                                                                         | re-reads it, unions it with its own tag scan, and confirms every entry — a set naming already-dead PIDs costs identity-checked no-op checks |
 | mid-drain, after the TERM pass has killed the tag carrier                         | no tagged process remains, but an untagged descendant may still run                                                                 | inherits the persisted captured set, so it looks for those PIDs rather than for a tag nobody carries any more                               |
 
+#### Where evidence is destroyed
+
+The crash-point table above asks what a crash leaves behind. This one asks the
+question that produced most of the findings on this path: **every place that
+destroys or consumes evidence, and why the obligations derived from it are
+already durable when the destruction runs.** Round after round the same shape
+turned up — evidence thrown away, or held only in memory, before the obligation
+it implied had been written down — so the sites are enumerated here rather than
+rediscovered one at a time.
+
+| Destruction                                             | What derived from it                         | Why it is safe before the delete                                                                                    |
+| ------------------------------------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| remnant deleted after a successful `ln` restore         | the record itself                            | not destroyed — the content is now the owner record at the canonical path                                           |
+| remnant deleted because its holder is verified dead     | that run's commands, named only by its token | the token is appended to `condemned` first; a token for a run with nothing alive costs one drain that finds nothing |
+| taken record dropped because `ln` could not put it back | same                                         | same: the token is appended to `condemned` before the copy goes                                                     |
+| taken record deleted after a confirmed-stale verdict    | same                                         | `record_condemned_run` runs immediately before it, inside the election                                              |
+| `condemned` list removed                                | every outstanding run's commands             | removed only after each token's drain confirmed its processes gone; a drain that cannot confirm exits instead       |
+| `captured.<token>` removed after a drain                | that run's process tree                      | removed only once every captured PID is gone or is somebody else now                                                |
+| `captured.<token>` removed when nothing was captured    | nothing                                      | reached only when the persisted file and the tag scan are both empty, so there is nothing to hand on                |
+| lock directory removed at release                       | this run's own commands                      | the exit trap tears down its commands before release, and release only deletes a record that still names this run   |
+| private staged/claim files removed                      | nothing                                      | never published; no other process reads or expects them                                                             |
+
+Two properties make the table checkable rather than a promise. Obligations are
+written to the lock **root**, not the lock directory, so releasing a lock never
+takes them with it. And every entry above records before it deletes, which is
+the same ordering the rest of this note argues for: the failure direction of
+writing too early is a redundant no-op, and of writing too late is a run that
+starts beside somebody else's work.
+
 #### The rules the table rests on
 
 Crashes are only half of it. The other half is ordinary interleaving: two runs

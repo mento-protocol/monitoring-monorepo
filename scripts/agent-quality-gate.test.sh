@@ -5718,6 +5718,82 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     fail "a captured set must be cleared once its processes are confirmed gone"
   rm -rf "$gate_race_root/run.lock"
 
+  # A dead run's record parked in a remnant is not garbage: it names a run
+  # whose commands can still be running, and its token is the only handle to
+  # them. A is killed mid-command with its watchdog suspended; B takes A's
+  # record and dies at the take boundary; C evaluates the remnant. Discarding
+  # it before writing the token down loses A's commands entirely.
+  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned"
+  rm -f "$gate_race_root"/captured.*
+  : > "$gate_race_log"
+  RACE_STUB_IGNORE_TERM=1 \
+    RACE_STUB_SECONDS=60 \
+    AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 45 \
+    > "$gate_race_out/remnant-a.out" 2>&1 &
+  race_remnant_a_wrapper=$!
+  race_waited=0
+  while [[ -z "$(awk '/^enter/ { print $2; exit }' "$gate_race_log")" && "$race_waited" -lt 120 ]]; do
+    sleep 0.5
+    race_waited=$((race_waited + 1))
+  done
+  race_remnant_orphan="$(awk '/^enter/ { print $2; exit }' "$gate_race_log")"
+  [[ -n "$race_remnant_orphan" ]] ||
+    fail "the remnant-token case never saw a command start"
+  race_remnant_watchdogs="$(pgrep -f "collect_tree" 2>/dev/null | tr '\n' ' ')"
+  for race_wd in $race_remnant_watchdogs; do kill -STOP "$race_wd" 2>/dev/null || true; done
+  race_remnant_a_pid="$(sed -n 's/^pid=//p' "$gate_race_root/run.lock/owner" | head -n1)"
+  kill -9 "$race_remnant_a_pid" "$race_remnant_a_wrapper" 2>/dev/null || true
+  wait "$race_remnant_a_wrapper" 2>/dev/null || true
+
+  # B takes the record and dies holding it.
+  RACE_STUB_SECONDS=2 \
+    AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+    AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    AGENT_QUALITY_GATE_LOCK_CRASH_AT=after-take \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 45 \
+    > "$gate_race_out/remnant-b.out" 2>&1 || true
+  [[ -n "$(find "$gate_race_root/run.lock" -name 'owner.reclaiming.*' 2>/dev/null)" ]] ||
+    fail "the remnant-token case needs a parked record to mean anything"
+  kill -0 "$race_remnant_orphan" 2>/dev/null ||
+    fail "the remnant-token case needs the first run's command alive"
+  (
+    while kill -0 "$race_remnant_orphan" 2>/dev/null; do sleep 0.5; done
+    date +%s > "$gate_race_out/remnant_died"
+  ) &
+  race_remnant_watcher=$!
+  RACE_STUB_SECONDS=2 \
+    AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+    AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 90 \
+    > "$gate_race_out/remnant-c.out" 2>&1 || true
+  wait "$race_remnant_watcher" 2>/dev/null || true
+  race_remnant_died="$(cat "$gate_race_out/remnant_died" 2>/dev/null || echo 0)"
+  race_remnant_c_started="$(awk '/^enter/ { if (NR > 1) { print $3; exit } }' "$gate_race_log")"
+  [[ -n "$race_remnant_c_started" ]] ||
+    fail "the run inheriting a discarded remnant must still execute"
+  [[ "$race_remnant_died" -ne 0 ]] ||
+    fail "a command named only by a discarded remnant must not keep running"
+  [[ "$race_remnant_c_started" -ge "$race_remnant_died" ]] ||
+    fail "the inheriting run started $((race_remnant_died - race_remnant_c_started))s before that command died"
+  for race_wd in $race_remnant_watchdogs; do
+    kill -CONT "$race_wd" 2>/dev/null || true
+    kill -KILL "$race_wd" 2>/dev/null || true
+  done
+  rm -rf "$gate_race_root/run.lock"
+
   # Crash-point sweep. Every boundary where this path creates, links, renames
   # or removes something is a place a SIGKILL can land, and each of the rounds
   # of review on this PR found one of them. The gate names those boundaries so

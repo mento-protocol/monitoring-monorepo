@@ -487,6 +487,19 @@ gate_lock_claim_tmp=""
 # ownerless and the next waiter starts beside a running holder. So a lock with
 # no record is not evidence of an absent holder until the remnants have been
 # read: a remnant naming a live process IS the owner record, misfiled.
+# A record about to be thrown away may name a run whose commands are still
+# running, and the token inside it is the only handle to them. Record that
+# obligation before the evidence goes — never after, because "after" is a
+# window a signal can land in. Same failure direction as the rest of this path:
+# condemning a run with nothing left alive costs one drain that finds nothing.
+gate_lock_condemn_before_discard() {
+  local record="$1"
+  local token
+  token="$(gate_lock_field_from_file "$record" token)"
+  [[ -n "$token" ]] || return 0
+  record_condemned_run "$token"
+}
+
 gate_lock_recover_hidden_record() {
   local lock="$1"
   local remnant pid start recovered=1
@@ -506,6 +519,9 @@ gate_lock_recover_hidden_record() {
       # copy still names a live process, so it stays: a record naming a live
       # holder is evidence, and only a verified-dead one may be deleted.
     else
+      # Dead holder — but "dead run" is not the same as "nothing running". Its
+      # commands outlive it, and this record is the last thing that names them.
+      gate_lock_condemn_before_discard "$remnant"
       rm -f "$remnant"
     fi
   done
@@ -518,7 +534,12 @@ gate_lock_recover_hidden_record() {
 restore_gate_lock_record() {
   [[ -n "$gate_lock_reclaim_tmp" ]] || return 0
   if [[ -e "$gate_lock_reclaim_tmp" && -n "$gate_lock_reclaim_origin" ]]; then
-    ln "$gate_lock_reclaim_tmp" "$gate_lock_reclaim_origin" 2>/dev/null || true
+    if ! ln "$gate_lock_reclaim_tmp" "$gate_lock_reclaim_origin" 2>/dev/null; then
+      # The slot is occupied, so this copy is superseded and about to be
+      # dropped rather than put back. It can still name a run whose commands
+      # are alive, so the obligation is written down before it goes.
+      gate_lock_condemn_before_discard "$gate_lock_reclaim_tmp"
+    fi
   fi
   rm -f "$gate_lock_reclaim_tmp"
   gate_lock_reclaim_tmp=""
@@ -842,6 +863,17 @@ drain_condemned_run_commands() {
     gate_drain_capture="$(cat "$captured_file" 2>/dev/null)
 "
   fi
+  # Walked twice, with a pause between. A tree walk is a snapshot, and a
+  # snapshot can catch a wrapper in the instant before its child is visible —
+  # observed, once, as a capture holding only the two tagged processes and none
+  # of their descendants. Missing a descendant here is expensive, because the
+  # first signal kills the tagged wrapper and with it the only handle to
+  # anything the walk did not already record. Two walks are not a proof, but
+  # they cost 200ms on a path that runs only after a crash.
+  for wrapper in $(pgrep -f "agentqg:${token}" 2>/dev/null || true); do
+    capture_process_tree "$wrapper"
+  done
+  sleep 0.2
   for wrapper in $(pgrep -f "agentqg:${token}" 2>/dev/null || true); do
     capture_process_tree "$wrapper"
   done
