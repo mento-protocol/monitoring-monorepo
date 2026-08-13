@@ -17,8 +17,8 @@ garden_lane: adrs-architecture
 measurement and version-bound decision producer. PR #1581 implements the source
 Grafana paging rules and routing. Protected policy publication and
 authentication, producer activation, human-approved Grafana application, and
-live proof remain rollout gates in
-[`docs/PLAN-peg-monitoring.md`](../PLAN-peg-monitoring.md).
+current rollout state are recorded in
+[`docs/notes/peg-monitoring.md`](../notes/peg-monitoring.md).
 **Scope:** metrics-bridge / alerts
 
 ## Context
@@ -148,9 +148,9 @@ live-proof gates pass.
 
 ## Evidence
 
-- `docs/PLAN-peg-monitoring.md` (both adversarial review rounds and the
-  EUROP market-structure evidence: live-verified venue depth, spread, and
-  volume figures, 2026-07-22)
+- [PR #1445](https://github.com/mento-protocol/monitoring-monorepo/pull/1445)
+  (both original review rounds and the 2026-07-22 EUROP market-structure
+  evidence)
 - `docs/notes/polygon-monitoring.md` (EURm/EUROP pool, MANUAL feed,
   migration-multisig breaker path)
 - `metrics-bridge/src/peg/order-book.ts`,
