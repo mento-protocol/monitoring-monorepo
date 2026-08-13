@@ -338,7 +338,9 @@ jobs:
               `root's \`pnpm-workspace.yaml\`. Update the override and lockfile ` +
               `together: in that root, run \`pnpm install --lockfile-only\`, inspect ` +
               `the lockfile diff for unrelated version changes, then verify with ` +
-              `\`pnpm install --frozen-lockfile\`. If the patched release is younger ` +
+              `\`pnpm install --frozen-lockfile\`. The override comment must name ` +
+              `the advisory and patched floor; explain a superseded floor when needed ` +
+              `to explain the range. If the patched release is younger ` +
               `than 4320 minutes, add a narrow reviewed \`minimumReleaseAgeExclude\` ` +
               `and append \`--config.minimumReleaseAge=0\` to the lockfile-only ` +
               `command. Prefer range-scoped exact pins ` +
