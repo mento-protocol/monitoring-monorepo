@@ -60,6 +60,7 @@
 import {
   NEEDS_TRIAGE_LABEL,
   neutralizeUntrusted,
+  QUEUE_LABEL,
   REOPEN_SHED_LABELS,
   STRAND_SHAPE_CLOSED_NEEDS_TRIAGE,
   STRAND_SHAPE_OPEN_VERDICT,
@@ -217,13 +218,32 @@ export function hasAdmissibleVerdict(comments) {
   return selectVerdictComment(comments ?? []).body !== null;
 }
 
-/** The pair Stage B's selector matches: `--state open` AND
- * `sentry:needs-triage`. A stub missing either is invisible to triage, and — if
- * its `closedAt` postdates the regression — to ingest as well. */
+/**
+ * Everything Stage B's selector matches, and it takes THREE things, not two:
+ * `--label sentry-triage --label sentry:needs-triage --state open`
+ * (.github/workflows/sentry-triage-agent.yml). A stub missing any of them is
+ * invisible to triage, and — if its `closedAt` postdates the regression — to
+ * ingest as well.
+ *
+ * `sentry-triage` was missing here while the docstring claimed this was the
+ * selector, which made it a predicate that could report a stub selectable when
+ * Stage B would never see it (issue #1817). It is the END-STATE test every
+ * `verify-end-state` re-queue is judged by, so the omission let a re-queue shed a
+ * stub's verdict, leave it unselectable, and still report success — the exact
+ * outcome the verification exists to catch. Every caller wanted the real
+ * selector; none wanted the pair.
+ *
+ * The verifier CORRECTS the other two — it reopens a closed stub and re-adds
+ * `sentry:needs-triage` — and deliberately does NOT correct this one. Removing
+ * `sentry-triage` is how a human retires a stub for good, so putting it back
+ * would overrule the withdrawal. Its absence is reported, never repaired.
+ */
 export function isSelectableForTriage({ state, labels } = {}) {
+  const names = Array.isArray(labels) ? labels : [];
   return (
     String(state ?? "").toUpperCase() !== "CLOSED" &&
-    (Array.isArray(labels) ? labels : []).includes(NEEDS_TRIAGE_LABEL)
+    names.includes(QUEUE_LABEL) &&
+    names.includes(NEEDS_TRIAGE_LABEL)
   );
 }
 
@@ -379,6 +399,17 @@ export async function ensureSelectableForTriage(
     const live = await observe();
     if (live && isSelectableForTriage(live)) return live;
 
+    // WITHDRAWN: stop, and write nothing more. `sentry-triage` gone from a read
+    // we actually took means a human retired this stub while the re-queue was
+    // in flight. Neither correction below can make it selectable again — only
+    // re-adding the label would, and doing that would overrule the withdrawal —
+    // so continuing would just be more writes on an issue somebody removed from
+    // the queue. Fall through to the failure below, which says what was seen.
+    // A FAILED read is different and keeps the old behaviour: `live` is null, we
+    // know nothing about membership, and correcting from `fallbackState` is
+    // still the right guess.
+    if (live && !(live.labels ?? []).includes(QUEUE_LABEL)) break;
+
     // Correct whatever is — or, with no read, may be — wrong. Both writes are
     // idempotent, so a repeat costs nothing and a lost response is harmless.
     const looksClosed = live
@@ -430,6 +461,23 @@ export async function ensureSelectableForTriage(
   const seen = observed
     ? `state=${observed.state}, labels=${observed.labels.join("|")}`
     : `unreadable (${readError})`;
+
+  // Membership gone is a DIFFERENT operator story from the rest, and telling
+  // them apart is the whole value of the message: nothing here is broken, a
+  // human retired the stub mid-re-queue and this run had already shed its
+  // previous-round markers by then. Say that, and do not ask anyone to undo the
+  // withdrawal by re-adding the label.
+  const withdrawn =
+    observed !== null && !(observed.labels ?? []).includes(QUEUE_LABEL);
+  if (withdrawn) {
+    process.stderr.write(
+      `::error::Queue stub #${issueNumber} lost ${QUEUE_LABEL} while it was being re-queued for triage (${seen}), so it is no longer in the queue and Stage B will never select it. This run had already shed its previous-round markers (${REOPEN_SHED_LABELS.join(", ")}). Nothing is re-adding ${QUEUE_LABEL} — removing it is how a stub is retired. If the removal was a mistake, re-add ${QUEUE_LABEL} and ${NEEDS_TRIAGE_LABEL} by hand.\n`,
+    );
+    throw new Error(
+      `Queue stub #${issueNumber} left the queue (${QUEUE_LABEL} removed) during a re-queue for triage (${seen}).`,
+    );
+  }
+
   process.stderr.write(
     `::error::Queue stub #${issueNumber} could not be confirmed open and carrying ${NEEDS_TRIAGE_LABEL} while being re-queued for triage (${seen}). It is STRANDED — restore it by hand: reopen it if it is closed, add ${NEEDS_TRIAGE_LABEL}, and remove any stale marker from the previous round (${REOPEN_SHED_LABELS.join(", ")}).\n`,
   );

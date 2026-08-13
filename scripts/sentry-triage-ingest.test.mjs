@@ -2705,6 +2705,71 @@ for (const withdrawn of [
   });
 }
 
+await test("a withdrawal landing mid-write fails the run loudly, never reports success", async () => {
+  // The revalidating read cannot close this window: the operator removes
+  // `sentry-triage` AFTER the sweep decided and BEFORE the label writes land. By
+  // then the verdict is already shed, and nothing may undo that — a compensating
+  // re-add would reintroduce the two-writers race the withdrawal just settled.
+  // What must not happen is the run reporting success, which is what it did
+  // while the end-state test omitted queue membership (#1817).
+  const fake = makeFakeGitHub({
+    issues: [strandedOpenStub(["sentry:verdict-upstream"])],
+  });
+  let views = 0;
+  const runGh = async (args, opts = {}) => {
+    const out = await fake.runGh(args, opts);
+    // The withdrawal lands the instant the revalidating read returns.
+    if (args[1] === "view" && ++views === 1) {
+      fake.get(42).labels = fake
+        .get(42)
+        .labels.filter((name) => name !== "sentry-triage");
+    }
+    return out;
+  };
+
+  const stderr = [];
+  const write = process.stderr.write.bind(process.stderr);
+  process.stderr.write = (chunk) => {
+    stderr.push(String(chunk));
+    return true;
+  };
+  let counts;
+  try {
+    counts = await runIngest(
+      { repo: REPO, trackerIssue: 1282 },
+      ingestDeps(fake, {
+        now: () => SWEEP_NOW,
+        recoverStranded: (options, issue, sweep) =>
+          recoverStrandedQueueIssue(options, issue, { ...sweep, runGh }),
+      }),
+    );
+  } finally {
+    process.stderr.write = write;
+  }
+
+  // The decisive assertion: NOT counted as a recovery, and the run goes red.
+  assertEqual(counts.recoveredOpenVerdict, 0);
+  assertEqual(counts.errors, 1);
+  // The stub is left as the withdrawal found it — nothing re-adds the queue
+  // label, because removing it is how a stub is retired.
+  const issue = fake.get(42);
+  assert(
+    !issue.labels.includes("sentry-triage"),
+    `the withdrawal must stand: ${JSON.stringify(issue.labels)}`,
+  );
+  // And the operator gets the right story, not the generic stranded one.
+  const errorLine = stderr.find((line) => line.includes("::error::"));
+  assert(errorLine, "a run that shed a verdict for nothing must be loud");
+  assert(
+    errorLine.includes("sentry-triage"),
+    `the failure must name the label that vanished: ${errorLine}`,
+  );
+  assert(
+    !/It is STRANDED/.test(errorLine),
+    `a withdrawn stub is retired, not stranded: ${errorLine}`,
+  );
+});
+
 await test("an open-verdict recovery whose shed fails is loud, not silently selectable", async () => {
   // The OPEN shape has no cover the closed one has: restoring the queue label
   // makes the stub selectable IMMEDIATELY, so a shed that never lands would hand

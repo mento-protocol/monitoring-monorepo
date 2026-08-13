@@ -321,6 +321,18 @@ unselectable: it takes the one artifact the stub had and buys nothing. Removing
 open shape, which has no `sentry:needs-triage` left to remove — so **to retire a
 verdicted, unqueued stub for good, remove `sentry-triage`.**
 
+A read cannot close that window on its own, so membership is part of the
+**end state** the re-queue is judged by. `isSelectableForTriage` is the full
+Stage B selector — open, `sentry-triage`, `sentry:needs-triage` — and it is what
+every `verify-end-state` re-queue must observe before it may report success. A
+withdrawal landing after the check but during the writes therefore ends the run
+RED, naming the label that vanished, rather than recording a success for a stub
+whose verdict it just shed. The verifier repairs the other two conditions and
+never this one: re-adding `sentry-triage` would overrule the human who removed
+it. Nothing tries to unwind the shed either — a compensating re-add would
+reintroduce the two-writers race the withdrawal just ended, and loud failure is
+this pipeline's discipline for a mutation it cannot safely reverse.
+
 The two shapes differ in one more way, and the stub's own state is why. On the
 closed path every interruption lands somewhere inert: the state change goes last,
 so a stub whose shed failed is still closed and invisible to Stage B until the
