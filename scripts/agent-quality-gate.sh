@@ -2403,6 +2403,12 @@ while IFS= read -r path; do
           add_command "pnpm sentry:autofix:run-record:test" "Sentry autofix run-record builder changed"
           add_command "pnpm sentry:autofix:finalize:test" "Sentry autofix run-record builder changed"
           ;;
+        scripts/sentry-autofix-record-labels.mjs)
+          # The record-run architectural backfill labeler (#1812). Its tests live
+          # in the finalize suite (the record-run job that owns this write), which
+          # exercises the plan, the revalidation re-read, and the label writes.
+          add_command "pnpm sentry:autofix:finalize:test" "Sentry autofix record-run backfill labeler changed"
+          ;;
         scripts/sentry-triage-archive.mjs|scripts/sentry-triage-archive.test.mjs)
           add_command "pnpm sentry:archive:test" "Sentry triage archive helper changed"
           ;;

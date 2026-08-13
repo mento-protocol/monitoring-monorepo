@@ -35,7 +35,11 @@ import {
 // and the untrusted-author selection fence.
 import { AUTOFIX_RUN_RECORD_MARKER } from "./sentry-autofix-run-record.mjs";
 import { AUTOFIX_COMMENT_PREFIX } from "./sentry-triage-digest.mjs";
-import { selectMarkedComment } from "./sentry-triage-project-core.mjs";
+import {
+  FIX_SCOPE_MECHANICAL,
+  selectMarkedComment,
+  VERDICT_MARKER,
+} from "./sentry-triage-project-core.mjs";
 import {
   FIX_PR_OPENED_LABEL,
   FIX_REFUSED_LABEL,
@@ -937,12 +941,72 @@ const architecturalSkip = (issue) => ({
   reason: SKIP_FIX_SCOPE_ARCHITECTURAL,
 });
 
-await test("backfill: self-heal-creates the label FIRST, then one ^[0-9]+$-validated --add-label per stub", async () => {
-  const calls = [];
+const BOT = { login: "github-actions[bot]" };
+
+// A `gh issue view --json …` body carrying ONE trusted verdict comment — the
+// shape `readStub`/`resolveVerdict` re-read during the backfill revalidation.
+// `fixScope: null` omits the line (normalizes to architectural, the pre-#1785
+// shape); FIX_SCOPE_MECHANICAL makes the stub selectable again.
+function verdictView(number, { verdict = "code-fix", fixScope = null } = {}) {
+  const body = [
+    VERDICT_MARKER,
+    "",
+    "```yaml",
+    `verdict: ${verdict}`,
+    "confidence: medium",
+    "affected_repo: mento-protocol/monitoring-monorepo",
+    "summary: A scoped bug",
+    "root_cause: |",
+    "  Abstract root cause.",
+    "proposed_action: |",
+    "  Abstract action.",
+    "duplicate_of: []",
+    ...(fixScope === null ? [] : [`fix_scope: ${fixScope}`]),
+    "```",
+    "",
+    "Diagnosis prose.",
+  ].join("\n");
+  return JSON.stringify({
+    number: Number(number),
+    title: `[sentry] APP-MENTO-ORG-${number} (analytics-mento-org, error)`,
+    body: "",
+    labels: [{ name: "sentry-triage" }],
+    comments: [{ author: BOT, body, createdAt: "2026-07-18T00:00:00Z" }],
+  });
+}
+
+// runGh mock for the backfill loop: `label create` and `issue edit` succeed;
+// `issue view` returns the configured LIVE verdict per number so the
+// revalidation re-read runs for real. `scopeByNumber` maps a number string to a
+// `verdictView` spec, or the sentinel "gone" (no verdict comment) / "error" (the
+// read throws). A number not in the map defaults to still-architectural.
+function makeBackfillRunGh({ scopeByNumber = {}, calls = [] } = {}) {
   const runGh = async (args) => {
     calls.push(args);
+    const [a0, a1] = args;
+    if (a0 === "issue" && a1 === "view") {
+      const number = String(args[2]);
+      const spec = scopeByNumber[number] ?? {};
+      if (spec === "error") throw new Error("gh issue view failed: boom");
+      if (spec === "gone") {
+        return JSON.stringify({
+          number: Number(number),
+          title: "t",
+          body: "",
+          labels: [],
+          comments: [],
+        });
+      }
+      return verdictView(number, spec);
+    }
     return "{}";
   };
+  return { runGh, calls };
+}
+
+await test("backfill: self-heal-creates the label FIRST, then one ^[0-9]+$-validated --add-label per stub", async () => {
+  // Every stub is still live-architectural, so all pass revalidation and label.
+  const { runGh, calls } = makeBackfillRunGh();
   const skip = [
     architecturalSkip("10"),
     architecturalSkip("22"),
@@ -973,11 +1037,7 @@ await test("backfill: self-heal-creates the label FIRST, then one ^[0-9]+$-valid
 });
 
 await test("backfill: a malformed (non-integer) issue number is REFUSED, never interpolated into a gh argv", async () => {
-  const calls = [];
-  const runGh = async (args) => {
-    calls.push(args);
-    return "{}";
-  };
+  const { runGh, calls } = makeBackfillRunGh();
   const skip = [
     architecturalSkip("7"),
     architecturalSkip("not-a-number"),
@@ -1007,11 +1067,7 @@ await test("backfill: only fix-scope-architectural skips are labeled (a future s
 
 await test("backfill: idempotent — re-running produces the identical --add-label edits", async () => {
   const run = async () => {
-    const calls = [];
-    const runGh = async (args) => {
-      calls.push(args);
-      return "{}";
-    };
+    const { runGh, calls } = makeBackfillRunGh();
     await backfillArchitecturalLabels(
       [architecturalSkip("5"), architecturalSkip("6")],
       { repo: "o/r" },
@@ -1042,6 +1098,64 @@ await test("backfill: the CLI's space-separated issue list rebuilds an all-archi
     architecturalSkip("33"),
   ]);
   assertDeepEqual(skipReportFromIssueList(""), []);
+});
+
+await test("backfill: revalidates each stub's LIVE scope before labeling — stale/gone/unreadable are left selectable (#1812 race)", async () => {
+  // The skip report is a snapshot from the select run. Between select and this
+  // record run each stub can move: #10 is still architectural (label it), #22 was
+  // re-triaged to mechanical (must NOT be re-excluded off the stale snapshot), #33
+  // lost its verdict comment, #44 fails to read. The last three fail CLOSED: no
+  // label, so they stay selectable and self-heal next run.
+  const calls = [];
+  const { runGh } = makeBackfillRunGh({
+    calls,
+    scopeByNumber: {
+      10: { fixScope: null },
+      22: { fixScope: FIX_SCOPE_MECHANICAL },
+      33: "gone",
+      44: "error",
+    },
+  });
+  const res = await backfillArchitecturalLabels(
+    [
+      architecturalSkip("10"),
+      architecturalSkip("22"),
+      architecturalSkip("33"),
+      architecturalSkip("44"),
+    ],
+    { repo: "o/r" },
+    { runGh },
+  );
+  assertDeepEqual(res.labeled, ["10"]);
+  assertDeepEqual(res.revalidated, ["22", "33", "44"]);
+  // Only the still-architectural stub got an --add-label edit; the stale ones did
+  // not (the whole point — a now-mechanical stub must not be re-excluded).
+  const editedNumbers = calls
+    .filter((c) => c[0] === "issue" && c[1] === "edit")
+    .map((c) => c[2]);
+  assertDeepEqual(editedNumbers, ["10"]);
+});
+
+await test("backfill NEGATIVE CONTROL: a stub whose live verdict is now mechanical is NEVER re-labeled (reds if the re-read is dropped)", async () => {
+  // Drop the revalidation re-read and #77 gets the stale architectural label back
+  // — the exact race Finding 1 closes. So this asserts the absence of that write:
+  // remove `liveArchitecturalScope` from the loop and both assertions go red.
+  const calls = [];
+  const { runGh } = makeBackfillRunGh({
+    calls,
+    scopeByNumber: { 77: { fixScope: FIX_SCOPE_MECHANICAL } },
+  });
+  const res = await backfillArchitecturalLabels(
+    [architecturalSkip("77")],
+    { repo: "o/r" },
+    { runGh },
+  );
+  assertDeepEqual(res.labeled, []);
+  assertDeepEqual(res.revalidated, ["77"]);
+  assert(
+    !calls.some((c) => c[0] === "issue" && c[1] === "edit" && c[2] === "77"),
+    "a now-mechanical stub must receive no --add-label edit",
+  );
 });
 
 // --- fork-PR ownership fence across the WHOLE finalize workflow (#1810; P1) ----

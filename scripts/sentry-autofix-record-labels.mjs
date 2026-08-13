@@ -18,6 +18,13 @@
  * autofix job with a write scope besides finalize. The select job stays
  * `issues:read`, so #1813's stated security blocker never materializes.
  *
+ * The skip report is a snapshot from the select run, so before labeling each stub
+ * the backfill RE-READS its live verdict through the selector's own resolver and
+ * only labels a stub the live scope still gates out — an operator who re-triaged
+ * #N to mechanical in the interval must not get the now-selectable stub excluded
+ * from the window off a stale snapshot. A gone/unreadable verdict fails CLOSED
+ * (no label), so the stub stays selectable and self-heals on the next run.
+ *
  * Legacy stubs stay CLOSED (operator resolution #1): a local code-fix stub is
  * closed at settlement, and this only adds a window-exclusion label — it never
  * reopens. A regression reopens any that still fire via the normal ingest path
@@ -37,6 +44,11 @@ import {
   FIX_SCOPE_ARCHITECTURAL_LABEL,
   LABEL_DEFINITIONS,
 } from "./sentry-triage-ingest.mjs";
+import {
+  FIX_SCOPE_MECHANICAL,
+  resolveVerdict,
+} from "./sentry-triage-project-core.mjs";
+import { readStub } from "./sentry-autofix-queue-io.mjs";
 
 // The selector's fix_scope skip reason (scripts/sentry-autofix-select.mjs
 // SKIP_FIX_SCOPE_ARCHITECTURAL). Kept as its own literal here so a rename there
@@ -44,6 +56,12 @@ import {
 // on it so a future second skip reason cannot accidentally get the architectural
 // label.
 export const SKIP_FIX_SCOPE_ARCHITECTURAL = "fix-scope-architectural";
+
+// The fixable verdict, mirrored from the selector (scripts/sentry-autofix-select.mjs
+// AUTOFIX_VERDICT). The revalidation below re-reads through the SAME authoritative
+// resolver the selector uses and re-applies the selector's own two conditions:
+// the verdict is still `code-fix` AND its fix_scope is still not mechanical.
+const AUTOFIX_VERDICT = "code-fix";
 
 // One run may backfill at most this many labels. The skip report can never hold
 // more than the selector's MAX_CANDIDATE_EVALUATIONS (50) entries, so this is a
@@ -124,17 +142,65 @@ export function defaultRunGh(args) {
 }
 
 /**
+ * Re-read issue #<number>'s LIVE verdict through the SAME authoritative resolver
+ * the selector uses (`readStub` -> `resolveVerdict`) and re-apply the selector's
+ * own fix_scope gate: still `code-fix` AND its fix_scope still not `mechanical`.
+ *
+ * The skip report is a SNAPSHOT taken at select time; between the select run and
+ * this record run an operator can re-triage #N from architectural to mechanical.
+ * Adding the exclusion label off the stale snapshot would keep the now-mechanical
+ * stub out of the candidate window until yet another re-triage — the exact stub
+ * the fix pipeline should now be picking up. So confirm the scope against live
+ * state before labeling. Tri-state so the caller can fail CLOSED:
+ *  - "architectural": live verdict still gates out on scope — safe to label.
+ *  - "selectable":    live verdict now parses as `mechanical` (or is no longer
+ *                     `code-fix`) — DO NOT label; the stub is correctly selectable.
+ *  - "unconfirmed":   the verdict is gone or unreadable (read/parse error) — DO
+ *                     NOT label; we cannot confirm the scope, so fail closed and
+ *                     leave the stub selectable (re-evaluated next run — self-heal).
+ */
+async function liveArchitecturalScope(runGh, repo, number) {
+  let full;
+  try {
+    full = await readStub(runGh, repo, number);
+  } catch (err) {
+    return {
+      state: "unconfirmed",
+      message: err instanceof Error ? err.message : String(err),
+    };
+  }
+  let parsed;
+  try {
+    ({ parsed } = resolveVerdict(full, number));
+  } catch (err) {
+    return {
+      state: "unconfirmed",
+      message: err instanceof Error ? err.message : String(err),
+    };
+  }
+  const architectural =
+    parsed.verdict === AUTOFIX_VERDICT &&
+    parsed.fixScope !== FIX_SCOPE_MECHANICAL;
+  return { state: architectural ? "architectural" : "selectable" };
+}
+
+/**
  * Backfill `sentry:fix-scope-architectural` onto every architectural stub in a
  * skip report. Self-heal-creates the label FIRST (from LABEL_DEFINITIONS, the
  * single source of truth for its color/description) so a record run that lands
  * before any post-deploy ingest bootstrapped the label still labels cleanly, then
- * issues ONE `gh issue edit --add-label` per validated number.
+ * REVALIDATES each stub's live scope (`liveArchitecturalScope`) and issues ONE
+ * `gh issue edit --add-label` per number the live verdict still gates out on
+ * scope. A stub re-triaged to mechanical since the skip report, or whose verdict
+ * is now gone/unreadable, is left UNLABELED (and so stays selectable) — the label
+ * is a snapshot-driven write and must not outlive the snapshot's truth.
  *
  * Every gh call is fail-SOFT and independent: a failed label-create is logged and
  * the per-issue edits still run (they self-heal on a later run if the label truly
- * does not exist); a failed edit skips that one issue (it re-enters the skip
- * report next run). Never throws — the record-run job is best-effort. Returns
- * `{ labeled, failed, refused, overflow }`.
+ * does not exist); a failed re-read or edit skips that one issue (it re-enters the
+ * skip report next run). Never throws — the record-run job is best-effort. Returns
+ * `{ labeled, failed, revalidated, refused, overflow }` where `revalidated` holds
+ * the numbers dropped because the live verdict no longer confirms architectural.
  */
 export async function backfillArchitecturalLabels(
   skipped,
@@ -186,7 +252,23 @@ export async function backfillArchitecturalLabels(
 
   const labeled = [];
   const failed = [];
+  const revalidated = [];
   for (const number of plan.numbers) {
+    // Revalidate against LIVE state before writing the snapshot-driven label.
+    const live = await liveArchitecturalScope(runGh, repo, number);
+    if (live.state !== "architectural") {
+      if (live.state === "selectable") {
+        process.stderr.write(
+          `note: #${number} was reported architectural but its live verdict no longer is (re-triaged to a selectable fix_scope); leaving it unlabeled and selectable.\n`,
+        );
+      } else {
+        process.stderr.write(
+          `note: could not confirm a live architectural fix_scope for #${number} (${live.message}); failing closed, leaving it unlabeled and selectable.\n`,
+        );
+      }
+      revalidated.push(number);
+      continue;
+    }
     try {
       await runGh([
         "issue",
@@ -206,7 +288,13 @@ export async function backfillArchitecturalLabels(
       failed.push(number);
     }
   }
-  return { labeled, failed, refused: plan.refused, overflow: plan.overflow };
+  return {
+    labeled,
+    failed,
+    revalidated,
+    refused: plan.refused,
+    overflow: plan.overflow,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -309,6 +397,7 @@ async function main() {
   process.stderr.write(
     `Backfilled ${FIX_SCOPE_ARCHITECTURAL_LABEL} onto ${result.labeled.length} stub(s)` +
       `${result.failed.length ? `, ${result.failed.length} failed` : ""}` +
+      `${result.revalidated.length ? `, ${result.revalidated.length} left unlabeled (live scope no longer architectural)` : ""}` +
       `${result.refused.length ? `, ${result.refused.length} refused` : ""}.\n`,
   );
 }
