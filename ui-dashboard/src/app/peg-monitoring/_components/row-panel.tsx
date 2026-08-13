@@ -68,58 +68,67 @@ export function RowPanel({
     <div
       id={`peg-panel-${asset.asset.asset}`}
       data-testid={`peg-panel-${asset.asset.asset}`}
+      role="row"
       className="border-y border-border bg-card px-[18px] pb-[22px] pt-5"
     >
-      <div className="space-y-2">
-        {stale ? (
-          <PanelLine tone="warning" text={staleNotice(ageLabel)} />
-        ) : null}
-        {previousPolicy ? (
-          <PanelLine
-            tone="warning"
-            text={PREVIOUS_POLICY_NOTICE}
-            testId={`peg-previous-policy-${asset.asset.asset}`}
+      <div role="cell" aria-colspan={9}>
+        <div className="space-y-2">
+          {stale ? (
+            <PanelLine tone="warning" text={staleNotice(ageLabel)} />
+          ) : null}
+          {previousPolicy ? (
+            <PanelLine
+              tone="warning"
+              text={PREVIOUS_POLICY_NOTICE}
+              testId={`peg-previous-policy-${asset.asset.asset}`}
+            />
+          ) : null}
+          {notice === null ? null : (
+            <PanelLine
+              tone={notice.tone}
+              text={notice.text}
+              live={notice.live}
+            />
+          )}
+          {primaryProblem === null ? null : (
+            <PanelLine
+              tone="warning"
+              text={`Primary market unusable: ${primaryProblem}`}
+              testId={`peg-primary-unusable-${asset.asset.asset}`}
+            />
+          )}
+        </div>
+        {monitors.length > 1 ? (
+          <MonitorBreakdown
+            monitors={monitors}
+            warnFraction={asset.asset.policy.structuralWarnFraction}
+            structuralCurrent={structuralCurrent}
           />
         ) : null}
-        {notice === null ? null : (
-          <PanelLine tone={notice.tone} text={notice.text} live={notice.live} />
-        )}
-        {primaryProblem === null ? null : (
-          <PanelLine
-            tone="warning"
-            text={`Primary market unusable: ${primaryProblem}`}
-            testId={`peg-primary-unusable-${asset.asset.asset}`}
+        <div className="mt-4">
+          <SupportingMarkets
+            asset={asset}
+            nowMs={nowMs}
+            // Retained (stale) evidence is judged against its confirmed time so
+            // it does not silently expire against the moving browser clock.
+            evidenceAtMs={stale ? producedAt * 1_000 : nowMs}
           />
-        )}
+        </div>
+        <div className="mt-4">
+          <PegHistoryChart
+            policy={asset.asset.policy}
+            nowBps={signedNowBps}
+            tone={
+              asset.thresholdTone === "uncertain"
+                ? "warning"
+                : asset.thresholdTone
+            }
+            measurement={measurementLabel(primary)}
+            nowMs={nowMs}
+          />
+        </div>
+        <p className="sr-only">{`${asset.assetName} is ${distanceLabel(asset)}.`}</p>
       </div>
-      {monitors.length > 1 ? (
-        <MonitorBreakdown
-          monitors={monitors}
-          warnFraction={asset.asset.policy.structuralWarnFraction}
-        />
-      ) : null}
-      <div className="mt-4">
-        <SupportingMarkets
-          asset={asset}
-          nowMs={nowMs}
-          // Retained (stale) evidence is judged against its confirmed time so
-          // it does not silently expire against the moving browser clock.
-          evidenceAtMs={stale ? producedAt * 1_000 : nowMs}
-        />
-      </div>
-      <div className="mt-4">
-        <PegHistoryChart
-          policy={asset.asset.policy}
-          nowBps={signedNowBps}
-          tone={
-            asset.thresholdTone === "uncertain"
-              ? "warning"
-              : asset.thresholdTone
-          }
-          measurement={measurementLabel(primary)}
-        />
-      </div>
-      <p className="sr-only">{`${asset.assetName} is ${distanceLabel(asset)}.`}</p>
     </div>
   );
 }
@@ -154,9 +163,11 @@ function PanelLine({
 function MonitorBreakdown({
   monitors,
   warnFraction,
+  structuralCurrent,
 }: {
   monitors: readonly MonitorState[];
   warnFraction: number;
+  structuralCurrent: boolean;
 }): React.JSX.Element {
   return (
     <ul className="mt-4 space-y-1.5">
@@ -173,8 +184,11 @@ function MonitorBreakdown({
             {state.monitor.poolAddress.slice(-6)}
           </Link>
           <span>
-            trading limit {formatFraction(state.saturation)} of{" "}
-            {formatFraction(warnFraction)} warn
+            {/* Same honesty rule as the row cell: an expired or absent
+                measurement must not read as a live percentage. */}
+            {structuralCurrent && state.saturation !== null
+              ? `trading limit ${formatFraction(state.saturation)} of ${formatFraction(warnFraction)} warn`
+              : `trading limit — (${structuralCurrent ? "no measurement" : "check expired"})`}
           </span>
           <span className="flex items-center gap-1.5">
             <SeverityDot tone={state.breaker.tone} />

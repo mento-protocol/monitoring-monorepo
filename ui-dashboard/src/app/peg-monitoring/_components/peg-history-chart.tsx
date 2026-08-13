@@ -34,11 +34,22 @@ const day = new Intl.DateTimeFormat("en-US", {
   timeZone: "UTC",
 });
 
-function pointLabel(point: PegHistoryPoint): string {
-  const magnitude = `${formatDeviationBps(Math.abs(point.bps))} ${point.bps < 0 ? "below" : "above"} target`;
-  const stamp = dayTime.format(point.at * 1_000).replace(",", "");
-  return `${stamp} · ${magnitude}${point.event === undefined ? "" : ` · ${point.event}`}`;
+/** "3.1 bps below target" / "at target" — matches the row's zero handling. */
+function deviationPhrase(bps: number): string {
+  if (bps === 0) return "at target";
+  return `${formatDeviationBps(Math.abs(bps))} ${bps < 0 ? "below" : "above"} target`;
 }
+
+function pointLabel(point: PegHistoryPoint): string {
+  const stamp = dayTime.format(point.at * 1_000).replace(",", "");
+  return `${stamp} · ${deviationPhrase(point.bps)}${point.event === undefined ? "" : ` · ${point.event}`}`;
+}
+
+const RANGE_MS: Record<PegChartRange, number> = {
+  "24h": 86_400_000,
+  "7d": 7 * 86_400_000,
+  "30d": 30 * 86_400_000,
+};
 
 type ChartProps = {
   policy: PegAssetPackage["policy"];
@@ -46,6 +57,7 @@ type ChartProps = {
   nowBps: number | null;
   tone: PegBoardTone;
   measurement: string;
+  nowMs: number;
   series?: readonly PegHistoryPoint[] | undefined;
 };
 
@@ -54,11 +66,16 @@ export function PegHistoryChart({
   nowBps,
   tone,
   measurement,
+  nowMs,
   series,
 }: ChartProps): React.JSX.Element {
   const [range, setRange] = useState<PegChartRange>(PEG_CHART_DEFAULT_RANGE);
   const [hovered, setHovered] = useState<number | null>(null);
-  const points = series ?? [];
+  // The selected range is a promise to the reader: whatever the feed supplies,
+  // only readings inside the window may plot, feed the axis, or reach the
+  // hover/reading list.
+  const cutoffSeconds = (nowMs - RANGE_MS[range]) / 1_000;
+  const points = (series ?? []).filter((point) => point.at >= cutoffSeconds);
   const scale = pegChartScale(policy);
   const nowY = nowBps === null ? null : scale.y(nowBps);
 
@@ -157,7 +174,7 @@ function chartLabel(
   const current =
     nowBps === null
       ? "the current deviation is unavailable"
-      : `now ${formatDeviationBps(Math.abs(nowBps))} ${nowBps < 0 ? "below" : "above"} target`;
+      : `now ${deviationPhrase(nowBps)}`;
   return count === 0
     ? `Peg history over ${range}. History is unavailable, so only the alert bands and ${current} are drawn.`
     : `Peg history over ${range}: ${count} readings, ${current}.`;
@@ -340,8 +357,9 @@ function ChartGutter({
           fontSize={10}
           fill={PEG_TONE_COLOR[tone]}
         >
-          now {nowBps < 0 ? "−" : "+"}
-          {formatDeviationBps(Math.abs(nowBps))}
+          {nowBps === 0
+            ? "now 0 bps"
+            : `now ${nowBps < 0 ? "−" : "+"}${formatDeviationBps(Math.abs(nowBps))}`}
         </text>
       )}
       <text

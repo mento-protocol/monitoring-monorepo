@@ -11,6 +11,7 @@ import type {
 import {
   formatDuration,
   formatFraction,
+  formatShortDuration,
   formatWholeBps,
 } from "./peg-board-format";
 
@@ -286,10 +287,15 @@ export function safeguardState(
       tone: "warning",
       detail: "The last breaker result is too old to use.",
     };
+  // An unreachable pool, a missing breaker, and a disabled breaker were all
+  // critical-class ("bad") in the pre-redesign safeguardState, and a disabled
+  // breaker still drives the row's Critical verdict (`hasUnsafeBreaker`) — the
+  // cell must not dress that condition in warning amber. Only "Check expired"
+  // was (and stays) a warning.
   if (!monitor.indexedPoolReachable)
     return {
       label: "Unavailable",
-      tone: "warning",
+      tone: "critical",
       detail: stale
         ? "At the last confirmed check, pool data was unavailable."
         : "Pool data is unavailable, so the breaker cannot confirm current conditions.",
@@ -297,7 +303,7 @@ export function safeguardState(
   if (monitor.breaker === null)
     return {
       label: "Unavailable",
-      tone: "warning",
+      tone: "critical",
       detail: stale
         ? "The breaker was unavailable at the last confirmed check."
         : "The breaker could not be checked.",
@@ -305,7 +311,7 @@ export function safeguardState(
   if (!monitor.breaker.enabled)
     return {
       label: "Disabled",
-      tone: "warning",
+      tone: "critical",
       detail: stale
         ? "The breaker was disabled at the last confirmed check."
         : "The breaker is disabled.",
@@ -403,6 +409,69 @@ export function alertRulesText(
   ].join(" ");
 }
 
+export type HeaderAlertRules = {
+  cadence: string;
+  tooltipLabel: string;
+  /** One entry when every peg shares the copy (label null); else per peg. */
+  rules: Array<{ label: string | null; text: string }>;
+};
+
+/**
+ * Header copy for cadence and the alert-rules ⓘ. Derived from ALL packages in
+ * a stable alphabetical order — never from the severity-sorted row order,
+ * which re-sorts live and would silently switch which peg's numbers the
+ * "board-wide" header shows. Uniform policies collapse to one copy; divergent
+ * policies render per peg, labelled, so no row inherits another peg's rules.
+ */
+export function headerAlertRules(
+  presentation: PegMonitoringPresentation,
+): HeaderAlertRules {
+  const entries = sortedCopy(presentation.assets, (left, right) =>
+    pegPairLabel(left).localeCompare(pegPairLabel(right)),
+  ).map((asset) => {
+    const interval = asset.deepSource?.policy.pollIntervalSeconds ?? null;
+    return {
+      label: pegPairLabel(asset),
+      interval,
+      text: alertRulesText(asset.asset.policy, interval),
+    };
+  });
+  if (entries.length === 0)
+    return {
+      cadence: "Checks run on schedule",
+      tooltipLabel: "Alert rules",
+      rules: [],
+    };
+  const intervals = [
+    ...new Set(
+      entries.flatMap((entry) =>
+        entry.interval === null ? [] : [entry.interval],
+      ),
+    ),
+  ];
+  const cadence =
+    intervals.length === 0
+      ? "Checks run on schedule"
+      : intervals.length === 1
+        ? `Checks every ${formatShortDuration(intervals[0]!)}`
+        : `Checks every ${formatShortDuration(Math.min(...intervals))}–${formatShortDuration(Math.max(...intervals))}`;
+  const uniform = entries.every((entry) => entry.text === entries[0]!.text);
+  if (uniform)
+    return {
+      cadence,
+      tooltipLabel:
+        entries.length === 1
+          ? "Alert rules for this peg"
+          : "Alert rules (all pegs)",
+      rules: [{ label: null, text: entries[0]!.text }],
+    };
+  return {
+    cadence,
+    tooltipLabel: "Alert rules per peg",
+    rules: entries.map(({ label, text }) => ({ label, text })),
+  };
+}
+
 /**
  * The payload exposes one saturation figure — the maximum across the pool's
  * 5-minute and 24-hour windows — so the header stays "Trading limit" and the
@@ -461,10 +530,13 @@ export function supportingSourceUnusableReason(
   source: PegSource,
   evidenceAtMs: number,
 ): string | null {
-  if (!source.healthy) return "no healthy observation";
+  // Specific causes first: the schema forces halted/absent listings and halted
+  // venues to also be non-healthy, so a leading `!healthy` check would swallow
+  // every specific reason below it (same ordering as `primaryMarketProblem`).
   if (source.listingState === "halted") return "listing halted";
   if (source.listingState === "absent") return "not listed on this venue";
   if (source.venueState === "halted") return "venue halted";
+  if (!source.healthy) return "no healthy observation";
   if (source.observationAt === null || source.executablePrice === null)
     return "no current observation";
   if (

@@ -5,6 +5,7 @@ import { makePegMonitoringResponse } from "@/test-utils/peg-monitoring-fixture";
 import {
   PEG_RAIL_SCALE_BPS,
   alertRulesText,
+  headerAlertRules,
   boardSummary,
   boardTone,
   distanceLabelFor,
@@ -204,6 +205,58 @@ describe("monitor selection", () => {
   });
 });
 
+describe("headerAlertRules", () => {
+  const presentation = (
+    assets: PegAssetPresentation[],
+  ): Parameters<typeof headerAlertRules>[0] =>
+    ({ assets }) as Parameters<typeof headerAlertRules>[0];
+
+  it("collapses uniform policies to one shared copy", () => {
+    const rules = headerAlertRules(
+      presentation([asset({}), asset({ assetName: "GHSm" })]),
+    );
+    expect(rules.cadence).toBe("Checks every 30s");
+    expect(rules.tooltipLabel).toBe("Alert rules (all pegs)");
+    expect(rules.rules).toHaveLength(1);
+    expect(rules.rules[0]!.label).toBeNull();
+  });
+
+  it("labels each peg and shows a cadence range when policies diverge", () => {
+    const otherPolicy = { ...pkg.policy, criticalDeviationBps: 75 };
+    const otherSource = {
+      ...primarySource,
+      policy: { ...primarySource.policy, pollIntervalSeconds: 60 },
+    };
+    const rules = headerAlertRules(
+      presentation([
+        // Critical row sorts first in the table; the header must still list
+        // alphabetically, so ZZZ's severity must not put it first here.
+        asset({
+          assetName: "ZZZ",
+          tone: "critical",
+          currentCritical: true,
+          asset: { ...pkg, policy: otherPolicy },
+          deepSource: otherSource,
+        }),
+        asset({}),
+      ]),
+    );
+    expect(rules.tooltipLabel).toBe("Alert rules per peg");
+    expect(rules.cadence).toBe("Checks every 30s–1m");
+    expect(rules.rules.map((rule) => rule.label)).toEqual([
+      "EUROP / EUR",
+      "ZZZ / EUR",
+    ]);
+    expect(rules.rules[1]!.text).toContain("75 bps");
+  });
+
+  it("keeps the single-peg label", () => {
+    const rules = headerAlertRules(presentation([asset({})]));
+    expect(rules.tooltipLabel).toBe("Alert rules for this peg");
+    expect(rules.rules[0]!.label).toBeNull();
+  });
+});
+
 describe("policy-derived copy", () => {
   it("interpolates thresholds, windows and coverage instead of hardcoding", () => {
     expect(alertRulesText(pkg.policy, 30)).toBe(
@@ -282,18 +335,27 @@ describe("supporting markets", () => {
     expect(
       supportingSourceUnusableReason({ ...fresh, healthy: false }, at),
     ).toBe("no healthy observation");
+    // Schema-valid degraded fixtures: halted/absent listings and halted venues
+    // are always non-healthy too, and the specific reason must still surface.
     expect(
       supportingSourceUnusableReason(
         { ...fresh, healthy: false, venueState: "halted" },
         at,
       ),
-    ).toBe("no healthy observation");
+    ).toBe("venue halted");
     expect(
-      supportingSourceUnusableReason({ ...fresh, listingState: "halted" }, at),
+      supportingSourceUnusableReason(
+        { ...fresh, healthy: false, listingState: "halted" },
+        at,
+      ),
     ).toBe("listing halted");
     expect(
-      supportingSourceUnusableReason({ ...fresh, listingState: "absent" }, at),
+      supportingSourceUnusableReason(
+        { ...fresh, healthy: false, listingState: "absent" },
+        at,
+      ),
     ).toBe("not listed on this venue");
+    // A capped observation can retain healthy=true with no executable price.
     expect(
       supportingSourceUnusableReason({ ...fresh, executablePrice: null }, at),
     ).toBe("no current observation");

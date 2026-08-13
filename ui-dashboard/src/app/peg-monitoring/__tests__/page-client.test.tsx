@@ -230,6 +230,30 @@ describe("PegMonitoringPageClient board", () => {
     ).toContain("134 bps below");
   });
 
+  it("pins an above-target off-scale venue at the right edge with »", () => {
+    const response = makePegMonitoringResponse();
+    const item = response.packages[0]!;
+    loaded({
+      ...response,
+      packages: [
+        {
+          ...item,
+          sources: item.sources.map((source) =>
+            source.id === "kraken_eur"
+              ? { ...source, executablePrice: 1.0134, deviationBps: null }
+              : source,
+          ),
+        },
+      ],
+    });
+    render();
+    click(query('[data-testid="peg-row-europ-schuman"]'));
+    const kraken = query('[data-testid="peg-supporting-source-kraken_eur"]')!;
+    expect(kraken.textContent).toContain("134 bps above");
+    expect(kraken.textContent).toContain("»");
+    expect(kraken.textContent).not.toContain("«");
+  });
+
   it("keeps stale packages readable and marks every age as stale", () => {
     loaded();
     render();
@@ -322,6 +346,41 @@ describe("PegMonitoringPageClient board", () => {
     const panel = query('[data-testid="peg-panel-europ-schuman"]')!;
     expect(panel.textContent).toContain("trading limit 42% of 80% warn");
     expect(panel.textContent).toContain("trading limit 91% of 80% warn");
+  });
+
+  it("never shows numeric trading limits once structural evidence expires", () => {
+    // 70s after producedAt: past the tightened 60s freshness grace (structural
+    // evidence expired) but inside the 90s package-stale threshold, so the
+    // package itself still renders as current.
+    vi.setSystemTime(PEG_FIXTURE_PRODUCED_AT * 1000 + 70_000);
+    const response = makePegMonitoringResponse();
+    const item = response.packages[0]!;
+    const monitor = item.monitors[0]!;
+    loaded({
+      ...response,
+      packages: [
+        {
+          ...item,
+          policy: { ...item.policy, freshnessGraceSeconds: 60 },
+          monitors: [
+            monitor,
+            {
+              ...monitor,
+              poolAddress: "0x5555555555555555555555555555555555555555",
+              structuralSaturation: 0.91,
+            },
+          ],
+        },
+      ],
+    });
+    render();
+    const row = query('[data-testid="peg-row-europ-schuman"]')!;
+    click(row);
+    const panel = query('[data-testid="peg-panel-europ-schuman"]')!;
+    expect(panel.textContent).toContain("trading limit — (check expired)");
+    expect(panel.textContent).not.toContain("42%");
+    expect(panel.textContent).not.toContain("91%");
+    expect(row.textContent).not.toContain("42%");
   });
 
   it("keeps the recent-alerts container with its Grafana fallback", () => {

@@ -65,22 +65,26 @@ export function BoardRow({
   const assetId = asset.asset.asset;
   const panelId = `peg-panel-${assetId}`;
   return (
-    // The chevron button carries the accessible toggle; the row itself is a
-    // pointer convenience, so it deliberately exposes no widget role (a row
-    // role would nest its links and breach the nested-interactive rule).
-    // eslint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/click-events-have-key-events
+    // The chevron button carries the accessible, focusable toggle; the row's
+    // own click handler is a pointer convenience layered on the ARIA table
+    // row, so the row itself stays out of the tab order.
+    // eslint-disable-next-line jsx-a11y/interactive-supports-focus, jsx-a11y/click-events-have-key-events
     <div
       data-testid={`peg-row-${assetId}`}
       data-open={open ? "true" : "false"}
+      role="row"
       onClick={(event) => {
         if (!isInteractiveTarget(event)) onToggle(assetId);
       }}
       className={`grid cursor-pointer items-center border-b border-border px-[18px] py-4 ${PEG_BOARD_GRID} ${rowTint(badge.tone, open)}`}
     >
-      <div className="truncate text-[15px] font-[650] text-foreground">
+      <div
+        role="cell"
+        className="truncate text-[15px] font-[650] text-foreground"
+      >
         {pegPairLabel(asset)}
       </div>
-      <div>
+      <div role="cell">
         <StatusBadge
           testId={`peg-status-${assetId}`}
           label={badge.label}
@@ -88,7 +92,10 @@ export function BoardRow({
           detail={asset.uncertaintyReason ?? asset.reasons[0] ?? null}
         />
       </div>
-      <div className="truncate text-[15px] font-semibold text-foreground">
+      <div
+        role="cell"
+        className="truncate text-[15px] font-semibold text-foreground"
+      >
         {formatNumber(asset.decisionSource?.executablePrice ?? null)}
       </div>
       <DistanceCell asset={asset} tone={badge.tone} />
@@ -112,20 +119,22 @@ export function BoardRow({
         stale={stale}
         structuralCurrent={structuralCurrent}
       />
-      <button
-        type="button"
-        aria-expanded={open}
-        aria-controls={panelId}
-        aria-label={`${open ? "Collapse" : "Expand"} ${pegPairLabel(asset)} details`}
-        onClick={() => onToggle(assetId)}
-        className={`flex size-7 items-center justify-center justify-self-end border text-[11px] ${
-          open
-            ? "border-[var(--border-secondary)] bg-[oklch(26.1%_0.0288_303)] text-foreground"
-            : "border-[var(--border-tertiary)] text-muted-foreground"
-        }`}
-      >
-        {open ? "▾" : "▸"}
-      </button>
+      <div role="cell" className="justify-self-end">
+        <button
+          type="button"
+          aria-expanded={open}
+          aria-controls={panelId}
+          aria-label={`${open ? "Collapse" : "Expand"} ${pegPairLabel(asset)} details`}
+          onClick={() => onToggle(assetId)}
+          className={`flex size-7 items-center justify-center border text-[11px] ${
+            open
+              ? "border-[var(--border-secondary)] bg-[oklch(26.1%_0.0288_303)] text-foreground"
+              : "border-[var(--border-tertiary)] text-muted-foreground"
+          }`}
+        >
+          {open ? "▾" : "▸"}
+        </button>
+      </div>
     </div>
   );
 }
@@ -149,7 +158,7 @@ function DistanceCell({
   const label = distanceLabel(asset);
   const warning = tone !== "healthy";
   return (
-    <div className="flex min-w-0 items-center gap-3">
+    <div role="cell" className="flex min-w-0 items-center gap-3">
       <DistanceRail
         testId={`peg-rail-${asset.asset.asset}`}
         marker={railMarker(asset.distanceBps, asset.direction)}

@@ -192,8 +192,9 @@ export function TwoLineCell({
   age: string | null;
   stale?: boolean;
 }): React.JSX.Element {
+  // Always a grid cell of the ARIA table declared in board-table.tsx.
   return (
-    <div className="min-w-0">
+    <div role="cell" className="min-w-0">
       <div className="truncate text-[12.5px] text-[var(--peg-text-2)]">
         {value}
       </div>

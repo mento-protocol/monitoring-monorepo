@@ -51,16 +51,31 @@ export function BoardTable({
   return (
     <div data-testid="peg-board" className="border border-border">
       <div className="overflow-x-auto">
-        <div className={PEG_BOARD_MIN_WIDTH}>
+        {/* The layout is a CSS grid, so the table semantics screen readers
+            need for column/cell association are declared via ARIA roles; the
+            expanded panel participates as a full-width row (aria-colspan). */}
+        <div
+          role="table"
+          aria-label="Peg monitoring board"
+          className={PEG_BOARD_MIN_WIDTH}
+        >
           <div
+            role="row"
             className={`grid border-b border-border px-[18px] py-2.5 ${PEG_BOARD_GRID}`}
           >
             {HEADERS.map((header, index) => (
               <div
+                role="columnheader"
                 key={header === "" ? `spacer-${index}` : header}
                 className="whitespace-nowrap text-[10.5px] font-[650] uppercase tracking-[0.1em] text-muted-foreground"
               >
-                {header}
+                {/* axe's empty-table-header wants SR-visible text, not a
+                    label attribute, for the chevron column. */}
+                {header === "" ? (
+                  <span className="sr-only">Details</span>
+                ) : (
+                  header
+                )}
               </div>
             ))}
           </div>

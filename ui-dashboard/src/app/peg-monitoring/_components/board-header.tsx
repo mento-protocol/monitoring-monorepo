@@ -2,11 +2,10 @@
 
 import type { CSSProperties } from "react";
 import type { PegMonitoringPresentation } from "@/lib/peg-monitoring-presentation";
-import { formatShortDuration } from "../_lib/peg-board-format";
 import {
   PEG_COLOR,
-  alertRulesText,
   boardSummary,
+  headerAlertRules,
   type PegBoardTone,
 } from "../_lib/peg-board-model";
 import { InfoDot, SeverityDot } from "./board-primitives";
@@ -45,9 +44,7 @@ export function BoardHeader({
   presentation: PegMonitoringPresentation;
 }): React.JSX.Element {
   const summary = boardSummary(presentation);
-  const leadAsset = presentation.assets[0];
-  const pollIntervalSeconds =
-    leadAsset?.deepSource?.policy.pollIntervalSeconds ?? null;
+  const alertRules = headerAlertRules(presentation);
   return (
     <header className="mb-[22px] flex flex-wrap items-center justify-between gap-3">
       <div className="flex flex-wrap items-center gap-3">
@@ -67,17 +64,26 @@ export function BoardHeader({
       </div>
       <div className="flex items-center gap-2">
         <span className="text-[12px] text-muted-foreground">
-          {pollIntervalSeconds === null
-            ? "Checks run on schedule"
-            : `Checks every ${formatShortDuration(pollIntervalSeconds)}`}
+          {alertRules.cadence}
         </span>
-        {leadAsset === undefined ? null : (
+        {alertRules.rules.length === 0 ? null : (
           <InfoDot
-            label="Alert rules for this peg"
-            content={alertRulesText(
-              leadAsset.asset.policy,
-              pollIntervalSeconds,
-            )}
+            label={alertRules.tooltipLabel}
+            content={
+              alertRules.rules.length === 1 &&
+              alertRules.rules[0]!.label === null ? (
+                alertRules.rules[0]!.text
+              ) : (
+                <span className="grid gap-2">
+                  {alertRules.rules.map((rule) => (
+                    <span key={rule.label ?? "shared"}>
+                      <strong className="font-[650]">{rule.label}</strong> —{" "}
+                      {rule.text}
+                    </span>
+                  ))}
+                </span>
+              )
+            }
           />
         )}
       </div>
