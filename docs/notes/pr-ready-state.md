@@ -111,8 +111,10 @@ verification-note sequence, optional validation-note section, and terminal
 clean line. The exact terminal is authoritative after that structure validates.
 The gate does not reinterpret the report's narrative prose: Claude's exact
 `LGTM` verdict and exact clean terminal own that meaning after author and
-structure validation. Markdown or HTML syntax, malformed headings, unknown
-terminals, and trailing text stay blocking.
+structure validation. The existing P0–P2 and direct-action contradiction guard
+still blocks explicit findings inside the report. It does not classify P3 or
+arbitrary semantic paraphrases. Markdown or HTML syntax, malformed headings,
+unknown terminals, and trailing text stay blocking.
 
 The compatibility registry is only for older free-form or retired shapes that
 cannot meet a current registered grammar. Each entry binds the untrimmed raw

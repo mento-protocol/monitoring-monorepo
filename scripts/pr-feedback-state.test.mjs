@@ -1366,6 +1366,13 @@ test("accepts the frozen PR #1828 structural Overall Claude review", () => {
       clean.replace("No architecture change", "```text No architecture change"),
     ],
     [
+      "explicit P1 finding",
+      clean.replace(
+        "No doc drift",
+        "[P1] Authentication bypass — must fix before merge",
+      ),
+    ],
+    [
       "nonsequential verification note",
       clean.replace(
         "2. **No architecture change**",
