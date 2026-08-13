@@ -670,7 +670,11 @@ gate_run_ensure_marker() {
 # the lock root; no leading dash, so no value can read as an option.
 gate_lock_token_is_wellformed() {
   local token="$1"
-  [[ "$token" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$ ]]
+  # The full generated structure — host, dash, PID, dash, epoch — not merely
+  # a path-safe string. A looser shape would let a crafted record carry a
+  # PREFIX of a real token, and combined with an unanchored match a prefix
+  # is enough to select a live run's processes.
+  [[ "$token" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,180}-[0-9]{1,10}-[0-9]{1,12}$ ]]
 }
 
 # ERE-escape a token for pgrep: validation keeps a token benign as a path,
@@ -698,7 +702,10 @@ gate_run_tagged_pids() {
   # A scan that failed is not a scan that found nothing. `pgrep` exits 1 for no
   # match and above that for a real failure, and reading the second as the first
   # would discharge an obligation on the strength of a question never answered.
-  found="$(pgrep -f "agentqg:$(gate_lock_token_pattern "$token")" 2>/dev/null)" && status=0 || status=$?
+  # Anchored on both sides: the tag is one whole argv element, and an
+  # unanchored match would let one token select another that merely extends
+  # it. The escape keeps hostname dots literal inside the anchors.
+  found="$(pgrep -f "(^| )agentqg:$(gate_lock_token_pattern "$token")( |\$)" 2>/dev/null)" && status=0 || status=$?
   [[ "$status" -le 1 ]] || printf '%s\n' "$gate_drain_scan_error"
   [[ -z "$found" ]] || printf '%s\n' "$found"
   if [[ -d /proc ]]; then
@@ -707,7 +714,10 @@ gate_run_tagged_pids() {
       # ours: the environment of anything this run started is readable by it.
       # So this skip is a scope, not a swallowed error.
       [[ -r "$environ" ]] || continue
-      grep -qaF "AGENTQG_RUN=agentqg:${token}" "$environ" 2>/dev/null || continue
+      # Exact entry, not substring: environ is NUL-separated, and a substring
+      # match would let one token select an environment carrying a longer one.
+      tr '\0' '\n' < "$environ" 2>/dev/null |
+        grep -qxF "AGENTQG_RUN=agentqg:${token}" || continue
       pid="${environ#/proc/}"
       printf '%s\n' "${pid%/environ}"
     done
