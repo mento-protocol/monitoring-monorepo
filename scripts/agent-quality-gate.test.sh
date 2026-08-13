@@ -5192,7 +5192,7 @@ STUB
       printf 'started_at=%s\n' "$(date +%s)"
       printf 'start_utc=%s\n' "Thu Jan  1 00:00:00 1970"
       printf 'worktree=%s\n' "$gate_race_repo"
-      printf 'token=recycled-pid\n'
+      printf 'token=recycled-pid-1-1\n'
     } > "$gate_race_root/run.lock/owner"
     race_waiter recycled 0 0
     grep -q "pid $$ now belongs to a different process" \
@@ -5214,7 +5214,7 @@ STUB
         printf 'started_at=%s\n' "$(date +%s)"
         printf 'start_utc=%s\n' "$race_lock_start"
         printf 'worktree=%s\n' "$gate_race_repo"
-        printf 'token=real-holder\n'
+        printf 'token=real-holder-1-1\n'
       } > "$gate_race_root/run.lock/owner"
       TZ="${race_tz%%:*}" \
         LC_ALL="${race_tz##*:}" \
@@ -5244,7 +5244,7 @@ STUB
       printf 'started_at=%s\n' "$(date +%s)"
       printf 'start=%s\n' "$race_lock_start"
       printf 'worktree=%s\n' "$gate_race_repo"
-      printf 'token=legacy-record\n'
+      printf 'token=legacy-record-1-1\n'
     } > "$gate_race_root/run.lock/owner"
     AGENT_QUALITY_GATE_LOCK=1 \
       AGENT_QUALITY_GATE_LOCK_HELD='' \
@@ -5268,7 +5268,7 @@ STUB
       printf 'started_at=%s\n' "$(date +%s)"
       printf 'start_utc=%s\n' "$race_lock_start"
       printf 'worktree=%s\n' "$gate_race_repo"
-      printf 'token=real-holder\n'
+      printf 'token=real-holder-1-1\n'
     } > "$gate_race_root/run.lock/owner"
     race_wait_started="$(date +%s)"
     AGENT_QUALITY_GATE_LOCK=1 \
@@ -5427,7 +5427,7 @@ STUB
       printf 'host=%s\n' "$(uname -n)"
       printf 'started_at=%s\n' "$(date +%s)"
       printf 'worktree=%s\n' "$gate_race_repo"
-      printf 'token=dead-holder-record\n'
+      printf 'token=dead-holder-record-1-1\n'
     } > "$gate_race_root/run.lock/owner.reclaiming.99998"
     race_waiter spent 0 0
     grep -q "Recovered the record of live holder" "$gate_race_out/spent.out" &&
@@ -5881,7 +5881,7 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   sleep 1
   kill -0 "$race_bystander" 2>/dev/null ||
     fail "the empty-identity case needs its bystander alive"
-  race_fake_token_value="fixture-empty-identity-$$"
+  race_fake_token_value="fixture-empty-identity-$$-1"
   mkdir -p "$gate_race_root/run.lock"
   mkdir -p "$gate_race_root/condemned.d"
   printf '%s\n' "$race_fake_token_value" \
@@ -6099,7 +6099,7 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
       printf 'started_at=%s\n' "$(date +%s)"
       printf 'start_utc=%s\n' "$(TZ=UTC LC_ALL=C ps -o lstart= -p 1 2>/dev/null | head -n1)"
       printf 'worktree=%s\n' "$gate_race_repo"
-      printf 'token=other-user-holder\n'
+      printf 'token=other-user-holder-1-1\n'
     } > "$gate_race_root/run.lock/owner"
     AGENT_QUALITY_GATE_LOCK=1 \
       AGENT_QUALITY_GATE_LOCK_HELD='' \
@@ -6199,11 +6199,11 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     rm -f "$gate_race_root"/captured.*
     : > "$gate_race_log"
     mkdir -p "$gate_race_root/condemned.d"
-    printf 'fixture-unreadable\n' > "$gate_race_root/condemned.d/fixture-unreadable"
+    printf 'fixture-unreadable-1-1\n' > "$gate_race_root/condemned.d/fixture-unreadable-1-1"
     if [[ "$race_unreadable_case" == condemned ]]; then
-      race_unreadable_file="$gate_race_root/condemned.d/fixture-unreadable"
+      race_unreadable_file="$gate_race_root/condemned.d/fixture-unreadable-1-1"
     else
-      race_unreadable_file="$gate_race_root/captured.fixture-unreadable"
+      race_unreadable_file="$gate_race_root/captured.fixture-unreadable-1-1"
       printf '99999|\n' > "$race_unreadable_file"
     fi
     chmod 000 "$race_unreadable_file"
@@ -6231,12 +6231,12 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   # outstanding: each file is removed only after its own processes are gone, so
   # whatever remains is what the next run inherits.
   : > "$gate_race_log"
-  bash -c 'eval "$1"; exit $?' "agentqg:fixture-inherited" 'sleep 60' &
+  bash -c 'eval "$1"; exit $?' "agentqg:fixture-inherited-1-1" 'sleep 60' &
   race_taken_proc=$!
   sleep 1
-  if [[ -n "$(pgrep -f "agentqg:fixture-inherited" 2>/dev/null | head -n1 || true)" ]]; then
+  if [[ -n "$(pgrep -f "agentqg:fixture-inherited-1-1" 2>/dev/null | head -n1 || true)" ]]; then
     mkdir -p "$gate_race_root/condemned.d"
-    printf 'fixture-inherited\n' > "$gate_race_root/condemned.d/fixture-inherited"
+    printf 'fixture-inherited-1-1\n' > "$gate_race_root/condemned.d/fixture-inherited-1-1"
     AGENT_QUALITY_GATE_LOCK=1 \
       AGENT_QUALITY_GATE_LOCK_HELD='' \
       AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
@@ -6247,7 +6247,7 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
       > "$gate_race_out/inherited-obligation.out" 2>&1 || true
     kill -0 "$race_taken_proc" 2>/dev/null &&
       fail "an obligation left behind by a dead drainer was never discharged"
-    [[ ! -e "$gate_race_root/condemned.d/fixture-inherited" ]] ||
+    [[ ! -e "$gate_race_root/condemned.d/fixture-inherited-1-1" ]] ||
       fail "a discharged obligation must not be left behind to be drained forever"
   fi
   kill -9 "$race_taken_proc" 2>/dev/null || true
@@ -6262,19 +6262,19 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   # in production, so it is widened here the way the rest of these
   # interleavings are.
   : > "$gate_race_log"
-  bash -c 'eval "$1"; exit $?' "agentqg:fixture-drained-first" 'sleep 60' &
+  bash -c 'eval "$1"; exit $?' "agentqg:fixture-drained-first-1-1" 'sleep 60' &
   race_unlink_first=$!
   # The late obligation names a live process of its own, so the assertion does
   # not depend on when it is published: either its file is still there for the
   # next run, or this run drained it. Only "file gone, process alive" is the
   # loss this case exists to catch.
-  bash -c 'eval "$1"; exit $?' "agentqg:fixture-arrived-late" 'sleep 90' &
+  bash -c 'eval "$1"; exit $?' "agentqg:fixture-arrived-late-1-1" 'sleep 90' &
   race_unlink_late=$!
   sleep 1
-  if [[ -n "$(pgrep -f "agentqg:fixture-drained-first" 2>/dev/null | head -n1 || true)" ]]; then
+  if [[ -n "$(pgrep -f "agentqg:fixture-drained-first-1-1" 2>/dev/null | head -n1 || true)" ]]; then
     mkdir -p "$gate_race_root/condemned.d"
-    printf 'fixture-drained-first\n' \
-      > "$gate_race_root/condemned.d/fixture-drained-first"
+    printf 'fixture-drained-first-1-1\n' \
+      > "$gate_race_root/condemned.d/fixture-drained-first-1-1"
     AGENT_QUALITY_GATE_LOCK=1 \
       AGENT_QUALITY_GATE_LOCK_HELD='' \
       AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
@@ -6288,19 +6288,19 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     # The capture file appears when that token's drain starts and is removed
     # when it is discharged, which is where its own file is about to go.
     race_waited=0
-    while [[ ! -e "$gate_race_root/captured.fixture-drained-first" && "$race_waited" -lt 400 ]]; do
+    while [[ ! -e "$gate_race_root/captured.fixture-drained-first-1-1" && "$race_waited" -lt 400 ]]; do
       sleep 0.5
       race_waited=$((race_waited + 1))
     done
     race_waited=0
-    while [[ -e "$gate_race_root/captured.fixture-drained-first" && "$race_waited" -lt 120 ]]; do
+    while [[ -e "$gate_race_root/captured.fixture-drained-first-1-1" && "$race_waited" -lt 120 ]]; do
       sleep 0.5
       race_waited=$((race_waited + 1))
     done
-    printf 'fixture-arrived-late\n' \
-      > "$gate_race_root/condemned.d/fixture-arrived-late"
+    printf 'fixture-arrived-late-1-1\n' \
+      > "$gate_race_root/condemned.d/fixture-arrived-late-1-1"
     wait "$race_unlink_wrapper" 2>/dev/null || true
-    if [[ ! -e "$gate_race_root/condemned.d/fixture-arrived-late" ]]; then
+    if [[ ! -e "$gate_race_root/condemned.d/fixture-arrived-late-1-1" ]]; then
       kill -0 "$race_unlink_late" 2>/dev/null &&
         fail "an obligation published during a drain was removed unread, and its command is still running"
     fi
