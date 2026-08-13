@@ -570,36 +570,45 @@ export async function readStub(runGh, repo, number) {
   };
 }
 
-// `gh pr list --head <branch>` matches by branch NAME, and a pull request opened
-// from a FORK carries its own head branch name — so `--head` returns fork PRs
-// too. Verified live against a public repo: `gh pr list -R cli/cli --head
-// feat/uptime-command --state open --json isCrossRepository,headRepositoryOwner`
-// returns `{"isCrossRepository":true,"headRepositoryOwner":{"login":
-// "seanturner83"}}`. This repo is public, queue-stub titles are public, and
-// `autofixBranchName` is deterministic, so ANY GitHub user can fork it, push
-// `sentry-autofix/<short-id-lower>`, and open a PR at main. Without this fence
-// that PR is read as OUR prior fix PR: the stub routes to the reconcile path,
-// which comments the attacker's PR url onto the queue issue and applies
-// `sentry:fix-pr-opened` — terminal until a human clears it — and the family
-// collapse then stands the whole duplicate family down behind it.
+// Ownership fence for the "does our prior autofix PR already exist?" lookup. A
+// branch-NAME-only match (`gh pr list --head <branch>`, or a REST `head=<branch>`
+// filter WITHOUT the owner qualifier) also returns PRs opened from a FORK, which
+// carry their own head branch name. Verified live against a public repo: `gh pr
+// list -R cli/cli --head feat/uptime-command --state open --json
+// isCrossRepository,headRepositoryOwner` returns
+// `{"isCrossRepository":true,"headRepositoryOwner":{"login":"seanturner83"}}`.
+// This repo is public, queue-stub titles are public, and `autofixBranchName` is
+// deterministic, so ANY GitHub user can fork it, push
+// `sentry-autofix/<short-id-lower>`, and open a PR at main. Read as OUR prior fix
+// PR, that stub routes to the reconcile path — which comments the attacker's PR
+// url onto the queue issue and applies `sentry:fix-pr-opened` (terminal until a
+// human clears it) — and the family collapse then stands the whole duplicate
+// family down behind it.
 //
-// The head branch is one-to-one with the SHORT-ID only WITHIN this repo, so
-// ownership has to be asserted, not assumed. Both signals must affirm it.
-export const HEAD_OWNERSHIP_FIELDS =
-  "number,isCrossRepository,headRepositoryOwner";
+// `openAutofixPrExists` shuts this at QUERY time with the owner-qualified REST
+// head filter `head=<owner>:<branch>`: a fork's head-repo owner differs, so
+// GitHub excludes it SERVER-SIDE and there is no page a flood of fork PRs could
+// truncate our own row off of. `isOwnHeadPr` re-checks each returned row as
+// defense in depth — the head branch is one-to-one with the SHORT-ID only WITHIN
+// this repo, so ownership is asserted, not assumed. Both signals must affirm it.
 
 /** True when `pr` is a same-repo PR of `repo` — i.e. one this pipeline could
- * have opened. Fails CLOSED: a missing or unexpected field is "not ours", which
- * costs at most a re-attempt on a branch that already has our PR (`gh pr create`
- * refuses a second one) and never hands an outsider the reconcile write path. */
+ * have opened. Reads the REST `GET /repos/{o}/{r}/pulls` shape
+ * (`head.repo.fork` / `head.repo.owner.login`), NOT the `gh pr list --json`
+ * shape (`isCrossRepository` / `headRepositoryOwner.login`) — the REST endpoint
+ * returns neither of those. Fails CLOSED: a missing or unexpected field is "not
+ * ours", which costs at most a re-attempt on a branch that already has our PR
+ * (`gh pr create` refuses a second one) and never hands an outsider the
+ * reconcile write path. */
 export function isOwnHeadPr(pr, repo) {
   const owner = String(repo ?? "")
     .split("/")[0]
     .toLowerCase();
   if (!owner) return false;
+  const headRepo = pr?.head?.repo;
   return (
-    pr?.isCrossRepository === false &&
-    String(pr?.headRepositoryOwner?.login ?? "").toLowerCase() === owner
+    headRepo?.fork === false &&
+    String(headRepo?.owner?.login ?? "").toLowerCase() === owner
   );
 }
 
@@ -610,29 +619,31 @@ export function isOwnHeadPr(pr, repo) {
  * whose body/title merely mentions the id (a human PR, a dependency bump, an
  * unrelated fix that cites the Sentry issue), which would both falsely dedup an
  * eligible stub out of selection AND — via the reconcile path — mislabel the
- * stub `sentry:fix-pr-opened` pointing at that unrelated PR. `--state open`
- * only: a merged/closed PR is not a live dedup (a regressed, re-triaged issue
- * must be re-attemptable). The branch name is derived from the shape-validated
- * SHORT-ID and transits `gh` as an argv element, so it can't inject.
+ * stub `sentry:fix-pr-opened` pointing at that unrelated PR. `state=open` only:
+ * a merged/closed PR is not a live dedup (a regressed, re-triaged issue must be
+ * re-attemptable). The branch name is derived from the shape-validated SHORT-ID
+ * and transits `gh` as a query value, so it can't inject.
  *
- * NOT `--limit 1`: fork PRs share the branch-name namespace (see above), so a
- * single-row window can be filled by a spoof and hide our own PR behind it —
- * which would make the leg try to open a second one. Take a small page and let
- * `isOwnHeadPr` pick ours out of it. */
+ * Uses the REST pulls endpoint with the OWNER-QUALIFIED head filter
+ * `head=<owner>:<branch>&base=main`, NOT `gh pr list --head <branch>`. Forks
+ * share the branch-name namespace (see the note above `isOwnHeadPr`), and `gh pr
+ * list --limit N` caps the rows the API returns BEFORE the client-side owner
+ * filter runs — so ≥N newer fork PRs on the branch name could push our real,
+ * older, same-repo PR off the page and hide it, making the leg open a second PR
+ * (or, on the workflow force-push path, clobber a PR already under review). The
+ * `head=<owner>:...` qualifier excludes forks SERVER-SIDE, so no page exists to
+ * truncate. `&base=main` pins the base the autofix leg always opens against:
+ * GitHub's open-PR uniqueness is per head+BASE pair (not head alone), so without
+ * it a same-owner PR from this branch to a different base could also return and
+ * be mis-picked; with it exactly our autofix PR (if any) comes back — at most one
+ * row. `isOwnHeadPr` re-checks each returned row's owner/fork as defense in
+ * depth. */
 export async function openAutofixPrExists(runGh, repo, shortId) {
+  const owner = String(repo ?? "").split("/")[0];
+  const branch = autofixBranchName(shortId);
   const stdout = await runGh([
-    "pr",
-    "list",
-    "--repo",
-    repo,
-    "--head",
-    autofixBranchName(shortId),
-    "--state",
-    "open",
-    "--json",
-    HEAD_OWNERSHIP_FIELDS,
-    "--limit",
-    "20",
+    "api",
+    `repos/${repo}/pulls?head=${owner}:${branch}&base=main&state=open`,
   ]);
   const parsed = JSON.parse(stdout);
   return (Array.isArray(parsed) ? parsed : []).some((pr) =>

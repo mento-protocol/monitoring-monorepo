@@ -10,6 +10,10 @@
       "reporter": "count-line",
       "floor": 19
     },
+    "scripts/sentry-autofix-run-record.test.mjs": {
+      "reporter": "count-line",
+      "floor": 7
+    },
     "scripts/sentry-mcp-broker.test.mjs": {
       "reporter": "node-test",
       "nodeArgs": ["--test"],

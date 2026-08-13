@@ -125,7 +125,7 @@ jobs:
     permissions:
       contents: read
       issues: read
-      # The dedup check calls `gh pr list`; unspecified GITHUB_TOKEN scopes
+      # The dedup check reads pulls via `gh api`; unspecified GITHUB_TOKEN scopes
       # default to none, so the PR read must be granted explicitly.
       pull-requests: read
     outputs:
@@ -772,22 +772,25 @@ jobs:
             # free-text SHORT-ID query can hit an unrelated open PR that merely
             # cites the Sentry issue and relink the stub to the wrong PR.
             #
-            # `--head` matches by branch NAME, which FORK PRs also carry, and this
-            # repo is public with a deterministic autofix branch name — so anyone
-            # can push `sentry-autofix/<short-id>` on a fork and open a PR at main
-            # before this candidate finalizes. Require the head repo to be THIS
-            # repo (both signals must affirm it, the same fence as the reconcile
-            # step and the selector's `isOwnHeadPr`) before relinking the stub to
-            # it; a fork PR is treated as NOT ours, so relink finds nothing.
-            reconciled_pr=$(GH_TOKEN="${APP_TOKEN}" gh pr list \
-              --repo "${REPO}" --head "${branch}" --state open --limit 20 \
-              --json url,isCrossRepository,headRepositoryOwner \
-              | jq -r --arg owner "${REPO%%/*}" \
-                  '[ .[]
-                     | select(.isCrossRepository == false)
-                     | select(((.headRepositoryOwner.login // "") | ascii_downcase)
-                              == ($owner | ascii_downcase)) ]
-                   | .[0].url // ""')
+            # A branch-NAME-only match returns FORK PRs too (they carry their own
+            # head branch), and this repo is public with a deterministic autofix
+            # branch name — so anyone can push `sentry-autofix/<short-id>` on a
+            # fork and open a PR at main before this candidate finalizes. The
+            # owner-qualified REST head filter `head=<owner>:<branch>&base=main`
+            # excludes forks SERVER-SIDE (a fork's head-repo owner differs), so it
+            # cannot be truncated by a flood of fork PRs the way a capped `gh pr
+            # list` page can, and `base=main` (GitHub's open-PR uniqueness is per
+            # head+base) means at most our own autofix PR returns; the client-side
+            # `.head.repo.fork`/owner recheck (the same fence as the selector's
+            # `isOwnHeadPr`) stays as defense in depth. A fork PR never matches, so
+            # relink finds nothing.
+            reconciled_pr=$(GH_TOKEN="${APP_TOKEN}" gh api \
+              "repos/${REPO}/pulls?head=${REPO%%/*}:${branch}&base=main&state=open" \
+              --jq '[ .[]
+                      | select(.head.repo.fork == false)
+                      | select(((.head.repo.owner.login // "") | ascii_downcase)
+                               == ("'"${REPO%%/*}"'" | ascii_downcase)) ]
+                    | .[0].html_url // ""')
             if [ -n "${reconciled_pr}" ]; then
               echo "::notice::#${QUEUE_ISSUE} already marked fix-pr-opened; relinking ${reconciled_pr}, no new PR."
               gh issue comment "${QUEUE_ISSUE}" --repo "${REPO}" \
@@ -806,22 +809,25 @@ jobs:
           # re-triaged issue can be fixed again. `gh` reads the API (never git
           # config), so this cannot be redirected by the tainted repo.
           #
-          # Same fork fence as the relink and reconcile paths: `--head` matches by
-          # branch NAME, which a FORK PR on the deterministic `sentry-autofix/...`
-          # name also carries. Require the head repo to be THIS repo (both signals
-          # affirm it) so an outsider's fork PR is never trusted as our prior fix
-          # and adopted as the dedup — that would mark the stub fixed against the
-          # fork PR and stand its whole family down. A fork PR is NOT ours, so it
-          # leaves `existing_pr` empty and this run opens our own PR below.
-          existing_pr=$(GH_TOKEN="${APP_TOKEN}" gh pr list \
-            --repo "${REPO}" --head "${branch}" --state open --limit 20 \
-            --json url,isCrossRepository,headRepositoryOwner \
-            | jq -r --arg owner "${REPO%%/*}" \
-                '[ .[]
-                   | select(.isCrossRepository == false)
-                   | select(((.headRepositoryOwner.login // "") | ascii_downcase)
-                            == ($owner | ascii_downcase)) ]
-                 | .[0].url // ""')
+          # Same fork fence as the relink and reconcile paths. A branch-NAME-only
+          # match returns a FORK PR on the deterministic `sentry-autofix/...` name
+          # too, and a capped `gh pr list --limit N` page could be filled by newer
+          # fork PRs that push our own row off it — leaving `existing_pr` empty and
+          # force-pushing over a real PR under review, OR adopting the fork PR as
+          # the dedup and marking the stub fixed against it. The owner-qualified
+          # REST head filter `head=<owner>:<branch>&base=main` excludes forks
+          # SERVER-SIDE, so no page exists to truncate, and `base=main` (GitHub's
+          # open-PR uniqueness is per head+base) means at most our own autofix PR
+          # returns; the client-side `.head.repo.fork`/owner recheck stays as
+          # defense in depth. A fork PR never matches, so it leaves `existing_pr`
+          # empty and this run opens our own PR below.
+          existing_pr=$(GH_TOKEN="${APP_TOKEN}" gh api \
+            "repos/${REPO}/pulls?head=${REPO%%/*}:${branch}&base=main&state=open" \
+            --jq '[ .[]
+                    | select(.head.repo.fork == false)
+                    | select(((.head.repo.owner.login // "") | ascii_downcase)
+                             == ("'"${REPO%%/*}"'" | ascii_downcase)) ]
+                  | .[0].html_url // ""')
 
           # Whether THIS run opened the PR — only a PR we opened here may be
           # withdrawn by the final stale-verdict guard below; a pre-existing PR
@@ -858,16 +864,23 @@ jobs:
             # Commit as the App bot identity (user id resolved for the noreply
             # email, per the create-github-app-token README) so the push is
             # App-attributed and downstream required CI fires. Force-push covers
-            # two orphan cases, both safe because the branch holds no OPEN PR,
-            # lives in our own `sentry-autofix/` namespace, and runs are
-            # concurrency-serialized (nothing under review is clobbered):
+            # two orphan cases, both safe because the branch holds no OPEN PR of
+            # ours, lives in our own `sentry-autofix/` namespace, and runs are
+            # concurrency-serialized (nothing under review is clobbered). "No OPEN
+            # PR of ours" is established by the owner-qualified `existing_pr` query
+            # above, which forks cannot truncate — a capped `gh pr list` page could
+            # be filled by fork PRs that hide our own row and make this force-push
+            # clobber a live PR, but `head=<owner>:<branch>&base=main` excludes
+            # forks server-side, so an empty result genuinely means no open
+            # same-repo PR to main:
             #   1. a prior run pushed but its `gh pr create` failed, leaving a
             #      branch with no PR; and
             #   2. a prior run's PR merged/closed and the Sentry issue later
             #      regressed — the regression reopen shed the autofix markers
             #      (ingest REOPEN_SHED_LABELS), the SHORT-ID no longer sits in an
-            #      OPEN PR, and the existing-PR check above is `--state open`, so
-            #      the stale merged/closed branch is reused for the fresh fix.
+            #      OPEN PR, and the owner-qualified existing-PR check above is
+            #      `state=open`, so the stale merged/closed branch is reused for
+            #      the fresh fix.
             # Either way THIS run's guard-approved diff is what gets pushed; the
             # PR body is a deterministic template (no per-run agent text), so it
             # stays consistent with whatever diff is force-published.
@@ -1083,24 +1096,27 @@ jobs:
           # the selector's dedup. No agent ran for a reconcile entry, so the
           # checkout is untrusted-free and the repo's real helper is safe to run.
           #
-          # `--head` matches by branch NAME, which FORK PRs also carry, and this
-          # repo is public with a deterministic autofix branch name — so anyone
-          # can push `sentry-autofix/<short-id>` on a fork and open a PR at main.
-          # Require the head repo to be THIS repo (both signals must affirm it,
-          # same fence as the selector's `isOwnHeadPr`) before this step comments
-          # the url onto a queue issue and applies the terminal marker. Without
-          # it an outsider gets a queue write and, through the duplicate_of
-          # family collapse, stands that stub's whole family down indefinitely.
+          # A branch-NAME-only match returns FORK PRs too (they carry their own
+          # head branch), and this repo is public with a deterministic autofix
+          # branch name — so anyone can push `sentry-autofix/<short-id>` on a fork
+          # and open a PR at main. The owner-qualified REST head filter
+          # `head=<owner>:<branch>&base=main` excludes forks SERVER-SIDE (a fork's
+          # head-repo owner differs) and pins the base the autofix leg always uses,
+          # so it cannot be truncated by a flood of fork PRs the way a capped `gh
+          # pr list` page can, and at most one row (GitHub's per head+base PR
+          # uniqueness) comes back. The client-side `.head.repo.fork`/owner recheck
+          # (same fence as the selector's `isOwnHeadPr`) stays as defense in depth
+          # before this step comments the url onto a queue issue and applies the
+          # terminal marker. Without it an outsider gets a queue write and, through
+          # the duplicate_of family collapse, stands that stub's whole family down.
           branch=$(node scripts/sentry-autofix-finalize.mjs branch --short-id "${SHORT_ID}")
-          pr_url=$(gh pr list --repo "${REPO}" \
-            --head "${branch}" --state open --limit 20 \
-            --json url,isCrossRepository,headRepositoryOwner \
-            | jq -r --arg owner "${REPO%%/*}" \
-                '[ .[]
-                   | select(.isCrossRepository == false)
-                   | select(((.headRepositoryOwner.login // "") | ascii_downcase)
-                            == ($owner | ascii_downcase)) ]
-                 | .[0].url // ""')
+          pr_url=$(gh api \
+            "repos/${REPO}/pulls?head=${REPO%%/*}:${branch}&base=main&state=open" \
+            --jq '[ .[]
+                    | select(.head.repo.fork == false)
+                    | select(((.head.repo.owner.login // "") | ascii_downcase)
+                             == ("'"${REPO%%/*}"'" | ascii_downcase)) ]
+                  | .[0].html_url // ""')
           if [ -z "${pr_url}" ]; then
             echo "::notice::#${QUEUE_ISSUE} reconcile: no open PR on ${branch} (merged/closed?); nothing to do."
             exit 0

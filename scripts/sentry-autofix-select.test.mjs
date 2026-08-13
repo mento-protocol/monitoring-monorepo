@@ -15,6 +15,7 @@ import {
   MAX_HANDLED_ID_QUERIES,
   MAX_REVERSE_PROBE_QUERIES,
   MAX_REVERSE_VERIFY_READS,
+  openAutofixPrExists,
   REVERSE_SEARCH_LIMIT,
 } from "./sentry-autofix-queue-io.mjs";
 import {
@@ -132,19 +133,21 @@ function stub({
  * Mock `gh`:
  *  - issue list -> the stub summaries (number/title/labels/createdAt)
  *  - issue view -> the full stub (with comments)
- *  - pr list    -> [] unless the queried --head branch corresponds to a
- *                  SHORT-ID in `prShortIds` (the fixture models an OPEN autofix
- *                  PR; the selector matches by the deterministic head branch
- *                  `sentry-autofix/<short-id-lower>`, NOT by a text search, so a
- *                  human/unrelated PR that merely cites the id cannot match)
- *                  or `forkPrShortIds` (a SPOOF: `--head` matches by branch
- *                  NAME, and fork PRs carry their own, so anyone can push
- *                  `sentry-autofix/<short-id>` on a fork of this public repo
- *                  and open a PR at main — verified live against cli/cli, where
- *                  `--head feat/uptime-command` returns a PR with
- *                  `isCrossRepository: true`). Rows carry the real response
- *                  shape so the ownership fence is exercised, and a spoof is
- *                  emitted FIRST so a fence that only read row 0 would fail.
+ *  - api        -> models `GET repos/<owner>/<repo>/pulls?head=<owner>:<branch>
+ *                  &state=open`, the OWNER-QUALIFIED REST head filter the selector
+ *                  now uses. A SHORT-ID in `prShortIds` models an OPEN same-repo
+ *                  autofix PR (head-repo `fork:false`, owner = repo owner); a
+ *                  SHORT-ID in `forkPrShortIds` models a SPOOF fork PR pushed on
+ *                  the deterministic `sentry-autofix/<short-id>` branch of this
+ *                  public repo (head-repo `fork:true`, owner = "outsider" —
+ *                  verified live against cli/cli, where a branch-only `--head`
+ *                  match returns a PR with `isCrossRepository: true`). GitHub
+ *                  applies the `head=<owner>:<branch>` filter SERVER-SIDE, so the
+ *                  handler returns only rows whose head-repo owner equals the
+ *                  query owner — a fork (different head owner) is dropped before
+ *                  the response, which is the truncation-proof property the fix
+ *                  relies on. `isOwnHeadPr` re-checks each returned row as defense
+ *                  in depth.
  */
 function branchToShortId(branch) {
   return String(branch)
@@ -164,9 +167,10 @@ function makeRunGh({
   stubs = [],
   prShortIds = [],
   forkPrShortIds = [],
+  diffBasePrShortIds = [],
   handled = [],
   repo = "o/r",
-  prListError = null,
+  openPrError = null,
 } = {}) {
   const owner = repo.split("/")[0];
   const calls = [];
@@ -279,29 +283,58 @@ function makeRunGh({
         comments: s.comments,
       });
     }
-    if (a0 === "pr" && a1 === "list") {
-      if (prListError) throw new Error(prListError);
-      // The selector matches the deterministic head branch (never --search).
-      const headIdx = args.indexOf("--head");
-      const shortId =
-        headIdx === -1 ? null : branchToShortId(args[headIdx + 1]);
-      const rows = [];
-      // Spoof first: a fence that trusted `.[0]` (or asked for `--limit 1`)
-      // would both accept this row AND hide a real PR behind it.
-      if (shortId && forkPrShortIds.includes(shortId)) {
-        rows.push({
-          number: 99,
-          isCrossRepository: true,
-          headRepositoryOwner: { login: "outsider" },
-        });
-      }
+    if (a0 === "api") {
+      if (openPrError) throw new Error(openPrError);
+      // GET repos/<owner>/<repo>/pulls?head=<owner>:<branch>&base=main&state=open
+      // — the owner-qualified REST head filter (never a branch-only `pr list
+      // --head`), pinned to the base the autofix leg always opens against.
+      const endpoint = String(a1);
+      const headMatch = /[?&]head=([^&]+)/.exec(endpoint);
+      const headQualifier = headMatch ? headMatch[1] : "";
+      const colon = headQualifier.indexOf(":");
+      const qOwner = colon === -1 ? "" : headQualifier.slice(0, colon);
+      const branch = colon === -1 ? "" : headQualifier.slice(colon + 1);
+      const baseMatch = /[?&]base=([^&]+)/.exec(endpoint);
+      const qBase = baseMatch ? baseMatch[1] : "";
+      const shortId = branch ? branchToShortId(branch) : null;
+      // Every PR that exists on this branch NAME — same-repo AND fork, and a
+      // same-owner PR to a NON-main base. GitHub applies the head=<owner>:<branch>
+      // AND base filters server-side, so only rows whose HEAD-REPO owner equals
+      // the query owner AND whose base matches survive; the fork (owner
+      // "outsider") and the different-base PR are dropped before the response —
+      // the two properties the fix relies on. Rows carry the real REST shape so
+      // `isOwnHeadPr` runs for real.
+      const allRows = [];
       if (shortId && prShortIds.includes(shortId)) {
-        rows.push({
+        allRows.push({
           number: 1,
-          isCrossRepository: false,
-          headRepositoryOwner: { login: owner },
+          html_url: `https://github.com/${repo}/pull/1`,
+          head: { repo: { fork: false, owner: { login: owner } } },
+          base: { ref: "main" },
         });
       }
+      if (shortId && forkPrShortIds.includes(shortId)) {
+        allRows.push({
+          number: 99,
+          html_url: "https://github.com/outsider/monitoring-monorepo/pull/99",
+          head: { repo: { fork: true, owner: { login: "outsider" } } },
+          base: { ref: "main" },
+        });
+      }
+      if (shortId && diffBasePrShortIds.includes(shortId)) {
+        allRows.push({
+          number: 77,
+          html_url: `https://github.com/${repo}/pull/77`,
+          head: { repo: { fork: false, owner: { login: owner } } },
+          base: { ref: "release-candidate" },
+        });
+      }
+      const rows = allRows.filter(
+        (r) =>
+          String(r.head.repo.owner.login).toLowerCase() ===
+            qOwner.toLowerCase() &&
+          (qBase === "" || String(r.base?.ref ?? "") === qBase),
+      );
       return JSON.stringify(rows);
     }
     throw new Error(`unexpected gh call: ${args.join(" ")}`);
@@ -403,35 +436,48 @@ await test("emits a RECONCILE entry when an OPEN autofix PR exists but the stub 
   assertDeepEqual(selected, [
     { issue: 30, shortId: "APP-MENTO-ORG-7X", reconcile: true },
   ]);
-  // The dedup must be scoped to OPEN PRs (a merged/closed PR must not strand a
-  // regressed stub) and must match the DETERMINISTIC head branch — never a text
-  // search, which an unrelated PR citing the id could satisfy.
-  const prCall = calls.find((c) => c[0] === "pr" && c[1] === "list");
-  assert(prCall, "pr list was queried");
-  const state = prCall[prCall.indexOf("--state") + 1];
-  assert(state === "open", `pr query must be open-only, got ${state}`);
+  // The dedup must query the OWNER-QUALIFIED REST head filter, scoped to OPEN
+  // PRs (a merged/closed PR must not strand a regressed stub) on the
+  // DETERMINISTIC head branch — never a free-text search an unrelated PR citing
+  // the id could satisfy, and never a branch-only `gh pr list` a fork flood
+  // could truncate.
+  const apiCall = calls.find((c) => c[0] === "api");
+  assert(apiCall, "the open-PR dedup was queried via gh api (REST)");
   assert(
-    prCall.indexOf("--search") === -1,
-    "must NOT use a text search (--search)",
+    !calls.some((c) => c[0] === "pr" && c[1] === "list"),
+    "must NOT use the fork-truncatable `gh pr list --head`",
   );
-  const head = prCall[prCall.indexOf("--head") + 1];
+  const endpoint = apiCall[1];
   assert(
-    head === "sentry-autofix/app-mento-org-7x",
-    `pr query must match the deterministic head branch, got ${head}`,
+    endpoint.includes("repos/o/r/pulls"),
+    `must hit the REST pulls endpoint, got ${endpoint}`,
+  );
+  assert(
+    endpoint.includes("head=o:sentry-autofix/app-mento-org-7x"),
+    `must owner-qualify the deterministic head branch, got ${endpoint}`,
+  );
+  assert(
+    endpoint.includes("base=main"),
+    `must pin base=main (GitHub PR uniqueness is per head+base), got ${endpoint}`,
+  );
+  assert(
+    endpoint.includes("state=open"),
+    `must scope to open PRs, got ${endpoint}`,
   );
 });
 
 await test("a FORK PR on the autofix branch name is not ours: no reconcile, the stub stays fixable", async () => {
-  // `gh pr list --head` matches by branch NAME, and fork PRs carry their own —
-  // verified live: `gh pr list -R cli/cli --head feat/uptime-command --state
-  // open` returns a PR with `isCrossRepository: true` owned by an unrelated
-  // user. This repo is public, queue-stub titles are public, and
+  // A branch-NAME-only match returns fork PRs (they carry their own head
+  // branch) — verified live: `gh pr list -R cli/cli --head feat/uptime-command
+  // --state open` returns a PR with `isCrossRepository: true` owned by an
+  // unrelated user. This repo is public, queue-stub titles are public, and
   // `sentry-autofix/<short-id-lower>` is deterministic, so anyone can produce
   // this row. Reading it as our prior fix PR hands an outsider the reconcile
   // write path — a comment carrying their PR url onto the queue issue plus the
-  // terminal `sentry:fix-pr-opened` marker, which is terminal until a human
-  // clears it — and the family collapse then stands the whole family down
-  // behind that marker.
+  // terminal `sentry:fix-pr-opened` marker, until a human clears it — and the
+  // family collapse then stands the whole family down behind that marker. The
+  // owner-qualified `head=<owner>:<branch>` filter excludes the fork SERVER-SIDE
+  // (its head-repo owner differs), so the query returns nothing.
   const stubs = [stub({ number: 40, shortId: "APP-MENTO-ORG-9Z" })];
   const { runGh, calls } = makeRunGh({
     stubs,
@@ -443,20 +489,24 @@ await test("a FORK PR on the autofix branch name is not ours: no reconcile, the 
     !("reconcile" in selected[0]),
     "a fork PR must not route the stub to the reconcile write path",
   );
-  // Ownership has to be READ, so the query must ask for the fields that decide
-  // it — a fence that never requested them could not fail closed.
-  const prCall = calls.find((c) => c[0] === "pr" && c[1] === "list");
-  const json = prCall[prCall.indexOf("--json") + 1];
-  for (const field of ["isCrossRepository", "headRepositoryOwner"]) {
-    assert(json.includes(field), `pr query must request ${field}, got ${json}`);
-  }
+  // The query must be owner-qualified — that is what excludes the fork before
+  // any row is returned; a branch-only query would surface it.
+  const apiCall = calls.find((c) => c[0] === "api");
+  assert(apiCall, "the open-PR dedup was queried via gh api");
+  assert(
+    apiCall[1].includes("head=o:sentry-autofix/app-mento-org-9z"),
+    `pr query must owner-qualify the head branch, got ${apiCall[1]}`,
+  );
 });
 
 await test("a spoofed fork PR cannot hide our real one behind it", async () => {
-  // The pre-fence query took `--limit 1`. Since forks share the branch-name
-  // namespace, a spoof row can fill that single slot — the fence would then
-  // report "no PR of ours", the leg would try to open a second one, and the
-  // orphaned stub would never be reconciled. Take a page and pick ours out.
+  // The old query paged `gh pr list --head <branch> --limit N`, capping the rows
+  // BEFORE the client-side owner filter — so newer fork PRs sharing the branch
+  // name could fill the page, the fence would report "no PR of ours", the leg
+  // would open a second PR (or force-push over a live one), and the orphaned
+  // stub would never be reconciled. The owner-qualified `head=<owner>:<branch>`
+  // filter excludes forks server-side, so however many fork PRs exist, only our
+  // same-repo PR enters the result set and is picked out.
   const stubs = [stub({ number: 41, shortId: "APP-MENTO-ORG-1A" })];
   const { runGh, calls } = makeRunGh({
     stubs,
@@ -467,17 +517,45 @@ await test("a spoofed fork PR cannot hide our real one behind it", async () => {
   assertDeepEqual(selected, [
     { issue: 41, shortId: "APP-MENTO-ORG-1A", reconcile: true },
   ]);
-  const prCall = calls.find((c) => c[0] === "pr" && c[1] === "list");
+  // No client-side row cap can be the safety mechanism: the query must be
+  // owner-qualified so forks never enter the result set to begin with.
+  const apiCall = calls.find((c) => c[0] === "api");
   assert(
-    Number(prCall[prCall.indexOf("--limit") + 1]) > 1,
-    "a single-row window can be filled by a spoof",
+    apiCall && apiCall[1].includes("head=o:sentry-autofix/app-mento-org-1a"),
+    "the dedup must owner-qualify the head branch, not page a branch-only list",
   );
 });
 
-await test("isOwnHeadPr fails CLOSED on a missing or mismatched head owner", () => {
+await test("a same-owner PR from the autofix branch to a DIFFERENT base is not our autofix PR (base=main pins it)", async () => {
+  // GitHub's open-PR uniqueness is per head+base, so a same-repo, same-owner PR
+  // can share the deterministic autofix branch while targeting a non-main base
+  // (a human could open one). Without `base=main` the query would return it and
+  // the leg could mis-relink/dedup against it; with `base=main` the server-side
+  // base filter drops it, so the stub stays fixable and no reconcile fires.
+  const stubs = [stub({ number: 42, shortId: "APP-MENTO-ORG-2B" })];
+  const { runGh, calls } = makeRunGh({
+    stubs,
+    diffBasePrShortIds: ["APP-MENTO-ORG-2B"],
+  });
+  const selected = await selectAutofixCandidates({ repo: "o/r" }, { runGh });
+  assertDeepEqual(selected, [{ issue: 42, shortId: "APP-MENTO-ORG-2B" }]);
+  assert(
+    !("reconcile" in selected[0]),
+    "a different-base PR must not route the stub to reconcile",
+  );
+  const apiCall = calls.find((c) => c[0] === "api");
+  assert(
+    apiCall && apiCall[1].includes("base=main"),
+    "the query must pin base=main so a different-base PR is excluded server-side",
+  );
+});
+
+await test("isOwnHeadPr fails CLOSED on a missing or mismatched head owner (REST shape)", () => {
+  // Reads the REST pulls shape (`head.repo.fork` / `head.repo.owner.login`), NOT
+  // the `gh pr list --json` `isCrossRepository`/`headRepositoryOwner` shape the
+  // REST endpoint does not return.
   const ours = {
-    isCrossRepository: false,
-    headRepositoryOwner: { login: "Mento-Protocol" },
+    head: { repo: { fork: false, owner: { login: "Mento-Protocol" } } },
   };
   assertEqual(
     isOwnHeadPr(ours, "mento-protocol/monitoring-monorepo"),
@@ -485,18 +563,31 @@ await test("isOwnHeadPr fails CLOSED on a missing or mismatched head owner", () 
     "owner comparison is case-insensitive",
   );
   for (const [label, pr] of [
-    ["fork", { isCrossRepository: true, headRepositoryOwner: { login: "x" } }],
+    [
+      "fork",
+      { head: { repo: { fork: true, owner: { login: "mento-protocol" } } } },
+    ],
     [
       "owner mismatch",
-      { isCrossRepository: false, headRepositoryOwner: { login: "x" } },
+      { head: { repo: { fork: false, owner: { login: "x" } } } },
     ],
-    ["no owner field", { isCrossRepository: false }],
+    ["no owner field", { head: { repo: { fork: false } } }],
     [
-      "no cross-repo field",
-      { headRepositoryOwner: { login: "mento-protocol" } },
+      "no fork field",
+      { head: { repo: { owner: { login: "mento-protocol" } } } },
     ],
-    ["empty row", {}],
+    ["no head repo", { head: {} }],
+    ["no head", {}],
     ["null row", null],
+    // The OLD `gh pr list --json` shape must NOT read as ours under the REST
+    // fence — it has no `head.repo`, so both signals are absent (fail closed).
+    [
+      "legacy pr-list shape",
+      {
+        isCrossRepository: false,
+        headRepositoryOwner: { login: "mento-protocol" },
+      },
+    ],
   ]) {
     assertEqual(
       isOwnHeadPr(pr, "mento-protocol/monitoring-monorepo"),
@@ -505,6 +596,92 @@ await test("isOwnHeadPr fails CLOSED on a missing or mismatched head owner", () 
     );
   }
   assertEqual(isOwnHeadPr(ours, ""), false, "an unparsable repo is not ours");
+});
+
+await test("openAutofixPrExists queries the owner-qualified REST head filter, not a fork-truncatable list", async () => {
+  // QUERY SHAPE + NEGATIVE CONTROL, exercising the LIVE function so the args it
+  // passes to the runner are the real ones. Reverting it to the branch-only `gh
+  // pr list --head <branch> --limit N` (which a flood of fork PRs can truncate)
+  // makes no `api` call, so `verb === "api"` fails — the invariant is that a real
+  // same-repo PR can never be hidden behind fork rows because forks are excluded
+  // SERVER-SIDE at query time, with no client-side page to fill.
+  const calls = [];
+  const runGh = async (args) => {
+    calls.push(args);
+    return JSON.stringify([
+      { html_url: "x", head: { repo: { fork: false, owner: { login: "o" } } } },
+    ]);
+  };
+  const result = await openAutofixPrExists(runGh, "o/r", "APP-MENTO-ORG-7X");
+  assertEqual(result, true, "a same-repo open PR row is ours");
+  assertEqual(calls.length, 1, "exactly one lookup call");
+  const [verb, endpoint] = calls[0];
+  assertEqual(verb, "api", "must use `gh api` (REST), not `gh pr list`");
+  assert(
+    endpoint.includes("repos/o/r/pulls"),
+    `must hit the REST pulls endpoint, got ${endpoint}`,
+  );
+  assert(
+    endpoint.includes("head=o:sentry-autofix/app-mento-org-7x"),
+    `must owner-qualify the head branch (head=<owner>:<branch>), got ${endpoint}`,
+  );
+  assert(
+    endpoint.includes("base=main"),
+    `must pin base=main (per head+base uniqueness), got ${endpoint}`,
+  );
+  assert(
+    endpoint.includes("state=open"),
+    `must scope to open, got ${endpoint}`,
+  );
+  // The truncation vector is gone: no branch-only list, no client-side row cap.
+  assert(
+    !calls.some((c) => c[0] === "pr" && c[1] === "list"),
+    "must not fall back to `gh pr list`",
+  );
+  assert(
+    !calls[0].includes("--limit"),
+    "must not rely on a client-side row cap the fix removed",
+  );
+});
+
+await test("openAutofixPrExists returns false when the owner-qualified query is empty", async () => {
+  const runGh = async () => JSON.stringify([]);
+  assertEqual(
+    await openAutofixPrExists(runGh, "o/r", "APP-MENTO-ORG-7X"),
+    false,
+    "no rows -> no open autofix PR of ours",
+  );
+});
+
+await test("openAutofixPrExists rejects fork / owner-mismatch / malformed rows as defense in depth", async () => {
+  // The owner-qualified query already excludes forks server-side, but the
+  // client-side fence must still reject anything that slips through — a fork row,
+  // an owner mismatch, or a malformed head. Each is "not ours", so the function
+  // returns false even though a row came back.
+  for (const rows of [
+    [{ head: { repo: { fork: true, owner: { login: "o" } } } }],
+    [{ head: { repo: { fork: false, owner: { login: "outsider" } } } }],
+    [{ head: { repo: { fork: false } } }],
+    [{ head: {} }],
+    [{}],
+  ]) {
+    const runGh = async () => JSON.stringify(rows);
+    assertEqual(
+      await openAutofixPrExists(runGh, "o/r", "APP-MENTO-ORG-7X"),
+      false,
+      `defense-in-depth must drop ${JSON.stringify(rows)}`,
+    );
+  }
+  // A genuine same-repo, non-fork, owner-matching row IS ours.
+  const ok = async () =>
+    JSON.stringify([
+      { head: { repo: { fork: false, owner: { login: "o" } } } },
+    ]);
+  assertEqual(
+    await openAutofixPrExists(ok, "o/r", "APP-MENTO-ORG-7X"),
+    true,
+    "a same-repo, non-fork, owner-matching row is ours",
+  );
 });
 
 await test("a transient open-PR read failure skips ONE stub, never the whole leg", async () => {
@@ -516,7 +693,8 @@ await test("a transient open-PR read failure skips ONE stub, never the whole leg
   const stubs = [stub({ number: 42, shortId: "APP-MENTO-ORG-2B" })];
   const { runGh } = makeRunGh({
     stubs,
-    prListError: "gh pr list failed with exit 1: API rate limit exceeded",
+    openPrError:
+      "gh api repos/o/r/pulls failed with exit 1: API rate limit exceeded",
   });
   const selected = await selectAutofixCandidates({ repo: "o/r" }, { runGh });
   assertDeepEqual(selected, []);
@@ -644,7 +822,7 @@ await test("skips a stub whose title has no parseable SHORT-ID", async () => {
   assertDeepEqual(selected, []);
 });
 
-await test("only queries PRs after cheaper checks pass (no wasted pr list)", async () => {
+await test("only queries PRs after cheaper checks pass (no wasted open-PR read)", async () => {
   const stubs = [
     stub({
       number: 70,
@@ -655,8 +833,9 @@ await test("only queries PRs after cheaper checks pass (no wasted pr list)", asy
   const { runGh, calls } = makeRunGh({ stubs });
   await selectAutofixCandidates({ repo: "o/r" }, { runGh });
   assert(
-    !calls.some((c) => c[0] === "pr" && c[1] === "list"),
-    "should not query PRs for a stub already deduped by label",
+    !calls.some((c) => c[0] === "api") &&
+      !calls.some((c) => c[0] === "pr" && c[1] === "list"),
+    "should not query the open-PR REST endpoint for a stub already deduped by label",
   );
 });
 
@@ -901,7 +1080,7 @@ await test("OLD PATH: with no duplicate_of, selection order, cap and the gh call
     [10, 11, 12],
   );
   assertEqual(
-    calls.filter((c) => c[0] === "pr" && c[1] === "list").length,
+    calls.filter((c) => c[0] === "api").length,
     3,
     "one open-PR read per surviving stub",
   );
@@ -1130,7 +1309,12 @@ await test("a family-handled deferral lifts exactly when the blocking marker is 
   for (const call of blocked.calls) {
     assert(
       (call[0] === "issue" && (call[1] === "list" || call[1] === "view")) ||
-        (call[0] === "pr" && call[1] === "list"),
+        // The open-PR dedup is a GET on the REST pulls endpoint (owner-qualified
+        // head filter) — a read, with no mutating method flag.
+        (call[0] === "api" &&
+          /^repos\/[^ ]+\/pulls\?/.test(String(call[1])) &&
+          !call.includes("--method") &&
+          !call.includes("-X")),
       `selector must issue reads only, got: ${call.join(" ")}`,
     );
   }
@@ -2101,7 +2285,10 @@ function writeCalls(calls) {
     (c) =>
       !(
         (c[0] === "issue" && (c[1] === "list" || c[1] === "view")) ||
-        (c[0] === "pr" && c[1] === "list")
+        (c[0] === "pr" && c[1] === "list") ||
+        // The owner-qualified open-PR dedup lookup (#1810) is a GET; the select
+        // leg is read-only, so this REST read must not count as a write.
+        c[0] === "api"
       ),
   );
 }
@@ -2276,7 +2463,10 @@ function makeNegationInterpretingRunGh({
         comments: s.comments,
       });
     }
-    if (a0 === "pr" && a1 === "list") return JSON.stringify([]);
+    // Owner-qualified open-PR dedup lookup (#1810 replaced the fork-truncatable
+    // `pr list --head` with the REST head filter). No fixture here has a
+    // pre-existing autofix PR, so the query is always empty.
+    if (a0 === "api") return JSON.stringify([]);
     throw new Error(`unexpected gh call: ${args.join(" ")}`);
   };
   return { runGh, calls };
