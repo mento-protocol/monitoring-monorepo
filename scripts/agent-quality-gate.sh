@@ -2386,7 +2386,12 @@ while IFS= read -r path; do
           add_command "pnpm sentry:archive:test" "Sentry needs-human brief helper changed"
           add_command "pnpm sentry:project:test" "Sentry needs-human brief helper changed"
           ;;
-        scripts/sentry-triage-project.mjs|scripts/sentry-triage-project-core.mjs|scripts/sentry-triage-project.test.mjs|scripts/sentry-triage-text.mjs|scripts/sentry-triage-projection.mjs|scripts/sentry-triage-escalation-contract.mjs)
+        scripts/sentry-triage-project.mjs|scripts/sentry-triage-project-core.mjs|scripts/sentry-triage-project-cli.mjs|scripts/sentry-triage-label-ensure.mjs|scripts/sentry-triage-project.test.mjs|scripts/sentry-triage-text.mjs|scripts/sentry-triage-projection.mjs|scripts/sentry-triage-escalation-contract.mjs)
+          # sentry-triage-project-cli.mjs (the argv surface) and
+          # sentry-triage-label-ensure.mjs (the settlement label self-heal) were
+          # split out of the entry module for the 1,000-line cap (#1827); both
+          # are covered by the projection suite and reached only through it, so
+          # they route exactly like the file they came from.
           add_command "pnpm sentry:project:test" "Sentry triage projection helper changed"
           # The agent's comment wrapper imports the shared marker contract from
           # sentry-triage-project-core.mjs, so its fences ride on this module.

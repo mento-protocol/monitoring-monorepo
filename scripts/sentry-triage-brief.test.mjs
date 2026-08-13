@@ -2123,8 +2123,17 @@ await test("the brief leg is not a stub-body writer, and owns its marker alone",
 });
 
 await test("the pipeline's shared modules stay under the file-size hard cap", () => {
+  // scripts/ has no max-lines lint, so the 1,000-line hard cap in
+  // docs/pr-checklists/recurring-review-patterns.md is only enforced here. The
+  // projection leg is on this list because it was NOT: it drifted past the cap
+  // unnoticed and a later PR appended to it, which is the exact sequence the
+  // checklist forbids (#1827). Everything a live workflow entry point reaches
+  // belongs here — an omission is how the next one drifts.
   const oversized = [
+    "scripts/sentry-triage-project.mjs",
+    "scripts/sentry-triage-project-cli.mjs",
     "scripts/sentry-triage-project-core.mjs",
+    "scripts/sentry-triage-label-ensure.mjs",
     "scripts/sentry-triage-escalation-contract.mjs",
     "scripts/sentry-triage-text.mjs",
     "scripts/sentry-triage-brief.mjs",
