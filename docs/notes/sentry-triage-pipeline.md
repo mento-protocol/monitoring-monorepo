@@ -284,12 +284,14 @@ directions degrade into states something already repairs — a re-queue that rac
 the `project` job leaves a stub its `--batch` mode skips, and one that raced the
 close leaves the closed-plus-needs-triage pairing the first sweep repairs.
 
-A human working a strand withdraws it for free: any comment or label edit moves
-`updated_at`, so reading or annotating one keeps it out of the sweep for another
-day without knowing the rule exists. The same property is the sweep's one
-weakness on a public repo — a determined commenter can keep a genuine strand
-below the threshold indefinitely. That delays a repair; it can never cause one to
-happen wrongly, and the state it preserves is the one this sweep found.
+**To hold a strand while you work on it, write to it.** Only a mutation moves
+`updated_at` — a comment, a label change, a state change, a title or body edit.
+Reading one does not, so opening a stub to inspect it buys no time at all and the
+sweep can re-queue it under you. Post a comment saying you are on it, and the
+stub is yours for another day. The same property is the sweep's one weakness on a
+public repo: a determined commenter can keep a genuine strand below the threshold
+indefinitely. That delays a repair; it can never cause one to happen wrongly, and
+the state it preserves is the one this sweep found.
 
 The window between the sweep's revalidating read and its label shed stays open,
 like the one the re-queue CLI's terminal guard documents, and for the same

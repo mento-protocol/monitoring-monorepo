@@ -885,7 +885,8 @@ export function isStrandedNeedsTriage(issue) {
  * pre-event verdict cannot settle that round either — this re-queue posts no
  * fence, but the round binding (#1717) refuses any verdict comment that is not
  * strictly newer than the one `select` recorded. What the human loses is one
- * triage round of delay; touching the stub at all resets the idle clock.
+ * triage round of delay, and any WRITE to the stub — a comment, a label — holds
+ * it past that (reads do not; see the idleness note below).
  *
  * THE THRESHOLD. A stub's clock starts when ITS verdict label lands, so the
  * window to clear is only what can still happen to it after that. The declared
@@ -915,9 +916,12 @@ export function isStrandedNeedsTriage(issue) {
  * needs-triage stubs), and one that raced the `verdict` job's close leaves the
  * closed-plus-needs-triage pairing the sweep arm above repairs.
  *
- * A HUMAN working the stub withdraws it from the sweep for free: a comment or a
- * label edit moves `updated_at`, so anyone reading or annotating a strand keeps
- * it out of this path for another day without knowing the rule exists.
+ * A HUMAN holds a strand by WRITING to it, and only by writing to it. GitHub
+ * moves `updated_at` on mutations — a comment, a label change, a state change, a
+ * title or body edit — and not on reads, so opening a stub to inspect it buys no
+ * time and this sweep can re-queue it mid-inspection. The runbook therefore
+ * tells an operator to post a comment rather than to "touch" the stub; see the
+ * open-verdict sweep in docs/notes/sentry-triage-pipeline.md.
  */
 export const STRANDED_OPEN_VERDICT_MIN_IDLE_MS = 24 * 60 * 60 * 1000;
 
