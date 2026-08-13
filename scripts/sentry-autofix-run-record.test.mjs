@@ -113,6 +113,81 @@ await test("run record distinguishes a family-SUPPRESSED queue from an empty one
   );
 });
 
+await test("run record distinguishes a SCOPE-suppressed queue from an empty one", () => {
+  // The second stand-down class (issue #1785), on the same argument as the
+  // first. The selector skips a `fix_scope: architectural` stub and writes
+  // nothing to the queue from the select leg — fresh ones settle OPEN under
+  // sentry:fix-scope-architectural and are window-excluded (#1812), so this
+  // counts the LEGACY stragglers the backfill has not labeled yet. Unreported,
+  // "triage is correctly classifying architectural" and "the prompt change never
+  // landed" render the same line.
+  const idle = buildAutofixRunRecordBody({
+    timestampIso: "2026-07-19T08:30:00Z",
+    trigger: "schedule",
+    disposition: "active",
+    candidates: 0,
+    deferred: 0,
+    skipped: 0,
+  });
+  const scopeStarved = buildAutofixRunRecordBody({
+    timestampIso: "2026-07-19T08:30:00Z",
+    trigger: "schedule",
+    disposition: "active",
+    candidates: 0,
+    deferred: 0,
+    skipped: 5,
+    skippedIssues: "1304 1313 1316 1326 1328",
+  });
+  assert(
+    idle !== scopeStarved,
+    "an all-skipped run must not render as an idle one",
+  );
+  assert(
+    scopeStarved.includes(
+      "Skipped (fix_scope: architectural): 5 (#1304, #1313, #1316, #1326, #1328)",
+    ),
+    `skip line names the issues, got: ${scopeStarved}`,
+  );
+  assert(
+    idle.includes("Skipped (fix_scope: architectural): 0"),
+    "missing -> 0",
+  );
+  // Separate lines because an operator acts on them differently: a deferral
+  // lifts when a sibling's marker goes, a skip only on re-triage.
+  const both = buildAutofixRunRecordBody({
+    timestampIso: "2026-07-19T08:30:00Z",
+    trigger: "schedule",
+    disposition: "active",
+    candidates: 0,
+    deferred: 2,
+    deferredIssues: "1313 1316",
+    skipped: 1,
+    skippedIssues: "1304",
+  });
+  assert(
+    both.includes("Deferred (duplicate_of family): 2 (#1313, #1316)") &&
+      both.includes("Skipped (fix_scope: architectural): 1 (#1304)"),
+    `both stand-downs render independently, got: ${both}`,
+  );
+});
+
+await test("run record skipped-issue list is whitelist-parsed too", () => {
+  // Same public-tracker exposure as the deferred list, same agent-authored
+  // trigger (`fix_scope` this time): only bare positive integers survive.
+  const body = buildAutofixRunRecordBody({
+    timestampIso: "2026-07-19T08:30:00Z",
+    trigger: "schedule",
+    disposition: "active",
+    candidates: 0,
+    skipped: 2,
+    skippedIssues: "1304 <img src=x> @everyone ../../etc 1313 -5 0",
+  });
+  const line = body
+    .split("\n")
+    .find((l) => l.startsWith("- Skipped (fix_scope: architectural):"));
+  assertEqual(line, "- Skipped (fix_scope: architectural): 2 (#1304, #1313)");
+});
+
 await test("run record deferred-issue list is whitelist-parsed, not escaped", () => {
   // The list reaches this line because agent-authored `duplicate_of` text
   // triggered a deferral, and it lands on a PUBLIC tracker comment. Only bare

@@ -21,6 +21,16 @@
  *     an unfixable stub. A merged/closed PR does NOT block: once a fixed issue
  *     regresses (ingest sheds the autofix markers on reopen), the stub is
  *     re-attemptable by design.
+ *   - FIX SCOPE (issue #1785/#1812): only a verdict claiming `fix_scope:
+ *     mechanical` starts a fix attempt. A local `architectural` verdict — the
+ *     fail-closed value for an absent or unrecognized field — settles OPEN under
+ *     `sentry:fix-scope-architectural` and is excluded from the candidate window
+ *     at query time; a LEGACY or hand-removed straggler that still reaches the
+ *     gate is skipped WITHOUT a terminal refusal marker (which would stand its
+ *     whole family down). The skip is REPORTED (`skipped`) because it writes
+ *     nothing here, and the record-run job backfills the exclusion label onto
+ *     the straggler. The skipped stub still joins the family union below —
+ *     dropping it would delete its `duplicate_of` edges and fan its family out.
  *   - FAMILY COLLAPSE (issue #1784): stubs whose verdicts place them in one
  *     `duplicate_of` family consume ONE run between them, not one each. The
  *     grouping, the transitive union and the representative rule live in
@@ -39,17 +49,8 @@ import { fileURLToPath } from "node:url";
 
 import {
   DEFAULT_REPO,
-  isValidShortId,
-  parseShortId,
-  resolveVerdict,
   selectVerdictComment,
-  validateAffectedRepo,
-  verdictCommentIdFromUrl,
 } from "./sentry-triage-project-core.mjs";
-import {
-  FIX_PR_OPENED_LABEL,
-  FIX_REFUSED_LABEL,
-} from "./sentry-triage-ingest.mjs";
 import {
   DEFER_FAMILY_DUPLICATE,
   DEFER_FAMILY_HANDLED,
@@ -57,21 +58,24 @@ import {
 } from "./sentry-autofix-family.mjs";
 import { resolveFamilies } from "./sentry-autofix-family-resolve.mjs";
 import {
-  AUTOFIX_SELECT_LABEL,
   defaultRunGh,
   listCodeFixStubs,
-  openAutofixPrExists,
   readStub,
 } from "./sentry-autofix-queue-io.mjs";
+// The per-stub eligibility layer, extracted so this module stays under the
+// 600-line soft cap: every filter that decides whether ONE stub may start a fix
+// attempt lives there, this module owns the window and the family collapse.
+import { evaluateCandidate, safeShortId } from "./sentry-autofix-candidate.mjs";
 
-// Only `code-fix` verdicts are fixable in code; the select label already
-// filters to these, but the re-parse cross-checks the verdict value too.
-const AUTOFIX_VERDICT = "code-fix";
+// The queue-scoping label (AUTOFIX_SELECT_LABEL) lives in the I/O layer beside
+// the queries that use it; the family-collapse project scope
+// (LOCAL_SENTRY_PROJECT) is owned by the extracted resolver
+// (sentry-autofix-family-resolve.mjs); the per-stub filters and the skip reason
+// are owned by sentry-autofix-candidate.mjs.
 
-// AUTOFIX_SELECT_LABEL is the queue-scoping label constant; it lives in the I/O
-// layer (sentry-autofix-queue-io.mjs) beside the queries that use it and is
-// imported above. The family-collapse project scope (LOCAL_SENTRY_PROJECT) is
-// owned by the extracted resolver (sentry-autofix-family-resolve.mjs).
+/** Re-exported from the candidate layer: the selector is still the module the
+ * workflow and the suites import this contract from. */
+export { SKIP_FIX_SCOPE_ARCHITECTURAL } from "./sentry-autofix-candidate.mjs";
 
 export const DEFAULT_CAP = 2;
 
@@ -91,160 +95,6 @@ export const DEFAULT_CAP = 2;
 // see), and it fails toward MORE candidates, never fewer.
 export const MAX_CANDIDATE_EVALUATIONS = 50;
 
-/**
- * Evaluate ONE candidate stub against every autofix filter. Returns a CANDIDATE
- * record `{ entry, shortId, duplicateOf, reconcile }` when the stub passes, or
- * `null` (with a stderr note) otherwise. `stub` needs `{ number, title, labels
- * }`; the verdict comments are read here. Never throws — a parse failure is a
- * skip, so the select job always emits a valid array.
- *
- * `entry` is the matrix entry EXACTLY as the workflow consumes it; the sibling
- * fields are selection-time metadata (issue #1784) and never reach stdout. The
- * split keeps the emitted contract byte-identical while giving family collapse
- * the `duplicate_of` the same authoritative parser already produced — no second
- * parser, and no new read.
- */
-async function evaluateCandidate(runGh, repo, stub) {
-  // Dedup by label first (cheapest, no extra API call). Both autofix markers
-  // are terminal until a human clears them or a regression sheds them — this
-  // also covers the single-issue dispatch path, which bypasses the server-side
-  // list filter.
-  if (stub.labels.includes(FIX_PR_OPENED_LABEL)) {
-    process.stderr.write(
-      `skip #${stub.number}: already carries ${FIX_PR_OPENED_LABEL}.\n`,
-    );
-    return null;
-  }
-  if (stub.labels.includes(FIX_REFUSED_LABEL)) {
-    process.stderr.write(
-      `skip #${stub.number}: already carries ${FIX_REFUSED_LABEL} (remove it to retry).\n`,
-    );
-    return null;
-  }
-  if (!stub.labels.includes(AUTOFIX_SELECT_LABEL)) {
-    process.stderr.write(
-      `skip #${stub.number}: not labeled ${AUTOFIX_SELECT_LABEL}.\n`,
-    );
-    return null;
-  }
-
-  const shortId = parseShortId(stub.title);
-  if (!isValidShortId(shortId)) {
-    process.stderr.write(
-      `skip #${stub.number}: no parseable Sentry SHORT-ID in title.\n`,
-    );
-    return null;
-  }
-
-  let parsed;
-  let verdictCommentUrl;
-  try {
-    const full = await readStub(runGh, repo, stub.number);
-    ({ parsed, verdictCommentUrl } = resolveVerdict(full, stub.number));
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    process.stderr.write(`skip #${stub.number}: ${message}\n`);
-    return null;
-  }
-
-  // Cross-check the verdict value and require an EXACTLY-local owning repo.
-  // `unrecognized` also resolves to LOCAL_REPO in validateAffectedRepo, but we
-  // fix here ONLY when the agent named this repo verbatim — an unrecognized
-  // value is not a confident local classification.
-  if (parsed.verdict !== AUTOFIX_VERDICT) {
-    process.stderr.write(
-      `skip #${stub.number}: verdict is ${parsed.verdict}, not ${AUTOFIX_VERDICT}.\n`,
-    );
-    return null;
-  }
-  const repoCheck = validateAffectedRepo(parsed.affectedRepo);
-  if (repoCheck.reason !== "local-repo") {
-    process.stderr.write(
-      `skip #${stub.number}: affected_repo is not exactly this repo (${repoCheck.reason}).\n`,
-    );
-    return null;
-  }
-
-  // An OPEN autofix PR already exists on this SHORT-ID's deterministic branch.
-  // Because the two terminal markers were filtered above, reaching here means
-  // the stub has NEITHER marker yet its fix PR exists — i.e. a prior run's `gh
-  // pr create` succeeded but its follow-up queue comment/label write did not
-  // land (a transient failure, or a same-tick race with a concurrent run). This
-  // is NOT a plain skip: the stub's queue side-effects are unreconciled and
-  // would never be repaired if we dropped it (the workflow's reconcile path is
-  // only reachable AFTER selection). Emit it as a RECONCILE entry — the fix job
-  // routes reconcile entries to a no-agent step that (re-)applies the marker +
-  // comment against the existing PR, never opening a duplicate and never
-  // re-running the agent (which could otherwise mislabel it `fix-refused`).
-  //
-  // Fail-SOFT, exactly like the `readStub` read above. This call is issued once
-  // per surviving stub — a whole-window count now, not a capped one — so a
-  // single transient `gh` rejection anywhere in the window used to reject out of
-  // `selectAutofixCandidates`, exit nonzero, and fail the select step under
-  // `set -euo pipefail`. That breaks the invariant the workflow's own header
-  // asserts ("ALWAYS emits a valid JSON array … never a failure"). Skipping the
-  // one stub is the safe direction: no fix is attempted, no reconcile is
-  // claimed, and the next run re-reads it from live state.
-  let hasOpenAutofixPr;
-  try {
-    hasOpenAutofixPr = await openAutofixPrExists(runGh, repo, shortId);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    process.stderr.write(
-      `skip #${stub.number}: could not read open autofix PRs for ${shortId}: ${message}\n`,
-    );
-    return null;
-  }
-  if (hasOpenAutofixPr) {
-    process.stderr.write(
-      `reconcile #${stub.number}: an open autofix PR exists for ${shortId} but the stub lacks its marker; routing to no-agent reconciliation.\n`,
-    );
-    return {
-      entry: { issue: stub.number, shortId, reconcile: true },
-      shortId,
-      duplicateOf: parsed.duplicateOf,
-      reconcile: true,
-    };
-  }
-
-  // Generation token (issue #1506): the numeric id of the verdict comment this
-  // fix is based on, threaded through the matrix to finalize so it can refuse to
-  // mark the stub fixed if a re-triage REPLACED the verdict comment (ABA) during
-  // the run — a change label-presence cannot see. Reconcile entries above carry
-  // no token: they relink a PRIOR run's PR, whose originating verdict id select
-  // never captured. Emit without the token (finalize falls back to the #1389
-  // label-presence guard) only if the url is unparsable — which should not
-  // happen for a real, fence-selected verdict comment.
-  const verdictCommentId = verdictCommentIdFromUrl(verdictCommentUrl);
-  if (!verdictCommentId) {
-    process.stderr.write(
-      `warn #${stub.number}: could not derive a verdict-comment id (url=${verdictCommentUrl}); emitting without a generation token.\n`,
-    );
-    return {
-      entry: { issue: stub.number, shortId },
-      shortId,
-      duplicateOf: parsed.duplicateOf,
-      reconcile: false,
-    };
-  }
-  return {
-    entry: { issue: stub.number, shortId, verdictCommentId },
-    shortId,
-    duplicateOf: parsed.duplicateOf,
-    reconcile: false,
-  };
-}
-
-/** Render a SHORT-ID into a diagnostic line. The value reaches stderr, which
- * GitHub Actions scans for `::workflow commands::` — so a newline inside it
- * would let agent-authored `duplicate_of` text inject one. `isValidShortId`
- * admits no newline (nor anything outside `[A-Za-z0-9._-]`), and this is the
- * one place a family id is interpolated, so the check sits here rather than
- * being assumed of the caller. */
-function safeShortId(shortId) {
-  return isValidShortId(shortId) ? shortId : "(unprintable short-id)";
-}
-
 /** One note per deferral reason, keyed by the collapse's own constants so a
  * reason added there cannot silently inherit another's wording. An unmapped
  * reason still prints — as itself, not as somebody else's explanation. */
@@ -258,8 +108,9 @@ const DEFER_NOTES = {
 };
 
 /**
- * Run the selection and report BOTH halves of its outcome: the matrix entries,
- * and every candidate the family collapse stood down.
+ * Run the selection and report EVERY half of its outcome: the matrix entries,
+ * every candidate the family collapse stood down, and every stub the `fix_scope`
+ * gate skipped.
  *
  * The deferred half exists because deferral writes nothing — no label, no
  * comment, no marker — so before this the only trace was a stderr line inside a
@@ -270,7 +121,17 @@ const DEFER_NOTES = {
  * family-starved queue read as a healthy idle leg, which is the #1758
  * misdiagnosis this whole leg exists to make impossible — and it left the
  * documented remedy (single-issue `workflow_dispatch`) unusable, because nobody
- * could tell which issue to name. Both fields go into the run record.
+ * could tell which issue to name. All three fields go into the run record.
+ *
+ * `skipped` exists for the same reason, one stand-down class later (issue
+ * #1785): a `fix_scope: architectural` verdict writes nothing either — no
+ * marker, deliberately, because a refusal marker is terminal and would stand its
+ * whole family down — and `architectural` is what EVERY verdict predating the
+ * field normalizes to. Unreported, the steady state after this ships is
+ * `Candidates selected: 0, Deferred: 0`, which is byte-identical to an idle
+ * queue and cannot be told apart from "the prompt change never landed" or "the
+ * parse broke" without opening Actions logs. That is the #1758 misdiagnosis
+ * exactly.
  *
  * Batch mode (default): up to `cap` oldest `sentry:verdict-code-fix` stubs owned
  * by this repo, ONE per `duplicate_of` family (issue #1784). Single mode
@@ -287,7 +148,11 @@ export async function selectAutofixRun(options, deps = {}) {
   const runGh = deps.runGh ?? defaultRunGh;
   const repo = options.repo ?? DEFAULT_REPO;
 
-  // Single-issue live run: evaluate exactly the requested issue.
+  // Single-issue live run: evaluate exactly the requested issue. A dispatch
+  // cannot override the fix_scope gate (that is the point of the gate), so the
+  // skip is reported here too — otherwise the documented remedy for a stalled
+  // leg is itself silent, and an operator who dispatches an architectural stub
+  // sees the same empty array as for an ineligible one.
   if (options.issue != null) {
     const stub = await readStub(runGh, repo, options.issue);
     const candidate = await evaluateCandidate(runGh, repo, {
@@ -297,10 +162,19 @@ export async function selectAutofixRun(options, deps = {}) {
     });
     // No list window in single-issue mode: one stub considered, one evaluated,
     // so the Window tripwire never fires (total == evaluated), and the family
-    // collapse is skipped entirely, so no cost budget can truncate.
+    // collapse is skipped entirely, so no cost budget can truncate. A dispatch
+    // cannot override the fix_scope gate, so an architectural stub is reported
+    // through `skipped` here too (the documented remedy for a stalled leg must
+    // not itself be silent).
+    const selectable = candidate != null && candidate.eligible !== false;
     return {
-      entries: candidate ? [candidate.entry] : [],
+      entries: selectable ? [candidate.entry] : [],
       deferred: [],
+      skipped: selectable
+        ? []
+        : candidate == null
+          ? []
+          : [{ issue: candidate.issue, reason: candidate.skipReason }],
       window: { total: 1, evaluated: 1 },
       truncations: {
         handledOverflow: 0,
@@ -348,8 +222,16 @@ export async function selectAutofixRun(options, deps = {}) {
   );
   const entries = [];
   const deferred = [];
+  const skipped = [];
   for (const decision of decisions) {
-    const number = decision.candidate.entry.issue;
+    const number = decision.candidate.issue;
+    // Ruled out before the collapse ran (fix_scope). It joined the union so its
+    // family edges survived, but it is not a family deferral and must not be
+    // reported as one: the two lift on different events.
+    if (decision.candidate.eligible === false) {
+      skipped.push({ issue: number, reason: decision.candidate.skipReason });
+      continue;
+    }
     if (!decision.selected) {
       // Deferral writes NOTHING to the queue — no label, no comment, no marker.
       // The member stays exactly as selectable as its live state makes it on the
@@ -366,11 +248,12 @@ export async function selectAutofixRun(options, deps = {}) {
     if (entries.length >= cap) continue;
     entries.push(decision.candidate.entry);
   }
-  return { entries, deferred, window, truncations };
+  return { entries, deferred, skipped, window, truncations };
 }
 
 /** Matrix entries only — the emitted contract, unchanged. `selectAutofixRun`
- * carries the deferral report the run record needs alongside it. */
+ * carries the deferral and fix_scope-skip reports the run record needs
+ * alongside it. */
 export async function selectAutofixCandidates(options, deps = {}) {
   const { entries } = await selectAutofixRun(options, deps);
   return entries;
@@ -408,8 +291,8 @@ function usage() {
 
 Prints a JSON array of { "issue": <number>, "shortId": "<SHORT-ID>" } matrix
 entries — the oldest capped batch of code-fix queue stubs owned by this repo
-that do not yet have a fix PR, collapsed to ONE candidate per \`duplicate_of\`
-family. Diagnostics go to stderr.
+that claim \`fix_scope: mechanical\` and do not yet have a fix PR, collapsed to
+ONE candidate per \`duplicate_of\` family. Diagnostics go to stderr.
 
 Options:
   --repo <owner/name>  Repo the queue stubs live in (default: ${DEFAULT_REPO}).
@@ -423,6 +306,10 @@ Options:
                        { "issue": <number>, "reason": "<enum>" } — to this path,
                        so the run record can distinguish an empty queue from one
                        whose candidates were all stood down. Stdout is unchanged.
+  --skipped-out <p>    Write the fix_scope SKIP report, same shape, to this path.
+                       An architectural verdict writes nothing to the queue, so
+                       without it a window standing entirely down on scope is
+                       indistinguishable from an empty one. Stdout is unchanged.
   --window-out <p>     Write the Window tripwire — { "total": <n>, "evaluated":
                        <n> } — to this path, so the run record can surface a list
                        window that exceeded the eval cap. Stdout is unchanged.
@@ -446,6 +333,7 @@ export function parseArgs(argv) {
     issue: null,
     emitVerdict: false,
     deferredOut: null,
+    skippedOut: null,
     windowOut: null,
     truncationsOut: null,
     help: false,
@@ -484,6 +372,9 @@ export function parseArgs(argv) {
       case "--deferred-out":
         options.deferredOut = readValue();
         break;
+      case "--skipped-out":
+        options.skippedOut = readValue();
+        break;
       case "--window-out":
         options.windowOut = readValue();
         break;
@@ -501,6 +392,21 @@ export function parseArgs(argv) {
   return options;
 }
 
+/** Best-effort JSON report write. A failed write degrades ONE counter on the
+ * run record; it must never fail the select step, whose whole contract is that
+ * it always emits a valid array. */
+function writeReport(path, report, label) {
+  if (!path) return;
+  try {
+    writeFileSync(path, `${JSON.stringify(report ?? [])}\n`);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    process.stderr.write(
+      `warn: could not write the ${label} report: ${message}\n`,
+    );
+  }
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   if (options.help) {
@@ -514,45 +420,16 @@ async function main() {
     process.stdout.write(await emitVerdict(options));
     return;
   }
-  const { entries, deferred, window, truncations } =
+  const { entries, deferred, skipped, window, truncations } =
     await selectAutofixRun(options);
   // Report BEFORE stdout: the workflow captures stdout into a shell variable, so
   // a failed report write must not be able to lose the entries too. All are
-  // best-effort — the run record degrades to "0 deferred" / no Window line / no
+  // best-effort — the run record degrades to "0" / no Window line / no
   // truncation line, never to a dead leg.
-  if (options.deferredOut) {
-    try {
-      writeFileSync(options.deferredOut, `${JSON.stringify(deferred)}\n`);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      process.stderr.write(
-        `warn: could not write the deferral report: ${message}\n`,
-      );
-    }
-  }
-  if (options.windowOut) {
-    try {
-      writeFileSync(options.windowOut, `${JSON.stringify(window ?? {})}\n`);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      process.stderr.write(
-        `warn: could not write the window report: ${message}\n`,
-      );
-    }
-  }
-  if (options.truncationsOut) {
-    try {
-      writeFileSync(
-        options.truncationsOut,
-        `${JSON.stringify(truncations ?? {})}\n`,
-      );
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      process.stderr.write(
-        `warn: could not write the truncations report: ${message}\n`,
-      );
-    }
-  }
+  writeReport(options.deferredOut, deferred, "deferral");
+  writeReport(options.skippedOut, skipped, "fix_scope skip");
+  writeReport(options.windowOut, window ?? {}, "window");
+  writeReport(options.truncationsOut, truncations ?? {}, "truncations");
   process.stdout.write(`${JSON.stringify(entries)}\n`);
 }
 

@@ -6,6 +6,7 @@ import {
   parseArgs,
   selectAutofixCandidates,
   selectAutofixRun,
+  SKIP_FIX_SCOPE_ARCHITECTURAL,
 } from "./sentry-autofix-select.mjs";
 import {
   AUTOFIX_SELECT_LABEL,
@@ -21,6 +22,8 @@ import {
   REVERSE_SEARCH_LIMIT,
 } from "./sentry-autofix-reverse-verify.mjs";
 import {
+  FIX_SCOPE_ARCHITECTURAL,
+  FIX_SCOPE_MECHANICAL,
   isValidShortId,
   MAX_DUPLICATE_LOOKUPS,
   VERDICT_MARKER,
@@ -35,6 +38,7 @@ import {
 import {
   FIX_PR_OPENED_LABEL,
   FIX_REFUSED_LABEL,
+  FIX_SCOPE_ARCHITECTURAL_LABEL,
 } from "./sentry-triage-ingest.mjs";
 
 let passed = 0;
@@ -74,12 +78,20 @@ const BOT = { login: "github-actions" };
 
 /** Build a bot-authored verdict comment for a code-fix stub. `duplicates`
  * renders in the SAME shape the live #1304-family verdicts carry — an inline
- * flow sequence of double-quoted SHORT-IDs. */
+ * flow sequence of double-quoted SHORT-IDs.
+ *
+ * `fixScope` defaults to `mechanical` because after issue #1785 that is the
+ * only value the selector acts on, so every fixture a test expects to be
+ * SELECTED has to claim it. Pass `null` to omit the line entirely — that is the
+ * exact shape of every verdict written before the field existed, including the
+ * five real strategy-probe payloads, and it must fail closed to
+ * `architectural`. */
 function verdictComment({
   affectedRepo = "mento-protocol/monitoring-monorepo",
   verdict = "code-fix",
   createdAt = "2026-07-18T00:00:00Z",
   duplicates = [],
+  fixScope = FIX_SCOPE_MECHANICAL,
 } = {}) {
   const body = [
     VERDICT_MARKER,
@@ -94,6 +106,7 @@ function verdictComment({
     "proposed_action: |",
     "  Abstract action.",
     `duplicate_of: [${duplicates.map((id) => `"${id}"`).join(", ")}]`,
+    ...(fixScope === null ? [] : [`fix_scope: ${fixScope}`]),
     "```",
     "",
     "Diagnosis prose.",
@@ -149,7 +162,9 @@ function branchToShortId(branch) {
  * `handled`: stubs that already carry a TERMINAL autofix marker — the
  * `sentry:fix-pr-opened` / `sentry:fix-refused` siblings the candidate window
  * excludes by construction, which the family collapse reads back through its
- * own per-marker query (issue #1784). Each entry is `{ shortId, label }`.
+ * own per-marker query (issue #1784). Each entry is `{ shortId, label }`, or
+ * `{ shortId, labels: [...] }` to carry MORE than one marker — e.g. a terminal
+ * marker AND the architectural hold together (#1812 Finding 3).
  */
 function makeRunGh({
   stubs = [],
@@ -179,7 +194,10 @@ function makeRunGh({
     number: h.number ?? 9000 + i,
     shortId: h.shortId,
     project: h.project ?? "analytics-mento-org",
-    label: h.label,
+    // A sibling can carry more than one autofix label — e.g. a terminal marker
+    // AND the architectural hold (#1812 Finding 3). `labels` (array) models
+    // that; `label` (single) stays for the common one-marker fixtures.
+    labelNames: h.labels ?? (h.label == null ? [] : [h.label]),
     declares: h.declares ?? [],
     mentions: h.mentions ?? [],
     matchTitleFor: h.matchTitleFor ?? h.shortId,
@@ -192,7 +210,7 @@ function makeRunGh({
     byNumber.set(String(h.number), {
       number: h.number,
       title: handledTitle(h),
-      labels: [h.label, "sentry-triage"],
+      labels: [...h.labelNames, "sentry-triage"],
       comments: [verdictComment({ duplicates: h.declares })],
     });
   }
@@ -226,7 +244,9 @@ function makeRunGh({
           matched.slice(0, limit).map((h) => ({
             number: h.number,
             title: handledTitle(h),
-            labels: [h.label, "sentry-triage"].map((name) => ({ name })),
+            labels: [...h.labelNames, "sentry-triage"].map((name) => ({
+              name,
+            })),
           })),
         );
       }
@@ -253,7 +273,9 @@ function makeRunGh({
             .map((h) => ({
               number: h.number,
               title: handledTitle(h),
-              labels: [h.label, "sentry-triage"].map((name) => ({ name })),
+              labels: [...h.labelNames, "sentry-triage"].map((name) => ({
+                name,
+              })),
             })),
         );
       }
@@ -962,46 +984,71 @@ const FAMILY_2E_DUPLICATES = [
 ];
 
 /** One member of the real family: `[sentry] <SHORT-ID>` with the verdict that
- * member actually carried. */
-function familyStub(number, shortId, createdAt, duplicates) {
+ * member actually carried. `fixScope` is threaded so the collapse tests can run
+ * on selectable (`mechanical`) members while the #1785 tests below replay the
+ * payloads verbatim, `fix_scope` line and all — i.e. absent. */
+function familyStub(
+  number,
+  shortId,
+  createdAt,
+  duplicates,
+  fixScope = FIX_SCOPE_MECHANICAL,
+) {
   return stub({
     number,
     shortId,
     createdAt,
-    comments: [verdictComment({ createdAt, duplicates })],
+    comments: [verdictComment({ createdAt, duplicates, fixScope })],
   });
 }
 
 /** The anchor (#1304 / ANALYTICS-MENTO-ORG-2E) plus its five back-pointing
  * siblings, in the order the queue created them. */
-function realFamilyStubs() {
+function realFamilyStubs(fixScope = FIX_SCOPE_MECHANICAL) {
   return [
     familyStub(
       1304,
       "ANALYTICS-MENTO-ORG-2E",
       "2026-07-16T17:27:24Z",
       FAMILY_2E_DUPLICATES,
+      fixScope,
     ),
-    familyStub(1313, "ANALYTICS-MENTO-ORG-2F", "2026-07-16T17:27:37Z", [
-      "ANALYTICS-MENTO-ORG-2E",
-    ]),
-    familyStub(1316, "ANALYTICS-MENTO-ORG-29", "2026-07-16T17:27:41Z", [
-      "ANALYTICS-MENTO-ORG-2E",
-    ]),
-    familyStub(1326, "ANALYTICS-MENTO-ORG-2A", "2026-07-16T17:27:54Z", [
-      "ANALYTICS-MENTO-ORG-2E",
-    ]),
-    familyStub(1328, "ANALYTICS-MENTO-ORG-2D", "2026-07-16T17:27:56Z", [
-      "ANALYTICS-MENTO-ORG-2E",
-    ]),
+    familyStub(
+      1313,
+      "ANALYTICS-MENTO-ORG-2F",
+      "2026-07-16T17:27:37Z",
+      ["ANALYTICS-MENTO-ORG-2E"],
+      fixScope,
+    ),
+    familyStub(
+      1316,
+      "ANALYTICS-MENTO-ORG-29",
+      "2026-07-16T17:27:41Z",
+      ["ANALYTICS-MENTO-ORG-2E"],
+      fixScope,
+    ),
+    familyStub(
+      1326,
+      "ANALYTICS-MENTO-ORG-2A",
+      "2026-07-16T17:27:54Z",
+      ["ANALYTICS-MENTO-ORG-2E"],
+      fixScope,
+    ),
+    familyStub(
+      1328,
+      "ANALYTICS-MENTO-ORG-2D",
+      "2026-07-16T17:27:56Z",
+      ["ANALYTICS-MENTO-ORG-2E"],
+      fixScope,
+    ),
   ];
 }
 
 /** The four siblings WITHOUT the anchor — the shape the window actually has on
  * the run after 2E was handled: four stubs joined only through an id that is
  * not itself a candidate. */
-function orphanedFamilyStubs() {
-  return realFamilyStubs().slice(1);
+function orphanedFamilyStubs(fixScope = FIX_SCOPE_MECHANICAL) {
+  return realFamilyStubs(fixScope).slice(1);
 }
 
 await test("OLD PATH: with no duplicate_of, selection order, cap and the gh call profile are unchanged", async () => {
@@ -2201,6 +2248,42 @@ await test("over-collapse invariant: foreign ids in options.handledEdges stay in
 
 // --- the pure collapse module's own bounds -------------------------------
 
+await test("collapseDuplicateFamilies: an INELIGIBLE candidate joins the union but is never selected", () => {
+  // The module's own contract, driven directly because the selector short-
+  // circuits on `eligible` before it ever reads the decision — so a regression
+  // here is invisible through the production entry point until some future
+  // caller stops short-circuiting, and then it emits the candidate the caller
+  // ruled out. Both halves are asserted: the edges land, and the record does
+  // not.
+  const candidates = [
+    { shortId: "APP-1", duplicateOf: ["APP-2"], eligible: false, issue: 1 },
+    { shortId: "APP-2", duplicateOf: [], entry: { issue: 2 } },
+    { shortId: "APP-3", duplicateOf: [], entry: { issue: 3 } },
+  ];
+  const decisions = collapseDuplicateFamilies(candidates, { project: "APP" });
+  assertEqual(
+    decisions[0].selected,
+    false,
+    "an ineligible candidate must never come back selected",
+  );
+  assertEqual(
+    decisions[0].reason,
+    null,
+    "the reason belongs to the caller, not to the family collapse",
+  );
+  // Its edge unioned APP-1 with APP-2, so APP-2 represents that family and
+  // APP-3 stays an independent candidate.
+  assertEqual(decisions[1].selected, true, "APP-2 represents the family");
+  assertEqual(decisions[2].selected, true, "APP-3 is a separate family");
+  // And an ineligible candidate does not consume the family's representative
+  // slot: dropping APP-2 from the window would leave the family unrepresented.
+  const alone = collapseDuplicateFamilies(
+    [{ shortId: "APP-1", duplicateOf: ["APP-2"], eligible: false, issue: 1 }],
+    { project: "APP" },
+  );
+  assertEqual(alone[0].selected, false);
+});
+
 await test("declaredFamilyIds drops the stub's OWN id before spending the lookup budget", () => {
   const self = "APP-2E";
   const ids = declaredFamilyIds(
@@ -2302,6 +2385,779 @@ await test("family ids are PROJECT-SCOPED: a foreign or bare-slug id joins nothi
     declaredFamilyIds("ANALYTICS-MENTO-ORG-D1", ["ANALYTICS-MENTO-ORG-D2"], ""),
     [],
   );
+});
+
+// ---------------------------------------------------------------------------
+// fix_scope: only a MECHANICAL code-fix is selectable (issue #1785).
+//
+// Every test above drives `fix_scope: mechanical`, so the whole pre-existing
+// contract — ordering, cap, dedup, reconcile, generation token, single-issue
+// dispatch, and the #1784 family collapse — is already pinned through the
+// production entry point against the rerouted code. These pin the new gate.
+// ---------------------------------------------------------------------------
+
+/** Capture stderr around one call. An architectural stub is skipped WITHOUT
+ * writing anything to the queue, so this note is the run's only trace of it and
+ * is worth asserting rather than assuming. */
+async function captureStderr(fn) {
+  const original = process.stderr.write.bind(process.stderr);
+  let text = "";
+  process.stderr.write = (chunk) => {
+    text += String(chunk);
+    return true;
+  };
+  try {
+    const result = await fn();
+    return { result, stderr: text };
+  } finally {
+    process.stderr.write = original;
+  }
+}
+
+/** Every gh call that is not one of the three READS the selector is allowed to
+ * make. Selection is read-only: a fix_scope skip must not label, comment, or
+ * edit anything. */
+function writeCalls(calls) {
+  return calls.filter(
+    (c) =>
+      !(
+        (c[0] === "issue" && (c[1] === "list" || c[1] === "view")) ||
+        (c[0] === "pr" && c[1] === "list") ||
+        // The owner-qualified open-PR dedup lookup (#1810) is a GET; the select
+        // leg is read-only, so this REST read must not count as a write.
+        c[0] === "api"
+      ),
+  );
+}
+
+await test("DONE-MEANS: a code-fix verdict without a recognised fix_scope is not selectable", async () => {
+  // Absent, empty, the agent's own prose, and a value that merely STARTS with
+  // the enum word — all four must fail closed. The last one is why the parser
+  // matches the whole value instead of a leading token the way `verdict` does.
+  const cases = [
+    { label: "absent", fixScope: null },
+    { label: "empty", fixScope: "" },
+    { label: "prose", fixScope: "Non-urgent: the code already fails open" },
+    { label: "prefix", fixScope: "mechanical refactor of the cache layer" },
+  ];
+  for (const { label, fixScope } of cases) {
+    const stubs = [
+      stub({
+        number: 700,
+        shortId: "ANALYTICS-MENTO-ORG-7A",
+        comments: [verdictComment({ fixScope })],
+      }),
+    ];
+    const { runGh, calls } = makeRunGh({ stubs });
+    const { result, stderr } = await captureStderr(() =>
+      selectAutofixRun({ repo: "o/r", cap: 2 }, { runGh }),
+    );
+    assertDeepEqual(result.entries, []);
+    assertDeepEqual(result.deferred, []);
+    assert(
+      stderr.includes(`skip #700`) &&
+        stderr.includes(
+          `fix_scope for ANALYTICS-MENTO-ORG-7A is ${FIX_SCOPE_ARCHITECTURAL}`,
+        ),
+      `expected a fix_scope skip note for the ${label} case, got: ${stderr}`,
+    );
+    assertDeepEqual(writeCalls(calls), []);
+  }
+});
+
+await test("DONE-MEANS: the REAL #1304 family payloads carry no fix_scope, so none is selected", async () => {
+  // The five strategy-probe verdicts verbatim: `code-fix`, this repo, a real
+  // duplicate_of graph, and NO fix_scope line — the shape every verdict written
+  // before #1785 has. Each one classifies architectural and drops out before
+  // the family collapse ever runs.
+  const { runGh, calls } = makeRunGh({ stubs: realFamilyStubs(null) });
+  const { result, stderr } = await captureStderr(() =>
+    selectAutofixRun({ repo: "o/r", cap: 2 }, { runGh }),
+  );
+  assertDeepEqual(result.entries, []);
+  assertDeepEqual(result.deferred, []);
+  for (const number of [1304, 1313, 1316, 1326, 1328]) {
+    assert(
+      stderr.includes(`skip #${number}: fix_scope`),
+      `expected #${number} to be skipped on fix_scope`,
+    );
+  }
+  // No refusal marker, no comment, no label FROM THE SELECT LEG — the whole
+  // point of the done-means: an architectural stub must not accumulate
+  // sentry:fix-refused, which is terminal and would stand its whole duplicate
+  // family down behind it. The select leg is read-only; the record-run job owns
+  // the exclusion-label backfill, and the human backlog is the REPORTED skip
+  // (fresh architectural stubs settle open under the label, #1812).
+  assertDeepEqual(writeCalls(calls), []);
+  assert(
+    !stderr.includes(FIX_REFUSED_LABEL),
+    "an architectural skip must not even mention the refusal marker",
+  );
+});
+
+await test("DONE-MEANS: a mechanical verdict IS selectable end-to-end", async () => {
+  const stubs = [
+    stub({
+      number: 720,
+      shortId: "ANALYTICS-MENTO-ORG-8B",
+      comments: [verdictComment({ fixScope: FIX_SCOPE_MECHANICAL })],
+    }),
+  ];
+  const batch = makeRunGh({ stubs });
+  assertDeepEqual(
+    await selectAutofixCandidates(
+      { repo: "o/r", cap: 2 },
+      { runGh: batch.runGh },
+    ),
+    [{ issue: 720, shortId: "ANALYTICS-MENTO-ORG-8B" }],
+  );
+  // The single-issue workflow_dispatch path runs the SAME filters.
+  const single = makeRunGh({ stubs });
+  assertDeepEqual(
+    await selectAutofixCandidates(
+      { repo: "o/r", issue: 720 },
+      { runGh: single.runGh },
+    ),
+    [{ issue: 720, shortId: "ANALYTICS-MENTO-ORG-8B" }],
+  );
+});
+
+await test("a single-issue dispatch cannot override the fix_scope gate", async () => {
+  // Family collapse is deliberately batch-only, so a dispatch overrides THAT.
+  // fix_scope is not a heuristic about which member to pick — it is the claim
+  // that a scoped fix exists at all, so naming the issue must not bypass it.
+  const stubs = [
+    stub({
+      number: 730,
+      shortId: "ANALYTICS-MENTO-ORG-9C",
+      comments: [verdictComment({ fixScope: FIX_SCOPE_ARCHITECTURAL })],
+    }),
+  ];
+  const { runGh, calls } = makeRunGh({ stubs });
+  assertDeepEqual(
+    await selectAutofixCandidates({ repo: "o/r", issue: 730 }, { runGh }),
+    [],
+  );
+  assertDeepEqual(writeCalls(calls), []);
+});
+
+// ---------------------------------------------------------------------------
+// Query-time exclusion of the architectural class (#1812). Settlement labels a
+// held stub sentry:fix-scope-architectural, and listCodeFixStubs excludes it in
+// the --search negation so the architectural backlog never enters the candidate
+// window. This mock INTERPRETS the -label: negations against a fake store (a
+// query-string string-assert is a broken control — it never proves the term
+// changes the SELECTION), so removing the architectural term is a real behaviour
+// change, reproducing #1813.
+// ---------------------------------------------------------------------------
+
+/** A gh mock whose candidate-window query APPLIES the `-label:"…"` negations in
+ * the --search string against the fake store. `dropArchitecturalNegation`
+ * simulates a selector query that lacks the architectural term (the in-test
+ * control): the mock ignores that one negation, so labeled-architectural stubs
+ * re-enter the window. Every stub here is a singleton family, so there are no
+ * per-id in:title / in:comments probes to model. */
+function makeNegationInterpretingRunGh({
+  stubs,
+  dropArchitecturalNegation = false,
+} = {}) {
+  const calls = [];
+  const byNumber = new Map(stubs.map((s) => [String(s.number), s]));
+  const runGh = async (args) => {
+    calls.push(args);
+    const [a0, a1] = args;
+    if (a0 === "issue" && a1 === "list") {
+      const searchIdx = args.indexOf("--search");
+      const search = searchIdx === -1 ? "" : args[searchIdx + 1];
+      // The per-id family probes (`"<ID>" in:title` / `"<ID>" in:comments`) are
+      // NOT the candidate window — every fixture here is a singleton family, so
+      // they surface nothing. Return [] before the negation filter so the window
+      // interpretation only ever runs on the actual window query.
+      if (/"[^"]+"\s+in:(title|comments)/.test(search)) return "[]";
+      let negated = [...search.matchAll(/-label:"([^"]+)"/g)].map((m) => m[1]);
+      if (dropArchitecturalNegation) {
+        negated = negated.filter((n) => n !== FIX_SCOPE_ARCHITECTURAL_LABEL);
+      }
+      const rows = stubs.filter(
+        (s) => !negated.some((neg) => s.labels.includes(neg)),
+      );
+      return JSON.stringify(
+        rows.map((s) => ({
+          number: s.number,
+          title: s.title,
+          createdAt: s.createdAt,
+          labels: s.labels.map((name) => ({ name })),
+        })),
+      );
+    }
+    if (a0 === "issue" && a1 === "view") {
+      const s = byNumber.get(String(args[2]));
+      return JSON.stringify({
+        number: s.number,
+        title: s.title,
+        body: "",
+        labels: s.labels.map((name) => ({ name })),
+        comments: s.comments,
+      });
+    }
+    // Owner-qualified open-PR dedup lookup (#1810 replaced the fork-truncatable
+    // `pr list --head` with the REST head filter). No fixture here has a
+    // pre-existing autofix PR, so the query is always empty.
+    if (a0 === "api") return JSON.stringify([]);
+    throw new Error(`unexpected gh call: ${args.join(" ")}`);
+  };
+  return { runGh, calls };
+}
+
+/** 50 OLDER labeled-architectural stubs + 1 NEWER mechanical stub. Oldest-first,
+ * the architectural 50 fill the whole MAX_CANDIDATE_EVALUATIONS window ahead of
+ * the mechanical one — the exact #1813 starvation shape. */
+function starvationStubs() {
+  const arch = [];
+  for (let i = 0; i < 50; i += 1) {
+    const n = 200 + i;
+    arch.push(
+      stub({
+        number: n,
+        shortId: `ANALYTICS-MENTO-ORG-S${i}`,
+        // Older than the mechanical stub, and carrying the settlement hold label.
+        createdAt: `2026-07-${String((i % 27) + 1).padStart(2, "0")}T00:00:00Z`,
+        labels: [
+          AUTOFIX_SELECT_LABEL,
+          "sentry-triage",
+          FIX_SCOPE_ARCHITECTURAL_LABEL,
+        ],
+        comments: [verdictComment({ fixScope: FIX_SCOPE_ARCHITECTURAL })],
+      }),
+    );
+  }
+  const mechanical = stub({
+    number: 999,
+    shortId: "ANALYTICS-MENTO-ORG-M1",
+    createdAt: "2026-08-01T00:00:00Z",
+    comments: [verdictComment({ fixScope: FIX_SCOPE_MECHANICAL })],
+  });
+  return { arch, all: [...arch, mechanical] };
+}
+
+await test("STARVATION REPRO: the label negation keeps 50 architectural stubs out of the window; only the mechanical selects, zero views on the 50 (#1812/#1813)", async () => {
+  const { arch, all } = starvationStubs();
+  const { runGh, calls } = makeNegationInterpretingRunGh({ stubs: all });
+  const { entries } = await selectAutofixRun(
+    { repo: "o/r", cap: 2 },
+    { runGh },
+  );
+  assertDeepEqual(entries, [{ issue: 999, shortId: "ANALYTICS-MENTO-ORG-M1" }]);
+  // The 50 architectural stubs never enter the window, so not one is READ.
+  const archNumbers = new Set(arch.map((s) => String(s.number)));
+  const viewedArch = calls.filter(
+    (c) => c[0] === "issue" && c[1] === "view" && archNumbers.has(String(c[2])),
+  );
+  assertEqual(
+    viewedArch.length,
+    0,
+    "no architectural stub may be read — they are excluded server-side",
+  );
+});
+
+await test("CONTROL: dropping the architectural negation lets the 50 refill the window and starve the mechanical -> [] (reproduces #1813)", async () => {
+  const { all } = starvationStubs();
+  // The ONLY change: the query no longer excludes the architectural label.
+  const { runGh } = makeNegationInterpretingRunGh({
+    stubs: all,
+    dropArchitecturalNegation: true,
+  });
+  const { entries } = await selectAutofixRun(
+    { repo: "o/r", cap: 2 },
+    { runGh },
+  );
+  // Oldest-first, the 50 architectural stubs fill MAX_CANDIDATE_EVALUATIONS and
+  // are all skipped on scope; the newer mechanical stub is truncated out of the
+  // eval window entirely. Nothing selects — the exact starvation #1812 removes.
+  assertDeepEqual(entries, []);
+});
+
+await test("BACKSTOP: a window stub with the hold label hand-removed but an architectural verdict is still skipped, never selected (#1812)", async () => {
+  // The label exclusion is the fast path; the verdict re-parse is the authority.
+  // A human who removes the label (thinking that re-enables selection) does not
+  // get a selection — evaluateCandidate re-parses fix_scope and skips it, and the
+  // record-run re-applies the label. Model it as a stub that PASSES the query
+  // (no hold label) but whose verdict is architectural.
+  const stubs = [
+    stub({
+      number: 321,
+      shortId: "ANALYTICS-MENTO-ORG-HR",
+      // No FIX_SCOPE_ARCHITECTURAL_LABEL — hand-removed — so it passes the query.
+      labels: [AUTOFIX_SELECT_LABEL, "sentry-triage"],
+      comments: [verdictComment({ fixScope: FIX_SCOPE_ARCHITECTURAL })],
+    }),
+  ];
+  const { runGh, calls } = makeNegationInterpretingRunGh({ stubs });
+  const { entries, skipped } = await selectAutofixRun(
+    { repo: "o/r", cap: 2 },
+    { runGh },
+  );
+  assertDeepEqual(entries, []);
+  assertDeepEqual(skipped, [
+    { issue: 321, reason: SKIP_FIX_SCOPE_ARCHITECTURAL },
+  ]);
+  // Read-only: it is skipped, never labeled/commented from the select leg.
+  assert(
+    !calls.some((c) => c[0] === "issue" && c[1] === "edit"),
+    "the select leg never writes",
+  );
+});
+
+await test("CONNECTOR: an architectural-LABELED anchor surfaced via reverse search joins its mechanical siblings but never blocks them (#1812)", async () => {
+  // A and C are mechanical candidates that declare NOTHING. B is the
+  // architectural anchor that declares [A, C] — but B is now EXCLUDED from the
+  // candidate window by its label, so the forward pass never sees its edges. The
+  // reverse in:comments probe surfaces B, and because B carries the hold label it
+  // is a pure CONNECTOR: its edges union A and C into one family, but it never
+  // stands them down. So the family collapses to ONE run (A, oldest); C defers as
+  // a family duplicate, not family-handled.
+  const anchor = [
+    {
+      shortId: "ANALYTICS-MENTO-ORG-C0",
+      label: FIX_SCOPE_ARCHITECTURAL_LABEL,
+      declares: ["ANALYTICS-MENTO-ORG-C1", "ANALYTICS-MENTO-ORG-C2"],
+    },
+  ];
+  const siblings = [
+    stub({
+      number: 501,
+      shortId: "ANALYTICS-MENTO-ORG-C1",
+      createdAt: "2026-07-01T00:00:00Z",
+    }),
+    stub({
+      number: 502,
+      shortId: "ANALYTICS-MENTO-ORG-C2",
+      createdAt: "2026-07-02T00:00:00Z",
+    }),
+  ];
+  const { runGh } = makeRunGh({ stubs: siblings, handled: anchor });
+  const run = await selectAutofixRun({ repo: "o/r", cap: 2 }, { runGh });
+  assertDeepEqual(
+    run.entries.map((e) => e.issue),
+    [501],
+    "the family collapses to ONE run (oldest sibling), not two",
+  );
+  assertDeepEqual(run.deferred, [
+    { issue: 502, reason: DEFER_FAMILY_DUPLICATE },
+  ]);
+
+  // After A (#501) goes terminal, the SAME architectural connector now hands C a
+  // handled blocker: C stands down as family-HANDLED (lifts when A regresses).
+  const anchorPlusTerminal = [
+    { shortId: "ANALYTICS-MENTO-ORG-C1", label: FIX_PR_OPENED_LABEL },
+    {
+      shortId: "ANALYTICS-MENTO-ORG-C0",
+      label: FIX_SCOPE_ARCHITECTURAL_LABEL,
+      declares: ["ANALYTICS-MENTO-ORG-C1", "ANALYTICS-MENTO-ORG-C2"],
+    },
+  ];
+  const onlyC = [
+    stub({
+      number: 502,
+      shortId: "ANALYTICS-MENTO-ORG-C2",
+      createdAt: "2026-07-02T00:00:00Z",
+    }),
+  ];
+  const terminal = makeRunGh({ stubs: onlyC, handled: anchorPlusTerminal });
+  const run2 = await selectAutofixRun(
+    { repo: "o/r", cap: 2 },
+    { runGh: terminal.runGh },
+  );
+  assertDeepEqual(run2.entries, []);
+  assertDeepEqual(run2.deferred, [
+    { issue: 502, reason: DEFER_FAMILY_HANDLED },
+  ]);
+});
+
+await test("TERMINAL-WINS: a reverse-surfaced sibling carrying BOTH a terminal marker AND the architectural hold BLOCKS the family (#1812 Finding 3)", async () => {
+  // Finding 3: a PRESENT terminal marker means a real terminal outcome — here an
+  // open fix PR — so the family must stand down regardless of the architectural
+  // hold; the hold makes a stub a pure connector ONLY when NEITHER terminal
+  // marker is present. B declares finalist A and carries BOTH
+  // sentry:fix-pr-opened AND sentry:fix-scope-architectural. A declares nothing,
+  // so ONLY the reverse in:comments probe can reach B — the exact leg the dropped
+  // `!architecturalLabel` guard lived on.
+  //
+  // The reverse `in:comments` hit carries B's CURRENT labels inline (read from
+  // the same response), so `reverseVerifyFamilies` can and must decide the block
+  // from them. The downstream handled-recheck that re-reads a surfaced member's
+  // marker is a SEPARATE `in:title` query, subject to GitHub's title-index lag on
+  // a freshly-labeled stub — modeled here with `matchTitleFor` pointing away, so
+  // an `in:title` search for B's own id returns nothing. That isolates the fix:
+  // the reverse blocker is the SOLE catch, and restoring the guard both drops it
+  // AND leaves the lagging title-recheck empty, wrongly selecting A.
+  const A = stub({ number: 760, shortId: "ANALYTICS-MENTO-ORG-TA" });
+  const bothLabels = [
+    {
+      shortId: "ANALYTICS-MENTO-ORG-TB",
+      labels: [FIX_PR_OPENED_LABEL, FIX_SCOPE_ARCHITECTURAL_LABEL],
+      declares: ["ANALYTICS-MENTO-ORG-TA"],
+      // in:title for TB is a tokenized/index-lag miss, so the title-recheck
+      // backstop cannot re-catch it — only the inline reverse labels can.
+      matchTitleFor: "ANALYTICS-MENTO-ORG-ZZ",
+    },
+  ];
+  // Fixture anchor: the blocker genuinely carries BOTH markers, so restoring the
+  // `!architecturalLabel` guard would treat it as a pure connector and bite this
+  // assertion — not a vacuous pass.
+  assert(
+    bothLabels[0].labels.includes(FIX_PR_OPENED_LABEL) &&
+      bothLabels[0].labels.includes(FIX_SCOPE_ARCHITECTURAL_LABEL),
+    "the blocker fixture must carry both the terminal marker and the hold",
+  );
+  const held = makeRunGh({ stubs: [A], handled: bothLabels });
+  const run = await selectAutofixRun(
+    { repo: "o/r", cap: 2 },
+    { runGh: held.runGh },
+  );
+  assertDeepEqual(run.entries, []);
+  assertDeepEqual(run.deferred, [{ issue: 760, reason: DEFER_FAMILY_HANDLED }]);
+  assert(
+    reverseSearchedFor(held.calls, "ANALYTICS-MENTO-ORG-TA"),
+    "the reverse probe must have surfaced the both-labels sibling",
+  );
+
+  // Live counter-arm through the same production entry point: strip the terminal
+  // marker so B carries ONLY the hold. Now B is a genuine pure connector — edges
+  // only — so A is (correctly) SELECTED. The terminal marker is the load-bearing
+  // difference between the two arms; the source-revert control below proves the
+  // guard, not the fixture, is what turns the block on and off.
+  const holdOnly = [
+    {
+      shortId: "ANALYTICS-MENTO-ORG-TB",
+      labels: [FIX_SCOPE_ARCHITECTURAL_LABEL],
+      declares: ["ANALYTICS-MENTO-ORG-TA"],
+      matchTitleFor: "ANALYTICS-MENTO-ORG-ZZ",
+    },
+  ];
+  const connector = makeRunGh({ stubs: [A], handled: holdOnly });
+  const run2 = await selectAutofixRun(
+    { repo: "o/r", cap: 2 },
+    { runGh: connector.runGh },
+  );
+  assertDeepEqual(run2.entries, [
+    { issue: 760, shortId: "ANALYTICS-MENTO-ORG-TA" },
+  ]);
+  assertDeepEqual(run2.deferred, []);
+  assert(
+    reverseSearchedFor(connector.calls, "ANALYTICS-MENTO-ORG-TA"),
+    "the reverse probe still runs in the connector-only control arm",
+  );
+});
+
+await test("a mechanical candidate flows through family dedupe AND the fix_scope gate together", async () => {
+  // The gate runs per-candidate, BEFORE the collapse: an architectural
+  // representative is not "the family's one run", it is simply not a candidate.
+  // Here 2E (the oldest, highest in-degree member) is architectural and the four
+  // siblings are mechanical — so the family still collapses to ONE run, and it
+  // is the oldest surviving member rather than nothing at all.
+  const stubs = realFamilyStubs();
+  stubs[0] = familyStub(
+    1304,
+    "ANALYTICS-MENTO-ORG-2E",
+    "2026-07-16T17:27:24Z",
+    FAMILY_2E_DUPLICATES,
+    FIX_SCOPE_ARCHITECTURAL,
+  );
+  const { runGh, calls } = makeRunGh({ stubs });
+  const { entries, deferred } = await selectAutofixRun(
+    { repo: "o/r", cap: 2 },
+    { runGh },
+  );
+  assertDeepEqual(entries, [
+    { issue: 1313, shortId: "ANALYTICS-MENTO-ORG-2F" },
+  ]);
+  assertDeepEqual(
+    deferred.map((d) => d.issue),
+    [1316, 1326, 1328],
+  );
+  assertEqual(deferred[0].reason, DEFER_FAMILY_DUPLICATE);
+  assertDeepEqual(writeCalls(calls), []);
+});
+
+await test("an architectural skip is not terminal: the same stub selects once re-triaged mechanical", async () => {
+  // A refusal marker would be terminal until a human cleared it, and would
+  // stand the whole family down behind it. The skip writes nothing, so the next
+  // run recomputes from live state — which is what makes `architectural` a
+  // backlog item rather than a burned candidate.
+  const architectural = makeRunGh({
+    stubs: [
+      stub({
+        number: 740,
+        shortId: "ANALYTICS-MENTO-ORG-AD",
+        comments: [verdictComment({ fixScope: FIX_SCOPE_ARCHITECTURAL })],
+      }),
+    ],
+  });
+  assertDeepEqual(
+    await selectAutofixCandidates(
+      { repo: "o/r" },
+      { runGh: architectural.runGh },
+    ),
+    [],
+  );
+  const retriaged = makeRunGh({
+    stubs: [
+      stub({
+        number: 740,
+        shortId: "ANALYTICS-MENTO-ORG-AD",
+        // Same stub, same labels, a newer verdict comment that names a scope.
+        comments: [
+          verdictComment({ fixScope: FIX_SCOPE_ARCHITECTURAL }),
+          verdictComment({
+            createdAt: "2026-07-19T00:00:00Z",
+            fixScope: FIX_SCOPE_MECHANICAL,
+          }),
+        ],
+      }),
+    ],
+  });
+  assertDeepEqual(
+    await selectAutofixCandidates({ repo: "o/r" }, { runGh: retriaged.runGh }),
+    [{ issue: 740, shortId: "ANALYTICS-MENTO-ORG-AD" }],
+  );
+});
+
+await test("the reconcile path survives an architectural verdict", async () => {
+  // The gate sits AFTER the reconcile branch on purpose. Reconciliation runs no
+  // agent and opens no PR — it repairs the queue bookkeeping for a PR that
+  // already exists. Gating it here would strand that PR unlinked forever if a
+  // re-triage changed the scope under it.
+  const { runGh } = makeRunGh({
+    stubs: [
+      stub({
+        number: 750,
+        shortId: "ANALYTICS-MENTO-ORG-BE",
+        comments: [verdictComment({ fixScope: FIX_SCOPE_ARCHITECTURAL })],
+      }),
+    ],
+    prShortIds: ["ANALYTICS-MENTO-ORG-BE"],
+  });
+  assertDeepEqual(await selectAutofixCandidates({ repo: "o/r" }, { runGh }), [
+    { issue: 750, shortId: "ANALYTICS-MENTO-ORG-BE", reconcile: true },
+  ]);
+});
+
+// ---------------------------------------------------------------------------
+// A fix_scope skip must not delete the stub's duplicate_of EDGES, and must be
+// REPORTED. Both halves are about what a bare `return null` silently did:
+// dropping the record dropped its family edges, and dropping the record dropped
+// the only evidence the run stood anything down.
+// ---------------------------------------------------------------------------
+
+/** An architectural ANCHOR that fans out: #900 names A1 and A2, and neither
+ * sibling back-points at it. The edges live ONLY on the architectural stub. */
+function fanOutFamilyStubs(anchorScope) {
+  return [
+    stub({
+      number: 900,
+      shortId: "ANALYTICS-MENTO-ORG-A0",
+      createdAt: "2026-07-01T00:00:00Z",
+      comments: [
+        verdictComment({
+          createdAt: "2026-07-01T00:00:00Z",
+          duplicates: ["ANALYTICS-MENTO-ORG-A1", "ANALYTICS-MENTO-ORG-A2"],
+          fixScope: anchorScope,
+        }),
+      ],
+    }),
+    stub({
+      number: 901,
+      shortId: "ANALYTICS-MENTO-ORG-A1",
+      createdAt: "2026-07-02T00:00:00Z",
+    }),
+    stub({
+      number: 902,
+      shortId: "ANALYTICS-MENTO-ORG-A2",
+      createdAt: "2026-07-03T00:00:00Z",
+    }),
+  ];
+}
+
+await test("DONE-MEANS: an architectural stub still carries its family's edges", async () => {
+  // The load-bearing direction of the graph, and the one a bare skip broke: the
+  // ONLY stub naming the siblings is the one the gate rules out. Drop its record
+  // and the family has no edges left — three independent candidates, so two
+  // agent runs and two PRs for one root cause, which is #1784's guarantee
+  // silently reopened. It must collapse exactly as if the anchor were
+  // mechanical: one candidate, the rest deferred.
+  const architectural = makeRunGh({
+    stubs: fanOutFamilyStubs(FIX_SCOPE_ARCHITECTURAL),
+  });
+  const run = await selectAutofixRun(
+    { repo: "o/r", cap: 2 },
+    { runGh: architectural.runGh },
+  );
+  assertDeepEqual(
+    run.entries.map((entry) => entry.issue),
+    [901],
+  );
+  assertDeepEqual(run.deferred, [
+    { issue: 902, reason: DEFER_FAMILY_DUPLICATE },
+  ]);
+  // The ruled-out anchor is reported as a SKIP, never as a family deferral: the
+  // two lift on different events (a sibling's marker vs. a re-triage).
+  assertDeepEqual(run.skipped, [
+    { issue: 900, reason: SKIP_FIX_SCOPE_ARCHITECTURAL },
+  ]);
+  // ... and it is never emitted, however the collapse decided about it.
+  assert(
+    !run.entries.some((entry) => entry.issue === 900),
+    "the architectural anchor must never reach the matrix",
+  );
+
+  // Control on the same window: with a MECHANICAL anchor the family is
+  // identical, so any difference beyond "who represents it" is edge loss.
+  const mechanical = makeRunGh({
+    stubs: fanOutFamilyStubs(FIX_SCOPE_MECHANICAL),
+  });
+  const baseline = await selectAutofixRun(
+    { repo: "o/r", cap: 2 },
+    { runGh: mechanical.runGh },
+  );
+  assertEqual(
+    baseline.entries.length,
+    run.entries.length,
+    "the family must consume one candidate slot either way",
+  );
+});
+
+await test("DONE-MEANS: a handled sibling reachable only through an architectural hop still stands the family down", async () => {
+  // Worse than fan-out. `ANALYTICS-MENTO-ORG-B0` already carries
+  // `sentry:fix-refused`, so it is outside the candidate window and reachable
+  // ONLY through listHandledShortIds — and the only stub naming it is
+  // architectural. Drop that stub's edges and #912 unions with nobody: a fresh
+  // agent run on a family the leg already refused, which is the exact path the
+  // only real data took.
+  const handled = [
+    { shortId: "ANALYTICS-MENTO-ORG-B0", label: FIX_REFUSED_LABEL },
+  ];
+  const hopStubs = (hopScope) => [
+    stub({
+      number: 911,
+      shortId: "ANALYTICS-MENTO-ORG-B1",
+      createdAt: "2026-07-01T00:00:00Z",
+      comments: [
+        verdictComment({
+          createdAt: "2026-07-01T00:00:00Z",
+          duplicates: ["ANALYTICS-MENTO-ORG-B0"],
+          fixScope: hopScope,
+        }),
+      ],
+    }),
+    stub({
+      number: 912,
+      shortId: "ANALYTICS-MENTO-ORG-B2",
+      createdAt: "2026-07-02T00:00:00Z",
+      comments: [
+        verdictComment({
+          createdAt: "2026-07-02T00:00:00Z",
+          duplicates: ["ANALYTICS-MENTO-ORG-B1"],
+          fixScope: FIX_SCOPE_MECHANICAL,
+        }),
+      ],
+    }),
+  ];
+
+  const { runGh } = makeRunGh({
+    stubs: hopStubs(FIX_SCOPE_ARCHITECTURAL),
+    handled,
+  });
+  const run = await selectAutofixRun({ repo: "o/r", cap: 2 }, { runGh });
+  assertDeepEqual(run.entries, []);
+  assertDeepEqual(run.deferred, [{ issue: 912, reason: DEFER_FAMILY_HANDLED }]);
+  assertDeepEqual(run.skipped, [
+    { issue: 911, reason: SKIP_FIX_SCOPE_ARCHITECTURAL },
+  ]);
+
+  // Control: with a mechanical hop the whole family stands down the same way.
+  const control = makeRunGh({
+    stubs: hopStubs(FIX_SCOPE_MECHANICAL),
+    handled,
+  });
+  const baseline = await selectAutofixRun(
+    { repo: "o/r", cap: 2 },
+    { runGh: control.runGh },
+  );
+  assertDeepEqual(baseline.entries, []);
+});
+
+await test("DONE-MEANS: a window standing entirely down on fix_scope is reported, not silent", async () => {
+  // The steady state this gate ships: every verdict predating the field reads
+  // as architectural. Unreported, the run record renders `Candidates selected:
+  // 0, Deferred: 0` — byte-identical to an empty queue, and to "the prompt
+  // change never landed". That is the #1758 misdiagnosis.
+  const { runGh, calls } = makeRunGh({ stubs: realFamilyStubs(null) });
+  const run = await selectAutofixRun({ repo: "o/r", cap: 2 }, { runGh });
+  assertDeepEqual(run.entries, []);
+  assertDeepEqual(run.deferred, []);
+  assertDeepEqual(
+    run.skipped,
+    [1304, 1313, 1316, 1326, 1328].map((issue) => ({
+      issue,
+      reason: SKIP_FIX_SCOPE_ARCHITECTURAL,
+    })),
+  );
+  // Reporting is not a write: the skip still touches nothing on the queue.
+  assertDeepEqual(writeCalls(calls), []);
+});
+
+await test("DONE-MEANS: a single-issue dispatch reports its fix_scope skip", async () => {
+  // The dispatch is the documented remedy for a stalled leg, and it cannot
+  // override this gate — so if it also reported nothing, the remedy for a silent
+  // stall would itself be silent.
+  const { runGh } = makeRunGh({
+    stubs: [
+      stub({
+        number: 930,
+        shortId: "ANALYTICS-MENTO-ORG-D1",
+        comments: [verdictComment({ fixScope: FIX_SCOPE_ARCHITECTURAL })],
+      }),
+    ],
+  });
+  const run = await selectAutofixRun({ repo: "o/r", issue: 930 }, { runGh });
+  assertDeepEqual(run.entries, []);
+  assertDeepEqual(run.skipped, [
+    { issue: 930, reason: SKIP_FIX_SCOPE_ARCHITECTURAL },
+  ]);
+});
+
+await test("an INELIGIBLE stub reports a skip, never a family deferral", async () => {
+  // One architectural stub with no family at all. It must land in `skipped`,
+  // and `deferred` must stay empty — the run record renders them as separate
+  // lines because an operator acts on them differently.
+  const { runGh } = makeRunGh({
+    stubs: [
+      stub({
+        number: 940,
+        shortId: "ANALYTICS-MENTO-ORG-E1",
+        comments: [verdictComment({ fixScope: FIX_SCOPE_ARCHITECTURAL })],
+      }),
+    ],
+  });
+  const run = await selectAutofixRun({ repo: "o/r", cap: 2 }, { runGh });
+  assertDeepEqual(run.deferred, []);
+  assertDeepEqual(run.skipped, [
+    { issue: 940, reason: SKIP_FIX_SCOPE_ARCHITECTURAL },
+  ]);
+});
+
+await test("parseArgs accepts --skipped-out beside --deferred-out", async () => {
+  const options = parseArgs([
+    "--deferred-out",
+    "/tmp/d.json",
+    "--skipped-out",
+    "/tmp/s.json",
+  ]);
+  assertEqual(options.deferredOut, "/tmp/d.json");
+  assertEqual(options.skippedOut, "/tmp/s.json");
+  // Absent by default: a caller that does not ask for the report gets no file.
+  assertEqual(parseArgs([]).skippedOut, null);
 });
 
 process.stdout.write(`\n${passed} passed, ${failed} failed\n`);

@@ -97,20 +97,21 @@ map is possible. Its actionable verdict does not project: it takes
 `skipped-repo`, and the stub closes with a note naming the unrecognised repo.
 Adding a project means adding it to the allowlist, not only to Sentry.
 
-| Verdict              | `analytics-mento-org` (local)                                                   | Every other project (external)                        |
-| -------------------- | ------------------------------------------------------------------------------- | ----------------------------------------------------- |
-| `code-fix`           | **Autofix-eligible** — the only path in the pipeline that writes code           | Projects an issue into the owning repo. Never autofix |
-| `config-fix`         | Record only: no projection (this repo is not an allowlisted target), no autofix | Projects an issue into the owning repo                |
-| `upstream-transient` | Closes. Nothing downstream                                                      | Same                                                  |
-| `needs-human`        | Stays open with a decision-ready brief                                          | Same                                                  |
+| Verdict              | `analytics-mento-org` (local)                                                                                                                                                                                                                     | Every other project (external)                        |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| `code-fix`           | `fix_scope: mechanical` → **autofix-eligible**, closed ledger entry — the only path that writes code. `fix_scope: architectural` → **stays OPEN** under `sentry:fix-scope-architectural` (human design work, excluded from autofix at query time) | Projects an issue into the owning repo. Never autofix |
+| `config-fix`         | Record only: no projection (this repo is not an allowlisted target), no autofix                                                                                                                                                                   | Projects an issue into the owning repo                |
+| `upstream-transient` | Closes. Nothing downstream                                                                                                                                                                                                                        | Same                                                  |
+| `needs-human`        | Stays open with a decision-ready brief                                                                                                                                                                                                            | Same                                                  |
 
 Autofix outcomes, for a local `code-fix` (`sentry-autofix-finalize.mjs`):
 
-| Agent produced                                                                                                     | Result                                               |
-| ------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------- |
-| A diff within `MAX_CHANGED_FILES`, no forbidden path, no symlink                                                   | PR opened, `sentry:fix-pr-opened`. Never auto-merges |
-| A larger diff, or one touching `FORBIDDEN_PREFIXES` (`.github/`, `terraform/`, `tools/`, lockfiles, `vercel.json`) | `sentry:fix-refused`                                 |
-| No changes                                                                                                         | `sentry:fix-refused`                                 |
+| Agent produced                                                                                                     | Result                                                                                                    |
+| ------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------- |
+| `fix_scope: architectural` (settlement, before any agent runs)                                                     | Stub left OPEN, labeled `sentry:fix-scope-architectural`. Never selected; human design work (issue #1812) |
+| A diff within `MAX_CHANGED_FILES`, no forbidden path, no symlink                                                   | PR opened, `sentry:fix-pr-opened`. Never auto-merges                                                      |
+| A larger diff, or one touching `FORBIDDEN_PREFIXES` (`.github/`, `terraform/`, `tools/`, lockfiles, `vercel.json`) | `sentry:fix-refused`                                                                                      |
+| No changes                                                                                                         | `sentry:fix-refused`                                                                                      |
 
 `sentry:fix-refused` is terminal — selection never reconsiders that stub. The
 forbidden prefixes are also why `config-fix` is not autofixable: the files a
@@ -273,18 +274,30 @@ triage round that produced its verdict — see
 
 The namespace is separate from the development backlog:
 
-| Label                        | Meaning                                                                |
-| ---------------------------- | ---------------------------------------------------------------------- |
-| `sentry-triage`              | Durable queue membership                                               |
-| `sentry:needs-triage`        | Awaiting a current verdict                                             |
-| `sentry:candidate-noise`     | Title matched an in-memory noise heuristic; raw text was not published |
-| `sentry:verdict-code-fix`    | Code change is the recommended disposition                             |
-| `sentry:verdict-config-fix`  | Configuration or infrastructure change is recommended                  |
-| `sentry:verdict-upstream`    | Upstream or transient issue; no repo fix                               |
-| `sentry:verdict-needs-human` | A human decision is required                                           |
-| `sentry:projected`           | An actionable external verdict was projected to its owning repo        |
-| `sentry:approved-archive`    | Human approval to archive the Sentry issue                             |
-| `sentry:archived`            | Archive workflow settled the approved issue                            |
+| Label                            | Meaning                                                                                       |
+| -------------------------------- | --------------------------------------------------------------------------------------------- |
+| `sentry-triage`                  | Durable queue membership                                                                      |
+| `sentry:needs-triage`            | Awaiting a current verdict                                                                    |
+| `sentry:candidate-noise`         | Title matched an in-memory noise heuristic; raw text was not published                        |
+| `sentry:verdict-code-fix`        | Code change is the recommended disposition                                                    |
+| `sentry:verdict-config-fix`      | Configuration or infrastructure change is recommended                                         |
+| `sentry:verdict-upstream`        | Upstream or transient issue; no repo fix                                                      |
+| `sentry:verdict-needs-human`     | A human decision is required                                                                  |
+| `sentry:projected`               | An actionable external verdict was projected to its owning repo                               |
+| `sentry:fix-scope-architectural` | Local code-fix, `fix_scope: architectural` — open human design work; autofix never selects it |
+| `sentry:approved-archive`        | Human approval to archive the Sentry issue                                                    |
+| `sentry:archived`                | Archive workflow settled the approved issue                                                   |
+
+`sentry:fix-scope-architectural` (issue #1812) rides the same atomic label edit
+as `sentry:verdict-code-fix` when a local code-fix verdict is scoped
+architectural, and sits OUTSIDE the `sentry:verdict-*` namespace so the
+settlement post-condition still counts exactly one verdict label. Its lifecycle:
+**shed on regression** and **shed on any re-verdict** (`REOPEN_SHED_LABELS`); the
+autofix record-run job is its legacy/self-heal writer — it self-heal-creates the
+label and backfills it onto legacy stubs the selector still skips on scope.
+Legacy backfilled stubs stay CLOSED (no mass reopen); a regression reopens any
+that still fire. Hand-removing it is not an operator affordance — the verdict
+re-parse still refuses and the record-run re-applies it; re-triage is.
 
 Queue issues must never carry `agent-ready`, `agent-active`,
 `needs-grooming`, or `in-pr`.
@@ -306,7 +319,46 @@ root_cause: |
 proposed_action: |
   <one to three redacted lines>
 duplicate_of: [] # Sentry SHORT-IDs only
+fix_scope: <mechanical | architectural> # code-fix only
 ```
+
+A `code-fix` verdict also carries `fix_scope`, because the verdict alone answers
+only "is the cause in our code?" and the autofix leg needs "does a scoped fix
+exist?" (issue #1785). `mechanical` is a bounded edit to files the agent can
+name, reviewable without a design discussion; `architectural` moves a boundary,
+spans modules, or needs the design decision taken first. `normalizeFixScope` in
+`scripts/sentry-triage-text.mjs` (re-exported from
+`scripts/sentry-triage-project-core.mjs`) is the single owner of the rule and
+**fails closed**: absent, empty, anything outside those two words, or a REPEATED
+`fix_scope:` key normalizes to `architectural`. The repeat rule is not
+theoretical: a block scalar ends at the first column-0 line, so agent-transcribed
+Sentry text inside `root_cause` can escape as a `fix_scope:` line, and a
+last-wins parse would let it overwrite the honest value. This is also why the
+template above carries a PLACEHOLDER rather than a sample value — of the
+contract's fields this is the only one whose two values are asymmetric, and a
+field nobody deliberated on keeps whatever the template said. Every verdict
+written before the field existed therefore reads as `architectural`, which is
+intended — autofix selects nothing until the
+prompt produces the field. The asymmetry is deliberate: a missed `mechanical`
+costs one un-attempted fix, while a wrong `mechanical` spends an agent run on a
+refactor it must then refuse, which is the failure the five strategy-probe stubs
+already produced.
+
+A LOCAL `code-fix` verdict scoped `architectural` **settles OPEN** (issue
+#1812). The label step's parser (`runParseOnly`) emits the verdict label plus
+`sentry:fix-scope-architectural` as one comma list, so the hold label rides the
+SAME single atomic `gh issue edit --add-label` as the verdict label — the
+step's post-condition reread still counts exactly one label, because
+`sentry:fix-scope-architectural` sits OUTSIDE the `sentry:verdict-*` namespace
+(`VERDICT_LABELS` filters on that prefix). The close step reads
+`architectural_hold` and leaves the stub open rather than closing it. So the
+"a verdicted queue issue is a closed ledger entry" invariant now has TWO open
+exceptions: an actionable EXTERNAL verdict (deferred to the project job) and a
+LOCAL architectural code-fix (held as human design work). The hold is never
+terminal: it is shed on regression and on any re-verdict
+(`REOPEN_SHED_LABELS`), and `shed` carries it exactly when the hold does not
+apply, so a re-dispatched stub whose scope flips to mechanical un-strands in the
+same edit.
 
 A `needs-human` verdict also includes a concrete `human_question`, a
 `how_to_check` list, a `decision_branches` list, one to three `hypotheses`, an
@@ -570,12 +622,13 @@ The deterministic parser accepts only comments from
 newer than the latest pipeline-authored regression comment. It then applies
 the label and transition below:
 
-| Verdict              | Label                        | Queue outcome      | Downstream action                                                                                                                  |
-| -------------------- | ---------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `code-fix`           | `sentry:verdict-code-fix`    | Close as completed | Project to an allowlisted external repo, or leave a visible projection-skipped note; eligible local issues may later enter autofix |
-| `config-fix`         | `sentry:verdict-config-fix`  | Close as completed | Project to an allowlisted external repo, or leave a visible projection-skipped note                                                |
-| `upstream-transient` | `sentry:verdict-upstream`    | Close as completed | None                                                                                                                               |
-| `needs-human`        | `sentry:verdict-needs-human` | Keep open          | Human answers the recorded question and decides the next action                                                                    |
+| Verdict                          | Label                                                        | Queue outcome                     | Downstream action                                                                                                                             |
+| -------------------------------- | ------------------------------------------------------------ | --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `code-fix` (mechanical/external) | `sentry:verdict-code-fix`                                    | Close as completed                | Project to an allowlisted external repo, or leave a visible projection-skipped note; eligible local mechanical issues may later enter autofix |
+| `code-fix` (local architectural) | `sentry:verdict-code-fix` + `sentry:fix-scope-architectural` | **Keep open** (human design work) | Excluded from autofix at query time; re-triage to clear (#1812)                                                                               |
+| `config-fix`                     | `sentry:verdict-config-fix`                                  | Close as completed                | Project to an allowlisted external repo, or leave a visible projection-skipped note                                                           |
+| `upstream-transient`             | `sentry:verdict-upstream`                                    | Close as completed                | None                                                                                                                                          |
+| `needs-human`                    | `sentry:verdict-needs-human`                                 | Keep open                         | Human answers the recorded question and decides the next action                                                                               |
 
 A stub carries exactly one `sentry:verdict-*` label. The label edit adds the
 new one and removes every other verdict label in the same call, so
@@ -656,7 +709,9 @@ fails so the next `main` run can project it safely.
 
 ### Local autofix PRs
 
-Autofix considers only local `code-fix` stubs without an existing fix PR,
+Autofix considers only local `code-fix` stubs that claim `fix_scope: mechanical`
+and have no existing fix PR, reports every stub it stood down — on either axis —
+into the run record,
 caps each run at two CANDIDATES — not two stubs, see the family collapse
 below — and uses a GitHub App scoped to Contents and Pull
 requests on this repository. The fix agent receives no Sentry credential.
@@ -665,6 +720,69 @@ contract. `ui-dashboard/vercel.json` denies `git.deploymentEnabled` for
 `sentry-autofix/*`, so an autofix branch's untrusted diff never gets a Vercel
 deployment (and its production-linked secrets) before human review — a trust
 boundary earlier than the path-aware skip script (ADR 0019, issue #1452).
+
+**Only `fix_scope: mechanical` is selectable** (issue #1785). A local `code-fix`
+verdict scoped `architectural` — including every verdict that omits the field,
+which fails closed — is **settled OPEN and labeled `sentry:fix-scope-architectural`**
+at verdict time (issue #1812), not closed and not left unmarked. That label is
+the human design backlog. The autofix selector excludes it in its `--search`
+negation, so the whole architectural class stays out of the candidate window at
+query time — the one class that would otherwise grow without bound, since every
+verdict predating the field reads as `architectural` (#1813's measured filler).
+`evaluateCandidate` still re-parses `fix_scope` as the authority, so a LEGACY
+stub that predates the label, or one whose label a human removed, is caught there
+and skipped with a stderr note (never `sentry:fix-refused` — a terminal marker
+would stand the whole family down). The gate sits after the reconcile branch, so
+a PR that already exists still gets its bookkeeping repaired even if its scope
+changed under it.
+
+Because the held stub is OPEN, the **open issue list is the primary human
+surface**: the architectural backlog is exactly the open stubs carrying
+`sentry:fix-scope-architectural`. Two more surfaces name what is not yet labeled:
+
+- the autofix **run record** on tracker issue #1282 counts every stub the
+  selector still skipped on scope — `- Skipped (fix_scope: architectural): N
+(#…)` — a legacy straggler the record-run backfill has not yet labeled. It is
+  reported because it writes nothing to the queue, and an unreported skip would
+  render as `Candidates selected: 0, Deferred: 0` — byte-identical to an empty
+  queue, the #1758 misdiagnosis this leg exists to make impossible.
+- the Slack **digest** lists open architectural stubs in their OWN **Open design
+  work** section (not Routed — a local verdict never routes anywhere).
+
+**Operator affordance: re-triage the OPEN stub via `workflow_dispatch`.** A human
+who judges a held stub mechanical re-triages it through the standard triage
+`workflow_dispatch`; its settlement then sheds the hold and closes it when the
+fresh verdict says mechanical, and the next autofix run selects it.
+**Hand-removing the label is NOT the affordance:** the verdict re-parse still
+refuses on scope, and the record-run backfill re-applies the label. A single-issue
+AUTOFIX `workflow_dispatch` does NOT override the gate either — the scope is a
+claim about the fix, not a heuristic about which family member to pick, so
+overriding it would spend exactly the agent run the field exists to prevent.
+Re-queueing has one owner (`requeueQueueStub` in
+`scripts/sentry-triage-requeue.mjs`), a pure chokepoint module with no argv shell.
+
+**Legacy stubs stay CLOSED** (operator resolution). A local architectural stub
+was CLOSED at verdict time; the record-run backfill only adds the
+window-exclusion label at up to 50/run, never reopens. A regression reopens any
+that still fire via the normal ingest path (`REOPEN_SHED_LABELS` sheds the hold
+so the fresh round re-decides scope). This closes issue #1813: the architectural
+class no longer fills the selector's read window, and the `Window: N stubs,
+evaluated M` line (below) is the standing tripwire for any regrowth.
+
+A residue this design does NOT drain, stated not hidden: a stub with no parseable
+SHORT-ID, an unparsable verdict, a verdict that is not `code-fix`, or a
+foreign/unrecognized `affected_repo` is dropped by `evaluateCandidate` (returns
+`null`) — it never reaches the `skipped` report, so it leaves NO run-record line,
+yet it keeps its `verdict-code-fix` + `autofix-select` labels and the oldest-first
+query returns it every run. A pile of these can occupy the whole
+`MAX_CANDIDATE_EVALUATIONS` slice while the run record names no reason; the only
+signal is the select step's stderr `skip #N:` note. It is not the architectural
+class and gets no hold label — a triage error whose fix does not live here. A
+run-record reporting path for this residue is a deliberate follow-up if real
+starvation is observed: it would have to thread these heterogeneous skip reasons
+through the `skipped_issues → record-labels` handoff, whose backfill assumes every
+reported skip is architectural, so it is held back rather than risk mislabeling a
+non-architectural stub.
 
 **One candidate per `duplicate_of` family** (issue #1784). Stubs whose verdicts
 place them in one Sentry issue family consume ONE autofix run between them, not

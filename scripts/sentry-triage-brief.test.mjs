@@ -54,6 +54,7 @@ import {
   resolveVerdict,
   sanitizeBriefList,
   selectNeedsHumanBriefFields,
+  VALID_FIX_SCOPES,
   VALID_VERDICTS,
   VERDICT_MARKER,
 } from "./sentry-triage-project-core.mjs";
@@ -1622,6 +1623,35 @@ await test("the triage prompt asks for the two new fields", () => {
   }
 });
 
+await test("the triage prompt states a fix_scope: architectural verdict leaves the stub OPEN as human design work (#1812 Finding 4)", () => {
+  // The classifier must understand the CONSEQUENCE of writing `architectural`:
+  // the stub is not closed and not autofixed — settlement leaves it OPEN under
+  // sentry:fix-scope-architectural as human backlog. A prompt still telling the
+  // agent the stub "closes as a ledger entry" (the pre-#1812 behaviour) would
+  // misdescribe the outcome it is choosing. Collapse whitespace so the assertion
+  // survives line wrapping in the prose bullet.
+  const prompt = readRepoFile(".github/prompts/sentry-triage.md").replace(
+    /\s+/g,
+    " ",
+  );
+  assert(
+    prompt.includes("sentry:fix-scope-architectural"),
+    "the prompt must name the sentry:fix-scope-architectural settlement label",
+  );
+  assert(
+    prompt.includes("leaves it OPEN as human design work"),
+    "the prompt must state the architectural stub stays OPEN as human design work",
+  );
+  assert(
+    prompt.includes("the stub is NOT closed"),
+    "the prompt must state the architectural stub is NOT closed",
+  );
+  assert(
+    prompt.includes("never autofixed"),
+    "the prompt must state the architectural stub is never autofixed",
+  );
+});
+
 await test("the pipeline doc records the two new fields and the brief leg", () => {
   const doc = readRepoFile("docs/notes/sentry-triage-pipeline.md");
   for (const needle of [
@@ -1824,6 +1854,77 @@ await test("NO exit in the triage workflow open-codes a re-queue (#1782)", () =>
       `requeue_row reason ${reason} is not one of ${REQUEUE_REASONS.join(", ")}`,
     );
   }
+});
+
+await test("the close step leaves a LOCAL architectural code-fix OPEN (#1812 settlement)", () => {
+  // Negative-control target: without this early-exit the close step falls through
+  // to `gh issue close`, closing the very stub #1812 exists to keep open as human
+  // design work. The verdict step already applied the hold label on the same
+  // atomic edit; the close step must read architectural_hold and exit 0.
+  const workflow = readRepoFile(".github/workflows/sentry-triage-agent.yml");
+  const closeStep = workflow.slice(
+    workflow.indexOf("- name: Close queue stub"),
+  );
+  // The close step reads the verdict step's architectural_hold output.
+  assert(
+    closeStep.includes(
+      "ARCHITECTURAL_HOLD: ${{ steps.verdict.outputs.architectural_hold }}",
+    ),
+    "the close step must receive architectural_hold from the verdict step",
+  );
+  // The early-exit: a code-fix whose hold is true is left OPEN (exit 0), never
+  // closed. This is the exact shape of the needs-human early-exit above it.
+  assert(
+    /\[ "\$\{VERDICT\}" = "code-fix" \] && \[ "\$\{ARCHITECTURAL_HOLD\}" = "true" \]/.test(
+      closeStep,
+    ),
+    "the close step must guard code-fix + architectural_hold",
+  );
+  // The guarded block echoes the open-under-label note and then exits 0 (left
+  // OPEN) before the block's `fi`.
+  assert(
+    /\[ "\$\{ARCHITECTURAL_HOLD\}" = "true" \]; then[\s\S]{0,400}?exit 0/.test(
+      closeStep,
+    ),
+    "a held architectural stub must exit 0 (left OPEN), never reach the close",
+  );
+});
+
+await test("the verdict step emits and shape-checks architectural_hold on the single atomic edit (#1812)", () => {
+  const workflow = readRepoFile(".github/workflows/sentry-triage-agent.yml");
+  const verdictStep = workflow.slice(
+    workflow.indexOf("- name: Apply verdict label"),
+    workflow.indexOf("- name: Render or clear the needs-human brief"),
+  );
+  // The hold flag is parsed from the parser output and shape-guarded to the
+  // closed boolean (never interpolated into a command).
+  assert(
+    verdictStep.includes("jq -r '.architecturalHold'"),
+    "the verdict step must read architecturalHold from the parse output",
+  );
+  assert(
+    /architectural_hold.*=~.*\^\(true\|false\)\$/s.test(verdictStep),
+    "architectural_hold must be shape-checked to true/false",
+  );
+  assert(
+    verdictStep.includes('echo "architectural_hold=${architectural_hold}"'),
+    "architectural_hold must be exported to the close step",
+  );
+  // The hold rides the SAME single atomic edit: there is exactly one add-label
+  // gh issue edit in the verdict step, and the label the parser hands over
+  // already carries the hold name in its comma list.
+  const addLabelEdits = verdictStep.match(/--add-label "\$\{label\}"/g) ?? [];
+  assert(
+    addLabelEdits.length === 1,
+    "the hold must ride the single atomic --add-label, not a second edit",
+  );
+  // The post-condition survivor filter still counts ONLY sentry:verdict-* labels,
+  // so the hold label (outside that namespace) never trips the double-verdict
+  // guard.
+  assert(
+    verdictStep.includes('select(startswith("sentry:verdict-"))'),
+    "the post-condition must count only the sentry:verdict-* namespace",
+  );
 });
 
 await test("live script comments describe the brief as a comment, not a body write (#1769 round 10)", () => {
@@ -2046,6 +2147,79 @@ await test("the triage prompt documents the rest of the verdict contract", () =>
       `expected the prompt's classify block to offer \`${verdict}\` — it is in VALID_VERDICTS, so the parser accepts it, but the agent never emits a verdict this block does not name`,
     );
   }
+
+  // fix_scope (issue #1785) is the autofix eligibility gate, and it fails
+  // CLOSED: a verdict that omits it reads as `architectural` and is never
+  // selected. So an undocumented field is not a hole in one brief — it is
+  // autofix selecting nothing, silently, for as long as the prompt stays quiet.
+  // Nothing but this test reads the prompt file.
+  assert(
+    prompt.includes("`fix_scope:`"),
+    "expected the prompt to ask for `fix_scope:` — the selector gates on it and an absent field fails closed, so an undocumented field means autofix never selects anything",
+  );
+  for (const scope of VALID_FIX_SCOPES) {
+    assert(
+      new RegExp(`^- \`${scope}\``, "m").test(prompt),
+      `expected the prompt to define \`${scope}\` — it is in VALID_FIX_SCOPES, and the agent cannot write a value the prompt never names`,
+    );
+  }
+  // The values are defined by the DISCRIMINATING QUESTION, not by adjectives:
+  // "bounded"/"small" are judgement calls an agent resolves toward optimism,
+  // which is how five architectural refactors arrived as code-fix candidates.
+  assert(
+    /name the files/i.test(prompt) && /design discussion/i.test(prompt),
+    "expected the prompt to define fix_scope by the discriminating question (name the files / reviewable without a design discussion), not by adjectives",
+  );
+
+  // Naming the field is not enough to make the agent EMIT it, and the two
+  // clauses that do are both one edit away from vanishing. Verified by mutation:
+  // softening "REQUIRED whenever `verdict: code-fix`" to "optional on a
+  // `code-fix` verdict" AND dropping fix_scope from the posting sentence's key
+  // list left every suite green — the agent then omits the field, every verdict
+  // fails closed, and autofix selects nothing while CI stays quiet.
+  assert(
+    /REQUIRED[^.]{0,80}`?verdict: code-fix`?/i.test(
+      flatten(prompt).slice(flatten(prompt).indexOf("fix_scope")),
+    ),
+    "expected the prompt to mark `fix_scope` REQUIRED for a code-fix verdict — an optional field is one the agent omits under turn pressure, and an omitted one fails closed",
+  );
+  const postingSentence = flatten(prompt)
+    .split(/(?<=\.)\s/)
+    .find((s) => /post EXACTLY ONE comment/i.test(s));
+  assert(
+    postingSentence != null && /fix_scope/.test(postingSentence),
+    "expected the `post EXACTLY ONE comment` contract sentence to enumerate fix_scope — that list is what the agent copies when it composes the yaml block",
+  );
+});
+
+// Wrap-aware: this file's claims wrap mid-sentence in the prompt and the doc,
+// and a line-based match silently passes on a stale one that crossed a break.
+function flatten(text) {
+  return String(text).replace(/\s+/g, " ");
+}
+
+await test("the contract document pins the safe default and normalizeFixScope's owner", () => {
+  // A template exists to be copied and edited field by field, and a field the
+  // agent did not deliberate on keeps whatever the template said. `fix_scope` is
+  // the one contract field whose two values are asymmetric — one of them is the
+  // only token that unlocks an automated code-writing run — so the sample value
+  // must not be the permissive one.
+  const doc = flatten(readRepoFile("docs/notes/sentry-triage-pipeline.md"));
+  assert(
+    !/fix_scope: mechanical #/.test(doc),
+    "the verdict template must not pre-fill `fix_scope: mechanical` — a copied-but-unedited field would ship the permissive value on an architectural root cause",
+  );
+  assert(
+    /fix_scope: <mechanical \| architectural>/.test(doc),
+    "expected the verdict template to render fix_scope as a placeholder",
+  );
+  // The doc is canonical context for future sessions, and the fail-closed
+  // default is exactly what a future change must not re-derive — so it has to
+  // point at the module that OWNS it, not the one re-exporting the name.
+  assert(
+    /normalizeFixScope[^.]{0,120}sentry-triage-text\.mjs/.test(doc),
+    "expected the doc to name scripts/sentry-triage-text.mjs as normalizeFixScope's home",
+  );
 });
 
 if (failed > 0) {

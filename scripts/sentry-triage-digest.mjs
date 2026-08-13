@@ -14,7 +14,9 @@
  *      exists — see the #1278 emission interface below).
  *   3. 📮 Routed to owning repo                (code/config-fix verdicts, each
  *      linking the PROJECTED owning-repo issue; falls back to the queue-issue
- *      verdict when projection was skipped).
+ *      verdict when projection was skipped — a LOCAL code-fix never projects,
+ *      and one the autofix leg will never attempt is marked as such rather
+ *      than left reading as handed to a team that does not exist).
  *   4. 🙅 Wontfix / transient                  (upstream-transient verdicts,
  *      each linking the rationale on the queue issue, with a nudge toward the
  *      existing `sentry:approved-archive` label flow for that stub).
@@ -55,23 +57,47 @@ import { fileURLToPath } from "node:url";
 // The archive leg's approval-label name is owned by the ingest module (it
 // defines the label); import it rather than duplicating the string literal so
 // the two can never drift apart.
-import { APPROVED_ARCHIVE_LABEL } from "./sentry-triage-ingest.mjs";
+import {
+  APPROVED_ARCHIVE_LABEL,
+  FIX_SCOPE_ARCHITECTURAL_LABEL,
+} from "./sentry-triage-ingest.mjs";
 
 // Verdict-comment parsing is delegated to the pipeline's single authoritative
 // parser (the same one the label/projection steps run) so the digest can never
 // diverge from what the pipeline decided. The permalink extractor + the
 // projected-comment prefix are contract constants owned by the same module.
 import {
-  boundBriefList,
-  boundBriefText,
   extractPermalink,
   isTrustedComment,
   parseVerdictComment,
   PROJECTED_COMMENT_PREFIX,
   REGRESSION_PREFIX,
-  selectNeedsHumanBriefFields,
   selectVerdictComment,
+  validateAffectedRepo,
 } from "./sentry-triage-project-core.mjs";
+
+// The pure Slack-render layer (escaping, per-issue line renderers, the section
+// taxonomy, block chunking) lives in its own module (#1812 file split); this
+// module owns classification, verdict-parse orchestration, Slack-payload
+// assembly, gh collection and the CLI. Imported directly, no re-export shim.
+import {
+  ARCHITECTURAL_SECTION,
+  AUTOFIXED_SECTION,
+  chunkBriefs,
+  chunkLines,
+  FAILED_SECTION,
+  isArchitecturalLocalCodeFix,
+  issueCountText,
+  mrkdwnSection,
+  NEEDS_HUMAN_SECTION,
+  renderNeedsHumanBrief,
+  renderSectionBodyLines,
+  ROUTED_SECTION,
+  SECTION_ORDER,
+  SECTION_TITLES,
+  UNSAFE_URL_CHARS,
+  WONTFIX_SECTION,
+} from "./sentry-triage-digest-render.mjs";
 
 // Re-export the authoritative parser under the digest's historical name so
 // consumers/tests keep one import surface (the digest never owns a second
@@ -114,97 +140,6 @@ export const LABEL_TO_VERDICT = {
 // must stay visible, never hidden.
 export const FAILED_BUCKET = "failed";
 
-// Outcome sections, in RENDER order — needs-human FIRST (decisions required),
-// then autofixed, routed, wontfix, and failed last. Empty sections are omitted.
-export const NEEDS_HUMAN_SECTION = "needs-human";
-export const AUTOFIXED_SECTION = "autofixed";
-export const ROUTED_SECTION = "routed";
-export const WONTFIX_SECTION = "wontfix";
-export const FAILED_SECTION = "failed";
-
-export const SECTION_ORDER = [
-  NEEDS_HUMAN_SECTION,
-  AUTOFIXED_SECTION,
-  ROUTED_SECTION,
-  WONTFIX_SECTION,
-  FAILED_SECTION,
-];
-
-const SECTION_TITLES = {
-  [NEEDS_HUMAN_SECTION]: "⚠️ Needs human — decisions required",
-  [AUTOFIXED_SECTION]: "🤖 Autofixed",
-  [ROUTED_SECTION]: "📮 Routed to owning repo",
-  [WONTFIX_SECTION]: "🙅 Wontfix / transient",
-  [FAILED_SECTION]: "🛑 Failed triage",
-};
-
-// Hard bound on the summary field we embed. "Truncate hard" mirrors the Stage A
-// queue-body defense; also keeps every Slack section well under the 3000-char
-// block limit (batch is capped at 10 issues upstream).
-const MAX_SUMMARY_LEN = 300;
-
-// The per-field bound for needs-human briefs is NOT defined here: it is
-// `MAX_BRIEF_TEXT_LEN` in sentry-triage-project-core.mjs, shared with the queue
-// stub's brief COMMENT (#1748) so the two emitters cannot drift. Bounding
-// happens BEFORE escaping, so even an all-`<` value expands to at most ~4x =
-// 1600 chars — a single brief line stays far under the per-section budget (a
-// brief is scannable; full detail lives on the linked queue issue).
-
-// ---------------------------------------------------------------------------
-// Untrusted-text neutralization + Slack escaping.
-// ---------------------------------------------------------------------------
-
-/**
- * Slack mrkdwn escape — identical to the main-failure notifier's
- * `gsub("&";"&amp;") | gsub("<";"&lt;") | gsub(">";"&gt;")`. Order matters:
- * `&` first, or the later substitutions corrupt their own output. Escaping
- * `<`/`>` is what makes Slack mention/link control syntax inert.
- */
-export function escapeSlackText(text) {
-  return String(text ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
-
-/** Collapse control chars/newlines/tabs to single spaces so an untrusted
- * value stays on one line. Same intent as the ingest's sanitizeFreeText. */
-export function sanitizeSummary(text) {
-  return (
-    String(text ?? "")
-      // eslint-disable-next-line no-control-regex -- stripping control chars from untrusted agent text is the whole point here
-      .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "")
-      .replace(/[\r\n\t]+/g, " ")
-      .replace(/\s+/g, " ")
-      .trim()
-  );
-}
-
-/** Sanitize -> hard-truncate -> Slack-escape, in that order (escape last so
- * the byte bound applies to the human-visible text, not the entity soup). */
-export function formatSummaryForSlack(text) {
-  const clean = sanitizeSummary(text);
-  const bounded =
-    clean.length > MAX_SUMMARY_LEN
-      ? `${clean.slice(0, MAX_SUMMARY_LEN).trimEnd()}…`
-      : clean;
-  return escapeSlackText(bounded);
-}
-
-/** Same sanitize->bound->escape pipeline as formatSummaryForSlack, at the
- * (shorter) brief-field bound. Sanitize+bound come from the shared core so the
- * Slack brief and the queue-issue brief agree; only the escape is Slack's. */
-export function formatBriefText(text) {
-  return escapeSlackText(boundBriefText(text));
-}
-
-/** Render a free-text brief list (hypotheses / investigated) as one escaped,
- * bounded line — items joined with "; " so the whole line still obeys the
- * brief-field bound. Empty in -> "" (the caller omits the line). */
-export function formatBriefList(items) {
-  return escapeSlackText(boundBriefList(items));
-}
-
 // ---------------------------------------------------------------------------
 // Pure parsing: queue title.
 // ---------------------------------------------------------------------------
@@ -243,15 +178,13 @@ export function findLatestVerdictComment(comments) {
   return selectVerdictComment(comments).body;
 }
 
-// Every URL below is embedded in Slack mrkdwn link syntax (`<url|text>`, in
-// `link()` / `idAndProject()`), so `<`, `>`, `|` in the URL would break out of
-// the link — spoofing the display text or splitting the Slack block. Reject
-// those plus any ASCII control char or whitespace (space, tab, newline, …).
+// Every URL below is embedded in Slack mrkdwn link syntax (`<url|text>`, in the
+// render layer's `link()` / `idAndProject()`), so `<`, `>`, `|` in the URL would
+// break out of the link. `UNSAFE_URL_CHARS` (imported from the render module,
+// the single source) rejects those plus any ASCII control char or whitespace.
 // `new URL()` accepts all of them in the path/query and these validators embed
 // the RAW input string, so the shape check must run on the original — not on
 // the re-encoded `parsed.href`.
-// eslint-disable-next-line no-control-regex -- rejecting control chars in a link target is the point
-const UNSAFE_URL_CHARS = /[<>|\x00-\x20\x7f]/;
 
 /** True for an https `github.com` URL. The projected-issue and fix-PR pointers
  * are trusted-bot-posted, but shape-validate them anyway before turning them
@@ -332,9 +265,14 @@ export function extractAutofixUrl(comments) {
 // Classification: one collected issue -> one digest entry.
 // ---------------------------------------------------------------------------
 
+// No verdict comment on the stub. `affectedRepo`/`fixScope` stay unreadable
+// rather than defaulted: the fix_scope annotation below must describe a verdict
+// that was actually read, never one inferred from a missing comment.
 const EMPTY_PARSED = {
   verdict: null,
   confidence: null,
+  affectedRepo: "",
+  fixScope: null,
   summary: "",
   humanQuestion: "",
   hypotheses: [],
@@ -343,14 +281,46 @@ const EMPTY_PARSED = {
 };
 
 /** Which outcome section an entry renders in. Bucket is the verdict; a
- * code/config-fix with recorded fix-PR data (#1278) goes to Autofixed, else
- * Routed. */
-function sectionForEntry(bucket, autofixUrl) {
+ * code/config-fix with recorded fix-PR data (#1278) goes to Autofixed. A LOCAL
+ * code-fix scoped architectural gets its OWN "Open design work" section (#1812,
+ * operator resolution #3) — it is held open under sentry:fix-scope-architectural
+ * and the autofix leg never acts on it, so it is not "Routed" anywhere. Every
+ * other actionable code/config-fix goes to Routed.
+ *
+ * The LIVE architectural-hold LABEL wins over a stale autofix pointer: an
+ * already-autofixed stub re-triaged as architectural keeps its old `Autofixed by
+ * PR:` marker (the re-triage adds the hold without shedding the marker, since no
+ * regression re-queued it), but the `sentry:fix-scope-architectural` label is the
+ * authoritative "now held open as design work" state, so it renders under Open
+ * design work even with an autofix URL. A recorded fix PR still beats a verdict
+ * that only READS architectural on scope (no hold label) — that stub was
+ * genuinely autofixed — so the scope-only architectural check stays after the
+ * autofix-URL check, exactly as before this fix. */
+function sectionForEntry({
+  bucket,
+  autofixUrl,
+  owningRepoIsLocal,
+  fixScope,
+  architecturalHold,
+}) {
   if (bucket === FAILED_BUCKET) return FAILED_SECTION;
   if (bucket === "needs-human") return NEEDS_HUMAN_SECTION;
   if (bucket === "upstream-transient") return WONTFIX_SECTION;
   // code-fix / config-fix.
-  return autofixUrl ? AUTOFIXED_SECTION : ROUTED_SECTION;
+  // The LIVE architectural hold LABEL overrides a stale autofix pointer: a stub
+  // re-triaged as architectural keeps its old `Autofixed by PR:` marker (no
+  // regression re-queued it, so the marker is not shed), but the label is the
+  // authoritative "now held open as design work" state, so it belongs in Open
+  // design work, not Autofixed.
+  if (architecturalHold) return ARCHITECTURAL_SECTION;
+  // A recorded fix PR (with no hold label) means the stub was genuinely
+  // autofixed — that beats a verdict that merely reads architectural on scope.
+  if (autofixUrl) return AUTOFIXED_SECTION;
+  // Fresh architectural verdict, not yet labeled and never autofixed.
+  if (isArchitecturalLocalCodeFix({ bucket, owningRepoIsLocal, fixScope })) {
+    return ARCHITECTURAL_SECTION;
+  }
+  return ROUTED_SECTION;
 }
 
 /**
@@ -392,6 +362,19 @@ export function classifyIssue(issue) {
   else bucket = FAILED_BUCKET;
 
   const autofixUrl = extractAutofixUrl(issue?.comments);
+  // The verdict contract's `fix_scope` (issue #1785) and whether the verdict
+  // named THIS repo — computed here so the section decision (which now routes a
+  // local architectural code-fix to its own #1812 section) and the entry agree.
+  const fixScope = parsed.fixScope ?? null;
+  const owningRepoIsLocal =
+    validateAffectedRepo(parsed.affectedRepo).reason === "local-repo";
+  // The LIVE architectural hold, straight from the stub's labels — the
+  // authoritative "held open as design work" marker the settlement/backfill
+  // applies. It outranks a stale autofix pointer in the section decision: a
+  // re-triage to architectural adds this label but leaves the old `Autofixed by
+  // PR:` comment in place, so the label is what keeps the now-open item out of
+  // the Autofixed section.
+  const architecturalHold = labelNames.includes(FIX_SCOPE_ARCHITECTURAL_LABEL);
 
   return {
     number: issue?.number,
@@ -400,9 +383,21 @@ export function classifyIssue(issue) {
     verdictLabels,
     url: typeof issue?.url === "string" ? issue.url : "",
     bucket,
-    section: sectionForEntry(bucket, autofixUrl),
+    section: sectionForEntry({
+      bucket,
+      autofixUrl,
+      owningRepoIsLocal,
+      fixScope,
+      architecturalHold,
+    }),
     verdict: bucket === FAILED_BUCKET ? null : bucket,
     confidence: parsed.confidence,
+    // Carried here for the same reason the needs-human brief is: the digest and
+    // the selector are two consumers of one contract, so a field that gates the
+    // selector cannot land on it alone and leave the human surface asserting the
+    // opposite.
+    fixScope,
+    owningRepoIsLocal,
     summary: parsed.summary,
     // needs-human decision-ready brief. The full contract rides along even
     // though the Slack render below shows a subset (#1748) — carrying it here
@@ -424,235 +419,6 @@ export function classifyIssue(issue) {
 // ---------------------------------------------------------------------------
 // Slack payload assembly.
 // ---------------------------------------------------------------------------
-
-function issueCountText(total) {
-  return `${total} issue${total === 1 ? "" : "s"} triaged`;
-}
-
-function isHttpsUrl(value) {
-  const str = String(value);
-  if (UNSAFE_URL_CHARS.test(str)) return false;
-  try {
-    return new URL(str).protocol === "https:";
-  } catch {
-    return false;
-  }
-}
-
-/** `<url|text>` only for a trusted https URL; otherwise the escaped text. */
-function link(url, text) {
-  return isHttpsUrl(url) ? `<${url}|${text}>` : text;
-}
-
-/** The linked, escaped SHORT-ID + escaped project, shared by every per-issue
- * line. Links to the queue issue by default; needs-human overrides the link
- * target to the Sentry permalink (via `linkUrl`, falling back to the queue
- * issue when no permalink was recorded). */
-function idAndProject(entry, { linkUrl } = {}) {
-  const idText = escapeSlackText(entry.shortId);
-  const url = linkUrl ?? entry.url;
-  const linked = isHttpsUrl(url) ? `<${url}|${idText}>` : idText;
-  // A Sentry SHORT-ID is prefixed with the project's short name, which for
-  // every current project is the upper-cased slug — `GOVERNANCE-MENTO-ORG-5H`
-  // in `governance-mento-org`. Rendering both says it twice. Sentry lets a
-  // project's slug and short name diverge (a slug rename does not rewrite
-  // existing short-ids), so this drops the repeat only when it IS a repeat and
-  // keeps the project whenever it would otherwise be lost.
-  const project = escapeSlackText(entry.project);
-  const redundant =
-    project &&
-    String(entry.shortId ?? "")
-      .toUpperCase()
-      .startsWith(`${project.toUpperCase()}-`);
-  // A ready-to-render SUFFIX, not a bare value: every renderer used to wrap
-  // this in parentheses unconditionally, so returning "" for the redundant case
-  // produced `ID ()` — punctuation where the repeat used to be. Owning the
-  // parentheses here makes that shape unrepresentable.
-  const shown = redundant ? "" : project;
-  return { linked, project: shown, projectSuffix: shown ? ` (${shown})` : "" };
-}
-
-/** A needs-human decision-ready brief: a level-1 bullet for the issue, then
- * level-2 sub-bullets for whatever context is present. Decision is always
- * shown (placeholder if somehow absent — the label step requires it);
- * hypotheses / investigated / why-escalated render only when present. The id
- * links straight to the Sentry issue (falling back to the queue issue when no
- * permalink was recorded) — the queue issue stays reachable via the Links
- * sub-bullet.
- *
- * Deliberately NOT rendered here: `how_to_check` and `decision_branches`
- * (#1748). Those are the instruction half of the brief, and the surface a
- * person acts on is the queue issue this line links to — Slack is the nudge.
- * They still flow through the shared selection below, so adding them to this
- * digest later is a render change, not a contract change. */
-function renderNeedsHumanBrief(entry) {
-  const { linked } = idAndProject(entry, {
-    linkUrl: entry.sentryPermalink || entry.url,
-  });
-  const confidence = entry.confidence ?? "unknown";
-  const lines = [`• *${linked}* · confidence: ${confidence}`];
-
-  // Shared selection + bound (sentry-triage-project-core.mjs); only the Slack
-  // escape below is this emitter's own.
-  const fields = selectNeedsHumanBriefFields(entry);
-
-  const decision = fields.question
-    ? escapeSlackText(fields.question)
-    : "_(no decision recorded — re-triage)_";
-  lines.push(`    ◦ *Decision needed:* ${decision}`);
-
-  const hypotheses = formatBriefList(fields.hypotheses);
-  if (hypotheses) lines.push(`    ◦ *Hypotheses:* ${hypotheses}`);
-
-  const investigated = formatBriefList(fields.investigated);
-  if (investigated) lines.push(`    ◦ *Already investigated:* ${investigated}`);
-
-  if (fields.escalationReason) {
-    lines.push(
-      `    ◦ *Why escalated:* ${escapeSlackText(fields.escalationReason)}`,
-    );
-  }
-
-  const linkParts = [];
-  if (isHttpsUrl(entry.url)) linkParts.push(link(entry.url, "queue issue"));
-  if (entry.sentryPermalink) {
-    linkParts.push(link(entry.sentryPermalink, "Sentry"));
-  }
-  if (linkParts.length) lines.push(`    ◦ *Links:* ${linkParts.join(" · ")}`);
-  return lines;
-}
-
-/** Shared one-liner for Autofixed / Routed: `• <id> (<project>) — <summary> →
- * <arrow>`, where <arrow> is the linked outcome (fix PR / owning-repo issue /
- * queue-verdict fallback). */
-function renderArrowLine(entry, arrowUrl, arrowLabel) {
-  const { linked, projectSuffix } = idAndProject(entry);
-  const summary = entry.summary
-    ? formatSummaryForSlack(entry.summary)
-    : "_(no summary)_";
-  return `• ${linked}${projectSuffix} — ${summary} → ${link(arrowUrl, arrowLabel)}`;
-}
-
-function renderWontfixLine(entry) {
-  const { linked, projectSuffix } = idAndProject(entry);
-  const confidence = entry.confidence ?? "unknown";
-  const summary = entry.summary
-    ? formatSummaryForSlack(entry.summary)
-    : "_(no summary)_";
-  // The SHORT-ID links the queue issue, which holds the verdict comment (the
-  // rationale). Confidence is LABELLED, not a bare parenthetical: on its own
-  // `(medium)` reads as part of the summary sentence rather than as the agent's
-  // self-assessment of its own verdict.
-  return `• ${linked}${projectSuffix} — ${summary} [confidence: ${confidence}]`;
-}
-
-function renderFailedLine(entry) {
-  const { linked, projectSuffix } = idAndProject(entry);
-  return `• ${linked}${projectSuffix} — triage incomplete (still \`${NEEDS_TRIAGE_LABEL}\`)`;
-}
-
-/** The body lines for one section (excluding its header), one line per entry.
- * needs-human is NOT handled here — its multi-line briefs are atomic groups
- * and go through chunkBriefs (see buildDigest) so a brief never splits across
- * Slack blocks mid-entry. */
-function renderSectionBodyLines(section, entries) {
-  switch (section) {
-    case AUTOFIXED_SECTION:
-      return entries.map((entry) =>
-        renderArrowLine(entry, entry.autofixUrl, "fix PR"),
-      );
-    case ROUTED_SECTION:
-      return entries.map((entry) =>
-        entry.projectedUrl
-          ? renderArrowLine(entry, entry.projectedUrl, "owning-repo issue")
-          : // Projection skipped (no token / local / unrecognized repo): fall
-            // back to the queue-issue verdict.
-            renderArrowLine(entry, entry.url, "triage verdict"),
-      );
-    case WONTFIX_SECTION:
-      return entries.map(renderWontfixLine);
-    case FAILED_SECTION:
-      return entries.map(renderFailedLine);
-    default:
-      return [];
-  }
-}
-
-// Slack caps a text object at 3000 chars; escape expansion (`<` -> `&lt;`,
-// `&` -> `&amp;`) means several worst-case summaries/briefs would blow past it
-// in one section, and chat.postMessage would reject the whole payload with
-// `invalid_blocks`. Budget per section, with headroom under the hard cap.
-export const MAX_SECTION_TEXT_LEN = 2800;
-
-function mrkdwnSection(text) {
-  // verbatim: true disables Slack's automatic parsing of this text object
-  // (defense in depth on top of escapeSlackText): raw `@everyone` / `#channel`
-  // strings in user-controlled text can otherwise be auto-linkified into live
-  // mentions by layout-block parsing. The explicit `<url|label>` links and
-  // `*bold*` markup we emit are mrkdwn markup, not auto-parsing, and still render.
-  return { type: "section", text: { type: "mrkdwn", text, verbatim: true } };
-}
-
-/** Greedily pack already-escaped lines into newline-joined chunks that each
- * stay within `maxLen` (a single oversized line gets its own chunk — with the
- * bounded summary/brief fields a rendered line stays well under the Slack cap). */
-export function chunkLines(lines, maxLen = MAX_SECTION_TEXT_LEN) {
-  const chunks = [];
-  let current = [];
-  let currentLen = 0;
-  for (const line of lines) {
-    const extra = line.length + (current.length > 0 ? 1 : 0); // +1 for "\n"
-    if (current.length > 0 && currentLen + extra > maxLen) {
-      chunks.push(current.join("\n"));
-      current = [line];
-      currentLen = line.length;
-    } else {
-      current.push(line);
-      currentLen += extra;
-    }
-  }
-  if (current.length > 0) chunks.push(current.join("\n"));
-  return chunks;
-}
-
-/**
- * Chunk the needs-human section at ENTRY boundaries: each brief (one entry's
- * line group) is ATOMIC — it never shares a block boundary mid-entry, so a
- * reader can never see half a brief in one Slack block and the rest in the
- * next. The section header leads the first chunk; briefs within a chunk are
- * separated by a blank line (same rendering as before). A single brief longer
- * than the budget gets its own block(s) — split at line granularity via
- * chunkLines, still never interleaved with another entry.
- */
-export function chunkBriefs(headerLine, briefs, maxLen = MAX_SECTION_TEXT_LEN) {
-  const chunks = [];
-  let current = headerLine;
-  const flush = () => {
-    if (current !== "") {
-      chunks.push(current);
-      current = "";
-    }
-  };
-  for (const lines of briefs) {
-    const text = lines.join("\n");
-    if (text.length > maxLen) {
-      // Oversized single entry: its own block(s), never packed with others.
-      flush();
-      chunks.push(...chunkLines(lines, maxLen));
-      continue;
-    }
-    // "\n" between the header and the first brief; a blank line between briefs.
-    const sep = current === "" ? "" : current === headerLine ? "\n" : "\n\n";
-    if (current !== "" && current.length + sep.length + text.length > maxLen) {
-      flush();
-    }
-    const sepAfterFlush =
-      current === "" ? "" : current === headerLine ? "\n" : "\n\n";
-    current = `${current}${sepAfterFlush}${text}`;
-  }
-  flush();
-  return chunks;
-}
 
 /**
  * Stubs carrying more than one `sentry:verdict-*` label, as ready-to-emit
