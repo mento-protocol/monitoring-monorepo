@@ -1958,6 +1958,15 @@ assert_contains "- pnpm exec turbo run typecheck --filter=@mento-protocol/alerts
 assert_raw_contains "- pnpm --filter @mento-protocol/alerts-onchain-event-handler exec vitest related --run src/slack.ts (alerts onchain-event-handler changed (coverage floor) (scoped-tests))"
 assert_not_contains "- pnpm --filter @mento-protocol/alerts-onchain-event-handler test:coverage"
 
+run_gate "alerts/infra/onchain-event-handler/pnpm-workspace.yaml"
+assert_contains "- node --test scripts/alerts-uuid-overrides.test.mjs (alerts uuid override policy changed)"
+
+run_gate "alerts/infra/oncall-announcer/pnpm-workspace.yaml"
+assert_contains "- node --test scripts/alerts-uuid-overrides.test.mjs (alerts uuid override policy changed)"
+
+run_gate "scripts/alerts-uuid-overrides.test.mjs"
+assert_contains "- node --test scripts/alerts-uuid-overrides.test.mjs (alerts uuid override contract changed)"
+
 run_gate "alerts/infra/onchain-event-handler/src/safe-abi.json"
 assert_contains "- pnpm exec turbo run lint --filter=@mento-protocol/alerts-onchain-event-handler --cache=local:rw (Safe ABI changed (handler imports it))"
 assert_contains "- pnpm exec turbo run typecheck --filter=@mento-protocol/alerts-onchain-event-handler --cache=local:rw (Safe ABI changed (handler imports it))"

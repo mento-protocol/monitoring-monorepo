@@ -3491,6 +3491,9 @@ while IFS= read -r path; do
           ;;
         alerts/infra/onchain-event-handler/src/*|alerts/infra/onchain-event-handler/package.json|alerts/infra/onchain-event-handler/pnpm-lock.yaml|alerts/infra/onchain-event-handler/pnpm-workspace.yaml|alerts/infra/onchain-event-handler/tsconfig.json|alerts/infra/onchain-event-handler/vitest.config.ts|alerts/infra/onchain-event-handler/knip.json|alerts/infra/onchain-event-handler/eslint.config.mjs)
           add_package_quality_commands "@mento-protocol/alerts-onchain-event-handler" "alerts onchain-event-handler changed"
+          if [[ "$path" == "alerts/infra/onchain-event-handler/pnpm-workspace.yaml" ]]; then
+            add_command "node --test scripts/alerts-uuid-overrides.test.mjs" "alerts uuid override policy changed"
+          fi
           ;;
         alerts/infra/onchain-event-handler/*.tf)
           add_terraform_validate_commands "alerts/infra" "alerts/infra Terraform changed"
@@ -3508,6 +3511,9 @@ while IFS= read -r path; do
       case "$path" in
         alerts/infra/oncall-announcer/src/*|alerts/infra/oncall-announcer/package.json|alerts/infra/oncall-announcer/pnpm-lock.yaml|alerts/infra/oncall-announcer/pnpm-workspace.yaml|alerts/infra/oncall-announcer/tsconfig.json|alerts/infra/oncall-announcer/vitest.config.ts|alerts/infra/oncall-announcer/knip.json|alerts/infra/oncall-announcer/eslint.config.mjs)
           add_alerts_oncall_quality_commands "alerts oncall-announcer changed"
+          if [[ "$path" == "alerts/infra/oncall-announcer/pnpm-workspace.yaml" ]]; then
+            add_command "node --test scripts/alerts-uuid-overrides.test.mjs" "alerts uuid override policy changed"
+          fi
           ;;
         alerts/infra/oncall-announcer/*.tf)
           add_terraform_validate_commands "alerts/infra" "alerts/infra Terraform changed"
@@ -3941,6 +3947,9 @@ while IFS= read -r path; do
           ;;
         scripts/lockfile-lint.mjs|scripts/lockfile-lint.test.mjs)
           add_command "pnpm lockfile:lint:test" "lockfile lint helper changed"
+          ;;
+        scripts/alerts-uuid-overrides.test.mjs)
+          add_command "node --test scripts/alerts-uuid-overrides.test.mjs" "alerts uuid override contract changed"
           ;;
         scripts/lockfile-scope.mjs|scripts/lockfile-scope.test.mjs)
           add_command "node scripts/lockfile-scope.test.mjs" "lockfile scope helper changed"

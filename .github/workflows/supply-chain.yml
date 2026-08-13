@@ -85,6 +85,7 @@ on:
       - .github/workflows/supply-chain.yml
       - scripts/pnpm-audit-high-gate.mjs
       - scripts/pnpm-audit-high-gate.test.mjs
+      - scripts/alerts-uuid-overrides.test.mjs
       - scripts/lockfile-lint.mjs
       - scripts/lockfile-lint.test.mjs
       - scripts/version-skew-check.mjs
@@ -129,6 +130,8 @@ jobs:
       # blip → re-run the job manually.
       - name: pnpm audit high gate self-tests
         run: node scripts/pnpm-audit-high-gate.test.mjs
+      - name: alerts uuid override contract
+        run: node --test scripts/alerts-uuid-overrides.test.mjs
       - name: pnpm audit (high+ only)
         run: node scripts/pnpm-audit-high-gate.mjs --dir . --label root
       - name: pnpm audit handler deploy lockfile (high+ only)
