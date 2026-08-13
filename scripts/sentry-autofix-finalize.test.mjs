@@ -946,15 +946,24 @@ const BOT = { login: "github-actions[bot]" };
 // A `gh issue view --json …` body carrying ONE trusted verdict comment — the
 // shape `readStub`/`resolveVerdict` re-read during the backfill revalidation.
 // `fixScope: null` omits the line (normalizes to architectural, the pre-#1785
-// shape); FIX_SCOPE_MECHANICAL makes the stub selectable again.
-function verdictView(number, { verdict = "code-fix", fixScope = null } = {}) {
+// shape); FIX_SCOPE_MECHANICAL makes the stub selectable again. `affectedRepo`
+// defaults to this repo; set it to an allowlisted-external repo to model a
+// re-triage that moved the owning repo off-local.
+function verdictView(
+  number,
+  {
+    verdict = "code-fix",
+    fixScope = null,
+    affectedRepo = "mento-protocol/monitoring-monorepo",
+  } = {},
+) {
   const body = [
     VERDICT_MARKER,
     "",
     "```yaml",
     `verdict: ${verdict}`,
     "confidence: medium",
-    "affected_repo: mento-protocol/monitoring-monorepo",
+    `affected_repo: ${affectedRepo}`,
     "summary: A scoped bug",
     "root_cause: |",
     "  Abstract root cause.",
@@ -1155,6 +1164,39 @@ await test("backfill NEGATIVE CONTROL: a stub whose live verdict is now mechanic
   assert(
     !calls.some((c) => c[0] === "issue" && c[1] === "edit" && c[2] === "77"),
     "a now-mechanical stub must receive no --add-label edit",
+  );
+});
+
+await test("backfill: a stub re-triaged to an allowlisted-EXTERNAL repo is not labeled (the hold is local-only)", async () => {
+  // The sentry:fix-scope-architectural hold is a LOCAL-only window exclusion.
+  // A local architectural stub re-triaged to an external allowlisted owning repo
+  // (still code-fix + architectural) must NOT get it: the hold would make
+  // runProjectionBatch's skipped-state guard drop the external issue from
+  // projection with no retry label. So the revalidation re-confirms the owning
+  // repo, exactly as the selector's evaluateCandidate does.
+  const calls = [];
+  const { runGh } = makeBackfillRunGh({
+    calls,
+    scopeByNumber: {
+      // Still LOCAL architectural -> labeled.
+      88: { fixScope: null },
+      // code-fix + architectural, but now an allowlisted-external repo -> NOT.
+      89: { fixScope: null, affectedRepo: "mento-protocol/frontend-monorepo" },
+    },
+  });
+  const res = await backfillArchitecturalLabels(
+    [architecturalSkip("88"), architecturalSkip("89")],
+    { repo: "o/r" },
+    { runGh },
+  );
+  assertDeepEqual(res.labeled, ["88"]);
+  assertDeepEqual(res.revalidated, ["89"]);
+  // Negative control: the ONLY thing keeping #89 unlabeled is the live repo
+  // re-check. Drop it from liveArchitecturalScope and #89 (code-fix +
+  // architectural) is labeled — this asserts the external stub gets no edit.
+  assertDeepEqual(
+    calls.filter((c) => c[0] === "issue" && c[1] === "edit").map((c) => c[2]),
+    ["88"],
   );
 });
 

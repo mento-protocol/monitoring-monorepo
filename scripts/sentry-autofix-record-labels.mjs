@@ -47,6 +47,7 @@ import {
 import {
   FIX_SCOPE_MECHANICAL,
   resolveVerdict,
+  validateAffectedRepo,
 } from "./sentry-triage-project-core.mjs";
 import { readStub } from "./sentry-autofix-queue-io.mjs";
 
@@ -144,19 +145,30 @@ export function defaultRunGh(args) {
 /**
  * Re-read issue #<number>'s LIVE verdict through the SAME authoritative resolver
  * the selector uses (`readStub` -> `resolveVerdict`) and re-apply the selector's
- * own fix_scope gate: still `code-fix` AND its fix_scope still not `mechanical`.
+ * own eligibility gate: still `code-fix`, its fix_scope still not `mechanical`,
+ * AND its affected_repo still EXACTLY this repo (`validateAffectedRepo` reason
+ * `local-repo` — not `allowed`, an allowlisted-external owner, nor
+ * `unrecognized-repo`). The `sentry:fix-scope-architectural` hold is a LOCAL-only
+ * exclusion; adding it to an issue whose live verdict now names an external
+ * allowlisted repo would suppress that issue's projection (`runProjectionBatch`
+ * skips a held stub) and leave it stuck — so the repo must be re-confirmed too,
+ * exactly as the selector's `evaluateCandidate` requires before it can skip a
+ * stub on scope.
  *
  * The skip report is a SNAPSHOT taken at select time; between the select run and
- * this record run an operator can re-triage #N from architectural to mechanical.
- * Adding the exclusion label off the stale snapshot would keep the now-mechanical
- * stub out of the candidate window until yet another re-triage — the exact stub
- * the fix pipeline should now be picking up. So confirm the scope against live
- * state before labeling. Tri-state so the caller can fail CLOSED:
- *  - "architectural": live verdict still gates out on scope — safe to label.
- *  - "selectable":    live verdict now parses as `mechanical` (or is no longer
- *                     `code-fix`) — DO NOT label; the stub is correctly selectable.
+ * this record run an operator can re-triage #N from architectural to mechanical,
+ * or to an external owning repo. Adding the exclusion label off the stale
+ * snapshot would keep the now-selectable (or now-external) stub mislabeled. So
+ * confirm scope AND repo against live state before labeling. Tri-state so the
+ * caller can fail CLOSED:
+ *  - "architectural": live verdict is still a LOCAL architectural code-fix — safe
+ *                     to label.
+ *  - "selectable":    live verdict is no longer a local architectural code-fix
+ *                     (now `mechanical`, no longer `code-fix`, or no longer this
+ *                     repo) — DO NOT label; leave the stub for its own leg to
+ *                     handle.
  *  - "unconfirmed":   the verdict is gone or unreadable (read/parse error) — DO
- *                     NOT label; we cannot confirm the scope, so fail closed and
+ *                     NOT label; we cannot confirm scope, so fail closed and
  *                     leave the stub selectable (re-evaluated next run — self-heal).
  */
 async function liveArchitecturalScope(runGh, repo, number) {
@@ -180,7 +192,8 @@ async function liveArchitecturalScope(runGh, repo, number) {
   }
   const architectural =
     parsed.verdict === AUTOFIX_VERDICT &&
-    parsed.fixScope !== FIX_SCOPE_MECHANICAL;
+    parsed.fixScope !== FIX_SCOPE_MECHANICAL &&
+    validateAffectedRepo(parsed.affectedRepo).reason === "local-repo";
   return { state: architectural ? "architectural" : "selectable" };
 }
 
@@ -259,7 +272,7 @@ export async function backfillArchitecturalLabels(
     if (live.state !== "architectural") {
       if (live.state === "selectable") {
         process.stderr.write(
-          `note: #${number} was reported architectural but its live verdict no longer is (re-triaged to a selectable fix_scope); leaving it unlabeled and selectable.\n`,
+          `note: #${number} was reported architectural but its live verdict no longer resolves to a local architectural code-fix (re-triaged scope, verdict, or owning repo); leaving it unlabeled.\n`,
         );
       } else {
         process.stderr.write(
