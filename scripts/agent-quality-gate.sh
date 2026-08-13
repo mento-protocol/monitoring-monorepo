@@ -82,7 +82,32 @@ quality_parallelism="${AGENT_QUALITY_PARALLELISM:-auto}"
 full_local_tests="${AGENT_GATE_FULL_TESTS:-false}"
 command_timeout_seconds="${AGENT_QUALITY_COMMAND_TIMEOUT_SECONDS:-900}"
 gate_lock_enabled="${AGENT_QUALITY_GATE_LOCK:-1}"
-gate_lock_wait_seconds="${AGENT_QUALITY_GATE_LOCK_WAIT_SECONDS:-1800}"
+
+# Reads one of the lock's tunable numbers. An override that is set but EMPTY is
+# an error rather than a silent fall back to the default: `${VAR:-default}`
+# treats empty and unset alike, so a caller that meant to pass a small test
+# value and passed nothing would quietly get the production one — which is
+# exactly how a fixture ends up holding a thirty-minute budget. Unset means the
+# default; empty means somebody's argument went missing, and that should say so
+# rather than look like it worked.
+gate_lock_seconds_knob() {
+  local name="$1"
+  local default="$2"
+  local value
+  eval "value=\${${name}-__gate_unset__}"
+  if [[ "$value" == "__gate_unset__" ]]; then
+    printf '%s' "$default"
+    return 0
+  fi
+  if [[ ! "$value" =~ ^[0-9]+$ ]]; then
+    echo "error: ${name} must be a whole number of seconds; got '${value}'." >&2
+    echo "Unset it to use the default (${default})." >&2
+    exit 2
+  fi
+  printf '%s' "$value"
+}
+
+gate_lock_wait_seconds="$(gate_lock_seconds_knob AGENT_QUALITY_GATE_LOCK_WAIT_SECONDS 1800)"
 if [[ -z "$allow_package_script_changes" ]]; then
   allow_package_script_changes="$(git config --bool --get agent.qualityGate.allowPackageScriptChanges 2>/dev/null || true)"
 fi
@@ -504,11 +529,11 @@ restore_gate_lock_record() {
 # abandoned. Correctness no longer rests on this number: a creator that resumes
 # after its lock was reclaimed fails its own O_EXCL owner write and queues
 # instead of running. The grace only keeps churn down.
-gate_lock_owner_grace_seconds="${AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS:-30}"
+gate_lock_owner_grace_seconds="$(gate_lock_seconds_knob AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS 30)"
 # Whole seconds: the wait budget is accounted in integer seconds. Tunable for
 # the same reason as the grace — the self-test asserts that waiting happens,
 # not that it takes five seconds a round.
-gate_lock_poll_seconds="${AGENT_QUALITY_GATE_LOCK_POLL_SECONDS:-5}"
+gate_lock_poll_seconds="$(gate_lock_seconds_knob AGENT_QUALITY_GATE_LOCK_POLL_SECONDS 5)"
 # Every process this run starts for a mapped command carries this string in its
 # own argv. It is the run's lock token, so it is unique per run and per machine,
 # and it exists exactly as long as the process does — nothing to register, no
@@ -571,7 +596,7 @@ drain_condemned_runs() {
 # make that promise, because the thing it waits for (each command's watchdog
 # noticing its gate died) can itself be descheduled by the same host pressure
 # that killed the gate, or suspended with the laptop.
-gate_lock_orphan_drain_bound_seconds="${AGENT_QUALITY_GATE_LOCK_ORPHAN_DRAIN_SECONDS:-120}"
+gate_lock_orphan_drain_bound_seconds="$(gate_lock_seconds_knob AGENT_QUALITY_GATE_LOCK_ORPHAN_DRAIN_SECONDS 120)"
 
 # Test-only. The self-test sets these to widen otherwise sub-millisecond
 # windows so the interleavings they permit can be exercised deterministically.
@@ -635,7 +660,12 @@ gate_lock_owner_field() {
 gate_lock_process_start() {
   local pid="$1"
   [[ -n "$pid" ]] || return 0
-  TZ=UTC LC_ALL=C ps -o lstart= -p "$pid" 2>/dev/null | head -n1
+  # Asking about a process is allowed to come back empty, and must not be an
+  # error: every caller here is racing the process it asks about, so `ps` fails
+  # the moment that process exits. Under `set -e` with `pipefail` this pipeline
+  # would then abort the whole gate from inside a command substitution —
+  # silently, losing whatever stdout was still buffered.
+  TZ=UTC LC_ALL=C ps -o lstart= -p "$pid" 2>/dev/null | head -n1 || true
 }
 
 # Is this PID still the process that recorded itself? `kill -0` alone cannot
@@ -740,42 +770,101 @@ claim_gate_run_lock() {
 # for — including the common case where the run died before starting a command,
 # which now costs no wait at all. Anything still tagged is signalled and then
 # waited for, because a signal delivered is not a process reaped.
+# Everything under a process, children first, each with the start string that
+# identifies it. Children first is also the order to signal in, and capturing
+# the identity now is what lets the drain tell "this PID is still the process
+# we condemned" from "this PID was reused while we worked".
+gate_drain_capture=""
+capture_process_tree() {
+  local root_pid="$1"
+  local child
+  for child in $(pgrep -P "$root_pid" 2>/dev/null || true); do
+    capture_process_tree "$child"
+  done
+  gate_drain_capture="${gate_drain_capture}${root_pid}|$(gate_lock_process_start "$root_pid")
+"
+}
+
 drain_condemned_run_commands() {
   local token="$1"
-  local survivors
+  local wrapper entry pid recorded current alive recycled
   local waited=0
   local announced=0
   local escalated=0
-  local pid
   [[ -n "$token" ]] || return 0
 
+  # Enumerate before signalling anything. Only the wrapper carries the tag, so
+  # killing it first would destroy the one handle to its descendants: a command
+  # that ignores TERM would outlive its wrapper, the next search for the tag
+  # would come back empty, and "no tagged process" would be read as "nothing
+  # running". The captured set, not a re-scan, is what the drain confirms
+  # against.
+  gate_drain_capture=""
+  for wrapper in $(pgrep -f "agentqg:${token}" 2>/dev/null || true); do
+    capture_process_tree "$wrapper"
+  done
+  [[ -n "$gate_drain_capture" ]] || return 0
+
+  echo "The run this lock was taken from left commands running; stopping them before starting anything."
+  announced=1
+  recycled=""
+
   while :; do
-    survivors="$(pgrep -f "agentqg:${token}" 2>/dev/null || true)"
-    [[ -n "$survivors" ]] || break
-    if [[ "$announced" -eq 0 ]]; then
-      echo "The run this lock was taken from left commands running; stopping them before starting anything."
-      announced=1
-    fi
+    alive=""
+    while IFS='|' read -r pid recorded; do
+      [[ -n "$pid" ]] || continue
+      kill -0 "$pid" 2>/dev/null || continue
+      current="$(gate_lock_process_start "$pid")"
+      if [[ -n "$recorded" && -n "$current" && "$current" != "$recorded" ]]; then
+        # The PID exists but is somebody else now. Signalling it would be
+        # killing a stranger's process, so it is left alone and named below.
+        case " ${recycled} " in
+          *" ${pid} "*) : ;;
+          *) recycled="${recycled}${pid} " ;;
+        esac
+        continue
+      fi
+      alive="${alive}${pid} "
+    done << EOF
+$gate_drain_capture
+EOF
+
+    [[ -n "$alive" ]] || break
+
     if [[ "$waited" -ge "$gate_lock_orphan_drain_bound_seconds" ]]; then
       # Refusing to run is the whole point: proceeding here is exactly the
       # cross-run overlap the lock exists to prevent.
-      echo "error: commands from the previous run are still alive after ${waited}s: $(printf '%s' "$survivors" | tr '\n' ' ')" >&2
+      echo "error: commands from the previous run are still alive after ${waited}s: ${alive}" >&2
       echo "Nothing has been executed. Investigate those processes, then re-run." >&2
       exit 2
     fi
-    for pid in $survivors; do
+
+    for pid in $alive; do
       if [[ "$escalated" -eq 1 ]]; then
-        kill_process_tree "$pid" KILL 2>/dev/null || true
+        kill -KILL "$pid" 2>/dev/null || true
       else
-        kill_process_tree "$pid" TERM 2>/dev/null || true
+        kill -TERM "$pid" 2>/dev/null || true
       fi
     done
     sleep 1
     waited=$((waited + 1))
     # Give TERM a few seconds to be honoured before insisting.
     [[ "$waited" -lt 4 ]] || escalated=1
+
+    # One re-capture, after the first signal. A child spawned between the
+    # enumeration and the signal has a captured process as its parent, so
+    # walking the captured set again finds it; after this pass those parents
+    # are dying or dead, so nothing new can appear beneath them.
+    if [[ "$waited" -eq 1 ]]; then
+      for pid in $alive; do
+        capture_process_tree "$pid"
+      done
+    fi
   done
 
+  if [[ -n "$recycled" ]]; then
+    echo "Left alone: pid(s) ${recycled}now belong to unrelated processes."
+  fi
   if [[ "$announced" -eq 1 ]]; then
     echo "Previous run's commands are gone; continuing."
     echo

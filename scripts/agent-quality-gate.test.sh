@@ -5005,8 +5005,13 @@ gate_race_log="$gate_race_repo/race.log"
   # to execute something, so they run it at its cheap default.
   cat > tools/trunk <<STUB
 #!/usr/bin/env bash
+# RACE_STUB_IGNORE_TERM makes this outlive a TERM the way a real build tool
+# with its own signal handling can. The loop is what survives: its sleeps are
+# killable, it is not.
+[ -n "\${RACE_STUB_IGNORE_TERM:-}" ] && trap '' TERM
 printf 'enter %s %s\n' "\$\$" "\$(date +%s)" >> "$gate_race_log"
-sleep "\${RACE_STUB_SECONDS:-1}"
+race_stub_deadline=\$(( \$(date +%s) + \${RACE_STUB_SECONDS:-1} ))
+while [ "\$(date +%s)" -lt "\$race_stub_deadline" ]; do sleep 1 || true; done
 printf 'exit %s %s\n' "\$\$" "\$(date +%s)" >> "$gate_race_log"
 exit 0
 STUB
@@ -5031,8 +5036,12 @@ STUB
       AGENT_QUALITY_GATE_LOCK_CLAIM_DELAY_SECONDS="$3" \
       AGENT_QUALITY_GATE_LOCK_TAKEN_DELAY_SECONDS="${5:-0}" \
       "$repo_root/scripts/agent-quality-gate.sh" \
-      --base HEAD --run --lock-wait 120 \
-      > "$gate_race_repo/$1.out" 2>&1 || true
+      --base HEAD --run --lock-wait 45 \
+      > "$gate_race_repo/$1.out" 2>&1
+    # Kept, not swallowed: when a run ends without saying anything useful, its
+    # status is the difference between "exited" and "was killed", and that is
+    # the first thing worth knowing on a runner nobody can attach to.
+    printf '%s\n' "$?" > "$gate_race_repo/$1.status"
   }
 
   assert_runs_did_not_overlap() {
@@ -5403,7 +5412,11 @@ STUB
     grep -q "All mapped commands passed" "$gate_race_repo/$race_tag.out" && continue
     grep -q "no longer holds the gate run lock" "$gate_race_repo/$race_tag.out" && continue
     grep -q "timed out after .* waiting for the gate run lock" "$gate_race_repo/$race_tag.out" && continue
-    race_unaccounted="${race_unaccounted} ${race_tag}(last: $(tail -n 2 "$gate_race_repo/$race_tag.out" | tr '\n' ' '))"
+    # Status first — a shell killed by a signal loses whatever stdout was still
+    # buffered, so its file can end mid-story and the number is what says so.
+    race_unaccounted="${race_unaccounted}
+--- ${race_tag} exited $(cat "$gate_race_repo/$race_tag.status" 2>/dev/null || echo unknown), full output:
+$(sed 's/^/      /' "$gate_race_repo/$race_tag.out")"
   done
   [[ -z "$race_unaccounted" ]] ||
     fail "cached ownerless verdict: run(s) ended without executing or saying why:${race_unaccounted}"
@@ -5457,10 +5470,17 @@ STUB
   # killed the gate, or suspended with the machine. Run twice: once with the
   # watchdog able to help, and once with it SIGSTOPped so it cannot. Measured
   # against the clock, because a killed command never writes its exit line.
-  for race_watchdog_state in running suspended; do
+  # Third state: the command ignores TERM. Only the wrapper carries the tag, so
+  # a drain that signalled the tag and then re-scanned for it would see the
+  # wrapper gone, find no token, and call the run drained while the command it
+  # was hosting kept going.
+  for race_watchdog_state in running suspended term-ignoring; do
   rm -rf "$gate_race_root/run.lock"
   : > "$gate_race_log"
-  RACE_STUB_SECONDS=30 \
+  race_stub_ignore_term=""
+  [[ "$race_watchdog_state" != "term-ignoring" ]] || race_stub_ignore_term=1
+  RACE_STUB_IGNORE_TERM="$race_stub_ignore_term" \
+    RACE_STUB_SECONDS=30 \
     AGENT_QUALITY_GATE_LOCK=1 \
     AGENT_QUALITY_GATE_LOCK_HELD='' \
     AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
