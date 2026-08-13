@@ -316,8 +316,12 @@ isolated environment is a launcher shim, not a working engine: shims re-resolve
 the real CLI from a `PATH` the reviewer deliberately withholds, so the search
 drops that candidate and continues. An engine that answers `--version` keeps its
 own exit 127 as a review failure, and the search never silently swaps in a
-different installation behind it. When every candidate is a shim, one message
-names them and carries the engine's error.
+different installation behind it. The probe spawns through the same
+snapshot-revalidating path as every other trusted executable, captures no pipes
+a descendant could hold open, and is bounded at 15 seconds by a `SIGKILL` sweep
+of its own process group. A probe that times out counts as failed, and the
+message says so. When every candidate is a shim, one message names each with the
+reason its probe failed and carries the engine's error.
 
 Set `AUTOREVIEW_HELPER` only when intentionally testing or replacing the
 pinned repo helper with a compatible implementation of its CLI contract.

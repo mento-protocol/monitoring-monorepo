@@ -3231,25 +3231,44 @@ function tomlInlineTable(values) {
 // A launcher shim exits 127 because it re-resolves the real CLI from a PATH the
 // reviewer deliberately does not hand to its engine. A working engine can also
 // exit 127 for its own reasons, so confirm the executable cannot even report its
-// version in that same environment before calling it unusable.
-function engineExecutableRuns(executable, cwd, env) {
+// version in that same environment before calling it unusable. Returns null when
+// the probe succeeds, otherwise the reason it failed.
+function engineVersionProbeFailure(executable, cwd, env) {
+  const seconds = ENGINE_VERSION_PROBE_TIMEOUT_MS / 1000;
+  let probe;
   try {
-    const probe = spawnSync(executable, ["--version"], {
+    probe = spawnTrustedSync(executable, ["--version"], {
       cwd,
-      encoding: "utf8",
       env,
-      stdio: ["ignore", "pipe", "pipe"],
+      // No pipes: spawnSync waits for the captured stdio to close, so a
+      // descendant still holding one would outlast the timeout and wedge the
+      // review. Only the exit status matters here.
+      stdio: ["ignore", "ignore", "ignore"],
       timeout: ENGINE_VERSION_PROBE_TIMEOUT_MS,
+      // SIGKILL cannot be caught or ignored, and detached: true makes the
+      // child its own group leader so the sweep below reaches its descendants.
+      killSignal: "SIGKILL",
+      detached: true,
     });
-    return !probe.error && probe.status === 0;
-  } catch {
-    return false;
+  } catch (error) {
+    return `its --version probe could not start: ${error.message}`;
   }
+  if (probe.error?.code === "ETIMEDOUT" || probe.signal === "SIGKILL") {
+    killProcessGroup(probe.pid);
+    return `its --version probe timed out after ${seconds}s`;
+  }
+  if (probe.error) {
+    return `its --version probe failed: ${probe.error.message}`;
+  }
+  if (probe.status !== 0) {
+    return `its --version probe exited ${probe.status}`;
+  }
+  return null;
 }
 
 function unusableEngineLauncherMessage(command, launchers, engineError) {
   const variable = commandOverrideVariable(command);
-  return `${command} CLI cannot run in the reviewer's isolated environment: ${launchers.join(", ")} exited 127 and could not report a version, which is how a launcher shim behaves. Point ${variable} at the real ${command} executable. Engine error: ${engineError}`;
+  return `${command} CLI cannot run in the reviewer's isolated environment: ${launchers.join("; ")}, which is how a launcher shim behaves. Point ${variable} at the real ${command} executable. Engine error: ${engineError}`;
 }
 
 async function runCodex(repo, args, prompt) {
@@ -3271,7 +3290,9 @@ async function runCodex(repo, args, prompt) {
       // the review with the engine's own error.
       if (!error?.launcherUnusable) throw error;
       rejectResolvedCommandCandidate(candidate);
-      unusableLaunchers.push(candidate);
+      unusableLaunchers.push(
+        `${candidate} exited 127 and ${error.launcherProbeFailure}`,
+      );
       firstLauncherError ??= error;
     }
   }
@@ -3377,11 +3398,16 @@ async function runCodexExecutable(codex, repo, args, prompt) {
         timeoutSeconds: args.timeoutSeconds,
       });
     } catch (error) {
-      if (
-        error?.exitCode === 127 &&
-        !engineExecutableRuns(codex, workspace, engineEnv)
-      ) {
-        error.launcherUnusable = true;
+      if (error?.exitCode === 127) {
+        const probeFailure = engineVersionProbeFailure(
+          codex,
+          workspace,
+          engineEnv,
+        );
+        if (probeFailure) {
+          error.launcherUnusable = true;
+          error.launcherProbeFailure = probeFailure;
+        }
       }
       throw error;
     }
