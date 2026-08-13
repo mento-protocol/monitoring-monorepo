@@ -84,7 +84,6 @@ Authority: canonical
 - [`docs/notes/cross-protocol-context.md`](notes/cross-protocol-context.md)
 - [`docs/notes/dashboard-verification.md`](notes/dashboard-verification.md)
 - [`docs/notes/documentation-gardening.md`](notes/documentation-gardening.md)
-- [`docs/notes/europ-operational-admission.md`](notes/europ-operational-admission.md)
 - [`docs/notes/github-tooling-surfaces.md`](notes/github-tooling-surfaces.md)
 - [`docs/notes/hasura-isolation-trigger.md`](notes/hasura-isolation-trigger.md)
 - [`docs/notes/peg-monitoring-onboarding.md`](notes/peg-monitoring-onboarding.md)

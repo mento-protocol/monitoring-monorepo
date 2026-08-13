@@ -1265,14 +1265,13 @@ permission or the environment-secret writes 403 (`terraform/providers.tf`).
 
 ## Verification
 
-These checks are offline unless noted. CI runs all of them in the required
-`Lint + test root scripts` job, one step per suite, so a red check names the leg
-that broke; `scripts/check-sentry-suites-in-ci.test.mjs` fails if a new suite
-lands without a step there.
+These checks are offline unless noted. CI runs all of them in the required,
+unconditional `Sentry suites` job — one gate step, which names the suite that
+broke in its summary table.
 
-An unconditional `sentry-suites` job (no `if:`, in `ci.needs` and absent from
-`alls-green` `allowed-skips`, so it can never be skipped) also runs the suites
-and proves they ran (ADR 0062). It executes `node scripts/sentry-suite-gate.mjs`,
+That job (no `if:`, in `ci.needs` and absent from `alls-green` `allowed-skips`,
+so it can never be skipped) runs the suites and proves they ran (ADR 0062). It
+executes `node scripts/sentry-suite-gate.mjs`,
 which reconciles the `scripts/sentry-*.test.mjs` files against
 `scripts/sentry-suite-manifest.json` by exact set equality (in both directions)
 and, for each non-exempt suite, asserts child exit 0, parsed `fail == 0`, parsed
@@ -1294,48 +1293,40 @@ without declaring is absent from its snapshot, so the suite fails — which is w
 keeps those lists honest. Each snapshot is digested when taken and re-verified
 immediately before its child runs, and the shared checkout is swept afterwards,
 so a suite that writes there is named even though it can no longer change a
-verdict. The per-suite steps in `Lint + test root scripts` and the
-`check-sentry-suites-in-ci` checker stay in place; both jobs run the suites for
-now.
+verdict.
 
-That check parses ci.yml rather than searching it, so a step only counts when
-it runs the suite as its whole command. Adding an `if:`, a
-`continue-on-error:`, a `working-directory:`, an `env:`, a `|| true`, or an
-extra argument makes the step stop counting, and the failure names which one.
+`scripts/check-sentry-suites-in-ci.test.mjs` is the gate's static half and runs
+as the last step of the same job, after the install it needs for `js-yaml`. It
+carries what the gate cannot see: that the gate job still exists, is
+unconditional, matches ADR 0062's canonical shape key for key, and reaches the
+required `ci` context; that the one suite the gate does not run
+(`sentry-provider-contract.test.mjs`, imported by `tf-stacks.test.mjs`) really
+is run by the unconditional `production-infra-contract` job; and that the local
+quality gate's `sentry:*` allowlist stays pinned to exact commands. It parses
+ci.yml rather than searching it, and compares the job by exact equality, so an
+`if:`, a `continue-on-error:`, a `working-directory:`, an `env:`, a `|| true`, a
+reordered step or a key nobody has thought of all fail it by name.
 
-The CI step for each Sentry suite is a DIRECT `node scripts/<file>` invocation
-(`node --test scripts/<file>` for the broker), never a `pnpm <alias>`. The
-pnpm-run path carries two config-level fail-opens a parser cannot see — a
-`scriptShell` override false-greens the alias, and a `presentry:*:test`
-lifecycle hook runs before it and can empty the suite — so the checker rejects an
-alias-based Sentry step and requires the direct form. Reproduce the CI steps
-with:
+Issue #1779 PR C moved that checker out of the path-gated
+`Lint + test root scripts` job, where a diff touching only the dashboard, the
+indexer or a non-Markdown doc asset skipped it, and dropped the per-suite steps
+that job used to duplicate. Reproduce the whole CI job with:
 
 ```bash
-node scripts/sentry-triage-ingest.test.mjs
-node scripts/sentry-triage-digest.test.mjs
-node scripts/sentry-triage-project.test.mjs
-node scripts/sentry-triage-brief.test.mjs
-node scripts/sentry-autofix-select.test.mjs
-node scripts/sentry-autofix-finalize.test.mjs
-node scripts/sentry-triage-archive.test.mjs
-node --test scripts/sentry-mcp-broker.test.mjs
-node scripts/sentry-triage-requeue.test.mjs
-node scripts/sentry-triage-agent-comment.test.mjs
-node scripts/check-sentry-suites-in-ci.test.mjs
-# The self-run gate's own three suites (each a scripts/sentry-*.test.mjs), then
-# the gate itself, which runs every suite above and asserts each one actually
-# ran. The `env -u` prefix matches the CI step and is what lets these run under
-# an ambient NODE_OPTIONS — without it the gate refuses to start by design:
-/usr/bin/env -u NODE_OPTIONS -u NODE_PATH node scripts/sentry-suite-gate.test.mjs
-/usr/bin/env -u NODE_OPTIONS -u NODE_PATH node scripts/sentry-suite-gate-integrity.test.mjs
-/usr/bin/env -u NODE_OPTIONS -u NODE_PATH node scripts/sentry-suite-gate-isolation.test.mjs
+# The gate, which runs every scripts/sentry-*.test.mjs and asserts each one
+# actually ran. The `env -u` prefix matches the CI step and is what lets it run
+# under an ambient NODE_OPTIONS — without it the gate refuses to start by design:
 /usr/bin/env -u NODE_OPTIONS -u NODE_PATH node scripts/sentry-suite-gate.mjs
+node scripts/check-sentry-suites-in-ci.test.mjs
 ```
 
+To run one suite on its own — the gate names the file it failed on — invoke it
+by path, e.g. `node scripts/sentry-triage-ingest.test.mjs` or
+`node --test scripts/sentry-mcp-broker.test.mjs`.
+
 The `pnpm sentry:*:test` aliases still run these suites for interactive use and
-in the local pre-push gate; CI's direct invocation is the backstop, and the pin
-validator keeps the aliases the gate trusts safe.
+in the local pre-push gate; the CI gate is the backstop, and the pin validator
+keeps the aliases the local gate trusts safe.
 
 ```bash
 # Read-only previews that require local credentials:

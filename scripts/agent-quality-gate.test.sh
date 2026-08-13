@@ -3912,28 +3912,44 @@ assert_contains "$sentry_ci_check"
 run_gate "scripts/sentry-not-yet-written.test.mjs"
 assert_contains "$sentry_ci_check"
 
-# A directory symlink under scripts/ routes the check even though its path is
-# extensionless and matches none of the suite globs: findSentrySuites follows
-# the link, so the check must run to enumerate any suite behind it (Codex
-# 3754355168). Needs a real symlink in the tree because the gate reads `-L`.
+# A directory symlink under scripts/ routes both Sentry checks even though its
+# path is extensionless and matches none of the suite globs: findSentrySuites and
+# the gate's own enumerator each follow the link, so both must run to reach any
+# suite behind it (Codex 3754355168). Needs a real symlink in the tree because
+# the gate reads `-L`.
+#
+# The GATE assertions are what this arm now turns on. #1779 PR C retired the
+# checker's demand for a direct CI step per suite — the unconditional CI gate
+# runs the suites instead — so the checker alone exits 0 on a suite exposed here
+# and only the manifest reconciliation reds. Measured on this branch before the
+# fix: with a link whose target held an unwired suite, `node
+# scripts/check-sentry-suites-in-ci.test.mjs` exited 0 while `node
+# scripts/sentry-suite-gate.mjs` exited 1 naming the missing manifest entry, and
+# this arm scheduled only the former (Codex 3766397748).
 symlink_target="$(mktemp -d)"
 ln -sfn "$symlink_target" "$sentry_symlink_probe"
 run_gate "$sentry_symlink_probe"
-assert_contains "- node scripts/check-sentry-suites-in-ci.test.mjs (symlink under scripts/ can expose an unwired Sentry suite)"
+sentry_symlink_reason="symlink under scripts/ can expose an unwired Sentry suite"
+assert_contains "- node scripts/check-sentry-suites-in-ci.test.mjs ($sentry_symlink_reason)"
+assert_contains "- $sentry_gate_env node scripts/sentry-suite-gate.test.mjs ($sentry_symlink_reason)"
+assert_contains "- $sentry_gate_env node scripts/sentry-suite-gate.mjs ($sentry_symlink_reason (validate the committed manifest against the real suites))"
 rm -f "$sentry_symlink_probe"
 rm -rf "$symlink_target"
 
 # The mirror case: a change BENEATH an existing scripts/ directory symlink's real
-# TARGET routes the check too. findSentrySuites follows the committed link and
-# would demand a suite added under the target, yet that path matches neither
-# scripts/* nor the rootScripts filter — so both this gate and CI would skip
-# without this routing (Codex 3754704280). Needs a real link to a repo-relative
+# TARGET routes both checks too. Both enumerators follow the committed link and
+# reach a suite added under the target, yet that path matches neither scripts/*
+# nor the rootScripts filter — so this gate would skip it entirely without this
+# routing (Codex 3754704280, 3766397748). Needs a real link to a repo-relative
 # directory because the gate resolves the target with `pwd -P`. The changed path
 # under the target need not exist; only the link and its target must.
 mkdir -p "$sentry_symlink_target_dir"
 ln -sfn "../$sentry_symlink_target_dir" "$sentry_symlink_to_target"
 run_gate "$sentry_symlink_target_dir/sentry-new.test.mjs"
-assert_contains "- node scripts/check-sentry-suites-in-ci.test.mjs (change beneath a scripts/ symlink target can expose an unwired Sentry suite)"
+sentry_symlink_target_reason="change beneath a scripts/ symlink target can expose an unwired Sentry suite"
+assert_contains "- node scripts/check-sentry-suites-in-ci.test.mjs ($sentry_symlink_target_reason)"
+assert_contains "- $sentry_gate_env node scripts/sentry-suite-gate.test.mjs ($sentry_symlink_target_reason)"
+assert_contains "- $sentry_gate_env node scripts/sentry-suite-gate.mjs ($sentry_symlink_target_reason (validate the committed manifest against the real suites))"
 rm -f "$sentry_symlink_to_target"
 rm -rf "$sentry_symlink_target_dir"
 
@@ -4027,15 +4043,6 @@ assert_contains "- node scripts/check-peg-registry-integrity.test.mjs (peg regis
 run_gate "scripts/check-peg-registry-integrity.test.mjs"
 assert_contains "- node scripts/check-peg-registry-integrity.mjs (peg registry integrity checker changed)"
 assert_contains "- node scripts/check-peg-registry-integrity.test.mjs (peg registry integrity checker changed)"
-
-run_gate "scripts/europ-operational-admission.mjs"
-assert_contains "- node --test scripts/europ-operational-admission.test.mjs (EUROP operational-admission evaluator changed)"
-
-run_gate "scripts/europ-operational-admission.test.mjs"
-assert_contains "- node --test scripts/europ-operational-admission.test.mjs (EUROP operational-admission evaluator changed)"
-
-run_gate "scripts/fixtures/europ-operational-admission/2026-08-11.json"
-assert_contains "- node --test scripts/europ-operational-admission.test.mjs (EUROP operational-admission evaluator changed)"
 
 run_gate "scripts/check-pr-description.mjs"
 assert_contains "- node scripts/check-pr-description.test.mjs (PR description validator changed)"
