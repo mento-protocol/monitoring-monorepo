@@ -3727,6 +3727,12 @@ assert_contains "- pnpm sentry:project:test (Sentry triage digest helper changed
 run_gate "scripts/sentry-triage-digest.test.mjs"
 assert_contains "- pnpm sentry:digest:test (Sentry triage digest helper changed)"
 
+# The pure Slack-render / section-taxonomy layer split out of digest.mjs (#1812)
+# must route the digest suite too — a render-only change still needs the snapshot
+# and Slack-safety tests.
+run_gate "scripts/sentry-triage-digest-render.mjs"
+assert_contains "- pnpm sentry:digest:test (Sentry triage digest helper changed)"
+
 run_gate "scripts/sentry-triage-queue-contract.mjs"
 assert_contains "- pnpm sentry:requeue:test (Sentry re-queue chokepoint changed)"
 assert_contains "- pnpm sentry:project:test (Sentry re-queue chokepoint changed)"

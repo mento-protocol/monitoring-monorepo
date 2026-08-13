@@ -2360,7 +2360,10 @@ while IFS= read -r path; do
         scripts/sentry-triage-ingest.mjs|scripts/sentry-triage-ingest.test.mjs)
           add_command "pnpm sentry:ingest:test" "Sentry triage ingest helper changed"
           ;;
-        scripts/sentry-triage-digest.mjs|scripts/sentry-triage-digest.test.mjs)
+        scripts/sentry-triage-digest.mjs|scripts/sentry-triage-digest-render.mjs|scripts/sentry-triage-digest.test.mjs)
+          # digest-render.mjs is the pure Slack-render + section-taxonomy layer
+          # split out of digest.mjs (#1812); the digest suite covers both, so a
+          # render-only change must still run the snapshot / Slack-safety tests.
           add_command "pnpm sentry:digest:test" "Sentry triage digest helper changed"
           # The two needs-human brief emitters share their field selection and
           # bounds; the queue-issue one also reads the digest's autofix prefix.
