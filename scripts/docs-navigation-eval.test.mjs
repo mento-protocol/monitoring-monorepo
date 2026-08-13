@@ -1221,7 +1221,7 @@ test("the frozen baseline contract queues the changed current fixture", async ()
 });
 
 test("issue scheduling rejects an invalid committed baseline before discovery", async () => {
-  const invalidBaseline = validResult();
+  const invalidBaseline = structuredClone(committedBaseline);
   invalidBaseline.answers = [];
   let listed = false;
   await assert.rejects(

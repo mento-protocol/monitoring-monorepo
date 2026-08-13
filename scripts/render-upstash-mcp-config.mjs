@@ -9,7 +9,7 @@ const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(SCRIPT_DIR, "..");
 
 export const UPSTASH_MCP_LAUNCHER_SHA256 =
-  "651e4a9194348728f492274e9346172a3bbd51039883480e46c196cbb33f3a1f";
+  "f4debf3eb16a81e829f607e01a18646fcce486b9d85029905f99a1a6a7f15e3b";
 
 function assertLauncherInputs({ launcherPath, launcherSha256 }) {
   if (!isAbsolute(launcherPath)) {

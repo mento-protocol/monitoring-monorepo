@@ -1,8 +1,32 @@
 @import "tailwindcss";
 
+/* Mento design-system tokens (`:root` + `.dark` blocks, the `@theme inline`
+   colour/radius mapping, and the AspektaVF `@font-face`). Import `theme.css`
+   only — the package also ships a fully compiled `globals.css` that carries its
+   own preflight and would double-apply on top of ours.
+
+   No `@source` is registered for the package `dist/`: scanning the bundle adds
+   ~8 KB brotli of utilities for components this app never renders, and the
+   animation classes it references (`animate-in`, `fade-in-0`, …) come from
+   `tw-animate-css`, which the app does not load — so the scan cannot reproduce
+   the library's own look anyway. The few DS components used here
+   (`Tooltip*`) get an explicit `className` instead. */
+@import "@mento-protocol/ui/theme.css";
+
+/* Must stay AFTER the design-system import. The DS `@theme` block remaps
+   `--font-sans` to AspektaVF, collapses the radius scale to `--radius: 0`, and
+   enlarges `--text-3xl`/`--text-6xl`. Restoring the app values here keeps every
+   route outside /peg-monitoring pixel-identical; the peg board opts back into
+   the DS look locally. */
 @theme inline {
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  --text-3xl: 1.875rem;
+  --text-6xl: 3.75rem;
+  --radius-sm: 0.25rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.75rem;
 }
 
 body {
