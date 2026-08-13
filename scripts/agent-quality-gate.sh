@@ -776,6 +776,11 @@ record_condemned_run() {
   local token="$1"
   local dir
   [[ -n "$token" ]] || return 0
+  # Validated HERE, not only at the read boundaries, because the token
+  # becomes a path component below: a crafted '../x' from a shared-root
+  # remnant would land the record outside condemned.d. Failing returns the
+  # caller to its unwritable-obligation path — stop, record left in place.
+  gate_lock_token_is_wellformed "$token" || return 1
   dir="$(gate_lock_condemned_dir)" || return 1
   mkdir -p "$dir" 2>/dev/null || return 1
   # Registered before it exists: the name carries our PID, so cleanup can see
@@ -1336,6 +1341,12 @@ drain_condemned_run_commands() {
         # keeps the drain open rather than discharging it.
         if gate_drain_membership_holds "$pid" ""; then
           alive="${alive}${pid} "
+          # Queued for the signal loop too — it consumes alive_identities, and
+          # an entry only in `alive` would be waited on but never signalled,
+          # holding the drain to its bound for nothing. The loop re-checks
+          # membership under the sentinel before sending anything.
+          alive_identities="${alive_identities}${pid}|${gate_lock_identity_unavailable}
+"
         else
           case " ${unverified} " in
             *" ${pid} "*) : ;;
