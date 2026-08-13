@@ -4,9 +4,10 @@ name: Supply Chain
 #
 # 1. npm advisory audit — fails this advisory workflow when a high/critical
 #    advisory exists against any package in the root or standalone deploy
-#    lockfiles. The governance-watchdog high-audit leg is duplicated in the
-#    required Code Quality job so that deploy lockfile stays covered by a
-#    ruleset-required check.
+#    lockfiles. The governance-watchdog and both alerts-handler high-audit
+#    legs are duplicated in the required Code Quality job so those deploy
+#    lockfiles stay covered by a ruleset-required check even though this
+#    workflow itself is not required and is path-filtered.
 #
 # 2. lockfile-lint — validates pnpm-lock.yaml structural integrity for the root
 #    workspace lockfile and the package-local Cloud Build lockfiles:

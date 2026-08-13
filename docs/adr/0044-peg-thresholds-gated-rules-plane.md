@@ -3,7 +3,7 @@ title: Peg alert thresholds stay in the gated alerts-rules plane, read from one 
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-10
+last_verified: 2026-08-13
 scope: alerts
 date: 2026-07
 doc_type: adr
@@ -23,6 +23,8 @@ gates tracked by
 [`docs/notes/peg-monitoring.md`](../notes/peg-monitoring.md).
 ADR 0057 narrows this record's observation-advancement rule without changing
 the gated-policy ownership or rollover contract.
+The first-rollover parser exception recorded below is retired by the amendment
+in this record.
 **Scope:** alerts
 
 ## Context
@@ -151,6 +153,18 @@ Phase 3 must implement the following protected artifact and rules contract:
     threshold.
   - Severity and routing stay per-rule: warn → Slack, critical → page, each
     with its own contact-point wiring.
+
+## Amendment — first-rollover parser exception retired
+
+The protected platform apply attached active-only generation
+`1786443055965590`, and live proof confirmed current producer/API packages, no
+legacy-version metric labels, and all 17 Peg Grafana rules with health `ok`,
+unpaused, and Normal. With that one-time transition complete,
+[#1750](https://github.com/mento-protocol/monitoring-monorepo/issues/1750)
+removed the exact-version default described above. Every active or
+retained-previous source must now declare
+`listingAbsentConsecutiveChecks`; omission rejects the policy. This amendment
+does not change the gated-policy ownership or two-phase rollover contract.
 
 ## Alternatives considered
 

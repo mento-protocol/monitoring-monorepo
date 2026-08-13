@@ -2386,7 +2386,12 @@ while IFS= read -r path; do
           add_command "pnpm sentry:archive:test" "Sentry needs-human brief helper changed"
           add_command "pnpm sentry:project:test" "Sentry needs-human brief helper changed"
           ;;
-        scripts/sentry-triage-project.mjs|scripts/sentry-triage-project-core.mjs|scripts/sentry-triage-project.test.mjs|scripts/sentry-triage-text.mjs|scripts/sentry-triage-projection.mjs|scripts/sentry-triage-escalation-contract.mjs)
+        scripts/sentry-triage-project.mjs|scripts/sentry-triage-project-core.mjs|scripts/sentry-triage-project-cli.mjs|scripts/sentry-triage-label-ensure.mjs|scripts/sentry-triage-project.test.mjs|scripts/sentry-triage-text.mjs|scripts/sentry-triage-projection.mjs|scripts/sentry-triage-escalation-contract.mjs)
+          # sentry-triage-project-cli.mjs (the argv surface) and
+          # sentry-triage-label-ensure.mjs (the settlement label self-heal) were
+          # split out of the entry module for the 1,000-line cap (#1827); both
+          # are covered by the projection suite and reached only through it, so
+          # they route exactly like the file they came from.
           add_command "pnpm sentry:project:test" "Sentry triage projection helper changed"
           # The agent's comment wrapper imports the shared marker contract from
           # sentry-triage-project-core.mjs, so its fences ride on this module.
@@ -2406,9 +2411,44 @@ while IFS= read -r path; do
         scripts/sentry-autofix-select.mjs|scripts/sentry-autofix-select.test.mjs)
           add_command "pnpm sentry:autofix:select:test" "Sentry autofix select helper changed"
           ;;
+        scripts/sentry-autofix-select-cli.mjs|scripts/sentry-autofix-decisions.mjs)
+          # The selector's CLI surface (option contract, help text, the report
+          # files the tracker reads back, --emit-verdict) and the decision ->
+          # report classifier both passes share. Neither owns a cost cap; both
+          # are exercised end to end by the select suite, which drives the CLI
+          # layer through writeRunReports and the classifier through the family
+          # collapse.
+          add_command "pnpm sentry:autofix:select:test" "Sentry autofix selection helper changed"
+          ;;
+        scripts/sentry-autofix-select-instrument.mjs|scripts/sentry-autofix-second-look.mjs)
+          # The selector's budget + instrumentation layer (the per-run read cap
+          # and its no-op guard, the gh counter, the throttle latch, the DEGRADED
+          # and summary lines) and the bounded second look.
+          add_command "pnpm sentry:autofix:select:test" "Sentry autofix selection helper changed"
+          # These two OWN caps the finalize suite pins the select job's
+          # timeout-minutes against — MAX_CANDIDATE_EVALUATIONS here,
+          # MAX_SECOND_LOOK_EVALUATIONS + SECOND_LOOK_FAMILY_BUDGETS there. That
+          # pin derives the budget from the LIVE constants, so raising one
+          # without re-checking the timeout has to fail in the gate, not in
+          # production on the path the second look exists to create.
+          add_command "pnpm sentry:autofix:finalize:test" "Sentry autofix per-run cost cap changed"
+          ;;
+        scripts/sentry-autofix-family-handled.mjs)
+          # The handled-FAMILY lookup, split out of sentry-autofix-queue-io.mjs
+          # for the 600-line soft cap. Its behaviour is exercised end to end by
+          # the select suite, like every other module on this leg.
+          add_command "pnpm sentry:autofix:select:test" "Sentry autofix handled-family lookup changed"
+          # It also OWNS a cap the finalize suite pins the select job's
+          # timeout-minutes against — MAX_HANDLED_ID_QUERIES, one of the terms in
+          # that suite's worst-case serial `gh` call count. Same reason
+          # sentry-autofix-select-instrument.mjs routes there: raising the cap
+          # without re-checking the timeout has to fail in the gate, not in
+          # production.
+          add_command "pnpm sentry:autofix:finalize:test" "Sentry autofix per-run cost cap changed"
+          ;;
         scripts/sentry-autofix-queue-io.mjs|scripts/sentry-autofix-family-resolve.mjs|scripts/sentry-autofix-reverse-verify.mjs|scripts/sentry-autofix-family.mjs|scripts/sentry-autofix-candidate.mjs)
-          # The selection leg's gh I/O layer (openAutofixPrExists / isOwnHeadPr /
-          # the family-collapse reads), the live-state family resolver, the
+          # The selection leg's gh I/O layer (the window list, readStub,
+          # openAutofixPrExists / isOwnHeadPr), the live-state family resolver, the
           # reverse `in:comments` verification leg, and the pure union-find
           # family module (transitive union / project scoping / MAX_FAMILY_MEMBERS
           # / representative rule) — all consumed by the selector. Each is

@@ -54,13 +54,17 @@ lint:
         # scanning this derived artifact would just double-report transitive
         # findings with no fix path.
         - alerts/infra/onchain-event-handler/package-lock.json
-        # Standalone Cloud Build lockfiles for the alerts handlers, audited by
-        # .github/workflows/supply-chain.yml's pnpm-audit step like their
-        # siblings above. They were the last lockfiles trunk's osv-scanner
-        # still scanned inline, which made every same-day OSV publication
-        # against any pinned transitive fail Code Quality repo-wide on files
-        # no open PR touches (2026-08-13: nanoid, then uuid and ws within
-        # hours). Security floors stay maintained via each package's
+        # Standalone Cloud Build lockfiles for the alerts handlers. The
+        # required Code Quality job runs scripts/pnpm-audit-high-gate.mjs
+        # against both directly (same duplication as governance-watchdog
+        # above), so a ruleset-required check still fails on a high/critical
+        # advisory; .github/workflows/supply-chain.yml's pnpm-audit step
+        # covers the same two directories for the non-required daily/weekly
+        # cadence. They were the last lockfiles trunk's osv-scanner still
+        # scanned inline, which made every same-day OSV publication against
+        # any pinned transitive fail Code Quality repo-wide on files no open
+        # PR touches (2026-08-13: nanoid, then uuid and ws within hours).
+        # Security floors stay maintained via each package's
         # pnpm-workspace.yaml overrides.
         - alerts/infra/oncall-announcer/pnpm-lock.yaml
         - alerts/infra/onchain-event-handler/pnpm-lock.yaml

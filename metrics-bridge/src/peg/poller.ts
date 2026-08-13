@@ -44,7 +44,6 @@ import type {
 } from "./policy.js";
 import {
   PEG_POLICY_MAX_ASSETS,
-  effectiveListingAbsentConsecutiveChecks,
   PEG_POLICY_MAX_SOURCES_PER_ASSET,
 } from "./policy.js";
 import type {
@@ -700,9 +699,8 @@ async function pollListingOnly(
     nowSeconds: input.context.nowSeconds,
     listingCadenceIsDue: listingCadenceDue,
     request,
-    listingAbsentConsecutiveCheckLimit: effectiveListingAbsentConsecutiveChecks(
-      input.policy,
-    ),
+    listingAbsentConsecutiveCheckLimit:
+      input.policy.listingAbsentConsecutiveChecks,
     report: (cause) =>
       input.context.dependencies.report("source_fetch", cause, {
         asset: input.assetId,
@@ -727,7 +725,7 @@ async function pollDueSource(
     const listingError = acceptRecordedListingCheck(
       state,
       listingChecks,
-      effectiveListingAbsentConsecutiveChecks(input.policy),
+      input.policy.listingAbsentConsecutiveChecks,
       listingCadenceDue,
     );
     const supported =
@@ -740,7 +738,7 @@ async function pollDueSource(
   const listingError = acceptRecordedListingCheck(
     state,
     listingChecks,
-    effectiveListingAbsentConsecutiveChecks(input.policy),
+    input.policy.listingAbsentConsecutiveChecks,
     listingCadenceDue,
   );
   if (listingError !== null) {

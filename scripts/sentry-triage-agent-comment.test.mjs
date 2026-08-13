@@ -620,17 +620,28 @@ test("the verdict edit sheds the other verdict labels and proves it landed", () 
   assert.match(job, /if \[ "\$\{survivor_count\}" -gt 1 \]; then/);
 });
 
-/**
- * The verdict label step from the edit that takes `sentry:needs-triage` off to
- * the end of the step — the window where the stub is invisible to the selector
- * and every exit therefore owes it a re-queue.
- */
-function verdictPostConditionBlock() {
-  const job = WORKFLOW.slice(
+/** The whole `verdict` job. */
+function verdictJobBlock() {
+  return WORKFLOW.slice(
     WORKFLOW.indexOf("\n  verdict:"),
     WORKFLOW.indexOf("\n  project:"),
   );
-  const start = job.indexOf('--remove-label "sentry:needs-triage,${shed}"');
+}
+
+/** The label edit that takes `sentry:needs-triage` off — the start of the
+ * window where the stub is invisible to the selector. */
+const VERDICT_EDIT_MARKER = '--remove-label "sentry:needs-triage,${shed}"';
+
+/**
+ * The verdict label step from that edit to the end of the step — the window
+ * where every exit owes the stub a re-queue. The edit itself is INSIDE it: gh
+ * sends the add and the removals as discrete mutations and fails the command on
+ * a label the repo does not have, so a failed edit can leave the stub carrying
+ * the verdict label and `sentry:needs-triage` at once.
+ */
+function verdictPostConditionBlock() {
+  const job = verdictJobBlock();
+  const start = job.indexOf(VERDICT_EDIT_MARKER);
   // End at the brief step, NOT the close step: the brief step has its own,
   // deliberately different failure semantics (#1769 round 10 — a CLEAR failure
   // exits 1 to BLOCK the close without re-queuing). This block is the VERDICT
@@ -653,12 +664,25 @@ test("a failed verdict post-condition re-queues the stub instead of stranding it
   // because this is the one branch where a stub can be wearing more than one
   // verdict label, plus the projection, autofix and archive markers), the
   // ordering, and the terminal revalidation.
-  const open = lines.findIndex(
+  //
+  // It is DEFINED above the window rather than inside it, because the edit that
+  // opens the window is itself an exit that owes a re-queue: defined below the
+  // edit, `set -e` aborted the step before any compensation existed to call
+  // (the 2026-08-13 failure on issue #1811).
+  const job = verdictJobBlock();
+  const jobLines = job.split("\n");
+  const open = jobLines.findIndex(
     (line) => line.trim() === "requeue_for_retry() {",
   );
-  assert.ok(open >= 0, "the verdict post-condition has no re-queue helper");
-  const close = lines.findIndex((line, i) => i > open && line.trim() === "}");
-  const helper = lines.slice(open, close).join("\n");
+  assert.ok(open >= 0, "the verdict step has no re-queue helper");
+  assert.ok(
+    job.indexOf("requeue_for_retry() {") < job.indexOf(VERDICT_EDIT_MARKER),
+    "the re-queue helper must be defined before the label edit, or the edit's own failure has nothing to call",
+  );
+  const close = jobLines.findIndex(
+    (line, i) => i > open && line.trim() === "}",
+  );
+  const helper = jobLines.slice(open, close).join("\n");
   assert.match(helper, /node scripts\/sentry-triage-workflow-requeue\.mjs/);
   assert.match(helper, /--issue "\$\{QUEUE_ISSUE_NUMBER\}"/);
   assert.match(helper, /--reason verdict-unsettled/);

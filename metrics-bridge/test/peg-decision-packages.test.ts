@@ -18,10 +18,7 @@ import {
   type PegPollCycleContext,
   type PegPollSourceState,
 } from "../src/peg/poll-cycle.js";
-import {
-  PEG_POLICY_LEGACY_LISTING_ABSENT_CONSECUTIVE_CHECKS_VERSION,
-  type PegPolicyVersion,
-} from "../src/peg/policy.js";
+import { type PegPolicyVersion } from "../src/peg/policy.js";
 import { publishPegPollSnapshot } from "../src/peg/publisher.js";
 import { parsePegRegistry } from "../src/peg/registry.js";
 
@@ -293,22 +290,25 @@ describe("peg decision-package producer", () => {
     );
   });
 
-  it("normalizes the exact legacy retained previous in the active-incomplete fallback", () => {
-    const legacyPrevious = policy(
-      PEG_POLICY_LEGACY_LISTING_ABSENT_CONSECUTIVE_CHECKS_VERSION,
-    );
-    delete legacyPrevious.assets["asset-one"]!.sources.deep_eur!
-      .listingAbsentConsecutiveChecks;
+  it("serializes the previous policy's explicit threshold in the active-incomplete fallback", () => {
+    const retainedPrevious = policy("previous-v2");
+    retainedPrevious.assets[
+      "asset-one"
+    ]!.sources.deep_eur!.listingAbsentConsecutiveChecks = 3;
     const prepared = preparePegDecisionPackages(
-      [snapshot(legacyPrevious.version)],
-      context([active, legacyPrevious], active.version, legacyPrevious.version),
+      [snapshot(retainedPrevious.version)],
+      context(
+        [active, retainedPrevious],
+        active.version,
+        retainedPrevious.version,
+      ),
     )!;
-    expect(prepared.model.producedPolicyVersion).toBe(legacyPrevious.version);
+    expect(prepared.model.producedPolicyVersion).toBe(retainedPrevious.version);
     expect(prepared.model.policySlot).toBe("previous");
     expect(
       prepared.model.packages[0]?.sources[0]?.policy
         .listingAbsentConsecutiveChecks,
-    ).toBe(2);
+    ).toBe(3);
   });
 
   it("keeps unobserved listing evidence paired null", () => {

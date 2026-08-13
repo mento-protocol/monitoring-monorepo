@@ -3740,6 +3740,16 @@ assert_contains "- pnpm sentry:project:test (Sentry re-queue chokepoint changed)
 run_gate "scripts/sentry-triage-project.mjs"
 assert_contains "- pnpm sentry:project:test (Sentry triage projection helper changed)"
 
+# The argv surface and the settlement label self-heal, split out of the entry
+# module for the 1,000-line hard cap (#1827). Both are reached only through that
+# leg, so an unrouted change to either would ship untested.
+run_gate "scripts/sentry-triage-project-cli.mjs"
+assert_contains "- pnpm sentry:project:test (Sentry triage projection helper changed)"
+
+run_gate "scripts/sentry-triage-label-ensure.mjs"
+assert_contains "- pnpm sentry:project:test (Sentry triage projection helper changed)"
+assert_contains "- pnpm sentry:brief:test (Sentry triage projection helper changed)"
+
 run_gate "scripts/sentry-triage-project-core.mjs"
 assert_contains "- pnpm sentry:project:test (Sentry triage projection helper changed)"
 assert_contains "- node scripts/sentry-triage-agent-comment.test.mjs (Sentry triage projection helper changed)"
@@ -3788,6 +3798,16 @@ assert_contains "- pnpm sentry:archive:test (Sentry triage archive helper change
 
 run_gate "scripts/sentry-triage-archive.test.mjs"
 assert_contains "- pnpm sentry:archive:test (Sentry triage archive helper changed)"
+
+# The handled-family lookup, split out of sentry-autofix-queue-io.mjs for the
+# 600-line soft cap. Pinned ALONE — a module added to this leg without a routing
+# case matches nothing and its edits run zero tests, and a pin that lists several
+# paths at once lets a sibling's route mask the miss. It carries
+# MAX_HANDLED_ID_QUERIES, a term in the finalize suite's select-job timeout pin,
+# so both suites must be routed.
+run_gate "scripts/sentry-autofix-family-handled.mjs"
+assert_contains "- pnpm sentry:autofix:select:test (Sentry autofix handled-family lookup changed)"
+assert_contains "- pnpm sentry:autofix:finalize:test (Sentry autofix per-run cost cap changed)"
 
 # The self-run Sentry-suite gate (#1779, ADR 0062) asserts, at runtime, that the
 # suites actually ran. A contributor who edits the gate script, its own suite, or

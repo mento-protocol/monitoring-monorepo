@@ -3,7 +3,7 @@ title: Terraform Stacks
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-11
+last_verified: 2026-08-13
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -90,13 +90,15 @@ including `--force-local-apply`. Controller recovery and the first protected
 publication are complete: it created
 `mento-monitoring-peg-policy/peg-policy/current.json` generation
 `1785276001213660`, which the first runtime attachment used. The later protected
-publication produced generation `1786443055965590`. This reviewed platform
-rollout selects that published generation for the runtime; publication alone
-does not attach it to Cloud Run. An approved platform apply and runtime proof
-remain required. For a future publication, dispatch `Peg Policy Publication`
-from `main`, inspect its read-only plan, then choose `apply` and approve the
-`production-infra` Environment. Its output feeds a separately reviewed runtime
-rollover.
+publication produced generation `1786443055965590`. The approved platform apply
+attached that active-only generation to Metrics Bridge revision
+`metrics-bridge-00196-6hg`. Post-apply proof confirmed current producer/API
+packages, exactly one policy-version metric, no legacy policy labels, and all
+17 Peg Grafana rules with health `ok`, unpaused, and Normal. Publication alone
+never attaches a generation to Cloud Run. For a future publication, dispatch
+`Peg Policy Publication` from `main`, inspect its read-only plan, then choose
+`apply` and approve the `production-infra` Environment. Its output feeds a
+separately reviewed runtime rollover.
 
 ## CI Model
 
@@ -183,11 +185,13 @@ owns private buckets and identities; protected `peg-policy-publication` writes
 the policy object.
 Metrics Bridge uses the dedicated runtime identity. The first runtime attachment
 pinned generation `1785276001213660` through paired `PEG_POLICY_*` values; the
-current reviewed rollout changes the source literal to published generation
-`1786443055965590`. Publication itself attaches neither Cloud Run nor Grafana
-consumers. The approved platform apply and runtime proof attach the new pin; the
-separate alerts-rules source change and approved apply activate Grafana.
+current runtime pins active-only generation `1786443055965590` through the same
+paired values. Publication itself attaches neither Cloud Run nor Grafana
+consumers. The approved platform apply attached the current pin; the separate
+alerts-rules source change and approved apply activate Grafana.
 Terraform derives the pinned URL and `gcp-metadata` mode from that literal.
+The checked-in platform source is back in steady state: the template-rollout
+marker is `false`, and Terraform ignores the generated revision name.
 Metrics Bridge ignores `template[0].revision` in steady state so routine plans
 do not clear the generated name stamped by deploys. Any Terraform-owned
 template change, including a policy-generation handoff, sets
@@ -246,10 +250,11 @@ hash-named objects. AppSpot can view those objects. Default Compute has no direc
 App Engine source-bucket grant in this stack.
 
 App Engine also writes its service-owned
-`staging.mento-monitoring.appspot.com` bucket during a deploy. The default
-AppSpot service account has Storage Admin on that one bucket only, as required
-for that internal staging path. It has no project-wide Storage Admin grant and
-does not receive Storage Admin on either Terraform-managed source bucket.
+`staging.mento-monitoring.appspot.com` bucket during a deploy. The App Engine
+uploaders and default AppSpot service account have Storage Admin on that one
+bucket only, as required for version submission and the internal staging path.
+They have no project-wide Storage Admin grant and do not receive Storage Admin
+on either Terraform-managed source bucket.
 
 The routine deployer and `gcp_dev_members` have Service Account User only on the
 dedicated Metrics Bridge runtime identity and dedicated builder. They have no

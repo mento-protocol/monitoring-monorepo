@@ -60,11 +60,15 @@ import {
 // label.
 export const SKIP_FIX_SCOPE_ARCHITECTURAL = "fix-scope-architectural";
 
-// One run may backfill at most this many labels. The skip report can never hold
-// more than the selector's MAX_CANDIDATE_EVALUATIONS (50) entries, so this is a
-// belt-and-braces bound that keeps the write volume aligned with the documented
-// cost ceiling; overflow ids are simply labeled on a later run (they re-enter the
-// skip report until labeled). Oldest-first order is preserved from the report.
+// One run may backfill at most this many labels. The skip report can now hold up
+// to MAX_CANDIDATE_EVALUATIONS (200) entries plus MAX_SECOND_LOOK_EVALUATIONS
+// (100) from a second look, so this is a REAL throttle on the write volume, not
+// the belt-and-braces bound it was when the window was 50 — deliberately left at
+// 50 because each backfilled stub costs three-to-four `gh` calls (below) and the
+// record job runs on a 5-minute timeout. Overflow ids are simply labeled on a
+// later run (they re-enter the skip report until labeled), and a full window of
+// architectural stubs drains at 50/run. Oldest-first order is preserved from the
+// report, so the queue's oldest stragglers are always the ones that drain first.
 // Each backfilled stub now costs read + write + read (the pre- and post-write
 // halves of the TOCTOU guard below), plus one more write when the post-check
 // forces a compensating removal — so this bound governs three-to-four gh calls

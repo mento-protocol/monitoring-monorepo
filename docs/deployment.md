@@ -3,7 +3,7 @@ title: Deployment Guide
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-11
+last_verified: 2026-08-13
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -179,14 +179,13 @@ required source-staging flag/value. [ADR 0053](adr/0053-explicit-deployment-sour
 defines the supported static discovery syntax and its deliberate indirect and
 dynamic proof limits.
 
-The source-staging migration is complete: both buckets and their scoped IAM are
-applied, all five deployment paths were canaried, and the broad project-level
-Storage Admin, Storage Object Admin, and Service Account User fallbacks were
-removed and audited. App Engine's default AppSpot service account retains
-Storage Admin only on its service-owned
-`staging.mento-monitoring.appspot.com` bucket for App Engine's internal deploy
-staging. [ADR 0053](adr/0053-explicit-deployment-source-staging.md) records
-that permission split and completed sequence.
+The source-staging migration keeps both buckets and every deploy caller on
+scoped IAM. Broad project-level Storage Admin, Storage Object Admin, and Service
+Account User fallbacks stay removed. App Engine uploaders and the default
+AppSpot service account receive Storage Admin only on the service-owned
+`staging.mento-monitoring.appspot.com` bucket for version submission and App
+Engine's internal deploy staging. [ADR 0053](adr/0053-explicit-deployment-source-staging.md)
+records that permission split.
 
 The Metrics Bridge builder foundation is applied, its effective IAM is
 verified, `cloudbuild.yaml` pins both submit paths to it, and both route canaries
@@ -311,10 +310,12 @@ complete. The first protected publication created
 `mento-monitoring-peg-policy/peg-policy/current.json` generation
 `1785276001213660`; its runtime attachment minted
 `metrics-bridge-r-47264e8-30405040839`. The later protected publication created
-generation `1786443055965590`. The reviewed runtime rollout selects that
-published generation in source, but it is not attached to Cloud Run until the
-approved platform apply and runtime proof complete. The canonical recovery
-procedure is in [`docs/terraform.md`](terraform.md) and
+generation `1786443055965590`. The approved runtime rollout attached that
+active-only generation to Cloud Run revision `metrics-bridge-00196-6hg`.
+Post-apply proof confirmed current producer and API packages, exactly one
+policy-version metric, no legacy policy labels, and all 17 Peg Grafana rules
+with health `ok`, unpaused, and Normal. The canonical recovery procedure is in
+[`docs/terraform.md`](terraform.md) and
 [ADR 0055](adr/0055-peg-policy-bucket-controller-recovery.md). Audit effective
 readers, writers, and IAM administrators after future applies and before runtime
 rollovers.

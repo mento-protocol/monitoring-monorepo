@@ -3,7 +3,7 @@ title: Scripts Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-11
+last_verified: 2026-08-13
 doc_type: agent-instructions
 scope: scripts
 review_interval_days: 90
@@ -53,7 +53,7 @@ garden_lane: agent-entry-points
   service-account overrides, and verifies that config's exact builder identity
   and logging mode. It keeps direct Cloud Build source-object reads limited to
   the Alloy and Metrics Bridge builders, excluding default Compute. It pins the
-  default AppSpot service account's Storage Admin grant to only its
+  App Engine uploader and default AppSpot Storage Admin grants to only the
   service-owned `staging.<project>.appspot.com` bucket and requires the direct
   Metrics Bridge bootstrap to
   reconcile the builder's project roles, repository writer, developer act-as

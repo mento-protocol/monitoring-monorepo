@@ -507,6 +507,84 @@ expectFailure(
   ),
   "App Engine default staging admin: depends_on must be exactly",
 );
+const appEngineDefaultStagingUploaderAdminForEach =
+  "  for_each = local.app_engine_source_uploaders";
+const appEngineDefaultStagingUploaderAdminMember = "  member = each.value";
+const appEngineDefaultStagingUploaderAdminBlock = `resource "google_storage_bucket_iam_member" "app_engine_default_staging_uploader_admin" {
+${appEngineDefaultStagingUploaderAdminForEach}
+
+${appEngineDefaultStagingBucket}
+${appEngineDefaultStagingAdminRole}
+${appEngineDefaultStagingUploaderAdminMember}
+
+${appEngineDefaultStagingAdminDependency}
+}`;
+assert(
+  files["terraform/deploy-staging.tf"].includes(
+    appEngineDefaultStagingUploaderAdminBlock,
+  ),
+  "App Engine uploader grant must target the service-owned staging bucket",
+);
+expectFailure(
+  mutate(
+    files,
+    "terraform/deploy-staging.tf",
+    appEngineDefaultStagingUploaderAdminBlock,
+    appEngineDefaultStagingUploaderAdminBlock.replace(
+      appEngineDefaultStagingUploaderAdminForEach,
+      "  for_each = local.deploy_source_callers",
+    ),
+  ),
+  "App Engine default staging uploader admin: for_each must be exactly",
+);
+expectFailure(
+  mutate(
+    files,
+    "terraform/deploy-staging.tf",
+    appEngineDefaultStagingUploaderAdminBlock,
+    appEngineDefaultStagingUploaderAdminBlock.replace(
+      appEngineDefaultStagingBucket,
+      "  bucket = google_storage_bucket.app_engine_source_staging.name",
+    ),
+  ),
+  "App Engine default staging uploader admin: bucket must be exactly",
+);
+expectFailure(
+  mutate(
+    files,
+    "terraform/deploy-staging.tf",
+    appEngineDefaultStagingUploaderAdminBlock,
+    appEngineDefaultStagingUploaderAdminBlock.replace(
+      appEngineDefaultStagingAdminRole,
+      '  role   = "roles/storage.objectAdmin"',
+    ),
+  ),
+  "App Engine default staging uploader admin: role must be exactly",
+);
+expectFailure(
+  mutate(
+    files,
+    "terraform/deploy-staging.tf",
+    appEngineDefaultStagingUploaderAdminBlock,
+    appEngineDefaultStagingUploaderAdminBlock.replace(
+      appEngineDefaultStagingUploaderAdminMember,
+      '  member = "serviceAccount:${google_service_account.metrics_bridge_deployer.email}"',
+    ),
+  ),
+  "App Engine default staging uploader admin: member must be exactly",
+);
+expectFailure(
+  mutate(
+    files,
+    "terraform/deploy-staging.tf",
+    appEngineDefaultStagingUploaderAdminBlock,
+    appEngineDefaultStagingUploaderAdminBlock.replace(
+      appEngineDefaultStagingAdminDependency,
+      "  depends_on = [google_project_service.appengine]",
+    ),
+  ),
+  "App Engine default staging uploader admin: depends_on must be exactly",
+);
 expectFailure(
   mutate(
     files,

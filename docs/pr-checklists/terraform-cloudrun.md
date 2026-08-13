@@ -3,7 +3,7 @@ title: Terraform and Cloud Run Checklist
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-11
+last_verified: 2026-08-13
 doc_type: checklist
 scope: terraform/infra
 review_interval_days: 90
@@ -103,9 +103,16 @@ trimmed build context:
 - [ ] Bucket-scope upload IAM: Cloud Build callers get bucket read/object create,
       build identities get object view, and App Engine uploaders get bucket
       read/Object Admin.
-- [ ] App Engine's default AppSpot service account gets Storage Admin only on
-      its service-owned `staging.<project>.appspot.com` bucket. Do not widen it
-      to project scope or the Terraform-managed source buckets.
+- [ ] App Engine uploaders and the default AppSpot service account get Storage
+      Admin only on the service-owned `staging.<project>.appspot.com` bucket.
+      Do not widen them to project scope or the Terraform-managed source
+      buckets.
+- [ ] After an approved apply changes App Engine staging IAM, dispatch the Aegis
+      App Engine workflow from clean current `main` and require success on that
+      exact head. Verify the new Aegis version serves 100% of traffic,
+      `/metrics` responds with a new `process_start_time_seconds`, and
+      `lastUpdatedAt` advances; then rerun the full platform plan and require no
+      changes.
 - [ ] Use `CLOUD_LOGGING_ONLY` unless a retained log bucket exists.
 
 ## 5. IAM ordering + dependencies

@@ -238,6 +238,49 @@ const PR_1600_CLEAN_CLAUDE_REVIEW = {
   ].join("\n"),
 };
 
+// Verbatim REST issuecomment 5278516901 from PR #1825. This newer Claude
+// layout stays fail closed through its body digest and exact review binding.
+const PR_1825_CLEAN_CLAUDE_REVIEW = {
+  id: 5278516901,
+  html_url:
+    "https://github.com/mento-protocol/monitoring-monorepo/pull/1825#issuecomment-5278516901",
+  created_at: "2026-08-13T09:01:00Z",
+  updated_at: "2026-08-13T09:01:00Z",
+  user: { login: "claude[bot]", type: "Bot" },
+  body: [
+    "**Claude finished @chapati23's task in 1m 37s** —— [View job](https://github.com/mento-protocol/monitoring-monorepo/actions/runs/31686745270)",
+    "",
+    "---",
+    "### Claude finished @chapati23's task",
+    "",
+    "- [x] Gather context (diff, AGENTS.md rules, related files)",
+    "- [x] Understand the request (code review)",
+    "- [x] Review Metrics Bridge policy/poller/decision-package changes",
+    "- [x] Review Terraform rollout revert",
+    "- [x] Review docs/ADR updates",
+    "- [x] Review test coverage changes",
+    "- [x] Post findings",
+    "",
+    "### Verdict: LGTM",
+    "",
+    "Clean, well-scoped cutover completion. Verified the schema, runtime, Terraform, and docs are all internally consistent — no dangling references to the removed shim anywhere in the repo.",
+    "",
+    "### What I checked",
+    "",
+    "1. **Schema (`metrics-bridge/src/peg/policy.ts`)** — `listingAbsentConsecutiveChecks` is now a required (not `.optional()`) field on `PegSourcePolicySchema`, and `requireListingThresholds`/`effectiveListingAbsentConsecutiveChecks`/the two legacy constants are fully removed, not just unreferenced. `staleAfterSeconds` cross-field validation reads the field directly now, no fallback path.",
+    "2. **Poller/decision-packages** — both call sites (`poller.ts`, `decision-packages.ts`) read `input.policy.listingAbsentConsecutiveChecks` directly; the `effectiveListingAbsentConsecutiveChecks` import is gone from both.",
+    '3. **Production policy data** — checked `alerts/rules/peg-thresholds.json` directly: `active` declares the threshold on all 3 sources, `previous` is `null`. This matches the "active-only" state the schema now enforces, so the stricter validation doesn\'t break the live policy artifact.',
+    "4. **Repo-wide grep** for the removed symbols (`effectiveListingAbsentConsecutiveChecks`, `PEG_POLICY_INITIAL_LISTING_ABSENT_CONSECUTIVE_CHECKS`, `PEG_POLICY_LEGACY_LISTING_ABSENT_CONSECUTIVE_CHECKS_VERSION`, `requireListingThresholds`) — zero remaining references outside history/docs. The one remaining hit for the legacy version string (`europ-2026-07-22-v1-a69b99...`) is an inert literal in `peg-policy.test.ts` (version-tamper test fixture) and the ADR amendment — not a live code path.",
+    "5. **Terraform** — `metrics_bridge_template_rollout_active` reverted `true → false` and `template[0].revision` re-added to `ignore_changes`, matching the PR's claim that the platform apply already completed and this is a source-only stabilization (no apply required). Consistent with the documented `0 add / 1 change / 0 destroy` apply.",
+    '6. **Tests** — `peg-policy.test.ts` replaces the legacy-acceptance test with a straightforward "missing threshold rejects" test for both `active` and `previous` slots, plus a new version-tamper test (digest mismatch) that was' +
+      "n't there before — net-positive coverage, not just deletion. `peg-decision-packages.test.ts` and `peg-runtime.test.ts` updates track the schema change correctly (no more synthetic `previous: null` override needed in the runtime test fixture since the checked-in policy already reflects that state).",
+    '7. **Docs/ADRs** — followed the repo\'s ADR-amendment convention (append an "Amendment" section, don\'t rewrite history) correctly in `0044-peg-thresholds-gated-rules-plane.md`. Runbook updates (`peg-monitoring.md`, `deployment.md`, `terraform.md`, onboarding doc) consistently replace "pending apply" language with the completed generation/revision proof and remove the now-obsolete "predecessor cleanup deployment proof" runbook section.',
+    "",
+    "No inline findings — nothing rose to a P1/P2/P3 flag. This is a straightforward, correctly-sequenced follow-through on a previously-planned migration (issue #1750), not new architecture, so no new ADR is needed per [`docs/pr-checklists/architecture-decisions.md`](docs/pr-checklists/architecture-decisions.md).",
+    " · [branch](https://github.com/mento-protocol/monitoring-monorepo/tree/codex/remove-retired-peg-policy-shim)",
+  ].join("\n"),
+};
+
 function normalizedReadyStateForClaudeReview(
   comment,
   {
@@ -1103,6 +1146,82 @@ test("accepts only the exact frozen PR #1600 free-form LGTM review", () => {
   const wrongHeadFeedbackState = summarizeFeedbackState(wrongHeadReadyState);
   assertEqual(wrongHeadFeedbackState.ready, false);
   assertEqual(wrongHeadFeedbackState.counts.blockingTopLevelBotComments, 1);
+});
+
+test("accepts only the exact frozen PR #1825 Claude task review", () => {
+  assertEqual(
+    createHash("sha256")
+      .update(PR_1825_CLEAN_CLAUDE_REVIEW.body, "utf8")
+      .digest("hex"),
+    "17628badc56cb6e53b77c559425020b839847e66357614e65a9707f8bf6d7ee9",
+  );
+  const options = {
+    number: 1825,
+    title: "fix(peg): finish the active-only policy cutover",
+    headRefOid: "5ce1cad0371551aff0e8b68867a29bb5d2736bf4",
+    headUpdatedAt: "2026-08-13T09:00:00Z",
+    reactionCreatedAt: "2026-08-13T09:10:00Z",
+  };
+  const normalizedReadyState = normalizedReadyStateForClaudeReview(
+    PR_1825_CLEAN_CLAUDE_REVIEW,
+    options,
+  );
+  const feedbackState = summarizeFeedbackState(normalizedReadyState);
+
+  assertEqual(normalizedReadyState.ready, true);
+  assertEqual(feedbackState.ready, normalizedReadyState.required.ready);
+  assertEqual(feedbackState.counts.blockingTopLevelBotComments, 0);
+  assertEqual(feedbackState.counts.blockingFindings, 0);
+
+  for (const [label, comment, mutatedOptions] of [
+    [
+      "body byte tamper",
+      {
+        ...PR_1825_CLEAN_CLAUDE_REVIEW,
+        body: `${PR_1825_CLEAN_CLAUDE_REVIEW.body}\n`,
+      },
+      options,
+    ],
+    [
+      "line-ending tamper",
+      {
+        ...PR_1825_CLEAN_CLAUDE_REVIEW,
+        body: PR_1825_CLEAN_CLAUDE_REVIEW.body.replaceAll("\n", "\r\n"),
+      },
+      options,
+    ],
+    [
+      "author tamper",
+      {
+        ...PR_1825_CLEAN_CLAUDE_REVIEW,
+        user: { login: "claude", type: "Bot" },
+      },
+      options,
+    ],
+    [
+      "comment ID tamper",
+      { ...PR_1825_CLEAN_CLAUDE_REVIEW, id: 5278516902 },
+      options,
+    ],
+    ["PR tamper", PR_1825_CLEAN_CLAUDE_REVIEW, { ...options, number: 1826 }],
+    [
+      "head tamper",
+      PR_1825_CLEAN_CLAUDE_REVIEW,
+      { ...options, headRefOid: "b".repeat(40) },
+    ],
+  ]) {
+    const mutatedReadyState = normalizedReadyStateForClaudeReview(
+      comment,
+      mutatedOptions,
+    );
+    const mutatedFeedbackState = summarizeFeedbackState(mutatedReadyState);
+    assertEqual(
+      mutatedFeedbackState.ready,
+      false,
+      `${label}: expected exact compatibility binding to fail closed`,
+    );
+    assertEqual(mutatedFeedbackState.counts.blockingTopLevelBotComments, 1);
+  }
 });
 
 test("fails closed on single-field PR #1544 Overall-verdict mutations", () => {
