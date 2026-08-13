@@ -229,6 +229,14 @@ function isActionableReviewBotComment(comment, pr) {
   if (!isReviewBotComment(comment)) return false;
   if (claudeReview.isClaudeLgtmReview(comment))
     return !isExplicitlyCleanClaudeReview(comment, pr);
+  const rawBody = String(comment.body ?? "");
+  if (
+    claudeReview.matchesCleanReviewCompatibilityRegistry(comment, pr, rawBody)
+  )
+    return false;
+  const parsedOverallClaudeReview =
+    claudeReview.parseExplicitlyCleanOverallClaudeReview(comment, pr);
+  if (parsedOverallClaudeReview?.usesNewTerminal) return false;
   const overallClaudeReview = claudeReview.classifyOverallClaudeReview(
     comment,
     pr,

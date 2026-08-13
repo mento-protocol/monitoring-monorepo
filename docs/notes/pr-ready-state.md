@@ -104,15 +104,23 @@ terminal state so late feedback is not missed.
 
 ### Bounded clean-Claude protocol
 
-`pr:feedback-state` accepts a clean verdict from Claude only through a bounded
-parser over registered comment shapes. Anything ambiguous or unregistered fails
-closed: unknown prose, Markdown or HTML syntax, hedging, negation, malformed
-headings, and mixed clean/actionable items stay blocking. A small compatibility
-registry holds exact observed payloads, each bound to its Claude author, PR
-number, comment ID, head SHA, and a digest of the untrimmed raw body, so any
-body or binding change — including line endings — blocks again. The exact
-grammar and registry live in `scripts/pr-feedback-state-claude.mjs`; do not
-broaden them to accept a new title or checklist subject.
+`pr:feedback-state` accepts a clean Claude verdict only through a bounded
+registered shape or an exact legacy compatibility entry. Registered shapes have
+an explicit heading, checklist order and item grammar, verdict, summary,
+verification-note sequence, optional validation-note section, and terminal
+clean line. The exact terminal is authoritative after that structure validates.
+The gate does not reinterpret the report's narrative prose: Claude's exact
+`LGTM` verdict and exact clean terminal own that meaning after author and
+structure validation. Markdown or HTML syntax, malformed headings, unknown
+terminals, and trailing text stay blocking.
+
+The compatibility registry is only for older free-form or retired shapes that
+cannot meet a current registered grammar. Each entry binds the untrimmed raw
+body digest to its Claude author, PR number, comment ID, and head SHA, so any
+body or binding change — including line endings — blocks again. The grammar and
+registry live in `scripts/pr-feedback-state-claude.mjs`; add a new registered
+shape when the structure is safe and reusable, and use a compatibility entry
+only for a frozen legacy payload.
 
 ## Expected CLI contract
 
