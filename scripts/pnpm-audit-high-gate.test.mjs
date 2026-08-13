@@ -124,6 +124,47 @@ test("rejects unrelated high advisories", () => {
   assert(stderr.includes("example@1.0.0"), `stderr: ${stderr}`);
 });
 
+test("excepts the unpatched extract-zip advisory only on LHCI toolchain paths", () => {
+  const { exitCode, stderr } = run({
+    advisories: {
+      789: {
+        module_name: "extract-zip",
+        severity: "high",
+        github_advisory_id: "GHSA-jmr9-qjv8-65gv",
+        findings: [
+          {
+            version: "2.0.1",
+            paths: [
+              "ui-dashboard>@lhci/cli>lighthouse>puppeteer-core>@puppeteer/browsers>extract-zip",
+            ],
+          },
+        ],
+      },
+    },
+  });
+  assert(exitCode === 0, `expected exit 0, got ${exitCode}: ${stderr}`);
+});
+
+test("the same advisory on a non-toolchain path still fails the gate", () => {
+  const { exitCode, stderr } = run({
+    advisories: {
+      790: {
+        module_name: "extract-zip",
+        severity: "high",
+        github_advisory_id: "GHSA-jmr9-qjv8-65gv",
+        findings: [
+          {
+            version: "2.0.1",
+            paths: ["some-service>unzip-helper>extract-zip"],
+          },
+        ],
+      },
+    },
+  });
+  assert(exitCode !== 0, "expected non-zero exit");
+  assert(stderr.includes("extract-zip@2.0.1"), `stderr: ${stderr}`);
+});
+
 test("fails closed on pnpm audit error payloads", () => {
   const { exitCode, stderr } = run({
     error: { message: "registry unavailable" },

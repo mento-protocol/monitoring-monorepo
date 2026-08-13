@@ -14,6 +14,40 @@ import { spawnSync } from "node:child_process";
 const HIGH_SEVERITIES = new Set(["high", "critical"]);
 
 /**
+ * Path-scoped advisory exceptions. pnpm's own ignoreGhsas is advisory-wide,
+ * which would also mask a FUTURE production dependency picking up the same
+ * vulnerable package — so exceptions live here instead, and a finding is
+ * excepted only when its dependency path matches the allowed route. Any
+ * other route to the same advisory still fails the gate.
+ *
+ * @type {Record<string, {pathPattern: RegExp; reason: string}>}
+ */
+const ADVISORY_EXCEPTIONS = {
+  // extract-zip <= 2.0.1 symlink path traversal; NO patched release exists.
+  // Reached only through the Lighthouse CI toolchain, which extracts Chrome
+  // archives from Google's CDN in dev/CI — never untrusted zips at runtime.
+  // Remove the moment upstream ships a fix.
+  "GHSA-jmr9-qjv8-65gv": {
+    pathPattern: /(@lhci\/cli|lighthouse|puppeteer)/,
+    reason:
+      "unpatched upstream; only reachable via the LHCI/puppeteer toolchain",
+  },
+};
+
+/**
+ * @param {string[]} ids
+ * @param {string} path
+ * @returns {boolean}
+ */
+function isExceptedFinding(ids, path) {
+  for (const id of ids) {
+    const exception = ADVISORY_EXCEPTIONS[id];
+    if (exception && exception.pathPattern.test(path)) return true;
+  }
+  return false;
+}
+
+/**
  * @param {string} message
  * @returns {never}
  */
@@ -177,6 +211,7 @@ function evaluateReport(report) {
     const severity = advisory.severity ?? "unknown-severity";
 
     for (const { finding, path } of findingPaths(advisory)) {
+      if (isExceptedFinding(ids, path)) continue;
       const version = finding.version ?? "unknown-version";
       const summary = `${id} ${severity} ${moduleName}@${version} via ${path}`;
       disallowed.push(summary);

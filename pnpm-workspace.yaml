@@ -161,10 +161,3 @@ allowBuilds:
   "rescript": true
   "sharp": false
   "unrs-resolver": false
-auditConfig:
-  # GHSA-jmr9-qjv8-65gv (extract-zip <=2.0.1, symlink path traversal) has NO
-  # patched release. Reached only via @lhci/cli -> lighthouse -> puppeteer,
-  # which extract Chrome archives from Google's CDN in dev/CI — never
-  # untrusted zips at runtime. Remove the moment upstream ships a fix.
-  ignoreGhsas:
-    - GHSA-jmr9-qjv8-65gv
