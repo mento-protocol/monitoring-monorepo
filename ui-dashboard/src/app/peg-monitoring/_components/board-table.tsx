@@ -50,7 +50,10 @@ export function BoardTable({
   const rows = sortBoardRows(presentation.assets);
   return (
     <div data-testid="peg-board" className="border border-border">
-      <div className="overflow-x-auto">
+      {/* `relative` contains absolutely-positioned descendants (the sr-only
+          column label, rail markers) so they clip with the scroller instead of
+          widening the document on narrow viewports. */}
+      <div className="relative overflow-x-auto">
         {/* The layout is a CSS grid, so the table semantics screen readers
             need for column/cell association are declared via ARIA roles; the
             expanded panel participates as a full-width row (aria-colspan). */}
