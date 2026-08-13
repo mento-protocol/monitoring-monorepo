@@ -662,13 +662,43 @@ gate_run_ensure_marker() {
 # this path can signal, and duplicates cost nothing: the capture records a PID
 # once. Where neither inherited handle is readable the argv tag stands alone,
 # which is the pre-existing behaviour.
+# A token names processes (through a pgrep pattern) and files (holder.*,
+# captured.*, condemned.d/*), and on a shared lock root it arrives from
+# records other users can write. Only the gate-generated shape is accepted
+# where one is read back: an alphanumeric start, then hostname characters,
+# digits, dots and dashes. No slash can pass, so no derived path can leave
+# the lock root; no leading dash, so no value can read as an option.
+gate_lock_token_is_wellformed() {
+  local token="$1"
+  [[ "$token" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$ ]]
+}
+
+# ERE-escape a token for pgrep: validation keeps a token benign as a path,
+# but hostname dots would still match any character as a pattern, and only
+# escaping makes the match literal.
+gate_lock_token_pattern() {
+  printf '%s' "$1" | sed 's/[][\.*^$+?(){}|\\]/\\&/g' || true
+}
+
 gate_run_tagged_pids() {
   local token="$1"
   local environ pid marker found status
+  # A token read back from a lock record names processes (through this
+  # pattern) and files (holder.*), and on a shared root it can be another
+  # user's writing. One that does not have the gate-generated shape is never
+  # matched with: a crafted '.*' would classify a stranger's processes as
+  # remnants, and this path signals what it matches. Emitting the scan-error
+  # sentinel keeps the obligation open and fails the run closed at the bound
+  # instead.
+  if ! gate_lock_token_is_wellformed "$token"; then
+    echo "error: malformed run token in a lock record; refusing to match processes with it." >&2
+    printf '%s\n' "$gate_drain_scan_error"
+    return 0
+  fi
   # A scan that failed is not a scan that found nothing. `pgrep` exits 1 for no
   # match and above that for a real failure, and reading the second as the first
   # would discharge an obligation on the strength of a question never answered.
-  found="$(pgrep -f "agentqg:${token}" 2>/dev/null)" && status=0 || status=$?
+  found="$(pgrep -f "agentqg:$(gate_lock_token_pattern "$token")" 2>/dev/null)" && status=0 || status=$?
   [[ "$status" -le 1 ]] || printf '%s\n' "$gate_drain_scan_error"
   [[ -z "$found" ]] || printf '%s\n' "$found"
   if [[ -d /proc ]]; then
@@ -677,7 +707,7 @@ gate_run_tagged_pids() {
       # ours: the environment of anything this run started is readable by it.
       # So this skip is a scope, not a swallowed error.
       [[ -r "$environ" ]] || continue
-      grep -qa "AGENTQG_RUN=agentqg:${token}" "$environ" 2>/dev/null || continue
+      grep -qaF "AGENTQG_RUN=agentqg:${token}" "$environ" 2>/dev/null || continue
       pid="${environ#/proc/}"
       printf '%s\n' "${pid%/environ}"
     done
@@ -823,6 +853,15 @@ drain_condemned_runs() {
         entry_token_value="${claimed##*/}"
         entry_token_value="${entry_token_value%.draining."$$"}"
       fi
+      if ! gate_lock_token_is_wellformed "$entry_token_value"; then
+        # On a shared lock root this is a crafted or corrupt record. Guessing
+        # what it binds could match a stranger's processes; discarding it
+        # could discharge a real obligation. Refusing to run is the only move
+        # that does neither.
+        echo "error: obligation record ${claimed} names a malformed run token." >&2
+        echo "Nothing has been executed. Inspect and remove that record, then re-run." >&2
+        exit 2
+      fi
       drain_condemned_run_commands "$entry_token_value"
       # Removed only here, with every process confirmed gone, and by a name
       # only this drainer can have created. A drain that cannot confirm exits
@@ -866,8 +905,19 @@ gate_lock_test_crash() {
 resolve_gate_lock_root() {
   local candidates=()
   local candidate
-  [[ -n "${AGENT_QUALITY_GATE_LOCK_DIR:-}" ]] &&
-    candidates+=("$AGENT_QUALITY_GATE_LOCK_DIR")
+  if [[ -n "${AGENT_QUALITY_GATE_LOCK_DIR:-}" ]]; then
+    # An explicit lock directory is a coordination contract, not a
+    # preference: runs configured to share it MUST share it. Falling back
+    # when it is unusable would quietly split them onto separate locks — the
+    # exact overlap this lock exists to prevent — so the override resolves
+    # to itself or the run fails closed.
+    candidate="$AGENT_QUALITY_GATE_LOCK_DIR"
+    if mkdir -p "$candidate" 2>/dev/null && [[ -w "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+    return 1
+  fi
   [[ -n "${HOME:-}" ]] && candidates+=("$HOME/.cache/agent-quality-gate")
   # Both fallbacks are per-user, so by default no two users share a lock. The
   # explicit override can point anywhere, including a directory two users
@@ -1525,6 +1575,12 @@ acquire_gate_run_lock() {
     elif [[ -n "$owner_host" && "$owner_host" != "$this_host" ]]; then
       # Only reachable if the lock root is on shared storage. Another host's
       # PIDs mean nothing here, so wait it out rather than guess.
+      :
+    elif ! gate_lock_token_is_wellformed "$owner_token_value"; then
+      # A token this gate would never generate. Reclaiming would later drain
+      # by that token — matching processes with a value another writer chose
+      # — so the holder is assumed live and waited out; the timeout fails
+      # closed with the holder line naming the record.
       :
     elif ! gate_lock_holder_is_live "$owner_pid" "$owner_start"; then
       if kill -0 "$owner_pid" 2>/dev/null; then
