@@ -957,7 +957,14 @@ jobs:
     needs: changes
     if: needs.changes.outputs.rootScripts == 'true'
     runs-on: blacksmith-2vcpu-ubuntu-2404
-    timeout-minutes: 5
+    # Measured on this runner: the gate routing suite was 134s of the job
+    # before any lock work and 193s after, putting it at 253s against a 300s
+    # cap — which cancelled this job mid-suite twice at 5. The lock cases have
+    # since roughly doubled as review added interleavings, each spending real
+    # seconds asserting that runs queue instead of racing; shortening them
+    # stops the assertions binding. 15 leaves room for that growth rather than
+    # tracking it, since an unused cap costs nothing.
+    timeout-minutes: 15
     permissions:
       checks: write
       contents: read

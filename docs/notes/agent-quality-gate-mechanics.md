@@ -3,7 +3,7 @@ title: Agent Quality Gate — Mechanics
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-29
+last_verified: 2026-08-12
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -172,6 +172,421 @@ heredocs and here-strings are fine, a redirection from a file is not. Editing it
 to need any of those fails the check with an explanation; change the probe in the
 same PR or keep the classifier free of them.
 
+### Scheduling contract (Refs #1802)
+
+The gate owns the machine while it runs. Two rules make that true, and both
+exist because contention — not flakiness — produced the failures in issue
+#1802.
+
+**One `--run` gate at a time, machine-wide.** `--run` takes a mkdir lock
+(`$HOME/.cache/agent-quality-gate/run.lock`, falling back to
+`$TMPDIR/agent-quality-gate-<uid>`; override with
+`AGENT_QUALITY_GATE_LOCK_DIR`) before it executes anything, and releases it on
+exit. `mkdir(2)`, `link(2)` and `rename(2)` are the primitives because macOS
+has no `flock(1)` and the repo's floor is Bash 3.2. Each is doing one job:
+`mkdir` creates the lock, `link` publishes a finished owner record and refuses
+an occupied path, and `rename` takes a record away — atomically, with the
+source vanishing, so whoever arrives second fails with `ENOENT`. Neither
+`link` nor `rename` is ever applied to the lock _directory_: `mv src dir`
+moves `src` _inside_ an existing `dir` instead of failing, so a rename could
+never be a conditional claim there. A second run prints the holder's PID,
+host, and worktree, then waits — bounded by `--lock-wait` / `AGENT_QUALITY_GATE_LOCK_WAIT_SECONDS`,
+1800 seconds by default — and exits 2 naming that holder if the wait runs out.
+Nothing that will not execute mapped commands ever competes for the lock: a dry
+run, a `--skip-if-fresh` cache hit, and a package-script refusal all exit
+before it. After waiting, a `--skip-if-fresh` run re-checks freshness, so the
+pre-push hook that queued behind a manual warm-up run reuses that run's stamp
+instead of repeating its work.
+
+The invariant the lock keeps is: **at every instant at most one process
+believes it holds it, and no waiter ever removes or renames another run's
+lock.** Three rules carry that. A holder is made in two atomic steps — win
+`mkdir` on the lock path, then build the record in a private file and `link`
+it into place — so a creator descheduled between them finds its publish
+refused and queues instead of running beside whoever took over. Publishing
+whole is what keeps that check honest: a reader never sees a half-written
+record, and a record that _is_ half-written could only have come from a run
+killed mid-write, which is why the `token` field is written last and a record
+without one counts as no record at all — reclaimable after the grace, PID
+field and all, because nothing in an unfinished record can be trusted. A
+waiter that judges a lock stale takes
+that record away by rename before it may write its own, and exactly one waiter
+can win a given record because the source vanishes with the rename; it then
+**re-reads what it took and proceeds only if it is still the identity it
+judged**, because a verdict formed before winning is worthless. A record taken
+by mistake goes back through `ln`, which refuses an occupied path, so a record
+written in the meantime is never clobbered. Nothing renames or deletes a lock
+directory except the run that owns it.
+
+Liveness is an identity check, not a PID check. `kill -0` succeeds on whatever
+inherited a dead holder's PID, and a recycled PID would make every later run
+wait on an unrelated process until `--lock-wait` expired — the opposite of
+unattended recovery. So the owner record stores the kernel's own start-time
+string for the holder (`ps -o lstart=`), compared verbatim: same PID and same
+start string means the holder, same PID with a different start string means
+the PID was reused and the lock is stale. Where no start time is available on
+either side — a sandbox without `ps`, a lock written by an older gate — this
+falls back to PID existence, which errs toward waiting rather than evicting.
+
+**An identity that cannot be read is not an identity that matches**, and which
+way "cannot read" should fall depends on what the answer authorises. Three
+places ask whether a PID is still the process that recorded itself — the wait
+loop's verdict, the re-read after a reclaim wins a record, and remnant
+evaluation — and for all three the conservative answer is _live_, because it
+means leave the lock alone. The drain asks the opposite question: not "may I
+leave this alone" but "may I kill this". There an unreadable identity must mean
+**never signal**, or an entry recorded without one would authorise killing
+whatever inherited its PID. So the drain signals only when the recorded and
+current identities are both present and equal; an entry it cannot verify is
+skipped, named, and still counts as outstanding, so the drain keeps waiting on
+it and fails closed at the bound rather than calling the run clear. That trade
+is deliberate — an orphan whose identity read keeps failing is never killed and
+holds the gate at exit 2 instead, because a run that refuses to start is
+recoverable and a stranger's killed process is not. A capture drops entries
+whose identity read came back empty, since the process was already gone, and a
+host with no identity source at all records `<no-identity-source>` — the one
+case that still signals on PID alone, because nothing better exists there.
+
+A killed holder cannot release its own lock, so recovery is explicit rather
+than time-based: a waiter that finds the recorded holder gone takes the record
+away and claims. `kill -9` on a gate run therefore costs the next run one line
+of output, never manual cleanup, and there is no state a signal can leave that
+needs a hand: the temp path a reclaim renames into is registered with the exit
+trap **before** the rename creates it, and cleanup restores rather than deletes,
+so an interrupted reclaim puts the record back exactly as it found it.
+
+#### Crash points
+
+A signal can land between any two of the filesystem operations above, and a
+`kill -9` skips the exit trap entirely, so the safe-state argument has to be
+made per boundary rather than per function. The boundaries are finite; this is
+all of them. Safe means: at most one process believes it holds the lock, no
+record naming a live holder is invisible to the next reader, and no state
+requires manual cleanup.
+
+| Crash lands                                                                       | State left behind                                                                                                                   | Next run                                                                                                                                    |
+| --------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| before `mkdir run.lock`                                                           | nothing                                                                                                                             | takes the lock normally                                                                                                                     |
+| after `mkdir`, before the record is staged                                        | lock directory, no record                                                                                                           | no complete record, so after the grace it publishes its own                                                                                 |
+| after staging, before `link`                                                      | `owner.claiming.<pid>` only                                                                                                         | same as above; the staged file is private and inert, and goes when the lock does                                                            |
+| after `link`, before the staged copy is unlinked                                  | complete record plus an inert `owner.claiming.<pid>`                                                                                | reads the record; reclaims it if its holder is gone                                                                                         |
+| while the holder runs mapped commands                                             | complete record naming a dead shell — and its command still running, because mapped commands are backgrounded and outlive the shell | the next run finds those commands by the dead run's token, stops them, and waits until they are gone before executing anything              |
+| while the holder runs mapped commands, with its watchdog descheduled or suspended | same, and nothing will clean up on its own                                                                                          | identical: the check looks for the processes rather than waiting for the watchdog, so a watchdog that never runs changes nothing            |
+| after `mv owner → owner.reclaiming.<pid>`, before the taken record is judged      | no `owner`, one remnant                                                                                                             | reads the remnant first: a live identity is linked back as the record, a spent one is discarded                                             |
+| after judging a taken record stale, before the new record is published            | no `owner`, no remnant                                                                                                              | no complete record, so after the grace it publishes its own                                                                                 |
+| after a taken record is judged NOT stale, before it is put back                   | same as the take boundary above                                                                                                     | same as the take boundary above                                                                                                             |
+| during `rm -rf` in release                                                        | lock directory partially gone                                                                                                       | either it is absent (take it) or record-less (grace, then publish)                                                                          |
+| after noting a condemned run, before publishing the replacement                   | the obligation names a run whose record is still in place                                                                           | reclaims that record again and notes the same token twice; draining a token whose processes are gone is a no-op                             |
+| after publishing a replacement, before draining what it condemned                 | the obligation names a run nobody is clearing                                                                                       | inherits the whole directory, not just the holder it reclaimed, so a chain of crashes loses nothing                                         |
+| after capturing a dead run's process tree, before the first signal                | the captured set is on disk, nothing has been signalled yet                                                                         | re-reads it, unions it with its own tag scan, and confirms every entry — a set naming already-dead PIDs costs identity-checked no-op checks |
+| mid-drain, after the TERM pass has killed the tag carrier                         | no tagged process remains, but an untagged descendant may still run                                                                 | inherits the persisted captured set, so it looks for those PIDs rather than for a tag nobody carries any more                               |
+
+#### Where evidence is destroyed
+
+The crash-point table above asks what a crash leaves behind. This one asks the
+question that produced most of the findings on this path: **every place that
+destroys or consumes evidence, and why the obligations derived from it are
+already durable when the destruction runs.** Round after round the same shape
+turned up — evidence thrown away, or held only in memory, before the obligation
+it implied had been written down — so the sites are enumerated here rather than
+rediscovered one at a time.
+
+| Destruction                                             | What derived from it                         | Why it is safe before the delete                                                                                           |
+| ------------------------------------------------------- | -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| remnant deleted after a successful `ln` restore         | the record itself                            | not destroyed — the content is now the owner record at the canonical path                                                  |
+| remnant deleted because its holder is verified dead     | that run's commands, named only by its token | the token is published under `condemned.d/` first; a token for a run with nothing alive costs one drain that finds nothing |
+| taken record dropped because `ln` could not put it back | same                                         | same: the token is published under `condemned.d/` before the copy goes                                                     |
+| taken record deleted after a confirmed-stale verdict    | same                                         | `record_condemned_run` runs immediately before it, inside the election                                                     |
+| `condemned.d/<token>` removed                           | that run's commands                          | removed only after its drain confirmed those processes gone; a drain that cannot confirm exits instead                     |
+| `captured.<token>` removed after a drain                | that run's process tree                      | removed only once every captured PID is gone or is somebody else now                                                       |
+| `captured.<token>` removed when nothing was captured    | nothing                                      | reached only when the persisted file and the tag scan are both empty, so there is nothing to hand on                       |
+| lock directory removed at release                       | this run's own commands                      | the exit trap tears down its commands before release, and release only deletes a record that still names this run          |
+| private staged/claim files removed                      | nothing                                      | never published; no other process reads or expects them                                                                    |
+
+Two properties make the table checkable rather than a promise. Obligations are
+written to the lock **root**, not the lock directory, so releasing a lock never
+takes them with it. And every entry above records before it deletes, which is
+the same ordering the rest of this note argues for: the failure direction of
+writing too early is a redundant no-op, and of writing too late is a run that
+starts beside somebody else's work.
+
+#### The rules the table rests on
+
+Crashes are only half of it. The other half is ordinary interleaving: two runs
+can each hold a verdict formed before the world changed, and act on it after.
+Four rules cover both, and every fix on this path has been an instance of one
+of them.
+
+1. **Every file this path creates carries its creator's PID and is registered
+   with the exit trap before it exists.** Cleanup can then never race its own
+   creation, and never names another run's file.
+2. **A lock with no record is not evidence of an absent holder until the
+   remnants have been read.** A remnant naming a live process is the owner
+   record, misfiled; it gets linked back. Only a remnant whose recorded
+   identity is verified dead may be deleted — and a claim settles remnants
+   immediately before publishing, not once at the top of a poll.
+3. **A verdict is evidence, never authority.** Ownerless, stale, spent-remnant:
+   each is re-checked immediately before the act it authorises, because the
+   gap between deciding and acting is exactly where another run publishes.
+4. **A holder re-reads its own record before executing anything.** Acquiring
+   the lock and reaching the first mapped command are separated by real work.
+   Anything that unseats the record in between — a waiter acting on a stale
+   verdict, a hand-deleted lock — is caught here and the run stops with
+   `this run no longer holds the gate run lock`, having executed nothing.
+5. **A command does not outlive the gate that started it, and the next run
+   proves it rather than assuming it.** Mapped commands run in the background,
+   so a `kill -9` on the gate shell leaves them running while the lock they
+   held becomes reclaimable — exclusion would hold on paper while two runs'
+   commands shared the machine. Two things close that. Every process a run
+   starts for a mapped command carries the run's lock token in its own argv,
+   so it is identifiable from outside by something born with it, with no
+   registry to keep in step and no window where a child exists untracked. And
+   a run that took the lock from a dead holder, before executing anything,
+   looks for processes carrying that holder's token: none means there is
+   nothing to wait for, and any that are there are signalled and then **waited
+   for until they are actually gone**. Killing another run's orphan is
+   deliberate — that run is gone, its work cannot be reported, and leaving it
+   running is the outcome the lock exists to prevent.
+
+   Each command's watchdog also kills its command when it notices its gate has
+   disappeared, which is the quicker path in the ordinary case. It is not the
+   guarantee: a watchdog can be descheduled by the same host pressure that
+   killed the gate, or suspended with the laptop, and a timer sized to it
+   would be waiting on something that may not run.
+   `AGENT_QUALITY_GATE_LOCK_ORPHAN_DRAIN_SECONDS` (120s) bounds the
+   confirmation, not the mechanism: reaching it means commands from a dead run
+   are still alive, and the gate refuses to run rather than start beside them.
+
+6. **An obligation one run owes the next lives on disk, not in a variable.**
+   Taking a lock from a dead holder makes this run responsible for that
+   holder's leftovers, and a process that is itself killed cannot hand a shell
+   variable to its successor. The condemned run's token is written to its own
+   file under `condemned.d/` in the lock **root** — beside the lock, because
+   the lock directory is the thing being reclaimed — before the replacement
+   record is published, and removed only once its processes are confirmed gone.
+   Every run drains the whole directory rather than only the holder it
+   reclaimed, so a chain of crashed reclaimers accumulates obligations instead
+   of dropping them. Written-then-crashed costs a redundant no-op drain; the
+   opposite order costs the overlap, which is why the write comes first.
+
+   One file per outstanding run, not one shared list. A shared list has to be
+   deleted by whoever drains it, and nothing in this shell can establish that
+   every process which opened it by name has finished writing — an appender
+   descheduled between its open and its write would have its line deleted
+   unread, and that line is the only thing naming those commands. With a file
+   each, nobody writes to a published file: it is built under a private
+   `.staging.<pid>` name and moved into place whole, so a reader sees the
+   complete token or no file. The drainer then claims each file by renaming it
+   to `<token>.draining.<pid>` before reading it, which frees the published
+   name at once and means the copy in hand is one nothing can replace —
+   otherwise a second condemnation of the same run could swap the entry between
+   the read and the unlink, and the unlink would delete an obligation nobody
+   had drained. A drainer killed while holding a claimed file leaves it in the
+   directory; the next run reads the token from the file's contents rather than
+   its name, so the suffix costs nothing.
+
+   The scan repeats until a pass finds nothing, because obligations are still
+   being published while the drain runs: a waiter condemning some third run's
+   remnant does not wait for the lock. The gap between that last empty pass and
+   the first mapped command is closed by asking ownership again rather than by
+   synchronising the publishers. Every publisher derives an obligation from a
+   record on disk, and while a run holds an untouched lock there is no such
+   record to derive from — a remnant under this lock exists only if this run's
+   own record was renamed away, and a run condemning what it took has taken
+   ours. So either nothing could have been published after the last empty scan,
+   or the record no longer names us and the run stops with exit 2. What can
+   still land is a duplicate of an obligation this drain already discharged,
+   published by a waiter that was mid-flight over a remnant this run had
+   already condemned itself; its processes are gone, and draining a token twice
+   is a no-op.
+
+   The same applies to the captured tree, one level down. A drain's first pass
+   kills the tag carrier, so from that moment the only record of what it was
+   about to kill is in its own memory — and a successor searching for the tag
+   would find nothing and read that as nothing left to do. The captured set is
+   therefore written to `captured.<token>` beside the lock **before the first
+   signal**, refreshed after the re-capture pass, and removed only once every
+   process in it is confirmed gone. A successor unions that file with its own
+   tag scan.
+
+   **A write that fails is not a write that crashed.** Crashing part way still
+   leaves the record the obligation was derived from, because that record is
+   deleted only once the write has returned, so the next run's recovery
+   re-derives it; the write failing while the caller carries on leaves nothing
+   anywhere. So it cannot be swallowed the way a best-effort write usually is.
+   The reachable case is not a full disk but a shared lock root, where the
+   directory belongs to another user. Both writes report failure and both
+   callers stop: a reclaimer that cannot condemn puts the record back where it
+   found it and exits rather than taking over, and a drain that cannot persist
+   its capture refuses to signal — before the first signal, while the tag it
+   would destroy is still the handle on those processes. The one exception is
+   teardown, which is already unwinding: it leaves the record in place, names
+   it, and carries on to release the lock.
+
+   **Unreadable is not empty.** The same shared root that makes a write fail
+   makes a read fail, and treating an unreadable obligation as an absent one is
+   how a run comes to execute beside commands it never drained. An obligation
+   file, or the directory holding them, that exists but cannot be read stops
+   the run and is named in the output.
+
+   **Obligation evidence is never rewritten in place.** A `>` redirection
+   truncates the file the moment it opens, so a rewrite has a window in which
+   the copy on disk is empty — and these files exist precisely to be read by
+   whoever comes after a process that died at a bad moment. Both lists are
+   therefore append-only, one short line per write, which is a single write
+   through an append descriptor and so cannot interleave a half line. The
+   readers tolerate duplicates, because re-checking a process that is already
+   gone costs nothing, and skip any line whose PID field is not a number — a
+   torn line should be impossible, and killing a stranger is a worse outcome
+   than missing a survivor the tag scan would find anyway. The census behind
+   that claim: `captured.<token>` is appended to; each `condemned.d/<token>` is written privately and published by rename; the owner
+   record is built in a private per-PID file and published with `ln`, so its
+   one `>` is to something nobody else reads; `owner.reclaiming.<pid>` is
+   created by rename. Nothing under the
+   lock root is rewritten in place.
+
+   The audit that goes with this rule, over the current code: the things that
+   gate a destructive or permissive act are the staleness verdict
+   (re-validated under the election immediately before acting, and the act
+   itself is a single atomic rename, so a crash before it destroys nothing),
+   the taken record (the remnant file _is_ the evidence), the obligation files
+   and the captured set (both persisted, above), the holder's own record
+   (re-read immediately before executing), and the per-run teardown list (its
+   evidence is the tag on the processes themselves). Nothing left on this path
+   decides to destroy or to proceed on the strength of something only one
+   process can see.
+
+7. **Enumerate before signalling, and confirm against what you enumerated.**
+   Only the wrapper carries the tag; its descendants do not. Signalling the
+   tagged process first therefore destroys the one handle to everything under
+   it — a command that ignores `TERM` outlives its wrapper, the next search for
+   the tag comes back empty, and "no tagged process" reads as "nothing
+   running". So the drain walks each tagged wrapper's tree first, recording
+   every PID with its pinned start string, and then judges itself finished
+   only when every process in that captured set is gone. A PID that still
+   exists but no longer matches its recorded start time was reused by someone
+   else; it is left alone and named in the output rather than signalled. The
+   walk repeats on every pass of the drain and stops recording a PID once it
+   has been seen, so the census converges instead of freezing: a command whose
+   `TERM` handler forks a replacement produces a child that did not exist when
+   the first walk ran, and a capture taken once would kill the parent it knew
+   about and leave that child running untagged into the next run.
+
+   Discovery cannot rest on the argv tag alone, because the tag dies with the
+   wrapper. A command that forks a replacement and then **exits** leaves that
+   replacement reparented, untagged, and with no ancestor left to walk down
+   from. So each mapped command starts with two handles its descendants
+   inherit and keep: the run's token in the environment, readable through
+   `/proc/<pid>/environ` where that exists, and an open descriptor on the run's
+   `holder.<token>` marker file, readable through `lsof` where that exists.
+   Both are named by a token unique to one run, so unlike a PID or a process
+   group neither can come to name a stranger. Each drain pass asks all three —
+   argv, environment, descriptor — and captures whatever is new. Where no
+   inherited handle is readable the argv tag stands alone, and a command of
+   that shape can still escape; nothing at this shell's floor closes that.
+
+   Everything a PID authorises is re-checked at the moment it is used, because
+   every one of these answers goes stale. Enumeration and the identity read are
+   two calls with a gap, so a PID recorded from a walk is confirmed to still be
+   one of ours — still carrying a handle, or still a child of the process the
+   walk reached it through — and one that cannot be confirmed is recorded with
+   no identity, which is never signalled and holds the drain open. The census
+   and the signal are separated by the bound and persist checks, so identity is
+   read again immediately before each `kill` rather than trusted from the
+   census. On a host with no identity source at all, a captured PID is signalled
+   only while it still answers to one of the run's handles. And the set that
+   stops a PID being recorded twice is per token, not per run: carried across
+   tokens it would skip a PID that has since been recycled by a process
+   belonging to the next one, recording it under no identity check at all.
+
+   **A scan that failed is not a scan that found nothing.** `pgrep` and `lsof`
+   both exit 1 for "no match" and above that for a real failure, and reading
+   the second as the first would discharge an obligation on the strength of a
+   question that was never answered. A failed scan keeps the drain open exactly
+   as an unverifiable process does, and fails closed at the bound with its own
+   line. Skipping an unreadable `/proc/<pid>/environ` is not that case: it means
+   another user's process, which cannot be one of ours, so it is a scope rather
+   than a swallowed error.
+
+8. **Elapsed time comes from the clock, not from counting sleeps.** A loop that
+   adds its own poll interval per iteration is measuring what it asked for. Any
+   process can be descheduled, suspended, or stopped for longer than it slept —
+   `SIGSTOP`, a laptop lid, a loaded runner — and such a loop resumes believing
+   almost no time has passed. It then outlives the deadline it announced and
+   reports a duration that never happened, which is worse than being late:
+   every wait, drain, and watchdog budget in this path is also the evidence
+   printed when one expires. Each of those loops reads `date +%s` once before
+   it starts and subtracts at the top of every iteration.
+
+Rule 4 is the one that does not depend on getting an interleaving right, and
+it is why the others are allowed to be merely careful: they keep runs from
+tripping over each other, while rule 4 makes any residual displacement a single
+loud abort instead of two runs on one machine. Release stays token-guarded, so
+a run that stops there cannot delete the lock of whoever holds it now.
+
+The self-test sweeps the crash boundaries by killing a run at each named point
+and asserting the next run still reaches its mapped commands and releases the
+lock, and pins the interleavings — two waiters on one stale record, a stalled
+creator, a cached ownerless verdict, and a displaced holder — as separate
+cases. A command that forks a fresh child on every `TERM`, a waiter held under
+`SIGSTOP` past its own budget, and a reclaimer facing an obligation directory it
+cannot write into are pinned there too: the first asserts no forked survivor
+outlives the drain — in two shapes, one where the forking command keeps running
+and one where it exits and orphans its replacement — the second that the
+reported wait matches the wall clock,
+the third that the run exits without executing and leaves the record it was
+about to discard. Unreadable obligation files, an obligation left behind by a
+dead drainer, and one published while a drain is running are pinned alongside
+them. Adding an operation to this path means adding its boundary to the table
+and to that sweep.
+
+A lock with no usable owner record — no file at all, or an unfinished one from
+a run killed mid-write — counts as abandoned after a 30-second grace, measured
+from the waiter's own first sighting. Both halves of publishing a record sit
+inside that same accounting, and a live claimer cannot be condemned by it
+anyway: if its record is discarded while it sleeps, its own `link` fails or
+its read-back mismatches, and it queues rather than runs. The grace path is
+still reachable, so it stays, but it carries no correctness weight; it only
+keeps churn down.
+
+Two escape hatches start immediately: `--no-lock` (or `AGENT_QUALITY_GATE_LOCK=0`),
+and an inherited `AGENT_QUALITY_GATE_LOCK_HELD`, which is how the gate's
+self-test drives the gate against fixture repos from inside a gate run without
+deadlocking behind its own ancestor. The self-test exports
+`AGENT_QUALITY_GATE_LOCK=0` for the same reason: its fixture runs are not this
+machine's gate, and must neither queue behind a real one nor block it.
+
+The pre-push hook reaches neither hatch — it runs a fixed command line and
+Trunk strips the environment those variables would arrive in — so when a hook's
+wait times out, recover in band by warming the stamps first
+(`pnpm agent:quality-gate --run`, which queues behind the holder, or
+`--no-lock` if you accept the contention) and then pushing: the hook's
+`--skip-if-fresh` cache-hits and exits before it ever takes the lock.
+
+**Heavy suites do not share the worker pool.** The quality phase runs in four
+parts: ordered setup prerequisites, the serialized dashboard build/browser
+group, the parallel pool, and an exclusive phase that starts only after the
+pool has drained. `is_quality_exclusive_command` holds that last set. Today it
+is the dashboard's Vitest suite — `pnpm --filter @mento-protocol/ui-dashboard
+test:coverage` and the scoped `vitest related` substitute that can replace it.
+
+The reason, measured on a 12-core mac: that suite forks its own Vitest workers
+across every core, and inside it `browser-api-policy.test.ts` spawns
+`scripts/browser-api-policy-lint-runner.mjs`, a single ESLint program load that
+costs ~17 seconds of CPU whatever else is happening. Wall clock is what moved —
+the same subprocess took ~19s uncontended and 29–38s with a load average around
+30 — so a wall-clock test budget expired while the work itself was unchanged.
+That is starvation, not a flaky assertion, which is why the remedy is to stop
+co-scheduling the suite rather than to widen the budget until the starvation
+stops being visible. The suite's fixture wait now lives in a `beforeAll` sized
+to that measurement, so a slow lint runner reports as a slow lint runner
+instead of as a policy assertion failure in whichever test happened to reach it
+first.
+
+Add to the exclusive set only with a measurement: every entry is wall time the
+pool can no longer overlap. The exclusive phase runs last precisely so cheap
+lint/typecheck feedback still arrives first.
+
 ### Scoped local test runs (Refs #1413)
 
 A per-package quality bundle normally runs `pnpm --filter <pkg> test:coverage`
@@ -218,10 +633,12 @@ replacement provisioner map to
 also executes that shell fixture in CI.
 
 The [PR operating card](pr-operating-card.md#the-loop) owns ordinary gate and
-closeout sequencing. Do not run a dashboard server, browser suite, or second
-gate in the same worktree. Browser tests and size-limit both run `next build`
-and can rewrite `next-env.d.ts`; run focused checks first, then let one gate
-own the mapped batch. For a non-trivial batch, freeze the card's scope baseline
+closeout sequencing. A second `--run` gate no longer needs a convention: the
+run lock above queues it behind the first one, on any worktree. What is still
+yours to avoid is a dashboard server or browser suite you started yourself
+alongside a gate — the lock does not know about those. Browser tests and
+size-limit both run `next build` and can rewrite `next-env.d.ts`; run focused
+checks first, then let one gate own the mapped batch. For a non-trivial batch, freeze the card's scope baseline
 and run autoreview after the gate; after accepted fixes, rerun focused checks
 and autoreview.
 
@@ -473,12 +890,20 @@ generated code, built packages) are invisible to the source fingerprint, so a
 stamp could skip them after their outputs were deleted. The Trunk check, the
 gate self-test, and the advisory ADR reminder also always re-run.
 
-Each mapped command has a watchdog (default 900 seconds; override with
+Each mapped command has a watchdog (default 1500 seconds; override with
 `--command-timeout <n>` or `AGENT_QUALITY_COMMAND_TIMEOUT_SECONDS`). On timeout
 it TERM→KILLs the process tree, reports
 `Command timed out after <n>s: <command>`, and logs durations status `fail`. A
 self-daemonizing child can escape the tree (none do). The timeout never bounds
 the whole run.
+
+That default was 900 until this gate's own self-test became the longest mapped
+command: it runs 525s alone and past 900s inside a full gate run, where it
+competes with everything else on the machine, and most of that time is spent
+asserting that runs queue rather than race — length that cannot be trimmed
+without the assertions ceasing to bind. The cap is a backstop against a hung
+command rather than a performance budget; `durations.jsonl` is where a command
+that has grown too slow gets noticed.
 
 Package-local gate tasks for `lint`, `typecheck`, `knip`, dashboard size-limit,
 local dashboard browser tests, and dashboard React Doctor checks run through
