@@ -51,12 +51,18 @@ import {
   DEFAULT_REPO,
   selectVerdictComment,
 } from "./sentry-triage-project-core.mjs";
-import {
-  DEFER_FAMILY_DUPLICATE,
-  DEFER_FAMILY_HANDLED,
-  DEFER_FAMILY_RECONCILING,
-} from "./sentry-autofix-family.mjs";
+// The decision -> report classifier, shared by the first pass and the second
+// look so both label a stand-down identically (a deferral and a fix_scope skip
+// lift on different events, and send an operator to different remedies).
+import { partitionDecisions } from "./sentry-autofix-decisions.mjs";
 import { resolveFamilies } from "./sentry-autofix-family-resolve.mjs";
+// The bounded second look, extracted so this module stays under the 600-line
+// soft cap: it owns the "the first pass found nothing off a FULL page — what is
+// past the ceiling?" pass, its own ceilings, and the cost arithmetic behind them.
+import {
+  resolveSecondLook,
+  SECOND_LOOK_LIST_ROWS,
+} from "./sentry-autofix-second-look.mjs";
 import {
   defaultRunGh,
   isRateLimitFailure,
@@ -67,17 +73,27 @@ import {
 // The per-stub eligibility layer, extracted so this module stays under the
 // 600-line soft cap: every filter that decides whether ONE stub may start a fix
 // attempt lives there, this module owns the window and the family collapse.
-import { evaluateCandidate, safeShortId } from "./sentry-autofix-candidate.mjs";
+import { evaluateCandidate } from "./sentry-autofix-candidate.mjs";
 
 // The queue-scoping label (AUTOFIX_SELECT_LABEL) lives in the I/O layer beside
 // the queries that use it; the family-collapse project scope
 // (LOCAL_SENTRY_PROJECT) is owned by the extracted resolver
 // (sentry-autofix-family-resolve.mjs); the per-stub filters and the skip reason
-// are owned by sentry-autofix-candidate.mjs.
+// are owned by sentry-autofix-candidate.mjs; the deferral wording and the
+// decision -> report split are owned by sentry-autofix-decisions.mjs.
 
 /** Re-exported from the candidate layer: the selector is still the module the
  * workflow and the suites import this contract from. */
 export { SKIP_FIX_SCOPE_ARCHITECTURAL } from "./sentry-autofix-candidate.mjs";
+
+/** Re-exported from the extracted second-look layer, same reason: the bounded
+ * second look is part of the SELECTION contract and the suite reads its ceilings
+ * from here. Its mechanics live in sentry-autofix-second-look.mjs. */
+export {
+  MAX_SECOND_LOOK_EVALUATIONS,
+  SECOND_LOOK_FAMILY_BUDGETS,
+  SECOND_LOOK_LIST_ROWS,
+} from "./sentry-autofix-second-look.mjs";
 
 export const DEFAULT_CAP = 2;
 
@@ -106,11 +122,11 @@ export const DEFAULT_CAP = 2;
 // because a silent no-op is precisely the failure a "we widened the window"
 // change must not ship as.
 //
-// 200, not 50 (this PR): 50 left 150 rows of a full window unread every run,
-// which — combined with family deferral writing nothing — is the starvation the
-// second look below exists to break. The cost is bounded and paid for: the
-// select job's `timeout-minutes` is 25, and 2 + 2×200 + 120 ≈ 522 serial `gh`
-// calls at a pessimistic ~1 s/call is ~9 minutes.
+// 200, not 50: 50 left 150 rows of a full window unread every run, which —
+// combined with family deferral writing nothing — is the starvation
+// sentry-autofix-second-look.mjs exists to break. The cost is bounded and paid
+// for: the select job's `timeout-minutes` is 25, and 2 + 2×200 + 120 ≈ 522
+// serial `gh` calls at a pessimistic ~1 s/call is ~9 minutes.
 export const MAX_CANDIDATE_EVALUATIONS = 200;
 
 /**
@@ -128,64 +144,6 @@ export function windowCeilingWarning(
   if (!(evaluations > listLimit)) return null;
   return `warn: MAX_CANDIDATE_EVALUATIONS (${evaluations}) exceeds LIST_LIMIT (${listLimit}), which the API applies FIRST — the window is really ${listLimit} and raising the evaluation cap alone does nothing. Raise LIST_LIMIT too.\n`;
 }
-
-// ---------------------------------------------------------------------------
-// Bounded second look
-// ---------------------------------------------------------------------------
-//
-// The starvation this exists to break: every stub inside the window is a
-// deferred family member, so the run selects NOTHING, writes NOTHING, and the
-// next run reads the SAME window and repeats — forever. Deferral is by design
-// state-free, so nothing ages out; a selectable stub sitting one row past the
-// window is never evaluated, at any point, ever.
-//
-// The second look fires ONLY on that exact signature: the first pass produced
-// zero matrix entries AND the list came back FULL (rawCount >= LIST_LIMIT, so
-// rows beyond it may exist). A healthy run — anything selected — never reaches
-// it and pays nothing. It is not a retry and not a widening: it reads the NEXT
-// rows once, with its own hard ceilings, and reports both that it ran and any
-// truncation of its own.
-//
-// COST ARITHMETIC (the constraint: first pass + second look must stay under
-// ~60% of the 25-minute select timeout at a pessimistic 1.0 s/call — every `gh`
-// call in this leg is serial, so ~900 calls is the wall):
-//   first pass  = 2 list pages + 2 × 200 per-stub reads + 120 family budget
-//                 (40 handled-id + 40 reverse probe + 40 verify read) = 522
-//   second look = 4 list pages (one `--limit 400` call, 100 rows per page)
-//               + 2 × 100 per-stub reads + 60 family budget (20 each) = 264
-//   TOTAL       = 786 calls ≈ 13.1 min at 1.0 s/call = 52% of 25 min. Under the
-//                 15-minute (≈900-call) wall with ~2 minutes of slack.
-// Raising any constant below re-opens this arithmetic; the suite pins the total
-// against DOCUMENTED_GH_CEILING.
-export const MAX_SECOND_LOOK_EVALUATIONS = 100;
-
-/** How many RAW rows past the first window the second look asks for. The list
- * is issued as ONE `gh issue list --limit LIST_LIMIT + this`, with the first
- * LIST_LIMIT raw rows dropped client-side — `gh issue list` has no offset flag,
- * and a raw-row skip is what lines up with the first pass's own `--limit`
- * (applied server-side, before any client filter). */
-export const SECOND_LOOK_LIST_ROWS = 200;
-
-/** The second look's OWN family budgets. The first pass's per-run budgets are
- * spent by the time it runs, so it cannot reuse them; half of each keeps the
- * total inside the arithmetic above while still letting a real family resolve. */
-export const SECOND_LOOK_FAMILY_BUDGETS = {
-  handled: 20,
-  probe: 20,
-  verify: 20,
-};
-
-/** One note per deferral reason, keyed by the collapse's own constants so a
- * reason added there cannot silently inherit another's wording. An unmapped
- * reason still prints — as itself, not as somebody else's explanation. */
-const DEFER_NOTES = {
-  [DEFER_FAMILY_DUPLICATE]: (decision) =>
-    `same duplicate_of family as ${safeShortId(decision.representative)}, which represents the family this run`,
-  [DEFER_FAMILY_HANDLED]: (decision) =>
-    `its duplicate_of family already has an autofix attempt on ${safeShortId(decision.representative)} (a regression sheds that marker)`,
-  [DEFER_FAMILY_RECONCILING]: () =>
-    "its duplicate_of family already has an open autofix PR being reconciled this run",
-};
 
 /**
  * Wrap the run's `gh` driver so ONE place sees every invocation the select leg
@@ -228,42 +186,6 @@ function instrumentRunGh(baseRunGh, state) {
       throw err;
     }
   };
-}
-
-/** Split one resolve pass's decisions into the three reported halves. Shared by
- * the first pass and the second look so both classify identically — a second
- * look that reported a family deferral as a fix_scope skip would send an
- * operator to the wrong remedy. */
-function partitionDecisions(decisions, cap) {
-  const entries = [];
-  const deferred = [];
-  const skipped = [];
-  for (const decision of decisions) {
-    const number = decision.candidate.issue;
-    // Ruled out before the collapse ran (fix_scope). It joined the union so its
-    // family edges survived, but it is not a family deferral and must not be
-    // reported as one: the two lift on different events.
-    if (decision.candidate.eligible === false) {
-      skipped.push({ issue: number, reason: decision.candidate.skipReason });
-      continue;
-    }
-    if (!decision.selected) {
-      // Deferral writes NOTHING to the queue — no label, no comment, no marker.
-      // The member stays exactly as selectable as its live state makes it on the
-      // next run, which is what lets a genuine regression (ingest sheds the
-      // sibling's autofix marker) bring the family straight back. It IS reported
-      // out, though: the run record carries the count and the issue numbers so
-      // "everything suppressed" never reads as "nothing queued".
-      process.stderr.write(
-        `defer #${number}: ${DEFER_NOTES[decision.reason]?.(decision) ?? `deferred (${decision.reason})`}; not marked, re-evaluated next run.\n`,
-      );
-      deferred.push({ issue: number, reason: decision.reason });
-      continue;
-    }
-    if (entries.length >= cap) continue;
-    entries.push(decision.candidate.entry);
-  }
-  return { entries, deferred, skipped };
 }
 
 /**
@@ -455,31 +377,13 @@ export async function selectAutofixRun(options, deps = {}) {
     process.stderr.write(
       `note: first pass selected nothing from a FULL list page (${page.rawCount} rows); taking ONE bounded second look at the next ${SECOND_LOOK_LIST_ROWS} rows.\n`,
     );
-    const beyond = await listCodeFixStubsPage(runGh, repo, {
-      limit: LIST_LIMIT + SECOND_LOOK_LIST_ROWS,
-      skip: LIST_LIMIT,
-    });
-    const furtherEvaluable = beyond.stubs.slice(0, MAX_SECOND_LOOK_EVALUATIONS);
-    window.secondLookTotal = beyond.stubs.length;
-    window.secondLookEvaluated = furtherEvaluable.length;
-    if (beyond.stubs.length > furtherEvaluable.length) {
-      // The second look's OWN truncation, surfaced exactly like the Window
-      // tripwire: it must never silently stop short either.
-      process.stderr.write(
-        `note: second look saw ${beyond.stubs.length} further stubs; evaluating the oldest ${furtherEvaluable.length} (MAX_SECOND_LOOK_EVALUATIONS).\n`,
-      );
-    }
-
-    const furtherCandidates = [];
-    for (const stub of furtherEvaluable) {
-      const candidate = await evaluateCandidate(runGh, repo, stub);
-      if (candidate) furtherCandidates.push(candidate);
-    }
-    // Its OWN family budgets: the first pass spent the per-run ones, so reusing
-    // them would silently double the run's worst-case volume.
-    const second = await resolveFamilies(runGh, repo, furtherCandidates, cap, {
-      budgets: SECOND_LOOK_FAMILY_BUDGETS,
-    });
+    const second = await resolveSecondLook(runGh, repo, cap);
+    // Its own total-vs-evaluated is its own truncation, surfaced exactly like
+    // the Window tripwire: this pass must never silently stop short either.
+    window.secondLookTotal = second.total;
+    window.secondLookEvaluated = second.evaluated;
+    // Partitioned through the SAME classifier the first pass used, so a
+    // second-look family deferral is never reported as a fix_scope skip.
     const secondParts = partitionDecisions(second.decisions, cap);
     entries.push(...secondParts.entries);
     deferred.push(...secondParts.deferred);
