@@ -37,7 +37,7 @@ Options:
                  coverage floors regardless of this flag.
   --command-timeout <n>
                  With --run, kill any single mapped command that runs longer
-                 than n seconds and report it as a failure. Default: 900. The
+                 than n seconds and report it as a failure. Default: 1500. The
                  timeout is per command, never for the whole run.
   --lock-wait <n>
                  With --run, wait at most n seconds for another gate run on
@@ -59,7 +59,7 @@ Environment:
   AGENT_GATE_FULL_TESTS
                       Same behavior as --full-local-tests when set to 1 or true.
   AGENT_QUALITY_COMMAND_TIMEOUT_SECONDS
-                      Same behavior as --command-timeout. Default: 900.
+                      Same behavior as --command-timeout. Default: 1500.
   AGENT_QUALITY_GATE_LOCK
                       Set to 0 or false for the same effect as --no-lock.
   AGENT_QUALITY_GATE_LOCK_WAIT_SECONDS
