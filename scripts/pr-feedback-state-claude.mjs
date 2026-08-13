@@ -42,6 +42,15 @@ const CLEAN_REVIEW_COMPATIBILITY = new Map([
       headRefOid: "0ff2700ecbec8d2877caeeaa91bf423cf8fdc2f0",
     },
   ],
+  [
+    "17628badc56cb6e53b77c559425020b839847e66357614e65a9707f8bf6d7ee9",
+    {
+      author: "claude[bot]",
+      prNumber: "1825",
+      commentId: "5278516901",
+      headRefOid: "5ce1cad0371551aff0e8b68867a29bb5d2736bf4",
+    },
+  ],
 ]);
 
 function normalizedReviewTitle(value) {
@@ -85,7 +94,9 @@ export function isClaudeTaskCompletionLine(value) {
 export function isClaudeLgtmReview(comment) {
   return (
     /^claude(?:\[bot\])?$/i.test(comment?.author ?? "") &&
-    /^\s*(?:\*\*)?Verdict:\s*LGTM(?:\*\*)?\s*$/im.test(comment?.body ?? "")
+    /^\s*(?:#{1,6}\s+)?(?:\*\*)?Verdict:\s*LGTM(?:\*\*)?\s*$/im.test(
+      comment?.body ?? "",
+    )
   );
 }
 
