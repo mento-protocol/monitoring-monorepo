@@ -97,6 +97,14 @@ tldr: **ruleset-required** workflows (`ci`, `Code Quality`, the Vercel checks) M
 - If a setup/cache script uses marker files or input hashes to skip work, the skip condition MUST verify the actual output that downstream commands need, not just the marker. Examples: dependency skips should verify a representative package resolves, Playwright skips should verify the browser executable exists, and codegen skips should verify the generated facade file exists.
 - Write marker files only after every validation step represented by that marker has passed. A failed post-install validation must not leave a fresh marker that makes the next run skip the install or rebuild path.
 
+### Supply-chain advisory bumps
+
+- **Overrides live in each package's `pnpm-workspace.yaml`** (pnpm 11), not in `package.json`. The `alerts/infra/*` packages also carry a `package.json` `overrides` block that is stale and unused — it lists neither `nanoid` nor `ws` and pins older `postcss`/`fast-uri`/`js-yaml` than the lockfiles resolve. Editing it looks correct and changes nothing about resolution.
+- **Raise the floor in every dependency root, not just the ones the failing log names.** There are four, each audited by a different path: `alerts/infra/oncall-announcer` and `alerts/infra/onchain-event-handler` (standalone Cloud Build source roots), `governance-watchdog` (its own step in `.github/workflows/trunk.yml`), and the repo root (the PR-triggered Supply Chain audit). A `Code Quality` failure lists only the lockfiles that step scanned, so fixing those leaves the required check red.
+- **A workspace override and its lockfile move together.** `pnpm install` fails outright when they disagree, which also breaks local `pnpm pr:ready-state` / `pr:feedback-state` until they match — you cannot bump the override alone and defer the lockfile.
+- Regenerating the **root** lockfile pulls in peer-resolution churn beyond the bumped package (`esbuild`, `supports-color` peer identities through @nestjs/cli, ts-jest, express, webpack). That is pre-existing drift, not a consequence of the bump, and it cannot be avoided given the rule above. Verify it changes no package _version_ — strip the parenthesised peer context and compare bare semvers — and say so in the PR rather than trying to suppress it.
+- When an advisory range widens to include the version already pinned, say so in the override comment ("the 3.3.17 fix is incomplete") the way the `brace-expansion` entry does. Check the replacement against `minimumReleaseAge` (4320 minutes): anything younger needs a `minimumReleaseAgeExclude` entry, as `postcss@8.5.23` has.
+
 ### Provisioner before consumer
 
 - A change that references a value **another job creates** — a label, a queue, a bucket, a schema column, a secret name — MUST survive the window between merge and that provisioner's next scheduled run. Review the deploy ordering, not only the code.
