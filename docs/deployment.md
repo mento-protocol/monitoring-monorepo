@@ -3,7 +3,7 @@ title: Deployment Guide
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-11
+last_verified: 2026-08-13
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -311,10 +311,12 @@ complete. The first protected publication created
 `mento-monitoring-peg-policy/peg-policy/current.json` generation
 `1785276001213660`; its runtime attachment minted
 `metrics-bridge-r-47264e8-30405040839`. The later protected publication created
-generation `1786443055965590`. The reviewed runtime rollout selects that
-published generation in source, but it is not attached to Cloud Run until the
-approved platform apply and runtime proof complete. The canonical recovery
-procedure is in [`docs/terraform.md`](terraform.md) and
+generation `1786443055965590`. The approved runtime rollout attached that
+active-only generation to Cloud Run revision `metrics-bridge-00196-6hg`.
+Post-apply proof confirmed current producer and API packages, exactly one
+policy-version metric, no legacy policy labels, and all 17 Peg Grafana rules
+with health `ok`, unpaused, and Normal. The canonical recovery procedure is in
+[`docs/terraform.md`](terraform.md) and
 [ADR 0055](adr/0055-peg-policy-bucket-controller-recovery.md). Audit effective
 readers, writers, and IAM administrators after future applies and before runtime
 rollovers.

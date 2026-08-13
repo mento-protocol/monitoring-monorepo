@@ -2,6 +2,7 @@
 import { LABEL_TO_VERDICT } from "./sentry-triage-digest.mjs";
 import {
   FIX_SCOPE_ARCHITECTURAL_LABEL,
+  LABEL_DEFINITIONS,
   VERDICT_LABELS,
 } from "./sentry-triage-ingest.mjs";
 import {
@@ -31,6 +32,7 @@ import {
   parseVerdictComment,
   PROJECTED_LABEL,
   resolveVerdict,
+  runEnsureLabels,
   runParseOnly,
   runPriorVerdicts,
   runProjection,
@@ -81,19 +83,20 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
-function assertThrows(fn, pattern) {
+function assertThrows(fn, pattern, label = "") {
+  const suffix = label ? ` (${label})` : "";
   try {
     fn();
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (!pattern.test(message)) {
-      throw new Error(`expected ${message} to match ${pattern}`, {
+      throw new Error(`expected ${message} to match ${pattern}${suffix}`, {
         cause: err,
       });
     }
     return;
   }
-  throw new Error("expected function to throw");
+  throw new Error(`expected function to throw${suffix}`);
 }
 
 async function assertRejects(promise, pattern) {
@@ -2701,6 +2704,10 @@ await test("runParseOnly does NOT hold a LOCAL MECHANICAL code-fix: bare label, 
   assertEqual(result.label, "sentry:verdict-code-fix");
   // A re-dispatched stub whose fresh verdict flips to mechanical must un-strand:
   // the hold label lands in the SHED list so the same atomic edit removes it.
+  // Which means EVERY non-architectural verdict names that label in its edit,
+  // including the very first one after the label was introduced — the settlement
+  // step self-heals the whole edit's label set from LABEL_DEFINITIONS before it
+  // edits, which is what makes shedding a freshly-added name safe (2026-08-13).
   assert(
     result.shed.split(",").includes(FIX_SCOPE_ARCHITECTURAL_LABEL),
     `a non-held stub must shed the hold label to un-strand: ${result.shed}`,
@@ -3444,6 +3451,173 @@ await test("runProjectionBatch survives a failing label ensure", async () => {
     { runGh },
   );
   assertEqual(rows[0].status, "projected");
+});
+
+// ---------------------------------------------------------------------------
+// --ensure-labels: the settlement step's pre-flight.
+//
+// Only the ingest job CREATES the label set, so a label added to
+// LABEL_DEFINITIONS does not exist in the repo until ingest next runs — and gh
+// fails a whole `issue edit` on a repo-nonexistent name, on --remove-label
+// exactly as on --add-label. That is what took the verdict step down on
+// 2026-08-13: `sentry:fix-scope-architectural` reached the shed list (#1812)
+// before the next ingest bootstrapped it.
+// ---------------------------------------------------------------------------
+
+function recordingRunGh({ failOn = () => false } = {}) {
+  const calls = [];
+  const runGh = async (args, opts = {}) => {
+    calls.push({ args, token: opts.token ?? null });
+    if (failOn(args)) throw new Error("boom");
+    return "";
+  };
+  return { runGh, calls };
+}
+
+await test("runEnsureLabels creates every named label from LABEL_DEFINITIONS", async () => {
+  const { runGh, calls } = recordingRunGh();
+  const result = await runEnsureLabels(
+    {
+      localRepo: "mento-protocol/monitoring-monorepo",
+      ensureLabels: [
+        "sentry:verdict-upstream",
+        FIX_SCOPE_ARCHITECTURAL_LABEL,
+        "sentry:needs-triage",
+      ],
+    },
+    { runGh },
+  );
+  assertDeepEqual(result.ensured, [
+    "sentry:verdict-upstream",
+    FIX_SCOPE_ARCHITECTURAL_LABEL,
+    "sentry:needs-triage",
+  ]);
+  assertDeepEqual(result.unknown, []);
+  assertDeepEqual(result.failed, []);
+  assertEqual(calls.length, 3);
+  for (const call of calls) {
+    assertEqual(call.args[0], "label");
+    assertEqual(call.args[1], "create");
+    assert(
+      call.args.includes("--force"),
+      "the ensure must be idempotent (--force), not a create that errors on an existing label",
+    );
+    assert(
+      call.args.includes("mento-protocol/monitoring-monorepo"),
+      "the ensure must target the queue repo",
+    );
+    assert(
+      call.token == null || call.token === "",
+      "label ensure must use the local token, never the projection PAT",
+    );
+  }
+  // Color/description come from the single source, so a repo label that drifted
+  // is corrected rather than merely made to exist.
+  const hold = calls.find((c) => c.args[2] === FIX_SCOPE_ARCHITECTURAL_LABEL);
+  const def = LABEL_DEFINITIONS.find(
+    (entry) => entry.name === FIX_SCOPE_ARCHITECTURAL_LABEL,
+  );
+  assert(
+    hold.args.includes(def.color) && hold.args.includes(def.description),
+    "label color/description must come from LABEL_DEFINITIONS",
+  );
+});
+
+await test("runEnsureLabels is best-effort: one failing create does not stop the rest", async () => {
+  // The ensure protects a write; it must never BE the thing that kills the
+  // step. The edit it guards still fails loudly, with compensation.
+  const { runGh, calls } = recordingRunGh({
+    failOn: (args) => args[2] === "sentry:verdict-code-fix",
+  });
+  const result = await runEnsureLabels(
+    {
+      localRepo: "mento-protocol/monitoring-monorepo",
+      ensureLabels: [
+        "sentry:verdict-code-fix",
+        "sentry:needs-triage",
+        // A name the single source does not define: drift, reported rather
+        // than silently skipped, and never fatal here either.
+        "sentry:verdict-invented",
+      ],
+    },
+    { runGh },
+  );
+  assertDeepEqual(result.failed, ["sentry:verdict-code-fix"]);
+  assertDeepEqual(result.ensured, ["sentry:needs-triage"]);
+  assertDeepEqual(result.unknown, ["sentry:verdict-invented"]);
+  assertEqual(
+    calls.length,
+    2,
+    "an undefined label costs no gh call, and a failed one does not abort the loop",
+  );
+});
+
+await test("runEnsureLabels de-duplicates names", async () => {
+  const { runGh, calls } = recordingRunGh();
+  await runEnsureLabels(
+    {
+      localRepo: "mento-protocol/monitoring-monorepo",
+      ensureLabels: ["sentry:needs-triage", "sentry:needs-triage"],
+    },
+    { runGh },
+  );
+  assertEqual(calls.length, 1);
+});
+
+await test("parseArgs takes --ensure-labels as a standalone mode", () => {
+  const options = parseArgs(
+    ["--ensure-labels", "sentry:verdict-upstream, sentry:needs-triage,"],
+    {},
+  );
+  assertDeepEqual(options.ensureLabels, [
+    "sentry:verdict-upstream",
+    "sentry:needs-triage",
+  ]);
+  // No --issue: the mode touches no stub.
+  assertEqual(options.queueIssue, null);
+  assertThrows(
+    () => parseArgs(["--ensure-labels", " , "], {}),
+    /at least one label name/,
+  );
+  assertThrows(
+    () =>
+      parseArgs(["--ensure-labels", "sentry:needs-triage", "--parse-only"], {}),
+    /standalone mode/,
+  );
+});
+
+await test("parseArgs refuses --ensure-labels alongside the DEFAULT projection mode", () => {
+  // The default mode carries no flag — it is `--issue`, optionally with the
+  // `--verdict` cross-check — so a guard that only rejected the FLAGGED modes
+  // would run the ensure, skip the projection entirely, and exit 0 reporting
+  // success for a no-op. Every mode-bearing input must be named.
+  for (const argv of [
+    ["--issue", "5", "--ensure-labels", "sentry:needs-triage"],
+    [
+      "--issue",
+      "5",
+      "--verdict",
+      "code-fix",
+      "--ensure-labels",
+      "sentry:needs-triage",
+    ],
+    ["--verdict", "code-fix", "--ensure-labels", "sentry:needs-triage"],
+    ["--issues", "[5]", "--ensure-labels", "sentry:needs-triage"],
+    ["--batch", "--issues", "[5]", "--ensure-labels", "sentry:needs-triage"],
+    ["--prior-verdicts", "--ensure-labels", "sentry:needs-triage"],
+  ]) {
+    assertThrows(
+      () => parseArgs(argv, {}),
+      /standalone mode/,
+      `expected \`${argv.join(" ")}\` to be refused`,
+    );
+  }
+  // A non-numeric --issue is still a requested projection, not an absent one.
+  assertThrows(
+    () =>
+      parseArgs(["--issue", "x", "--ensure-labels", "sentry:needs-triage"], {}),
+    /standalone mode/,
+  );
 });
 
 if (failed > 0) {

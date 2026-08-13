@@ -273,14 +273,10 @@ Only an authoritative response advances `mento_peg_listing_checked_at`.
 Unknown, missing, or stale evidence is not delisting. Listing confirmation can
 still succeed when the later book fetch fails, so listing alerts do not gate
 on source health, observation time, or the asset heartbeat. Source validators
-require every policy source to declare its bounded listing-confirmation
-threshold. During the production transition only, Metrics Bridge accepts the
-omission from the exact legacy retained version
-`europ-2026-07-22-v1-a69b99aad61649957a2639dc8348b05f` and normalizes it to
-`2` in decision packages. Remove that runtime shim in a follow-up PR after the
-`previous: null` generation is published, pinned, and live-verified;
-[#1750](https://github.com/mento-protocol/monitoring-monorepo/issues/1750)
-tracks that removal.
+and Metrics Bridge require every active or retained-previous policy source to
+declare an integer `listingAbsentConsecutiveChecks` value from 2 through 1000.
+A missing value rejects the policy instead of receiving a runtime default. The
+current production policy is active-only, with `previous: null`.
 
 A source restoration is not enough by itself. Repeat the executable-depth and
 coverage gates before restoring alert authority.

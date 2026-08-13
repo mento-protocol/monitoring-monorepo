@@ -3746,6 +3746,16 @@ assert_contains "- pnpm sentry:project:test (Sentry re-queue chokepoint changed)
 run_gate "scripts/sentry-triage-project.mjs"
 assert_contains "- pnpm sentry:project:test (Sentry triage projection helper changed)"
 
+# The argv surface and the settlement label self-heal, split out of the entry
+# module for the 1,000-line hard cap (#1827). Both are reached only through that
+# leg, so an unrouted change to either would ship untested.
+run_gate "scripts/sentry-triage-project-cli.mjs"
+assert_contains "- pnpm sentry:project:test (Sentry triage projection helper changed)"
+
+run_gate "scripts/sentry-triage-label-ensure.mjs"
+assert_contains "- pnpm sentry:project:test (Sentry triage projection helper changed)"
+assert_contains "- pnpm sentry:brief:test (Sentry triage projection helper changed)"
+
 run_gate "scripts/sentry-triage-project-core.mjs"
 assert_contains "- pnpm sentry:project:test (Sentry triage projection helper changed)"
 assert_contains "- node scripts/sentry-triage-agent-comment.test.mjs (Sentry triage projection helper changed)"

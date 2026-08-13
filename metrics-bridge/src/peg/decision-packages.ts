@@ -7,7 +7,6 @@ import type {
 } from "./metrics.js";
 import {
   PEG_POLICY_MAX_ASSETS,
-  effectiveListingAbsentConsecutiveChecks,
   type PegAssetPolicy,
   type PegPolicyVersion,
   type PegSourcePolicy,
@@ -71,11 +70,9 @@ export interface PegDecisionPackageSource {
   registryRole: PegSourceRole;
   authority: PegSourcePolicy["authority"];
   convertVia: PegConversion | null;
-  // Live streak state stays in Prometheus; this policy threshold gives readers
-  // complete decision context, including the retained legacy default.
-  policy: Omit<PegSourcePolicy, "authority"> & {
-    listingAbsentConsecutiveChecks: number;
-  };
+  // Live streak state stays in Prometheus; the policy gives readers the
+  // threshold needed to interpret it.
+  policy: Omit<PegSourcePolicy, "authority">;
   listingState: MarketState | null;
   listingCheckedAt: number | null;
   healthy: boolean;
@@ -324,8 +321,7 @@ function sourceEvidence(
       referenceSizeCap: policy.referenceSizeCap,
       pollIntervalSeconds: policy.pollIntervalSeconds,
       staleAfterSeconds: policy.staleAfterSeconds,
-      listingAbsentConsecutiveChecks:
-        effectiveListingAbsentConsecutiveChecks(policy),
+      listingAbsentConsecutiveChecks: policy.listingAbsentConsecutiveChecks,
       spreadEnvelopeBps: policy.spreadEnvelopeBps,
       conversionErrorBps: policy.conversionErrorBps,
     },

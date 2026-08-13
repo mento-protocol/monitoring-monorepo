@@ -727,7 +727,25 @@ A stub carries exactly one `sentry:verdict-*` label. The label edit adds the
 new one and removes every other verdict label in the same call, so
 re-dispatching an already-verdicted stub — the usual case after a human answers
 a `needs-human` escalation — replaces the old verdict instead of stacking a
-second one. The step then re-reads the stub and fails its own matrix job if the
+second one.
+
+**The step self-heals its label set first, and the edit itself compensates.**
+Only ingest CREATES labels, so a name added to `LABEL_DEFINITIONS` does not
+exist in the repo until ingest next runs — and `gh` fails an entire
+`issue edit` on a repo-nonexistent name, on `--remove-label` exactly as on
+`--add-label`, after applying the add. So the step runs
+`sentry-triage-project.mjs --ensure-labels` over every name its edit touches —
+the verdict label, the whole shed list, and `sentry:needs-triage` —
+immediately before the edit, `gh label create --force` from the same single
+source the three other settlement paths self-heal from
+(`sentry-autofix.yml`, `runProjectionBatch`, `ensureArchiveLabels`). The ensure
+is best-effort per label; the edit that follows is guarded, so a partial failure
+re-queues the stub rather than stranding it verdict-labeled and queued at once.
+That is the failure PR #1812 shipped: `sentry:fix-scope-architectural` entered
+the shed list of every non-architectural verdict hours before the ingest run
+that would have created it, and the whole settlement leg failed on it.
+
+The step then re-reads the stub and fails its own matrix job if the
 read fails or more than one verdict label survives — re-queuing the stub first,
 the same compensation the brief-clear, close and projection failure paths make,
 so it goes back in the queue instead of being stranded open with no retry path.
