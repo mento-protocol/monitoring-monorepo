@@ -5010,6 +5010,13 @@ gate_race_log="$gate_race_out/race.log"
   git config user.name "Quality Gate Test"
   printf 'fixture\n' > fixture.txt
   mkdir -p tools
+  # The replacements these stubs fork are found again by their sleep duration,
+  # and that duration is derived from this suite's PID so it names only this
+  # suite's fixtures. A fixed number would let the teardown below `kill -9`
+  # something an unrelated process — or a second copy of this suite — happened
+  # to be running.
+  gate_race_fork_seconds="98$((RANDOM % 900 + 100))${$}"
+  gate_race_forkexit_seconds="97$((RANDOM % 900 + 100))${$}"
   # The two contention cases need this to outlast the stagger between their
   # waiters, or two unexcluded runs would simply miss each other and the
   # assertion would pass on broken code. Every other case only needs the gate
@@ -5019,10 +5026,10 @@ gate_race_log="$gate_race_out/race.log"
 # RACE_STUB_IGNORE_TERM makes this outlive a TERM the way a real build tool
 # with its own signal handling can. The loop is what survives: its sleeps are
 # killable, it is not.
-[ -n "\${RACE_STUB_FORK_ON_TERM:-}" ] && trap 'sleep 987654 &' TERM
+[ -n "\${RACE_STUB_FORK_ON_TERM:-}" ] && trap 'sleep ${gate_race_fork_seconds} &' TERM
 # RACE_STUB_FORK_AND_EXIT leaves a replacement behind and then goes away, so
 # the replacement is reparented with no tagged ancestor left to walk down from.
-[ -n "\${RACE_STUB_FORK_AND_EXIT:-}" ] && trap 'sleep 987655 & exit 0' TERM
+[ -n "\${RACE_STUB_FORK_AND_EXIT:-}" ] && trap 'sleep ${gate_race_forkexit_seconds} & exit 0' TERM
 [ -n "\${RACE_STUB_IGNORE_TERM:-}" ] && [ -z "\${RACE_STUB_FORK_ON_TERM:-}" ] && [ -z "\${RACE_STUB_FORK_AND_EXIT:-}" ] && trap '' TERM
 printf 'enter %s %s\n' "\$\$" "\$(date +%s)" >> "$gate_race_log"
 race_stub_deadline=\$(( \$(date +%s) + \${RACE_STUB_SECONDS:-1} ))
@@ -5529,8 +5536,11 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   kill -0 "$race_orphan_pid" 2>/dev/null ||
     fail "the orphan case needs the command to outlive its gate to mean anything"
   (
-    while kill -0 "$race_orphan_pid" 2>/dev/null; do sleep 0.5; done
-    date +%s > "$gate_race_out/orphan_died"
+    race_watch_deadline=$(($(date +%s) + 300))
+    while kill -0 "$race_orphan_pid" 2>/dev/null && [ "$(date +%s)" -lt "$race_watch_deadline" ]; do sleep 0.5; done
+    # Recorded only if it really died: writing a time when the bound expired
+    # would let the assertion below read a stalled watcher as a confirmed death.
+    kill -0 "$race_orphan_pid" 2>/dev/null || date +%s > "$gate_race_out/orphan_died"
   ) &
   race_orphan_watcher=$!
   RACE_STUB_SECONDS=2 \
@@ -5618,8 +5628,11 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   kill -0 "$race_chain_orphan" 2>/dev/null ||
     fail "the crash-chain case needs A's command alive to mean anything"
   (
-    while kill -0 "$race_chain_orphan" 2>/dev/null; do sleep 0.5; done
-    date +%s > "$gate_race_out/chain_died"
+    race_watch_deadline=$(($(date +%s) + 300))
+    while kill -0 "$race_chain_orphan" 2>/dev/null && [ "$(date +%s)" -lt "$race_watch_deadline" ]; do sleep 0.5; done
+    # Recorded only if it really died: writing a time when the bound expired
+    # would let the assertion below read a stalled watcher as a confirmed death.
+    kill -0 "$race_chain_orphan" 2>/dev/null || date +%s > "$gate_race_out/chain_died"
   ) &
   race_chain_watcher=$!
   RACE_STUB_SECONDS=2 \
@@ -5702,8 +5715,11 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   kill -0 "$race_drain_orphan" 2>/dev/null ||
     fail "the interrupted-drain case needs its TERM-ignoring command alive to mean anything"
   (
-    while kill -0 "$race_drain_orphan" 2>/dev/null; do sleep 0.5; done
-    date +%s > "$gate_race_out/drain_died"
+    race_watch_deadline=$(($(date +%s) + 300))
+    while kill -0 "$race_drain_orphan" 2>/dev/null && [ "$(date +%s)" -lt "$race_watch_deadline" ]; do sleep 0.5; done
+    # Recorded only if it really died: writing a time when the bound expired
+    # would let the assertion below read a stalled watcher as a confirmed death.
+    kill -0 "$race_drain_orphan" 2>/dev/null || date +%s > "$gate_race_out/drain_died"
   ) &
   race_drain_watcher=$!
   RACE_STUB_SECONDS=2 \
@@ -5776,8 +5792,11 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   kill -0 "$race_remnant_orphan" 2>/dev/null ||
     fail "the remnant-token case needs the first run's command alive"
   (
-    while kill -0 "$race_remnant_orphan" 2>/dev/null; do sleep 0.5; done
-    date +%s > "$gate_race_out/remnant_died"
+    race_watch_deadline=$(($(date +%s) + 300))
+    while kill -0 "$race_remnant_orphan" 2>/dev/null && [ "$(date +%s)" -lt "$race_watch_deadline" ]; do sleep 0.5; done
+    # Recorded only if it really died: writing a time when the bound expired
+    # would let the assertion below read a stalled watcher as a confirmed death.
+    kill -0 "$race_remnant_orphan" 2>/dev/null || date +%s > "$gate_race_out/remnant_died"
   ) &
   race_remnant_watcher=$!
   RACE_STUB_SECONDS=2 \
@@ -5886,7 +5905,7 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     --base HEAD --run --lock-wait 90 \
     > "$gate_race_out/fork-b.out" 2>&1 || true
   sleep 1
-  race_fork_survivors="$(pgrep -f "sleep 987654" 2>/dev/null | tr '\n' ' ' || true)"
+  race_fork_survivors="$(pgrep -f "sleep ${gate_race_fork_seconds}" 2>/dev/null | tr '\n' ' ' || true)"
   for race_leftover_pid in $race_fork_survivors; do
     kill -9 "$race_leftover_pid" 2>/dev/null || true
   done
@@ -5931,7 +5950,7 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     --base HEAD --run --lock-wait 90 \
     > "$gate_race_out/forkexit-b.out" 2>&1 || true
   sleep 1
-  race_forkexit_survivors="$(pgrep -f "sleep 987655" 2>/dev/null | tr '\n' ' ' || true)"
+  race_forkexit_survivors="$(pgrep -f "sleep ${gate_race_forkexit_seconds}" 2>/dev/null | tr '\n' ' ' || true)"
   for race_leftover_pid in $race_forkexit_survivors; do
     kill -9 "$race_leftover_pid" 2>/dev/null || true
   done
@@ -5959,21 +5978,34 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
     AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
     "$repo_root/scripts/agent-quality-gate.sh" \
-    --base HEAD --run --lock-wait 2 \
+    --base HEAD --run --lock-wait 25 \
     > "$gate_race_out/stopped-waiter.out" 2>&1 &
   race_stopped_wrapper=$!
-  sleep 2
-  race_stopped_waiter="$(pgrep -f "agent-quality-gate.sh --base HEAD --run --lock-wait 2" 2>/dev/null | head -n1 || true)"
-  if [[ -n "$race_stopped_waiter" ]]; then
-    kill -STOP "$race_stopped_waiter" 2>/dev/null || true
-    sleep 9
-    kill -CONT "$race_stopped_waiter" 2>/dev/null || true
-  fi
+  # The budget is far longer than the suspension so the waiter is certainly
+  # still waiting when it is stopped. A budget the fixture races would let this
+  # case pass by skipping its own assertion — the failure it exists to catch
+  # looks exactly like the gate having already exited.
+  race_waited=0
+  race_stopped_waiter=""
+  while [[ -z "$race_stopped_waiter" && "$race_waited" -lt 60 ]]; do
+    race_stopped_waiter="$(pgrep -f "agent-quality-gate.sh --base HEAD --run --lock-wait 25" 2>/dev/null | head -n1 || true)"
+    [[ -n "$race_stopped_waiter" ]] && break
+    sleep 0.5
+    race_waited=$((race_waited + 1))
+  done
+  [[ -n "$race_stopped_waiter" ]] ||
+    fail "the suspended-waiter case never found its waiter, so it proved nothing"
+  kill -STOP "$race_stopped_waiter" 2>/dev/null ||
+    fail "the suspended-waiter case could not suspend its waiter"
+  sleep 12
+  kill -CONT "$race_stopped_waiter" 2>/dev/null || true
   wait "$race_stopped_wrapper" 2>/dev/null || true
   kill -9 "$race_stopped_holder" 2>/dev/null || true
   race_stopped_reported="$(sed -n 's/.*timed out after \([0-9]*\)s.*/\1/p' "$gate_race_out/stopped-waiter.out" | head -n1 || true)"
+  [[ -n "$race_stopped_reported" ]] ||
+    fail "a waiter suspended past its budget must still report a timeout"
   if [[ -n "$race_stopped_waiter" && -n "$race_stopped_reported" ]]; then
-    [[ "$race_stopped_reported" -ge 8 ]] ||
+    [[ "$race_stopped_reported" -ge 11 ]] ||
       fail "a waiter suspended past its budget reported ${race_stopped_reported}s, not the time that passed"
   fi
   rm -rf "$gate_race_root/run.lock"

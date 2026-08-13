@@ -612,10 +612,18 @@ gate_run_ensure_marker() {
 # which is the pre-existing behaviour.
 gate_run_tagged_pids() {
   local token="$1"
-  local environ pid marker
-  pgrep -f "agentqg:${token}" 2>/dev/null || true
+  local environ pid marker found status
+  # A scan that failed is not a scan that found nothing. `pgrep` exits 1 for no
+  # match and above that for a real failure, and reading the second as the first
+  # would discharge an obligation on the strength of a question never answered.
+  found="$(pgrep -f "agentqg:${token}" 2>/dev/null)" && status=0 || status=$?
+  [[ "$status" -le 1 ]] || gate_drain_scan_failed=1
+  [[ -z "$found" ]] || printf '%s\n' "$found"
   if [[ -d /proc ]]; then
     for environ in /proc/[0-9]*/environ; do
+      # Unreadable here means another user's process, which cannot be one of
+      # ours: the environment of anything this run started is readable by it.
+      # So this skip is a scope, not a swallowed error.
       [[ -r "$environ" ]] || continue
       grep -qa "AGENTQG_RUN=agentqg:${token}" "$environ" 2>/dev/null || continue
       pid="${environ#/proc/}"
@@ -625,7 +633,9 @@ gate_run_tagged_pids() {
   marker="${gate_lock_root_dir}/holder.${token}"
   if [[ -n "$gate_lock_root_dir" && -e "$marker" ]] &&
     command -v lsof > /dev/null 2>&1; then
-    lsof -w -t -- "$marker" 2>/dev/null || true
+    found="$(lsof -w -t -- "$marker" 2>/dev/null)" && status=0 || status=$?
+    [[ "$status" -le 1 ]] || gate_drain_scan_failed=1
+    [[ -z "$found" ]] || printf '%s\n' "$found"
   fi
 }
 
@@ -981,6 +991,12 @@ gate_drain_capture_file=""
 # Set when an append to that file failed, so the drain can refuse to signal
 # with nothing durable behind it.
 gate_drain_capture_unpersisted=0
+# Set when a discovery scan failed rather than came back empty, so an
+# unanswered question is never read as "nothing left running".
+gate_drain_scan_failed=0
+# The PIDs this run's handles named on the current pass, read by the
+# membership check deep inside the recursive walk.
+gate_drain_tagged_now=""
 
 # Recorded in place of a start time on a host that cannot produce one at all —
 # a sandbox without `ps`. It has to be distinguishable from an empty identity,
@@ -1017,10 +1033,30 @@ gate_lock_identity_source_available() {
 # successor consults when nothing carries the tag any more. Appending removes
 # that window rather than narrowing it: the list can only grow, so an
 # interrupted drain leaves fewer entries than it eventually would have, never
+# Is this PID still one of ours, asked after its identity was read? Two answers
+# count: it still carries one of the run's handles, or it is still a child of
+# the process the walk reached it through. Either is enough, and both are
+# needed — a reparented descendant has lost its parent but keeps the inherited
+# handle, while a handle-less descendant is still reachable through its parent.
+gate_drain_membership_holds() {
+  local pid="$1"
+  local parent="${2:-}"
+  local candidate
+  for candidate in ${gate_drain_tagged_now}; do
+    [[ "$candidate" == "$pid" ]] && return 0
+  done
+  [[ -n "$parent" ]] || return 1
+  for candidate in $(pgrep -P "$parent" 2>/dev/null || true); do
+    [[ "$candidate" == "$pid" ]] && return 0
+  done
+  return 1
+}
+
 # fewer than it had already committed to. Since a capture always completes
 # before the first signal, anything already signalled is already on disk.
 capture_process_tree() {
   local root_pid="$1"
+  local from_parent="${2:-}"
   local child entry start
   # Children first, and always re-walked even for a process already recorded:
   # a command that survives TERM can fork again afterwards, so discovery has to
@@ -1028,7 +1064,7 @@ capture_process_tree() {
   # skipped for a PID already in the list, which is what lets a pass that adds
   # nothing be recognised as one.
   for child in $(pgrep -P "$root_pid" 2>/dev/null || true); do
-    capture_process_tree "$child"
+    capture_process_tree "$child" "$root_pid"
   done
   case " ${gate_drain_seen} " in
     *" ${root_pid} "*) return 0 ;;
@@ -1043,6 +1079,14 @@ capture_process_tree() {
       return 0
     fi
     start="$gate_lock_identity_unavailable"
+  elif ! gate_drain_membership_holds "$root_pid" "$from_parent"; then
+    # Enumeration and identity are two reads with a gap between them, and a PID
+    # recycled inside it would be recorded under a stranger's identity that
+    # every later check then confirms. Re-asking whether this PID is still one
+    # of ours closes that in the direction the rest of this path uses: an
+    # answer that cannot be confirmed is recorded with no identity, which is
+    # never signalled and holds the drain open rather than discharging it.
+    start=""
   fi
   entry="${root_pid}|${start}"
   gate_drain_seen="${gate_drain_seen}${root_pid} "
@@ -1060,7 +1104,7 @@ capture_process_tree() {
 
 drain_condemned_run_commands() {
   local token="$1"
-  local wrapper entry pid recorded current alive recycled unverified captured_file
+  local wrapper entry pid recorded current alive alive_identities recycled unverified captured_file
   local waited=0
   local drain_started_at
   local announced=0
@@ -1075,11 +1119,17 @@ drain_condemned_run_commands() {
   # running". The captured set, not a re-scan, is what the drain confirms
   # against.
   gate_drain_capture=""
+  # Per token, not per run: the dedup set is what stops a PID being recorded
+  # twice, and carrying it across tokens would skip a PID that has since been
+  # recycled by a process belonging to the next one — recording it under no
+  # identity check at all.
+  gate_drain_seen=""
   captured_file=""
   [[ -z "$gate_lock_root_dir" ]] || captured_file="${gate_lock_root_dir}/captured.${token}"
   # Every process found from here on is appended as it is discovered.
   gate_drain_capture_file="$captured_file"
   gate_drain_capture_unpersisted=0
+  gate_drain_scan_failed=0
   # Start from what an earlier drain wrote down before it was interrupted. Its
   # tagged processes are very likely already gone — killing them is what the
   # first pass does — so a fresh tag scan on its own would come back empty and
@@ -1100,14 +1150,16 @@ drain_condemned_run_commands() {
   # first signal kills the tagged wrapper and with it the only handle to
   # anything the walk did not already record. Two walks are not a proof, but
   # they cost 200ms on a path that runs only after a crash.
-  for wrapper in $(gate_run_tagged_pids "$token"); do
+  gate_drain_tagged_now="$(gate_run_tagged_pids "$token")"
+  for wrapper in $gate_drain_tagged_now; do
     capture_process_tree "$wrapper"
   done
   sleep 0.2
-  for wrapper in $(gate_run_tagged_pids "$token"); do
+  gate_drain_tagged_now="$(gate_run_tagged_pids "$token")"
+  for wrapper in $gate_drain_tagged_now; do
     capture_process_tree "$wrapper"
   done
-  if [[ -z "${gate_drain_capture//[[:space:]]/}" ]]; then
+  if [[ -z "${gate_drain_capture//[[:space:]]/}" && "$gate_drain_scan_failed" -eq 0 ]]; then
     [[ -z "$captured_file" ]] || rm -f "$captured_file"
     [[ -z "$gate_lock_root_dir" ]] || rm -f "${gate_lock_root_dir}/holder.${token}"
     return 0
@@ -1132,7 +1184,10 @@ drain_condemned_run_commands() {
 
   while :; do
     alive=""
+    alive_identities=""
     unverified=""
+    gate_drain_scan_failed=0
+    gate_drain_tagged_now="$(gate_run_tagged_pids "$token")"
     while IFS='|' read -r pid recorded; do
       [[ -n "$pid" ]] || continue
       # Only signal something that reads as a PID. Appends are single short
@@ -1143,10 +1198,19 @@ drain_condemned_run_commands() {
       [[ "$pid" =~ ^[0-9]+$ ]] || continue
       kill -0 "$pid" 2>/dev/null || continue
       if [[ "$recorded" == "$gate_lock_identity_unavailable" ]]; then
-        # This host cannot identify processes at all, so the tag that led us
-        # to this tree is the only selector there is. Signalling on PID alone
-        # is the pre-identity behaviour, kept only where nothing better exists.
-        alive="${alive}${pid} "
+        # This host cannot identify processes at all, so a handle it still
+        # carries is the only selector there is. Signalling on PID alone would
+        # kill whatever inherited the number; a PID that no longer answers to
+        # any of this run's handles is therefore left alone and named, and it
+        # keeps the drain open rather than discharging it.
+        if gate_drain_membership_holds "$pid" ""; then
+          alive="${alive}${pid} "
+        else
+          case " ${unverified} " in
+            *" ${pid} "*) : ;;
+            *) unverified="${unverified}${pid} " ;;
+          esac
+        fi
         continue
       fi
       current="$(gate_lock_process_start "$pid")"
@@ -1174,13 +1238,16 @@ drain_condemned_run_commands() {
         continue
       fi
       alive="${alive}${pid} "
+      alive_identities="${alive_identities}${pid}|${recorded}
+"
     done << EOF
 $gate_drain_capture
 EOF
 
     # Unverifiable entries keep the drain open even though nothing is sent to
-    # them: "we could not check" is not "it is gone".
-    [[ -n "$alive" || -n "$unverified" ]] || break
+    # them: "we could not check" is not "it is gone". A scan that failed counts
+    # the same way — an unanswered question is not an empty answer.
+    [[ -n "$alive" || -n "$unverified" || "$gate_drain_scan_failed" -ne 0 ]] || break
 
     if [[ "$waited" -ge "$gate_lock_orphan_drain_bound_seconds" ]]; then
       # Refusing to run is the whole point: proceeding here is exactly the
@@ -1189,6 +1256,8 @@ EOF
         echo "error: commands from the previous run are still alive after ${waited}s: ${alive}" >&2
       [[ -z "$unverified" ]] ||
         echo "error: processes from the previous run could not be identified after ${waited}s, so none were signalled: ${unverified}" >&2
+      [[ "$gate_drain_scan_failed" -eq 0 ]] ||
+        echo "error: the scan for the previous run's processes kept failing after ${waited}s, so it is not known whether any are left." >&2
       echo "Nothing has been executed. Investigate those processes, then re-run." >&2
       exit 2
     fi
@@ -1203,13 +1272,30 @@ EOF
       exit 2
     fi
 
-    for pid in $alive; do
+    # Identity is re-read here rather than trusted from the census above. The
+    # two are separated by the whole census, the bound check and the persist
+    # check, and a PID recycled inside that gap would be signalled on the
+    # strength of a check that passed for a process which no longer exists.
+    while IFS='|' read -r pid recorded; do
+      [[ -n "$pid" ]] || continue
+      if [[ "$recorded" != "$gate_lock_identity_unavailable" ]]; then
+        current="$(gate_lock_process_start "$pid")"
+        if [[ -z "$current" || "$current" != "$recorded" ]]; then
+          # Gone, or somebody else now. Either way this signal is not ours to
+          # send; the next census re-classifies it.
+          continue
+        fi
+      elif ! gate_drain_membership_holds "$pid" ""; then
+        continue
+      fi
       if [[ "$escalated" -eq 1 ]]; then
         kill -KILL "$pid" 2>/dev/null || true
       else
         kill -TERM "$pid" 2>/dev/null || true
       fi
-    done
+    done << EOF
+$alive_identities
+EOF
     # After the first pass the tag carrier is usually dead, which is exactly
     # the state a successor has to be able to inherit.
     [[ "$waited" -ne 0 ]] || gate_lock_test_crash after-drain-term
@@ -1233,7 +1319,8 @@ EOF
     # Re-asked of the token as well, not only of the survivors: a command that
     # forks a replacement and then exits leaves nothing to walk down from, and
     # the replacement is discoverable only by the token it inherited.
-    for pid in $alive $(gate_run_tagged_pids "$token"); do
+    gate_drain_tagged_now="$(gate_run_tagged_pids "$token")"
+    for pid in $alive $gate_drain_tagged_now; do
       capture_process_tree "$pid"
     done
   done
@@ -5155,6 +5242,17 @@ assert_gate_run_lock_still_ours
 # a clock: the watchdogs that would clean them up can be descheduled by the same
 # pressure that killed the gate, or suspended along with the laptop.
 drain_condemned_runs
+
+# Asked again, and this is what orders the drain against publishers rather than
+# hoping they are quiet. Publishing an obligation is not synchronised with the
+# lock — but every publisher derives one from a record on disk, and while this
+# run holds an untouched lock there is no such record to derive from: a remnant
+# under this lock can only exist if this run's own record was renamed away, and
+# a run condemning what it took has taken ours. So either nothing could have
+# been published after the last empty scan, or the record no longer names us
+# and this stops. The publications that can still land are duplicates of
+# obligations this run already drained, whose processes are already gone.
+assert_gate_run_lock_still_ours
 
 run_prerequisite_phase "preflight" "${preflight_commands[@]+"${preflight_commands[@]}"}"
 run_prerequisite_phase "codegen" "${codegen_commands[@]+"${codegen_commands[@]}"}"

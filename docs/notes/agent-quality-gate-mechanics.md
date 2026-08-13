@@ -387,11 +387,18 @@ of them.
 
    The scan repeats until a pass finds nothing, because obligations are still
    being published while the drain runs: a waiter condemning some third run's
-   remnant does not wait for the lock. What that does not close is the gap
-   between the last empty pass and the first mapped command. Publishing an
-   obligation and holding the lock are not ordered against each other, and no
-   arrangement of files at this shell's floor makes them so — recorded here
-   because it is the residual, not because it is closed.
+   remnant does not wait for the lock. The gap between that last empty pass and
+   the first mapped command is closed by asking ownership again rather than by
+   synchronising the publishers. Every publisher derives an obligation from a
+   record on disk, and while a run holds an untouched lock there is no such
+   record to derive from — a remnant under this lock exists only if this run's
+   own record was renamed away, and a run condemning what it took has taken
+   ours. So either nothing could have been published after the last empty scan,
+   or the record no longer names us and the run stops with exit 2. What can
+   still land is a duplicate of an obligation this drain already discharged,
+   published by a waiter that was mid-flight over a remnant this run had
+   already condemned itself; its processes are gone, and draining a token twice
+   is a no-op.
 
    The same applies to the captured tree, one level down. A drain's first pass
    kills the tag carrier, so from that moment the only record of what it was
@@ -477,6 +484,29 @@ of them.
    argv, environment, descriptor — and captures whatever is new. Where no
    inherited handle is readable the argv tag stands alone, and a command of
    that shape can still escape; nothing at this shell's floor closes that.
+
+   Everything a PID authorises is re-checked at the moment it is used, because
+   every one of these answers goes stale. Enumeration and the identity read are
+   two calls with a gap, so a PID recorded from a walk is confirmed to still be
+   one of ours — still carrying a handle, or still a child of the process the
+   walk reached it through — and one that cannot be confirmed is recorded with
+   no identity, which is never signalled and holds the drain open. The census
+   and the signal are separated by the bound and persist checks, so identity is
+   read again immediately before each `kill` rather than trusted from the
+   census. On a host with no identity source at all, a captured PID is signalled
+   only while it still answers to one of the run's handles. And the set that
+   stops a PID being recorded twice is per token, not per run: carried across
+   tokens it would skip a PID that has since been recycled by a process
+   belonging to the next one, recording it under no identity check at all.
+
+   **A scan that failed is not a scan that found nothing.** `pgrep` and `lsof`
+   both exit 1 for "no match" and above that for a real failure, and reading
+   the second as the first would discharge an obligation on the strength of a
+   question that was never answered. A failed scan keeps the drain open exactly
+   as an unverifiable process does, and fails closed at the bound with its own
+   line. Skipping an unreadable `/proc/<pid>/environ` is not that case: it means
+   another user's process, which cannot be one of ours, so it is a scope rather
+   than a swallowed error.
 
 8. **Elapsed time comes from the clock, not from counting sleeps.** A loop that
    adds its own poll interval per iteration is measuring what it asked for. Any
