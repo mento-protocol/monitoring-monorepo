@@ -3542,6 +3542,68 @@ await test("SECOND LOOK: its OWN shortfall is reported through `full`, which doe
   );
 });
 
+await test("SECOND LOOK: `full` is a SENTINEL fact — a queue EXACTLY at the ceiling is not 'more remains'", async () => {
+  // The boundary the plain `rawCount >= limit` form gets wrong, and the whole
+  // reason this pass reads ONE row past its own ceiling. `full` is published on
+  // the tracker as `— and MORE rows sit past even that`, the standing regrowth
+  // tripwire: a definite claim that the queue is outgrowing one run's reach.
+  // At EXACTLY `skip + SECOND_LOOK_LIST_ROWS` raw rows nothing sits past the
+  // second look, so the claim is false — and false PERMANENTLY, because that
+  // state is stable: the operator is told to act on growth that is not there.
+  //
+  // NEGATIVE CONTROL: drop `sentinel: true` from resolveSecondLook's list call,
+  // or revert `full` in listCodeFixStubsPage to `list.length >= limit`, and the
+  // exactly-at-the-ceiling assertion below flips to true while the one-row-past
+  // assertion stays true — the flag stops distinguishing the two states at all.
+  const skip = Math.min(MAX_CANDIDATE_EVALUATIONS, LIST_LIMIT);
+  assertEqual(
+    skip,
+    LIST_LIMIT,
+    "starvedWindowStubs fills exactly LIST_LIMIT window rows, so the offset must be that",
+  );
+
+  // Exactly at the ceiling: skip + SECOND_LOOK_LIST_ROWS raw rows, none beyond.
+  const { window: exact } = await selectAutofixRun(
+    { repo: "o/r", cap: 2 },
+    {
+      runGh: makeRunGh({
+        stubs: starvedWindowStubs({ further: SECOND_LOOK_LIST_ROWS }),
+      }).runGh,
+    },
+  );
+  assertEqual(exact.secondLook, true, "the second look must have run");
+  assertEqual(
+    exact.secondLookTotal,
+    SECOND_LOOK_LIST_ROWS,
+    "and it must have read its whole row cap, or the boundary is not exercised",
+  );
+  assertEqual(
+    exact.secondLookFull,
+    false,
+    "a queue that ENDS at the ceiling must not be reported as having more past it",
+  );
+
+  // One row beyond: the sentinel comes back, and the claim becomes true.
+  const { window: past } = await selectAutofixRun(
+    { repo: "o/r", cap: 2 },
+    {
+      runGh: makeRunGh({
+        stubs: starvedWindowStubs({ further: SECOND_LOOK_LIST_ROWS + 1 }),
+      }).runGh,
+    },
+  );
+  assertEqual(
+    past.secondLookTotal,
+    SECOND_LOOK_LIST_ROWS,
+    "the counts are identical either side of the boundary — only `full` moves",
+  );
+  assertEqual(
+    past.secondLookFull,
+    true,
+    "ONE row past the ceiling must be reported as more remaining",
+  );
+});
+
 await test("PIN: MAX_SECOND_LOOK_EVALUATIONS may never exceed SECOND_LOOK_LIST_ROWS (the same no-op trap, on the pass this leg added)", () => {
   // The invariant that `MAX_CANDIDATE_EVALUATIONS <= LIST_LIMIT` pins is
   // GENERIC — the row cap is applied server-side BEFORE the evaluation slice —
@@ -3578,10 +3640,14 @@ await test("SECOND LOOK: the list it issues asks for exactly the rows past what 
   //      from LIST_LIMIT. They are equal today, but under a LOWER eval cap a
   //      LIST_LIMIT skip would jump the rows between the two — read by neither
   //      pass, a permanent hole in the middle of the window.
+  //   3. the trailing `+ 1` is the SENTINEL row that makes `full` a fact rather
+  //      than a guess, and it is the entire API-request delta the cost bound
+  //      documents (301 rows = 4 pages, not 3).
   //
   // NEGATIVE CONTROL: change `skipRawRows` back to `LIST_LIMIT` while lowering
   // MAX_CANDIDATE_EVALUATIONS, or drop `skipRawRows` so the second look re-reads
-  // from row 0, and the offset assertion below fails.
+  // from row 0, and the offset assertion below fails; drop `sentinel: true` and
+  // the same assertion fails on the `+ 1`.
   const stubs = starvedWindowStubs({ further: 3 });
   const { runGh, calls } = makeRunGh({ stubs });
   await selectAutofixRun({ repo: "o/r", cap: 2 }, { runGh });
@@ -3600,8 +3666,8 @@ await test("SECOND LOOK: the list it issues asks for exactly the rows past what 
   );
   assertEqual(
     windowLimit(windowLists[1]),
-    expectedSkip + SECOND_LOOK_LIST_ROWS,
-    "the second look asks for the first pass's offset PLUS its own row cap",
+    expectedSkip + SECOND_LOOK_LIST_ROWS + 1,
+    "the second look asks for the first pass's offset PLUS its own row cap PLUS the sentinel row",
   );
 });
 
@@ -4093,6 +4159,192 @@ await test("SECOND LOOK: a RATE-LIMITED list read degrades the run instead of fa
   assert(
     truncations.rateLimited > 0,
     "the throttle must reach the disposition flip, not die with the step",
+  );
+});
+
+/** A rejection shaped like the one `defaultRunGh` builds for a throttled call:
+ * the argv-carrying message plus gh's own stderr on `ghStderr`, which is the
+ * only half `isRateLimitFailure` may be run against. */
+function throttleError(argv = "gh issue list --repo o/r") {
+  const err = new Error(`${argv} failed with exit 1`);
+  err.ghStderr = "HTTP 403: API rate limit exceeded for user ID 1234.";
+  return err;
+}
+
+/** Round-trip a run through the report writer the CLI uses, so a fail-closed
+ * assertion covers the channel the disposition flip ACTUALLY rides — the
+ * truncations file — instead of only the returned object. Returns the parsed
+ * file plus whether the degraded signal survived. */
+function writeAndReadTruncations(run) {
+  const dir = mkdtempSync(join(tmpdir(), "autofix-select-failclosed-"));
+  try {
+    const truncationsOut = join(dir, "truncations.json");
+    const { lostDegradedSignal } = writeRunReports({ truncationsOut }, run);
+    return {
+      lostDegradedSignal,
+      written: JSON.parse(readFileSync(truncationsOut, "utf8")),
+    };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+await test("FAIL CLOSED: a THROTTLED FIRST window list degrades the run instead of failing the step", async () => {
+  // The third and last unhandled throw site, and the one on the most common
+  // path: the batch run's very FIRST read. `instrumentRunGh` counts the throttle
+  // and RETHROWS by design (so every fail-soft handler downstream keeps its
+  // exact behaviour), so the rejection left `selectAutofixRun` untouched, `main`
+  // set exit 1, and the step died under `set -euo pipefail` — taking the JSON
+  // array, the `::error::` line, `truncations.rateLimited` and the
+  // `degraded-rate-limited` disposition with it. The run went out as a select
+  // FAILURE with no record of why, which is the exact inverse of the contract
+  // this leg is built on. The second look's list was already wrapped for this
+  // reason; this one and the dispatch read were missed.
+  //
+  // NEGATIVE CONTROL: remove the try/catch around `listCodeFixStubsPage` in
+  // selectAutofixRun and this test throws instead of returning.
+  const { runGh: base } = makeRunGh({
+    stubs: starvedWindowStubs({ further: 3 }),
+  });
+  const runGh = async (args) => {
+    if (isWindowListArgs(args)) throw throttleError();
+    return base(args);
+  };
+  const { result, stderr } = await captureStderr(() =>
+    selectAutofixRun({ repo: "o/r", cap: 2 }, { runGh }),
+  );
+  // The invariant the workflow header asserts: ALWAYS a valid array, NEVER a
+  // throw. Reaching this line at all is half the assertion.
+  assert(
+    Array.isArray(result.entries),
+    "the leg must still emit a valid array",
+  );
+  assertDeepEqual(result.entries, []);
+  assert(
+    result.truncations.rateLimited > 0,
+    "the degradation must be reported, not silent",
+  );
+  assertEqual(
+    result.window.total,
+    0,
+    "a window that was never read must not claim stubs it did not see",
+  );
+  assertEqual(result.window.evaluated, 0);
+  assertEqual(result.window.ghCalls, 1, "and the one issued read is counted");
+  assert(
+    stderr.includes("::error::selection DEGRADED"),
+    `the loud report must still be written, got: ${stderr}`,
+  );
+  // exit 0: `main` fails the step only when the degraded signal is LOST, so the
+  // report has to survive the file layer too — that is the channel the
+  // disposition flip rides.
+  const { lostDegradedSignal, written } = writeAndReadTruncations(result);
+  assertEqual(lostDegradedSignal, false, "the degraded run still exits 0");
+  assert(
+    written.rateLimited > 0,
+    `the truncations file must carry the throttle, got: ${JSON.stringify(written)}`,
+  );
+});
+
+await test("FAIL CLOSED: a THROTTLED dispatch readStub degrades the run instead of failing the step", async () => {
+  // The dispatch path's first read, same shape and the same stakes: the
+  // documented remedy for a stalled leg must not be the one path that turns a
+  // throttle into a dead step with no run record.
+  //
+  // NEGATIVE CONTROL: remove the try/catch around `readStub` in the
+  // `options.issue != null` branch and this test throws instead of returning.
+  const { runGh: base } = makeRunGh({
+    stubs: [stub({ number: 8400, shortId: "ANALYTICS-MENTO-ORG-DR" })],
+  });
+  const runGh = async (args) => {
+    if (args[0] === "issue" && args[1] === "view") {
+      throw throttleError("gh issue view 8400 --repo o/r");
+    }
+    return base(args);
+  };
+  const { result, stderr } = await captureStderr(() =>
+    selectAutofixRun({ repo: "o/r", issue: 8400 }, { runGh }),
+  );
+  assert(
+    Array.isArray(result.entries),
+    "the leg must still emit a valid array",
+  );
+  assertDeepEqual(result.entries, []);
+  assert(result.truncations.rateLimited > 0, "the degradation is reported");
+  assertEqual(
+    result.window.evaluated,
+    0,
+    "the stub was never read, so it was never evaluated",
+  );
+  assert(
+    stderr.includes("::error::selection DEGRADED"),
+    `the loud report must still be written, got: ${stderr}`,
+  );
+  const { lostDegradedSignal, written } = writeAndReadTruncations(result);
+  assertEqual(lostDegradedSignal, false, "the degraded run still exits 0");
+  assert(written.rateLimited > 0, "the truncations file carries the throttle");
+});
+
+await test("FAIL CLOSED: a NON-throttle failure on those same reads still FAILS the step, unchanged", async () => {
+  // The scoping half, and the reason the two catches above test
+  // `state.rateLimited` rather than swallowing everything. A rate limit is the
+  // dedupe hazard this leg fails closed against — the read did not answer, and
+  // selecting on that opens duplicate PRs — so it degrades and reports. A
+  // TOTAL failure of the same read (transport gone, malformed body, dead token)
+  // is a different thing: nothing was read, so nothing can be wrongly selected,
+  // there is no window to report on, and a dead step is the louder and more
+  // actionable signal than a green run rendering as an idle queue. That is the
+  // behaviour on main and this round deliberately preserves it.
+  //
+  // NEGATIVE CONTROL: change either new catch to swallow unconditionally (drop
+  // its `if (state.rateLimited === 0) throw err;`) and every assertion below
+  // flips — each call resolves to a clean `[]` and the failure goes silent.
+  const stubs = starvedWindowStubs({ further: 3 });
+  const rejects = async (runGh, options, what) => {
+    let threw = false;
+    try {
+      await selectAutofixRun(options, { runGh });
+    } catch {
+      threw = true;
+    }
+    assert(threw, `${what} must still reject`);
+  };
+
+  // Transport failure on the first window list.
+  const { runGh: listBase } = makeRunGh({ stubs });
+  await rejects(
+    async (args) => {
+      if (isWindowListArgs(args)) {
+        throw new Error("gh issue list failed with exit 1:\nread ECONNRESET");
+      }
+      return listBase(args);
+    },
+    { repo: "o/r", cap: 2 },
+    "a transport failure on the window list",
+  );
+
+  // Malformed body on the same read: never a `gh` rejection at all, so the
+  // throttle latch cannot have fired and the JSON.parse throw must propagate.
+  const { runGh: jsonBase } = makeRunGh({ stubs });
+  await rejects(
+    async (args) => (isWindowListArgs(args) ? "not json" : jsonBase(args)),
+    { repo: "o/r", cap: 2 },
+    "a malformed window list body",
+  );
+
+  // And the dispatch read.
+  const { runGh: dispatchBase } = makeRunGh({
+    stubs: [stub({ number: 8401, shortId: "ANALYTICS-MENTO-ORG-DQ" })],
+  });
+  await rejects(
+    async (args) => {
+      if (args[0] === "issue" && args[1] === "view") {
+        throw new Error("gh issue view 8401 failed with exit 1:\nHTTP 404");
+      }
+      return dispatchBase(args);
+    },
+    { repo: "o/r", issue: 8401 },
+    "a 404 on the dispatch stub read",
   );
 });
 

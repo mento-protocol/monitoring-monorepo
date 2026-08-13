@@ -955,7 +955,7 @@ is how a drift detector ends up compared against a ceiling it can never reach:
 | unit                 | what it is                                                                         | worst case, first pass | + second look |
 | -------------------- | ---------------------------------------------------------------------------------- | ---------------------- | ------------- |
 | `gh` **invocations** | serial subprocesses; ≈ 1 s each, so this is what the job **timeout** is spent in   | 521                    | **782**       |
-| API **requests**     | what the rate limiter **bills**; `gh issue list` paginates at 100 rows per request | 522                    | **785**       |
+| API **requests**     | what the rate limiter **bills**; `gh issue list` paginates at 100 rows per request | 522                    | **786**       |
 
 The first pass: one window list invocation (2 requests at 200 rows) +
 `MAX_CANDIDATE_EVALUATIONS` (200) × 2 reads (issue view + PR list) +
@@ -994,14 +994,19 @@ the ~782-invocation worst case fits at ~52% of the budget with room for checkout
 setup, and API-latency spikes rather than being sized to hope. CI minutes are free
 on this public repo's `ubuntu-latest`, so that headroom costs nothing.
 
-**The timeout is not the only constraint.** Split the ~785 requests by bucket
+**The timeout is not the only constraint.** Split the ~786 requests by bucket
 against the free-plan budgets (1,000 core req/hr per repo, 1,000 GraphQL points/hr,
 both SHARED with every other workflow in this repo):
 
-- **GraphQL ≈ 485** — 6 list pages + 300 `issue view` + 60 `in:title` searches +
+- **GraphQL = 486** — 6 list pages + 300 `issue view` + 60 `in:title` searches +
   60 `in:comments` probes + 60 verify reads. `gh issue list --search` routes to
-  GraphQL, not the REST search bucket.
-- **REST core = 300** — one `gh api repos/…/pulls` per evaluated stub.
+  GraphQL, not the REST search bucket. The 6 pages are **2 + 4**: the first
+  pass asks for 200 rows (2 pages at 100 rows/request) and the second look for
+  301 (3 full pages plus a fourth holding only its sentinel row — see "Bounded
+  second look"). The 300 `issue view` are the per-stub verdict reads, 200 in the
+  first pass and 100 in the second; each family term is likewise its first-pass
+  cap plus the second look's half (40+20).
+- **REST core = 300** — one `gh api repos/…/pulls` per evaluated stub (200 + 100).
 
 So one worst-case run burns **~49% of the repo's hourly GraphQL budget and ~30% of
 core in 13 minutes**, while `agent` (30 min) and `finalize` (15 min) do their own
@@ -1036,9 +1041,10 @@ run — and a selectable stub sitting one row past the list ceiling is never
 evaluated, at any point, ever. When the first pass yields **zero** selectable
 entries **and** the list came back **full** (`rawCount >= LIST_LIMIT`, so more may
 exist), the selector takes ONE bounded pass over the rows beyond that ceiling: a
-single `gh issue list --limit <skip> + SECOND_LOOK_LIST_ROWS` with the first
+single `gh issue list --limit <skip> + SECOND_LOOK_LIST_ROWS + 1` with the first
 `<skip>` **raw** rows dropped client-side (raw, because `--limit` is applied
-server-side before the project filter, so a filtered-row skip would not line up).
+server-side before the project filter, so a filtered-row skip would not line up)
+and the trailing `+ 1` **sentinel** row dropped before anything reads it.
 It evaluates at most `MAX_SECOND_LOOK_EVALUATIONS` (100) of them and resolves
 families over them on its OWN halved budgets (20 handled-id / 20 reverse probe /
 20 verify read) — the first pass has already spent the per-run ones — but over the
@@ -1072,13 +1078,40 @@ list read FAILED`** when it could not read at all. That `full` flag, not the cou
 is the standing tripwire for queue regrowth: `N` is clamped by the row cap, so the
 counts alone read identically whether 100 stubs or 5,000 sit past the ceiling.
 
-Its list read is the one `gh` call in this leg with no fail-soft handler under it,
-and the second look put it on the frequent path — once the queue is ≥ `LIST_LIMIT`
-rows, EVERY no-selection run depends on it. It is caught rather than allowed to
-propagate: an uncaught rejection would exit 1 and kill the step under `set -euo
-pipefail`, destroying the whole run record including the DEGRADED line a throttled
-run needs most. The first pass selected nothing by precondition, so nothing is lost
-by standing on its result.
+That is why the second look's `full` is a **sentinel** read rather than the first
+pass's `rawCount >= limit` form. The two differ at exactly one queue size — when
+`skip + SECOND_LOOK_LIST_ROWS` raw rows exist and nothing is past them — and there
+the weaker form states on the tracker that more rows remain and the queue is
+outgrowing one run's reach, which is false. So the second look asks for one row
+past its ceiling, never evaluates it, and raises `full` only when it comes back.
+The **cost delta is one API request per second look** (301 rows is four 100-row
+pages instead of three), no extra `gh` invocation and no extra per-stub read; it
+is the whole difference between the 785 this leg would otherwise bill and the 786
+above. The first pass keeps the cheaper form on purpose: its `full` only decides
+whether to run this pass, and over-firing costs one list call on a run that
+already selected nothing — far less than an extra request on **every** run.
+
+Three `gh` calls in this leg have no fail-soft handler under them: the first
+pass's window list, the single-issue dispatch's `readStub`, and the second look's
+own list — which this pass put on the frequent path, since once the queue is ≥
+`LIST_LIMIT` rows EVERY no-selection run depends on it. All three are caught, and
+all three split the same way:
+
+- A **rate-limit-shaped** failure DEGRADES the run — `[]`, `rateLimited`, the
+  `::error::` line, exit 0. `instrumentRunGh` records the throttle and rethrows
+  (so every fail-soft handler downstream keeps its exact behaviour), so without
+  the catch the rejection reaches `main`, exits 1 and kills the step under `set
+-euo pipefail` — destroying the whole run record including the DEGRADED line a
+  throttled run needs most. The second look's own failure additionally reports
+  `secondLookFailed` and stands on the first pass's result, which by precondition
+  selected nothing, so nothing is lost.
+- **Any other** failure still propagates and fails the step, unchanged. A
+  malformed body, a dead token or a missing `gh` means the run cannot see its
+  queue at all; there is no window to report on, nothing can be wrongly selected
+  from a read that never happened, and a failed step is the louder signal. The
+  fail-closed work deliberately did not touch it. (The second look is the one
+  exception, and only because the first pass's report is already complete and
+  valid: its non-throttle failure is a `::warning::` plus `secondLookFailed`.)
 
 The arithmetic that sizes it: 521 (first pass) + 1 list invocation + 2×100 reads +
 60 family budget = **782** serial invocations, ~13 min at 1.0 s/call, ~52% of the

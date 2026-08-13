@@ -144,15 +144,20 @@ jobs:
     #   TOTAL ≈ 782 invocations ≈ 13 min at a pessimistic ~1 s/call, ~52% of this
     #   budget, leaving room for checkout/setup and API-latency spikes.
     # In API REQUESTS — the unit the rate limiter bills, since `gh issue list`
-    # paginates at 100 rows per request — the same worst case is ~785. Do NOT
+    # paginates at 100 rows per request — the same worst case is 786. Do NOT
     # mix the two: the run record reports invocations. CI minutes are free on a
     # public repo's ubuntu-latest, so the timeout headroom itself costs nothing.
     #
-    # The timeout is NOT the only constraint. Split that ~785 by bucket against
+    # The timeout is NOT the only constraint. Split that 786 by bucket against
     # the free-plan budgets named on the rate-budget steps below (1,000 core
     # req/hr per repo, 1,000 GraphQL points/hr, both SHARED with every other
-    # workflow): ~485 GraphQL (6 list pages + 300 `issue view` + 60 `in:title` +
-    # 60 `in:comments` + 60 verify reads) and ~300 REST core (`gh api …/pulls`).
+    # workflow): 486 GraphQL (6 list pages + 300 `issue view` + 60 `in:title` +
+    # 60 `in:comments` + 60 verify reads) and 300 REST core (`gh api …/pulls`).
+    # The 6 list pages are 2 + 4: 200 rows for the first pass, 301 for the
+    # second look — its 300 plus ONE sentinel row that lands alone on a fourth
+    # page and makes its "MORE rows sit past even that" tracker line a fact
+    # instead of a guess at the boundary. Every other term is the first pass's
+    # cap plus the second look's half (200+100 stub reads, 40+20 per budget).
     # One worst-case run is therefore ~49% of the repo's hourly GraphQL budget
     # and ~30% of core, inside 13 minutes, while `agent` and `finalize` do their
     # own `gh` work in the same hour. That is a ~2x margin, not a non-issue —

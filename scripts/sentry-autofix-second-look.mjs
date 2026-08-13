@@ -30,11 +30,14 @@
  *   first pass  = 1 list invocation (2 requests, 200 rows) + 2 × 200 per-stub
  *                 reads + 120 family budget (40 handled-id + 40 reverse probe +
  *                 40 verify read) = 521 invocations / 522 requests
- *   second look = 1 list invocation (3 requests: 300 rows) + 2 × 100 per-stub
- *                 reads + 60 family budget (20 each) = 261 invocations /
- *                 263 requests
+ *   second look = 1 list invocation (4 requests: 301 rows — the 300 it reads
+ *                 plus ONE sentinel row, which lands alone on a fourth page and
+ *                 is counted, never evaluated) + 2 × 100 per-stub reads + 60
+ *                 family budget (20 each) = 261 invocations / 264 requests
  *   TOTAL       = 782 invocations ≈ 13.0 min at a pessimistic 1.0 s/call = 52%
- *                 of the 25-minute select timeout; 785 API requests.
+ *                 of the 25-minute select timeout; 786 API requests.
+ * The sentinel is the whole delta between 785 and 786, and it buys `full` the
+ * difference between "the page filled up" and "a row really does sit past this".
  * Raising any constant here re-opens BOTH sums — the timeout above and
  * the per-bucket rate budget in docs/notes/sentry-triage-pipeline.md § "Cost
  * bound". The select suite pins the invocation total against
@@ -123,11 +126,19 @@ export const SECOND_LOOK_FAMILY_BUDGETS = {
  * already proven rather than re-deriving them on a smaller budget.
  *
  * `full` is the "there is MORE past even this" signal, taken off the raw row
- * count exactly like the first pass's. It is the honest replacement for the
- * `total > evaluated` truncation this pass used to report: `total` is clamped by
- * SECOND_LOOK_LIST_ROWS by construction, so it reads the same whether 100 or
- * 5,000 stubs sit past the ceiling, whereas `full` distinguishes "we reached the
- * end of the queue" from "the queue is growing past what one run can see".
+ * count. It is the honest replacement for the `total > evaluated` truncation
+ * this pass used to report: `total` is clamped by SECOND_LOOK_LIST_ROWS by
+ * construction, so it reads the same whether 100 or 5,000 stubs sit past the
+ * ceiling, whereas `full` distinguishes "we reached the end of the queue" from
+ * "the queue is growing past what one run can see".
+ *
+ * It is a SENTINEL read, not the first pass's `rawCount >= limit` form. The two
+ * differ at exactly one point — a queue holding precisely `skipRawRows +
+ * SECOND_LOOK_LIST_ROWS` raw rows — and that point is where the weaker form is
+ * simply wrong: nothing sits past the second look, yet the tracker states that
+ * more rows remain and the queue is outgrowing one run's reach. The first pass
+ * can afford the guess (its `full` only decides whether to run this pass); a
+ * line an operator reads as a standing regrowth tripwire cannot.
  */
 export async function resolveSecondLook(runGh, repo, cap, options = {}) {
   const skipRawRows =
@@ -137,6 +148,16 @@ export async function resolveSecondLook(runGh, repo, cap, options = {}) {
   const beyond = await listCodeFixStubsPage(runGh, repo, {
     limit: skipRawRows + SECOND_LOOK_LIST_ROWS,
     skip: skipRawRows,
+    // Ask for ONE row past the ceiling so `full` is a FACT, not a guess. This
+    // pass PUBLISHES `full` on the tracker as "and MORE rows sit past even
+    // that" — a definite claim about the queue — and the default
+    // `rawCount >= limit` form asserts exactly that at the boundary where it is
+    // false: a queue holding precisely `skipRawRows + SECOND_LOOK_LIST_ROWS`
+    // raw rows has NOTHING past the second look, yet reads as outgrowing one
+    // run's reach forever. The sentinel row is dropped before anything reads or
+    // counts it, so the evaluated set and every per-stub budget are unchanged;
+    // it costs ONE extra API request per second look (see § COST ARITHMETIC).
+    sentinel: true,
   });
   const evaluable = beyond.stubs.slice(0, MAX_SECOND_LOOK_EVALUATIONS);
   if (beyond.stubs.length > evaluable.length) {

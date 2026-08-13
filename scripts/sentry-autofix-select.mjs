@@ -222,6 +222,32 @@ function instrumentRunGh(baseRunGh, state) {
   };
 }
 
+/** The Window tripwire record at its zero state — every field the workflow's
+ * `jq` reads, before anything has been counted. One source rather than a literal
+ * per return path: the workflow reads these key names, so a typo in one copy
+ * silently zeroes a line of the run record and no test that asserts the returned
+ * OBJECT would see it. */
+const emptyWindow = () => ({
+  total: 0,
+  evaluated: 0,
+  secondLook: false,
+  secondLookTotal: 0,
+  secondLookEvaluated: 0,
+  secondLookFull: false,
+  secondLookFailed: false,
+  ghCalls: 0,
+});
+
+/** The truncation record with nothing cut — the baseline the paths that never
+ * reach the family resolver return. Same reason as `emptyWindow`: `rateLimited`
+ * in particular is the one key the degraded disposition rides on. */
+const noTruncations = () => ({
+  handledOverflow: 0,
+  reverseBudget: false,
+  reverseNonconvergent: false,
+  rateLimited: 0,
+});
+
 /**
  * Run the selection and report EVERY half of its outcome: the matrix entries,
  * every candidate the family collapse stood down, and every stub the `fix_scope`
@@ -300,7 +326,42 @@ export async function selectAutofixRun(options, deps = {}) {
   // leg is itself silent, and an operator who dispatches an architectural stub
   // sees the same empty array as for an ineligible one.
   if (options.issue != null) {
-    const stub = await readStub(runGh, repo, options.issue);
+    let stub;
+    try {
+      stub = await readStub(runGh, repo, options.issue);
+    } catch (err) {
+      // THROTTLE ONLY, and this is the distinction the scope turns on.
+      //
+      // A RATE-LIMIT-shaped failure must DEGRADE. `instrumentRunGh` records the
+      // throttle and RETHROWS by design — so every fail-soft handler downstream
+      // keeps behaving exactly as it did — but this read has no handler under
+      // it, so the rejection would leave `selectAutofixRun`, reach `main`, set
+      // exit 1, and kill the step under `set -euo pipefail`. That destroys the
+      // `::error::` line, the `rateLimited` truncation and the disposition flip
+      // that ARE the fail-closed contract, on precisely the run they exist for.
+      // Degrade instead: zero entries, the loud report, exit 0.
+      //
+      // Any OTHER failure still rejects, unchanged. A missing issue, malformed
+      // JSON or a broken `gh` is not the hazard this leg fails closed against —
+      // nothing was read, so nothing can be wrongly SELECTED — and a dispatch
+      // that names an unreadable issue is an operator error whose loudest,
+      // most useful signal is a failed step. That is the behaviour on `main`
+      // and this round deliberately leaves it alone.
+      if (state.rateLimited === 0) throw err;
+      return degraded({
+        entries: [],
+        deferred: [],
+        skipped: [],
+        window: {
+          ...emptyWindow(),
+          // One issue was named, none was evaluated. Never `evaluated: 1`: the
+          // read that would have evaluated it is exactly what failed.
+          total: 1,
+          ghCalls: state.ghCalls,
+        },
+        truncations: noTruncations(),
+      });
+    }
     const candidate = await evaluateCandidate(runGh, repo, {
       number: stub.number,
       title: stub.title,
@@ -323,21 +384,12 @@ export async function selectAutofixRun(options, deps = {}) {
           ? []
           : [{ issue: candidate.issue, reason: candidate.skipReason }],
       window: {
+        ...emptyWindow(),
         total: 1,
         evaluated: 1,
-        secondLook: false,
-        secondLookTotal: 0,
-        secondLookEvaluated: 0,
-        secondLookFull: false,
-        secondLookFailed: false,
         ghCalls: state.ghCalls,
       },
-      truncations: {
-        handledOverflow: 0,
-        reverseBudget: false,
-        reverseNonconvergent: false,
-        rateLimited: 0,
-      },
+      truncations: noTruncations(),
     };
     // A dispatch dedupes on the SAME open-PR read the batch path does, so a
     // throttled one can open a duplicate just as easily.
@@ -348,7 +400,55 @@ export async function selectAutofixRun(options, deps = {}) {
     Number.isInteger(options.cap) && options.cap > 0
       ? options.cap
       : DEFAULT_CAP;
-  const page = await listCodeFixStubsPage(runGh, repo);
+  // The Window tripwire (PR #1810 cost bound): the record job renders "Window: N
+  // stubs, evaluated M" when N>M, so any approach toward the eval cap is
+  // reported on the tracker weeks ahead — never a silent truncation. Built
+  // BEFORE the window list, so a list read that never answers still has a report
+  // to degrade onto instead of taking the whole run record down with it.
+  const window = emptyWindow();
+
+  // The single greppable operator line for the run. It is emitted by the CALLER
+  // with the count that was actually emitted, not built inside `finish()`:
+  // `degraded()` replaces `entries` with `[]` AFTER `finish()` returns, so a
+  // line built there reported `entries=2` on runs that emitted zero — on exactly
+  // the fail-closed path, the one an operator greps this line to understand.
+  const summarize = (emitted) => {
+    process.stderr.write(
+      `gh-calls=${state.ghCalls} window=${window.evaluated}/${window.total} second-look=${window.secondLook ? `${window.secondLookEvaluated}/${window.secondLookTotal}${window.secondLookFull ? "+" : ""}${window.secondLookFailed ? " (failed)" : ""}` : "no"} entries=${emitted}\n`,
+    );
+  };
+
+  // The FIRST window list, and — like the dispatch `readStub` above and the
+  // second look's own list below — a `gh` call with no fail-soft handler under
+  // it. Same split, for the same reason:
+  //
+  //   THROTTLE -> DEGRADE. `instrumentRunGh` rethrows, so an uncaught rejection
+  //   here exits 1 and kills the step under `set -euo pipefail` — losing the
+  //   `::error::` line, `truncations.rateLimited` and the `degraded-rate-limited`
+  //   disposition on the one run that needs them. A throttled window read also
+  //   answers NOTHING about the queue, so `[]` is the only honest emission.
+  //
+  //   ANYTHING ELSE -> THROW, unchanged. A malformed JSON body, a dead token, a
+  //   missing `gh`: the run cannot see its queue at all, there is no window to
+  //   report on, and a failed step is the louder and more actionable signal than
+  //   a green run rendering as an idle one. That is `main`'s behaviour today and
+  //   the harden round leaves it exactly as it is.
+  let page;
+  try {
+    page = await listCodeFixStubsPage(runGh, repo);
+  } catch (err) {
+    if (state.rateLimited === 0) throw err;
+    window.ghCalls = state.ghCalls;
+    const report = degraded({
+      entries: [],
+      deferred: [],
+      skipped: [],
+      window,
+      truncations: noTruncations(),
+    });
+    summarize(report.entries.length);
+    return report;
+  }
   const stubs = page.stubs;
 
   // Evaluate the window before choosing, not just the first `cap`: the family
@@ -364,19 +464,8 @@ export async function selectAutofixRun(options, deps = {}) {
       `note: window has ${stubs.length} stubs; evaluating the oldest ${evaluable.length} (MAX_CANDIDATE_EVALUATIONS).\n`,
     );
   }
-  // The Window tripwire (PR #1810 cost bound): the record job renders "Window: N
-  // stubs, evaluated M" when N>M, so any approach toward the eval cap is
-  // reported on the tracker weeks ahead — never a silent truncation.
-  const window = {
-    total: stubs.length,
-    evaluated: evaluable.length,
-    secondLook: false,
-    secondLookTotal: 0,
-    secondLookEvaluated: 0,
-    secondLookFull: false,
-    secondLookFailed: false,
-    ghCalls: 0,
-  };
+  window.total = stubs.length;
+  window.evaluated = evaluable.length;
 
   const candidates = [];
   for (const stub of evaluable) {
@@ -406,17 +495,6 @@ export async function selectAutofixRun(options, deps = {}) {
   const deferred = first.deferred;
   const skipped = first.skipped;
   const runTruncations = { ...truncations, rateLimited: 0 };
-
-  // The single greppable operator line for the run. It is emitted by the CALLER
-  // with the count that was actually emitted, not built inside `finish()`:
-  // `degraded()` replaces `entries` with `[]` AFTER `finish()` returns, so a
-  // line built there reported `entries=2` on runs that emitted zero — on exactly
-  // the fail-closed path, the one an operator greps this line to understand.
-  const summarize = (emitted) => {
-    process.stderr.write(
-      `gh-calls=${state.ghCalls} window=${window.evaluated}/${window.total} second-look=${window.secondLook ? `${window.secondLookEvaluated}/${window.secondLookTotal}${window.secondLookFull ? "+" : ""}${window.secondLookFailed ? " (failed)" : ""}` : "no"} entries=${emitted}\n`,
-    );
-  };
 
   const finish = () => {
     window.ghCalls = state.ghCalls;

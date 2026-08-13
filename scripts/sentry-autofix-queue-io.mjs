@@ -192,11 +192,29 @@ export function defaultRunGh(args) {
  * applies before any client-side filter, so counting filtered rows would
  * re-read or skip stubs depending on how many the project filter dropped.
  *
- * Returns `{ stubs, rawCount, full }` — `full` (rawCount >= limit) is the
- * "there may be more" signal, taken off the RAW row count for the same reason.
- * The filtered `stubs` length cannot carry it: the project filter can drop rows,
- * so a genuinely full page can come back short and a second look that keyed on
- * it would never fire.
+ * Returns `{ stubs, rawCount, full }` — `full` is the "is there anything past
+ * this page?" signal, taken off the RAW row count. The filtered `stubs` length
+ * cannot carry it: the project filter can drop rows, so a genuinely full page
+ * can come back short and a second look that keyed on it would never fire.
+ *
+ * `full` has TWO strengths, and the caller picks by what it does with the answer.
+ * By default it is `rawCount >= limit` — "the page came back full, so rows MAY
+ * sit past it". That is right for a TRIGGER (being wrong costs one extra list
+ * call) and wrong for a CLAIM: at EXACTLY `limit` rows it asserts more remain
+ * when nothing does.
+ *
+ * `options.sentinel` buys the definite answer. The query asks for ONE row past
+ * the ceiling, that row is dropped before anything reads or counts it, and
+ * `full` becomes "a row beyond the ceiling really did come back". Cost: ONE
+ * extra API REQUEST on the calls that opt in, and zero extra `gh` invocations
+ * and zero extra per-stub reads — `gh issue list` paginates at 100 rows per
+ * request, so a 300-row ask (3 requests) becomes a 301-row ask (4, the last
+ * holding just the sentinel). Opt-in for exactly that reason: the second look
+ * PUBLISHES its `full` on the operator-facing tracker as the standing regrowth
+ * tripwire, so it pays; the first pass only uses `full` to decide whether to
+ * take a second look at all, and being conservative there costs one extra list
+ * call on a run that already selected nothing — cheaper than the extra request
+ * on EVERY run.
  */
 export async function listCodeFixStubsPage(runGh, repo, options = {}) {
   const limit =
@@ -205,6 +223,7 @@ export async function listCodeFixStubsPage(runGh, repo, options = {}) {
       : LIST_LIMIT;
   const skip =
     Number.isInteger(options.skip) && options.skip > 0 ? options.skip : 0;
+  const sentinel = options.sentinel === true;
   const stdout = await runGh([
     "issue",
     "list",
@@ -256,10 +275,16 @@ export async function listCodeFixStubsPage(runGh, repo, options = {}) {
     "--json",
     "number,title,labels,createdAt",
     "--limit",
-    String(limit),
+    String(sentinel ? limit + 1 : limit),
   ]);
   const parsed = JSON.parse(stdout);
-  const list = Array.isArray(parsed) ? parsed : [];
+  const returned = Array.isArray(parsed) ? parsed : [];
+  // The sentinel is COUNTED, never used. Trimming it here — before the skip, the
+  // project filter and the sort — is what keeps `limit` an honest ceiling: the
+  // page still delivers at most `limit` raw rows, so `rawCount`, the evaluable
+  // stubs and every per-stub read budget downstream are byte-identical to the
+  // same call without it.
+  const list = sentinel ? returned.slice(0, limit) : returned;
   const stubs = list
     .slice(skip)
     .map((issue) => ({
@@ -277,7 +302,13 @@ export async function listCodeFixStubsPage(runGh, repo, options = {}) {
     // `--search sort:created-asc` returns oldest-first, but keep the client-side
     // sort as defense-in-depth (same pattern as the triage select job).
     .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
-  return { stubs, rawCount: list.length, full: list.length >= limit };
+  return {
+    stubs,
+    rawCount: list.length,
+    // With the sentinel, `full` is a fact: a row past the ceiling came back.
+    // Without it, it is the weaker "the page filled up, so more MAY exist".
+    full: sentinel ? returned.length > limit : list.length >= limit,
+  };
 }
 
 /** The filtered window only — the shape every caller but the second look wants.
