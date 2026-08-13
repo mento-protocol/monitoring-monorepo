@@ -2386,6 +2386,12 @@ while IFS= read -r path; do
         scripts/sentry-autofix-select.mjs|scripts/sentry-autofix-select.test.mjs)
           add_command "pnpm sentry:autofix:select:test" "Sentry autofix select helper changed"
           ;;
+        scripts/sentry-autofix-queue-io.mjs)
+          # The selection leg's gh I/O layer (openAutofixPrExists / isOwnHeadPr /
+          # the family-collapse reads). Its behavior is exercised by the select
+          # suite, which mocks runGh and drives the full flow.
+          add_command "pnpm sentry:autofix:select:test" "Sentry autofix queue-io layer changed"
+          ;;
         scripts/sentry-autofix-finalize.mjs|scripts/sentry-autofix-finalize.test.mjs)
           add_command "pnpm sentry:autofix:finalize:test" "Sentry autofix finalize helper changed"
           ;;

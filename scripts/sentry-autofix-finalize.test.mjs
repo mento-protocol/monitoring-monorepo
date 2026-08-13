@@ -1140,118 +1140,141 @@ await test("guard catches underscore-containing / underscore-split credential fi
   );
 });
 
-// --- fork-PR ownership fence on the NORMAL finalize path (#1810 follow-up) ----
+// --- fork-PR ownership fence across the WHOLE finalize workflow (#1810; P1) ----
 //
-// `gh pr list --head <branch>` matches by branch NAME, and a FORK PR carries its
-// own — so on this public repo anyone can push `sentry-autofix/<short-id>` on a
-// fork and open a PR at main before a candidate finalizes. The reconcile path
-// already fences that (require the head repo to be THIS repo). These tests pin
-// that the NORMAL "Open fix PR from a pristine clone" step applies the SAME fence
-// to both of its `gh pr list --head` reads (the relink-under-marker read and the
-// dup-guard read) by extracting the actual jq programs from the workflow and
-// running them through real `jq` — not by string-matching the query, which the
-// selector suite's own comments call a broken control.
+// A branch-NAME-only read (`gh pr list --head <branch>`) returns FORK PRs too,
+// and a capped page could be filled by newer fork PRs that hide our own row — so
+// on this public repo anyone can push `sentry-autofix/<short-id>` on a fork and
+// open a PR at main before a candidate finalizes. Every open-PR ownership lookup
+// in this workflow now queries the OWNER-QUALIFIED REST head filter
+// (`GET repos/${REPO}/pulls?head=${REPO%%/*}:${branch}&base=main&state=open`),
+// which excludes forks server-side and pins the base the autofix leg always uses
+// (GitHub's open-PR uniqueness is per head+base), and keeps the jq
+// `.head.repo.fork`/owner check as defense in depth. There are THREE such reads —
+// the relink-under-marker read and the dup-guard read in the "Open fix PR from a
+// pristine clone" step, PLUS the read in the separate "Reconcile orphaned fix PR"
+// step (an earlier revision converted only the first two and left this one on the
+// truncatable `gh pr list`). These tests pin that ALL THREE carry the fence, by
+// extracting the actual jq programs from the workflow and running them through
+// real `jq` — not by string-matching the query, which the selector suite's own
+// comments call a broken control.
 
 const AUTOFIX_WORKFLOW = readFileSync(
   new URL("../.github/workflows/sentry-autofix.yml", import.meta.url),
   "utf8",
 );
 
-/** The body of the normal-finalize step, bounded so the reconcile step's own
- * (already-fenced) read is never counted here. */
-function pristineCloneStep() {
-  const start = AUTOFIX_WORKFLOW.indexOf("Open fix PR from a pristine clone");
-  const end = AUTOFIX_WORKFLOW.indexOf("Reconcile orphaned fix PR");
-  assert(start !== -1 && end !== -1 && end > start, "both steps are present");
-  return AUTOFIX_WORKFLOW.slice(start, end);
+// Executable lines of the whole workflow (comments stripped): the workflow's
+// prose explains the OLD `gh pr list` behavior, so the truncatable-read tripwire
+// must not see those mentions.
+function workflowCode() {
+  return AUTOFIX_WORKFLOW.split("\n")
+    .filter((line) => !/^\s*#/.test(line))
+    .join("\n");
 }
 
-/** Every jq ownership-fence program the step pipes a `gh pr list` result into.
- * The program is single-quoted and contains no single quote, so it captures
- * cleanly from the opening quote after `--arg owner "${REPO%%/*}"`. */
-function fenceProgramsIn(stepBody) {
-  const re = /jq -r --arg owner "\$\{REPO%%\/\*\}"[\s\S]*?'([\s\S]*?)'/g;
+// The org owner is spliced into the fence jq via a shell breakout
+// (`("` + `'"${REPO%%/*}"'` + `"` -> `("mento-protocol"`), so a real jq receives
+// it as a string literal. Reconstruct that EFFECTIVE program for the test.
+const SHELL_OWNER_TOKEN = `'"\${REPO%%/*}"'`;
+
+function effectiveProgram(raw, owner = "mento-protocol") {
+  return raw.split(SHELL_OWNER_TOKEN).join(owner);
+}
+
+/** Every jq ownership-fence program the workflow feeds an owner-qualified
+ * `gh api ... pulls` result into. Anchored on the `pulls?head=` query so the
+ * unrelated `gh api /users/... --jq '.id'` read is never captured. */
+function fenceProgramsIn(body) {
+  const re = /pulls\?head=[\s\S]*?--jq '([\s\S]*?)'\)/g;
   const programs = [];
-  for (const m of stepBody.matchAll(re)) programs.push(m[1]);
+  for (const m of body.matchAll(re)) programs.push(m[1]);
   return programs;
 }
 
 const FORK_PR = [
   {
-    url: "https://github.com/outsider/monitoring-monorepo/pull/9",
-    isCrossRepository: true,
-    headRepositoryOwner: { login: "outsider" },
+    html_url: "https://github.com/outsider/monitoring-monorepo/pull/9",
+    head: { repo: { fork: true, owner: { login: "outsider" } } },
   },
 ];
 // Mixed-case owner to exercise the fence's ascii_downcase.
 const OWN_PR = [
   {
-    url: "https://github.com/mento-protocol/monitoring-monorepo/pull/5",
-    isCrossRepository: false,
-    headRepositoryOwner: { login: "Mento-Protocol" },
+    html_url: "https://github.com/mento-protocol/monitoring-monorepo/pull/5",
+    head: { repo: { fork: false, owner: { login: "Mento-Protocol" } } },
   },
 ];
 
 function runFence(program, input, owner = "mento-protocol") {
-  return execFileSync("jq", ["-r", "--arg", "owner", owner, program], {
+  return execFileSync("jq", ["-r", effectiveProgram(program, owner)], {
     input: JSON.stringify(input),
     encoding: "utf8",
   }).trim();
 }
 
-await test("normal finalize path fences BOTH of its gh pr list --head reads (not just the reconcile path)", () => {
-  const step = pristineCloneStep();
-  // Exactly the relink read and the dup-guard read, each fenced.
-  const headReads = (step.match(/gh pr list \\?\n?[\s\S]*?--head/g) ?? [])
-    .length;
-  const programs = fenceProgramsIn(step);
-  assertEqual(programs.length, 2);
-  assert(
-    headReads >= 2,
-    `both --head reads are present in the step, found ${headReads}`,
+await test("every open-PR lookup in the finalize workflow is owner-qualified and fenced (all THREE sites)", () => {
+  const programs = fenceProgramsIn(AUTOFIX_WORKFLOW);
+  assertEqual(
+    programs.length,
+    3,
+    "the relink, dup-guard, AND reconcile-orphaned reads are each owner-qualified",
   );
-  // Regression tripwire: the pre-fix bare read (`--json url --jq '.[0].url…`)
-  // must be gone from this step — its return was trusted verbatim, fork and all.
+  const code = workflowCode();
+  // Every executable owner-qualified read pins the head branch AND base=main.
+  const ownerQualified =
+    code.split("pulls?head=${REPO%%/*}:${branch}&base=main&state=open").length -
+    1;
+  assertEqual(
+    ownerQualified,
+    3,
+    "all three reads owner-qualify the head branch and pin base=main",
+  );
+  // Regression tripwire: NO fork-truncatable `gh pr list` read may remain
+  // anywhere in the workflow's executable body (the reconcile step was the gap).
   assert(
-    !step.includes("--json url --jq"),
-    "the unfenced bare `--json url --jq` read must not return to the normal path",
+    !code.includes("gh pr list"),
+    "the fork-truncatable `gh pr list --head` read must not remain in the workflow",
   );
   for (const program of programs) {
     assert(
-      program.includes("isCrossRepository") &&
+      program.includes(".head.repo.fork") &&
+        program.includes(".head.repo.owner.login") &&
         program.includes("ascii_downcase"),
-      "each fence checks the head repo ownership (isCrossRepository + owner)",
+      "each fence checks head-repo ownership (fork == false + owner match)",
     );
   }
 });
 
-await test("fork fence: a fork PR on the autofix branch is NOT ours; our own PR is kept even behind a spoof", () => {
-  const programs = fenceProgramsIn(pristineCloneStep());
-  // Not vacuous if a strip removes the fences: both reads must carry one.
-  assertEqual(programs.length, 2);
+await test("fork fence: a fork PR on the autofix branch is NOT ours; our own PR is kept even behind a spoof (all THREE reads)", () => {
+  const programs = fenceProgramsIn(AUTOFIX_WORKFLOW);
+  // Not vacuous if a strip removes a fence: all three reads must carry one.
+  assertEqual(programs.length, 3);
   for (const program of programs) {
-    // Fork PR -> empty: the relink read finds nothing to relink to, and the
-    // dup-guard read leaves `existing_pr` empty so this run opens our own PR.
+    // Fork PR -> empty: the read finds nothing ours to relink/dedup against.
     assertEqual(runFence(program, FORK_PR), "");
     // Our own same-repo PR -> its url.
-    assertEqual(runFence(program, OWN_PR), OWN_PR[0].url);
-    // Spoof FIRST, ours second: the fence must scan the page, not read row 0.
-    assertEqual(runFence(program, [...FORK_PR, ...OWN_PR]), OWN_PR[0].url);
+    assertEqual(runFence(program, OWN_PR), OWN_PR[0].html_url);
+    // Even with a fork spoof present, the jq fence keeps only ours (defense in
+    // depth over whatever rows arrive; the owner-qualified query already drops
+    // forks server-side).
+    assertEqual(runFence(program, [...FORK_PR, ...OWN_PR]), OWN_PR[0].html_url);
   }
 });
 
 await test("fork-fence negative control: the pre-fix bare jq TRUSTS the fork PR", () => {
-  // The exact read the fix replaced. Run on live jq over the same fork input, it
-  // returns the fork's url — which the finalize path would relink the stub to or
-  // adopt as its dedup. Anchored: the extracted (fenced) program is NOT this bare
-  // jq, so a revert to it both trips the tripwire above and restores this trust.
-  const bare = '.[0].url // ""';
-  assertEqual(runFence(bare, FORK_PR), FORK_PR[0].url);
-  const programs = fenceProgramsIn(pristineCloneStep());
-  assertEqual(programs.length, 2);
+  // The bare read the fix replaced (REST `.html_url` field). Run on live jq over
+  // the same fork input, it returns the fork's url — which the finalize path
+  // would relink the stub to or adopt as its dedup. Anchored: no shipped (fenced)
+  // program is this bare jq, so a revert to it at ANY of the three reads restores
+  // this trust and reds the assertions above.
+  const bare = '.[0].html_url // ""';
+  assertEqual(runFence(bare, FORK_PR), FORK_PR[0].html_url);
+  const programs = fenceProgramsIn(AUTOFIX_WORKFLOW);
+  assertEqual(programs.length, 3);
   for (const program of programs) {
     assert(
-      program.replace(/\s+/g, " ").trim() !== bare,
+      effectiveProgram(program).replace(/\s+/g, " ").trim() !== bare,
       "the shipped fence must not be the bare, fork-trusting read",
     );
   }
