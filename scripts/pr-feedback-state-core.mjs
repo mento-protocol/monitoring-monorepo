@@ -53,7 +53,7 @@ const LEGACY_SAFE_CLAUDE_ROLLUP_LINES = new Set([
 ]);
 const CLEAN_ROLLUP_ENTRY = /^\d+[.)]\s+\[[Pp]3\]\s+(No[- ]action:.*)$/i;
 const CLEAN_REVIEW_SUMMARY =
-  /\b(?:no\s+changes\s+requested|no\s+[Pp][0-3](?:\/[Pp][0-3])+\s+(?:issues?|findings?)(?:\s+found)?|no\s+[Pp][0-2]\s+(?:issues?|findings?)|(?:no|zero|0)\s+(?:Critical|High|Medium|Low)\s+Severity\s+(?:issues?|findings?))\b/gi;
+  /\b(?:no\s+changes\s+requested|no\s+[Pp][0-2]\s+(?:issues?|findings?)|(?:no|zero|0)\s+(?:Critical|High|Medium|Low)\s+Severity\s+(?:issues?|findings?))\b/gi;
 const REVIEW_CONTRADICTION =
   /(?:BUGBOT_BUG_ID|\b[Pp][0-2]\b|\b(?:Critical|High|Medium|Low)\s+Severity\b|\bSeverity\s*:\s*(?:Critical|High|Medium|Low)\b|\bAction\s+items?\s*:|\b(?:Action\s+required|changes\s+requested|needs[- ]changes)\b|\b(?:please|must|need(?:s)?\s+to|should)\s+(?:add|address|change|ensure|fix|implement|prevent|remove|restore|update|validate)\b|\b(?:but|however|although|yet)\b[^.!?\r\n]*\b(?:add|address|change|ensure|fix|implement|prevent|remove|restore|update|validate)\b|(?:^|[\r\n])\s*(?:[-*>]\s*)?(?:add|address|change|ensure|fix|implement|prevent|remove|restore|update|validate)\b)/i;
 
@@ -106,24 +106,11 @@ function hasUnnegatedFailure(value) {
   const scrubbed = String(value ?? "").replace(NEGATED_FAILURE, "");
   return FAILURE_TERM.test(scrubbed);
 }
-function hasExplicitReviewContradiction(value) {
+function hasReviewContradiction(value) {
   const body = String(value ?? "")
     .replace(/[*_~]/g, "")
     .replace(CLEAN_REVIEW_SUMMARY, "");
-  return REVIEW_CONTRADICTION.test(body);
-}
-function hasReviewContradiction(value) {
-  return hasExplicitReviewContradiction(value) || hasUnnegatedFailure(value);
-}
-function hasStructuredClaudeReviewContradiction(review) {
-  const narrative = [
-    ...review.summary,
-    ...review.notes,
-    ...review.validationNote,
-  ]
-    .join("\n")
-    .replace(/\bfails?[- ]closed\b/gi, "");
-  return hasExplicitReviewContradiction(narrative);
+  return REVIEW_CONTRADICTION.test(body) || hasUnnegatedFailure(body);
 }
 function isBenignChecklistSubject(value) {
   const subject = String(value ?? "").trim();
@@ -242,15 +229,6 @@ function isActionableReviewBotComment(comment, pr) {
   if (!isReviewBotComment(comment)) return false;
   if (claudeReview.isClaudeLgtmReview(comment))
     return !isExplicitlyCleanClaudeReview(comment, pr);
-  const rawBody = String(comment.body ?? "");
-  if (
-    claudeReview.matchesCleanReviewCompatibilityRegistry(comment, pr, rawBody)
-  )
-    return false;
-  const parsedOverallClaudeReview =
-    claudeReview.parseExplicitlyCleanOverallClaudeReview(comment, pr);
-  if (parsedOverallClaudeReview?.usesNewTerminal)
-    return hasStructuredClaudeReviewContradiction(parsedOverallClaudeReview);
   const overallClaudeReview = claudeReview.classifyOverallClaudeReview(
     comment,
     pr,

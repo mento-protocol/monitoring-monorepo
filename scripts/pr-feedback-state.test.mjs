@@ -29,10 +29,10 @@ function assert(condition, msg) {
   if (!condition) throw new Error(msg);
 }
 
-function assertEqual(actual, expected, context = "") {
+function assertEqual(actual, expected) {
   if (actual !== expected) {
     throw new Error(
-      `${context ? `${context}: ` : ""}expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`,
+      `expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`,
     );
   }
 }
@@ -278,54 +278,6 @@ const PR_1825_CLEAN_CLAUDE_REVIEW = {
     "",
     "No inline findings — nothing rose to a P1/P2/P3 flag. This is a straightforward, correctly-sequenced follow-through on a previously-planned migration (issue #1750), not new architecture, so no new ADR is needed per [`docs/pr-checklists/architecture-decisions.md`](docs/pr-checklists/architecture-decisions.md).",
     " · [branch](https://github.com/mento-protocol/monitoring-monorepo/tree/codex/remove-retired-peg-policy-shim)",
-  ].join("\n"),
-};
-
-const PR_1828_HEAD = "a51bed19066171ff56e115b5ab86c922aca701ad";
-// Verbatim REST issuecomment 5279015783 from PR #1828. This Overall-review
-// layout is accepted through the bounded structural grammar, not the exact
-// compatibility registry.
-const PR_1828_CLEAN_CLAUDE_REVIEW = {
-  id: 5279015783,
-  html_url:
-    "https://github.com/mento-protocol/monitoring-monorepo/pull/1828#issuecomment-5279015783",
-  created_at: "2026-08-13T10:22:00Z",
-  updated_at: "2026-08-13T10:22:00Z",
-  user: { login: "claude[bot]", type: "Bot" },
-  body: [
-    "**Claude finished @chapati23's task in 3m 7s** —— [View job](https://github.com/mento-protocol/monitoring-monorepo/actions/runs/31690408148)",
-    "",
-    "---",
-    "### Code Review — PR #1828",
-    "",
-    "- [x] Gather context (read changed files, diff)",
-    "- [x] Understand the request (code review)",
-    "- [x] Review `scripts/pr-feedback-state-claude.mjs` changes",
-    "- [x] Review `scripts/pr-feedback-state.test.mjs` changes",
-    "- [x] Check compatibility-registry pattern precedent",
-    "- [x] Post findings",
-    "",
-    "**Overall verdict: LGTM**",
-    "",
-    "### Summary",
-    "",
-    "This follows the exact pattern already established for the PR #1544/#1595/#1600 entries in `CLEAN_REVIEW_COMPATIBILITY` (`scripts/pr-feedback-state-claude.mjs:17-53`): a new map entry keyed by the SHA-256 digest of the raw comment body, bound to `author`, `prNumber`, `commentId`, and `headRefOid`. `matchesCleanReviewCompatibilityRegistry` (line 131) requires all five to match exactly, so this only recognizes the one frozen #1825 payload — any edit, re-post, or format drift still fails closed.",
-    "",
-    "The one behavioral grammar change is widening `isClaudeLgtmReview` (line 94) to accept an optional Markdown heading (`#{1,6}\\s+`) before `Verdict: LGTM`. I traced the downstream effect in `scripts/pr-feedback-state-core.mjs:228-243`: this only changes which branch a comment is routed through (`isClaudeLgtmReview` → `isExplicitlyCleanClaudeReview`, vs. falling through to `classifyOverallClaudeReview`/the generic P3-signal fallback). The generic (non-registry) path inside `isExplicitlyCleanClaudeReview` still requires the old, unmodified `Findings`/`Roll up` heading structure (`pr-feedback-state-core.mjs:208-213`), which the new heading-style format doesn't have — so a non-registered comment with a headed `### Verdict: LGTM` line still ends up actionable. Net effect: the widened grammar is strictly narrower for this shape of review, not looser, since it now requires the exact registry match instead of merely lacking a P3 marker in the old fallback. No P1/P2 issues found.",
-    "",
-    "Test coverage (`scripts/pr-feedback-state.test.mjs:1148-1224`) is thorough: verifies the fixture's SHA-256 digest matches the registered key, confirms the frozen review reads `ready: true`, and then exercises 6 independent tamper cases (body-byte append, CRLF line-ending swap, author, comment ID, PR number, head SHA) each asserting fail-closed (`ready: false`, one blocking comment). Confirmed no other call sites duplicate the `Verdict: LGTM` grammar outside these three files, so nothing else needed updating.",
-    "",
-    "### Verification notes (no issues found)",
-    "",
-    "1. **Registry entry correctness** — digest, `headRefOid` (40 hex chars), and `commentId` are well-formed and match the fixture's self-asserted digest in the test.",
-    "2. **No architecture change** — matches the PR's own claim; this is an additive record on the existing bounded mechanism (already used without a new ADR per this repo's own commit history for the prior entries).",
-    "3. **No doc drift** — grepped `docs/pr-checklists/` for references to the compatibility registry/`isClaudeLgtmReview`; none exist, so no runbook needed updating.",
-    "",
-    "### Note on validation",
-    "",
-    "I was not able to execute `node`/`pnpm` commands in this sandboxed session (tool approval unavailable), so I verified correctness by static trace of the routing logic rather than re-running `pnpm pr:feedback-state:test`. The PR description's reported results (36 tests passing, fresh-context and deterministic autoreview clean, live read-only projection against #1825 showing `ready: true`) are consistent with what the code should produce based on this trace.",
-    "",
-    "No findings to report as inline comments — no roll-up items beyond the above.",
   ].join("\n"),
 };
 
@@ -1269,144 +1221,6 @@ test("accepts only the exact frozen PR #1825 Claude task review", () => {
       `${label}: expected exact compatibility binding to fail closed`,
     );
     assertEqual(mutatedFeedbackState.counts.blockingTopLevelBotComments, 1);
-  }
-});
-
-test("accepts the frozen PR #1828 structural Overall Claude review", () => {
-  assertEqual(PR_1828_CLEAN_CLAUDE_REVIEW.body.length, 3639);
-  assertEqual(
-    createHash("sha256")
-      .update(PR_1828_CLEAN_CLAUDE_REVIEW.body, "utf8")
-      .digest("hex"),
-    "15c3cecdb3edc24736f1dfc72f4c39e1321787d386a0096fcb6d1d9a4a49e137",
-  );
-  const options = {
-    number: 1828,
-    title: "fix(tooling): keep Claude LGTM feedback fail closed",
-    headRefOid: PR_1828_HEAD,
-    headUpdatedAt: "2026-08-13T10:20:00Z",
-    reactionCreatedAt: "2026-08-13T10:25:00Z",
-  };
-  const feedbackState = summarizeFeedbackState(
-    normalizedReadyStateForClaudeReview(PR_1828_CLEAN_CLAUDE_REVIEW, options),
-  );
-
-  assertEqual(feedbackState.ready, true);
-  assertEqual(feedbackState.counts.blockingTopLevelBotComments, 0);
-  assertEqual(feedbackState.counts.blockingFindings, 0);
-
-  const reviewWithAnotherCommentId = summarizeFeedbackState(
-    normalizedReadyStateForClaudeReview(
-      { ...PR_1828_CLEAN_CLAUDE_REVIEW, id: 5279015784 },
-      options,
-    ),
-  );
-  assertEqual(reviewWithAnotherCommentId.ready, true);
-
-  const clean = PR_1828_CLEAN_CLAUDE_REVIEW.body;
-  for (const cleanNarrative of [
-    "No P3 issues",
-    "No P3 findings",
-    "No P1/P2/P3 findings",
-    "The retry handles a network failure correctly",
-    "The error is caught and retried",
-  ]) {
-    const cleanAbsenceFeedback = summarizeFeedbackState(
-      normalizedReadyStateForClaudeReview(
-        {
-          ...PR_1828_CLEAN_CLAUDE_REVIEW,
-          body: clean.replace("No doc drift", cleanNarrative),
-        },
-        options,
-      ),
-    );
-    assertEqual(cleanAbsenceFeedback.ready, true, cleanNarrative);
-  }
-
-  const mutations = [
-    [
-      "wrong first checklist entry",
-      clean.replace(
-        "Gather context (read changed files, diff)",
-        "Gather context (read diff)",
-      ),
-    ],
-    [
-      "unchecked checklist entry",
-      clean.replace(
-        "- [x] Understand the request (code review)",
-        "- [ ] Understand the request (code review)",
-      ),
-    ],
-    [
-      "unbounded check item",
-      clean.replace(
-        "Check compatibility-registry pattern precedent",
-        "Check compatibility-registry pattern precedent, then fix it",
-      ),
-    ],
-    [
-      "path traversal review item",
-      clean.replace(
-        "Review `scripts/pr-feedback-state.test.mjs` changes",
-        "Review `../pr-feedback-state.test.mjs` changes",
-      ),
-    ],
-    [
-      "arbitrary heading",
-      clean.replace("### Note on validation", "### Extra context"),
-    ],
-    [
-      "HTML evidence",
-      clean.replace(
-        "Registry entry correctness",
-        "Registry <em>entry</em> correctness",
-      ),
-    ],
-    [
-      "code-block evidence",
-      clean.replace("No architecture change", "```text No architecture change"),
-    ],
-    [
-      "explicit P1 finding",
-      clean.replace(
-        "No doc drift",
-        "[P1] Authentication bypass — must fix before merge",
-      ),
-    ],
-    [
-      "nonsequential verification note",
-      clean.replace(
-        "2. **No architecture change**",
-        "4. **No architecture change**",
-      ),
-    ],
-    [
-      "empty validation section",
-      clean.replace(
-        "I was not able to execute `node`/`pnpm` commands in this sandboxed session (tool approval unavailable), so I verified correctness by static trace of the routing logic rather than re-running `pnpm pr:feedback-state:test`. The PR description's reported results (36 tests passing, fresh-context and deterministic autoreview clean, live read-only projection against #1825 showing `ready: true`) are consistent with what the code should produce based on this trace.\n\n",
-        "",
-      ),
-    ],
-    [
-      "legacy terminal outside the compatibility registry",
-      clean.replace(
-        "No findings to report as inline comments — no roll-up items beyond the above.",
-        "No P1/P2/P3 findings — implementation is complete.",
-      ),
-    ],
-    ["trailing text", `${clean}\n\nAll checks passed.`],
-  ];
-
-  for (const [label, body] of mutations) {
-    const feedback = summarizeFeedbackState(
-      normalizedReadyStateForClaudeReview(
-        { ...PR_1828_CLEAN_CLAUDE_REVIEW, body },
-        options,
-      ),
-    );
-    assertEqual(feedback.ready, false, label);
-    assertEqual(feedback.counts.blockingTopLevelBotComments, 1, label);
   }
 });
 

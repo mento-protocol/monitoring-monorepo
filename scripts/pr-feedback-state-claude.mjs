@@ -12,11 +12,8 @@ const OVERALL_VERDICT = /^\*\*Overall verdict:\s+LGTM\*\*$/;
 const OVERALL_SUMMARY_HEADING = /^###\s+Summary$/;
 const OVERALL_VERIFICATION_HEADING =
   /^###\s+Verification notes \(no issues found\)$/;
-const OVERALL_VALIDATION_NOTE_HEADING = /^###\s+Note on validation$/;
 const OVERALL_NOTE = /^([1-9]\d*)\.\s+\*\*(.{1,200})\*\*(?:\s+(.{1,4000}))?$/;
 const OVERALL_TERMINAL_CLEAN = /^No P1\/P2\/P3 findings\s+—\s+(.{1,500})$/;
-const OVERALL_TERMINAL_NO_INLINE_FINDINGS =
-  /^No findings to report as inline comments — no roll-up items beyond the above\.$/;
 const CLEAN_REVIEW_COMPATIBILITY = new Map([
   [
     "039923882eee9f880165543ef85e1ca251d84b995a78647b41c2b788d02a4885",
@@ -123,33 +120,11 @@ function isOverallReviewSubject(value) {
   return reviewPath !== undefined && isBoundedRepoRelativePath(reviewPath);
 }
 
-function isOverallCheckSubject(value) {
-  return /^Check (?:[A-Za-z0-9][A-Za-z0-9-]*(?: [A-Za-z0-9][A-Za-z0-9-]*){0,15})$/.test(
-    String(value ?? ""),
-  );
-}
-
 function hasStructuralMarkdown(value) {
   const line = String(value ?? "");
   return (
     /(?:^|\s)(?:```|~~~)/.test(line) ||
     /^(?:#{1,6}\s|[-+*]\s+|\d+[.)]\s+|>\s*|\|.*\|$)/.test(line)
-  );
-}
-
-function hasUnsafeMarkup(value) {
-  return /<!--|-->|<\/?[A-Za-z][^>\r\n]*>|(?:^|\s)(?:```|~~~)/.test(
-    String(value ?? ""),
-  );
-}
-
-function isPlainOverallEvidence(value) {
-  const line = String(value ?? "");
-  return (
-    line.length > 0 &&
-    !hasControlCharacter(line) &&
-    !hasStructuralMarkdown(line) &&
-    !hasUnsafeMarkup(line)
   );
 }
 
@@ -165,12 +140,11 @@ export function matchesCleanReviewCompatibilityRegistry(comment, pr, rawBody) {
   );
 }
 
-export function parseExplicitlyCleanOverallClaudeReview(comment, pr) {
+export function isExplicitlyCleanOverallClaudeReview(comment, pr) {
   const author = String(comment?.author ?? "").toLowerCase();
   if (author !== "claude" && author !== "claude[bot]") return false;
 
   const body = String(comment?.body ?? "");
-  if (body.includes("\r")) return null;
   const lines = body.split(/\r?\n/);
   if (hasMarkdownCodeBlockIndentation(lines)) return false;
   const nonempty = lines.map((line) => line.trim()).filter(Boolean);
@@ -200,12 +174,7 @@ export function parseExplicitlyCleanOverallClaudeReview(comment, pr) {
     checklist[0] !== "Gather context (read changed files, diff)" ||
     checklist[1] !== "Understand the request (code review)" ||
     checklist.at(-1) !== "Post findings" ||
-    !checklist
-      .slice(2, -1)
-      .every(
-        (subject) =>
-          isOverallReviewSubject(subject) || isOverallCheckSubject(subject),
-      ) ||
+    !checklist.slice(2, -1).every(isOverallReviewSubject) ||
     !OVERALL_VERDICT.test(nonempty[index] ?? "")
   )
     return false;
@@ -223,7 +192,9 @@ export function parseExplicitlyCleanOverallClaudeReview(comment, pr) {
   }
   if (
     summary.length === 0 ||
-    summary.some((line) => !isPlainOverallEvidence(line)) ||
+    summary.some(
+      (line) => hasControlCharacter(line) || hasStructuralMarkdown(line),
+    ) ||
     !OVERALL_VERIFICATION_HEADING.test(nonempty[index] ?? "")
   )
     return false;
@@ -236,50 +207,24 @@ export function parseExplicitlyCleanOverallClaudeReview(comment, pr) {
     if (
       Number(note[1]) !== notes.length + 1 ||
       !note[3] ||
-      !isPlainOverallEvidence(note[2]) ||
-      !isPlainOverallEvidence(note[3])
+      hasControlCharacter(note[2]) ||
+      hasControlCharacter(note[3]) ||
+      hasStructuralMarkdown(note[3])
     )
       return false;
     notes.push(`${note[2]} ${note[3]}`);
     index += 1;
   }
-  if (notes.length === 0) return null;
+  if (notes.length === 0) return false;
 
-  const validationNote = [];
-  if (OVERALL_VALIDATION_NOTE_HEADING.test(nonempty[index] ?? "")) {
-    index += 1;
-    while (
-      index < nonempty.length &&
-      !OVERALL_TERMINAL_CLEAN.test(nonempty[index]) &&
-      !OVERALL_TERMINAL_NO_INLINE_FINDINGS.test(nonempty[index])
-    ) {
-      if (!isPlainOverallEvidence(nonempty[index])) return null;
-      validationNote.push(nonempty[index]);
-      index += 1;
-    }
-    if (validationNote.length === 0) return null;
-  }
-
-  const terminal = nonempty[index];
+  const terminal = nonempty[index]?.match(OVERALL_TERMINAL_CLEAN);
   if (
-    (!OVERALL_TERMINAL_CLEAN.test(terminal ?? "") &&
-      !OVERALL_TERMINAL_NO_INLINE_FINDINGS.test(terminal ?? "")) ||
+    !terminal ||
     index !== nonempty.length - 1 ||
-    !isPlainOverallEvidence(terminal)
+    hasControlCharacter(terminal[1]) ||
+    hasStructuralMarkdown(terminal[1])
   )
-    return null;
-  return {
-    checklist,
-    summary,
-    notes,
-    validationNote,
-    terminal,
-    usesNewTerminal: OVERALL_TERMINAL_NO_INLINE_FINDINGS.test(terminal),
-  };
-}
-
-export function isExplicitlyCleanOverallClaudeReview(comment, pr) {
-  const body = String(comment?.body ?? "");
+    return false;
   return matchesCleanReviewCompatibilityRegistry(comment, pr, body);
 }
 
