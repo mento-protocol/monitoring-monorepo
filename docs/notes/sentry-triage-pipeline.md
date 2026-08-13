@@ -747,11 +747,20 @@ so the fresh round re-decides scope). This closes issue #1813: the architectural
 class no longer fills the selector's read window, and the `Window: N stubs,
 evaluated M` line (below) is the standing tripwire for any regrowth.
 
-A residue this design does NOT drain, stated not hidden: a rare LOCAL stub whose
-verdict names a foreign or unrecognized repo, or fails to parse, is skipped by
-`evaluateCandidate` (returns `null`) and never labeled — it re-enters the window
-each run as a single reported skip. It is not the architectural class and does
-not get the hold label; it is a triage error whose fix would not live here.
+A residue this design does NOT drain, stated not hidden: a stub with no parseable
+SHORT-ID, an unparsable verdict, a verdict that is not `code-fix`, or a
+foreign/unrecognized `affected_repo` is dropped by `evaluateCandidate` (returns
+`null`) — it never reaches the `skipped` report, so it leaves NO run-record line,
+yet it keeps its `verdict-code-fix` + `autofix-select` labels and the oldest-first
+query returns it every run. A pile of these can occupy the whole
+`MAX_CANDIDATE_EVALUATIONS` slice while the run record names no reason; the only
+signal is the select step's stderr `skip #N:` note. It is not the architectural
+class and gets no hold label — a triage error whose fix does not live here. A
+run-record reporting path for this residue is a deliberate follow-up if real
+starvation is observed: it would have to thread these heterogeneous skip reasons
+through the `skipped_issues → record-labels` handoff, whose backfill assumes every
+reported skip is architectural, so it is held back rather than risk mislabeling a
+non-architectural stub.
 
 **One candidate per `duplicate_of` family** (issue #1784). Stubs whose verdicts
 place them in one Sentry issue family consume ONE autofix run between them, not
