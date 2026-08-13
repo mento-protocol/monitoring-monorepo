@@ -578,14 +578,26 @@ gate_run_command_tag() {
   printf 'agentqg:%s' "${gate_lock_token:-nolock-$$}"
 }
 
-# The lock root, kept once resolved: the condemned list lives beside the lock
-# rather than inside it, because the lock directory is what gets reclaimed and
-# the obligation has to outlive that.
+# The lock root, kept once resolved: outstanding obligations live beside the
+# lock rather than inside it, because the lock directory is what gets reclaimed
+# and the obligation has to outlive that.
 gate_lock_root_dir=""
+# A staged obligation this process has written but not yet published. Named
+# with our PID and registered with the exit trap before it is created, so
+# cleanup can never race the write nor name another run's file.
+gate_lock_condemn_tmp=""
 
-gate_lock_condemned_path() {
+# One file per outstanding run rather than one shared list. A shared list has
+# to be deleted by whoever drains it, and there is no way in this shell to
+# establish that every process which opened it by name has finished writing —
+# an appender descheduled between its open and its write would have its line
+# deleted unread. Here nobody writes to a published file: each is created by
+# one process under a private name and moved into place whole, and the drainer
+# deletes only the files it has read to the end. Late arrivals are new files,
+# which are either seen by this drain or inherited by the next.
+gate_lock_condemned_dir() {
   [[ -n "$gate_lock_root_dir" ]] || return 1
-  printf '%s/condemned' "$gate_lock_root_dir"
+  printf '%s/condemned.d' "$gate_lock_root_dir"
 }
 
 # Write down that a dead run's commands are somebody's problem now, BEFORE
@@ -594,34 +606,59 @@ gate_lock_condemned_path() {
 # draining leaves the previous run's survivors with nobody who knows about
 # them. On disk, the next run inherits the obligation instead.
 #
-# Appended inside the reclaim election, which is already serialised by the
-# rename test-and-set: whoever won the record is the only writer here, and a
-# single short line is one append. Duplicates are harmless — draining a token
+# Written inside the reclaim election, which is already serialised by the
+# rename test-and-set: whoever won the record is the only writer here. The file
+# is built under a private per-PID name and moved into place, so a reader sees
+# the whole token or no file at all. Duplicates are harmless — draining a token
 # whose processes are already gone is a no-op — which is the right failure
 # direction for the crash between this write and the publish it precedes.
 #
-# The write failing is a different matter from crashing after it: a crash still
-# leaves the obligation on disk, whereas a failed append leaves nothing at all.
-# So this reports failure and every caller stops rather than carrying on. The
-# reachable case is not a full disk but a shared lock root, where the condemned
-# file belongs to another user and this run simply cannot append to it.
+# The write failing is a different matter from crashing after it. A crash still
+# leaves the record this obligation was derived from, because that record is
+# deleted only once this returns, so the next run's recovery re-derives it. A
+# failed write with the caller carrying on leaves nothing anywhere. So this
+# reports failure and every caller stops. The reachable case is not a full disk
+# but a shared lock root, where the directory belongs to another user.
 record_condemned_run() {
   local token="$1"
-  local path
+  local dir
   [[ -n "$token" ]] || return 0
-  path="$(gate_lock_condemned_path)" || return 1
-  printf '%s\n' "$token" >> "$path" 2>/dev/null || return 1
+  dir="$(gate_lock_condemned_dir)" || return 1
+  mkdir -p "$dir" 2>/dev/null || return 1
+  # Registered before it exists: the name carries our PID, so cleanup can see
+  # it whether or not the write got that far, and can never name another run's.
+  gate_lock_condemn_tmp="${dir}/.staging.$$"
+  printf '%s\n' "$token" > "$gate_lock_condemn_tmp" 2>/dev/null || {
+    rm -f "$gate_lock_condemn_tmp"
+    gate_lock_condemn_tmp=""
+    return 1
+  }
+  # Published by rename, which is atomic: the drainer never reads a partial
+  # token, and re-condemning the same run simply replaces an identical file.
+  if ! mv "$gate_lock_condemn_tmp" "${dir}/${token}" 2>/dev/null; then
+    rm -f "$gate_lock_condemn_tmp"
+    gate_lock_condemn_tmp=""
+    return 1
+  fi
+  gate_lock_condemn_tmp=""
 }
 
-# The condemned list is the only thing that tells the next holder a dead run's
-# commands are still outstanding. Losing a write to it means taking the lock
-# over and starting mapped commands beside those commands — the cross-run
-# overlap this whole path exists to prevent — so a run that cannot record the
-# obligation stops here, with the record it was about to discard left in place.
+# These files are the only thing that tells the next holder a dead run's
+# commands are still outstanding. Losing one means taking the lock over and
+# starting mapped commands beside those commands — the cross-run overlap this
+# whole path exists to prevent — so a run that cannot record the obligation
+# stops here, with the record it was about to discard left in place.
 gate_lock_obligation_unwritable() {
-  echo "error: could not record the previous run's commands as outstanding in ${gate_lock_root_dir:-unknown}/condemned." >&2
+  echo "error: could not record the previous run's commands as outstanding in ${gate_lock_root_dir:-unknown}/condemned.d." >&2
   echo "Nothing would drain them, so this run would execute alongside them." >&2
   echo "Nothing has been executed. Fix that path — permissions, or free space — then re-run." >&2
+  exit 2
+}
+
+gate_lock_obligation_unreadable() {
+  echo "error: the outstanding-commands record at ${1} exists but cannot be read." >&2
+  echo "It names commands a dead run left behind, and skipping it would start this run alongside them." >&2
+  echo "Nothing has been executed. Fix that path — permissions — then re-run." >&2
   exit 2
 }
 
@@ -629,74 +666,31 @@ gate_lock_obligation_unwritable() {
 # just the holder it personally condemned. That is what makes a chain of
 # crashes safe: a third run inherits both the run it reclaimed and whatever
 # that run had not finished clearing.
-gate_lock_obligation_unreadable() {
-  echo "error: the outstanding-commands list at ${1} exists but cannot be read." >&2
-  echo "It names commands a dead run left behind, and skipping it would start this run alongside them." >&2
-  echo "Nothing has been executed. Fix that path — permissions — then re-run." >&2
-  exit 2
-}
-
-# Drain every token in one taken list, then remove it. The list is re-read
-# until two passes running see the same number of lines: an appender that
-# opened the file by name before it was renamed away can still be between its
-# open and its write, and its line would otherwise arrive after the read and
-# be deleted unread. That set is bounded and shrinking — the name it opened
-# refers to a new file now — so the re-read terminates. Tokens already drained
-# are skipped; draining one twice is harmless but not free.
-gate_lock_drain_taken_list() {
-  local list="$1"
-  local token drained="" lines=0 previous=-1
-  [[ -e "$list" ]] || return 0
-  [[ -r "$list" ]] || gate_lock_obligation_unreadable "$list"
-  while [[ "$lines" -ne "$previous" ]]; do
-    previous="$lines"
-    lines=0
-    while IFS= read -r token; do
-      [[ -n "$token" ]] || continue
-      lines=$((lines + 1))
-      case " ${drained} " in
-        *" ${token} "*) continue ;;
-      esac
-      drain_condemned_run_commands "$token"
-      drained="${drained}${token} "
-    done < "$list"
-  done
-  # Removed only here, with every token confirmed gone. A drain that cannot
-  # confirm exits instead, leaving the list for whoever comes next.
-  gate_lock_test_delay "${AGENT_QUALITY_GATE_LOCK_DRAIN_UNLINK_DELAY_SECONDS:-}"
-  rm -f "$list"
-}
-
+#
+# Nothing is taken away first and nothing is deleted unread. Each file is
+# removed only after its own token is confirmed discharged, and nobody ever
+# writes to a file already published, so removing one cannot race a writer. A
+# drainer killed part way leaves the rest of the directory exactly as it was.
 drain_condemned_runs() {
-  local path taken remnant
-  path="$(gate_lock_condemned_path)" || return 0
-
-  # A drainer killed mid-drain leaves the list it took parked under
-  # condemned.draining.*, where nothing else looks — the same hazard as a
-  # reclaim interrupted with the owner record in hand. Those obligations are
-  # still outstanding, so they are drained here, before our own. Nothing
-  # deletes these on the way out: being left behind is what hands them on.
-  for remnant in "${path}".draining.*; do
-    [[ -e "$remnant" ]] || continue
-    gate_lock_drain_taken_list "$remnant"
+  local dir entry entry_token_value
+  dir="$(gate_lock_condemned_dir)" || return 0
+  [[ -d "$dir" ]] || return 0
+  [[ -r "$dir" && -x "$dir" ]] || gate_lock_obligation_unreadable "$dir"
+  for entry in "$dir"/*; do
+    # The glob skips staging files, whose names begin with a dot. That is what
+    # they are named for: a run that died mid-write leaves one behind, and the
+    # record it was derived from is still there, so the obligation reaches us
+    # through the recovery pass rather than as a half-written token here.
+    [[ -e "$entry" ]] || continue
+    [[ -r "$entry" ]] || gate_lock_obligation_unreadable "$entry"
+    entry_token_value="$(head -n1 "$entry" 2>/dev/null || true)"
+    [[ -n "$entry_token_value" ]] || entry_token_value="${entry##*/}"
+    drain_condemned_run_commands "$entry_token_value"
+    # Removed only here, with every process confirmed gone. A drain that
+    # cannot confirm exits instead, leaving the rest for whoever comes next.
+    gate_lock_test_delay "${AGENT_QUALITY_GATE_LOCK_DRAIN_UNLINK_DELAY_SECONDS:-}"
+    rm -f "$entry"
   done
-
-  [[ -e "$path" ]] || return 0
-  [[ -r "$path" ]] || gate_lock_obligation_unreadable "$path"
-  # Taken by rename rather than read and then unlinked. Only the lock holder
-  # drains, but any run can append: a waiter condemning a dead remnant, or one
-  # unwinding with a record it could not put back. A token appended between
-  # the read and the delete would be removed having never been drained, and
-  # its commands are exactly the ones nothing else knows about. After the
-  # rename those appends create a fresh list for the next run instead.
-  taken="${path}.draining.$$"
-  if ! mv "$path" "$taken" 2>/dev/null; then
-    # Nothing else removes this file, so a rename that fails means the lock
-    # root will not let this run take the list — and a list it cannot take is
-    # one it cannot promise to drain.
-    gate_lock_obligation_unreadable "$path"
-  fi
-  gate_lock_drain_taken_list "$taken"
 }
 
 # Upper bound on confirming a dead run's commands are gone — a bound on the
@@ -1409,6 +1403,12 @@ cleanup_tmpfiles() {
   if [[ -n "$gate_lock_claim_tmp" ]]; then
     rm -f "$gate_lock_claim_tmp"
     gate_lock_claim_tmp=""
+  fi
+  # Same for a staged obligation: it was never published, and the record it
+  # was derived from is still where it was, so nothing is lost by dropping it.
+  if [[ -n "$gate_lock_condemn_tmp" ]]; then
+    rm -f "$gate_lock_condemn_tmp"
+    gate_lock_condemn_tmp=""
   fi
   # Released last: the lock must outlive worker teardown, or the next run
   # starts while this one's mapped commands are still dying.

@@ -276,8 +276,8 @@ requires manual cleanup.
 | after judging a taken record stale, before the new record is published            | no `owner`, no remnant                                                                                                              | no complete record, so after the grace it publishes its own                                                                                 |
 | after a taken record is judged NOT stale, before it is put back                   | same as the take boundary above                                                                                                     | same as the take boundary above                                                                                                             |
 | during `rm -rf` in release                                                        | lock directory partially gone                                                                                                       | either it is absent (take it) or record-less (grace, then publish)                                                                          |
-| after noting a condemned run, before publishing the replacement                   | the condemned list names a run whose record is still in place                                                                       | reclaims that record again and notes the same token twice; draining a token whose processes are gone is a no-op                             |
-| after publishing a replacement, before draining what it condemned                 | the condemned list names a run nobody is clearing                                                                                   | inherits the whole list, not just the holder it reclaimed, so a chain of crashes loses nothing                                              |
+| after noting a condemned run, before publishing the replacement                   | the obligation names a run whose record is still in place                                                                           | reclaims that record again and notes the same token twice; draining a token whose processes are gone is a no-op                             |
+| after publishing a replacement, before draining what it condemned                 | the obligation names a run nobody is clearing                                                                                       | inherits the whole directory, not just the holder it reclaimed, so a chain of crashes loses nothing                                         |
 | after capturing a dead run's process tree, before the first signal                | the captured set is on disk, nothing has been signalled yet                                                                         | re-reads it, unions it with its own tag scan, and confirms every entry — a set naming already-dead PIDs costs identity-checked no-op checks |
 | mid-drain, after the TERM pass has killed the tag carrier                         | no tagged process remains, but an untagged descendant may still run                                                                 | inherits the persisted captured set, so it looks for those PIDs rather than for a tag nobody carries any more                               |
 
@@ -291,17 +291,17 @@ turned up — evidence thrown away, or held only in memory, before the obligatio
 it implied had been written down — so the sites are enumerated here rather than
 rediscovered one at a time.
 
-| Destruction                                             | What derived from it                         | Why it is safe before the delete                                                                                    |
-| ------------------------------------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| remnant deleted after a successful `ln` restore         | the record itself                            | not destroyed — the content is now the owner record at the canonical path                                           |
-| remnant deleted because its holder is verified dead     | that run's commands, named only by its token | the token is appended to `condemned` first; a token for a run with nothing alive costs one drain that finds nothing |
-| taken record dropped because `ln` could not put it back | same                                         | same: the token is appended to `condemned` before the copy goes                                                     |
-| taken record deleted after a confirmed-stale verdict    | same                                         | `record_condemned_run` runs immediately before it, inside the election                                              |
-| `condemned` list removed                                | every outstanding run's commands             | removed only after each token's drain confirmed its processes gone; a drain that cannot confirm exits instead       |
-| `captured.<token>` removed after a drain                | that run's process tree                      | removed only once every captured PID is gone or is somebody else now                                                |
-| `captured.<token>` removed when nothing was captured    | nothing                                      | reached only when the persisted file and the tag scan are both empty, so there is nothing to hand on                |
-| lock directory removed at release                       | this run's own commands                      | the exit trap tears down its commands before release, and release only deletes a record that still names this run   |
-| private staged/claim files removed                      | nothing                                      | never published; no other process reads or expects them                                                             |
+| Destruction                                             | What derived from it                         | Why it is safe before the delete                                                                                           |
+| ------------------------------------------------------- | -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| remnant deleted after a successful `ln` restore         | the record itself                            | not destroyed — the content is now the owner record at the canonical path                                                  |
+| remnant deleted because its holder is verified dead     | that run's commands, named only by its token | the token is published under `condemned.d/` first; a token for a run with nothing alive costs one drain that finds nothing |
+| taken record dropped because `ln` could not put it back | same                                         | same: the token is published under `condemned.d/` before the copy goes                                                     |
+| taken record deleted after a confirmed-stale verdict    | same                                         | `record_condemned_run` runs immediately before it, inside the election                                                     |
+| `condemned.d/<token>` removed                           | that run's commands                          | removed only after its drain confirmed those processes gone; a drain that cannot confirm exits instead                     |
+| `captured.<token>` removed after a drain                | that run's process tree                      | removed only once every captured PID is gone or is somebody else now                                                       |
+| `captured.<token>` removed when nothing was captured    | nothing                                      | reached only when the persisted file and the tag scan are both empty, so there is nothing to hand on                       |
+| lock directory removed at release                       | this run's own commands                      | the exit trap tears down its commands before release, and release only deletes a record that still names this run          |
+| private staged/claim files removed                      | nothing                                      | never published; no other process reads or expects them                                                                    |
 
 Two properties make the table checkable rather than a promise. Obligations are
 written to the lock **root**, not the lock directory, so releasing a lock never
@@ -360,14 +360,25 @@ of them.
 6. **An obligation one run owes the next lives on disk, not in a variable.**
    Taking a lock from a dead holder makes this run responsible for that
    holder's leftovers, and a process that is itself killed cannot hand a shell
-   variable to its successor. The condemned run's token is appended to
-   `condemned` in the lock **root** — beside the lock, because the lock
-   directory is the thing being reclaimed — before the replacement record is
-   published, and removed only once its processes are confirmed gone. Every
-   run drains the entire outstanding list rather than only the holder it
+   variable to its successor. The condemned run's token is written to its own
+   file under `condemned.d/` in the lock **root** — beside the lock, because
+   the lock directory is the thing being reclaimed — before the replacement
+   record is published, and removed only once its processes are confirmed gone.
+   Every run drains the whole directory rather than only the holder it
    reclaimed, so a chain of crashed reclaimers accumulates obligations instead
    of dropping them. Written-then-crashed costs a redundant no-op drain; the
    opposite order costs the overlap, which is why the write comes first.
+
+   One file per outstanding run, not one shared list. A shared list has to be
+   deleted by whoever drains it, and nothing in this shell can establish that
+   every process which opened it by name has finished writing — an appender
+   descheduled between its open and its write would have its line deleted
+   unread, and that line is the only thing naming those commands. With a file
+   each, nobody writes to a published file: it is built under a private
+   `.staging.<pid>` name and moved into place whole, so a reader sees the
+   complete token or no file, and the drainer removes only what it has read to
+   the end. An obligation published during a drain is a new file — picked up by
+   that drain or inherited by the next.
 
    The same applies to the captured tree, one level down. A drain's first pass
    kills the tag carrier, so from that moment the only record of what it was
@@ -378,12 +389,13 @@ of them.
    process in it is confirmed gone. A successor unions that file with its own
    tag scan.
 
-   **A write that fails is not a write that crashed.** Crashing after the
-   append still leaves the obligation on disk for whoever comes next; the
-   append failing leaves nothing at all, so it cannot be swallowed the way a
-   best-effort write usually is. The reachable case is not a full disk but a
-   shared lock root, where `condemned` was created by another user and this run
-   simply cannot append to it. Both writes therefore report failure and both
+   **A write that fails is not a write that crashed.** Crashing part way still
+   leaves the record the obligation was derived from, because that record is
+   deleted only once the write has returned, so the next run's recovery
+   re-derives it; the write failing while the caller carries on leaves nothing
+   anywhere. So it cannot be swallowed the way a best-effort write usually is.
+   The reachable case is not a full disk but a shared lock root, where the
+   directory belongs to another user. Both writes report failure and both
    callers stop: a reclaimer that cannot condemn puts the record back where it
    found it and exits rather than taking over, and a drain that cannot persist
    its capture refuses to signal — before the first signal, while the tag it
@@ -391,18 +403,11 @@ of them.
    teardown, which is already unwinding: it leaves the record in place, names
    it, and carries on to release the lock.
 
-   **Unreadable is not empty, and the list is consumed by rename.** The same
-   shared root that makes an append fail makes a read fail, and treating an
-   unreadable list as an absent one is how a run comes to execute beside
-   commands it never drained — so both reads fail closed too. The list is then
-   taken with `mv` rather than read and unlinked: only the holder drains, but
-   any run appends, so an obligation arriving after the reader reached EOF and
-   before the unlink would have been deleted having never been drained. After
-   the rename such appends create a fresh list for the next run. The taken copy
-   is re-read until two passes agree on its length, which covers an appender
-   caught between opening the old name and writing to it, and a drainer killed
-   with a list in its hands leaves it under `condemned.draining.<pid>` for the
-   same recovery pass that reads `owner.reclaiming.<pid>` remnants.
+   **Unreadable is not empty.** The same shared root that makes a write fail
+   makes a read fail, and treating an unreadable obligation as an absent one is
+   how a run comes to execute beside commands it never drained. An obligation
+   file, or the directory holding them, that exists but cannot be read stops
+   the run and is named in the output.
 
    **Obligation evidence is never rewritten in place.** A `>` redirection
    truncates the file the moment it opens, so a rewrite has a window in which
@@ -414,17 +419,17 @@ of them.
    gone costs nothing, and skip any line whose PID field is not a number — a
    torn line should be impossible, and killing a stranger is a worse outcome
    than missing a survivor the tag scan would find anyway. The census behind
-   that claim: `condemned` and `captured.<token>` are appended to; the owner
+   that claim: `captured.<token>` is appended to; each `condemned.d/<token>` is written privately and published by rename; the owner
    record is built in a private per-PID file and published with `ln`, so its
    one `>` is to something nobody else reads; `owner.reclaiming.<pid>` is
-   created by rename; `condemned.draining.<pid>` likewise. Nothing under the
+   created by rename. Nothing under the
    lock root is rewritten in place.
 
    The audit that goes with this rule, over the current code: the things that
    gate a destructive or permissive act are the staleness verdict
    (re-validated under the election immediately before acting, and the act
    itself is a single atomic rename, so a crash before it destroys nothing),
-   the taken record (the remnant file _is_ the evidence), the condemned list
+   the taken record (the remnant file _is_ the evidence), the obligation files
    and the captured set (both persisted, above), the holder's own record
    (re-read immediately before executing), and the per-run teardown list (its
    evidence is the tag on the processes themselves). Nothing left on this path
@@ -468,14 +473,14 @@ and asserting the next run still reaches its mapped commands and releases the
 lock, and pins the interleavings — two waiters on one stale record, a stalled
 creator, a cached ownerless verdict, and a displaced holder — as separate
 cases. A command that forks a fresh child on every `TERM`, a waiter held under
-`SIGSTOP` past its own budget, and a reclaimer facing a `condemned` file it
-cannot append to are pinned there too: the first asserts no forked survivor
+`SIGSTOP` past its own budget, and a reclaimer facing an obligation directory it
+cannot write into are pinned there too: the first asserts no forked survivor
 outlives the drain, the second that the reported wait matches the wall clock,
 the third that the run exits without executing and leaves the record it was
-about to discard. Unreadable obligation files, a list left behind by a killed
-drainer, and an obligation appended in the window before a drained list is
-removed are pinned alongside them. Adding an operation to this path means
-adding its boundary to the table and to that sweep.
+about to discard. Unreadable obligation files, an obligation left behind by a
+dead drainer, and one published while a drain is running are pinned alongside
+them. Adding an operation to this path means adding its boundary to the table
+and to that sweep.
 
 A lock with no usable owner record — no file at all, or an unfinished one from
 a run killed mid-write — counts as abandoned after a 30-second grace, measured

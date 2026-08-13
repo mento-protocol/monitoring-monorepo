@@ -5555,7 +5555,7 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   # can drain A; C reclaims B. If the obligation to drain A lived only in B's
   # shell variable it died with B, and C runs beside A's survivor. Every run
   # drains the whole outstanding set, so C inherits A's along with B's.
-  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned"
+  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
   : > "$gate_race_log"
   RACE_STUB_SECONDS=45 \
     AGENT_QUALITY_GATE_LOCK=1 \
@@ -5602,7 +5602,7 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   done
   [[ -n "$race_chain_b_pid" && "$race_chain_b_pid" != "$race_chain_a_pid" ]] ||
     fail "the crash-chain case never saw B publish its record"
-  [[ -r "$gate_race_root/condemned" ]] ||
+  [[ -n "$(ls -A "$gate_race_root/condemned.d" 2>/dev/null || true)" ]] ||
     fail "B must record what it condemned before taking over, not after"
   kill -9 "$race_chain_b_pid" "$race_chain_b_wrapper" 2>/dev/null || true
   wait "$race_chain_b_wrapper" 2>/dev/null || true
@@ -5631,8 +5631,8 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     fail "a command inherited through a crash chain must not keep running"
   [[ "$race_chain_c_started" -ge "$race_chain_died" ]] ||
     fail "the inheriting run started $((race_chain_died - race_chain_c_started))s before the first run's command died"
-  [[ ! -e "$gate_race_root/condemned" ]] ||
-    fail "a drained condemned list must be cleared once its tokens are confirmed gone"
+  [[ -z "$(ls -A "$gate_race_root/condemned.d" 2>/dev/null || true)" ]] ||
+    fail "a drained obligation must be cleared once its processes are confirmed gone"
   for race_wd in $race_chain_watchdogs; do
     kill -CONT "$race_wd" 2>/dev/null || true
     kill -KILL "$race_wd" 2>/dev/null || true
@@ -5644,7 +5644,7 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   # find nothing and call the obligation discharged while a TERM-ignoring
   # descendant kept running. The captured tree has to be written down before
   # the first signal for the successor to have anything to inherit.
-  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned"
+  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
   rm -f "$gate_race_root"/captured.*
   : > "$gate_race_log"
   RACE_STUB_IGNORE_TERM=1 \
@@ -5724,7 +5724,7 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   # them. A is killed mid-command with its watchdog suspended; B takes A's
   # record and dies at the take boundary; C evaluates the remnant. Discarding
   # it before writing the token down loses A's commands entirely.
-  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned"
+  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
   rm -f "$gate_race_root"/captured.*
   : > "$gate_race_log"
   RACE_STUB_IGNORE_TERM=1 \
@@ -5801,7 +5801,7 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   # authorise signalling whatever holds the PID now. The bystander below
   # survives TERM and writes down that it was signalled, so the evidence
   # survives either outcome.
-  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned"
+  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
   rm -f "$gate_race_root"/captured.*
   race_receipt="$gate_race_out/bystander-receipt"
   : > "$race_receipt"
@@ -5812,7 +5812,9 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     fail "the empty-identity case needs its bystander alive"
   race_fake_token_value="fixture-empty-identity-$$"
   mkdir -p "$gate_race_root/run.lock"
-  printf '%s\n' "$race_fake_token_value" > "$gate_race_root/condemned"
+  mkdir -p "$gate_race_root/condemned.d"
+  printf '%s\n' "$race_fake_token_value" \
+    > "$gate_race_root/condemned.d/$race_fake_token_value"
   printf '%s|\n' "$race_bystander" > "$gate_race_root/captured.${race_fake_token_value}"
   AGENT_QUALITY_GATE_LOCK=1 \
     AGENT_QUALITY_GATE_LOCK_HELD='' \
@@ -5833,14 +5835,14 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     fail "failing closed on an unverifiable process must say so"
   kill -9 "$race_bystander" 2>/dev/null || true
   wait "$race_bystander" 2>/dev/null || true
-  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned"
+  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
   rm -f "$gate_race_root"/captured.*
 
   # A command that ignores TERM and forks a fresh child each time it is
   # signalled. Discovery has to keep looking while anything is alive to fork:
   # a single recapture cannot see a child spawned after it ran, and the KILL
   # pass then takes the captured parent while the newest child walks away.
-  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned"
+  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
   rm -f "$gate_race_root"/captured.*
   : > "$gate_race_log"
   RACE_STUB_FORK_ON_TERM=1 \
@@ -5921,11 +5923,12 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   fi
   rm -rf "$gate_race_root/run.lock"
 
-  # The condemned list is the only thing that tells the next holder a dead run's
-  # commands are outstanding, and on a shared lock root it can belong to another
-  # user. A run that cannot append to it must not discard the record and take
-  # over: that is how it would come to execute beside those commands.
-  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned"
+  # The obligation directory is the only thing that tells the next holder a
+  # dead run's commands are outstanding, and on a shared lock root it can
+  # belong to another user. A run that cannot write into it must not discard
+  # the record and take over: that is how it comes to execute beside those
+  # commands.
+  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
   rm -f "$gate_race_root"/captured.*
   : > "$gate_race_log"
   mkdir -p "$gate_race_root/run.lock"
@@ -5936,8 +5939,8 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     printf 'worktree=%s\n' "$gate_race_repo"
     printf 'token=unwritable-obligation\n'
   } > "$gate_race_root/run.lock/owner"
-  : > "$gate_race_root/condemned"
-  chmod 444 "$gate_race_root/condemned"
+  mkdir -p "$gate_race_root/condemned.d"
+  chmod 555 "$gate_race_root/condemned.d"
   AGENT_QUALITY_GATE_LOCK=1 \
     AGENT_QUALITY_GATE_LOCK_HELD='' \
     AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
@@ -5947,7 +5950,7 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     --base HEAD --run --lock-wait 20 \
     > "$gate_race_out/unwritable-condemned.out" 2>&1 &&
     race_unwritable_exit=0 || race_unwritable_exit=$?
-  chmod 644 "$gate_race_root/condemned" 2>/dev/null || true
+  chmod 755 "$gate_race_root/condemned.d" 2>/dev/null || true
   [[ "$race_unwritable_exit" == "2" ]] ||
     fail "a run that cannot record the obligation must fail closed, got exit ${race_unwritable_exit}"
   grep -q "could not record the previous run's commands as outstanding" \
@@ -5957,18 +5960,19 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     fail "a run that could not record the obligation executed a mapped command anyway"
   [[ -e "$gate_race_root/run.lock/owner" ]] ||
     fail "the record naming those commands must survive a failed obligation write"
-  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned"
+  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
 
   # Unreadable is not empty. Both obligation files can be created by another
   # user on a shared lock root, and reading one as "nothing outstanding" is how
   # a run comes to execute beside commands it never drained.
   for race_unreadable_case in condemned captured; do
-    rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned"
-    rm -f "$gate_race_root"/captured.* "$gate_race_root"/condemned.draining.*
+    rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
+    rm -f "$gate_race_root"/captured.*
     : > "$gate_race_log"
-    printf 'fixture-unreadable\n' > "$gate_race_root/condemned"
+    mkdir -p "$gate_race_root/condemned.d"
+    printf 'fixture-unreadable\n' > "$gate_race_root/condemned.d/fixture-unreadable"
     if [[ "$race_unreadable_case" == condemned ]]; then
-      race_unreadable_file="$gate_race_root/condemned"
+      race_unreadable_file="$gate_race_root/condemned.d/fixture-unreadable"
     else
       race_unreadable_file="$gate_race_root/captured.fixture-unreadable"
       printf '99999|\n' > "$race_unreadable_file"
@@ -5984,26 +5988,26 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
       race_unreadable_exit=0 || race_unreadable_exit=$?
     chmod 644 "$race_unreadable_file" 2>/dev/null || true
     [[ "$race_unreadable_exit" == "2" ]] ||
-      fail "an unreadable ${race_unreadable_case} list must fail closed, got exit ${race_unreadable_exit}"
+      fail "an unreadable ${race_unreadable_case} record must fail closed, got exit ${race_unreadable_exit}"
     grep -q "exists but cannot be read" \
       "$gate_race_out/unreadable-${race_unreadable_case}.out" ||
-      fail "failing closed on an unreadable ${race_unreadable_case} list must say so"
+      fail "failing closed on an unreadable ${race_unreadable_case} record must say so"
     [[ -z "$(awk '/^enter/ { print $2; exit }' "$gate_race_log")" ]] ||
-      fail "a run that could not read the ${race_unreadable_case} list executed a mapped command anyway"
+      fail "a run that could not read the ${race_unreadable_case} record executed a mapped command anyway"
   done
-  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned"
+  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
   rm -f "$gate_race_root"/captured.*
 
-  # A drainer killed with the list in its hands leaves it parked under
-  # condemned.draining.*, where only this recovery looks. Those obligations are
-  # still outstanding, so a later run has to find and discharge them.
-  rm -f "$gate_race_root"/condemned.draining.*
+  # An obligation left by a drainer that died before discharging it is still
+  # outstanding: each file is removed only after its own processes are gone, so
+  # whatever remains is what the next run inherits.
   : > "$gate_race_log"
-  bash -c 'eval "$1"; exit $?' "agentqg:fixture-taken-remnant" 'sleep 60' &
+  bash -c 'eval "$1"; exit $?' "agentqg:fixture-inherited" 'sleep 60' &
   race_taken_proc=$!
   sleep 1
-  if [[ -n "$(pgrep -f "agentqg:fixture-taken-remnant" 2>/dev/null | head -n1 || true)" ]]; then
-    printf 'fixture-taken-remnant\n' > "$gate_race_root/condemned.draining.99999"
+  if [[ -n "$(pgrep -f "agentqg:fixture-inherited" 2>/dev/null | head -n1 || true)" ]]; then
+    mkdir -p "$gate_race_root/condemned.d"
+    printf 'fixture-inherited\n' > "$gate_race_root/condemned.d/fixture-inherited"
     AGENT_QUALITY_GATE_LOCK=1 \
       AGENT_QUALITY_GATE_LOCK_HELD='' \
       AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
@@ -6011,35 +6015,37 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
       AGENT_QUALITY_GATE_LOCK_ORPHAN_DRAIN_SECONDS=30 \
       "$repo_root/scripts/agent-quality-gate.sh" \
       --base HEAD --run --lock-wait 30 \
-      > "$gate_race_out/taken-remnant.out" 2>&1 || true
+      > "$gate_race_out/inherited-obligation.out" 2>&1 || true
     kill -0 "$race_taken_proc" 2>/dev/null &&
-      fail "an obligation list left by a killed drainer was never drained"
-    [[ ! -e "$gate_race_root/condemned.draining.99999" ]] ||
-      fail "a drained obligation list must not be left behind to be drained forever"
+      fail "an obligation left behind by a dead drainer was never discharged"
+    [[ ! -e "$gate_race_root/condemned.d/fixture-inherited" ]] ||
+      fail "a discharged obligation must not be left behind to be drained forever"
   fi
   kill -9 "$race_taken_proc" 2>/dev/null || true
   wait "$race_taken_proc" 2>/dev/null || true
-  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned"
-  rm -f "$gate_race_root"/captured.* "$gate_race_root"/condemned.draining.*
+  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
+  rm -f "$gate_race_root"/captured.*
 
-  # Any run can append an obligation while the holder is draining. The reader
-  # holds its fd open, so an append during the drain is still seen; the one at
-  # risk lands after EOF and before the list is removed. Taking the list by
-  # rename sends that append to a fresh list instead of into the file about to
-  # be unlinked. The window is microseconds in production, so it is widened
-  # here the way the rest of these interleavings are.
+  # Any run can publish an obligation while the holder is draining. The drainer
+  # removes only files it has read to the end, so one arriving mid-drain is
+  # either picked up by this run or inherited by the next — never deleted
+  # unread. The window between reading a file and removing it is microseconds
+  # in production, so it is widened here the way the rest of these
+  # interleavings are.
   : > "$gate_race_log"
   bash -c 'eval "$1"; exit $?' "agentqg:fixture-drained-first" 'sleep 60' &
   race_unlink_first=$!
   # The late obligation names a live process of its own, so the assertion does
-  # not depend on when the append lands: either the token is still listed for
-  # the next run, or this run drained it. Only "token gone, process alive" is
-  # the loss this case exists to catch.
+  # not depend on when it is published: either its file is still there for the
+  # next run, or this run drained it. Only "file gone, process alive" is the
+  # loss this case exists to catch.
   bash -c 'eval "$1"; exit $?' "agentqg:fixture-arrived-late" 'sleep 90' &
   race_unlink_late=$!
   sleep 1
   if [[ -n "$(pgrep -f "agentqg:fixture-drained-first" 2>/dev/null | head -n1 || true)" ]]; then
-    printf 'fixture-drained-first\n' > "$gate_race_root/condemned"
+    mkdir -p "$gate_race_root/condemned.d"
+    printf 'fixture-drained-first\n' \
+      > "$gate_race_root/condemned.d/fixture-drained-first"
     AGENT_QUALITY_GATE_LOCK=1 \
       AGENT_QUALITY_GATE_LOCK_HELD='' \
       AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
@@ -6051,7 +6057,7 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
       > "$gate_race_out/unlink-window.out" 2>&1 &
     race_unlink_wrapper=$!
     # The capture file appears when that token's drain starts and is removed
-    # when it is discharged, which is where the list has been read to EOF.
+    # when it is discharged, which is where its own file is about to go.
     race_waited=0
     while [[ ! -e "$gate_race_root/captured.fixture-drained-first" && "$race_waited" -lt 400 ]]; do
       sleep 0.5
@@ -6062,18 +6068,19 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
       sleep 0.5
       race_waited=$((race_waited + 1))
     done
-    printf 'fixture-arrived-late\n' >> "$gate_race_root/condemned"
+    printf 'fixture-arrived-late\n' \
+      > "$gate_race_root/condemned.d/fixture-arrived-late"
     wait "$race_unlink_wrapper" 2>/dev/null || true
-    if ! grep -q "fixture-arrived-late" "$gate_race_root/condemned" 2>/dev/null; then
+    if [[ ! -e "$gate_race_root/condemned.d/fixture-arrived-late" ]]; then
       kill -0 "$race_unlink_late" 2>/dev/null &&
-        fail "an obligation appended before the list was removed was deleted unread, and its command is still running"
+        fail "an obligation published during a drain was removed unread, and its command is still running"
     fi
   fi
   kill -9 "$race_unlink_first" "$race_unlink_late" 2>/dev/null || true
   wait "$race_unlink_first" 2>/dev/null || true
   wait "$race_unlink_late" 2>/dev/null || true
-  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned"
-  rm -f "$gate_race_root"/captured.* "$gate_race_root"/condemned.draining.*
+  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
+  rm -f "$gate_race_root"/captured.*
 
   # Crash-point sweep. Every boundary where this path creates, links, renames
   # or removes something is a place a SIGKILL can land, and each of the rounds
