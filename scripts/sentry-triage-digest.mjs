@@ -57,7 +57,10 @@ import { fileURLToPath } from "node:url";
 // The archive leg's approval-label name is owned by the ingest module (it
 // defines the label); import it rather than duplicating the string literal so
 // the two can never drift apart.
-import { APPROVED_ARCHIVE_LABEL } from "./sentry-triage-ingest.mjs";
+import {
+  APPROVED_ARCHIVE_LABEL,
+  FIX_SCOPE_ARCHITECTURAL_LABEL,
+} from "./sentry-triage-ingest.mjs";
 
 // Verdict-comment parsing is delegated to the pipeline's single authoritative
 // parser (the same one the label/projection steps run) so the digest can never
@@ -282,13 +285,38 @@ const EMPTY_PARSED = {
  * code-fix scoped architectural gets its OWN "Open design work" section (#1812,
  * operator resolution #3) — it is held open under sentry:fix-scope-architectural
  * and the autofix leg never acts on it, so it is not "Routed" anywhere. Every
- * other actionable code/config-fix goes to Routed. */
-function sectionForEntry({ bucket, autofixUrl, owningRepoIsLocal, fixScope }) {
+ * other actionable code/config-fix goes to Routed.
+ *
+ * The LIVE architectural-hold LABEL wins over a stale autofix pointer: an
+ * already-autofixed stub re-triaged as architectural keeps its old `Autofixed by
+ * PR:` marker (the re-triage adds the hold without shedding the marker, since no
+ * regression re-queued it), but the `sentry:fix-scope-architectural` label is the
+ * authoritative "now held open as design work" state, so it renders under Open
+ * design work even with an autofix URL. A recorded fix PR still beats a verdict
+ * that only READS architectural on scope (no hold label) — that stub was
+ * genuinely autofixed — so the scope-only architectural check stays after the
+ * autofix-URL check, exactly as before this fix. */
+function sectionForEntry({
+  bucket,
+  autofixUrl,
+  owningRepoIsLocal,
+  fixScope,
+  architecturalHold,
+}) {
   if (bucket === FAILED_BUCKET) return FAILED_SECTION;
   if (bucket === "needs-human") return NEEDS_HUMAN_SECTION;
   if (bucket === "upstream-transient") return WONTFIX_SECTION;
   // code-fix / config-fix.
+  // The LIVE architectural hold LABEL overrides a stale autofix pointer: a stub
+  // re-triaged as architectural keeps its old `Autofixed by PR:` marker (no
+  // regression re-queued it, so the marker is not shed), but the label is the
+  // authoritative "now held open as design work" state, so it belongs in Open
+  // design work, not Autofixed.
+  if (architecturalHold) return ARCHITECTURAL_SECTION;
+  // A recorded fix PR (with no hold label) means the stub was genuinely
+  // autofixed — that beats a verdict that merely reads architectural on scope.
   if (autofixUrl) return AUTOFIXED_SECTION;
+  // Fresh architectural verdict, not yet labeled and never autofixed.
   if (isArchitecturalLocalCodeFix({ bucket, owningRepoIsLocal, fixScope })) {
     return ARCHITECTURAL_SECTION;
   }
@@ -340,6 +368,13 @@ export function classifyIssue(issue) {
   const fixScope = parsed.fixScope ?? null;
   const owningRepoIsLocal =
     validateAffectedRepo(parsed.affectedRepo).reason === "local-repo";
+  // The LIVE architectural hold, straight from the stub's labels — the
+  // authoritative "held open as design work" marker the settlement/backfill
+  // applies. It outranks a stale autofix pointer in the section decision: a
+  // re-triage to architectural adds this label but leaves the old `Autofixed by
+  // PR:` comment in place, so the label is what keeps the now-open item out of
+  // the Autofixed section.
+  const architecturalHold = labelNames.includes(FIX_SCOPE_ARCHITECTURAL_LABEL);
 
   return {
     number: issue?.number,
@@ -353,6 +388,7 @@ export function classifyIssue(issue) {
       autofixUrl,
       owningRepoIsLocal,
       fixScope,
+      architecturalHold,
     }),
     verdict: bucket === FAILED_BUCKET ? null : bucket,
     confidence: parsed.confidence,

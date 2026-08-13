@@ -710,6 +710,39 @@ await test("classifyIssue routes an actionable verdict with fix-PR data to the a
   assertEqual(entry.autofixUrl, FIX_PR_URL);
 });
 
+await test("classifyIssue routes a re-triaged-architectural stub to Open design work over its stale autofix marker (#1812)", () => {
+  // An already-autofixed stub re-triaged as architectural: the workflow adds the
+  // sentry:fix-scope-architectural hold but leaves the old `Autofixed by PR:`
+  // marker in place (no regression re-queued it, so the marker is not shed). The
+  // LIVE hold label is authoritative — this is open design work now, not an
+  // autofixed item — so it must NOT stay in the Autofixed section.
+  const entry = classifyIssue(
+    issueFixture({
+      labels: [
+        "sentry-triage",
+        "sentry:verdict-code-fix",
+        "sentry:fix-scope-architectural",
+      ],
+      comments: [
+        // The marker was written while the verdict was mechanical; the label,
+        // not the parsed scope, is what now routes it to Open design work.
+        {
+          body: verdictComment({ verdict: "code-fix", fixScope: "mechanical" }),
+        },
+        { body: `${AUTOFIX_COMMENT_PREFIX}${FIX_PR_URL}` },
+      ],
+    }),
+  );
+  // Negative control: the live-label precedence is the ONLY thing keeping this
+  // out of Autofixed — drop `if (architecturalHold)` from sectionForEntry and a
+  // mechanical verdict + autofix marker lands in "autofixed" (the #1812 bug).
+  assertEqual(entry.section, "architectural");
+  assert(
+    entry.section !== "autofixed",
+    "the live architectural hold label must beat the stale autofix pointer",
+  );
+});
+
 await test("classifyIssue picks up a projected-issue pointer for the routed link", () => {
   // Only an EXTERNAL code-fix genuinely projects and routes; a local one holds
   // under sentry:fix-scope-architectural in its own section (#1812), so this
