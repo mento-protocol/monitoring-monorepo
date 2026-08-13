@@ -54,6 +54,16 @@ lint:
         # scanning this derived artifact would just double-report transitive
         # findings with no fix path.
         - alerts/infra/onchain-event-handler/package-lock.json
+        # Standalone Cloud Build lockfiles for the alerts handlers, audited by
+        # .github/workflows/supply-chain.yml's pnpm-audit step like their
+        # siblings above. They were the last lockfiles trunk's osv-scanner
+        # still scanned inline, which made every same-day OSV publication
+        # against any pinned transitive fail Code Quality repo-wide on files
+        # no open PR touches (2026-08-13: nanoid, then uuid and ws within
+        # hours). Security floors stay maintained via each package's
+        # pnpm-workspace.yaml overrides.
+        - alerts/infra/oncall-announcer/pnpm-lock.yaml
+        - alerts/infra/onchain-event-handler/pnpm-lock.yaml
     - linters: [checkov]
       paths:
         - terraform/main.tf

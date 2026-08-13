@@ -31,7 +31,7 @@ overrides:
   '@istanbuljs/load-nyc-config>js-yaml': 4.3.1
   '@lhci/utils>js-yaml': 4.3.1
   js-yaml@>=4.0.0 <4.3.1: 4.3.1
-  nanoid@<3.3.17: 3.3.17
+  nanoid@<3.3.18: 3.3.18
   protobufjs@>=7.0.0 <7.6.5: 7.6.5
   qs@<6.15.2: 6.15.2
   cookie@<0.7.0: 0.7.2
@@ -92,7 +92,7 @@ importers:
         version: 0.311.3(@lezer/highlight@1.2.3)(@lezer/lr@1.4.10)
       '@upstash/mcp-server':
         specifier: 0.2.4
-        version: 0.2.4
+        version: 0.2.4(supports-color@5.5.0)
       dependency-cruiser:
         specifier: 17.4.0
         version: 17.4.0
@@ -174,7 +174,7 @@ importers:
     devDependencies:
       '@nestjs/cli':
         specifier: 11.0.12
-        version: 11.0.12(@types/node@24.10.1)
+        version: 11.0.12(@types/node@24.10.1)(esbuild@0.28.1)
       '@nestjs/schematics':
         specifier: 11.0.9
         version: 11.0.9(chokidar@4.0.3)(typescript@5.9.3)
@@ -222,7 +222,7 @@ importers:
         version: 3.6.2
       ts-jest:
         specifier: 29.4.5
-        version: 29.4.5(@babel/core@7.29.6)(@jest/transform@30.2.0)(@jest/types@30.4.1)(babel-jest@30.2.0(@babel/core@7.29.6))(jest-util@30.4.1)(jest@30.2.0(@types/node@24.10.1)(ts-node@10.9.2(@types/node@24.10.1)(typescript@5.9.3)))(typescript@5.9.3)
+        version: 29.4.5(@babel/core@7.29.6)(@jest/transform@30.2.0)(@jest/types@30.4.1)(babel-jest@30.2.0(@babel/core@7.29.6))(esbuild@0.28.1)(jest-util@30.4.1)(jest@30.2.0(@types/node@24.10.1)(ts-node@10.9.2(@types/node@24.10.1)(typescript@5.9.3)))(typescript@5.9.3)
       ts-node:
         specifier: 10.9.2
         version: 10.9.2(@types/node@24.10.1)(typescript@5.9.3)
@@ -7438,8 +7438,8 @@ packages:
     resolution: {integrity: sha512-dkEJPVvun4FryqBmZ5KhDo0K9iDXAwn08tMLDinNdRBNPcYEDiWYysLcc6k3mjTMlbP9KyylvRpd4wFtwrT9rw==}
     engines: {node: ^20.17.0 || >=22.9.0}
 
-  nanoid@3.3.17:
-    resolution: {integrity: sha512-xQLf0A3HOMlgHq0n247/LRuAOYmB7dXJ/DvAxGvsSBij45XtBSmQycu+F8ODbHwns/XyFZagyL1+J0Offw1E0g==}
+  nanoid@3.3.18:
+    resolution: {integrity: sha512-DTg4MJbGMWkfi6VZFdNt2/caMbQy4Ou+Op/hJQvGEWcnVfoA1QA+xzRKAzw9jD6+GVOOeYr/mIcuDSdug6F6+w==}
     engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
     hasBin: true
 
@@ -11263,7 +11263,7 @@ snapshots:
 
   '@mento-protocol/contracts@0.9.0': {}
 
-  '@modelcontextprotocol/sdk@1.30.0(zod@3.25.76)':
+  '@modelcontextprotocol/sdk@1.30.0(supports-color@5.5.0)(zod@3.25.76)':
     dependencies:
       '@hono/node-server': 2.1.0(hono@4.13.1)
       ajv: 8.18.0
@@ -11273,8 +11273,8 @@ snapshots:
       cross-spawn: 7.0.6
       eventsource: 3.0.7
       eventsource-parser: 3.0.6
-      express: 5.2.1
-      express-rate-limit: 8.6.2(express@5.2.1)
+      express: 5.2.1(supports-color@5.5.0)
+      express-rate-limit: 8.6.2(express@5.2.1(supports-color@5.5.0))(supports-color@5.5.0)
       hono: 4.13.1
       jose: 6.2.2
       json-schema-typed: 8.0.2
@@ -11313,7 +11313,7 @@ snapshots:
       '@tybys/wasm-util': 0.10.2
     optional: true
 
-  '@nestjs/cli@11.0.12(@types/node@24.10.1)':
+  '@nestjs/cli@11.0.12(@types/node@24.10.1)(esbuild@0.28.1)':
     dependencies:
       '@angular-devkit/core': 19.2.19(chokidar@4.0.3)
       '@angular-devkit/schematics': 19.2.19(chokidar@4.0.3)
@@ -11324,14 +11324,14 @@ snapshots:
       chokidar: 4.0.3
       cli-table3: 0.6.5
       commander: 4.1.1
-      fork-ts-checker-webpack-plugin: 9.1.0(typescript@5.9.3)(webpack@5.106.2)
+      fork-ts-checker-webpack-plugin: 9.1.0(typescript@5.9.3)(webpack@5.106.2(esbuild@0.28.1))
       glob: 12.0.0
       node-emoji: 1.11.0
       ora: 5.4.1
       tsconfig-paths: 4.2.0
       tsconfig-paths-webpack-plugin: 4.2.0
       typescript: 5.9.3
-      webpack: 5.106.2
+      webpack: 5.106.2(esbuild@0.28.1)
       webpack-node-externals: 3.0.0
     transitivePeerDependencies:
       - '@types/node'
@@ -13067,9 +13067,9 @@ snapshots:
   '@unrs/resolver-binding-win32-x64-msvc@1.11.1':
     optional: true
 
-  '@upstash/mcp-server@0.2.4':
+  '@upstash/mcp-server@0.2.4(supports-color@5.5.0)':
     dependencies:
-      '@modelcontextprotocol/sdk': 1.30.0(zod@3.25.76)
+      '@modelcontextprotocol/sdk': 1.30.0(supports-color@5.5.0)(zod@3.25.76)
       '@types/node': 15.14.9
       chalk: 5.6.2
       commander: 14.0.3
@@ -14968,10 +14968,10 @@ snapshots:
       jest-mock: 30.4.1
       jest-util: 30.4.1
 
-  express-rate-limit@8.6.2(express@5.2.1):
+  express-rate-limit@8.6.2(express@5.2.1(supports-color@5.5.0))(supports-color@5.5.0):
     dependencies:
       debug: 4.4.3(supports-color@5.5.0)
-      express: 5.2.1
+      express: 5.2.1(supports-color@5.5.0)
       ip-address: 10.3.1
     transitivePeerDependencies:
       - supports-color
@@ -15044,7 +15044,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  express@5.2.1:
+  express@5.2.1(supports-color@5.5.0):
     dependencies:
       accepts: 2.0.0
       body-parser: 2.3.0
@@ -15253,7 +15253,7 @@ snapshots:
       cross-spawn: 7.0.6
       signal-exit: 4.1.0
 
-  fork-ts-checker-webpack-plugin@9.1.0(typescript@5.9.3)(webpack@5.106.2):
+  fork-ts-checker-webpack-plugin@9.1.0(typescript@5.9.3)(webpack@5.106.2(esbuild@0.28.1)):
     dependencies:
       '@babel/code-frame': 7.29.0
       chalk: 4.1.2
@@ -15268,7 +15268,7 @@ snapshots:
       semver: 7.7.4
       tapable: 2.3.3
       typescript: 5.9.3
-      webpack: 5.106.2
+      webpack: 5.106.2(esbuild@0.28.1)
 
   form-data@2.5.6:
     dependencies:
@@ -17429,7 +17429,7 @@ snapshots:
 
   mute-stream@3.0.0: {}
 
-  nanoid@3.3.17: {}
+  nanoid@3.3.18: {}
 
   nanospinner@1.2.2:
     dependencies:
@@ -17979,7 +17979,7 @@ snapshots:
 
   postcss@8.5.23:
     dependencies:
-      nanoid: 3.3.17
+      nanoid: 3.3.18
       picocolors: 1.1.1
       source-map-js: 1.2.1
 
@@ -19136,14 +19136,6 @@ snapshots:
     optionalDependencies:
       esbuild: 0.28.1
 
-  terser-webpack-plugin@5.4.0(webpack@5.106.2):
-    dependencies:
-      '@jridgewell/trace-mapping': 0.3.31
-      jest-worker: 27.5.1
-      schema-utils: 4.3.3
-      terser: 5.46.1
-      webpack: 5.106.2
-
   terser@5.46.1:
     dependencies:
       '@jridgewell/source-map': 0.3.11
@@ -19254,7 +19246,7 @@ snapshots:
       picomatch: 4.0.4
       typescript: 5.9.3
 
-  ts-jest@29.4.5(@babel/core@7.29.6)(@jest/transform@30.2.0)(@jest/types@30.4.1)(babel-jest@30.2.0(@babel/core@7.29.6))(jest-util@30.4.1)(jest@30.2.0(@types/node@24.10.1)(ts-node@10.9.2(@types/node@24.10.1)(typescript@5.9.3)))(typescript@5.9.3):
+  ts-jest@29.4.5(@babel/core@7.29.6)(@jest/transform@30.2.0)(@jest/types@30.4.1)(babel-jest@30.2.0(@babel/core@7.29.6))(esbuild@0.28.1)(jest-util@30.4.1)(jest@30.2.0(@types/node@24.10.1)(ts-node@10.9.2(@types/node@24.10.1)(typescript@5.9.3)))(typescript@5.9.3):
     dependencies:
       bs-logger: 0.2.6
       fast-json-stable-stringify: 2.1.0
@@ -19272,6 +19264,7 @@ snapshots:
       '@jest/transform': 30.2.0
       '@jest/types': 30.4.1
       babel-jest: 30.2.0(@babel/core@7.29.6)
+      esbuild: 0.28.1
       jest-util: 30.4.1
 
   ts-mixer@6.0.4: {}
@@ -19730,37 +19723,6 @@ snapshots:
   webpack-node-externals@3.0.0: {}
 
   webpack-sources@3.3.4: {}
-
-  webpack@5.106.2:
-    dependencies:
-      '@types/eslint-scope': 3.7.7
-      '@types/estree': 1.0.8
-      '@types/json-schema': 7.0.15
-      '@webassemblyjs/ast': 1.14.1
-      '@webassemblyjs/wasm-edit': 1.14.1
-      '@webassemblyjs/wasm-parser': 1.14.1
-      acorn: 8.16.0
-      acorn-import-phases: 1.0.4(acorn@8.16.0)
-      browserslist: 4.28.2
-      chrome-trace-event: 1.0.4
-      enhanced-resolve: 5.21.0
-      es-module-lexer: 2.0.0
-      eslint-scope: 5.1.1
-      events: 3.3.0
-      glob-to-regexp: 0.4.1
-      graceful-fs: 4.2.11
-      loader-runner: 4.3.1
-      mime-db: 1.54.0
-      neo-async: 2.6.2
-      schema-utils: 4.3.3
-      tapable: 2.3.3
-      terser-webpack-plugin: 5.4.0(webpack@5.106.2)
-      watchpack: 2.5.1
-      webpack-sources: 3.3.4
-    transitivePeerDependencies:
-      - '@swc/core'
-      - esbuild
-      - uglify-js
 
   webpack@5.106.2(esbuild@0.28.1):
     dependencies:
