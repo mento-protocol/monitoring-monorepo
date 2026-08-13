@@ -17,6 +17,12 @@ trap 'echo "agent-quality-gate test suite aborted: line $LINENO: $BASH_COMMAND (
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
+# Every fixture gate run below drives `--run` against a throwaway repo. None of
+# them is the machine's real gate, so none should queue behind one — or make a
+# real one queue behind them (GitHub issue #1802). The lock tests near the end
+# re-enable exclusion explicitly against their own lock directory.
+export AGENT_QUALITY_GATE_LOCK=0
+
 paths_file="$(mktemp)"
 output_file="$(mktemp)"
 gate_cache_dir="$(mktemp -d)"
@@ -4881,5 +4887,1479 @@ STUB
     fail "expected the quality command to be reused on the second run"
 )
 rm -rf "$prereq_reuse_repo"
+
+# --- Cross-run mutual exclusion (GitHub issue #1802) -------------------------
+# Two gate runs on one machine starve each other, and the pre-push hook starts
+# one of its own while a manual run is still going, so `--run` takes a
+# machine-wide mkdir lock. What has to hold: a live holder makes the second run
+# wait rather than race, a holder that was killed never wedges the next run,
+# and both escape hatches (--no-lock, an inherited nested-run marker) still
+# start immediately.
+gate_lock_repo="$(mktemp -d)"
+gate_lock_root="$(mktemp -d)"
+(
+  cd "$gate_lock_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  printf 'fixture\n' > fixture.txt
+  mkdir -p tools
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  chmod +x tools/trunk
+  git add .
+  git commit -qm init
+  printf 'changed\n' >> fixture.txt
+
+  run_locked_gate() {
+    # AGENT_QUALITY_GATE_LOCK_HELD is cleared deliberately: when this suite runs
+    # as a mapped command of a real gate it inherits the outer run's marker,
+    # and every contention assertion below would pass vacuously through the
+    # nested-run escape hatch.
+    set +e
+    AGENT_QUALITY_GATE_LOCK=1 \
+      AGENT_QUALITY_GATE_LOCK_HELD='' \
+      AGENT_QUALITY_GATE_LOCK_DIR="$gate_lock_root" \
+      AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+      --base HEAD --run --lock-wait 2 "$@" \
+      > "$output_file" 2>&1
+    local exit_code=$?
+    set -e
+    printf '%s\n' "$exit_code"
+  }
+
+  write_lock_owner() {
+    mkdir -p "$gate_lock_root/run.lock"
+    {
+      printf 'pid=%s\n' "$1"
+      printf 'host=%s\n' "$(uname -n)"
+      printf 'started_at=%s\n' "$(date +%s)"
+      printf 'worktree=%s\n' "$gate_lock_repo"
+      printf 'token=fixture-holder-1-1\n'
+    } > "$gate_lock_root/run.lock/owner"
+  }
+
+  # A live holder: the second run announces who it is waiting for, keeps
+  # waiting, and gives up with a bounded, actionable failure instead of hanging.
+  sleep 120 &
+  live_holder_pid=$!
+  write_lock_owner "$live_holder_pid"
+  lock_exit="$(run_locked_gate)"
+  kill "$live_holder_pid" 2>/dev/null || true
+  [[ "$lock_exit" == "2" ]] ||
+    fail "expected a contended gate run to exit 2 after --lock-wait, got $lock_exit"
+  assert_contains "Waiting for the agent quality gate run lock"
+  assert_contains "held by pid ${live_holder_pid}"
+  assert_contains "timed out after"
+  # The pre-push hook cannot pass --no-lock, so the timeout must also name the
+  # recovery that works from a failed push.
+  assert_contains "--skip-if-fresh cache-hits and exits before this lock"
+  [[ -d "$gate_lock_root/run.lock" ]] ||
+    fail "a run that never acquired the lock must not delete the holder's lock"
+
+  # A dead holder whose record carries a token the gate would never generate
+  # is waited out, never reclaimed: reclaiming would later drain by that
+  # token, matching processes with a value another writer chose. On a shared
+  # root that record can be crafted, so fail-closed here means the timeout.
+  sleep 0 &
+  malformed_dead_pid=$!
+  wait "$malformed_dead_pid" 2>/dev/null || true
+  mkdir -p "$gate_lock_root/run.lock"
+  {
+    printf 'pid=%s\n' "$malformed_dead_pid"
+    printf 'host=%s\n' "$(uname -n)"
+    printf 'started_at=%s\n' "$(date +%s)"
+    printf 'worktree=%s\n' "$gate_lock_repo"
+    printf 'token=crafted.*\n'
+  } > "$gate_lock_root/run.lock/owner"
+  lock_exit="$(run_locked_gate)"
+  [[ "$lock_exit" == "2" ]] ||
+    fail "a malformed-token record must be waited out and fail closed, got $lock_exit"
+  assert_contains "timed out after"
+  [[ -d "$gate_lock_root/run.lock" ]] ||
+    fail "a malformed-token record must never be reclaimed"
+  rm -rf "$gate_lock_root/run.lock"
+
+  # An inherited nested-run marker (the gate's own self-test runs the gate)
+  # starts immediately instead of deadlocking behind its own ancestor.
+  sleep 120 &
+  nested_holder_pid=$!
+  write_lock_owner "$nested_holder_pid"
+  set +e
+  AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD=outer-run \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_lock_root" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 5 \
+    > "$output_file" 2>&1
+  nested_exit=$?
+  set -e
+  kill "$nested_holder_pid" 2>/dev/null || true
+  [[ "$nested_exit" == "0" ]] ||
+    fail "expected a nested gate run to ignore the lock, got $nested_exit"
+  assert_not_contains "Waiting for the agent quality gate run lock"
+
+  # --no-lock is the documented escape hatch: it starts despite a live holder
+  # and leaves that holder's lock alone.
+  sleep 120 &
+  bypass_holder_pid=$!
+  write_lock_owner "$bypass_holder_pid"
+  bypass_exit="$(run_locked_gate --no-lock)"
+  kill "$bypass_holder_pid" 2>/dev/null || true
+  [[ "$bypass_exit" == "0" ]] ||
+    fail "expected --no-lock to run despite a live holder, got $bypass_exit"
+  assert_not_contains "Waiting for the agent quality gate run lock"
+  [[ -d "$gate_lock_root/run.lock" ]] ||
+    fail "--no-lock must not delete another run's lock"
+
+  # A killed holder (SIGKILL leaves the directory behind, EXIT trap and all)
+  # must never wedge the next run: it reclaims the lock unattended, then
+  # releases its own on the way out.
+  sleep 0 &
+  dead_holder_pid=$!
+  wait "$dead_holder_pid" 2>/dev/null || true
+  write_lock_owner "$dead_holder_pid"
+  stale_exit="$(run_locked_gate)"
+  [[ "$stale_exit" == "0" ]] ||
+    fail "expected a stale lock to be reclaimed without manual cleanup, got $stale_exit"
+  assert_contains "is stale (holder pid ${dead_holder_pid} is gone); reclaiming it."
+  [[ ! -d "$gate_lock_root/run.lock" ]] ||
+    fail "a successful run must release the lock it acquired"
+)
+rm -rf "$gate_lock_repo" "$gate_lock_root"
+
+# Reclaiming a lock spans two decisions — "this lock is stale" and "take it" —
+# and creating one spans two more: win `mkdir`, then record ownership. Both
+# windows are sub-millisecond in production, which is why the gate exposes
+# test-only delays that hold them open. What has to hold either way: exactly
+# one run executes mapped commands at a time. The fixture's only mapped command
+# is a trunk stub recording when it starts and stops, so two overlapping
+# records are the failure these two cases exist to catch.
+gate_race_repo="$(mktemp -d)"
+gate_race_root="$(mktemp -d)"
+# Logs and per-run output live outside the fixture repo on purpose: written
+# inside it they become untracked changed paths, so every run would map
+# commands over the suite's own artifacts and the mapped set would grow as
+# the suite went on.
+gate_race_out="$(mktemp -d)"
+gate_race_log="$gate_race_out/race.log"
+(
+  cd "$gate_race_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  printf 'fixture\n' > fixture.txt
+  mkdir -p tools
+  # The replacements these stubs fork are found again by their sleep duration,
+  # and that duration is derived from this suite's PID so it names only this
+  # suite's fixtures. A fixed number would let the teardown below `kill -9`
+  # something an unrelated process — or a second copy of this suite — happened
+  # to be running.
+  gate_race_fork_seconds="98$((RANDOM % 900 + 100))${$}"
+  gate_race_forkexit_seconds="97$((RANDOM % 900 + 100))${$}"
+  # The two contention cases need this to outlast the stagger between their
+  # waiters, or two unexcluded runs would simply miss each other and the
+  # assertion would pass on broken code. Every other case only needs the gate
+  # to execute something, so they run it at its cheap default.
+  cat > tools/trunk <<STUB
+#!/usr/bin/env bash
+# RACE_STUB_IGNORE_TERM makes this outlive a TERM the way a real build tool
+# with its own signal handling can. The loop is what survives: its sleeps are
+# killable, it is not.
+[ -n "\${RACE_STUB_FORK_ON_TERM:-}" ] && trap 'sleep ${gate_race_fork_seconds} &' TERM
+# RACE_STUB_FORK_AND_EXIT leaves a replacement behind and then goes away, so
+# the replacement is reparented with no tagged ancestor left to walk down from.
+[ -n "\${RACE_STUB_FORK_AND_EXIT:-}" ] && trap 'sleep ${gate_race_forkexit_seconds} & exit 0' TERM
+[ -n "\${RACE_STUB_IGNORE_TERM:-}" ] && [ -z "\${RACE_STUB_FORK_ON_TERM:-}" ] && [ -z "\${RACE_STUB_FORK_AND_EXIT:-}" ] && trap '' TERM
+printf 'enter %s %s\n' "\$\$" "\$(date +%s)" >> "$gate_race_log"
+race_stub_deadline=\$(( \$(date +%s) + \${RACE_STUB_SECONDS:-1} ))
+while [ "\$(date +%s)" -lt "\$race_stub_deadline" ]; do sleep 1 || true; done
+printf 'exit %s %s\n' "\$\$" "\$(date +%s)" >> "$gate_race_log"
+exit 0
+STUB
+  chmod +x tools/trunk
+  git add .
+  git commit -qm init
+  printf 'changed\n' >> fixture.txt
+
+  race_waiter() {
+    # AGENT_QUALITY_GATE_LOCK_HELD is cleared for the same reason as above: an
+    # inherited marker would make every assertion here pass vacuously. The
+    # grace and poll are shrunk to keep this suite inside its CI job budget:
+    # every case below asserts that waiting and grace-respecting happen, never
+    # that they take the production number of seconds.
+    RACE_STUB_SECONDS="${4:-1}" \
+      AGENT_QUALITY_GATE_LOCK=1 \
+      AGENT_QUALITY_GATE_LOCK_HELD='' \
+      AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+      AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
+      AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+      AGENT_QUALITY_GATE_LOCK_RECLAIM_DELAY_SECONDS="$2" \
+      AGENT_QUALITY_GATE_LOCK_CLAIM_DELAY_SECONDS="$3" \
+      AGENT_QUALITY_GATE_LOCK_TAKEN_DELAY_SECONDS="${5:-0}" \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+      --base HEAD --run --lock-wait 45 \
+      > "$gate_race_out/$1.out" 2>&1
+    # Kept, not swallowed: when a run ends without saying anything useful, its
+    # status is the difference between "exited" and "was killed", and that is
+    # the first thing worth knowing on a runner nobody can attach to.
+    printf '%s\n' "$?" > "$gate_race_out/$1.status"
+  }
+
+  assert_runs_did_not_overlap() {
+    local label="$1"
+    local overlapping starts
+    # Nesting in the shared append-only log, not elapsed time: an `enter` while
+    # another run is still between its own enter and exit is an overlap, at any
+    # clock resolution. That keeps the fixture command short without weakening
+    # the assertion.
+    overlapping="$(awk '
+      /^enter/ {
+        if (depth > 0) { print "nested at " $2 }
+        depth++
+      }
+      /^exit/ { depth-- }
+    ' "$gate_race_log")"
+    [[ -z "$overlapping" ]] ||
+      fail "${label}: two gate runs executed mapped commands at once (${overlapping})"
+    # An expected count of 0 means "do not check": where the backstop can fire,
+    # stopping a displaced run is as correct as running it, so the number that
+    # reach a mapped command is not the invariant — not overlapping is.
+    starts="$(awk '/^enter/ { c++ } END { print c + 0 }' "$gate_race_log")"
+    [[ "${2:-2}" -eq 0 || "$starts" -eq "${2:-2}" ]] ||
+      fail "${label}: expected ${2:-2} run(s) to execute the mapped command, saw ${starts}"
+  }
+
+  # One stale lock, two waiters. The late waiter forms its verdict first, then
+  # stalls past the point where the early one has already taken the lock over,
+  # so its reclaim decision is obsolete when it finally acts on it.
+  sleep 0 &
+  race_dead_pid=$!
+  wait "$race_dead_pid" 2>/dev/null || true
+  mkdir -p "$gate_race_root/run.lock"
+  {
+    printf 'pid=%s\n' "$race_dead_pid"
+    printf 'host=%s\n' "$(uname -n)"
+    printf 'started_at=%s\n' "$(date +%s)"
+    printf 'worktree=%s\n' "$gate_race_repo"
+    printf 'token=fixture-holder-1-1\n'
+  } > "$gate_race_root/run.lock/owner"
+  : > "$gate_race_log"
+  race_waiter late 4 0 4 &
+  race_late=$!
+  sleep 2
+  race_waiter early 0 0 4 &
+  race_early=$!
+  wait "$race_late" 2>/dev/null || true
+  wait "$race_early" 2>/dev/null || true
+  assert_runs_did_not_overlap "stale lock, two waiters"
+  race_reclaims="$(
+    cat "$gate_race_out/early.out" "$gate_race_out/late.out" |
+      awk '/reclaiming it/ { c++ } END { print c + 0 }'
+  )"
+  [[ "$race_reclaims" -eq 1 ]] ||
+    fail "expected exactly one run to reclaim the stale lock, got ${race_reclaims}"
+
+  # A creator descheduled between `mkdir` and recording ownership. The waiter
+  # reclaims the ownerless lock legitimately; the creator must discover on
+  # resume that the lock is no longer its own instead of running beside it.
+  rm -rf "$gate_race_root/run.lock"
+  : > "$gate_race_log"
+  race_waiter stalled 0 5 4 &
+  race_stalled=$!
+  sleep 1
+  race_waiter reclaimer 0 0 4 &
+  race_reclaimer=$!
+  wait "$race_stalled" 2>/dev/null || true
+  wait "$race_reclaimer" 2>/dev/null || true
+  assert_runs_did_not_overlap "stalled creator"
+  grep -q "recorded ownership of .* first; queueing behind it" \
+    "$gate_race_out/stalled.out" ||
+    fail "a creator whose lock was reclaimed mid-claim must queue, not run"
+  [[ ! -d "$gate_race_root/run.lock" ]] ||
+    fail "both race runs finished; the lock must not be left behind"
+
+  # `kill -0` cannot tell a holder from whatever inherited its PID after it
+  # died. A recycled PID reads as alive, so without a start-time identity every
+  # later run waits on an unrelated process until --lock-wait expires — the
+  # opposite of unattended recovery. Both directions matter: reclaim a record
+  # whose PID has been reused, and never evict a holder that is genuinely it.
+  # Recorded exactly as the gate records it. `ps` renders lstart in the
+  # caller's TZ and locale, so the pin is part of the identity, not decoration.
+  race_lock_start="$(TZ=UTC LC_ALL=C ps -o lstart= -p $$ 2>/dev/null | head -n1)"
+  if [[ -n "$race_lock_start" ]]; then
+    rm -rf "$gate_race_root/run.lock"
+    : > "$gate_race_log"
+    mkdir -p "$gate_race_root/run.lock"
+    {
+      # This shell is alive, so `kill -0` succeeds — but it is not the process
+      # the record describes, and the recorded start time says so.
+      printf 'pid=%s\n' "$$"
+      printf 'host=%s\n' "$(uname -n)"
+      printf 'started_at=%s\n' "$(date +%s)"
+      printf 'start_utc=%s\n' "Thu Jan  1 00:00:00 1970"
+      printf 'worktree=%s\n' "$gate_race_repo"
+      printf 'token=recycled-pid-1-1\n'
+    } > "$gate_race_root/run.lock/owner"
+    race_waiter recycled 0 0
+    grep -q "pid $$ now belongs to a different process" \
+      "$gate_race_out/recycled.out" ||
+      fail "a reused PID must read as stale, not as the original holder"
+    [[ ! -d "$gate_race_root/run.lock" ]] ||
+      fail "the run that reclaimed a reused-PID lock must release it"
+
+    # The control: same live PID, the start time this process really has — and
+    # a waiter running in a different timezone and locale from the one that
+    # recorded it. `ps` renders lstart in the caller's environment, so an
+    # unpinned comparison reads one live process as two identities and evicts
+    # a holder mid-run. Each waiter here must sit and wait instead.
+    for race_tz in "UTC:C" "America/New_York:C" "Asia/Tokyo:de_DE.UTF-8"; do
+      mkdir -p "$gate_race_root/run.lock"
+      {
+        printf 'pid=%s\n' "$$"
+        printf 'host=%s\n' "$(uname -n)"
+        printf 'started_at=%s\n' "$(date +%s)"
+        printf 'start_utc=%s\n' "$race_lock_start"
+        printf 'worktree=%s\n' "$gate_race_repo"
+        printf 'token=real-holder-1-1\n'
+      } > "$gate_race_root/run.lock/owner"
+      TZ="${race_tz%%:*}" \
+        LC_ALL="${race_tz##*:}" \
+        AGENT_QUALITY_GATE_LOCK=1 \
+        AGENT_QUALITY_GATE_LOCK_HELD='' \
+        AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+        AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+        "$repo_root/scripts/agent-quality-gate.sh" \
+        --base HEAD --run --lock-wait 2 \
+        > "$gate_race_out/genuine.out" 2>&1 || true
+      grep -q "timed out after" "$gate_race_out/genuine.out" ||
+        fail "a holder whose recorded start time still matches must be waited for (${race_tz})"
+      grep -q "reclaiming it" "$gate_race_out/genuine.out" &&
+        fail "a live holder must never be reclaimed over a timezone or locale difference (${race_tz})"
+      [[ -d "$gate_race_root/run.lock" ]] ||
+        fail "a waiter must leave a genuine holder's lock in place (${race_tz})"
+      rm -rf "$gate_race_root/run.lock"
+    done
+
+    # A record from a gate that predates the pinned field carries no readable
+    # start time. Liveness must fall back to PID existence and WAIT, never
+    # decide a live holder is stale because it cannot read its identity.
+    mkdir -p "$gate_race_root/run.lock"
+    {
+      printf 'pid=%s\n' "$$"
+      printf 'host=%s\n' "$(uname -n)"
+      printf 'started_at=%s\n' "$(date +%s)"
+      printf 'start=%s\n' "$race_lock_start"
+      printf 'worktree=%s\n' "$gate_race_repo"
+      printf 'token=legacy-record-1-1\n'
+    } > "$gate_race_root/run.lock/owner"
+    AGENT_QUALITY_GATE_LOCK=1 \
+      AGENT_QUALITY_GATE_LOCK_HELD='' \
+      AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+      AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+      --base HEAD --run --lock-wait 2 \
+      > "$gate_race_out/legacy.out" 2>&1 || true
+    grep -q "reclaiming it" "$gate_race_out/legacy.out" &&
+      fail "an unreadable start time must fail safe to waiting, not to reclaiming"
+    [[ -d "$gate_race_root/run.lock" ]] ||
+      fail "a waiter must leave a pre-pinning holder's lock in place"
+    rm -rf "$gate_race_root/run.lock"
+
+    # The budget is a promise: a wait shorter than the poll interval must not
+    # sleep past it and then report the overshoot as the elapsed time.
+    mkdir -p "$gate_race_root/run.lock"
+    {
+      printf 'pid=%s\n' "$$"
+      printf 'host=%s\n' "$(uname -n)"
+      printf 'started_at=%s\n' "$(date +%s)"
+      printf 'start_utc=%s\n' "$race_lock_start"
+      printf 'worktree=%s\n' "$gate_race_repo"
+      printf 'token=real-holder-1-1\n'
+    } > "$gate_race_root/run.lock/owner"
+    race_wait_started="$(date +%s)"
+    AGENT_QUALITY_GATE_LOCK=1 \
+      AGENT_QUALITY_GATE_LOCK_HELD='' \
+      AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+      AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=5 \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+      --base HEAD --run --lock-wait 1 \
+      > "$gate_race_out/shortwait.out" 2>&1 || true
+    grep -q "timed out after 1s" "$gate_race_out/shortwait.out" ||
+      fail "a 1s budget under a 5s poll must report the budget it actually kept"
+    [[ $(($(date +%s) - race_wait_started)) -lt 5 ]] ||
+      fail "a 1s budget under a 5s poll must not sleep a full interval"
+    rm -rf "$gate_race_root/run.lock"
+  fi
+
+  # A run killed part-way through publishing its record leaves a file that
+  # parses as no holder at all. It must be reclaimable: the claim links a
+  # finished record into place and cannot overwrite whatever is sitting there,
+  # so a leftover the reclaim path skips would wedge every later run until
+  # --lock-wait expired. The token is written last, which is what makes an
+  # unfinished record recognisable — including one whose PID field is itself a
+  # truncated value that happens to name a live process.
+  for race_leftover in "" "pid=99" "pid=$$"; do
+    rm -rf "$gate_race_root/run.lock"
+    : > "$gate_race_log"
+    mkdir -p "$gate_race_root/run.lock"
+    printf '%s' "$race_leftover" > "$gate_race_root/run.lock/owner"
+    race_waiter leftover 0 0
+    grep -q "never recorded a complete identity" "$gate_race_out/leftover.out" ||
+      fail "an unfinished owner record ([${race_leftover}]) must read as no holder"
+    [[ ! -d "$gate_race_root/run.lock" ]] ||
+      fail "the run that reclaimed an unfinished record ([${race_leftover}]) must release it"
+  done
+
+  # A reclaim takes the dead record away by rename before writing its own. The
+  # temp path is registered with the exit trap before that rename creates it,
+  # so a signal landing anywhere in the window cannot orphan it — and cleanup
+  # puts the record back rather than deleting it, because a record taken but
+  # not yet judged may still name a live holder.
+  taken_record_present() {
+    [[ -n "$(find "$gate_race_root/run.lock" -name 'owner.reclaiming.*' 2>/dev/null)" ]]
+  }
+
+  await_taken_record() {
+    local i=0
+    while [[ $i -lt 60 ]]; do
+      taken_record_present && return 0
+      sleep 0.5
+      i=$((i + 1))
+    done
+    return 1
+  }
+
+  interrupt_reclaim() {
+    local tag="$1"
+    local reclaim_delay="$2"
+    local taken_delay="$3"
+    local pid
+    rm -rf "$gate_race_root/run.lock"
+    mkdir -p "$gate_race_root/run.lock"
+    {
+      printf 'pid=%s\n' "$race_dead_pid"
+      printf 'host=%s\n' "$(uname -n)"
+      printf 'started_at=%s\n' "$(date +%s)"
+      printf 'worktree=%s\n' "$gate_race_repo"
+      printf 'token=fixture-holder-1-1\n'
+    } > "$gate_race_root/run.lock/owner"
+    AGENT_QUALITY_GATE_LOCK=1 \
+      AGENT_QUALITY_GATE_LOCK_HELD='' \
+      AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+      AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+      AGENT_QUALITY_GATE_LOCK_RECLAIM_DELAY_SECONDS="$reclaim_delay" \
+      AGENT_QUALITY_GATE_LOCK_TAKEN_DELAY_SECONDS="$taken_delay" \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+      --base HEAD --run --lock-wait 60 \
+      > "$gate_race_out/$tag.out" 2>&1 &
+    pid=$!
+    if [[ "$taken_delay" != "0" ]]; then
+      # Kill it precisely while it holds the record, or the assertions below
+      # would pass without the window ever being entered.
+      await_taken_record ||
+        fail "${tag}: the reclaim never reached the window this test interrupts"
+    else
+      sleep 2
+      ! taken_record_present ||
+        fail "${tag}: expected the record to be untouched at this point"
+    fi
+    kill -TERM "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+    ! taken_record_present ||
+      fail "${tag}: an interrupted reclaim must not orphan its temp record"
+    [[ -r "$gate_race_root/run.lock/owner" ]] ||
+      fail "${tag}: an interrupted reclaim must leave the owner record in place"
+    [[ "$(sed -n 's/^token=//p' "$gate_race_root/run.lock/owner" | head -n1)" == "fixture-holder-1-1" ]] ||
+      fail "${tag}: the restored record must be the one the reclaim took"
+  }
+
+  # Interrupted before the rename: nothing was created, and the path already
+  # registered with the trap must not confuse cleanup.
+  interrupt_reclaim interrupted-before 5 0
+  # Interrupted while holding the record it took: cleanup restores it.
+  interrupt_reclaim interrupted-holding 0 5
+
+  # The lock those interrupted reclaims left behind is still reclaimable.
+  race_waiter recovered 0 0
+  grep -q "reclaiming it" "$gate_race_out/recovered.out" ||
+    fail "a lock left by an interrupted reclaim must still be reclaimable"
+  [[ ! -d "$gate_race_root/run.lock" ]] ||
+    fail "the recovering run must release the lock it acquired"
+
+  # A reclaim killed between taking a record and judging it parks that record
+  # under owner.reclaiming.*, where nothing looks for it. When the record it
+  # took belongs to a LIVE holder — its verdict was formed before another run
+  # took the lock over — the lock reads as ownerless and the next waiter starts
+  # beside a running holder. A remnant naming a live process is the owner
+  # record, misfiled, and has to be read as one.
+  if [[ -n "$race_lock_start" ]]; then
+    rm -rf "$gate_race_root/run.lock"
+    : > "$gate_race_log"
+    mkdir -p "$gate_race_root/run.lock"
+    {
+      printf 'pid=%s\n' "$$"
+      printf 'host=%s\n' "$(uname -n)"
+      printf 'started_at=%s\n' "$(date +%s)"
+      printf 'start_utc=%s\n' "$race_lock_start"
+      printf 'worktree=%s\n' "$gate_race_repo"
+      printf 'token=live-holder-record-1-1\n'
+    } > "$gate_race_root/run.lock/owner.reclaiming.99999"
+    # A short budget on purpose: recovering the remnant means finding a LIVE
+    # holder, so this run is supposed to wait and give up, not acquire.
+    AGENT_QUALITY_GATE_LOCK=1 \
+      AGENT_QUALITY_GATE_LOCK_HELD='' \
+      AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+      AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
+      AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+      --base HEAD --run --lock-wait 2 \
+      > "$gate_race_out/hidden.out" 2>&1 || true
+    grep -q "Recovered the record of live holder pid $$" \
+      "$gate_race_out/hidden.out" ||
+      fail "a remnant naming a live holder must be recovered, not ignored"
+    grep -q "reclaiming it" "$gate_race_out/hidden.out" &&
+      fail "a lock whose holder is only visible in a remnant must not be reclaimed"
+    [[ "$(sed -n 's/^token=//p' "$gate_race_root/run.lock/owner" | head -n1)" == "live-holder-record-1-1" ]] ||
+      fail "the recovered remnant must become the owner record"
+    [[ -z "$(find "$gate_race_root/run.lock" -name 'owner.reclaiming.*' 2>/dev/null)" ]] ||
+      fail "a recovered remnant must not be left behind to be read twice"
+    rm -rf "$gate_race_root/run.lock"
+
+    # The converse: a remnant naming a process that is gone is spent, and must
+    # not keep a free lock looking occupied.
+    mkdir -p "$gate_race_root/run.lock"
+    {
+      printf 'pid=%s\n' "$race_dead_pid"
+      printf 'host=%s\n' "$(uname -n)"
+      printf 'started_at=%s\n' "$(date +%s)"
+      printf 'worktree=%s\n' "$gate_race_repo"
+      printf 'token=dead-holder-record-1-1\n'
+    } > "$gate_race_root/run.lock/owner.reclaiming.99998"
+    race_waiter spent 0 0
+    grep -q "Recovered the record of live holder" "$gate_race_out/spent.out" &&
+      fail "a remnant naming a dead process must not be resurrected"
+    [[ ! -d "$gate_race_root/run.lock" ]] ||
+      fail "a lock left holding only a spent remnant must be reclaimed and released"
+  fi
+
+  # A verdict is only ever evidence, never authority. A creator stalls past the
+  # grace, two waiters both conclude the lock is ownerless, and by the time they
+  # act the creator has published: one of them takes that live record away to
+  # inspect it, and the other finds the canonical path empty. Without settling
+  # the remnants immediately before publishing, the second waiter claims a lock
+  # whose holder is merely in flight, and three runs execute at once.
+  rm -rf "$gate_race_root/run.lock"
+  : > "$gate_race_log"
+  race_waiter creator 0 5 8 0 &
+  race_creator=$!
+  sleep 1
+  race_waiter takerA 6 0 3 4 &
+  race_taker_a=$!
+  race_waiter takerB 7 0 3 0 &
+  race_taker_b=$!
+  wait "$race_creator" 2>/dev/null || true
+  wait "$race_taker_a" 2>/dev/null || true
+  wait "$race_taker_b" 2>/dev/null || true
+  assert_runs_did_not_overlap "cached ownerless verdict" 0
+  # Every one of the three must have either executed or said why it did not.
+  # The invariant is that none disappears silently — not that a particular
+  # number of them run, because a displaced run stopping and a queued run
+  # timing out are both correct outcomes, and which ones occur depends on how
+  # the machine schedules three gates. Checked per run, and reporting the tail
+  # of whichever went quiet, so a failure on a runner nobody can attach to is
+  # still diagnosable.
+  race_unaccounted=""
+  for race_tag in creator takerA takerB; do
+    grep -q "All mapped commands passed" "$gate_race_out/$race_tag.out" && continue
+    grep -q "no longer holds the gate run lock" "$gate_race_out/$race_tag.out" && continue
+    grep -q "timed out after .* waiting for the gate run lock" "$gate_race_out/$race_tag.out" && continue
+    # Status first — a shell killed by a signal loses whatever stdout was still
+    # buffered, so its file can end mid-story and the number is what says so.
+    race_unaccounted="${race_unaccounted}
+--- ${race_tag} exited $(cat "$gate_race_out/$race_tag.status" 2>/dev/null || echo unknown), full output:
+$(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
+  done
+  [[ -z "$race_unaccounted" ]] ||
+    fail "cached ownerless verdict: run(s) ended without executing or saying why:${race_unaccounted}"
+  rm -rf "$gate_race_root/run.lock"
+
+  # The backstop. Everything above narrows the interleavings; this one makes a
+  # displacement that slips through detectable rather than fatal. A run whose
+  # record is replaced between taking the lock and reaching its first mapped
+  # command must stop, and must not delete the record that replaced it.
+  : > "$gate_race_log"
+  RACE_STUB_SECONDS=1 \
+    AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD_DELAY_SECONDS=6 \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 30 \
+    > "$gate_race_out/displaced.out" 2>&1 &
+  race_displaced=$!
+  race_waited=0
+  while [[ ! -r "$gate_race_root/run.lock/owner" && "$race_waited" -lt 30 ]]; do
+    sleep 0.5
+    race_waited=$((race_waited + 1))
+  done
+  [[ -r "$gate_race_root/run.lock/owner" ]] ||
+    fail "the displaced-holder case never saw the run publish its record"
+  {
+    printf 'pid=%s\n' "$$"
+    printf 'host=%s\n' "$(uname -n)"
+    printf 'started_at=%s\n' "$(date +%s)"
+    printf 'worktree=%s\n' "$gate_race_repo"
+    printf 'token=somebody-else-1-1\n'
+  } > "$gate_race_root/run.lock/owner"
+  wait "$race_displaced" 2>/dev/null && race_displaced_exit=0 || race_displaced_exit=$?
+  [[ "$race_displaced_exit" == "2" ]] ||
+    fail "a displaced holder must stop with exit 2, got ${race_displaced_exit}"
+  grep -q "no longer holds the gate run lock" "$gate_race_out/displaced.out" ||
+    fail "a displaced holder must say so before stopping"
+  [[ ! -s "$gate_race_log" ]] ||
+    fail "a displaced holder must stop before executing any mapped command"
+  [[ "$(sed -n 's/^token=//p' "$gate_race_root/run.lock/owner" | head -n1)" == "somebody-else-1-1" ]] ||
+    fail "a displaced holder must not delete the record that replaced its own"
+  rm -rf "$gate_race_root/run.lock"
+
+  # A gate killed mid-command does not take that command with it: mapped
+  # commands are backgrounded, so they outlive their shell while the lock they
+  # held becomes reclaimable. The next run must not start until those commands
+  # are confirmed gone — confirmed by looking for them, because the watchdog
+  # that would clean them up can be descheduled by the same pressure that
+  # killed the gate, or suspended with the machine. Run twice: once with the
+  # watchdog able to help, and once with it SIGSTOPped so it cannot. Measured
+  # against the clock, because a killed command never writes its exit line.
+  # Third state: the command ignores TERM. Only the wrapper carries the tag, so
+  # a drain that signalled the tag and then re-scanned for it would see the
+  # wrapper gone, find no token, and call the run drained while the command it
+  # was hosting kept going.
+  for race_watchdog_state in running suspended term-ignoring; do
+  rm -rf "$gate_race_root/run.lock"
+  : > "$gate_race_log"
+  race_stub_ignore_term=""
+  [[ "$race_watchdog_state" != "term-ignoring" ]] || race_stub_ignore_term=1
+  RACE_STUB_IGNORE_TERM="$race_stub_ignore_term" \
+    RACE_STUB_SECONDS=30 \
+    AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 60 \
+    > "$gate_race_out/orphan-victim.out" 2>&1 &
+  race_victim_wrapper=$!
+  race_waited=0
+  while [[ -z "$(awk '/^enter/ { print $2; exit }' "$gate_race_log")" && "$race_waited" -lt 120 ]]; do
+    sleep 0.5
+    race_waited=$((race_waited + 1))
+  done
+  race_orphan_pid="$(awk '/^enter/ { print $2; exit }' "$gate_race_log")"
+  [[ -n "$race_orphan_pid" ]] ||
+    fail "the orphan case never saw a mapped command start"
+  # Suspending the watchdog is what "descheduled" means here: nothing is left
+  # that would clean up after the gate, so the next run has to do it itself.
+  # Kill the gate SHELL — the PID it recorded — not the wrapper around it.
+  race_victim_pid="$(sed -n 's/^pid=//p' "$gate_race_root/run.lock/owner" | head -n1)"
+  race_watchdogs=""
+  if [[ "$race_watchdog_state" == "suspended" ]]; then
+    # Anchored to THIS gate by parentage: the watchdog is a child of the gate
+    # shell, which is still alive here. A bare "collect_tree" match is every
+    # watchdog on the machine — suspending those would disable unrelated
+    # runs' timeouts mid-flight.
+    race_watchdogs="$(pgrep -P "$race_victim_pid" -f "collect_tree" 2>/dev/null | tr '\n' ' ')"
+    [[ -n "$race_watchdogs" ]] ||
+      fail "the suspended-watchdog case found no watchdog to suspend"
+    for race_wd in $race_watchdogs; do kill -STOP "$race_wd" 2>/dev/null || true; done
+  fi
+  kill -9 "$race_victim_pid" 2>/dev/null || true
+  kill -9 "$race_victim_wrapper" 2>/dev/null || true
+  wait "$race_victim_wrapper" 2>/dev/null || true
+  kill -0 "$race_orphan_pid" 2>/dev/null ||
+    fail "the orphan case needs the command to outlive its gate to mean anything"
+  (
+    race_watch_deadline=$(($(date +%s) + 300))
+    while kill -0 "$race_orphan_pid" 2>/dev/null && [ "$(date +%s)" -lt "$race_watch_deadline" ]; do sleep 0.5; done
+    # Recorded only if it really died: writing a time when the bound expired
+    # would let the assertion below read a stalled watcher as a confirmed death.
+    kill -0 "$race_orphan_pid" 2>/dev/null || date +%s > "$gate_race_out/orphan_died"
+  ) &
+  race_orphan_watcher=$!
+  RACE_STUB_SECONDS=2 \
+    AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+    AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 120 \
+    > "$gate_race_out/orphan-next.out" 2>&1 || true
+  wait "$race_orphan_watcher" 2>/dev/null || true
+  race_orphan_died="$(cat "$gate_race_out/orphan_died" 2>/dev/null || echo 0)"
+  race_next_started="$(awk '/^enter/ { if (NR > 1) { print $3; exit } }' "$gate_race_log")"
+  [[ -n "$race_next_started" ]] ||
+    fail "the run after an orphaned command must still execute"
+  [[ "$race_orphan_died" -ne 0 ]] ||
+    fail "a command whose gate was killed must not keep running"
+  [[ "$race_next_started" -ge "$race_orphan_died" ]] ||
+    fail "watchdog ${race_watchdog_state}: the next run started $((race_orphan_died - race_next_started))s before the orphaned command died"
+  # Nothing stays suspended on the machine afterwards.
+  for race_wd in $race_watchdogs; do
+    kill -CONT "$race_wd" 2>/dev/null || true
+    kill -KILL "$race_wd" 2>/dev/null || true
+  done
+  rm -rf "$gate_race_root/run.lock"
+  done
+
+  # A chain of crashes. A is killed mid-command with its watchdog suspended, so
+  # nothing self-cleans; B reclaims A and publishes, then is killed before it
+  # can drain A; C reclaims B. If the obligation to drain A lived only in B's
+  # shell variable it died with B, and C runs beside A's survivor. Every run
+  # drains the whole outstanding set, so C inherits A's along with B's.
+  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
+  : > "$gate_race_log"
+  RACE_STUB_SECONDS=45 \
+    AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 60 \
+    > "$gate_race_out/chain-a.out" 2>&1 &
+  race_chain_a_wrapper=$!
+  race_waited=0
+  while [[ -z "$(awk '/^enter/ { print $2; exit }' "$gate_race_log")" && "$race_waited" -lt 120 ]]; do
+    sleep 0.5
+    race_waited=$((race_waited + 1))
+  done
+  race_chain_orphan="$(awk '/^enter/ { print $2; exit }' "$gate_race_log")"
+  [[ -n "$race_chain_orphan" ]] ||
+    fail "the crash-chain case never saw A start a command"
+  race_chain_a_pid="$(sed -n 's/^pid=//p' "$gate_race_root/run.lock/owner" | head -n1)"
+  # Anchored to A's gate by parentage (A is still alive here) — a bare
+  # "collect_tree" match is every watchdog on the machine, including
+  # unrelated runs'.
+  race_chain_watchdogs="$(pgrep -P "$race_chain_a_pid" -f "collect_tree" 2>/dev/null | tr '\n' ' ')"
+  for race_wd in $race_chain_watchdogs; do kill -STOP "$race_wd" 2>/dev/null || true; done
+  kill -9 "$race_chain_a_pid" "$race_chain_a_wrapper" 2>/dev/null || true
+  wait "$race_chain_a_wrapper" 2>/dev/null || true
+
+  # B: reclaims A, publishes, and dies inside the window before draining.
+  RACE_STUB_SECONDS=3 \
+    AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+    AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD_DELAY_SECONDS=25 \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 60 \
+    > "$gate_race_out/chain-b.out" 2>&1 &
+  race_chain_b_wrapper=$!
+  race_waited=0
+  race_chain_b_pid=""
+  while [[ "$race_waited" -lt 180 ]]; do
+    race_chain_b_pid="$(sed -n 's/^pid=//p' "$gate_race_root/run.lock/owner" 2>/dev/null | head -n1)"
+    [[ -n "$race_chain_b_pid" && "$race_chain_b_pid" != "$race_chain_a_pid" ]] && break
+    sleep 0.5
+    race_waited=$((race_waited + 1))
+  done
+  [[ -n "$race_chain_b_pid" && "$race_chain_b_pid" != "$race_chain_a_pid" ]] ||
+    fail "the crash-chain case never saw B publish its record"
+  [[ -n "$(ls -A "$gate_race_root/condemned.d" 2>/dev/null || true)" ]] ||
+    fail "B must record what it condemned before taking over, not after"
+  kill -9 "$race_chain_b_pid" "$race_chain_b_wrapper" 2>/dev/null || true
+  wait "$race_chain_b_wrapper" 2>/dev/null || true
+  kill -0 "$race_chain_orphan" 2>/dev/null ||
+    fail "the crash-chain case needs A's command alive to mean anything"
+  (
+    race_watch_deadline=$(($(date +%s) + 300))
+    while kill -0 "$race_chain_orphan" 2>/dev/null && [ "$(date +%s)" -lt "$race_watch_deadline" ]; do sleep 0.5; done
+    # Recorded only if it really died: writing a time when the bound expired
+    # would let the assertion below read a stalled watcher as a confirmed death.
+    kill -0 "$race_chain_orphan" 2>/dev/null || date +%s > "$gate_race_out/chain_died"
+  ) &
+  race_chain_watcher=$!
+  RACE_STUB_SECONDS=2 \
+    AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+    AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 120 \
+    > "$gate_race_out/chain-c.out" 2>&1 || true
+  wait "$race_chain_watcher" 2>/dev/null || true
+  race_chain_died="$(cat "$gate_race_out/chain_died" 2>/dev/null || echo 0)"
+  race_chain_c_started="$(awk '/^enter/ { if (NR > 1) { print $3; exit } }' "$gate_race_log")"
+  [[ -n "$race_chain_c_started" ]] ||
+    fail "the run inheriting a crash chain must still execute"
+  [[ "$race_chain_died" -ne 0 ]] ||
+    fail "a command inherited through a crash chain must not keep running"
+  [[ "$race_chain_c_started" -ge "$race_chain_died" ]] ||
+    fail "the inheriting run started $((race_chain_died - race_chain_c_started))s before the first run's command died"
+  [[ -z "$(ls -A "$gate_race_root/condemned.d" 2>/dev/null || true)" ]] ||
+    fail "a drained obligation must be cleared once its processes are confirmed gone"
+  for race_wd in $race_chain_watchdogs; do
+    kill -CONT "$race_wd" 2>/dev/null || true
+    kill -KILL "$race_wd" 2>/dev/null || true
+  done
+  rm -rf "$gate_race_root/run.lock"
+
+  # A drain interrupted between its TERM pass and its KILL pass. That first
+  # pass kills the tag carrier, so a successor searching only for the tag would
+  # find nothing and call the obligation discharged while a TERM-ignoring
+  # descendant kept running. The captured tree has to be written down before
+  # the first signal for the successor to have anything to inherit.
+  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
+  rm -f "$gate_race_root"/captured.*
+  : > "$gate_race_log"
+  RACE_STUB_IGNORE_TERM=1 \
+    RACE_STUB_SECONDS=60 \
+    AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 45 \
+    > "$gate_race_out/drain-a.out" 2>&1 &
+  race_drain_a_wrapper=$!
+  race_waited=0
+  while [[ -z "$(awk '/^enter/ { print $2; exit }' "$gate_race_log")" && "$race_waited" -lt 120 ]]; do
+    sleep 0.5
+    race_waited=$((race_waited + 1))
+  done
+  race_drain_orphan="$(awk '/^enter/ { print $2; exit }' "$gate_race_log")"
+  [[ -n "$race_drain_orphan" ]] ||
+    fail "the interrupted-drain case never saw a command start"
+  race_drain_a_pid="$(sed -n 's/^pid=//p' "$gate_race_root/run.lock/owner" | head -n1)"
+  kill -9 "$race_drain_a_pid" "$race_drain_a_wrapper" 2>/dev/null || true
+  wait "$race_drain_a_wrapper" 2>/dev/null || true
+
+  # B reclaims, sends its first TERM pass, and dies before it can escalate.
+  RACE_STUB_SECONDS=2 \
+    AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+    AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    AGENT_QUALITY_GATE_LOCK_CRASH_AT=after-drain-term \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 45 \
+    > "$gate_race_out/drain-b.out" 2>&1 || true
+  race_captured_file="$(find "$gate_race_root" -name 'captured.*' 2>/dev/null | head -n1)"
+  [[ -n "$race_captured_file" ]] ||
+    fail "a drain must write down what it captured before it signals anything"
+  # Non-empty is the point: the snapshot is only ever appended to, so an
+  # interrupted drain cannot leave the successor an empty list. A rewrite
+  # would, because a `>` redirection truncates the moment it opens.
+  [[ -s "$race_captured_file" ]] ||
+    fail "an interrupted drain must not leave an empty captured set behind"
+  grep -qE '^[0-9]+\|' "$race_captured_file" ||
+    fail "the captured set must name processes, not fragments"
+  kill -0 "$race_drain_orphan" 2>/dev/null ||
+    fail "the interrupted-drain case needs its TERM-ignoring command alive to mean anything"
+  (
+    race_watch_deadline=$(($(date +%s) + 300))
+    while kill -0 "$race_drain_orphan" 2>/dev/null && [ "$(date +%s)" -lt "$race_watch_deadline" ]; do sleep 0.5; done
+    # Recorded only if it really died: writing a time when the bound expired
+    # would let the assertion below read a stalled watcher as a confirmed death.
+    kill -0 "$race_drain_orphan" 2>/dev/null || date +%s > "$gate_race_out/drain_died"
+  ) &
+  race_drain_watcher=$!
+  RACE_STUB_SECONDS=2 \
+    AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+    AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 90 \
+    > "$gate_race_out/drain-c.out" 2>&1 || true
+  wait "$race_drain_watcher" 2>/dev/null || true
+  race_drain_died="$(cat "$gate_race_out/drain_died" 2>/dev/null || echo 0)"
+  race_drain_c_started="$(awk '/^enter/ { if (NR > 1) { print $3; exit } }' "$gate_race_log")"
+  [[ -n "$race_drain_c_started" ]] ||
+    fail "the run inheriting an interrupted drain must still execute"
+  [[ "$race_drain_died" -ne 0 ]] ||
+    fail "a command inherited through an interrupted drain must not keep running"
+  [[ "$race_drain_c_started" -ge "$race_drain_died" ]] ||
+    fail "the inheriting run started $((race_drain_died - race_drain_c_started))s before the survivor died"
+  [[ -z "$(find "$gate_race_root" -name 'captured.*' 2>/dev/null)" ]] ||
+    fail "a captured set must be cleared once its processes are confirmed gone"
+  rm -rf "$gate_race_root/run.lock"
+
+  # A dead run's record parked in a remnant is not garbage: it names a run
+  # whose commands can still be running, and its token is the only handle to
+  # them. A is killed mid-command with its watchdog suspended; B takes A's
+  # record and dies at the take boundary; C evaluates the remnant. Discarding
+  # it before writing the token down loses A's commands entirely.
+  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
+  rm -f "$gate_race_root"/captured.*
+  : > "$gate_race_log"
+  RACE_STUB_IGNORE_TERM=1 \
+    RACE_STUB_SECONDS=60 \
+    AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 45 \
+    > "$gate_race_out/remnant-a.out" 2>&1 &
+  race_remnant_a_wrapper=$!
+  race_waited=0
+  while [[ -z "$(awk '/^enter/ { print $2; exit }' "$gate_race_log")" && "$race_waited" -lt 120 ]]; do
+    sleep 0.5
+    race_waited=$((race_waited + 1))
+  done
+  race_remnant_orphan="$(awk '/^enter/ { print $2; exit }' "$gate_race_log")"
+  [[ -n "$race_remnant_orphan" ]] ||
+    fail "the remnant-token case never saw a command start"
+  race_remnant_a_pid="$(sed -n 's/^pid=//p' "$gate_race_root/run.lock/owner" | head -n1)"
+  # Anchored to A's gate by parentage (A is still alive here) — a bare
+  # "collect_tree" match is every watchdog on the machine, including
+  # unrelated runs'.
+  race_remnant_watchdogs="$(pgrep -P "$race_remnant_a_pid" -f "collect_tree" 2>/dev/null | tr '\n' ' ')"
+  for race_wd in $race_remnant_watchdogs; do kill -STOP "$race_wd" 2>/dev/null || true; done
+  kill -9 "$race_remnant_a_pid" "$race_remnant_a_wrapper" 2>/dev/null || true
+  wait "$race_remnant_a_wrapper" 2>/dev/null || true
+
+  # B takes the record and dies holding it.
+  RACE_STUB_SECONDS=2 \
+    AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+    AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    AGENT_QUALITY_GATE_LOCK_CRASH_AT=after-take \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 45 \
+    > "$gate_race_out/remnant-b.out" 2>&1 || true
+  [[ -n "$(find "$gate_race_root/run.lock" -name 'owner.reclaiming.*' 2>/dev/null)" ]] ||
+    fail "the remnant-token case needs a parked record to mean anything"
+  kill -0 "$race_remnant_orphan" 2>/dev/null ||
+    fail "the remnant-token case needs the first run's command alive"
+  (
+    race_watch_deadline=$(($(date +%s) + 300))
+    while kill -0 "$race_remnant_orphan" 2>/dev/null && [ "$(date +%s)" -lt "$race_watch_deadline" ]; do sleep 0.5; done
+    # Recorded only if it really died: writing a time when the bound expired
+    # would let the assertion below read a stalled watcher as a confirmed death.
+    kill -0 "$race_remnant_orphan" 2>/dev/null || date +%s > "$gate_race_out/remnant_died"
+  ) &
+  race_remnant_watcher=$!
+  RACE_STUB_SECONDS=2 \
+    AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+    AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 90 \
+    > "$gate_race_out/remnant-c.out" 2>&1 || true
+  wait "$race_remnant_watcher" 2>/dev/null || true
+  race_remnant_died="$(cat "$gate_race_out/remnant_died" 2>/dev/null || echo 0)"
+  race_remnant_c_started="$(awk '/^enter/ { if (NR > 1) { print $3; exit } }' "$gate_race_log")"
+  [[ -n "$race_remnant_c_started" ]] ||
+    fail "the run inheriting a discarded remnant must still execute"
+  [[ "$race_remnant_died" -ne 0 ]] ||
+    fail "a command named only by a discarded remnant must not keep running"
+  [[ "$race_remnant_c_started" -ge "$race_remnant_died" ]] ||
+    fail "the inheriting run started $((race_remnant_died - race_remnant_c_started))s before that command died"
+  for race_wd in $race_remnant_watchdogs; do
+    kill -CONT "$race_wd" 2>/dev/null || true
+    kill -KILL "$race_wd" 2>/dev/null || true
+  done
+  rm -rf "$gate_race_root/run.lock"
+
+  # An identity that cannot be read is not an identity that matches. A capture
+  # records an empty start time when the process exits between the tree walk
+  # and the identity read, and treating that as "matches anything" would
+  # authorise signalling whatever holds the PID now. The bystander below
+  # survives TERM and writes down that it was signalled, so the evidence
+  # survives either outcome.
+  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
+  rm -f "$gate_race_root"/captured.*
+  race_receipt="$gate_race_out/bystander-receipt"
+  : > "$race_receipt"
+  bash -c 'trap "printf TERMED >> \"$1\"" TERM; for _ in $(seq 1 60); do sleep 1; done' _ "$race_receipt" &
+  race_bystander=$!
+  sleep 1
+  kill -0 "$race_bystander" 2>/dev/null ||
+    fail "the empty-identity case needs its bystander alive"
+  race_fake_token_value="fixture-empty-identity-$$-1"
+  mkdir -p "$gate_race_root/run.lock"
+  mkdir -p "$gate_race_root/condemned.d"
+  printf '%s\n' "$race_fake_token_value" \
+    > "$gate_race_root/condemned.d/$race_fake_token_value"
+  printf '%s|\n' "$race_bystander" > "$gate_race_root/captured.${race_fake_token_value}"
+  AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+    AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    AGENT_QUALITY_GATE_LOCK_ORPHAN_DRAIN_SECONDS=4 \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 30 \
+    > "$gate_race_out/empty-identity.out" 2>&1 && race_empty_exit=0 || race_empty_exit=$?
+  [[ ! -s "$race_receipt" ]] ||
+    fail "a process whose recorded identity is empty must never be signalled"
+  kill -0 "$race_bystander" 2>/dev/null ||
+    fail "a process whose recorded identity is empty must never be killed"
+  [[ "$race_empty_exit" == "2" ]] ||
+    fail "an unverifiable process must hold the drain and fail closed, got exit ${race_empty_exit}"
+  grep -q "could not be identified" "$gate_race_out/empty-identity.out" ||
+    fail "failing closed on an unverifiable process must say so"
+  kill -9 "$race_bystander" 2>/dev/null || true
+  wait "$race_bystander" 2>/dev/null || true
+  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
+  rm -f "$gate_race_root"/captured.*
+
+  # A command that ignores TERM and forks a fresh child each time it is
+  # signalled. Discovery has to keep looking while anything is alive to fork:
+  # a single recapture cannot see a child spawned after it ran, and the KILL
+  # pass then takes the captured parent while the newest child walks away.
+  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
+  rm -f "$gate_race_root"/captured.*
+  : > "$gate_race_log"
+  RACE_STUB_FORK_ON_TERM=1 \
+    RACE_STUB_IGNORE_TERM=1 \
+    RACE_STUB_SECONDS=90 \
+    AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 45 \
+    > "$gate_race_out/fork-a.out" 2>&1 &
+  race_fork_wrapper=$!
+  race_waited=0
+  while [[ -z "$(awk '/^enter/ { print $2; exit }' "$gate_race_log")" && "$race_waited" -lt 120 ]]; do
+    sleep 0.5
+    race_waited=$((race_waited + 1))
+  done
+  [[ -n "$(awk '/^enter/ { print $2; exit }' "$gate_race_log")" ]] ||
+    fail "the fork-on-TERM case never saw a command start"
+  race_fork_pid="$(sed -n 's/^pid=//p' "$gate_race_root/run.lock/owner" | head -n1)"
+  kill -9 "$race_fork_pid" "$race_fork_wrapper" 2>/dev/null || true
+  wait "$race_fork_wrapper" 2>/dev/null || true
+  RACE_STUB_SECONDS=2 \
+    AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+    AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    AGENT_QUALITY_GATE_LOCK_ORPHAN_DRAIN_SECONDS=40 \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 90 \
+    > "$gate_race_out/fork-b.out" 2>&1 || true
+  sleep 1
+  race_fork_survivors="$(pgrep -f "sleep ${gate_race_fork_seconds}" 2>/dev/null | tr '\n' ' ' || true)"
+  for race_leftover_pid in $race_fork_survivors; do
+    kill -9 "$race_leftover_pid" 2>/dev/null || true
+  done
+  [[ -z "$race_fork_survivors" ]] ||
+    fail "children forked while being signalled outlived the drain: ${race_fork_survivors}"
+  rm -rf "$gate_race_root/run.lock"
+
+  # The same shape, except the command exits after forking. Its replacement is
+  # reparented, carries no argv tag, and has no tagged ancestor to be walked
+  # down from — so only a handle the replacement inherited can still find it.
+  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
+  rm -f "$gate_race_root"/captured.* "$gate_race_root"/holder.*
+  : > "$gate_race_log"
+  RACE_STUB_FORK_AND_EXIT=1 \
+    RACE_STUB_SECONDS=90 \
+    AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 45 \
+    > "$gate_race_out/forkexit-a.out" 2>&1 &
+  race_forkexit_wrapper=$!
+  race_waited=0
+  while [[ -z "$(awk '/^enter/ { print $2; exit }' "$gate_race_log")" && "$race_waited" -lt 240 ]]; do
+    sleep 0.5
+    race_waited=$((race_waited + 1))
+  done
+  [[ -n "$(awk '/^enter/ { print $2; exit }' "$gate_race_log")" ]] ||
+    fail "the fork-and-exit case never saw a command start"
+  race_forkexit_pid="$(sed -n 's/^pid=//p' "$gate_race_root/run.lock/owner" | head -n1)"
+  kill -9 "$race_forkexit_pid" "$race_forkexit_wrapper" 2>/dev/null || true
+  wait "$race_forkexit_wrapper" 2>/dev/null || true
+  RACE_STUB_SECONDS=2 \
+    AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+    AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    AGENT_QUALITY_GATE_LOCK_ORPHAN_DRAIN_SECONDS=40 \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 90 \
+    > "$gate_race_out/forkexit-b.out" 2>&1 || true
+  sleep 1
+  race_forkexit_survivors="$(pgrep -f "sleep ${gate_race_forkexit_seconds}" 2>/dev/null | tr '\n' ' ' || true)"
+  for race_leftover_pid in $race_forkexit_survivors; do
+    kill -9 "$race_leftover_pid" 2>/dev/null || true
+  done
+  [[ -z "$race_forkexit_survivors" ]] ||
+    fail "a replacement forked by a command that then exited outlived the drain: ${race_forkexit_survivors}"
+  rm -rf "$gate_race_root/run.lock"
+  rm -f "$gate_race_root"/holder.*
+
+  # A waiter that is suspended past its own budget must notice the time that
+  # actually passed, not the time it asked to sleep for.
+  rm -rf "$gate_race_root/run.lock"
+  sleep 300 &
+  race_stopped_holder=$!
+  mkdir -p "$gate_race_root/run.lock"
+  {
+    printf 'pid=%s\n' "$race_stopped_holder"
+    printf 'host=%s\n' "$(uname -n)"
+    printf 'started_at=%s\n' "$(date +%s)"
+    printf 'start_utc=%s\n' "$(TZ=UTC LC_ALL=C ps -o lstart= -p "$race_stopped_holder" 2>/dev/null | head -n1)"
+    printf 'worktree=%s\n' "$gate_race_repo"
+    printf 'token=live-holder-1-1\n'
+  } > "$gate_race_root/run.lock/owner"
+  AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 14 \
+    > "$gate_race_out/stopped-waiter.out" 2>&1 &
+  race_stopped_wrapper=$!
+  # The budget is far longer than the suspension so the waiter is certainly
+  # still waiting when it is stopped. A budget the fixture races would let this
+  # case pass by skipping its own assertion — the failure it exists to catch
+  # looks exactly like the gate having already exited.
+  race_waited=0
+  race_stopped_waiter=""
+  while [[ -z "$race_stopped_waiter" && "$race_waited" -lt 60 ]]; do
+    race_stopped_waiter="$(pgrep -f "agent-quality-gate.sh --base HEAD --run --lock-wait 14" 2>/dev/null | head -n1 || true)"
+    [[ -n "$race_stopped_waiter" ]] && break
+    sleep 0.5
+    race_waited=$((race_waited + 1))
+  done
+  [[ -n "$race_stopped_waiter" ]] ||
+    fail "the suspended-waiter case never found its waiter, so it proved nothing"
+  kill -STOP "$race_stopped_waiter" 2>/dev/null ||
+    fail "the suspended-waiter case could not suspend its waiter"
+  sleep 8
+  kill -CONT "$race_stopped_waiter" 2>/dev/null || true
+  wait "$race_stopped_wrapper" 2>/dev/null || true
+  kill -9 "$race_stopped_holder" 2>/dev/null || true
+  race_stopped_reported="$(sed -n 's/.*timed out after \([0-9]*\)s.*/\1/p' "$gate_race_out/stopped-waiter.out" | head -n1 || true)"
+  [[ -n "$race_stopped_reported" ]] ||
+    fail "a waiter suspended past its budget must still report a timeout"
+  if [[ -n "$race_stopped_waiter" && -n "$race_stopped_reported" ]]; then
+    [[ "$race_stopped_reported" -ge 7 ]] ||
+      fail "a waiter suspended past its budget reported ${race_stopped_reported}s, not the time that passed"
+  fi
+  rm -rf "$gate_race_root/run.lock"
+
+  # A scan that fails is not a scan that finds nothing. With `pgrep` exiting 2
+  # — a real failure, not "no match" — a run inheriting an obligation cannot
+  # tell whether anything is left, and must refuse to execute rather than
+  # discharge it. This also pins that the failure survives the command
+  # substitution the scan runs in, which is where the first version of it died.
+  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
+  rm -f "$gate_race_root"/captured.* "$gate_race_root"/holder.*
+  : > "$gate_race_log"
+  race_stub_bin="$gate_race_out/failing-scan-bin"
+  mkdir -p "$race_stub_bin"
+  printf '#!/bin/bash\nexit 2\n' > "$race_stub_bin/pgrep"
+  chmod +x "$race_stub_bin/pgrep"
+  mkdir -p "$gate_race_root/condemned.d"
+  printf 'fixture-unscannable-1-1\n' > "$gate_race_root/condemned.d/fixture-unscannable-1-1"
+  PATH="$race_stub_bin:$PATH" \
+    AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    AGENT_QUALITY_GATE_LOCK_ORPHAN_DRAIN_SECONDS=6 \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 20 \
+    > "$gate_race_out/failing-scan.out" 2>&1 &&
+    race_scan_exit=0 || race_scan_exit=$?
+  [[ "$race_scan_exit" == "2" ]] ||
+    fail "a drain whose scans keep failing must fail closed, got exit ${race_scan_exit}"
+  grep -q "kept failing" "$gate_race_out/failing-scan.out" ||
+    fail "failing closed on an unanswerable scan must say so"
+  [[ -z "$(awk '/^enter/ { print $2; exit }' "$gate_race_log")" ]] ||
+    fail "a run whose scans kept failing executed a mapped command anyway"
+  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
+
+  # A holder owned by another user is live even though this run may not signal
+  # it: `kill -0` fails with EPERM exactly as it does for a process that is
+  # gone, and reading that as gone reclaims a lock whose holder is running.
+  # PID 1 is the portable stand-in — always alive, never ours to signal.
+  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
+  : > "$gate_race_log"
+  if ! kill -0 1 2>/dev/null; then
+    mkdir -p "$gate_race_root/run.lock"
+    {
+      printf 'pid=1\n'
+      printf 'host=%s\n' "$(uname -n)"
+      printf 'started_at=%s\n' "$(date +%s)"
+      printf 'start_utc=%s\n' "$(TZ=UTC LC_ALL=C ps -o lstart= -p 1 2>/dev/null | head -n1)"
+      printf 'worktree=%s\n' "$gate_race_repo"
+      printf 'token=other-user-holder-1-1\n'
+    } > "$gate_race_root/run.lock/owner"
+    AGENT_QUALITY_GATE_LOCK=1 \
+      AGENT_QUALITY_GATE_LOCK_HELD='' \
+      AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+      AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
+      AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+      --base HEAD --run --lock-wait 6 \
+      > "$gate_race_out/foreign-holder.out" 2>&1 || true
+    grep -q "reclaiming it" "$gate_race_out/foreign-holder.out" &&
+      fail "a holder this user cannot signal was treated as dead and reclaimed"
+    [[ -z "$(awk '/^enter/ { print $2; exit }' "$gate_race_log")" ]] ||
+      fail "a run executed while a live holder it could not signal held the lock"
+  fi
+  rm -rf "$gate_race_root/run.lock"
+
+  # The obligation directory is the only thing that tells the next holder a
+  # dead run's commands are outstanding, and on a shared lock root it can
+  # belong to another user. A run that cannot write into it must not discard
+  # the record and take over: that is how it comes to execute beside those
+  # commands.
+  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
+  rm -f "$gate_race_root"/captured.*
+  : > "$gate_race_log"
+  mkdir -p "$gate_race_root/run.lock"
+  {
+    printf 'pid=%s\n' "$race_dead_pid"
+    printf 'host=%s\n' "$(uname -n)"
+    printf 'started_at=%s\n' "$(date +%s)"
+    printf 'worktree=%s\n' "$gate_race_repo"
+    printf 'token=unwritable-obligation-1-1\n'
+  } > "$gate_race_root/run.lock/owner"
+  mkdir -p "$gate_race_root/condemned.d"
+  chmod 555 "$gate_race_root/condemned.d"
+  AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+    AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 20 \
+    > "$gate_race_out/unwritable-condemned.out" 2>&1 &&
+    race_unwritable_exit=0 || race_unwritable_exit=$?
+  chmod 755 "$gate_race_root/condemned.d" 2>/dev/null || true
+  [[ "$race_unwritable_exit" == "2" ]] ||
+    fail "a run that cannot record the obligation must fail closed, got exit ${race_unwritable_exit}"
+  grep -q "could not record the previous run's commands as outstanding" \
+    "$gate_race_out/unwritable-condemned.out" ||
+    fail "failing closed on an unrecordable obligation must say so"
+  [[ -z "$(awk '/^enter/ { print $2; exit }' "$gate_race_log")" ]] ||
+    fail "a run that could not record the obligation executed a mapped command anyway"
+  [[ -e "$gate_race_root/run.lock/owner" ]] ||
+    fail "the record naming those commands must survive a failed obligation write"
+  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
+
+  # The run marker is the inherited-descriptor handle a fork-and-exit
+  # replacement is found by on hosts without /proc. A run that cannot write it
+  # must stop before its first command rather than quietly forfeit that
+  # discovery. The claim delay opens a deterministic window: run.lock exists,
+  # the claim writes inside it, and only the marker needs the root itself.
+  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
+  rm -f "$gate_race_root"/captured.* "$gate_race_root"/holder.*
+  : > "$gate_race_log"
+  AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    AGENT_QUALITY_GATE_LOCK_CLAIM_DELAY_SECONDS=3 \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 20 \
+    > "$gate_race_out/unwritable-marker.out" 2>&1 &
+  race_marker_wrapper=$!
+  race_waited=0
+  while [[ ! -d "$gate_race_root/run.lock" && "$race_waited" -lt 60 ]]; do
+    sleep 0.2
+    race_waited=$((race_waited + 1))
+  done
+  [[ -d "$gate_race_root/run.lock" ]] ||
+    fail "the unwritable-marker case never saw the lock claimed"
+  chmod 555 "$gate_race_root"
+  wait "$race_marker_wrapper" 2>/dev/null && race_marker_exit=0 || race_marker_exit=$?
+  chmod 755 "$gate_race_root" 2>/dev/null || true
+  [[ "$race_marker_exit" -ne 0 ]] ||
+    fail "a run that cannot write its marker must fail closed, got exit 0"
+  grep -q "could not create the run marker" "$gate_race_out/unwritable-marker.out" ||
+    fail "failing closed on an unwritable marker must say so"
+  [[ -z "$(awk '/^enter/ { print $2; exit }' "$gate_race_log")" ]] ||
+    fail "a run that could not write its marker executed a mapped command anyway"
+  rm -rf "$gate_race_root/run.lock"
+  rm -f "$gate_race_root"/holder.*
+
+  # Unreadable is not empty. Both obligation files can be created by another
+  # user on a shared lock root, and reading one as "nothing outstanding" is how
+  # a run comes to execute beside commands it never drained.
+  for race_unreadable_case in condemned captured; do
+    rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
+    rm -f "$gate_race_root"/captured.*
+    : > "$gate_race_log"
+    mkdir -p "$gate_race_root/condemned.d"
+    printf 'fixture-unreadable-1-1\n' > "$gate_race_root/condemned.d/fixture-unreadable-1-1"
+    if [[ "$race_unreadable_case" == condemned ]]; then
+      race_unreadable_file="$gate_race_root/condemned.d/fixture-unreadable-1-1"
+    else
+      race_unreadable_file="$gate_race_root/captured.fixture-unreadable-1-1"
+      printf '99999|\n' > "$race_unreadable_file"
+    fi
+    chmod 000 "$race_unreadable_file"
+    AGENT_QUALITY_GATE_LOCK=1 \
+      AGENT_QUALITY_GATE_LOCK_HELD='' \
+      AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+      AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+      --base HEAD --run --lock-wait 20 \
+      > "$gate_race_out/unreadable-${race_unreadable_case}.out" 2>&1 &&
+      race_unreadable_exit=0 || race_unreadable_exit=$?
+    chmod 644 "$race_unreadable_file" 2>/dev/null || true
+    [[ "$race_unreadable_exit" == "2" ]] ||
+      fail "an unreadable ${race_unreadable_case} record must fail closed, got exit ${race_unreadable_exit}"
+    grep -q "exists but cannot be read" \
+      "$gate_race_out/unreadable-${race_unreadable_case}.out" ||
+      fail "failing closed on an unreadable ${race_unreadable_case} record must say so"
+    [[ -z "$(awk '/^enter/ { print $2; exit }' "$gate_race_log")" ]] ||
+      fail "a run that could not read the ${race_unreadable_case} record executed a mapped command anyway"
+  done
+  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
+  rm -f "$gate_race_root"/captured.*
+
+  # An obligation left by a drainer that died before discharging it is still
+  # outstanding: each file is removed only after its own processes are gone, so
+  # whatever remains is what the next run inherits.
+  : > "$gate_race_log"
+  bash -c 'eval "$1"; exit $?' "agentqg:fixture-inherited-1-1" 'sleep 60' &
+  race_taken_proc=$!
+  sleep 1
+  if [[ -n "$(pgrep -f "agentqg:fixture-inherited-1-1" 2>/dev/null | head -n1 || true)" ]]; then
+    mkdir -p "$gate_race_root/condemned.d"
+    printf 'fixture-inherited-1-1\n' > "$gate_race_root/condemned.d/fixture-inherited-1-1"
+    AGENT_QUALITY_GATE_LOCK=1 \
+      AGENT_QUALITY_GATE_LOCK_HELD='' \
+      AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+      AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+      AGENT_QUALITY_GATE_LOCK_ORPHAN_DRAIN_SECONDS=30 \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+      --base HEAD --run --lock-wait 30 \
+      > "$gate_race_out/inherited-obligation.out" 2>&1 || true
+    kill -0 "$race_taken_proc" 2>/dev/null &&
+      fail "an obligation left behind by a dead drainer was never discharged"
+    [[ ! -e "$gate_race_root/condemned.d/fixture-inherited-1-1" ]] ||
+      fail "a discharged obligation must not be left behind to be drained forever"
+  fi
+  kill -9 "$race_taken_proc" 2>/dev/null || true
+  wait "$race_taken_proc" 2>/dev/null || true
+  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
+  rm -f "$gate_race_root"/captured.*
+
+  # Any run can publish an obligation while the holder is draining. The drainer
+  # removes only files it has read to the end, so one arriving mid-drain is
+  # either picked up by this run or inherited by the next — never deleted
+  # unread. The window between reading a file and removing it is microseconds
+  # in production, so it is widened here the way the rest of these
+  # interleavings are.
+  : > "$gate_race_log"
+  bash -c 'eval "$1"; exit $?' "agentqg:fixture-drained-first-1-1" 'sleep 60' &
+  race_unlink_first=$!
+  # The late obligation names a live process of its own, so the assertion does
+  # not depend on when it is published: either its file is still there for the
+  # next run, or this run drained it. Only "file gone, process alive" is the
+  # loss this case exists to catch.
+  bash -c 'eval "$1"; exit $?' "agentqg:fixture-arrived-late-1-1" 'sleep 90' &
+  race_unlink_late=$!
+  sleep 1
+  if [[ -n "$(pgrep -f "agentqg:fixture-drained-first-1-1" 2>/dev/null | head -n1 || true)" ]]; then
+    mkdir -p "$gate_race_root/condemned.d"
+    printf 'fixture-drained-first-1-1\n' \
+      > "$gate_race_root/condemned.d/fixture-drained-first-1-1"
+    AGENT_QUALITY_GATE_LOCK=1 \
+      AGENT_QUALITY_GATE_LOCK_HELD='' \
+      AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+      AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+      AGENT_QUALITY_GATE_LOCK_ORPHAN_DRAIN_SECONDS=30 \
+      AGENT_QUALITY_GATE_LOCK_DRAIN_UNLINK_DELAY_SECONDS=4 \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+      --base HEAD --run --lock-wait 30 \
+      > "$gate_race_out/unlink-window.out" 2>&1 &
+    race_unlink_wrapper=$!
+    # The capture file appears when that token's drain starts and is removed
+    # when it is discharged, which is where its own file is about to go.
+    race_waited=0
+    while [[ ! -e "$gate_race_root/captured.fixture-drained-first-1-1" && "$race_waited" -lt 400 ]]; do
+      sleep 0.5
+      race_waited=$((race_waited + 1))
+    done
+    race_waited=0
+    while [[ -e "$gate_race_root/captured.fixture-drained-first-1-1" && "$race_waited" -lt 120 ]]; do
+      sleep 0.5
+      race_waited=$((race_waited + 1))
+    done
+    printf 'fixture-arrived-late-1-1\n' \
+      > "$gate_race_root/condemned.d/fixture-arrived-late-1-1"
+    wait "$race_unlink_wrapper" 2>/dev/null || true
+    if [[ ! -e "$gate_race_root/condemned.d/fixture-arrived-late-1-1" ]]; then
+      kill -0 "$race_unlink_late" 2>/dev/null &&
+        fail "an obligation published during a drain was removed unread, and its command is still running"
+    fi
+  fi
+  kill -9 "$race_unlink_first" "$race_unlink_late" 2>/dev/null || true
+  wait "$race_unlink_first" 2>/dev/null || true
+  wait "$race_unlink_late" 2>/dev/null || true
+  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
+  rm -f "$gate_race_root"/captured.*
+
+  # Crash-point sweep. Every boundary where this path creates, links, renames
+  # or removes something is a place a SIGKILL can land, and each of the rounds
+  # of review on this PR found one of them. The gate names those boundaries so
+  # the suite can kill a run at each and assert the next one still recovers —
+  # so a future change to this path is checked against the enumeration rather
+  # than rediscovered. The mechanics note lists what each state looks like.
+  for race_crash_point in after-mkdir after-staged after-link after-take; do
+    rm -rf "$gate_race_root/run.lock"
+    : > "$gate_race_log"
+    if [[ "$race_crash_point" == "after-take" ]]; then
+      # Reached only with a record to take: plant a spent one.
+      mkdir -p "$gate_race_root/run.lock"
+      {
+        printf 'pid=%s\n' "$race_dead_pid"
+        printf 'host=%s\n' "$(uname -n)"
+        printf 'started_at=%s\n' "$(date +%s)"
+        printf 'worktree=%s\n' "$gate_race_repo"
+        printf 'token=fixture-holder-1-1\n'
+      } > "$gate_race_root/run.lock/owner"
+    fi
+    AGENT_QUALITY_GATE_LOCK=1 \
+      AGENT_QUALITY_GATE_LOCK_HELD='' \
+      AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+      AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
+      AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+      AGENT_QUALITY_GATE_LOCK_CRASH_AT="$race_crash_point" \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+      --base HEAD --run --lock-wait 30 \
+      > "$gate_race_out/crash-$race_crash_point.out" 2>&1 || true
+    # The next run has to reach mapped commands and clean up after itself,
+    # whatever the crash left behind.
+    race_waiter "after-$race_crash_point" 0 0
+    grep -q "All mapped commands passed" \
+      "$gate_race_out/after-$race_crash_point.out" ||
+      fail "a run crashed at ${race_crash_point} must not wedge the next one"
+    [[ ! -d "$gate_race_root/run.lock" ]] ||
+      fail "the run recovering from a crash at ${race_crash_point} must release the lock"
+  done
+)
+rm -rf "$gate_race_repo" "$gate_race_root" "$gate_race_out"
 
 echo "agent quality gate tests passed"
