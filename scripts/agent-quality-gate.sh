@@ -509,6 +509,16 @@ gate_lock_owner_grace_seconds="${AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS:-30
 # the same reason as the grace — the self-test asserts that waiting happens,
 # not that it takes five seconds a round.
 gate_lock_poll_seconds="${AGENT_QUALITY_GATE_LOCK_POLL_SECONDS:-5}"
+# How long to let a dead holder's commands finish dying before taking over. A
+# gate killed mid-command leaves that command running — it is backgrounded, so
+# it outlives its shell — and each command's watchdog notices its gate is gone
+# and kills it. Worst case that is a poll (2s) plus the TERM-to-KILL grace (3s)
+# for anything that ignores TERM, so ten is that window doubled: the path is
+# rare enough that margin costs nothing and a race here costs correctness.
+# Only the dead-record path waits; a lock with no record belongs to a run that
+# never reached a command.
+gate_lock_orphan_settle_seconds="${AGENT_QUALITY_GATE_LOCK_ORPHAN_SETTLE_SECONDS:-10}"
+gate_lock_reclaimed_dead_holder=0
 
 # Test-only. The self-test sets these to widen otherwise sub-millisecond
 # windows so the interleavings they permit can be exercised deterministically.
@@ -816,6 +826,12 @@ acquire_gate_run_lock() {
           if gate_lock_record_still_stale \
             "$gate_lock_reclaim_tmp" "$owner_pid" "$owner_token" "$owner_start"; then
             echo "Gate run lock at ${lock} is stale (${stale_reason}); reclaiming it." >&2
+            # The holder is gone, but a gate killed mid-command leaves that
+            # command running. Remember that, and wait it out later — just
+            # before this run's own commands, not here: sleeping between
+            # judging the record and publishing would hand another waiter the
+            # same verdict and the same six seconds to act on it.
+            gate_lock_reclaimed_dead_holder=1
             rm -f "$gate_lock_reclaim_tmp"
             gate_lock_reclaim_tmp=""
             gate_lock_reclaim_origin=""
@@ -3753,6 +3769,7 @@ run_with_timeout() {
     cmd_pid="$1"
     timeout_secs="$2"
     marker="$3"
+    gate_pid="$4"
     collect_tree() {
       local pid="$1"
       local child
@@ -3761,32 +3778,57 @@ run_with_timeout() {
       done < <(pgrep -P "$pid" 2>/dev/null || true)
       echo "$pid"
     }
-    sleep "$timeout_secs"
-    # Teardown on normal command completion kills this watchdog children-first,
-    # so the dying sleep must not be mistaken for an elapsed timeout: bash
-    # advances past a signal-killed sleep (rc>128) before the watchdog itself
-    # receives TERM, and writing the marker in that window reports a false
-    # "timed out after Ns" for a command that already succeeded (the race hits
-    # reliably on Linux, rarely on macOS).
-    [ "$?" -eq 0 ] || exit 0
+    kill_tree() {
+      local tree
+      tree="$(collect_tree "$1")"
+      while IFS= read -r pid; do
+        [ -n "$pid" ] && kill -TERM "$pid" 2>/dev/null
+      done <<EOF_KILL
+$tree
+EOF_KILL
+      sleep 3
+      while IFS= read -r pid; do
+        [ -n "$pid" ] && kill -KILL "$pid" 2>/dev/null
+      done <<EOF_KILL
+$tree
+EOF_KILL
+    }
+    # Sleep in steps rather than one shot, because this watchdog outlives its
+    # gate: the command is backgrounded, so a SIGKILLed gate shell leaves it
+    # running with the lock already reclaimable. Nobody else can see that
+    # command — but this process can, and it is the last thing standing that
+    # knows the two belong together.
+    waited=0
+    while [ "$waited" -lt "$timeout_secs" ]; do
+      nap=2
+      remaining=$((timeout_secs - waited))
+      [ "$nap" -le "$remaining" ] || nap="$remaining"
+      sleep "$nap"
+      # Teardown on normal command completion kills this watchdog children-first,
+      # so the dying sleep must not be mistaken for an elapsed timeout: bash
+      # advances past a signal-killed sleep (rc>128) before the watchdog itself
+      # receives TERM, and writing the marker in that window reports a false
+      # "timed out after Ns" for a command that already succeeded (the race hits
+      # reliably on Linux, rarely on macOS).
+      [ "$?" -eq 0 ] || exit 0
+      if ! kill -0 "$gate_pid" 2>/dev/null; then
+        # The gate that started this command is gone without tearing it down,
+        # which only happens on SIGKILL or a crash. Its command must not keep
+        # running: the lock it held is already reclaimable, so whatever starts
+        # next would be sharing the machine with a run that no longer exists.
+        # No marker — this is not a timeout, and nobody is left to read it.
+        kill_tree "$cmd_pid"
+        exit 0
+      fi
+      waited=$((waited + nap))
+    done
     echo timeout > "$marker"
-    # Snapshot the whole tree BEFORE TERM: a root that exits on TERM reparents
-    # a TERM-ignoring descendant away from the tree, so a post-TERM re-walk
-    # would miss it. The KILL pass targets the saved list.
-    tree="$(collect_tree "$cmd_pid")"
-    while IFS= read -r pid; do
-      [ -n "$pid" ] && kill -TERM "$pid" 2>/dev/null
-    done <<EOF_TREE
-$tree
-EOF_TREE
-    sleep 3
-    while IFS= read -r pid; do
-      [ -n "$pid" ] && kill -KILL "$pid" 2>/dev/null
-    done <<EOF_TREE
-$tree
-EOF_TREE
+    # kill_tree snapshots the whole tree BEFORE TERM: a root that exits on TERM
+    # reparents a TERM-ignoring descendant away from the tree, so a post-TERM
+    # re-walk would miss it. The KILL pass targets the saved list.
+    kill_tree "$cmd_pid"
     exit 0
-  ' _ "$cmd_pid" "$command_timeout_seconds" "$timeout_marker" >/dev/null 2>&1 &
+  ' _ "$cmd_pid" "$command_timeout_seconds" "$timeout_marker" "$$" >/dev/null 2>&1 &
   watchdog_pid=$!
   active_timeout_pids=("$cmd_pid" "$watchdog_pid")
 
@@ -4438,6 +4480,17 @@ prune_command_stamps
 # it took. Mapping and stamp work happen between acquiring and here, which is
 # room enough for another run to have taken it over.
 assert_gate_run_lock_still_ours
+
+# This run took the lock from a holder that died. That holder's mapped command
+# may still be running — commands are backgrounded and outlive their shell —
+# and its watchdog needs a poll plus a TERM-to-KILL grace to notice and clear
+# it. Wait that out here, where it costs only the run that reclaimed and only
+# once, rather than between judging the record and publishing.
+if [[ "$gate_lock_reclaimed_dead_holder" -eq 1 &&
+  "$gate_lock_orphan_settle_seconds" =~ ^[1-9][0-9]*$ ]]; then
+  echo "Waiting ${gate_lock_orphan_settle_seconds}s for any command that outlived the run this lock was taken from."
+  sleep "$gate_lock_orphan_settle_seconds"
+fi
 
 run_prerequisite_phase "preflight" "${preflight_commands[@]+"${preflight_commands[@]}"}"
 run_prerequisite_phase "codegen" "${codegen_commands[@]+"${codegen_commands[@]}"}"

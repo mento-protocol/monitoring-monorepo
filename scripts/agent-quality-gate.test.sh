@@ -4897,6 +4897,7 @@ STUB
       AGENT_QUALITY_GATE_LOCK_HELD='' \
       AGENT_QUALITY_GATE_LOCK_DIR="$gate_lock_root" \
       AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+      AGENT_QUALITY_GATE_LOCK_ORPHAN_SETTLE_SECONDS=1 \
       "$repo_root/scripts/agent-quality-gate.sh" \
       --base HEAD --run --lock-wait 2 "$@" \
       > "$output_file" 2>&1
@@ -5005,9 +5006,9 @@ gate_race_log="$gate_race_repo/race.log"
   # to execute something, so they run it at its cheap default.
   cat > tools/trunk <<STUB
 #!/usr/bin/env bash
-printf 'enter %s\n' "\$\$" >> "$gate_race_log"
+printf 'enter %s %s\n' "\$\$" "\$(date +%s)" >> "$gate_race_log"
 sleep "\${RACE_STUB_SECONDS:-1}"
-printf 'exit %s\n' "\$\$" >> "$gate_race_log"
+printf 'exit %s %s\n' "\$\$" "\$(date +%s)" >> "$gate_race_log"
 exit 0
 STUB
   chmod +x tools/trunk
@@ -5027,6 +5028,7 @@ STUB
       AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
       AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
       AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+      AGENT_QUALITY_GATE_LOCK_ORPHAN_SETTLE_SECONDS="${6:-1}" \
       AGENT_QUALITY_GATE_LOCK_RECLAIM_DELAY_SECONDS="$2" \
       AGENT_QUALITY_GATE_LOCK_CLAIM_DELAY_SECONDS="$3" \
       AGENT_QUALITY_GATE_LOCK_TAKEN_DELAY_SECONDS="${5:-0}" \
@@ -5391,16 +5393,22 @@ STUB
   wait "$race_taker_a" 2>/dev/null || true
   wait "$race_taker_b" 2>/dev/null || true
   assert_runs_did_not_overlap "cached ownerless verdict" 0
-  # Every one of the three must have either executed alone or stopped saying
-  # why. A run that quietly does neither would mean work was skipped without
-  # anyone noticing, which is its own bug.
-  race_accounted="$(awk '/^enter/ { c++ } END { print c + 0 }' "$gate_race_log")"
+  # Every one of the three must have either executed or said why it did not.
+  # The invariant is that none disappears silently — not that a particular
+  # number of them run, because a displaced run stopping and a queued run
+  # timing out are both correct outcomes, and which ones occur depends on how
+  # the machine schedules three gates. Checked per run, and reporting the tail
+  # of whichever went quiet, so a failure on a runner nobody can attach to is
+  # still diagnosable.
+  race_unaccounted=""
   for race_tag in creator takerA takerB; do
-    grep -q "no longer holds the gate run lock" "$gate_race_repo/$race_tag.out" &&
-      race_accounted=$((race_accounted + 1))
+    grep -q "All mapped commands passed" "$gate_race_repo/$race_tag.out" && continue
+    grep -q "no longer holds the gate run lock" "$gate_race_repo/$race_tag.out" && continue
+    grep -q "timed out after .* waiting for the gate run lock" "$gate_race_repo/$race_tag.out" && continue
+    race_unaccounted="${race_unaccounted} ${race_tag}(last: $(tail -n 2 "$gate_race_repo/$race_tag.out" | tr '\n' ' '))"
   done
-  [[ "$race_accounted" -eq 3 ]] ||
-    fail "cached ownerless verdict: all three runs must execute or abort loudly, accounted ${race_accounted}"
+  [[ -z "$race_unaccounted" ]] ||
+    fail "cached ownerless verdict: run(s) ended without executing or saying why:${race_unaccounted}"
   rm -rf "$gate_race_root/run.lock"
 
   # The backstop. Everything above narrows the interleavings; this one makes a
@@ -5441,6 +5449,68 @@ STUB
     fail "a displaced holder must stop before executing any mapped command"
   [[ "$(sed -n 's/^token=//p' "$gate_race_root/run.lock/owner" | head -n1)" == "somebody-else" ]] ||
     fail "a displaced holder must not delete the record that replaced its own"
+  rm -rf "$gate_race_root/run.lock"
+
+  # A gate killed mid-command does not take that command with it: mapped
+  # commands are backgrounded, so they outlive their shell while the lock they
+  # held becomes reclaimable. The command's own watchdog is the only thing left
+  # that knows the two belong together, so it kills the command when its gate
+  # disappears — and a reclaimer waits that out before starting its own work.
+  # Measured against the clock rather than the shared log, because a killed
+  # command never writes its own exit line.
+  rm -rf "$gate_race_root/run.lock"
+  : > "$gate_race_log"
+  RACE_STUB_SECONDS=30 \
+    AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 60 \
+    > "$gate_race_repo/orphan-victim.out" 2>&1 &
+  race_victim_wrapper=$!
+  race_waited=0
+  while [[ -z "$(awk '/^enter/ { print $2; exit }' "$gate_race_log")" && "$race_waited" -lt 120 ]]; do
+    sleep 0.5
+    race_waited=$((race_waited + 1))
+  done
+  race_orphan_pid="$(awk '/^enter/ { print $2; exit }' "$gate_race_log")"
+  [[ -n "$race_orphan_pid" ]] ||
+    fail "the orphan case never saw a mapped command start"
+  # Kill the gate SHELL — the PID it recorded — not the wrapper around it.
+  race_victim_pid="$(sed -n 's/^pid=//p' "$gate_race_root/run.lock/owner" | head -n1)"
+  kill -9 "$race_victim_pid" 2>/dev/null || true
+  kill -9 "$race_victim_wrapper" 2>/dev/null || true
+  wait "$race_victim_wrapper" 2>/dev/null || true
+  kill -0 "$race_orphan_pid" 2>/dev/null ||
+    fail "the orphan case needs the command to outlive its gate to mean anything"
+  (
+    while kill -0 "$race_orphan_pid" 2>/dev/null; do sleep 0.5; done
+    date +%s > "$gate_race_repo/orphan_died"
+  ) &
+  race_orphan_watcher=$!
+  # This is the case that asserts the settle, so it runs with the gate's own
+  # default rather than the shrunken one the other cases use — invoked
+  # directly, because leaving an override empty would read as unset and hand
+  # it the short value.
+  RACE_STUB_SECONDS=2 \
+    AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+    AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 120 \
+    > "$gate_race_repo/orphan-next.out" 2>&1 || true
+  wait "$race_orphan_watcher" 2>/dev/null || true
+  race_orphan_died="$(cat "$gate_race_repo/orphan_died" 2>/dev/null || echo 0)"
+  race_next_started="$(awk '/^enter/ { if (NR > 1) { print $3; exit } }' "$gate_race_log")"
+  [[ -n "$race_next_started" ]] ||
+    fail "the run after an orphaned command must still execute"
+  [[ "$race_orphan_died" -ne 0 ]] ||
+    fail "a command whose gate was killed must not keep running"
+  [[ "$race_next_started" -ge "$race_orphan_died" ]] ||
+    fail "the next run started $((race_orphan_died - race_next_started))s before the orphaned command died"
   rm -rf "$gate_race_root/run.lock"
 
   # Crash-point sweep. Every boundary where this path creates, links, renames

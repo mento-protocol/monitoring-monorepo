@@ -245,17 +245,17 @@ all of them. Safe means: at most one process believes it holds the lock, no
 record naming a live holder is invisible to the next reader, and no state
 requires manual cleanup.
 
-| Crash lands                                                                  | State left behind                                    | Next run                                                                                        |
-| ---------------------------------------------------------------------------- | ---------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| before `mkdir run.lock`                                                      | nothing                                              | takes the lock normally                                                                         |
-| after `mkdir`, before the record is staged                                   | lock directory, no record                            | no complete record, so after the grace it publishes its own                                     |
-| after staging, before `link`                                                 | `owner.claiming.<pid>` only                          | same as above; the staged file is private and inert, and goes when the lock does                |
-| after `link`, before the staged copy is unlinked                             | complete record plus an inert `owner.claiming.<pid>` | reads the record; reclaims it if its holder is gone                                             |
-| while the holder runs mapped commands                                        | complete record naming a dead process                | takes the record by rename and claims                                                           |
-| after `mv owner → owner.reclaiming.<pid>`, before the taken record is judged | no `owner`, one remnant                              | reads the remnant first: a live identity is linked back as the record, a spent one is discarded |
-| after judging a taken record stale, before the new record is published       | no `owner`, no remnant                               | no complete record, so after the grace it publishes its own                                     |
-| after a taken record is judged NOT stale, before it is put back              | same as the take boundary above                      | same as the take boundary above                                                                 |
-| during `rm -rf` in release                                                   | lock directory partially gone                        | either it is absent (take it) or record-less (grace, then publish)                              |
+| Crash lands                                                                  | State left behind                                                                                                                   | Next run                                                                                            |
+| ---------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| before `mkdir run.lock`                                                      | nothing                                                                                                                             | takes the lock normally                                                                             |
+| after `mkdir`, before the record is staged                                   | lock directory, no record                                                                                                           | no complete record, so after the grace it publishes its own                                         |
+| after staging, before `link`                                                 | `owner.claiming.<pid>` only                                                                                                         | same as above; the staged file is private and inert, and goes when the lock does                    |
+| after `link`, before the staged copy is unlinked                             | complete record plus an inert `owner.claiming.<pid>`                                                                                | reads the record; reclaims it if its holder is gone                                                 |
+| while the holder runs mapped commands                                        | complete record naming a dead shell — and its command still running, because mapped commands are backgrounded and outlive the shell | the command's watchdog kills it once its gate is gone; a reclaimer waits that out before publishing |
+| after `mv owner → owner.reclaiming.<pid>`, before the taken record is judged | no `owner`, one remnant                                                                                                             | reads the remnant first: a live identity is linked back as the record, a spent one is discarded     |
+| after judging a taken record stale, before the new record is published       | no `owner`, no remnant                                                                                                              | no complete record, so after the grace it publishes its own                                         |
+| after a taken record is judged NOT stale, before it is put back              | same as the take boundary above                                                                                                     | same as the take boundary above                                                                     |
+| during `rm -rf` in release                                                   | lock directory partially gone                                                                                                       | either it is absent (take it) or record-less (grace, then publish)                                  |
 
 #### The rules the table rests on
 
@@ -280,6 +280,17 @@ of them.
    Anything that unseats the record in between — a waiter acting on a stale
    verdict, a hand-deleted lock — is caught here and the run stops with
    `this run no longer holds the gate run lock`, having executed nothing.
+5. **A command does not outlive the gate that started it.** Mapped commands
+   run in the background, so a `kill -9` on the gate shell leaves them running
+   while the lock they held becomes reclaimable — exclusion would hold on
+   paper while two runs' commands shared the machine. Each command's watchdog
+   already outlives the shell too, and it is the last process that knows the
+   two belong together, so it kills the command when its gate disappears.
+   Killing another run's orphan is deliberate: that run is gone, its work
+   cannot be reported, and leaving it running is the outcome the lock exists
+   to prevent. A reclaimer additionally waits out the watchdog's detection and
+   grace (`AGENT_QUALITY_GATE_LOCK_ORPHAN_SETTLE_SECONDS`, 6s) before
+   publishing, so the next run's commands never start beside a survivor.
 
 Rule 4 is the one that does not depend on getting an interleaving right, and
 it is why the others are allowed to be merely careful: they keep runs from
