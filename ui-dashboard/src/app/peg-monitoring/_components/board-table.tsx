@@ -84,6 +84,7 @@ export function BoardTable({
                   <RowPanel
                     asset={asset}
                     nowMs={nowMs}
+                    producedAt={producedAt}
                     stale={stale}
                     previousPolicy={previousPolicy}
                     ageLabel={ageLabel}

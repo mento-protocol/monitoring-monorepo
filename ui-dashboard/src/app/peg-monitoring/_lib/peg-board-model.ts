@@ -447,6 +447,34 @@ function depthOnlyTooltip(source: PegSource): string {
 }
 
 /** Supporting venues carry no alert authority; the tag says which kind. */
+/**
+ * Why a supporting venue's numbers cannot be shown, or null when they can.
+ * Mirrors `sourceHasUnavailableEvidence` (the deleted evidence view's rule)
+ * minus three conditions that are healthy-by-design for supporting venues:
+ * `capped === true` and the null `deviationBps`/`premiumBps` that follow from
+ * it — a DEPTH ONLY venue fills partially on purpose, carries its meaning in
+ * the role tag, and still quotes a real executable price the rail can place.
+ * When the package itself is stale, callers pass the confirmed time instead
+ * of the browser clock so retained evidence does not expire mid-display.
+ */
+export function supportingSourceUnusableReason(
+  source: PegSource,
+  evidenceAtMs: number,
+): string | null {
+  if (!source.healthy) return "no healthy observation";
+  if (source.listingState === "halted") return "listing halted";
+  if (source.listingState === "absent") return "not listed on this venue";
+  if (source.venueState === "halted") return "venue halted";
+  if (source.observationAt === null || source.executablePrice === null)
+    return "no current observation";
+  if (
+    evidenceAtMs - source.observationAt * 1_000 >
+    source.policy.staleAfterSeconds * 1_000
+  )
+    return "check expired";
+  return null;
+}
+
 export function supportingRole(source: PegSource): SupportingRole {
   return source.authority === "display" || source.convertVia !== null
     ? { tag: "DISPLAY ONLY", tooltip: displayOnlyTooltip(source) }

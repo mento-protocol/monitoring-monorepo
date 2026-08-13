@@ -68,15 +68,15 @@ describe("RecentAlerts", () => {
     expect(container.querySelectorAll("li")).toHaveLength(0);
   });
 
-  it("renders one entry per transition with its severity dot and bold lead", () => {
+  it("renders one entry per in-window transition with its severity dot and bold lead", () => {
     act(() => root.render(<RecentAlerts nowMs={NOW_MS} events={events} />));
     const rows = container.querySelectorAll("li");
-    expect(rows).toHaveLength(3);
+    // The Jul 22 policy activation predates the advertised 7-day window, so
+    // the component drops it even though the feed supplied it.
+    expect(rows).toHaveLength(2);
     expect(
-      container.querySelector('[data-testid="peg-alert-policy"]')!.textContent,
-    ).toContain(
-      "Policy europ-2026-07-22-v1 activated — warn −25, page −50, premium +25.",
-    );
+      container.querySelector('[data-testid="peg-alert-policy"]'),
+    ).toBeNull();
     expect(rows[0]!.querySelector("strong")!.textContent).toBe(
       "KESm warning raised",
     );
@@ -88,5 +88,28 @@ describe("RecentAlerts", () => {
     expect(new Set(leadClasses).size).toBe(1);
     expect(container.textContent).toContain("Today 16:05");
     expect(container.textContent).toContain("Aug 9 14:37");
+  });
+
+  it("renders an in-window policy activation with the brand-purple dot", () => {
+    const recentPolicy: PegAlertEvent = {
+      ...events[2]!,
+      at: Date.UTC(2026, 7, 10, 9, 0) / 1_000,
+    };
+    act(() =>
+      root.render(<RecentAlerts nowMs={NOW_MS} events={[recentPolicy]} />),
+    );
+    expect(
+      container.querySelector('[data-testid="peg-alert-policy"]')!.textContent,
+    ).toContain(
+      "Policy europ-2026-07-22-v1 activated — warn −25, page −50, premium +25.",
+    );
+  });
+
+  it("says so when a wired feed has no events inside the window", () => {
+    act(() =>
+      root.render(<RecentAlerts nowMs={NOW_MS} events={[events[2]!]} />),
+    );
+    expect(container.textContent).toContain("No alerts in the last 7 days.");
+    expect(container.querySelectorAll("li")).toHaveLength(0);
   });
 });

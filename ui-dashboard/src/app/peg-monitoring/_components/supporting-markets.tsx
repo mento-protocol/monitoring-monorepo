@@ -11,6 +11,7 @@ import {
   railMarker,
   sourceDistance,
   supportingRole,
+  supportingSourceUnusableReason,
   venueLabel,
   venueTradeUrl,
 } from "../_lib/peg-board-model";
@@ -25,9 +26,12 @@ import { DistanceRail } from "./distance-rail";
 export function SupportingMarkets({
   asset,
   nowMs,
+  evidenceAtMs,
 }: {
   asset: PegAssetPresentation;
   nowMs: number;
+  /** Freshness clock: the browser's now, or the confirmed time when stale. */
+  evidenceAtMs: number;
 }): React.JSX.Element | null {
   const sources = asset.asset.sources.filter(
     (source) => source.id !== asset.asset.policy.deepVenueSource,
@@ -55,6 +59,7 @@ export function SupportingMarkets({
             source={source}
             target={asset.asset.policy.target}
             nowMs={nowMs}
+            evidenceAtMs={evidenceAtMs}
           />
         ))}
       </div>
@@ -66,25 +71,17 @@ function SupportingRow({
   source,
   target,
   nowMs,
+  evidenceAtMs,
 }: {
   source: PegSource;
   target: number;
   nowMs: number;
+  evidenceAtMs: number;
 }): React.JSX.Element {
-  const distance = sourceDistance(source, target);
-  const marker = railMarker(distance.bps, distance.direction);
+  const unusableReason = supportingSourceUnusableReason(source, evidenceAtMs);
   const role = supportingRole(source);
   const url = venueTradeUrl(source);
   const label = venueLabel(source);
-  const offScale = marker?.offScale === true;
-  const distanceText = distanceLabelFor(distance.bps, distance.direction);
-  const railTooltip =
-    offScale && distance.bps !== null && distance.direction !== null
-      ? offScaleRailTooltip(
-          distance.bps,
-          distance.direction === "above" ? "above" : "below",
-        )
-      : undefined;
   return (
     <div
       data-testid={`peg-supporting-source-${source.id}`}
@@ -107,6 +104,41 @@ function SupportingRow({
           </button>
         </PegTooltip>
       </div>
+      {unusableReason === null ? (
+        <UsableCells source={source} target={target} nowMs={nowMs} />
+      ) : (
+        <UnavailableCells
+          source={source}
+          reason={unusableReason}
+          nowMs={nowMs}
+        />
+      )}
+    </div>
+  );
+}
+
+function UsableCells({
+  source,
+  target,
+  nowMs,
+}: {
+  source: PegSource;
+  target: number;
+  nowMs: number;
+}): React.JSX.Element {
+  const distance = sourceDistance(source, target);
+  const marker = railMarker(distance.bps, distance.direction);
+  const offScale = marker?.offScale === true;
+  const distanceText = distanceLabelFor(distance.bps, distance.direction);
+  const railTooltip =
+    offScale && distance.bps !== null && distance.direction !== null
+      ? offScaleRailTooltip(
+          distance.bps,
+          distance.direction === "above" ? "above" : "below",
+        )
+      : undefined;
+  return (
+    <>
       <div className="truncate text-[12.5px] text-muted-foreground">
         {formatNumber(source.executablePrice)}
       </div>
@@ -114,7 +146,7 @@ function SupportingRow({
         <DistanceRail
           marker={marker}
           tone={offScale ? "critical" : "healthy"}
-          ariaLabel={`${label}: ${distanceText}`}
+          ariaLabel={`${venueLabel(source)}: ${distanceText}`}
           tooltip={railTooltip}
         />
         <span
@@ -132,6 +164,44 @@ function SupportingRow({
       <div className="truncate text-[12.5px] text-muted-foreground">
         {formatWholeBps(source.spreadBps)}
       </div>
-    </div>
+    </>
+  );
+}
+
+/**
+ * A venue that cannot corroborate must not look like it does: no price, no
+ * rail marker, no spread — the reason takes their place (mirrors the deleted
+ * evidence view's "Unavailable" treatment).
+ */
+function UnavailableCells({
+  source,
+  reason,
+  nowMs,
+}: {
+  source: PegSource;
+  reason: string;
+  nowMs: number;
+}): React.JSX.Element {
+  return (
+    <>
+      <div className="truncate text-[12.5px] text-muted-foreground">—</div>
+      <div className="flex min-w-0 items-center gap-3">
+        <DistanceRail
+          marker={null}
+          tone="healthy"
+          ariaLabel={`${venueLabel(source)}: unavailable — ${reason}`}
+        />
+        <span
+          className="whitespace-nowrap text-[12px]"
+          style={{ color: PEG_COLOR.muted }}
+        >
+          Unavailable — {reason}
+        </span>
+      </div>
+      <div className="truncate text-[11px]" style={{ color: PEG_COLOR.dim }}>
+        {checkedAgo(source.observationAt, nowMs) ?? "no check recorded"}
+      </div>
+      <div className="truncate text-[12.5px] text-muted-foreground">—</div>
+    </>
   );
 }

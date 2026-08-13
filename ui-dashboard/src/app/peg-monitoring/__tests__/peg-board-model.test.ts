@@ -15,6 +15,7 @@ import {
   sourceDistance,
   statusBadge,
   supportingRole,
+  supportingSourceUnusableReason,
   tradingLimitTooltip,
   venueLabel,
   venueTradeUrl,
@@ -269,6 +270,39 @@ describe("supporting markets", () => {
     expect(role.tag).toBe("DEPTH ONLY");
     expect(role.tooltip).not.toContain("too thin");
     expect(role.tooltip).toContain("can never set peg status");
+  });
+
+  it("keeps a capped-but-fresh venue usable and blocks invalid evidence", () => {
+    const fresh = pkg.sources[1]!;
+    const at = (fresh.observationAt ?? 0) * 1_000 + 5_000;
+    expect(supportingSourceUnusableReason(fresh, at)).toBeNull();
+    expect(
+      supportingSourceUnusableReason({ ...fresh, capped: true }, at),
+    ).toBeNull();
+    expect(
+      supportingSourceUnusableReason({ ...fresh, healthy: false }, at),
+    ).toBe("no healthy observation");
+    expect(
+      supportingSourceUnusableReason(
+        { ...fresh, healthy: false, venueState: "halted" },
+        at,
+      ),
+    ).toBe("no healthy observation");
+    expect(
+      supportingSourceUnusableReason({ ...fresh, listingState: "halted" }, at),
+    ).toBe("listing halted");
+    expect(
+      supportingSourceUnusableReason({ ...fresh, listingState: "absent" }, at),
+    ).toBe("not listed on this venue");
+    expect(
+      supportingSourceUnusableReason({ ...fresh, executablePrice: null }, at),
+    ).toBe("no current observation");
+    expect(
+      supportingSourceUnusableReason(
+        fresh,
+        at + fresh.policy.staleAfterSeconds * 1_000 + 1_000,
+      ),
+    ).toBe("check expired");
   });
 
   it("derives a signed distance from the venue's own price", () => {

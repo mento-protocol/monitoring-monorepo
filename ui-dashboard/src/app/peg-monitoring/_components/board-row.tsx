@@ -208,8 +208,19 @@ function TradingLimitCell({
   const states = monitorStates(asset, structuralCurrent, stale);
   const target = mostSaturatedMonitor(states);
   const saturation =
-    asset.asset.structural.structuralSaturation ?? target?.saturation ?? 0;
-  const value = formatFraction(saturation);
+    asset.asset.structural.structuralSaturation ?? target?.saturation ?? null;
+  // A missing or expired measurement must not read as a safe 0%: the fraction
+  // renders only when structural evidence is current and a saturation exists.
+  const measured = structuralCurrent && saturation !== null;
+  const value =
+    structuralCurrent && saturation !== null ? formatFraction(saturation) : "—";
+  const tooltip = measured
+    ? tradingLimitTooltip(asset.asset.policy.structuralWarnFraction)
+    : `${
+        structuralCurrent
+          ? "No trading-limit measurement is available from the indexed pool."
+          : "The structural evidence behind this measurement has expired."
+      } ${tradingLimitTooltip(asset.asset.policy.structuralWarnFraction)}`;
   // The link is the tooltip trigger itself: wrapping it in a button would nest
   // two interactive controls.
   const trigger =
@@ -227,15 +238,7 @@ function TradingLimitCell({
     );
   return (
     <TwoLineCell
-      value={
-        <PegTooltip
-          content={tradingLimitTooltip(
-            asset.asset.policy.structuralWarnFraction,
-          )}
-        >
-          {trigger}
-        </PegTooltip>
-      }
+      value={<PegTooltip content={tooltip}>{trigger}</PegTooltip>}
       age={checkedAgo(producedAt, nowMs)}
       stale={stale}
     />

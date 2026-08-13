@@ -73,6 +73,10 @@ function AlertEntry({
   );
 }
 
+const SEVEN_DAYS_MS = 7 * 86_400_000;
+/** Producer clocks may run slightly ahead of the browser's. */
+const FUTURE_SKEW_MS = 60_000;
+
 export function RecentAlerts({
   events,
   nowMs,
@@ -80,6 +84,13 @@ export function RecentAlerts({
   events?: readonly PegAlertEvent[] | undefined;
   nowMs: number;
 }): React.JSX.Element {
+  // The header advertises "last 7 days", so the component enforces it rather
+  // than trusting the feed: an older transition (or one stamped further than
+  // clock skew into the future) must not render under that label.
+  const visible = events?.filter((event) => {
+    const atMs = event.at * 1_000;
+    return atMs >= nowMs - SEVEN_DAYS_MS && atMs <= nowMs + FUTURE_SKEW_MS;
+  });
   return (
     <section
       data-testid="peg-recent-alerts"
@@ -102,7 +113,7 @@ export function RecentAlerts({
           Full history in Grafana
         </ExternalLink>
       </div>
-      {events === undefined || events.length === 0 ? (
+      {visible === undefined ? (
         <p className="border-t border-border px-[18px] py-3 text-[12px] text-muted-foreground">
           No alert feed is wired into this page yet. Peg alert transitions and
           policy activations are in{" "}
@@ -114,9 +125,13 @@ export function RecentAlerts({
           </ExternalLink>
           .
         </p>
+      ) : visible.length === 0 ? (
+        <p className="border-t border-border px-[18px] py-3 text-[12px] text-muted-foreground">
+          No alerts in the last 7 days.
+        </p>
       ) : (
         <ul>
-          {events.map((event) => (
+          {visible.map((event) => (
             <AlertEntry key={event.id} event={event} nowMs={nowMs} />
           ))}
         </ul>

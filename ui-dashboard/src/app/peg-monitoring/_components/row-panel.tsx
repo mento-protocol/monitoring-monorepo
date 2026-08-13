@@ -37,6 +37,7 @@ const noticeTint = {
 export function RowPanel({
   asset,
   nowMs,
+  producedAt,
   stale,
   previousPolicy,
   ageLabel,
@@ -44,6 +45,7 @@ export function RowPanel({
 }: {
   asset: PegAssetPresentation;
   nowMs: number;
+  producedAt: number;
   stale: boolean;
   previousPolicy: boolean;
   ageLabel: string;
@@ -97,7 +99,13 @@ export function RowPanel({
         />
       ) : null}
       <div className="mt-4">
-        <SupportingMarkets asset={asset} nowMs={nowMs} />
+        <SupportingMarkets
+          asset={asset}
+          nowMs={nowMs}
+          // Retained (stale) evidence is judged against its confirmed time so
+          // it does not silently expire against the moving browser clock.
+          evidenceAtMs={stale ? producedAt * 1_000 : nowMs}
+        />
       </div>
       <div className="mt-4">
         <PegHistoryChart
