@@ -15,7 +15,11 @@ const OG_FIXTURE_PATH = "src/lib/homepage-og.ts";
 const TEST_FIXTURE_PATH = "src/lib/__tests__/browser-api-policy.test.ts";
 const SYMBOL_AWARE_RULE_ID =
   "browser-api-policy/no-unsupported-receiver-property";
-const LINT_RUNNER_TIMEOUT_MS = 30_000;
+// The shared worker lint pass takes ~13s alone and multiples of that under
+// the quality gate's parallel load; 30s timed out there twice. The budget
+// covers engine startup contention, not a hang — regressions still fail on
+// assertions.
+const LINT_RUNNER_TIMEOUT_MS = 120_000;
 const execFileAsync = promisify(execFile);
 const eslint = new ESLint({
   cwd: fileURLToPath(DASHBOARD_ROOT_URL),
@@ -71,7 +75,12 @@ async function browserApiMessages(lintCase: LintCase) {
   return (await lintResultsPromise)[lintCase];
 }
 
-describe("browser runtime API policy", () => {
+// These tests boot a real ESLint engine (config resolution plus a worker
+// lint pass shared through `lintResultsPromise`), which measures ~13s alone
+// and longer under the quality gate's parallel load — vitest's 5s default
+// times the suite out before ESLint returns. The budget covers engine
+// startup, not a hang: a genuine regression still fails on assertions.
+describe("browser runtime API policy", { timeout: 120_000 }, () => {
   it("pins the Next.js 16 browser floor", () => {
     const packageJson = JSON.parse(
       readFileSync(new URL("package.json", DASHBOARD_ROOT_URL), "utf8"),

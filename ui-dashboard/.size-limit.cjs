@@ -257,11 +257,19 @@ const config = [
     //
     // Baseline: 11,400 bytes  Budget: retained at 12 KB (5.3% headroom).
     // The prior per-budget 10,283-byte note was stale: origin/main's 2026-07-09
-    // header already measured 11,276 bytes, and this PR changes no styles or
-    // Tailwind class names.
+    // header already measured 11,276 bytes.
+    //
+    // 2026-08-13 (peg board redesign): the @mento-protocol/ui adoption adds the
+    // design system's `:root`/`.dark` token blocks, its `@theme` mapping, and
+    // the AspektaVF `@font-face` to the single Tailwind bundle, plus the new
+    // board page's own utilities — measured 12,206 bytes brotli with the app's
+    // Tailwind pass. Budget: ×~1.10 ≈ 13.4 KB → 14 kB. No `@source` scan of the
+    // package dist is registered (see globals.css), so the DS's unused component
+    // utilities stay out of this bundle; a jump past this budget means that
+    // boundary broke.
     name: "All client CSS",
     path: manifestPathsOrFallback(".css", ["static/"], ".next/static/**/*.css"),
-    limit: "12 kB",
+    limit: "14 kB",
   },
 ];
 

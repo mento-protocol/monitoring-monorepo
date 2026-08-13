@@ -1,83 +1,70 @@
-const cards = ["warning", "freshness"];
-const evidenceItems = ["market", "sources", "pool", "breaker"];
+import { PEG_BOARD_GRID, PEG_BOARD_MIN_WIDTH } from "./_lib/peg-board-model";
+
+const rows = ["first", "second"];
+const cells = [
+  ["peg", "w-20"],
+  ["status", "w-16"],
+  ["price", "w-14"],
+  ["distance", "w-full"],
+  ["market", "w-28"],
+  ["spread", "w-12"],
+  ["limit", "w-10"],
+  ["breaker", "w-14"],
+  ["chevron", "w-7"],
+] as const;
 
 function Bar({ className }: { className: string }): React.JSX.Element {
-  return <div className={`rounded bg-slate-800 ${className}`} />;
+  return (
+    <div className={`h-3 bg-[oklch(26.13%_0.0288_302.75)] ${className}`} />
+  );
 }
 
+/**
+ * Board-shaped skeleton: same header row, same nine-column grid and the same
+ * 16px row padding as the loaded table, so the first paint does not reflow.
+ */
 export function PegMonitoringLoading(): React.JSX.Element {
   return (
-    <section
-      aria-label="Loading peg monitoring"
-      className="space-y-5 animate-pulse"
-    >
+    <div aria-label="Loading peg monitoring" className="animate-pulse">
       <div
-        data-testid="peg-skeleton-status"
-        className="rounded-xl border border-slate-800 bg-slate-900/45 p-5"
+        data-testid="peg-skeleton-header"
+        className="mb-[22px] flex items-center justify-between gap-3"
       >
-        <Bar className="h-5 w-44" />
+        <div className="flex items-center gap-3">
+          <Bar className="h-6 w-44" />
+          <Bar className="h-6 w-52" />
+        </div>
+        <Bar className="w-32" />
       </div>
-      <div
-        data-testid="peg-skeleton-headlines"
-        className="grid gap-3 md:grid-cols-2"
-      >
-        {cards.map((card) => (
-          <div
-            key={card}
-            className="space-y-5 rounded-xl border border-slate-800 bg-slate-900/45 p-5"
-          >
-            <Bar className="h-3 w-32" />
-            <Bar className="h-7 w-3/4" />
-            <Bar className="h-3 w-2/3" />
-          </div>
-        ))}
-      </div>
-      <article
-        data-testid="peg-skeleton-scorecard"
-        className="rounded-xl border border-slate-800 bg-slate-900/45 p-5"
-      >
-        <div className="grid gap-6 xl:grid-cols-[minmax(13rem,0.8fr)_minmax(20rem,1.4fr)_minmax(13rem,0.8fr)] xl:items-center">
-          <div className="space-y-4">
-            <div className="flex items-center justify-between gap-3">
-              <Bar className="h-6 w-36" />
-              <Bar className="h-7 w-20 rounded-full" />
+      <div data-testid="peg-skeleton-board" className="border border-border">
+        <div className="overflow-x-auto">
+          <div className={PEG_BOARD_MIN_WIDTH}>
+            <div
+              className={`grid border-b border-border px-[18px] py-2.5 ${PEG_BOARD_GRID}`}
+            >
+              {cells.map(([column, width]) => (
+                <Bar key={column} className={`h-2.5 ${width}`} />
+              ))}
             </div>
-            <Bar className="h-9 w-44" />
-            <Bar className="h-3 w-56 max-w-full" />
-          </div>
-          <div className="space-y-3">
-            <div className="flex justify-between gap-3">
-              <Bar className="h-4 w-28" />
-              <Bar className="h-4 w-36" />
-            </div>
-            <Bar className="h-3 w-full rounded-full" />
-            <div className="flex justify-between gap-3">
-              <Bar className="h-3 w-12" />
-              <Bar className="h-3 w-24" />
-              <Bar className="h-3 w-24" />
-            </div>
-          </div>
-          <div className="space-y-4 rounded-lg border border-slate-800 p-4">
-            <Bar className="h-3 w-32" />
-            <Bar className="h-5 w-full" />
-            <Bar className="h-3 w-3/4" />
+            {rows.map((row) => (
+              <div
+                key={row}
+                className={`grid items-center border-b border-border px-[18px] py-4 ${PEG_BOARD_GRID}`}
+              >
+                {cells.map(([column, width]) => (
+                  <Bar key={column} className={`h-5 ${width}`} />
+                ))}
+              </div>
+            ))}
           </div>
         </div>
-        <div className="mt-5 grid gap-4 border-t border-slate-800 pt-4 sm:grid-cols-4">
-          {evidenceItems.map((item) => (
-            <div key={item} className="space-y-2">
-              <Bar className="h-3 w-20" />
-              <Bar className="h-4 w-32 max-w-full" />
-            </div>
-          ))}
-        </div>
-      </article>
-      <div
-        data-testid="peg-skeleton-evidence"
-        className="rounded-xl border border-slate-800 bg-slate-950/35 p-5"
-      >
-        <Bar className="h-5 w-40" />
       </div>
-    </section>
+      <div
+        data-testid="peg-skeleton-alerts"
+        className="mt-3.5 border border-border px-[18px] py-3"
+      >
+        <Bar className="w-40" />
+      </div>
+    </div>
   );
 }

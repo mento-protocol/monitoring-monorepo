@@ -46,9 +46,9 @@ registry.
   `sha512-LN5yao74QQZTjGmolGqAh9YkQa/206ni94wwTtu6I/mVkyMeAbRME7rjK64KrWmCTw2OHUb8TMFsw6r4rMmUSQ==`
 - npm shasum: `4b2a627dbce2773f000a0e14d15e61a7ca1150f8`
 - launcher SHA-256:
-  `651e4a9194348728f492274e9346172a3bbd51039883480e46c196cbb33f3a1f`
+  `f4debf3eb16a81e829f607e01a18646fcce486b9d85029905f99a1a6a7f15e3b`
 - dependency-closed runtime SHA-256:
-  `c6770a6008cfb5946a4e87385c6f61aa1166fff0614d541789949cb577ce09b6`
+  `8dd4f9a1d40127541d7030d2bb4c6eaf9a96812bf591306736762e1831e70f76`
 - entrypoint SHA-256:
   `1949e38e9c66aaac5cc00e2da2b8bbf712a4c39266f8f501a3cdd86253fe4b8e`
 - upstream git commit: `e3ab3c20ebd7d0e195cd774004fdb4c3dcb448d1`
