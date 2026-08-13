@@ -1155,7 +1155,7 @@ The arithmetic that sizes it: 521 (first pass) + 1 list invocation + 2×100 read
 **Fail closed on rate limiting.** Nearly every read in this leg fails SOFT toward
 MORE candidates — `readStub` and `openAutofixPrExists` in
 `scripts/sentry-autofix-candidate.mjs`, the per-id handled lookups in
-`scripts/sentry-autofix-queue-io.mjs`, the reverse probes in
+`scripts/sentry-autofix-family-handled.mjs`, the reverse probes in
 `scripts/sentry-autofix-reverse-verify.mjs`. That is the right trade for a
 transient blip (one self-terminating extra attempt), but the blockers those reads
 look for ARE the dedupe signals, so a throttled read is indistinguishable from

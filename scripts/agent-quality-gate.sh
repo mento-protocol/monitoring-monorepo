@@ -2433,9 +2433,22 @@ while IFS= read -r path; do
           # production on the path the second look exists to create.
           add_command "pnpm sentry:autofix:finalize:test" "Sentry autofix per-run cost cap changed"
           ;;
+        scripts/sentry-autofix-family-handled.mjs)
+          # The handled-FAMILY lookup, split out of sentry-autofix-queue-io.mjs
+          # for the 600-line soft cap. Its behaviour is exercised end to end by
+          # the select suite, like every other module on this leg.
+          add_command "pnpm sentry:autofix:select:test" "Sentry autofix handled-family lookup changed"
+          # It also OWNS a cap the finalize suite pins the select job's
+          # timeout-minutes against — MAX_HANDLED_ID_QUERIES, one of the terms in
+          # that suite's worst-case serial `gh` call count. Same reason
+          # sentry-autofix-select-instrument.mjs routes there: raising the cap
+          # without re-checking the timeout has to fail in the gate, not in
+          # production.
+          add_command "pnpm sentry:autofix:finalize:test" "Sentry autofix per-run cost cap changed"
+          ;;
         scripts/sentry-autofix-queue-io.mjs|scripts/sentry-autofix-family-resolve.mjs|scripts/sentry-autofix-reverse-verify.mjs|scripts/sentry-autofix-family.mjs|scripts/sentry-autofix-candidate.mjs)
-          # The selection leg's gh I/O layer (openAutofixPrExists / isOwnHeadPr /
-          # the family-collapse reads), the live-state family resolver, the
+          # The selection leg's gh I/O layer (the window list, readStub,
+          # openAutofixPrExists / isOwnHeadPr), the live-state family resolver, the
           # reverse `in:comments` verification leg, and the pure union-find
           # family module (transitive union / project scoping / MAX_FAMILY_MEMBERS
           # / representative rule) — all consumed by the selector. Each is

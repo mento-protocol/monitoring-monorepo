@@ -20,9 +20,9 @@ import {
 } from "./sentry-autofix-family.mjs";
 import {
   listHandledShortIds,
-  LOCAL_SENTRY_PROJECT,
   MAX_HANDLED_ID_QUERIES,
-} from "./sentry-autofix-queue-io.mjs";
+} from "./sentry-autofix-family-handled.mjs";
+import { LOCAL_SENTRY_PROJECT } from "./sentry-autofix-queue-io.mjs";
 import {
   MAX_REVERSE_PROBE_QUERIES,
   MAX_REVERSE_VERIFY_READS,

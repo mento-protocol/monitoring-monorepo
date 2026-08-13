@@ -42,7 +42,7 @@ import {
   MAX_SECOND_LOOK_EVALUATIONS,
   SECOND_LOOK_FAMILY_BUDGETS,
 } from "./sentry-autofix-second-look.mjs";
-import { MAX_HANDLED_ID_QUERIES } from "./sentry-autofix-queue-io.mjs";
+import { MAX_HANDLED_ID_QUERIES } from "./sentry-autofix-family-handled.mjs";
 import {
   MAX_REVERSE_PROBE_QUERIES,
   MAX_REVERSE_VERIFY_READS,
