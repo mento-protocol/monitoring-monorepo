@@ -106,11 +106,14 @@ function hasUnnegatedFailure(value) {
   const scrubbed = String(value ?? "").replace(NEGATED_FAILURE, "");
   return FAILURE_TERM.test(scrubbed);
 }
-function hasReviewContradiction(value) {
+function hasExplicitReviewContradiction(value) {
   const body = String(value ?? "")
     .replace(/[*_~]/g, "")
     .replace(CLEAN_REVIEW_SUMMARY, "");
-  return REVIEW_CONTRADICTION.test(body) || hasUnnegatedFailure(body);
+  return REVIEW_CONTRADICTION.test(body);
+}
+function hasReviewContradiction(value) {
+  return hasExplicitReviewContradiction(value) || hasUnnegatedFailure(value);
 }
 function hasStructuredClaudeReviewContradiction(review) {
   const narrative = [
@@ -120,7 +123,7 @@ function hasStructuredClaudeReviewContradiction(review) {
   ]
     .join("\n")
     .replace(/\bfails?[- ]closed\b/gi, "");
-  return hasReviewContradiction(narrative);
+  return hasExplicitReviewContradiction(narrative);
 }
 function isBenignChecklistSubject(value) {
   const subject = String(value ?? "").trim();

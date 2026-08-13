@@ -1304,21 +1304,23 @@ test("accepts the frozen PR #1828 structural Overall Claude review", () => {
   assertEqual(reviewWithAnotherCommentId.ready, true);
 
   const clean = PR_1828_CLEAN_CLAUDE_REVIEW.body;
-  for (const cleanAbsencePhrase of [
+  for (const cleanNarrative of [
     "No P3 issues",
     "No P3 findings",
     "No P1/P2/P3 findings",
+    "The retry handles a network failure correctly",
+    "The error is caught and retried",
   ]) {
     const cleanAbsenceFeedback = summarizeFeedbackState(
       normalizedReadyStateForClaudeReview(
         {
           ...PR_1828_CLEAN_CLAUDE_REVIEW,
-          body: clean.replace("No doc drift", cleanAbsencePhrase),
+          body: clean.replace("No doc drift", cleanNarrative),
         },
         options,
       ),
     );
-    assertEqual(cleanAbsenceFeedback.ready, true, cleanAbsencePhrase);
+    assertEqual(cleanAbsenceFeedback.ready, true, cleanNarrative);
   }
 
   const mutations = [
