@@ -164,11 +164,24 @@ resource "google_storage_bucket_iam_member" "app_engine_source_appspot_object_vi
 
 # App Engine still writes its service-owned staging.<project>.appspot.com
 # bucket after gcloud routes source input through the explicit bucket above.
-# Google requires Storage Admin for this default service account on that bucket.
+# Keep Google's required default-service-account grant on that bucket.
 resource "google_storage_bucket_iam_member" "app_engine_default_staging_admin" {
   bucket = "staging.${google_project.monitoring.project_id}.appspot.com"
   role   = "roles/storage.admin"
   member = "serviceAccount:${local.aegis_app_engine_default_service_account}"
+
+  depends_on = [google_app_engine_application.aegis]
+}
+
+# The gcloud caller submits CreateVersion before App Engine takes over. Grant
+# the same uploader set access to only the service-owned staging bucket; the
+# AppSpot-only grant above does not let these callers complete that submission.
+resource "google_storage_bucket_iam_member" "app_engine_default_staging_uploader_admin" {
+  for_each = local.app_engine_source_uploaders
+
+  bucket = "staging.${google_project.monitoring.project_id}.appspot.com"
+  role   = "roles/storage.admin"
+  member = each.value
 
   depends_on = [google_app_engine_application.aegis]
 }

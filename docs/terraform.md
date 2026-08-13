@@ -250,10 +250,11 @@ hash-named objects. AppSpot can view those objects. Default Compute has no direc
 App Engine source-bucket grant in this stack.
 
 App Engine also writes its service-owned
-`staging.mento-monitoring.appspot.com` bucket during a deploy. The default
-AppSpot service account has Storage Admin on that one bucket only, as required
-for that internal staging path. It has no project-wide Storage Admin grant and
-does not receive Storage Admin on either Terraform-managed source bucket.
+`staging.mento-monitoring.appspot.com` bucket during a deploy. The App Engine
+uploaders and default AppSpot service account have Storage Admin on that one
+bucket only, as required for version submission and the internal staging path.
+They have no project-wide Storage Admin grant and do not receive Storage Admin
+on either Terraform-managed source bucket.
 
 The routine deployer and `gcp_dev_members` have Service Account User only on the
 dedicated Metrics Bridge runtime identity and dedicated builder. They have no
