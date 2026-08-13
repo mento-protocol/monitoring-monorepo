@@ -311,6 +311,16 @@ for a human to have declined it by removing the label, which the sweep would
 otherwise put straight back. A failed re-read leaves the stub stranded for the
 next run rather than recovering blind.
 
+**Both arms also require `sentry-triage` in that live re-read**, and decline
+without writing when it is gone. The snapshot cannot fail that test — it comes
+from a `labels=sentry-triage` query — so it exists for the withdrawal that lands
+in between. Stage B's selector wants `sentry-triage` AND `sentry:needs-triage`,
+so re-queuing a stub that lost the first sheds its verdict and still leaves it
+unselectable: it takes the one artifact the stub had and buys nothing. Removing
+`sentry-triage` is also the only withdrawal gesture available for a stub in the
+open shape, which has no `sentry:needs-triage` left to remove — so **to retire a
+verdicted, unqueued stub for good, remove `sentry-triage`.**
+
 The two shapes differ in one more way, and the stub's own state is why. On the
 closed path every interruption lands somewhere inert: the state change goes last,
 so a stub whose shed failed is still closed and invisible to Stage B until the

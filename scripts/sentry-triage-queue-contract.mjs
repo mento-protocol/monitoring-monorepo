@@ -73,6 +73,17 @@ export function truncateTitle(text, maxLen = 90) {
 // list every label inline).
 export const NEEDS_TRIAGE_LABEL = "sentry:needs-triage";
 
+// DURABLE QUEUE MEMBERSHIP. Stage B's selector requires this label AND
+// `sentry:needs-triage`, so a stub without it is invisible to triage no matter
+// what else it carries — which makes removing it the strongest withdrawal
+// gesture this namespace has, and the only one available for a stub that has no
+// `sentry:needs-triage` left to remove. Anything that re-enrolls a stub must
+// therefore check it against LIVE state first. `scripts/sentry-autofix-queue-io.mjs`
+// keeps its own `SENTRY_TRIAGE_QUEUE_LABEL` twin for its search strings, and the
+// LABEL_DEFINITIONS entry below keeps its literal because the bootstrap must
+// list every label inline.
+export const QUEUE_LABEL = "sentry-triage";
+
 // Idempotently created/updated on every run (`gh label create --force`).
 export const LABEL_DEFINITIONS = [
   {

@@ -26,6 +26,7 @@ import {
   NEEDS_TRIAGE_LABEL,
   neutralizeUntrusted,
   parseArchiveBaseline,
+  QUEUE_LABEL,
   reopenBaselineOf,
   SETTLING_VERDICT_LABELS,
   STRAND_SHAPE_CLOSED_NEEDS_TRIAGE,
@@ -63,6 +64,7 @@ export {
   neutralizeUntrusted,
   parseArchiveBaseline,
   PROJECTED_LABEL,
+  QUEUE_LABEL,
   reopenBaselineOf,
   REOPEN_SHED_LABELS,
   sanitizeFreeText,
@@ -184,7 +186,7 @@ export function classifyNoise(rawTitle) {
 }
 
 export function buildQueueLabels(isNoise) {
-  const labels = ["sentry-triage", NEEDS_TRIAGE_LABEL];
+  const labels = [QUEUE_LABEL, NEEDS_TRIAGE_LABEL];
   if (isNoise) labels.push("sentry:candidate-noise");
   return labels;
 }
@@ -947,8 +949,22 @@ export function isStrandedOpenVerdict(
  * Which stranded shape this stub is in, or null for every healthy one. The names
  * (STRAND_SHAPE_*) live in the queue contract because the chokepoint renders a
  * note per shape; the predicates live here, with the sweep that applies them.
+ *
+ * QUEUE MEMBERSHIP IS CHECKED FIRST, for BOTH shapes, and it is the revalidation
+ * that needs it. The snapshot cannot fail this test — it comes from a
+ * `labels=sentry-triage` query — so on that side the check is free and inert.
+ * On the live re-read it is the difference between repairing a strand and
+ * wrecking an issue somebody deliberately withdrew: Stage B's selector requires
+ * `sentry-triage` AND `sentry:needs-triage`, so re-queuing a stub that has lost
+ * the first one sheds its verdict and STILL leaves it unselectable. Strictly
+ * destructive — it takes the one artifact the stub had and buys nothing.
+ *
+ * Removing `sentry-triage` is also the only withdrawal gesture available for a
+ * stub in the open shape, which by definition has no `sentry:needs-triage` left
+ * to remove. Declining here is what makes that gesture mean something.
  */
 export function strandedShapeOf(issue, options = {}) {
+  if (!(issue?.labels ?? []).includes(QUEUE_LABEL)) return null;
   if (isStrandedNeedsTriage(issue)) return STRAND_SHAPE_CLOSED_NEEDS_TRIAGE;
   if (isStrandedOpenVerdict(issue, options)) return STRAND_SHAPE_OPEN_VERDICT;
   return null;

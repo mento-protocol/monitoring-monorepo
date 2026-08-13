@@ -2645,6 +2645,66 @@ await test("a comment posted since the snapshot withdraws the stub from the swee
   );
 });
 
+// Withdrawal by removing `sentry-triage` itself. Stage B's selector wants that
+// label AND `sentry:needs-triage`, so re-queuing a stub that lost the first one
+// sheds its verdict and STILL leaves it unselectable — strictly destructive.
+// Both arms revalidate membership, and for the open shape it is the ONLY
+// withdrawal gesture available, since that shape has no `sentry:needs-triage`
+// left to remove.
+for (const withdrawn of [
+  {
+    name: "closed-and-needing-triage",
+    stub: {
+      number: 42,
+      title: buildQueueTitle("X-42", "web", "error"),
+      state: "CLOSED",
+      labels: ["sentry-triage", NEEDS_TRIAGE_LABEL],
+    },
+    survives: NEEDS_TRIAGE_LABEL,
+  },
+  {
+    name: "open-and-verdict-labeled",
+    stub: strandedOpenStub(["sentry:verdict-upstream"]),
+    survives: "sentry:verdict-upstream",
+  },
+]) {
+  await test(`a stub withdrawn from the queue is not re-enrolled (${withdrawn.name})`, async () => {
+    const fake = makeFakeGitHub({ issues: [withdrawn.stub] });
+    const staleSnapshot = fake.snapshot();
+    // The withdrawal lands after the snapshot, before the sweep reaches it.
+    fake.get(42).labels = fake
+      .get(42)
+      .labels.filter((name) => name !== "sentry-triage");
+
+    const counts = await runIngest(
+      { repo: REPO, trackerIssue: 1282 },
+      ingestDeps(fake, {
+        listQueueIssues: async () => staleSnapshot,
+        now: () => SWEEP_NOW,
+      }),
+    );
+
+    assertEqual(counts.recovered, 0);
+    assertEqual(counts.recoveredOpenVerdict, 0);
+    assertEqual(counts.errors, 0);
+    // Read, then nothing — declining costs one request and no write.
+    assertDeepEqual(
+      fake.calls.map((args) => args[1]),
+      ["view"],
+    );
+    const issue = fake.get(42);
+    assert(
+      issue.labels.includes(withdrawn.survives),
+      `the withdrawn stub must keep ${withdrawn.survives}: ${JSON.stringify(issue.labels)}`,
+    );
+    assert(
+      !issue.labels.includes("sentry-triage"),
+      "nothing may put the queue label back",
+    );
+    assertDeepEqual(issue.comments, []);
+  });
+}
+
 await test("an open-verdict recovery whose shed fails is loud, not silently selectable", async () => {
   // The OPEN shape has no cover the closed one has: restoring the queue label
   // makes the stub selectable IMMEDIATELY, so a shed that never lands would hand
