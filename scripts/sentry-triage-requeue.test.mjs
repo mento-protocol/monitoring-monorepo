@@ -22,7 +22,11 @@ import {
   REGRESSION_PREFIX,
   VERDICT_MARKER,
 } from "./sentry-triage-project-core.mjs";
-import { NEEDS_TRIAGE_LABEL } from "./sentry-triage-queue-contract.mjs";
+import {
+  NEEDS_TRIAGE_LABEL,
+  STRAND_SHAPE_CLOSED_NEEDS_TRIAGE,
+  STRAND_SHAPE_OPEN_VERDICT,
+} from "./sentry-triage-queue-contract.mjs";
 import {
   buildRegressedComment,
   buildRequeueAddLabelArgs,
@@ -1186,9 +1190,11 @@ await test("every note this chokepoint posts reads as intent, never as a complet
   // a write which did not land is a wrong attestation, so the wording has to be
   // true under every outcome — including the one where every write failed.
   //
-  // The stranded-recovery note is the same shape from ingest's side (its reopen
-  // follows the note), so both are pinned here rather than only the one that
-  // was flagged.
+  // The stranded-recovery notes are the same shape from ingest's side (its
+  // reopen follows the note), so all of them are pinned here rather than only
+  // the one that was flagged. There is one per stranded SHAPE (#1817), and the
+  // open-verdict note is posted while the label writes it describes can still
+  // fail, exactly like the closed one.
   const completedClaims = [
     "have been shed",
     "has been shed",
@@ -1199,7 +1205,15 @@ await test("every note this chokepoint posts reads as intent, never as a complet
   ];
   const notes = [
     ...REQUEUE_REASONS.map((reason) => [reason, buildRequeueNote(reason)]),
-    ["stranded-recovery", buildStrandedRecoveryComment()],
+    ...[STRAND_SHAPE_CLOSED_NEEDS_TRIAGE, STRAND_SHAPE_OPEN_VERDICT].map(
+      (shape) => [
+        `stranded-recovery/${shape}`,
+        buildStrandedRecoveryComment(shape),
+      ],
+    ),
+    // The default argument is the closed pairing, and a caller that names no
+    // shape must still get a real note rather than a throw.
+    ["stranded-recovery/default", buildStrandedRecoveryComment()],
   ];
   for (const [label, note] of notes) {
     for (const claim of completedClaims) {

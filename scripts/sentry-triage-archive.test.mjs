@@ -1401,7 +1401,12 @@ await test("the non-requeuing refusals must NOT fence the prior verdict", () => 
   }
 });
 
-await test("isSelectableForTriage is exactly Stage B's selector pair", () => {
+await test("isSelectableForTriage is exactly Stage B's selector, all three parts", () => {
+  // `.github/workflows/sentry-triage-agent.yml` selects on
+  // `--label sentry-triage --label sentry:needs-triage --state open`. This
+  // predicate is the end-state test every verify-end-state re-queue is judged
+  // by, so anything it omits is something a re-queue can report as success while
+  // Stage B never sees the stub (#1817).
   const ok = {
     state: "OPEN",
     labels: ["sentry-triage", "sentry:needs-triage"],
@@ -1410,6 +1415,12 @@ await test("isSelectableForTriage is exactly Stage B's selector pair", () => {
   assertEqual(isSelectableForTriage({ ...ok, state: "CLOSED" }), false);
   assertEqual(
     isSelectableForTriage({ ...ok, labels: ["sentry-triage"] }),
+    false,
+  );
+  // Queue membership is the third part, and the one a human removes to retire a
+  // stub for good — a re-queue must never call that selectable.
+  assertEqual(
+    isSelectableForTriage({ ...ok, labels: ["sentry:needs-triage"] }),
     false,
   );
   assertEqual(isSelectableForTriage({}), false);
@@ -1854,7 +1865,10 @@ await test("a genuinely failing reopen strands the stub and fails RED", async ()
   assert(errorLine.includes("STRANDED"), "says the stub is stranded");
   assert(errorLine.includes("state=CLOSED"), "names the observed state");
   assert(
-    errorLine.includes("Reopen it by hand"),
+    // The verifier is shared by three callers now (#1817), so its instruction
+    // is caller-neutral: what to restore, not which refusal produced the stub.
+    errorLine.includes("restore it by hand") &&
+      errorLine.includes("reopen it if it is closed"),
     "tells the operator what to do",
   );
 });

@@ -73,6 +73,17 @@ export function truncateTitle(text, maxLen = 90) {
 // list every label inline).
 export const NEEDS_TRIAGE_LABEL = "sentry:needs-triage";
 
+// DURABLE QUEUE MEMBERSHIP. Stage B's selector requires this label AND
+// `sentry:needs-triage`, so a stub without it is invisible to triage no matter
+// what else it carries — which makes removing it the strongest withdrawal
+// gesture this namespace has, and the only one available for a stub that has no
+// `sentry:needs-triage` left to remove. Anything that re-enrolls a stub must
+// therefore check it against LIVE state first. `scripts/sentry-autofix-queue-io.mjs`
+// keeps its own `SENTRY_TRIAGE_QUEUE_LABEL` twin for its search strings, and the
+// LABEL_DEFINITIONS entry below keeps its literal because the bootstrap must
+// list every label inline.
+export const QUEUE_LABEL = "sentry-triage";
+
 // Idempotently created/updated on every run (`gh label create --force`).
 export const LABEL_DEFINITIONS = [
   {
@@ -215,6 +226,29 @@ export const ARCHIVED_LABEL = "sentry:archived";
 export const VERDICT_LABELS = LABEL_DEFINITIONS.map(
   (label) => label.name,
 ).filter((name) => name.startsWith("sentry:verdict-"));
+
+// The one verdict whose stub RESTS open. `.github/workflows/sentry-triage-agent.yml`
+// closes every other bucket in its close step; `needs-human` exits that step
+// early and leaves the stub open for a human to answer. So open +
+// `sentry:verdict-needs-human` + no `sentry:needs-triage` is a resting state,
+// not a strand, and anything sweeping the open-but-unselectable shape must skip
+// it — re-queuing it would strip the question a human was asked and re-triage
+// the stub on a loop.
+export const NEEDS_HUMAN_VERDICT_LABEL = "sentry:verdict-needs-human";
+
+// The verdicts whose stub is SUPPOSED to end up closed. A stub still open on one
+// of these, with no `sentry:needs-triage`, has a round that never settled it —
+// the shape ingest's stranded sweep repairs (issue #1817).
+export const SETTLING_VERDICT_LABELS = VERDICT_LABELS.filter(
+  (name) => name !== NEEDS_HUMAN_VERDICT_LABEL,
+);
+
+// The two unselectable shapes ingest's stranded sweep repairs. The PREDICATES
+// live with the sweep (`strandedShapeOf` in scripts/sentry-triage-ingest.mjs);
+// the names live here because the re-queue chokepoint renders a note per shape
+// and must not import ingest — ingest imports it.
+export const STRAND_SHAPE_CLOSED_NEEDS_TRIAGE = "closed-needs-triage";
+export const STRAND_SHAPE_OPEN_VERDICT = "open-verdict";
 
 // Labels a re-queue must shed: the stale verdict labels, the stale
 // `sentry:projected` marker (ADR 0038), the stale autofix markers
