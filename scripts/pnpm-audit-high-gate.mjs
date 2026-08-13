@@ -28,9 +28,12 @@ const ADVISORY_EXCEPTIONS = {
   // archives from Google's CDN in dev/CI — never untrusted zips at runtime.
   // Remove the moment upstream ships a fix.
   "GHSA-jmr9-qjv8-65gv": {
-    pathPattern: /(@lhci\/cli|lighthouse|puppeteer)/,
-    reason:
-      "unpatched upstream; only reachable via the LHCI/puppeteer toolchain",
+    // Anchored on the @lhci/cli path segment specifically: a runtime
+    // dependency that pulls puppeteer directly (service>puppeteer>…) must
+    // still fail the gate — only the Lighthouse CI toolchain route is the
+    // dev/CI-only case this exception describes.
+    pathPattern: /(^|>)@lhci\/cli>/,
+    reason: "unpatched upstream; only reachable via the @lhci/cli toolchain",
   },
 };
 
