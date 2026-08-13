@@ -51,6 +51,15 @@ const CLEAN_REVIEW_COMPATIBILITY = new Map([
       headRefOid: "5ce1cad0371551aff0e8b68867a29bb5d2736bf4",
     },
   ],
+  [
+    "3816022eb21a2e41e0617c719f6daedc8c1c5c282b4b1b2010e4b739b0c3f1c7",
+    {
+      author: "claude[bot]",
+      prNumber: "1837",
+      commentId: "5281908631",
+      headRefOid: "7d982e05a0256d73d0d7aeafc485dfad338e63ce",
+    },
+  ],
 ]);
 
 function normalizedReviewTitle(value) {
