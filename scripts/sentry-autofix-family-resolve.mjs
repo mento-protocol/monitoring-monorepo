@@ -22,9 +22,11 @@ import {
   listHandledShortIds,
   LOCAL_SENTRY_PROJECT,
   MAX_HANDLED_ID_QUERIES,
+} from "./sentry-autofix-queue-io.mjs";
+import {
   MAX_REVERSE_VERIFY_READS,
   reverseVerifyFamilies,
-} from "./sentry-autofix-queue-io.mjs";
+} from "./sentry-autofix-reverse-verify.mjs";
 
 // Reverse-verify fixpoint ceiling (PR #1810 bug B). A newly discovered blocker
 // defers a finalist, which promotes the next candidate, which has its own family

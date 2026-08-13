@@ -12,11 +12,13 @@ import {
   isOwnHeadPr,
   LOCAL_SENTRY_PROJECT,
   MAX_HANDLED_ID_QUERIES,
+  openAutofixPrExists,
+} from "./sentry-autofix-queue-io.mjs";
+import {
   MAX_REVERSE_PROBE_QUERIES,
   MAX_REVERSE_VERIFY_READS,
-  openAutofixPrExists,
   REVERSE_SEARCH_LIMIT,
-} from "./sentry-autofix-queue-io.mjs";
+} from "./sentry-autofix-reverse-verify.mjs";
 import {
   isValidShortId,
   MAX_DUPLICATE_LOOKUPS,
