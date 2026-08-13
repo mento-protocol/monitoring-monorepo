@@ -107,6 +107,12 @@ trimmed build context:
       Admin only on the service-owned `staging.<project>.appspot.com` bucket.
       Do not widen them to project scope or the Terraform-managed source
       buckets.
+- [ ] After an approved apply changes App Engine staging IAM, dispatch the Aegis
+      App Engine workflow from clean current `main` and require success on that
+      exact head. Verify the new Aegis version serves 100% of traffic,
+      `/metrics` responds with a new `process_start_time_seconds`, and
+      `lastUpdatedAt` advances; then rerun the full platform plan and require no
+      changes.
 - [ ] Use `CLOUD_LOGGING_ONLY` unless a retained log bucket exists.
 
 ## 5. IAM ordering + dependencies
