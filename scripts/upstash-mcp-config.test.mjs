@@ -564,7 +564,12 @@ test("workspace dependency and lockfile pin the reviewed artifact", async () => 
   assert.equal(packageJson.devDependencies[PACKAGE_NAME], PACKAGE_VERSION);
   assert.equal(packageJson.devDependencies.esbuild, ESBUILD_VERSION);
   assert.equal(importer.specifier, PACKAGE_VERSION);
-  assert.equal(importer.version, PACKAGE_VERSION);
+  // pnpm suffixes the resolved version with a peer-resolution key (e.g.
+  // "0.2.4(supports-color@5.5.0)") when other workspace dependencies make a
+  // transitive peer resolvable. The suffix changes graph keying, not which
+  // artifact installs — the integrity assertion below pins the bytes, and the
+  // rebuilt runtime hash pins the dependency closure.
+  assert.equal(importer.version.split("(")[0], PACKAGE_VERSION);
   assert.equal(
     lockfile.importers["."].devDependencies.esbuild.specifier,
     ESBUILD_VERSION,

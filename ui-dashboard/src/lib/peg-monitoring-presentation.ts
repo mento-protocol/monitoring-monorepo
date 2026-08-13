@@ -14,7 +14,6 @@ import {
   type SourceSelection,
 } from "./peg-monitoring-presentation-safety";
 
-export type { PegPresentationTone } from "./peg-monitoring-presentation-safety";
 type PegThresholdTone = PegPresentationTone | "uncertain";
 
 export type PegAssetPresentation = {

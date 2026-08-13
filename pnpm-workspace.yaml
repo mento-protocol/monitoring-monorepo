@@ -78,7 +78,11 @@ packageConfigs:
     saveExact: true
 
 overrides:
-  "envio>react": 19.2.6
+  # The Envio CLI renders its terminal UI with Ink. Its react-dom arrives as a
+  # peer of @rescript/react and resolves from the hoisted copy, so this pin must
+  # track the dashboard's react version or react-dom's own `react: ^x` peer
+  # breaks inside envio's subtree.
+  "envio>react": 19.2.8
   # GHSA-f88m-g3jw-g9cj: stable Next 16.2.x still requests sharp ^0.34.5.
   # Remove once the supported stable Next line selects sharp >=0.35.0.
   "sharp@<0.35.0": 0.35.3

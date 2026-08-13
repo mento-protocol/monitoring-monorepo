@@ -1,80 +1,79 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
+import { Provider as TooltipProvider } from "@radix-ui/react-tooltip";
 import { ErrorBox } from "@/components/feedback";
 import { usePegMonitoring } from "@/hooks/use-peg-monitoring";
 import { classifyPegMonitoringState } from "@/lib/peg-monitoring";
 import { presentPegMonitoring } from "@/lib/peg-monitoring-presentation";
-import { PegMonitoringEvidence } from "./peg-monitoring-evidence";
+import { BoardHeader } from "./_components/board-header";
+import { BoardTable } from "./_components/board-table";
+import { RecentAlerts } from "./_components/recent-alerts";
+import { formatAge } from "./_lib/peg-board-format";
+import { PEG_BOARD_VARS } from "./_lib/peg-board-model";
 import { PegMonitoringLoading } from "./peg-monitoring-loading";
-import { PegMonitoringScorecard } from "./peg-monitoring-scorecard";
 
-function Header(): React.JSX.Element {
-  return (
-    <header className="space-y-3">
-      <div>
-        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-400">
-          Peg monitoring
-        </p>
-        <h1 className="mt-2 text-3xl font-semibold tracking-tight text-white">
-          Peg status
-        </h1>
-      </div>
-      <p className="max-w-3xl text-sm leading-6 text-slate-400">
-        See whether a monitored asset is off peg or nearing a warning threshold
-        from its current measurement and supporting evidence.
-      </p>
-    </header>
-  );
-}
+/**
+ * The board opts into the Mento design system locally: `dark` activates the
+ * package's token block, AspektaVF comes from `theme.css`'s `@font-face`, and
+ * the custom properties cover the mockup colours the token set has no name for.
+ * Scoping it here keeps every other route on the app's Geist/slate look.
+ */
+const boardStyle: CSSProperties = {
+  fontFamily: '"AspektaVF", var(--font-geist-sans), sans-serif',
+  ...PEG_BOARD_VARS,
+};
+
+const AGE_TICK_MS = 10_000;
 
 export function PegMonitoringPageClient(): React.JSX.Element {
   const result = usePegMonitoring();
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 10_000);
+    const timer = window.setInterval(() => setNow(Date.now()), AGE_TICK_MS);
     return () => window.clearInterval(timer);
   }, []);
   const nowMs = Math.max(now, Date.now());
-  const state = classifyPegMonitoringState({
-    ...result,
-    nowMs,
-  });
+  const state = classifyPegMonitoringState({ ...result, nowMs });
+  const confirmed = state.kind === "current" || state.kind === "stale";
   const usesPreviousPolicy =
-    (state.kind === "current" || state.kind === "stale") &&
+    confirmed &&
     (state.data.policySlot === "previous" ||
       state.data.producedPolicyVersion !==
         state.data.approvedActivePolicyVersion);
-  const presentation =
-    state.kind === "current" || state.kind === "stale"
-      ? presentPegMonitoring(state.data, {
-          nowMs,
-          packageIsStale: state.kind === "stale",
-          usesPreviousPolicy,
-        })
-      : null;
+  const presentation = confirmed
+    ? presentPegMonitoring(state.data, {
+        nowMs,
+        packageIsStale: state.kind === "stale",
+        usesPreviousPolicy,
+      })
+    : null;
   return (
-    <main data-testid="peg-monitoring-page" className="space-y-8">
-      <Header />
-      {state.kind === "loading" ? (
-        <PegMonitoringLoading />
-      ) : state.kind === "unavailable" ? (
-        <ErrorBox message="Peg monitoring is unavailable. No confirmed decision package can be shown." />
-      ) : (
-        <div className="space-y-6">
-          <PegMonitoringScorecard
-            presentation={presentation!}
-            ageMs={state.ageMs}
-            stale={state.kind === "stale"}
-            usesPreviousPolicy={usesPreviousPolicy}
-          />
-          <PegMonitoringEvidence
-            state={state}
-            presentation={presentation!}
-            nowMs={nowMs}
-          />
-        </div>
-      )}
-    </main>
+    <TooltipProvider delayDuration={120}>
+      <main
+        data-testid="peg-monitoring-page"
+        className="dark bg-background p-4 text-foreground sm:p-7"
+        style={boardStyle}
+      >
+        {state.kind === "loading" ? (
+          <PegMonitoringLoading />
+        ) : state.kind === "unavailable" || presentation === null ? (
+          <ErrorBox message="Peg monitoring is unavailable. No confirmed decision package can be shown." />
+        ) : (
+          <>
+            <BoardHeader presentation={presentation} />
+            <BoardTable
+              presentation={presentation}
+              nowMs={nowMs}
+              producedAt={state.data.producedAt}
+              stale={state.kind === "stale"}
+              previousPolicy={usesPreviousPolicy}
+              ageLabel={formatAge(state.ageMs)}
+            />
+            <RecentAlerts nowMs={nowMs} />
+          </>
+        )}
+      </main>
+    </TooltipProvider>
   );
 }
