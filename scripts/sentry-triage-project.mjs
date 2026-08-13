@@ -1155,17 +1155,30 @@ export function parseArgs(argv, env = process.env) {
         "--prior-verdict-comment is only consumed by --parse-only; pass both or neither",
       );
     }
-    // Label self-heal is its own mode: it touches no stub, so it takes no
-    // issue. Combining it with a resolving mode would hide which one the caller
-    // meant — and the label step runs the two as separate, ordered invocations
-    // on purpose (ensure, THEN edit), so nothing legitimately needs both.
-    if (
-      options.ensureLabels !== null &&
-      (options.batch || options.parseOnly || options.priorVerdicts)
-    ) {
-      throw new Error(
-        "--ensure-labels is a standalone mode; run it in its own invocation",
-      );
+    // Label self-heal is its own mode: it touches no stub and resolves no
+    // verdict, so an invocation that also asks for one of those gets neither
+    // silently. The DEFAULT mode is the one to be careful about — it is not a
+    // flag at all, just `--issue` plus an optional `--verdict` cross-check — so
+    // a guard that only rejected the FLAGGED modes would let
+    // `--issue 5 --verdict code-fix --ensure-labels …` ensure the labels, skip
+    // the projection entirely, and exit 0 reporting success for a no-op. Every
+    // mode-bearing input is therefore rejected by name. The label step runs
+    // ensure and edit as separate, ordered invocations on purpose, so nothing
+    // legitimately needs both.
+    if (options.ensureLabels !== null) {
+      const alsoRequested = [
+        options.batch && "--batch",
+        options.parseOnly && "--parse-only",
+        options.priorVerdicts && "--prior-verdicts",
+        issuesRaw !== null && "--issues",
+        options.queueIssue !== null && "--issue",
+        options.expectedVerdict !== null && "--verdict",
+      ].filter(Boolean);
+      if (alsoRequested.length > 0) {
+        throw new Error(
+          `--ensure-labels is a standalone mode; run it in its own invocation (also passed: ${alsoRequested.join(", ")})`,
+        );
+      }
     }
     if (options.batch || options.priorVerdicts) {
       options.queueIssues = parseIssueNumbers(issuesRaw);

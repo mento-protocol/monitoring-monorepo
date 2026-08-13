@@ -83,19 +83,20 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
-function assertThrows(fn, pattern) {
+function assertThrows(fn, pattern, label = "") {
+  const suffix = label ? ` (${label})` : "";
   try {
     fn();
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (!pattern.test(message)) {
-      throw new Error(`expected ${message} to match ${pattern}`, {
+      throw new Error(`expected ${message} to match ${pattern}${suffix}`, {
         cause: err,
       });
     }
     return;
   }
-  throw new Error("expected function to throw");
+  throw new Error(`expected function to throw${suffix}`);
 }
 
 async function assertRejects(promise, pattern) {
@@ -3581,6 +3582,40 @@ await test("parseArgs takes --ensure-labels as a standalone mode", () => {
   assertThrows(
     () =>
       parseArgs(["--ensure-labels", "sentry:needs-triage", "--parse-only"], {}),
+    /standalone mode/,
+  );
+});
+
+await test("parseArgs refuses --ensure-labels alongside the DEFAULT projection mode", () => {
+  // The default mode carries no flag — it is `--issue`, optionally with the
+  // `--verdict` cross-check — so a guard that only rejected the FLAGGED modes
+  // would run the ensure, skip the projection entirely, and exit 0 reporting
+  // success for a no-op. Every mode-bearing input must be named.
+  for (const argv of [
+    ["--issue", "5", "--ensure-labels", "sentry:needs-triage"],
+    [
+      "--issue",
+      "5",
+      "--verdict",
+      "code-fix",
+      "--ensure-labels",
+      "sentry:needs-triage",
+    ],
+    ["--verdict", "code-fix", "--ensure-labels", "sentry:needs-triage"],
+    ["--issues", "[5]", "--ensure-labels", "sentry:needs-triage"],
+    ["--batch", "--issues", "[5]", "--ensure-labels", "sentry:needs-triage"],
+    ["--prior-verdicts", "--ensure-labels", "sentry:needs-triage"],
+  ]) {
+    assertThrows(
+      () => parseArgs(argv, {}),
+      /standalone mode/,
+      `expected \`${argv.join(" ")}\` to be refused`,
+    );
+  }
+  // A non-numeric --issue is still a requested projection, not an absent one.
+  assertThrows(
+    () =>
+      parseArgs(["--issue", "x", "--ensure-labels", "sentry:needs-triage"], {}),
     /standalone mode/,
   );
 });

@@ -1805,6 +1805,25 @@ await test("the verdict step self-heals every label its edit names, BEFORE the e
       .split(",")
       .map((name) => name.trim())
       .filter(Boolean);
+  // Guarded like the --parse-only call above it: under `set -e` an unguarded
+  // node call aborts the step with no annotation naming which call died. It
+  // deliberately does NOT re-queue — nothing has been written yet, so
+  // sentry:needs-triage is still on the stub and it stays selectable. The
+  // compensation count pinned in the next test is what holds that line.
+  assert(
+    /^\s*if ! node scripts\/sentry-triage-project\.mjs\s+--ensure-labels/.test(
+      ensureLine,
+    ),
+    `the label ensure must be guarded, got: ${ensureLine?.trim()}`,
+  );
+  const ensureFailureBranch = verdictJob.slice(
+    ensureAt,
+    verdictJob.indexOf("gh issue edit"),
+  );
+  assert(
+    /echo "::error::[^"]*#\$\{QUEUE_ISSUE_NUMBER\}/.test(ensureFailureBranch),
+    "the ensure's failure branch must name the issue in an ::error:: annotation",
+  );
   const ensured = new Set(
     splitNames(/--ensure-labels\s+"([^"]*)"/.exec(ensureLine)[1]),
   );

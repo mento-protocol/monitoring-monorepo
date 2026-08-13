@@ -839,10 +839,21 @@ jobs:
           # temp file so it stays out of this step's log; what a reader needs —
           # a create that failed, a name missing from the definitions — is a
           # stderr warning annotation.
-          node scripts/sentry-triage-project.mjs \
-            --ensure-labels "${label},${shed},sentry:needs-triage" \
-            --repo "${GITHUB_REPOSITORY}" \
-            > "${RUNNER_TEMP}/verdict-label-ensure.json"
+          #
+          # Guarded like the --parse-only call above, and for the same reason: a
+          # bare abort under set -e says nothing about which call died. It does
+          # NOT re-queue, deliberately. Nothing has been written yet — the edit
+          # below has not run — so `sentry:needs-triage` is still on the stub and
+          # it stays selectable for the next scheduled run without any
+          # compensation, exactly like the --parse-only refusal. The re-queue
+          # window opens at the edit, not here.
+          if ! node scripts/sentry-triage-project.mjs \
+              --ensure-labels "${label},${shed},sentry:needs-triage" \
+              --repo "${GITHUB_REPOSITORY}" \
+              > "${RUNNER_TEMP}/verdict-label-ensure.json"; then
+            echo "::error::Could not self-heal the label set for issue #${QUEUE_ISSUE_NUMBER} (see the log above); refusing to attempt the verdict edit against a label set that may not exist. Nothing was written, so sentry:needs-triage is still on the stub and the next scheduled run retries it."
+            exit 1
+          fi
           if ! gh issue edit "${QUEUE_ISSUE_NUMBER}" \
             --repo "${GITHUB_REPOSITORY}" \
             --remove-label "sentry:needs-triage,${shed}" \
