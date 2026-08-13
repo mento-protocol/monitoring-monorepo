@@ -125,6 +125,18 @@ export {
   VALID_FIX_SCOPES,
 } from "./sentry-triage-text.mjs";
 
+// The needs-human ESCALATION contract, split into
+// scripts/sentry-triage-escalation-contract.mjs when this file reached the
+// 1000-line hard cap. It judges already-parsed, already-neutralized verdict
+// fields and imports only the text layer, so it adds no cycle and no runtime
+// dependency; re-exported here so the verdict contract stays one import surface.
+export {
+  escalationCompletenessRefusal,
+  isDecisionReadyQuestion,
+  MIN_DECISION_BRANCHES,
+  MIN_HOW_TO_CHECK_STEPS,
+} from "./sentry-triage-escalation-contract.mjs";
+
 // `export … from` re-exports without binding the names locally, and the parsing
 // and validation below use several of them.
 import {
@@ -137,6 +149,10 @@ import {
   stripYamlQuotes,
   truncate,
 } from "./sentry-triage-text.mjs";
+import {
+  escalationCompletenessRefusal,
+  isDecisionReadyQuestion,
+} from "./sentry-triage-escalation-contract.mjs";
 
 // ---------------------------------------------------------------------------
 // Pure parsing: queue title, permalink, verdict comment (richer than digest).
@@ -818,56 +834,6 @@ export function priorVerdictRefusal(priorToken, selectedUrl) {
     : `the newest usable verdict comment (${selectedId}) predates the one recorded before this triage round (${priorToken})`;
 }
 
-// Blatant non-decision placeholders that defeat the point of a needs-human
-// escalation — "please look" is not a decision. This is a DETERMINISTIC
-// BACKSTOP against the laziest bypasses, not a full decision-quality judge (a
-// parser can't reliably assess that — the prompt makes decision quality the
-// agent's responsibility). Matched EXACTLY against the normalized question
-// (lowercased, trailing punctuation stripped) so a real "decide X or Y" that
-// merely CONTAINS one of these words is never falsely rejected.
-const NON_DECISION_QUESTIONS = new Set([
-  "",
-  "?",
-  "look",
-  "look into this",
-  "take a look",
-  "please look",
-  "please look into this",
-  "please investigate",
-  "investigate",
-  "investigate this",
-  "needs investigation",
-  "needs looking into",
-  "needs human",
-  "needs human review",
-  "needs review",
-  "review",
-  "review this",
-  "check this",
-  "tbd",
-  "todo",
-  "n/a",
-  "na",
-  "none",
-  "unknown",
-  "unsure",
-]);
-
-/** Normalize a human_question for the placeholder check: single-line, lowered,
- * trailing sentence punctuation stripped. */
-function normalizeHumanQuestion(text) {
-  return sanitizeFreeText(text)
-    .toLowerCase()
-    .replace(/[.!?]+$/, "")
-    .trim();
-}
-
-/** True when a needs-human `human_question` is a real decision request (present
- * and not a blatant non-decision placeholder). */
-export function isDecisionReadyQuestion(text) {
-  return !NON_DECISION_QUESTIONS.has(normalizeHumanQuestion(text));
-}
-
 /**
  * The SINGLE authoritative verdict resolution, shared by the workflow's label
  * step (`--parse-only`) and the projection flow: newest marker comment,
@@ -923,16 +889,19 @@ export function resolveVerdict(issue, queueIssueNumber, options = {}) {
         `needs-human verdict on issue #${queueIssueNumber} has no decision-ready 'human_question' (missing or a non-decision placeholder like "please look"); a needs-human escalation must name the exact question/decision a human must answer. Leaving sentry:needs-triage in place for re-triage.`,
       );
     }
-    // A decision-ready escalation also needs the INSTRUCTION half: at least one
-    // how_to_check step AND one decision_branch that SURVIVE neutralization —
-    // sanitizeBriefList drops control-only items that would render empty, so a
-    // question with no real checks/dispositions is rejected (#1769 rounds 11, 15).
-    if (
-      sanitizeBriefList(parsed.howToCheck).length === 0 ||
-      sanitizeBriefList(parsed.decisionBranches).length === 0
-    ) {
+    // A decision-ready escalation also needs the INSTRUCTION half: the steps
+    // that answer the question and one branch per answer, counted AFTER
+    // neutralization — sanitizeBriefList drops control-only items that would
+    // render empty, so the gate and the renderer judge the same items (#1769
+    // rounds 11, 15; the two-branch requirement is #1782). The rule itself lives
+    // in the escalation contract; this call site owns only the parsed fields.
+    const incomplete = escalationCompletenessRefusal({
+      howToCheckCount: sanitizeBriefList(parsed.howToCheck).length,
+      decisionBranchCount: sanitizeBriefList(parsed.decisionBranches).length,
+    });
+    if (incomplete) {
       throw new Error(
-        `needs-human verdict on issue #${queueIssueNumber} is an incomplete brief: it must carry at least one 'how_to_check' step AND at least one 'decision_branch' (a question with no checks or dispositions is not decision-ready). Leaving sentry:needs-triage in place for re-triage.`,
+        `needs-human verdict on issue #${queueIssueNumber} is an incomplete brief: ${incomplete}. Leaving sentry:needs-triage in place for re-triage.`,
       );
     }
   }

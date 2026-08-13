@@ -37,10 +37,15 @@ import {
   requeueQueueStub,
 } from "./sentry-triage-requeue.mjs";
 import {
-  buildBriefClearRecoveryComment,
+  buildRequeueNote,
+  isTerminalStub,
   parseRequeueArgs,
-  runClearFailureRequeue,
-} from "./sentry-triage-brief-clear-recovery.mjs";
+  REQUEUE_REASON_BRIEF_CLEAR,
+  REQUEUE_REASON_CLOSE_FAILURE,
+  REQUEUE_REASON_VERDICT_UNSETTLED,
+  REQUEUE_REASONS,
+  runWorkflowRequeue,
+} from "./sentry-triage-workflow-requeue.mjs";
 
 let passed = 0;
 let failed = 0;
@@ -670,6 +675,115 @@ await test("verify-end-state fails RED on a marker the shed left behind", async 
   );
 });
 
+await test("a reported add failure still gets the markers shed once selectability is back", async () => {
+  // THE SEQUENCING HAZARD. The add and the shed share one try, so an add that
+  // REPORTS failure jumps past the shed — never attempted, not merely failed.
+  // `ensureSelectableForTriage` then re-adds the label and the stub is
+  // SELECTABLE again, which is the worst place to stop: a stranded stub is
+  // inert, but a selectable one still wearing `sentry:approved-archive` hands
+  // the next archive dispatch a human approval this re-queue was meant to
+  // consume, and its autofix markers suppress the next fix attempt.
+  const live = {
+    state: "OPEN",
+    labels: [
+      "sentry-triage",
+      "sentry:verdict-upstream",
+      "sentry:projected",
+      "sentry:approved-archive",
+      "sentry:fix-pr-opened",
+    ],
+    comments: [],
+  };
+  let addAttempts = 0;
+  const w = makeWriter({
+    failOn: (args) => {
+      // Only the chokepoint's OWN add reports failure; the verifier's retry
+      // succeeds. That is the transient case this must self-heal.
+      if (args.includes("--add-label")) {
+        addAttempts += 1;
+        return addAttempts === 1 ? "gh issue edit: 502" : null;
+      }
+      return null;
+    },
+  });
+  const writeGh = async (args) => {
+    const out = await w.writeGh(args);
+    if (args.includes("--add-label"))
+      for (const n of args[args.indexOf("--add-label") + 1].split(","))
+        if (!live.labels.includes(n)) live.labels.push(n);
+    if (args.includes("--remove-label")) {
+      const rm = new Set(args[args.indexOf("--remove-label") + 1].split(","));
+      live.labels = live.labels.filter((n) => !rm.has(n));
+    }
+    return out;
+  };
+
+  // No throw: the retry healed it, so the run is honest about being fine.
+  await requeueQueueStub(
+    { writeGh, readStub: async () => live },
+    {
+      repo: REPO,
+      issueNumber: 42,
+      cause: REQUEUE_CAUSE_BOOKKEEPING,
+      note: buildStrandedRecoveryComment(),
+      onFailure: REQUEUE_ON_FAILURE_VERIFY_END_STATE,
+      fallbackState: "OPEN",
+    },
+  );
+
+  assert(
+    w.calls.some((args) => args.includes("--remove-label")),
+    "the skipped shed must be re-attempted after selectability is restored",
+  );
+  assertDeepEqual(live.labels, ["sentry-triage", NEEDS_TRIAGE_LABEL]);
+  assert(
+    !live.labels.includes("sentry:approved-archive"),
+    "a consumed archive approval must never survive onto a selectable stub",
+  );
+});
+
+await test("a shed that never lands still fails RED rather than healing on paper", async () => {
+  // The retry is BOUNDED and the check still decides. A stub whose markers
+  // genuinely survive must stay loud — self-healing the transient case must not
+  // become quietly tolerating the persistent one.
+  const live = {
+    state: "OPEN",
+    labels: ["sentry-triage", NEEDS_TRIAGE_LABEL, "sentry:approved-archive"],
+    comments: [],
+  };
+  const w = makeWriter({
+    failOn: (args) =>
+      args.includes("--remove-label") ? "gh issue edit: 500" : null,
+  });
+  await assertRejects(
+    requeueQueueStub(
+      { writeGh: w.writeGh, readStub: async () => live },
+      {
+        repo: REPO,
+        issueNumber: 42,
+        cause: REQUEUE_CAUSE_BOOKKEEPING,
+        note: buildStrandedRecoveryComment(),
+        onFailure: REQUEUE_ON_FAILURE_VERIFY_END_STATE,
+        fallbackState: "OPEN",
+      },
+    ),
+    /these stale markers survived: sentry:approved-archive/,
+  );
+  const shedAttempts = w.calls.filter((args) =>
+    args.includes("--remove-label"),
+  ).length;
+  assert(
+    shedAttempts >= 1 && shedAttempts <= 2,
+    `the shed retry must be bounded, saw ${shedAttempts} attempts`,
+  );
+  // The note is intent-worded, so a stub left carrying markers is not sitting
+  // under a comment claiming they were removed.
+  assert(
+    !buildStrandedRecoveryComment().includes("have been shed"),
+    "the note must not attest a shed that did not land",
+  );
+});
+
 // ---------------------------------------------------------------------------
 // The stub BODY is nobody's to rewrite here.
 // ---------------------------------------------------------------------------
@@ -741,10 +855,11 @@ await test("no re-queue path rewrites the stub body (#1692)", async () => {
 });
 
 // ---------------------------------------------------------------------------
-// The clear-failure re-queue CLI (#1769 round 16). A needs-human stub
-// re-dispatched to a settled verdict whose brief CLEAR fails is left open,
-// verdict-labeled and off sentry:needs-triage — a strand no stage sees. This
-// entry drives it back to selectable through the chokepoint, OPEN-safe.
+// The workflow re-queue CLI (#1769 round 16, generalized in #1782). Every
+// compensating exit in .github/workflows/sentry-triage-agent.yml runs on a stub
+// that is open, verdict-labeled and off sentry:needs-triage — a strand no stage
+// sees. This entry drives it back to selectable through the chokepoint,
+// OPEN-safe, unless the stub went TERMINAL underneath the failing step.
 // ---------------------------------------------------------------------------
 
 function makeClearFailureGh(initial, { failOn = () => null } = {}) {
@@ -791,15 +906,16 @@ function makeClearFailureGh(initial, { failOn = () => null } = {}) {
   return { state, calls, runGh };
 }
 
-await test("runClearFailureRequeue restores needs-triage and sheds the verdict on an OPEN stub (#1769 round 16)", async () => {
+await test("runWorkflowRequeue restores needs-triage and sheds the verdict on an OPEN stub (#1769 round 16)", async () => {
   const gh = makeClearFailureGh({
     state: "OPEN",
     labels: ["sentry-triage", "sentry:verdict-upstream"],
   });
-  const result = await runClearFailureRequeue({
+  const result = await runWorkflowRequeue({
     runGh: gh.runGh,
     repo: REPO,
     issueNumber: 1731,
+    reason: REQUEUE_REASON_BRIEF_CLEAR,
   });
   assertEqual(result.requeued, true);
   assert(
@@ -813,7 +929,10 @@ await test("runClearFailureRequeue restores needs-triage and sheds the verdict o
   assertEqual(gh.state.state, "OPEN");
   // A bookkeeping note rides with the labels; it is NOT a regression fence.
   assertEqual(gh.state.comments.length, 1);
-  assertEqual(gh.state.comments[0], buildBriefClearRecoveryComment());
+  assertEqual(
+    gh.state.comments[0],
+    buildRequeueNote(REQUEUE_REASON_BRIEF_CLEAR),
+  );
   assert(
     !gh.state.comments[0].startsWith(REGRESSION_PREFIX),
     "the recovery note must never be a regression fence",
@@ -825,15 +944,25 @@ await test("runClearFailureRequeue restores needs-triage and sheds the verdict o
   );
 });
 
-await test("parseRequeueArgs requires a numeric issue and a repo", () => {
-  const ok = parseRequeueArgs(["--issue", "1731", "--repo", "o/r"]);
+await test("parseRequeueArgs requires a numeric issue, a repo and a known reason", () => {
+  const ok = parseRequeueArgs([
+    "--issue",
+    "1731",
+    "--repo",
+    "o/r",
+    "--reason",
+    REQUEUE_REASON_CLOSE_FAILURE,
+  ]);
   assertEqual(ok.issueNumber, 1731);
   assertEqual(ok.repo, "o/r");
+  assertEqual(ok.reason, REQUEUE_REASON_CLOSE_FAILURE);
   for (const bad of [
     [],
-    ["--issue", "x", "--repo", "o/r"],
-    ["--issue", "1731"],
-    ["--repo", "o/r"],
+    ["--issue", "x", "--repo", "o/r", "--reason", REQUEUE_REASON_CLOSE_FAILURE],
+    ["--issue", "1731", "--reason", REQUEUE_REASON_CLOSE_FAILURE],
+    ["--repo", "o/r", "--reason", REQUEUE_REASON_CLOSE_FAILURE],
+    ["--issue", "1731", "--repo", "o/r"],
+    ["--issue", "1731", "--repo", "o/r", "--reason", "made-up"],
     ["--bogus"],
   ]) {
     let threw = false;
@@ -857,10 +986,11 @@ await test("the advisory note failing never skips selectability verification (#1
         args[1] === "comment" ? "HTTP 500 server error" : null,
     },
   );
-  const result = await runClearFailureRequeue({
+  const result = await runWorkflowRequeue({
     runGh: gh.runGh,
     repo: REPO,
     issueNumber: 1731,
+    reason: REQUEUE_REASON_BRIEF_CLEAR,
   });
   assertEqual(result.requeued, true);
   assert(
@@ -889,13 +1019,230 @@ await test("a label restoration that cannot be verified selectable is a HARD fai
     },
   );
   await assertRejects(
-    runClearFailureRequeue({ runGh: gh.runGh, repo: REPO, issueNumber: 1731 }),
+    runWorkflowRequeue({
+      runGh: gh.runGh,
+      repo: REPO,
+      issueNumber: 1731,
+      reason: REQUEUE_REASON_BRIEF_CLEAR,
+    }),
     /not selectable for triage/,
   );
   assert(
     !gh.state.labels.includes(NEEDS_TRIAGE_LABEL),
     "the stub never became selectable (the add-label kept failing)",
   );
+});
+
+// ---------------------------------------------------------------------------
+// The TERMINAL guard (#1782, deferred from #1769 round 18). Every caller's
+// premise is a snapshot: the step saw a failure, then decided to compensate.
+// sentry-triage-archive.yml holds its own concurrency group, so the archive can
+// complete in between — and a re-queue would then shed `sentry:archived`, shed
+// the verdict labels and reopen a retry stub over an already-archived Sentry
+// issue that consumed a human approval. A close whose mutation LANDED and only
+// lost its response is the same shape from the other side.
+// ---------------------------------------------------------------------------
+
+await test("isTerminalStub reads CLOSED and sentry:archived, and nothing else", () => {
+  assertEqual(isTerminalStub({ state: "CLOSED", labels: [] }), true);
+  assertEqual(isTerminalStub({ state: "closed", labels: [] }), true);
+  assertEqual(
+    isTerminalStub({ state: "OPEN", labels: ["sentry:archived"] }),
+    true,
+  );
+  assertEqual(
+    isTerminalStub({
+      state: "OPEN",
+      labels: ["sentry:verdict-upstream", "sentry:approved-archive"],
+    }),
+    false,
+  );
+  assertEqual(isTerminalStub(), false);
+});
+
+await test("a stub ARCHIVED during the failing step is declined, not reopened (#1782)", async () => {
+  // The archive leg completed while the brief clear was failing: the stub still
+  // reads OPEN but carries the terminal `sentry:archived` marker. Re-queuing
+  // would shed it — and nothing here can un-archive the Sentry issue.
+  const gh = makeClearFailureGh({
+    state: "OPEN",
+    labels: ["sentry-triage", "sentry:verdict-upstream", "sentry:archived"],
+  });
+  const result = await runWorkflowRequeue({
+    runGh: gh.runGh,
+    repo: REPO,
+    issueNumber: 1731,
+    reason: REQUEUE_REASON_BRIEF_CLEAR,
+  });
+  assertEqual(result.requeued, false);
+  assertEqual(result.reason, "revalidated-away");
+  assert(
+    gh.state.labels.includes("sentry:archived"),
+    "the terminal archive marker must survive a declined re-queue",
+  );
+  assert(
+    !gh.state.labels.includes(NEEDS_TRIAGE_LABEL),
+    "a terminal stub must NOT be put back in the triage queue",
+  );
+  assertEqual(gh.state.comments.length, 0);
+  assert(
+    !gh.calls.some((a) => a[1] === "edit" || a[1] === "reopen"),
+    "a declined re-queue must perform no write at all",
+  );
+});
+
+await test("a close whose response was lost leaves the stub CLOSED, not re-queued (#1782)", async () => {
+  // The close-failure compensation's own worst case: the mutation landed and
+  // only its response was lost. Re-queuing would manufacture the
+  // closed-plus-needs-triage pairing no pipeline stage can see.
+  const gh = makeClearFailureGh({
+    state: "CLOSED",
+    labels: ["sentry-triage", "sentry:verdict-upstream"],
+  });
+  const result = await runWorkflowRequeue({
+    runGh: gh.runGh,
+    repo: REPO,
+    issueNumber: 1731,
+    reason: REQUEUE_REASON_CLOSE_FAILURE,
+  });
+  assertEqual(result.requeued, false);
+  assertEqual(gh.state.state, "CLOSED");
+  assert(
+    !gh.state.labels.includes(NEEDS_TRIAGE_LABEL),
+    "a settled stub must not be dragged back into the queue",
+  );
+});
+
+await test("a TRANSIENT revalidation read failure retries and re-queues normally (#1782)", async () => {
+  // The verdict step's first compensating exit runs BECAUSE a `gh` read on this
+  // stub just failed, and the compensation's opening act is another read of the
+  // same stub — correlated, usually transient. Unretried, that blip aborted the
+  // compensation and left the stub OPEN + verdict-labeled + not needs-triage: a
+  // shape no sweeper selects. One bounded retry is what closes that.
+  let views = 0;
+  const gh = makeClearFailureGh(
+    { state: "OPEN", labels: ["sentry-triage", "sentry:verdict-upstream"] },
+    {
+      failOn: (args) => {
+        if (args[1] !== "view") return null;
+        views += 1;
+        return views === 1 ? "HTTP 502 bad gateway" : null;
+      },
+    },
+  );
+  const result = await runWorkflowRequeue({
+    runGh: gh.runGh,
+    repo: REPO,
+    issueNumber: 1731,
+    reason: REQUEUE_REASON_VERDICT_UNSETTLED,
+  });
+  assertEqual(result.requeued, true);
+  assert(
+    gh.state.labels.includes(NEEDS_TRIAGE_LABEL),
+    "a stub whose revalidation read recovered must land back in the queue",
+  );
+  assert(
+    !gh.state.labels.includes("sentry:verdict-upstream"),
+    "the stale verdict must still be shed on the retried path",
+  );
+});
+
+await test("the terminal revalidation FAILS CLOSED: an unreadable stub is never re-queued (#1782)", async () => {
+  // The chokepoint's invariant 7 — a failed read is not permission to proceed.
+  // It propagates, the workflow reports the manual repair and the run goes red,
+  // rather than mutating a stub whose terminal state could not be observed. The
+  // retry above is BOUNDED, so a persistent outage still lands here.
+  const gh = makeClearFailureGh(
+    { state: "OPEN", labels: ["sentry-triage", "sentry:verdict-upstream"] },
+    { failOn: (args) => (args[1] === "view" ? "HTTP 502 bad gateway" : null) },
+  );
+  await assertRejects(
+    runWorkflowRequeue({
+      runGh: gh.runGh,
+      repo: REPO,
+      issueNumber: 1731,
+      reason: REQUEUE_REASON_BRIEF_CLEAR,
+    }),
+    /502/,
+  );
+  assert(
+    !gh.calls.some((a) => a[1] === "edit" || a[1] === "reopen"),
+    "no write may precede a terminal revalidation that could not be taken",
+  );
+  assertEqual(
+    gh.calls.filter((a) => a[1] === "view").length,
+    2,
+    "the revalidating read retries exactly once before failing closed",
+  );
+});
+
+await test("every note this chokepoint posts reads as intent, never as a completed write", () => {
+  // Ordering makes this a correctness question, not a style one. The note is
+  // posted AFTER the label edit — whose error is CAUGHT rather than thrown, so
+  // the sequence continues — and BEFORE the end-state verification. A note
+  // attesting that markers "have been shed" and `sentry:needs-triage` was
+  // "restored" can therefore sit on a stub the verifier then reports as still
+  // carrying stale markers, or as stranded. Operator-facing output that asserts
+  // a write which did not land is a wrong attestation, so the wording has to be
+  // true under every outcome — including the one where every write failed.
+  //
+  // The stranded-recovery note is the same shape from ingest's side (its reopen
+  // follows the note), so both are pinned here rather than only the one that
+  // was flagged.
+  const completedClaims = [
+    "have been shed",
+    "has been shed",
+    "were shed",
+    "have been restored",
+    "has been restored",
+    "restored, so",
+  ];
+  const notes = [
+    ...REQUEUE_REASONS.map((reason) => [reason, buildRequeueNote(reason)]),
+    ["stranded-recovery", buildStrandedRecoveryComment()],
+  ];
+  for (const [label, note] of notes) {
+    for (const claim of completedClaims) {
+      assert(
+        !note.includes(claim),
+        `the ${label} note claims a completed write ("${claim}"); phrase it as intent`,
+      );
+    }
+    assert(
+      /\bshedding\b/.test(note),
+      `the ${label} note must describe the shed as in progress`,
+    );
+  }
+  // …and the re-queue notes must say what they are putting back, so intent
+  // wording does not quietly become vagueness.
+  for (const reason of REQUEUE_REASONS) {
+    assert(
+      /\bis restoring\b/.test(buildRequeueNote(reason)),
+      `the ${reason} note must name the needs-triage restoration as intent`,
+    );
+  }
+});
+
+await test("every re-queue reason renders a distinct bookkeeping note; an unknown one refuses", () => {
+  // The reason is the ONLY thing a compensating exit declares, so an unnamed one
+  // must throw BEFORE any I/O rather than inherit some default shed policy.
+  const notes = REQUEUE_REASONS.map((reason) => buildRequeueNote(reason));
+  assertEqual(new Set(notes).size, REQUEUE_REASONS.length);
+  for (const note of notes) {
+    assert(
+      !note.startsWith(REGRESSION_PREFIX),
+      "a bookkeeping note must never be a regression fence",
+    );
+  }
+  for (const bad of [undefined, null, "", "sentry-evidence", "close_failure"]) {
+    let threw = false;
+    try {
+      buildRequeueNote(bad);
+    } catch {
+      threw = true;
+    }
+    assert(threw, `buildRequeueNote(${JSON.stringify(bad)}) must throw`);
+  }
 });
 
 if (failed > 0) {

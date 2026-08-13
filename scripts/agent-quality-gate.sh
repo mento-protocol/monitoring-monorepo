@@ -2386,7 +2386,7 @@ while IFS= read -r path; do
           add_command "pnpm sentry:archive:test" "Sentry needs-human brief helper changed"
           add_command "pnpm sentry:project:test" "Sentry needs-human brief helper changed"
           ;;
-        scripts/sentry-triage-project.mjs|scripts/sentry-triage-project-core.mjs|scripts/sentry-triage-project.test.mjs|scripts/sentry-triage-text.mjs|scripts/sentry-triage-projection.mjs)
+        scripts/sentry-triage-project.mjs|scripts/sentry-triage-project-core.mjs|scripts/sentry-triage-project.test.mjs|scripts/sentry-triage-text.mjs|scripts/sentry-triage-projection.mjs|scripts/sentry-triage-escalation-contract.mjs)
           add_command "pnpm sentry:project:test" "Sentry triage projection helper changed"
           # The agent's comment wrapper imports the shared marker contract from
           # sentry-triage-project-core.mjs, so its fences ride on this module.
@@ -2438,11 +2438,12 @@ while IFS= read -r path; do
         scripts/sentry-mcp-broker.mjs|scripts/sentry-mcp-broker.test.mjs)
           add_command "pnpm sentry:broker:test" "Sentry credential broker changed"
           ;;
-        scripts/sentry-triage-requeue.mjs|scripts/sentry-triage-requeue.test.mjs|scripts/sentry-triage-queue-contract.mjs|scripts/sentry-triage-brief-clear-recovery.mjs)
+        scripts/sentry-triage-requeue.mjs|scripts/sentry-triage-requeue.test.mjs|scripts/sentry-triage-queue-contract.mjs|scripts/sentry-triage-workflow-requeue.mjs)
           # The single re-queue chokepoint, the queue contract it reads, and the
-          # brief clear-failure CLI that wraps it (#1769 round 17). Both sites that
-          # re-queue a stub run through the chokepoint, so its suite is never the
-          # whole story — run theirs too. The CLI's tests live in the requeue suite.
+          # workflow CLI that wraps it for every compensating exit in the triage
+          # agent workflow (#1769 round 17, #1782). Every site that re-queues a stub
+          # runs through the chokepoint, so its suite is never the whole story —
+          # run theirs too. The CLI's tests live in the requeue suite.
           add_command "pnpm sentry:requeue:test" "Sentry re-queue chokepoint changed"
           add_command "pnpm sentry:ingest:test" "Sentry re-queue chokepoint changed"
           add_command "pnpm sentry:archive:test" "Sentry re-queue chokepoint changed"
