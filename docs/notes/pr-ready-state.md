@@ -104,15 +104,19 @@ terminal state so late feedback is not missed.
 
 ### Bounded clean-Claude protocol
 
-`pr:feedback-state` accepts a clean verdict from Claude only through a bounded
-parser over registered comment shapes. Anything ambiguous or unregistered fails
-closed: unknown prose, Markdown or HTML syntax, hedging, negation, malformed
-headings, and mixed clean/actionable items stay blocking. A small compatibility
-registry holds exact observed payloads, each bound to its Claude author, PR
-number, comment ID, head SHA, and a digest of the untrimmed raw body, so any
-body or binding change — including line endings — blocks again. The exact
-grammar and registry live in `scripts/pr-feedback-state-claude.mjs`; do not
-broaden them to accept a new title or checklist subject.
+`pr:feedback-state` keeps older exceptions in an exact compatibility registry.
+Each entry binds the raw body digest to its Claude author, PR, comment, and head.
+Reviews from the observed PR #1848 shape onward use a small prose-pattern
+library. The library requires one unhedged `Verdict: LGTM` or `Overall verdict:
+LGTM` line and an explicit no-findings or no-action conclusion. P0-P2 findings,
+P3 lines without a known no-action disposition, direct action requests,
+ambiguous verdicts, and unsupported markup stay blocking. Current-head and
+unresolved-feedback checks remain separate and mandatory.
+
+The registry and named phrase groups live in
+`scripts/pr-feedback-state-claude.mjs`. Add a phrase only with a real review
+fixture and nearby blocking mutations. The library does not try to prove the
+meaning of arbitrary English prose.
 
 ## Expected CLI contract
 
