@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
+import { realpathSync } from "node:fs";
 import { createServer } from "node:net";
+import { fileURLToPath } from "node:url";
 import { buildFixtureApp } from "./fixture-build.mjs";
 import {
   FIXTURE_DIST_DIR,
@@ -54,43 +56,22 @@ async function findFreePort(exclude = []) {
 // here would desync the two and either point the client at nothing or, worse,
 // an unrelated reused server. The var stays settable for turbo's cache-key
 // tracking; it just can't diverge from the build's constant.
-process.env.PLAYWRIGHT_FIXTURE_PORT = String(FIXTURE_HASURA_PORT);
-if (!process.env.PLAYWRIGHT_NEXT_PORT) {
-  process.env.PLAYWRIGHT_NEXT_PORT = String(
-    await findFreePort([FIXTURE_HASURA_PORT]),
-  );
-}
-
-const args = process.argv.slice(2);
-const productionIndex = args.indexOf("--production");
-const forceRebuild = productionIndex !== -1;
-if (forceRebuild) args.splice(productionIndex, 1);
-// Captured before browserTestEnv defaults PLAYWRIGHT_NEXT_COMMAND below, so
-// this reflects only an explicit caller override (e.g. the documented
-// Turbopack-production-build-panic fallback to `pnpm dev --webpack`).
-const usingCustomNextCommand = Boolean(process.env.PLAYWRIGHT_NEXT_COMMAND);
-
-const browserTestEnv = {
-  ...process.env,
-  NEXT_DIST_DIR: FIXTURE_DIST_DIR,
-  NEXT_PUBLIC_HASURA_URL: FIXTURE_HASURA_URL,
-  NEXT_PUBLIC_BROWSER_TEST_FIXTURES: "true",
-  NEXT_TELEMETRY_DISABLED: "1",
-  PLAYWRIGHT_NEXT_COMMAND:
-    process.env.PLAYWRIGHT_NEXT_COMMAND ??
-    "pnpm exec next start --hostname 127.0.0.1 --port {port}",
-  PLAYWRIGHT_NEXT_TIMEOUT_MS:
-    process.env.PLAYWRIGHT_NEXT_TIMEOUT_MS ?? "120000",
-};
-
-async function verifyFixtureServerReuse() {
-  const runtimeOptions = fixtureServerRuntimeOptions();
-  const expectedIdentity = await currentFixtureServerIdentity(runtimeOptions);
+async function verifyFixtureServerReuse({
+  env,
+  browserTestEnv,
+  fixtureServerIdentity,
+  probeServer,
+}) {
+  const runtimeOptions = fixtureServerRuntimeOptions({
+    scenario: env.HASURA_FIXTURE_SCENARIO,
+    clientDelayMs: env.HASURA_FIXTURE_CLIENT_DELAY_MS,
+  });
+  const expectedIdentity = await fixtureServerIdentity(runtimeOptions);
   const healthUrl = identityHealthUrl(
     `http://127.0.0.1:${FIXTURE_HASURA_PORT}`,
     expectedIdentity,
   );
-  const decision = await probeFixtureServer({
+  const decision = await probeServer({
     healthUrl,
     expectedIdentity,
   });
@@ -102,7 +83,7 @@ async function verifyFixtureServerReuse() {
   }
   if (
     decision.action === "reuse" &&
-    process.env.PLAYWRIGHT_REUSE_FIXTURE_SERVER === "false"
+    env.PLAYWRIGHT_REUSE_FIXTURE_SERVER === "false"
   ) {
     throw new Error(
       `fixture server on ${FIXTURE_HASURA_PORT} matches this checkout, but ` +
@@ -118,13 +99,13 @@ async function verifyFixtureServerReuse() {
   );
 }
 
-function runPlaywright() {
+function runPlaywright({ args, env, spawnProcess }) {
   return new Promise((resolve, reject) => {
-    const child = spawn(
+    const child = spawnProcess(
       "playwright",
       ["test", "--config=playwright.config.ts", ...args],
       {
-        env: browserTestEnv,
+        env,
         shell: process.platform === "win32",
         stdio: "inherit",
       },
@@ -137,32 +118,81 @@ function runPlaywright() {
   });
 }
 
-let exitCode = 1;
-try {
-  if (usingCustomNextCommand) {
-    // A custom Next command doesn't serve the fixture build (it's the
-    // documented fallback for a Turbopack production-build panic in
-    // buildFixtureApp() — see docs/notes/dashboard-verification.md). Building
-    // here would hard-fail on that same panic before Playwright ever starts
-    // the substitute command, defeating the fallback entirely.
-    exitCode = 0;
-  } else {
-    const fixtureBuildHash = await currentFixtureBuildHash();
-    const decision = forceRebuild
-      ? { action: "rebuild" }
-      : await fixtureBuildDecision({ expectedHash: fixtureBuildHash });
-    exitCode =
-      decision.action === "rebuild"
-        ? await buildFixtureApp({ fixtureBuildHash })
-        : 0;
+export async function runBrowserTests({
+  argv = process.argv.slice(2),
+  env = process.env,
+  buildHash = currentFixtureBuildHash,
+  buildDecision = fixtureBuildDecision,
+  buildFixture = buildFixtureApp,
+  fixtureServerIdentity = currentFixtureServerIdentity,
+  probeServer = probeFixtureServer,
+  spawnProcess = spawn,
+} = {}) {
+  env.PLAYWRIGHT_FIXTURE_PORT = String(FIXTURE_HASURA_PORT);
+  if (!env.PLAYWRIGHT_NEXT_PORT) {
+    env.PLAYWRIGHT_NEXT_PORT = String(
+      await findFreePort([FIXTURE_HASURA_PORT]),
+    );
   }
-  if (exitCode === 0) {
-    await verifyFixtureServerReuse();
-    exitCode = await runPlaywright();
+
+  const args = [...argv];
+  const productionIndex = args.indexOf("--production");
+  const forceRebuild = productionIndex !== -1;
+  if (forceRebuild) args.splice(productionIndex, 1);
+  const usingCustomNextCommand = Boolean(env.PLAYWRIGHT_NEXT_COMMAND);
+  const browserTestEnv = {
+    ...env,
+    NEXT_DIST_DIR: FIXTURE_DIST_DIR,
+    NEXT_PUBLIC_HASURA_URL: FIXTURE_HASURA_URL,
+    NEXT_PUBLIC_BROWSER_TEST_FIXTURES: "true",
+    NEXT_TELEMETRY_DISABLED: "1",
+    PLAYWRIGHT_NEXT_COMMAND:
+      env.PLAYWRIGHT_NEXT_COMMAND ??
+      "pnpm exec next start --hostname 127.0.0.1 --port {port}",
+    PLAYWRIGHT_NEXT_TIMEOUT_MS: env.PLAYWRIGHT_NEXT_TIMEOUT_MS ?? "120000",
+  };
+
+  let exitCode = 1;
+  try {
+    if (usingCustomNextCommand) {
+      // A custom Next command doesn't serve the fixture build (it's the
+      // documented fallback for a Turbopack production-build panic in
+      // buildFixtureApp() — see docs/notes/dashboard-verification.md). Building
+      // here would hard-fail on that same panic before Playwright ever starts
+      // the substitute command, defeating the fallback entirely.
+      exitCode = 0;
+    } else {
+      const fixtureBuildHash = await buildHash();
+      const decision = forceRebuild
+        ? { action: "rebuild" }
+        : await buildDecision({ expectedHash: fixtureBuildHash });
+      exitCode =
+        decision.action === "rebuild"
+          ? await buildFixture({ fixtureBuildHash })
+          : 0;
+    }
+    if (exitCode === 0) {
+      await verifyFixtureServerReuse({
+        env,
+        browserTestEnv,
+        fixtureServerIdentity,
+        probeServer,
+      });
+      exitCode = await runPlaywright({
+        args,
+        env: browserTestEnv,
+        spawnProcess,
+      });
+    }
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : error);
+    exitCode = 1;
   }
-} catch (error) {
-  console.error(error instanceof Error ? error.message : error);
-  exitCode = 1;
+  return exitCode;
 }
 
-process.exit(exitCode);
+const isMain =
+  process.argv[1] !== undefined &&
+  realpathSync(process.argv[1]) ===
+    realpathSync(fileURLToPath(import.meta.url));
+if (isMain) process.exit(await runBrowserTests());

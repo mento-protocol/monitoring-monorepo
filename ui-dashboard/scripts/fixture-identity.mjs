@@ -57,21 +57,20 @@ function capture(command, args, options) {
 }
 
 /** Turbo's fixture-build hash is the source of truth for build freshness. */
-export async function currentFixtureBuildHash() {
+export async function currentFixtureBuildHash({
+  workspaceDir = repoDir,
+  turboPath = turboBinary(),
+  taskId = "@mento-protocol/ui-dashboard#fixture-build",
+  filter = "@mento-protocol/ui-dashboard",
+  env = process.env,
+} = {}) {
   const output = await capture(
-    turboBinary(),
-    [
-      "run",
-      "fixture-build",
-      "--filter=@mento-protocol/ui-dashboard",
-      "--dry=json",
-    ],
-    { cwd: repoDir, env: process.env },
+    turboPath,
+    ["run", "fixture-build", `--filter=${filter}`, "--dry=json"],
+    { cwd: workspaceDir, env },
   );
   const summary = JSON.parse(output);
-  const task = summary.tasks?.find(
-    ({ taskId }) => taskId === "@mento-protocol/ui-dashboard#fixture-build",
-  );
+  const task = summary.tasks?.find((task) => task.taskId === taskId);
   if (typeof task?.hash !== "string" || task.hash.length === 0) {
     throw new Error("Turbo did not report the dashboard fixture-build hash");
   }
