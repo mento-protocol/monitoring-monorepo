@@ -6,6 +6,10 @@ import {
   type PegHistoryPoint,
   type PegHistoryResponse,
 } from "@/lib/peg-history";
+import {
+  readBoundedGrafanaResponse,
+  resolveGrafanaEndpoint,
+} from "@/lib/server/grafana-read";
 
 export const dynamic = "force-dynamic";
 export const PEG_HISTORY_UPSTREAM_TIMEOUT_MS = 8_000;
@@ -75,27 +79,7 @@ function errorResponse(error: string, status: number): NextResponse {
 export function resolveGrafanaQueryEndpoint(
   raw: string | undefined,
 ): URL | null {
-  if (!raw) return null;
-  try {
-    const url = new URL(raw);
-    const localHttp =
-      process.env.NODE_ENV !== "production" &&
-      url.protocol === "http:" &&
-      ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
-    if (
-      (url.protocol !== "https:" && !localHttp) ||
-      url.username ||
-      url.password ||
-      url.search ||
-      url.hash ||
-      (url.pathname !== "" && url.pathname !== "/")
-    )
-      return null;
-    url.pathname = "/api/ds/query";
-    return url;
-  } catch {
-    return null;
-  }
+  return resolveGrafanaEndpoint(raw, "/api/ds/query");
 }
 
 function signedDeviationPromql(input: {
@@ -130,41 +114,6 @@ function buildGrafanaRequest(
     from: String(fromMs),
     to: String(toMs),
   };
-}
-
-async function readBounded(response: Response): Promise<string> {
-  const length = response.headers.get("content-length");
-  if (
-    length !== null &&
-    (!/^\d+$/.test(length) || Number(length) > PEG_HISTORY_MAX_RESPONSE_BYTES)
-  )
-    throw new InvalidUpstreamResponseError();
-  if (response.body === null) throw new InvalidUpstreamResponseError();
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  while (true) {
-    // react-doctor-disable-next-line react-doctor/async-await-in-loop -- ordered streams expose one bounded chunk at a time
-    const next = await reader.read();
-    if (next.done) break;
-    total += next.value.byteLength;
-    if (total > PEG_HISTORY_MAX_RESPONSE_BYTES) {
-      void reader.cancel().catch(() => undefined);
-      throw new InvalidUpstreamResponseError();
-    }
-    chunks.push(next.value);
-  }
-  const body = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    body.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  try {
-    return new TextDecoder("utf-8", { fatal: true }).decode(body);
-  } catch {
-    throw new InvalidUpstreamResponseError();
-  }
 }
 
 function onlyFieldIndex(frame: GrafanaFrame, type: string): number {
@@ -307,7 +256,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (!upstream.headers.get("content-type")?.includes("application/json"))
       throw new InvalidUpstreamResponseError();
     const points = parseGrafanaPoints(
-      JSON.parse(await readBounded(upstream)) as unknown,
+      JSON.parse(
+        await readBoundedGrafanaResponse(
+          upstream,
+          PEG_HISTORY_MAX_RESPONSE_BYTES,
+        ),
+      ) as unknown,
       fromMs,
       toMs,
       input.data,

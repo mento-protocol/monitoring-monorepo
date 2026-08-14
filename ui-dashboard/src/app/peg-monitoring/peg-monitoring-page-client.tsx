@@ -3,6 +3,7 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import { Provider as TooltipProvider } from "@radix-ui/react-tooltip";
 import { ErrorBox } from "@/components/feedback";
+import { usePegAlerts } from "@/hooks/use-peg-alerts";
 import { usePegMonitoring } from "@/hooks/use-peg-monitoring";
 import { classifyPegMonitoringState } from "@/lib/peg-monitoring";
 import { presentPegMonitoring } from "@/lib/peg-monitoring-presentation";
@@ -36,6 +37,7 @@ export function PegMonitoringPageClient(): React.JSX.Element {
   const nowMs = Math.max(now, Date.now());
   const state = classifyPegMonitoringState({ ...result, nowMs });
   const confirmed = state.kind === "current" || state.kind === "stale";
+  const alerts = usePegAlerts(confirmed);
   const usesPreviousPolicy =
     confirmed &&
     (state.data.policySlot === "previous" ||
@@ -71,7 +73,19 @@ export function PegMonitoringPageClient(): React.JSX.Element {
               ageLabel={formatAge(state.ageMs)}
               policyVersion={state.data.producedPolicyVersion}
             />
-            <RecentAlerts nowMs={nowMs} />
+            <RecentAlerts
+              events={alerts.data?.events ?? []}
+              nowMs={nowMs}
+              state={
+                alerts.hasError
+                  ? "unavailable"
+                  : alerts.data !== null
+                    ? "ready"
+                    : alerts.isLoading
+                      ? "loading"
+                      : "unavailable"
+              }
+            />
           </>
         )}
       </main>

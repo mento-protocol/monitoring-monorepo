@@ -1,20 +1,9 @@
 "use client";
 
 import { PEG_GRAFANA_ALERTS_URL } from "@/lib/peg-monitoring";
+import type { PegAlertEvent, PegAlertSeverity } from "@/lib/peg-alerts";
 import { PEG_COLOR } from "../_lib/peg-board-model";
 import { ExternalLink, SeverityDot } from "./board-primitives";
-
-type PegAlertSeverity = "warning" | "cleared" | "page" | "policy";
-
-export type PegAlertEvent = {
-  id: string;
-  /** Unix seconds. */
-  at: number;
-  severity: PegAlertSeverity;
-  /** Bold lead-in, e.g. "EUROP spread warning cleared". */
-  lead: string;
-  detail: string;
-};
 
 const SEVERITY_COLOR: Record<PegAlertSeverity, string> = {
   warning: PEG_COLOR.amber,
@@ -43,10 +32,6 @@ export function alertTimestamp(atSeconds: number, nowMs: number): string {
     : `${calendar.format(at)} ${clock.format(at)}`;
 }
 
-/**
- * State transitions and policy activations only. The feed itself lands in a
- * follow-up PR; the row shape is settled here so that change is data-only.
- */
 function AlertEntry({
   event,
   nowMs,
@@ -62,7 +47,7 @@ function AlertEntry({
       <span className="pt-[5px]">
         <SeverityDot size={8} color={SEVERITY_COLOR[event.severity]} />
       </span>
-      <span className="text-[11.5px]" style={{ color: PEG_COLOR.dim }}>
+      <span className="text-[11.5px]" style={{ color: PEG_COLOR.muted }}>
         {alertTimestamp(event.at, nowMs)}
       </span>
       <span className="text-[12.5px] text-[var(--peg-text-2)]">
@@ -80,14 +65,16 @@ const FUTURE_SKEW_MS = 60_000;
 export function RecentAlerts({
   events,
   nowMs,
+  state,
 }: {
-  events?: readonly PegAlertEvent[] | undefined;
+  events: readonly PegAlertEvent[];
   nowMs: number;
+  state: "loading" | "ready" | "unavailable";
 }): React.JSX.Element {
   // The header advertises "last 7 days", so the component enforces it rather
   // than trusting the feed: an older transition (or one stamped further than
   // clock skew into the future) must not render under that label.
-  const visible = events?.filter((event) => {
+  const visible = events.filter((event) => {
     const atMs = event.at * 1_000;
     return atMs >= nowMs - SEVEN_DAYS_MS && atMs <= nowMs + FUTURE_SKEW_MS;
   });
@@ -113,17 +100,19 @@ export function RecentAlerts({
           Full history in Grafana
         </ExternalLink>
       </div>
-      {visible === undefined ? (
-        <p className="border-t border-border px-[18px] py-3 text-[12px] text-muted-foreground">
-          No alert feed is wired into this page yet. Peg alert transitions and
-          policy activations are in{" "}
-          <ExternalLink
-            href={PEG_GRAFANA_ALERTS_URL}
-            className="text-[var(--primary-border)]"
-          >
-            Grafana
-          </ExternalLink>
-          .
+      {state === "loading" ? (
+        <p
+          role="status"
+          className="border-t border-border px-[18px] py-3 text-[12px] text-muted-foreground"
+        >
+          Loading recent alerts…
+        </p>
+      ) : state === "unavailable" ? (
+        <p
+          role="status"
+          className="border-t border-border px-[18px] py-3 text-[12px] text-muted-foreground"
+        >
+          Recent alerts unavailable. Full history remains available in Grafana.
         </p>
       ) : visible.length === 0 ? (
         <p className="border-t border-border px-[18px] py-3 text-[12px] text-muted-foreground">
