@@ -101,11 +101,101 @@ describe("GET /api/peg-monitoring", () => {
           ],
         }),
       );
+    const oversized = await GET();
+    expect(oversized.status).toBe(502);
+    expect(await oversized.json()).toEqual({
+      error: "Peg monitoring upstream response is invalid",
+      failureClass: "invalid-payload",
+    });
     expect((await GET()).status).toBe(502);
     expect((await GET()).status).toBe(502);
     expect((await GET()).status).toBe(502);
     expect((await GET()).status).toBe(502);
     expect((await GET()).status).toBe(502);
-    expect((await GET()).status).toBe(502);
+  });
+  it("classifies timeout and network failures without forwarding details", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    fetchMock.mockRejectedValueOnce(
+      new DOMException("request timed out", "TimeoutError"),
+    );
+    const timeout = await GET();
+    expect(timeout.status).toBe(504);
+    expect(await timeout.json()).toEqual({
+      error: "Peg monitoring upstream timed out",
+      failureClass: "timeout",
+    });
+    fetchMock.mockRejectedValueOnce(new TypeError("connection failed"));
+    const network = await GET();
+    expect(network.status).toBe(502);
+    expect(await network.json()).toEqual({
+      error: "Peg monitoring upstream request failed",
+      failureClass: "network",
+    });
+  });
+  it("keeps a response-body stream timeout distinct from invalid payloads", async () => {
+    const body = new ReadableStream({
+      pull(controller) {
+        controller.error(new DOMException("body stalled", "TimeoutError"));
+      },
+    });
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(body, {
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    const response = await GET();
+    expect(response.status).toBe(504);
+    expect(await response.json()).toEqual({
+      error: "Peg monitoring upstream timed out",
+      failureClass: "timeout",
+    });
+  });
+  it("keeps a response-body stream failure distinct from invalid payloads", async () => {
+    const body = new ReadableStream({
+      pull(controller) {
+        controller.error(new TypeError("body connection failed"));
+      },
+    });
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(body, {
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    const response = await GET();
+    expect(response.status).toBe(502);
+    expect(await response.json()).toEqual({
+      error: "Peg monitoring upstream request failed",
+      failureClass: "network",
+    });
+  });
+  it.each([
+    [429, 502, "upstream-rate-limit", "Peg monitoring upstream rate limited"],
+    [503, 503, "upstream-unavailable", "peg decision packages unavailable"],
+    [418, 502, "upstream-http", "Peg monitoring upstream unavailable"],
+  ])(
+    "preserves upstream HTTP %i as %s with %s metadata",
+    async (upstreamStatus, localStatus, failureClass, error) => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        json({ ignored: "body" }, { status: upstreamStatus }),
+      );
+      const response = await GET();
+      expect(response.status).toBe(localStatus);
+      expect(await response.json()).toMatchObject({
+        error,
+        failureClass,
+        upstreamStatus,
+      });
+    },
+  );
+  it("classifies missing configuration without starting a request", async () => {
+    vi.stubEnv("METRICS_BRIDGE_URL", "");
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    const response = await GET();
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error: "Peg monitoring upstream is not configured",
+      failureClass: "configuration",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

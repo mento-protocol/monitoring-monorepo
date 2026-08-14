@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { type ApiErrorBody, type ApiFailureClass } from "@/lib/api-failure";
 import { PegMonitoringResponseSchema } from "@/lib/peg-monitoring-schema";
 
 export const dynamic = "force-dynamic";
@@ -8,8 +9,18 @@ const headers = { "Cache-Control": "no-store" } as const;
 
 class InvalidUpstreamResponseError extends Error {}
 
-function errorResponse(error: string, status: number): NextResponse {
-  return NextResponse.json({ error }, { status, headers });
+function errorResponse(
+  error: string,
+  status: number,
+  failureClass: ApiFailureClass,
+  upstreamStatus?: number,
+): NextResponse {
+  const body: ApiErrorBody = {
+    error,
+    failureClass,
+    ...(upstreamStatus === undefined ? {} : { upstreamStatus }),
+  };
+  return NextResponse.json(body, { status, headers });
 }
 
 export function resolvePegMonitoringEndpoint(
@@ -84,18 +95,50 @@ function timedOut(error: unknown): boolean {
 export async function GET(): Promise<NextResponse> {
   const endpoint = resolvePegMonitoringEndpoint(process.env.METRICS_BRIDGE_URL);
   if (endpoint === null)
-    return errorResponse("Peg monitoring upstream is not configured", 503);
+    return errorResponse(
+      "Peg monitoring upstream is not configured",
+      503,
+      "configuration",
+    );
+  let upstream: Response;
   try {
-    const upstream = await fetch(endpoint, {
+    upstream = await fetch(endpoint, {
       headers: { Accept: "application/json" },
       cache: "no-store",
       redirect: "error",
       signal: AbortSignal.timeout(PEG_MONITORING_UPSTREAM_TIMEOUT_MS),
     });
-    if (upstream.status === 503)
-      return errorResponse("peg decision packages unavailable", 503);
-    if (!upstream.ok)
-      return errorResponse("Peg monitoring upstream unavailable", 502);
+  } catch (error) {
+    if (timedOut(error))
+      return errorResponse("Peg monitoring upstream timed out", 504, "timeout");
+    return errorResponse(
+      "Peg monitoring upstream request failed",
+      502,
+      "network",
+    );
+  }
+  if (upstream.status === 429)
+    return errorResponse(
+      "Peg monitoring upstream rate limited",
+      502,
+      "upstream-rate-limit",
+      upstream.status,
+    );
+  if (upstream.status === 503)
+    return errorResponse(
+      "peg decision packages unavailable",
+      503,
+      "upstream-unavailable",
+      upstream.status,
+    );
+  if (!upstream.ok)
+    return errorResponse(
+      "Peg monitoring upstream unavailable",
+      502,
+      "upstream-http",
+      upstream.status,
+    );
+  try {
     if (!upstream.headers.get("content-type")?.includes("application/json"))
       throw new InvalidUpstreamResponseError();
     const parsed = PegMonitoringResponseSchema.safeParse(
@@ -105,7 +148,17 @@ export async function GET(): Promise<NextResponse> {
     return NextResponse.json(parsed.data, { headers });
   } catch (error) {
     if (timedOut(error))
-      return errorResponse("Peg monitoring upstream timed out", 504);
-    return errorResponse("Peg monitoring upstream response is invalid", 502);
+      return errorResponse("Peg monitoring upstream timed out", 504, "timeout");
+    if (error instanceof TypeError)
+      return errorResponse(
+        "Peg monitoring upstream request failed",
+        502,
+        "network",
+      );
+    return errorResponse(
+      "Peg monitoring upstream response is invalid",
+      502,
+      "invalid-payload",
+    );
   }
 }

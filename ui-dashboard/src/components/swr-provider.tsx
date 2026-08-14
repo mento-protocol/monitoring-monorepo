@@ -21,6 +21,7 @@ import {
   createPersistedSWRCache,
   type PersistedSWRCacheController,
 } from "@/lib/swr-persisted-cache";
+import { FetchJsonError } from "@/lib/fetch-json";
 
 // Global SWR onError handler: funnel every fetch failure to Sentry with the
 // SWR cache key attached as extra data. Without this, caught errors surface
@@ -43,9 +44,25 @@ function shouldCapture(normalized: string): boolean {
 
 function captureSWRError(err: unknown, key: unknown) {
   const normalized = normalizeSWRFreshnessKey(key);
-  if (!shouldCapture(normalized)) return;
+  const captureFingerprint =
+    err instanceof FetchJsonError
+      ? JSON.stringify([
+          normalized,
+          err.failureClass,
+          err.upstreamStatus ?? err.status,
+        ])
+      : normalized;
+  if (!shouldCapture(captureFingerprint)) return;
+  const tags: Record<string, string> = { source: "swr" };
+  if (err instanceof FetchJsonError) {
+    tags.failure_class = err.failureClass;
+    if (err.requestPath !== null) tags.api_route = err.requestPath;
+    if (err.status !== null) tags.http_status = String(err.status);
+    if (err.upstreamStatus !== null)
+      tags.upstream_status = String(err.upstreamStatus);
+  }
   Sentry.captureException(err, {
-    tags: { source: "swr" },
+    tags,
     extra: { swrKey: normalized },
   });
 }
