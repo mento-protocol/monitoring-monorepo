@@ -7,6 +7,7 @@ import { axe } from "vitest-axe";
 import type { PegMonitoringResult } from "@/hooks/use-peg-monitoring";
 import type { PegHistoryResult } from "@/hooks/use-peg-history";
 import type { PegAlertsResult } from "@/hooks/use-peg-alerts";
+import { PEG_GRAFANA_ALERTS_URL } from "@/lib/peg-monitoring";
 import {
   makePegMonitoringResponse,
   PEG_FIXTURE_CHAIN_ID,
@@ -526,11 +527,9 @@ describe("PegMonitoringPageClient board", () => {
     const alerts = query('[data-testid="peg-recent-alerts"]')!;
     expect(alerts.textContent).toContain("Recent alerts");
     expect(alerts.textContent).toContain("· last 7 days");
-    expect(
-      alerts.querySelectorAll(
-        'a[href="https://clabsmento.grafana.net/alerting/list?search=Peg"]',
-      ).length,
-    ).toBeGreaterThan(0);
+    expect(alerts.querySelector("a")?.getAttribute("href")).toBe(
+      PEG_GRAFANA_ALERTS_URL,
+    );
   });
 
   it("keeps the current board intact when recent alerts fail", () => {

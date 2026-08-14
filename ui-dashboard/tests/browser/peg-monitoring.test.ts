@@ -192,7 +192,7 @@ test("renders the status board, expands a row panel, and retains stale evidence"
   });
   await expect(grafanaLink).toHaveAttribute(
     "href",
-    "https://clabsmento.grafana.net/alerting/list?search=Peg",
+    "https://clabsmento.grafana.net/alerting/history?var-LABELS_FILTER=service%3Dpeg-monitoring&from=now-7d&to=now&timezone=browser",
   );
   await expect(grafanaLink).toHaveAttribute("rel", /noopener/);
   await expect(
