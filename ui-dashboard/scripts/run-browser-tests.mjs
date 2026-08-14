@@ -29,7 +29,8 @@ import {
 // Only the Next server port is OS-assigned (bound at runtime, not inlined). The
 // fixture Hasura port is fixed (`FIXTURE_HASURA_PORT`) because it is baked into
 // the client bundle and CSP; Playwright reuses an already-running fixture
-// server on it (`reuseExistingServer: true`) instead of hard-failing.
+// server on it only when its identity matches; mismatched or unverifiable
+// processes fail closed without being stopped.
 function allocatePort() {
   return new Promise((resolve, reject) => {
     const srv = createServer();
