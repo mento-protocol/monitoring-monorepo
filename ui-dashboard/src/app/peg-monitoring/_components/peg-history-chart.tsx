@@ -1,7 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import {
+  usePegHistory,
+  type PegHistoryIdentity,
+  type PegHistoryResult,
+} from "@/hooks/use-peg-history";
 import type { PegAssetPackage } from "@/lib/peg-monitoring";
+import { PEG_HISTORY_RANGES } from "@/lib/peg-history";
 import {
   PEG_CHART,
   PEG_CHART_DEFAULT_RANGE,
@@ -19,6 +25,7 @@ import {
   formatDeviationBps,
   type PegBoardTone,
 } from "../_lib/peg-board-model";
+import { ChartAxis, ChartBands, ChartSeries } from "./peg-history-chart-plot";
 
 const dayTime = new Intl.DateTimeFormat("en-US", {
   month: "short",
@@ -28,12 +35,6 @@ const dayTime = new Intl.DateTimeFormat("en-US", {
   hour12: false,
   timeZone: "UTC",
 });
-const day = new Intl.DateTimeFormat("en-US", {
-  month: "short",
-  day: "numeric",
-  timeZone: "UTC",
-});
-
 /** "3.1 bps below target" / "at target" — matches the row's zero handling. */
 function deviationPhrase(bps: number): string {
   if (bps === 0) return "at target";
@@ -59,7 +60,71 @@ type ChartProps = {
   measurement: string;
   nowMs: number;
   series?: readonly PegHistoryPoint[] | undefined;
+  historyIdentity?: PegHistoryIdentity | null | undefined;
+  /** Fixed end of a retained package's historical window, in Unix seconds. */
+  historyEndSeconds?: number | undefined;
 };
+
+type HistoryState = "loading" | "ready" | "empty" | "stale" | "unavailable";
+
+function visibleHistory(
+  points: readonly PegHistoryPoint[],
+  range: PegChartRange,
+  nowMs: number,
+): { points: readonly PegHistoryPoint[]; xs: number[] } {
+  const cutoffSeconds = (nowMs - RANGE_MS[range]) / 1_000;
+  const windowEndSeconds = nowMs / 1_000;
+  const visible = points.filter(
+    (point) => point.at >= cutoffSeconds && point.at <= windowEndSeconds,
+  );
+  return {
+    points: visible,
+    // Timestamp-derived positions preserve the real duration of missed polls.
+    xs: visible.map((point) =>
+      pointXAt(point.at, cutoffSeconds, windowEndSeconds),
+    ),
+  };
+}
+
+function resolvedHistory(
+  series: readonly PegHistoryPoint[] | undefined,
+  history: PegHistoryResult,
+  range: PegChartRange,
+): {
+  points: readonly PegHistoryPoint[];
+  state: HistoryState;
+  stepSeconds: number;
+} {
+  if (series !== undefined)
+    return {
+      points: series,
+      state: series.length === 0 ? "empty" : "ready",
+      stepSeconds: PEG_HISTORY_RANGES[range].stepSeconds,
+    };
+  if (history.data !== null) {
+    const points = history.data.points;
+    return {
+      points,
+      stepSeconds: history.data.stepSeconds,
+      state: history.hasError
+        ? "stale"
+        : points.length === 0
+          ? "empty"
+          : "ready",
+    };
+  }
+  if (history.hasError)
+    return {
+      points: [],
+      state: "unavailable",
+      stepSeconds: PEG_HISTORY_RANGES[range].stepSeconds,
+    };
+  return {
+    points: [],
+    state: history.isLoading ? "loading" : "unavailable",
+    stepSeconds: PEG_HISTORY_RANGES[range].stepSeconds,
+  };
+}
 
 export function PegHistoryChart({
   policy,
@@ -68,25 +133,32 @@ export function PegHistoryChart({
   measurement,
   nowMs,
   series,
+  historyIdentity = null,
+  historyEndSeconds,
 }: ChartProps): React.JSX.Element {
   const [range, setRange] = useState<PegChartRange>(PEG_CHART_DEFAULT_RANGE);
   const [hovered, setHovered] = useState<number | null>(null);
-  // The selected range is a promise to the reader: whatever the feed supplies,
-  // only readings inside the window may plot, feed the axis, or reach the
-  // hover/reading list.
-  const cutoffSeconds = (nowMs - RANGE_MS[range]) / 1_000;
-  const points = (series ?? []).filter((point) => point.at >= cutoffSeconds);
-  // Timestamp-derived x positions: a gap between polls occupies its real
-  // share of the window instead of collapsing to one array step.
-  const pointXs = points.map((point) =>
-    pointXAt(point.at, cutoffSeconds, nowMs / 1_000),
-  );
+  const history = usePegHistory(historyIdentity, range, historyEndSeconds);
+  const resolved = resolvedHistory(series, history, range);
+  const { points, xs: pointXs } = visibleHistory(resolved.points, range, nowMs);
   const scale = pegChartScale(policy);
   const nowY = nowBps === null ? null : scale.y(nowBps);
 
   return (
     <figure className="m-0">
-      <ChartHeader measurement={measurement} range={range} onRange={setRange} />
+      <ChartHeader
+        measurement={measurement}
+        range={range}
+        onRange={(next) => {
+          setHovered(null);
+          setRange(next);
+        }}
+      />
+      <HistoryStatus
+        range={range}
+        count={points.length}
+        state={resolved.state}
+      />
       <div
         onPointerMove={(event) => {
           if (points.length === 0) return;
@@ -100,11 +172,17 @@ export function PegHistoryChart({
         <svg
           viewBox={`0 0 ${PEG_CHART.viewBoxWidth} ${PEG_CHART.viewBoxHeight}`}
           role="img"
-          aria-label={chartLabel(nowBps, range, points.length)}
+          aria-label={chartLabel(nowBps, range, points.length, resolved.state)}
           className="block w-full"
         >
           <ChartBands policy={policy} />
-          <ChartSeries points={points} xs={pointXs} scale={scale} tone={tone} />
+          <ChartSeries
+            points={points}
+            xs={pointXs}
+            stepSeconds={resolved.stepSeconds}
+            scale={scale}
+            tone={tone}
+          />
           <ChartGutter
             policy={policy}
             nowBps={nowBps}
@@ -119,7 +197,7 @@ export function PegHistoryChart({
               fontSize={12}
               fill={PEG_COLOR.muted}
             >
-              History unavailable
+              {emptyHistoryMessage(resolved.state)}
             </text>
           ) : (
             <ChartAxis points={points} xs={pointXs} />
@@ -190,119 +268,68 @@ function chartLabel(
   nowBps: number | null,
   range: PegChartRange,
   count: number,
+  state: HistoryState,
 ): string {
   const current =
     nowBps === null
       ? "the current deviation is unavailable"
       : `now ${deviationPhrase(nowBps)}`;
-  return count === 0
-    ? `Peg history over ${range}. History is unavailable, so only the alert bands and ${current} are drawn.`
-    : `Peg history over ${range}: ${count} readings, ${current}.`;
+  if (count > 0)
+    return state === "stale"
+      ? `Peg history over ${range}: ${count} last confirmed readings; refresh failed, ${current}.`
+      : `Peg history over ${range}: ${count} readings, ${current}.`;
+  if (state === "loading")
+    return `Peg history over ${range}. History is loading, so only the alert bands and ${current} are drawn.`;
+  if (state === "unavailable")
+    return `Peg history over ${range}. History is unavailable, so only the alert bands and ${current} are drawn.`;
+  if (state === "stale")
+    return `Peg history over ${range}. The refresh failed and there are no last confirmed readings in this window, so only the alert bands and ${current} are drawn.`;
+  return `Peg history over ${range}. No readings were returned in this window, so only the alert bands and ${current} are drawn.`;
 }
 
-function ChartBands({
-  policy,
+function emptyHistoryMessage(state: HistoryState): string {
+  if (state === "loading") return "Loading history";
+  if (state === "unavailable") return "History unavailable";
+  if (state === "stale") return "No last confirmed readings in this window";
+  return "No readings in this window";
+}
+
+function historyStatusMessage(
+  range: PegChartRange,
+  count: number,
+  state: HistoryState,
+): string {
+  if (state === "loading") return `Loading peg history over ${range}`;
+  if (state === "unavailable") return `Peg history over ${range} unavailable`;
+  if (state === "stale")
+    return `History refresh failed · ${
+      count === 0
+        ? "no last confirmed readings in this window"
+        : "showing last confirmed readings"
+    }`;
+  if (state === "empty") return `No peg history readings over ${range}`;
+  return `${count} peg history readings loaded over ${range}`;
+}
+
+function HistoryStatus({
+  range,
+  count,
+  state,
 }: {
-  policy: PegAssetPackage["policy"];
+  range: PegChartRange;
+  count: number;
+  state: HistoryState;
 }): React.JSX.Element {
-  const scale = pegChartScale(policy);
-  const bands = pegChartBands(scale);
-  const lines: Array<{ y: number; stroke: string }> = [
-    { y: scale.y(scale.premiumWarnBps), stroke: "oklch(76.9% 0.188 70 / 0.5)" },
-    { y: scale.y(-scale.warnBps), stroke: "oklch(76.9% 0.188 70 / 0.5)" },
-    { y: scale.y(-scale.criticalBps), stroke: "oklch(54.7% 0.193 26.4 / 0.6)" },
-  ];
   return (
-    <g>
-      {bands.map((band) => (
-        <rect
-          key={band.key}
-          x={0}
-          y={band.y}
-          width={PEG_CHART.plotWidth}
-          height={band.height}
-          fill={band.fill}
-        />
-      ))}
-      {lines.map((line) => (
-        <line
-          key={line.y}
-          x1={0}
-          x2={PEG_CHART.plotWidth}
-          y1={line.y}
-          y2={line.y}
-          stroke={line.stroke}
-          strokeWidth={1}
-          strokeDasharray="4 4"
-        />
-      ))}
-      <line
-        x1={0}
-        x2={PEG_CHART.plotWidth}
-        y1={scale.y(0)}
-        y2={scale.y(0)}
-        stroke="oklch(98% 0.0054 297.73 / 0.3)"
-        strokeWidth={1}
-      />
-    </g>
-  );
-}
-
-function ChartSeries({
-  points,
-  xs,
-  scale,
-  tone,
-}: {
-  points: readonly PegHistoryPoint[];
-  xs: readonly number[];
-  scale: ReturnType<typeof pegChartScale>;
-  tone: PegBoardTone;
-}): React.JSX.Element | null {
-  if (points.length === 0) return null;
-  const path = points
-    .map((point, index) => `${xs[index]!},${scale.y(point.bps)}`)
-    .join(" ");
-  return (
-    <polyline
-      points={path}
-      fill="none"
-      stroke={PEG_TONE_COLOR[tone]}
-      strokeWidth={2}
-      strokeLinejoin="round"
-    />
-  );
-}
-
-function ChartAxis({
-  points,
-  xs,
-}: {
-  points: readonly PegHistoryPoint[];
-  xs: readonly number[];
-}): React.JSX.Element {
-  const ticks = [0, 0.33, 0.66, 1].map((ratio) => {
-    const index = Math.min(
-      points.length - 1,
-      Math.round(ratio * (points.length - 1)),
-    );
-    return { index, x: xs[index]! };
-  });
-  return (
-    <g>
-      {ticks.map((tick) => (
-        <text
-          key={tick.index}
-          x={Math.min(PEG_CHART.plotWidth - 12, Math.max(12, tick.x))}
-          y={PEG_CHART.axisY}
-          textAnchor="middle"
-          fontSize={10}
-          fill={PEG_COLOR.muted}
-        >
-          {day.format(points[tick.index]!.at * 1_000)}
-        </text>
-      ))}
-    </g>
+    <p
+      role="status"
+      aria-atomic="true"
+      className={
+        state === "stale" ? "-mt-2 mb-2 text-[11px] text-amber-700" : "sr-only"
+      }
+    >
+      {historyStatusMessage(range, count, state)}
+    </p>
   );
 }
 

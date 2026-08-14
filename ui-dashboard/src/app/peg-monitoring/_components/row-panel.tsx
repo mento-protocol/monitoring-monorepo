@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import type { PegHistoryIdentity } from "@/hooks/use-peg-history";
 import type { PegAssetPresentation } from "@/lib/peg-monitoring-presentation";
 import { buildPoolDetailHref } from "@/lib/routing";
 import { formatFraction } from "../_lib/peg-board-format";
@@ -35,6 +36,19 @@ const noticeTint = {
   },
 } as const;
 
+function historyIdentity(
+  asset: PegAssetPresentation,
+  policyVersion: string,
+): PegHistoryIdentity | null {
+  return asset.deepSource === null
+    ? null
+    : {
+        asset: asset.asset.asset,
+        source: asset.deepSource.id,
+        policyVersion,
+      };
+}
+
 export function RowPanel({
   asset,
   nowMs,
@@ -43,6 +57,7 @@ export function RowPanel({
   previousPolicy,
   ageLabel,
   structuralCurrent,
+  policyVersion,
 }: {
   asset: PegAssetPresentation;
   nowMs: number;
@@ -51,6 +66,7 @@ export function RowPanel({
   previousPolicy: boolean;
   ageLabel: string;
   structuralCurrent: boolean;
+  policyVersion: string;
 }): React.JSX.Element {
   const notice = panelNotice(asset, stale, previousPolicy);
   const primary = asset.deepSource;
@@ -127,7 +143,9 @@ export function RowPanel({
                 : asset.thresholdTone
             }
             measurement={measurementLabel(primary)}
-            nowMs={nowMs}
+            nowMs={stale ? producedAt * 1_000 : nowMs}
+            historyIdentity={historyIdentity(asset, policyVersion)}
+            historyEndSeconds={stale ? producedAt : undefined}
           />
         </div>
         <p className="sr-only">{`${asset.assetName} is ${distanceLabel(asset)}.`}</p>

@@ -5,6 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { axe } from "vitest-axe";
 import type { PegMonitoringResult } from "@/hooks/use-peg-monitoring";
+import type { PegHistoryResult } from "@/hooks/use-peg-history";
 import {
   makePegMonitoringResponse,
   PEG_FIXTURE_CHAIN_ID,
@@ -18,9 +19,21 @@ const state = vi.hoisted(() => ({
     isLoading: true,
     hasError: false,
   } as PegMonitoringResult,
+  history: {
+    data: null,
+    isLoading: false,
+    hasError: true,
+  } as PegHistoryResult,
+  historyRequest: null as readonly unknown[] | null,
 }));
 vi.mock("@/hooks/use-peg-monitoring", () => ({
   usePegMonitoring: () => state.current,
+}));
+vi.mock("@/hooks/use-peg-history", () => ({
+  usePegHistory: (...args: readonly unknown[]) => {
+    state.historyRequest = args;
+    return state.history;
+  },
 }));
 vi.mock("next/link", () => ({
   default: ({
@@ -47,6 +60,8 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(PEG_FIXTURE_PRODUCED_AT * 1000 + 20_000);
   state.current = { data: null, isLoading: true, hasError: false };
+  state.history = { data: null, isLoading: false, hasError: true };
+  state.historyRequest = null;
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -202,6 +217,76 @@ describe("PegMonitoringPageClient board", () => {
         .textContent,
     ).toContain("DISPLAY ONLY");
     expect(panel.querySelectorAll("[aria-pressed]")).toHaveLength(3);
+    expect(
+      panel.querySelector('figure [role="status"]')!.textContent,
+    ).toContain("Peg history over 7d unavailable");
+  });
+
+  it("wires validated history into the expanded asset chart", () => {
+    const response = makePegMonitoringResponse();
+    const item = response.packages[0]!;
+    state.history = {
+      data: {
+        asset: item.asset,
+        source: item.policy.deepVenueSource,
+        policyVersion: response.producedPolicyVersion,
+        range: "7d",
+        from: PEG_FIXTURE_PRODUCED_AT - 7 * 86_400,
+        to: PEG_FIXTURE_PRODUCED_AT,
+        stepSeconds: 1_800,
+        points: [
+          { at: PEG_FIXTURE_PRODUCED_AT - 3_600, bps: -4 },
+          { at: PEG_FIXTURE_PRODUCED_AT, bps: 2 },
+        ],
+      },
+      isLoading: false,
+      hasError: false,
+    };
+    loaded(response);
+    render();
+    click(query('[data-testid="peg-row-europ-schuman"]'));
+    const chart = query('[aria-label*="Peg history over 7d"]')!;
+    expect(chart.getAttribute("aria-label")).toContain("2 readings");
+    expect(chart.textContent).not.toContain("History unavailable");
+
+    state.history = { ...state.history, hasError: true };
+    render();
+    expect(
+      query('[aria-label*="Peg history over 7d"]')!.getAttribute("aria-label"),
+    ).toContain("2 last confirmed readings; refresh failed");
+    expect(
+      query('[data-testid="peg-panel-europ-schuman"]')!.textContent,
+    ).toContain("History refresh failed · showing last confirmed readings");
+
+    state.history = {
+      ...state.history,
+      data: { ...state.history.data!, points: [] },
+    };
+    render();
+    expect(
+      query('[data-testid="peg-panel-europ-schuman"]')!.textContent,
+    ).toContain(
+      "History refresh failed · no last confirmed readings in this window",
+    );
+
+    state.history = { ...state.history, hasError: false };
+    render();
+    expect(query('[aria-label*="Peg history over 7d"]')!.textContent).toContain(
+      "No readings in this window",
+    );
+
+    state.history = {
+      ...state.history,
+      data: {
+        ...state.history.data!,
+        points: [{ at: PEG_FIXTURE_PRODUCED_AT, bps: -3 }],
+      },
+    };
+    render();
+    expect(query('[data-testid="peg-history-single-point"]')).not.toBeNull();
+    expect(
+      container.querySelectorAll('[data-testid="peg-history-axis-tick"]'),
+    ).toHaveLength(1);
   });
 
   it("pins an off-scale supporting venue at the rail edge", () => {
@@ -270,6 +355,7 @@ describe("PegMonitoringPageClient board", () => {
     expect(
       query('[data-testid="peg-panel-europ-schuman"]')!.textContent,
     ).toContain("Showing the last confirmed check, produced 20s ago.");
+    expect(state.historyRequest?.[2]).toBe(PEG_FIXTURE_PRODUCED_AT);
   });
 
   it("keeps a previous-policy notice in the affected row's panel", () => {
