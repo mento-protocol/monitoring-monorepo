@@ -281,6 +281,51 @@ const PR_1825_CLEAN_CLAUDE_REVIEW = {
   ].join("\n"),
 };
 
+// Verbatim REST issuecomment 5281908631 from PR #1837 at head
+// 7d982e05a0256d73d0d7aeafc485dfad338e63ce. The summary explicitly marks its
+// sole P3 as pre-justified, non-blocking, and no-action. Keep every byte frozen
+// so this free-form layout can only be accepted through an exact binding.
+const PR_1837_CLEAN_CLAUDE_REVIEW = {
+  id: 5281908631,
+  html_url:
+    "https://github.com/mento-protocol/monitoring-monorepo/pull/1837#issuecomment-5281908631",
+  created_at: "2026-08-13T14:41:30Z",
+  updated_at: "2026-08-13T14:44:05Z",
+  user: { login: "claude[bot]", type: "Bot" },
+  body: [
+    "**Claude finished @chapati23's task in 2m 21s** —— [View job](https://github.com/mento-protocol/monitoring-monorepo/actions/runs/31711344431)",
+    "",
+    "---",
+    "### Review: fix(terraform): restore Aegis staging uploads",
+    "",
+    "- [x] Gather context (PR body, diff, changed files)",
+    "- [x] Read changed files in full",
+    "- [x] Check Terraform IAM change correctness",
+    "- [x] Check ADR 0053 update for consistency",
+    "- [x] Check identity contract fixture/test updates",
+    "- [x] Check docs (deployment.md, terraform.md, checklists, AGENTS.md) for drift",
+    "- [x] Post inline findings (none met the bar - see below)",
+    "- [x] Post final sticky summary",
+    "",
+    "### Verdict: LGTM",
+    "",
+    "The change is narrow and well-scoped: it adds a bucket-scoped `roles/storage.admin` grant for the existing `local.app_engine_source_uploaders` set on `staging.<project>.appspot.com` (`terraform/deploy-staging.tf:176-187`), leaving the original AppSpot-only grant untouched. Root cause tracks the PR description: the `CreateVersion` audit event named `metrics-bridge-deployer` (part of `app_engine_source_uploaders`), not the default AppSpot service account, so the prior bucket-scoped grant covering only AppSpot couldn't succeed.",
+    "",
+    "### Cross-cutting notes",
+    "",
+    "1. [P3] Blast-radius widening is real but pre-justified. This grant gives `roles/storage.admin` (which includes `storage.buckets.setIamPolicy`) to the full uploader set (`gcp_dev_members`, the routine deployer, and `grafana_agent_builder`), not just the routine deployer that actually failed, on a GCP-managed bucket. That's a step up from the `objectAdmin` role those same identities already hold on the Terraform-managed source bucket. This is inherent to Google's documented remedy for the internal AppSpot staging path (no narrower role is offered), and ADR 0053's \"Rejected Alternatives\" section already weighs and accepts this trade-off, so this isn't a blocker, just the one place this PR expands who can touch bucket-level IAM.",
+    "2. Consistency check passed. Every doc surface that referenced the old single-principal grant (`terraform/AGENTS.md`, `scripts/AGENTS.md`, `docs/terraform.md`, `docs/deployment.md`, `docs/pr-checklists/terraform-cloudrun.md`, ADR 0053) was updated in this PR; a repo-wide grep for the old phrasing turned up no stragglers.",
+    "3. Test coverage is thorough and symmetric. Both `scripts/deploy-staging-contract.test.mjs` and `scripts/production-infra-identity-contract/security.test.mjs` got exact-shape assertions plus mutation-based negative tests (`for_each`, `bucket`, `role`, `member`, `depends_on`) mirroring the existing `app_engine_default_staging_admin` coverage pattern. `surfaces.mjs` and `iam.mjs` fingerprints were updated in lockstep.",
+    "4. Process compliance. No `terraform apply` was run; the actual platform apply is correctly deferred to #1789 per the repo's human-approval-required rule for Terraform applies.",
+    "",
+    "### Numbered finding roll-up",
+    "",
+    "1. [P3] `terraform/deploy-staging.tf:176-187` - new grant extends `roles/storage.admin` (incl. `setIamPolicy`) to human dev members and the Alloy builder on a GCP-managed bucket, beyond just the deployer that actually failed. Already weighed in ADR 0053's alternatives section; no action requested.",
+    "",
+    "No P1/P2 findings. No inline comments posted - nothing rose above the P3 threshold this checklist inlines.",
+  ].join("\n"),
+};
+
 function normalizedReadyStateForClaudeReview(
   comment,
   {
@@ -1221,6 +1266,146 @@ test("accepts only the exact frozen PR #1825 Claude task review", () => {
       `${label}: expected exact compatibility binding to fail closed`,
     );
     assertEqual(mutatedFeedbackState.counts.blockingTopLevelBotComments, 1);
+  }
+});
+
+test("accepts only the exact frozen PR #1837 no-action Claude LGTM", () => {
+  assertEqual(PR_1837_CLEAN_CLAUDE_REVIEW.body.length, 3271);
+  assertEqual(
+    Buffer.byteLength(PR_1837_CLEAN_CLAUDE_REVIEW.body, "utf8"),
+    3275,
+  );
+  assertEqual(
+    createHash("sha256")
+      .update(PR_1837_CLEAN_CLAUDE_REVIEW.body, "utf8")
+      .digest("hex"),
+    "3816022eb21a2e41e0617c719f6daedc8c1c5c282b4b1b2010e4b739b0c3f1c7",
+  );
+  const normalizedReadyState = normalizedReadyStateForClaudeReview(
+    PR_1837_CLEAN_CLAUDE_REVIEW,
+    {
+      number: 1837,
+      title: "fix(terraform): restore Aegis staging uploads",
+      headRefOid: "7d982e05a0256d73d0d7aeafc485dfad338e63ce",
+      headUpdatedAt: "2026-08-13T14:39:33Z",
+      reactionCreatedAt: "2026-08-13T14:45:00Z",
+    },
+  );
+  const feedbackState = summarizeFeedbackState(normalizedReadyState);
+
+  assertEqual(normalizedReadyState.required.ready, true);
+  assertEqual(feedbackState.ready, true);
+  assertEqual(feedbackState.counts.blockingTopLevelBotComments, 0);
+  assertEqual(feedbackState.counts.blockingFindings, 0);
+
+  const options = {
+    number: 1837,
+    title: "fix(terraform): restore Aegis staging uploads",
+    headRefOid: "7d982e05a0256d73d0d7aeafc485dfad338e63ce",
+    headUpdatedAt: "2026-08-13T14:39:33Z",
+    reactionCreatedAt: "2026-08-13T14:45:00Z",
+  };
+  for (const [label, comment, mutatedOptions] of [
+    [
+      "body byte tamper",
+      {
+        ...PR_1837_CLEAN_CLAUDE_REVIEW,
+        body: `${PR_1837_CLEAN_CLAUDE_REVIEW.body}\n`,
+      },
+      options,
+    ],
+    [
+      "line-ending tamper",
+      {
+        ...PR_1837_CLEAN_CLAUDE_REVIEW,
+        body: PR_1837_CLEAN_CLAUDE_REVIEW.body.replaceAll("\n", "\r\n"),
+      },
+      options,
+    ],
+    [
+      "author tamper",
+      {
+        ...PR_1837_CLEAN_CLAUDE_REVIEW,
+        user: { login: "claude", type: "Bot" },
+      },
+      options,
+    ],
+    [
+      "comment ID tamper",
+      { ...PR_1837_CLEAN_CLAUDE_REVIEW, id: 5281908632 },
+      options,
+    ],
+    ["PR tamper", PR_1837_CLEAN_CLAUDE_REVIEW, { ...options, number: 1838 }],
+    [
+      "head tamper",
+      PR_1837_CLEAN_CLAUDE_REVIEW,
+      { ...options, headRefOid: "b".repeat(40) },
+    ],
+    [
+      "hedged verdict",
+      {
+        ...PR_1837_CLEAN_CLAUDE_REVIEW,
+        body: PR_1837_CLEAN_CLAUDE_REVIEW.body.replace(
+          "### Verdict: LGTM",
+          "### Verdict: probably LGTM",
+        ),
+      },
+      options,
+    ],
+    [
+      "contradictory roll-up",
+      {
+        ...PR_1837_CLEAN_CLAUDE_REVIEW,
+        body: PR_1837_CLEAN_CLAUDE_REVIEW.body.replace(
+          "Already weighed in ADR 0053's alternatives section; no action requested.",
+          "Please narrow the grant before merge.",
+        ),
+      },
+      options,
+    ],
+    [
+      "malformed roll-up heading",
+      {
+        ...PR_1837_CLEAN_CLAUDE_REVIEW,
+        body: PR_1837_CLEAN_CLAUDE_REVIEW.body.replace(
+          "### Numbered finding roll-up",
+          "### Numbered finding roll up",
+        ),
+      },
+      options,
+    ],
+    [
+      "actionable P3 roll-up",
+      {
+        ...PR_1837_CLEAN_CLAUDE_REVIEW,
+        body: PR_1837_CLEAN_CLAUDE_REVIEW.body.replace(
+          "no action requested.",
+          "action required: restrict this grant before merge.",
+        ),
+      },
+      options,
+    ],
+    [
+      "appended actionable text",
+      {
+        ...PR_1837_CLEAN_CLAUDE_REVIEW,
+        body: `${PR_1837_CLEAN_CLAUDE_REVIEW.body}\n\nPlease fix the grant before merge.`,
+      },
+      options,
+    ],
+  ]) {
+    const mutatedReadyState = normalizedReadyStateForClaudeReview(
+      comment,
+      mutatedOptions,
+    );
+    const mutatedFeedbackState = summarizeFeedbackState(mutatedReadyState);
+    assertEqual(
+      mutatedFeedbackState.ready,
+      false,
+      `${label}: expected exact compatibility binding to fail closed`,
+    );
+    assertEqual(mutatedFeedbackState.counts.blockingTopLevelBotComments, 1);
+    assertEqual(mutatedFeedbackState.counts.blockingFindings > 0, true);
   }
 });
 
