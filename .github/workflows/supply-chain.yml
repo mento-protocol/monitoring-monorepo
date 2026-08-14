@@ -85,6 +85,7 @@ on:
       - .github/workflows/supply-chain.yml
       - scripts/pnpm-audit-high-gate.mjs
       - scripts/pnpm-audit-high-gate.test.mjs
+      - scripts/alerts-uuid-overrides.test.mjs
       - scripts/lockfile-lint.mjs
       - scripts/lockfile-lint.test.mjs
       - scripts/version-skew-check.mjs
@@ -116,11 +117,12 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version
-          # `cache: pnpm` would require a warmed pnpm store, but this workflow
-          # never runs `pnpm install` — just `pnpm audit`. The post-step fails
-          # cache-path validation (##[error]Path Validation Error) and flips
-          # the job red. Audit is sub-second against the hosted advisory DB
-          # so the cache would save nothing useful anyway.
+          # `cache: pnpm` is omitted. The only install is the UUID contract's
+          # `pnpm install --lockfile-only` in a throwaway fixture; it resolves a
+          # test lockfile and does not materialize dependencies for later steps.
+          # The audits query the hosted advisory DB directly, so persisting the
+          # store would save nothing useful and adds a cache-path post-step that
+          # has flipped the job red.
       # Fail closed: no `--ignore-registry-errors`. That flag exits 0 on any
       # registry error — transient 5xx *and* persistent auth/network failures
       # — so an npm outage or misconfig would silently let advisories through.
@@ -129,6 +131,8 @@ jobs:
       # blip → re-run the job manually.
       - name: pnpm audit high gate self-tests
         run: node scripts/pnpm-audit-high-gate.test.mjs
+      - name: alerts uuid override contract
+        run: node --test scripts/alerts-uuid-overrides.test.mjs
       - name: pnpm audit (high+ only)
         run: node scripts/pnpm-audit-high-gate.mjs --dir . --label root
       - name: pnpm audit handler deploy lockfile (high+ only)
@@ -232,8 +236,8 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version
-          # No pnpm install — same as the blocking audit job. Audit queries the
-          # hosted advisory DB directly from the committed lockfile.
+          # This report job does not run pnpm install; it queries the hosted
+          # advisory DB directly from the committed lockfile.
       - name: pnpm audit (moderate+, report only)
         # Exit 1 means advisories found, which is the expected report case.
         # The script step below fails if pnpm returns a registry error payload.
