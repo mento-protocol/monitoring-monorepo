@@ -326,6 +326,49 @@ const PR_1837_CLEAN_CLAUDE_REVIEW = {
   ].join("\n"),
 };
 
+const PR_1848_HEAD = "44cbfc657ba8e2a3ed3f48927b3999678d66c13e";
+// Verbatim REST issuecomment 5287402981 from PR #1848. This common Claude
+// shape has an Overall-verdict heading and an explicit no-findings ending.
+const PR_1848_CLEAN_CLAUDE_REVIEW = {
+  id: 5287402981,
+  html_url:
+    "https://github.com/mento-protocol/monitoring-monorepo/pull/1848#issuecomment-5287402981",
+  created_at: "2026-08-13T23:08:10Z",
+  updated_at: "2026-08-13T23:11:53Z",
+  user: { login: "claude[bot]", type: "Bot" },
+  body: [
+    "**Claude finished @chapati23's task in 3m 28s** —— [View job](https://github.com/mento-protocol/monitoring-monorepo/actions/runs/31752689248)",
+    "",
+    "---",
+    "### Code Review — PR #1848",
+    "",
+    "- [x] Gather context (PR body, diff, changed files)",
+    "- [x] Understand the request (code review)",
+    "- [x] Read `scripts/pr-feedback-state-claude.mjs` and diff",
+    "- [x] Read `scripts/pr-feedback-state.test.mjs` and diff",
+    "- [x] Check registry/fail-closed pattern against AGENTS.md conventions",
+    "- [x] Post findings",
+    "",
+    "### Overall verdict: LGTM",
+    "",
+    "This is a minimal, well-scoped addition that follows the existing `CLEAN_REVIEW_COMPATIBILITY` registry pattern exactly (4 prior entries for PRs #1544, #1595, #1600, #1825). It adds one new SHA-256-keyed entry for the frozen PR #1837 review body, gated on digest + author + PR number + comment ID + head SHA all matching simultaneously.",
+    "",
+    "I traced the actual code path to make sure the fix does what it claims:",
+    "",
+    "- `isActionableReviewBotComment` → `isClaudeLgtmReview` matches the `### Verdict: LGTM` line in the PR #1837 body → falls into `isExplicitlyCleanClaudeReview`, which checks `matchesCleanReviewCompatibilityRegistry` **first**, before any general-grammar parsing (`scripts/pr-feedback-state-core.mjs:200-205`). That's why this works even though the body's `### Review: <title>` / `### Cross-cutting notes` / `### Numbered finding roll-up` layout doesn't match the general `Findings`/`Roll up` heading grammar or the separate `isExplicitlyCleanOverallClaudeReview` \"Code Review — PR #N\" grammar. Confirmed both alternate parse paths correctly reject this layout on their own, so the registry entry is the only thing making it pass — exactly the stated intent.",
+    "- Verified the new registry hex string is a well-formed 64-char SHA-256 digest, and manually checked the `body.length` (3271) vs. `Buffer.byteLength` (3275) delta traces to the one `——` (double em-dash) occurrence in the completion line — internally consistent, not a copy-paste artifact.",
+    '- Walked through each of the 11 mutation cases (byte, line-ending, author, comment ID, PR number, head, verdict-hedge, contradictory roll-up, malformed heading, actionable-P3 roll-up, appended text) against the actual matcher logic — each one breaks the exact digest match and correctly falls through to a general-grammar path that rejects the layout, reproducing the fail-closed guarantee the PR claims. This is broader mutation coverage than the #1825 precedent (6 cases), which is a reasonable bar given this layout has more surface area (verdict line + roll-up section) than the earlier "Overall Claude Review" format.',
+    "- Scope check: the registry key is bound to one immutable historical comment (fixed ID + fixed head SHA + fixed digest), so this can't be reused to accept a *different* review body — no bypass risk introduced.",
+    '- Per `scripts/AGENTS.md`, this is a Node root script change with a focused test — `pr-feedback-state.test.mjs` covers it, satisfying the "new Node root scripts must be covered" rule. No shell scripts touched, no ADR needed (correctly marked N/A in the PR body — this extends existing registry data, not architecture).',
+    "",
+    "I could not execute `node --test` locally in this sandboxed review environment (bash tool execution was blocked), so I verified by static trace through the matcher functions rather than by running the suite. The PR body reports 37/37 and 75/75 passing, and CI was still in progress at review time (`CI` workflow: in_progress) — worth confirming it goes green before merge, but nothing in the diff suggests it wouldn't.",
+    "",
+    "### Numbered finding roll-up",
+    "",
+    "No P1/P2/P3 findings — nothing rose above the bar for an inline comment.",
+  ].join("\n"),
+};
+
 function normalizedReadyStateForClaudeReview(
   comment,
   {
@@ -1407,6 +1450,170 @@ test("accepts only the exact frozen PR #1837 no-action Claude LGTM", () => {
     assertEqual(mutatedFeedbackState.counts.blockingTopLevelBotComments, 1);
     assertEqual(mutatedFeedbackState.counts.blockingFindings > 0, true);
   }
+});
+
+test("accepts the observed PR #1848 Overall-verdict clean review", () => {
+  const normalizedReadyState = normalizedReadyStateForClaudeReview(
+    PR_1848_CLEAN_CLAUDE_REVIEW,
+    {
+      number: 1848,
+      title: "fix(agent): accept exact no-action Claude review",
+      headRefOid: PR_1848_HEAD,
+      headUpdatedAt: "2026-08-13T22:09:46Z",
+      reactionCreatedAt: "2026-08-13T23:12:00Z",
+    },
+  );
+  const feedbackState = summarizeFeedbackState(normalizedReadyState);
+
+  assertEqual(normalizedReadyState.required.ready, true);
+  assertEqual(feedbackState.ready, true);
+  assertEqual(feedbackState.counts.blockingTopLevelBotComments, 0);
+  assertEqual(feedbackState.counts.blockingFindings, 0);
+});
+
+test("classifies the post-#1848 Claude prose pattern library", () => {
+  const options = {
+    number: 1848,
+    title: "fix(agent): accept exact no-action Claude review",
+    headRefOid: PR_1848_HEAD,
+    headUpdatedAt: "2026-08-13T22:09:46Z",
+    reactionCreatedAt: "2026-08-14T00:30:00Z",
+  };
+  const comment = (body, overrides = {}) => ({
+    ...PR_1848_CLEAN_CLAUDE_REVIEW,
+    id: 5287403000,
+    created_at: "2026-08-14T00:00:00Z",
+    updated_at: "2026-08-14T00:00:00Z",
+    body,
+    ...overrides,
+  });
+  const expectReady = (label, review, expected) => {
+    const readyState = normalizedReadyStateForClaudeReview(review, options);
+    const feedbackState = summarizeFeedbackState(readyState);
+    assertEqual(
+      feedbackState.ready,
+      expected,
+      `${label}: unexpected feedback-state result`,
+    );
+    assertEqual(
+      feedbackState.counts.blockingTopLevelBotComments,
+      expected ? 0 : 1,
+    );
+  };
+
+  for (const [label, body] of [
+    [
+      "plain LGTM with an explicit no-findings conclusion",
+      `### Review: ${options.title}\n\nVerdict: LGTM\n\nNo inline findings — nothing rose to a P1/P2/P3 flag.`,
+    ],
+    [
+      "no-action P3 observation",
+      `### Review: ${options.title}\n\n**Verdict: LGTM**\n\n1. [P3] None blocking: tests cover the changed paths.\n\nNo P1/P2 findings.`,
+    ],
+    [
+      "Overall verdict with no findings",
+      "### Overall verdict: LGTM\n\nNo P1/P2/P3 findings — clean review.",
+    ],
+  ]) {
+    expectReady(label, comment(body), true);
+  }
+
+  const clean = PR_1848_CLEAN_CLAUDE_REVIEW.body;
+  for (const [label, body] of [
+    [
+      "hedged verdict",
+      clean.replace(
+        "### Overall verdict: LGTM",
+        "### Overall verdict: probably LGTM",
+      ),
+    ],
+    [
+      "duplicate verdict",
+      clean.replace(
+        "### Overall verdict: LGTM",
+        "### Overall verdict: LGTM\n\nVerdict: LGTM",
+      ),
+    ],
+    [
+      "conflicting verdict",
+      clean.replace(
+        "### Overall verdict: LGTM",
+        "### Overall verdict: LGTM\n\nVerdict: CHANGES REQUESTED",
+      ),
+    ],
+    [
+      "bullet-prefixed conflicting verdict",
+      clean.replace(
+        "### Overall verdict: LGTM",
+        "### Overall verdict: LGTM\n\n- Verdict: CHANGES REQUESTED",
+      ),
+    ],
+    [
+      "task-list conflicting verdict",
+      clean.replace(
+        "### Overall verdict: LGTM",
+        "### Overall verdict: LGTM\n\n- [ ] Verdict: CHANGES REQUESTED",
+      ),
+    ],
+    [
+      "missing clean conclusion",
+      clean.replace(
+        "No P1/P2/P3 findings — nothing rose above the bar for an inline comment.",
+        "Review complete.",
+      ),
+    ],
+    [
+      "wrong PR heading",
+      clean.replace("### Code Review — PR #1848", "### Code Review — PR #1849"),
+    ],
+    ["P2 finding", `${clean}\n\n1. [P2] Restore validation.`],
+    ["P2 heading", `${clean}\n\n### [P2] Validation is missing.`],
+    ["P2 table row", `${clean}\n\n| P2 | Validation is missing |`],
+    ["P2 task item", `${clean}\n\n- [ ] [P2] Restore validation.`],
+    ["actionable P3", `${clean}\n\n1. [P3] Fix the fallback.`],
+    ["period-delimited P3", `${clean}\n\n- [ ] [P3]. Fix the fallback.`],
+    [
+      "period-delimited contradictory P3",
+      `${clean}\n\n- [ ] [P3]. Fix the fallback — not a blocker.`,
+    ],
+    ["bare imperative", `${clean}\n\nFix the fallback.`],
+    [
+      "contradictory P3 request",
+      `${clean}\n\n1. [P3] No action requested, but please fix the fallback.`,
+    ],
+    [
+      "contradictory bare P3 request",
+      `${clean}\n\n1. [P3] No action requested, but fix the fallback.`,
+    ],
+    ["action request", `${clean}\n\nAction required: restore validation.`],
+    ["direct request", `${clean}\n\nPlease fix the fallback.`],
+    ["required-fix noun", `${clean}\n\nA fix is required before merge.`],
+    [
+      "passive requirement",
+      `${clean}\n\nThe fallback must be fixed before merge.`,
+    ],
+    [
+      "action appended to clean conclusion",
+      clean.replace(
+        "No P1/P2/P3 findings — nothing rose above the bar for an inline comment.",
+        "No P1/P2 findings — Please fix the fallback before merge.",
+      ),
+    ],
+    ["CRLF transport", clean.replaceAll("\n", "\r\n")],
+    ["fenced suffix", `${clean}\n\n\`\`\`text\nexample\n\`\`\``],
+    ["HTML suffix", `${clean}\n\n<!-- review metadata -->`],
+  ]) {
+    expectReady(label, comment(body), false);
+  }
+
+  expectReady(
+    "pre-library comments still need an exact compatibility entry",
+    comment(clean, {
+      created_at: "2026-08-13T23:08:09Z",
+      updated_at: "2026-08-13T23:08:09Z",
+    }),
+    false,
+  );
 });
 
 test("fails closed on single-field PR #1544 Overall-verdict mutations", () => {

@@ -106,10 +106,16 @@ function hasUnnegatedFailure(value) {
   const scrubbed = String(value ?? "").replace(NEGATED_FAILURE, "");
   return FAILURE_TERM.test(scrubbed);
 }
-function hasReviewContradiction(value) {
-  const body = String(value ?? "")
+function reviewContradictionBody(value) {
+  return String(value ?? "")
     .replace(/[*_~]/g, "")
     .replace(CLEAN_REVIEW_SUMMARY, "");
+}
+function hasReviewActionSignal(value) {
+  return REVIEW_CONTRADICTION.test(reviewContradictionBody(value));
+}
+function hasReviewContradiction(value) {
+  const body = reviewContradictionBody(value);
   return REVIEW_CONTRADICTION.test(body) || hasUnnegatedFailure(body);
 }
 function isBenignChecklistSubject(value) {
@@ -201,8 +207,6 @@ function isExplicitlyCleanClaudeReview(comment, pr) {
   const author = String(comment.author ?? "").toLowerCase();
   if (author !== "claude" && author !== "claude[bot]") return false;
   const body = String(comment.body ?? "");
-  if (claudeReview.matchesCleanReviewCompatibilityRegistry(comment, pr, body))
-    return true;
   const lines = body.split(/\r?\n/);
   if (claudeReview.hasMarkdownCodeBlockIndentation(lines)) return false;
   if (!/^\s*(?:\*\*)?Verdict:\s*LGTM(?:\*\*)?\s*$/im.test(body)) return false;
@@ -227,13 +231,27 @@ function isExplicitlyCleanClaudeReview(comment, pr) {
 }
 function isActionableReviewBotComment(comment, pr) {
   if (!isReviewBotComment(comment)) return false;
-  if (claudeReview.isClaudeLgtmReview(comment))
-    return !isExplicitlyCleanClaudeReview(comment, pr);
-  const overallClaudeReview = claudeReview.classifyOverallClaudeReview(
-    comment,
-    pr,
-  );
-  if (overallClaudeReview !== null) return overallClaudeReview;
+  if (
+    claudeReview.matchesCleanReviewCompatibilityRegistry(
+      comment,
+      pr,
+      String(comment.body ?? ""),
+    )
+  )
+    return false;
+  if (
+    claudeReview.isClaudeLgtmReview(comment) &&
+    isExplicitlyCleanClaudeReview(comment, pr)
+  )
+    return false;
+  const claudeProse = claudeReview.classifyClaudeReviewProse(comment, pr);
+  if (claudeProse !== null)
+    return (
+      claudeProse ||
+      hasReviewActionSignal(
+        claudeReview.withoutCleanReviewConclusionLines(comment.body),
+      )
+    );
   if (hasReviewContradiction(comment.body)) return true;
   const actionableSignal =
     /(?:\[[Pp]3\]|\*\*[Pp]3\*\*|\b[Pp]3\s*(?::|[-—|]|Badge\b))/.test(
