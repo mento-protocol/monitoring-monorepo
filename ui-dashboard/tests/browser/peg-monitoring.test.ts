@@ -271,3 +271,91 @@ test("keeps the board scrollable without pushing the page wider on mobile", asyn
   );
   expect(horizontalOverflow).toBeLessThanOrEqual(1);
 });
+
+test("refreshes the board when a hidden tab resumes", async ({ page }) => {
+  await page.clock.install({ time: new Date(now * 1000 + 20_000) });
+  await page.addInitScript(() => {
+    let visibilityState: DocumentVisibilityState = "visible";
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => visibilityState,
+    });
+    (
+      window as Window & {
+        __setPegTestVisibility?: (state: DocumentVisibilityState) => void;
+      }
+    ).__setPegTestVisibility = (state) => {
+      visibilityState = state;
+      document.dispatchEvent(new Event("visibilitychange"));
+    };
+  });
+  let boardRequests = 0;
+  const resumedAt = now + 120;
+  const resumedPayload = {
+    ...payload,
+    producedAt: resumedAt,
+    packages: payload.packages.map((item) => ({
+      ...item,
+      monitors: item.monitors.map((monitor) => ({
+        ...monitor,
+        breaker:
+          monitor.breaker === null
+            ? null
+            : {
+                ...monitor.breaker,
+                lastUpdatedAt:
+                  monitor.breaker.lastUpdatedAt === null
+                    ? null
+                    : monitor.breaker.lastUpdatedAt + 120,
+                lastStatusUpdatedAt: monitor.breaker.lastStatusUpdatedAt + 120,
+              },
+      })),
+      sources: item.sources.map((source) => ({
+        ...source,
+        observationAt:
+          source.observationAt === null ? null : source.observationAt + 120,
+        fetchedAt: source.fetchedAt === null ? null : source.fetchedAt + 120,
+        lastTradeAt:
+          source.lastTradeAt === null ? null : source.lastTradeAt + 120,
+      })),
+    })),
+  };
+  await page.route("**/api/peg-monitoring", async (route) => {
+    boardRequests += 1;
+    await route.fulfill({
+      json: boardRequests === 1 ? payload : resumedPayload,
+    });
+  });
+  await page.route("**/api/peg-monitoring/alerts", async (route) => {
+    await route.fulfill({
+      json: { from: now - 7 * 86_400, to: now, events: [] },
+    });
+  });
+  await page.goto("/peg-monitoring");
+
+  const aggregate = page.getByTestId("peg-aggregate-status");
+  await expect(aggregate).toHaveText("1 of 1 peg healthy");
+  expect(boardRequests).toBe(1);
+
+  await page.evaluate(() => {
+    (
+      window as Window & {
+        __setPegTestVisibility?: (state: DocumentVisibilityState) => void;
+      }
+    ).__setPegTestVisibility?.("hidden");
+  });
+  await page.clock.runFor(100_000);
+  expect(boardRequests).toBe(1);
+
+  await page.evaluate(() => {
+    (
+      window as Window & {
+        __setPegTestVisibility?: (state: DocumentVisibilityState) => void;
+      }
+    ).__setPegTestVisibility?.("visible");
+  });
+  await page.clock.runFor(1);
+  await expect.poll(() => boardRequests).toBe(2);
+  await expect(aggregate).toHaveText("1 of 1 peg healthy");
+  await expect(aggregate).not.toContainText("latest data is stale");
+});
