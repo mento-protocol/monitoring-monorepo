@@ -7,6 +7,9 @@ import {
   type PegHistoryResponse,
 } from "@/lib/peg-history";
 import {
+  GRAFANA_NO_STORE_HEADERS,
+  grafanaErrorResponse,
+  isGrafanaTimeout,
   readBoundedGrafanaResponse,
   resolveGrafanaEndpoint,
 } from "@/lib/server/grafana-read";
@@ -16,7 +19,6 @@ export const PEG_HISTORY_UPSTREAM_TIMEOUT_MS = 8_000;
 export const PEG_HISTORY_MAX_RESPONSE_BYTES = 512 * 1024;
 export const PEG_HISTORY_DATASOURCE_UID = "grafanacloud-prom";
 
-const responseHeaders = { "Cache-Control": "no-store" } as const;
 const label = z
   .string()
   .min(1)
@@ -71,10 +73,6 @@ const grafanaResponseSchema = z
 type GrafanaFrame = z.infer<typeof grafanaFrameSchema>;
 
 class InvalidUpstreamResponseError extends Error {}
-
-function errorResponse(error: string, status: number): NextResponse {
-  return NextResponse.json({ error }, { status, headers: responseHeaders });
-}
 
 export function resolveGrafanaQueryEndpoint(
   raw: string | undefined,
@@ -210,23 +208,17 @@ function parseGrafanaPoints(
   return points;
 }
 
-function timedOut(error: unknown): boolean {
-  return (
-    error instanceof Error &&
-    (error.name === "TimeoutError" || error.name === "AbortError")
-  );
-}
-
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const input = querySchema.safeParse(
     Object.fromEntries(request.nextUrl.searchParams.entries()),
   );
-  if (!input.success) return errorResponse("Invalid peg history query", 400);
+  if (!input.success)
+    return grafanaErrorResponse("Invalid peg history query", 400);
   const requestNowMs = Date.now();
   const requestedToMs =
     input.data.to === undefined ? requestNowMs : input.data.to * 1_000;
   if (requestedToMs > requestNowMs)
-    return errorResponse("Invalid peg history query", 400);
+    return grafanaErrorResponse("Invalid peg history query", 400);
   const settings = PEG_HISTORY_RANGES[input.data.range];
   const stepMs = settings.stepSeconds * 1_000;
   // Grafana aligns Prometheus range-query bounds to the requested step. Match
@@ -236,7 +228,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const endpoint = resolveGrafanaQueryEndpoint(process.env.GRAFANA_QUERY_URL);
   const token = process.env.GRAFANA_QUERY_TOKEN?.trim();
   if (endpoint === null || !token)
-    return errorResponse("Peg history is not configured", 503);
+    return grafanaErrorResponse("Peg history is not configured", 503);
   const fromMs = toMs - settings.windowSeconds * 1_000;
   try {
     const upstream = await fetch(endpoint, {
@@ -252,7 +244,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       signal: AbortSignal.timeout(PEG_HISTORY_UPSTREAM_TIMEOUT_MS),
     });
     if (!upstream.ok)
-      return errorResponse("Peg history upstream unavailable", 502);
+      return grafanaErrorResponse("Peg history upstream unavailable", 502);
     if (!upstream.headers.get("content-type")?.includes("application/json"))
       throw new InvalidUpstreamResponseError();
     const points = parseGrafanaPoints(
@@ -273,9 +265,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       stepSeconds: settings.stepSeconds,
       points,
     };
-    return NextResponse.json(response, { headers: responseHeaders });
+    return NextResponse.json(response, { headers: GRAFANA_NO_STORE_HEADERS });
   } catch (error) {
-    if (timedOut(error)) return errorResponse("Peg history timed out", 504);
-    return errorResponse("Peg history upstream response is invalid", 502);
+    if (isGrafanaTimeout(error))
+      return grafanaErrorResponse("Peg history timed out", 504);
+    return grafanaErrorResponse(
+      "Peg history upstream response is invalid",
+      502,
+    );
   }
 }

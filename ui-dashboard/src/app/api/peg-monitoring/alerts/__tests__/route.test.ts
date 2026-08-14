@@ -282,7 +282,7 @@ describe("GET /api/peg-monitoring/alerts", () => {
       const query = url.searchParams;
       expect(query.get("from")).toBe(String(FROM_SECONDS));
       expect(query.get("to")).toBe(String(NOW_SECONDS));
-      expect(query.get("limit")).toBe(String(PEG_ALERTS_MAX_STATE_ROWS));
+      expect(query.get("limit")).toBe(String(PEG_ALERTS_MAX_STATE_ROWS + 1));
       expect(query.get("labels_service")).toBe("peg-monitoring");
       expect(new Headers(init?.headers).get("authorization")).toBe(
         "Bearer viewer-token",
@@ -405,6 +405,22 @@ describe("GET /api/peg-monitoring/alerts", () => {
     expect(PEG_ALERTS_MAX_POLICY_RESPONSE_BYTES).toBeLessThan(
       PEG_ALERTS_MAX_STATE_RESPONSE_BYTES,
     );
+  });
+
+  it("fails closed when the state-history sentinel proves truncation", async () => {
+    const sentinelRows = Array.from(
+      { length: PEG_ALERTS_MAX_STATE_ROWS + 1 },
+      (_, index) => ({
+        at: FROM_SECONDS + index,
+        line: stateLine({ fingerprint: `sentinel-${index}` }),
+      }),
+    );
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(json(stateFrame(sentinelRows)))
+      .mockResolvedValueOnce(json(stateFrame([])))
+      .mockResolvedValueOnce(json(policyResponse()));
+
+    expect((await GET()).status).toBe(502);
   });
 
   it("maps upstream timeouts to 504 without exposing credentials", async () => {

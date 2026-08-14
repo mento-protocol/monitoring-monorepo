@@ -1,4 +1,27 @@
+import { NextResponse } from "next/server";
+
 class InvalidGrafanaResponseError extends Error {}
+
+export const GRAFANA_NO_STORE_HEADERS = {
+  "Cache-Control": "no-store",
+} as const;
+
+export function grafanaErrorResponse(
+  error: string,
+  status: number,
+): NextResponse {
+  return NextResponse.json(
+    { error },
+    { status, headers: GRAFANA_NO_STORE_HEADERS },
+  );
+}
+
+export function isGrafanaTimeout(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    (error.name === "TimeoutError" || error.name === "AbortError")
+  );
+}
 
 export function resolveGrafanaEndpoint(
   rawOrigin: string | undefined,

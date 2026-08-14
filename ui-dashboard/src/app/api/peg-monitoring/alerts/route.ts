@@ -4,6 +4,9 @@ import {
   type PegAlertsResponse,
 } from "@/lib/peg-alerts";
 import {
+  GRAFANA_NO_STORE_HEADERS,
+  grafanaErrorResponse,
+  isGrafanaTimeout,
   readBoundedGrafanaResponse,
   resolveGrafanaEndpoint,
 } from "@/lib/server/grafana-read";
@@ -23,12 +26,6 @@ export const PEG_ALERTS_MAX_POLICY_RESPONSE_BYTES = 512 * 1024;
 export const PEG_ALERTS_MAX_EVENTS = 4;
 export const PEG_ALERTS_DATASOURCE_UID = "grafanacloud-prom";
 
-const responseHeaders = { "Cache-Control": "no-store" } as const;
-
-function errorResponse(error: string, status: number): NextResponse {
-  return NextResponse.json({ error }, { status, headers: responseHeaders });
-}
-
 function stateHistoryUrl(
   origin: string | undefined,
   from: number,
@@ -39,7 +36,9 @@ function stateHistoryUrl(
   if (url === null) return null;
   url.searchParams.set("from", String(from));
   url.searchParams.set("to", String(to));
-  url.searchParams.set("limit", String(PEG_ALERTS_MAX_STATE_ROWS));
+  // Ask for one sentinel row beyond the parser cap so a full page proves the
+  // seven-day result was truncated instead of silently losing an incident.
+  url.searchParams.set("limit", String(PEG_ALERTS_MAX_STATE_ROWS + 1));
   url.searchParams.set("labels_service", "peg-monitoring");
   if (kind === "cleared") {
     url.searchParams.set("previous", "Alerting");
@@ -103,13 +102,6 @@ async function fetchJson(
   ) as unknown;
 }
 
-function timedOut(error: unknown): boolean {
-  return (
-    error instanceof Error &&
-    (error.name === "TimeoutError" || error.name === "AbortError")
-  );
-}
-
 export async function GET(): Promise<NextResponse> {
   const to = Math.floor(Date.now() / 1_000);
   const from = to - PEG_ALERTS_WINDOW_SECONDS;
@@ -137,7 +129,7 @@ export async function GET(): Promise<NextResponse> {
     clearedUrl === null ||
     policyUrl === null
   )
-    return errorResponse("Peg alert history is not configured", 503);
+    return grafanaErrorResponse("Peg alert history is not configured", 503);
 
   try {
     const [raisedRaw, clearedRaw, policyRaw] = await Promise.all([
@@ -158,10 +150,13 @@ export async function GET(): Promise<NextResponse> {
       PEG_ALERTS_MAX_EVENTS,
     );
     const response: PegAlertsResponse = { from, to, events };
-    return NextResponse.json(response, { headers: responseHeaders });
+    return NextResponse.json(response, { headers: GRAFANA_NO_STORE_HEADERS });
   } catch (error) {
-    if (timedOut(error))
-      return errorResponse("Peg alert history timed out", 504);
-    return errorResponse("Peg alert history upstream response is invalid", 502);
+    if (isGrafanaTimeout(error))
+      return grafanaErrorResponse("Peg alert history timed out", 504);
+    return grafanaErrorResponse(
+      "Peg alert history upstream response is invalid",
+      502,
+    );
   }
 }
