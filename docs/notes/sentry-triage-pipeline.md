@@ -3,7 +3,7 @@ title: Sentry Triage Pipeline
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-10
+last_verified: 2026-08-14
 scope: ci/process
 doc_type: runbook
 review_interval_days: 90
@@ -76,10 +76,11 @@ starts, and regardless of what the branch's workflow file says — so a feature-
 `workflow_dispatch` can no longer reach the pipeline's secrets by stripping the
 in-workflow `if: github.ref == 'refs/heads/main'` guard. Still select `main`; the
 environment is the backstop, not a licence to dispatch off-main. The shared
-`CLAUDE_CODE_OAUTH_TOKEN` deliberately stays a repo-level secret (it is consumed
-by `.github/workflows/claude.yml` on feature-branch `pull_request` events, which a
-main-only environment would break); it is inference-only, so its residual
-exposure is bounded to inference-quota abuse.
+`CLAUDE_CODE_OAUTH_TOKEN` stays a repo-level secret shared with
+`.github/workflows/claude.yml`. ADR 0064 retired that workflow's direct
+feature-branch `pull_request` consumer; moving the shared token now needs a
+separate Terraform-owned environment rollout covering both consumers. It is
+inference-only, so its residual authority is bounded to inference use.
 
 ## What happens to an issue
 
@@ -1541,7 +1542,8 @@ resources on the `sentry-pipeline` GitHub Environment
 (`terraform/github-environment.tf`), not repo-level Actions secrets. They are
 still count-gated on the same tfvars, so an unset value plans and applies cleanly
 and the stage stays inert. `CLAUDE_CODE_OAUTH_TOKEN` remains a repo-level secret
-(`terraform/github-secrets.tf`) because it is shared with `claude.yml`. Adding a
+(`terraform/github-secrets.tf`) shared with the protected-main `claude.yml`
+consumer and the Sentry agent. Adding a
 new Sentry-pipeline secret means: add its `github_actions_environment_secret`
 here, and add `environment: sentry-pipeline` to every job that reads it.
 
@@ -1560,7 +1562,7 @@ To pause ingest/triage, autofix, or archive, set that stage's named
 visible projection-skipped outcome instead of creating owning-repo issues.
 Never widen the read-only token or reuse it for archive. Treat
 `CLAUDE_CODE_OAUTH_TOKEN` replacement as a shared-secret rotation and verify
-the existing Claude PR workflow after applying it.
+the protected-main Claude review workflow after applying it.
 
 The **settings audit** row is not a pipeline stage — it powers
 `.github/workflows/platform-settings-drift.yml`, a daily read-only check

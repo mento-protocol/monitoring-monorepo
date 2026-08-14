@@ -3,7 +3,7 @@ title: Terraform Stacks
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-13
+last_verified: 2026-08-14
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -352,8 +352,9 @@ pattern, admin bypass disabled, and — deliberately, the pipeline is unattended
 no reviewer or wait timer. Every platform apply reconciles its policy and
 secrets. Every secret-bearing Sentry job declares it, so those secrets are
 reachable only from `main`, server-enforced even on a branch-modified
-`workflow_dispatch`. `CLAUDE_CODE_OAUTH_TOKEN` intentionally stays repo-level
-for `claude.yml`.
+`workflow_dispatch`. `CLAUDE_CODE_OAUTH_TOKEN` stays repo-level for the Sentry
+agent and protected-main `claude.yml` consumers; ADR 0050 records the required
+IaC rollout if that shared token moves to an Environment.
 
 Never recreate retired `Production`/`production` names or manage
 Environment secrets outside their owning IaC/integration path. A new workflow

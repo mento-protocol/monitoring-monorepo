@@ -1,0 +1,25 @@
+name: Claude Review Request
+
+on:
+  # This lane carries no secret, effective repository permission, checkout, or
+  # PR-controlled output. Its completed run is only a signal for the
+  # protected-main Claude workflow, which resolves and revalidates the live PR.
+  pull_request:
+    types: [opened, ready_for_review]
+    paths-ignore:
+      - "**/*.md"
+
+permissions: {}
+
+jobs:
+  request:
+    if: |
+      github.event.pull_request.draft != true &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.actor != 'dependabot[bot]' &&
+      !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - name: Request protected-main Claude review
+        run: echo "Review request accepted for trusted resolution."

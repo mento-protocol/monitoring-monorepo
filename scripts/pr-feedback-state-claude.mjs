@@ -14,6 +14,18 @@ const OVERALL_VERIFICATION_HEADING =
   /^###\s+Verification notes \(no issues found\)$/;
 const OVERALL_NOTE = /^([1-9]\d*)\.\s+\*\*(.{1,200})\*\*(?:\s+(.{1,4000}))?$/;
 const OVERALL_TERMINAL_CLEAN = /^No P1\/P2\/P3 findings\s+—\s+(.{1,500})$/;
+const CLAUDE_REVIEW_ATTESTATION_SIGNAL =
+  /(?:mento-claude-(?:clean-)?review|MENTO CLAUDE(?: CLEAN)? REVIEW)/i;
+const CLEAN_REVIEW_ATTESTATION =
+  /^<!-- mento-claude-clean-review:v1 -->\nMENTO CLAUDE CLEAN REVIEW v1\nPR: ([1-9]\d*)\nHEAD: ([0-9a-f]{40})\nVERDICT: CLEAN\nFINDINGS: 0\nFOLLOW-UP: NONE\nEND MENTO CLAUDE CLEAN REVIEW v1$/;
+const CLEAN_REVIEW_PROTOCOL_PREFIX =
+  /^<!-- mento-claude-clean-review:v1 -->\nMENTO CLAUDE CLEAN REVIEW v1\nPR: [1-9]\d*\nHEAD: ([0-9a-f]{40})(?=\n|$)/;
+const NON_CLEAN_REVIEW_PROTOCOL_PREFIX =
+  /^<!-- mento-claude-review:v1 -->\nMENTO CLAUDE REVIEW v1\nPR: [1-9]\d*\nHEAD: ([0-9a-f]{40})(?=\n|$)/;
+export const CLAUDE_LEGACY_CLEAN_REVIEW_CUTOFF = "2026-08-14T00:00:00Z";
+const CLAUDE_LEGACY_CLEAN_REVIEW_CUTOFF_MS = Date.parse(
+  CLAUDE_LEGACY_CLEAN_REVIEW_CUTOFF,
+);
 const CLEAN_REVIEW_COMPATIBILITY = new Map([
   [
     "039923882eee9f880165543ef85e1ca251d84b995a78647b41c2b788d02a4885",
@@ -107,6 +119,64 @@ export function isClaudeLgtmReview(comment) {
       comment?.body ?? "",
     )
   );
+}
+
+function isCanonicalGithubUtcSecondBeforeCutoff(value) {
+  if (
+    typeof value !== "string" ||
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(value)
+  ) {
+    return false;
+  }
+  const timestamp = Date.parse(value);
+  return (
+    Number.isFinite(timestamp) &&
+    new Date(timestamp).toISOString().replace(".000Z", "Z") === value &&
+    timestamp < CLAUDE_LEGACY_CLEAN_REVIEW_CUTOFF_MS
+  );
+}
+
+export function isLegacyClaudeCleanReviewBeforeCutoff(comment) {
+  if (!isCanonicalGithubUtcSecondBeforeCutoff(comment?.createdAt)) return false;
+  return (
+    comment?.updatedAt === null ||
+    comment?.updatedAt === undefined ||
+    isCanonicalGithubUtcSecondBeforeCutoff(comment.updatedAt)
+  );
+}
+
+export function isClaudeCleanReviewAttestationBody(comment, pr) {
+  if (comment?.author !== "claude[bot]" || comment?.authorType !== "Bot")
+    return false;
+
+  const match = String(comment?.body ?? "").match(CLEAN_REVIEW_ATTESTATION);
+  return (
+    match !== null &&
+    match[1] === String(pr?.number ?? "") &&
+    match[2] === String(pr?.headRefOid ?? "")
+  );
+}
+
+export function claudeReviewProtocolHeadSha(body) {
+  const source = String(body ?? "");
+  return (
+    source.match(CLEAN_REVIEW_PROTOCOL_PREFIX)?.[1] ??
+    source.match(NON_CLEAN_REVIEW_PROTOCOL_PREFIX)?.[1] ??
+    null
+  );
+}
+
+export function isExactClaudeCleanReviewAttestation(comment, pr) {
+  return (
+    comment?.claudeReviewProvenanceVerified === true &&
+    isClaudeCleanReviewAttestationBody(comment, pr)
+  );
+}
+
+export function classifyClaudeCleanReviewAttestation(comment, pr) {
+  if (!CLAUDE_REVIEW_ATTESTATION_SIGNAL.test(String(comment?.body ?? "")))
+    return null;
+  return !isExactClaudeCleanReviewAttestation(comment, pr);
 }
 
 function isBoundedRepoRelativePath(value) {

@@ -3,7 +3,7 @@ title: PR Operating Card
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-13
+last_verified: 2026-08-14
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -135,6 +135,14 @@ Solution` (approach before implementation detail). PRs open **ready for
    reclassification before starting a sixth. Authority:
    [`agent-issue-workflow.md`](agent-issue-workflow.md) for the deferral and
    issue-lifecycle rules.
+
+   When a current-head Claude follow-up is useful, request it with the exact
+   `@claude review` command from an `OWNER` or `MEMBER` account. Automatic
+   open/ready review and this command use the same ADR 0064 attestation path.
+   A clean attestation clears only Claude's top-level surface; sweep and reply
+   to every inline or review-thread item independently. The feedback probe
+   verifies the nonexpired protected-run sentinel live; retry an artifact or
+   workflow-run API failure instead of treating it as blocker evidence.
 
 7. **Ready-state.** Before signalling all-clear, run both projections with
    `<BASE_REPO>` resolved from the PR URL — as the `babysit-pr` skill does —

@@ -5,6 +5,10 @@ import {
   summarizeFeedbackState,
 } from "./pr-feedback-state-core.mjs";
 import {
+  CLAUDE_LEGACY_CLEAN_REVIEW_CUTOFF,
+  isExactClaudeCleanReviewAttestation,
+} from "./pr-feedback-state-claude.mjs";
+import {
   parseFeedbackArgs,
   renderFeedbackState,
 } from "./pr-feedback-state.mjs";
@@ -353,7 +357,7 @@ function normalizedReadyStateForClaudeReview(
       statusCheckRollup: [],
       reviews: [],
     },
-    issueComments: [comment],
+    issueComments: Array.isArray(comment) ? comment : [comment],
     reactions: [
       {
         content: "+1",
@@ -1714,6 +1718,594 @@ ${findings.join("\n")}
 #### Roll-up
 ${rollup.join("\n")}`;
 }
+
+test("legacy Claude clean formats require a bounded server creation time", () => {
+  assertEqual(CLAUDE_LEGACY_CLEAN_REVIEW_CUTOFF, "2026-08-14T00:00:00Z");
+  const legacyBody = structuredClaudeReview({
+    title: "fix(deps): upgrade sharp past vulnerable libvips",
+  });
+  const lgtmCases = [
+    ["before cutoff", "2026-08-13T23:59:59Z", true],
+    ["at cutoff", CLAUDE_LEGACY_CLEAN_REVIEW_CUTOFF, false],
+    ["after cutoff", "2026-08-14T00:00:01Z", false],
+    ["missing creation time", undefined, false],
+    ["malformed creation time", "2026-08-14", false],
+    ["offset creation time", "2026-08-13T23:00:00-01:00", false],
+    ["impossible creation time", "2026-02-30T12:00:00Z", false],
+  ];
+  let fixtureId = 5300001400;
+  for (const [label, createdAt, expectedReady] of lgtmCases) {
+    const comment = {
+      ...PR_1431_CLEAN_CLAUDE_REVIEW,
+      id: fixtureId++,
+      body: legacyBody,
+      created_at: createdAt,
+      updated_at:
+        createdAt === "2026-08-13T23:59:59Z"
+          ? "2026-08-13T23:59:59Z"
+          : PR_1431_CLEAN_CLAUDE_REVIEW.updated_at,
+    };
+    const state = normalizedReadyStateForClaudeReview(comment);
+    assertEqual(
+      summarizeFeedbackState(state).ready,
+      expectedReady,
+      `LGTM grammar: ${label}`,
+    );
+  }
+
+  const editedLegacyState = normalizedReadyStateForClaudeReview({
+    ...PR_1431_CLEAN_CLAUDE_REVIEW,
+    id: fixtureId,
+    body: legacyBody,
+    created_at: "2026-08-13T23:59:59Z",
+    updated_at: "2026-08-14T00:00:00Z",
+  });
+  assertEqual(
+    summarizeFeedbackState(editedLegacyState).ready,
+    false,
+    "an edited legacy comment cannot cross the cutoff",
+  );
+
+  const exactRegistryOptions = {
+    number: 1544,
+    title: "fix(tooling): validate navigation fixtures in local gate",
+    headRefOid: PR_1544_HEAD,
+    headUpdatedAt: "2026-07-23T15:52:22Z",
+    reactionCreatedAt: "2026-07-23T16:05:00Z",
+  };
+  for (const [label, createdAt] of [
+    ["post-cutoff", "2026-08-14T00:00:01Z"],
+    ["missing", undefined],
+  ]) {
+    const comment = {
+      ...PR_1544_CLEAN_CLAUDE_REVIEW,
+      created_at: createdAt,
+    };
+    const state = normalizedReadyStateForClaudeReview(
+      comment,
+      exactRegistryOptions,
+    );
+    assertEqual(
+      summarizeFeedbackState(state).ready,
+      true,
+      `exact Overall registry remains timestamp-independent: ${label}`,
+    );
+  }
+});
+
+const CLAUDE_ATTESTATION_HEAD = "a".repeat(40);
+const CLAUDE_CLEAN_REVIEW_ATTESTATION = `<!-- mento-claude-clean-review:v1 -->
+MENTO CLAUDE CLEAN REVIEW v1
+PR: 1567
+HEAD: ${CLAUDE_ATTESTATION_HEAD}
+VERDICT: CLEAN
+FINDINGS: 0
+FOLLOW-UP: NONE
+END MENTO CLAUDE CLEAN REVIEW v1`;
+
+function claudeAttestationComment(
+  body = CLAUDE_CLEAN_REVIEW_ATTESTATION,
+  user = { login: "claude[bot]", type: "Bot" },
+) {
+  return {
+    id: 5300001567,
+    html_url:
+      "https://github.com/mento-protocol/monitoring-monorepo/pull/1567#issuecomment-5300001567",
+    created_at: "2026-08-14T01:01:00Z",
+    updated_at: "2026-08-14T01:01:00Z",
+    user,
+    body,
+    claudeReviewProvenanceVerified: true,
+  };
+}
+
+test("accepts only the exact current-head Claude clean-review attestation", () => {
+  const options = {
+    number: 1567,
+    title: "feat(agent): attest clean Claude reviews",
+    headRefOid: CLAUDE_ATTESTATION_HEAD,
+    headUpdatedAt: "2026-08-14T01:00:00Z",
+    reactionCreatedAt: "2026-08-14T01:02:00Z",
+  };
+  const normalizedReadyState = normalizedReadyStateForClaudeReview(
+    claudeAttestationComment(),
+    options,
+  );
+  const feedbackState = summarizeFeedbackState(normalizedReadyState);
+
+  assertEqual(normalizedReadyState.required.ready, true);
+  assertEqual(feedbackState.ready, true);
+  assertEqual(feedbackState.counts.blockingTopLevelBotComments, 0);
+  assertEqual(
+    isExactClaudeCleanReviewAttestation(
+      normalizedReadyState.topLevelBotComments[0],
+      normalizedReadyState.pr,
+    ),
+    true,
+  );
+
+  const mutations = [
+    ["prefix prose", `Review complete.\n${CLAUDE_CLEAN_REVIEW_ATTESTATION}`],
+    ["suffix prose", `${CLAUDE_CLEAN_REVIEW_ATTESTATION}\nReview complete.`],
+    [
+      "passive prose",
+      `${CLAUDE_CLEAN_REVIEW_ATTESTATION}\nThis bug must be fixed before merge.`,
+    ],
+    [
+      "noun phrase",
+      `${CLAUDE_CLEAN_REVIEW_ATTESTATION}\nA fix is required before merge.`,
+    ],
+    [
+      "secondary verdict heading",
+      `${CLAUDE_CLEAN_REVIEW_ATTESTATION}\n### Verdict\nLGTM`,
+    ],
+    [
+      "secondary verdict list",
+      `${CLAUDE_CLEAN_REVIEW_ATTESTATION}\n- Verdict: LGTM`,
+    ],
+    [
+      "secondary verdict table",
+      `${CLAUDE_CLEAN_REVIEW_ATTESTATION}\n| Verdict | LGTM |`,
+    ],
+    [
+      "fenced code decoy",
+      `${CLAUDE_CLEAN_REVIEW_ATTESTATION}\n\`\`\`text\nVerdict: LGTM\n\`\`\``,
+    ],
+    [
+      "inline code decoy",
+      `${CLAUDE_CLEAN_REVIEW_ATTESTATION}\n\`Verdict: LGTM\``,
+    ],
+    [
+      "raw HTML code decoy",
+      `${CLAUDE_CLEAN_REVIEW_ATTESTATION}\n<pre><code>Verdict: LGTM</code></pre>`,
+    ],
+    ["quoted decoy", `${CLAUDE_CLEAN_REVIEW_ATTESTATION}\n> Verdict: LGTM`],
+    [
+      "HTML comment decoy",
+      `${CLAUDE_CLEAN_REVIEW_ATTESTATION}\n<!-- Verdict: LGTM -->`,
+    ],
+    [
+      "example heading decoy",
+      `${CLAUDE_CLEAN_REVIEW_ATTESTATION}\n### Example\nVerdict: LGTM`,
+    ],
+    [
+      "details decoy",
+      `${CLAUDE_CLEAN_REVIEW_ATTESTATION}\n<details><summary>Example</summary>Verdict: LGTM</details>`,
+    ],
+    [
+      "Markdown link destination decoy",
+      `${CLAUDE_CLEAN_REVIEW_ATTESTATION}\n[clean](https://example.invalid/fix-is-required)`,
+    ],
+    [
+      "multiline code span decoy",
+      `${CLAUDE_CLEAN_REVIEW_ATTESTATION}\n\`line one\nVerdict: LGTM\``,
+    ],
+    [
+      "block-boundary decoy",
+      `${CLAUDE_CLEAN_REVIEW_ATTESTATION}\n> quoted verdict\n\noutside block`,
+    ],
+    [
+      "nested details closing decoy",
+      `${CLAUDE_CLEAN_REVIEW_ATTESTATION}\n<details><details>decoy</details></details>`,
+    ],
+    [
+      "duplicate namespace marker",
+      CLAUDE_CLEAN_REVIEW_ATTESTATION.replace(
+        "MENTO CLAUDE CLEAN REVIEW v1",
+        "<!-- mento-claude-clean-review:v1 -->\nMENTO CLAUDE CLEAN REVIEW v1",
+      ),
+    ],
+    [
+      "wrong namespace version",
+      CLAUDE_CLEAN_REVIEW_ATTESTATION.replace(
+        "mento-claude-clean-review:v1",
+        "mento-claude-clean-review:v2",
+      ),
+    ],
+    [
+      "wrong PR",
+      CLAUDE_CLEAN_REVIEW_ATTESTATION.replace("PR: 1567", "PR: 1568"),
+    ],
+    [
+      "zero-padded PR",
+      CLAUDE_CLEAN_REVIEW_ATTESTATION.replace("PR: 1567", "PR: 01567"),
+    ],
+    [
+      "uppercase head",
+      CLAUDE_CLEAN_REVIEW_ATTESTATION.replace(
+        CLAUDE_ATTESTATION_HEAD,
+        CLAUDE_ATTESTATION_HEAD.toUpperCase(),
+      ),
+    ],
+    [
+      "short head",
+      CLAUDE_CLEAN_REVIEW_ATTESTATION.replace(
+        CLAUDE_ATTESTATION_HEAD,
+        "a".repeat(39),
+      ),
+    ],
+    [
+      "non-clean verdict",
+      CLAUDE_CLEAN_REVIEW_ATTESTATION.replace(
+        "VERDICT: CLEAN",
+        "VERDICT: LGTM",
+      ),
+    ],
+    [
+      "nonzero findings",
+      CLAUDE_CLEAN_REVIEW_ATTESTATION.replace("FINDINGS: 0", "FINDINGS: 1"),
+    ],
+    [
+      "follow-up prose",
+      CLAUDE_CLEAN_REVIEW_ATTESTATION.replace(
+        "FOLLOW-UP: NONE",
+        "FOLLOW-UP: LATER",
+      ),
+    ],
+    [
+      "wrong ending",
+      CLAUDE_CLEAN_REVIEW_ATTESTATION.replace(
+        "END MENTO CLAUDE CLEAN REVIEW v1",
+        "END MENTO CLAUDE CLEAN REVIEW v2",
+      ),
+    ],
+    ["CRLF", CLAUDE_CLEAN_REVIEW_ATTESTATION.replaceAll("\n", "\r\n")],
+    ["trailing line feed", `${CLAUDE_CLEAN_REVIEW_ATTESTATION}\n`],
+  ];
+
+  let fixtureId = 5300001568;
+  for (const [label, body] of mutations) {
+    const mutatedReadyState = normalizedReadyStateForClaudeReview(
+      { ...claudeAttestationComment(body), id: fixtureId++ },
+      options,
+    );
+    const mutatedFeedbackState = summarizeFeedbackState(mutatedReadyState);
+    assertEqual(
+      mutatedFeedbackState.ready,
+      false,
+      `${label}: expected malformed attestation to fail closed`,
+    );
+    assertEqual(mutatedFeedbackState.counts.blockingTopLevelBotComments, 1);
+  }
+});
+
+test("binds clean-review attestations to the Claude App bot identity", () => {
+  const pr = { number: 1567, headRefOid: CLAUDE_ATTESTATION_HEAD };
+  for (const comment of [
+    {
+      author: "claude",
+      authorType: "Bot",
+      body: CLAUDE_CLEAN_REVIEW_ATTESTATION,
+      claudeReviewProvenanceVerified: true,
+    },
+    {
+      author: "github-actions[bot]",
+      authorType: "Bot",
+      body: CLAUDE_CLEAN_REVIEW_ATTESTATION,
+      claudeReviewProvenanceVerified: true,
+    },
+    {
+      author: "claude[bot]",
+      authorType: "User",
+      body: CLAUDE_CLEAN_REVIEW_ATTESTATION,
+      claudeReviewProvenanceVerified: true,
+    },
+    {
+      author: "claude[bot]",
+      authorType: "Bot",
+      body: CLAUDE_CLEAN_REVIEW_ATTESTATION,
+      claudeReviewProvenanceVerified: false,
+    },
+  ]) {
+    assertEqual(isExactClaudeCleanReviewAttestation(comment, pr), false);
+  }
+
+  const legacyClaudeReadyState = normalizedReadyStateForClaudeReview(
+    claudeAttestationComment(CLAUDE_CLEAN_REVIEW_ATTESTATION, {
+      login: "claude",
+      type: "Bot",
+    }),
+    {
+      number: 1567,
+      headRefOid: CLAUDE_ATTESTATION_HEAD,
+      headUpdatedAt: "2026-08-14T01:00:00Z",
+      reactionCreatedAt: "2026-08-14T01:02:00Z",
+    },
+  );
+  assertEqual(summarizeFeedbackState(legacyClaudeReadyState).ready, false);
+});
+
+test("preserves attestation bytes through REST issue-comment normalization", () => {
+  const rawBody = CLAUDE_CLEAN_REVIEW_ATTESTATION.replaceAll("\n", "\r\n");
+  const normalizedReadyState = normalizedReadyStateForClaudeReview(
+    claudeAttestationComment(rawBody),
+    {
+      number: 1567,
+      headRefOid: CLAUDE_ATTESTATION_HEAD,
+      headUpdatedAt: "2026-08-14T01:00:00Z",
+      reactionCreatedAt: "2026-08-14T01:02:00Z",
+    },
+  );
+
+  assertEqual(normalizedReadyState.topLevelBotComments[0].body, rawBody);
+  assertEqual(
+    isExactClaudeCleanReviewAttestation(
+      normalizedReadyState.topLevelBotComments[0],
+      normalizedReadyState.pr,
+    ),
+    false,
+  );
+  assertEqual(summarizeFeedbackState(normalizedReadyState).ready, false);
+});
+
+test("handles multiple clean-review attestation comments without hiding conflicts", () => {
+  const currentOptions = {
+    number: 1567,
+    title: "feat(agent): attest clean Claude reviews",
+    headRefOid: CLAUDE_ATTESTATION_HEAD,
+    headUpdatedAt: "2026-08-14T01:00:00Z",
+    reactionCreatedAt: "2026-08-14T01:04:00Z",
+  };
+  const current = claudeAttestationComment();
+  const duplicate = {
+    ...claudeAttestationComment(),
+    id: 5300001568,
+    created_at: "2026-08-14T01:02:00Z",
+    updated_at: "2026-08-14T01:02:00Z",
+  };
+  const duplicatedReadyState = normalizedReadyStateForClaudeReview(
+    [current, duplicate],
+    currentOptions,
+  );
+  assertEqual(summarizeFeedbackState(duplicatedReadyState).ready, true);
+
+  const conflictingReadyState = normalizedReadyStateForClaudeReview(
+    [
+      current,
+      {
+        ...duplicate,
+        body: CLAUDE_CLEAN_REVIEW_ATTESTATION.replace(
+          "FINDINGS: 0",
+          "FINDINGS: 1",
+        ),
+      },
+    ],
+    currentOptions,
+  );
+  assertEqual(summarizeFeedbackState(conflictingReadyState).ready, false);
+  assertEqual(
+    summarizeFeedbackState(conflictingReadyState).counts
+      .blockingTopLevelBotComments,
+    1,
+  );
+});
+
+test("treats the deterministic non-clean Claude envelope as blocking", () => {
+  const body = `<!-- mento-claude-review:v1 -->
+MENTO CLAUDE REVIEW v1
+PR: 1567
+HEAD: ${CLAUDE_ATTESTATION_HEAD}
+VERDICT: NEEDS DISCUSSION
+REVIEW JSON:
+\`\`\`json
+{"verdict":"needs_discussion","findings":[],"follow_up":"Confirm the intended trust boundary."}
+\`\`\`
+END MENTO CLAUDE REVIEW v1`;
+  const readyStateWithFinding = normalizedReadyStateForClaudeReview(
+    claudeAttestationComment(body),
+    {
+      number: 1567,
+      headRefOid: CLAUDE_ATTESTATION_HEAD,
+      headUpdatedAt: "2026-08-14T01:00:00Z",
+      reactionCreatedAt: "2026-08-14T01:02:00Z",
+    },
+  );
+
+  const feedbackState = summarizeFeedbackState(readyStateWithFinding);
+  assertEqual(feedbackState.ready, false);
+  assertEqual(feedbackState.counts.blockingTopLevelBotComments, 1);
+
+  const staleHeadFeedback = summarizeFeedbackState(
+    normalizedReadyStateForClaudeReview(
+      claudeAttestationComment(
+        body.replace(CLAUDE_ATTESTATION_HEAD, "b".repeat(40)),
+      ),
+      {
+        number: 1567,
+        headRefOid: CLAUDE_ATTESTATION_HEAD,
+        headUpdatedAt: "2026-08-14T01:00:00Z",
+        reactionCreatedAt: "2026-08-14T01:02:00Z",
+      },
+    ),
+  );
+  assertEqual(staleHeadFeedback.ready, true);
+  assertEqual(staleHeadFeedback.counts.blockingTopLevelBotComments, 0);
+});
+
+test("binds a late protocol comment to its stale head beside a current attestation", () => {
+  const current = claudeAttestationComment();
+  const normalizedReadyState = normalizedReadyStateForClaudeReview(
+    [
+      {
+        ...current,
+        id: 5300001500,
+        body: CLAUDE_CLEAN_REVIEW_ATTESTATION.replace(
+          CLAUDE_ATTESTATION_HEAD,
+          "b".repeat(40),
+        ),
+        created_at: "2026-08-14T01:01:30Z",
+        updated_at: "2026-08-14T01:01:30Z",
+      },
+      current,
+    ],
+    {
+      number: 1567,
+      title: "feat(agent): attest clean Claude reviews",
+      headRefOid: CLAUDE_ATTESTATION_HEAD,
+      headUpdatedAt: "2026-08-14T01:00:00Z",
+      reactionCreatedAt: "2026-08-14T01:02:00Z",
+    },
+  );
+
+  const feedbackState = summarizeFeedbackState(normalizedReadyState);
+  assertEqual(feedbackState.ready, true);
+  assertEqual(feedbackState.counts.topLevelBotComments, 2);
+  assertEqual(feedbackState.counts.blockingTopLevelBotComments, 0);
+  assertEqual(feedbackState.findings[0].state, "stale");
+});
+
+test("malformed protocol comments block only on their bound head", () => {
+  const boundHead = "b".repeat(40);
+  const malformed = {
+    ...claudeAttestationComment(
+      CLAUDE_CLEAN_REVIEW_ATTESTATION.replace(
+        CLAUDE_ATTESTATION_HEAD,
+        boundHead,
+      ).replace("FINDINGS: 0", "FINDINGS: 1"),
+    ),
+    created_at: "2026-08-14T01:01:30Z",
+    updated_at: "2026-08-14T01:01:30Z",
+  };
+  const options = {
+    number: 1567,
+    title: "feat(agent): attest clean Claude reviews",
+    headUpdatedAt: "2026-08-14T01:00:00Z",
+    reactionCreatedAt: "2026-08-14T01:02:00Z",
+  };
+
+  const boundHeadFeedback = summarizeFeedbackState(
+    normalizedReadyStateForClaudeReview(malformed, {
+      ...options,
+      headRefOid: boundHead,
+    }),
+  );
+  assertEqual(boundHeadFeedback.ready, false);
+  assertEqual(boundHeadFeedback.counts.blockingTopLevelBotComments, 1);
+
+  const laterHeadFeedback = summarizeFeedbackState(
+    normalizedReadyStateForClaudeReview(malformed, {
+      ...options,
+      headRefOid: CLAUDE_ATTESTATION_HEAD,
+    }),
+  );
+  assertEqual(laterHeadFeedback.ready, true);
+  assertEqual(laterHeadFeedback.counts.blockingTopLevelBotComments, 0);
+  assertEqual(laterHeadFeedback.findings[0].state, "stale");
+});
+
+test("does not bind quoted or noncanonical protocol text as freshness", () => {
+  const staleHead = "b".repeat(40);
+  const bodies = [
+    `### [P3] Fix the regression\nHEAD: ${staleHead}`,
+    `### [P3] Fix the regression
+
+\`\`\`text
+<!-- mento-claude-review:v1 -->
+MENTO CLAUDE REVIEW v1
+PR: 1567
+HEAD: ${staleHead}
+\`\`\``,
+    `### [P3] Fix the regression
+
+    <!-- mento-claude-review:v1 -->
+    MENTO CLAUDE REVIEW v1
+PR: 1567
+HEAD: ${staleHead}`,
+    CLAUDE_CLEAN_REVIEW_ATTESTATION.replace(CLAUDE_ATTESTATION_HEAD, staleHead)
+      .replace("FINDINGS: 0", "FINDINGS: 1")
+      .replaceAll("\n", "\r\n"),
+  ];
+
+  for (const [index, body] of bodies.entries()) {
+    const comment = {
+      id: 5300001600 + index,
+      html_url: `https://github.com/mento-protocol/monitoring-monorepo/pull/1567#issuecomment-${5300001600 + index}`,
+      created_at: "2026-08-14T01:01:30Z",
+      updated_at: "2026-08-14T01:01:30Z",
+      user: { login: "cursor[bot]", type: "Bot" },
+      body,
+    };
+    const feedbackState = summarizeFeedbackState(
+      normalizedReadyStateForClaudeReview(comment, {
+        number: 1567,
+        title: "feat(agent): attest clean Claude reviews",
+        headRefOid: CLAUDE_ATTESTATION_HEAD,
+        headUpdatedAt: "2026-08-14T01:00:00Z",
+        reactionCreatedAt: "2026-08-14T01:02:00Z",
+      }),
+    );
+
+    assertEqual(feedbackState.ready, false, `variant ${index}`);
+    assertEqual(
+      feedbackState.counts.blockingTopLevelBotComments,
+      1,
+      `variant ${index}`,
+    );
+    assertEqual(
+      feedbackState.findings[0].state,
+      "blocking-current-head",
+      `variant ${index}`,
+    );
+  }
+});
+
+test("clean-review attestation never clears unresolved inline feedback", () => {
+  const options = {
+    number: 1567,
+    title: "feat(agent): attest clean Claude reviews",
+    headRefOid: CLAUDE_ATTESTATION_HEAD,
+    headUpdatedAt: "2026-08-14T01:00:00Z",
+    reactionCreatedAt: "2026-08-14T01:02:00Z",
+  };
+  const normalizedReadyState = normalizedReadyStateForClaudeReview(
+    claudeAttestationComment(),
+    options,
+  );
+
+  const unresolvedThreadState = {
+    ...normalizedReadyState,
+    unresolvedReviewThreads: [
+      {
+        id: "thread-1567",
+        path: "scripts/claude-review-workflow.mjs",
+        line: 1,
+      },
+    ],
+  };
+  assertEqual(summarizeFeedbackState(unresolvedThreadState).ready, false);
+
+  const unrepliedCommentState = {
+    ...normalizedReadyState,
+    unrepliedRootReviewComments: [
+      {
+        id: 5300001600,
+        path: "scripts/claude-review-workflow.mjs",
+        line: 1,
+      },
+    ],
+  };
+  assertEqual(summarizeFeedbackState(unrepliedCommentState).ready, false);
+});
 
 test("accepts bounded clean Claude reviews for unrelated ordinary PR titles", () => {
   const cleanReviews = [

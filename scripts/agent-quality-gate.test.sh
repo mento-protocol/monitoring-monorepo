@@ -1988,6 +1988,16 @@ assert_contains "- pnpm docs:garden:test (documentation garden workflow changed)
 assert_contains "- pnpm docs:navigation-eval:test (documentation navigation scheduler workflow changed)"
 assert_contains "node scripts/check-adr-reminder.mjs"
 
+run_gate ".github/workflows/claude.yml"
+assert_contains "- node scripts/claude-review-workflow.test.mjs (Claude review workflow changed)"
+assert_contains "- pnpm pr:feedback-state:test (Claude review attestation consumer changed)"
+assert_contains "- pnpm pr:ready-state:test (Claude review live provenance consumer changed)"
+
+run_gate ".github/workflows/claude-review-request.yml"
+assert_contains "- node scripts/claude-review-workflow.test.mjs (Claude review workflow changed)"
+assert_contains "- pnpm pr:feedback-state:test (Claude review attestation consumer changed)"
+assert_contains "- pnpm pr:ready-state:test (Claude review live provenance consumer changed)"
+
 run_gate ".lighthouserc.cjs"
 assert_contains "- node scripts/lighthouse-config.test.mjs (Lighthouse CI budget config changed)"
 
@@ -4009,7 +4019,56 @@ run_gate ".github/workflows/ci.yml"
 assert_contains "- node scripts/check-sentry-suites-in-ci.test.mjs (central CI workflow changed)"
 
 run_gate "scripts/pr-feedback-state-claude.mjs"
+assert_contains "- node scripts/claude-review-workflow.test.mjs (Claude review attestation classifier changed)"
 assert_contains "- pnpm pr:feedback-state:test (PR feedback-state helper changed)"
+assert_contains "- pnpm pr:ready-state:test (Claude review attestation classifier changed)"
+
+run_gate "scripts/pr-feedback-state.mjs"
+assert_contains "- pnpm pr:feedback-state:test (PR feedback-state helper changed)"
+
+run_gate "scripts/pr-feedback-state-core.mjs"
+assert_contains "- pnpm pr:feedback-state:test (PR feedback-state helper changed)"
+
+run_gate "scripts/pr-feedback-state.test.mjs"
+assert_contains "- pnpm pr:feedback-state:test (PR feedback-state helper changed)"
+
+run_gate "scripts/claude-review-workflow.mjs"
+assert_contains "- node scripts/claude-review-workflow.test.mjs (Claude review producer changed)"
+assert_contains "- pnpm pr:feedback-state:test (Claude review attestation producer changed)"
+assert_contains "- pnpm pr:ready-state:test (Claude review live provenance producer changed)"
+
+run_gate "scripts/claude-review-contract.mjs"
+assert_contains "- node scripts/claude-review-workflow.test.mjs (Claude review producer changed)"
+assert_contains "- pnpm pr:feedback-state:test (Claude review attestation producer changed)"
+assert_contains "- pnpm pr:ready-state:test (Claude review live provenance producer changed)"
+
+run_gate "scripts/claude-review-context.mjs"
+assert_contains "- node scripts/claude-review-workflow.test.mjs (Claude review producer changed)"
+assert_contains "- pnpm pr:feedback-state:test (Claude review attestation producer changed)"
+assert_contains "- pnpm pr:ready-state:test (Claude review live provenance producer changed)"
+
+run_gate "scripts/claude-review-publisher.mjs"
+assert_contains "- node scripts/claude-review-workflow.test.mjs (Claude review producer changed)"
+assert_contains "- pnpm pr:feedback-state:test (Claude review attestation producer changed)"
+assert_contains "- pnpm pr:ready-state:test (Claude review live provenance producer changed)"
+
+run_gate "scripts/claude-review-workflow.test.mjs"
+assert_contains "- node scripts/claude-review-workflow.test.mjs (Claude review producer tests changed)"
+
+run_gate "scripts/pr-ready-state.mjs"
+assert_contains "- node scripts/claude-review-workflow.test.mjs (Claude review live provenance helper changed)"
+assert_contains "- pnpm pr:feedback-state:test (PR feedback-state live fetch changed)"
+assert_contains "- pnpm pr:ready-state:test (PR ready-state helper changed)"
+
+run_gate "scripts/pr-ready-state-core.mjs"
+assert_contains "- pnpm pr:feedback-state:test (PR ready-state normalization consumer changed)"
+assert_contains "- pnpm pr:ready-state:test (PR ready-state helper changed)"
+
+run_gate "scripts/pr-ready-state-format.mjs"
+assert_contains "- pnpm pr:ready-state:test (PR ready-state helper changed)"
+
+run_gate "scripts/pr-ready-state.test.mjs"
+assert_contains "- pnpm pr:ready-state:test (PR ready-state helper changed)"
 
 run_gate "scripts/sanitize-terraform-output.sh"
 assert_contains "- pnpm sanitize:test (Terraform output sanitizer changed)"
@@ -5053,6 +5112,15 @@ gate_race_out="$(mktemp -d)"
 gate_race_log="$gate_race_out/race.log"
 (
   cd "$gate_race_repo"
+  race_live_holder_pid=""
+  cleanup_gate_race_live_holder() {
+    if [[ -n "$race_live_holder_pid" ]]; then
+      kill "$race_live_holder_pid" 2>/dev/null || true
+      wait "$race_live_holder_pid" 2>/dev/null || true
+      race_live_holder_pid=""
+    fi
+  }
+  trap cleanup_gate_race_live_holder EXIT
   git init -q
   git config user.email test@example.invalid
   git config user.name "Quality Gate Test"
@@ -5276,12 +5344,22 @@ STUB
 
     # The budget is a promise: a wait shorter than the poll interval must not
     # sleep past it and then report the overshoot as the elapsed time.
+    sleep 120 &
+    race_live_holder_pid=$!
+    race_shortwait_holder_start="$(
+      TZ=UTC LC_ALL=C ps -o lstart= -p "$race_live_holder_pid" 2>/dev/null |
+        head -n1
+    )"
+    if [[ -z "$race_shortwait_holder_start" ]]; then
+      cleanup_gate_race_live_holder
+      fail "could not read the short-wait fixture holder's process identity"
+    fi
     mkdir -p "$gate_race_root/run.lock"
     {
-      printf 'pid=%s\n' "$$"
+      printf 'pid=%s\n' "$race_live_holder_pid"
       printf 'host=%s\n' "$(uname -n)"
       printf 'started_at=%s\n' "$(date +%s)"
-      printf 'start_utc=%s\n' "$race_lock_start"
+      printf 'start_utc=%s\n' "$race_shortwait_holder_start"
       printf 'worktree=%s\n' "$gate_race_repo"
       printf 'token=real-holder-1-1\n'
     } > "$gate_race_root/run.lock/owner"
@@ -5293,11 +5371,19 @@ STUB
       "$repo_root/scripts/agent-quality-gate.sh" \
       --base HEAD --run --lock-wait 1 \
       > "$gate_race_out/shortwait.out" 2>&1 || true
+    race_shortwait_elapsed=$(($(date +%s) - race_wait_started))
+    race_shortwait_holder_live=0
+    kill -0 "$race_live_holder_pid" 2>/dev/null && race_shortwait_holder_live=1
+    cleanup_gate_race_live_holder
+    rm -rf "$gate_race_root/run.lock"
+    [[ "$race_shortwait_holder_live" -eq 1 ]] ||
+      fail "the short-wait fixture holder must remain live through the waiter"
     grep -q "timed out after 1s" "$gate_race_out/shortwait.out" ||
       fail "a 1s budget under a 5s poll must report the budget it actually kept"
-    [[ $(($(date +%s) - race_wait_started)) -lt 5 ]] ||
+    grep -q "reclaiming it" "$gate_race_out/shortwait.out" &&
+      fail "a short waiter must never reclaim its live fixture holder"
+    [[ "$race_shortwait_elapsed" -lt 5 ]] ||
       fail "a 1s budget under a 5s poll must not sleep a full interval"
-    rm -rf "$gate_race_root/run.lock"
   fi
 
   # A run killed part-way through publishing its record leaves a file that
@@ -5402,14 +5488,24 @@ STUB
   # beside a running holder. A remnant naming a live process is the owner
   # record, misfiled, and has to be read as one.
   if [[ -n "$race_lock_start" ]]; then
+    sleep 120 &
+    race_live_holder_pid=$!
+    race_hidden_holder_start="$(
+      TZ=UTC LC_ALL=C ps -o lstart= -p "$race_live_holder_pid" 2>/dev/null |
+        head -n1
+    )"
+    if [[ -z "$race_hidden_holder_start" ]]; then
+      cleanup_gate_race_live_holder
+      fail "could not read the remnant fixture holder's process identity"
+    fi
     rm -rf "$gate_race_root/run.lock"
     : > "$gate_race_log"
     mkdir -p "$gate_race_root/run.lock"
     {
-      printf 'pid=%s\n' "$$"
+      printf 'pid=%s\n' "$race_live_holder_pid"
       printf 'host=%s\n' "$(uname -n)"
       printf 'started_at=%s\n' "$(date +%s)"
-      printf 'start_utc=%s\n' "$race_lock_start"
+      printf 'start_utc=%s\n' "$race_hidden_holder_start"
       printf 'worktree=%s\n' "$gate_race_repo"
       printf 'token=live-holder-record-1-1\n'
     } > "$gate_race_root/run.lock/owner.reclaiming.99999"
@@ -5423,16 +5519,29 @@ STUB
       "$repo_root/scripts/agent-quality-gate.sh" \
       --base HEAD --run --lock-wait 2 \
       > "$gate_race_out/hidden.out" 2>&1 || true
-    grep -q "Recovered the record of live holder pid $$" \
+    race_hidden_holder_live=0
+    kill -0 "$race_live_holder_pid" 2>/dev/null && race_hidden_holder_live=1
+    race_hidden_owner_token="$(
+      sed -n 's/^token=//p' "$gate_race_root/run.lock/owner" 2>/dev/null |
+        head -n1
+    )"
+    race_hidden_remnants="$(
+      find "$gate_race_root/run.lock" -name 'owner.reclaiming.*' 2>/dev/null
+    )"
+    race_hidden_holder_pid="$race_live_holder_pid"
+    cleanup_gate_race_live_holder
+    rm -rf "$gate_race_root/run.lock"
+    [[ "$race_hidden_holder_live" -eq 1 ]] ||
+      fail "the remnant fixture holder must remain live through the waiter"
+    grep -q "Recovered the record of live holder pid ${race_hidden_holder_pid}" \
       "$gate_race_out/hidden.out" ||
       fail "a remnant naming a live holder must be recovered, not ignored"
     grep -q "reclaiming it" "$gate_race_out/hidden.out" &&
       fail "a lock whose holder is only visible in a remnant must not be reclaimed"
-    [[ "$(sed -n 's/^token=//p' "$gate_race_root/run.lock/owner" | head -n1)" == "live-holder-record-1-1" ]] ||
+    [[ "$race_hidden_owner_token" == "live-holder-record-1-1" ]] ||
       fail "the recovered remnant must become the owner record"
-    [[ -z "$(find "$gate_race_root/run.lock" -name 'owner.reclaiming.*' 2>/dev/null)" ]] ||
+    [[ -z "$race_hidden_remnants" ]] ||
       fail "a recovered remnant must not be left behind to be read twice"
-    rm -rf "$gate_race_root/run.lock"
 
     # The converse: a remnant naming a process that is gone is spent, and must
     # not keep a free lock looking occupied.

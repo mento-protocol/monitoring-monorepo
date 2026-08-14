@@ -39,6 +39,18 @@ garden_lane: agent-entry-points
 - New Node root scripts must be covered by `pnpm lint:scripts`; new shell scripts
   must pass `bash -n`. Add a focused command to `scripts/agent-quality-gate.sh`
   for behavior that syntax and lint checks cannot verify.
+- The `claude-review-{contract,context,publisher,workflow}.mjs` modules form
+  the protected-main trust boundary for Claude review context,
+  structured-result transport, and Claude App publication.
+  Keep protected main at the Action workspace root and PR code under
+  `review-target`; the model may read only that tree and its bounded trusted
+  input packet. Keep the model job separate from the OIDC publisher, preserve
+  exact body bytes, least-privilege App permissions, token revocation, and the
+  protected-run sentinel that proves comment provenance. Route producer,
+  workflow, parser, and live provenance changes through their producer,
+  `pr:feedback-state`, and `pr:ready-state` focused suites.
+  See
+  [ADR 0064](../docs/adr/0064-deterministic-claude-clean-review-attestation.md).
 - `pnpm tf plan/apply platform` owns its saved plan. The wrapper captures plan
   JSON only in memory, checks the Metrics Bridge template mode, applies the
   same private plan, uses one mode-`0600` snapshot of each variable file for

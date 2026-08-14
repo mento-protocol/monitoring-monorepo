@@ -389,10 +389,13 @@ export function findTopLevelBotComments(issueComments = []) {
     .map((comment) => ({
       id: comment.id,
       author: comment.user?.login ?? null,
+      authorType: comment.user?.type ?? null,
       url: comment.html_url ?? comment.url ?? null,
       createdAt: comment.created_at ?? null,
       updatedAt: comment.updated_at ?? null,
       body: comment.body ?? "",
+      claudeReviewProvenanceVerified:
+        comment.claudeReviewProvenanceVerified === true,
     }));
 }
 
@@ -409,12 +412,15 @@ export function findTopLevelBotReviewComments(reviews = []) {
     .map((review) => ({
       id: review.id ?? null,
       author: review.author?.login ?? null,
+      authorType: review.author?.type ?? null,
       url: review.url ?? null,
       createdAt: review.submittedAt ?? null,
       updatedAt: null,
       commitOid: review.commit?.oid ?? null,
       state: review.state ?? null,
       body: review.body ?? "",
+      claudeReviewProvenanceVerified:
+        review.claudeReviewProvenanceVerified === true,
     }));
 }
 

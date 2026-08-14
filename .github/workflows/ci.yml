@@ -1106,6 +1106,10 @@ jobs:
         # secrets are unreachable from PR-head code. Issue #1388 — an
         # activation gate for the autofix leg.
         run: node scripts/check-autofix-ci-trust.mjs
+      - name: Claude review attestation contract tests
+        # Pins the protected-main producer, structured-output transport,
+        # Claude App publisher, and workflow source contract (issue #1567).
+        run: node scripts/claude-review-workflow.test.mjs
       - name: Platform settings drift unit tests
         # Behavioral coverage of scripts/check-workflow-permissions-drift.mjs —
         # the decision layer for .github/workflows/platform-settings-drift.yml

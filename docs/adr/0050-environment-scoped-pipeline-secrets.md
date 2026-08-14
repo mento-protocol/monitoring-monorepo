@@ -3,7 +3,7 @@ title: Pipeline secrets are gated by a Terraform-managed GitHub Environment
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-26
+last_verified: 2026-08-14
 scope: terraform / ci
 date: 2026-07
 doc_type: adr
@@ -13,7 +13,7 @@ garden_lane: adrs-architecture
 
 # ADR 0050 — Pipeline secrets are gated by a Terraform-managed GitHub Environment
 
-**Status:** Accepted (Jul 2026). Amended 2026-07-27 — the decision stands, but
+**Status:** Accepted (Jul 2026). Amended 2026-07-27 and 2026-08-14 — the decision stands, but
 its first implementation used a branch-policy mechanism that does not work in
 this repo and silently failed open; see "Correction" below and
 [#1649](https://github.com/mento-protocol/monitoring-monorepo/issues/1649).
@@ -112,10 +112,12 @@ Boundaries of the decision:
   Containing that would
   need the credential outside repo-admin control (the separate-repository
   alternative below).
-- **`CLAUDE_CODE_OAUTH_TOKEN` stays repo-level.** `claude.yml` reads it on
-  `pull_request` events from feature branches — exactly what a main-only policy
-  denies. It is inference-only (no repo write capability), so its residual
-  exposure is bounded and unchanged.
+- **`CLAUDE_CODE_OAUTH_TOKEN` stays repo-level in this decision.** ADR 0064
+  retired the direct feature-branch `pull_request` consumer, so that original
+  reason no longer applies. The token remains shared by `claude.yml` and the
+  Sentry agent; moving it is an IaC and rollout decision outside ADR 0064. It is
+  inference-only (no repository write capability), so its residual authority
+  remains bounded to inference use.
 - **Identity-contract coverage moves with the secrets.**
   `github_actions_environment_secret` is an identity-bearing type in the
   production-infra identity contract; the environment-scoped secret blocks stay
@@ -127,6 +129,16 @@ Boundaries of the decision:
   reaching `main` before the environment exists auto-creates it **unprotected**.
   Any future environment introduced this way must land applied-and-protected
   before its first workflow reference merges.
+
+## Amendment (2026-08-14) — protected-main Claude review workflow
+
+[ADR 0064](0064-deterministic-claude-clean-review-attestation.md) replaced
+`claude.yml`'s direct secret-bearing `pull_request` lane with an unprivileged PR
+dispatcher and a protected-main `workflow_run` consumer. This removes the
+feature-ref constraint cited by the original repo-level-token exception. It
+does not silently move or duplicate the shared secret: any future environment
+scope for `CLAUDE_CODE_OAUTH_TOKEN` must model both consumers in Terraform and
+follow this ADR's protected-environment rollout order.
 
 ## Alternatives considered
 

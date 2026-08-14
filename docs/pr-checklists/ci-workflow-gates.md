@@ -3,7 +3,7 @@ title: CI Workflow Gates Checklist
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-23
+last_verified: 2026-08-14
 doc_type: checklist
 scope: ci/process
 review_interval_days: 90
@@ -78,6 +78,40 @@ A `uses: org/action@v4` line trusts whoever owns that tag to never re-point it a
 
 Canonical good example: `.github/workflows/metrics-bridge.yml` — every external
 action is SHA-pinned.
+
+### Model review publishers
+
+When a model reviews PR-controlled content and a bot identity publishes the
+result, treat inference and publication as separate trust domains.
+
+- [ ] The model job has no `id-token: write`, write-scoped GitHub token, write
+      tool, persisted checkout credential, or publisher step.
+- [ ] A protected-main resolver binds the base repository, canonical PR number,
+      full head SHA, default branch, and exact workflow ref before inference.
+- [ ] Keep protected code at the model Action's workspace root. Put PR-head
+      files in a credential-free subdirectory and precompute bounded review
+      input without executing reviewed code.
+- [ ] Treat model authentication as a credential even in a read-only job. Use
+      `--tools` to expose only required tools, `dontAsk` with path-scoped read
+      rules, bare denies for Bash/write/agent/web/MCP tools, and an explicit
+      setting source that cannot load reviewed project configuration.
+- [ ] Cross-job model output has a closed schema and byte limit, is validated
+      before transport, and is revalidated by the publisher. Do not interpolate
+      free-form JSON into shell text.
+- [ ] The OIDC publisher is a separate job with an explicit `needs:` edge and
+      the same event trust guard. Validate the GitHub-issued token's issuer,
+      audience, repository, workflow ref, run ID, run attempt, and lifetime.
+- [ ] Recheck the live PR head immediately before publishing. Verify the REST
+      author login/type and exact persisted body, then revoke the App token in a
+      `finally` path.
+- [ ] A shared bot login is not producer provenance. Bind clean output to an
+      immutable protected-run receipt such as a nonexpired artifact containing
+      the persisted comment ID and body digest. API lookup failures are unknown
+      probe state; absent or mismatched receipts are fail-closed blocker state.
+
+Canonical example: the dispatcher, review, and publisher split in
+`.github/workflows/claude-review-request.yml` and `.github/workflows/claude.yml`
+([ADR 0064](../adr/0064-deterministic-claude-clean-review-attestation.md)).
 
 ## 4. Concurrency and serialization
 

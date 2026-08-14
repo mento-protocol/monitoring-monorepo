@@ -78,6 +78,11 @@ function referencedCommitShas(comment) {
 
 function isCurrentHeadComment(comment, pr) {
   const headSha = String(pr?.headRefOid ?? "").toLowerCase();
+  const protocolHeadSha = claudeReview.claudeReviewProtocolHeadSha(
+    comment?.body,
+  );
+  if (headSha && protocolHeadSha) return protocolHeadSha === headSha;
+
   const reviewCommitSha = String(comment.commitOid ?? "").toLowerCase();
   if (headSha && reviewCommitSha) return reviewCommitSha === headSha;
 
@@ -203,6 +208,8 @@ function isExplicitlyCleanClaudeReview(comment, pr) {
   const body = String(comment.body ?? "");
   if (claudeReview.matchesCleanReviewCompatibilityRegistry(comment, pr, body))
     return true;
+  if (!claudeReview.isLegacyClaudeCleanReviewBeforeCutoff(comment))
+    return false;
   const lines = body.split(/\r?\n/);
   if (claudeReview.hasMarkdownCodeBlockIndentation(lines)) return false;
   if (!/^\s*(?:\*\*)?Verdict:\s*LGTM(?:\*\*)?\s*$/im.test(body)) return false;
@@ -226,6 +233,9 @@ function isExplicitlyCleanClaudeReview(comment, pr) {
   );
 }
 function isActionableReviewBotComment(comment, pr) {
+  const cleanReviewAttestation =
+    claudeReview.classifyClaudeCleanReviewAttestation(comment, pr);
+  if (cleanReviewAttestation !== null) return cleanReviewAttestation;
   if (!isReviewBotComment(comment)) return false;
   if (claudeReview.isClaudeLgtmReview(comment))
     return !isExplicitlyCleanClaudeReview(comment, pr);

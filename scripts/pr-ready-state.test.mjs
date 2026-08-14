@@ -1169,6 +1169,7 @@ test("filters top-level issue comments down to bots", () => {
 
   assertEqual(bots.length, 1);
   assertEqual(bots[0].author, "cursor[bot]");
+  assertEqual(bots[0].authorType, "Bot");
 });
 
 test("filters top-level review bodies down to bots with body text", () => {
@@ -1196,6 +1197,7 @@ test("filters top-level review bodies down to bots with body text", () => {
 
   assertEqual(bots.length, 1);
   assertEqual(bots[0].author, "chatgpt-codex-connector[bot]");
+  assertEqual(bots[0].authorType, "Bot");
   assertEqual(bots[0].state, "COMMENTED");
   assertEqual(bots[0].commitOid, "head-sha");
 });

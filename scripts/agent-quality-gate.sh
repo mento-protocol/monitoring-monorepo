@@ -3395,6 +3395,11 @@ while IFS= read -r path; do
       add_command "node scripts/check-autofix-ci-trust.mjs" "GitHub Actions workflow/action changed (autofix CI trust boundary)"
       add_adr_reminder "workflow/action changed — ADR reminder (a new workflow likely needs an ADR)"
       case "$path" in
+        .github/workflows/claude.yml|.github/workflows/claude-review-request.yml)
+          add_command "node scripts/claude-review-workflow.test.mjs" "Claude review workflow changed"
+          add_command "pnpm pr:feedback-state:test" "Claude review attestation consumer changed"
+          add_command "pnpm pr:ready-state:test" "Claude review live provenance consumer changed"
+          ;;
         .github/workflows/ci.yml)
           add_surface "workspace"
           add_preflight_command "pnpm install --frozen-lockfile" "central CI workflow changed"
@@ -3908,10 +3913,32 @@ while IFS= read -r path; do
           # verdict-label maps.
           add_command "pnpm sentry:project:test" "Sentry re-queue chokepoint changed"
           ;;
-        scripts/pr-feedback-state.mjs|scripts/pr-feedback-state-core.mjs|scripts/pr-feedback-state-claude.mjs|scripts/pr-feedback-state.test.mjs)
+        scripts/pr-feedback-state-claude.mjs)
+          add_command "node scripts/claude-review-workflow.test.mjs" "Claude review attestation classifier changed"
+          add_command "pnpm pr:feedback-state:test" "PR feedback-state helper changed"
+          add_command "pnpm pr:ready-state:test" "Claude review attestation classifier changed"
+          ;;
+        scripts/pr-feedback-state.mjs|scripts/pr-feedback-state-core.mjs|scripts/pr-feedback-state.test.mjs)
           add_command "pnpm pr:feedback-state:test" "PR feedback-state helper changed"
           ;;
-        scripts/pr-ready-state.mjs|scripts/pr-ready-state-core.mjs|scripts/pr-ready-state-format.mjs|scripts/pr-ready-state.test.mjs)
+        scripts/claude-review-workflow.test.mjs)
+          add_command "node scripts/claude-review-workflow.test.mjs" "Claude review producer tests changed"
+          ;;
+        scripts/claude-review-*.mjs)
+          add_command "node scripts/claude-review-workflow.test.mjs" "Claude review producer changed"
+          add_command "pnpm pr:feedback-state:test" "Claude review attestation producer changed"
+          add_command "pnpm pr:ready-state:test" "Claude review live provenance producer changed"
+          ;;
+        scripts/pr-ready-state.mjs)
+          add_command "node scripts/claude-review-workflow.test.mjs" "Claude review live provenance helper changed"
+          add_command "pnpm pr:feedback-state:test" "PR feedback-state live fetch changed"
+          add_command "pnpm pr:ready-state:test" "PR ready-state helper changed"
+          ;;
+        scripts/pr-ready-state-core.mjs)
+          add_command "pnpm pr:feedback-state:test" "PR ready-state normalization consumer changed"
+          add_command "pnpm pr:ready-state:test" "PR ready-state helper changed"
+          ;;
+        scripts/pr-ready-state-format.mjs|scripts/pr-ready-state.test.mjs)
           add_command "pnpm pr:ready-state:test" "PR ready-state helper changed"
           ;;
         scripts/review-process-metrics.mjs|scripts/review-process-metrics.test.mjs)

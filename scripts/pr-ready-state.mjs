@@ -15,9 +15,25 @@ import {
   summarizeReadyState,
   summarizeTerminalReadyState,
 } from "./pr-ready-state-core.mjs";
+import { isClaudeCleanReviewAttestationBody } from "./pr-feedback-state-claude.mjs";
+import { buildClaudeReviewAttestationArtifactName } from "./claude-review-workflow.mjs";
 import { formatCompact, formatHuman } from "./pr-ready-state-format.mjs";
 
 const GH_OUTPUT_MAX_BYTES = 20 * 1024 * 1024;
+const CLAUDE_REVIEW_WORKFLOW_PATH = ".github/workflows/claude.yml";
+const CLAUDE_REVIEW_BASE_BRANCH_EVENTS = new Set([
+  "workflow_run",
+  "issue_comment",
+]);
+const CLAUDE_REVIEW_HEAD_BRANCH_EVENTS = new Set([
+  "pull_request_review_comment",
+  "pull_request_review",
+]);
+const CLAUDE_REVIEW_EVENTS = new Set([
+  ...CLAUDE_REVIEW_BASE_BRANCH_EVENTS,
+  ...CLAUDE_REVIEW_HEAD_BRANCH_EVENTS,
+]);
+const CANONICAL_GIT_SHA_PATTERN = /^[0-9a-f]{40}$/;
 
 function runGh(args) {
   return new Promise((resolve, reject) => {
@@ -699,6 +715,119 @@ async function attachCodexRequestReactions({ repo, issueComments }) {
   );
 }
 
+function verifiedClaudeReviewRun(run, { repo, pr, runId }) {
+  const hasCanonicalHeadSha = CANONICAL_GIT_SHA_PATTERN.test(
+    run?.head_sha ?? "",
+  );
+  const targetsProtectedBranch =
+    typeof pr?.baseRefName === "string" &&
+    pr.baseRefName.length > 0 &&
+    CLAUDE_REVIEW_BASE_BRANCH_EVENTS.has(run?.event) &&
+    run?.head_branch === pr.baseRefName;
+  const targetsPullRequestHead =
+    typeof pr?.headRefName === "string" &&
+    pr.headRefName.length > 0 &&
+    CANONICAL_GIT_SHA_PATTERN.test(pr?.headRefOid ?? "") &&
+    CLAUDE_REVIEW_HEAD_BRANCH_EVENTS.has(run?.event) &&
+    run?.head_branch === pr.headRefName &&
+    run?.head_sha === pr.headRefOid;
+
+  return (
+    Number.isSafeInteger(runId) &&
+    runId > 0 &&
+    run?.id === runId &&
+    run?.status === "completed" &&
+    run?.conclusion === "success" &&
+    run?.path === CLAUDE_REVIEW_WORKFLOW_PATH &&
+    CLAUDE_REVIEW_EVENTS.has(run?.event) &&
+    hasCanonicalHeadSha &&
+    (targetsProtectedBranch || targetsPullRequestHead) &&
+    run?.repository?.full_name === repoPath(repo) &&
+    run?.actor?.type === "User" &&
+    run?.actor?.login !== "dependabot[bot]"
+  );
+}
+
+export async function attachClaudeReviewAttestationProvenance({
+  repo,
+  pr,
+  issueComments,
+  now = new Date(),
+  artifactLookup = null,
+  runLookup = null,
+}) {
+  const lookupArtifacts =
+    artifactLookup ??
+    ((name) =>
+      ghApiJsonResult(repo, [
+        `repos/${repoPath(repo)}/actions/artifacts?name=${encodeURIComponent(name)}&per_page=100`,
+      ]));
+  const lookupRun =
+    runLookup ??
+    ((runId) =>
+      ghApiJsonResult(repo, [`repos/${repoPath(repo)}/actions/runs/${runId}`]));
+  const observedAt = now.getTime();
+  if (!Number.isFinite(observedAt)) {
+    throw new Error("Claude review provenance clock is invalid");
+  }
+
+  return Promise.all(
+    issueComments.map(async (comment) => {
+      const normalized = {
+        author: comment?.user?.login ?? null,
+        authorType: comment?.user?.type ?? null,
+        body: comment?.body ?? "",
+      };
+      if (!isClaudeCleanReviewAttestationBody(normalized, pr)) return comment;
+      const artifactName = buildClaudeReviewAttestationArtifactName({
+        prNumber: pr.number,
+        headSha: pr.headRefOid,
+        commentId: comment.id,
+        body: comment.body,
+      });
+      const artifactsResult = await lookupArtifacts(artifactName);
+      if (!artifactsResult.ok) {
+        throw new Error(
+          `Claude review provenance artifact lookup failed: ${artifactsResult.error}`,
+        );
+      }
+      const commentCreatedAt = Date.parse(comment.created_at ?? "");
+      const artifacts = Array.isArray(artifactsResult.value?.artifacts)
+        ? artifactsResult.value.artifacts
+        : [];
+      let verified = false;
+      for (const artifact of artifacts) {
+        const expiresAt = Date.parse(artifact?.expires_at ?? "");
+        const artifactCreatedAt = Date.parse(artifact?.created_at ?? "");
+        if (
+          artifact?.name !== artifactName ||
+          artifact?.expired !== false ||
+          !Number.isFinite(expiresAt) ||
+          expiresAt <= observedAt ||
+          !Number.isFinite(commentCreatedAt) ||
+          !Number.isFinite(artifactCreatedAt) ||
+          artifactCreatedAt < commentCreatedAt
+        ) {
+          continue;
+        }
+        const runId = artifact?.workflow_run?.id;
+        if (!Number.isSafeInteger(runId) || runId < 1) continue;
+        const runResult = await lookupRun(runId);
+        if (!runResult.ok) {
+          throw new Error(
+            `Claude review provenance workflow run lookup failed: ${runResult.error}`,
+          );
+        }
+        if (verifiedClaudeReviewRun(runResult.value, { repo, pr, runId })) {
+          verified = true;
+          break;
+        }
+      }
+      return { ...comment, claudeReviewProvenanceVerified: verified };
+    }),
+  );
+}
+
 async function fetchRequiredStatusContexts({
   repo,
   baseRef,
@@ -800,9 +929,14 @@ export async function fetchReadyState({
   const issueCommentsPromise = ghApiJsonPages(repo, [
     `repos/${path}/issues/${number}/comments`,
   ]);
-  const issueCommentsWithReactionsPromise = issueCommentsPromise.then(
-    (issueComments) => attachCodexRequestReactions({ repo, issueComments }),
+  const issueCommentsWithProvenancePromise = issueCommentsPromise.then(
+    (issueComments) =>
+      attachClaudeReviewAttestationProvenance({ repo, pr, issueComments }),
   );
+  const issueCommentsWithReactionsPromise =
+    issueCommentsWithProvenancePromise.then((issueComments) =>
+      attachCodexRequestReactions({ repo, issueComments }),
+    );
   const reactionsPromise = ghApiJsonPages(repo, [
     "-H",
     "Accept: application/vnd.github+json",

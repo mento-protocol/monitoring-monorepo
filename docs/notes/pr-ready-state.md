@@ -3,7 +3,7 @@ title: PR Ready State
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-10
+last_verified: 2026-08-14
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -104,15 +104,63 @@ terminal state so late feedback is not missed.
 
 ### Bounded clean-Claude protocol
 
-`pr:feedback-state` accepts a clean verdict from Claude only through a bounded
-parser over registered comment shapes. Anything ambiguous or unregistered fails
-closed: unknown prose, Markdown or HTML syntax, hedging, negation, malformed
-headings, and mixed clean/actionable items stay blocking. A small compatibility
-registry holds exact observed payloads, each bound to its Claude author, PR
-number, comment ID, head SHA, and a digest of the untrimmed raw body, so any
-body or binding change — including line endings — blocks again. The exact
-grammar and registry live in `scripts/pr-feedback-state-claude.mjs`; do not
-broaden them to accept a new title or checklist subject.
+New Claude reviews have one deterministic clean contract. Automatic review on
+PR open/ready and explicit `@claude review` requests both resolve the live PR,
+review its exact head through the same structured-output producer, and publish
+through the Claude App only after a final head recheck. The clean body is:
+
+```text
+<!-- mento-claude-clean-review:v1 -->
+MENTO CLAUDE CLEAN REVIEW v1
+PR: <canonical decimal PR number>
+HEAD: <40 lowercase hexadecimal characters>
+VERDICT: CLEAN
+FINDINGS: 0
+FOLLOW-UP: NONE
+END MENTO CLAUDE CLEAN REVIEW v1
+```
+
+`pr:feedback-state` accepts those exact untrimmed bytes only from
+`claude[bot]` with REST user type `Bot`, bound to the current PR number and full
+head SHA, and backed by a nonexpired sentinel artifact from a completed,
+successful protected-main `.github/workflows/claude.yml` run. The artifact name
+binds the PR, head, comment ID, and exact body digest. Its run must have a human
+actor and use `workflow_run`, `issue_comment`, `pull_request_review_comment`, or
+`pull_request_review`. The first two triggers bind to the current base branch
+and expose a canonical full head SHA; the review triggers bind to the exact
+current PR head branch and head SHA. Missing, malformed, expired, or mismatched
+provenance blocks. An artifact or run API failure makes the probe fail as
+unknown/retriable rather than inventing blocker state. Extra prose, prefix or suffix text, trailing newlines, CRLF
+normalization, duplicate markers, secondary verdicts, Markdown/HTML contexts,
+or a legacy `claude` login make a current-head protocol comment blocking. The
+parser does not strip inert contexts or recover an attestation from a larger
+comment. Two current comments are classified independently, so a malformed or
+non-clean one remains blocking beside a valid clean one. A prior-head comment
+stays stale and cannot satisfy or override the current head.
+
+The protected review job uses a trusted workspace-root checkout and keeps the
+PR head under `review-target`. Protected code writes a bounded diff/log/status
+packet before inference. The Claude process exposes only path-scoped
+`Read`/`Glob`/`Grep` tools under `dontAsk`; Bash, edits, agents, web, notebooks,
+and MCP tools are absent so untrusted reviewed content cannot read the model's
+OAuth credential.
+
+This comment clears only the top-level Claude surface. Unresolved threads,
+unreplied inline comments, requested changes, and all other feedback gates
+remain blocking. A missing structured result also fails the workflow; a green
+no-comment Action run cannot count as review evidence.
+
+The bounded legacy LGTM grammar remains only for comments with a canonical
+GitHub `createdAt` strictly before `2026-08-14T00:00:00Z`; a present
+`updatedAt` must also be canonical and before that cutoff. Missing, malformed,
+at-cutoff, or later timestamps block. The small exact compatibility registry
+remains timestamp-independent and binds author, PR number, comment ID, head
+SHA, and a digest of the raw body, including line endings. Treat both as frozen
+history: do not broaden free-form parsing or add one-off digest entries for new
+review formats. The producer contract lives in the
+`scripts/claude-review-{contract,context,publisher,workflow}.mjs` modules; the
+parser lives in `scripts/pr-feedback-state-claude.mjs`. Their rationale is
+[ADR 0064](../adr/0064-deterministic-claude-clean-review-attestation.md).
 
 ## Expected CLI contract
 
