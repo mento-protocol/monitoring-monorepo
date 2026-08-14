@@ -8,7 +8,7 @@ import {
   resolveGrafanaQueryEndpoint,
 } from "../route";
 
-const NOW_MS = Date.UTC(2026, 7, 13, 20, 0);
+const NOW_MS = Date.UTC(2026, 7, 13, 20, 17);
 const baseQuery = {
   asset: "europ-schuman",
   source: "bitvavo_eur",
@@ -29,6 +29,9 @@ const seriesLabels = {
   source: baseQuery.source,
   policy_version: baseQuery.policyVersion,
 };
+const alignToStep = (valueMs: number, stepMs: number) =>
+  Math.floor(valueMs / stepMs) * stepMs;
+const BASE_TO_MS = alignToStep(NOW_MS, 1_800_000);
 const frame = (
   times: unknown[],
   values: unknown[],
@@ -61,7 +64,7 @@ describe("POST /api/peg-monitoring/history", () => {
           A: {
             frames: [
               frame(
-                [NOW_MS - 3_600_000, NOW_MS - 1_800_000, NOW_MS],
+                [BASE_TO_MS - 3_600_000, BASE_TO_MS - 1_800_000, BASE_TO_MS],
                 [-4.5, null, 2.25],
               ),
             ],
@@ -75,12 +78,12 @@ describe("POST /api/peg-monitoring/history", () => {
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(await response.json()).toEqual({
       ...baseQuery,
-      from: (NOW_MS - 7 * 86_400_000) / 1_000,
-      to: NOW_MS / 1_000,
+      from: (BASE_TO_MS - 7 * 86_400_000) / 1_000,
+      to: BASE_TO_MS / 1_000,
       stepSeconds: 1_800,
       points: [
-        { at: (NOW_MS - 3_600_000) / 1_000, bps: -4.5 },
-        { at: NOW_MS / 1_000, bps: 2.25 },
+        { at: (BASE_TO_MS - 3_600_000) / 1_000, bps: -4.5 },
+        { at: BASE_TO_MS / 1_000, bps: 2.25 },
       ],
     });
 
@@ -99,8 +102,8 @@ describe("POST /api/peg-monitoring/history", () => {
       to: string;
       queries: Array<Record<string, unknown>>;
     };
-    expect(body.from).toBe(String(NOW_MS - 7 * 86_400_000));
-    expect(body.to).toBe(String(NOW_MS));
+    expect(body.from).toBe(String(BASE_TO_MS - 7 * 86_400_000));
+    expect(body.to).toBe(String(BASE_TO_MS));
     expect(body.queries).toEqual([
       expect.objectContaining({
         datasource: {
@@ -134,10 +137,13 @@ describe("POST /api/peg-monitoring/history", () => {
       const call = fetchMock.mock.calls[index]!;
       const body = JSON.parse(String(call[1]?.body)) as {
         from: string;
+        to: string;
         queries: Array<{ intervalMs: number; maxDataPoints: number }>;
       };
       const [, windowMs, intervalMs, maxDataPoints] = cases[index]!;
-      expect(body.from).toBe(String(NOW_MS - windowMs));
+      const alignedToMs = alignToStep(NOW_MS, intervalMs);
+      expect(body.from).toBe(String(alignedToMs - windowMs));
+      expect(body.to).toBe(String(alignedToMs));
       expect(body.queries[0]).toMatchObject({ intervalMs, maxDataPoints });
     });
   });
@@ -152,16 +158,17 @@ describe("POST /api/peg-monitoring/history", () => {
       request({ ...baseQuery, to: String(confirmedAt) }),
     );
     expect(response.status).toBe(200);
+    const alignedConfirmedAtMs = alignToStep(confirmedAt * 1_000, 1_800_000);
     expect(await response.json()).toMatchObject({
-      from: confirmedAt - 7 * 86_400,
-      to: confirmedAt,
+      from: alignedConfirmedAtMs / 1_000 - 7 * 86_400,
+      to: alignedConfirmedAtMs / 1_000,
     });
     const body = JSON.parse(String(fetchMock.mock.calls[0]![1]?.body)) as {
       from: string;
       to: string;
     };
-    expect(body.from).toBe(String(NOW_MS - 60_000 - 7 * 86_400_000));
-    expect(body.to).toBe(String(NOW_MS - 60_000));
+    expect(body.from).toBe(String(alignedConfirmedAtMs - 7 * 86_400_000));
+    expect(body.to).toBe(String(alignedConfirmedAtMs));
   });
 
   it("rejects unbounded labels, unknown ranges, invalid end times, and extra parameters", async () => {
@@ -227,8 +234,8 @@ describe("POST /api/peg-monitoring/history", () => {
           results: {
             A: {
               frames: [
-                frame([NOW_MS], [-1]),
-                frame([NOW_MS - 1_800_000], [-2]),
+                frame([BASE_TO_MS], [-1]),
+                frame([BASE_TO_MS - 1_800_000], [-2]),
               ],
             },
           },
@@ -258,7 +265,7 @@ describe("POST /api/peg-monitoring/history", () => {
           results: {
             A: {
               frames: [
-                frame([NOW_MS], [-1], {
+                frame([BASE_TO_MS], [-1], {
                   ...seriesLabels,
                   source: "kraken_eur",
                 }),
@@ -276,7 +283,7 @@ describe("POST /api/peg-monitoring/history", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       json({
         results: {
-          A: { frames: [frame([NOW_MS], [25_000])] },
+          A: { frames: [frame([BASE_TO_MS], [25_000])] },
         },
       }),
     );
@@ -284,7 +291,7 @@ describe("POST /api/peg-monitoring/history", () => {
     const response = await POST(request());
     expect(response.status).toBe(200);
     expect((await response.json()).points).toEqual([
-      { at: NOW_MS / 1_000, bps: 25_000 },
+      { at: BASE_TO_MS / 1_000, bps: 25_000 },
     ]);
   });
 });

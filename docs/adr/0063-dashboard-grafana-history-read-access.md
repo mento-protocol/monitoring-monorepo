@@ -15,9 +15,9 @@ garden_lane: adrs-architecture
 
 **Status:** Accepted (Aug 2026). Amends
 [ADR 0049](0049-peg-decision-package-read-model.md), which stays in force for
-current-state evidence. The Terraform is checked in and unapplied; a
-human-approved platform apply activates the identity and the dashboard
-environment. **Scope:** ui-dashboard / terraform/infra
+current-state evidence. The Terraform was applied on 2026-08-14, and the
+dashboard environment now uses the dedicated read identity. **Scope:**
+ui-dashboard / terraform/infra
 
 ## Context
 

@@ -274,15 +274,20 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   );
   if (!input.success) return errorResponse("Invalid peg history query", 400);
   const requestNowMs = Date.now();
-  const toMs =
+  const requestedToMs =
     input.data.to === undefined ? requestNowMs : input.data.to * 1_000;
-  if (toMs > requestNowMs)
+  if (requestedToMs > requestNowMs)
     return errorResponse("Invalid peg history query", 400);
+  const settings = PEG_HISTORY_RANGES[input.data.range];
+  const stepMs = settings.stepSeconds * 1_000;
+  // Grafana aligns Prometheus range-query bounds to the requested step. Match
+  // those bounds here so valid boundary points are not rejected as upstream
+  // data outside an unaligned browser-time window.
+  const toMs = Math.floor(requestedToMs / stepMs) * stepMs;
   const endpoint = resolveGrafanaQueryEndpoint(process.env.GRAFANA_QUERY_URL);
   const token = process.env.GRAFANA_QUERY_TOKEN?.trim();
   if (endpoint === null || !token)
     return errorResponse("Peg history is not configured", 503);
-  const settings = PEG_HISTORY_RANGES[input.data.range];
   const fromMs = toMs - settings.windowSeconds * 1_000;
   try {
     const upstream = await fetch(endpoint, {
