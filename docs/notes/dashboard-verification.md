@@ -3,7 +3,7 @@ title: Dashboard Local and Browser Verification
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-29
+last_verified: 2026-08-14
 doc_type: runbook
 scope: ui-dashboard
 review_interval_days: 90
@@ -148,9 +148,14 @@ separately. Non-Sentry 429s and failed GraphQL/API calls are regressions.
 `tests/browser/fixtures/hasura-fixture-server.mjs`, then runs Playwright under
 `tests/browser/`. There is no `next dev` server: the build is produced at most
 once per gate run (the turbo `test:browser` task `dependsOn` the cached
-`fixture-build` task) and reused across re-runs; direct callers build it
-in-script when `.next-fixture` is absent. The fixture server is the only GraphQL
-source for these tests; never point them at hosted Hasura/Envio. The app-level
+`fixture-build` task) and reused across re-runs. Direct callers compare the
+stored Turbo task hash with the current `fixture-build` hash and rebuild stale
+or unverifiable output. The fixture server publishes an identity over its local
+source closure, scenario, and response delay; the runner reuses port 3211 only
+when that identity matches this checkout and fails without stopping an unknown
+process on mismatch. Use the package scripts, not a direct `playwright test`,
+so this preflight runs. The fixture server is the
+only GraphQL source for these tests; never point it at hosted Hasura/Envio. The app-level
 harness covers App Router navigation, URL state, hydration, CSP, SWR request
 behavior, and real browser focus. On a fresh checkout, install Chromium once
 with `pnpm exec playwright install chromium`; the quality gate does this
@@ -179,6 +184,9 @@ the canonical pool-detail LCP contract. It builds against the local
 Volume headline stay visible while client revalidation is delayed, rejects
 fixture GraphQL/request/browser errors, and collects three exact
 `?lhci=fixture` Lighthouse runs against the blocking 1,700 ms median ceiling.
+This command starts its non-default fixture scenario on a fresh OS-assigned
+port and checks the unqualified health endpoint; it does not reuse Playwright's
+fixed-port server. Both callers use the same scenario and delay normalizer.
 
 The browser smoke requires exactly one delayed breaker completion. Lighthouse
 may make additional valid retries or prefetches but requires at least four

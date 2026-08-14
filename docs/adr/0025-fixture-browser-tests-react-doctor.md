@@ -3,7 +3,7 @@ title: Fixture-driven browser tests, visual snapshots, and a react-doctor score 
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-24
+last_verified: 2026-08-14
 scope: ui-dashboard
 date: 2026-05
 doc_type: adr
@@ -48,6 +48,10 @@ Two gates:
   edit can block the PR — fix or scope them.
 - Turbo caches the fixture build separately and keeps the fixture and normal
   `.next` build outputs isolated.
+- Direct runs bind cached builds to Turbo's `fixture-build` hash. A reused
+  fixed-port fixture server must publish the current fixture source and runtime
+  identity; mismatched or unverifiable processes fail closed and are left
+  untouched.
 
 ## Evidence
 

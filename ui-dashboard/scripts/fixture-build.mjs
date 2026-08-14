@@ -5,6 +5,11 @@ import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { FIXTURE_DIST_DIR, FIXTURE_HASURA_URL } from "./fixture-constants.mjs";
+import {
+  currentFixtureBuildHash,
+  invalidateFixtureBuildIdentity,
+  writeFixtureBuildIdentity,
+} from "./fixture-identity.mjs";
 
 // `next build` rewrites these tracked files to reference the active `distDir`
 // (`next-env.d.ts` imports `<distDir>/types`; `tsconfig.json` adds
@@ -14,16 +19,6 @@ import { FIXTURE_DIST_DIR, FIXTURE_HASURA_URL } from "./fixture-constants.mjs";
 const rewrittenTrackedFiles = ["../next-env.d.ts", "../tsconfig.json"].map(
   (relative) => new URL(relative, import.meta.url),
 );
-const fixtureBuildIdUrl = new URL(
-  `../${FIXTURE_DIST_DIR}/BUILD_ID`,
-  import.meta.url,
-);
-
-/** A completed fixture build leaves a BUILD_ID marker in the dist dir. */
-export function fixtureBuildExists() {
-  return existsSync(fixtureBuildIdUrl);
-}
-
 function runNextBuild(env) {
   return new Promise((resolve, reject) => {
     const child = spawn("pnpm", ["build"], {
@@ -37,7 +32,15 @@ function runNextBuild(env) {
 }
 
 /** Produce the fixture-mode production build in `.next-fixture`. */
-export async function buildFixtureApp() {
+export async function buildFixtureApp({
+  fixtureBuildHash,
+  distDir,
+  runBuild = runNextBuild,
+} = {}) {
+  const expectedHash =
+    fixtureBuildHash ??
+    process.env.TURBO_HASH ??
+    (await currentFixtureBuildHash());
   const snapshots = await Promise.all(
     rewrittenTrackedFiles.map(async (url) => ({
       url,
@@ -45,13 +48,20 @@ export async function buildFixtureApp() {
     })),
   );
   try {
-    return await runNextBuild({
+    // A failed or interrupted build may leave old/partial dist output. Remove
+    // its authority marker first so the next direct run must rebuild.
+    await invalidateFixtureBuildIdentity(distDir);
+    const exitCode = await runBuild({
       ...process.env,
       NEXT_PUBLIC_BROWSER_TEST_FIXTURES: "true",
       NEXT_PUBLIC_HASURA_URL: FIXTURE_HASURA_URL,
-      NEXT_DIST_DIR: FIXTURE_DIST_DIR,
+      NEXT_DIST_DIR: distDir ?? FIXTURE_DIST_DIR,
       NEXT_TELEMETRY_DISABLED: "1",
     });
+    if (exitCode === 0) {
+      await writeFixtureBuildIdentity(expectedHash, distDir);
+    }
+    return exitCode;
   } finally {
     await Promise.all(
       snapshots.map(({ url, original }) =>

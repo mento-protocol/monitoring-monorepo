@@ -16,3 +16,13 @@
 export const FIXTURE_HASURA_PORT = 3211;
 export const FIXTURE_HASURA_URL = `http://127.0.0.1:${FIXTURE_HASURA_PORT}/graphql`;
 export const FIXTURE_DIST_DIR = ".next-fixture";
+export const FIXTURE_DEFAULT_SCENARIO = "default";
+export const FIXTURE_LIGHTHOUSE_SCENARIO = "lighthouse-pool";
+export const FIXTURE_DEFAULT_CLIENT_DELAY_MS = 0;
+export function identityHealthUrl(baseUrl, fixtureServerIdentity) {
+  const url = new URL(
+    `/health/${encodeURIComponent(fixtureServerIdentity)}`,
+    baseUrl,
+  );
+  return url.href;
+}

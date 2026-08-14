@@ -1,8 +1,89 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  fixtureHealthResponse,
   handleGraphQL,
+  startFixtureServer,
   shouldDelayPoolBreakerResponse,
 } from "../tests/browser/fixtures/hasura-fixture-server.mjs";
+import { identityHealthUrl } from "./fixture-constants.mjs";
+import { currentFixtureServerIdentity } from "./fixture-identity.mjs";
+
+describe("hasura fixture health identity", () => {
+  it("serves the non-default runtime identity on the qualified endpoint", async () => {
+    const runtimeOptions = {
+      scenario: "lighthouse-pool",
+      clientDelayMs: "2200",
+    };
+    const expectedIdentity = await currentFixtureServerIdentity(runtimeOptions);
+    const { server, fixtureServerIdentity } = await startFixtureServer(
+      0,
+      runtimeOptions,
+    );
+    try {
+      const address = server.address();
+      expect(typeof address).toBe("object");
+      expect(address).not.toBeNull();
+      const fixtureUrl = `http://127.0.0.1:${address?.port}`;
+
+      expect(fixtureServerIdentity).toBe(expectedIdentity);
+      const matching = await fetch(
+        identityHealthUrl(fixtureUrl, expectedIdentity),
+      );
+      expect(matching.status).toBe(200);
+      await expect(matching.json()).resolves.toMatchObject({
+        ok: true,
+        fixtureServerIdentity: expectedIdentity,
+      });
+
+      const mismatched = await fetch(
+        identityHealthUrl(fixtureUrl, "stale-checkout"),
+      );
+      expect(mismatched.status).toBe(409);
+      await expect(mismatched.json()).resolves.toMatchObject({
+        fixtureServerIdentity: expectedIdentity,
+      });
+    } finally {
+      await new Promise((resolvePromise, reject) => {
+        server.close((error) =>
+          error === undefined ? resolvePromise() : reject(error),
+        );
+      });
+    }
+  });
+
+  it("accepts the matching fixture server identity", () => {
+    expect(
+      fixtureHealthResponse({
+        requestedIdentity: "current",
+        fixtureServerIdentity: "current",
+      }),
+    ).toMatchObject({
+      status: 200,
+      body: { ok: true, fixtureServerIdentity: "current" },
+    });
+  });
+
+  it("rejects a mismatched fixture server identity", () => {
+    expect(
+      fixtureHealthResponse({
+        requestedIdentity: "current",
+        fixtureServerIdentity: "stale",
+      }),
+    ).toMatchObject({
+      status: 409,
+      body: { ok: true, fixtureServerIdentity: "stale" },
+    });
+  });
+
+  it("keeps the unqualified health endpoint for non-Playwright consumers", () => {
+    expect(
+      fixtureHealthResponse({
+        requestedIdentity: null,
+        fixtureServerIdentity: "current",
+      }).status,
+    ).toBe(200);
+  });
+});
 
 const DAY_SECONDS = 86_400;
 const QUERY =
