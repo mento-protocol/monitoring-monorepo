@@ -13,3 +13,4 @@ export const SWR_KEY_CDP_BORROWING_REVENUE =
 export const SWR_KEY_RESERVE_YIELD = "reserve-yield-current";
 export const SWR_KEY_RESERVE_YIELD_HISTORY = "reserve-yield-history";
 export const SWR_KEY_PEG_MONITORING = "peg-monitoring";
+export const SWR_KEY_PEG_ALERTS = "peg-alerts";

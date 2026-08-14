@@ -2,11 +2,8 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import {
-  RecentAlerts,
-  alertTimestamp,
-  type PegAlertEvent,
-} from "../_components/recent-alerts";
+import { RecentAlerts, alertTimestamp } from "../_components/recent-alerts";
+import type { PegAlertEvent } from "@/lib/peg-alerts";
 
 const NOW_MS = Date.UTC(2026, 7, 11, 16, 30);
 let container: HTMLDivElement;
@@ -22,10 +19,6 @@ afterEach(() => {
   container.remove();
 });
 
-/**
- * The feed itself lands in a follow-up PR. These cover the entry row that PR
- * will bind data to, so the change stays data-only.
- */
 const events: PegAlertEvent[] = [
   {
     id: "kesm-warning",
@@ -58,18 +51,36 @@ describe("alertTimestamp", () => {
 });
 
 describe("RecentAlerts", () => {
-  it("falls back to the Grafana link while no feed is wired", () => {
-    act(() => root.render(<RecentAlerts nowMs={NOW_MS} />));
+  it("shows an explicit loading state", () => {
+    act(() =>
+      root.render(<RecentAlerts events={[]} nowMs={NOW_MS} state="loading" />),
+    );
     expect(container.textContent).toContain("Recent alerts");
     expect(container.textContent).toContain("· last 7 days");
-    expect(container.textContent).toContain(
-      "No alert feed is wired into this page yet",
-    );
+    expect(container.textContent).toContain("Loading recent alerts…");
     expect(container.querySelectorAll("li")).toHaveLength(0);
   });
 
+  it("keeps the Grafana escape hatch when the feed fails", () => {
+    act(() =>
+      root.render(
+        <RecentAlerts events={[]} nowMs={NOW_MS} state="unavailable" />,
+      ),
+    );
+    expect(container.textContent).toContain("Recent alerts unavailable");
+    expect(
+      container.querySelector(
+        'a[href="https://clabsmento.grafana.net/alerting/list?search=Peg"]',
+      ),
+    ).not.toBeNull();
+  });
+
   it("renders one entry per in-window transition with its severity dot and bold lead", () => {
-    act(() => root.render(<RecentAlerts nowMs={NOW_MS} events={events} />));
+    act(() =>
+      root.render(
+        <RecentAlerts nowMs={NOW_MS} events={events} state="ready" />,
+      ),
+    );
     const rows = container.querySelectorAll("li");
     // The Jul 22 policy activation predates the advertised 7-day window, so
     // the component drops it even though the feed supplied it.
@@ -96,7 +107,9 @@ describe("RecentAlerts", () => {
       at: Date.UTC(2026, 7, 10, 9, 0) / 1_000,
     };
     act(() =>
-      root.render(<RecentAlerts nowMs={NOW_MS} events={[recentPolicy]} />),
+      root.render(
+        <RecentAlerts nowMs={NOW_MS} events={[recentPolicy]} state="ready" />,
+      ),
     );
     expect(
       container.querySelector('[data-testid="peg-alert-policy"]')!.textContent,
@@ -107,7 +120,9 @@ describe("RecentAlerts", () => {
 
   it("says so when a wired feed has no events inside the window", () => {
     act(() =>
-      root.render(<RecentAlerts nowMs={NOW_MS} events={[events[2]!]} />),
+      root.render(
+        <RecentAlerts nowMs={NOW_MS} events={[events[2]!]} state="ready" />,
+      ),
     );
     expect(container.textContent).toContain("No alerts in the last 7 days.");
     expect(container.querySelectorAll("li")).toHaveLength(0);

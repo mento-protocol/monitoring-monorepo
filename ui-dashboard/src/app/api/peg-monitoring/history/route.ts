@@ -6,13 +6,19 @@ import {
   type PegHistoryPoint,
   type PegHistoryResponse,
 } from "@/lib/peg-history";
+import {
+  GRAFANA_NO_STORE_HEADERS,
+  grafanaErrorResponse,
+  isGrafanaTimeout,
+  readBoundedGrafanaResponse,
+  resolveGrafanaEndpoint,
+} from "@/lib/server/grafana-read";
 
 export const dynamic = "force-dynamic";
 export const PEG_HISTORY_UPSTREAM_TIMEOUT_MS = 8_000;
 export const PEG_HISTORY_MAX_RESPONSE_BYTES = 512 * 1024;
 export const PEG_HISTORY_DATASOURCE_UID = "grafanacloud-prom";
 
-const responseHeaders = { "Cache-Control": "no-store" } as const;
 const label = z
   .string()
   .min(1)
@@ -68,34 +74,10 @@ type GrafanaFrame = z.infer<typeof grafanaFrameSchema>;
 
 class InvalidUpstreamResponseError extends Error {}
 
-function errorResponse(error: string, status: number): NextResponse {
-  return NextResponse.json({ error }, { status, headers: responseHeaders });
-}
-
 export function resolveGrafanaQueryEndpoint(
   raw: string | undefined,
 ): URL | null {
-  if (!raw) return null;
-  try {
-    const url = new URL(raw);
-    const localHttp =
-      process.env.NODE_ENV !== "production" &&
-      url.protocol === "http:" &&
-      ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
-    if (
-      (url.protocol !== "https:" && !localHttp) ||
-      url.username ||
-      url.password ||
-      url.search ||
-      url.hash ||
-      (url.pathname !== "" && url.pathname !== "/")
-    )
-      return null;
-    url.pathname = "/api/ds/query";
-    return url;
-  } catch {
-    return null;
-  }
+  return resolveGrafanaEndpoint(raw, "/api/ds/query");
 }
 
 function signedDeviationPromql(input: {
@@ -130,41 +112,6 @@ function buildGrafanaRequest(
     from: String(fromMs),
     to: String(toMs),
   };
-}
-
-async function readBounded(response: Response): Promise<string> {
-  const length = response.headers.get("content-length");
-  if (
-    length !== null &&
-    (!/^\d+$/.test(length) || Number(length) > PEG_HISTORY_MAX_RESPONSE_BYTES)
-  )
-    throw new InvalidUpstreamResponseError();
-  if (response.body === null) throw new InvalidUpstreamResponseError();
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  while (true) {
-    // react-doctor-disable-next-line react-doctor/async-await-in-loop -- ordered streams expose one bounded chunk at a time
-    const next = await reader.read();
-    if (next.done) break;
-    total += next.value.byteLength;
-    if (total > PEG_HISTORY_MAX_RESPONSE_BYTES) {
-      void reader.cancel().catch(() => undefined);
-      throw new InvalidUpstreamResponseError();
-    }
-    chunks.push(next.value);
-  }
-  const body = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    body.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  try {
-    return new TextDecoder("utf-8", { fatal: true }).decode(body);
-  } catch {
-    throw new InvalidUpstreamResponseError();
-  }
 }
 
 function onlyFieldIndex(frame: GrafanaFrame, type: string): number {
@@ -261,23 +208,17 @@ function parseGrafanaPoints(
   return points;
 }
 
-function timedOut(error: unknown): boolean {
-  return (
-    error instanceof Error &&
-    (error.name === "TimeoutError" || error.name === "AbortError")
-  );
-}
-
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const input = querySchema.safeParse(
     Object.fromEntries(request.nextUrl.searchParams.entries()),
   );
-  if (!input.success) return errorResponse("Invalid peg history query", 400);
+  if (!input.success)
+    return grafanaErrorResponse("Invalid peg history query", 400);
   const requestNowMs = Date.now();
   const requestedToMs =
     input.data.to === undefined ? requestNowMs : input.data.to * 1_000;
   if (requestedToMs > requestNowMs)
-    return errorResponse("Invalid peg history query", 400);
+    return grafanaErrorResponse("Invalid peg history query", 400);
   const settings = PEG_HISTORY_RANGES[input.data.range];
   const stepMs = settings.stepSeconds * 1_000;
   // Grafana aligns Prometheus range-query bounds to the requested step. Match
@@ -287,7 +228,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const endpoint = resolveGrafanaQueryEndpoint(process.env.GRAFANA_QUERY_URL);
   const token = process.env.GRAFANA_QUERY_TOKEN?.trim();
   if (endpoint === null || !token)
-    return errorResponse("Peg history is not configured", 503);
+    return grafanaErrorResponse("Peg history is not configured", 503);
   const fromMs = toMs - settings.windowSeconds * 1_000;
   try {
     const upstream = await fetch(endpoint, {
@@ -303,11 +244,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       signal: AbortSignal.timeout(PEG_HISTORY_UPSTREAM_TIMEOUT_MS),
     });
     if (!upstream.ok)
-      return errorResponse("Peg history upstream unavailable", 502);
+      return grafanaErrorResponse("Peg history upstream unavailable", 502);
     if (!upstream.headers.get("content-type")?.includes("application/json"))
       throw new InvalidUpstreamResponseError();
     const points = parseGrafanaPoints(
-      JSON.parse(await readBounded(upstream)) as unknown,
+      JSON.parse(
+        await readBoundedGrafanaResponse(
+          upstream,
+          PEG_HISTORY_MAX_RESPONSE_BYTES,
+        ),
+      ) as unknown,
       fromMs,
       toMs,
       input.data,
@@ -319,9 +265,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       stepSeconds: settings.stepSeconds,
       points,
     };
-    return NextResponse.json(response, { headers: responseHeaders });
+    return NextResponse.json(response, { headers: GRAFANA_NO_STORE_HEADERS });
   } catch (error) {
-    if (timedOut(error)) return errorResponse("Peg history timed out", 504);
-    return errorResponse("Peg history upstream response is invalid", 502);
+    if (isGrafanaTimeout(error))
+      return grafanaErrorResponse("Peg history timed out", 504);
+    return grafanaErrorResponse(
+      "Peg history upstream response is invalid",
+      502,
+    );
   }
 }

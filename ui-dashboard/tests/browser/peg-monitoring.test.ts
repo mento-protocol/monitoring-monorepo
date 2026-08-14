@@ -75,6 +75,25 @@ test("renders the status board, expands a row panel, and retains stale evidence"
       },
     });
   });
+  await page.route("**/api/peg-monitoring/alerts", async (route) => {
+    expect(route.request().method()).toBe("GET");
+    await route.fulfill({
+      json: {
+        from: now - 7 * 86_400,
+        to: now,
+        events: [
+          {
+            id: "europ-spread-cleared",
+            at: now - 120,
+            severity: "cleared",
+            lead: "EUROP spread warning cleared",
+            detail:
+              "Bitvavo EUR · active policy returned to normal after 22 min.",
+          },
+        ],
+      },
+    });
+  });
   await page.goto("/peg-monitoring");
 
   await expect(
@@ -166,6 +185,8 @@ test("renders the status board, expands a row panel, and retains stale evidence"
 
   const alerts = page.getByTestId("peg-recent-alerts");
   await expect(alerts).toContainText("Recent alerts");
+  await expect(alerts).toContainText("EUROP spread warning cleared");
+  await expect(alerts).toContainText("normal after 22 min");
   const grafanaLink = alerts.getByRole("link", {
     name: /Full history in Grafana/,
   });
@@ -205,6 +226,13 @@ test("keeps the board scrollable without pushing the page wider on mobile", asyn
       body: '{"error":"history offline"}',
     });
   });
+  await page.route("**/api/peg-monitoring/alerts", async (route) => {
+    await route.fulfill({
+      status: 502,
+      contentType: "application/json",
+      body: '{"error":"alert history offline"}',
+    });
+  });
   await page.goto("/peg-monitoring");
 
   await expect(page.getByTestId("peg-row-europ-schuman")).toBeVisible();
@@ -215,6 +243,9 @@ test("keeps the board scrollable without pushing the page wider on mobile", asyn
   await expect(page.getByTestId("peg-panel-europ-schuman")).toBeVisible();
   await expect(page.getByTestId("peg-panel-europ-schuman")).toContainText(
     "History unavailable",
+  );
+  await expect(page.getByTestId("peg-recent-alerts")).toContainText(
+    "Recent alerts unavailable",
   );
 
   const horizontalOverflow = await page.evaluate(

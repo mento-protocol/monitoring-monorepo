@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { axe } from "vitest-axe";
 import type { PegMonitoringResult } from "@/hooks/use-peg-monitoring";
 import type { PegHistoryResult } from "@/hooks/use-peg-history";
+import type { PegAlertsResult } from "@/hooks/use-peg-alerts";
 import {
   makePegMonitoringResponse,
   PEG_FIXTURE_CHAIN_ID,
@@ -25,6 +26,11 @@ const state = vi.hoisted(() => ({
     hasError: true,
   } as PegHistoryResult,
   historyRequest: null as readonly unknown[] | null,
+  alerts: {
+    data: { from: 0, to: 0, events: [] },
+    isLoading: false,
+    hasError: false,
+  } as PegAlertsResult,
 }));
 vi.mock("@/hooks/use-peg-monitoring", () => ({
   usePegMonitoring: () => state.current,
@@ -34,6 +40,9 @@ vi.mock("@/hooks/use-peg-history", () => ({
     state.historyRequest = args;
     return state.history;
   },
+}));
+vi.mock("@/hooks/use-peg-alerts", () => ({
+  usePegAlerts: () => state.alerts,
 }));
 vi.mock("next/link", () => ({
   default: ({
@@ -62,6 +71,11 @@ beforeEach(() => {
   state.current = { data: null, isLoading: true, hasError: false };
   state.history = { data: null, isLoading: false, hasError: true };
   state.historyRequest = null;
+  state.alerts = {
+    data: { from: 0, to: 0, events: [] },
+    isLoading: false,
+    hasError: false,
+  };
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -506,7 +520,7 @@ describe("PegMonitoringPageClient board", () => {
     expect(panel.textContent).not.toContain("91%");
   });
 
-  it("keeps the recent-alerts container with its Grafana fallback", () => {
+  it("keeps the recent-alerts container with its Grafana history link", () => {
     loaded();
     render();
     const alerts = query('[data-testid="peg-recent-alerts"]')!;
@@ -517,6 +531,20 @@ describe("PegMonitoringPageClient board", () => {
         'a[href="https://clabsmento.grafana.net/alerting/list?search=Peg"]',
       ).length,
     ).toBeGreaterThan(0);
+  });
+
+  it("keeps the current board intact when recent alerts fail", () => {
+    loaded();
+    state.alerts = {
+      data: { from: 0, to: 0, events: [] },
+      isLoading: false,
+      hasError: true,
+    };
+    render();
+    expect(query('[data-testid="peg-row-europ-schuman"]')).not.toBeNull();
+    expect(query('[data-testid="peg-recent-alerts"]')!.textContent).toContain(
+      "Recent alerts unavailable",
+    );
   });
 
   it("falls back to an error box when no package can be shown", () => {
