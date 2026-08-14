@@ -336,13 +336,14 @@ jobs:
               `**Rule:** inspect every dependency root and update only roots whose ` +
               `lockfiles resolve an affected version. Overrides live in each affected ` +
               `root's \`pnpm-workspace.yaml\`. Update the override and lockfile ` +
-              `together: in that root, run \`pnpm install --lockfile-only\`, inspect ` +
-              `the lockfile diff for unrelated version changes, then verify with ` +
+              `together: in that root, run ` +
+              `\`pnpm update --lockfile-only <advisory-package>\`, then discard every ` +
+              `unrelated bare-version change from the lockfile diff and verify with ` +
               `\`pnpm install --frozen-lockfile\`. The override comment must name ` +
               `the advisory and patched floor; explain a superseded floor when needed ` +
               `to explain the range. If the patched release is younger ` +
               `than 4320 minutes, add a narrow reviewed \`minimumReleaseAgeExclude\` ` +
-              `and append \`--config.minimumReleaseAge=0\` to the lockfile-only ` +
+              `and append \`--config.minimumReleaseAge=0\` to the targeted update ` +
               `command. Prefer range-scoped exact pins ` +
               `(\`pkg@<x.y.z: x.y.z\`) for anything with major-incompat risk.\n\n` +
               marker;
