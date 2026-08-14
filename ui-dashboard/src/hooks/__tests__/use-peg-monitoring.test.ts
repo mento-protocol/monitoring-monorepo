@@ -38,7 +38,7 @@ afterEach(() => {
   }
 });
 describe("usePegMonitoring", () => {
-  it("uses the same-origin timed 30-second polling contract", async () => {
+  it("uses the same-origin polling and resumed-tab refresh contract", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(Response.json(makePegMonitoringResponse()));
@@ -46,7 +46,8 @@ describe("usePegMonitoring", () => {
     expect(swr.mock.calls[0]?.[0]).toBe(SWR_KEY_PEG_MONITORING);
     expect(probe.config).toMatchObject({
       refreshInterval: PEG_MONITORING_REFRESH_MS,
-      revalidateOnFocus: false,
+      revalidateOnFocus: true,
+      focusThrottleInterval: PEG_MONITORING_REFRESH_MS,
       revalidateOnReconnect: false,
       refreshWhenHidden: false,
     });

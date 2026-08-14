@@ -34,7 +34,11 @@ export function usePegMonitoring(): PegMonitoringResult {
     fetchPegMonitoring,
     {
       refreshInterval: PEG_MONITORING_REFRESH_MS,
-      revalidateOnFocus: false,
+      // This is one same-origin board read, not a Hasura query fan-out. Refresh
+      // on resume so a hidden tab does not retain an old package until the next
+      // interval, and cap focus refreshes at the normal board cadence.
+      revalidateOnFocus: true,
+      focusThrottleInterval: PEG_MONITORING_REFRESH_MS,
       revalidateOnReconnect: false,
       refreshWhenHidden: false,
       onSuccess() {
