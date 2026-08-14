@@ -31,6 +31,8 @@ test("renders the status board, expands a row panel, and retains stale evidence"
   await page.clock.install({ time: new Date(now * 1000 + 20_000) });
   await page.setViewportSize({ width: 1440, height: 900 });
   let request = 0;
+  let failRefreshes = false;
+  let failedRefreshes = 0;
   let releaseFirstResponse!: () => void;
   const firstResponseGate = new Promise<void>((resolve) => {
     releaseFirstResponse = resolve;
@@ -44,6 +46,11 @@ test("renders the status board, expands a row panel, and retains stale evidence"
       await route.fulfill({ json: payload });
       return;
     }
+    if (!failRefreshes) {
+      await route.fulfill({ json: payload });
+      return;
+    }
+    failedRefreshes += 1;
     await route.fulfill({
       status: 503,
       contentType: "application/json",
@@ -168,6 +175,23 @@ test("renders the status board, expands a row panel, and retains stale evidence"
     panel.getByRole("img", { name: /Peg history over 24h: 2 readings/ }),
   ).toBeVisible();
   expect(historyRequests["24h"]).toBe(1);
+
+  failRefreshes = true;
+  await page.clock.runFor(30_000);
+  await expect.poll(() => failedRefreshes).toBe(1);
+  await expect(aggregate).toHaveText("1 of 1 peg healthy");
+  await expect(aggregate).not.toContainText("latest data is stale");
+
+  await page.clock.runFor(30_000);
+  await expect.poll(() => failedRefreshes).toBeGreaterThanOrEqual(2);
+  await expect(aggregate).toContainText("latest data is stale");
+  await expect(page.getByTestId("peg-row-europ-schuman")).toContainText(
+    "· stale",
+  );
+  await expect(page.getByTestId("peg-panel-europ-schuman")).toContainText(
+    "Showing the last confirmed check",
+  );
+
   await page.clock.runFor(300_000);
   await expect.poll(() => historyRequests["24h"]).toBeGreaterThan(1);
   await expect(
@@ -192,21 +216,13 @@ test("renders the status board, expands a row panel, and retains stale evidence"
   });
   await expect(grafanaLink).toHaveAttribute(
     "href",
-    "https://clabsmento.grafana.net/alerting/list?search=Peg",
+    "https://clabsmento.grafana.net/alerting/history?var-LABELS_FILTER=service%3Dpeg-monitoring&from=now-7d&to=now&timezone=browser",
   );
   await expect(grafanaLink).toHaveAttribute("rel", /noopener/);
   await expect(
     page.getByRole("link", { name: "Peg Monitoring", exact: true }),
   ).toBeVisible();
 
-  await page.clock.runFor(80_000);
-  await expect(aggregate).toContainText("latest data is stale");
-  await expect(page.getByTestId("peg-row-europ-schuman")).toContainText(
-    "· stale",
-  );
-  await expect(page.getByTestId("peg-panel-europ-schuman")).toContainText(
-    "Showing the last confirmed check",
-  );
   await expect.poll(() => historyRequestEnds.at(-1)).toBe(String(now));
 });
 

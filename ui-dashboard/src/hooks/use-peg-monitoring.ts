@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import useSWR from "swr";
 import { fetchJsonOrThrow } from "@/lib/fetch-json";
 import { rateLimitAwareRetry } from "@/lib/gql-retry";
@@ -15,6 +16,8 @@ export type PegMonitoringResult = {
   hasError: boolean;
 };
 
+const REFRESH_FAILURES_BEFORE_STALE = 2;
+
 function fetchPegMonitoring(): Promise<PegMonitoringResponse> {
   return fetchJsonOrThrow<PegMonitoringResponse>(
     "/api/peg-monitoring",
@@ -24,6 +27,8 @@ function fetchPegMonitoring(): Promise<PegMonitoringResponse> {
 }
 
 export function usePegMonitoring(): PegMonitoringResult {
+  const [consecutiveRefreshFailures, setConsecutiveRefreshFailures] =
+    useState(0);
   const { data, error, isLoading } = useSWR(
     SWR_KEY_PEG_MONITORING,
     fetchPegMonitoring,
@@ -32,8 +37,22 @@ export function usePegMonitoring(): PegMonitoringResult {
       revalidateOnFocus: false,
       revalidateOnReconnect: false,
       refreshWhenHidden: false,
-      onErrorRetry: rateLimitAwareRetry,
+      onSuccess() {
+        setConsecutiveRefreshFailures(0);
+      },
+      onErrorRetry(error, key, config, revalidate, options) {
+        setConsecutiveRefreshFailures((failures) =>
+          Math.min(failures + 1, REFRESH_FAILURES_BEFORE_STALE),
+        );
+        rateLimitAwareRetry(error, key, config, revalidate, options);
+      },
     },
   );
-  return { data: data ?? null, isLoading, hasError: error !== undefined };
+  return {
+    data: data ?? null,
+    isLoading,
+    hasError:
+      error !== undefined &&
+      consecutiveRefreshFailures >= REFRESH_FAILURES_BEFORE_STALE,
+  };
 }

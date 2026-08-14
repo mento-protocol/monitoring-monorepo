@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { RecentAlerts, alertTimestamp } from "../_components/recent-alerts";
 import type { PegAlertEvent } from "@/lib/peg-alerts";
+import { PEG_GRAFANA_ALERTS_URL } from "@/lib/peg-monitoring";
 
 const NOW_MS = Date.UTC(2026, 7, 11, 16, 30);
 let container: HTMLDivElement;
@@ -68,11 +69,9 @@ describe("RecentAlerts", () => {
       ),
     );
     expect(container.textContent).toContain("Recent alerts unavailable");
-    expect(
-      container.querySelector(
-        'a[href="https://clabsmento.grafana.net/alerting/list?search=Peg"]',
-      ),
-    ).not.toBeNull();
+    expect(container.querySelector("a")?.getAttribute("href")).toBe(
+      PEG_GRAFANA_ALERTS_URL,
+    );
   });
 
   it("renders one entry per in-window transition with its severity dot and bold lead", () => {
