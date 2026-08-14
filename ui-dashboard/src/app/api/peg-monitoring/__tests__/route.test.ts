@@ -169,18 +169,19 @@ describe("GET /api/peg-monitoring", () => {
     });
   });
   it.each([
-    [429, 502, "upstream-rate-limit"],
-    [503, 503, "upstream-unavailable"],
-    [418, 502, "upstream-http"],
+    [429, 502, "upstream-rate-limit", "Peg monitoring upstream rate limited"],
+    [503, 503, "upstream-unavailable", "peg decision packages unavailable"],
+    [418, 502, "upstream-http", "Peg monitoring upstream unavailable"],
   ])(
     "preserves upstream HTTP %i as %s with %s metadata",
-    async (upstreamStatus, localStatus, failureClass) => {
+    async (upstreamStatus, localStatus, failureClass, error) => {
       vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
         json({ ignored: "body" }, { status: upstreamStatus }),
       );
       const response = await GET();
       expect(response.status).toBe(localStatus);
       expect(await response.json()).toMatchObject({
+        error,
         failureClass,
         upstreamStatus,
       });

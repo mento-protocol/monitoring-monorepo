@@ -119,7 +119,7 @@ export async function GET(): Promise<NextResponse> {
   }
   if (upstream.status === 429)
     return errorResponse(
-      "Peg monitoring upstream unavailable",
+      "Peg monitoring upstream rate limited",
       502,
       "upstream-rate-limit",
       upstream.status,
