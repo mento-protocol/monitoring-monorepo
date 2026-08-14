@@ -16,10 +16,13 @@ const DEFAULT_TIMEOUT_MS = 25_000;
 export async function fetchJsonOrThrow<T>(
   url: string,
   label: string,
-  opts: { timeoutMs?: number } = {},
+  opts: { timeoutMs?: number; method?: "GET" | "POST" } = {},
 ): Promise<T> {
   const timeout = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const res = await fetch(url, { signal: AbortSignal.timeout(timeout) });
+  const res = await fetch(url, {
+    ...(opts.method === undefined ? {} : { method: opts.method }),
+    signal: AbortSignal.timeout(timeout),
+  });
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as {
       error?: string;

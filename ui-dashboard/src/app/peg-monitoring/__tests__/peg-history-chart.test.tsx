@@ -81,4 +81,33 @@ describe("PegHistoryChart ranges", () => {
     expect(texts.some((text) => text!.endsWith("· at target"))).toBe(true);
     expect(texts.some((text) => text!.includes("0 bps above"))).toBe(false);
   });
+
+  it("breaks the line across missing sampling intervals", () => {
+    const fiveMinutes = 5 * 60_000;
+    act(() =>
+      root.render(
+        <PegHistoryChart
+          policy={policy}
+          nowBps={-3.1}
+          tone="healthy"
+          measurement="Test measurement"
+          nowMs={NOW_MS}
+          series={[
+            point(20 * fiveMinutes, -6),
+            point(19 * fiveMinutes, -5),
+            point(3 * fiveMinutes, -4),
+            point(2 * fiveMinutes, -3),
+          ]}
+        />,
+      ),
+    );
+
+    const segments = container.querySelectorAll(
+      '[data-testid="peg-history-line-segment"]',
+    );
+    expect(segments).toHaveLength(2);
+    expect(segments[0]!.getAttribute("points")).not.toContain(
+      segments[1]!.getAttribute("points")!,
+    );
+  });
 });
