@@ -143,6 +143,10 @@ point that can still teach the old sequence. Search root and package
 rollback, and babysit scripts. Update stale ordered runbooks and stale
 file/directory descriptions in the same PR.
 
+Treat workflow-generated issue bodies and operator instructions as live entry
+points: compare their rules item by item with the canonical owner before the
+first push.
+
 Treat deploy, rollback, and babysit as one workflow family: a new promotion or
 verification gate normally belongs in each applicable path. Search for the old
 command or invariant after editing and inspect every remaining hit; a concise
