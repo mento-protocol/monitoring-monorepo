@@ -3,6 +3,7 @@
 import { act, StrictMode } from "react";
 import { createRoot, hydrateRoot, type Root } from "react-dom/client";
 import { renderToString } from "react-dom/server";
+import * as Sentry from "@sentry/nextjs";
 import useSWR, {
   preload,
   SWRConfig,
@@ -16,6 +17,7 @@ import {
   SwrProvider,
 } from "@/components/swr-provider";
 import type { TradingLimitsQuery } from "@/lib/__generated__/graphql";
+import { FetchJsonError } from "@/lib/fetch-json";
 import { TRADING_LIMITS } from "@/lib/queries";
 import {
   createPersistedSWRCache,
@@ -127,6 +129,24 @@ function FallbackDataProbe({ triggerRef }: { triggerRef: TriggerRef }) {
   );
 }
 
+function GlobalFailureProbe({
+  error,
+  triggerRef,
+}: {
+  error: Error;
+  triggerRef: TriggerRef;
+}) {
+  const { mutate } = useSWR(
+    "peg-monitoring-observability-test",
+    async () => {
+      throw error;
+    },
+    { revalidateOnMount: false, shouldRetryOnError: false },
+  );
+  triggerRef.current = () => mutate();
+  return null;
+}
+
 function CustomSuccessProbe({
   onSuccess,
   triggerRef,
@@ -207,6 +227,7 @@ function ImmediateFailureTradingLimitsProbe({
 }
 
 beforeEach(() => {
+  vi.clearAllMocks();
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
   vi.useFakeTimers();
   vi.setSystemTime(NOW);
@@ -226,6 +247,75 @@ afterEach(() => {
 });
 
 describe("SwrProvider freshness tracking", () => {
+  it("captures safe fetch metadata at most once per key per minute", async () => {
+    const triggerRef: TriggerRef = { current: null };
+    const error = new FetchJsonError("upstream unavailable", {
+      failureClass: "upstream-rate-limit",
+      requestPath: "/api/peg-monitoring",
+      status: 502,
+      upstreamStatus: 429,
+    });
+
+    act(() => {
+      root.render(
+        <SwrProvider>
+          <GlobalFailureProbe error={error} triggerRef={triggerRef} />
+        </SwrProvider>,
+      );
+    });
+
+    await act(async () => {
+      await triggerRef.current?.().catch(() => undefined);
+    });
+    expect(Sentry.captureException).toHaveBeenCalledWith(error, {
+      tags: {
+        api_route: "/api/peg-monitoring",
+        failure_class: "upstream-rate-limit",
+        http_status: "502",
+        source: "swr",
+        upstream_status: "429",
+      },
+      extra: { swrKey: "peg-monitoring-observability-test" },
+    });
+
+    await act(async () => {
+      await triggerRef.current?.().catch(() => undefined);
+    });
+    expect(Sentry.captureException).toHaveBeenCalledTimes(1);
+
+    const timeoutError = new FetchJsonError("request timed out", {
+      failureClass: "timeout",
+      requestPath: "/api/peg-monitoring",
+      status: 504,
+    });
+    act(() => {
+      root.render(
+        <SwrProvider>
+          <GlobalFailureProbe error={timeoutError} triggerRef={triggerRef} />
+        </SwrProvider>,
+      );
+    });
+    await act(async () => {
+      await triggerRef.current?.().catch(() => undefined);
+    });
+    expect(Sentry.captureException).toHaveBeenLastCalledWith(timeoutError, {
+      tags: {
+        api_route: "/api/peg-monitoring",
+        failure_class: "timeout",
+        http_status: "504",
+        source: "swr",
+      },
+      extra: { swrKey: "peg-monitoring-observability-test" },
+    });
+    expect(Sentry.captureException).toHaveBeenCalledTimes(2);
+
+    vi.setSystemTime(NOW + 60_000);
+    await act(async () => {
+      await triggerRef.current?.().catch(() => undefined);
+    });
+    expect(Sentry.captureException).toHaveBeenCalledTimes(3);
+  });
+
   it("seeds fallback data as last-good data before the first refresh fails", async () => {
     const triggerRef: TriggerRef = { current: null };
 

@@ -78,6 +78,33 @@ The live listing-confirmation producer and consumer source includes
 application and Grafana query evidence remain separate gates. Listing state
 must never be inferred from source health.
 
+## Dashboard refresh diagnostics
+
+The dashboard reports failed `/api/peg-monitoring` SWR reads to the
+`analytics-mento-org` Sentry project with safe `api_route`, `failure_class`,
+`http_status`, and, when the bridge returned an HTTP response,
+`upstream_status` tags. The API response and Sentry event omit upstream bodies,
+request query strings, credentials, and full URLs.
+
+Use this production query to find bridge rate limits:
+
+```text
+environment:production source:swr api_route:"/api/peg-monitoring" failure_class:upstream-rate-limit upstream_status:429
+```
+
+Sentry captures at most one event per normalized SWR key and root-cause
+fingerprint per client runtime per minute. Event counts therefore measure
+sampled client-runtime minutes rather than raw failed requests, unique clients,
+or unique wall-clock minutes. Remove the `failure_class` and `upstream_status`
+terms to inspect all refresh root causes, then group the results by those tags.
+
+The seven days ending 2026-08-14 contained one client-side peg-monitoring fetch
+failure and no preserved upstream status. That evidence does not support a
+cadence change, so the dashboard retains its 30-second refresh interval. Use
+the classified query after a representative production window before changing
+that interval; a sustained `upstream-rate-limit` signal is the trigger to
+reassess it.
+
 ## Rule inventory
 
 For each active policy, the generated source defines:

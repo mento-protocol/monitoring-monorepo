@@ -4,7 +4,7 @@ export const PEG_MONITORING_REFRESH_MS = 30_000;
 export const PEG_MONITORING_STALE_AFTER_MS = 90_000;
 const MAX_FUTURE_CLOCK_SKEW_MS = 60_000;
 export const PEG_GRAFANA_ALERTS_URL =
-  "https://clabsmento.grafana.net/alerting/history?var-LABELS_FILTER=service%3Dpeg-monitoring&from=now-7d&to=now&timezone=browser";
+  "https://clabsmento.grafana.net/alerting/history?var-LABELS_FILTER=service%3Dpeg-monitoring&from=now-7d&to=now&timezone=browser&var-STATE_FILTER_TO=Alerting";
 export type {
   PegMonitoringResponse,
   PegAssetPackage,
