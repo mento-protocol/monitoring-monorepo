@@ -239,7 +239,7 @@ describe("Kraken response parsing", () => {
     });
   });
 
-  it("requires PostTrade when the listed book has no provider identity", async () => {
+  it("classifies a PostTrade network failure when an empty book has no identity", async () => {
     await expect(
       fetchKrakenObservation(request, {
         fetch: queuedFetch([
@@ -248,7 +248,10 @@ describe("Kraken response parsing", () => {
           new Error("PostTrade unavailable"),
         ]),
       }),
-    ).rejects.toThrow("PostTrade unavailable");
+    ).rejects.toMatchObject({
+      name: "PegProviderRequestError",
+      evidence: { reason: "provider_network", httpStatus: null },
+    });
   });
 
   it("rejects malformed numeric fields and oversized books", () => {
@@ -373,7 +376,8 @@ describe("Kraken transport bounds", () => {
 
     const pending = fetchKrakenObservation(request, { fetch });
     const assertion = expect(pending).rejects.toMatchObject({
-      name: "AbortError",
+      name: "PegProviderRequestError",
+      evidence: { reason: "provider_timeout", httpStatus: null },
     });
     await vi.advanceTimersByTimeAsync(KRAKEN_TIMEOUT_MS);
     await assertion;

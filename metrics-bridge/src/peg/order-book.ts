@@ -6,6 +6,10 @@ import type {
   PegObservation,
   Sleep,
 } from "./types.js";
+import {
+  PegProviderRequestError,
+  providerFailureEvidence,
+} from "./failure-reasons.js";
 
 export const MAX_PROVIDER_RETRIES = 1;
 export const MAX_RETRY_DELAY_MS = 1_000;
@@ -253,11 +257,33 @@ const declaredContentLength = (response: Response) => {
   return Number.isSafeInteger(value) && value >= 0 ? value : null;
 };
 
+const readProviderBodyChunk = async (
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+) => {
+  try {
+    return await reader.read();
+  } catch (cause) {
+    const evidence = providerFailureEvidence(cause);
+    throw new PegProviderRequestError(
+      evidence.reason === "provider_timeout"
+        ? "provider response body timed out"
+        : evidence.reason === "provider_network"
+          ? "provider response body failed during transfer"
+          : "provider returned an unreadable response body",
+      evidence,
+      { cause },
+    );
+  }
+};
+
 const readBoundedBody = async (response: Response, maxBytes: number) => {
   const declared = declaredContentLength(response);
   if (declared !== null && declared > maxBytes) {
     await response.body?.cancel();
-    throw new Error(`provider response exceeds ${maxBytes} bytes`);
+    throw new PegProviderRequestError(
+      `provider response exceeds ${maxBytes} bytes`,
+      { reason: "invalid_response", httpStatus: null },
+    );
   }
   if (response.body === null) return "";
 
@@ -265,12 +291,15 @@ const readBoundedBody = async (response: Response, maxBytes: number) => {
   const chunks: Uint8Array[] = [];
   let received = 0;
   while (true) {
-    const { done, value } = await reader.read();
+    const { done, value } = await readProviderBodyChunk(reader);
     if (done) break;
     received += value.byteLength;
     if (received > maxBytes) {
       await reader.cancel();
-      throw new Error(`provider response exceeds ${maxBytes} bytes`);
+      throw new PegProviderRequestError(
+        `provider response exceeds ${maxBytes} bytes`,
+        { reason: "invalid_response", httpStatus: null },
+      );
     }
     chunks.push(value);
   }
@@ -299,18 +328,44 @@ const fetchAttempt = async (request: BoundedJsonRequest) => {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), request.timeoutMs);
   try {
-    const response = await request.fetch(request.url, {
-      headers: { Accept: "application/json" },
-      signal: controller.signal,
-    });
+    let response: Response;
+    try {
+      response = await request.fetch(request.url, {
+        headers: { Accept: "application/json" },
+        signal: controller.signal,
+      });
+    } catch (cause) {
+      const timedOut =
+        cause instanceof Error &&
+        (cause.name === "AbortError" || cause.name === "TimeoutError");
+      throw new PegProviderRequestError(
+        timedOut
+          ? "provider request timed out"
+          : "provider network request failed",
+        {
+          reason: timedOut ? "provider_timeout" : "provider_network",
+          httpStatus: null,
+        },
+        { cause },
+      );
+    }
     if (!response.ok) {
       await response.body?.cancel();
       return { response, body: null };
     }
-    return {
-      response,
-      body: await readBoundedBody(response, request.maxResponseBytes),
-    };
+    try {
+      return {
+        response,
+        body: await readBoundedBody(response, request.maxResponseBytes),
+      };
+    } catch (cause) {
+      if (cause instanceof PegProviderRequestError) throw cause;
+      throw new PegProviderRequestError(
+        "provider returned an unreadable response",
+        { reason: "invalid_response", httpStatus: null },
+        { cause },
+      );
+    }
   } finally {
     clearTimeout(timer);
   }
@@ -326,16 +381,30 @@ export const fetchBoundedJson = async (request: BoundedJsonRequest) => {
       try {
         return JSON.parse(body) as unknown;
       } catch (error) {
-        throw new Error("provider returned invalid JSON", { cause: error });
+        throw new PegProviderRequestError(
+          "provider returned invalid JSON",
+          { reason: "invalid_response", httpStatus: null },
+          { cause: error },
+        );
       }
     }
     if (
       !isRetryableStatus(response.status) ||
       attempt === MAX_PROVIDER_RETRIES
     ) {
-      throw new Error(`provider returned HTTP ${response.status}`);
+      throw new PegProviderRequestError(
+        `provider returned HTTP ${response.status}`,
+        {
+          reason:
+            response.status === 429 ? "rate_limited" : "provider_http_error",
+          httpStatus: response.status,
+        },
+      );
     }
     await request.sleep(retryDelay(response));
   }
-  throw new Error("provider request exhausted its retry budget");
+  throw new PegProviderRequestError(
+    "provider request exhausted its retry budget",
+    { reason: "unknown", httpStatus: null },
+  );
 };

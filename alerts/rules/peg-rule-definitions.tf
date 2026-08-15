@@ -17,7 +17,8 @@ locals {
         fill_expr          = local.peg_active_fill_promql[key]
         structural_expr    = local.peg_active_structural_context_promql[item.asset_id]
         corroboration_expr = local.peg_no_corroboration_promql
-        summary            = "Executable downside deviation is sustained above the warning threshold."
+        summary            = "${local.peg_source_display_names[key]} sell price is {{ if $values.A }}{{ printf \"%.4g\" $values.A.Value }} bps {{ end }}below peg"
+        resolved_summary   = "${local.peg_source_display_names[key]} sell price was {{ if $values.A }}{{ printf \"%.4g\" $values.A.Value }} bps {{ end }}below peg"
         action             = "Compare the deep and secondary books, then inspect pool-flow saturation before escalating."
         notification       = local.peg_notify_market_warning
       }
@@ -38,7 +39,8 @@ locals {
         fill_expr          = local.peg_active_fill_promql[key]
         structural_expr    = local.peg_active_structural_context_promql[item.asset_id]
         corroboration_expr = local.peg_no_corroboration_promql
-        summary            = "Executable sell price is sustained above the premium warning threshold."
+        summary            = "${local.peg_source_display_names[key]} sell price is {{ if $values.A }}{{ printf \"%.4g\" $values.A.Value }} bps {{ end }}above peg"
+        resolved_summary   = "${local.peg_source_display_names[key]} sell price was {{ if $values.A }}{{ printf \"%.4g\" $values.A.Value }} bps {{ end }}above peg"
         action             = "Review reserve-side exposure; premium is warning-only and never pages the drain path."
         notification       = local.peg_notify_market_warning
       }
@@ -60,7 +62,8 @@ locals {
         spread_expr        = local.peg_active_spread_context_promql[key]
         structural_expr    = local.peg_active_structural_context_promql[item.asset_id]
         corroboration_expr = local.peg_active_corroboration_promql[item.asset_id]
-        summary            = "The policy-designated deep venue has a sustained executable downside deviation."
+        summary            = "${local.peg_source_display_names[key]} sell price is {{ if $values.A }}{{ printf \"%.4g\" $values.A.Value }} bps {{ end }}below peg"
+        resolved_summary   = "${local.peg_source_display_names[key]} sell price was {{ if $values.A }}{{ printf \"%.4g\" $values.A.Value }} bps {{ end }}below peg"
         action             = "Verify the deep book and structural flow, then follow the breaker-multisig decision runbook."
         notification       = local.peg_notify_page
       }
@@ -81,7 +84,8 @@ locals {
         fill_expr          = local.peg_active_fill_promql[key]
         structural_expr    = local.peg_active_structural_context_promql[item.asset_id]
         corroboration_expr = local.peg_no_corroboration_promql
-        summary            = "The deep venue spread exceeds its approved envelope."
+        summary            = "${local.peg_source_display_names[key]} buy and sell prices are {{ if $values.A }}{{ printf \"%.4g\" $values.A.Value }} bps {{ else }}unusually far {{ end }}apart"
+        resolved_summary   = "${local.peg_source_display_names[key]} buy and sell prices were {{ if $values.A }}{{ printf \"%.4g\" $values.A.Value }} bps {{ else }}unusually far {{ end }}apart"
         action             = "Check whether the book is evacuating or merely widening within a transient venue event."
         notification       = local.peg_notify_market_warning
       }
@@ -102,7 +106,8 @@ locals {
         fill_expr          = local.peg_active_fill_promql["${asset_id}/${asset.deepVenueSource}"]
         structural_expr    = local.peg_active_structural_context_promql[asset_id]
         corroboration_expr = local.peg_no_corroboration_promql
-        summary            = "Indexed-pool directional flow is near the enforced trading-limit rate."
+        summary            = "${local.peg_asset_display_names[asset_id]} pool flow {{ if $values.Structural }}is using {{ printf \"%.4g\" $values.Structural.Value }}% of its trading limit{{ else }}is close to its trading limit{{ end }}"
+        resolved_summary   = "${local.peg_asset_display_names[asset_id]} pool flow {{ if $values.Structural }}used {{ printf \"%.4g\" $values.Structural.Value }}% of its trading limit{{ else }}was close to its trading limit{{ end }}"
         action             = "Inspect pool flow and counterparties; structural saturation alone never pages."
         notification       = local.peg_notify_market_warning
       }
@@ -123,7 +128,8 @@ locals {
         fill_expr          = local.peg_active_fill_promql["${asset_id}/${asset.deepVenueSource}"]
         structural_expr    = local.peg_active_structural_context_promql[asset_id]
         corroboration_expr = local.peg_no_corroboration_promql
-        summary            = "No usable uncapped price exists on the policy-designated deep venue."
+        summary            = local.peg_active_source_failure_summaries["${asset_id}/${asset.deepVenueSource}"]
+        resolved_summary   = local.peg_active_source_failure_resolved_summaries["${asset_id}/${asset.deepVenueSource}"]
         action             = "Inspect book depth and venue health; the consecutive-poll duration is derived from policy cadence."
         notification       = local.peg_notify_ops_warning
       }
@@ -145,7 +151,8 @@ locals {
         spread_expr        = local.peg_active_spread_context_promql["${asset_id}/${asset.deepVenueSource}"]
         structural_expr    = local.peg_active_structural_context_promql[asset_id]
         corroboration_expr = local.peg_active_corroboration_promql[asset_id]
-        summary            = "The deep venue is blind while an independent stress leg is active."
+        summary            = "${local.peg_active_source_failure_summaries["${asset_id}/${asset.deepVenueSource}"]} while separate market data also shows stress"
+        resolved_summary   = "${local.peg_active_source_failure_resolved_summaries["${asset_id}/${asset.deepVenueSource}"]} while separate market data also showed stress"
         action             = "Treat this as a page: verify partial-price shortfall, spread, and structural flow before breaker action."
         notification       = local.peg_notify_page
       }
@@ -167,7 +174,8 @@ locals {
         listing_age_expr   = local.peg_active_listing_age_promql[key]
         structural_expr    = local.peg_active_structural_context_promql[item.asset_id]
         corroboration_expr = local.peg_no_corroboration_promql
-        summary            = "The producer confirms that this non-deep policy source's exact pair is absent."
+        summary            = "${local.peg_source_display_names[key]} does not list the ${local.peg_asset_display_names[item.asset_id]}/${upper(split("_", item.source_id)[1])} market"
+        resolved_summary   = "${local.peg_source_display_names[key]} did not list the ${local.peg_asset_display_names[item.asset_id]}/${upper(split("_", item.source_id)[1])} market"
         action             = "Verify the provider listing, then replace or remove the source through reviewed registry and policy cleanup."
         notification       = local.peg_notify_ops_warning
       }
@@ -189,7 +197,8 @@ locals {
         listing_age_expr   = local.peg_active_listing_age_promql[key]
         structural_expr    = local.peg_active_structural_context_promql[item.asset_id]
         corroboration_expr = local.peg_no_corroboration_promql
-        summary            = "The producer confirms that the policy-designated deep pair is absent."
+        summary            = "${local.peg_source_display_names[key]} does not list the ${local.peg_asset_display_names[item.asset_id]}/${upper(split("_", item.source_id)[1])} market"
+        resolved_summary   = "${local.peg_source_display_names[key]} did not list the ${local.peg_asset_display_names[item.asset_id]}/${upper(split("_", item.source_id)[1])} market"
         action             = "Treat the critical path as unreachable and re-onboard a replacement deep source through reviewed policy."
         notification       = local.peg_notify_ops_warning
       }
@@ -210,7 +219,8 @@ locals {
         fill_expr          = local.peg_empty_context_promql
         structural_expr    = local.peg_active_structural_context_promql[asset_id]
         corroboration_expr = local.peg_no_corroboration_promql
-        summary            = "The registry-bound indexed pool is unreachable while the exact-version peg loop remains fresh."
+        summary            = replace(local.peg_indexed_pool_summary_template, "__ASSET__", local.peg_asset_display_names[asset_id])
+        resolved_summary   = replace(local.peg_indexed_pool_resolved_summary_template, "__ASSET__", local.peg_asset_display_names[asset_id])
         action             = "Inspect Hasura pool resolution and indexer coverage; use the heartbeat alert for a complete loop outage."
         notification       = local.peg_notify_ops_warning
       }
@@ -231,7 +241,8 @@ locals {
         fill_expr          = local.peg_active_fill_promql[key]
         structural_expr    = local.peg_active_structural_context_promql[item.asset_id]
         corroboration_expr = local.peg_no_corroboration_promql
-        summary            = "A peg venue adapter is unhealthy while the isolated peg loop remains live."
+        summary            = local.peg_active_source_failure_summaries[key]
+        resolved_summary   = local.peg_active_source_failure_resolved_summaries[key]
         action             = "Inspect bounded peg error channels and venue/API status; this ops signal never pages."
         notification       = local.peg_notify_ops_warning
       }
@@ -252,7 +263,8 @@ locals {
         fill_expr          = local.peg_active_fill_promql[key]
         structural_expr    = local.peg_active_structural_context_promql[item.asset_id]
         corroboration_expr = local.peg_no_corroboration_promql
-        summary            = "A non-primary peg source has remained unhealthy for the policy dead-source interval."
+        summary            = local.peg_active_source_failure_summaries[key]
+        resolved_summary   = local.peg_active_source_failure_resolved_summaries[key]
         action             = "Re-census the venue and prepare a source-controlled registry/policy cleanup if the listing is gone."
         notification       = local.peg_notify_ops_warning
       }
@@ -273,7 +285,8 @@ locals {
         fill_expr          = local.peg_empty_context_promql
         structural_expr    = local.peg_active_structural_context_promql[asset_id]
         corroboration_expr = local.peg_no_corroboration_promql
-        summary            = "The isolated peg loop has not completed an asset poll within the freshness grace."
+        summary            = "${local.peg_asset_display_names[asset_id]} monitor data has stopped updating"
+        resolved_summary   = "${local.peg_asset_display_names[asset_id]} monitor data stopped updating"
         action             = "Check metrics-bridge peg-loop logs and policy fetch health before trusting market decisions."
         notification       = local.peg_notify_ops_warning
       }
@@ -299,7 +312,8 @@ locals {
         fill_expr          = local.peg_previous_fill_promql[key]
         structural_expr    = local.peg_previous_structural_context_promql[item.asset_id]
         corroboration_expr = local.peg_no_corroboration_promql
-        summary            = "Retained-policy executable downside deviation remains above warning."
+        summary            = "${local.peg_source_display_names[key]} sell price is {{ if $values.A }}{{ printf \"%.4g\" $values.A.Value }} bps {{ end }}below peg"
+        resolved_summary   = "${local.peg_source_display_names[key]} sell price was {{ if $values.A }}{{ printf \"%.4g\" $values.A.Value }} bps {{ end }}below peg"
         action             = "Evaluate this policy version independently; remove retained rules only through the reviewed JSON cleanup."
         notification       = local.peg_notify_market_warning
       }
@@ -320,7 +334,8 @@ locals {
         fill_expr          = local.peg_previous_fill_promql[key]
         structural_expr    = local.peg_previous_structural_context_promql[item.asset_id]
         corroboration_expr = local.peg_no_corroboration_promql
-        summary            = "Retained-policy executable premium remains above warning."
+        summary            = "${local.peg_source_display_names[key]} sell price is {{ if $values.A }}{{ printf \"%.4g\" $values.A.Value }} bps {{ end }}above peg"
+        resolved_summary   = "${local.peg_source_display_names[key]} sell price was {{ if $values.A }}{{ printf \"%.4g\" $values.A.Value }} bps {{ end }}above peg"
         action             = "Review reserve-side exposure under the retained policy."
         notification       = local.peg_notify_market_warning
       }
@@ -342,7 +357,8 @@ locals {
         spread_expr        = local.peg_previous_spread_context_promql[key]
         structural_expr    = local.peg_previous_structural_context_promql[item.asset_id]
         corroboration_expr = local.peg_previous_corroboration_promql[item.asset_id]
-        summary            = "The retained policy's deep venue has a sustained critical downside deviation."
+        summary            = "${local.peg_source_display_names[key]} sell price is {{ if $values.A }}{{ printf \"%.4g\" $values.A.Value }} bps {{ end }}below peg"
+        resolved_summary   = "${local.peg_source_display_names[key]} sell price was {{ if $values.A }}{{ printf \"%.4g\" $values.A.Value }} bps {{ end }}below peg"
         action             = "Treat this version independently until source-controlled cleanup removes it."
         notification       = local.peg_notify_page
       }
@@ -363,7 +379,8 @@ locals {
         fill_expr          = local.peg_previous_fill_promql[key]
         structural_expr    = local.peg_previous_structural_context_promql[item.asset_id]
         corroboration_expr = local.peg_no_corroboration_promql
-        summary            = "The retained policy's deep-venue spread exceeds its envelope."
+        summary            = "${local.peg_source_display_names[key]} buy and sell prices are {{ if $values.A }}{{ printf \"%.4g\" $values.A.Value }} bps {{ else }}unusually far {{ end }}apart"
+        resolved_summary   = "${local.peg_source_display_names[key]} buy and sell prices were {{ if $values.A }}{{ printf \"%.4g\" $values.A.Value }} bps {{ else }}unusually far {{ end }}apart"
         action             = "Inspect the retained policy's venue state."
         notification       = local.peg_notify_market_warning
       }
@@ -384,7 +401,8 @@ locals {
         fill_expr          = local.peg_previous_fill_promql["${asset_id}/${asset.deepVenueSource}"]
         structural_expr    = local.peg_previous_structural_context_promql[asset_id]
         corroboration_expr = local.peg_no_corroboration_promql
-        summary            = "Retained-policy structural saturation remains elevated."
+        summary            = "${local.peg_asset_display_names[asset_id]} pool flow {{ if $values.Structural }}is using {{ printf \"%.4g\" $values.Structural.Value }}% of its trading limit{{ else }}is close to its trading limit{{ end }}"
+        resolved_summary   = "${local.peg_asset_display_names[asset_id]} pool flow {{ if $values.Structural }}used {{ printf \"%.4g\" $values.Structural.Value }}% of its trading limit{{ else }}was close to its trading limit{{ end }}"
         action             = "Inspect pool flow under the retained policy."
         notification       = local.peg_notify_market_warning
       }
@@ -405,7 +423,8 @@ locals {
         fill_expr          = local.peg_previous_fill_promql["${asset_id}/${asset.deepVenueSource}"]
         structural_expr    = local.peg_previous_structural_context_promql[asset_id]
         corroboration_expr = local.peg_no_corroboration_promql
-        summary            = "The retained policy has no usable deep-venue price."
+        summary            = local.peg_previous_source_failure_summaries["${asset_id}/${asset.deepVenueSource}"]
+        resolved_summary   = local.peg_previous_source_failure_resolved_summaries["${asset_id}/${asset.deepVenueSource}"]
         action             = "Inspect retained-policy venue health; do not gate this rule on the active ACK."
         notification       = local.peg_notify_ops_warning
       }
@@ -427,7 +446,8 @@ locals {
         spread_expr        = local.peg_previous_spread_context_promql["${asset_id}/${asset.deepVenueSource}"]
         structural_expr    = local.peg_previous_structural_context_promql[asset_id]
         corroboration_expr = local.peg_previous_corroboration_promql[asset_id]
-        summary            = "The retained policy is blind while an independent stress leg is active."
+        summary            = "${local.peg_previous_source_failure_summaries["${asset_id}/${asset.deepVenueSource}"]} while separate market data also shows stress"
+        resolved_summary   = "${local.peg_previous_source_failure_resolved_summaries["${asset_id}/${asset.deepVenueSource}"]} while separate market data also showed stress"
         action             = "Verify partial-price shortfall, spread, and structural flow before breaker action."
         notification       = local.peg_notify_page
       }
@@ -449,7 +469,8 @@ locals {
         listing_age_expr   = local.peg_previous_listing_age_promql[key]
         structural_expr    = local.peg_previous_structural_context_promql[item.asset_id]
         corroboration_expr = local.peg_no_corroboration_promql
-        summary            = "The producer confirms that this retained non-deep policy source's exact pair is absent."
+        summary            = "${local.peg_source_display_names[key]} does not list the ${local.peg_asset_display_names[item.asset_id]}/${upper(split("_", item.source_id)[1])} market"
+        resolved_summary   = "${local.peg_source_display_names[key]} did not list the ${local.peg_asset_display_names[item.asset_id]}/${upper(split("_", item.source_id)[1])} market"
         action             = "Verify the retained version independently; remove or replace its source only through reviewed cleanup."
         notification       = local.peg_notify_ops_warning
       }
@@ -471,7 +492,8 @@ locals {
         listing_age_expr   = local.peg_previous_listing_age_promql[key]
         structural_expr    = local.peg_previous_structural_context_promql[item.asset_id]
         corroboration_expr = local.peg_no_corroboration_promql
-        summary            = "The producer confirms that the retained policy's deep pair is absent."
+        summary            = "${local.peg_source_display_names[key]} does not list the ${local.peg_asset_display_names[item.asset_id]}/${upper(split("_", item.source_id)[1])} market"
+        resolved_summary   = "${local.peg_source_display_names[key]} did not list the ${local.peg_asset_display_names[item.asset_id]}/${upper(split("_", item.source_id)[1])} market"
         action             = "Treat this retained critical path as unreachable until reviewed policy cleanup removes or replaces it."
         notification       = local.peg_notify_ops_warning
       }
@@ -492,7 +514,8 @@ locals {
         fill_expr          = local.peg_empty_context_promql
         structural_expr    = local.peg_previous_structural_context_promql[asset_id]
         corroboration_expr = local.peg_no_corroboration_promql
-        summary            = "The retained policy's registry-bound indexed pool is unreachable while its peg loop remains fresh."
+        summary            = replace(local.peg_indexed_pool_summary_template, "__ASSET__", local.peg_asset_display_names[asset_id])
+        resolved_summary   = replace(local.peg_indexed_pool_resolved_summary_template, "__ASSET__", local.peg_asset_display_names[asset_id])
         action             = "Inspect Hasura pool resolution and retain this rule until reviewed policy cleanup removes the version."
         notification       = local.peg_notify_ops_warning
       }
@@ -513,7 +536,8 @@ locals {
         fill_expr          = local.peg_previous_fill_promql[key]
         structural_expr    = local.peg_previous_structural_context_promql[item.asset_id]
         corroboration_expr = local.peg_no_corroboration_promql
-        summary            = "A retained-policy source is unhealthy."
+        summary            = local.peg_previous_source_failure_summaries[key]
+        resolved_summary   = local.peg_previous_source_failure_resolved_summaries[key]
         action             = "Inspect the retained policy's venue/API path."
         notification       = local.peg_notify_ops_warning
       }
@@ -534,7 +558,8 @@ locals {
         fill_expr          = local.peg_previous_fill_promql[key]
         structural_expr    = local.peg_previous_structural_context_promql[item.asset_id]
         corroboration_expr = local.peg_no_corroboration_promql
-        summary            = "A retained-policy non-primary source is permanently dead."
+        summary            = local.peg_previous_source_failure_summaries[key]
+        resolved_summary   = local.peg_previous_source_failure_resolved_summaries[key]
         action             = "Remove it only through reviewed retained-policy cleanup."
         notification       = local.peg_notify_ops_warning
       }
@@ -555,7 +580,8 @@ locals {
         fill_expr          = local.peg_empty_context_promql
         structural_expr    = local.peg_previous_structural_context_promql[asset_id]
         corroboration_expr = local.peg_no_corroboration_promql
-        summary            = "The retained policy has no fresh peg-loop heartbeat."
+        summary            = "${local.peg_asset_display_names[asset_id]} monitor data has stopped updating"
+        resolved_summary   = "${local.peg_asset_display_names[asset_id]} monitor data stopped updating"
         action             = "Keep retained rules live until explicit source-controlled cleanup."
         notification       = local.peg_notify_ops_warning
       }
@@ -578,7 +604,8 @@ locals {
       fill_expr          = local.peg_empty_context_promql
       structural_expr    = local.peg_empty_context_promql
       corroboration_expr = local.peg_no_corroboration_promql
-      summary            = "The producer has not acknowledged the active gated peg policy within its expected window."
+      summary            = "Peg monitor has not loaded policy ${local.peg_active_policy_version}"
+      resolved_summary   = "Peg monitor did not load policy ${local.peg_active_policy_version}"
       action             = "Check private policy fetch/auth and bridge peg-loop logs; do not remove the retained policy."
       notification       = local.peg_notify_ops_warning
     }

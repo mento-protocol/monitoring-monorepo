@@ -7,12 +7,24 @@ import {
   validateListingEvidence,
 } from "./listing-metrics.js";
 import type { MarketState, PegObservation } from "./types.js";
+import {
+  failureReasonCode,
+  PEG_FAILURE_REASON_CODES,
+  type PegFailureReason,
+} from "./failure-reasons.js";
 
 const sourceLabels = ["asset", "source", "policy_version"] as const;
 const venueStateLabels = [...sourceLabels, "state"] as const;
 const assetLabels = ["asset", "policy_version"] as const;
 const policyLabels = ["policy_version"] as const;
 const errorLabels = ["kind"] as const;
+const failureEventLabels = [
+  "kind",
+  "reason",
+  "http_status",
+  "asset",
+  "source",
+] as const;
 
 type SourceLabels = {
   asset: string;
@@ -35,6 +47,8 @@ export interface PegSourceMetricSnapshot {
   spreadBps: number | null;
   newSuccess: boolean;
   newUsableDecision: boolean;
+  failureReason?: PegFailureReason | null;
+  failureHttpStatus?: number | null;
 }
 
 export interface PegBreakerMetricSnapshot {
@@ -72,6 +86,7 @@ export interface PegAssetMetricSnapshot {
   structuralSaturation: number | null;
   structuralQuerySaturated: boolean;
   indexedPoolReachable: boolean;
+  structuralFailureReason?: PegFailureReason | null;
   counterpartyCount: number;
   monitors: PegMonitorMetricSnapshot[];
   sources: PegSourceMetricSnapshot[];
@@ -144,6 +159,18 @@ export const pegGauges = {
     labelNames: sourceLabels,
     registers: [register],
   }),
+  sourceFailureReason: new Gauge({
+    name: "mento_peg_source_failure_reason",
+    help: "Bounded numeric reason for the source's current unusable state. Zero means no known failure.",
+    labelNames: sourceLabels,
+    registers: [register],
+  }),
+  sourceFailureHttpStatus: new Gauge({
+    name: "mento_peg_source_failure_http_status",
+    help: "Provider HTTP status for the source's current failure. Zero means the failure has no HTTP status.",
+    labelNames: sourceLabels,
+    registers: [register],
+  }),
   observationAt: new Gauge({
     name: "mento_peg_observation_at",
     help: "Unix timestamp of the last authoritative venue timestamp or newly observed sequence; HTTP success alone never advances it.",
@@ -186,6 +213,12 @@ export const pegGauges = {
     labelNames: assetLabels,
     registers: [register],
   }),
+  structuralFailureReason: new Gauge({
+    name: "mento_peg_structural_failure_reason",
+    help: "Bounded numeric reason why indexed pool evidence is unavailable. Zero means no known failure.",
+    labelNames: assetLabels,
+    registers: [register],
+  }),
   counterpartyCount: new Gauge({
     name: "mento_peg_counterparty_count",
     help: "Advisory unique SwapEvent caller count in the bounded structural page; never a paging input.",
@@ -223,6 +256,12 @@ export const pegCounters = {
     name: "mento_peg_poll_errors_total",
     help: "Bounded peg-loop failures by stable error channel; peg failures never affect the primary bridge health signal.",
     labelNames: errorLabels,
+    registers: [register],
+  }),
+  failureEvents: new Counter({
+    name: "mento_peg_failure_events_total",
+    help: "Monotonic count of peg failures by bounded cause, exact bounded HTTP status, and source-controlled location.",
+    labelNames: failureEventLabels,
     registers: [register],
   }),
 } as const;
@@ -347,6 +386,26 @@ function validateSourceSnapshot(
     validateStatusOnlyHalt(source);
   }
   validateUsableDecision(source);
+  validateSourceFailureEvidence(source);
+}
+
+function validateSourceFailureEvidence(source: PegSourceMetricSnapshot): void {
+  if (
+    source.failureReason !== undefined &&
+    source.failureReason !== null &&
+    !(source.failureReason in PEG_FAILURE_REASON_CODES)
+  ) {
+    throw new Error("failureReason must be a supported bounded reason");
+  }
+  if (
+    source.failureHttpStatus !== undefined &&
+    source.failureHttpStatus !== null &&
+    (!Number.isInteger(source.failureHttpStatus) ||
+      source.failureHttpStatus < 100 ||
+      source.failureHttpStatus > 599)
+  ) {
+    throw new Error("failureHttpStatus must be an HTTP status or null");
+  }
 }
 
 function validateSnapshots(snapshots: PegAssetMetricSnapshot[]): void {
@@ -465,6 +524,11 @@ function publishSourceGauges(source: PegSourceMetricSnapshot): void {
     policy_version: source.policyVersion,
   };
   pegGauges.sourceHealthy.set(labels, source.healthy ? 1 : 0);
+  pegGauges.sourceFailureReason.set(
+    labels,
+    failureReasonCode(source.failureReason ?? null),
+  );
+  pegGauges.sourceFailureHttpStatus.set(labels, source.failureHttpStatus ?? 0);
   publishListingGauges(labels, source);
   if (source.referenceSize !== null) {
     pegGauges.referenceSize.set(labels, source.referenceSize);
@@ -506,6 +570,10 @@ function publishAsset(snapshot: PegAssetMetricSnapshot): void {
   pegGauges.indexedPoolReachable.set(
     labels,
     snapshot.indexedPoolReachable ? 1 : 0,
+  );
+  pegGauges.structuralFailureReason.set(
+    labels,
+    failureReasonCode(snapshot.structuralFailureReason ?? null),
   );
   pegGauges.counterpartyCount.set(labels, snapshot.counterpartyCount);
   pegGauges.lastPoll.set(labels, snapshot.lastPollAt);
@@ -553,5 +621,6 @@ export function _resetPegMetricsForTests(): void {
   pegCounters.pollSuccess.reset();
   pegCounters.usableDecision.reset();
   pegCounters.pollErrors.reset();
+  pegCounters.failureEvents.reset();
   activeSourceCounterLabels.clear();
 }

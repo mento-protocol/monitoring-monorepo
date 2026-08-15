@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it, vi } from "vitest";
+import { register } from "../src/metrics.js";
 import { assertPegPolicyRegistrySupportsPolicy } from "../src/peg/compatibility.js";
 import { GCP_METADATA_TOKEN_URL } from "../src/peg/gcp-metadata-auth.js";
 import {
@@ -8,6 +9,7 @@ import {
   type PegPolicyVersion,
 } from "../src/peg/policy.js";
 import type { PegPoller } from "../src/peg/poller.js";
+import { _resetPegMetricsForTests } from "../src/peg/metrics.js";
 import { loadPegRegistry, parsePegRegistry } from "../src/peg/registry.js";
 import {
   createPegRuntime as createProductionPegRuntime,
@@ -62,6 +64,28 @@ function poller(
 }
 
 describe("Peg runtime isolation", () => {
+  it("records a bounded cause through the default production reporter", async () => {
+    _resetPegMetricsForTests();
+    const errorLog = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    try {
+      const runtime = createPegRuntime({
+        policyUrl: "not a protected URL",
+      });
+
+      await runtime.runCycle();
+
+      const metrics = await register.metrics();
+      expect(metrics).toContain(
+        'mento_peg_failure_events_total{kind="policy_config",reason="unknown",http_status="none",asset="",source=""} 1',
+      );
+    } finally {
+      errorLog.mockRestore();
+      _resetPegMetricsForTests();
+    }
+  });
+
   it("starts in dormant mode without scheduling or loading protected state", () => {
     const loadRegistry = vi.fn();
     const runtime = createPegRuntime({

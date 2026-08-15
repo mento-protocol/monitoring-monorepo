@@ -9,7 +9,12 @@ const SEVERITY_COLOR: Record<PegAlertSeverity, string> = {
   warning: PEG_COLOR.amber,
   cleared: PEG_COLOR.green,
   page: PEG_COLOR.red,
-  policy: PEG_COLOR.purple,
+};
+
+const SEVERITY_LABEL: Record<PegAlertSeverity, string> = {
+  warning: "Alert active",
+  cleared: "Alert resolved",
+  page: "Urgent alert active",
 };
 
 const clock = new Intl.DateTimeFormat("en-US", {
@@ -44,15 +49,19 @@ function AlertEntry({
       data-testid={`peg-alert-${event.id}`}
       className="grid grid-cols-[14px_96px_1fr] items-start gap-2.5 border-t border-border px-[18px] py-2.5"
     >
-      <span className="pt-[5px]">
+      <span
+        className="pt-[5px]"
+        role="img"
+        aria-label={SEVERITY_LABEL[event.severity]}
+      >
         <SeverityDot size={8} color={SEVERITY_COLOR[event.severity]} />
       </span>
       <span className="text-[11.5px]" style={{ color: PEG_COLOR.muted }}>
         {alertTimestamp(event.at, nowMs)}
       </span>
       <span className="text-[12.5px] text-[var(--peg-text-2)]">
-        <strong className="font-[650] text-foreground">{event.lead}</strong> —{" "}
-        {event.detail}
+        <strong className="font-[650] text-foreground">{event.lead}</strong>
+        {event.detail === "" ? null : <> — {event.detail}</>}
       </span>
     </li>
   );

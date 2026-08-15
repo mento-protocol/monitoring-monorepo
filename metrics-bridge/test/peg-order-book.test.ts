@@ -6,6 +6,7 @@ import {
   sortBookLevels,
 } from "../src/peg/order-book.js";
 import type { PegObservationInput } from "../src/peg/order-book.js";
+import { PegProviderRequestError } from "../src/peg/failure-reasons.js";
 
 const observationInput = (
   overrides: Partial<PegObservationInput> = {},
@@ -295,6 +296,85 @@ describe("fetchBoundedJson", () => {
     await expect(fetchBoundedJson(request(fetch))).rejects.toThrow(/HTTP 400/);
     expect(terminal.cancel).toHaveBeenCalledOnce();
     expect(fetch).toHaveBeenCalledOnce();
+  });
+
+  it("keeps exact bounded evidence for rate limits and HTTP errors", async () => {
+    const rateLimited = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValue(new Response(null, { status: 429 }));
+    await expect(
+      fetchBoundedJson(request(rateLimited)),
+    ).rejects.toMatchObject<PegProviderRequestError>({
+      evidence: { reason: "rate_limited", httpStatus: 429 },
+    });
+
+    const serverError = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValue(new Response(null, { status: 500 }));
+    await expect(
+      fetchBoundedJson(request(serverError)),
+    ).rejects.toMatchObject<PegProviderRequestError>({
+      evidence: { reason: "provider_http_error", httpStatus: 500 },
+    });
+  });
+
+  it("distinguishes provider timeouts from other network failures", async () => {
+    const timeout = vi
+      .fn<typeof globalThis.fetch>()
+      .mockRejectedValue(new DOMException("late", "AbortError"));
+    await expect(
+      fetchBoundedJson(request(timeout)),
+    ).rejects.toMatchObject<PegProviderRequestError>({
+      evidence: { reason: "provider_timeout", httpStatus: null },
+    });
+
+    const network = vi
+      .fn<typeof globalThis.fetch>()
+      .mockRejectedValue(new TypeError("offline"));
+    await expect(
+      fetchBoundedJson(request(network)),
+    ).rejects.toMatchObject<PegProviderRequestError>({
+      evidence: { reason: "provider_network", httpStatus: null },
+    });
+  });
+
+  it("classifies a timeout while reading the response body", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>().mockImplementation(
+      async (_input, init) =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              init?.signal?.addEventListener("abort", () => {
+                controller.error(new DOMException("late body", "AbortError"));
+              });
+            },
+          }),
+        ),
+    );
+
+    await expect(
+      fetchBoundedJson({ ...request(fetch), timeoutMs: 5 }),
+    ).rejects.toMatchObject<PegProviderRequestError>({
+      evidence: { reason: "provider_timeout", httpStatus: null },
+    });
+  });
+
+  it("classifies a network failure while reading the response body", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(
+      new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.error(new TypeError("connection reset"));
+          },
+        }),
+      ),
+    );
+
+    await expect(
+      fetchBoundedJson(request(fetch)),
+    ).rejects.toMatchObject<PegProviderRequestError>({
+      evidence: { reason: "provider_network", httpStatus: null },
+    });
   });
 
   it("cancels a body whose declared content length exceeds the cap", async () => {

@@ -9,7 +9,11 @@ resource "grafana_message_template" "peg_slack_title" {
   name     = "Peg - Slack Title"
   template = <<-EOT
 {{ define "peg.slack.title" -}}
-{{ if (len .Alerts.Firing) }}{{ if eq .CommonLabels.severity "critical" }}🚨{{ else }}🟡{{ end }}{{ else }}✅{{ end }} {{ with .CommonLabels.alertname }}{{ . }}{{ else }}Peg monitoring{{ end }}
+{{ if (len .Alerts.Firing) -}}
+{{ if eq .CommonLabels.severity "critical" }}🚨{{ else }}🟡{{ end }} {{ range $i, $alert := .Alerts.Firing }}{{ if $i }}, {{ end }}{{ with $alert.Annotations.summary }}{{ . }}{{ else }}Peg monitoring needs attention{{ end }}{{ end }}
+{{- else -}}
+✅ {{ range $i, $alert := .Alerts.Resolved }}{{ if $i }}, {{ end }}{{ with $alert.Annotations.resolved_summary }}{{ . }}{{ else }}Peg monitoring recovered{{ end }}{{ end }}
+{{- end }}
 {{- end }}
 EOT
 }
@@ -21,11 +25,12 @@ resource "grafana_message_template" "peg_slack_message" {
   template = <<-EOT
 {{ define "peg.slack.message" }}
 {{ if and (len .Alerts.Firing) (eq .CommonLabels.severity "critical") -}}
-<!subteam^${var.oncall_support_usergroup_id}> Please investigate this critical Peg alert.
+<!subteam^${var.oncall_support_usergroup_id}> Please investigate.
 {{ end -}}
 {{ range .Alerts.Firing -}}
-*FIRING: {{ with .Labels.alertname }}{{ . }}{{ else }}Peg monitoring{{ end }}* — `{{ with .Labels.asset }}{{ . }}{{ else }}unknown asset{{ end }}`{{ with .Labels.source }} / `{{ . }}`{{ end }}
-{{ with .Annotations.summary }}{{ . }}{{ end }}
+{{ with .Annotations.summary }}*{{ . }}*{{ else }}*Peg monitoring needs attention*{{ end }}
+{{ with .Annotations.asset_name }}*Asset:* {{ . }}{{ end }}
+{{ with .Annotations.source_name }}*Source:* {{ . }}{{ end }}
 {{ with .Annotations.executable_price }}*Executable price:* {{ . }}{{ end }}
 {{ with .Annotations.deviation_bps }}*Downside deviation:* {{ . }} bps{{ end }}
 {{ with .Annotations.premium_bps }}*Premium:* {{ . }} bps{{ end }}
@@ -35,15 +40,15 @@ resource "grafana_message_template" "peg_slack_message" {
 {{ with .Annotations.listing_check_age }}*Listing checked:* {{ . }}{{ end }}
 {{ with .Annotations.structural_saturation }}*Structural saturation:* {{ . }}{{ end }}
 {{ with .Annotations.corroboration }}*Corroboration:* {{ . }}{{ end }}
-*Policy:* `{{ with .Labels.policy_version }}{{ . }}{{ else }}unknown{{ end }}`
 {{ with .Annotations.action }}*Action:* {{ . }}{{ end }}
 *Started:* {{ .StartsAt.Format "Mon Jan 02 15:04 UTC" }}
 *Alert ID:* `{{ .Fingerprint }}`
 {{ end -}}
 {{ range .Alerts.Resolved -}}
-*RESOLVED: {{ with .Labels.alertname }}{{ . }}{{ else }}Peg monitoring{{ end }}* — `{{ with .Labels.asset }}{{ . }}{{ else }}unknown asset{{ end }}`{{ with .Labels.source }} / `{{ . }}`{{ end }}
-*Policy:* `{{ with .Labels.policy_version }}{{ . }}{{ else }}unknown{{ end }}`
-*Resolved:* {{ .EndsAt.Format "Mon Jan 02 15:04 UTC" }}
+{{ with .Annotations.resolved_summary }}*{{ . }}*{{ else }}*Peg monitoring recovered*{{ end }}
+{{ with .Annotations.asset_name }}*Asset:* {{ . }}{{ end }}
+{{ with .Annotations.source_name }}*Source:* {{ . }}{{ end }}
+*Ended:* {{ .EndsAt.Format "Mon Jan 02 15:04 UTC" }}
 *Alert ID:* `{{ .Fingerprint }}`
 {{ end -}}
 {{ if and (eq (len .Alerts.Firing) 0) (eq (len .Alerts.Resolved) 0) }}No peg alerts are present in this notification.{{ end }}
@@ -58,11 +63,11 @@ resource "grafana_message_template" "peg_victorops_title" {
   template = <<-EOT
 {{ define "peg.victorops.title" -}}
 {{ if (len .Alerts.Firing) -}}
-P1 {{ range $i, $alert := .Alerts.Firing }}{{ if $i }}, {{ end }}{{ with $alert.Labels.asset }}{{ . }}{{ else }}unknown asset{{ end }}: {{ with $alert.Labels.alertname }}{{ . }}{{ else }}peg page{{ end }}{{ end }}
+P1 {{ range $i, $alert := .Alerts.Firing }}{{ if $i }}, {{ end }}{{ with $alert.Annotations.summary }}{{ . }}{{ else }}Peg monitoring needs attention{{ end }}{{ end }}
 {{- end }}
 {{ if and (len .Alerts.Firing) (len .Alerts.Resolved) }} | {{ end -}}
 {{ if (len .Alerts.Resolved) -}}
-RESOLVED {{ range $i, $alert := .Alerts.Resolved }}{{ if $i }}, {{ end }}{{ with $alert.Labels.asset }}{{ . }}{{ else }}unknown asset{{ end }}: {{ with $alert.Labels.alertname }}{{ . }}{{ else }}peg page{{ end }}{{ end }}
+RESOLVED {{ range $i, $alert := .Alerts.Resolved }}{{ if $i }}, {{ end }}{{ with $alert.Annotations.resolved_summary }}{{ . }}{{ else }}Peg monitoring recovered{{ end }}{{ end }}
 {{- end }}
 {{ if and (eq (len .Alerts.Firing) 0) (eq (len .Alerts.Resolved) 0) }}Peg status unknown{{ end }}
 {{- end }}
@@ -77,7 +82,7 @@ resource "grafana_message_template" "peg_victorops_message" {
 {{ define "peg.victorops.message" }}
 {{ range .Alerts.Firing -}}
 PROBLEM: {{ with .Annotations.summary }}{{ . }}{{ else }}A peg page is firing.{{ end }}
-POLICY: {{ with .Labels.policy_version }}{{ . }}{{ else }}unknown{{ end }}{{ with .Labels.source }} SOURCE: {{ . }}{{ end }}
+{{ with .Annotations.asset_name }}ASSET: {{ . }}{{ end }}{{ with .Annotations.source_name }} SOURCE: {{ . }}{{ end }}
 {{ with .Annotations.executable_price }}EXECUTABLE PRICE: {{ . }}{{ end }}
 {{ with .Annotations.deviation_bps }}DOWNSIDE DEVIATION: {{ . }} bps{{ end }}
 {{ with .Annotations.premium_bps }}PREMIUM: {{ . }} bps{{ end }}
@@ -92,9 +97,8 @@ Started: {{ .StartsAt.Format "Mon Jan 02 15:04 UTC" }}
 Alert: {{ .GeneratorURL }}
 {{ end -}}
 {{ range .Alerts.Resolved -}}
-RESOLVED: {{ with .Labels.alertname }}{{ . }}{{ else }}Peg page{{ end }} for {{ with .Labels.asset }}{{ . }}{{ else }}unknown asset{{ end }}.
-Policy: {{ with .Labels.policy_version }}{{ . }}{{ else }}unknown{{ end }}
-Resolved: {{ .EndsAt.Format "Mon Jan 02 15:04 UTC" }}
+RESOLVED: {{ with .Annotations.resolved_summary }}{{ . }}{{ else }}Peg monitoring recovered{{ end }}
+Ended: {{ .EndsAt.Format "Mon Jan 02 15:04 UTC" }}
 {{ end -}}
 {{ if and (eq (len .Alerts.Firing) 0) (eq (len .Alerts.Resolved) 0) }}Peg status unknown.{{ end }}
 {{ end }}
