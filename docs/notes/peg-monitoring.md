@@ -3,7 +3,7 @@ title: Peg monitoring alert source validation and activation
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-13
+last_verified: 2026-08-15
 doc_type: runbook
 scope: alerts/peg-monitoring
 review_interval_days: 90
@@ -105,6 +105,65 @@ the classified query after a representative production window before changing
 that interval; a sustained `upstream-rate-limit` signal is the trigger to
 reassess it.
 
+## Alert history explanations
+
+The dashboard `Recent alerts` list uses cause-first sentences. The state dot
+shows whether the condition is active, urgent, or resolved. Each dot also has
+an accessible state label. The sentence omits Grafana state terms, policy-slot
+terms, and internal rule names. For example, a downside transition reads
+`Bitvavo sell price is 31 bps below peg`.
+
+Grafana rule summaries and Peg notification templates use the same copy
+contract. Grafana keeps the internal rule name stable for alert identity, but
+the user-facing summary leads with the measured cause. Slack titles use the
+severity icon plus that summary. Slack bodies do not repeat `FIRING`,
+`RESOLVED`, the policy slot, or the internal rule name. Resolved notifications
+use the matching past-tense summary. Splunk On-Call uses the same summaries and
+keeps its required `P1` or `RESOLVED` state text because it has no color icon.
+Canonical display-name maps preserve asset and provider casing such as `KESm`
+and `VALR` across the dashboard, Grafana, and notifications.
+
+Grafana state history stores the evaluated query values for each transition.
+Every Peg rule therefore includes two helper queries, `Reason` and
+`HttpStatus`. The helpers do not affect the alert condition. They also stay out
+of instance labels, so a changed failure cause cannot change the alert
+fingerprint. The dashboard uses the fired transition's values for both the
+active row and its later resolved row. It never uses raw provider errors,
+response bodies, request URLs, or annotations as display text.
+
+Metrics Bridge publishes these bounded helper metrics:
+
+- `mento_peg_source_failure_reason` for source and deep-price failures;
+- `mento_peg_source_failure_http_status` for an exact provider HTTP status;
+  and
+- `mento_peg_structural_failure_reason` for indexed-pool failures.
+
+It also increments `mento_peg_failure_events_total` for frequency analysis.
+The counter labels contain a bounded reason, an exact HTTP status from 100
+through 599 or `none`, and the source-controlled asset and source IDs. For
+example, this query measures Bitvavo rate-limit failures:
+
+```promql
+sum(increase(mento_peg_failure_events_total{reason="rate_limited",http_status="429",source="bitvavo_eur"}[24h]))
+```
+
+Use the counter to decide whether the provider poll interval needs adjustment.
+Use the current-state gauges to explain a specific alert transition.
+
+Zero means no known failure. `metrics-bridge/src/peg/failure-reasons.ts` owns
+the stable numeric mapping. The mapping distinguishes rate limits, other HTTP
+errors, timeouts, network failures, invalid or stale data, repeated data,
+insufficient book depth, halted or unlisted markets, conversion failures,
+structural query or data failures, missing reference size, unsupported
+providers, unknown failures, and multiple simultaneous structural failures.
+The HTTP metric is zero when no status applies. A provider HTTP failure retains
+the exact status, such as 429 or 500.
+
+The dashboard combines matching active-policy and retained-previous rows only
+for display when they transition within 90 seconds. Grafana still evaluates,
+routes, and records both rule instances independently. The list does not infer
+policy activation from the first observed policy metric sample.
+
 ## Rule inventory
 
 For each active policy, the generated source defines:
@@ -195,6 +254,10 @@ are true:
 4. `mento_peg_last_poll`, `mento_peg_source_healthy`,
    `mento_peg_observation_at`, `mento_peg_indexed_pool_reachable`, and
    `mento_peg_blind_consecutive_polls` return the expected labelled series.
+   `mento_peg_source_failure_reason`,
+   `mento_peg_source_failure_http_status`, and
+   `mento_peg_structural_failure_reason` return zero for healthy evidence and
+   bounded codes for reproduced failures.
    Every configured source also exposes one-hot `mento_peg_listing_state`, a
    positive `mento_peg_listing_checked_at`, and
    `mento_peg_listing_absent_consecutive_checks` for the exact policy version.

@@ -62,6 +62,11 @@ import type {
   PegObservation,
   RecordListingCheck,
 } from "./types.js";
+import { pegFailureEvidence, setPegFailure } from "./failure-reasons.js";
+import {
+  createPegSourceMetricSnapshot,
+  type PegSourceSnapshotContent,
+} from "./source-snapshot.js";
 
 export const MAX_PROVIDER_CLOCK_SKEW_MS = 60_000;
 
@@ -178,6 +183,8 @@ const defaultSourceState = (): SourceState => ({
   listingCheckedAt: null,
   listingAbsentConsecutiveChecks: 0,
   blindConsecutivePolls: 0,
+  failureReason: null,
+  failureHttpStatus: null,
 });
 
 const defaultReadConversionLeg = async (
@@ -273,39 +280,6 @@ function observationIsFresh(
   );
 }
 
-function priceMovement(
-  observation: PegObservation | null,
-  target: number,
-): Pick<PegSourceMetricSnapshot, "deviationBps" | "premiumBps"> {
-  if (
-    observation === null ||
-    observation.venueState === "halted" ||
-    observation.capped ||
-    observation.vwap === null ||
-    !Number.isFinite(observation.vwap) ||
-    observation.vwap <= 0
-  ) {
-    return { deviationBps: null, premiumBps: null };
-  }
-  return {
-    deviationBps: Math.max(0, ((target - observation.vwap) / target) * 10_000),
-    premiumBps: Math.max(0, ((observation.vwap - target) / target) * 10_000),
-  };
-}
-
-function spreadBps(observation: PegObservation | null): number | null {
-  if (
-    observation === null ||
-    observation.bid === null ||
-    observation.ask === null
-  ) {
-    return null;
-  }
-  const midpoint = (observation.bid + observation.ask) / 2;
-  const spread = ((observation.ask - observation.bid) / midpoint) * 10_000;
-  return midpoint > 0 && Number.isFinite(spread) && spread >= 0 ? spread : null;
-}
-
 type PollSourceInput = {
   assetId: string;
   target: number;
@@ -316,41 +290,21 @@ type PollSourceInput = {
   context: CycleContext;
 };
 
-type SourceSnapshotContent = {
-  referenceSize: number | null;
-  observation: PegObservation | null;
-  newSuccess: boolean;
-};
-
 function sourceSnapshot(
   input: PollSourceInput,
   state: SourceState,
-  content: SourceSnapshotContent,
+  content: PegSourceSnapshotContent,
 ): PegSourceMetricSnapshot {
-  const { referenceSize, observation, newSuccess } = content;
-  const movement = priceMovement(observation, input.target);
-  return {
-    asset: input.assetId,
-    source: input.source.id,
-    policyVersion: input.context.policyVersion,
-    healthy:
-      observation !== null &&
-      observation.venueState !== "halted" &&
-      observation.observationAt !== null &&
-      observation.sequence !== null,
-    observation,
-    referenceSize,
-    listingState: state.listingState,
-    listingCheckedAt: state.listingCheckedAt,
-    listingAbsentConsecutiveChecks: state.listingAbsentConsecutiveChecks,
-    ...movement,
-    spreadBps: spreadBps(observation),
-    newSuccess,
-    newUsableDecision:
-      newSuccess &&
-      movement.deviationBps !== null &&
-      movement.premiumBps !== null,
-  };
+  return createPegSourceMetricSnapshot(
+    {
+      assetId: input.assetId,
+      target: input.target,
+      sourceId: input.source.id,
+      policyVersion: input.context.policyVersion,
+    },
+    state,
+    content,
+  );
 }
 
 function referenceSize(
@@ -444,6 +398,17 @@ function clearSource(state: SourceState, refSize: number | null): void {
   state.conversionValidUntil = null;
 }
 
+function setCachedObservationFailure(
+  state: SourceState,
+  conversionFresh: boolean,
+): void {
+  if (state.failureReason !== null) return;
+  setPegFailure(state, {
+    reason: cachedObservationFailureReason(conversionFresh),
+    httpStatus: null,
+  });
+}
+
 function cachedObservation(
   state: SourceState,
   source: PegSource,
@@ -468,10 +433,17 @@ function cachedObservation(
     !conversionFresh ||
     !observationIsFresh(state.observation, policy, context.nowMs)
   ) {
+    setCachedObservationFailure(state, conversionFresh);
     clearSource(state, state.referenceSize);
     return null;
   }
   return state.observation;
+}
+
+function cachedObservationFailureReason(
+  conversionFresh: boolean,
+): "stale_data" | "conversion_unavailable" {
+  return conversionFresh ? "stale_data" : "conversion_unavailable";
 }
 
 function unavailableSourceSnapshot(
@@ -561,6 +533,7 @@ function failSource(
     asset: input.assetId,
     source: input.source.id,
   });
+  setPegFailure(state, pegFailureEvidence(failure.kind, failure.cause));
   return unavailableSourceSnapshot(input, state, refSize);
 }
 
@@ -614,6 +587,7 @@ function acceptDueObservation(
     state.rawObservation = null;
     state.referenceSize = refSize;
     state.conversionValidUntil = null;
+    setPegFailure(state, { reason: "market_halted", httpStatus: null });
     return sourceSnapshot(input, state, {
       referenceSize: refSize,
       observation,
@@ -632,6 +606,12 @@ function acceptDueObservation(
     input.source.convertVia === undefined ? null : rawObservation;
   state.referenceSize = refSize;
   state.conversionValidUntil = converted.validUntil;
+  setPegFailure(
+    state,
+    observation.capped || observation.vwap === null
+      ? { reason: "insufficient_liquidity", httpStatus: null }
+      : null,
+  );
   // A repeated provider identity remains healthy until its provider timestamp
   // expires, but cannot create new coverage or sustain a price decision.
   return sourceSnapshot(input, state, {
@@ -680,6 +660,12 @@ async function refreshExpiredConversion(
 
   state.observation = converted.observation;
   state.conversionValidUntil = converted.validUntil;
+  setPegFailure(
+    state,
+    converted.observation.capped || converted.observation.vwap === null
+      ? { reason: "insufficient_liquidity", httpStatus: null }
+      : null,
+  );
   return sourceSnapshot(input, state, {
     referenceSize: refSize,
     observation: converted.observation,
@@ -848,6 +834,10 @@ async function snapshotWithoutReferenceSize(
   observationCadenceDue: boolean,
   listingCadenceDue: boolean,
 ): Promise<PegSourceMetricSnapshot | null> {
+  setPegFailure(state, {
+    reason: "reference_size_unavailable",
+    httpStatus: null,
+  });
   if (input.blindConsecutivePollLimit !== null && observationCadenceDue) {
     state.lastAttemptAt = input.context.nowSeconds;
     updateBlindConsecutivePolls(state, input.blindConsecutivePollLimit, false);
@@ -1011,6 +1001,7 @@ async function pollAsset(
     structuralSaturation: structural.saturation,
     structuralQuerySaturated: structural.querySaturated,
     indexedPoolReachable: structural.reachable,
+    structuralFailureReason: structural.failureReason,
     counterpartyCount: structural.counterpartyCount,
     monitors: structural.monitors,
     sources,

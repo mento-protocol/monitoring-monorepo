@@ -1178,7 +1178,7 @@ test("Peg Slack pages mention @support-engineer only while critical alerts are f
   const supportMention = "<!subteam^${var.oncall_support_usergroup_id}>";
   const guardedMention = [
     '{{ if and (len .Alerts.Firing) (eq .CommonLabels.severity "critical") -}}',
-    `${supportMention} Please investigate this critical Peg alert.`,
+    `${supportMention} Please investigate.`,
     "{{ end -}}",
   ].join("\n");
 
@@ -1193,6 +1193,59 @@ test("Peg Slack pages mention @support-engineer only while critical alerts are f
   assert(
     !victorOpsTemplates.includes("<!subteam^"),
     "the Slack usergroup mention must not enter Splunk On-Call payloads",
+  );
+});
+
+test("Peg Grafana and Slack copy leads with the concrete cause", () => {
+  const rulesDir = path.resolve(__dirname, "..", "alerts/rules");
+  const definitions = readFileSync(
+    path.join(rulesDir, "peg-rule-definitions.tf"),
+    "utf8",
+  );
+  const copyLocals = readFileSync(
+    path.join(rulesDir, "peg-copy-locals.tf"),
+    "utf8",
+  );
+  const rules = readFileSync(path.join(rulesDir, "rules-peg.tf"), "utf8");
+  const templates = readFileSync(
+    path.join(rulesDir, "peg-message-templates.tf"),
+    "utf8",
+  );
+
+  assert(
+    definitions.includes("sell price is") &&
+      definitions.includes("below peg") &&
+      definitions.includes("buy and sell prices are") &&
+      definitions.includes("pool flow") &&
+      definitions.includes("does not list the"),
+    "Peg Grafana summaries must use the approved cause-first market wording",
+  );
+  assert(
+    copyLocals.includes("rate limit is reached") &&
+      copyLocals.includes("price request returns") &&
+      copyLocals.includes("price request is timing out") &&
+      copyLocals.includes("cannot be reached") &&
+      copyLocals.includes("returning invalid price data"),
+    "Peg Grafana summaries must explain the bounded provider failure reason",
+  );
+  assert(
+    /kesm\s*=\s*"KESm"/.test(copyLocals) &&
+      /valr\s*=\s*"VALR"/.test(copyLocals),
+    "Peg Grafana summaries must preserve canonical asset and provider casing",
+  );
+  assert(
+    rules.includes("resolved_summary = rule.value.resolved_summary") &&
+      rules.includes("asset_name") &&
+      rules.includes("source_name"),
+    "Peg rules must expose the cause-first copy and plain display names",
+  );
+  assert(
+    templates.includes("$alert.Annotations.summary") &&
+      templates.includes("$alert.Annotations.resolved_summary") &&
+      !templates.includes(".CommonLabels.alertname") &&
+      !templates.includes("*FIRING:") &&
+      !templates.includes("*RESOLVED:"),
+    "Peg Slack titles and bodies must use the cause instead of internal alert state or rule names",
   );
 });
 

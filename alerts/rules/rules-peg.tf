@@ -22,7 +22,10 @@ resource "grafana_rule_group" "peg_monitoring" {
 
       annotations = {
         summary          = rule.value.summary
+        resolved_summary = rule.value.resolved_summary
         action           = rule.value.action
+        asset_name       = rule.value.asset == "policy" ? "Peg monitor" : local.peg_asset_display_names[rule.value.asset]
+        source_name      = rule.value.source == "" ? "" : local.peg_source_display_names["${rule.value.asset}/${rule.value.source}"]
         executable_price = "{{ if and $values.Price (ge $values.Price.Value 0.0) }}{{ printf \"%.6f\" $values.Price.Value }}{{ else }}unavailable{{ end }}"
         deviation_bps = (
           startswith(rule.value.name, "Peg Downside Warning") || startswith(rule.value.name, "Peg Deep-Venue Downside Critical")
@@ -47,9 +50,9 @@ resource "grafana_rule_group" "peg_monitoring" {
           : ""
         )
         structural_saturation = "{{ if and $values.Structural (ge $values.Structural.Value 0.0) }}{{ printf \"%.1f%%\" $values.Structural.Value }}{{ else }}unavailable{{ end }}"
-        corroboration = startswith(rule.value.name, "Peg Blind While Stressed Critical") ? "blindness plus structural saturation, spread, or partial-price shortfall" : (
+        corroboration = startswith(rule.value.name, "Peg Blind While Stressed Critical") ? "separate market data also shows stress" : (
           startswith(rule.value.name, "Peg Deep-Venue Downside Critical")
-          ? "{{ if and $values.Corroboration (gt $values.Corroboration.Value 0.0) }}structural saturation or a distinct fresh uncapped venue{{ else }}none required; deep venue pages alone{{ end }}"
+          ? "{{ if and $values.Corroboration (gt $values.Corroboration.Value 0.0) }}separate pool or venue data also shows stress{{ else }}no extra confirmation required{{ end }}"
           : ""
         )
       }
@@ -157,6 +160,50 @@ resource "grafana_rule_group" "peg_monitoring" {
         model = jsonencode({
           refId   = "Corroboration"
           expr    = rule.value.corroboration_expr
+          instant = true
+        })
+      }
+
+      # These helper values are stored with each Grafana state transition.
+      # They do not participate in the alert condition or instance labels.
+      data {
+        ref_id         = "Reason"
+        datasource_uid = var.prometheus_datasource_uid
+        relative_time_range {
+          from = max(rule.value.query_range, 60)
+          to   = 0
+        }
+        model = jsonencode({
+          refId = "Reason"
+          expr = rule.value.source != "" ? format(
+            "max(mento_peg_source_failure_reason{asset=\"%s\",source=\"%s\",policy_version=\"%s\"}) or on() vector(0)",
+            rule.value.asset,
+            rule.value.source,
+            rule.value.policy_version,
+            ) : rule.value.asset != "policy" ? format(
+            "max(mento_peg_structural_failure_reason{asset=\"%s\",policy_version=\"%s\"}) or on() vector(0)",
+            rule.value.asset,
+            rule.value.policy_version,
+          ) : local.peg_no_corroboration_promql
+          instant = true
+        })
+      }
+
+      data {
+        ref_id         = "HttpStatus"
+        datasource_uid = var.prometheus_datasource_uid
+        relative_time_range {
+          from = max(rule.value.query_range, 60)
+          to   = 0
+        }
+        model = jsonencode({
+          refId = "HttpStatus"
+          expr = rule.value.source != "" ? format(
+            "max(mento_peg_source_failure_http_status{asset=\"%s\",source=\"%s\",policy_version=\"%s\"}) or on() vector(0)",
+            rule.value.asset,
+            rule.value.source,
+            rule.value.policy_version,
+          ) : local.peg_no_corroboration_promql
           instant = true
         })
       }

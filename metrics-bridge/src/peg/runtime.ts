@@ -5,6 +5,10 @@ import {
 } from "./compatibility.js";
 import { pegCounters } from "./metrics.js";
 import {
+  failureHttpStatusLabel,
+  pegFailureEvidence,
+} from "./failure-reasons.js";
+import {
   GcpMetadataBearerTokenProvider,
   parsePinnedGcsJsonMediaUrl,
 } from "./gcp-metadata-auth.js";
@@ -264,6 +268,14 @@ function selectCompatiblePolicies(
 
 function defaultErrorReporter(event: PegRuntimeErrorEvent): void {
   pegCounters.pollErrors.inc({ kind: event.kind });
+  const evidence = pegFailureEvidence(event.kind, event.cause);
+  pegCounters.failureEvents.inc({
+    kind: event.kind,
+    reason: evidence.reason,
+    http_status: failureHttpStatusLabel(evidence.httpStatus),
+    asset: event.asset ?? "",
+    source: event.source ?? "",
+  });
   const location = [
     event.asset === null ? null : `asset=${event.asset}`,
     event.source === null ? null : `source=${event.source}`,

@@ -3,21 +3,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PEG_ALERTS_WINDOW_SECONDS } from "@/lib/peg-alerts";
 import {
   GET,
-  PEG_ALERTS_DATASOURCE_UID,
   PEG_ALERTS_MAX_EVENTS,
-  PEG_ALERTS_MAX_POLICY_RESPONSE_BYTES,
   PEG_ALERTS_MAX_STATE_RESPONSE_BYTES,
   PEG_ALERTS_UPSTREAM_TIMEOUT_MS,
 } from "../route";
 import {
+  combinePegAlertEvents,
+  parseStateTransitions,
   PEG_ALERTS_MAX_STATE_ROWS,
-  PEG_ALERTS_POLICY_STEP_SECONDS,
-  policyQueryBounds,
 } from "../peg-alert-events";
 
 const NOW_SECONDS = 1_786_694_595;
 const FROM_SECONDS = NOW_SECONDS - PEG_ALERTS_WINDOW_SECONDS;
-const POLICY_BOUNDS = policyQueryBounds(FROM_SECONDS, NOW_SECONDS);
 
 type StateLine = {
   schemaVersion: 1;
@@ -26,6 +23,7 @@ type StateLine = {
   fingerprint: string;
   ruleTitle: string;
   ruleUID: string;
+  values: Record<string, number>;
   labels: {
     alertname: string;
     asset: string;
@@ -52,6 +50,7 @@ function stateLine(
     fingerprint: "spread-instance",
     ruleTitle,
     ruleUID: "spread-rule",
+    values: { A: 34, Reason: 0, HttpStatus: 0 },
     ...overrides,
     labels: {
       alertname: ruleTitle,
@@ -93,65 +92,39 @@ function stateFrame(rows: Array<{ at: number; line: StateLine }>): object {
   };
 }
 
-function policyFrame(
-  policyVersion: string,
-  points: Array<{ at: number; value: number | null }>,
-  instance = "bridge-a",
-): object {
-  return {
-    schema: {
-      fields: [
-        { name: "Time", type: "time" },
-        {
-          name: "Value",
-          type: "number",
-          labels: {
-            __name__: "mento_peg_policy_version",
-            instance,
-            policy_version: policyVersion,
-          },
-        },
-      ],
-    },
-    data: {
-      values: [
-        points.map(({ at }) => at * 1_000),
-        points.map(({ value }) => value),
-      ],
-    },
-  };
-}
-
-function policyResponse(frames: object[] = []): object {
-  return { results: { P: { frames } } };
-}
-
 function json(body: unknown, init?: ResponseInit): Response {
   return Response.json(body, init);
 }
 
+function eventFor(overrides: Parameters<typeof stateLine>[0]): {
+  lead: string;
+  detail: string;
+} {
+  const transitions = parseStateTransitions(
+    stateFrame([{ at: NOW_SECONDS - 1, line: stateLine(overrides) }]),
+    FROM_SECONDS,
+    NOW_SECONDS,
+  );
+  const event = combinePegAlertEvents(transitions, 1)[0];
+  if (event === undefined) throw new Error("missing alert event");
+  return event;
+}
+
 function successfulFetch() {
   const raisedRows = [
-    // Ordinary evaluation churn is valid upstream data but never a feed event.
     {
       at: NOW_SECONDS - 1_500,
       line: stateLine({ previous: "Pending", current: "Normal" }),
     },
-    {
-      at: NOW_SECONDS - 1_200,
-      line: stateLine(),
-    },
-    // Grafana can repeat an Alerting row while the same instance remains open.
-    {
-      at: NOW_SECONDS - 1_140,
-      line: stateLine(),
-    },
+    { at: NOW_SECONDS - 1_200, line: stateLine() },
+    { at: NOW_SECONDS - 1_140, line: stateLine() },
     {
       at: NOW_SECONDS - 300,
       line: stateLine({
         fingerprint: "critical-instance",
         ruleTitle: "Peg Deep-Venue Downside Critical [europ-schuman · active]",
         ruleUID: "critical-rule",
+        values: { A: 52, Reason: 0, HttpStatus: 0 },
         labels: {
           alertname:
             "Peg Deep-Venue Downside Critical [europ-schuman · active]",
@@ -165,46 +138,24 @@ function successfulFetch() {
   const clearedRows = [
     {
       at: NOW_SECONDS - 600,
-      line: stateLine({ previous: "Alerting", current: "Normal" }),
+      line: stateLine({ previous: "Alerting", current: "Normal", values: {} }),
     },
-    // Repeated clears after the incident closes must not create per-check rows.
     {
       at: NOW_SECONDS - 540,
-      line: stateLine({ previous: "Alerting", current: "Normal" }),
+      line: stateLine({ previous: "Alerting", current: "Normal", values: {} }),
     },
-    // A clear without a raise in the bounded window has no honest duration.
     {
       at: NOW_SECONDS - 120,
       line: stateLine({
         previous: "Alerting",
         current: "Normal",
         fingerprint: "unpaired-instance",
+        values: {},
       }),
     },
   ];
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     const url = new URL(String(input));
-    if (url.pathname === "/api/ds/query") {
-      return json(
-        policyResponse([
-          // The old policy has a sample in the extra pre-window step.
-          policyFrame("europ-old", [
-            {
-              at: POLICY_BOUNDS.fromMs / 1_000,
-              value: 1,
-            },
-            { at: FROM_SECONDS, value: 1 },
-          ]),
-          policyFrame("europ-new", [{ at: NOW_SECONDS - 300, value: 1 }]),
-          // A second scrape instance must not duplicate the activation.
-          policyFrame(
-            "europ-new",
-            [{ at: NOW_SECONDS - 240, value: 1 }],
-            "bridge-b",
-          ),
-        ]),
-      );
-    }
     return json(
       stateFrame(
         url.searchParams.get("current") === "Alerting"
@@ -229,7 +180,7 @@ afterEach(() => {
 });
 
 describe("GET /api/peg-monitoring/alerts", () => {
-  it("pairs real transitions, collapses repeated rows, and adds policy activations", async () => {
+  it("pairs transitions, keeps original evidence, and omits policy activations", async () => {
     const fetchMock = successfulFetch();
 
     const response = await GET();
@@ -240,46 +191,32 @@ describe("GET /api/peg-monitoring/alerts", () => {
       to: NOW_SECONDS,
       events: [
         {
-          id: `policy:europ-new:${NOW_SECONDS - 300}`,
-          at: NOW_SECONDS - 300,
-          severity: "policy",
-          lead: "Policy europ-new activated",
-          detail: "First observed in Mimir; activation time is approximate.",
-        },
-        {
           id: `state:critical-instance:raised:${NOW_SECONDS - 300}`,
           at: NOW_SECONDS - 300,
           severity: "page",
-          lead: "EUROP downside critical page raised",
-          detail: "Bitvavo EUR · active policy entered alerting.",
+          lead: "Bitvavo sell price is 52 bps below peg",
+          detail: "EUROP.",
         },
         {
           id: `state:spread-instance:cleared:${NOW_SECONDS - 600}`,
           at: NOW_SECONDS - 600,
           severity: "cleared",
-          lead: "EUROP spread warning cleared",
-          detail:
-            "Bitvavo EUR · active policy returned to normal after 10 min.",
+          lead: "Bitvavo buy and sell prices were 34 bps apart",
+          detail: "EUROP · lasted 10 min.",
         },
         {
           id: `state:spread-instance:raised:${NOW_SECONDS - 1_200}`,
           at: NOW_SECONDS - 1_200,
           severity: "warning",
-          lead: "EUROP spread warning raised",
-          detail: "Bitvavo EUR · active policy entered alerting.",
+          lead: "Bitvavo buy and sell prices are 34 bps apart",
+          detail: "EUROP.",
         },
       ],
     });
     expect(PEG_ALERTS_MAX_EVENTS).toBe(4);
-
-    expect(fetchMock).toHaveBeenCalledTimes(3);
-    const stateCalls = fetchMock.mock.calls.filter(
-      ([input]) => new URL(String(input)).pathname === "/api/v1/rules/history",
-    );
-    expect(stateCalls).toHaveLength(2);
-    for (const [input, init] of stateCalls) {
-      const url = new URL(String(input));
-      const query = url.searchParams;
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    for (const [input, init] of fetchMock.mock.calls) {
+      const query = new URL(String(input)).searchParams;
       expect(query.get("from")).toBe(String(FROM_SECONDS));
       expect(query.get("to")).toBe(String(NOW_SECONDS));
       expect(query.get("limit")).toBe(String(PEG_ALERTS_MAX_STATE_ROWS + 1));
@@ -288,49 +225,264 @@ describe("GET /api/peg-monitoring/alerts", () => {
         "Bearer viewer-token",
       );
     }
-    expect(
-      stateCalls.some(
-        ([input]) =>
-          new URL(String(input)).searchParams.get("current") === "Alerting",
-      ),
-    ).toBe(true);
-    expect(
-      stateCalls.some(([input]) => {
-        const query = new URL(String(input)).searchParams;
-        return (
-          query.get("previous") === "Alerting" &&
-          query.get("current") === "Normal"
-        );
-      }),
-    ).toBe(true);
-
-    const policyCall = fetchMock.mock.calls.find(
-      ([input]) => new URL(String(input)).pathname === "/api/ds/query",
-    )!;
-    const policyBody = JSON.parse(String(policyCall[1]?.body)) as {
-      from: string;
-      to: string;
-      queries: Array<Record<string, unknown>>;
-    };
-    expect(policyBody.from).toBe(String(POLICY_BOUNDS.fromMs));
-    expect(policyBody.to).toBe(String(POLICY_BOUNDS.toMs));
-    expect(policyBody.queries).toEqual([
-      expect.objectContaining({
-        datasource: { type: "prometheus", uid: PEG_ALERTS_DATASOURCE_UID },
-        expr: "mento_peg_policy_version",
-        intervalMs: PEG_ALERTS_POLICY_STEP_SECONDS * 1_000,
-        range: true,
-        instant: false,
-      }),
-    ]);
     expect(PEG_ALERTS_UPSTREAM_TIMEOUT_MS).toBeLessThan(10_000);
   });
 
-  it("returns the real empty state when both Grafana sources are empty", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) =>
-      String(input).includes("/api/ds/query")
-        ? json(policyResponse())
-        : json(stateFrame([])),
+  it("coalesces matching active and previous policy transitions", () => {
+    const active = stateLine({
+      fingerprint: "active",
+      values: { A: 31 },
+    });
+    const previous = stateLine({
+      fingerprint: "previous",
+      ruleTitle:
+        "Peg Deep-Venue Spread Warning [europ-schuman/bitvavo_eur · previous]",
+      labels: {
+        alertname:
+          "Peg Deep-Venue Spread Warning [europ-schuman/bitvavo_eur · previous]",
+        policy_version: "europ-old",
+      },
+      values: { A: 32 },
+    });
+    const transitions = parseStateTransitions(
+      stateFrame([
+        { at: NOW_SECONDS - 61, line: previous },
+        { at: NOW_SECONDS - 1, line: active },
+      ]),
+      FROM_SECONDS,
+      NOW_SECONDS,
+    );
+
+    expect(combinePegAlertEvents(transitions, 4)).toEqual([
+      expect.objectContaining({
+        id: `state:active:raised:${NOW_SECONDS - 1}`,
+        lead: "Bitvavo buy and sell prices are 31 bps apart",
+      }),
+    ]);
+  });
+
+  it("keeps separate alert cycles from the same policy", () => {
+    const fired = stateLine({ fingerprint: "active-cycle" });
+    const resolved = stateLine({
+      previous: "Alerting",
+      current: "Normal",
+      fingerprint: "active-cycle",
+      values: {},
+    });
+    const transitions = parseStateTransitions(
+      stateFrame([
+        { at: NOW_SECONDS - 200, line: fired },
+        { at: NOW_SECONDS - 160, line: resolved },
+        { at: NOW_SECONDS - 120, line: fired },
+        { at: NOW_SECONDS - 80, line: resolved },
+      ]),
+      FROM_SECONDS,
+      NOW_SECONDS,
+    );
+
+    expect(combinePegAlertEvents(transitions, 4).map(({ id }) => id)).toEqual([
+      `state:active-cycle:cleared:${NOW_SECONDS - 80}`,
+      `state:active-cycle:raised:${NOW_SECONDS - 120}`,
+      `state:active-cycle:cleared:${NOW_SECONDS - 160}`,
+      `state:active-cycle:raised:${NOW_SECONDS - 200}`,
+    ]);
+  });
+
+  it("coalesces active and previous policy transitions one-to-one", () => {
+    const active = stateLine({ fingerprint: "active" });
+    const previous = (fingerprint: string) =>
+      stateLine({
+        fingerprint,
+        ruleTitle:
+          "Peg Deep-Venue Spread Warning [europ-schuman/bitvavo_eur · previous]",
+        labels: {
+          alertname:
+            "Peg Deep-Venue Spread Warning [europ-schuman/bitvavo_eur · previous]",
+          policy_version: "europ-old",
+        },
+      });
+    const transitions = parseStateTransitions(
+      stateFrame([
+        { at: NOW_SECONDS - 120, line: previous("previous-older") },
+        { at: NOW_SECONDS - 90, line: active },
+        { at: NOW_SECONDS - 60, line: previous("previous-newer") },
+      ]),
+      FROM_SECONDS,
+      NOW_SECONDS,
+    );
+
+    expect(combinePegAlertEvents(transitions, 4).map(({ id }) => id)).toEqual([
+      `state:active:raised:${NOW_SECONDS - 90}`,
+      `state:previous-older:raised:${NOW_SECONDS - 120}`,
+    ]);
+  });
+
+  it.each([
+    {
+      title: "Peg Downside Warning [europ-schuman/bitvavo_eur · active]",
+      values: { A: 31 },
+      lead: "Bitvavo sell price is 31 bps below peg",
+    },
+    {
+      title: "Peg Downside Warning [kesm-current/valr_zar · active]",
+      values: { A: 25 },
+      source: "valr_zar",
+      asset: "kesm-current",
+      lead: "VALR sell price is 25 bps below peg",
+    },
+    {
+      title: "Peg Premium Warning [europ-schuman/bitvavo_eur · active]",
+      values: { A: 26.4 },
+      lead: "Bitvavo sell price is 26.4 bps above peg",
+    },
+    {
+      title:
+        "Peg Deep-Venue Spread Warning [europ-schuman/bitvavo_eur · active]",
+      values: { A: 34 },
+      lead: "Bitvavo buy and sell prices are 34 bps apart",
+    },
+    {
+      title: "Peg Structural Saturation Warning [europ-schuman · active]",
+      values: { Structural: 82.5 },
+      source: "",
+      lead: "EUROP pool flow is using 82.5% of its trading limit",
+    },
+    {
+      title: "Peg Registry Rot [europ-schuman/kraken_usd · active]",
+      values: {},
+      source: "kraken_usd",
+      lead: "Kraken does not list the EUROP/USD market",
+    },
+    {
+      title: "Peg Indexed Pool Unreachable [europ-schuman · active]",
+      values: { Reason: 12 },
+      source: "",
+      lead: "EUROP pool data cannot be fetched",
+    },
+    {
+      title: "Peg Heartbeat Missing [europ-schuman · active]",
+      values: {},
+      source: "",
+      lead: "EUROP monitor data has stopped updating",
+    },
+    {
+      title: "Peg Policy Rollover Stuck",
+      values: {},
+      source: "",
+      asset: "policy",
+      lead: "Peg monitor has not loaded policy europ-v1",
+    },
+  ])(
+    "uses cause-first copy for $title",
+    ({ title, values, source, asset, lead }) => {
+      const event = eventFor({
+        ruleTitle: title,
+        values,
+        labels: {
+          alertname: title,
+          source: source ?? "bitvavo_eur",
+          asset: asset ?? "europ-schuman",
+        },
+      });
+      expect(event.lead).toBe(lead);
+      expect(event.lead).not.toMatch(
+        /warning|raised|cleared|alerting|blindness|critical page/i,
+      );
+    },
+  );
+
+  it.each([
+    [
+      1,
+      429,
+      "Bitvavo is rejecting price requests because its rate limit is reached (HTTP 429)",
+    ],
+    [2, 500, "Bitvavo price request returns HTTP 500"],
+    [3, 0, "Bitvavo price request is timing out"],
+    [4, 0, "Bitvavo cannot be reached"],
+    [5, 0, "Bitvavo is returning invalid price data"],
+    [6, 0, "Bitvavo price data has stopped updating"],
+    [7, 0, "Bitvavo is repeating old price data"],
+    [
+      8,
+      0,
+      "Bitvavo cannot fill the monitored sell size; only 42% is available",
+    ],
+    [9, 0, "Bitvavo market is halted"],
+    [10, 0, "Bitvavo price cannot be converted to the peg currency"],
+    [11, 0, "Bitvavo price conversion is failing"],
+    [16, 0, "Pool data does not provide the monitored sell size"],
+    [17, 0, "Bitvavo is not supported by the monitor"],
+    [18, 0, "Bitvavo is not providing a usable sell price"],
+    [19, 0, "Multiple failures are preventing a usable Bitvavo price"],
+    [20, 0, "Bitvavo does not list this market"],
+  ])(
+    "explains bounded source failure reason %i",
+    (reason, status, expectedLead) => {
+      const title = "Peg Source Unhealthy [europ-schuman/bitvavo_eur · active]";
+      const event = eventFor({
+        ruleTitle: title,
+        values: { Reason: reason, HttpStatus: status, Fill: 42 },
+        labels: { alertname: title },
+      });
+      expect(event).toMatchObject({
+        lead: expectedLead,
+        detail: "EUROP.",
+      });
+    },
+  );
+
+  it("keeps the fired HTTP cause when the alert resolves", () => {
+    const title = "Peg Source Unhealthy [europ-schuman/bitvavo_eur · active]";
+    const fired = stateLine({
+      fingerprint: "rate-limit-instance",
+      ruleTitle: title,
+      values: { Reason: 1, HttpStatus: 429 },
+      labels: { alertname: title },
+    });
+    const resolved = stateLine({
+      previous: "Alerting",
+      current: "Normal",
+      fingerprint: "rate-limit-instance",
+      ruleTitle: title,
+      values: {},
+      labels: { alertname: title },
+    });
+    const events = combinePegAlertEvents(
+      parseStateTransitions(
+        stateFrame([
+          { at: NOW_SECONDS - 120, line: fired },
+          { at: NOW_SECONDS - 60, line: resolved },
+        ]),
+        FROM_SECONDS,
+        NOW_SECONDS,
+      ),
+      4,
+    );
+
+    expect(events[0]).toMatchObject({
+      severity: "cleared",
+      lead: "Bitvavo rejected price requests because its rate limit was reached (HTTP 429)",
+      detail: "EUROP · lasted 1 min.",
+    });
+  });
+
+  it("adds the separate stress cause without policy jargon", () => {
+    const title = "Peg Blind While Stressed Critical [europ-schuman · active]";
+    expect(
+      eventFor({
+        ruleTitle: title,
+        values: { Reason: 8, Fill: 42 },
+        labels: { alertname: title, route: "page", severity: "critical" },
+      }).lead,
+    ).toBe(
+      "Bitvavo cannot fill the monitored sell size; only 42% is available while separate market data also shows stress",
+    );
+  });
+
+  it("returns an empty state when Grafana has no transitions", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      json(stateFrame([])),
     );
     const response = await GET();
     expect(response.status).toBe(200);
@@ -357,36 +509,18 @@ describe("GET /api/peg-monitoring/alerts", () => {
         "https://grafana.example?token=no",
       ].map((origin) => {
         vi.stubEnv("GRAFANA_QUERY_URL", origin);
-        return GET().then((response) => response.status);
+        return GET().then((result) => result.status);
       }),
     );
     expect(unsafeStatuses).toEqual([503, 503, 503, 503]);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("fails closed for malformed frames, logical query errors, and oversized bodies", async () => {
+  it("fails closed for malformed frames and oversized bodies", async () => {
     vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(json({ schema: {}, data: {} }))
-      .mockResolvedValueOnce(json(stateFrame([])))
-      .mockResolvedValueOnce(json(policyResponse()));
+      .mockResolvedValueOnce(json(stateFrame([])));
     expect((await GET()).status).toBe(502);
-
-    vi.restoreAllMocks();
-    vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(json(stateFrame([])))
-      .mockResolvedValueOnce(json(stateFrame([])))
-      .mockResolvedValueOnce(
-        json({
-          results: {
-            P: { frames: [], error: "secret query detail", status: 500 },
-          },
-        }),
-      );
-    const logical = await GET();
-    expect(logical.status).toBe(502);
-    expect(JSON.stringify(await logical.json())).not.toContain(
-      "secret query detail",
-    );
 
     vi.restoreAllMocks();
     vi.spyOn(globalThis, "fetch")
@@ -398,13 +532,8 @@ describe("GET /api/peg-monitoring/alerts", () => {
           },
         }),
       )
-      .mockResolvedValueOnce(json(stateFrame([])))
-      .mockResolvedValueOnce(json(policyResponse()));
+      .mockResolvedValueOnce(json(stateFrame([])));
     expect((await GET()).status).toBe(502);
-
-    expect(PEG_ALERTS_MAX_POLICY_RESPONSE_BYTES).toBeLessThan(
-      PEG_ALERTS_MAX_STATE_RESPONSE_BYTES,
-    );
   });
 
   it("fails closed when the state-history sentinel proves truncation", async () => {
@@ -417,8 +546,7 @@ describe("GET /api/peg-monitoring/alerts", () => {
     );
     vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(json(stateFrame(sentinelRows)))
-      .mockResolvedValueOnce(json(stateFrame([])))
-      .mockResolvedValueOnce(json(policyResponse()));
+      .mockResolvedValueOnce(json(stateFrame([])));
 
     expect((await GET()).status).toBe(502);
   });

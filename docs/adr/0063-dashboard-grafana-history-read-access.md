@@ -3,7 +3,7 @@ title: Peg history reads Grafana Cloud through a dedicated read-only token
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-13
+last_verified: 2026-08-15
 scope: ui-dashboard / terraform/infra
 date: 2026-08
 doc_type: adr
@@ -95,6 +95,16 @@ History is an isolated failure domain. A Grafana outage, a revoked token, or a
 5xx from a history route must leave the current-state board rendering from the
 decision package. History routes degrade to an unavailable series and never
 block, delay, or fail the current-state fetch.
+
+For recent alert explanations, the dashboard reads the bounded `values` map
+that Grafana writes with each state transition. Peg rules include reason and
+HTTP-status helper queries for this purpose. These queries do not affect the
+condition or instance labels. The dashboard validates a fixed set of query
+keys and maps numeric reason codes to fixed product copy. It does not render
+Grafana errors, provider errors, annotations, URLs, or response bodies. A
+resolved row uses the values from its paired fired transition. The dashboard
+may combine matching active and retained-previous rows for display, but the
+underlying Grafana rule instances remain separate.
 
 ## Alternatives considered
 

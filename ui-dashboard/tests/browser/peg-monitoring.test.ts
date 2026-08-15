@@ -93,9 +93,8 @@ test("renders the status board, expands a row panel, and retains stale evidence"
             id: "europ-spread-cleared",
             at: now - 120,
             severity: "cleared",
-            lead: "EUROP spread warning cleared",
-            detail:
-              "Bitvavo EUR · active policy returned to normal after 22 min.",
+            lead: "Bitvavo buy and sell prices were 34 bps apart",
+            detail: "EUROP · lasted 22 min.",
           },
         ],
       },
@@ -209,8 +208,13 @@ test("renders the status board, expands a row panel, and retains stale evidence"
 
   const alerts = page.getByTestId("peg-recent-alerts");
   await expect(alerts).toContainText("Recent alerts");
-  await expect(alerts).toContainText("EUROP spread warning cleared");
-  await expect(alerts).toContainText("normal after 22 min");
+  await expect(alerts).toContainText(
+    "Bitvavo buy and sell prices were 34 bps apart",
+  );
+  await expect(alerts).toContainText("EUROP · lasted 22 min");
+  await expect(
+    alerts.getByRole("img", { name: "Alert resolved" }),
+  ).toBeVisible();
   const grafanaLink = alerts.getByRole("link", {
     name: /Full history in Grafana/,
   });

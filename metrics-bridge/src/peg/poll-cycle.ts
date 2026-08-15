@@ -6,6 +6,7 @@ import {
 import type { PegPolicyVersion } from "./policy.js";
 import type { PegRegistry } from "./registry.js";
 import type { MarketState, PegObservation } from "./types.js";
+import type { PegFailureReason } from "./failure-reasons.js";
 
 interface SinglePolicyPegPollCycleInput {
   registry: PegRegistry;
@@ -50,6 +51,8 @@ export interface PegPollSourceState {
   listingCheckedAt: number | null;
   listingAbsentConsecutiveChecks: number;
   blindConsecutivePolls: number;
+  failureReason: PegFailureReason | null;
+  failureHttpStatus: number | null;
 }
 
 export interface PegPollCycleCoordinatorDependencies {

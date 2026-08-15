@@ -15,6 +15,10 @@ import {
   FPMM_L1_WINDOW_SECONDS,
   TRADING_LIMIT_INTERNAL_DECIMALS,
 } from "./structural.js";
+import {
+  combineFailureReasons,
+  type PegFailureReason,
+} from "./failure-reasons.js";
 
 export interface PegPolledStructuralContext {
   reachable: boolean;
@@ -23,6 +27,7 @@ export interface PegPolledStructuralContext {
   counterpartyCount: number;
   limits: PegTradingLimitRow[];
   monitors: PegMonitorMetricSnapshot[];
+  failureReason: PegFailureReason | null;
 }
 
 type StructuralPollErrorKind =
@@ -52,6 +57,7 @@ interface StructuralPollContext {
 type MonitorResult = {
   snapshot: PegMonitorMetricSnapshot;
   limit: PegTradingLimitRow | null;
+  failureReason: PegFailureReason | null;
 };
 
 const poolIdFor = (monitor: PegMonitor) =>
@@ -103,6 +109,7 @@ const monitorIdentity = (monitor: PegMonitor) => ({
 
 const failedMonitor = (
   monitor: PegMonitor,
+  failureReason: PegFailureReason,
   querySaturated = false,
 ): MonitorResult => ({
   snapshot: {
@@ -114,6 +121,7 @@ const failedMonitor = (
     breaker: null,
   },
   limit: null,
+  failureReason,
 });
 
 function boundedMonitors(
@@ -150,7 +158,7 @@ async function pollMonitor(
     });
   } catch (error) {
     context.dependencies.report("structural_query", error, location);
-    return failedMonitor(monitor);
+    return failedMonitor(monitor, "structural_query");
   }
 
   if (result.status !== "ok") {
@@ -159,7 +167,7 @@ async function pollMonitor(
       new Error(`structural context status: ${result.status}`),
       location,
     );
-    return failedMonitor(monitor, result.pageSaturated);
+    return failedMonitor(monitor, "structural_missing", result.pageSaturated);
   }
   const bindingIssue = structuralBindingIssue(monitor, result);
   if (bindingIssue !== null) {
@@ -168,7 +176,7 @@ async function pollMonitor(
       new Error(bindingIssue),
       location,
     );
-    return failedMonitor(monitor, result.pageSaturated);
+    return failedMonitor(monitor, "structural_binding", result.pageSaturated);
   }
 
   try {
@@ -194,10 +202,11 @@ async function pollMonitor(
         breaker: breaker.breaker,
       },
       limit: result.tradingLimit,
+      failureReason: null,
     };
   } catch (error) {
     context.dependencies.report("structural_data", error, location);
-    return failedMonitor(monitor, result.pageSaturated);
+    return failedMonitor(monitor, "structural_data", result.pageSaturated);
   }
 }
 
@@ -234,5 +243,8 @@ export async function pollPegStructuralContext(
       ? results.flatMap(({ limit }) => (limit === null ? [] : [limit]))
       : [],
     monitors: results.map(({ snapshot }) => snapshot),
+    failureReason: combineFailureReasons(
+      results.map(({ failureReason }) => failureReason),
+    ),
   };
 }

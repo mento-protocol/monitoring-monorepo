@@ -25,22 +25,15 @@ const events: PegAlertEvent[] = [
     id: "kesm-warning",
     at: Date.UTC(2026, 7, 11, 16, 5) / 1_000,
     severity: "warning",
-    lead: "KESm warning raised",
-    detail: "deviation ≥ 25 bps sustained 10 min on VALR. Slack notified.",
+    lead: "VALR sell price is 25 bps below peg",
+    detail: "KESm.",
   },
   {
     id: "europ-cleared",
     at: Date.UTC(2026, 7, 9, 14, 37) / 1_000,
     severity: "cleared",
-    lead: "EUROP spread warning cleared",
-    detail: "spread back under 30 bps after 22 min.",
-  },
-  {
-    id: "policy",
-    at: Date.UTC(2026, 6, 22, 9, 0) / 1_000,
-    severity: "policy",
-    lead: "Policy europ-2026-07-22-v1 activated",
-    detail: "warn −25, page −50, premium +25.",
+    lead: "Bitvavo buy and sell prices were 30 bps apart",
+    detail: "EUROP · lasted 22 min.",
   },
 ];
 
@@ -81,14 +74,9 @@ describe("RecentAlerts", () => {
       ),
     );
     const rows = container.querySelectorAll("li");
-    // The Jul 22 policy activation predates the advertised 7-day window, so
-    // the component drops it even though the feed supplied it.
     expect(rows).toHaveLength(2);
-    expect(
-      container.querySelector('[data-testid="peg-alert-policy"]'),
-    ).toBeNull();
     expect(rows[0]!.querySelector("strong")!.textContent).toBe(
-      "KESm warning raised",
+      "VALR sell price is 25 bps below peg",
     );
     // Every bold lead gets the same colour treatment; the mockup was
     // inconsistent about this.
@@ -98,29 +86,35 @@ describe("RecentAlerts", () => {
     expect(new Set(leadClasses).size).toBe(1);
     expect(container.textContent).toContain("Today 16:05");
     expect(container.textContent).toContain("Aug 9 14:37");
+    expect(
+      rows[0]!.querySelector('[role="img"]')?.getAttribute("aria-label"),
+    ).toBe("Alert active");
+    expect(
+      rows[1]!.querySelector('[role="img"]')?.getAttribute("aria-label"),
+    ).toBe("Alert resolved");
   });
 
-  it("renders an in-window policy activation with the brand-purple dot", () => {
-    const recentPolicy: PegAlertEvent = {
-      ...events[2]!,
-      at: Date.UTC(2026, 7, 10, 9, 0) / 1_000,
-    };
+  it("omits the separator when the cause needs no detail", () => {
     act(() =>
       root.render(
-        <RecentAlerts nowMs={NOW_MS} events={[recentPolicy]} state="ready" />,
+        <RecentAlerts
+          nowMs={NOW_MS}
+          events={[{ ...events[0]!, detail: "" }]}
+          state="ready"
+        />,
       ),
     );
-    expect(
-      container.querySelector('[data-testid="peg-alert-policy"]')!.textContent,
-    ).toContain(
-      "Policy europ-2026-07-22-v1 activated — warn −25, page −50, premium +25.",
-    );
+    expect(container.querySelector("li")?.textContent).not.toContain("—");
   });
 
   it("says so when a wired feed has no events inside the window", () => {
     act(() =>
       root.render(
-        <RecentAlerts nowMs={NOW_MS} events={[events[2]!]} state="ready" />,
+        <RecentAlerts
+          nowMs={NOW_MS}
+          events={[{ ...events[0]!, at: Date.UTC(2026, 6, 22, 9, 0) / 1_000 }]}
+          state="ready"
+        />,
       ),
     );
     expect(container.textContent).toContain("No alerts in the last 7 days.");

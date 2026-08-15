@@ -59,9 +59,20 @@ afterEach(() => _resetPegMetricsForTests());
 describe("Peg metrics", () => {
   it("publishes peg-loop failures through a bounded error channel", async () => {
     pegCounters.pollErrors.inc({ kind: "source_fetch" });
+    pegCounters.failureEvents.inc({
+      kind: "source_fetch",
+      reason: "rate_limited",
+      http_status: "429",
+      asset: "europ-schuman",
+      source: "bitvavo_eur",
+    });
 
-    expect(await register.metrics()).toContain(
+    const metrics = await register.metrics();
+    expect(metrics).toContain(
       'mento_peg_poll_errors_total{kind="source_fetch"} 1',
+    );
+    expect(metrics).toContain(
+      'mento_peg_failure_events_total{kind="source_fetch",reason="rate_limited",http_status="429",asset="europ-schuman",source="bitvavo_eur"} 1',
     );
   });
 
@@ -97,10 +108,48 @@ describe("Peg metrics", () => {
       'mento_peg_blind_consecutive_polls{asset="europ-schuman",policy_version="europ-v1"} 0',
     );
     expect(metrics).toContain(
+      'mento_peg_source_failure_reason{asset="europ-schuman",source="bitvavo_eur",policy_version="europ-v1"} 0',
+    );
+    expect(metrics).toContain(
+      'mento_peg_source_failure_http_status{asset="europ-schuman",source="bitvavo_eur",policy_version="europ-v1"} 0',
+    );
+    expect(metrics).toContain(
+      'mento_peg_structural_failure_reason{asset="europ-schuman",policy_version="europ-v1"} 0',
+    );
+    expect(metrics).toContain(
       'mento_peg_poll_success_total{asset="europ-schuman",source="bitvavo_eur",policy_version="europ-v1"} 1',
     );
     expect(metrics).toContain(
       'mento_peg_usable_decision_total{asset="europ-schuman",source="bitvavo_eur",policy_version="europ-v1"} 1',
+    );
+  });
+
+  it("publishes bounded source and structural failure evidence", async () => {
+    const failed = snapshot({
+      indexedPoolReachable: false,
+      structuralFailureReason: "structural_query",
+    });
+    const source = failed.sources[0]!;
+    source.healthy = false;
+    source.observation = null;
+    source.deviationBps = null;
+    source.premiumBps = null;
+    source.spreadBps = null;
+    source.newSuccess = false;
+    source.newUsableDecision = false;
+    source.failureReason = "rate_limited";
+    source.failureHttpStatus = 429;
+
+    publishPegMetrics([failed]);
+    const metrics = await register.metrics();
+    expect(metrics).toContain(
+      'mento_peg_source_failure_reason{asset="europ-schuman",source="bitvavo_eur",policy_version="europ-v1"} 1',
+    );
+    expect(metrics).toContain(
+      'mento_peg_source_failure_http_status{asset="europ-schuman",source="bitvavo_eur",policy_version="europ-v1"} 429',
+    );
+    expect(metrics).toContain(
+      'mento_peg_structural_failure_reason{asset="europ-schuman",policy_version="europ-v1"} 12',
     );
   });
 

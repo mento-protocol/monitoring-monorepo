@@ -20,6 +20,7 @@ import {
 import { publishPegPollSnapshot } from "../src/peg/publisher.js";
 import { parsePegRegistry } from "../src/peg/registry.js";
 import type { PegObservation } from "../src/peg/types.js";
+import { PegProviderRequestError } from "../src/peg/failure-reasons.js";
 
 const fixed15 = (tokens: number) => (BigInt(tokens) * 10n ** 15n).toString();
 
@@ -233,6 +234,63 @@ afterEach(() => {
 });
 
 describe("peg poll cycle freshness and measurements", () => {
+  it("carries exact provider failure evidence into the source snapshot", async () => {
+    const spec = primaryAsset();
+    const input = makeInput([spec]);
+    const nowMs = 1_800_000_000_000;
+    const poller = createPegPoller({
+      nowMs: () => nowMs,
+      fetchStructuralContext: vi.fn(async () =>
+        structuralContext(spec, Math.floor(nowMs / 1_000)),
+      ),
+      fetchBitvavo: vi.fn(async () => {
+        throw new PegProviderRequestError("provider returned HTTP 429", {
+          reason: "rate_limited",
+          httpStatus: 429,
+        });
+      }),
+      publish: vi.fn(),
+    });
+
+    const result = (await poller.pollCycle(input))[0]!;
+    expect(source(result)).toMatchObject({
+      healthy: false,
+      failureReason: "rate_limited",
+      failureHttpStatus: 429,
+    });
+  });
+
+  it("retains exact provider failure evidence between provider cadence slots", async () => {
+    const spec = primaryAsset();
+    const input = makeInput([spec]);
+    let nowMs = 1_800_000_000_000;
+    const fetchBitvavo = vi.fn(async () => {
+      throw new PegProviderRequestError("provider returned HTTP 429", {
+        reason: "rate_limited",
+        httpStatus: 429,
+      });
+    });
+    const poller = createPegPoller({
+      nowMs: () => nowMs,
+      fetchStructuralContext: vi.fn(async () =>
+        structuralContext(spec, Math.floor(nowMs / 1_000)),
+      ),
+      fetchBitvavo,
+      publish: vi.fn(),
+    });
+
+    await poller.pollCycle(input);
+    nowMs += 10_000;
+    const betweenAttempts = (await poller.pollCycle(input))[0]!;
+
+    expect(source(betweenAttempts)).toMatchObject({
+      healthy: false,
+      failureReason: "rate_limited",
+      failureHttpStatus: 429,
+    });
+    expect(fetchBitvavo).toHaveBeenCalledOnce();
+  });
+
   it("commits a successful listing lookup even when the book fetch fails", async () => {
     const spec = primaryAsset();
     const input = makeInput([spec]);
@@ -1738,6 +1796,7 @@ describe("peg poll cycle conversion and cadence", () => {
     nowMs += 61_000;
     const unavailable = (await poller.pollCycle(input))[0]!;
     expect(unavailable.indexedPoolReachable).toBe(false);
+    expect(unavailable.structuralFailureReason).toBe("structural_query");
     expect(source(unavailable, "kraken_usd")).toMatchObject({
       healthy: true,
       referenceSize: 50,
@@ -1754,6 +1813,7 @@ describe("peg poll cycle conversion and cadence", () => {
     nowMs += 1_000;
     const recovered = (await poller.pollCycle(input))[0]!;
     expect(recovered.indexedPoolReachable).toBe(true);
+    expect(recovered.structuralFailureReason).toBeNull();
     expect(source(recovered, "kraken_usd")).toMatchObject({
       healthy: true,
       referenceSize: 50,

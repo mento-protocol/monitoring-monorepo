@@ -12,19 +12,14 @@ import {
 } from "@/lib/server/grafana-read";
 import {
   combinePegAlertEvents,
-  parsePolicyActivations,
   parseStateTransitions,
-  policyQueryBounds,
   PEG_ALERTS_MAX_STATE_ROWS,
-  PEG_ALERTS_POLICY_STEP_SECONDS,
 } from "./peg-alert-events";
 
 export const dynamic = "force-dynamic";
 export const PEG_ALERTS_UPSTREAM_TIMEOUT_MS = 8_000;
 export const PEG_ALERTS_MAX_STATE_RESPONSE_BYTES = 4 * 1024 * 1024;
-export const PEG_ALERTS_MAX_POLICY_RESPONSE_BYTES = 512 * 1024;
 export const PEG_ALERTS_MAX_EVENTS = 4;
-export const PEG_ALERTS_DATASOURCE_UID = "grafanacloud-prom";
 
 function stateHistoryUrl(
   origin: string | undefined,
@@ -49,46 +44,15 @@ function stateHistoryUrl(
   return url;
 }
 
-function policyRequest(from: number, to: number): object {
-  const bounds = policyQueryBounds(from, to);
-  const stepMs = PEG_ALERTS_POLICY_STEP_SECONDS * 1_000;
-  return {
-    queries: [
-      {
-        refId: "P",
-        datasource: {
-          type: "prometheus",
-          uid: PEG_ALERTS_DATASOURCE_UID,
-        },
-        expr: "mento_peg_policy_version",
-        format: "time_series",
-        range: true,
-        instant: false,
-        intervalMs: stepMs,
-        maxDataPoints: (bounds.toMs - bounds.fromMs) / stepMs + 1,
-      },
-    ],
-    // One extra point distinguishes a policy that predates the visible window
-    // from a label series first observed inside it.
-    from: String(bounds.fromMs),
-    to: String(bounds.toMs),
-  };
-}
-
 async function fetchJson(
   url: URL,
   token: string,
   maximumBytes: number,
-  init: Pick<RequestInit, "body" | "method"> = {},
 ): Promise<unknown> {
   const response = await fetch(url, {
-    ...init,
     headers: {
       Accept: "application/json",
       Authorization: `Bearer ${token}`,
-      ...(init.body === undefined
-        ? {}
-        : { "Content-Type": "application/json" }),
     },
     cache: "no-store",
     redirect: "error",
@@ -132,23 +96,15 @@ export async function GET(): Promise<NextResponse> {
     return grafanaErrorResponse("Peg alert history is not configured", 503);
 
   try {
-    const [raisedRaw, clearedRaw, policyRaw] = await Promise.all([
+    const [raisedRaw, clearedRaw] = await Promise.all([
       fetchJson(raisedUrl, token, PEG_ALERTS_MAX_STATE_RESPONSE_BYTES),
       fetchJson(clearedUrl, token, PEG_ALERTS_MAX_STATE_RESPONSE_BYTES),
-      fetchJson(policyUrl, token, PEG_ALERTS_MAX_POLICY_RESPONSE_BYTES, {
-        method: "POST",
-        body: JSON.stringify(policyRequest(from, to)),
-      }),
     ]);
     const transitions = [
       ...parseStateTransitions(raisedRaw, from, to),
       ...parseStateTransitions(clearedRaw, from, to),
     ];
-    const events = combinePegAlertEvents(
-      transitions,
-      parsePolicyActivations(policyRaw, from, to),
-      PEG_ALERTS_MAX_EVENTS,
-    );
+    const events = combinePegAlertEvents(transitions, PEG_ALERTS_MAX_EVENTS);
     const response: PegAlertsResponse = { from, to, events };
     return NextResponse.json(response, { headers: GRAFANA_NO_STORE_HEADERS });
   } catch (error) {

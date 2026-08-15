@@ -3,7 +3,7 @@ title: Peg paging measures executable sell price; the deep venue pages alone
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-24
+last_verified: 2026-08-15
 scope: metrics-bridge / alerts
 date: 2026-07
 doc_type: adr
@@ -114,6 +114,16 @@ live-proof gates pass.
   needed, is stateful bridge-side work. Source _health_ problems are
   ops-noise tier and never page. Pager trust is a design invariant: the
   critical channel stays quiet enough to be believed.
+- **Failure explanations do not change alert identity.** The producer exposes
+  bounded numeric reason and HTTP-status gauges for source and indexed-pool
+  failures. Grafana reads them through helper queries that never participate
+  in the condition or instance labels. State history records those evaluated
+  values at each transition. The dashboard can therefore distinguish a 429,
+  an HTTP 500, a timeout, insufficient book depth, and other bounded causes
+  without parsing raw errors or changing the alert fingerprint. Resolved rows
+  reuse the fired transition's evidence. Active and retained-previous rules
+  remain independent in Grafana even when the dashboard combines matching
+  rows for display.
 
 ## Alternatives considered
 
@@ -154,6 +164,7 @@ live-proof gates pass.
 - `docs/notes/polygon-monitoring.md` (EURm/EUROP pool, MANUAL feed,
   migration-multisig breaker path)
 - `metrics-bridge/src/peg/order-book.ts`,
+  `metrics-bridge/src/peg/failure-reasons.ts`,
   `metrics-bridge/src/peg/poller.ts`, and
   `metrics-bridge/src/peg/metrics.ts` (implemented measurement semantics)
 - `metrics-bridge/src/peg/poll-cycle.ts` (version-bound decision scheduling
