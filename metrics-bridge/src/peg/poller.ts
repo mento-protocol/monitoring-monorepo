@@ -834,10 +834,6 @@ async function snapshotWithoutReferenceSize(
   observationCadenceDue: boolean,
   listingCadenceDue: boolean,
 ): Promise<PegSourceMetricSnapshot | null> {
-  setPegFailure(state, {
-    reason: "reference_size_unavailable",
-    httpStatus: null,
-  });
   if (input.blindConsecutivePollLimit !== null && observationCadenceDue) {
     state.lastAttemptAt = input.context.nowSeconds;
     updateBlindConsecutivePolls(state, input.blindConsecutivePollLimit, false);
@@ -850,6 +846,16 @@ async function snapshotWithoutReferenceSize(
   if (state.referenceSize === null) {
     clearSource(state, null);
     if (!listingAvailable && state.listingState === null) return null;
+    if (
+      state.failureReason === null &&
+      state.listingState !== "absent" &&
+      state.listingState !== "halted"
+    ) {
+      setPegFailure(state, {
+        reason: "reference_size_unavailable",
+        httpStatus: null,
+      });
+    }
     return sourceSnapshot(input, state, {
       referenceSize: null,
       observation: null,

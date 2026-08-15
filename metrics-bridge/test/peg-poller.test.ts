@@ -291,6 +291,40 @@ describe("peg poll cycle freshness and measurements", () => {
     expect(fetchBitvavo).toHaveBeenCalledOnce();
   });
 
+  it("retains provider failure evidence during a structural outage", async () => {
+    const spec = primaryAsset();
+    const input = makeInput([spec]);
+    let nowMs = 1_800_000_000_000;
+    let structuralAvailable = true;
+    const fetchBitvavo = vi.fn(async () => {
+      throw new PegProviderRequestError("provider returned HTTP 429", {
+        reason: "rate_limited",
+        httpStatus: 429,
+      });
+    });
+    const poller = createPegPoller({
+      nowMs: () => nowMs,
+      fetchStructuralContext: vi.fn(async () => {
+        if (!structuralAvailable) throw new Error("Hasura unavailable");
+        return structuralContext(spec, Math.floor(nowMs / 1_000));
+      }),
+      fetchBitvavo,
+      publish: vi.fn(),
+    });
+
+    await poller.pollCycle(input);
+    structuralAvailable = false;
+    nowMs += 10_000;
+    const unavailable = (await poller.pollCycle(input))[0]!;
+
+    expect(source(unavailable)).toMatchObject({
+      healthy: false,
+      failureReason: "rate_limited",
+      failureHttpStatus: 429,
+    });
+    expect(fetchBitvavo).toHaveBeenCalledOnce();
+  });
+
   it("commits a successful listing lookup even when the book fetch fails", async () => {
     const spec = primaryAsset();
     const input = makeInput([spec]);
@@ -619,6 +653,8 @@ describe("peg poll cycle freshness and measurements", () => {
       observation: null,
       listingState: "absent",
       listingAbsentConsecutiveChecks: 1,
+      failureReason: "market_unlisted",
+      failureHttpStatus: null,
     });
     nowMs += 30_000;
     const confirmed = (await poller.pollCycle(input))[0]!;
@@ -1367,6 +1403,8 @@ describe("peg poll cycle isolation", () => {
       newSuccess: false,
       newUsableDecision: false,
       observation: { vwap: 0.9, capped: false },
+      failureReason: null,
+      failureHttpStatus: null,
     });
     expect(fetchBitvavo).toHaveBeenCalledTimes(1);
     expect(fetchBitvavo.mock.calls[0]?.[0].refSize).toBe(10);
@@ -1430,6 +1468,8 @@ describe("peg poll cycle isolation", () => {
       healthy: true,
       observation: { sequence: "frozen" },
       newSuccess: false,
+      failureReason: null,
+      failureHttpStatus: null,
     });
     expect(source(recovered).deviationBps).toBeCloseTo(1_000);
     expect(recovered.blind).toBe(false);
