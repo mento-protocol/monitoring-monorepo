@@ -61,6 +61,23 @@ function pendingSentence(
     : ` The alert fired after ${condition} for ${durationWords(seconds)}.`;
 }
 
+function blindThresholdSentence(
+  event: PegAlertEvent,
+  policy: ExactPolicyContext | null,
+): string {
+  if (
+    event.evidence.rule !== "Blind Warning" &&
+    event.evidence.rule !== "Blind While Stressed Critical"
+  ) {
+    return "";
+  }
+  const pollSeconds = policy?.source?.policy.pollIntervalSeconds;
+  const checks = policy?.asset.policy.blindConsecutivePolls;
+  return pollSeconds === undefined || checks === undefined
+    ? ""
+    : ` The alert fired after ${checks} checks in a row without a usable sell price (about ${durationWords(pollSeconds * checks)}).`;
+}
+
 function unknownSellPriceExplanation(
   event: PegAlertEvent,
   policy: ExactPolicyContext | null,
@@ -74,19 +91,7 @@ function unknownSellPriceExplanation(
     event.evidence.failureReason === 18
       ? " The monitor did not classify the cause."
       : " The exact cause was not recorded.";
-  if (
-    event.evidence.rule !== "Blind Warning" &&
-    event.evidence.rule !== "Blind While Stressed Critical"
-  ) {
-    return `${opening}${pendingSentence(event)}${causeGap}`;
-  }
-  const pollSeconds = policy?.source?.policy.pollIntervalSeconds;
-  const checks = policy?.asset.policy.blindConsecutivePolls;
-  const threshold =
-    pollSeconds === undefined || checks === undefined
-      ? ""
-      : ` The alert fired after ${checks} checks in a row without one (about ${durationWords(pollSeconds * checks)}).`;
-  return `${opening}${threshold}${pendingSentence(event)}${causeGap}`;
+  return `${opening}${blindThresholdSentence(event, policy)}${pendingSentence(event)}${causeGap}`;
 }
 
 function stalePriceExplanation(
@@ -96,9 +101,10 @@ function stalePriceExplanation(
   const source = event.evidence.sourceName;
   const market = marketName(event);
   const staleAfter = policy?.source?.policy.staleAfterSeconds;
+  const blindThreshold = blindThresholdSentence(event, policy);
   if (event.severity === "cleared") {
     const wait = event.evidence.pendingSeconds;
-    return `A fresh ${source} ${market} price arrived, so the alert cleared.${
+    return `A fresh ${source} ${market} price arrived, so the alert cleared.${blindThreshold}${
       wait === null || wait <= 0
         ? ""
         : ` The data had remained too old for ${durationWords(wait)} before the alert fired.`
@@ -108,10 +114,7 @@ function stalePriceExplanation(
     staleAfter === undefined
       ? "older than the allowed age"
       : `more than ${durationWords(staleAfter)} old`;
-  return `The latest ${source} ${market} price was ${age}.${pendingSentence(
-    event,
-    "the data remained too old",
-  )}`;
+  return `The latest ${source} ${market} price was ${age}.${blindThreshold}${pendingSentence(event, "the data remained too old")}`;
 }
 
 function sourceFailureExplanation(
@@ -127,7 +130,7 @@ function sourceFailureExplanation(
     SOURCE_FAILURE_EXPLANATIONS[event.evidence.failureReason ?? 0];
   return explanation === undefined
     ? unknownSellPriceExplanation(event, policy)
-    : `${explanation(source, market, event.severity === "cleared")}${pendingSentence(event)}`;
+    : `${explanation(source, market, event.severity === "cleared")}${blindThresholdSentence(event, policy)}${pendingSentence(event)}`;
 }
 
 type SourceFailureExplanation = (

@@ -259,7 +259,7 @@ describe("pegAlertExplanation", () => {
     };
 
     expect(pegAlertExplanation(fallbackEvent, monitoring)).toBe(
-      "The monitor could not calculate a current Bitvavo sell price for the monitored amount. The alert fired after 10 checks in a row without one (about 5 minutes). The exact cause was not recorded.",
+      "The monitor could not calculate a current Bitvavo sell price for the monitored amount. The alert fired after 10 checks in a row without a usable sell price (about 5 minutes). The exact cause was not recorded.",
     );
     expect(
       pegAlertExplanation(
@@ -274,6 +274,59 @@ describe("pegAlertExplanation", () => {
       ),
     ).toBe(
       "The monitor could not calculate a current Bitvavo sell price for the monitored amount. The exact cause was not recorded.",
+    );
+  });
+
+  it.each(["Blind Warning", "Blind While Stressed Critical"] as const)(
+    "includes the blind threshold for a classified %s failure",
+    (rule) => {
+      const event: PegAlertEvent = {
+        id: `bitvavo-${rule}`,
+        at: NOW_MS / 1_000,
+        severity: "warning",
+        lead: "Bitvavo sell price is unavailable",
+        detail: "EUROP.",
+        evidence: {
+          rule,
+          assetId: "europ-schuman",
+          assetName: "EUROP",
+          sourceId: "bitvavo_eur",
+          sourceName: "Bitvavo",
+          quoteCurrency: "EUR",
+          policyVersion: monitoring.producedPolicyVersion,
+          failureReason: 1,
+          pendingSeconds: null,
+        },
+      };
+
+      expect(pegAlertExplanation(event, monitoring)).toBe(
+        "HTTP 429 means Bitvavo received too many price requests in a short period. The alert fired after 10 checks in a row without a usable sell price (about 5 minutes).",
+      );
+    },
+  );
+
+  it("includes the blind threshold for a stale-data failure", () => {
+    const event: PegAlertEvent = {
+      id: "bitvavo-blind-stale",
+      at: NOW_MS / 1_000,
+      severity: "warning",
+      lead: "Bitvavo sell price is unavailable",
+      detail: "EUROP.",
+      evidence: {
+        rule: "Blind Warning",
+        assetId: "europ-schuman",
+        assetName: "EUROP",
+        sourceId: "bitvavo_eur",
+        sourceName: "Bitvavo",
+        quoteCurrency: "EUR",
+        policyVersion: monitoring.producedPolicyVersion,
+        failureReason: 6,
+        pendingSeconds: null,
+      },
+    };
+
+    expect(pegAlertExplanation(event, monitoring)).toBe(
+      "The latest Bitvavo EUROP/EUR price was more than 2 minutes old. The alert fired after 10 checks in a row without a usable sell price (about 5 minutes).",
     );
   });
 
