@@ -118,10 +118,20 @@ contract. Grafana keeps the internal rule name stable for alert identity, but
 the user-facing summary leads with the measured cause. Slack titles use the
 severity icon plus that summary. Slack bodies do not repeat `FIRING`,
 `RESOLVED`, the policy slot, or the internal rule name. Resolved notifications
-use the matching past-tense summary. Splunk On-Call uses the same summaries and
-keeps its required `P1` or `RESOLVED` state text because it has no color icon.
+usually use the matching past-tense summary. Stale-data and unavailable-price
+recoveries state that the data or price is available again. Splunk On-Call uses
+the same summaries and keeps its required `P1` or `RESOLVED` state text because
+it has no color icon.
 Canonical display-name maps preserve asset and provider casing such as `KESm`
 and `VALR` across the dashboard, Grafana, and notifications.
+
+Each dashboard alert row has a collapsed `Details` disclosure. The disclosure
+explains the fixed condition and its actual Pending-to-Alerting wait. It reads a
+threshold from the decision package only when the event and package use the
+same policy version. Older events without cause telemetry say that the exact
+cause was not recorded. The history backend reads one extra seven-day context
+window to pair transitions that began before the displayed window. It emits
+only alerts that fired or cleared during the displayed seven days.
 
 Grafana state history stores the evaluated query values for each transition.
 Every Peg rule therefore includes two helper queries, `Reason` and

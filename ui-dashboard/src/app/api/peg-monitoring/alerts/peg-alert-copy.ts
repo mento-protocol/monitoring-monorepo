@@ -1,21 +1,4 @@
-const RULE_KINDS = [
-  "Blind Warning",
-  "Blind While Stressed Critical",
-  "Critical Path Unreachable",
-  "Deep-Venue Downside Critical",
-  "Deep-Venue Spread Warning",
-  "Downside Warning",
-  "Heartbeat Missing",
-  "Indexed Pool Unreachable",
-  "Policy Rollover Stuck",
-  "Premium Warning",
-  "Registry Rot",
-  "Source Permanently Dead",
-  "Source Unhealthy",
-  "Structural Saturation Warning",
-] as const;
-
-export type PegAlertRuleKind = (typeof RULE_KINDS)[number] | "Unknown";
+import { PEG_ALERT_RULE_KINDS, type PegAlertRuleKind } from "@/lib/peg-alerts";
 
 export interface PegAlertCopyLine {
   ruleTitle: string;
@@ -51,7 +34,9 @@ const PROVIDER_DISPLAY_NAMES: Readonly<Record<string, string>> = {
 
 export function pegAlertRuleKind(line: PegAlertCopyLine): PegAlertRuleKind {
   const title = line.ruleTitle.match(/^Peg (.+?)(?: \[|$)/)?.[1];
-  return RULE_KINDS.find((candidate) => candidate === title) ?? "Unknown";
+  return (
+    PEG_ALERT_RULE_KINDS.find((candidate) => candidate === title) ?? "Unknown"
+  );
 }
 
 export function pegAlertAssetName(asset: string): string {
@@ -59,7 +44,7 @@ export function pegAlertAssetName(asset: string): string {
   return ASSET_DISPLAY_NAMES[symbol] ?? symbol.toUpperCase();
 }
 
-function sourceName(source: string): string {
+export function pegAlertSourceName(source: string): string {
   const provider = source.split("_", 1)[0] ?? source;
   if (provider === "") return "Price source";
   return (
@@ -68,7 +53,7 @@ function sourceName(source: string): string {
   );
 }
 
-function sourceCurrency(source: string): string | null {
+export function pegAlertSourceCurrency(source: string): string | null {
   const currency = source.split("_")[1];
   return currency === undefined ? null : currency.toUpperCase();
 }
@@ -121,7 +106,7 @@ const SOURCE_FAILURE_LEADS: Partial<Record<number, SourceFailureFormatter>> = {
   5: ({ source, cleared }) =>
     `${source} ${form(cleared, "returned", "is returning")} invalid price data`,
   6: ({ source, cleared }) =>
-    `${source} price data ${form(cleared, "stopped", "has stopped")} updating`,
+    `${source} price data ${form(cleared, "is fresh again", "is too old")}`,
   7: ({ source, cleared }) =>
     `${source} ${form(cleared, "repeated", "is repeating")} old price data`,
   8: ({ source, cleared, fill }) =>
@@ -147,7 +132,7 @@ function sourceFailureCause(
   cleared: boolean,
 ): PegAlertCauseCopy {
   const context: SourceFailureContext = {
-    source: sourceName(line.labels.source),
+    source: pegAlertSourceName(line.labels.source),
     cleared,
     fill: numberLabel(line.values.Fill),
     status: httpStatus(line),
@@ -157,8 +142,8 @@ function sourceFailureCause(
     formatter?.(context) ??
     form(
       cleared,
-      `${context.source} did not provide a usable sell price`,
-      `${context.source} is not providing a usable sell price`,
+      `${context.source} sell price is available again`,
+      `${context.source} sell price is unavailable`,
     );
   return { lead, includesAsset: false };
 }
@@ -202,8 +187,8 @@ function marketListingCause(
   cleared: boolean,
 ): PegAlertCauseCopy {
   const asset = pegAlertAssetName(line.labels.asset);
-  const source = sourceName(line.labels.source);
-  const currency = sourceCurrency(line.labels.source);
+  const source = pegAlertSourceName(line.labels.source);
+  const currency = pegAlertSourceCurrency(line.labels.source);
   const market = currency === null ? asset : `${asset}/${currency}`;
   return {
     lead: `${source} ${form(cleared, "did not list", "does not list")} the ${market} market`,
@@ -217,7 +202,7 @@ type CauseBuilder = (
 ) => PegAlertCauseCopy;
 
 const downsideCause: CauseBuilder = (line, cleared) => {
-  const source = sourceName(line.labels.source);
+  const source = pegAlertSourceName(line.labels.source);
   const present = form(cleared, "was", "is");
   return {
     lead: withMeasurement(
@@ -230,7 +215,7 @@ const downsideCause: CauseBuilder = (line, cleared) => {
 };
 
 const premiumCause: CauseBuilder = (line, cleared) => {
-  const source = sourceName(line.labels.source);
+  const source = pegAlertSourceName(line.labels.source);
   const present = form(cleared, "was", "is");
   return {
     lead: withMeasurement(
@@ -243,7 +228,7 @@ const premiumCause: CauseBuilder = (line, cleared) => {
 };
 
 const spreadCause: CauseBuilder = (line, cleared) => {
-  const source = sourceName(line.labels.source);
+  const source = pegAlertSourceName(line.labels.source);
   const present = form(cleared, "were", "are");
   return {
     lead: withMeasurement(

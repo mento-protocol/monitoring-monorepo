@@ -75,6 +75,7 @@ export function PegMonitoringPageClient(): React.JSX.Element {
             />
             <RecentAlerts
               events={alerts.data?.events ?? []}
+              monitoring={state.data}
               nowMs={nowMs}
               state={
                 alerts.hasError

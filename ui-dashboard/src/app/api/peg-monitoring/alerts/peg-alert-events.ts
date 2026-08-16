@@ -4,6 +4,8 @@ import {
   pegAlertAssetName,
   pegAlertCauseCopy,
   pegAlertRuleKind,
+  pegAlertSourceCurrency,
+  pegAlertSourceName,
 } from "./peg-alert-copy";
 
 export const PEG_ALERTS_MAX_STATE_ROWS = 1_000;
@@ -74,7 +76,7 @@ class InvalidPegAlertsUpstreamError extends Error {}
 
 type PegStateTransition = {
   at: number;
-  kind: "raised" | "cleared";
+  kind: "pending" | "raised" | "cleared" | "normal";
   identity: string;
   line: StateLine;
 };
@@ -96,12 +98,18 @@ function baseState(value: string): string {
 }
 
 function transitionKind(line: StateLine): PegStateTransition["kind"] | null {
+  if (baseState(line.current) === "Pending") return "pending";
   if (baseState(line.current) === "Alerting") return "raised";
   if (
     baseState(line.previous) === "Alerting" &&
     baseState(line.current) === "Normal"
   )
     return "cleared";
+  if (
+    baseState(line.previous) === "Pending" &&
+    baseState(line.current) === "Normal"
+  )
+    return "normal";
   return null;
 }
 
@@ -190,6 +198,7 @@ type PhrasedEvent = PegAlertEvent & {
 function phraseTransition(
   transition: PegStateTransition,
   raised?: PegStateTransition,
+  pending?: PegStateTransition,
 ): PhrasedEvent {
   const evidence = raised?.line ?? transition.line;
   const cleared = transition.kind === "cleared";
@@ -213,6 +222,20 @@ function phraseTransition(
         : "warning",
     lead: cause.lead,
     detail: detail === "" ? "" : `${detail}.`,
+    evidence: {
+      rule: pegAlertRuleKind(evidence),
+      assetId: evidence.labels.asset,
+      assetName: pegAlertAssetName(evidence.labels.asset),
+      sourceId: evidence.labels.source,
+      sourceName: pegAlertSourceName(evidence.labels.source),
+      quoteCurrency: pegAlertSourceCurrency(evidence.labels.source),
+      policyVersion: evidence.labels.policy_version,
+      failureReason: normalizedFailureReason(evidence.values.Reason),
+      pendingSeconds:
+        pending === undefined || raised === undefined
+          ? null
+          : Math.max(0, raised.at - pending.at),
+    },
     duplicateKey: [
       pegAlertRuleKind(evidence),
       evidence.labels.asset,
@@ -223,30 +246,65 @@ function phraseTransition(
   };
 }
 
+function normalizedFailureReason(reason: number | undefined): number | null {
+  return reason !== undefined &&
+    Number.isInteger(reason) &&
+    reason >= 1 &&
+    reason <= 20
+    ? reason
+    : null;
+}
+
 function pairStateTransitions(
   transitions: readonly PegStateTransition[],
 ): PhrasedEvent[] {
+  const kindRank: Record<PegStateTransition["kind"], number> = {
+    pending: 0,
+    raised: 1,
+    normal: 2,
+    cleared: 3,
+  };
   const ordered = [...transitions].sort(
     (left, right) =>
       left.at - right.at ||
-      (left.kind === right.kind ? 0 : left.kind === "raised" ? -1 : 1) ||
+      kindRank[left.kind] - kindRank[right.kind] ||
       left.identity.localeCompare(right.identity),
   );
-  const open = new Map<string, PegStateTransition>();
+  const pending = new Map<string, PegStateTransition>();
+  const open = new Map<
+    string,
+    { raised: PegStateTransition; pending?: PegStateTransition }
+  >();
   const events: PhrasedEvent[] = [];
   for (const transition of ordered) {
-    if (transition.kind === "raised") {
-      if (!open.has(transition.identity))
-        open.set(transition.identity, transition);
+    if (transition.kind === "pending") {
+      pending.set(transition.identity, transition);
       continue;
     }
-    const raised = open.get(transition.identity);
-    if (raised === undefined || transition.at < raised.at) continue;
-    events.push(phraseTransition(raised));
-    events.push(phraseTransition(transition, raised));
+    if (transition.kind === "normal") {
+      pending.delete(transition.identity);
+      continue;
+    }
+    if (transition.kind === "raised") {
+      if (!open.has(transition.identity))
+        open.set(transition.identity, {
+          raised: transition,
+          ...(pending.has(transition.identity)
+            ? { pending: pending.get(transition.identity)! }
+            : {}),
+        });
+      pending.delete(transition.identity);
+      continue;
+    }
+    const cycle = open.get(transition.identity);
+    if (cycle === undefined || transition.at < cycle.raised.at) continue;
+    events.push(phraseTransition(cycle.raised, cycle.raised, cycle.pending));
+    events.push(phraseTransition(transition, cycle.raised, cycle.pending));
     open.delete(transition.identity);
   }
-  for (const raised of open.values()) events.push(phraseTransition(raised));
+  for (const cycle of open.values()) {
+    events.push(phraseTransition(cycle.raised, cycle.raised, cycle.pending));
+  }
   return events;
 }
 
@@ -294,16 +352,19 @@ function coalescePolicyDuplicates(events: PhrasedEvent[]): PegAlertEvent[] {
     severity: event.severity,
     lead: event.lead,
     detail: event.detail,
+    evidence: event.evidence,
   }));
 }
 
 export function combinePegAlertEvents(
   stateTransitions: readonly PegStateTransition[],
   maximumEvents: number,
+  minimumEventAt = Number.NEGATIVE_INFINITY,
 ): PegAlertEvent[] {
   return coalescePolicyDuplicates(pairStateTransitions(stateTransitions))
     .sort(
       (left, right) => right.at - left.at || left.id.localeCompare(right.id),
     )
+    .filter((event) => event.at >= minimumEventAt)
     .slice(0, maximumEvents);
 }

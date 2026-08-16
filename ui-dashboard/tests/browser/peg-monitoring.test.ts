@@ -95,6 +95,17 @@ test("renders the status board, expands a row panel, and retains stale evidence"
             severity: "cleared",
             lead: "Bitvavo buy and sell prices were 34 bps apart",
             detail: "EUROP · lasted 22 min.",
+            evidence: {
+              rule: "Deep-Venue Spread Warning",
+              assetId: "europ-schuman",
+              assetName: "EUROP",
+              sourceId: "bitvavo_eur",
+              sourceName: "Bitvavo",
+              quoteCurrency: "EUR",
+              policyVersion: payload.producedPolicyVersion,
+              failureReason: null,
+              pendingSeconds: 600,
+            },
           },
         ],
       },
@@ -214,6 +225,19 @@ test("renders the status board, expands a row panel, and retains stale evidence"
   await expect(alerts).toContainText("EUROP · lasted 22 min");
   await expect(
     alerts.getByRole("img", { name: "Alert resolved" }),
+  ).toBeVisible();
+  const alertDetails = alerts.locator("details");
+  await expect(
+    alertDetails.getByText(
+      "The gap between the best available buy and sell prices exceeded the allowed spread.",
+    ),
+  ).toBeHidden();
+  await alertDetails.getByText("Details", { exact: true }).click();
+  await expect(
+    alertDetails.getByText(
+      "The alert fired after the condition continued for 10 minutes.",
+      { exact: false },
+    ),
   ).toBeVisible();
   const grafanaLink = alerts.getByRole("link", {
     name: /Full history in Grafana/,

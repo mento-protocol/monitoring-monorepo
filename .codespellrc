@@ -3,4 +3,5 @@
 # wether: genuine typo in compiled contract metadata (rawMetadata) that
 #         cannot be changed without invalidating the bytecode hash
 # applyable: official Terraform plan JSON field name
-ignore-words-list = amountin,wether,afterall,strat,applyable
+# zar: ISO 4217 code for the South African rand
+ignore-words-list = amountin,wether,afterall,strat,applyable,zar

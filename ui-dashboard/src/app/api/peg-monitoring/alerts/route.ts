@@ -20,12 +20,13 @@ export const dynamic = "force-dynamic";
 export const PEG_ALERTS_UPSTREAM_TIMEOUT_MS = 8_000;
 export const PEG_ALERTS_MAX_STATE_RESPONSE_BYTES = 4 * 1024 * 1024;
 export const PEG_ALERTS_MAX_EVENTS = 4;
+export const PEG_ALERTS_CONTEXT_LEAD_IN_SECONDS = PEG_ALERTS_WINDOW_SECONDS;
 
 function stateHistoryUrl(
   origin: string | undefined,
   from: number,
   to: number,
-  kind: "raised" | "cleared",
+  kind: "pending" | "raised" | "cleared" | "canceled",
 ): URL | null {
   const url = resolveGrafanaEndpoint(origin, "/api/v1/rules/history");
   if (url === null) return null;
@@ -35,12 +36,12 @@ function stateHistoryUrl(
   // seven-day result was truncated instead of silently losing an incident.
   url.searchParams.set("limit", String(PEG_ALERTS_MAX_STATE_ROWS + 1));
   url.searchParams.set("labels_service", "peg-monitoring");
-  if (kind === "cleared") {
-    url.searchParams.set("previous", "Alerting");
-    url.searchParams.set("current", "Normal");
-  } else {
-    url.searchParams.set("current", "Alerting");
-  }
+  url.searchParams.set(
+    "current",
+    kind === "raised" ? "Alerting" : kind === "pending" ? "Pending" : "Normal",
+  );
+  if (kind === "cleared") url.searchParams.set("previous", "Alerting");
+  if (kind === "canceled") url.searchParams.set("previous", "Pending");
   return url;
 }
 
@@ -69,16 +70,19 @@ async function fetchJson(
 export async function GET(): Promise<NextResponse> {
   const to = Math.floor(Date.now() / 1_000);
   const from = to - PEG_ALERTS_WINDOW_SECONDS;
+  // Fetch one extra display window so alerts that start before `from` retain
+  // their Pending wait and fired evidence. Emitted rows remain within `from`.
+  const contextFrom = from - PEG_ALERTS_CONTEXT_LEAD_IN_SECONDS;
   const token = process.env.GRAFANA_QUERY_TOKEN?.trim();
   const raisedUrl = stateHistoryUrl(
     process.env.GRAFANA_QUERY_URL,
-    from,
+    contextFrom,
     to,
     "raised",
   );
   const clearedUrl = stateHistoryUrl(
     process.env.GRAFANA_QUERY_URL,
-    from,
+    contextFrom,
     to,
     "cleared",
   );
@@ -94,17 +98,39 @@ export async function GET(): Promise<NextResponse> {
     policyUrl === null
   )
     return grafanaErrorResponse("Peg alert history is not configured", 503);
+  const pendingUrl = stateHistoryUrl(
+    process.env.GRAFANA_QUERY_URL,
+    contextFrom,
+    to,
+    "pending",
+  );
+  const canceledUrl = stateHistoryUrl(
+    process.env.GRAFANA_QUERY_URL,
+    contextFrom,
+    to,
+    "canceled",
+  );
+  if (pendingUrl === null || canceledUrl === null)
+    return grafanaErrorResponse("Peg alert history is not configured", 503);
 
   try {
-    const [raisedRaw, clearedRaw] = await Promise.all([
+    const [pendingRaw, raisedRaw, clearedRaw, canceledRaw] = await Promise.all([
+      fetchJson(pendingUrl, token, PEG_ALERTS_MAX_STATE_RESPONSE_BYTES),
       fetchJson(raisedUrl, token, PEG_ALERTS_MAX_STATE_RESPONSE_BYTES),
       fetchJson(clearedUrl, token, PEG_ALERTS_MAX_STATE_RESPONSE_BYTES),
+      fetchJson(canceledUrl, token, PEG_ALERTS_MAX_STATE_RESPONSE_BYTES),
     ]);
     const transitions = [
-      ...parseStateTransitions(raisedRaw, from, to),
-      ...parseStateTransitions(clearedRaw, from, to),
+      ...parseStateTransitions(pendingRaw, contextFrom, to),
+      ...parseStateTransitions(raisedRaw, contextFrom, to),
+      ...parseStateTransitions(clearedRaw, contextFrom, to),
+      ...parseStateTransitions(canceledRaw, contextFrom, to),
     ];
-    const events = combinePegAlertEvents(transitions, PEG_ALERTS_MAX_EVENTS);
+    const events = combinePegAlertEvents(
+      transitions,
+      PEG_ALERTS_MAX_EVENTS,
+      from,
+    );
     const response: PegAlertsResponse = { from, to, events };
     return NextResponse.json(response, { headers: GRAFANA_NO_STORE_HEADERS });
   } catch (error) {
