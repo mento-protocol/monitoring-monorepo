@@ -191,18 +191,18 @@ PR body and final summary.
 
 ### UI visual evidence
 
-After a UI PR exists and its `headRefOid` matches local `HEAD`, attach the
-before/after images in one PR comment. Use the authenticated GitHub web comment
-composer because `gh` and the public Issues API cannot upload local image
-attachments. The comment must name the route or state, exact base and head
-commits, viewport, and fixture or data source. Label the images **Before** and
-**After** and place them side by side when the composer supports a Markdown
-table.
+After a UI PR exists and its `headRefOid` matches local `HEAD`, add a
+`## Visual comparison` section to the PR description. Place it immediately
+after `## The Solution` and before `## Details`. Use the authenticated GitHub
+web description editor because `gh` and the public Issues API cannot upload
+local image attachments. The section must name the route or state, exact base
+and head commits, viewport, and fixture or data source. Label the images
+**Before** and **After** and place them side by side in a Markdown table.
 
-Reopen the published comment and verify that both attachment URLs are present,
-both images render, and the labels map to the correct revisions. Capture the
-comment URL for the final summary. Do not treat a local image path, a comment
-containing broken Markdown, or an unverified upload as visual evidence. If the
+Reopen the PR description and verify that both attachment URLs are present,
+both images render, and the labels map to the correct revisions. Record the PR
+URL and verified base/head pair for the final summary. Do not treat a local
+image path, broken Markdown, or an unverified upload as visual evidence. If the
 authenticated browser or attachment surface is unavailable, stop and report
 the blocker; do not call the UI PR shipped or ready.
 
