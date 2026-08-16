@@ -1,8 +1,12 @@
 import { NextResponse } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { PEG_ALERTS_WINDOW_SECONDS } from "@/lib/peg-alerts";
+import {
+  type PegAlertEvent,
+  PEG_ALERTS_WINDOW_SECONDS,
+} from "@/lib/peg-alerts";
 import {
   GET,
+  PEG_ALERTS_CONTEXT_LEAD_IN_SECONDS,
   PEG_ALERTS_MAX_EVENTS,
   PEG_ALERTS_MAX_STATE_RESPONSE_BYTES,
   PEG_ALERTS_UPSTREAM_TIMEOUT_MS,
@@ -15,6 +19,7 @@ import {
 
 const NOW_SECONDS = 1_786_694_595;
 const FROM_SECONDS = NOW_SECONDS - PEG_ALERTS_WINDOW_SECONDS;
+const CONTEXT_FROM_SECONDS = FROM_SECONDS - PEG_ALERTS_CONTEXT_LEAD_IN_SECONDS;
 
 type StateLine = {
   schemaVersion: 1;
@@ -96,10 +101,7 @@ function json(body: unknown, init?: ResponseInit): Response {
   return Response.json(body, init);
 }
 
-function eventFor(overrides: Parameters<typeof stateLine>[0]): {
-  lead: string;
-  detail: string;
-} {
+function eventFor(overrides: Parameters<typeof stateLine>[0]): PegAlertEvent {
   const transitions = parseStateTransitions(
     stateFrame([{ at: NOW_SECONDS - 1, line: stateLine(overrides) }]),
     FROM_SECONDS,
@@ -111,11 +113,13 @@ function eventFor(overrides: Parameters<typeof stateLine>[0]): {
 }
 
 function successfulFetch() {
-  const raisedRows = [
+  const pendingRows = [
     {
-      at: NOW_SECONDS - 1_500,
-      line: stateLine({ previous: "Pending", current: "Normal" }),
+      at: NOW_SECONDS - 1_800,
+      line: stateLine({ previous: "Normal", current: "Pending" }),
     },
+  ];
+  const raisedRows = [
     { at: NOW_SECONDS - 1_200, line: stateLine() },
     { at: NOW_SECONDS - 1_140, line: stateLine() },
     {
@@ -135,7 +139,7 @@ function successfulFetch() {
       }),
     },
   ];
-  const clearedRows = [
+  const normalRows = [
     {
       at: NOW_SECONDS - 600,
       line: stateLine({ previous: "Alerting", current: "Normal", values: {} }),
@@ -156,11 +160,17 @@ function successfulFetch() {
   ];
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     const url = new URL(String(input));
+    const current = url.searchParams.get("current");
+    const previous = url.searchParams.get("previous");
     return json(
       stateFrame(
-        url.searchParams.get("current") === "Alerting"
-          ? raisedRows
-          : clearedRows,
+        current === "Pending"
+          ? pendingRows
+          : current === "Alerting"
+            ? raisedRows
+            : previous === "Alerting"
+              ? normalRows
+              : [],
       ),
     );
   });
@@ -170,7 +180,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(NOW_SECONDS * 1_000);
   vi.stubEnv("GRAFANA_QUERY_URL", "https://grafana.example");
-  vi.stubEnv("GRAFANA_QUERY_TOKEN", "viewer-token");
+  vi.stubEnv("GRAFANA_QUERY_TOKEN", "test-token");
 });
 
 afterEach(() => {
@@ -196,6 +206,17 @@ describe("GET /api/peg-monitoring/alerts", () => {
           severity: "page",
           lead: "Bitvavo sell price is 52 bps below peg",
           detail: "EUROP.",
+          evidence: {
+            rule: "Deep-Venue Downside Critical",
+            assetId: "europ-schuman",
+            assetName: "EUROP",
+            sourceId: "bitvavo_eur",
+            sourceName: "Bitvavo",
+            quoteCurrency: "EUR",
+            policyVersion: "europ-v1",
+            failureReason: null,
+            pendingSeconds: null,
+          },
         },
         {
           id: `state:spread-instance:cleared:${NOW_SECONDS - 600}`,
@@ -203,6 +224,17 @@ describe("GET /api/peg-monitoring/alerts", () => {
           severity: "cleared",
           lead: "Bitvavo buy and sell prices were 34 bps apart",
           detail: "EUROP · lasted 10 min.",
+          evidence: {
+            rule: "Deep-Venue Spread Warning",
+            assetId: "europ-schuman",
+            assetName: "EUROP",
+            sourceId: "bitvavo_eur",
+            sourceName: "Bitvavo",
+            quoteCurrency: "EUR",
+            policyVersion: "europ-v1",
+            failureReason: null,
+            pendingSeconds: 600,
+          },
         },
         {
           id: `state:spread-instance:raised:${NOW_SECONDS - 1_200}`,
@@ -210,22 +242,77 @@ describe("GET /api/peg-monitoring/alerts", () => {
           severity: "warning",
           lead: "Bitvavo buy and sell prices are 34 bps apart",
           detail: "EUROP.",
+          evidence: {
+            rule: "Deep-Venue Spread Warning",
+            assetId: "europ-schuman",
+            assetName: "EUROP",
+            sourceId: "bitvavo_eur",
+            sourceName: "Bitvavo",
+            quoteCurrency: "EUR",
+            policyVersion: "europ-v1",
+            failureReason: null,
+            pendingSeconds: 600,
+          },
         },
       ],
     });
     expect(PEG_ALERTS_MAX_EVENTS).toBe(4);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(
+      fetchMock.mock.calls.map(([input]) =>
+        new URL(String(input)).searchParams.get("current"),
+      ),
+    ).toEqual(["Pending", "Alerting", "Normal", "Normal"]);
+    expect(
+      fetchMock.mock.calls.map(([input]) =>
+        new URL(String(input)).searchParams.get("previous"),
+      ),
+    ).toEqual([null, null, "Alerting", "Pending"]);
     for (const [input, init] of fetchMock.mock.calls) {
       const query = new URL(String(input)).searchParams;
-      expect(query.get("from")).toBe(String(FROM_SECONDS));
+      expect(query.get("from")).toBe(String(CONTEXT_FROM_SECONDS));
       expect(query.get("to")).toBe(String(NOW_SECONDS));
       expect(query.get("limit")).toBe(String(PEG_ALERTS_MAX_STATE_ROWS + 1));
       expect(query.get("labels_service")).toBe("peg-monitoring");
       expect(new Headers(init?.headers).get("authorization")).toBe(
-        "Bearer viewer-token",
+        "Bearer test-token",
       );
     }
     expect(PEG_ALERTS_UPSTREAM_TIMEOUT_MS).toBeLessThan(10_000);
+  });
+
+  it("keeps a Pending transition just before the display window", async () => {
+    const pending = stateLine({
+      previous: "Normal",
+      current: "Pending",
+      fingerprint: "boundary-instance",
+    });
+    const raised = stateLine({ fingerprint: "boundary-instance" });
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = new URL(String(input));
+      const current = url.searchParams.get("current");
+      return json(
+        stateFrame(
+          current === "Pending"
+            ? [{ at: FROM_SECONDS - 60, line: pending }]
+            : current === "Alerting"
+              ? [{ at: FROM_SECONDS + 60, line: raised }]
+              : [],
+        ),
+      );
+    });
+
+    const response = await GET();
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      from: FROM_SECONDS,
+      events: [
+        {
+          at: FROM_SECONDS + 60,
+          evidence: { pendingSeconds: 120 },
+        },
+      ],
+    });
   });
 
   it("coalesces matching active and previous policy transitions", () => {
@@ -286,6 +373,34 @@ describe("GET /api/peg-monitoring/alerts", () => {
       `state:active-cycle:cleared:${NOW_SECONDS - 160}`,
       `state:active-cycle:raised:${NOW_SECONDS - 200}`,
     ]);
+  });
+
+  it("does not attach a canceled pending cycle to a later alert", () => {
+    const pending = stateLine({
+      previous: "Normal",
+      current: "Pending",
+      fingerprint: "canceled-pending",
+    });
+    const canceled = stateLine({
+      previous: "Pending",
+      current: "Normal",
+      fingerprint: "canceled-pending",
+      values: {},
+    });
+    const fired = stateLine({ fingerprint: "canceled-pending" });
+    const transitions = parseStateTransitions(
+      stateFrame([
+        { at: NOW_SECONDS - 200, line: pending },
+        { at: NOW_SECONDS - 150, line: canceled },
+        { at: NOW_SECONDS - 100, line: fired },
+      ]),
+      FROM_SECONDS,
+      NOW_SECONDS,
+    );
+
+    expect(
+      combinePegAlertEvents(transitions, 4)[0]?.evidence.pendingSeconds,
+    ).toBeNull();
   });
 
   it("coalesces active and previous policy transitions one-to-one", () => {
@@ -401,7 +516,7 @@ describe("GET /api/peg-monitoring/alerts", () => {
     [3, 0, "Bitvavo price request is timing out"],
     [4, 0, "Bitvavo cannot be reached"],
     [5, 0, "Bitvavo is returning invalid price data"],
-    [6, 0, "Bitvavo price data has stopped updating"],
+    [6, 0, "Bitvavo price data is too old"],
     [7, 0, "Bitvavo is repeating old price data"],
     [
       8,
@@ -413,7 +528,7 @@ describe("GET /api/peg-monitoring/alerts", () => {
     [11, 0, "Bitvavo price conversion is failing"],
     [16, 0, "Pool data does not provide the monitored sell size"],
     [17, 0, "Bitvavo is not supported by the monitor"],
-    [18, 0, "Bitvavo is not providing a usable sell price"],
+    [18, 0, "Bitvavo sell price is unavailable"],
     [19, 0, "Multiple failures are preventing a usable Bitvavo price"],
     [20, 0, "Bitvavo does not list this market"],
   ])(
@@ -467,6 +582,71 @@ describe("GET /api/peg-monitoring/alerts", () => {
     });
   });
 
+  it("uses positive recovery wording for stale and unclassified prices", () => {
+    const title = "Peg Source Unhealthy [europ-schuman/kraken_eur · active]";
+    const pending = stateLine({
+      previous: "Normal",
+      current: "Pending",
+      fingerprint: "stale-instance",
+      ruleTitle: title,
+      values: { Reason: 6 },
+      labels: { alertname: title, source: "kraken_eur" },
+    });
+    const fired = stateLine({
+      fingerprint: "stale-instance",
+      ruleTitle: title,
+      values: { Reason: 6 },
+      labels: { alertname: title, source: "kraken_eur" },
+    });
+    const resolved = stateLine({
+      previous: "Alerting",
+      current: "Normal",
+      fingerprint: "stale-instance",
+      ruleTitle: title,
+      values: {},
+      labels: { alertname: title, source: "kraken_eur" },
+    });
+    const events = combinePegAlertEvents(
+      parseStateTransitions(
+        stateFrame([
+          { at: NOW_SECONDS - 1_920, line: pending },
+          { at: NOW_SECONDS - 120, line: fired },
+          { at: NOW_SECONDS - 60, line: resolved },
+        ]),
+        FROM_SECONDS,
+        NOW_SECONDS,
+      ),
+      4,
+    );
+
+    expect(events).toEqual([
+      expect.objectContaining({
+        severity: "cleared",
+        lead: "Kraken price data is fresh again",
+        evidence: expect.objectContaining({
+          failureReason: 6,
+          pendingSeconds: 1_800,
+        }),
+      }),
+      expect.objectContaining({
+        severity: "warning",
+        lead: "Kraken price data is too old",
+        evidence: expect.objectContaining({
+          failureReason: 6,
+          pendingSeconds: 1_800,
+        }),
+      }),
+    ]);
+
+    expect(
+      eventFor({
+        ruleTitle: title,
+        values: { Reason: 18 },
+        labels: { alertname: title, source: "kraken_eur" },
+      }).lead,
+    ).toBe("Kraken sell price is unavailable");
+  });
+
   it("adds the separate stress cause without policy jargon", () => {
     const title = "Peg Blind While Stressed Critical [europ-schuman · active]";
     expect(
@@ -497,7 +677,7 @@ describe("GET /api/peg-monitoring/alerts", () => {
     const fetchMock = vi.spyOn(globalThis, "fetch");
     vi.stubEnv("GRAFANA_QUERY_TOKEN", "   ");
     expect((await GET()).status).toBe(503);
-    vi.stubEnv("GRAFANA_QUERY_TOKEN", "viewer-token");
+    vi.stubEnv("GRAFANA_QUERY_TOKEN", "test-token");
     const credentialedOrigin = new URL("https://grafana.example");
     credentialedOrigin.username = "user";
     credentialedOrigin.password = "test";
@@ -519,6 +699,8 @@ describe("GET /api/peg-monitoring/alerts", () => {
   it("fails closed for malformed frames and oversized bodies", async () => {
     vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(json({ schema: {}, data: {} }))
+      .mockResolvedValueOnce(json(stateFrame([])))
+      .mockResolvedValueOnce(json(stateFrame([])))
       .mockResolvedValueOnce(json(stateFrame([])));
     expect((await GET()).status).toBe(502);
 
@@ -532,6 +714,8 @@ describe("GET /api/peg-monitoring/alerts", () => {
           },
         }),
       )
+      .mockResolvedValueOnce(json(stateFrame([])))
+      .mockResolvedValueOnce(json(stateFrame([])))
       .mockResolvedValueOnce(json(stateFrame([])));
     expect((await GET()).status).toBe(502);
   });
@@ -546,6 +730,8 @@ describe("GET /api/peg-monitoring/alerts", () => {
     );
     vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(json(stateFrame(sentinelRows)))
+      .mockResolvedValueOnce(json(stateFrame([])))
+      .mockResolvedValueOnce(json(stateFrame([])))
       .mockResolvedValueOnce(json(stateFrame([])));
 
     expect((await GET()).status).toBe(502);
@@ -553,11 +739,11 @@ describe("GET /api/peg-monitoring/alerts", () => {
 
   it("maps upstream timeouts to 504 without exposing credentials", async () => {
     vi.spyOn(globalThis, "fetch").mockRejectedValue(
-      new DOMException("viewer-token", "TimeoutError"),
+      new DOMException("test-token", "TimeoutError"),
     );
     const response = await GET();
     expect(response.status).toBe(504);
-    expect(JSON.stringify(await response.json())).not.toContain("viewer-token");
+    expect(JSON.stringify(await response.json())).not.toContain("test-token");
   });
 
   it("does not depend on a NextRequest or query parameters", async () => {

@@ -121,9 +121,30 @@ generated-artifact, or runtime proof; retain all applicable verification.
 ## Commit And Push
 
 Stage only the intended files. Use a conventional commit prefix that matches the
-change (`fix:`, `feat:`, `docs:`, `chore:`, `test:`, or `refactor:`). Push with
-`git push "$HEAD_REMOTE" HEAD:"$HEAD_REF"`, adding `-u` only for a new PR
-branch.
+change (`fix:`, `feat:`, `docs:`, `chore:`, `test:`, or `refactor:`).
+
+For UI changes, capture visual review evidence only after every intended file
+and review fix is committed and the worktree is clean. Record the final local
+`HEAD` OID before capture. Capture at least one representative before/after
+pair for each materially different route or state changed by the PR.
+
+- Render `BASE_REMOTE/BASE_REF` in an isolated worktree for **Before** and the
+  recorded final local `HEAD` for **After**. Never simulate the old state with
+  DOM edits, stale deployments, or remembered screenshots.
+- Use the same route, viewport, theme, authentication state, and deterministic
+  fixture data for both images. Crop to the product surface. Do not expose
+  secrets, personal data, account identifiers, or unrelated browser chrome.
+- Store review images outside the repository. Never add them to the product
+  commit unless the repository already owns screenshot fixtures for that
+  purpose.
+- A new route still needs a pair: show the base route's prior result, such as
+  its 404 or nearest parent state, and the new route at the recorded `HEAD`.
+
+If either revision cannot be rendered, stop before publication unless the user
+explicitly waives visual evidence for that PR.
+
+Push with `git push "$HEAD_REMOTE" HEAD:"$HEAD_REF"`, adding `-u` only for a
+new PR branch.
 
 For an existing PR, the remote must resolve to the PR's `headRepositoryOwner`
 and `headRepository`; do not assume it is `origin`. Re-read the PR after the
@@ -167,6 +188,23 @@ drafts suppress the automated AI reviews this workflow depends on. Use draft
 only when the user explicitly asks for draft/PR-only handling or when required
 validation/review is intentionally still pending, and state that reason in the
 PR body and final summary.
+
+### UI visual evidence
+
+After a UI PR exists and its `headRefOid` matches local `HEAD`, attach the
+before/after images in one PR comment. Use the authenticated GitHub web comment
+composer because `gh` and the public Issues API cannot upload local image
+attachments. The comment must name the route or state, exact base and head
+commits, viewport, and fixture or data source. Label the images **Before** and
+**After** and place them side by side when the composer supports a Markdown
+table.
+
+Reopen the published comment and verify that both attachment URLs are present,
+both images render, and the labels map to the correct revisions. Capture the
+comment URL for the final summary. Do not treat a local image path, a comment
+containing broken Markdown, or an unverified upload as visual evidence. If the
+authenticated browser or attachment surface is unavailable, stop and report
+the blocker; do not call the UI PR shipped or ready.
 
 ## Post-Push And Closeout
 

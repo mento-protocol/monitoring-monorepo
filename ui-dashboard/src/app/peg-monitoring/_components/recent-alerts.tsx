@@ -1,8 +1,10 @@
 "use client";
 
 import { PEG_GRAFANA_ALERTS_URL } from "@/lib/peg-monitoring";
+import type { PegMonitoringResponse } from "@/lib/peg-monitoring";
 import type { PegAlertEvent, PegAlertSeverity } from "@/lib/peg-alerts";
 import { PEG_COLOR } from "../_lib/peg-board-model";
+import { pegAlertExplanation } from "../_lib/peg-alert-explanation";
 import { ExternalLink, SeverityDot } from "./board-primitives";
 
 const SEVERITY_COLOR: Record<PegAlertSeverity, string> = {
@@ -39,30 +41,55 @@ export function alertTimestamp(atSeconds: number, nowMs: number): string {
 
 function AlertEntry({
   event,
+  monitoring,
   nowMs,
 }: {
   event: PegAlertEvent;
+  monitoring: PegMonitoringResponse;
   nowMs: number;
 }): React.JSX.Element {
+  const explanation = pegAlertExplanation(event, monitoring);
   return (
     <li
       data-testid={`peg-alert-${event.id}`}
-      className="grid grid-cols-[14px_96px_1fr] items-start gap-2.5 border-t border-border px-[18px] py-2.5"
+      className="border-t border-border"
     >
-      <span
-        className="pt-[5px]"
-        role="img"
-        aria-label={SEVERITY_LABEL[event.severity]}
-      >
-        <SeverityDot size={8} color={SEVERITY_COLOR[event.severity]} />
-      </span>
-      <span className="text-[11.5px]" style={{ color: PEG_COLOR.muted }}>
-        {alertTimestamp(event.at, nowMs)}
-      </span>
-      <span className="text-[12.5px] text-[var(--peg-text-2)]">
-        <strong className="font-[650] text-foreground">{event.lead}</strong>
-        {event.detail === "" ? null : <> — {event.detail}</>}
-      </span>
+      <details className="group">
+        <summary className="grid cursor-pointer list-none grid-cols-[14px_96px_1fr] items-start gap-2.5 px-[18px] py-2.5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--primary-border)] [&::-webkit-details-marker]:hidden">
+          <span
+            className="pt-[5px]"
+            role="img"
+            aria-label={SEVERITY_LABEL[event.severity]}
+          >
+            <SeverityDot size={8} color={SEVERITY_COLOR[event.severity]} />
+          </span>
+          <span className="text-[11.5px]" style={{ color: PEG_COLOR.muted }}>
+            {alertTimestamp(event.at, nowMs)}
+          </span>
+          <span className="flex min-w-0 items-start justify-between gap-3 text-[12.5px] text-[var(--peg-text-2)]">
+            <span>
+              <strong className="font-[650] text-foreground">
+                {event.lead}
+              </strong>
+              {event.detail === "" ? null : <> — {event.detail}</>}
+            </span>
+            <span className="shrink-0 text-[11.5px] text-[var(--primary-border)] underline decoration-transparent underline-offset-2 group-hover:decoration-current">
+              <span className="group-open:hidden">Details</span>
+              <span className="hidden group-open:inline">Hide</span>
+            </span>
+          </span>
+        </summary>
+        <div className="grid grid-cols-[14px_96px_1fr] gap-2.5 px-[18px] pb-3">
+          <span aria-hidden="true" />
+          <span aria-hidden="true" />
+          <p
+            data-testid={`peg-alert-explanation-${event.id}`}
+            className="max-w-[78ch] text-[12px] leading-relaxed text-muted-foreground"
+          >
+            {explanation}
+          </p>
+        </div>
+      </details>
     </li>
   );
 }
@@ -73,10 +100,12 @@ const FUTURE_SKEW_MS = 60_000;
 
 export function RecentAlerts({
   events,
+  monitoring,
   nowMs,
   state,
 }: {
   events: readonly PegAlertEvent[];
+  monitoring: PegMonitoringResponse;
   nowMs: number;
   state: "loading" | "ready" | "unavailable";
 }): React.JSX.Element {
@@ -130,7 +159,12 @@ export function RecentAlerts({
       ) : (
         <ul>
           {visible.map((event) => (
-            <AlertEntry key={event.id} event={event} nowMs={nowMs} />
+            <AlertEntry
+              key={event.id}
+              event={event}
+              monitoring={monitoring}
+              nowMs={nowMs}
+            />
           ))}
         </ul>
       )}
