@@ -6,7 +6,7 @@ import {
   parseLeadingMarkerBlock,
   requireSingleQueueState,
   selectQueueIssues,
-} from "./lib/gh-issue-lifecycle.mjs";
+} from "../lib/gh-issue-lifecycle.mjs";
 
 export const DOCS_GARDEN_MARKER = "<!-- docs-garden-issue:v1 -->";
 export const DOCS_GARDEN_PACKET_MARKER_PREFIX = "<!-- docs-garden-packet:v1 ";

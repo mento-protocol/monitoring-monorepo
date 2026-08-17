@@ -17,7 +17,7 @@ import {
   shardDocuments,
   weeklySelection,
 } from "./docs-audit-helpers.mjs";
-import { MAX_ROUTE_LIMIT_BYTES } from "./context/agent-context-budget.mjs";
+import { MAX_ROUTE_LIMIT_BYTES } from "../context/agent-context-budget.mjs";
 
 const scriptPath = fileURLToPath(new URL("./docs-audit.mjs", import.meta.url));
 

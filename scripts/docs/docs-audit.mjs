@@ -9,7 +9,7 @@ import { buildAuditPacket, renderAuditPacket } from "./docs-audit-helpers.mjs";
 import {
   buildDocumentationInventory,
   trackedDocumentationFiles,
-} from "./context/docs-index-helpers.mjs";
+} from "../context/docs-index-helpers.mjs";
 
 function parseArgs(argv) {
   const options = {
@@ -44,7 +44,7 @@ function parseArgs(argv) {
 }
 
 function usage() {
-  return `Usage: node scripts/docs-audit.mjs [options]
+  return `Usage: node scripts/docs/docs-audit.mjs [options]
 
 Options:
   --date YYYY-MM-DD       Deterministic cycle date (default: today)

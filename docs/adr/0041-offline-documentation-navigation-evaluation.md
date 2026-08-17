@@ -98,10 +98,13 @@ Use a versioned, offline evaluation contract:
 - `docs/evals/documentation-navigation-fixtures.json`
 - `docs/evals/documentation-navigation-result.schema.json`
 - `docs/evals/documentation-navigation-baseline.json`
-- `scripts/docs-navigation-eval.mjs`
-- `scripts/docs-navigation-eval-helpers.mjs`
-- `scripts/docs-navigation-eval-result.mjs`
-- `scripts/docs-navigation-eval.test.mjs`
+- `scripts/docs/docs-navigation-eval.mjs`
+- `scripts/docs/docs-navigation-eval-helpers.mjs`
+- `scripts/docs/docs-navigation-eval-result.mjs` — scoring against documentation
+  bytes at a commit
+- `scripts/docs/docs-navigation-eval-result-shape.mjs` — the result envelope
+  contract, checked before any repository read
+- `scripts/docs/docs-navigation-eval.test.mjs`
 - `scripts/lib/gh-issue-lifecycle.mjs` — the shared monthly-issue scheduling
   primitives, including workflow authorization for live creation
 - `.github/workflows/ci.yml`
