@@ -21,6 +21,14 @@ const scratchDirectory = mkdtempSync(
 );
 const changedPathsFile = path.join(scratchDirectory, "changed-paths.txt");
 
+// Generic parsing cores this contract imports from `scripts/lib/` (ADR 0064).
+// They sit outside `scripts/production-infra-identity-contract/**`, so the
+// recursive prefix that covers the rest of the contract does not reach them.
+const SHARED_PARSING_CORES = [
+  "scripts/lib/hcl.mjs",
+  "scripts/lib/workflow-yaml.mjs",
+];
+
 function qualityGatePlan(changedPath) {
   writeFileSync(changedPathsFile, `${changedPath}\n`);
   return execFileSync(
@@ -38,6 +46,14 @@ function qualityGatePlan(changedPath) {
   );
 }
 
+// Every non-empty change set in the real tree runs `pnpm tf:test` through the
+// gate's unconditional sweep, so the presence of the command proves nothing
+// about the changed path. The reason string does: the contract-surface arm
+// names the surface, the sweep names the change set, and `add_command` keeps
+// whichever reason registered first. Asserting the reason is what pins the arm.
+const CONTRACT_SURFACE_REASON =
+  "production infrastructure identity contract surface changed";
+
 function assertRoutesIdentityContract(changedPath) {
   const plan = qualityGatePlan(changedPath);
   const routedCommands = plan.match(/^- pnpm tf:test \([^)]*\)$/gmu) ?? [];
@@ -45,6 +61,15 @@ function assertRoutesIdentityContract(changedPath) {
     routedCommands.length,
     1,
     `${changedPath} must route exactly one pnpm tf:test command:\n${plan}`,
+  );
+}
+
+function assertRoutesContractSurface(changedPath) {
+  assertRoutesIdentityContract(changedPath);
+  assert.equal(
+    qualityGatePlan(changedPath).match(/^- pnpm tf:test \(([^)]*)\)$/mu)[1],
+    CONTRACT_SURFACE_REASON,
+    `${changedPath} must route pnpm tf:test as a contract surface, not through the unconditional sweep`,
   );
 }
 
@@ -91,6 +116,36 @@ try {
     /needs\.changes\.outputs\.rootScripts == 'true'/u,
     "ci.yml scripts job must run when rootScripts changes",
   );
+
+  // The three enumerated terraform paths-filters decide whether the terraform
+  // jobs run at all. `scripts/production-infra-identity-contract/**` covers the
+  // contract, but not the shared cores it imports, so each core needs its own
+  // entry in every filter.
+  const infraWorkflow = loadYaml(
+    readFileSync(
+      path.join(repositoryRoot, ".github/workflows/infra.yml"),
+      "utf8",
+    ),
+  );
+  const infraTriggers = infraWorkflow.on ?? infraWorkflow[true];
+  const terraformFilters = [
+    ["ci.yml terraform filter", filters.terraform],
+    ["infra.yml push paths", infraTriggers.push.paths],
+    ["infra.yml pull_request paths", infraTriggers.pull_request.paths],
+  ];
+  for (const [label, patterns] of terraformFilters) {
+    assert(Array.isArray(patterns), `${label} must be a path list`);
+    assert(
+      patterns.includes("scripts/production-infra-identity-contract/**"),
+      `${label} must cover the identity contract directory`,
+    );
+    for (const sharedCore of SHARED_PARSING_CORES) {
+      assert(
+        patterns.includes(sharedCore),
+        `${label} must include ${sharedCore}`,
+      );
+    }
+  }
   const productionInfraContract = ciWorkflow.jobs["production-infra-contract"];
   assert(
     productionInfraContract,
@@ -158,6 +213,17 @@ try {
   ]) {
     assertRoutesIdentityContract(changedPath);
   }
+
+  // ADR 0064 moved the shared parsing cores out of this directory. They back
+  // all five contract clusters and the ADR 0053 deploy-staging contract, so
+  // they must keep routing as a contract surface from their new home.
+  for (const sharedCore of SHARED_PARSING_CORES) {
+    assertRoutesContractSurface(sharedCore);
+  }
+  assertRoutesContractSurface(
+    "scripts/production-infra-identity-contract/identity.mjs",
+  );
+
   assertRoutesAgentGateSelfTest(
     "scripts/production-infra-identity-contract/routing.test.mjs",
   );

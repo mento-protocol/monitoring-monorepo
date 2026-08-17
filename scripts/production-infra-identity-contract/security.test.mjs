@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { validFixtureFiles } from "./fixtures.mjs";
-import { terraformTopLevelBlocks } from "./hcl.mjs";
+import { terraformTopLevelBlocks } from "../lib/hcl.mjs";
 import {
   assertProductionInfraIdentityContract,
   validateProductionInfraIdentityContract,

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
-import { attributeExpression } from "./hcl.mjs";
+import { attributeExpression } from "../lib/hcl.mjs";
 
 // These are the complete var.* and local.* source closure for the audited IAM
 // grant sinks, module calls, and service-account identity sources. External
