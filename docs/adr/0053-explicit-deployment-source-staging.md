@@ -3,7 +3,7 @@ title: Routine GCP deploys use explicit source-staging buckets
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-13
+last_verified: 2026-08-17
 scope: terraform/infra
 date: 2026-07
 doc_type: adr
@@ -165,6 +165,28 @@ approved apply.
   cmd shell preserves `#` as executable text; known Unix and PowerShell shells
   retain their native `#` comment behavior. Inert examples belong only in
   `scripts/deploy-staging-contract.test.mjs`.
+- The same contract pins the Metrics Bridge build path. Both submit callsites —
+  the GitHub deploy workflow and the direct wrapper — must pass
+  `--config=cloudbuild.yaml` exactly and must not override it with
+  `--service-account`. That config must name the dedicated builder
+  ([ADR 0058](0058-metrics-bridge-dedicated-cloud-build-executor.md)) and write
+  logs only to Cloud Logging, as the Alloy build config must. The contract also
+  proves the Terraform side of the grants above: the Cloud Build source-object
+  readers are exactly the two dedicated builders, and the App Engine uploader
+  and default AppSpot Storage Admin grants name only
+  `staging.<project>.appspot.com`.
+- The contract fixes the direct Metrics Bridge deploy's bootstrap shape. Before
+  it builds, that wrapper reconciles the builder's project roles, Artifact
+  Registry writer, developer act-as bindings, build-log reader,
+  dedicated-builder source readers, and Peg-policy bucket IAM. It targets the
+  two source readers by exact instance key, never their whole `for_each`
+  collection, so a routine deploy cannot enact the pending sibling removal
+  reserved for ADR 0058's reviewed platform apply. It fails closed on an
+  existing service whose exact name it cannot verify and does not target that
+  service. A first service create and an interrupted public-binding create each
+  run one separate `-refresh=false` saved plan accepted by
+  `check-metrics-bridge-bootstrap-plan.mjs`. Terraform state, the live service,
+  and the live public invoker binding are all verified before image rollout.
 - The original source-staging phase boundary is complete. ADR 0058 adds a
   separate applied-foundation, routing-canary, then direct-reader cleanup
   sequence for the Metrics Bridge builder. This ADR itself creates no peg-policy
@@ -174,7 +196,10 @@ approved apply.
 
 - Bucket and IAM ownership:
   [`terraform/deploy-staging.tf`](../../terraform/deploy-staging.tf)
-- Contract implementation:
+- Direct deploy wrapper and its bootstrap plan guard:
+  [`scripts/deploy-bridge.sh`](../../scripts/deploy-bridge.sh) and
+  [`scripts/check-metrics-bridge-bootstrap-plan.mjs`](../../scripts/check-metrics-bridge-bootstrap-plan.mjs)
+- Contract implementation, run by `pnpm tf:test`:
   [`scripts/deploy-staging-contract.mjs`](../../scripts/deploy-staging-contract.mjs)
   and
   [`scripts/deploy-staging-callsite-discovery.mjs`](../../scripts/deploy-staging-callsite-discovery.mjs).
