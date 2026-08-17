@@ -17,7 +17,7 @@ garden_lane: agent-entry-points
 ## Scope
 
 `scripts/` contains deploy wrappers, agent quality gates, code-health checks,
-and repo maintenance utilities. 210 files sit flat at the top level today.
+and repo maintenance utilities. 201 files sit flat at the top level today.
 
 ## Target Layout
 
@@ -40,8 +40,8 @@ Until a phase merges, its files are flat.
 | `terraform/`    | P10   | movable Terraform guards and helpers   |
 | `gate/`         | P11   | quality-gate satellites                |
 
-`lib/` (the shared tier; P7 adds to it) and
-`production-infra-identity-contract/` exist today.
+Landed: P1. `lib/` (the shared tier; P7 adds to it) and
+`production-infra-identity-contract/` predate the reorganization.
 
 ## Why Files Stay Flat
 

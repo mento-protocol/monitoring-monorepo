@@ -1986,13 +1986,13 @@ assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate terraform -chd
 
 run_gate ".github/workflows/metrics-bridge.yml"
 assert_contains "- docs/pr-checklists/ci-workflow-gates.md (GitHub Actions workflow/action changed)"
-assert_contains "- node scripts/check-github-action-pins.mjs (GitHub Actions workflow/action changed)"
+assert_contains "- node scripts/workflows/check-github-action-pins.mjs (GitHub Actions workflow/action changed)"
 assert_contains "- docs/pr-checklists/terraform-cloudrun.md (metrics bridge Cloud Run workflow changed)"
 assert_contains "- pnpm agent:context-check (Cloud Run revision suffix guard changed)"
 
 run_gate ".github/workflows/documentation-garden.yml"
 assert_contains "- docs/pr-checklists/ci-workflow-gates.md (GitHub Actions workflow/action changed)"
-assert_contains "- node scripts/check-github-action-pins.mjs (GitHub Actions workflow/action changed)"
+assert_contains "- node scripts/workflows/check-github-action-pins.mjs (GitHub Actions workflow/action changed)"
 assert_contains "- pnpm docs:garden:test (documentation garden workflow changed)"
 assert_contains "- pnpm docs:navigation-eval:test (documentation navigation scheduler workflow changed)"
 assert_contains "node scripts/check-adr-reminder.mjs"
@@ -2005,7 +2005,7 @@ assert_contains "- node scripts/lighthouse-config.test.mjs (Lighthouse config as
 
 run_gate ".github/workflows/ci.yml"
 assert_contains "- docs/pr-checklists/ci-workflow-gates.md (GitHub Actions workflow/action changed)"
-assert_contains "- node scripts/check-github-action-pins.mjs (GitHub Actions workflow/action changed)"
+assert_contains "- node scripts/workflows/check-github-action-pins.mjs (GitHub Actions workflow/action changed)"
 assert_contains "- pnpm install --frozen-lockfile (central CI workflow changed)"
 assert_contains "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen (central CI workflow changed)"
 assert_contains "- pnpm tf:test (Terraform registry-backed CI workflow changed)"
@@ -2027,7 +2027,7 @@ assert_order \
 
 run_gate ".github/workflows/infra.yml"
 assert_contains "- docs/pr-checklists/ci-workflow-gates.md (GitHub Actions workflow/action changed)"
-assert_contains "- node scripts/check-github-action-pins.mjs (GitHub Actions workflow/action changed)"
+assert_contains "- node scripts/workflows/check-github-action-pins.mjs (GitHub Actions workflow/action changed)"
 assert_contains "- pnpm tf:test (Terraform registry workflow changed)"
 assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate node scripts/terraform-fmt-check.mjs terraform (Terraform registry workflow changed)"
 assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate node scripts/terraform-fmt-check.mjs alerts/rules (Terraform registry workflow changed)"
@@ -2036,7 +2036,7 @@ assert_contains "- TF_DATA_DIR=aegis/terraform/.terraform-agent-gate node script
 
 run_gate ".github/actions/pnpm-install/action.yml"
 assert_contains "- docs/pr-checklists/ci-workflow-gates.md (GitHub Actions workflow/action changed)"
-assert_contains "- node scripts/check-github-action-pins.mjs (GitHub Actions workflow/action changed)"
+assert_contains "- node scripts/workflows/check-github-action-pins.mjs (GitHub Actions workflow/action changed)"
 assert_contains "- pnpm install --frozen-lockfile (pnpm install action changed)"
 assert_contains "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen (pnpm install action changed)"
 assert_contains "- bash scripts/check-react-doctor-score.sh (pnpm install action changed)"
@@ -2341,7 +2341,7 @@ assert_contains "- bash scripts/check-skills-mirror.sh (skills mirror checker ch
 
 run_gate ".trunk/trunk.yaml"
 assert_contains "- tooling"
-assert_contains "- node scripts/check-github-action-pins.mjs (Trunk workflow/action setup changed)"
+assert_contains "- node scripts/workflows/check-github-action-pins.mjs (Trunk workflow/action setup changed)"
 assert_contains "- pnpm agent:quality-gate:test (agent quality gate trunk hook changed)"
 assert_contains "- ./tools/trunk check --all (changed paths require full-repo Trunk checks)"
 assert_not_contains "- pnpm --filter @mento-protocol/ui-dashboard typecheck"
@@ -4063,18 +4063,33 @@ assert_contains "- pnpm lint:scripts (root build script changed)"
 assert_contains "- node scripts/check-hermetic-vitest-setup.mjs (hermetic Vitest setup checker changed)"
 assert_contains "- node scripts/check-hermetic-vitest-setup.test.mjs (hermetic Vitest setup checker changed)"
 
-run_gate "scripts/check-github-action-pins.mjs"
-assert_contains "- node scripts/check-github-action-pins.mjs (GitHub Actions pin checker changed)"
-assert_contains "- node scripts/check-github-action-pins.test.mjs (GitHub Actions pin checker changed)"
+run_gate "scripts/workflows/check-github-action-pins.mjs"
+assert_contains "- node scripts/workflows/check-github-action-pins.mjs (GitHub Actions pin checker changed)"
+assert_contains "- node scripts/workflows/check-github-action-pins.test.mjs (GitHub Actions pin checker changed)"
 
-run_gate "scripts/check-workflow-permissions-drift.mjs"
-assert_contains "- node scripts/check-workflow-permissions-drift.test.mjs (platform-settings workflow-permissions drift checker changed)"
+run_gate "scripts/workflows/check-autofix-ci-trust.mjs"
+assert_contains "- node scripts/workflows/check-autofix-ci-trust.mjs (autofix CI trust checker changed)"
+assert_contains "- node scripts/workflows/check-autofix-ci-trust.test.mjs (autofix CI trust checker changed)"
 
-run_gate "scripts/check-workflow-permissions-drift.test.mjs"
-assert_contains "- node scripts/check-workflow-permissions-drift.test.mjs (platform-settings workflow-permissions drift checker changed)"
+run_gate "scripts/workflows/check-autofix-ci-trust.test.mjs"
+assert_contains "- node scripts/workflows/check-autofix-ci-trust.mjs (autofix CI trust checker changed)"
+assert_contains "- node scripts/workflows/check-autofix-ci-trust.test.mjs (autofix CI trust checker changed)"
 
-run_gate "scripts/check-github-action-pins.test.mjs"
-assert_contains "- node scripts/check-github-action-pins.test.mjs (GitHub Actions pin checker test changed)"
+# The annotation-scoping module the checker imports. It carries no `check-`
+# prefix, so nothing but this arm routes it to the checker it is half of.
+run_gate "scripts/workflows/autofix-trust-annotations.mjs"
+assert_contains "- pnpm lint:scripts (root build script changed)"
+assert_contains "- node scripts/workflows/check-autofix-ci-trust.mjs (autofix CI trust checker changed)"
+assert_contains "- node scripts/workflows/check-autofix-ci-trust.test.mjs (autofix CI trust checker changed)"
+
+run_gate "scripts/workflows/check-workflow-permissions-drift.mjs"
+assert_contains "- node scripts/workflows/check-workflow-permissions-drift.test.mjs (platform-settings workflow-permissions drift checker changed)"
+
+run_gate "scripts/workflows/check-workflow-permissions-drift.test.mjs"
+assert_contains "- node scripts/workflows/check-workflow-permissions-drift.test.mjs (platform-settings workflow-permissions drift checker changed)"
+
+run_gate "scripts/workflows/check-github-action-pins.test.mjs"
+assert_contains "- node scripts/workflows/check-github-action-pins.test.mjs (GitHub Actions pin checker test changed)"
 
 run_gate "scripts/alert-rules-lint.mjs"
 assert_contains "- pnpm alerts:rules:lint:test (alert-rules lint helper changed)"

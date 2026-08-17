@@ -1083,35 +1083,36 @@ jobs:
         # GitHub issue bodies and PR sticky comments.
         run: pnpm sanitize:test
       - name: Notifier coverage unit tests
-        # Behavioral coverage of scripts/check-notifier-coverage.mjs:
+        # Behavioral coverage of scripts/workflows/check-notifier-coverage.mjs:
         # parse helpers (hasPushMain inline + block-sequence, hasSchedule,
         # parseNotifierList, parseName), the checked===0 guard, and an
         # end-to-end missing-workflow case.
-        run: node scripts/check-notifier-coverage.test.mjs
+        run: node scripts/workflows/check-notifier-coverage.test.mjs
       - name: Notifier coverage assertion
         # Asserts that every push-to-main or schedule-only workflow is listed
         # in notify-slack-on-main-failure.yml so failures are never silent.
         # Also triggered by changes to the notifier itself (rootScripts filter
         # above includes the notifier YAML).
-        run: node scripts/check-notifier-coverage.mjs
+        run: node scripts/workflows/check-notifier-coverage.mjs
       - name: Autofix CI trust unit tests
-        # Behavioral coverage of scripts/check-autofix-ci-trust.mjs (trigger/
-        # secret detectors, pull_request_target refusal, guard + annotation
-        # acceptance).
-        run: node scripts/check-autofix-ci-trust.test.mjs
+        # Behavioral coverage of scripts/workflows/check-autofix-ci-trust.mjs
+        # (trigger/secret detectors, pull_request_target refusal, guard +
+        # annotation acceptance).
+        run: node scripts/workflows/check-autofix-ci-trust.test.mjs
       - name: Autofix CI trust assertion
         # Machine-authored sentry-autofix/* PRs pass every fork/dependabot
         # check, so every secret-bearing pull_request workflow must either
         # guard against them or document (autofix-ci-trust annotation) why its
         # secrets are unreachable from PR-head code. Issue #1388 — an
         # activation gate for the autofix leg.
-        run: node scripts/check-autofix-ci-trust.mjs
+        run: node scripts/workflows/check-autofix-ci-trust.mjs
       - name: Platform settings drift unit tests
-        # Behavioral coverage of scripts/check-workflow-permissions-drift.mjs —
-        # the decision layer for .github/workflows/platform-settings-drift.yml
-        # (issue #1564): ok/drift/malformed classification + CLI exit codes for
-        # the daily "default workflow-token permission stays read-only" check.
-        run: node scripts/check-workflow-permissions-drift.test.mjs
+        # Behavioral coverage of
+        # scripts/workflows/check-workflow-permissions-drift.mjs — the decision
+        # layer for .github/workflows/platform-settings-drift.yml (issue #1564):
+        # ok/drift/malformed classification + CLI exit codes for the daily
+        # "default workflow-token permission stays read-only" check.
+        run: node scripts/workflows/check-workflow-permissions-drift.test.mjs
       - name: Override prune report self-tests
         # Behavioral coverage of scripts/override-prune-report.mjs (verdict
         # heuristic, lockfile parsing, git-blame age check). The report

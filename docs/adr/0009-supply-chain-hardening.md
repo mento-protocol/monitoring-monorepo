@@ -35,7 +35,7 @@ Adopt a defense-in-depth posture:
   no install needed. The advisory Supply Chain workflow runs it on dependency
   inputs and daily.
 - **SHA-pin every GitHub Action** `uses:` ref, enforced by the ruleset-required
-  Code Quality job through `scripts/check-github-action-pins.mjs`.
+  Code Quality job through `scripts/workflows/check-github-action-pins.mjs`.
 
 ## Alternatives considered
 
@@ -53,4 +53,4 @@ Adopt a defense-in-depth posture:
 
 - `minimumReleaseAge` PR #418; lockfile-lint PR #447; advisory workflow split
   PR #813; enforce-pinned-actions PR #922; early action pins PR #177.
-- Guards in `pnpm-workspace.yaml`, `scripts/check-github-action-pins.mjs`, [`docs/pr-checklists/recurring-review-patterns.md`](../pr-checklists/recurring-review-patterns.md).
+- Guards in `pnpm-workspace.yaml`, `scripts/workflows/check-github-action-pins.mjs`, [`docs/pr-checklists/recurring-review-patterns.md`](../pr-checklists/recurring-review-patterns.md).

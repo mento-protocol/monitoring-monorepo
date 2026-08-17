@@ -74,7 +74,7 @@ A `uses: org/action@v4` line trusts whoever owns that tag to never re-point it a
 
 - [ ] All third-party actions in workflows and composite actions MUST be pinned to a full commit SHA with the tag in a comment: `uses: org/action@<40-char-sha> # v6.0.2`
 - [ ] Local relative actions such as `uses: ./.github/actions/pnpm-install` are allowed; the scanner follows their `action.yml` / `action.yaml` targets and checks nested third-party `uses:` entries too.
-- [ ] Run `node scripts/check-github-action-pins.mjs` locally when editing `.github/workflows/**`, `.github/actions/**`, or `.trunk/setup-ci/**`; the required `Code Quality` workflow runs the same check on every PR.
+- [ ] Run `node scripts/workflows/check-github-action-pins.mjs` locally when editing `.github/workflows/**`, `.github/actions/**`, or `.trunk/setup-ci/**`; the required `Code Quality` workflow runs the same check on every PR.
 
 Canonical good example: `.github/workflows/metrics-bridge.yml` — every external
 action is SHA-pinned.
@@ -155,8 +155,8 @@ Decision framework for `runs-on` (applied in PR #822 — partial migration savin
 `notify-slack-on-main-failure.yml` fires for every workflow whose failure would otherwise be silent. It must be kept in sync whenever a new workflow is added.
 
 - [ ] If the new workflow runs on push to `main` (`on.push.branches: [main]`, OR a branchless `on.push:` with no `branches:`/`branches-ignore:` key, which runs on every branch) OR has `on.schedule`, add its `name:` value to the `workflow_run.workflows` list in `notify-slack-on-main-failure.yml`
-- [ ] If it's intentionally advisory/non-blocking and you don't want Slack noise on flakes, add its `name:` value to the `EXCLUDED_NAMES` set in `scripts/check-notifier-coverage.mjs` with a comment explaining why
-- [ ] `node scripts/check-notifier-coverage.mjs` must pass after the change — it runs in the `scripts` CI job and enforces this structurally. The `scripts` job's `rootScripts` path filter includes `.github/workflows/**`, so adding a workflow file alone is enough to fire the check (no script edit required)
+- [ ] If it's intentionally advisory/non-blocking and you don't want Slack noise on flakes, add its `name:` value to the `EXCLUDED_NAMES` set in `scripts/workflows/check-notifier-coverage.mjs` with a comment explaining why
+- [ ] `node scripts/workflows/check-notifier-coverage.mjs` must pass after the change — it runs in the `scripts` CI job and enforces this structurally. The `scripts` job's `rootScripts` path filter includes `.github/workflows/**`, so adding a workflow file alone is enough to fire the check (no script edit required)
 
 `workflow_run.workflows` does NOT support wildcards — every new workflow name must be listed explicitly.
 
@@ -166,7 +166,7 @@ Sentry-autofix PRs (head branch `sentry-autofix/*`) are same-repo, non-fork,
 non-Dependabot — they pass every historical CI trust check — but their diffs
 are machine-authored from untrusted Sentry input, so any secret a `pull_request`
 job exposes to their PR-head code is an exfiltration channel (issue #1388).
-`scripts/check-autofix-ci-trust.mjs` enforces this structurally in the
+`scripts/workflows/check-autofix-ci-trust.mjs` enforces this structurally in the
 `scripts` CI job. It parses the workflow with `js-yaml` and analyzes the parsed
 structure, so exotic-but-valid YAML (anchors, `\uXXXX` escapes, block scalars,
 flow/JSON roots) cannot slip a trigger or secret past it; unparsable YAML fails
@@ -186,7 +186,7 @@ closed.
       guard or annotation
 - [ ] Never introduce `pull_request_target` — the checker refuses it outright
 - [ ] Checkouts in jobs that execute PR-head code set `persist-credentials: false` (the checkout token in `.git/config` is readable by any test/build the PR controls)
-- [ ] `node scripts/check-autofix-ci-trust.mjs` must pass after the change
+- [ ] `node scripts/workflows/check-autofix-ci-trust.mjs` must pass after the change
 
 ## 11. Lessons already paid for
 

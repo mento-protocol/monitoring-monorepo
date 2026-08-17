@@ -3,10 +3,10 @@
  * Platform-settings drift check (issue #1564): assert the repo's default GitHub
  * Actions workflow-token permission has not been reverted out-of-band.
  *
- * WHY THIS EXISTS. `scripts/check-autofix-ci-trust.mjs` treats a job with no
- * explicit `permissions:` as having no write scope — an assumption that ONLY
- * holds while the repo default workflow-token permission is `read`. #1557 pinned
- * that default to `read` in Terraform
+ * WHY THIS EXISTS. `scripts/workflows/check-autofix-ci-trust.mjs` treats a job
+ * with no explicit `permissions:` as having no write scope — an assumption that
+ * ONLY holds while the repo default workflow-token permission is `read`. #1557
+ * pinned that default to `read` in Terraform
  * (`terraform/github-actions-permissions.tf` →
  * `github_workflow_repository_permissions.default_read`), but the `platform`
  * stack is manual plan/apply and deliberately NOT in the scheduled
@@ -27,7 +27,7 @@
  *   2  drift      — setting reverted (mirrors terraform-drift's exit-2 = "changes")
  *   3  malformed  — response shape unexpected; fail loud, never read as ok
  *
- * Run: `printf '%s' "$json" | node scripts/check-workflow-permissions-drift.mjs`
+ * Run: `printf '%s' "$json" | node scripts/workflows/check-workflow-permissions-drift.mjs`
  */
 
 import { fileURLToPath } from "node:url";

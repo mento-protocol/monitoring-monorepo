@@ -1,16 +1,22 @@
 #!/usr/bin/env node
 /**
- * Fixture tests for scripts/check-github-action-pins.mjs.
+ * Fixture tests for scripts/workflows/check-github-action-pins.mjs.
  *
- * Run: `node scripts/check-github-action-pins.test.mjs`
+ * Run: `node scripts/workflows/check-github-action-pins.test.mjs`
  */
 
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const SCRIPT = resolve("scripts/check-github-action-pins.mjs");
+// Resolved from this file, not the cwd, so the suite runs from any directory
+// and survives a move of the pair into another `scripts/` subdirectory.
+const SCRIPT = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "check-github-action-pins.mjs",
+);
 const PINNED_SHA = "0123456789abcdef0123456789abcdef01234567";
 
 const tests = [];

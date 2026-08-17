@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 /**
- * Unit tests for scripts/check-notifier-coverage.mjs.
+ * Unit tests for scripts/workflows/check-notifier-coverage.mjs.
  *
  * Imports parse helpers from check-notifier-coverage-helpers.mjs (the shared
  * module) so tests always exercise the real implementations without drift.
  * End-to-end CLI behaviour is tested via spawnSync against a synthetic
  * WORKFLOWS_DIR written to a temp directory.
  *
- * Run: node scripts/check-notifier-coverage.test.mjs
+ * Run: node scripts/workflows/check-notifier-coverage.test.mjs
  * CI:  .github/workflows/ci.yml  (scripts job)
  */
 

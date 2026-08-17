@@ -11,9 +11,9 @@ name: Platform Settings Drift Detection
 #
 # INVARIANT (#1564, #1557): the repo default GitHub Actions workflow-token
 # permission stays `read` (and token PR-approval stays disabled). The autofix
-# CI-trust checker (scripts/check-autofix-ci-trust.mjs) treats a job with no
-# explicit `permissions:` as having no write scope — true ONLY while the repo
-# default is read-only. A manual flip to `write` silently breaks that
+# CI-trust checker (scripts/workflows/check-autofix-ci-trust.mjs) treats a job
+# with no explicit `permissions:` as having no write scope — true ONLY while the
+# repo default is read-only. A manual flip to `write` silently breaks that
 # assumption; this catches it within a day and opens a `drift-detection` issue,
 # mirroring terraform-drift's issue UX.
 #
@@ -100,7 +100,7 @@ jobs:
           fi
 
           set +e
-          verdict=$(printf '%s' "${resp}" | node scripts/check-workflow-permissions-drift.mjs)
+          verdict=$(printf '%s' "${resp}" | node scripts/workflows/check-workflow-permissions-drift.mjs)
           vc=$?
           set -e
           echo "${verdict}"
@@ -170,7 +170,7 @@ jobs:
               `#1557). Either it was reverted out-of-band, or there is code on ` +
               `\`main\` that has not been applied. Re-assert it with ` +
               `\`pnpm tf apply platform -- -auto-approve\` from a clean \`main\` checkout after explicit human approval.\n\n` +
-              `**Why it matters:** \`scripts/check-autofix-ci-trust.mjs\` assumes a ` +
+              `**Why it matters:** \`scripts/workflows/check-autofix-ci-trust.mjs\` assumes a ` +
               `job with no explicit \`permissions:\` has no write scope, which holds ` +
               `only while the repo default workflow-token permission is \`read\`.\n\n` +
               `<details><summary>Check output</summary>\n\n` +
