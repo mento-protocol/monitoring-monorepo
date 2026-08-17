@@ -12,7 +12,6 @@ locals {
   ]
   runtime_config_hash = md5(jsonencode({
     announce_on_first_run                 = var.announce_on_first_run
-    schedule                              = var.schedule
     slack_channel_id                      = var.slack_channel_id
     slack_support_usergroup_id            = var.slack_support_usergroup_id
     splunk_on_call_api_base_url           = var.splunk_on_call_api_base_url

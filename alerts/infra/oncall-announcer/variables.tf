@@ -62,9 +62,9 @@ variable "runtime" {
 }
 
 variable "schedule" {
-  description = "Cloud Scheduler cron expression for polling Splunk On-Call. State dedupe prevents duplicate announcements when this runs more often than the rotation cadence."
+  description = "Cloud Scheduler cron expression for polling Splunk On-Call. The default checks shortly after the weekly Sunday 10:00 Europe/Berlin handover."
   type        = string
-  default     = "*/15 * * * *"
+  default     = "5,20 10 * * 0"
 }
 
 variable "scheduler_name" {
