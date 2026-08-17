@@ -30,7 +30,7 @@ import {
 const scriptPath = fileURLToPath(
   new URL("./agent-context-budget.mjs", import.meta.url),
 );
-const repoRoot = path.resolve(path.dirname(scriptPath), "..");
+const repoRoot = path.resolve(path.dirname(scriptPath), "..", "..");
 
 function withRepo(fn) {
   const repo = mkdtempSync(path.join(tmpdir(), "agent-context-budget-"));

@@ -174,6 +174,11 @@ For each non-happy path, decide the behavior explicitly.
       Verify by diffing skeleton-phase vs loaded-phase section rects; the
       browser recipe (GraphQL-delay init script + rect sampler) is embedded in
       issue #1218 and its sibling skeleton-parity issues (#1219–#1223).
+- [ ] shared table/grid parity: when a shared column template or column count
+      changes, update every structural consumer in the same patch: headers,
+      loaded rows, loading skeletons, expanded-row `aria-colspan`, nested/detail
+      rows, and tests that assert cell count or overflow. Verify the longest
+      real labels and unavailable states at narrow and wide supported viewports.
 - [ ] **SSR-prefetch / `fallbackData` of safety-critical or clock-dependent
       data ships the full staleness envelope.** Painting SSR-cached
       operator-safety state (breaker/market-hours config, halt status) on first
