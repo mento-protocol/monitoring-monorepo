@@ -156,8 +156,9 @@ test("renders the status board, expands a row panel, and retains stale evidence"
   await expect(venueLink).toHaveAttribute("target", "_blank");
 
   // Clicking a link navigates instead of toggling the panel.
-  const chevron = row.getByRole("button", { name: /Expand EUROP/ });
-  await expect(chevron).toHaveAttribute("aria-expanded", "false");
+  const rowToggle = row.getByRole("button", { name: /Expand EUROP/ });
+  await expect(rowToggle).toHaveAttribute("aria-expanded", "false");
+  await expect(rowToggle).toHaveText("EUROP / EUR");
   await row.getByRole("link", { name: "Ready" }).click();
   await expect(page).toHaveURL(new RegExp(`/pool/${poolId}\\?tab=oracle`));
   await page.goBack();
@@ -311,7 +312,7 @@ test("keeps the board scrollable without pushing the page wider on mobile", asyn
   expect(horizontalOverflow).toBeLessThanOrEqual(1);
 });
 
-test("contains long distance labels inside the compact desktop column", async ({
+test("contains long distance labels without desktop board overflow", async ({
   page,
 }) => {
   await page.clock.install({ time: new Date(now * 1000 + 20_000) });
@@ -320,15 +321,29 @@ test("contains long distance labels inside the compact desktop column", async ({
     ...payload,
     packages: payload.packages.map((item) => ({
       ...item,
-      sources: item.sources.map((source) =>
-        source.id === item.policy.deepVenueSource || source.id === "kraken_eur"
-          ? {
-              ...source,
-              executablePrice: 0.87655,
-              deviationBps: 1_234.5,
-            }
-          : source,
-      ),
+      sources: item.sources.map((source) => {
+        if (
+          source.id === item.policy.deepVenueSource ||
+          source.id === "kraken_eur"
+        ) {
+          return {
+            ...source,
+            executablePrice: 0.87655,
+            deviationBps: 1_234.5,
+          };
+        }
+        if (source.id === "kraken_usd") {
+          return {
+            ...source,
+            healthy: false,
+            venueState: "unavailable" as const,
+            executablePrice: null,
+            observationAt: null,
+            spreadBps: null,
+          };
+        }
+        return source;
+      }),
     })),
   };
   await page.route("**/api/peg-monitoring", async (route) => {
@@ -343,7 +358,7 @@ test("contains long distance labels inside the compact desktop column", async ({
 
   const row = page.getByTestId("peg-row-europ-schuman");
   const cells = row.getByRole("cell");
-  await expect(cells).toHaveCount(9);
+  await expect(cells).toHaveCount(8);
   const label = row.getByText("1,234.5 bps below", { exact: true });
   await expect(label).toBeVisible();
   const [labelBox, distanceBox, primaryBox] = await Promise.all([
@@ -396,6 +411,37 @@ test("contains long distance labels inside the compact desktop column", async ({
     .getByTestId("peg-board-scroller")
     .evaluate((element) => element.scrollWidth - element.clientWidth);
   expect(boardOverflow).toBeLessThanOrEqual(1);
+
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  const unavailableRow = page.getByTestId("peg-supporting-source-kraken_usd");
+  const unavailableDistance = page.getByTestId(
+    "peg-supporting-distance-kraken_usd",
+  );
+  const unavailableLabel = unavailableRow.getByText(
+    "Unavailable — no healthy observation",
+    { exact: true },
+  );
+  const [unavailableLabelBox, unavailableDistanceBox, unavailableAgeBox] =
+    await Promise.all([
+      unavailableLabel.boundingBox(),
+      unavailableDistance.boundingBox(),
+      unavailableRow.locator(":scope > div").nth(3).boundingBox(),
+    ]);
+  expect(unavailableLabelBox).not.toBeNull();
+  expect(unavailableDistanceBox).not.toBeNull();
+  expect(unavailableAgeBox).not.toBeNull();
+  expect(
+    unavailableLabelBox!.x + unavailableLabelBox!.width,
+  ).toBeLessThanOrEqual(
+    unavailableDistanceBox!.x + unavailableDistanceBox!.width + 1,
+  );
+  expect(
+    unavailableDistanceBox!.x + unavailableDistanceBox!.width,
+  ).toBeLessThanOrEqual(unavailableAgeBox!.x + 1);
+  const largeBoardOverflow = await page
+    .getByTestId("peg-board-scroller")
+    .evaluate((element) => element.scrollWidth - element.clientWidth);
+  expect(largeBoardOverflow).toBeLessThanOrEqual(1);
 });
 
 test("refreshes the board when a hidden tab resumes", async ({ page }) => {

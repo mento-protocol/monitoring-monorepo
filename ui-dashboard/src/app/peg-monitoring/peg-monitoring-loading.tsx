@@ -14,7 +14,6 @@ const cells = [
   ["spread", "w-12"],
   ["limit", "w-10"],
   ["breaker", "w-14"],
-  ["chevron", "w-7"],
 ] as const;
 
 function Bar({ className }: { className: string }): React.JSX.Element {
@@ -24,7 +23,7 @@ function Bar({ className }: { className: string }): React.JSX.Element {
 }
 
 /**
- * Board-shaped skeleton: same header row, same nine-column grid and the same
+ * Board-shaped skeleton: same header row, same eight-column grid and the same
  * 16px row padding as the loaded table, so the first paint does not reflow.
  */
 export function PegMonitoringLoading(): React.JSX.Element {
