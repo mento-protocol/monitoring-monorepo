@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /**
- * Fixture-driven tests for scripts/lockfile-lint.mjs.
+ * Fixture-driven tests for scripts/supply-chain/lockfile-lint.mjs.
  *
  * Each test writes a minimal synthetic pnpm-lock.yaml (and optional .npmrc /
  * pnpm-workspace.yaml) to a temp directory, then runs the script against it
  * via spawnSync. Asserts on exit code and stdout/stderr substrings.
  *
- * Run: node scripts/lockfile-lint.test.mjs
+ * Run: node scripts/supply-chain/lockfile-lint.test.mjs
  */
 
 import { spawnSync } from "node:child_process";

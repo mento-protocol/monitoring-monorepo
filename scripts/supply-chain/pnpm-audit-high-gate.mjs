@@ -3,8 +3,8 @@
  * Fail-closed high/critical pnpm audit gate.
  *
  * Run:
- *   node scripts/pnpm-audit-high-gate.mjs --dir .
- *   node scripts/pnpm-audit-high-gate.mjs --dir governance-watchdog
+ *   node scripts/supply-chain/pnpm-audit-high-gate.mjs --dir .
+ *   node scripts/supply-chain/pnpm-audit-high-gate.mjs --dir governance-watchdog
  */
 
 import { readFileSync } from "node:fs";
@@ -97,7 +97,7 @@ function parseArgs(argv) {
       parsed.label = value;
     } else if (arg === "--help" || arg === "-h") {
       console.log(
-        "Usage: node scripts/pnpm-audit-high-gate.mjs [--dir <path>] [--label <name>] [--audit-json <path>]",
+        "Usage: node scripts/supply-chain/pnpm-audit-high-gate.mjs [--dir <path>] [--label <name>] [--audit-json <path>]",
       );
       process.exit(0);
     } else {

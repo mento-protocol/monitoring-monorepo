@@ -37,8 +37,9 @@ name: Supply Chain
 # happens to touch context files. It is a separate job from the advisory
 # report so a stale doc can never abort supply-chain tracking.
 #
-# 5. override prune report — a weekly non-blocking report (scripts/
-#    override-prune-report.mjs) that flags `pnpm.overrides` entries whose
+# 5. override prune report — a weekly non-blocking report
+#    (scripts/supply-chain/override-prune-report.mjs) that flags
+#    `pnpm.overrides` entries whose
 #    floor may already be satisfied by natural resolution, and
 #    `minimumReleaseAgeExclude` entries older than a configurable age.
 #    Report-only: it never edits config; pruning an entry is always a
@@ -80,16 +81,19 @@ on:
       - "**/pnpm-workspace.yaml"
       - "**/.npmrc"
       - patches/**
-      # The gate itself — changes to the workflow or the lockfile-lint
-      # scripts must self-trigger a run (same pattern as the other gates).
+      # The gate itself — changes to the workflow or the supply-chain scripts
+      # must self-trigger a run (same pattern as the other gates). This used to
+      # enumerate the seven basenames one per line, which goes silent rather
+      # than red when a file moves: the job simply stops running and the
+      # required `ci` sentinel stays green. `scripts/supply-chain/**` covers
+      # exactly the same module — every script this workflow invokes lives
+      # there and nothing else does — while surviving the next move within it.
       - .github/workflows/supply-chain.yml
-      - scripts/pnpm-audit-high-gate.mjs
-      - scripts/pnpm-audit-high-gate.test.mjs
-      - scripts/alerts-uuid-overrides.test.mjs
-      - scripts/lockfile-lint.mjs
-      - scripts/lockfile-lint.test.mjs
-      - scripts/version-skew-check.mjs
-      - scripts/version-skew-check.test.mjs
+      - scripts/supply-chain/**
+      # lockfile-lint's override-range gate parses override selectors with this
+      # shared module, which sits outside the directory above.
+      - scripts/lib/pnpm-override-selector.mjs
+      - scripts/lib/pnpm-override-selector.test.mjs
   schedule:
     # Daily run so a newly-disclosed CVE against a pinned dep is caught
     # within 24h. Failures are reported to Slack via
@@ -130,17 +134,17 @@ jobs:
       # clearly while registry failures still stop the job. A rare transient
       # blip → re-run the job manually.
       - name: pnpm audit high gate self-tests
-        run: node scripts/pnpm-audit-high-gate.test.mjs
+        run: node scripts/supply-chain/pnpm-audit-high-gate.test.mjs
       - name: alerts uuid override contract
-        run: node --test scripts/alerts-uuid-overrides.test.mjs
+        run: node --test scripts/supply-chain/alerts-uuid-overrides.test.mjs
       - name: pnpm audit (high+ only)
-        run: node scripts/pnpm-audit-high-gate.mjs --dir . --label root
+        run: node scripts/supply-chain/pnpm-audit-high-gate.mjs --dir . --label root
       - name: pnpm audit handler deploy lockfile (high+ only)
-        run: node scripts/pnpm-audit-high-gate.mjs --dir alerts/infra/onchain-event-handler --label alerts/infra/onchain-event-handler
+        run: node scripts/supply-chain/pnpm-audit-high-gate.mjs --dir alerts/infra/onchain-event-handler --label alerts/infra/onchain-event-handler
       - name: pnpm audit on-call announcer deploy lockfile (high+ only)
-        run: node scripts/pnpm-audit-high-gate.mjs --dir alerts/infra/oncall-announcer --label alerts/infra/oncall-announcer
+        run: node scripts/supply-chain/pnpm-audit-high-gate.mjs --dir alerts/infra/oncall-announcer --label alerts/infra/oncall-announcer
       - name: pnpm audit governance-watchdog deploy lockfile (high+ only)
-        run: node scripts/pnpm-audit-high-gate.mjs --dir governance-watchdog --label governance-watchdog
+        run: node scripts/supply-chain/pnpm-audit-high-gate.mjs --dir governance-watchdog --label governance-watchdog
 
   lockfile-lint:
     name: lockfile integrity + registry check
@@ -157,33 +161,33 @@ jobs:
       - name: lockfile-lint self-tests
         # Runs the fixture suite that exercises the parser logic against
         # synthetic lockfiles. Zero external deps — same Node.js binary.
-        run: node scripts/lockfile-lint.test.mjs
+        run: node scripts/supply-chain/lockfile-lint.test.mjs
       - name: lockfile integrity + registry check
-        # scripts/lockfile-lint.mjs validates:
+        # scripts/supply-chain/lockfile-lint.mjs validates:
         #   1. Every package in pnpm-lock.yaml packages: has a sha512 integrity
         #      hash (prevents tampered-tarball installs).
         #   2. No custom registry= in any .npmrc or registries: in
         #      pnpm-workspace.yaml (prevents registry-redirect attacks).
         #   3. Override and resolution floors are bounded.
-        run: node scripts/lockfile-lint.mjs
+        run: node scripts/supply-chain/lockfile-lint.mjs
       - name: handler lockfile integrity + registry check
         # Same gate for the package-local lockfile Cloud Build uses as the
         # on-chain handler deploy source of truth.
-        run: LOCKFILE_LINT_ROOT=alerts/infra/onchain-event-handler node scripts/lockfile-lint.mjs
+        run: LOCKFILE_LINT_ROOT=alerts/infra/onchain-event-handler node scripts/supply-chain/lockfile-lint.mjs
       - name: on-call announcer lockfile integrity + registry check
         # Same gate for the package-local lockfile Cloud Build uses as the
         # on-call announcer deploy source of truth.
-        run: LOCKFILE_LINT_ROOT=alerts/infra/oncall-announcer node scripts/lockfile-lint.mjs
+        run: LOCKFILE_LINT_ROOT=alerts/infra/oncall-announcer node scripts/supply-chain/lockfile-lint.mjs
       - name: governance-watchdog lockfile integrity + registry check
         # Same gate for the package-local lockfile Cloud Build uses as the
         # governance-watchdog deploy source of truth.
-        run: LOCKFILE_LINT_ROOT=governance-watchdog node scripts/lockfile-lint.mjs
+        run: LOCKFILE_LINT_ROOT=governance-watchdog node scripts/supply-chain/lockfile-lint.mjs
       - name: version-skew self-tests
-        run: node scripts/version-skew-check.test.mjs
+        run: node scripts/supply-chain/version-skew-check.test.mjs
       - name: dependency version-skew check
         # Every declared version of a cataloged package (currently viem)
         # must be "catalog:" or exactly the catalog version.
-        run: node scripts/version-skew-check.mjs
+        run: node scripts/supply-chain/version-skew-check.mjs
 
   context-staleness-report:
     name: context staleness report (scheduled)
@@ -431,12 +435,12 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version
-          # No pnpm install — scripts/override-prune-report.mjs is pure
+          # No pnpm install — scripts/supply-chain/override-prune-report.mjs is pure
           # Node.js (zero deps) and reads only the committed lockfiles.
       - name: override-prune-report self-tests
-        run: node scripts/override-prune-report.test.mjs
+        run: node scripts/supply-chain/override-prune-report.test.mjs
       - name: Generate override prune report
-        run: node scripts/override-prune-report.mjs > /tmp/override-prune-report.md
+        run: node scripts/supply-chain/override-prune-report.mjs > /tmp/override-prune-report.md
       - name: Ensure label exists
         env:
           GH_TOKEN: ${{ github.token }}

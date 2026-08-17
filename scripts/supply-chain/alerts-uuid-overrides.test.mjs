@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 
-const REPO_ROOT = resolve(import.meta.dirname, "..");
+const REPO_ROOT = resolve(import.meta.dirname, "../..");
 const WORKSPACE_POLICIES = [
   "alerts/infra/onchain-event-handler/pnpm-workspace.yaml",
   "alerts/infra/oncall-announcer/pnpm-workspace.yaml",

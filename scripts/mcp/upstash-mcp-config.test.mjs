@@ -41,14 +41,14 @@ import {
   verifyUpstashMcpLauncher,
 } from "./render-upstash-mcp-config.mjs";
 
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const PACKAGE_NAME = "@upstash/mcp-server";
 const PACKAGE_VERSION = "0.2.4";
 const ESBUILD_VERSION = "0.28.1";
 const PINNED_PACKAGE = `${PACKAGE_NAME}@${PACKAGE_VERSION}`;
 const PACKAGE_INTEGRITY =
   "sha512-LN5yao74QQZTjGmolGqAh9YkQa/206ni94wwTtu6I/mVkyMeAbRME7rjK64KrWmCTw2OHUb8TMFsw6r4rMmUSQ==";
-const LAUNCHER_NAME = "scripts/upstash-mcp-launcher.mjs";
+const LAUNCHER_NAME = "scripts/mcp/upstash-mcp-launcher.mjs";
 const EXPECTED_ENV_VARS = ["UPSTASH_EMAIL", "UPSTASH_API_KEY"];
 const EXPECTED_TOOLS = [
   "redis_database_list_databases",
@@ -205,7 +205,7 @@ test("config generation loads the complete local module closure from a reviewed 
   const snapshotRoot = await mkdtemp(
     resolve(tmpdir(), "upstash-mcp-generator-snapshot-"),
   );
-  const snapshotScripts = resolve(snapshotRoot, "scripts");
+  const snapshotScripts = resolve(snapshotRoot, "scripts/mcp");
   const runtimeDirectory = resolve(snapshotRoot, "runtime");
   const moduleNames = [
     "render-upstash-mcp-config.mjs",
@@ -213,11 +213,11 @@ test("config generation loads the complete local module closure from a reviewed 
     "upstash-mcp-launcher.mjs",
   ];
   try {
-    await mkdir(snapshotScripts);
+    await mkdir(snapshotScripts, { recursive: true });
     await Promise.all(
       moduleNames.map((name) =>
         copyFile(
-          resolve(ROOT, "scripts", name),
+          resolve(ROOT, "scripts/mcp", name),
           resolve(snapshotScripts, name),
         ),
       ),
@@ -244,11 +244,11 @@ test("config generation loads the complete local module closure from a reviewed 
     assert.equal(importedRun.status, 0, importedRun.stderr);
 
     const mutableRoot = resolve(snapshotRoot, "mutable-checkout");
-    const mutableScripts = resolve(mutableRoot, "scripts");
+    const mutableScripts = resolve(mutableRoot, "scripts/mcp");
     const sentinelPath = resolve(snapshotRoot, "mutable-builder-ran");
     await mkdir(mutableScripts, { recursive: true });
     await copyFile(
-      resolve(ROOT, "scripts/render-upstash-mcp-config.mjs"),
+      resolve(ROOT, "scripts/mcp/render-upstash-mcp-config.mjs"),
       resolve(mutableScripts, "render-upstash-mcp-config.mjs"),
     );
     await writeFile(
@@ -356,7 +356,7 @@ test("runtime build executes only a reviewed esbuild native snapshot", async () 
   );
 
   const builderSource = await readFile(
-    resolve(ROOT, "scripts/build-upstash-mcp-runtime.mjs"),
+    resolve(ROOT, "scripts/mcp/build-upstash-mcp-runtime.mjs"),
     "utf8",
   );
   assert.doesNotMatch(builderSource, /from ["']esbuild["']/);
@@ -547,7 +547,7 @@ test("Git pins the reviewed launcher to LF bytes", async () => {
   assert.ok(
     attributes
       .split(/\r?\n/)
-      .includes("scripts/upstash-mcp-launcher.mjs text eol=lf"),
+      .includes("scripts/mcp/upstash-mcp-launcher.mjs text eol=lf"),
   );
 });
 
@@ -620,9 +620,9 @@ test("operator and upload guidance carry the pin, ownership, and Cloud boundary"
   assert.match(operator, /--repo-root "\$PWD"/);
   assert.doesNotMatch(
     operator,
-    /^node scripts\/render-upstash-mcp-config\.mjs$/m,
+    /^node scripts\/mcp\/render-upstash-mcp-config\.mjs$/m,
   );
-  assert.match(operator, /scripts\/upstash-mcp-config\.test\.mjs/);
+  assert.match(operator, /scripts\/mcp\/upstash-mcp-config\.test\.mjs/);
   assert.match(upload, /upstash-mcp-operator\.md/);
   for (const tool of EXPECTED_TOOLS) assert.match(upload, new RegExp(tool));
   for (const skill of [codexSkill, claudeSkill]) {
@@ -636,7 +636,7 @@ test("operator and upload guidance carry the pin, ownership, and Cloud boundary"
 
 test("contract rejects direct launchers and credential-bearing arguments", () => {
   const safe = renderUpstashMcpConfig({
-    launcherPath: "/reviewed/repo/scripts/upstash-mcp-launcher.mjs",
+    launcherPath: "/reviewed/repo/scripts/mcp/upstash-mcp-launcher.mjs",
     nodePath: "/reviewed/node",
     runtimePath: "/reviewed/personal/upstash-runtime.mjs",
   });

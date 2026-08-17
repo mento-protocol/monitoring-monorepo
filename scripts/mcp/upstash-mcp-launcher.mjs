@@ -22,7 +22,9 @@ export const UPSTASH_MCP_RUNTIME_LOADER = [
 const TERMINATION_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"];
 
 function defaultRepoRoot() {
-  return realpathSync(resolve(dirname(fileURLToPath(import.meta.url)), ".."));
+  return realpathSync(
+    resolve(dirname(fileURLToPath(import.meta.url)), "../.."),
+  );
 }
 
 function isWithin(parent, child) {

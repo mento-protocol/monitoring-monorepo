@@ -17,7 +17,7 @@ garden_lane: agent-entry-points
 ## Scope
 
 `scripts/` holds deploy wrappers, agent quality gates, code-health checks, and
-repo maintenance utilities. 188 files sit flat at the top level today.
+repo maintenance utilities. 175 files sit flat at the top level today.
 
 ## Target Layout
 
@@ -40,7 +40,7 @@ Files stay flat until their phase merges.
 | `terraform/`    | P10   | movable Terraform guards and helpers   |
 | `gate/`         | P11   | quality-gate satellites                |
 
-Landed: P1, P2, P7, P8. `lib/` (the shared tier) and
+Landed: P1, P2, P6, P7, P8. `lib/` (the shared tier) and
 `production-infra-identity-contract/` predate the reorganization. `setup.sh`
 stays flat: `.config/wt.toml` runs that exact path as the Worktrunk pre-start
 hook, and eight docs name it. `redrive-onchain-deadletter.{mjs,test.mjs}` stays
@@ -49,10 +49,12 @@ so moving it there drops it out of `lint:scripts`. That ignore is
 config-relative; `scripts/alerts/**` stays linted.
 
 `lib/` holds cores more than one cluster reads. `hcl.mjs` (Terraform HCL
-tokenizer and block extraction) and `workflow-yaml.mjs` (Actions workflow and
-shell-run parsing) carry no domain policy and stay outside domain directories:
-five files beyond `production-infra-identity-contract/` read `hcl.mjs`, and the
-ADR 0053 deploy-staging contract reads `workflow-yaml.mjs`.
+tokenizer and block extraction), `workflow-yaml.mjs` (Actions workflow and
+shell-run parsing), and `pnpm-override-selector.mjs` (pnpm override selectors)
+carry no domain policy and stay outside domain directories: five files beyond
+`production-infra-identity-contract/` read `hcl.mjs`, the ADR 0053
+deploy-staging contract reads `workflow-yaml.mjs`, and both the lockfile-lint
+gate and the override prune advisor read the selector parser.
 `peg-policy-digest.mjs` is the one definition of the peg version-digest contract
 both peg validators check. Inventories, pinned hashes, and identities stay with
 their domain.
@@ -72,15 +74,17 @@ that mechanism moves with it, in the same PR.
   repo-relative paths, reconciled against `findSentrySuites()` by set equality
   both ways. A moved or renamed suite fails the gate closed.
 - **Enumerated workflow paths-filters.** 22 of 32 files in
-  `.github/workflows/` pin a `scripts/` path. `ci.yml` (`autoreviewSuite` and
-  `autoreviewRootRuntime`; `rootScripts` is the recursive `scripts/**`),
-  `infra.yml`, `supply-chain.yml`, `alerts-rules.yml`,
-  `peg-policy-publication.yml`, and `schema-diff.yml` list individual files.
-  The three terraform filters (`ci.yml` `terraform`; `infra.yml` push and
-  `pull_request`) also name `scripts/lib/hcl.mjs` and
-  `scripts/lib/workflow-yaml.mjs`, outside the recursive
-  `scripts/production-infra-identity-contract/**`; `routing.test.mjs` there
-  asserts all three. A filter also names what its listed files import.
+  `.github/workflows/` pin a `scripts/` path. `ci.yml` (`autoreviewSuite`,
+  `autoreviewRootRuntime`, `versionSkew`; `rootScripts` is the recursive
+  `scripts/**`), `infra.yml`, `alerts-rules.yml`, `peg-policy-publication.yml`,
+  and `schema-diff.yml` list individual files. The three terraform filters
+  (`ci.yml` `terraform`; `infra.yml` push and `pull_request`) also name
+  `scripts/lib/hcl.mjs` and `scripts/lib/workflow-yaml.mjs`, outside the
+  recursive `scripts/production-infra-identity-contract/**`; `routing.test.mjs`
+  there asserts all three. A filter also names what its listed files import. A
+  miss is silent — the job stops running while the required `ci` sentinel stays
+  green. ADR 0064 covers when a module glob such as `supply-chain.yml`'s
+  `scripts/supply-chain/**` is the safer pin.
 - **Terraform stack registry.** `terraform.stacks.json` `changedPathPatterns`
   pins exact `scripts/` paths per stack, mirrored into those filters.
 - **Production infrastructure contract pins.**
@@ -91,28 +95,20 @@ that mechanism moves with it, in the same PR.
   Claude Code on the web resolves `bootstrap/claude-code-web-setup.sh` through
   `.claude/hooks/session-start.sh`. No repo grep reaches the console: moving
   either needs an operator edit there.
+- **Reviewed-artifact byte pins.** `.gitattributes` pins
+  `scripts/mcp/upstash-mcp-launcher.mjs` to `text eol=lf`, and
+  `UPSTASH_MCP_LAUNCHER_SHA256` in `scripts/mcp/render-upstash-mcp-config.mjs`
+  hashes it — a move's depth fix alone changes both. Procedure:
+  [`docs/notes/upstash-mcp-operator.md`](../docs/notes/upstash-mcp-operator.md).
 
 **Any new pin of a `scripts/` path must be listed here.** An unrecorded pin
 breaks silently on the next move.
 
 ## Sweep Checklist for a Move
 
-Run every item in the PR that moves a file.
-
-1. Root `package.json` — 73 entries reference `scripts/`.
-2. `check-agent-quality-gate-package-scripts.sh` — pinned alias map.
-3. `.github/workflows/` — 22 of 32 files, including the filters above.
-4. `terraform.stacks.json` — per-stack `changedPathPatterns`.
-5. `.trunk/trunk.yaml` — pre-push hook runs `scripts/agent-quality-gate.sh`.
-6. `.claude/settings.json`, `.codex/hooks.json`, `.claude/hooks/session-start.sh`,
-   and the verbatim copies and invocation regexes in `check-agent-context.mjs`.
-7. `.claude/skills/` and `.agents/skills/` — both mirrors.
-8. `docs/notes/quick-commands.md`.
-9. `agent-quality-gate.sh` routing arms — a literal-prefix glob such as
-   `scripts/deploy-*.sh` or `scripts/sentry-*.test.mjs` stops matching one
-   directory down. Keep the basename prefix; add the paired one-level arm. Its
-   contract-surface arm also names `scripts/lib/*.mjs`, which sets the
-   `pnpm tf:test` reason; the unconditional sweep already runs the suite.
+Work the nine-surface checklist in
+[ADR 0064](../docs/adr/0064-scripts-module-directories.md#sweep-checklist-for-a-move)
+in the PR that moves a file. Every surface there is mandatory.
 
 ## Operating Rules
 
