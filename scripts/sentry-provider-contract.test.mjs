@@ -7,7 +7,7 @@ import {
   attributeExpression,
   normalizeExpression,
   terraformTopLevelBlocks,
-} from "./production-infra-identity-contract/hcl.mjs";
+} from "./lib/hcl.mjs";
 
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),

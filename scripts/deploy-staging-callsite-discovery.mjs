@@ -1,8 +1,7 @@
 import { load as loadYaml } from "js-yaml";
 import ts from "typescript";
-import { commentMaskedHcl } from "./production-infra-identity-contract/hcl.mjs";
-import { stripShellComment } from "./production-infra-identity-contract/workflow-inventory.mjs";
-import { isMapping } from "./production-infra-identity-contract/workflow-inventory.mjs";
+import { commentMaskedHcl } from "./lib/hcl.mjs";
+import { isMapping, stripShellComment } from "./lib/workflow-yaml.mjs";
 
 // This is a lexical guard with bounded AST recovery, not a general shell or
 // JavaScript invocation parser. The source-staging boundary has five approved

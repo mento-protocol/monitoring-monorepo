@@ -10,13 +10,13 @@ import {
   REFRESH_SERVICE_ACCOUNT_VARIABLE,
   SERVICE_AND_DRIFT_WORKFLOWS,
 } from "./constants.mjs";
-import { escapeRegExp, requireFile } from "./hcl.mjs";
+import { escapeRegExp, requireFile } from "../lib/hcl.mjs";
 import { validateRefreshRouting } from "./refresh-routing.mjs";
 import {
-  isMapping,
   validateWorkflowDependencyInventory,
   validateWorkflowInventory,
 } from "./workflow-inventory.mjs";
+import { isMapping } from "../lib/workflow-yaml.mjs";
 
 function stripYamlComments(contents) {
   return contents

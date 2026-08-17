@@ -7,7 +7,7 @@ import {
   requireBlock,
   sameSortedValues,
   terraformTopLevelBlocks,
-} from "./production-infra-identity-contract/hcl.mjs";
+} from "./lib/hcl.mjs";
 import {
   discoverDeployStagingCallsites,
   isGcloudExecutable,

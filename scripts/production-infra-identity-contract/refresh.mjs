@@ -15,7 +15,7 @@ import {
   requireFile,
   sameMap,
   sameSortedValues,
-} from "./hcl.mjs";
+} from "../lib/hcl.mjs";
 import {
   referencesRefreshTarget,
   referencesRefreshWif,
