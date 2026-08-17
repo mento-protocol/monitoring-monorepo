@@ -25,7 +25,7 @@ repository added a lint-aware reporter and routed active work to GitHub Issues,
 so its August run opened PR #1724 with generated and exempt files in the report.
 
 The repository already owns the executable policy in
-`scripts/file-size-watchlist.mjs`, its tests, the passive watch list, and the
+`scripts/repo-health/file-size-watchlist.mjs`, its tests, the passive watch list, and the
 recurring-review checklist. Keeping the cadence outside the repository would
 leave a second policy copy that normal review and drift checks cannot update.
 
@@ -36,10 +36,10 @@ The repository owns one monthly, issue-only file-size schedule:
 - `.github/workflows/file-size-watchlist.yml` runs at 07:13 UTC on the first day
   of each month and supports manual dispatch.
 - Every run scans a separate checkout of the current default branch and
-  executes `node scripts/file-size-watchlist.mjs --format issue`. A manual
+  executes `node scripts/repo-health/file-size-watchlist.mjs --format issue`. A manual
   branch dispatch may validate unreleased scheduler logic, but it cannot change
   the source commit used for the report.
-- `scripts/file-size-watchlist-issue.mjs` opens or updates one marked issue for
+- `scripts/repo-health/file-size-watchlist-issue.mjs` opens or updates one marked issue for
   an effective hard/near-hard row, a new effective soft-cap row, or growth above
   100 raw lines while the file remains over the effective soft cap. Rough counts
   determine cap status; raw counts describe growth only.
@@ -85,9 +85,9 @@ The repository owns one monthly, issue-only file-size schedule:
 ## Evidence
 
 - [`.github/workflows/file-size-watchlist.yml`](../../.github/workflows/file-size-watchlist.yml)
-- [`scripts/file-size-watchlist.mjs`](../../scripts/file-size-watchlist.mjs)
-- [`scripts/file-size-watchlist-issue.mjs`](../../scripts/file-size-watchlist-issue.mjs)
-- [`scripts/file-size-watchlist.test.mjs`](../../scripts/file-size-watchlist.test.mjs)
+- [`scripts/repo-health/file-size-watchlist.mjs`](../../scripts/repo-health/file-size-watchlist.mjs)
+- [`scripts/repo-health/file-size-watchlist-issue.mjs`](../../scripts/repo-health/file-size-watchlist-issue.mjs)
+- [`scripts/repo-health/file-size-watchlist.test.mjs`](../../scripts/repo-health/file-size-watchlist.test.mjs)
 - [`docs/notes/file-size-watch.md`](../notes/file-size-watch.md)
 - [Issue #1753](https://github.com/mento-protocol/monitoring-monorepo/issues/1753)
 - [PR #1724](https://github.com/mento-protocol/monitoring-monorepo/pull/1724)

@@ -22,7 +22,7 @@ import {
 } from "./file-size-watchlist-issue.mjs";
 
 const scriptPath = fileURLToPath(import.meta.url);
-const repoRoot = resolve(dirname(scriptPath), "..");
+const repoRoot = resolve(dirname(scriptPath), "../..");
 
 test("scopeForPath excludes generated files, non-Aegis tests, and dashboard types", () => {
   assert.equal(scopeForPath("indexer-envio/.envio/types.d.ts"), null);
@@ -139,7 +139,13 @@ test("baseline parsing supports docs notes and old backlog tables", () => {
 test("json output honors --limit", () => {
   const output = execFileSync(
     process.execPath,
-    ["scripts/file-size-watchlist.mjs", "--format", "json", "--limit", "1"],
+    [
+      "scripts/repo-health/file-size-watchlist.mjs",
+      "--format",
+      "json",
+      "--limit",
+      "1",
+    ],
     { cwd: repoRoot, encoding: "utf8" },
   );
   assert.equal(JSON.parse(output).rows.length, 1);
@@ -253,6 +259,9 @@ test("workflow owns the monthly current-main issue route", () => {
   );
   assert.match(workflow, /FILE_SIZE_WATCHLIST_ROOT:/);
   assert.match(workflow, /gh label create "file-size-watchlist"/);
-  assert.match(workflow, /node scripts\/file-size-watchlist-issue\.mjs --json/);
+  assert.match(
+    workflow,
+    /node scripts\/repo-health\/file-size-watchlist-issue\.mjs --json/,
+  );
   assert.doesNotMatch(workflow, /BACKLOG\.md/);
 });

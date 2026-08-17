@@ -258,6 +258,12 @@ jobs:
               - scripts/**/*.cjs
               - scripts/**/*.js
               - scripts/**/*.sh
+              # The React Doctor wrappers live with the package they drive, but
+              # agent-quality-gate.test.sh copies and executes the diff wrapper
+              # in a stub repo. Without these two paths a wrapper edit would
+              # skip the suite that proves its branch cleanup.
+              - ui-dashboard/scripts/check-react-doctor-diff.sh
+              - ui-dashboard/scripts/check-react-doctor-score.sh
               - docs/evals/documentation-navigation-*.json
               - .lighthouserc.cjs
               - "**/vitest.hermetic-setup.ts"
@@ -1028,9 +1034,9 @@ jobs:
         # list while tracked and non-ignored source paths remain covered.
         run: node scripts/terraform-fmt-check.test.mjs
       - name: Hermetic Vitest setup consistency
-        run: node scripts/check-hermetic-vitest-setup.mjs
+        run: node scripts/repo-health/check-hermetic-vitest-setup.mjs
       - name: Hermetic Vitest setup consistency suite
-        run: node scripts/check-hermetic-vitest-setup.test.mjs
+        run: node scripts/repo-health/check-hermetic-vitest-setup.test.mjs
       - name: Deviation threshold drift suite
         run: node scripts/check-deviation-threshold-drift.test.mjs
       - name: Agent context checker unit tests

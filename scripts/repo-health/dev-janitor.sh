@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-Usage: scripts/dev-janitor.sh [--apply]
+Usage: scripts/repo-health/dev-janitor.sh [--apply]
 
 Reports (and, with --apply, cleans up) stale local dev-machine disk usage:
 trunk repo caches, the pnpm store, and pruned git worktree metadata. Stale

@@ -85,7 +85,7 @@ import {
   triggerBlockers,
   workflowBlockers,
 } from "./check-sentry-suites-in-ci-core.mjs";
-import { countLines, HARD_CAP } from "./file-size-watchlist.mjs";
+import { countLines, HARD_CAP } from "./repo-health/file-size-watchlist.mjs";
 // The execution-surface invariants (pin/hook ordering, lifecycle-hook rejection,
 // escaping-symlink rejection) live in a sibling module to keep both files under
 // the line cap. Importing it registers its `test()`s in this run, so the single

@@ -119,6 +119,13 @@ scheduled document, for context an agent gets from the directory map in
   passed without checking anything, and a move would have made it do so.
 - The reorganization lands incrementally. Each phase moves one module and sweeps
   its pins, so a break is scoped to one subsystem and one PR.
+- A file whose only consumer is one package leaves `scripts/` instead of getting
+  a subdirectory. P9 moved `check-react-doctor-{diff,score}.sh` to
+  `ui-dashboard/scripts/`. An out-move drops the recursive `scripts/**` safety
+  net, so it re-pins what the net covered: the `rootScripts` paths-filter now
+  names both wrappers, because `agent-quality-gate.test.sh` copies and runs the
+  diff wrapper in a stub repo, and the `.claude/settings.json` allowlist plus
+  its verbatim copy in `check-agent-context.mjs` carry the package path.
 
 ## Evidence
 

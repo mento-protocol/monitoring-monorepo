@@ -17,7 +17,7 @@ garden_lane: agent-entry-points
 ## Scope
 
 `scripts/` contains deploy wrappers, agent quality gates, code-health checks,
-and repo maintenance utilities. 201 files sit flat at the top level today.
+and repo maintenance utilities. 189 files sit flat at the top level today.
 
 ## Target Layout
 
@@ -40,7 +40,7 @@ Until a phase merges, its files are flat.
 | `terraform/`    | P10   | movable Terraform guards and helpers   |
 | `gate/`         | P11   | quality-gate satellites                |
 
-Landed: P1, P7. `lib/` (the shared tier) and
+Landed: P1, P7, P9. `lib/` (the shared tier) and
 `production-infra-identity-contract/` predate the reorganization.
 
 `lib/` holds generic cores carrying no domain policy: `hcl.mjs` (Terraform HCL

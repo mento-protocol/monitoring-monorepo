@@ -1,1 +1,7 @@
 scripts/upstash-mcp-launcher.mjs text eol=lf
+# Before P9 this file declared its co-change pair separator with a raw U+0000,
+# so Git classified it as binary and hid 394 lines of source from every diff.
+# P9 replaced the byte with the `\0` escape. Both paths are pinned as diffable
+# so the move itself, and any later diff spanning it, stays reviewable.
+scripts/code-health-history.mjs diff
+scripts/repo-health/code-health-history.mjs diff
