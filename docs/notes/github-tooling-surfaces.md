@@ -29,7 +29,8 @@ skills link here instead of duplicating it.
 1. `CLAUDE_CODE_REMOTE` is set → Claude cloud session → MCP-first, unless
    the variant passes the full capability gate in step 3 — then gh-first
    applies with `--repo <owner/name>` on PR-scoped calls. This is the same
-   gate `scripts/claude-code-web-setup.sh` and `.claude/babysit-pr.sh` use.
+   gate `scripts/bootstrap/claude-code-web-setup.sh` and `.claude/babysit-pr.sh`
+   use.
 2. Otherwise → local (or Codex Cloud) → gh-first.
 3. The capability gate: a repo-scoped `gh api repos/<owner>/<repo>` call, a
    minimal GraphQL query (`gh api graphql -f query='query{viewer{login}}'`),

@@ -89,7 +89,7 @@ export function RowPanel({
       role="row"
       className={`border-y border-border bg-card pb-[22px] pt-5 ${PEG_BOARD_ROW_PADDING}`}
     >
-      <div role="cell" aria-colspan={9}>
+      <div role="cell" aria-colspan={8}>
         <div className="space-y-2">
           {stale ? (
             <PanelLine tone="warning" text={staleNotice(ageLabel)} />

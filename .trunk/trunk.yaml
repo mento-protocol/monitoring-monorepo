@@ -44,8 +44,9 @@ lint:
         - indexer-envio/pnpm-lock.yaml
         - pnpm-lock.yaml
         # Standalone Cloud Build lockfile for governance-watchdog. The required
-        # Code Quality job runs scripts/pnpm-audit-high-gate.mjs against this
-        # lockfile and applies the path-scoped Discord undici exception there;
+        # Code Quality job runs scripts/supply-chain/pnpm-audit-high-gate.mjs
+        # against this lockfile and applies the path-scoped Discord undici
+        # exception there;
         # OSV ignores are only vulnerability-scoped, so using them here would
         # be too broad.
         - governance-watchdog/pnpm-lock.yaml
@@ -55,7 +56,8 @@ lint:
         # findings with no fix path.
         - alerts/infra/onchain-event-handler/package-lock.json
         # Standalone Cloud Build lockfiles for the alerts handlers. The
-        # required Code Quality job runs scripts/pnpm-audit-high-gate.mjs
+        # required Code Quality job runs
+        # scripts/supply-chain/pnpm-audit-high-gate.mjs
         # against both directly (same duplication as governance-watchdog
         # above), so a ruleset-required check still fails on a high/critical
         # advisory; .github/workflows/supply-chain.yml's pnpm-audit step

@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 /**
- * Fixture-driven tests for scripts/version-skew-check.mjs.
+ * Fixture-driven tests for scripts/supply-chain/version-skew-check.mjs.
  *
  * Each test writes a minimal synthetic workspace and package manifests to a
  * temp directory, then runs the script via spawnSync.
  *
- * Run: node scripts/version-skew-check.test.mjs
+ * Run: node scripts/supply-chain/version-skew-check.test.mjs
  */
 
 import { spawnSync } from "node:child_process";

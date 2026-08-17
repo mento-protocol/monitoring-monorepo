@@ -22,7 +22,7 @@ import {
   verifyUpstashMcpEntrypoint,
 } from "./upstash-mcp-launcher.mjs";
 
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const ESBUILD_VERSION = "0.28.1";
 const ESBUILD_PACKAGE_JSON_SHA256 =
   "d55d1d19fcc5b6079e4a71dd4111340c79c682bc36835ac7058a0c364c7db58a";

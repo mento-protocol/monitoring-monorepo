@@ -61,11 +61,11 @@ export const PEG_TONE_COLOR: Record<PegBoardTone, string> = {
   uncertain: PEG_COLOR.amber,
 };
 
-/** Board grid: Peg · Status · Price · Distance · Primary · Spread · Limit · Breaker · chevron. */
+/** Board grid: Peg · Status · Price · Distance · Primary · Spread · Limit · Breaker. */
 export const PEG_BOARD_GRID =
-  "grid-cols-[96px_78px_76px_158px_128px_92px_100px_82px_28px] gap-[7px] xl:grid-cols-[118px_92px_94px_minmax(180px,1fr)_160px_118px_132px_96px_28px] xl:gap-4";
+  "grid-cols-[100px_80px_78px_168px_134px_96px_104px_84px] gap-[8px] xl:grid-cols-[120px_90px_92px_minmax(220px,1fr)_164px_114px_124px_96px] xl:gap-[14px]";
 /** Compact desktops fit the full board; narrow mobile viewports still scroll. */
-export const PEG_BOARD_MIN_WIDTH = "min-w-[900px] xl:min-w-[1220px]";
+export const PEG_BOARD_MIN_WIDTH = "min-w-[900px] xl:min-w-full";
 export const PEG_BOARD_ROW_PADDING = "px-3 xl:px-[18px]";
 
 /** The row rail spans ±60 bps around target, with the target tick at 50%. */
