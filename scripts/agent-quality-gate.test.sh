@@ -706,11 +706,30 @@ if install_marker_matches "$marker_file" "$marker_changed_hash"; then
 fi
 
 # A missing input set yields an empty hash, which never matches, so the caller
-# rebuilds instead of trusting a marker it cannot verify.
+# rebuilds instead of trusting a marker it cannot verify. Assert that against an
+# absent marker: `cat` of a missing file is also empty, so a matcher without the
+# empty-hash guard would compare "" to "" and report a match.
 marker_empty_hash="$(install_marker_hash_inputs "$marker_scratch/absent" || true)"
 [[ -z "$marker_empty_hash" ]] || fail "install-marker hashed a missing input set"
+if install_marker_matches "$marker_scratch/never-written.sha256" "$marker_empty_hash"; then
+  fail "install-marker matched an empty hash against an absent marker"
+fi
 if install_marker_matches "$marker_file" "$marker_empty_hash"; then
   fail "install-marker matched on an empty hash"
+fi
+
+# An input that cannot be hashed must not silently drop out: a hash that omits
+# the same file on every run still matches its marker, so the guarded work never
+# reruns. Skipped as root, where mode 000 does not deny a read.
+if [[ "$(id -u)" != "0" ]]; then
+  printf 'three\n' > "$marker_scratch/inputs/unreadable.txt"
+  chmod 000 "$marker_scratch/inputs/unreadable.txt"
+  marker_partial_hash="$(install_marker_hash_inputs "$marker_scratch/inputs" || true)"
+  chmod 644 "$marker_scratch/inputs/unreadable.txt"
+  if [[ -n "$marker_partial_hash" ]]; then
+    fail "install-marker returned a hash that omits an unreadable input"
+  fi
+  rm -f "$marker_scratch/inputs/unreadable.txt"
 fi
 
 install_marker_write "$marker_file" ""

@@ -42,7 +42,8 @@ Until a phase merges, its files are flat.
 
 Landed: P1, P2. `lib/` (the shared tier; P7 adds to it) and
 `production-infra-identity-contract/` predate the reorganization. `setup.sh`
-stays flat: the worktree runbooks and eight docs name that exact path.
+stays flat: `.config/wt.toml` runs that exact path as the Worktrunk pre-start
+hook, and eight docs name it.
 
 ## Why Files Stay Flat
 
@@ -83,8 +84,8 @@ Run every item in the PR that moves a file.
 2. `check-agent-quality-gate-package-scripts.sh` — pinned alias map.
 3. `.github/workflows/` — 22 of 32 files, including the filters above.
 4. `.trunk/trunk.yaml` — pre-push hook runs `scripts/agent-quality-gate.sh`.
-5. `.claude/settings.json`, `.codex/hooks.json`, and their verbatim copies and
-   invocation regexes in `check-agent-context.mjs`.
+5. `.claude/settings.json`, `.codex/hooks.json`, `.claude/hooks/session-start.sh`,
+   and the verbatim copies and invocation regexes in `check-agent-context.mjs`.
 6. `.claude/skills/` and `.agents/skills/` — both mirrors.
 7. `docs/notes/quick-commands.md`.
 8. `agent-quality-gate.sh` routing arms — a literal-prefix glob such as

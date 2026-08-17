@@ -45,14 +45,21 @@ install_marker_hash_inputs() {
   # containing a space would be passed as two nonexistent files and silently
   # drop out of the hash. Container checkouts and worktrees can sit under such
   # a path.
+  local input_count
+  input_count="$(wc -l <"$file_list" | tr -d ' ')"
+
   local per_file
   per_file="$(tr '\n' '\0' <"$file_list" | xargs -0 "${hasher[@]}" 2>/dev/null)"
   rm -f "$file_list"
 
-  # No per-file digest at all means every input failed to hash. Hashing that
-  # empty stream would return one stable value for every input state, which is a
-  # marker that always matches. Refuse instead.
+  # Every input must produce a digest line. A file that cannot be hashed — gone
+  # between the listing and the read, or unreadable — would otherwise drop out
+  # silently, and a hash that omits the same file on every run still matches its
+  # marker, so the guarded work never reruns. Refuse instead.
+  local digest_count
+  digest_count="$(printf '%s\n' "$per_file" | grep -c '.' || true)"
   [ -n "$per_file" ] || return 1
+  [ "$digest_count" = "$input_count" ] || return 1
 
   local hash
   hash="$(printf '%s\n' "$per_file" | "${hasher[@]}" | awk '{print $1}')"

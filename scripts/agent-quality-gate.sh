@@ -3700,10 +3700,9 @@ while IFS= read -r path; do
           add_command "pnpm agent:quality-gate:test" "shared install-marker fragment changed"
           ;;
         scripts/setup.sh|scripts/bootstrap/claude-code-web-setup.sh)
-          # The two install-marker consumers. An inverted skip condition or a
-          # marker written before its work is verified passes `bash -n`, so route
-          # the suite that asserts both the fragment's behavior and that these
-          # files still source it.
+          # The two install-marker consumers. The suite pins that both still
+          # source the shared fragment and use its hash, which `bash -n` cannot
+          # see, and re-runs the fragment's own behavioral checks.
           add_command "pnpm agent:quality-gate:test" "install-marker consumer changed"
           ;;
         scripts/check-skills-mirror.sh|scripts/check-skills-mirror.test.sh)
