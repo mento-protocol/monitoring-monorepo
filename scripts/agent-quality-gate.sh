@@ -2685,11 +2685,11 @@ add_root_tooling_package_script_checks() {
   add_command "node scripts/supply-chain/version-skew-check.test.mjs" "$reason"
   add_command "node scripts/supply-chain/override-prune-report.test.mjs" "$reason"
   add_command "node scripts/check-adr-reminder.test.mjs" "$reason"
-  add_command "node scripts/docs-index.test.mjs" "$reason"
+  add_command "node scripts/context/docs-index.test.mjs" "$reason"
   add_command "node scripts/docs-audit.test.mjs" "$reason"
   add_command "node scripts/docs-garden-issue.test.mjs" "$reason"
   add_command "node scripts/docs-navigation-eval.test.mjs" "$reason"
-  add_command "node scripts/agent-context-budget.test.mjs" "$reason"
+  add_command "node scripts/context/agent-context-budget.test.mjs" "$reason"
 }
 
 # Advisory ADR reminder, fed the gate's own base/head + changed-path set so the
@@ -3731,9 +3731,9 @@ while IFS= read -r path; do
         scripts/agent-autoreview.mjs|scripts/agent-autoreview-core.mjs|scripts/agent-autoreview-core.test.mjs|scripts/agent-autoreview-target-guard.test.mjs)
           add_command "pnpm agent:autoreview:test" "agent autoreview helper changed"
           ;;
-        scripts/check-agent-context.mjs|scripts/check-agent-context-helpers.mjs|scripts/check-agent-context.test.mjs)
+        scripts/context/check-agent-context.mjs|scripts/context/check-agent-context-helpers.mjs|scripts/context/check-agent-context.test.mjs)
           add_command "pnpm agent:context-check" "agent context checker changed"
-          add_command "node scripts/check-agent-context.test.mjs" "agent context checker changed"
+          add_command "node scripts/context/check-agent-context.test.mjs" "agent context checker changed"
           ;;
         scripts/mcp/build-upstash-mcp-runtime.mjs|scripts/mcp/render-upstash-mcp-config.mjs|scripts/mcp/upstash-mcp-config.test.mjs|scripts/mcp/upstash-mcp-launcher.mjs)
           add_command "node --test scripts/mcp/upstash-mcp-config.test.mjs" "Upstash MCP transport contract changed"
@@ -3741,7 +3741,7 @@ while IFS= read -r path; do
         scripts/file-size-watchlist.mjs|scripts/file-size-watchlist-issue.mjs|scripts/file-size-watchlist.test.mjs)
           add_command "node --test scripts/file-size-watchlist.test.mjs" "file-size watchlist automation changed"
           ;;
-        scripts/claude-runtime-document-registry.mjs|scripts/docs-index.mjs|scripts/docs-index-helpers.mjs|scripts/docs-index.test.mjs)
+        scripts/context/claude-runtime-document-registry.mjs|scripts/context/docs-index.mjs|scripts/context/docs-index-helpers.mjs|scripts/context/docs-index.test.mjs)
           add_command "pnpm docs:index:test" "documentation catalog helper changed"
           add_command "pnpm docs:index --check" "documentation catalog helper changed"
           add_command "pnpm agent:context-check" "documentation catalog metadata contract changed"
@@ -3762,7 +3762,15 @@ while IFS= read -r path; do
           add_command "pnpm docs:navigation-eval -- --validate docs/evals/documentation-navigation-baseline.json --fixtures docs/evals/documentation-navigation-baseline-fixtures.json" "documentation navigation evaluation changed"
           add_command "pnpm docs:index --check" "documentation navigation evaluation consumes the catalog"
           ;;
-        scripts/agent-context-budget.mjs|scripts/agent-context-budget.test.mjs)
+        scripts/lib/gh-issue-lifecycle.mjs)
+          # The `gh` runner, pagination guard, Documentation Garden workflow
+          # authorization, label bootstrap, and queue-state arbitration behind
+          # both scheduled issue automations. Neither suite covers the other's
+          # consumer, so a shared module belongs in both arms.
+          add_command "pnpm docs:garden:test" "shared GitHub issue lifecycle module changed"
+          add_command "pnpm docs:navigation-eval:test" "shared GitHub issue lifecycle module changed"
+          ;;
+        scripts/context/agent-context-budget.mjs|scripts/context/agent-context-budget.test.mjs)
           add_command "pnpm agent:context-budget:test" "agent context budget helper changed"
           add_command "pnpm agent:context-budget --strict" "agent context budget helper changed"
           ;;

@@ -8,6 +8,7 @@ import jsYaml from "js-yaml";
 import {
   buildDocsGardenIssueSpec,
   DOCS_GARDEN_MARKER,
+  DOCS_GARDEN_PACKET_MARKER_PREFIX,
   mondayForWeekSerial,
   normalizeGithubIssuePages,
   packetMarker,
@@ -18,13 +19,15 @@ import {
   weekSerialForDate,
 } from "./docs-garden-issue-helpers.mjs";
 import {
-  assertAuthorizedGardenWorkflow,
-  ensureLabelsExist,
-  ghPaginate,
   listGithubIssues,
   parseArgs,
   runDocsGardenIssue,
 } from "./docs-garden-issue.mjs";
+import {
+  assertAuthorizedGardenWorkflow,
+  ensureLabelsExist,
+  ghPaginate,
+} from "./lib/gh-issue-lifecycle.mjs";
 
 let passed = 0;
 let failed = 0;
@@ -146,6 +149,14 @@ await test("leading markers round-trip the occurrence identity", () => {
   assert.throws(
     () => parseLeadingDocsGardenMarkers(`${DOCS_GARDEN_MARKER}\ninvalid`),
     /malformed packet marker/,
+  );
+  // A marker whose payload parses to literal null must fail, not read as an
+  // untracked issue: treating it as untracked would hide a live queue item and
+  // let a duplicate through.
+  assert.throws(() =>
+    parseLeadingDocsGardenMarkers(
+      `${DOCS_GARDEN_MARKER}\n${DOCS_GARDEN_PACKET_MARKER_PREFIX}null -->`,
+    ),
   );
 });
 

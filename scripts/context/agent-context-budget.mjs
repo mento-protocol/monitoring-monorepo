@@ -340,7 +340,7 @@ export function parseContextBudgetArgs(argv) {
 }
 
 function usage() {
-  return `Usage: node scripts/agent-context-budget.mjs [--json] [--strict] [--limit BYTES] [--root PATH]
+  return `Usage: node scripts/context/agent-context-budget.mjs [--json] [--strict] [--limit BYTES] [--root PATH]
 
 Report mode always exits zero after a successful scan. --strict exits non-zero
 when the root file, a scoped file, or a root-plus-scoped route exceeds its cap.

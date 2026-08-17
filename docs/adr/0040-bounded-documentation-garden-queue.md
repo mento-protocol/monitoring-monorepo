@@ -108,5 +108,7 @@ Run the documentation garden through a deterministic, issue-only scheduler:
 - `scripts/docs-garden-issue.mjs`
 - `scripts/docs-garden-issue-helpers.mjs`
 - `scripts/docs-garden-issue.test.mjs`
+- `scripts/lib/gh-issue-lifecycle.mjs` — the shared queue-state arbitration and
+  marker parsing this fail-closed recovery depends on
 - `.agents/skills/doc-garden/SKILL.md`
 - `docs/notes/documentation-gardening.md`
