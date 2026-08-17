@@ -10,6 +10,8 @@ type ExactPolicyContext = {
   source: PegSource | null;
 };
 
+const SECONDARY_SOURCE_UNHEALTHY_SECONDS = 30 * 60;
+
 function durationWords(seconds: number): string {
   if (seconds < 60) return `${seconds} ${seconds === 1 ? "second" : "seconds"}`;
   if (seconds < 3_600) {
@@ -51,14 +53,49 @@ function marketName(event: PegAlertEvent): string {
     : `${event.evidence.assetName}/${quote}`;
 }
 
-function pendingSentence(
+function configuredWaitSeconds(
   event: PegAlertEvent,
-  condition = "the condition continued",
+  policy: ExactPolicyContext | null,
+): number | null {
+  if (policy === null) return null;
+  if (event.evidence.rule === "Source Permanently Dead")
+    return policy.asset.policy.permanentlyDeadSeconds;
+  if (event.evidence.rule === "Source Unhealthy") {
+    if (policy.source === null) return null;
+    return policy.source.authority === "secondary"
+      ? SECONDARY_SOURCE_UNHEALTHY_SECONDS
+      : policy.source.policy.pollIntervalSeconds * 2;
+  }
+  if (
+    event.evidence.rule === "Deep-Venue Spread Warning" ||
+    event.evidence.rule === "Structural Saturation Warning"
+  )
+    return policy.asset.policy.warnSustainSeconds;
+  return null;
+}
+
+function configuredWaitSentence(
+  event: PegAlertEvent,
+  policy: ExactPolicyContext | null,
+  condition: string,
 ): string {
-  const seconds = event.evidence.pendingSeconds;
+  const seconds = configuredWaitSeconds(event, policy);
   return seconds === null || seconds <= 0
     ? ""
-    : ` The alert fired after ${condition} for ${durationWords(seconds)}.`;
+    : ` The alert fires after ${condition} for ${durationWords(seconds)}.`;
+}
+
+function sourceWaitSentence(
+  event: PegAlertEvent,
+  policy: ExactPolicyContext | null,
+): string {
+  return configuredWaitSentence(
+    event,
+    policy,
+    event.evidence.rule === "Source Permanently Dead"
+      ? "the source remains unhealthy"
+      : "the problem continues",
+  );
 }
 
 function blindThresholdSentence(
@@ -91,7 +128,7 @@ function unknownSellPriceExplanation(
     event.evidence.failureReason === 18
       ? " The monitor did not classify the cause."
       : " The exact cause was not recorded.";
-  return `${opening}${blindThresholdSentence(event, policy)}${pendingSentence(event)}${causeGap}`;
+  return `${opening}${blindThresholdSentence(event, policy)}${sourceWaitSentence(event, policy)}${causeGap}`;
 }
 
 function stalePriceExplanation(
@@ -102,19 +139,19 @@ function stalePriceExplanation(
   const market = marketName(event);
   const staleAfter = policy?.source?.policy.staleAfterSeconds;
   const blindThreshold = blindThresholdSentence(event, policy);
+  const alertWait = configuredWaitSentence(
+    event,
+    policy,
+    "the data remains too old",
+  );
   if (event.severity === "cleared") {
-    const wait = event.evidence.pendingSeconds;
-    return `A fresh ${source} ${market} price arrived, so the alert cleared.${blindThreshold}${
-      wait === null || wait <= 0
-        ? ""
-        : ` The data had remained too old for ${durationWords(wait)} before the alert fired.`
-    }`;
+    return `A fresh ${source} ${market} price arrived, so the alert cleared.${blindThreshold}${alertWait}`;
   }
   const age =
     staleAfter === undefined
       ? "older than the allowed age"
       : `more than ${durationWords(staleAfter)} old`;
-  return `The latest ${source} ${market} price was ${age}.${blindThreshold}${pendingSentence(event, "the data remained too old")}`;
+  return `The latest ${source} ${market} price was ${age}.${blindThreshold}${alertWait}`;
 }
 
 function sourceFailureExplanation(
@@ -130,7 +167,7 @@ function sourceFailureExplanation(
     SOURCE_FAILURE_EXPLANATIONS[event.evidence.failureReason ?? 0];
   return explanation === undefined
     ? unknownSellPriceExplanation(event, policy)
-    : `${explanation(source, market, event.severity === "cleared")}${blindThresholdSentence(event, policy)}${pendingSentence(event)}`;
+    : `${explanation(source, market, event.severity === "cleared")}${blindThresholdSentence(event, policy)}${sourceWaitSentence(event, policy)}`;
 }
 
 type SourceFailureExplanation = (
@@ -186,13 +223,13 @@ function listingExplanation(
       checks === undefined
         ? ""
         : ` The original alert fired after ${checks} consecutive listing checks reported the market missing.`;
-    return `${event.evidence.sourceName} now reports that it lists the ${marketName(event)} market.${originalWait}${pendingSentence(event)}`;
+    return `${event.evidence.sourceName} now reports that it lists the ${marketName(event)} market.${originalWait}`;
   }
   const confirmation =
     checks === undefined
       ? ""
       : ` The monitor confirmed this across ${checks} consecutive listing checks.`;
-  return `${event.evidence.sourceName} reported that it does not list the ${marketName(event)} market.${confirmation}${pendingSentence(event)}`;
+  return `${event.evidence.sourceName} reported that it does not list the ${marketName(event)} market.${confirmation}`;
 }
 
 function movementExplanation(
@@ -207,7 +244,7 @@ function movementExplanation(
     seconds === undefined
       ? ""
       : ` The rule evaluates new sell-price decisions across a ${durationWords(seconds)} window.`;
-  return `The monitor uses the average price available when selling the monitored amount, not the midpoint between buy and sell prices.${window}${pendingSentence(event)}`;
+  return `The monitor uses the average price available when selling the monitored amount, not the midpoint between buy and sell prices.${window}`;
 }
 
 type RuleExplanation = (
@@ -226,28 +263,28 @@ const RULE_EXPLANATIONS: Record<PegAlertRuleKind, RuleExplanation> = {
   "Deep-Venue Downside Critical": movementExplanation,
   "Downside Warning": movementExplanation,
   "Premium Warning": movementExplanation,
-  "Deep-Venue Spread Warning": (event) =>
-    `The gap between the best available buy and sell prices exceeded the allowed spread.${pendingSentence(event)}`,
-  "Structural Saturation Warning": (event) =>
-    `Pool flow stayed close to the trading limit.${pendingSentence(event)}`,
-  "Heartbeat Missing": (event, policy) => {
+  "Deep-Venue Spread Warning": (event, policy) =>
+    `The gap between the best available buy and sell prices exceeded the allowed spread.${configuredWaitSentence(event, policy, "the gap remains too wide")}`,
+  "Structural Saturation Warning": (event, policy) =>
+    `Pool flow stayed close to the trading limit.${configuredWaitSentence(event, policy, "pool flow remains close to the trading limit")}`,
+  "Heartbeat Missing": (_event, policy) => {
     const freshness = policy?.asset.policy.freshnessGraceSeconds;
     const condition =
       freshness === undefined
         ? "The Peg monitor did not complete a new poll within its allowed delay."
         : `The Peg monitor did not complete a new poll within ${durationWords(freshness)}.`;
-    return `${condition}${pendingSentence(event)}`;
+    return condition;
   },
-  "Indexed Pool Unreachable": (event) =>
-    `The monitor could not verify the indexed pool that supplies trading-limit and flow data. Current market prices remain separate.${pendingSentence(event)}`,
+  "Indexed Pool Unreachable": () =>
+    "The monitor could not verify the indexed pool that supplies trading-limit and flow data. Current market prices remain separate.",
   "Policy Rollover Stuck": (event, _policy, monitoring) =>
     `${
       event.evidence.policyVersion === monitoring.approvedActivePolicyVersion
         ? `The Peg monitor did not load the approved policy within ${durationWords(monitoring.rolloverAckExpectedSeconds)}.`
         : "The Peg monitor did not load the approved policy within the allowed time."
-    }${pendingSentence(event)}`,
-  Unknown: (event) =>
-    `The alert history did not contain a recognized Peg rule or a precise cause.${pendingSentence(event)}`,
+    }`,
+  Unknown: () =>
+    "The alert history did not contain a recognized Peg rule or a precise cause.",
 };
 
 export function pegAlertExplanation(

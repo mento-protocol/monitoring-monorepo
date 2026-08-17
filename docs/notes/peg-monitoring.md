@@ -126,12 +126,16 @@ Canonical display-name maps preserve asset and provider casing such as `KESm`
 and `VALR` across the dashboard, Grafana, and notifications.
 
 Each dashboard alert row has a collapsed `Details` disclosure. The disclosure
-explains the fixed condition and its actual Pending-to-Alerting wait. It reads a
-threshold from the decision package only when the event and package use the
-same policy version. Older events without cause telemetry say that the exact
-cause was not recorded. The history backend reads one extra seven-day context
-window to pair transitions that began before the displayed window. It emits
-only alerts that fired or cleared during the displayed seven days.
+explains the fixed condition and its configured wait. It reads thresholds from
+the decision package only when the event and package use the same policy
+version. Older events without cause telemetry say that the exact cause was not
+recorded. The history backend reads only fired and resolved transitions from
+the displayed seven days. It does not read Pending or canceled transitions.
+When a matching fired transition is available, a resolved row keeps its cause
+and shows how long the alert stayed active. A resolution remains visible
+without that active time when the alert fired before the displayed window. Its
+details can still show the configured wait when the event and current policy
+versions match.
 
 Grafana state history stores the evaluated query values for each transition.
 Every Peg rule therefore includes two helper queries, `Reason` and

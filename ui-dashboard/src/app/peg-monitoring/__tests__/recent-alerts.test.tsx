@@ -39,7 +39,6 @@ const events: PegAlertEvent[] = [
       quoteCurrency: "ZAR",
       policyVersion: "kesm-v1",
       failureReason: null,
-      pendingSeconds: null,
     },
   },
   {
@@ -57,7 +56,6 @@ const events: PegAlertEvent[] = [
       quoteCurrency: "EUR",
       policyVersion: monitoring.producedPolicyVersion,
       failureReason: null,
-      pendingSeconds: 600,
     },
   },
 ];
@@ -155,7 +153,7 @@ describe("RecentAlerts", () => {
       "The gap between the best available buy and sell prices exceeded the allowed spread.",
     );
     expect(details.textContent).toContain(
-      "The alert fired after the condition continued for 10 minutes.",
+      "The alert fires after the gap remains too wide for 10 minutes.",
     );
   });
 
@@ -190,14 +188,9 @@ describe("RecentAlerts", () => {
 });
 
 describe("pegAlertExplanation", () => {
-  it("shows the measured alert wait when the event policy is not current", () => {
-    const event: PegAlertEvent = {
-      ...events[0]!,
-      evidence: { ...events[0]!.evidence, pendingSeconds: 420 },
-    };
-
-    expect(pegAlertExplanation(event, monitoring)).toBe(
-      "The monitor uses the average price available when selling the monitored amount, not the midpoint between buy and sell prices. The alert fired after the condition continued for 7 minutes.",
+  it("does not apply current thresholds to a historical policy", () => {
+    expect(pegAlertExplanation(events[0]!, monitoring)).toBe(
+      "The monitor uses the average price available when selling the monitored amount, not the midpoint between buy and sell prices.",
     );
   });
 
@@ -217,12 +210,11 @@ describe("pegAlertExplanation", () => {
         quoteCurrency: "EUR",
         policyVersion: monitoring.producedPolicyVersion,
         failureReason: 6,
-        pendingSeconds: 1_800,
       },
     };
 
     expect(pegAlertExplanation(staleEvent, monitoring)).toBe(
-      "The latest Kraken EUROP/EUR price was more than 5 minutes old. The alert fired after the data remained too old for 30 minutes.",
+      "The latest Kraken EUROP/EUR price was more than 5 minutes old. The alert fires after the data remains too old for 30 minutes.",
     );
     expect(
       pegAlertExplanation(
@@ -234,7 +226,7 @@ describe("pegAlertExplanation", () => {
         monitoring,
       ),
     ).toBe(
-      "A fresh Kraken EUROP/EUR price arrived, so the alert cleared. The data had remained too old for 30 minutes before the alert fired.",
+      "A fresh Kraken EUROP/EUR price arrived, so the alert cleared. The alert fires after the data remains too old for 30 minutes.",
     );
   });
 
@@ -254,7 +246,6 @@ describe("pegAlertExplanation", () => {
         quoteCurrency: "EUR",
         policyVersion: monitoring.producedPolicyVersion,
         failureReason: null,
-        pendingSeconds: null,
       },
     };
 
@@ -295,7 +286,6 @@ describe("pegAlertExplanation", () => {
           quoteCurrency: "EUR",
           policyVersion: monitoring.producedPolicyVersion,
           failureReason: 1,
-          pendingSeconds: null,
         },
       };
 
@@ -321,7 +311,6 @@ describe("pegAlertExplanation", () => {
         quoteCurrency: "EUR",
         policyVersion: monitoring.producedPolicyVersion,
         failureReason: 6,
-        pendingSeconds: null,
       },
     };
 
@@ -346,12 +335,11 @@ describe("pegAlertExplanation", () => {
         quoteCurrency: "EUR",
         policyVersion: monitoring.producedPolicyVersion,
         failureReason: 18,
-        pendingSeconds: 300,
       },
     };
 
     expect(pegAlertExplanation(event, monitoring)).toBe(
-      "The monitor could not calculate a current Bitvavo sell price for the monitored amount. The alert fired after the condition continued for 5 minutes. The monitor did not classify the cause.",
+      "The monitor could not calculate a current Bitvavo sell price for the monitored amount. The alert fires after the problem continues for 1 minute. The monitor did not classify the cause.",
     );
   });
 
@@ -371,7 +359,6 @@ describe("pegAlertExplanation", () => {
         quoteCurrency: null,
         policyVersion: monitoring.approvedActivePolicyVersion,
         failureReason: null,
-        pendingSeconds: null,
       },
     };
 
@@ -407,12 +394,11 @@ describe("pegAlertExplanation", () => {
         quoteCurrency: "EUR",
         policyVersion: monitoring.producedPolicyVersion,
         failureReason: 17,
-        pendingSeconds: null,
       },
     };
 
     expect(pegAlertExplanation(event, monitoring)).toBe(
-      "The Peg monitor supports Bitvavo again.",
+      "The Peg monitor supports Bitvavo again. The alert fires after the problem continues for 1 minute.",
     );
     expect(
       pegAlertExplanation(
@@ -422,7 +408,9 @@ describe("pegAlertExplanation", () => {
         },
         monitoring,
       ),
-    ).toBe("Bitvavo now reports that it lists the EUROP/EUR market.");
+    ).toBe(
+      "Bitvavo now reports that it lists the EUROP/EUR market. The alert fires after the problem continues for 1 minute.",
+    );
     expect(
       pegAlertExplanation(
         {

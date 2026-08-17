@@ -33,7 +33,6 @@ type PegAlertEvidence = {
   quoteCurrency: string | null;
   policyVersion: string;
   failureReason: number | null;
-  pendingSeconds: number | null;
 };
 
 export type PegAlertEvent = {
