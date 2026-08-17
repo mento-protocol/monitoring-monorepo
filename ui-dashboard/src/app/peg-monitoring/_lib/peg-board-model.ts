@@ -63,13 +63,10 @@ export const PEG_TONE_COLOR: Record<PegBoardTone, string> = {
 
 /** Board grid: Peg · Status · Price · Distance · Primary · Spread · Limit · Breaker · chevron. */
 export const PEG_BOARD_GRID =
-  "grid-cols-[118px_92px_94px_1fr_160px_118px_132px_96px_28px] gap-4";
-/** Sum of the fixed tracks plus gaps, so the 1fr distance column keeps its rail. */
-// Fixed columns + gaps + row padding total 1,002px, so anything at or below
-// that starves the 1fr distance column; 1,220px leaves it the ~215px the rail
-// plus an un-truncated "31.2 bps below" label need. Below this the wrapper's
-// overflow-x-auto scrolls instead of crushing cells.
-export const PEG_BOARD_MIN_WIDTH = "min-w-[1220px]";
+  "grid-cols-[96px_78px_76px_158px_128px_92px_100px_82px_28px] gap-[7px] xl:grid-cols-[118px_92px_94px_minmax(180px,1fr)_160px_118px_132px_96px_28px] xl:gap-4";
+/** Compact desktops fit the full board; narrow mobile viewports still scroll. */
+export const PEG_BOARD_MIN_WIDTH = "min-w-[900px] xl:min-w-[1220px]";
+export const PEG_BOARD_ROW_PADDING = "px-3 xl:px-[18px]";
 
 /** The row rail spans ±60 bps around target, with the target tick at 50%. */
 export const PEG_RAIL_SCALE_BPS = 60;

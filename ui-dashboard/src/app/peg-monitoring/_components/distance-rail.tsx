@@ -32,7 +32,7 @@ export function DistanceRail({
       role="img"
       aria-label={ariaLabel}
       data-testid={testId}
-      className="relative block h-2 w-[120px] shrink-0"
+      className="relative block h-2 w-[72px] shrink-0 xl:w-[120px]"
       style={{ background: PEG_RAIL_GRADIENT }}
     >
       <span
@@ -94,7 +94,7 @@ function OffScaleMarker({
       <span
         aria-hidden="true"
         className={`absolute top-1/2 -translate-y-1/2 text-[11px] leading-none ${
-          below ? "-left-3.5" : "-right-3.5"
+          below ? "left-0 xl:-left-3.5" : "right-0 xl:-right-3.5"
         }`}
         style={{ color: PEG_COLOR.redText }}
       >
