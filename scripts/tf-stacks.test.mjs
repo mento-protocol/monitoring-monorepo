@@ -16,7 +16,7 @@ import "./deploy-staging-contract.test.mjs";
 import "./production-infra-identity-contract/index.test.mjs";
 import "./sentry-provider-contract.test.mjs";
 import "./check-peg-policy-publication.test.mjs";
-import "./check-metrics-bridge-template-plan.test.mjs";
+import "./terraform/check-metrics-bridge-template-plan.test.mjs";
 
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -1566,7 +1566,9 @@ for (const stack of registry.stacks) {
     `${stack.id} must react to wrapper edits`,
   );
   assert(
-    stack.changedPathPatterns.includes("scripts/terraform-fmt-check.mjs"),
+    stack.changedPathPatterns.includes(
+      "scripts/terraform/terraform-fmt-check.mjs",
+    ),
     `${stack.id} must react to format-helper edits`,
   );
 }
