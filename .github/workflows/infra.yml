@@ -26,9 +26,10 @@ on:
       # Shared parsing cores (ADR 0064) that sit outside the prefix above.
       - scripts/lib/hcl.mjs
       - scripts/lib/workflow-yaml.mjs
-      # Modules the peg registry integrity checker imports. The stack registry
-      # counts them as Peg policy publication inputs, so this filter has to be
-      # able to reach that stack inventory.
+      # The peg registry integrity checker and the modules it imports. The stack
+      # registry counts all three as Peg policy publication inputs, so this
+      # filter has to be able to reach that inventory.
+      - scripts/alerts/check-peg-registry-integrity.mjs
       - scripts/alerts/check-peg-registry-integrity-lineage.mjs
       - scripts/lib/peg-policy-digest.mjs
       - scripts/terraform-fmt-check.mjs
@@ -63,9 +64,10 @@ on:
       # Shared parsing cores (ADR 0064) that sit outside the prefix above.
       - scripts/lib/hcl.mjs
       - scripts/lib/workflow-yaml.mjs
-      # Modules the peg registry integrity checker imports. The stack registry
-      # counts them as Peg policy publication inputs, so this filter has to be
-      # able to reach that stack inventory.
+      # The peg registry integrity checker and the modules it imports. The stack
+      # registry counts all three as Peg policy publication inputs, so this
+      # filter has to be able to reach that inventory.
+      - scripts/alerts/check-peg-registry-integrity.mjs
       - scripts/alerts/check-peg-registry-integrity-lineage.mjs
       - scripts/lib/peg-policy-digest.mjs
       - scripts/terraform-fmt-check.mjs
