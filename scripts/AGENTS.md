@@ -17,7 +17,7 @@ garden_lane: agent-entry-points
 ## Scope
 
 `scripts/` contains deploy wrappers, agent quality gates, code-health checks,
-and repo maintenance utilities. 198 files sit flat at the top level today.
+and repo maintenance utilities. 196 files sit flat at the top level today.
 
 ## Target Layout
 
@@ -26,19 +26,19 @@ subdirectories here. Each lands in one PR across phases P1–P13 of the scripts
 reorganization ([issue 1877](https://github.com/mento-protocol/monitoring-monorepo/issues/1877)).
 Until a phase merges, its files are flat.
 
-| Directory       | Phase | Holds                                       |
-| --------------- | ----- | ------------------------------------------- |
-| `workflows/`    | P1    | scripts backing Actions workflow jobs       |
-| `bootstrap/`    | P2    | container and hosted-session setup          |
-| `context/`      | P3    | agent context, budget, skill mirrors        |
-| `docs/`         | P4    | catalog, audit, garden, nav eval            |
-| `pr/`           | P5    | PR and issue state projections              |
-| `supply-chain/` | P6    | lockfile, audit, pin, skew gates            |
-| `mcp/`          | P6    | MCP broker, launcher, config rendering      |
-| `alerts/`       | P8    | alert-rule lint, peg-policy checks          |
-| `repo-health/`  | P9    | code-health, file-size, lint wrappers       |
-| `terraform/`    | P10   | movable Terraform guards and helpers        |
-| `gate/`         | P11   | quality-gate satellites                     |
+| Directory       | Phase | Holds                                  |
+| --------------- | ----- | -------------------------------------- |
+| `workflows/`    | P1    | scripts backing Actions workflow jobs  |
+| `bootstrap/`    | P2    | container and hosted-session setup     |
+| `context/`      | P3    | agent context, budget, skill mirrors   |
+| `docs/`         | P4    | catalog, audit, garden, nav eval       |
+| `pr/`           | P5    | PR and issue state projections         |
+| `supply-chain/` | P6    | lockfile, audit, pin, skew gates       |
+| `mcp/`          | P6    | MCP broker, launcher, config rendering |
+| `alerts/`       | P8    | alert-rule lint, peg-policy checks     |
+| `repo-health/`  | P9    | code-health, file-size, lint wrappers  |
+| `terraform/`    | P10   | movable Terraform guards and helpers   |
+| `gate/`         | P11   | quality-gate satellites                |
 
 Landed: P1, P2. `lib/` (the shared tier; P7 adds to it) and
 `production-infra-identity-contract/` predate the reorganization. `setup.sh`

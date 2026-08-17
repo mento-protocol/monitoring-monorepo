@@ -2372,6 +2372,14 @@ run_gate "scripts/lib/install-marker.sh"
 assert_contains "- bash -n scripts/lib/install-marker.sh (shell script changed)"
 assert_contains "- pnpm agent:quality-gate:test (shared install-marker fragment changed)"
 
+run_gate "scripts/setup.sh"
+assert_contains "- bash -n scripts/setup.sh (shell script changed)"
+assert_contains "- pnpm agent:quality-gate:test (install-marker consumer changed)"
+
+run_gate "scripts/bootstrap/claude-code-web-setup.sh"
+assert_contains "- bash -n scripts/bootstrap/claude-code-web-setup.sh (shell script changed)"
+assert_contains "- pnpm agent:quality-gate:test (install-marker consumer changed)"
+
 run_gate "scripts/check-react-doctor-diff.sh"
 assert_contains "- bash -n scripts/check-react-doctor-diff.sh (shell script changed)"
 assert_contains "- pnpm agent:quality-gate:test (agent quality gate mapping changed)"
