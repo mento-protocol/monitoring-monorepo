@@ -691,10 +691,10 @@ validator_repo="$(mktemp -d)"
     "pr:feedback-state:test": "node scripts/pr-feedback-state.test.mjs",
     "pr:ready-state": "node scripts/pr-ready-state.mjs",
     "pr:ready-state:test": "node scripts/pr-ready-state.test.mjs",
-    "lockfile:lint": "node scripts/lockfile-lint.mjs",
-    "lockfile:lint:test": "node scripts/lockfile-lint.test.mjs",
-    "skew:check": "node scripts/version-skew-check.mjs",
-    "skew:check:test": "node scripts/version-skew-check.test.mjs"
+    "lockfile:lint": "node scripts/supply-chain/lockfile-lint.mjs",
+    "lockfile:lint:test": "node scripts/supply-chain/lockfile-lint.test.mjs",
+    "skew:check": "node scripts/supply-chain/version-skew-check.mjs",
+    "skew:check:test": "node scripts/supply-chain/version-skew-check.test.mjs"
   }
 }
 JSON
@@ -908,10 +908,10 @@ package_json_repo="$(mktemp -d)"
     "pr:feedback-state:test": "node scripts/pr-feedback-state.test.mjs",
     "pr:ready-state": "node scripts/pr-ready-state.mjs",
     "pr:ready-state:test": "node scripts/pr-ready-state.test.mjs",
-    "lockfile:lint": "node scripts/lockfile-lint.mjs",
-    "lockfile:lint:test": "node scripts/lockfile-lint.test.mjs",
-    "skew:check": "node scripts/version-skew-check.mjs",
-    "skew:check:test": "node scripts/version-skew-check.test.mjs"
+    "lockfile:lint": "node scripts/supply-chain/lockfile-lint.mjs",
+    "lockfile:lint:test": "node scripts/supply-chain/lockfile-lint.test.mjs",
+    "skew:check": "node scripts/supply-chain/version-skew-check.mjs",
+    "skew:check:test": "node scripts/supply-chain/version-skew-check.test.mjs"
   }
 }
 JSON
@@ -937,8 +937,8 @@ assert_contains "- node scripts/docs-navigation-eval.test.mjs (root package tool
 assert_contains "- node scripts/pr-feedback-state.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/pr-ready-state.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/tf-stacks.test.mjs (root package tooling script changed)"
-assert_contains "- node scripts/lockfile-lint.test.mjs (root package tooling script changed)"
-assert_contains "- node scripts/version-skew-check.test.mjs (root package tooling script changed)"
+assert_contains "- node scripts/supply-chain/lockfile-lint.test.mjs (root package tooling script changed)"
+assert_contains "- node scripts/supply-chain/version-skew-check.test.mjs (root package tooling script changed)"
 assert_not_contains "- pnpm agent:quality-gate:test"
 assert_not_contains "- pnpm install --frozen-lockfile"
 assert_not_contains "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen"
@@ -972,10 +972,10 @@ dedupe_quality_gate_alias_repo="$(mktemp -d)"
     "pr:feedback-state:test": "node scripts/pr-feedback-state.test.mjs",
     "pr:ready-state": "node scripts/pr-ready-state.mjs",
     "pr:ready-state:test": "node scripts/pr-ready-state.test.mjs",
-    "lockfile:lint": "node scripts/lockfile-lint.mjs",
-    "lockfile:lint:test": "node scripts/lockfile-lint.test.mjs",
-    "skew:check": "node scripts/version-skew-check.mjs",
-    "skew:check:test": "node scripts/version-skew-check.test.mjs"
+    "lockfile:lint": "node scripts/supply-chain/lockfile-lint.mjs",
+    "lockfile:lint:test": "node scripts/supply-chain/lockfile-lint.test.mjs",
+    "skew:check": "node scripts/supply-chain/version-skew-check.mjs",
+    "skew:check:test": "node scripts/supply-chain/version-skew-check.test.mjs"
   }
 }
 JSON
@@ -1022,10 +1022,10 @@ lockfile_script_repo="$(mktemp -d)"
     "pr:feedback-state:test": "node scripts/pr-feedback-state.test.mjs",
     "pr:ready-state": "node scripts/pr-ready-state.mjs",
     "pr:ready-state:test": "node scripts/pr-ready-state.test.mjs",
-    "lockfile:lint": "node scripts/lockfile-lint.mjs",
-    "lockfile:lint:test": "node scripts/lockfile-lint.test.mjs",
-    "skew:check": "node scripts/version-skew-check.mjs",
-    "skew:check:test": "node scripts/version-skew-check.test.mjs"
+    "lockfile:lint": "node scripts/supply-chain/lockfile-lint.mjs",
+    "lockfile:lint:test": "node scripts/supply-chain/lockfile-lint.test.mjs",
+    "skew:check": "node scripts/supply-chain/version-skew-check.mjs",
+    "skew:check:test": "node scripts/supply-chain/version-skew-check.test.mjs"
   }
 }
 JSON
@@ -1034,7 +1034,7 @@ JSON
   node - <<'NODE'
 const fs = require("fs");
 const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
-pkg.scripts["lockfile:lint:test"] = "node scripts/lockfile-lint.test.mjs --fixture";
+pkg.scripts["lockfile:lint:test"] = "node scripts/supply-chain/lockfile-lint.test.mjs --fixture";
 fs.writeFileSync("package.json", `${JSON.stringify(pkg, null, 2)}\n`);
 NODE
   "$repo_root/scripts/agent-quality-gate.sh" --base HEAD > "$output_file"
@@ -1049,8 +1049,8 @@ assert_contains "- node scripts/agent-issue-board.test.mjs (root package tooling
 assert_contains "- node scripts/pr-feedback-state.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/pr-ready-state.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/tf-stacks.test.mjs (root package tooling script changed)"
-assert_contains "- node scripts/lockfile-lint.test.mjs (root package tooling script changed)"
-assert_contains "- node scripts/version-skew-check.test.mjs (root package tooling script changed)"
+assert_contains "- node scripts/supply-chain/lockfile-lint.test.mjs (root package tooling script changed)"
+assert_contains "- node scripts/supply-chain/version-skew-check.test.mjs (root package tooling script changed)"
 assert_not_contains "- pnpm install --frozen-lockfile"
 assert_not_contains "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen"
 assert_not_contains "- pnpm --filter @mento-protocol/ui-dashboard lint"
@@ -1082,10 +1082,10 @@ pr_ready_state_script_repo="$(mktemp -d)"
     "pr:feedback-state:test": "node scripts/pr-feedback-state.test.mjs",
     "pr:ready-state": "node scripts/pr-ready-state.mjs",
     "pr:ready-state:test": "node scripts/pr-ready-state.test.mjs",
-    "lockfile:lint": "node scripts/lockfile-lint.mjs",
-    "lockfile:lint:test": "node scripts/lockfile-lint.test.mjs",
-    "skew:check": "node scripts/version-skew-check.mjs",
-    "skew:check:test": "node scripts/version-skew-check.test.mjs"
+    "lockfile:lint": "node scripts/supply-chain/lockfile-lint.mjs",
+    "lockfile:lint:test": "node scripts/supply-chain/lockfile-lint.test.mjs",
+    "skew:check": "node scripts/supply-chain/version-skew-check.mjs",
+    "skew:check:test": "node scripts/supply-chain/version-skew-check.test.mjs"
   }
 }
 JSON
@@ -1109,8 +1109,8 @@ assert_contains "- node scripts/agent-issue-board.test.mjs (root package tooling
 assert_contains "- node scripts/pr-feedback-state.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/pr-ready-state.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/tf-stacks.test.mjs (root package tooling script changed)"
-assert_contains "- node scripts/lockfile-lint.test.mjs (root package tooling script changed)"
-assert_contains "- node scripts/version-skew-check.test.mjs (root package tooling script changed)"
+assert_contains "- node scripts/supply-chain/lockfile-lint.test.mjs (root package tooling script changed)"
+assert_contains "- node scripts/supply-chain/version-skew-check.test.mjs (root package tooling script changed)"
 assert_not_contains "- pnpm install --frozen-lockfile"
 assert_not_contains "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen"
 assert_not_contains "- pnpm --filter @mento-protocol/ui-dashboard lint"
@@ -1964,13 +1964,13 @@ assert_raw_contains "- pnpm --filter @mento-protocol/alerts-onchain-event-handle
 assert_not_contains "- pnpm --filter @mento-protocol/alerts-onchain-event-handler test:coverage"
 
 run_gate "alerts/infra/onchain-event-handler/pnpm-workspace.yaml"
-assert_contains "- node --test scripts/alerts-uuid-overrides.test.mjs (alerts uuid override policy changed)"
+assert_contains "- node --test scripts/supply-chain/alerts-uuid-overrides.test.mjs (alerts uuid override policy changed)"
 
 run_gate "alerts/infra/oncall-announcer/pnpm-workspace.yaml"
-assert_contains "- node --test scripts/alerts-uuid-overrides.test.mjs (alerts uuid override policy changed)"
+assert_contains "- node --test scripts/supply-chain/alerts-uuid-overrides.test.mjs (alerts uuid override policy changed)"
 
-run_gate "scripts/alerts-uuid-overrides.test.mjs"
-assert_contains "- node --test scripts/alerts-uuid-overrides.test.mjs (alerts uuid override contract changed)"
+run_gate "scripts/supply-chain/alerts-uuid-overrides.test.mjs"
+assert_contains "- node --test scripts/supply-chain/alerts-uuid-overrides.test.mjs (alerts uuid override contract changed)"
 
 run_gate "alerts/infra/onchain-event-handler/src/safe-abi.json"
 assert_contains "- pnpm exec turbo run lint --filter=@mento-protocol/alerts-onchain-event-handler --cache=local:rw (Safe ABI changed (handler imports it))"
@@ -3587,25 +3587,25 @@ assert_contains "- pnpm agent:context-budget --strict (agent instruction budget 
 run_gate ".codex/config.toml"
 assert_contains "- agent-context"
 assert_contains "- pnpm agent:context-budget --strict (agent instruction budget input changed)"
-assert_contains "- node --test scripts/upstash-mcp-config.test.mjs (Upstash MCP transport contract changed)"
+assert_contains "- node --test scripts/mcp/upstash-mcp-config.test.mjs (Upstash MCP transport contract changed)"
 
 run_gate ".codex/upstash-mcp.example.toml"
-assert_contains "- node --test scripts/upstash-mcp-config.test.mjs (Upstash MCP transport contract changed)"
+assert_contains "- node --test scripts/mcp/upstash-mcp-config.test.mjs (Upstash MCP transport contract changed)"
 
 run_gate ".gitattributes"
-assert_contains "- node --test scripts/upstash-mcp-config.test.mjs (Upstash MCP transport contract changed)"
+assert_contains "- node --test scripts/mcp/upstash-mcp-config.test.mjs (Upstash MCP transport contract changed)"
 
 run_gate ".agents/skills/forensic-report/references/upload.md"
-assert_contains "- node --test scripts/upstash-mcp-config.test.mjs (Upstash MCP transport contract changed)"
+assert_contains "- node --test scripts/mcp/upstash-mcp-config.test.mjs (Upstash MCP transport contract changed)"
 
 run_gate "docs/notes/upstash-mcp-operator.md"
-assert_contains "- node --test scripts/upstash-mcp-config.test.mjs (Upstash MCP transport contract changed)"
+assert_contains "- node --test scripts/mcp/upstash-mcp-config.test.mjs (Upstash MCP transport contract changed)"
 
 run_gate "terraform/variables.tf"
-assert_contains "- node --test scripts/upstash-mcp-config.test.mjs (Upstash MCP transport contract changed)"
+assert_contains "- node --test scripts/mcp/upstash-mcp-config.test.mjs (Upstash MCP transport contract changed)"
 
 run_gate "pnpm-lock.yaml"
-assert_contains "- node --test scripts/upstash-mcp-config.test.mjs (Upstash MCP transport contract changed)"
+assert_contains "- node --test scripts/mcp/upstash-mcp-config.test.mjs (Upstash MCP transport contract changed)"
 
 # Any docs markdown may carry canonical: true frontmatter (discovery in
 # check-agent-context.mjs), so a discovered doc path must route through the
@@ -3734,11 +3734,36 @@ assert_contains "- pnpm --filter @mento-protocol/metrics-bridge lint (ESLint bas
 run_gate "scripts/eslint-baseline-diff.test.mjs"
 assert_contains "- node scripts/eslint-baseline-diff.test.mjs (ESLint baseline wrapper test changed)"
 
-run_gate "scripts/lockfile-lint.mjs"
+run_gate "scripts/supply-chain/lockfile-lint.mjs"
 assert_contains "- pnpm lockfile:lint:test (lockfile lint helper changed)"
 
-run_gate "scripts/lockfile-lint.test.mjs"
+run_gate "scripts/supply-chain/lockfile-lint.test.mjs"
 assert_contains "- pnpm lockfile:lint:test (lockfile lint helper changed)"
+
+# The two gate modules lockfile-lint.mjs delegates to.
+run_gate "scripts/supply-chain/lockfile-lint-registry-sources.mjs"
+assert_contains "- pnpm lockfile:lint:test (lockfile lint helper changed)"
+
+run_gate "scripts/supply-chain/lockfile-lint-override-ranges.mjs"
+assert_contains "- pnpm lockfile:lint:test (lockfile lint helper changed)"
+
+# The shared override selector parser routes BOTH readers: the CI-failing
+# lockfile-lint gate and the never-failing override prune advisor.
+run_gate "scripts/lib/pnpm-override-selector.mjs"
+assert_contains "- node --test scripts/lib/pnpm-override-selector.test.mjs (shared pnpm override selector parser changed)"
+assert_contains "- pnpm lockfile:lint:test (shared pnpm override selector parser changed)"
+assert_contains "- pnpm override:prune-report:test (shared pnpm override selector parser changed)"
+
+run_gate "scripts/lib/pnpm-override-selector.test.mjs"
+assert_contains "- node --test scripts/lib/pnpm-override-selector.test.mjs (shared pnpm override selector parser changed)"
+assert_contains "- pnpm lockfile:lint:test (shared pnpm override selector parser changed)"
+assert_contains "- pnpm override:prune-report:test (shared pnpm override selector parser changed)"
+
+run_gate "scripts/supply-chain/override-prune-report.mjs"
+assert_contains "- pnpm override:prune-report:test (override prune report helper changed)"
+
+run_gate "scripts/supply-chain/pnpm-audit-high-gate.mjs"
+assert_contains "- node scripts/supply-chain/pnpm-audit-high-gate.test.mjs (pnpm audit high gate changed)"
 
 run_gate "scripts/sentry-triage-digest.mjs"
 assert_contains "- pnpm sentry:digest:test (Sentry triage digest helper changed)"
@@ -4047,10 +4072,10 @@ assert_contains "- pnpm issue:board:test (agent issue board helper changed)"
 run_gate "scripts/agent-issue-board.test.mjs"
 assert_contains "- pnpm issue:board:test (agent issue board helper changed)"
 
-run_gate "scripts/version-skew-check.mjs"
+run_gate "scripts/supply-chain/version-skew-check.mjs"
 assert_contains "- pnpm skew:check:test (version skew checker changed)"
 
-run_gate "scripts/version-skew-check.test.mjs"
+run_gate "scripts/supply-chain/version-skew-check.test.mjs"
 assert_contains "- pnpm skew:check:test (version skew checker changed)"
 
 run_gate "scripts/check-hermetic-vitest-setup.mjs"
@@ -4139,21 +4164,21 @@ run_gate "scripts/check-agent-context.test.mjs"
 assert_contains "- pnpm agent:context-check (agent context checker changed)"
 assert_contains "- node scripts/check-agent-context.test.mjs (agent context checker changed)"
 
-run_gate "scripts/build-upstash-mcp-runtime.mjs"
+run_gate "scripts/mcp/build-upstash-mcp-runtime.mjs"
 assert_contains "- pnpm lint:scripts (root build script changed)"
-assert_contains "- node --test scripts/upstash-mcp-config.test.mjs (Upstash MCP transport contract changed)"
+assert_contains "- node --test scripts/mcp/upstash-mcp-config.test.mjs (Upstash MCP transport contract changed)"
 
-run_gate "scripts/upstash-mcp-config.test.mjs"
+run_gate "scripts/mcp/upstash-mcp-config.test.mjs"
 assert_contains "- pnpm lint:scripts (root build script changed)"
-assert_contains "- node --test scripts/upstash-mcp-config.test.mjs (Upstash MCP transport contract changed)"
+assert_contains "- node --test scripts/mcp/upstash-mcp-config.test.mjs (Upstash MCP transport contract changed)"
 
-run_gate "scripts/upstash-mcp-launcher.mjs"
+run_gate "scripts/mcp/upstash-mcp-launcher.mjs"
 assert_contains "- pnpm lint:scripts (root build script changed)"
-assert_contains "- node --test scripts/upstash-mcp-config.test.mjs (Upstash MCP transport contract changed)"
+assert_contains "- node --test scripts/mcp/upstash-mcp-config.test.mjs (Upstash MCP transport contract changed)"
 
-run_gate "scripts/render-upstash-mcp-config.mjs"
+run_gate "scripts/mcp/render-upstash-mcp-config.mjs"
 assert_contains "- pnpm lint:scripts (root build script changed)"
-assert_contains "- node --test scripts/upstash-mcp-config.test.mjs (Upstash MCP transport contract changed)"
+assert_contains "- node --test scripts/mcp/upstash-mcp-config.test.mjs (Upstash MCP transport contract changed)"
 
 run_gate "scripts/docs-index.mjs"
 assert_contains "- pnpm docs:index:test (documentation catalog helper changed)"

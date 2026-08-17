@@ -46,7 +46,7 @@ registry.
   `sha512-LN5yao74QQZTjGmolGqAh9YkQa/206ni94wwTtu6I/mVkyMeAbRME7rjK64KrWmCTw2OHUb8TMFsw6r4rMmUSQ==`
 - npm shasum: `4b2a627dbce2773f000a0e14d15e61a7ca1150f8`
 - launcher SHA-256:
-  `f4debf3eb16a81e829f607e01a18646fcce486b9d85029905f99a1a6a7f15e3b`
+  `633a7f94140ee014355d7e57bd50925bc8c9cd5aad774149e23db57a8ae273c2`
 - dependency-closed runtime SHA-256:
   `8dd4f9a1d40127541d7030d2bb4c6eaf9a96812bf591306736762e1831e70f76`
 - entrypoint SHA-256:
@@ -102,10 +102,10 @@ REVIEWED_SNAPSHOT=$(mktemp -d)
 git cat-file -e "$REVIEWED_HEAD^{commit}"
 set -o pipefail
 git archive --format=tar "$REVIEWED_HEAD" \
-  scripts/render-upstash-mcp-config.mjs \
-  scripts/build-upstash-mcp-runtime.mjs \
-  scripts/upstash-mcp-launcher.mjs | tar -x -C "$REVIEWED_SNAPSHOT"
-node "$REVIEWED_SNAPSHOT/scripts/render-upstash-mcp-config.mjs" \
+  scripts/mcp/render-upstash-mcp-config.mjs \
+  scripts/mcp/build-upstash-mcp-runtime.mjs \
+  scripts/mcp/upstash-mcp-launcher.mjs | tar -x -C "$REVIEWED_SNAPSHOT"
+node "$REVIEWED_SNAPSHOT/scripts/mcp/render-upstash-mcp-config.mjs" \
   --repo-root "$PWD"
 ```
 
@@ -114,8 +114,12 @@ The command also creates the reviewed, credential-free runtime under
 credential-free config output into `~/.codex/config.toml`. The checked-in
 [`.codex/upstash-mcp.example.toml`](../../.codex/upstash-mcp.example.toml) shows
 the output shape but contains placeholder paths. Keep `enabled = false` as the
-normal state. Regenerate the table after moving the checkout or Node binary.
-The reviewed renderer rejects direct execution from its owning `scripts/`
+normal state. Regenerate the table after moving the checkout or Node binary, and
+after any commit that moves or edits the launcher — the table embeds the
+launcher's absolute path and its SHA-256, so a stale table refuses to start.
+The launcher moved from `scripts/` to `scripts/mcp/` in the P6 scripts
+reorganization, which changed both.
+The reviewed renderer rejects direct execution from its owning `scripts/mcp/`
 directory before loading the builder. The immutable Git object, not that
 self-check, is the trust boundary against unreviewed working-tree changes. The
 temporary snapshot contains source only and no credential. Let the system
@@ -149,7 +153,7 @@ personal `enabled = true` only for the attended session.
 Run the repository contract test first:
 
 ```bash
-node --test scripts/upstash-mcp-config.test.mjs
+node --test scripts/mcp/upstash-mcp-config.test.mjs
 ```
 
 The example stores only environment-variable names, so `codex mcp list` cannot

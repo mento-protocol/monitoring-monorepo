@@ -17,7 +17,7 @@ garden_lane: agent-entry-points
 ## Scope
 
 `scripts/` contains deploy wrappers, agent quality gates, code-health checks,
-and repo maintenance utilities. 201 files sit flat at the top level today.
+and repo maintenance utilities. 188 files sit flat at the top level today.
 
 ## Target Layout
 
@@ -40,12 +40,12 @@ Until a phase merges, its files are flat.
 | `terraform/`    | P10   | movable Terraform guards and helpers   |
 | `gate/`         | P11   | quality-gate satellites                |
 
-Landed: P1. `lib/` (the shared tier; P7 adds to it) and
+Landed: P1, P6. `lib/` (the shared tier; P7 adds to it) and
 `production-infra-identity-contract/` predate the reorganization.
 
 ## Why Files Stay Flat
 
-Five mechanisms pin `scripts/` paths. A file one of them names moves only when
+Six mechanisms pin `scripts/` paths. A file one of them names moves only when
 that mechanism moves with it, in the same PR.
 
 - **Autoreview runtime materialization.** `agent-autoreview.sh` names its
@@ -58,13 +58,23 @@ that mechanism moves with it, in the same PR.
   repo-relative paths, reconciled against `findSentrySuites()` by exact set
   equality both ways. A moved or renamed suite fails the gate closed.
 - **Enumerated workflow paths-filters.** 22 of the 32 files in
-  `.github/workflows/` pin a `scripts/` path. `ci.yml` (`autoreviewSuite` and
-  `autoreviewRootRuntime`; `rootScripts` is the recursive `scripts/**`),
-  `infra.yml`, `supply-chain.yml`, `alerts-rules.yml`,
-  `peg-policy-publication.yml`, and `schema-diff.yml` list individual files.
+  `.github/workflows/` pin a `scripts/` path. `ci.yml` (`autoreviewSuite`,
+  `autoreviewRootRuntime`, and `versionSkew`; `rootScripts` is the recursive
+  `scripts/**`), `infra.yml`, `alerts-rules.yml`,
+  `peg-policy-publication.yml`, and `schema-diff.yml` list individual files. A
+  miss is silent: the job stops running and the required `ci` sentinel stays
+  green. Where a filter's file set is one whole module, `scripts/<module>/**`
+  is the safer pin — `supply-chain.yml` uses it.
 - **Production infrastructure contract pins.**
   `production-infra-identity-contract/workflow-inventory.mjs` pins exact script
   paths for the workflows it audits.
+- **Reviewed-artifact byte pins.** `.gitattributes` pins
+  `scripts/mcp/upstash-mcp-launcher.mjs` to `text eol=lf`, and
+  `UPSTASH_MCP_LAUNCHER_SHA256` in `scripts/mcp/render-upstash-mcp-config.mjs`
+  hashes that file. Any launcher edit, including a depth fix forced by a move,
+  changes the hash: recompute it, update
+  `docs/notes/upstash-mcp-operator.md`, and tell operators to re-run the
+  renderer — their Codex TOML embeds the launcher path and hash.
 
 **Any new pin of a `scripts/` path must be listed in this file.** An unrecorded
 pin breaks silently on the next move.
@@ -77,6 +87,7 @@ Run every item in the PR that moves a file.
 2. `check-agent-quality-gate-package-scripts.sh` — pinned alias map.
 3. `.github/workflows/` — 22 of 32 files, including the filters above.
 4. `.trunk/trunk.yaml` — pre-push hook runs `scripts/agent-quality-gate.sh`.
+   Also `.gitattributes`, which pins one script path.
 5. `.claude/settings.json` and its verbatim copy in `check-agent-context.mjs`.
 6. `.claude/skills/` and `.agents/skills/` — both mirrors.
 7. `docs/notes/quick-commands.md`.

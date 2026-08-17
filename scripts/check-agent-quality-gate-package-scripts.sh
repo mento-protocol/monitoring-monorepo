@@ -63,12 +63,12 @@ const expectedScripts = {
   "tf:test": "node scripts/tf-stacks.test.mjs",
   "alerts:rules:lint": "node scripts/alert-rules-lint.mjs",
   "alerts:rules:lint:test": "node scripts/alert-rules-lint.test.mjs",
-  "lockfile:lint": "node scripts/lockfile-lint.mjs",
-  "lockfile:lint:test": "node scripts/lockfile-lint.test.mjs",
-  "skew:check": "node scripts/version-skew-check.mjs",
-  "skew:check:test": "node scripts/version-skew-check.test.mjs",
-  "override:prune-report": "node scripts/override-prune-report.mjs",
-  "override:prune-report:test": "node scripts/override-prune-report.test.mjs",
+  "lockfile:lint": "node scripts/supply-chain/lockfile-lint.mjs",
+  "lockfile:lint:test": "node scripts/supply-chain/lockfile-lint.test.mjs",
+  "skew:check": "node scripts/supply-chain/version-skew-check.mjs",
+  "skew:check:test": "node scripts/supply-chain/version-skew-check.test.mjs",
+  "override:prune-report": "node scripts/supply-chain/override-prune-report.mjs",
+  "override:prune-report:test": "node scripts/supply-chain/override-prune-report.test.mjs",
   "sanitize:test": "node scripts/sanitize-terraform-output.test.mjs",
 };
 

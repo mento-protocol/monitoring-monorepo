@@ -349,8 +349,12 @@ jobs:
               - pnpm-workspace.yaml
               - "**/pnpm-workspace.yaml"
               - patches/**
-              - scripts/version-skew-check.mjs
-              - scripts/version-skew-check.test.mjs
+              # Enumerated on purpose: this job runs one checker, and widening
+              # to scripts/supply-chain/** would fire it on every lockfile-lint
+              # or audit-gate edit. An enumerated filter goes silent when a file
+              # moves, so both paths move with the checker in the same PR.
+              - scripts/supply-chain/version-skew-check.mjs
+              - scripts/supply-chain/version-skew-check.test.mjs
               - .github/workflows/ci.yml
               - .github/actions/pnpm-install/**
       - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
@@ -1114,11 +1118,19 @@ jobs:
         # "default workflow-token permission stays read-only" check.
         run: node scripts/workflows/check-workflow-permissions-drift.test.mjs
       - name: Override prune report self-tests
-        # Behavioral coverage of scripts/override-prune-report.mjs (verdict
-        # heuristic, lockfile parsing, git-blame age check). The report
+        # Behavioral coverage of scripts/supply-chain/override-prune-report.mjs
+        # (verdict heuristic, lockfile parsing, git-blame age check). The report
         # itself only runs weekly via supply-chain.yml; this required job is
         # what catches a regression in the script on every PR.
-        run: node scripts/override-prune-report.test.mjs
+        run: node scripts/supply-chain/override-prune-report.test.mjs
+      - name: pnpm override selector parser self-tests
+        # scripts/lib/pnpm-override-selector.mjs is read by two consumers with
+        # opposite failure modes: the lockfile-lint override-range gate fails
+        # CI, and the override prune report never fails anything. The suite's
+        # dedup assertions fail the moment either consumer stops importing the
+        # shared module, so they belong in a required job rather than only in
+        # the advisory supply-chain workflow.
+        run: node --test scripts/lib/pnpm-override-selector.test.mjs
       # The Sentry suites used to run here, one step each (issue #1721). They
       # now run in the unconditional `sentry-suites` job, which also proves from
       # their own output that each one asserted (issue #1779, ADR 0062) — a

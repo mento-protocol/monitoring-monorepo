@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * Fixture tests for scripts/pnpm-audit-high-gate.mjs.
+ * Fixture tests for scripts/supply-chain/pnpm-audit-high-gate.mjs.
  *
- * Run: node scripts/pnpm-audit-high-gate.test.mjs
+ * Run: node scripts/supply-chain/pnpm-audit-high-gate.test.mjs
  */
 
 import { spawnSync } from "node:child_process";

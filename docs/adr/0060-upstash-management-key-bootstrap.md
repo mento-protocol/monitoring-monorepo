@@ -102,4 +102,4 @@ The operator procedure and pinned MCP artifact live in
 - OpenAI documents that Codex Cloud secrets exist only during setup and are
   removed before the agent phase.
 - Enforced by `.codex/upstash-mcp.example.toml` and
-  `scripts/upstash-mcp-config.test.mjs`.
+  `scripts/mcp/upstash-mcp-config.test.mjs`.
