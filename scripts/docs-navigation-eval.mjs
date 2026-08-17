@@ -7,11 +7,9 @@ import process from "node:process";
 import { pathToFileURL } from "node:url";
 
 import {
-  assertAuthorizedGardenWorkflow,
-  ensureLabelsExist,
-  ghPaginate,
-  runGh,
-} from "./docs-garden-issue.mjs";
+  buildDocumentationInventory,
+  trackedDocumentationFiles,
+} from "./context/docs-index-helpers.mjs";
 import {
   buildNavigationEvalIssueSpec,
   buildNavigationPrompt,
@@ -28,9 +26,11 @@ import {
   scoreNavigationResult,
 } from "./docs-navigation-eval-result.mjs";
 import {
-  buildDocumentationInventory,
-  trackedDocumentationFiles,
-} from "./docs-index-helpers.mjs";
+  assertAuthorizedGardenWorkflow,
+  ensureLabelsExist,
+  ghPaginate,
+  runGh,
+} from "./lib/gh-issue-lifecycle.mjs";
 
 export const DEFAULT_NAVIGATION_EVAL_REPO =
   "mento-protocol/monitoring-monorepo";

@@ -17,7 +17,7 @@ garden_lane: agent-entry-points
 ## Scope
 
 `scripts/` holds deploy wrappers, agent quality gates, code-health checks, and
-repo maintenance utilities. 175 files sit flat at the top level today.
+repo maintenance utilities. 166 files sit flat at the top level today.
 
 ## Target Layout
 
@@ -30,7 +30,7 @@ Files stay flat until their phase merges.
 | --------------- | ----- | -------------------------------------- |
 | `workflows/`    | P1    | scripts backing Actions workflow jobs  |
 | `bootstrap/`    | P2    | container and hosted-session setup     |
-| `context/`      | P3    | agent context, budget, skill mirrors   |
+| `context/`      | P3    | agent context, budget, doc catalog     |
 | `docs/`         | P4    | catalog, audit, garden, nav eval       |
 | `pr/`           | P5    | PR and issue state projections         |
 | `supply-chain/` | P6    | lockfile, audit, pin, skew gates       |
@@ -40,7 +40,7 @@ Files stay flat until their phase merges.
 | `terraform/`    | P10   | movable Terraform guards and helpers   |
 | `gate/`         | P11   | quality-gate satellites                |
 
-Landed: P1, P2, P6, P7, P8. `lib/` (the shared tier) and
+Landed: P1, P2, P3, P6, P7, P8. `lib/` (the shared tier) and
 `production-infra-identity-contract/` predate the reorganization. `setup.sh`
 stays flat: `.config/wt.toml` runs that exact path as the Worktrunk pre-start
 hook, and eight docs name it. `redrive-onchain-deadletter.{mjs,test.mjs}` stays
@@ -50,11 +50,14 @@ config-relative; `scripts/alerts/**` stays linted.
 
 `lib/` holds cores more than one cluster reads. `hcl.mjs` (Terraform HCL
 tokenizer and block extraction), `workflow-yaml.mjs` (Actions workflow and
-shell-run parsing), and `pnpm-override-selector.mjs` (pnpm override selectors)
-carry no domain policy and stay outside domain directories: five files beyond
+shell-run parsing), `pnpm-override-selector.mjs` (pnpm override selectors), and
+`gh-issue-lifecycle.mjs` (the `gh` runner, pagination guard, Documentation
+Garden workflow authorization, label bootstrap, and issue-queue arbitration).
+Cores stay outside domain directories: five files beyond
 `production-infra-identity-contract/` read `hcl.mjs`, the ADR 0053
-deploy-staging contract reads `workflow-yaml.mjs`, and both the lockfile-lint
-gate and the override prune advisor read the selector parser.
+deploy-staging contract reads `workflow-yaml.mjs`, both the lockfile-lint gate
+and the override prune advisor read the selector parser, and the documentation
+garden and navigation-eval schedulers both read the issue lifecycle.
 `peg-policy-digest.mjs` is the one definition of the peg version-digest contract
 both peg validators check. Inventories, pinned hashes, and identities stay with
 their domain.

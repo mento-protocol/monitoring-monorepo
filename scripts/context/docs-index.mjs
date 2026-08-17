@@ -29,7 +29,7 @@ function parseArgs(argv) {
 }
 
 function usage() {
-  return `Usage: node scripts/docs-index.mjs [--write | --check | --json] [--root PATH]
+  return `Usage: node scripts/context/docs-index.mjs [--write | --check | --json] [--root PATH]
 
 The catalog models the proposed working tree from tracked and non-ignored
 untracked Markdown, excluding CLAUDE.md and .claude/skills mirrors. --write

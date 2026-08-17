@@ -1,19 +1,19 @@
 import { createHash } from "node:crypto";
 
 import { renderAuditPacket } from "./docs-audit-helpers.mjs";
+import {
+  normalizeIssuePages,
+  parseLeadingMarkerBlock,
+  requireSingleQueueState,
+  selectQueueIssues,
+} from "./lib/gh-issue-lifecycle.mjs";
 
 export const DOCS_GARDEN_MARKER = "<!-- docs-garden-issue:v1 -->";
 export const DOCS_GARDEN_PACKET_MARKER_PREFIX = "<!-- docs-garden-packet:v1 ";
 export const DOCS_GARDEN_EPIC = 1341;
 export const MAX_ISSUE_BODY_CHARS = 65_000;
 export const DOCS_AUTOMATION_OWNERSHIP_LABEL = "source:audit";
-
-export const ISSUE_STATE_LABELS = [
-  "needs-grooming",
-  "agent-ready",
-  "agent-active",
-  "in-pr",
-];
+const QUEUE_KIND = "docs-garden";
 
 const BASE_LABELS = [
   "agent-ready",
@@ -22,49 +22,6 @@ const BASE_LABELS = [
   "kind:refactor",
   "source:audit",
   "priority:p2",
-];
-
-export const LABEL_DEFINITIONS = [
-  {
-    name: "agent-ready",
-    color: "0e8a16",
-    description: "Scoped work ready for an agent to claim",
-  },
-  {
-    name: "documentation",
-    color: "0075ca",
-    description: "Documentation changes",
-  },
-  {
-    name: "pkg:tooling",
-    color: "5319e7",
-    description: "Repository tooling and automation",
-  },
-  {
-    name: "kind:refactor",
-    color: "c5def5",
-    description: "Maintenance or refactoring work",
-  },
-  {
-    name: "source:audit",
-    color: "d4c5f9",
-    description: "Work generated from a deterministic audit",
-  },
-  {
-    name: "priority:p2",
-    color: "fbca04",
-    description: "Normal-priority planned work",
-  },
-  {
-    name: "risk:low",
-    color: "c2e0c6",
-    description: "Low-risk change",
-  },
-  {
-    name: "risk:medium",
-    color: "fef2c0",
-    description: "Medium-risk change requiring normal review",
-  },
 ];
 
 function parseDate(dateInput) {
@@ -108,29 +65,14 @@ export function packetMarker(packet) {
 }
 
 export function parseLeadingDocsGardenMarkers(body) {
-  const lines = String(body ?? "").split(/\r?\n/);
-  if (lines[0] !== DOCS_GARDEN_MARKER) return null;
-  const packetLine = lines[1] ?? "";
-  if (
-    !packetLine.startsWith(DOCS_GARDEN_PACKET_MARKER_PREFIX) ||
-    !packetLine.endsWith(" -->")
-  ) {
-    throw new Error(
+  const metadata = parseLeadingMarkerBlock(body, {
+    marker: DOCS_GARDEN_MARKER,
+    metadataPrefix: DOCS_GARDEN_PACKET_MARKER_PREFIX,
+    malformedMessage:
       "docs-garden issue has a missing or malformed packet marker",
-    );
-  }
-  const raw = packetLine.slice(
-    DOCS_GARDEN_PACKET_MARKER_PREFIX.length,
-    -" -->".length,
-  );
-  let metadata;
-  try {
-    metadata = JSON.parse(raw);
-  } catch (error) {
-    throw new Error("docs-garden issue packet marker is not valid JSON", {
-      cause: error,
-    });
-  }
+    invalidJsonMessage: "docs-garden issue packet marker is not valid JSON",
+  });
+  if (metadata === undefined) return null;
   if (
     !Number.isSafeInteger(metadata.week_serial) ||
     typeof metadata.fingerprint !== "string" ||
@@ -144,30 +86,10 @@ export function parseLeadingDocsGardenMarkers(body) {
   return metadata;
 }
 
-function labelName(label) {
-  return typeof label === "string" ? label : label?.name;
-}
-
 export function normalizeGithubIssuePages(pages) {
-  const uniqueIssues = new Map();
-  for (const issue of (pages ?? []).flat()) {
-    if (!issue || issue.pull_request || uniqueIssues.has(issue.number))
-      continue;
-    uniqueIssues.set(issue.number, issue);
-  }
-  return [...uniqueIssues.values()].map((issue) => {
-    const labels = (issue.labels ?? []).map(labelName).filter(Boolean);
-    return {
-      number: issue.number,
-      title: String(issue.title ?? ""),
-      body: String(issue.body ?? ""),
-      state: String(issue.state ?? "").toUpperCase(),
-      labels,
-      url: issue.html_url ?? null,
-      marker: labels.includes(DOCS_AUTOMATION_OWNERSHIP_LABEL)
-        ? parseLeadingDocsGardenMarkers(issue.body)
-        : null,
-    };
+  return normalizeIssuePages(pages, {
+    ownershipLabel: DOCS_AUTOMATION_OWNERSHIP_LABEL,
+    parseMarker: parseLeadingDocsGardenMarkers,
   });
 }
 
@@ -175,14 +97,10 @@ export function resolveTargetWeekSerial(currentWeekSerial, issues) {
   if (!Number.isSafeInteger(currentWeekSerial)) {
     throw new Error("current week serial must be a safe integer");
   }
-  const gardenIssues = issues.filter((issue) => issue.marker);
-  const open = gardenIssues.filter((issue) => issue.state === "OPEN");
-  if (open.length > 1) {
-    throw new Error(
-      `found ${open.length} open docs-garden issues; expected at most one`,
-    );
-  }
-  if (open.length === 1) return open[0].marker.week_serial;
+  const { tracked: gardenIssues, open } = selectQueueIssues(issues, {
+    kind: QUEUE_KIND,
+  });
+  if (open) return open.marker.week_serial;
 
   const closedSerials = gardenIssues
     .filter((issue) => issue.state === "CLOSED")
@@ -298,27 +216,13 @@ export function buildDocsGardenIssueSpec(
   };
 }
 
-function stateLabels(issue) {
-  return issue.labels.filter((label) => ISSUE_STATE_LABELS.includes(label));
-}
-
 export function planDocsGardenIssueSync({ packet, issues }) {
-  const gardenIssues = issues.filter((issue) => issue.marker);
-  const open = gardenIssues.filter((issue) => issue.state === "OPEN");
-  if (open.length > 1) {
-    throw new Error(
-      `found ${open.length} open docs-garden issues; expected at most one`,
-    );
-  }
+  const { tracked: gardenIssues, open: issue } = selectQueueIssues(issues, {
+    kind: QUEUE_KIND,
+  });
 
-  if (open.length === 1) {
-    const issue = open[0];
-    const states = stateLabels(issue);
-    if (states.length !== 1) {
-      throw new Error(
-        `open docs-garden issue #${issue.number} has ${states.length} queue state labels; expected exactly one`,
-      );
-    }
+  if (issue) {
+    const state = requireSingleQueueState(issue, { kind: QUEUE_KIND });
     if (issue.marker.week_serial !== packet.cycle.week_serial) {
       return {
         action: "skip-prior-open",
@@ -326,7 +230,7 @@ export function planDocsGardenIssueSync({ packet, issues }) {
         issue,
       };
     }
-    if (states[0] === "agent-ready") {
+    if (state === "agent-ready") {
       if (
         issue.marker.fingerprint !== packet.fingerprint ||
         issue.marker.scope_digest !== packetScopeDigest(packet)
@@ -343,14 +247,14 @@ export function planDocsGardenIssueSync({ packet, issues }) {
         issue,
       };
     }
-    if (states[0] === "agent-active" || states[0] === "in-pr") {
+    if (state === "agent-active" || state === "in-pr") {
       return {
         action: "skip-busy",
-        reason: `issue #${issue.number} is ${states[0]}; preserving claimed scope`,
+        reason: `issue #${issue.number} is ${state}; preserving claimed scope`,
         issue,
       };
     }
-    if (states[0] === "needs-grooming") {
+    if (state === "needs-grooming") {
       return {
         action: "skip-blocked",
         reason: `issue #${issue.number} needs grooming; preserving blocked scope for human clarification`,
@@ -358,14 +262,14 @@ export function planDocsGardenIssueSync({ packet, issues }) {
       };
     }
     throw new Error(
-      `open docs-garden issue #${issue.number} is not claimable or in progress (${states[0]})`,
+      `open docs-garden issue #${issue.number} is not claimable or in progress (${state})`,
     );
   }
 
   const completed = gardenIssues.find(
-    (issue) =>
-      issue.state === "CLOSED" &&
-      issue.marker.week_serial === packet.cycle.week_serial,
+    (candidate) =>
+      candidate.state === "CLOSED" &&
+      candidate.marker.week_serial === packet.cycle.week_serial,
   );
   if (completed) {
     return {

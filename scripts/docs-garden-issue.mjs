@@ -1,15 +1,17 @@
 #!/usr/bin/env node
 
-import { spawn } from "node:child_process";
 import { realpathSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
 
+import {
+  buildDocumentationInventory,
+  trackedDocumentationFiles,
+} from "./context/docs-index-helpers.mjs";
 import { buildAuditPacket } from "./docs-audit-helpers.mjs";
 import {
   buildDocsGardenIssueSpec,
-  LABEL_DEFINITIONS,
   mondayForWeekSerial,
   normalizeGithubIssuePages,
   planDocsGardenIssueSync,
@@ -17,18 +19,13 @@ import {
   weekSerialForDate,
 } from "./docs-garden-issue-helpers.mjs";
 import {
-  buildDocumentationInventory,
-  trackedDocumentationFiles,
-} from "./docs-index-helpers.mjs";
+  assertAuthorizedGardenWorkflow,
+  ensureLabelsExist,
+  ghPaginate,
+  runGh,
+} from "./lib/gh-issue-lifecycle.mjs";
 
 export const DEFAULT_REPO = "mento-protocol/monitoring-monorepo";
-const GARDEN_OIDC_AUDIENCE = "mento-docs-garden";
-const GITHUB_OIDC_ISSUER = "https://token.actions.githubusercontent.com";
-const GITHUB_OIDC_REQUEST_HOST_SUFFIX = ".actions.githubusercontent.com";
-
-function isGithubOidcRequestHost(hostname) {
-  return hostname.endsWith(GITHUB_OIDC_REQUEST_HOST_SUFFIX);
-}
 
 function parseBoolean(value, name) {
   if (value == null || String(value).trim() === "") return false;
@@ -112,167 +109,6 @@ DOCS_GARDEN_SHARD, DOCS_GARDEN_DRY_RUN.
 `;
 }
 
-function quoteArg(value) {
-  if (/^[A-Za-z0-9_./:=@#-]+$/.test(value)) return value;
-  return JSON.stringify(value);
-}
-
-function formatGh(args) {
-  return `gh ${args.map((arg) => quoteArg(String(arg))).join(" ")}`;
-}
-
-export function runGh(args) {
-  return new Promise((resolve, reject) => {
-    const child = spawn("gh", args, { stdio: ["ignore", "pipe", "pipe"] });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk;
-    });
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk;
-    });
-    child.on("error", (error) => {
-      reject(new Error(`${formatGh(args)} failed: ${error.message}`));
-    });
-    child.on("close", (status) => {
-      if (status !== 0) {
-        reject(
-          new Error(`${formatGh(args)} failed with exit ${status}:\n${stderr}`),
-        );
-        return;
-      }
-      resolve(stdout);
-    });
-  });
-}
-
-function decodeOidcClaims(token) {
-  const segments = String(token ?? "").split(".");
-  if (segments.length !== 3) {
-    throw new Error("GitHub OIDC response did not contain a JWT");
-  }
-  try {
-    return JSON.parse(Buffer.from(segments[1], "base64url").toString("utf8"));
-  } catch (error) {
-    throw new Error("GitHub OIDC token payload is malformed", { cause: error });
-  }
-}
-
-function audienceIncludes(audience, expected) {
-  return Array.isArray(audience)
-    ? audience.includes(expected)
-    : audience === expected;
-}
-
-export async function assertAuthorizedGardenWorkflow(
-  options,
-  {
-    env = process.env,
-    fetchImpl = globalThis.fetch,
-    now = () => Date.now(),
-  } = {},
-) {
-  const eventName = String(env.GITHUB_EVENT_NAME ?? "");
-  const workflowRef = String(env.GITHUB_WORKFLOW_REF ?? "");
-  const expectedWorkflowRef = `${options.repo}/.github/workflows/documentation-garden.yml@${env.GITHUB_REF ?? ""}`;
-  if (
-    env.GITHUB_ACTIONS !== "true" ||
-    !["schedule", "workflow_dispatch"].includes(eventName) ||
-    workflowRef !== expectedWorkflowRef
-  ) {
-    throw new Error(
-      "live issue creation is restricted to the Documentation Garden workflow; use --dry-run locally or dispatch that workflow on the default branch",
-    );
-  }
-
-  const requestToken = String(env.ACTIONS_ID_TOKEN_REQUEST_TOKEN ?? "");
-  let requestUrl;
-  try {
-    requestUrl = new URL(String(env.ACTIONS_ID_TOKEN_REQUEST_URL ?? ""));
-  } catch (error) {
-    throw new Error("GitHub Actions OIDC request URL is missing or invalid", {
-      cause: error,
-    });
-  }
-  if (
-    requestUrl.protocol !== "https:" ||
-    !isGithubOidcRequestHost(requestUrl.hostname) ||
-    !requestToken
-  ) {
-    throw new Error("GitHub Actions OIDC runner credentials are unavailable");
-  }
-  requestUrl.searchParams.set("audience", GARDEN_OIDC_AUDIENCE);
-
-  const response = await fetchImpl(requestUrl, {
-    headers: {
-      accept: "application/json",
-      authorization: `bearer ${requestToken}`,
-    },
-    redirect: "error",
-  });
-  if (!response.ok) {
-    throw new Error(
-      `GitHub Actions OIDC identity request failed with status ${response.status}`,
-    );
-  }
-  const oidcResponse = await response.json();
-  const claims = decodeOidcClaims(oidcResponse?.value);
-  const nowSeconds = Math.floor(now() / 1000);
-  const valid =
-    claims.iss === GITHUB_OIDC_ISSUER &&
-    audienceIncludes(claims.aud, GARDEN_OIDC_AUDIENCE) &&
-    String(claims.repository ?? "").toLowerCase() ===
-      options.repo.toLowerCase() &&
-    claims.workflow === "Documentation Garden" &&
-    claims.workflow_ref === expectedWorkflowRef &&
-    claims.workflow_sha === env.GITHUB_SHA &&
-    claims.event_name === eventName &&
-    claims.ref === env.GITHUB_REF &&
-    String(claims.run_id ?? "") === String(env.GITHUB_RUN_ID ?? "") &&
-    String(claims.run_attempt ?? "") === String(env.GITHUB_RUN_ATTEMPT ?? "") &&
-    Number(claims.nbf) <= nowSeconds + 30 &&
-    Number(claims.iat) <= nowSeconds + 30 &&
-    Number(claims.exp) > nowSeconds;
-  if (!valid) {
-    throw new Error(
-      "GitHub OIDC identity does not match the active Documentation Garden workflow run",
-    );
-  }
-  return claims;
-}
-
-export async function ghPaginate(
-  apiPath,
-  { perPage = 100, maxPages = 200, runner = runGh } = {},
-) {
-  const pages = [];
-  for (let page = 1; ; page += 1) {
-    if (page > maxPages) {
-      throw new Error(
-        `GitHub pagination exceeded ${maxPages} pages for ${apiPath}; refusing to continue silently`,
-      );
-    }
-    const separator = apiPath.includes("?") ? "&" : "?";
-    const stdout = await runner([
-      "api",
-      `${apiPath}${separator}per_page=${perPage}&page=${page}`,
-    ]);
-    const items = stdout.trim() ? JSON.parse(stdout) : [];
-    if (!Array.isArray(items)) {
-      throw new Error(
-        `unexpected non-array GitHub API response for ${apiPath}`,
-      );
-    }
-    if (items.length === 0) break;
-    pages.push(items);
-    if (items.length < perPage) break;
-  }
-  return pages;
-}
-
 export async function listGithubIssues(options, { runner = runGh } = {}) {
   // Structural body markers own queue identity. Enumerate the complete issue
   // set so a removed routing label cannot hide a live garden item and allow a
@@ -281,27 +117,6 @@ export async function listGithubIssues(options, { runner = runGh } = {}) {
     runner,
   });
   return normalizeGithubIssuePages(pages);
-}
-
-export async function ensureLabelsExist(options, { runner = runGh } = {}) {
-  const pages = await ghPaginate(`repos/${options.repo}/labels`, { runner });
-  const existing = new Set(
-    pages.flat().map((label) => String(label?.name ?? "")),
-  );
-  for (const label of LABEL_DEFINITIONS) {
-    if (existing.has(label.name)) continue;
-    await runner([
-      "label",
-      "create",
-      label.name,
-      "--repo",
-      options.repo,
-      "--color",
-      label.color,
-      "--description",
-      label.description,
-    ]);
-  }
 }
 
 async function defaultCreateIssue(options, spec) {
