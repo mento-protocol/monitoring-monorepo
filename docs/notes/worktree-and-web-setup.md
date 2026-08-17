@@ -61,7 +61,7 @@ itself through a SessionStart hook (`.claude/settings.json` →
 `.claude/hooks/session-start.sh`) that delegates to:
 
 ```bash
-./scripts/claude-code-web-setup.sh
+./scripts/bootstrap/claude-code-web-setup.sh
 ```
 
 The heavy bootstrap runs only for a remote startup event, not local sessions,

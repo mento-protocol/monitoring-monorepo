@@ -7,11 +7,11 @@
 
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO_ROOT"
 
-# shellcheck source=scripts/codex-cloud-git-helpers.sh
-source "$REPO_ROOT/scripts/codex-cloud-git-helpers.sh"
+# shellcheck source=scripts/bootstrap/codex-cloud-git-helpers.sh
+source "$REPO_ROOT/scripts/bootstrap/codex-cloud-git-helpers.sh"
 
 run_as_root() {
   if [[ "$(id -u)" == "0" ]]; then

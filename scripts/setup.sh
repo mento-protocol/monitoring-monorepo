@@ -17,6 +17,9 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
+# shellcheck source=scripts/lib/install-marker.sh
+source "$REPO_ROOT/scripts/lib/install-marker.sh"
+
 # Shared Turbo cache across worktrees (GitHub issue #1411): keep the local Turbo
 # filesystem cache at one stable per-repo location outside any worktree so a
 # fresh per-PR worktree reuses warm entries instead of starting 100% cold.
@@ -34,33 +37,6 @@ if [ -z "${TURBO_CACHE_DIR:-}" ] &&
     export TURBO_CACHE_DIR="$turbo_cache_candidate"
   fi
 fi
-
-hash_inputs() {
-  local file_list
-  file_list="$(mktemp "${TMPDIR:-/tmp}/monitoring-setup-hash.XXXXXX")"
-
-  for p in "$@"; do
-    if [ -d "$p" ]; then
-      find "$p" -type f 2>/dev/null
-    elif [ -e "$p" ]; then
-      printf '%s\n' "$p"
-    fi
-  done | LC_ALL=C sort -u >"$file_list"
-
-  if [ ! -s "$file_list" ]; then
-    rm -f "$file_list"
-    return 1
-  fi
-
-  local hash
-  if command -v sha256sum >/dev/null 2>&1; then
-    hash="$(xargs sha256sum <"$file_list" 2>/dev/null | sha256sum | awk '{print $1}')"
-  else
-    hash="$(xargs shasum -a 256 <"$file_list" 2>/dev/null | shasum -a 256 | awk '{print $1}')"
-  fi
-  rm -f "$file_list"
-  printf '%s\n' "$hash"
-}
 
 playwright_chromium_present() {
   (cd ui-dashboard && node -e \
@@ -94,7 +70,7 @@ deps_install_ran=0
 deps_had_node_modules=0
 [ -d node_modules ] && deps_had_node_modules=1
 deps_hash="$(
-  hash_inputs \
+  install_marker_hash_inputs \
     pnpm-lock.yaml \
     pnpm-workspace.yaml \
     package.json \
@@ -105,7 +81,7 @@ deps_hash="$(
     alerts/infra/*/package.json || true
 )"
 legacy_deps_hash="$(
-  hash_inputs \
+  install_marker_hash_inputs \
     pnpm-lock.yaml \
     pnpm-workspace.yaml \
     package.json \
@@ -119,8 +95,8 @@ legacy_deps_hash="$(
 )"
 if [ -d node_modules ] &&
   [ -n "$deps_hash" ] &&
-  { [ "$(cat "$deps_marker" 2>/dev/null)" = "$deps_hash" ] ||
-    [ "$(cat "$deps_marker" 2>/dev/null)" = "$legacy_deps_hash" ]; } &&
+  { install_marker_matches "$deps_marker" "$deps_hash" ||
+    install_marker_matches "$deps_marker" "$legacy_deps_hash"; } &&
   dashboard_sentry_present; then
   echo "  dependencies are up to date; skipping pnpm install"
   deps_marker_pending=1
@@ -132,51 +108,41 @@ fi
 
 echo "▶ Verifying ui-dashboard dependency resolution..."
 dashboard_sentry_present
-if [ "$deps_marker_pending" -eq 1 ] && [ -n "$deps_hash" ]; then
-  printf '%s' "$deps_hash" >"$deps_marker"
+if [ "$deps_marker_pending" -eq 1 ]; then
+  install_marker_write "$deps_marker" "$deps_hash"
 fi
 
 echo "▶ Building shared-config when needed..."
 shared_config_marker="node_modules/.setup-shared-config.sha256"
-shared_config_hash="$(hash_inputs shared-config/src shared-config/tsconfig.json || true)"
+shared_config_hash="$(install_marker_hash_inputs shared-config/src shared-config/tsconfig.json || true)"
 if [ -s shared-config/dist/chains.js ] &&
-  [ -n "$shared_config_hash" ] &&
-  [ "$(cat "$shared_config_marker" 2>/dev/null)" = "$shared_config_hash" ]; then
+  install_marker_matches "$shared_config_marker" "$shared_config_hash"; then
   echo "  shared-config build is up to date; skipping"
 elif [ "$deps_install_ran" -eq 1 ] &&
   [ "$deps_had_node_modules" -eq 0 ] &&
   [ -s shared-config/dist/chains.js ]; then
   echo "  shared-config was built during pnpm install; refreshing marker"
-  if [ -n "$shared_config_hash" ]; then
-    printf '%s' "$shared_config_hash" >"$shared_config_marker"
-  fi
+  install_marker_write "$shared_config_marker" "$shared_config_hash"
 else
   pnpm --filter @mento-protocol/config build
   if [ ! -s shared-config/dist/chains.js ]; then
     echo "error: shared-config build did not produce shared-config/dist/chains.js." >&2
     exit 1
   fi
-  if [ -n "$shared_config_hash" ]; then
-    printf '%s' "$shared_config_hash" >"$shared_config_marker"
-  fi
+  install_marker_write "$shared_config_marker" "$shared_config_hash"
 fi
 
 echo "▶ Installing Playwright Chromium and host dependencies (ui-dashboard browser tests)..."
 playwright_marker="node_modules/.setup-playwright-chromium.sha256"
-playwright_hash="$(hash_inputs pnpm-lock.yaml ui-dashboard/package.json || true)"
+playwright_hash="$(install_marker_hash_inputs pnpm-lock.yaml ui-dashboard/package.json || true)"
 if playwright_chromium_present &&
   { ! playwright_host_deps_required ||
-    { [ -n "$playwright_hash" ] &&
-      [ "$(cat "$playwright_marker" 2>/dev/null)" = "$playwright_hash" ]; }; }; then
+    install_marker_matches "$playwright_marker" "$playwright_hash"; }; then
   echo "  Playwright Chromium executable is available; skipping installer"
-  if [ -n "$playwright_hash" ]; then
-    printf '%s' "$playwright_hash" >"$playwright_marker"
-  fi
+  install_marker_write "$playwright_marker" "$playwright_hash"
 else
   if pnpm --filter @mento-protocol/ui-dashboard exec playwright install --with-deps chromium; then
-    if [ -n "$playwright_hash" ]; then
-      printf '%s' "$playwright_hash" >"$playwright_marker"
-    fi
+    install_marker_write "$playwright_marker" "$playwright_hash"
   else
     echo "  ⚠ Playwright Chromium install failed; continuing setup." >&2
     echo "    Run 'pnpm --filter @mento-protocol/ui-dashboard exec playwright install --with-deps chromium' before browser tests." >&2
@@ -185,9 +151,9 @@ fi
 
 echo "▶ Running Envio codegen (multichain config)..."
 codegen_marker="node_modules/.setup-codegen.sha256"
-codegen_hash="$(hash_inputs indexer-envio/config*.yaml indexer-envio/schema.graphql indexer-envio/package.json indexer-envio/abis indexer-envio/scripts || true)"
-if [ -s "indexer-envio/.envio/types.d.ts" ] && [ -n "$codegen_hash" ] &&
-  [ "$(cat "$codegen_marker" 2>/dev/null)" = "$codegen_hash" ]; then
+codegen_hash="$(install_marker_hash_inputs indexer-envio/config*.yaml indexer-envio/schema.graphql indexer-envio/package.json indexer-envio/abis indexer-envio/scripts || true)"
+if [ -s "indexer-envio/.envio/types.d.ts" ] &&
+  install_marker_matches "$codegen_marker" "$codegen_hash"; then
   echo "  Envio types are up to date; skipping codegen"
 else
   rm -f indexer-envio/.envio/types.d.ts
@@ -203,9 +169,7 @@ underlying error.
 MSG
   exit 1
 fi
-if [ -n "$codegen_hash" ]; then
-  printf '%s' "$codegen_hash" >"$codegen_marker"
-fi
+install_marker_write "$codegen_marker" "$codegen_hash"
 
 echo ""
 echo "✅ Setup complete. You're ready to work and push."
