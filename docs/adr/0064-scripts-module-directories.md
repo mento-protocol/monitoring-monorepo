@@ -149,14 +149,16 @@ routing, not procedure.
 3. `.github/workflows/` — 22 of 32 files, including the enumerated filters
    listed under "Why Files Stay Flat" in `scripts/AGENTS.md`.
 4. `.trunk/trunk.yaml` pre-push hook, and `.gitattributes`.
-5. `.claude/settings.json` and its verbatim copy in `check-agent-context.mjs`.
+5. `.claude/settings.json`, `.codex/hooks.json`,
+   `.claude/hooks/session-start.sh`, and the verbatim copies and invocation
+   regexes in `check-agent-context.mjs`.
 6. `.claude/skills/` and `.agents/skills/` — both mirrors.
 7. `docs/notes/quick-commands.md`.
 8. `agent-quality-gate.sh` routing arms — a literal-prefix glob such as
    `scripts/deploy-*.sh` or `scripts/sentry-*.test.mjs` stops matching one
    directory down. Keep the basename prefix; add the paired one-level arm. Its
-   contract-surface arm also names `scripts/lib/*.mjs`; that arm sets the
-   `pnpm tf:test` reason, since the unconditional sweep already runs the suite.
+   contract-surface arm also names `scripts/lib/*.mjs`, which sets the
+   `pnpm tf:test` reason; the unconditional sweep already runs the suite.
 
 A shared module under `scripts/lib/` is routed from every arm that reads it,
 not only the arm of the consumer that happens to fail loudest.
