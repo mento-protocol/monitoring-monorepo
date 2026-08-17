@@ -102,5 +102,7 @@ Use a versioned, offline evaluation contract:
 - `scripts/docs-navigation-eval-helpers.mjs`
 - `scripts/docs-navigation-eval-result.mjs`
 - `scripts/docs-navigation-eval.test.mjs`
+- `scripts/lib/gh-issue-lifecycle.mjs` — the shared monthly-issue scheduling
+  primitives, including workflow authorization for live creation
 - `.github/workflows/ci.yml`
 - `.github/workflows/documentation-garden.yml`

@@ -399,7 +399,7 @@ test("Claude runtime registry reports every malformed path-less entry", () => {
 });
 
 test("Claude runtime registry classification leaves live runtime bytes unchanged", () => {
-  const repo = path.resolve(path.dirname(scriptPath), "..");
+  const repo = path.resolve(path.dirname(scriptPath), "..", "..");
   const files = trackedDocumentationFiles(repo);
   const before = new Map(
     CLAUDE_RUNTIME_DOCUMENT_PATHS.map((file) => [

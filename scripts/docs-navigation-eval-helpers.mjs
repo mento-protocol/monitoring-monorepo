@@ -1,6 +1,13 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 
+import {
+  normalizeIssuePages,
+  parseLeadingMarkerBlock,
+  requireSingleQueueState,
+  selectQueueIssues,
+} from "./lib/gh-issue-lifecycle.mjs";
+
 export const NAVIGATION_EVAL_MARKER = "<!-- docs-navigation-eval-issue:v1 -->";
 export const NAVIGATION_EVAL_MONTH_MARKER_PREFIX =
   "<!-- docs-navigation-eval-month:v1 ";
@@ -17,12 +24,7 @@ const REQUIRED_CATEGORIES = [
   "commands",
   "operator-workflows",
 ];
-const ISSUE_STATE_LABELS = [
-  "needs-grooming",
-  "agent-ready",
-  "agent-active",
-  "in-pr",
-];
+const QUEUE_KIND = "navigation-eval";
 const ISSUE_LABELS = [
   "agent-ready",
   "documentation",
@@ -436,27 +438,14 @@ export function navigationMonthMarker(month, digest) {
 }
 
 export function parseLeadingNavigationEvalMarkers(body) {
-  const lines = String(body ?? "").split(/\r?\n/);
-  if (lines[0] !== NAVIGATION_EVAL_MARKER) return null;
-  const marker = lines[1] ?? "";
-  if (
-    !marker.startsWith(NAVIGATION_EVAL_MONTH_MARKER_PREFIX) ||
-    !marker.endsWith(" -->")
-  ) {
-    throw new Error(
+  const metadata = parseLeadingMarkerBlock(body, {
+    marker: NAVIGATION_EVAL_MARKER,
+    metadataPrefix: NAVIGATION_EVAL_MONTH_MARKER_PREFIX,
+    malformedMessage:
       "navigation-eval issue has a missing or malformed month marker",
-    );
-  }
-  let metadata;
-  try {
-    metadata = JSON.parse(
-      marker.slice(NAVIGATION_EVAL_MONTH_MARKER_PREFIX.length, -" -->".length),
-    );
-  } catch (error) {
-    throw new Error("navigation-eval month marker is not valid JSON", {
-      cause: error,
-    });
-  }
+    invalidJsonMessage: "navigation-eval month marker is not valid JSON",
+  });
+  if (metadata === undefined) return null;
   if (
     !/^\d{4}-\d{2}$/.test(metadata?.month ?? "") ||
     !/^[0-9a-f]{64}$/.test(metadata?.fixture_digest ?? "")
@@ -466,32 +455,11 @@ export function parseLeadingNavigationEvalMarkers(body) {
   return metadata;
 }
 
-function labelName(label) {
-  return typeof label === "string" ? label : label?.name;
-}
-
 export function normalizeNavigationEvalIssuePages(pages) {
-  const unique = new Map();
-  for (const issue of (pages ?? []).flat()) {
-    if (!issue || issue.pull_request || unique.has(issue.number)) continue;
-    const labels = (issue.labels ?? []).map(labelName).filter(Boolean);
-    unique.set(issue.number, {
-      number: issue.number,
-      title: String(issue.title ?? ""),
-      body: String(issue.body ?? ""),
-      state: String(issue.state ?? "").toUpperCase(),
-      labels,
-      url: issue.html_url ?? null,
-      marker: labels.includes(NAVIGATION_EVAL_OWNERSHIP_LABEL)
-        ? parseLeadingNavigationEvalMarkers(issue.body)
-        : null,
-    });
-  }
-  return [...unique.values()];
-}
-
-function stateLabels(issue) {
-  return issue.labels.filter((label) => ISSUE_STATE_LABELS.includes(label));
+  return normalizeIssuePages(pages, {
+    ownershipLabel: NAVIGATION_EVAL_OWNERSHIP_LABEL,
+    parseMarker: parseLeadingNavigationEvalMarkers,
+  });
 }
 
 export function isRoutingSensitivePath(file) {
@@ -610,21 +578,11 @@ export function planNavigationEvalIssueSync({
   issues,
   spec,
 }) {
-  const evaluationIssues = issues.filter((issue) => issue.marker);
-  const open = evaluationIssues.filter((issue) => issue.state === "OPEN");
-  if (open.length > 1) {
-    throw new Error(
-      `found ${open.length} open navigation-eval issues; expected at most one`,
-    );
-  }
-  if (open.length === 1) {
-    const issue = open[0];
-    const states = stateLabels(issue);
-    if (states.length !== 1) {
-      throw new Error(
-        `open navigation-eval issue #${issue.number} has ${states.length} queue state labels; expected exactly one`,
-      );
-    }
+  const { tracked: evaluationIssues, open: issue } = selectQueueIssues(issues, {
+    kind: QUEUE_KIND,
+  });
+  if (issue) {
+    requireSingleQueueState(issue, { kind: QUEUE_KIND });
     const sameMonth = issue.marker.month === month;
     const sameFixture = issue.marker.fixture_digest === digest;
     return {
@@ -642,7 +600,8 @@ export function planNavigationEvalIssueSync({
     };
   }
   const completed = evaluationIssues.find(
-    (issue) => issue.state === "CLOSED" && issue.marker.month === month,
+    (candidate) =>
+      candidate.state === "CLOSED" && candidate.marker.month === month,
   );
   if (completed) {
     return {

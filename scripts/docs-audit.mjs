@@ -9,7 +9,7 @@ import { buildAuditPacket, renderAuditPacket } from "./docs-audit-helpers.mjs";
 import {
   buildDocumentationInventory,
   trackedDocumentationFiles,
-} from "./docs-index-helpers.mjs";
+} from "./context/docs-index-helpers.mjs";
 
 function parseArgs(argv) {
   const options = {

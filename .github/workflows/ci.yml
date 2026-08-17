@@ -1038,9 +1038,9 @@ jobs:
       - name: Deviation threshold drift suite
         run: node scripts/check-deviation-threshold-drift.test.mjs
       - name: Agent context checker unit tests
-        # Behavioral coverage of scripts/check-agent-context.mjs's pure
+        # Behavioral coverage of scripts/context/check-agent-context.mjs's pure
         # helpers: frontmatter parsing and the last_verified staleness window.
-        run: node scripts/check-agent-context.test.mjs
+        run: node scripts/context/check-agent-context.test.mjs
       - name: Agent context checker
         # Runs the actual check-agent-context.mjs enforcement pass (managed
         # frontmatter + last_verified staleness policy) — the unit tests

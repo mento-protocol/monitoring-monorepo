@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Unit tests for scripts/check-agent-context.mjs.
+ * Unit tests for scripts/context/check-agent-context.mjs.
  *
  * The script itself scans live repo state (git ls-files, real settings/hook
  * files) and exits the process on failure, so it isn't a good target for a
@@ -9,7 +9,7 @@
  * check-agent-context-helpers.mjs directly, plus a small fixture harness for
  * README-specific metadata discovery that lives in the main script.
  *
- * Run: node scripts/check-agent-context.test.mjs
+ * Run: node scripts/context/check-agent-context.test.mjs
  * CI:  .github/workflows/ci.yml  (scripts job)
  */
 

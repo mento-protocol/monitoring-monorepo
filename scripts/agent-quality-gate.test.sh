@@ -190,7 +190,7 @@ run_context_check_expect_failure() {
   NODE_ENV=test \
     AGENT_CONTEXT_CODEX_HOOKS_FILE="$codex_hooks_fixture" \
     AGENT_CONTEXT_CLAUDE_SETTINGS_FILE="$claude_settings_fixture" \
-    node scripts/check-agent-context.mjs > "$output_file" 2>&1
+    node scripts/context/check-agent-context.mjs > "$output_file" 2>&1
   local exit_code=$?
   set -e
 
@@ -598,7 +598,7 @@ assert_turbo_task_has_input "react-doctor:score" '$TURBO_ROOT$/.node-version'
 assert_turbo_task_has_input "react-doctor:score" '$TURBO_ROOT$/turbo.json'
 
 printf 'scratch\n' > "$untracked_skill_artifact"
-node scripts/check-agent-context.mjs > "$output_file"
+node scripts/context/check-agent-context.mjs > "$output_file"
 assert_contains "Agent context check passed"
 rm -f "$untracked_skill_artifact"
 
@@ -755,7 +755,7 @@ validator_repo="$(mktemp -d)"
   "scripts": {
     "agent:quality-gate": "true",
     "agent:quality-gate:test": "bash scripts/agent-quality-gate.test.sh",
-    "agent:context-check": "node scripts/check-agent-context.mjs",
+    "agent:context-check": "node scripts/context/check-agent-context.mjs",
     "agent:autoreview": "./scripts/agent-autoreview.sh",
     "agent:prewarm": "node scripts/agent-prewarm.mjs",
     "agent:prewarm:test": "node scripts/agent-prewarm.test.mjs",
@@ -976,7 +976,7 @@ package_json_repo="$(mktemp -d)"
   "scripts": {
     "agent:quality-gate": "./scripts/agent-quality-gate.sh",
     "agent:quality-gate:test": "bash scripts/agent-quality-gate.test.sh",
-    "agent:context-check": "node scripts/check-agent-context.mjs",
+    "agent:context-check": "node scripts/context/check-agent-context.mjs",
     "agent:autoreview": "./scripts/agent-autoreview.sh",
     "agent:prewarm": "node scripts/agent-prewarm.mjs",
     "agent:prewarm:test": "node scripts/agent-prewarm.test.mjs",
@@ -1040,7 +1040,7 @@ dedupe_quality_gate_alias_repo="$(mktemp -d)"
   "scripts": {
     "agent:quality-gate": "./scripts/agent-quality-gate.sh",
     "agent:quality-gate:test": "bash scripts/agent-quality-gate.test.sh",
-    "agent:context-check": "node scripts/check-agent-context.mjs",
+    "agent:context-check": "node scripts/context/check-agent-context.mjs",
     "agent:autoreview": "./scripts/agent-autoreview.sh",
     "agent:prewarm": "node scripts/agent-prewarm.mjs",
     "agent:prewarm:test": "node scripts/agent-prewarm.test.mjs",
@@ -1090,7 +1090,7 @@ lockfile_script_repo="$(mktemp -d)"
   "scripts": {
     "agent:quality-gate": "./scripts/agent-quality-gate.sh",
     "agent:quality-gate:test": "bash scripts/agent-quality-gate.test.sh",
-    "agent:context-check": "node scripts/check-agent-context.mjs",
+    "agent:context-check": "node scripts/context/check-agent-context.mjs",
     "agent:autoreview": "./scripts/agent-autoreview.sh",
     "agent:prewarm": "node scripts/agent-prewarm.mjs",
     "agent:prewarm:test": "node scripts/agent-prewarm.test.mjs",
@@ -1150,7 +1150,7 @@ pr_ready_state_script_repo="$(mktemp -d)"
   "scripts": {
     "agent:quality-gate": "./scripts/agent-quality-gate.sh",
     "agent:quality-gate:test": "bash scripts/agent-quality-gate.test.sh",
-    "agent:context-check": "node scripts/check-agent-context.mjs",
+    "agent:context-check": "node scripts/context/check-agent-context.mjs",
     "agent:autoreview": "./scripts/agent-autoreview.sh",
     "agent:prewarm": "node scripts/agent-prewarm.mjs",
     "agent:prewarm:test": "node scripts/agent-prewarm.test.mjs",
@@ -1210,7 +1210,7 @@ package_script_repo="$(mktemp -d)"
   "scripts": {
     "agent:quality-gate": "./scripts/agent-quality-gate.sh",
     "agent:quality-gate:test": "bash scripts/agent-quality-gate.test.sh",
-    "agent:context-check": "node scripts/check-agent-context.mjs",
+    "agent:context-check": "node scripts/context/check-agent-context.mjs",
     "postinstall": "node scripts/postinstall.js"
   }
 }
@@ -1248,7 +1248,7 @@ package_scripts_object_repo="$(mktemp -d)"
   "scripts": {
     "agent:quality-gate": "./scripts/agent-quality-gate.sh",
     "agent:quality-gate:test": "bash scripts/agent-quality-gate.test.sh",
-    "agent:context-check": "node scripts/check-agent-context.mjs",
+    "agent:context-check": "node scripts/context/check-agent-context.mjs",
     "postinstall": "node scripts/postinstall.js"
   }
 }
@@ -1283,7 +1283,7 @@ mixed_package_script_repo="$(mktemp -d)"
   "scripts": {
     "agent:quality-gate": "./scripts/agent-quality-gate.sh",
     "agent:quality-gate:test": "bash scripts/agent-quality-gate.test.sh",
-    "agent:context-check": "node scripts/check-agent-context.mjs"
+    "agent:context-check": "node scripts/context/check-agent-context.mjs"
   },
   "dependencies": {
     "left-pad": "1.3.0"
@@ -3752,7 +3752,7 @@ run_gate "pnpm-lock.yaml"
 assert_contains "- node --test scripts/mcp/upstash-mcp-config.test.mjs (Upstash MCP transport contract changed)"
 
 # Any docs markdown may carry canonical: true frontmatter (discovery in
-# check-agent-context.mjs), so a discovered doc path must route through the
+# scripts/context/check-agent-context.mjs), so a discovered doc path must
 # context check locally, not just in CI.
 run_gate "docs/terraform.md"
 assert_contains "- docs"
@@ -3763,7 +3763,7 @@ assert_contains "- agent-context"
 assert_contains "- pnpm agent:context-check (agent context files changed)"
 
 if AGENT_CONTEXT_CODEX_HOOKS_FILE="$codex_hooks_fixture" \
-  node scripts/check-agent-context.mjs > "$output_file" 2>&1; then
+  node scripts/context/check-agent-context.mjs > "$output_file" 2>&1; then
   unscoped_override_status=0
 else
   unscoped_override_status=$?
@@ -4296,17 +4296,17 @@ run_gate "scripts/agent-autoreview-target-guard.test.mjs"
 assert_contains "- pnpm lint:scripts (root build script changed)"
 assert_contains "- pnpm agent:autoreview:test (agent autoreview helper changed)"
 
-run_gate "scripts/check-agent-context.mjs"
+run_gate "scripts/context/check-agent-context.mjs"
 assert_contains "- pnpm agent:context-check (agent context checker changed)"
-assert_contains "- node scripts/check-agent-context.test.mjs (agent context checker changed)"
+assert_contains "- node scripts/context/check-agent-context.test.mjs (agent context checker changed)"
 
-run_gate "scripts/check-agent-context-helpers.mjs"
+run_gate "scripts/context/check-agent-context-helpers.mjs"
 assert_contains "- pnpm agent:context-check (agent context checker changed)"
-assert_contains "- node scripts/check-agent-context.test.mjs (agent context checker changed)"
+assert_contains "- node scripts/context/check-agent-context.test.mjs (agent context checker changed)"
 
-run_gate "scripts/check-agent-context.test.mjs"
+run_gate "scripts/context/check-agent-context.test.mjs"
 assert_contains "- pnpm agent:context-check (agent context checker changed)"
-assert_contains "- node scripts/check-agent-context.test.mjs (agent context checker changed)"
+assert_contains "- node scripts/context/check-agent-context.test.mjs (agent context checker changed)"
 
 run_gate "scripts/mcp/build-upstash-mcp-runtime.mjs"
 assert_contains "- pnpm lint:scripts (root build script changed)"
@@ -4324,15 +4324,15 @@ run_gate "scripts/mcp/render-upstash-mcp-config.mjs"
 assert_contains "- pnpm lint:scripts (root build script changed)"
 assert_contains "- node --test scripts/mcp/upstash-mcp-config.test.mjs (Upstash MCP transport contract changed)"
 
-run_gate "scripts/docs-index.mjs"
+run_gate "scripts/context/docs-index.mjs"
 assert_contains "- pnpm docs:index:test (documentation catalog helper changed)"
 assert_contains "- pnpm docs:index --check (documentation catalog helper changed)"
 assert_contains "- pnpm agent:context-check (documentation catalog metadata contract changed)"
 
-run_gate "scripts/docs-index-helpers.mjs"
+run_gate "scripts/context/docs-index-helpers.mjs"
 assert_contains "- pnpm docs:index:test (documentation catalog helper changed)"
 
-run_gate "scripts/claude-runtime-document-registry.mjs"
+run_gate "scripts/context/claude-runtime-document-registry.mjs"
 assert_contains "- pnpm docs:index:test (documentation catalog helper changed)"
 assert_contains "- pnpm docs:index --check (documentation catalog helper changed)"
 assert_contains "- pnpm agent:context-check (documentation catalog metadata contract changed)"
@@ -4341,7 +4341,7 @@ run_gate "docs/claude-runtime-document-registry.json"
 assert_contains "- pnpm docs:index --check (Claude runtime document registry changed)"
 assert_contains "- pnpm agent:context-check (Claude runtime document registry changed)"
 
-run_gate "scripts/docs-index.test.mjs"
+run_gate "scripts/context/docs-index.test.mjs"
 assert_contains "- pnpm docs:index:test (documentation catalog helper changed)"
 
 run_gate "scripts/docs-audit.mjs"
@@ -4388,6 +4388,11 @@ assert_contains "- pnpm docs:navigation-eval:test (documentation navigation eval
 assert_contains "- pnpm docs:navigation-eval -- --check-fixtures (documentation navigation evaluation changed)"
 assert_occurrences 1 "- pnpm docs:navigation-eval -- --check-fixtures"
 
+run_gate "scripts/lib/gh-issue-lifecycle.mjs"
+assert_contains "- pnpm lint:scripts (root build script changed)"
+assert_contains "- pnpm docs:garden:test (shared GitHub issue lifecycle module changed)"
+assert_contains "- pnpm docs:navigation-eval:test (shared GitHub issue lifecycle module changed)"
+
 run_gate "docs/evals/documentation-navigation-fixtures.json"
 assert_contains "- pnpm docs:navigation-eval:test (documentation navigation evaluation contract changed)"
 assert_contains "- pnpm docs:navigation-eval -- --check-fixtures (documentation navigation evaluation contract changed)"
@@ -4413,11 +4418,11 @@ assert_occurrences 1 "- pnpm docs:navigation-eval -- --check-fixtures"
 run_gate "ui-dashboard/src/app/page.tsx"
 assert_not_contains_mapped "- pnpm docs:navigation-eval -- --check-fixtures"
 
-run_gate "scripts/agent-context-budget.mjs"
+run_gate "scripts/context/agent-context-budget.mjs"
 assert_contains "- pnpm agent:context-budget:test (agent context budget helper changed)"
 assert_contains "- pnpm agent:context-budget --strict (agent context budget helper changed)"
 
-run_gate "scripts/agent-context-budget.test.mjs"
+run_gate "scripts/context/agent-context-budget.test.mjs"
 assert_contains "- pnpm agent:context-budget:test (agent context budget helper changed)"
 
 run_gate "scripts/check-deviation-threshold-drift.mjs"
@@ -4805,7 +4810,8 @@ run_parallel_interrupt_regression() {
     git config user.name "Quality Gate Test"
     mkdir -p bin scripts tools
     printf 'console.log("fixture");\n' > scripts/agent-prewarm.mjs
-    printf 'console.log("fixture");\n' > scripts/agent-context-budget.mjs
+    mkdir -p scripts/context
+    printf 'console.log("fixture");\n' > scripts/context/agent-context-budget.mjs
     cat > tools/trunk <<'STUB'
 #!/usr/bin/env bash
 if [[ "${QG_FAST_RUN:-0}" == "1" ]]; then
@@ -4836,7 +4842,7 @@ STUB
     chmod +x bin/pnpm bin/qg-par-victim bin/qg-par-descendant tools/trunk
     git add .
     git commit -qm init
-    printf 'scripts/agent-prewarm.mjs\nscripts/agent-context-budget.mjs\n' > changed-paths.txt
+    printf 'scripts/agent-prewarm.mjs\nscripts/context/agent-context-budget.mjs\n' > changed-paths.txt
 
     local barrier="$parallel_interrupt_repo/registration"
     local gate_output="$parallel_interrupt_repo/gate-output"
