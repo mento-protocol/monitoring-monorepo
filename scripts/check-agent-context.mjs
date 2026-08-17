@@ -385,7 +385,7 @@ function isCodexSessionEndCommand(command) {
   return (
     /^bash\s+-lc\s+['"]/.test(command) &&
     command.includes("repo=$(git rev-parse --show-toplevel") &&
-    /&&\s+exec\s+bash\s+["']?\$repo\/scripts\/agent-session-end-hook\.sh["']?/.test(
+    /&&\s+exec\s+bash\s+["']?\$repo\/scripts\/bootstrap\/agent-session-end-hook\.sh["']?/.test(
       command,
     )
   );
@@ -393,7 +393,7 @@ function isCodexSessionEndCommand(command) {
 
 function isClaudeSessionEndCommand(command) {
   const scriptPath =
-    /["']\$\{CLAUDE_PROJECT_DIR\}\/scripts\/agent-session-end-hook\.sh["']/;
+    /["']\$\{CLAUDE_PROJECT_DIR\}\/scripts\/bootstrap\/agent-session-end-hook\.sh["']/;
   const directInvocation = new RegExp(
     String.raw`^bash\s+${scriptPath.source}(?:\s|$)`,
   );
@@ -414,8 +414,8 @@ const allowedClaudeBashScriptPermissions = new Set([
   "Bash(bash ./scripts/agent-quality-gate.sh:*)",
   "Bash(bash scripts/agent-quality-gate.test.sh:*)",
   "Bash(bash ./scripts/agent-quality-gate.test.sh:*)",
-  "Bash(bash scripts/agent-session-end-hook.sh:*)",
-  "Bash(bash ./scripts/agent-session-end-hook.sh:*)",
+  "Bash(bash scripts/bootstrap/agent-session-end-hook.sh:*)",
+  "Bash(bash ./scripts/bootstrap/agent-session-end-hook.sh:*)",
   "Bash(bash scripts/check-agent-quality-gate-package-scripts.sh:*)",
   "Bash(bash ./scripts/check-agent-quality-gate-package-scripts.sh:*)",
   "Bash(bash ui-dashboard/scripts/check-react-doctor-diff.sh:*)",
@@ -539,7 +539,7 @@ if (codexHooks) {
   }
   if (!commands.some(isCodexSessionEndCommand)) {
     fail(
-      ".codex/hooks.json: expected SessionEnd command to execute scripts/agent-session-end-hook.sh via resolved repo root",
+      ".codex/hooks.json: expected SessionEnd command to execute scripts/bootstrap/agent-session-end-hook.sh via resolved repo root",
     );
   }
 }
@@ -562,15 +562,17 @@ if (claudeSettings) {
   }
   if (!commands.some(isClaudeSessionEndCommand)) {
     fail(
-      ".claude/settings.json: expected SessionEnd command to execute quoted ${CLAUDE_PROJECT_DIR}/scripts/agent-session-end-hook.sh with bash",
+      ".claude/settings.json: expected SessionEnd command to execute quoted ${CLAUDE_PROJECT_DIR}/scripts/bootstrap/agent-session-end-hook.sh with bash",
     );
   }
 }
 
-const sessionEndHook = readRequired("scripts/agent-session-end-hook.sh");
+const sessionEndHook = readRequired(
+  "scripts/bootstrap/agent-session-end-hook.sh",
+);
 if (sessionEndHook?.includes("/Users/")) {
   fail(
-    "scripts/agent-session-end-hook.sh: hook must derive the repository root instead of hardcoding a local path",
+    "scripts/bootstrap/agent-session-end-hook.sh: hook must derive the repository root instead of hardcoding a local path",
   );
 }
 

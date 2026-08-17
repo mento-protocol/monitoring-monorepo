@@ -17,8 +17,8 @@ Codex Cloud does not inherit a developer's local `~/.agents`, `~/.codex`, or
 cached-container maintenance script as:
 
 ```bash
-./scripts/codex-cloud-setup.sh
-./scripts/codex-cloud-maintenance.sh
+./scripts/bootstrap/codex-cloud-setup.sh
+./scripts/bootstrap/codex-cloud-maintenance.sh
 ```
 
 ## Setup contract

@@ -78,8 +78,8 @@ Codex Cloud does not inherit a developer's local `~/.agents`, `~/.codex`, or
 maintenance scripts as:
 
 ```bash
-./scripts/codex-cloud-setup.sh
-./scripts/codex-cloud-maintenance.sh
+./scripts/bootstrap/codex-cloud-setup.sh
+./scripts/bootstrap/codex-cloud-maintenance.sh
 ```
 
 Both paths rely on the repo-local autoreview helper. GitHub CLI bootstrap,
@@ -101,16 +101,16 @@ in [`documentation-gardening.md`](documentation-gardening.md).
 
 The `.agents/skills/` ↔ `.claude/skills/` mirror is enforced, not just
 documented: `scripts/repo-health/check-skills-mirror.mjs` byte-compares the two
-trees and
-fails on any drift, and the Agent Quality Gate runs it automatically whenever
-either tree changes. Symlinking the trees was rejected — repo files pushed via
-the GitHub Contents API and hosted/web checkouts are not guaranteed to
-preserve symlinks, so a check script is the safer default. Run
+trees and fails on any drift, and the Agent Quality Gate runs it automatically
+whenever either tree changes. Symlinking the trees was rejected — repo files
+pushed via the GitHub Contents API and hosted/web checkouts are not guaranteed
+to preserve symlinks, so a check script is the safer default. Run
 `node scripts/repo-health/check-skills-mirror.mjs` after editing either copy.
 
 ## SessionEnd hook
 
-`scripts/agent-session-end-hook.sh` runs on SessionEnd for Claude Code and Codex.
+`scripts/bootstrap/agent-session-end-hook.sh` runs on SessionEnd for Claude Code
+and Codex.
 When the session left commits or working-tree changes, it prints a one-line
 `/reflect` nudge so durable learnings can be routed before context is lost. It is
 silent on no-op sessions.

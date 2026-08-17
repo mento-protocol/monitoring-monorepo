@@ -3695,8 +3695,20 @@ while IFS= read -r path; do
           add_checklist "docs/pr-checklists/terraform-cloudrun.md" "Cloud Run deploy script changed"
           add_command "pnpm agent:context-check" "Cloud Run revision suffix guard changed"
           ;;
-        scripts/agent-session-end-hook.sh)
+        scripts/bootstrap/agent-session-end-hook.sh)
           add_command "pnpm agent:context-check" "agent SessionEnd hook changed"
+          ;;
+        scripts/lib/install-marker.sh)
+          # Sourced by scripts/setup.sh and
+          # scripts/bootstrap/claude-code-web-setup.sh. `bash -n` cannot see the
+          # skip semantics, so route the suite that exercises them.
+          add_command "pnpm agent:quality-gate:test" "shared install-marker fragment changed"
+          ;;
+        scripts/setup.sh|scripts/bootstrap/claude-code-web-setup.sh)
+          # The two install-marker consumers. The suite pins that both still
+          # source the shared fragment and use its hash, which `bash -n` cannot
+          # see, and re-runs the fragment's own behavioral checks.
+          add_command "pnpm agent:quality-gate:test" "install-marker consumer changed"
           ;;
       esac
       ;;

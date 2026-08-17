@@ -15,7 +15,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "if [ -f \"${CLAUDE_PROJECT_DIR}/scripts/agent-session-end-hook.sh\" ]; then bash \"${CLAUDE_PROJECT_DIR}/scripts/agent-session-end-hook.sh\"; fi"
+            "command": "if [ -f \"${CLAUDE_PROJECT_DIR}/scripts/bootstrap/agent-session-end-hook.sh\" ]; then bash \"${CLAUDE_PROJECT_DIR}/scripts/bootstrap/agent-session-end-hook.sh\"; fi"
           }
         ]
       }
@@ -30,8 +30,8 @@
       "Bash(bash ./scripts/agent-quality-gate.sh:*)",
       "Bash(bash scripts/agent-quality-gate.test.sh:*)",
       "Bash(bash ./scripts/agent-quality-gate.test.sh:*)",
-      "Bash(bash scripts/agent-session-end-hook.sh:*)",
-      "Bash(bash ./scripts/agent-session-end-hook.sh:*)",
+      "Bash(bash scripts/bootstrap/agent-session-end-hook.sh:*)",
+      "Bash(bash ./scripts/bootstrap/agent-session-end-hook.sh:*)",
       "Bash(bash scripts/check-agent-quality-gate-package-scripts.sh:*)",
       "Bash(bash ./scripts/check-agent-quality-gate-package-scripts.sh:*)",
       "Bash(bash ui-dashboard/scripts/check-react-doctor-diff.sh:*)",
