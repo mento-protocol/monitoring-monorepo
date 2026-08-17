@@ -129,29 +129,14 @@ in the PR that moves a file. Every surface there is mandatory.
   print, upload, or cache either plan form. The guarded first-service bootstrap
   plans below are a deploy-only exception. See
   [ADR 0061](../docs/adr/0061-exact-plan-guard-for-manual-platform-applies.md).
-- `pnpm tf:test` owns the deployment source-staging contract. It allows exactly
-  five literal checked-in `gcloud builds submit` / `gcloud app deploy` callsites
-  with their source-staging flag and value; pins both Metrics Bridge submit
-  paths to the checked-in `cloudbuild.yaml`; rejects CLI service-account
-  overrides; verifies that config's exact builder identity and logging mode;
-  limits direct Cloud Build source-object reads to the Alloy and Metrics Bridge
-  builders, excluding default Compute; and scopes the App Engine uploader and
-  default AppSpot Storage Admin grants to the service-owned
-  `staging.<project>.appspot.com` bucket. Before building, the direct Metrics
-  Bridge bootstrap must reconcile the builder's project roles, repository
-  writer, developer act-as bindings, build-log reader, dedicated-builder source
-  readers, and Peg-policy bucket IAM; target the two reader instances, never
-  their whole `for_each` collection, so a routine deploy cannot enact a pending
-  sibling removal reserved for a reviewed platform apply; fail closed on an
-  existing service whose exact name it cannot verify, and not target that
-  service; take separate no-refresh saved plans accepted by
-  `check-metrics-bridge-bootstrap-plan.mjs` for a first service create and an
-  interrupted public-binding create; and verify Terraform state, the live
-  service, and its public binding.
-  [ADR 0053](../docs/adr/0053-explicit-deployment-source-staging.md) owns the
-  supported static syntax and explicit proof limits. Keep indirect or dynamic
-  deploy forms forbidden and inert examples confined to
+- `pnpm tf:test` enforces the deployment source-staging contract: the five
+  allowed `gcloud builds submit` / `gcloud app deploy` callsites, the Metrics
+  Bridge build config, its guarded no-refresh bootstrap plans, and the staging
+  bucket IAM. Never add a callsite, an indirect or dynamic deploy form, or a CLI
+  service-account override, and keep inert examples in
   `scripts/deploy-staging-contract.test.mjs`.
+  [ADR 0053](../docs/adr/0053-explicit-deployment-source-staging.md) owns the
+  contract, its supported static syntax, and its explicit proof limits.
 
 ## Verification
 
