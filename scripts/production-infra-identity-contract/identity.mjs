@@ -24,7 +24,7 @@ import {
   sameSortedValues,
   stringAttribute,
   topLevelBlockKey,
-} from "./hcl.mjs";
+} from "../lib/hcl.mjs";
 
 const EXPECTED_PROVIDER_BLOCKS = new Set([
   "terraform/ci-wif.tf:google_iam_workload_identity_pool_provider.github",

@@ -4141,8 +4141,18 @@ while IFS= read -r path; do
   # every complete-inventory input plus the contract implementation itself.
   # Keep this after the specialized cases so ci.yml/infra.yml retain their
   # more specific command reasons while `add_command` deduplicates the run.
+  #
+  # `scripts/lib/*.mjs` covers the shared parsing cores the contract imports
+  # from outside its own directory (ADR 0064): `hcl.mjs` backs all five
+  # contract clusters plus the ADR 0053 deploy-staging contract, and
+  # `workflow-yaml.mjs` backs the workflow and refresh-routing checks. The
+  # unconditional real-tree sweep further down already runs `pnpm tf:test` for
+  # any non-empty change set, so this arm does not decide whether the suite
+  # runs — it names the reason and keeps the routing correct if that sweep is
+  # ever narrowed. The glob is deliberately wider than the two files so a
+  # future shared core added to `scripts/lib/` cannot land unrouted.
   case "$path" in
-    terraform/*|aegis/terraform/*|alerts/infra/*|alerts/rules/*|governance-watchdog/infra/*|.github/workflows/*|scripts/production-infra-identity-contract/*.mjs|scripts/sanitize-terraform-output.sh|scripts/verify-github-environment-protection.mjs)
+    terraform/*|aegis/terraform/*|alerts/infra/*|alerts/rules/*|governance-watchdog/infra/*|.github/workflows/*|scripts/production-infra-identity-contract/*.mjs|scripts/lib/*.mjs|scripts/sanitize-terraform-output.sh|scripts/verify-github-environment-protection.mjs)
       add_command "pnpm tf:test" "production infrastructure identity contract surface changed"
       ;;
   esac

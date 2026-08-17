@@ -11,7 +11,7 @@ import {
   nestedBlocks,
   terraformTopLevelBlocks,
   topLevelBlockKey,
-} from "./production-infra-identity-contract/hcl.mjs";
+} from "./lib/hcl.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export const PUBLICATION_FILES = [

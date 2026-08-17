@@ -183,6 +183,12 @@ jobs:
               - scripts/check-peg-policy-publication.mjs
               - scripts/check-peg-policy-publication.test.mjs
               - scripts/production-infra-identity-contract/**
+              # Shared parsing cores the contract and the deploy-staging
+              # contract both import (ADR 0064). They sit outside the
+              # production-infra-identity-contract/** prefix above, so they need
+              # their own entries or a parser change stops firing these jobs.
+              - scripts/lib/hcl.mjs
+              - scripts/lib/workflow-yaml.mjs
               - scripts/terraform-fmt-check.mjs
               - scripts/tf-platform-plan-guard.mjs
               - scripts/tf-stacks.mjs

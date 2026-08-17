@@ -128,7 +128,17 @@ action is create. It then applies the exact checked plan.
   [ADR 0054](0054-same-project-peg-policy-artifact.md)
 - Controller and authoritative policies:
   [`terraform/peg-policy.tf`](../../terraform/peg-policy.tf)
-- Fail-closed regression contract:
-  [`scripts/production-infra-identity-contract/peg-policy.mjs`](../../scripts/production-infra-identity-contract/peg-policy.mjs)
+- Fail-closed regression contract, split by concern under
+  `scripts/production-infra-identity-contract/` and reached through
+  [`index.mjs`](../../scripts/production-infra-identity-contract/index.mjs):
+  [`peg-policy-constants.mjs`](../../scripts/production-infra-identity-contract/peg-policy-constants.mjs),
+  [`peg-policy-bucket.mjs`](../../scripts/production-infra-identity-contract/peg-policy-bucket.mjs),
+  [`peg-policy-publication.mjs`](../../scripts/production-infra-identity-contract/peg-policy-publication.mjs),
+  and
+  [`peg-policy-runtime.mjs`](../../scripts/production-infra-identity-contract/peg-policy-runtime.mjs).
+  They parse HCL through the shared
+  [`scripts/lib/hcl.mjs`](../../scripts/lib/hcl.mjs) core
+  ([ADR 0064](0064-scripts-module-directories.md)); the assertions themselves are
+  unchanged.
 - Recovery runbook: [`docs/terraform.md`](../terraform.md)
 - Issue: [#1444](https://github.com/mento-protocol/monitoring-monorepo/issues/1444)

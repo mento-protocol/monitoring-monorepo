@@ -17,7 +17,7 @@ garden_lane: agent-entry-points
 ## Scope
 
 `scripts/` contains deploy wrappers, agent quality gates, code-health checks,
-and repo maintenance utilities. 188 files sit flat at the top level today.
+and repo maintenance utilities. 190 files sit flat at the top level today.
 
 ## Target Layout
 
@@ -40,8 +40,17 @@ Until a phase merges, its files are flat.
 | `terraform/`    | P10   | movable Terraform guards and helpers   |
 | `gate/`         | P11   | quality-gate satellites                |
 
-Landed: P1, P6. `lib/` (the shared tier; P7 adds to it) and
+Landed: P1, P6, P7. `lib/` (the shared tier) and
 `production-infra-identity-contract/` predate the reorganization.
+
+`lib/` holds generic cores carrying no domain policy: `hcl.mjs` (Terraform HCL
+tokenizer and block extraction), `workflow-yaml.mjs` (Actions workflow and
+shell-run parsing), and `pnpm-override-selector.mjs` (pnpm override selectors).
+Five files outside `production-infra-identity-contract/` read `hcl.mjs`, the
+ADR 0053 deploy-staging contract reads `workflow-yaml.mjs`, and both the
+lockfile-lint gate and the override prune advisor read the selector parser, so
+none belongs in a domain directory. Inventories, pinned hashes, and expected
+identities stay with their domain.
 
 ## Why Files Stay Flat
 
@@ -59,41 +68,32 @@ that mechanism moves with it, in the same PR.
   equality both ways. A moved or renamed suite fails the gate closed.
 - **Enumerated workflow paths-filters.** 22 of the 32 files in
   `.github/workflows/` pin a `scripts/` path. `ci.yml` (`autoreviewSuite`,
-  `autoreviewRootRuntime`, and `versionSkew`; `rootScripts` is the recursive
-  `scripts/**`), `infra.yml`, `alerts-rules.yml`,
-  `peg-policy-publication.yml`, and `schema-diff.yml` list individual files. A
-  miss is silent: the job stops running and the required `ci` sentinel stays
-  green. Where a filter's file set is one whole module, `scripts/<module>/**`
-  is the safer pin — `supply-chain.yml` uses it.
+  `autoreviewRootRuntime`, `versionSkew`; `rootScripts` is the recursive
+  `scripts/**`), `infra.yml`, `alerts-rules.yml`, `peg-policy-publication.yml`,
+  and `schema-diff.yml` list individual files. The three terraform filters
+  (`ci.yml` `terraform`; `infra.yml` push and `pull_request`) also name
+  `scripts/lib/hcl.mjs` and `scripts/lib/workflow-yaml.mjs`, outside the
+  recursive `scripts/production-infra-identity-contract/**`; `routing.test.mjs`
+  there asserts all three. A miss is silent — the job stops running while the
+  required `ci` sentinel stays green. ADR 0064 covers when a module glob such as
+  `supply-chain.yml`'s `scripts/supply-chain/**` is the safer pin.
 - **Production infrastructure contract pins.**
   `production-infra-identity-contract/workflow-inventory.mjs` pins exact script
   paths for the workflows it audits.
 - **Reviewed-artifact byte pins.** `.gitattributes` pins
   `scripts/mcp/upstash-mcp-launcher.mjs` to `text eol=lf`, and
   `UPSTASH_MCP_LAUNCHER_SHA256` in `scripts/mcp/render-upstash-mcp-config.mjs`
-  hashes that file. Any launcher edit, including a depth fix forced by a move,
-  changes the hash: recompute it, update
-  `docs/notes/upstash-mcp-operator.md`, and tell operators to re-run the
-  renderer — their Codex TOML embeds the launcher path and hash.
+  hashes it — a move's depth fix alone changes both. Procedure:
+  [`docs/notes/upstash-mcp-operator.md`](../docs/notes/upstash-mcp-operator.md).
 
 **Any new pin of a `scripts/` path must be listed in this file.** An unrecorded
 pin breaks silently on the next move.
 
 ## Sweep Checklist for a Move
 
-Run every item in the PR that moves a file.
-
-1. Root `package.json` — 73 entries reference `scripts/`.
-2. `check-agent-quality-gate-package-scripts.sh` — pinned alias map.
-3. `.github/workflows/` — 22 of 32 files, including the filters above.
-4. `.trunk/trunk.yaml` — pre-push hook runs `scripts/agent-quality-gate.sh`.
-   Also `.gitattributes`, which pins one script path.
-5. `.claude/settings.json` and its verbatim copy in `check-agent-context.mjs`.
-6. `.claude/skills/` and `.agents/skills/` — both mirrors.
-7. `docs/notes/quick-commands.md`.
-8. `agent-quality-gate.sh` routing arms — a literal-prefix glob such as
-   `scripts/deploy-*.sh` or `scripts/sentry-*.test.mjs` stops matching one
-   directory down. Keep the basename prefix; add the paired one-level arm.
+Work the eight-surface checklist in
+[ADR 0064](../docs/adr/0064-scripts-module-directories.md#sweep-checklist-for-a-move)
+in the PR that moves a file. Every surface there is mandatory.
 
 ## Operating Rules
 
