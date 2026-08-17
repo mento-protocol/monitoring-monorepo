@@ -190,6 +190,7 @@ Authority: canonical
 - [`docs/adr/0061-exact-plan-guard-for-manual-platform-applies.md`](adr/0061-exact-plan-guard-for-manual-platform-applies.md) — Manual platform applies use an exact private plan guard
 - [`docs/adr/0062-sentry-suites-self-run-gate.md`](adr/0062-sentry-suites-self-run-gate.md) — An unconditional gate job runs the Sentry suites and proves from their output that they asserted
 - [`docs/adr/0063-dashboard-grafana-history-read-access.md`](adr/0063-dashboard-grafana-history-read-access.md) — Peg history reads Grafana Cloud through a dedicated read-only token
+- [`docs/adr/0064-scripts-module-directories.md`](adr/0064-scripts-module-directories.md) — scripts/ may use module subdirectories; basenames and pinned paths are the constraint
 
 Authority: non-canonical
 
