@@ -95,13 +95,13 @@ starts.
 For a Codex Cloud environment, configure the environment setup script to run:
 
 ```bash
-./scripts/codex-cloud-setup.sh
+./scripts/bootstrap/codex-cloud-setup.sh
 ```
 
 Also configure the optional maintenance script for cached container resumes:
 
 ```bash
-./scripts/codex-cloud-maintenance.sh
+./scripts/bootstrap/codex-cloud-maintenance.sh
 ```
 
 These scripts perform the frozen install, Envio codegen, agent-context checks,

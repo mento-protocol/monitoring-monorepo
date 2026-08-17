@@ -17,7 +17,7 @@ garden_lane: agent-entry-points
 ## Scope
 
 `scripts/` contains deploy wrappers, agent quality gates, code-health checks,
-and repo maintenance utilities. 210 files sit flat at the top level today.
+and repo maintenance utilities. 205 files sit flat at the top level today.
 
 ## Target Layout
 
@@ -26,26 +26,27 @@ subdirectories here. Each lands in one PR across phases P1–P13 of the scripts
 reorganization ([issue 1877](https://github.com/mento-protocol/monitoring-monorepo/issues/1877)).
 Until a phase merges, its files are flat.
 
-| Directory       | Phase | Holds                                  |
-| --------------- | ----- | -------------------------------------- |
-| `workflows/`    | P1    | scripts backing Actions workflow jobs  |
-| `bootstrap/`    | P2    | clone, worktree, hosted-session setup  |
-| `context/`      | P3    | agent context, budget, skill mirrors   |
-| `docs/`         | P4    | catalog, audit, garden, nav eval       |
-| `pr/`           | P5    | PR and issue state projections         |
-| `supply-chain/` | P6    | lockfile, audit, pin, skew gates       |
-| `mcp/`          | P6    | MCP broker, launcher, config rendering |
-| `alerts/`       | P8    | alert-rule lint, peg-policy checks     |
-| `repo-health/`  | P9    | code-health, file-size, lint wrappers  |
-| `terraform/`    | P10   | movable Terraform guards and helpers   |
-| `gate/`         | P11   | quality-gate satellites                |
+| Directory       | Phase | Holds                                       |
+| --------------- | ----- | ------------------------------------------- |
+| `workflows/`    | P1    | scripts backing Actions workflow jobs       |
+| `bootstrap/`    | P2    | container and hosted-session setup — landed |
+| `context/`      | P3    | agent context, budget, skill mirrors        |
+| `docs/`         | P4    | catalog, audit, garden, nav eval            |
+| `pr/`           | P5    | PR and issue state projections              |
+| `supply-chain/` | P6    | lockfile, audit, pin, skew gates            |
+| `mcp/`          | P6    | MCP broker, launcher, config rendering      |
+| `alerts/`       | P8    | alert-rule lint, peg-policy checks          |
+| `repo-health/`  | P9    | code-health, file-size, lint wrappers       |
+| `terraform/`    | P10   | movable Terraform guards and helpers        |
+| `gate/`         | P11   | quality-gate satellites                     |
 
 `lib/` (the shared tier; P7 adds to it) and
-`production-infra-identity-contract/` exist today.
+`production-infra-identity-contract/` exist today. `setup.sh` stays flat: the
+worktree runbooks and eight docs name that exact path.
 
 ## Why Files Stay Flat
 
-Five mechanisms pin `scripts/` paths. A file one of them names moves only when
+Six mechanisms pin `scripts/` paths. A file one of them names moves only when
 that mechanism moves with it, in the same PR.
 
 - **Autoreview runtime materialization.** `agent-autoreview.sh` names its
@@ -65,6 +66,11 @@ that mechanism moves with it, in the same PR.
 - **Production infrastructure contract pins.**
   `production-infra-identity-contract/workflow-inventory.mjs` pins exact script
   paths for the workflows it audits.
+- **External console pins.** The Codex Cloud environment console holds the
+  setup and maintenance script paths, and Claude Code on the web resolves
+  `bootstrap/claude-code-web-setup.sh` through `.claude/hooks/session-start.sh`.
+  No repo grep reaches the console: moving `bootstrap/codex-cloud-setup.sh` or
+  `bootstrap/codex-cloud-maintenance.sh` needs an operator edit there.
 
 **Any new pin of a `scripts/` path must be listed in this file.** An unrecorded
 pin breaks silently on the next move.
@@ -77,7 +83,8 @@ Run every item in the PR that moves a file.
 2. `check-agent-quality-gate-package-scripts.sh` — pinned alias map.
 3. `.github/workflows/` — 22 of 32 files, including the filters above.
 4. `.trunk/trunk.yaml` — pre-push hook runs `scripts/agent-quality-gate.sh`.
-5. `.claude/settings.json` and its verbatim copy in `check-agent-context.mjs`.
+5. `.claude/settings.json`, `.codex/hooks.json`, and their verbatim copies and
+   invocation regexes in `check-agent-context.mjs`.
 6. `.claude/skills/` and `.agents/skills/` — both mirrors.
 7. `docs/notes/quick-commands.md`.
 8. `agent-quality-gate.sh` routing arms — a literal-prefix glob such as

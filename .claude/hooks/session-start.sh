@@ -46,7 +46,7 @@ if [ -n "$HOOK_INPUT" ]; then
 fi
 
 REPO_ROOT="${CLAUDE_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
-SETUP_SCRIPT="$REPO_ROOT/scripts/claude-code-web-setup.sh"
+SETUP_SCRIPT="$REPO_ROOT/scripts/bootstrap/claude-code-web-setup.sh"
 
 if [ ! -f "$SETUP_SCRIPT" ]; then
   echo "claude-code-web SessionStart: $SETUP_SCRIPT missing; skipping bootstrap." >&2
