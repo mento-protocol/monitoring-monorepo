@@ -172,7 +172,7 @@ jobs:
 
       - name: Deviation threshold drift check
         working-directory: ${{ github.workspace }}
-        run: node scripts/check-deviation-threshold-drift.mjs
+        run: node scripts/alerts/check-deviation-threshold-drift.mjs
 
       - name: Authenticate PR plan to Google Cloud
         if: github.event_name == 'pull_request'

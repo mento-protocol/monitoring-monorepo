@@ -2630,7 +2630,7 @@ map_lockfile_importer_to_bundle() {
 route_lockfile_change() {
   add_surface "workspace"
   add_preflight_command "pnpm install --frozen-lockfile" "workspace dependency/config changed"
-  add_command "node scripts/check-peg-registry-integrity.mjs" "root lockfile changed (peg registry authority dependency)"
+  add_command "node scripts/alerts/check-peg-registry-integrity.mjs" "root lockfile changed (peg registry authority dependency)"
 
   local importers
   if lockfile_only_manifest_change && importers="$(lockfile_scoped_importers)"; then
@@ -3305,7 +3305,7 @@ while IFS= read -r path; do
       add_surface "metrics-bridge"
       case "$path" in
         metrics-bridge/peg-registry.json)
-          add_command "node scripts/check-peg-registry-integrity.mjs" "peg registry changed"
+          add_command "node scripts/alerts/check-peg-registry-integrity.mjs" "peg registry changed"
           ;;
       esac
       case "$path" in
@@ -3374,12 +3374,12 @@ while IFS= read -r path; do
       add_ui_size_limit "shared-config exports feed the dashboard bundle"
       case "$path" in
         shared-config/chain-metadata.json|shared-config/deployment-namespaces.json|shared-config/oracle-reporters.json|shared-config/src/chains.ts|shared-config/src/oracle-reporters.ts|shared-config/src/tokens.ts)
-          add_command "node scripts/check-peg-registry-integrity.mjs" "peg registry authority input changed"
+          add_command "node scripts/alerts/check-peg-registry-integrity.mjs" "peg registry authority input changed"
           ;;
       esac
       case "$path" in
         shared-config/src/thresholds.ts)
-          add_command "node scripts/check-deviation-threshold-drift.mjs" "shared deviation threshold source changed"
+          add_command "node scripts/alerts/check-deviation-threshold-drift.mjs" "shared deviation threshold source changed"
           add_command "pnpm --filter @mento-protocol/indexer-envio exec vitest run deviationThresholdSharedConfigSync" "shared deviation threshold source changed"
           ;;
         shared-config/deployment-namespaces.json|shared-config/fx-calendar.json)
@@ -3475,10 +3475,10 @@ while IFS= read -r path; do
       add_command "pnpm alerts:rules:lint" "alerts/rules PromQL lint + metric cross-check"
       case "$path" in
         alerts/rules/peg-thresholds.json)
-          add_command "node scripts/check-peg-registry-integrity.mjs" "peg threshold policy changed"
+          add_command "node scripts/alerts/check-peg-registry-integrity.mjs" "peg threshold policy changed"
           ;;
         alerts/rules/main.tf|alerts/rules/rules-fpmms.tf)
-          add_command "node scripts/check-deviation-threshold-drift.mjs" "deviation threshold Terraform consumer changed"
+          add_command "node scripts/alerts/check-deviation-threshold-drift.mjs" "deviation threshold Terraform consumer changed"
           ;;
       esac
       ;;
@@ -3993,22 +3993,37 @@ while IFS= read -r path; do
         scripts/filter-envio-runtime-errors.mjs|scripts/filter-envio-runtime-errors.test.mjs)
           add_command "node scripts/filter-envio-runtime-errors.test.mjs" "indexer runtime-log filter changed"
           ;;
-        scripts/alert-rules-lint.mjs|scripts/alert-rules-lint.test.mjs)
+        scripts/alerts/alert-rules-lint.mjs|scripts/alerts/alert-rules-lint-extract.mjs|scripts/alerts/alert-rules-lint-peg-policy.mjs|scripts/alerts/alert-rules-lint.test.mjs)
           add_command "pnpm alerts:rules:lint:test" "alert-rules lint helper changed"
           ;;
-        scripts/check-peg-registry-integrity.mjs|scripts/check-peg-registry-integrity.test.mjs)
-          add_command "node scripts/check-peg-registry-integrity.mjs" "peg registry integrity checker changed"
-          add_command "node scripts/check-peg-registry-integrity.test.mjs" "peg registry integrity checker changed"
+        scripts/alerts/check-peg-registry-integrity.mjs|scripts/alerts/check-peg-registry-integrity-lineage.mjs|scripts/alerts/check-peg-registry-integrity.test.mjs)
+          add_command "node scripts/alerts/check-peg-registry-integrity.mjs" "peg registry integrity checker changed"
+          add_command "node scripts/alerts/check-peg-registry-integrity.test.mjs" "peg registry integrity checker changed"
+          ;;
+        # The publication boundary's only suite runs inside `pnpm tf:test`,
+        # which the unconditional real-tree sweep further down already routes.
+        # Naming it here keeps the reason honest and the routing correct if that
+        # sweep is ever narrowed.
+        scripts/alerts/check-peg-policy-publication.mjs|scripts/alerts/check-peg-policy-publication.test.mjs)
+          add_command "pnpm tf:test" "peg policy publication boundary changed"
+          ;;
+        # The peg policy version-digest contract. Both peg validators compare a
+        # version string against this one implementation, so a change here has
+        # to run both or the halves can disagree undetected.
+        scripts/lib/peg-policy-digest.mjs)
+          add_command "pnpm alerts:rules:lint:test" "peg policy version digest changed"
+          add_command "node scripts/alerts/check-peg-registry-integrity.mjs" "peg policy version digest changed"
+          add_command "node scripts/alerts/check-peg-registry-integrity.test.mjs" "peg policy version digest changed"
           ;;
         scripts/check-pr-description.mjs|scripts/check-pr-description.test.mjs)
           add_command "node scripts/check-pr-description.test.mjs" "PR description validator changed"
           ;;
-        scripts/check-deviation-threshold-drift.mjs)
-          add_command "node scripts/check-deviation-threshold-drift.mjs" "deviation threshold drift checker changed"
-          add_command "node scripts/check-deviation-threshold-drift.test.mjs" "deviation threshold drift checker changed"
+        scripts/alerts/check-deviation-threshold-drift.mjs)
+          add_command "node scripts/alerts/check-deviation-threshold-drift.mjs" "deviation threshold drift checker changed"
+          add_command "node scripts/alerts/check-deviation-threshold-drift.test.mjs" "deviation threshold drift checker changed"
           ;;
-        scripts/check-deviation-threshold-drift.test.mjs)
-          add_command "node scripts/check-deviation-threshold-drift.test.mjs" "deviation threshold drift checker test changed"
+        scripts/alerts/check-deviation-threshold-drift.test.mjs)
+          add_command "node scripts/alerts/check-deviation-threshold-drift.test.mjs" "deviation threshold drift checker test changed"
           ;;
         scripts/notify-terraform-apply.mjs|scripts/notify-terraform-apply.test.mjs)
           add_command "node scripts/notify-terraform-apply.test.mjs" "Terraform apply Slack notifier changed"
@@ -4141,7 +4156,9 @@ while IFS= read -r path; do
   # any non-empty change set, so this arm does not decide whether the suite
   # runs — it names the reason and keeps the routing correct if that sweep is
   # ever narrowed. The glob is deliberately wider than the two files so a
-  # future shared core added to `scripts/lib/` cannot land unrouted.
+  # future shared core added to `scripts/lib/` cannot land unrouted; the cost is
+  # that a core the contract does not read, such as `peg-policy-digest.mjs`,
+  # also gets this reason. Its own arm above routes the two peg suites.
   case "$path" in
     terraform/*|aegis/terraform/*|alerts/infra/*|alerts/rules/*|governance-watchdog/infra/*|.github/workflows/*|scripts/production-infra-identity-contract/*.mjs|scripts/lib/*.mjs|scripts/sanitize-terraform-output.sh|scripts/verify-github-environment-protection.mjs)
       add_command "pnpm tf:test" "production infrastructure identity contract surface changed"

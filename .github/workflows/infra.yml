@@ -20,12 +20,17 @@ on:
       - terraform.stacks.json
       - scripts/check-metrics-bridge-template-plan.mjs
       - scripts/check-metrics-bridge-template-plan.test.mjs
-      - scripts/check-peg-policy-publication.mjs
-      - scripts/check-peg-policy-publication.test.mjs
+      - scripts/alerts/check-peg-policy-publication.mjs
+      - scripts/alerts/check-peg-policy-publication.test.mjs
       - scripts/production-infra-identity-contract/**
       # Shared parsing cores (ADR 0064) that sit outside the prefix above.
       - scripts/lib/hcl.mjs
       - scripts/lib/workflow-yaml.mjs
+      # Modules the peg registry integrity checker imports. The stack registry
+      # counts them as Peg policy publication inputs, so this filter has to be
+      # able to reach that stack inventory.
+      - scripts/alerts/check-peg-registry-integrity-lineage.mjs
+      - scripts/lib/peg-policy-digest.mjs
       - scripts/terraform-fmt-check.mjs
       - scripts/tf-platform-plan-guard.mjs
       - scripts/tf-stacks.mjs
@@ -52,12 +57,17 @@ on:
       - terraform.stacks.json
       - scripts/check-metrics-bridge-template-plan.mjs
       - scripts/check-metrics-bridge-template-plan.test.mjs
-      - scripts/check-peg-policy-publication.mjs
-      - scripts/check-peg-policy-publication.test.mjs
+      - scripts/alerts/check-peg-policy-publication.mjs
+      - scripts/alerts/check-peg-policy-publication.test.mjs
       - scripts/production-infra-identity-contract/**
       # Shared parsing cores (ADR 0064) that sit outside the prefix above.
       - scripts/lib/hcl.mjs
       - scripts/lib/workflow-yaml.mjs
+      # Modules the peg registry integrity checker imports. The stack registry
+      # counts them as Peg policy publication inputs, so this filter has to be
+      # able to reach that stack inventory.
+      - scripts/alerts/check-peg-registry-integrity-lineage.mjs
+      - scripts/lib/peg-policy-digest.mjs
       - scripts/terraform-fmt-check.mjs
       - scripts/tf-platform-plan-guard.mjs
       - scripts/tf-stacks.mjs

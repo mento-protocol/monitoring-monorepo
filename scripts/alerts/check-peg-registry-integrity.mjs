@@ -1,14 +1,25 @@
 #!/usr/bin/env node
 
-import { createHash } from "node:crypto";
-import { execFileSync, spawnSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import {
+  POLICY_VERSION_DIGEST_PATTERN,
+  pegPolicyVersionDigest,
+} from "../lib/peg-policy-digest.mjs";
+import {
+  inferredPolicyBaseRef,
+  isRecord,
+  printable,
+  readPolicyFromGit,
+  validatePegPolicyLineage,
+} from "./check-peg-registry-integrity-lineage.mjs";
+
+export { pegPolicyVersionDigest, validatePegPolicyLineage };
 
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
-const REPO_ROOT = resolve(dirname(SCRIPT_PATH), "..");
+const REPO_ROOT = resolve(dirname(SCRIPT_PATH), "..", "..");
 const DEFAULT_REGISTRY_PATH = resolve(
   REPO_ROOT,
   "metrics-bridge/peg-registry.json",
@@ -17,7 +28,6 @@ const DEFAULT_POLICY_PATH = resolve(
   REPO_ROOT,
   "alerts/rules/peg-thresholds.json",
 );
-const POLICY_REPO_PATH = "alerts/rules/peg-thresholds.json";
 const EVM_ADDRESS = /^0x[0-9a-f]{40}$/;
 const SOURCE_ID = /^[a-z][a-z0-9_]{2,63}$/;
 const COVERAGE_CLASS = "cex-book+indexed-pool";
@@ -37,94 +47,6 @@ const POLICY_SOURCE_NUMBER_FIELDS = [
 ];
 const POLICY_AUTHORITIES = new Set(["deep", "secondary", "display"]);
 const POLICY_VERSION_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/;
-const POLICY_VERSION_DIGEST_PATTERN = /-([0-9a-f]{32})$/;
-
-function isRecord(value) {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function recursivelySortObjectKeys(value) {
-  if (Array.isArray(value)) return value.map(recursivelySortObjectKeys);
-  if (!isRecord(value)) return value;
-  return Object.fromEntries(
-    Object.keys(value)
-      .sort()
-      .map((key) => [key, recursivelySortObjectKeys(value[key])]),
-  );
-}
-
-export function pegPolicyVersionDigest(policyVersion) {
-  if (!isRecord(policyVersion)) return null;
-  const content = Object.fromEntries(
-    Object.entries(policyVersion).filter(([key]) => key !== "version"),
-  );
-  return createHash("sha256")
-    .update(JSON.stringify(recursivelySortObjectKeys(content)))
-    .digest("hex")
-    .slice(0, 32);
-}
-
-function policyVersionFingerprint(policyVersion) {
-  return JSON.stringify(recursivelySortObjectKeys(policyVersion));
-}
-
-export function validatePegPolicyLineage(basePolicy, policy) {
-  const errors = [];
-  if (!isRecord(basePolicy?.active) || !isRecord(policy?.active)) {
-    return ["policy lineage: base and candidate must contain active versions"];
-  }
-
-  const baseActive = basePolicy.active;
-  const nextActive = policy.active;
-  const sameActiveVersion = baseActive.version === nextActive.version;
-  if (!sameActiveVersion) {
-    if (basePolicy.previous !== null) {
-      errors.push(
-        `policy.active: rollover ${printable(baseActive.version)} -> ${printable(nextActive.version)} requires ACK cleanup of the retained predecessor before another active rollover`,
-      );
-      return errors;
-    }
-    if (
-      !isRecord(policy.previous) ||
-      policyVersionFingerprint(policy.previous) !==
-        policyVersionFingerprint(baseActive)
-    ) {
-      errors.push(
-        `policy.previous: active rollover ${printable(baseActive.version)} -> ${printable(nextActive.version)} must retain the complete prior active version`,
-      );
-    }
-    return errors;
-  }
-
-  if (
-    policyVersionFingerprint(baseActive) !==
-    policyVersionFingerprint(nextActive)
-  ) {
-    errors.push(
-      `policy.active: version ${printable(nextActive.version)} changed content in place`,
-    );
-  }
-
-  const basePrevious = isRecord(basePolicy.previous)
-    ? basePolicy.previous
-    : null;
-  const nextPrevious = isRecord(policy.previous) ? policy.previous : null;
-  if (basePrevious === null && nextPrevious !== null) {
-    errors.push(
-      `policy.previous: version ${printable(nextActive.version)} reintroduced a retained predecessor without an active rollover`,
-    );
-  } else if (
-    basePrevious !== null &&
-    nextPrevious !== null &&
-    policyVersionFingerprint(basePrevious) !==
-      policyVersionFingerprint(nextPrevious)
-  ) {
-    errors.push(
-      `policy.previous: version ${printable(nextActive.version)} changed its retained predecessor in place`,
-    );
-  }
-  return errors;
-}
 
 function validatePolicyVersionIdentity(version, path, errors) {
   if (
@@ -152,10 +74,6 @@ function validatePolicyVersionIdentity(version, path, errors) {
 function keysWithinLimit(record, limit) {
   const keys = Object.keys(record);
   return { count: keys.length, keys: keys.slice(0, limit).sort() };
-}
-
-function printable(value) {
-  return typeof value === "string" ? `"${value}"` : JSON.stringify(value);
 }
 
 function validateAddress(errors, path, value) {
@@ -780,10 +698,17 @@ export function validatePegRegistryIntegrity({ registry, policy, authority }) {
   return [...new Set(state.errors)].sort();
 }
 
+// `@mento-protocol/config` is a metrics-bridge dependency that pnpm does not
+// hoist to the workspace root, so resolution from this file alone fails. The
+// second base walks the metrics-bridge manifest instead. Both bases are
+// relative to THIS file, so the `../..` prefix has to track the directory
+// depth: from `scripts/alerts/` the repository root is two levels up.
+// Removing the workaround needs a workspace package this file could depend on
+// directly, which the scripts reorganization does not create.
 function configRequire() {
   const bases = [
     import.meta.url,
-    new URL("../metrics-bridge/package.json", import.meta.url),
+    new URL("../../metrics-bridge/package.json", import.meta.url),
   ];
   for (const base of bases) {
     const require = createRequire(base);
@@ -842,72 +767,6 @@ async function readJson(path, label) {
       cause: error,
     });
   }
-}
-
-function validateGitRef(ref) {
-  if (
-    typeof ref !== "string" ||
-    ref.length === 0 ||
-    ref.length > 256 ||
-    ref.startsWith("-") ||
-    !/^[A-Za-z0-9._/-]+$/.test(ref)
-  ) {
-    throw new Error(`invalid policy base ref ${printable(ref)}`);
-  }
-}
-
-function gitObjectExists(specifier) {
-  const result = spawnSync("git", ["cat-file", "-e", specifier], {
-    cwd: REPO_ROOT,
-    encoding: "utf8",
-  });
-  if (result.error) throw result.error;
-  return result.status === 0;
-}
-
-function readPolicyFromGit(baseRef) {
-  validateGitRef(baseRef);
-  try {
-    execFileSync(
-      "git",
-      ["rev-parse", "--verify", "--end-of-options", `${baseRef}^{commit}`],
-      { cwd: REPO_ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
-    );
-  } catch (error) {
-    throw new Error(`cannot resolve policy base ref ${baseRef}`, {
-      cause: error,
-    });
-  }
-  const specifier = `${baseRef}:${POLICY_REPO_PATH}`;
-  if (!gitObjectExists(specifier)) return null;
-  let source;
-  try {
-    source = execFileSync("git", ["show", specifier], {
-      cwd: REPO_ROOT,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-  } catch (error) {
-    throw new Error(`cannot read policy from ${specifier}`, { cause: error });
-  }
-  try {
-    return JSON.parse(source);
-  } catch (error) {
-    throw new Error(`base policy: invalid JSON in ${specifier}`, {
-      cause: error,
-    });
-  }
-}
-
-function inferredPolicyBaseRef() {
-  const explicit = process.env.PEG_POLICY_BASE_REF?.trim();
-  if (explicit) return explicit;
-  const githubBase = process.env.GITHUB_BASE_REF?.trim();
-  if (githubBase) return `origin/${githubBase}`;
-  // Local and hosted callers must prove the base commit exists. The only
-  // valid no-baseline case is a resolved base that does not yet contain the
-  // policy path (the initial introduction); an unavailable ref is an error.
-  return "origin/main";
 }
 
 function summary(registry) {
@@ -1011,7 +870,7 @@ async function main() {
     const options = cliOptions(process.argv.slice(2));
     if (options.help) {
       console.log(
-        "Usage: node scripts/check-peg-registry-integrity.mjs [--registry PATH] [--policy PATH] [--base-policy PATH | --base-ref REF]",
+        "Usage: node scripts/alerts/check-peg-registry-integrity.mjs [--registry PATH] [--policy PATH] [--base-policy PATH | --base-ref REF]",
       );
       return;
     }

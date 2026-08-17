@@ -9,7 +9,7 @@ import { validateDeviationThresholdDrift } from "./check-deviation-threshold-dri
 const THRESHOLDS_PATH = "shared-config/src/thresholds.ts";
 const ALERTS_MAIN_PATH = "alerts/rules/main.tf";
 const FPMM_RULES_PATH = "alerts/rules/rules-fpmms.tf";
-const repoRoot = fileURLToPath(new URL("../", import.meta.url));
+const repoRoot = fileURLToPath(new URL("../../", import.meta.url));
 const relativeScriptPath = relative(
   repoRoot,
   fileURLToPath(

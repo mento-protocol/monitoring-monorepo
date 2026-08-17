@@ -15,7 +15,7 @@ import { fileURLToPath } from "node:url";
 import "./deploy-staging-contract.test.mjs";
 import "./production-infra-identity-contract/index.test.mjs";
 import "./sentry-provider-contract.test.mjs";
-import "./check-peg-policy-publication.test.mjs";
+import "./alerts/check-peg-policy-publication.test.mjs";
 import "./check-metrics-bridge-template-plan.test.mjs";
 
 const repoRoot = path.resolve(

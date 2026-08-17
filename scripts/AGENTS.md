@@ -17,7 +17,7 @@ garden_lane: agent-entry-points
 ## Scope
 
 `scripts/` contains deploy wrappers, agent quality gates, code-health checks,
-and repo maintenance utilities. 201 files sit flat at the top level today.
+and repo maintenance utilities. 193 files sit flat at the top level today.
 
 ## Target Layout
 
@@ -40,20 +40,26 @@ Until a phase merges, its files are flat.
 | `terraform/`    | P10   | movable Terraform guards and helpers   |
 | `gate/`         | P11   | quality-gate satellites                |
 
-Landed: P1, P7. `lib/` (the shared tier) and
+Landed: P1, P7, P8. `lib/` (the shared tier) and
 `production-infra-identity-contract/` predate the reorganization.
 
-`lib/` holds generic cores carrying no domain policy: `hcl.mjs` (Terraform HCL
-tokenizer and block extraction) and `workflow-yaml.mjs` (Actions workflow and
-shell-run parsing). A generic parsing core does not live inside a domain
-directory: five files outside `production-infra-identity-contract/` read
-`hcl.mjs`, and the ADR 0053 deploy-staging contract also reads
-`workflow-yaml.mjs`. Inventories, pinned hashes, and expected identities stay
-with their domain.
+`lib/` holds cores more than one cluster reads. A generic parsing core does not
+live inside a domain directory: five files outside
+`production-infra-identity-contract/` read `hcl.mjs` (Terraform HCL tokenizer),
+and the ADR 0053 deploy-staging contract also reads `workflow-yaml.mjs`
+(Actions workflow and shell-run parsing). `peg-policy-digest.mjs` is the one
+definition of the peg policy version-digest contract both peg validators
+compare against; it sat duplicated in each until P8. Inventories, pinned hashes,
+and expected identities stay with their domain.
+
+`redrive-onchain-deadletter.{mjs,test.mjs}` stays flat although `alerts/infra/`
+owns it: `eslint.config.mjs` ignores `alerts/**`, so moving the pair to its
+owner would drop it out of `lint:scripts`. That ignore resolves against the
+config file, so `scripts/alerts/**` stays linted.
 
 ## Why Files Stay Flat
 
-Five mechanisms pin `scripts/` paths. A file one of them names moves only when
+Six mechanisms pin `scripts/` paths. A file one of them names moves only when
 that mechanism moves with it, in the same PR.
 
 - **Autoreview runtime materialization.** `agent-autoreview.sh` names its
@@ -74,7 +80,11 @@ that mechanism moves with it, in the same PR.
   `pull_request`) also name `scripts/lib/hcl.mjs` and
   `scripts/lib/workflow-yaml.mjs`, which sit outside the recursive
   `scripts/production-infra-identity-contract/**`. `routing.test.mjs` in that
-  directory asserts all three.
+  directory asserts all three. A filter names what its listed files import, so
+  `peg-policy-publication.yml` also carries the three modules its two checkers
+  import.
+- **Terraform stack registry.** `terraform.stacks.json` `changedPathPatterns`
+  pins exact `scripts/` paths per stack, mirrored into the workflow filters.
 - **Production infrastructure contract pins.**
   `production-infra-identity-contract/workflow-inventory.mjs` pins exact script
   paths for the workflows it audits.
@@ -89,11 +99,12 @@ Run every item in the PR that moves a file.
 1. Root `package.json` — 73 entries reference `scripts/`.
 2. `check-agent-quality-gate-package-scripts.sh` — pinned alias map.
 3. `.github/workflows/` — 22 of 32 files, including the filters above.
-4. `.trunk/trunk.yaml` — pre-push hook runs `scripts/agent-quality-gate.sh`.
-5. `.claude/settings.json` and its verbatim copy in `check-agent-context.mjs`.
-6. `.claude/skills/` and `.agents/skills/` — both mirrors.
-7. `docs/notes/quick-commands.md`.
-8. `agent-quality-gate.sh` routing arms — a literal-prefix glob such as
+4. `terraform.stacks.json` — per-stack `changedPathPatterns`.
+5. `.trunk/trunk.yaml` — pre-push hook runs `scripts/agent-quality-gate.sh`.
+6. `.claude/settings.json` and its verbatim copy in `check-agent-context.mjs`.
+7. `.claude/skills/` and `.agents/skills/` — both mirrors.
+8. `docs/notes/quick-commands.md`.
+9. `agent-quality-gate.sh` routing arms — a literal-prefix glob such as
    `scripts/deploy-*.sh` or `scripts/sentry-*.test.mjs` stops matching one
    directory down. Keep the basename prefix; add the paired one-level arm. Its
    contract-surface arm also names `scripts/lib/*.mjs`; that arm sets the
@@ -127,32 +138,18 @@ Run every item in the PR that moves a file.
   upload, or cache either plan form. The guarded first-service bootstrap plans
   below are a separate deploy-only exception. See
   [ADR 0061](../docs/adr/0061-exact-plan-guard-for-manual-platform-applies.md).
-- `pnpm tf:test` owns the deployment source-staging contract. It allows exactly
-  five literal checked-in `gcloud builds submit` / `gcloud app deploy`
-  callsites, including their source-staging flag and value. It also pins both
-  Metrics Bridge submit paths to the checked-in `cloudbuild.yaml`, rejects CLI
-  service-account overrides, and verifies that config's exact builder identity
-  and logging mode. It keeps direct Cloud Build source-object reads limited to
-  the Alloy and Metrics Bridge builders, excluding default Compute. It pins the
-  App Engine uploader and default AppSpot Storage Admin grants to only the
-  service-owned `staging.<project>.appspot.com` bucket and requires the direct
-  Metrics Bridge bootstrap to
-  reconcile the builder's project roles, repository writer, developer act-as
-  bindings, build-log reader, exact dedicated-builder source readers, and
-  Peg-policy bucket IAM dependency before submitting and rolling out a build.
-  That bootstrap must target the two reader instances, never their whole
-  `for_each` collection, so a routine deploy cannot enact a pending sibling
-  removal reserved for a reviewed full platform apply.
-  For an existing Metrics Bridge service, that bootstrap must fail closed if it
-  cannot verify the exact service name and must not target the service. A first
-  service create and an interrupted public-binding create must use separate
-  no-refresh saved plans accepted by `check-metrics-bridge-bootstrap-plan.mjs`.
-  The deploy must then verify Terraform state, the live service, and the live
-  public binding before building.
+- `pnpm tf:test` owns the deployment source-staging contract: the five allowed
+  literal checked-in `gcloud builds submit` / `gcloud app deploy` callsites with
+  their source-staging flag and value, both Metrics Bridge submit paths pinned
+  to the checked-in `cloudbuild.yaml`, direct Cloud Build source-object reads
+  limited to the Alloy and Metrics Bridge builders, the bucket-scoped App Engine
+  uploader and AppSpot grants, and the IAM the direct Metrics Bridge bootstrap
+  must reconcile before it builds.
   [ADR 0053](../docs/adr/0053-explicit-deployment-source-staging.md) owns the
-  supported static syntax and explicit proof limits. Keep indirect or dynamic
-  deploy forms forbidden and inert examples confined to
-  `scripts/deploy-staging-contract.test.mjs`.
+  supported static syntax and explicit proof limits;
+  [`docs/deployment.md`](../docs/deployment.md) owns the bootstrap sequence and
+  its guarded no-refresh plans. Keep indirect or dynamic deploy forms forbidden
+  and inert examples confined to `scripts/deploy-staging-contract.test.mjs`.
 
 ## Verification
 

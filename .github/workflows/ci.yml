@@ -180,8 +180,8 @@ jobs:
               - terraform.stacks.json
               - scripts/check-metrics-bridge-template-plan.mjs
               - scripts/check-metrics-bridge-template-plan.test.mjs
-              - scripts/check-peg-policy-publication.mjs
-              - scripts/check-peg-policy-publication.test.mjs
+              - scripts/alerts/check-peg-policy-publication.mjs
+              - scripts/alerts/check-peg-policy-publication.test.mjs
               - scripts/production-infra-identity-contract/**
               # Shared parsing cores the contract and the deploy-staging
               # contract both import (ADR 0064). They sit outside the
@@ -189,6 +189,11 @@ jobs:
               # their own entries or a parser change stops firing these jobs.
               - scripts/lib/hcl.mjs
               - scripts/lib/workflow-yaml.mjs
+              # Modules the peg registry integrity checker imports. The stack
+              # registry counts them as Peg policy publication inputs, so this
+              # filter has to be able to reach that stack inventory.
+              - scripts/alerts/check-peg-registry-integrity-lineage.mjs
+              - scripts/lib/peg-policy-digest.mjs
               - scripts/terraform-fmt-check.mjs
               - scripts/tf-platform-plan-guard.mjs
               - scripts/tf-stacks.mjs
@@ -387,7 +392,7 @@ jobs:
       - name: Lint
         run: pnpm --filter @mento-protocol/config lint
       - name: Deviation threshold drift check
-        run: node scripts/check-deviation-threshold-drift.mjs
+        run: node scripts/alerts/check-deviation-threshold-drift.mjs
       - name: Knip (dead-code / dep hygiene, blocking)
         run: pnpm --filter @mento-protocol/config knip
       - name: Test with coverage
@@ -625,7 +630,7 @@ jobs:
           fetch-depth: 0
       - uses: ./.github/actions/pnpm-install
       - name: Peg registry integrity
-        run: node scripts/check-peg-registry-integrity.mjs
+        run: node scripts/alerts/check-peg-registry-integrity.mjs
       - name: Resolve main baseline (PR baseline-growth check)
         if: github.event_name == 'pull_request'
         uses: ./.github/actions/resolve-eslint-baseline
@@ -862,7 +867,7 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
       - name: Deviation threshold drift check
-        run: node scripts/check-deviation-threshold-drift.mjs
+        run: node scripts/alerts/check-deviation-threshold-drift.mjs
       - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
           terraform_version: 1.14.6
@@ -1009,9 +1014,9 @@ jobs:
       - name: ESLint root scripts
         run: pnpm lint:scripts
       - name: Peg registry integrity
-        run: node scripts/check-peg-registry-integrity.mjs
+        run: node scripts/alerts/check-peg-registry-integrity.mjs
       - name: Peg registry integrity checker suite
-        run: node scripts/check-peg-registry-integrity.test.mjs
+        run: node scripts/alerts/check-peg-registry-integrity.test.mjs
       - name: Lighthouse config assertion suite
         # Exercises route matching, per-route threshold boundaries, and
         # multi-run aggregation through the installed LHCI CLI. Keep this in
@@ -1032,7 +1037,7 @@ jobs:
       - name: Hermetic Vitest setup consistency suite
         run: node scripts/check-hermetic-vitest-setup.test.mjs
       - name: Deviation threshold drift suite
-        run: node scripts/check-deviation-threshold-drift.test.mjs
+        run: node scripts/alerts/check-deviation-threshold-drift.test.mjs
       - name: Agent context checker unit tests
         # Behavioral coverage of scripts/check-agent-context.mjs's pure
         # helpers: frontmatter parsing and the last_verified staleness window.
