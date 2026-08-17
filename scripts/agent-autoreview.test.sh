@@ -2600,6 +2600,10 @@ CLAUDE
   expect_file_contains "$capture.env" "AWS_ROLE_ARN=arn:aws:iam::123456789012:role/autoreview-test"
   expect_file_contains "$capture.env" "AWS_ROLE_SESSION_NAME=autoreview-session"
   expect_file_contains "$capture.env" "AWS_SDK_LOAD_CONFIG=1"
+  # Claude Code builds its macOS Keychain account name from USER. The runner
+  # above starts the helper with `env -i` and no USER, so this line can only
+  # come from the helper deriving the name from the process credentials.
+  expect_file_contains_line "$capture.env" "USER=$(id -un)"
   local key
   local snapshot_path
   local expected_source
@@ -2924,6 +2928,54 @@ CLAUDE
   fi
 }
 
+# A failed --version probe proves nothing about the installed version. The
+# reviewer used to report the too-old message for every probe failure, which
+# sent operators to upgrade a CLI that was already new enough.
+run_claude_version_probe_failure_regression() {
+  local review_repo="$tmp_dir/claude-version-probe"
+  local fake_bin="$tmp_dir/claude-version-probe-bin"
+  init_review_repo "$review_repo"
+  printf 'base\n' >"$review_repo/README.md"
+  commit_review_repo "$review_repo" init
+  printf 'review me\n' >>"$review_repo/README.md"
+  mkdir "$fake_bin"
+  cat >"$fake_bin/claude" <<'CLAUDE'
+#!/usr/bin/env bash
+cat >/dev/null
+if [[ "${1:-}" == "--version" ]]; then
+  printf 'version probe exploded\n' >&2
+  exit 3
+fi
+exit 1
+CLAUDE
+  chmod +x "$fake_bin/claude"
+
+  run_helper_with_path_in_repo_expect_failure "$review_repo" "$fake_bin" \
+    --mode local --engine claude --no-tools
+  expect_stderr_contains "claude engine version probe failed"
+  expect_stderr_contains "version probe exploded"
+  expect_file_not_contains "$stderr" "requires Claude Code >= 2.1.169"
+  expect_stdout_not_contains "autoreview clean"
+
+  cat >"$fake_bin/claude" <<'CLAUDE'
+#!/usr/bin/env bash
+cat >/dev/null
+if [[ "${1:-}" == "--version" ]]; then
+  printf '2.1.100\n'
+  exit 0
+fi
+exit 1
+CLAUDE
+  chmod +x "$fake_bin/claude"
+
+  run_helper_with_path_in_repo_expect_failure "$review_repo" "$fake_bin" \
+    --mode local --engine claude --no-tools
+  expect_stderr_contains \
+    "claude engine requires Claude Code >= 2.1.169 for --safe-mode"
+  expect_file_not_contains "$stderr" "version probe failed"
+  expect_stdout_not_contains "autoreview clean"
+}
+
 run_codex_isolation_regression() {
   local review_repo="$tmp_dir/codex-isolation"
   local fake_bin="$tmp_dir/fake-codex-bin"
@@ -3012,6 +3064,9 @@ CODEX
     printf 'Codex SSL_CERT_FILE snapshot survived engine cleanup\n' >&2
     exit 1
   fi
+  # USER exists for the claude engine's Keychain lookup alone; codex keeps the
+  # narrower environment it had before that fix.
+  expect_file_not_contains "$capture.env" "USER=$(id -un)"
   expect_file_not_contains "$capture.env" "UNRELATED_SECRET"
   expect_stdout_contains "autoreview clean"
   expect_empty_stderr
@@ -6630,6 +6685,7 @@ run_engine_isolation_family() {
   run_codex_binary_resolution_regression
   run_suite_family_diagnostic_regression
   run_claude_no_tools_regression
+  run_claude_version_probe_failure_regression
   run_codex_isolation_regression
   run_engine_signal_cleanup_regression
   run_stdin_epipe_regression
