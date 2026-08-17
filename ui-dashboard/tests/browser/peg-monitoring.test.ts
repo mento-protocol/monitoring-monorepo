@@ -104,7 +104,6 @@ test("renders the status board, expands a row panel, and retains stale evidence"
               quoteCurrency: "EUR",
               policyVersion: payload.producedPolicyVersion,
               failureReason: null,
-              pendingSeconds: 600,
             },
           },
         ],
@@ -235,7 +234,7 @@ test("renders the status board, expands a row panel, and retains stale evidence"
   await alertDetails.getByText("Details", { exact: true }).click();
   await expect(
     alertDetails.getByText(
-      "The alert fired after the condition continued for 10 minutes.",
+      "The alert fires after the gap remains too wide for 10 minutes.",
       { exact: false },
     ),
   ).toBeVisible();
