@@ -176,7 +176,7 @@ chain key.
 
 ### On-call Announcer
 
-- Runs from Cloud Scheduler every 15 minutes by default
+- Runs from Cloud Scheduler at 10:05 and 10:20 every Sunday in `Europe/Berlin`
 - Polls Splunk On-Call `/api-public/v1/oncall/current`
 - Resolves the current Splunk On-Call user email to a Slack user ID with `users.lookupByEmail`
 - Posts one Slack message to `#eng` only when the on-call username changes

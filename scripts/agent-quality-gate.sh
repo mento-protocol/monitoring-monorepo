@@ -3391,8 +3391,8 @@ while IFS= read -r path; do
     .github/workflows/*|.github/actions/*)
       add_surface "github-workflows"
       add_checklist "docs/pr-checklists/ci-workflow-gates.md" "GitHub Actions workflow/action changed"
-      add_command "node scripts/check-github-action-pins.mjs" "GitHub Actions workflow/action changed"
-      add_command "node scripts/check-autofix-ci-trust.mjs" "GitHub Actions workflow/action changed (autofix CI trust boundary)"
+      add_command "node scripts/workflows/check-github-action-pins.mjs" "GitHub Actions workflow/action changed"
+      add_command "node scripts/workflows/check-autofix-ci-trust.mjs" "GitHub Actions workflow/action changed (autofix CI trust boundary)"
       add_adr_reminder "workflow/action changed — ADR reminder (a new workflow likely needs an ADR)"
       case "$path" in
         .github/workflows/ci.yml)
@@ -3462,7 +3462,7 @@ while IFS= read -r path; do
       ;;
     .trunk/*)
       add_surface "tooling"
-      add_command "node scripts/check-github-action-pins.mjs" "Trunk workflow/action setup changed"
+      add_command "node scripts/workflows/check-github-action-pins.mjs" "Trunk workflow/action setup changed"
       add_command "pnpm agent:quality-gate:test" "agent quality gate trunk hook changed"
       ;;
     turbo.json)
@@ -3976,19 +3976,19 @@ while IFS= read -r path; do
           add_command "node scripts/check-hermetic-vitest-setup.mjs" "hermetic Vitest setup checker changed"
           add_command "node scripts/check-hermetic-vitest-setup.test.mjs" "hermetic Vitest setup checker changed"
           ;;
-        scripts/check-github-action-pins.mjs)
-          add_command "node scripts/check-github-action-pins.mjs" "GitHub Actions pin checker changed"
-          add_command "node scripts/check-github-action-pins.test.mjs" "GitHub Actions pin checker changed"
+        scripts/workflows/check-github-action-pins.mjs)
+          add_command "node scripts/workflows/check-github-action-pins.mjs" "GitHub Actions pin checker changed"
+          add_command "node scripts/workflows/check-github-action-pins.test.mjs" "GitHub Actions pin checker changed"
           ;;
-        scripts/check-autofix-ci-trust.mjs|scripts/check-autofix-ci-trust.test.mjs)
-          add_command "node scripts/check-autofix-ci-trust.mjs" "autofix CI trust checker changed"
-          add_command "node scripts/check-autofix-ci-trust.test.mjs" "autofix CI trust checker changed"
+        scripts/workflows/check-autofix-ci-trust.mjs|scripts/workflows/check-autofix-ci-trust.test.mjs|scripts/workflows/autofix-trust-annotations.mjs)
+          add_command "node scripts/workflows/check-autofix-ci-trust.mjs" "autofix CI trust checker changed"
+          add_command "node scripts/workflows/check-autofix-ci-trust.test.mjs" "autofix CI trust checker changed"
           ;;
-        scripts/check-workflow-permissions-drift.mjs|scripts/check-workflow-permissions-drift.test.mjs)
-          add_command "node scripts/check-workflow-permissions-drift.test.mjs" "platform-settings workflow-permissions drift checker changed"
+        scripts/workflows/check-workflow-permissions-drift.mjs|scripts/workflows/check-workflow-permissions-drift.test.mjs)
+          add_command "node scripts/workflows/check-workflow-permissions-drift.test.mjs" "platform-settings workflow-permissions drift checker changed"
           ;;
-        scripts/check-github-action-pins.test.mjs)
-          add_command "node scripts/check-github-action-pins.test.mjs" "GitHub Actions pin checker test changed"
+        scripts/workflows/check-github-action-pins.test.mjs)
+          add_command "node scripts/workflows/check-github-action-pins.test.mjs" "GitHub Actions pin checker test changed"
           ;;
         scripts/deploy-indexer-verify.mjs|scripts/deploy-indexer-verify.test.mjs)
           add_command "node scripts/deploy-indexer-verify.test.mjs" "indexer deploy verifier changed"

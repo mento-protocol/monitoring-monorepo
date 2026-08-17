@@ -27,7 +27,7 @@ const SOURCE_BLOCK_SHAPE_SPECIFICATIONS = [
   "alerts/infra:variable.debug_mode|f52b2ce0bd99f8f263fda1fbc5aac0e9b5bce445d603fc45a4d5ec0ac4f472ce",
   "alerts/infra:variable.multisigs|bc6efbb0d5eb414139081182fac6f93647f32b822e9bbd08bc2c17209bce2f29",
   "alerts/infra:variable.oncall_announce_on_first_run|e36344bd00f1f50834bd9243d1c4e059bdb52da9c090c5f1f3876ca6950557bb",
-  "alerts/infra:variable.oncall_rotation_check_schedule|0019df3ba1482127d81c064fe39e4b8d01f1217602baca2aa6e3e0aaed40a916",
+  "alerts/infra:variable.oncall_rotation_check_schedule|5bc5eda526ec49fbc7534bda52cf242fcbc0b32c19dfc62ebf5ad60a0d895c5d",
   "alerts/infra:variable.oncall_slack_channel_id|de5843b9c72d3b4400b1df21867ca03b969020399514940324fd68c750bc89a6",
   "alerts/infra:variable.oncall_support_usergroup_id|c65531b6a19f26ea2c0efb6196481a8ea9cf0949f219a147fb8a2398b2777903",
   "alerts/infra:variable.org_id|9f4baa3184507cb57b60f341f8a8bd31877289b78cc638e67709406c677f6602",

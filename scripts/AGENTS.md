@@ -17,7 +17,7 @@ garden_lane: agent-entry-points
 ## Scope
 
 `scripts/` contains deploy wrappers, agent quality gates, code-health checks,
-and repo maintenance utilities. 205 files sit flat at the top level today.
+and repo maintenance utilities. 198 files sit flat at the top level today.
 
 ## Target Layout
 
@@ -29,7 +29,7 @@ Until a phase merges, its files are flat.
 | Directory       | Phase | Holds                                       |
 | --------------- | ----- | ------------------------------------------- |
 | `workflows/`    | P1    | scripts backing Actions workflow jobs       |
-| `bootstrap/`    | P2    | container and hosted-session setup — landed |
+| `bootstrap/`    | P2    | container and hosted-session setup          |
 | `context/`      | P3    | agent context, budget, skill mirrors        |
 | `docs/`         | P4    | catalog, audit, garden, nav eval            |
 | `pr/`           | P5    | PR and issue state projections              |
@@ -40,9 +40,9 @@ Until a phase merges, its files are flat.
 | `terraform/`    | P10   | movable Terraform guards and helpers        |
 | `gate/`         | P11   | quality-gate satellites                     |
 
-`lib/` (the shared tier; P7 adds to it) and
-`production-infra-identity-contract/` exist today. `setup.sh` stays flat: the
-worktree runbooks and eight docs name that exact path.
+Landed: P1, P2. `lib/` (the shared tier; P7 adds to it) and
+`production-infra-identity-contract/` predate the reorganization. `setup.sh`
+stays flat: the worktree runbooks and eight docs name that exact path.
 
 ## Why Files Stay Flat
 

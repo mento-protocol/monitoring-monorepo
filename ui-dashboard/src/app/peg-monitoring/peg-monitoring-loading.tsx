@@ -1,4 +1,8 @@
-import { PEG_BOARD_GRID, PEG_BOARD_MIN_WIDTH } from "./_lib/peg-board-model";
+import {
+  PEG_BOARD_GRID,
+  PEG_BOARD_MIN_WIDTH,
+  PEG_BOARD_ROW_PADDING,
+} from "./_lib/peg-board-model";
 
 const rows = ["first", "second"];
 const cells = [
@@ -40,7 +44,7 @@ export function PegMonitoringLoading(): React.JSX.Element {
         <div className="overflow-x-auto">
           <div className={PEG_BOARD_MIN_WIDTH}>
             <div
-              className={`grid border-b border-border px-[18px] py-2.5 ${PEG_BOARD_GRID}`}
+              className={`grid border-b border-border py-2.5 ${PEG_BOARD_GRID} ${PEG_BOARD_ROW_PADDING}`}
             >
               {cells.map(([column, width]) => (
                 <Bar key={column} className={`h-2.5 ${width}`} />
@@ -49,7 +53,7 @@ export function PegMonitoringLoading(): React.JSX.Element {
             {rows.map((row) => (
               <div
                 key={row}
-                className={`grid items-center border-b border-border px-[18px] py-4 ${PEG_BOARD_GRID}`}
+                className={`grid items-center border-b border-border py-4 ${PEG_BOARD_GRID} ${PEG_BOARD_ROW_PADDING}`}
               >
                 {cells.map(([column, width]) => (
                   <Bar key={column} className={`h-5 ${width}`} />

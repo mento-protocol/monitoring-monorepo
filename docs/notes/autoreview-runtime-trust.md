@@ -206,6 +206,14 @@ unset it or provide a trusted external PEM bundle through snapshotted
 are released, including ordinary success and failure as well as timeout or
 interruption.
 
+The Claude engine additionally receives `USER`, because Claude Code builds its
+macOS Keychain account name from that variable and reports an expired OAuth
+session when the lookup misses. The helper derives the name from its own process
+credentials rather than the inherited value, and drops it when the name falls
+outside the portable username character set, so a hostile parent environment
+cannot steer the Keychain lookup. The Codex engine environment does not carry
+it.
+
 The narrow trusted exceptions to the repo-relative supplemental-evidence rule
 are adapter-generated feedback state and protected-main checklist copies inside
 the prepared-bundle directory. Sensitive paths, credential-like content, private
