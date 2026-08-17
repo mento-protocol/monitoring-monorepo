@@ -53,5 +53,5 @@ staleness window on canonical files.
 
 ## Evidence
 
-- [`docs/context-standards.md`](../context-standards.md); enforcement in `scripts/check-agent-context.mjs`.
+- [`docs/context-standards.md`](../context-standards.md); enforcement in `scripts/context/check-agent-context.mjs`.
 - PR #1079 (SPEC under the authority model), PR #1090 (root AGENTS token diet), PR #1088 (archive completed PLANs).

@@ -5,7 +5,7 @@ import {
   classifyDocumentation,
   isDocumentationPath,
   parseDocumentationMetadata,
-} from "./docs-index-helpers.mjs";
+} from "./context/docs-index-helpers.mjs";
 import {
   fixtureDigest,
   isNavigationEvalAnswerArtifact,

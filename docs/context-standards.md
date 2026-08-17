@@ -93,7 +93,7 @@ Rules:
 The catalog also classifies every document with `doc_type`, `scope`,
 `review_interval_days`, and `garden_lane`. Canonical documents must declare all
 four fields explicitly. Non-canonical and unmanaged documents may rely on the
-path defaults tested in `scripts/docs-index-helpers.mjs`; explicit metadata can
+path defaults tested in `scripts/context/docs-index-helpers.mjs`; explicit metadata can
 override those defaults. Canonical context normally uses a 90-day semantic
 review interval. Classification controls routing and gardening only; it never
 overrides `canonical` authority.

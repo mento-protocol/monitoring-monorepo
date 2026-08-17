@@ -36,7 +36,7 @@ lint:
         - .github/prompts/**
     - linters: [prettier]
       paths:
-        # Generated deterministically by scripts/docs-index.mjs. Formatting it
+        # Generated deterministically by scripts/context/docs-index.mjs. Formatting it
         # independently would make `docs:index --check` report false drift.
         - docs/README.md
     - linters: [osv-scanner]

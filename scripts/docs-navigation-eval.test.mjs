@@ -982,6 +982,16 @@ test("navigation issue markers are structural and de-duplicate REST pages", () =
     () => parseLeadingNavigationEvalMarkers(`${NAVIGATION_EVAL_MARKER}\nbad`),
     /malformed/,
   );
+  // A month marker whose payload parses to literal null must fail, not read as
+  // an untracked issue: treating it as untracked would hide a live evaluation
+  // and let a duplicate through.
+  assert.throws(
+    () =>
+      parseLeadingNavigationEvalMarkers(
+        `${NAVIGATION_EVAL_MARKER}\n<!-- docs-navigation-eval-month:v1 null -->`,
+      ),
+    /invalid metadata/,
+  );
   const normalized = normalizeNavigationEvalIssuePages([
     [
       {

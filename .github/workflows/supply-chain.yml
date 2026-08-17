@@ -31,7 +31,7 @@ name: Supply Chain
 #    resolution-time override floors stay visible without blocking merges.
 #
 # This workflow also hosts the repo's scheduled-report slot: a dedicated
-# weekly context-staleness job runs scripts/check-agent-context.mjs so the
+# weekly context-staleness job runs scripts/context/check-agent-context.mjs so the
 # canonical-context last_verified policy — which expires with time, not with
 # a diff — is evaluated on a calendar cadence instead of only when a PR
 # happens to touch context files. It is a separate job from the advisory
@@ -206,11 +206,11 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version
-          # No pnpm install — scripts/check-agent-context.mjs is pure Node.js
-          # (node builtins + a sibling helper module), same sub-30s pattern
-          # as the lockfile-lint job.
+          # No pnpm install — scripts/context/check-agent-context.mjs is pure
+          # Node.js (node builtins + sibling helper modules), same sub-30s
+          # pattern as the lockfile-lint job.
       - name: Agent context staleness check
-        run: node scripts/check-agent-context.mjs
+        run: node scripts/context/check-agent-context.mjs
 
   moderate-advisory-report:
     name: moderate advisory report (non-blocking)

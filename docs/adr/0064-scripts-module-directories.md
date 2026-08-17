@@ -72,10 +72,10 @@ the JSON patch to apply. Move a Sentry suite and update the manifest key in the
 same commit.
 
 **3. A `scripts/` subdirectory gets no `AGENTS.md` of its own.**
-`scripts/agent-context-budget.mjs` treats every tracked `AGENTS.md` as an
-instruction file, measures it against the 9,216-byte scoped cap, and charges it
-to the route of every directory beneath it against the 18,944-byte route cap.
-`scripts/docs-index-helpers.mjs` files it under the `agent-entry-points` garden
+`scripts/context/agent-context-budget.mjs` treats every tracked `AGENTS.md` as
+an instruction file, measures it against the 9,216-byte scoped cap, and charges
+it to the route of every directory beneath it against the 18,944-byte route cap.
+`scripts/context/docs-index-helpers.mjs` files it under the `agent-entry-points` garden
 lane, which schedules it for re-verification. A per-subdirectory instruction
 file therefore costs budget on every route through it and adds a document the
 garden must keep true. `scripts/AGENTS.md` stays the single scoped instruction
@@ -135,8 +135,9 @@ scheduled document, for context an agent gets from the directory map in
   `findSentrySuites()` in `scripts/sentry-suite-gate.mjs`, and
   [ADR 0062](0062-sentry-suites-self-run-gate.md).
 - Instruction-file budget and lane: `INSTRUCTION_FILENAMES` and the route
-  computation in `scripts/agent-context-budget.mjs`; the `agent-instructions` →
-  `agent-entry-points` mapping in `scripts/docs-index-helpers.mjs`.
+  computation in `scripts/context/agent-context-budget.mjs`; the
+  `agent-instructions` → `agent-entry-points` mapping in
+  `scripts/context/docs-index-helpers.mjs`.
 - Paths-filter policy: [ADR 0010](0010-required-checks-no-paths-filters.md).
 - Programme tracking issue:
   <https://github.com/mento-protocol/monitoring-monorepo/issues/1877>.
