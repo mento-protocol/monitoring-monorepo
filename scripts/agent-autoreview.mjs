@@ -24,7 +24,7 @@ import {
   writeFileSync,
   writeSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { tmpdir, userInfo } from "node:os";
 import path from "node:path";
 import process from "node:process";
 import {
@@ -2939,6 +2939,26 @@ function snapshotExternalRegularFileEnv(env, repo, snapshotRecord, key) {
   }
 }
 
+// Claude Code reads its macOS Keychain credentials with
+// `security find-generic-password -a "$USER" -s "Claude Code-credentials"`. The
+// engine environment is rebuilt from an allowlist, so an absent USER sends that
+// lookup to a different account name, no credential is found, and the CLI fails
+// in about 20ms with an expired-OAuth-session error. Derive the account name
+// from the process credentials rather than the inherited variable so a hostile
+// parent environment cannot steer the lookup, and reject anything outside the
+// portable username character set.
+const ENGINE_ACCOUNT_NAME_PATTERN = /^[A-Za-z0-9._-]{1,64}$/;
+
+function trustedEngineAccountName() {
+  let username;
+  try {
+    ({ username } = userInfo());
+  } catch {
+    return null;
+  }
+  return ENGINE_ACCOUNT_NAME_PATTERN.test(username) ? username : null;
+}
+
 function safeEngineEnv(repo, engine, runtimeDir) {
   if (process.env.SSL_CERT_DIR) {
     throw new Error(
@@ -3056,6 +3076,8 @@ function safeEngineEnv(repo, engine, runtimeDir) {
     const claudeConfig = externalPath(repo, process.env.CLAUDE_CONFIG_DIR);
     if (claudeConfig) env.CLAUDE_CONFIG_DIR = claudeConfig;
     env.CLAUDE_CODE_DISABLE_AUTO_MEMORY = "1";
+    const account = trustedEngineAccountName();
+    if (account) env.USER = account;
   }
   const git = resolveTrustedCommand("git", repo);
   const nodeRuntime = attestedNodeRuntime(repo);
@@ -3439,9 +3461,13 @@ async function ensureClaudeIsolationSupported(claude, repo, env, cwd) {
       label: "claude version probe",
       timeoutSeconds: 15,
     });
-  } catch {
+  } catch (error) {
+    // A failed probe proves nothing about the installed version. Report the
+    // probe failure and its cause so an operator does not chase an upgrade that
+    // is already in place.
     throw new Error(
-      "claude engine requires Claude Code >= 2.1.169 for --safe-mode",
+      `claude engine version probe failed: ${error?.message || error}`,
+      { cause: error },
     );
   }
   const version = parseVersion(
