@@ -167,12 +167,13 @@ describe("PegMonitoringPageClient board", () => {
     ).not.toBeNull();
   });
 
-  it("toggles the panel from the row and from the chevron, and keeps rows independent", () => {
+  it("toggles the panel from the row and the peg label", () => {
     loaded();
     render();
     const row = query('[data-testid="peg-row-europ-schuman"]')!;
-    const chevron = row.querySelector("button[aria-expanded]")!;
-    expect(chevron.getAttribute("aria-expanded")).toBe("false");
+    const toggle = row.querySelector("button[aria-expanded]")!;
+    expect(toggle.textContent).toBe("EUROP / EUR");
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
     expect(query('[data-testid="peg-panel-europ-schuman"]')).toBeNull();
 
     click(row);
@@ -188,11 +189,7 @@ describe("PegMonitoringPageClient board", () => {
         .getAttribute("aria-controls"),
     ).toBe("peg-panel-europ-schuman");
 
-    click(
-      query('[data-testid="peg-row-europ-schuman"]')!.querySelector(
-        "button[aria-expanded]",
-      ),
-    );
+    click(toggle);
     expect(query('[data-testid="peg-panel-europ-schuman"]')).toBeNull();
   });
 
