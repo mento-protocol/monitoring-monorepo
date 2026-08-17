@@ -131,6 +131,14 @@ scheduled document, for context an agent gets from the directory map in
   deliberately narrower than a module — `ci.yml`'s `versionSkew` runs one
   checker, and a module glob would fire it on every unrelated edit in that
   directory.
+- A workflow that runs a script from the PR's base ref degrades rather than
+  fails when that script moves. `pr-description.yml` checks the base ref out as
+  `trusted-base/` and prefers it over the PR's own copy, so a PR cannot edit the
+  rule it is judged by. With one probe path, every PR branched before the move
+  finds nothing at the old path and falls through to its own copy behind a
+  `::warning::` — the job stays green while the trusted-validator property is
+  gone. P5 hit this and now probes both paths, new first. Keep the pre-move
+  probe until no open PR bases on a pre-move tree.
 - Moving a file can change a reviewed artifact's hash. A script that derives its
   repo root by walking up a fixed number of directories needs that count fixed
   in the same commit, which changes its bytes. When the file's SHA-256 is itself
@@ -147,7 +155,9 @@ routing, not procedure.
 1. Root `package.json` — 73 entries reference `scripts/`.
 2. `check-agent-quality-gate-package-scripts.sh` — pinned alias map.
 3. `.github/workflows/` — 22 of 32 files, including the enumerated filters
-   listed under "Why Files Stay Flat" in `scripts/AGENTS.md`.
+   listed under "Why Files Stay Flat" in `scripts/AGENTS.md`. A workflow that
+   runs a script from the PR's **base** ref must probe the new path and the
+   pre-move path; see the trusted-validator consequence above.
 4. `.trunk/trunk.yaml` pre-push hook, and `.gitattributes`.
 5. `.claude/settings.json`, `.codex/hooks.json`,
    `.claude/hooks/session-start.sh`, and the verbatim copies and invocation

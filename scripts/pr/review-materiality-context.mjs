@@ -9,11 +9,11 @@ import {
   classifyDocumentation,
   DOCUMENT_STATUSES,
   parseDocumentationMetadata,
-} from "./context/docs-index-helpers.mjs";
+} from "../context/docs-index-helpers.mjs";
 import {
   assessStaleness,
   daysSince,
-} from "./context/check-agent-context-helpers.mjs";
+} from "../context/check-agent-context-helpers.mjs";
 
 const REQUIRED_CANONICAL_NOTE_METADATA = [
   "title",

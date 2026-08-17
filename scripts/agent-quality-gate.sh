@@ -2665,8 +2665,8 @@ add_root_tooling_package_script_checks() {
   add_command "bash scripts/check-agent-quality-gate-package-scripts.sh" "$reason"
   add_command "bash scripts/agent-quality-gate.test.sh" "$reason"
   add_command "node scripts/agent-prewarm.test.mjs" "$reason"
-  add_command "node scripts/review-materiality.test.mjs" "$reason"
-  add_command "node scripts/agent-issue-board.test.mjs" "$reason"
+  add_command "node scripts/pr/review-materiality.test.mjs" "$reason"
+  add_command "node scripts/pr/agent-issue-board.test.mjs" "$reason"
   add_command "pnpm sentry:ingest:test" "$reason"
   add_command "pnpm sentry:digest:test" "$reason"
   add_command "pnpm sentry:project:test" "$reason"
@@ -2684,7 +2684,7 @@ add_root_tooling_package_script_checks() {
   add_command "node scripts/supply-chain/lockfile-lint.test.mjs" "$reason"
   add_command "node scripts/supply-chain/version-skew-check.test.mjs" "$reason"
   add_command "node scripts/supply-chain/override-prune-report.test.mjs" "$reason"
-  add_command "node scripts/check-adr-reminder.test.mjs" "$reason"
+  add_command "node scripts/pr/check-adr-reminder.test.mjs" "$reason"
   add_command "node scripts/context/docs-index.test.mjs" "$reason"
   add_command "node scripts/docs-audit.test.mjs" "$reason"
   add_command "node scripts/docs-garden-issue.test.mjs" "$reason"
@@ -2697,7 +2697,7 @@ add_root_tooling_package_script_checks() {
 # --changed-paths-file set). Self-suppressing, so safe to route broadly.
 add_adr_reminder() {
   local reason="$1"
-  local cmd="node scripts/check-adr-reminder.mjs"
+  local cmd="node scripts/pr/check-adr-reminder.mjs"
   cmd="$cmd --base $(quote_path "$base_ref") --head $(quote_path "$head_ref")"
   cmd="$cmd --include-untracked --changed-paths-file $(quote_path "$changed_paths_file")"
   add_command "$cmd" "$reason"
@@ -3780,16 +3780,20 @@ while IFS= read -r path; do
         scripts/check-deploy-root-anchors.test.mjs)
           add_command "node scripts/check-deploy-root-anchors.test.mjs" "deploy root-anchor test changed"
           ;;
-        scripts/check-adr-reminder.mjs|scripts/check-adr-reminder.test.mjs)
+        scripts/pr/check-adr-reminder.mjs|scripts/pr/check-adr-reminder.test.mjs)
           add_command "pnpm adr:check:test" "ADR reminder helper changed"
           ;;
         scripts/agent-prewarm.mjs|scripts/agent-prewarm.test.mjs)
           add_command "pnpm agent:prewarm:test" "agent prewarm helper changed"
           ;;
-        scripts/review-materiality.mjs|scripts/review-materiality-context.mjs|scripts/review-materiality.test.mjs)
+        scripts/pr/review-materiality.mjs|scripts/pr/review-materiality-context.mjs|scripts/pr/review-materiality.test.mjs)
           add_command "pnpm agent:review-materiality:test" "agent review materiality helper changed"
           ;;
-        scripts/agent-issue-board.mjs|scripts/agent-issue-board.test.mjs)
+        scripts/pr/agent-issue-board.mjs|scripts/pr/agent-issue-board.test.mjs|scripts/pr/issue-board-cli.mjs|scripts/pr/issue-board-commands.mjs|scripts/pr/issue-board-projects.mjs|scripts/pr/issue-board-state.mjs|scripts/pr/issue-board-transport.mjs)
+          # agent-issue-board.mjs is the entry point over five layers (cli,
+          # transport, state, projects, commands). The one suite covers the
+          # pure state machine through the entry's re-exports, so every layer
+          # routes to it.
           add_command "pnpm issue:board:test" "agent issue board helper changed"
           ;;
         scripts/sentry-triage-ingest.mjs|scripts/sentry-triage-ingest.test.mjs)
@@ -3940,8 +3944,8 @@ while IFS= read -r path; do
         scripts/pr-ready-state.mjs|scripts/pr-ready-state-core.mjs|scripts/pr-ready-state-format.mjs|scripts/pr-ready-state.test.mjs)
           add_command "pnpm pr:ready-state:test" "PR ready-state helper changed"
           ;;
-        scripts/review-process-metrics.mjs|scripts/review-process-metrics.test.mjs)
-          add_command "node scripts/review-process-metrics.test.mjs" "review-process metrics collector changed"
+        scripts/pr/review-process-metrics.mjs|scripts/pr/review-process-metrics.test.mjs)
+          add_command "node scripts/pr/review-process-metrics.test.mjs" "review-process metrics collector changed"
           ;;
         scripts/check-metrics-bridge-template-plan.mjs|scripts/check-metrics-bridge-template-plan.test.mjs|scripts/tf-platform-plan-guard.mjs|scripts/tf-stacks.mjs|scripts/tf-stacks.test.mjs)
           add_command "pnpm tf:test" "Terraform stack wrapper changed"
@@ -4029,8 +4033,8 @@ while IFS= read -r path; do
           add_command "node scripts/check-peg-registry-integrity.mjs" "peg registry integrity checker changed"
           add_command "node scripts/check-peg-registry-integrity.test.mjs" "peg registry integrity checker changed"
           ;;
-        scripts/check-pr-description.mjs|scripts/check-pr-description.test.mjs)
-          add_command "node scripts/check-pr-description.test.mjs" "PR description validator changed"
+        scripts/pr/check-pr-description.mjs|scripts/pr/check-pr-description.test.mjs)
+          add_command "node scripts/pr/check-pr-description.test.mjs" "PR description validator changed"
           ;;
         scripts/check-deviation-threshold-drift.mjs)
           add_command "node scripts/check-deviation-threshold-drift.mjs" "deviation threshold drift checker changed"

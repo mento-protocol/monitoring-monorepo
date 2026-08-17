@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 import { validatePrDescription } from "./check-pr-description.mjs";
 
-const repoRoot = fileURLToPath(new URL("../", import.meta.url));
+const repoRoot = fileURLToPath(new URL("../../", import.meta.url));
 const relativeScriptPath = relative(
   repoRoot,
   fileURLToPath(new URL("./check-pr-description.mjs", import.meta.url)),

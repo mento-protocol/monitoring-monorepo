@@ -17,7 +17,7 @@ garden_lane: agent-entry-points
 ## Scope
 
 `scripts/` holds deploy wrappers, agent quality gates, code-health checks, and
-repo maintenance utilities. 174 files sit flat at the top level today.
+repo maintenance utilities. 163 files sit flat at the top level today.
 
 ## Target Layout
 
@@ -40,7 +40,7 @@ Files stay flat until their phase merges.
 | `terraform/`    | P10   | movable Terraform guards and helpers   |
 | `gate/`         | P11   | quality-gate satellites                |
 
-Landed: P1, P2, P3, P6, P7. `lib/` (the shared tier) and
+Landed: P1, P2, P3, P5, P6, P7. `lib/` (the shared tier) and
 `production-infra-identity-contract/` predate the reorganization. `setup.sh`
 stays flat: `.config/wt.toml` runs that exact path as the Worktrunk pre-start
 hook, and eight docs name it.
@@ -82,6 +82,10 @@ that mechanism moves with it, in the same PR.
   there asserts all three. A miss is silent — the job stops running while the
   required `ci` sentinel stays green. ADR 0064 covers when a module glob such as
   `supply-chain.yml`'s `scripts/supply-chain/**` is the safer pin.
+- **Trusted-validator probes.** `pr-description.yml` runs the validator from
+  the PR's base ref, so it must probe `scripts/pr/` and the pre-move
+  `scripts/` path. A single probe silently falls back to the PR's own copy for
+  every PR branched before a move.
 - **Production infrastructure contract pins.**
   `production-infra-identity-contract/workflow-inventory.mjs` pins exact script
   paths for the workflows it audits.

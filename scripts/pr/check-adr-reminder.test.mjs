@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Offline tests for the pure logic in check-adr-reminder.mjs.
- * Run: node scripts/check-adr-reminder.test.mjs  (or `pnpm adr:check:test`)
+ * Run: node scripts/pr/check-adr-reminder.test.mjs  (or `pnpm adr:check:test`)
  */
 import assert from "node:assert/strict";
 
