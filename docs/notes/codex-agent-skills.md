@@ -78,8 +78,8 @@ Codex Cloud does not inherit a developer's local `~/.agents`, `~/.codex`, or
 maintenance scripts as:
 
 ```bash
-./scripts/codex-cloud-setup.sh
-./scripts/codex-cloud-maintenance.sh
+./scripts/bootstrap/codex-cloud-setup.sh
+./scripts/bootstrap/codex-cloud-maintenance.sh
 ```
 
 Both paths rely on the repo-local autoreview helper. GitHub CLI bootstrap,
@@ -109,7 +109,8 @@ preserve symlinks, so a check script is the safer default. Run
 
 ## SessionEnd hook
 
-`scripts/agent-session-end-hook.sh` runs on SessionEnd for Claude Code and Codex.
+`scripts/bootstrap/agent-session-end-hook.sh` runs on SessionEnd for Claude Code
+and Codex.
 When the session left commits or working-tree changes, it prints a one-line
 `/reflect` nudge so durable learnings can be routed before context is lost. It is
 silent on no-op sessions.

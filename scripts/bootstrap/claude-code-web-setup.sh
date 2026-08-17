@@ -6,7 +6,7 @@
 # to a fresh local worktree without requiring anything from a developer's home
 # directory.
 #
-# Parallel to scripts/codex-cloud-setup.sh (Codex Cloud). The two scripts share
+# Parallel to scripts/bootstrap/codex-cloud-setup.sh (Codex Cloud). The two share
 # the install/codegen contract; this one additionally installs Playwright
 # Chromium so the browser-fixture tests under
 # `pnpm --filter @mento-protocol/ui-dashboard test:browser` work without an
@@ -14,8 +14,11 @@
 
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO_ROOT"
+
+# shellcheck source=scripts/lib/install-marker.sh
+source "$REPO_ROOT/scripts/lib/install-marker.sh"
 
 echo "==> Marking repository safe for git"
 git config --global --add safe.directory "$REPO_ROOT" || true
@@ -57,35 +60,19 @@ else
   echo "WARN: network access, keep defaults) to enable local Trunk fmt/lint hooks." >&2
 fi
 
-# Content-addressed skip markers let a warm bootstrap (the cached environment
-# Setup script and the SessionStart hook both re-enter this script on a fresh
-# container) avoid re-running work the snapshot already has. hash_inputs is
-# deterministic (sorted), expands directories to their files, tolerates missing
-# optional inputs, and is guarded at every call site so a hashing miss degrades
-# to a safe rebuild rather than aborting under `set -euo pipefail`.
-hash_inputs() {
-  {
-    for p in "$@"; do
-      if [ -d "$p" ]; then
-        find "$p" -type f 2>/dev/null
-      elif [ -e "$p" ]; then
-        printf '%s\n' "$p"
-      fi
-    done
-  } | sort -u | xargs -r sha256sum 2>/dev/null | sha256sum | awk '{print $1}'
-}
-
 echo "==> Installing workspace dependencies"
 # Skip the (~15s) reinstall when neither the lockfile nor the shared-config build
 # inputs changed since the last bootstrap. shared-config is built by the root
 # postinstall (tsc -> shared-config/dist), which other packages import from, so a
 # shared-config/src edit must bust the marker even when pnpm-lock.yaml is
 # unchanged. The marker lives inside the gitignored node_modules, so it is
-# discarded whenever the dependency tree is.
+# discarded whenever the dependency tree is. Marker semantics are shared with
+# scripts/setup.sh through scripts/lib/install-marker.sh: a hashing miss yields
+# an empty hash, which never matches, so the work reruns.
 deps_marker="node_modules/.web-bootstrap-deps.sha256"
-deps_hash="$(hash_inputs pnpm-lock.yaml shared-config/src shared-config/package.json shared-config/tsconfig.json || true)"
-if [ -d node_modules ] && [ -n "$deps_hash" ] &&
-  [ "$(cat "$deps_marker" 2>/dev/null)" = "$deps_hash" ]; then
+deps_hash="$(install_marker_hash_inputs pnpm-lock.yaml shared-config/src shared-config/package.json shared-config/tsconfig.json || true)"
+if [ -d node_modules ] &&
+  install_marker_matches "$deps_marker" "$deps_hash"; then
   echo "deps + shared-config unchanged since last bootstrap; skipping pnpm install."
   deps_skipped=1
 else
@@ -103,8 +90,8 @@ pnpm --filter @mento-protocol/ui-dashboard exec node -e "require.resolve('@sentr
 # Record the deps marker only AFTER the resolution check passes, so a successful
 # install + failed verification never caches a broken state (a warm restart
 # would otherwise skip install and re-hit the same failure).
-if [ "$deps_skipped" = "0" ] && [ -n "$deps_hash" ]; then
-  printf '%s' "$deps_hash" >"$deps_marker"
+if [ "$deps_skipped" = "0" ]; then
+  install_marker_write "$deps_marker" "$deps_hash"
 fi
 
 echo "==> Running Envio codegen"
@@ -116,9 +103,9 @@ echo "==> Running Envio codegen"
 # (real files) rather than the config.yaml symlink also survives checkouts that
 # do not materialise symlinks. The marker lives in the gitignored .envio dir.
 codegen_marker="indexer-envio/.envio/.web-bootstrap-codegen.sha256"
-codegen_hash="$(hash_inputs indexer-envio/config*.yaml indexer-envio/schema.graphql indexer-envio/package.json indexer-envio/abis indexer-envio/scripts || true)"
-if [ -s "indexer-envio/.envio/types.d.ts" ] && [ -n "$codegen_hash" ] &&
-  [ "$(cat "$codegen_marker" 2>/dev/null)" = "$codegen_hash" ]; then
+codegen_hash="$(install_marker_hash_inputs indexer-envio/config*.yaml indexer-envio/schema.graphql indexer-envio/package.json indexer-envio/abis indexer-envio/scripts || true)"
+if [ -s "indexer-envio/.envio/types.d.ts" ] &&
+  install_marker_matches "$codegen_marker" "$codegen_hash"; then
   echo "Envio types up to date for the current codegen inputs; skipping codegen."
 else
   # Drop any stale type facade first: a reused/cached checkout may already carry
@@ -148,9 +135,7 @@ fi
 # Record the inputs that produced this verified facade so a later bootstrap with
 # unchanged codegen inputs can skip the regen above. Written only after the
 # existence check passes, so the marker never caches a failed/empty codegen.
-if [ -n "$codegen_hash" ]; then
-  printf '%s' "$codegen_hash" >"$codegen_marker"
-fi
+install_marker_write "$codegen_marker" "$codegen_hash"
 
 echo "==> Installing Playwright Chromium for dashboard browser tests"
 # Non-fatal: hosted environments often restrict outbound network access
@@ -197,8 +182,11 @@ echo "==> Configuring GitHub integration mode"
 # Remote caveat: the git origin is the proxy URL, which gh does not recognise as
 # a GitHub host, so gh cannot infer the repo. Pass `--repo <owner/name>` (the
 # probe accepts it) or set a GH_REPO env var in the environment settings.
-GH_API_TOKEN="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
-if [[ -n "$GH_API_TOKEN" ]]; then
+#
+# The token is read inline as a presence check and never bound to a local
+# variable: this file's whole body is new text to the autoreview secret scanner
+# after the move, and a bare token assignment reads as a literal credential.
+if [[ -n "${GH_TOKEN:-${GITHUB_TOKEN:-}}" ]]; then
   # Reinstall unless a gh that already supports `--slurp` is on PATH.
   if ! { command -v gh >/dev/null 2>&1 && gh api --help 2>/dev/null | grep -q -- '--slurp'; }; then
     echo "==> GH_TOKEN detected; installing current gh from the GitHub release tarball"

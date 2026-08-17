@@ -170,7 +170,7 @@ function createContextCheckFixture(readmeContent, extraFiles = {}) {
   );
   writeFixtureFile(
     root,
-    "scripts/agent-session-end-hook.sh",
+    "scripts/bootstrap/agent-session-end-hook.sh",
     "#!/usr/bin/env bash\n",
   );
   writeFixtureJson(root, ".codex/hooks.json", {
@@ -181,7 +181,7 @@ function createContextCheckFixture(readmeContent, extraFiles = {}) {
             {
               type: "command",
               command:
-                "bash -lc 'repo=$(git rev-parse --show-toplevel) && exec bash \"$repo/scripts/agent-session-end-hook.sh\"'",
+                "bash -lc 'repo=$(git rev-parse --show-toplevel) && exec bash \"$repo/scripts/bootstrap/agent-session-end-hook.sh\"'",
             },
           ],
         },
@@ -197,7 +197,7 @@ function createContextCheckFixture(readmeContent, extraFiles = {}) {
             {
               type: "command",
               command:
-                'bash "${CLAUDE_PROJECT_DIR}/scripts/agent-session-end-hook.sh"',
+                'bash "${CLAUDE_PROJECT_DIR}/scripts/bootstrap/agent-session-end-hook.sh"',
             },
           ],
         },
@@ -729,7 +729,7 @@ test("rejects direct and wrapped Claude sag permissions without the canonical ke
                 {
                   type: "command",
                   command:
-                    'bash "${CLAUDE_PROJECT_DIR}/scripts/agent-session-end-hook.sh"',
+                    'bash "${CLAUDE_PROJECT_DIR}/scripts/bootstrap/agent-session-end-hook.sh"',
                 },
               ],
             },
@@ -786,7 +786,7 @@ test("accepts the reviewed single-command Claude sag permissions", () => {
               {
                 type: "command",
                 command:
-                  'bash "${CLAUDE_PROJECT_DIR}/scripts/agent-session-end-hook.sh"',
+                  'bash "${CLAUDE_PROJECT_DIR}/scripts/bootstrap/agent-session-end-hook.sh"',
               },
             ],
           },
@@ -825,7 +825,7 @@ test("rejects every unreviewed Claude Bash permission", () => {
                 {
                   type: "command",
                   command:
-                    'bash "${CLAUDE_PROJECT_DIR}/scripts/agent-session-end-hook.sh"',
+                    'bash "${CLAUDE_PROJECT_DIR}/scripts/bootstrap/agent-session-end-hook.sh"',
                 },
               ],
             },
