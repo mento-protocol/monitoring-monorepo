@@ -32,13 +32,13 @@ jobs:
         run: node scripts/workflows/check-github-action-pins.mjs
       - uses: ./.trunk/setup-ci
       - name: pnpm audit high gate self-tests
-        run: node scripts/pnpm-audit-high-gate.test.mjs
+        run: node scripts/supply-chain/pnpm-audit-high-gate.test.mjs
       - name: pnpm audit governance-watchdog deploy lockfile (high+ only)
-        run: node scripts/pnpm-audit-high-gate.mjs --dir governance-watchdog --label governance-watchdog
+        run: node scripts/supply-chain/pnpm-audit-high-gate.mjs --dir governance-watchdog --label governance-watchdog
       - name: pnpm audit on-call announcer deploy lockfile (high+ only)
-        run: node scripts/pnpm-audit-high-gate.mjs --dir alerts/infra/oncall-announcer --label alerts/infra/oncall-announcer
+        run: node scripts/supply-chain/pnpm-audit-high-gate.mjs --dir alerts/infra/oncall-announcer --label alerts/infra/oncall-announcer
       - name: pnpm audit handler deploy lockfile (high+ only)
-        run: node scripts/pnpm-audit-high-gate.mjs --dir alerts/infra/onchain-event-handler --label alerts/infra/onchain-event-handler
+        run: node scripts/supply-chain/pnpm-audit-high-gate.mjs --dir alerts/infra/onchain-event-handler --label alerts/infra/onchain-event-handler
       - name: Cache Trunk artifacts
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:

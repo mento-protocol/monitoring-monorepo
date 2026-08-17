@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 /**
- * Fixture + unit tests for scripts/override-prune-report.mjs.
+ * Fixture + unit tests for scripts/supply-chain/override-prune-report.mjs.
  *
  * Most coverage imports the exported pure functions directly (fast, precise
  * assertions on the verdict heuristic). A couple of subprocess tests exercise
  * the CLI contract (exit code, table headers, multi-root graceful skip) the
- * same way scripts/lockfile-lint.test.mjs and
- * scripts/pnpm-audit-high-gate.test.mjs do.
+ * same way scripts/supply-chain/lockfile-lint.test.mjs and
+ * scripts/supply-chain/pnpm-audit-high-gate.test.mjs do.
  *
- * Run: node scripts/override-prune-report.test.mjs
+ * Run: node scripts/supply-chain/override-prune-report.test.mjs
  */
 
 import { spawnSync } from "node:child_process";

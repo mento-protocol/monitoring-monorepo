@@ -2681,9 +2681,9 @@ add_root_tooling_package_script_checks() {
   add_command "node scripts/pr-ready-state.test.mjs" "$reason"
   add_command "node scripts/terraform-fmt-check.test.mjs" "$reason"
   add_command "node scripts/tf-stacks.test.mjs" "$reason"
-  add_command "node scripts/lockfile-lint.test.mjs" "$reason"
-  add_command "node scripts/version-skew-check.test.mjs" "$reason"
-  add_command "node scripts/override-prune-report.test.mjs" "$reason"
+  add_command "node scripts/supply-chain/lockfile-lint.test.mjs" "$reason"
+  add_command "node scripts/supply-chain/version-skew-check.test.mjs" "$reason"
+  add_command "node scripts/supply-chain/override-prune-report.test.mjs" "$reason"
   add_command "node scripts/check-adr-reminder.test.mjs" "$reason"
   add_command "node scripts/docs-index.test.mjs" "$reason"
   add_command "node scripts/docs-audit.test.mjs" "$reason"
@@ -3061,8 +3061,8 @@ while IFS= read -r path; do
       ;;
   esac
   case "$path" in
-    .gitattributes|.codex/config.toml|.codex/upstash-mcp.example.toml|.agents/skills/forensic-report/*|.claude/skills/forensic-report/*|docs/adr/0030-iac-before-cli-secrets.md|docs/adr/0060-upstash-management-key-bootstrap.md|docs/deployment.md|docs/notes/codex-agent-skills.md|docs/notes/upstash-mcp-operator.md|package.json|pnpm-lock.yaml|scripts/build-upstash-mcp-runtime.mjs|scripts/render-upstash-mcp-config.mjs|scripts/upstash-mcp-launcher.mjs|terraform/terraform.tfvars.example|terraform/variables.tf)
-      add_command "node --test scripts/upstash-mcp-config.test.mjs" "Upstash MCP transport contract changed"
+    .gitattributes|.codex/config.toml|.codex/upstash-mcp.example.toml|.agents/skills/forensic-report/*|.claude/skills/forensic-report/*|docs/adr/0030-iac-before-cli-secrets.md|docs/adr/0060-upstash-management-key-bootstrap.md|docs/deployment.md|docs/notes/codex-agent-skills.md|docs/notes/upstash-mcp-operator.md|package.json|pnpm-lock.yaml|scripts/mcp/build-upstash-mcp-runtime.mjs|scripts/mcp/render-upstash-mcp-config.mjs|scripts/mcp/upstash-mcp-launcher.mjs|terraform/terraform.tfvars.example|terraform/variables.tf)
+      add_command "node --test scripts/mcp/upstash-mcp-config.test.mjs" "Upstash MCP transport contract changed"
       ;;
   esac
   case "$path" in
@@ -3497,7 +3497,7 @@ while IFS= read -r path; do
         alerts/infra/onchain-event-handler/src/*|alerts/infra/onchain-event-handler/package.json|alerts/infra/onchain-event-handler/pnpm-lock.yaml|alerts/infra/onchain-event-handler/pnpm-workspace.yaml|alerts/infra/onchain-event-handler/tsconfig.json|alerts/infra/onchain-event-handler/vitest.config.ts|alerts/infra/onchain-event-handler/knip.json|alerts/infra/onchain-event-handler/eslint.config.mjs)
           add_package_quality_commands "@mento-protocol/alerts-onchain-event-handler" "alerts onchain-event-handler changed"
           if [[ "$path" == "alerts/infra/onchain-event-handler/pnpm-workspace.yaml" ]]; then
-            add_command "node --test scripts/alerts-uuid-overrides.test.mjs" "alerts uuid override policy changed"
+            add_command "node --test scripts/supply-chain/alerts-uuid-overrides.test.mjs" "alerts uuid override policy changed"
           fi
           ;;
         alerts/infra/onchain-event-handler/*.tf)
@@ -3517,7 +3517,7 @@ while IFS= read -r path; do
         alerts/infra/oncall-announcer/src/*|alerts/infra/oncall-announcer/package.json|alerts/infra/oncall-announcer/pnpm-lock.yaml|alerts/infra/oncall-announcer/pnpm-workspace.yaml|alerts/infra/oncall-announcer/tsconfig.json|alerts/infra/oncall-announcer/vitest.config.ts|alerts/infra/oncall-announcer/knip.json|alerts/infra/oncall-announcer/eslint.config.mjs)
           add_alerts_oncall_quality_commands "alerts oncall-announcer changed"
           if [[ "$path" == "alerts/infra/oncall-announcer/pnpm-workspace.yaml" ]]; then
-            add_command "node --test scripts/alerts-uuid-overrides.test.mjs" "alerts uuid override policy changed"
+            add_command "node --test scripts/supply-chain/alerts-uuid-overrides.test.mjs" "alerts uuid override policy changed"
           fi
           ;;
         alerts/infra/oncall-announcer/*.tf)
@@ -3736,8 +3736,8 @@ while IFS= read -r path; do
           add_command "pnpm agent:context-check" "agent context checker changed"
           add_command "node scripts/check-agent-context.test.mjs" "agent context checker changed"
           ;;
-        scripts/build-upstash-mcp-runtime.mjs|scripts/render-upstash-mcp-config.mjs|scripts/upstash-mcp-config.test.mjs|scripts/upstash-mcp-launcher.mjs)
-          add_command "node --test scripts/upstash-mcp-config.test.mjs" "Upstash MCP transport contract changed"
+        scripts/mcp/build-upstash-mcp-runtime.mjs|scripts/mcp/render-upstash-mcp-config.mjs|scripts/mcp/upstash-mcp-config.test.mjs|scripts/mcp/upstash-mcp-launcher.mjs)
+          add_command "node --test scripts/mcp/upstash-mcp-config.test.mjs" "Upstash MCP transport contract changed"
           ;;
         scripts/repo-health/file-size-watchlist.mjs|scripts/repo-health/file-size-watchlist-issue.mjs|scripts/repo-health/file-size-watchlist.test.mjs)
           add_command "node --test scripts/repo-health/file-size-watchlist.test.mjs" "file-size watchlist automation changed"
@@ -3962,25 +3962,34 @@ while IFS= read -r path; do
         scripts/terraform-fmt-check.test.mjs)
           add_command "node scripts/terraform-fmt-check.test.mjs" "Terraform format helper test changed"
           ;;
-        scripts/lockfile-lint.mjs|scripts/lockfile-lint.test.mjs)
+        scripts/supply-chain/lockfile-lint.mjs|scripts/supply-chain/lockfile-lint.test.mjs|scripts/supply-chain/lockfile-lint-registry-sources.mjs|scripts/supply-chain/lockfile-lint-override-ranges.mjs)
           add_command "pnpm lockfile:lint:test" "lockfile lint helper changed"
           ;;
-        scripts/alerts-uuid-overrides.test.mjs)
-          add_command "node --test scripts/alerts-uuid-overrides.test.mjs" "alerts uuid override contract changed"
+        # One parser, two readers with opposite failure modes: lockfile:lint
+        # fails CI on an unbounded override range and override:prune-report
+        # never fails anything. Route both so a change here cannot pass by
+        # only satisfying the side that stays green.
+        scripts/lib/pnpm-override-selector.mjs|scripts/lib/pnpm-override-selector.test.mjs)
+          add_command "node --test scripts/lib/pnpm-override-selector.test.mjs" "shared pnpm override selector parser changed"
+          add_command "pnpm lockfile:lint:test" "shared pnpm override selector parser changed"
+          add_command "pnpm override:prune-report:test" "shared pnpm override selector parser changed"
+          ;;
+        scripts/supply-chain/alerts-uuid-overrides.test.mjs)
+          add_command "node --test scripts/supply-chain/alerts-uuid-overrides.test.mjs" "alerts uuid override contract changed"
           ;;
         scripts/lockfile-scope.mjs|scripts/lockfile-scope.test.mjs)
           add_command "node scripts/lockfile-scope.test.mjs" "lockfile scope helper changed"
           ;;
-        scripts/pnpm-audit-high-gate.mjs|scripts/pnpm-audit-high-gate.test.mjs)
-          add_command "node scripts/pnpm-audit-high-gate.test.mjs" "pnpm audit high gate changed"
+        scripts/supply-chain/pnpm-audit-high-gate.mjs|scripts/supply-chain/pnpm-audit-high-gate.test.mjs)
+          add_command "node scripts/supply-chain/pnpm-audit-high-gate.test.mjs" "pnpm audit high gate changed"
           ;;
         scripts/sanitize-terraform-output.test.mjs)
           add_command "pnpm sanitize:test" "Terraform output sanitizer test changed"
           ;;
-        scripts/version-skew-check.mjs|scripts/version-skew-check.test.mjs)
+        scripts/supply-chain/version-skew-check.mjs|scripts/supply-chain/version-skew-check.test.mjs)
           add_command "pnpm skew:check:test" "version skew checker changed"
           ;;
-        scripts/override-prune-report.mjs|scripts/override-prune-report.test.mjs)
+        scripts/supply-chain/override-prune-report.mjs|scripts/supply-chain/override-prune-report.test.mjs)
           add_command "pnpm override:prune-report:test" "override prune report helper changed"
           ;;
         scripts/repo-health/check-hermetic-vitest-setup.mjs|scripts/repo-health/check-hermetic-vitest-setup.test.mjs)

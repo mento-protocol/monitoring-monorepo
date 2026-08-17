@@ -65,14 +65,19 @@
  * governance-watchdog) — see .github/workflows/supply-chain.yml.
  *
  * Run:
- *   node scripts/override-prune-report.mjs
- *   node scripts/override-prune-report.mjs --max-age-days 60
+ *   node scripts/supply-chain/override-prune-report.mjs
+ *   node scripts/supply-chain/override-prune-report.mjs --max-age-days 60
  */
 
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
+import { packageNameFromOverrideSelector } from "../lib/pnpm-override-selector.mjs";
+
+// Re-exported so the existing test surface keeps importing it from here while
+// the parser itself lives in one place.
+export { packageNameFromOverrideSelector };
 
 const REPO_ROOT = process.env["OVERRIDE_PRUNE_REPORT_ROOT"] ?? process.cwd();
 const DEFAULT_MAX_AGE_DAYS = 90;
@@ -194,7 +199,7 @@ export function extractOverridesMap(lockfileText) {
   return section ? parseFlatMap(section) : new Map();
 }
 
-// Same key-matching approach as scripts/lockfile-lint.mjs's `totalEntries`
+// Same key-matching approach as scripts/supply-chain/lockfile-lint.mjs's `totalEntries`
 // regex: a top-level (2-space indent) YAML key ending in `:` at end-of-line,
 // quoted or bare.
 const PACKAGE_KEY_RE =
@@ -249,60 +254,9 @@ export function extractPackageInstances(lockfileText) {
 }
 
 // ── override selector / version helpers ──────────────────────────────────
-
-/**
- * @param {string} selector
- * @param {number} index
- */
-function isPeerSelectorSeparator(selector, index) {
-  const previous = selector[index - 1] ?? "";
-  const next = selector[index + 1] ?? "";
-  return (
-    next !== "" &&
-    next !== "=" &&
-    previous !== "@" &&
-    previous !== "<" &&
-    previous !== ">" &&
-    previous !== "=" &&
-    !/\s|\|/.test(previous)
-  );
-}
-
-/**
- * Splits a pnpm override selector on bare `>` path separators (e.g.
- * `parent>child`), distinct from `>`/`>=` used inside a version range.
- * Mirrors scripts/lockfile-lint.mjs's `peerQualifiedSelectorParts`.
- * @param {string} selector
- * @returns {string[]}
- */
-function peerQualifiedSelectorParts(selector) {
-  const parts = [];
-  let start = 0;
-  for (let index = 0; index < selector.length; index += 1) {
-    if (selector[index] === ">" && isPeerSelectorSeparator(selector, index)) {
-      parts.push(selector.slice(start, index));
-      start = index + 1;
-    }
-  }
-  parts.push(selector.slice(start));
-  return parts;
-}
-
-/**
- * Strips any path qualifiers (`parent>child`) and version-range suffix from
- * a pnpm override selector, leaving the bare package name. Mirrors
- * scripts/lockfile-lint.mjs's `packageNameFromOverrideSelector`.
- * @param {string} selector
- * @returns {string}
- */
-export function packageNameFromOverrideSelector(selector) {
-  const parts = peerQualifiedSelectorParts(selector);
-  const packageSelector = parts[parts.length - 1] ?? selector;
-  const rangeSeparator = packageSelector.indexOf("@", 1);
-  return rangeSeparator === -1
-    ? packageSelector
-    : packageSelector.slice(0, rangeSeparator);
-}
+//
+// Selector parsing lives in scripts/lib/pnpm-override-selector.mjs, shared
+// with the lockfile-lint override-range gate. See the import at the top.
 
 /**
  * Extracts the "floor" version from an override replacement value — the

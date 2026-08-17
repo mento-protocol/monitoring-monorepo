@@ -13,8 +13,8 @@ catalog:
   # Single source of truth for viem. ui-dashboard/metrics-bridge reference it
   # via "catalog:"; indexer-envio, aegis, governance-watchdog and the alerts
   # handler are also built as standalone source roots outside this workspace,
-  # so they keep literal pins; scripts/version-skew-check.mjs enforces they
-  # stay equal to this entry.
+  # so they keep literal pins; scripts/supply-chain/version-skew-check.mjs
+  # enforces they stay equal to this entry.
   viem: 2.50.4
 
 # pnpm-workspace.yaml overrides carry bounded undici security pins for root
