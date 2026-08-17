@@ -57,8 +57,9 @@ or the `.dependency-cruiser.cjs` / `*/knip.json` files.
 - `pnpm skew:check` compares every cataloged dependency with
   [`pnpm-workspace.yaml`](../../pnpm-workspace.yaml). Workspace-only consumers
   use `catalog:`; independently installed or deployed roots keep literal pins,
-  and [`version-skew-check.mjs`](../../scripts/version-skew-check.mjs) prevents
-  those pins from drifting.
+  and
+  [`version-skew-check.mjs`](../../scripts/supply-chain/version-skew-check.mjs)
+  prevents those pins from drifting.
 - Packages with an env module parse supported variables through Zod at module
   load. The dashboard keeps public values in
   [`src/env.ts`](../../ui-dashboard/src/env.ts) and server-only values in

@@ -6,10 +6,14 @@ import { dirname, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
-const ROOT = resolve(SCRIPT_DIR, "..");
+const ROOT = resolve(SCRIPT_DIR, "../..");
 
+// SHA-256 of scripts/mcp/upstash-mcp-launcher.mjs. Recompute with
+// `shasum -a 256 scripts/mcp/upstash-mcp-launcher.mjs` whenever that file
+// changes, and re-run the renderer on every operator machine — the generated
+// Codex TOML embeds this value next to the launcher path.
 export const UPSTASH_MCP_LAUNCHER_SHA256 =
-  "f4debf3eb16a81e829f607e01a18646fcce486b9d85029905f99a1a6a7f15e3b";
+  "633a7f94140ee014355d7e57bd50925bc8c9cd5aad774149e23db57a8ae273c2";
 
 function assertLauncherInputs({ launcherPath, launcherSha256 }) {
   if (!isAbsolute(launcherPath)) {
@@ -101,7 +105,7 @@ export async function renderLocalUpstashMcpConfig({
   runtimeDirectory,
 } = {}) {
   const launcherPath = realpathSync(
-    resolve(repoRoot, "scripts/upstash-mcp-launcher.mjs"),
+    resolve(repoRoot, "scripts/mcp/upstash-mcp-launcher.mjs"),
   );
   verifyUpstashMcpLauncher({ launcherPath });
   const { prepareUpstashMcpRuntime } =
@@ -127,7 +131,7 @@ function reviewedSnapshotRepoRoot(args) {
     throw new Error("the Upstash MCP repository root must be absolute");
   }
   const repoRoot = realpathSync(args[1]);
-  const checkoutScripts = realpathSync(resolve(repoRoot, "scripts"));
+  const checkoutScripts = realpathSync(resolve(repoRoot, "scripts/mcp"));
   if (realpathSync(SCRIPT_DIR) === checkoutScripts) {
     throw new Error(
       "run the config generator from an immutable reviewed commit snapshot",

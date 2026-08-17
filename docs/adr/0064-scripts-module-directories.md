@@ -119,6 +119,49 @@ scheduled document, for context an agent gets from the directory map in
   passed without checking anything, and a move would have made it do so.
 - The reorganization lands incrementally. Each phase moves one module and sweeps
   its pins, so a break is scoped to one subsystem and one PR.
+- An enumerated paths-filter fails silently rather than loudly: the job stops
+  running, and the required `ci` sentinel stays green because a skipped job is
+  not a failed one. Where a filter's whole file set is one module, replace the
+  enumeration with `scripts/<module>/**` in the PR that moves it. The glob
+  covers the same files, so it does not widen the advisory-job cost this ADR's
+  rejected alternative was protecting, and it survives the next move within the
+  module. P6 did this for `supply-chain.yml`, whose seven enumerated basenames
+  became `scripts/supply-chain/**` plus two entries for a shared `lib/` module
+  that sits outside the directory. Keep the enumeration where the filter is
+  deliberately narrower than a module — `ci.yml`'s `versionSkew` runs one
+  checker, and a module glob would fire it on every unrelated edit in that
+  directory.
+- Moving a file can change a reviewed artifact's hash. A script that derives its
+  repo root by walking up a fixed number of directories needs that count fixed
+  in the same commit, which changes its bytes. When the file's SHA-256 is itself
+  a pinned constant, recompute the constant, update every doc that records it,
+  and treat operator regeneration as a release step. P6 hit this with
+  `scripts/mcp/upstash-mcp-launcher.mjs`.
+
+## Sweep checklist for a move
+
+Run every item in the PR that moves a file. `scripts/AGENTS.md` points here
+rather than carrying the list, because its scoped instruction budget is for
+routing, not procedure.
+
+1. Root `package.json` — 73 entries reference `scripts/`.
+2. `check-agent-quality-gate-package-scripts.sh` — pinned alias map.
+3. `.github/workflows/` — 22 of 32 files, including the enumerated filters
+   listed under "Why Files Stay Flat" in `scripts/AGENTS.md`.
+4. `.trunk/trunk.yaml` pre-push hook, and `.gitattributes`.
+5. `.claude/settings.json`, `.codex/hooks.json`,
+   `.claude/hooks/session-start.sh`, and the verbatim copies and invocation
+   regexes in `check-agent-context.mjs`.
+6. `.claude/skills/` and `.agents/skills/` — both mirrors.
+7. `docs/notes/quick-commands.md`.
+8. `agent-quality-gate.sh` routing arms — a literal-prefix glob such as
+   `scripts/deploy-*.sh` or `scripts/sentry-*.test.mjs` stops matching one
+   directory down. Keep the basename prefix; add the paired one-level arm. Its
+   contract-surface arm also names `scripts/lib/*.mjs`, which sets the
+   `pnpm tf:test` reason; the unconditional sweep already runs the suite.
+
+A shared module under `scripts/lib/` is routed from every arm that reads it,
+not only the arm of the consumer that happens to fail loudest.
 
 ## Evidence
 
