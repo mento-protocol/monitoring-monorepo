@@ -3,7 +3,7 @@ title: Manual platform applies use an exact private plan guard
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-10
+last_verified: 2026-08-17
 scope: terraform/infra
 date: 2026-08
 doc_type: adr
@@ -79,6 +79,13 @@ must still review a separate preflight plan and obtain explicit human approval
 before apply. The apply creates a fresh plan, so only the machine policy reviews
 the exact plan applied. Issue #1576 still owns broad policy coverage for every
 retained protected-stack mutation.
+
+This guard covers `pnpm tf plan/apply platform` only. The direct Metrics Bridge
+deploy holds a separate, deploy-only exception: two targeted `-refresh=false`
+bootstrap plans checked by
+[`scripts/check-metrics-bridge-bootstrap-plan.mjs`](../../scripts/check-metrics-bridge-bootstrap-plan.mjs).
+[ADR 0053](0053-explicit-deployment-source-staging.md) owns that shape and the
+contract that enforces it.
 
 ## Alternatives considered
 
