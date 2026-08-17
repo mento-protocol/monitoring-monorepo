@@ -1325,6 +1325,7 @@ test("#1453 every codecov upload step in ci.yml excludes sentry-autofix heads", 
   const ciPath = join(
     dirname(fileURLToPath(import.meta.url)),
     "..",
+    "..",
     ".github",
     "workflows",
     "ci.yml",

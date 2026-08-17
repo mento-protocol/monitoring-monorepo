@@ -7,7 +7,7 @@
  *
  * No external dependencies — reads files with pure Node.js.
  *
- * Run: `node scripts/check-notifier-coverage.mjs`
+ * Run: `node scripts/workflows/check-notifier-coverage.mjs`
  * CI:  .github/workflows/ci.yml  (scripts job)
  */
 

@@ -38,7 +38,7 @@ while the job holds the read-only plan SA — whose state-bucket
 `storage.objectViewer` access includes cleartext secret values in state. The
 autofix diff guard also forbids `*.tf`/`*.hcl`/`*.tfvars` at any depth;
 the plan-job `if:` exclusion is defense in depth behind it, and
-`scripts/check-autofix-ci-trust.mjs` enforces the pattern structurally.
+`scripts/workflows/check-autofix-ci-trust.mjs` enforces the pattern structurally.
 
 ## CI identity boundaries
 

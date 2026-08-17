@@ -29,7 +29,7 @@ jobs:
         with:
           fetch-depth: 0
       - name: Check GitHub Actions pins
-        run: node scripts/check-github-action-pins.mjs
+        run: node scripts/workflows/check-github-action-pins.mjs
       - uses: ./.trunk/setup-ci
       - name: pnpm audit high gate self-tests
         run: node scripts/pnpm-audit-high-gate.test.mjs
