@@ -200,7 +200,7 @@ function UnavailableCells({
           ariaLabel={`${venueLabel(source)}: unavailable — ${reason}`}
         />
         <span
-          className="min-w-0 whitespace-normal text-[11.5px] leading-tight xl:whitespace-nowrap xl:text-[12px]"
+          className="min-w-0 whitespace-normal text-[11.5px] leading-tight xl:text-[12px]"
           style={{ color: PEG_COLOR.muted }}
         >
           Unavailable — {reason}

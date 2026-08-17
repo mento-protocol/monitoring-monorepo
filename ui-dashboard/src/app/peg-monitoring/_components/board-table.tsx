@@ -20,7 +20,6 @@ const HEADERS = [
   "Bid-ask spread",
   "Trading limit",
   "Breaker",
-  "",
 ];
 
 export function BoardTable({
@@ -72,19 +71,13 @@ export function BoardTable({
             role="row"
             className={`grid border-b border-border py-2.5 ${PEG_BOARD_GRID} ${PEG_BOARD_ROW_PADDING}`}
           >
-            {HEADERS.map((header, index) => (
+            {HEADERS.map((header) => (
               <div
                 role="columnheader"
-                key={header === "" ? `spacer-${index}` : header}
+                key={header}
                 className="whitespace-nowrap text-[10.5px] font-[650] uppercase tracking-[0.1em] text-muted-foreground"
               >
-                {/* axe's empty-table-header wants SR-visible text, not a
-                    label attribute, for the chevron column. */}
-                {header === "" ? (
-                  <span className="sr-only">Details</span>
-                ) : (
-                  header
-                )}
+                {header}
               </div>
             ))}
           </div>
