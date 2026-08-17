@@ -321,7 +321,7 @@ test("contains long distance labels inside the compact desktop column", async ({
     packages: payload.packages.map((item) => ({
       ...item,
       sources: item.sources.map((source) =>
-        source.id === item.policy.deepVenueSource
+        source.id === item.policy.deepVenueSource || source.id === "kraken_eur"
           ? {
               ...source,
               executablePrice: 0.87655,
@@ -359,6 +359,38 @@ test("contains long distance labels inside the compact desktop column", async ({
   );
   expect(distanceBox!.x + distanceBox!.width).toBeLessThanOrEqual(
     primaryBox!.x + 1,
+  );
+  await row.getByText("EUROP / EUR", { exact: true }).click();
+  const supportingRow = page.getByTestId("peg-supporting-source-kraken_eur");
+  const supportingDistance = page.getByTestId(
+    "peg-supporting-distance-kraken_eur",
+  );
+  const supportingRail = page.getByTestId("peg-supporting-rail-kraken_eur");
+  const supportingLabel = supportingRow.getByText("1,234.5 bps below", {
+    exact: true,
+  });
+  const offScaleChevron = supportingRow.getByText("«", { exact: true });
+  const [
+    supportingLabelBox,
+    supportingDistanceBox,
+    supportingRailBox,
+    chevronBox,
+  ] = await Promise.all([
+    supportingLabel.boundingBox(),
+    supportingDistance.boundingBox(),
+    supportingRail.boundingBox(),
+    offScaleChevron.boundingBox(),
+  ]);
+  expect(supportingLabelBox).not.toBeNull();
+  expect(supportingDistanceBox).not.toBeNull();
+  expect(supportingRailBox).not.toBeNull();
+  expect(chevronBox).not.toBeNull();
+  expect(supportingLabelBox!.x + supportingLabelBox!.width).toBeLessThanOrEqual(
+    supportingDistanceBox!.x + supportingDistanceBox!.width + 1,
+  );
+  expect(chevronBox!.x).toBeGreaterThanOrEqual(supportingRailBox!.x - 1);
+  expect(chevronBox!.x + chevronBox!.width).toBeLessThanOrEqual(
+    supportingRailBox!.x + supportingRailBox!.width + 1,
   );
   const boardOverflow = await page
     .getByTestId("peg-board-scroller")

@@ -142,15 +142,19 @@ function UsableCells({
       <div className="truncate text-[12.5px] text-muted-foreground">
         {formatNumber(source.executablePrice)}
       </div>
-      <div className="flex min-w-0 items-center gap-3">
+      <div
+        data-testid={`peg-supporting-distance-${source.id}`}
+        className="flex min-w-0 items-center gap-1.5 xl:gap-3"
+      >
         <DistanceRail
+          testId={`peg-supporting-rail-${source.id}`}
           marker={marker}
           tone={offScale ? "critical" : "healthy"}
           ariaLabel={`${venueLabel(source)}: ${distanceText}`}
           tooltip={railTooltip}
         />
         <span
-          className="whitespace-nowrap text-[12px]"
+          className="min-w-0 whitespace-normal text-[11.5px] leading-tight xl:whitespace-nowrap xl:text-[12px]"
           style={{
             color: offScale ? PEG_COLOR.offScale : PEG_COLOR.muted,
           }}
@@ -185,14 +189,18 @@ function UnavailableCells({
   return (
     <>
       <div className="truncate text-[12.5px] text-muted-foreground">—</div>
-      <div className="flex min-w-0 items-center gap-3">
+      <div
+        data-testid={`peg-supporting-distance-${source.id}`}
+        className="flex min-w-0 items-center gap-1.5 xl:gap-3"
+      >
         <DistanceRail
+          testId={`peg-supporting-rail-${source.id}`}
           marker={null}
           tone="healthy"
           ariaLabel={`${venueLabel(source)}: unavailable — ${reason}`}
         />
         <span
-          className="whitespace-nowrap text-[12px]"
+          className="min-w-0 whitespace-normal text-[11.5px] leading-tight xl:whitespace-nowrap xl:text-[12px]"
           style={{ color: PEG_COLOR.muted }}
         >
           Unavailable — {reason}
