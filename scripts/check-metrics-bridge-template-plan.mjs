@@ -2,10 +2,7 @@
 
 import { isDeepStrictEqual } from "node:util";
 
-import {
-  attributeExpression,
-  terraformTopLevelBlocks,
-} from "./production-infra-identity-contract/hcl.mjs";
+import { attributeExpression, terraformTopLevelBlocks } from "./lib/hcl.mjs";
 
 export const METRICS_BRIDGE_SERVICE_ADDRESS =
   "google_cloud_run_v2_service.metrics_bridge";

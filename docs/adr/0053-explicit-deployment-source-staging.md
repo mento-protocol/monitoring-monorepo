@@ -174,6 +174,15 @@ approved apply.
 
 - Bucket and IAM ownership:
   [`terraform/deploy-staging.tf`](../../terraform/deploy-staging.tf)
+- Contract implementation:
+  [`scripts/deploy-staging-contract.mjs`](../../scripts/deploy-staging-contract.mjs)
+  and
+  [`scripts/deploy-staging-callsite-discovery.mjs`](../../scripts/deploy-staging-callsite-discovery.mjs).
+  Both read Terraform and workflow text through the shared parsing cores
+  [`scripts/lib/hcl.mjs`](../../scripts/lib/hcl.mjs) and
+  [`scripts/lib/workflow-yaml.mjs`](../../scripts/lib/workflow-yaml.mjs)
+  ([ADR 0064](0064-scripts-module-directories.md)). Those cores carry no policy;
+  the five allowed callsites and the source-staging assertions live here.
 - [Cloud Build source staging reference](https://cloud.google.com/sdk/gcloud/reference/builds/submit)
 - [App Engine deployment bucket reference](https://cloud.google.com/sdk/gcloud/reference/app/deploy)
 - [App Engine deployment troubleshooting](https://cloud.google.com/appengine/docs/standard/troubleshooter/deployment)

@@ -4,7 +4,7 @@ import {
   expectExpression,
   normalizeExpression,
   topLevelBlockKey,
-} from "./hcl.mjs";
+} from "../lib/hcl.mjs";
 import { validateTerraformExecutionSurfaces } from "./execution.mjs";
 import { validateIamSourceProvenance } from "./provenance.mjs";
 

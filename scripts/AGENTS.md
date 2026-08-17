@@ -30,7 +30,7 @@ Until a phase merges, its files are flat.
 | --------------- | ----- | -------------------------------------- |
 | `workflows/`    | P1    | scripts backing Actions workflow jobs  |
 | `bootstrap/`    | P2    | clone, worktree, hosted-session setup  |
-| `context/`      | P3    | agent context, budget, skill mirrors   |
+| `context/`      | P3    | agent context, budget, doc catalog     |
 | `docs/`         | P4    | catalog, audit, garden, nav eval       |
 | `pr/`           | P5    | PR and issue state projections         |
 | `supply-chain/` | P6    | lockfile, audit, pin, skew gates       |
@@ -40,8 +40,17 @@ Until a phase merges, its files are flat.
 | `terraform/`    | P10   | movable Terraform guards and helpers   |
 | `gate/`         | P11   | quality-gate satellites                |
 
-Landed: P1, P3. `lib/` (the shared tier; P7 adds to it) and
+Landed: P1, P3, P7. `lib/` (the shared tier) and
 `production-infra-identity-contract/` predate the reorganization.
+
+`lib/` holds generic cores carrying no domain policy: `hcl.mjs` (Terraform HCL
+tokenizer and block extraction), `workflow-yaml.mjs` (Actions workflow and
+shell-run parsing), and `gh-issue-lifecycle.mjs` (shared `gh` runner and
+issue-queue state). A generic core does not live in a domain
+directory: five files outside `production-infra-identity-contract/` read
+`hcl.mjs`, and the ADR 0053 deploy-staging contract also reads
+`workflow-yaml.mjs`. Inventories, pinned hashes, and expected identities stay
+with their domain.
 
 ## Why Files Stay Flat
 
@@ -62,6 +71,11 @@ that mechanism moves with it, in the same PR.
   `autoreviewRootRuntime`; `rootScripts` is the recursive `scripts/**`),
   `infra.yml`, `supply-chain.yml`, `alerts-rules.yml`,
   `peg-policy-publication.yml`, and `schema-diff.yml` list individual files.
+  The three terraform filters (`ci.yml` `terraform`; `infra.yml` push and
+  `pull_request`) also name `scripts/lib/hcl.mjs` and
+  `scripts/lib/workflow-yaml.mjs`, which sit outside the recursive
+  `scripts/production-infra-identity-contract/**`. `routing.test.mjs` in that
+  directory asserts all three.
 - **Production infrastructure contract pins.**
   `production-infra-identity-contract/workflow-inventory.mjs` pins exact script
   paths for the workflows it audits.
@@ -82,7 +96,9 @@ Run every item in the PR that moves a file.
 7. `docs/notes/quick-commands.md`.
 8. `agent-quality-gate.sh` routing arms — a literal-prefix glob such as
    `scripts/deploy-*.sh` or `scripts/sentry-*.test.mjs` stops matching one
-   directory down. Keep the basename prefix; add the paired one-level arm.
+   directory down. Keep the basename prefix; add the paired one-level arm. Its
+   contract-surface arm also names `scripts/lib/*.mjs`; that arm sets the
+   `pnpm tf:test` reason, since the unconditional sweep already runs the suite.
 
 ## Operating Rules
 

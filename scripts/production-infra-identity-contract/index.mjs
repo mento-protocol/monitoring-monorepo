@@ -5,7 +5,7 @@ import {
   REFRESH_PROVIDER_CONDITION,
   SERVICE_AND_DRIFT_WORKFLOWS,
 } from "./constants.mjs";
-import { terraformTopLevelBlocks } from "./hcl.mjs";
+import { terraformTopLevelBlocks } from "../lib/hcl.mjs";
 import {
   validateGithubVariables,
   validateIdentityReferenceInventory,
@@ -17,8 +17,8 @@ import { validateIamGrantSinkInventory } from "./iam.mjs";
 import {
   PEG_POLICY_IDENTITY_REFERENCE_SPECIFICATIONS,
   PEG_POLICY_PRODUCTION_APPLIER_GRANT_KEY,
-  validatePegPolicyFoundation,
-} from "./peg-policy.mjs";
+} from "./peg-policy-constants.mjs";
+import { validatePegPolicyFoundation } from "./peg-policy-runtime.mjs";
 import { validateRefreshIdentity } from "./refresh.mjs";
 import { validateWorkflowContract } from "./workflow.mjs";
 

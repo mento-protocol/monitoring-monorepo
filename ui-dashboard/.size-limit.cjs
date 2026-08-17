@@ -15,12 +15,22 @@
 // 3. Set budget to current_bytes × 1.10 (10% headroom).
 // 4. Update the comments below with the new baseline + date.
 //
+// MEASUREMENT VARIANCE — never set a budget within ~1% of the measurement.
+// Brotli output differs between the CI runner and developer machines on a
+// byte-identical source tree, in both directions and on every entry. Tree
+// 77e409d4 measured 288.88 kB (CI) against 289.32 kB (macOS) on the Plotly
+// chunk, and 13.95 kB (CI) against 14.02 kB (macOS) on the CSS bundle. A
+// budget with less headroom than that spread decides pass/fail by host, not
+// by bundle content.
+//
 // BASELINE (measured 2026-07-15 with Next.js 16.2.6 + Turbopack):
 //   All client JS chunks (brotli):     1,122,116 bytes (1.07 MB)
 //   Plotly chunk (brotli):               288,930 bytes
 //   Markdown editor chunk (brotli):       44,109 bytes
 //   Sentry replay chunk (brotli):         34,792 bytes
-//   All CSS (brotli):                     11,400 bytes (11.1 KB)
+//   All CSS (brotli):                     13,961 bytes (13.96 kB)
+//     re-measured 2026-08-17 on main (a60c1031); the other four entries still
+//     carry their 2026-07-15 numbers.
 
 const fs = process.getBuiltinModule("node:fs");
 const path = process.getBuiltinModule("node:path");
@@ -267,9 +277,24 @@ const config = [
     // package dist is registered (see globals.css), so the DS's unused component
     // utilities stay out of this bundle; a jump past this budget means that
     // boundary broke.
+    //
+    // 2026-08-17 re-baseline: the board finished at 13,961 bytes, 39 bytes under
+    // the 14 kB budget, so the same tree passed in CI (13.95 kB) and failed on a
+    // macOS machine (14.02 kB). Baseline: 13,961 bytes  Budget: ×1.10 = 15,357,
+    // rounded down to the whole unit → 15 kB. That keeps 1,039 bytes (7.4%) of
+    // headroom, well past the ~0.5% host spread, while staying tighter than the
+    // procedure's ceiling.
+    //
+    // Trimming was measured first and rejected: the two candidates are the
+    // oklch→lab() fallbacks Lightning CSS emits for the `Firefox >= 111`
+    // browserslist floor (2,297 bytes brotli, but dropping them raises the
+    // support floor — an ADR 0023 decision, not a budget fix) and the 99 design
+    // system custom properties no rule references (358 bytes brotli, but pruning
+    // them means vendoring a forked copy of the package `theme.css`, and 13,603
+    // bytes would still sit at 97% of the old budget).
     name: "All client CSS",
     path: manifestPathsOrFallback(".css", ["static/"], ".next/static/**/*.css"),
-    limit: "14 kB",
+    limit: "15 kB",
   },
 ];
 
