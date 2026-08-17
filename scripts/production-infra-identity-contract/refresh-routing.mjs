@@ -24,7 +24,7 @@ import {
   terraformPlanCommands,
   terraformPlanFlagsMatch,
   workflowJobSteps,
-} from "./workflow-inventory.mjs";
+} from "../lib/workflow-yaml.mjs";
 
 const DRIFT_WORKFLOW = ".github/workflows/terraform-drift.yml";
 const REFRESH_WORKFLOWS = new Set([...APPLY_WORKFLOWS, DRIFT_WORKFLOW]);

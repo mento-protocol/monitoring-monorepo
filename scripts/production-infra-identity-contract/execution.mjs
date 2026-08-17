@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
-import { blockKey, stringAttribute, topLevelBlockKey } from "./hcl.mjs";
+import { blockKey, stringAttribute, topLevelBlockKey } from "../lib/hcl.mjs";
 import { validateTerraformSourceSurfaces } from "./surfaces.mjs";
 
 const EXECUTION_BLOCK_SHAPE_SPECIFICATIONS = [
