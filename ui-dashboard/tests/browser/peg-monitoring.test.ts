@@ -311,7 +311,7 @@ test("keeps the board scrollable without pushing the page wider on mobile", asyn
   expect(horizontalOverflow).toBeLessThanOrEqual(1);
 });
 
-test("contains long distance labels inside the compact desktop column", async ({
+test("contains long distance labels without desktop board overflow", async ({
   page,
 }) => {
   await page.clock.install({ time: new Date(now * 1000 + 20_000) });
@@ -396,6 +396,12 @@ test("contains long distance labels inside the compact desktop column", async ({
     .getByTestId("peg-board-scroller")
     .evaluate((element) => element.scrollWidth - element.clientWidth);
   expect(boardOverflow).toBeLessThanOrEqual(1);
+
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  const largeBoardOverflow = await page
+    .getByTestId("peg-board-scroller")
+    .evaluate((element) => element.scrollWidth - element.clientWidth);
+  expect(largeBoardOverflow).toBeLessThanOrEqual(1);
 });
 
 test("refreshes the board when a hidden tab resumes", async ({ page }) => {
