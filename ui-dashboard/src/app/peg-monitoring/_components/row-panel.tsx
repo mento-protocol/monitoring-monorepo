@@ -7,6 +7,7 @@ import { buildPoolDetailHref } from "@/lib/routing";
 import { formatFraction } from "../_lib/peg-board-format";
 import {
   PEG_COLOR,
+  PEG_BOARD_ROW_PADDING,
   distanceLabel,
   effectiveAssetPolicy,
   monitorStates,
@@ -86,7 +87,7 @@ export function RowPanel({
       id={`peg-panel-${asset.asset.asset}`}
       data-testid={`peg-panel-${asset.asset.asset}`}
       role="row"
-      className="border-y border-border bg-card px-[18px] pb-[22px] pt-5"
+      className={`border-y border-border bg-card pb-[22px] pt-5 ${PEG_BOARD_ROW_PADDING}`}
     >
       <div role="cell" aria-colspan={9}>
         <div className="space-y-2">

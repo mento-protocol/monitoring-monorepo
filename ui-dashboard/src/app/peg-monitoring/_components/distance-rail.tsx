@@ -32,7 +32,7 @@ export function DistanceRail({
       role="img"
       aria-label={ariaLabel}
       data-testid={testId}
-      className="relative block h-2 w-[120px] shrink-0"
+      className="relative block h-2 w-[72px] shrink-0 xl:w-[120px]"
       style={{ background: PEG_RAIL_GRADIENT }}
     >
       <span

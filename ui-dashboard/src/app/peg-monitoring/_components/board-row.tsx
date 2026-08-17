@@ -12,6 +12,7 @@ import {
 } from "../_lib/peg-board-format";
 import {
   PEG_BOARD_GRID,
+  PEG_BOARD_ROW_PADDING,
   PEG_COLOR,
   distanceLabel,
   monitorStates,
@@ -76,7 +77,7 @@ export function BoardRow({
       onClick={(event) => {
         if (!isInteractiveTarget(event)) onToggle(assetId);
       }}
-      className={`grid cursor-pointer items-center border-b border-border px-[18px] py-4 ${PEG_BOARD_GRID} ${rowTint(badge.tone, open)}`}
+      className={`grid cursor-pointer items-center border-b border-border py-4 ${PEG_BOARD_GRID} ${PEG_BOARD_ROW_PADDING} ${rowTint(badge.tone, open)}`}
     >
       <div
         role="cell"
@@ -158,7 +159,7 @@ function DistanceCell({
   const label = distanceLabel(asset);
   const warning = tone !== "healthy";
   return (
-    <div role="cell" className="flex min-w-0 items-center gap-3">
+    <div role="cell" className="flex min-w-0 items-center gap-2 xl:gap-3">
       <DistanceRail
         testId={`peg-rail-${asset.asset.asset}`}
         marker={railMarker(asset.distanceBps, asset.direction)}
@@ -168,7 +169,7 @@ function DistanceCell({
         ariaLabel={`${asset.assetName} distance from target: ${label}`}
       />
       <span
-        className={`whitespace-nowrap text-[12.5px] ${warning ? "font-[650]" : ""}`}
+        className={`min-w-0 whitespace-normal text-[11.5px] leading-tight xl:whitespace-nowrap xl:text-[12.5px] ${warning ? "font-[650]" : ""}`}
         style={{ color: warning ? PEG_COLOR.amber : PEG_COLOR.muted }}
       >
         {label}

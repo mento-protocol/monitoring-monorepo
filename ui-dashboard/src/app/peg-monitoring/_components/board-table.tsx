@@ -5,6 +5,7 @@ import type { PegMonitoringPresentation } from "@/lib/peg-monitoring-presentatio
 import {
   PEG_BOARD_GRID,
   PEG_BOARD_MIN_WIDTH,
+  PEG_BOARD_ROW_PADDING,
   sortBoardRows,
 } from "../_lib/peg-board-model";
 import { BoardRow } from "./board-row";
@@ -55,7 +56,10 @@ export function BoardTable({
       {/* `relative` contains absolutely-positioned descendants (the sr-only
           column label, rail markers) so they clip with the scroller instead of
           widening the document on narrow viewports. */}
-      <div className="relative overflow-x-auto">
+      <div
+        data-testid="peg-board-scroller"
+        className="relative overflow-x-auto"
+      >
         {/* The layout is a CSS grid, so the table semantics screen readers
             need for column/cell association are declared via ARIA roles; the
             expanded panel participates as a full-width row (aria-colspan). */}
@@ -66,7 +70,7 @@ export function BoardTable({
         >
           <div
             role="row"
-            className={`grid border-b border-border px-[18px] py-2.5 ${PEG_BOARD_GRID}`}
+            className={`grid border-b border-border py-2.5 ${PEG_BOARD_GRID} ${PEG_BOARD_ROW_PADDING}`}
           >
             {HEADERS.map((header, index) => (
               <div
