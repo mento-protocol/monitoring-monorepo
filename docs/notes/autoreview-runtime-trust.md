@@ -230,7 +230,21 @@ to the whole value, so a literal fused to a reference still refuses. Shell
 expansion nesting is bounded at eight levels, past which the value is not a
 reference and stays subject to the literal rules; real defaults nest one to
 three deep, and an unbounded walk lets one crafted line exhaust the scanner's
-stack.
+stack. Three more shapes pass on the same proof, and only unquoted. The scanner
+sees no file type, so each carries a syntactic discriminator: HCL iteration
+traversals (`each`, `count`, `self`, and the `rule` dynamic-block iterator) as
+bare dotted identifier paths behind a whitespace-surrounded `=`, which a shell
+assignment cannot take; a TypeScript type annotation in `:` position whose
+union or intersection members all come from a closed twelve-word keyword
+vocabulary, so the value cannot carry a credential in any language, split
+across members or whole; and a shell command list on an `=` value whose head is
+the substitution the scanner already accepts and whose `||`/`&&` tail holds only
+words under credential length drawn from an alphabet with no `=`, `:`, quote,
+`$`, or parenthesis, so neither a second assignment nor a command argument can
+hide one. A literal in value position stays refused whatever names it: a fixture
+string is a quoted literal, and no syntax separates one from a weak credential,
+so fixtures compose the value from parts or use a documented placeholder marker
+(`fixture-token`, `example-secret`).
 Evidence reads reject symlinks and verify that the opened descriptor still
 identifies the file that was inspected, closing path-swap races.
 

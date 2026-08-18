@@ -846,6 +846,208 @@ assert.match(
   /literal generic token assignment/,
   "a real literal trailing an HCL reference fails the ^…$ anchor and is rejected",
 );
+// HCL iteration traversals are the same reference class: `each`/`count` are the
+// fixed for_each and count scopes, `self` is a resource's own attributes, and
+// `rule` is the dynamic-block iterator this repo's alert rules declare. Both
+// diff directions are asserted, because the scanner reads removed lines too and
+// a PR that only deletes such a line lost its bundle as well.
+for (const direction of ["+", "-"]) {
+  assert.equal(
+    secretLikeReason(`${direction}        token    = rule.value.token`),
+    null,
+    `dynamic-block iterator traversals are references (${direction} side)`,
+  );
+  assert.equal(
+    secretLikeReason(`${direction}  client_secret = each.value.secret`),
+    null,
+    `for_each iterator traversals are references (${direction} side)`,
+  );
+}
+assert.equal(
+  secretLikeReason("  auth_token = self.triggers.auth_token"),
+  null,
+  "self.* provisioner traversals are references, not literal tokens",
+);
+// Anti-bypass: the traversal has to be the whole unquoted value. A quoted value
+// is an HCL string, an unlisted scope is not a traversal, and a literal fused to
+// or trailing one fails the ^…$ anchor.
+const iterationTraversal = ["rule", "value", "token"].join(".");
+assert.match(
+  secretLikeReason(`  token = "${iterationTraversal}"`),
+  /literal (?:generic token|credential) assignment/,
+  "a quoted traversal-shaped value is an HCL string literal, not a reference",
+);
+assert.match(
+  secretLikeReason(`  auth_token = each.value.token ${genericTokenCredential}`),
+  /literal generic token assignment/,
+  "a literal trailing an iteration traversal is still rejected",
+);
+assert.match(
+  secretLikeReason(`  auth_token = iterator.value.${genericTokenCredential}`),
+  /literal generic token assignment/,
+  "an unlisted scope is not a traversal and stays subject to the literal rules",
+);
+// A TypeScript type annotation occupies type position and carries no value at
+// all, so `token: string | undefined` names a shape the compiler erases. The
+// generic pattern had no type-position awareness and read the annotation as a
+// literal, so editing or moving an interface aborted the bundle.
+for (const direction of ["+", "-"]) {
+  assert.equal(
+    secretLikeReason(`${direction}  token: string | undefined,`),
+    null,
+    `optional-token annotations are type positions (${direction} side)`,
+  );
+}
+assert.equal(
+  secretLikeReason("  refresh_token: number | undefined,"),
+  null,
+  "any union of built-in keywords is a type annotation",
+);
+assert.equal(
+  secretLikeReason("  token: string[] | undefined,"),
+  null,
+  "array type members are type annotations",
+);
+assert.equal(
+  secretLikeReason("  token: string | undefined;"),
+  null,
+  "semicolon-terminated interface members are type annotations",
+);
+// The scanner reads a whole diff and has no file type, so each rule carries its
+// own syntactic discriminator. The annotation rule accepts a closed keyword
+// vocabulary, which carries no credential in any language; the traversal rule
+// reads the spaced `=`, which a shell assignment cannot take; the command-list
+// rule reads `=` only.
+assert.match(
+  secretLikeReason("  token: Address | undefined,"),
+  /literal generic token assignment/,
+  "a named type is outside the keyword vocabulary and stays a literal",
+);
+assert.match(
+  secretLikeReason("  token=each.value.audit_token"),
+  /literal generic token assignment/,
+  "an unspaced `=` is a shell assignment, so a traversal-shaped value is literal",
+);
+assert.match(
+  secretLikeReason("  export SERVICE_TOKEN=each.value.audit_token"),
+  /literal (?:generic token|credential) assignment/,
+  "an exported shell assignment is likewise not an HCL attribute",
+);
+assert.match(
+  secretLikeReason("  token: $(get_access_token) || return 1"),
+  /literal generic token assignment/,
+  "the command-list rule reads `=` values, not `key: value` scalars",
+);
+// Anti-bypass: every member has to be one of the built-in keywords, so no
+// member can carry a credential and no credential can be split across members —
+// the bypass a per-member length bound would leave open. Quoting the same text
+// makes it a literal again.
+assert.match(
+  secretLikeReason(`  token: string | ${genericTokenCredential},`),
+  /literal generic token assignment/,
+  "a credential-sized union member is still rejected",
+);
+const splitCredential = ["abcdefghij", "klmnopqrst"].join(" | ");
+assert.match(
+  secretLikeReason(`  token: string | ${splitCredential},`),
+  /literal generic token assignment/,
+  "a literal split across short union members is still rejected",
+);
+const quotedAnnotation = ["string | ", genericTokenCredential].join("");
+assert.match(
+  secretLikeReason(`  token: "${quotedAnnotation}",`),
+  /literal (?:generic token|credential) assignment/,
+  "a quoted annotation-shaped value is a string literal, not a type",
+);
+assert.match(
+  secretLikeReason("  token = string | undefined"),
+  /literal generic token assignment/,
+  "type position is `:` only; the HCL/shell `=` form stays subject to the rules",
+);
+// A shell command list continues past the assignment: the value is the command
+// substitution, resolved when the script runs, and the operator's right side is
+// a separate command. The line patterns have no shell grammar, so they captured
+// the tail too and read the whole span as a literal.
+for (const direction of ["+", "-"]) {
+  assert.equal(
+    secretLikeReason(
+      `${direction}  access_token=$(get_access_token) || return 1`,
+    ),
+    null,
+    `command substitutions with a control tail are references (${direction} side)`,
+  );
+}
+assert.equal(
+  secretLikeReason("  refresh_token=$(mint --scope repo) && log ok"),
+  null,
+  "an && control tail is likewise a separate command",
+);
+assert.equal(
+  secretLikeReason("  access_token=$(get_access_token) || return 1 || exit 2"),
+  null,
+  "chained control operators are still a command list",
+);
+// Anti-bypass: the tail's alphabet excludes `=`, `:`, quotes, `$`, and
+// parentheses, so a second assignment cannot hide in it, and the head is
+// measured by the same call-expression rule a bare `$(cmd)` value already
+// passes — a literal head, or anything between the head and the operator, is
+// still a literal.
+assert.match(
+  secretLikeReason(
+    `  access_token=$(get) || SERVICE_TOKEN=${genericTokenCredential}`,
+  ),
+  /literal generic token assignment/,
+  "a credential assignment in the control tail is still rejected",
+);
+assert.match(
+  secretLikeReason(
+    `  access_token=$(get) || SERVICE_TOKEN="${genericTokenCredential}"`,
+  ),
+  /literal (?:generic token|credential) (?:assignment|expression)/,
+  "a quoted credential assignment in the control tail is still rejected",
+);
+assert.match(
+  secretLikeReason(`  access_token=${genericTokenCredential} || return 1`),
+  /literal generic token assignment/,
+  "a literal head with a control tail is still rejected",
+);
+assert.match(
+  secretLikeReason(
+    `  access_token=$(get) ${genericTokenCredential} || return 1`,
+  ),
+  /literal generic token assignment/,
+  "a literal between the substitution and the operator is still rejected",
+);
+assert.match(
+  secretLikeReason(`  access_token=$(echo ${modernNpmToken}) || return 1`),
+  /credential-like token/,
+  "a strong credential inside the substitution is still rejected",
+);
+assert.match(
+  secretLikeReason(`  access_token=$(get) || echo ${genericTokenCredential}`),
+  /literal generic token assignment/,
+  "a credential-sized tail word is still rejected, assignment or not",
+);
+// Refused by design: a fixture literal such as
+// `ACTIONS_ID_TOKEN_REQUEST_TOKEN: "<hyphen-joined words>"` is a quoted literal
+// in value position, and no syntax distinguishes it from a real weak
+// credential — only the surrounding file says it is a fixture, and the diff
+// author picks that file's name. Fixtures compose the literal from parts, the
+// way this file does, or use a documented placeholder marker. This assertion
+// exists so a later rule cannot start accepting the shape unnoticed.
+const fixtureMarkerCredential = ["runner", "bound", "credential"].join("-");
+assert.match(
+  secretLikeReason(
+    `    ACTIONS_ID_TOKEN_REQUEST_TOKEN: "${fixtureMarkerCredential}",`,
+  ),
+  /literal generic token assignment/,
+  "a hyphen-joined fixture literal is still refused; compose it from parts",
+);
+assert.equal(
+  secretLikeReason('    ACTIONS_ID_TOKEN_REQUEST_TOKEN: "fixture-token",'),
+  null,
+  "the documented placeholder markers remain the fixture workaround",
+);
 const publicEvmTokenAddress = ["0x", "0".repeat(39), "1"].join("");
 assert.match(
   secretLikeReason(`USDC_TOKEN="${publicEvmTokenAddress}"`),

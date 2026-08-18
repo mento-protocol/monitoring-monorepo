@@ -1058,6 +1058,135 @@ function unquotedCodeExpression(value, trailingComma, propertyContext = false) {
   return balancedDelimitedExpression(expression, openingIndex);
 }
 
+// The scanner reads a whole diff and has no file type, so a rule that proves
+// one language's syntax has to carry its own discriminator. A shell assignment
+// forbids whitespace around `=` — `TOKEN = value` runs the command `TOKEN` — so
+// requiring whitespace on both sides is a syntactic proof that the line is not
+// a shell assignment, and it is what separates an HCL attribute from
+// `TOKEN=each.value.<literal>` in a script.
+function spacedAssignmentOperator(operator) {
+  return /^[ \t]+=[ \t]+$/.test(operator);
+}
+
+// HCL iteration traversals name a value the plan resolves, exactly like the
+// `var`/`local`/`module`/`data` traversals `placeholderValue()` already accepts:
+// `each` and `count` are the fixed `for_each`/`count` scopes, `self` is a
+// resource's own attributes, and `rule` is the dynamic-block iterator this
+// repo's alert rules declare. The grammar is a bare dotted identifier path
+// anchored end to end, so a literal fused to a traversal
+// (`rule.value.token ghp_real`) is not one. Only the unquoted branches consult
+// it, which is what keeps a quoted traversal-shaped value a literal: in HCL a
+// quoted value is a string, and the traversal proof is the absence of quotes.
+// It reads the spaced `=` form only; the `key: value` form of the same path is
+// already a property traversal to `unquotedCodeExpression()`.
+const HCL_ITERATION_TRAVERSAL =
+  /^(?:count|each|rule|self)(?:\.[A-Za-z_][A-Za-z0-9_-]*)+$/;
+
+function hclIterationTraversal(value) {
+  return HCL_ITERATION_TRAVERSAL.test(value.trim());
+}
+
+// A TypeScript type annotation occupies type position: `token: string |
+// undefined` declares a shape and carries no value at all. The accepted set is
+// closed rather than shaped: every member of the union or intersection has to
+// be one of the built-in type keywords below, optionally suffixed with `[]`.
+// Because the whole value is then drawn from a twelve-word vocabulary, it
+// cannot carry a credential in any language — not as one member and not split
+// across several, which a shape rule measuring member length would allow. A
+// named type (`Address | undefined`) is outside the vocabulary and stays
+// subject to the literal rules; that is the fail-closed direction, and the
+// scanner has no file type with which to prove a name is a type.
+const TYPE_ANNOTATION_KEYWORDS = new Set([
+  "any",
+  "bigint",
+  "boolean",
+  "never",
+  "null",
+  "number",
+  "object",
+  "string",
+  "symbol",
+  "undefined",
+  "unknown",
+  "void",
+]);
+
+const TYPE_ANNOTATION_MEMBER = /^([A-Za-z_$][A-Za-z0-9_$]*)(?:\[\])*$/;
+
+function typeAnnotationValue(value) {
+  const members = value.trim().split(/\s*[|&]\s*/);
+  if (members.length < 2) return false;
+  return members.every((member) => {
+    const parsed = TYPE_ANNOTATION_MEMBER.exec(member);
+    return parsed !== null && TYPE_ANNOTATION_KEYWORDS.has(parsed[1]);
+  });
+}
+
+// A shell command list continues past the assignment: in
+// `access_token=$(get_access_token) || return 1` the assigned value is the
+// command substitution, resolved when the script runs, and `return 1` is a
+// separate command the operator guards. The line patterns carry no shell
+// grammar, so they capture the tail too and read the whole span as a literal.
+// The head is measured by the same call-expression rule a bare `$(cmd)` value
+// already passes, so no new value shape is admitted here — only the tail is
+// new. Its alphabet excludes `=`, `:`, quotes, `$`, and parentheses, so a
+// second assignment cannot hide in it, and every word stays under the length
+// the literal rules treat as credential-sized, so a command argument cannot
+// carry one either: `token=$(get) || SERVICE_TOKEN=<literal>` and
+// `token=$(get) || echo <literal>` both still fail closed. A real guard tail
+// (`|| return 1`, `|| exit 1`, `&& log ok`) is words of a few characters.
+// Operators are found at parenthesis depth zero so that `$(a || b)` stays one
+// substitution; quotes need no tracking because the callers' value groups
+// exclude them. It reads `=` values only — the languages that write a command
+// list into an assignment all use `=`.
+function shellControlOperatorIndex(expression) {
+  let depth = 0;
+  for (let index = 0; index < expression.length; index += 1) {
+    const character = expression[index];
+    if (character === "(") {
+      depth += 1;
+      continue;
+    }
+    if (character === ")") {
+      depth -= 1;
+      continue;
+    }
+    if (
+      depth === 0 &&
+      (character === "|" || character === "&") &&
+      expression[index + 1] === character
+    ) {
+      return index;
+    }
+  }
+  return -1;
+}
+
+function shellCommandListValue(value) {
+  const expression = value.trim();
+  const operatorIndex = shellControlOperatorIndex(expression);
+  if (operatorIndex === -1) return false;
+  if (
+    !unquotedCodeExpression(expression.slice(0, operatorIndex).trim(), false)
+  ) {
+    return false;
+  }
+  const words = expression
+    .slice(operatorIndex)
+    .replace(/^(?:\|\||&&)\s*/, "")
+    .split(/\s+/)
+    .filter(Boolean);
+  return (
+    words.length > 0 &&
+    words.every(
+      (word) =>
+        word === "||" ||
+        word === "&&" ||
+        (word.length < 12 && /^[A-Za-z0-9_./-]+$/.test(word)),
+    )
+  );
+}
+
 function wrappedQuotedLiteral(value) {
   const expression = unwrapBalancedExpression(value);
   const quote = expression[0];
@@ -1690,15 +1819,19 @@ export function secretLikeReason(text) {
     return "literal wallet recovery phrase";
   }
   const genericTokenAssignmentPattern =
-    /^[+ -]?\s*["'`]?(token|[a-z][a-z0-9]*(?:_[a-z0-9]+)*_token)["'`]?\s*([:=])\s*(["'`]?)([^"'`\r\n]+?)\3[ \t]*(,?)(?:[ \t]+(?:\/\/[^\r\n]*|\/\*[^\r\n]*\*\/)|[ \t]*(?:[#;][^\r\n]*)?)$/gim;
+    /^[+ -]?\s*["'`]?(token|[a-z][a-z0-9]*(?:_[a-z0-9]+)*_token)["'`]?(\s*[:=]\s*)(["'`]?)([^"'`\r\n]+?)\3[ \t]*(,?)(?:[ \t]+(?:\/\/[^\r\n]*|\/\*[^\r\n]*\*\/)|[ \t]*(?:[#;][^\r\n]*)?)$/gim;
   for (const match of text.matchAll(genericTokenAssignmentPattern)) {
     const key = match[1];
+    const operator = match[2];
     const quoted = Boolean(match[3]);
     const value = match[4].trim();
     const trailingComma = match[5] === ",";
     if (
       !quoted &&
-      unquotedCodeExpression(value, trailingComma, match[2] === ":")
+      (unquotedCodeExpression(value, trailingComma, operator.includes(":")) ||
+        (spacedAssignmentOperator(operator) && hclIterationTraversal(value)) ||
+        (operator.includes("=") && shellCommandListValue(value)) ||
+        (operator.includes(":") && typeAnnotationValue(value)))
     ) {
       continue;
     }
@@ -1774,11 +1907,15 @@ export function secretLikeReason(text) {
       return "literal registry credential assignment";
   }
   const unquotedKeyPattern =
-    /^[+ -]?\s*(?:export\s+)?([A-Za-z][A-Za-z0-9_-]*)\s*([:=])\s*([A-Za-z0-9_$+./=:@%!?~^-]{12,})[ \t]*(,?)(?:[ \t]+(?:\/\/[^\r\n]*|\/\*[^\r\n]*\*\/)|[ \t]*(?:[#;][^\r\n]*)?)$/gim;
+    /^[+ -]?\s*(?:export\s+)?([A-Za-z][A-Za-z0-9_-]*)(\s*[:=]\s*)([A-Za-z0-9_$+./=:@%!?~^-]{12,})[ \t]*(,?)(?:[ \t]+(?:\/\/[^\r\n]*|\/\*[^\r\n]*\*\/)|[ \t]*(?:[#;][^\r\n]*)?)$/gim;
   for (const match of text.matchAll(unquotedKeyPattern)) {
     const key = match[1];
+    const operator = match[2];
     const value = match[3].trim();
-    if (unquotedCodeExpression(value, match[4] === ",", match[2] === ":")) {
+    if (
+      unquotedCodeExpression(value, match[4] === ",", operator.includes(":")) ||
+      (spacedAssignmentOperator(operator) && hclIterationTraversal(value))
+    ) {
       continue;
     }
     if (

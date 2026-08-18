@@ -6607,6 +6607,49 @@ run_sensitive_input_regressions() {
   run_helper_in_repo_expect_failure "$review_repo" --mode local --engine local --bundle-output "$bundle_output" --prepare-only
   expect_stderr_contains "refusing to include secret-like content"
 
+  # An HCL iteration traversal, a TypeScript type annotation, and a shell
+  # command list all name values the diff does not carry. Each one used to abort
+  # the whole bundle. The fixture text stays single-quoted so the substitution
+  # and the union reach the scanner unexpanded.
+  git -C "$review_repo" restore README.md
+  {
+    # shellcheck disable=SC2016
+    printf '%s\n' '        token    = rule.value.token'
+    printf '%s\n' '  token: string | undefined,'
+    # shellcheck disable=SC2016
+    printf '%s\n' '  access_token=$(get_access_token) || return 1'
+  } >>"$review_repo/README.md"
+  local shapes_output="$tmp_dir/sensitive-prompt-shapes.md"
+  run_helper_in_repo "$review_repo" --mode local --engine local --bundle-output "$shapes_output" --prepare-only
+  expect_file_contains "$shapes_output" 'rule.value.token'
+  expect_file_contains "$shapes_output" 'string | undefined'
+  # shellcheck disable=SC2016
+  expect_file_contains "$shapes_output" '$(get_access_token) || return 1'
+  expect_empty_stderr
+
+  # Each accepted shape has a literal twin that still fails closed: quoting an
+  # HCL traversal makes it a string, a credential-sized union member is not a
+  # type, and the control tail cannot carry a second assignment. The literals are
+  # joined from parts so this file's own source carries none.
+  git -C "$review_repo" restore README.md
+  printf '%s%s%s\n' '  token    = "rule.value.' \
+    "live-traversal-abcdefghijklmnopqrstuvwxyz" '"' >>"$review_repo/README.md"
+  run_helper_in_repo_expect_failure "$review_repo" --mode local --engine local --bundle-output "$bundle_output" --prepare-only
+  expect_stderr_contains "refusing to include secret-like content"
+
+  git -C "$review_repo" restore README.md
+  printf '%s%s%s\n' '  token: string | ' \
+    "live-annotation-abcdefghijklmnopqrstuvwxyz" ',' >>"$review_repo/README.md"
+  run_helper_in_repo_expect_failure "$review_repo" --mode local --engine local --bundle-output "$bundle_output" --prepare-only
+  expect_stderr_contains "refusing to include secret-like content"
+
+  git -C "$review_repo" restore README.md
+  # shellcheck disable=SC2016
+  printf '%s%s\n' '  access_token=$(get) || SERVICE_TOKEN=' \
+    "live-tail-abcdefghijklmnopqrstuvwxyz" >>"$review_repo/README.md"
+  run_helper_in_repo_expect_failure "$review_repo" --mode local --engine local --bundle-output "$bundle_output" --prepare-only
+  expect_stderr_contains "refusing to include secret-like content"
+
   git -C "$review_repo" restore README.md
   mkdir "$review_repo/.aws"
   {
