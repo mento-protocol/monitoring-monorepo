@@ -58,7 +58,10 @@ jobs:
           # uses the base branch NAME, so trusted-base/ is always current
           # main at job-execution time, never a snapshot pinned to when a PR
           # branched — once main carries the validator at scripts/pr/, no
-          # PR (old, reopened, or new) can still resolve the flat path.
+          # PR (old, reopened, or new) can still resolve the flat path. This
+          # relies on the trigger above staying `branches: [main]`; widening
+          # it to other long-lived base branches needs its own dual-probe
+          # bridge until those branches carry scripts/pr/ too.
           if [ -f trusted-base/scripts/pr/check-pr-description.mjs ]; then
             node trusted-base/scripts/pr/check-pr-description.mjs
           elif [ -f pr-head/scripts/pr/check-pr-description.mjs ]; then
