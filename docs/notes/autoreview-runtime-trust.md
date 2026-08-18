@@ -230,7 +230,28 @@ to the whole value, so a literal fused to a reference still refuses. Shell
 expansion nesting is bounded at eight levels, past which the value is not a
 reference and stays subject to the literal rules; real defaults nest one to
 three deep, and an unbounded walk lets one crafted line exhaust the scanner's
-stack.
+stack. Three more shapes pass on the same proof, and only unquoted. The scanner
+sees no file type, so each carries a syntactic discriminator: HCL iteration
+traversals (`each`, `count`, `self`, and the `rule` dynamic-block iterator) as
+bare dotted identifier paths behind a whitespace-surrounded `=`, which a shell
+assignment cannot take; a TypeScript type annotation in `:` position whose
+union or intersection members all come from a closed twelve-word keyword
+vocabulary, so the value cannot carry a credential in any language, split
+across members or whole; and a shell command list on an `=` value whose head is
+a command substitution read by word position — a command name of separator-split
+segments each under credential length, then arguments each bounded whole by that
+length, whether a shell reference, a flag with its optional value, or a bare
+word — followed by a `||`/`&&` tail of whole words under it, drawn from an
+alphabet with no `=`, `:`, quote, `$`, or parenthesis. A literal argument, one
+split across separators, one wearing a `--` prefix, and a second assignment in
+the tail all fail closed. So do two shapes that carry nothing: a head that is a
+call expression rather than a substitution, and an argument over that length,
+such as a deep path. Both refuse today too, so nothing regresses; they are the
+price of a rule that proves inertness from syntax alone.
+A literal in value position stays refused whatever names it: a fixture
+string is a quoted literal, and no syntax separates one from a weak credential,
+so fixtures compose the value from parts or use a documented placeholder marker
+(`fixture-token`, `example-secret`).
 Evidence reads reject symlinks and verify that the opened descriptor still
 identifies the file that was inspected, closing path-swap races.
 
