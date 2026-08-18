@@ -40,7 +40,7 @@ resource "grafana_service_account" "dashboard_reader" {
   is_disabled = false
 }
 
-# Rotation lever. `scripts/tf-platform-plan-guard.mjs` parses platform Terraform
+# Rotation lever. `scripts/terraform/tf-platform-plan-guard.mjs` parses platform Terraform
 # arguments against a strict allowlist and rejects everything outside it, so
 # `-replace` is not available on this stack. Without a source-driven trigger the
 # only way to roll this credential would be a manual Grafana console action —

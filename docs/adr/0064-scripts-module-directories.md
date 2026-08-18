@@ -151,7 +151,7 @@ Run every item in the PR that moves a file. `scripts/AGENTS.md` points here
 rather than carrying the list, because its scoped instruction budget is for
 routing, not procedure.
 
-1. Root `package.json` — 73 entries reference `scripts/`.
+1. Root `package.json` — 74 entries reference `scripts/`.
 2. `check-agent-quality-gate-package-scripts.sh` — pinned alias map.
 3. `.github/workflows/` — 22 of 32 files, including the enumerated filters
    listed under "Why Files Stay Flat" in `scripts/AGENTS.md`.
@@ -165,7 +165,13 @@ routing, not procedure.
    `scripts/deploy-*.sh` or `scripts/sentry-*.test.mjs` stops matching one
    directory down. Keep the basename prefix; add the paired one-level arm. Its
    contract-surface arm also names `scripts/lib/*.mjs`, which sets the
-   `pnpm tf:test` reason; the unconditional sweep already runs the suite.
+   `pnpm tf:test` reason; the unconditional sweep already runs the suite. Its
+   `implementation_signature()` path list is stricter than a glob: an entry it
+   cannot stat hashes as `__missing__`, so the signature freezes and
+   `--skip-if-fresh` reuses a stale stamp. Repoint it in the same commit.
+9. `terraform.stacks.json` — each stack's `changedPathPatterns` enumerates
+   exact `scripts/` paths, and `tf-stacks.test.mjs` asserts three of them per
+   stack. A stale entry stops the stack reacting to its own tooling.
 
 A shared module under `scripts/lib/` is routed from every arm that reads it,
 not only the arm of the consumer that happens to fail loudest.

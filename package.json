@@ -64,6 +64,7 @@
     "pr:ready-state:test": "node scripts/pr-ready-state.test.mjs",
     "tf": "node scripts/tf-stacks.mjs",
     "tf:test": "node scripts/tf-stacks.test.mjs",
+    "deploy-staging:test": "node scripts/deploy-staging-contract.test.mjs",
     "aegis:build": "pnpm --filter @mento-protocol/aegis build",
     "aegis:dev": "pnpm --filter @mento-protocol/aegis dev",
     "aegis:typecheck": "pnpm --filter @mento-protocol/aegis typecheck",

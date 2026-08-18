@@ -1990,13 +1990,13 @@ assert_not_contains "- pnpm --filter @mento-protocol/ui-dashboard lint"
 assert_not_contains_mapped "- pnpm --filter @mento-protocol/ui-dashboard test:browser"
 
 run_gate "terraform/metrics-bridge.tf"
-assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate node scripts/terraform-fmt-check.mjs terraform (Terraform changed)"
+assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate node scripts/terraform/terraform-fmt-check.mjs terraform (Terraform changed)"
 assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate terraform -chdir=terraform init -backend=false -input=false (Terraform changed)"
 assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate terraform -chdir=terraform validate -no-color (Terraform changed)"
 assert_contains "- docs/pr-checklists/terraform-cloudrun.md (Terraform/Cloud Run path changed)"
 
 run_gate "alerts/rules/rules-fpmms.tf"
-assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate node scripts/terraform-fmt-check.mjs alerts/rules (alerts/rules Terraform changed)"
+assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate node scripts/terraform/terraform-fmt-check.mjs alerts/rules (alerts/rules Terraform changed)"
 assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules init -backend=false -input=false (alerts/rules Terraform changed)"
 assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules validate -no-color (alerts/rules Terraform changed)"
 assert_contains "- pnpm alerts:rules:lint (alerts/rules PromQL lint + metric cross-check)"
@@ -2004,26 +2004,26 @@ assert_contains "- node scripts/check-deviation-threshold-drift.mjs (deviation t
 assert_not_contains "node scripts/check-peg-registry-integrity.mjs"
 
 run_gate "alerts/rules/peg-thresholds.json"
-assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate node scripts/terraform-fmt-check.mjs alerts/rules (alerts/rules Terraform changed)"
+assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate node scripts/terraform/terraform-fmt-check.mjs alerts/rules (alerts/rules Terraform changed)"
 assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules init -backend=false -input=false (alerts/rules Terraform changed)"
 assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules validate -no-color (alerts/rules Terraform changed)"
 assert_contains "- pnpm alerts:rules:lint (alerts/rules PromQL lint + metric cross-check)"
 assert_contains "- node scripts/check-peg-registry-integrity.mjs (peg threshold policy changed)"
 
 run_gate "alerts/rules/main.tf"
-assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate node scripts/terraform-fmt-check.mjs alerts/rules (alerts/rules Terraform changed)"
+assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate node scripts/terraform/terraform-fmt-check.mjs alerts/rules (alerts/rules Terraform changed)"
 assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules init -backend=false -input=false (alerts/rules Terraform changed)"
 assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules validate -no-color (alerts/rules Terraform changed)"
 assert_contains "- node scripts/check-deviation-threshold-drift.mjs (deviation threshold Terraform consumer changed)"
 
 run_gate "alerts/infra/main.tf"
-assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate node scripts/terraform-fmt-check.mjs alerts/infra (alerts/infra Terraform changed)"
+assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate node scripts/terraform/terraform-fmt-check.mjs alerts/infra (alerts/infra Terraform changed)"
 assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate terraform -chdir=alerts/infra init -backend=false -input=false (alerts/infra Terraform changed)"
 assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate terraform -chdir=alerts/infra validate -no-color (alerts/infra Terraform changed)"
 assert_contains "- docs/pr-checklists/terraform-cloudrun.md (alerts/infra Cloud Function path changed)"
 
 run_gate "alerts/infra/channels/sentry-bridge/main.tf"
-assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate node scripts/terraform-fmt-check.mjs alerts/infra (alerts/infra Terraform changed)"
+assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate node scripts/terraform/terraform-fmt-check.mjs alerts/infra (alerts/infra Terraform changed)"
 
 run_gate "alerts/infra/onchain-event-listeners/main.tf"
 assert_contains "- bash alerts/infra/scripts/fix-webhook-state.test.sh (QuickNode replacement state parser changed)"
@@ -2037,7 +2037,7 @@ assert_contains "- bash -n alerts/infra/scripts/fix-webhook-state.test.sh (shell
 assert_contains "- bash alerts/infra/scripts/fix-webhook-state.test.sh (QuickNode state parser changed)"
 
 run_gate "alerts/infra/onchain-event-handler/main.tf"
-assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate node scripts/terraform-fmt-check.mjs alerts/infra (alerts/infra Terraform changed)"
+assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate node scripts/terraform/terraform-fmt-check.mjs alerts/infra (alerts/infra Terraform changed)"
 assert_contains "- docs/pr-checklists/terraform-cloudrun.md (alerts/infra Cloud Function path changed)"
 
 run_gate "alerts/infra/onchain-event-handler/src/slack.ts"
@@ -2063,7 +2063,7 @@ assert_contains "- pnpm exec turbo run typecheck --filter=@mento-protocol/alerts
 # the full coverage floor runs (fail toward full).
 assert_contains "- pnpm --filter @mento-protocol/alerts-onchain-event-handler test:coverage"
 assert_not_contains "vitest related --run src/safe-abi.json"
-assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate node scripts/terraform-fmt-check.mjs alerts/infra (Safe ABI changed (listener filter uses it at plan time))"
+assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate node scripts/terraform/terraform-fmt-check.mjs alerts/infra (Safe ABI changed (listener filter uses it at plan time))"
 assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate terraform -chdir=alerts/infra init -backend=false -input=false (Safe ABI changed (listener filter uses it at plan time))"
 assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate terraform -chdir=alerts/infra validate -no-color (Safe ABI changed (listener filter uses it at plan time))"
 
@@ -2092,9 +2092,9 @@ assert_contains "- node scripts/workflows/check-github-action-pins.mjs (GitHub A
 assert_contains "- pnpm install --frozen-lockfile (central CI workflow changed)"
 assert_contains "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen (central CI workflow changed)"
 assert_contains "- pnpm tf:test (Terraform registry-backed CI workflow changed)"
-assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate node scripts/terraform-fmt-check.mjs terraform (Terraform registry-backed CI workflow changed)"
-assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate node scripts/terraform-fmt-check.mjs alerts/rules (Terraform registry-backed CI workflow changed)"
-assert_contains "- TF_DATA_DIR=aegis/terraform/.terraform-agent-gate node scripts/terraform-fmt-check.mjs aegis/terraform (Terraform registry-backed CI workflow changed)"
+assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate node scripts/terraform/terraform-fmt-check.mjs terraform (Terraform registry-backed CI workflow changed)"
+assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate node scripts/terraform/terraform-fmt-check.mjs alerts/rules (Terraform registry-backed CI workflow changed)"
+assert_contains "- TF_DATA_DIR=aegis/terraform/.terraform-agent-gate node scripts/terraform/terraform-fmt-check.mjs aegis/terraform (Terraform registry-backed CI workflow changed)"
 # Workspace-wide triggers (ci.yml here) deliberately skip the playwright
 # suite — CI runs it in its own ui-dashboard job and the local --single-process
 # chromium mode is flaky on keyboard/route-heavy tests.
@@ -2112,10 +2112,10 @@ run_gate ".github/workflows/infra.yml"
 assert_contains "- docs/pr-checklists/ci-workflow-gates.md (GitHub Actions workflow/action changed)"
 assert_contains "- node scripts/workflows/check-github-action-pins.mjs (GitHub Actions workflow/action changed)"
 assert_contains "- pnpm tf:test (Terraform registry workflow changed)"
-assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate node scripts/terraform-fmt-check.mjs terraform (Terraform registry workflow changed)"
-assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate node scripts/terraform-fmt-check.mjs alerts/rules (Terraform registry workflow changed)"
-assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate node scripts/terraform-fmt-check.mjs alerts/infra (Terraform registry workflow changed)"
-assert_contains "- TF_DATA_DIR=aegis/terraform/.terraform-agent-gate node scripts/terraform-fmt-check.mjs aegis/terraform (Terraform registry workflow changed)"
+assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate node scripts/terraform/terraform-fmt-check.mjs terraform (Terraform registry workflow changed)"
+assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate node scripts/terraform/terraform-fmt-check.mjs alerts/rules (Terraform registry workflow changed)"
+assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate node scripts/terraform/terraform-fmt-check.mjs alerts/infra (Terraform registry workflow changed)"
+assert_contains "- TF_DATA_DIR=aegis/terraform/.terraform-agent-gate node scripts/terraform/terraform-fmt-check.mjs aegis/terraform (Terraform registry workflow changed)"
 
 run_gate ".github/actions/pnpm-install/action.yml"
 assert_contains "- docs/pr-checklists/ci-workflow-gates.md (GitHub Actions workflow/action changed)"
@@ -2470,25 +2470,25 @@ assert_contains "- pnpm agent:quality-gate:test (turbo task config changed)"
 run_gate "terraform.stacks.json"
 assert_contains "- terraform"
 assert_contains "- pnpm tf:test (Terraform stack registry changed)"
-assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate node scripts/terraform-fmt-check.mjs terraform (Terraform stack registry changed)"
-assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate node scripts/terraform-fmt-check.mjs alerts/rules (Terraform stack registry changed)"
-assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate node scripts/terraform-fmt-check.mjs alerts/infra (Terraform stack registry changed)"
-assert_contains "- TF_DATA_DIR=aegis/terraform/.terraform-agent-gate node scripts/terraform-fmt-check.mjs aegis/terraform (Terraform stack registry changed)"
+assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate node scripts/terraform/terraform-fmt-check.mjs terraform (Terraform stack registry changed)"
+assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate node scripts/terraform/terraform-fmt-check.mjs alerts/rules (Terraform stack registry changed)"
+assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate node scripts/terraform/terraform-fmt-check.mjs alerts/infra (Terraform stack registry changed)"
+assert_contains "- TF_DATA_DIR=aegis/terraform/.terraform-agent-gate node scripts/terraform/terraform-fmt-check.mjs aegis/terraform (Terraform stack registry changed)"
 
 run_gate "scripts/tf-stacks.mjs"
 assert_contains "- pnpm tf:test (Terraform stack wrapper changed)"
-assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate node scripts/terraform-fmt-check.mjs terraform (Terraform stack wrapper changed)"
-assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate node scripts/terraform-fmt-check.mjs alerts/rules (Terraform stack wrapper changed)"
-assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate node scripts/terraform-fmt-check.mjs alerts/infra (Terraform stack wrapper changed)"
-assert_contains "- TF_DATA_DIR=aegis/terraform/.terraform-agent-gate node scripts/terraform-fmt-check.mjs aegis/terraform (Terraform stack wrapper changed)"
+assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate node scripts/terraform/terraform-fmt-check.mjs terraform (Terraform stack wrapper changed)"
+assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate node scripts/terraform/terraform-fmt-check.mjs alerts/rules (Terraform stack wrapper changed)"
+assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate node scripts/terraform/terraform-fmt-check.mjs alerts/infra (Terraform stack wrapper changed)"
+assert_contains "- TF_DATA_DIR=aegis/terraform/.terraform-agent-gate node scripts/terraform/terraform-fmt-check.mjs aegis/terraform (Terraform stack wrapper changed)"
 
-run_gate "scripts/tf-platform-plan-guard.mjs"
+run_gate "scripts/terraform/tf-platform-plan-guard.mjs"
 assert_contains "- pnpm tf:test (Terraform stack wrapper changed)"
-assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate node scripts/terraform-fmt-check.mjs terraform (Terraform stack wrapper changed)"
+assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate node scripts/terraform/terraform-fmt-check.mjs terraform (Terraform stack wrapper changed)"
 
-run_gate "scripts/check-metrics-bridge-template-plan.mjs"
+run_gate "scripts/terraform/check-metrics-bridge-template-plan.mjs"
 assert_contains "- pnpm tf:test (Terraform stack wrapper changed)"
-assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate node scripts/terraform-fmt-check.mjs terraform (Terraform stack wrapper changed)"
+assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate node scripts/terraform/terraform-fmt-check.mjs terraform (Terraform stack wrapper changed)"
 
 for deploy_staging_contract_case in \
   '.github/workflows/metrics-bridge.yml|docs/pr-checklists/terraform-cloudrun.md (metrics bridge Cloud Run workflow changed)' \
@@ -2510,17 +2510,66 @@ done
 run_gate "ui-dashboard/src/deploy.ts"
 assert_occurrences 1 "- pnpm tf:test (non-empty change set validates production infrastructure contract)"
 
-run_gate "scripts/terraform-fmt-check.mjs"
-assert_contains "- node scripts/terraform-fmt-check.test.mjs (Terraform format helper changed)"
+run_gate "scripts/terraform/terraform-fmt-check.mjs"
+assert_contains "- node scripts/terraform/terraform-fmt-check.test.mjs (Terraform format helper changed)"
 assert_contains "- pnpm tf:test (Terraform format helper changed)"
-assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate node scripts/terraform-fmt-check.mjs terraform (Terraform format helper changed)"
-assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate node scripts/terraform-fmt-check.mjs alerts/rules (Terraform format helper changed)"
-assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate node scripts/terraform-fmt-check.mjs alerts/infra (Terraform format helper changed)"
-assert_contains "- TF_DATA_DIR=aegis/terraform/.terraform-agent-gate node scripts/terraform-fmt-check.mjs aegis/terraform (Terraform format helper changed)"
-assert_contains "- TF_DATA_DIR=governance-watchdog/infra/.terraform-agent-gate node scripts/terraform-fmt-check.mjs governance-watchdog/infra (Terraform format helper changed)"
+assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate node scripts/terraform/terraform-fmt-check.mjs terraform (Terraform format helper changed)"
+assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate node scripts/terraform/terraform-fmt-check.mjs alerts/rules (Terraform format helper changed)"
+assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate node scripts/terraform/terraform-fmt-check.mjs alerts/infra (Terraform format helper changed)"
+assert_contains "- TF_DATA_DIR=aegis/terraform/.terraform-agent-gate node scripts/terraform/terraform-fmt-check.mjs aegis/terraform (Terraform format helper changed)"
+assert_contains "- TF_DATA_DIR=governance-watchdog/infra/.terraform-agent-gate node scripts/terraform/terraform-fmt-check.mjs governance-watchdog/infra (Terraform format helper changed)"
 
-run_gate "scripts/terraform-fmt-check.test.mjs"
-assert_contains "- node scripts/terraform-fmt-check.test.mjs (Terraform format helper test changed)"
+run_gate "scripts/terraform/terraform-fmt-check.test.mjs"
+assert_contains "- node scripts/terraform/terraform-fmt-check.test.mjs (Terraform format helper test changed)"
+
+# The two apply-pipeline notifiers moved with the guards (P10) and had no
+# routing assertion before. A missed repoint drops their focused suite without
+# failing anything.
+run_gate "scripts/terraform/notify-terraform-apply.mjs"
+assert_contains "- node scripts/terraform/notify-terraform-apply.test.mjs (Terraform apply Slack notifier changed)"
+
+run_gate "scripts/terraform/check-terraform-deploy-queue.mjs"
+assert_contains "- node scripts/terraform/check-terraform-deploy-queue.test.mjs (Terraform deploy queue watcher changed)"
+
+# The fmt check is a fail-fast prerequisite, not a parallel-pool command.
+# `add_terraform_validate_commands` builds the command string;
+# `is_quality_setup_command` recognizes it with a literal glob. Repointing one
+# without the other fails silently — the check still runs, just demoted into the
+# parallel pool with keep-going semantics. Read the classifier's pattern out of
+# the gate source and match it against the command the gate actually emitted, so
+# the two cannot drift apart unnoticed.
+terraform_fmt_setup_pattern="$(
+  awk '/^is_quality_setup_command\(\) \{/,/^\}/' scripts/agent-quality-gate.sh |
+    awk '/^    TF_DATA_DIR=.*terraform-fmt-check[^)]*\)$/ {
+      sub(/\)$/, ""); sub(/^    /, ""); print
+    }'
+)"
+[[ -n "$terraform_fmt_setup_pattern" ]] ||
+  fail "is_quality_setup_command has no terraform-fmt-check setup pattern"
+# The source pattern escapes its spaces for `case`; an unquoted `[[ ]]` right
+# operand needs them plain.
+terraform_fmt_setup_pattern="${terraform_fmt_setup_pattern//\\ / }"
+run_gate "terraform/main.tf"
+terraform_fmt_mapped_command="$(
+  awk '/^- TF_DATA_DIR=.*terraform-fmt-check\.mjs / {
+    line = $0
+    sub(/^- /, "", line)
+    sub(/ \([^(]*\)$/, "", line)
+    print line
+    exit
+  }' "$output_file"
+)"
+[[ -n "$terraform_fmt_mapped_command" ]] ||
+  fail "gate mapped no terraform-fmt-check command for a terraform/ change"
+# shellcheck disable=SC2053 # deliberate glob match against a source-derived pattern
+[[ "$terraform_fmt_mapped_command" == $terraform_fmt_setup_pattern ]] ||
+  fail "is_quality_setup_command no longer classifies '$terraform_fmt_mapped_command' as a setup command"
+# Negative control: the pre-P10 flat path must not satisfy the pattern, or the
+# match above would pass for the wrong reason.
+# shellcheck disable=SC2053 # deliberate glob match against a source-derived pattern
+if [[ "${terraform_fmt_mapped_command/scripts\/terraform\//scripts/}" == $terraform_fmt_setup_pattern ]]; then
+  fail "is_quality_setup_command still matches the pre-move flat terraform-fmt-check path"
+fi
 
 fail_fast_repo="$(mktemp -d)"
 (
