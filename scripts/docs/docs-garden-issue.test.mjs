@@ -27,7 +27,7 @@ import {
   assertAuthorizedGardenWorkflow,
   ensureLabelsExist,
   ghPaginate,
-} from "./lib/gh-issue-lifecycle.mjs";
+} from "../lib/gh-issue-lifecycle.mjs";
 
 let passed = 0;
 let failed = 0;
@@ -781,7 +781,10 @@ await test("OIDC authorization rejects env spoofing and claim drift", async () =
 
 await test("scheduled workflow fetches the history required by packet evidence", () => {
   const workflow = readFileSync(
-    new URL("../.github/workflows/documentation-garden.yml", import.meta.url),
+    new URL(
+      "../../.github/workflows/documentation-garden.yml",
+      import.meta.url,
+    ),
     "utf8",
   );
   assert.match(

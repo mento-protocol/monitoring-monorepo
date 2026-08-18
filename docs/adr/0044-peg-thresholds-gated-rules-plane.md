@@ -206,7 +206,7 @@ does not change the gated-policy ownership or two-phase rollover contract.
   acknowledgment telemetry, including authoritative listing state and bounded
   consecutive-absence confirmation)
 - `metrics-bridge/Dockerfile` (gated policy excluded from the service image)
-- `scripts/check-peg-registry-integrity.mjs` (cross-plane source contract)
+- `scripts/alerts/check-peg-registry-integrity.mjs` (cross-plane source contract)
 - `alerts/rules/rules-reserve-balances.tf`, `rules-oracle-relayers.tf`
   (per-key `for_each` threshold precedents)
 - `alerts/rules/rules-metrics-bridge.tf` (deliberate `no_data_state =
@@ -217,6 +217,6 @@ does not change the gated-policy ownership or two-phase rollover contract.
   structural reachability, and warning-only operations routing)
 - `docs/notes/peg-monitoring-onboarding.md` (onboarding, scheduled exact-pair
   re-census, rollout, response, and rollback)
-- `scripts/check-deviation-threshold-drift.mjs` (the mirror-drift pattern
+- `scripts/alerts/check-deviation-threshold-drift.mjs` (the mirror-drift pattern
   this class deliberately avoids needing)
 - ADRs 0029, 0043, 0045

@@ -14,7 +14,8 @@
 # source at `shared-config/src/thresholds.ts` (`DEVIATION_TOLERANCE_RATIO` /
 # `DEVIATION_CRITICAL_RATIO`). HCL can't import TS, so any threshold change is a
 # coordinated edit across packages: bump the TS constants, then mirror them in
-# Terraform. `scripts/check-deviation-threshold-drift.mjs` enforces that mirror.
+# Terraform. `scripts/alerts/check-deviation-threshold-drift.mjs` enforces that
+# mirror.
 
 # ── Oracle liveness ──────────────────────────────────────────────────────────
 resource "grafana_rule_group" "fpmms_oracle" {

@@ -20,7 +20,7 @@ assert.equal(
 );
 
 const policySource = readFileSync(
-  new URL("../alerts/rules/peg-thresholds.json", import.meta.url),
+  new URL("../../alerts/rules/peg-thresholds.json", import.meta.url),
 );
 const policySourceMd5Hex = createHash("md5").update(policySource).digest("hex");
 assert.equal(

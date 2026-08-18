@@ -408,7 +408,42 @@ fi
 rm -rf "$classifier_missing_helper_dir"
 [[ "$classifier_missing_helper_exit" -eq 2 ]] ||
   fail "missing routing classifier helper exited $classifier_missing_helper_exit instead of 2"
+assert_contains "error: routing-sensitive path classifier could not be loaded from"
 assert_contains "error: failed to classify routing-sensitive changed paths"
+
+# The gate resolves the routing classifier from its own source directory. No CI
+# job runs the gate for real, so this suite is the only place that import is
+# exercised outside a developer's pre-push — which makes these three assertions
+# the machine control on a stale path after a move. Read the literal out of the
+# gate, prove it resolves against the real tree, and prove it still exports the
+# classifier the gate destructures.
+routing_classifier_literal="$(
+  awk -F'"' '/^routing_classifier_path=/ { print $2; exit }' \
+    scripts/agent-quality-gate.sh
+)"
+routing_classifier_relative="${routing_classifier_literal/\$script_source_dir/scripts}"
+[[ "$routing_classifier_relative" == scripts/*.mjs ]] ||
+  fail "could not read routing_classifier_path from scripts/agent-quality-gate.sh (got '$routing_classifier_literal')"
+[[ -f "$repo_root/$routing_classifier_relative" ]] ||
+  fail "gate routing classifier path does not exist: $routing_classifier_relative"
+if ! node --input-type=module - "$repo_root/$routing_classifier_relative" \
+  > "$output_file" 2>&1 <<'NODE'
+import { pathToFileURL } from "node:url";
+
+const [modulePath] = process.argv.slice(2);
+const classifier = await import(pathToFileURL(modulePath).href);
+if (typeof classifier.isRoutingSensitivePath !== "function") {
+  throw new Error(`${modulePath} does not export isRoutingSensitivePath`);
+}
+NODE
+then
+  fail "gate routing classifier at $routing_classifier_relative does not import cleanly"
+fi
+
+# The other half of the same contract: a routing-sensitive documentation path
+# must still reach the classifier and schedule the fixture check.
+run_gate "docs/notes/quick-commands.md"
+assert_contains "- pnpm docs:navigation-eval -- --check-fixtures (routing-sensitive source changed)"
 
 write_turbo_facts
 
@@ -761,10 +796,10 @@ validator_repo="$(mktemp -d)"
     "agent:prewarm:test": "node scripts/agent-prewarm.test.mjs",
     "agent:review-materiality": "node scripts/pr/review-materiality.mjs",
     "agent:review-materiality:test": "node scripts/pr/review-materiality.test.mjs",
-    "docs:garden": "node scripts/docs-garden-issue.mjs",
-    "docs:garden:test": "node scripts/docs-garden-issue.test.mjs",
-    "docs:navigation-eval": "node scripts/docs-navigation-eval.mjs",
-    "docs:navigation-eval:test": "node scripts/docs-navigation-eval.test.mjs",
+    "docs:garden": "node scripts/docs/docs-garden-issue.mjs",
+    "docs:garden:test": "node scripts/docs/docs-garden-issue.test.mjs",
+    "docs:navigation-eval": "node scripts/docs/docs-navigation-eval.mjs",
+    "docs:navigation-eval:test": "node scripts/docs/docs-navigation-eval.test.mjs",
     "issue:board": "node scripts/pr/agent-issue-board.mjs",
     "issue:board:test": "node scripts/pr/agent-issue-board.test.mjs",
     "issue:claim": "node scripts/pr/agent-issue-board.mjs claim",
@@ -1003,7 +1038,7 @@ JSON
   node - <<'NODE'
 const fs = require("fs");
 const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
-pkg.scripts["docs:garden:test"] = "node scripts/docs-garden-issue.test.mjs --fixture";
+pkg.scripts["docs:garden:test"] = "node scripts/docs/docs-garden-issue.test.mjs --fixture";
 fs.writeFileSync("package.json", `${JSON.stringify(pkg, null, 2)}\n`);
 NODE
   "$repo_root/scripts/agent-quality-gate.sh" --base HEAD > "$output_file"
@@ -1015,8 +1050,8 @@ assert_contains "- bash scripts/agent-quality-gate.test.sh (root package tooling
 assert_contains "- node scripts/agent-prewarm.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/pr/review-materiality.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/pr/agent-issue-board.test.mjs (root package tooling script changed)"
-assert_contains "- node scripts/docs-garden-issue.test.mjs (root package tooling script changed)"
-assert_contains "- node scripts/docs-navigation-eval.test.mjs (root package tooling script changed)"
+assert_contains "- node scripts/docs/docs-garden-issue.test.mjs (root package tooling script changed)"
+assert_contains "- node scripts/docs/docs-navigation-eval.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/pr-feedback-state.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/pr-ready-state.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/tf-stacks.test.mjs (root package tooling script changed)"
@@ -1512,7 +1547,7 @@ packages:
 assert_contains "- pnpm skew:check (lockfile change scoped to importers)"
 assert_contains "- pnpm lockfile:lint (lockfile change scoped to importers)"
 assert_contains "- pnpm --filter @mento-protocol/metrics-bridge test:coverage (lockfile importer metrics-bridge changed (coverage floor))"
-assert_contains "- node scripts/check-peg-registry-integrity.mjs (root lockfile changed (peg registry authority dependency))"
+assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs (root lockfile changed (peg registry authority dependency))"
 assert_not_contains "cd aegis && forge test"
 assert_not_contains "@mento-protocol/integration-probes test:coverage"
 assert_not_contains "workspace dependency/config changed (coverage floor)"
@@ -1788,11 +1823,11 @@ run_gate "metrics-bridge/src/peg/metrics.ts"
 assert_contains "- pnpm alerts:rules:lint (metrics-bridge gauge registry changed (alerts cross-check))"
 
 run_gate "metrics-bridge/peg-registry.json"
-assert_contains "- node scripts/check-peg-registry-integrity.mjs (peg registry changed)"
+assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs (peg registry changed)"
 
 run_gate "metrics-bridge/src/rpc.ts"
 assert_contains "- docs/pr-checklists/terraform-cloudrun.md (metrics bridge Cloud Run runtime changed)"
-assert_not_contains "node scripts/check-peg-registry-integrity.mjs"
+assert_not_contains "node scripts/alerts/check-peg-registry-integrity.mjs"
 
 run_gate "metrics-bridge/src/rebalance-probe.ts"
 assert_contains "- docs/pr-checklists/terraform-cloudrun.md (metrics bridge Cloud Run runtime changed)"
@@ -2000,21 +2035,21 @@ assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate node scripts/t
 assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules init -backend=false -input=false (alerts/rules Terraform changed)"
 assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules validate -no-color (alerts/rules Terraform changed)"
 assert_contains "- pnpm alerts:rules:lint (alerts/rules PromQL lint + metric cross-check)"
-assert_contains "- node scripts/check-deviation-threshold-drift.mjs (deviation threshold Terraform consumer changed)"
-assert_not_contains "node scripts/check-peg-registry-integrity.mjs"
+assert_contains "- node scripts/alerts/check-deviation-threshold-drift.mjs (deviation threshold Terraform consumer changed)"
+assert_not_contains "node scripts/alerts/check-peg-registry-integrity.mjs"
 
 run_gate "alerts/rules/peg-thresholds.json"
 assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate node scripts/terraform/terraform-fmt-check.mjs alerts/rules (alerts/rules Terraform changed)"
 assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules init -backend=false -input=false (alerts/rules Terraform changed)"
 assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules validate -no-color (alerts/rules Terraform changed)"
 assert_contains "- pnpm alerts:rules:lint (alerts/rules PromQL lint + metric cross-check)"
-assert_contains "- node scripts/check-peg-registry-integrity.mjs (peg threshold policy changed)"
+assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs (peg threshold policy changed)"
 
 run_gate "alerts/rules/main.tf"
 assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate node scripts/terraform/terraform-fmt-check.mjs alerts/rules (alerts/rules Terraform changed)"
 assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules init -backend=false -input=false (alerts/rules Terraform changed)"
 assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules validate -no-color (alerts/rules Terraform changed)"
-assert_contains "- node scripts/check-deviation-threshold-drift.mjs (deviation threshold Terraform consumer changed)"
+assert_contains "- node scripts/alerts/check-deviation-threshold-drift.mjs (deviation threshold Terraform consumer changed)"
 
 run_gate "alerts/infra/main.tf"
 assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate node scripts/terraform/terraform-fmt-check.mjs alerts/infra (alerts/infra Terraform changed)"
@@ -2142,7 +2177,7 @@ assert_contains "- pnpm --filter @mento-protocol/metrics-bridge typecheck (metri
 assert_contains "- pnpm --filter @mento-protocol/metrics-bridge test:coverage (metrics bridge build context changed (coverage floor))"
 
 run_gate "shared-config/deployment-namespaces.json"
-assert_contains "- node scripts/check-peg-registry-integrity.mjs (peg registry authority input changed)"
+assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs (peg registry authority input changed)"
 assert_order \
   "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen (shared-config vendored indexer fixture changed)" \
   "- pnpm indexer:testnet:codegen (shared-config vendored indexer fixture changed)"
@@ -2168,25 +2203,25 @@ assert_contains "- pnpm dashboard:size-limit (shared-config exports feed the das
 run_gate "shared-config/src/chains.ts"
 assert_contains "- pnpm --filter @mento-protocol/config test:coverage (shared-config changed (coverage floor))"
 assert_contains "- pnpm dashboard:size-limit (shared-config exports feed the dashboard bundle)"
-assert_contains "- node scripts/check-peg-registry-integrity.mjs (peg registry authority input changed)"
+assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs (peg registry authority input changed)"
 # The cache key includes shared-config inputs for browser tests, but the local
 # gate still does not broaden shared-config-only edits into Playwright runs.
 assert_not_contains_mapped "- pnpm --filter @mento-protocol/ui-dashboard test:browser (shared-config exports feed the dashboard bundle)"
 
 run_gate "shared-config/oracle-reporters.json"
-assert_contains "- node scripts/check-peg-registry-integrity.mjs (peg registry authority input changed)"
+assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs (peg registry authority input changed)"
 
 run_gate "shared-config/chain-metadata.json"
-assert_contains "- node scripts/check-peg-registry-integrity.mjs (peg registry authority input changed)"
+assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs (peg registry authority input changed)"
 
 run_gate "shared-config/src/oracle-reporters.ts"
-assert_contains "- node scripts/check-peg-registry-integrity.mjs (peg registry authority input changed)"
+assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs (peg registry authority input changed)"
 
 run_gate "shared-config/src/tokens.ts"
-assert_contains "- node scripts/check-peg-registry-integrity.mjs (peg registry authority input changed)"
+assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs (peg registry authority input changed)"
 
 run_gate "shared-config/src/thresholds.ts"
-assert_contains "- node scripts/check-deviation-threshold-drift.mjs (shared deviation threshold source changed)"
+assert_contains "- node scripts/alerts/check-deviation-threshold-drift.mjs (shared deviation threshold source changed)"
 assert_raw_contains "- pnpm --filter @mento-protocol/indexer-envio exec vitest run deviationThresholdSharedConfigSync (shared deviation threshold source changed)"
 # shared-config's downstream blast radius is the point — it keeps the full suite
 # and never scopes to `vitest related` (issue #1413, condition c).
@@ -3443,11 +3478,13 @@ signature_stamp_repo="$(mktemp -d)"
   git init -q
   git config user.email test@example.invalid
   git config user.name "Quality Gate Test"
-  mkdir -p scripts tools
+  mkdir -p scripts/docs scripts/terraform tools
   printf 'fixture\n' > fixture.txt
   printf 'second fixture\n' > second.txt
   printf '# fixture gate implementation\n' > scripts/agent-quality-gate.sh
-  printf '# fixture routing classifier\n' > scripts/docs-navigation-eval-helpers.mjs
+  printf '# fixture routing classifier\n' > scripts/docs/docs-navigation-eval-helpers.mjs
+  printf '# fixture terraform format checker\n' > scripts/terraform/terraform-fmt-check.mjs
+  printf '# fixture terraform format checker suite\n' > scripts/terraform/terraform-fmt-check.test.mjs
   cat > tools/trunk <<'STUB'
 #!/usr/bin/env bash
 counter_file="${COUNTER_FILE:?}"
@@ -3504,7 +3541,7 @@ STUB
   [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "4" ]] ||
     fail "fresh gate stamp was reused after the gate implementation changed"
 
-  printf '# changed fixture routing classifier\n' >> scripts/docs-navigation-eval-helpers.mjs
+  printf '# changed fixture routing classifier\n' >> scripts/docs/docs-navigation-eval-helpers.mjs
   COUNTER_FILE="$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
     "$repo_root/scripts/agent-quality-gate.sh" \
       --changed-paths-file changed-paths-two.txt \
@@ -3514,6 +3551,34 @@ STUB
       > "$output_file" 2>&1
   [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "5" ]] ||
     fail "fresh gate stamp was reused after the routing classifier changed"
+
+  # Every moved entry in implementation_signature() carries the same hazard: a
+  # path the gate cannot stat hashes as `__missing__` on both runs, so the
+  # signature stops moving and --skip-if-fresh reuses a dead stamp. The
+  # classifier above covers the P4 move; these two cover the P10 one. The
+  # entries that have never moved are unfixtured apart from the gate itself
+  # (its suite, the alias validator, turbo.json, and .trunk/trunk.yaml).
+  printf '# changed fixture terraform format checker\n' >> scripts/terraform/terraform-fmt-check.mjs
+  COUNTER_FILE="$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file changed-paths-two.txt \
+      --base "$base_two" \
+      --run \
+      --skip-if-fresh \
+      > "$output_file" 2>&1
+  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "6" ]] ||
+    fail "fresh gate stamp was reused after the Terraform format checker changed"
+
+  printf '# changed fixture terraform format checker suite\n' >> scripts/terraform/terraform-fmt-check.test.mjs
+  COUNTER_FILE="$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file changed-paths-two.txt \
+      --base "$base_two" \
+      --run \
+      --skip-if-fresh \
+      > "$output_file" 2>&1
+  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "7" ]] ||
+    fail "fresh gate stamp was reused after the Terraform format checker suite changed"
 )
 rm -rf "$signature_stamp_repo"
 assert_not_contains "Previous successful agent quality gate run is still fresh; skipping mapped commands."
@@ -4287,19 +4352,41 @@ assert_contains "- node scripts/workflows/check-workflow-permissions-drift.test.
 run_gate "scripts/workflows/check-github-action-pins.test.mjs"
 assert_contains "- node scripts/workflows/check-github-action-pins.test.mjs (GitHub Actions pin checker test changed)"
 
-run_gate "scripts/alert-rules-lint.mjs"
+run_gate "scripts/alerts/alert-rules-lint.mjs"
 assert_contains "- pnpm alerts:rules:lint:test (alert-rules lint helper changed)"
 
-run_gate "scripts/alert-rules-lint.test.mjs"
+run_gate "scripts/alerts/alert-rules-lint.test.mjs"
 assert_contains "- pnpm alerts:rules:lint:test (alert-rules lint helper changed)"
 
-run_gate "scripts/check-peg-registry-integrity.mjs"
-assert_contains "- node scripts/check-peg-registry-integrity.mjs (peg registry integrity checker changed)"
-assert_contains "- node scripts/check-peg-registry-integrity.test.mjs (peg registry integrity checker changed)"
+run_gate "scripts/alerts/alert-rules-lint-extract.mjs"
+assert_contains "- pnpm alerts:rules:lint:test (alert-rules lint helper changed)"
 
-run_gate "scripts/check-peg-registry-integrity.test.mjs"
-assert_contains "- node scripts/check-peg-registry-integrity.mjs (peg registry integrity checker changed)"
-assert_contains "- node scripts/check-peg-registry-integrity.test.mjs (peg registry integrity checker changed)"
+run_gate "scripts/alerts/alert-rules-lint-peg-policy.mjs"
+assert_contains "- pnpm alerts:rules:lint:test (alert-rules lint helper changed)"
+
+run_gate "scripts/alerts/check-peg-registry-integrity.mjs"
+assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs (peg registry integrity checker changed)"
+assert_contains "- node scripts/alerts/check-peg-registry-integrity.test.mjs (peg registry integrity checker changed)"
+
+run_gate "scripts/alerts/check-peg-registry-integrity-lineage.mjs"
+assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs (peg registry integrity checker changed)"
+assert_contains "- node scripts/alerts/check-peg-registry-integrity.test.mjs (peg registry integrity checker changed)"
+
+run_gate "scripts/alerts/check-peg-registry-integrity.test.mjs"
+assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs (peg registry integrity checker changed)"
+assert_contains "- node scripts/alerts/check-peg-registry-integrity.test.mjs (peg registry integrity checker changed)"
+
+run_gate "scripts/alerts/check-peg-policy-publication.mjs"
+assert_contains "- pnpm tf:test (peg policy publication boundary changed)"
+
+run_gate "scripts/alerts/check-peg-policy-publication.test.mjs"
+assert_contains "- pnpm tf:test (peg policy publication boundary changed)"
+
+# The shared digest both peg validators compare against: one file, both suites.
+run_gate "scripts/lib/peg-policy-digest.mjs"
+assert_contains "- pnpm alerts:rules:lint:test (peg policy version digest changed)"
+assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs (peg policy version digest changed)"
+assert_contains "- node scripts/alerts/check-peg-registry-integrity.test.mjs (peg policy version digest changed)"
 
 run_gate "scripts/pr/check-pr-description.mjs"
 assert_contains "- node scripts/pr/check-pr-description.test.mjs (PR description validator changed)"
@@ -4371,46 +4458,51 @@ assert_contains "- pnpm agent:context-check (Claude runtime document registry ch
 run_gate "scripts/context/docs-index.test.mjs"
 assert_contains "- pnpm docs:index:test (documentation catalog helper changed)"
 
-run_gate "scripts/docs-audit.mjs"
+run_gate "scripts/docs/docs-audit.mjs"
 assert_contains "- pnpm docs:audit:test (documentation audit planner changed)"
 assert_contains "- pnpm docs:audit --dry-run (documentation audit planner changed)"
 assert_contains "- pnpm docs:index --check (documentation audit planner consumes the catalog)"
 
-run_gate "scripts/docs-audit-helpers.mjs"
+run_gate "scripts/docs/docs-audit-helpers.mjs"
 assert_contains "- pnpm docs:audit:test (documentation audit planner changed)"
 
-run_gate "scripts/docs-audit.test.mjs"
+run_gate "scripts/docs/docs-audit.test.mjs"
 assert_contains "- pnpm docs:audit:test (documentation audit planner changed)"
 
-run_gate "scripts/docs-garden-issue.mjs"
+run_gate "scripts/docs/docs-garden-issue.mjs"
 assert_contains "- pnpm docs:garden:test (documentation garden issue automation changed)"
 assert_contains "- pnpm docs:audit --dry-run (documentation garden issue automation consumes the planner)"
 assert_contains "- pnpm docs:index --check (documentation garden issue automation consumes the catalog)"
 
-run_gate "scripts/docs-garden-issue-helpers.mjs"
+run_gate "scripts/docs/docs-garden-issue-helpers.mjs"
 assert_contains "- pnpm docs:garden:test (documentation garden issue automation changed)"
 
-run_gate "scripts/docs-garden-issue.test.mjs"
+run_gate "scripts/docs/docs-garden-issue.test.mjs"
 assert_contains "- pnpm docs:garden:test (documentation garden issue automation changed)"
 
-run_gate "scripts/docs-navigation-eval.mjs"
+run_gate "scripts/docs/docs-navigation-eval.mjs"
 assert_contains "- pnpm docs:navigation-eval:test (documentation navigation evaluation changed)"
 assert_contains "- pnpm docs:navigation-eval -- --check-fixtures (documentation navigation evaluation changed)"
 assert_occurrences 1 "- pnpm docs:navigation-eval -- --check-fixtures"
 assert_contains "- pnpm docs:navigation-eval -- --validate docs/evals/documentation-navigation-baseline.json --fixtures docs/evals/documentation-navigation-baseline-fixtures.json (documentation navigation evaluation changed)"
 assert_contains "- pnpm docs:index --check (documentation navigation evaluation consumes the catalog)"
 
-run_gate "scripts/docs-navigation-eval-helpers.mjs"
+run_gate "scripts/docs/docs-navigation-eval-helpers.mjs"
 assert_contains "- pnpm docs:navigation-eval:test (documentation navigation evaluation changed)"
 assert_contains "- pnpm docs:navigation-eval -- --check-fixtures (documentation navigation evaluation changed)"
 assert_occurrences 1 "- pnpm docs:navigation-eval -- --check-fixtures"
 
-run_gate "scripts/docs-navigation-eval-result.mjs"
+run_gate "scripts/docs/docs-navigation-eval-result.mjs"
 assert_contains "- pnpm docs:navigation-eval:test (documentation navigation evaluation changed)"
 assert_contains "- pnpm docs:navigation-eval -- --check-fixtures (documentation navigation evaluation changed)"
 assert_occurrences 1 "- pnpm docs:navigation-eval -- --check-fixtures"
 
-run_gate "scripts/docs-navigation-eval.test.mjs"
+run_gate "scripts/docs/docs-navigation-eval-result-shape.mjs"
+assert_contains "- pnpm docs:navigation-eval:test (documentation navigation evaluation changed)"
+assert_contains "- pnpm docs:navigation-eval -- --check-fixtures (documentation navigation evaluation changed)"
+assert_occurrences 1 "- pnpm docs:navigation-eval -- --check-fixtures"
+
+run_gate "scripts/docs/docs-navigation-eval.test.mjs"
 assert_contains "- pnpm docs:navigation-eval:test (documentation navigation evaluation changed)"
 assert_contains "- pnpm docs:navigation-eval -- --check-fixtures (documentation navigation evaluation changed)"
 assert_occurrences 1 "- pnpm docs:navigation-eval -- --check-fixtures"
@@ -4452,12 +4544,12 @@ assert_contains "- pnpm agent:context-budget --strict (agent context budget help
 run_gate "scripts/context/agent-context-budget.test.mjs"
 assert_contains "- pnpm agent:context-budget:test (agent context budget helper changed)"
 
-run_gate "scripts/check-deviation-threshold-drift.mjs"
-assert_contains "- node scripts/check-deviation-threshold-drift.mjs (deviation threshold drift checker changed)"
-assert_contains "- node scripts/check-deviation-threshold-drift.test.mjs (deviation threshold drift checker changed)"
+run_gate "scripts/alerts/check-deviation-threshold-drift.mjs"
+assert_contains "- node scripts/alerts/check-deviation-threshold-drift.mjs (deviation threshold drift checker changed)"
+assert_contains "- node scripts/alerts/check-deviation-threshold-drift.test.mjs (deviation threshold drift checker changed)"
 
-run_gate "scripts/check-deviation-threshold-drift.test.mjs"
-assert_contains "- node scripts/check-deviation-threshold-drift.test.mjs (deviation threshold drift checker test changed)"
+run_gate "scripts/alerts/check-deviation-threshold-drift.test.mjs"
+assert_contains "- node scripts/alerts/check-deviation-threshold-drift.test.mjs (deviation threshold drift checker test changed)"
 
 run_gate "scripts/verify-github-environment-protection.mjs"
 assert_contains "- node scripts/verify-github-environment-protection.test.mjs (GitHub environment protection checker changed)"

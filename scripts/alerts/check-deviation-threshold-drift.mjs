@@ -14,7 +14,7 @@ const THRESHOLD_EXPORTS = {
 };
 
 function repoRoot() {
-  return resolve(dirname(fileURLToPath(import.meta.url)), "..");
+  return resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 }
 
 function escapeRegex(value) {

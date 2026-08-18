@@ -30,10 +30,8 @@ import {
   planNavigationEvalIssueSync,
   validateFixtureSuite,
 } from "./docs-navigation-eval-helpers.mjs";
-import {
-  scoreNavigationResult,
-  validateNavigationResultShape,
-} from "./docs-navigation-eval-result.mjs";
+import { validateNavigationResultShape } from "./docs-navigation-eval-result-shape.mjs";
+import { scoreNavigationResult } from "./docs-navigation-eval-result.mjs";
 import {
   assertCleanEvaluationCheckout,
   loadEvaluationContext,
@@ -41,11 +39,11 @@ import {
   runNavigationEvalIssue,
 } from "./docs-navigation-eval.mjs";
 
-const repoRoot = fileURLToPath(new URL("..", import.meta.url));
+const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const committedBaseline = JSON.parse(
   readFileSync(
     new URL(
-      "../docs/evals/documentation-navigation-baseline.json",
+      "../../docs/evals/documentation-navigation-baseline.json",
       import.meta.url,
     ),
     "utf8",
@@ -525,7 +523,7 @@ test("prompt is deterministic and never leaks routes or qualification traps", ()
   assert.match(first, /documentation-navigation-\*\.json/);
   assert.match(first, /result schema remains allowed/);
   assert.match(first, /do not\s+repeat them in an answer's `loaded_sources`/);
-  assert.match(first, /scripts\/docs-navigation-eval-result\.mjs/);
+  assert.match(first, /scripts\/docs\/docs-navigation-eval-result\.mjs/);
   assert.ok(!first.includes("shared-config/AGENTS.md"));
   assert.ok(!first.includes("docs/PLAN-celo-mainnet-indexer.md"));
   const targeted = buildNavigationPrompt(context.suite, {
@@ -1139,7 +1137,7 @@ test("scheduled integration is issue-only and contains no model credential or in
   );
   assert.match(
     workflow,
-    /node scripts\/docs-navigation-eval\.mjs --schedule-issue --json/,
+    /node scripts\/docs\/docs-navigation-eval\.mjs --schedule-issue --json/,
   );
   assert.match(workflow, /if: github\.event_name == 'schedule'/);
   assert.doesNotMatch(

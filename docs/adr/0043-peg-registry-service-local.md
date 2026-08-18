@@ -128,7 +128,7 @@ unpublished.
 - `metrics-bridge/peg-registry.json` and
   `metrics-bridge/src/peg/registry.ts` (implemented topology and schema)
 - `metrics-bridge/test/peg-registry.test.ts`
-- `scripts/check-peg-registry-integrity.mjs`
+- `scripts/alerts/check-peg-registry-integrity.mjs`
 - `alerts/rules/peg-promql-active.tf`,
   `alerts/rules/peg-promql-previous.tf`, and
   `alerts/rules/peg-rule-definitions.tf` (active and retained-previous indexed

@@ -155,6 +155,6 @@ monitoring, extending — not replacing — ADR 0027's scope:
   and isolated metric publication)
 - `metrics-bridge/test/peg-poller.test.ts` and
   `metrics-bridge/test/peg-structural.test.ts`
-- `scripts/check-peg-registry-integrity.mjs`
+- `scripts/alerts/check-peg-registry-integrity.mjs`
 - `indexer-envio/schema.graphql` (`SwapEvent`, pool reserves)
 - ADRs 0004, 0014, 0027, 0030

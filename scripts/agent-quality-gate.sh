@@ -1878,18 +1878,45 @@ if [[ ! -s "$changed_paths_file" ]]; then
   exit 0
 fi
 
+# Routing classification runs from the gate's own source tree, not the repo
+# under test, so a `scripts/` move must repoint this literal in the same commit.
+# Nothing in CI runs the gate for real; the routing suite is what exercises this
+# import there, and a developer's pre-push is where a stale path bites first.
+# The loader below therefore exits 3 and names the module it could not resolve,
+# instead of letting the failure read as a generic classifier fault.
+routing_classifier_path="$script_source_dir/docs/docs-navigation-eval-helpers.mjs"
 routing_sensitive_paths_changed=""
-if ! routing_sensitive_paths_changed="$(
+routing_classifier_status=0
+routing_sensitive_paths_changed="$(
   node --input-type=module - \
-    "$script_source_dir/docs-navigation-eval-helpers.mjs" \
+    "$routing_classifier_path" \
     "$changed_paths_file" <<'NODE'
-import { readFileSync } from "node:fs";
+import { readFileSync, writeSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 const [classifierPath, changedPathsPath] = process.argv.slice(2);
-const { isRoutingSensitivePath } = await import(
-  pathToFileURL(classifierPath).href
-);
+let isRoutingSensitivePath;
+try {
+  ({ isRoutingSensitivePath } = await import(
+    pathToFileURL(classifierPath).href
+  ));
+} catch (error) {
+  // writeSync, not process.stderr.write: process.exit() drops whatever is still
+  // queued on an async stderr, which is what stderr is whenever the gate runs
+  // under a pipe rather than a terminal.
+  //
+  // Nothing in this heredoc, code or prose, may leave a quote, backtick, or
+  // paren unbalanced. bash 3.2 mis-scans one inside a heredoc nested in $( ),
+  // which is how the gate runs this snippet, and
+  // check-sentry-suites-in-ci-gate-probe parses the gate with /bin/bash — 3.2
+  // on macOS. A lone apostrophe in a comment reds three of its cases.
+  writeSync(2, `${error instanceof Error ? error.message : String(error)}\n`);
+  process.exit(3);
+}
+if (typeof isRoutingSensitivePath !== "function") {
+  writeSync(2, `${classifierPath} does not export isRoutingSensitivePath\n`);
+  process.exit(3);
+}
 const changedPaths = readFileSync(changedPathsPath, "utf8")
   .split(/\r?\n/)
   .filter(Boolean);
@@ -1897,7 +1924,12 @@ process.stdout.write(
   changedPaths.some(isRoutingSensitivePath) ? "true" : "false",
 );
 NODE
-)"; then
+)" || routing_classifier_status=$?
+if [[ "$routing_classifier_status" -ne 0 ]]; then
+  if [[ "$routing_classifier_status" -eq 3 ]]; then
+    echo "error: routing-sensitive path classifier could not be loaded from ${routing_classifier_path}" >&2
+    echo "       scripts/agent-quality-gate.sh imports this module at pre-push time; moving it requires repointing that path in the same commit." >&2
+  fi
   echo "error: failed to classify routing-sensitive changed paths" >&2
   exit 2
 fi
@@ -2630,7 +2662,7 @@ map_lockfile_importer_to_bundle() {
 route_lockfile_change() {
   add_surface "workspace"
   add_preflight_command "pnpm install --frozen-lockfile" "workspace dependency/config changed"
-  add_command "node scripts/check-peg-registry-integrity.mjs" "root lockfile changed (peg registry authority dependency)"
+  add_command "node scripts/alerts/check-peg-registry-integrity.mjs" "root lockfile changed (peg registry authority dependency)"
 
   local importers
   if lockfile_only_manifest_change && importers="$(lockfile_scoped_importers)"; then
@@ -2686,9 +2718,9 @@ add_root_tooling_package_script_checks() {
   add_command "node scripts/supply-chain/override-prune-report.test.mjs" "$reason"
   add_command "node scripts/pr/check-adr-reminder.test.mjs" "$reason"
   add_command "node scripts/context/docs-index.test.mjs" "$reason"
-  add_command "node scripts/docs-audit.test.mjs" "$reason"
-  add_command "node scripts/docs-garden-issue.test.mjs" "$reason"
-  add_command "node scripts/docs-navigation-eval.test.mjs" "$reason"
+  add_command "node scripts/docs/docs-audit.test.mjs" "$reason"
+  add_command "node scripts/docs/docs-garden-issue.test.mjs" "$reason"
+  add_command "node scripts/docs/docs-navigation-eval.test.mjs" "$reason"
   add_command "node scripts/context/agent-context-budget.test.mjs" "$reason"
 }
 
@@ -3310,7 +3342,7 @@ while IFS= read -r path; do
       add_surface "metrics-bridge"
       case "$path" in
         metrics-bridge/peg-registry.json)
-          add_command "node scripts/check-peg-registry-integrity.mjs" "peg registry changed"
+          add_command "node scripts/alerts/check-peg-registry-integrity.mjs" "peg registry changed"
           ;;
       esac
       case "$path" in
@@ -3379,12 +3411,12 @@ while IFS= read -r path; do
       add_ui_size_limit "shared-config exports feed the dashboard bundle"
       case "$path" in
         shared-config/chain-metadata.json|shared-config/deployment-namespaces.json|shared-config/oracle-reporters.json|shared-config/src/chains.ts|shared-config/src/oracle-reporters.ts|shared-config/src/tokens.ts)
-          add_command "node scripts/check-peg-registry-integrity.mjs" "peg registry authority input changed"
+          add_command "node scripts/alerts/check-peg-registry-integrity.mjs" "peg registry authority input changed"
           ;;
       esac
       case "$path" in
         shared-config/src/thresholds.ts)
-          add_command "node scripts/check-deviation-threshold-drift.mjs" "shared deviation threshold source changed"
+          add_command "node scripts/alerts/check-deviation-threshold-drift.mjs" "shared deviation threshold source changed"
           add_command "pnpm --filter @mento-protocol/indexer-envio exec vitest run deviationThresholdSharedConfigSync" "shared deviation threshold source changed"
           ;;
         shared-config/deployment-namespaces.json|shared-config/fx-calendar.json)
@@ -3480,10 +3512,10 @@ while IFS= read -r path; do
       add_command "pnpm alerts:rules:lint" "alerts/rules PromQL lint + metric cross-check"
       case "$path" in
         alerts/rules/peg-thresholds.json)
-          add_command "node scripts/check-peg-registry-integrity.mjs" "peg threshold policy changed"
+          add_command "node scripts/alerts/check-peg-registry-integrity.mjs" "peg threshold policy changed"
           ;;
         alerts/rules/main.tf|alerts/rules/rules-fpmms.tf)
-          add_command "node scripts/check-deviation-threshold-drift.mjs" "deviation threshold Terraform consumer changed"
+          add_command "node scripts/alerts/check-deviation-threshold-drift.mjs" "deviation threshold Terraform consumer changed"
           ;;
       esac
       ;;
@@ -3751,17 +3783,17 @@ while IFS= read -r path; do
           add_command "pnpm docs:index --check" "documentation catalog helper changed"
           add_command "pnpm agent:context-check" "documentation catalog metadata contract changed"
           ;;
-        scripts/docs-audit.mjs|scripts/docs-audit-helpers.mjs|scripts/docs-audit.test.mjs)
+        scripts/docs/docs-audit.mjs|scripts/docs/docs-audit-helpers.mjs|scripts/docs/docs-audit.test.mjs)
           add_command "pnpm docs:audit:test" "documentation audit planner changed"
           add_command "pnpm docs:audit --dry-run" "documentation audit planner changed"
           add_command "pnpm docs:index --check" "documentation audit planner consumes the catalog"
           ;;
-        scripts/docs-garden-issue.mjs|scripts/docs-garden-issue-helpers.mjs|scripts/docs-garden-issue.test.mjs)
+        scripts/docs/docs-garden-issue.mjs|scripts/docs/docs-garden-issue-helpers.mjs|scripts/docs/docs-garden-issue.test.mjs)
           add_command "pnpm docs:garden:test" "documentation garden issue automation changed"
           add_command "pnpm docs:audit --dry-run" "documentation garden issue automation consumes the planner"
           add_command "pnpm docs:index --check" "documentation garden issue automation consumes the catalog"
           ;;
-        scripts/docs-navigation-eval.mjs|scripts/docs-navigation-eval-helpers.mjs|scripts/docs-navigation-eval-result.mjs|scripts/docs-navigation-eval.test.mjs)
+        scripts/docs/docs-navigation-eval.mjs|scripts/docs/docs-navigation-eval-helpers.mjs|scripts/docs/docs-navigation-eval-result.mjs|scripts/docs/docs-navigation-eval-result-shape.mjs|scripts/docs/docs-navigation-eval.test.mjs)
           add_command "pnpm docs:navigation-eval:test" "documentation navigation evaluation changed"
           add_command "pnpm docs:navigation-eval -- --check-fixtures" "documentation navigation evaluation changed"
           add_command "pnpm docs:navigation-eval -- --validate docs/evals/documentation-navigation-baseline.json --fixtures docs/evals/documentation-navigation-baseline-fixtures.json" "documentation navigation evaluation changed"
@@ -4036,22 +4068,37 @@ while IFS= read -r path; do
         scripts/filter-envio-runtime-errors.mjs|scripts/filter-envio-runtime-errors.test.mjs)
           add_command "node scripts/filter-envio-runtime-errors.test.mjs" "indexer runtime-log filter changed"
           ;;
-        scripts/alert-rules-lint.mjs|scripts/alert-rules-lint.test.mjs)
+        scripts/alerts/alert-rules-lint.mjs|scripts/alerts/alert-rules-lint-extract.mjs|scripts/alerts/alert-rules-lint-peg-policy.mjs|scripts/alerts/alert-rules-lint.test.mjs)
           add_command "pnpm alerts:rules:lint:test" "alert-rules lint helper changed"
           ;;
-        scripts/check-peg-registry-integrity.mjs|scripts/check-peg-registry-integrity.test.mjs)
-          add_command "node scripts/check-peg-registry-integrity.mjs" "peg registry integrity checker changed"
-          add_command "node scripts/check-peg-registry-integrity.test.mjs" "peg registry integrity checker changed"
+        scripts/alerts/check-peg-registry-integrity.mjs|scripts/alerts/check-peg-registry-integrity-lineage.mjs|scripts/alerts/check-peg-registry-integrity.test.mjs)
+          add_command "node scripts/alerts/check-peg-registry-integrity.mjs" "peg registry integrity checker changed"
+          add_command "node scripts/alerts/check-peg-registry-integrity.test.mjs" "peg registry integrity checker changed"
+          ;;
+        # The publication boundary's only suite runs inside `pnpm tf:test`,
+        # which the unconditional real-tree sweep further down already routes.
+        # Naming it here keeps the reason honest and the routing correct if that
+        # sweep is ever narrowed.
+        scripts/alerts/check-peg-policy-publication.mjs|scripts/alerts/check-peg-policy-publication.test.mjs)
+          add_command "pnpm tf:test" "peg policy publication boundary changed"
+          ;;
+        # The peg policy version-digest contract. Both peg validators compare a
+        # version string against this one implementation, so a change here has
+        # to run both or the halves can disagree undetected.
+        scripts/lib/peg-policy-digest.mjs)
+          add_command "pnpm alerts:rules:lint:test" "peg policy version digest changed"
+          add_command "node scripts/alerts/check-peg-registry-integrity.mjs" "peg policy version digest changed"
+          add_command "node scripts/alerts/check-peg-registry-integrity.test.mjs" "peg policy version digest changed"
           ;;
         scripts/pr/check-pr-description.mjs|scripts/pr/check-pr-description.test.mjs)
           add_command "node scripts/pr/check-pr-description.test.mjs" "PR description validator changed"
           ;;
-        scripts/check-deviation-threshold-drift.mjs)
-          add_command "node scripts/check-deviation-threshold-drift.mjs" "deviation threshold drift checker changed"
-          add_command "node scripts/check-deviation-threshold-drift.test.mjs" "deviation threshold drift checker changed"
+        scripts/alerts/check-deviation-threshold-drift.mjs)
+          add_command "node scripts/alerts/check-deviation-threshold-drift.mjs" "deviation threshold drift checker changed"
+          add_command "node scripts/alerts/check-deviation-threshold-drift.test.mjs" "deviation threshold drift checker changed"
           ;;
-        scripts/check-deviation-threshold-drift.test.mjs)
-          add_command "node scripts/check-deviation-threshold-drift.test.mjs" "deviation threshold drift checker test changed"
+        scripts/alerts/check-deviation-threshold-drift.test.mjs)
+          add_command "node scripts/alerts/check-deviation-threshold-drift.test.mjs" "deviation threshold drift checker test changed"
           ;;
         scripts/terraform/notify-terraform-apply.mjs|scripts/terraform/notify-terraform-apply.test.mjs)
           add_command "node scripts/terraform/notify-terraform-apply.test.mjs" "Terraform apply Slack notifier changed"
@@ -4184,7 +4231,9 @@ while IFS= read -r path; do
   # any non-empty change set, so this arm does not decide whether the suite
   # runs — it names the reason and keeps the routing correct if that sweep is
   # ever narrowed. The glob is deliberately wider than the two files so a
-  # future shared core added to `scripts/lib/` cannot land unrouted.
+  # future shared core added to `scripts/lib/` cannot land unrouted; the cost is
+  # that a core the contract does not read, such as `peg-policy-digest.mjs`,
+  # also gets this reason. Its own arm above routes the two peg suites.
   # `scripts/terraform/*.mjs` (P10) does the same for the moved apply-path
   # guards: `tf-stacks.mjs` imports two of them, so a change there reaches the
   # contract through the wrapper.
@@ -4425,7 +4474,7 @@ implementation_signature() {
     scripts/agent-quality-gate.sh \
     scripts/agent-quality-gate.test.sh \
     scripts/check-agent-quality-gate-package-scripts.sh \
-    scripts/docs-navigation-eval-helpers.mjs \
+    scripts/docs/docs-navigation-eval-helpers.mjs \
     scripts/terraform/terraform-fmt-check.mjs \
     scripts/terraform/terraform-fmt-check.test.mjs \
     turbo.json \

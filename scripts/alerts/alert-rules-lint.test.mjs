@@ -18,16 +18,17 @@ import {
 } from "./alert-rules-lint.mjs";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
+const repoRoot = path.resolve(__dirname, "..", "..");
 const script = path.resolve(__dirname, "alert-rules-lint.mjs");
 const pegPolicyFixture = JSON.parse(
   readFileSync(
-    path.resolve(__dirname, "..", "alerts/rules/peg-thresholds.json"),
+    path.resolve(repoRoot, "alerts/rules/peg-thresholds.json"),
     "utf8",
   ),
 );
 const pegRegistryFixture = JSON.parse(
   readFileSync(
-    path.resolve(__dirname, "..", "metrics-bridge/peg-registry.json"),
+    path.resolve(repoRoot, "metrics-bridge/peg-registry.json"),
     "utf8",
   ),
 );
@@ -84,7 +85,7 @@ function test(name, fn) {
 
 function runCli(options = {}) {
   return spawnSync(process.execPath, [script], {
-    cwd: path.resolve(__dirname, ".."),
+    cwd: repoRoot,
     encoding: "utf8",
     env: { ...process.env, ...options.env },
   });
@@ -855,7 +856,7 @@ test("peg PromQL requires exact dormant previous selectors before rollover", () 
 
 test("committed peg rules preserve coverage, rollover, and routing invariants", () => {
   const ruleDefinitions = readFileSync(
-    path.resolve(__dirname, "..", "alerts/rules/peg-rule-definitions.tf"),
+    path.resolve(repoRoot, "alerts/rules/peg-rule-definitions.tf"),
     "utf8",
   );
   const source = [
@@ -866,15 +867,15 @@ test("committed peg rules preserve coverage, rollover, and routing invariants", 
     "rules-peg.tf",
   ]
     .map((file) =>
-      readFileSync(path.resolve(__dirname, "..", "alerts/rules", file), "utf8"),
+      readFileSync(path.resolve(repoRoot, "alerts/rules", file), "utf8"),
     )
     .join("\n");
   const contacts = readFileSync(
-    path.resolve(__dirname, "..", "alerts/rules/peg-contact-points.tf"),
+    path.resolve(repoRoot, "alerts/rules/peg-contact-points.tf"),
     "utf8",
   );
   const templates = readFileSync(
-    path.resolve(__dirname, "..", "alerts/rules/peg-message-templates.tf"),
+    path.resolve(repoRoot, "alerts/rules/peg-message-templates.tf"),
     "utf8",
   );
   const europPolicies = [pegPolicyFixture.active.assets["europ-schuman"]];
@@ -1159,7 +1160,7 @@ test("committed peg rules preserve coverage, rollover, and routing invariants", 
 
 test("Peg Slack pages mention @support-engineer only while critical alerts are firing", () => {
   const templates = readFileSync(
-    path.resolve(__dirname, "..", "alerts/rules/peg-message-templates.tf"),
+    path.resolve(repoRoot, "alerts/rules/peg-message-templates.tf"),
     "utf8",
   );
   const slackMessageTemplate = templates.slice(
@@ -1197,7 +1198,7 @@ test("Peg Slack pages mention @support-engineer only while critical alerts are f
 });
 
 test("Peg Grafana and Slack copy leads with the concrete cause", () => {
-  const rulesDir = path.resolve(__dirname, "..", "alerts/rules");
+  const rulesDir = path.resolve(repoRoot, "alerts/rules");
   const definitions = readFileSync(
     path.join(rulesDir, "peg-rule-definitions.tf"),
     "utf8",
@@ -1251,7 +1252,7 @@ test("Peg Grafana and Slack copy leads with the concrete cause", () => {
 
 test("Peg support-engineer input remains managed when the on-call announcer is disabled", () => {
   const infra = readFileSync(
-    path.resolve(__dirname, "..", "alerts/infra/main.tf"),
+    path.resolve(repoRoot, "alerts/infra/main.tf"),
     "utf8",
   );
   const sharedSecrets = infra.slice(
@@ -1263,7 +1264,7 @@ test("Peg support-engineer input remains managed when the on-call announcer is d
     infra.indexOf("alerts_infra_ci_monitoring_secret_names"),
   );
   const infraVariables = readFileSync(
-    path.resolve(__dirname, "..", "alerts/infra/variables.tf"),
+    path.resolve(repoRoot, "alerts/infra/variables.tf"),
     "utf8",
   );
   const supportUsergroupVariable = infraVariables.slice(
@@ -1291,7 +1292,7 @@ test("Peg support-engineer input remains managed when the on-call announcer is d
 });
 
 test("Peg Grafana consumers use a literal source activation guard", () => {
-  const rulesDir = path.resolve(__dirname, "..", "alerts/rules");
+  const rulesDir = path.resolve(repoRoot, "alerts/rules");
   const policyLocals = readFileSync(
     path.join(rulesDir, "peg-policy-locals.tf"),
     "utf8",
@@ -1513,11 +1514,7 @@ test("CLI accepts extracted active, previous, and ACK scopes during rollover", (
 
 test("trading-mode notification templates avoid single-alert duplicate headings", () => {
   const source = readFileSync(
-    path.resolve(
-      __dirname,
-      "..",
-      "alerts/rules/message-templates-victorops.tf",
-    ),
+    path.resolve(repoRoot, "alerts/rules/message-templates-victorops.tf"),
     "utf8",
   );
   const titleStart = source.indexOf(
@@ -1602,11 +1599,7 @@ test("trading-mode notification templates avoid single-alert duplicate headings"
 
 test("oracle expiry notifications lead with human impact and action", () => {
   const victorops = readFileSync(
-    path.resolve(
-      __dirname,
-      "..",
-      "alerts/rules/message-templates-victorops.tf",
-    ),
+    path.resolve(repoRoot, "alerts/rules/message-templates-victorops.tf"),
     "utf8",
   );
   assert(
@@ -1645,7 +1638,7 @@ test("oracle expiry notifications lead with human impact and action", () => {
     "resolve-only pages should start directly with the recovery message",
   );
   const slack = readFileSync(
-    path.resolve(__dirname, "..", "alerts/rules/message-templates-slack.tf"),
+    path.resolve(repoRoot, "alerts/rules/message-templates-slack.tf"),
     "utf8",
   );
   assert(
@@ -1658,7 +1651,7 @@ test("oracle expiry notifications lead with human impact and action", () => {
 
 test("Slack trading-mode bodies suppress duplicate single-alert headings", () => {
   const source = readFileSync(
-    path.resolve(__dirname, "..", "alerts/rules/message-templates-slack.tf"),
+    path.resolve(repoRoot, "alerts/rules/message-templates-slack.tf"),
     "utf8",
   );
   assert(
@@ -1683,7 +1676,7 @@ test("Slack trading-mode bodies suppress duplicate single-alert headings", () =>
 
 test("Polygon-family EUROPEUR staleness bypasses relayer remediation", () => {
   const ruleSource = readFileSync(
-    path.resolve(__dirname, "..", "alerts/rules/rules-oracle-relayers.tf"),
+    path.resolve(repoRoot, "alerts/rules/rules-oracle-relayers.tf"),
     "utf8",
   );
   const ruleGuardStart = ruleSource.indexOf("{{ if and");
@@ -1710,10 +1703,7 @@ test("Polygon-family EUROPEUR staleness bypasses relayer remediation", () => {
     "alerts/rules/message-templates-slack.tf",
     "alerts/rules/message-templates-victorops.tf",
   ]) {
-    const source = readFileSync(
-      path.resolve(__dirname, "..", relativePath),
-      "utf8",
-    );
+    const source = readFileSync(path.resolve(repoRoot, relativePath), "utf8");
     const branchStart = source.indexOf(
       '{{ if and (or (eq .Labels.chain "polygon") (eq .Labels.chain "polygon-testnet")) (eq .Labels.rateFeed "EUROPEUR") -}}',
     );
@@ -1742,7 +1732,7 @@ test("Polygon-family EUROPEUR staleness bypasses relayer remediation", () => {
 
 test("trading-mode Splunk pages repeat slowly per rate feed", () => {
   const source = readFileSync(
-    path.resolve(__dirname, "..", "alerts/rules/notification-policies.tf"),
+    path.resolve(repoRoot, "alerts/rules/notification-policies.tf"),
     "utf8",
   );
   const matchingBlocks = blocksFor(source, 'dynamic "policy"').filter(
@@ -1791,7 +1781,7 @@ test("trading-mode Splunk pages repeat slowly per rate feed", () => {
 
 test("trading-mode alerts keep incidents open across short flaps", () => {
   const tradingModeRules = readFileSync(
-    path.resolve(__dirname, "..", "alerts/rules/rules-trading-modes.tf"),
+    path.resolve(repoRoot, "alerts/rules/rules-trading-modes.tf"),
     "utf8",
   );
   assert(
@@ -1820,13 +1810,11 @@ test("CLI recognizes gauges registered by the peg listing module", () => {
       env: {
         ALERT_RULES_LINT_RULES_DIR: dir,
         ALERT_RULES_LINT_PEG_POLICY: path.resolve(
-          __dirname,
-          "..",
+          repoRoot,
           "alerts/rules/peg-thresholds.json",
         ),
         ALERT_RULES_LINT_PEG_REGISTRY: path.resolve(
-          __dirname,
-          "..",
+          repoRoot,
           "metrics-bridge/peg-registry.json",
         ),
         ALERT_RULES_LINT_MIN_EXPRESSIONS: "1",

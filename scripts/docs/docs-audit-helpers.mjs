@@ -7,8 +7,8 @@ import {
   MAX_ROUTE_LIMIT_BYTES,
   resolveProjectDocMaxBytes,
   trackedInstructionFiles,
-} from "./context/agent-context-budget.mjs";
-import { GARDEN_LANES } from "./context/docs-index-helpers.mjs";
+} from "../context/agent-context-budget.mjs";
+import { GARDEN_LANES } from "../context/docs-index-helpers.mjs";
 
 export const MAX_SHARD_DOCUMENTS = 10;
 export const MAX_SHARD_WORDS = 15_000;
