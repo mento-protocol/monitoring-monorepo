@@ -52,20 +52,20 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Probe BOTH trusted-base locations before considering the PR's own
-          # copy. The validator moved to scripts/pr/ (issue 1877 phase P5);
-          # every PR branched before that move has a base ref that still
-          # carries it at the old flat path. Dropping the legacy probe would
-          # silently fall through to the pr-head copy for the whole in-flight
-          # backlog — "trust the PR", which is the property this job exists to
-          # deny. Retiring the legacy probe is tracked separately; it can only
-          # happen once no open PR has a pre-move base.
+          # Prefer the trusted base-ref copy over the PR's own, so a PR
+          # cannot edit the rule it is judged by. The legacy flat-path probe
+          # (pre issue-1877-P5) retired in issue 1904: the checkout above
+          # uses the base branch NAME, so trusted-base/ is always current
+          # main at job-execution time, never a snapshot pinned to when a PR
+          # branched — once main carries the validator at scripts/pr/, no
+          # PR (old, reopened, or new) can still resolve the flat path. This
+          # relies on the trigger above staying `branches: [main]`; widening
+          # it to other long-lived base branches needs its own dual-probe
+          # bridge until those branches carry scripts/pr/ too.
           if [ -f trusted-base/scripts/pr/check-pr-description.mjs ]; then
             node trusted-base/scripts/pr/check-pr-description.mjs
-          elif [ -f trusted-base/scripts/check-pr-description.mjs ]; then
-            node trusted-base/scripts/check-pr-description.mjs
           elif [ -f pr-head/scripts/pr/check-pr-description.mjs ]; then
-            echo "::warning::Trusted PR-description validator missing on the target branch at both scripts/pr/ and scripts/; using the PR copy only for the bootstrap PR that introduces the script."
+            echo "::warning::Trusted PR-description validator missing on the target branch; using the PR copy only for the bootstrap PR that introduces the script."
             node pr-head/scripts/pr/check-pr-description.mjs
           else
             echo "::error::PR-description validator is missing from both the target branch and PR head."
