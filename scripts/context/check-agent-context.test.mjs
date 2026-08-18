@@ -9,6 +9,11 @@
  * check-agent-context-helpers.mjs directly, plus a small fixture harness for
  * README-specific metadata discovery that lives in the main script.
  *
+ * The `.claude/settings.json` permission allowlist and the SessionEnd hook
+ * wiring live in check-settings-contract.mjs and are covered by
+ * check-settings-contract.test.mjs. One end-to-end test below keeps this
+ * entrypoint's forwarding of those failures under test.
+ *
  * Run: node scripts/context/check-agent-context.test.mjs
  * CI:  .github/workflows/ci.yml  (scripts job)
  */
@@ -696,89 +701,25 @@ test("applies staleness checks to a hidden root README marker", () => {
   }
 });
 
-test("rejects direct and wrapped Claude sag permissions without the canonical key path", () => {
-  const today = isoDateWithOffset(0);
-  const permissions = [
-    'Bash(sag --api-key-file ~/.config/sag/elevenlabs-api-key -v Charlie "hey, i need your approval in the agent chat")',
-    'Bash(sag -v Charlie --api-key-file ~/.config/sag/elevenlabs-api-key "hey, i need your approval in the agent chat")',
-    'Bash(sag speak --api-key-file ~/.config/sag/elevenlabs-api-key -v Charlie "hey, i need your approval in the agent chat")',
-    "Bash(sag:*)",
-    'Bash(env LANG=C sag --api-key-file ~/.config/other-key -v Charlie "hey, i need your approval in the agent chat")',
-    'Bash(command sag -v Charlie "hey, i need your approval in the agent chat")',
-    'Bash(echo ready && sag --api-key-file ~/.config/other-key -v Charlie "hey, i need your approval in the agent chat")',
-    'Bash(/usr/bin/env LANG=C /usr/local/bin/sag --api-key-file ~/.config/other-key -v Charlie "hey, i need your approval in the agent chat")',
-    "Bash(command sag:*)",
-    'Bash(env LANG=C command sag --api-key-file ~/.config/elevenlabs_api_key -v Charlie "hey, i need your approval in the agent chat")',
-    'Bash(command sag --api-key-file=~/.config/elevenlabs_api_key -v Charlie "hey, i need your approval in the agent chat")',
-    'Bash(sag --api-key-file ~/.config/other-key -v Charlie "hey"; printf %s --api-key-file ~/.config/elevenlabs_api_key)',
-    String.raw`Bash(s\ag --api-key-file /tmp/other-key -v Charlie "hey")`,
-    "Bash(s''ag --api-key-file /tmp/other-key -v Charlie \"hey\")",
-  ];
+// ── settings-contract wiring ──────────────────────────────────────────────────
+//
+// The permission-allowlist and SessionEnd-hook rules moved to
+// check-settings-contract.mjs, and check-settings-contract.test.mjs owns their
+// coverage. What stays here is the wiring: this entrypoint must still run that
+// module and surface its failures, because `pnpm agent:context-check`, the four
+// bootstrap scripts, and the weekly staleness job all reach the contract only
+// through this script.
 
-  for (const permission of permissions) {
-    const root = createContextCheckFixture(
-      `# Root README\n\n<!-- agent-context: title="Root README" status=active owner=eng canonical=true last_verified=${today} -->\n`,
-    );
-    try {
-      writeFixtureJson(root, ".claude/settings.json", {
-        permissions: { allow: [permission] },
-        hooks: {
-          SessionEnd: [
-            {
-              hooks: [
-                {
-                  type: "command",
-                  command:
-                    'bash "${CLAUDE_PROJECT_DIR}/scripts/bootstrap/agent-session-end-hook.sh"',
-                },
-              ],
-            },
-          ],
-        },
-      });
+console.log("\nsettings-contract wiring");
 
-      try {
-        execFileSync(process.execPath, [checkerScriptPath], {
-          cwd: root,
-          encoding: "utf8",
-          stdio: ["ignore", "pipe", "pipe"],
-        });
-        throw new Error(`expected context check to reject ${permission}`);
-      } catch (/** @type {unknown} */ err) {
-        const maybeError =
-          err && typeof err === "object"
-            ? /** @type {{stderr?: string, stdout?: string, message?: string}} */ (
-                err
-              )
-            : {};
-        const output = `${maybeError.stdout ?? ""}${maybeError.stderr ?? ""}`;
-        assert(
-          output.includes(
-            "sag permissions must include --api-key-file with the canonical ~/.config/elevenlabs_api_key path",
-          ),
-          `expected wrapped sag path failure, got ${JSON.stringify(output || maybeError.message)}`,
-        );
-      }
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
-  }
-});
-
-test("accepts the reviewed single-command Claude sag permissions", () => {
+test("surfaces settings-contract failures from the extracted module", () => {
   const today = isoDateWithOffset(0);
   const root = createContextCheckFixture(
     `# Root README\n\n<!-- agent-context: title="Root README" status=active owner=eng canonical=true last_verified=${today} -->\n`,
   );
   try {
     writeFixtureJson(root, ".claude/settings.json", {
-      permissions: {
-        allow: [
-          'Bash(sag --api-key-file ~/.config/elevenlabs_api_key -v Charlie "hey, i need your feedback in the agent chat")',
-          'Bash(sag --api-key-file ~/.config/elevenlabs_api_key -v Charlie "hey, i need your approval in the agent chat")',
-          'Bash(sag --api-key-file ~/.config/elevenlabs_api_key -v Charlie "hey, the task finished and needs your attention in the agent chat")',
-        ],
-      },
+      permissions: { allow: ["Bash(echo sagacious)"] },
       hooks: {
         SessionEnd: [
           {
@@ -794,68 +735,30 @@ test("accepts the reviewed single-command Claude sag permissions", () => {
       },
     });
 
-    execFileSync(process.execPath, [checkerScriptPath], {
-      cwd: root,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    try {
+      execFileSync(process.execPath, [checkerScriptPath], {
+        cwd: root,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      throw new Error(
+        "expected context check to surface the settings-contract failure",
+      );
+    } catch (/** @type {unknown} */ err) {
+      const maybeError =
+        err && typeof err === "object"
+          ? /** @type {{stderr?: string, stdout?: string, message?: string}} */ (
+              err
+            )
+          : {};
+      const output = `${maybeError.stdout ?? ""}${maybeError.stderr ?? ""}`;
+      assert(
+        output.includes("unexpected Bash permission"),
+        `expected unreviewed Bash permission failure, got ${JSON.stringify(output || maybeError.message)}`,
+      );
+    }
   } finally {
     rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("rejects every unreviewed Claude Bash permission", () => {
-  const today = isoDateWithOffset(0);
-  const permissions = [
-    'Bash(cmd=sag; "$cmd" --api-key-file /tmp/other-key -v Charlie "hey")',
-    "Bash(echo sagacious)",
-  ];
-
-  for (const permission of permissions) {
-    const root = createContextCheckFixture(
-      `# Root README\n\n<!-- agent-context: title="Root README" status=active owner=eng canonical=true last_verified=${today} -->\n`,
-    );
-    try {
-      writeFixtureJson(root, ".claude/settings.json", {
-        permissions: { allow: [permission] },
-        hooks: {
-          SessionEnd: [
-            {
-              hooks: [
-                {
-                  type: "command",
-                  command:
-                    'bash "${CLAUDE_PROJECT_DIR}/scripts/bootstrap/agent-session-end-hook.sh"',
-                },
-              ],
-            },
-          ],
-        },
-      });
-
-      try {
-        execFileSync(process.execPath, [checkerScriptPath], {
-          cwd: root,
-          encoding: "utf8",
-          stdio: ["ignore", "pipe", "pipe"],
-        });
-        throw new Error(`expected context check to reject ${permission}`);
-      } catch (/** @type {unknown} */ err) {
-        const maybeError =
-          err && typeof err === "object"
-            ? /** @type {{stderr?: string, stdout?: string, message?: string}} */ (
-                err
-              )
-            : {};
-        const output = `${maybeError.stdout ?? ""}${maybeError.stderr ?? ""}`;
-        assert(
-          output.includes("unexpected Bash permission"),
-          `expected unreviewed Bash permission failure, got ${JSON.stringify(output || maybeError.message)}`,
-        );
-      }
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
   }
 });
 

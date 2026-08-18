@@ -4526,6 +4526,20 @@ run_gate "scripts/context/check-agent-context.test.mjs"
 assert_contains "- pnpm agent:context-check (agent context checker changed)"
 assert_contains "- node scripts/context/check-agent-context.test.mjs (agent context checker changed)"
 
+# The settings/hook contract module split out of the context checker (#1887).
+# Its own suite plus the caller's wiring test plus the real enforcement pass.
+run_gate "scripts/context/check-settings-contract.mjs"
+assert_contains "- pnpm lint:scripts (root build script changed)"
+assert_contains "- pnpm agent:context-check (agent settings contract changed)"
+assert_contains "- node scripts/context/check-settings-contract.test.mjs (agent settings contract changed)"
+assert_contains "- node scripts/context/check-agent-context.test.mjs (agent settings contract changed)"
+
+run_gate "scripts/context/check-settings-contract.test.mjs"
+assert_contains "- pnpm lint:scripts (root build script changed)"
+assert_contains "- pnpm agent:context-check (agent settings contract changed)"
+assert_contains "- node scripts/context/check-settings-contract.test.mjs (agent settings contract changed)"
+assert_contains "- node scripts/context/check-agent-context.test.mjs (agent settings contract changed)"
+
 run_gate "scripts/mcp/build-upstash-mcp-runtime.mjs"
 assert_contains "- pnpm lint:scripts (root build script changed)"
 assert_contains "- node --test scripts/mcp/upstash-mcp-config.test.mjs (Upstash MCP transport contract changed)"
