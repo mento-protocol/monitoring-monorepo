@@ -18,8 +18,8 @@ on:
       - governance-watchdog/tsconfig.json
       - governance-watchdog/tsconfig.build.json
       - terraform.stacks.json
-      - scripts/check-metrics-bridge-template-plan.mjs
-      - scripts/check-metrics-bridge-template-plan.test.mjs
+      - scripts/terraform/check-metrics-bridge-template-plan.mjs
+      - scripts/terraform/check-metrics-bridge-template-plan.test.mjs
       - scripts/alerts/check-peg-policy-publication.mjs
       - scripts/alerts/check-peg-policy-publication.test.mjs
       - scripts/production-infra-identity-contract/**
@@ -32,8 +32,8 @@ on:
       - scripts/alerts/check-peg-registry-integrity.mjs
       - scripts/alerts/check-peg-registry-integrity-lineage.mjs
       - scripts/lib/peg-policy-digest.mjs
-      - scripts/terraform-fmt-check.mjs
-      - scripts/tf-platform-plan-guard.mjs
+      - scripts/terraform/terraform-fmt-check.mjs
+      - scripts/terraform/tf-platform-plan-guard.mjs
       - scripts/tf-stacks.mjs
       - scripts/tf-stacks.test.mjs
       - .github/workflows/alerts-infra.yml
@@ -56,8 +56,8 @@ on:
       - governance-watchdog/tsconfig.json
       - governance-watchdog/tsconfig.build.json
       - terraform.stacks.json
-      - scripts/check-metrics-bridge-template-plan.mjs
-      - scripts/check-metrics-bridge-template-plan.test.mjs
+      - scripts/terraform/check-metrics-bridge-template-plan.mjs
+      - scripts/terraform/check-metrics-bridge-template-plan.test.mjs
       - scripts/alerts/check-peg-policy-publication.mjs
       - scripts/alerts/check-peg-policy-publication.test.mjs
       - scripts/production-infra-identity-contract/**
@@ -70,8 +70,8 @@ on:
       - scripts/alerts/check-peg-registry-integrity.mjs
       - scripts/alerts/check-peg-registry-integrity-lineage.mjs
       - scripts/lib/peg-policy-digest.mjs
-      - scripts/terraform-fmt-check.mjs
-      - scripts/tf-platform-plan-guard.mjs
+      - scripts/terraform/terraform-fmt-check.mjs
+      - scripts/terraform/tf-platform-plan-guard.mjs
       - scripts/tf-stacks.mjs
       - scripts/tf-stacks.test.mjs
       - .github/workflows/alerts-infra.yml

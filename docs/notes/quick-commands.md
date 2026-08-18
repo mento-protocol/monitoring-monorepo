@@ -70,12 +70,13 @@ node scripts/review-process-metrics.mjs --prs <pr1,pr2,...> --output <result.jso
 pnpm lockfile:lint                 # Fail-closed integrity + registry + override-floor check; no install needed
 pnpm skew:check                    # Fail on dependency version skew vs the pnpm catalog; no install needed
 pnpm sanitize:test                 # Fixture tests for scripts/sanitize-terraform-output.sh (terraform output secret redaction)
+pnpm deploy-staging:test           # ADR 0053 deployment source-staging contract on its own; `pnpm tf:test` also imports it
 pnpm override:prune-report          # pnpm.overrides + minimumReleaseAgeExclude pruning report (advisory; no install needed)
 pnpm adr:check                      # Advisory ADR reminder for architectural changes (new package/stack/workflow); --strict to hard-gate
 pnpm adr:check:test                 # Offline tests for the ADR reminder trigger logic
 node scripts/workflows/check-github-action-pins.mjs  # Verify workflow/composite-action `uses:` refs are SHA-pinned
-node scripts/check-hermetic-vitest-setup.mjs  # Verify all workspace Vitest network guards are byte-identical
-node scripts/file-size-watchlist.mjs  # Refresh source file-size watchlist; use --format issue for GitHub Issues, not BACKLOG.md
+node scripts/repo-health/check-hermetic-vitest-setup.mjs  # Verify all workspace Vitest network guards are byte-identical
+node scripts/repo-health/file-size-watchlist.mjs  # Refresh source file-size watchlist; use --format issue for GitHub Issues, not BACKLOG.md
 pnpm indexer:testnet:codegen       # Generate types (multichain testnet: Celo Sepolia + Monad testnet + Polygon Amoy)
 pnpm indexer:testnet:dev           # Start indexer (multichain testnet)
 
@@ -159,6 +160,6 @@ pnpm alerts:rules:plan
 # reviewer approval; that acknowledges the commit and earlier plan, not the exact apply plan.
 
 # Dev janitor
-bash scripts/dev-janitor.sh            # Dry-run: report stale trunk repo caches, pnpm store, git worktrees, /private/tmp trees
-bash scripts/dev-janitor.sh --apply    # Delete stale trunk repo caches, prune pnpm store, and run git worktree prune
+bash scripts/repo-health/dev-janitor.sh          # Dry-run: report stale trunk repo caches, pnpm store, git worktrees, /private/tmp trees
+bash scripts/repo-health/dev-janitor.sh --apply  # Delete stale trunk repo caches, prune pnpm store, and run git worktree prune
 ```

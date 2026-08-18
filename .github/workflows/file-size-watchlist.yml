@@ -64,4 +64,4 @@ jobs:
           FILE_SIZE_WATCHLIST_REPO: ${{ github.repository }}
           FILE_SIZE_WATCHLIST_PUBLISH_REPORT: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_report && 'true' || 'false' }}
           FILE_SIZE_WATCHLIST_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: node scripts/file-size-watchlist-issue.mjs --json
+        run: node scripts/repo-health/file-size-watchlist-issue.mjs --json

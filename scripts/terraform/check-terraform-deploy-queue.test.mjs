@@ -15,7 +15,7 @@ const now = new Date("2026-07-07T12:00:00Z");
 const workflow = DEPLOY_WORKFLOWS[0];
 const workflowYaml = readFileSync(
   new URL(
-    "../.github/workflows/terraform-deploy-queue-watch.yml",
+    "../../.github/workflows/terraform-deploy-queue-watch.yml",
     import.meta.url,
   ),
   "utf8",

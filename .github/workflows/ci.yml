@@ -178,8 +178,8 @@ jobs:
               - aegis/terraform/**
               - governance-watchdog/**
               - terraform.stacks.json
-              - scripts/check-metrics-bridge-template-plan.mjs
-              - scripts/check-metrics-bridge-template-plan.test.mjs
+              - scripts/terraform/check-metrics-bridge-template-plan.mjs
+              - scripts/terraform/check-metrics-bridge-template-plan.test.mjs
               - scripts/alerts/check-peg-policy-publication.mjs
               - scripts/alerts/check-peg-policy-publication.test.mjs
               - scripts/production-infra-identity-contract/**
@@ -195,8 +195,8 @@ jobs:
               - scripts/alerts/check-peg-registry-integrity.mjs
               - scripts/alerts/check-peg-registry-integrity-lineage.mjs
               - scripts/lib/peg-policy-digest.mjs
-              - scripts/terraform-fmt-check.mjs
-              - scripts/tf-platform-plan-guard.mjs
+              - scripts/terraform/terraform-fmt-check.mjs
+              - scripts/terraform/tf-platform-plan-guard.mjs
               - scripts/tf-stacks.mjs
               - scripts/tf-stacks.test.mjs
               - .github/workflows/alerts-infra.yml
@@ -264,6 +264,12 @@ jobs:
               - scripts/**/*.cjs
               - scripts/**/*.js
               - scripts/**/*.sh
+              # The React Doctor wrappers live with the package they drive, but
+              # agent-quality-gate.test.sh copies and executes the diff wrapper
+              # in a stub repo. Without these two paths a wrapper edit would
+              # skip the suite that proves its branch cleanup.
+              - ui-dashboard/scripts/check-react-doctor-diff.sh
+              - ui-dashboard/scripts/check-react-doctor-score.sh
               - docs/evals/documentation-navigation-*.json
               - .lighthouserc.cjs
               - "**/vitest.hermetic-setup.ts"
@@ -1036,11 +1042,11 @@ jobs:
       - name: Terraform source-format target regression suite
         # Proves ignored operator tfvars stay outside the explicit format target
         # list while tracked and non-ignored source paths remain covered.
-        run: node scripts/terraform-fmt-check.test.mjs
+        run: node scripts/terraform/terraform-fmt-check.test.mjs
       - name: Hermetic Vitest setup consistency
-        run: node scripts/check-hermetic-vitest-setup.mjs
+        run: node scripts/repo-health/check-hermetic-vitest-setup.mjs
       - name: Hermetic Vitest setup consistency suite
-        run: node scripts/check-hermetic-vitest-setup.test.mjs
+        run: node scripts/repo-health/check-hermetic-vitest-setup.test.mjs
       - name: Deviation threshold drift suite
         run: node scripts/alerts/check-deviation-threshold-drift.test.mjs
       - name: Agent context checker unit tests

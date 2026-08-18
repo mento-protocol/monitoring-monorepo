@@ -61,6 +61,10 @@ const expectedScripts = {
   "pr:ready-state:test": "node scripts/pr-ready-state.test.mjs",
   "tf": "node scripts/tf-stacks.mjs",
   "tf:test": "node scripts/tf-stacks.test.mjs",
+  // The ADR 0053 deploy-staging contract's own runner. `tf:test` imports it for
+  // its side effects, so before this alias the largest suite in the tree could
+  // only be run through the umbrella.
+  "deploy-staging:test": "node scripts/deploy-staging-contract.test.mjs",
   "alerts:rules:lint": "node scripts/alerts/alert-rules-lint.mjs",
   "alerts:rules:lint:test": "node scripts/alerts/alert-rules-lint.test.mjs",
   "lockfile:lint": "node scripts/supply-chain/lockfile-lint.mjs",

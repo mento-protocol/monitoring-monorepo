@@ -2679,7 +2679,7 @@ add_root_tooling_package_script_checks() {
   add_command "node scripts/check-sentry-suites-in-ci.test.mjs" "$reason"
   add_command "node scripts/pr-feedback-state.test.mjs" "$reason"
   add_command "node scripts/pr-ready-state.test.mjs" "$reason"
-  add_command "node scripts/terraform-fmt-check.test.mjs" "$reason"
+  add_command "node scripts/terraform/terraform-fmt-check.test.mjs" "$reason"
   add_command "node scripts/tf-stacks.test.mjs" "$reason"
   add_command "node scripts/supply-chain/lockfile-lint.test.mjs" "$reason"
   add_command "node scripts/supply-chain/version-skew-check.test.mjs" "$reason"
@@ -2763,7 +2763,7 @@ add_terraform_validate_commands() {
   local module="$1"
   local reason="$2"
   local tf_data_dir="${module}/.terraform-agent-gate"
-  add_command "TF_DATA_DIR=${tf_data_dir} node scripts/terraform-fmt-check.mjs $(quote_path "$module")" "$reason"
+  add_command "TF_DATA_DIR=${tf_data_dir} node scripts/terraform/terraform-fmt-check.mjs $(quote_path "$module")" "$reason"
   add_command "TF_DATA_DIR=${tf_data_dir} terraform -chdir=${module} init -backend=false -input=false" "$reason"
   add_command "TF_DATA_DIR=${tf_data_dir} terraform -chdir=${module} validate -no-color" "$reason"
 }
@@ -3152,11 +3152,11 @@ while IFS= read -r path; do
   case "$path" in
     */vitest.config.ts|*/vitest.mutation.config.ts)
       add_surface "tooling"
-      add_command "node scripts/check-hermetic-vitest-setup.mjs" "hermetic Vitest config changed"
+      add_command "node scripts/repo-health/check-hermetic-vitest-setup.mjs" "hermetic Vitest config changed"
       ;;
     */vitest.hermetic-setup.ts)
       add_surface "tooling"
-      add_command "node scripts/check-hermetic-vitest-setup.mjs" "hermetic Vitest setup changed"
+      add_command "node scripts/repo-health/check-hermetic-vitest-setup.mjs" "hermetic Vitest setup changed"
       case "$path" in
         alerts/infra/oncall-announcer/vitest.hermetic-setup.ts)
           add_package_vitest_typecheck_commands "@mento-protocol/alerts-oncall-announcer" "alerts oncall-announcer hermetic Vitest setup changed"
@@ -3191,6 +3191,11 @@ while IFS= read -r path; do
       case "$path" in
         ui-dashboard/scripts/vercel-ignore-build.sh|ui-dashboard/scripts/vercel-ignore-build.test.sh)
           add_command "bash ui-dashboard/scripts/vercel-ignore-build.test.sh" "Vercel ignore build script changed"
+          ;;
+        ui-dashboard/scripts/check-react-doctor-diff.sh|ui-dashboard/scripts/check-react-doctor-score.sh)
+          # agent-quality-gate.test.sh copies and runs the diff wrapper in a
+          # stub repo, so the routing suite is this pair's real regression test.
+          add_command "pnpm agent:quality-gate:test" "React Doctor wrapper changed"
           ;;
       esac
       ;;
@@ -3653,8 +3658,8 @@ while IFS= read -r path; do
       add_command "pnpm agent:context-check" "agent context files changed"
       case "$path" in
         .agents/skills/*|.claude/skills/*)
-          add_command "bash scripts/check-skills-mirror.test.sh" "skills mirror content changed"
-          add_command "bash scripts/check-skills-mirror.sh" "skills mirror content changed"
+          add_command "node scripts/repo-health/check-skills-mirror.test.mjs" "skills mirror content changed"
+          add_command "node scripts/repo-health/check-skills-mirror.mjs" "skills mirror content changed"
           ;;
       esac
       ;;
@@ -3677,14 +3682,14 @@ while IFS= read -r path; do
           add_command "bash scripts/check-agent-quality-gate-package-scripts.sh" "agent quality gate package script validator changed"
           add_command "pnpm agent:quality-gate:test" "agent quality gate mapping changed"
           ;;
-        scripts/agent-quality-gate.sh|scripts/agent-quality-gate.test.sh|scripts/check-react-doctor-diff.sh|scripts/check-react-doctor-score.sh)
+        scripts/agent-quality-gate.sh|scripts/agent-quality-gate.test.sh)
           add_command "pnpm agent:quality-gate:test" "agent quality gate mapping changed"
           ;;
         scripts/agent-autoreview.sh|scripts/agent-autoreview.test.sh)
           add_command "pnpm agent:autoreview:test" "agent autoreview adapter changed"
           ;;
-        scripts/dev-janitor.sh|scripts/dev-janitor.test.sh)
-          add_command "bash scripts/dev-janitor.test.sh" "dev janitor script changed"
+        scripts/repo-health/dev-janitor.sh|scripts/repo-health/dev-janitor.test.sh)
+          add_command "bash scripts/repo-health/dev-janitor.test.sh" "dev janitor script changed"
           ;;
         scripts/deploy-bridge.sh)
           add_checklist "docs/pr-checklists/terraform-cloudrun.md" "Cloud Run deploy script changed"
@@ -3704,10 +3709,6 @@ while IFS= read -r path; do
           # source the shared fragment and use its hash, which `bash -n` cannot
           # see, and re-runs the fragment's own behavioral checks.
           add_command "pnpm agent:quality-gate:test" "install-marker consumer changed"
-          ;;
-        scripts/check-skills-mirror.sh|scripts/check-skills-mirror.test.sh)
-          add_command "bash scripts/check-skills-mirror.test.sh" "skills mirror checker changed"
-          add_command "bash scripts/check-skills-mirror.sh" "skills mirror checker changed"
           ;;
       esac
       ;;
@@ -3738,8 +3739,12 @@ while IFS= read -r path; do
         scripts/mcp/build-upstash-mcp-runtime.mjs|scripts/mcp/render-upstash-mcp-config.mjs|scripts/mcp/upstash-mcp-config.test.mjs|scripts/mcp/upstash-mcp-launcher.mjs)
           add_command "node --test scripts/mcp/upstash-mcp-config.test.mjs" "Upstash MCP transport contract changed"
           ;;
-        scripts/file-size-watchlist.mjs|scripts/file-size-watchlist-issue.mjs|scripts/file-size-watchlist.test.mjs)
-          add_command "node --test scripts/file-size-watchlist.test.mjs" "file-size watchlist automation changed"
+        scripts/repo-health/file-size-watchlist.mjs|scripts/repo-health/file-size-watchlist-issue.mjs|scripts/repo-health/file-size-watchlist.test.mjs)
+          add_command "node --test scripts/repo-health/file-size-watchlist.test.mjs" "file-size watchlist automation changed"
+          ;;
+        scripts/repo-health/check-skills-mirror.mjs|scripts/repo-health/check-skills-mirror.test.mjs)
+          add_command "node scripts/repo-health/check-skills-mirror.test.mjs" "skills mirror checker changed"
+          add_command "node scripts/repo-health/check-skills-mirror.mjs" "skills mirror checker changed"
           ;;
         scripts/context/claude-runtime-document-registry.mjs|scripts/context/docs-index.mjs|scripts/context/docs-index-helpers.mjs|scripts/context/docs-index.test.mjs)
           add_command "pnpm docs:index:test" "documentation catalog helper changed"
@@ -3943,7 +3948,12 @@ while IFS= read -r path; do
         scripts/review-process-metrics.mjs|scripts/review-process-metrics.test.mjs)
           add_command "node scripts/review-process-metrics.test.mjs" "review-process metrics collector changed"
           ;;
-        scripts/check-metrics-bridge-template-plan.mjs|scripts/check-metrics-bridge-template-plan.test.mjs|scripts/tf-platform-plan-guard.mjs|scripts/tf-stacks.mjs|scripts/tf-stacks.test.mjs)
+        # Enumerated, not `scripts/terraform/*`: a glob here would win over the
+        # two `terraform-fmt-check` arms below, which bash `case` never reaches
+        # once an earlier arm matches, and the format helper would silently lose
+        # its own suite. `scripts/tf-stacks.{mjs,test.mjs}` stay flat — seven
+        # security-contract pins name those exact paths (scripts/AGENTS.md).
+        scripts/terraform/check-metrics-bridge-template-plan.mjs|scripts/terraform/check-metrics-bridge-template-plan.test.mjs|scripts/terraform/tf-platform-plan-guard.mjs|scripts/tf-stacks.mjs|scripts/tf-stacks.test.mjs)
           add_command "pnpm tf:test" "Terraform stack wrapper changed"
           add_terraform_validate_commands "terraform" "Terraform stack wrapper changed"
           add_terraform_validate_commands "alerts/rules" "Terraform stack wrapper changed"
@@ -3952,8 +3962,8 @@ while IFS= read -r path; do
           add_terraform_validate_commands "governance-watchdog/infra" "Terraform stack wrapper changed"
           add_registered_terraform_validate_commands "Terraform stack wrapper changed"
           ;;
-        scripts/terraform-fmt-check.mjs)
-          add_command "node scripts/terraform-fmt-check.test.mjs" "Terraform format helper changed"
+        scripts/terraform/terraform-fmt-check.mjs)
+          add_command "node scripts/terraform/terraform-fmt-check.test.mjs" "Terraform format helper changed"
           add_command "pnpm tf:test" "Terraform format helper changed"
           add_terraform_validate_commands "terraform" "Terraform format helper changed"
           add_terraform_validate_commands "alerts/rules" "Terraform format helper changed"
@@ -3962,8 +3972,8 @@ while IFS= read -r path; do
           add_terraform_validate_commands "governance-watchdog/infra" "Terraform format helper changed"
           add_registered_terraform_validate_commands "Terraform format helper changed"
           ;;
-        scripts/terraform-fmt-check.test.mjs)
-          add_command "node scripts/terraform-fmt-check.test.mjs" "Terraform format helper test changed"
+        scripts/terraform/terraform-fmt-check.test.mjs)
+          add_command "node scripts/terraform/terraform-fmt-check.test.mjs" "Terraform format helper test changed"
           ;;
         scripts/supply-chain/lockfile-lint.mjs|scripts/supply-chain/lockfile-lint.test.mjs|scripts/supply-chain/lockfile-lint-registry-sources.mjs|scripts/supply-chain/lockfile-lint-override-ranges.mjs)
           add_command "pnpm lockfile:lint:test" "lockfile lint helper changed"
@@ -3995,9 +4005,9 @@ while IFS= read -r path; do
         scripts/supply-chain/override-prune-report.mjs|scripts/supply-chain/override-prune-report.test.mjs)
           add_command "pnpm override:prune-report:test" "override prune report helper changed"
           ;;
-        scripts/check-hermetic-vitest-setup.mjs|scripts/check-hermetic-vitest-setup.test.mjs)
-          add_command "node scripts/check-hermetic-vitest-setup.mjs" "hermetic Vitest setup checker changed"
-          add_command "node scripts/check-hermetic-vitest-setup.test.mjs" "hermetic Vitest setup checker changed"
+        scripts/repo-health/check-hermetic-vitest-setup.mjs|scripts/repo-health/check-hermetic-vitest-setup.test.mjs)
+          add_command "node scripts/repo-health/check-hermetic-vitest-setup.mjs" "hermetic Vitest setup checker changed"
+          add_command "node scripts/repo-health/check-hermetic-vitest-setup.test.mjs" "hermetic Vitest setup checker changed"
           ;;
         scripts/workflows/check-github-action-pins.mjs)
           add_command "node scripts/workflows/check-github-action-pins.mjs" "GitHub Actions pin checker changed"
@@ -4054,11 +4064,11 @@ while IFS= read -r path; do
         scripts/alerts/check-deviation-threshold-drift.test.mjs)
           add_command "node scripts/alerts/check-deviation-threshold-drift.test.mjs" "deviation threshold drift checker test changed"
           ;;
-        scripts/notify-terraform-apply.mjs|scripts/notify-terraform-apply.test.mjs)
-          add_command "node scripts/notify-terraform-apply.test.mjs" "Terraform apply Slack notifier changed"
+        scripts/terraform/notify-terraform-apply.mjs|scripts/terraform/notify-terraform-apply.test.mjs)
+          add_command "node scripts/terraform/notify-terraform-apply.test.mjs" "Terraform apply Slack notifier changed"
           ;;
-        scripts/check-terraform-deploy-queue.mjs|scripts/check-terraform-deploy-queue.test.mjs)
-          add_command "node scripts/check-terraform-deploy-queue.test.mjs" "Terraform deploy queue watcher changed"
+        scripts/terraform/check-terraform-deploy-queue.mjs|scripts/terraform/check-terraform-deploy-queue.test.mjs)
+          add_command "node scripts/terraform/check-terraform-deploy-queue.test.mjs" "Terraform deploy queue watcher changed"
           ;;
         scripts/redrive-onchain-deadletter.mjs|scripts/redrive-onchain-deadletter.test.mjs)
           add_command "node scripts/redrive-onchain-deadletter.test.mjs" "onchain dead-letter redrive tool changed"
@@ -4188,8 +4198,11 @@ while IFS= read -r path; do
   # future shared core added to `scripts/lib/` cannot land unrouted; the cost is
   # that a core the contract does not read, such as `peg-policy-digest.mjs`,
   # also gets this reason. Its own arm above routes the two peg suites.
+  # `scripts/terraform/*.mjs` (P10) does the same for the moved apply-path
+  # guards: `tf-stacks.mjs` imports two of them, so a change there reaches the
+  # contract through the wrapper.
   case "$path" in
-    terraform/*|aegis/terraform/*|alerts/infra/*|alerts/rules/*|governance-watchdog/infra/*|.github/workflows/*|scripts/production-infra-identity-contract/*.mjs|scripts/lib/*.mjs|scripts/sanitize-terraform-output.sh|scripts/verify-github-environment-protection.mjs)
+    terraform/*|aegis/terraform/*|alerts/infra/*|alerts/rules/*|governance-watchdog/infra/*|.github/workflows/*|scripts/production-infra-identity-contract/*.mjs|scripts/lib/*.mjs|scripts/terraform/*.mjs|scripts/sanitize-terraform-output.sh|scripts/verify-github-environment-protection.mjs)
       add_command "pnpm tf:test" "production infrastructure identity contract surface changed"
       ;;
   esac
@@ -4426,8 +4439,8 @@ implementation_signature() {
     scripts/agent-quality-gate.test.sh \
     scripts/check-agent-quality-gate-package-scripts.sh \
     scripts/docs-navigation-eval-helpers.mjs \
-    scripts/terraform-fmt-check.mjs \
-    scripts/terraform-fmt-check.test.mjs \
+    scripts/terraform/terraform-fmt-check.mjs \
+    scripts/terraform/terraform-fmt-check.test.mjs \
     turbo.json \
     .trunk/trunk.yaml; do
     if [[ -f "$path" ]]; then
@@ -5158,7 +5171,7 @@ is_quality_setup_command() {
     TF_DATA_DIR=*terraform\ -chdir=*)
       return 0
       ;;
-    TF_DATA_DIR=*node\ scripts/terraform-fmt-check.mjs\ *)
+    TF_DATA_DIR=*node\ scripts/terraform/terraform-fmt-check.mjs\ *)
       return 0
       ;;
   esac

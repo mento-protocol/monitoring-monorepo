@@ -76,7 +76,7 @@ live filter against it — not the other way around.
 | ---------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `#deploys` | the `workflows:{…}` filter above | Pairs with the apply-pending prompt (§2) so the plan summary, the `production-infra` approval prompt, and the final workflow-run outcome all land in the deploy channel. |
 
-## 2. `scripts/notify-terraform-apply.mjs` (repo-owned, partially Terraform-managed)
+## 2. `scripts/terraform/notify-terraform-apply.mjs` (repo-owned, partially Terraform-managed)
 
 A bespoke script invoked from a "Notify Slack that Terraform apply is
 pending" step in the `plan` job of `governance-watchdog.yml`,
@@ -132,7 +132,7 @@ default workflow-token permission to read-only.
 `.github/workflows/terraform-deploy-queue-watch.yml` is the pre-plan detector for a
 different failure mode: a post-merge Terraform deploy workflow can sit
 `queued`/`pending` behind an older run before any job starts. In that state the
-GitHub Slack App approval card and `scripts/notify-terraform-apply.mjs` summary
+GitHub Slack App approval card and `scripts/terraform/notify-terraform-apply.mjs` summary
 cannot fire because the deploy workflow has not reached its `plan` job.
 
 The watcher runs daily, reads recent runs for the four `production-infra`

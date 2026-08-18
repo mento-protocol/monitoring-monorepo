@@ -36,4 +36,4 @@ jobs:
           SLACK_BOT_TOKEN: ${{ secrets.TF_VAR_SLACK_BOT_TOKEN }}
           SLACK_CHANNEL: ${{ vars.TERRAFORM_APPLY_SLACK_CHANNEL == '#ci-operations' && '#deploys' || vars.TERRAFORM_APPLY_SLACK_CHANNEL || '#deploys' }}
           TERRAFORM_DEPLOY_STALE_MINUTES: "60"
-        run: node scripts/check-terraform-deploy-queue.mjs
+        run: node scripts/terraform/check-terraform-deploy-queue.mjs

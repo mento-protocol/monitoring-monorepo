@@ -119,6 +119,13 @@ scheduled document, for context an agent gets from the directory map in
   passed without checking anything, and a move would have made it do so.
 - The reorganization lands incrementally. Each phase moves one module and sweeps
   its pins, so a break is scoped to one subsystem and one PR.
+- A file whose only consumer is one package leaves `scripts/` instead of getting
+  a subdirectory. P9 moved `check-react-doctor-{diff,score}.sh` to
+  `ui-dashboard/scripts/`. An out-move drops the recursive `scripts/**` safety
+  net, so it re-pins what the net covered: the `rootScripts` paths-filter now
+  names both wrappers, because `agent-quality-gate.test.sh` copies and runs the
+  diff wrapper in a stub repo, and the `.claude/settings.json` allowlist plus
+  its verbatim copy in `check-agent-context.mjs` carry the package path.
 - An enumerated paths-filter fails silently rather than loudly: the job stops
   running, and the required `ci` sentinel stays green because a skipped job is
   not a failed one. Where a filter's whole file set is one module, replace the
@@ -144,12 +151,14 @@ Run every item in the PR that moves a file. `scripts/AGENTS.md` points here
 rather than carrying the list, because its scoped instruction budget is for
 routing, not procedure.
 
-1. Root `package.json` — 73 entries reference `scripts/`.
+1. Root `package.json` — 74 entries reference `scripts/`.
 2. `check-agent-quality-gate-package-scripts.sh` — pinned alias map.
 3. `.github/workflows/` — 22 of 32 files, including the enumerated filters
    listed under "Why Files Stay Flat" in `scripts/AGENTS.md`.
-4. `terraform.stacks.json` — per-stack `changedPathPatterns`, which
-   `docs/terraform.md` requires the workflow filters to mirror.
+4. `terraform.stacks.json` — each stack's `changedPathPatterns` enumerates
+   exact `scripts/` paths, which `docs/terraform.md` requires the workflow
+   filters to mirror, and `tf-stacks.test.mjs` asserts three of them per stack.
+   A stale entry stops the stack reacting to its own tooling.
 5. `.trunk/trunk.yaml` pre-push hook, and `.gitattributes`.
 6. `.claude/settings.json`, `.codex/hooks.json`,
    `.claude/hooks/session-start.sh`, and the verbatim copies and invocation
@@ -160,7 +169,10 @@ routing, not procedure.
    `scripts/deploy-*.sh` or `scripts/sentry-*.test.mjs` stops matching one
    directory down. Keep the basename prefix; add the paired one-level arm. Its
    contract-surface arm also names `scripts/lib/*.mjs`, which sets the
-   `pnpm tf:test` reason; the unconditional sweep already runs the suite.
+   `pnpm tf:test` reason; the unconditional sweep already runs the suite. Its
+   `implementation_signature()` path list is stricter than a glob: an entry it
+   cannot stat hashes as `__missing__`, so the signature freezes and
+   `--skip-if-fresh` reuses a stale stamp. Repoint it in the same commit.
 
 A shared module under `scripts/lib/` is routed from every arm that reads it,
 not only the arm of the consumer that happens to fail loudest.
