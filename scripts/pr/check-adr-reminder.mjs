@@ -19,7 +19,7 @@
  * Advisory by default (exit 0). Pass `--strict` to exit non-zero on a trigger
  * that has no accompanying ADR so a CI job can hard-gate if a team wants that.
  *
- * Usage: node scripts/check-adr-reminder.mjs [--base <ref>] [--head <ref>]
+ * Usage: node scripts/pr/check-adr-reminder.mjs [--base <ref>] [--head <ref>]
  *          [--strict] [--include-untracked] [--changed-paths-file <file>]
  *
  * The agent quality gate passes its own `--head`, `--include-untracked`, and

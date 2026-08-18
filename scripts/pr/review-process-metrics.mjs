@@ -19,7 +19,7 @@ const REVIEW_BOT_LOGINS = new Set([
 ]);
 
 function usage() {
-  return `Usage: node scripts/review-process-metrics.mjs [options]
+  return `Usage: node scripts/pr/review-process-metrics.mjs [options]
 
 Collect review-process metrics for merged PR cohorts.
 

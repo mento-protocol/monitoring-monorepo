@@ -176,7 +176,7 @@ this body shape:
 - Commands and results.
 ```
 
-`scripts/check-pr-description.mjs` enforces the first two sections and their
+`scripts/pr/check-pr-description.mjs` enforces the first two sections and their
 order in CI, so no change log or other content may precede them. Put
 review/verification caveats, detailed technical notes, and issue closure
 references after `The Solution`, and use closure references only when the PR

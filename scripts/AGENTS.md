@@ -17,7 +17,7 @@ garden_lane: agent-entry-points
 ## Scope
 
 `scripts/` holds deploy wrappers, agent quality gates, code-health checks, and
-repo maintenance utilities. 135 files sit flat at the top level today.
+repo maintenance utilities. 124 files sit flat at the top level today.
 
 ## Target Layout
 
@@ -40,7 +40,7 @@ Files stay flat until their phase merges.
 | `terraform/`    | P10   | movable Terraform guards and helpers   |
 | `gate/`         | P11   | quality-gate satellites                |
 
-Landed: P1, P2, P3, P4, P6, P7, P8, P9, P10. `lib/` (the shared tier) and
+Landed: P1, P2, P3, P4, P5, P6, P7, P8, P9, P10. `lib/` (the shared tier) and
 `production-infra-identity-contract/` predate the reorganization. `setup.sh`
 stays flat: `.config/wt.toml` runs that exact path as the Worktrunk pre-start
 hook, and eight docs name it. `redrive-onchain-deadletter.{mjs,test.mjs}` stays
@@ -64,7 +64,7 @@ their domain.
 
 ## Why Files Stay Flat
 
-Ten mechanisms pin `scripts/` paths. A file one of them names moves only when
+Eleven mechanisms pin `scripts/` paths. A file one of them names moves only when
 that mechanism moves with it, in the same PR.
 
 - **Autoreview runtime materialization.** `agent-autoreview.sh` names its
@@ -97,6 +97,8 @@ that mechanism moves with it, in the same PR.
   `scripts/supply-chain/**` is the safer pin.
 - **Terraform stack registry.** `terraform.stacks.json` `changedPathPatterns`
   pins exact `scripts/` paths per stack, mirrored into those filters.
+- **Trusted-validator probes.** `pr-description.yml` runs the validator from the
+  PR's base ref, so a move probes both paths. ADR 0064 has the failure mode.
 - **Production infrastructure contract pins.**
   `production-infra-identity-contract/workflow-inventory.mjs` pins exact script
   paths for the workflows it audits.

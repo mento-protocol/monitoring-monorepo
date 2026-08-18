@@ -610,7 +610,7 @@ export async function defaultFetchMergedSentryIssues(options) {
 }
 
 // ---------------------------------------------------------------------------
-// GitHub side effects (via `gh`, mirroring scripts/agent-issue-board.mjs).
+// GitHub side effects (via `gh`, mirroring scripts/pr/agent-issue-board.mjs).
 // Read-only calls always execute; mutating calls are logged and skipped
 // under --dry-run.
 // ---------------------------------------------------------------------------

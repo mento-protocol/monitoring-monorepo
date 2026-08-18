@@ -32,7 +32,7 @@ is enforced, not just documented:
 
 - **When** to write one is defined by a three-part test and a trigger-surface
   list in [`docs/pr-checklists/architecture-decisions.md`](../pr-checklists/architecture-decisions.md).
-- **A reminder gate** — `scripts/check-adr-reminder.mjs` (`pnpm adr:check`) —
+- **A reminder gate** — `scripts/pr/check-adr-reminder.mjs` (`pnpm adr:check`) —
   detects high-signal architectural changes (new package/service, new Terraform
   stack, new CI/deploy workflow) that ship without an ADR and prints a reminder.
   The agent quality gate runs it on those surfaces, so a normal pre-push flow
@@ -65,12 +65,12 @@ for a trigger without an accompanying ADR.
   **Architecture decision?** checklist item.
 - ADRs are canonical context (ADR 0005), so each is enrolled in the 90-day
   re-verification check — the log stays honest over time.
-- `pnpm adr:check` is a repo command; `scripts/check-adr-reminder.test.mjs`
+- `pnpm adr:check` is a repo command; `scripts/pr/check-adr-reminder.test.mjs`
   covers its trigger logic.
 
 ## Evidence
 
-- `scripts/check-adr-reminder.mjs`, `scripts/check-adr-reminder.test.mjs`,
+- `scripts/pr/check-adr-reminder.mjs`, `scripts/pr/check-adr-reminder.test.mjs`,
   `docs/pr-checklists/architecture-decisions.md`, the `adr:check` script in
   `package.json`, the `terraform.stacks.json` / workspace / workflow routing in
   `scripts/agent-quality-gate.sh`, and the "Architecture decision?" line in

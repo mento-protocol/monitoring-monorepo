@@ -794,17 +794,17 @@ validator_repo="$(mktemp -d)"
     "agent:autoreview": "./scripts/agent-autoreview.sh",
     "agent:prewarm": "node scripts/agent-prewarm.mjs",
     "agent:prewarm:test": "node scripts/agent-prewarm.test.mjs",
-    "agent:review-materiality": "node scripts/review-materiality.mjs",
-    "agent:review-materiality:test": "node scripts/review-materiality.test.mjs",
+    "agent:review-materiality": "node scripts/pr/review-materiality.mjs",
+    "agent:review-materiality:test": "node scripts/pr/review-materiality.test.mjs",
     "docs:garden": "node scripts/docs/docs-garden-issue.mjs",
     "docs:garden:test": "node scripts/docs/docs-garden-issue.test.mjs",
     "docs:navigation-eval": "node scripts/docs/docs-navigation-eval.mjs",
     "docs:navigation-eval:test": "node scripts/docs/docs-navigation-eval.test.mjs",
-    "issue:board": "node scripts/agent-issue-board.mjs",
-    "issue:board:test": "node scripts/agent-issue-board.test.mjs",
-    "issue:claim": "node scripts/agent-issue-board.mjs claim",
-    "issue:review": "node scripts/agent-issue-board.mjs review",
-    "issue:release": "node scripts/agent-issue-board.mjs release",
+    "issue:board": "node scripts/pr/agent-issue-board.mjs",
+    "issue:board:test": "node scripts/pr/agent-issue-board.test.mjs",
+    "issue:claim": "node scripts/pr/agent-issue-board.mjs claim",
+    "issue:review": "node scripts/pr/agent-issue-board.mjs review",
+    "issue:release": "node scripts/pr/agent-issue-board.mjs release",
     "pr:feedback-state": "node scripts/pr-feedback-state.mjs",
     "pr:feedback-state:test": "node scripts/pr-feedback-state.test.mjs",
     "pr:ready-state": "node scripts/pr-ready-state.mjs",
@@ -1015,13 +1015,13 @@ package_json_repo="$(mktemp -d)"
     "agent:autoreview": "./scripts/agent-autoreview.sh",
     "agent:prewarm": "node scripts/agent-prewarm.mjs",
     "agent:prewarm:test": "node scripts/agent-prewarm.test.mjs",
-    "agent:review-materiality": "node scripts/review-materiality.mjs",
-    "agent:review-materiality:test": "node scripts/review-materiality.test.mjs",
-    "issue:board": "node scripts/agent-issue-board.mjs",
-    "issue:board:test": "node scripts/agent-issue-board.test.mjs",
-    "issue:claim": "node scripts/agent-issue-board.mjs claim",
-    "issue:review": "node scripts/agent-issue-board.mjs review",
-    "issue:release": "node scripts/agent-issue-board.mjs release",
+    "agent:review-materiality": "node scripts/pr/review-materiality.mjs",
+    "agent:review-materiality:test": "node scripts/pr/review-materiality.test.mjs",
+    "issue:board": "node scripts/pr/agent-issue-board.mjs",
+    "issue:board:test": "node scripts/pr/agent-issue-board.test.mjs",
+    "issue:claim": "node scripts/pr/agent-issue-board.mjs claim",
+    "issue:review": "node scripts/pr/agent-issue-board.mjs review",
+    "issue:release": "node scripts/pr/agent-issue-board.mjs release",
     "pr:feedback-state": "node scripts/pr-feedback-state.mjs",
     "pr:feedback-state:test": "node scripts/pr-feedback-state.test.mjs",
     "pr:ready-state": "node scripts/pr-ready-state.mjs",
@@ -1048,8 +1048,8 @@ assert_contains "- tooling"
 assert_contains "- bash scripts/check-agent-quality-gate-package-scripts.sh (root package tooling script changed)"
 assert_contains "- bash scripts/agent-quality-gate.test.sh (root package tooling script changed)"
 assert_contains "- node scripts/agent-prewarm.test.mjs (root package tooling script changed)"
-assert_contains "- node scripts/review-materiality.test.mjs (root package tooling script changed)"
-assert_contains "- node scripts/agent-issue-board.test.mjs (root package tooling script changed)"
+assert_contains "- node scripts/pr/review-materiality.test.mjs (root package tooling script changed)"
+assert_contains "- node scripts/pr/agent-issue-board.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/docs/docs-garden-issue.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/docs/docs-navigation-eval.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/pr-feedback-state.test.mjs (root package tooling script changed)"
@@ -1079,13 +1079,13 @@ dedupe_quality_gate_alias_repo="$(mktemp -d)"
     "agent:autoreview": "./scripts/agent-autoreview.sh",
     "agent:prewarm": "node scripts/agent-prewarm.mjs",
     "agent:prewarm:test": "node scripts/agent-prewarm.test.mjs",
-    "agent:review-materiality": "node scripts/review-materiality.mjs",
-    "agent:review-materiality:test": "node scripts/review-materiality.test.mjs",
-    "issue:board": "node scripts/agent-issue-board.mjs",
-    "issue:board:test": "node scripts/agent-issue-board.test.mjs",
-    "issue:claim": "node scripts/agent-issue-board.mjs claim",
-    "issue:review": "node scripts/agent-issue-board.mjs review",
-    "issue:release": "node scripts/agent-issue-board.mjs release",
+    "agent:review-materiality": "node scripts/pr/review-materiality.mjs",
+    "agent:review-materiality:test": "node scripts/pr/review-materiality.test.mjs",
+    "issue:board": "node scripts/pr/agent-issue-board.mjs",
+    "issue:board:test": "node scripts/pr/agent-issue-board.test.mjs",
+    "issue:claim": "node scripts/pr/agent-issue-board.mjs claim",
+    "issue:review": "node scripts/pr/agent-issue-board.mjs review",
+    "issue:release": "node scripts/pr/agent-issue-board.mjs release",
     "pr:feedback-state": "node scripts/pr-feedback-state.mjs",
     "pr:feedback-state:test": "node scripts/pr-feedback-state.test.mjs",
     "pr:ready-state": "node scripts/pr-ready-state.mjs",
@@ -1129,13 +1129,13 @@ lockfile_script_repo="$(mktemp -d)"
     "agent:autoreview": "./scripts/agent-autoreview.sh",
     "agent:prewarm": "node scripts/agent-prewarm.mjs",
     "agent:prewarm:test": "node scripts/agent-prewarm.test.mjs",
-    "agent:review-materiality": "node scripts/review-materiality.mjs",
-    "agent:review-materiality:test": "node scripts/review-materiality.test.mjs",
-    "issue:board": "node scripts/agent-issue-board.mjs",
-    "issue:board:test": "node scripts/agent-issue-board.test.mjs",
-    "issue:claim": "node scripts/agent-issue-board.mjs claim",
-    "issue:review": "node scripts/agent-issue-board.mjs review",
-    "issue:release": "node scripts/agent-issue-board.mjs release",
+    "agent:review-materiality": "node scripts/pr/review-materiality.mjs",
+    "agent:review-materiality:test": "node scripts/pr/review-materiality.test.mjs",
+    "issue:board": "node scripts/pr/agent-issue-board.mjs",
+    "issue:board:test": "node scripts/pr/agent-issue-board.test.mjs",
+    "issue:claim": "node scripts/pr/agent-issue-board.mjs claim",
+    "issue:review": "node scripts/pr/agent-issue-board.mjs review",
+    "issue:release": "node scripts/pr/agent-issue-board.mjs release",
     "pr:feedback-state": "node scripts/pr-feedback-state.mjs",
     "pr:feedback-state:test": "node scripts/pr-feedback-state.test.mjs",
     "pr:ready-state": "node scripts/pr-ready-state.mjs",
@@ -1162,8 +1162,8 @@ assert_contains "- tooling"
 assert_contains "- bash scripts/check-agent-quality-gate-package-scripts.sh (root package tooling script changed)"
 assert_contains "- bash scripts/agent-quality-gate.test.sh (root package tooling script changed)"
 assert_contains "- node scripts/agent-prewarm.test.mjs (root package tooling script changed)"
-assert_contains "- node scripts/review-materiality.test.mjs (root package tooling script changed)"
-assert_contains "- node scripts/agent-issue-board.test.mjs (root package tooling script changed)"
+assert_contains "- node scripts/pr/review-materiality.test.mjs (root package tooling script changed)"
+assert_contains "- node scripts/pr/agent-issue-board.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/pr-feedback-state.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/pr-ready-state.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/tf-stacks.test.mjs (root package tooling script changed)"
@@ -1189,13 +1189,13 @@ pr_ready_state_script_repo="$(mktemp -d)"
     "agent:autoreview": "./scripts/agent-autoreview.sh",
     "agent:prewarm": "node scripts/agent-prewarm.mjs",
     "agent:prewarm:test": "node scripts/agent-prewarm.test.mjs",
-    "agent:review-materiality": "node scripts/review-materiality.mjs",
-    "agent:review-materiality:test": "node scripts/review-materiality.test.mjs",
-    "issue:board": "node scripts/agent-issue-board.mjs",
-    "issue:board:test": "node scripts/agent-issue-board.test.mjs",
-    "issue:claim": "node scripts/agent-issue-board.mjs claim",
-    "issue:review": "node scripts/agent-issue-board.mjs review",
-    "issue:release": "node scripts/agent-issue-board.mjs release",
+    "agent:review-materiality": "node scripts/pr/review-materiality.mjs",
+    "agent:review-materiality:test": "node scripts/pr/review-materiality.test.mjs",
+    "issue:board": "node scripts/pr/agent-issue-board.mjs",
+    "issue:board:test": "node scripts/pr/agent-issue-board.test.mjs",
+    "issue:claim": "node scripts/pr/agent-issue-board.mjs claim",
+    "issue:review": "node scripts/pr/agent-issue-board.mjs review",
+    "issue:release": "node scripts/pr/agent-issue-board.mjs release",
     "pr:feedback-state": "node scripts/pr-feedback-state.mjs",
     "pr:feedback-state:test": "node scripts/pr-feedback-state.test.mjs",
     "pr:ready-state": "node scripts/pr-ready-state.mjs",
@@ -1222,8 +1222,8 @@ assert_contains "- tooling"
 assert_contains "- bash scripts/check-agent-quality-gate-package-scripts.sh (root package tooling script changed)"
 assert_contains "- bash scripts/agent-quality-gate.test.sh (root package tooling script changed)"
 assert_contains "- node scripts/agent-prewarm.test.mjs (root package tooling script changed)"
-assert_contains "- node scripts/review-materiality.test.mjs (root package tooling script changed)"
-assert_contains "- node scripts/agent-issue-board.test.mjs (root package tooling script changed)"
+assert_contains "- node scripts/pr/review-materiality.test.mjs (root package tooling script changed)"
+assert_contains "- node scripts/pr/agent-issue-board.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/pr-feedback-state.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/pr-ready-state.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/tf-stacks.test.mjs (root package tooling script changed)"
@@ -2113,7 +2113,7 @@ assert_contains "- docs/pr-checklists/ci-workflow-gates.md (GitHub Actions workf
 assert_contains "- node scripts/workflows/check-github-action-pins.mjs (GitHub Actions workflow/action changed)"
 assert_contains "- pnpm docs:garden:test (documentation garden workflow changed)"
 assert_contains "- pnpm docs:navigation-eval:test (documentation navigation scheduler workflow changed)"
-assert_contains "node scripts/check-adr-reminder.mjs"
+assert_contains "node scripts/pr/check-adr-reminder.mjs"
 
 run_gate ".lighthouserc.cjs"
 assert_contains "- node scripts/lighthouse-config.test.mjs (Lighthouse CI budget config changed)"
@@ -4272,25 +4272,40 @@ assert_contains "- pnpm sanitize:test (Terraform output sanitizer changed)"
 run_gate "scripts/sanitize-terraform-output.test.mjs"
 assert_contains "- pnpm sanitize:test (Terraform output sanitizer test changed)"
 
-run_gate "scripts/review-materiality.mjs"
+run_gate "scripts/pr/review-materiality.mjs"
 assert_contains "- pnpm agent:review-materiality:test (agent review materiality helper changed)"
 
-run_gate "scripts/review-materiality-context.mjs"
+run_gate "scripts/pr/review-materiality-context.mjs"
 assert_contains "- pnpm agent:review-materiality:test (agent review materiality helper changed)"
 
-run_gate "scripts/review-materiality.test.mjs"
+run_gate "scripts/pr/review-materiality.test.mjs"
 assert_contains "- pnpm agent:review-materiality:test (agent review materiality helper changed)"
 
-run_gate "scripts/review-process-metrics.mjs"
-assert_contains "- node scripts/review-process-metrics.test.mjs (review-process metrics collector changed)"
+run_gate "scripts/pr/review-process-metrics.mjs"
+assert_contains "- node scripts/pr/review-process-metrics.test.mjs (review-process metrics collector changed)"
 
-run_gate "scripts/review-process-metrics.test.mjs"
-assert_contains "- node scripts/review-process-metrics.test.mjs (review-process metrics collector changed)"
+run_gate "scripts/pr/review-process-metrics.test.mjs"
+assert_contains "- node scripts/pr/review-process-metrics.test.mjs (review-process metrics collector changed)"
 
-run_gate "scripts/agent-issue-board.mjs"
+run_gate "scripts/pr/agent-issue-board.mjs"
 assert_contains "- pnpm issue:board:test (agent issue board helper changed)"
 
-run_gate "scripts/agent-issue-board.test.mjs"
+run_gate "scripts/pr/agent-issue-board.test.mjs"
+assert_contains "- pnpm issue:board:test (agent issue board helper changed)"
+
+run_gate "scripts/pr/issue-board-cli.mjs"
+assert_contains "- pnpm issue:board:test (agent issue board helper changed)"
+
+run_gate "scripts/pr/issue-board-transport.mjs"
+assert_contains "- pnpm issue:board:test (agent issue board helper changed)"
+
+run_gate "scripts/pr/issue-board-state.mjs"
+assert_contains "- pnpm issue:board:test (agent issue board helper changed)"
+
+run_gate "scripts/pr/issue-board-projects.mjs"
+assert_contains "- pnpm issue:board:test (agent issue board helper changed)"
+
+run_gate "scripts/pr/issue-board-commands.mjs"
 assert_contains "- pnpm issue:board:test (agent issue board helper changed)"
 
 run_gate "scripts/supply-chain/version-skew-check.mjs"
@@ -4373,11 +4388,11 @@ assert_contains "- pnpm alerts:rules:lint:test (peg policy version digest change
 assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs (peg policy version digest changed)"
 assert_contains "- node scripts/alerts/check-peg-registry-integrity.test.mjs (peg policy version digest changed)"
 
-run_gate "scripts/check-pr-description.mjs"
-assert_contains "- node scripts/check-pr-description.test.mjs (PR description validator changed)"
+run_gate "scripts/pr/check-pr-description.mjs"
+assert_contains "- node scripts/pr/check-pr-description.test.mjs (PR description validator changed)"
 
-run_gate "scripts/check-pr-description.test.mjs"
-assert_contains "- node scripts/check-pr-description.test.mjs (PR description validator changed)"
+run_gate "scripts/pr/check-pr-description.test.mjs"
+assert_contains "- node scripts/pr/check-pr-description.test.mjs (PR description validator changed)"
 
 run_gate "scripts/agent-autoreview.mjs"
 assert_contains "- pnpm lint:scripts (root build script changed)"
@@ -5141,10 +5156,10 @@ prereq_reuse_repo="$(mktemp -d)"
   git init -q
   git config user.email test@example.invalid
   git config user.name "Quality Gate Test"
-  mkdir -p bin scripts shared-config/src sub tools
+  mkdir -p bin scripts/pr shared-config/src sub tools
   printf '{"name":"sub"}\n' > sub/package.json
   printf 'export const x = 1;\n' > shared-config/src/x.ts
-  printf 'process.exit(0);\n' > scripts/check-adr-reminder.mjs
+  printf 'process.exit(0);\n' > scripts/pr/check-adr-reminder.mjs
   cat > tools/trunk <<'STUB'
 #!/usr/bin/env bash
 exit 0

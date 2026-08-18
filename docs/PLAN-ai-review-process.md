@@ -56,7 +56,7 @@ the repo's existing gates:
 
 1. PR #1034 shipped a repo-native materiality and context-drift slice:
 
-- Add `scripts/review-materiality.mjs`.
+- Add `scripts/review-materiality.mjs` (now `scripts/pr/review-materiality.mjs`).
 - Expose it as `pnpm agent:review-materiality`.
 - Have it classify changed paths against a base ref and emit both human output
   and JSON.
