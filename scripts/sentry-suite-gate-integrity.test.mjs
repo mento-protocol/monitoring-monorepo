@@ -510,10 +510,23 @@ await test("a declared directory is copied whole, so an enumerating suite sees t
       .filter((p) => p.startsWith("scripts/"))
       .map((p) => p.slice("scripts/".length))
       .filter(isTarget);
-    assertEqual(
-      visible.length,
-      onDisk.length,
-      `${suite} must see every non-test scripts/**/*.mjs, not a subset`,
+    // Compare the PATHS, not the counts. Equal totals prove nothing on their
+    // own: one stale entry still listed in the snapshot offsets one nested
+    // module missing from it, and the subset this exists to forbid passes with
+    // the arithmetic intact. Name both directions so a failure says which file.
+    const visibleSet = new Set(visible);
+    const onDiskSet = new Set(onDisk);
+    const missing = onDisk.filter((p) => !visibleSet.has(p)).sort();
+    const extra = visible.filter((p) => !onDiskSet.has(p)).sort();
+    assert(
+      missing.length === 0 && extra.length === 0,
+      `${suite} must see every non-test scripts/**/*.mjs, not a subset` +
+        (missing.length > 0
+          ? `; on disk but not visible: ${missing.join(", ")}`
+          : "") +
+        (extra.length > 0
+          ? `; visible but not on disk: ${extra.join(", ")}`
+          : ""),
     );
   }
 });
