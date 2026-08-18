@@ -1,4 +1,5 @@
 import { ImageResponse } from "next/og";
+import { ogFontOptions } from "@/lib/og-fonts";
 import { fetchPoolForMetadata, type PoolOgData } from "@/lib/pool-og";
 import { formatUSD } from "@/lib/format";
 
@@ -374,6 +375,7 @@ export default async function Image({
   const data = await fetchPoolForMetadata(poolId);
   return new ImageResponse(<Card data={data} />, {
     ...size,
+    ...(await ogFontOptions()),
     headers: { "Cache-Control": IMAGE_CACHE_CONTROL },
   });
 }

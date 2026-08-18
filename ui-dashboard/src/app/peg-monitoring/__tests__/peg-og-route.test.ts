@@ -112,10 +112,29 @@ describe("peg-monitoring opengraph-image route", () => {
       width: 1200,
       height: 630,
       headers: {
+        // 5 minutes of stale replay, not the 24h the other cards use: this
+        // card states an alert condition, and the window bounds how far into a
+        // breach a CDN may still answer with a healthy render.
         "Cache-Control":
-          "public, max-age=60, s-maxage=60, stale-while-revalidate=86400",
+          "public, max-age=60, s-maxage=60, stale-while-revalidate=300",
       },
     });
+  });
+
+  it("loads real font faces rather than leaving Satori on its fallback", async () => {
+    fetchForMetadata.mockResolvedValue(healthy);
+
+    await Image();
+
+    const { fonts } = imageResponseCalls[0]!.options as {
+      fonts?: { name: string; weight: number }[];
+    };
+    // Without these the card renders in Satori's bundled face, where a single
+    // weight makes every `fontWeight` above inert.
+    expect(fonts?.map((font) => font.weight).sort()).toEqual([
+      400, 600, 700, 800,
+    ]);
+    expect(fonts?.every((font) => font.name === "Geist")).toBe(true);
   });
 
   it("still renders a card when there is no package to draw", async () => {
