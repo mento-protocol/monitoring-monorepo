@@ -164,8 +164,8 @@ routing, not procedure.
    `--skip-if-fresh` reuses a stale stamp. Repoint it in the same commit.
    The gate also resolves node helpers from `$script_source_dir`:
    `docs/docs-navigation-eval-helpers.mjs`, which classifies routing-sensitive
-   paths, and `lockfile-scope.mjs`. Those are differently-rooted literals for
-   files the routing arms and the signature list name again, so the classifier
+   paths, and `lockfile-scope.mjs`. Those are differently-rooted literals, and
+   the routing arms and the signature list name the classifier again, so it
    appears three times in all — the import, its routing arm, and
    `implementation_signature()`. Repoint every occurrence. No CI job runs the
    gate for real, so `agent-quality-gate.test.sh` is the only place any of them

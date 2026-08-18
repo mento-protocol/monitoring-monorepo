@@ -3540,12 +3540,12 @@ STUB
   [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "5" ]] ||
     fail "fresh gate stamp was reused after the routing classifier changed"
 
-  # Both moved entries in implementation_signature() carry the same hazard: a
+  # Every moved entry in implementation_signature() carries the same hazard: a
   # path the gate cannot stat hashes as `__missing__` on both runs, so the
   # signature stops moving and --skip-if-fresh reuses a dead stamp. The
   # classifier above covers the P4 move; these two cover the P10 one. The
-  # remaining entries (the gate, its suite, the alias validator, turbo.json,
-  # .trunk/trunk.yaml) have never moved and are not fixtured here.
+  # entries that have never moved are unfixtured apart from the gate itself
+  # (its suite, the alias validator, turbo.json, and .trunk/trunk.yaml).
   printf '# changed fixture terraform format checker\n' >> scripts/terraform/terraform-fmt-check.mjs
   COUNTER_FILE="$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
     "$repo_root/scripts/agent-quality-gate.sh" \
