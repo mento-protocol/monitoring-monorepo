@@ -140,16 +140,36 @@ function Rail({ row, height }: { row: PegOgRow; height: number }) {
  * A deviation past ±60 bps has no honest position on the rail, so it pins to
  * the edge as a hollow ring with a chevron — the same treatment the page's
  * `DistanceRail` uses, rather than a solid dot implying a measured spot.
+ *
+ * Laid out as one absolutely-positioned full-width row that flex-justifies to
+ * the correct end. Per-element percentage offsets (`left: "99%"`) do not
+ * survive here: with a third absolutely-positioned sibling on the rail Satori
+ * resolved them to 0, so an above-target premium pinned to the discount end
+ * and the card asserted the opposite direction of the real deviation. Flex
+ * justification has no such failure mode, and it keeps the chevron inside the
+ * rail rather than clipped off the edge of the card.
  */
 function OffScaleMarker({ below, size }: { below: boolean; size: number }) {
+  const chevron = (
+    <span style={{ fontSize: 22, color: RED_TEXT }}>{below ? "«" : "»"}</span>
+  );
   return (
-    <>
+    <div
+      style={{
+        display: "flex",
+        position: "absolute",
+        left: 0,
+        top: -3,
+        width: "100%",
+        height: size,
+        alignItems: "center",
+        gap: 4,
+        justifyContent: below ? "flex-start" : "flex-end",
+      }}
+    >
+      {below ? chevron : null}
       <div
         style={{
-          position: "absolute",
-          left: below ? "1%" : "99%",
-          top: -3,
-          marginLeft: -size / 2,
           width: size,
           height: size,
           borderRadius: size,
@@ -157,30 +177,63 @@ function OffScaleMarker({ below, size }: { below: boolean; size: number }) {
           border: `3px solid ${OFF_SCALE}`,
         }}
       />
-      <div
-        style={{
-          display: "flex",
-          position: "absolute",
-          top: -4,
-          ...(below ? { left: -26 } : { right: -26 }),
-          width: 22,
-          justifyContent: "center",
-        }}
-      >
-        <span style={{ fontSize: 22, color: RED_TEXT }}>
-          {below ? "«" : "»"}
-        </span>
-      </div>
-    </>
+      {below ? null : chevron}
+    </div>
   );
 }
+
+/**
+ * One tile owns the whole body; two have to split it. A tile drawn at the
+ * single-peg scale needs about 246px and two of them only get ~211px each,
+ * which pushed the stats row below its own border and into the footer, so the
+ * two-peg variant trims its type and padding to fit.
+ */
+function tileScale(compact: boolean) {
+  return compact
+    ? {
+        pad: "16px 30px",
+        pair: 34,
+        price: 30,
+        distance: 22,
+        headGap: 16,
+        rail: 20,
+        railGap: 4,
+        scaleHeight: 22,
+        tick: 15,
+        statTop: 12,
+        statKey: 15,
+        statValue: 21,
+        pillPad: "6px 16px",
+        pillText: 21,
+        pillDot: 9,
+      }
+    : {
+        pad: "28px 32px",
+        pair: 44,
+        price: 40,
+        distance: 26,
+        headGap: 22,
+        rail: 28,
+        railGap: 8,
+        scaleHeight: 24,
+        tick: 17,
+        statTop: 18,
+        statKey: 16,
+        statValue: 25,
+        pillPad: "8px 20px",
+        pillText: 25,
+        pillDot: 11,
+      };
+}
+
+type TileScale = ReturnType<typeof tileScale>;
 
 /**
  * Threshold ticks under a tile's rail, read from the peg's own policy. Ticks
  * beyond the fixed ±60 bps window are dropped rather than clamped, since a
  * clamped tick would place a threshold where it is not.
  */
-function RailScale({ row }: { row: PegOgRow }) {
+function RailScale({ row, scale }: { row: PegOgRow; scale: TileScale }) {
   const { downsideWarn, downsideCritical, premiumWarn } = row.thresholds;
   const ticks = [
     {
@@ -201,7 +254,13 @@ function RailScale({ row }: { row: PegOgRow }) {
     },
   ].filter((tick) => tick.at >= 0 && tick.at <= 100);
   return (
-    <div style={{ display: "flex", position: "relative", height: 24 }}>
+    <div
+      style={{
+        display: "flex",
+        position: "relative",
+        height: scale.scaleHeight,
+      }}
+    >
       {ticks.map((tick) => (
         <div
           key={tick.label}
@@ -214,21 +273,23 @@ function RailScale({ row }: { row: PegOgRow }) {
             justifyContent: "center",
           }}
         >
-          <span style={{ fontSize: 17, color: tick.color }}>{tick.label}</span>
+          <span style={{ fontSize: scale.tick, color: tick.color }}>
+            {tick.label}
+          </span>
         </div>
       ))}
     </div>
   );
 }
 
-function StatusPill({ row }: { row: PegOgRow }) {
+function StatusPill({ row, scale }: { row: PegOgRow; scale: TileScale }) {
   return (
     <div
       style={{
         display: "flex",
         alignItems: "center",
         gap: 10,
-        padding: "8px 20px",
+        padding: scale.pillPad,
         borderRadius: 999,
         background: TONE_TINT[row.tone].bg,
         border: `1px solid ${TONE_TINT[row.tone].border}`,
@@ -236,13 +297,13 @@ function StatusPill({ row }: { row: PegOgRow }) {
     >
       <div
         style={{
-          width: 11,
-          height: 11,
-          borderRadius: 11,
+          width: scale.pillDot,
+          height: scale.pillDot,
+          borderRadius: scale.pillDot,
           background: TONE_COLOR[row.tone],
         }}
       />
-      <span style={{ fontSize: 25, color: TONE_COLOR[row.tone] }}>
+      <span style={{ fontSize: scale.pillText, color: TONE_COLOR[row.tone] }}>
         {row.status}
       </span>
     </div>
@@ -250,7 +311,7 @@ function StatusPill({ row }: { row: PegOgRow }) {
 }
 
 /** The board's supporting columns, kept as facts rather than filler space. */
-function TileStats({ row }: { row: PegOgRow }) {
+function TileStats({ row, scale }: { row: PegOgRow; scale: TileScale }) {
   // `?? null` rather than `=== null`: a cached payload written by an earlier
   // deploy can be missing fields this card since learned to read.
   const breaker = row.breaker ?? null;
@@ -273,13 +334,13 @@ function TileStats({ row }: { row: PegOgRow }) {
             flexDirection: "column",
             flex: 1,
             gap: 6,
-            paddingTop: 18,
+            paddingTop: scale.statTop,
             borderTop: `1px solid ${HAIRLINE}`,
           }}
         >
           <span
             style={{
-              fontSize: 16,
+              fontSize: scale.statKey,
               letterSpacing: 1.6,
               textTransform: "uppercase",
               color: DIM,
@@ -287,14 +348,17 @@ function TileStats({ row }: { row: PegOgRow }) {
           >
             {stat.key}
           </span>
-          <span style={{ fontSize: 25, color: stat.color }}>{stat.value}</span>
+          <span style={{ fontSize: scale.statValue, color: stat.color }}>
+            {stat.value}
+          </span>
         </div>
       ))}
     </div>
   );
 }
 
-function Tile({ row }: { row: PegOgRow }) {
+function Tile({ row, compact }: { row: PegOgRow; compact: boolean }) {
+  const scale = tileScale(compact);
   return (
     <div
       style={{
@@ -302,7 +366,7 @@ function Tile({ row }: { row: PegOgRow }) {
         flexDirection: "column",
         flex: 1,
         justifyContent: "space-between",
-        padding: "28px 32px",
+        padding: scale.pad,
         borderRadius: 16,
         background: SURFACE,
         border: `1px solid ${HAIRLINE}`,
@@ -315,24 +379,38 @@ function Tile({ row }: { row: PegOgRow }) {
           alignItems: "center",
         }}
       >
-        <div style={{ display: "flex", alignItems: "baseline", gap: 22 }}>
-          <span style={{ fontSize: 44, color: TEXT, letterSpacing: -0.6 }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "baseline",
+            gap: scale.headGap,
+          }}
+        >
+          <span
+            style={{ fontSize: scale.pair, color: TEXT, letterSpacing: -0.6 }}
+          >
             {row.pair}
           </span>
-          <span style={{ fontSize: 40, color: TEXT_2 }}>{row.price}</span>
-          <span style={{ fontSize: 26, color: TONE_COLOR[row.tone] }}>
+          <span style={{ fontSize: scale.price, color: TEXT_2 }}>
+            {row.price}
+          </span>
+          <span
+            style={{ fontSize: scale.distance, color: TONE_COLOR[row.tone] }}
+          >
             {row.distance}
           </span>
         </div>
-        <StatusPill row={row} />
+        <StatusPill row={row} scale={scale} />
       </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <div
+        style={{ display: "flex", flexDirection: "column", gap: scale.railGap }}
+      >
         <div style={{ display: "flex" }}>
-          <Rail row={row} height={28} />
+          <Rail row={row} height={scale.rail} />
         </div>
-        <RailScale row={row} />
+        <RailScale row={row} scale={scale} />
       </div>
-      <TileStats row={row} />
+      <TileStats row={row} scale={scale} />
     </div>
   );
 }
@@ -465,7 +543,7 @@ function Body({ data }: { data: PegMonitoringOgData | null }) {
         style={{ display: "flex", flexDirection: "column", flex: 1, gap: 16 }}
       >
         {rows.map((row) => (
-          <Tile key={row.pair} row={row} />
+          <Tile key={row.pair} row={row} compact={rows.length > 1} />
         ))}
       </div>
     );
