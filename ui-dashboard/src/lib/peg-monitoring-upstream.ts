@@ -73,14 +73,26 @@ export function resolvePegMonitoringEndpoint(
   }
 }
 
+/**
+ * Drop an unread body so its connection is released now rather than at the
+ * next GC. Every rejection path below runs this before throwing: under a
+ * misbehaving upstream returning a stream of invalid responses, leaving them
+ * undrained holds sockets open for as long as the process lives.
+ */
+function discardBody(response: Response): void {
+  void response.body?.cancel().catch(() => undefined);
+}
+
 async function readBounded(response: Response): Promise<string> {
   const length = response.headers.get("content-length");
   if (
     length !== null &&
     (!/^\d+$/.test(length) ||
       Number(length) > PEG_MONITORING_MAX_RESPONSE_BYTES)
-  )
+  ) {
+    discardBody(response);
     throw new InvalidUpstreamResponseError();
+  }
   if (response.body === null) throw new InvalidUpstreamResponseError();
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
@@ -169,10 +181,16 @@ export async function fetchPegDecisionPackages(): Promise<PegUpstreamResult> {
     return failure("Peg monitoring upstream request failed", 502, "network");
   }
   const statusFailure = classifyUpstreamStatus(upstream);
-  if (statusFailure !== null) return statusFailure;
+  if (statusFailure !== null) {
+    // A rate-limited or erroring upstream still sends a body we never read.
+    discardBody(upstream);
+    return statusFailure;
+  }
   try {
-    if (!upstream.headers.get("content-type")?.includes("application/json"))
+    if (!upstream.headers.get("content-type")?.includes("application/json")) {
+      discardBody(upstream);
       throw new InvalidUpstreamResponseError();
+    }
     const parsed = PegMonitoringResponseSchema.safeParse(
       JSON.parse(await readBounded(upstream)) as unknown,
     );

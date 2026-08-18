@@ -237,6 +237,15 @@ describe("fetchPegMonitoringOgDataUncached", () => {
     vi.spyOn(globalThis, "fetch").mockRejectedValue(new TypeError("network"));
     expect(await fetchPegMonitoringOgDataUncached()).toBeNull();
 
+    // Hand the unconfigured case a *healthy* bridge, so only the missing
+    // origin can produce `null` below. Leaving the rejecting mock in place
+    // would let this assertion pass even if endpoint resolution stopped
+    // rejecting an empty value.
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify(makePegMonitoringResponse()), {
+        headers: { "content-type": "application/json" },
+      }),
+    );
     vi.stubEnv("METRICS_BRIDGE_URL", "");
     expect(await fetchPegMonitoringOgDataUncached()).toBeNull();
   });
@@ -246,14 +255,13 @@ describe("peg monitoring OG cache", () => {
   it("salts the key with the deploy marker and the resolved bridge origin", () => {
     // Without the origin part, repointing the bridge on a deploy that shares
     // the "dev" salt would keep serving the previous origin's packages.
+    // The deploy marker is asserted as the literal it resolves to under test
+    // (neither Vercel var is set here). Recomputing it with the module's own
+    // `??` chain would make the assertion agree with any implementation.
+    expect(process.env.VERCEL_DEPLOYMENT_ID).toBeUndefined();
+    expect(process.env.VERCEL_GIT_COMMIT_SHA).toBeUndefined();
     expect(capturedCacheKeyParts).toEqual([
-      [
-        "peg-monitoring-og",
-        process.env.VERCEL_DEPLOYMENT_ID ??
-          process.env.VERCEL_GIT_COMMIT_SHA ??
-          "dev",
-        BRIDGE_ORIGIN,
-      ],
+      ["peg-monitoring-og", "dev", BRIDGE_ORIGIN],
     ]);
   });
 

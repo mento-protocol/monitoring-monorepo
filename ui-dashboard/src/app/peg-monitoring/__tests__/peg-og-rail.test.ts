@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { railGradient } from "../opengraph-image";
+import { railGradient, railTicks } from "../_lib/peg-og-layout";
 
-/** Percent positions on the fixed ±60 bps rail, to 2dp as the card emits them. */
+/** Percent position of a signed bps value on the fixed ±60 bps rail.
+ *  Full float precision, matching what the gradient string carries. */
 const at = (bps: number) => 50 + (bps / 60) * 50;
 
 describe("railGradient", () => {
@@ -47,5 +48,59 @@ describe("railGradient", () => {
 
     expect(gradient).not.toMatch(/-\d/);
     expect(gradient).toContain("0%");
+  });
+});
+
+describe("railTicks", () => {
+  it("labels every threshold when they sit far enough apart", () => {
+    const ticks = railTicks({
+      downsideWarn: 25,
+      downsideCritical: 50,
+      premiumWarn: 25,
+    });
+
+    expect(ticks.map((tick) => tick.label)).toEqual([
+      "critical −50",
+      "warn −25",
+      "TARGET",
+      "warn +25",
+    ]);
+  });
+
+  it("drops the less severe of two ticks too close to label separately", () => {
+    // 20 and 25 bps sit ~4% apart on the rail; their ~140px centred labels
+    // would print as one unreadable run. Worst-first ordering means the
+    // critical tick survives and the warn tick is the one dropped.
+    const labels = railTicks({
+      downsideWarn: 20,
+      downsideCritical: 25,
+      premiumWarn: 25,
+    }).map((tick) => tick.label);
+
+    expect(labels).toContain("critical −25");
+    expect(labels).not.toContain("warn −20");
+  });
+
+  it("keeps the target tick and returns ticks in rail order", () => {
+    const ticks = railTicks({
+      downsideWarn: 20,
+      downsideCritical: 25,
+      premiumWarn: 25,
+    });
+    const positions = ticks.map((tick) => tick.at);
+
+    expect(ticks.map((tick) => tick.label)).toContain("TARGET");
+    expect(positions).toEqual([...positions].sort((a, b) => a - b));
+  });
+
+  it("drops a threshold outside the rail rather than clamping it", () => {
+    const ticks = railTicks({
+      downsideWarn: 25,
+      downsideCritical: 90,
+      premiumWarn: 25,
+    });
+
+    expect(ticks.map((tick) => tick.label)).not.toContain("critical −90");
+    expect(ticks.every((tick) => tick.at >= 0 && tick.at <= 100)).toBe(true);
   });
 });

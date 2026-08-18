@@ -40,6 +40,8 @@ import {
 export const PEG_OG_MAX_ROWS = 4;
 
 export type PegOgRow = {
+  /** The package's own asset id — unique per peg, unlike the pair label. */
+  id: string;
   pair: string;
   price: string;
   distance: string;
@@ -90,6 +92,7 @@ function toRow(asset: PegAssetPresentation, stale: boolean): PegOgRow {
   const structuralCurrent = stale || asset.structuralEvidenceCurrent;
   const monitor = worstMonitor(monitorStates(asset, structuralCurrent, stale));
   return {
+    id: asset.asset.asset,
     pair: pegPairLabel(asset),
     price: formatNumber(source?.executablePrice ?? null),
     distance: distanceLabel(asset),

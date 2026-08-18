@@ -4,7 +4,8 @@ import {
   type PegMonitoringOgData,
   type PegOgRow,
 } from "./_lib/peg-og-data";
-import { PEG_RAIL_SCALE_BPS, type PegBoardTone } from "./_lib/peg-board-model";
+import { type PegBoardTone } from "./_lib/peg-board-model";
+import { railGradient, railTicks } from "./_lib/peg-og-layout";
 
 export const runtime = "nodejs";
 export const revalidate = 60;
@@ -40,57 +41,18 @@ const TONE_COLOR: Record<PegBoardTone, string> = {
   critical: RED_TEXT,
 };
 
+const TICK_COLOR = {
+  critical: RED_TEXT,
+  warn: AMBER,
+  target: TEXT_2,
+} as const;
+
 const TONE_TINT: Record<PegBoardTone, { bg: string; border: string }> = {
   healthy: { bg: "rgba(30,204,9,0.12)", border: "rgba(30,204,9,0.38)" },
   warning: { bg: "rgba(254,153,0,0.12)", border: "rgba(254,153,0,0.38)" },
   uncertain: { bg: "rgba(254,153,0,0.12)", border: "rgba(254,153,0,0.38)" },
   critical: { bg: "rgba(201,44,44,0.16)", border: "rgba(201,44,44,0.48)" },
 };
-
-const RAIL_RED = "rgba(201,44,44,0.40)";
-const RAIL_AMBER = "rgba(254,153,0,0.35)";
-const RAIL_GREEN = "rgba(30,204,9,0.25)";
-
-/**
- * Where a signed bps value sits on the fixed ±60 bps rail. Values outside the
- * window return <0 or >100 — `RailScale` drops those ticks rather than draw a
- * threshold where it is not, while `railGradient` clamps them, since a band
- * edge past the rail just means that zone fills to the end.
- */
-function railPercent(bps: number): number {
-  return 50 + (bps / PEG_RAIL_SCALE_BPS) * 50;
-}
-
-function clampPercent(percent: number): number {
-  return Math.min(100, Math.max(0, percent));
-}
-
-/**
- * Hard-edged zones over the fixed ±60 bps window, with the colour boundaries
- * derived from the same policy thresholds `RailScale` labels.
- *
- * The page's `PEG_RAIL_GRADIENT` hardcodes 10/30/70 — a rounded stand-in for
- * EUROP's ±25/±50 that actually lands on ±24/−48. The page can afford that
- * because it draws no threshold ticks; this card labels them, so a fixed
- * gradient would print "warn −25" against a band that starts at −24, and for a
- * peg on different policy would put the label nowhere near its own band.
- */
-export function railGradient(thresholds: PegOgRow["thresholds"]): string {
-  const criticalEdge = clampPercent(railPercent(-thresholds.downsideCritical));
-  const warnEdge = clampPercent(railPercent(-thresholds.downsideWarn));
-  const premiumEdge = clampPercent(railPercent(thresholds.premiumWarn));
-  return [
-    "linear-gradient(to right",
-    `${RAIL_RED} 0%`,
-    `${RAIL_RED} ${criticalEdge}%`,
-    `${RAIL_AMBER} ${criticalEdge}%`,
-    `${RAIL_AMBER} ${warnEdge}%`,
-    `${RAIL_GREEN} ${warnEdge}%`,
-    `${RAIL_GREEN} ${premiumEdge}%`,
-    `${RAIL_AMBER} ${premiumEdge}%`,
-    `${RAIL_AMBER} 100%)`,
-  ].join(", ");
-}
 
 /**
  * One or two pegs get a tile each; three or more collapse to table rows. A
@@ -262,25 +224,7 @@ type TileScale = ReturnType<typeof tileScale>;
  * clamped tick would place a threshold where it is not.
  */
 function RailScale({ row, scale }: { row: PegOgRow; scale: TileScale }) {
-  const { downsideWarn, downsideCritical, premiumWarn } = row.thresholds;
-  const ticks = [
-    {
-      at: railPercent(-downsideCritical),
-      label: `critical −${downsideCritical}`,
-      color: RED_TEXT,
-    },
-    {
-      at: railPercent(-downsideWarn),
-      label: `warn −${downsideWarn}`,
-      color: AMBER,
-    },
-    { at: 50, label: "TARGET", color: TEXT_2 },
-    {
-      at: railPercent(premiumWarn),
-      label: `warn +${premiumWarn}`,
-      color: AMBER,
-    },
-  ].filter((tick) => tick.at >= 0 && tick.at <= 100);
+  const ticks = railTicks(row.thresholds);
   return (
     <div
       style={{
@@ -301,7 +245,7 @@ function RailScale({ row, scale }: { row: PegOgRow; scale: TileScale }) {
             justifyContent: "center",
           }}
         >
-          <span style={{ fontSize: scale.tick, color: tick.color }}>
+          <span style={{ fontSize: scale.tick, color: TICK_COLOR[tick.tone] }}>
             {tick.label}
           </span>
         </div>
@@ -569,7 +513,9 @@ function Body({ data }: { data: PegMonitoringOgData | null }) {
         style={{ display: "flex", flexDirection: "column", flex: 1, gap: 16 }}
       >
         {rows.map((row) => (
-          <Tile key={row.pair} row={row} compact={rows.length > 1} />
+          // Keyed by asset id, not the pair label: two pegs can share a pair
+          // label (same asset name, same peg) while their ids stay distinct.
+          <Tile key={row.id} row={row} compact={rows.length > 1} />
         ))}
       </div>
     );
@@ -577,7 +523,7 @@ function Body({ data }: { data: PegMonitoringOgData | null }) {
     <div style={{ display: "flex", flexDirection: "column", flex: 1 }}>
       <TableHeads />
       {rows.map((row, index) => (
-        <TableRow key={row.pair} row={row} last={index === rows.length - 1} />
+        <TableRow key={row.id} row={row} last={index === rows.length - 1} />
       ))}
     </div>
   );
