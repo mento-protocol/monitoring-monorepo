@@ -117,11 +117,14 @@ Replace BugBot with CodeRabbit as the third advisory reviewer.
 1. **Install and subscribe** (done 2026-08-18): the CodeRabbit GitHub App
    with one paid **Pro+** seat ($60/month on monthly billing; $48/month
    annual), chosen for throughput — 10 reviews/hour nominal, 4/hour
-   sustained at this repo's volume, automatic reviews on every PR. Enable
-   the **usage-based add-on** so over-limit reviews continue at 25¢ per
-   reviewed file instead of waiting. The $0 OSS tier (Pro+ features,
-   ~1/hour, manual-trigger-only under 10 stars, no add-on) remains the
-   documented fallback if spend must return to zero.
+   sustained at this repo's volume, automatic reviews on every PR. The
+   **usage-based add-on** (25¢ per reviewed file on over-limit reviews) is
+   deferred: the operator decided on 2026-08-18 to feel the rate-limit
+   friction first, at flat seat cost, and enable the add-on only if that
+   friction proves annoying. Until then, over-limit reviews wait instead of
+   billing. The $0 OSS tier (Pro+ features, ~1/hour, manual-trigger-only
+   under 10 stars, no add-on) remains the documented fallback if spend must
+   return to zero.
 2. **Commit `.coderabbit.yaml`** before the first review lands: start from the
    assertive-adjacent default only if noise proves low; otherwise use the
    `chill` profile or the July 2026 `quiet` profile (critical findings inline,
@@ -136,15 +139,19 @@ Replace BugBot with CodeRabbit as the third advisory reviewer.
    Until step 4 lands, CodeRabbit is not in the feedback-ledger bot roster, so
    its comments do not block `pr:ready-state` — triage them manually during
    the window.
-4. **Update the bot rosters and docs in the cutover PR**:
-   `scripts/pr-feedback-state-core.mjs`, `scripts/pr-feedback-state-claude.mjs`
-   (severity/marker regexes — `BUGBOT_BUG_ID` retires, CodeRabbit's markers
-   enter), `scripts/pr-ready-state-core.mjs`, `scripts/pr/review-process-metrics.mjs`,
-   their tests, `docs/notes/pr-ready-state.md`,
-   `docs/pr-checklists/ci-workflow-gates.md`,
-   `docs/adr/0007-agent-quality-gate-and-merge-oracle.md` (its "Advisory bot
-   lag (for example, Cursor)" line goes stale), and the comment in
-   `.github/workflows/dependabot-auto-merge.yml`.
+4. **Update the bot rosters and docs — two phases, not one cutover PR.** The
+   ADD side lands here, side by side with BugBot, nothing BugBot-related
+   removed: `scripts/pr-feedback-state-core.mjs`,
+   `scripts/pr-feedback-state-claude.mjs` (CodeRabbit's markers enter;
+   `BUGBOT_BUG_ID` stays live), `scripts/pr-ready-state-core.mjs`,
+   `scripts/pr/review-process-metrics.mjs`, their tests,
+   `docs/notes/pr-ready-state.md`, and `docs/pr-checklists/ci-workflow-gates.md`.
+   The BugBot sweep — retiring `BUGBOT_BUG_ID`,
+   `docs/adr/0007-agent-quality-gate-and-merge-oracle.md`'s "Advisory bot lag
+   (for example, Cursor)" line, and the comment in
+   `.github/workflows/dependabot-auto-merge.yml` — follows once the ~2-week
+   parallel window (step 3) ends and BugBot is disabled in the Cursor
+   dashboard.
 5. **Measure.** Run `scripts/pr/review-process-metrics.mjs` on before/after
    cohorts and re-check the fixed/won't-fix reply ratio per bot after ~40
    merged PRs. If CodeRabbit's accepted-finding rate is materially below
@@ -185,12 +192,13 @@ Replace BugBot with CodeRabbit as the third advisory reviewer.
 
 ## Consequences
 
-- Review spend drops from ~$560–1,680/month (est.) to $48–60/month for one
-  Pro+ seat plus 25¢ per reviewed file on over-limit reviews — realistically
-  under ~$180/month in heavy months, with path filters shrinking the file
-  counts. BugBot's per-run meter, which scaled with agent iteration, is gone
-  from the default path; only explicit over-limit overflow is metered, and
-  the $0 OSS fallback caps downside.
+- Review spend drops from ~$560–1,680/month (est.) to a flat $48–60/month for
+  one Pro+ seat while the usage-based add-on stays deferred (over-limit
+  reviews wait rather than bill); enabling the add-on later would add up to
+  25¢ per reviewed file on over-limit reviews, realistically under
+  ~$180/month in heavy months, with path filters shrinking the file counts.
+  BugBot's per-run meter, which scaled with agent iteration, is gone from the
+  default path either way, and the $0 OSS fallback caps downside.
 - The stack's third seat changes character from precision-quiet to
   high-recall. CodeRabbit's known weakness is verbosity; the quiet/chill
   profiles, path filters, and pause-after-reviewed-commits are the levers, and
@@ -215,11 +223,21 @@ Replace BugBot with CodeRabbit as the third advisory reviewer.
   comment/review write access, steered by `.coderabbit.yaml` — and CodeRabbit
   resolves that file from the **source branch** of the PR under review,
   falling back to defaults when absent, so a PR can weaken or replace the
-  profile that reviews it. Acceptable while the bot is advisory and gates
-  nothing; before any CodeRabbit output ever feeds a required gate, protect
-  the config (CODEOWNERS or CodeRabbit central configuration) and add
-  marker-recognition tests (`@coderabbitai configuration` prints the
-  effective settings).
+  profile that reviews it. That was acceptable only while the bot's output
+  fed nothing required. This PR (the ADD side of step 4) satisfies the
+  pre-gate condition this bullet used to defer:
+  `scripts/coderabbit-config.test.mjs` pins the
+  committed config by exact equality and runs in required CI
+  (`pnpm coderabbit:config:test`), so a source-branch edit to
+  `.coderabbit.yaml` fails the build instead of silently weakening the
+  reviewer; and the feedback-ledger roster
+  (`scripts/pr-feedback-state-core.mjs`, `scripts/pr-feedback-state-claude.mjs`,
+  `scripts/pr/review-process-metrics.mjs`) carries marker-recognition tests
+  for CodeRabbit's finding markers (`cr-indicator-types`, the severity badge)
+  and its non-finding machinery (rate-limit, summary, trigger-ack,
+  thread-resolved-ack). CodeRabbit's inline findings now feed
+  `pr:feedback-state`, the merge oracle; its own check context stays
+  advisory (`scripts/pr-ready-state-core.mjs`).
 - Watch item: `claude[bot]` review currently rides existing Max
   subscription spend. Anthropic's separate metered "Code Review" product bills
   $15–25/review — ruinous at this volume. If the GitHub Action review path is
