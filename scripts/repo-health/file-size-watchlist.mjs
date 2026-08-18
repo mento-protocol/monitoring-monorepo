@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 /**
  * File-size watchlist reporter for source files covered by this repo's
- * max-lines policy. Generated output belongs in docs/notes/file-size-watch.md
- * or a GitHub Issue, never BACKLOG.md.
+ * max-lines policy, plus scripts/, where no lint rule enforces one (ADR 0065).
+ * Generated output belongs in docs/notes/file-size-watch.md or a GitHub Issue,
+ * never BACKLOG.md.
  *
  * Run:
  *   node scripts/repo-health/file-size-watchlist.mjs
@@ -18,6 +19,37 @@ import { pathToFileURL } from "node:url";
 export const SOFT_CAP = 600;
 export const HARD_CAP = 1000;
 export const NEAR_HARD_CAP = 950;
+
+/**
+ * `scripts/` files this repository has decided not to split, each with the
+ * mechanism that makes the split a security decision rather than a refactor.
+ * Exact paths only — a pattern would let the list grow without a reviewer
+ * seeing which files joined. It stays short on purpose: a file whose split is
+ * merely expensive, or is already owned by an issue, belongs in the report as a
+ * normal row. ADR 0065 owns the list and its review cadence.
+ */
+export const SCRIPTS_EXEMPTIONS = [
+  {
+    reason:
+      "trust root: the wrapper hashes its own blob against frozen HEAD before an explicit-ref review, so a sourced sibling falls outside the identity it proves",
+    paths: ["scripts/agent-autoreview.sh"],
+  },
+  {
+    reason:
+      "trust root: the wrapper materializes exactly these two helper names under a 2 MB aggregate cap, from six literal lists with per-name file modes; admitting a third rewrites that materializer",
+    paths: [
+      "scripts/agent-autoreview.mjs",
+      "scripts/agent-autoreview-core.mjs",
+    ],
+  },
+];
+
+export function exemptionReason(path) {
+  for (const entry of SCRIPTS_EXEMPTIONS) {
+    if (entry.paths.includes(path)) return entry.reason;
+  }
+  return null;
+}
 
 const SOURCE_SCOPES = [
   {
@@ -50,6 +82,22 @@ const SOURCE_SCOPES = [
     label: "aegis",
     prefix: "aegis/src/",
     extensions: [".ts"],
+    includeTests: true,
+  },
+  {
+    // No ESLint `max-lines` reaches scripts/ — the root config sets none — so
+    // this scope is the only size signal the tree has. The extension list
+    // mirrors what the root config lints (`.mjs`, `.js`, `.cjs`) plus shell;
+    // only .mjs and .sh exist here today. Tests are excluded as everywhere but
+    // Aegis: splitting a scripts/ suite means re-measuring a manifest floor or
+    // re-enumerating a paths-filter, per-file work a size row cannot describe.
+    // Where the tree wanted a test-side gate it built one —
+    // check-sentry-suites-in-ci.test.mjs hard-caps 20 files, and the select and
+    // brief Sentry legs pin their own modules the same way.
+    label: "scripts",
+    prefix: "scripts/",
+    extensions: [".mjs", ".js", ".cjs", ".sh"],
+    exemption: exemptionReason,
   },
 ];
 
@@ -62,8 +110,11 @@ export function isGenerated(path) {
 }
 
 function isExcludedTest(path, scope) {
-  if (scope.label === "aegis") return false;
-  return path.includes("/__tests__/") || /\.(test|spec)\.(ts|tsx)$/.test(path);
+  if (scope.includeTests === true) return false;
+  return (
+    path.includes("/__tests__/") ||
+    /\.(test|spec)\.(ts|tsx|mjs|js|sh)$/.test(path)
+  );
 }
 
 export function scopeForPath(path) {
@@ -80,7 +131,7 @@ export function scopeForPath(path) {
   return scope;
 }
 
-export function countLines(source) {
+export function countLines(source, options = {}) {
   const physicalLines =
     source === "" ? [] : source.replace(/\r?\n$/, "").split(/\r?\n/);
   const raw = physicalLines.length;
@@ -90,6 +141,16 @@ export function countLines(source) {
   for (const line of physicalLines) {
     let trimmed = line.trim();
     if (trimmed === "") continue;
+
+    // Shell has no `//` or `/* */`; without this a `#` comment counts as code
+    // and the rough column overstates every .sh file in the report. This is a
+    // line-prefix approximation, not a shell parser: a heredoc payload line
+    // starting with `#` reads as a comment. `raw` stays exact either way.
+    if (options.hashComments === true) {
+      if (trimmed.startsWith("#")) continue;
+      rough += 1;
+      continue;
+    }
 
     if (inBlockComment) {
       const closeIndex = trimmed.indexOf("*/");
@@ -132,16 +193,20 @@ export function scanFileList(files, readFile) {
     .flatMap((path) => {
       const scope = scopeForPath(path);
       if (scope === null) return [];
-      const counts = countLines(readFile(path));
-      const status = statusForCounts(counts);
-      if (status === "ok") return [];
+      const counts = countLines(readFile(path), {
+        hashComments: path.endsWith(".sh"),
+      });
+      const capStatus = statusForCounts(counts);
+      if (capStatus === "ok") return [];
+      const reason = scope.exemption?.(path) ?? null;
       return [
         {
           path,
           package: scope.label,
           raw: counts.raw,
           rough: counts.rough,
-          status,
+          status: reason === null ? capStatus : "exempt",
+          ...(reason === null ? {} : { capStatus, reason }),
         },
       ];
     })
@@ -149,6 +214,14 @@ export function scanFileList(files, readFile) {
       (a, b) =>
         b.rough - a.rough || b.raw - a.raw || a.path.localeCompare(b.path),
     );
+}
+
+/** Split a scan into the actionable table and the reasoned exemption table. */
+export function partitionExempt(rows) {
+  return {
+    tracked: rows.filter((row) => row.status !== "exempt"),
+    exempt: rows.filter((row) => row.status === "exempt"),
+  };
 }
 
 export function parseBaselineRows(source) {
@@ -212,15 +285,19 @@ export function withRawDeltas(rows, baselineRows) {
 }
 
 function trackedFiles(root) {
+  // NUL-delimited: git C-quotes a path holding a newline or a non-ASCII byte
+  // when it writes one per line, and a quoted path matches no scope prefix, so
+  // an over-cap file would drop out of the report with nothing to show for it.
   const output = execFileSync(
     "git",
-    ["ls-files", "--cached", "--others", "--exclude-standard"],
+    ["ls-files", "-z", "--cached", "--others", "--exclude-standard"],
     {
       cwd: root,
       encoding: "utf8",
+      maxBuffer: 16 * 1024 * 1024,
     },
   );
-  return output.trim() === "" ? [] : output.trim().split(/\n/);
+  return output.split("\0").filter((path) => path !== "");
 }
 
 function readRepoFile(root, path) {
@@ -251,10 +328,11 @@ function deltaLabel(delta) {
 export function formatMarkdown(rows, options = {}) {
   const generatedAt =
     options.generatedAt ?? new Date().toISOString().slice(0, 10);
+  const { tracked, exempt } = partitionExempt(rows);
   const lines = [
     `Counts refreshed ${generatedAt}. Generated by \`node scripts/repo-health/file-size-watchlist.mjs\`.`,
     "",
-    "Scope: source files in package configs that enforce `max-lines`; generated files, non-Aegis tests, and `ui-dashboard/src/lib/types.ts` are excluded.",
+    "Scope: source files in package configs that enforce `max-lines`, plus `scripts/` script and shell sources; generated files, tests outside Aegis, and `ui-dashboard/src/lib/types.ts` are excluded.",
     "`raw` is physical lines; `rough` approximates ESLint after `skipBlankLines` and `skipComments`.",
     "Use `--format issue` for GitHub Issues; do not append this report to `BACKLOG.md`.",
     "",
@@ -262,17 +340,36 @@ export function formatMarkdown(rows, options = {}) {
     "| ----: | --: | ----: | ------ | ---- |",
   ];
 
-  if (rows.length === 0) {
+  if (tracked.length === 0) {
     lines.push("| 0 | 0 | 0 | ok | No files above the watch threshold |");
-    return `${lines.join("\n")}\n`;
   }
-
-  for (const row of rows) {
+  for (const row of tracked) {
     lines.push(
       `| ${row.rough} | ${row.raw} | ${deltaLabel(row.rawDelta)} | ${statusLabel(row.status)} | \`${row.path}\` |`,
     );
   }
-  return `${lines.join("\n")}\n`;
+  return `${lines.join("\n")}${formatExemptSection(exempt)}\n`;
+}
+
+function formatExemptSection(exempt) {
+  if (exempt.length === 0) return "";
+  const lines = [
+    "",
+    "",
+    `Exempt (${exempt.length}): splitting these would change a named mechanism rather than refactor a file, so they never open an issue. \`docs/adr/0065-scripts-file-size-watchlist-scope.md\` owns the list and its review cadence.`,
+    "",
+    "| Rough | Raw | Cap | File | Why it is exempt |",
+    "| ----: | --: | --- | ---- | ---------------- |",
+  ];
+  for (const row of exempt) {
+    // A raw `|` would split the cell, and parseBaselineRows reads this table
+    // back by fixed column index — one pipe misreads every following column.
+    const reason = row.reason.replaceAll("|", "\\|");
+    lines.push(
+      `| ${row.rough} | ${row.raw} | ${statusLabel(row.capStatus)} | \`${row.path}\` | ${reason} |`,
+    );
+  }
+  return lines.join("\n");
 }
 
 export function formatIssue(rows, options = {}) {
@@ -292,6 +389,7 @@ export function formatIssue(rows, options = {}) {
     "",
     "- Refactor `hard cap` and `near hard cap` files before adding behavior to them.",
     "- Keep `soft cap` and `watch` rows in `docs/notes/file-size-watch.md` unless a concrete split is ready.",
+    "- Do not re-litigate an exempt row. Its mechanism is named beside it; changing that mechanism is the only way in.",
   ].join("\n");
 }
 
@@ -364,13 +462,17 @@ function main() {
       ? new Map()
       : parseBaselineRows(readOptionalBaseline(root, args.baseline));
   const rowsWithDeltas = withRawDeltas(rows, baselineRows);
-  const limitedRows =
-    args.limit === null ? rowsWithDeltas : rowsWithDeltas.slice(0, args.limit);
+  // `--limit` trims the actionable queue only. Exempt rows always ship whole:
+  // a truncated exemption reads as a silently dropped file.
+  const { tracked, exempt } = partitionExempt(rowsWithDeltas);
+  const limitedTracked =
+    args.limit === null ? tracked : tracked.slice(0, args.limit);
+  const limitedRows = [...limitedTracked, ...exempt];
 
   if (args.format === "json") {
     console.log(
       JSON.stringify(
-        { softCap: SOFT_CAP, hardCap: HARD_CAP, rows: limitedRows },
+        { softCap: SOFT_CAP, hardCap: HARD_CAP, rows: limitedTracked, exempt },
         null,
         2,
       ),

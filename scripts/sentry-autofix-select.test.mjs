@@ -5054,10 +5054,11 @@ await test("CLI: a DEGRADED run whose truncations report cannot be written fails
 });
 
 await test("the selection leg's modules stay under the 600-line soft cap", () => {
-  // scripts/ has no max-lines lint and sits outside the file-size watchlist's
-  // package scopes (scripts/repo-health/file-size-watchlist.mjs), so the 600-line soft cap in
-  // docs/pr-checklists/recurring-review-patterns.md is only enforced where a
-  // suite pins it. The triage legs pin their own in sentry-triage-brief.test.mjs;
+  // scripts/ has no max-lines lint. Since ADR 0065 the file-size watchlist
+  // scopes these modules, but it only reports — the 600-line soft cap in
+  // docs/pr-checklists/recurring-review-patterns.md is enforced, on the commit
+  // that crosses it, only where a suite pins it. The triage legs pin their own
+  // in sentry-triage-brief.test.mjs;
   // this leg had NO pin, which is how sentry-autofix-queue-io.mjs reached 583 —
   // 17 lines of headroom — before anyone looked. Pinned HERE rather than added to
   // that list because the gate routes every module below to THIS suite: a pin in

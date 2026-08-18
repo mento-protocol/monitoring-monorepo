@@ -11,7 +11,7 @@ review_interval_days: 90
 garden_lane: adrs-architecture
 ---
 
-# ADR 0065 — CodeRabbit replaces Cursor BugBot as the third PR review bot
+# ADR 0066 — CodeRabbit replaces Cursor BugBot as the third PR review bot
 
 **Status:** Accepted (Aug 2026) — cutover per the plan under Decision.
 **Scope:** ci/process

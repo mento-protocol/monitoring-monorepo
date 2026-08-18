@@ -173,6 +173,14 @@ Treat these as a shrinking ceiling, not a target.
 - `pnpm code-health:history` writes the local advisory hotspot/coupling report
   to `reports/code-health-history.md`. It is not currently a scheduled or
   merge-blocking workflow.
+- `node scripts/repo-health/file-size-watchlist.mjs` reports files over the
+  600-line soft cap and 1,000-line hard cap. It covers the package `src/` trees
+  that set `max-lines` plus `scripts/` script and shell sources, where no lint
+  rule enforces a cap; tests are excluded outside Aegis. A `scripts/` file whose
+  split would change a named mechanism rather than refactor a file prints in a
+  separate exempt table with its reason
+  ([ADR 0065](../adr/0065-scripts-file-size-watchlist-scope.md)); the monthly
+  issue route is [ADR 0059](../adr/0059-repo-owned-file-size-watchlist-scheduler.md).
 - Continue shrinking every `eslint-baseline.json` until it is empty; once empty,
   the configured rules behave as ordinary blocking errors.
 

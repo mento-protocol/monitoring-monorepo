@@ -1753,6 +1753,23 @@ acquire_gate_run_lock() {
       # The pre-push hook passes a fixed command line and Trunk strips the
       # environment, so neither escape hatch is reachable from a failed push.
       echo "Pushing? Warm the stamps with 'pnpm agent:quality-gate --run' first, then push: --skip-if-fresh cache-hits and exits before this lock." >&2
+      # GitHub issue #1894. Every other outcome states itself on stdout — a green
+      # run ends "All mapped commands passed." — but this one used to speak on
+      # stderr alone, so a caller reading the gate's stdout saw the reassuring
+      # "waiting up to Ns" banner and then nothing. Pair that with a pipeline,
+      # whose status is the READER's unless the caller set `pipefail`, and a run
+      # that executed nothing reads as a pass on both signals at once. So the
+      # verdict goes to stdout too, and names the status a pipeline hides.
+      # SIGPIPE is ignored and the writes are optional because they come after
+      # the stderr diagnosis and must never displace it: a stdout that closes
+      # while this verdict is being written costs the caller the stdout copy,
+      # never the stderr copy and never the exit status. A reader that closed
+      # earlier still kills the run on the wait banner above, which is a
+      # SIGPIPE death — non-zero, so still not a pass, which is the invariant
+      # this path owes its caller.
+      trap '' PIPE
+      echo "Gate run lock wait expired after ${waited}s. No mapped command ran; this gate exits 2." 2>/dev/null || true
+      echo "Piped? A pipeline reports the reader's status: read \${PIPESTATUS[0]} or set -o pipefail." 2>/dev/null || true
       exit 2
     fi
     # Never sleep past the budget: with a wait shorter than — or not divisible
@@ -3785,6 +3802,15 @@ while IFS= read -r path; do
         scripts/context/check-agent-context.mjs|scripts/context/check-agent-context-helpers.mjs|scripts/context/check-agent-context.test.mjs)
           add_command "pnpm agent:context-check" "agent context checker changed"
           add_command "node scripts/context/check-agent-context.test.mjs" "agent context checker changed"
+          ;;
+        scripts/context/check-settings-contract.mjs|scripts/context/check-settings-contract.test.mjs)
+          # The `.claude/settings.json` permission allowlist and the SessionEnd
+          # hook wiring for both runtimes. `check-agent-context.mjs` is the only
+          # caller, and its suite holds the one test of that forwarding, so a
+          # change here routes both suites plus the real enforcement pass.
+          add_command "pnpm agent:context-check" "agent settings contract changed"
+          add_command "node scripts/context/check-settings-contract.test.mjs" "agent settings contract changed"
+          add_command "node scripts/context/check-agent-context.test.mjs" "agent settings contract changed"
           ;;
         scripts/mcp/build-upstash-mcp-runtime.mjs|scripts/mcp/render-upstash-mcp-config.mjs|scripts/mcp/upstash-mcp-config.test.mjs|scripts/mcp/upstash-mcp-launcher.mjs)
           add_command "node --test scripts/mcp/upstash-mcp-config.test.mjs" "Upstash MCP transport contract changed"

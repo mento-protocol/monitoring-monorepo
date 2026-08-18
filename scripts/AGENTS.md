@@ -19,28 +19,27 @@ garden_lane: agent-entry-points
 `scripts/` holds deploy wrappers, agent quality gates, code-health checks, and
 repo maintenance utilities. 120 files sit flat at the top level today.
 
-## Target Layout
+## Layout
 
 [ADR 0064](../docs/adr/0064-scripts-module-directories.md) governs
-subdirectories here. Each lands in one PR across phases P1–P13
-([issue 1877](https://github.com/mento-protocol/monitoring-monorepo/issues/1877)).
-Files stay flat until their phase merges.
+subdirectories here and links the reorganization issue; phases P1–P13 have all
+landed.
 
-| Directory       | Phase | Holds                                  |
-| --------------- | ----- | -------------------------------------- |
-| `workflows/`    | P1    | scripts backing Actions workflow jobs  |
-| `bootstrap/`    | P2    | container and hosted-session setup     |
-| `context/`      | P3    | agent context, budget, doc catalog     |
-| `docs/`         | P4    | audit planner, garden, navigation eval |
-| `pr/`           | P5    | PR and issue state projections         |
-| `supply-chain/` | P6    | lockfile, audit, pin, skew gates       |
-| `mcp/`          | P6    | MCP broker, launcher, config rendering |
-| `alerts/`       | P8    | alert-rule lint, peg-policy checks     |
-| `repo-health/`  | P9    | code-health, file-size, lint wrappers  |
-| `terraform/`    | P10   | movable Terraform guards and helpers   |
-| `gate/`         | P11   | quality-gate satellites                |
+| Directory       | Holds                                  |
+| --------------- | -------------------------------------- |
+| `workflows/`    | scripts backing Actions workflow jobs  |
+| `bootstrap/`    | container and hosted-session setup     |
+| `context/`      | agent context, budget, doc catalog     |
+| `docs/`         | audit planner, garden, navigation eval |
+| `pr/`           | PR and issue state projections         |
+| `supply-chain/` | lockfile, audit, pin, skew gates       |
+| `mcp/`          | MCP broker, launcher, config rendering |
+| `alerts/`       | alert-rule lint, peg-policy checks     |
+| `repo-health/`  | code-health, file-size, lint wrappers  |
+| `terraform/`    | movable Terraform guards and helpers   |
+| `gate/`         | quality-gate satellites                |
 
-Landed: P1–P11. `lib/` (the shared tier) and
+`lib/` (the shared tier) and
 `production-infra-identity-contract/` predate the reorganization. `setup.sh`
 stays flat: `.config/wt.toml` runs that exact path as the Worktrunk pre-start
 hook, and eight docs name it. `redrive-onchain-deadletter.{mjs,test.mjs}` stays
@@ -142,6 +141,9 @@ in the PR that moves a file. Every surface there is mandatory.
 - New Node root scripts need `pnpm lint:scripts` coverage; new shell scripts must
   pass `bash -n`. Add a focused command to `scripts/agent-quality-gate.sh` for
   behavior syntax and lint checks cannot verify.
+- No ESLint `max-lines` reaches this tree. The file-size watchlist reports it
+  instead — tests aside, three trust-root files exempt:
+  [ADR 0065](../docs/adr/0065-scripts-file-size-watchlist-scope.md).
 - `pnpm tf plan/apply platform` owns one private saved plan. Never accept a
   caller plan path, or print, upload, or cache either plan form. The wrapper
   mechanism and its deploy-only bootstrap exception are in

@@ -3,7 +3,7 @@ title: Agent Quality Gate — Mechanics
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-12
+last_verified: 2026-08-18
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -194,6 +194,20 @@ moves `src` _inside_ an existing `dir` instead of failing, so a rename could
 never be a conditional claim there. A second run prints the holder's PID,
 host, and worktree, then waits — bounded by `--lock-wait` / `AGENT_QUALITY_GATE_LOCK_WAIT_SECONDS`,
 1800 seconds by default — and exits 2 naming that holder if the wait runs out.
+The expiry states itself on **stdout as well as stderr** (GitHub issue #1894).
+Every other outcome already did — a green run ends `All mapped commands
+passed.` — but the expiry once spoke on stderr alone, so a caller reading the
+gate's stdout saw the `waiting up to Ns` banner and then nothing. Piped, that
+became a fail-open: a pipeline reports the _reader's_ status unless the caller
+set `pipefail`, so a run that executed nothing read as a pass on the stream and
+on the status at once. The stdout verdict names the wait expiry, says no mapped
+command ran, and names the status a pipeline hides. `SIGPIPE` is ignored for
+those two writes, and they come after the stderr diagnosis: a stdout that
+closes while the verdict is being written costs the caller the stdout copy,
+never the stderr copy and never the exit status. A reader that closes _earlier_
+still kills the run on the wait banner, which is a `SIGPIPE` death — non-zero,
+so still not a pass. That is the invariant this path owes its caller: **a run
+that executed nothing never reports success, in any output mode.**
 Nothing that will not execute mapped commands ever competes for the lock: a dry
 run, a `--skip-if-fresh` cache hit, and a package-script refusal all exit
 before it. After waiting, a `--skip-if-fresh` run re-checks freshness, so the
@@ -557,6 +571,15 @@ self-test drives the gate against fixture repos from inside a gate run without
 deadlocking behind its own ancestor. The self-test exports
 `AGENT_QUALITY_GATE_LOCK=0` for the same reason: its fixture runs are not this
 machine's gate, and must neither queue behind a real one nor block it.
+
+**Every fixture process the self-test scans for carries that run's own PID in
+its name** (GitHub issue #1898). `pgrep` and `pkill` scan the whole machine, so
+a fixed fixture name is not a run's own: four worktrees running this suite at
+once each saw the others' timeout and interrupt fixtures, failed on them, and
+passed on a clean re-run — and a `pkill` cleanup would have reaped a sibling's
+live fixture. A new fixture whose liveness the suite asserts takes the same
+`$((RANDOM % 900 + 100))-$$` suffix the lock-race fixtures use, and every scan
+for it is scoped to that exact name.
 
 The pre-push hook reaches neither hatch — it runs a fixed command line and
 Trunk strips the environment those variables would arrive in — so when a hook's
