@@ -74,7 +74,8 @@ Decision criteria: review quality and cost.
 Read together: no candidate has a decisive quality edge. BugBot is the quiet,
 precision-first member of the stack — a role Codex (deliberately P0/P1-only)
 already fills. CodeRabbit and Greptile are the two credible replacements, and
-both sit at or above BugBot on independent false-positive measurements.
+both measured lower false-positive rates than BugBot in the independent
+study.
 
 ### Cost at this repo's shape (1 PR-author seat, ~280 PRs/month, public repo)
 
