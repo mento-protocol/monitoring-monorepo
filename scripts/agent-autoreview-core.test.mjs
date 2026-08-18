@@ -604,6 +604,91 @@ assert.equal(
   null,
   "service token placeholders remain allowed",
 );
+// A shell parameter expansion carrying a default, assign, or alternate operator
+// resolves at runtime the way a bare `${VAR}` does, so the diff carries no
+// literal. Before this, a PR that merely moved a shell file containing one
+// aborted the whole bundle, because the scanner read the expansion as a
+// credential and scans removed lines too.
+assert.equal(
+  secretLikeReason('GH_API_TOKEN="${GH_TOKEN:-${GITHUB_TOKEN:-}}"'),
+  null,
+  "nested shell default expansions are references, not literal tokens",
+);
+assert.equal(
+  secretLikeReason('SERVICE_TOKEN="${SERVICE_TOKEN-}"'),
+  null,
+  "unset-only shell default expansions are references",
+);
+assert.equal(
+  secretLikeReason('API_TOKEN="${API_TOKEN:=${FALLBACK_TOKEN}}"'),
+  null,
+  "assign-default shell expansions are references",
+);
+assert.equal(
+  secretLikeReason('API_TOKEN="${CI:+${GITHUB_TOKEN}}"'),
+  null,
+  "alternate shell expansions whose word is a reference are references",
+);
+assert.equal(
+  secretLikeReason('API_KEY="${3:-${QUICKNODE_API_KEY-}}"'),
+  null,
+  "positional-parameter shell expansions are references",
+);
+// Anti-bypass: the word after the operator is the one place a literal can hide,
+// and the brace that closes the expansion has to end the value. Each fixture is
+// joined from parts so this file's own source carries no credential-key
+// assignment for the scanner to reject when the diff is reviewed.
+const tokenAssignment = (value) =>
+  ["GH_API_TOKEN", "=", '"', value, '"'].join("");
+assert.match(
+  secretLikeReason(
+    tokenAssignment(["${GH_TOKEN:-", genericTokenCredential, "}"].join("")),
+  ),
+  /literal generic token assignment/,
+  "a literal default inside a shell expansion is still rejected",
+);
+assert.match(
+  secretLikeReason(
+    tokenAssignment(["${GH_TOKEN:+", genericTokenCredential, "}"].join("")),
+  ),
+  /literal generic token assignment/,
+  "a literal alternate inside a shell expansion is still rejected",
+);
+assert.match(
+  secretLikeReason(
+    tokenAssignment(["${GH_TOKEN:-}", genericTokenCredential].join("")),
+  ),
+  /literal generic token assignment/,
+  "a literal fused to a shell expansion fails the ^…$ anchor and is rejected",
+);
+assert.match(
+  secretLikeReason(
+    tokenAssignment(
+      ["${GH_TOKEN:-${A:-", genericTokenCredential, "}}"].join(""),
+    ),
+  ),
+  /literal generic token assignment/,
+  "a literal nested one level deeper in a default is still rejected",
+);
+// The word is measured against shell-native reference forms only. Under shell
+// semantics a `secrets.…`/`var.…` word is a plain literal, so the broader
+// placeholder grammar would otherwise carry a credential through a default.
+for (const scope of ["secrets", "var", "local"]) {
+  assert.match(
+    secretLikeReason(
+      tokenAssignment(
+        ["${GH_TOKEN:-", scope, ".", genericTokenCredential, "}"].join(""),
+      ),
+    ),
+    /literal generic token assignment/,
+    `a ${scope}.* word inside a shell default is a literal, not a reference`,
+  );
+}
+assert.equal(
+  secretLikeReason('GH_API_TOKEN="${GH_TOKEN:-$GITHUB_TOKEN}"'),
+  null,
+  "a bare $VAR word inside a shell default is a reference",
+);
 assert.equal(
   secretLikeReason("GH_TOKEN: ${{ github.token }}"),
   null,

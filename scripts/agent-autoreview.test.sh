@@ -6582,6 +6582,31 @@ run_sensitive_input_regressions() {
     exit 1
   fi
 
+  # A shell default expansion names values it does not carry, so a diff that
+  # moves or edits one builds a bundle instead of losing both review engines.
+  # The expansions below are the reviewed fixture text, so they must stay
+  # single-quoted and unexpanded.
+  git -C "$review_repo" restore README.md
+  # shellcheck disable=SC2016
+  printf '%s\n' 'GH_API_TOKEN="${GH_TOKEN:-${GITHUB_TOKEN:-}}"' \
+    >>"$review_repo/README.md"
+  run_helper_in_repo "$review_repo" --mode local --engine local --bundle-output "$bundle_output" --prepare-only
+  # shellcheck disable=SC2016
+  expect_file_contains "$bundle_output" 'GH_API_TOKEN="${GH_TOKEN:-'
+  expect_empty_stderr
+
+  # The default is the one place a literal can hide, and it still fails closed.
+  # The head is a variable so this file's own source carries no credential-key
+  # assignment for the scanner to reject when the diff is reviewed.
+  local expansion_head
+  # shellcheck disable=SC2016
+  expansion_head='GH_API_TOKEN="${GH_TOKEN:-'
+  git -C "$review_repo" restore README.md
+  printf '%s%s%s%s\n' "$expansion_head" "live-default-" \
+    "abcdefghijklmnopqrstuvwxyz" '}"' >>"$review_repo/README.md"
+  run_helper_in_repo_expect_failure "$review_repo" --mode local --engine local --bundle-output "$bundle_output" --prepare-only
+  expect_stderr_contains "refusing to include secret-like content"
+
   git -C "$review_repo" restore README.md
   mkdir "$review_repo/.aws"
   {
