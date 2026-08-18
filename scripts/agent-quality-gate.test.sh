@@ -67,6 +67,37 @@ fail() {
   exit 1
 }
 
+# A PID that is dead at the moment a fixture writes it into a lock record.
+# Spawning a real child and reaping it is what makes the number dead; asking
+# the gate's own two liveness probes about it afterwards is what keeps a
+# recycled number from being planted as a "dead" holder. Never a guessed
+# number, and never one captured once and reused: PIDs are handed out
+# sequentially, so the number just freed here is the last one the allocator
+# will return until it wraps the whole PID space — but a capture reused across
+# a family that runs for minutes gives a busy CI runner time to wrap onto it,
+# and a live runner process planted as a dead holder fails the family it was
+# written for (GitHub issue 1919). Call this immediately before each write.
+# The residual window is between the check below and the caller's write; it
+# takes a full PID-space wrap inside it to matter.
+fresh_dead_pid() {
+  local candidate
+  local attempt=0
+  while [[ "$attempt" -lt 20 ]]; do
+    attempt=$((attempt + 1))
+    sleep 0 &
+    candidate=$!
+    wait "$candidate" 2>/dev/null || true
+    # Both probes, in the order acquire_gate_run_lock asks them: `kill -0` for
+    # the common case and `ps` for a live process this user may not signal.
+    if ! kill -0 "$candidate" 2>/dev/null &&
+      ! ps -p "$candidate" > /dev/null 2>&1; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
 run_gate() {
   : > "$paths_file"
   local path
@@ -3540,6 +3571,94 @@ STUB
 rm -rf "$stale_stamp_repo"
 assert_not_contains "Previous successful agent quality gate run is still fresh; skipping mapped commands."
 
+# GitHub issue #1899: staging a file the gate was already validating changes
+# nothing about what it validates. An untracked path is invisible to
+# `git diff`, so `git add` alone used to start a ` create mode` summary line
+# and cost a warm stamp a full re-run — with the changed-path set, the mapped
+# command plan, the base OID and the file's own bytes provably unchanged. The
+# three cases that must still bust the stamp are here beside it: content,
+# file mode, and an add that genuinely changes what the gate routes.
+index_state_stamp_repo="$(mktemp -d)"
+(
+  cd "$index_state_stamp_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  printf 'fixture\n' > fixture.txt
+  printf 'ignored-*\n' > .gitignore
+  mkdir -p tools
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+counter_file="${COUNTER_FILE:?}"
+count=0
+if [[ -f "$counter_file" ]]; then
+  count="$(cat "$counter_file")"
+fi
+printf '%s\n' "$((count + 1))" > "$counter_file"
+STUB
+  chmod +x tools/trunk
+  git add .
+  git commit -qm init
+  base_ref="$(git rev-parse --verify HEAD)"
+  counter="$index_state_stamp_repo/.tmp/agent-quality-gate/trunk-count"
+  printf 'changed\n' >> fixture.txt
+  printf 'brand new\n' > new.txt
+
+  index_state_gate() {
+    COUNTER_FILE="$counter" \
+      "$repo_root/scripts/agent-quality-gate.sh" --base "$base_ref" "$@" \
+      > "$output_file" 2>&1
+  }
+
+  index_state_gate --run
+  index_state_before="$(sed -n '2s/^stamp=//p' \
+    "$index_state_stamp_repo/.tmp/agent-quality-gate/last-success.stamp")"
+
+  # Bytes untouched, tracking state changed.
+  git add new.txt
+  index_state_gate --run --skip-if-fresh
+  [[ "$(cat "$counter")" == "1" ]] ||
+    fail "staging an already-validated untracked file re-ran the mapped commands"
+  grep -Fq -- "Previous successful agent quality gate run is still fresh; skipping mapped commands." \
+    "$output_file" ||
+    fail "staging an already-validated untracked file lost the freshness stamp"
+
+  # The same transition must not have quietly frozen the signature: the stamp
+  # a skip reuses is still the one the warm run wrote.
+  index_state_after="$(sed -n '2s/^stamp=//p' \
+    "$index_state_stamp_repo/.tmp/agent-quality-gate/last-success.stamp")"
+  [[ "$index_state_after" == "$index_state_before" ]] ||
+    fail "the reused stamp is not the one the warm run wrote"
+
+  # Content still moves it.
+  printf 'edited after staging\n' >> new.txt
+  index_state_gate --run --skip-if-fresh
+  [[ "$(cat "$counter")" == "2" ]] ||
+    fail "editing a staged file reused the stamp warmed before the edit"
+
+  # So does the file mode, which the dropped summary line used to carry.
+  chmod +x new.txt
+  index_state_gate --run --skip-if-fresh
+  [[ "$(cat "$counter")" == "3" ]] ||
+    fail "making a validated file executable reused the stamp warmed before it"
+
+  # An ignored file is not routed, so creating one changes nothing …
+  printf 'hidden\n' > ignored-file.txt
+  index_state_gate --run --skip-if-fresh
+  [[ "$(cat "$counter")" == "3" ]] ||
+    fail "an ignored file the gate never routes invalidated the stamp"
+
+  # … but forcing it into the index adds a path the gate routes, and that is a
+  # different validation plan, not an index-state transition.
+  git add -f ignored-file.txt
+  index_state_gate --run --skip-if-fresh
+  [[ "$(cat "$counter")" == "4" ]] ||
+    fail "an add that changed the routed path set reused the stamp warmed before it"
+  grep -Fq -- "- ignored-file.txt" "$output_file" ||
+    fail "the forced add did not reach the gate's routed path set"
+)
+rm -rf "$index_state_stamp_repo"
+
 # Extending the reuse window must not weaken any exact-signature binding. Use
 # equal-tree base commits to isolate the base OID, then change the validation
 # path/command plan and the fixture's gate implementation independently. Every
@@ -5478,9 +5597,8 @@ STUB
   # is waited out, never reclaimed: reclaiming would later drain by that
   # token, matching processes with a value another writer chose. On a shared
   # root that record can be crafted, so fail-closed here means the timeout.
-  sleep 0 &
-  malformed_dead_pid=$!
-  wait "$malformed_dead_pid" 2>/dev/null || true
+  malformed_dead_pid="$(fresh_dead_pid)" ||
+    fail "could not obtain a reaped PID that reads as dead for the malformed-token case"
   mkdir -p "$gate_lock_root/run.lock"
   {
     printf 'pid=%s\n' "$malformed_dead_pid"
@@ -5532,9 +5650,8 @@ STUB
   # A killed holder (SIGKILL leaves the directory behind, EXIT trap and all)
   # must never wedge the next run: it reclaims the lock unattended, then
   # releases its own on the way out.
-  sleep 0 &
-  dead_holder_pid=$!
-  wait "$dead_holder_pid" 2>/dev/null || true
+  dead_holder_pid="$(fresh_dead_pid)" ||
+    fail "could not obtain a reaped PID that reads as dead for the stale-lock case"
   write_lock_owner "$dead_holder_pid"
   stale_exit="$(run_locked_gate)"
   [[ "$stale_exit" == "0" ]] ||
@@ -5650,9 +5767,8 @@ STUB
   # One stale lock, two waiters. The late waiter forms its verdict first, then
   # stalls past the point where the early one has already taken the lock over,
   # so its reclaim decision is obsolete when it finally acts on it.
-  sleep 0 &
-  race_dead_pid=$!
-  wait "$race_dead_pid" 2>/dev/null || true
+  race_dead_pid="$(fresh_dead_pid)" ||
+    fail "could not obtain a reaped PID that reads as dead for the two-waiter case"
   mkdir -p "$gate_race_root/run.lock"
   {
     printf 'pid=%s\n' "$race_dead_pid"
@@ -5784,7 +5900,11 @@ STUB
     rm -rf "$gate_race_root/run.lock"
 
     # The budget is a promise: a wait shorter than the poll interval must not
-    # sleep past it and then report the overshoot as the elapsed time.
+    # sleep past it and then report the overshoot as the elapsed time. Capping
+    # the nap is only half of keeping that promise — the elapsed time has to be
+    # measured finer than the budget too, or a wait that begins late in a
+    # second reads a second longer than it was and reports a 1s budget as 2s.
+    # That is the arithmetic behind both CI sightings in GitHub issue #1919.
     mkdir -p "$gate_race_root/run.lock"
     {
       printf 'pid=%s\n' "$$"
@@ -5851,11 +5971,13 @@ STUB
     local tag="$1"
     local reclaim_delay="$2"
     local taken_delay="$3"
-    local pid
+    local pid dead_pid
+    dead_pid="$(fresh_dead_pid)" ||
+      fail "${tag}: could not obtain a reaped PID that reads as dead"
     rm -rf "$gate_race_root/run.lock"
     mkdir -p "$gate_race_root/run.lock"
     {
-      printf 'pid=%s\n' "$race_dead_pid"
+      printf 'pid=%s\n' "$dead_pid"
       printf 'host=%s\n' "$(uname -n)"
       printf 'started_at=%s\n' "$(date +%s)"
       printf 'worktree=%s\n' "$gate_race_repo"
@@ -5945,6 +6067,8 @@ STUB
 
     # The converse: a remnant naming a process that is gone is spent, and must
     # not keep a free lock looking occupied.
+    race_dead_pid="$(fresh_dead_pid)" ||
+      fail "could not obtain a reaped PID that reads as dead for the spent-remnant case"
     mkdir -p "$gate_race_root/run.lock"
     {
       printf 'pid=%s\n' "$race_dead_pid"
@@ -6648,6 +6772,8 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
   rm -f "$gate_race_root"/captured.*
   : > "$gate_race_log"
+  race_dead_pid="$(fresh_dead_pid)" ||
+    fail "could not obtain a reaped PID that reads as dead for the unwritable-obligation case"
   mkdir -p "$gate_race_root/run.lock"
   {
     printf 'pid=%s\n' "$race_dead_pid"
@@ -6846,6 +6972,8 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     : > "$gate_race_log"
     if [[ "$race_crash_point" == "after-take" ]]; then
       # Reached only with a record to take: plant a spent one.
+      race_dead_pid="$(fresh_dead_pid)" ||
+        fail "${race_crash_point}: could not obtain a reaped PID that reads as dead"
       mkdir -p "$gate_race_root/run.lock"
       {
         printf 'pid=%s\n' "$race_dead_pid"

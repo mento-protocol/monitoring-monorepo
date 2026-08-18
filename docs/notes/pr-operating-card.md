@@ -56,8 +56,11 @@ even when you never open an authority.
 
    `--run` maps changed paths to the safe local checks (lint, typecheck, tests,
    browser suite) and stamps freshness so a later pre-push `--skip-if-fresh`
-   cache-hits. It does not run `trunk fmt` — run `./tools/trunk fmt` (the
-   checked-in launcher; a global `trunk` may not exist)
+   cache-hits. Run `git fetch origin main` first: the base commit is part of
+   that stamp, the hook fetches before it runs the gate, and a stamp warmed
+   against a stale `origin/main` is invalidated by that fetch, so the push pays
+   for the full gate a second time. It does not run `trunk fmt` — run
+   `./tools/trunk fmt` (the checked-in launcher; a global `trunk` may not exist)
    before committing so the required Code Quality CI stays green. The gate never
    deploys and never applies Terraform. It **refuses package-script,
    package-manager, or lockfile changes until their lifecycle risk is reviewed
