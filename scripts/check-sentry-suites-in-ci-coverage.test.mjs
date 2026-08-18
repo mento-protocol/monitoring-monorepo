@@ -152,7 +152,7 @@ test("the local gate's tooling allowlist trusts every sentry:* script", () => {
 test("every sentry:* script the gate trusts is pinned to an exact command", () => {
   // Allowlisting an alias TRUSTS it: `agent:quality-gate --run` will execute it
   // without `--allow-package-script-changes`. That trust is only safe while
-  // check-agent-quality-gate-package-scripts.sh pins the alias to an exact
+  // check-agent-quality-gate-package-scripts.mjs pins the alias to an exact
   // command — otherwise appending `&& <anything>` to a trusted script runs it.
   // The two lists drifted apart before this assertion existed: 13 aliases were
   // trusted and 4 pinned.
@@ -176,7 +176,7 @@ test("every sentry:* script the gate trusts is pinned to an exact command", () =
     [],
     "these sentry:* scripts are trusted by classify_root_package_json_changes " +
       "but not pinned to an exact command in " +
-      `check-agent-quality-gate-package-scripts.sh: ${unpinned.join(", ")}. ` +
+      `check-agent-quality-gate-package-scripts.mjs: ${unpinned.join(", ")}. ` +
       "A trusted alias whose command is not pinned can gain an appended " +
       "command that the gate then runs unprompted.",
   );

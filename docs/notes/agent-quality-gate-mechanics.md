@@ -110,7 +110,7 @@ entrypoint validator plus the gate/prewarm/PR-feedback/PR-ready/Terraform-stack
 regression tests instead of the package-script refusal path. That exemption
 holds only because every allowlisted alias is pinned to an exact command, so the
 entrypoint validator
-(`scripts/check-agent-quality-gate-package-scripts.sh`) runs as a fail-fast
+(`scripts/check-agent-quality-gate-package-scripts.mjs`) runs as a fail-fast
 quality-setup prerequisite: an unpinned or drifted alias aborts the run before
 any `pnpm <alias>` executes, and `--skip-if-fresh` cannot skip it. Existing changed paths run
 targeted Trunk checks for faster local iteration. Deleted paths,

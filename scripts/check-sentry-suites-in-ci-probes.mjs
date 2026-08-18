@@ -43,13 +43,13 @@ export const WORKFLOWS_DIR = join(ROOT, ".github", "workflows");
 export const CI_PATH = join(WORKFLOWS_DIR, "ci.yml");
 export const VALIDATOR_PATH = join(
   SCRIPTS_DIR,
-  "check-agent-quality-gate-package-scripts.sh",
+  "check-agent-quality-gate-package-scripts.mjs",
 );
 
 /** The pin validator invocation the `scripts` job must run before install and any alias. */
 export const PIN_VALIDATOR_COMMAND = [
-  "bash",
-  "scripts/check-agent-quality-gate-package-scripts.sh",
+  "node",
+  "scripts/check-agent-quality-gate-package-scripts.mjs",
 ];
 
 /** The local install action the `scripts` job must run AFTER the pin validator. */
@@ -386,7 +386,7 @@ export function findSentrySuites(
 export const SENTRY_SUITES = findSentrySuites(SCRIPTS_DIR);
 
 /**
- * Run check-agent-quality-gate-package-scripts.sh against a synthetic
+ * Run check-agent-quality-gate-package-scripts.mjs against a synthetic
  * package.json and report whether it accepted. Lets the lifecycle invariants
  * prove the validator rejects an unsanctioned lifecycle hook (and accepts the
  * real, clean manifest) without running the whole gate.
@@ -399,7 +399,7 @@ export function runPackageScriptValidator(pkg) {
   try {
     writeFileSync(join(dir, "package.json"), `${JSON.stringify(pkg)}\n`);
     try {
-      const stdout = execFileSync("bash", [VALIDATOR_PATH], {
+      const stdout = execFileSync(process.execPath, [VALIDATOR_PATH], {
         cwd: dir,
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
@@ -464,7 +464,7 @@ export const TRUSTED_JOBS = new Map([["production-infra-contract", null]]);
 // reach it — a dashboard-only or indexer-only diff runs it like any other.
 
 /**
- * The exact commands check-agent-quality-gate-package-scripts.sh pins, read
+ * The exact commands check-agent-quality-gate-package-scripts.mjs pins, read
  * from the validator itself: it is run against a package.json with no scripts,
  * so it reports every pin it enforces, with the command it demands.
  *
@@ -479,7 +479,7 @@ export function validatorPins() {
   try {
     writeFileSync(join(dir, "package.json"), '{"scripts":{}}\n');
     try {
-      execFileSync("bash", [VALIDATOR_PATH], {
+      execFileSync(process.execPath, [VALIDATOR_PATH], {
         cwd: dir,
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],

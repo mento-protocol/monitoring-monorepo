@@ -9,7 +9,7 @@
  *   INSTALL — `pnpm install` runs the root lifecycle hooks (postinstall and
  *             friends), and pnpm auto-runs `pre<x>`/`post<x>` around a script.
  *
- * Both are closed by the pin validator (check-agent-quality-gate-package-scripts.sh)
+ * Both are closed by the pin validator (check-agent-quality-gate-package-scripts.mjs)
  * running FIRST: it pins each trusted alias to an exact command and rejects any
  * unsanctioned lifecycle hook. These tests pin that ordering and prove the
  * validator rejects a hook. That validator is what makes the local gate's trust

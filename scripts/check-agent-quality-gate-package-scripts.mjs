@@ -1,8 +1,5 @@
-#!/usr/bin/env bash
-set -euo pipefail
-
-node <<'NODE'
-const fs = require("node:fs");
+#!/usr/bin/env node
+import fs from "node:fs";
 
 const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
 const scripts = pkg.scripts ?? {};
@@ -18,10 +15,12 @@ const expectedScripts = {
   "agent:prewarm": "node scripts/gate/agent-prewarm.mjs",
   "agent:prewarm:test": "node scripts/gate/agent-prewarm.test.mjs",
   "agent:review-materiality": "node scripts/pr/review-materiality.mjs",
-  "agent:review-materiality:test": "node scripts/pr/review-materiality.test.mjs",
+  "agent:review-materiality:test":
+    "node scripts/pr/review-materiality.test.mjs",
   "agent:context-check": "node scripts/context/check-agent-context.mjs",
   "agent:context-budget": "node scripts/context/agent-context-budget.mjs",
-  "agent:context-budget:test": "node scripts/context/agent-context-budget.test.mjs",
+  "agent:context-budget:test":
+    "node scripts/context/agent-context-budget.test.mjs",
   "docs:index": "node scripts/context/docs-index.mjs",
   "docs:index:test": "node scripts/context/docs-index.test.mjs",
   "docs:audit": "node scripts/docs/docs-audit.mjs",
@@ -29,11 +28,13 @@ const expectedScripts = {
   "docs:garden": "node scripts/docs/docs-garden-issue.mjs",
   "docs:garden:test": "node scripts/docs/docs-garden-issue.test.mjs",
   "docs:navigation-eval": "node scripts/docs/docs-navigation-eval.mjs",
-  "docs:navigation-eval:test": "node scripts/docs/docs-navigation-eval.test.mjs",
+  "docs:navigation-eval:test":
+    "node scripts/docs/docs-navigation-eval.test.mjs",
   "adr:check": "node scripts/pr/check-adr-reminder.mjs",
   "adr:check:test": "node scripts/pr/check-adr-reminder.test.mjs",
   "agent:autoreview": "./scripts/agent-autoreview.sh",
-  "agent:autoreview:test": "AUTOREVIEW_TEST_FOCUS=suite bash scripts/agent-autoreview.test.sh",
+  "agent:autoreview:test":
+    "AUTOREVIEW_TEST_FOCUS=suite bash scripts/agent-autoreview.test.sh",
   "issue:board": "node scripts/pr/agent-issue-board.mjs",
   "issue:board:test": "node scripts/pr/agent-issue-board.test.mjs",
   "issue:claim": "node scripts/pr/agent-issue-board.mjs claim",
@@ -49,8 +50,10 @@ const expectedScripts = {
   "sentry:brief:test": "node scripts/sentry-triage-brief.test.mjs",
   "sentry:autofix:select": "node scripts/sentry-autofix-select.mjs",
   "sentry:autofix:select:test": "node scripts/sentry-autofix-select.test.mjs",
-  "sentry:autofix:finalize:test": "node scripts/sentry-autofix-finalize.test.mjs",
-  "sentry:autofix:run-record:test": "node scripts/sentry-autofix-run-record.test.mjs",
+  "sentry:autofix:finalize:test":
+    "node scripts/sentry-autofix-finalize.test.mjs",
+  "sentry:autofix:run-record:test":
+    "node scripts/sentry-autofix-run-record.test.mjs",
   "sentry:archive": "node scripts/sentry-triage-archive.mjs",
   "sentry:archive:test": "node scripts/sentry-triage-archive.test.mjs",
   "sentry:broker:test": "node --test scripts/sentry-mcp-broker.test.mjs",
@@ -59,7 +62,7 @@ const expectedScripts = {
   "pr:feedback-state:test": "node scripts/pr-feedback-state.test.mjs",
   "pr:ready-state": "node scripts/pr-ready-state.mjs",
   "pr:ready-state:test": "node scripts/pr-ready-state.test.mjs",
-  "tf": "node scripts/tf-stacks.mjs",
+  tf: "node scripts/tf-stacks.mjs",
   "tf:test": "node scripts/tf-stacks.test.mjs",
   // The ADR 0053 deploy-staging contract's own runner. `tf:test` imports it for
   // its side effects, so before this alias the largest suite in the tree could
@@ -71,14 +74,18 @@ const expectedScripts = {
   "lockfile:lint:test": "node scripts/supply-chain/lockfile-lint.test.mjs",
   "skew:check": "node scripts/supply-chain/version-skew-check.mjs",
   "skew:check:test": "node scripts/supply-chain/version-skew-check.test.mjs",
-  "override:prune-report": "node scripts/supply-chain/override-prune-report.mjs",
-  "override:prune-report:test": "node scripts/supply-chain/override-prune-report.test.mjs",
+  "override:prune-report":
+    "node scripts/supply-chain/override-prune-report.mjs",
+  "override:prune-report:test":
+    "node scripts/supply-chain/override-prune-report.test.mjs",
   "sanitize:test": "node scripts/sanitize-terraform-output.test.mjs",
 };
 
 for (const [name, expected] of Object.entries(expectedScripts)) {
   if (scripts[name] !== expected) {
-    console.error(`package.json scripts.${name} must be ${JSON.stringify(expected)}`);
+    console.error(
+      `package.json scripts.${name} must be ${JSON.stringify(expected)}`,
+    );
     process.exitCode = 1;
   }
 }
@@ -118,8 +125,7 @@ for (const [name, command] of Object.entries(scripts)) {
   console.error(
     `package.json scripts.${name} is a lifecycle hook (${JSON.stringify(command)}) that runs ` +
       "automatically during install or around a trusted alias; remove it or pin it in " +
-      "scripts/check-agent-quality-gate-package-scripts.sh with the other sanctioned hooks",
+      "scripts/check-agent-quality-gate-package-scripts.mjs with the other sanctioned hooks",
   );
   process.exitCode = 1;
 }
-NODE

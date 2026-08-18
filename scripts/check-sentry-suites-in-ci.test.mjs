@@ -23,7 +23,7 @@
  *      job, and that job is trustworthy.
  *   3. The local gate's tooling allowlist in scripts/agent-quality-gate.sh
  *      lists every `sentry:*` script, and every listed script is pinned to an
- *      exact command by check-agent-quality-gate-package-scripts.sh. The local
+ *      exact command by check-agent-quality-gate-package-scripts.mjs. The local
  *      gate runs the `pnpm sentry:*:test` aliases (developer convenience, with
  *      the CI gate as the backstop); the allowlist grants that trust and the
  *      pin is what makes it safe.

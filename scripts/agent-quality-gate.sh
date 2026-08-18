@@ -2712,7 +2712,7 @@ route_lockfile_change() {
 
 add_root_tooling_package_script_checks() {
   local reason="$1"
-  add_command "bash scripts/check-agent-quality-gate-package-scripts.sh" "$reason"
+  add_command "node scripts/check-agent-quality-gate-package-scripts.mjs" "$reason"
   add_command "bash scripts/agent-quality-gate.test.sh" "$reason"
   add_command "node scripts/gate/agent-prewarm.test.mjs" "$reason"
   add_command "node scripts/pr/review-materiality.test.mjs" "$reason"
@@ -3728,10 +3728,6 @@ while IFS= read -r path; do
           ;;
       esac
       case "$path" in
-        scripts/check-agent-quality-gate-package-scripts.sh)
-          add_command "bash scripts/check-agent-quality-gate-package-scripts.sh" "agent quality gate package script validator changed"
-          add_command "pnpm agent:quality-gate:test" "agent quality gate mapping changed"
-          ;;
         scripts/agent-quality-gate.sh|scripts/agent-quality-gate.test.sh)
           add_command "pnpm agent:quality-gate:test" "agent quality gate mapping changed"
           ;;
@@ -3776,6 +3772,10 @@ while IFS= read -r path; do
       add_surface "scripts"
       add_command "pnpm lint:scripts" "root build script changed"
       case "$path" in
+        scripts/check-agent-quality-gate-package-scripts.mjs)
+          add_command "node scripts/check-agent-quality-gate-package-scripts.mjs" "agent quality gate package script validator changed"
+          add_command "pnpm agent:quality-gate:test" "agent quality gate mapping changed"
+          ;;
         scripts/production-infra-identity-contract/routing.test.mjs)
           add_command "pnpm agent:quality-gate:test" "agent quality gate mapping changed"
           ;;
@@ -4295,7 +4295,7 @@ while IFS= read -r path; do
         .github/actions/* | \
         package.json | \
         scripts/agent-quality-gate.sh | \
-        scripts/check-agent-quality-gate-package-scripts.sh | \
+        scripts/check-agent-quality-gate-package-scripts.mjs | \
         scripts/check-sentry-suites-in-ci*.mjs | \
         scripts/static-imports.mjs | \
         scripts/sentry-*.test.mjs | \
@@ -4491,7 +4491,7 @@ implementation_signature() {
   for path in \
     scripts/agent-quality-gate.sh \
     scripts/agent-quality-gate.test.sh \
-    scripts/check-agent-quality-gate-package-scripts.sh \
+    scripts/check-agent-quality-gate-package-scripts.mjs \
     scripts/docs/docs-navigation-eval-helpers.mjs \
     scripts/gate/lockfile-scope.mjs \
     scripts/terraform/terraform-fmt-check.mjs \
@@ -5205,7 +5205,7 @@ is_quality_setup_command() {
   # independent quality pool starts. Keep this list in sync with new
   # setup-style commands added by the path mapper above.
   case "$command" in
-    "bash scripts/check-agent-quality-gate-package-scripts.sh")
+    "node scripts/check-agent-quality-gate-package-scripts.mjs")
       # A SAFETY prerequisite, not a build one. The `root-tooling-scripts`
       # classification skips the `--allow-package-script-changes` refusal for a
       # package.json edit that touches only allowlisted aliases, which is only

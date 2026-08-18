@@ -1020,7 +1020,7 @@ jobs:
         #   check-sentry-suites-in-ci.test.mjs pins this ordering, because the
         #   `sentry:*` aliases the local quality gate trusts are pinned by the
         #   same validator.
-        run: bash scripts/check-agent-quality-gate-package-scripts.sh
+        run: node scripts/check-agent-quality-gate-package-scripts.mjs
       - uses: ./.github/actions/pnpm-install
       - name: ESLint root scripts
         run: pnpm lint:scripts
