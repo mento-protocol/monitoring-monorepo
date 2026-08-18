@@ -47,23 +47,49 @@ const TONE_TINT: Record<PegBoardTone, { bg: string; border: string }> = {
   critical: { bg: "rgba(201,44,44,0.16)", border: "rgba(201,44,44,0.48)" },
 };
 
-// Mirrors PEG_RAIL_GRADIENT: hard-edged zones over the fixed ±60 bps window,
-// so the rail on the card and the rail on the page read the same.
-const RAIL_GRADIENT = [
-  "linear-gradient(to right",
-  "rgba(201,44,44,0.40) 0%",
-  "rgba(201,44,44,0.40) 10%",
-  "rgba(254,153,0,0.35) 10%",
-  "rgba(254,153,0,0.35) 30%",
-  "rgba(30,204,9,0.25) 30%",
-  "rgba(30,204,9,0.25) 70%",
-  "rgba(254,153,0,0.35) 70%",
-  "rgba(254,153,0,0.35) 100%)",
-].join(", ");
+const RAIL_RED = "rgba(201,44,44,0.40)";
+const RAIL_AMBER = "rgba(254,153,0,0.35)";
+const RAIL_GREEN = "rgba(30,204,9,0.25)";
 
-/** Where a signed bps value sits on the fixed ±60 bps rail. */
+/**
+ * Where a signed bps value sits on the fixed ±60 bps rail. Values outside the
+ * window return <0 or >100 — `RailScale` drops those ticks rather than draw a
+ * threshold where it is not, while `railGradient` clamps them, since a band
+ * edge past the rail just means that zone fills to the end.
+ */
 function railPercent(bps: number): number {
   return 50 + (bps / PEG_RAIL_SCALE_BPS) * 50;
+}
+
+function clampPercent(percent: number): number {
+  return Math.min(100, Math.max(0, percent));
+}
+
+/**
+ * Hard-edged zones over the fixed ±60 bps window, with the colour boundaries
+ * derived from the same policy thresholds `RailScale` labels.
+ *
+ * The page's `PEG_RAIL_GRADIENT` hardcodes 10/30/70 — a rounded stand-in for
+ * EUROP's ±25/±50 that actually lands on ±24/−48. The page can afford that
+ * because it draws no threshold ticks; this card labels them, so a fixed
+ * gradient would print "warn −25" against a band that starts at −24, and for a
+ * peg on different policy would put the label nowhere near its own band.
+ */
+export function railGradient(thresholds: PegOgRow["thresholds"]): string {
+  const criticalEdge = clampPercent(railPercent(-thresholds.downsideCritical));
+  const warnEdge = clampPercent(railPercent(-thresholds.downsideWarn));
+  const premiumEdge = clampPercent(railPercent(thresholds.premiumWarn));
+  return [
+    "linear-gradient(to right",
+    `${RAIL_RED} 0%`,
+    `${RAIL_RED} ${criticalEdge}%`,
+    `${RAIL_AMBER} ${criticalEdge}%`,
+    `${RAIL_AMBER} ${warnEdge}%`,
+    `${RAIL_GREEN} ${warnEdge}%`,
+    `${RAIL_GREEN} ${premiumEdge}%`,
+    `${RAIL_AMBER} ${premiumEdge}%`,
+    `${RAIL_AMBER} 100%)`,
+  ].join(", ");
 }
 
 /**
@@ -101,7 +127,7 @@ function Rail({ row, height }: { row: PegOgRow; height: number }) {
         flex: 1,
         height,
         borderRadius: 5,
-        background: RAIL_GRADIENT,
+        background: railGradient(row.thresholds),
         opacity: marker === null ? 0.35 : 1,
       }}
     >
