@@ -693,7 +693,7 @@ gate_lock_token_pattern() {
 
 gate_run_tagged_pids() {
   local token="$1"
-  local environ pid marker found status
+  local environ environ_entries pid marker found status
   # A token read back from a lock record names processes (through this
   # pattern) and files (holder.*), and on a shared root it can be another
   # user's writing. One that does not have the gate-generated shape is never
@@ -717,13 +717,40 @@ gate_run_tagged_pids() {
   [[ -z "$found" ]] || printf '%s\n' "$found"
   if [[ -d /proc ]]; then
     for environ in /proc/[0-9]*/environ; do
-      # Unreadable here means another user's process, which cannot be one of
-      # ours: the environment of anything this run started is readable by it.
-      # So this skip is a scope, not a swallowed error.
+      # A builtin test first, because this loop runs once per process on the
+      # host: `-r` false means the read cannot succeed, and skipping there
+      # costs nothing. It is not the whole guard — `-r` answers from the
+      # permission bits, and the kernel refuses `/proc/<pid>/environ` for a
+      # process that changed credentials whatever those say.
       [[ -r "$environ" ]] || continue
+      # The redirection is inside a group with its own stderr redirect. A
+      # redirection that cannot open its target is reported by the shell
+      # itself, before the `2>/dev/null` beside it applies, so the bare form
+      # printed `/proc/<pid>/environ: Permission denied` into the output of
+      # every drain on a runner (GitHub issue 1919); the group's redirect is
+      # already in place when the inner one is attempted. NULs are translated
+      # before the capture because command substitution cannot hold them, and
+      # the exact-entry match below depends on the separators surviving.
+      environ_entries="$({ tr '\0' '\n' < "$environ"; } 2>/dev/null)" ||
+        environ_entries=""
+      if [[ -z "$environ_entries" ]]; then
+        # Past the `-r` test and still nothing: the kernel refused the read for
+        # a process that changed credentials, the process exited between the
+        # listing and the read, or its environment is genuinely empty. None can
+        # be one of ours. Anything this run started carries this user's
+        # credentials and this run's environment, so it stays readable to it —
+        # and where a credential-changing descendant stretches that, the
+        # argv-tag scan above and the marker-descriptor scan below still name
+        # it, because neither reads the environment. Deliberately NOT the
+        # scan-error sentinel: one unreadable process is ordinary — every
+        # GitHub runner has one — and counting it as a failed scan would fail
+        # every crash recovery on such a host closed, rather than only the ones
+        # with work left to do.
+        continue
+      fi
       # Exact entry, not substring: environ is NUL-separated, and a substring
       # match would let one token select an environment carrying a longer one.
-      tr '\0' '\n' < "$environ" 2>/dev/null |
+      printf '%s\n' "$environ_entries" |
         grep -qxF "AGENTQG_RUN=agentqg:${token}" || continue
       pid="${environ#/proc/}"
       printf '%s\n' "${pid%/environ}"
@@ -978,6 +1005,29 @@ gate_lock_field_from_file() {
 
 gate_lock_owner_field() {
   gate_lock_field_from_file "$1/owner" "$2"
+}
+
+# Wall-clock milliseconds. Two whole-second `date +%s` reads carry up to a
+# second of error between them, because each truncates to the second boundary it
+# landed in: a wait that starts at X.99 and lasts 1.05s reads as two seconds.
+# The lock wait then reports that measurement error as elapsed time, which is
+# how `--lock-wait 1` announced a two-second timeout on a loaded CI runner and
+# flaked the suite's budget assertion (GitHub issue 1919). EPOCHREALTIME renders
+# its fraction with the locale's decimal separator, so both forms are read; a
+# shell too old to have it degrades to whole seconds, which is exactly the
+# behaviour this replaces.
+gate_wall_millis() {
+  local now="${EPOCHREALTIME:-}"
+  local seconds fraction
+  case "$now" in
+    *[.,]*)
+      seconds="${now%%[.,]*}"
+      fraction="${now#*[.,]}000"
+      printf '%s%s\n' "$seconds" "${fraction:0:3}"
+      return 0
+      ;;
+  esac
+  printf '%s000\n' "$(date +%s)"
 }
 
 # The kernel's own start-time string for a PID, used verbatim. Comparing it as
@@ -1550,11 +1600,13 @@ release_gate_run_lock() {
 
 acquire_gate_run_lock() {
   local root lock owner_pid owner_host owner_worktree owner_token_value owner_start
-  local stale_reason nap remaining
+  local stale_reason nap remaining now_millis
   # Elapsed time comes from the clock, never from adding up requested sleeps.
   # A shell that is descheduled or SIGSTOPped sleeps far longer than it asked
   # to, and counting the request would let a run outlive the budget it printed
-  # while reporting a smaller number than it actually took.
+  # while reporting a smaller number than it actually took. Read in
+  # milliseconds and reported in whole seconds: measuring in whole seconds
+  # instead charges the wait up to a second it never spent.
   local waited=0
   local wait_started_at
   local last_beat=0
@@ -1586,10 +1638,17 @@ acquire_gate_run_lock() {
   lock="$root/run.lock"
   gate_lock_root_dir="$root"
   this_host="$(uname -n)"
-  wait_started_at="$(date +%s)"
+  wait_started_at="$(gate_wall_millis)"
 
   while :; do
-    waited=$(($(date +%s) - wait_started_at))
+    now_millis="$(gate_wall_millis)"
+    # A clock stepped backwards mid-wait — this is a wall clock, and NTP steps
+    # it — would otherwise make every later delta smaller than the budget, so
+    # the wait would outlive the budget it announced. Re-anchoring costs the
+    # step's worth of waiting and keeps the budget reachable; clamping the
+    # delta to zero would only tidy the number printed.
+    [[ "$now_millis" -ge "$wait_started_at" ]] || wait_started_at="$now_millis"
+    waited=$(((now_millis - wait_started_at) / 1000))
     if mkdir "$lock" 2>/dev/null; then
       gate_lock_test_crash after-mkdir
       gate_lock_test_delay "${AGENT_QUALITY_GATE_LOCK_CLAIM_DELAY_SECONDS:-}"
@@ -4532,6 +4591,25 @@ implementation_signature() {
   done | hash_stream
 }
 
+# The mode of a path, read from the worktree rather than from the index, so the
+# answer does not depend on whether the path is tracked yet. This is what the
+# ` create mode <mode> …` line dropped below used to carry. `-x` asks whether
+# THIS user may execute it, which is git's own rule — the owner bit — for a file
+# this user owns, and that is every file in a worktree it is working in. Where
+# the two differ (a file owned by somebody else, an execute bit set only for
+# group or other) this answer is still the same on both sides of a `git add`,
+# which is the property the freshness stamp needs from it.
+gate_worktree_filemode() {
+  local path="$1"
+  if [[ -L "$path" ]]; then
+    printf '120000'
+  elif [[ -x "$path" ]]; then
+    printf '100755'
+  else
+    printf '100644'
+  fi
+}
+
 validation_content_signature() {
   local path
 
@@ -4540,6 +4618,11 @@ validation_content_signature() {
       printf 'path %s\0' "$path"
       if [[ -f "$path" ]]; then
         printf 'file %s\0' "$(hash_file "$path")"
+        # The executable bit and symlink-ness are not in the content hash, and
+        # they are the part of the summary line below that says something about
+        # the file rather than about the index. Read from the worktree, so
+        # `git add` cannot move it.
+        printf 'mode %s\0' "$(gate_worktree_filemode "$path")"
       elif [[ -d "$path" ]]; then
         printf 'directory\0'
       elif [[ -e "$path" ]]; then
@@ -4547,7 +4630,18 @@ validation_content_signature() {
       else
         printf 'deleted\0'
       fi
-      git diff --no-ext-diff --summary "$base_ref" -- "$path" 2>/dev/null || true
+      # `create mode` lines are dropped: they appear the moment a path becomes
+      # tracked and say nothing about what was validated. An untracked path is
+      # invisible to `git diff`, so `git add` alone used to move this signature
+      # and cost a fresh stamp a full re-run — with the changed-path set, the
+      # command plan, the base OID and the file's bytes all provably unchanged
+      # (GitHub issue 1899). Deletions and mode changes are not index-state
+      # transitions in the same way — `git diff <base> -- <path>` reports both
+      # from the worktree, staged or not — so those summary lines stay.
+      # `awk` rather than `grep -v`, which exits 1 when it filters everything
+      # out and would abort the run under `set -e`.
+      git diff --no-ext-diff --summary "$base_ref" -- "$path" 2>/dev/null |
+        awk '!/^ create mode /' || true
     done < "$changed_paths_file"
   } | hash_stream
 }

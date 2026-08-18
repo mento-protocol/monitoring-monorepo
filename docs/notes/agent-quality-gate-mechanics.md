@@ -520,9 +520,23 @@ of them.
    the second as the first would discharge an obligation on the strength of a
    question that was never answered. A failed scan keeps the drain open exactly
    as an unverifiable process does, and fails closed at the bound with its own
-   line. Skipping an unreadable `/proc/<pid>/environ` is not that case: it means
-   another user's process, which cannot be one of ours, so it is a scope rather
-   than a swallowed error.
+   line. Skipping an unreadable `/proc/<pid>/environ` is deliberately **not**
+   that case. It happens three ways — another user's process, a process the
+   kernel will not let us read because it changed credentials, and a process
+   that exited between the directory listing and the read — and none of them can
+   be a process this run started, because everything it starts keeps this user's
+   credentials and this run's environment. Where that reasoning is stretched by
+   a credential-changing descendant, the argv-tag and marker-descriptor scans
+   still name it; neither reads the environment. Counting an unreadable
+   environment as a failed scan would instead fail every crash recovery closed
+   on any host that has one such process, which every GitHub runner does. The
+   read is wrapped in a group carrying its own `2>/dev/null`, because a
+   redirection that cannot open its target is reported by the shell itself,
+   before a `2>/dev/null` beside it applies: the bare form printed
+   `/proc/<pid>/environ: Permission denied` into every drain's output on a
+   runner (GitHub issue #1919). The `-r` test stays in front of it as a fast
+   path — this loop runs once per process on the host — but it is not the
+   guard, because permission bits are not what the kernel decides on.
 
 8. **Elapsed time comes from the clock, not from counting sleeps.** A loop that
    adds its own poll interval per iteration is measuring what it asked for. Any
@@ -531,8 +545,12 @@ of them.
    almost no time has passed. It then outlives the deadline it announced and
    reports a duration that never happened, which is worse than being late:
    every wait, drain, and watchdog budget in this path is also the evidence
-   printed when one expires. Each of those loops reads `date +%s` once before
-   it starts and subtracts at the top of every iteration.
+   printed when one expires. Each of those loops reads the clock once before it
+   starts and subtracts at the top of every iteration. The lock wait reads it in
+   milliseconds (`EPOCHREALTIME`, falling back to whole seconds on a shell
+   without it), because whole-second reads truncate at both ends: a wait that
+   begins at `X.99` and lasts 1.05s subtracts to two seconds, and `--lock-wait 1`
+   then reported a budget it had kept as an overshoot (GitHub issue #1919).
 
 Rule 4 is the one that does not depend on getting an interleaving right, and
 it is why the others are allowed to be merely careful: they keep runs from
@@ -896,6 +914,23 @@ can satisfy the `--skip-if-fresh` check.
 The whole-run stamp's signature is the same bound-input set described above;
 any change to it reruns the mapped commands immediately, while an unchanged
 stamp still expires after two hours to avoid masking drift.
+
+Validated file content is bound by each path's bytes, its worktree file mode,
+and the `git diff --summary` lines for it — minus the `create mode` lines,
+which report that a path became tracked rather than anything about what was
+validated. An untracked path is invisible to `git diff`, so before that
+exclusion a bare `git add` of a file the gate was already validating moved the
+signature and cost a warm stamp a full re-run, with the changed-path set, the
+mapped command plan, the base OID and the file's own bytes unchanged (GitHub
+issue #1899). Everything that genuinely changes validation still moves it:
+edited bytes, a changed file mode, and an add that puts a path the gate routes
+into the changed-path set — `git add -f` of an ignored file, which no
+`--exclude-standard` listing reports until it is tracked.
+
+The base commit is a bound input, so warm the stamp **after**
+`git fetch origin main`, not before: the pre-push hook fetches before it runs
+the gate, and a stamp warmed against a stale `origin/main` is invalidated by
+that fetch — correctly, because the validation base really did move.
 
 Below the whole-run stamp, `--run` also keeps per-command success stamps
 (`.tmp/agent-quality-gate/command-stamps.tsv`) so a run that was killed
