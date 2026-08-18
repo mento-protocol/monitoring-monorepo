@@ -423,7 +423,6 @@ locals {
         "Low USDT Reserve Balance Alert",
         "Low axlUSDC Reserve Balance Alert",
         "Empty USDC Reserve Balance Alert [Polygon]",
-        "Empty EUROP Reserve Balance Alert [Polygon]"
       ],
       slack_title_template       = "slack.reserve_balance_alert_title",
       slack_message_template     = "slack.reserve_balance_alert_message",
