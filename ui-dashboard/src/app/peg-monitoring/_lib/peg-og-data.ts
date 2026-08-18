@@ -7,7 +7,10 @@ import {
   presentPegMonitoring,
   type PegAssetPresentation,
 } from "@/lib/peg-monitoring-presentation";
-import { fetchPegDecisionPackages } from "@/lib/peg-monitoring-upstream";
+import {
+  fetchPegDecisionPackages,
+  resolvePegMonitoringEndpoint,
+} from "@/lib/peg-monitoring-upstream";
 import type { PegMonitoringResponse } from "@/lib/peg-monitoring-schema";
 import { formatAge, formatNumber, formatWholeBps } from "./peg-board-format";
 import {
@@ -140,27 +143,45 @@ export function buildPegMonitoringOgData(
   };
 }
 
-/** @internal Exported for testing — skips the cache wrapper. */
-export async function fetchPegMonitoringOgDataUncached(): Promise<PegMonitoringOgData | null> {
+/** Upstream payload, or null for every failure the card renders the same way. */
+async function fetchPegDecisionPackagesOrNull(): Promise<PegMonitoringResponse | null> {
   const result = await fetchPegDecisionPackages();
-  return result.ok ? buildPegMonitoringOgData(result.data, Date.now()) : null;
+  return result.ok ? result.data : null;
 }
 
+/** @internal Exported for testing — skips the cache wrapper. */
+export async function fetchPegMonitoringOgDataUncached(): Promise<PegMonitoringOgData | null> {
+  const raw = await fetchPegDecisionPackagesOrNull();
+  return raw === null ? null : buildPegMonitoringOgData(raw, Date.now());
+}
+
+// Caches the raw decision package, never the rendered card. `age`, `stale` and
+// the classifier verdict all read a clock, so caching them would replay a
+// package captured at 85s old as `stale: false` for another 60s of real age.
+// The render below re-derives them from a fresh clock on every call.
+//
 // 60s TTL, matching the pool and homepage cards. Peg state can flip inside a
 // single alert window, so an hour-long cache would keep serving "healthy"
 // through a breach. This bounds the origin only — Slack caches its own unfurl
 // per URL, so an old share can still show the state it was unfurled with.
+//
+// The resolved bridge origin is part of the key: where the deploy salt
+// collapses to "dev", repointing `METRICS_BRIDGE_URL` must not keep serving
+// the previous origin's packages. Keying on the resolved form stops a rejected
+// value from churning the key.
 const cachedFetch = unstable_cache(
-  fetchPegMonitoringOgDataUncached,
+  fetchPegDecisionPackagesOrNull,
   [
     "peg-monitoring-og",
     process.env.VERCEL_DEPLOYMENT_ID ??
       process.env.VERCEL_GIT_COMMIT_SHA ??
       "dev",
+    resolvePegMonitoringEndpoint(process.env.METRICS_BRIDGE_URL)?.origin ?? "",
   ],
   { revalidate: 60, tags: ["peg-monitoring-og"] },
 );
 
-export function fetchPegMonitoringForMetadata(): Promise<PegMonitoringOgData | null> {
-  return cachedFetch();
+export async function fetchPegMonitoringForMetadata(): Promise<PegMonitoringOgData | null> {
+  const raw = await cachedFetch();
+  return raw === null ? null : buildPegMonitoringOgData(raw, Date.now());
 }
