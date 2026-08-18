@@ -3472,6 +3472,7 @@ signature_stamp_repo="$(mktemp -d)"
   printf '# fixture gate implementation\n' > scripts/agent-quality-gate.sh
   printf '# fixture routing classifier\n' > scripts/docs/docs-navigation-eval-helpers.mjs
   printf '# fixture terraform format checker\n' > scripts/terraform/terraform-fmt-check.mjs
+  printf '# fixture terraform format checker suite\n' > scripts/terraform/terraform-fmt-check.test.mjs
   cat > tools/trunk <<'STUB'
 #!/usr/bin/env bash
 counter_file="${COUNTER_FILE:?}"
@@ -3539,10 +3540,12 @@ STUB
   [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "5" ]] ||
     fail "fresh gate stamp was reused after the routing classifier changed"
 
-  # Every path in implementation_signature() carries the same hazard: an entry
-  # the gate cannot stat hashes as `__missing__` on both runs, so the signature
-  # stops moving and --skip-if-fresh reuses a dead stamp. Cover the Terraform
-  # arm too, so a later move of that file cannot go unnoticed here.
+  # Both moved entries in implementation_signature() carry the same hazard: a
+  # path the gate cannot stat hashes as `__missing__` on both runs, so the
+  # signature stops moving and --skip-if-fresh reuses a dead stamp. The
+  # classifier above covers the P4 move; these two cover the P10 one. The
+  # remaining entries (the gate, its suite, the alias validator, turbo.json,
+  # .trunk/trunk.yaml) have never moved and are not fixtured here.
   printf '# changed fixture terraform format checker\n' >> scripts/terraform/terraform-fmt-check.mjs
   COUNTER_FILE="$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
     "$repo_root/scripts/agent-quality-gate.sh" \
@@ -3553,6 +3556,17 @@ STUB
       > "$output_file" 2>&1
   [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "6" ]] ||
     fail "fresh gate stamp was reused after the Terraform format checker changed"
+
+  printf '# changed fixture terraform format checker suite\n' >> scripts/terraform/terraform-fmt-check.test.mjs
+  COUNTER_FILE="$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file changed-paths-two.txt \
+      --base "$base_two" \
+      --run \
+      --skip-if-fresh \
+      > "$output_file" 2>&1
+  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "7" ]] ||
+    fail "fresh gate stamp was reused after the Terraform format checker suite changed"
 )
 rm -rf "$signature_stamp_repo"
 assert_not_contains "Previous successful agent quality gate run is still fresh; skipping mapped commands."

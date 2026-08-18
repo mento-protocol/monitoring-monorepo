@@ -109,7 +109,7 @@ breaks silently on the next move.
 
 ## Sweep Checklist for a Move
 
-Work the nine-surface checklist in
+Work the ten-surface checklist in
 [ADR 0064](../docs/adr/0064-scripts-module-directories.md#sweep-checklist-for-a-move)
 in the PR that moves a file. Every surface there is mandatory.
 
