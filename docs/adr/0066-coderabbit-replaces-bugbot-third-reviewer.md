@@ -82,7 +82,7 @@ study.
 | Option              | Pricing model                                 | Est. monthly cost                                        |
 | ------------------- | --------------------------------------------- | -------------------------------------------------------- |
 | BugBot (status quo) | ~$1.00–1.50/run, uncapped, re-review per push | ~$560–1,680                                              |
-| CodeRabbit          | Pro+ seat $48–60/mo + 25¢/file over-limit     | **~$60–180** (chosen); OSS $0 manual-trigger fallback    |
+| CodeRabbit          | Pro+ seat $48–60/mo; usage add-on deferred    | **$48–60** (chosen); ~$60–180 with add-on; OSS $0        |
 | Greptile            | $30/seat incl. 50 reviews, then $1/review     | ~$260 (review-on-open only); $540–1,100 (re-review/push) |
 | Cubic               | Free unlimited on public repos                | $0                                                       |
 | Graphite Agent      | Flat $20–40/month, unlimited reviews          | $20–40                                                   |
@@ -237,7 +237,14 @@ Replace BugBot with CodeRabbit as the third advisory reviewer.
   and its non-finding machinery (rate-limit, summary, trigger-ack,
   thread-resolved-ack). CodeRabbit's inline findings now feed
   `pr:feedback-state`, the merge oracle; its own check context stays
-  advisory (`scripts/pr-ready-state-core.mjs`).
+  advisory (`scripts/pr-ready-state-core.mjs`). Two residuals, accepted:
+  the pin is fail-loud, not fail-secure — CodeRabbit reviews the source
+  branch before CI runs, so a weakened config still shapes that one PR's
+  review, and a same-patch edit to config plus pin is visible rather than
+  impossible (any in-repo policy is PR-editable; comparing against a
+  trusted ref would freeze legitimate config changes and recurse the same
+  loophole). The out-of-repo close is CodeRabbit's org-level override
+  layer, recorded as an operator step in issue #1917.
 - Watch item: `claude[bot]` review currently rides existing Max
   subscription spend. Anthropic's separate metered "Code Review" product bills
   $15–25/review — ruinous at this volume. If the GitHub Action review path is
