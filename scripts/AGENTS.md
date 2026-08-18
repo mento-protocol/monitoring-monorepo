@@ -17,7 +17,7 @@ garden_lane: agent-entry-points
 ## Scope
 
 `scripts/` holds deploy wrappers, agent quality gates, code-health checks, and
-repo maintenance utilities. 153 files sit flat at the top level today.
+repo maintenance utilities. 145 files sit flat at the top level today.
 
 ## Target Layout
 
@@ -40,12 +40,15 @@ Files stay flat until their phase merges.
 | `terraform/`    | P10   | movable Terraform guards and helpers   |
 | `gate/`         | P11   | quality-gate satellites                |
 
-Landed: P1, P2, P3, P6, P7, P9, P10. `lib/` (the shared tier) and
+Landed: P1, P2, P3, P6, P7, P8, P9, P10. `lib/` (the shared tier) and
 `production-infra-identity-contract/` predate the reorganization. `setup.sh`
 stays flat: `.config/wt.toml` runs that exact path as the Worktrunk pre-start
-hook, and eight docs name it.
+hook, and eight docs name it. `redrive-onchain-deadletter.{mjs,test.mjs}` stays
+flat although `alerts/infra/` owns it: `eslint.config.mjs` ignores `alerts/**`,
+so moving it there drops it out of `lint:scripts`. That ignore is
+config-relative; `scripts/alerts/**` stays linted.
 
-`lib/` holds generic cores carrying no domain policy: `hcl.mjs` (Terraform HCL
+`lib/` holds cores more than one cluster reads. `hcl.mjs` (Terraform HCL
 tokenizer and block extraction), `workflow-yaml.mjs` (Actions workflow and
 shell-run parsing), `pnpm-override-selector.mjs` (pnpm override selectors), and
 `gh-issue-lifecycle.mjs` (the `gh` runner, pagination guard, Documentation
@@ -54,8 +57,10 @@ Cores stay outside domain directories: five files beyond
 `production-infra-identity-contract/` read `hcl.mjs`, the ADR 0053
 deploy-staging contract reads `workflow-yaml.mjs`, both the lockfile-lint gate
 and the override prune advisor read the selector parser, and the documentation
-garden and navigation-eval schedulers both read the issue lifecycle. Inventories,
-pinned hashes, and identities stay with their domain.
+garden and navigation-eval schedulers both read the issue lifecycle.
+`peg-policy-digest.mjs` is the one definition of the peg version-digest contract
+both peg validators check. Inventories, pinned hashes, and identities stay with
+their domain.
 
 ## Why Files Stay Flat
 
@@ -79,11 +84,12 @@ that mechanism moves with it, in the same PR.
   (`ci.yml` `terraform`; `infra.yml` push and `pull_request`) also name
   `scripts/lib/hcl.mjs` and `scripts/lib/workflow-yaml.mjs`, outside the
   recursive `scripts/production-infra-identity-contract/**`; `routing.test.mjs`
-  there asserts all three. A miss is silent — the job stops running while the
-  required `ci` sentinel stays green. ADR 0064 covers when a module glob such as
-  `supply-chain.yml`'s `scripts/supply-chain/**` is the safer pin.
-- **Terraform stack registry.** `terraform.stacks.json` pins exact `scripts/`
-  paths per stack.
+  there asserts all three. A filter also names what its listed files import. A
+  miss is silent — the job stops running while the required `ci` sentinel stays
+  green. ADR 0064 covers when a module glob such as `supply-chain.yml`'s
+  `scripts/supply-chain/**` is the safer pin.
+- **Terraform stack registry.** `terraform.stacks.json` `changedPathPatterns`
+  pins exact `scripts/` paths per stack, mirrored into those filters.
 - **Production infrastructure contract pins.**
   `production-infra-identity-contract/workflow-inventory.mjs` pins exact script
   paths for the workflows it audits.

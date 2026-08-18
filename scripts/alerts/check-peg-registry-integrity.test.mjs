@@ -12,7 +12,7 @@ import {
   validatePegPolicyLineage,
 } from "./check-peg-registry-integrity.mjs";
 
-const REPO_ROOT = fileURLToPath(new URL("../", import.meta.url));
+const REPO_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const SCRIPT_PATH = fileURLToPath(
   new URL("./check-peg-registry-integrity.mjs", import.meta.url),
 );

@@ -335,8 +335,8 @@ const PEG_POLICY_PUBLICATION_DETECT_CHANGES_COMMAND = [
 ].join("\n");
 
 const PEG_POLICY_PUBLICATION_VALIDATE_COMMAND = [
-  "node scripts/check-peg-registry-integrity.mjs",
-  "node scripts/check-peg-policy-publication.mjs",
+  "node scripts/alerts/check-peg-registry-integrity.mjs",
+  "node scripts/alerts/check-peg-policy-publication.mjs",
   "",
 ].join("\n");
 
@@ -504,8 +504,11 @@ function pegPolicyPublicationWorkflowInventory() {
           "alerts/peg-policy-publication/**",
           "alerts/rules/peg-thresholds.json",
           "metrics-bridge/peg-registry.json",
-          "scripts/check-peg-policy-publication.mjs",
-          "scripts/check-peg-registry-integrity.mjs",
+          "scripts/alerts/check-peg-policy-publication.mjs",
+          "scripts/alerts/check-peg-registry-integrity.mjs",
+          "scripts/alerts/check-peg-registry-integrity-lineage.mjs",
+          "scripts/lib/peg-policy-digest.mjs",
+          "scripts/lib/hcl.mjs",
           ".github/workflows/peg-policy-publication.yml",
         ],
       },
