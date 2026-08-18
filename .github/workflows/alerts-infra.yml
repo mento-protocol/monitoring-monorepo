@@ -69,7 +69,7 @@ on:
     paths:
       - alerts/infra/**
       - scripts/sanitize-terraform-output.sh
-      - scripts/notify-terraform-apply.mjs
+      - scripts/terraform/notify-terraform-apply.mjs
       - scripts/verify-github-environment-protection.mjs
       - scripts/verify-github-environment-protection.test.mjs
       - .github/workflows/alerts-infra.yml
@@ -78,7 +78,7 @@ on:
     paths:
       - alerts/infra/**
       - scripts/sanitize-terraform-output.sh
-      - scripts/notify-terraform-apply.mjs
+      - scripts/terraform/notify-terraform-apply.mjs
       - scripts/verify-github-environment-protection.mjs
       - scripts/verify-github-environment-protection.test.mjs
       - .github/workflows/alerts-infra.yml
@@ -426,7 +426,7 @@ jobs:
           TERRAFORM_PLAN_FILE: /tmp/tf-plan.txt
           TERRAFORM_STACK_LABEL: alerts/infra
           TERRAFORM_TARGET_ENVIRONMENT: production-infra
-        run: node "$GITHUB_WORKSPACE/scripts/notify-terraform-apply.mjs"
+        run: node "$GITHUB_WORKSPACE/scripts/terraform/notify-terraform-apply.mjs"
 
       - name: Post plan as sticky PR comment
         if: always() && github.event_name == 'pull_request'

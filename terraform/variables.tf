@@ -68,7 +68,7 @@ variable "platform_settings_audit_token" {
 variable "terraform_apply_slack_channel" {
   description = <<-EOT
     Slack channel that receives the Terraform apply-pending prompt posted
-    by `scripts/notify-terraform-apply.mjs` for the CI-applied stacks
+    by `scripts/terraform/notify-terraform-apply.mjs` for the CI-applied stacks
     (alerts-rules, alerts-delivery, aegis, governance-watchdog). Mirrored
     to the GitHub Actions repository variable `TERRAFORM_APPLY_SLACK_CHANNEL`
     (see `github-variables.tf`), which those workflows read with a fallback
@@ -468,7 +468,7 @@ variable "grafana_dashboard_reader_token_rotation_counter" {
     write it to the Vercel project, THEN redeploy the dashboard so an active
     deployment stops presenting the revoked token — the apply alone leaves
     history failing, exactly as documented for auth_secret_prev. This is the
-    only rotation path: `scripts/tf-platform-plan-guard.mjs` rejects every
+    only rotation path: `scripts/terraform/tf-platform-plan-guard.mjs` rejects every
     platform Terraform argument outside its allowlist, so `-replace` is
     unavailable.
   EOT
