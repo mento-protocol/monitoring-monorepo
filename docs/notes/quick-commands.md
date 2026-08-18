@@ -70,6 +70,7 @@ node scripts/review-process-metrics.mjs --prs <pr1,pr2,...> --output <result.jso
 pnpm lockfile:lint                 # Fail-closed integrity + registry + override-floor check; no install needed
 pnpm skew:check                    # Fail on dependency version skew vs the pnpm catalog; no install needed
 pnpm sanitize:test                 # Fixture tests for scripts/sanitize-terraform-output.sh (terraform output secret redaction)
+pnpm deploy-staging:test           # ADR 0053 deployment source-staging contract on its own; `pnpm tf:test` also imports it
 pnpm override:prune-report          # pnpm.overrides + minimumReleaseAgeExclude pruning report (advisory; no install needed)
 pnpm adr:check                      # Advisory ADR reminder for architectural changes (new package/stack/workflow); --strict to hard-gate
 pnpm adr:check:test                 # Offline tests for the ADR reminder trigger logic

@@ -13,12 +13,12 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { checkTerraformFormat } from "./terraform-fmt-check.mjs";
+import { checkTerraformFormat } from "./terraform/terraform-fmt-check.mjs";
 import {
   assertPlatformTerraformEnvironment,
   parsePlatformCommandArgs,
   runGuardedPlatformCommand,
-} from "./tf-platform-plan-guard.mjs";
+} from "./terraform/tf-platform-plan-guard.mjs";
 
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),

@@ -127,16 +127,16 @@ contract that enforces it.
 ## Evidence
 
 - Plan policy:
-  [`scripts/check-metrics-bridge-template-plan.mjs`](../../scripts/check-metrics-bridge-template-plan.mjs),
+  [`scripts/terraform/check-metrics-bridge-template-plan.mjs`](../../scripts/terraform/check-metrics-bridge-template-plan.mjs),
   which reads HCL through the shared
   [`scripts/lib/hcl.mjs`](../../scripts/lib/hcl.mjs) core
   ([ADR 0064](0064-scripts-module-directories.md)). The core carries no policy;
   the target and refresh rules live here.
 - Wrapper and private-plan lifecycle:
-  [`scripts/tf-platform-plan-guard.mjs`](../../scripts/tf-platform-plan-guard.mjs)
+  [`scripts/terraform/tf-platform-plan-guard.mjs`](../../scripts/terraform/tf-platform-plan-guard.mjs)
   and [`scripts/tf-stacks.mjs`](../../scripts/tf-stacks.mjs)
 - Regression tests:
-  [`scripts/check-metrics-bridge-template-plan.test.mjs`](../../scripts/check-metrics-bridge-template-plan.test.mjs)
+  [`scripts/terraform/check-metrics-bridge-template-plan.test.mjs`](../../scripts/terraform/check-metrics-bridge-template-plan.test.mjs)
   and [`scripts/tf-stacks.test.mjs`](../../scripts/tf-stacks.test.mjs)
 - Cloud Run phase contract:
   [`terraform/metrics-bridge.tf`](../../terraform/metrics-bridge.tf)

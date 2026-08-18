@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 const defaultRepoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
+  "..",
 );
 const terraformFormatPathspecs = [
   ":(glob)**/*.tf",
@@ -157,7 +158,7 @@ function main() {
   const [modulePath, ...extraArgs] = process.argv.slice(2);
   if (!modulePath || extraArgs.length > 0) {
     process.stderr.write(
-      "Usage: node scripts/terraform-fmt-check.mjs <module-path>\n",
+      "Usage: node scripts/terraform/terraform-fmt-check.mjs <module-path>\n",
     );
     process.exit(2);
   }
