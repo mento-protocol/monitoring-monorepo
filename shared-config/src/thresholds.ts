@@ -5,8 +5,8 @@
 // IMPORTANT: alerts/rules/main.tf and alerts/rules/rules-fpmms.tf hard-code
 // these same numbers as HCL literals (1.01 for the OK/WARN boundary, 1.05 for
 // the WARN/CRITICAL boundary). HCL can't import TS exports, so any change here
-// must be mirrored there manually. `scripts/check-deviation-threshold-drift.mjs`
-// enforces that mirror.
+// must be mirrored there manually.
+// `scripts/alerts/check-deviation-threshold-drift.mjs` enforces that mirror.
 
 /**
  * OK/WARN boundary. A pool is considered "within tolerance" while

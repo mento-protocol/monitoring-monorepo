@@ -65,8 +65,8 @@ const expectedScripts = {
   // its side effects, so before this alias the largest suite in the tree could
   // only be run through the umbrella.
   "deploy-staging:test": "node scripts/deploy-staging-contract.test.mjs",
-  "alerts:rules:lint": "node scripts/alert-rules-lint.mjs",
-  "alerts:rules:lint:test": "node scripts/alert-rules-lint.test.mjs",
+  "alerts:rules:lint": "node scripts/alerts/alert-rules-lint.mjs",
+  "alerts:rules:lint:test": "node scripts/alerts/alert-rules-lint.test.mjs",
   "lockfile:lint": "node scripts/supply-chain/lockfile-lint.mjs",
   "lockfile:lint:test": "node scripts/supply-chain/lockfile-lint.test.mjs",
   "skew:check": "node scripts/supply-chain/version-skew-check.mjs",

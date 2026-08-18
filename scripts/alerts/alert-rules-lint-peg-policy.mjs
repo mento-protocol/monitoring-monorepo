@@ -1,50 +1,20 @@
-#!/usr/bin/env node
 /**
- * Static checks for the Grafana alert-rule stack in alerts/rules/.
+ * Peg policy half of the alert-rules linter.
  *
- * 1. PromQL syntax lint: extracts every PromQL expression embedded in the .tf
- *    files (expr attributes, *_promql / *_expr locals, format() templates,
- *    join() fragment lists, heredocs), neutralizes Terraform templating, and
- *    parses each expression with the Prometheus lezer grammar in strict mode.
- * 2. Metric cross-check: every mento_pool_* / mento_cdp_* / mento_peg_* series name
- *    referenced in alerts/rules must be registered in metrics-bridge.
- * 3. Peg policy cross-check: the gated threshold bundle is structurally strict,
- *    matches the service registry exactly, and keeps every peg PromQL selector
- *    bound to the accepted policy version set.
+ * Two checks live here. The bundle check reads alerts/rules/peg-thresholds.json
+ * and holds it to a strict shape: exact key sets, per-field numeric bands, the
+ * threshold relationships between warn and critical, and exact agreement with
+ * the metrics-bridge service registry. The PromQL check reads the expressions
+ * the extractor found and proves every mento_peg_* selector is bound to the
+ * policy version its rule is scoped to, so a rollover cannot leave a rule
+ * reading the wrong policy plane.
  *
- * The extractor is regex-based, not an HCL evaluator. The count floors
- * (ALERT_RULES_LINT_MIN_*) fail loudly if a future .tf refactor moves
- * expressions into shapes the extractor no longer sees; extend the extractor
- * instead of lowering the floor.
+ * ADR 0044 owns the gated rules plane these rules implement.
  */
-import { createHash } from "node:crypto";
-import { readdirSync, readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { parser } from "@prometheus-io/lezer-promql";
-
-const repoRoot = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "..",
-);
-const rulesDir =
-  process.env.ALERT_RULES_LINT_RULES_DIR ?? path.join(repoRoot, "alerts/rules");
-const metricsSrcDir =
-  process.env.ALERT_RULES_LINT_METRICS_DIR ??
-  path.join(repoRoot, "metrics-bridge/src");
-const pegPolicyPath =
-  process.env.ALERT_RULES_LINT_PEG_POLICY ??
-  path.join(rulesDir, "peg-thresholds.json");
-const pegRegistryPath =
-  process.env.ALERT_RULES_LINT_PEG_REGISTRY ??
-  path.join(repoRoot, "metrics-bridge/peg-registry.json");
-const GAUGE_SOURCE_FILES = [
-  "metrics.ts",
-  "cdp-metrics.ts",
-  "peg/metrics.ts",
-  "peg/listing-metrics.ts",
-];
-const LITERAL_PERCENT = "__ALERT_RULES_LINT_LITERAL_PERCENT__";
+import {
+  POLICY_VERSION_DIGEST_PATTERN,
+  pegPolicyVersionDigest,
+} from "../lib/peg-policy-digest.mjs";
 
 const POLICY_BUNDLE_KEYS = ["schemaVersion", "active", "previous"];
 const POLICY_VERSION_KEYS = ["version", "rolloverAckExpectedSeconds", "assets"];
@@ -74,7 +44,6 @@ const POLICY_SOURCE_KEYS = [
   "conversionErrorBps",
 ];
 const POLICY_VERSION_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/;
-const POLICY_VERSION_DIGEST_PATTERN = /-([0-9a-f]{32})$/;
 const MAX_POLICY_ASSETS = 32;
 const MAX_POLICY_SOURCES = 16;
 const APPROVED_POLICY_VERSION_INTERPOLATION = {
@@ -121,266 +90,8 @@ function effectiveListingAbsentConsecutiveChecks(source) {
   return source.listingAbsentConsecutiveChecks;
 }
 
-const intEnv = (name, fallback) => {
-  const raw = process.env[name];
-  return raw === undefined ? fallback : Number.parseInt(raw, 10);
-};
-
-// An HCL double-quoted string body. Handles \" escapes inside jsonencode.
-const QUOTED = String.raw`"((?:[^"\\]|\\.)*)"`;
-
-// Peg rollover scope is carried by a reserved Terraform-local name so the
-// production extractor and the semantic validator share one executable path.
-// Inline `expr` attributes remain intentionally unscoped and fail closed when
-// a previous policy is retained.
-function pegRuleForExpressionName(name) {
-  if (/^peg_rollover_ack_[a-z0-9_]+_(?:promql|expr)$/.test(name)) {
-    return { kind: "rollover-ack" };
-  }
-  const decision = /^peg_(active|previous)_[a-z0-9_]+_(?:promql|expr)$/.exec(
-    name,
-  );
-  return decision === null
-    ? undefined
-    : { kind: "decision", policy: decision[1] };
-}
-
-function extractedExpression(file, kind, name, expr) {
-  const pegRule = pegRuleForExpressionName(name);
-  return pegRule === undefined
-    ? { file, kind, expr }
-    : { file, kind, expr, pegRule };
-}
-
-function stripLineComment(line) {
-  let inString = false;
-  let escaped = false;
-
-  for (let i = 0; i < line.length; i += 1) {
-    const char = line[i];
-
-    if (inString) {
-      if (escaped) {
-        escaped = false;
-      } else if (char === "\\") {
-        escaped = true;
-      } else if (char === '"') {
-        inString = false;
-      }
-      continue;
-    }
-
-    if (char === '"') {
-      inString = true;
-    } else if (char === "#") {
-      return line.slice(0, i).trimEnd();
-    } else if (char === "/" && line[i + 1] === "/") {
-      return line.slice(0, i).trimEnd();
-    }
-  }
-
-  return line;
-}
-
-export const stripComments = (text) =>
-  text.split("\n").map(stripLineComment).join("\n");
-
-export const unescapeHcl = (value) => value.replace(/\\(["\\])/g, "$1");
-
-// Make a Terraform-templated expression parseable as plain PromQL. Terraform
-// ${...} interpolations and %s format verbs become a placeholder metric
-// selector; numeric format verbs become a literal 1; %% is Terraform's escaped
-// literal percent and becomes PromQL's modulo operator.
-export const neutralize = (expr) =>
-  expr
-    .replace(/%%/g, LITERAL_PERCENT)
-    .replace(/\$\{[^}]+\}/g, "placeholder_metric")
-    .replace(/%s/g, "placeholder_metric")
-    .replace(/%[dfg]/g, "1")
-    .replaceAll(LITERAL_PERCENT, "%");
-
-function findClosingBracket(text, openIndex) {
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
-
-  for (let i = openIndex; i < text.length; i += 1) {
-    const char = text[i];
-
-    if (inString) {
-      if (escaped) {
-        escaped = false;
-      } else if (char === "\\") {
-        escaped = true;
-      } else if (char === '"') {
-        inString = false;
-      }
-      continue;
-    }
-
-    if (char === '"') {
-      inString = true;
-    } else if (char === "[") {
-      depth += 1;
-    } else if (char === "]") {
-      depth -= 1;
-      if (depth === 0) return i;
-    }
-  }
-
-  return -1;
-}
-
-function extractJoinExpressions(file, text) {
-  const out = [];
-  const assignment = /^\s*(expr|[A-Za-z0-9_]*_(?:promql|expr))\s*=/gm;
-  for (const match of text.matchAll(assignment)) {
-    const name = match[1];
-    const bodyStart = match.index + match[0].length;
-    const nextAssignment = /^\s*[A-Za-z0-9_]+\s*=/gm;
-    nextAssignment.lastIndex = bodyStart;
-    const next = nextAssignment.exec(text);
-    const bodyEnd = next ? next.index : text.length;
-    const body = text.slice(bodyStart, bodyEnd);
-    const joinCall = new RegExp(String.raw`join\(\s*${QUOTED}\s*,\s*\[`, "g");
-
-    for (const join of body.matchAll(joinCall)) {
-      const separator = unescapeHcl(join[1]);
-      const open = join.index + join[0].lastIndexOf("[");
-      const close = findClosingBracket(body, open);
-      if (close === -1) continue;
-
-      const listBody = body.slice(open + 1, close);
-      const elem = new RegExp(String.raw`^\s*${QUOTED},?\s*$`, "gm");
-      const fragments = [];
-      for (const element of listBody.matchAll(elem)) {
-        const fragment = unescapeHcl(element[1]);
-        fragments.push(fragment);
-        out.push(extractedExpression(file, "join-elem", name, fragment));
-      }
-      if (fragments.length > 0) {
-        out.push(
-          extractedExpression(file, "join", name, fragments.join(separator)),
-        );
-      }
-    }
-  }
-
-  return out;
-}
-
-// `text` must already be comment-stripped.
-export function extractExpressions(file, text) {
-  const out = [];
-
-  // Pass A: single-line `expr = "..."` and `*_promql` / `*_expr` locals.
-  const single = new RegExp(
-    String.raw`^\s*(expr|[A-Za-z0-9_]*_(?:promql|expr))\s*=\s*${QUOTED}\s*,?\s*$`,
-    "gm",
-  );
-  for (const match of text.matchAll(single)) {
-    out.push(
-      extractedExpression(file, "single", match[1], unescapeHcl(match[2])),
-    );
-  }
-
-  // Pass B: format() templates (inline or template on the next line). Skip
-  // *_regex* locals (label-regex builders, not PromQL); accept `expr`,
-  // `*_promql` / `*_expr` names, and PascalCase duration-part map keys.
-  const fmt = new RegExp(
-    String.raw`^\s*([A-Za-z0-9_]+)\s*=\s*format\(\s*\n?\s*${QUOTED}`,
-    "gm",
-  );
-  for (const match of text.matchAll(fmt)) {
-    const name = match[1];
-    if (/_regex/.test(name)) continue;
-    if (
-      name !== "expr" &&
-      !/_(promql|expr)$/.test(name) &&
-      !/^[A-Z][A-Za-z0-9]*$/.test(name)
-    ) {
-      continue;
-    }
-    out.push(extractedExpression(file, "format", name, unescapeHcl(match[2])));
-  }
-
-  // Pass B2: map comprehensions whose value is a format() template. Peg rules
-  // use these to materialize one version-bound expression per asset/source;
-  // missing this shape would leave the generated decision plane unparsed.
-  const mapFmt = new RegExp(
-    String.raw`^\s*([A-Za-z0-9_]+_(?:promql|expr))\s*=\s*\{[\s\S]*?^\s*for\b[^\n]*=>\s*format\(\s*\n?\s*${QUOTED}`,
-    "gm",
-  );
-  for (const match of text.matchAll(mapFmt)) {
-    out.push(
-      extractedExpression(file, "map-format", match[1], unescapeHcl(match[2])),
-    );
-  }
-
-  // Pass C: heredocs assigned to expr / *_promql / *_expr.
-  const heredoc = new RegExp(
-    String.raw`^\s*(expr|[A-Za-z0-9_]*_(?:promql|expr))\s*=\s*<<-?EOT\n([\s\S]*?)^\s*EOT$`,
-    "gm",
-  );
-  for (const match of text.matchAll(heredoc)) {
-    out.push(extractedExpression(file, "heredoc", match[1], match[2]));
-  }
-
-  // Pass D: quoted fragments of join("...", [ ... ]) lists inside expr
-  // assignments, including format(..., join(...)) wrappers. HCL has no raw
-  // string escapes inside the bracket list, so scan for the matching closing
-  // bracket while ignoring PromQL range-selector brackets inside quoted
-  // fragments.
-  out.push(...extractJoinExpressions(file, text));
-
-  return out;
-}
-
-const strictParser = parser.configure({ strict: true });
-
-/** Returns null when `expr` parses, otherwise the parser error message. */
-export function lintPromql(expr) {
-  try {
-    strictParser.parse(expr);
-    return null;
-  } catch (error) {
-    return error instanceof Error ? error.message : String(error);
-  }
-}
-
-export const registeredMetricNames = (tsSource) =>
-  [...tsSource.matchAll(/name:\s*"(mento_[a-z0-9_]+)"/g)].map(
-    (match) => match[1],
-  );
-
-export const referencedMetricNames = (tfSource) =>
-  [...tfSource.matchAll(/\bmento_(?:pool|cdp|peg)_[a-z0-9_]*[a-z0-9]\b/g)].map(
-    (match) => match[0],
-  );
-
 function isObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function recursivelySortObjectKeys(value) {
-  if (Array.isArray(value)) return value.map(recursivelySortObjectKeys);
-  if (!isObject(value)) return value;
-  return Object.fromEntries(
-    Object.keys(value)
-      .sort()
-      .map((key) => [key, recursivelySortObjectKeys(value[key])]),
-  );
-}
-
-export function pegPolicyVersionDigest(policyVersion) {
-  if (!isObject(policyVersion)) return null;
-  const content = Object.fromEntries(
-    Object.entries(policyVersion).filter(([key]) => key !== "version"),
-  );
-  return createHash("sha256")
-    .update(JSON.stringify(recursivelySortObjectKeys(content)))
-    .digest("hex")
-    .slice(0, 32);
 }
 
 function validatePolicyVersionDigest(policy, location, failures) {
@@ -939,111 +650,10 @@ export function validatePegPromqlExpressions(expressions, policyVersions) {
   return failures;
 }
 
-function readJson(file, label, failures) {
-  try {
-    return JSON.parse(readFileSync(file, "utf8"));
-  } catch (error) {
-    failures.push(
-      `${label}: ${error instanceof Error ? error.message : String(error)}`,
-    );
-    return null;
-  }
-}
-
-function policyVersions(bundle) {
+/** The active/previous version pair the PromQL check binds selectors to. */
+export function pegPolicyVersions(bundle) {
   return {
     active: isObject(bundle?.active) ? bundle.active.version : "",
     previous: isObject(bundle?.previous) ? bundle.previous.version : null,
   };
-}
-
-function main() {
-  const minExpressions = intEnv("ALERT_RULES_LINT_MIN_EXPRESSIONS", 170);
-  const minRegistered = intEnv("ALERT_RULES_LINT_MIN_REGISTERED", 30);
-  const minReferenced = intEnv("ALERT_RULES_LINT_MIN_REFERENCED", 25);
-
-  const failures = [];
-  const referenced = new Set();
-  let expressions = [];
-
-  const pegPolicy = readJson(pegPolicyPath, "peg policy", failures);
-  const pegRegistry = readJson(pegRegistryPath, "peg registry", failures);
-  if (pegPolicy !== null && pegRegistry !== null) {
-    failures.push(...validatePegPolicyBundle(pegPolicy, pegRegistry));
-  }
-  const tfFiles = readdirSync(rulesDir)
-    .filter((file) => file.endsWith(".tf"))
-    .sort();
-
-  for (const file of tfFiles) {
-    const cleaned = stripComments(
-      readFileSync(path.join(rulesDir, file), "utf8"),
-    );
-    expressions.push(...extractExpressions(file, cleaned));
-    for (const name of referencedMetricNames(cleaned)) referenced.add(name);
-  }
-
-  for (const { file, kind, expr } of expressions) {
-    const neutralized = neutralize(expr);
-    const errorMessage = lintPromql(neutralized);
-    if (errorMessage !== null) {
-      failures.push(
-        `${file} [${kind}]: ${errorMessage}\n      ${neutralized.trim()}`,
-      );
-    }
-  }
-  failures.push(
-    ...validatePegPromqlExpressions(expressions, policyVersions(pegPolicy)),
-  );
-
-  const registered = new Set();
-  for (const file of GAUGE_SOURCE_FILES) {
-    const source = readFileSync(path.join(metricsSrcDir, file), "utf8");
-    for (const name of registeredMetricNames(source)) registered.add(name);
-  }
-
-  for (const name of [...referenced].sort()) {
-    if (!registered.has(name)) {
-      failures.push(
-        `unknown metric in alerts/rules: ${name} is not registered in metrics-bridge (${GAUGE_SOURCE_FILES.join(", ")})`,
-      );
-    }
-  }
-
-  if (expressions.length < minExpressions) {
-    failures.push(
-      `extraction floor: ${expressions.length} expressions < ${minExpressions} - extend the extractor in scripts/alert-rules-lint.mjs`,
-    );
-  }
-  if (registered.size < minRegistered) {
-    failures.push(
-      `gauge floor: ${registered.size} registered names < ${minRegistered}`,
-    );
-  }
-  if (referenced.size < minReferenced) {
-    failures.push(
-      `reference floor: ${referenced.size} referenced names < ${minReferenced}`,
-    );
-  }
-
-  console.log(
-    `alert-rules-lint: ${expressions.length} PromQL expressions parsed, ` +
-      `${referenced.size} referenced metric names checked against ${registered.size} registered gauges, peg policy validated`,
-  );
-
-  if (failures.length > 0) {
-    console.error(
-      `\n${failures.length} failure(s):\n${failures
-        .map((failure) => `  - ${failure}`)
-        .join("\n")}`,
-    );
-    process.exit(1);
-  }
-}
-
-if (
-  process.argv[1] &&
-  path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
-) {
-  main();
 }

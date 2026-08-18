@@ -17,7 +17,7 @@ garden_lane: agent-entry-points
 ## Scope
 
 `scripts/` holds deploy wrappers, agent quality gates, code-health checks, and
-repo maintenance utilities. 143 files sit flat at the top level today.
+repo maintenance utilities. 135 files sit flat at the top level today.
 
 ## Target Layout
 
@@ -40,12 +40,15 @@ Files stay flat until their phase merges.
 | `terraform/`    | P10   | movable Terraform guards and helpers   |
 | `gate/`         | P11   | quality-gate satellites                |
 
-Landed: P1, P2, P3, P4, P6, P7, P9, P10. `lib/` (the shared tier) and
+Landed: P1, P2, P3, P4, P6, P7, P8, P9, P10. `lib/` (the shared tier) and
 `production-infra-identity-contract/` predate the reorganization. `setup.sh`
 stays flat: `.config/wt.toml` runs that exact path as the Worktrunk pre-start
-hook, and eight docs name it.
+hook, and eight docs name it. `redrive-onchain-deadletter.{mjs,test.mjs}` stays
+flat although `alerts/infra/` owns it: `eslint.config.mjs` ignores `alerts/**`,
+so moving it there drops it out of `lint:scripts`. That ignore is
+config-relative; `scripts/alerts/**` stays linted.
 
-`lib/` holds generic cores carrying no domain policy: `hcl.mjs` (Terraform HCL
+`lib/` holds cores more than one cluster reads. `hcl.mjs` (Terraform HCL
 tokenizer and block extraction), `workflow-yaml.mjs` (Actions workflow and
 shell-run parsing), `pnpm-override-selector.mjs` (pnpm override selectors), and
 `gh-issue-lifecycle.mjs` (the `gh` runner, pagination guard, Documentation
@@ -54,8 +57,10 @@ Cores stay outside domain directories: five files beyond
 `production-infra-identity-contract/` read `hcl.mjs`, the ADR 0053
 deploy-staging contract reads `workflow-yaml.mjs`, both the lockfile-lint gate
 and the override prune advisor read the selector parser, and the documentation
-garden and navigation-eval schedulers both read the issue lifecycle. Inventories,
-pinned hashes, and identities stay with their domain.
+garden and navigation-eval schedulers both read the issue lifecycle.
+`peg-policy-digest.mjs` is the one definition of the peg version-digest contract
+both peg validators check. Inventories, pinned hashes, and identities stay with
+their domain.
 
 ## Why Files Stay Flat
 
@@ -86,11 +91,12 @@ that mechanism moves with it, in the same PR.
   (`ci.yml` `terraform`; `infra.yml` push and `pull_request`) also name
   `scripts/lib/hcl.mjs` and `scripts/lib/workflow-yaml.mjs`, outside the
   recursive `scripts/production-infra-identity-contract/**`; `routing.test.mjs`
-  there asserts all three. A miss is silent — the job stops running while the
-  required `ci` sentinel stays green. ADR 0064 covers when a module glob such as
-  `supply-chain.yml`'s `scripts/supply-chain/**` is the safer pin.
-- **Terraform stack registry.** `terraform.stacks.json` pins exact `scripts/`
-  paths per stack.
+  there asserts all three. A filter also names what its listed files import. A
+  miss is silent — the job stops running while the required `ci` sentinel stays
+  green. ADR 0064 covers when a module glob such as `supply-chain.yml`'s
+  `scripts/supply-chain/**` is the safer pin.
+- **Terraform stack registry.** `terraform.stacks.json` `changedPathPatterns`
+  pins exact `scripts/` paths per stack, mirrored into those filters.
 - **Production infrastructure contract pins.**
   `production-infra-identity-contract/workflow-inventory.mjs` pins exact script
   paths for the workflows it audits.
@@ -134,12 +140,9 @@ in the PR that moves a file. Every surface there is mandatory.
 - New Node root scripts need `pnpm lint:scripts` coverage; new shell scripts must
   pass `bash -n`. Add a focused command to `scripts/agent-quality-gate.sh` for
   behavior syntax and lint checks cannot verify.
-- `pnpm tf plan/apply platform` owns its saved plan. The wrapper keeps plan JSON
-  in memory only, checks the Metrics Bridge template mode, applies that same
-  private plan, uses one mode-`0600` snapshot of each variable file for both
-  phases, and deletes its temporary files. Never accept a caller plan path, or
-  print, upload, or cache either plan form. The guarded first-service bootstrap
-  plans below are a deploy-only exception. See
+- `pnpm tf plan/apply platform` owns one private saved plan. Never accept a
+  caller plan path, or print, upload, or cache either plan form. The wrapper
+  mechanism and its deploy-only bootstrap exception are in
   [ADR 0061](../docs/adr/0061-exact-plan-guard-for-manual-platform-applies.md).
 - `pnpm tf:test` enforces the deployment source-staging contract: the five
   allowed `gcloud builds submit` / `gcloud app deploy` callsites, the Metrics
