@@ -3786,6 +3786,15 @@ while IFS= read -r path; do
           add_command "pnpm agent:context-check" "agent context checker changed"
           add_command "node scripts/context/check-agent-context.test.mjs" "agent context checker changed"
           ;;
+        scripts/context/check-settings-contract.mjs|scripts/context/check-settings-contract.test.mjs)
+          # The `.claude/settings.json` permission allowlist and the SessionEnd
+          # hook wiring for both runtimes. `check-agent-context.mjs` is the only
+          # caller, and its suite holds the one test of that forwarding, so a
+          # change here routes both suites plus the real enforcement pass.
+          add_command "pnpm agent:context-check" "agent settings contract changed"
+          add_command "node scripts/context/check-settings-contract.test.mjs" "agent settings contract changed"
+          add_command "node scripts/context/check-agent-context.test.mjs" "agent settings contract changed"
+          ;;
         scripts/mcp/build-upstash-mcp-runtime.mjs|scripts/mcp/render-upstash-mcp-config.mjs|scripts/mcp/upstash-mcp-config.test.mjs|scripts/mcp/upstash-mcp-launcher.mjs)
           add_command "node --test scripts/mcp/upstash-mcp-config.test.mjs" "Upstash MCP transport contract changed"
           ;;

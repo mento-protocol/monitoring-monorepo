@@ -1053,6 +1053,11 @@ jobs:
         # Behavioral coverage of scripts/context/check-agent-context.mjs's pure
         # helpers: frontmatter parsing and the last_verified staleness window.
         run: node scripts/context/check-agent-context.test.mjs
+      - name: Agent settings contract tests
+        # Behavioral coverage of the .claude/settings.json permission allowlist
+        # and the SessionEnd hook wiring for both runtimes, which the context
+        # checker runs but no longer defines.
+        run: node scripts/context/check-settings-contract.test.mjs
       - name: Agent context checker
         # Runs the actual check-agent-context.mjs enforcement pass (managed
         # frontmatter + last_verified staleness policy) — the unit tests

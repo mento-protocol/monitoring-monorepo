@@ -125,7 +125,8 @@ scheduled document, for context an agent gets from the directory map in
   net, so it re-pins what the net covered: the `rootScripts` paths-filter now
   names both wrappers, because `agent-quality-gate.test.sh` copies and runs the
   diff wrapper in a stub repo, and the `.claude/settings.json` allowlist plus
-  its verbatim copy in `check-agent-context.mjs` carry the package path.
+  its verbatim copy in `context/check-settings-contract.mjs` carry the package
+  path.
 - An enumerated paths-filter fails silently rather than loudly: the job stops
   running, and the required `ci` sentinel stays green because a skipped job is
   not a failed one. Where a filter's whole file set is one module, replace the
@@ -172,7 +173,8 @@ routing, not procedure.
 5. `.trunk/trunk.yaml` pre-push hook, and `.gitattributes`.
 6. `.claude/settings.json`, `.codex/hooks.json`,
    `.claude/hooks/session-start.sh`, and the verbatim copies and invocation
-   regexes in `check-agent-context.mjs`.
+   regexes in `context/check-settings-contract.mjs`, which
+   `context/check-agent-context.mjs` runs.
 7. `.claude/skills/` and `.agents/skills/` — both mirrors.
 8. `docs/notes/quick-commands.md`.
 9. `agent-quality-gate.sh` routing arms — a literal-prefix glob such as
