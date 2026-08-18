@@ -81,7 +81,7 @@ both sit at or above BugBot on independent false-positive measurements.
 | Option              | Pricing model                                 | Est. monthly cost                                        |
 | ------------------- | --------------------------------------------- | -------------------------------------------------------- |
 | BugBot (status quo) | ~$1.00–1.50/run, uncapped, re-review per push | ~$560–1,680                                              |
-| CodeRabbit          | OSS tier free; else $24–30 for one seat       | **$0** (manual trigger; fallback $24–30)                 |
+| CodeRabbit          | Pro+ seat $48–60/mo + 25¢/file over-limit     | **~$60–180** (chosen); OSS $0 manual-trigger fallback    |
 | Greptile            | $30/seat incl. 50 reviews, then $1/review     | ~$260 (review-on-open only); $540–1,100 (re-review/push) |
 | Cubic               | Free unlimited on public repos                | $0                                                       |
 | Graphite Agent      | Flat $20–40/month, unlimited reviews          | $20–40                                                   |
@@ -96,22 +96,31 @@ and public repos with **fewer than 10 stars get no automatic reviews** —
 every review is triggered manually (`@coderabbitai review`). This repo has 0
 stars, so the $0 tier is manual-trigger-only; the trigger is a PR comment an
 agent or babysit loop can post. Seats bill per Git identity that **opens** a
-PR — pushing commits consumes nothing — so the paid fallback is one seat.
+PR — pushing commits consumes nothing — so the paid path is one seat.
+
+Rate limits decided the tier. The OSS tier has no usage-based buy-out: when
+its star-scaled ~1 review/hour allowance is exhausted, the review waits.
+Paid plans meter per developer identity under a fair-usage ladder — Pro
+sustains 1 review/hour once an identity passes 60 reviews per 7 days, while
+Pro+ still sustains 4/hour at this repo's ~65 reviews/week (falling to
+1/hour only past 90) — and both can enable the **usage-based add-on**
+(25¢ per reviewed file) so over-limit reviews continue instead of waiting.
 Observed at install: the org lands on a default 14-day Pro+ trial (3
-reviews/developer/hour, the source of the first rate-limit refusal),
-expiring 2026-09-01; an unsubscribed org then reverts to Free and its public
-repos to the OSS treatment.
+reviews/developer/hour, the source of the first rate-limit refusal). The
+operator upgraded the org to a paid Pro+ seat on 2026-08-18.
 
 ## Decision
 
 Replace BugBot with CodeRabbit as the third advisory reviewer.
 
-1. **Install** the CodeRabbit GitHub App on the repo (done 2026-08-18; the
-   org sits on the default Pro+ trial until 2026-09-01). Decide before the
-   trial ends: let the org revert to Free so the public repos ride the $0
-   OSS tier with manual/scripted triggers, or pay for one Pro seat at
-   $24–30/month for automatic reviews (5/hour nominal, fair-usage-degraded
-   at this volume).
+1. **Install and subscribe** (done 2026-08-18): the CodeRabbit GitHub App
+   with one paid **Pro+** seat ($60/month on monthly billing; $48/month
+   annual), chosen for throughput — 10 reviews/hour nominal, 4/hour
+   sustained at this repo's volume, automatic reviews on every PR. Enable
+   the **usage-based add-on** so over-limit reviews continue at 25¢ per
+   reviewed file instead of waiting. The $0 OSS tier (Pro+ features,
+   ~1/hour, manual-trigger-only under 10 stars, no add-on) remains the
+   documented fallback if spend must return to zero.
 2. **Commit `.coderabbit.yaml`** before the first review lands: start from the
    assertive-adjacent default only if noise proves low; otherwise use the
    `chill` profile or the July 2026 `quiet` profile (critical findings inline,
@@ -156,8 +165,9 @@ Replace BugBot with CodeRabbit as the third advisory reviewer.
   duplicates the precision-quiet role Codex already fills.
 - **Drop to two bots** — $0, but measurable coverage loss: 93.4% of findings
   in the parallel study were caught by exactly one tool, and BugBot delivered
-  5 accepted findings in the last 40 merged PRs here. Free CodeRabbit
-  dominates this option: same $0, coverage retained.
+  5 accepted findings in the last 40 merged PRs here. CodeRabbit's OSS tier
+  dominates this option at the same $0 (coverage retained, reduced cadence);
+  the chosen Pro+ seat buys the automatic cadence on top.
 - **Cubic / Korbit / Ellipsis** (free-for-public-repo tiers) — genuine $0
   candidates, but with thin or no independent quality evidence. Cubic
   (vendor-claimed 11% false-positive rate) is the designated zero-cost
@@ -174,22 +184,27 @@ Replace BugBot with CodeRabbit as the third advisory reviewer.
 
 ## Consequences
 
-- Review spend drops from ~$560–1,680/month (est.) to $0, with a $24–30/month
-  worst case. No component of the new stack meters per review run.
+- Review spend drops from ~$560–1,680/month (est.) to $48–60/month for one
+  Pro+ seat plus 25¢ per reviewed file on over-limit reviews — realistically
+  under ~$180/month in heavy months, with path filters shrinking the file
+  counts. BugBot's per-run meter, which scaled with agent iteration, is gone
+  from the default path; only explicit over-limit overflow is metered, and
+  the $0 OSS fallback caps downside.
 - The stack's third seat changes character from precision-quiet to
   high-recall. CodeRabbit's known weakness is verbosity; the quiet/chill
   profiles, path filters, and pause-after-reviewed-commits are the levers, and
   the feedback-ledger discipline (every finding gets a Fixed/Won't-fix reply)
   already forces per-finding triage. If noise stays high after tuning, that is
   a revisit trigger, not a live-with-it.
-- No CodeRabbit tier auto-reviews every push at this repo's volume. The OSS
-  tier requires manual triggers under 10 stars, and paid Pro's fair-usage
-  ladder drops a developer identity past 60 reviews per 7 days to 1
-  review/hour — this repo's ~65 PRs/week sits in that bucket. The workable
-  pattern on any tier is triggered reviews at ready points
-  (`@coderabbitai review`, label opt-in, or
-  `auto_pause_after_reviewed_commits`); the parallel-run window should
-  exercise it before BugBot is switched off.
+- No CodeRabbit tier auto-reviews every push unmetered at this repo's
+  volume. Pro+ sustains 4 reviews/hour at ~65 reviews/week and drops to
+  1/hour past 90, so agent fix-commit bursts either wait or bill through
+  the add-on. Set `auto_pause_after_reviewed_commits` low and prefer
+  triggered reviews at ready points (`@coderabbitai review`, label opt-in)
+  so the ladder spends on review rounds that matter; the parallel-run
+  window should exercise this before BugBot is switched off.
+  `@coderabbitai rate limit` reports remaining capacity without consuming
+  a review.
 - The cutover PR must sweep every live `cursor[bot]`/BugBot reference — the
   step-4 list above, re-verified by grep at cutover time rather than a fixed
   count, since references have already drifted once during this ADR's own
@@ -209,9 +224,10 @@ Replace BugBot with CodeRabbit as the third advisory reviewer.
   $15–25/review — ruinous at this volume. If the GitHub Action review path is
   ever folded into that product, this ADR's math changes and the stack needs
   re-deciding.
-- If CodeRabbit's public-repo terms change or throttling proves unworkable:
-  first fallback is one paid CodeRabbit Pro seat ($24–30/month); second is
-  Cubic (free, public repos); third is Graphite Agent (flat $20–40/month).
+- Fallback ladder from the paid seat: down to CodeRabbit's $0 OSS tier
+  (reduced, manual-trigger cadence); sideways to Cubic (free unlimited on
+  public repos) or Graphite Agent (flat $20–40/month unlimited) if
+  unmetered volume ever outranks CodeRabbit's quality evidence.
 
 ## Evidence
 
@@ -224,7 +240,12 @@ Replace BugBot with CodeRabbit as the third advisory reviewer.
 - CodeRabbit pricing and public-repo terms: coderabbit.ai/pricing,
   docs.coderabbit.ai/management/plans, docs.coderabbit.ai/management/seat-assignment
   (seat = PR-opener; pushes free), kb.coderabbit.ai article 8856795235
-  (open-source Pro activation). All fetched 2026-08-18.
+  (open-source activation). The plans page carries the fair-usage ladders
+  (Pro 5→1/hour, Pro+ 10→1/hour by 7-day volume), the OSS star-scaled
+  1–10/hour per-repo limits, the under-10-stars manual-trigger rule, and
+  add-on availability (paid plans only). The installed org's billing page
+  confirmed the default Pro+ trial and the 2026-08-18 paid upgrade. All
+  checked 2026-08-18.
 - Greptile pricing and OSS terms: greptile.com/pricing,
   greptile.com/blog/greptile-v4 (2026-03-05 model change),
   greptile.com/docs/code-review-bot/trigger-code-review (re-review is opt-in
