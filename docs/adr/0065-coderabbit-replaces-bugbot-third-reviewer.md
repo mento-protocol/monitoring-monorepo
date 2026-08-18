@@ -55,8 +55,8 @@ Decision criteria: review quality and cost.
   sample is too small and bursty to measure noise rates.
 - **The strongest independent head-to-head** (146 PRs / 679 findings, four
   bots run in parallel for 3 weeks, published May 2026): false-positive
-  rates were Greptile 0%, CodeRabbit 2.3%, BugBot 4.8%. CodeRabbit posted the
-  most findings (3.4/PR), Greptile the fewest (2.2/PR). 93.4% of findings were
+  rates were Greptile 0% (118 findings), CodeRabbit 2.3% (281), BugBot 4.8%
+  (128), and Sentry Seer — the fourth bot — ~9%. 93.4% of findings were
   caught by exactly **one** tool and none by all four — the bots are
   complementary, so removing one costs real coverage.
 - **Martian Code Review Bench**, the only independent rolling benchmark found:
