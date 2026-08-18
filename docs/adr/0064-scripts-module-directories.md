@@ -162,11 +162,18 @@ routing, not procedure.
    `implementation_signature()` path list is stricter than a glob: an entry it
    cannot stat hashes as `__missing__`, so the signature freezes and
    `--skip-if-fresh` reuses a stale stamp. Repoint it in the same commit.
-   The gate also imports `docs/docs-navigation-eval-helpers.mjs` from
-   `$script_source_dir` to classify routing-sensitive paths. That is a second,
-   differently-rooted literal for the same file: repoint both, and note that no
-   CI job runs the gate for real — `agent-quality-gate.test.sh` is the only
-   place either literal is exercised outside a developer's pre-push.
+   The gate also resolves node helpers from `$script_source_dir`:
+   `docs/docs-navigation-eval-helpers.mjs`, which classifies routing-sensitive
+   paths, and `lockfile-scope.mjs`. Those are differently-rooted literals for
+   files the routing arms and the signature list name again, so the classifier
+   appears three times in all — the import, its routing arm, and
+   `implementation_signature()`. Repoint every occurrence. No CI job runs the
+   gate for real, so `agent-quality-gate.test.sh` is the only place any of them
+   is exercised outside a developer's pre-push. `lockfile-scope.mjs` is the
+   quieter of the two: its caller reads a nonzero exit as "cannot narrow", so a
+   stale path silently widens every lockfile change to the full suite. It is
+   also absent from `implementation_signature()`; the phase that moves it into
+   `gate/` should add it.
 9. `terraform.stacks.json` — each stack's `changedPathPatterns` enumerates
    exact `scripts/` paths, and `tf-stacks.test.mjs` asserts three of them per
    stack. A stale entry stops the stack reacting to its own tooling.
@@ -185,7 +192,8 @@ not only the arm of the consumer that happens to fail loudest.
 ## Evidence
 
 - Flat-layout scale and prefix counts: `git ls-files scripts/` — 210 top-level
-  files, 53 with the `sentry-` prefix, at 2026-08-17.
+  files, 53 with the `sentry-` prefix, measured at P0. The count falls with each
+  phase; `scripts/AGENTS.md` carries the current one.
 - Bash `case` routing: `scripts/agent-autoreview.sh` (`scripts/*` arm),
   `scripts/agent-quality-gate.sh` (`scripts/*.sh`, `scripts/deploy-*.sh`, and
   the paired `scripts/sentry-*.test.mjs` / `scripts/*/sentry-*.test.mjs` arms).

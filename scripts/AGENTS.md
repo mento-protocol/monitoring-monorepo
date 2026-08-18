@@ -68,12 +68,13 @@ that mechanism moves with it, in the same PR.
 - **Gate source-directory guards.** `agent-quality-gate.sh` gates real-tree
   routing on `$script_source_dir == $repo_root/scripts`, leaving its stub-repo
   unit tests unaffected.
-- **Gate runtime module pins.** `agent-quality-gate.sh` names
-  `docs/docs-navigation-eval-helpers.mjs` in two separate literals, and both
-  must move together.
+- **Gate runtime module pins.** `agent-quality-gate.sh` resolves
+  `docs/docs-navigation-eval-helpers.mjs` and `lockfile-scope.mjs` from
+  `$script_source_dir`, and names the classifier in three literals. Repoint
+  every one; ADR 0064 lists them.
 - **Evaluation fixture forbidden lists.** `forbidden_sources` in
   `docs/evals/documentation-navigation-fixtures.json` names the navigation
-  eval's own implementation by exact path.
+  eval's own implementation.
 - **Sentry suite manifest.** `sentry-suite-manifest.json` keys are exact
   repo-relative paths, reconciled against `findSentrySuites()` by set equality
   both ways. A moved or renamed suite fails the gate closed.

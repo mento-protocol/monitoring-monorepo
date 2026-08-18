@@ -1905,10 +1905,11 @@ try {
   // queued on an async stderr, which is what stderr is whenever the gate runs
   // under a pipe rather than a terminal.
   //
-  // No apostrophes anywhere in this heredoc, in code or in prose. bash 3.2
-  // mis-scans one inside a heredoc nested in $( ), which is how the gate runs
-  // this snippet, and check-sentry-suites-in-ci-gate-probe parses the gate with
-  // /bin/bash — 3.2 on macOS — so one apostrophe reds three of its cases.
+  // Nothing in this heredoc, code or prose, may leave a quote, backtick, or
+  // paren unbalanced. bash 3.2 mis-scans one inside a heredoc nested in $( ),
+  // which is how the gate runs this snippet, and
+  // check-sentry-suites-in-ci-gate-probe parses the gate with /bin/bash — 3.2
+  // on macOS. A lone apostrophe in a comment reds three of its cases.
   writeSync(2, `${error instanceof Error ? error.message : String(error)}\n`);
   process.exit(3);
 }
