@@ -497,6 +497,8 @@ describe("board summary", () => {
       }),
     ).toEqual({
       text: "1 of 2 pegs healthy · 1 warning",
+      counts: "1 of 2 pegs healthy · 1 warning",
+      qualifier: null,
       tone: "warning",
       ariaLabel: "Some pegs need attention. EUROP crossed a warning threshold.",
     });
@@ -513,8 +515,14 @@ describe("board summary", () => {
         },
         furthest: null,
         closestWarning: null,
-      }).text,
-    ).toBe("0 of 1 peg healthy · 1 unconfirmed · latest data is stale");
+      }),
+    ).toMatchObject({
+      text: "0 of 1 peg healthy · 1 unconfirmed · latest data is stale",
+      // Split out so width-bound surfaces can place the qualifier themselves
+      // instead of overflowing or dropping it.
+      counts: "0 of 1 peg healthy · 1 unconfirmed",
+      qualifier: "latest data is stale",
+    });
   });
 });
 
