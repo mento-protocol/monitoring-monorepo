@@ -270,6 +270,11 @@ jobs:
               # skip the suite that proves its branch cleanup.
               - ui-dashboard/scripts/check-react-doctor-diff.sh
               - ui-dashboard/scripts/check-react-doctor-score.sh
+              # CodeRabbit reads .coderabbit.yaml from the PR's own source
+              # branch and its findings feed the pr:feedback-state ledger, so a
+              # config-only PR must still run the allowlist pin below. Without
+              # this entry the whole scripts job skips and the pin never runs.
+              - .coderabbit.yaml
               - docs/evals/documentation-navigation-*.json
               - .lighthouserc.cjs
               - "**/vitest.hermetic-setup.ts"
@@ -1039,6 +1044,15 @@ jobs:
         # Without this in CI, a routing regression only fails locally (pre-push)
         # and could merge if a contributor bypasses the local gate.
         run: pnpm agent:quality-gate:test
+      - name: CodeRabbit config allowlist pin
+        # ADR 0066. CodeRabbit resolves .coderabbit.yaml from the PR's SOURCE
+        # branch, so a PR can weaken the reviewer that reviews it — and its
+        # findings now feed the pr:feedback-state ledger. The pin asserts the
+        # committed config exactly equals the canonical object in the suite, so
+        # weakening it fails required CI until the pin is edited in the same PR.
+        # This runs in CI, not only in the local pre-push gate, because the
+        # local gate is the thing a config-weakening PR would skip.
+        run: pnpm coderabbit:config:test
       - name: Terraform source-format target regression suite
         # Proves ignored operator tfvars stay outside the explicit format target
         # list while tracked and non-ignored source paths remain covered.

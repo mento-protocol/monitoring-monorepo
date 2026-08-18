@@ -62,6 +62,10 @@ const expectedScripts = {
   "pr:feedback-state:test": "node scripts/pr-feedback-state.test.mjs",
   "pr:ready-state": "node scripts/pr-ready-state.mjs",
   "pr:ready-state:test": "node scripts/pr-ready-state.test.mjs",
+  // The .coderabbit.yaml allowlist pin (ADR 0066). CodeRabbit reads that config
+  // from the PR's own source branch, so the suite that pins it is exactly the
+  // command a weakening PR would want to drift.
+  "coderabbit:config:test": "node scripts/coderabbit-config.test.mjs",
   tf: "node scripts/tf-stacks.mjs",
   "tf:test": "node scripts/tf-stacks.test.mjs",
   // The ADR 0053 deploy-staging contract's own runner. `tf:test` imports it for

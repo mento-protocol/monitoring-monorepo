@@ -4510,6 +4510,15 @@ assert_contains "- node scripts/pr/review-process-metrics.test.mjs (review-proce
 run_gate "scripts/pr/review-process-metrics.test.mjs"
 assert_contains "- node scripts/pr/review-process-metrics.test.mjs (review-process metrics collector changed)"
 
+# The CodeRabbit config pin (ADR 0066). The config is a repo-root .yaml, so it
+# reaches no `scripts/*` arm and needs its own top-level route; both halves of
+# the pair must run the pin.
+run_gate ".coderabbit.yaml"
+assert_contains "- pnpm coderabbit:config:test (CodeRabbit review config changed)"
+
+run_gate "scripts/coderabbit-config.test.mjs"
+assert_contains "- pnpm coderabbit:config:test (CodeRabbit config pin changed)"
+
 run_gate "scripts/pr/agent-issue-board.mjs"
 assert_contains "- pnpm issue:board:test (agent issue board helper changed)"
 

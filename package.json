@@ -62,6 +62,7 @@
     "pr:feedback-state:test": "node scripts/pr-feedback-state.test.mjs",
     "pr:ready-state": "node scripts/pr-ready-state.mjs",
     "pr:ready-state:test": "node scripts/pr-ready-state.test.mjs",
+    "coderabbit:config:test": "node scripts/coderabbit-config.test.mjs",
     "tf": "node scripts/tf-stacks.mjs",
     "tf:test": "node scripts/tf-stacks.test.mjs",
     "deploy-staging:test": "node scripts/deploy-staging-contract.test.mjs",
