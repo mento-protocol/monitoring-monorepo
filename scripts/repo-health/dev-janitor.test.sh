@@ -25,7 +25,7 @@ touch -t 202501010000 "$old_dir"
 # fresh_dir keeps its just-created mtime (today).
 
 if ! JANITOR_TRUNK_REPOS_DIR="$trunk_repos_dir" JANITOR_STALE_DAYS=30 JANITOR_SKIP_SYSTEM=1 \
-  scripts/dev-janitor.sh > "$output_file"; then
+  scripts/repo-health/dev-janitor.sh > "$output_file"; then
   fail "dry-run exited nonzero, expected 0"
 fi
 
@@ -34,7 +34,7 @@ grep -q "fresh-repo" "$output_file" && fail "dry-run output named the fresh repo
 [[ -d "$old_dir" ]] || fail "dry-run deleted the old repo cache"
 [[ -d "$fresh_dir" ]] || fail "dry-run deleted the fresh repo cache"
 
-if scripts/dev-janitor.sh --bogus-flag > "$output_file" 2>&1; then
+if scripts/repo-health/dev-janitor.sh --bogus-flag > "$output_file" 2>&1; then
   fail "unknown flag exited 0, expected nonzero"
 fi
 
@@ -45,14 +45,14 @@ mkdir -p "$old_dir" "$fresh_dir"
 touch -t 202501010000 "$old_dir"
 
 if ! JANITOR_TRUNK_REPOS_DIR="$trunk_repos_dir" JANITOR_STALE_DAYS=30 JANITOR_SKIP_SYSTEM=1 \
-  scripts/dev-janitor.sh --apply > "$output_file"; then
+  scripts/repo-health/dev-janitor.sh --apply > "$output_file"; then
   fail "apply exited nonzero, expected 0"
 fi
 
 [[ ! -d "$old_dir" ]] || fail "apply did not delete the stale trunk repo cache"
 [[ -d "$fresh_dir" ]] || fail "apply deleted the fresh trunk repo cache"
 
-if JANITOR_TRUNK_REPOS_DIR="/" JANITOR_SKIP_SYSTEM=1 scripts/dev-janitor.sh --apply > "$output_file" 2>&1; then
+if JANITOR_TRUNK_REPOS_DIR="/" JANITOR_SKIP_SYSTEM=1 scripts/repo-health/dev-janitor.sh --apply > "$output_file" 2>&1; then
   fail "apply against unsafe trunk cache root exited 0, expected nonzero"
 fi
 
@@ -62,7 +62,7 @@ grep -q "refus" "$output_file" || fail "apply against unsafe trunk cache root di
 # refused, or --apply would delete depth-1 directories under it.
 ancestor_of_repo_root="$(dirname "$repo_root")"
 if JANITOR_TRUNK_REPOS_DIR="$ancestor_of_repo_root" JANITOR_SKIP_SYSTEM=1 \
-  scripts/dev-janitor.sh --apply > "$output_file" 2>&1; then
+  scripts/repo-health/dev-janitor.sh --apply > "$output_file" 2>&1; then
   fail "apply against an ancestor-of-repo-root cache dir exited 0, expected nonzero"
 fi
 

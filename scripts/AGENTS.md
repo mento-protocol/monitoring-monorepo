@@ -17,7 +17,7 @@ garden_lane: agent-entry-points
 ## Scope
 
 `scripts/` holds deploy wrappers, agent quality gates, code-health checks, and
-repo maintenance utilities. 165 files sit flat at the top level today.
+repo maintenance utilities. 153 files sit flat at the top level today.
 
 ## Target Layout
 
@@ -40,7 +40,7 @@ Files stay flat until their phase merges.
 | `terraform/`    | P10   | movable Terraform guards and helpers   |
 | `gate/`         | P11   | quality-gate satellites                |
 
-Landed: P1, P2, P3, P6, P7, P10. `lib/` (the shared tier) and
+Landed: P1, P2, P3, P6, P7, P9, P10. `lib/` (the shared tier) and
 `production-infra-identity-contract/` predate the reorganization. `setup.sh`
 stays flat: `.config/wt.toml` runs that exact path as the Worktrunk pre-start
 hook, and eight docs name it.

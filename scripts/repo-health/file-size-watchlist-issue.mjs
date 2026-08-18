@@ -160,7 +160,7 @@ function run(command, args, options = {}) {
 }
 
 function generateReport(root) {
-  const script = resolve(root, "scripts/file-size-watchlist.mjs");
+  const script = resolve(root, "scripts/repo-health/file-size-watchlist.mjs");
   const json = JSON.parse(
     run(process.execPath, [script, "--root", root, "--format", "json"]),
   );
@@ -211,7 +211,7 @@ function formatIssueBody({ report, actionableRows, repo, runUrl }) {
     "",
     "## Done means",
     "",
-    "Split or explicitly exempt each actionable row, preserve behavior with package tests, and rerun `node scripts/file-size-watchlist.mjs --format issue` until no actionable rows remain.",
+    "Split or explicitly exempt each actionable row, preserve behavior with package tests, and rerun `node scripts/repo-health/file-size-watchlist.mjs --format issue` until no actionable rows remain.",
   ].filter((line) => line !== null);
   return `${evidence.join("\n")}\n`;
 }
