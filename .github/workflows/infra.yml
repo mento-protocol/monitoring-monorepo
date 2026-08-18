@@ -18,16 +18,16 @@ on:
       - governance-watchdog/tsconfig.json
       - governance-watchdog/tsconfig.build.json
       - terraform.stacks.json
-      - scripts/check-metrics-bridge-template-plan.mjs
-      - scripts/check-metrics-bridge-template-plan.test.mjs
+      - scripts/terraform/check-metrics-bridge-template-plan.mjs
+      - scripts/terraform/check-metrics-bridge-template-plan.test.mjs
       - scripts/check-peg-policy-publication.mjs
       - scripts/check-peg-policy-publication.test.mjs
       - scripts/production-infra-identity-contract/**
       # Shared parsing cores (ADR 0064) that sit outside the prefix above.
       - scripts/lib/hcl.mjs
       - scripts/lib/workflow-yaml.mjs
-      - scripts/terraform-fmt-check.mjs
-      - scripts/tf-platform-plan-guard.mjs
+      - scripts/terraform/terraform-fmt-check.mjs
+      - scripts/terraform/tf-platform-plan-guard.mjs
       - scripts/tf-stacks.mjs
       - scripts/tf-stacks.test.mjs
       - .github/workflows/alerts-infra.yml
@@ -50,16 +50,16 @@ on:
       - governance-watchdog/tsconfig.json
       - governance-watchdog/tsconfig.build.json
       - terraform.stacks.json
-      - scripts/check-metrics-bridge-template-plan.mjs
-      - scripts/check-metrics-bridge-template-plan.test.mjs
+      - scripts/terraform/check-metrics-bridge-template-plan.mjs
+      - scripts/terraform/check-metrics-bridge-template-plan.test.mjs
       - scripts/check-peg-policy-publication.mjs
       - scripts/check-peg-policy-publication.test.mjs
       - scripts/production-infra-identity-contract/**
       # Shared parsing cores (ADR 0064) that sit outside the prefix above.
       - scripts/lib/hcl.mjs
       - scripts/lib/workflow-yaml.mjs
-      - scripts/terraform-fmt-check.mjs
-      - scripts/tf-platform-plan-guard.mjs
+      - scripts/terraform/terraform-fmt-check.mjs
+      - scripts/terraform/tf-platform-plan-guard.mjs
       - scripts/tf-stacks.mjs
       - scripts/tf-stacks.test.mjs
       - .github/workflows/alerts-infra.yml

@@ -79,7 +79,7 @@ the Grafana provider and an Admin provisioning input for that purpose alone; it
 owns no Grafana rules, folders, or dashboards.
 
 Rotation is a reviewed counter, `grafana_dashboard_reader_token_rotation_counter`.
-`scripts/tf-platform-plan-guard.mjs` parses platform Terraform arguments against
+`scripts/terraform/tf-platform-plan-guard.mjs` parses platform Terraform arguments against
 a strict allowlist, so `-replace` is unavailable on this stack, and
 [ADR 0030](0030-iac-before-cli-secrets.md) rules out rolling the credential by
 hand in the Grafana console. Incrementing the counter mints the replacement and

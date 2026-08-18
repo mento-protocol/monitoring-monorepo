@@ -72,7 +72,7 @@ resource "github_actions_variable" "gcp_peg_policy_publication_plan_service_acco
 # `.github/workflows/{governance-watchdog,aegis-terraform,alerts-infra,
 # alerts-rules}.yml` each read `vars.TERRAFORM_APPLY_SLACK_CHANNEL` (falling
 # back to a hardcoded `#deploys` when the variable is unset) to choose
-# where `scripts/notify-terraform-apply.mjs` posts its apply-pending
+# where `scripts/terraform/notify-terraform-apply.mjs` posts its apply-pending
 # summary. Before this resource, that fallback only existed as duplicated
 # workflow YAML; this makes the routing an explicit, versioned GitHub
 # Actions variable instead.

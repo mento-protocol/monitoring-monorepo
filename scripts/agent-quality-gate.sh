@@ -2679,7 +2679,7 @@ add_root_tooling_package_script_checks() {
   add_command "node scripts/check-sentry-suites-in-ci.test.mjs" "$reason"
   add_command "node scripts/pr-feedback-state.test.mjs" "$reason"
   add_command "node scripts/pr-ready-state.test.mjs" "$reason"
-  add_command "node scripts/terraform-fmt-check.test.mjs" "$reason"
+  add_command "node scripts/terraform/terraform-fmt-check.test.mjs" "$reason"
   add_command "node scripts/tf-stacks.test.mjs" "$reason"
   add_command "node scripts/supply-chain/lockfile-lint.test.mjs" "$reason"
   add_command "node scripts/supply-chain/version-skew-check.test.mjs" "$reason"
@@ -2763,7 +2763,7 @@ add_terraform_validate_commands() {
   local module="$1"
   local reason="$2"
   local tf_data_dir="${module}/.terraform-agent-gate"
-  add_command "TF_DATA_DIR=${tf_data_dir} node scripts/terraform-fmt-check.mjs $(quote_path "$module")" "$reason"
+  add_command "TF_DATA_DIR=${tf_data_dir} node scripts/terraform/terraform-fmt-check.mjs $(quote_path "$module")" "$reason"
   add_command "TF_DATA_DIR=${tf_data_dir} terraform -chdir=${module} init -backend=false -input=false" "$reason"
   add_command "TF_DATA_DIR=${tf_data_dir} terraform -chdir=${module} validate -no-color" "$reason"
 }
@@ -3947,7 +3947,12 @@ while IFS= read -r path; do
         scripts/pr/review-process-metrics.mjs|scripts/pr/review-process-metrics.test.mjs)
           add_command "node scripts/pr/review-process-metrics.test.mjs" "review-process metrics collector changed"
           ;;
-        scripts/check-metrics-bridge-template-plan.mjs|scripts/check-metrics-bridge-template-plan.test.mjs|scripts/tf-platform-plan-guard.mjs|scripts/tf-stacks.mjs|scripts/tf-stacks.test.mjs)
+        # Enumerated, not `scripts/terraform/*`: a glob here would win over the
+        # two `terraform-fmt-check` arms below, which bash `case` never reaches
+        # once an earlier arm matches, and the format helper would silently lose
+        # its own suite. `scripts/tf-stacks.{mjs,test.mjs}` stay flat — seven
+        # security-contract pins name those exact paths (scripts/AGENTS.md).
+        scripts/terraform/check-metrics-bridge-template-plan.mjs|scripts/terraform/check-metrics-bridge-template-plan.test.mjs|scripts/terraform/tf-platform-plan-guard.mjs|scripts/tf-stacks.mjs|scripts/tf-stacks.test.mjs)
           add_command "pnpm tf:test" "Terraform stack wrapper changed"
           add_terraform_validate_commands "terraform" "Terraform stack wrapper changed"
           add_terraform_validate_commands "alerts/rules" "Terraform stack wrapper changed"
@@ -3956,8 +3961,8 @@ while IFS= read -r path; do
           add_terraform_validate_commands "governance-watchdog/infra" "Terraform stack wrapper changed"
           add_registered_terraform_validate_commands "Terraform stack wrapper changed"
           ;;
-        scripts/terraform-fmt-check.mjs)
-          add_command "node scripts/terraform-fmt-check.test.mjs" "Terraform format helper changed"
+        scripts/terraform/terraform-fmt-check.mjs)
+          add_command "node scripts/terraform/terraform-fmt-check.test.mjs" "Terraform format helper changed"
           add_command "pnpm tf:test" "Terraform format helper changed"
           add_terraform_validate_commands "terraform" "Terraform format helper changed"
           add_terraform_validate_commands "alerts/rules" "Terraform format helper changed"
@@ -3966,8 +3971,8 @@ while IFS= read -r path; do
           add_terraform_validate_commands "governance-watchdog/infra" "Terraform format helper changed"
           add_registered_terraform_validate_commands "Terraform format helper changed"
           ;;
-        scripts/terraform-fmt-check.test.mjs)
-          add_command "node scripts/terraform-fmt-check.test.mjs" "Terraform format helper test changed"
+        scripts/terraform/terraform-fmt-check.test.mjs)
+          add_command "node scripts/terraform/terraform-fmt-check.test.mjs" "Terraform format helper test changed"
           ;;
         scripts/supply-chain/lockfile-lint.mjs|scripts/supply-chain/lockfile-lint.test.mjs|scripts/supply-chain/lockfile-lint-registry-sources.mjs|scripts/supply-chain/lockfile-lint-override-ranges.mjs)
           add_command "pnpm lockfile:lint:test" "lockfile lint helper changed"
@@ -4043,11 +4048,11 @@ while IFS= read -r path; do
         scripts/check-deviation-threshold-drift.test.mjs)
           add_command "node scripts/check-deviation-threshold-drift.test.mjs" "deviation threshold drift checker test changed"
           ;;
-        scripts/notify-terraform-apply.mjs|scripts/notify-terraform-apply.test.mjs)
-          add_command "node scripts/notify-terraform-apply.test.mjs" "Terraform apply Slack notifier changed"
+        scripts/terraform/notify-terraform-apply.mjs|scripts/terraform/notify-terraform-apply.test.mjs)
+          add_command "node scripts/terraform/notify-terraform-apply.test.mjs" "Terraform apply Slack notifier changed"
           ;;
-        scripts/check-terraform-deploy-queue.mjs|scripts/check-terraform-deploy-queue.test.mjs)
-          add_command "node scripts/check-terraform-deploy-queue.test.mjs" "Terraform deploy queue watcher changed"
+        scripts/terraform/check-terraform-deploy-queue.mjs|scripts/terraform/check-terraform-deploy-queue.test.mjs)
+          add_command "node scripts/terraform/check-terraform-deploy-queue.test.mjs" "Terraform deploy queue watcher changed"
           ;;
         scripts/redrive-onchain-deadletter.mjs|scripts/redrive-onchain-deadletter.test.mjs)
           add_command "node scripts/redrive-onchain-deadletter.test.mjs" "onchain dead-letter redrive tool changed"
@@ -4175,8 +4180,11 @@ while IFS= read -r path; do
   # runs — it names the reason and keeps the routing correct if that sweep is
   # ever narrowed. The glob is deliberately wider than the two files so a
   # future shared core added to `scripts/lib/` cannot land unrouted.
+  # `scripts/terraform/*.mjs` (P10) does the same for the moved apply-path
+  # guards: `tf-stacks.mjs` imports two of them, so a change there reaches the
+  # contract through the wrapper.
   case "$path" in
-    terraform/*|aegis/terraform/*|alerts/infra/*|alerts/rules/*|governance-watchdog/infra/*|.github/workflows/*|scripts/production-infra-identity-contract/*.mjs|scripts/lib/*.mjs|scripts/sanitize-terraform-output.sh|scripts/verify-github-environment-protection.mjs)
+    terraform/*|aegis/terraform/*|alerts/infra/*|alerts/rules/*|governance-watchdog/infra/*|.github/workflows/*|scripts/production-infra-identity-contract/*.mjs|scripts/lib/*.mjs|scripts/terraform/*.mjs|scripts/sanitize-terraform-output.sh|scripts/verify-github-environment-protection.mjs)
       add_command "pnpm tf:test" "production infrastructure identity contract surface changed"
       ;;
   esac
@@ -4413,8 +4421,8 @@ implementation_signature() {
     scripts/agent-quality-gate.test.sh \
     scripts/check-agent-quality-gate-package-scripts.sh \
     scripts/docs-navigation-eval-helpers.mjs \
-    scripts/terraform-fmt-check.mjs \
-    scripts/terraform-fmt-check.test.mjs \
+    scripts/terraform/terraform-fmt-check.mjs \
+    scripts/terraform/terraform-fmt-check.test.mjs \
     turbo.json \
     .trunk/trunk.yaml; do
     if [[ -f "$path" ]]; then
@@ -5145,7 +5153,7 @@ is_quality_setup_command() {
     TF_DATA_DIR=*terraform\ -chdir=*)
       return 0
       ;;
-    TF_DATA_DIR=*node\ scripts/terraform-fmt-check.mjs\ *)
+    TF_DATA_DIR=*node\ scripts/terraform/terraform-fmt-check.mjs\ *)
       return 0
       ;;
   esac
