@@ -2464,26 +2464,29 @@ assert_contains "- node scripts/repo-health/check-hermetic-vitest-setup.mjs (her
 run_gate "bootstrap-worktree.sh"
 assert_contains "- bash -n bootstrap-worktree.sh (shell script changed)"
 
-run_gate "scripts/deploy-indexer.sh"
-assert_contains "- bash -n scripts/deploy-indexer.sh (shell script changed)"
+run_gate "scripts/deploy/deploy-indexer.sh"
+assert_contains "- bash -n scripts/deploy/deploy-indexer.sh (shell script changed)"
 assert_contains "- node scripts/check-deploy-root-anchors.test.mjs (deploy wrapper changed)"
 
+# deploy-indexer-status.sh is the one wrapper that stays flat (its disposition is
+# a Node rewrite, tracked separately). Pin that it still routes the wrapper
+# contract from the top level, so the move cannot strand it.
 run_gate "scripts/deploy-indexer-status.sh"
 assert_contains "- bash -n scripts/deploy-indexer-status.sh (shell script changed)"
 assert_contains "- node scripts/check-deploy-root-anchors.test.mjs (deploy wrapper changed)"
 
-run_gate "scripts/deploy-indexer-logs.sh"
-assert_contains "- bash -n scripts/deploy-indexer-logs.sh (shell script changed)"
+run_gate "scripts/deploy/deploy-indexer-logs.sh"
+assert_contains "- bash -n scripts/deploy/deploy-indexer-logs.sh (shell script changed)"
 assert_contains "- node scripts/check-deploy-root-anchors.test.mjs (deploy wrapper changed)"
-assert_contains "- node scripts/filter-envio-runtime-errors.test.mjs (indexer runtime-log filter changed)"
+assert_contains "- node scripts/deploy/filter-envio-runtime-errors.test.mjs (indexer runtime-log filter changed)"
 
-run_gate "scripts/filter-envio-runtime-errors.mjs"
+run_gate "scripts/deploy/filter-envio-runtime-errors.mjs"
 assert_contains "- pnpm lint:scripts (root build script changed)"
-assert_contains "- node scripts/filter-envio-runtime-errors.test.mjs (indexer runtime-log filter changed)"
+assert_contains "- node scripts/deploy/filter-envio-runtime-errors.test.mjs (indexer runtime-log filter changed)"
 
-run_gate "scripts/filter-envio-runtime-errors.test.mjs"
+run_gate "scripts/deploy/filter-envio-runtime-errors.test.mjs"
 assert_contains "- pnpm lint:scripts (root build script changed)"
-assert_contains "- node scripts/filter-envio-runtime-errors.test.mjs (indexer runtime-log filter changed)"
+assert_contains "- node scripts/deploy/filter-envio-runtime-errors.test.mjs (indexer runtime-log filter changed)"
 
 for path in \
   scripts/repo-health/file-size-watchlist.mjs \
@@ -2494,59 +2497,83 @@ for path in \
   assert_contains "- node --test scripts/repo-health/file-size-watchlist.test.mjs (file-size watchlist automation changed)"
 done
 
-run_gate "scripts/deploy-indexer-verify.mjs"
+# The Node deploy helpers moved with the wrappers. Their arms match exact paths,
+# so a stale pattern stops routing the focused suite silently — assert each of
+# the four moved specifiers reaches its own test.
+run_gate "scripts/deploy/deploy-indexer-verify.mjs"
 assert_contains "- pnpm lint:scripts (root build script changed)"
-assert_contains "- node scripts/deploy-indexer-verify.test.mjs (indexer deploy verifier changed)"
+assert_contains "- node scripts/deploy/deploy-indexer-verify.test.mjs (indexer deploy verifier changed)"
 
-run_gate "scripts/deploy-indexer-verify.test.mjs"
+run_gate "scripts/deploy/deploy-indexer-verify.test.mjs"
 assert_contains "- pnpm lint:scripts (root build script changed)"
-assert_contains "- node scripts/deploy-indexer-verify.test.mjs (indexer deploy verifier changed)"
+assert_contains "- node scripts/deploy/deploy-indexer-verify.test.mjs (indexer deploy verifier changed)"
+
+run_gate "scripts/deploy/deploy-indexer-perf.mjs"
+assert_contains "- pnpm lint:scripts (root build script changed)"
+assert_contains "- node scripts/deploy/deploy-indexer-perf.test.mjs (indexer deploy perf helper changed)"
+
+run_gate "scripts/deploy/deploy-indexer-perf.test.mjs"
+assert_contains "- pnpm lint:scripts (root build script changed)"
+assert_contains "- node scripts/deploy/deploy-indexer-perf.test.mjs (indexer deploy perf helper changed)"
+
+# The pre-move paths must route NOTHING helper-specific any more. Without this
+# the suite would still pass if an arm kept both spellings, which is how a
+# half-finished move survives review.
+run_gate "scripts/deploy-indexer-verify.mjs"
+assert_not_contains "- node scripts/deploy/deploy-indexer-verify.test.mjs (indexer deploy verifier changed)"
 
 run_gate "scripts/deploy-indexer-perf.mjs"
-assert_contains "- pnpm lint:scripts (root build script changed)"
-assert_contains "- node scripts/deploy-indexer-perf.test.mjs (indexer deploy perf helper changed)"
+assert_not_contains "- node scripts/deploy/deploy-indexer-perf.test.mjs (indexer deploy perf helper changed)"
 
-run_gate "scripts/deploy-indexer-perf.test.mjs"
-assert_contains "- pnpm lint:scripts (root build script changed)"
-assert_contains "- node scripts/deploy-indexer-perf.test.mjs (indexer deploy perf helper changed)"
-
-run_gate "scripts/deploy-bridge.sh"
+run_gate "scripts/deploy/deploy-bridge.sh"
 assert_contains "- docs/pr-checklists/terraform-cloudrun.md (Cloud Run deploy script changed)"
-assert_occurrences 1 "- bash -n scripts/deploy-bridge.sh (shell script changed)"
+assert_occurrences 1 "- bash -n scripts/deploy/deploy-bridge.sh (shell script changed)"
 assert_contains "- node scripts/check-deploy-root-anchors.test.mjs (deploy wrapper changed)"
+assert_contains "- pnpm agent:context-check (Cloud Run revision suffix guard changed)"
 
 run_gate "scripts/check-deploy-root-anchors.test.mjs"
 assert_contains "- pnpm lint:scripts (root build script changed)"
 assert_contains "- node scripts/check-deploy-root-anchors.test.mjs (deploy root-anchor test changed)"
 
-# A deploy wrapper that lands under scripts/deploy/ must route the same
-# root-anchor contract the flat wrappers route today. `scripts/deploy-*.sh` is
-# anchored on a literal prefix at the TOP of scripts/, so it stops matching one
-# directory down and the check simply stops being scheduled — nothing reds.
-# ADR 0064's remedy is the paired one-level arm, and check-deploy-root-anchors
-# .test.mjs already walks scripts/ recursively, so only the routing was missing.
-# The path need not exist (see the nested Sentry suite cases below); `bash -n`
-# is skipped for a path with no file, so only the routed check is asserted.
-run_gate "scripts/deploy/deploy-indexer.sh"
+# The wrappers themselves are asserted at their real paths above. What is left to
+# pin is the routing the move does NOT make concrete: depth beyond one level, the
+# sibling path the pattern also reaches, and the Node negative control.
+#
+# Two levels down. The wrappers sit at scripts/deploy/ today, so a one-level
+# assertion alone would not notice a pattern narrowed to exactly that directory.
+# `*` matches `/` in a `case` pattern, so the pair reaches any depth — assert a
+# generic wrapper and a specialized one, because the specialized arm matches an
+# exact basename and could be narrowed independently of the glob.
+run_gate "scripts/deploy/region/deploy-probe.sh"
 assert_contains "- node scripts/check-deploy-root-anchors.test.mjs (deploy wrapper changed)"
 
-# The bridge carries a Cloud Run arm of its own in a later `case` statement, so
-# asserting only the root-anchor check here would record post-move under-routing
-# as the expectation. Require the full set the flat path gets above.
-run_gate "scripts/deploy/deploy-bridge.sh"
+run_gate "scripts/deploy/region/deploy-indexer-logs.sh"
+assert_contains "- node scripts/check-deploy-root-anchors.test.mjs (deploy wrapper changed)"
+assert_contains "- node scripts/deploy/filter-envio-runtime-errors.test.mjs (indexer runtime-log filter changed)"
+
+# The Node helpers get the same depth pin, and need it more: a wrapper that moves
+# again still lands on the generic deploy glob, while a .mjs has no
+# deploy-specific fallback — it would keep only `pnpm lint:scripts` and stop
+# running its suite with nothing red.
+run_gate "scripts/deploy/region/deploy-indexer-verify.mjs"
+assert_contains "- node scripts/deploy/deploy-indexer-verify.test.mjs (indexer deploy verifier changed)"
+
+run_gate "scripts/deploy/region/deploy-indexer-perf.test.mjs"
+assert_contains "- node scripts/deploy/deploy-indexer-perf.test.mjs (indexer deploy perf helper changed)"
+
+run_gate "scripts/deploy/region/filter-envio-runtime-errors.mjs"
+assert_contains "- node scripts/deploy/filter-envio-runtime-errors.test.mjs (indexer runtime-log filter changed)"
+
+# The bridge carries the most to lose at depth — narrowing its arm back to the
+# exact path would drop the Cloud Run checklist and the revision-suffix guard,
+# and only this case would notice.
+run_gate "scripts/deploy/region/deploy-bridge.sh"
 assert_contains "- node scripts/check-deploy-root-anchors.test.mjs (deploy wrapper changed)"
 assert_contains "- docs/pr-checklists/terraform-cloudrun.md (Cloud Run deploy script changed)"
 assert_contains "- pnpm agent:context-check (Cloud Run revision suffix guard changed)"
 
-# The wrapper with a two-command arm of its own, and the one case where the
-# widened glob is actively dangerous: its arm sits FIRST and matches an exact
-# path, so after a move the glob below would catch the path and schedule only
-# the root-anchor check. The run still looks routed while the runtime-log filter
-# check is gone. Assert BOTH commands survive the move, not just the one the
-# widened arm supplies.
-run_gate "scripts/deploy/deploy-indexer-logs.sh"
-assert_contains "- node scripts/check-deploy-root-anchors.test.mjs (deploy wrapper changed)"
-assert_contains "- node scripts/filter-envio-runtime-errors.test.mjs (indexer runtime-log filter changed)"
+run_gate "scripts/filter-envio-runtime-errors.mjs"
+assert_not_contains "- node scripts/deploy/filter-envio-runtime-errors.test.mjs (indexer runtime-log filter changed)"
 
 # `*` matches `/`, so the paired arm reaches a `deploy-*.sh` basename under ANY
 # scripts/ subdirectory, not only a future scripts/deploy/. That breadth is the
@@ -2684,7 +2711,7 @@ assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate node scripts/terr
 
 for deploy_staging_contract_case in \
   '.github/workflows/metrics-bridge.yml|docs/pr-checklists/terraform-cloudrun.md (metrics bridge Cloud Run workflow changed)' \
-  'scripts/deploy-bridge.sh|node scripts/check-deploy-root-anchors.test.mjs (deploy wrapper changed)' \
+  'scripts/deploy/deploy-bridge.sh|node scripts/check-deploy-root-anchors.test.mjs (deploy wrapper changed)' \
   'aegis/grafana-agent/deploy.sh|docs/pr-checklists/ci-workflow-gates.md (Aegis deploy path changed)' \
   'aegis/bin/deploy.sh|docs/pr-checklists/ci-workflow-gates.md (Aegis deploy path changed)' \
   'aegis/grafana-agent/cloudbuild.yaml|docs/pr-checklists/ci-workflow-gates.md (Aegis deploy path changed)' \
@@ -3996,11 +4023,11 @@ rename_repo="$(mktemp -d)"
   git init -q
   git config user.email test@example.invalid
   git config user.name "Quality Gate Test"
-  mkdir -p scripts
-  printf '#!/usr/bin/env bash\n' > scripts/deploy-bridge.sh
+  mkdir -p scripts/deploy
+  printf '#!/usr/bin/env bash\n' > scripts/deploy/deploy-bridge.sh
   git add .
   git commit -qm init
-  git mv scripts/deploy-bridge.sh docs.md
+  git mv scripts/deploy/deploy-bridge.sh docs.md
   "$repo_root/scripts/agent-quality-gate.sh" --base HEAD > "$output_file"
 )
 rm -rf "$rename_repo"
@@ -4178,9 +4205,9 @@ run_context_check_expect_failure
 assert_contains ".claude/settings.json: unexpected bash scripts allow: Bash(bash ./scripts/*)"
 restore_hook_configs
 
-append_claude_allow "Bash(bash ./scripts/deploy-dashboard.sh:*)"
+append_claude_allow "Bash(bash ./scripts/deploy/deploy-dashboard.sh:*)"
 run_context_check_expect_failure
-assert_contains ".claude/settings.json: must not allow deploy/promote scripts: Bash(bash ./scripts/deploy-dashboard.sh:*)"
+assert_contains ".claude/settings.json: must not allow deploy/promote scripts: Bash(bash ./scripts/deploy/deploy-dashboard.sh:*)"
 restore_hook_configs
 
 run_gate "docs/deleted.md"

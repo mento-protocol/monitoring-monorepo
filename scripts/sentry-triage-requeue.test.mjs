@@ -184,12 +184,19 @@ await test("buildRegressedComment has exactly one call site: the chokepoint", ()
   // #1716 shipped a re-queue that quietly lacked the fence because the fence was
   // something each producer chose to emit. Keeping the builder to a single
   // caller is what makes "declare a cause" the only way to get one.
+  // Recursive: scripts/ is a tree now (ADR 0064). A flat readdir silently stops
+  // seeing every module the reorganization relocates, so "one call site" would
+  // become "one call site among the files that happen to still be flat".
   const scriptsDir = dirname(fileURLToPath(import.meta.url));
   const offenders = [];
   let scanned = 0;
-  for (const file of readdirSync(scriptsDir)) {
+  for (const file of readdirSync(scriptsDir, { recursive: true })) {
     if (!file.endsWith(".mjs")) continue;
     if (file.endsWith(".test.mjs")) continue; // tests pin the text, by design
+    // Path-exact, not basename: a recursive walk yields `<subdir>/<name>`, so
+    // excluding by basename would skip a future `scripts/<subdir>/
+    // sentry-triage-requeue.mjs` — the second-owner case this test exists to
+    // catch. The flat entry is its own relative path, so this still matches it.
     if (file === "sentry-triage-requeue.mjs") continue;
     scanned += 1;
     const src = readFileSync(join(scriptsDir, file), "utf8");

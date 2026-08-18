@@ -70,7 +70,7 @@ Current call sites to verify any new deploy path against:
 
 - the `gcloud run services update` step in
   `.github/workflows/metrics-bridge.yml`
-- the matching rollout in `scripts/deploy-bridge.sh`
+- the matching rollout in `scripts/deploy/deploy-bridge.sh`
 
 ## 4. Cloud Build source context
 

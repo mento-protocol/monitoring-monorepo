@@ -18,29 +18,33 @@ const ROOT = fileURLToPath(new URL("..", import.meta.url));
 // it that quotes its own path cannot pull it into the subject list.
 const GUARD_PATH = "scripts/lib/deploy-guard.sh";
 
+// Keys are exact repo-relative paths and the anchors are literal source lines,
+// so both carry the wrappers' depth. A wrapper one directory down resolves the
+// guard through `/..`; a stale key here fails loudly (the unmatched-anchors
+// assertion below), and a stale `/..` count fails as a missing anchor.
 const orderedAnchors = {
-  "scripts/deploy-dashboard.sh": [
-    'REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"',
-    'source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/deploy-guard.sh"',
+  "scripts/deploy/deploy-dashboard.sh": [
+    'REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"',
+    'source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/deploy-guard.sh"',
     '(cd "$REPO_ROOT" && vercel deploy --prod',
   ],
-  "scripts/deploy-indexer.sh": [
-    'source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/deploy-guard.sh"',
+  "scripts/deploy/deploy-indexer.sh": [
+    'source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/deploy-guard.sh"',
     'REPO_ROOT="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)"',
     'cd "$REPO_ROOT"',
     "git ls-remote --heads origin",
   ],
-  "scripts/deploy-indexer-rollback.sh": [
+  "scripts/deploy/deploy-indexer-rollback.sh": [
     'REPO_ROOT="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)"',
     'cd "$REPO_ROOT"',
-    'source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/deploy-guard.sh"',
+    'source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/deploy-guard.sh"',
     'pnpm deploy:indexer:promote "$REGISTERED" --yes',
     'echo "Dry run: nothing pushed."',
-    'source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/deploy-guard.sh"',
+    'source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/deploy-guard.sh"',
     'git push --force-with-lease origin "$FULL_SHA:refs/heads/$DEPLOY_BRANCH"',
   ],
-  "scripts/deploy-bridge.sh": [
-    'source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/deploy-guard.sh"',
+  "scripts/deploy/deploy-bridge.sh": [
+    'source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/deploy-guard.sh"',
     'REPO_ROOT="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)"',
     'cd "$REPO_ROOT"',
     'TAG="$(git rev-parse --short HEAD)"',

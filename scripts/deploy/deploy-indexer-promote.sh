@@ -22,7 +22,7 @@ fi
 if [[ -z "$COMMIT" ]]; then
   # Auto-detect latest deployment
   COMMIT=$(pnpm exec envio-cloud indexer get "$ENVIO_INDEXER" "$ENVIO_ORG" -o json \
-    | node scripts/resolve-envio-deployment.mjs "")
+    | node scripts/deploy/resolve-envio-deployment.mjs "")
 
   if [[ -z "$COMMIT" ]]; then
     echo "❌ No deployments found for $ENVIO_ORG/$ENVIO_INDEXER"
@@ -31,7 +31,7 @@ if [[ -z "$COMMIT" ]]; then
 else
   TARGET_COMMIT="$COMMIT"
   COMMIT=$(pnpm exec envio-cloud indexer get "$ENVIO_INDEXER" "$ENVIO_ORG" -o json \
-    | node scripts/resolve-envio-deployment.mjs "$TARGET_COMMIT")
+    | node scripts/deploy/resolve-envio-deployment.mjs "$TARGET_COMMIT")
 
   if [[ -z "$COMMIT" ]]; then
     echo "❌ Deployment $TARGET_COMMIT not found for $ENVIO_ORG/$ENVIO_INDEXER"

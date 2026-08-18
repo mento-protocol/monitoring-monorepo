@@ -102,4 +102,4 @@ Persist one `OracleFeedState` row per feed referenced by an indexed pool:
   transitions, same-block ordering, bootstrap bounding, expiry changes, and
   removal-only freshness updates.
 - `indexer-envio/config/replay-integrity.json` and
-  `scripts/deploy-indexer-verify.mjs` enforce the full-replay boundary.
+  `scripts/deploy/deploy-indexer-verify.mjs` enforce the full-replay boundary.

@@ -602,10 +602,10 @@ for (const [filePath, doubleQuoted, singleQuoted, expectedError] of [
     "metrics-bridge.yml: builds-submit must use --gcs-source-staging-dir",
   ],
   [
-    "scripts/deploy-bridge.sh",
+    "scripts/deploy/deploy-bridge.sh",
     '--gcs-source-staging-dir="gs://${PROJECT}-cloud-build-source/metrics-bridge"',
     "--gcs-source-staging-dir='gs://${PROJECT}-cloud-build-source/metrics-bridge'",
-    "scripts/deploy-bridge.sh: builds-submit must use --gcs-source-staging-dir",
+    "scripts/deploy/deploy-bridge.sh: builds-submit must use --gcs-source-staging-dir",
   ],
   [
     "aegis/grafana-agent/deploy.sh",
@@ -630,7 +630,7 @@ assertDeployStagingContract(
 assertDeployStagingContract(
   mutate(
     files,
-    "scripts/deploy-bridge.sh",
+    "scripts/deploy/deploy-bridge.sh",
     "gcloud builds submit",
     "gcloud.cmd builds submit",
   ),
@@ -777,7 +777,7 @@ for (const [filePath, configFlag] of [
     ".github/workflows/metrics-bridge.yml",
     "            --config=cloudbuild.yaml \\\n",
   ],
-  ["scripts/deploy-bridge.sh", "  --config=cloudbuild.yaml \\\n"],
+  ["scripts/deploy/deploy-bridge.sh", "  --config=cloudbuild.yaml \\\n"],
 ]) {
   expectFailure(
     mutate(
@@ -807,13 +807,13 @@ for (const target of [
   "google_service_account_iam_member.dev_metrics_bridge_builder_service_account_user",
   "google_service_account_iam_member.dev_metrics_bridge_runtime_service_account_user",
 ]) {
-  const targetLine = files["scripts/deploy-bridge.sh"]
+  const targetLine = files["scripts/deploy/deploy-bridge.sh"]
     .split("\n")
     .find((line) => line.includes(`-target=${target}`));
   assert(targetLine, `direct bootstrap target fixture missing: ${target}`);
   expectFailure(
-    mutate(files, "scripts/deploy-bridge.sh", `${targetLine}\n`, ""),
-    `scripts/deploy-bridge.sh: direct bootstrap must target ${target} exactly once`,
+    mutate(files, "scripts/deploy/deploy-bridge.sh", `${targetLine}\n`, ""),
+    `scripts/deploy/deploy-bridge.sh: direct bootstrap must target ${target} exactly once`,
   );
 }
 
@@ -835,25 +835,25 @@ for (const { variable, account } of directSourceReaderTargets) {
   directSourceReaderAssignments.push(assignment);
   directSourceReaderArguments.push(targetLine.trim().replace(/\s*\\$/u, ""));
   assert(
-    files["scripts/deploy-bridge.sh"].includes(assignment),
+    files["scripts/deploy/deploy-bridge.sh"].includes(assignment),
     `direct source-reader target fixture missing: ${variable}`,
   );
   assert(
-    files["scripts/deploy-bridge.sh"].includes(targetLine),
+    files["scripts/deploy/deploy-bridge.sh"].includes(targetLine),
     `direct source-reader target line missing: ${variable}`,
   );
   expectFailure(
-    mutate(files, "scripts/deploy-bridge.sh", `${targetLine}`, ""),
-    `scripts/deploy-bridge.sh: direct bootstrap must target the exact ${variable} instance once`,
+    mutate(files, "scripts/deploy/deploy-bridge.sh", `${targetLine}`, ""),
+    `scripts/deploy/deploy-bridge.sh: direct bootstrap must target the exact ${variable} instance once`,
   );
   expectFailure(
     mutate(
       files,
-      "scripts/deploy-bridge.sh",
+      "scripts/deploy/deploy-bridge.sh",
       assignment,
       assignment.replace(account, "default-compute"),
     ),
-    `scripts/deploy-bridge.sh: direct bootstrap must target the exact ${variable} instance once`,
+    `scripts/deploy/deploy-bridge.sh: direct bootstrap must target the exact ${variable} instance once`,
   );
 }
 
@@ -887,148 +887,153 @@ const broadSourceReaderTarget =
 expectFailure(
   mutate(
     files,
-    "scripts/deploy-bridge.sh",
+    "scripts/deploy/deploy-bridge.sh",
     '  -target="$GRAFANA_AGENT_SOURCE_READER_TARGET" \\\n',
     `${broadSourceReaderTarget}  -target="$GRAFANA_AGENT_SOURCE_READER_TARGET" \\\n`,
   ),
-  "scripts/deploy-bridge.sh: direct bootstrap must not target the whole source-reader collection",
+  "scripts/deploy/deploy-bridge.sh: direct bootstrap must not target the whole source-reader collection",
 );
 
 expectFailure(
   mutate(
     files,
-    "scripts/deploy-bridge.sh",
+    "scripts/deploy/deploy-bridge.sh",
     "      -target=google_cloud_run_v2_service.metrics_bridge\n",
     "",
   ),
-  "scripts/deploy-bridge.sh: google_cloud_run_v2_service.metrics_bridge must run exactly once only through a guarded no-refresh plan in the confirmed-absent service branch",
+  "scripts/deploy/deploy-bridge.sh: google_cloud_run_v2_service.metrics_bridge must run exactly once only through a guarded no-refresh plan in the confirmed-absent service branch",
 );
 expectFailure(
   mutate(
     files,
-    "scripts/deploy-bridge.sh",
+    "scripts/deploy/deploy-bridge.sh",
     "    -target=google_cloud_run_v2_service_iam_member.metrics_bridge_public\n",
     "",
   ),
-  "scripts/deploy-bridge.sh: partial bootstrap recovery must apply only a guarded no-refresh public-binding plan",
+  "scripts/deploy/deploy-bridge.sh: partial bootstrap recovery must apply only a guarded no-refresh public-binding plan",
 );
 
 expectFailure(
   mutate(
     files,
-    "scripts/deploy-bridge.sh",
+    "scripts/deploy/deploy-bridge.sh",
     'if ! EXISTING_METRICS_BRIDGE_SERVICE="$(gcloud run services list',
     'if EXISTING_METRICS_BRIDGE_SERVICE="$(gcloud run services list',
   ),
-  "scripts/deploy-bridge.sh: existing-service lookup must be exact and fail closed",
+  "scripts/deploy/deploy-bridge.sh: existing-service lookup must be exact and fail closed",
 );
 expectFailure(
   mutate(
     files,
-    "scripts/deploy-bridge.sh",
+    "scripts/deploy/deploy-bridge.sh",
     "  --filter='metadata.name=metrics-bridge' \\\n",
     "  --filter='metadata.name:metrics-bridge' \\\n",
   ),
-  "scripts/deploy-bridge.sh: existing-service lookup must be exact and fail closed",
+  "scripts/deploy/deploy-bridge.sh: existing-service lookup must be exact and fail closed",
 );
 expectFailure(
   mutate(
     files,
-    "scripts/deploy-bridge.sh",
+    "scripts/deploy/deploy-bridge.sh",
     '  echo "Unable to verify Metrics Bridge Cloud Run service state; refusing to deploy."\n  exit 1\nfi',
     '  echo "Unable to verify Metrics Bridge Cloud Run service state; refusing to deploy."\nfi',
   ),
-  "scripts/deploy-bridge.sh: existing-service lookup must be exact and fail closed",
+  "scripts/deploy/deploy-bridge.sh: existing-service lookup must be exact and fail closed",
 );
 expectFailure(
   mutate(
     files,
-    "scripts/deploy-bridge.sh",
+    "scripts/deploy/deploy-bridge.sh",
     '    echo "Unexpected Cloud Run service lookup result; refusing to deploy."\n    exit 1\n    ;;',
     '    echo "Unexpected Cloud Run service lookup result; refusing to deploy."\n    ;;',
   ),
-  "scripts/deploy-bridge.sh: service bootstrap branching must reject unexpected lookup results",
+  "scripts/deploy/deploy-bridge.sh: service bootstrap branching must reject unexpected lookup results",
 );
 expectFailure(
   mutate(
     mutate(
       files,
-      "scripts/deploy-bridge.sh",
+      "scripts/deploy/deploy-bridge.sh",
       "      -target=google_cloud_run_v2_service.metrics_bridge\n",
       "",
     ),
-    "scripts/deploy-bridge.sh",
+    "scripts/deploy/deploy-bridge.sh",
     "  -target=google_service_account_iam_member.dev_metrics_bridge_runtime_service_account_user\n",
     "  -target=google_service_account_iam_member.dev_metrics_bridge_runtime_service_account_user \\\n  -target=google_cloud_run_v2_service.metrics_bridge\n",
   ),
-  "scripts/deploy-bridge.sh: google_cloud_run_v2_service.metrics_bridge must run exactly once only through a guarded no-refresh plan in the confirmed-absent service branch",
-);
-expectFailure(
-  mutate(files, "scripts/deploy-bridge.sh", "      -refresh=false \\\n", ""),
-  "scripts/deploy-bridge.sh: google_cloud_run_v2_service.metrics_bridge must run exactly once only through a guarded no-refresh plan in the confirmed-absent service branch",
+  "scripts/deploy/deploy-bridge.sh: google_cloud_run_v2_service.metrics_bridge must run exactly once only through a guarded no-refresh plan in the confirmed-absent service branch",
 );
 expectFailure(
   mutate(
     files,
-    "scripts/deploy-bridge.sh",
+    "scripts/deploy/deploy-bridge.sh",
+    "      -refresh=false \\\n",
+    "",
+  ),
+  "scripts/deploy/deploy-bridge.sh: google_cloud_run_v2_service.metrics_bridge must run exactly once only through a guarded no-refresh plan in the confirmed-absent service branch",
+);
+expectFailure(
+  mutate(
+    files,
+    "scripts/deploy/deploy-bridge.sh",
     "node scripts/check-metrics-bridge-bootstrap-plan.mjs service",
     "node scripts/other-plan-checker.mjs service",
   ),
-  "scripts/deploy-bridge.sh: google_cloud_run_v2_service.metrics_bridge must run exactly once only through a guarded no-refresh plan in the confirmed-absent service branch",
+  "scripts/deploy/deploy-bridge.sh: google_cloud_run_v2_service.metrics_bridge must run exactly once only through a guarded no-refresh plan in the confirmed-absent service branch",
 );
 expectFailure(
   mutate(
     files,
-    "scripts/deploy-bridge.sh",
+    "scripts/deploy/deploy-bridge.sh",
     'if ! CREATED_METRICS_BRIDGE_SERVICE="$(gcloud run services list',
     'if CREATED_METRICS_BRIDGE_SERVICE="$(gcloud run services list',
   ),
-  "scripts/deploy-bridge.sh: google_cloud_run_v2_service.metrics_bridge must run exactly once only through a guarded no-refresh plan in the confirmed-absent service branch",
+  "scripts/deploy/deploy-bridge.sh: google_cloud_run_v2_service.metrics_bridge must run exactly once only through a guarded no-refresh plan in the confirmed-absent service branch",
 );
 expectFailure(
   mutate(
     files,
-    "scripts/deploy-bridge.sh",
+    "scripts/deploy/deploy-bridge.sh",
     "    -refresh=false \\\n" + '    -out="$PUBLIC_BINDING_PLAN" \\\n',
     '    -out="$PUBLIC_BINDING_PLAN" \\\n',
   ),
-  "scripts/deploy-bridge.sh: partial bootstrap recovery must apply only a guarded no-refresh public-binding plan",
+  "scripts/deploy/deploy-bridge.sh: partial bootstrap recovery must apply only a guarded no-refresh public-binding plan",
 );
 expectFailure(
   mutate(
     files,
-    "scripts/deploy-bridge.sh",
+    "scripts/deploy/deploy-bridge.sh",
     "node scripts/check-metrics-bridge-bootstrap-plan.mjs public-binding",
     "node scripts/other-plan-checker.mjs public-binding",
   ),
-  "scripts/deploy-bridge.sh: partial bootstrap recovery must apply only a guarded no-refresh public-binding plan",
+  "scripts/deploy/deploy-bridge.sh: partial bootstrap recovery must apply only a guarded no-refresh public-binding plan",
 );
 expectFailure(
   mutate(
     files,
-    "scripts/deploy-bridge.sh",
+    "scripts/deploy/deploy-bridge.sh",
     'if ! grep -Fqx -- "$METRICS_BRIDGE_SERVICE_ADDRESS" <<<"$TERRAFORM_STATE_ADDRESSES"; then',
     'if grep -Fqx -- "$METRICS_BRIDGE_SERVICE_ADDRESS" <<<"$TERRAFORM_STATE_ADDRESSES"; then',
   ),
-  "scripts/deploy-bridge.sh: service bootstrap branching must reject unexpected lookup results",
+  "scripts/deploy/deploy-bridge.sh: service bootstrap branching must reject unexpected lookup results",
 );
 expectFailure(
   mutate(
     files,
-    "scripts/deploy-bridge.sh",
+    "scripts/deploy/deploy-bridge.sh",
     "  --filter='bindings.role=roles/run.invoker AND bindings.members=allUsers' \\\n",
     "  --filter='bindings.role=roles/run.invoker' \\\n",
   ),
-  "scripts/deploy-bridge.sh: live public-binding verification must be exact and fail before image rollout",
+  "scripts/deploy/deploy-bridge.sh: live public-binding verification must be exact and fail before image rollout",
 );
 expectFailure(
   mutate(
     files,
-    "scripts/deploy-bridge.sh",
+    "scripts/deploy/deploy-bridge.sh",
     '    echo "Public invoker binding is tracked but missing live; run a reviewed platform plan/apply before deploying."\n    exit 1',
     '    echo "Public invoker binding is tracked but missing live; run a reviewed platform plan/apply before deploying."',
   ),
-  "scripts/deploy-bridge.sh: live public-binding verification must be exact and fail before image rollout",
+  "scripts/deploy/deploy-bridge.sh: live public-binding verification must be exact and fail before image rollout",
 );
 
 const metricsBridgeBuilderExecutor =

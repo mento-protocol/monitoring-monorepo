@@ -2,7 +2,7 @@
 
 import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
-import { summarizePolygonPools } from "./lib/polygon-deployment-semantics.mjs";
+import { summarizePolygonPools } from "../lib/polygon-deployment-semantics.mjs";
 
 const ENVIO_ORG = "mento-protocol";
 const ENVIO_INDEXER = "mento";

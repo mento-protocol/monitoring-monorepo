@@ -488,8 +488,14 @@ await test("a declared directory is copied whole, so an enumerating suite sees t
   const manifest = JSON.parse(
     readFileSync(join(REAL_ROOT, "scripts/sentry-suite-manifest.json"), "utf8"),
   );
+  // Both suites walk scripts/ RECURSIVELY (ADR 0064 made it a tree), so the
+  // completeness this asserts is over the whole tree. Comparing only the flat
+  // top level would have gone on passing while each phase of the reorganization
+  // moved modules out of the compared set.
   const isTarget = (f) => f.endsWith(".mjs") && !f.endsWith(".test.mjs");
-  const onDisk = readdirSync(join(REAL_ROOT, "scripts")).filter(isTarget);
+  const onDisk = readdirSync(join(REAL_ROOT, "scripts"), {
+    recursive: true,
+  }).filter(isTarget);
   for (const suite of [
     "scripts/sentry-triage-requeue.test.mjs",
     "scripts/sentry-triage-brief.test.mjs",
@@ -501,13 +507,13 @@ await test("a declared directory is copied whole, so an enumerating suite sees t
     );
     const inputs = gateInputs(manifest, REAL_ROOT);
     const visible = inputs
-      .filter((p) => p.startsWith("scripts/") && !p.slice(8).includes("/"))
+      .filter((p) => p.startsWith("scripts/"))
       .map((p) => p.slice("scripts/".length))
       .filter(isTarget);
     assertEqual(
       visible.length,
       onDisk.length,
-      `${suite} must see every non-test scripts/*.mjs, not a subset`,
+      `${suite} must see every non-test scripts/**/*.mjs, not a subset`,
     );
   }
 });

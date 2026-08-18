@@ -34,7 +34,7 @@ deployment_list_json() {
 
 deployment_commit_from_list() {
   local target="$1"
-  node scripts/resolve-envio-deployment.mjs "$target"
+  node scripts/deploy/resolve-envio-deployment.mjs "$target"
 }
 
 latest_deployment_commit() {

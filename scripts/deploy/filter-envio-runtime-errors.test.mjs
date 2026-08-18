@@ -125,7 +125,7 @@ test("wrapper fixes the provider page size and propagates capped-page failure", 
   const wrapper = fileURLToPath(
     new URL("./deploy-indexer-logs.sh", import.meta.url),
   );
-  const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
+  const repositoryRoot = fileURLToPath(new URL("../../", import.meta.url));
   const tempDirectory = mkdtempSync(join(tmpdir(), "envio-log-filter-"));
   const fakePnpm = join(tempDirectory, "pnpm");
   const capturedArgs = join(tempDirectory, "deployment-log-args");

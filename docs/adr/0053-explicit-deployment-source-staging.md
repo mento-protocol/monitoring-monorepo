@@ -197,7 +197,7 @@ approved apply.
 - Bucket and IAM ownership:
   [`terraform/deploy-staging.tf`](../../terraform/deploy-staging.tf)
 - Direct deploy wrapper and its bootstrap plan guard:
-  [`scripts/deploy-bridge.sh`](../../scripts/deploy-bridge.sh) and
+  [`scripts/deploy/deploy-bridge.sh`](../../scripts/deploy/deploy-bridge.sh) and
   [`scripts/check-metrics-bridge-bootstrap-plan.mjs`](../../scripts/check-metrics-bridge-bootstrap-plan.mjs)
 - Contract implementation, run by `pnpm tf:test`:
   [`scripts/deploy-staging-contract.mjs`](../../scripts/deploy-staging-contract.mjs)
