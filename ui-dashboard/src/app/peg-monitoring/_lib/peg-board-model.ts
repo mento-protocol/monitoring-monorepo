@@ -151,6 +151,10 @@ export function pegPairLabel(asset: PegAssetPresentation): string {
  */
 export function boardSummary(presentation: PegMonitoringPresentation): {
   text: string;
+  /** `text` without the trailing verdict qualifier — for width-bound surfaces. */
+  counts: string;
+  /** The verdict qualifier alone, or null when the counts tell the whole story. */
+  qualifier: string | null;
   tone: PegBoardTone;
   ariaLabel: string;
 } {
@@ -164,10 +168,15 @@ export function boardSummary(presentation: PegMonitoringPresentation): {
   if (count("critical") > 0) parts.push(`${count("critical")} critical`);
   if (count("warning") > 0) parts.push(`${count("warning")} warning`);
   if (count("uncertain") > 0) parts.push(`${count("uncertain")} unconfirmed`);
-  if (presentation.aggregate.tone === "uncertain")
-    parts.push(presentation.aggregate.label.toLowerCase());
+  const counts = parts.join(" · ");
+  const qualifier =
+    presentation.aggregate.tone === "uncertain"
+      ? presentation.aggregate.label.toLowerCase()
+      : null;
   return {
-    text: parts.join(" · "),
+    text: qualifier === null ? counts : `${counts} · ${qualifier}`,
+    counts,
+    qualifier,
     tone:
       presentation.aggregate.tone === "uncertain"
         ? "uncertain"

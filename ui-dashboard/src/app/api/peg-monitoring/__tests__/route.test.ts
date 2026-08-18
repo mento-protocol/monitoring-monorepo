@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { GET } from "../route";
 import {
-  GET,
   PEG_MONITORING_MAX_RESPONSE_BYTES,
   PEG_MONITORING_UPSTREAM_TIMEOUT_MS,
-} from "../route";
+} from "@/lib/peg-monitoring-upstream";
 import { makePegMonitoringResponse } from "@/test-utils/peg-monitoring-fixture";
 const json = (body: unknown, init: ResponseInit = {}) =>
   new Response(JSON.stringify(body), {

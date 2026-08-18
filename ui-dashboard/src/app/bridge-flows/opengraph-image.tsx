@@ -1,4 +1,5 @@
 import { ImageResponse } from "next/og";
+import { ogFontOptions } from "@/lib/og-fonts";
 import {
   fetchBridgeFlowsOgData,
   type BridgeFlowsOgData,
@@ -250,6 +251,7 @@ export default async function Image() {
   const data = await fetchBridgeFlowsOgData();
   return new ImageResponse(<Card data={data} />, {
     ...size,
+    ...(await ogFontOptions()),
     headers: { "Cache-Control": IMAGE_CACHE_CONTROL },
   });
 }

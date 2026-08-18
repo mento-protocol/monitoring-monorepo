@@ -23,6 +23,21 @@ export type PegMonitoringViewState =
       reason: "age" | "clock-skew" | "refresh-error";
     };
 
+/**
+ * True when the package was produced under a policy that is no longer the
+ * approved active one — either it came from the previous slot, or its policy
+ * version has since been superseded. Both the board and its social card feed
+ * this into `presentPegMonitoring`, so it lives here rather than being spelled
+ * out at each call site: a safety rule with two copies is a safety rule that
+ * can disagree with itself.
+ */
+export function usesPreviousPolicy(data: PegMonitoringResponse): boolean {
+  return (
+    data.policySlot === "previous" ||
+    data.producedPolicyVersion !== data.approvedActivePolicyVersion
+  );
+}
+
 export function classifyPegMonitoringState(input: {
   data: PegMonitoringResponse | null;
   hasError: boolean;

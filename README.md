@@ -250,32 +250,32 @@ Create `indexer-envio/.env` from `indexer-envio/.env.example`:
 
 ### Dashboard
 
-| Variable                                   | Description                                                                                                |
-| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
-| `ENABLE_EXPERIMENTAL_COREPACK`             | Vercel Corepack opt-in so hosted builds honor the repo `packageManager` pnpm version (Terraform-managed)   |
-| `NEXT_PUBLIC_HASURA_URL`                   | Prod Envio GraphQL endpoint (shared by Celo, Monad, Polygon, and Ethereum reserve-yield data)              |
-| `METRICS_BRIDGE_URL`                       | Server-only HTTPS Metrics Bridge origin for the validated `/api/peg-monitoring` proxy (Terraform-managed)  |
-| `NEXT_PUBLIC_HASURA_URL_TESTNET`           | Optional shared Monad Testnet + Polygon Amoy Envio GraphQL endpoint                                        |
-| `NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA`      | Optional Celo Sepolia Envio GraphQL endpoint                                                               |
-| `NEXT_PUBLIC_RPC_URL_POLYGON_MAINNET`      | Optional Polygon RPC override (default: `https://polygon.drpc.org`)                                        |
-| `NEXT_PUBLIC_RPC_URL_POLYGON_AMOY`         | Optional Polygon Amoy RPC override (default: `https://polygon-amoy.drpc.org`)                              |
-| `NEXT_PUBLIC_EXPLORER_URL_POLYGON_MAINNET` | Optional Polygon explorer-base override (default: `https://polygonscan.com`)                               |
-| `NEXT_PUBLIC_EXPLORER_URL_POLYGON_AMOY`    | Optional Polygon Amoy explorer-base override (default: `https://amoy.polygonscan.com`)                     |
-| `NEXT_PUBLIC_SHOW_TESTNET_NETWORKS`        | Set to `true` with the per-testnet endpoint URL to show hosted testnet networks                            |
-| `NEXT_PUBLIC_SWR_CACHE_BUILD_SALT`         | Auto-set from Vercel deployment/commit; invalidates the bounded client cache (`dev` locally)               |
-| `HASURA_SECRET_CELO_SEPOLIA_LOCAL`         | Optional server-only admin secret for `/api/hasura/celo-sepolia-local` proxy                               |
-| `HASURA_SECRET_CELO_MAINNET_LOCAL`         | Optional server-only admin secret for `/api/hasura/celo-mainnet-local` proxy                               |
-| `HASURA_UPSTREAM_URL_CELO_SEPOLIA_LOCAL`   | Optional upstream URL override for local sepolia Hasura proxy (default `http://localhost:8080/v1/graphql`) |
-| `HASURA_UPSTREAM_URL_CELO_MAINNET_LOCAL`   | Optional upstream URL override for local mainnet Hasura proxy (default `http://localhost:8080/v1/graphql`) |
-| `UPSTASH_REDIS_REST_URL`                   | Address labels storage (Upstash Redis)                                                                     |
-| `UPSTASH_REDIS_REST_TOKEN`                 | Address labels Redis auth token                                                                            |
-| `GRAFANA_QUERY_URL`                        | Server-only Grafana Cloud origin for peg history and alert state history (Terraform-managed)               |
-| `GRAFANA_QUERY_TOKEN`                      | Server-only Grafana Viewer service-account token for those reads (Terraform-managed)                       |
-| `AUTH_SECRET`                              | Auth.js JWT secret; required for local simulated login and real OAuth sessions                             |
-| `AUTH_GOOGLE_ID`                           | Google OAuth client id; non-empty placeholder is enough for local simulated login                          |
-| `AUTH_GOOGLE_SECRET`                       | Google OAuth client secret; non-empty placeholder is enough for local simulated login                      |
-| `BLOB_STORE_ID`                            | Vercel Blob OIDC store id for daily label backups (set by the Vercel store integration)                    |
-| `BLOB_WEBHOOK_PUBLIC_KEY`                  | Vercel Blob OIDC public key (set by the Vercel store integration)                                          |
+| Variable                                   | Description                                                                                                                              |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `ENABLE_EXPERIMENTAL_COREPACK`             | Vercel Corepack opt-in so hosted builds honor the repo `packageManager` pnpm version (Terraform-managed)                                 |
+| `NEXT_PUBLIC_HASURA_URL`                   | Prod Envio GraphQL endpoint (shared by Celo, Monad, Polygon, and Ethereum reserve-yield data)                                            |
+| `METRICS_BRIDGE_URL`                       | Server-only HTTPS Metrics Bridge origin for the validated `/api/peg-monitoring` proxy and the peg-monitoring OG card (Terraform-managed) |
+| `NEXT_PUBLIC_HASURA_URL_TESTNET`           | Optional shared Monad Testnet + Polygon Amoy Envio GraphQL endpoint                                                                      |
+| `NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA`      | Optional Celo Sepolia Envio GraphQL endpoint                                                                                             |
+| `NEXT_PUBLIC_RPC_URL_POLYGON_MAINNET`      | Optional Polygon RPC override (default: `https://polygon.drpc.org`)                                                                      |
+| `NEXT_PUBLIC_RPC_URL_POLYGON_AMOY`         | Optional Polygon Amoy RPC override (default: `https://polygon-amoy.drpc.org`)                                                            |
+| `NEXT_PUBLIC_EXPLORER_URL_POLYGON_MAINNET` | Optional Polygon explorer-base override (default: `https://polygonscan.com`)                                                             |
+| `NEXT_PUBLIC_EXPLORER_URL_POLYGON_AMOY`    | Optional Polygon Amoy explorer-base override (default: `https://amoy.polygonscan.com`)                                                   |
+| `NEXT_PUBLIC_SHOW_TESTNET_NETWORKS`        | Set to `true` with the per-testnet endpoint URL to show hosted testnet networks                                                          |
+| `NEXT_PUBLIC_SWR_CACHE_BUILD_SALT`         | Auto-set from Vercel deployment/commit; invalidates the bounded client cache (`dev` locally)                                             |
+| `HASURA_SECRET_CELO_SEPOLIA_LOCAL`         | Optional server-only admin secret for `/api/hasura/celo-sepolia-local` proxy                                                             |
+| `HASURA_SECRET_CELO_MAINNET_LOCAL`         | Optional server-only admin secret for `/api/hasura/celo-mainnet-local` proxy                                                             |
+| `HASURA_UPSTREAM_URL_CELO_SEPOLIA_LOCAL`   | Optional upstream URL override for local sepolia Hasura proxy (default `http://localhost:8080/v1/graphql`)                               |
+| `HASURA_UPSTREAM_URL_CELO_MAINNET_LOCAL`   | Optional upstream URL override for local mainnet Hasura proxy (default `http://localhost:8080/v1/graphql`)                               |
+| `UPSTASH_REDIS_REST_URL`                   | Address labels storage (Upstash Redis)                                                                                                   |
+| `UPSTASH_REDIS_REST_TOKEN`                 | Address labels Redis auth token                                                                                                          |
+| `GRAFANA_QUERY_URL`                        | Server-only Grafana Cloud origin for peg history and alert state history (Terraform-managed)                                             |
+| `GRAFANA_QUERY_TOKEN`                      | Server-only Grafana Viewer service-account token for those reads (Terraform-managed)                                                     |
+| `AUTH_SECRET`                              | Auth.js JWT secret; required for local simulated login and real OAuth sessions                                                           |
+| `AUTH_GOOGLE_ID`                           | Google OAuth client id; non-empty placeholder is enough for local simulated login                                                        |
+| `AUTH_GOOGLE_SECRET`                       | Google OAuth client secret; non-empty placeholder is enough for local simulated login                                                    |
+| `BLOB_STORE_ID`                            | Vercel Blob OIDC store id for daily label backups (set by the Vercel store integration)                                                  |
+| `BLOB_WEBHOOK_PUBLIC_KEY`                  | Vercel Blob OIDC public key (set by the Vercel store integration)                                                                        |
 
 ### Integration Probes
 

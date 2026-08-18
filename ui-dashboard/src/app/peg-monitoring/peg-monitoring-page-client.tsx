@@ -5,7 +5,10 @@ import { Provider as TooltipProvider } from "@radix-ui/react-tooltip";
 import { ErrorBox } from "@/components/feedback";
 import { usePegAlerts } from "@/hooks/use-peg-alerts";
 import { usePegMonitoring } from "@/hooks/use-peg-monitoring";
-import { classifyPegMonitoringState } from "@/lib/peg-monitoring";
+import {
+  classifyPegMonitoringState,
+  usesPreviousPolicy,
+} from "@/lib/peg-monitoring";
 import { presentPegMonitoring } from "@/lib/peg-monitoring-presentation";
 import { BoardHeader } from "./_components/board-header";
 import { BoardTable } from "./_components/board-table";
@@ -38,16 +41,12 @@ export function PegMonitoringPageClient(): React.JSX.Element {
   const state = classifyPegMonitoringState({ ...result, nowMs });
   const confirmed = state.kind === "current" || state.kind === "stale";
   const alerts = usePegAlerts(confirmed);
-  const usesPreviousPolicy =
-    confirmed &&
-    (state.data.policySlot === "previous" ||
-      state.data.producedPolicyVersion !==
-        state.data.approvedActivePolicyVersion);
+  const previousPolicy = confirmed && usesPreviousPolicy(state.data);
   const presentation = confirmed
     ? presentPegMonitoring(state.data, {
         nowMs,
         packageIsStale: state.kind === "stale",
-        usesPreviousPolicy,
+        usesPreviousPolicy: previousPolicy,
       })
     : null;
   return (
@@ -69,7 +68,7 @@ export function PegMonitoringPageClient(): React.JSX.Element {
               nowMs={nowMs}
               producedAt={state.data.producedAt}
               stale={state.kind === "stale"}
-              previousPolicy={usesPreviousPolicy}
+              previousPolicy={previousPolicy}
               ageLabel={formatAge(state.ageMs)}
               policyVersion={state.data.producedPolicyVersion}
             />
