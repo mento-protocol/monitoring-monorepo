@@ -43,7 +43,7 @@ This repo is the worst case for that model. One login (`chapati23`) authors
 ~280 merged PRs/month (~850 in 90 days), and the agent workflow pushes several
 fix-commit rounds per PR, so review runs land at roughly 2–4× the PR count
 (560–1,120 runs/month). At $1.00–1.50/run that is **~$560–1,680/month**, versus
-$40–120/month under the old flat model. This is the mechanism behind the
+$40/month (one PR-author seat) under the old flat model. This is the mechanism behind the
 observed cost growth; Cursor's own forum documents the same effect on other
 iteration-heavy teams.
 
@@ -110,6 +110,9 @@ Replace BugBot with CodeRabbit as the third advisory reviewer.
 3. **Parallel-run for ~2 weeks.** Switch BugBot to manual triggering
    (`bugbot run`) during the window to cap its spend, compare both bots'
    findings on the same PRs, then disable BugBot in the Cursor dashboard.
+   Until step 4 lands, CodeRabbit is not in the feedback-ledger bot roster, so
+   its comments do not block `pr:ready-state` — triage them manually during
+   the window.
 4. **Update the bot rosters and docs in the cutover PR**:
    `scripts/pr-feedback-state-core.mjs`, `scripts/pr-feedback-state-claude.mjs`
    (severity/marker regexes — `BUGBOT_BUG_ID` retires, CodeRabbit's markers
@@ -174,6 +177,11 @@ Replace BugBot with CodeRabbit as the third advisory reviewer.
   count, since references have already drifted once during this ADR's own
   review. `pr:feedback-state` severity regexes keyed on `BUGBOT_BUG_ID` retire
   with it.
+- CodeRabbit is a new third-party GitHub App with repo read access and PR
+  comment/review write access, steered by `.coderabbit.yaml` — a PR-authored
+  file, so a PR can change the profile that reviews it. Both are acceptable
+  while the bot is advisory and gates nothing; re-assess this boundary before
+  any CodeRabbit output ever feeds a required gate.
 - Watch item: `claude[bot]` review currently rides existing Max
   subscription spend. Anthropic's separate metered "Code Review" product bills
   $15–25/review — ruinous at this volume. If the GitHub Action review path is
@@ -207,8 +215,14 @@ Replace BugBot with CodeRabbit as the third advisory reviewer.
   (independent rolling benchmark; both CodeRabbit and Greptile cite favorable
   snapshots); deepsource.com "Every AI code review vendor benchmarks itself,
   and wins" (2026-02-26, documents the 82%→45% Greptile re-run gap).
+- Field-scan pricing (Cubic, Graphite, Qodo, Copilot, Vercel Agent, Anthropic
+  Code Review): each vendor's public pricing/docs pages, fetched 2026-08-18 —
+  cubic.dev/pricing-plans, graphite.com/blog (2026-01-08 restructure),
+  qodo.ai, github.blog changelog (2026-04-27 Actions-minutes change),
+  vercel.com/docs/agent/pr-review.
 - This repo's numbers: 40-PR sample #1843–#1911 collected 2026-08-18 via
   `gh api pulls/<n>/comments` (26/26 findings fixed; per-bot split above);
   merged-PR volume from `git log --first-parent` (280 in 30 days, 850 in 90);
-  BugBot's advisory-only role per ADR 0007 and
-  `docs/pr-checklists/ci-workflow-gates.md`.
+  BugBot's not-required check status per ADR 0007 and
+  `docs/pr-checklists/ci-workflow-gates.md`; its `BUGBOT_BUG_ID` feedback-gate
+  role per `scripts/pr-feedback-state-core.mjs`.
