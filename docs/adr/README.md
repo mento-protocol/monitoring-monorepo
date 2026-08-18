@@ -76,6 +76,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0059](0059-repo-owned-file-size-watchlist-scheduler.md)    | Monthly lint-aware file-size drift enters one repository-owned issue route           |
 | [0062](0062-sentry-suites-self-run-gate.md)                 | An unconditional gate job runs the Sentry suites and proves from output they ran     |
 | [0064](0064-scripts-module-directories.md)                  | `scripts/` may use module subdirectories; basenames and pinned paths constrain moves |
+| [0065](0065-coderabbit-replaces-bugbot-third-reviewer.md)   | CodeRabbit replaces Cursor BugBot as the third advisory PR reviewer                  |
 
 ### shared-config
 
