@@ -637,7 +637,7 @@ export function contextOwnershipBlockers(workflows, context, owner) {
 
 /**
  * Blockers when a job runs untrusted execution before validating it. The pin
- * validator (check-agent-quality-gate-package-scripts.sh) is what makes the
+ * validator (check-agent-quality-gate-package-scripts.mjs) is what makes the
  * job's trust safe: it pins each trusted alias to an exact command, so a drifted
  * `"docs:index": "node … && curl evil"` is rejected, and it rejects an
  * unsanctioned lifecycle hook a package-only PR adds. Both guarantees hold only

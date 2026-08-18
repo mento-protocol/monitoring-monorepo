@@ -160,7 +160,7 @@ rather than carrying the list, because its scoped instruction budget is for
 routing, not procedure.
 
 1. Root `package.json` — 74 entries reference `scripts/`.
-2. `check-agent-quality-gate-package-scripts.sh` — pinned alias map.
+2. `check-agent-quality-gate-package-scripts.mjs` — pinned alias map.
 3. `.github/workflows/` — 22 of 32 files, including the enumerated filters
    listed under "Why Files Stay Flat" in `scripts/AGENTS.md`. A workflow that
    runs a script from the PR's **base** ref must probe the new path and the

@@ -849,7 +849,7 @@ validator_repo="$(mktemp -d)"
 }
 JSON
   set +e
-  bash "$repo_root/scripts/check-agent-quality-gate-package-scripts.sh" > "$output_file" 2>&1
+  node "$repo_root/scripts/check-agent-quality-gate-package-scripts.mjs" > "$output_file" 2>&1
   exit_code=$?
   set -e
   [[ "$exit_code" -ne 0 ]]
@@ -1077,7 +1077,7 @@ NODE
 )
 rm -rf "$package_json_repo"
 assert_contains "- tooling"
-assert_contains "- bash scripts/check-agent-quality-gate-package-scripts.sh (root package tooling script changed)"
+assert_contains "- node scripts/check-agent-quality-gate-package-scripts.mjs (root package tooling script changed)"
 assert_contains "- bash scripts/agent-quality-gate.test.sh (root package tooling script changed)"
 assert_contains "- node scripts/gate/agent-prewarm.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/pr/review-materiality.test.mjs (root package tooling script changed)"
@@ -1191,7 +1191,7 @@ NODE
 )
 rm -rf "$lockfile_script_repo"
 assert_contains "- tooling"
-assert_contains "- bash scripts/check-agent-quality-gate-package-scripts.sh (root package tooling script changed)"
+assert_contains "- node scripts/check-agent-quality-gate-package-scripts.mjs (root package tooling script changed)"
 assert_contains "- bash scripts/agent-quality-gate.test.sh (root package tooling script changed)"
 assert_contains "- node scripts/gate/agent-prewarm.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/pr/review-materiality.test.mjs (root package tooling script changed)"
@@ -1251,7 +1251,7 @@ NODE
 )
 rm -rf "$pr_ready_state_script_repo"
 assert_contains "- tooling"
-assert_contains "- bash scripts/check-agent-quality-gate-package-scripts.sh (root package tooling script changed)"
+assert_contains "- node scripts/check-agent-quality-gate-package-scripts.mjs (root package tooling script changed)"
 assert_contains "- bash scripts/agent-quality-gate.test.sh (root package tooling script changed)"
 assert_contains "- node scripts/gate/agent-prewarm.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/pr/review-materiality.test.mjs (root package tooling script changed)"
@@ -1295,7 +1295,7 @@ NODE
 rm -rf "$package_script_repo"
 assert_contains "- workspace"
 assert_contains "- pnpm install --frozen-lockfile (root package script changed)"
-assert_contains "- bash scripts/check-agent-quality-gate-package-scripts.sh (root package script changed)"
+assert_contains "- node scripts/check-agent-quality-gate-package-scripts.mjs (root package script changed)"
 assert_contains "- bash scripts/agent-quality-gate.test.sh (root package script changed)"
 assert_contains "- pnpm --filter @mento-protocol/ui-dashboard typecheck (root package script changed)"
 # Workspace-wide triggers skip the dashboard playwright suite — see the
@@ -1333,7 +1333,7 @@ NODE
 rm -rf "$package_scripts_object_repo"
 assert_contains "- workspace"
 assert_contains "- pnpm install --frozen-lockfile (root package script changed)"
-assert_contains "- bash scripts/check-agent-quality-gate-package-scripts.sh (root package script changed)"
+assert_contains "- node scripts/check-agent-quality-gate-package-scripts.mjs (root package script changed)"
 assert_contains "- bash scripts/agent-quality-gate.test.sh (root package script changed)"
 assert_contains "- pnpm --filter @mento-protocol/ui-dashboard typecheck (root package script changed)"
 assert_not_contains_mapped "- pnpm --filter @mento-protocol/ui-dashboard test:browser (root package script changed)"
@@ -1371,7 +1371,7 @@ NODE
 rm -rf "$mixed_package_script_repo"
 assert_contains "- workspace"
 assert_contains "- pnpm install --frozen-lockfile (root package script changed)"
-assert_contains "- bash scripts/check-agent-quality-gate-package-scripts.sh (root package script changed)"
+assert_contains "- node scripts/check-agent-quality-gate-package-scripts.mjs (root package script changed)"
 assert_contains "- bash scripts/agent-quality-gate.test.sh (root package script changed)"
 assert_contains "- pnpm --filter @mento-protocol/ui-dashboard typecheck (root package script changed)"
 assert_not_contains_mapped "- pnpm --filter @mento-protocol/ui-dashboard test:browser (root package script changed)"
@@ -1507,7 +1507,7 @@ NODE
   "$repo_root/scripts/agent-quality-gate.sh" --base HEAD > "$output_file"
 )
 rm -rf "$dev_metadata_scripts_repo"
-assert_contains "- bash scripts/check-agent-quality-gate-package-scripts.sh (root package script changed)"
+assert_contains "- node scripts/check-agent-quality-gate-package-scripts.mjs (root package script changed)"
 assert_not_contains "workspace dev metadata changed"
 
 # ── Lockfile-importer scoping (issue #1414) ─────────────────────────────────
@@ -2524,9 +2524,12 @@ run_gate "scripts/check-react-doctor-score.sh"
 assert_not_contains "(React Doctor wrapper changed)"
 assert_not_contains "(agent quality gate mapping changed)"
 
-run_gate "scripts/check-agent-quality-gate-package-scripts.sh"
-assert_contains "- bash -n scripts/check-agent-quality-gate-package-scripts.sh (shell script changed)"
-assert_contains "- bash scripts/check-agent-quality-gate-package-scripts.sh (agent quality gate package script validator changed)"
+run_gate "scripts/check-agent-quality-gate-package-scripts.mjs"
+# The validator is Node, so it routes through the `scripts/*.mjs` arm: ESLint
+# replaces the `bash -n` syntax check it got as a shell script.
+assert_not_contains "- bash -n scripts/check-agent-quality-gate-package-scripts"
+assert_contains "- pnpm lint:scripts (root build script changed)"
+assert_contains "- node scripts/check-agent-quality-gate-package-scripts.mjs (agent quality gate package script validator changed)"
 assert_contains "- pnpm agent:quality-gate:test (agent quality gate mapping changed)"
 
 run_gate ".agents/skills/ship/SKILL.md"
@@ -2806,10 +2809,9 @@ pin_prerequisite_marker="$pin_prerequisite_repo/pool-marker"
   }
 }
 JSON
-  cat > scripts/check-agent-quality-gate-package-scripts.sh <<'STUB'
-#!/usr/bin/env bash
-echo 'package.json scripts.sentry:project:test must be "node ok.mjs"'
-exit 1
+  cat > scripts/check-agent-quality-gate-package-scripts.mjs <<'STUB'
+console.error('package.json scripts.sentry:project:test must be "node ok.mjs"');
+process.exit(1);
 STUB
   cat > tools/trunk <<'STUB'
 #!/usr/bin/env bash
@@ -2819,7 +2821,7 @@ STUB
 #!/usr/bin/env bash
 : > "${POOL_MARKER:?}"
 STUB
-  chmod +x bin/pnpm tools/trunk scripts/check-agent-quality-gate-package-scripts.sh
+  chmod +x bin/pnpm tools/trunk
   git add .
   git commit -qm init
   cat > package.json <<'JSON'
@@ -2847,7 +2849,7 @@ if [[ -f "$pin_prerequisite_marker" ]]; then
   fail "the quality pool ran a trusted pnpm alias even though the pin validator failed"
 fi
 rm -rf "$pin_prerequisite_repo"
-assert_contains "+ bash scripts/check-agent-quality-gate-package-scripts.sh"
+assert_contains "+ node scripts/check-agent-quality-gate-package-scripts.mjs"
 assert_contains "Stopping after first failed mapped command (--fail-fast)."
 assert_not_contains "Running quality commands with parallelism 4."
 
@@ -3552,6 +3554,7 @@ signature_stamp_repo="$(mktemp -d)"
   printf 'fixture\n' > fixture.txt
   printf 'second fixture\n' > second.txt
   printf '# fixture gate implementation\n' > scripts/agent-quality-gate.sh
+  printf '// fixture alias validator\n' > scripts/check-agent-quality-gate-package-scripts.mjs
   printf '# fixture routing classifier\n' > scripts/docs/docs-navigation-eval-helpers.mjs
   printf '# fixture lockfile scope classifier\n' > scripts/gate/lockfile-scope.mjs
   printf '# fixture terraform format checker\n' > scripts/terraform/terraform-fmt-check.mjs
@@ -3626,9 +3629,9 @@ STUB
   # Every moved entry in implementation_signature() carries the same hazard: a
   # path the gate cannot stat hashes as `__missing__` on both runs, so the
   # signature stops moving and --skip-if-fresh reuses a dead stamp. The
-  # classifier above covers the P4 move; the two below cover the P10 one and the
-  # P11 one. The entries that have never moved are unfixtured apart from the gate
-  # itself (its suite, the alias validator, turbo.json, and .trunk/trunk.yaml).
+  # classifier above covers the P4 move; the three below cover the P10, P11, and
+  # P12 ones. The entries that have never moved are unfixtured apart from the
+  # gate itself (its suite, turbo.json, and .trunk/trunk.yaml).
   printf '# changed fixture terraform format checker\n' >> scripts/terraform/terraform-fmt-check.mjs
   COUNTER_FILE="$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
     "$repo_root/scripts/agent-quality-gate.sh" \
@@ -3665,6 +3668,21 @@ STUB
       > "$output_file" 2>&1
   [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "8" ]] ||
     fail "fresh gate stamp was reused after the lockfile scope classifier changed"
+
+  # P12 renamed the pinned alias registry from .sh to .mjs. Left stale, the
+  # signature entry hashes as `__missing__` on every run, so an edit to the one
+  # check that stops a package-only PR redirecting a trusted command would be
+  # skipped behind a stamp warmed before it.
+  printf '// changed fixture alias validator\n' >> scripts/check-agent-quality-gate-package-scripts.mjs
+  COUNTER_FILE="$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file changed-paths-two.txt \
+      --base "$base_two" \
+      --run \
+      --skip-if-fresh \
+      > "$output_file" 2>&1
+  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "9" ]] ||
+    fail "fresh gate stamp was reused after the pinned alias registry changed"
 )
 rm -rf "$signature_stamp_repo"
 assert_not_contains "Previous successful agent quality gate run is still fresh; skipping mapped commands."
@@ -4280,7 +4298,7 @@ assert_contains "$sentry_ci_check"
 run_gate "scripts/agent-quality-gate.sh"
 assert_contains "$sentry_ci_check"
 
-run_gate "scripts/check-agent-quality-gate-package-scripts.sh"
+run_gate "scripts/check-agent-quality-gate-package-scripts.mjs"
 assert_contains "$sentry_ci_check"
 
 run_gate "scripts/tf-stacks.test.mjs"

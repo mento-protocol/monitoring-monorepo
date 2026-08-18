@@ -29,9 +29,9 @@ composite `action.yml` files. It never opens the content of a script a step
 invokes. A trusted step `run: bash x.sh` whose script appends
 `NODE_OPTIONS=--import=…` to `$GITHUB_ENV` neuters every later suite in the same
 job into a false-green no-op. The vector was live when this was written: the
-`scripts` job's first PR-authored step was
-`run: bash scripts/check-agent-quality-gate-package-scripts.sh`, which executed
-before all ten suites it then held. Reading invoked-script content is not a
+`scripts` job's first PR-authored step ran
+`scripts/check-agent-quality-gate-package-scripts.mjs`, which executed before
+all ten suites it then held. Reading invoked-script content is not a
 fix — it false-positives on every legitimate script and regresses infinitely
 through whatever those scripts invoke.
 
