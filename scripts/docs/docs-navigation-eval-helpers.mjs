@@ -6,7 +6,7 @@ import {
   parseLeadingMarkerBlock,
   requireSingleQueueState,
   selectQueueIssues,
-} from "./lib/gh-issue-lifecycle.mjs";
+} from "../lib/gh-issue-lifecycle.mjs";
 
 export const NAVIGATION_EVAL_MARKER = "<!-- docs-navigation-eval-issue:v1 -->";
 export const NAVIGATION_EVAL_MONTH_MARKER_PREFIX =

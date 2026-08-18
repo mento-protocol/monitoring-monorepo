@@ -1878,18 +1878,45 @@ if [[ ! -s "$changed_paths_file" ]]; then
   exit 0
 fi
 
+# Routing classification runs from the gate's own source tree, not the repo
+# under test, so a `scripts/` move must repoint this literal in the same commit.
+# Nothing in CI runs the gate for real; the routing suite is what exercises this
+# import there, and a developer's pre-push is where a stale path bites first.
+# The loader below therefore exits 3 and names the module it could not resolve,
+# instead of letting the failure read as a generic classifier fault.
+routing_classifier_path="$script_source_dir/docs/docs-navigation-eval-helpers.mjs"
 routing_sensitive_paths_changed=""
-if ! routing_sensitive_paths_changed="$(
+routing_classifier_status=0
+routing_sensitive_paths_changed="$(
   node --input-type=module - \
-    "$script_source_dir/docs-navigation-eval-helpers.mjs" \
+    "$routing_classifier_path" \
     "$changed_paths_file" <<'NODE'
-import { readFileSync } from "node:fs";
+import { readFileSync, writeSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 const [classifierPath, changedPathsPath] = process.argv.slice(2);
-const { isRoutingSensitivePath } = await import(
-  pathToFileURL(classifierPath).href
-);
+let isRoutingSensitivePath;
+try {
+  ({ isRoutingSensitivePath } = await import(
+    pathToFileURL(classifierPath).href
+  ));
+} catch (error) {
+  // writeSync, not process.stderr.write: process.exit() drops whatever is still
+  // queued on an async stderr, which is what stderr is whenever the gate runs
+  // under a pipe rather than a terminal.
+  //
+  // Nothing in this heredoc, code or prose, may leave a quote, backtick, or
+  // paren unbalanced. bash 3.2 mis-scans one inside a heredoc nested in $( ),
+  // which is how the gate runs this snippet, and
+  // check-sentry-suites-in-ci-gate-probe parses the gate with /bin/bash — 3.2
+  // on macOS. A lone apostrophe in a comment reds three of its cases.
+  writeSync(2, `${error instanceof Error ? error.message : String(error)}\n`);
+  process.exit(3);
+}
+if (typeof isRoutingSensitivePath !== "function") {
+  writeSync(2, `${classifierPath} does not export isRoutingSensitivePath\n`);
+  process.exit(3);
+}
 const changedPaths = readFileSync(changedPathsPath, "utf8")
   .split(/\r?\n/)
   .filter(Boolean);
@@ -1897,7 +1924,12 @@ process.stdout.write(
   changedPaths.some(isRoutingSensitivePath) ? "true" : "false",
 );
 NODE
-)"; then
+)" || routing_classifier_status=$?
+if [[ "$routing_classifier_status" -ne 0 ]]; then
+  if [[ "$routing_classifier_status" -eq 3 ]]; then
+    echo "error: routing-sensitive path classifier could not be loaded from ${routing_classifier_path}" >&2
+    echo "       scripts/agent-quality-gate.sh imports this module at pre-push time; moving it requires repointing that path in the same commit." >&2
+  fi
   echo "error: failed to classify routing-sensitive changed paths" >&2
   exit 2
 fi
@@ -2686,9 +2718,9 @@ add_root_tooling_package_script_checks() {
   add_command "node scripts/supply-chain/override-prune-report.test.mjs" "$reason"
   add_command "node scripts/check-adr-reminder.test.mjs" "$reason"
   add_command "node scripts/context/docs-index.test.mjs" "$reason"
-  add_command "node scripts/docs-audit.test.mjs" "$reason"
-  add_command "node scripts/docs-garden-issue.test.mjs" "$reason"
-  add_command "node scripts/docs-navigation-eval.test.mjs" "$reason"
+  add_command "node scripts/docs/docs-audit.test.mjs" "$reason"
+  add_command "node scripts/docs/docs-garden-issue.test.mjs" "$reason"
+  add_command "node scripts/docs/docs-navigation-eval.test.mjs" "$reason"
   add_command "node scripts/context/agent-context-budget.test.mjs" "$reason"
 }
 
@@ -3751,17 +3783,17 @@ while IFS= read -r path; do
           add_command "pnpm docs:index --check" "documentation catalog helper changed"
           add_command "pnpm agent:context-check" "documentation catalog metadata contract changed"
           ;;
-        scripts/docs-audit.mjs|scripts/docs-audit-helpers.mjs|scripts/docs-audit.test.mjs)
+        scripts/docs/docs-audit.mjs|scripts/docs/docs-audit-helpers.mjs|scripts/docs/docs-audit.test.mjs)
           add_command "pnpm docs:audit:test" "documentation audit planner changed"
           add_command "pnpm docs:audit --dry-run" "documentation audit planner changed"
           add_command "pnpm docs:index --check" "documentation audit planner consumes the catalog"
           ;;
-        scripts/docs-garden-issue.mjs|scripts/docs-garden-issue-helpers.mjs|scripts/docs-garden-issue.test.mjs)
+        scripts/docs/docs-garden-issue.mjs|scripts/docs/docs-garden-issue-helpers.mjs|scripts/docs/docs-garden-issue.test.mjs)
           add_command "pnpm docs:garden:test" "documentation garden issue automation changed"
           add_command "pnpm docs:audit --dry-run" "documentation garden issue automation consumes the planner"
           add_command "pnpm docs:index --check" "documentation garden issue automation consumes the catalog"
           ;;
-        scripts/docs-navigation-eval.mjs|scripts/docs-navigation-eval-helpers.mjs|scripts/docs-navigation-eval-result.mjs|scripts/docs-navigation-eval.test.mjs)
+        scripts/docs/docs-navigation-eval.mjs|scripts/docs/docs-navigation-eval-helpers.mjs|scripts/docs/docs-navigation-eval-result.mjs|scripts/docs/docs-navigation-eval-result-shape.mjs|scripts/docs/docs-navigation-eval.test.mjs)
           add_command "pnpm docs:navigation-eval:test" "documentation navigation evaluation changed"
           add_command "pnpm docs:navigation-eval -- --check-fixtures" "documentation navigation evaluation changed"
           add_command "pnpm docs:navigation-eval -- --validate docs/evals/documentation-navigation-baseline.json --fixtures docs/evals/documentation-navigation-baseline-fixtures.json" "documentation navigation evaluation changed"
@@ -4438,7 +4470,7 @@ implementation_signature() {
     scripts/agent-quality-gate.sh \
     scripts/agent-quality-gate.test.sh \
     scripts/check-agent-quality-gate-package-scripts.sh \
-    scripts/docs-navigation-eval-helpers.mjs \
+    scripts/docs/docs-navigation-eval-helpers.mjs \
     scripts/terraform/terraform-fmt-check.mjs \
     scripts/terraform/terraform-fmt-check.test.mjs \
     turbo.json \

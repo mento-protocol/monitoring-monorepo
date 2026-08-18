@@ -9,7 +9,7 @@ import { pathToFileURL } from "node:url";
 import {
   buildDocumentationInventory,
   trackedDocumentationFiles,
-} from "./context/docs-index-helpers.mjs";
+} from "../context/docs-index-helpers.mjs";
 import {
   buildNavigationEvalIssueSpec,
   buildNavigationPrompt,
@@ -30,7 +30,7 @@ import {
   ensureLabelsExist,
   ghPaginate,
   runGh,
-} from "./lib/gh-issue-lifecycle.mjs";
+} from "../lib/gh-issue-lifecycle.mjs";
 
 export const DEFAULT_NAVIGATION_EVAL_REPO =
   "mento-protocol/monitoring-monorepo";
@@ -133,7 +133,7 @@ export function parseArgs(argv, env = process.env) {
 }
 
 function usage() {
-  return `Usage: node scripts/docs-navigation-eval.mjs MODE [options]
+  return `Usage: node scripts/docs/docs-navigation-eval.mjs MODE [options]
 
 Generate and validate the read-only fresh-agent documentation navigation
 evaluation, or synchronize its monthly claimable issue. No mode invokes a

@@ -17,7 +17,7 @@ garden_lane: agent-entry-points
 ## Scope
 
 `scripts/` holds deploy wrappers, agent quality gates, code-health checks, and
-repo maintenance utilities. 145 files sit flat at the top level today.
+repo maintenance utilities. 135 files sit flat at the top level today.
 
 ## Target Layout
 
@@ -31,7 +31,7 @@ Files stay flat until their phase merges.
 | `workflows/`    | P1    | scripts backing Actions workflow jobs  |
 | `bootstrap/`    | P2    | container and hosted-session setup     |
 | `context/`      | P3    | agent context, budget, doc catalog     |
-| `docs/`         | P4    | catalog, audit, garden, nav eval       |
+| `docs/`         | P4    | audit planner, garden, navigation eval |
 | `pr/`           | P5    | PR and issue state projections         |
 | `supply-chain/` | P6    | lockfile, audit, pin, skew gates       |
 | `mcp/`          | P6    | MCP broker, launcher, config rendering |
@@ -40,7 +40,7 @@ Files stay flat until their phase merges.
 | `terraform/`    | P10   | movable Terraform guards and helpers   |
 | `gate/`         | P11   | quality-gate satellites                |
 
-Landed: P1, P2, P3, P6, P7, P8, P9, P10. `lib/` (the shared tier) and
+Landed: P1, P2, P3, P4, P6, P7, P8, P9, P10. `lib/` (the shared tier) and
 `production-infra-identity-contract/` predate the reorganization. `setup.sh`
 stays flat: `.config/wt.toml` runs that exact path as the Worktrunk pre-start
 hook, and eight docs name it. `redrive-onchain-deadletter.{mjs,test.mjs}` stays
@@ -64,7 +64,7 @@ their domain.
 
 ## Why Files Stay Flat
 
-Eight mechanisms pin `scripts/` paths. A file one of them names moves only when
+Ten mechanisms pin `scripts/` paths. A file one of them names moves only when
 that mechanism moves with it, in the same PR.
 
 - **Autoreview runtime materialization.** `agent-autoreview.sh` names its
@@ -73,6 +73,13 @@ that mechanism moves with it, in the same PR.
 - **Gate source-directory guards.** `agent-quality-gate.sh` gates real-tree
   routing on `$script_source_dir == $repo_root/scripts`, leaving its stub-repo
   unit tests unaffected.
+- **Gate runtime module pins.** `agent-quality-gate.sh` resolves
+  `docs/docs-navigation-eval-helpers.mjs` and `lockfile-scope.mjs` from
+  `$script_source_dir`, and names the classifier in three literals. Repoint
+  every one; ADR 0064 lists them.
+- **Evaluation fixture forbidden lists.** `forbidden_sources` in
+  `docs/evals/documentation-navigation-fixtures.json` names the navigation
+  eval's own implementation.
 - **Sentry suite manifest.** `sentry-suite-manifest.json` keys are exact
   repo-relative paths, reconciled against `findSentrySuites()` by set equality
   both ways. A moved or renamed suite fails the gate closed.
@@ -109,7 +116,7 @@ breaks silently on the next move.
 
 ## Sweep Checklist for a Move
 
-Work the nine-surface checklist in
+Work the ten-surface checklist in
 [ADR 0064](../docs/adr/0064-scripts-module-directories.md#sweep-checklist-for-a-move)
 in the PR that moves a file. Every surface there is mandatory.
 
@@ -133,12 +140,9 @@ in the PR that moves a file. Every surface there is mandatory.
 - New Node root scripts need `pnpm lint:scripts` coverage; new shell scripts must
   pass `bash -n`. Add a focused command to `scripts/agent-quality-gate.sh` for
   behavior syntax and lint checks cannot verify.
-- `pnpm tf plan/apply platform` owns its saved plan. The wrapper keeps plan JSON
-  in memory only, checks the Metrics Bridge template mode, applies that same
-  private plan, uses one mode-`0600` snapshot of each variable file for both
-  phases, and deletes its temporary files. Never accept a caller plan path, or
-  print, upload, or cache either plan form. The guarded first-service bootstrap
-  plans below are a deploy-only exception. See
+- `pnpm tf plan/apply platform` owns one private saved plan. Never accept a
+  caller plan path, or print, upload, or cache either plan form. The wrapper
+  mechanism and its deploy-only bootstrap exception are in
   [ADR 0061](../docs/adr/0061-exact-plan-guard-for-manual-platform-applies.md).
 - `pnpm tf:test` enforces the deployment source-staging contract: the five
   allowed `gcloud builds submit` / `gcloud app deploy` callsites, the Metrics

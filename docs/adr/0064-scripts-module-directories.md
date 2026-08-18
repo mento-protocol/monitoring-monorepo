@@ -173,6 +173,26 @@ routing, not procedure.
    `implementation_signature()` path list is stricter than a glob: an entry it
    cannot stat hashes as `__missing__`, so the signature freezes and
    `--skip-if-fresh` reuses a stale stamp. Repoint it in the same commit.
+   The gate also resolves node helpers from `$script_source_dir`:
+   `docs/docs-navigation-eval-helpers.mjs`, which classifies routing-sensitive
+   paths, and `lockfile-scope.mjs`. Those are differently-rooted literals, and
+   the routing arms and the signature list name the classifier again, so it
+   appears three times in all — the import, its routing arm, and
+   `implementation_signature()`. Repoint every occurrence. No CI job runs the
+   gate for real, so `agent-quality-gate.test.sh` is the only place any of them
+   is exercised outside a developer's pre-push. `lockfile-scope.mjs` is the
+   quieter of the two: its caller reads a nonzero exit as "cannot narrow", so a
+   stale path silently widens every lockfile change to the full suite. It is
+   also absent from `implementation_signature()`; the phase that moves it into
+   `gate/` should add it.
+10. `forbidden_sources` in `docs/evals/documentation-navigation-fixtures.json`
+    names the navigation evaluation's own implementation, so a run cannot read
+    the answers out of it. `validateFixtureSuite` checks those paths for
+    uniqueness and never for existence, so a stale entry stops forbidding
+    anything and no check reds. The paired
+    `documentation-navigation-baseline-fixtures.json` is the frozen contract for
+    the committed baseline result and is deliberately left alone; editing it
+    would force a rebind of that result's `fixture_digest`.
 
 A shared module under `scripts/lib/` is routed from every arm that reads it,
 not only the arm of the consumer that happens to fail loudest.
@@ -180,7 +200,8 @@ not only the arm of the consumer that happens to fail loudest.
 ## Evidence
 
 - Flat-layout scale and prefix counts: `git ls-files scripts/` — 210 top-level
-  files, 53 with the `sentry-` prefix, at 2026-08-17.
+  files, 53 with the `sentry-` prefix, measured at P0. The count falls with each
+  phase; `scripts/AGENTS.md` carries the current one.
 - Bash `case` routing: `scripts/agent-autoreview.sh` (`scripts/*` arm),
   `scripts/agent-quality-gate.sh` (`scripts/*.sh`, `scripts/deploy-*.sh`, and
   the paired `scripts/sentry-*.test.mjs` / `scripts/*/sentry-*.test.mjs` arms).

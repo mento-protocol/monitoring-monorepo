@@ -8,7 +8,7 @@ import { pathToFileURL } from "node:url";
 import {
   buildDocumentationInventory,
   trackedDocumentationFiles,
-} from "./context/docs-index-helpers.mjs";
+} from "../context/docs-index-helpers.mjs";
 import { buildAuditPacket } from "./docs-audit-helpers.mjs";
 import {
   buildDocsGardenIssueSpec,
@@ -23,7 +23,7 @@ import {
   ensureLabelsExist,
   ghPaginate,
   runGh,
-} from "./lib/gh-issue-lifecycle.mjs";
+} from "../lib/gh-issue-lifecycle.mjs";
 
 export const DEFAULT_REPO = "mento-protocol/monitoring-monorepo";
 
@@ -88,7 +88,7 @@ export function parseArgs(argv, env = process.env) {
 }
 
 function usage() {
-  return `Usage: node scripts/docs-garden-issue.mjs [options]
+  return `Usage: node scripts/docs/docs-garden-issue.mjs [options]
 
 Create or retain the one bounded documentation-garden queue issue. Local
 invocations are preview-only and must use --dry-run; live issue creation is
