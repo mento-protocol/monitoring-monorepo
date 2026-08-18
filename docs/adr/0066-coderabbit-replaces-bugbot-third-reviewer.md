@@ -36,7 +36,8 @@ review run, with three properties that matter here:
 
 - The default trigger re-reviews the **full PR on every push**; incremental
   review is opt-in.
-- There is **no published spending cap** and no per-run cost line on the bill.
+- There is **no BugBot-specific spending cap** — only the Cursor account's
+  general monthly spend limit bounds it — and no per-run cost line on the bill.
 - There is **no free or discounted tier** for public repositories.
 
 This repo is the worst case for that model. One login (`chapati23`) authors
@@ -58,7 +59,8 @@ Decision criteria: review quality and cost.
   sample is too small and bursty to measure noise rates.
 - **The strongest independent head-to-head** (146 PRs / 679 findings, four
   bots run in parallel for 3 weeks, published May 2026): false-positive
-  rates were Greptile 0% (118 findings), CodeRabbit 2.3% (281), BugBot 4.8%
+  rates — the study counts FP/(fixed+FP), excluding pending findings — were
+  Greptile 0% (118 audited findings), CodeRabbit 2.3% (281), BugBot 4.8%
   (128), and Sentry Seer — the fourth bot — ~9%. 93.4% of findings were
   caught by exactly **one** tool and none by all four — the bots are
   complementary, so removing one costs real coverage.
@@ -72,7 +74,7 @@ Decision criteria: review quality and cost.
 Read together: no candidate has a decisive quality edge. BugBot is the quiet,
 precision-first member of the stack — a role Codex (deliberately P0/P1-only)
 already fills. CodeRabbit and Greptile are the two credible replacements, and
-both sit at or above BugBot on independent precision measurements.
+both sit at or above BugBot on independent false-positive measurements.
 
 ### Cost at this repo's shape (1 PR-author seat, ~280 PRs/month, public repo)
 
@@ -108,8 +110,10 @@ Replace BugBot with CodeRabbit as the third advisory reviewer.
    trees, and `auto_pause_after_reviewed_commits` tuned so agent fix-commit
    bursts do not burn review rounds.
 3. **Parallel-run for ~2 weeks.** Switch BugBot to manual triggering
-   (`bugbot run`) during the window to cap its spend, compare both bots'
-   findings on the same PRs, then disable BugBot in the Cursor dashboard.
+   (`bugbot run`) during the window to bound how often it runs — a trigger
+   limit, not a spending cap; the account-level monthly spend limit is the
+   only hard ceiling — compare both bots' findings on the same PRs, then
+   disable BugBot in the Cursor dashboard.
    Until step 4 lands, CodeRabbit is not in the feedback-ledger bot roster, so
    its comments do not block `pr:ready-state` — triage them manually during
    the window.
@@ -178,10 +182,14 @@ Replace BugBot with CodeRabbit as the third advisory reviewer.
   review. `pr:feedback-state` severity regexes keyed on `BUGBOT_BUG_ID` retire
   with it.
 - CodeRabbit is a new third-party GitHub App with repo read access and PR
-  comment/review write access, steered by `.coderabbit.yaml` — a PR-authored
-  file, so a PR can change the profile that reviews it. Both are acceptable
-  while the bot is advisory and gates nothing; re-assess this boundary before
-  any CodeRabbit output ever feeds a required gate.
+  comment/review write access, steered by `.coderabbit.yaml` — and CodeRabbit
+  resolves that file from the **source branch** of the PR under review,
+  falling back to defaults when absent, so a PR can weaken or replace the
+  profile that reviews it. Acceptable while the bot is advisory and gates
+  nothing; before any CodeRabbit output ever feeds a required gate, protect
+  the config (CODEOWNERS or CodeRabbit central configuration) and add
+  marker-recognition tests (`@coderabbitai configuration` prints the
+  effective settings).
 - Watch item: `claude[bot]` review currently rides existing Max
   subscription spend. Anthropic's separate metered "Code Review" product bills
   $15–25/review — ruinous at this volume. If the GitHub Action review path is
