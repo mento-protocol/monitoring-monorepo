@@ -77,6 +77,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0062](0062-sentry-suites-self-run-gate.md)                 | An unconditional gate job runs the Sentry suites and proves from output they ran     |
 | [0064](0064-scripts-module-directories.md)                  | `scripts/` may use module subdirectories; basenames and pinned paths constrain moves |
 | [0065](0065-scripts-file-size-watchlist-scope.md)           | `scripts/` sits inside the file-size watchlist, with named-mechanism exemptions      |
+| [0066](0066-coderabbit-replaces-bugbot-third-reviewer.md)   | CodeRabbit replaces Cursor BugBot as the third advisory PR reviewer                  |
 
 ### shared-config
 

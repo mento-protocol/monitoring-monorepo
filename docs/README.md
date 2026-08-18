@@ -192,6 +192,7 @@ Authority: canonical
 - [`docs/adr/0063-dashboard-grafana-history-read-access.md`](adr/0063-dashboard-grafana-history-read-access.md) — Peg history reads Grafana Cloud through a dedicated read-only token
 - [`docs/adr/0064-scripts-module-directories.md`](adr/0064-scripts-module-directories.md) — scripts/ may use module subdirectories; basenames and pinned paths are the constraint
 - [`docs/adr/0065-scripts-file-size-watchlist-scope.md`](adr/0065-scripts-file-size-watchlist-scope.md) — scripts/ is inside the file-size watchlist, with named-mechanism exemptions
+- [`docs/adr/0066-coderabbit-replaces-bugbot-third-reviewer.md`](adr/0066-coderabbit-replaces-bugbot-third-reviewer.md) — CodeRabbit replaces Cursor BugBot as the third PR review bot
 
 Authority: non-canonical
 
