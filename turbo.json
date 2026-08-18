@@ -234,7 +234,7 @@
         "$TURBO_ROOT$/pnpm-workspace.yaml",
         "$TURBO_ROOT$/.npmrc",
         "$TURBO_ROOT$/.node-version",
-        "$TURBO_ROOT$/scripts/check-react-doctor-diff.sh",
+        "scripts/check-react-doctor-diff.sh",
         "$TURBO_ROOT$/turbo.json",
         "!AGENTS.md",
         "!CLAUDE.md"
@@ -257,7 +257,7 @@
         "$TURBO_ROOT$/pnpm-workspace.yaml",
         "$TURBO_ROOT$/.npmrc",
         "$TURBO_ROOT$/.node-version",
-        "$TURBO_ROOT$/scripts/check-react-doctor-score.sh",
+        "scripts/check-react-doctor-score.sh",
         "$TURBO_ROOT$/turbo.json",
         "!AGENTS.md",
         "!CLAUDE.md"

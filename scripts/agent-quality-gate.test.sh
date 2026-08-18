@@ -266,13 +266,13 @@ normalize_expected_command() {
     *"pnpm dashboard:size-limit"*)
       expected="${expected/pnpm dashboard:size-limit/VERCEL_DEPLOYMENT_ID=local-quality-gate pnpm exec turbo run size-limit --filter=@mento-protocol/ui-dashboard --cache=local:rw}"
       ;;
-    *"bash scripts/check-react-doctor-score.sh"*)
-      expected="${expected/bash scripts\/check-react-doctor-score.sh/pnpm exec turbo run react-doctor:score --filter=@mento-protocol\/ui-dashboard --cache=local:rw}"
+    *"bash ui-dashboard/scripts/check-react-doctor-score.sh"*)
+      expected="${expected/bash ui-dashboard\/scripts\/check-react-doctor-score.sh/pnpm exec turbo run react-doctor:score --filter=@mento-protocol\/ui-dashboard --cache=local:rw}"
       ;;
-    *"bash scripts/check-react-doctor-diff.sh "*)
-      local base_ref="${expected#*bash scripts/check-react-doctor-diff.sh }"
+    *"bash ui-dashboard/scripts/check-react-doctor-diff.sh "*)
+      local base_ref="${expected#*bash ui-dashboard/scripts/check-react-doctor-diff.sh }"
       base_ref="${base_ref%% *}"
-      expected="${expected/bash scripts\/check-react-doctor-diff.sh ${base_ref}/REACT_DOCTOR_BASE_REF=${base_ref} REACT_DOCTOR_BASE_CACHE_KEY=__unresolved__:${base_ref} pnpm exec turbo run react-doctor:diff --filter=@mento-protocol\/ui-dashboard --cache=local:rw}"
+      expected="${expected/bash ui-dashboard\/scripts\/check-react-doctor-diff.sh ${base_ref}/REACT_DOCTOR_BASE_REF=${base_ref} REACT_DOCTOR_BASE_CACHE_KEY=__unresolved__:${base_ref} pnpm exec turbo run react-doctor:diff --filter=@mento-protocol\/ui-dashboard --cache=local:rw}"
       ;;
     *"pnpm --filter @mento-protocol/"*" lint"*|*"pnpm --filter @mento-protocol/"*" typecheck"*|*"pnpm --filter @mento-protocol/"*" test"*|*"pnpm --filter @mento-protocol/"*" knip"*)
       package_name="${expected#*pnpm --filter }"
@@ -564,18 +564,18 @@ assert_turbo_task_has_env "fixture-build" "NEXT_DIST_DIR"
 node - <<'NODE' ||
 const fs = require("node:fs");
 const pkg = JSON.parse(fs.readFileSync("ui-dashboard/package.json", "utf8"));
-if (pkg.scripts?.["react-doctor:diff"] !== 'bash ../scripts/check-react-doctor-diff.sh "${REACT_DOCTOR_BASE_REF:-origin/main}"') {
-  console.error("ui-dashboard react-doctor:diff must delegate to the root diff wrapper");
+if (pkg.scripts?.["react-doctor:diff"] !== 'bash ./scripts/check-react-doctor-diff.sh "${REACT_DOCTOR_BASE_REF:-origin/main}"') {
+  console.error("ui-dashboard react-doctor:diff must delegate to the package-local diff wrapper");
   process.exit(1);
 }
-if (pkg.scripts?.["react-doctor:score"] !== "bash ../scripts/check-react-doctor-score.sh") {
-  console.error("ui-dashboard react-doctor:score must delegate to the root score wrapper");
+if (pkg.scripts?.["react-doctor:score"] !== "bash ./scripts/check-react-doctor-score.sh") {
+  console.error("ui-dashboard react-doctor:score must delegate to the package-local score wrapper");
   process.exit(1);
 }
 NODE
-  fail "expected ui-dashboard React Doctor package scripts to use root wrappers"
+  fail "expected ui-dashboard React Doctor package scripts to use the package-local wrappers"
 assert_turbo_task_has_input "react-doctor:diff" "react-doctor.config.json"
-assert_turbo_task_has_input "react-doctor:diff" '$TURBO_ROOT$/scripts/check-react-doctor-diff.sh'
+assert_turbo_task_has_input "react-doctor:diff" "scripts/check-react-doctor-diff.sh"
 assert_turbo_task_lacks_input "react-doctor:diff" '$TURBO_ROOT$/scripts/agent-quality-gate.sh'
 assert_turbo_task_lacks_input "react-doctor:diff" '$TURBO_ROOT$/scripts/agent-quality-gate.test.sh'
 assert_turbo_task_has_input "react-doctor:diff" '$TURBO_ROOT$/package.json'
@@ -587,7 +587,7 @@ assert_turbo_task_has_input "react-doctor:diff" '$TURBO_ROOT$/turbo.json'
 assert_turbo_task_has_env "react-doctor:diff" "REACT_DOCTOR_BASE_REF"
 assert_turbo_task_has_env "react-doctor:diff" "REACT_DOCTOR_BASE_CACHE_KEY"
 assert_turbo_task_has_input "react-doctor:score" "react-doctor.config.json"
-assert_turbo_task_has_input "react-doctor:score" '$TURBO_ROOT$/scripts/check-react-doctor-score.sh'
+assert_turbo_task_has_input "react-doctor:score" "scripts/check-react-doctor-score.sh"
 assert_turbo_task_lacks_input "react-doctor:score" '$TURBO_ROOT$/scripts/agent-quality-gate.sh'
 assert_turbo_task_lacks_input "react-doctor:score" '$TURBO_ROOT$/scripts/agent-quality-gate.test.sh'
 assert_turbo_task_has_input "react-doctor:score" '$TURBO_ROOT$/package.json'
@@ -937,7 +937,7 @@ assert_occurrences 1 "- pnpm exec turbo run knip --filter="
 # changes still trigger it via the per-package dispatch.
 assert_not_contains "playwright install chromium (package manager config changed)"
 assert_not_contains_mapped "- pnpm --filter @mento-protocol/ui-dashboard test:browser (package manager config changed)"
-assert_contains "- bash scripts/check-react-doctor-score.sh (package manager config changed)"
+assert_contains "- bash ui-dashboard/scripts/check-react-doctor-score.sh (package manager config changed)"
 assert_order \
   "- pnpm install --frozen-lockfile (package manager config changed)" \
   "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen (package manager config changed)"
@@ -956,7 +956,7 @@ run_gate "package.json"
 assert_contains "- bash scripts/agent-quality-gate.test.sh (agent quality gate package script changed)"
 assert_contains "- pnpm skew:check (workspace dependency/config changed)"
 assert_contains "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen (workspace dependency/config changed)"
-assert_contains "- bash scripts/check-react-doctor-score.sh (workspace dependency/config changed)"
+assert_contains "- bash ui-dashboard/scripts/check-react-doctor-score.sh (workspace dependency/config changed)"
 assert_order \
   "- pnpm install --frozen-lockfile (workspace package manifest changed)" \
   "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen (workspace dependency/config changed)"
@@ -1234,7 +1234,7 @@ assert_contains "- pnpm --filter @mento-protocol/ui-dashboard typecheck (root pa
 # Workspace-wide triggers skip the dashboard playwright suite — see the
 # matching `assert_not_contains` block above .npmrc for the rationale.
 assert_not_contains_mapped "- pnpm --filter @mento-protocol/ui-dashboard test:browser (root package script changed)"
-assert_contains "- bash scripts/check-react-doctor-score.sh (root package script changed)"
+assert_contains "- bash ui-dashboard/scripts/check-react-doctor-score.sh (root package script changed)"
 
 package_scripts_object_repo="$(mktemp -d)"
 (
@@ -1818,8 +1818,8 @@ assert_contains "- docs/pr-checklists/terraform-cloudrun.md (metrics bridge Clou
 
 run_gate "ui-dashboard/src/lib/gql-retry.ts"
 assert_contains "- docs/pr-checklists/swr-polling-hasura.md (Hasura/SWR/query path changed)"
-assert_contains "- bash scripts/check-react-doctor-diff.sh origin/test (ui-dashboard client code should keep React Doctor clean)"
-assert_contains "- bash scripts/check-react-doctor-score.sh (ui-dashboard React Doctor score should stay 100)"
+assert_contains "- bash ui-dashboard/scripts/check-react-doctor-diff.sh origin/test (ui-dashboard client code should keep React Doctor clean)"
+assert_contains "- bash ui-dashboard/scripts/check-react-doctor-score.sh (ui-dashboard React Doctor score should stay 100)"
 assert_raw_contains "- pnpm --filter @mento-protocol/ui-dashboard exec vitest related --run src/lib/gql-retry.ts (ui-dashboard changed (coverage floor) (scoped-tests))"
 assert_not_contains "- pnpm --filter @mento-protocol/ui-dashboard test:coverage"
 assert_contains "- pnpm --filter @mento-protocol/ui-dashboard exec playwright install chromium (ui-dashboard changed)"
@@ -1838,8 +1838,8 @@ assert_contains "- pnpm --filter @mento-protocol/ui-dashboard test:coverage"
 assert_not_contains "vitest related --run src/lib/gql-retry.ts"
 
 run_gate "ui-dashboard/react-doctor.config.json"
-assert_contains "- bash scripts/check-react-doctor-diff.sh origin/test (ui-dashboard client code should keep React Doctor clean)"
-assert_contains "- bash scripts/check-react-doctor-score.sh (ui-dashboard React Doctor score should stay 100)"
+assert_contains "- bash ui-dashboard/scripts/check-react-doctor-diff.sh origin/test (ui-dashboard client code should keep React Doctor clean)"
+assert_contains "- bash ui-dashboard/scripts/check-react-doctor-score.sh (ui-dashboard React Doctor score should stay 100)"
 assert_not_contains_mapped "- pnpm dashboard:build"
 
 run_gate "ui-dashboard/tests/browser/fixtures/hasura-fixture-server.mjs"
@@ -1877,7 +1877,7 @@ assert_contains "- docs/pr-checklists/mutation-testing.md (dashboard mutation ba
 assert_contains "- pnpm dashboard:mutation (dashboard mutation baseline changed)"
 
 run_gate "ui-dashboard/vitest.mutation.config.ts"
-assert_contains "- node scripts/check-hermetic-vitest-setup.mjs (hermetic Vitest config changed)"
+assert_contains "- node scripts/repo-health/check-hermetic-vitest-setup.mjs (hermetic Vitest config changed)"
 assert_contains "- docs/pr-checklists/mutation-testing.md (dashboard mutation baseline changed)"
 assert_contains "- pnpm dashboard:mutation (dashboard mutation baseline changed)"
 
@@ -1894,7 +1894,7 @@ assert_contains "- docs/pr-checklists/mutation-testing.md (metrics bridge mutati
 assert_contains "- pnpm bridge:mutation (metrics bridge mutation baseline changed)"
 
 run_gate "metrics-bridge/vitest.mutation.config.ts"
-assert_contains "- node scripts/check-hermetic-vitest-setup.mjs (hermetic Vitest config changed)"
+assert_contains "- node scripts/repo-health/check-hermetic-vitest-setup.mjs (hermetic Vitest config changed)"
 assert_contains "- docs/pr-checklists/mutation-testing.md (metrics bridge mutation baseline changed)"
 assert_contains "- pnpm bridge:mutation (metrics bridge mutation baseline changed)"
 
@@ -1911,7 +1911,7 @@ assert_contains "- docs/pr-checklists/mutation-testing.md (indexer mutation base
 assert_contains "- pnpm indexer:mutation (indexer mutation baseline changed)"
 
 run_gate "indexer-envio/vitest.mutation.config.ts"
-assert_contains "- node scripts/check-hermetic-vitest-setup.mjs (hermetic Vitest config changed)"
+assert_contains "- node scripts/repo-health/check-hermetic-vitest-setup.mjs (hermetic Vitest config changed)"
 assert_contains "- docs/pr-checklists/mutation-testing.md (indexer mutation baseline changed)"
 assert_contains "- pnpm indexer:mutation (indexer mutation baseline changed)"
 
@@ -2100,7 +2100,7 @@ assert_contains "- TF_DATA_DIR=aegis/terraform/.terraform-agent-gate node script
 # chromium mode is flaky on keyboard/route-heavy tests.
 assert_not_contains "playwright install chromium (central CI workflow changed)"
 assert_not_contains_mapped "- pnpm --filter @mento-protocol/ui-dashboard test:browser (central CI workflow changed)"
-assert_contains "- bash scripts/check-react-doctor-score.sh (central CI workflow changed)"
+assert_contains "- bash ui-dashboard/scripts/check-react-doctor-score.sh (central CI workflow changed)"
 assert_order \
   "- pnpm install --frozen-lockfile (central CI workflow changed)" \
   "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen (central CI workflow changed)"
@@ -2122,7 +2122,7 @@ assert_contains "- docs/pr-checklists/ci-workflow-gates.md (GitHub Actions workf
 assert_contains "- node scripts/workflows/check-github-action-pins.mjs (GitHub Actions workflow/action changed)"
 assert_contains "- pnpm install --frozen-lockfile (pnpm install action changed)"
 assert_contains "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen (pnpm install action changed)"
-assert_contains "- bash scripts/check-react-doctor-score.sh (pnpm install action changed)"
+assert_contains "- bash ui-dashboard/scripts/check-react-doctor-score.sh (pnpm install action changed)"
 assert_order \
   "- pnpm install --frozen-lockfile (pnpm install action changed)" \
   "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen (pnpm install action changed)"
@@ -2270,7 +2270,7 @@ assert_hermetic_setup_routes() {
   local reason="$3"
 
   run_gate "$path"
-  assert_contains "- node scripts/check-hermetic-vitest-setup.mjs (hermetic Vitest setup changed)"
+  assert_contains "- node scripts/repo-health/check-hermetic-vitest-setup.mjs (hermetic Vitest setup changed)"
   assert_contains "- pnpm --filter $package_name typecheck ($reason)"
   assert_contains "- pnpm --filter $package_name test:coverage ($reason (coverage floor))"
 }
@@ -2317,13 +2317,13 @@ assert_hermetic_setup_routes \
   "ui-dashboard hermetic Vitest setup changed"
 
 run_gate "ui-dashboard/vitest.config.ts"
-assert_contains "- node scripts/check-hermetic-vitest-setup.mjs (hermetic Vitest config changed)"
+assert_contains "- node scripts/repo-health/check-hermetic-vitest-setup.mjs (hermetic Vitest config changed)"
 
 run_gate "metrics-bridge/vitest.config.ts"
-assert_contains "- node scripts/check-hermetic-vitest-setup.mjs (hermetic Vitest config changed)"
+assert_contains "- node scripts/repo-health/check-hermetic-vitest-setup.mjs (hermetic Vitest config changed)"
 
 run_gate "indexer-envio/vitest.config.ts"
-assert_contains "- node scripts/check-hermetic-vitest-setup.mjs (hermetic Vitest config changed)"
+assert_contains "- node scripts/repo-health/check-hermetic-vitest-setup.mjs (hermetic Vitest config changed)"
 
 run_gate "bootstrap-worktree.sh"
 assert_contains "- bash -n bootstrap-worktree.sh (shell script changed)"
@@ -2350,12 +2350,12 @@ assert_contains "- pnpm lint:scripts (root build script changed)"
 assert_contains "- node scripts/filter-envio-runtime-errors.test.mjs (indexer runtime-log filter changed)"
 
 for path in \
-  scripts/file-size-watchlist.mjs \
-  scripts/file-size-watchlist-issue.mjs \
-  scripts/file-size-watchlist.test.mjs; do
+  scripts/repo-health/file-size-watchlist.mjs \
+  scripts/repo-health/file-size-watchlist-issue.mjs \
+  scripts/repo-health/file-size-watchlist.test.mjs; do
   run_gate "$path"
   assert_contains "- pnpm lint:scripts (root build script changed)"
-  assert_contains "- node --test scripts/file-size-watchlist.test.mjs (file-size watchlist automation changed)"
+  assert_contains "- node --test scripts/repo-health/file-size-watchlist.test.mjs (file-size watchlist automation changed)"
 done
 
 run_gate "scripts/deploy-indexer-verify.mjs"
@@ -2399,13 +2399,25 @@ run_gate "scripts/bootstrap/claude-code-web-setup.sh"
 assert_contains "- bash -n scripts/bootstrap/claude-code-web-setup.sh (shell script changed)"
 assert_contains "- pnpm agent:quality-gate:test (install-marker consumer changed)"
 
+# The React Doctor wrappers live in ui-dashboard/scripts/, not scripts/. The
+# routing suite still owns them because it copies and runs the diff wrapper in
+# a stub repo, so assert both that the package path routes and that the retired
+# root path no longer does.
+run_gate "ui-dashboard/scripts/check-react-doctor-diff.sh"
+assert_contains "- bash -n ui-dashboard/scripts/check-react-doctor-diff.sh (shell script changed)"
+assert_contains "- pnpm agent:quality-gate:test (React Doctor wrapper changed)"
+
+run_gate "ui-dashboard/scripts/check-react-doctor-score.sh"
+assert_contains "- bash -n ui-dashboard/scripts/check-react-doctor-score.sh (shell script changed)"
+assert_contains "- pnpm agent:quality-gate:test (React Doctor wrapper changed)"
+
 run_gate "scripts/check-react-doctor-diff.sh"
-assert_contains "- bash -n scripts/check-react-doctor-diff.sh (shell script changed)"
-assert_contains "- pnpm agent:quality-gate:test (agent quality gate mapping changed)"
+assert_not_contains "(React Doctor wrapper changed)"
+assert_not_contains "(agent quality gate mapping changed)"
 
 run_gate "scripts/check-react-doctor-score.sh"
-assert_contains "- bash -n scripts/check-react-doctor-score.sh (shell script changed)"
-assert_contains "- pnpm agent:quality-gate:test (agent quality gate mapping changed)"
+assert_not_contains "(React Doctor wrapper changed)"
+assert_not_contains "(agent quality gate mapping changed)"
 
 run_gate "scripts/check-agent-quality-gate-package-scripts.sh"
 assert_contains "- bash -n scripts/check-agent-quality-gate-package-scripts.sh (shell script changed)"
@@ -2415,24 +2427,24 @@ assert_contains "- pnpm agent:quality-gate:test (agent quality gate mapping chan
 run_gate ".agents/skills/ship/SKILL.md"
 assert_contains "- agent-context"
 assert_contains "- pnpm agent:context-check (agent context files changed)"
-assert_contains "- bash scripts/check-skills-mirror.test.sh (skills mirror content changed)"
-assert_contains "- bash scripts/check-skills-mirror.sh (skills mirror content changed)"
+assert_contains "- node scripts/repo-health/check-skills-mirror.test.mjs (skills mirror content changed)"
+assert_contains "- node scripts/repo-health/check-skills-mirror.mjs (skills mirror content changed)"
 
 run_gate ".claude/skills/ship/SKILL.md"
 assert_contains "- agent-context"
 assert_contains "- pnpm agent:context-check (agent context files changed)"
-assert_contains "- bash scripts/check-skills-mirror.test.sh (skills mirror content changed)"
-assert_contains "- bash scripts/check-skills-mirror.sh (skills mirror content changed)"
+assert_contains "- node scripts/repo-health/check-skills-mirror.test.mjs (skills mirror content changed)"
+assert_contains "- node scripts/repo-health/check-skills-mirror.mjs (skills mirror content changed)"
 
-run_gate "scripts/check-skills-mirror.sh"
-assert_contains "- bash -n scripts/check-skills-mirror.sh (shell script changed)"
-assert_contains "- bash scripts/check-skills-mirror.test.sh (skills mirror checker changed)"
-assert_contains "- bash scripts/check-skills-mirror.sh (skills mirror checker changed)"
+run_gate "scripts/repo-health/check-skills-mirror.mjs"
+assert_contains "- pnpm lint:scripts (root build script changed)"
+assert_contains "- node scripts/repo-health/check-skills-mirror.test.mjs (skills mirror checker changed)"
+assert_contains "- node scripts/repo-health/check-skills-mirror.mjs (skills mirror checker changed)"
 
-run_gate "scripts/check-skills-mirror.test.sh"
-assert_contains "- bash -n scripts/check-skills-mirror.test.sh (shell script changed)"
-assert_contains "- bash scripts/check-skills-mirror.test.sh (skills mirror checker changed)"
-assert_contains "- bash scripts/check-skills-mirror.sh (skills mirror checker changed)"
+run_gate "scripts/repo-health/check-skills-mirror.test.mjs"
+assert_contains "- pnpm lint:scripts (root build script changed)"
+assert_contains "- node scripts/repo-health/check-skills-mirror.test.mjs (skills mirror checker changed)"
+assert_contains "- node scripts/repo-health/check-skills-mirror.mjs (skills mirror checker changed)"
 
 run_gate ".trunk/trunk.yaml"
 assert_contains "- tooling"
@@ -3615,15 +3627,15 @@ react_doctor_repo="$(mktemp -d)"
   git add README.md
   git commit -qm init
   original_head="$(git rev-parse --verify HEAD)"
-  mkdir -p bin scripts
-  cp "$repo_root/scripts/check-react-doctor-diff.sh" scripts/check-react-doctor-diff.sh
+  mkdir -p bin ui-dashboard/scripts
+  cp "$repo_root/ui-dashboard/scripts/check-react-doctor-diff.sh" ui-dashboard/scripts/check-react-doctor-diff.sh
   cat > bin/pnpm <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "$@" > "$PNPM_ARGS_FILE"
 STUB
   chmod +x bin/pnpm
   git switch --detach HEAD >/dev/null 2>&1
-  PNPM_ARGS_FILE="$output_file.pnpm-args" PATH="$PWD/bin:$PATH" bash scripts/check-react-doctor-diff.sh origin/test
+  PNPM_ARGS_FILE="$output_file.pnpm-args" PATH="$PWD/bin:$PATH" bash ui-dashboard/scripts/check-react-doctor-diff.sh origin/test
   [[ "$(git rev-parse --abbrev-ref HEAD)" == "HEAD" ]] ||
     fail "React Doctor diff helper did not restore detached HEAD"
   [[ "$(git rev-parse --verify HEAD)" == "$original_head" ]] ||
@@ -4237,15 +4249,15 @@ assert_contains "- pnpm skew:check:test (version skew checker changed)"
 run_gate "scripts/supply-chain/version-skew-check.test.mjs"
 assert_contains "- pnpm skew:check:test (version skew checker changed)"
 
-run_gate "scripts/check-hermetic-vitest-setup.mjs"
+run_gate "scripts/repo-health/check-hermetic-vitest-setup.mjs"
 assert_contains "- pnpm lint:scripts (root build script changed)"
-assert_contains "- node scripts/check-hermetic-vitest-setup.mjs (hermetic Vitest setup checker changed)"
-assert_contains "- node scripts/check-hermetic-vitest-setup.test.mjs (hermetic Vitest setup checker changed)"
+assert_contains "- node scripts/repo-health/check-hermetic-vitest-setup.mjs (hermetic Vitest setup checker changed)"
+assert_contains "- node scripts/repo-health/check-hermetic-vitest-setup.test.mjs (hermetic Vitest setup checker changed)"
 
-run_gate "scripts/check-hermetic-vitest-setup.test.mjs"
+run_gate "scripts/repo-health/check-hermetic-vitest-setup.test.mjs"
 assert_contains "- pnpm lint:scripts (root build script changed)"
-assert_contains "- node scripts/check-hermetic-vitest-setup.mjs (hermetic Vitest setup checker changed)"
-assert_contains "- node scripts/check-hermetic-vitest-setup.test.mjs (hermetic Vitest setup checker changed)"
+assert_contains "- node scripts/repo-health/check-hermetic-vitest-setup.mjs (hermetic Vitest setup checker changed)"
+assert_contains "- node scripts/repo-health/check-hermetic-vitest-setup.test.mjs (hermetic Vitest setup checker changed)"
 
 run_gate "scripts/workflows/check-github-action-pins.mjs"
 assert_contains "- node scripts/workflows/check-github-action-pins.mjs (GitHub Actions pin checker changed)"
@@ -4459,14 +4471,14 @@ assert_contains "- pnpm agent:autoreview:test (agent autoreview adapter changed)
 run_gate "scripts/agent-autoreview.test.sh"
 assert_contains "- pnpm agent:autoreview:test (agent autoreview adapter changed)"
 
-run_gate "scripts/dev-janitor.sh"
-assert_contains "- bash scripts/dev-janitor.test.sh (dev janitor script changed)"
+run_gate "scripts/repo-health/dev-janitor.sh"
+assert_contains "- bash scripts/repo-health/dev-janitor.test.sh (dev janitor script changed)"
 
-run_gate "scripts/dev-janitor.test.sh"
-assert_contains "- bash scripts/dev-janitor.test.sh (dev janitor script changed)"
+run_gate "scripts/repo-health/dev-janitor.test.sh"
+assert_contains "- bash scripts/repo-health/dev-janitor.test.sh (dev janitor script changed)"
 
 # Other root-script changes only need the standalone scripts ESLint.
-run_gate "scripts/code-health-history.mjs"
+run_gate "scripts/repo-health/code-health-history.mjs"
 assert_contains "- pnpm lint:scripts (root build script changed)"
 assert_not_contains "(ESLint baseline wrapper changed)"
 
