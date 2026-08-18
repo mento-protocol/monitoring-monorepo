@@ -432,20 +432,20 @@ manual CLI commands (`gh secret set`, `vercel env add`, `gcloud secrets versions
 add`, etc.). Add or update the owning Terraform resource/integration instead,
 document the source of truth here, and wait for a human-approved plan/apply.
 
-| Variable                              | Source                   | Description                                                           |
-| ------------------------------------- | ------------------------ | --------------------------------------------------------------------- |
-| `ENABLE_EXPERIMENTAL_COREPACK`        | Terraform resource       | Vercel Corepack opt-in so hosted builds honor pnpm 11                 |
-| `NEXT_PUBLIC_HASURA_URL`              | `terraform.tfvars`       | Prod Envio endpoint (Ethereum reserve-yield + Celo + Monad + Polygon) |
-| `METRICS_BRIDGE_URL`                  | Terraform Cloud Run URI  | Server-only Metrics Bridge origin for the peg-monitoring proxy        |
-| `NEXT_PUBLIC_HASURA_URL_TESTNET`      | `terraform.tfvars`       | Optional Monad Testnet Envio endpoint                                 |
-| `NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA` | `terraform.tfvars`       | Optional Celo Sepolia Envio endpoint                                  |
-| `NEXT_PUBLIC_SHOW_TESTNET_NETWORKS`   | `terraform.tfvars`       | Optional `true` flag that exposes hosted testnet networks             |
-| `UPSTASH_REDIS_REST_URL`              | Terraform output         | Dashboard-managed Redis — auto-set from DB                            |
-| `UPSTASH_REDIS_REST_TOKEN`            | Terraform output         | Dashboard-managed Redis token — auto-set                              |
-| `GRAFANA_QUERY_URL`                   | `terraform.tfvars`       | Server-only Grafana Cloud origin for peg history and alert history    |
-| `GRAFANA_QUERY_TOKEN`                 | Terraform output         | Server-only Grafana Viewer token — auto-set from the minted token     |
-| `BLOB_STORE_ID`                       | Vercel store integration | Blob OIDC store id for backup and restore routes                      |
-| `BLOB_WEBHOOK_PUBLIC_KEY`             | Vercel store integration | Blob OIDC public key for the connected store                          |
+| Variable                              | Source                   | Description                                                                |
+| ------------------------------------- | ------------------------ | -------------------------------------------------------------------------- |
+| `ENABLE_EXPERIMENTAL_COREPACK`        | Terraform resource       | Vercel Corepack opt-in so hosted builds honor pnpm 11                      |
+| `NEXT_PUBLIC_HASURA_URL`              | `terraform.tfvars`       | Prod Envio endpoint (Ethereum reserve-yield + Celo + Monad + Polygon)      |
+| `METRICS_BRIDGE_URL`                  | Terraform Cloud Run URI  | Server-only Metrics Bridge origin for the peg-monitoring proxy and OG card |
+| `NEXT_PUBLIC_HASURA_URL_TESTNET`      | `terraform.tfvars`       | Optional Monad Testnet Envio endpoint                                      |
+| `NEXT_PUBLIC_HASURA_URL_CELO_SEPOLIA` | `terraform.tfvars`       | Optional Celo Sepolia Envio endpoint                                       |
+| `NEXT_PUBLIC_SHOW_TESTNET_NETWORKS`   | `terraform.tfvars`       | Optional `true` flag that exposes hosted testnet networks                  |
+| `UPSTASH_REDIS_REST_URL`              | Terraform output         | Dashboard-managed Redis — auto-set from DB                                 |
+| `UPSTASH_REDIS_REST_TOKEN`            | Terraform output         | Dashboard-managed Redis token — auto-set                                   |
+| `GRAFANA_QUERY_URL`                   | `terraform.tfvars`       | Server-only Grafana Cloud origin for peg history and alert history         |
+| `GRAFANA_QUERY_TOKEN`                 | Terraform output         | Server-only Grafana Viewer token — auto-set from the minted token          |
+| `BLOB_STORE_ID`                       | Vercel store integration | Blob OIDC store id for backup and restore routes                           |
+| `BLOB_WEBHOOK_PUBLIC_KEY`             | Vercel store integration | Blob OIDC public key for the connected store                               |
 
 Terraform derives `METRICS_BRIDGE_URL` from
 `google_cloud_run_v2_service.metrics_bridge.uri`. A human-approved platform

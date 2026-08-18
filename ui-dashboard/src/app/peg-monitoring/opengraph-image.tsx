@@ -312,16 +312,13 @@ function StatusPill({ row, scale }: { row: PegOgRow; scale: TileScale }) {
 
 /** The board's supporting columns, kept as facts rather than filler space. */
 function TileStats({ row, scale }: { row: PegOgRow; scale: TileScale }) {
-  // `?? null` rather than `=== null`: a cached payload written by an earlier
-  // deploy can be missing fields this card since learned to read.
-  const breaker = row.breaker ?? null;
   const stats = [
     { key: "PRIMARY MARKET", value: row.venue ?? "—", color: TEXT_2 },
     { key: "BID–ASK SPREAD", value: row.spread ?? "—", color: TEXT_2 },
     {
       key: "CIRCUIT BREAKER",
-      value: breaker?.label ?? "—",
-      color: breaker === null ? TEXT_2 : TONE_COLOR[breaker.tone],
+      value: row.breaker?.label ?? "—",
+      color: row.breaker === null ? TEXT_2 : TONE_COLOR[row.breaker.tone],
     },
   ];
   return (
