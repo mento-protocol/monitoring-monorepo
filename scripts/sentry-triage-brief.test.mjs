@@ -2125,6 +2125,8 @@ await test("the brief leg is not a stub-body writer, and owns its marker alone",
 await test("the pipeline's shared modules stay under the file-size hard cap", () => {
   // scripts/ has no max-lines lint, so the 1,000-line hard cap in
   // docs/pr-checklists/recurring-review-patterns.md is only enforced here. The
+  // file-size watchlist scopes these modules since ADR 0065, but it reports
+  // rather than blocks; this list is what reds the commit that crosses. The
   // projection leg is on this list because it was NOT: it drifted past the cap
   // unnoticed and a later PR appended to it, which is the exact sequence the
   // checklist forbids (#1827). Everything a live workflow entry point reaches
@@ -2150,8 +2152,9 @@ await test("the pipeline's shared modules stay under the file-size hard cap", ()
 
 await test("the brief leg stays under the 600-line soft cap (#1769 round 9)", () => {
   // docs/pr-checklists/recurring-review-patterns.md sets a 600-line soft cap;
-  // scripts/ has no max-lines lint, so pin it here. The round-9 split moved the
-  // renderer into a sibling to bring the leg back under it.
+  // scripts/ has no max-lines lint, and the ADR 0065 watchlist reports rather
+  // than blocks, so pin it here. The round-9 split moved the renderer into a
+  // sibling to bring the leg back under it.
   for (const path of [
     "scripts/sentry-triage-brief.mjs",
     "scripts/sentry-triage-brief-render.mjs",

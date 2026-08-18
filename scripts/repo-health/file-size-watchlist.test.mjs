@@ -1,16 +1,26 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import {
+  mkdtempSync,
+  mkdirSync,
+  rmSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { test } from "node:test";
-import { dirname, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
   _private,
+  SCRIPTS_EXEMPTIONS,
   countLines,
+  exemptionReason,
   formatIssue,
   formatMarkdown,
   parseBaselineRows,
+  partitionExempt,
   scanFileList,
   scopeForPath,
   withRawDeltas,
@@ -244,6 +254,311 @@ test("issue sync never overwrites a claimed packet and fails on duplicates", () 
       }),
     /expected at most one/,
   );
+});
+
+const BIG_SOURCE = Array.from(
+  { length: 1200 },
+  (_, index) => `const value${index} = ${index};`,
+).join("\n");
+
+test("the scripts scope covers .mjs and .sh at every depth, tests aside", () => {
+  assert.equal(scopeForPath("scripts/tf-stacks.mjs")?.label, "scripts");
+  assert.equal(
+    scopeForPath("scripts/alerts/check-peg-registry-integrity.mjs")?.label,
+    "scripts",
+  );
+  assert.equal(scopeForPath("scripts/agent-quality-gate.sh")?.label, "scripts");
+  // Tests follow the rule every scope but Aegis uses.
+  assert.equal(scopeForPath("scripts/alerts/alert-rules-lint.test.mjs"), null);
+  assert.equal(scopeForPath("scripts/agent-quality-gate.test.sh"), null);
+  // Only executable sources. The manifest, the schema stub, and AGENTS.md are
+  // data or prose, and a line cap says nothing useful about them.
+  assert.equal(scopeForPath("scripts/sentry-suite-manifest.json"), null);
+  assert.equal(scopeForPath("scripts/envio-schema-stubs.graphql"), null);
+  assert.equal(scopeForPath("scripts/AGENTS.md"), null);
+});
+
+test("countLines treats # as a comment only when asked", () => {
+  const shell = ["#!/usr/bin/env bash", "# note", "set -euo pipefail"].join(
+    "\n",
+  );
+  assert.deepEqual(countLines(shell, { hashComments: true }), {
+    raw: 3,
+    rough: 1,
+  });
+  assert.deepEqual(countLines(shell), { raw: 3, rough: 3 });
+});
+
+// Spelled out rather than derived from SCRIPTS_EXEMPTIONS: an expectation read
+// from the thing under test shrinks with it, and every deletion still passes.
+const EXPECTED_EXEMPT_PATHS = [
+  "scripts/agent-autoreview.sh",
+  "scripts/agent-autoreview.mjs",
+  "scripts/agent-autoreview-core.mjs",
+];
+
+const ADR_PATH = "docs/adr/0065-scripts-file-size-watchlist-scope.md";
+
+test("the exemption list holds exactly the three trust-root files", () => {
+  const declared = SCRIPTS_EXEMPTIONS.flatMap((entry) => entry.paths);
+  assert.deepEqual(
+    [...declared].sort(),
+    [...EXPECTED_EXEMPT_PATHS].sort(),
+    `adding or dropping an exemption is an ${ADR_PATH} decision; update that ADR and this list together`,
+  );
+  // Only the scripts scope consults this list, so an entry outside scripts/
+  // would sit here doing nothing at all.
+  for (const path of declared) {
+    assert.ok(path.startsWith("scripts/"), `${path} is outside the scope`);
+    assert.match(exemptionReason(path) ?? "", /trust root/);
+    assert.doesNotMatch(
+      exemptionReason(path) ?? "",
+      /\|/,
+      "a pipe in a reason splits the exempt table cell and misreads the baseline",
+    );
+  }
+
+  // The ADR is the record; make that claim true rather than assumed. This also
+  // pins the filename the report prints in its exempt-table header.
+  const adr = readFileSync(resolve(repoRoot, ADR_PATH), "utf8");
+  for (const path of EXPECTED_EXEMPT_PATHS) {
+    assert.ok(
+      adr.includes(basename(path)),
+      `${ADR_PATH} does not record ${path}; the exemption and its record have drifted`,
+    );
+  }
+
+  // Files whose split is merely expensive, or already owned by an issue, are
+  // not exempt. agent-quality-gate.sh is issue 1498's whole subject; the two
+  // test paths never reach the report at all, and are here as pure
+  // exemptionReason controls.
+  for (const path of [
+    "scripts/agent-quality-gate.sh",
+    "scripts/pr-ready-state-core.mjs",
+    "scripts/deploy-staging-contract.mjs",
+    "scripts/sentry-autofix-select.test.mjs",
+    "scripts/tf-stacks.test.mjs",
+  ]) {
+    assert.equal(exemptionReason(path), null, `${path} must not be exempt`);
+  }
+});
+
+test("every exemption names a file that is still real and still over the cap", () => {
+  // A stale entry is the failure this list exists to prevent: it would keep
+  // quietly excusing a path that moved, shrank, or never existed.
+  const rows = scanFileList(EXPECTED_EXEMPT_PATHS, (path) =>
+    readFileSync(resolve(repoRoot, path), "utf8"),
+  );
+  assert.deepEqual(
+    EXPECTED_EXEMPT_PATHS.filter(
+      (path) => !rows.some((row) => row.path === path),
+    ),
+    [],
+    "an exempted file is no longer above the watch threshold; delete its entry",
+  );
+  for (const row of rows) {
+    assert.equal(row.status, "exempt");
+    assert.ok(row.reason.length > 0, `${row.path} carries no reason`);
+    assert.notEqual(row.capStatus, "exempt");
+  }
+});
+
+test("the trust root still pins the two helper names the exemption cites", () => {
+  // The reason cites six literal lists. It holds only while each names these
+  // two and nothing else — a third helper in any of them means the exemption
+  // is re-argued, not silently inherited. Windows are bounded so a literal
+  // surviving elsewhere in a 6,800-line file cannot stand in for the real one.
+  const wrapper = readFileSync(
+    resolve(repoRoot, "scripts/agent-autoreview.sh"),
+    "utf8",
+  );
+  const helpers = ["agent-autoreview.mjs", "agent-autoreview-core.mjs"];
+
+  const copyList = wrapper.match(/my @names = \(([^)]*)\)/);
+  assert.ok(copyList, "materialize_filesystem_autoreview_runtime lost @names");
+  assert.deepEqual(
+    copyList[1].match(/"([^"]+)"/g)?.map((name) => name.replaceAll('"', "")),
+    helpers,
+    "the Perl copy list no longer materializes exactly the two exempt helpers",
+  );
+
+  // helper_paths, both autoreview runtime_paths arrays, the lstat loop, and the
+  // ACL loop. Each is asserted where it stands, not anywhere in the file.
+  const lists = [
+    /local helper_paths=\(\n((?:\s+scripts\/[\w.-]+\n)+)\s*\)/,
+    /local runtime_paths=\(\n((?:\s+scripts\/agent-autoreview[\w.-]*\n)+)\s*\)/g,
+    /for my \$name \(([^)]*agent-autoreview[^)]*)\)/,
+    /for source_file in \\\n([\s\S]{0,300}?); do/,
+  ];
+  for (const list of lists) {
+    const found = wrapper.match(list);
+    assert.ok(found, `the trust root lost a list matching ${list}`);
+    for (const helper of helpers) {
+      assert.ok(
+        String(found[0]).includes(helper),
+        `${helper} is missing from ${String(found[0]).slice(0, 60)}…`,
+      );
+    }
+  }
+
+  assert.match(
+    wrapper,
+    /my \$aggregate_limit = 2 \* 1024 \* 1024;[\s\S]{0,1200}?\$aggregate > \$aggregate_limit/,
+    "the 2 MB aggregate cap is no longer enforced next to where it is declared",
+  );
+  // …and the wrapper still hashes its own path against the frozen ref.
+  assert.match(
+    wrapper,
+    /verify_current_wrapper_matches_ref\(\) \{[\s\S]{0,400}?local relative_path="scripts\/agent-autoreview\.sh"/,
+  );
+});
+
+test("the live report never routes an exempt file into the issue queue", () => {
+  // The producer/consumer boundary end to end: the CLI's own JSON, through the
+  // filter the monthly workflow applies.
+  const report = JSON.parse(
+    execFileSync(
+      process.execPath,
+      ["scripts/repo-health/file-size-watchlist.mjs", "--format", "json"],
+      { cwd: repoRoot, encoding: "utf8", maxBuffer: 5 * 1024 * 1024 },
+    ),
+  );
+  const exemptPaths = new Set(report.exempt.map((row) => row.path));
+  assert.deepEqual([...exemptPaths].sort(), [...EXPECTED_EXEMPT_PATHS].sort());
+
+  const actionable = actionableFileSizeRows(report.rows);
+  assert.deepEqual(
+    actionable.filter((row) => exemptPaths.has(row.path)),
+    [],
+  );
+  assert.deepEqual(
+    report.rows.filter((row) => row.status === "exempt"),
+    [],
+    "an exempt row leaked into the tracked list the consumer reads",
+  );
+  assert.ok(
+    report.rows.some((row) => row.path.startsWith("scripts/")),
+    "the scripts scope reported nothing; the scope or the reader is broken",
+  );
+});
+
+test("an exemption is what suppresses the row, not the scope", () => {
+  // Same content, two paths: one exempt, one a plain sibling. Drop the
+  // exemption and the identical file reports as a hard-cap row.
+  const files = [
+    "scripts/agent-autoreview-core.mjs",
+    "scripts/agent-autoreview-sibling.mjs",
+  ];
+  const rows = scanFileList(files, () => BIG_SOURCE);
+
+  assert.deepEqual(
+    rows.map((row) => [row.path, row.status]),
+    [
+      ["scripts/agent-autoreview-core.mjs", "exempt"],
+      ["scripts/agent-autoreview-sibling.mjs", "hard"],
+    ],
+  );
+  assert.equal(rows[0].capStatus, "hard");
+
+  const { tracked, exempt } = partitionExempt(rows);
+  assert.deepEqual(
+    tracked.map((row) => row.path),
+    ["scripts/agent-autoreview-sibling.mjs"],
+  );
+  assert.equal(exempt.length, 1);
+  // An exempt row can never open an issue or fail a run.
+  assert.deepEqual(actionableFileSizeRows(exempt), []);
+  assert.equal(_private.shouldFail(exempt, "hard"), false);
+});
+
+test("an exempt row reports its reason instead of vanishing", () => {
+  const rows = [
+    {
+      path: "scripts/agent-autoreview.sh",
+      package: "scripts",
+      raw: 6872,
+      rough: 6479,
+      status: "exempt",
+      capStatus: "hard",
+      reason: "trust root: hashes its own blob against frozen HEAD",
+      rawDelta: 0,
+    },
+  ];
+  const markdown = formatMarkdown(rows, { generatedAt: "2026-08-18" });
+  assert.match(markdown, /No files above the watch threshold/);
+  assert.match(markdown, /Exempt \(1\)/);
+  assert.match(markdown, /hashes its own blob against frozen HEAD/);
+  assert.match(formatIssue(rows), /hashes its own blob against frozen HEAD/);
+});
+
+test("the CLI reports the scripts scope and never truncates the exempt table", () => {
+  const output = execFileSync(
+    process.execPath,
+    [
+      "scripts/repo-health/file-size-watchlist.mjs",
+      "--format",
+      "json",
+      "--limit",
+      "1",
+    ],
+    { cwd: repoRoot, encoding: "utf8", maxBuffer: 5 * 1024 * 1024 },
+  );
+  const report = JSON.parse(output);
+  assert.equal(report.rows.length, 1);
+  assert.deepEqual(
+    report.exempt.map((row) => row.path).sort(),
+    [...EXPECTED_EXEMPT_PATHS].sort(),
+    "--limit trimmed the exemption table; a truncated exemption reads as a dropped file",
+  );
+  assert.ok(
+    report.exempt.every((row) => row.status === "exempt" && row.reason),
+    "an exempt row shipped without its reason",
+  );
+});
+
+test("a scratch checkout flags an unexempted scripts file at the hard cap", () => {
+  const root = mkdtempSync(join(tmpdir(), "file-size-watchlist-"));
+  try {
+    execFileSync("git", ["init", "--quiet", root]);
+    mkdirSync(join(root, "scripts"));
+    // agent-autoreview-core.mjs is exempt; the siblings are not. All hold the
+    // same 1,200-line body, so only the exemption separates them.
+    writeFileSync(join(root, "scripts/agent-autoreview-core.mjs"), BIG_SOURCE);
+    writeFileSync(join(root, "scripts/plain-helper.mjs"), BIG_SOURCE);
+    // A newline in the name forces git to C-quote it in line-delimited output,
+    // whatever `core.quotePath` says, and a quoted path matches no scope
+    // prefix. Read without `-z`, this over-cap file vanishes from the report.
+    writeFileSync(join(root, `scripts/odd${"\n"}helper.mjs`), BIG_SOURCE);
+
+    const report = JSON.parse(
+      execFileSync(
+        process.execPath,
+        [
+          resolve(repoRoot, "scripts/repo-health/file-size-watchlist.mjs"),
+          "--root",
+          root,
+          "--format",
+          "json",
+          "--no-baseline",
+        ],
+        { encoding: "utf8", maxBuffer: 5 * 1024 * 1024 },
+      ),
+    );
+
+    assert.deepEqual(
+      report.rows.map((row) => [row.path, row.status]).sort(),
+      [
+        ["scripts/plain-helper.mjs", "hard"],
+        [`scripts/odd${"\n"}helper.mjs`, "hard"],
+      ].sort(),
+    );
+    assert.deepEqual(
+      report.exempt.map((row) => row.path),
+      ["scripts/agent-autoreview-core.mjs"],
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("workflow owns the monthly current-main issue route", () => {
