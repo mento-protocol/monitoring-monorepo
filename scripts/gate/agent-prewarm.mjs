@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 const maxCapturedBytes = 20 * 1024 * 1024;
 const defaultParallelism = 2;
 
-const usage = `Usage: scripts/agent-prewarm.mjs [--base <ref>] [--head <ref>] [--changed-paths-file <file>] [--dry-run] [--allow-package-script-changes] [--parallel <n>]
+const usage = `Usage: scripts/gate/agent-prewarm.mjs [--base <ref>] [--head <ref>] [--changed-paths-file <file>] [--dry-run] [--allow-package-script-changes] [--parallel <n>]
 
 Prewarm Turbo's local cache for the Turbo-backed commands already mapped by
 the agent quality gate. The helper only runs commands shaped as:

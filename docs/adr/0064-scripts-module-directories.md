@@ -185,16 +185,19 @@ routing, not procedure.
    `--skip-if-fresh` reuses a stale stamp. Repoint it in the same commit.
    The gate also resolves node helpers from `$script_source_dir`:
    `docs/docs-navigation-eval-helpers.mjs`, which classifies routing-sensitive
-   paths, and `lockfile-scope.mjs`. Those are differently-rooted literals, and
-   the routing arms and the signature list name the classifier again, so it
+   paths, and `gate/lockfile-scope.mjs`. Those are differently-rooted literals,
+   and the routing arms and the signature list name each helper again, so each
    appears three times in all — the import, its routing arm, and
-   `implementation_signature()`. Repoint every occurrence. No CI job runs the
-   gate for real, so `agent-quality-gate.test.sh` is the only place any of them
-   is exercised outside a developer's pre-push. `lockfile-scope.mjs` is the
-   quieter of the two: its caller reads a nonzero exit as "cannot narrow", so a
-   stale path silently widens every lockfile change to the full suite. It is
-   also absent from `implementation_signature()`; the phase that moves it into
-   `gate/` should add it.
+   `implementation_signature()`. Repoint every occurrence. `$script_source_dir`
+   is the required anchor: the gate runs against stub fixture repositories where
+   `$repo_root` is a temp directory with no `scripts/` tree, so a repo-root
+   anchor misses the helper on every fixture run. No CI job runs the gate for
+   real, so `agent-quality-gate.test.sh` is the only place any of them is
+   exercised outside a developer's pre-push. P11 moved `lockfile-scope.mjs` into
+   `gate/`, added it to `implementation_signature()` (issue 1905), and made a
+   helper the gate cannot find exit 2 instead of falling toward the full suite —
+   its caller reads a nonzero exit as "cannot narrow", so the old behaviour
+   silently widened every lockfile change and the run read as slow, not broken.
 10. `forbidden_sources` in `docs/evals/documentation-navigation-fixtures.json`
     names the navigation evaluation's own implementation, so a run cannot read
     the answers out of it. `validateFixtureSuite` checks those paths for
@@ -227,5 +230,11 @@ not only the arm of the consumer that happens to fail loudest.
   `agent-instructions` → `agent-entry-points` mapping in
   `scripts/context/docs-index-helpers.mjs`.
 - Paths-filter policy: [ADR 0010](0010-required-checks-no-paths-filters.md).
+- Shared-core readership, the census behind keeping `scripts/lib/` outside the
+  domain directories: five files beyond `production-infra-identity-contract/`
+  read `hcl.mjs`; the ADR 0053 deploy-staging contract reads
+  `workflow-yaml.mjs`; the lockfile-lint gate and the override prune advisor
+  both read `pnpm-override-selector.mjs`; the documentation garden and the
+  navigation-eval scheduler both read `gh-issue-lifecycle.mjs`.
 - Programme tracking issue:
   <https://github.com/mento-protocol/monitoring-monorepo/issues/1877>.

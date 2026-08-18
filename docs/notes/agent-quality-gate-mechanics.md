@@ -146,20 +146,22 @@ the full suite:
 | Root `package.json`, `devDependencies`/metadata only | `pnpm install --frozen-lockfile` + `pnpm skew:check` + `pnpm lockfile:lint` + the `@mento-protocol/config` bundle as canary (it typechecks downstream consumers). |
 
 Lockfile scoping applies only when `pnpm-lock.yaml` is the sole
-workspace-manifest-class change and `scripts/lockfile-scope.mjs` (js-yaml
+workspace-manifest-class change and `scripts/gate/lockfile-scope.mjs` (js-yaml
 structural diff) reports that only importer sections changed; a parse/`git show`
 failure, a co-changed manifest, any non-importer top-level section
 (`settings`, `catalogs`, `overrides`, `patchedDependencies`,
 `packageExtensionsChecksum`, `packages`, `snapshots`, …), or an importer that
-maps to no known package bundle falls back to the full suite. The dev-metadata
-class covers a root `package.json` whose changed JSON pointers are all under
-`/devDependencies` or `/name`, `/description`, `/license`, `/keywords`,
-`/author`, `/repository`, `/bugs`, `/homepage`; any `/dependencies`, `/pnpm`,
-`/packageManager`, `/engines`, `/scripts`, or unknown-key change keeps today's
-full-suite and package-script refusal behavior. Both classes still set the
-package-script risk flag, so `--run` continues to refuse until
-`--allow-package-script-changes`, and `package.json` still gets a full-repo
-Trunk scan.
+maps to no known package bundle falls back to the full suite. A classifier the
+gate cannot find is the one exception: it exits 2 and names the path, because
+widening on a stale path reads as a slow-but-green run that nobody investigates.
+The dev-metadata class covers a root `package.json` whose changed JSON pointers
+are all under `/devDependencies` or `/name`, `/description`, `/license`,
+`/keywords`, `/author`, `/repository`, `/bugs`, `/homepage`; any
+`/dependencies`, `/pnpm`, `/packageManager`, `/engines`, `/scripts`, or
+unknown-key change keeps today's full-suite and package-script refusal
+behavior. Both classes still set the package-script risk flag, so `--run`
+continues to refuse until `--allow-package-script-changes`, and `package.json`
+still gets a full-repo Trunk scan.
 
 `classify_root_package_json_changes` is lifted out of this script and re-run by
 `scripts/check-sentry-suites-in-ci-gate-probe.mjs`, which proves each alias still

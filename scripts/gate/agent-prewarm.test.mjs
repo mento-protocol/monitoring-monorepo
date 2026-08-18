@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   extractTurboCacheDir,
   extractTurboPrewarmCommands,
@@ -127,5 +128,51 @@ Changed paths:
 
 // Absent line (caller opt-out or unwritable home) => no shared dir to apply.
 assert.equal(extractTurboCacheDir(gateOutput), null);
+
+// ── Gate stdout contract ───────────────────────────────────────────────────
+// This helper reads the gate's dry-run stdout with two regexes anchored on exact
+// header text. Nothing about that coupling is declared on the gate's side, so a
+// reworded header would leave prewarm silently warming nothing. Pull both
+// literals out of the gate source, rebuild the stdout shape from them, and parse
+// that — a rename on either side fails here instead of going quiet.
+const gateSource = readFileSync(
+  new URL("../agent-quality-gate.sh", import.meta.url),
+  "utf8",
+);
+
+const mappedCommandsHeader = gateSource.match(
+  /^echo "(Mapped safe local commands:)"$/m,
+)?.[1];
+assert.ok(
+  mappedCommandsHeader,
+  'scripts/agent-quality-gate.sh no longer emits `echo "Mapped safe local commands:"`; extractTurboPrewarmCommands matches that line exactly',
+);
+
+const turboCacheDirPrefix = gateSource.match(
+  /^\s*echo "(Turbo cache dir: )\$\{TURBO_CACHE_DIR\}"$/m,
+)?.[1];
+assert.ok(
+  turboCacheDirPrefix,
+  'scripts/agent-quality-gate.sh no longer emits `echo "Turbo cache dir: ${TURBO_CACHE_DIR}"`; extractTurboCacheDir matches that prefix exactly',
+);
+
+const gateContractOutput = `Agent quality gate
+
+Base: origin/main
+${turboCacheDirPrefix}/home/agent/.cache/turbo-monitoring-monorepo
+
+${mappedCommandsHeader}
+- pnpm exec turbo run lint --filter=@mento-protocol/ui-dashboard --cache=local:rw (ui-dashboard changed)
+
+Dry run only. Re-run with --run to execute the mapped commands.
+`;
+
+assert.deepEqual(extractTurboPrewarmCommands(gateContractOutput), [
+  "pnpm exec turbo run lint --filter=@mento-protocol/ui-dashboard --cache=local:rw",
+]);
+assert.equal(
+  extractTurboCacheDir(gateContractOutput),
+  "/home/agent/.cache/turbo-monitoring-monorepo",
+);
 
 console.log("agent prewarm tests passed");

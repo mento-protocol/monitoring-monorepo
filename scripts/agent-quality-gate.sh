@@ -250,8 +250,9 @@ if [[ ! "$gate_lock_wait_seconds" =~ ^[0-9]+$ ]]; then
 fi
 
 # Resolve this script's own directory before the cd below so node helpers it
-# invokes (e.g. lockfile-scope.mjs) resolve from the real checkout even when the
-# gate runs against a temp fixture repo whose working directory is elsewhere.
+# invokes (e.g. gate/lockfile-scope.mjs) resolve from the real checkout even when
+# the gate runs against a temp fixture repo whose working directory is elsewhere.
+# Anchoring these on $repo_root instead would make every fixture run miss them.
 script_source_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 repo_root="$(git rev-parse --show-toplevel)"
@@ -2551,6 +2552,14 @@ apply_scoped_test_commands() {
 # touches only importer sections, narrow the suite to the affected packages.
 # Every ambiguity (co-changed manifests, non-importer sections, an unmapped or
 # root importer, parse/git failure) fails toward the full suite.
+#
+# The classifier runs from the gate's own source tree, not the repo under test,
+# so a `scripts/` move must repoint this literal in the same commit. Fail-toward-
+# full is the right answer for an ambiguous lockfile; it is the wrong answer for
+# a helper this gate cannot find, because that failure is invisible — every
+# lockfile change silently widens to the full suite and the run reads as slow
+# rather than broken. Missing helper therefore exits 2 and names the path.
+lockfile_scope_path="$script_source_dir/gate/lockfile-scope.mjs"
 
 # True iff pnpm-lock.yaml changed and no other workspace-manifest-class path did.
 lockfile_only_manifest_change() {
@@ -2590,7 +2599,7 @@ lockfile_scoped_importers() {
   fi
 
   local rc=0
-  node "$script_source_dir/lockfile-scope.mjs" "$base_file" "$head_file" < /dev/null || rc=$?
+  node "$lockfile_scope_path" "$base_file" "$head_file" < /dev/null || rc=$?
   rm -f "$base_file" "$head_file"
   return "$rc"
 }
@@ -2664,6 +2673,15 @@ route_lockfile_change() {
   add_preflight_command "pnpm install --frozen-lockfile" "workspace dependency/config changed"
   add_command "node scripts/alerts/check-peg-registry-integrity.mjs" "root lockfile changed (peg registry authority dependency)"
 
+  # Checked here, not inside lockfile_scoped_importers: that helper runs in a
+  # command substitution, where an exit would only end the subshell and read as
+  # one more fail-toward-full.
+  if [[ ! -f "$lockfile_scope_path" ]]; then
+    echo "error: lockfile scope classifier could not be loaded from ${lockfile_scope_path}" >&2
+    echo "       scripts/agent-quality-gate.sh runs this module at pre-push time; moving it requires repointing that path in the same commit." >&2
+    exit 2
+  fi
+
   local importers
   if lockfile_only_manifest_change && importers="$(lockfile_scoped_importers)"; then
     local importer
@@ -2696,7 +2714,7 @@ add_root_tooling_package_script_checks() {
   local reason="$1"
   add_command "bash scripts/check-agent-quality-gate-package-scripts.sh" "$reason"
   add_command "bash scripts/agent-quality-gate.test.sh" "$reason"
-  add_command "node scripts/agent-prewarm.test.mjs" "$reason"
+  add_command "node scripts/gate/agent-prewarm.test.mjs" "$reason"
   add_command "node scripts/pr/review-materiality.test.mjs" "$reason"
   add_command "node scripts/pr/agent-issue-board.test.mjs" "$reason"
   add_command "pnpm sentry:ingest:test" "$reason"
@@ -3820,7 +3838,7 @@ while IFS= read -r path; do
         scripts/pr/check-adr-reminder.mjs|scripts/pr/check-adr-reminder.test.mjs)
           add_command "pnpm adr:check:test" "ADR reminder helper changed"
           ;;
-        scripts/agent-prewarm.mjs|scripts/agent-prewarm.test.mjs)
+        scripts/gate/agent-prewarm.mjs|scripts/gate/agent-prewarm.test.mjs)
           add_command "pnpm agent:prewarm:test" "agent prewarm helper changed"
           ;;
         scripts/pr/review-materiality.mjs|scripts/pr/review-materiality-context.mjs|scripts/pr/review-materiality.test.mjs)
@@ -4026,8 +4044,8 @@ while IFS= read -r path; do
         scripts/supply-chain/alerts-uuid-overrides.test.mjs)
           add_command "node --test scripts/supply-chain/alerts-uuid-overrides.test.mjs" "alerts uuid override contract changed"
           ;;
-        scripts/lockfile-scope.mjs|scripts/lockfile-scope.test.mjs)
-          add_command "node scripts/lockfile-scope.test.mjs" "lockfile scope helper changed"
+        scripts/gate/lockfile-scope.mjs|scripts/gate/lockfile-scope.test.mjs)
+          add_command "node scripts/gate/lockfile-scope.test.mjs" "lockfile scope helper changed"
           ;;
         scripts/supply-chain/pnpm-audit-high-gate.mjs|scripts/supply-chain/pnpm-audit-high-gate.test.mjs)
           add_command "node scripts/supply-chain/pnpm-audit-high-gate.test.mjs" "pnpm audit high gate changed"
@@ -4475,6 +4493,7 @@ implementation_signature() {
     scripts/agent-quality-gate.test.sh \
     scripts/check-agent-quality-gate-package-scripts.sh \
     scripts/docs/docs-navigation-eval-helpers.mjs \
+    scripts/gate/lockfile-scope.mjs \
     scripts/terraform/terraform-fmt-check.mjs \
     scripts/terraform/terraform-fmt-check.test.mjs \
     turbo.json \
