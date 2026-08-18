@@ -6650,6 +6650,16 @@ run_sensitive_input_regressions() {
   run_helper_in_repo_expect_failure "$review_repo" --mode local --engine local --bundle-output "$bundle_output" --prepare-only
   expect_stderr_contains "refusing to include secret-like content"
 
+  # The substitution's own words are held to the same rule: a weak literal in
+  # argument position carries no strong pattern, so nothing else would catch it.
+  git -C "$review_repo" restore README.md
+  # shellcheck disable=SC2016
+  printf '%s%s%s\n' '  access_token=$(echo ' \
+    "live-argument-abcdefghijklmnopqrstuvwxyz" ') || return 1' \
+    >>"$review_repo/README.md"
+  run_helper_in_repo_expect_failure "$review_repo" --mode local --engine local --bundle-output "$bundle_output" --prepare-only
+  expect_stderr_contains "refusing to include secret-like content"
+
   git -C "$review_repo" restore README.md
   mkdir "$review_repo/.aws"
   {

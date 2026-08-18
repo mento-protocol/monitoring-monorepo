@@ -797,6 +797,13 @@ export function sensitivePathReason(rawPath) {
 // value then stays subject to the literal rules.
 const MAX_SHELL_EXPANSION_NESTING = 8;
 
+// The length at which the literal rules start treating a value as a credential.
+// Every rule that measures a value, a word, or a segment reads it from here, so
+// tuning it moves the whole scanner at once. Two line patterns mirror it as a
+// `{12,}` quantifier, where a computed bound would obscure the pattern; change
+// those with it.
+const CREDENTIAL_LITERAL_MIN_LENGTH = 12;
+
 function shellExpansionWord(word) {
   return (
     word === "" ||
@@ -1122,23 +1129,71 @@ function typeAnnotationValue(value) {
   });
 }
 
-// A shell command list continues past the assignment: in
-// `access_token=$(get_access_token) || return 1` the assigned value is the
-// command substitution, resolved when the script runs, and `return 1` is a
-// separate command the operator guards. The line patterns carry no shell
-// grammar, so they capture the tail too and read the whole span as a literal.
-// The head is measured by the same call-expression rule a bare `$(cmd)` value
-// already passes, so no new value shape is admitted here — only the tail is
-// new. Its alphabet excludes `=`, `:`, quotes, `$`, and parentheses, so a
-// second assignment cannot hide in it, and every word stays under the length
-// the literal rules treat as credential-sized, so a command argument cannot
-// carry one either: `token=$(get) || SERVICE_TOKEN=<literal>` and
-// `token=$(get) || echo <literal>` both still fail closed. A real guard tail
-// (`|| return 1`, `|| exit 1`, `&& log ok`) is words of a few characters.
+// Words inside an accepted command substitution are read by position, because
+// the two positions carry different risk. Arguments are where a literal can
+// sit, so each one is bounded whole by the length the literal rules treat as
+// credential-sized: a shell-native reference, a flag whose name and optional
+// value each stay under it, or a bare word that does. One uniform bound leaves
+// no position in which a long literal can hide, prefixed with `--` or split
+// across separators. It also refuses a long real argument such as a deep path,
+// which is the fail-closed direction and costs a line only when it sits in a
+// credential-named assignment with a control tail.
+//
+// The command word names something the shell executes, never a value, so it is
+// measured only for opaque runs — a real command or function name
+// (`get_access_token`) is short segments joined by separators. Bounding it whole
+// would refuse those names, and the position already carries whatever a bare
+// `$(cmd)` value carries today.
+const SHELL_WORD_ALPHABET = /^[A-Za-z0-9_./-]+$/;
+const SHELL_FLAG_WORD =
+  /^(--?[A-Za-z0-9][A-Za-z0-9-]*)(?:=([A-Za-z0-9_./-]*))?$/;
+
+function shellCommandWord(word) {
+  return (
+    SHELL_WORD_ALPHABET.test(word) &&
+    word
+      .split(/[-_./]/)
+      .every((segment) => segment.length < CREDENTIAL_LITERAL_MIN_LENGTH)
+  );
+}
+
+function shellArgumentWord(word) {
+  if (shellExpansionWord(word)) return true;
+  const flag = SHELL_FLAG_WORD.exec(word);
+  if (flag)
+    return (
+      flag[1].length < CREDENTIAL_LITERAL_MIN_LENGTH &&
+      (flag[2] ?? "").length < CREDENTIAL_LITERAL_MIN_LENGTH
+    );
+  return (
+    word.length < CREDENTIAL_LITERAL_MIN_LENGTH &&
+    SHELL_WORD_ALPHABET.test(word)
+  );
+}
+
+// The head of an accepted command list is a command substitution whose own
+// words are inert, so a literal argument fails closed
+// (`token=$(echo <literal>) || return 1`) even though the call-expression rule
+// that governs a bare `$(cmd)` value would take it. A backtick head, an
+// arithmetic expansion, and a plain call expression are all outside this form.
+function shellCommandSubstitution(head) {
+  if (!head.startsWith("$(") || !head.endsWith(")")) return false;
+  if (!balancedDelimitedExpression(head, 1)) return false;
+  const [command, ...args] = head
+    .slice(2, -1)
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  return (
+    command !== undefined &&
+    shellCommandWord(command) &&
+    args.every(shellArgumentWord)
+  );
+}
+
 // Operators are found at parenthesis depth zero so that `$(a || b)` stays one
 // substitution; quotes need no tracking because the callers' value groups
-// exclude them. It reads `=` values only — the languages that write a command
-// list into an assignment all use `=`.
+// exclude them.
 function shellControlOperatorIndex(expression) {
   let depth = 0;
   for (let index = 0; index < expression.length; index += 1) {
@@ -1162,13 +1217,23 @@ function shellControlOperatorIndex(expression) {
   return -1;
 }
 
+// A shell command list continues past the assignment: in
+// `access_token=$(get_access_token) || return 1` the assigned value is the
+// command substitution, resolved when the script runs, and `return 1` is a
+// separate command the operator guards. The line patterns carry no shell
+// grammar, so they capture the tail too and read the whole span as a literal.
+// The tail is stricter than the substitution: whole words under credential
+// length from an alphabet with no `=`, `:`, quote, `$`, or parenthesis, so
+// neither a second assignment (`token=$(get) || SERVICE_TOKEN=<literal>`) nor a
+// command argument (`token=$(get) || echo <literal>`) can carry one, split
+// across separators or not. A real guard tail is `|| return 1`, `|| exit 1`,
+// `&& log ok`. Callers read `=` values only — the languages that write a
+// command list into an assignment all use `=`.
 function shellCommandListValue(value) {
   const expression = value.trim();
   const operatorIndex = shellControlOperatorIndex(expression);
   if (operatorIndex === -1) return false;
-  if (
-    !unquotedCodeExpression(expression.slice(0, operatorIndex).trim(), false)
-  ) {
+  if (!shellCommandSubstitution(expression.slice(0, operatorIndex).trim())) {
     return false;
   }
   const words = expression
@@ -1182,7 +1247,8 @@ function shellCommandListValue(value) {
       (word) =>
         word === "||" ||
         word === "&&" ||
-        (word.length < 12 && /^[A-Za-z0-9_./-]+$/.test(word)),
+        (word.length < CREDENTIAL_LITERAL_MIN_LENGTH &&
+          SHELL_WORD_ALPHABET.test(word)),
     )
   );
 }
@@ -1589,7 +1655,8 @@ function literalAuthorizationCredential(value) {
   const scheme = /^(?:bearer|basic|token|digest|apikey)\s+(.+)$/i.exec(trimmed);
   const credential = (scheme?.[1] ?? trimmed).trim();
   return (
-    credential.length >= (scheme ? 8 : 12) && !placeholderValue(credential)
+    credential.length >= (scheme ? 8 : CREDENTIAL_LITERAL_MIN_LENGTH) &&
+    !placeholderValue(credential)
   );
 }
 
@@ -1659,7 +1726,7 @@ export function secretLikeReason(text) {
       const value = rawValue.trim();
       if (
         sensitiveQueryNames.has(name.toLowerCase()) &&
-        value.length >= 12 &&
+        value.length >= CREDENTIAL_LITERAL_MIN_LENGTH &&
         !placeholderValue(value)
       ) {
         return "secret-bearing URL";
@@ -1670,7 +1737,10 @@ export function secretLikeReason(text) {
     /^[+ -]?\s*["'`]?aws[_-]?(?:access[_-]?key[_-]?id|secret[_-]?access[_-]?key|session[_-]?token)["'`]?\s*[:=]\s*["'`]?([^"'`\r\n]+?)["'`]?(?:[ \t]+(?:\/\/[^\r\n]*|\/\*[^\r\n]*\*\/)|[ \t]*(?:[#;][^\r\n]*)?)$/gim;
   for (const match of text.matchAll(awsCredentialPattern)) {
     const value = match[1].trim();
-    if (value.length >= 12 && !placeholderValue(value)) {
+    if (
+      value.length >= CREDENTIAL_LITERAL_MIN_LENGTH &&
+      !placeholderValue(value)
+    ) {
       return "literal AWS credential assignment";
     }
   }
@@ -1784,14 +1854,17 @@ export function secretLikeReason(text) {
           continue;
         }
         if (awsCredentialKey) {
-          if (value.length >= 12 && !placeholderValue(value)) {
+          if (
+            value.length >= CREDENTIAL_LITERAL_MIN_LENGTH &&
+            !placeholderValue(value)
+          ) {
             return "literal AWS credential assignment";
           }
           continue;
         }
         if (directLiteral && !computed && !multilineDirectTemplate) continue;
         if (
-          value.length >= 12 &&
+          value.length >= CREDENTIAL_LITERAL_MIN_LENGTH &&
           !publicTokenAddressForKey(key, value) &&
           !placeholderValue(value)
         ) {
@@ -1836,7 +1909,7 @@ export function secretLikeReason(text) {
       continue;
     }
     if (
-      value.length >= 12 &&
+      value.length >= CREDENTIAL_LITERAL_MIN_LENGTH &&
       !publicTokenAddressForKey(key, value) &&
       !placeholderValue(value)
     ) {
@@ -1885,13 +1958,16 @@ export function secretLikeReason(text) {
         continue;
       }
       if (awsCredentialKey) {
-        if (value.length >= 12 && !placeholderValue(value)) {
+        if (
+          value.length >= CREDENTIAL_LITERAL_MIN_LENGTH &&
+          !placeholderValue(value)
+        ) {
           return "literal AWS credential assignment";
         }
         continue;
       }
       if (
-        value.length >= 12 &&
+        value.length >= CREDENTIAL_LITERAL_MIN_LENGTH &&
         !publicTokenAddressForKey(key, value) &&
         !placeholderValue(value)
       ) {
@@ -1903,7 +1979,10 @@ export function secretLikeReason(text) {
     /^[+ -]?\s*\/\/[^=\r\n]+\/?:_(?:authToken|auth|password)\s*=\s*["'`]?([^"'`\r\n]+?)["'`]?(?:[ \t]+(?:\/\/[^\r\n]*|\/\*[^\r\n]*\*\/)|[ \t]*(?:[#;][^\r\n]*)?)$/gim;
   for (const match of text.matchAll(registryAuthPattern)) {
     const value = match[1].trim();
-    if (value.length >= 12 && !placeholderValue(value))
+    if (
+      value.length >= CREDENTIAL_LITERAL_MIN_LENGTH &&
+      !placeholderValue(value)
+    )
       return "literal registry credential assignment";
   }
   const unquotedKeyPattern =

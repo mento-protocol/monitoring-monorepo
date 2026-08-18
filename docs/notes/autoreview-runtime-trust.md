@@ -238,10 +238,17 @@ assignment cannot take; a TypeScript type annotation in `:` position whose
 union or intersection members all come from a closed twelve-word keyword
 vocabulary, so the value cannot carry a credential in any language, split
 across members or whole; and a shell command list on an `=` value whose head is
-the substitution the scanner already accepts and whose `||`/`&&` tail holds only
-words under credential length drawn from an alphabet with no `=`, `:`, quote,
-`$`, or parenthesis, so neither a second assignment nor a command argument can
-hide one. A literal in value position stays refused whatever names it: a fixture
+a command substitution read by word position — a command name of separator-split
+segments each under credential length, then arguments each bounded whole by that
+length, whether a shell reference, a flag with its optional value, or a bare
+word — followed by a `||`/`&&` tail of whole words under it, drawn from an
+alphabet with no `=`, `:`, quote, `$`, or parenthesis. A literal argument, one
+split across separators, one wearing a `--` prefix, and a second assignment in
+the tail all fail closed. So do two shapes that carry nothing: a head that is a
+call expression rather than a substitution, and an argument over that length,
+such as a deep path. Both refuse today too, so nothing regresses; they are the
+price of a rule that proves inertness from syntax alone.
+A literal in value position stays refused whatever names it: a fixture
 string is a quoted literal, and no syntax separates one from a weak credential,
 so fixtures compose the value from parts or use a documented placeholder marker
 (`fixture-token`, `example-secret`).

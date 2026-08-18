@@ -987,11 +987,23 @@ assert.equal(
   null,
   "chained control operators are still a command list",
 );
+assert.equal(
+  secretLikeReason(
+    "  access_token=$(vault read -field=token secret/path) || return 1",
+  ),
+  null,
+  "flags and paths are inert arguments: each part stays under credential length",
+);
+assert.match(
+  secretLikeReason("  access_token=$(cat /run/secrets/api_token) || return 1"),
+  /literal generic token assignment/,
+  "the argument bound is uniform: even a real long path fails closed",
+);
 // Anti-bypass: the tail's alphabet excludes `=`, `:`, quotes, `$`, and
-// parentheses, so a second assignment cannot hide in it, and the head is
-// measured by the same call-expression rule a bare `$(cmd)` value already
-// passes — a literal head, or anything between the head and the operator, is
-// still a literal.
+// parentheses, so a second assignment cannot hide in it, and its words are
+// bounded whole rather than by segment, so a literal split across separators
+// cannot either. A literal head, or anything between the head and the operator,
+// is still a literal.
 assert.match(
   secretLikeReason(
     `  access_token=$(get) || SERVICE_TOKEN=${genericTokenCredential}`,
@@ -1027,6 +1039,84 @@ assert.match(
   secretLikeReason(`  access_token=$(get) || echo ${genericTokenCredential}`),
   /literal generic token assignment/,
   "a credential-sized tail word is still rejected, assignment or not",
+);
+// The substitution's arguments are bounded too. A weak literal in argument
+// position carries no strong pattern, so nothing else in the scanner would
+// catch it, and a long one split across separators is measured whole.
+const separatorSplitCredential = ["correct", "horse", "battery", "staple"].join(
+  "-",
+);
+assert.match(
+  secretLikeReason(
+    `  access_token=$(echo ${separatorSplitCredential}) || return 1`,
+  ),
+  /literal generic token assignment/,
+  "a separator-split literal argument is rejected",
+);
+assert.match(
+  secretLikeReason(
+    `  access_token=$(auth --${separatorSplitCredential}) || return 1`,
+  ),
+  /literal generic token assignment/,
+  "a flag prefix does not exempt a literal from the argument bound",
+);
+assert.match(
+  secretLikeReason(
+    `  access_token=$(get) || SERVICE_TOKEN=${separatorSplitCredential}`,
+  ),
+  /literal generic token assignment/,
+  "a separator-split literal in the control tail is rejected",
+);
+assert.match(
+  secretLikeReason(
+    `  access_token=$(echo ${genericTokenCredential}) || return 1`,
+  ),
+  /literal generic token assignment/,
+  "a weak literal argument inside the substitution is rejected",
+);
+assert.match(
+  secretLikeReason(
+    `  access_token=$(auth --token ${genericTokenCredential}) || return 1`,
+  ),
+  /literal generic token assignment/,
+  "a weak literal behind a flag is rejected",
+);
+assert.match(
+  secretLikeReason(
+    `  access_token=$(auth --token=${genericTokenCredential}) || return 1`,
+  ),
+  /literal generic token assignment/,
+  "a weak literal in a flag value is rejected",
+);
+assert.match(
+  secretLikeReason(
+    `  access_token=$(auth --${genericTokenCredential}) || return 1`,
+  ),
+  /literal generic token assignment/,
+  "a weak literal wearing a flag prefix is rejected",
+);
+assert.match(
+  secretLikeReason("  token = getToken() || fallback"),
+  /literal generic token assignment/,
+  "the head has to be a command substitution, not any call expression",
+);
+// Words are split on whitespace, so a nested substitution arrives as fragments
+// carrying parentheses — outside the argument alphabet, and refused. This pins
+// the property rather than the parse: no rearrangement of `$( … )` inside the
+// substitution may reach the accept path.
+assert.match(
+  secretLikeReason(
+    `  access_token=$(echo $(printf ${genericTokenCredential})) || return 1`,
+  ),
+  /literal generic token assignment/,
+  "a literal inside a nested substitution is rejected",
+);
+// The command word is measured too: a real command name is short segments
+// joined by separators, an opaque run is not.
+assert.match(
+  secretLikeReason(`  access_token=$(${"a".repeat(32)}) || return 1`),
+  /literal generic token assignment/,
+  "an opaque run in command position is not a command name",
 );
 // Refused by design: a fixture literal such as
 // `ACTIONS_ID_TOKEN_REQUEST_TOKEN: "<hyphen-joined words>"` is a quoted literal
