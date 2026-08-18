@@ -59,7 +59,7 @@ pinned hashes, and identities stay with their domain.
 
 ## Why Files Stay Flat
 
-Nine mechanisms pin `scripts/` paths. A file one of them names moves only when
+Ten mechanisms pin `scripts/` paths. A file one of them names moves only when
 that mechanism moves with it, in the same PR.
 
 - **Autoreview runtime materialization.** `agent-autoreview.sh` names its
@@ -68,13 +68,12 @@ that mechanism moves with it, in the same PR.
 - **Gate source-directory guards.** `agent-quality-gate.sh` gates real-tree
   routing on `$script_source_dir == $repo_root/scripts`, leaving its stub-repo
   unit tests unaffected.
-- **Gate runtime module pins.** `agent-quality-gate.sh` imports
-  `docs/docs-navigation-eval-helpers.mjs` from `$script_source_dir` to classify
-  routing-sensitive paths, and hashes that same literal in
-  `implementation_signature()`. No CI job runs the gate for real, so a stale
-  path loses routing and freezes the `--skip-if-fresh` stamp on developer
-  machines. `agent-quality-gate.test.sh` is the only control: it asserts the
-  literal resolves and that a classifier change busts the stamp.
+- **Gate runtime module pins.** `agent-quality-gate.sh` names
+  `docs/docs-navigation-eval-helpers.mjs` in two separate literals, and both
+  must move together.
+- **Evaluation fixture forbidden lists.** `forbidden_sources` in
+  `docs/evals/documentation-navigation-fixtures.json` names the navigation
+  eval's own implementation by exact path.
 - **Sentry suite manifest.** `sentry-suite-manifest.json` keys are exact
   repo-relative paths, reconciled against `findSentrySuites()` by set equality
   both ways. A moved or renamed suite fails the gate closed.

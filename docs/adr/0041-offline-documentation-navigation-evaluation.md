@@ -103,7 +103,7 @@ Use a versioned, offline evaluation contract:
 - `scripts/docs/docs-navigation-eval-result.mjs` — scoring against documentation
   bytes at a commit
 - `scripts/docs/docs-navigation-eval-result-shape.mjs` — the result envelope
-  contract, checked before any repository read
+  contract, a pure function of the submitted JSON
 - `scripts/docs/docs-navigation-eval.test.mjs`
 - `scripts/lib/gh-issue-lifecycle.mjs` — the shared monthly-issue scheduling
   primitives, including workflow authorization for live creation

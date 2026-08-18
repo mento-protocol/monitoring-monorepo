@@ -3466,11 +3466,12 @@ signature_stamp_repo="$(mktemp -d)"
   git init -q
   git config user.email test@example.invalid
   git config user.name "Quality Gate Test"
-  mkdir -p scripts/docs tools
+  mkdir -p scripts/docs scripts/terraform tools
   printf 'fixture\n' > fixture.txt
   printf 'second fixture\n' > second.txt
   printf '# fixture gate implementation\n' > scripts/agent-quality-gate.sh
   printf '# fixture routing classifier\n' > scripts/docs/docs-navigation-eval-helpers.mjs
+  printf '# fixture terraform format checker\n' > scripts/terraform/terraform-fmt-check.mjs
   cat > tools/trunk <<'STUB'
 #!/usr/bin/env bash
 counter_file="${COUNTER_FILE:?}"
@@ -3537,6 +3538,21 @@ STUB
       > "$output_file" 2>&1
   [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "5" ]] ||
     fail "fresh gate stamp was reused after the routing classifier changed"
+
+  # Every path in implementation_signature() carries the same hazard: an entry
+  # the gate cannot stat hashes as `__missing__` on both runs, so the signature
+  # stops moving and --skip-if-fresh reuses a dead stamp. Cover the Terraform
+  # arm too, so a later move of that file cannot go unnoticed here.
+  printf '# changed fixture terraform format checker\n' >> scripts/terraform/terraform-fmt-check.mjs
+  COUNTER_FILE="$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file changed-paths-two.txt \
+      --base "$base_two" \
+      --run \
+      --skip-if-fresh \
+      > "$output_file" 2>&1
+  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "6" ]] ||
+    fail "fresh gate stamp was reused after the Terraform format checker changed"
 )
 rm -rf "$signature_stamp_repo"
 assert_not_contains "Previous successful agent quality gate run is still fresh; skipping mapped commands."

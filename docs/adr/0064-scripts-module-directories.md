@@ -162,9 +162,22 @@ routing, not procedure.
    `implementation_signature()` path list is stricter than a glob: an entry it
    cannot stat hashes as `__missing__`, so the signature freezes and
    `--skip-if-fresh` reuses a stale stamp. Repoint it in the same commit.
+   The gate also imports `docs/docs-navigation-eval-helpers.mjs` from
+   `$script_source_dir` to classify routing-sensitive paths. That is a second,
+   differently-rooted literal for the same file: repoint both, and note that no
+   CI job runs the gate for real — `agent-quality-gate.test.sh` is the only
+   place either literal is exercised outside a developer's pre-push.
 9. `terraform.stacks.json` — each stack's `changedPathPatterns` enumerates
    exact `scripts/` paths, and `tf-stacks.test.mjs` asserts three of them per
    stack. A stale entry stops the stack reacting to its own tooling.
+10. `forbidden_sources` in `docs/evals/documentation-navigation-fixtures.json`
+    names the navigation evaluation's own implementation, so a run cannot read
+    the answers out of it. `validateFixtureSuite` checks those paths for
+    uniqueness and never for existence, so a stale entry stops forbidding
+    anything and no check reds. The paired
+    `documentation-navigation-baseline-fixtures.json` is the frozen contract for
+    the committed baseline result and is deliberately left alone; editing it
+    would force a rebind of that result's `fixture_digest`.
 
 A shared module under `scripts/lib/` is routed from every arm that reads it,
 not only the arm of the consumer that happens to fail loudest.

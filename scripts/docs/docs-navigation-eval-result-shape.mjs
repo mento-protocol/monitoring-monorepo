@@ -1,9 +1,11 @@
 // Envelope contract for a navigation-evaluation result: the property names,
 // types, and cardinalities a submitted result must carry before any scoring
-// runs. Nothing here reads the repository or the fixture suite, so a shape
-// error is reported without git access and without a loaded corpus.
-// `docs-navigation-eval-result.mjs` owns the scoring pass that follows, which
-// is where a result is measured against documentation bytes at a commit.
+// runs. Nothing here touches the repository, the fixture suite, or git, so
+// these checks are a pure function of the submitted JSON. The CLI still loads
+// its evaluation context first, so a malformed result can meet a context error
+// before its shape error. `docs-navigation-eval-result.mjs` owns the scoring
+// pass, which is where a result is measured against documentation bytes at a
+// commit.
 
 export function isObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
