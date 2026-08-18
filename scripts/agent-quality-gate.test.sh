@@ -4909,31 +4909,43 @@ STUB
   # parent exits on TERM while its child ignores TERM (PR 1492 review): the
   # watchdog must snapshot the tree before TERM and KILL the saved list, or
   # the reparented child survives the escalation.
-  cat > bin/qg-timeout-orphan <<'STUB'
+  #
+  # GitHub issue #1898: distinctive is not the same as unique. `pgrep` scans the
+  # whole machine, so a fixed name also matched a sibling worktree's fixture and
+  # four parallel suite runs failed each other's assertions — and `pkill` would
+  # have reaped a sibling's live fixture on the way out. The name therefore
+  # carries this run's own PID, and every scan below is scoped to that name.
+  # Same construction as the lock-race fixtures further down.
+  timeout_fixture_tag="$((RANDOM % 900 + 100))-$$"
+  timeout_victim="$command_timeout_repo/bin/qg-timeout-victim-$timeout_fixture_tag"
+  timeout_orphan="$command_timeout_repo/bin/qg-timeout-orphan-$timeout_fixture_tag"
+  cat > "$timeout_orphan" <<'STUB'
 #!/usr/bin/env bash
 trap '' TERM
 while :; do sleep 1; done
 STUB
-  cat > bin/qg-timeout-victim <<'STUB'
+  cat > "$timeout_victim" <<'STUB'
 #!/usr/bin/env bash
 trap 'exit 0' TERM
-qg-timeout-orphan &
+"${QG_TIMEOUT_ORPHAN:?}" &
 sleep 45 &
 wait
 STUB
   cat > bin/pnpm <<'STUB'
 #!/usr/bin/env bash
 if [[ "$*" == "agent:prewarm:test" ]]; then
-  exec qg-timeout-victim
+  exec "${QG_TIMEOUT_VICTIM:?}"
 fi
 exit 0
 STUB
-  chmod +x bin/pnpm bin/qg-timeout-victim bin/qg-timeout-orphan tools/trunk
+  chmod +x bin/pnpm "$timeout_victim" "$timeout_orphan" tools/trunk
   git add .
   git commit -qm init
   printf 'scripts/gate/agent-prewarm.mjs\n' > changed-paths.txt
   set +e
   PATH="$command_timeout_repo/bin:$PATH" \
+    QG_TIMEOUT_VICTIM="$timeout_victim" \
+    QG_TIMEOUT_ORPHAN="$timeout_orphan" \
     "$repo_root/scripts/agent-quality-gate.sh" \
       --changed-paths-file changed-paths.txt \
       --base HEAD \
@@ -4947,12 +4959,12 @@ STUB
     fail "expected the gate to fail when a mapped command exceeded --command-timeout"
   # TERM lands at ~2s; give the KILL backstop a moment, then assert no leak.
   sleep 4
-  if pgrep -f "qg-timeout-victim" >/dev/null 2>&1; then
-    pkill -KILL -f "qg-timeout-victim" 2>/dev/null || true
+  if pgrep -f "qg-timeout-victim-$timeout_fixture_tag" >/dev/null 2>&1; then
+    pkill -KILL -f "qg-timeout-victim-$timeout_fixture_tag" 2>/dev/null || true
     fail "timed-out command left a leaked background process"
   fi
-  if pgrep -f "qg-timeout-orphan" >/dev/null 2>&1; then
-    pkill -KILL -f "qg-timeout-orphan" 2>/dev/null || true
+  if pgrep -f "qg-timeout-orphan-$timeout_fixture_tag" >/dev/null 2>&1; then
+    pkill -KILL -f "qg-timeout-orphan-$timeout_fixture_tag" 2>/dev/null || true
     fail "timed-out command's TERM-ignoring child escaped the watchdog KILL pass"
   fi
 )
@@ -4977,8 +4989,13 @@ command_interrupt_repo="$(mktemp -d)"
 exit 0
 STUB
   # Ignores TERM and respawns its sleep child each second, so only the KILL
-  # escalation can reap it.
-  cat > bin/qg-interrupt-victim <<'STUB'
+  # escalation can reap it. Run-unique for the same reason as the timeout
+  # fixture above (GitHub issue #1898): this suite waits on `pgrep` to decide
+  # the victim started, so a sibling worktree's fixture would satisfy the wait
+  # before this run's victim exists.
+  interrupt_fixture_tag="$((RANDOM % 900 + 100))-$$"
+  interrupt_victim="$command_interrupt_repo/bin/qg-interrupt-victim-$interrupt_fixture_tag"
+  cat > "$interrupt_victim" <<'STUB'
 #!/usr/bin/env bash
 trap '' TERM
 while :; do sleep 1; done
@@ -4986,16 +5003,17 @@ STUB
   cat > bin/pnpm <<'STUB'
 #!/usr/bin/env bash
 if [[ "$*" == "agent:prewarm:test" ]]; then
-  exec qg-interrupt-victim
+  exec "${QG_INTERRUPT_VICTIM:?}"
 fi
 exit 0
 STUB
-  chmod +x bin/pnpm bin/qg-interrupt-victim tools/trunk
+  chmod +x bin/pnpm "$interrupt_victim" tools/trunk
   git add .
   git commit -qm init
   printf 'scripts/gate/agent-prewarm.mjs\n' > changed-paths.txt
   set +e
   PATH="$command_interrupt_repo/bin:$PATH" \
+    QG_INTERRUPT_VICTIM="$interrupt_victim" \
     "$repo_root/scripts/agent-quality-gate.sh" \
       --changed-paths-file changed-paths.txt \
       --base HEAD \
@@ -5004,12 +5022,12 @@ STUB
       > "$output_file" 2>&1 &
   gate_pid=$!
   waited=0
-  until pgrep -f "qg-interrupt-victim" >/dev/null 2>&1; do
+  until pgrep -f "qg-interrupt-victim-$interrupt_fixture_tag" >/dev/null 2>&1; do
     sleep 1
     waited=$((waited + 1))
     if [[ "$waited" -ge 20 ]]; then
       kill -KILL "$gate_pid" 2>/dev/null
-      pkill -KILL -f "qg-interrupt-victim" 2>/dev/null
+      pkill -KILL -f "qg-interrupt-victim-$interrupt_fixture_tag" 2>/dev/null
       fail "interrupt fixture never started its victim"
     fi
   done
@@ -5021,8 +5039,8 @@ STUB
     fail "expected the gate to exit nonzero when interrupted by TERM"
   # The trap teardown TERMs immediately, then KILLs after its 3s grace.
   sleep 5
-  if pgrep -f "qg-interrupt-victim" >/dev/null 2>&1; then
-    pkill -KILL -f "qg-interrupt-victim" 2>/dev/null || true
+  if pgrep -f "qg-interrupt-victim-$interrupt_fixture_tag" >/dev/null 2>&1; then
+    pkill -KILL -f "qg-interrupt-victim-$interrupt_fixture_tag" 2>/dev/null || true
     fail "interrupted gate left a SIGTERM-ignoring process running"
   fi
 )
@@ -5400,6 +5418,61 @@ STUB
   assert_contains "--skip-if-fresh cache-hits and exits before this lock"
   [[ -d "$gate_lock_root/run.lock" ]] ||
     fail "a run that never acquired the lock must not delete the holder's lock"
+
+  # GitHub issue #1894: the same expiry, read the way a piped caller reads it.
+  # Every other outcome states itself on stdout — a green run ends "All mapped
+  # commands passed." — but the expiry used to speak on stderr alone, leaving a
+  # stdout stream that ended on the reassuring "waiting up to Ns" banner. A
+  # caller that piped the gate then had two signals and both lied: that stream,
+  # and a pipeline status that belongs to the READER unless the caller set
+  # `pipefail`. So this asserts the shape that misled — stdout piped, stderr
+  # discarded — on both halves: the gate's own status, and a stdout stream that
+  # names the wait expiry and says nothing ran.
+  sleep 120 &
+  piped_holder_pid=$!
+  write_lock_owner "$piped_holder_pid"
+  set +e
+  AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_lock_root" \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 2 \
+    2>/dev/null | cat > "$output_file"
+  piped_exit="${PIPESTATUS[0]}"
+  set -e
+  kill "$piped_holder_pid" 2>/dev/null || true
+  [[ "$piped_exit" == "2" ]] ||
+    fail "expected a piped contended gate run to exit 2 after --lock-wait, got $piped_exit"
+  assert_raw_contains "Gate run lock wait expired after"
+  assert_raw_contains "No mapped command ran; this gate exits 2."
+  assert_raw_contains "read \${PIPESTATUS[0]} or set -o pipefail"
+  [[ -d "$gate_lock_root/run.lock" ]] ||
+    fail "a piped run that never acquired the lock must not delete the holder's lock"
+
+  # The same expiry against a reader that closes the pipe. Whether the run
+  # reaches the verdict (exit 2) or dies writing the wait banner (a SIGPIPE
+  # death) is a race with the reader, so what is pinned here is the invariant
+  # the whole path owes its caller rather than one of the two statuses: a run
+  # that executed nothing never reports success.
+  sleep 120 &
+  closed_pipe_holder_pid=$!
+  write_lock_owner "$closed_pipe_holder_pid"
+  set +e
+  AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_lock_root" \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 2 \
+    2> "$output_file" | head -c 1 > /dev/null
+  closed_pipe_exit="${PIPESTATUS[0]}"
+  set -e
+  kill "$closed_pipe_holder_pid" 2>/dev/null || true
+  [[ "$closed_pipe_exit" != "0" ]] ||
+    fail "a contended gate whose reader closed the pipe reported success without executing anything"
+  [[ -d "$gate_lock_root/run.lock" ]] ||
+    fail "a run killed by a closed pipe must not delete the holder's lock"
 
   # A dead holder whose record carries a token the gate would never generate
   # is waited out, never reclaimed: reclaiming would later drain by that
