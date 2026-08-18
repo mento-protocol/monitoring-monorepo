@@ -97,8 +97,7 @@ resource "grafana_rule_group" "reserve_balances" {
   # tracked in #1332 rather than being guessed here.
   dynamic "rule" {
     for_each = {
-      USDC  = { metric = "USDC_balanceOf", token = "USDC" }
-      EUROP = { metric = "EUROP_balanceOf", token = "EUROP" }
+      USDC = { metric = "USDC_balanceOf", token = "USDC" }
     }
 
     content {
