@@ -1902,8 +1902,10 @@ try {
   ));
 } catch (error) {
   // writeSync, not process.stderr.write: process.exit() drops whatever is still
-  // queued on an async stderr, which is exactly the case when the gate's stderr
-  // is a pipe rather than a terminal.
+  // queued on an async stderr, which is what stderr is whenever the gate runs
+  // under a pipe rather than a terminal. No apostrophes below this line — bash
+  // 3.2 mis-scans one inside a heredoc nested in $( ), which is how the gate
+  // runs this snippet, and check-sentry-suites-in-ci-gate-probe reds on it.
   writeSync(2, `${error instanceof Error ? error.message : String(error)}\n`);
   process.exit(3);
 }
