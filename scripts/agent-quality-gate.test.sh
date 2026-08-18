@@ -445,6 +445,38 @@ fi
 run_gate "docs/notes/quick-commands.md"
 assert_contains "- pnpm docs:navigation-eval -- --check-fixtures (routing-sensitive source changed)"
 
+# The lockfile scope classifier is the quieter sibling of the routing classifier
+# and needs the same machine control. Its caller reads a nonzero exit as "cannot
+# narrow", so a stale path would widen every lockfile change back to the full
+# workspace suite — a run that stays green and only gets slower. Read the literal
+# out of the gate, prove it resolves against the real tree, and prove it still
+# runs as the CLI the gate spawns.
+lockfile_scope_literal="$(
+  awk -F'"' '/^lockfile_scope_path=/ { print $2; exit }' \
+    scripts/agent-quality-gate.sh
+)"
+lockfile_scope_relative="${lockfile_scope_literal/\$script_source_dir/scripts}"
+[[ "$lockfile_scope_relative" == scripts/*.mjs ]] ||
+  fail "could not read lockfile_scope_path from scripts/agent-quality-gate.sh (got '$lockfile_scope_literal')"
+[[ "$lockfile_scope_literal" == '$script_source_dir'/* ]] ||
+  fail "lockfile_scope_path must stay anchored on \$script_source_dir so fixture-repo runs reach the real checkout (got '$lockfile_scope_literal')"
+[[ -f "$repo_root/$lockfile_scope_relative" ]] ||
+  fail "gate lockfile scope classifier path does not exist: $lockfile_scope_relative"
+lockfile_scope_probe_dir="$(mktemp -d)"
+printf 'importers:\n  metrics-bridge:\n    dependencies:\n      viem: 2.0.0\n' \
+  > "$lockfile_scope_probe_dir/base.yaml"
+printf 'importers:\n  metrics-bridge:\n    dependencies:\n      viem: 2.1.0\n' \
+  > "$lockfile_scope_probe_dir/head.yaml"
+if ! node "$repo_root/$lockfile_scope_relative" \
+  "$lockfile_scope_probe_dir/base.yaml" \
+  "$lockfile_scope_probe_dir/head.yaml" > "$output_file" 2>&1; then
+  rm -rf "$lockfile_scope_probe_dir"
+  fail "gate lockfile scope classifier at $lockfile_scope_relative did not run cleanly"
+fi
+rm -rf "$lockfile_scope_probe_dir"
+[[ "$(cat "$output_file")" == "metrics-bridge" ]] ||
+  fail "gate lockfile scope classifier did not narrow to the changed importer"
+
 write_turbo_facts
 
 assert_turbo_task_has_input "build" '$TURBO_ROOT$/shared-config/src/**'
@@ -792,8 +824,8 @@ validator_repo="$(mktemp -d)"
     "agent:quality-gate:test": "bash scripts/agent-quality-gate.test.sh",
     "agent:context-check": "node scripts/context/check-agent-context.mjs",
     "agent:autoreview": "./scripts/agent-autoreview.sh",
-    "agent:prewarm": "node scripts/agent-prewarm.mjs",
-    "agent:prewarm:test": "node scripts/agent-prewarm.test.mjs",
+    "agent:prewarm": "node scripts/gate/agent-prewarm.mjs",
+    "agent:prewarm:test": "node scripts/gate/agent-prewarm.test.mjs",
     "agent:review-materiality": "node scripts/pr/review-materiality.mjs",
     "agent:review-materiality:test": "node scripts/pr/review-materiality.test.mjs",
     "docs:garden": "node scripts/docs/docs-garden-issue.mjs",
@@ -1013,8 +1045,8 @@ package_json_repo="$(mktemp -d)"
     "agent:quality-gate:test": "bash scripts/agent-quality-gate.test.sh",
     "agent:context-check": "node scripts/context/check-agent-context.mjs",
     "agent:autoreview": "./scripts/agent-autoreview.sh",
-    "agent:prewarm": "node scripts/agent-prewarm.mjs",
-    "agent:prewarm:test": "node scripts/agent-prewarm.test.mjs",
+    "agent:prewarm": "node scripts/gate/agent-prewarm.mjs",
+    "agent:prewarm:test": "node scripts/gate/agent-prewarm.test.mjs",
     "agent:review-materiality": "node scripts/pr/review-materiality.mjs",
     "agent:review-materiality:test": "node scripts/pr/review-materiality.test.mjs",
     "issue:board": "node scripts/pr/agent-issue-board.mjs",
@@ -1047,7 +1079,7 @@ rm -rf "$package_json_repo"
 assert_contains "- tooling"
 assert_contains "- bash scripts/check-agent-quality-gate-package-scripts.sh (root package tooling script changed)"
 assert_contains "- bash scripts/agent-quality-gate.test.sh (root package tooling script changed)"
-assert_contains "- node scripts/agent-prewarm.test.mjs (root package tooling script changed)"
+assert_contains "- node scripts/gate/agent-prewarm.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/pr/review-materiality.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/pr/agent-issue-board.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/docs/docs-garden-issue.test.mjs (root package tooling script changed)"
@@ -1077,8 +1109,8 @@ dedupe_quality_gate_alias_repo="$(mktemp -d)"
     "agent:quality-gate:test": "bash scripts/agent-quality-gate.test.sh",
     "agent:context-check": "node scripts/context/check-agent-context.mjs",
     "agent:autoreview": "./scripts/agent-autoreview.sh",
-    "agent:prewarm": "node scripts/agent-prewarm.mjs",
-    "agent:prewarm:test": "node scripts/agent-prewarm.test.mjs",
+    "agent:prewarm": "node scripts/gate/agent-prewarm.mjs",
+    "agent:prewarm:test": "node scripts/gate/agent-prewarm.test.mjs",
     "agent:review-materiality": "node scripts/pr/review-materiality.mjs",
     "agent:review-materiality:test": "node scripts/pr/review-materiality.test.mjs",
     "issue:board": "node scripts/pr/agent-issue-board.mjs",
@@ -1127,8 +1159,8 @@ lockfile_script_repo="$(mktemp -d)"
     "agent:quality-gate:test": "bash scripts/agent-quality-gate.test.sh",
     "agent:context-check": "node scripts/context/check-agent-context.mjs",
     "agent:autoreview": "./scripts/agent-autoreview.sh",
-    "agent:prewarm": "node scripts/agent-prewarm.mjs",
-    "agent:prewarm:test": "node scripts/agent-prewarm.test.mjs",
+    "agent:prewarm": "node scripts/gate/agent-prewarm.mjs",
+    "agent:prewarm:test": "node scripts/gate/agent-prewarm.test.mjs",
     "agent:review-materiality": "node scripts/pr/review-materiality.mjs",
     "agent:review-materiality:test": "node scripts/pr/review-materiality.test.mjs",
     "issue:board": "node scripts/pr/agent-issue-board.mjs",
@@ -1161,7 +1193,7 @@ rm -rf "$lockfile_script_repo"
 assert_contains "- tooling"
 assert_contains "- bash scripts/check-agent-quality-gate-package-scripts.sh (root package tooling script changed)"
 assert_contains "- bash scripts/agent-quality-gate.test.sh (root package tooling script changed)"
-assert_contains "- node scripts/agent-prewarm.test.mjs (root package tooling script changed)"
+assert_contains "- node scripts/gate/agent-prewarm.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/pr/review-materiality.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/pr/agent-issue-board.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/pr-feedback-state.test.mjs (root package tooling script changed)"
@@ -1187,8 +1219,8 @@ pr_ready_state_script_repo="$(mktemp -d)"
     "agent:quality-gate:test": "bash scripts/agent-quality-gate.test.sh",
     "agent:context-check": "node scripts/context/check-agent-context.mjs",
     "agent:autoreview": "./scripts/agent-autoreview.sh",
-    "agent:prewarm": "node scripts/agent-prewarm.mjs",
-    "agent:prewarm:test": "node scripts/agent-prewarm.test.mjs",
+    "agent:prewarm": "node scripts/gate/agent-prewarm.mjs",
+    "agent:prewarm:test": "node scripts/gate/agent-prewarm.test.mjs",
     "agent:review-materiality": "node scripts/pr/review-materiality.mjs",
     "agent:review-materiality:test": "node scripts/pr/review-materiality.test.mjs",
     "issue:board": "node scripts/pr/agent-issue-board.mjs",
@@ -1221,7 +1253,7 @@ rm -rf "$pr_ready_state_script_repo"
 assert_contains "- tooling"
 assert_contains "- bash scripts/check-agent-quality-gate-package-scripts.sh (root package tooling script changed)"
 assert_contains "- bash scripts/agent-quality-gate.test.sh (root package tooling script changed)"
-assert_contains "- node scripts/agent-prewarm.test.mjs (root package tooling script changed)"
+assert_contains "- node scripts/gate/agent-prewarm.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/pr/review-materiality.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/pr/agent-issue-board.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/pr-feedback-state.test.mjs (root package tooling script changed)"
@@ -1683,6 +1715,44 @@ importers:
 '
 assert_contains "- cd aegis && forge test (workspace dependency/config changed)"
 assert_not_contains "lockfile change scoped to importers"
+
+# A missing classifier is NOT an ambiguous lockfile, and must not be answered
+# with fail-toward-full: that reads as a slow-but-green run and nobody looks.
+# Mirror the real hazard by giving the gate a source directory that has every
+# sibling except gate/, so only the lockfile scope spawn goes stale, and require
+# a loud exit 2.
+lockfile_scope_missing_dir="$(mktemp -d)"
+for lockfile_scope_sibling in "$repo_root"/scripts/*; do
+  lockfile_scope_sibling_name="$(basename "$lockfile_scope_sibling")"
+  if [[ "$lockfile_scope_sibling_name" != "gate" ]]; then
+    ln -s "$lockfile_scope_sibling" \
+      "$lockfile_scope_missing_dir/$lockfile_scope_sibling_name"
+  fi
+done
+lockfile_scope_missing_repo="$(mktemp -d)"
+(
+  cd "$lockfile_scope_missing_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  printf '{ "name": "fixture" }\n' > package.json
+  printf '%s' "$lockfile_scope_base_yaml" > pnpm-lock.yaml
+  git add package.json pnpm-lock.yaml
+  git commit -qm init
+  printf 'lockfileVersion: %s\nsettings:\n  autoInstallPeers: true\noverrides: {}\nimporters:\n  .:\n    dependencies: {}\n  metrics-bridge:\n    dependencies:\n      viem:\n        specifier: ^2.1.0\n        version: 2.1.0\n  integration-probes:\n    dependencies:\n      undici:\n        specifier: ^6.0.0\n        version: 6.0.0\npackages:\n  viem@2.0.0: {}\n' \
+    "'9.0'" > pnpm-lock.yaml
+  set +e
+  bash "$lockfile_scope_missing_dir/agent-quality-gate.sh" --base HEAD > "$output_file" 2>&1
+  printf '%s\n' "$?" > exit-code
+  set -e
+)
+lockfile_scope_missing_exit="$(cat "$lockfile_scope_missing_repo/exit-code")"
+rm -rf "$lockfile_scope_missing_dir" "$lockfile_scope_missing_repo"
+[[ "$lockfile_scope_missing_exit" -eq 2 ]] ||
+  fail "missing lockfile scope classifier exited $lockfile_scope_missing_exit instead of 2"
+assert_contains "error: lockfile scope classifier could not be loaded from"
+assert_not_contains "lockfile change scoped to importers"
+assert_not_contains "- cd aegis && forge test (workspace dependency/config changed)"
 
 run_gate "indexer-envio/package.json"
 assert_contains "- docs/pr-checklists/stateful-data-ui.md (indexer data flow changed)"
@@ -2673,8 +2743,8 @@ parallel_quality_repo="$(mktemp -d)"
   git init -q
   git config user.email test@example.invalid
   git config user.name "Quality Gate Test"
-  mkdir -p bin scripts tools
-  printf 'console.log("fixture");\n' > scripts/agent-prewarm.mjs
+  mkdir -p bin scripts/gate tools
+  printf 'console.log("fixture");\n' > scripts/gate/agent-prewarm.mjs
   cat > tools/trunk <<'STUB'
 #!/usr/bin/env bash
 marker="${PARALLEL_MARKER:?}"
@@ -2695,7 +2765,7 @@ STUB
   chmod +x bin/pnpm tools/trunk
   git add .
   git commit -qm init
-  printf 'scripts/agent-prewarm.mjs\n' > changed-paths.txt
+  printf 'scripts/gate/agent-prewarm.mjs\n' > changed-paths.txt
   PARALLEL_MARKER="$parallel_quality_repo/parallel-marker" \
     PATH="$parallel_quality_repo/bin:$PATH" \
     "$repo_root/scripts/agent-quality-gate.sh" \
@@ -2707,7 +2777,7 @@ STUB
 )
 rm -rf "$parallel_quality_repo"
 assert_contains "Running quality commands with parallelism 4."
-assert_contains "+ ./tools/trunk check scripts/agent-prewarm.mjs"
+assert_contains "+ ./tools/trunk check scripts/gate/agent-prewarm.mjs"
 assert_contains "+ pnpm lint:scripts"
 assert_contains "+ pnpm agent:prewarm:test"
 assert_contains "All mapped commands passed."
@@ -3037,8 +3107,8 @@ auto_parallel_quality_repo="$(mktemp -d)"
   git init -q
   git config user.email test@example.invalid
   git config user.name "Quality Gate Test"
-  mkdir -p bin scripts tools
-  printf 'console.log("fixture");\n' > scripts/agent-prewarm.mjs
+  mkdir -p bin scripts/gate tools
+  printf 'console.log("fixture");\n' > scripts/gate/agent-prewarm.mjs
   cat > tools/trunk <<'STUB'
 #!/usr/bin/env bash
 exit 0
@@ -3058,7 +3128,7 @@ STUB
   chmod +x bin/getconf bin/pnpm tools/trunk
   git add .
   git commit -qm init
-  printf 'scripts/agent-prewarm.mjs\n' > changed-paths.txt
+  printf 'scripts/gate/agent-prewarm.mjs\n' > changed-paths.txt
   PATH="$auto_parallel_quality_repo/bin:$PATH" \
     "$repo_root/scripts/agent-quality-gate.sh" \
       --changed-paths-file changed-paths.txt \
@@ -3478,11 +3548,12 @@ signature_stamp_repo="$(mktemp -d)"
   git init -q
   git config user.email test@example.invalid
   git config user.name "Quality Gate Test"
-  mkdir -p scripts/docs scripts/terraform tools
+  mkdir -p scripts/docs scripts/gate scripts/terraform tools
   printf 'fixture\n' > fixture.txt
   printf 'second fixture\n' > second.txt
   printf '# fixture gate implementation\n' > scripts/agent-quality-gate.sh
   printf '# fixture routing classifier\n' > scripts/docs/docs-navigation-eval-helpers.mjs
+  printf '# fixture lockfile scope classifier\n' > scripts/gate/lockfile-scope.mjs
   printf '# fixture terraform format checker\n' > scripts/terraform/terraform-fmt-check.mjs
   printf '# fixture terraform format checker suite\n' > scripts/terraform/terraform-fmt-check.test.mjs
   cat > tools/trunk <<'STUB'
@@ -3555,9 +3626,9 @@ STUB
   # Every moved entry in implementation_signature() carries the same hazard: a
   # path the gate cannot stat hashes as `__missing__` on both runs, so the
   # signature stops moving and --skip-if-fresh reuses a dead stamp. The
-  # classifier above covers the P4 move; these two cover the P10 one. The
-  # entries that have never moved are unfixtured apart from the gate itself
-  # (its suite, the alias validator, turbo.json, and .trunk/trunk.yaml).
+  # classifier above covers the P4 move; the two below cover the P10 one and the
+  # P11 one. The entries that have never moved are unfixtured apart from the gate
+  # itself (its suite, the alias validator, turbo.json, and .trunk/trunk.yaml).
   printf '# changed fixture terraform format checker\n' >> scripts/terraform/terraform-fmt-check.mjs
   COUNTER_FILE="$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
     "$repo_root/scripts/agent-quality-gate.sh" \
@@ -3579,6 +3650,21 @@ STUB
       > "$output_file" 2>&1
   [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "7" ]] ||
     fail "fresh gate stamp was reused after the Terraform format checker suite changed"
+
+  # GitHub issue #1905: the lockfile scope classifier is a gate runtime pin, so
+  # editing it has to move the signature. Its caller reads a nonzero exit as
+  # "cannot narrow", so a stale stamp here hides a routing change nothing else
+  # reports.
+  printf '# changed fixture lockfile scope classifier\n' >> scripts/gate/lockfile-scope.mjs
+  COUNTER_FILE="$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file changed-paths-two.txt \
+      --base "$base_two" \
+      --run \
+      --skip-if-fresh \
+      > "$output_file" 2>&1
+  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "8" ]] ||
+    fail "fresh gate stamp was reused after the lockfile scope classifier changed"
 )
 rm -rf "$signature_stamp_repo"
 assert_not_contains "Previous successful agent quality gate run is still fresh; skipping mapped commands."
@@ -4588,8 +4674,8 @@ command_stamp_resume_repo="$(mktemp -d)"
   git init -q
   git config user.email test@example.invalid
   git config user.name "Quality Gate Test"
-  mkdir -p bin scripts tools
-  printf 'console.log("fixture");\n' > scripts/agent-prewarm.mjs
+  mkdir -p bin scripts/gate tools
+  printf 'console.log("fixture");\n' > scripts/gate/agent-prewarm.mjs
   cat > tools/trunk <<'STUB'
 #!/usr/bin/env bash
 exit 0
@@ -4611,7 +4697,7 @@ STUB
   chmod +x bin/pnpm tools/trunk
   git add .
   git commit -qm init
-  printf 'scripts/agent-prewarm.mjs\n' > changed-paths.txt
+  printf 'scripts/gate/agent-prewarm.mjs\n' > changed-paths.txt
   : > "$command_stamp_resume_repo/prewarm-fail"
   set +e
   LINT_SIDE_EFFECT="$command_stamp_resume_repo/lint-side-effect" \
@@ -4678,8 +4764,8 @@ command_stamp_invalidation_repo="$(mktemp -d)"
   git init -q
   git config user.email test@example.invalid
   git config user.name "Quality Gate Test"
-  mkdir -p bin scripts tools
-  printf 'console.log("fixture");\n' > scripts/agent-prewarm.mjs
+  mkdir -p bin scripts/gate tools
+  printf 'console.log("fixture");\n' > scripts/gate/agent-prewarm.mjs
   cat > tools/trunk <<'STUB'
 #!/usr/bin/env bash
 exit 0
@@ -4692,7 +4778,7 @@ STUB
   chmod +x bin/pnpm tools/trunk
   git add .
   git commit -qm init
-  printf 'scripts/agent-prewarm.mjs\n' > changed-paths.txt
+  printf 'scripts/gate/agent-prewarm.mjs\n' > changed-paths.txt
   LINT_SIDE_EFFECT="$command_stamp_invalidation_repo/lint-side-effect" \
     PATH="$command_stamp_invalidation_repo/bin:$PATH" \
     "$repo_root/scripts/agent-quality-gate.sh" \
@@ -4704,7 +4790,7 @@ STUB
   [[ "$(wc -l < "$command_stamp_invalidation_repo/lint-side-effect" | tr -d ' ')" == "1" ]] ||
     fail "expected lint:scripts to run once on the first invalidation run"
 
-  printf 'console.log("changed");\n' >> scripts/agent-prewarm.mjs
+  printf 'console.log("changed");\n' >> scripts/gate/agent-prewarm.mjs
   LINT_SIDE_EFFECT="$command_stamp_invalidation_repo/lint-side-effect" \
     PATH="$command_stamp_invalidation_repo/bin:$PATH" \
     "$repo_root/scripts/agent-quality-gate.sh" \
@@ -4728,8 +4814,8 @@ command_stamp_exempt_repo="$(mktemp -d)"
   git init -q
   git config user.email test@example.invalid
   git config user.name "Quality Gate Test"
-  mkdir -p bin scripts tools
-  printf 'console.log("fixture");\n' > scripts/agent-prewarm.mjs
+  mkdir -p bin scripts/gate tools
+  printf 'console.log("fixture");\n' > scripts/gate/agent-prewarm.mjs
   printf '#!/usr/bin/env bash\nexit 0\n' > scripts/agent-quality-gate.sh
   cat > tools/trunk <<'STUB'
 #!/usr/bin/env bash
@@ -4747,7 +4833,7 @@ STUB
   chmod +x bin/pnpm scripts/agent-quality-gate.sh tools/trunk
   git add .
   git commit -qm init
-  printf '%s\n' scripts/agent-prewarm.mjs scripts/agent-quality-gate.sh > changed-paths.txt
+  printf '%s\n' scripts/gate/agent-prewarm.mjs scripts/agent-quality-gate.sh > changed-paths.txt
   for _ in 1 2; do
     TRUNK_COUNT="$command_stamp_exempt_repo/trunk-count" \
       SELFTEST_COUNT="$command_stamp_exempt_repo/selftest-count" \
@@ -4781,8 +4867,8 @@ command_timeout_repo="$(mktemp -d)"
   git init -q
   git config user.email test@example.invalid
   git config user.name "Quality Gate Test"
-  mkdir -p bin scripts tools
-  printf 'console.log("fixture");\n' > scripts/agent-prewarm.mjs
+  mkdir -p bin scripts/gate tools
+  printf 'console.log("fixture");\n' > scripts/gate/agent-prewarm.mjs
   cat > tools/trunk <<'STUB'
 #!/usr/bin/env bash
 exit 0
@@ -4813,7 +4899,7 @@ STUB
   chmod +x bin/pnpm bin/qg-timeout-victim bin/qg-timeout-orphan tools/trunk
   git add .
   git commit -qm init
-  printf 'scripts/agent-prewarm.mjs\n' > changed-paths.txt
+  printf 'scripts/gate/agent-prewarm.mjs\n' > changed-paths.txt
   set +e
   PATH="$command_timeout_repo/bin:$PATH" \
     "$repo_root/scripts/agent-quality-gate.sh" \
@@ -4852,8 +4938,8 @@ command_interrupt_repo="$(mktemp -d)"
   git init -q
   git config user.email test@example.invalid
   git config user.name "Quality Gate Test"
-  mkdir -p bin scripts tools
-  printf 'console.log("fixture");\n' > scripts/agent-prewarm.mjs
+  mkdir -p bin scripts/gate tools
+  printf 'console.log("fixture");\n' > scripts/gate/agent-prewarm.mjs
   cat > tools/trunk <<'STUB'
 #!/usr/bin/env bash
 exit 0
@@ -4875,7 +4961,7 @@ STUB
   chmod +x bin/pnpm bin/qg-interrupt-victim tools/trunk
   git add .
   git commit -qm init
-  printf 'scripts/agent-prewarm.mjs\n' > changed-paths.txt
+  printf 'scripts/gate/agent-prewarm.mjs\n' > changed-paths.txt
   set +e
   PATH="$command_interrupt_repo/bin:$PATH" \
     "$repo_root/scripts/agent-quality-gate.sh" \
@@ -4927,8 +5013,8 @@ run_parallel_interrupt_regression() {
     git init -q
     git config user.email test@example.invalid
     git config user.name "Quality Gate Test"
-    mkdir -p bin scripts tools
-    printf 'console.log("fixture");\n' > scripts/agent-prewarm.mjs
+    mkdir -p bin scripts/gate tools
+    printf 'console.log("fixture");\n' > scripts/gate/agent-prewarm.mjs
     mkdir -p scripts/context
     printf 'console.log("fixture");\n' > scripts/context/agent-context-budget.mjs
     cat > tools/trunk <<'STUB'
@@ -4961,7 +5047,7 @@ STUB
     chmod +x bin/pnpm bin/qg-par-victim bin/qg-par-descendant tools/trunk
     git add .
     git commit -qm init
-    printf 'scripts/agent-prewarm.mjs\nscripts/context/agent-context-budget.mjs\n' > changed-paths.txt
+    printf 'scripts/gate/agent-prewarm.mjs\nscripts/context/agent-context-budget.mjs\n' > changed-paths.txt
 
     local barrier="$parallel_interrupt_repo/registration"
     local gate_output="$parallel_interrupt_repo/gate-output"

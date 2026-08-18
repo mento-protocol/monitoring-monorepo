@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 /**
- * Unit tests for scripts/lockfile-scope.mjs.
+ * Unit tests for scripts/gate/lockfile-scope.mjs.
  *
  * Exercises the pure `classifyLockfileChange` classifier plus the CLI
  * exit-code contract the agent quality gate depends on.
  *
- * Run: node scripts/lockfile-scope.test.mjs
+ * Run: node scripts/gate/lockfile-scope.test.mjs
  */
 
 import { spawnSync } from "node:child_process";

@@ -17,7 +17,7 @@ garden_lane: agent-entry-points
 ## Scope
 
 `scripts/` holds deploy wrappers, agent quality gates, code-health checks, and
-repo maintenance utilities. 124 files sit flat at the top level today.
+repo maintenance utilities. 120 files sit flat at the top level today.
 
 ## Target Layout
 
@@ -40,7 +40,7 @@ Files stay flat until their phase merges.
 | `terraform/`    | P10   | movable Terraform guards and helpers   |
 | `gate/`         | P11   | quality-gate satellites                |
 
-Landed: P1, P2, P3, P4, P5, P6, P7, P8, P9, P10. `lib/` (the shared tier) and
+Landed: P1–P11. `lib/` (the shared tier) and
 `production-infra-identity-contract/` predate the reorganization. `setup.sh`
 stays flat: `.config/wt.toml` runs that exact path as the Worktrunk pre-start
 hook, and eight docs name it. `redrive-onchain-deadletter.{mjs,test.mjs}` stays
@@ -53,14 +53,10 @@ tokenizer and block extraction), `workflow-yaml.mjs` (Actions workflow and
 shell-run parsing), `pnpm-override-selector.mjs` (pnpm override selectors), and
 `gh-issue-lifecycle.mjs` (the `gh` runner, pagination guard, Documentation
 Garden workflow authorization, label bootstrap, and issue-queue arbitration).
-Cores stay outside domain directories: five files beyond
-`production-infra-identity-contract/` read `hcl.mjs`, the ADR 0053
-deploy-staging contract reads `workflow-yaml.mjs`, both the lockfile-lint gate
-and the override prune advisor read the selector parser, and the documentation
-garden and navigation-eval schedulers both read the issue lifecycle.
-`peg-policy-digest.mjs` is the one definition of the peg version-digest contract
-both peg validators check. Inventories, pinned hashes, and identities stay with
-their domain.
+Cores stay outside domain directories; ADR 0064 records which clusters read
+each. `peg-policy-digest.mjs` is the one definition of the peg version-digest
+contract both peg validators check. Inventories, pinned hashes, and identities
+stay with their domain.
 
 ## Why Files Stay Flat
 
@@ -74,9 +70,9 @@ that mechanism moves with it, in the same PR.
   routing on `$script_source_dir == $repo_root/scripts`, leaving its stub-repo
   unit tests unaffected.
 - **Gate runtime module pins.** `agent-quality-gate.sh` resolves
-  `docs/docs-navigation-eval-helpers.mjs` and `lockfile-scope.mjs` from
-  `$script_source_dir`, and names the classifier in three literals. Repoint
-  every one; ADR 0064 lists them.
+  `docs/docs-navigation-eval-helpers.mjs` and `gate/lockfile-scope.mjs` from
+  `$script_source_dir` — never `$repo_root`, which is a stub repo under test —
+  and names each in three literals. Repoint every one; ADR 0064 lists them.
 - **Evaluation fixture forbidden lists.** `forbidden_sources` in
   `docs/evals/documentation-navigation-fixtures.json` names the navigation
   eval's own implementation.

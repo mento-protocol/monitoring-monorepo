@@ -12,7 +12,7 @@
  *   - Otherwise reports the importer keys whose section changed, so the gate
  *     can map each to its package quality bundle.
  *
- * CLI: `node scripts/lockfile-scope.mjs <base-lockfile> <head-lockfile>`
+ * CLI: `node scripts/gate/lockfile-scope.mjs <base-lockfile> <head-lockfile>`
  *   - exit 0 and print each changed importer key on its own line when the
  *     change is scopable (an empty list means no semantic importer change).
  *   - exit 1 on any fail-toward-full condition, including read/parse errors.
