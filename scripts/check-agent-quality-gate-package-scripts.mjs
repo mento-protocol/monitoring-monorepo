@@ -40,24 +40,33 @@ const expectedScripts = {
   "issue:claim": "node scripts/pr/agent-issue-board.mjs claim",
   "issue:review": "node scripts/pr/agent-issue-board.mjs review",
   "issue:release": "node scripts/pr/agent-issue-board.mjs release",
-  "sentry:ingest": "node scripts/sentry-triage-ingest.mjs",
-  "sentry:ingest:test": "node scripts/sentry-triage-ingest.test.mjs",
-  "sentry:digest": "node scripts/sentry-triage-digest.mjs",
-  "sentry:digest:test": "node scripts/sentry-triage-digest.test.mjs",
-  "sentry:project": "node scripts/sentry-triage-project.mjs",
-  "sentry:project:test": "node scripts/sentry-triage-project.test.mjs",
-  "sentry:brief": "node scripts/sentry-triage-brief.mjs",
-  "sentry:brief:test": "node scripts/sentry-triage-brief.test.mjs",
-  "sentry:autofix:select": "node scripts/sentry-autofix-select.mjs",
-  "sentry:autofix:select:test": "node scripts/sentry-autofix-select.test.mjs",
+  "sentry:ingest": "node scripts/sentry/triage/sentry-triage-ingest.mjs",
+  "sentry:ingest:test":
+    "node scripts/sentry/triage/sentry-triage-ingest.test.mjs",
+  "sentry:digest": "node scripts/sentry/triage/sentry-triage-digest.mjs",
+  "sentry:digest:test":
+    "node scripts/sentry/triage/sentry-triage-digest.test.mjs",
+  "sentry:project": "node scripts/sentry/triage/sentry-triage-project.mjs",
+  "sentry:project:test":
+    "node scripts/sentry/triage/sentry-triage-project.test.mjs",
+  "sentry:brief": "node scripts/sentry/triage/sentry-triage-brief.mjs",
+  "sentry:brief:test":
+    "node scripts/sentry/triage/sentry-triage-brief.test.mjs",
+  "sentry:autofix:select":
+    "node scripts/sentry/autofix/sentry-autofix-select.mjs",
+  "sentry:autofix:select:test":
+    "node scripts/sentry/autofix/sentry-autofix-select.test.mjs",
   "sentry:autofix:finalize:test":
-    "node scripts/sentry-autofix-finalize.test.mjs",
+    "node scripts/sentry/autofix/sentry-autofix-finalize.test.mjs",
   "sentry:autofix:run-record:test":
-    "node scripts/sentry-autofix-run-record.test.mjs",
-  "sentry:archive": "node scripts/sentry-triage-archive.mjs",
-  "sentry:archive:test": "node scripts/sentry-triage-archive.test.mjs",
-  "sentry:broker:test": "node --test scripts/sentry-mcp-broker.test.mjs",
-  "sentry:requeue:test": "node scripts/sentry-triage-requeue.test.mjs",
+    "node scripts/sentry/autofix/sentry-autofix-run-record.test.mjs",
+  "sentry:archive": "node scripts/sentry/triage/sentry-triage-archive.mjs",
+  "sentry:archive:test":
+    "node scripts/sentry/triage/sentry-triage-archive.test.mjs",
+  "sentry:broker:test":
+    "node --test scripts/sentry/broker/sentry-mcp-broker.test.mjs",
+  "sentry:requeue:test":
+    "node scripts/sentry/triage/sentry-triage-requeue.test.mjs",
   "pr:feedback-state": "node scripts/pr-feedback-state.mjs",
   "pr:feedback-state:test": "node scripts/pr-feedback-state.test.mjs",
   "pr:ready-state": "node scripts/pr-ready-state.mjs",

@@ -263,6 +263,6 @@ jobs:
           QUEUE_ISSUE_NUMBER: ${{ steps.ctx.outputs.issue }}
         run: |
           set -euo pipefail
-          node scripts/sentry-triage-archive.mjs \
+          node scripts/sentry/triage/sentry-triage-archive.mjs \
             --issue "${QUEUE_ISSUE_NUMBER}" \
             --repo "${GITHUB_REPOSITORY}"
