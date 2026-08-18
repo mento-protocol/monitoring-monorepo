@@ -203,6 +203,6 @@ Replace BugBot with CodeRabbit as the third advisory reviewer.
   and wins" (2026-02-26, documents the 82%→45% Greptile re-run gap).
 - This repo's numbers: 40-PR sample #1843–#1911 collected 2026-08-18 via
   `gh api pulls/<n>/comments` (26/26 findings fixed; per-bot split above);
-  merged-PR volume from `git log --first-parent` (274 in 30 days, 850 in 90);
+  merged-PR volume from `git log --first-parent` (280 in 30 days, 850 in 90);
   BugBot's advisory-only role per ADR 0007 and
   `docs/pr-checklists/ci-workflow-gates.md`.
