@@ -604,9 +604,9 @@ assert.equal(
   null,
   "service token placeholders remain allowed",
 );
-// A shell parameter expansion carrying a default, assign, or alternate operator
-// resolves at runtime the way a bare `${VAR}` does, so the diff carries no
-// literal. Before this, a PR that merely moved a shell file containing one
+// A shell parameter expansion carrying a default, assign, alternate, or error
+// operator resolves at runtime the way a bare `${VAR}` does, so the diff carries
+// no literal. Before this, a PR that merely moved a shell file containing one
 // aborted the whole bundle, because the scanner read the expansion as a
 // credential and scans removed lines too.
 assert.equal(
@@ -633,6 +633,16 @@ assert.equal(
   secretLikeReason('API_KEY="${3:-${QUICKNODE_API_KEY-}}"'),
   null,
   "positional-parameter shell expansions are references",
+);
+assert.equal(
+  secretLikeReason('SERVICE_TOKEN="${SERVICE_TOKEN:?}"'),
+  null,
+  "colon-error shell expansions are references",
+);
+assert.equal(
+  secretLikeReason('SERVICE_TOKEN="${SERVICE_TOKEN?$FALLBACK_TOKEN}"'),
+  null,
+  "unset-error shell expansions whose word is a reference are references",
 );
 // Anti-bypass: the word after the operator is the one place a literal can hide,
 // and the brace that closes the expansion has to end the value. Each fixture is
@@ -688,6 +698,59 @@ assert.equal(
   secretLikeReason('GH_API_TOKEN="${GH_TOKEN:-$GITHUB_TOKEN}"'),
   null,
   "a bare $VAR word inside a shell default is a reference",
+);
+assert.match(
+  secretLikeReason(
+    tokenAssignment(["${GH_TOKEN:?", genericTokenCredential, "}"].join("")),
+  ),
+  /literal generic token assignment/,
+  "a literal in a shell error-operator word is still rejected",
+);
+// An exactly-empty quoted default expands to the empty string, so it is inert.
+// Anything inside those quotes is a literal and stays subject to the rules.
+assert.equal(
+  secretLikeReason(tokenAssignment("${GH_TOKEN:-''}")),
+  null,
+  "an exactly-empty quoted word inside a shell default is a reference",
+);
+assert.equal(
+  secretLikeReason(["GH_API_TOKEN", "=", "'", '${GH_TOKEN:-""}', "'"].join("")),
+  null,
+  "the double-quoted empty word is likewise a reference",
+);
+assert.match(
+  secretLikeReason(
+    tokenAssignment(["${GH_TOKEN:-'", genericTokenCredential, "'}"].join("")),
+  ),
+  /literal credential (?:assignment|expression)/,
+  "a quoted non-empty word inside a shell default is still rejected",
+);
+// Nesting is bounded: each level recurses and rescans its own substring, so an
+// unbounded one costs quadratic time and a stack frame per level. Past the bound
+// the value is not a reference, which leaves it subject to the literal rules —
+// the fail-closed direction.
+const nestedShellExpansion = (depth) =>
+  "${A:-".repeat(depth) + "}".repeat(depth);
+assert.equal(
+  secretLikeReason(tokenAssignment(nestedShellExpansion(8))),
+  null,
+  "shell expansions nested to the bound are still references",
+);
+assert.match(
+  secretLikeReason(tokenAssignment(nestedShellExpansion(9))),
+  /literal generic token assignment/,
+  "shell expansions nested past the bound are not references",
+);
+// The adversarial input the bound exists for: unbounded, 100,000 levels threw
+// `RangeError: Maximum call stack size exceeded` out of the scanner and aborted
+// bundle preparation instead of returning a verdict. Returning a verdict at all
+// is the whole property; wall-clock is not asserted, because the fixture also
+// runs every other rule in the scanner and a time budget would only measure the
+// machine.
+assert.match(
+  secretLikeReason(tokenAssignment(nestedShellExpansion(100_000))),
+  /literal generic token assignment/,
+  "a deeply nested shell expansion returns a verdict instead of overflowing",
 );
 assert.equal(
   secretLikeReason("GH_TOKEN: ${{ github.token }}"),

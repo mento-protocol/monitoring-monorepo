@@ -223,10 +223,14 @@ prepared-bundle artifact is published or review input is sent to a semantic
 engine. A value that only names a credential is a reference, not a literal, and
 passes: environment and `process.env` reads, GitHub Actions `${{ … }}` context
 expressions, Terraform `var`/`local`/`module`/`data` traversals, and shell
-parameter expansions such as `${GH_TOKEN:-${GITHUB_TOKEN:-}}` whose default,
-assign, or alternate word is empty or itself a shell-native reference. Every one
-of those is anchored to the whole value, so a literal fused to a reference still
-refuses.
+parameter expansions such as `${GH_TOKEN:-${GITHUB_TOKEN:-}}` whose default
+(`:-`, `-`), assign (`:=`, `=`), alternate (`:+`, `+`), or error (`:?`, `?`)
+word is empty or itself a shell-native reference. Every one of those is anchored
+to the whole value, so a literal fused to a reference still refuses. Shell
+expansion nesting is bounded at eight levels, past which the value is not a
+reference and stays subject to the literal rules; real defaults nest one to
+three deep, and an unbounded walk lets one crafted line exhaust the scanner's
+stack.
 Evidence reads reject symlinks and verify that the opened descriptor still
 identifies the file that was inspected, closing path-swap races.
 

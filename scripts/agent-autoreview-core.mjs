@@ -773,9 +773,11 @@ export function sensitivePathReason(rawPath) {
 // operator resolves at runtime exactly the way a bare `${VAR}` does, so
 // `GH_API_TOKEN="${GH_TOKEN:-${GITHUB_TOKEN:-}}"` names values it does not
 // carry. The word after `:-`, `-`, `:=`, `=`, `:+`, `+`, `:?`, or `?` is
-// accepted only when it is empty or itself a shell-native reference, because a
-// default can inline a real credential (`${GH_TOKEN:-ghp_real}`) and that must
-// still fail closed. The word is deliberately not measured against the whole
+// accepted only when it is empty, an exactly-empty quoted word, or itself a
+// shell-native reference, because a default can inline a real credential
+// (`${GH_TOKEN:-ghp_real}`) and that must still fail closed — a quoted word with
+// anything in it stays subject to the literal rules. The word is deliberately
+// not measured against the whole
 // placeholder grammar: under shell semantics a word such as `secrets.ghp_real`
 // is a plain literal, not a reference, so the broader grammar would let one
 // through. Nesting is parsed rather than pattern-matched, and the brace closing
@@ -783,9 +785,23 @@ export function sensitivePathReason(rawPath) {
 // expansion (`${VAR:-}ghp_real`) is not a reference either. Any other expansion
 // form — `${VAR#prefix}`, `${VAR/a/b}` — leaves a non-empty, non-reference word
 // and stays subject to the literal rules.
+//
+// Nesting is bounded because each level recurses and rescans its own substring.
+// A single diff line of deeply nested reference-only expansions otherwise costs
+// quadratic time and one stack frame per level. Measured on this scanner before
+// the bound: 20,000 levels took 8.9s, and 100,000 levels ran 38s and then threw
+// `RangeError: Maximum call stack size exceeded` out of the scan, aborting
+// bundle preparation instead of returning a verdict. Bounded, the same
+// 100,000-level line returns a refusal in 118ms. Real shell defaults nest one to three deep, so anything past the
+// bound is treated as not a reference — the fail-closed direction, since the
+// value then stays subject to the literal rules.
+const MAX_SHELL_EXPANSION_NESTING = 8;
+
 function shellExpansionWord(word) {
   return (
     word === "" ||
+    word === "''" ||
+    word === '""' ||
     /^\$(?:[A-Za-z_][A-Za-z0-9_]*|[0-9])$/.test(word) ||
     shellExpansionReference(word)
   );
@@ -801,6 +817,7 @@ function shellExpansionReference(expression) {
   for (let index = 0; index < expression.length; index += 1) {
     if (expression[index] === "$" && expression[index + 1] === "{") {
       depth += 1;
+      if (depth > MAX_SHELL_EXPANSION_NESTING) return false;
       index += 1;
       continue;
     }
