@@ -94,7 +94,11 @@ that mechanism moves with it, in the same PR.
 - **Terraform stack registry.** `terraform.stacks.json` `changedPathPatterns`
   pins exact `scripts/` paths per stack, mirrored into those filters.
 - **Trusted-validator probes.** `pr-description.yml` runs the validator from the
-  PR's base ref, so a move probes both paths. ADR 0064 has the failure mode.
+  PR's base ref via the base branch **name**, so it always resolves to the base
+  branch's current tip — never a snapshot from when a PR branched. One probe
+  path is enough once the target path is live on the base branch (issue 1904);
+  a move still needs a temporary dual probe for the commit that performs it.
+  ADR 0064 has the failure mode.
 - **Production infrastructure contract pins.**
   `production-infra-identity-contract/workflow-inventory.mjs` pins exact script
   paths for the workflows it audits.
