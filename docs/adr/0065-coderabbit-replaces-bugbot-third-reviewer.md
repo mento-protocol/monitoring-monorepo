@@ -20,11 +20,14 @@ garden_lane: adrs-architecture
 
 Every PR gets three AI reviewers: Cursor BugBot (`cursor[bot]`), OpenAI Codex
 (`chatgpt-codex-connector[bot]`), and Claude Code (`claude[bot]`), plus a local
-pre-push Codex autoreview. BugBot is advisory only: it is not a required check
-and no gate consumes its output (ADR 0007; the dependabot auto-merge flow cites
-it as a risk-summary source only). Codex and Claude run on subscriptions the
-team already pays for other reasons. BugBot is the only reviewer with its own
-bill.
+pre-push Codex autoreview. BugBot is advisory only for CI status: its check is
+not required and its lag does not block (ADR 0007). Its comment content is not
+fully advisory, though — `pr:feedback-state` treats `BUGBOT_BUG_ID` as an
+actionable marker and blocks `pr:ready-state` until every flagged comment is
+answered (`scripts/pr-feedback-state-core.mjs`); the dependabot auto-merge flow
+separately cites BugBot's risk summary as advisory only. Codex and Claude run
+on subscriptions the team already pays for other reasons. BugBot is the only
+reviewer with its own bill.
 
 That bill changed shape. Cursor announced on 2026-05-11 (effective at each
 customer's first renewal after 2026-06-08) that BugBot dropped its flat
@@ -112,7 +115,9 @@ Replace BugBot with CodeRabbit as the third advisory reviewer.
    (severity/marker regexes — `BUGBOT_BUG_ID` retires, CodeRabbit's markers
    enter), `scripts/pr-ready-state-core.mjs`, `scripts/pr/review-process-metrics.mjs`,
    their tests, `docs/notes/pr-ready-state.md`,
-   `docs/pr-checklists/ci-workflow-gates.md`, and the comment in
+   `docs/pr-checklists/ci-workflow-gates.md`,
+   `docs/adr/0007-agent-quality-gate-and-merge-oracle.md` (its "Advisory bot
+   lag (for example, Cursor)" line goes stale), and the comment in
    `.github/workflows/dependabot-auto-merge.yml`.
 5. **Measure.** Run `scripts/pr/review-process-metrics.mjs` on before/after
    cohorts and re-check the fixed/won't-fix reply ratio per bot after ~40
@@ -164,9 +169,11 @@ Replace BugBot with CodeRabbit as the third advisory reviewer.
 - The open-source tier's rate limits are unverified until install. The
   parallel-run window exists to observe them under this repo's bursty,
   multi-round load before BugBot is switched off.
-- Ten files reference `cursor[bot]`/BugBot and change in the cutover PR (list
-  under Decision). `pr:feedback-state` severity regexes keyed on
-  `BUGBOT_BUG_ID` retire with it.
+- The cutover PR must sweep every live `cursor[bot]`/BugBot reference — the
+  step-4 list above, re-verified by grep at cutover time rather than a fixed
+  count, since references have already drifted once during this ADR's own
+  review. `pr:feedback-state` severity regexes keyed on `BUGBOT_BUG_ID` retire
+  with it.
 - Watch item: `claude[bot]` review currently rides existing Max
   subscription spend. Anthropic's separate metered "Code Review" product bills
   $15–25/review — ruinous at this volume. If the GitHub Action review path is
