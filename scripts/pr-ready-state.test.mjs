@@ -2182,6 +2182,108 @@ test("compact output includes readiness counters and Codex signal state", () => 
   assert(output.includes("overrides=0"), output);
 });
 
+// --- CodeRabbit advisory check context (ADR 0066) --------------------------
+
+test("splits the CodeRabbit check into optional lag alongside Cursor Bugbot", () => {
+  const split = splitRequiredAndOptionalChecks([
+    { name: "Code Quality", status: "COMPLETED", conclusion: "SUCCESS" },
+    // Observed shape: CodeRabbit's context PASSES with "Review rate limited"
+    // when no review ran. A pass here is not a review signal.
+    { name: "CodeRabbit", status: "COMPLETED", conclusion: "SUCCESS" },
+    { name: "Cursor Bugbot", status: "IN_PROGRESS", conclusion: null },
+    { name: "GraphQL schema diff", status: "IN_PROGRESS", conclusion: null },
+    { name: "jscpd", status: "IN_PROGRESS", conclusion: null },
+  ]);
+
+  assertDeepEqual(
+    {
+      required: split.required.map((check) => `${check.name}:${check.state}`),
+      optional: split.optional.map((check) => `${check.name}:${check.state}`),
+    },
+    {
+      required: ["Code Quality:pass"],
+      optional: [
+        "CodeRabbit:pass",
+        "Cursor Bugbot:pending",
+        "GraphQL schema diff:pending",
+        "jscpd:pending",
+      ],
+    },
+  );
+});
+
+test("honors branch protection when it makes the CodeRabbit check required", () => {
+  const split = splitRequiredAndOptionalChecks(
+    [
+      { name: "CodeRabbit", status: "IN_PROGRESS", conclusion: null },
+      { name: "Cursor Bugbot", status: "IN_PROGRESS", conclusion: null },
+    ],
+    ["CodeRabbit"],
+  );
+
+  assertDeepEqual(
+    {
+      required: split.required.map((check) => `${check.name}:${check.state}`),
+      optional: split.optional.map((check) => `${check.name}:${check.state}`),
+    },
+    {
+      required: ["CodeRabbit:pending"],
+      optional: ["Cursor Bugbot:pending"],
+    },
+  );
+});
+
+test("never awaits a pending CodeRabbit check for readiness", () => {
+  const summary = summarizeReadyState({
+    pr: {
+      ...basePr,
+      statusCheckRollup: [
+        { name: "lint", conclusion: "SUCCESS", status: "COMPLETED" },
+        { name: "CodeRabbit", conclusion: null, status: "IN_PROGRESS" },
+      ],
+    },
+    reactions: [
+      {
+        content: "+1",
+        created_at: "2026-05-21T13:23:00Z",
+        user: { login: "chatgpt-codex-connector[bot]" },
+      },
+    ],
+    reviewComments: [],
+    reviewThreads: [],
+  });
+
+  assertEqual(summary.ready, true);
+  assertEqual(summary.required.ready, true);
+  assertEqual(summary.optional.ready, false);
+  assertEqual(summary.optional.items[0].name, "CodeRabbit");
+});
+
+test("a passing CodeRabbit check does not clear a real required blocker", () => {
+  // The rate-limit failure mode: CodeRabbit's context passes without reviewing
+  // anything, so it must not move the required verdict in either direction.
+  const summary = summarizeReadyState({
+    pr: {
+      ...basePr,
+      statusCheckRollup: [
+        { name: "CodeRabbit", conclusion: "SUCCESS", status: "COMPLETED" },
+        { name: "ci", conclusion: "FAILURE", status: "COMPLETED" },
+      ],
+    },
+    reactions: [],
+  });
+
+  assertEqual(summary.ready, false);
+  assert(
+    summary.required.blockers.some((blocker) => blocker.name === "ci"),
+    "expected the failing required check to remain a blocker",
+  );
+  assert(
+    !summary.required.blockers.some((blocker) => blocker.name === "CodeRabbit"),
+    "CodeRabbit must never appear as a required blocker by default",
+  );
+});
+
 if (failed > 0) {
   process.stderr.write(`\n${failed} failed, ${passed} passed\n`);
   process.exit(1);
