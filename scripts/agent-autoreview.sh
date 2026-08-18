@@ -6471,6 +6471,36 @@ EOF
     exit 1
   fi
 
+  # `git_output` pins `-c diff.renames=false`, so every capture below states its
+  # own rename policy instead of inheriting one. The patch and stat captures pass
+  # `--find-renames` at Git's default similarity floor, which overrides that pin:
+  # a bulk move otherwise renders as delete+add pairs and deterministically
+  # exhausts the capture budget, and a stat that disagreed with its own patch
+  # would misreport the change. Git elides content only at similarity index 100%,
+  # a byte-identical relocation of already-reviewed content, and rename detection
+  # pairs an added path only with a deleted one, so nothing new hides behind a
+  # header. Any edit still emits its hunks, which stay reviewable and reach the
+  # helper's secret scanner. `--no-ext-diff --no-textconv` still pin the payload
+  # to Git's own plain text.
+  #
+  # `-l5000` owns the rename candidate limit, which `diff.renameLimit` in the
+  # reviewed repository's own config would otherwise set. Git's exact and
+  # basename passes ignore that limit, but a move that changes a basename and
+  # edits the file needs the exhaustive pass, which Git skips past 1,000
+  # candidates even by default; skipping it restores the delete+add blowup this
+  # block exists to prevent. The pin stays finite because that pass runs before
+  # any byte reaches the capture limiter, so it is the one stage no output bound
+  # can cut short, and it is quadratic in candidate count. 5,000 is more than
+  # twice this repository's whole tracked tree and costs about 74 seconds at its
+  # own ceiling, measured on 50 KB blobs that defeat both cheap passes; the same
+  # change without detection produces 272 MB. Past the pin, Git says on stderr
+  # that it skipped detection and these captures fall back to delete+add pairs,
+  # which review correctly and either fit the budget or fail it by its own
+  # message. Nothing here treats that stderr as a capture failure.
+  #
+  # The changed-path captures keep the `diff.renames=false` pin on purpose: they
+  # feed the sensitive-path refusal and checklist routing, which must still see
+  # the path a move leaves behind.
   case "$target_mode" in
     local)
       capture_output_file "$staging_dir/git-status.txt" "git status" 0 \
@@ -6478,13 +6508,13 @@ EOF
       capture_output_file "$staging_dir/changed-paths.txt" "changed paths" 0 \
         emit_local_changed_paths "$repo" "$frozen_head_oid"
       capture_output_file "$staging_dir/patches/staged.stat" "staged diff stat" 0 \
-        git_output "$repo" diff --cached --stat --no-ext-diff --no-textconv "$frozen_head_oid" --
+        git_output "$repo" diff --cached --stat --find-renames -l5000 --no-ext-diff --no-textconv "$frozen_head_oid" --
       capture_output_file "$staging_dir/patches/staged.diff" "staged diff" 0 \
-        git_output "$repo" diff --cached --patch --no-renames --no-ext-diff --no-textconv "$frozen_head_oid" --
+        git_output "$repo" diff --cached --patch --find-renames -l5000 --no-ext-diff --no-textconv "$frozen_head_oid" --
       capture_output_file "$staging_dir/patches/unstaged.stat" "unstaged diff stat" 0 \
-        git_output "$repo" diff --stat --no-ext-diff --no-textconv
+        git_output "$repo" diff --stat --find-renames -l5000 --no-ext-diff --no-textconv
       capture_output_file "$staging_dir/patches/unstaged.diff" "unstaged diff" 0 \
-        git_output "$repo" diff --patch --no-renames --no-ext-diff --no-textconv
+        git_output "$repo" diff --patch --find-renames -l5000 --no-ext-diff --no-textconv
       capture_output_file "$staging_dir/patches/untracked-paths.txt" "untracked paths" 0 \
         emit_untracked_paths "$repo"
       capture_untracked_files \
@@ -6496,9 +6526,9 @@ EOF
       capture_output_file "$staging_dir/changed-paths.txt" "changed paths" 0 \
         emit_branch_changed_paths "$repo" "$target_ref" "$frozen_head_oid"
       capture_output_file "$staging_dir/patches/branch.stat" "branch diff stat" 0 \
-        git_output "$repo" diff --stat --no-ext-diff --no-textconv "$target_ref...$frozen_head_oid" --
+        git_output "$repo" diff --stat --find-renames -l5000 --no-ext-diff --no-textconv "$target_ref...$frozen_head_oid" --
       capture_output_file "$staging_dir/patches/branch.diff" "branch diff" 0 \
-        git_output "$repo" diff --patch --no-renames --no-ext-diff --no-textconv "$target_ref...$frozen_head_oid" --
+        git_output "$repo" diff --patch --find-renames -l5000 --no-ext-diff --no-textconv "$target_ref...$frozen_head_oid" --
       ;;
     branch-local)
       capture_output_file "$staging_dir/git-status.txt" "git status" 0 \
@@ -6506,17 +6536,17 @@ EOF
       capture_output_file "$staging_dir/changed-paths.txt" "changed paths" 0 \
         emit_branch_local_changed_paths "$repo" "$target_ref" "$frozen_head_oid"
       capture_output_file "$staging_dir/patches/branch.stat" "branch diff stat" 0 \
-        git_output "$repo" diff --stat --no-ext-diff --no-textconv "$target_ref...$frozen_head_oid" --
+        git_output "$repo" diff --stat --find-renames -l5000 --no-ext-diff --no-textconv "$target_ref...$frozen_head_oid" --
       capture_output_file "$staging_dir/patches/branch.diff" "branch diff" 0 \
-        git_output "$repo" diff --patch --no-renames --no-ext-diff --no-textconv "$target_ref...$frozen_head_oid" --
+        git_output "$repo" diff --patch --find-renames -l5000 --no-ext-diff --no-textconv "$target_ref...$frozen_head_oid" --
       capture_output_file "$staging_dir/patches/staged.stat" "staged diff stat" 0 \
-        git_output "$repo" diff --cached --stat --no-ext-diff --no-textconv "$frozen_head_oid" --
+        git_output "$repo" diff --cached --stat --find-renames -l5000 --no-ext-diff --no-textconv "$frozen_head_oid" --
       capture_output_file "$staging_dir/patches/staged.diff" "staged diff" 0 \
-        git_output "$repo" diff --cached --patch --no-renames --no-ext-diff --no-textconv "$frozen_head_oid" --
+        git_output "$repo" diff --cached --patch --find-renames -l5000 --no-ext-diff --no-textconv "$frozen_head_oid" --
       capture_output_file "$staging_dir/patches/unstaged.stat" "unstaged diff stat" 0 \
-        git_output "$repo" diff --stat --no-ext-diff --no-textconv
+        git_output "$repo" diff --stat --find-renames -l5000 --no-ext-diff --no-textconv
       capture_output_file "$staging_dir/patches/unstaged.diff" "unstaged diff" 0 \
-        git_output "$repo" diff --patch --no-renames --no-ext-diff --no-textconv
+        git_output "$repo" diff --patch --find-renames -l5000 --no-ext-diff --no-textconv
       capture_output_file "$staging_dir/patches/untracked-paths.txt" "untracked paths" 0 \
         emit_untracked_paths "$repo"
       capture_untracked_files \
@@ -6528,9 +6558,9 @@ EOF
       capture_output_file "$staging_dir/changed-paths.txt" "changed paths" 0 \
         emit_commit_changed_paths "$repo" "$target_ref"
       capture_output_file "$staging_dir/patches/commit.stat" "commit diff stat" 0 \
-        git_output "$repo" show --stat --no-ext-diff --no-textconv --format=fuller "$target_ref"
+        git_output "$repo" show --stat --find-renames -l5000 --no-ext-diff --no-textconv --format=fuller "$target_ref"
       capture_output_file "$staging_dir/patches/commit.diff" "commit diff" 0 \
-        git_output "$repo" show --patch --no-renames --no-ext-diff --no-textconv --format=fuller "$target_ref"
+        git_output "$repo" show --patch --find-renames -l5000 --no-ext-diff --no-textconv --format=fuller "$target_ref"
       ;;
   esac
 

@@ -27,6 +27,32 @@ The direct helper and prepared-bundle adapter enforce one cumulative input
 budget while capturing diffs, untracked files, checklists, and feedback, before
 those bytes can accumulate in memory or staging sidecars.
 
+Every Git invocation pins `-c diff.renames=false`, so no capture inherits a
+rename policy from operator configuration and each one states its own. The patch
+and stat captures pass `--find-renames` at Git's default similarity floor, which
+overrides that pin: a branch that relocates many files otherwise bundles as
+delete+add pairs and exhausts the budget before analysis runs, and a stat that
+disagreed with the patch it indexes would misreport the change. Content is
+elided only at similarity index 100%, and rename detection pairs an added path
+only with a deleted one, so a header can never stand in for content the change
+introduces. A relocation carrying edits emits its hunks, which are bundled,
+chunked, and scanned like any other change; a relocated binary is reviewable
+only while it is byte-identical, and one that also changes still fails closed.
+Those captures also own the rename candidate limit as `-l5000`, because the
+reviewed repository's own config can still set `diff.renameLimit`, and a move
+that changes a basename and edits the file needs the exhaustive pass Git skips
+past 1,000 candidates even by default. The pin stays finite: that pass runs
+before any byte reaches the capture limiter and is quadratic in candidate count,
+so a change more than twice the size of the whole tracked tree says on stderr
+that detection was skipped and falls back to delete+add pairs, rather than
+stalling in Git. Those pairs still review correctly; a large enough one fails on
+the capture budget with its own message.
+The changed-path captures keep the pin, so both sides of a move stay enumerated
+for the sensitive-path refusal and checklist routing. Rename detection works
+within one diff, so a move whose two sides are split across commits has no pair
+to find: review that branch in branch mode, where both sides sit in the same
+diff.
+
 For a real review, the helper resolves a symbolic branch base or commit target
 once to an immutable object ID. Direct `--dry-run` instead reports the requested
 ref without resolving or freezing it. Source fingerprints cover the symbolic

@@ -6125,6 +6125,411 @@ run_aggregate_untracked_bound_regression() {
   fi
 }
 
+# The credential fixtures below are joined from parts so this suite's own source
+# carries no credential assignment for the scanner to reject when a diff of this
+# file is reviewed.
+rename_capture_credential_line() {
+  printf 'api_key = "%s%s"\n' "live-move-" "abcdefghijklmnopqrstuvwxyz"
+}
+
+seed_rename_capture_module() {
+  local target="$1"
+  local module="$2"
+  awk -v n="$module" 'BEGIN {
+    for (j = 0; j < 700; j += 1) {
+      printf "export const value_%02d_%03d = \"payload %02d %03d abcdefghijklmnopqrstuvwxyz0123456789\";\n", n, j, n, j
+    }
+  }' >"$target"
+}
+
+seed_rename_capture_lines() {
+  local target="$1"
+  local count="$2"
+  awk -v total="$count" 'BEGIN {
+    for (j = 0; j < total; j += 1) printf "stable %04d\n", j
+  }' >"$target"
+}
+
+run_rename_capture_regressions() {
+  local review_repo="$tmp_dir/rename-capture"
+  local bundle_dir="$tmp_dir/rename-capture-bundle"
+  local bundle_output="$tmp_dir/rename-capture-prompt.md"
+  local branch_patch="$bundle_dir/patches/branch.diff"
+  local captured_bytes
+  local index
+
+  # A bulk verbatim move used to render as delete+add pairs and exhaust the
+  # capture budget before any analysis ran. Fifty modules of roughly 57 KB
+  # exceed the budget when doubled, so this fixture fails closed without rename
+  # detection and bundles compactly with it.
+  init_review_repo "$review_repo"
+  mkdir "$review_repo/flat"
+  index=0
+  while ((index < 50)); do
+    seed_rename_capture_module "$review_repo/flat/module-$index.mjs" "$index"
+    index=$((index + 1))
+  done
+  rename_capture_credential_line >>"$review_repo/flat/module-49.mjs"
+  commit_review_repo "$review_repo" init
+
+  git -C "$review_repo" switch -c bulk-move >/dev/null 2>&1
+  mkdir "$review_repo/nested"
+  index=0
+  while ((index < 50)); do
+    git -C "$review_repo" mv \
+      "flat/module-$index.mjs" \
+      "nested/module-$index.mjs"
+    index=$((index + 1))
+  done
+  printf 'export const movedAndEdited = "edit sentinel";\n' \
+    >>"$review_repo/nested/module-0.mjs"
+  commit_review_repo "$review_repo" "move modules and edit one"
+
+  run_helper_in_repo "$review_repo" \
+    --prepare-bundle-dir "$bundle_dir" \
+    --mode branch \
+    --base main \
+    --engine local
+  expect_empty_stderr
+  # Forty-nine verbatim moves carry a header and no content; the fiftieth
+  # exposes exactly its edit hunk.
+  expect_file_contains "$branch_patch" "rename from flat/module-1.mjs"
+  expect_file_contains "$branch_patch" "similarity index 100%"
+  expect_file_contains "$branch_patch" '+export const movedAndEdited'
+  expect_file_not_contains "$branch_patch" "value_01_500"
+  # A verbatim move of a file that already carried a credential-shaped line
+  # reports nothing, because the capture never restates the line.
+  expect_file_not_contains "$branch_patch" "live-move-"
+  captured_bytes="$(wc -c <"$branch_patch")"
+  captured_bytes="${captured_bytes//[[:space:]]/}"
+  if ((captured_bytes > 200000)); then
+    printf 'rename-aware branch capture is %s bytes; verbatim moves are being restated as content\n' \
+      "$captured_bytes" >&2
+    exit 1
+  fi
+
+  run_helper_in_repo "$review_repo" \
+    --mode branch \
+    --base main \
+    --engine local \
+    --prepare-only \
+    --bundle-output "$bundle_output"
+  expect_empty_stderr
+  expect_file_contains "$bundle_output" "rename from flat/module-1.mjs"
+  expect_file_contains "$bundle_output" '+export const movedAndEdited'
+  expect_file_not_contains "$bundle_output" "value_01_500"
+  expect_file_not_contains "$bundle_output" "live-move-"
+  # The stat has its own call sites and must describe the same change as the
+  # patch it indexes, not 100 separate deletions and creations.
+  expect_file_contains "$bundle_dir/patches/branch.stat" \
+    "{flat => nested}/module-1.mjs"
+
+  # The staged and unstaged captures are separate call sites in both runtimes,
+  # reached only by a local or branch-local target. A staged move must land on
+  # them too.
+  local staged_repo="$tmp_dir/rename-capture-staged"
+  local staged_bundle="$tmp_dir/rename-capture-staged-bundle"
+  local staged_output="$tmp_dir/rename-capture-staged-prompt.md"
+  init_review_repo "$staged_repo"
+  seed_rename_capture_lines "$staged_repo/legacy.txt" 200
+  rename_capture_credential_line >>"$staged_repo/legacy.txt"
+  commit_review_repo "$staged_repo" init
+  git -C "$staged_repo" mv legacy.txt moved.txt
+  run_helper_in_repo "$staged_repo" \
+    --prepare-bundle-dir "$staged_bundle" \
+    --mode local \
+    --engine local
+  expect_empty_stderr
+  expect_file_contains "$staged_bundle/patches/staged.diff" "rename from legacy.txt"
+  expect_file_not_contains "$staged_bundle/patches/staged.diff" "live-move-"
+  expect_file_contains "$staged_bundle/patches/staged.stat" "legacy.txt => moved.txt"
+  # The changed-path capture keeps both sides, so the path a move leaves behind
+  # still reaches the sensitive-path refusal and checklist routing.
+  expect_file_contains "$staged_bundle/changed-paths.txt" "legacy.txt"
+  expect_file_contains "$staged_bundle/changed-paths.txt" "moved.txt"
+  run_helper_in_repo "$staged_repo" \
+    --mode local \
+    --engine local \
+    --prepare-only \
+    --bundle-output "$staged_output"
+  expect_empty_stderr
+  expect_file_contains "$staged_output" "rename from legacy.txt"
+  expect_file_not_contains "$staged_output" "live-move-"
+  # The unstaged capture is deliberately unasserted for renames: its added side
+  # would have to be a worktree path Git already tracks, and a worktree move
+  # leaves the destination untracked, so no pair can form there. The run above
+  # still executes that capture, which is what catches a malformed flag.
+
+  # The branch-local arm has six capture lines of its own, reached only when a
+  # non-main branch is dirty.
+  local branch_local_bundle="$tmp_dir/rename-capture-branch-local-bundle"
+  git -C "$review_repo" mv \
+    nested/module-3.mjs \
+    nested/module-3-relocated.mjs
+  run_helper_in_repo "$review_repo" \
+    --prepare-bundle-dir "$branch_local_bundle" \
+    --mode auto \
+    --base main \
+    --engine local
+  expect_empty_stderr
+  expect_stdout_contains "autoreview target: branch-local"
+  expect_file_contains "$branch_local_bundle/patches/branch.diff" \
+    "rename from flat/module-1.mjs"
+  expect_file_not_contains "$branch_local_bundle/patches/branch.diff" "value_01_500"
+  expect_file_contains "$branch_local_bundle/patches/staged.diff" \
+    "rename from nested/module-3.mjs"
+  expect_file_not_contains "$branch_local_bundle/patches/staged.diff" "value_03_500"
+  expect_file_contains "$branch_local_bundle/patches/staged.stat" \
+    "nested/{module-3.mjs => module-3-relocated.mjs}"
+  git -C "$review_repo" mv \
+    nested/module-3-relocated.mjs \
+    nested/module-3.mjs
+
+  # Negative control: a move that also introduces a credential-shaped line must
+  # still fail closed. Rename detection may not become a smuggling channel.
+  local smuggle_repo="$tmp_dir/rename-capture-smuggle"
+  init_review_repo "$smuggle_repo"
+  seed_rename_capture_lines "$smuggle_repo/legacy.txt" 200
+  commit_review_repo "$smuggle_repo" init
+  git -C "$smuggle_repo" switch -c smuggle >/dev/null 2>&1
+  git -C "$smuggle_repo" mv legacy.txt moved.txt
+  rename_capture_credential_line >>"$smuggle_repo/moved.txt"
+  commit_review_repo "$smuggle_repo" "move and introduce a credential"
+  run_helper_in_repo_expect_failure "$smuggle_repo" \
+    --mode branch \
+    --base main \
+    --engine local \
+    --prepare-only \
+    --bundle-output "$tmp_dir/rename-capture-smuggle-prompt.md"
+  expect_stderr_contains "refusing to include secret-like content"
+
+  # Negative control: a verbatim move carries no content, so the content scanner
+  # has nothing to read. The path refusal is what covers a file crossing into a
+  # less trusted location, and it still sees both sides because the changed-path
+  # capture keeps the `diff.renames=false` pin.
+  local boundary_repo="$tmp_dir/rename-capture-boundary"
+  init_review_repo "$boundary_repo"
+  mkdir "$boundary_repo/private" "$boundary_repo/public"
+  rename_capture_credential_line >"$boundary_repo/private/.env.production"
+  printf 'placeholder\n' >"$boundary_repo/public/readme.txt"
+  commit_review_repo "$boundary_repo" init
+  git -C "$boundary_repo" switch -c boundary >/dev/null 2>&1
+  git -C "$boundary_repo" mv private/.env.production public/config.txt
+  commit_review_repo "$boundary_repo" "move a private file to a published path"
+  run_helper_in_repo_expect_failure "$boundary_repo" \
+    --mode branch \
+    --base main \
+    --engine local \
+    --prepare-only \
+    --bundle-output "$tmp_dir/rename-capture-boundary-prompt.md"
+  expect_stderr_contains "refusing to include sensitive changed paths"
+  expect_stderr_contains "private/.env.production"
+
+  # Negative control: a similarity-gamed move — thousands of identical lines
+  # plus one hostile line — pairs as a rename and must still surface that line
+  # as a reviewable, scanned hunk. The pairing is asserted first, so the control
+  # cannot pass by quietly falling back to a delete+add pair.
+  local gamed_repo="$tmp_dir/rename-capture-gamed"
+  init_review_repo "$gamed_repo"
+  seed_rename_capture_lines "$gamed_repo/legacy.txt" 4000
+  commit_review_repo "$gamed_repo" init
+  git -C "$gamed_repo" switch -c gamed >/dev/null 2>&1
+  git -C "$gamed_repo" mv legacy.txt moved.txt
+  rename_capture_credential_line >>"$gamed_repo/moved.txt"
+  commit_review_repo "$gamed_repo" "gamed move"
+  if ! git -C "$gamed_repo" diff \
+    --patch --find-renames --no-ext-diff --no-textconv \
+    'main...gamed' -- |
+    grep -q '^similarity index 99%'; then
+    printf 'similarity-gamed control no longer pairs as a rename; it stopped exercising rename capture\n' >&2
+    exit 1
+  fi
+  run_helper_in_repo_expect_failure "$gamed_repo" \
+    --mode branch \
+    --base main \
+    --engine local \
+    --prepare-only \
+    --bundle-output "$tmp_dir/rename-capture-gamed-prompt.md"
+  expect_stderr_contains "refusing to include secret-like content"
+
+  # The reviewed repository's own config still reaches Git, and a rename
+  # candidate limit there would skip the exhaustive pass that pairs a move which
+  # changes a basename and edits the file. `-l5000` owns it. The fixture asserts
+  # that Git really would skip without the flag, so the control cannot pass on a
+  # limit that never bites.
+  local limited_repo="$tmp_dir/rename-capture-limited"
+  local limited_output="$tmp_dir/rename-capture-limited-prompt.md"
+  init_review_repo "$limited_repo"
+  git -C "$limited_repo" config diff.renameLimit 1
+  mkdir "$limited_repo/flat"
+  index=0
+  while ((index < 6)); do
+    seed_rename_capture_lines "$limited_repo/flat/old-$index.txt" 200
+    printf 'module %s\n' "$index" >>"$limited_repo/flat/old-$index.txt"
+    index=$((index + 1))
+  done
+  commit_review_repo "$limited_repo" init
+  git -C "$limited_repo" switch -c limited >/dev/null 2>&1
+  mkdir "$limited_repo/nested"
+  index=0
+  while ((index < 6)); do
+    git -C "$limited_repo" mv \
+      "flat/old-$index.txt" \
+      "nested/renamed-$index.txt"
+    printf 'edited tail %s\n' "$index" \
+      >>"$limited_repo/nested/renamed-$index.txt"
+    index=$((index + 1))
+  done
+  commit_review_repo "$limited_repo" "rename and edit every module"
+  if git -C "$limited_repo" diff \
+    --patch --find-renames --no-ext-diff --no-textconv \
+    'main...limited' -- 2>/dev/null |
+    grep -q '^rename from '; then
+    printf 'rename-limit control no longer suppresses detection without an owned -l; it stopped proving anything\n' >&2
+    exit 1
+  fi
+  run_helper_in_repo "$limited_repo" \
+    --mode branch \
+    --base main \
+    --engine local \
+    --prepare-only \
+    --bundle-output "$limited_output"
+  expect_empty_stderr
+  expect_file_contains "$limited_output" "rename from flat/old-3.txt"
+  local limited_bundle="$tmp_dir/rename-capture-limited-bundle"
+  run_helper_in_repo "$limited_repo" \
+    --prepare-bundle-dir "$limited_bundle" \
+    --mode branch \
+    --base main \
+    --engine local
+  expect_empty_stderr
+  expect_file_contains "$limited_bundle/patches/branch.diff" \
+    "rename from flat/old-3.txt"
+
+  # A binary move keeps the same rule: a verbatim relocation has no content to
+  # review, and a binary that actually changes still fails closed.
+  local binary_repo="$tmp_dir/rename-capture-binary"
+  init_review_repo "$binary_repo"
+  head -c 4096 /dev/urandom >"$binary_repo/blob.bin"
+  commit_review_repo "$binary_repo" init
+  git -C "$binary_repo" switch -c binary-move >/dev/null 2>&1
+  git -C "$binary_repo" mv blob.bin moved.bin
+  commit_review_repo "$binary_repo" "move a binary verbatim"
+  run_helper_in_repo "$binary_repo" \
+    --mode branch \
+    --base main \
+    --engine local \
+    --prepare-only \
+    --bundle-output "$tmp_dir/rename-capture-binary-prompt.md"
+  expect_empty_stderr
+  # A verbatim relocation carries no bytes to review, but a mode change is not
+  # content: Git states it on the rename header, so a binary that lands in an
+  # executable position stays visible to the reviewer.
+  local mode_repo="$tmp_dir/rename-capture-binary-mode"
+  local mode_output="$tmp_dir/rename-capture-binary-mode-prompt.md"
+  init_review_repo "$mode_repo"
+  head -c 4096 /dev/urandom >"$mode_repo/blob.bin"
+  commit_review_repo "$mode_repo" init
+  git -C "$mode_repo" switch -c binary-mode >/dev/null 2>&1
+  mkdir "$mode_repo/hooks"
+  git -C "$mode_repo" mv blob.bin hooks/blob.bin
+  chmod +x "$mode_repo/hooks/blob.bin"
+  commit_review_repo "$mode_repo" "move a binary into hooks and make it executable"
+  run_helper_in_repo "$mode_repo" \
+    --mode branch \
+    --base main \
+    --engine local \
+    --prepare-only \
+    --bundle-output "$mode_output"
+  expect_empty_stderr
+  expect_file_contains "$mode_output" "rename to hooks/blob.bin"
+  expect_file_contains "$mode_output" "new mode 100755"
+
+  head -c 4096 /dev/urandom >>"$binary_repo/moved.bin"
+  commit_review_repo "$binary_repo" "change the binary"
+  run_helper_in_repo_expect_failure "$binary_repo" \
+    --mode branch \
+    --base main \
+    --engine local \
+    --prepare-only \
+    --bundle-output "$tmp_dir/rename-capture-binary-changed-prompt.md"
+  expect_stderr_contains "refusing binary changes"
+}
+
+run_moved_content_rescan_regressions() {
+  local atomic_repo="$tmp_dir/moved-content-atomic"
+  local split_repo="$tmp_dir/moved-content-split"
+
+  # A commit that moves a file carrying a credential-shaped line used to abort
+  # per-commit review: the delete side restated content the repository already
+  # held. Pairing the two sides inside the commit removes that false positive.
+  init_review_repo "$atomic_repo"
+  seed_rename_capture_lines "$atomic_repo/legacy.txt" 200
+  rename_capture_credential_line >>"$atomic_repo/legacy.txt"
+  commit_review_repo "$atomic_repo" init
+  git -C "$atomic_repo" switch -c atomic-move >/dev/null 2>&1
+  git -C "$atomic_repo" mv legacy.txt moved.txt
+  commit_review_repo "$atomic_repo" "move the file in one commit"
+  run_helper_in_repo "$atomic_repo" \
+    --mode commit \
+    --commit HEAD \
+    --engine local \
+    --prepare-only \
+    --bundle-output "$tmp_dir/moved-content-atomic-prompt.md"
+  expect_empty_stderr
+  expect_file_contains "$tmp_dir/moved-content-atomic-prompt.md" \
+    "rename from legacy.txt"
+  expect_file_not_contains "$tmp_dir/moved-content-atomic-prompt.md" \
+    "live-move-"
+  # The wrapper's own commit-mode captures are separate call sites from the
+  # helper's, so they get their own assertion rather than riding on the prompt.
+  local atomic_bundle="$tmp_dir/moved-content-atomic-bundle"
+  run_helper_in_repo "$atomic_repo" \
+    --prepare-bundle-dir "$atomic_bundle" \
+    --mode commit \
+    --commit HEAD \
+    --engine local
+  expect_empty_stderr
+  expect_file_contains "$atomic_bundle/patches/commit.diff" "rename from legacy.txt"
+  expect_file_not_contains "$atomic_bundle/patches/commit.diff" "live-move-"
+  expect_file_contains "$atomic_bundle/patches/commit.stat" "legacy.txt => moved.txt"
+
+  # Residue pinned by issue 1931: when the added copy landed in an earlier
+  # commit, the deleting commit holds no added path for Git to pair with, so
+  # the restated content still reaches the scanner and per-commit review of that
+  # commit still fails closed. Rename detection is per diff and cannot reach
+  # across commits. Review such a branch in branch mode, where both sides are in
+  # one diff. Assert the current behavior so a future fix has to change this
+  # test deliberately.
+  init_review_repo "$split_repo"
+  seed_rename_capture_lines "$split_repo/legacy.txt" 200
+  rename_capture_credential_line >>"$split_repo/legacy.txt"
+  commit_review_repo "$split_repo" init
+  git -C "$split_repo" switch -c split-move >/dev/null 2>&1
+  cp "$split_repo/legacy.txt" "$split_repo/moved.txt"
+  commit_review_repo "$split_repo" "add the copy at its new path"
+  git -C "$split_repo" rm -q legacy.txt
+  commit_review_repo "$split_repo" "remove the original path"
+  run_helper_in_repo_expect_failure "$split_repo" \
+    --mode commit \
+    --commit HEAD \
+    --engine local \
+    --prepare-only \
+    --bundle-output "$tmp_dir/moved-content-split-prompt.md"
+  expect_stderr_contains "refusing to include secret-like content"
+  run_helper_in_repo "$split_repo" \
+    --mode branch \
+    --base main \
+    --engine local \
+    --prepare-only \
+    --bundle-output "$tmp_dir/moved-content-split-branch-prompt.md"
+  expect_empty_stderr
+  expect_file_contains "$tmp_dir/moved-content-split-branch-prompt.md" \
+    "rename from legacy.txt"
+  expect_file_not_contains "$tmp_dir/moved-content-split-branch-prompt.md" \
+    "live-move-"
+}
+
 run_bundle_output_deferred_regression() {
   local review_repo="$tmp_dir/bundle-output-deferred"
   local fake_bin="$tmp_dir/bundle-output-deferred-bin"
@@ -6936,6 +7341,8 @@ run_bundle_integrity_family() {
   run_feedback_runtime_aggregate_regression
   run_large_untracked_bound_regression
   run_aggregate_untracked_bound_regression
+  run_rename_capture_regressions
+  run_moved_content_rescan_regressions
   run_bundle_output_deferred_regression
   run_sensitive_input_regressions
   run_attested_untracked_serializer_regression

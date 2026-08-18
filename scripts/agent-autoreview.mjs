@@ -2268,6 +2268,17 @@ function aggregateInputLimitError(label) {
   return error;
 }
 
+// `runGitBufferResult` pins `-c diff.renames=false`, so every stat and patch
+// below overrides it with `--find-renames` at Git's default similarity floor,
+// for the reason the wrapper's capture block records: a bulk move otherwise
+// renders as delete+add pairs and deterministically exhausts the aggregate
+// limit. Git elides content only at similarity index 100%, and pairs an added
+// path only with a deleted one, so a rename header can never stand in for
+// content this branch introduces. A rename carrying edits still emits its
+// hunks, so they are bundled, chunked, and scanned exactly like any other
+// change. `-l5000` owns the rename candidate limit, finite for the reason the
+// wrapper's capture block records. `changedPaths` keeps the pin, so a move's
+// source path still reaches the sensitive-path refusal.
 function gitBundlePart(collector, label, repo, gitArgs) {
   const maxBuffer = Math.max(
     1024,
@@ -2296,6 +2307,8 @@ function appendLocalBundle(repo, target, collector) {
     "--cached",
     target.head,
     "--stat",
+    "--find-renames",
+    "-l5000",
     "--",
   ]);
   gitBundlePart(collector, "staged diff", repo, [
@@ -2305,7 +2318,8 @@ function appendLocalBundle(repo, target, collector) {
     "--cached",
     target.head,
     "--patch",
-    "--no-renames",
+    "--find-renames",
+    "-l5000",
     "--",
   ]);
   collector.add("unstaged diff heading", "# Unstaged Diff");
@@ -2314,13 +2328,16 @@ function appendLocalBundle(repo, target, collector) {
     "--no-ext-diff",
     "--no-textconv",
     "--stat",
+    "--find-renames",
+    "-l5000",
   ]);
   gitBundlePart(collector, "unstaged diff", repo, [
     "diff",
     "--no-ext-diff",
     "--no-textconv",
     "--patch",
-    "--no-renames",
+    "--find-renames",
+    "-l5000",
   ]);
   const untracked = gitPathList(repo, [
     "ls-files",
@@ -2364,6 +2381,8 @@ function appendBranchBundle(repo, target, collector) {
     "--no-ext-diff",
     "--no-textconv",
     "--stat",
+    "--find-renames",
+    "-l5000",
     `${target.ref}...${target.head}`,
     "--",
   ]);
@@ -2372,7 +2391,8 @@ function appendBranchBundle(repo, target, collector) {
     "--no-ext-diff",
     "--no-textconv",
     "--patch",
-    "--no-renames",
+    "--find-renames",
+    "-l5000",
     `${target.ref}...${target.head}`,
     "--",
   ]);
@@ -2401,6 +2421,8 @@ function commitBundle(repo, commitRef) {
     "--no-ext-diff",
     "--no-textconv",
     "--stat",
+    "--find-renames",
+    "-l5000",
     "--format=fuller",
     "--end-of-options",
     commitRef,
@@ -2411,7 +2433,8 @@ function commitBundle(repo, commitRef) {
     "--no-ext-diff",
     "--no-textconv",
     "--patch",
-    "--no-renames",
+    "--find-renames",
+    "-l5000",
     "--format=fuller",
     "--end-of-options",
     commitRef,
