@@ -2,7 +2,10 @@
 // only from this route's `opengraph-image`. Deliberately NOT using `import
 // "server-only"` — that guard throws under the vitest environment.
 import { unstable_cache } from "next/cache";
-import { classifyPegMonitoringState } from "@/lib/peg-monitoring";
+import {
+  classifyPegMonitoringState,
+  usesPreviousPolicy,
+} from "@/lib/peg-monitoring";
 import {
   presentPegMonitoring,
   type PegAssetPresentation,
@@ -125,9 +128,7 @@ export function buildPegMonitoringOgData(
   const presentation = presentPegMonitoring(data, {
     nowMs,
     packageIsStale: stale,
-    usesPreviousPolicy:
-      data.policySlot === "previous" ||
-      data.producedPolicyVersion !== data.approvedActivePolicyVersion,
+    usesPreviousPolicy: usesPreviousPolicy(data),
   });
   const ordered = sortBoardRows(presentation.assets);
   const summary = boardSummary(presentation);

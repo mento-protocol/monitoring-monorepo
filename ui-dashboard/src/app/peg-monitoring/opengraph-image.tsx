@@ -144,6 +144,7 @@ function Rail({ row, height }: { row: PegOgRow; height: number }) {
       {marker === null ? null : marker.offScale ? (
         <OffScaleMarker below={marker.percent < 50} size={dotSize} />
       ) : (
+        // react-doctor-disable-next-line react-doctor/no-inline-exhaustive-style
         <div
           style={{
             position: "absolute",
@@ -180,6 +181,7 @@ function OffScaleMarker({ below, size }: { below: boolean; size: number }) {
     <span style={{ fontSize: 22, color: RED_TEXT }}>{below ? "«" : "»"}</span>
   );
   return (
+    // react-doctor-disable-next-line react-doctor/no-inline-exhaustive-style
     <div
       style={{
         display: "flex",
@@ -383,6 +385,7 @@ function TileStats({ row, scale }: { row: PegOgRow; scale: TileScale }) {
 function Tile({ row, compact }: { row: PegOgRow; compact: boolean }) {
   const scale = tileScale(compact);
   return (
+    // react-doctor-disable-next-line react-doctor/no-inline-exhaustive-style
     <div
       style={{
         display: "flex",
@@ -618,6 +621,7 @@ function Card({ data }: { data: PegMonitoringOgData | null }) {
   // amber so a fetch failure never reads as a confirmed breach.
   const tone: PegBoardTone = data?.tone ?? "uncertain";
   return (
+    // react-doctor-disable-next-line react-doctor/no-inline-exhaustive-style
     <div
       style={{
         display: "flex",
