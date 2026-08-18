@@ -93,6 +93,53 @@ describe("railTicks", () => {
     expect(positions).toEqual([...positions].sort((a, b) => a - b));
   });
 
+  it("keeps TARGET when a tight policy crowds the centre of the rail", () => {
+    // A 10 bps critical sits 8.3% from centre — inside a label width. Filtering
+    // in candidate order dropped TARGET itself here, leaving a rail that
+    // labelled a threshold but not the target it deviates from.
+    const labels = railTicks({
+      downsideWarn: 5,
+      downsideCritical: 10,
+      premiumWarn: 25,
+    }).map((tick) => tick.label);
+
+    expect(labels).toContain("TARGET");
+    expect(labels).toContain("warn +25");
+  });
+
+  it("never drops TARGET at any policy the schema allows", () => {
+    for (const downsideCritical of [1, 5, 10, 25, 50, 59]) {
+      for (const downsideWarn of [1, 5, 10, 25, 50]) {
+        for (const premiumWarn of [1, 10, 25, 59]) {
+          const labels = railTicks({
+            downsideWarn,
+            downsideCritical,
+            premiumWarn,
+          }).map((tick) => tick.label);
+          expect(labels).toContain("TARGET");
+        }
+      }
+    }
+  });
+
+  it("never emits two labels closer than a label width apart", () => {
+    for (const downsideCritical of [1, 5, 10, 25, 50, 59]) {
+      for (const downsideWarn of [1, 5, 10, 25, 50]) {
+        const positions = railTicks({
+          downsideWarn,
+          downsideCritical,
+          premiumWarn: 25,
+        }).map((tick) => tick.at);
+        for (let i = 1; i < positions.length; i += 1) {
+          // 140px label box on the ~1024px tile rail ≈ 13.7% of the width.
+          expect(positions[i]! - positions[i - 1]!).toBeGreaterThanOrEqual(
+            (140 / 1024) * 100,
+          );
+        }
+      }
+    }
+  });
+
   it("drops a threshold outside the rail rather than clamping it", () => {
     const ticks = railTicks({
       downsideWarn: 25,

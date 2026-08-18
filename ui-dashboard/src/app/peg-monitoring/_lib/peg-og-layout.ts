@@ -52,29 +52,52 @@ export type RailTick = {
   tone: "critical" | "warn" | "target";
 };
 
-/**
- * Minimum gap between two tick centres, as a percentage of rail width. The
- * labels are centred boxes ~140px wide on a ~330–1000px rail; below this gap
- * neighbouring labels collide and print as one unreadable run.
- */
-const MIN_TICK_GAP_PERCENT = 12;
+/** Width of a tick's centred label box in `RailScale`, in px. */
+const TICK_LABEL_WIDTH = 140;
 
 /**
- * Threshold ticks for a peg's own policy, worst-first so that when two
- * thresholds sit too close to label separately the *less* severe one is the
- * one dropped. Ticks outside the ±60 bps window are dropped rather than
- * clamped: a tick is a claim about where a threshold is, and a clamped tick
- * would put that claim in the wrong place.
+ * Rail width in px inside a tile, which is the only place ticks render: the
+ * 1200px card less its 56px side padding, less the tile's own ~30px padding.
+ * Both tile scales land within 4px of this, so one constant covers them.
+ *
+ * (The table layout's rail is roughly a third of this, but it draws no ticks —
+ * an earlier version of this comment conflated the two and understated the
+ * available width.)
+ */
+const TILE_RAIL_WIDTH = 1024;
+
+/**
+ * Minimum gap between two tick centres, as a percentage of rail width, derived
+ * from the label box rather than guessed: two centred 140px boxes need at least
+ * their own width between centres or they overlap and print as one run.
+ */
+const MIN_TICK_GAP_PERCENT = (TICK_LABEL_WIDTH / TILE_RAIL_WIDTH) * 100;
+
+/**
+ * Threshold ticks for a peg's own policy.
+ *
+ * `TARGET` is reserved before anything else is considered: it is the rail's
+ * reference point, and a rail that labels a threshold but not the target it
+ * deviates from is unreadable. A tight policy makes this reachable — with a
+ * 10 bps critical the critical tick lands 8.3% from centre, and filtering it
+ * in candidate order dropped `TARGET` itself.
+ *
+ * Policy ticks then compete for the remaining room worst-first, so when two
+ * sit closer than a label width the *less* severe one is dropped. Ticks
+ * outside the ±60 bps window are dropped rather than clamped: a tick is a
+ * claim about where a threshold is, and a clamped tick would put that claim in
+ * the wrong place. A dropped label never hides the threshold itself — the
+ * gradient still changes colour at that exact point.
  */
 export function railTicks(thresholds: PegOgRow["thresholds"]): RailTick[] {
-  const candidates = (
+  const target: RailTick = { at: 50, label: "TARGET", tone: "target" };
+  const policy = (
     [
       {
         at: railPercent(-thresholds.downsideCritical),
         label: `critical −${thresholds.downsideCritical}`,
         tone: "critical",
       },
-      { at: 50, label: "TARGET", tone: "target" },
       {
         at: railPercent(-thresholds.downsideWarn),
         label: `warn −${thresholds.downsideWarn}`,
@@ -88,8 +111,8 @@ export function railTicks(thresholds: PegOgRow["thresholds"]): RailTick[] {
     ] satisfies RailTick[]
   ).filter((tick) => tick.at >= 0 && tick.at <= 100);
 
-  const kept: RailTick[] = [];
-  for (const tick of candidates) {
+  const kept: RailTick[] = [target];
+  for (const tick of policy) {
     const collides = kept.some(
       (placed) => Math.abs(placed.at - tick.at) < MIN_TICK_GAP_PERCENT,
     );
