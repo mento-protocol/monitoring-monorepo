@@ -11,11 +11,11 @@ const RAIL_GREEN = "rgba(30,204,9,0.25)";
  * threshold where it is not, while `railGradient` clamps them, since a band
  * edge past the rail just means that zone fills to the end.
  */
-export function railPercent(bps: number): number {
+function railPercent(bps: number): number {
   return 50 + (bps / PEG_RAIL_SCALE_BPS) * 50;
 }
 
-export function clampPercent(percent: number): number {
+function clampPercent(percent: number): number {
   return Math.min(100, Math.max(0, percent));
 }
 
