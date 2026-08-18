@@ -6088,7 +6088,20 @@ select_checklists() {
     esac
 
     case "$path" in
-      terraform/*|aegis/terraform/*|alerts/rules/*|scripts/deploy-*.sh)
+      # `scripts/*/deploy-*.sh` is the paired one-level arm ADR 0064 requires
+      # next to a literal-prefix glob: `scripts/deploy-*.sh` stops matching a
+      # wrapper that moves into `scripts/deploy/`, and the review silently loses
+      # the Terraform/Cloud Run checklist rather than failing. `*` matches `/`
+      # in a `case` pattern, so the pair reaches every depth. Shell-only, like
+      # the set it widens: the deploy helpers written in Node (indexer perf,
+      # verify, runtime-log filter) drive Envio, own no Cloud Run or Terraform
+      # surface, and are not routed this checklist today.
+      #
+      # The pair also reaches a `deploy-*.sh` basename under any other scripts/
+      # subdirectory, today `scripts/lib/deploy-guard.sh`. Intended and pinned
+      # in the suite: that guard is what `deploy-bridge.sh` sources before it
+      # mutates Cloud Run, so a review of it is a review of that deploy path.
+      terraform/*|aegis/terraform/*|alerts/rules/*|scripts/deploy-*.sh|scripts/*/deploy-*.sh)
         candidate="$(add_checklist "$repo" "docs/pr-checklists/terraform-cloudrun.md" "$source_ref" "${checklists[@]+"${checklists[@]}"}" || true)"
         [[ -n "$candidate" ]] && checklists+=("$candidate")
         ;;

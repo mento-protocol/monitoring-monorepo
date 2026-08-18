@@ -3,7 +3,7 @@ title: scripts/ may use module subdirectories; basenames and pinned paths are th
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-17
+last_verified: 2026-08-18
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -62,6 +62,27 @@ already carries the paired arm `scripts/*/sentry-*.test.mjs` next to
 all 53 `sentry-*` files wherever they land, keep the `deploy-` prefix on the
 deploy wrappers, and add the paired one-level arm whenever a literal-prefix glob
 is the routing.
+
+Both deploy arms now carry that pair, added ahead of the move rather than with
+it: `scripts/deploy-*.sh|scripts/*/deploy-*.sh` routes the root-anchor check in
+`agent-quality-gate.sh`, and the same pair routes the Terraform/Cloud Run
+checklist in `select_checklists()` in `agent-autoreview.sh`. Both stay
+shell-scoped. The check behind the first has a `deploy-*.sh` subject set, and
+the Node deploy helpers that land in the same directory drive Envio and own no
+Cloud Run surface, so neither arm is the right home for them. Widening a routing
+glob is separable from the move it protects, and doing it first means the move
+cannot be the commit that goes quiet.
+
+Because `*` matches `/`, the pair reaches a `deploy-*.sh` basename under any
+`scripts/` subdirectory rather than one fixed directory. That is deliberate on
+both arms: `collectDeployWrappers()` in `check-deploy-root-anchors.test.mjs`
+walks `scripts/` recursively, so routing pinned to a single directory would once
+again be narrower than the check it schedules. The one live path it newly
+reaches is `scripts/lib/deploy-guard.sh`, the guard every wrapper sources before
+it mutates anything, which is precisely when both the check and the Cloud Run
+checklist should run. Both suites pin it. One consequence for later edits: a
+`case` takes the first matching arm, so a new arm for a path of the shape
+`scripts/<dir>/deploy-*.sh` goes ABOVE the pair or it never runs.
 
 `scripts/sentry-suite-manifest.json` is stricter than a glob. Its keys are exact
 repo-relative paths, and `scripts/sentry-suite-gate.mjs` reconciles them against
@@ -179,7 +200,16 @@ routing, not procedure.
 8. `docs/notes/quick-commands.md`.
 9. `agent-quality-gate.sh` routing arms — a literal-prefix glob such as
    `scripts/deploy-*.sh` or `scripts/sentry-*.test.mjs` stops matching one
-   directory down. Keep the basename prefix; add the paired one-level arm. Its
+   directory down. Keep the basename prefix; add the paired one-level arm. The
+   `sentry-` and `deploy-` arms already carry theirs, so a move of those files
+   verifies the pair rather than adding it. An arm naming an exact path is a
+   literal, not a glob, and needs the same pairing for the same reason: all
+   three on the deploy leg — `scripts/deploy-indexer-logs.sh`,
+   `scripts/deploy-bridge.sh`, and the `deploy-*.sh` glob — now carry it, so a
+   moved wrapper keeps its whole command set. Leaving one unpaired below a
+   widened glob is the worst case, not the safe one: the glob catches the moved
+   path, the run still looks routed, and only the arm's extra commands go
+   missing. Its
    contract-surface arm also names `scripts/lib/*.mjs`, which sets the
    `pnpm tf:test` reason; the unconditional sweep already runs the suite. Its
    `implementation_signature()` path list is stricter than a glob: an entry it
@@ -217,9 +247,15 @@ not only the arm of the consumer that happens to fail loudest.
 - Flat-layout scale and prefix counts: `git ls-files scripts/` — 210 top-level
   files, 53 with the `sentry-` prefix, measured at P0. The count falls with each
   phase; `scripts/AGENTS.md` carries the current one.
-- Bash `case` routing: `scripts/agent-autoreview.sh` (`scripts/*` arm),
-  `scripts/agent-quality-gate.sh` (`scripts/*.sh`, `scripts/deploy-*.sh`, and
-  the paired `scripts/sentry-*.test.mjs` / `scripts/*/sentry-*.test.mjs` arms).
+- Bash `case` routing: `scripts/agent-autoreview.sh` (`scripts/*` arm, and the
+  paired `scripts/deploy-*.sh` / `scripts/*/deploy-*.sh` checklist arm),
+  `scripts/agent-quality-gate.sh` (`scripts/*.sh`, and the paired
+  `scripts/deploy-*.sh` / `scripts/*/deploy-*.sh` and
+  `scripts/sentry-*.test.mjs` / `scripts/*/sentry-*.test.mjs` arms).
+- Routing assertions for both deploy pairs, each with a negative control:
+  `scripts/agent-quality-gate.test.sh` (the `scripts/deploy/` cases beside the
+  flat ones) and `run_deploy_directory_checklist_routing_regression` in
+  `scripts/agent-autoreview.test.sh`.
 - Recursive lint: `package.json` `lint:scripts`, `eslint.config.mjs` `files`
   globs.
 - Recursive CI filter: `.github/workflows/ci.yml`, `rootScripts` filter, whose
