@@ -13,8 +13,7 @@ garden_lane: adrs-architecture
 
 # ADR 0065 — CodeRabbit replaces Cursor BugBot as the third PR review bot
 
-**Status:** Accepted (Aug 2026) — CodeRabbit installed; cutover per the plan
-under Decision.
+**Status:** Accepted (Aug 2026) — cutover per the plan under Decision.
 **Scope:** ci/process
 
 ## Context
@@ -40,7 +39,7 @@ review run, with three properties that matter here:
 This repo is the worst case for that model. One login (`chapati23`) authors
 ~280 merged PRs/month (~850 in 90 days), and the agent workflow pushes several
 fix-commit rounds per PR, so review runs land at roughly 2–4× the PR count
-(560–1,120 runs/month). At $1.00–1.50/run that is **~$600–1,800/month**, versus
+(560–1,120 runs/month). At $1.00–1.50/run that is **~$560–1,680/month**, versus
 $40–120/month under the old flat model. This is the mechanism behind the
 observed cost growth; Cursor's own forum documents the same effect on other
 iteration-heavy teams.
@@ -55,14 +54,14 @@ Decision criteria: review quality and cost.
   Claude 6 on 3 PRs. All three bots currently deliver accepted findings; the
   sample is too small and bursty to measure noise rates.
 - **The strongest independent head-to-head** (146 PRs / 679 findings, four
-  bots run in parallel for 3.5 weeks, published May 2026): false-positive
+  bots run in parallel for 3 weeks, published May 2026): false-positive
   rates were Greptile 0%, CodeRabbit 2.3%, BugBot 4.8%. CodeRabbit posted the
   most findings (3.4/PR), Greptile the fewest (2.2/PR). 93.4% of findings were
   caught by exactly **one** tool and none by all four — the bots are
   complementary, so removing one costs real coverage.
 - **Martian Code Review Bench**, the only independent rolling benchmark found:
   CodeRabbit topped the March 2026 snapshot (F1 51.2%), Greptile the July 2026
-  snapshot (F1 60.8%, precision 76.2%). The leaders cluster at 50–60% F1 and
+  snapshot (F1 60.8%, precision 76.2%). The leaders cluster at 50–61% F1 and
   the ranking flips between snapshots. Vendor-run benchmarks are unreliable:
   an independent re-run of Greptile's own 50-bug set measured 45% recall
   against the self-reported 82%.
@@ -76,7 +75,7 @@ both sit at or above BugBot on independent precision measurements.
 
 | Option              | Pricing model                                 | Est. monthly cost                                        |
 | ------------------- | --------------------------------------------- | -------------------------------------------------------- |
-| BugBot (status quo) | ~$1.00–1.50/run, uncapped, re-review per push | ~$600–1,800                                              |
+| BugBot (status quo) | ~$1.00–1.50/run, uncapped, re-review per push | ~$560–1,680                                              |
 | CodeRabbit          | Pro free on public repos; else $24–30/seat    | **$0** (fallback $24–30)                                 |
 | Greptile            | $30/seat incl. 50 reviews, then $1/review     | ~$260 (review-on-open only); $540–1,100 (re-review/push) |
 | Cubic               | Free unlimited on public repos                | $0                                                       |
@@ -154,7 +153,7 @@ Replace BugBot with CodeRabbit as the third advisory reviewer.
 
 ## Consequences
 
-- Review spend drops from ~$600–1,800/month (est.) to $0, with a $24–30/month
+- Review spend drops from ~$560–1,680/month (est.) to $0, with a $24–30/month
   worst case. No component of the new stack meters per review run.
 - The stack's third seat changes character from precision-quiet to
   high-recall. CodeRabbit's known weakness is verbosity; the quiet/chill
@@ -168,7 +167,7 @@ Replace BugBot with CodeRabbit as the third advisory reviewer.
 - Ten files reference `cursor[bot]`/BugBot and change in the cutover PR (list
   under Decision). `pr:feedback-state` severity regexes keyed on
   `BUGBOT_BUG_ID` retire with it.
-- Watch item, not action: `claude[bot]` review currently rides existing Max
+- Watch item: `claude[bot]` review currently rides existing Max
   subscription spend. Anthropic's separate metered "Code Review" product bills
   $15–25/review — ruinous at this volume. If the GitHub Action review path is
   ever folded into that product, this ADR's math changes and the stack needs
