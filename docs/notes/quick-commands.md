@@ -76,7 +76,7 @@ pnpm adr:check                      # Advisory ADR reminder for architectural ch
 pnpm adr:check:test                 # Offline tests for the ADR reminder trigger logic
 node scripts/workflows/check-github-action-pins.mjs  # Verify workflow/composite-action `uses:` refs are SHA-pinned
 node scripts/repo-health/check-hermetic-vitest-setup.mjs  # Verify all workspace Vitest network guards are byte-identical
-node scripts/repo-health/file-size-watchlist.mjs  # Refresh source file-size watchlist; use --format issue for GitHub Issues, not BACKLOG.md
+node scripts/repo-health/file-size-watchlist.mjs  # Refresh source file-size watchlist (package src/ trees + scripts/); use --format issue for GitHub Issues, not BACKLOG.md
 pnpm indexer:testnet:codegen       # Generate types (multichain testnet: Celo Sepolia + Monad testnet + Polygon Amoy)
 pnpm indexer:testnet:dev           # Start indexer (multichain testnet)
 

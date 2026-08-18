@@ -534,9 +534,10 @@ test("the suite enumeration walks symlinked directories", () => {
 test("the checker's own files stay under the file-size hard cap", () => {
   // Round 9's split drifted back over the 1,000-line cap because nothing
   // machine-enforced it: the root ESLint config sets no `max-lines`, and the
-  // file-size watchlist scopes the package `src/` trees, not scripts/. Lock the
-  // checker's own modules here, reusing the watchlist's own line counter, so a
-  // future round cannot quietly regrow one past the cap.
+  // file-size watchlist scoped the package `src/` trees, not scripts/. ADR 0065
+  // added that scope, but the watchlist only reports — this list is the hard
+  // gate. Lock the checker's own modules here, reusing the watchlist's own line
+  // counter, so a future round cannot quietly regrow one past the cap.
   const files = [
     CORE,
     SELF,
