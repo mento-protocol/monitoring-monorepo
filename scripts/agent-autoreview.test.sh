@@ -5247,6 +5247,115 @@ run_frozen_checklist_symlink_regression() {
   fi
 }
 
+# The Terraform/Cloud Run checklist reaches a review through a literal-prefix
+# glob, `scripts/deploy-*.sh`, which stops matching once a wrapper sits in
+# `scripts/deploy/` (ADR 0064). Nothing fails when it stops: the review just
+# runs without the checklist. Each run below changes exactly one file, so the
+# only thing that can select terraform-cloudrun.md is the deploy arm itself —
+# revert the paired glob and the nested case fails here.
+run_deploy_directory_checklist_routing_regression() {
+  local review_repo="$tmp_dir/deploy-directory-checklist-routing"
+  local flat_bundle="$tmp_dir/deploy-directory-checklist-flat-bundle"
+  local nested_bundle="$tmp_dir/deploy-directory-checklist-nested-bundle"
+  local node_bundle="$tmp_dir/deploy-directory-checklist-node-bundle"
+  local guard_bundle="$tmp_dir/deploy-directory-checklist-guard-bundle"
+  init_review_repo "$review_repo"
+  mkdir -p "$review_repo/docs/pr-checklists"
+  printf 'base\n' >"$review_repo/README.md"
+  printf 'recurring checklist\n' \
+    >"$review_repo/docs/pr-checklists/recurring-review-patterns.md"
+  printf 'exclusions checklist\n' \
+    >"$review_repo/docs/pr-checklists/review-prompt-exclusions.md"
+  printf 'code-health checklist\n' \
+    >"$review_repo/docs/pr-checklists/code-health.md"
+  printf 'terraform checklist\n' \
+    >"$review_repo/docs/pr-checklists/terraform-cloudrun.md"
+  commit_review_repo "$review_repo" "add trusted checklists"
+
+  # Control: the flat wrapper shape the arm routes today.
+  git -C "$review_repo" switch -c flat-deploy >/dev/null 2>&1
+  mkdir -p "$review_repo/scripts"
+  printf 'flat deploy wrapper\n' >"$review_repo/scripts/deploy-probe.sh"
+  commit_review_repo "$review_repo" "add flat deploy wrapper"
+  run_helper_in_repo "$review_repo" \
+    --prepare-bundle-dir "$flat_bundle" \
+    --mode branch \
+    --base main \
+    --engine local
+  expect_file_contains_line \
+    "$flat_bundle/selected-checklists.txt" \
+    "docs/pr-checklists/terraform-cloudrun.md"
+
+  # The same wrapper one directory down must select the identical checklist.
+  git -C "$review_repo" switch main >/dev/null 2>&1
+  git -C "$review_repo" switch -c nested-deploy >/dev/null 2>&1
+  mkdir -p "$review_repo/scripts/deploy"
+  printf 'nested deploy wrapper\n' \
+    >"$review_repo/scripts/deploy/deploy-probe.sh"
+  commit_review_repo "$review_repo" "add nested deploy wrapper"
+  run_helper_in_repo "$review_repo" \
+    --prepare-bundle-dir "$nested_bundle" \
+    --mode branch \
+    --base main \
+    --engine local
+  expect_file_contains_line \
+    "$nested_bundle/selected-checklists.txt" \
+    "docs/pr-checklists/terraform-cloudrun.md"
+
+  # Shell-scoped on purpose. A Node deploy helper landing in the same directory
+  # drives Envio, owns no Cloud Run or Terraform surface, and is not routed this
+  # checklist today; it still picks up code-health through the recursive
+  # `scripts/*` arm. Pin both halves so a later widening is a decision, not a
+  # side effect.
+  git -C "$review_repo" switch main >/dev/null 2>&1
+  git -C "$review_repo" switch -c nested-node-deploy >/dev/null 2>&1
+  mkdir -p "$review_repo/scripts/deploy"
+  printf 'nested deploy helper\n' \
+    >"$review_repo/scripts/deploy/deploy-probe.mjs"
+  commit_review_repo "$review_repo" "add nested deploy helper"
+  run_helper_in_repo "$review_repo" \
+    --prepare-bundle-dir "$node_bundle" \
+    --mode branch \
+    --base main \
+    --engine local
+  expect_file_contains_line \
+    "$node_bundle/selected-checklists.txt" \
+    "docs/pr-checklists/code-health.md"
+  expect_file_not_contains \
+    "$node_bundle/selected-checklists.txt" \
+    "docs/pr-checklists/terraform-cloudrun.md"
+
+  # `*` matches `/`, so the pair also reaches a `deploy-*.sh` basename in any
+  # other scripts/ subdirectory — today `scripts/lib/deploy-guard.sh`, which
+  # `deploy-bridge.sh` sources before it mutates Cloud Run. Reviewing that guard
+  # against the Cloud Run checklist is the intent, so pin it rather than leave
+  # it to be rediscovered as a surprise.
+  git -C "$review_repo" switch main >/dev/null 2>&1
+  git -C "$review_repo" switch -c deploy-guard >/dev/null 2>&1
+  mkdir -p "$review_repo/scripts/lib"
+  printf 'shared deploy guard\n' \
+    >"$review_repo/scripts/lib/deploy-guard.sh"
+  commit_review_repo "$review_repo" "add shared deploy guard"
+  run_helper_in_repo "$review_repo" \
+    --prepare-bundle-dir "$guard_bundle" \
+    --mode branch \
+    --base main \
+    --engine local
+  expect_file_contains_line \
+    "$guard_bundle/selected-checklists.txt" \
+    "docs/pr-checklists/terraform-cloudrun.md"
+  # Each checklist has its own `case` statement, so the new alternative can only
+  # add a selection, never displace one. Pin the coexistence rather than argue
+  # it: code-health still arrives through the recursive `scripts/*` arm.
+  expect_file_contains_line \
+    "$guard_bundle/selected-checklists.txt" \
+    "docs/pr-checklists/code-health.md"
+  expect_file_contains_line \
+    "$nested_bundle/selected-checklists.txt" \
+    "docs/pr-checklists/code-health.md"
+  expect_empty_stderr
+}
+
 run_git_replace_ref_regression() {
   local review_repo="$tmp_dir/git-replace-ref"
   local bundle_dir="$tmp_dir/git-replace-ref-bundle"
@@ -6822,6 +6931,7 @@ run_bundle_integrity_family() {
   run_stage_timing_split_checkout_regression
   run_prepared_unsupported_path_regressions
   run_frozen_checklist_symlink_regression
+  run_deploy_directory_checklist_routing_regression
   run_prepared_untracked_symlink_regression
   run_feedback_runtime_aggregate_regression
   run_large_untracked_bound_regression

@@ -3792,11 +3792,36 @@ while IFS= read -r path; do
     scripts/*.sh)
       add_surface "scripts"
       case "$path" in
-        scripts/deploy-indexer-logs.sh)
+        # Paired for the same reason as the arm below, and it has to be: this one
+        # sits FIRST, so once this wrapper moves the exact path stops matching,
+        # the widened arm below catches it instead, and the run keeps scheduling
+        # the root-anchor check while the runtime-log filter check quietly drops
+        # out. Partial routing reads as working routing, which is worse than the
+        # gap the pair exists to close.
+        scripts/deploy-indexer-logs.sh|scripts/*/deploy-indexer-logs.sh)
           add_command "node scripts/check-deploy-root-anchors.test.mjs" "deploy wrapper changed"
           add_command "node scripts/filter-envio-runtime-errors.test.mjs" "indexer runtime-log filter changed"
           ;;
-        scripts/deploy-*.sh)
+        # Paired one-level arm, the ADR 0064 remedy for a literal-prefix glob.
+        # `scripts/deploy-*.sh` is anchored on a prefix at the TOP of scripts/,
+        # so it stops matching the moment a wrapper sits one directory down —
+        # and nothing reds: the root-anchor check simply stops being scheduled.
+        # `*` matches `/` in a `case` pattern, so the paired arm reaches every
+        # depth. Shell-only on purpose: the subject set of
+        # check-deploy-root-anchors.test.mjs is `deploy-*.sh` files that source
+        # `lib/deploy-guard.sh`, and that walk is already recursive, so the
+        # check is ready for the move before the routing is.
+        #
+        # That same breadth reaches a `deploy-*.sh` basename under any scripts/
+        # subdirectory, today `scripts/lib/deploy-guard.sh` — deliberate, and
+        # pinned in the suite. Matching the check's own recursive walk is the
+        # whole point; a pattern stopping at one fixed directory would be
+        # narrower than what it schedules. The guard is the file every wrapper
+        # sources, so a change to it is exactly when the check should run.
+        # Consequence for later edits: `case` takes the FIRST matching arm, so a
+        # new arm for a path of the shape `scripts/<dir>/deploy-*.sh` belongs
+        # ABOVE this one or it never runs.
+        scripts/deploy-*.sh|scripts/*/deploy-*.sh)
           add_command "node scripts/check-deploy-root-anchors.test.mjs" "deploy wrapper changed"
           ;;
         scripts/sanitize-terraform-output.sh)
@@ -3813,7 +3838,13 @@ while IFS= read -r path; do
         scripts/repo-health/dev-janitor.sh|scripts/repo-health/dev-janitor.test.sh)
           add_command "bash scripts/repo-health/dev-janitor.test.sh" "dev janitor script changed"
           ;;
-        scripts/deploy-bridge.sh)
+        # Paired like the two arms in the case above. This is a separate `case`
+        # statement, so the widened deploy glob cannot shadow it — but an exact
+        # path stops matching after a move all the same, and these two commands
+        # are the whole Cloud Run half of this wrapper's routing. Pairing it here
+        # is what makes "a moved deploy script routes identically" true for the
+        # bridge rather than true for the root-anchor check alone.
+        scripts/deploy-bridge.sh|scripts/*/deploy-bridge.sh)
           add_checklist "docs/pr-checklists/terraform-cloudrun.md" "Cloud Run deploy script changed"
           add_command "pnpm agent:context-check" "Cloud Run revision suffix guard changed"
           ;;

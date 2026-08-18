@@ -2519,6 +2519,59 @@ run_gate "scripts/check-deploy-root-anchors.test.mjs"
 assert_contains "- pnpm lint:scripts (root build script changed)"
 assert_contains "- node scripts/check-deploy-root-anchors.test.mjs (deploy root-anchor test changed)"
 
+# A deploy wrapper that lands under scripts/deploy/ must route the same
+# root-anchor contract the flat wrappers route today. `scripts/deploy-*.sh` is
+# anchored on a literal prefix at the TOP of scripts/, so it stops matching one
+# directory down and the check simply stops being scheduled — nothing reds.
+# ADR 0064's remedy is the paired one-level arm, and check-deploy-root-anchors
+# .test.mjs already walks scripts/ recursively, so only the routing was missing.
+# The path need not exist (see the nested Sentry suite cases below); `bash -n`
+# is skipped for a path with no file, so only the routed check is asserted.
+run_gate "scripts/deploy/deploy-indexer.sh"
+assert_contains "- node scripts/check-deploy-root-anchors.test.mjs (deploy wrapper changed)"
+
+# The bridge carries a Cloud Run arm of its own in a later `case` statement, so
+# asserting only the root-anchor check here would record post-move under-routing
+# as the expectation. Require the full set the flat path gets above.
+run_gate "scripts/deploy/deploy-bridge.sh"
+assert_contains "- node scripts/check-deploy-root-anchors.test.mjs (deploy wrapper changed)"
+assert_contains "- docs/pr-checklists/terraform-cloudrun.md (Cloud Run deploy script changed)"
+assert_contains "- pnpm agent:context-check (Cloud Run revision suffix guard changed)"
+
+# The wrapper with a two-command arm of its own, and the one case where the
+# widened glob is actively dangerous: its arm sits FIRST and matches an exact
+# path, so after a move the glob below would catch the path and schedule only
+# the root-anchor check. The run still looks routed while the runtime-log filter
+# check is gone. Assert BOTH commands survive the move, not just the one the
+# widened arm supplies.
+run_gate "scripts/deploy/deploy-indexer-logs.sh"
+assert_contains "- node scripts/check-deploy-root-anchors.test.mjs (deploy wrapper changed)"
+assert_contains "- node scripts/filter-envio-runtime-errors.test.mjs (indexer runtime-log filter changed)"
+
+# `*` matches `/`, so the paired arm reaches a `deploy-*.sh` basename under ANY
+# scripts/ subdirectory, not only a future scripts/deploy/. That breadth is the
+# point: check-deploy-root-anchors.test.mjs walks scripts/ recursively too, so
+# routing that stopped at one fixed directory would again be narrower than the
+# check it schedules. The live path it newly reaches is the shared guard every
+# wrapper sources — the one file whose change can break all of them at once —
+# and the check exists to assert they still source it. Pin it so the reach is a
+# recorded decision, and so a later arm of the same shape has to be placed
+# BEFORE this one rather than being silently shadowed by it.
+run_gate "scripts/lib/deploy-guard.sh"
+assert_contains "- node scripts/check-deploy-root-anchors.test.mjs (deploy wrapper changed)"
+# The reach is purely additive: this live path keeps everything it routed before
+# the pair existed. Assert that too, so a future arm ordering that swallows it
+# reds here instead of quietly thinning the guard's routing.
+assert_contains "- bash -n scripts/lib/deploy-guard.sh (shell script changed)"
+
+# The arm stays shell-scoped on purpose: the check's subject set is `deploy-*.sh`
+# files that source lib/deploy-guard.sh, so a Node helper moving into the same
+# directory must NOT pick it up. Pin that, or the next widening quietly schedules
+# a shell contract for files it cannot assert anything about.
+run_gate "scripts/deploy/deploy-indexer-perf.mjs"
+assert_contains "- pnpm lint:scripts (root build script changed)"
+assert_not_contains "- node scripts/check-deploy-root-anchors.test.mjs (deploy wrapper changed)"
+
 run_gate "scripts/bootstrap/agent-session-end-hook.sh"
 assert_contains "- bash -n scripts/bootstrap/agent-session-end-hook.sh (shell script changed)"
 assert_contains "- pnpm agent:context-check (agent SessionEnd hook changed)"
