@@ -3184,11 +3184,11 @@ while IFS= read -r path; do
   case "$path" in
     */vitest.config.ts|*/vitest.mutation.config.ts)
       add_surface "tooling"
-      add_command "node scripts/check-hermetic-vitest-setup.mjs" "hermetic Vitest config changed"
+      add_command "node scripts/repo-health/check-hermetic-vitest-setup.mjs" "hermetic Vitest config changed"
       ;;
     */vitest.hermetic-setup.ts)
       add_surface "tooling"
-      add_command "node scripts/check-hermetic-vitest-setup.mjs" "hermetic Vitest setup changed"
+      add_command "node scripts/repo-health/check-hermetic-vitest-setup.mjs" "hermetic Vitest setup changed"
       case "$path" in
         alerts/infra/oncall-announcer/vitest.hermetic-setup.ts)
           add_package_vitest_typecheck_commands "@mento-protocol/alerts-oncall-announcer" "alerts oncall-announcer hermetic Vitest setup changed"
@@ -3223,6 +3223,11 @@ while IFS= read -r path; do
       case "$path" in
         ui-dashboard/scripts/vercel-ignore-build.sh|ui-dashboard/scripts/vercel-ignore-build.test.sh)
           add_command "bash ui-dashboard/scripts/vercel-ignore-build.test.sh" "Vercel ignore build script changed"
+          ;;
+        ui-dashboard/scripts/check-react-doctor-diff.sh|ui-dashboard/scripts/check-react-doctor-score.sh)
+          # agent-quality-gate.test.sh copies and runs the diff wrapper in a
+          # stub repo, so the routing suite is this pair's real regression test.
+          add_command "pnpm agent:quality-gate:test" "React Doctor wrapper changed"
           ;;
       esac
       ;;
@@ -3685,8 +3690,8 @@ while IFS= read -r path; do
       add_command "pnpm agent:context-check" "agent context files changed"
       case "$path" in
         .agents/skills/*|.claude/skills/*)
-          add_command "bash scripts/check-skills-mirror.test.sh" "skills mirror content changed"
-          add_command "bash scripts/check-skills-mirror.sh" "skills mirror content changed"
+          add_command "node scripts/repo-health/check-skills-mirror.test.mjs" "skills mirror content changed"
+          add_command "node scripts/repo-health/check-skills-mirror.mjs" "skills mirror content changed"
           ;;
       esac
       ;;
@@ -3709,14 +3714,14 @@ while IFS= read -r path; do
           add_command "bash scripts/check-agent-quality-gate-package-scripts.sh" "agent quality gate package script validator changed"
           add_command "pnpm agent:quality-gate:test" "agent quality gate mapping changed"
           ;;
-        scripts/agent-quality-gate.sh|scripts/agent-quality-gate.test.sh|scripts/check-react-doctor-diff.sh|scripts/check-react-doctor-score.sh)
+        scripts/agent-quality-gate.sh|scripts/agent-quality-gate.test.sh)
           add_command "pnpm agent:quality-gate:test" "agent quality gate mapping changed"
           ;;
         scripts/agent-autoreview.sh|scripts/agent-autoreview.test.sh)
           add_command "pnpm agent:autoreview:test" "agent autoreview adapter changed"
           ;;
-        scripts/dev-janitor.sh|scripts/dev-janitor.test.sh)
-          add_command "bash scripts/dev-janitor.test.sh" "dev janitor script changed"
+        scripts/repo-health/dev-janitor.sh|scripts/repo-health/dev-janitor.test.sh)
+          add_command "bash scripts/repo-health/dev-janitor.test.sh" "dev janitor script changed"
           ;;
         scripts/deploy-bridge.sh)
           add_checklist "docs/pr-checklists/terraform-cloudrun.md" "Cloud Run deploy script changed"
@@ -3736,10 +3741,6 @@ while IFS= read -r path; do
           # source the shared fragment and use its hash, which `bash -n` cannot
           # see, and re-runs the fragment's own behavioral checks.
           add_command "pnpm agent:quality-gate:test" "install-marker consumer changed"
-          ;;
-        scripts/check-skills-mirror.sh|scripts/check-skills-mirror.test.sh)
-          add_command "bash scripts/check-skills-mirror.test.sh" "skills mirror checker changed"
-          add_command "bash scripts/check-skills-mirror.sh" "skills mirror checker changed"
           ;;
       esac
       ;;
@@ -3770,8 +3771,12 @@ while IFS= read -r path; do
         scripts/mcp/build-upstash-mcp-runtime.mjs|scripts/mcp/render-upstash-mcp-config.mjs|scripts/mcp/upstash-mcp-config.test.mjs|scripts/mcp/upstash-mcp-launcher.mjs)
           add_command "node --test scripts/mcp/upstash-mcp-config.test.mjs" "Upstash MCP transport contract changed"
           ;;
-        scripts/file-size-watchlist.mjs|scripts/file-size-watchlist-issue.mjs|scripts/file-size-watchlist.test.mjs)
-          add_command "node --test scripts/file-size-watchlist.test.mjs" "file-size watchlist automation changed"
+        scripts/repo-health/file-size-watchlist.mjs|scripts/repo-health/file-size-watchlist-issue.mjs|scripts/repo-health/file-size-watchlist.test.mjs)
+          add_command "node --test scripts/repo-health/file-size-watchlist.test.mjs" "file-size watchlist automation changed"
+          ;;
+        scripts/repo-health/check-skills-mirror.mjs|scripts/repo-health/check-skills-mirror.test.mjs)
+          add_command "node scripts/repo-health/check-skills-mirror.test.mjs" "skills mirror checker changed"
+          add_command "node scripts/repo-health/check-skills-mirror.mjs" "skills mirror checker changed"
           ;;
         scripts/context/claude-runtime-document-registry.mjs|scripts/context/docs-index.mjs|scripts/context/docs-index-helpers.mjs|scripts/context/docs-index.test.mjs)
           add_command "pnpm docs:index:test" "documentation catalog helper changed"
@@ -4032,9 +4037,9 @@ while IFS= read -r path; do
         scripts/supply-chain/override-prune-report.mjs|scripts/supply-chain/override-prune-report.test.mjs)
           add_command "pnpm override:prune-report:test" "override prune report helper changed"
           ;;
-        scripts/check-hermetic-vitest-setup.mjs|scripts/check-hermetic-vitest-setup.test.mjs)
-          add_command "node scripts/check-hermetic-vitest-setup.mjs" "hermetic Vitest setup checker changed"
-          add_command "node scripts/check-hermetic-vitest-setup.test.mjs" "hermetic Vitest setup checker changed"
+        scripts/repo-health/check-hermetic-vitest-setup.mjs|scripts/repo-health/check-hermetic-vitest-setup.test.mjs)
+          add_command "node scripts/repo-health/check-hermetic-vitest-setup.mjs" "hermetic Vitest setup checker changed"
+          add_command "node scripts/repo-health/check-hermetic-vitest-setup.test.mjs" "hermetic Vitest setup checker changed"
           ;;
         scripts/workflows/check-github-action-pins.mjs)
           add_command "node scripts/workflows/check-github-action-pins.mjs" "GitHub Actions pin checker changed"

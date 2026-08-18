@@ -92,7 +92,7 @@
     "code-health:knip:report": "pnpm -r --workspace-concurrency=1 knip:report",
     "code-health:deps": "depcruise --config .dependency-cruiser.cjs shared-config ui-dashboard indexer-envio metrics-bridge integration-probes aegis",
     "code-health:deps:graph": "depcruise --config .dependency-cruiser.cjs --output-type dot shared-config ui-dashboard indexer-envio metrics-bridge integration-probes aegis | dot -T svg > reports/dep-graph.svg",
-    "code-health:history": "node scripts/code-health-history.mjs",
+    "code-health:history": "node scripts/repo-health/code-health-history.mjs",
     "code-health:duplication": "jscpd --config .jscpd.json",
     "code-health": "pnpm code-health:knip && pnpm code-health:deps",
     "lint:scripts": "eslint scripts/ eslint.config.mjs .dependency-cruiser.cjs --cache --cache-strategy content --cache-location .eslintcache",

@@ -418,10 +418,10 @@ const allowedClaudeBashScriptPermissions = new Set([
   "Bash(bash ./scripts/bootstrap/agent-session-end-hook.sh:*)",
   "Bash(bash scripts/check-agent-quality-gate-package-scripts.sh:*)",
   "Bash(bash ./scripts/check-agent-quality-gate-package-scripts.sh:*)",
-  "Bash(bash scripts/check-react-doctor-diff.sh:*)",
-  "Bash(bash ./scripts/check-react-doctor-diff.sh:*)",
-  "Bash(bash scripts/check-react-doctor-score.sh:*)",
-  "Bash(bash ./scripts/check-react-doctor-score.sh:*)",
+  "Bash(bash ui-dashboard/scripts/check-react-doctor-diff.sh:*)",
+  "Bash(bash ./ui-dashboard/scripts/check-react-doctor-diff.sh:*)",
+  "Bash(bash ui-dashboard/scripts/check-react-doctor-score.sh:*)",
+  "Bash(bash ./ui-dashboard/scripts/check-react-doctor-score.sh:*)",
 ]);
 
 // Keep this in sync with `.claude/settings.json`. Exact entries make the key
@@ -452,8 +452,16 @@ const allowedClaudeBashPermissions = new Set([
   ...allowedClaudeOtherBashPermissions,
 ]);
 
+// Root `scripts/` and package-local `<package>/scripts/` both count: the React
+// Doctor wrappers live in `ui-dashboard/scripts/`, so a prefix-blind check
+// would route a package-local script permission into the generic branch.
+const bashScriptPermission =
+  /^Bash\(bash\s+(?:\.\/)?(?:[\w.-]+\/)?scripts\/[^)]*\)$/;
+const bashDeployScriptPermission =
+  /^Bash\(bash\s+(?:\.\/)?(?:[\w.-]+\/)?scripts\/deploy-[^)]*\)$/;
+
 function isClaudeBashScriptPermission(permission) {
-  return /^Bash\(bash\s+(?:\.\/)?scripts\/[^)]*\)$/.test(permission);
+  return bashScriptPermission.test(permission);
 }
 
 function isClaudeSagPermission(permission) {
@@ -501,7 +509,7 @@ function validateClaudePermissions(settings) {
 
     if (allowedClaudeBashPermissions.has(permission)) continue;
 
-    if (/^Bash\(bash\s+(?:\.\/)?scripts\/deploy-[^)]*\)$/.test(permission)) {
+    if (bashDeployScriptPermission.test(permission)) {
       fail(
         `.claude/settings.json: must not allow deploy/promote scripts: ${permission}`,
       );
