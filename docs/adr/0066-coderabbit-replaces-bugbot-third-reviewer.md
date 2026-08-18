@@ -81,28 +81,37 @@ both sit at or above BugBot on independent false-positive measurements.
 | Option              | Pricing model                                 | Est. monthly cost                                        |
 | ------------------- | --------------------------------------------- | -------------------------------------------------------- |
 | BugBot (status quo) | ~$1.00–1.50/run, uncapped, re-review per push | ~$560–1,680                                              |
-| CodeRabbit          | Pro free on public repos; else $24–30/seat    | **$0** (fallback $24–30)                                 |
+| CodeRabbit          | OSS tier free; else $24–30 for one seat       | **$0** (manual trigger; fallback $24–30)                 |
 | Greptile            | $30/seat incl. 50 reviews, then $1/review     | ~$260 (review-on-open only); $540–1,100 (re-review/push) |
 | Cubic               | Free unlimited on public repos                | $0                                                       |
 | Graphite Agent      | Flat $20–40/month, unlimited reviews          | $20–40                                                   |
 | Drop to two bots    | —                                             | $0, minus third-bot coverage                             |
 
-CodeRabbit's public-repo terms were verified against the vendor's own docs and
-knowledge base on 2026-08-18: Pro-tier review features activate automatically
-and free on any public GitHub repo, with no application step and no
-nonprofit/OSS-license requirement; company-owned public repos are not
-excluded. Seats bill per Git identity that **opens** a PR — pushing commits to
-an open PR consumes nothing — so even the paid fallback is one seat.
+CodeRabbit's public-repo terms were verified against the vendor's docs and
+the installed org's billing page on 2026-08-18. The Open Source tier gives
+public repos **Pro+ features free**, with no application step and no license
+requirement; company-owned public repos included. Two limits shape it: OSS
+rate limits are per-repository and popularity-scaled (1–10 reviews/hour),
+and public repos with **fewer than 10 stars get no automatic reviews** —
+every review is triggered manually (`@coderabbitai review`). This repo has 0
+stars, so the $0 tier is manual-trigger-only; the trigger is a PR comment an
+agent or babysit loop can post. Seats bill per Git identity that **opens** a
+PR — pushing commits consumes nothing — so the paid fallback is one seat.
+Observed at install: the org lands on a default 14-day Pro+ trial (3
+reviews/developer/hour, the source of the first rate-limit refusal),
+expiring 2026-09-01; an unsubscribed org then reverts to Free and its public
+repos to the OSS treatment.
 
 ## Decision
 
 Replace BugBot with CodeRabbit as the third advisory reviewer.
 
-1. **Install** the CodeRabbit GitHub App on the repo. The repo is public, so
-   Pro-tier review should activate at $0. Verify the plan and the effective
-   rate limits on the account page after install — the open-source tier's
-   exact hourly caps are unpublished (paid Pro is 5 reviews/developer/hour).
-   Fallback if throttled: one paid Pro seat at $24–30/month.
+1. **Install** the CodeRabbit GitHub App on the repo (done 2026-08-18; the
+   org sits on the default Pro+ trial until 2026-09-01). Decide before the
+   trial ends: let the org revert to Free so the public repos ride the $0
+   OSS tier with manual/scripted triggers, or pay for one Pro seat at
+   $24–30/month for automatic reviews (5/hour nominal, fair-usage-degraded
+   at this volume).
 2. **Commit `.coderabbit.yaml`** before the first review lands: start from the
    assertive-adjacent default only if noise proves low; otherwise use the
    `chill` profile or the July 2026 `quiet` profile (critical findings inline,
@@ -173,9 +182,14 @@ Replace BugBot with CodeRabbit as the third advisory reviewer.
   the feedback-ledger discipline (every finding gets a Fixed/Won't-fix reply)
   already forces per-finding triage. If noise stays high after tuning, that is
   a revisit trigger, not a live-with-it.
-- The open-source tier's rate limits are unverified until install. The
-  parallel-run window exists to observe them under this repo's bursty,
-  multi-round load before BugBot is switched off.
+- No CodeRabbit tier auto-reviews every push at this repo's volume. The OSS
+  tier requires manual triggers under 10 stars, and paid Pro's fair-usage
+  ladder drops a developer identity past 60 reviews per 7 days to 1
+  review/hour — this repo's ~65 PRs/week sits in that bucket. The workable
+  pattern on any tier is triggered reviews at ready points
+  (`@coderabbitai review`, label opt-in, or
+  `auto_pause_after_reviewed_commits`); the parallel-run window should
+  exercise it before BugBot is switched off.
 - The cutover PR must sweep every live `cursor[bot]`/BugBot reference — the
   step-4 list above, re-verified by grep at cutover time rather than a fixed
   count, since references have already drifted once during this ADR's own
