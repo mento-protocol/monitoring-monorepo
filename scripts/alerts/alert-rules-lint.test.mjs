@@ -1876,10 +1876,20 @@ test("long-lived pool criticals repeat twice daily, short-lived ones hourly", ()
     );
   const poolAttributes = attributesExceptRepeat(poolRoute);
   const slowAttributes = attributesExceptRepeat(slowRoute);
-  assert(
-    Object.keys(poolAttributes).length >= 4,
-    "expected to parse contact_point, group_by, group_wait and group_interval",
-  );
+  // Named-presence check and union comparison cover different failures: this
+  // catches a required attribute missing from BOTH locals (or a regex that
+  // silently parsed nothing), the loop below catches the two diverging.
+  for (const key of [
+    "contact_point",
+    "group_by",
+    "group_wait",
+    "group_interval",
+  ]) {
+    assert(
+      Object.hasOwn(poolAttributes, key) && Object.hasOwn(slowAttributes, key),
+      `both pool-critical routes should declare ${key}`,
+    );
+  }
   for (const key of new Set([
     ...Object.keys(poolAttributes),
     ...Object.keys(slowAttributes),
