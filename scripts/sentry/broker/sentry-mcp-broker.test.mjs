@@ -40,7 +40,7 @@ import {
 } from "./sentry-mcp-broker.mjs";
 
 const HANDLE = "h".repeat(64);
-const REAL_TOKEN = "dummy-access-token-value";
+const REAL_TOKEN = "sntrys_the_real_read_only_token_value";
 
 /** A stub Sentry that records what it was asked and with which credential. */
 async function startUpstream(respond) {
@@ -777,9 +777,9 @@ test("the broker, spawned the way the workflow spawns it, has NO token in its ex
   const port = await freePort();
   const script = `
     set -euo pipefail
-    tok="\${SENTRY_TRIAGE_TOKEN:-}"
+    token="\${SENTRY_TRIAGE_TOKEN:-}"
     unset SENTRY_TRIAGE_TOKEN
-    printf '%s' "\${tok}" | \
+    printf '%s' "\${token}" | \
       SENTRY_MCP_BROKER_HANDLE="${HANDLE}" \
       SENTRY_MCP_BROKER_PORT=${port} \
       SENTRY_MCP_BROKER_TTL_SECONDS=30 \

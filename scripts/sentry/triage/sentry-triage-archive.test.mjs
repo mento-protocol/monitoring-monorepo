@@ -116,7 +116,7 @@ async function assertRejects(promise, pattern) {
 // Fixtures + mocks.
 // ---------------------------------------------------------------------------
 
-const TOKEN = "dummy-secret-token";
+const TOKEN = "sntrys_archive_token";
 const APPROVER = "octomaintainer";
 const QUEUE_URL =
   "https://github.com/mento-protocol/monitoring-monorepo/issues/42";
