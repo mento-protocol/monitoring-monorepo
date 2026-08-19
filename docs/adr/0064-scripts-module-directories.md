@@ -218,6 +218,10 @@ routing, not procedure.
    repoint both. The three Node deploy-helper arms are exact-path on both sides;
    P14 moved them into `scripts/deploy/` and repointed pattern and command
    together. A stale command path there fails loudly, a stale pattern silently.
+   Changing a script's LANGUAGE is the same hazard wearing different clothes: P15
+   rewrote the status wrapper as `scripts/deploy/deploy-indexer-status.mjs`, and
+   with the `.sh` gone no `deploy-*.sh` glob reaches it any more. A rewrite that
+   does not add its own arm is routed by `pnpm lint:scripts` alone.
    Its
    contract-surface arm also names `scripts/lib/*.mjs`, which sets the
    `pnpm tf:test` reason; the unconditional sweep already runs the suite. Its

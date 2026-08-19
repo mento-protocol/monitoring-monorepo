@@ -2468,12 +2468,23 @@ run_gate "scripts/deploy/deploy-indexer.sh"
 assert_contains "- bash -n scripts/deploy/deploy-indexer.sh (shell script changed)"
 assert_contains "- node scripts/check-deploy-root-anchors.test.mjs (deploy wrapper changed)"
 
-# deploy-indexer-status.sh is the one wrapper that stays flat (its disposition is
-# a Node rewrite, tracked separately). Pin that it still routes the wrapper
-# contract from the top level, so the move cannot strand it.
+# The status command is Node now (P15). Its own suite is the only thing that
+# covers its argument parsing, renderers and cadence bands, so assert the arm
+# routes it from both the module and the test — and assert it does NOT pick up
+# the deploy-wrapper root-anchor contract, which is for `deploy-*.sh` files that
+# source the guard and has nothing to say about a read-only Node command.
+run_gate "scripts/deploy/deploy-indexer-status.mjs"
+assert_contains "- pnpm lint:scripts (root build script changed)"
+assert_contains "- node scripts/deploy/deploy-indexer-status.test.mjs (indexer deploy status command changed)"
+assert_not_contains "- node scripts/check-deploy-root-anchors.test.mjs (deploy wrapper changed)"
+
+run_gate "scripts/deploy/deploy-indexer-status.test.mjs"
+assert_contains "- node scripts/deploy/deploy-indexer-status.test.mjs (indexer deploy status command changed)"
+
+# The retired shell path must route nothing status-specific, so a half-finished
+# rewrite that left both spellings in the arm cannot pass review.
 run_gate "scripts/deploy-indexer-status.sh"
-assert_contains "- bash -n scripts/deploy-indexer-status.sh (shell script changed)"
-assert_contains "- node scripts/check-deploy-root-anchors.test.mjs (deploy wrapper changed)"
+assert_not_contains "- node scripts/deploy/deploy-indexer-status.test.mjs (indexer deploy status command changed)"
 
 run_gate "scripts/deploy/deploy-indexer-logs.sh"
 assert_contains "- bash -n scripts/deploy/deploy-indexer-logs.sh (shell script changed)"
@@ -2563,6 +2574,9 @@ assert_contains "- node scripts/deploy/deploy-indexer-perf.test.mjs (indexer dep
 
 run_gate "scripts/deploy/region/filter-envio-runtime-errors.mjs"
 assert_contains "- node scripts/deploy/filter-envio-runtime-errors.test.mjs (indexer runtime-log filter changed)"
+
+run_gate "scripts/deploy/region/deploy-indexer-status.mjs"
+assert_contains "- node scripts/deploy/deploy-indexer-status.test.mjs (indexer deploy status command changed)"
 
 # The bridge carries the most to lose at depth — narrowing its arm back to the
 # exact path would drop the Cloud Run checklist and the revision-suffix guard,

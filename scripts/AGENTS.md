@@ -17,12 +17,12 @@ garden_lane: agent-entry-points
 ## Scope
 
 `scripts/` holds deploy wrappers, agent quality gates, code-health checks, and
-repo maintenance utilities. 105 files sit flat at the top level.
+repo maintenance utilities. 104 files sit flat at the top level.
 
 ## Layout
 
 [ADR 0064](../docs/adr/0064-scripts-module-directories.md) governs
-subdirectories here and links the reorganization issue; phases P1–P14 have
+subdirectories here and links the reorganization issue; phases P1–P15 have
 landed.
 
 | Directory       | Holds                                  |

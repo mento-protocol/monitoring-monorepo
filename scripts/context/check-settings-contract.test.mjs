@@ -247,14 +247,16 @@ test("rejects unreviewed root and package-local bash script permissions", () => 
 
 test("rejects deploy and promote script permissions", () => {
   for (const permission of [
-    // Both layouts. The wrappers now live under `scripts/deploy/`; anchored on
-    // the flat `scripts/deploy-` prefix alone, those entries fall to the generic
+    // Both layouts. The wrappers live under `scripts/deploy/`; anchored on the
+    // flat `scripts/deploy-` prefix alone, those entries fall to the generic
     // `scripts/` branch and still fail, but under a message that no longer says
     // "deploy". These cases pin the specific refusal, not merely a refusal.
     "Bash(bash ./scripts/deploy/deploy-dashboard.sh:*)",
     "Bash(bash scripts/deploy/deploy-indexer.sh:*)",
     "Bash(bash ./scripts/deploy/deploy-indexer-promote.sh:*)",
-    "Bash(bash ./scripts/deploy-indexer-status.sh:*)",
+    // The flat half still has live subjects — the deploy-staging contract files
+    // never moved — so it stays pinned against a real path, not a retired one.
+    "Bash(bash ./scripts/deploy-staging-contract.mjs:*)",
     "Bash(bash ui-dashboard/scripts/deploy-preview.sh:*)",
   ]) {
     assertFailureContains(

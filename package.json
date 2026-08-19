@@ -78,7 +78,7 @@
     "aegis:agent:preflight": "pnpm --filter @mento-protocol/aegis agent:preflight",
     "aegis:agent:test": "pnpm --filter @mento-protocol/aegis agent:test",
     "deploy:indexer": "./scripts/deploy/deploy-indexer.sh",
-    "deploy:indexer:status": "./scripts/deploy-indexer-status.sh",
+    "deploy:indexer:status": "node scripts/deploy/deploy-indexer-status.mjs",
     "deploy:indexer:promote": "./scripts/deploy/deploy-indexer-promote.sh",
     "deploy:indexer:rollback": "./scripts/deploy/deploy-indexer-rollback.sh",
     "deploy:indexer:logs": "./scripts/deploy/deploy-indexer-logs.sh",

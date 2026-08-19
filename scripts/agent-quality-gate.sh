@@ -4222,6 +4222,18 @@ while IFS= read -r path; do
           scripts/*/filter-envio-runtime-errors.test.mjs)
           add_command "node scripts/deploy/filter-envio-runtime-errors.test.mjs" "indexer runtime-log filter changed"
           ;;
+        # The status command is the shell wrapper rewritten in Node (P15). It is
+        # read-only, so it never sourced the deploy guard and is not a subject of
+        # check-deploy-root-anchors.test.mjs — nothing routes it by the
+        # `deploy-*.sh` globs any more, and without this arm its argument
+        # parsing, renderers and cadence bands would be covered by nothing but
+        # `pnpm lint:scripts`.
+        scripts/deploy/deploy-indexer-status.mjs | \
+          scripts/deploy/deploy-indexer-status.test.mjs | \
+          scripts/*/deploy-indexer-status.mjs | \
+          scripts/*/deploy-indexer-status.test.mjs)
+          add_command "node scripts/deploy/deploy-indexer-status.test.mjs" "indexer deploy status command changed"
+          ;;
         scripts/alerts/alert-rules-lint.mjs|scripts/alerts/alert-rules-lint-extract.mjs|scripts/alerts/alert-rules-lint-peg-policy.mjs|scripts/alerts/alert-rules-lint.test.mjs)
           add_command "pnpm alerts:rules:lint:test" "alert-rules lint helper changed"
           ;;
