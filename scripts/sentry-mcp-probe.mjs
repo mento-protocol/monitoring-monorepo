@@ -84,6 +84,15 @@ export const PROTOCOL_VERSION = "2024-11-05";
 /** Default ceiling for the whole handshake, generous enough for a cold `npx`. */
 export const DEFAULT_TIMEOUT_MS = 120_000;
 
+/** JSON-RPC id for `initialize`; `tools/list` pages take the ids after it. */
+const INITIALIZE_ID = 1;
+
+/**
+ * Pagination stop. A server that returns a cursor forever would otherwise hold
+ * the probe until its timeout with no explanation; this names the reason.
+ */
+const MAX_TOOL_PAGES = 20;
+
 /**
  * Read the probe's configuration from the environment.
  *
@@ -105,8 +114,20 @@ export function resolveProbeConfig(env = process.env) {
   if (missing.length) {
     throw new Error(`missing required environment: ${missing.join(", ")}`);
   }
-  if (!/^[0-9]+$/.test(port)) {
-    throw new Error(`SENTRY_MCP_BROKER_PORT must be an integer, got "${port}"`);
+  // Same rule the broker applies to the same variable — it rejects anything
+  // outside 1..65535 — so the two readers of SENTRY_MCP_BROKER_PORT cannot
+  // disagree about what a valid wiring is. A digits-only check would accept
+  // 65536 here and then fail as a connection error at a less obvious place.
+  const portNumber = Number(port);
+  if (
+    !/^[0-9]+$/.test(port) ||
+    !Number.isInteger(portNumber) ||
+    portNumber < 1 ||
+    portNumber > 65535
+  ) {
+    throw new Error(
+      `SENTRY_MCP_BROKER_PORT must be an integer from 1 to 65535, got "${port}"`,
+    );
   }
 
   const rawTimeout = String(env.SENTRY_MCP_PROBE_TIMEOUT_MS ?? "").trim();
@@ -171,6 +192,33 @@ export function missingTools(present, required = REQUIRED_TOOLS) {
 }
 
 /**
+ * Kill the child AND anything it spawned.
+ *
+ * The child is `npx`, which execs the MCP server as a grandchild; killing the
+ * child alone leaves that grandchild alive holding the stdio pipes it
+ * inherited. Negating the pid addresses the whole process group, which is why
+ * the spawn sets `detached`. Falls back to the direct child on Windows (no
+ * process groups) and whenever the group kill throws — an already-dead group
+ * raises ESRCH, which is success, not a problem to report.
+ */
+export function killProcessGroup(child) {
+  if (!child) return;
+  if (process.platform !== "win32" && typeof child.pid === "number") {
+    try {
+      process.kill(-child.pid, "SIGKILL");
+      return;
+    } catch {
+      // Fall through to the direct kill below.
+    }
+  }
+  try {
+    child.kill("SIGKILL");
+  } catch {
+    // Already gone.
+  }
+}
+
+/**
  * Spawn the MCP server, handshake, and return its tool names.
  *
  * `spawnFn` is injected so the tests can drive the whole protocol against a
@@ -183,15 +231,28 @@ export async function listServerTools({
   handle,
   timeoutMs = DEFAULT_TIMEOUT_MS,
   spawnFn = spawn,
+  killFn = killProcessGroup,
 } = {}) {
   const child = spawnFn(command, args, {
     stdio: ["pipe", "pipe", "pipe"],
     env: { ...process.env, SENTRY_ACCESS_TOKEN: handle },
+    // `npx` EXECS A GRANDCHILD — the MCP server binary — and killing `npx`
+    // alone leaves it running with our stdio pipes inherited. An orphan
+    // holding the read side can keep this process from exiting, which would
+    // hang the pre-flight step until the 30-minute job timeout: a new failure
+    // mode, in the step whose whole job is to be a reliable gate. Its own
+    // process group makes the whole tree killable in one call.
+    detached: process.platform !== "win32",
   });
 
   let settled = false;
   let stdout = "";
   let stderr = "";
+  // `tools/list` may paginate; ids advance per page so a late reply to an
+  // earlier page cannot be mistaken for the current one.
+  let listId = INITIALIZE_ID + 1;
+  let pages = 1;
+  const collected = [];
   const send = (message) => {
     if (!child.stdin.destroyed)
       child.stdin.write(`${JSON.stringify(message)}\n`);
@@ -202,7 +263,7 @@ export async function listServerTools({
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      child.kill("SIGKILL");
+      killFn(child);
       fn(value);
     };
     const fail = (reason) =>
@@ -249,7 +310,7 @@ export async function listServerTools({
       const { messages, rest } = drainMessages(stdout);
       stdout = rest;
       for (const message of messages) {
-        if (message.id === 1) {
+        if (message.id === INITIALIZE_ID) {
           if (message.error) {
             fail(
               `the Sentry MCP server refused initialize: ${JSON.stringify(message.error)}`,
@@ -257,15 +318,43 @@ export async function listServerTools({
             return;
           }
           send({ jsonrpc: "2.0", method: "notifications/initialized" });
-          send({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
-        } else if (message.id === 2) {
+          send({
+            jsonrpc: "2.0",
+            id: listId,
+            method: "tools/list",
+            params: {},
+          });
+        } else if (message.id === listId) {
           if (message.error) {
             fail(
               `the Sentry MCP server refused tools/list: ${JSON.stringify(message.error)}`,
             );
             return;
           }
-          finish(resolve, toolNames(message.result));
+          collected.push(...toolNames(message.result));
+          // FOLLOW PAGINATION. `tools/list` may split its result, and a probe
+          // that read only the first page could report a required tool missing
+          // that the server does in fact expose — a false RED that would stop
+          // triage entirely, on the one step that is allowed to stop it. The
+          // cursor is opaque: pass it back verbatim, never parse it.
+          const cursor = message.result?.nextCursor;
+          if (typeof cursor === "string" && cursor !== "") {
+            if (++pages > MAX_TOOL_PAGES) {
+              fail(
+                `the Sentry MCP server paginated tools/list past ${MAX_TOOL_PAGES} pages`,
+              );
+              return;
+            }
+            listId += 1;
+            send({
+              jsonrpc: "2.0",
+              id: listId,
+              method: "tools/list",
+              params: { cursor },
+            });
+            continue;
+          }
+          finish(resolve, collected);
           return;
         }
       }
@@ -273,7 +362,7 @@ export async function listServerTools({
 
     send({
       jsonrpc: "2.0",
-      id: 1,
+      id: INITIALIZE_ID,
       method: "initialize",
       params: {
         protocolVersion: PROTOCOL_VERSION,
@@ -291,10 +380,11 @@ export async function listServerTools({
 export async function probeSentryToolset({
   env = process.env,
   spawnFn = spawn,
+  killFn = killProcessGroup,
   required = REQUIRED_TOOLS,
 } = {}) {
   const config = resolveProbeConfig(env);
-  const tools = await listServerTools({ ...config, spawnFn });
+  const tools = await listServerTools({ ...config, spawnFn, killFn });
   const missing = missingTools(tools, required);
   if (missing.length) {
     throw new Error(

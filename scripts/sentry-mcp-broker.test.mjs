@@ -46,6 +46,7 @@ import {
   drainMessages,
   encodeAnnotation,
   isEntryPoint as probeIsEntryPoint,
+  killProcessGroup,
   missingTools,
   probeSentryToolset,
   resolveProbeConfig,
@@ -1303,7 +1304,21 @@ test("resolveProbeConfig fails loudly rather than defaulting a wiring value", ()
   );
   assert.throws(
     () => resolveProbeConfig({ ...PROBE_ENV, SENTRY_MCP_BROKER_PORT: "94o1" }),
-    /must be an integer/,
+    /must be an integer from 1 to 65535/,
+  );
+  // Same range the broker enforces on the same variable, so the two readers of
+  // SENTRY_MCP_BROKER_PORT cannot disagree about what a valid wiring is.
+  for (const port of ["0", "65536", "99999"]) {
+    assert.throws(
+      () => resolveProbeConfig({ ...PROBE_ENV, SENTRY_MCP_BROKER_PORT: port }),
+      /must be an integer from 1 to 65535/,
+      `port ${port} must be refused`,
+    );
+  }
+  assert.equal(
+    resolveProbeConfig({ ...PROBE_ENV, SENTRY_MCP_BROKER_PORT: "65535" })
+      .args[3],
+    "127.0.0.1:65535",
   );
   assert.throws(
     () =>
@@ -1409,6 +1424,86 @@ test("the probe runs the immutable staged copy, before the agent", () => {
     probeAt < job.indexOf("anthropics/claude-code-action@"),
     "the probe must run BEFORE the agent it gates",
   );
+});
+
+test("a paginated tools/list is followed to the end", async () => {
+  // A probe that read only the first page could report a required tool missing
+  // that the server DOES expose — a false red that stops triage entirely, on
+  // the one step allowed to stop it.
+  const child = fakeMcpChild();
+  const pages = [
+    { tools: ["find_organizations", "find_projects"], nextCursor: "p2" },
+    { tools: ["search_issues", "search_events"], nextCursor: "p3" },
+    { tools: ["get_sentry_resource"] },
+  ];
+  const cursorsSeen = [];
+  let buffered = "";
+  child.stdin.on("data", (chunk) => {
+    buffered += chunk.toString();
+    const lines = buffered.split("\n");
+    buffered = lines.pop() ?? "";
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      const message = JSON.parse(line);
+      if (message.method === "initialize") {
+        child.stdout.write(
+          `${JSON.stringify({ jsonrpc: "2.0", id: message.id, result: {} })}\n`,
+        );
+      } else if (message.method === "tools/list") {
+        cursorsSeen.push(message.params?.cursor ?? null);
+        const page = pages.shift();
+        child.stdout.write(
+          `${JSON.stringify({
+            jsonrpc: "2.0",
+            id: message.id,
+            result: {
+              tools: page.tools.map((name) => ({ name })),
+              ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
+            },
+          })}\n`,
+        );
+      }
+    }
+  });
+
+  const tools = await probeSentryToolset({
+    env: PROBE_ENV,
+    spawnFn: () => child,
+  });
+  assert.deepEqual(tools, REQUIRED_TOOLS);
+  // The cursor is opaque and must go back verbatim, never parsed or rebuilt.
+  assert.deepEqual(cursorsSeen, [null, "p2", "p3"]);
+});
+
+test("the whole npx process TREE is killed, not just npx", async () => {
+  // npx execs the MCP server as a grandchild. Killing only npx leaves it
+  // holding the stdio pipes it inherited, which can keep this process from
+  // exiting — hanging the pre-flight step until the job timeout.
+  const child = fakeMcpChild();
+  respondLikeServer(child, REQUIRED_TOOLS);
+  child.pid = 4242;
+  const killed = [];
+  await probeSentryToolset({
+    env: PROBE_ENV,
+    spawnFn: () => child,
+    killFn: (c) => killed.push(c.pid),
+  });
+  assert.deepEqual(killed, [4242], "the probe must hand the child to killFn");
+
+  // And the real killer negates the pid, which is what addresses the group.
+  const signals = [];
+  const fakeChild = {
+    pid: 99,
+    kill: (sig) => signals.push(["direct", sig]),
+  };
+  const realKill = process.kill;
+  process.kill = (pid, sig) => signals.push([pid, sig]);
+  try {
+    killProcessGroup(fakeChild);
+  } finally {
+    process.kill = realKill;
+  }
+  assert.deepEqual(signals, [[-99, "SIGKILL"]]);
 });
 
 test("the closure assertion catches every relative import form", () => {
