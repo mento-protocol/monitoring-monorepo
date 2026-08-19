@@ -1858,14 +1858,35 @@ test("long-lived pool criticals repeat twice daily, short-lived ones hourly", ()
     "a weeks-long pool breach should re-notify #alerts-critical twice a day, not 24 times",
   );
 
-  // The slow variant must differ from the shared one in repeat cadence only —
-  // same channel, same grouping, same debounce.
-  for (const attribute of ["contact_point", "group_by", "group_wait"]) {
-    const pattern = new RegExp(`\\b${attribute}\\s*=\\s*([^\\n]+)`);
+  // The slow variant must differ from the shared one in repeat cadence only.
+  // Compare every attribute the two locals declare rather than a hand-listed
+  // subset, so an attribute added to one local and not the other is caught
+  // without anyone remembering to extend this test.
+  const attributesExceptRepeat = (block) =>
+    Object.fromEntries(
+      // Slice past the `<name> = {` header so the local's own name is not
+      // read as an attribute — the two locals have different names by design.
+      [
+        ...block
+          .slice(block.indexOf("{") + 1)
+          .matchAll(/^\s*(\w+)\s*=\s*(.+?)\s*$/gm),
+      ]
+        .map(([, key, value]) => [key, value])
+        .filter(([key]) => key !== "repeat_interval"),
+    );
+  const poolAttributes = attributesExceptRepeat(poolRoute);
+  const slowAttributes = attributesExceptRepeat(slowRoute);
+  assert(
+    Object.keys(poolAttributes).length >= 4,
+    "expected to parse contact_point, group_by, group_wait and group_interval",
+  );
+  for (const key of new Set([
+    ...Object.keys(poolAttributes),
+    ...Object.keys(slowAttributes),
+  ])) {
     assert(
-      pattern.exec(poolRoute)?.[1].trim() ===
-        pattern.exec(slowRoute)?.[1].trim(),
-      `notify_critical_pool_slow should differ from notify_critical_pool in repeat_interval only, but ${attribute} differs`,
+      poolAttributes[key] === slowAttributes[key],
+      `notify_critical_pool_slow should differ from notify_critical_pool in repeat_interval only, but ${key} differs: ${poolAttributes[key]} vs ${slowAttributes[key]}`,
     );
   }
 
