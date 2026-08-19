@@ -690,11 +690,18 @@ resource "grafana_rule_group" "fpmms_deviation" {
   # grace prevents single-eval glitches from undoing an otherwise stable
   # firing state. Same rationale on the anchored rule below.
   rule {
-    name           = "Deviation Breach Critical"
-    condition      = "threshold"
-    for            = "1m"
-    exec_err_state = "Error"
-    no_data_state  = "OK"
+    name      = "Deviation Breach Critical"
+    condition = "threshold"
+    for       = "1m"
+    # `keep_firing_for = "1h"`: `for = "1m"` smooths a single-eval glitch, but a
+    # breached pool still churned through 23 Pending→Alerting transitions in two
+    # weeks (four inside 27 minutes), and every transition re-notifies
+    # #alerts-critical. Holding the incident open across short healthy dips
+    # collapses that churn into one alert lifecycle. Same rationale as
+    # rules-trading-modes.tf.
+    keep_firing_for = "1h"
+    exec_err_state  = "Error"
+    no_data_state   = "OK"
 
     annotations = {
       summary          = local.deviation_critical_summary_annotation
@@ -836,12 +843,15 @@ resource "grafana_rule_group" "fpmms_deviation" {
       })
     }
 
+    # `_slow`: a breach can stay open for weeks while a fix is planned, so this
+    # repeats twice a day instead of hourly. The oracle criticals earlier in this
+    # file stay on the 1h `notify_critical_pool`.
     notification_settings {
-      contact_point   = local.notify_critical_pool.contact_point
-      group_by        = local.notify_critical_pool.group_by
-      group_wait      = local.notify_critical_pool.group_wait
-      group_interval  = local.notify_critical_pool.group_interval
-      repeat_interval = local.notify_critical_pool.repeat_interval
+      contact_point   = local.notify_critical_pool_slow.contact_point
+      group_by        = local.notify_critical_pool_slow.group_by
+      group_wait      = local.notify_critical_pool_slow.group_wait
+      group_interval  = local.notify_critical_pool_slow.group_interval
+      repeat_interval = local.notify_critical_pool_slow.repeat_interval
     }
   }
 
@@ -861,9 +871,11 @@ resource "grafana_rule_group" "fpmms_deviation" {
     # is absent, so the annotation query set is even sparser — without
     # the 1m grace a single Mimir-ruler glitch in either Aegis reserve-
     # balance query would reset the firing state.
-    for            = "1m"
-    exec_err_state = "Error"
-    no_data_state  = "OK"
+    for = "1m"
+    # Same flap absorption as the magnitude-gated critical above.
+    keep_firing_for = "1h"
+    exec_err_state  = "Error"
+    no_data_state   = "OK"
 
     annotations = {
       summary          = "Breach active for {{ humanizeDuration $values.A.Value }} — deviation-ratio data unavailable; can't confirm magnitude."
@@ -965,12 +977,13 @@ resource "grafana_rule_group" "fpmms_deviation" {
       })
     }
 
+    # `_slow`: same long-lived-breach reasoning as the magnitude-gated rule.
     notification_settings {
-      contact_point   = local.notify_critical_pool.contact_point
-      group_by        = local.notify_critical_pool.group_by
-      group_wait      = local.notify_critical_pool.group_wait
-      group_interval  = local.notify_critical_pool.group_interval
-      repeat_interval = local.notify_critical_pool.repeat_interval
+      contact_point   = local.notify_critical_pool_slow.contact_point
+      group_by        = local.notify_critical_pool_slow.group_by
+      group_wait      = local.notify_critical_pool_slow.group_wait
+      group_interval  = local.notify_critical_pool_slow.group_interval
+      repeat_interval = local.notify_critical_pool_slow.repeat_interval
     }
   }
 }
@@ -1108,11 +1121,15 @@ resource "grafana_rule_group" "fpmms_rebalancer" {
   interval_seconds = 60
 
   rule {
-    name           = "Rebalancer Stale"
-    condition      = "threshold"
-    for            = "5m"
-    exec_err_state = "Error"
-    no_data_state  = "OK"
+    name      = "Rebalancer Stale"
+    condition = "threshold"
+    for       = "5m"
+    # A rebalancer that acts once and stalls again flips this rule in and out of
+    # Alerting, and each flip re-notifies #alerts-critical. Hold the incident
+    # open for an hour so one stalled rebalancer reads as one incident.
+    keep_firing_for = "1h"
+    exec_err_state  = "Error"
+    no_data_state   = "OK"
 
     annotations = {
       summary          = "Rebalancer hasn't acted{{ if $values.BreachAge }} despite {{ humanizeDuration $values.BreachAge.Value }} of ongoing threshold breach{{ else }} despite ongoing threshold breach{{ end }}."
@@ -1234,12 +1251,14 @@ resource "grafana_rule_group" "fpmms_rebalancer" {
       })
     }
 
+    # `_slow`: a rebalancer blocked on a reserve shortfall stays stale until the
+    # shortfall is funded, which is days rather than minutes. Repeat twice a day.
     notification_settings {
-      contact_point   = local.notify_critical_pool.contact_point
-      group_by        = local.notify_critical_pool.group_by
-      group_wait      = local.notify_critical_pool.group_wait
-      group_interval  = local.notify_critical_pool.group_interval
-      repeat_interval = local.notify_critical_pool.repeat_interval
+      contact_point   = local.notify_critical_pool_slow.contact_point
+      group_by        = local.notify_critical_pool_slow.group_by
+      group_wait      = local.notify_critical_pool_slow.group_wait
+      group_interval  = local.notify_critical_pool_slow.group_interval
+      repeat_interval = local.notify_critical_pool_slow.repeat_interval
     }
   }
 
@@ -1660,12 +1679,15 @@ resource "grafana_rule_group" "fpmms_oracle_jump" {
       })
     }
 
+    # Incident-level grouping: one oracle median jump hits every pool on that
+    # feed in the same evaluation, so group without `pool_id` and let the Slack
+    # body list the affected pools in a single message.
     notification_settings {
-      contact_point   = local.notify_critical.contact_point
-      group_by        = local.notify_critical.group_by
-      group_wait      = local.notify_critical.group_wait
-      group_interval  = local.notify_critical.group_interval
-      repeat_interval = local.notify_critical.repeat_interval
+      contact_point   = local.notify_critical_incident.contact_point
+      group_by        = local.notify_critical_incident.group_by
+      group_wait      = local.notify_critical_incident.group_wait
+      group_interval  = local.notify_critical_incident.group_interval
+      repeat_interval = local.notify_critical_incident.repeat_interval
     }
   }
 }

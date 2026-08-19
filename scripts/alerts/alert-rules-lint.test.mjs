@@ -1794,6 +1794,165 @@ test("trading-mode alerts keep incidents open across short flaps", () => {
   );
 });
 
+// Rule blocks are written as `rule {` directly, or as `content {` inside a
+// `dynamic "rule"` loop. Comments are stripped first so a rationale comment
+// quoting an attribute cannot satisfy an assertion.
+function ruleBlockNamed(source, namePattern) {
+  const stripped = stripComments(source);
+  const blocks = [
+    ...blocksFor(stripped, "rule {"),
+    ...blocksFor(stripped, "content {"),
+  ].filter((block) => namePattern.test(block));
+  assert(
+    blocks.length === 1,
+    `expected exactly one rule block matching ${namePattern}, got ${blocks.length}`,
+  );
+  return blocks[0];
+}
+
+test("flap-prone criticals keep incidents open across short recoveries", () => {
+  const fpmmRules = readFileSync(
+    path.resolve(repoRoot, "alerts/rules/rules-fpmms.tf"),
+    "utf8",
+  );
+  const relayerRules = readFileSync(
+    path.resolve(repoRoot, "alerts/rules/rules-oracle-relayers.tf"),
+    "utf8",
+  );
+
+  for (const [namePattern, source] of [
+    [/\bname\s*=\s*"Deviation Breach Critical"/, fpmmRules],
+    [/\bname\s*=\s*"Deviation Breach Critical \(anchored\)"/, fpmmRules],
+    [/\bname\s*=\s*"Rebalancer Stale"/, fpmmRules],
+  ]) {
+    assert(
+      /\bkeep_firing_for\s*=\s*"1h"/.test(ruleBlockNamed(source, namePattern)),
+      `${namePattern} should hold the incident open for 1h across short recoveries`,
+    );
+  }
+
+  assert(
+    /\bkeep_firing_for\s*=\s*"30m"/.test(
+      ruleBlockNamed(relayerRules, /\bname\s*=\s*"Oldest Report Expired \[/),
+    ),
+    "Oldest Report Expired should absorb relayer catch-up cycles for 30m",
+  );
+});
+
+test("long-lived pool criticals repeat twice daily, short-lived ones hourly", () => {
+  const contactPoints = readFileSync(
+    path.resolve(repoRoot, "alerts/rules/contact-points.tf"),
+    "utf8",
+  );
+  const stripped = stripComments(contactPoints);
+  const [poolRoute] = blocksFor(stripped, "notify_critical_pool = ");
+  const [slowRoute] = blocksFor(stripped, "notify_critical_pool_slow = ");
+  assert(poolRoute, "notify_critical_pool local should exist");
+  assert(slowRoute, "notify_critical_pool_slow local should exist");
+  assert(
+    /\brepeat_interval\s*=\s*"1h"/.test(poolRoute),
+    "the shared pool-critical route must keep its hourly repeat for other consumers",
+  );
+  assert(
+    /\brepeat_interval\s*=\s*"12h"/.test(slowRoute),
+    "a weeks-long pool breach should re-notify #alerts-critical twice a day, not 24 times",
+  );
+
+  // The slow variant must differ from the shared one in repeat cadence only —
+  // same channel, same grouping, same debounce.
+  for (const attribute of ["contact_point", "group_by", "group_wait"]) {
+    const pattern = new RegExp(`\\b${attribute}\\s*=\\s*([^\\n]+)`);
+    assert(
+      pattern.exec(poolRoute)?.[1].trim() ===
+        pattern.exec(slowRoute)?.[1].trim(),
+      `notify_critical_pool_slow should differ from notify_critical_pool in repeat_interval only, but ${attribute} differs`,
+    );
+  }
+
+  // Only the long-lived pool-balance criticals take the slow cadence; the
+  // oracle and trading-limit criticals in the same file stay hourly.
+  const fpmmRules = readFileSync(
+    path.resolve(repoRoot, "alerts/rules/rules-fpmms.tf"),
+    "utf8",
+  );
+  const slowRules = [
+    /\bname\s*=\s*"Deviation Breach Critical"/,
+    /\bname\s*=\s*"Deviation Breach Critical \(anchored\)"/,
+    /\bname\s*=\s*"Rebalancer Stale"/,
+  ];
+  const hourlyRules = [
+    /\bname\s*=\s*"Oracle Contract Down"/,
+    /\bname\s*=\s*"Oracle Down"/,
+    /\bname\s*=\s*"Oracle Liveness Critical"/,
+    /\bname\s*=\s*"Trading Limit Tripped"/,
+  ];
+  for (const namePattern of slowRules) {
+    assert(
+      /\blocal\.notify_critical_pool_slow\b/.test(
+        ruleBlockNamed(fpmmRules, namePattern),
+      ),
+      `${namePattern} should notify through notify_critical_pool_slow`,
+    );
+  }
+  for (const namePattern of hourlyRules) {
+    assert(
+      /\blocal\.notify_critical_pool\b/.test(
+        ruleBlockNamed(fpmmRules, namePattern),
+      ),
+      `${namePattern} should stay on the hourly notify_critical_pool route`,
+    );
+  }
+});
+
+test("oracle-driven criticals group per incident, not per pool", () => {
+  const contactPoints = readFileSync(
+    path.resolve(repoRoot, "alerts/rules/contact-points.tf"),
+    "utf8",
+  );
+  const stripped = stripComments(contactPoints);
+  const [incidentRoute] = blocksFor(stripped, "notify_critical_incident = ");
+  assert(incidentRoute, "notify_critical_incident local should exist");
+  assert(
+    /\bcontact_point\s*=\s*grafana_contact_point\.slack_critical\.name/.test(
+      incidentRoute,
+    ),
+    "incident-grouped criticals should still route to #alerts-critical",
+  );
+  assert(
+    /\bgroup_by\s*=\s*\[\s*"alertname"\s*,\s*"grafana_folder"\s*,\s*"chain_id"\s*\]/.test(
+      incidentRoute,
+    ),
+    "incident grouping must drop pool_id so one upstream failure sends one message",
+  );
+  assert(
+    /\brepeat_interval\s*=\s*"1h"/.test(incidentRoute),
+    "incident grouping changes message count, not the hourly critical repeat",
+  );
+
+  // Service-scoped criticals (metrics-bridge) have no pool labels; without
+  // `alertname` they would collapse into a single folder-level group.
+  const [serviceRoute] = blocksFor(stripped, "notify_critical = ");
+  assert(serviceRoute, "notify_critical local should exist");
+  assert(
+    /\bgroup_by\s*=\s*\[[^\]]*"alertname"/.test(serviceRoute),
+    "service-scoped criticals must keep alertname in group_by",
+  );
+
+  for (const [relativePath, namePattern] of [
+    ["alerts/rules/rules-vp-oracles.tf", /"VirtualPool Oracle Stale \(prod\)"/],
+    ["alerts/rules/rules-fpmms.tf", /"Oracle Jump Far Above Swap Fee"/],
+  ]) {
+    const source = readFileSync(path.resolve(repoRoot, relativePath), "utf8");
+    const block = ruleBlockNamed(source, namePattern);
+    assert(
+      /\bcontact_point\s*=\s*local\.notify_critical_incident\.contact_point/.test(
+        block,
+      ) && !/\blocal\.notify_critical_pool\b/.test(block),
+      `${relativePath} ${namePattern} should notify through notify_critical_incident`,
+    );
+  }
+});
+
 test("CLI recognizes gauges registered by the peg listing module", () => {
   const dir = mkdtempSync(join(tmpdir(), "alert-rules-lint-test-"));
   try {
