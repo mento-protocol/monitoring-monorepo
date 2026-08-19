@@ -47,13 +47,13 @@ Use `--format issue` for GitHub Issues; do not append this report to `BACKLOG.md
 | Rough |  Raw | Delta | Status        | File                                                                         |
 | ----: | ---: | ----: | ------------- | ---------------------------------------------------------------------------- |
 |  3953 | 5665 |     0 | hard cap      | `scripts/agent-quality-gate.sh`                                              |
-|  1261 | 2105 |     0 | hard cap      | `scripts/sentry-triage-archive.mjs`                                          |
+|  1261 | 2105 |     0 | hard cap      | `scripts/sentry/triage/sentry-triage-archive.mjs`                            |
 |   982 | 1054 |     0 | near hard cap | `metrics-bridge/src/peg/poller.ts`                                           |
 |   946 | 1032 |     0 | soft cap      | `scripts/deploy-staging-callsite-discovery.mjs`                              |
 |   888 |  993 |     0 | soft cap      | `scripts/pr-ready-state-core.mjs`                                            |
 |   867 |  977 |     0 | soft cap      | `scripts/pr-ready-state.mjs`                                                 |
 |   862 |  904 |     0 | soft cap      | `scripts/deploy-staging-contract.mjs`                                        |
-|   854 | 1490 |     0 | soft cap      | `scripts/sentry-triage-ingest.mjs`                                           |
+|   854 | 1490 |     0 | soft cap      | `scripts/sentry/triage/sentry-triage-ingest.mjs`                             |
 |   844 |  901 |     0 | soft cap      | `scripts/alerts/check-peg-registry-integrity.mjs`                            |
 |   814 | 1174 |     0 | soft cap      | `indexer-envio/src/handlers/sortedOracles.ts`                                |
 |   788 | 1119 |     0 | soft cap      | `ui-dashboard/src/components/oracle-chart.tsx`                               |
@@ -78,7 +78,7 @@ Use `--format issue` for GitHub Issues; do not append this report to `BACKLOG.md
 |   599 |  619 |     0 | watch         | `indexer-envio/src/handlers/liquity/stabilityPool.ts`                        |
 |   598 |  659 |     0 | watch         | `scripts/alerts/alert-rules-lint-peg-policy.mjs`                             |
 |   593 |  711 |     0 | watch         | `metrics-bridge/src/metrics.ts`                                              |
-|   591 |  950 |     0 | watch         | `scripts/sentry-triage-project.mjs`                                          |
+|   591 |  950 |     0 | watch         | `scripts/sentry/triage/sentry-triage-project.mjs`                            |
 |   590 |  626 |     0 | watch         | `metrics-bridge/src/peg/metrics.ts`                                          |
 |   590 |  618 |     0 | watch         | `scripts/docs/docs-navigation-eval-helpers.mjs`                              |
 |   580 |  642 |     0 | watch         | `ui-dashboard/src/lib/cdp-borrowing-revenue.ts`                              |
@@ -88,14 +88,14 @@ Use `--format issue` for GitHub Issues; do not append this report to `BACKLOG.md
 |   560 |  784 |     0 | watch         | `ui-dashboard/src/app/page-client.tsx`                                       |
 |   559 |  601 |     0 | watch         | `scripts/context/docs-index-helpers.mjs`                                     |
 |   557 |  709 |     0 | watch         | `indexer-envio/src/handlers/broker.ts`                                       |
-|   555 |  951 |     0 | watch         | `scripts/sentry-triage-project-core.mjs`                                     |
-|   551 |  904 |     0 | watch         | `scripts/sentry-autofix-finalize.mjs`                                        |
+|   555 |  951 |     0 | watch         | `scripts/sentry/triage/sentry-triage-project-core.mjs`                       |
+|   551 |  904 |     0 | watch         | `scripts/sentry/autofix/sentry-autofix-finalize.mjs`                         |
 |   546 |  669 |     0 | watch         | `indexer-envio/src/pool/self-heal.ts`                                        |
 |   536 |  606 |     0 | watch         | `ui-dashboard/src/app/volume/page-client.tsx`                                |
 |   527 |  638 |     0 | watch         | `ui-dashboard/src/lib/pool-og.ts`                                            |
 |   511 |  725 |     0 | watch         | `ui-dashboard/src/components/volume-over-time-chart.tsx`                     |
-|   510 |  780 |     0 | watch         | `scripts/sentry-suite-gate.mjs`                                              |
-|   506 |  806 |     0 | watch         | `scripts/check-sentry-suites-in-ci-core.mjs`                                 |
+|   510 |  780 |     0 | watch         | `scripts/sentry/gate/sentry-suite-gate.mjs`                                  |
+|   506 |  806 |     0 | watch         | `scripts/sentry/ci-wiring/check-sentry-suites-in-ci-core.mjs`                |
 |   503 |  724 |     0 | watch         | `ui-dashboard/src/components/time-series-chart-card.tsx`                     |
 |   500 |  654 |     0 | watch         | `indexer-envio/src/handlers/wormhole/nttManager.ts`                          |
 |   494 |  620 |     0 | watch         | `aegis/src/query.service.spec.ts`                                            |
@@ -103,10 +103,10 @@ Use `--format issue` for GitHub Issues; do not append this report to `BACKLOG.md
 |   468 |  607 |     0 | watch         | `ui-dashboard/src/app/stables/_lib/aggregate.ts`                             |
 |   464 |  606 |     0 | watch         | `scripts/supply-chain/lockfile-lint-override-ranges.mjs`                     |
 |   457 |  624 |     0 | watch         | `indexer-envio/src/handlers/biPoolManager.ts`                                |
-|   452 |  776 |     0 | watch         | `scripts/check-sentry-suites-in-ci-gate-probe.mjs`                           |
+|   452 |  776 |     0 | watch         | `scripts/sentry/ci-wiring/check-sentry-suites-in-ci-gate-probe.mjs`          |
 |   443 |  609 |     0 | watch         | `ui-dashboard/src/app/peg-monitoring/_lib/peg-board-model.ts`                |
-|   397 |  699 |     0 | watch         | `scripts/sentry-triage-digest.mjs`                                           |
-|   375 |  815 |     0 | watch         | `scripts/sentry-triage-requeue.mjs`                                          |
+|   397 |  699 |     0 | watch         | `scripts/sentry/triage/sentry-triage-digest.mjs`                             |
+|   375 |  815 |     0 | watch         | `scripts/sentry/triage/sentry-triage-requeue.mjs`                            |
 |   338 |  610 |     0 | watch         | `scripts/supply-chain/override-prune-report.mjs`                             |
 |   333 |  632 |     0 | watch         | `ui-dashboard/src/lib/volume-hero.ts`                                        |
 |   291 |  648 |     0 | watch         | `scripts/workflows/check-autofix-ci-trust.mjs`                               |

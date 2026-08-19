@@ -197,7 +197,7 @@ jobs:
           # verdict job and nowhere near the agent: this job has its own runner
           # and its own pristine checkout, which no agent ever touched.
           prior_file="${RUNNER_TEMP}/prior-verdicts.json"
-          node scripts/sentry-triage-project.mjs \
+          node scripts/sentry/triage/sentry-triage-project.mjs \
             --prior-verdicts \
             --issues "${SELECTED_ISSUES}" \
             --repo "${GITHUB_REPOSITORY}" \
@@ -243,7 +243,7 @@ jobs:
   #     the payload before running its own command — defeating the immutable
   #     staged copies, since the payload runs first. There is no later step
   #     here to poison. Asserted by a test in
-  #     scripts/sentry-triage-agent-comment.test.mjs; do not add a step below
+  #     scripts/sentry/triage/sentry-triage-agent-comment.test.mjs; do not add a step below
   #     the agent.
   #   - NO SENTRY CREDENTIAL IN THE AGENT'S ENV (issue #1711). The Sentry token
   #     is step-scoped to the broker step below and is NOT job env. The agent
@@ -368,7 +368,7 @@ jobs:
       # grants compose into "write any content to any path this user can write":
       #
       #     gh issue view <n> --json number --template '<literal JavaScript>' \
-      #       > scripts/sentry-triage-agent-comment.mjs
+      #       > scripts/sentry/triage/sentry-triage-agent-comment.mjs
       #
       # That replaces the wrapper the agent is then allowed to run, defeating
       # the pinned target, the marker fences and the child-env scrub in one
@@ -385,7 +385,7 @@ jobs:
       # The closure is copied rather than inlined so the marker constants keep a
       # single owner (sentry-triage-project-core.mjs) — inlining them into the
       # wrapper is the drift this pipeline already guards against elsewhere.
-      # scripts/sentry-triage-agent-comment.test.mjs recomputes the closure from
+      # scripts/sentry/triage/sentry-triage-agent-comment.test.mjs recomputes the closure from
       # the source and fails if this list stops matching it.
       #
       # Modes are load-bearing, not decoration: 0444 files in a 0555 directory
@@ -423,15 +423,16 @@ jobs:
           # it is staged because this job must execute nothing from the
           # agent-writable checkout, and staging it keeps that true even if the
           # broker step ever moves. Its own import closure is itself; the
-          # closure check lives in scripts/sentry-mcp-broker.test.mjs.
+          # closure check lives in scripts/sentry/broker/sentry-mcp-broker.test.mjs.
           for f in \
             sentry-triage-agent-comment.mjs \
             sentry-triage-project-core.mjs \
             sentry-triage-escalation-contract.mjs \
-            sentry-triage-text.mjs \
-            sentry-mcp-broker.mjs; do
-            install -m 0444 "scripts/${f}" "${tools_dir}/${f}"
+            sentry-triage-text.mjs; do
+            install -m 0444 "scripts/sentry/triage/${f}" "${tools_dir}/${f}"
           done
+          install -m 0444 "scripts/sentry/broker/sentry-mcp-broker.mjs" \
+            "${tools_dir}/sentry-mcp-broker.mjs"
           chmod 0555 "${tools_dir}"
 
           echo "Pinned write target: ${GITHUB_REPOSITORY}#${QUEUE_ISSUE_NUMBER}"
@@ -714,7 +715,7 @@ jobs:
           # The agent's only write is the verdict comment. The label swap is
           # applied HERE, deterministically, so a prompt-injected agent cannot
           # touch labels at all. The PARSE is delegated to
-          # scripts/sentry-triage-project.mjs --parse-only — the exact same
+          # scripts/sentry/triage/sentry-triage-project.mjs --parse-only — the exact same
           # parser the projection step runs — so labeling and projection can
           # never disagree about what the verdict is (single-parser rule: a
           # sed-vs-script divergence here could apply a label and then have the
@@ -744,7 +745,7 @@ jobs:
           # Plain scripts/ is correct HERE and nowhere else in this file: this
           # job has its own runner and its own pristine checkout, which the
           # agent never touched.
-          if ! node scripts/sentry-triage-project.mjs \
+          if ! node scripts/sentry/triage/sentry-triage-project.mjs \
               --parse-only \
               --issue "${QUEUE_ISSUE_NUMBER}" \
               --repo "${GITHUB_REPOSITORY}" \
@@ -796,7 +797,7 @@ jobs:
           # #1811).
           #
           # Every compensating exit in this workflow routes through the ONE
-          # re-queue chokepoint (scripts/sentry-triage-requeue.mjs, BOOKKEEPING
+          # re-queue chokepoint (scripts/sentry/triage/sentry-triage-requeue.mjs, BOOKKEEPING
           # cause — nothing in Sentry moved), via its workflow CLI, and never an
           # open-coded label swap (#1782). The CLI owns the shed set
           # (REOPEN_SHED_LABELS, which covers the whole verdict namespace — this
@@ -811,7 +812,7 @@ jobs:
           # either way, and a compensation that itself fails should fail loudly
           # under set -e.
           requeue_for_retry() {
-            node scripts/sentry-triage-workflow-requeue.mjs \
+            node scripts/sentry/triage/sentry-triage-workflow-requeue.mjs \
               --issue "${QUEUE_ISSUE_NUMBER}" \
               --repo "${GITHUB_REPOSITORY}" \
               --reason verdict-unsettled
@@ -830,8 +831,8 @@ jobs:
           # The three other settlement paths already do this before they write
           # labels (.github/workflows/sentry-autofix.yml via
           # `sentry-autofix-finalize.mjs label-def`, runProjectionBatch in
-          # scripts/sentry-triage-project.mjs, ensureArchiveLabels in
-          # scripts/sentry-triage-archive.mjs); this step was the last one that
+          # scripts/sentry/triage/sentry-triage-project.mjs, ensureArchiveLabels in
+          # scripts/sentry/triage/sentry-triage-archive.mjs); this step was the last one that
           # did not. Best-effort per label, like theirs: the mode warns and
           # continues on a create it cannot make, so the ensure never becomes the
           # thing that kills settlement — a name that still does not exist fails
@@ -847,7 +848,7 @@ jobs:
           # it stays selectable for the next scheduled run without any
           # compensation, exactly like the --parse-only refusal. The re-queue
           # window opens at the edit, not here.
-          if ! node scripts/sentry-triage-project.mjs \
+          if ! node scripts/sentry/triage/sentry-triage-project.mjs \
               --ensure-labels "${label},${shed},sentry:needs-triage" \
               --repo "${GITHUB_REPOSITORY}" \
               > "${RUNNER_TEMP}/verdict-label-ensure.json"; then
@@ -944,7 +945,7 @@ jobs:
       #     the project job skips a non-actionable/local outcome, and ingest's
       #     regression gate only reopens CLOSED stubs (#1769 round 16). So the
       #     clear-failure branch also RESTORES selectability through the single
-      #     re-queue chokepoint (scripts/sentry-triage-requeue.mjs, BOOKKEEPING
+      #     re-queue chokepoint (scripts/sentry/triage/sentry-triage-requeue.mjs, BOOKKEEPING
       #     cause — nothing in Sentry moved), never an open-coded label swap:
       #     block-the-close AND restore-select together. The chokepoint is
       #     idempotent and OPEN-safe (verify-end-state reopens only a closed stub),
@@ -961,7 +962,7 @@ jobs:
           # Plain scripts/ is correct HERE for the same reason as the label
           # step above: this job has its own runner and its own pristine
           # checkout, which the agent never touched.
-          if ! node scripts/sentry-triage-brief.mjs \
+          if ! node scripts/sentry/triage/sentry-triage-brief.mjs \
               --issue "${QUEUE_ISSUE_NUMBER}" \
               --repo "${GITHUB_REPOSITORY}"; then
             if [ "${VERDICT}" = "needs-human" ]; then
@@ -978,7 +979,7 @@ jobs:
               # `sentry:archived` and reopen a retry stub over an already-archived
               # Sentry issue that consumed a human approval (#1782). A re-queue
               # that itself fails is surfaced but must not stop the close-block.
-              if ! node scripts/sentry-triage-workflow-requeue.mjs \
+              if ! node scripts/sentry/triage/sentry-triage-workflow-requeue.mjs \
                   --issue "${QUEUE_ISSUE_NUMBER}" \
                   --repo "${GITHUB_REPOSITORY}" \
                   --reason brief-clear-failure; then
@@ -1000,7 +1001,7 @@ jobs:
       # at query time). The
       # comment text is fixed; the only variables are closed-enum values —
       # never agent-authored text. Regression reopens closed issues
-      # automatically (Stage A's reopen path in scripts/sentry-triage-ingest.mjs)
+      # automatically (Stage A's reopen path in scripts/sentry/triage/sentry-triage-ingest.mjs)
       # — see docs/notes/sentry-triage-pipeline.md.
       # -----------------------------------------------------------------------
       - name: Close queue stub (deterministic)
@@ -1056,7 +1057,7 @@ jobs:
           # leaves the stub correctly settled instead of manufacturing the
           # closed-plus-needs-triage pairing no pipeline stage can see. Ingest's
           # stranded-stub sweep (isStrandedNeedsTriage in
-          # scripts/sentry-triage-ingest.mjs) still repairs that pairing from the
+          # scripts/sentry/triage/sentry-triage-ingest.mjs) still repairs that pairing from the
           # producers that can still write it — the archive leg's refusal, a
           # crash inside ingest's own reopen, a hand-edit.
           if ! gh issue close "${QUEUE_ISSUE_NUMBER}" \
@@ -1064,7 +1065,7 @@ jobs:
             --reason completed \
             --comment "Triage complete: ${VERDICT}.${projection_note} Ledger entry closed; reopens automatically on Sentry regression."; then
             echo "::error::Failed to close issue #${QUEUE_ISSUE_NUMBER}; re-queuing it through the re-queue chokepoint (restore sentry:needs-triage, shed ${VERDICT_LABEL} + the other stale markers) for retry."
-            node scripts/sentry-triage-workflow-requeue.mjs \
+            node scripts/sentry/triage/sentry-triage-workflow-requeue.mjs \
               --issue "${QUEUE_ISSUE_NUMBER}" \
               --repo "${GITHUB_REPOSITORY}" \
               --reason close-failure
@@ -1137,7 +1138,7 @@ jobs:
           # (diagnostics on stderr); every value consumed below is closed-enum
           # or a gh-derived URL — never agent-authored text.
           results_file="${RUNNER_TEMP}/projection-results.json"
-          node scripts/sentry-triage-project.mjs \
+          node scripts/sentry/triage/sentry-triage-project.mjs \
             --batch \
             --repo "${GITHUB_REPOSITORY}" \
             --issues "${SENTRY_TRIAGE_ISSUES}" \
@@ -1145,7 +1146,7 @@ jobs:
 
           # (The batch script self-heals the sentry:projected label from
           # Stage A's LABEL_DEFINITIONS before settling — see
-          # runProjectionBatch in scripts/sentry-triage-project.mjs.)
+          # runProjectionBatch in scripts/sentry/triage/sentry-triage-project.mjs.)
 
           # Every compensating exit in this job re-queues through the ONE
           # chokepoint's workflow CLI (#1782), never an open-coded label swap:
@@ -1160,7 +1161,7 @@ jobs:
           # A compensation failure turns the job red and is called out for manual
           # repair instead of stranding the rest of the batch.
           requeue_row() {
-            if ! node scripts/sentry-triage-workflow-requeue.mjs \
+            if ! node scripts/sentry/triage/sentry-triage-workflow-requeue.mjs \
               --issue "$1" \
               --repo "${GITHUB_REPOSITORY}" \
               --reason "$2"; then
@@ -1282,7 +1283,7 @@ jobs:
           # --repo: same source of truth as the select/triage jobs
           # (GITHUB_REPOSITORY), so the digest reads the run's own repository
           # instead of assuming the script's default (matters on forks/renames).
-          node scripts/sentry-triage-digest.mjs \
+          node scripts/sentry/triage/sentry-triage-digest.mjs \
             --channel '#engineering' \
             --repo "${GITHUB_REPOSITORY}" \
             > "${RUNNER_TEMP}/digest-payload.json"

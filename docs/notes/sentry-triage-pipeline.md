@@ -25,14 +25,14 @@ enabling or operating a later stage.
 
 ## Authority and stage map
 
-| Stage                    | Owner                                                                              | Schedule or trigger                                    | Writes                                                                   |
-| ------------------------ | ---------------------------------------------------------------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------ |
-| Ingest                   | `.github/workflows/sentry-triage-ingest.yml`, `scripts/sentry-triage-ingest.mjs`   | 05:30 and 13:30 UTC daily; manual dispatch from `main` | Redacted queue issues and the ingest run record                          |
-| Triage                   | `.github/workflows/sentry-triage-agent.yml`, `.github/prompts/sentry-triage.md`    | 07:55 UTC weekdays; manual dispatch must select `main` | One verdict comment per selected issue                                   |
-| Deterministic settlement | `scripts/sentry-triage-project-core.mjs`, `scripts/sentry-triage-project.mjs`      | After each triage batch                                | Verdict labels, queue closure, and optional owning-repo issue projection |
-| Autofix                  | `.github/workflows/sentry-autofix.yml`, `.github/prompts/sentry-autofix.md`        | 08:30 UTC weekdays; manual dispatch from `main`        | A scoped branch and PR for eligible local code fixes                     |
-| Archive                  | `.github/workflows/sentry-triage-archive.yml`, `scripts/sentry-triage-archive.mjs` | Human approval label or manual dispatch from `main`    | Sentry `archived_until_escalating` state and a queue audit record        |
-| Staleness watch          | `alerts/infra/sentry-ingest-watcher/`, `alerts/infra/monitoring.tf`                | Hourly Cloud Scheduler job, outside GitHub Actions     | A Cloud Monitoring freshness gauge; alerts `#alerts-infra`               |
+| Stage                    | Owner                                                                                                     | Schedule or trigger                                    | Writes                                                                   |
+| ------------------------ | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------ |
+| Ingest                   | `.github/workflows/sentry-triage-ingest.yml`, `scripts/sentry/triage/sentry-triage-ingest.mjs`            | 05:30 and 13:30 UTC daily; manual dispatch from `main` | Redacted queue issues and the ingest run record                          |
+| Triage                   | `.github/workflows/sentry-triage-agent.yml`, `.github/prompts/sentry-triage.md`                           | 07:55 UTC weekdays; manual dispatch must select `main` | One verdict comment per selected issue                                   |
+| Deterministic settlement | `scripts/sentry/triage/sentry-triage-project-core.mjs`, `scripts/sentry/triage/sentry-triage-project.mjs` | After each triage batch                                | Verdict labels, queue closure, and optional owning-repo issue projection |
+| Autofix                  | `.github/workflows/sentry-autofix.yml`, `.github/prompts/sentry-autofix.md`                               | 08:30 UTC weekdays; manual dispatch from `main`        | A scoped branch and PR for eligible local code fixes                     |
+| Archive                  | `.github/workflows/sentry-triage-archive.yml`, `scripts/sentry/triage/sentry-triage-archive.mjs`          | Human approval label or manual dispatch from `main`    | Sentry `archived_until_escalating` state and a queue audit record        |
+| Staleness watch          | `alerts/infra/sentry-ingest-watcher/`, `alerts/infra/monitoring.tf`                                       | Hourly Cloud Scheduler job, outside GitHub Actions     | A Cloud Monitoring freshness gauge; alerts `#alerts-infra`               |
 
 Staleness watch is the only row that does not run in GitHub Actions, and that
 is the whole point: a scheduler that dies silently cannot report its own death.
@@ -58,11 +58,11 @@ ADRs own the trust boundaries and rationale. Update those sources and this
 runbook together when a contract changes.
 
 Two shared modules sit under the stages above.
-`scripts/sentry-triage-project-core.mjs` owns the VERDICT contract — markers,
+`scripts/sentry/triage/sentry-triage-project-core.mjs` owns the VERDICT contract — markers,
 parsing, and the two comment selectors every fence is asked through.
-`scripts/sentry-triage-queue-contract.mjs` owns the QUEUE contract — the label
+`scripts/sentry/triage/sentry-triage-queue-contract.mjs` owns the QUEUE contract — the label
 namespace, the untrusted-text neutralization, and the archive freshness-baseline
-fields. `scripts/sentry-triage-requeue.mjs` is the one place a queue stub is ever
+fields. `scripts/sentry/triage/sentry-triage-requeue.mjs` is the one place a queue stub is ever
 re-queued for triage; both producers call it and neither reconstructs the
 sequence.
 
@@ -157,7 +157,7 @@ Ingest queries unresolved issues for the `mento-labs` organization on three
 axes: newly seen, regressed, and **escalating**. The last is separate because
 Sentry's grammar treats `is:regressed` and `is:escalating` as distinct filters
 and the archive leg only ever produces the second (#1765). The project set, mapping, pagination, default lookback, and noise
-heuristics are owned by `scripts/sentry-triage-ingest.mjs`; do not duplicate
+heuristics are owned by `scripts/sentry/triage/sentry-triage-ingest.mjs`; do not duplicate
 those lists here.
 
 Each Sentry group maps to one queue issue:
@@ -199,12 +199,12 @@ bulk:
 
 That write order is load-bearing at both ends, and no stage writes it by hand.
 Every re-queue in the pipeline runs through one function,
-`requeueQueueStub` in `scripts/sentry-triage-requeue.mjs`, which takes the CAUSE
+`requeueQueueStub` in `scripts/sentry/triage/sentry-triage-requeue.mjs`, which takes the CAUSE
 as an argument and decides the fence from it. The triage agent workflow reaches
-it through `scripts/sentry-triage-workflow-requeue.mjs`, the CLI every
+it through `scripts/sentry/triage/sentry-triage-workflow-requeue.mjs`, the CLI every
 compensating exit in that workflow calls with a `--reason`; an open-coded label
 swap anywhere in the workflow reds a shape test in
-`scripts/sentry-triage-brief.test.mjs`. Because every caller's premise is a
+`scripts/sentry/triage/sentry-triage-brief.test.mjs`. Because every caller's premise is a
 snapshot of a failure it already observed, that CLI revalidates live state and
 DECLINES when the stub has gone terminal — CLOSED, or carrying
 `sentry:archived` because the archive leg completed in between — rather than
@@ -420,8 +420,8 @@ only "is the cause in our code?" and the autofix leg needs "does a scoped fix
 exist?" (issue #1785). `mechanical` is a bounded edit to files the agent can
 name, reviewable without a design discussion; `architectural` moves a boundary,
 spans modules, or needs the design decision taken first. `normalizeFixScope` in
-`scripts/sentry-triage-text.mjs` (re-exported from
-`scripts/sentry-triage-project-core.mjs`) is the single owner of the rule and
+`scripts/sentry/triage/sentry-triage-text.mjs` (re-exported from
+`scripts/sentry/triage/sentry-triage-project-core.mjs`) is the single owner of the rule and
 **fails closed**: absent, empty, anything outside those two words, or a REPEATED
 `fix_scope:` key normalizes to `architectural`. The repeat rule is not
 theoretical: a block scalar ends at the first column-0 line, so agent-transcribed
@@ -480,16 +480,16 @@ deterministic: nothing else in the contract carries the instruction half of a
 decision, so without them a rendered brief can only restate the situation. Both
 are enforced, counted after neutralization, by
 `escalationCompletenessRefusal` in
-`scripts/sentry-triage-escalation-contract.mjs`: at least one `how_to_check`
+`scripts/sentry/triage/sentry-triage-escalation-contract.mjs`: at least one `how_to_check`
 step, and at least **two** `decision_branches` — a decision has at least two
 answers, and a one-branch escalation settles with the brief silent on the other
 one and no retry, because the verdict resolved cleanly. Failing either is the
 same fail-loud contract as a missing verdict: the label step exits nonzero and
 `sentry:needs-triage` stays on for the next run.
 Every list is capped at `MAX_BRIEF_LIST_ITEMS` (in
-`scripts/sentry-triage-project-core.mjs`), and every field is bounded at
+`scripts/sentry/triage/sentry-triage-project-core.mjs`), and every field is bounded at
 `MAX_BRIEF_TEXT_LEN` before either emitter escapes it. The bounds and the
-untrusted-text neutralization live in `scripts/sentry-triage-text.mjs` — the
+untrusted-text neutralization live in `scripts/sentry/triage/sentry-triage-text.mjs` — the
 pipeline's lowest layer, importing nothing — and are re-exported by the verdict
 contract, so every caller keeps one import surface and the two briefs cannot
 drift. For a `needs-human` verdict the prose after the YAML block is at most
@@ -498,12 +498,12 @@ pushes the decision further down the page.
 
 ### The needs-human brief
 
-`scripts/sentry-triage-brief.mjs` renders those fields as a dedicated,
+`scripts/sentry/triage/sentry-triage-brief.mjs` renders those fields as a dedicated,
 updated-in-place **comment** on the queue stub, in a fixed order — question, how
 to check, what each answer leads to, evidence collapsed underneath. The
 `verdict` job runs it right after the label swap, so a stub a person is asked to
 decide carries the decision beside its YAML. The digest's Slack brief
-(`renderNeedsHumanBrief` in `scripts/sentry-triage-digest.mjs`) is the second
+(`renderNeedsHumanBrief` in `scripts/sentry/triage/sentry-triage-digest.mjs`) is the second
 emitter over the same shared field selection; only the escaping differs —
 Slack gets `escapeSlackText`, GitHub gets `escapeGithubMarkdown`, which
 backslash-escapes every active markdown character so agent-authored text can
@@ -534,7 +534,7 @@ renders reads as current to whoever opens the issue:
   brief in place for a later close to bury;
 - a re-queue does **not** clear it: the re-queue chokepoint leaves the marked
   brief comment untouched. It writes no stub BODY — that is the invariant
-  `scripts/sentry-triage-requeue.test.mjs` pins (issue #1692) — but it may post
+  `scripts/sentry/triage/sentry-triage-requeue.test.mjs` pins (issue #1692) — but it may post
   its OWN comment: a regression-fence comment for a `sentry-evidence` re-queue,
   a bookkeeping note otherwise (see the regression fence below). So a re-queued
   stub keeps its old brief until the next round's verdict lands — on a stub
@@ -553,7 +553,7 @@ could be misread by a prefix-anchored consumer fails closed.
 
 The agent posts its verdict comment — never the brief, which `runBrief` writes
 separately through its own `gh` calls — through
-`scripts/sentry-triage-agent-comment.mjs`, its only write path. The wrapper
+`scripts/sentry/triage/sentry-triage-agent-comment.mjs`, its only write path. The wrapper
 accepts no issue argument, and does not take the target from the environment
 either: bash arithmetic expansion assigns, so a body containing
 `$((SENTRY_TRIAGE_COMMENT_ISSUE=1234))` rewrites the exported variable while
@@ -571,9 +571,9 @@ to any path this user can write" — including over the wrapper itself. The same
 trusted step therefore copies the wrapper's whole runtime import closure into a
 read-only `sentry-triage-tools` directory under `$RUNNER_TEMP`, and the agent's
 `--allowedTools` grant names **that** path, never `scripts/`.
-`scripts/sentry-triage-agent-comment.test.mjs` recomputes the closure from the
+`scripts/sentry/triage/sentry-triage-agent-comment.test.mjs` recomputes the closure from the
 source and fails if the staging list stops matching it, so the attack cannot
-move one file over. `scripts/sentry-mcp-broker.mjs` is staged alongside it even
+move one file over. `scripts/sentry/broker/sentry-mcp-broker.mjs` is staged alongside it even
 though no grant names it: the rule for this job is that it executes nothing from
 the agent-writable checkout, and a rule with an ordering caveat is one refactor
 away from being wrong. The agent job's checkout also sets
@@ -637,7 +637,7 @@ auditable public comment. Re-check on the next action bump.
 accepted residuals; this is the mechanism.
 
 A trusted step in the triage job — before the agent, holding
-`SENTRY_TRIAGE_TOKEN` step-scoped — starts `scripts/sentry-mcp-broker.mjs` on
+`SENTRY_TRIAGE_TOKEN` step-scoped — starts `scripts/sentry/broker/sentry-mcp-broker.mjs` on
 loopback and mints an opaque per-run handle with `openssl rand -hex 32`. The
 agent step receives the handle through `$GITHUB_ENV` and no Sentry credential.
 Its Sentry MCP server runs with `--host 127.0.0.1:<port> --insecure-http` and
@@ -669,7 +669,7 @@ agent can read.
 GitHub expands `${{ }}` before writing the step script to `$RUNNER_TEMP`, so an
 inline secret sits in plaintext on disk for the whole job — the same
 same-UID-readable class as `/proc`. Audited across all 31 workflows: zero hits,
-and a test in `scripts/sentry-mcp-broker.test.mjs` keeps this workflow that way.
+and a test in `scripts/sentry/broker/sentry-mcp-broker.test.mjs` keeps this workflow that way.
 
 The broker refuses anything that is not a GET on an allow-listed path with the
 exact handle, and refuses to relay an upstream redirect (the MCP client would
@@ -870,7 +870,7 @@ AUTOFIX `workflow_dispatch` does NOT override the gate either — the scope is a
 claim about the fix, not a heuristic about which family member to pick, so
 overriding it would spend exactly the agent run the field exists to prevent.
 Re-queueing has one owner (`requeueQueueStub` in
-`scripts/sentry-triage-requeue.mjs`), a pure chokepoint module with no argv shell.
+`scripts/sentry/triage/sentry-triage-requeue.mjs`), a pure chokepoint module with no argv shell.
 
 **Legacy stubs stay CLOSED** (operator resolution). A local architectural stub
 was CLOSED at verdict time; the record-run backfill only adds the
@@ -1154,9 +1154,9 @@ The arithmetic that sizes it: 521 (first pass) + 1 list invocation + 2×100 read
 
 **Fail closed on rate limiting.** Nearly every read in this leg fails SOFT toward
 MORE candidates — `readStub` and `openAutofixPrExists` in
-`scripts/sentry-autofix-candidate.mjs`, the per-id handled lookups in
-`scripts/sentry-autofix-family-handled.mjs`, the reverse probes in
-`scripts/sentry-autofix-reverse-verify.mjs`. That is the right trade for a
+`scripts/sentry/autofix/sentry-autofix-candidate.mjs`, the per-id handled lookups in
+`scripts/sentry/autofix/sentry-autofix-family-handled.mjs`, the reverse probes in
+`scripts/sentry/autofix/sentry-autofix-reverse-verify.mjs`. That is the right trade for a
 transient blip (one self-terminating extra attempt), but the blockers those reads
 look for ARE the dedupe signals, so a throttled read is indistinguishable from
 "no blocker found" — and a rate-limited run can open **duplicate** autofix PRs
@@ -1737,16 +1737,16 @@ broke in its summary table.
 
 That job (no `if:`, in `ci.needs` and absent from `alls-green` `allowed-skips`,
 so it can never be skipped) runs the suites and proves they ran (ADR 0062). It
-executes `node scripts/sentry-suite-gate.mjs`,
-which reconciles the `scripts/sentry-*.test.mjs` files against
-`scripts/sentry-suite-manifest.json` by exact set equality (in both directions)
+executes `node scripts/sentry/gate/sentry-suite-gate.mjs`,
+which reconciles every `sentry-*.test.mjs` file found anywhere under `scripts/`
+against `scripts/sentry/gate/sentry-suite-manifest.json` by exact set equality (in both directions)
 and, for each non-exempt suite, asserts child exit 0, parsed `fail == 0`, parsed
 `pass >= floor`, and `pass ==` the per-case lines it emitted — so a suite that
 exits 0 without asserting fails the gate. The gate is dependency-free, runs with
 no `pnpm install` before it, and its own three suites
-(`scripts/sentry-suite-gate.test.mjs`,
-`scripts/sentry-suite-gate-integrity.test.mjs` and
-`scripts/sentry-suite-gate-isolation.test.mjs`) are enumerated and run like any
+(`scripts/sentry/gate/sentry-suite-gate.test.mjs`,
+`scripts/sentry/gate/sentry-suite-gate-integrity.test.mjs` and
+`scripts/sentry/gate/sentry-suite-gate-isolation.test.mjs`) are enumerated and run like any
 other.
 
 Each suite runs from its OWN copy of the derived input set, and every copy is
@@ -1761,7 +1761,7 @@ immediately before its child runs, and the shared checkout is swept afterwards,
 so a suite that writes there is named even though it can no longer change a
 verdict.
 
-`scripts/check-sentry-suites-in-ci.test.mjs` is the gate's static half and runs
+`scripts/sentry/ci-wiring/check-sentry-suites-in-ci.test.mjs` is the gate's static half and runs
 as the last step of the same job, after the install it needs for `js-yaml`. It
 carries what the gate cannot see: that the gate job still exists, is
 unconditional, matches ADR 0062's canonical shape key for key, and reaches the
@@ -1779,16 +1779,16 @@ indexer or a non-Markdown doc asset skipped it, and dropped the per-suite steps
 that job used to duplicate. Reproduce the whole CI job with:
 
 ```bash
-# The gate, which runs every scripts/sentry-*.test.mjs and asserts each one
-# actually ran. The `env -u` prefix matches the CI step and is what lets it run
+# The gate, which runs every sentry-*.test.mjs found anywhere under scripts/
+# and asserts each one actually ran. The `env -u` prefix matches the CI step and is what lets it run
 # under an ambient NODE_OPTIONS — without it the gate refuses to start by design:
-/usr/bin/env -u NODE_OPTIONS -u NODE_PATH node scripts/sentry-suite-gate.mjs
-node scripts/check-sentry-suites-in-ci.test.mjs
+/usr/bin/env -u NODE_OPTIONS -u NODE_PATH node scripts/sentry/gate/sentry-suite-gate.mjs
+node scripts/sentry/ci-wiring/check-sentry-suites-in-ci.test.mjs
 ```
 
 To run one suite on its own — the gate names the file it failed on — invoke it
-by path, e.g. `node scripts/sentry-triage-ingest.test.mjs` or
-`node --test scripts/sentry-mcp-broker.test.mjs`.
+by path, e.g. `node scripts/sentry/triage/sentry-triage-ingest.test.mjs` or
+`node --test scripts/sentry/broker/sentry-mcp-broker.test.mjs`.
 
 The `pnpm sentry:*:test` aliases still run these suites for interactive use and
 in the local pre-push gate; the CI gate is the backstop, and the pin validator

@@ -222,7 +222,7 @@ cloud-routine experiment ran for weeks producing nothing and nobody noticed.
 - The watcher pins the marker version `run-record:v1`. A `v2` bump that lands
   without updating the watcher makes it fail closed and alert — deliberate, so
   the contract cannot drift silently. `RUN_RECORD_MARKER` in
-  `scripts/sentry-triage-ingest.mjs` carries the matching note
+  `scripts/sentry/triage/sentry-triage-ingest.mjs` carries the matching note
 - `sentry-triage-ingest-stale` alerts `#alerts-infra` on two conditions that
   divide cleanly. A threshold condition owns _ingest is stale and the watcher
   is still reporting_: the gauge exceeds 26h (ingest runs 2x/day and GitHub's

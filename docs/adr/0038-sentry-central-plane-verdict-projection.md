@@ -66,7 +66,7 @@ deterministic step.**
   dataset are preserved.
 - **Verdict projection (deterministic, no LLM, SERIALIZED).** A dedicated
   `project` job in `.github/workflows/sentry-triage-agent.yml`, driven by
-  `scripts/sentry-triage-project.mjs --batch`, runs after the whole triage
+  `scripts/sentry/triage/sentry-triage-project.mjs --batch`, runs after the whole triage
   matrix and processes the batch's actionable external verdicts one at a time
   in one process. Serialization plus an in-run registry kills the
   duplicate-family double-file race (a just-created issue is not searchable
@@ -156,11 +156,11 @@ deterministic step.**
 - Implemented for issue
   [#1339](https://github.com/mento-protocol/monitoring-monorepo/issues/1339)
   in PR #1356:
-  `scripts/sentry-triage-project.mjs` (+ tests), the projection/close steps in
+  `scripts/sentry/triage/sentry-triage-project.mjs` (+ tests), the projection/close steps in
   `.github/workflows/sentry-triage-agent.yml`, the `count`-gated
   `github_actions_secret.sentry_projection_token` in
   `terraform/github-secrets.tf` (+ variable + tfvars.example), the
-  `sentry:projected` label bootstrap in `scripts/sentry-triage-ingest.mjs`, and
+  `sentry:projected` label bootstrap in `scripts/sentry/triage/sentry-triage-ingest.mjs`, and
   the `## Verdict projection` section + runbook + diagrams in
   `docs/notes/sentry-triage-pipeline.md`.
 - First-run correlation evidence: four governance Sentry groups clustered into
