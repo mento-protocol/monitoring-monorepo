@@ -123,8 +123,19 @@ export function validate(args, env = process.env) {
       exitCode: 1,
     };
   }
+  // Safe-integer checked as well as all-digits, for the same reason as the
+  // timeout override below: a long enough run of digits becomes Infinity
+  // through Number(), and here that silently disables the cadence branch of
+  // shouldEmitCompact — the compact watch would then print only on a state
+  // change and on the final render. Bash's arithmetic wrapped instead, making
+  // the branch always true, so the shell's failure was a noisy watch. Silence
+  // is the worse of the two, which is why this is checked and not carried over.
   const fixed = env.ENVIO_SYNC_COMPACT_EMIT_SECONDS;
-  if (fixed !== undefined && fixed !== "" && !/^[0-9]+$/.test(fixed)) {
+  if (
+    fixed !== undefined &&
+    fixed !== "" &&
+    (!/^[0-9]+$/.test(fixed) || !Number.isSafeInteger(Number(fixed)))
+  ) {
     return {
       ok: false,
       stdout: [],

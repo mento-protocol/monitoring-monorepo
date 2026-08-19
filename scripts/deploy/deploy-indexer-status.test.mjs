@@ -107,12 +107,17 @@ assert.deepEqual(compactOnly.stderr, ["❌ --compact requires --watch"]);
 assert.equal(validate({ compact: true, watch: true }, {}).ok, true);
 assert.equal(validate({ compact: false, watch: false }, {}).ok, true);
 
-const badCadence = validate(
-  { compact: true, watch: true },
-  { ENVIO_SYNC_COMPACT_EMIT_SECONDS: "abc" },
-);
-assert.equal(badCadence.ok, false);
-assert.match(badCadence.stderr[0], /must be an integer number of seconds/);
+// Same rejects as the timeout override, including the all-digits value that
+// overflows to Infinity: there it would disable the cadence branch of
+// shouldEmitCompact, leaving the compact watch silent between state changes.
+for (const bad of ["abc", "Infinity", "-5", "1.5", "1e3", "9".repeat(400)]) {
+  const badCadence = validate(
+    { compact: true, watch: true },
+    { ENVIO_SYNC_COMPACT_EMIT_SECONDS: bad },
+  );
+  assert.equal(badCadence.ok, false, `${bad} must be refused`);
+  assert.match(badCadence.stderr[0], /must be an integer number of seconds/);
+}
 assert.equal(
   validate(
     { compact: true, watch: true },
