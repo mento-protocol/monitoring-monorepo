@@ -44,6 +44,7 @@ import {
   PROTOCOL_VERSION,
   REQUIRED_TOOLS,
   drainMessages,
+  encodeAnnotation,
   missingTools,
   probeSentryToolset,
   resolveProbeConfig,
@@ -1371,8 +1372,13 @@ test("the probe runs the immutable staged copy, before the agent", () => {
     join(dirname(fileURLToPath(import.meta.url)), "sentry-mcp-probe.mjs"),
     "utf8",
   );
+  // Every relative form, not just `from "./x"`: a `../` specifier and a
+  // side-effect `import "./x"` (which has no `from` at all) would each add a
+  // file to the runtime closure that the staging step does not copy, and the
+  // probe would then die inside the trusted step with ERR_MODULE_NOT_FOUND.
   assert.equal(
-    [...source.matchAll(/from\s+["'](\.\/[^"']+)["']/g)].length,
+    [...source.matchAll(/(?:from|import)\s*\(?\s*["'](\.{1,2}\/[^"']+)["']/g)]
+      .length,
     0,
     "the probe grew a relative import; the staging step must carry it too",
   );
@@ -1402,6 +1408,45 @@ test("the probe runs the immutable staged copy, before the agent", () => {
     probeAt < job.indexOf("anthropics/claude-code-action@"),
     "the probe must run BEFORE the agent it gates",
   );
+});
+
+test("the closure assertion catches every relative import form", () => {
+  // The narrow `from "./x"` pattern this started as would miss both of these,
+  // and either one silently breaks the probe inside the trusted step.
+  const pattern = /(?:from|import)\s*\(?\s*["'](\.{1,2}\/[^"']+)["']/g;
+  for (const form of [
+    'import { x } from "./sibling.mjs";',
+    'import { x } from "../parent.mjs";',
+    'import "./side-effect.mjs";',
+    'const m = await import("./dynamic.mjs");',
+  ]) {
+    assert.equal(
+      [...form.matchAll(pattern)].length,
+      1,
+      `the closure pattern missed: ${form}`,
+    );
+  }
+  // node: builtins and bare specifiers are not relative and must not match.
+  for (const form of [
+    'import test from "node:test";',
+    'import x from "some-package";',
+  ]) {
+    assert.equal(
+      [...form.matchAll(pattern)].length,
+      0,
+      `false positive: ${form}`,
+    );
+  }
+});
+
+test("an annotation reason survives its newlines", () => {
+  // A workflow command ends at the first newline, and the reason carries the
+  // server's stderr — so an unencoded message would drop the part that says why.
+  assert.equal(encodeAnnotation("a\nb"), "a%0Ab");
+  assert.equal(encodeAnnotation("a\r\nb"), "a%0D%0Ab");
+  // `%` first, or the escapes introduced above would be double-encoded.
+  assert.equal(encodeAnnotation("100%\ndone"), "100%25%0Adone");
+  assert.equal(encodeAnnotation(undefined), "");
 });
 
 test("the probe stays under the 600-line soft cap", () => {

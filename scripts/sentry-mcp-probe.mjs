@@ -165,8 +165,7 @@ export function toolNames(result) {
 export function missingTools(present, required = REQUIRED_TOOLS) {
   const names = new Set(present.map((name) => String(name)));
   const has = (want) =>
-    names.has(want) ||
-    [...names].some((name) => name.endsWith(`__${want}`) || name === want);
+    names.has(want) || [...names].some((name) => name.endsWith(`__${want}`));
   return required.filter((want) => !has(want));
 }
 
@@ -304,6 +303,21 @@ export async function probeSentryToolset({
   return tools;
 }
 
+/**
+ * Encode a reason for a `::error::` workflow command.
+ *
+ * A workflow command ENDS at the first newline, and this reason usually carries
+ * the MCP server's stderr — so an unencoded multi-line message would put its
+ * first line in the annotation and spill the rest into the log as loose text,
+ * losing exactly the part that says why the toolset never came up.
+ */
+export function encodeAnnotation(message) {
+  return String(message ?? "")
+    .replaceAll("%", "%25")
+    .replaceAll("\r", "%0D")
+    .replaceAll("\n", "%0A");
+}
+
 /** True when this module is the process entry point (not an import). */
 export function isEntryPoint(argv1, moduleUrl) {
   if (!argv1) return false;
@@ -320,7 +334,7 @@ async function main() {
     console.log(`Sentry MCP toolset registered: ${tools.join(", ")}`);
   } catch (error) {
     console.log(
-      `::error::Sentry MCP pre-flight failed; refusing to start the triage agent without its evidence source. ${error.message}`,
+      `::error::Sentry MCP pre-flight failed; refusing to start the triage agent without its evidence source. ${encodeAnnotation(error.message)}`,
     );
     process.exitCode = 1;
   }
