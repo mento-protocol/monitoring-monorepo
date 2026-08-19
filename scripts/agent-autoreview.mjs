@@ -2268,6 +2268,17 @@ function aggregateInputLimitError(label) {
   return error;
 }
 
+// `runGitBufferResult` pins `-c diff.renames=false`, so every stat and patch
+// below overrides it with `--find-renames` at Git's default similarity floor,
+// for the reason the wrapper's capture block records: a bulk move otherwise
+// renders as delete+add pairs and deterministically exhausts the aggregate
+// limit. Git elides content only at similarity index 100%, and pairs an added
+// path only with a deleted one, so a rename header can never stand in for
+// content this branch introduces. A rename carrying edits still emits its
+// hunks, so they are bundled, chunked, and scanned exactly like any other
+// change. `-l5000` owns the rename candidate limit, finite for the reason the
+// wrapper's capture block records. `changedPaths` keeps the pin, so a move's
+// source path still reaches the sensitive-path refusal.
 function gitBundlePart(collector, label, repo, gitArgs) {
   const maxBuffer = Math.max(
     1024,
@@ -2296,6 +2307,8 @@ function appendLocalBundle(repo, target, collector) {
     "--cached",
     target.head,
     "--stat",
+    "--find-renames",
+    "-l5000",
     "--",
   ]);
   gitBundlePart(collector, "staged diff", repo, [
@@ -2305,7 +2318,8 @@ function appendLocalBundle(repo, target, collector) {
     "--cached",
     target.head,
     "--patch",
-    "--no-renames",
+    "--find-renames",
+    "-l5000",
     "--",
   ]);
   collector.add("unstaged diff heading", "# Unstaged Diff");
@@ -2314,13 +2328,16 @@ function appendLocalBundle(repo, target, collector) {
     "--no-ext-diff",
     "--no-textconv",
     "--stat",
+    "--find-renames",
+    "-l5000",
   ]);
   gitBundlePart(collector, "unstaged diff", repo, [
     "diff",
     "--no-ext-diff",
     "--no-textconv",
     "--patch",
-    "--no-renames",
+    "--find-renames",
+    "-l5000",
   ]);
   const untracked = gitPathList(repo, [
     "ls-files",
@@ -2364,6 +2381,8 @@ function appendBranchBundle(repo, target, collector) {
     "--no-ext-diff",
     "--no-textconv",
     "--stat",
+    "--find-renames",
+    "-l5000",
     `${target.ref}...${target.head}`,
     "--",
   ]);
@@ -2372,7 +2391,8 @@ function appendBranchBundle(repo, target, collector) {
     "--no-ext-diff",
     "--no-textconv",
     "--patch",
-    "--no-renames",
+    "--find-renames",
+    "-l5000",
     `${target.ref}...${target.head}`,
     "--",
   ]);
@@ -2401,6 +2421,8 @@ function commitBundle(repo, commitRef) {
     "--no-ext-diff",
     "--no-textconv",
     "--stat",
+    "--find-renames",
+    "-l5000",
     "--format=fuller",
     "--end-of-options",
     commitRef,
@@ -2411,7 +2433,8 @@ function commitBundle(repo, commitRef) {
     "--no-ext-diff",
     "--no-textconv",
     "--patch",
-    "--no-renames",
+    "--find-renames",
+    "-l5000",
     "--format=fuller",
     "--end-of-options",
     commitRef,
@@ -4129,6 +4152,45 @@ function nonTestPath(relativePath) {
   );
 }
 
+// `--numstat -z` states one record as `added TAB deleted TAB path NUL`, and a
+// detected rename as `added TAB deleted TAB NUL preimage NUL postimage NUL` —
+// an empty path field followed by the two paths as fields of their own.
+// Reading them structurally is what makes classification correct: without `-z`
+// the same rename renders as `old => new` inside the path column, and a file
+// whose own name contains ` => ` is then indistinguishable from a rename. Such
+// a name is legal, and mis-splitting it hands the wrong half to `nonTestPath`.
+// Classification wants the postimage: a file moved out of a test path is not
+// test churn any more, and one moved into a test path is.
+function parseNumstatRecords(source) {
+  const fields = source.split("\0");
+  const records = [];
+  let index = 0;
+  while (index < fields.length) {
+    const match = fields[index].match(/^(\d+|-)\t(\d+|-)\t([\s\S]*)$/);
+    if (!match) {
+      index += 1;
+      continue;
+    }
+    if (match[3] !== "") {
+      records.push({ added: match[1], deleted: match[2], path: match[3] });
+      index += 1;
+      continue;
+    }
+    const postimage = fields[index + 2];
+    if (postimage === undefined) break;
+    records.push({ added: match[1], deleted: match[2], path: postimage });
+    index += 3;
+  }
+  return records;
+}
+
+// These carry `--find-renames -l5000` for the same reason the bundle captures
+// do: the baseline states the size of the change the bundle shows, and without
+// pairing a verbatim move reports every line of every moved file twice. The
+// changed-file count beside it still comes from the rename-blind path
+// enumeration, so it deliberately counts both sides of a move: one number is
+// paths touched, the other is lines changed. This output feeds the baseline
+// only; no NUL from it reaches the review bundle or its collector.
 function numstatSources(repo, target) {
   if (target.mode === "local") {
     return [
@@ -4137,11 +4199,22 @@ function numstatSources(repo, target) {
         "--no-ext-diff",
         "--no-textconv",
         "--numstat",
+        "-z",
+        "--find-renames",
+        "-l5000",
         "--cached",
         target.head,
         "--",
       ]),
-      runGit(repo, ["diff", "--no-ext-diff", "--no-textconv", "--numstat"]),
+      runGit(repo, [
+        "diff",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--numstat",
+        "-z",
+        "--find-renames",
+        "-l5000",
+      ]),
     ];
   }
   if (target.mode === "branch") {
@@ -4151,6 +4224,9 @@ function numstatSources(repo, target) {
         "--no-ext-diff",
         "--no-textconv",
         "--numstat",
+        "-z",
+        "--find-renames",
+        "-l5000",
         `${target.ref}...${target.head}`,
       ]),
     ];
@@ -4162,6 +4238,9 @@ function numstatSources(repo, target) {
         "--no-ext-diff",
         "--no-textconv",
         "--numstat",
+        "-z",
+        "--find-renames",
+        "-l5000",
         `${target.ref}...${target.head}`,
       ]),
       runGit(repo, [
@@ -4169,11 +4248,22 @@ function numstatSources(repo, target) {
         "--no-ext-diff",
         "--no-textconv",
         "--numstat",
+        "-z",
+        "--find-renames",
+        "-l5000",
         "--cached",
         target.head,
         "--",
       ]),
-      runGit(repo, ["diff", "--no-ext-diff", "--no-textconv", "--numstat"]),
+      runGit(repo, [
+        "diff",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--numstat",
+        "-z",
+        "--find-renames",
+        "-l5000",
+      ]),
     ];
   }
   return [
@@ -4182,6 +4272,9 @@ function numstatSources(repo, target) {
       "--no-ext-diff",
       "--no-textconv",
       "--numstat",
+      "-z",
+      "--find-renames",
+      "-l5000",
       "--format=",
       target.ref,
     ]),
@@ -4191,11 +4284,12 @@ function numstatSources(repo, target) {
 function scopeBaseline(repo, target, paths) {
   let nonTestLoc = 0;
   for (const source of numstatSources(repo, target)) {
-    for (const line of source.split("\n")) {
-      const match = line.match(/^(\d+|-)\t(\d+|-)\t(.+)$/);
-      if (!match || !nonTestPath(match[3])) continue;
-      if (match[1] !== "-") nonTestLoc += Number.parseInt(match[1], 10);
-      if (match[2] !== "-") nonTestLoc += Number.parseInt(match[2], 10);
+    for (const record of parseNumstatRecords(source)) {
+      if (!nonTestPath(record.path)) continue;
+      if (record.added !== "-") nonTestLoc += Number.parseInt(record.added, 10);
+      if (record.deleted !== "-") {
+        nonTestLoc += Number.parseInt(record.deleted, 10);
+      }
     }
   }
   if (target.mode === "local" || target.mode === "branch-local") {
