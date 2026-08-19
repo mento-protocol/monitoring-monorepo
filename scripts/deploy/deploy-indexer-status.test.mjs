@@ -126,24 +126,34 @@ for (const bad of ["abc", "Infinity", "-5", "1.5", "1e3", "9".repeat(400)]) {
 // command and is therefore confined to the one path that reads it. Narrowing
 // this one would quietly start accepting an export the command has always
 // rejected, so pin every mode rather than leave it to the next reader's taste.
-for (const mode of [
-  { compact: false, watch: false, commit: "abc1234" },
-  { compact: false, watch: true, commit: "abc1234" },
-  { compact: false, watch: true, commit: "" },
-  { compact: true, watch: true, commit: "abc1234" },
-]) {
+// Every mode the parser can actually produce, enumerated from `parseArgs` rather
+// than hand-picked: the full cross product of "commit given or not" with plain,
+// watch, and compact watch. `--compact` requires `--watch`, so compact:true
+// without watch:true is not a reachable shape and is refused earlier.
+//
+// One list drives BOTH matrices below. Two hand-maintained lists is how the
+// acceptance side came to cover four fewer modes than the refusal side while
+// its comment claimed "every mode" — a mode-specific regression could have
+// passed the suite through the gap.
+const EVERY_MODE = [
+  { compact: false, watch: false, commit: "" }, // status
+  { compact: false, watch: false, commit: "abc1234" }, // status <commit>
+  { compact: false, watch: true, commit: "" }, // status --watch
+  { compact: false, watch: true, commit: "abc1234" }, // status <commit> --watch
+  { compact: true, watch: true, commit: "" }, // status --watch --compact
+  { compact: true, watch: true, commit: "abc1234" }, // status <commit> -w -c
+];
+
+for (const mode of EVERY_MODE) {
   assert.equal(
     validate(mode, { ENVIO_SYNC_COMPACT_EMIT_SECONDS: "abc" }).ok,
     false,
     `a malformed cadence export must be refused in every mode: ${JSON.stringify(mode)}`,
   );
 }
-// A well-formed value is accepted in every mode, so the refusal above is about
-// the value and not about the mode.
-for (const mode of [
-  { compact: false, watch: false, commit: "abc1234" },
-  { compact: true, watch: true, commit: "abc1234" },
-]) {
+// The same modes accept a well-formed value, so the refusal above is about the
+// value and not about the mode.
+for (const mode of EVERY_MODE) {
   assert.equal(
     validate(mode, { ENVIO_SYNC_COMPACT_EMIT_SECONDS: "45" }).ok,
     true,
