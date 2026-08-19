@@ -4316,6 +4316,15 @@ assert_contains "- pnpm sentry:digest:test (Sentry triage digest helper changed)
 run_gate "scripts/sentry-triage-digest-render.mjs"
 assert_contains "- pnpm sentry:digest:test (Sentry triage digest helper changed)"
 
+# The MCP pre-flight probe (#1938) has no suite of its own — its tests live in
+# the broker's, so it must route there. Pinned one path at a time: a sibling in
+# the same change set would pull the suite in anyway and hide the miss.
+run_gate "scripts/sentry-mcp-probe.mjs"
+assert_contains "- pnpm sentry:broker:test (Sentry MCP broker or pre-flight probe changed)"
+
+run_gate "scripts/sentry-mcp-broker.mjs"
+assert_contains "- pnpm sentry:broker:test (Sentry MCP broker or pre-flight probe changed)"
+
 run_gate "scripts/sentry-triage-queue-contract.mjs"
 assert_contains "- pnpm sentry:requeue:test (Sentry re-queue chokepoint changed)"
 assert_contains "- pnpm sentry:project:test (Sentry re-queue chokepoint changed)"

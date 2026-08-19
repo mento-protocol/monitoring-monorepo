@@ -4097,8 +4097,11 @@ while IFS= read -r path; do
         scripts/sentry-triage-archive.mjs|scripts/sentry-triage-archive.test.mjs)
           add_command "pnpm sentry:archive:test" "Sentry triage archive helper changed"
           ;;
-        scripts/sentry-mcp-broker.mjs|scripts/sentry-mcp-broker.test.mjs)
-          add_command "pnpm sentry:broker:test" "Sentry credential broker changed"
+        scripts/sentry-mcp-broker.mjs|scripts/sentry-mcp-broker.test.mjs|scripts/sentry-mcp-probe.mjs)
+          # The broker and the MCP pre-flight probe (#1938) share one suite:
+          # sentry-mcp-broker.test.mjs holds both, so the probe must route here
+          # too or a change touching only the probe runs none of its own tests.
+          add_command "pnpm sentry:broker:test" "Sentry MCP broker or pre-flight probe changed"
           ;;
         scripts/sentry-triage-requeue.mjs|scripts/sentry-triage-requeue.test.mjs|scripts/sentry-triage-queue-contract.mjs|scripts/sentry-triage-workflow-requeue.mjs)
           # The single re-queue chokepoint, the queue contract it reads, and the
