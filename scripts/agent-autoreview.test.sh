@@ -6497,6 +6497,15 @@ seed_capture_deadline_fixture() {
   local filter_script="$2"
   local state_pointer="$3"
   local stall_seconds="${4:-0}"
+  # `--patch` alone reaches one capture per mode. Matching `--stat` as well
+  # reaches two, which is what an arm needs to observe a budget spent across
+  # captures rather than granted to each of them. Neither matches the scope
+  # baseline's `--numstat`, which carries the same rename flags but is not a
+  # bundle capture.
+  local match_condition='"$args" == *--patch*'
+  if [[ "${5:-patch}" == "patch-and-stat" ]]; then
+    match_condition='( "$args" == *--patch* || "$args" == *--stat* )'
+  fi
 
   init_review_repo "$review_repo"
   printf 'base\n' >"$review_repo/README.md"
@@ -6513,11 +6522,7 @@ inspect_pid="\$PPID"
 level=0
 while [[ "\$inspect_pid" =~ ^[1-9][0-9]*\$ && "\$level" -lt 4 ]]; do
   args="\$(ps -o args= -p "\$inspect_pid" 2>/dev/null || true)"
-  if [[
-    "\$args" == *--patch* &&
-      "\$args" == *--find-renames* &&
-      "\$args" == *-l5000* ]] \\
-    ; then
+  if [[ $match_condition && "\$args" == *--find-renames* && "\$args" == *-l5000* ]]; then
     if [[ "$stall_seconds" -gt 0 ]]; then
       sleep $stall_seconds
       exec cat
@@ -6589,6 +6594,43 @@ run_capture_deadline_regressions() {
   run_capture_deadline_override_parity_arm
   run_capture_deadline_feedback_clamp_arm
   run_capture_deadline_byte_refusal_arm
+  run_capture_deadline_helper_accumulation_arm
+}
+
+# The helper's budget is one budget for every Git spawn the process makes, not a
+# fresh timer each spawn. Two finite stalls that each fit the budget on their own
+# but do not fit it together separate the two: the refusal must name the second
+# capture. A helper that reset its spending per spawn would finish both.
+run_capture_deadline_helper_accumulation_arm() {
+  local review_repo="$tmp_dir/capture-deadline-accumulation"
+  local filter_script="$tmp_dir/capture-deadline-accumulation-filter.sh"
+  local state_pointer="$tmp_dir/capture-deadline-accumulation-state-dir"
+  local state_dir="$tmp_dir/capture-deadline-accumulation-state"
+  local bundle_output="$tmp_dir/capture-deadline-accumulation-prompt.md"
+
+  mkdir -p "$state_dir"
+  printf '%s\n' "$state_dir" >"$state_pointer"
+  # Two stalls: the unstaged stat capture and the unstaged patch capture. Git
+  # converts the worktree file more than once per capture, so each costs about
+  # four seconds -- inside the seven-second budget alone, past it together.
+  seed_capture_deadline_fixture \
+    "$review_repo" "$filter_script" "$state_pointer" 2 patch-and-stat
+
+  run_helper_in_repo_expect_failure_with_env "$review_repo" \
+    "AGENT_AUTOREVIEW_CAPTURE_DEADLINE_SECONDS=7" \
+    "AGENT_AUTOREVIEW_FEEDBACK_DEADLINE_SECONDS=30" \
+    --mode local \
+    --engine local \
+    --prepare-only \
+    --bundle-output "$bundle_output"
+  # The trailing "(" pins the second capture: "unstaged diff stat" carries
+  # "unstaged diff" as a prefix, and only the label is followed by the spend.
+  expect_stderr_contains "while capturing unstaged diff ("
+  if [[ -e "$bundle_output" ]]; then
+    printf 'a capture stage that spent its whole budget still published a prompt: %s\n' \
+      "$bundle_output" >&2
+    exit 1
+  fi
 }
 
 # The deadline kills a capture with SIGKILL, and spawnSync reports an exhausted
@@ -6985,8 +7027,13 @@ run_capture_deadline_feedback_clamp_arm() {
   printf 'dirty again\n' >"$review_repo/payload.txt"
 
   started_at="$(date +%s)"
+  # The shared budget is wide enough that ordinary setup -- the stall, the
+  # protected-main runtime materialization, a Node start -- cannot exhaust it on
+  # a loaded machine, and still well under the independent 30-second feedback
+  # deadline, so the clamp is what the refusal reports. The message is the
+  # discriminator; the elapsed bound only catches a run that never returns.
   run_helper_in_repo_expect_failure_with_env "$review_repo" \
-    "AGENT_AUTOREVIEW_CAPTURE_DEADLINE_SECONDS=12" \
+    "AGENT_AUTOREVIEW_CAPTURE_DEADLINE_SECONDS=20" \
     "AGENT_AUTOREVIEW_FEEDBACK_DEADLINE_SECONDS=30" \
     --prepare-bundle-dir "$bundle_dir" \
     --mode local \
@@ -6998,7 +7045,7 @@ run_capture_deadline_feedback_clamp_arm() {
     printf 'the feedback capture kept its full independent deadline instead of the remaining shared budget\n' >&2
     exit 1
   fi
-  if ((elapsed >= 25)); then
+  if ((elapsed >= 60)); then
     printf 'the feedback capture ran past the shared capture budget: took %ss\n' \
       "$elapsed" >&2
     exit 1

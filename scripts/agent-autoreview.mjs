@@ -1956,7 +1956,15 @@ function spawnGitWithinCaptureDeadline(git, gitArgs, options, label) {
     !outOfBuffer &&
     (result.error?.code === "ETIMEDOUT" ||
       (result.signal === "SIGKILL" && elapsedMs >= remainingMs - 50));
-  if (outOfBuffer || result.signal) killProcessGroup(result.pid);
+  // Sweep on the deadline too, not only on a reported signal. spawnSync returns
+  // when the child has exited *and* its stdio pipes are closed, so a git that
+  // exited on its own while a descendant still held the inherited stderr keeps
+  // this call running until the timer fires; Node then signals an already-reaped
+  // child, leaves `signal` null, and the descendant that caused the stall is the
+  // one thing left to reap.
+  if (outOfBuffer || result.signal || deadlineExpired) {
+    killProcessGroup(result.pid);
+  }
   if (deadlineExpired) throw captureDeadlineError(label);
   return result;
 }
