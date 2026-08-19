@@ -4368,7 +4368,7 @@ capture_feedback_state() {
   local runtime_dir="$2"
   local pr_number="$3"
   local repository_slug="$4"
-  local deadline_seconds="$5"
+  local deadline_seconds
   local gh_bin
   local trusted_bin="$runtime_dir/trusted-bin"
   local env_args=()
@@ -4399,6 +4399,24 @@ capture_feedback_state() {
   fi
   if [[ -n "${GITHUB_TOKEN:-}" ]]; then
     env_args+=("GITHUB_TOKEN=$GITHUB_TOKEN")
+  fi
+  # This capture keeps its own bound, so the shared budget has to reach it by
+  # hand -- and it has to be read here, immediately before the launch, or the
+  # seconds spent reaching this point would be granted twice. Without the clamp
+  # a feedback capture starting with seconds left could still run its full
+  # independent deadline and carry the run past the ceiling every other capture
+  # respects. `review_capture_measure` writes globals this subshell discards;
+  # only the reading matters.
+  if ! review_capture_measure; then
+    echo "agent:autoreview: cannot bound the PR feedback capture: the wall clock is unreadable or moved backwards" >&2
+    return 1
+  fi
+  deadline_seconds="$feedback_capture_deadline_seconds"
+  if ((review_capture_seconds_left < deadline_seconds)); then
+    deadline_seconds="$review_capture_seconds_left"
+  fi
+  if ((deadline_seconds < 1)); then
+    deadline_seconds=1
   fi
   (
     cd "$repo"
@@ -6851,25 +6869,8 @@ EOF
       "$repo" \
       "$protected_main_ref" \
       "$feedback_runtime_dir"
-    # This capture keeps its own bound, so the shared budget has to reach it as
-    # an argument: without the clamp a feedback capture starting with seconds
-    # left could still run its full independent deadline and carry the run past
-    # the ceiling every other capture respects.
-    local feedback_deadline="$feedback_capture_deadline_seconds"
-    local feedback_budget_left
-    if ! review_capture_measure; then
-      echo "agent:autoreview: cannot bound the PR feedback capture: the wall clock is unreadable or moved backwards" >&2
-      return 1
-    fi
-    feedback_budget_left="$review_capture_seconds_left"
-    if ((feedback_budget_left < feedback_deadline)); then
-      feedback_deadline="$feedback_budget_left"
-    fi
-    if ((feedback_deadline < 1)); then
-      feedback_deadline=1
-    fi
     capture_prebounded_output_file "$staging_dir/feedback-state.json" "PR feedback state" 0 \
-      capture_feedback_state "$repo" "$feedback_runtime_dir" "$pr_number" "$repository_slug" "$feedback_deadline"
+      capture_feedback_state "$repo" "$feedback_runtime_dir" "$pr_number" "$repository_slug"
     if ! safe_remove_tree \
       "$feedback_runtime_dir" \
       "$feedback_runtime_identity" \

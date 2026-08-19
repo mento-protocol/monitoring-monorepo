@@ -73,10 +73,12 @@ of it. The wrapper's captures are one contiguous stage, so its first capture
 fixes an absolute deadline and the stage as a whole cannot outlast it. The
 helper's Git spawns bracket a semantic review that may legitimately run for half
 an hour, so there the budget is the time those spawns actually take, and the
-review cannot consume what the post-review fingerprint still needs. No monotonic
-clock is available to the wrapper's shell, so a clock it cannot read, or one
-that moves backwards inside a stage, refuses the capture rather than restarting
-the stage on a fresh full budget. A capture that reaches the bound refuses
+review cannot consume what the post-review fingerprint still needs. The helper
+measures on a monotonic clock, so no clock adjustment reaches its accounting; no
+monotonic clock is available to the wrapper's shell, so a clock it cannot read,
+or one that moves backwards inside a stage, refuses the capture rather than
+restarting the stage on a fresh full budget. A capture that reaches the bound
+refuses
 by stage name and elapsed time and produces no bundle; it is never published
 partially and never skipped silently. Nothing the capture started outlives that
 refusal: the wrapper runs each capture as its own process group and escalates

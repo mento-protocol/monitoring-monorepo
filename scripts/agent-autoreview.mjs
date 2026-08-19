@@ -1925,14 +1925,19 @@ function captureDeadlineError(label) {
 function spawnGitWithinCaptureDeadline(git, gitArgs, options, label) {
   const remainingMs = CAPTURE_DEADLINE_MS - gitCaptureSpentMs;
   if (remainingMs <= 0) throw captureDeadlineError(label);
-  const startedAt = Date.now();
+  // `performance.now()` rather than `Date.now()`: it is monotonic, so a system
+  // clock stepping backwards mid-run cannot make a capture that took minutes
+  // charge nothing and hand the next one time the run already spent.
+  const startedAt = performance.now();
   const result = spawnTrustedSync(git, gitArgs, {
     ...options,
-    timeout: remainingMs,
+    // The monotonic clock reports fractions of a millisecond; spawnSync only
+    // takes whole ones.
+    timeout: Math.ceil(remainingMs),
     killSignal: "SIGKILL",
     detached: true,
   });
-  gitCaptureSpentMs += Math.max(0, Date.now() - startedAt);
+  gitCaptureSpentMs += Math.max(0, performance.now() - startedAt);
   // spawnSync reports an exhausted `maxBuffer` the same way it reports an
   // expired timeout: it kills the child with the configured signal and sets
   // `signal` to it. Only the error code separates them, so the byte refusal has
