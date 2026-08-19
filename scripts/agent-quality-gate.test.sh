@@ -4303,61 +4303,61 @@ assert_contains "- pnpm override:prune-report:test (override prune report helper
 run_gate "scripts/supply-chain/pnpm-audit-high-gate.mjs"
 assert_contains "- node scripts/supply-chain/pnpm-audit-high-gate.test.mjs (pnpm audit high gate changed)"
 
-run_gate "scripts/sentry-triage-digest.mjs"
+run_gate "scripts/sentry/triage/sentry-triage-digest.mjs"
 assert_contains "- pnpm sentry:digest:test (Sentry triage digest helper changed)"
 assert_contains "- pnpm sentry:project:test (Sentry triage digest helper changed)"
 
-run_gate "scripts/sentry-triage-digest.test.mjs"
+run_gate "scripts/sentry/triage/sentry-triage-digest.test.mjs"
 assert_contains "- pnpm sentry:digest:test (Sentry triage digest helper changed)"
 
 # The pure Slack-render / section-taxonomy layer split out of digest.mjs (#1812)
 # must route the digest suite too — a render-only change still needs the snapshot
 # and Slack-safety tests.
-run_gate "scripts/sentry-triage-digest-render.mjs"
+run_gate "scripts/sentry/triage/sentry-triage-digest-render.mjs"
 assert_contains "- pnpm sentry:digest:test (Sentry triage digest helper changed)"
 
 # The MCP pre-flight probe (#1938) has no suite of its own — its tests live in
 # the broker's, so it must route there. Pinned one path at a time: a sibling in
 # the same change set would pull the suite in anyway and hide the miss.
-run_gate "scripts/sentry-mcp-probe.mjs"
+run_gate "scripts/sentry/broker/sentry-mcp-probe.mjs"
 assert_contains "- pnpm sentry:broker:test (Sentry MCP broker or pre-flight probe changed)"
 
-run_gate "scripts/sentry-mcp-broker.mjs"
+run_gate "scripts/sentry/broker/sentry-mcp-broker.mjs"
 assert_contains "- pnpm sentry:broker:test (Sentry MCP broker or pre-flight probe changed)"
 
-run_gate "scripts/sentry-triage-queue-contract.mjs"
+run_gate "scripts/sentry/triage/sentry-triage-queue-contract.mjs"
 assert_contains "- pnpm sentry:requeue:test (Sentry re-queue chokepoint changed)"
 assert_contains "- pnpm sentry:project:test (Sentry re-queue chokepoint changed)"
 
-run_gate "scripts/sentry-triage-project.mjs"
+run_gate "scripts/sentry/triage/sentry-triage-project.mjs"
 assert_contains "- pnpm sentry:project:test (Sentry triage projection helper changed)"
 
 # The argv surface and the settlement label self-heal, split out of the entry
 # module for the 1,000-line hard cap (#1827). Both are reached only through that
 # leg, so an unrouted change to either would ship untested.
-run_gate "scripts/sentry-triage-project-cli.mjs"
+run_gate "scripts/sentry/triage/sentry-triage-project-cli.mjs"
 assert_contains "- pnpm sentry:project:test (Sentry triage projection helper changed)"
 
-run_gate "scripts/sentry-triage-label-ensure.mjs"
+run_gate "scripts/sentry/triage/sentry-triage-label-ensure.mjs"
 assert_contains "- pnpm sentry:project:test (Sentry triage projection helper changed)"
 assert_contains "- pnpm sentry:brief:test (Sentry triage projection helper changed)"
 
-run_gate "scripts/sentry-triage-project-core.mjs"
+run_gate "scripts/sentry/triage/sentry-triage-project-core.mjs"
 assert_contains "- pnpm sentry:project:test (Sentry triage projection helper changed)"
-assert_contains "- node scripts/sentry-triage-agent-comment.test.mjs (Sentry triage projection helper changed)"
+assert_contains "- node scripts/sentry/triage/sentry-triage-agent-comment.test.mjs (Sentry triage projection helper changed)"
 # Both brief emitters and the archive leg consume this module's exports (the
 # verdict parser + shared selection, and the marker/trusted-author contract), so
 # a change here must run their focused suites too (#1769 round 15).
 assert_contains "- pnpm sentry:brief:test (Sentry triage projection helper changed)"
 assert_contains "- pnpm sentry:archive:test (Sentry triage projection helper changed)"
 
-run_gate "scripts/sentry-triage-project.test.mjs"
+run_gate "scripts/sentry/triage/sentry-triage-project.test.mjs"
 assert_contains "- pnpm sentry:project:test (Sentry triage projection helper changed)"
 
 # The needs-human brief (#1748) reads the verdict contract, the prompt that
 # produces it, the note that documents it, and the workflow step that runs it —
 # every one of those must route its suite, or the drift lands unnoticed.
-run_gate "scripts/sentry-triage-brief.mjs"
+run_gate "scripts/sentry/triage/sentry-triage-brief.mjs"
 assert_contains "- pnpm sentry:brief:test (Sentry needs-human brief helper changed)"
 assert_contains "- pnpm sentry:digest:test (Sentry needs-human brief helper changed)"
 # The brief leg is a shared dependency of BOTH legs that call clearBriefComments,
@@ -4367,7 +4367,7 @@ assert_contains "- pnpm sentry:digest:test (Sentry needs-human brief helper chan
 assert_contains "- pnpm sentry:archive:test (Sentry needs-human brief helper changed)"
 assert_contains "- pnpm sentry:project:test (Sentry needs-human brief helper changed)"
 
-run_gate "scripts/sentry-triage-brief.test.mjs"
+run_gate "scripts/sentry/triage/sentry-triage-brief.test.mjs"
 assert_contains "- pnpm sentry:brief:test (Sentry needs-human brief helper changed)"
 
 run_gate ".github/prompts/sentry-triage.md"
@@ -4382,16 +4382,16 @@ assert_contains "- pnpm sentry:brief:test (Sentry verdict contract note changed)
 run_gate ".github/workflows/sentry-triage-agent.yml"
 assert_contains "- pnpm sentry:brief:test (Sentry triage agent workflow changed)"
 
-run_gate "scripts/sentry-triage-agent-comment.mjs"
-assert_contains "- node scripts/sentry-triage-agent-comment.test.mjs (Sentry triage agent comment wrapper changed)"
+run_gate "scripts/sentry/triage/sentry-triage-agent-comment.mjs"
+assert_contains "- node scripts/sentry/triage/sentry-triage-agent-comment.test.mjs (Sentry triage agent comment wrapper changed)"
 
-run_gate "scripts/sentry-triage-agent-comment.test.mjs"
-assert_contains "- node scripts/sentry-triage-agent-comment.test.mjs (Sentry triage agent comment wrapper changed)"
+run_gate "scripts/sentry/triage/sentry-triage-agent-comment.test.mjs"
+assert_contains "- node scripts/sentry/triage/sentry-triage-agent-comment.test.mjs (Sentry triage agent comment wrapper changed)"
 
-run_gate "scripts/sentry-triage-archive.mjs"
+run_gate "scripts/sentry/triage/sentry-triage-archive.mjs"
 assert_contains "- pnpm sentry:archive:test (Sentry triage archive helper changed)"
 
-run_gate "scripts/sentry-triage-archive.test.mjs"
+run_gate "scripts/sentry/triage/sentry-triage-archive.test.mjs"
 assert_contains "- pnpm sentry:archive:test (Sentry triage archive helper changed)"
 
 # The handled-family lookup, split out of sentry-autofix-queue-io.mjs for the
@@ -4400,20 +4400,20 @@ assert_contains "- pnpm sentry:archive:test (Sentry triage archive helper change
 # paths at once lets a sibling's route mask the miss. It carries
 # MAX_HANDLED_ID_QUERIES, a term in the finalize suite's select-job timeout pin,
 # so both suites must be routed.
-run_gate "scripts/sentry-autofix-family-handled.mjs"
+run_gate "scripts/sentry/autofix/sentry-autofix-family-handled.mjs"
 assert_contains "- pnpm sentry:autofix:select:test (Sentry autofix handled-family lookup changed)"
 assert_contains "- pnpm sentry:autofix:finalize:test (Sentry autofix per-run cost cap changed)"
 
 # The self-run Sentry-suite gate (#1779, ADR 0062) asserts, at runtime, that the
 # suites actually ran. A contributor who edits the gate script, its own suite, or
-# the manifest it reconciles against must run scripts/sentry-suite-gate.test.mjs
+# the manifest it reconciles against must run scripts/sentry/gate/sentry-suite-gate.test.mjs
 # locally — or the gate could ship broken. The manifest .json is included on
 # purpose: the gate reconciles set membership and per-suite floors against it, so
 # a floor edit is exactly the kind of change that must run the gate test.
 # Both gate commands must be routed, for the gate's own files AND for every
 # manifest-owned suite. Neither command substitutes for the other: the self-test
 # only exercises the gate's logic against throwaway fixture manifests in a temp
-# dir and never reads the committed scripts/sentry-suite-manifest.json, while
+# dir and never reads the committed scripts/sentry/gate/sentry-suite-manifest.json, while
 # only the real gate reconciles that file against the real suites. Proven with
 # the requeue floor bumped 31 -> 999: `sentry-suite-gate.test.mjs` still exits 0
 # while `sentry-suite-gate.mjs` exits 1 and names the suite.
@@ -4423,18 +4423,18 @@ assert_contains "- pnpm sentry:autofix:finalize:test (Sentry autofix per-run cos
 # without it the gate refuses to start and 10 of the self-test's 20 cases fail.
 sentry_gate_env="/usr/bin/env -u NODE_OPTIONS -u NODE_PATH"
 sentry_gate_reason="Sentry-suite gate, manifest, or a manifest-owned suite changed"
-sentry_gate_test="- $sentry_gate_env node scripts/sentry-suite-gate.test.mjs ($sentry_gate_reason)"
-sentry_gate_run="- $sentry_gate_env node scripts/sentry-suite-gate.mjs ($sentry_gate_reason (validate the committed manifest against the real suites))"
+sentry_gate_test="- $sentry_gate_env node scripts/sentry/gate/sentry-suite-gate.test.mjs ($sentry_gate_reason)"
+sentry_gate_run="- $sentry_gate_env node scripts/sentry/gate/sentry-suite-gate.mjs ($sentry_gate_reason (validate the committed manifest against the real suites))"
 
-run_gate "scripts/sentry-suite-gate.mjs"
+run_gate "scripts/sentry/gate/sentry-suite-gate.mjs"
 assert_contains "$sentry_gate_test"
 assert_contains "$sentry_gate_run"
 
-run_gate "scripts/sentry-suite-gate.test.mjs"
+run_gate "scripts/sentry/gate/sentry-suite-gate.test.mjs"
 assert_contains "$sentry_gate_test"
 assert_contains "$sentry_gate_run"
 
-run_gate "scripts/sentry-suite-manifest.json"
+run_gate "scripts/sentry/gate/sentry-suite-manifest.json"
 assert_contains "$sentry_gate_test"
 assert_contains "$sentry_gate_run"
 
@@ -4442,14 +4442,14 @@ assert_contains "$sentry_gate_run"
 # moves its pass count against its committed floor, so it must route the gate
 # too. Deleting one test here leaves `pnpm sentry:requeue:test` green at
 # "30 passed" while the gate reds on `pass 30 < floor 31`.
-run_gate "scripts/sentry-triage-requeue.test.mjs"
+run_gate "scripts/sentry/triage/sentry-triage-requeue.test.mjs"
 assert_contains "- pnpm sentry:requeue:test (Sentry re-queue chokepoint changed)"
 assert_contains "$sentry_gate_test"
 assert_contains "$sentry_gate_run"
 
 # A second, unrelated manifest-owned suite, to prove the routing is the generic
 # glob and not a per-suite arm.
-run_gate "scripts/sentry-triage-archive.test.mjs"
+run_gate "scripts/sentry/triage/sentry-triage-archive.test.mjs"
 assert_contains "$sentry_gate_run"
 
 # EVERY file the round-8 split created must route the gate, not just the ones
@@ -4457,11 +4457,11 @@ assert_contains "$sentry_gate_run"
 # environment isolation, the step-summary redirection and the shared harness, and
 # it scheduled neither gate suite until the arm was widened to
 # `sentry-suite-gate*.mjs` — the second routing gap a split has introduced.
-run_gate "scripts/sentry-suite-gate-fixtures.mjs"
+run_gate "scripts/sentry/gate/sentry-suite-gate-fixtures.mjs"
 assert_contains "$sentry_gate_test"
 assert_contains "$sentry_gate_run"
 
-run_gate "scripts/sentry-suite-gate-integrity.test.mjs"
+run_gate "scripts/sentry/gate/sentry-suite-gate-integrity.test.mjs"
 assert_contains "$sentry_gate_test"
 assert_contains "$sentry_gate_run"
 
@@ -4470,7 +4470,7 @@ assert_contains "$sentry_gate_run"
 # exemption proof AND the coverage check's import proof. Extracted, it scheduled
 # only Trunk, lint:scripts and tf:test — the third routing gap a file-creating
 # change has opened here (Codex 3761572721). It must route BOTH consumers.
-run_gate "scripts/static-imports.mjs"
+run_gate "scripts/lib/static-imports.mjs"
 assert_contains "$sentry_gate_test"
 assert_contains "$sentry_gate_run"
 
@@ -4478,31 +4478,31 @@ assert_contains "$sentry_gate_run"
 # CI. Every file it reads must route it, or the drift it exists to catch is
 # only caught after push. Its first home was an arm nested under `scripts/*.sh`,
 # where a `.mjs` path could never reach it — hence a case per reader here.
-sentry_ci_check="- node scripts/check-sentry-suites-in-ci.test.mjs (Sentry CI-coverage check reads this file)"
+sentry_ci_check="- node scripts/sentry/ci-wiring/check-sentry-suites-in-ci.test.mjs (Sentry CI-coverage check reads this file)"
 
-run_gate "scripts/check-sentry-suites-in-ci.test.mjs"
+run_gate "scripts/sentry/ci-wiring/check-sentry-suites-in-ci.test.mjs"
 assert_contains "$sentry_ci_check"
 
-run_gate "scripts/check-sentry-suites-in-ci-core.mjs"
+run_gate "scripts/sentry/ci-wiring/check-sentry-suites-in-ci-core.mjs"
 assert_contains "$sentry_ci_check"
 
 # The core-grammar and probes siblings are read the same way; the glob covers
 # every `check-sentry-suites-in-ci*.mjs`, not just the two named modules.
-run_gate "scripts/check-sentry-suites-in-ci-core-commands.mjs"
+run_gate "scripts/sentry/ci-wiring/check-sentry-suites-in-ci-core-commands.mjs"
 assert_contains "$sentry_ci_check"
 
-run_gate "scripts/check-sentry-suites-in-ci-probes.mjs"
+run_gate "scripts/sentry/ci-wiring/check-sentry-suites-in-ci-probes.mjs"
 assert_contains "$sentry_ci_check"
 
 # `staticImports` is the check's import proof, imported from outside the prefix.
-run_gate "scripts/static-imports.mjs"
+run_gate "scripts/lib/static-imports.mjs"
 assert_contains "$sentry_ci_check"
 
 # The gate's exemption proof parses the `tf:test` alias with the checker's shell
 # grammar, so this module decides a gate verdict despite its checker name — the
 # fourth gap of this shape, found by sweeping the dry-run over every path the
 # round touched rather than by reading the globs.
-run_gate "scripts/check-sentry-suites-in-ci-core-commands.mjs"
+run_gate "scripts/sentry/ci-wiring/check-sentry-suites-in-ci-core-commands.mjs"
 assert_contains "$sentry_gate_test"
 assert_contains "$sentry_gate_run"
 
@@ -4544,16 +4544,16 @@ assert_contains "$sentry_ci_check"
 # runs the suites instead — so the checker alone exits 0 on a suite exposed here
 # and only the manifest reconciliation reds. Measured on this branch before the
 # fix: with a link whose target held an unwired suite, `node
-# scripts/check-sentry-suites-in-ci.test.mjs` exited 0 while `node
-# scripts/sentry-suite-gate.mjs` exited 1 naming the missing manifest entry, and
+# scripts/sentry/ci-wiring/check-sentry-suites-in-ci.test.mjs` exited 0 while `node
+# scripts/sentry/gate/sentry-suite-gate.mjs` exited 1 naming the missing manifest entry, and
 # this arm scheduled only the former (Codex 3766397748).
 symlink_target="$(mktemp -d)"
 ln -sfn "$symlink_target" "$sentry_symlink_probe"
 run_gate "$sentry_symlink_probe"
 sentry_symlink_reason="symlink under scripts/ can expose an unwired Sentry suite"
-assert_contains "- node scripts/check-sentry-suites-in-ci.test.mjs ($sentry_symlink_reason)"
-assert_contains "- $sentry_gate_env node scripts/sentry-suite-gate.test.mjs ($sentry_symlink_reason)"
-assert_contains "- $sentry_gate_env node scripts/sentry-suite-gate.mjs ($sentry_symlink_reason (validate the committed manifest against the real suites))"
+assert_contains "- node scripts/sentry/ci-wiring/check-sentry-suites-in-ci.test.mjs ($sentry_symlink_reason)"
+assert_contains "- $sentry_gate_env node scripts/sentry/gate/sentry-suite-gate.test.mjs ($sentry_symlink_reason)"
+assert_contains "- $sentry_gate_env node scripts/sentry/gate/sentry-suite-gate.mjs ($sentry_symlink_reason (validate the committed manifest against the real suites))"
 rm -f "$sentry_symlink_probe"
 rm -rf "$symlink_target"
 
@@ -4568,9 +4568,9 @@ mkdir -p "$sentry_symlink_target_dir"
 ln -sfn "../$sentry_symlink_target_dir" "$sentry_symlink_to_target"
 run_gate "$sentry_symlink_target_dir/sentry-new.test.mjs"
 sentry_symlink_target_reason="change beneath a scripts/ symlink target can expose an unwired Sentry suite"
-assert_contains "- node scripts/check-sentry-suites-in-ci.test.mjs ($sentry_symlink_target_reason)"
-assert_contains "- $sentry_gate_env node scripts/sentry-suite-gate.test.mjs ($sentry_symlink_target_reason)"
-assert_contains "- $sentry_gate_env node scripts/sentry-suite-gate.mjs ($sentry_symlink_target_reason (validate the committed manifest against the real suites))"
+assert_contains "- node scripts/sentry/ci-wiring/check-sentry-suites-in-ci.test.mjs ($sentry_symlink_target_reason)"
+assert_contains "- $sentry_gate_env node scripts/sentry/gate/sentry-suite-gate.test.mjs ($sentry_symlink_target_reason)"
+assert_contains "- $sentry_gate_env node scripts/sentry/gate/sentry-suite-gate.mjs ($sentry_symlink_target_reason (validate the committed manifest against the real suites))"
 rm -f "$sentry_symlink_to_target"
 rm -rf "$sentry_symlink_target_dir"
 
@@ -4584,13 +4584,13 @@ run_gate "scripts/a/b/sentry-deep.test.mjs"
 assert_contains "$sentry_ci_check"
 
 # An existing suite keeps its specific helper command and gains this one.
-run_gate "scripts/sentry-triage-requeue.test.mjs"
+run_gate "scripts/sentry/triage/sentry-triage-requeue.test.mjs"
 assert_contains "- pnpm sentry:requeue:test (Sentry re-queue chokepoint changed)"
 assert_contains "$sentry_ci_check"
 
 # ci.yml routes it too, under its own more specific reason.
 run_gate ".github/workflows/ci.yml"
-assert_contains "- node scripts/check-sentry-suites-in-ci.test.mjs (central CI workflow changed)"
+assert_contains "- node scripts/sentry/ci-wiring/check-sentry-suites-in-ci.test.mjs (central CI workflow changed)"
 
 run_gate "scripts/pr-feedback-state-claude.mjs"
 assert_contains "- pnpm pr:feedback-state:test (PR feedback-state helper changed)"

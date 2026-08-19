@@ -33,7 +33,7 @@ bash expands and transforms `$VAR` before any wrapper receives argv:
 `--body "…${TOKEN:0:4}x${TOKEN:4}"` posts the whole token with one removable
 character spliced in, reproduced against the real CLI
 ([#1711](https://github.com/mento-protocol/monitoring-monorepo/issues/1711)).
-The verbatim-value scan in `scripts/sentry-triage-agent-comment.mjs` catches the
+The verbatim-value scan in `scripts/sentry/triage/sentry-triage-agent-comment.mjs` catches the
 accident and was never a leak control. Exact-value scanning is structurally the
 wrong layer when the adversary controls the shell.
 
@@ -76,7 +76,7 @@ start is theatre. The variable must be absent when the process is exec'd. So:
   environment is the one that had to be cleaned.
 
 - A trusted step, ordered before the agent and holding the secret **step-scoped**,
-  starts `scripts/sentry-mcp-broker.mjs` bound to `127.0.0.1` and mints an
+  starts `scripts/sentry/broker/sentry-mcp-broker.mjs` bound to `127.0.0.1` and mints an
   opaque handle (`openssl rand -hex 32`).
 - The MCP server runs with `--host 127.0.0.1:<port> --insecure-http` and the
   handle as its access token. The broker validates the handle, substitutes the
@@ -170,13 +170,13 @@ start is theatre. The variable must be absent when the process is exec'd. So:
   `~/.sentry/mcp.json` cache and the device-code OAuth fallback, so a missing
   token exits 1 rather than falling back; `validateRegionUrl` accepts
   `{sentry.io, us.sentry.io, de.sentry.io}` and the steering bypass reproduces.
-- Enforced by `scripts/sentry-mcp-broker.mjs`,
-  `scripts/sentry-mcp-broker.test.mjs` (fail-closed and mutation-checked), and
+- Enforced by `scripts/sentry/broker/sentry-mcp-broker.mjs`,
+  `scripts/sentry/broker/sentry-mcp-broker.test.mjs` (fail-closed and mutation-checked), and
   `.github/workflows/sentry-triage-agent.yml`. Operator detail in
   [`docs/notes/sentry-triage-pipeline.md`](../notes/sentry-triage-pipeline.md).
 - Broker readiness is not the whole toolchain. The credential path can be
   healthy while the MCP server itself never registers, and that failure is
   silent: the CLI initialises without the server and the agent simply has no
-  Sentry tool. `scripts/sentry-mcp-probe.mjs` closes that fail-open with a
+  Sentry tool. `scripts/sentry/broker/sentry-mcp-probe.mjs` closes that fail-open with a
   handshake + `tools/list` pre-flight in the same job, before the agent (issue
   #1938); it shares this broker's suite and its `env`-pinned server spec.

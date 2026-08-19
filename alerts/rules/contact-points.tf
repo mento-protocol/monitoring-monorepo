@@ -252,16 +252,23 @@ locals {
   EOT
 
   # Group/repeat timings applied via notification_settings on every v3 rule.
-  # Aegis root policy uses 30s/5m/4h for catch-all; v3 shortens repeat to 1h so
-  # unacknowledged pages don't go silent overnight.
+  # Aegis root policy uses 30s/5m/4h for catch-all. v3 criticals repeat hourly by
+  # default so an unacknowledged page doesn't go silent overnight; the one
+  # exception is `notify_critical_pool_slow` below, for conditions that stay true
+  # for days at a time and where hourly repetition buries the new alerts instead
+  # of surfacing the old one.
   #
-  # Two variants:
+  # Four variants:
   #   `notify_*_pool` omits `alertname` so co-firing KPI rules on the same
   #     pool (e.g. Deviation Breach + Rebalancer Stale) collapse into one
   #     Slack thread per (chain_id, pool_id). Used by fpmms pool-level rules.
   #   `notify_*` keeps `alertname` (the pre-collapse grouping). Used by
   #     service-scoped rules (metrics-bridge) that lack pool labels —
   #     without alertname they would all merge into one folder-level group.
+  #   `notify_critical_pool_slow` is `notify_critical_pool` with a 12h repeat.
+  #   `notify_critical_incident` omits `pool_id` so a single upstream failure
+  #     that hits many pools at once collapses into one Slack message per
+  #     (chain_id, alertname). Used by the oracle-driven criticals.
   notify_critical = {
     contact_point   = grafana_contact_point.slack_critical.name
     group_by        = ["alertname", "grafana_folder", "chain_id", "pool_id"]
@@ -281,6 +288,46 @@ locals {
   notify_critical_pool = {
     contact_point   = grafana_contact_point.slack_critical.name
     group_by        = ["grafana_folder", "chain_id", "pool_id"]
+    group_wait      = "30s"
+    group_interval  = "5m"
+    repeat_interval = "1h"
+  }
+
+  # Same routing and grouping as `notify_critical_pool`, slower repeat. Split by
+  # how long the underlying condition normally lasts, not by severity:
+  #   - Oracle and trading-limit criticals describe short-lived incidents that
+  #     someone is expected to clear within the hour, so they keep the 1h repeat
+  #     above and stay on `notify_critical_pool`.
+  #   - Pool-balance criticals (deviation breach, stalled rebalancer) can stay
+  #     true for weeks while a fix is planned. CHFm/USDm sat in breach for 14.6
+  #     days and re-posted to #alerts-critical up to 24 times a day at the hourly
+  #     cadence, which buried every unrelated alert raised in that window.
+  # Twice-daily re-notification still surfaces a forgotten breach without
+  # crowding out the alerts an operator has not seen yet.
+  notify_critical_pool_slow = {
+    contact_point   = grafana_contact_point.slack_critical.name
+    group_by        = ["grafana_folder", "chain_id", "pool_id"]
+    group_wait      = "30s"
+    group_interval  = "5m"
+    repeat_interval = "12h"
+  }
+
+  # Incident-level grouping for criticals whose cause is upstream of any single
+  # pool. An oracle stall or a median jump lands on every pool reading that feed
+  # at once (observed: 9 pools in 3 minutes, 7 pools in 1 minute), and per-pool
+  # grouping turned one incident into that many separate Slack messages.
+  # Dropping `pool_id` collapses them into one message; the Slack body ranges
+  # over `.Alerts`, so every affected pool still gets its own titled block
+  # inside that message. `alertname` is retained so an oracle stall and a price
+  # jump on the same chain stay legible as two distinct incidents. The label is
+  # `chain_id`, not `chain` — protocol rules carry the former.
+  #
+  # Repeat stays at the 1h critical default: this variant changes how many
+  # messages one incident produces, not how often an unresolved one is repeated,
+  # and oracle incidents are expected to clear within the hour.
+  notify_critical_incident = {
+    contact_point   = grafana_contact_point.slack_critical.name
+    group_by        = ["alertname", "grafana_folder", "chain_id"]
     group_wait      = "30s"
     group_interval  = "5m"
     repeat_interval = "1h"

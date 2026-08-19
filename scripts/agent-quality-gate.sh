@@ -2802,7 +2802,7 @@ add_root_tooling_package_script_checks() {
   add_command "pnpm sentry:archive:test" "$reason"
   add_command "pnpm sentry:broker:test" "$reason"
   add_command "pnpm sentry:requeue:test" "$reason"
-  add_command "node scripts/check-sentry-suites-in-ci.test.mjs" "$reason"
+  add_command "node scripts/sentry/ci-wiring/check-sentry-suites-in-ci.test.mjs" "$reason"
   add_command "node scripts/pr-feedback-state.test.mjs" "$reason"
   add_command "node scripts/pr-ready-state.test.mjs" "$reason"
   add_command "node scripts/coderabbit-config.test.mjs" "$reason"
@@ -3150,8 +3150,8 @@ fi
 # real suites. Both carry the CI entry point's `env -u` prefix so a developer
 # with an ambient NODE_OPTIONS can run them at all.
 add_sentry_suite_gate_commands() {
-  add_command "/usr/bin/env -u NODE_OPTIONS -u NODE_PATH node scripts/sentry-suite-gate.test.mjs" "$1"
-  add_command "/usr/bin/env -u NODE_OPTIONS -u NODE_PATH node scripts/sentry-suite-gate.mjs" "$1 (validate the committed manifest against the real suites)"
+  add_command "/usr/bin/env -u NODE_OPTIONS -u NODE_PATH node scripts/sentry/gate/sentry-suite-gate.test.mjs" "$1"
+  add_command "/usr/bin/env -u NODE_OPTIONS -u NODE_PATH node scripts/sentry/gate/sentry-suite-gate.mjs" "$1 (validate the committed manifest against the real suites)"
 }
 
 while IFS= read -r path; do
@@ -3533,7 +3533,7 @@ while IFS= read -r path; do
           add_workspace_quality_commands "central CI workflow changed"
           # This workflow is the check's input: it asserts every Sentry suite
           # has a step in the `scripts` job.
-          add_command "node scripts/check-sentry-suites-in-ci.test.mjs" "central CI workflow changed"
+          add_command "node scripts/sentry/ci-wiring/check-sentry-suites-in-ci.test.mjs" "central CI workflow changed"
           add_command "pnpm tf:test" "Terraform registry-backed CI workflow changed"
           add_terraform_validate_commands "terraform" "Terraform registry-backed CI workflow changed"
           add_terraform_validate_commands "alerts/rules" "Terraform registry-backed CI workflow changed"
@@ -3567,7 +3567,7 @@ while IFS= read -r path; do
           # Both suites assert on this file: the agent-comment tests own the
           # "agent is the last step" and staged-closure invariants, the broker
           # tests own "no Sentry credential in the agent's env" (#1711).
-          add_command "node scripts/sentry-triage-agent-comment.test.mjs" "Sentry triage agent workflow changed"
+          add_command "node scripts/sentry/triage/sentry-triage-agent-comment.test.mjs" "Sentry triage agent workflow changed"
           add_command "pnpm sentry:broker:test" "Sentry triage agent workflow changed"
           # A third: the brief suite asserts the verdict job actually runs the
           # needs-human brief leg, gated on the resolved verdict (#1748).
@@ -3881,7 +3881,7 @@ while IFS= read -r path; do
       add_surface "scripts"
       add_command "pnpm coderabbit:config:test" "CodeRabbit review config changed"
       ;;
-    scripts/sentry-suite-manifest.json)
+    scripts/sentry/gate/sentry-suite-manifest.json)
       # The manifest the self-run Sentry-suite gate reconciles against (#1779,
       # ADR 0062). A .json edit reaches no other scripts/ arm, so claim the
       # surface here; the repo-specific block below routes the two gate commands
@@ -3983,10 +3983,10 @@ while IFS= read -r path; do
           # routes to it.
           add_command "pnpm issue:board:test" "agent issue board helper changed"
           ;;
-        scripts/sentry-triage-ingest.mjs|scripts/sentry-triage-ingest.test.mjs)
+        scripts/sentry/triage/sentry-triage-ingest.mjs|scripts/sentry/triage/sentry-triage-ingest.test.mjs)
           add_command "pnpm sentry:ingest:test" "Sentry triage ingest helper changed"
           ;;
-        scripts/sentry-triage-digest.mjs|scripts/sentry-triage-digest-render.mjs|scripts/sentry-triage-digest.test.mjs)
+        scripts/sentry/triage/sentry-triage-digest.mjs|scripts/sentry/triage/sentry-triage-digest-render.mjs|scripts/sentry/triage/sentry-triage-digest.test.mjs)
           # digest-render.mjs is the pure Slack-render + section-taxonomy layer
           # split out of digest.mjs (#1812); the digest suite covers both, so a
           # render-only change must still run the snapshot / Slack-safety tests.
@@ -3998,7 +3998,7 @@ while IFS= read -r path; do
           # maps the projection suite pins against each other.
           add_command "pnpm sentry:project:test" "Sentry triage digest helper changed"
           ;;
-        scripts/sentry-triage-brief.mjs|scripts/sentry-triage-brief-render.mjs|scripts/sentry-triage-brief.test.mjs)
+        scripts/sentry/triage/sentry-triage-brief.mjs|scripts/sentry/triage/sentry-triage-brief-render.mjs|scripts/sentry/triage/sentry-triage-brief.test.mjs)
           add_command "pnpm sentry:brief:test" "Sentry needs-human brief helper changed"
           # Sibling emitter over the same shared selection.
           add_command "pnpm sentry:digest:test" "Sentry needs-human brief helper changed"
@@ -4012,7 +4012,7 @@ while IFS= read -r path; do
           add_command "pnpm sentry:archive:test" "Sentry needs-human brief helper changed"
           add_command "pnpm sentry:project:test" "Sentry needs-human brief helper changed"
           ;;
-        scripts/sentry-triage-project.mjs|scripts/sentry-triage-project-core.mjs|scripts/sentry-triage-project-cli.mjs|scripts/sentry-triage-label-ensure.mjs|scripts/sentry-triage-project.test.mjs|scripts/sentry-triage-text.mjs|scripts/sentry-triage-projection.mjs|scripts/sentry-triage-escalation-contract.mjs)
+        scripts/sentry/triage/sentry-triage-project.mjs|scripts/sentry/triage/sentry-triage-project-core.mjs|scripts/sentry/triage/sentry-triage-project-cli.mjs|scripts/sentry/triage/sentry-triage-label-ensure.mjs|scripts/sentry/triage/sentry-triage-project.test.mjs|scripts/sentry/triage/sentry-triage-text.mjs|scripts/sentry/triage/sentry-triage-projection.mjs|scripts/sentry/triage/sentry-triage-escalation-contract.mjs)
           # sentry-triage-project-cli.mjs (the argv surface) and
           # sentry-triage-label-ensure.mjs (the settlement label self-heal) were
           # split out of the entry module for the 1,000-line cap (#1827); both
@@ -4021,7 +4021,7 @@ while IFS= read -r path; do
           add_command "pnpm sentry:project:test" "Sentry triage projection helper changed"
           # The agent's comment wrapper imports the shared marker contract from
           # sentry-triage-project-core.mjs, so its fences ride on this module.
-          add_command "node scripts/sentry-triage-agent-comment.test.mjs" "Sentry triage projection helper changed"
+          add_command "node scripts/sentry/triage/sentry-triage-agent-comment.test.mjs" "Sentry triage projection helper changed"
           # The verdict parser and the shared brief selection live here; both
           # brief emitters are pure consumers of them.
           add_command "pnpm sentry:brief:test" "Sentry triage projection helper changed"
@@ -4031,13 +4031,13 @@ while IFS= read -r path; do
           # break its audit-comment idempotency and brief-clear (#1769 round 15).
           add_command "pnpm sentry:archive:test" "Sentry triage projection helper changed"
           ;;
-        scripts/sentry-triage-agent-comment.mjs|scripts/sentry-triage-agent-comment.test.mjs)
-          add_command "node scripts/sentry-triage-agent-comment.test.mjs" "Sentry triage agent comment wrapper changed"
+        scripts/sentry/triage/sentry-triage-agent-comment.mjs|scripts/sentry/triage/sentry-triage-agent-comment.test.mjs)
+          add_command "node scripts/sentry/triage/sentry-triage-agent-comment.test.mjs" "Sentry triage agent comment wrapper changed"
           ;;
-        scripts/sentry-autofix-select.mjs|scripts/sentry-autofix-select.test.mjs)
+        scripts/sentry/autofix/sentry-autofix-select.mjs|scripts/sentry/autofix/sentry-autofix-select.test.mjs)
           add_command "pnpm sentry:autofix:select:test" "Sentry autofix select helper changed"
           ;;
-        scripts/sentry-autofix-select-cli.mjs|scripts/sentry-autofix-decisions.mjs)
+        scripts/sentry/autofix/sentry-autofix-select-cli.mjs|scripts/sentry/autofix/sentry-autofix-decisions.mjs)
           # The selector's CLI surface (option contract, help text, the report
           # files the tracker reads back, --emit-verdict) and the decision ->
           # report classifier both passes share. Neither owns a cost cap; both
@@ -4046,7 +4046,7 @@ while IFS= read -r path; do
           # collapse.
           add_command "pnpm sentry:autofix:select:test" "Sentry autofix selection helper changed"
           ;;
-        scripts/sentry-autofix-select-instrument.mjs|scripts/sentry-autofix-second-look.mjs)
+        scripts/sentry/autofix/sentry-autofix-select-instrument.mjs|scripts/sentry/autofix/sentry-autofix-second-look.mjs)
           # The selector's budget + instrumentation layer (the per-run read cap
           # and its no-op guard, the gh counter, the throttle latch, the DEGRADED
           # and summary lines) and the bounded second look.
@@ -4059,7 +4059,7 @@ while IFS= read -r path; do
           # production on the path the second look exists to create.
           add_command "pnpm sentry:autofix:finalize:test" "Sentry autofix per-run cost cap changed"
           ;;
-        scripts/sentry-autofix-family-handled.mjs)
+        scripts/sentry/autofix/sentry-autofix-family-handled.mjs)
           # The handled-FAMILY lookup, split out of sentry-autofix-queue-io.mjs
           # for the 600-line soft cap. Its behaviour is exercised end to end by
           # the select suite, like every other module on this leg.
@@ -4072,7 +4072,7 @@ while IFS= read -r path; do
           # production.
           add_command "pnpm sentry:autofix:finalize:test" "Sentry autofix per-run cost cap changed"
           ;;
-        scripts/sentry-autofix-queue-io.mjs|scripts/sentry-autofix-family-resolve.mjs|scripts/sentry-autofix-reverse-verify.mjs|scripts/sentry-autofix-family.mjs|scripts/sentry-autofix-candidate.mjs)
+        scripts/sentry/autofix/sentry-autofix-queue-io.mjs|scripts/sentry/autofix/sentry-autofix-family-resolve.mjs|scripts/sentry/autofix/sentry-autofix-reverse-verify.mjs|scripts/sentry/autofix/sentry-autofix-family.mjs|scripts/sentry/autofix/sentry-autofix-candidate.mjs)
           # The selection leg's gh I/O layer (the window list, readStub,
           # openAutofixPrExists / isOwnHeadPr), the live-state family resolver, the
           # reverse `in:comments` verification leg, and the pure union-find
@@ -4082,17 +4082,17 @@ while IFS= read -r path; do
           # flow end to end.
           add_command "pnpm sentry:autofix:select:test" "Sentry autofix selection helper changed"
           ;;
-        scripts/sentry-autofix-finalize.mjs|scripts/sentry-autofix-finalize.test.mjs)
+        scripts/sentry/autofix/sentry-autofix-finalize.mjs|scripts/sentry/autofix/sentry-autofix-finalize.test.mjs)
           add_command "pnpm sentry:autofix:finalize:test" "Sentry autofix finalize helper changed"
           ;;
-        scripts/sentry-autofix-run-record.mjs|scripts/sentry-autofix-run-record.test.mjs)
+        scripts/sentry/autofix/sentry-autofix-run-record.mjs|scripts/sentry/autofix/sentry-autofix-run-record.test.mjs)
           # The tracker run-record body builder, extracted from finalize.mjs.
           # Run its own suite AND finalize's — finalize imports it for the
           # `run-record` CLI subcommand, so its wiring rides on this module.
           add_command "pnpm sentry:autofix:run-record:test" "Sentry autofix run-record builder changed"
           add_command "pnpm sentry:autofix:finalize:test" "Sentry autofix run-record builder changed"
           ;;
-        scripts/sentry-autofix-record-labels.mjs|scripts/sentry-autofix-hold-revalidate.mjs)
+        scripts/sentry/autofix/sentry-autofix-record-labels.mjs|scripts/sentry/autofix/sentry-autofix-hold-revalidate.mjs)
           # The record-run architectural backfill labeler (#1812) and the
           # revalidation/compensation layer extracted from it. Their tests live
           # in the finalize suite (the record-run job that owns this write),
@@ -4100,16 +4100,16 @@ while IFS= read -r path; do
           # writes and the withdrawal + terminal-guarded re-queue.
           add_command "pnpm sentry:autofix:finalize:test" "Sentry autofix record-run backfill labeler changed"
           ;;
-        scripts/sentry-triage-archive.mjs|scripts/sentry-triage-archive.test.mjs)
+        scripts/sentry/triage/sentry-triage-archive.mjs|scripts/sentry/triage/sentry-triage-archive.test.mjs)
           add_command "pnpm sentry:archive:test" "Sentry triage archive helper changed"
           ;;
-        scripts/sentry-mcp-broker.mjs|scripts/sentry-mcp-broker.test.mjs|scripts/sentry-mcp-probe.mjs)
+        scripts/sentry/broker/sentry-mcp-broker.mjs|scripts/sentry/broker/sentry-mcp-broker.test.mjs|scripts/sentry/broker/sentry-mcp-probe.mjs)
           # The broker and the MCP pre-flight probe (#1938) share one suite:
           # sentry-mcp-broker.test.mjs holds both, so the probe must route here
           # too or a change touching only the probe runs none of its own tests.
           add_command "pnpm sentry:broker:test" "Sentry MCP broker or pre-flight probe changed"
           ;;
-        scripts/sentry-triage-requeue.mjs|scripts/sentry-triage-requeue.test.mjs|scripts/sentry-triage-queue-contract.mjs|scripts/sentry-triage-workflow-requeue.mjs)
+        scripts/sentry/triage/sentry-triage-requeue.mjs|scripts/sentry/triage/sentry-triage-requeue.test.mjs|scripts/sentry/triage/sentry-triage-queue-contract.mjs|scripts/sentry/triage/sentry-triage-workflow-requeue.mjs)
           # The single re-queue chokepoint, the queue contract it reads, and the
           # workflow CLI that wraps it for every compensating exit in the triage
           # agent workflow (#1769 round 17, #1782). Every site that re-queues a stub
@@ -4446,7 +4446,7 @@ while IFS= read -r path; do
   # prove no decoy job owns the `ci` check-run name, and the env scan recurses
   # into the composite `action.yml` files the trusted jobs pull in. Editing one
   # of those must run the check, or the drift it exists to catch surfaces only
-  # after push. `scripts/check-sentry-suites-in-ci*.mjs` covers this file, the
+  # after push. `scripts/sentry/ci-wiring/check-sentry-suites-in-ci*.mjs` covers this file, the
   # core, and its `-core-commands` / `-probes` siblings alike.
   #
   # Two suite globs because `findSentrySuites` in the check enumerates
@@ -4467,12 +4467,12 @@ while IFS= read -r path; do
         package.json | \
         scripts/agent-quality-gate.sh | \
         scripts/check-agent-quality-gate-package-scripts.mjs | \
-        scripts/check-sentry-suites-in-ci*.mjs | \
-        scripts/static-imports.mjs | \
+        scripts/sentry/ci-wiring/check-sentry-suites-in-ci*.mjs | \
+        scripts/lib/static-imports.mjs | \
         scripts/sentry-*.test.mjs | \
         scripts/*/sentry-*.test.mjs | \
         scripts/tf-stacks.test.mjs)
-        add_command "node scripts/check-sentry-suites-in-ci.test.mjs" "Sentry CI-coverage check reads this file"
+        add_command "node scripts/sentry/ci-wiring/check-sentry-suites-in-ci.test.mjs" "Sentry CI-coverage check reads this file"
         ;;
     esac
     # The self-run Sentry-suite gate (#1779, ADR 0062) runs EVERY suite the
@@ -4497,14 +4497,14 @@ while IFS= read -r path; do
     # ambient `NODE_OPTIONS=--no-warnings` cannot run the gate at all — it
     # refuses to start before executing a single suite — and half the
     # self-test's fixtures fail for that same reason. The gate costs ~3s.
-    # `scripts/sentry-suite-gate*.mjs` rather than the gate script alone: the
+    # `scripts/sentry/gate/sentry-suite-gate*.mjs` rather than the gate script alone: the
     # round-8 split created sentry-suite-gate-fixtures.mjs, which this arm did
     # not match, so a change to it scheduled Trunk and lint:scripts but NEITHER
     # gate suite — and that file owns fixture environment isolation, the
     # step-summary redirection and the shared harness. The prefix glob covers
     # every current and future gate module, so the next split cannot reopen it.
     #
-    # `scripts/static-imports.mjs` is named outright because it sits under
+    # `scripts/lib/static-imports.mjs` is named outright because it sits under
     # neither prefix and yet decides both consumers' answers: the gate's watch
     # set and exemption proof, and the CI-coverage check's import proof. It
     # scheduled only Trunk, lint:scripts and tf:test when it was extracted, so a
@@ -4523,10 +4523,10 @@ while IFS= read -r path; do
     case "$path" in
       scripts/sentry-*.test.mjs | \
         scripts/*/sentry-*.test.mjs | \
-        scripts/sentry-suite-gate*.mjs | \
-        scripts/static-imports.mjs | \
-        scripts/check-sentry-suites-in-ci-core-commands.mjs | \
-        scripts/sentry-suite-manifest.json)
+        scripts/sentry/gate/sentry-suite-gate*.mjs | \
+        scripts/lib/static-imports.mjs | \
+        scripts/sentry/ci-wiring/check-sentry-suites-in-ci-core-commands.mjs | \
+        scripts/sentry/gate/sentry-suite-manifest.json)
         add_sentry_suite_gate_commands "Sentry-suite gate, manifest, or a manifest-owned suite changed"
         ;;
     esac
@@ -4550,7 +4550,7 @@ while IFS= read -r path; do
     case "$path" in
       scripts/*)
         if [[ -L "$repo_root/$path" ]]; then
-          add_command "node scripts/check-sentry-suites-in-ci.test.mjs" "symlink under scripts/ can expose an unwired Sentry suite"
+          add_command "node scripts/sentry/ci-wiring/check-sentry-suites-in-ci.test.mjs" "symlink under scripts/ can expose an unwired Sentry suite"
           add_sentry_suite_gate_commands "symlink under scripts/ can expose an unwired Sentry suite"
         fi
         ;;
@@ -4564,7 +4564,7 @@ while IFS= read -r path; do
     for scripts_symlink_target in "${scripts_symlink_targets[@]+"${scripts_symlink_targets[@]}"}"; do
       case "$path" in
         "$scripts_symlink_target"/*)
-          add_command "node scripts/check-sentry-suites-in-ci.test.mjs" "change beneath a scripts/ symlink target can expose an unwired Sentry suite"
+          add_command "node scripts/sentry/ci-wiring/check-sentry-suites-in-ci.test.mjs" "change beneath a scripts/ symlink target can expose an unwired Sentry suite"
           add_sentry_suite_gate_commands "change beneath a scripts/ symlink target can expose an unwired Sentry suite"
           break
           ;;

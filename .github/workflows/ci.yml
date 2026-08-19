@@ -1205,7 +1205,7 @@ jobs:
     #
     # The step list is closed-world and its order is load-bearing. The two
     # upstream, SHA-pinned actions are the only things trusted before the gate.
-    # `scripts/sentry-suite-gate.mjs` is the FIRST and ONLY PR-authored code that
+    # `scripts/sentry/gate/sentry-suite-gate.mjs` is the FIRST and ONLY PR-authored code that
     # runs before the suites: `pnpm install` is deliberately ordered AFTER it
     # (the composite action's postinstall is PR-authored code) and there is no
     # other pre-gate step, which closes the R1 window where such a step could
@@ -1227,7 +1227,7 @@ jobs:
         with:
           node-version-file: .node-version
       - name: Run and assert the Sentry suites
-        run: /usr/bin/env -u NODE_OPTIONS -u NODE_PATH node scripts/sentry-suite-gate.mjs
+        run: /usr/bin/env -u NODE_OPTIONS -u NODE_PATH node scripts/sentry/gate/sentry-suite-gate.mjs
       # Steps 4-5 run AFTER the gate, and only after it. The install's composite
       # `postinstall` is PR-authored code, so putting it first would restore the
       # R1 window the job exists to close; ordering it here keeps that window
@@ -1242,7 +1242,7 @@ jobs:
         # gate's `sentry:*` allowlist to its pins. It ran in the path-gated
         # `scripts` job until this PR, where a dashboard-only, indexer-only or
         # non-Markdown doc-asset diff skipped it entirely.
-        run: node scripts/check-sentry-suites-in-ci.test.mjs
+        run: node scripts/sentry/ci-wiring/check-sentry-suites-in-ci.test.mjs
 
   autoreview-suite:
     name: Autoreview adversarial suite

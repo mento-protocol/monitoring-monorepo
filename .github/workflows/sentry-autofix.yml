@@ -92,7 +92,7 @@ jobs:
   # no-op (`[]`, exit 0), never a failure and never an empty matrix expression
   # downstream. The selection logic (verdict re-parse, exact-local repo check,
   # dedup, duplicate_of family collapse, cap) lives in
-  # scripts/sentry-autofix-select.mjs (+ tests), not inline. The cap counts
+  # scripts/sentry/autofix/sentry-autofix-select.mjs (+ tests), not inline. The cap counts
   # CANDIDATES: one duplicate_of family consumes one slot however many stubs it
   # spans (issue #1784). Family collapse DEFERS the rest without writing
   # anything to the queue. Fresh architectural verdicts are excluded from the
@@ -343,7 +343,7 @@ jobs:
               # byte-identical to "the named issue was ineligible". The dispatch
               # is the documented remedy for a stalled leg; a silent remedy for a
               # silent stall is exactly how #1758 stayed undiagnosed.
-              entries=$(node scripts/sentry-autofix-select.mjs \
+              entries=$(node scripts/sentry/autofix/sentry-autofix-select.mjs \
                 --repo "${GITHUB_REPOSITORY}" \
                 --issue "${DISPATCH_ISSUE}" \
                 --skipped-out "${skipped_report}" \
@@ -355,7 +355,7 @@ jobs:
           else
             # Oldest-first, capped at 2 per run (quota cap — do not raise
             # without re-checking the daily envelope against the Max window).
-            entries=$(node scripts/sentry-autofix-select.mjs \
+            entries=$(node scripts/sentry/autofix/sentry-autofix-select.mjs \
               --repo "${GITHUB_REPOSITORY}" \
               --cap 2 \
               --deferred-out "${deferred_report}" \
@@ -537,7 +537,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          node scripts/sentry-autofix-select.mjs \
+          node scripts/sentry/autofix/sentry-autofix-select.mjs \
             --repo "${REPO}" --issue "${QUEUE_ISSUE}" --emit-verdict \
             > /tmp/autofix-verdict.md
 
@@ -625,7 +625,7 @@ jobs:
           GH_TOKEN: ""
         run: |
           set -euo pipefail
-          fin="${RUNNER_TEMP}/base/scripts/sentry-autofix-finalize.mjs"
+          fin="${RUNNER_TEMP}/base/scripts/sentry/autofix/sentry-autofix-finalize.mjs"
           node "${fin}" diff-trees \
             --base "${RUNNER_TEMP}/base" \
             --work "${GITHUB_WORKSPACE}" \
@@ -806,7 +806,7 @@ jobs:
           GH_TOKEN: ""
         run: |
           set -euo pipefail
-          fin="${RUNNER_TEMP}/base/scripts/sentry-autofix-finalize.mjs"
+          fin="${RUNNER_TEMP}/base/scripts/sentry/autofix/sentry-autofix-finalize.mjs"
           node "${fin}" diff-trees \
             --base "${RUNNER_TEMP}/base" \
             --work "${RUNNER_TEMP}/work" \
@@ -833,7 +833,7 @@ jobs:
           # tainted checkout) with github.token. The comment is FULLY
           # deterministic (the machine-generated guard reason only) — no agent
           # free-text is published, so there is nothing untrusted to neutralize.
-          node "${RUNNER_TEMP}/base/scripts/sentry-autofix-finalize.mjs" analysis-comment \
+          node "${RUNNER_TEMP}/base/scripts/sentry/autofix/sentry-autofix-finalize.mjs" analysis-comment \
             --reason "$(cat "${RUNNER_TEMP}/refuse-reason.txt")" \
             > "${RUNNER_TEMP}/analysis.md"
           gh issue comment "${QUEUE_ISSUE}" --repo "${REPO}" --body-file "${RUNNER_TEMP}/analysis.md"
@@ -846,7 +846,7 @@ jobs:
           # definition before applying it (the stub may predate a label
           # bootstrap; gh errors on a missing repo label). A human retries by
           # removing the label; a regression reopen sheds it automatically.
-          def=$(node "${RUNNER_TEMP}/base/scripts/sentry-autofix-finalize.mjs" refused-label-def)
+          def=$(node "${RUNNER_TEMP}/base/scripts/sentry/autofix/sentry-autofix-finalize.mjs" refused-label-def)
           gh label create "$(jq -r '.name' <<<"${def}")" \
             --repo "${REPO}" \
             --color "$(jq -r '.color' <<<"${def}")" \
@@ -885,7 +885,7 @@ jobs:
         run: |
           set -euo pipefail
           base="${RUNNER_TEMP}/base"
-          fin="${base}/scripts/sentry-autofix-finalize.mjs"
+          fin="${base}/scripts/sentry/autofix/sentry-autofix-finalize.mjs"
 
           branch=$(node "${fin}" branch --short-id "${SHORT_ID}")
 
@@ -1253,7 +1253,7 @@ jobs:
           # before this step comments the url onto a queue issue and applies the
           # terminal marker. Without it an outsider gets a queue write and, through
           # the duplicate_of family collapse, stands that stub's whole family down.
-          branch=$(node scripts/sentry-autofix-finalize.mjs branch --short-id "${SHORT_ID}")
+          branch=$(node scripts/sentry/autofix/sentry-autofix-finalize.mjs branch --short-id "${SHORT_ID}")
           pr_url=$(gh api \
             "repos/${REPO}/pulls?head=${REPO%%/*}:${branch}&base=main&state=open" \
             --jq '[ .[]
@@ -1268,8 +1268,8 @@ jobs:
           # Repair the queue side-effects: the digest link comment + the terminal
           # marker (self-heal the label from the ingest single source first).
           gh issue comment "${QUEUE_ISSUE}" --repo "${REPO}" \
-            --body "$(node scripts/sentry-autofix-finalize.mjs autofix-comment --url "${pr_url}")"
-          def=$(node scripts/sentry-autofix-finalize.mjs label-def)
+            --body "$(node scripts/sentry/autofix/sentry-autofix-finalize.mjs autofix-comment --url "${pr_url}")"
+          def=$(node scripts/sentry/autofix/sentry-autofix-finalize.mjs label-def)
           gh label create "$(jq -r '.name' <<<"${def}")" \
             --repo "${REPO}" \
             --color "$(jq -r '.color' <<<"${def}")" \
@@ -1417,7 +1417,7 @@ jobs:
             trigger="workflow_dispatch (issue #${DISPATCH_ISSUE})"
           fi
 
-          body=$(node scripts/sentry-autofix-finalize.mjs run-record \
+          body=$(node scripts/sentry/autofix/sentry-autofix-finalize.mjs run-record \
             --timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --trigger "${trigger}" \
             --disposition "${disposition}" \
@@ -1445,7 +1445,7 @@ jobs:
           # Rolling comment: PATCH the existing marker-bearing comment if present,
           # else create it. Selection is author-fenced + prefix-anchored
           # (select-run-record-id -> selectMarkedComment, the shared helper in
-          # scripts/sentry-triage-project-core.mjs also used by the ingest's own
+          # scripts/sentry/triage/sentry-triage-project-core.mjs also used by the ingest's own
           # run-record write path) so a drive-by comment planting the marker
           # anywhere in its body is never selected as the record — this repo is
           # public and #1282 is open. Every write tolerates failure (|| true) so
@@ -1461,7 +1461,7 @@ jobs:
           gh api "repos/${REPO}/issues/${TRACKER_ISSUE}/comments" --paginate --slurp \
             > "${RUNNER_TEMP}/run-record-comments.json" 2>/dev/null \
             || echo '[]' > "${RUNNER_TEMP}/run-record-comments.json"
-          existing_id=$(node scripts/sentry-autofix-finalize.mjs select-run-record-id \
+          existing_id=$(node scripts/sentry/autofix/sentry-autofix-finalize.mjs select-run-record-id \
             --comments-file "${RUNNER_TEMP}/run-record-comments.json")
           if [ "${existing_id}" != "none" ]; then
             gh api -X PATCH "repos/${REPO}/issues/comments/${existing_id}" \
@@ -1510,6 +1510,6 @@ jobs:
           fi
           # The numbers are the select job's own validated integer output; the
           # module re-validates each against ^[0-9]+$ before it reaches a gh argv.
-          node scripts/sentry-autofix-record-labels.mjs \
+          node scripts/sentry/autofix/sentry-autofix-record-labels.mjs \
             --repo "${REPO}" \
             --issues "${SKIPPED_ISSUES}" || true

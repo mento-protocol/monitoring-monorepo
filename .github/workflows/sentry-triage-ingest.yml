@@ -13,7 +13,7 @@ name: Sentry Triage Ingest
 # docs/notes/sentry-triage-pipeline.md). Both guards fail safe: this workflow
 # merges and runs on schedule immediately, but every run no-ops until an
 # operator turns it on — first the kill-switch step below (repo variable),
-# then a second no-op inside scripts/sentry-triage-ingest.mjs itself if the
+# then a second no-op inside scripts/sentry/triage/sentry-triage-ingest.mjs itself if the
 # token secret is still missing (defense in depth; see the script's
 # `resolveTokenGuard`).
 #
@@ -100,7 +100,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           # Empty/unset when the Terraform secret (#1276) hasn't been created
-          # yet — scripts/sentry-triage-ingest.mjs's resolveTokenGuard() logs
+          # yet — scripts/sentry/triage/sentry-triage-ingest.mjs's resolveTokenGuard() logs
           # a ::notice:: and exits 0 in that case, no network calls made.
           SENTRY_TRIAGE_TOKEN: ${{ secrets.SENTRY_TRIAGE_TOKEN }}
           # Optional workflow_dispatch backfill override. Never interpolated

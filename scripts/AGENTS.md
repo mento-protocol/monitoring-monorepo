@@ -3,7 +3,7 @@ title: Scripts Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-17
+last_verified: 2026-08-18
 doc_type: agent-instructions
 scope: scripts
 review_interval_days: 90
@@ -12,17 +12,17 @@ garden_lane: agent-entry-points
 
 # AGENTS.md — Scripts
 
-> **Architecture decisions** behind these scripts live in [`docs/adr/`](../docs/adr/README.md) — read the relevant ADR before changing how something here works; it records why the code is built that way.
+> **Architecture decisions** behind these scripts live in [`docs/adr/`](../docs/adr/README.md) — read the relevant ADR before changing how something here works.
 
 ## Scope
 
 `scripts/` holds deploy wrappers, agent quality gates, code-health checks, and
-repo maintenance utilities. 104 files sit flat at the top level.
+repo maintenance utilities. 38 files sit flat at the top level today.
 
 ## Layout
 
 [ADR 0064](../docs/adr/0064-scripts-module-directories.md) governs
-subdirectories here and links the reorganization issue; phases P1–P15 have
+subdirectories here and links the reorganization issue; phases P1–P15 have all
 landed.
 
 | Directory       | Holds                                  |
@@ -39,6 +39,7 @@ landed.
 | `repo-health/`  | code-health, file-size, lint wrappers  |
 | `terraform/`    | movable Terraform guards and helpers   |
 | `gate/`         | quality-gate satellites                |
+| `sentry/`       | triage/autofix/gate/broker/ci-wiring   |
 
 `lib/` (the shared tier) and
 `production-infra-identity-contract/` predate the reorganization. `setup.sh`
@@ -74,9 +75,9 @@ that mechanism moves with it, in the same PR.
 - **Evaluation fixture forbidden lists.** `forbidden_sources` in
   `docs/evals/documentation-navigation-fixtures.json` names the navigation
   eval's own implementation.
-- **Sentry suite manifest.** `sentry-suite-manifest.json` keys are exact
-  repo-relative paths, reconciled against `findSentrySuites()` by set equality
-  both ways. A moved or renamed suite fails the gate closed.
+- **Sentry suite manifest.** `scripts/sentry/gate/sentry-suite-manifest.json`
+  keys are exact repo-relative paths, reconciled against `findSentrySuites()`
+  by set equality both ways. A moved or renamed suite fails the gate closed.
 - **Enumerated workflow paths-filters.** 22 of 32 files in
   `.github/workflows/` pin a `scripts/` path. `ci.yml` (`autoreviewSuite`,
   `autoreviewRootRuntime`, `versionSkew`; `rootScripts` is the recursive

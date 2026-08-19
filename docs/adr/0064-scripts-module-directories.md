@@ -84,8 +84,8 @@ checklist should run. Both suites pin it. One consequence for later edits: a
 `case` takes the first matching arm, so a new arm for a path of the shape
 `scripts/<dir>/deploy-*.sh` goes ABOVE the pair or it never runs.
 
-`scripts/sentry-suite-manifest.json` is stricter than a glob. Its keys are exact
-repo-relative paths, and `scripts/sentry-suite-gate.mjs` reconciles them against
+`scripts/sentry/gate/sentry-suite-manifest.json` is stricter than a glob. Its keys are exact
+repo-relative paths, and `scripts/sentry/gate/sentry-suite-gate.mjs` reconciles them against
 `findSentrySuites()` by exact set equality in both directions.
 `findSentrySuites()` recurses and matches on the `sentry-` basename prefix, so a
 move is discovered but the manifest key is stale, and the gate fails closed with
@@ -274,8 +274,8 @@ not only the arm of the consumer that happens to fail loudest.
   globs.
 - Recursive CI filter: `.github/workflows/ci.yml`, `rootScripts` filter, whose
   in-file comment records that `scripts/**` matches every depth.
-- Exact-set manifest: `scripts/sentry-suite-manifest.json`,
-  `findSentrySuites()` in `scripts/sentry-suite-gate.mjs`, and
+- Exact-set manifest: `scripts/sentry/gate/sentry-suite-manifest.json`,
+  `findSentrySuites()` in `scripts/sentry/gate/sentry-suite-gate.mjs`, and
   [ADR 0062](0062-sentry-suites-self-run-gate.md).
 - Instruction-file budget and lane: `INSTRUCTION_FILENAMES` and the route
   computation in `scripts/context/agent-context-budget.mjs`; the
