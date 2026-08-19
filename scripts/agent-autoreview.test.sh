@@ -6747,6 +6747,10 @@ run_capture_deadline_wrapper_arm() {
 }
 
 # The helper's own synchronous capture path, reached without a prepared bundle.
+# This is also the arm that pins the descendant case: the filter and the child
+# it forks both inherit Git's stderr, which is the helper's own pipe, so a
+# spawnSync that waited for its pipes to close rather than for its timeout would
+# never return here and the wrapper would not exit inside its budget.
 run_capture_deadline_helper_arm() {
   local review_repo="$1"
   local state_pointer="$2"
