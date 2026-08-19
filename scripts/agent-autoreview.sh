@@ -5850,28 +5850,193 @@ validate_auto_feedback_state() {
 max_review_capture_bytes=$((512000 * 8))
 review_capture_bytes=0
 
-capture_output_file() {
+# The byte budget above bounds what a capture emits, never the work Git does to
+# emit it: Git reads and diffs every changed blob before the first byte reaches
+# the limiter, so a pathological repository state, a hung filesystem, or a Git
+# bug stalls a capture that no output bound can cut short. This is the wall-clock
+# bound. It is one budget for the whole capture stage rather than a timer per
+# spawn, so the captures together can never outlast it, and it counts only the
+# time actually spent inside a capture, so unrelated wrapper work cannot consume
+# it. Measured on this repository, a 1,000-commit 23.8 MB branch diff captures in
+# about a second; the documented worst case, rename detection at the `-l5000`
+# product ceiling, is about 74 seconds for a single capture on one machine, and
+# the whole tracked tree (2,220 files) cannot reach that product. 600 seconds is
+# therefore far above any capture set a real review performs, and a third of the
+# reviewer's own 1,800-second default timeout. Overridable for tests, validated
+# here for the reason the gh deadline records.
+max_review_capture_seconds="${AGENT_AUTOREVIEW_CAPTURE_DEADLINE_SECONDS:-600}"
+if ! [[ "$max_review_capture_seconds" =~ ^[1-9][0-9]*$ ]]; then
+  echo "agent:autoreview: AGENT_AUTOREVIEW_CAPTURE_DEADLINE_SECONDS='$max_review_capture_seconds' is not a positive integer; using default 600s" >&2
+  max_review_capture_seconds=600
+fi
+review_capture_seconds=0
+
+# Run one capture pipeline and record both exit statuses where the caller can
+# read them after the job has been waited on. `${PIPESTATUS[@]}` is only readable
+# in the shell that ran the pipeline, and that shell is now a background job.
+run_capture_pipeline() {
   local output="$1"
-  local label="$2"
-  local allowed_status="$3"
+  local limit="$2"
+  local status_file="$3"
   shift 3
+  local -a statuses
+  set +e
+  "$@" | head -c "$limit" >"$output"
+  statuses=("${PIPESTATUS[@]}")
+  set -e
+  printf '%s %s\n' "${statuses[0]:-1}" "${statuses[1]:-1}" >"$status_file"
+}
+
+# Bound one capture with the wall clock the capture budget has left. The pipeline
+# runs as its own process group (`set -m`), so an expiry signals the capture
+# command and the byte limiter together instead of leaving either behind, and the
+# watchdog is a group leader too, so killing it takes its `sleep` with it. The
+# parent blocks in `wait` rather than polling, so a normal capture pays no added
+# latency; `wait` stderr is discarded because a signalled job would otherwise
+# print a job-control notice over the refusal this function exists to produce.
+# The watchdog records the expiry in $timeout_file before signalling, so the
+# caller distinguishes a deadline from any other non-zero capture.
+run_capture_with_deadline() {
+  local deadline="$1"
+  local timeout_file="$2"
+  local status_file="$3"
+  shift 3
+  local child
+  local watchdog
+  local status
+  local had_monitor=0
+  case "$-" in
+    *m*) had_monitor=1 ;;
+  esac
+  set -m
+  "$@" &
+  child=$!
+  (
+    sleep "$deadline"
+    printf 'timeout\n' >"$timeout_file"
+    kill -TERM "-$child" 2>/dev/null || kill -TERM "$child" 2>/dev/null || true
+    sleep 1
+    kill -KILL "-$child" 2>/dev/null || kill -KILL "$child" 2>/dev/null || true
+  ) &
+  watchdog=$!
+  if [[ "$had_monitor" -eq 0 ]]; then
+    set +m
+  fi
+  # An interrupted wrapper must not leave either group running or its
+  # bookkeeping files behind: the capture tree is exactly the hung-command class
+  # this function bounds, and the watchdog would otherwise outlive it holding a
+  # full-deadline sleep. Re-raise afterward so the interrupted script still dies
+  # with the expected signal semantics.
+  trap 'kill -KILL "-$watchdog" 2>/dev/null || kill -KILL "$watchdog" 2>/dev/null || true; kill -TERM "-$child" 2>/dev/null || kill -TERM "$child" 2>/dev/null || true; sleep 1; kill -KILL "-$child" 2>/dev/null || kill -KILL "$child" 2>/dev/null || true; wait "$child" 2>/dev/null || true; rm -f "$timeout_file" "$status_file"; trap - INT TERM; kill -s TERM "$$"' TERM
+  trap 'kill -KILL "-$watchdog" 2>/dev/null || kill -KILL "$watchdog" 2>/dev/null || true; kill -TERM "-$child" 2>/dev/null || kill -TERM "$child" 2>/dev/null || true; sleep 1; kill -KILL "-$child" 2>/dev/null || kill -KILL "$child" 2>/dev/null || true; wait "$child" 2>/dev/null || true; rm -f "$timeout_file" "$status_file"; trap - INT TERM; kill -s INT "$$"' INT
+  if wait "$child" 2>/dev/null; then
+    status=0
+  else
+    status=$?
+  fi
+  if [[ -s "$timeout_file" ]]; then
+    # SIGTERM already freed the pipeline shell this `wait` was blocked on, but a
+    # part of the capture tree that ignores SIGTERM is still running and only
+    # the watchdog's escalation reaches it. Let the watchdog finish before
+    # reaping it, then sweep the group once more.
+    wait "$watchdog" 2>/dev/null || true
+    kill -KILL "-$child" 2>/dev/null || true
+  else
+    kill -KILL "-$watchdog" 2>/dev/null || kill -KILL "$watchdog" 2>/dev/null || true
+    wait "$watchdog" 2>/dev/null || true
+  fi
+  trap - INT TERM
+  return "$status"
+}
+
+capture_output_file() {
+  capture_budgeted_output_file 1 "$@"
+}
+
+# Same capture accounting without a second wall-clock bound, for a command that
+# already enforces its own. Only the PR feedback capture qualifies: it runs
+# through `run_with_deadline`, whose interrupt traps re-raise against `$$` --
+# the wrapper itself, since `$$` does not change in a subshell -- so signalling
+# it from an outer deadline would terminate the wrapper instead of refusing.
+capture_prebounded_output_file() {
+  capture_budgeted_output_file 0 "$@"
+}
+
+capture_budgeted_output_file() {
+  local apply_deadline="$1"
+  local output="$2"
+  local label="$3"
+  local allowed_status="$4"
+  shift 4
   local remaining=$((max_review_capture_bytes - review_capture_bytes))
+  local remaining_seconds=$((max_review_capture_seconds - review_capture_seconds))
   local command_status
   local limiter_status
   local size
-  local pipeline_status=()
+  local started
+  local ended
+  local elapsed
+  local status_file
+  local timeout_file
 
   if ((remaining <= 0)); then
     echo "agent:autoreview: review input exceeds the ${max_review_capture_bytes}-byte capture budget while capturing $label" >&2
     return 1
   fi
+  if ((remaining_seconds <= 0)); then
+    echo "agent:autoreview: review capture exceeded the ${max_review_capture_seconds}-second capture deadline before capturing $label (${review_capture_seconds}s spent capturing); no review bundle was produced" >&2
+    return 124
+  fi
+  if
+    ! status_file="$(/usr/bin/mktemp "${TMPDIR:-/tmp}/autoreview-capture.XXXXXX")"
+  then
+    echo "agent:autoreview: failed to allocate a capture status file for $label" >&2
+    return 1
+  fi
+  if
+    ! timeout_file="$(/usr/bin/mktemp "${TMPDIR:-/tmp}/autoreview-capture-deadline.XXXXXX")"
+  then
+    rm -f "$status_file"
+    echo "agent:autoreview: failed to allocate a capture deadline file for $label" >&2
+    return 1
+  fi
+  : >"$output"
 
+  started="$(stage_epoch_seconds)"
   set +e
-  "$@" | head -c "$((remaining + 1))" >"$output"
-  pipeline_status=("${PIPESTATUS[@]}")
+  if [[ "$apply_deadline" -eq 1 ]]; then
+    run_capture_with_deadline "$remaining_seconds" "$timeout_file" "$status_file" \
+      run_capture_pipeline "$output" "$((remaining + 1))" "$status_file" "$@"
+  else
+    run_capture_pipeline "$output" "$((remaining + 1))" "$status_file" "$@"
+  fi
   set -e
-  command_status="${pipeline_status[0]:-1}"
-  limiter_status="${pipeline_status[1]:-1}"
+  # Whole seconds: this shell has no sub-second clock it can rely on, so a
+  # capture faster than a second charges nothing. The undercount is bounded by
+  # the number of captures a mode performs and is immaterial against a
+  # ten-minute budget, while a capture that actually stalls charges every second
+  # it took. `stage_epoch_seconds` degrades to 0 if /bin/date is unavailable;
+  # treat any unusable reading as zero elapsed rather than charging nonsense.
+  ended="$(stage_epoch_seconds)"
+  elapsed=0
+  if [[ "$started" =~ ^[1-9][0-9]*$ && "$ended" =~ ^[1-9][0-9]*$ ]] &&
+    ((ended > started)); then
+    elapsed=$((ended - started))
+  fi
+  review_capture_seconds=$((review_capture_seconds + elapsed))
+
+  if [[ -s "$timeout_file" ]]; then
+    rm -f "$status_file" "$timeout_file"
+    echo "agent:autoreview: capture of $label exceeded the ${max_review_capture_seconds}-second capture deadline after ${review_capture_seconds}s; no review bundle was produced" >&2
+    return 124
+  fi
+  if ! read -r command_status limiter_status <"$status_file"; then
+    command_status=1
+    limiter_status=1
+  fi
+  rm -f "$status_file" "$timeout_file"
+  [[ "$command_status" =~ ^[0-9]+$ ]] || command_status=1
+  [[ "$limiter_status" =~ ^[0-9]+$ ]] || limiter_status=1
   size="$(wc -c <"$output")"
   size="${size//[[:space:]]/}"
 
@@ -6637,7 +6802,7 @@ EOF
       "$repo" \
       "$protected_main_ref" \
       "$feedback_runtime_dir"
-    capture_output_file "$staging_dir/feedback-state.json" "PR feedback state" 0 \
+    capture_prebounded_output_file "$staging_dir/feedback-state.json" "PR feedback state" 0 \
       capture_feedback_state "$repo" "$feedback_runtime_dir" "$pr_number" "$repository_slug"
     if ! safe_remove_tree \
       "$feedback_runtime_dir" \

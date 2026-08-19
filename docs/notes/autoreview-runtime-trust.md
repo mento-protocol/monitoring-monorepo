@@ -63,6 +63,30 @@ symmetric candidates of 50 KB blobs took about 74 seconds at the product
 ceiling, against 272 MB of restated diff with detection off. Elapsed time
 depends on hardware and blob size; the comparison count does not.
 
+Both bounds above limit output, not work. Git reads and diffs every changed
+blob before the first byte reaches the limiter, and the candidate gate caps
+comparisons rather than seconds, so a pathological repository state, a hung
+filesystem, or a Git defect can hold a capture open past either. One wall-clock
+budget bounds that work: 600 seconds, spent across every capture a run performs,
+enforced separately in each runtime. Each capture may take only what the budget
+has left, so the captures together can never outlast it, and only time actually
+spent capturing is charged, so a semantic-engine review between two of the
+helper's Git spawns cannot consume it. A capture that reaches the bound refuses
+by stage name and elapsed time and produces no bundle; it is never published
+partially and never skipped silently. Nothing the capture started outlives that
+refusal: the wrapper runs each capture as its own process group and escalates
+SIGTERM to a process-group SIGKILL, and the helper spawns detached and sweeps
+the group after its own kill. The wrapper's budget covers its capture stage; in
+the helper it covers every Git spawn. The one capture it does not wrap is the PR
+feedback state, which already carries its own wall-clock bound and still spends
+what it uses from the same budget. The number is a ceiling, not a statement
+about how long a capture takes: a 1,000-commit, 23.8 MB branch diff of this
+repository captures in about a second, and the deadline promises nothing about
+elapsed time beyond the bound it enforces. Its default is the one value in this
+note an operator may set, alongside the other deadlines in the operator
+contract, because moving a liveness bound cannot make a review accept evidence
+it would otherwise refuse.
+
 The changed-path captures keep the pin, so both sides of a move stay enumerated
 for the sensitive-path refusal and checklist routing. The scope baseline splits
 the difference on purpose: its changed-file count comes from that rename-blind

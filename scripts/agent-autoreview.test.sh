@@ -4123,14 +4123,14 @@ assert_deadline_fixture_processes_stopped() {
       pid_file="$descendant_pid_file"
     fi
     if [[ ! -s "$pid_file" ]]; then
-      printf '%s fake gh did not record its %s pid\n' "$context" "$role" >&2
+      printf '%s fixture did not record its %s pid\n' "$context" "$role" >&2
       failed=1
       continue
     fi
     pid="$(cat "$pid_file")"
     if ! wait_for_process_exit_or_zombie "$pid" 200; then
       kill -KILL "$pid" 2>/dev/null || true
-      printf '%s left its fake gh %s alive: pid %s\n' \
+      printf '%s left its fixture %s alive: pid %s\n' \
         "$context" "$role" "$pid" >&2
       failed=1
     fi
@@ -6478,6 +6478,363 @@ run_rename_capture_regressions() {
   expect_stderr_contains "refusing binary changes"
 }
 
+# A capture stalls when the reviewed repository's own state makes Git stop
+# making progress -- work no output bound can cut short, because Git reads and
+# diffs every blob before the first byte reaches the limiter. This fixture
+# supplies that state without touching the real Git: a `filter.<name>.clean`
+# process the reviewed repository declares in its own config and
+# `.gitattributes`. The filter inspects the Git command line above it and hangs
+# only for a rename-aware patch capture, so target selection, the source
+# fingerprint, the changed-path enumeration, and the stat captures all convert
+# normally and the run reaches the one capture the deadline must bound. The
+# filter ignores SIGTERM and forks a descendant that does too, so only a
+# process-group SIGKILL clears the tree it leaves behind.
+seed_capture_deadline_fixture() {
+  local review_repo="$1"
+  local filter_script="$2"
+  local state_pointer="$3"
+
+  init_review_repo "$review_repo"
+  printf 'base\n' >"$review_repo/README.md"
+  printf 'seed\n' >"$review_repo/payload.txt"
+  printf '%s\n' 'payload.txt filter=stall' >"$review_repo/.gitattributes"
+  commit_review_repo "$review_repo" init
+
+  cat >"$filter_script" <<FILTER
+#!/bin/bash
+PATH=/usr/bin:/bin
+export PATH
+state_dir="\$(cat "$state_pointer" 2>/dev/null || true)"
+inspect_pid="\$PPID"
+level=0
+while [[ "\$inspect_pid" =~ ^[1-9][0-9]*\$ && "\$level" -lt 4 ]]; do
+  args="\$(ps -o args= -p "\$inspect_pid" 2>/dev/null || true)"
+  if [[
+    "\$args" == *--patch* &&
+      "\$args" == *--find-renames* &&
+      "\$args" == *-l5000* ]] \\
+    ; then
+    trap '' TERM
+    printf '%s\n' "\$\$" >"\$state_dir/leader.pid"
+    /bin/bash -c 'trap "" TERM; while true; do sleep 1; done' &
+    printf '%s\n' "\$!" >"\$state_dir/descendant.pid"
+    while true; do
+      sleep 1
+    done
+  fi
+  inspect_pid="\$(ps -o ppid= -p "\$inspect_pid" 2>/dev/null | tr -d ' ')"
+  level=\$((level + 1))
+done
+exec cat
+FILTER
+  chmod +x "$filter_script"
+  git -C "$review_repo" config filter.stall.clean "$filter_script"
+  # Only an unstaged change routes worktree content through the clean filter, so
+  # this is what puts the stall on the unstaged patch capture.
+  printf 'dirty\n' >"$review_repo/payload.txt"
+}
+
+run_capture_deadline_regressions() {
+  local review_repo="$tmp_dir/capture-deadline"
+  local filter_script="$tmp_dir/capture-deadline-filter.sh"
+  local state_pointer="$tmp_dir/capture-deadline-state-dir"
+  local control_state="$tmp_dir/capture-deadline-control-state"
+  local wrapper_state="$tmp_dir/capture-deadline-wrapper-state"
+  local helper_state="$tmp_dir/capture-deadline-helper-state"
+  local deadline_seconds=5
+  local control_pid
+  local control_waited
+
+  mkdir -p "$control_state" "$wrapper_state" "$helper_state"
+  printf '%s\n' "$control_state" >"$state_pointer"
+  seed_capture_deadline_fixture \
+    "$review_repo" "$filter_script" "$state_pointer"
+
+  # Negative control. The arms below only prove a deadline if the fixture really
+  # does stall the capture, so run the exact rename-aware patch capture outside
+  # any deadline first and require that it is still running well past the bound
+  # the wrapper and helper are given. A fixture that quietly stopped stalling
+  # would make both arms pass vacuously.
+  git -C "$review_repo" diff \
+    --patch --find-renames -l5000 --no-ext-diff --no-textconv \
+    >/dev/null 2>&1 &
+  control_pid=$!
+  control_waited=0
+  while ((control_waited < (deadline_seconds + 3) * 10)); do
+    process_is_runnable "$control_pid" || break
+    sleep 0.1
+    control_waited=$((control_waited + 1))
+  done
+  if ! process_is_runnable "$control_pid"; then
+    printf 'capture-deadline fixture no longer stalls an unbounded rename-aware patch capture; the deadline arms below would pass vacuously\n' >&2
+    exit 1
+  fi
+  kill -KILL "$control_pid" 2>/dev/null || true
+  wait "$control_pid" 2>/dev/null || true
+  cleanup_capture_deadline_fixture_tree "$control_state"
+
+  run_capture_deadline_wrapper_arm \
+    "$review_repo" "$state_pointer" "$wrapper_state" "$deadline_seconds"
+  run_capture_deadline_helper_arm \
+    "$review_repo" "$state_pointer" "$helper_state" "$deadline_seconds"
+  run_capture_deadline_headroom_arm
+}
+
+cleanup_capture_deadline_fixture_tree() {
+  local state_dir="$1"
+  local role
+  local pid_file
+  local pid
+
+  for role in descendant leader; do
+    pid_file="$state_dir/$role.pid"
+    [[ -s "$pid_file" ]] || continue
+    pid="$(cat "$pid_file")"
+    [[ "$pid" =~ ^[1-9][0-9]*$ ]] || continue
+    kill -KILL "$pid" 2>/dev/null || true
+    wait_for_process_exit_or_zombie "$pid" 200 || true
+  done
+  : >"$state_dir/leader.pid"
+  : >"$state_dir/descendant.pid"
+}
+
+# The wrapper's own capture block, reached by a prepared-bundle local target.
+run_capture_deadline_wrapper_arm() {
+  local review_repo="$1"
+  local state_pointer="$2"
+  local state_dir="$3"
+  local deadline_seconds="$4"
+  local bundle_dir="$state_dir/bundle"
+  local wrapper_pid
+  local wrapper_status
+  local started_at
+  local elapsed
+  local had_monitor=0
+
+  printf '%s\n' "$state_dir" >"$state_pointer"
+  : >"$state_dir/leader.pid"
+  : >"$state_dir/descendant.pid"
+  : >"$state_dir/group.pid"
+  : >"$stdout"
+  : >"$stderr"
+  started_at="$(date +%s)"
+  begin_deadline_fixture_registration
+  case "$-" in
+    *m*) had_monitor=1 ;;
+  esac
+  set -m
+  (
+    cd "$review_repo"
+    # `exec`, so the subshell becomes the wrapper: the suite's inherited ERR
+    # trap would otherwise report this deliberately failing run as unexpected.
+    exec env -i \
+      "PATH=$PATH" \
+      "HOME=$HOME" \
+      "TMPDIR=${TMPDIR:-/tmp}" \
+      "AGENT_AUTOREVIEW_CAPTURE_DEADLINE_SECONDS=$deadline_seconds" \
+      "$adapter_wrapper" \
+      --prepare-bundle-dir "$bundle_dir" \
+      --mode local \
+      --engine local >"$stdout" 2>"$stderr"
+  ) &
+  wrapper_pid=$!
+  arm_deadline_fixture_cleanup "$wrapper_pid" "$state_dir"
+  if [[ "$had_monitor" -eq 0 ]]; then
+    set +m
+  fi
+  if ! wait_for_deadline_wrapper_exit \
+    "wrapper capture deadline" "$wrapper_pid" "$state_dir"; then
+    exit 1
+  fi
+  set +e
+  wait "$wrapper_pid" 2>/dev/null
+  wrapper_status=$?
+  set -e
+  elapsed=$(($(date +%s) - started_at))
+
+  if [[ "$wrapper_status" -eq 0 ]]; then
+    cleanup_capture_deadline_fixture_tree "$state_dir"
+    printf 'a stalled wrapper capture unexpectedly succeeded\n' >&2
+    exit 1
+  fi
+  if ((elapsed >= 60)); then
+    cleanup_capture_deadline_fixture_tree "$state_dir"
+    printf 'the wrapper capture deadline did not bound a stalled capture: took %ss\n' \
+      "$elapsed" >&2
+    exit 1
+  fi
+  expect_stderr_contains \
+    "capture of unstaged diff exceeded the ${deadline_seconds}-second capture deadline"
+  expect_stderr_contains "no review bundle was produced"
+  if [[ -e "$bundle_dir" ]]; then
+    cleanup_capture_deadline_fixture_tree "$state_dir"
+    printf 'a capture that hit its deadline still published a bundle: %s\n' \
+      "$bundle_dir" >&2
+    exit 1
+  fi
+  # The escalation must reach the whole process group, not just the Git process
+  # the wrapper started: both the SIGTERM-ignoring filter and its descendant are
+  # gone.
+  if ! assert_deadline_fixture_processes_stopped \
+    "wrapper capture deadline" \
+    "$state_dir/leader.pid" \
+    "$state_dir/descendant.pid"; then
+    cleanup_capture_deadline_fixture_tree "$state_dir"
+    exit 1
+  fi
+  cleanup_retained_test_command_runtimes
+  if ! disarm_deadline_fixture_cleanup "$wrapper_pid" "$state_dir"; then
+    printf 'wrapper capture deadline fixture cleanup registry drifted\n' >&2
+    exit 1
+  fi
+}
+
+# The helper's own synchronous capture path, reached without a prepared bundle.
+run_capture_deadline_helper_arm() {
+  local review_repo="$1"
+  local state_pointer="$2"
+  local state_dir="$3"
+  local deadline_seconds="$4"
+  local bundle_output="$state_dir/prompt.md"
+  local wrapper_pid
+  local wrapper_status
+  local started_at
+  local elapsed
+  local had_monitor=0
+
+  printf '%s\n' "$state_dir" >"$state_pointer"
+  : >"$state_dir/leader.pid"
+  : >"$state_dir/descendant.pid"
+  : >"$state_dir/group.pid"
+  : >"$stdout"
+  : >"$stderr"
+  started_at="$(date +%s)"
+  begin_deadline_fixture_registration
+  case "$-" in
+    *m*) had_monitor=1 ;;
+  esac
+  set -m
+  (
+    cd "$review_repo"
+    # `exec` for the reason the wrapper arm records.
+    exec env -i \
+      "PATH=$PATH" \
+      "HOME=$HOME" \
+      "TMPDIR=${TMPDIR:-/tmp}" \
+      "AGENT_AUTOREVIEW_CAPTURE_DEADLINE_SECONDS=$deadline_seconds" \
+      "$adapter_wrapper" \
+      --mode local \
+      --engine local \
+      --prepare-only \
+      --bundle-output "$bundle_output" >"$stdout" 2>"$stderr"
+  ) &
+  wrapper_pid=$!
+  arm_deadline_fixture_cleanup "$wrapper_pid" "$state_dir"
+  if [[ "$had_monitor" -eq 0 ]]; then
+    set +m
+  fi
+  if ! wait_for_deadline_wrapper_exit \
+    "helper capture deadline" "$wrapper_pid" "$state_dir"; then
+    exit 1
+  fi
+  set +e
+  wait "$wrapper_pid" 2>/dev/null
+  wrapper_status=$?
+  set -e
+  elapsed=$(($(date +%s) - started_at))
+
+  if [[ "$wrapper_status" -eq 0 ]]; then
+    cleanup_capture_deadline_fixture_tree "$state_dir"
+    printf 'a stalled helper capture unexpectedly succeeded\n' >&2
+    exit 1
+  fi
+  if ((elapsed >= 60)); then
+    cleanup_capture_deadline_fixture_tree "$state_dir"
+    printf 'the helper capture deadline did not bound a stalled capture: took %ss\n' \
+      "$elapsed" >&2
+    exit 1
+  fi
+  expect_stderr_contains \
+    "review capture exceeded the ${deadline_seconds}-second capture deadline while capturing unstaged diff"
+  expect_stderr_contains "no review bundle was produced"
+  if [[ -e "$bundle_output" ]]; then
+    cleanup_capture_deadline_fixture_tree "$state_dir"
+    printf 'a helper capture that hit its deadline still published a prompt: %s\n' \
+      "$bundle_output" >&2
+    exit 1
+  fi
+  if ! assert_deadline_fixture_processes_stopped \
+    "helper capture deadline" \
+    "$state_dir/leader.pid" \
+    "$state_dir/descendant.pid"; then
+    cleanup_capture_deadline_fixture_tree "$state_dir"
+    exit 1
+  fi
+  cleanup_retained_test_command_runtimes
+  if ! disarm_deadline_fixture_cleanup "$wrapper_pid" "$state_dir"; then
+    printf 'helper capture deadline fixture cleanup registry drifted\n' >&2
+    exit 1
+  fi
+}
+
+# A healthy review must never come near the bound. The shipped budget is 600
+# seconds; this arm reviews an ordinary dirty worktree under a tenth of that and
+# requires both runtimes to finish, so a capture path that started spending real
+# wall clock fails here long before it could reach production.
+run_capture_deadline_headroom_arm() {
+  local review_repo="$tmp_dir/capture-deadline-headroom"
+  local bundle_dir="$tmp_dir/capture-deadline-headroom-bundle"
+  local bundle_output="$tmp_dir/capture-deadline-headroom-prompt.md"
+
+  init_review_repo "$review_repo"
+  printf 'base\n' >"$review_repo/README.md"
+  seed_rename_capture_lines "$review_repo/payload.txt" 200
+  commit_review_repo "$review_repo" init
+  printf 'unstaged edit\n' >>"$review_repo/payload.txt"
+
+  run_helper_in_repo_with_env "$review_repo" \
+    "AGENT_AUTOREVIEW_CAPTURE_DEADLINE_SECONDS=60" \
+    --prepare-bundle-dir "$bundle_dir" \
+    --mode local \
+    --engine local
+  expect_empty_stderr
+  expect_file_contains "$bundle_dir/patches/unstaged.diff" "unstaged edit"
+
+  run_helper_in_repo_with_env "$review_repo" \
+    "AGENT_AUTOREVIEW_CAPTURE_DEADLINE_SECONDS=60" \
+    --mode local \
+    --engine local \
+    --prepare-only \
+    --bundle-output "$bundle_output"
+  expect_empty_stderr
+  expect_file_contains "$bundle_output" "unstaged edit"
+}
+
+run_helper_in_repo_with_env() {
+  local review_repo="$1"
+  local extra_env="$2"
+  shift 2
+  : >"$stdout"
+  : >"$stderr"
+  local status=0
+  (
+    cd "$review_repo"
+    env -i \
+      "PATH=$PATH" \
+      "HOME=$HOME" \
+      "TMPDIR=${TMPDIR:-/tmp}" \
+      "$extra_env" \
+      "$adapter_wrapper" \
+      "$@" >"$stdout" 2>"$stderr"
+  ) || status=$?
+  cleanup_retained_test_command_runtimes
+  if [[ "$status" -ne 0 ]]; then
+    printf 'helper failed unexpectedly\nstdout:\n%s\nstderr:\n%s\n' \
+      "$(cat "$stdout")" "$(cat "$stderr")" >&2
+    return "$status"
+  fi
+}
+
 run_numstat_path_parsing_regressions() {
   local arrow_repo="$tmp_dir/numstat-path-parsing"
   local arrow_output="$tmp_dir/numstat-path-parsing-prompt.md"
@@ -7414,6 +7771,7 @@ run_bundle_integrity_family() {
   run_large_untracked_bound_regression
   run_aggregate_untracked_bound_regression
   run_rename_capture_regressions
+  run_capture_deadline_regressions
   run_numstat_path_parsing_regressions
   run_moved_content_rescan_regressions
   run_bundle_output_deferred_regression
@@ -8797,6 +9155,9 @@ case "$test_focus" in
     ;;
   cleanup-race)
     run_untrusted_cleanup_retention_regression
+    ;;
+  capture-deadline)
+    run_capture_deadline_regressions
     ;;
   *)
     printf 'unknown AUTOREVIEW_TEST_FOCUS: %s\n' "$test_focus" >&2
