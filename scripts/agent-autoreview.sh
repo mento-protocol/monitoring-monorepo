@@ -5881,8 +5881,9 @@ review_capture_seconds_left=0
 # Publish the seconds left before the capture stage's absolute deadline into
 # `review_capture_seconds_left`. The first call fixes the stage's start, so this
 # assigns two globals and cannot be called through a command substitution, whose
-# subshell would discard both. A clock this shell cannot read returns non-zero,
-# which fails the capture closed rather than leaving it unbounded.
+# subshell would discard both. A clock this shell cannot read, or one that moved
+# backwards, returns non-zero, which fails the capture closed rather than
+# leaving it unbounded.
 review_capture_measure() {
   local now
   local elapsed
@@ -5895,10 +5896,11 @@ review_capture_measure() {
   fi
   elapsed=$((now - review_capture_started_epoch))
   if ((elapsed < 0)); then
-    # A clock that moved backwards cannot bound anything; restart the stage
-    # rather than hand a capture a budget larger than the one it was given.
-    review_capture_started_epoch="$now"
-    elapsed=0
+    # No monotonic clock is available to this shell, so a clock that moved
+    # backwards has to fail closed. Restarting the stage from the new reading
+    # would hand the run a fresh full budget, and a stage that kept doing that
+    # would outlast the deadline it is supposed to enforce.
+    return 1
   fi
   review_capture_seconds_left=$((max_review_capture_seconds - elapsed))
 }
@@ -6031,7 +6033,7 @@ capture_budgeted_output_file() {
     return 1
   fi
   if ! review_capture_measure; then
-    echo "agent:autoreview: cannot read a wall clock to bound the capture of $label" >&2
+    echo "agent:autoreview: cannot bound the capture of $label: the wall clock is unreadable or moved backwards" >&2
     return 1
   fi
   remaining_seconds="$review_capture_seconds_left"
@@ -6856,7 +6858,7 @@ EOF
     local feedback_deadline="$feedback_capture_deadline_seconds"
     local feedback_budget_left
     if ! review_capture_measure; then
-      echo "agent:autoreview: cannot read a wall clock to bound the PR feedback capture" >&2
+      echo "agent:autoreview: cannot bound the PR feedback capture: the wall clock is unreadable or moved backwards" >&2
       return 1
     fi
     feedback_budget_left="$review_capture_seconds_left"
