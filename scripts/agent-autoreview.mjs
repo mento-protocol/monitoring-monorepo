@@ -1897,11 +1897,13 @@ const CAPTURE_DEADLINE_MS = (() => {
   // this variable independently, so a value one accepted and the other rejected
   // would give a single run two different budgets -- `Number.parseInt` would
   // read `1x` as one second here while the wrapper announced its 600-second
-  // fallback. The digit ceiling keeps every accepted value exact in both a
-  // shell integer and a double.
+  // fallback. Six digits is the ceiling both apply: it keeps this millisecond
+  // conversion inside the unsigned 32-bit range timeout APIs are uniformly safe
+  // with, and 999,999 seconds is eleven days, far past any bound a capture
+  // stage has a use for.
   const configured =
     process.env.AGENT_AUTOREVIEW_CAPTURE_DEADLINE_SECONDS || "";
-  return /^[1-9][0-9]{0,8}$/.test(configured)
+  return /^[1-9][0-9]{0,5}$/.test(configured)
     ? Number(configured) * 1000
     : 600_000;
 })();

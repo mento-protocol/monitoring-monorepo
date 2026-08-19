@@ -5891,10 +5891,13 @@ review_capture_bytes=0
 # reviewer's own 1,800-second default timeout. Overridable for tests, validated
 # here for the reason the gh deadline records. The helper reads the same
 # variable and applies this exact rule, so no value can hand one run two
-# different budgets.
+# different budgets. Six digits is the shared ceiling: it keeps the helper's
+# millisecond conversion inside the unsigned 32-bit range timeout APIs are
+# uniformly safe with, and 999,999 seconds is already eleven days, far past any
+# bound a capture stage has a use for.
 max_review_capture_seconds="${AGENT_AUTOREVIEW_CAPTURE_DEADLINE_SECONDS:-600}"
-if ! [[ "$max_review_capture_seconds" =~ ^[1-9][0-9]{0,8}$ ]]; then
-  echo "agent:autoreview: AGENT_AUTOREVIEW_CAPTURE_DEADLINE_SECONDS='$max_review_capture_seconds' is not a positive integer; using default 600s" >&2
+if ! [[ "$max_review_capture_seconds" =~ ^[1-9][0-9]{0,5}$ ]]; then
+  echo "agent:autoreview: AGENT_AUTOREVIEW_CAPTURE_DEADLINE_SECONDS='$max_review_capture_seconds' is not a positive integer below 1000000 seconds; using default 600s" >&2
   max_review_capture_seconds=600
 fi
 review_capture_started_epoch=0

@@ -6891,7 +6891,7 @@ run_capture_deadline_override_parity_arm() {
     --mode local \
     --engine local
   expect_stderr_contains \
-    "AGENT_AUTOREVIEW_CAPTURE_DEADLINE_SECONDS='1x' is not a positive integer; using default 600s"
+    "AGENT_AUTOREVIEW_CAPTURE_DEADLINE_SECONDS='1x' is not a positive integer below 1000000 seconds; using default 600s"
 
   run_helper_in_repo_with_env "$review_repo" \
     "AGENT_AUTOREVIEW_CAPTURE_DEADLINE_SECONDS=1x" \
@@ -6900,8 +6900,21 @@ run_capture_deadline_override_parity_arm() {
     --prepare-only \
     --bundle-output "$bundle_output"
   expect_stderr_contains \
-    "AGENT_AUTOREVIEW_CAPTURE_DEADLINE_SECONDS='1x' is not a positive integer; using default 600s"
+    "AGENT_AUTOREVIEW_CAPTURE_DEADLINE_SECONDS='1x' is not a positive integer below 1000000 seconds; using default 600s"
   expect_file_contains "$bundle_output" "dirty"
+
+  # Seven digits is past the shared ceiling, so both runtimes must fall back
+  # rather than one of them adopting an eleven-day deadline.
+  run_helper_in_repo_with_env "$review_repo" \
+    "AGENT_AUTOREVIEW_CAPTURE_DEADLINE_SECONDS=9999999" \
+    --mode local \
+    --engine local \
+    --prepare-only \
+    --bundle-output "$tmp_dir/capture-deadline-parity-wide-prompt.md"
+  expect_stderr_contains \
+    "AGENT_AUTOREVIEW_CAPTURE_DEADLINE_SECONDS='9999999' is not a positive integer below 1000000 seconds; using default 600s"
+  expect_file_contains \
+    "$tmp_dir/capture-deadline-parity-wide-prompt.md" "dirty"
 }
 
 # The PR feedback capture keeps its own wall-clock bound, so it is the one
