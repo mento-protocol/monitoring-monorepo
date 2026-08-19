@@ -8,8 +8,10 @@
  * template cross-references this gauge's labels via
  * `$values.B.Labels.reason_message` (Grafana's `$labels` exposes only the
  * firing query's labels, so the annotation reads query B's labels through
- * the `$values` map) to annotate the existing `Deviation Breach Critical`
- * alert.
+ * the `$values` map). It answers "why aren't rebalances landing" on the rules
+ * where that is the operator's next question: `Rebalancer Stale` (the
+ * actionable pool critical), `Rebalance Ineffective`, `Deviation Breach`, and
+ * the `Pool Depletion Risk` rules.
  *
  * Run cadence is controlled by `REBALANCE_PROBE_EVERY_N_POLLS` — see
  * `poller.ts`. The gauge is RESET at the start of each cycle so a pool
@@ -73,9 +75,11 @@ export function _resetProbeInProgressForTests(): void {
 }
 
 /**
- * Returns pools eligible for the rebalance-reason probe — same gating as the
- * `Deviation Breach Critical` rule so we only annotate alerts that can
- * actually fire.
+ * Returns pools eligible for the rebalance-reason probe. The gate is a cost
+ * control, not an alert mirror: a pool this deep in breach is the one whose
+ * blocked rebalance is worth an RPC simulation, and since ADR 0067 nothing
+ * pages on the 1.05 magnitude. The only Grafana rule still downstream of it is
+ * the warning-severity `Deviation Breach Critical State Changed`.
  *
  *   - `wrappedExchangeId` empty (native FPMM, not a healed VirtualPool)
  *   - `deviationBreachStartedAt > 0` (active breach anchor)
@@ -87,9 +91,9 @@ export function _resetProbeInProgressForTests(): void {
 export function eligibleForProbe(pools: PoolRow[]): PoolRow[] {
   // Defense-in-depth VP exclusion via the canonical `isFpmmPool` predicate.
   // The poller already filters to FPMM-only rows at the boundary, but a healed
-  // VP that slipped through (or a direct caller passing unfiltered pools) no
-  // longer fires the Deviation Breach Critical alert, so annotating it would
-  // emit a phantom `mento_pool_rebalance_blocked` gauge.
+  // VP that slipped through (or a direct caller passing unfiltered pools) has
+  // no FPMM deviation or depletion alert to annotate, so probing it would emit
+  // a phantom `mento_pool_rebalance_blocked` gauge.
   return pools.filter(isFpmmPool).filter((pool) => {
     if (Number(pool.deviationBreachStartedAt) <= 0) return false;
     const ratio = parseFloat(pool.lastDeviationRatio);

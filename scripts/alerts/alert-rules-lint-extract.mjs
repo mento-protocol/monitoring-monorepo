@@ -266,7 +266,10 @@ export function extractionFloorFailures({
   referenced,
 }) {
   const failures = [];
-  const minExpressions = intEnv("ALERT_RULES_LINT_MIN_EXPRESSIONS", 170);
+  // 169 since ADR 0067 replaced the two magnitude-based deviation criticals
+  // with the two depletion rules — a real net loss of extracted expressions,
+  // not an extractor regression.
+  const minExpressions = intEnv("ALERT_RULES_LINT_MIN_EXPRESSIONS", 169);
   const minRegistered = intEnv("ALERT_RULES_LINT_MIN_REGISTERED", 30);
   const minReferenced = intEnv("ALERT_RULES_LINT_MIN_REFERENCED", 25);
 
