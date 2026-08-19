@@ -6915,6 +6915,28 @@ run_capture_deadline_override_parity_arm() {
     "AGENT_AUTOREVIEW_CAPTURE_DEADLINE_SECONDS='9999999' is not a positive integer below 1000000 seconds; using default 600s"
   expect_file_contains \
     "$tmp_dir/capture-deadline-parity-wide-prompt.md" "dirty"
+
+  # One second is the smallest value the documented range accepts. It must be
+  # taken as a deadline and enforced, not rejected as invalid: the measurement
+  # that fixes the capture stage's start has no elapsed time to round up, so it
+  # cannot spend the whole budget before the first capture runs.
+  run_helper_in_repo_expect_failure_with_env "$review_repo" \
+    "AGENT_AUTOREVIEW_CAPTURE_DEADLINE_SECONDS=1" \
+    "AGENT_AUTOREVIEW_FEEDBACK_DEADLINE_SECONDS=30" \
+    --prepare-bundle-dir "$tmp_dir/capture-deadline-parity-floor-bundle" \
+    --mode local \
+    --engine local
+  expect_stderr_contains "1-second capture deadline"
+  if grep -Fq -- "is not a positive integer below 1000000 seconds" "$stderr"; then
+    printf 'the smallest documented capture deadline was rejected as invalid\n' >&2
+    exit 1
+  fi
+  # `git status` is the first capture a local target makes. Refusing there means
+  # the measurement that started the stage had already spent the whole budget.
+  if grep -Fq -- "before capturing git status" "$stderr"; then
+    printf 'the capture stage spent its whole budget before its first capture ran\n' >&2
+    exit 1
+  fi
 }
 
 # The PR feedback capture keeps its own wall-clock bound, so it is the one

@@ -5917,7 +5917,13 @@ review_capture_measure() {
     return 1
   fi
   if [[ "$review_capture_started_epoch" == "0" ]]; then
+    # The call that fixes the stage's start has nothing to round: its capture
+    # begins exactly now, so it gets the whole budget. Rounding here instead
+    # would silently shorten every configured deadline by a second and reject
+    # the smallest valid one outright.
     review_capture_started_epoch="$now"
+    review_capture_seconds_left="$max_review_capture_seconds"
+    return 0
   fi
   elapsed=$((now - review_capture_started_epoch))
   if ((elapsed < 0)); then
@@ -5927,11 +5933,12 @@ review_capture_measure() {
     # would outlast the deadline it is supposed to enforce.
     return 1
   fi
-  # Round the elapsed time up by a second. A whole-second clock truncates, so a
-  # stage that really has run 3.8 seconds measures 3, and each capture then gets
-  # a fresh relative timer sized from that under-measurement; a stage of them
-  # would drift past the ceiling it is supposed to hold. Charging the unmeasured
-  # fraction as a whole second keeps every timer inside the budget.
+  # Round the elapsed time up by a second, for every measurement after the
+  # first. A whole-second clock truncates, so a stage that really has run 3.8
+  # seconds measures 3, and each capture then gets a fresh relative timer sized
+  # from that under-measurement; a run of them would drift past the ceiling it
+  # is supposed to hold. Charging the unmeasured fraction as a whole second
+  # keeps every timer inside the budget.
   review_capture_seconds_left=$((max_review_capture_seconds - elapsed - 1))
 }
 
