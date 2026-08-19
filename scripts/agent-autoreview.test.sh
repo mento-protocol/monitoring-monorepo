@@ -6478,6 +6478,56 @@ run_rename_capture_regressions() {
   expect_stderr_contains "refusing binary changes"
 }
 
+run_numstat_path_parsing_regressions() {
+  local arrow_repo="$tmp_dir/numstat-path-parsing"
+  local arrow_output="$tmp_dir/numstat-path-parsing-prompt.md"
+  # A literal ` => ` in a filename is legal, and it is exactly what a rename
+  # renders as inside the textual path column. The baseline reads NUL-delimited
+  # records instead, where a rename carries its preimage and postimage as
+  # separate fields, so the two cases cannot be confused.
+  local arrow_name='report.test.mjs => summary.mjs'
+  init_review_repo "$arrow_repo"
+  mkdir "$arrow_repo/src"
+  seed_rename_capture_lines "$arrow_repo/src/$arrow_name" 20
+  seed_rename_capture_lines "$arrow_repo/src/keeper.test.mjs" 20
+  seed_rename_capture_lines "$arrow_repo/src/plain.mjs" 20
+  commit_review_repo "$arrow_repo" init
+
+  git -C "$arrow_repo" switch -c arrow >/dev/null 2>&1
+  # Edited in place. Its own name ends in a test suffix, so its line must not
+  # reach the non-test count. A textual split hands `summary.mjs` to
+  # classification and counts it.
+  printf 'edited in place\n' >>"$arrow_repo/src/$arrow_name"
+  # A test file renamed to a non-test path: the postimage decides, so this line
+  # must count. Reading the preimage instead would drop it.
+  git -C "$arrow_repo" mv src/keeper.test.mjs src/keeper.mjs
+  printf 'edited after the move\n' >>"$arrow_repo/src/keeper.mjs"
+  printf 'edited plainly\n' >>"$arrow_repo/src/plain.mjs"
+  commit_review_repo "$arrow_repo" "edit an arrow-named file and rename a test"
+
+  # Precondition: the textual form really is ambiguous here, so the control
+  # cannot pass on output that never had the problem.
+  if ! git -C "$arrow_repo" diff \
+    --numstat --find-renames -l5000 --no-ext-diff --no-textconv \
+    'main...arrow' -- |
+    grep -Fq "src/$arrow_name"; then
+    printf 'arrow-named control no longer renders an ambiguous numstat path; it stopped proving anything\n' >&2
+    exit 1
+  fi
+
+  run_helper_in_repo "$arrow_repo" \
+    --mode branch \
+    --base main \
+    --engine local \
+    --prepare-only \
+    --bundle-output "$arrow_output"
+  expect_empty_stderr
+  # Two counted lines: the renamed test's edit and the plain file's edit. The
+  # arrow-named file is a test path and stays out. Four changed paths, because
+  # the enumeration keeps both sides of the rename.
+  expect_stdout_contains "scope_baseline: changed_files=4 non_test_loc=2"
+}
+
 run_moved_content_rescan_regressions() {
   local atomic_repo="$tmp_dir/moved-content-atomic"
   local split_repo="$tmp_dir/moved-content-split"
@@ -7364,6 +7414,7 @@ run_bundle_integrity_family() {
   run_large_untracked_bound_regression
   run_aggregate_untracked_bound_regression
   run_rename_capture_regressions
+  run_numstat_path_parsing_regressions
   run_moved_content_rescan_regressions
   run_bundle_output_deferred_regression
   run_sensitive_input_regressions

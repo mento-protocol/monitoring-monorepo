@@ -41,21 +41,27 @@ only while it is byte-identical, and one that also changes still fails closed.
 Those captures also own the rename candidate limit as `-l5000`, because the
 reviewed repository's own config can still set `diff.renameLimit`, and a move
 that changes a basename and edits the file needs the exhaustive pass Git skips
-past its default candidate count. The pin stays finite: that pass runs before
-any byte reaches the capture limiter and is quadratic in candidate count, so a
-change more than twice the size of the whole tracked tree says on stderr that
-detection was skipped and falls back to delete+add pairs, rather than stalling
-in Git. Those pairs still review correctly; a large enough one fails on the
-capture budget with its own message.
+past its default candidate count. The pin stays finite because that pass runs
+before any byte reaches the capture limiter, so no output bound can cut it
+short. What bounds it is the gate Git applies: the exhaustive pass is skipped
+once the number of unpaired sources multiplied by the number of unpaired
+destinations exceeds the square of the limit. `-l5000` therefore authorizes at
+most 25,000,000 pair comparisons, whatever the reviewed change looks like.
+Past that product Git says on stderr that detection was skipped and these
+captures fall back to delete+add pairs, rather than stalling. Those pairs still
+review correctly; a large enough one fails on the capture budget with its own
+message.
 
 This repository declares no minimum Git version, and the default the pin
 replaces has moved: `diff.renameLimit` documents 400 in older Git and 1,000
 today. Nothing here depends on which one a host ships, because the pin overrides
 both — an explicit `-l` wins over the config and over the built-in default, and
-5,000 is above either. The reasoning and the timings above were validated
-against Git 2.54.0, where 2,000 symmetric candidates pair under `-l5000` and are
-skipped without it. Git gates the pass on the candidate product rather than one
-count, so `-l5000` authorizes at most 25,000,000 pair comparisons.
+5,000 is above either. The bound above was validated against Git 2.54.0, where
+2,000 symmetric candidates pair under `-l5000` and are skipped without it. As
+one machine-specific observation rather than a guarantee: on that host, 5,000
+symmetric candidates of 50 KB blobs took about 74 seconds at the product
+ceiling, against 272 MB of restated diff with detection off. Elapsed time
+depends on hardware and blob size; the comparison count does not.
 
 The changed-path captures keep the pin, so both sides of a move stay enumerated
 for the sensitive-path refusal and checklist routing. The scope baseline splits

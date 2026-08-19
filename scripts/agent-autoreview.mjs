@@ -4152,16 +4152,36 @@ function nonTestPath(relativePath) {
   );
 }
 
-// `--numstat` states a detected rename in its path column as `old => new`, or
-// as `pre/{old => new}/post` when the two paths share a prefix and a suffix.
-// Classification has to read the destination: a file moved out of a test path
-// is not test churn any more, and one moved into a test path is.
-function numstatDestinationPath(pathField) {
-  const braced = pathField.match(/^(.*)\{(.*) => (.*)\}(.*)$/);
-  if (braced) return `${braced[1]}${braced[3]}${braced[4]}`;
-  const plain = pathField.match(/^(.*) => (.*)$/);
-  if (plain) return plain[2];
-  return pathField;
+// `--numstat -z` states one record as `added TAB deleted TAB path NUL`, and a
+// detected rename as `added TAB deleted TAB NUL preimage NUL postimage NUL` —
+// an empty path field followed by the two paths as fields of their own.
+// Reading them structurally is what makes classification correct: without `-z`
+// the same rename renders as `old => new` inside the path column, and a file
+// whose own name contains ` => ` is then indistinguishable from a rename. Such
+// a name is legal, and mis-splitting it hands the wrong half to `nonTestPath`.
+// Classification wants the postimage: a file moved out of a test path is not
+// test churn any more, and one moved into a test path is.
+function parseNumstatRecords(source) {
+  const fields = source.split("\0");
+  const records = [];
+  let index = 0;
+  while (index < fields.length) {
+    const match = fields[index].match(/^(\d+|-)\t(\d+|-)\t([\s\S]*)$/);
+    if (!match) {
+      index += 1;
+      continue;
+    }
+    if (match[3] !== "") {
+      records.push({ added: match[1], deleted: match[2], path: match[3] });
+      index += 1;
+      continue;
+    }
+    const postimage = fields[index + 2];
+    if (postimage === undefined) break;
+    records.push({ added: match[1], deleted: match[2], path: postimage });
+    index += 3;
+  }
+  return records;
 }
 
 // These carry `--find-renames -l5000` for the same reason the bundle captures
@@ -4169,7 +4189,8 @@ function numstatDestinationPath(pathField) {
 // pairing a verbatim move reports every line of every moved file twice. The
 // changed-file count beside it still comes from the rename-blind path
 // enumeration, so it deliberately counts both sides of a move: one number is
-// paths touched, the other is lines changed.
+// paths touched, the other is lines changed. This output feeds the baseline
+// only; no NUL from it reaches the review bundle or its collector.
 function numstatSources(repo, target) {
   if (target.mode === "local") {
     return [
@@ -4178,6 +4199,7 @@ function numstatSources(repo, target) {
         "--no-ext-diff",
         "--no-textconv",
         "--numstat",
+        "-z",
         "--find-renames",
         "-l5000",
         "--cached",
@@ -4189,6 +4211,7 @@ function numstatSources(repo, target) {
         "--no-ext-diff",
         "--no-textconv",
         "--numstat",
+        "-z",
         "--find-renames",
         "-l5000",
       ]),
@@ -4201,6 +4224,7 @@ function numstatSources(repo, target) {
         "--no-ext-diff",
         "--no-textconv",
         "--numstat",
+        "-z",
         "--find-renames",
         "-l5000",
         `${target.ref}...${target.head}`,
@@ -4214,6 +4238,7 @@ function numstatSources(repo, target) {
         "--no-ext-diff",
         "--no-textconv",
         "--numstat",
+        "-z",
         "--find-renames",
         "-l5000",
         `${target.ref}...${target.head}`,
@@ -4223,6 +4248,7 @@ function numstatSources(repo, target) {
         "--no-ext-diff",
         "--no-textconv",
         "--numstat",
+        "-z",
         "--find-renames",
         "-l5000",
         "--cached",
@@ -4234,6 +4260,7 @@ function numstatSources(repo, target) {
         "--no-ext-diff",
         "--no-textconv",
         "--numstat",
+        "-z",
         "--find-renames",
         "-l5000",
       ]),
@@ -4245,6 +4272,7 @@ function numstatSources(repo, target) {
       "--no-ext-diff",
       "--no-textconv",
       "--numstat",
+      "-z",
       "--find-renames",
       "-l5000",
       "--format=",
@@ -4256,11 +4284,12 @@ function numstatSources(repo, target) {
 function scopeBaseline(repo, target, paths) {
   let nonTestLoc = 0;
   for (const source of numstatSources(repo, target)) {
-    for (const line of source.split("\n")) {
-      const match = line.match(/^(\d+|-)\t(\d+|-)\t(.+)$/);
-      if (!match || !nonTestPath(numstatDestinationPath(match[3]))) continue;
-      if (match[1] !== "-") nonTestLoc += Number.parseInt(match[1], 10);
-      if (match[2] !== "-") nonTestLoc += Number.parseInt(match[2], 10);
+    for (const record of parseNumstatRecords(source)) {
+      if (!nonTestPath(record.path)) continue;
+      if (record.added !== "-") nonTestLoc += Number.parseInt(record.added, 10);
+      if (record.deleted !== "-") {
+        nonTestLoc += Number.parseInt(record.deleted, 10);
+      }
     }
   }
   if (target.mode === "local" || target.mode === "branch-local") {

@@ -6490,13 +6490,14 @@ EOF
   # candidates even by default; skipping it restores the delete+add blowup this
   # block exists to prevent. The pin stays finite because that pass runs before
   # any byte reaches the capture limiter, so it is the one stage no output bound
-  # can cut short, and it is quadratic in candidate count. 5,000 is more than
-  # twice this repository's whole tracked tree and costs about 74 seconds at its
-  # own ceiling, measured on 50 KB blobs that defeat both cheap passes; the same
-  # change without detection produces 272 MB. Past the pin, Git says on stderr
-  # that it skipped detection and these captures fall back to delete+add pairs,
-  # which review correctly and either fit the budget or fail it by its own
-  # message. Nothing here treats that stderr as a capture failure.
+  # can cut short. What bounds it is Git's own gate: the exhaustive pass is
+  # skipped once unpaired sources multiplied by unpaired destinations exceeds
+  # the square of the limit, so `-l5000` authorizes at most 25,000,000 pair
+  # comparisons. 5,000 is also more than twice this repository's whole tracked
+  # tree. Past that product, Git says on stderr that it skipped detection and
+  # these captures fall back to delete+add pairs, which review correctly and
+  # either fit the budget or fail it by its own message. Nothing here treats
+  # that stderr as a capture failure.
   #
   # The changed-path captures keep the `diff.renames=false` pin on purpose: they
   # feed the sensitive-path refusal and checklist routing, which must still see
