@@ -130,6 +130,19 @@ export function validate(args, env = process.env) {
   // change and on the final render. Bash's arithmetic wrapped instead, making
   // the branch always true, so the shell's failure was a noisy watch. Silence
   // is the worse of the two, which is why this is checked and not carried over.
+  //
+  // Deliberately NOT narrowed to compact watch, unlike the timeout override
+  // below, and the asymmetry is the point rather than an oversight. That one
+  // narrows a refusal this command never had: the shell read the timeout inside
+  // `(( ))` and never validated it, so scoping the new check to the single path
+  // that reads it adds no failure anywhere else. This one is the shell's own
+  // refusal, which sat at top level and fired on every invocation — a plain
+  // `status <commit>` with `ENVIO_SYNC_COMPACT_EMIT_SECONDS=abc` exited 1 there.
+  // Gating it would silently start accepting an export the command has rejected
+  // all along, which is a behaviour change dressed as a cleanup. Only the
+  // overflow half is new, and that half is refused everywhere for the same
+  // reason the value is refused everywhere: catching a malformed export early
+  // costs nothing, and the operator finds the typo before the watch matters.
   const fixed = env.ENVIO_SYNC_COMPACT_EMIT_SECONDS;
   if (
     fixed !== undefined &&

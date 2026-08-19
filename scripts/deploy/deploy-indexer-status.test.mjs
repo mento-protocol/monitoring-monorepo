@@ -118,6 +118,38 @@ for (const bad of ["abc", "Infinity", "-5", "1.5", "1e3", "9".repeat(400)]) {
   assert.equal(badCadence.ok, false, `${bad} must be refused`);
   assert.match(badCadence.stderr[0], /must be an integer number of seconds/);
 }
+
+// Mode scope, pinned in both directions. This refusal is the SHELL's own and
+// sat at top level: `status <commit>` with a malformed export exited 1 there,
+// whether or not compact watch was ever reached. It stays unnarrowed for that
+// reason, unlike the timeout override below, whose refusal is new to this
+// command and is therefore confined to the one path that reads it. Narrowing
+// this one would quietly start accepting an export the command has always
+// rejected, so pin every mode rather than leave it to the next reader's taste.
+for (const mode of [
+  { compact: false, watch: false, commit: "abc1234" },
+  { compact: false, watch: true, commit: "abc1234" },
+  { compact: false, watch: true, commit: "" },
+  { compact: true, watch: true, commit: "abc1234" },
+]) {
+  assert.equal(
+    validate(mode, { ENVIO_SYNC_COMPACT_EMIT_SECONDS: "abc" }).ok,
+    false,
+    `a malformed cadence export must be refused in every mode: ${JSON.stringify(mode)}`,
+  );
+}
+// A well-formed value is accepted in every mode, so the refusal above is about
+// the value and not about the mode.
+for (const mode of [
+  { compact: false, watch: false, commit: "abc1234" },
+  { compact: true, watch: true, commit: "abc1234" },
+]) {
+  assert.equal(
+    validate(mode, { ENVIO_SYNC_COMPACT_EMIT_SECONDS: "45" }).ok,
+    true,
+    `a well-formed cadence export must be accepted: ${JSON.stringify(mode)}`,
+  );
+}
 assert.equal(
   validate(
     { compact: true, watch: true },
