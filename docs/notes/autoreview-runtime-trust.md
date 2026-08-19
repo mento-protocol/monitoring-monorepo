@@ -68,10 +68,13 @@ blob before the first byte reaches the limiter, and the candidate gate caps
 comparisons rather than seconds, so a pathological repository state, a hung
 filesystem, or a Git defect can hold a capture open past either. One wall-clock
 budget bounds that work: 600 seconds, spent across every capture a run performs,
-enforced separately in each runtime. Each capture may take only what the budget
-has left, so the captures together can never outlast it, and only time actually
-spent capturing is charged, so a semantic-engine review between two of the
-helper's Git spawns cannot consume it. A capture that reaches the bound refuses
+enforced separately in each runtime, and each capture may take only what is left
+of it. The wrapper's captures are one contiguous stage, so its first capture
+fixes an absolute deadline and the stage as a whole cannot outlast it. The
+helper's Git spawns bracket a semantic review that may legitimately run for half
+an hour, so there the budget is the time those spawns actually take, and the
+review cannot consume what the post-review fingerprint still needs. A capture
+that reaches the bound refuses
 by stage name and elapsed time and produces no bundle; it is never published
 partially and never skipped silently. Nothing the capture started outlives that
 refusal: the wrapper runs each capture as its own process group and escalates

@@ -5856,9 +5856,12 @@ review_capture_bytes=0
 # the limiter, so a pathological repository state, a hung filesystem, or a Git
 # bug stalls a capture that no output bound can cut short. This is the wall-clock
 # bound. It is one budget for the whole capture stage rather than a timer per
-# spawn, so the captures together can never outlast it, and it counts only the
-# time actually spent inside a capture, so unrelated wrapper work cannot consume
-# it. Measured on this repository, a 1,000-commit 23.8 MB branch diff captures in
+# spawn: the first capture fixes an absolute deadline and every later one may
+# take only what is left of it, so the stage as a whole can never outlast the
+# budget. One absolute deadline rather than a sum of measured captures, because
+# this shell reads whole seconds only and a sum of roundings would let a run of
+# sub-second captures spend real time while the budget recorded none. Measured
+# on this repository, a 1,000-commit 23.8 MB branch diff captures in
 # about a second; the documented worst case, rename detection at the `-l5000`
 # product ceiling, is about 74 seconds for a single capture on one machine, and
 # the whole tracked tree (2,220 files) cannot reach that product. 600 seconds is
@@ -5872,7 +5875,45 @@ if ! [[ "$max_review_capture_seconds" =~ ^[1-9][0-9]{0,8}$ ]]; then
   echo "agent:autoreview: AGENT_AUTOREVIEW_CAPTURE_DEADLINE_SECONDS='$max_review_capture_seconds' is not a positive integer; using default 600s" >&2
   max_review_capture_seconds=600
 fi
-review_capture_seconds=0
+review_capture_started_epoch=0
+review_capture_seconds_left=0
+
+# Publish the seconds left before the capture stage's absolute deadline into
+# `review_capture_seconds_left`. The first call fixes the stage's start, so this
+# assigns two globals and cannot be called through a command substitution, whose
+# subshell would discard both. A clock this shell cannot read returns non-zero,
+# which fails the capture closed rather than leaving it unbounded.
+review_capture_measure() {
+  local now
+  local elapsed
+  now="$(stage_epoch_seconds)"
+  if ! [[ "$now" =~ ^[1-9][0-9]*$ ]]; then
+    return 1
+  fi
+  if [[ "$review_capture_started_epoch" == "0" ]]; then
+    review_capture_started_epoch="$now"
+  fi
+  elapsed=$((now - review_capture_started_epoch))
+  if ((elapsed < 0)); then
+    # A clock that moved backwards cannot bound anything; restart the stage
+    # rather than hand a capture a budget larger than the one it was given.
+    review_capture_started_epoch="$now"
+    elapsed=0
+  fi
+  review_capture_seconds_left=$((max_review_capture_seconds - elapsed))
+}
+
+# Read-only, so a command substitution is safe here.
+review_capture_elapsed_seconds() {
+  local now
+  now="$(stage_epoch_seconds)"
+  if [[ "$now" =~ ^[1-9][0-9]*$ && "$review_capture_started_epoch" != "0" ]] &&
+    ((now > review_capture_started_epoch)); then
+    printf '%s\n' "$((now - review_capture_started_epoch))"
+  else
+    printf '0\n'
+  fi
+}
 
 # Run one capture pipeline and record both exit statuses where the caller can
 # read them after the job has been waited on. `${PIPESTATUS[@]}` is only readable
@@ -5916,6 +5957,10 @@ run_capture_with_deadline() {
   child=$!
   (
     sleep "$deadline"
+    # Say nothing about a capture that already finished: the parent has not
+    # necessarily reaped this watchdog yet, and a marker written over a
+    # completed capture would refuse a run that had nothing wrong with it.
+    kill -0 "-$child" 2>/dev/null || kill -0 "$child" 2>/dev/null || exit 0
     printf 'timeout\n' >"$timeout_file"
     kill -TERM "-$child" 2>/dev/null || kill -TERM "$child" 2>/dev/null || true
     sleep 1
@@ -5972,13 +6017,12 @@ capture_budgeted_output_file() {
   local allowed_status="$4"
   shift 4
   local remaining=$((max_review_capture_bytes - review_capture_bytes))
-  local remaining_seconds=$((max_review_capture_seconds - review_capture_seconds))
-  local command_status
-  local limiter_status
+  local remaining_seconds
+  local command_status=""
+  local limiter_status=""
   local size
-  local started
-  local ended
-  local elapsed
+  local completed=0
+  local timed_out=0
   local status_file
   local timeout_file
 
@@ -5986,8 +6030,13 @@ capture_budgeted_output_file() {
     echo "agent:autoreview: review input exceeds the ${max_review_capture_bytes}-byte capture budget while capturing $label" >&2
     return 1
   fi
+  if ! review_capture_measure; then
+    echo "agent:autoreview: cannot read a wall clock to bound the capture of $label" >&2
+    return 1
+  fi
+  remaining_seconds="$review_capture_seconds_left"
   if ((remaining_seconds <= 0)); then
-    echo "agent:autoreview: review capture exceeded the ${max_review_capture_seconds}-second capture deadline before capturing $label (${review_capture_seconds}s spent capturing); no review bundle was produced" >&2
+    echo "agent:autoreview: review capture exceeded the ${max_review_capture_seconds}-second capture deadline before capturing $label ($(review_capture_elapsed_seconds)s in the capture stage); no review bundle was produced" >&2
     return 124
   fi
   if
@@ -6005,7 +6054,6 @@ capture_budgeted_output_file() {
   fi
   : >"$output"
 
-  started="$(stage_epoch_seconds)"
   set +e
   if [[ "$apply_deadline" -eq 1 ]]; then
     run_capture_with_deadline "$remaining_seconds" "$timeout_file" "$status_file" \
@@ -6014,32 +6062,28 @@ capture_budgeted_output_file() {
     run_capture_pipeline "$output" "$((remaining + 1))" "$status_file" "$@"
   fi
   set -e
-  # Whole seconds: this shell has no sub-second clock it can rely on, so a
-  # capture faster than a second charges nothing. The undercount is bounded by
-  # the number of captures a mode performs and is immaterial against a
-  # ten-minute budget, while a capture that actually stalls charges every second
-  # it took. `stage_epoch_seconds` degrades to 0 if /bin/date is unavailable;
-  # treat any unusable reading as zero elapsed rather than charging nonsense.
-  ended="$(stage_epoch_seconds)"
-  elapsed=0
-  if [[ "$started" =~ ^[1-9][0-9]*$ && "$ended" =~ ^[1-9][0-9]*$ ]] &&
-    ((ended > started)); then
-    elapsed=$((ended - started))
-  fi
-  review_capture_seconds=$((review_capture_seconds + elapsed))
 
   if [[ -s "$timeout_file" ]]; then
-    rm -f "$status_file" "$timeout_file"
-    echo "agent:autoreview: capture of $label exceeded the ${max_review_capture_seconds}-second capture deadline after ${review_capture_seconds}s; no review bundle was produced" >&2
-    return 124
+    timed_out=1
   fi
-  if ! read -r command_status limiter_status <"$status_file"; then
+  read -r command_status limiter_status <"$status_file" || true
+  if [[ "$command_status" =~ ^[0-9]+$ && "$limiter_status" =~ ^[0-9]+$ ]]; then
+    completed=1
+  else
     command_status=1
     limiter_status=1
   fi
   rm -f "$status_file" "$timeout_file"
-  [[ "$command_status" =~ ^[0-9]+$ ]] || command_status=1
-  [[ "$limiter_status" =~ ^[0-9]+$ ]] || limiter_status=1
+  # A capture that recorded its own statuses ran to the end of its pipeline, so
+  # take that over the watchdog's marker: the marker is written just before the
+  # signal, and a capture killed by it never reaches its own bookkeeping. That
+  # keeps a capture landing exactly on the boundary from being thrown away,
+  # while a capture the watchdog really stopped still refuses. The stage clock
+  # has advanced either way, so the next capture is bounded by what is left.
+  if [[ "$timed_out" -eq 1 && "$completed" -eq 0 ]]; then
+    echo "agent:autoreview: capture of $label exceeded the ${max_review_capture_seconds}-second capture deadline after $(review_capture_elapsed_seconds)s; no review bundle was produced" >&2
+    return 124
+  fi
   size="$(wc -c <"$output")"
   size="${size//[[:space:]]/}"
 
@@ -6810,7 +6854,12 @@ EOF
     # left could still run its full independent deadline and carry the run past
     # the ceiling every other capture respects.
     local feedback_deadline="$feedback_capture_deadline_seconds"
-    local feedback_budget_left=$((max_review_capture_seconds - review_capture_seconds))
+    local feedback_budget_left
+    if ! review_capture_measure; then
+      echo "agent:autoreview: cannot read a wall clock to bound the PR feedback capture" >&2
+      return 1
+    fi
+    feedback_budget_left="$review_capture_seconds_left"
     if ((feedback_budget_left < feedback_deadline)); then
       feedback_deadline="$feedback_budget_left"
     fi
