@@ -7,11 +7,17 @@ resource "grafana_rule_group" "oracle_relayers" {
     for_each = local.chains
 
     content {
-      name           = "Oldest Report Expired [${rule.value.title}]"
-      condition      = "isExpired"
-      for            = "5m"
-      exec_err_state = "Error"
-      no_data_state  = "NoData"
+      name      = "Oldest Report Expired [${rule.value.title}]"
+      condition = "isExpired"
+      for       = "5m"
+      # A relayer that catches up for one evaluation and falls behind again
+      # resolves and re-fires this rule; Celo alone logged 30 such transitions
+      # across roughly three incidents in two weeks. Hold the incident open for
+      # 30m — long enough to absorb the catch-up cycle, short enough that a real
+      # recovery still resolves within the relayer's report cadence.
+      keep_firing_for = "30m"
+      exec_err_state  = "Error"
+      no_data_state   = "NoData"
 
       annotations = {
         summary = "{{ $labels.rateFeed }} oracle report expired on {{ $labels.chain | title }}. Swaps using this feed may revert. {{ if and (or (eq $labels.chain \"polygon\") (eq $labels.chain \"polygon-testnet\")) (eq $labels.rateFeed \"EUROPEUR\") }}Check the deployment/migration owner responsible for the fixed 1.0 SortedOracles report.{{ else }}Check whether the oracle relayer is executing and inspect errors for this feed.{{ end }}"
