@@ -6588,6 +6588,53 @@ run_capture_deadline_regressions() {
   run_capture_deadline_headroom_arm
   run_capture_deadline_override_parity_arm
   run_capture_deadline_feedback_clamp_arm
+  run_capture_deadline_byte_refusal_arm
+}
+
+# The deadline kills a capture with SIGKILL, and spawnSync reports an exhausted
+# `maxBuffer` with that same signal. A capture that overruns the byte budget in
+# milliseconds must still refuse on bytes: reporting it as a wall-clock stall
+# would name the wrong cause and skip the aggregate-limit path entirely.
+run_capture_deadline_byte_refusal_arm() {
+  local review_repo="$tmp_dir/capture-deadline-byte-refusal"
+  local bundle_output="$tmp_dir/capture-deadline-byte-refusal-prompt.md"
+  local started_at
+  local elapsed
+
+  init_review_repo "$review_repo"
+  printf 'base\n' >"$review_repo/README.md"
+  seed_rename_capture_lines "$review_repo/payload.txt" 4
+  commit_review_repo "$review_repo" init
+  git -C "$review_repo" switch -c oversized >/dev/null 2>&1
+  # Well past the 4,096,000-byte aggregate limit, and nothing a rename pairing
+  # can compact: one tracked file replaced wholesale.
+  seed_rename_capture_lines "$review_repo/payload.txt" 500000
+  commit_review_repo "$review_repo" "replace the payload"
+
+  started_at="$(date +%s)"
+  run_helper_in_repo_expect_failure "$review_repo" \
+    --mode branch \
+    --base main \
+    --engine local \
+    --prepare-only \
+    --bundle-output "$bundle_output"
+  elapsed=$(($(date +%s) - started_at))
+  expect_stderr_contains \
+    "review input exceeds the 4096000-byte aggregate limit while adding branch diff"
+  if grep -Fq -- "capture deadline" "$stderr"; then
+    printf 'an oversized capture was reported as a wall-clock stall instead of a byte refusal\n' >&2
+    exit 1
+  fi
+  if ((elapsed >= 60)); then
+    printf 'the byte refusal took %ss; it should not be waiting on a deadline\n' \
+      "$elapsed" >&2
+    exit 1
+  fi
+  if [[ -e "$bundle_output" ]]; then
+    printf 'an oversized capture still published a prompt: %s\n' \
+      "$bundle_output" >&2
+    exit 1
+  fi
 }
 
 cleanup_capture_deadline_fixture_tree() {

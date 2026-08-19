@@ -1933,10 +1933,18 @@ function spawnGitWithinCaptureDeadline(git, gitArgs, options, label) {
     detached: true,
   });
   gitCaptureSpentMs += Math.max(0, Date.now() - startedAt);
-  if (result.error?.code === "ETIMEDOUT" || result.signal === "SIGKILL") {
-    killProcessGroup(result.pid);
-    throw captureDeadlineError(label);
-  }
+  // spawnSync reports an exhausted `maxBuffer` the same way it reports an
+  // expired timeout: it kills the child with the configured signal and sets
+  // `signal` to it. Only the error code separates them, so the byte refusal has
+  // to be recognized first or every oversized capture would be reported as a
+  // wall-clock stall and never reach the aggregate-limit error the caller maps
+  // it to. Both paths still sweep the group the detached child leads.
+  const outOfBuffer = result.error?.code === "ENOBUFS";
+  const deadlineExpired =
+    !outOfBuffer &&
+    (result.error?.code === "ETIMEDOUT" || result.signal === "SIGKILL");
+  if (outOfBuffer || deadlineExpired) killProcessGroup(result.pid);
+  if (deadlineExpired) throw captureDeadlineError(label);
   return result;
 }
 
