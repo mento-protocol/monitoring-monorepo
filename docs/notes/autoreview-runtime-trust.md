@@ -41,17 +41,30 @@ only while it is byte-identical, and one that also changes still fails closed.
 Those captures also own the rename candidate limit as `-l5000`, because the
 reviewed repository's own config can still set `diff.renameLimit`, and a move
 that changes a basename and edits the file needs the exhaustive pass Git skips
-past 1,000 candidates even by default. The pin stays finite: that pass runs
-before any byte reaches the capture limiter and is quadratic in candidate count,
-so a change more than twice the size of the whole tracked tree says on stderr
-that detection was skipped and falls back to delete+add pairs, rather than
-stalling in Git. Those pairs still review correctly; a large enough one fails on
-the capture budget with its own message.
+past its default candidate count. The pin stays finite: that pass runs before
+any byte reaches the capture limiter and is quadratic in candidate count, so a
+change more than twice the size of the whole tracked tree says on stderr that
+detection was skipped and falls back to delete+add pairs, rather than stalling
+in Git. Those pairs still review correctly; a large enough one fails on the
+capture budget with its own message.
+
+This repository declares no minimum Git version, and the default the pin
+replaces has moved: `diff.renameLimit` documents 400 in older Git and 1,000
+today. Nothing here depends on which one a host ships, because the pin overrides
+both — an explicit `-l` wins over the config and over the built-in default, and
+5,000 is above either. The reasoning and the timings above were validated
+against Git 2.54.0, where 2,000 symmetric candidates pair under `-l5000` and are
+skipped without it. Git gates the pass on the candidate product rather than one
+count, so `-l5000` authorizes at most 25,000,000 pair comparisons.
+
 The changed-path captures keep the pin, so both sides of a move stay enumerated
-for the sensitive-path refusal and checklist routing. Rename detection works
-within one diff, so a move whose two sides are split across commits has no pair
-to find: review that branch in branch mode, where both sides sit in the same
-diff.
+for the sensitive-path refusal and checklist routing. The scope baseline splits
+the difference on purpose: its changed-file count comes from that rename-blind
+enumeration and counts both sides of a move, while its non-test line count is
+rename-aware, so the prompt states how many paths a change touches beside how
+many lines it actually changes. Rename detection works within one diff, so a
+move whose two sides are split across commits has no pair to find: review that
+branch in branch mode, where both sides sit in the same diff.
 
 For a real review, the helper resolves a symbolic branch base or commit target
 once to an immutable object ID. Direct `--dry-run` instead reports the requested

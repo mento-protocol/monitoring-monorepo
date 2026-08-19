@@ -4152,6 +4152,24 @@ function nonTestPath(relativePath) {
   );
 }
 
+// `--numstat` states a detected rename in its path column as `old => new`, or
+// as `pre/{old => new}/post` when the two paths share a prefix and a suffix.
+// Classification has to read the destination: a file moved out of a test path
+// is not test churn any more, and one moved into a test path is.
+function numstatDestinationPath(pathField) {
+  const braced = pathField.match(/^(.*)\{(.*) => (.*)\}(.*)$/);
+  if (braced) return `${braced[1]}${braced[3]}${braced[4]}`;
+  const plain = pathField.match(/^(.*) => (.*)$/);
+  if (plain) return plain[2];
+  return pathField;
+}
+
+// These carry `--find-renames -l5000` for the same reason the bundle captures
+// do: the baseline states the size of the change the bundle shows, and without
+// pairing a verbatim move reports every line of every moved file twice. The
+// changed-file count beside it still comes from the rename-blind path
+// enumeration, so it deliberately counts both sides of a move: one number is
+// paths touched, the other is lines changed.
 function numstatSources(repo, target) {
   if (target.mode === "local") {
     return [
@@ -4160,11 +4178,20 @@ function numstatSources(repo, target) {
         "--no-ext-diff",
         "--no-textconv",
         "--numstat",
+        "--find-renames",
+        "-l5000",
         "--cached",
         target.head,
         "--",
       ]),
-      runGit(repo, ["diff", "--no-ext-diff", "--no-textconv", "--numstat"]),
+      runGit(repo, [
+        "diff",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--numstat",
+        "--find-renames",
+        "-l5000",
+      ]),
     ];
   }
   if (target.mode === "branch") {
@@ -4174,6 +4201,8 @@ function numstatSources(repo, target) {
         "--no-ext-diff",
         "--no-textconv",
         "--numstat",
+        "--find-renames",
+        "-l5000",
         `${target.ref}...${target.head}`,
       ]),
     ];
@@ -4185,6 +4214,8 @@ function numstatSources(repo, target) {
         "--no-ext-diff",
         "--no-textconv",
         "--numstat",
+        "--find-renames",
+        "-l5000",
         `${target.ref}...${target.head}`,
       ]),
       runGit(repo, [
@@ -4192,11 +4223,20 @@ function numstatSources(repo, target) {
         "--no-ext-diff",
         "--no-textconv",
         "--numstat",
+        "--find-renames",
+        "-l5000",
         "--cached",
         target.head,
         "--",
       ]),
-      runGit(repo, ["diff", "--no-ext-diff", "--no-textconv", "--numstat"]),
+      runGit(repo, [
+        "diff",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--numstat",
+        "--find-renames",
+        "-l5000",
+      ]),
     ];
   }
   return [
@@ -4205,6 +4245,8 @@ function numstatSources(repo, target) {
       "--no-ext-diff",
       "--no-textconv",
       "--numstat",
+      "--find-renames",
+      "-l5000",
       "--format=",
       target.ref,
     ]),
@@ -4216,7 +4258,7 @@ function scopeBaseline(repo, target, paths) {
   for (const source of numstatSources(repo, target)) {
     for (const line of source.split("\n")) {
       const match = line.match(/^(\d+|-)\t(\d+|-)\t(.+)$/);
-      if (!match || !nonTestPath(match[3])) continue;
+      if (!match || !nonTestPath(numstatDestinationPath(match[3]))) continue;
       if (match[1] !== "-") nonTestLoc += Number.parseInt(match[1], 10);
       if (match[2] !== "-") nonTestLoc += Number.parseInt(match[2], 10);
     }

@@ -6185,6 +6185,23 @@ run_rename_capture_regressions() {
     >>"$review_repo/nested/module-0.mjs"
   commit_review_repo "$review_repo" "move modules and edit one"
 
+  # The fixture proves something only while its un-paired form really would
+  # exhaust the budget. Assert that before trusting the rename-aware result, so
+  # a later edit that shrinks the module count or size fails here instead of
+  # passing vacuously.
+  local unpaired_bytes
+  unpaired_bytes="$(
+    git -C "$review_repo" diff \
+      --patch --no-renames --no-ext-diff --no-textconv \
+      'main...bulk-move' -- | wc -c
+  )"
+  unpaired_bytes="${unpaired_bytes//[[:space:]]/}"
+  if ((unpaired_bytes <= 4096000)); then
+    printf 'bulk-move fixture is %s bytes without rename detection; it no longer exceeds the capture budget it exists to test\n' \
+      "$unpaired_bytes" >&2
+    exit 1
+  fi
+
   run_helper_in_repo "$review_repo" \
     --prepare-bundle-dir "$bundle_dir" \
     --mode branch \
@@ -6215,6 +6232,11 @@ run_rename_capture_regressions() {
     --prepare-only \
     --bundle-output "$bundle_output"
   expect_empty_stderr
+  # The baseline states the size of the change the bundle shows: one edited
+  # line, not 70,000 restated ones. The changed-file count still carries both
+  # sides of every move, because the path enumeration stays rename-blind.
+  expect_stdout_contains "scope_baseline: changed_files=100 non_test_loc=1"
+  expect_file_contains "$bundle_output" "Scope baseline: 100 changed files; 1 non-test changed lines."
   expect_file_contains "$bundle_output" "rename from flat/module-1.mjs"
   expect_file_contains "$bundle_output" '+export const movedAndEdited'
   expect_file_not_contains "$bundle_output" "value_01_500"
