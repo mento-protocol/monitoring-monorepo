@@ -1214,32 +1214,48 @@ await test("Sentry pagination fails loud past maxPages instead of truncating", a
   assertEqual(served, 3);
 
   // The bounded case still returns: a scan that ends inside the cap is not an
-  // error, so the guard cannot be a blanket refusal at the last page.
-  let round = 0;
-  const finite = async () => {
-    round += 1;
-    return {
-      ok: true,
-      status: 200,
-      statusText: "OK",
-      json: async () => [{ id: String(round), shortId: `X-${round}` }],
-      headers: {
-        get: () =>
-          round < 2
-            ? '<https://us.sentry.io/api/0/organizations/o/issues/?cursor=next>; rel="next"; results="true"; cursor="next"'
-            : null,
-      },
+  // error, so the guard cannot be a blanket refusal at the last page. Both
+  // terminators, because Sentry uses the SECOND one: it keeps sending a
+  // `rel="next"` link at the end of a result set and signals exhaustion with
+  // `results="false"`. A guard that only recognised a missing Link header would
+  // throw on every real ingest run, which is a far louder break than the silent
+  // truncation above.
+  for (const [label, terminator] of [
+    ["no Link header at all", null],
+    [
+      "Sentry's results=false terminator",
+      '<https://us.sentry.io/api/0/organizations/o/issues/?cursor=end>; rel="next"; results="false"; cursor="end"',
+    ],
+  ]) {
+    let round = 0;
+    const finite = async () => {
+      round += 1;
+      return {
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        json: async () => [{ id: String(round), shortId: `X-${round}` }],
+        headers: {
+          get: () =>
+            round < 2
+              ? '<https://us.sentry.io/api/0/organizations/o/issues/?cursor=next>; rel="next"; results="true"; cursor="next"'
+              : terminator,
+        },
+      };
     };
-  };
-  const issues = await fetchAllSentryIssues({
-    query: "is:unresolved",
-    org: "o",
-    baseUrl: "https://us.sentry.io",
-    token: "t",
-    fetchImpl: finite,
-    maxPages: 3,
-  });
-  assertEqual(issues.length, 2);
+    const issues = await fetchAllSentryIssues({
+      query: "is:unresolved",
+      org: "o",
+      baseUrl: "https://us.sentry.io",
+      token: "t",
+      fetchImpl: finite,
+      maxPages: 3,
+    });
+    assert(
+      issues.length === 2,
+      `a scan ending with ${label} must return both pages; got ${issues.length}`,
+    );
+  }
 });
 
 await test("REST issue normalization flattens pages, drops PRs, uppercases state, carries closed_at + updated_at + labels + body", () => {
