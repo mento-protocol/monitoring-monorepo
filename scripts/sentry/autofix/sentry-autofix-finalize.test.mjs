@@ -203,7 +203,7 @@ await test("guard refuses a diff whose file content is credential-shaped", () =>
   mkdirSync(join(dir, "ui-dashboard"), { recursive: true });
   writeFileSync(
     join(dir, "ui-dashboard", "leak.ts"),
-    'const t = "ghs_AbCdEfGhIjKlMnOpQrSt";\n',
+    'const t = "ghs_AbCdEfGhIjKlMnOpQrStUvWxYz012345";\n',
   );
   writeFileSync(
     join(dir, "ui-dashboard", "clean.ts"),
@@ -259,7 +259,7 @@ await test("guard refuses a credential file whose path has a trailing space (#15
   mkdirSync(join(dir, "ui-dashboard"), { recursive: true });
   writeFileSync(
     join(dir, "ui-dashboard", "leak.ts "),
-    'const t = "ghs_AbCdEfGhIjKlMnOpQrSt";\n',
+    'const t = "ghs_AbCdEfGhIjKlMnOpQrStUvWxYz012345";\n',
   );
   const r = evaluateDiffGuard(["ui-dashboard/leak.ts "], { workRoot: dir });
   assert(
@@ -433,7 +433,7 @@ await test("analysis comment is deterministic — no summary channel to smuggle 
   const reason = "The autofix diff touches 25 files (limit 20).";
   const c = buildAnalysisComment(
     reason,
-    "ghs_AbCdEfGhIjKlMnOpQrSt leak attempt",
+    "ghs_AbCdEfGhIjKlMnOpQrStUvWxYz012345 leak attempt",
   );
   assert(c.includes(reason), "deterministic reason rendered");
   assert(
