@@ -4411,12 +4411,16 @@ capture_feedback_state() {
     echo "agent:autoreview: cannot bound the PR feedback capture: the wall clock is unreadable or moved backwards" >&2
     return 1
   fi
+  # The caller checked the budget before allocating this capture's bookkeeping;
+  # if it ran out in between, refuse here rather than granting a floor of one
+  # more second, which would let a bundle publish past the stated ceiling.
+  if ((review_capture_seconds_left <= 0)); then
+    echo "agent:autoreview: review capture exceeded the ${max_review_capture_seconds}-second capture deadline before the PR feedback capture; no review bundle was produced" >&2
+    return 124
+  fi
   deadline_seconds="$feedback_capture_deadline_seconds"
   if ((review_capture_seconds_left < deadline_seconds)); then
     deadline_seconds="$review_capture_seconds_left"
-  fi
-  if ((deadline_seconds < 1)); then
-    deadline_seconds=1
   fi
   (
     cd "$repo"
