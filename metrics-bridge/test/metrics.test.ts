@@ -1601,6 +1601,178 @@ describe("updateMetrics", () => {
     expect(r1Keys).toEqual([...(devKeys ?? []), "token_symbol"].sort());
   });
 
+  // ── Value-weighted reserve shares ────────────────────────────────────────
+  // The depletion alerts read these, not the raw-count pair. Each case below
+  // is a live production pool: the two JPYm pools carry the same JPY/USD feed
+  // with OPPOSITE `invertRateFeed` flags because their token0/token1 order
+  // differs by chain, so they pin both orientations. Expected values were
+  // replayed against indexer state and cross-checked against the pool's
+  // on-chain `priceDifference` (both reproduce it to within 1 bps).
+  it("value-weights an off-parity pool that reads its feed inverted (Celo JPYm/USDm, token0 = USDm)", async () => {
+    updateMetrics([
+      makePool({
+        id: "42220-0x9861f6d2fe392b934c86ec89d2886ceb772b2b41",
+        token0: "0x765de816845861e75a25fca122bb6898b8b1282a",
+        token1: "0xc45ecf20f3cd864b32d9794d6f76814ae8892e20",
+        reserves0: "24391461103092243011223",
+        reserves1: "5751211502393013574884561",
+        lastMedianPrice: "6310100000000000000000", // 0.0063101 USD per JPY
+        invertRateFeed: true,
+        invertRateFeedKnown: true,
+      }),
+    ]);
+    // By token count the pool reads 0.4% / 99.6% — that is the JPY/USD rate,
+    // not depletion. This exact reading is what shipped in PR #1940 and would
+    // have paged (`< 10%`) on a pool the dashboard shows as healthy.
+    expect(
+      await getGaugeValue(register, "mento_pool_reserve_share_token0", {
+        token_symbol: "USDm",
+      }),
+    ).toBeCloseTo(0.0042, 4);
+    // By value the same pool is 40/60 — inside every depletion band.
+    expect(
+      await getGaugeValue(register, "mento_pool_reserve_value_share_token0", {
+        token_symbol: "USDm",
+      }),
+    ).toBeCloseTo(0.402, 3);
+    expect(
+      await getGaugeValue(register, "mento_pool_reserve_value_share_token1", {
+        token_symbol: "JPYm",
+      }),
+    ).toBeCloseTo(0.598, 3);
+  });
+
+  it("value-weights the same feed the other way round (Monad JPYm/USDm, token0 = JPYm, not inverted)", async () => {
+    updateMetrics([
+      makePool({
+        id: "143-0x4df3f08977743ad95ab31b8dc203eae885ae9d32",
+        chainId: 143,
+        token0: "0x22f6a6752800eab67b84748fefc3cc658384af72",
+        token1: "0xbc69212b8e4d445b2307c9d32dd68e2a4df00115",
+        reserves0: "4574818803667125398741438",
+        reserves1: "31017541179518163757928",
+        lastMedianPrice: "6309227876692451000000",
+        invertRateFeed: false,
+        invertRateFeedKnown: true,
+      }),
+    ]);
+    // Same rate, mirrored token order: assuming one orientation for every pool
+    // would read this side at ~0.00004 and page. Correct answer is ~48%.
+    expect(
+      await getGaugeValue(register, "mento_pool_reserve_value_share_token0", {
+        token_symbol: "JPYm",
+      }),
+    ).toBeCloseTo(0.482, 3);
+    expect(
+      await getGaugeValue(register, "mento_pool_reserve_value_share_token1", {
+        token_symbol: "USDm",
+      }),
+    ).toBeCloseTo(0.518, 3);
+  });
+
+  it("value share equals count share on a parity pair", async () => {
+    updateMetrics([
+      makePool({
+        id: "42220-0x0feba760d93423d127de1b6abecdb60e5253228d",
+        token0: "0x48065fbbe25f71c9282ddf5e1cd6d6a887483d5e",
+        token1: "0x765de816845861e75a25fca122bb6898b8b1282a",
+        token0Decimals: 6,
+        reserves0: "30363272577",
+        reserves1: "30807414550474845359006",
+        lastMedianPrice: "999319820000000000000000",
+        invertRateFeed: false,
+        invertRateFeedKnown: true,
+      }),
+    ]);
+    expect(
+      await getGaugeValue(register, "mento_pool_reserve_share_token0", {
+        token_symbol: "USDT",
+      }),
+    ).toBeCloseTo(0.4965, 3);
+    expect(
+      await getGaugeValue(register, "mento_pool_reserve_value_share_token0", {
+        token_symbol: "USDT",
+      }),
+    ).toBeCloseTo(0.4964, 3);
+  });
+
+  it("value share reports a genuinely one-sided pool as one-sided", async () => {
+    // Same Celo JPYm pool, but the USDm leg has actually been drained: 1/1000
+    // of the reserves that made it 40/60 above.
+    updateMetrics([
+      makePool({
+        id: "42220-0x9861f6d2fe392b934c86ec89d2886ceb772b2b41",
+        token0: "0x765de816845861e75a25fca122bb6898b8b1282a",
+        token1: "0xc45ecf20f3cd864b32d9794d6f76814ae8892e20",
+        reserves0: "24391461103092243011",
+        reserves1: "5751211502393013574884561",
+        lastMedianPrice: "6310100000000000000000",
+        invertRateFeed: true,
+        invertRateFeedKnown: true,
+      }),
+    ]);
+    const share = await getGaugeValue(
+      register,
+      "mento_pool_reserve_value_share_token0",
+      { token_symbol: "USDm" },
+    );
+    expect(share).toBeLessThan(0.001);
+  });
+
+  it("publishes no value share when the rate-feed orientation has not been read", async () => {
+    updateMetrics([makePool({ invertRateFeedKnown: false })]);
+    // Count shares still publish — only the oracle-frame conversion is gated.
+    expect(
+      await getGaugeValue(register, "mento_pool_reserve_share_token0", {
+        token_symbol: "USDm",
+      }),
+    ).toBeCloseTo(0.5);
+    expect(
+      await getGaugeValue(register, "mento_pool_reserve_value_share_token0", {
+        token_symbol: "USDm",
+      }),
+    ).toBeUndefined();
+    expect(
+      await getGaugeValue(register, "mento_pool_reserve_value_share_token1", {
+        token_symbol: "GBPm",
+      }),
+    ).toBeUndefined();
+  });
+
+  it("publishes no value share while the median feed is dark", async () => {
+    // Live case: the Polygon EURm/EUROP pool has never landed a median.
+    updateMetrics([makePool({ lastMedianPrice: "0" })]);
+    expect(
+      await getGaugeValue(register, "mento_pool_reserve_value_share_token0", {
+        token_symbol: "USDm",
+      }),
+    ).toBeUndefined();
+  });
+
+  it("value-share gauges carry the same label shape as the count-share gauges", async () => {
+    updateMetrics([makePool()]);
+    const json = await register.getMetricsAsJSON();
+    type MetricEntry = {
+      name: string;
+      values?: Array<{ labels: Record<string, string> }>;
+    };
+    const labelKeysFor = (name: string): string[] | undefined => {
+      const m = json.find((x) => (x as MetricEntry).name === name) as
+        | MetricEntry
+        | undefined;
+      const sample = m?.values?.[0]?.labels;
+      return sample ? Object.keys(sample).sort() : undefined;
+    };
+    const countKeys = labelKeysFor("mento_pool_reserve_share_token0");
+    expect(countKeys).toBeDefined();
+    expect(labelKeysFor("mento_pool_reserve_value_share_token0")).toEqual(
+      countKeys,
+    );
+    expect(labelKeysFor("mento_pool_reserve_value_share_token1")).toEqual(
+      countKeys,
+    );
+  });
+
   it("token_symbol label resolves known token addresses on a real Celo pool (axlUSDC + USDm)", async () => {
     // 0x765de8…1282a is USDm on Celo (42220) per @mento-protocol/contracts.
     // 0xeb466342…5215 is axlUSDC. Confirms the gauge correctly carries the

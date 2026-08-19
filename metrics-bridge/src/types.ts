@@ -44,6 +44,16 @@ export interface PoolRow {
   reserves1: string;
   token0Decimals: number;
   token1Decimals: number;
+  // Optional companion state: which way round the pool reads its rate feed.
+  // `true` means token0 is the feed's quote token, so the pool's oracle
+  // reference is `1 / lastMedianPrice`. Mirrors the on-chain FPMM flag the
+  // indexer reads (`indexer-envio/src/priceDifference.ts`). `false` is both
+  // the real "not inverted" value and the companion-query default, so
+  // `invertRateFeedKnown` is what gates use: value-weighted reserve shares
+  // publish nothing until the orientation has actually been read, because
+  // guessing it inverts the answer on half the pools.
+  invertRateFeed: boolean;
+  invertRateFeedKnown: boolean;
   // Liquidity strategy address — needed by the metrics-bridge rebalance probe
   // to simulate `rebalance(pool)` and decode the revert reason. The
   // `Pool.rebalancerAddress` column is `String!` in the indexer schema

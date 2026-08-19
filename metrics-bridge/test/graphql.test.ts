@@ -594,6 +594,72 @@ describe("fetchPools — degraded-mode oracle lineage", () => {
     });
   });
 
+  it("falls back to an unknown rate-feed orientation when Hasura reports an unknown field", async () => {
+    // Fail closed: without the flag the bridge cannot tell which way round a
+    // pool reads its feed, so `invertRateFeedKnown: false` must survive the
+    // merge and suppress the value-weighted reserve-share gauges rather than
+    // let `invertRateFeed: false` be read as "not inverted".
+    requestSpy.mockImplementation(({ document }: { document: unknown }) => {
+      const doc = String(document);
+      if (doc.includes("BridgePoolsRateFeedOrientation")) {
+        return Promise.reject(unknownFieldError("invertRateFeed"));
+      }
+      if (doc.includes("BridgePoolsVpExchangeDeprecation")) {
+        return Promise.resolve({ BiPoolExchange: [] });
+      }
+      if (doc.includes("BridgePoolsVpLifecycleDeprecation")) {
+        return Promise.resolve({ VirtualPoolLifecycle: [] });
+      }
+      if (doc.includes("query BridgePools {")) {
+        return Promise.resolve({ Pool: [BASE_POOL] });
+      }
+      return Promise.resolve({ Pool: [] });
+    });
+
+    const res = await fetchPools();
+    expect(res.Pool[0]).toMatchObject({
+      id: BASE_POOL.id,
+      invertRateFeed: false,
+      invertRateFeedKnown: false,
+    });
+  });
+
+  it("carries the rate-feed orientation through the merge when the companion query succeeds", async () => {
+    requestSpy.mockImplementation(({ document }: { document: unknown }) => {
+      const doc = String(document);
+      if (doc.includes("BridgePoolsRateFeedOrientation")) {
+        return Promise.resolve({
+          Pool: [
+            {
+              id: BASE_POOL.id,
+              invertRateFeed: true,
+              invertRateFeedKnown: true,
+            },
+          ],
+        });
+      }
+      if (doc.includes("BridgePoolsVpExchangeDeprecation")) {
+        return Promise.resolve({ BiPoolExchange: [] });
+      }
+      if (doc.includes("BridgePoolsVpLifecycleDeprecation")) {
+        return Promise.resolve({ VirtualPoolLifecycle: [] });
+      }
+      if (doc.includes("query BridgePools {")) {
+        return Promise.resolve({ Pool: [BASE_POOL] });
+      }
+      return Promise.resolve({ Pool: [] });
+    });
+
+    const res = await fetchPools();
+    expect(res.Pool[0]).toMatchObject({
+      id: BASE_POOL.id,
+      invertRateFeed: true,
+      invertRateFeedKnown: true,
+      // Companion rows must not be able to overwrite base-query state.
+      lastMedianPrice: BASE_POOL.lastMedianPrice,
+    });
+  });
+
   it("falls back to an empty oracle tx hash when Hasura reports an unknown field", async () => {
     requestSpy.mockImplementation(({ document }: { document: unknown }) => {
       const doc = String(document);

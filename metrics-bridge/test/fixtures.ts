@@ -46,6 +46,13 @@ export function makePool(overrides: Partial<PoolRow> = {}): PoolRow {
     reserves1: "1000000000000000000",
     token0Decimals: 18,
     token1Decimals: 18,
+    // Matches the real Celo GBPm/USDm pool this fixture models: token0 is
+    // USDm, the feed's quote token, so the pool inverts the GBP/USD median
+    // to get its oracle reference. Value-weighted shares therefore publish
+    // by default; tests that need them absent override
+    // `invertRateFeedKnown: false` or `lastMedianPrice: "0"`.
+    invertRateFeed: true,
+    invertRateFeedKnown: true,
     // Test default — real strategy address from FPMM Reserve liquidity
     // strategy on Celo mainnet. Probes hitting RPC are mocked at the
     // viem-client layer in dedicated tests.

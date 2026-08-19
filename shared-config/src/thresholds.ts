@@ -9,7 +9,11 @@
 //     drives dashboard health badges, breach-history bucketing, the indexer's
 //     persisted breach accounting, and metrics-bridge probe eligibility.
 //   - Depletion side share (`POOL_DEPLETION_*_SHARE`) measures user impact:
-//     how thin the smaller side of the pool has become.
+//     how thin the smaller side of the pool has become, BY VALUE. Token counts
+//     are not comparable across an off-parity pair — a balanced JPYm/USDm pool
+//     holds 0.4% of its tokens in USDm and is perfectly healthy — so the
+//     consumers of these floors convert each leg through the pool's oracle
+//     first (`mento_pool_reserve_value_share_token*`).
 //
 // Since ADR 0067 only the second ladder pages. Deviation magnitude is an
 // analytics classification, not an alert severity.
@@ -67,11 +71,12 @@ export const DEVIATION_TOLERANCE_RATIO = 1.01;
 export const DEVIATION_CRITICAL_RATIO = 1.05;
 
 /**
- * Pool depletion CRITICAL floor, as a share of normalized reserves held by the
- * smaller side. Below it the thin leg no longer has the depth to absorb normal
- * swap size: an FPMM's quoted bandwidth in one direction is bounded by what
- * that side actually holds, so a 15/85 pool starts rejecting trades a 50/50
- * pool of the same TVL would serve.
+ * Pool depletion CRITICAL floor, as the VALUE share of reserves held by the
+ * smaller side — each leg priced through the pool's own oracle reference, not
+ * counted in tokens. Below it the thin leg no longer has the depth to absorb
+ * normal swap size: an FPMM's quoted bandwidth in one direction is bounded by
+ * what that side actually holds, so a 15/85 pool starts rejecting trades a
+ * 50/50 pool of the same TVL would serve.
  *
  * Mirrored into the `Pool Depletion Risk` Grafana evaluator in
  * `alerts/rules/rules-fpmms.tf`, and enforced by
@@ -80,7 +85,8 @@ export const DEVIATION_CRITICAL_RATIO = 1.05;
 export const POOL_DEPLETION_CRITICAL_SHARE = 0.2;
 
 /**
- * Pool depletion PAGE floor, same units as `POOL_DEPLETION_CRITICAL_SHARE`.
+ * Pool depletion PAGE floor, same units as `POOL_DEPLETION_CRITICAL_SHARE`
+ * (value share, not token count).
  * Below it the pool is effectively one-sided: bandwidth exhaustion is imminent
  * (a 95/5 pool has almost nothing left to sell of the thin token) and once that
  * side reaches zero, every swap into it reverts outright. That is direct,

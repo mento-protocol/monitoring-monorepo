@@ -693,20 +693,23 @@ resource "grafana_rule_group" "fpmms_deviation" {
 # ── Pool depletion risk ──────────────────────────────────────────────────────
 #
 # The pageable failure on an oracle-priced FPMM is a side running dry, not a
-# wide reserve ratio. Both tiers read `min(side share)` from the same
-# reserve-share gauges the deviation annotations render; see main.tf for the
-# expression, the deliberate absence of FX-weekend gating, and why the two
-# bands are mutually exclusive.
+# wide reserve ratio. Both tiers read `min(side share)` from the value-weighted
+# reserve-share gauges — token counts converted through the pool's own oracle
+# reference. See main.tf for the expression, why the count-share gauges are the
+# wrong input (they read the exchange rate, not depletion), the NoData
+# behaviour when a feed is dark, the deliberate absence of FX-weekend gating,
+# and why the two bands are mutually exclusive.
 #
-#   critical — min side share in [10%, 20%), sustained 15m. Bandwidth on the
+#   critical — min value share in [10%, 20%), sustained 15m. Bandwidth on the
 #              thin side is thin enough that ordinary size starts failing, but
 #              the pool still serves both directions.
-#   page     — min side share < 10%. The pool is effectively one-sided;
+#   page     — min value share < 10%. The pool is effectively one-sided;
 #              swappers lose one direction outright once it empties.
 #
 # Neither tier fires on the 2026-08 CHFm/USDm breach that motivated ADR 0067:
 # that pool bottomed at ~22% min side, above both bands. `Rebalancer Stale`
-# covered it, correctly.
+# covered it, correctly. On the 18 live pools replayed for PR #1941 the
+# thinnest value side was 26% (Monad CHFm/USDm), so neither tier fires today.
 resource "grafana_rule_group" "fpmms_depletion" {
   name             = "Pool Depletion Risk"
   folder_uid       = grafana_folder.fpmms.uid
@@ -722,7 +725,7 @@ resource "grafana_rule_group" "fpmms_depletion" {
   #
   # What absorbs churn instead: the 15m dwell on the critical tier, and the
   # 10-percentage-point gap between the bands — a pool has to move a long way
-  # in side share to change tier, unlike a deviation ratio that re-derives on
+  # in value share to change tier, unlike a deviation ratio that re-derives on
   # every oracle update.
   rule {
     name      = "Pool Depletion Risk"
@@ -740,10 +743,11 @@ resource "grafana_rule_group" "fpmms_depletion" {
       # WORSE and crosses down into the `Pool Nearly One-Sided` band, so the
       # copy must not claim an improvement it cannot see. Same reason the
       # deviation rules use a neutral "Alert Stopped" resolution.
-      resolved_title   = "Pool Depletion Alert Stopped"
-      resolved_summary = "Either the thin side recovered above the depletion floor, or the pool crossed into the one-sided page band — check the reserves line."
-      current_reserves = local.deviation_current_reserves_annotation
-      rebalance_reason = local.deviation_rebalance_reason_annotation
+      resolved_title    = "Pool Depletion Alert Stopped"
+      resolved_summary  = "Either the thin side recovered above the depletion floor, or the pool crossed into the one-sided page band — check the reserves line."
+      current_reserves  = local.deviation_current_reserves_annotation
+      value_composition = local.pool_depletion_value_composition_annotation
+      rebalance_reason  = local.deviation_rebalance_reason_annotation
     }
 
     labels = {
@@ -751,7 +755,7 @@ resource "grafana_rule_group" "fpmms_depletion" {
       severity = "critical"
     }
 
-    # A = min side share, floored at the page band so a pool below 10% belongs
+    # A = min value share, floored at the page band so a pool below 10% belongs
     # to the page rule alone. The Grafana evaluator supplies the upper bound so
     # the mirrored `0.2` literal sits where the drift checker reads it.
     data {
@@ -773,6 +777,7 @@ resource "grafana_rule_group" "fpmms_depletion" {
     # see main.tf for why they sit outside the threshold condition.
     dynamic "data" {
       for_each = concat(
+        local.pool_depletion_value_share_annotation_queries,
         local.deviation_reserve_annotation_queries,
         local.deviation_rebalancer_annotation_queries,
       )
@@ -838,10 +843,11 @@ resource "grafana_rule_group" "fpmms_depletion" {
       # The page band is open-ended downward, so leaving it can only mean the
       # thin side grew. This resolution can honestly claim recovery where the
       # critical tier's cannot.
-      resolved_title   = "Pool Two-Sided Again"
-      resolved_summary = "The thin side is back above the one-sided floor."
-      current_reserves = local.deviation_current_reserves_annotation
-      rebalance_reason = local.deviation_rebalance_reason_annotation
+      resolved_title    = "Pool Two-Sided Again"
+      resolved_summary  = "The thin side is back above the one-sided floor."
+      current_reserves  = local.deviation_current_reserves_annotation
+      value_composition = local.pool_depletion_value_composition_annotation
+      rebalance_reason  = local.deviation_rebalance_reason_annotation
     }
 
     # `severity = "page"` follows the repo's page convention (trading limits,
@@ -871,6 +877,7 @@ resource "grafana_rule_group" "fpmms_depletion" {
 
     dynamic "data" {
       for_each = concat(
+        local.pool_depletion_value_share_annotation_queries,
         local.deviation_reserve_annotation_queries,
         local.deviation_rebalancer_annotation_queries,
       )
@@ -1202,7 +1209,7 @@ resource "grafana_rule_group" "fpmms_rebalancer" {
   # rule a rebalancer whose corrections keep falling short is invisible until
   # either `Rebalancer Stale` fires — the actionable critical, once the
   # rebalancer stops acting altogether — or one side thins far enough to trip
-  # the `Pool Depletion Risk` side-share floors.
+  # the `Pool Depletion Risk` value-share floors.
   rule {
     name           = "Rebalance Ineffective"
     condition      = "threshold"
