@@ -6069,7 +6069,6 @@ capture_budgeted_output_file() {
   local command_status=""
   local limiter_status=""
   local size
-  local completed=0
   local timed_out=0
   local status_file
   local timeout_file
@@ -6115,20 +6114,18 @@ capture_budgeted_output_file() {
     timed_out=1
   fi
   read -r command_status limiter_status <"$status_file" || true
-  if [[ "$command_status" =~ ^[0-9]+$ && "$limiter_status" =~ ^[0-9]+$ ]]; then
-    completed=1
-  else
+  if ! [[ "$command_status" =~ ^[0-9]+$ && "$limiter_status" =~ ^[0-9]+$ ]]; then
     command_status=1
     limiter_status=1
   fi
   rm -f "$status_file" "$timeout_file"
-  # A capture that recorded its own statuses ran to the end of its pipeline, so
-  # take that over the watchdog's marker: the marker is written just before the
-  # signal, and a capture killed by it never reaches its own bookkeeping. That
-  # keeps a capture landing exactly on the boundary from being thrown away,
-  # while a capture the watchdog really stopped still refuses. The stage clock
-  # has advanced either way, so the next capture is bounded by what is left.
-  if [[ "$timed_out" -eq 1 && "$completed" -eq 0 ]]; then
+  # The marker decides, whatever the pipeline reported. The watchdog writes it
+  # only after confirming the capture was still running, so it cannot appear for
+  # a capture that had already finished; and once it appears the deadline has
+  # passed, so nothing the capture produced afterwards may be published --
+  # including output from a command that handled the SIGTERM and exited during
+  # the second before the SIGKILL.
+  if [[ "$timed_out" -eq 1 ]]; then
     echo "agent:autoreview: capture of $label exceeded the ${max_review_capture_seconds}-second capture deadline after $(review_capture_elapsed_seconds)s; no review bundle was produced" >&2
     return 124
   fi
