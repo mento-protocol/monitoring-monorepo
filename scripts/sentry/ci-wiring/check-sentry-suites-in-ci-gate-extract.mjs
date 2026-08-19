@@ -49,6 +49,14 @@ export const PROBE_TIMEOUT_MS = 30_000;
  * on timeout the whole group is killed by negative pid. Everything the probe
  * started is in that group; nothing else is.
  *
+ * The deadline is SIGKILL, not the default SIGTERM, and that is what makes it a
+ * deadline at all. `spawnSync` sends its `killSignal` and then keeps waiting for
+ * the child to exit; it escalates only when the signal itself ERRORS, which
+ * ignoring SIGTERM does not. A probe shell that traps or ignores it therefore
+ * hangs `spawnSync` forever — and the group kill below can never run, because
+ * the call it follows has not returned. SIGKILL cannot be trapped, so the shell
+ * dies, `spawnSync` returns ETIMEDOUT, and the group cleanup gets its turn.
+ *
  * @param {string} bash
  * @param {string[]} args
  * @param {object} options
@@ -60,6 +68,7 @@ export const runProbeShell = (bash, args, { dirs, ...options }) => {
     cwd: dirs.empty,
     env: probeEnv(dirs),
     detached: true,
+    killSignal: "SIGKILL",
   });
   if (result.error?.code === "ETIMEDOUT" && typeof result.pid === "number") {
     try {

@@ -1427,6 +1427,20 @@ await test("isSelectableForTriage is exactly Stage B's selector, all three parts
   assertEqual(isSelectableForTriage(), false);
 });
 
+await test("isSelectableForTriage requires a read that says OPEN, not merely one that does not say CLOSED", () => {
+  // Every `readStub` feeding this normalizes a missing or unexpected `state` to
+  // `""`. Under a not-CLOSED test that unreadable state passed, so the
+  // end-state verification could report a re-queue as successful without any
+  // read having confirmed the stub open — the one wrong answer this predicate
+  // must never give.
+  const labels = ["sentry-triage", "sentry:needs-triage"];
+  assertEqual(isSelectableForTriage({ state: "OPEN", labels }), true);
+  assertEqual(isSelectableForTriage({ state: "", labels }), false);
+  assertEqual(isSelectableForTriage({ labels }), false);
+  assertEqual(isSelectableForTriage({ state: null, labels }), false);
+  assertEqual(isSelectableForTriage({ state: "MERGED", labels }), false);
+});
+
 await test("a fence that cannot be posted stops the re-queue instead of exposing the stub", async () => {
   // "Safe first, loud second" assumed making the stub selectable IS the safe
   // act. Once the comment's first line became the regression fence that stopped

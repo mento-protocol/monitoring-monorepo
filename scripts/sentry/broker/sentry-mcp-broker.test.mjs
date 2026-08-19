@@ -33,6 +33,7 @@ import {
   classify,
   handleMatches,
   isAllowedPath,
+  isBackPressureHeader,
   isEntryPoint,
   readTokenFromStdin,
   resolveConfig,
@@ -428,6 +429,74 @@ test("rewriteRegionLinks touches only links.regionUrl", () => {
   assert.equal(payload[0].links.organizationUrl, "https://a");
   assert.equal(payload[1].links, undefined);
   assert.equal("regionUrl" in payload[2].links, false);
+});
+
+test("a socket error AFTER startup is logged, not swallowed", async () => {
+  // The startup promise's `reject` used to be the server's only `error`
+  // listener, and once that promise settles it is a no-op — so every later
+  // socket error vanished, and a broker that had stopped answering looked
+  // exactly like a Sentry with nothing to say.
+  await withBroker(jsonUpstream([]), async ({ broker, logs }) => {
+    broker.emit("error", new Error("EADDRNOTAVAIL after startup"));
+    assert.ok(
+      logs.some((line) => line.includes("SERVER-ERROR")),
+      `a post-startup server error must reach the log; saw ${JSON.stringify(logs)}`,
+    );
+    assert.ok(
+      logs.some((line) => line.includes("EADDRNOTAVAIL after startup")),
+      "the log line must name what actually failed",
+    );
+  });
+});
+
+// ── back-pressure ────────────────────────────────────────────────────────────
+
+test("a throttled upstream reaches the client WITH its back-off headers", async () => {
+  // The MCP server obeys `Retry-After` and the `X-Sentry-Rate-Limit-*` family.
+  // Relaying only content-type and link turned a 429 into a bare status, so the
+  // client retried at once against a Sentry that was still refusing it.
+  await withBroker(
+    (_req, res) => {
+      res.writeHead(429, {
+        "content-type": "application/json",
+        "retry-after": "42",
+        "x-sentry-rate-limit-limit": "100",
+        "x-sentry-rate-limit-remaining": "0",
+        "x-sentry-rate-limit-reset": "1755600000",
+        "x-sentry-rate-limit-concurrentlimit": "10",
+        // Not back-pressure and not the broker's to relay.
+        "set-cookie": "session=leak-me",
+        "x-served-by": "sentry-edge-7",
+      });
+      res.end(JSON.stringify({ detail: "rate limited" }));
+    },
+    async ({ base }) => {
+      const res = await call(base, "/api/0/organizations/");
+      assert.equal(res.status, 429);
+      assert.equal(res.headers.get("retry-after"), "42");
+      assert.equal(res.headers.get("x-sentry-rate-limit-limit"), "100");
+      assert.equal(res.headers.get("x-sentry-rate-limit-remaining"), "0");
+      assert.equal(res.headers.get("x-sentry-rate-limit-reset"), "1755600000");
+      assert.equal(
+        res.headers.get("x-sentry-rate-limit-concurrentlimit"),
+        "10",
+        "a name-by-name list would have dropped this one",
+      );
+      // Still an allowlist: everything else the upstream sent stays upstream.
+      assert.equal(res.headers.get("set-cookie"), null);
+      assert.equal(res.headers.get("x-served-by"), null);
+    },
+  );
+});
+
+test("isBackPressureHeader admits the two families and nothing else", () => {
+  assert.equal(isBackPressureHeader("Retry-After"), true);
+  assert.equal(isBackPressureHeader("X-Sentry-Rate-Limit-Reset"), true);
+  assert.equal(isBackPressureHeader("x-sentry-rate-limit-anything-new"), true);
+  assert.equal(isBackPressureHeader("authorization"), false);
+  assert.equal(isBackPressureHeader("set-cookie"), false);
+  assert.equal(isBackPressureHeader("x-sentry-token"), false);
+  assert.equal(isBackPressureHeader(undefined), false);
 });
 
 // ── fail closed: redirects and upstream failures ─────────────────────────────

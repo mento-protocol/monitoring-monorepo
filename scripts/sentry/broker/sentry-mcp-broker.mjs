@@ -244,6 +244,27 @@ export function rewriteRegionLinks(payload, brokerOrigin) {
   return payload;
 }
 
+/**
+ * The upstream back-pressure headers this broker relays to its client.
+ *
+ * Sentry answers a throttled read with `Retry-After` and a family of
+ * `X-Sentry-Rate-Limit-*` headers, and the MCP server is written to obey them.
+ * Dropping them turns a 429 into a bare status: the client cannot tell how long
+ * to wait, so it retries immediately against a Sentry already refusing it, and
+ * the run burns its budget on requests none of which can succeed.
+ *
+ * A PREFIX allowlist, not a passthrough. The broker exists so that only what it
+ * chose crosses it, and the two things named here carry no credential and no
+ * routing — but a name-by-name list would silently drop whichever member of the
+ * family Sentry adds next, which is the failure this fixes in the first place.
+ */
+const RATE_LIMIT_HEADER_PREFIX = "x-sentry-rate-limit";
+
+export function isBackPressureHeader(name) {
+  const lower = String(name ?? "").toLowerCase();
+  return lower === "retry-after" || lower.startsWith(RATE_LIMIT_HEADER_PREFIX);
+}
+
 function deny(res, status, reason) {
   res.writeHead(status, { "content-type": "application/json" });
   res.end(JSON.stringify({ detail: `sentry-mcp-broker: ${reason}` }));
@@ -376,6 +397,11 @@ export function createHandler(config) {
     // the MCP client reads only the `cursor="…"` value out of it.
     const link = upstreamRes.headers.get("link");
     if (link) headers.link = link;
+    // Back-pressure, relayed for the same reason (see isBackPressureHeader):
+    // without it a 429 arrives stripped of every hint of when to try again.
+    for (const [name, value] of upstreamRes.headers) {
+      if (isBackPressureHeader(name)) headers[name.toLowerCase()] = value;
+    }
     res.writeHead(upstreamRes.status, headers);
     res.end(body);
     log(
@@ -404,8 +430,25 @@ export async function startBroker(config) {
     });
   });
   await new Promise((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(config.port ?? 0, BIND_HOST, resolve);
+    const onStartupError = (error) => reject(error);
+    server.once("error", onStartupError);
+    server.listen(config.port ?? 0, BIND_HOST, () => {
+      server.removeListener("error", onStartupError);
+      resolve();
+    });
+  });
+  // Past startup that `reject` is a no-op, and it was the server's ONLY `error`
+  // listener — so every later socket error was discarded in silence, which for a
+  // broker whose whole job is to be the one path to Sentry reads as "the run
+  // simply stopped getting answers". Log it instead. Nothing here throws: an
+  // `error` event with no listener is an uncaught exception that would take the
+  // broker down with the run still using it.
+  server.on("error", (error) => {
+    config.log?.(
+      `sentry-mcp-broker: SERVER-ERROR ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
   });
   const { port } = server.address();
   // `validateRegionUrl` demands an https URL and accepts the base host; the MCP
