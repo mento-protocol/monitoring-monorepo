@@ -7,14 +7,14 @@
 // value for a malformed response would silently disarm the switch, which is
 // the exact failure this watcher exists to catch.
 
-// The rolling run record `scripts/sentry-triage-ingest.mjs` posts on tracker
+// The rolling run record `scripts/sentry/triage/sentry-triage-ingest.mjs` posts on tracker
 // issue #1282. Pinned to the exact version: this watcher reads the record's
 // body as a contract, so a `v2` bump must fail closed and alert rather than
 // keep parsing a field whose meaning has quietly changed. `RUN_RECORD_MARKER`
 // in that script names this reader.
 export const RUN_RECORD_MARKER = "<!-- sentry-triage-ingest:run-record:v1 -->";
 
-// Mirrors `TRUSTED_COMMENT_AUTHORS` in scripts/sentry-triage-project-core.mjs.
+// Mirrors `TRUSTED_COMMENT_AUTHORS` in scripts/sentry/triage/sentry-triage-project-core.mjs.
 // This repository is public and #1282 is open, so without an author fence any
 // drive-by commenter could post a marker-bearing comment carrying a fresh
 // timestamp and hold the gauge green over a dead pipeline. The GraphQL shape

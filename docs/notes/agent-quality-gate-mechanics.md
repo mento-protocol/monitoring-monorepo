@@ -164,7 +164,7 @@ continues to refuse until `--allow-package-script-changes`, and `package.json`
 still gets a full-repo Trunk scan.
 
 `classify_root_package_json_changes` is lifted out of this script and re-run by
-`scripts/check-sentry-suites-in-ci-gate-probe.mjs`, which proves each alias still
+`scripts/sentry/ci-wiring/check-sentry-suites-in-ci-gate-probe.mjs`, which proves each alias still
 routes to the arm it is supposed to. The probe runs it with an empty `$PATH`
 under `set -r`, so the function must reach nothing but shell builtins, keywords
 and `json_change_paths` — no external command, and no output redirection, which

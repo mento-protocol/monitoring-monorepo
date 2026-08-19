@@ -38,7 +38,7 @@ through whatever those scripts invoke.
 **R2 — "has a CI step" is not "the step ran meaningful assertions".** The checker
 proves invocation, not execution. A suite that exits 0 for an environment reason
 satisfies every static assertion. This was not hypothetical:
-`scripts/sentry-triage-project.test.mjs` emitted 112 `ok` lines but reported
+`scripts/sentry/triage/sentry-triage-project.test.mjs` emitted 112 `ok` lines but reported
 `110 passed`, because its summary and exit-code block sat before the file's last
 two `await test(...)` calls. Those two tests' failures incremented the counter
 after the exit-code decision was already made, so they could never fail the
@@ -59,27 +59,28 @@ its `allowed-skips` — the treatment `production-infra-contract` already gets.
 
 The job's step list is closed-world and its order is load-bearing:
 
-| #   | Step                                                                                | Why it is where it is                                                                                              | Lands in |
-| --- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | -------- |
-| 1   | `actions/checkout` (SHA-pinned, `persist-credentials: false`)                       | Upstream, one of exactly two non-PR-authored things trusted before the suites                                      | this PR  |
-| 2   | `actions/setup-node` (SHA-pinned, `node-version-file: .node-version`)               | Same                                                                                                               | this PR  |
-| 3   | `run: /usr/bin/env -u NODE_OPTIONS -u NODE_PATH node scripts/sentry-suite-gate.mjs` | The first and only PR-authored code before the suites; strips both vars, symmetric with the gate's per-child spawn | this PR  |
-| 4   | `uses: ./.github/actions/pnpm-install`                                              | After the suites, so its `postinstall` cannot reach them                                                           | PR C     |
-| 5   | `run: node scripts/check-sentry-suites-in-ci.test.mjs`                              | Needs `js-yaml`; after the suites for the same reason                                                              | PR C     |
+| #   | Step                                                                                            | Why it is where it is                                                                                              | Lands in |
+| --- | ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | -------- |
+| 1   | `actions/checkout` (SHA-pinned, `persist-credentials: false`)                                   | Upstream, one of exactly two non-PR-authored things trusted before the suites                                      | this PR  |
+| 2   | `actions/setup-node` (SHA-pinned, `node-version-file: .node-version`)                           | Same                                                                                                               | this PR  |
+| 3   | `run: /usr/bin/env -u NODE_OPTIONS -u NODE_PATH node scripts/sentry/gate/sentry-suite-gate.mjs` | The first and only PR-authored code before the suites; strips both vars, symmetric with the gate's per-child spawn | this PR  |
+| 4   | `uses: ./.github/actions/pnpm-install`                                                          | After the suites, so its `postinstall` cannot reach them                                                           | PR C     |
+| 5   | `run: node scripts/sentry/ci-wiring/check-sentry-suites-in-ci.test.mjs`                         | Needs `js-yaml`; after the suites for the same reason                                                              | PR C     |
 
 Steps 1-3 are the security-critical core: no PR-authored step runs before the
 gate, so the R1 window is closed. Steps 4-5 landed in PR C, which also deleted
 the duplicated suite steps from the `scripts` job and narrowed the checker's
 charter — see "What PR C retired, and why" below.
 
-`scripts/sentry-suite-gate.mjs` is dependency-free, which is what makes step 3
-possible: every `scripts/sentry-*.mjs` imports only `node:` builtins, so running
+`scripts/sentry/gate/sentry-suite-gate.mjs` is dependency-free, which is what makes step 3
+possible: every sentry `.mjs` file imports only `node:` builtins, so running
 the suites needs no install. It:
 
-1. enumerates `scripts/sentry-*.test.mjs` with a symlink-following, cycle-safe
-   walker (a dependency-free port of the checker's `findSentrySuites`) and
-   asserts exact set equality against `scripts/sentry-suite-manifest.json` in
-   both directions, printing the JSON patch to apply on a miss;
+1. enumerates every `sentry-*.test.mjs` file anywhere under `scripts/` with a
+   symlink-following, cycle-safe walker (a dependency-free port of the
+   checker's `findSentrySuites`) and asserts exact set equality against
+   `scripts/sentry/gate/sentry-suite-manifest.json` in both directions,
+   printing the JSON patch to apply on a miss;
 2. refuses to start if `NODE_OPTIONS` or `NODE_PATH` is set in its own env,
    catching removal of the `env -u` prefix or an attempt to drive the gate under
    the very injection it defends against;
@@ -92,7 +93,7 @@ the suites needs no install. It:
    parse failure or missing suite fails closed;
 4. re-verifies each exemption's route without running it — that
    `scripts/tf-stacks.test.mjs` still statically imports
-   `scripts/sentry-provider-contract.test.mjs`, and that the exact package.json
+   `scripts/sentry/gate/sentry-provider-contract.test.mjs`, and that the exact package.json
    alias the owning job runs is nothing but `node scripts/tf-stacks.test.mjs` —
    since that suite runs in `production-infra-contract` via `pnpm tf:test` and
    carries import-time assertions with no counts;
@@ -105,7 +106,7 @@ repository files it opens rather than imports) and `readsDirs` (the directories
 it enumerates, copied whole), and — for the one non-gate suite — an `exempt`
 route with its importer. Floors use `>=` semantics.
 
-`scripts/sentry-suite-gate.test.mjs` is the runner's own suite, named `sentry-*`
+`scripts/sentry/gate/sentry-suite-gate.test.mjs` is the runner's own suite, named `sentry-*`
 so `findSentrySuites` enumerates it and the gate runs it — neutering the runner
 now also requires faking its own suite's count and per-case lines.
 
@@ -298,7 +299,7 @@ and the pin literals are the only thing stopping a fork swap; Dependabot bumps
 now require a paired edit.
 
 The gate cannot detect its own deletion, so the static checker carries that.
-`scripts/check-sentry-suites-in-ci-gate-job.test.mjs` pins the job. Without it
+`scripts/sentry/ci-wiring/check-sentry-suites-in-ci-gate-job.test.mjs` pins the job. Without it
 every check in the repository stayed green with the whole job deleted.
 
 ### What PR C retired, and why
@@ -391,19 +392,19 @@ never acquire an `if:` — GitHub treats a skipped required check as satisfied.
 
 Assertion count is not assertion strength. A suite of `assert(true)` calls
 satisfies every leg. Closing that needs assertion-depth counting and, beyond it,
-mutation testing of `scripts/sentry-*.mjs`; today `mutation-testing.yml` is
+mutation testing of the sentry `.mjs` files; today `mutation-testing.yml` is
 scoped to vitest packages only.
 
 ## Rollout
 
-Sequenced after #1769, which added `scripts/sentry-triage-brief.test.mjs` and
+Sequenced after #1769, which added `scripts/sentry/triage/sentry-triage-brief.test.mjs` and
 reshaped several suites.
 
 0. **PR #1787 (merged).** Move the misordered summary block in
-   `scripts/sentry-triage-project.test.mjs` to the end of the file (reported
+   `scripts/sentry/triage/sentry-triage-project.test.mjs` to the end of the file (reported
    count 110 → 112). Without it the gate's `pass == per-case-line` check reds on
    that suite, so it is a prerequisite of this PR, not part of it.
-1. **PR B (merged).** Add the manifest, `scripts/sentry-suite-gate.mjs`, its own
+1. **PR B (merged).** Add the manifest, `scripts/sentry/gate/sentry-suite-gate.mjs`, its own
    suite, and the unconditional `sentry-suites` job wired into `ci.needs` and out
    of `allowed-skips`; add a direct step to the `scripts` job invoking the gate's
    own suite so the #1754 coverage checker stays green. The suites briefly ran in
@@ -424,7 +425,7 @@ reshaped several suites.
    required checks.
 
 Each red path is proven to fail before it is trusted. This PR ships those proofs
-as `scripts/sentry-suite-gate.test.mjs`: an emptied suite fails the summary
+as `scripts/sentry/gate/sentry-suite-gate.test.mjs`: an emptied suite fails the summary
 parse; a hollow suite whose summary overcounts fails per-case-line equality; an
 injected `NODE_OPTIONS=--import…process.exit(0)` neuters a plain `node` run yet
 the `env -u` latch strips it so the suite really runs; a suite added or removed
@@ -433,10 +434,10 @@ without a manifest edit fails set equality; a suite under its floor reds; and
 
 ## Evidence
 
-- R2 defect and fix: `node scripts/sentry-triage-project.test.mjs | grep -c '^ok '` returned 112 against a reported `110 passed` before PR #1787 moved the summary block to the file's end; the count now reads 112, which the gate's floor requires.
+- R2 defect and fix: `node scripts/sentry/triage/sentry-triage-project.test.mjs | grep -c '^ok '` returned 112 against a reported `110 passed` before PR #1787 moved the summary block to the file's end; the count now reads 112, which the gate's floor requires.
 - Dependency-freedom: the 34 modules the gate loads or spawns — itself, its imports, every non-exempt suite and their transitive first-party imports — import only `node:` builtins and repo-local siblings, checked by walking `staticImports` over that closure. (The exempt importer's own closure does reach `js-yaml`; the gate digests those files, it never loads them.) The checker's `js-yaml` import is why the checker stays a step 4-5 job.
-- The gate green against the real suites: `node scripts/sentry-suite-gate.mjs` reconciles all thirteen `scripts/sentry-*.test.mjs`, asserts the twelve non-exempt suites from their output, and re-verifies the provider-contract exemption route.
-- Each negative path reds the gate: `node scripts/sentry-suite-gate.test.mjs` and `node scripts/sentry-suite-gate-integrity.test.mjs`.
+- The gate green against the real suites: `node scripts/sentry/gate/sentry-suite-gate.mjs` reconciles all thirteen `sentry-*.test.mjs` files found anywhere under `scripts/`, asserts the twelve non-exempt suites from their output, and re-verifies the provider-contract exemption route.
+- Each negative path reds the gate: `node scripts/sentry/gate/sentry-suite-gate.test.mjs` and `node scripts/sentry/gate/sentry-suite-gate-integrity.test.mjs`.
 - Snapshot cost, measured on this repository: full tracked tree 1.48s each / 18.8s for thirteen; derived input set 20ms each / 241ms for thirteen. The gate's own overhead went 0.21s → 0.60s, its total 5.3s → 5.7s. Adding `readsDirs` for the two enumerating suites, per-snapshot digests and the pre-spawn verification took it to 7.6s.
 - Declared reads are complete because incompleteness fails: running every suite from a sparse snapshot converged on six reads across three suites, one of which review had found by inspection.
 - The enumerating suites really enumerate: planting `scripts/zz-round12-decoy.mjs` with a forbidden `buildRegressedComment(` call reds `sentry-triage-requeue.test.mjs` (`expected [], got ["zz-round12-decoy.mjs"]`), and the same file with a `BRIEF_COMMENT_MARKER` reference reds `sentry-triage-brief.test.mjs`. Both are clean again once it is removed.

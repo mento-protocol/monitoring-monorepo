@@ -273,7 +273,10 @@ test("the scripts scope covers .mjs and .sh at every depth, tests aside", () => 
   assert.equal(scopeForPath("scripts/agent-quality-gate.test.sh"), null);
   // Only executable sources. The manifest, the schema stub, and AGENTS.md are
   // data or prose, and a line cap says nothing useful about them.
-  assert.equal(scopeForPath("scripts/sentry-suite-manifest.json"), null);
+  assert.equal(
+    scopeForPath("scripts/sentry/gate/sentry-suite-manifest.json"),
+    null,
+  );
   assert.equal(scopeForPath("scripts/envio-schema-stubs.graphql"), null);
   assert.equal(scopeForPath("scripts/AGENTS.md"), null);
 });
@@ -336,7 +339,7 @@ test("the exemption list holds exactly the three trust-root files", () => {
     "scripts/agent-quality-gate.sh",
     "scripts/pr-ready-state-core.mjs",
     "scripts/deploy-staging-contract.mjs",
-    "scripts/sentry-autofix-select.test.mjs",
+    "scripts/sentry/autofix/sentry-autofix-select.test.mjs",
     "scripts/tf-stacks.test.mjs",
   ]) {
     assert.equal(exemptionReason(path), null, `${path} must not be exempt`);

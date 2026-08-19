@@ -32,7 +32,7 @@ so there was no config for the watchlist to mirror and no lint rule behind a
 therefore been vacuous for `scripts/` the whole time.
 
 The tree noticed before this ADR did.
-`scripts/check-sentry-suites-in-ci.test.mjs` carries a hand-maintained list of
+`scripts/sentry/ci-wiring/check-sentry-suites-in-ci.test.mjs` carries a hand-maintained list of
 20 paths, imports `countLines` and `HARD_CAP` from the watchlist, and fails when
 one of them crosses 1,000 raw lines. Its comment gave the reason outright — "the
 root ESLint config sets no `max-lines`, and the file-size watchlist scopes the
@@ -181,14 +181,14 @@ that nothing holds in place.
   [`scripts/repo-health/file-size-watchlist.test.mjs`](../../scripts/repo-health/file-size-watchlist.test.mjs)
 - No root `max-lines`: [`eslint.config.mjs`](../../eslint.config.mjs)
 - The subsystem-local gate this leaves in place:
-  `scripts/check-sentry-suites-in-ci.test.mjs`, "the checker's own files stay
-  under the file-size hard cap"
+  `scripts/sentry/ci-wiring/check-sentry-suites-in-ci.test.mjs`, "the checker's
+  own files stay under the file-size hard cap"
 - Trust-root pins: `verify_current_wrapper_matches_ref` and
   `materialize_filesystem_autoreview_runtime` in `scripts/agent-autoreview.sh`
 - Test-split costs behind the exclusion:
-  [`scripts/sentry-suite-manifest.json`](../../scripts/sentry-suite-manifest.json)
+  [`scripts/sentry/gate/sentry-suite-manifest.json`](../../scripts/sentry/gate/sentry-suite-manifest.json)
   and [ADR 0062](0062-sentry-suites-self-run-gate.md); `verifyExemptRoute` in
-  `scripts/sentry-suite-gate.mjs`; `CONTRACT_FIXTURE` in
+  `scripts/sentry/gate/sentry-suite-gate.mjs`; `CONTRACT_FIXTURE` in
   `scripts/deploy-staging-callsite-discovery.mjs` and
   [ADR 0053](0053-explicit-deployment-source-staging.md); the silent-skip
   failure mode of enumerated paths-filters in
