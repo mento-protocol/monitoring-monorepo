@@ -71,12 +71,15 @@ resource "grafana_rule_group" "vp_oracle_staleness" {
       })
     }
 
+    # Incident-level grouping: one stale oracle feed goes stale for every
+    # VirtualPool that wraps it, so group without `pool_id` and let the Slack
+    # body list the affected pools in a single message.
     notification_settings {
-      contact_point   = local.notify_critical_pool.contact_point
-      group_by        = local.notify_critical_pool.group_by
-      group_wait      = local.notify_critical_pool.group_wait
-      group_interval  = local.notify_critical_pool.group_interval
-      repeat_interval = local.notify_critical_pool.repeat_interval
+      contact_point   = local.notify_critical_incident.contact_point
+      group_by        = local.notify_critical_incident.group_by
+      group_wait      = local.notify_critical_incident.group_wait
+      group_interval  = local.notify_critical_incident.group_interval
+      repeat_interval = local.notify_critical_incident.repeat_interval
     }
   }
 }
