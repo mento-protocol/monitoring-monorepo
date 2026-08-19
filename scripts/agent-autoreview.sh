@@ -5927,7 +5927,12 @@ review_capture_measure() {
     # would outlast the deadline it is supposed to enforce.
     return 1
   fi
-  review_capture_seconds_left=$((max_review_capture_seconds - elapsed))
+  # Round the elapsed time up by a second. A whole-second clock truncates, so a
+  # stage that really has run 3.8 seconds measures 3, and each capture then gets
+  # a fresh relative timer sized from that under-measurement; a stage of them
+  # would drift past the ceiling it is supposed to hold. Charging the unmeasured
+  # fraction as a whole second keeps every timer inside the budget.
+  review_capture_seconds_left=$((max_review_capture_seconds - elapsed - 1))
 }
 
 # Read-only, so a command substitution is safe here.
