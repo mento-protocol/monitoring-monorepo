@@ -3589,6 +3589,12 @@ while IFS= read -r path; do
           # renderer consumes (#1748); dropping one here would leave the brief
           # silently half-empty in production.
           add_command "pnpm sentry:brief:test" "Sentry triage prompt changed"
+          # The broker suite pins the OTHER load-bearing prompt rule: losing the
+          # Sentry toolset posts nothing rather than a verdict (#1938). It lives
+          # there because it is the agent-side half of the pre-flight probe, so
+          # a prompt-only edit must run it too or the rule can be dropped with
+          # nothing red.
+          add_command "pnpm sentry:broker:test" "Sentry triage prompt changed"
           ;;
       esac
       ;;
@@ -4097,8 +4103,11 @@ while IFS= read -r path; do
         scripts/sentry/triage/sentry-triage-archive.mjs|scripts/sentry/triage/sentry-triage-archive.test.mjs)
           add_command "pnpm sentry:archive:test" "Sentry triage archive helper changed"
           ;;
-        scripts/sentry/broker/sentry-mcp-broker.mjs|scripts/sentry/broker/sentry-mcp-broker.test.mjs)
-          add_command "pnpm sentry:broker:test" "Sentry credential broker changed"
+        scripts/sentry/broker/sentry-mcp-broker.mjs|scripts/sentry/broker/sentry-mcp-broker.test.mjs|scripts/sentry/broker/sentry-mcp-probe.mjs)
+          # The broker and the MCP pre-flight probe (#1938) share one suite:
+          # sentry-mcp-broker.test.mjs holds both, so the probe must route here
+          # too or a change touching only the probe runs none of its own tests.
+          add_command "pnpm sentry:broker:test" "Sentry MCP broker or pre-flight probe changed"
           ;;
         scripts/sentry/triage/sentry-triage-requeue.mjs|scripts/sentry/triage/sentry-triage-requeue.test.mjs|scripts/sentry/triage/sentry-triage-queue-contract.mjs|scripts/sentry/triage/sentry-triage-workflow-requeue.mjs)
           # The single re-queue chokepoint, the queue contract it reads, and the

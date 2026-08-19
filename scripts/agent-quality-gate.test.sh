@@ -4316,6 +4316,15 @@ assert_contains "- pnpm sentry:digest:test (Sentry triage digest helper changed)
 run_gate "scripts/sentry/triage/sentry-triage-digest-render.mjs"
 assert_contains "- pnpm sentry:digest:test (Sentry triage digest helper changed)"
 
+# The MCP pre-flight probe (#1938) has no suite of its own — its tests live in
+# the broker's, so it must route there. Pinned one path at a time: a sibling in
+# the same change set would pull the suite in anyway and hide the miss.
+run_gate "scripts/sentry/broker/sentry-mcp-probe.mjs"
+assert_contains "- pnpm sentry:broker:test (Sentry MCP broker or pre-flight probe changed)"
+
+run_gate "scripts/sentry/broker/sentry-mcp-broker.mjs"
+assert_contains "- pnpm sentry:broker:test (Sentry MCP broker or pre-flight probe changed)"
+
 run_gate "scripts/sentry/triage/sentry-triage-queue-contract.mjs"
 assert_contains "- pnpm sentry:requeue:test (Sentry re-queue chokepoint changed)"
 assert_contains "- pnpm sentry:project:test (Sentry re-queue chokepoint changed)"
@@ -4363,6 +4372,9 @@ assert_contains "- pnpm sentry:brief:test (Sentry needs-human brief helper chang
 
 run_gate ".github/prompts/sentry-triage.md"
 assert_contains "- pnpm sentry:brief:test (Sentry triage prompt changed)"
+# The broker suite pins the prompt's "losing the toolset posts nothing" rule
+# (#1938); without this route a prompt-only edit could drop it with nothing red.
+assert_contains "- pnpm sentry:broker:test (Sentry triage prompt changed)"
 
 run_gate "docs/notes/sentry-triage-pipeline.md"
 assert_contains "- pnpm sentry:brief:test (Sentry verdict contract note changed)"

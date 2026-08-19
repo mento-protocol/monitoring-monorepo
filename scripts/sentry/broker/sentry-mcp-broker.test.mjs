@@ -16,11 +16,13 @@
 
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
+import { EventEmitter } from "node:events";
 import { createServer } from "node:http";
 import { connect } from "node:net";
 import { readFileSync } from "node:fs";
 import { platform } from "node:os";
 import { dirname, join } from "node:path";
+import { PassThrough } from "node:stream";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -38,6 +40,17 @@ import {
   rewriteRegionLinks,
   startBroker,
 } from "./sentry-mcp-broker.mjs";
+import {
+  PROTOCOL_VERSION,
+  REQUIRED_TOOLS,
+  drainMessages,
+  encodeAnnotation,
+  isEntryPoint as probeIsEntryPoint,
+  killProcessGroup,
+  missingTools,
+  probeSentryToolset,
+  resolveProbeConfig,
+} from "./sentry-mcp-probe.mjs";
 
 const HANDLE = "h".repeat(64);
 const REAL_TOKEN = "sntrys_the_real_read_only_token_value";
@@ -1097,4 +1110,508 @@ test("the MCP config points at the loopback broker and carries only the handle",
   );
   // SENTRY_HOST cannot carry a scheme, so it is gone with the token.
   assert.ok(!("SENTRY_HOST" in sentry.env));
+});
+
+// ── the MCP pre-flight probe (issue #1938) ──────────────────────────────────
+//
+// The probe exists because the failure it catches is SILENT: when the Sentry
+// MCP server does not register, claude-code-action initialises without it and
+// prints nothing, the agent reports its own blindness as a verdict, and the
+// deterministic verdict job settles the stub on it. So these tests hold two
+// things: the probe's own protocol handling, driven against a fake server the
+// way the broker suite drives its stub Sentry rather than pulling the real
+// package into CI; and the wiring that makes the probe run at all — staged,
+// before the agent, against the same server spec the agent is handed.
+
+/** Literal-match a value that carries regex metacharacters (`@`, `.`, `/`). */
+function escapeForRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** A spawn() stand-in: an EventEmitter with the three streams, no process. */
+function fakeMcpChild() {
+  const child = new EventEmitter();
+  child.stdin = new PassThrough();
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  child.killed = false;
+  child.kill = () => {
+    child.killed = true;
+  };
+  return child;
+}
+
+/**
+ * Answer the probe's requests the way a healthy MCP server would.
+ * `tools` is what `tools/list` reports back.
+ */
+function respondLikeServer(child, tools) {
+  let buffered = "";
+  child.stdin.on("data", (chunk) => {
+    buffered += chunk.toString();
+    const lines = buffered.split("\n");
+    buffered = lines.pop() ?? "";
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      const message = JSON.parse(line);
+      if (message.method === "initialize") {
+        child.stdout.write(
+          `${JSON.stringify({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: PROTOCOL_VERSION, serverInfo: { name: "sentry", version: "0.37.0" } } })}\n`,
+        );
+      } else if (message.method === "tools/list") {
+        child.stdout.write(
+          `${JSON.stringify({ jsonrpc: "2.0", id: message.id, result: { tools: tools.map((name) => ({ name })) } })}\n`,
+        );
+      }
+    }
+  });
+}
+
+const PROBE_ENV = {
+  SENTRY_MCP_SERVER_SPEC: "@sentry/mcp-server@0.37.0",
+  SENTRY_MCP_BROKER_PORT: "9401",
+  SENTRY_MCP_BROKER_HANDLE: "h".repeat(64),
+};
+
+test("the probe reports the toolset a healthy server registers", async () => {
+  const child = fakeMcpChild();
+  respondLikeServer(child, REQUIRED_TOOLS);
+  const tools = await probeSentryToolset({
+    env: PROBE_ENV,
+    spawnFn: () => child,
+  });
+  assert.deepEqual(tools, REQUIRED_TOOLS);
+  assert.ok(child.killed, "the probe must not leave the server running");
+});
+
+test("DEMONSTRATED FAILURE: an empty toolset is refused, and names what is missing", async () => {
+  // This is the 2026-08-19 shape: the CLI came up, the server did not, and the
+  // agent saw no Sentry tool at all. Before the probe this passed silently into
+  // a needs-human verdict on seven stubs.
+  const child = fakeMcpChild();
+  respondLikeServer(child, []);
+  await assert.rejects(
+    probeSentryToolset({ env: PROBE_ENV, spawnFn: () => child }),
+    (error) => {
+      assert.match(error.message, /registered no usable toolset/);
+      for (const name of REQUIRED_TOOLS)
+        assert.ok(error.message.includes(name));
+      return true;
+    },
+  );
+});
+
+test("a PARTIAL toolset is refused too — the missing names, not the present ones", async () => {
+  const child = fakeMcpChild();
+  respondLikeServer(child, ["find_organizations", "find_projects"]);
+  await assert.rejects(
+    probeSentryToolset({ env: PROBE_ENV, spawnFn: () => child }),
+    (error) => {
+      assert.match(
+        error.message,
+        /missing: search_issues, search_events, get_sentry_resource/,
+      );
+      return true;
+    },
+  );
+});
+
+test("a server that dies before answering fails closed, carrying its stderr", async () => {
+  const child = fakeMcpChild();
+  setImmediate(() => {
+    child.stderr.write("npm error 404 Not Found");
+    setImmediate(() => child.emit("exit", 1, null));
+  });
+  await assert.rejects(
+    probeSentryToolset({ env: PROBE_ENV, spawnFn: () => child }),
+    (error) => {
+      assert.match(error.message, /exited before the handshake completed/);
+      assert.match(error.message, /npm error 404/);
+      return true;
+    },
+  );
+});
+
+test("a server that never answers times out rather than hanging the job", async () => {
+  const child = fakeMcpChild(); // answers nothing
+  await assert.rejects(
+    probeSentryToolset({
+      env: { ...PROBE_ENV, SENTRY_MCP_PROBE_TIMEOUT_MS: "40" },
+      spawnFn: () => child,
+    }),
+    (error) => {
+      assert.match(error.message, /did not complete the handshake within 40ms/);
+      return true;
+    },
+  );
+  assert.ok(child.killed, "a timed-out server must still be killed");
+});
+
+test("a spawn that never starts is reported as a start failure", async () => {
+  const child = fakeMcpChild();
+  setImmediate(() => child.emit("error", new Error("spawn npx ENOENT")));
+  await assert.rejects(
+    probeSentryToolset({ env: PROBE_ENV, spawnFn: () => child }),
+    (error) => {
+      assert.match(error.message, /could not start the Sentry MCP server/);
+      assert.match(error.message, /ENOENT/);
+      return true;
+    },
+  );
+});
+
+test("an initialize refusal is reported as a refusal, not a timeout", async () => {
+  const child = fakeMcpChild();
+  child.stdin.on("data", () => {
+    child.stdout.write(
+      `${JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code: -32603, message: "bad token" } })}\n`,
+    );
+  });
+  await assert.rejects(
+    probeSentryToolset({ env: PROBE_ENV, spawnFn: () => child }),
+    (error) => {
+      assert.match(error.message, /refused initialize/);
+      return true;
+    },
+  );
+});
+
+test("npm chatter on stdout does not break the handshake", () => {
+  // `npx -y` prints to stdout on a cold cache. A non-JSON line is noise, not a
+  // protocol error: dropping the run over it would turn a working server red.
+  const { messages, rest } = drainMessages(
+    'npm warn exec fetching\n{"jsonrpc":"2.0","id":1,"result":{}}\n{"partial":',
+  );
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].id, 1);
+  assert.equal(rest, '{"partial":');
+});
+
+test("missingTools accepts a server that namespaces its tool names", () => {
+  assert.deepEqual(
+    missingTools(["mcp__sentry__find_projects"], ["find_projects"]),
+    [],
+  );
+  assert.deepEqual(missingTools(["find_projects_v2"], ["find_projects"]), [
+    "find_projects",
+  ]);
+});
+
+test("resolveProbeConfig fails loudly rather than defaulting a wiring value", () => {
+  // Same rule the broker applies to its port: a default is a second source of
+  // truth that disagrees only on a live run.
+  assert.throws(
+    () => resolveProbeConfig({}),
+    /missing required environment: SENTRY_MCP_SERVER_SPEC, SENTRY_MCP_BROKER_PORT, SENTRY_MCP_BROKER_HANDLE/,
+  );
+  assert.throws(
+    () => resolveProbeConfig({ ...PROBE_ENV, SENTRY_MCP_BROKER_PORT: "94o1" }),
+    /must be an integer from 1 to 65535/,
+  );
+  // Same range the broker enforces on the same variable, so the two readers of
+  // SENTRY_MCP_BROKER_PORT cannot disagree about what a valid wiring is.
+  for (const port of ["0", "65536", "99999"]) {
+    assert.throws(
+      () => resolveProbeConfig({ ...PROBE_ENV, SENTRY_MCP_BROKER_PORT: port }),
+      /must be an integer from 1 to 65535/,
+      `port ${port} must be refused`,
+    );
+  }
+  assert.equal(
+    resolveProbeConfig({ ...PROBE_ENV, SENTRY_MCP_BROKER_PORT: "65535" })
+      .args[3],
+    "127.0.0.1:65535",
+  );
+  assert.throws(
+    () =>
+      resolveProbeConfig({ ...PROBE_ENV, SENTRY_MCP_PROBE_TIMEOUT_MS: "0" }),
+    /must be a positive number/,
+  );
+});
+
+test("the probe spawns the server the AGENT is given, argument for argument", () => {
+  // A probe that passed against a different spec, port or transport than the
+  // agent's own --mcp-config would be worse than no probe: it would certify a
+  // server nobody runs. So derive both from the same job env and compare.
+  const job = triageJobBlock();
+  const sentry = JSON.parse(/--mcp-config '([^']+)'/.exec(job)[1]).mcpServers
+    .sentry;
+  const substituted = sentry.args.map((arg) =>
+    arg
+      .replace(
+        "${{ env.SENTRY_MCP_SERVER_SPEC }}",
+        PROBE_ENV.SENTRY_MCP_SERVER_SPEC,
+      )
+      .replace(
+        "${{ env.SENTRY_MCP_BROKER_PORT }}",
+        PROBE_ENV.SENTRY_MCP_BROKER_PORT,
+      ),
+  );
+  const config = resolveProbeConfig(PROBE_ENV);
+  assert.equal(config.command, sentry.command);
+  assert.deepEqual(config.args, substituted);
+});
+
+test("the MCP server spec has ONE literal, shared by the probe and the agent step", () => {
+  const job = triageJobBlock();
+  const jobEnv = job.slice(
+    job.indexOf("\n    env:"),
+    job.indexOf("\n    steps:"),
+  );
+  const declared = /SENTRY_MCP_SERVER_SPEC: "([^"]+)"/.exec(jobEnv)?.[1];
+  assert.ok(declared, "the triage job must pin the MCP server spec in job env");
+  const steps = job.slice(job.indexOf("\n    steps:"));
+  const strays = [
+    ...steps.matchAll(new RegExp(escapeForRegExp(declared), "g")),
+  ];
+  assert.equal(
+    strays.length,
+    0,
+    `the server spec ${declared} is restated inside the job's steps; it must come from job env`,
+  );
+});
+
+test("every tool the probe REQUIRES is one the agent is allowed to call", () => {
+  // The probe demanding a tool the allowlist withholds would red every run on a
+  // grant the agent could not use anyway.
+  const allowed = /--allowedTools '([^']+)'/.exec(triageJobBlock())?.[1] ?? "";
+  for (const name of REQUIRED_TOOLS) {
+    assert.ok(
+      allowed.includes(`mcp__sentry__${name}`),
+      `the probe requires ${name}, which is not in the agent's --allowedTools`,
+    );
+  }
+});
+
+test("the probe runs the immutable staged copy, before the agent", () => {
+  const job = triageJobBlock();
+  // Its runtime closure is itself — the staging step carries no relative import.
+  const source = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "sentry-mcp-probe.mjs"),
+    "utf8",
+  );
+  // Every relative form, not just `from "./x"`: a `../` specifier and a
+  // side-effect `import "./x"` (which has no `from` at all) would each add a
+  // file to the runtime closure that the staging step does not copy, and the
+  // probe would then die inside the trusted step with ERR_MODULE_NOT_FOUND.
+  assert.equal(
+    [...source.matchAll(/(?:from|import)\s*\(?\s*["'](\.{1,2}\/[^"']+)["']/g)]
+      .length,
+    0,
+    "the probe grew a relative import; the staging step must carry it too",
+  );
+  const stagingBlock = job.slice(
+    job.indexOf("Stage immutable agent tools"),
+    job.indexOf("Start the Sentry credential broker"),
+  );
+  assert.ok(
+    stagingBlock.includes("sentry-mcp-probe.mjs"),
+    "the probe is not in the staging step's copy list",
+  );
+  assert.match(
+    job,
+    /node "\$\{RUNNER_TEMP\}\/sentry-triage-tools\/sentry-mcp-probe\.mjs"/,
+  );
+  // Before the agent is the only place it CAN go: this job must end with the
+  // agent, so there is no post-hoc check available.
+  const probeAt = job.indexOf(
+    "- name: Verify the Sentry MCP toolset registers",
+  );
+  assert.ok(probeAt > 0, "the pre-flight probe step is missing from the job");
+  assert.ok(
+    probeAt > job.indexOf("- name: Start the Sentry credential broker"),
+    "the probe must run AFTER the broker it points at",
+  );
+  assert.ok(
+    probeAt < job.indexOf("anthropics/claude-code-action@"),
+    "the probe must run BEFORE the agent it gates",
+  );
+});
+
+test("a paginated tools/list is followed to the end", async () => {
+  // A probe that read only the first page could report a required tool missing
+  // that the server DOES expose — a false red that stops triage entirely, on
+  // the one step allowed to stop it.
+  const child = fakeMcpChild();
+  const pages = [
+    { tools: ["find_organizations", "find_projects"], nextCursor: "p2" },
+    { tools: ["search_issues", "search_events"], nextCursor: "p3" },
+    { tools: ["get_sentry_resource"] },
+  ];
+  const cursorsSeen = [];
+  let buffered = "";
+  child.stdin.on("data", (chunk) => {
+    buffered += chunk.toString();
+    const lines = buffered.split("\n");
+    buffered = lines.pop() ?? "";
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      const message = JSON.parse(line);
+      if (message.method === "initialize") {
+        child.stdout.write(
+          `${JSON.stringify({ jsonrpc: "2.0", id: message.id, result: {} })}\n`,
+        );
+      } else if (message.method === "tools/list") {
+        cursorsSeen.push(message.params?.cursor ?? null);
+        const page = pages.shift();
+        child.stdout.write(
+          `${JSON.stringify({
+            jsonrpc: "2.0",
+            id: message.id,
+            result: {
+              tools: page.tools.map((name) => ({ name })),
+              ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
+            },
+          })}\n`,
+        );
+      }
+    }
+  });
+
+  const tools = await probeSentryToolset({
+    env: PROBE_ENV,
+    spawnFn: () => child,
+  });
+  assert.deepEqual(tools, REQUIRED_TOOLS);
+  // The cursor is opaque and must go back verbatim, never parsed or rebuilt.
+  assert.deepEqual(cursorsSeen, [null, "p2", "p3"]);
+});
+
+test("the whole npx process TREE is killed, not just npx", async () => {
+  // npx execs the MCP server as a grandchild. Killing only npx leaves it
+  // holding the stdio pipes it inherited, which can keep this process from
+  // exiting — hanging the pre-flight step until the job timeout.
+  const child = fakeMcpChild();
+  respondLikeServer(child, REQUIRED_TOOLS);
+  child.pid = 4242;
+  const killed = [];
+  await probeSentryToolset({
+    env: PROBE_ENV,
+    spawnFn: () => child,
+    killFn: (c) => killed.push(c.pid),
+  });
+  assert.deepEqual(killed, [4242], "the probe must hand the child to killFn");
+
+  // And the real killer negates the pid, which is what addresses the group.
+  const signals = [];
+  const fakeChild = {
+    pid: 99,
+    kill: (sig) => signals.push(["direct", sig]),
+  };
+  const realKill = process.kill;
+  process.kill = (pid, sig) => signals.push([pid, sig]);
+  try {
+    killProcessGroup(fakeChild);
+  } finally {
+    process.kill = realKill;
+  }
+  assert.deepEqual(signals, [[-99, "SIGKILL"]]);
+});
+
+test("the closure assertion catches every relative import form", () => {
+  // The narrow `from "./x"` pattern this started as would miss both of these,
+  // and either one silently breaks the probe inside the trusted step.
+  const pattern = /(?:from|import)\s*\(?\s*["'](\.{1,2}\/[^"']+)["']/g;
+  for (const form of [
+    'import { x } from "./sibling.mjs";',
+    'import { x } from "../parent.mjs";',
+    'import "./side-effect.mjs";',
+    'const m = await import("./dynamic.mjs");',
+  ]) {
+    assert.equal(
+      [...form.matchAll(pattern)].length,
+      1,
+      `the closure pattern missed: ${form}`,
+    );
+  }
+  // node: builtins and bare specifiers are not relative and must not match.
+  for (const form of [
+    'import test from "node:test";',
+    'import x from "some-package";',
+  ]) {
+    assert.equal(
+      [...form.matchAll(pattern)].length,
+      0,
+      `false positive: ${form}`,
+    );
+  }
+});
+
+test("an annotation reason survives its newlines", () => {
+  // A workflow command ends at the first newline, and the reason carries the
+  // server's stderr — so an unencoded message would drop the part that says why.
+  assert.equal(encodeAnnotation("a\nb"), "a%0Ab");
+  assert.equal(encodeAnnotation("a\r\nb"), "a%0D%0Ab");
+  // `%` first, or the escapes introduced above would be double-encoded.
+  assert.equal(encodeAnnotation("100%\ndone"), "100%25%0Adone");
+  assert.equal(encodeAnnotation(undefined), "");
+});
+
+test("the probe's entry-point check survives a symlinked staging path", async () => {
+  // Sharper here than for the broker. The workflow runs the probe from a staged
+  // copy under `$RUNNER_TEMP`; where that root is a symlink, a raw string
+  // compare says "not the entry point", node exits 0 having probed nothing, and
+  // the STEP GOES GREEN — so the agent starts unguarded and the fail-open this
+  // whole PR closes walks through the check that was meant to close it.
+  const { mkdtempSync, mkdirSync, copyFileSync, symlinkSync } =
+    await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const here = dirname(fileURLToPath(import.meta.url));
+
+  const root = mkdtempSync(join(tmpdir(), "probe-entry-"));
+  const real = join(root, "real");
+  mkdirSync(real);
+  const staged = join(real, "sentry-mcp-probe.mjs");
+  copyFileSync(join(here, "sentry-mcp-probe.mjs"), staged);
+  const linked = join(root, "linked");
+  symlinkSync(real, linked);
+
+  assert.equal(probeIsEntryPoint(staged, `file://${staged}`), true);
+  assert.equal(
+    probeIsEntryPoint(join(linked, "sentry-mcp-probe.mjs"), `file://${staged}`),
+    true,
+    "a symlinked staging path must still count as the entry point",
+  );
+  assert.equal(probeIsEntryPoint("", `file://${staged}`), false);
+  assert.equal(
+    probeIsEntryPoint(join(real, "other.mjs"), `file://${staged}`),
+    false,
+    "a different file must not count as the entry point",
+  );
+});
+
+test("the probe stays under the 600-line soft cap", () => {
+  // scripts/ has no max-lines lint and the ADR 0065 watchlist reports rather
+  // than blocks, so the cap in docs/pr-checklists/recurring-review-patterns.md
+  // is only enforced by a test. This module is new; pin it before it drifts,
+  // in the suite the gate routes it to.
+  const lines = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "sentry-mcp-probe.mjs"),
+    "utf8",
+  ).split("\n").length;
+  assert.ok(
+    lines <= 600,
+    `sentry-mcp-probe.mjs is ${lines} lines, over the 600 soft cap`,
+  );
+});
+
+test("the prompt forbids posting a verdict when the toolset is gone", () => {
+  // The deterministic guard above is the fence; this is the agent-side half of
+  // the same rule, for a toolset lost AFTER the probe passed. Without it the
+  // agent reports its blindness as needs-human and the verdict job settles the
+  // stub on it (#1938).
+  const prompt = readFileSync(
+    join(
+      dirname(fileURLToPath(import.meta.url)),
+      "..",
+      "..",
+      "..",
+      ".github",
+      "prompts",
+      "sentry-triage.md",
+    ),
+    "utf8",
+  );
+  assert.match(prompt, /One failure is NOT a verdict/);
+  assert.match(prompt, /post NOTHING and stop/);
 });

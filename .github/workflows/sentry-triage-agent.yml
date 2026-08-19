@@ -258,7 +258,7 @@ jobs:
   #     agent's Bash env. `claude-code-action` puts it there itself — its
   #     base-action/src/parse-sdk-options.ts spreads the whole `process.env`
   #     into the CLI subprocess, deleting only the OIDC request vars — and the
-  #     pinned v1.0.183 offers no per-step or first-class MCP env forwarding to
+  #     pinned v1.0.190 offers no per-step or first-class MCP env forwarding to
   #     move it. It is inference-scoped: worst case is inference-quota abuse,
   #     not repo or queue compromise, and any use lands in an auditable public
   #     comment. Re-check on the next action bump.
@@ -299,9 +299,12 @@ jobs:
     # its own MCP vars — "this step's env: block shadows the calling workflow's
     # job-level env vars … Set these in your workflow's job-level env: or via a
     # prior step that writes to $GITHUB_ENV". RE-VERIFIED for issue #1288, for
-    # #1711, and again on the bump to the version pinned below, v1.0.183
-    # (be7b93b1): its action.yml is byte-identical to the previously verified
-    # v1.0.179 (b76a0776), so there is still no per-step env passthrough and no
+    # #1711, on the v1.0.183 bump (be7b93b1, byte-identical to the previously
+    # verified v1.0.179 / b76a0776), and again on the bump to the version pinned
+    # below, v1.0.190 (5ef2e550): its action.yml differs from v1.0.183 in three
+    # places, none of them an input or an env channel — a new `conclusion`
+    # output, one input DESCRIPTION reworded, and `no-cache: true` on its
+    # setup-bun step. So there is still no per-step env passthrough and no
     # first-class MCP env input — upstream deprecated `mcp_config` in favour of
     # `claude_args: --mcp-config`, which takes a path or JSON, never env. So
     # anything the MCP server must read has to be job env — which is exactly why
@@ -334,10 +337,18 @@ jobs:
     #     broker script REQUIRES it rather than defaulting — a default would be
     #     a second source of truth that disagrees only on a live run, as a
     #     connection refused.
+    #   - SENTRY_MCP_SERVER_SPEC: the ONLY literal for the Sentry MCP server
+    #     package. The pre-flight probe step spawns it and the agent step's
+    #     --mcp-config interpolates it, so the two cannot address different
+    #     servers — a probe that passed against a version the agent does not run
+    #     would be worse than no probe. Bumping it re-derives the broker's path
+    #     allowlist AND the probe's REQUIRED_TOOLS; see
+    #     docs/notes/sentry-triage-pipeline.md.
     env:
       GH_TOKEN: ${{ github.token }}
       SENTRY_TRIAGE_COMMENT_ISSUE: ${{ matrix.issue }}
       SENTRY_MCP_BROKER_PORT: "9401"
+      SENTRY_MCP_SERVER_SPEC: "@sentry/mcp-server@0.37.0"
     steps:
       # SHA-pinned (not tags) so tag retargeting / a compromised release cannot
       # silently run new code. Bump via Dependabot (.github/dependabot.yml).
@@ -419,11 +430,12 @@ jobs:
           tools_dir="${RUNNER_TEMP}/sentry-triage-tools"
           mkdir -p "${tools_dir}"
           chmod 0755 "${tools_dir}"
-          # sentry-mcp-broker.mjs is NOT agent-executable (no grant names it) —
-          # it is staged because this job must execute nothing from the
-          # agent-writable checkout, and staging it keeps that true even if the
-          # broker step ever moves. Its own import closure is itself; the
-          # closure check lives in scripts/sentry/broker/sentry-mcp-broker.test.mjs.
+          # sentry-mcp-broker.mjs and sentry-mcp-probe.mjs are NOT
+          # agent-executable (no grant names either) — they are staged because
+          # this job must execute nothing from the agent-writable checkout, and
+          # staging them keeps that true even if their steps ever move. Each
+          # one's import closure is itself; both closure checks live in
+          # scripts/sentry/broker/sentry-mcp-broker.test.mjs.
           for f in \
             sentry-triage-agent-comment.mjs \
             sentry-triage-project-core.mjs \
@@ -433,6 +445,8 @@ jobs:
           done
           install -m 0444 "scripts/sentry/broker/sentry-mcp-broker.mjs" \
             "${tools_dir}/sentry-mcp-broker.mjs"
+          install -m 0444 "scripts/sentry/broker/sentry-mcp-probe.mjs" \
+            "${tools_dir}/sentry-mcp-probe.mjs"
           chmod 0555 "${tools_dir}"
 
           echo "Pinned write target: ${GITHUB_REPOSITORY}#${QUEUE_ISSUE_NUMBER}"
@@ -565,6 +579,44 @@ jobs:
           echo "SENTRY_MCP_BROKER_HANDLE=${handle}" >> "${GITHUB_ENV}"
           echo "Sentry credential broker listening on 127.0.0.1:$(cat "${ready_file}") (pid ${broker_pid})."
 
+      # -----------------------------------------------------------------------
+      # PRE-FLIGHT: prove the Sentry MCP toolset registers (issue #1938).
+      #
+      # THE FAIL-OPEN THIS CLOSES. claude-code-action spawns the Sentry MCP
+      # server itself, and when that spawn fails it initialises WITHOUT the
+      # server and prints nothing — no MCP error, no npm error, no exit notice.
+      # The agent then holds no `mcp__sentry__*` tool at all and, reasonably,
+      # reports that as its verdict; the `verdict` job cannot tell that comment
+      # apart from a judgement, so it labels the stub, strips
+      # `sentry:needs-triage` and parks it as human work. On 2026-08-19 that
+      # turned one silent startup stall into seven stubs carrying escalations
+      # nobody could act on.
+      #
+      # So the toolset is proven HERE, deterministically, before the agent
+      # starts: same pinned spec, same loopback broker, MCP handshake,
+      # `tools/list`, and the read-only Sentry tools required to be present.
+      # Failing this step fails the job while `sentry:needs-triage` is still on
+      # the stub, so the round ends the way a dead broker already ends — the
+      # `verdict` job finds no usable verdict, says so loudly, and the next run
+      # retries the stub. Fail-closed, and nothing to clean up afterwards.
+      #
+      # It must run BEFORE the agent, and not merely as a matter of taste: this
+      # job ENDS with the agent (see the job banner — $GITHUB_ENV injection is
+      # inert only because no step follows it, asserted by
+      # sentry-triage-agent-comment.test.mjs), so a post-hoc check is not
+      # available. It runs the IMMUTABLE staged copy for the same reason the
+      # broker does: the rule for this job is that it executes nothing from the
+      # agent-writable checkout, full stop.
+      #
+      # It also WARMS THE npx CACHE for the agent's own spawn moments later.
+      # That is deliberate: the stall this issue was found through is
+      # unexplained, and paying a cold fetch here — where the timeout is an
+      # honest job failure — beats paying it inside a startup window whose
+      # expiry is silent.
+      # -----------------------------------------------------------------------
+      - name: Verify the Sentry MCP toolset registers (trusted)
+        run: node "${RUNNER_TEMP}/sentry-triage-tools/sentry-mcp-probe.mjs"
+
       - name: Render triage prompt
         id: render
         env:
@@ -604,13 +656,16 @@ jobs:
           # search-tools/execute-tool meta-executor, and
           # analyze_issue_with_seer. Note that five names below
           # (get_issue_details, get_event_stacktrace, get_issue_tag_values,
-          # get_issue_activity, search_issue_events) do not exist at
-          # @sentry/mcp-server@0.37.0 — they are inert grants kept so a version
+          # get_issue_activity, search_issue_events) do not exist at the pinned
+          # SENTRY_MCP_SERVER_SPEC — they are inert grants kept so a version
           # bump that restores them does not silently lose the grant. The
-          # broker's path allowlist is derived from the five that DO exist
-          # (find_organizations, find_projects, search_issues, search_events,
-          # get_sentry_resource); re-derive it on a version bump, per
-          # docs/notes/sentry-triage-pipeline.md.
+          # broker's path allowlist and the pre-flight probe's REQUIRED_TOOLS
+          # are both derived from the five that DO exist (find_organizations,
+          # find_projects, search_issues, search_events, get_sentry_resource);
+          # re-derive both on a version bump, per
+          # docs/notes/sentry-triage-pipeline.md. The version itself is NOT
+          # restated here: it has one home, in job env, and a comment carrying a
+          # copy is how the v1.0.183 action claims above went stale.
           #
           # --setting-sources user: do NOT load the checked-out repo's
           # .claude/settings.json — its permissions.allow list (e.g. `node *`)
@@ -621,7 +676,7 @@ jobs:
             --model claude-sonnet-5
             --max-turns 50
             --setting-sources user
-            --mcp-config '{"mcpServers":{"sentry":{"command":"npx","args":["-y","@sentry/mcp-server@0.37.0","--host","127.0.0.1:${{ env.SENTRY_MCP_BROKER_PORT }}","--insecure-http"],"env":{"SENTRY_ACCESS_TOKEN":"${SENTRY_MCP_BROKER_HANDLE}"}}}}'
+            --mcp-config '{"mcpServers":{"sentry":{"command":"npx","args":["-y","${{ env.SENTRY_MCP_SERVER_SPEC }}","--host","127.0.0.1:${{ env.SENTRY_MCP_BROKER_PORT }}","--insecure-http"],"env":{"SENTRY_ACCESS_TOKEN":"${SENTRY_MCP_BROKER_HANDLE}"}}}}'
             --allowedTools 'Read,Grep,Glob,Bash(gh issue view:*),Bash(gh issue list:*),Bash(node ${{ runner.temp }}/sentry-triage-tools/sentry-triage-agent-comment.mjs:*),mcp__sentry__find_organizations,mcp__sentry__find_projects,mcp__sentry__get_issue_details,mcp__sentry__get_event_stacktrace,mcp__sentry__get_issue_tag_values,mcp__sentry__get_issue_activity,mcp__sentry__search_issues,mcp__sentry__search_events,mcp__sentry__search_issue_events,mcp__sentry__get_sentry_resource'
 
   # ---------------------------------------------------------------------------

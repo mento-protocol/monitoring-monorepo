@@ -120,15 +120,18 @@ configuration fix would change are the ones the guard rejects, and the rest
 
 Cases that are not a verdict:
 
-| Situation                                      | Handling                                                                                                                                                          |
-| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| The Sentry issue recurs after its stub closed  | Ingest reopens it when `lastSeen` is newer than `closedAt`, and it re-triages. This is the safety net under every close above                                     |
-| A human wants it archived in Sentry            | Only via the `sentry:approved-archive` label. Never automatic, for any verdict                                                                                    |
-| Sentry unreadable, or the turn budget runs out | The agent posts `needs-human` saying so, rather than failing silently                                                                                             |
-| No verdict, or one from a stale round          | The label step fails loudly and leaves `sentry:needs-triage` for the next run                                                                                     |
-| `SENTRY_PROJECTION_TOKEN` absent               | An external actionable verdict gets **neither routing nor an open escalation** — the stub closes with a skipped note and resurfaces only on regression. Known gap |
-| Filed on a weekend                             | Ingest runs daily; the triage agent runs weekdays only. A missing weekend verdict is not a defect                                                                 |
-| `sentry:candidate-noise`                       | Written by ingest from a title match and read by nothing today                                                                                                    |
+| Situation                                     | Handling                                                                                                                                                                                                                                |
+| --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The Sentry issue recurs after its stub closed | Ingest reopens it when `lastSeen` is newer than `closedAt`, and it re-triages. This is the safety net under every close above                                                                                                           |
+| A human wants it archived in Sentry           | Only via the `sentry:approved-archive` label. Never automatic, for any verdict                                                                                                                                                          |
+| The turn budget runs out                      | The agent posts `needs-human` saying so, rather than failing silently                                                                                                                                                                   |
+| The Sentry MCP toolset does not register      | The pre-flight probe fails the triage job before the agent starts, so `sentry:needs-triage` stays on and the next run retries. Losing the toolset mid-run is the one irrecoverable failure the agent must NOT post as a verdict (#1938) |
+| SOME Sentry reads fail, toolset present       | The agent triages on the evidence it did get and reflects the gap in `confidence`. A root cause it still cannot resolve is `needs-human` on the evidence, not on the tooling                                                            |
+| EVERY Sentry read fails, toolset present      | Same as losing the toolset: the agent posts nothing and stops, so the round fails closed and `sentry:needs-triage` stays on for retry. `.github/prompts/sentry-triage.md` states the two cases together                                 |
+| No verdict, or one from a stale round         | The label step fails loudly and leaves `sentry:needs-triage` for the next run                                                                                                                                                           |
+| `SENTRY_PROJECTION_TOKEN` absent              | An external actionable verdict gets **neither routing nor an open escalation** — the stub closes with a skipped note and resurfaces only on regression. Known gap                                                                       |
+| Filed on a weekend                            | Ingest runs daily; the triage agent runs weekdays only. A missing weekend verdict is not a defect                                                                                                                                       |
+| `sentry:candidate-noise`                      | Written by ingest from a title match and read by nothing today                                                                                                                                                                          |
 
 ## Non-negotiable invariants
 
@@ -573,8 +576,9 @@ read-only `sentry-triage-tools` directory under `$RUNNER_TEMP`, and the agent's
 `--allowedTools` grant names **that** path, never `scripts/`.
 `scripts/sentry/triage/sentry-triage-agent-comment.test.mjs` recomputes the closure from the
 source and fails if the staging list stops matching it, so the attack cannot
-move one file over. `scripts/sentry/broker/sentry-mcp-broker.mjs` is staged alongside it even
-though no grant names it: the rule for this job is that it executes nothing from
+move one file over. `scripts/sentry/broker/sentry-mcp-broker.mjs` and
+`scripts/sentry/broker/sentry-mcp-probe.mjs` are staged alongside it even though
+no grant names either: the rule for this job is that it executes nothing from
 the agent-writable checkout, and a rule with an ordering caveat is one refactor
 away from being wrong. The agent job's checkout also sets
 `persist-credentials: false`, matching the autofix agent job.
@@ -708,7 +712,58 @@ only five of the ten names in `--allowedTools` exist — `find_organizations`,
 `find_projects`, `search_issues`, `search_events`, `get_sentry_resource`; the
 other five are inert grants kept in case a bump restores them. A path the broker
 refuses fails the triage leg loudly with the path named in its log, so a stale
-allowlist is visible rather than silent.
+allowlist is visible rather than silent. The same bump re-derives
+`REQUIRED_TOOLS` in `scripts/sentry/broker/sentry-mcp-probe.mjs` (below), which names those
+same five. Both read the one pinned spec in the triage job's
+`env: SENTRY_MCP_SERVER_SPEC`; neither restates the version.
+
+### The MCP pre-flight probe
+
+The triage job proves the Sentry toolset registers **before** the agent starts,
+and fails the job when it does not (issue #1938).
+
+Without that check the pipeline fails OPEN, because the failure is silent.
+`claude-code-action` spawns the Sentry MCP server itself; when that spawn does
+not complete, the CLI initialises without it and prints nothing — no MCP error,
+no npm error, no subprocess exit notice reaches the job log. The agent then
+holds no `mcp__sentry__*` tool at all and reports that as a `needs-human`
+verdict, which the deterministic `verdict` job cannot tell apart from a
+judgement: it applies the label, strips `sentry:needs-triage`, and parks the
+stub as human work on a question nobody can answer. On 2026-08-19 one silent
+startup stall produced seven such stubs in a single run.
+
+So `scripts/sentry/broker/sentry-mcp-probe.mjs` runs between the broker step and the agent:
+it spawns the pinned server against the same loopback broker, performs the MCP
+handshake, calls `tools/list`, and requires the five real Sentry tools to be
+present. A failure ends the job while `sentry:needs-triage` is still on the
+stub, so the round settles the way a dead broker already settles it — the
+`verdict` job finds no usable verdict, fails loudly, and the next run retries.
+
+Three properties are load-bearing and each is pinned by a test in
+`scripts/sentry/broker/sentry-mcp-broker.test.mjs`, the suite that owns the probe:
+
+- **It runs before the agent**, and could not run after: this job must END with
+  the agent — a later step's bash would source a `$GITHUB_ENV`-injected
+  `BASH_ENV` payload before its own command — so there is no post-hoc step
+  available even in principle.
+- **It spawns the agent's own server, argument for argument.** A probe that
+  passed against a different spec, port or transport would certify a server
+  nobody runs, so both derive from the same job `env`.
+- **It warms the `npx` cache** for the agent's spawn moments later. The stall
+  this was found through — ~29.7s to CLI-ready against 6.8s on a run that
+  worked — is unexplained; paying a cold fetch in the probe, where a timeout is
+  an honest job failure, beats paying it inside a startup window whose expiry is
+  silent.
+
+`tools/list` is answered by the MCP server and reaches neither the broker nor
+Sentry, so a green probe proves the toolchain **resolves and registers** — not
+that the credential works. Broker readiness owns that, and an auth failure is
+already loud as failed agent reads rather than silent as an absent toolset.
+
+The agent-side half of the same rule lives in `.github/prompts/sentry-triage.md`
+and covers a toolset lost _after_ the probe passed: losing the evidence source
+is the one irrecoverable failure that must NOT be posted as a verdict. The agent
+stops without commenting, and the round fails closed.
 
 The deterministic parser accepts only comments from
 `github-actions[bot]`. After a regression reopen, it accepts only a verdict
