@@ -708,7 +708,7 @@ resource "grafana_rule_group" "fpmms_deviation" {
 #
 # Neither tier fires on the 2026-08 CHFm/USDm breach that motivated ADR 0067:
 # that pool bottomed at ~22% min side, above both bands. `Rebalancer Stale`
-# covered it, correctly. On the 18 live pools replayed for PR #1941 the
+# covered it, correctly. On the 18 live pools replayed for PR #1944 the
 # thinnest value side was 26% (Monad CHFm/USDm), so neither tier fires today.
 resource "grafana_rule_group" "fpmms_depletion" {
   name             = "Pool Depletion Risk"

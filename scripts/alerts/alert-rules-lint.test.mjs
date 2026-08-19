@@ -1850,7 +1850,7 @@ test("flap-prone criticals keep incidents open across short recoveries", () => {
 
 // A token-count share is the exchange rate, not depletion: a balanced
 // JPYm/USDm pool reads 0.4% / 99.6% by count and would page forever. PR #1940
-// shipped exactly that and was corrected in #1941 before the production apply.
+// shipped exactly that and was corrected in #1944 before the production apply.
 // These assertions pin the value-weighted input so the cheaper-looking gauge
 // cannot be swapped back in, and pin the annotation to the same numbers the
 // threshold used.

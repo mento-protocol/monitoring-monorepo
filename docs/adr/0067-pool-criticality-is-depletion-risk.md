@@ -59,7 +59,7 @@ inaction**, not when a ratio is large.
 
   PR #1940 shipped this reading the raw token-count gauges
   (`mento_pool_reserve_share_token{0,1}`) instead, which is wrong on any pair
-  that does not trade near parity; PR #1941 corrected it before the production
+  that does not trade near parity; PR #1944 corrected it before the production
   apply. See the reversed alternative below.
 
   The bands partition the range at the page share with no gap and no overlap,
@@ -69,8 +69,10 @@ inaction**, not when a ratio is large.
   because the held band keeps firing while the pool crosses into its
   neighbour — in both directions. The 15m dwell and the 10-percentage-point
   gap between the bands absorb churn instead. Neither rule is FX-weekend
-  gated: reserve share is on-chain balances, not an oracle-derived quantity,
-  so a market pause does not make the signal spurious.
+  gated: the quantity is on-chain balances weighted by the last median, and a
+  market pause does not make it spurious — a rate that stopped updating on
+  Friday still says whether the two legs are worth roughly the same. The
+  weekend is exactly when nobody is watching a pool drain.
 
 - **Page delivery uses one bundled contact point.** Every `service = "fpmms"`
   rule routes through rule-level `notification_settings`, which bypasses
@@ -135,7 +137,7 @@ inaction**, not when a ratio is large.
   dwell and band separation instead. The cost is accepted: a pool oscillating
   across a band boundary can produce a fire/resolve pair per dwell period.
 - **A new metrics-bridge gauge for side share** — rejected as unnecessary in
-  PR #1940, **reversed in PR #1941**. The existing per-token reserve-share
+  PR #1940, **reversed in PR #1944**. The existing per-token reserve-share
   gauges do carry a number at the right pool fingerprint, but it is a token
   count, and token counts on the two sides of an off-parity pair are not
   comparable quantities. The correct comparison needs each leg priced through
@@ -217,7 +219,7 @@ inaction**, not when a ratio is large.
   — Part 1, noise mechanics (`keep_firing_for`, 12h repeat, incident grouping).
 - PR [#1940](https://github.com/mento-protocol/monitoring-monorepo/pull/1940)
   — Part 2, the depletion rules, shipped reading token-count shares.
-- PR [#1941](https://github.com/mento-protocol/monitoring-monorepo/pull/1941)
+- PR [#1944](https://github.com/mento-protocol/monitoring-monorepo/pull/1944)
   — the value-weighting correction, with the 18-pool production replay. Each
   pool's value split reproduces the pool's own on-chain `priceDifference` to
   within 1 bps, which is what establishes the conversion is in the same frame
