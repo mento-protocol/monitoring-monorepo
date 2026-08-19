@@ -501,8 +501,14 @@ await test("a declared directory is copied whole, so an enumerating suite sees t
       "utf8",
     ),
   );
+  // Both suites walk scripts/ RECURSIVELY (ADR 0064 made it a tree), so the
+  // completeness this asserts is over the whole tree. Comparing only the flat
+  // top level would have gone on passing while each phase of the reorganization
+  // moved modules out of the compared set.
   const isTarget = (f) => f.endsWith(".mjs") && !f.endsWith(".test.mjs");
-  const onDisk = readdirSync(join(REAL_ROOT, "scripts")).filter(isTarget);
+  const onDisk = readdirSync(join(REAL_ROOT, "scripts"), {
+    recursive: true,
+  }).filter(isTarget);
   for (const suite of [
     "scripts/sentry/triage/sentry-triage-requeue.test.mjs",
     "scripts/sentry/triage/sentry-triage-brief.test.mjs",
@@ -514,13 +520,26 @@ await test("a declared directory is copied whole, so an enumerating suite sees t
     );
     const inputs = gateInputs(manifest, REAL_ROOT);
     const visible = inputs
-      .filter((p) => p.startsWith("scripts/") && !p.slice(8).includes("/"))
+      .filter((p) => p.startsWith("scripts/"))
       .map((p) => p.slice("scripts/".length))
       .filter(isTarget);
-    assertEqual(
-      visible.length,
-      onDisk.length,
-      `${suite} must see every non-test scripts/*.mjs, not a subset`,
+    // Compare the PATHS, not the counts. Equal totals prove nothing on their
+    // own: one stale entry still listed in the snapshot offsets one nested
+    // module missing from it, and the subset this exists to forbid passes with
+    // the arithmetic intact. Name both directions so a failure says which file.
+    const visibleSet = new Set(visible);
+    const onDiskSet = new Set(onDisk);
+    const missing = onDisk.filter((p) => !visibleSet.has(p)).sort();
+    const extra = visible.filter((p) => !onDiskSet.has(p)).sort();
+    assert(
+      missing.length === 0 && extra.length === 0,
+      `${suite} must see every non-test scripts/**/*.mjs, not a subset` +
+        (missing.length > 0
+          ? `; on disk but not visible: ${missing.join(", ")}`
+          : "") +
+        (extra.length > 0
+          ? `; visible but not on disk: ${extra.join(", ")}`
+          : ""),
     );
   }
 });

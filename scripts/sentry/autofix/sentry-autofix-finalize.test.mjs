@@ -137,7 +137,7 @@ await test("guard refuses forbidden prefixes and dependency/toolchain files", ()
   for (const path of [
     ".github/workflows/x.yml",
     "terraform/main.tf",
-    "scripts/deploy-indexer.sh",
+    "scripts/deploy/deploy-indexer.sh",
     "scripts/sentry/autofix/sentry-autofix-finalize.mjs",
     "scripts/anything.mjs",
     "patches/foo.patch",

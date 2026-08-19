@@ -53,7 +53,7 @@ resource "google_service_account_iam_member" "dev_appengine_default_service_acco
 }
 
 # cloudbuild.yaml pins `options.logging: CLOUD_LOGGING_ONLY` so both CI and
-# `scripts/deploy-bridge.sh` stream logs from Cloud Logging (not the default
+# `scripts/deploy/deploy-bridge.sh` stream logs from Cloud Logging (not the default
 # GCS log bucket). Devs need `logging.viewer` to read those streams — without
 # it, `pnpm bridge:deploy` runs the build but fails at log-stream time.
 # Mirrors the same role on `ci_deployer_roles`.

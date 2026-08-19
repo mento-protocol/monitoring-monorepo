@@ -188,20 +188,19 @@ await test("buildRegressedComment has exactly one call site: the chokepoint", ()
   // module directories) no longer sit flat at scripts/ top level, so a
   // non-recursive readdirSync of "wherever this test file lives" would
   // silently stop seeing exactly the files most likely to call this builder.
+  // This file itself sits two directories below scripts/, so scriptsDir walks
+  // up two levels rather than using its own directory directly.
   const scriptsDir = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
   const offenders = [];
   let scanned = 0;
-  for (const entry of readdirSync(scriptsDir, {
-    recursive: true,
-    withFileTypes: true,
-  })) {
-    if (!entry.isFile()) continue;
-    if (!entry.name.endsWith(".mjs")) continue;
-    if (entry.name.endsWith(".test.mjs")) continue; // tests pin the text, by design
-    if (entry.name === "sentry-triage-requeue.mjs") continue;
-    const relative = join(entry.parentPath, entry.name).slice(
-      scriptsDir.length + 1,
-    );
+  for (const relative of readdirSync(scriptsDir, { recursive: true })) {
+    if (!relative.endsWith(".mjs")) continue;
+    if (relative.endsWith(".test.mjs")) continue; // tests pin the text, by design
+    // Path-exact, not basename: a recursive walk yields `<subdir>/<name>`, so
+    // excluding by basename would skip a future `scripts/<subdir>/
+    // sentry-triage-requeue.mjs` — the second-owner case this test exists to
+    // catch. The flat entry is its own relative path, so this still matches it.
+    if (relative === "sentry-triage-requeue.mjs") continue;
     scanned += 1;
     const src = readFileSync(join(scriptsDir, relative), "utf8");
     // A bare re-export is not a call site.

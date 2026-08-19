@@ -2097,22 +2097,20 @@ await test("the brief leg is not a stub-body writer, and owns its marker alone",
     "sentry/triage/sentry-triage-brief.mjs",
     "sentry/triage/sentry-triage-brief-render.mjs",
   ]);
+  // Recursive: scripts/ is a tree now (ADR 0064), and a flat readdir would stop
+  // seeing each module the reorganization relocates while still reporting a
+  // pass. P14 moved the deploy leg into scripts/deploy/ and took this scan from
+  // 63 modules to 59 — under the floor below, which is the only reason it was
+  // noticed. The invariant is "no OTHER module carries this marker", so depth
+  // was never part of it.
   const scriptsDir = join(repoRoot, "scripts");
   const offenders = [];
   let scanned = 0;
-  // Recursive: the sentry family (and other module directories) no longer sit
-  // flat at scripts/ top level, so a non-recursive readdirSync would silently
-  // stop seeing exactly the files most likely to reference this marker.
-  for (const entry of readdirSync(scriptsDir, {
-    recursive: true,
-    withFileTypes: true,
-  })) {
-    if (!entry.isFile()) continue;
-    if (!entry.name.endsWith(".mjs") || entry.name.endsWith(".test.mjs"))
-      continue;
-    const relative = join(entry.parentPath, entry.name).slice(
-      scriptsDir.length + 1,
-    );
+  for (const relative of readdirSync(scriptsDir, { recursive: true })) {
+    if (!relative.endsWith(".mjs") || relative.endsWith(".test.mjs")) continue;
+    // Path-exact, not basename: the walk yields `<subdir>/<name>`, so matching
+    // on basename would exempt a future copy of either leg file living in a
+    // subdirectory — exactly the second-owner case this asserts against.
     if (briefLegFiles.has(relative)) continue;
     scanned += 1;
     const src = readFileSync(join(scriptsDir, relative), "utf8");

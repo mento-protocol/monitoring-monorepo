@@ -63,7 +63,7 @@ const EXPECTED_CALLSITES = [
     value: "gs://${GCP_PROJECT}-cloud-build-source/metrics-bridge",
   },
   {
-    filePath: "scripts/deploy-bridge.sh",
+    filePath: "scripts/deploy/deploy-bridge.sh",
     surface: "shell",
     kind: "builds-submit",
     flag: "gcs-source-staging-dir",
@@ -558,7 +558,7 @@ function validateCallsites(files, errors) {
 
   for (const filePath of [
     ".github/workflows/metrics-bridge.yml",
-    "scripts/deploy-bridge.sh",
+    "scripts/deploy/deploy-bridge.sh",
   ]) {
     const record = records.find(
       (candidate) =>
@@ -602,7 +602,7 @@ function validateCallsites(files, errors) {
     );
   }
 
-  const directDeployPath = "scripts/deploy-bridge.sh";
+  const directDeployPath = "scripts/deploy/deploy-bridge.sh";
   const directDeploy = requireSource(files, directDeployPath, errors);
   const normalizedDirectDeployLines = directDeploy
     .split("\n")

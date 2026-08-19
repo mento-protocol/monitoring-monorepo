@@ -1,6 +1,11 @@
 export const BOT_APPROVER = "chatgpt-codex-connector[bot]";
 const BOT_APPROVER_LOGIN = "chatgpt-codex-connector";
 const OPTIONAL_CHECK_NAMES = new Set([
+  // The "CodeRabbit" check context is advisory in the same way "Cursor Bugbot"
+  // is, and weaker: it PASSES when the review was rate-limited and never ran
+  // (ADR 0066). Report its lag, never await it, and never read a pass on it as
+  // a readiness signal — the ledger reads CodeRabbit's inline findings instead.
+  "CodeRabbit",
   "Core Web Vitals + accessibility (ui-dashboard)",
   "Cursor Bugbot",
   "GraphQL schema diff",

@@ -153,7 +153,7 @@ if [[ "$ERRORS_ONLY" == "true" ]]; then
 fi
 
 DEPLOYMENTS_JSON=$(pnpm exec envio-cloud indexer get "$ENVIO_INDEXER" "$ENVIO_ORG" -o json)
-COMMIT=$(printf '%s' "$DEPLOYMENTS_JSON" | node scripts/resolve-envio-deployment.mjs "$COMMIT")
+COMMIT=$(printf '%s' "$DEPLOYMENTS_JSON" | node scripts/deploy/resolve-envio-deployment.mjs "$COMMIT")
 
 if [[ -z "$COMMIT" ]]; then
   echo "❌ Deployment not found for $ENVIO_ORG/$ENVIO_INDEXER"
@@ -173,7 +173,7 @@ fi
 # provider does not expose a way to retrieve the rest of the requested window.
 if [[ "$ERRORS_ONLY" == "true" ]]; then
   pnpm exec envio-cloud deployment logs "$ENVIO_INDEXER" "$COMMIT" "$ENVIO_ORG" "${ARGS[@]}" |
-    node scripts/filter-envio-runtime-errors.mjs
+    node scripts/deploy/filter-envio-runtime-errors.mjs
 else
   pnpm exec envio-cloud deployment logs "$ENVIO_INDEXER" "$COMMIT" "$ENVIO_ORG" "${ARGS[@]}"
 fi

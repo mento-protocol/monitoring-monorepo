@@ -53,7 +53,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 COMMIT=$(pnpm exec envio-cloud indexer get "$ENVIO_INDEXER" "$ENVIO_ORG" -o json \
-  | node scripts/resolve-envio-deployment.mjs "$COMMIT")
+  | node scripts/deploy/resolve-envio-deployment.mjs "$COMMIT")
 
 if [[ -z "$COMMIT" ]]; then
   echo "Deployment not found for $ENVIO_ORG/$ENVIO_INDEXER"

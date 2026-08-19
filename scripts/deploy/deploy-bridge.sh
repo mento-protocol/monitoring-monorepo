@@ -56,7 +56,7 @@ if [ "$SKIP_CONFIRM" = true ]; then
 fi
 
 # shellcheck source=scripts/lib/deploy-guard.sh
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/deploy-guard.sh"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/deploy-guard.sh"
 
 # Anchor all subsequent terraform/gcloud mutations to the guarded repo root so
 # the guard and the deploy operate on the same checkout regardless of caller CWD.

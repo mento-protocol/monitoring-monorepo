@@ -563,7 +563,7 @@ variable "grafana_agent_secret_rotation_counters" {
 }
 
 variable "metrics_bridge_image" {
-  description = "Bootstrap image used only when the Cloud Run service is first created. After bootstrap, image rollouts happen out-of-band via `gcloud run services update` (see scripts/deploy-bridge.sh + the GitHub workflow) — terraform ignores image drift via `lifecycle.ignore_changes`. Pinned by digest so bootstrap behavior is deterministic across environments; `gcr.io/cloudrun/hello`'s `http.HandleFunc(\"/\", …)` catch-all handles the `/health` probe."
+  description = "Bootstrap image used only when the Cloud Run service is first created. After bootstrap, image rollouts happen out-of-band via `gcloud run services update` (see scripts/deploy/deploy-bridge.sh + the GitHub workflow) — terraform ignores image drift via `lifecycle.ignore_changes`. Pinned by digest so bootstrap behavior is deterministic across environments; `gcr.io/cloudrun/hello`'s `http.HandleFunc(\"/\", …)` catch-all handles the `/health` probe."
   type        = string
   default     = "gcr.io/cloudrun/hello@sha256:572cdac9c931d84f01557f445ad5e980f6f23860c9bb18af02f2d5ca0b3b101e"
 

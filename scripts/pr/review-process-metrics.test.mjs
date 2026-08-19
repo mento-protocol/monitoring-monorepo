@@ -73,6 +73,39 @@ test("identifies review bots and finding-like review text", () => {
   assert.equal(isFindingLikeText("Codex Review: no major issues"), false);
 });
 
+test("counts CodeRabbit as a review bot without moving the other bots", () => {
+  // ADR 0066. The OLD path is asserted in the same test so a roster edit that
+  // displaced Cursor, Codex, or Claude would fail here.
+  assert.equal(isReviewBotLogin("coderabbitai[bot]"), true);
+  assert.equal(isReviewBotLogin("coderabbitai"), true);
+  assert.equal(isReviewBotLogin("cursor[bot]"), true);
+  assert.equal(isReviewBotLogin("claude[bot]"), true);
+  assert.equal(isReviewBotLogin("chatgpt-codex-connector[bot]"), true);
+  assert.equal(isReviewBotLogin("chapati23"), false);
+  // CodeRabbit is not Codex and not Claude; the per-bot detectors stay narrow.
+  assert.equal(isCodexBotLogin("coderabbitai[bot]"), false);
+  assert.equal(isClaudeBotLogin("coderabbitai[bot]"), false);
+});
+
+test("counts CodeRabbit findings as finding-like text", () => {
+  assert.equal(
+    isFindingLikeText("<!-- cr-indicator-types:potential_issue -->"),
+    true,
+  );
+  assert.equal(
+    isFindingLikeText(
+      "_🎯 Functional Correctness_ | _🟠 Major_ | _🏗️ Heavy lift_",
+    ),
+    true,
+  );
+  assert.equal(isFindingLikeText("_🟡 Minor_"), true);
+  // Negative control: CodeRabbit machinery carries neither marker.
+  assert.equal(isFindingLikeText("## Review limit reached"), false);
+  // OLD path: the Cursor marker and priority badges still count.
+  assert.equal(isFindingLikeText("<!-- BUGBOT_BUG_ID: example -->"), true);
+  assert.equal(isFindingLikeText("[P2] Missing branch coverage"), true);
+});
+
 test("identifies review-summary detector text", () => {
   assert.equal(isClaudeSummary("Claude finished @chapati23's task"), true);
   assert.equal(isClaudeSummary("### PR Review — LGTM"), true);

@@ -27,6 +27,51 @@ The direct helper and prepared-bundle adapter enforce one cumulative input
 budget while capturing diffs, untracked files, checklists, and feedback, before
 those bytes can accumulate in memory or staging sidecars.
 
+Every Git invocation pins `-c diff.renames=false`, so no capture inherits a
+rename policy from operator configuration and each one states its own. The patch
+and stat captures pass `--find-renames` at Git's default similarity floor, which
+overrides that pin: a branch that relocates many files otherwise bundles as
+delete+add pairs and exhausts the budget before analysis runs, and a stat that
+disagreed with the patch it indexes would misreport the change. Content is
+elided only at similarity index 100%, and rename detection pairs an added path
+only with a deleted one, so a header can never stand in for content the change
+introduces. A relocation carrying edits emits its hunks, which are bundled,
+chunked, and scanned like any other change; a relocated binary is reviewable
+only while it is byte-identical, and one that also changes still fails closed.
+Those captures also own the rename candidate limit as `-l5000`, because the
+reviewed repository's own config can still set `diff.renameLimit`, and a move
+that changes a basename and edits the file needs the exhaustive pass Git skips
+past its default candidate count. The pin stays finite because that pass runs
+before any byte reaches the capture limiter, so no output bound can cut it
+short. What bounds it is the gate Git applies: the exhaustive pass is skipped
+once the number of unpaired sources multiplied by the number of unpaired
+destinations exceeds the square of the limit. `-l5000` therefore authorizes at
+most 25,000,000 pair comparisons, whatever the reviewed change looks like.
+Past that product Git says on stderr that detection was skipped and these
+captures fall back to delete+add pairs, rather than stalling. Those pairs still
+review correctly; a large enough one fails on the capture budget with its own
+message.
+
+This repository declares no minimum Git version, and the default the pin
+replaces has moved: `diff.renameLimit` documents 400 in older Git and 1,000
+today. Nothing here depends on which one a host ships, because the pin overrides
+both — an explicit `-l` wins over the config and over the built-in default, and
+5,000 is above either. The bound above was validated against Git 2.54.0, where
+2,000 symmetric candidates pair under `-l5000` and are skipped without it. As
+one machine-specific observation rather than a guarantee: on that host, 5,000
+symmetric candidates of 50 KB blobs took about 74 seconds at the product
+ceiling, against 272 MB of restated diff with detection off. Elapsed time
+depends on hardware and blob size; the comparison count does not.
+
+The changed-path captures keep the pin, so both sides of a move stay enumerated
+for the sensitive-path refusal and checklist routing. The scope baseline splits
+the difference on purpose: its changed-file count comes from that rename-blind
+enumeration and counts both sides of a move, while its non-test line count is
+rename-aware, so the prompt states how many paths a change touches beside how
+many lines it actually changes. Rename detection works within one diff, so a
+move whose two sides are split across commits has no pair to find: review that
+branch in branch mode, where both sides sit in the same diff.
+
 For a real review, the helper resolves a symbolic branch base or commit target
 once to an immutable object ID. Direct `--dry-run` instead reports the requested
 ref without resolving or freezing it. Source fingerprints cover the symbolic

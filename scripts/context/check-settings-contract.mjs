@@ -116,8 +116,15 @@ const allowedClaudeBashPermissions = new Set([
 // would route a package-local script permission into the generic branch.
 const bashScriptPermission =
   /^Bash\(bash\s+(?:\.\/)?(?:[\w.-]+\/)?scripts\/[^)]*\)$/;
+// `deploy[-/]` covers both layouts: the flat wrappers and the `scripts/deploy/`
+// directory they moved into. Anchored on `deploy-` alone, a permission naming a
+// moved wrapper stops matching here and falls to the generic `scripts/` branch
+// below. It still fails — both branches call fail() — so this is a diagnostic
+// loss, not a bypass: the reader is told "unexpected bash scripts allow" and has
+// to work out for themselves that the entry is a deploy wrapper, which is the
+// one fact that makes it unreviewable rather than merely unreviewed.
 const bashDeployScriptPermission =
-  /^Bash\(bash\s+(?:\.\/)?(?:[\w.-]+\/)?scripts\/deploy-[^)]*\)$/;
+  /^Bash\(bash\s+(?:\.\/)?(?:[\w.-]+\/)?scripts\/deploy[-/][^)]*\)$/;
 
 function isClaudeBashScriptPermission(permission) {
   return bashScriptPermission.test(permission);

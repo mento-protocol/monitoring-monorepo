@@ -17,16 +17,17 @@ garden_lane: agent-entry-points
 ## Scope
 
 `scripts/` holds deploy wrappers, agent quality gates, code-health checks, and
-repo maintenance utilities. 53 files sit flat at the top level today.
+repo maintenance utilities. 38 files sit flat at the top level today.
 
 ## Layout
 
 [ADR 0064](../docs/adr/0064-scripts-module-directories.md) governs
-subdirectories here and links the reorganization issue; phases P1–P14 have all
+subdirectories here and links the reorganization issue; phases P1–P15 have all
 landed.
 
 | Directory       | Holds                                  |
 | --------------- | -------------------------------------- |
+| `deploy/`       | deploy wrappers and their Node helpers |
 | `workflows/`    | scripts backing Actions workflow jobs  |
 | `bootstrap/`    | container and hosted-session setup     |
 | `context/`      | agent context, budget, doc catalog     |
@@ -44,9 +45,7 @@ landed.
 `production-infra-identity-contract/` predate the reorganization. `setup.sh`
 stays flat: `.config/wt.toml` runs that exact path as the Worktrunk pre-start
 hook, and eight docs name it. `redrive-onchain-deadletter.{mjs,test.mjs}` stays
-flat although `alerts/infra/` owns it: `eslint.config.mjs` ignores `alerts/**`,
-so moving it there drops it out of `lint:scripts`. That ignore is
-config-relative; `scripts/alerts/**` stays linted.
+flat although `alerts/infra/` owns it; ADR 0064 has the lint reason.
 
 `lib/` holds cores more than one cluster reads. `hcl.mjs` (Terraform HCL
 tokenizer and block extraction), `workflow-yaml.mjs` (Actions workflow and

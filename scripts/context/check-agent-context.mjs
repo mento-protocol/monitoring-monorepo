@@ -332,7 +332,7 @@ if (
   );
 }
 
-const bridgeDeploy = readRequired("scripts/deploy-bridge.sh");
+const bridgeDeploy = readRequired("scripts/deploy/deploy-bridge.sh");
 if (
   bridgeDeploy &&
   !hasExecutableLine(
@@ -341,7 +341,7 @@ if (
   )
 ) {
   fail(
-    "scripts/deploy-bridge.sh: expected Cloud Run revision suffix to use r-${TAG}-$(date +%s)",
+    "scripts/deploy/deploy-bridge.sh: expected Cloud Run revision suffix to use r-${TAG}-$(date +%s)",
   );
 }
 

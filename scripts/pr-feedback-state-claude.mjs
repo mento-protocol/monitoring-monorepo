@@ -28,8 +28,11 @@ const EXPLICIT_ACTION_LINE =
   /^(?:\*\*)?(?:Action\s+(?:items?|required)|Changes\s+requested|Needs\s+changes|A\s+fix\s+is\s+required|.{1,160}\s+must\s+be\s+(?:addressed|changed|fixed|implemented|removed|restored|updated|validated)|(?:Please\s+)?(?:add|address|change|ensure|fix|implement|prevent|remove|restore|update|validate)|(?:Must|Should|Needs?\s+to)\s+(?:add|address|change|ensure|fix|implement|prevent|remove|restore|update|validate))\b/i;
 const INLINE_DIRECT_ACTION =
   /\bplease\s+(?:add|address|change|ensure|fix|implement|prevent|remove|restore|update|validate)\b/i;
+// `cr-indicator-types` is CodeRabbit's finding marker and the counterpart to
+// Cursor's BUGBOT_BUG_ID: a Claude LGTM verdict that quotes or relays one is
+// not an explicitly clean review.
 const EXPLICIT_SEVERITY =
-  /(?:BUGBOT_BUG_ID|\b(?:Critical|High|Medium|Low)\s+Severity\b|\bSeverity\s*:\s*(?:Critical|High|Medium|Low)\b)/i;
+  /(?:BUGBOT_BUG_ID|<!--\s*cr-indicator-types\s*:|\b(?:Critical|High|Medium|Low)\s+Severity\b|\bSeverity\s*:\s*(?:Critical|High|Medium|Low)\b)/i;
 const CLEAN_REVIEW_COMPATIBILITY = new Map([
   [
     "039923882eee9f880165543ef85e1ca251d84b995a78647b41c2b788d02a4885",

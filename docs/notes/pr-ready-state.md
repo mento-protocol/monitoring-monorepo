@@ -93,6 +93,21 @@ separate advisory state: report it in the readiness output, but do not hold the
 all-clear on it unless the Cursor check or review is required by branch
 protection.
 
+CodeRabbit's `CodeRabbit` check context (ADR 0066) is advisory the same way,
+with one added trap: it reports `SUCCESS` even when no review ran. A
+rate-limited push gets a PR comment carrying
+`<!-- This is an auto-generated comment: rate limited by coderabbit.ai -->`
+and the check still passes. A passing `CodeRabbit` check alongside a
+current-head rate-limit comment means "no review ran," not "reviewed and
+clean" — read the comment, not the check conclusion, and rerun
+`pr:feedback-state` once a later push clears the rate limit.
+`.coderabbit.yaml` leaves `request_changes_workflow` at its `false` default,
+so CodeRabbit does not submit a GitHub `CHANGES_REQUESTED` review today. If
+that setting is ever turned on, a `CHANGES_REQUESTED` review does not clear
+itself on a later clean push and needs the same manual fix as any other
+stuck bot review verdict: dismiss it with
+`gh api repos/<owner>/<repo>/pulls/<pr>/reviews/<review_id>/dismissals -X PUT -f message='<why>' -f event=DISMISS`.
+
 Some non-required workflows still post feedback that becomes a repo-policy
 blocker after the required status surface is green. Their workflow status stays
 optional, but inline threads, unreplied review comments, and actionable
