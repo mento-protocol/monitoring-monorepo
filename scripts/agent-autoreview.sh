@@ -5968,7 +5968,15 @@ run_capture_with_deadline() {
   local child
   local watchdog
   local status
+  local saved_signal_traps
   local had_monitor=0
+  # Unlike run_with_deadline, this runs in the wrapper's own shell, so `trap -`
+  # alone would leave every later stage without whatever INT/TERM handling the
+  # caller had. Snapshot the caller's disposition and put it back on every exit
+  # path, including the re-raise, so the signal still reaches that handler.
+  # `trap -p` reports the caller's traps through a command substitution, and an
+  # absent trap snapshots as an empty string that evaluates to nothing.
+  saved_signal_traps="$(trap -p INT TERM)"
   case "$-" in
     *m*) had_monitor=1 ;;
   esac
@@ -5995,8 +6003,8 @@ run_capture_with_deadline() {
   # this function bounds, and the watchdog would otherwise outlive it holding a
   # full-deadline sleep. Re-raise afterward so the interrupted script still dies
   # with the expected signal semantics.
-  trap 'kill -KILL "-$watchdog" 2>/dev/null || kill -KILL "$watchdog" 2>/dev/null || true; kill -TERM "-$child" 2>/dev/null || kill -TERM "$child" 2>/dev/null || true; sleep 1; kill -KILL "-$child" 2>/dev/null || kill -KILL "$child" 2>/dev/null || true; wait "$child" 2>/dev/null || true; rm -f "$timeout_file" "$status_file"; trap - INT TERM; kill -s TERM "$$"' TERM
-  trap 'kill -KILL "-$watchdog" 2>/dev/null || kill -KILL "$watchdog" 2>/dev/null || true; kill -TERM "-$child" 2>/dev/null || kill -TERM "$child" 2>/dev/null || true; sleep 1; kill -KILL "-$child" 2>/dev/null || kill -KILL "$child" 2>/dev/null || true; wait "$child" 2>/dev/null || true; rm -f "$timeout_file" "$status_file"; trap - INT TERM; kill -s INT "$$"' INT
+  trap 'kill -KILL "-$watchdog" 2>/dev/null || kill -KILL "$watchdog" 2>/dev/null || true; kill -TERM "-$child" 2>/dev/null || kill -TERM "$child" 2>/dev/null || true; sleep 1; kill -KILL "-$child" 2>/dev/null || kill -KILL "$child" 2>/dev/null || true; wait "$child" 2>/dev/null || true; rm -f "$timeout_file" "$status_file"; trap - INT TERM; eval "$saved_signal_traps"; kill -s TERM "$$"' TERM
+  trap 'kill -KILL "-$watchdog" 2>/dev/null || kill -KILL "$watchdog" 2>/dev/null || true; kill -TERM "-$child" 2>/dev/null || kill -TERM "$child" 2>/dev/null || true; sleep 1; kill -KILL "-$child" 2>/dev/null || kill -KILL "$child" 2>/dev/null || true; wait "$child" 2>/dev/null || true; rm -f "$timeout_file" "$status_file"; trap - INT TERM; eval "$saved_signal_traps"; kill -s INT "$$"' INT
   if wait "$child" 2>/dev/null; then
     status=0
   else
@@ -6014,6 +6022,7 @@ run_capture_with_deadline() {
     wait "$watchdog" 2>/dev/null || true
   fi
   trap - INT TERM
+  eval "$saved_signal_traps"
   return "$status"
 }
 
