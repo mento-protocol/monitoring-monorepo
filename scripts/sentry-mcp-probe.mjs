@@ -52,6 +52,7 @@
  */
 
 import { spawn } from "node:child_process";
+import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 /**
@@ -318,11 +319,29 @@ export function encodeAnnotation(message) {
     .replaceAll("\n", "%0A");
 }
 
-/** True when this module is the process entry point (not an import). */
+/**
+ * True when this module is the process entry point (not an import).
+ *
+ * Compares REAL paths, the same way `sentry-mcp-broker.mjs` does and for a
+ * sharper reason. The workflow runs this from a staged copy under
+ * `$RUNNER_TEMP`, and on any host where that temp root is a symlink the string
+ * node is invoked with and the one `import.meta.url` resolves to differ. A raw
+ * compare then says "not the entry point", node exits 0 having run nothing —
+ * and for THIS module that is a silent pass: the probe reports success without
+ * probing, and the agent starts unguarded. The failure it exists to catch would
+ * sail straight through the check meant to catch it.
+ */
 export function isEntryPoint(argv1, moduleUrl) {
   if (!argv1) return false;
+  const resolve = (value) => {
+    try {
+      return realpathSync(value);
+    } catch {
+      return value;
+    }
+  };
   try {
-    return argv1 === fileURLToPath(moduleUrl);
+    return resolve(argv1) === resolve(fileURLToPath(moduleUrl));
   } catch {
     return false;
   }

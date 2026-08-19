@@ -3589,6 +3589,12 @@ while IFS= read -r path; do
           # renderer consumes (#1748); dropping one here would leave the brief
           # silently half-empty in production.
           add_command "pnpm sentry:brief:test" "Sentry triage prompt changed"
+          # The broker suite pins the OTHER load-bearing prompt rule: losing the
+          # Sentry toolset posts nothing rather than a verdict (#1938). It lives
+          # there because it is the agent-side half of the pre-flight probe, so
+          # a prompt-only edit must run it too or the rule can be dropped with
+          # nothing red.
+          add_command "pnpm sentry:broker:test" "Sentry triage prompt changed"
           ;;
       esac
       ;;

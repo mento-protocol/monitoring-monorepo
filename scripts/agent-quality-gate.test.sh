@@ -4372,6 +4372,9 @@ assert_contains "- pnpm sentry:brief:test (Sentry needs-human brief helper chang
 
 run_gate ".github/prompts/sentry-triage.md"
 assert_contains "- pnpm sentry:brief:test (Sentry triage prompt changed)"
+# The broker suite pins the prompt's "losing the toolset posts nothing" rule
+# (#1938); without this route a prompt-only edit could drop it with nothing red.
+assert_contains "- pnpm sentry:broker:test (Sentry triage prompt changed)"
 
 run_gate "docs/notes/sentry-triage-pipeline.md"
 assert_contains "- pnpm sentry:brief:test (Sentry verdict contract note changed)"

@@ -45,6 +45,7 @@ import {
   REQUIRED_TOOLS,
   drainMessages,
   encodeAnnotation,
+  isEntryPoint as probeIsEntryPoint,
   missingTools,
   probeSentryToolset,
   resolveProbeConfig,
@@ -1447,6 +1448,39 @@ test("an annotation reason survives its newlines", () => {
   // `%` first, or the escapes introduced above would be double-encoded.
   assert.equal(encodeAnnotation("100%\ndone"), "100%25%0Adone");
   assert.equal(encodeAnnotation(undefined), "");
+});
+
+test("the probe's entry-point check survives a symlinked staging path", async () => {
+  // Sharper here than for the broker. The workflow runs the probe from a staged
+  // copy under `$RUNNER_TEMP`; where that root is a symlink, a raw string
+  // compare says "not the entry point", node exits 0 having probed nothing, and
+  // the STEP GOES GREEN — so the agent starts unguarded and the fail-open this
+  // whole PR closes walks through the check that was meant to close it.
+  const { mkdtempSync, mkdirSync, copyFileSync, symlinkSync } =
+    await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const here = dirname(fileURLToPath(import.meta.url));
+
+  const root = mkdtempSync(join(tmpdir(), "probe-entry-"));
+  const real = join(root, "real");
+  mkdirSync(real);
+  const staged = join(real, "sentry-mcp-probe.mjs");
+  copyFileSync(join(here, "sentry-mcp-probe.mjs"), staged);
+  const linked = join(root, "linked");
+  symlinkSync(real, linked);
+
+  assert.equal(probeIsEntryPoint(staged, `file://${staged}`), true);
+  assert.equal(
+    probeIsEntryPoint(join(linked, "sentry-mcp-probe.mjs"), `file://${staged}`),
+    true,
+    "a symlinked staging path must still count as the entry point",
+  );
+  assert.equal(probeIsEntryPoint("", `file://${staged}`), false);
+  assert.equal(
+    probeIsEntryPoint(join(real, "other.mjs"), `file://${staged}`),
+    false,
+    "a different file must not count as the entry point",
+  );
 });
 
 test("the probe stays under the 600-line soft cap", () => {
