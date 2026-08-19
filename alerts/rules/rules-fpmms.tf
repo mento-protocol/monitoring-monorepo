@@ -9,13 +9,21 @@
 # `no_data_state = "OK"` on every rule: absence of data shouldn't fire here,
 # that's what the separate metrics-bridge rule group is for.
 #
-# DEVIATION THRESHOLDS — the bare `1.01` (warn) and `1.05` (critical) literals
-# in this file plus the PromQL literals in main.tf mirror the TS canonical
-# source at `shared-config/src/thresholds.ts` (`DEVIATION_TOLERANCE_RATIO` /
-# `DEVIATION_CRITICAL_RATIO`). HCL can't import TS, so any threshold change is a
-# coordinated edit across packages: bump the TS constants, then mirror them in
+# ALERT THRESHOLD MIRRORS — the bare `1.01` (deviation tolerance), `0.2` (pool
+# depletion critical side share) and `0.1` (pool depletion page side share)
+# literals in this file, plus the depletion literal in main.tf, mirror the TS
+# canonical source at `shared-config/src/thresholds.ts`
+# (`DEVIATION_TOLERANCE_RATIO`, `POOL_DEPLETION_CRITICAL_SHARE`,
+# `POOL_DEPLETION_PAGE_SHARE`). HCL can't import TS, so any threshold change is
+# a coordinated edit across packages: bump the TS constants, then mirror them in
 # Terraform. `scripts/alerts/check-deviation-threshold-drift.mjs` enforces that
 # mirror.
+#
+# `DEVIATION_CRITICAL_RATIO` (1.05) is deliberately NOT mirrored here any more.
+# It stays the analytics classification that drives dashboard badges,
+# breach-history bucketing, the indexer's persisted `criticalDurationSeconds`,
+# and metrics-bridge probe eligibility — but since ADR 0067 no Grafana rule
+# pages on it.
 
 # ── Oracle liveness ──────────────────────────────────────────────────────────
 resource "grafana_rule_group" "fpmms_oracle" {
@@ -680,60 +688,61 @@ resource "grafana_rule_group" "fpmms_deviation" {
       repeat_interval = local.notify_warning_pools_pool.repeat_interval
     }
   }
+}
 
-  # `for = "1m"`: the threshold is already "breach age > 1h", so this does
-  # NOT add a duration requirement to whether the breach itself counts as
-  # critical. It just smooths transient NoData blips from the Mimir ruler:
-  # after the 2026-04-28 incident where a missing series in the annotation
-  # query set propagated NoData and reset alert state to Normal between
-  # eval cycles (despite manual `/api/v1/eval` returning Alerting), a 1m
-  # grace prevents single-eval glitches from undoing an otherwise stable
-  # firing state. Same rationale on the anchored rule below.
+# ── Pool depletion risk ──────────────────────────────────────────────────────
+#
+# The pageable failure on an oracle-priced FPMM is a side running dry, not a
+# wide reserve ratio. Both tiers read `min(side share)` from the same
+# reserve-share gauges the deviation annotations render; see main.tf for the
+# expression, the deliberate absence of FX-weekend gating, and why the two
+# bands are mutually exclusive.
+#
+#   critical — min side share in [10%, 20%), sustained 15m. Bandwidth on the
+#              thin side is thin enough that ordinary size starts failing, but
+#              the pool still serves both directions.
+#   page     — min side share < 10%. The pool is effectively one-sided;
+#              swappers lose one direction outright once it empties.
+#
+# Neither tier fires on the 2026-08 CHFm/USDm breach that motivated ADR 0067:
+# that pool bottomed at ~22% min side, above both bands. `Rebalancer Stale`
+# covered it, correctly.
+resource "grafana_rule_group" "fpmms_depletion" {
+  name             = "Pool Depletion Risk"
+  folder_uid       = grafana_folder.fpmms.uid
+  interval_seconds = 60
+
+  # NEITHER depletion rule carries `keep_firing_for`, unlike every other
+  # flap-prone pool critical in this file. A hold is what makes two adjacent
+  # bands double-notify: hold the critical and a pool crossing down into the
+  # page band pages while the critical is still held open; hold the page and a
+  # pool recovering up into the critical band fires the critical while the page
+  # is still held. There is no hold placement that survives both crossings, and
+  # single notification per depleting pool is the property this design is for.
+  #
+  # What absorbs churn instead: the 15m dwell on the critical tier, and the
+  # 10-percentage-point gap between the bands — a pool has to move a long way
+  # in side share to change tier, unlike a deviation ratio that re-derives on
+  # every oracle update.
   rule {
-    name      = "Deviation Breach Critical"
+    name      = "Pool Depletion Risk"
     condition = "threshold"
-    for       = "1m"
-    # `keep_firing_for = "1h"`: `for = "1m"` smooths a single-eval glitch, but a
-    # breached pool still churned through 23 Pending→Alerting transitions in two
-    # weeks (four inside 27 minutes), and every transition re-notifies
-    # #alerts-critical. Holding the incident open across short healthy dips
-    # collapses that churn into one alert lifecycle. Same rationale as
-    # rules-trading-modes.tf.
-    keep_firing_for = "1h"
-    exec_err_state  = "Error"
-    no_data_state   = "OK"
+    # 15m: reserve share swings on every swap, and a single large trade that
+    # briefly parks the pool at 18% is not an incident. Sustained thinness is.
+    for            = "15m"
+    exec_err_state = "Error"
+    no_data_state  = "OK"
 
     annotations = {
-      summary          = local.deviation_critical_summary_annotation
-      resolved_title   = "Deviation Breach Alert Stopped"
-      resolved_summary = local.deviation_resolved_summary_annotation
-      # Pre-rendered "17% axlUSDC / 83% USDm". Reads pre-scaled
-      # percentage values from R0/R1 and the per-series `token_symbol`
-      # label written by metrics-bridge. No sprig — map access via
-      # `.Labels.token_symbol` is a Go-template builtin.
-      # When metrics-bridge can't resolve a contract address it falls
-      # back to literal "token0" / "token1" (matches the existing `pair`
-      # fallback semantics).
+      summary     = local.pool_depletion_summary_annotation
+      description = "The thin side of the pool no longer has the depth to serve normal swap size. Check whether the rebalancer is acting (`Rebalancer Stale`) and whether the Reserve has bandwidth to fund the short leg."
+      # Deliberately not "recovered": this alert also stops when the pool gets
+      # WORSE and crosses down into the `Pool Nearly One-Sided` band, so the
+      # copy must not claim an improvement it cannot see. Same reason the
+      # deviation rules use a neutral "Alert Stopped" resolution.
+      resolved_title   = "Pool Depletion Alert Stopped"
+      resolved_summary = "Either the thin side recovered above the depletion floor, or the pool crossed into the one-sided page band — check the reserves line."
       current_reserves = local.deviation_current_reserves_annotation
-      # Rebalance reason annotation, sourced from the metrics-bridge probe
-      # (`mento_pool_rebalance_blocked`) for the bounded Solidity-error
-      # reason and from Aegis (USDC/USDT/axlUSDC `_balanceOf`) for the
-      # live reserve balance. The probe runs every Nth Hasura poll for
-      # pools matching this rule's gate, so the rebalance_blocked label
-      # set carries the same `chain_id`/`pool_id`/`pair` identity as the
-      # alert. Rendered in the Slack body via
-      # `{{ if .Annotations.rebalance_reason }}` — see contact-points.tf.
-      # When the probe hasn't run yet or the RPC failed, the rebalance_
-      # blocked gauge is absent and this annotation expands to empty
-      # string, which the template suppresses.
-      #
-      # `$labels` in a Grafana alert annotation only exposes labels from
-      # the firing series (query A — the breach gauge). Query B's labels
-      # (`reason_code` / `reason_message`) live on its own series and are
-      # accessible via `$values.B.Labels.*`. The Aegis reserve-balance
-      # queries return ALL series (Aegis label set differs from
-      # `mento_pool_*`, so per-instance binding doesn't apply); the
-      # template dispatches by `$labels.pair`.
       rebalance_reason = local.deviation_rebalance_reason_annotation
     }
 
@@ -742,12 +751,9 @@ resource "grafana_rule_group" "fpmms_deviation" {
       severity = "critical"
     }
 
-    # The Prometheus expression: seconds since breach started, gated on an
-    # active breach (breach_start > 0), current magnitude still above the
-    # 1.01 warning tolerance, and either current OR open-breach peak
-    # magnitude above 1.05 (5% over threshold). Once an open breach crosses
-    # critical it stays with the critical rule until recovered, so warning
-    # notification suppression cannot create a silent de-escalation gap.
+    # A = min side share, floored at the page band so a pool below 10% belongs
+    # to the page rule alone. The Grafana evaluator supplies the upper bound so
+    # the mirrored `0.2` literal sits where the drift checker reads it.
     data {
       ref_id         = "A"
       datasource_uid = var.prometheus_datasource_uid
@@ -757,43 +763,19 @@ resource "grafana_rule_group" "fpmms_deviation" {
       }
       model = jsonencode({
         refId   = "A"
-        expr    = local.deviation_critical_gate_promql
+        expr    = local.pool_depletion_critical_active_promql
         instant = true
       })
     }
 
-    # Annotation-only queries (Dev / R0 / R1 / B / ResUSDC / ResUSDT /
-    # ResAxlUSDC) — populate `$values.*` for the annotation locals in
-    # main.tf. NOT part of the threshold condition: a missing series for
-    # any one of these (e.g. probe hasn't run yet, ratio sentinel, both
-    # reserves zero, non-stable pool with no Aegis coverage) leaves
-    # `$values.X` empty and the `{{ if }}` guards in each annotation drop
-    # the line cleanly. Authored once in
-    # `local.deviation_annotation_queries` and consumed here +
-    # by the anchored rule below — a query-shape change lands in one place.
-    #
-    # Implementation notes:
-    #   - Dev pre-computes `(ratio - 1) * 100` in PromQL because sprig math
-    #     (`sub`/`mul`) is unavailable in Grafana annotation templates.
-    #     Integer percent + `printf "%.0f%%"` keeps a 122x breach out of
-    #     scientific notation (humanizePercentage's `%.4g` would render
-    #     "1.219e+04% above threshold").
-    #   - R0/R1 scale the FLAT reserve-share gauges by 100 for display
-    #     (labels preserved, no `token_index` label) so the per-instance
-    #     match against query A's `pool_id/chain_id/pair` fingerprint binds.
-    #     A previous version with `token_index` silently dropped
-    #     `$values.R0` / `$values.R1`. The `token_symbol` extension is 1:1
-    #     with `pool_id` so it doesn't widen cardinality. Regression-tested
-    #     in `metrics-bridge/test/metrics.test.ts` ("label-shape contract").
-    #   - B = `mento_pool_rebalance_blocked > 0` so the series is empty
-    #     when the probe couldn't determine a reason; the annotation
-    #     template reads `$values.B.Labels.*` (NOT `$labels`, which exposes
-    #     only the condition query A's labels).
-    #   - ResUSDC / ResUSDT / ResAxlUSDC source from Aegis (Celo only); see
-    #     main.tf for the rationale on why the dispatch happens in the
-    #     `rebalance_reason` template instead of via per-instance label match.
+    # Annotation-only R0 / R1 plus the rebalance-blocked reason and its Aegis
+    # reserve-balance companions. Same bounded set the rebalancer rules use;
+    # see main.tf for why they sit outside the threshold condition.
     dynamic "data" {
-      for_each = local.deviation_annotation_queries
+      for_each = concat(
+        local.deviation_reserve_annotation_queries,
+        local.deviation_rebalancer_annotation_queries,
+      )
       content {
         ref_id         = data.value.ref_id
         datasource_uid = var.prometheus_datasource_uid
@@ -810,20 +792,6 @@ resource "grafana_rule_group" "fpmms_deviation" {
     }
 
     data {
-      ref_id         = "Info"
-      datasource_uid = var.prometheus_datasource_uid
-      relative_time_range {
-        from = local.instant_query_range_seconds
-        to   = 0
-      }
-      model = jsonencode({
-        refId   = "Info"
-        expr    = local.deviation_critical_resolved_info_promql
-        instant = true
-      })
-    }
-
-    data {
       ref_id         = "threshold"
       datasource_uid = "__expr__"
       relative_time_range {
@@ -835,7 +803,7 @@ resource "grafana_rule_group" "fpmms_deviation" {
         type       = "threshold"
         expression = "A"
         conditions = [{
-          evaluator = { params = [3600], type = "gt" }
+          evaluator = { params = [0.2], type = "lt" }
           operator  = { type = "and" }
           query     = { params = ["threshold"] }
         }]
@@ -843,9 +811,8 @@ resource "grafana_rule_group" "fpmms_deviation" {
       })
     }
 
-    # `_slow`: a breach can stay open for weeks while a fix is planned, so this
-    # repeats twice a day instead of hourly. The oracle criticals earlier in this
-    # file stay on the 1h `notify_critical_pool`.
+    # `_slow`: a thin pool stays thin until someone funds or rebalances it,
+    # which is days rather than minutes. Same reasoning as `Rebalancer Stale`.
     notification_settings {
       contact_point   = local.notify_critical_pool_slow.contact_point
       group_by        = local.notify_critical_pool_slow.group_by
@@ -855,56 +822,37 @@ resource "grafana_rule_group" "fpmms_deviation" {
     }
   }
 
-  # Critical fallback for the deviation-ratio-unavailable window where the indexer
-  # has anchored a breach for >1h but the bridge isn't publishing
-  # `mento_pool_deviation_ratio` (the `-1` sentinel from metrics-bridge).
-  # Without this rule, the magnitude-gated critical above silently drops
-  # alerts while deviation-ratio data is unavailable —
-  # the anchored warning rule still fires, but at warning severity. Mirror of
-  # the warning anchored rule, escalated to critical once the breach has
-  # outlived the 1h grace.
   rule {
-    name      = "Deviation Breach Critical (anchored)"
+    name      = "Pool Nearly One-Sided"
     condition = "threshold"
-    # `for = "1m"`: same NoData-blip smoothing as the magnitude-gated rule
-    # above. The anchored rule fires only when the deviation-ratio gauge
-    # is absent, so the annotation query set is even sparser — without
-    # the 1m grace a single Mimir-ruler glitch in either Aegis reserve-
-    # balance query would reset the firing state.
-    for = "1m"
-    # Same flap absorption as the magnitude-gated critical above.
-    keep_firing_for = "1h"
-    exec_err_state  = "Error"
-    no_data_state   = "OK"
+    # 1m, not 15m: below 10% the pool is minutes away from rejecting one swap
+    # direction outright. The dwell exists only to smooth a single-eval Mimir
+    # NoData blip, the same reason the oracle-jump rules carry it. See the note
+    # above the critical rule for why this tier carries no `keep_firing_for`.
+    for            = "1m"
+    exec_err_state = "Error"
+    no_data_state  = "OK"
 
     annotations = {
-      summary          = "Breach active for {{ humanizeDuration $values.A.Value }} — deviation-ratio data unavailable; can't confirm magnitude."
-      resolved_title   = "Deviation Breach Alert Stopped"
-      resolved_summary = local.deviation_resolved_summary_annotation
-      # Reserve share is independent of the deviation ratio gauge — even
-      # when the ratio is in its `-1` sentinel state, the indexer is still
-      # writing reserves on every Swap / ReserveUpdate, so this line
-      # typically renders. See the magnitude-gated rule for the display
-      # formatting rationale.
+      summary = local.pool_depletion_summary_annotation
+      # The page band is open-ended downward, so leaving it can only mean the
+      # thin side grew. This resolution can honestly claim recovery where the
+      # critical tier's cannot.
+      resolved_title   = "Pool Two-Sided Again"
+      resolved_summary = "The thin side is back above the one-sided floor."
       current_reserves = local.deviation_current_reserves_annotation
-      # Same rebalance-reason annotation as the magnitude-gated critical
-      # rule. The metrics-bridge probe gates on `lastDeviationRatio > 1.05`
-      # (which is the `-1` sentinel while deviation-ratio data is unavailable,
-      # so eligible pools in this state typically slip past) — but if a probe
-      # DID run before the deviation-ratio gauge dropped, the most-recent
-      # reason annotation would still be present here. Reads
-      # `$values.B.Labels.*` for the bounded
-      # reason label pair (NOT `$labels`, which exposes only the firing
-      # query's labels), and dispatches to the matching Aegis reserve-balance
-      # series via `$labels.pair`. When neither the reason labels nor the
-      # Aegis series are present, the `{{ if … }}` guards collapse the
-      # annotation cleanly.
       rebalance_reason = local.deviation_rebalance_reason_annotation
     }
 
+    # `severity = "page"` follows the repo's page convention (trading limits,
+    # trading modes, peg). Delivery does NOT come from the label-routed policy
+    # tree: every fpmms rule uses rule-level `notification_settings`, which
+    # bypasses that tree entirely. See `grafana_contact_point.pool_page` in
+    # contact-points.tf for why the bundled contact point is the only option
+    # here that cannot double-deliver.
     labels = {
       service  = "fpmms"
-      severity = "critical"
+      severity = "page"
     }
 
     data {
@@ -916,18 +864,16 @@ resource "grafana_rule_group" "fpmms_deviation" {
       }
       model = jsonencode({
         refId   = "A"
-        expr    = local.deviation_critical_unavailable_active_promql
+        expr    = local.pool_depletion_page_active_promql
         instant = true
       })
     }
 
-    # Annotation-only queries (Dev / R0 / R1 / B / ResUSDC / ResUSDT /
-    # ResAxlUSDC) — see the magnitude-gated rule above for the rationale
-    # on each query and why they sit outside the threshold condition.
-    # Authored once in `local.deviation_annotation_queries` so
-    # the magnitude-gated and anchored rules can never drift in shape.
     dynamic "data" {
-      for_each = local.deviation_annotation_queries
+      for_each = concat(
+        local.deviation_reserve_annotation_queries,
+        local.deviation_rebalancer_annotation_queries,
+      )
       content {
         ref_id         = data.value.ref_id
         datasource_uid = var.prometheus_datasource_uid
@@ -943,20 +889,9 @@ resource "grafana_rule_group" "fpmms_deviation" {
       }
     }
 
-    data {
-      ref_id         = "Info"
-      datasource_uid = var.prometheus_datasource_uid
-      relative_time_range {
-        from = local.instant_query_range_seconds
-        to   = 0
-      }
-      model = jsonencode({
-        refId   = "Info"
-        expr    = local.deviation_critical_unavailable_resolved_info_promql
-        instant = true
-      })
-    }
-
+    # `lt`, not `lte`: a pool sitting exactly at the 10% boundary belongs to the
+    # critical rule, whose PromQL floor is `>= 0.1`. The two bands partition the
+    # range with no gap and no overlap.
     data {
       ref_id         = "threshold"
       datasource_uid = "__expr__"
@@ -969,7 +904,7 @@ resource "grafana_rule_group" "fpmms_deviation" {
         type       = "threshold"
         expression = "A"
         conditions = [{
-          evaluator = { params = [3600], type = "gt" }
+          evaluator = { params = [0.1], type = "lt" }
           operator  = { type = "and" }
           query     = { params = ["threshold"] }
         }]
@@ -977,13 +912,12 @@ resource "grafana_rule_group" "fpmms_deviation" {
       })
     }
 
-    # `_slow`: same long-lived-breach reasoning as the magnitude-gated rule.
     notification_settings {
-      contact_point   = local.notify_critical_pool_slow.contact_point
-      group_by        = local.notify_critical_pool_slow.group_by
-      group_wait      = local.notify_critical_pool_slow.group_wait
-      group_interval  = local.notify_critical_pool_slow.group_interval
-      repeat_interval = local.notify_critical_pool_slow.repeat_interval
+      contact_point   = local.notify_page_pool.contact_point
+      group_by        = local.notify_page_pool.group_by
+      group_wait      = local.notify_page_pool.group_wait
+      group_interval  = local.notify_page_pool.group_interval
+      repeat_interval = local.notify_page_pool.repeat_interval
     }
   }
 }
@@ -1263,9 +1197,12 @@ resource "grafana_rule_group" "fpmms_rebalancer" {
   }
 
   # KPI 4 effectiveness half: rebalancer is ALIVE (so `Rebalancer Stale` stays
-  # quiet) but INEFFECTIVE. Without this rule, operators only learn about
-  # control-loop failure when `Deviation Breach Critical` fires at 60 min, with
-  # no visibility into why the rebalancer's corrections aren't landing.
+  # quiet) but INEFFECTIVE. It is the earliest signal in the ladder: deviation
+  # magnitude alone no longer escalates anywhere (ADR 0067), so without this
+  # rule a rebalancer whose corrections keep falling short is invisible until
+  # either `Rebalancer Stale` fires — the actionable critical, once the
+  # rebalancer stops acting altogether — or one side thins far enough to trip
+  # the `Pool Depletion Risk` side-share floors.
   rule {
     name           = "Rebalance Ineffective"
     condition      = "threshold"
@@ -1456,10 +1393,11 @@ resource "grafana_rule_group" "fpmms_oracle_jump" {
     condition = "threshold"
     # `for = "1m"` smooths transient NoData blips from the Mimir ruler. The
     # threshold is "any in-band jump within the last 10m", so this does NOT
-    # add a meaningful duration requirement — same rationale as the
-    # `Deviation Breach Critical` rule (see the 2026-04-28 incident note
-    # above). A single-eval glitch in any annotation query would otherwise
-    # reset alert state to Normal between eval cycles.
+    # add a meaningful duration requirement. On 2026-04-28 a missing series in
+    # an annotation query set propagated NoData through a whole deviation rule
+    # and reset its state to Normal between eval cycles, even though a manual
+    # `/api/v1/eval` returned Alerting; the 1m grace stops a single-eval glitch
+    # from undoing an otherwise stable firing state.
     for            = "1m"
     exec_err_state = "Error"
     no_data_state  = "OK"
@@ -1574,9 +1512,8 @@ resource "grafana_rule_group" "fpmms_oracle_jump" {
     name      = "Oracle Jump Far Above Swap Fee"
     condition = "threshold"
     # `for = "1m"` smooths transient NoData blips from the Mimir ruler —
-    # same rationale as the warning tier and the deviation-breach critical
-    # rule (see the 2026-04-28 incident note earlier in this file). Without
-    # it, a single-eval glitch on any annotation-only query (e.g. the new
+    # same rationale and same 2026-04-28 incident as the warning tier above.
+    # Without it, a single-eval glitch on any annotation-only query (e.g. the
     # oracle-price gauges during a bridge restart) would propagate NoData
     # and reset alert state to Normal between cycles.
     for            = "1m"

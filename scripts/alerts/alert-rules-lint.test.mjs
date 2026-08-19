@@ -1820,16 +1820,12 @@ test("flap-prone criticals keep incidents open across short recoveries", () => {
     "utf8",
   );
 
-  for (const [namePattern, source] of [
-    [/\bname\s*=\s*"Deviation Breach Critical"/, fpmmRules],
-    [/\bname\s*=\s*"Deviation Breach Critical \(anchored\)"/, fpmmRules],
-    [/\bname\s*=\s*"Rebalancer Stale"/, fpmmRules],
-  ]) {
-    assert(
-      /\bkeep_firing_for\s*=\s*"1h"/.test(ruleBlockNamed(source, namePattern)),
-      `${namePattern} should hold the incident open for 1h across short recoveries`,
-    );
-  }
+  assert(
+    /\bkeep_firing_for\s*=\s*"1h"/.test(
+      ruleBlockNamed(fpmmRules, /\bname\s*=\s*"Rebalancer Stale"/),
+    ),
+    "Rebalancer Stale should hold the incident open for 1h across short recoveries",
+  );
 
   assert(
     /\bkeep_firing_for\s*=\s*"30m"/.test(
@@ -1837,6 +1833,19 @@ test("flap-prone criticals keep incidents open across short recoveries", () => {
     ),
     "Oldest Report Expired should absorb relayer catch-up cycles for 30m",
   );
+
+  // The banded depletion tiers are the exception, and it is load-bearing. A
+  // hold on either band keeps it firing while a pool crosses into the other,
+  // which is exactly the double notification the partition exists to prevent.
+  for (const namePattern of [
+    /\bname\s*=\s*"Pool Depletion Risk"/,
+    /\bname\s*=\s*"Pool Nearly One-Sided"/,
+  ]) {
+    assert(
+      !/\bkeep_firing_for\s*=/.test(ruleBlockNamed(fpmmRules, namePattern)),
+      `${namePattern} must NOT hold its incident open — a held band double-notifies with its neighbour on every tier crossing`,
+    );
+  }
 });
 
 test("long-lived pool criticals repeat twice daily, short-lived ones hourly", () => {
@@ -1876,8 +1885,7 @@ test("long-lived pool criticals repeat twice daily, short-lived ones hourly", ()
     "utf8",
   );
   const slowRules = [
-    /\bname\s*=\s*"Deviation Breach Critical"/,
-    /\bname\s*=\s*"Deviation Breach Critical \(anchored\)"/,
+    /\bname\s*=\s*"Pool Depletion Risk"/,
     /\bname\s*=\s*"Rebalancer Stale"/,
   ];
   const hourlyRules = [
@@ -1902,6 +1910,68 @@ test("long-lived pool criticals repeat twice daily, short-lived ones hourly", ()
       `${namePattern} should stay on the hourly notify_critical_pool route`,
     );
   }
+});
+
+test("pool pages deliver through one bundled contact point, never the policy tree", () => {
+  const fpmmRules = readFileSync(
+    path.resolve(repoRoot, "alerts/rules/rules-fpmms.tf"),
+    "utf8",
+  );
+  const contactPoints = readFileSync(
+    path.resolve(repoRoot, "alerts/rules/contact-points.tf"),
+    "utf8",
+  );
+  const policies = stripComments(
+    readFileSync(
+      path.resolve(repoRoot, "alerts/rules/notification-policies.tf"),
+      "utf8",
+    ),
+  );
+
+  const pageRule = ruleBlockNamed(
+    fpmmRules,
+    /\bname\s*=\s*"Pool Nearly One-Sided"/,
+  );
+  assert(
+    /\bseverity\s*=\s*"page"/.test(pageRule),
+    "the one-sided-pool rule should carry the repo's page severity label",
+  );
+  assert(
+    /\blocal\.notify_page_pool\b/.test(pageRule),
+    "a page-severity fpmms rule still needs rule-level notification_settings",
+  );
+
+  const stripped = stripComments(contactPoints);
+  const [pageRoute] = blocksFor(stripped, "notify_page_pool = ");
+  assert(pageRoute, "notify_page_pool local should exist");
+  assert(
+    /\bcontact_point\s*=\s*grafana_contact_point\.pool_page\.name/.test(
+      pageRoute,
+    ),
+    "pool pages should route to the bundled Splunk + Slack contact point",
+  );
+
+  // One contact point carrying both destinations is what makes the page
+  // single-delivery: rule-level notification_settings bypass the policy tree,
+  // so a second destination has to live inside the same contact point.
+  const [pageContactPoint] = blocksFor(
+    stripped,
+    'resource "grafana_contact_point" "pool_page"',
+  );
+  assert(pageContactPoint, "grafana_contact_point.pool_page should exist");
+  for (const destination of ["slack {", "victorops {"]) {
+    assert(
+      pageContactPoint.includes(destination),
+      `the bundled page contact point should carry a ${destination.replace(" {", "")} destination`,
+    );
+  }
+
+  // The other half of "cannot double-fire": no policy-tree branch matches the
+  // fpmms plane, so nothing can deliver the same page a second time.
+  assert(
+    !/\bvalue\s*=\s*"fpmms"/.test(policies),
+    "the label-routed policy tree must not match service=fpmms — fpmms rules route rule-level, and a matching branch would double-deliver",
+  );
 });
 
 test("oracle-driven criticals group per incident, not per pool", () => {

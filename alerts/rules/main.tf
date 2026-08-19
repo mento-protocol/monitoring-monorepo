@@ -246,33 +246,48 @@ locals {
     local.fx_rebalancer_stale_gate_promql,
   )
 
-  # Critical magnitude is sticky for the life of the open breach: once the
-  # indexer's open-breach peak has crossed 1.05x, the critical alert stays
-  # responsible until the current ratio is back within the warning tolerance.
-  # The `or` fallback keeps the old current-ratio-only semantics during the
-  # rollout window before metrics-bridge publishes the peak-ratio gauge.
-  deviation_critical_magnitude_promql = "(mento_pool_deviation_open_breach_peak_ratio > 1.05) or on(chain_id, pool_id, pair) (mento_pool_deviation_ratio > 1.05)"
-  deviation_critical_gate_promql = format(
-    "((time() - mento_pool_deviation_breach_start) and on(chain_id, pool_id, pair) (mento_pool_deviation_ratio > 1.01) and on(chain_id, pool_id, pair) (%s) and on(chain_id, pool_id, pair) (mento_pool_deviation_breach_start > 0)) unless (%s)",
-    local.deviation_critical_magnitude_promql,
-    local.fx_weekend_suppressed_breach_start_promql,
-  )
-  # Metrics-bridge only publishes critical alert_state after the critical
-  # rule's own 1m dwell could have elapsed. Suppress warning coverage on that
-  # state, not on breach age alone, so late critical-magnitude or data-gap
-  # changes cannot resolve warning before critical can actually fire. During
-  # rollout, fall back to the previous age-based suppression per pool until any
-  # alert_state series exists for that pool.
-  deviation_critical_suppression_seconds       = 3780
-  deviation_alert_state_present_promql         = "max without(state) (mento_pool_deviation_alert_state)"
-  deviation_critical_state_ready_promql        = "max without(state) (mento_pool_deviation_alert_state{state=~\"critical|deviation_ratio_unavailable_critical\"} > 0)"
-  deviation_critical_legacy_active_promql      = "(${local.deviation_critical_gate_promql}) > ${local.deviation_critical_suppression_seconds}"
-  deviation_critical_ready_promql              = "(${local.deviation_critical_state_ready_promql}) or on(chain_id, pool_id, pair) ((${local.deviation_critical_legacy_active_promql}) unless on(chain_id, pool_id, pair) (${local.deviation_alert_state_present_promql}))"
-  deviation_warning_unavailable_base_promql    = "((time() - mento_pool_deviation_breach_start) and on(chain_id, pool_id, pair) (mento_pool_deviation_breach_start > 0) unless on(chain_id, pool_id, pair) mento_pool_deviation_ratio) unless (${local.fx_weekend_suppressed_breach_start_promql})"
-  deviation_warning_unavailable_rollout_promql = "(${local.deviation_alert_state_present_promql}) or (((time() - mento_pool_deviation_breach_start) <= ${local.deviation_critical_suppression_seconds}) and on(chain_id, pool_id, pair) (mento_pool_deviation_breach_start > 0))"
-  deviation_warning_active_promql              = "((mento_pool_deviation_ratio unless (${local.fx_weekend_suppressed_deviation_ratio_promql})) unless on(chain_id, pool_id, pair) (${local.deviation_critical_ready_promql}))"
-  deviation_warning_unavailable_active_promql  = "((${local.deviation_warning_unavailable_base_promql}) unless on(chain_id, pool_id, pair) (${local.deviation_critical_state_ready_promql})) and on(chain_id, pool_id, pair) (${local.deviation_warning_unavailable_rollout_promql})"
-  deviation_critical_unavailable_active_promql = "(((time() - mento_pool_deviation_breach_start) and on(chain_id, pool_id, pair) (mento_pool_deviation_breach_start > 0) unless on(chain_id, pool_id, pair) mento_pool_deviation_ratio) unless (${local.fx_weekend_suppressed_breach_start_promql}))"
+  # The warning tier now carries the whole deviation ladder, and nothing
+  # suppresses it. Both expressions used to subtract the pools the
+  # magnitude-based critical rules had taken over (`unless
+  # deviation_critical_ready`). Those rules are gone — ADR 0067 moved paging
+  # from deviation magnitude to depletion risk — so removing the suppression
+  # branch with them is load-bearing, not cleanup: without it the pools that
+  # were loudest under the old definition would get no notification at all.
+  # Every pool outside the 1% tolerance now stays covered in #alerts-pools for
+  # as long as its breach is open.
+  deviation_warning_active_promql             = "(mento_pool_deviation_ratio unless (${local.fx_weekend_suppressed_deviation_ratio_promql}))"
+  deviation_warning_unavailable_active_promql = "((time() - mento_pool_deviation_breach_start) and on(chain_id, pool_id, pair) (mento_pool_deviation_breach_start > 0) unless on(chain_id, pool_id, pair) mento_pool_deviation_ratio) unless (${local.fx_weekend_suppressed_breach_start_promql})"
+
+  # ── Pool depletion risk ───────────────────────────────────────────────────
+  # What makes a pool critical is user impact, not deviation magnitude. An
+  # oracle-priced FPMM quotes the same price at 60/40 as at 50/50, so a wide
+  # ratio costs a swapper nothing on its own. A side running dry does: once one
+  # leg is empty every swap into that leg reverts, and well before that the
+  # remaining bandwidth on that side is too thin to serve normal size.
+  # `min(side share)` is that signal, read from the same reserve-share gauges
+  # the deviation annotations already render.
+  #
+  # `min without(token_symbol)` folds the two flat per-token gauges into one
+  # series per pool. Aggregation drops `__name__`, so the result carries
+  # exactly the pool fingerprint (chain_id, pool_id, pair, …) that the alert
+  # instances and the R0/R1 annotation queries are keyed on. Both gauges are
+  # skipped when a pool's reserves are both zero, so an unfunded pool produces
+  # no series and cannot fire either tier.
+  #
+  # Deliberately NOT FX-weekend gated, unlike the deviation rules above. Those
+  # gate FX pairs because their signal derives from an oracle that legitimately
+  # stops updating while the market is closed. Reserve share is on-chain
+  # balances only: a pool that is 95/5 on Saturday genuinely cannot serve one
+  # swap direction, and the weekend is exactly when nobody is watching. Same
+  # reasoning as the un-gated Oracle Jump rules in rules-fpmms.tf.
+  pool_min_reserve_share_promql = "min without(token_symbol) (mento_pool_reserve_share_token0 or mento_pool_reserve_share_token1)"
+  # Two mutually exclusive bands, same shape as the oracle-jump tiers: a pool
+  # matches the page rule or the critical rule, never both, so one depleting
+  # pool never produces two notifications. The page band is open-ended
+  # downward (a fully drained 0% side still pages); the critical band is
+  # floored at the page share here and capped by its own Grafana evaluator.
+  pool_depletion_page_active_promql     = local.pool_min_reserve_share_promql
+  pool_depletion_critical_active_promql = "(${local.pool_min_reserve_share_promql}) >= 0.1"
 
   # Transition markers let resolved notifications say why an alert stopped
   # instead of listing every possible cause. Each base alert rule adds the
@@ -282,14 +297,10 @@ locals {
   # matching the base alert's own active label set. The transition marker wins
   # when present and carries the reason labels; the fallback only keeps active
   # alerts evaluable between transitions.
-  deviation_warning_resolved_transition_promql              = "mento_pool_deviation_alert_transition_active{from=\"warning\",reason!~\"breach_started|state_changed|fx_weekend_reopened\"} > 0"
-  deviation_warning_unavailable_resolved_transition_promql  = "mento_pool_deviation_alert_transition_active{from=\"deviation_ratio_unavailable_warning\",reason!~\"breach_started|state_changed|fx_weekend_reopened\"} > 0"
-  deviation_critical_resolved_transition_promql             = "mento_pool_deviation_alert_transition_active{from=\"critical\",reason!~\"breach_started|state_changed|fx_weekend_reopened\"} > 0"
-  deviation_critical_unavailable_resolved_transition_promql = "mento_pool_deviation_alert_transition_active{from=\"deviation_ratio_unavailable_critical\",reason!~\"breach_started|state_changed|fx_weekend_reopened\"} > 0"
-  deviation_warning_resolved_info_promql                    = "(${local.deviation_warning_resolved_transition_promql}) or on(chain_id, pool_id, pair) (0 * (${local.deviation_warning_active_promql}))"
-  deviation_warning_unavailable_resolved_info_promql        = "(${local.deviation_warning_unavailable_resolved_transition_promql}) or on(chain_id, pool_id, pair) (0 * (${local.deviation_warning_unavailable_active_promql}))"
-  deviation_critical_resolved_info_promql                   = "(${local.deviation_critical_resolved_transition_promql}) or on(chain_id, pool_id, pair) (0 * (${local.deviation_critical_gate_promql}))"
-  deviation_critical_unavailable_resolved_info_promql       = "(${local.deviation_critical_unavailable_resolved_transition_promql}) or on(chain_id, pool_id, pair) (0 * (${local.deviation_critical_unavailable_active_promql}))"
+  deviation_warning_resolved_transition_promql             = "mento_pool_deviation_alert_transition_active{from=\"warning\",reason!~\"breach_started|state_changed|fx_weekend_reopened\"} > 0"
+  deviation_warning_unavailable_resolved_transition_promql = "mento_pool_deviation_alert_transition_active{from=\"deviation_ratio_unavailable_warning\",reason!~\"breach_started|state_changed|fx_weekend_reopened\"} > 0"
+  deviation_warning_resolved_info_promql                   = "(${local.deviation_warning_resolved_transition_promql}) or on(chain_id, pool_id, pair) (0 * (${local.deviation_warning_active_promql}))"
+  deviation_warning_unavailable_resolved_info_promql       = "(${local.deviation_warning_unavailable_resolved_transition_promql}) or on(chain_id, pool_id, pair) (0 * (${local.deviation_warning_unavailable_active_promql}))"
 
   # ── Deviation Breach annotations ─────────────────────────────────────────
   # Deviation-breach rules render the same Slack diagnostic lines, so we
@@ -305,14 +316,11 @@ locals {
   # this reason.
   #
   # Strategy:
-  #   - `deviation_*_summary` reads `$values.Dev.Value` from a query that
-  #     pre-computes `(mento_pool_deviation_ratio - 1) * 100` in PromQL.
-  #     The warning rule reads its duration from `$values.BreachAge`; the
-  #     critical rule already uses `$values.A` as breach age. Rendering branches
+  #   - `deviation_warning_summary_annotation` reads `$values.Dev.Value` from a
+  #     query that pre-computes `(mento_pool_deviation_ratio - 1) * 100` in
+  #     PromQL, and its duration from `$values.BreachAge`. Rendering branches
   #     by magnitude so summaries stay scannable across four orders of
   #     magnitude ("Pool 5% above…" → "Pool 44M% above…"):
-  #     If `Dev` is absent, the critical fallback can still render `$values.A`
-  #     because A is the firing breach-age condition for that rule.
   #       - < 1000:   integer percent ("44%")
   #       - 1000–9999: thousand-separated ("1,234%") — Go templates have
   #         no native %`,d formatter and Grafana's template engine doesn't
@@ -349,9 +357,16 @@ locals {
   #     metrics-bridge probe (the in-bridge enrichment shipped in PR #237
   #     failed in production with `[REBALANCE_PROBE_FAILED]: Missing or
   #     invalid parameters`, leaving the gauges absent, which propagated
-  #     NoData through this rule and stuck the critical alerts in Normal for
+  #     NoData through the deviation rules and stuck them in Normal for
   #     ~9h on 2026-04-28).
-  deviation_warning_summary_annotation            = <<-EOT
+  #   - `pool_depletion_summary_annotation` names the depleting side from the
+  #     same R0/R1 queries: whichever share is smaller is the leg that runs out
+  #     first, and its `token_symbol` label is the token swappers will stop
+  #     being able to buy. The `$values.A` fallback renders the aggregated min
+  #     share through `humanizePercentage` — safe here because A is a [0, 1]
+  #     fraction, nowhere near the 1e4 regime where that helper flips to
+  #     scientific notation.
+  deviation_warning_summary_annotation = <<-EOT
     {{- if $values.Dev -}}
       {{- $dev := $values.Dev.Value -}}
       {{- if lt $dev 1000.0 -}}
@@ -379,21 +394,21 @@ locals {
       Pool above 1% tolerance.
     {{- end -}}
   EOT
-  deviation_critical_summary_annotation           = <<-EOT
-    {{- if $values.Dev -}}
-      {{- $dev := $values.Dev.Value -}}
-      {{- $age := humanizeDuration $values.A.Value -}}
-      {{- if lt $dev 5.0 -}}
-        {{- printf "Pool crossed 5%% threshold and remains %.0f%% above 1%% tolerance for %s — rebalancer not closing breach." $dev $age -}}
-      {{- else if lt $dev 1000.0 -}}
-        {{- printf "Pool %.0f%% above 5%% threshold for %s — rebalancer not closing breach." $dev $age -}}
-      {{- else if and (lt $dev 10000.0) $values.DevQ $values.DevR -}}
-        {{- printf "Pool %.0f,%03.0f%% above 5%% threshold for %s — rebalancer not closing breach." $values.DevQ.Value $values.DevR.Value $age -}}
+  # One summary for both depletion tiers. The rule names ("Pool Depletion
+  # Risk" / "Pool Nearly One-Sided") carry the severity distinction, so the
+  # copy only has to answer the two operator questions: which side is running
+  # out, and what to check.
+  pool_depletion_summary_annotation               = <<-EOT
+    {{- if and $values.R0 $values.R1 -}}
+      {{- if lt $values.R0.Value $values.R1.Value -}}
+        {{- printf "Only %.0f%% of pool reserves are %s. Users cannot swap into %s once that side empties — check the rebalancer and %s reserve bandwidth." $values.R0.Value $values.R0.Labels.token_symbol $values.R0.Labels.token_symbol $values.R0.Labels.token_symbol -}}
       {{- else -}}
-        {{- printf "Pool %s%% above 5%% threshold for %s — rebalancer not closing breach." (humanize $dev) $age -}}
+        {{- printf "Only %.0f%% of pool reserves are %s. Users cannot swap into %s once that side empties — check the rebalancer and %s reserve bandwidth." $values.R1.Value $values.R1.Labels.token_symbol $values.R1.Labels.token_symbol $values.R1.Labels.token_symbol -}}
       {{- end -}}
+    {{- else if $values.A -}}
+      {{- printf "Smallest pool side holds only %s of reserves. Users cannot swap into it once it empties — check the rebalancer and reserve bandwidth." (humanizePercentage $values.A.Value) -}}
     {{- else -}}
-      Pool above 5% threshold for {{ humanizeDuration $values.A.Value }} — rebalancer not closing breach.
+      One pool side is nearly drained. Users cannot swap into it once it empties — check the rebalancer and reserve bandwidth.
     {{- end -}}
   EOT
   deviation_current_reserves_annotation           = <<-EOT
