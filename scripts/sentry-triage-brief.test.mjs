@@ -2089,11 +2089,20 @@ await test("the brief leg is not a stub-body writer, and owns its marker alone",
     "sentry-triage-brief.mjs",
     "sentry-triage-brief-render.mjs",
   ]);
+  // Recursive: scripts/ is a tree now (ADR 0064), and a flat readdir would stop
+  // seeing each module the reorganization relocates while still reporting a
+  // pass. P14 moved the deploy leg into scripts/deploy/ and took this scan from
+  // 63 modules to 59 — under the floor below, which is the only reason it was
+  // noticed. The invariant is "no OTHER module carries this marker", so depth
+  // was never part of it.
   const scriptsDir = join(repoRoot, "scripts");
   const offenders = [];
   let scanned = 0;
-  for (const file of readdirSync(scriptsDir)) {
+  for (const file of readdirSync(scriptsDir, { recursive: true })) {
     if (!file.endsWith(".mjs") || file.endsWith(".test.mjs")) continue;
+    // Path-exact, not basename: the walk yields `<subdir>/<name>`, so matching
+    // on basename would exempt a future copy of either leg file living in a
+    // subdirectory — exactly the second-owner case this asserts against.
     if (briefLegFiles.has(file)) continue;
     scanned += 1;
     const src = readFileSync(join(scriptsDir, file), "utf8");

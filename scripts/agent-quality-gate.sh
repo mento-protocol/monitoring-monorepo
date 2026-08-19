@@ -3792,15 +3792,16 @@ while IFS= read -r path; do
     scripts/*.sh)
       add_surface "scripts"
       case "$path" in
-        # Paired for the same reason as the arm below, and it has to be: this one
-        # sits FIRST, so once this wrapper moves the exact path stops matching,
-        # the widened arm below catches it instead, and the run keeps scheduling
-        # the root-anchor check while the runtime-log filter check quietly drops
-        # out. Partial routing reads as working routing, which is worse than the
-        # gap the pair exists to close.
-        scripts/deploy-indexer-logs.sh|scripts/*/deploy-indexer-logs.sh)
+        # Exact live path first, the any-depth pair second. This arm sits FIRST
+        # in the case, so if the exact path ever goes stale again the widened arm
+        # below catches the file and the run keeps scheduling the root-anchor
+        # check while the runtime-log filter check quietly drops out. Partial
+        # routing reads as working routing, which is worse than the gap the pair
+        # exists to close — so the pair stays even though the glob alone would
+        # match the wrapper where it lives today.
+        scripts/deploy/deploy-indexer-logs.sh|scripts/*/deploy-indexer-logs.sh)
           add_command "node scripts/check-deploy-root-anchors.test.mjs" "deploy wrapper changed"
-          add_command "node scripts/filter-envio-runtime-errors.test.mjs" "indexer runtime-log filter changed"
+          add_command "node scripts/deploy/filter-envio-runtime-errors.test.mjs" "indexer runtime-log filter changed"
           ;;
         # Paired one-level arm, the ADR 0064 remedy for a literal-prefix glob.
         # `scripts/deploy-*.sh` is anchored on a prefix at the TOP of scripts/,
@@ -3844,7 +3845,7 @@ while IFS= read -r path; do
         # are the whole Cloud Run half of this wrapper's routing. Pairing it here
         # is what makes "a moved deploy script routes identically" true for the
         # bridge rather than true for the root-anchor check alone.
-        scripts/deploy-bridge.sh|scripts/*/deploy-bridge.sh)
+        scripts/deploy/deploy-bridge.sh|scripts/*/deploy-bridge.sh)
           add_checklist "docs/pr-checklists/terraform-cloudrun.md" "Cloud Run deploy script changed"
           add_command "pnpm agent:context-check" "Cloud Run revision suffix guard changed"
           ;;
@@ -4193,14 +4194,33 @@ while IFS= read -r path; do
         scripts/workflows/check-github-action-pins.test.mjs)
           add_command "node scripts/workflows/check-github-action-pins.test.mjs" "GitHub Actions pin checker test changed"
           ;;
-        scripts/deploy-indexer-verify.mjs|scripts/deploy-indexer-verify.test.mjs)
-          add_command "node scripts/deploy-indexer-verify.test.mjs" "indexer deploy verifier changed"
+        # The Node deploy helpers moved into scripts/deploy/ with the wrappers.
+        # These arms match exact paths, so the patterns AND the commands they
+        # schedule both carry the new location — a stale command path fails loud
+        # (node cannot find the file), but a stale pattern fails silent.
+        #
+        # Each therefore also carries the any-depth pair, like the wrapper arms.
+        # It matters MORE here: a wrapper that moves again still falls through to
+        # `scripts/deploy-*.sh|scripts/*/deploy-*.sh` and keeps the root-anchor
+        # check, but a `.mjs` has no deploy-specific fallback at all — it would
+        # land on `pnpm lint:scripts` alone and quietly stop running its suite.
+        scripts/deploy/deploy-indexer-verify.mjs | \
+          scripts/deploy/deploy-indexer-verify.test.mjs | \
+          scripts/*/deploy-indexer-verify.mjs | \
+          scripts/*/deploy-indexer-verify.test.mjs)
+          add_command "node scripts/deploy/deploy-indexer-verify.test.mjs" "indexer deploy verifier changed"
           ;;
-        scripts/deploy-indexer-perf.mjs|scripts/deploy-indexer-perf.test.mjs)
-          add_command "node scripts/deploy-indexer-perf.test.mjs" "indexer deploy perf helper changed"
+        scripts/deploy/deploy-indexer-perf.mjs | \
+          scripts/deploy/deploy-indexer-perf.test.mjs | \
+          scripts/*/deploy-indexer-perf.mjs | \
+          scripts/*/deploy-indexer-perf.test.mjs)
+          add_command "node scripts/deploy/deploy-indexer-perf.test.mjs" "indexer deploy perf helper changed"
           ;;
-        scripts/filter-envio-runtime-errors.mjs|scripts/filter-envio-runtime-errors.test.mjs)
-          add_command "node scripts/filter-envio-runtime-errors.test.mjs" "indexer runtime-log filter changed"
+        scripts/deploy/filter-envio-runtime-errors.mjs | \
+          scripts/deploy/filter-envio-runtime-errors.test.mjs | \
+          scripts/*/filter-envio-runtime-errors.mjs | \
+          scripts/*/filter-envio-runtime-errors.test.mjs)
+          add_command "node scripts/deploy/filter-envio-runtime-errors.test.mjs" "indexer runtime-log filter changed"
           ;;
         scripts/alerts/alert-rules-lint.mjs|scripts/alerts/alert-rules-lint-extract.mjs|scripts/alerts/alert-rules-lint-peg-policy.mjs|scripts/alerts/alert-rules-lint.test.mjs)
           add_command "pnpm alerts:rules:lint:test" "alert-rules lint helper changed"

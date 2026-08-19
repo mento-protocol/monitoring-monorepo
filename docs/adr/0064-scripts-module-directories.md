@@ -140,6 +140,11 @@ scheduled document, for context an agent gets from the directory map in
   passed without checking anything, and a move would have made it do so.
 - The reorganization lands incrementally. Each phase moves one module and sweeps
   its pins, so a break is scoped to one subsystem and one PR.
+- A file the lint config would lose stays flat even when another tree owns it.
+  `redrive-onchain-deadletter.{mjs,test.mjs}` belongs to `alerts/infra/`, but
+  `eslint.config.mjs` ignores `alerts/**`, so moving it there drops it out of
+  `lint:scripts`. That ignore is config-relative, so `scripts/alerts/**` stays
+  linted — the destination is what matters, not the name.
 - A file whose only consumer is one package leaves `scripts/` instead of getting
   a subdirectory. P9 moved `check-react-doctor-{diff,score}.sh` to
   `ui-dashboard/scripts/`. An out-move drops the recursive `scripts/**` safety
@@ -203,13 +208,17 @@ routing, not procedure.
    directory down. Keep the basename prefix; add the paired one-level arm. The
    `sentry-` and `deploy-` arms already carry theirs, so a move of those files
    verifies the pair rather than adding it. An arm naming an exact path is a
-   literal, not a glob, and needs the same pairing for the same reason: all
-   three on the deploy leg — `scripts/deploy-indexer-logs.sh`,
-   `scripts/deploy-bridge.sh`, and the `deploy-*.sh` glob — now carry it, so a
-   moved wrapper keeps its whole command set. Leaving one unpaired below a
-   widened glob is the worst case, not the safe one: the glob catches the moved
-   path, the run still looks routed, and only the arm's extra commands go
-   missing. Its
+   literal, not a glob, and needs the same pairing for the same reason: the
+   three on the deploy leg — the `deploy-indexer-logs.sh` and `deploy-bridge.sh`
+   arms and the `deploy-*.sh` glob — carry it, so a moved wrapper keeps its
+   whole command set. Leaving one unpaired below a widened glob is the worst
+   case, not the safe one: the glob catches the moved path, the run still looks
+   routed, and only the arm's extra commands go missing. A pattern is only half
+   of it — an arm that also names a path in the command it schedules has to
+   repoint both. The three Node deploy-helper arms are exact-path on both sides;
+   P14 moved them into `scripts/deploy/` and repointed pattern and command
+   together. A stale command path there fails loudly, a stale pattern silently.
+   Its
    contract-surface arm also names `scripts/lib/*.mjs`, which sets the
    `pnpm tf:test` reason; the unconditional sweep already runs the suite. Its
    `implementation_signature()` path list is stricter than a glob: an entry it

@@ -10,14 +10,14 @@
 # mentolabs/monitoring-dashboard project.
 #
 # Usage:
-#   ./scripts/deploy-dashboard.sh
+#   ./scripts/deploy/deploy-dashboard.sh
 #
 # Environment variables (optional):
 #   VERCEL_TOKEN  — auth token (falls back to local CLI session)
 
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 VERCEL_DIR="$REPO_ROOT/.vercel"
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -51,7 +51,7 @@ ok "Logged in as $(vercel whoami "${VERCEL_TOKEN_ARGS[@]}" 2>/dev/null)"
 # .vercel/project.json.
 
 # shellcheck source=scripts/lib/deploy-guard.sh
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/deploy-guard.sh"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/deploy-guard.sh"
 
 log "Deploying to production…"
 (cd "$REPO_ROOT" && vercel deploy --prod "${VERCEL_TOKEN_ARGS[@]}")

@@ -52,7 +52,7 @@ DEPLOYMENTS_JSON=$(pnpm --silent exec envio-cloud indexer get "$ENVIO_INDEXER" "
 CURRENT_PROD=$(printf "%s" "$DEPLOYMENTS_JSON" \
   | jq -r 'first(.data.deployments[]? | select(.prod_status == "prod") | .commit_hash) // "unknown"')
 DEPLOYMENT_COUNT=$(printf "%s" "$DEPLOYMENTS_JSON" | jq -r '(.data.deployments // []) | length')
-REGISTERED=$(printf "%s" "$DEPLOYMENTS_JSON" | node scripts/resolve-envio-deployment.mjs "$TARGET")
+REGISTERED=$(printf "%s" "$DEPLOYMENTS_JSON" | node scripts/deploy/resolve-envio-deployment.mjs "$TARGET")
 
 echo "Indexer rollback"
 echo "   Indexer: $ENVIO_ORG/$ENVIO_INDEXER"
@@ -72,7 +72,7 @@ if [[ -n "$REGISTERED" ]]; then
   fi
 
   # shellcheck source=scripts/lib/deploy-guard.sh
-  source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/deploy-guard.sh"
+  source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/deploy-guard.sh"
 
   if [[ "$AUTO_YES" == "false" ]]; then
     read -r -p "Promote $REGISTERED back to production? [y/N] " confirm
@@ -126,7 +126,7 @@ if [[ "$DRY_RUN" == "true" ]]; then
 fi
 
 # shellcheck source=scripts/lib/deploy-guard.sh
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/deploy-guard.sh"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/deploy-guard.sh"
 
 if [[ "$AUTO_YES" == "false" ]]; then
   read -r -p "Force-push $SHORT_SHA to $DEPLOY_BRANCH? [y/N] " confirm
@@ -150,7 +150,7 @@ if grep -q "Everything up-to-date" <<<"$PUSH_OUTPUT"; then
   REGISTERED_AFTER_NOOP=""
   if [[ "$DEPLOYMENTS_AFTER_NOOP_STATUS" -eq 0 ]]; then
     REGISTERED_AFTER_NOOP=$(printf "%s" "$DEPLOYMENTS_AFTER_NOOP_JSON" \
-      | node scripts/resolve-envio-deployment.mjs "$FULL_SHA" 2>/dev/null)
+      | node scripts/deploy/resolve-envio-deployment.mjs "$FULL_SHA" 2>/dev/null)
   fi
   set -e
   REGISTERED_AFTER_NOOP="${REGISTERED_AFTER_NOOP:-}"

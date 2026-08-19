@@ -170,7 +170,7 @@ function createContextCheckFixture(readmeContent, extraFiles = {}) {
   );
   writeFixtureFile(
     root,
-    "scripts/deploy-bridge.sh",
+    "scripts/deploy/deploy-bridge.sh",
     'REVISION_SUFFIX="r-${TAG}-$(date +%s)"\n',
   );
   writeFixtureFile(

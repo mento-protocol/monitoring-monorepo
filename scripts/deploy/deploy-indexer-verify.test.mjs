@@ -16,7 +16,7 @@ import {
 import {
   POLYGON_FPMM_EXPECTATIONS,
   summarizePolygonPools,
-} from "./lib/polygon-deployment-semantics.mjs";
+} from "../lib/polygon-deployment-semantics.mjs";
 
 const NOW_SECONDS = 2_000_000_000;
 const VALID_REPLAY_INTEGRITY = {
