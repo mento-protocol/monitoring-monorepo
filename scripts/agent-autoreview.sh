@@ -4368,6 +4368,7 @@ capture_feedback_state() {
   local runtime_dir="$2"
   local pr_number="$3"
   local repository_slug="$4"
+  local deadline_seconds="$5"
   local gh_bin
   local trusted_bin="$runtime_dir/trusted-bin"
   local env_args=()
@@ -4402,7 +4403,7 @@ capture_feedback_state() {
   (
     cd "$repo"
     run_with_deadline "PR feedback capture" \
-      "$feedback_capture_deadline_seconds" \
+      "$deadline_seconds" \
       run_trusted_node_in_clean_env \
       "${#env_args[@]}" \
       "${env_args[@]}" \
@@ -5863,9 +5864,11 @@ review_capture_bytes=0
 # the whole tracked tree (2,220 files) cannot reach that product. 600 seconds is
 # therefore far above any capture set a real review performs, and a third of the
 # reviewer's own 1,800-second default timeout. Overridable for tests, validated
-# here for the reason the gh deadline records.
+# here for the reason the gh deadline records. The helper reads the same
+# variable and applies this exact rule, so no value can hand one run two
+# different budgets.
 max_review_capture_seconds="${AGENT_AUTOREVIEW_CAPTURE_DEADLINE_SECONDS:-600}"
-if ! [[ "$max_review_capture_seconds" =~ ^[1-9][0-9]*$ ]]; then
+if ! [[ "$max_review_capture_seconds" =~ ^[1-9][0-9]{0,8}$ ]]; then
   echo "agent:autoreview: AGENT_AUTOREVIEW_CAPTURE_DEADLINE_SECONDS='$max_review_capture_seconds' is not a positive integer; using default 600s" >&2
   max_review_capture_seconds=600
 fi
@@ -6802,8 +6805,20 @@ EOF
       "$repo" \
       "$protected_main_ref" \
       "$feedback_runtime_dir"
+    # This capture keeps its own bound, so the shared budget has to reach it as
+    # an argument: without the clamp a feedback capture starting with seconds
+    # left could still run its full independent deadline and carry the run past
+    # the ceiling every other capture respects.
+    local feedback_deadline="$feedback_capture_deadline_seconds"
+    local feedback_budget_left=$((max_review_capture_seconds - review_capture_seconds))
+    if ((feedback_budget_left < feedback_deadline)); then
+      feedback_deadline="$feedback_budget_left"
+    fi
+    if ((feedback_deadline < 1)); then
+      feedback_deadline=1
+    fi
     capture_prebounded_output_file "$staging_dir/feedback-state.json" "PR feedback state" 0 \
-      capture_feedback_state "$repo" "$feedback_runtime_dir" "$pr_number" "$repository_slug"
+      capture_feedback_state "$repo" "$feedback_runtime_dir" "$pr_number" "$repository_slug" "$feedback_deadline"
     if ! safe_remove_tree \
       "$feedback_runtime_dir" \
       "$feedback_runtime_identity" \

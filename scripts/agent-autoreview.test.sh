@@ -6489,10 +6489,14 @@ run_rename_capture_regressions() {
 # normally and the run reaches the one capture the deadline must bound. The
 # filter ignores SIGTERM and forks a descendant that does too, so only a
 # process-group SIGKILL clears the tree it leaves behind.
+# `stall_seconds` of 0 hangs the capture forever; a positive value delays it by
+# that many seconds and then passes the content through, which is what an arm
+# needs when it must observe how much budget a slow-but-finite capture spends.
 seed_capture_deadline_fixture() {
   local review_repo="$1"
   local filter_script="$2"
   local state_pointer="$3"
+  local stall_seconds="${4:-0}"
 
   init_review_repo "$review_repo"
   printf 'base\n' >"$review_repo/README.md"
@@ -6514,6 +6518,10 @@ while [[ "\$inspect_pid" =~ ^[1-9][0-9]*\$ && "\$level" -lt 4 ]]; do
       "\$args" == *--find-renames* &&
       "\$args" == *-l5000* ]] \\
     ; then
+    if [[ "$stall_seconds" -gt 0 ]]; then
+      sleep $stall_seconds
+      exec cat
+    fi
     trap '' TERM
     printf '%s\n' "\$\$" >"\$state_dir/leader.pid"
     /bin/bash -c 'trap "" TERM; while true; do sleep 1; done' &
@@ -6578,6 +6586,8 @@ run_capture_deadline_regressions() {
   run_capture_deadline_helper_arm \
     "$review_repo" "$state_pointer" "$helper_state" "$deadline_seconds"
   run_capture_deadline_headroom_arm
+  run_capture_deadline_override_parity_arm
+  run_capture_deadline_feedback_clamp_arm
 }
 
 cleanup_capture_deadline_fixture_tree() {
@@ -6808,6 +6818,138 @@ run_capture_deadline_headroom_arm() {
     --bundle-output "$bundle_output"
   expect_empty_stderr
   expect_file_contains "$bundle_output" "unstaged edit"
+}
+
+# Both runtimes read the same override independently, so a value one accepts and
+# the other rejects would give one run two budgets. `1x` is the shape that
+# separates them: a prefix parse reads one second while a whole-value match
+# falls back to 600. A capture that costs three seconds therefore only survives
+# if the helper applied the wrapper's rule.
+run_capture_deadline_override_parity_arm() {
+  local review_repo="$tmp_dir/capture-deadline-parity"
+  local filter_script="$tmp_dir/capture-deadline-parity-filter.sh"
+  local state_pointer="$tmp_dir/capture-deadline-parity-state-dir"
+  local state_dir="$tmp_dir/capture-deadline-parity-state"
+  local bundle_dir="$tmp_dir/capture-deadline-parity-bundle"
+  local bundle_output="$tmp_dir/capture-deadline-parity-prompt.md"
+
+  mkdir -p "$state_dir"
+  printf '%s\n' "$state_dir" >"$state_pointer"
+  seed_capture_deadline_fixture \
+    "$review_repo" "$filter_script" "$state_pointer" 3
+
+  run_helper_in_repo_with_env "$review_repo" \
+    "AGENT_AUTOREVIEW_CAPTURE_DEADLINE_SECONDS=1x" \
+    --prepare-bundle-dir "$bundle_dir" \
+    --mode local \
+    --engine local
+  expect_stderr_contains \
+    "AGENT_AUTOREVIEW_CAPTURE_DEADLINE_SECONDS='1x' is not a positive integer; using default 600s"
+
+  run_helper_in_repo_with_env "$review_repo" \
+    "AGENT_AUTOREVIEW_CAPTURE_DEADLINE_SECONDS=1x" \
+    --mode local \
+    --engine local \
+    --prepare-only \
+    --bundle-output "$bundle_output"
+  expect_stderr_contains \
+    "AGENT_AUTOREVIEW_CAPTURE_DEADLINE_SECONDS='1x' is not a positive integer; using default 600s"
+  expect_file_contains "$bundle_output" "dirty"
+}
+
+# The PR feedback capture keeps its own wall-clock bound, so it is the one
+# capture the shared deadline does not wrap. It still has to respect the shared
+# ceiling: a capture that spends most of the budget must leave the feedback
+# capture only what is left, not its full independent deadline.
+run_capture_deadline_feedback_clamp_arm() {
+  local review_repo="$tmp_dir/capture-deadline-feedback"
+  local filter_script="$tmp_dir/capture-deadline-feedback-filter.sh"
+  local state_pointer="$tmp_dir/capture-deadline-feedback-state-dir"
+  local state_dir="$tmp_dir/capture-deadline-feedback-state"
+  local bundle_dir="$tmp_dir/capture-deadline-feedback-bundle"
+  local runtime_file
+  local started_at
+  local elapsed
+
+  mkdir -p "$state_dir"
+  printf '%s\n' "$state_dir" >"$state_pointer"
+  seed_capture_deadline_fixture \
+    "$review_repo" "$filter_script" "$state_pointer" 3
+  git -C "$review_repo" remote add origin \
+    https://github.com/mento-protocol/monitoring-monorepo.git
+  mkdir -p "$review_repo/scripts"
+  # The feedback runtime is materialized from protected main and executed
+  # directly. A runtime that never returns is the cheapest way to reach the
+  # deadline the wrapper hands it.
+  printf 'setInterval(() => {}, 1000);\n' \
+    >"$review_repo/scripts/pr-feedback-state.mjs"
+  for runtime_file in \
+    pr-feedback-state-core.mjs \
+    pr-feedback-state-claude.mjs \
+    pr-ready-state.mjs \
+    pr-ready-state-core.mjs \
+    pr-ready-state-format.mjs; do
+    printf 'export {};\n' >"$review_repo/scripts/$runtime_file"
+  done
+  commit_review_repo "$review_repo" "feedback runtime"
+  # `commit_review_repo` only seeds origin/main once, and the seed commit
+  # predates these runtime files. Protected main has to carry them, because that
+  # is the object the wrapper materializes the feedback runtime from.
+  git -C "$review_repo" update-ref refs/remotes/origin/main HEAD
+  printf 'dirty again\n' >"$review_repo/payload.txt"
+
+  started_at="$(date +%s)"
+  run_helper_in_repo_expect_failure_with_env "$review_repo" \
+    "AGENT_AUTOREVIEW_CAPTURE_DEADLINE_SECONDS=12" \
+    "AGENT_AUTOREVIEW_FEEDBACK_DEADLINE_SECONDS=30" \
+    --prepare-bundle-dir "$bundle_dir" \
+    --mode local \
+    --feedback-pr 1299 \
+    --engine local
+  elapsed=$(($(date +%s) - started_at))
+  expect_stderr_contains "PR feedback capture timed out after"
+  if grep -Fq -- "PR feedback capture timed out after 30s" "$stderr"; then
+    printf 'the feedback capture kept its full independent deadline instead of the remaining shared budget\n' >&2
+    exit 1
+  fi
+  if ((elapsed >= 25)); then
+    printf 'the feedback capture ran past the shared capture budget: took %ss\n' \
+      "$elapsed" >&2
+    exit 1
+  fi
+  if [[ -e "$bundle_dir" ]]; then
+    printf 'a feedback capture that hit its deadline still published a bundle: %s\n' \
+      "$bundle_dir" >&2
+    exit 1
+  fi
+}
+
+run_helper_in_repo_expect_failure_with_env() {
+  local review_repo="$1"
+  local first_env="$2"
+  local second_env="$3"
+  shift 3
+  : >"$stdout"
+  : >"$stderr"
+  local status=0
+  (
+    cd "$review_repo"
+    # `exec` for the reason the wrapper arm records.
+    exec env -i \
+      "PATH=$PATH" \
+      "HOME=$HOME" \
+      "TMPDIR=${TMPDIR:-/tmp}" \
+      "$first_env" \
+      "$second_env" \
+      "$adapter_wrapper" \
+      "$@" >"$stdout" 2>"$stderr"
+  ) || status=$?
+  cleanup_retained_test_command_runtimes
+  if [[ "$status" -eq 0 ]]; then
+    printf 'expected helper to fail\nstdout:\n%s\nstderr:\n%s\n' \
+      "$(cat "$stdout")" "$(cat "$stderr")" >&2
+    exit 1
+  fi
 }
 
 run_helper_in_repo_with_env() {

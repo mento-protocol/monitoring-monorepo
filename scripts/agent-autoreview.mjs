@@ -1893,12 +1893,16 @@ function decodeGitOutput(data, label) {
 // second -- and above the documented worst case of about 74 seconds for rename
 // detection at the `-l5000` product ceiling. Overridable for tests.
 const CAPTURE_DEADLINE_MS = (() => {
-  const configured = Number.parseInt(
-    process.env.AGENT_AUTOREVIEW_CAPTURE_DEADLINE_SECONDS || "",
-    10,
-  );
-  return Number.isFinite(configured) && configured > 0
-    ? configured * 1000
+  // Whole-value match, and the same one the wrapper applies. Both runtimes read
+  // this variable independently, so a value one accepted and the other rejected
+  // would give a single run two different budgets -- `Number.parseInt` would
+  // read `1x` as one second here while the wrapper announced its 600-second
+  // fallback. The digit ceiling keeps every accepted value exact in both a
+  // shell integer and a double.
+  const configured =
+    process.env.AGENT_AUTOREVIEW_CAPTURE_DEADLINE_SECONDS || "";
+  return /^[1-9][0-9]{0,8}$/.test(configured)
+    ? Number(configured) * 1000
     : 600_000;
 })();
 let gitCaptureSpentMs = 0;
