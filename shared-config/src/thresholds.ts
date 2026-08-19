@@ -51,10 +51,13 @@ export const DEVIATION_TOLERANCE_RATIO = 1.01;
  *     as a cost gate that keeps RPC simulation proportional to the handful of
  *     pools deep enough in breach to be worth explaining.
  *
- * Since ADR 0067 no Grafana rule fires on it: an oracle-priced pool quoting
- * 5% past its rebalance boundary costs a swapper nothing, so magnitude alone
- * stopped being pageable. `Rebalancer Stale` covers the actionable mid-range
- * failure and `Pool Depletion Risk` covers user impact.
+ * Since ADR 0067 nothing pages on it: an oracle-priced pool quoting 5% past its
+ * rebalance boundary costs a swapper nothing, so magnitude alone stopped being
+ * pageable. The one Grafana rule still downstream of this boundary is the
+ * warning-severity `Deviation Breach Critical State Changed`, which reports
+ * transitions of the classification rather than firing on the ratio.
+ * `Rebalancer Stale` covers the actionable mid-range failure and
+ * `Pool Depletion Risk` covers user impact.
  *
  * Mirrors `DEVIATION_CRITICAL_NUM / DEVIATION_CRITICAL_DEN` in
  * `indexer-envio/src/pool/health.ts`; `test/deviationThresholdSharedConfigSync.test.ts`

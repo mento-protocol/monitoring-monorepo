@@ -159,6 +159,16 @@ inaction**, not when a ratio is large.
 - Applying this stack destroys `grafana_contact_point.slack_critical_transition`
   and creates `grafana_contact_point.pool_page`. Both are Grafana-side
   resources behind the `production-infra` apply gate.
+- **The page tier has a non-empty day-one firing set.** Queried against
+  production on 2026-08-19, `min(side share)` puts both `JPYm/USDm` pools below
+  the page floor — Celo at 0.42% USDm (99.58% JPYm) and Monad at 0.67% USDm
+  (99.33% JPYm). Those are true positives: a swapper cannot buy USDm out of
+  either pool. Every other pool sits at 22% or above. Whoever approves the
+  `production-infra` apply is therefore approving two immediate Splunk On-Call
+  pages for a pre-existing condition, which is the producer-first rollout check
+  in `alerts/rules/README.md` working as intended — the condition is old, only
+  the visibility is new. Fund or rebalance the USDm leg of those two pools
+  before approving, or expect the pages.
 
 ## Evidence
 

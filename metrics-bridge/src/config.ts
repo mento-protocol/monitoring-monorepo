@@ -31,8 +31,11 @@ export const REBALANCE_PROBE_EVERY_N_POLLS = Math.floor(
 
 // Pools above tolerance whose current ratio or open-breach peak crossed this
 // threshold are eligible for the rebalance-reason probe. This is a COST GATE,
-// not an alert mirror: since ADR 0067 no Grafana rule fires on the 1.05
-// magnitude, but a pool that deep in breach is exactly the one whose blocked
+// not an alert mirror: since ADR 0067 nothing pages on the 1.05 magnitude —
+// the one Grafana rule left downstream of it is the warning-severity
+// `Deviation Breach Critical State Changed`, which reports transitions of the
+// bridge's classification rather than firing on the ratio — but a pool that
+// deep in breach is exactly the one whose blocked
 // rebalance is worth an RPC simulation, and the gate keeps that simulation off
 // the long tail of pools drifting a fraction over tolerance. Sourced from
 // `@mento-protocol/config/thresholds` so a future bump lands in one place

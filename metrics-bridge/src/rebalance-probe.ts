@@ -77,8 +77,9 @@ export function _resetProbeInProgressForTests(): void {
 /**
  * Returns pools eligible for the rebalance-reason probe. The gate is a cost
  * control, not an alert mirror: a pool this deep in breach is the one whose
- * blocked rebalance is worth an RPC simulation, and no Grafana rule has fired
- * on the 1.05 magnitude since ADR 0067.
+ * blocked rebalance is worth an RPC simulation, and since ADR 0067 nothing
+ * pages on the 1.05 magnitude. The only Grafana rule still downstream of it is
+ * the warning-severity `Deviation Breach Critical State Changed`.
  *
  *   - `wrappedExchangeId` empty (native FPMM, not a healed VirtualPool)
  *   - `deviationBreachStartedAt > 0` (active breach anchor)
