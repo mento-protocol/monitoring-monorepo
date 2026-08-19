@@ -125,7 +125,7 @@ PRs are grouped + cooldown-throttled and pass through a tiered auto-merge gate (
 
 Cooldown default in `dependabot.yml`: `default-days: 7`. Per-semver-tier cooldown (`semver-major-days` etc.) is NOT supported for the github-actions ecosystem — only `default-days` is honored, so all tiers share the same delay. Cooldown does NOT apply to security updates (GitHub-enforced). Because auto-merge handles the click, the 7-day delay on routine bumps costs zero friction.
 
-- [ ] If you add a new external Action that's load-bearing for review/merge gating (Cursor Bugbot, Codex, Claude), add it to the auto-merge exclusion list with the same self-loop rationale
+- [ ] If you add a new external review integration — GitHub App or Action — that's load-bearing for review/merge gating (Cursor Bugbot, Codex, Claude, CodeRabbit), add it to the auto-merge exclusion list with the same self-loop rationale
 - [ ] If you add a new `package-ecosystem` to `dependabot.yml`, decide whether it inherits the same auto-merge policy or needs a separate rule — npm in particular has a larger transitive blast radius than github-actions
 
 ## 8. Runner architecture (ARM vs x64)

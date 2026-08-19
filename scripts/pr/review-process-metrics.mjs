@@ -11,9 +11,11 @@ const CODEX_BOT_LOGINS = new Set([
   "chatgpt-codex-connector[bot]",
 ]);
 const CLAUDE_BOT_LOGINS = new Set(["claude", "claude[bot]"]);
+const CODERABBIT_BOT_LOGINS = new Set(["coderabbitai", "coderabbitai[bot]"]);
 const REVIEW_BOT_LOGINS = new Set([
   ...CODEX_BOT_LOGINS,
   ...CLAUDE_BOT_LOGINS,
+  ...CODERABBIT_BOT_LOGINS,
   "cursor",
   "cursor[bot]",
 ]);
@@ -161,6 +163,12 @@ export function isFindingLikeText(value) {
     /\[[Pp][0-3]\]/.test(body) ||
     /\b[Pp][0-3]\s+Badge\b/.test(body) ||
     /\bBUGBOT_BUG_ID\b/.test(body) ||
+    // CodeRabbit's finding marker and severity badge (ADR 0066), the
+    // counterparts to BUGBOT_BUG_ID.
+    /<!--\s*cr-indicator-types\s*:/i.test(body) ||
+    /_\s*(?:\p{Extended_Pictographic}️?\s*)?(?:Critical|Major|Minor|Trivial)\s*_/u.test(
+      body,
+    ) ||
     /\bchanges requested\b/i.test(body) ||
     /\b(?:critical|high|medium|low) severity\b/i.test(body) ||
     /\bfindings?\b/i.test(body)

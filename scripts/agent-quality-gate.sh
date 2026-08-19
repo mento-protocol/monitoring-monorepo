@@ -2805,6 +2805,7 @@ add_root_tooling_package_script_checks() {
   add_command "node scripts/check-sentry-suites-in-ci.test.mjs" "$reason"
   add_command "node scripts/pr-feedback-state.test.mjs" "$reason"
   add_command "node scripts/pr-ready-state.test.mjs" "$reason"
+  add_command "node scripts/coderabbit-config.test.mjs" "$reason"
   add_command "node scripts/terraform/terraform-fmt-check.test.mjs" "$reason"
   add_command "node scripts/tf-stacks.test.mjs" "$reason"
   add_command "node scripts/supply-chain/lockfile-lint.test.mjs" "$reason"
@@ -3866,6 +3867,14 @@ while IFS= read -r path; do
           ;;
       esac
       ;;
+    .coderabbit.yaml)
+      # CodeRabbit resolves this config from the PR's SOURCE branch, and its
+      # findings feed the pr:feedback-state ledger, so the config is a trust
+      # boundary (ADR 0066). A repo-root .yaml reaches no `scripts/*` arm, so
+      # claim the surface and route the allowlist pin here.
+      add_surface "scripts"
+      add_command "pnpm coderabbit:config:test" "CodeRabbit review config changed"
+      ;;
     scripts/sentry-suite-manifest.json)
       # The manifest the self-run Sentry-suite gate reconciles against (#1779,
       # ADR 0062). A .json edit reaches no other scripts/ arm, so claim the
@@ -4118,6 +4127,11 @@ while IFS= read -r path; do
           ;;
         scripts/pr/review-process-metrics.mjs|scripts/pr/review-process-metrics.test.mjs)
           add_command "node scripts/pr/review-process-metrics.test.mjs" "review-process metrics collector changed"
+          ;;
+        scripts/coderabbit-config.test.mjs)
+          # Half of the .coderabbit.yaml pin pair; the config's own arm sits in
+          # the outer case because a repo-root .yaml never reaches this block.
+          add_command "pnpm coderabbit:config:test" "CodeRabbit config pin changed"
           ;;
         # Enumerated, not `scripts/terraform/*`: a glob here would win over the
         # two `terraform-fmt-check` arms below, which bash `case` never reaches
