@@ -23,15 +23,9 @@ import {
 } from "./sentry-triage-agent-comment.mjs";
 
 const RUNNER_TEMP_FOR_TESTS = "/runner/_temp";
-// The three literals below use the scanner's own recognized placeholder
-// vocabulary (dummy-<word>-<word>) so a diff of the whole file (as a
-// rename-and-edit diff shows it) does not read as a live credential to a
-// pattern-based secret scanner; all three are compared only by
-// whole-string equality or generically sliced below, so the exact
-// content changes nothing about what these tests exercise.
-const SENTRY_TOKEN = "dummy-secret-token-value";
-const GH_TOKEN = "dummy-access-token";
-const OAUTH_TOKEN = "dummy-auth-token";
+const SENTRY_TOKEN = "sntrys_deadbeefdeadbeefdeadbeef";
+const GH_TOKEN = "ghs_0123456789abcdefghijklmnopqrstuvwxyz";
+const OAUTH_TOKEN = "sk-ant-oat01-abcdefghijklmnopqrstuvwxyz";
 
 const VERDICT_BODY = [
   VERDICT_MARKER,
@@ -393,8 +387,8 @@ test("the gh child env drops every secret except gh's own credential", async () 
 test("nothing outside the allowlist is inherited", () => {
   const childEnv = buildChildEnv(
     baseEnv({
-      AWS_SECRET_ACCESS_KEY: "placeholder-secret-value",
-      SENTRY_PROJECTION_TOKEN: "dummy-credential-value",
+      AWS_SECRET_ACCESS_KEY: "aws-secret-value",
+      SENTRY_PROJECTION_TOKEN: "projection-secret-value",
       GH_HOST: "evil.example.com",
     }),
   );
