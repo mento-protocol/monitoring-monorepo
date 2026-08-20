@@ -5,6 +5,10 @@ import {
   summarizeFeedbackState,
 } from "./pr-feedback-state-core.mjs";
 import {
+  classifyClaudeReviewProse,
+  matchesCleanReviewCompatibilityRegistry,
+} from "./pr-feedback-state-claude.mjs";
+import {
   parseFeedbackArgs,
   renderFeedbackState,
 } from "./pr-feedback-state.mjs";
@@ -366,6 +370,56 @@ const PR_1848_CLEAN_CLAUDE_REVIEW = {
     "### Numbered finding roll-up",
     "",
     "No P1/P2/P3 findings — nothing rose above the bar for an inline comment.",
+  ].join("\n"),
+};
+
+// Verbatim REST issuecomment 5355983385 from PR #1965. Keep the whole body so
+// its distinct suffix structure can only pass through exact compatibility.
+const PR_1965_HEAD = "0884780bfe1d5ae8710a6f845c3a6199f1bf365d";
+const PR_1965_CLEAN_CLAUDE_REVIEW = {
+  id: 5355983385,
+  html_url:
+    "https://github.com/mento-protocol/monitoring-monorepo/pull/1965#issuecomment-5355983385",
+  created_at: "2026-08-20T12:37:45Z",
+  updated_at: "2026-08-20T12:40:12Z",
+  user: { login: "claude[bot]", type: "Bot" },
+  body: [
+    "**Claude finished @chapati23's task in 2m 10s** —— [View job](https://github.com/mento-protocol/monitoring-monorepo/actions/runs/32369816103)",
+    "",
+    "---",
+    "### Review: PR #1965 — fix(setup): verify custom Foundry installers",
+    "",
+    "**Verdict: LGTM** ✅",
+    "",
+    "- [x] Gather context (PR diff, changed files)",
+    "- [x] Read `scripts/bootstrap/codex-cloud-setup.sh` diff in detail",
+    "- [x] Read `scripts/bootstrap/codex-cloud-setup.test.sh` (new suite)",
+    "- [x] Read `scripts/agent-quality-gate.sh` / `.test.sh` changes",
+    "- [x] Read docs changes (`docs/notes/codex-cloud-setup.md`, `scripts/AGENTS.md`)",
+    "- [x] Check AGENTS.md / CLAUDE.md conformance (supply-chain hardening, path-pin doc)",
+    "- [x] Post inline findings (none — no P1/P2 issues found)",
+    "- [x] Post sticky summary",
+    "",
+    "#### Summary",
+    "",
+    "This closes #1477 correctly: a custom `CODEX_CLOUD_FOUNDRYUP_URL` can no longer reach `curl | bash` unverified. Traced the control flow in `install_foundry` (`scripts/bootstrap/codex-cloud-setup.sh:391-431`):",
+    "",
+    "1. Custom URL + no checksum → fails closed before any `curl`/`bash` runs.",
+    "2. Checksum present but malformed (not 64 hex chars) → fails closed, regardless of URL.",
+    "3. Checksum present and valid → routed through `run_verified_foundry_installer` (download to `mktemp` file, `sha256sum -c` verify, `bash` only after verification, `trap ... EXIT` inside the subshell cleans up the temp file on every exit path — success, checksum mismatch, download failure, or installer failure).",
+    "4. No checksum + URL unchanged → the pipeline hardcodes `$default_foundryup_url` (not the user-controlled `$foundryup_url`) for the `curl | bash` path, so a custom URL can never slip into the unverified pipeline even if the earlier guard were ever bypassed — solid defense-in-depth.",
+    "",
+    "The new `codex-cloud-setup.test.sh` offline suite exercises all the paths above with mocked `curl`/installer/tool binaries, including asserting the temp file is actually removed (`assert_download_was_cleaned`) after mismatch, download failure, and installer failure. Coverage is thorough — nothing to add.",
+    "",
+    'Docs (`docs/notes/codex-cloud-setup.md`) and `scripts/AGENTS.md` are updated consistently with the new behavior, and the gate-routing pin (`agent-quality-gate.sh` pairing `codex-cloud-setup.{sh,test.sh}`) is documented in `scripts/AGENTS.md`\'s "Why Files Stay Flat" section as required by `scripts/CLAUDE.md` ("Any new pin of a `scripts/` path must be listed here").',
+    "",
+    "#### Findings roll-up",
+    "",
+    "No findings — none of the reviewed dimensions (correctness, security, AGENTS.md conformance, test coverage) surfaced an issue worth flagging.",
+    "",
+    "#### Notes on review method",
+    "",
+    "- Bash execution (`bash -n`, running the test suite) required approval not available in this session, so verification was static (careful manual trace of control flow + reading the mock test harness) rather than dynamic. The PR body's own validation log (`agent:quality-gate --run`, the offline suite, fresh-context autoreview) covers the dynamic side.",
   ].join("\n"),
 };
 
@@ -1478,6 +1532,128 @@ test("blocks the observed PR #1848 review because its body is free prose", () =>
   assertEqual(feedbackState.ready, false);
   assertEqual(feedbackState.counts.blockingTopLevelBotComments, 1);
   assertEqual(feedbackState.counts.blockingFindings > 0, true);
+});
+
+test("accepts only the exact captured PR #1965 Claude compatibility record", () => {
+  assertEqual(PR_1965_CLEAN_CLAUDE_REVIEW.body.length, 2939);
+  assertEqual(
+    Buffer.byteLength(PR_1965_CLEAN_CLAUDE_REVIEW.body, "utf8"),
+    2965,
+  );
+  assertEqual(
+    createHash("sha256")
+      .update(PR_1965_CLEAN_CLAUDE_REVIEW.body, "utf8")
+      .digest("hex"),
+    "6ebf5de00fde8c46040def096e4c0c02ee0ab02b9fae20130e1ba8e6e84037e3",
+  );
+
+  const options = {
+    number: 1965,
+    title: "fix(setup): verify custom Foundry installers",
+    headRefOid: PR_1965_HEAD,
+    headUpdatedAt: "2026-08-20T12:35:00Z",
+    reactionCreatedAt: "2026-08-20T12:41:00Z",
+  };
+  const directComment = {
+    id: PR_1965_CLEAN_CLAUDE_REVIEW.id,
+    author: PR_1965_CLEAN_CLAUDE_REVIEW.user.login,
+    createdAt: PR_1965_CLEAN_CLAUDE_REVIEW.created_at,
+  };
+
+  assertEqual(
+    classifyClaudeReviewProse(
+      { ...directComment, body: PR_1965_CLEAN_CLAUDE_REVIEW.body },
+      { number: options.number, title: options.title },
+    ),
+    true,
+    "expected the general parser to classify the captured PR #1965 layout as actionable or unsupported",
+  );
+  assertEqual(
+    matchesCleanReviewCompatibilityRegistry(
+      directComment,
+      options,
+      PR_1965_CLEAN_CLAUDE_REVIEW.body,
+    ),
+    true,
+  );
+
+  const readyState = normalizedReadyStateForClaudeReview(
+    PR_1965_CLEAN_CLAUDE_REVIEW,
+    options,
+  );
+  const feedbackState = summarizeFeedbackState(readyState);
+  assertEqual(readyState.required.ready, true);
+  assertEqual(feedbackState.ready, true);
+  assertEqual(feedbackState.counts.blockingTopLevelBotComments, 0);
+  assertEqual(feedbackState.counts.blockingFindings, 0);
+
+  for (const [label, comment, mutatedOptions] of [
+    [
+      "body",
+      {
+        ...PR_1965_CLEAN_CLAUDE_REVIEW,
+        body: `${PR_1965_CLEAN_CLAUDE_REVIEW.body}\n`,
+      },
+      options,
+    ],
+    [
+      "author",
+      {
+        ...PR_1965_CLEAN_CLAUDE_REVIEW,
+        user: { ...PR_1965_CLEAN_CLAUDE_REVIEW.user, login: "claude" },
+      },
+      options,
+    ],
+    [
+      "comment ID",
+      {
+        ...PR_1965_CLEAN_CLAUDE_REVIEW,
+        id: PR_1965_CLEAN_CLAUDE_REVIEW.id + 1,
+      },
+      options,
+    ],
+    ["PR", PR_1965_CLEAN_CLAUDE_REVIEW, { ...options, number: 1966 }],
+    [
+      "head",
+      PR_1965_CLEAN_CLAUDE_REVIEW,
+      { ...options, headRefOid: "b".repeat(40) },
+    ],
+    [
+      "timestamp",
+      {
+        ...PR_1965_CLEAN_CLAUDE_REVIEW,
+        created_at: "2026-08-20T12:37:46Z",
+      },
+      options,
+    ],
+  ]) {
+    assertEqual(
+      matchesCleanReviewCompatibilityRegistry(
+        {
+          id: comment.id,
+          author: comment.user.login,
+          createdAt: comment.created_at,
+        },
+        mutatedOptions,
+        comment.body,
+      ),
+      false,
+      `${label}: expected direct compatibility-registry mismatch`,
+    );
+
+    const mutatedReadyState = normalizedReadyStateForClaudeReview(
+      comment,
+      mutatedOptions,
+    );
+    const mutatedFeedbackState = summarizeFeedbackState(mutatedReadyState);
+    assertEqual(
+      mutatedFeedbackState.ready,
+      false,
+      `${label}: expected feedback-state to fail closed`,
+    );
+    assertEqual(mutatedFeedbackState.counts.blockingTopLevelBotComments, 1);
+    assertEqual(mutatedFeedbackState.counts.blockingFindings > 0, true);
+  }
 });
 
 test("classifies the post-#1848 Claude prose pattern library", () => {

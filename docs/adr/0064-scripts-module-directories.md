@@ -3,7 +3,7 @@ title: scripts/ may use module subdirectories; basenames and pinned paths are th
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-18
+last_verified: 2026-08-20
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -225,9 +225,10 @@ routing, not procedure.
    runs a script from the PR's **base** ref must probe the new path and the
    pre-move path; see the trusted-validator consequence above.
 4. `terraform.stacks.json` — each stack's `changedPathPatterns` enumerates
-   exact `scripts/` paths, which `docs/terraform.md` requires the workflow
-   filters to mirror, and `tf-stacks.test.mjs` asserts three of them per stack.
-   A stale entry stops the stack reacting to its own tooling.
+   exact `scripts/` paths. The registry's broad `workflowAdmissionPatterns`
+   boundary admits `scripts/**`; `tf-stacks.test.mjs` proves it subsumes every
+   stack pattern. A stale stack entry still stops that stack reacting to its
+   own tooling.
 5. `.trunk/trunk.yaml` pre-push hook, and `.gitattributes`.
 6. `.claude/settings.json`, `.codex/hooks.json`,
    `.claude/hooks/session-start.sh`, and the verbatim copies and invocation
