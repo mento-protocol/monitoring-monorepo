@@ -138,9 +138,10 @@ ambiguous verdicts, and unsupported markup stay blocking. Current-head and
 unresolved-feedback checks remain separate and mandatory.
 
 The registry and named phrase groups live in
-`scripts/pr-feedback-state-claude.mjs`. Add a compatibility record only with a
-byte-exact source fixture and single-field binding mutations. The library does
-not try to prove the meaning of arbitrary English prose.
+`scripts/pr-feedback-state-claude.mjs`. Add a named phrase only with a real
+review fixture and nearby blocking mutations. Add a compatibility record only
+with a byte-exact source fixture and single-field binding mutations. The
+library does not try to prove the meaning of arbitrary English prose.
 
 ## Expected CLI contract
 
