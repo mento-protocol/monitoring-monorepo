@@ -152,6 +152,7 @@ run_install() {
     export TEST_CURL_FAIL="$curl_fail"
     export TEST_FOUNDRYUP_FAIL="$foundryup_fail"
     export TEST_EXPECTED_URL="${url_value/__UNSET__/$default_url}"
+    export CODEX_CLOUD_INSTALL_FOUNDRY=true
     unset CODEX_CLOUD_FOUNDRYUP_URL CODEX_CLOUD_FOUNDRYUP_SHA256
     if [[ "$url_value" != "__UNSET__" ]]; then
       export CODEX_CLOUD_FOUNDRYUP_URL="$url_value"
