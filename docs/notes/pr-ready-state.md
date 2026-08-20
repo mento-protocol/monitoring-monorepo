@@ -147,7 +147,7 @@ trailing sentence blocks, because a tail is unconstrained English and no term
 list separates praise from a defect stated plainly.
 
 The registry and named phrase groups live in
-`scripts/pr-feedback-state-claude.mjs`. Add a phrase only with a real review
+`scripts/pr/pr-feedback-state-claude.mjs`. Add a phrase only with a real review
 fixture and nearby blocking mutations. The library does not try to prove the
 meaning of arbitrary English prose — it refuses prose it cannot recognize, and
 the compatibility registry is the escape hatch for a specific historical body.

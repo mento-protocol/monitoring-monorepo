@@ -868,7 +868,7 @@ export async function fetchReadyState({
 }
 
 function usage() {
-  return `Usage: pnpm pr:ready-state <pr-number-or-url> [--repo <[host/]owner/name>] [--json] [--compact] [--watch] [--until-ready]\n       pnpm pr:ready-state --pr <pr-number-or-url> [--repo <[host/]owner/name>] [--json] [--compact] [--watch] [--until-ready]\n       pnpm pr:ready-state --help\n       node scripts/pr-ready-state.mjs <pr-number-or-url> [--repo <[host/]owner/name>] [--json] [--compact] [--watch] [--until-ready]\n\nNote: --watch --json emits newline-delimited JSON, one summary per poll. --until-ready only affects watch mode.\n`;
+  return `Usage: pnpm pr:ready-state <pr-number-or-url> [--repo <[host/]owner/name>] [--json] [--compact] [--watch] [--until-ready]\n       pnpm pr:ready-state --pr <pr-number-or-url> [--repo <[host/]owner/name>] [--json] [--compact] [--watch] [--until-ready]\n       pnpm pr:ready-state --help\n       node scripts/pr/pr-ready-state.mjs <pr-number-or-url> [--repo <[host/]owner/name>] [--json] [--compact] [--watch] [--until-ready]\n\nNote: --watch --json emits newline-delimited JSON, one summary per poll. --until-ready only affects watch mode.\n`;
 }
 
 function readFlagValue(rest, flag) {

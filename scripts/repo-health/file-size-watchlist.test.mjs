@@ -337,7 +337,7 @@ test("the exemption list holds exactly the three trust-root files", () => {
   // exemptionReason controls.
   for (const path of [
     "scripts/agent-quality-gate.sh",
-    "scripts/pr-ready-state-core.mjs",
+    "scripts/pr/pr-ready-state-core.mjs",
     "scripts/deploy-staging-contract.mjs",
     "scripts/sentry/autofix/sentry-autofix-select.test.mjs",
     "scripts/tf-stacks.test.mjs",

@@ -24,7 +24,7 @@ pre-push Codex autoreview. BugBot is advisory only for CI status: its check is
 not required and its lag does not block (ADR 0007). Its comment content is not
 fully advisory, though — `pr:feedback-state` treats `BUGBOT_BUG_ID` as an
 actionable marker and blocks `pr:ready-state` until every flagged comment is
-answered (`scripts/pr-feedback-state-core.mjs`); the dependabot auto-merge flow
+answered (`scripts/pr/pr-feedback-state-core.mjs`); the dependabot auto-merge flow
 separately cites BugBot's risk summary as advisory only. Codex and Claude run
 on subscriptions the team already pays for other reasons. BugBot is the only
 reviewer with its own bill.
@@ -141,9 +141,9 @@ Replace BugBot with CodeRabbit as the third advisory reviewer.
    the window.
 4. **Update the bot rosters and docs — two phases, not one cutover PR.** The
    ADD side lands here, side by side with BugBot, nothing BugBot-related
-   removed: `scripts/pr-feedback-state-core.mjs`,
-   `scripts/pr-feedback-state-claude.mjs` (CodeRabbit's markers enter;
-   `BUGBOT_BUG_ID` stays live), `scripts/pr-ready-state-core.mjs`,
+   removed: `scripts/pr/pr-feedback-state-core.mjs`,
+   `scripts/pr/pr-feedback-state-claude.mjs` (CodeRabbit's markers enter;
+   `BUGBOT_BUG_ID` stays live), `scripts/pr/pr-ready-state-core.mjs`,
    `scripts/pr/review-process-metrics.mjs`, their tests,
    `docs/notes/pr-ready-state.md`, and `docs/pr-checklists/ci-workflow-gates.md`.
    The BugBot sweep — retiring `BUGBOT_BUG_ID`,
@@ -231,13 +231,13 @@ Replace BugBot with CodeRabbit as the third advisory reviewer.
   (`pnpm coderabbit:config:test`), so a source-branch edit to
   `.coderabbit.yaml` fails the build instead of silently weakening the
   reviewer; and the feedback-ledger roster
-  (`scripts/pr-feedback-state-core.mjs`, `scripts/pr-feedback-state-claude.mjs`,
+  (`scripts/pr/pr-feedback-state-core.mjs`, `scripts/pr/pr-feedback-state-claude.mjs`,
   `scripts/pr/review-process-metrics.mjs`) carries marker-recognition tests
   for CodeRabbit's finding markers (`cr-indicator-types`, the severity badge)
   and its non-finding machinery (rate-limit, summary, trigger-ack,
   thread-resolved-ack). CodeRabbit's inline findings now feed
   `pr:feedback-state`, the merge oracle; its own check context stays
-  advisory (`scripts/pr-ready-state-core.mjs`). Two residuals, accepted:
+  advisory (`scripts/pr/pr-ready-state-core.mjs`). Two residuals, accepted:
   the pin is fail-loud, not fail-secure — CodeRabbit reviews the source
   branch before CI runs, so a weakened config still shapes that one PR's
   review, and a same-patch edit to config plus pin is visible rather than
@@ -294,4 +294,4 @@ Replace BugBot with CodeRabbit as the third advisory reviewer.
   merged-PR volume from `git log --first-parent` (280 in 30 days, 850 in 90);
   BugBot's not-required check status per ADR 0007 and
   `docs/pr-checklists/ci-workflow-gates.md`; its `BUGBOT_BUG_ID` feedback-gate
-  role per `scripts/pr-feedback-state-core.mjs`.
+  role per `scripts/pr/pr-feedback-state-core.mjs`.
