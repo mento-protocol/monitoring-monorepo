@@ -84,6 +84,44 @@ const THEMATIC_BREAK = /^(?:-{3,}|\*{3,}|_{3,})$/;
 // else after the label makes the line free prose, which is not recognized.
 const CLEAN_SECTION_LABEL =
   /^(?:\*\*)?(?:Numbered\s+findings?\s+roll[- ]?up|Findings|Roll[- ]?up)\s*:?(?:\*\*)?$/i;
+// The `#### What I checked` checklist a clean Claude review opens with, and
+// the curated topic allowlist that makes it safe evidence. It lives here
+// because both Claude-review paths read it: `isExplicitlyCleanClaudeReview` in
+// pr-feedback-state-core.mjs validates the checklist inside the preamble that
+// precedes paired `Findings`/`Roll-up` headings, and the prose classifier below
+// meets the same checklist standing on its own (issue 1968). One definition,
+// never two — core imports these, and the claude module never imports core.
+//
+// The allowlist is what bounds this shape. `- [x] <anything>` is a free
+// sentence, so recognizing every ticked box would readmit exactly the
+// declarative defect the allowlist scan closed: `- [x] Anonymous callers can
+// delete every stored record.` Only a subject built from curated topics counts.
+const CLAUDE_CHECKLIST_HEADING = /^#{1,6}\s+What\s+I\s+checked$/i;
+const CLAUDE_CHECKLIST_ENTRY = /^-\s+\[([^\]])\]\s+(.{1,200})$/;
+const SAFE_CLAUDE_CHECKLIST_TOPICS = new Set([
+  "api contract",
+  "authentication boundary",
+  "checklist routing",
+  "ci status",
+  "configuration scope",
+  "dependency resolution",
+  "documentation examples",
+  "generated artifacts",
+  "operator documentation",
+  "parser behavior",
+  "parser structure",
+  "regression-test coverage",
+  "request-path coverage",
+  "review title",
+  "runtime behavior",
+  "schema compatibility",
+  "session lifecycle",
+  "type safety",
+  "unit tests",
+  "unit-test coverage",
+]);
+const LEGACY_SAFE_CLAUDE_CHECKLIST_SUBJECT =
+  /^(?:`pnpm-workspace\.yaml`\s+override\s+syntax\/scope|`pnpm-lock\.yaml`\s+regeneration\s+for\s+unrelated\s+drift|Supply-chain\/lockfile-lint\s+compliance\s+and\s+CI\s+status|Other\s+standalone\s+lockfiles\s+for\s+leftover\s+vulnerable\s+`sharp@0\.34\.5`)$/i;
 // The priority marker a finding line opens with, stripped before the rest of
 // the line is judged. Shared by the action scan and the P3 evidence check so
 // the two cannot disagree about where a finding's text begins.
@@ -350,12 +388,59 @@ function isRecognizedCleanReviewLine(line) {
     return true;
   if (verdictDeclaration(raw)) return true;
   if (CLEAN_SECTION_LABEL.test(reviewLineContent(raw))) return true;
+  // A `#### What I checked` checklist is legitimate on its own, not only inside
+  // the preamble that precedes paired `Findings`/`Roll-up` headings, which is
+  // the whole of issue 1968. It is recognized through the same two functions
+  // that validate it there, so the standalone and paired paths cannot disagree
+  // about which checklist is safe.
+  if (isClaudeChecklistHeading(raw) || isBenignChecklistEntry(raw)) return true;
   const priority = priorityAtLineStart(raw);
   if (priority !== undefined)
     return (
       priority === "3" && hasPositiveCleanEvidence(priorityLineContent(raw))
     );
   return false;
+}
+
+// True for the checklist's own heading. The heading names a section and
+// asserts nothing, so it is recognized clean evidence on its own — the entries
+// under it are what carry claims, and each is checked separately.
+export function isClaudeChecklistHeading(line) {
+  return CLAUDE_CHECKLIST_HEADING.test(String(line ?? "").trim());
+}
+
+function isBenignChecklistSubject(value) {
+  const subject = String(value ?? "").trim();
+  if (
+    !subject ||
+    subject.length > 200 ||
+    hasControlCharacter(subject) ||
+    (subject.match(/`/g)?.length ?? 0) % 2 !== 0
+  )
+    return false;
+  if (LEGACY_SAFE_CLAUDE_CHECKLIST_SUBJECT.test(subject)) return true;
+  const topics = subject.toLowerCase().split(/\s+and\s+/);
+  return (
+    topics.length <= 3 &&
+    topics.every((topic) => SAFE_CLAUDE_CHECKLIST_TOPICS.has(topic))
+  );
+}
+
+// True for a single checklist entry that is both TICKED and built only from
+// curated topics. Both callers ask this one question, so the entry grammar, the
+// ticked-box rule, and the subject allowlist are spelled once. An unticked
+// (`[ ]`) or negated (`[-]`) box states an intention rather than a result and
+// fails here, the same way `hasUncheckedTaskBox` rejects it for every other
+// recognized shape.
+export function isBenignChecklistEntry(line) {
+  const entry = String(line ?? "")
+    .trim()
+    .match(CLAUDE_CHECKLIST_ENTRY);
+  return (
+    entry !== null &&
+    entry[1].toLowerCase() === "x" &&
+    isBenignChecklistSubject(entry[2])
+  );
 }
 
 export function hasControlCharacter(value) {

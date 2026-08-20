@@ -5,40 +5,15 @@ const FINDING_EXCERPT_LENGTH = 240;
 const FAILURE_TERM = /\b(?:error|errors|fail|fails|failed|failure|failures)\b/i;
 const NEGATED_FAILURE =
   /\b(?:no|zero|0)[ \t]+(?:errors?|fails?|failed|failures?)(?:[ \t]+(?:and|or)[ \t]+(?:errors?|fails?|failed|failures?))?(?:[ \t]+(?:are|was|were)[ \t]+(?:found|observed|reported))?(?=[ \t]*(?:[.,;:]|$))/gi;
-const CLEAN_FINDING_MARKER =
-  /^(?:None\s+blocking|No[- ]action(?:\s+required)?|Good\s+hygiene|Lockfile\s+diff\s+is\s+fully\s+mechanical)\b[\s:—.,]*(.*)$/i;
-const UNSAFE_EVIDENCE_QUALIFIER =
-  /\b(?:not|never|cannot|can't|doesn't|does\s+not|fails?\s+to|may|might|could|appears?|seems?|probably|likely|possibly|perhaps|unclear|unknown)\b/i;
-const POSITIVE_EVIDENCE =
-  /^(?:clean(?:,\s+well\s+scoped)?(?:\s+fix)?|well\s+scoped(?:\s+fix)?|correct|covered|bounded|mechanical|verified|complete|exact\s+removal\s+condition|(?:no|zero|0)\s+(?:errors?|fails?|failed|failures?)(?:\s+(?:and|or)\s+(?:errors?|fails?|failed|failures?))?(?:\s+(?:are|was|were)\s+(?:found|observed|reported))?|no\s+unrelated\s+version\s+bumps?|no\s+vulnerable\s+sharp@0\.34\.5\s+remains?\s+anywhere\s+in\s+(?:the\s+)?repo(?:'s)?\s+lockfiles|parser\s+should\s+continue\s+rejecting\s+malformed\s+input|fallback\s+should\s+stay|fix\s+is\s+correct|override\s+selector\s+is\s+correctly\s+bounded|lockfile\s+churn\s+beyond\s+sharp\s+itself\s+is\s+confirmed\s+mechanical,\s+not\s+scope\s+creep|(?:the\s+)?bounded\s+selector\s+matches\s+the\s+repo(?:'s)?\s+established\s+override\s+pattern|matches\s+repo\s+convention|(?:the\s+)?inline\s+comment\s+documents\s+the\s+advisory|removal\s+condition\s+comment\s+satisfies\s+the\s+temporary\s+override\s+documentation\s+expectation|tests\s+cover\s+the\s+changed\s+paths)$/i;
+// The clean-evidence grammar (CLEAN_FINDING_MARKER, POSITIVE_EVIDENCE, and the
+// hedge filter) now lives in pr-feedback-state-claude.mjs, which both this path
+// and the prose classifier read. One definition, never two.
 const CLAUDE_REVIEW_TITLE_LINE = /^#{1,6}\s+Review:\s+(.{1,200})$/i;
 const CLAUDE_VERDICT_LINE = /^(?:\*\*)?Verdict:\s*LGTM(?:\*\*)?$/i;
-const CLAUDE_CHECKLIST_HEADING = /^#{1,6}\s+What\s+I\s+checked$/i;
-const CLAUDE_CHECKLIST_ENTRY = /^-\s+\[([^\]])\]\s+(.{1,200})$/;
-const SAFE_CLAUDE_CHECKLIST_TOPICS = new Set([
-  "api contract",
-  "authentication boundary",
-  "checklist routing",
-  "ci status",
-  "configuration scope",
-  "dependency resolution",
-  "documentation examples",
-  "generated artifacts",
-  "operator documentation",
-  "parser behavior",
-  "parser structure",
-  "regression-test coverage",
-  "request-path coverage",
-  "review title",
-  "runtime behavior",
-  "schema compatibility",
-  "session lifecycle",
-  "type safety",
-  "unit tests",
-  "unit-test coverage",
-]);
-const LEGACY_SAFE_CLAUDE_CHECKLIST_SUBJECT =
-  /^(?:`pnpm-workspace\.yaml`\s+override\s+syntax\/scope|`pnpm-lock\.yaml`\s+regeneration\s+for\s+unrelated\s+drift|Supply-chain\/lockfile-lint\s+compliance\s+and\s+CI\s+status|Other\s+standalone\s+lockfiles\s+for\s+leftover\s+vulnerable\s+`sharp@0\.34\.5`)$/i;
+// The `What I checked` checklist grammar and its curated topic allowlist now
+// live in pr-feedback-state-claude.mjs, which both this preamble validator and
+// the standalone-checklist path in the prose classifier read. One definition,
+// never two.
 const LEGACY_SAFE_CLAUDE_FINDING_LINES = new Set([
   "1. **[P3] None blocking — clean, well-scoped fix.** The bounded selector matches the repo's established override pattern.",
   "2. **[P3] Good hygiene:** the inline comment documents the advisory and exact removal condition.",
@@ -164,22 +139,6 @@ function hasReviewContradiction(value) {
   const body = reviewContradictionBody(value);
   return REVIEW_CONTRADICTION.test(body) || hasUnnegatedFailure(body);
 }
-function isBenignChecklistSubject(value) {
-  const subject = String(value ?? "").trim();
-  if (
-    !subject ||
-    subject.length > 200 ||
-    claudeReview.hasControlCharacter(subject) ||
-    (subject.match(/`/g)?.length ?? 0) % 2 !== 0
-  )
-    return false;
-  if (LEGACY_SAFE_CLAUDE_CHECKLIST_SUBJECT.test(subject)) return true;
-  const topics = subject.toLowerCase().split(/\s+and\s+/);
-  return (
-    topics.length <= 3 &&
-    topics.every((topic) => SAFE_CLAUDE_CHECKLIST_TOPICS.has(topic))
-  );
-}
 function isSafeClaudePreamble(lines, pr) {
   const preamble = lines.map((line) => line.trim()).filter(Boolean);
   let index = 0;
@@ -197,57 +156,29 @@ function isSafeClaudePreamble(lines, pr) {
   if (!CLAUDE_VERDICT_LINE.test(preamble[index] ?? "")) return false;
   index += 1;
   if (index === preamble.length) return true;
-  if (!CLAUDE_CHECKLIST_HEADING.test(preamble[index] ?? "")) return false;
+  if (!claudeReview.isClaudeChecklistHeading(preamble[index] ?? ""))
+    return false;
   index += 1;
 
   let checklistEntries = 0;
   for (; index < preamble.length; index += 1) {
-    const entry = preamble[index].match(CLAUDE_CHECKLIST_ENTRY);
-    if (
-      !entry ||
-      entry[1].toLowerCase() !== "x" ||
-      !isBenignChecklistSubject(entry[2])
-    )
-      return false;
+    if (!claudeReview.isBenignChecklistEntry(preamble[index])) return false;
     checklistEntries += 1;
   }
   return checklistEntries > 0;
-}
-function hasPositiveCleanEvidence(value) {
-  const tail = String(value ?? "")
-    .trim()
-    .match(CLEAN_FINDING_MARKER)?.[1];
-  if (tail === undefined) return false;
-  const evidenceClauses = tail
-    .split(/(?:[!?;]+|\.(?=\s|$)|\b(?:and|but|however|although|yet)\b)/i)
-    .map((clause) => clause.trim())
-    .filter(Boolean);
-  return (
-    evidenceClauses.length > 0 &&
-    evidenceClauses.every((evidence) => {
-      const withoutSafeNegation = evidence.replace(
-        /,\s+not\s+scope\s+creep$/i,
-        "",
-      );
-      return (
-        !UNSAFE_EVIDENCE_QUALIFIER.test(withoutSafeNegation) &&
-        POSITIVE_EVIDENCE.test(evidence)
-      );
-    })
-  );
 }
 function isCleanFindingLine(line) {
   const raw = String(line ?? "").trim();
   if (LEGACY_SAFE_CLAUDE_FINDING_LINES.has(raw)) return true;
   const p3 = raw.match(/^\d+[.)]\s+\[[Pp]3\]\s+(.+)$/);
-  if (p3) return hasPositiveCleanEvidence(p3[1]);
+  if (p3) return claudeReview.hasPositiveCleanEvidence(p3[1]);
   return false;
 }
 function isCleanRollupLine(line) {
   const raw = String(line ?? "").trim();
   if (LEGACY_SAFE_CLAUDE_ROLLUP_LINES.has(raw)) return true;
   const entry = raw.match(CLEAN_ROLLUP_ENTRY)?.[1];
-  return entry !== undefined && hasPositiveCleanEvidence(entry);
+  return entry !== undefined && claudeReview.hasPositiveCleanEvidence(entry);
 }
 function isExplicitlyCleanClaudeReview(comment, pr) {
   const author = String(comment.author ?? "").toLowerCase();

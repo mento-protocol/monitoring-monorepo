@@ -2079,6 +2079,157 @@ test("refuses prose the prose classifier cannot positively recognize", () => {
   }
 });
 
+// Issue 1968. `#### What I checked` is a shape the codebase already treated as
+// legitimate — `isSafeClaudePreamble` validates it — but only inside the
+// preamble that precedes paired `Findings`/`Roll-up` headings. Standing on its
+// own, the body routes to the prose classifier, which had no checklist shape at
+// all, so a clean review was blocked. Both paths now read ONE definition of the
+// checklist grammar and ONE curated topic allowlist, so they cannot disagree
+// about which checklist is safe.
+//
+// The allowlist is the whole safety property. `- [x] <free sentence>` would
+// readmit exactly the declarative defect issue 1966 closed, so the blocking
+// half below is the load-bearing half.
+test("recognizes a standalone What-I-checked checklist only for curated topics", () => {
+  const options = {
+    number: 1848,
+    title: "fix(agent): accept exact no-action Claude review",
+    headRefOid: PR_1848_HEAD,
+    headUpdatedAt: "2026-08-13T22:09:46Z",
+    reactionCreatedAt: "2026-08-20T09:30:00Z",
+  };
+  let fixtureId = 5353832870;
+  const expectReady = (label, body, expected) => {
+    const feedbackState = summarizeFeedbackState(
+      normalizedReadyStateForClaudeReview(
+        {
+          ...PR_1848_CLEAN_CLAUDE_REVIEW,
+          id: fixtureId++,
+          created_at: "2026-08-20T09:10:48Z",
+          updated_at: "2026-08-20T09:11:54Z",
+          body,
+        },
+        options,
+      ),
+    );
+    assertEqual(
+      feedbackState.ready,
+      expected,
+      `${label}: unexpected feedback-state result`,
+    );
+    assertEqual(
+      feedbackState.counts.blockingTopLevelBotComments,
+      expected ? 0 : 1,
+    );
+  };
+
+  // The reproduction from the issue: a verdict, a standalone checklist, and a
+  // bare conclusion, with no `Findings`/`Roll-up` headings anywhere. Subjects
+  // are curated topics — the issue's illustrative "Reviewed the diff for
+  // correctness" is not one, and deliberately still blocks below.
+  const standalone = (entries) =>
+    [
+      `### Review: ${options.title}`,
+      "",
+      "**Verdict:** LGTM",
+      "",
+      "#### What I checked",
+      ...entries,
+      "",
+      "No P1/P2/P3 findings.",
+    ].join("\n");
+  const CURATED = ["- [x] Unit tests", "- [x] Parser behavior"];
+  const DEFECT = "Anonymous callers can delete every stored record.";
+
+  for (const [label, body] of [
+    ["standalone checklist with curated topics", standalone(CURATED)],
+    [
+      "standalone checklist with and-joined curated topics",
+      standalone(["- [x] Unit tests and type safety and ci status"]),
+    ],
+    [
+      "standalone checklist under a deeper heading level",
+      standalone(CURATED).replace(
+        "#### What I checked",
+        "##### What I checked",
+      ),
+    ],
+    [
+      "standalone checklist with a legacy curated subject",
+      standalone(["- [x] `pnpm-workspace.yaml` override syntax/scope"]),
+    ],
+  ]) {
+    expectReady(label, body, true);
+  }
+
+  for (const [label, body] of [
+    // The allowlist must not become open-ended: an uncurated subject is a free
+    // sentence, and a free sentence can state a defect.
+    [
+      "checklist subject outside the curated topic set",
+      standalone([`- [x] ${DEFECT}`]),
+    ],
+    [
+      "checklist subject that only starts with a curated topic",
+      standalone(["- [x] Unit tests, but the retry loop never terminates"]),
+    ],
+    [
+      "checklist subject joining more topics than the cap allows",
+      standalone([
+        "- [x] Unit tests and type safety and ci status and review title",
+      ]),
+    ],
+    [
+      "checklist subject with an unbalanced code span",
+      standalone(["- [x] `unit tests"]),
+    ],
+    // `hasUncheckedTaskBox` guards every recognized shape, and a checklist
+    // entry is no exception: an unticked or negated box states an intention the
+    // reviewer never completed.
+    [
+      "unchecked checklist entry",
+      standalone(["- [ ] Unit tests", "- [x] Parser behavior"]),
+    ],
+    [
+      "negated checklist entry",
+      standalone(["- [-] Unit tests", "- [x] Parser behavior"]),
+    ],
+    // Recognizing the checklist must not license the rest of the body.
+    [
+      "curated checklist beside a declarative defect",
+      `${standalone(CURATED)}\n\n${DEFECT}`,
+    ],
+    [
+      "curated checklist beside an explicit action",
+      `${standalone(CURATED)}\n\nPlease fix the fallback.`,
+    ],
+    [
+      "curated checklist beside a severity finding",
+      `${standalone(CURATED)}\n\nSeverity: High — the token leaks into the log.`,
+    ],
+    // A checklist is evidence of review, never the clean conclusion itself.
+    // Dropping the conclusion must still block.
+    [
+      "curated checklist with no clean conclusion",
+      standalone(CURATED).replace("\n\nNo P1/P2/P3 findings.", ""),
+    ],
+    // The entry grammar accepts one subject, not a smuggled finding line.
+    [
+      "checklist entry carrying a priority finding",
+      standalone(["- [x] [P1] Unit tests are missing"]),
+    ],
+    [
+      "checklist heading carrying a claim",
+      standalone(CURATED).replace(
+        "#### What I checked",
+        `#### What I checked — ${DEFECT}`,
+      ),
+    ],
+  ]) {
+    expectReady(label, body, false);
+  }
+});
+
 test("fails closed on single-field PR #1544 Overall-verdict mutations", () => {
   const clean = PR_1544_CLEAN_CLAUDE_REVIEW.body;
   const reviewHeading = "### Code Review — PR #1544";
