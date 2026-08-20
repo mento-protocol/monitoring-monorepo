@@ -6598,6 +6598,39 @@ run_capture_deadline_regressions() {
   run_capture_deadline_feedback_clamp_arm
   run_capture_deadline_byte_refusal_arm
   run_capture_deadline_helper_accumulation_arm
+  run_capture_deadline_wrapper_accumulation_arm
+}
+
+# The same claim on the wrapper side: one budget for the whole capture stage,
+# not a fresh one per capture. Two finite stalls that each fit the budget alone
+# but not together separate them, and the refusal must name the second capture.
+# A stage clock that restarted per capture would finish both.
+run_capture_deadline_wrapper_accumulation_arm() {
+  local review_repo="$tmp_dir/capture-deadline-wrapper-accumulation"
+  local filter_script="$tmp_dir/capture-deadline-wrapper-accumulation-filter.sh"
+  local state_pointer="$tmp_dir/capture-deadline-wrapper-accumulation-state-dir"
+  local state_dir="$tmp_dir/capture-deadline-wrapper-accumulation-state"
+  local bundle_dir="$tmp_dir/capture-deadline-wrapper-accumulation-bundle"
+
+  mkdir -p "$state_dir"
+  printf '%s\n' "$state_dir" >"$state_pointer"
+  seed_capture_deadline_fixture \
+    "$review_repo" "$filter_script" "$state_pointer" 2 patch-and-stat
+
+  run_helper_in_repo_expect_failure_with_env "$review_repo" \
+    "AGENT_AUTOREVIEW_CAPTURE_DEADLINE_SECONDS=7" \
+    "AGENT_AUTOREVIEW_FEEDBACK_DEADLINE_SECONDS=30" \
+    --prepare-bundle-dir "$bundle_dir" \
+    --mode local \
+    --engine local
+  # "capture of unstaged diff stat exceeded" does not contain this phrase, so it
+  # pins the second capture rather than the first.
+  expect_stderr_contains "capture of unstaged diff exceeded"
+  if [[ -e "$bundle_dir" ]]; then
+    printf 'a capture stage that spent its whole budget still published a bundle: %s\n' \
+      "$bundle_dir" >&2
+    exit 1
+  fi
 }
 
 # The helper's budget is one budget for every Git spawn the process makes, not a

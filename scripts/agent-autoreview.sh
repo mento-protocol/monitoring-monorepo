@@ -6007,7 +6007,14 @@ run_capture_with_deadline() {
     # Say nothing about a capture that already finished: the parent has not
     # necessarily reaped this watchdog yet, and a marker written over a
     # completed capture would refuse a run that had nothing wrong with it.
+    # `kill -0` alone is not that check -- a child that exited moments ago is a
+    # zombie until the parent's `wait` reaps it, and a zombie and its group both
+    # still accept the signal. The pipeline records its statuses as its last
+    # act, so that file is what says it finished.
     kill -0 "-$child" 2>/dev/null || kill -0 "$child" 2>/dev/null || exit 0
+    if [[ -s "$status_file" ]]; then
+      exit 0
+    fi
     printf 'timeout\n' >"$timeout_file"
     kill -TERM "-$child" 2>/dev/null || kill -TERM "$child" 2>/dev/null || true
     sleep 1
@@ -6099,7 +6106,15 @@ capture_budgeted_output_file() {
     echo "agent:autoreview: failed to allocate a capture deadline file for $label" >&2
     return 1
   fi
-  : >"$output"
+  # Guarantee the file the size check reads below exists even if the capture
+  # never starts. Checked rather than bare, because a bare redirection failure
+  # here would abort the wrapper under errexit with no diagnostic and leave both
+  # bookkeeping files behind.
+  if ! : >"$output"; then
+    rm -f "$status_file" "$timeout_file"
+    echo "agent:autoreview: failed to open the capture output for $label" >&2
+    return 1
+  fi
 
   set +e
   if [[ "$apply_deadline" -eq 1 ]]; then
