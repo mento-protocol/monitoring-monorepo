@@ -171,6 +171,10 @@ inaction**, not when a ratio is large.
   the previous price, so a price-only check would have kept pricing reserves
   off a rate the contract had stopped honouring. This matches
   `hasFreshLiveMedian`, which is how the indexer decides the same question.
+- That silence is no longer dark. `Pool Value Share Missing` (warning,
+  `#alerts-pools`) fires when a pool holds reserves but publishes no value
+  share, so a pool falling out of depletion coverage is reported rather than
+  merely absent. It surfaces the gap; closing one is still a bridge change.
 - The Polygon `EURm/EUROP` pool is the one exception to that gate. No oracle
   network publishes a EUROP/EUR price, so the pair runs on a hardcoded `MANUAL`
   rate feed pinned to 1:1 ([ADR 0042](0042-metrics-bridge-external-price-poller.md))
@@ -195,6 +199,12 @@ inaction**, not when a ratio is large.
   the fallback on, because the 1:1 rate is a property of the pair rather than of
   any one report's freshness. The stale report itself is the oracle-liveness
   plane's job, and these two ladders stay independent.
+- The fallback and `Pool Value Share Missing` compose without a special case.
+  The alert asks whether a funded pool publishes any value share; once the
+  bridge publishes one for `EURm/EUROP`, that pool stops matching, so the alert
+  needs no pool-ID exclusion and gains no dead branch. If a future editor ever
+  removes the fallback, the alert starts reporting the pool instead of the gap
+  going quiet again.
 - `POOL_DEPLETION_CRITICAL_SHARE` and `POOL_DEPLETION_PAGE_SHARE` join the
   Terraform mirror set. `DEVIATION_CRITICAL_RATIO` leaves it; a future editor
   who bumps it will get no drift-check failure, because there is nothing in

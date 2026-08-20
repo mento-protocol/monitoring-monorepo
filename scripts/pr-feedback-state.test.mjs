@@ -1616,6 +1616,254 @@ test("classifies the post-#1848 Claude prose pattern library", () => {
   );
 });
 
+// The PR #1954 layout: the verdict heading carries the verdict rather than the
+// PR title, emphasis wraps only the `Verdict:` label, and the roll-up denies
+// findings with bracketed severities. Each of those shapes made the classifier
+// read a clean LGTM as unaddressed feedback.
+//
+// Deliberately WITHOUT the trailing summary sentences the observed #1954 body
+// carried. A tail is unconstrained prose, so it is always actionable — see the
+// companion test below, which pins that the observed body itself stays blocked.
+const PR_1954_CLEAN_CLAUDE_BODY = [
+  "**Claude finished @chapati23's task in 0m 50s** —— [View job](https://github.com/mento-protocol/monitoring-monorepo/actions/runs/32352528757)",
+  "",
+  "---",
+  "### Review: LGTM ✅",
+  "",
+  "**Verdict:** LGTM",
+  "",
+  "**Numbered findings roll-up:**",
+  "1. None — no [P1]/[P2]/[P3] findings.",
+].join("\n");
+
+test("accepts the PR #1954 label-bold verdict and bracketed no-findings roll-up", () => {
+  const options = {
+    number: 1848,
+    title: "fix(agent): accept exact no-action Claude review",
+    headRefOid: PR_1848_HEAD,
+    headUpdatedAt: "2026-08-13T22:09:46Z",
+    reactionCreatedAt: "2026-08-20T09:30:00Z",
+  };
+  const comment = (body) => ({
+    ...PR_1848_CLEAN_CLAUDE_REVIEW,
+    id: 5353832859,
+    created_at: "2026-08-20T09:10:48Z",
+    updated_at: "2026-08-20T09:11:54Z",
+    body,
+  });
+  const expectReady = (label, body, expected) => {
+    const feedbackState = summarizeFeedbackState(
+      normalizedReadyStateForClaudeReview(comment(body), options),
+    );
+    assertEqual(
+      feedbackState.ready,
+      expected,
+      `${label}: unexpected feedback-state result`,
+    );
+    assertEqual(
+      feedbackState.counts.blockingTopLevelBotComments,
+      expected ? 0 : 1,
+    );
+  };
+
+  expectReady("bare verdict and roll-up", PR_1954_CLEAN_CLAUDE_BODY, true);
+
+  // The widened grammar must not turn a qualified verdict, a smuggled finding,
+  // or a self-contradicting roll-up into an all-clear. The declarative-defect
+  // cases matter most: they carry no priority, connective, or action verb, so
+  // only refusing tails outright keeps them actionable.
+  const clean = PR_1954_CLEAN_CLAUDE_BODY;
+  const VERDICT = "**Verdict:** LGTM";
+  const ROLLUP = "1. None — no [P1]/[P2]/[P3] findings.";
+  for (const [label, body] of [
+    [
+      "verdict qualified by a required fix",
+      clean.replace(
+        VERDICT,
+        "**Verdict:** LGTM. But the abort timeout must be fixed before merge.",
+      ),
+    ],
+    [
+      "verdict tail naming a priority",
+      clean.replace(
+        VERDICT,
+        "**Verdict:** LGTM. One [P2] is left for a follow-up.",
+      ),
+    ],
+    [
+      "verdict continuation rather than a new sentence",
+      clean.replace(
+        VERDICT,
+        "**Verdict:** LGTM pending rework of the fallback",
+      ),
+    ],
+    [
+      "verdict tail with a direct request",
+      clean.replace(
+        VERDICT,
+        "**Verdict:** LGTM. Please restore the validation before merge.",
+      ),
+    ],
+    [
+      "verdict tail stating a defect declaratively",
+      clean.replace(
+        VERDICT,
+        "**Verdict:** LGTM. Anonymous callers can delete every stored record.",
+      ),
+    ],
+    [
+      "verdict tail reading as praise",
+      clean.replace(
+        VERDICT,
+        "**Verdict:** LGTM. This is a clean, mechanical channel-rename PR.",
+      ),
+    ],
+    [
+      "roll-up denies findings then names one",
+      clean.replace(
+        ROLLUP,
+        "1. None — no [P1]/[P2] findings. [P1] The bot token leaks into the collector step.",
+      ),
+    ],
+    [
+      "roll-up tail carrying an action",
+      clean.replace(
+        ROLLUP,
+        "1. None — no [P1]/[P2]/[P3] findings. Please fix the fallback before merge.",
+      ),
+    ],
+    [
+      "roll-up tail stating a defect declaratively",
+      clean.replace(
+        ROLLUP,
+        "1. None — no [P1]/[P2]/[P3] findings. Anonymous callers can delete every stored record.",
+      ),
+    ],
+    [
+      "verdict heading smuggling free text",
+      clean.replace("### Review: LGTM ✅", "### Review: LGTM — but see below"),
+    ],
+    [
+      "verdict heading naming another PR",
+      clean.replace("### Review: LGTM ✅", "### Review: some other change"),
+    ],
+    // Stripping the `1. ` roll-up prefix must not also strip an unchecked
+    // task box: `- [ ] No P1/P2 findings.` is an intention, not a result, and
+    // treating it as a clean conclusion would additionally hide the line from
+    // the actionable scan via withoutCleanReviewConclusionLines.
+    //
+    // Every prefix order reviewLineContent peels is covered. A first fix
+    // matched only the `- [ ]` shape, which left `1. [ ]`, `1) [ ]`, `### [ ]`,
+    // and `- 1. [ ]` all reading as clean.
+    [
+      "unchecked task conclusion",
+      clean.replace(ROLLUP, "- [ ] No P1/P2 findings."),
+    ],
+    [
+      "unchecked bracketed roll-up",
+      clean.replace(ROLLUP, "- [ ] None — no [P1]/[P2]/[P3] findings."),
+    ],
+    [
+      "negated task conclusion",
+      clean.replace(ROLLUP, "- [-] No P1/P2 findings."),
+    ],
+    [
+      "numbered unchecked conclusion",
+      clean.replace(ROLLUP, "1. [ ] No P1/P2 findings."),
+    ],
+    [
+      "paren-numbered unchecked conclusion",
+      clean.replace(ROLLUP, "1) [ ] No P1/P2 findings."),
+    ],
+    [
+      "numbered negated conclusion",
+      clean.replace(ROLLUP, "2. [-] No P1/P2 findings."),
+    ],
+    [
+      "heading unchecked conclusion",
+      clean.replace(ROLLUP, "### [ ] No P1/P2 findings."),
+    ],
+    [
+      "bullet-then-numbered unchecked conclusion",
+      clean.replace(ROLLUP, "- 1. [ ] No P1/P2 findings."),
+    ],
+    // The verdict line needs the same box check as the conclusion: peeling the
+    // prefix hides an unticked box there too. Closes a hole that predates this
+    // PR — `- [ ] **Verdict: LGTM**` was accepted on main.
+    [
+      "unchecked verdict task",
+      clean.replace(VERDICT, "- [ ] **Verdict:** LGTM"),
+    ],
+    [
+      "numbered unchecked verdict task",
+      clean.replace(VERDICT, "1. [ ] **Verdict:** LGTM"),
+    ],
+    [
+      "unchecked whole-bold verdict task",
+      clean.replace(VERDICT, "- [ ] **Verdict: LGTM**"),
+    ],
+    ["negated verdict task", clean.replace(VERDICT, "- [-] **Verdict:** LGTM")],
+  ]) {
+    expectReady(label, body, false);
+  }
+
+  // The counterpart: a ticked box is a completed check and stays eligible,
+  // under the same prefix orders the rejection covers.
+  for (const [label, conclusion] of [
+    ["checked task conclusion", "- [x] No P1/P2 findings."],
+    ["checked numbered conclusion", "1. [x] No P1/P2 findings."],
+    ["capital-checked conclusion", "- [X] No P1/P2 findings."],
+  ]) {
+    expectReady(label, clean.replace(ROLLUP, conclusion), true);
+  }
+  expectReady(
+    "checked verdict task",
+    clean.replace(VERDICT, "- [x] **Verdict:** LGTM"),
+    true,
+  );
+});
+
+// The body actually posted on PR #1954. Its verdict and roll-up each end in a
+// summarizing sentence, and a sentence is unconstrained natural language: no
+// blacklist of priorities, connectives, or action verbs can tell praise from a
+// defect stated plainly. This gate is fail-closed on a merge path, so the tail
+// keeps it actionable even though a human reads the review as clean. Widening
+// the grammar to admit this body would reopen that hole — treat a failure here
+// as a warning, not a test to relax.
+test("keeps the observed PR #1954 review actionable because its tails are prose", () => {
+  const observed = [
+    "**Claude finished @chapati23's task in 0m 50s** —— [View job](https://github.com/mento-protocol/monitoring-monorepo/actions/runs/32352528757)",
+    "",
+    "---",
+    "### Review: LGTM ✅",
+    "",
+    "**Verdict:** LGTM. This is a clean, mechanical channel-rename PR with no gaps.",
+    "",
+    "**Numbered findings roll-up:**",
+    "1. None — no [P1]/[P2]/[P3] findings. All four changed files are internally consistent and match the PR's stated scope.",
+  ].join("\n");
+  const feedbackState = summarizeFeedbackState(
+    normalizedReadyStateForClaudeReview(
+      {
+        ...PR_1848_CLEAN_CLAUDE_REVIEW,
+        id: 5353832859,
+        created_at: "2026-08-20T09:10:48Z",
+        updated_at: "2026-08-20T09:11:54Z",
+        body: observed,
+      },
+      {
+        number: 1848,
+        title: "fix(agent): accept exact no-action Claude review",
+        headRefOid: PR_1848_HEAD,
+        headUpdatedAt: "2026-08-13T22:09:46Z",
+        reactionCreatedAt: "2026-08-20T09:30:00Z",
+      },
+    ),
+  );
+  assertEqual(feedbackState.ready, false);
+  assertEqual(feedbackState.counts.blockingTopLevelBotComments, 1);
+});
+
 test("fails closed on single-field PR #1544 Overall-verdict mutations", () => {
   const clean = PR_1544_CLEAN_CLAUDE_REVIEW.body;
   const reviewHeading = "### Code Review — PR #1544";

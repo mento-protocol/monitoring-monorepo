@@ -5,17 +5,55 @@ const COMMONMARK_ASCII_PUNCTUATION_ESCAPE =
 const CLAUDE_TASK_COMPLETION_LINE =
   /^\*\*Claude\s+finished\s+@[A-Za-z0-9_-]+'s\s+task\s+in\s+\d+m\s+\d+s\*\*(?:\s+——\s+\[View\s+job\]\(https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/actions\/runs\/\d+\))?$/i;
 const CLAUDE_VERDICT_NAMESPACE = /^(?:\*\*)?(?:Overall\s+)?Verdict\s*:/i;
+// Emphasis may wrap the whole declaration (`**Verdict: LGTM**`) or only the
+// label (`**Verdict:** LGTM`) — the same statement either way. `tail` captures
+// anything after the verdict word; `isCleanTail` decides whether it is a plain
+// summarizing sentence or a qualification that keeps the review actionable.
 const CLAUDE_CLEAN_VERDICT =
-  /^(?:\*\*)?(?:Overall\s+)?Verdict:\s*LGTM(?:\*\*)?\s*$/i;
+  /^(?:\*\*)?(?:Overall\s+)?Verdict:(?:\*\*)?\s*(?:\*\*)?LGTM(?:\*\*)?\s*(?<tail>[\s\S]*)$/i;
 const PROSE_PATTERN_LIBRARY_START = Date.parse("2026-08-13T23:08:10Z");
 const REVIEW_NUMBER_HEADING = /^#{1,6}\s+Code Review\s+—\s+PR\s+#(\d+)$/gm;
 const REVIEW_TITLE_HEADING = /^#{1,6}\s+Review:\s+(.{1,200})$/gim;
+// `### Review: <PR title>` is the usual heading, but a clean review may instead
+// put the verdict there (`### Review: LGTM ✅`). Only the bare verdict word and
+// an optional approval mark are allowed — never free text, which would let a
+// heading smuggle a finding past the title check.
+// Alternation, not a character class: `✔️` is U+2714 plus a variation selector,
+// and a combined character inside a class is a lint error and a silent mismatch.
+const CLEAN_REVIEW_TITLE = /^LGTM(?:\s*(?:✅|✔️?|\u{1F44D}️?))*$/iu;
 const CLEAN_CONCLUSION_PATTERNS = [
   /^No\s+P1\/P2\/P3\s+findings(?:\s*[.—-]\s*(?:clean review|nothing rose above the bar for an inline comment))?[.!]?$/i,
   /^No\s+P1\/P2\s+findings[.!]?$/i,
   /^No\s+inline\s+(?:comments|findings)(?:\s+(?:filed|posted))?(?:\s*[.—-]\s*nothing rose to a P1\/P2\/P3 flag)?[.!]?$/i,
   /^No\s+changes\s+requested[.!]?$/i,
 ];
+// A numbered roll-up entry that states the absence of findings, with the
+// severities optionally bracketed and an optional `None — ` lead-in:
+// `1. None — no [P1]/[P2]/[P3] findings.` The trailing `tail` is held to the
+// same clean-summary rule as a verdict tail, so a roll-up that starts by
+// denying findings and then names one stays actionable.
+const CLEAN_CONCLUSION_WITH_TAIL =
+  /^(?:None\s*[—–-]\s*)?No\s+\[?P1\]?\/\[?P2\]?(?:\/\[?P3\]?)?\s+findings(?<tail>[\s\S]*)$/i;
+// A verdict or roll-up may end with a bare sentence terminator, and nothing
+// else. Any remaining prose makes the statement actionable.
+//
+// This is deliberately an allowlist of ONE shape rather than a blacklist of
+// finding vocabulary. A tail is unconstrained natural language, so rejecting
+// selected terms (priorities, contradiction connectives, action verbs) cannot
+// be exhaustive: a defect stated declaratively — `Verdict: LGTM. Anonymous
+// callers can delete every stored record.` — carries none of those markers and
+// would read as clean. On a fail-closed gate that silently drops real reviewer
+// findings before merge, so the only safe rule is that a clean verdict asserts
+// cleanliness and says nothing further.
+const CLEAN_TAIL_SHAPE = /^[.!]?$/;
+// The prefix grammar `reviewLineContent` peels: bullets, numbering, headings,
+// and task boxes, in any order and up to three deep. `hasUncheckedTaskBox`
+// walks the same pattern and depth — keep them shared, never re-spelled.
+const REVIEW_LINE_PREFIX = /^(?:[-*+]\s+|\d+[.)]\s+|#{1,6}\s+|\[[ xX-]\]\s+)/;
+const REVIEW_LINE_PREFIX_DEPTH = 3;
+// An empty (`[ ]`) or negated (`[-]`) task box, once the prefixes before it are
+// gone. `[x]`/`[X]` is a completed check and stays eligible.
+const UNCHECKED_TASK_BOX = /^\[[ -]\]\s/;
 const CLEAN_P3_DISPOSITION_PATTERNS = [
   /\bno[- ]action(?:\s+requested)?\b/i,
   /\bnone\s+blocking\b/i,
@@ -93,9 +131,51 @@ function isClaudeAuthor(value) {
   return /^claude(?:\[bot\])?$/i.test(String(value ?? ""));
 }
 
+// Guards whatever trails a clean verdict or roll-up entry: only a bare sentence
+// terminator passes. See CLEAN_TAIL_SHAPE for why this is an allowlist.
+function isCleanTail(tail) {
+  return CLEAN_TAIL_SHAPE.test(String(tail ?? "").trim());
+}
+
+function matchesCleanVerdict(line) {
+  const tail = CLAUDE_CLEAN_VERDICT.exec(line)?.groups?.tail;
+  return tail !== undefined && isCleanTail(tail);
+}
+
+// True when an unchecked or negated task box sits anywhere in the line's prefix
+// run. Mirrors `reviewLineContent`'s peel loop step for step — same pattern,
+// same depth — so the two cannot drift into disagreeing about what a prefix is.
+function hasUncheckedTaskBox(line) {
+  let value = String(line ?? "").trim();
+  for (let index = 0; index < REVIEW_LINE_PREFIX_DEPTH; index += 1) {
+    if (UNCHECKED_TASK_BOX.test(value)) return true;
+    const stripped = value.replace(REVIEW_LINE_PREFIX, "");
+    if (stripped === value) break;
+    value = stripped;
+  }
+  return UNCHECKED_TASK_BOX.test(value);
+}
+
 function isCleanConclusion(line) {
-  const value = String(line ?? "").trim();
-  return CLEAN_CONCLUSION_PATTERNS.some((pattern) => pattern.test(value));
+  // An UNCHECKED task box states an intention, not a result: `- [ ] No P1/P2
+  // findings.` is a box the reviewer never ticked. `reviewLineContent` peels
+  // `[ ]` along with bullets, numbering, and headings, so the box must be
+  // caught before it is peeled — otherwise the line reads as a completed clean
+  // assertion and `withoutCleanReviewConclusionLines` also deletes it from the
+  // actionable scan.
+  //
+  // Walk the SAME prefix grammar `reviewLineContent` uses rather than matching
+  // one hand-written shape. A single pattern only covered `- [ ]` and missed
+  // every other order the peeler accepts — `1. [ ]`, `1) [ ]`, `### [ ]`,
+  // `- 1. [ ]` — so the check must follow the peeler step for step.
+  if (hasUncheckedTaskBox(line)) return false;
+  // Strip list/heading markers so a numbered roll-up entry is judged on its
+  // text, not its `1. ` prefix.
+  const value = reviewLineContent(line);
+  if (CLEAN_CONCLUSION_PATTERNS.some((pattern) => pattern.test(value)))
+    return true;
+  const tail = CLEAN_CONCLUSION_WITH_TAIL.exec(value)?.groups?.tail;
+  return tail !== undefined && isCleanTail(tail);
 }
 
 export function withoutCleanReviewConclusionLines(value) {
@@ -107,11 +187,8 @@ export function withoutCleanReviewConclusionLines(value) {
 
 function reviewLineContent(line) {
   let value = String(line ?? "").trim();
-  for (let index = 0; index < 3; index += 1) {
-    const stripped = value.replace(
-      /^(?:[-*+]\s+|\d+[.)]\s+|#{1,6}\s+|\[[ xX-]\]\s+)/,
-      "",
-    );
+  for (let index = 0; index < REVIEW_LINE_PREFIX_DEPTH; index += 1) {
+    const stripped = value.replace(REVIEW_LINE_PREFIX, "");
     if (stripped === value) break;
     value = stripped;
   }
@@ -207,7 +284,11 @@ export function classifyClaudeReviewProse(comment, pr) {
 
   if (
     verdictLines.length !== 1 ||
-    !CLAUDE_CLEAN_VERDICT.test(reviewLineContent(verdictLines[0])) ||
+    // Symmetric with isCleanConclusion: an unticked box in front of the
+    // verdict means the reviewer never completed it, and reviewLineContent
+    // peels the box away before the verdict pattern ever sees it.
+    hasUncheckedTaskBox(verdictLines[0]) ||
+    !matchesCleanVerdict(reviewLineContent(verdictLines[0])) ||
     body.includes("\r") ||
     body.includes("\0") ||
     body.length > 65_536 ||
@@ -234,7 +315,8 @@ export function classifyClaudeReviewProse(comment, pr) {
   if (
     reviewTitles.length > 1 ||
     (reviewTitles.length === 1 &&
-      !isOrdinaryReviewTitle(reviewTitles[0], pr?.title))
+      !isOrdinaryReviewTitle(reviewTitles[0], pr?.title) &&
+      !CLEAN_REVIEW_TITLE.test(String(reviewTitles[0]).trim()))
   )
     return true;
 
