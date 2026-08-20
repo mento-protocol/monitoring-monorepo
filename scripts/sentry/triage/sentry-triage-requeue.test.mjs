@@ -960,6 +960,39 @@ await test("runWorkflowRequeue restores needs-triage and sheds the verdict on an
   );
 });
 
+await test("every stub read on the verification path ASKS for state, which the OPEN selector now requires", async () => {
+  // `isSelectableForTriage` demands `state === "OPEN"`, and every reader
+  // normalizes a missing field to `""`. So a `--json` list that forgets `state`
+  // does not degrade — it makes the predicate return false for every stub, and
+  // each re-queue ends in the loud stranded path though nothing is wrong. That
+  // precondition was held by inspection; this holds it by test.
+  const readers = [];
+  const gh = makeClearFailureGh({
+    state: "OPEN",
+    labels: ["sentry-triage", "sentry:verdict-upstream"],
+  });
+  const runGh = async (args) => {
+    if (args[0] === "issue" && args[1] === "view") {
+      const jsonAt = args.indexOf("--json");
+      readers.push(jsonAt === -1 ? "" : args[jsonAt + 1]);
+    }
+    return gh.runGh(args);
+  };
+  await runWorkflowRequeue({
+    runGh,
+    repo: REPO,
+    issueNumber: 1731,
+    reason: REQUEUE_REASON_BRIEF_CLEAR,
+  });
+  assert(readers.length > 0, "the re-queue must read the stub at all");
+  for (const fields of readers) {
+    assert(
+      fields.split(",").includes("state"),
+      `a stub read asked for "${fields}", which never yields a state the selector can accept`,
+    );
+  }
+});
+
 await test("parseRequeueArgs requires a numeric issue, a repo and a known reason", () => {
   const ok = parseRequeueArgs([
     "--issue",
