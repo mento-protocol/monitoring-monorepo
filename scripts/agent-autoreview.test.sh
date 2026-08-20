@@ -6614,11 +6614,12 @@ run_capture_deadline_wrapper_accumulation_arm() {
 
   mkdir -p "$state_dir"
   printf '%s\n' "$state_dir" >"$state_pointer"
+  # Sized for the reason the helper arm records.
   seed_capture_deadline_fixture \
-    "$review_repo" "$filter_script" "$state_pointer" 2 patch-and-stat
+    "$review_repo" "$filter_script" "$state_pointer" 6 patch-and-stat
 
   run_helper_in_repo_expect_failure_with_env "$review_repo" \
-    "AGENT_AUTOREVIEW_CAPTURE_DEADLINE_SECONDS=7" \
+    "AGENT_AUTOREVIEW_CAPTURE_DEADLINE_SECONDS=22" \
     "AGENT_AUTOREVIEW_FEEDBACK_DEADLINE_SECONDS=30" \
     --prepare-bundle-dir "$bundle_dir" \
     --mode local \
@@ -6647,13 +6648,16 @@ run_capture_deadline_helper_accumulation_arm() {
   mkdir -p "$state_dir"
   printf '%s\n' "$state_dir" >"$state_pointer"
   # Two stalls: the unstaged stat capture and the unstaged patch capture. Git
-  # converts the worktree file more than once per capture, so each costs about
-  # four seconds -- inside the seven-second budget alone, past it together.
+  # converts the worktree file twice per capture, so each costs about twelve
+  # seconds -- inside the twenty-two-second budget alone, past it together. The
+  # stalls are sized to dominate the budget, because the budget also carries
+  # every quick Git spawn the run makes before them, and those get slower on a
+  # loaded machine.
   seed_capture_deadline_fixture \
-    "$review_repo" "$filter_script" "$state_pointer" 2 patch-and-stat
+    "$review_repo" "$filter_script" "$state_pointer" 6 patch-and-stat
 
   run_helper_in_repo_expect_failure_with_env "$review_repo" \
-    "AGENT_AUTOREVIEW_CAPTURE_DEADLINE_SECONDS=7" \
+    "AGENT_AUTOREVIEW_CAPTURE_DEADLINE_SECONDS=22" \
     "AGENT_AUTOREVIEW_FEEDBACK_DEADLINE_SECONDS=30" \
     --mode local \
     --engine local \
