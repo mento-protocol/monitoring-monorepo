@@ -7038,7 +7038,7 @@ run_capture_deadline_feedback_clamp_arm() {
   mkdir -p "$state_dir"
   printf '%s\n' "$state_dir" >"$state_pointer"
   seed_capture_deadline_fixture \
-    "$review_repo" "$filter_script" "$state_pointer" 3
+    "$review_repo" "$filter_script" "$state_pointer" 1
   git -C "$review_repo" remote add origin \
     https://github.com/mento-protocol/monitoring-monorepo.git
   mkdir -p "$review_repo/scripts"
@@ -7063,25 +7063,26 @@ run_capture_deadline_feedback_clamp_arm() {
   printf 'dirty again\n' >"$review_repo/payload.txt"
 
   started_at="$(date +%s)"
-  # The shared budget is wide enough that ordinary setup -- the stall, the
-  # protected-main runtime materialization, a Node start -- cannot exhaust it on
-  # a loaded machine, and still well under the independent 30-second feedback
-  # deadline, so the clamp is what the refusal reports. The message is the
-  # discriminator; the elapsed bound only catches a run that never returns.
+  # The shared budget is several times the setup this arm needs -- the stall,
+  # the protected-main runtime materialization, a Node start -- so a loaded
+  # machine cannot exhaust it before the feedback capture, and it stays well
+  # under the independent 90-second feedback deadline, so the clamp is what the
+  # refusal reports. The message is the discriminator; the elapsed bound only
+  # catches a run that never returns.
   run_helper_in_repo_expect_failure_with_env "$review_repo" \
-    "AGENT_AUTOREVIEW_CAPTURE_DEADLINE_SECONDS=20" \
-    "AGENT_AUTOREVIEW_FEEDBACK_DEADLINE_SECONDS=30" \
+    "AGENT_AUTOREVIEW_CAPTURE_DEADLINE_SECONDS=30" \
+    "AGENT_AUTOREVIEW_FEEDBACK_DEADLINE_SECONDS=90" \
     --prepare-bundle-dir "$bundle_dir" \
     --mode local \
     --feedback-pr 1299 \
     --engine local
   elapsed=$(($(date +%s) - started_at))
   expect_stderr_contains "PR feedback capture timed out after"
-  if grep -Fq -- "PR feedback capture timed out after 30s" "$stderr"; then
+  if grep -Fq -- "PR feedback capture timed out after 90s" "$stderr"; then
     printf 'the feedback capture kept its full independent deadline instead of the remaining shared budget\n' >&2
     exit 1
   fi
-  if ((elapsed >= 60)); then
+  if ((elapsed >= 75)); then
     printf 'the feedback capture ran past the shared capture budget: took %ss\n' \
       "$elapsed" >&2
     exit 1

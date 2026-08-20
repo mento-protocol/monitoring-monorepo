@@ -5967,7 +5967,12 @@ run_capture_pipeline() {
   "$@" | head -c "$limit" >"$output"
   statuses=("${PIPESTATUS[@]}")
   set -e
-  printf '%s %s\n' "${statuses[0]:-1}" "${statuses[1]:-1}" >"$status_file"
+  # Publish by rename. The watchdog reads this file to tell a finished capture
+  # from a running one, and a plain redirection truncates before it writes, so a
+  # deadline landing inside that window would see an empty file and refuse a
+  # capture that had in fact completed.
+  printf '%s %s\n' "${statuses[0]:-1}" "${statuses[1]:-1}" >"$status_file.partial"
+  mv -f "$status_file.partial" "$status_file"
 }
 
 # Bound one capture with the wall clock the capture budget has left. The pipeline
@@ -6009,8 +6014,8 @@ run_capture_with_deadline() {
     # completed capture would refuse a run that had nothing wrong with it.
     # `kill -0` alone is not that check -- a child that exited moments ago is a
     # zombie until the parent's `wait` reaps it, and a zombie and its group both
-    # still accept the signal. The pipeline records its statuses as its last
-    # act, so that file is what says it finished.
+    # still accept the signal. The pipeline renames its statuses into place as
+    # its last act, so that file appearing is what says it finished.
     kill -0 "-$child" 2>/dev/null || kill -0 "$child" 2>/dev/null || exit 0
     if [[ -s "$status_file" ]]; then
       exit 0
@@ -6032,8 +6037,8 @@ run_capture_with_deadline() {
   # this function bounds, and the watchdog would otherwise outlive it holding a
   # full-deadline sleep. Re-raise afterward so the interrupted script still dies
   # with the expected signal semantics.
-  trap 'kill -KILL "-$watchdog" 2>/dev/null || kill -KILL "$watchdog" 2>/dev/null || true; kill -TERM "-$child" 2>/dev/null || kill -TERM "$child" 2>/dev/null || true; sleep 1; kill -KILL "-$child" 2>/dev/null || kill -KILL "$child" 2>/dev/null || true; wait "$child" 2>/dev/null || true; rm -f "$timeout_file" "$status_file"; trap - INT TERM; eval "$saved_signal_traps"; kill -s TERM "$$"' TERM
-  trap 'kill -KILL "-$watchdog" 2>/dev/null || kill -KILL "$watchdog" 2>/dev/null || true; kill -TERM "-$child" 2>/dev/null || kill -TERM "$child" 2>/dev/null || true; sleep 1; kill -KILL "-$child" 2>/dev/null || kill -KILL "$child" 2>/dev/null || true; wait "$child" 2>/dev/null || true; rm -f "$timeout_file" "$status_file"; trap - INT TERM; eval "$saved_signal_traps"; kill -s INT "$$"' INT
+  trap 'kill -KILL "-$watchdog" 2>/dev/null || kill -KILL "$watchdog" 2>/dev/null || true; kill -TERM "-$child" 2>/dev/null || kill -TERM "$child" 2>/dev/null || true; sleep 1; kill -KILL "-$child" 2>/dev/null || kill -KILL "$child" 2>/dev/null || true; wait "$child" 2>/dev/null || true; rm -f "$timeout_file" "$status_file" "$status_file.partial"; trap - INT TERM; eval "$saved_signal_traps"; kill -s TERM "$$"' TERM
+  trap 'kill -KILL "-$watchdog" 2>/dev/null || kill -KILL "$watchdog" 2>/dev/null || true; kill -TERM "-$child" 2>/dev/null || kill -TERM "$child" 2>/dev/null || true; sleep 1; kill -KILL "-$child" 2>/dev/null || kill -KILL "$child" 2>/dev/null || true; wait "$child" 2>/dev/null || true; rm -f "$timeout_file" "$status_file" "$status_file.partial"; trap - INT TERM; eval "$saved_signal_traps"; kill -s INT "$$"' INT
   if wait "$child" 2>/dev/null; then
     status=0
   else
@@ -6113,7 +6118,7 @@ capture_budgeted_output_file() {
   # here would abort the wrapper under errexit with no diagnostic and leave both
   # bookkeeping files behind.
   if ! : >"$output"; then
-    rm -f "$status_file" "$timeout_file"
+    rm -f "$status_file" "$status_file.partial" "$timeout_file"
     echo "agent:autoreview: failed to open the capture output for $label" >&2
     return 1
   fi
@@ -6135,7 +6140,7 @@ capture_budgeted_output_file() {
     command_status=1
     limiter_status=1
   fi
-  rm -f "$status_file" "$timeout_file"
+  rm -f "$status_file" "$status_file.partial" "$timeout_file"
   # The marker decides, whatever the pipeline reported. The watchdog writes it
   # only after confirming the capture was still running, so it cannot appear for
   # a capture that had already finished; and once it appears the deadline has
