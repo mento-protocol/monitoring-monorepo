@@ -4471,13 +4471,17 @@ capture_feedback_state() {
   # The caller checked the budget before allocating this capture's bookkeeping;
   # if it ran out in between, refuse here rather than granting a floor of one
   # more second, which would let a bundle publish past the stated ceiling.
-  if ((review_capture_seconds_left <= 0)); then
+  # One of those seconds belongs to `run_with_deadline`, which waits a second
+  # between its SIGTERM and its SIGKILL: a capture handed the whole remaining
+  # budget would settle that second past the shared ceiling. Reserve it, and
+  # treat a budget with nothing left after the reservation as spent.
+  if ((review_capture_seconds_left <= 1)); then
     echo "agent:autoreview: review capture exceeded the ${max_review_capture_seconds}-second capture deadline before the PR feedback capture; no review bundle was produced" >&2
     return 124
   fi
   deadline_seconds="$feedback_capture_deadline_seconds"
-  if ((review_capture_seconds_left < deadline_seconds)); then
-    deadline_seconds="$review_capture_seconds_left"
+  if ((review_capture_seconds_left - 1 < deadline_seconds)); then
+    deadline_seconds=$((review_capture_seconds_left - 1))
   fi
   (
     cd "$repo"

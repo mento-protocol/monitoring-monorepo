@@ -7327,7 +7327,11 @@ run_capture_deadline_feedback_clamp_arm() {
     printf 'the feedback capture kept its full independent deadline instead of the remaining shared budget\n' >&2
     exit 1
   fi
-  if ((elapsed >= 75)); then
+  # The shared budget is 30 seconds, so the whole run settles inside it plus
+  # process startup. This pins the ceiling itself, not merely the absence of a
+  # hang; the reserved escalation second is below the resolution any assertion
+  # here could carry, and is correct by construction rather than by arm.
+  if ((elapsed >= 45)); then
     printf 'the feedback capture ran past the shared capture budget: took %ss\n' \
       "$elapsed" >&2
     exit 1

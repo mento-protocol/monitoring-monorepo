@@ -87,14 +87,24 @@ since an interrupted capture is not bound by the deadline. The helper spawns
 detached and sweeps the group after every capture, and registers terminal-signal
 handlers before it detaches anything: a caught signal cannot kill it
 mid-capture, so the deadline still fires and still reaps the tree, where a fatal
-one would strand a group no longer reachable from the terminal. A process wedged
-in uninterruptible I/O is the exception no signal reaches, on either side: the
-refusal still fires on time and still publishes nothing, but that process ends
-when its I/O does. The one capture
+one would strand a group no longer reachable from the terminal. The one capture
 the budget does not wrap is the PR feedback state, which already carries its own
-wall-clock bound; that bound is clamped to what the shared budget has left and
-the time it spends is charged there, so it cannot carry a run past the ceiling
-either. The number is a ceiling, not a statement about how long a capture takes:
+wall-clock bound; that bound is clamped to what the shared budget has left,
+minus the second that bound spends escalating, and the time it spends is charged
+there, so it cannot carry a run past the ceiling either.
+
+What the budget covers is the captures themselves: the wrapper's stage begins at
+its first capture, and in the helper it covers every Git spawn. Three things sit
+outside it, and none of them is bounded by anything else. The wrapper's own
+target-selection and runtime-materialization Git reads run before the stage
+opens, inside command substitutions that cannot stream a killable job. The
+helper's untracked-file reads are synchronous, so a wedged mount blocks the
+process itself and no timer of its own can run. And a process already wedged in
+uninterruptible I/O reaches neither runtime's SIGKILL: the refusal still fires on
+time and still publishes nothing, but that process ends when its I/O does.
+Putting every capture behind a supervisor that could abandon it would convert
+that last case from a visible hang into a silently abandoned process holding the
+same resources, which is why it is not done. The number is a ceiling, not a statement about how long a capture takes:
 a 1,000-commit, 23.8 MB branch diff of this repository captures in about a
 second, and the deadline promises nothing about elapsed time beyond the bound it
 enforces. Its default is the one value in this
