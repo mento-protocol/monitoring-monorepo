@@ -844,6 +844,22 @@ const KNOWN_FAKE_FIXTURE_VALUES = new Set(
     // scripts/sentry/autofix/sentry-autofix-finalize.test.mjs
     ["ghs", "_AbCdEfGhIjKlMnOpQrStUvWxYz012345"],
     ["a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8"],
+    // scripts/sentry/triage/sentry-triage-agent-comment.test.mjs — hyphenated
+    // word fixtures. They carry no provider prefix and no high-entropy body,
+    // but `placeholderValue()`'s vocabulary is anchored on a leading
+    // redacted/example/dummy-style word, so `aws-secret-value` misses it. They
+    // are registered here as exact values rather than by widening that
+    // vocabulary to a `<anything>-secret-value` shape, which would accept an
+    // unbounded set.
+    ["aws-secret-value"],
+    ["projection-secret-value"],
+    // scripts/sentry/autofix/sentry-autofix-finalize.test.mjs — a shell
+    // expansion carrying its own shell quoting, so it reaches the scanner as
+    // `'"..."'` rather than a bare reference. Registered as an exact value
+    // instead of teaching the reference grammar to peel quote wrappers: that
+    // peel accepted a quote-wrapped real credential, which is the fail-open
+    // this scanner exists to prevent.
+    ["'\"\\${REPO%%/*}\"'"],
   ].map((fragments) => fragments.join("")),
 );
 
@@ -868,7 +884,20 @@ function shellExpansionWord(word) {
   );
 }
 
-function shellExpansionReference(expression) {
+// A shell snippet embedded in a JS template literal escapes its expansions as
+// `\${VAR}` so JS does not interpolate them. The runtime value is the ordinary
+// `${VAR}` the shell later expands, so it is the same reference the unescaped
+// form already cleared — the backslashes are JS quoting, not part of the value.
+//
+// Only `\$` immediately before `{` is unescaped, and the result must still
+// satisfy the full reference grammar below. A literal secret cannot acquire
+// that shape by having backslashes removed.
+function unescapeShellExpansions(expression) {
+  return expression.replace(/\\+\$(?=\{)/g, "$");
+}
+
+function shellExpansionReference(rawExpression) {
+  const expression = unescapeShellExpansions(rawExpression);
   const head = /^\$\{(?:[A-Za-z_][A-Za-z0-9_]*|[0-9]+)(?::?[-=+?])?/.exec(
     expression,
   );

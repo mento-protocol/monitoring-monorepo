@@ -249,6 +249,59 @@ for (const [binding, fixtureValue] of [
   }
 }
 
+// Issue 1970: the remaining four Sentry-suite lines, read from the suites
+// themselves rather than transcribed. Hand-copying these through a shell got
+// them wrong twice, and a wrong fixture makes this assertion prove nothing.
+for (const [rel, lineNumber] of [
+  ["scripts/sentry/broker/sentry-mcp-broker.test.mjs", 1036],
+  ["scripts/sentry/autofix/sentry-autofix-finalize.test.mjs", 1697],
+  ["scripts/sentry/triage/sentry-triage-agent-comment.test.mjs", 390],
+  ["scripts/sentry/triage/sentry-triage-agent-comment.test.mjs", 391],
+]) {
+  const source = readFileSync(new URL(`../${rel}`, import.meta.url), "utf8");
+  const subject = source.split("\n")[lineNumber - 1];
+  assert.ok(subject, `issue 1970 fixture line missing: ${rel}:${lineNumber}`);
+  for (const [position, prefix] of diffPositions) {
+    assert.equal(
+      secretLikeReason(prefix + subject.trimStart()),
+      null,
+      `issue 1970 line clears on ${position} diff lines: ${rel}:${lineNumber}`,
+    );
+  }
+}
+
+// An escaped shell expansion is a reference, but only the escaping is removed —
+// a real credential riding behind one is still refused.
+assert.equal(secretLikeReason('token="\\${SENTRY_TRIAGE_TOKEN:-}"'), null);
+assert.ok(
+  secretLikeReason(
+    `token="\\\${VAR}${["ghp_", "0123456789abcdefghij0123456789ABCD"].join("")}"`,
+  ),
+  "an escaped expansion followed by real material is still refused",
+);
+assert.ok(
+  secretLikeReason('token="\\${NOT CLOSED"'),
+  "a malformed escaped expansion is still refused",
+);
+// Quote-wrapped expansions are registered as exact values, NOT by teaching the
+// reference grammar to peel quote wrappers: peeling accepted a quote-wrapped
+// real credential, which is the fail-open this scanner exists to prevent.
+assert.ok(
+  secretLikeReason(
+    `const TOKEN = "'${["ghp_", "0123456789abcdefghij0123456789ABCD"].join("")}'"`,
+  ),
+  "a quote-wrapped real credential is still refused",
+);
+// The hyphenated fixtures are exact values too — a near miss stays refused.
+assert.ok(
+  secretLikeReason('AWS_SECRET_ACCESS_KEY: "aws-secret-value-real"'),
+  "a near miss on a hyphenated fixture is still refused",
+);
+assert.ok(
+  secretLikeReason('TOKEN: "database-secret-value"'),
+  "an unregistered hyphenated value is still refused",
+);
+
 // Membership is exact-value. Every near miss below is a value the registry does
 // not hold, so the shape rules judge it exactly as they did before.
 const unregisteredSentryShape = ["sntrys", "_9f3a2b", "1c8d", "e4f5a6b"].join(
