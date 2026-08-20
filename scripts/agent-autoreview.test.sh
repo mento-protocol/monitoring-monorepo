@@ -5990,18 +5990,18 @@ run_feedback_runtime_aggregate_regression() {
   init_review_repo "$review_repo"
   git -C "$review_repo" remote add origin \
     https://github.com/mento-protocol/monitoring-monorepo.git
-  mkdir -p "$review_repo/scripts"
+  mkdir -p "$review_repo/scripts/pr"
   printf 'base\n' >"$review_repo/README.md"
   dd if=/dev/zero bs=1100000 count=1 2>/dev/null |
-    tr '\000' 'a' >"$review_repo/scripts/pr-feedback-state.mjs"
+    tr '\000' 'a' >"$review_repo/scripts/pr/pr-feedback-state.mjs"
   dd if=/dev/zero bs=1100000 count=1 2>/dev/null |
-    tr '\000' 'b' >"$review_repo/scripts/pr-feedback-state-core.mjs"
+    tr '\000' 'b' >"$review_repo/scripts/pr/pr-feedback-state-core.mjs"
   for runtime_file in \
     pr-feedback-state-claude.mjs \
     pr-ready-state.mjs \
     pr-ready-state-core.mjs \
     pr-ready-state-format.mjs; do
-    printf 'export {};\n' >"$review_repo/scripts/$runtime_file"
+    printf 'export {};\n' >"$review_repo/scripts/pr/$runtime_file"
   done
   commit_review_repo "$review_repo" init
   protected_main_oid="$(git -C "$review_repo" rev-parse HEAD)"
@@ -6040,17 +6040,16 @@ run_feedback_runtime_aggregate_regression() {
   fi
 }
 
-# The feedback runtime is migrating from flat scripts/ paths into scripts/pr/
-# (issue 1877, track D3) while the wrapper keeps reading every helper blob from
-# the protected origin/main snapshot. Both sides of that move have to work: the
-# pre-move origin/main a wrapper built before the copies landed still reads, and
-# the post-move one where scripts/pr/ is what a later wrapper must prefer.
-run_feedback_runtime_dual_location_regression() {
-  local review_repo="$tmp_dir/feedback-runtime-dual-location"
-  local fallback_bundle="$tmp_dir/feedback-runtime-fallback-bundle"
-  local preferred_bundle="$tmp_dir/feedback-runtime-preferred-bundle"
-  local mixed_bundle="$tmp_dir/feedback-runtime-mixed-bundle"
-  local gh_shim_bin="$tmp_dir/feedback-runtime-dual-location-gh"
+# The feedback runtime lives only under scripts/pr/ (issue 1877, track D3), and
+# the wrapper reads every helper blob from the protected origin/main snapshot.
+# Two properties matter now the move is complete: the helpers resolve and run
+# from that one location, and a snapshot without them fails closed instead of
+# materializing a partial runtime.
+run_feedback_runtime_location_regression() {
+  local review_repo="$tmp_dir/feedback-runtime-location"
+  local resolved_bundle="$tmp_dir/feedback-runtime-resolved-bundle"
+  local missing_bundle="$tmp_dir/feedback-runtime-missing-location-bundle"
+  local gh_shim_bin="$tmp_dir/feedback-runtime-location-gh"
   local runtime_file
 
   mkdir "$gh_shim_bin"
@@ -6064,19 +6063,24 @@ GH
   init_review_repo "$review_repo"
   git -C "$review_repo" remote add origin \
     https://github.com/mento-protocol/monitoring-monorepo.git
-  mkdir -p "$review_repo/scripts"
+  mkdir -p "$review_repo/scripts/pr"
   printf 'base\n' >"$review_repo/README.md"
-  # Model the pre-move origin/main: only the flat copies exist.
-  cat >"$review_repo/scripts/pr-feedback-state.mjs" <<'FLAT_FEEDBACK_RUNTIME'
+  # The entry point imports a sibling so the run also proves the materialized
+  # helpers land beside each other under the flat runtime destination.
+  cat >"$review_repo/scripts/pr/pr-feedback-state.mjs" <<'MOVED_FEEDBACK_RUNTIME'
 #!/usr/bin/env node
-process.stdout.write('{"findings":[],"testEvidence":{"location":"flat"}}\n');
-FLAT_FEEDBACK_RUNTIME
+import { marker } from "./pr-ready-state-format.mjs";
+process.stdout.write(
+  `{"findings":[],"testEvidence":{"location":"scripts-pr","sibling":"${marker}"}}\n`,
+);
+MOVED_FEEDBACK_RUNTIME
+  printf 'export const marker = "sibling";\n' \
+    >"$review_repo/scripts/pr/pr-ready-state-format.mjs"
   for runtime_file in \
     pr-feedback-state-core.mjs \
     pr-ready-state.mjs \
-    pr-ready-state-core.mjs \
-    pr-ready-state-format.mjs; do
-    printf 'export {};\n' >"$review_repo/scripts/$runtime_file"
+    pr-ready-state-core.mjs; do
+    printf 'export {};\n' >"$review_repo/scripts/pr/$runtime_file"
   done
   commit_review_repo "$review_repo" init
   git -C "$review_repo" switch -c feature >/dev/null 2>&1
@@ -6087,91 +6091,52 @@ FLAT_FEEDBACK_RUNTIME
     cd "$review_repo"
     run_adapter \
       "PATH=$gh_shim_bin:$PATH" \
-      --prepare-bundle-dir "$fallback_bundle" \
+      --prepare-bundle-dir "$resolved_bundle" \
       --mode branch \
       --base main \
       --feedback-pr 1299
   )
   expect_file_contains \
-    "$fallback_bundle/feedback-state.json" \
-    '"location":"flat"'
+    "$resolved_bundle/feedback-state.json" \
+    '"location":"scripts-pr"'
+  expect_file_contains \
+    "$resolved_bundle/feedback-state.json" \
+    '"sibling":"sibling"'
   expect_empty_stderr
 
-  # Model the post-move origin/main: both locations exist and scripts/pr/ is the
-  # one the wrapper must run. Distinct bodies make preference observable — a
-  # resolver that silently kept reading the flat copy would still pass a
-  # byte-identical fixture.
+  # A snapshot that keeps the helpers only at the retired flat paths — what a
+  # wrapper newer than the move sees on an origin/main older than it — resolves
+  # nothing and fails closed. The pre-move location is not a fallback any more.
   git -C "$review_repo" switch main >/dev/null 2>&1
-  mkdir -p "$review_repo/scripts/pr"
-  cat >"$review_repo/scripts/pr/pr-feedback-state.mjs" <<'MOVED_FEEDBACK_RUNTIME'
-#!/usr/bin/env node
-process.stdout.write('{"findings":[],"testEvidence":{"location":"scripts-pr"}}\n');
-MOVED_FEEDBACK_RUNTIME
   for runtime_file in \
+    pr-feedback-state.mjs \
     pr-feedback-state-core.mjs \
     pr-ready-state.mjs \
     pr-ready-state-core.mjs \
     pr-ready-state-format.mjs; do
-    printf 'export {};\n' >"$review_repo/scripts/pr/$runtime_file"
+    git -C "$review_repo" mv \
+      "scripts/pr/$runtime_file" \
+      "scripts/$runtime_file"
   done
-  commit_review_repo "$review_repo" "add scripts/pr copies"
+  commit_review_repo "$review_repo" "retire the scripts/pr location"
   git -C "$review_repo" update-ref refs/remotes/origin/main HEAD
   git -C "$review_repo" switch feature >/dev/null 2>&1
 
   (
     cd "$review_repo"
-    run_adapter \
+    run_adapter_expect_failure \
       "PATH=$gh_shim_bin:$PATH" \
-      --prepare-bundle-dir "$preferred_bundle" \
+      --prepare-bundle-dir "$missing_bundle" \
       --mode branch \
       --base main \
       --feedback-pr 1299
   )
-  expect_file_contains \
-    "$preferred_bundle/feedback-state.json" \
-    '"location":"scripts-pr"'
-  expect_file_not_contains \
-    "$preferred_bundle/feedback-state.json" \
-    '"location":"flat"'
-  expect_empty_stderr
-
-  # Each basename resolves on its own, so a snapshot mid-way through the move
-  # can carry one helper under scripts/pr/ and another only at the flat path.
-  # The flattened destination is what makes that safe: both land as siblings in
-  # the runtime directory, so their relative imports still resolve. Drop one
-  # scripts/pr/ copy and have the preferred entry point import the sibling that
-  # is now reachable only through the fallback.
-  git -C "$review_repo" switch main >/dev/null 2>&1
-  rm "$review_repo/scripts/pr/pr-ready-state-format.mjs"
-  printf 'export const marker = "flat-sibling";\n' \
-    >"$review_repo/scripts/pr-ready-state-format.mjs"
-  cat >"$review_repo/scripts/pr/pr-feedback-state.mjs" <<'MIXED_FEEDBACK_RUNTIME'
-#!/usr/bin/env node
-import { marker } from "./pr-ready-state-format.mjs";
-process.stdout.write(
-  `{"findings":[],"testEvidence":{"location":"scripts-pr","sibling":"${marker}"}}\n`,
-);
-MIXED_FEEDBACK_RUNTIME
-  commit_review_repo "$review_repo" "split the runtime across both locations"
-  git -C "$review_repo" update-ref refs/remotes/origin/main HEAD
-  git -C "$review_repo" switch feature >/dev/null 2>&1
-
-  (
-    cd "$review_repo"
-    run_adapter \
-      "PATH=$gh_shim_bin:$PATH" \
-      --prepare-bundle-dir "$mixed_bundle" \
-      --mode branch \
-      --base main \
-      --feedback-pr 1299
-  )
-  expect_file_contains \
-    "$mixed_bundle/feedback-state.json" \
-    '"location":"scripts-pr"'
-  expect_file_contains \
-    "$mixed_bundle/feedback-state.json" \
-    '"sibling":"flat-sibling"'
-  expect_empty_stderr
+  expect_stderr_contains \
+    "does not carry scripts/pr/pr-feedback-state.mjs; pull an up-to-date wrapper"
+  if [[ -e "$missing_bundle" ]]; then
+    printf 'bundle was published without a resolvable feedback runtime\n' >&2
+    exit 1
+  fi
 }
 
 run_large_untracked_bound_regression() {
@@ -7545,7 +7510,7 @@ run_bundle_integrity_family() {
   run_deploy_directory_checklist_routing_regression
   run_prepared_untracked_symlink_regression
   run_feedback_runtime_aggregate_regression
-  run_feedback_runtime_dual_location_regression
+  run_feedback_runtime_location_regression
   run_large_untracked_bound_regression
   run_aggregate_untracked_bound_regression
   run_rename_capture_regressions
@@ -8278,8 +8243,8 @@ init_review_repo "$pr_base_repo"
 git -C "$pr_base_repo" remote add origin \
   https://github.com/mento-protocol/monitoring-monorepo.git
 printf 'base\n' >"$pr_base_repo/README.md"
-mkdir -p "$pr_base_repo/scripts"
-cat >"$pr_base_repo/scripts/pr-feedback-state.mjs" <<'FEEDBACK_RUNTIME'
+mkdir -p "$pr_base_repo/scripts/pr"
+cat >"$pr_base_repo/scripts/pr/pr-feedback-state.mjs" <<'FEEDBACK_RUNTIME'
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
 
@@ -8311,7 +8276,7 @@ for feedback_runtime_file in \
   pr-ready-state.mjs \
   pr-ready-state-core.mjs \
   pr-ready-state-format.mjs; do
-  printf 'export {};\n' >"$pr_base_repo/scripts/$feedback_runtime_file"
+  printf 'export {};\n' >"$pr_base_repo/scripts/pr/$feedback_runtime_file"
 done
 commit_review_repo "$pr_base_repo" init
 protected_feedback_runtime_oid="$(git -C "$pr_base_repo" rev-parse HEAD)"
@@ -8319,7 +8284,7 @@ git -C "$pr_base_repo" update-ref \
   refs/remotes/origin/main \
   "$protected_feedback_runtime_oid"
 git -C "$pr_base_repo" switch -c release >/dev/null 2>&1
-cat >"$pr_base_repo/scripts/pr-feedback-state.mjs" <<HOSTILE_FEEDBACK_RUNTIME
+cat >"$pr_base_repo/scripts/pr/pr-feedback-state.mjs" <<HOSTILE_FEEDBACK_RUNTIME
 #!/usr/bin/env node
 import { writeFileSync } from "node:fs";
 writeFileSync("$hostile_feedback_marker", "unsafe PR-base runtime executed\n");
