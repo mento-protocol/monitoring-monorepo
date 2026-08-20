@@ -1452,7 +1452,17 @@ test("accepts only the exact frozen PR #1837 no-action Claude LGTM", () => {
   }
 });
 
-test("accepts the observed PR #1848 Overall-verdict clean review", () => {
+// A human reads the observed PR #1848 review as clean: its verdict is LGTM and
+// its roll-up denies findings. It cleared until issue 1966, but only because
+// none of its five narrative paragraphs happened to use finding vocabulary —
+// nothing established that they were clean. That is the same fail-open #1960
+// closed for verdict and roll-up tails, and a paragraph is the same
+// unconstrained natural language a tail is. On a fail-closed merge gate the
+// classifier now refuses what it cannot recognize, so this body blocks.
+//
+// Treat a future failure here as a warning, not a test to relax: making this
+// body clear again means admitting free prose, which reopens issue 1966.
+test("blocks the observed PR #1848 review because its body is free prose", () => {
   const normalizedReadyState = normalizedReadyStateForClaudeReview(
     PR_1848_CLEAN_CLAUDE_REVIEW,
     {
@@ -1465,10 +1475,9 @@ test("accepts the observed PR #1848 Overall-verdict clean review", () => {
   );
   const feedbackState = summarizeFeedbackState(normalizedReadyState);
 
-  assertEqual(normalizedReadyState.required.ready, true);
-  assertEqual(feedbackState.ready, true);
-  assertEqual(feedbackState.counts.blockingTopLevelBotComments, 0);
-  assertEqual(feedbackState.counts.blockingFindings, 0);
+  assertEqual(feedbackState.ready, false);
+  assertEqual(feedbackState.counts.blockingTopLevelBotComments, 1);
+  assertEqual(feedbackState.counts.blockingFindings > 0, true);
 });
 
 test("classifies the post-#1848 Claude prose pattern library", () => {
@@ -1862,6 +1871,209 @@ test("keeps the observed PR #1954 review actionable because its tails are prose"
   );
   assertEqual(feedbackState.ready, false);
   assertEqual(feedbackState.counts.blockingTopLevelBotComments, 1);
+});
+
+// Issue 1966. #1960 refused prose in a verdict or roll-up TAIL; every other
+// line in the body still passed a blacklist scan, so a defect written as a
+// plain declarative sentence — no priority, no severity, no action verb —
+// cleared the gate. The scan is now an allowlist: a line is ignored only when
+// it is positively recognized as one of the shapes a clean review is made of.
+//
+// Both directions are pinned here. The clean bodies must keep clearing, or the
+// gate is useless; the defect bodies must block, or reviewer findings are
+// dropped before merge.
+test("refuses prose the prose classifier cannot positively recognize", () => {
+  const options = {
+    number: 1848,
+    title: "fix(agent): accept exact no-action Claude review",
+    headRefOid: PR_1848_HEAD,
+    headUpdatedAt: "2026-08-13T22:09:46Z",
+    reactionCreatedAt: "2026-08-20T09:30:00Z",
+  };
+  const expectReady = (label, body, expected) => {
+    const feedbackState = summarizeFeedbackState(
+      normalizedReadyStateForClaudeReview(
+        {
+          ...PR_1848_CLEAN_CLAUDE_REVIEW,
+          id: 5353832860,
+          created_at: "2026-08-20T09:10:48Z",
+          updated_at: "2026-08-20T09:11:54Z",
+          body,
+        },
+        options,
+      ),
+    );
+    assertEqual(
+      feedbackState.ready,
+      expected,
+      `${label}: unexpected feedback-state result`,
+    );
+    assertEqual(
+      feedbackState.counts.blockingTopLevelBotComments,
+      expected ? 0 : 1,
+    );
+  };
+
+  const clean = PR_1954_CLEAN_CLAUDE_BODY;
+  const DEFECT = "Anonymous callers can delete every stored record.";
+
+  // The reproduction from the issue, in the verdict format main itself
+  // accepts: a whole-bold verdict under an exact-title review heading.
+  expectReady(
+    "declarative defect after a clean conclusion",
+    [
+      `### Review: ${options.title}`,
+      "",
+      "**Verdict: LGTM**",
+      "",
+      "No P1/P2 findings.",
+      "",
+      DEFECT,
+    ].join("\n"),
+    false,
+  );
+
+  for (const [label, body] of [
+    ["declarative defect appended to a clean body", `${clean}\n\n${DEFECT}`],
+    ["declarative defect as a bullet", `${clean}\n\n- ${DEFECT}`],
+    ["declarative defect as a numbered item", `${clean}\n\n1. ${DEFECT}`],
+    ["declarative defect as a heading", `${clean}\n\n### ${DEFECT}`],
+    [
+      "declarative defect under a section",
+      `${clean}\n\n### Notes\n\n${DEFECT}`,
+    ],
+    [
+      "declarative defect before the verdict",
+      clean.replace("**Verdict:** LGTM", `${DEFECT}\n\n**Verdict:** LGTM`),
+    ],
+    // The old scan let any P3 line pass on a disposition phrase alone, so a
+    // defect rode along behind "Not a blocker". The line must now carry
+    // curated positive evidence and nothing else.
+    [
+      "P3 disposition carrying a defect",
+      `${clean}\n\n1. [P3] Not a blocker: anonymous callers can delete every stored record.`,
+    ],
+    [
+      "P3 no-action carrying a defect",
+      `${clean}\n\n1. [P3] No action requested. The bot token leaks into the collector step.`,
+    ],
+    // Praise is unconstrained prose too. It is refused for the same reason a
+    // defect is: nothing distinguishes the two by shape.
+    ["summarizing praise", `${clean}\n\nThis is a clean, mechanical PR.`],
+    // A section label is recognized only when it labels and nothing more.
+    [
+      "section label carrying a claim",
+      clean.replace(
+        "**Numbered findings roll-up:**",
+        "**Numbered findings roll-up: the retry loop never terminates**",
+      ),
+    ],
+    // A review heading is recognized only because harvest already validated
+    // its PR number and title. The line scan must therefore recognize exactly
+    // the set harvest sees: matching a TRIMMED line, or matching the number
+    // heading case-insensitively, let an unharvested heading through with its
+    // title and PR-number checks skipped. Markdown still renders a heading
+    // indented up to three spaces, so these are real review bodies.
+    [
+      "indented review heading carrying a defect",
+      [
+        `   ### Review: ${DEFECT}`,
+        "",
+        "**Verdict:** LGTM",
+        "",
+        "No P1/P2 findings.",
+      ].join("\n"),
+    ],
+    [
+      "indented review heading naming another PR",
+      [
+        "   ### Code Review — PR #9999",
+        "",
+        "**Verdict:** LGTM",
+        "",
+        "No P1/P2 findings.",
+      ].join("\n"),
+    ],
+    [
+      "mis-cased review-number heading naming another PR",
+      [
+        "### code review — PR #9999",
+        "",
+        "**Verdict:** LGTM",
+        "",
+        "No P1/P2 findings.",
+      ].join("\n"),
+    ],
+    // An unticked box means the assertion was never completed, whatever the
+    // assertion is. The verdict and conclusion paths already guarded this; the
+    // P3 evidence path peeled the box the same way and did not, so evidence
+    // its author never confirmed cleared the gate.
+    [
+      "unchecked P3 clean-evidence task",
+      `${clean}\n\n- [ ] [P3] Good hygiene: tests cover the changed paths.`,
+    ],
+    [
+      "negated P3 clean-evidence task",
+      `${clean}\n\n- [-] [P3] Good hygiene: tests cover the changed paths.`,
+    ],
+    [
+      "numbered unchecked P3 clean-evidence task",
+      `${clean}\n\n1. [ ] [P3] Good hygiene: tests cover the changed paths.`,
+    ],
+    // `No action required` is not an accepted marker: the body-level fallback
+    // scan matches `Action required` and blocks the comment regardless, so the
+    // grammar must not advertise it as clean. Pins the two layers in agreement.
+    [
+      "P3 'No action required' is not advertised clean",
+      `${clean}\n\n1. [P3] No action required: tests cover the changed paths.`,
+    ],
+    // Matching a curated phrase as a whole must not let anything ride along
+    // with it. `POSITIVE_EVIDENCE` is anchored, so these fall through to the
+    // per-clause split and fail there.
+    [
+      "curated conjunction phrase with a defect appended",
+      `${clean}\n\n1. [P3] None blocking: no errors and failures were found. Anonymous callers can delete every stored record.`,
+    ],
+    [
+      "curated conjunction phrase joined to a defect",
+      `${clean}\n\n1. [P3] None blocking: no errors and failures were found and anonymous callers can delete every stored record.`,
+    ],
+    [
+      "curated conjunction phrase hedged",
+      `${clean}\n\n1. [P3] None blocking: no errors and failures were probably found.`,
+    ],
+  ]) {
+    expectReady(label, body, false);
+  }
+
+  for (const [label, body] of [
+    ["bare verdict and roll-up", clean],
+    [
+      "verdict, checklist-free conclusion, and nothing else",
+      `### Review: ${options.title}\n\nVerdict: LGTM\n\nNo P1/P2/P3 findings.`,
+    ],
+    [
+      "P3 observation with curated positive evidence",
+      `${clean}\n\n1. [P3] None blocking: tests cover the changed paths.`,
+    ],
+    // The counterpart to the unchecked-box cases above: a ticked box is a
+    // completed check, so the evidence behind it still clears.
+    [
+      "checked P3 clean-evidence task",
+      `${clean}\n\n- [x] [P3] Good hygiene: tests cover the changed paths.`,
+    ],
+    // A curated entry that spans a conjunction must match as a whole. Splitting
+    // on `and` first tore this phrase into `no errors` plus `failures were
+    // found`, and the second half is not an entry, so a curated phrase failed
+    // its own allowlist.
+    [
+      "P3 evidence whose curated phrase spans a conjunction",
+      `${clean}\n\n1. [P3] None blocking: no errors and failures were found.`,
+    ],
+    ["bare Findings section label", `${clean}\n\n### Findings`],
+  ]) {
+    expectReady(label, body, true);
+  }
 });
 
 test("fails closed on single-field PR #1544 Overall-verdict mutations", () => {
