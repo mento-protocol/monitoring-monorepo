@@ -173,6 +173,10 @@ inaction**, not when a ratio is large.
   the previous price, so a price-only check would have kept pricing reserves
   off a rate the contract had stopped honouring. This matches
   `hasFreshLiveMedian`, which is how the indexer decides the same question.
+- That silence is no longer dark. `Pool Value Share Missing` (warning,
+  `#alerts-pools`) fires when a pool holds reserves but publishes no value
+  share, so a pool falling out of depletion coverage is reported rather than
+  merely absent. It surfaces the gap; closing one is still a bridge change.
 - `POOL_DEPLETION_CRITICAL_SHARE` and `POOL_DEPLETION_PAGE_SHARE` join the
   Terraform mirror set. `DEVIATION_CRITICAL_RATIO` leaves it; a future editor
   who bumps it will get no drift-check failure, because there is nothing in
