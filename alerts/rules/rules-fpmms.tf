@@ -705,6 +705,8 @@ resource "grafana_rule_group" "fpmms_deviation" {
 #              the pool still serves both directions.
 #   page     — min value share < 10%. The pool is effectively one-sided;
 #              swappers lose one direction outright once it empties.
+#   warning  — the pool holds reserves but publishes no value share at all, so
+#              neither tier above can see it. Coverage visibility, not a band.
 #
 # Neither tier fires on the 2026-08 CHFm/USDm breach that motivated ADR 0067:
 # that pool bottomed at ~22% min side, above both bands. `Rebalancer Stale`
@@ -925,6 +927,99 @@ resource "grafana_rule_group" "fpmms_depletion" {
       group_wait      = local.notify_page_pool.group_wait
       group_interval  = local.notify_page_pool.group_interval
       repeat_interval = local.notify_page_pool.repeat_interval
+    }
+  }
+
+  # Third rule, and not a depletion band: it reports the state in which the two
+  # bands above go quiet. They read the value-share gauges, the bridge withholds
+  # those when a pool's median is not live or its `invertRateFeed` orientation
+  # has not been read on chain, and `no_data_state = "OK"` makes that silence
+  # indistinguishable from a healthy pool. A funded pool with no value share has
+  # no depletion coverage at all, and nothing says so today.
+  #
+  # It belongs in this group rather than a sibling one for the same reason
+  # `Deviation Breach (anchored)` sits inside `fpmms_deviation`: a rule that
+  # covers the window where another rule's input is unavailable is read with
+  # that rule, and shares its 60s evaluation interval.
+  #
+  # See main.tf for the expression, the `unless on(...)` join, and why the fat
+  # side (`max`) rather than the thin side decides that the pool is funded.
+  rule {
+    name      = "Pool Value Share Missing"
+    condition = "threshold"
+    # 30m, far longer than either band's dwell. The gap is structural — an
+    # unread orientation flag or a feed that has never landed a median stays
+    # that way until someone changes something — so nothing is lost by waiting,
+    # while the dwell absorbs a bridge restart or a run of missed scrapes that
+    # would otherwise read as a minute-long loss of coverage.
+    for            = "30m"
+    exec_err_state = "Error"
+    no_data_state  = "OK"
+
+    # No `keep_firing_for`: no warning rule in this file carries one.
+    #
+    # `description` is deliberately load-bearing only in the Grafana rule-detail
+    # view — the Slack template renders `description` for critical severity
+    # alone, so everything an operator needs in the channel is in `summary`.
+    annotations = {
+      summary          = "Pool holds reserves but publishes no value share, so the depletion rules cannot see it. Check the metrics-bridge logs for an unread `invertRateFeed`, unread token decimals, or a rate feed with no live median."
+      description      = "`Pool Depletion Risk` and `Pool Nearly One-Sided` both read the `mento_pool_reserve_value_share_token0` / `mento_pool_reserve_value_share_token1` pair. metrics-bridge publishes those only when the pool has a live SortedOracles median, its `invertRateFeed` orientation has been read on chain, and its token decimals have been read (`tokenDecimalsKnown`); it withholds them otherwise rather than publish a share derived from a guessed rate or a guessed decimal scale. Unread decimals are the one cause that leaves the oracle looking entirely healthy, so check `tokenDecimalsKnown` before chasing the feed. Both rules treat the resulting silence as OK, so this pool is currently unwatched for depletion. ADR 0067 records the fail-closed decision."
+      resolved_title   = "Pool Value Share Restored"
+      resolved_summary = "The pool publishes value shares again — the depletion rules cover it."
+    }
+
+    labels = {
+      service  = "fpmms"
+      severity = "warning"
+    }
+
+    data {
+      ref_id         = "A"
+      datasource_uid = var.prometheus_datasource_uid
+      relative_time_range {
+        from = local.instant_query_range_seconds
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "A"
+        expr    = local.pool_value_share_missing_active_promql
+        instant = true
+      })
+    }
+
+    # `gt 0` is a presence test, not a band: the expression only produces a
+    # series for a funded pool that publishes no value share, and that series is
+    # always >= 0.5. Same condition shape as `Deviation Breach (anchored)`.
+    data {
+      ref_id         = "threshold"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "threshold"
+        type       = "threshold"
+        expression = "A"
+        conditions = [{
+          evaluator = { params = [0], type = "gt" }
+          operator  = { type = "and" }
+          query     = { params = ["threshold"] }
+        }]
+        datasource = { type = "__expr__", uid = "__expr__" }
+      })
+    }
+
+    # No annotation-only queries. The value-share annotation queries the two
+    # bands use select exactly the series this rule fires on the ABSENCE of, so
+    # attaching them would hand Grafana a guaranteed-empty query and risk
+    # NoData-ing the whole rule (see alerts/AGENTS.md).
+    notification_settings {
+      contact_point   = local.notify_warning_pools_pool.contact_point
+      group_by        = local.notify_warning_pools_pool.group_by
+      group_wait      = local.notify_warning_pools_pool.group_wait
+      group_interval  = local.notify_warning_pools_pool.group_interval
+      repeat_interval = local.notify_warning_pools_pool.repeat_interval
     }
   }
 }

@@ -4274,42 +4274,94 @@ materialize_filesystem_autoreview_runtime() {
   ' "$source_scripts_dir" "$runtime_dir" "$EUID"
 }
 
+# Resolve one feedback-runtime name against the protected snapshot, preferring
+# the scripts/pr/ location and falling back to the pre-move flat path.
+#
+# The runtime migrates from scripts/ into scripts/pr/ over three merges (issue
+# 1877, track D3), and this wrapper reads every helper blob from origin/main
+# rather than the checked-out tree. A wrapper pinned to one location alone
+# therefore fails closed against the other side of the move: pinned to the flat
+# path it breaks the moment the move lands, pinned to scripts/pr/ it breaks on
+# every origin/main that predates it. Accepting both keeps each wrapper
+# generation working against the origin/main before the move and the one after.
+# Drop the fallback only once no reachable wrapper still needs the flat copies.
+#
+# Prints the resolved repo-relative path, or nothing when the snapshot carries
+# neither location. A git failure is reported and returns nonzero, so absence
+# and inspection failure never collapse into the same answer.
+feedback_runtime_snapshot_path() {
+  local repo="$1"
+  local snapshot_ref="$2"
+  local runtime_name="$3"
+  local candidate
+  local entry
+  for candidate in "scripts/pr/$runtime_name" "scripts/$runtime_name"; do
+    if ! entry="$(
+      git_output "$repo" ls-tree "$snapshot_ref" -- "$candidate"
+    )"; then
+      echo "agent:autoreview: cannot inspect trusted feedback runtime: $candidate" >&2
+      return 1
+    fi
+    if [[ -n "$entry" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  return 0
+}
+
 materialize_feedback_runtime() {
   local repo="$1"
   local snapshot_ref="$2"
   local runtime_dir="$3"
   local relative_path
-  local optional_entry
-  local optional_runtime_path="scripts/pr-feedback-state-claude.mjs"
+  local runtime_name
+  local resolved_path
+  local index
   local output_path
   local mode
   local size
   local size_value
   local total_size=0
   local max_runtime_bytes=2097152
-  local runtime_paths=(
-    scripts/pr-feedback-state.mjs \
-    scripts/pr-feedback-state-core.mjs \
-    scripts/pr-ready-state.mjs \
-    scripts/pr-ready-state-core.mjs \
-    scripts/pr-ready-state-format.mjs
+  local required_runtime_names=(
+    pr-feedback-state.mjs \
+    pr-feedback-state-core.mjs \
+    pr-ready-state.mjs \
+    pr-ready-state-core.mjs \
+    pr-ready-state-format.mjs
   )
+  local optional_runtime_names=(
+    pr-feedback-state-claude.mjs
+  )
+  local runtime_names=()
+  local runtime_paths=()
 
-  if ! optional_entry="$(
-    git_output "$repo" ls-tree "$snapshot_ref" -- "$optional_runtime_path"
-  )"; then
-    echo "agent:autoreview: cannot inspect optional trusted feedback runtime: $optional_runtime_path" >&2
-    return 1
-  fi
-  if [[ -n "$optional_entry" ]]; then
-    if ! mode="$(
-      git_blob_mode "$repo" "$snapshot_ref" "$optional_runtime_path"
-    )" || [[ "$mode" != "100644" && "$mode" != "100755" ]]; then
-      echo "agent:autoreview: trusted feedback runtime is not a regular Git blob: $optional_runtime_path" >&2
+  for runtime_name in "${required_runtime_names[@]}"; do
+    if ! resolved_path="$(
+      feedback_runtime_snapshot_path "$repo" "$snapshot_ref" "$runtime_name"
+    )"; then
       return 1
     fi
-    runtime_paths+=("$optional_runtime_path")
-  fi
+    if [[ -z "$resolved_path" ]]; then
+      echo "agent:autoreview: trusted feedback runtime is missing $runtime_name at $snapshot_ref: no scripts/pr/ or scripts/ copy" >&2
+      return 1
+    fi
+    runtime_names+=("$runtime_name")
+    runtime_paths+=("$resolved_path")
+  done
+
+  for runtime_name in "${optional_runtime_names[@]}"; do
+    if ! resolved_path="$(
+      feedback_runtime_snapshot_path "$repo" "$snapshot_ref" "$runtime_name"
+    )"; then
+      return 1
+    fi
+    if [[ -n "$resolved_path" ]]; then
+      runtime_names+=("$runtime_name")
+      runtime_paths+=("$resolved_path")
+    fi
+  done
 
   for relative_path in "${runtime_paths[@]}"; do
     if ! mode="$(git_blob_mode "$repo" "$snapshot_ref" "$relative_path")" ||
@@ -4337,8 +4389,13 @@ materialize_feedback_runtime() {
   done
 
   mkdir -p "$runtime_dir/scripts"
-  for relative_path in "${runtime_paths[@]}"; do
-    output_path="$runtime_dir/$relative_path"
+  # The destination stays flat under scripts/ whichever location the snapshot
+  # carried, so the helpers' sibling relative imports and the capture call site
+  # resolve identically on both sides of the move. Each destination basename is
+  # a literal from the lists above, never a path read out of the snapshot.
+  for index in "${!runtime_paths[@]}"; do
+    relative_path="${runtime_paths[$index]}"
+    output_path="$runtime_dir/scripts/${runtime_names[$index]}"
     if ! git_output "$repo" cat-file blob "${snapshot_ref}:${relative_path}" >"$output_path"; then
       echo "agent:autoreview: trusted feedback runtime is missing $relative_path at $snapshot_ref" >&2
       return 1

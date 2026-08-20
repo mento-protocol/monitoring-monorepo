@@ -4595,6 +4595,31 @@ assert_contains "- node scripts/sentry/ci-wiring/check-sentry-suites-in-ci.test.
 run_gate "scripts/pr-feedback-state-claude.mjs"
 assert_contains "- pnpm pr:feedback-state:test (PR feedback-state helper changed)"
 
+# Paired one-level arms for the D3 move. Neither arm is a glob, so the
+# scripts/pr/ copies route only because they are named outright; a miss here is
+# silent, the suite simply stops running for the copy the wrapper prefers.
+run_gate "scripts/pr/pr-feedback-state.mjs"
+assert_contains "- pnpm pr:feedback-state:test (PR feedback-state helper changed)"
+
+run_gate "scripts/pr/pr-feedback-state-core.mjs"
+assert_contains "- pnpm pr:feedback-state:test (PR feedback-state helper changed)"
+
+run_gate "scripts/pr/pr-feedback-state-claude.mjs"
+assert_contains "- pnpm pr:feedback-state:test (PR feedback-state helper changed)"
+
+run_gate "scripts/pr/pr-ready-state.mjs"
+assert_contains "- pnpm pr:ready-state:test (PR ready-state helper changed)"
+
+run_gate "scripts/pr/pr-ready-state-core.mjs"
+assert_contains "- pnpm pr:ready-state:test (PR ready-state helper changed)"
+
+run_gate "scripts/pr/pr-ready-state-format.mjs"
+assert_contains "- pnpm pr:ready-state:test (PR ready-state helper changed)"
+
+# The pre-move flat paths keep routing while both locations are live.
+run_gate "scripts/pr-ready-state-format.mjs"
+assert_contains "- pnpm pr:ready-state:test (PR ready-state helper changed)"
+
 run_gate "scripts/sanitize-terraform-output.sh"
 assert_contains "- pnpm sanitize:test (Terraform output sanitizer changed)"
 

@@ -32,7 +32,9 @@ import {
   assertTokenAbsentFromExecEnv,
   classify,
   handleMatches,
+  handleServerError,
   isAllowedPath,
+  isBackPressureHeader,
   isEntryPoint,
   readTokenFromStdin,
   resolveConfig,
@@ -428,6 +430,247 @@ test("rewriteRegionLinks touches only links.regionUrl", () => {
   assert.equal(payload[0].links.organizationUrl, "https://a");
   assert.equal(payload[1].links, undefined);
   assert.equal("regionUrl" in payload[2].links, false);
+});
+
+test("a socket error AFTER startup is logged AND fails the broker closed", async () => {
+  // Two halves, and the second is the one that reaches the workflow. The
+  // startup promise's `reject` used to be the server's only `error` listener,
+  // and once that promise settles it is a no-op, so every later socket error
+  // vanished. Logging alone does not fix that: the workflow sends both broker
+  // streams to a file it prints only when readiness fails, so a line written
+  // after readiness is read by nobody and the agent keeps spending its turn
+  // budget against a broker that has stopped accepting.
+  const exits = [];
+  await withBroker(
+    jsonUpstream([]),
+    async ({ broker, logs }) => {
+      broker.emit("error", new Error("EADDRNOTAVAIL after startup"));
+      assert.ok(
+        logs.some((line) => line.includes("SERVER-ERROR")),
+        `a post-startup server error must reach the log; saw ${JSON.stringify(logs)}`,
+      );
+      assert.ok(
+        logs.some((line) => line.includes("EADDRNOTAVAIL after startup")),
+        "the log line must name what actually failed",
+      );
+      assert.deepEqual(exits, [1], "the broker must exit non-zero, not linger");
+      assert.equal(
+        broker.listening,
+        false,
+        "a broker that stopped accepting must not keep the port claimed",
+      );
+    },
+    { exit: (code) => exits.push(code) },
+  );
+});
+
+test("handleServerError says what failed before it stops, and stops regardless", () => {
+  const lines = [];
+  const exits = [];
+  let closed = 0;
+  const error = new Error("listening socket is gone");
+  error.code = "EADDRNOTAVAIL";
+  handleServerError(error, {
+    server: {
+      listening: false,
+      close: () => {
+        closed += 1;
+        // The order is load-bearing: a close that throws must not swallow the
+        // exit, or the fatal path leaves the broker alive after all.
+        throw new Error("already down");
+      },
+    },
+    log: (line) => lines.push(line),
+    exit: (code) => exits.push(code),
+  });
+  assert.deepEqual(lines, [
+    "sentry-mcp-broker: SERVER-ERROR listening socket is gone",
+  ]);
+  assert.equal(closed, 1);
+  assert.deepEqual(exits, [1]);
+});
+
+test("a transient accept error does NOT take the broker down while it is still listening", () => {
+  // One momentary fd squeeze is not a lost listener. Tearing down on it would
+  // reach the same dead-broker outcome the fatal path exists to prevent, just
+  // sooner — so a code known to be per-connection survives, and says so.
+  for (const code of ["EMFILE", "ENFILE", "ENOBUFS", "ECONNABORTED"]) {
+    const lines = [];
+    const exits = [];
+    let closed = 0;
+    const error = new Error(`accept failed: ${code}`);
+    error.code = code;
+    handleServerError(error, {
+      server: {
+        listening: true,
+        close: () => {
+          closed += 1;
+        },
+      },
+      log: (line) => lines.push(line),
+      exit: (c) => exits.push(c),
+    });
+    assert.equal(closed, 0, `${code} must not close a live listener`);
+    assert.deepEqual(exits, [], `${code} must not exit`);
+    assert.ok(
+      lines.some((line) => line.includes(`accept failed: ${code}`)),
+      `${code} must still be reported`,
+    );
+    assert.ok(
+      lines.some((line) => line.includes("staying up")),
+      `${code} must say it stayed up`,
+    );
+  }
+});
+
+test("the fatal default holds: an unknown code, or a lost listener, stops the broker", () => {
+  // The two directions are not symmetric. Staying up with the listener gone
+  // restores the silence this whole handler exists to end; going down when it
+  // was fine costs a run that fails visibly. So anything not KNOWN to be
+  // per-connection is treated as the listener being gone.
+  const cases = [
+    ["an unknown code", "ESOMETHINGNEW", true],
+    ["no code at all", undefined, true],
+    ["a transient code but a listener that is gone", "EMFILE", false],
+  ];
+  for (const [label, code, listening] of cases) {
+    const exits = [];
+    let closed = 0;
+    const error = new Error(label);
+    if (code) error.code = code;
+    handleServerError(error, {
+      server: {
+        listening,
+        close: () => {
+          closed += 1;
+        },
+      },
+      log: () => {},
+      exit: (c) => exits.push(c),
+    });
+    assert.equal(closed, 1, `${label} must close`);
+    assert.deepEqual(exits, [1], `${label} must exit non-zero`);
+  }
+});
+
+/** Runs `body` with `console.log` captured, restoring it however body ends. */
+async function withCapturedConsole(body) {
+  const lines = [];
+  const realLog = console.log;
+  console.log = (line) => lines.push(String(line));
+  try {
+    await body(lines);
+  } finally {
+    console.log = realLog;
+  }
+  return lines;
+}
+
+test("both broker diagnostics survive a caller that supplies no log sink", async () => {
+  // An optional call on `config.log` puts the silence straight back for any
+  // caller passing none, which is the defect both lines exist to end. The
+  // console fallback is the one `createHandler` already applies.
+  const upstream = await startUpstream(jsonUpstream([]));
+  const exits = [];
+  const broker = await startBroker({
+    token: REAL_TOKEN,
+    handle: HANDLE,
+    upstream: upstream.origin,
+    port: 0,
+    exit: (code) => exits.push(code),
+  });
+  // An unparsable upstream makes the handler throw INSIDE the request path,
+  // which is the only way to reach HANDLER-ERROR.
+  const broken = await startBroker({
+    token: REAL_TOKEN,
+    handle: HANDLE,
+    upstream: "not-a-url",
+    port: 0,
+    exit: (code) => exits.push(code),
+  });
+  let status = null;
+  const lines = await withCapturedConsole(async () => {
+    status = (
+      await call(
+        `http://127.0.0.1:${broken.address().port}`,
+        "/api/0/organizations/",
+      )
+    ).status;
+    broker.emit("error", new Error("no sink was supplied"));
+  });
+  broker.close();
+  broken.close();
+  upstream.server.close();
+
+  assert.equal(status, 500, "a thrown handler still denies rather than hangs");
+  assert.ok(
+    lines.some((line) => line.includes("HANDLER-ERROR")),
+    `the handler failure must reach the fallback; saw ${JSON.stringify(lines)}`,
+  );
+  assert.ok(
+    lines.some(
+      (line) =>
+        line.includes("SERVER-ERROR") && line.includes("no sink was supplied"),
+    ),
+    `the socket failure must reach the fallback; saw ${JSON.stringify(lines)}`,
+  );
+});
+
+// ── back-pressure ────────────────────────────────────────────────────────────
+
+test("a throttled upstream reaches the client WITH its back-off headers", async () => {
+  // The MCP server obeys `Retry-After` and the `X-Sentry-Rate-Limit-*` family.
+  // Relaying only content-type and link turned a 429 into a bare status, so the
+  // client retried at once against a Sentry that was still refusing it.
+  await withBroker(
+    (_req, res) => {
+      res.writeHead(429, {
+        "content-type": "application/json",
+        "retry-after": "42",
+        "x-sentry-rate-limit-limit": "100",
+        "x-sentry-rate-limit-remaining": "0",
+        "x-sentry-rate-limit-reset": "1755600000",
+        "x-sentry-rate-limit-concurrentlimit": "10",
+        // Not back-pressure and not the broker's to relay.
+        "set-cookie": "session=leak-me",
+        "x-served-by": "sentry-edge-7",
+      });
+      res.end(JSON.stringify({ detail: "rate limited" }));
+    },
+    async ({ base }) => {
+      const res = await call(base, "/api/0/organizations/");
+      assert.equal(res.status, 429);
+      assert.equal(res.headers.get("retry-after"), "42");
+      assert.equal(res.headers.get("x-sentry-rate-limit-limit"), "100");
+      assert.equal(res.headers.get("x-sentry-rate-limit-remaining"), "0");
+      assert.equal(res.headers.get("x-sentry-rate-limit-reset"), "1755600000");
+      assert.equal(
+        res.headers.get("x-sentry-rate-limit-concurrentlimit"),
+        "10",
+        "a name-by-name list would have dropped this one",
+      );
+      // Still an allowlist: everything else the upstream sent stays upstream.
+      assert.equal(res.headers.get("set-cookie"), null);
+      assert.equal(res.headers.get("x-served-by"), null);
+    },
+  );
+});
+
+test("isBackPressureHeader admits the two families and nothing else", () => {
+  assert.equal(isBackPressureHeader("Retry-After"), true);
+  assert.equal(isBackPressureHeader("X-Sentry-Rate-Limit-Reset"), true);
+  assert.equal(isBackPressureHeader("x-sentry-rate-limit-anything-new"), true);
+  assert.equal(isBackPressureHeader("authorization"), false);
+  assert.equal(isBackPressureHeader("set-cookie"), false);
+  assert.equal(isBackPressureHeader("x-sentry-token"), false);
+  assert.equal(isBackPressureHeader(undefined), false);
+  // The prefix carries its trailing hyphen, so a name that merely STARTS with
+  // those letters is not the family and does not cross.
+  assert.equal(isBackPressureHeader("x-sentry-rate-limitation"), false);
+  assert.equal(isBackPressureHeader("x-sentry-rate-limiter-secret"), false);
+  // Sentry's plural ingest header is not a Web API response header, and the
+  // hyphen excludes it too; every ALLOWED_PATHS entry is a Web API read.
+  assert.equal(isBackPressureHeader("x-sentry-rate-limits"), false);
 });
 
 // ── fail closed: redirects and upstream failures ─────────────────────────────

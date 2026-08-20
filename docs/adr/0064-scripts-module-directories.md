@@ -179,6 +179,21 @@ scheduled document, for context an agent gets from the directory map in
   a pinned constant, recompute the constant, update every doc that records it,
   and treat operator regeneration as a release step. P6 hit this with
   `scripts/mcp/upstash-mcp-launcher.mjs`.
+- A file read from `origin/main` rather than the working tree cannot move in one
+  PR. `agent-autoreview.sh` materializes the `pr-*-state` helpers from the
+  protected `origin/main` snapshot because the checked-out copies are not
+  trusted, and a missing path there fails closed. The wrapper that runs is
+  whichever one the developer has checked out, so any single PR that both moves
+  the files and repoints the pin leaves one pairing broken: a pre-move wrapper
+  reading a post-move `origin/main`, or a post-move wrapper reading the
+  `origin/main` that still predates its own merge. D3 splits it across three
+  merges — add the copies and teach the wrapper to accept either location; then
+  repoint every consumer; then delete the pre-move copies and the fallback. The
+  middle state keeps both locations live on `origin/main`, which is what lets a
+  wrapper generation from either side of the move keep working. This is stricter
+  than the `pr-description.yml` case above, which degrades to a warning; here
+  there is no fallback to degrade to. Hold the last step until no wrapper old
+  enough to need the pre-move paths is still in use.
 
 ## Sweep checklist for a move
 

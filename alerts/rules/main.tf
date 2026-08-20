@@ -325,6 +325,39 @@ locals {
   pool_depletion_page_active_promql     = local.pool_min_reserve_value_share_promql
   pool_depletion_critical_active_promql = "(${local.pool_min_reserve_value_share_promql}) >= 0.1"
 
+  # ── Value-share coverage gap ─────────────────────────────────────────────
+  # Both bands above read the VALUE-share gauges, which the bridge publishes
+  # only for a pool with a live median AND an on-chain-read `invertRateFeed`
+  # orientation. That gate is fail-closed and correct — a depletion number
+  # derived from a guessed orientation would be worse than none — but it is
+  # silent: a pool that trips it leaves both bands at NoData, and `no_data_state
+  # = "OK"` turns that into no notification at all. This expression is the
+  # visibility companion, the same unless-shape as
+  # `deviation_warning_unavailable_active_promql` above, which covers the
+  # matching data-unavailable gap on the deviation side.
+  #
+  # Left side — pools the bridge sees holding reserves. The count-share gauges
+  # publish whenever normalized reserves sum above zero, so their presence is
+  # exactly "this pool is funded" and needs no separate reserves metric.
+  #
+  # `max`, not `min`: on a fully one-sided pool the thin side reads 0.0, and a
+  # `> 0` threshold would then skip the pool with the WORST depletion exposure.
+  # The fat side is >= 0.5 for any funded pool, so `max` fires for every funded
+  # pool, and the value it fires with reads as the concentration on the heavy
+  # leg. The alert is a presence signal; the number is diagnostic only.
+  #
+  # `without(token_symbol)` folds the two flat per-token series into one series
+  # per pool and drops `__name__`, leaving exactly the pool fingerprint the
+  # alert instances and the `notify_warning_pools_pool` `group_by` are keyed on
+  # — same reason `pool_min_reserve_value_share_promql` aggregates that way.
+  #
+  # Right side — `unless on(chain_id, pool_id, pair)`, not a bare `unless`: the
+  # value gauges carry `token_symbol` and their own `__name__`, so a full
+  # label-set comparison would never match and the rule would fire on every
+  # funded pool. `on()` restricts the join to the pool fingerprint the two
+  # gauge families share.
+  pool_value_share_missing_active_promql = "max without(token_symbol) (mento_pool_reserve_share_token0 or mento_pool_reserve_share_token1) unless on(chain_id, pool_id, pair) (mento_pool_reserve_value_share_token0 or mento_pool_reserve_value_share_token1)"
+
   # Transition markers let resolved notifications say why an alert stopped
   # instead of listing every possible cause. Each base alert rule adds the
   # matching query as annotation-only `Info`; it is not part of the threshold
