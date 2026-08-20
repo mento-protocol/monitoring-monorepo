@@ -12,8 +12,30 @@ const CLAUDE_VERDICT_NAMESPACE = /^(?:\*\*)?(?:Overall\s+)?Verdict\s*:/i;
 const CLAUDE_CLEAN_VERDICT =
   /^(?:\*\*)?(?:Overall\s+)?Verdict:(?:\*\*)?\s*(?:\*\*)?LGTM(?:\*\*)?\s*(?<tail>[\s\S]*)$/i;
 const PROSE_PATTERN_LIBRARY_START = Date.parse("2026-08-13T23:08:10Z");
-const REVIEW_NUMBER_HEADING = /^#{1,6}\s+Code Review\s+—\s+PR\s+#(\d+)$/gm;
-const REVIEW_TITLE_HEADING = /^#{1,6}\s+Review:\s+(.{1,200})$/gim;
+// One source per heading shape, compiled twice: a global form that harvests
+// every occurrence from the body, and a single-line form the per-line scan
+// uses. Re-spelling either shape would let the harvest and the scan disagree
+// about what a review heading is, which is how a heading would slip past
+// validation and still be treated as recognized.
+const REVIEW_NUMBER_HEADING_SHAPE = String.raw`^#{1,6}\s+Code Review\s+—\s+PR\s+#(\d+)$`;
+const REVIEW_TITLE_HEADING_SHAPE = String.raw`^#{1,6}\s+Review:\s+(.{1,200})$`;
+const REVIEW_NUMBER_HEADING = new RegExp(REVIEW_NUMBER_HEADING_SHAPE, "gm");
+const REVIEW_TITLE_HEADING = new RegExp(REVIEW_TITLE_HEADING_SHAPE, "gim");
+// Per-shape single-line forms, each carrying the SAME flags as its harvest
+// counterpart minus `g`/`m`: the number heading stays case-sensitive like its
+// `gm` harvest, the title heading keeps `i` like its `gim` harvest. They are
+// tested against the RAW line, never a trimmed one.
+//
+// Both properties are load-bearing. The line scan treats a review heading as
+// already-validated because harvest checked its PR number and title, so the
+// two must agree on exactly which lines are headings. A single combined
+// case-insensitive pattern applied to a trimmed line disagreed twice: a
+// `   ### Review: <defect>` indented 1-3 spaces is invisible to harvest (whose
+// shape anchors `^#`) yet matched here, and a mis-cased `### code review — PR
+// #9999` is likewise unharvested but matched. Either one skipped the title and
+// PR-number checks entirely and allowlisted a defect on a fail-closed gate.
+const REVIEW_NUMBER_HEADING_LINE = new RegExp(REVIEW_NUMBER_HEADING_SHAPE);
+const REVIEW_TITLE_HEADING_LINE = new RegExp(REVIEW_TITLE_HEADING_SHAPE, "i");
 // `### Review: <PR title>` is the usual heading, but a clean review may instead
 // put the verdict there (`### Review: LGTM ✅`). Only the bare verdict word and
 // an optional approval mark are allowed — never free text, which would let a
@@ -54,14 +76,43 @@ const REVIEW_LINE_PREFIX_DEPTH = 3;
 // An empty (`[ ]`) or negated (`[-]`) task box, once the prefixes before it are
 // gone. `[x]`/`[X]` is a completed check and stays eligible.
 const UNCHECKED_TASK_BOX = /^\[[ -]\]\s/;
-const CLEAN_P3_DISPOSITION_PATTERNS = [
-  /\bno[- ]action(?:\s+requested)?\b/i,
-  /\bnone\s+blocking\b/i,
-  /\bnot\s+(?:a\s+)?blocker\b/i,
-  /\bisn['’]t\s+(?:a\s+)?blocker\b/i,
-  /\bnot\s+worth\s+(?:a\s+)?fix\b/i,
-  /\bnot\s+an?\s+(?:error|issue)\b/i,
-];
+// A horizontal rule carries no assertion, so it is recognized clean evidence.
+const THEMATIC_BREAK = /^(?:-{3,}|\*{3,}|_{3,})$/;
+// Section labels a clean review uses to introduce its findings or roll-up.
+// They name a section and assert nothing, so they are recognized clean
+// evidence. Emphasis may wrap the label, and the colon is optional. Anything
+// else after the label makes the line free prose, which is not recognized.
+const CLEAN_SECTION_LABEL =
+  /^(?:\*\*)?(?:Numbered\s+findings?\s+roll[- ]?up|Findings|Roll[- ]?up)\s*:?(?:\*\*)?$/i;
+// The priority marker a finding line opens with, stripped before the rest of
+// the line is judged. Shared by the action scan and the P3 evidence check so
+// the two cannot disagree about where a finding's text begins.
+const PRIORITY_MARKER_PREFIX =
+  /^(?:\*\*)?\[?[Pp][0-3]\]?(?:\*\*)?(?:\s*[^A-Za-z0-9\s]\s*|\s+)/;
+// The clean-evidence grammar, shared with `isExplicitlyCleanClaudeReview` in
+// pr-feedback-state-core.mjs. It lives here because both Claude-review paths
+// read it and a second copy drifted from the first within one PR.
+//
+// A finding line may state the absence of an action, but only when every
+// clause that follows is a curated positive observation. `POSITIVE_EVIDENCE`
+// is an exact-match allowlist: each entry is one reviewed phrase, never an
+// open-ended shape, because anything looser lets a defect ride along behind a
+// no-action marker.
+// `No action required` is deliberately NOT here, though it reads like a
+// sibling of `No action`. The body-level fallback scan in
+// `isActionableReviewBotComment` matches `\bAction\s+required\b` through
+// REVIEW_CONTRADICTION, so a line carrying it blocks anyway. Advertising it as
+// accepted here made the two layers disagree: the grammar called the line
+// clean and the gate still blocked it. Narrowing the marker keeps the
+// advertised set honest. The alternative — exempting recognized P3 lines from
+// the fallback scan — would weaken a fail-closed check to fix a false positive,
+// which is the wrong direction on this gate.
+const CLEAN_FINDING_MARKER =
+  /^(?:None\s+blocking|No[- ]action|Good\s+hygiene|Lockfile\s+diff\s+is\s+fully\s+mechanical)\b[\s:—.,]*(.*)$/i;
+const UNSAFE_EVIDENCE_QUALIFIER =
+  /\b(?:not|never|cannot|can't|doesn't|does\s+not|fails?\s+to|may|might|could|appears?|seems?|probably|likely|possibly|perhaps|unclear|unknown)\b/i;
+const POSITIVE_EVIDENCE =
+  /^(?:clean(?:,\s+well\s+scoped)?(?:\s+fix)?|well\s+scoped(?:\s+fix)?|correct|covered|bounded|mechanical|verified|complete|exact\s+removal\s+condition|(?:no|zero|0)\s+(?:errors?|fails?|failed|failures?)(?:\s+(?:and|or)\s+(?:errors?|fails?|failed|failures?))?(?:\s+(?:are|was|were)\s+(?:found|observed|reported))?|no\s+unrelated\s+version\s+bumps?|no\s+vulnerable\s+sharp@0\.34\.5\s+remains?\s+anywhere\s+in\s+(?:the\s+)?repo(?:'s)?\s+lockfiles|parser\s+should\s+continue\s+rejecting\s+malformed\s+input|fallback\s+should\s+stay|fix\s+is\s+correct|override\s+selector\s+is\s+correctly\s+bounded|lockfile\s+churn\s+beyond\s+sharp\s+itself\s+is\s+confirmed\s+mechanical,\s+not\s+scope\s+creep|(?:the\s+)?bounded\s+selector\s+matches\s+the\s+repo(?:'s)?\s+established\s+override\s+pattern|matches\s+repo\s+convention|(?:the\s+)?inline\s+comment\s+documents\s+the\s+advisory|removal\s+condition\s+comment\s+satisfies\s+the\s+temporary\s+override\s+documentation\s+expectation|tests\s+cover\s+the\s+changed\s+paths)$/i;
 const EXPLICIT_ACTION_LINE =
   /^(?:\*\*)?(?:Action\s+(?:items?|required)|Changes\s+requested|Needs\s+changes|A\s+fix\s+is\s+required|.{1,160}\s+must\s+be\s+(?:addressed|changed|fixed|implemented|removed|restored|updated|validated)|(?:Please\s+)?(?:add|address|change|ensure|fix|implement|prevent|remove|restore|update|validate)|(?:Must|Should|Needs?\s+to)\s+(?:add|address|change|ensure|fix|implement|prevent|remove|restore|update|validate))\b/i;
 const INLINE_DIRECT_ACTION =
@@ -215,18 +266,106 @@ function priorityAtLineStart(line) {
   )?.[1];
 }
 
-function hasCleanP3Disposition(line) {
-  return CLEAN_P3_DISPOSITION_PATTERNS.some((pattern) => pattern.test(line));
+// A finding line's text with its list/heading prefixes and priority marker
+// removed, so the evidence check judges the claim rather than the numbering.
+function priorityLineContent(line) {
+  return reviewLineContent(line).replace(PRIORITY_MARKER_PREFIX, "");
+}
+
+// True when a no-action marker is followed only by curated positive
+// observations. Every clause after the marker must clear the hedge filter and
+// match POSITIVE_EVIDENCE exactly, so a defect appended to a no-action lead-in
+// is never read as clean.
+// One clause (or a whole tail) counts as clean evidence when it carries no
+// hedge and matches the curated allowlist exactly. Shared by both the
+// full-tail attempt and the per-clause fallback so the two cannot diverge.
+function isCuratedEvidenceClause(evidence) {
+  const withoutSafeNegation = evidence.replace(/,\s+not\s+scope\s+creep$/i, "");
+  return (
+    !UNSAFE_EVIDENCE_QUALIFIER.test(withoutSafeNegation) &&
+    POSITIVE_EVIDENCE.test(evidence)
+  );
+}
+
+export function hasPositiveCleanEvidence(value) {
+  const tail = String(value ?? "")
+    .trim()
+    .match(CLEAN_FINDING_MARKER)?.[1];
+  if (tail === undefined) return false;
+  // Try the WHOLE tail against the allowlist before splitting it. Several
+  // curated entries span a conjunction — `no errors and failures were found` is
+  // one exact `POSITIVE_EVIDENCE` phrase — and splitting on `and` first tore it
+  // into `no errors` plus `failures were found`, whose second half is not an
+  // entry, so a curated phrase failed its own allowlist.
+  //
+  // This cannot smuggle anything: `POSITIVE_EVIDENCE` is anchored `^...$`, so a
+  // full-tail match means the entire tail is one reviewed phrase. Splitting
+  // stays as the fallback for genuinely multi-clause evidence.
+  // Strip a trailing sentence terminator first: `POSITIVE_EVIDENCE` is anchored
+  // `^...$` and its entries carry no punctuation, so `...were found.` would
+  // miss. The per-clause path never saw this because its split consumes the
+  // terminator.
+  if (isCuratedEvidenceClause(tail.replace(/[.!?;]+$/, "").trim())) return true;
+  const evidenceClauses = tail
+    .split(/(?:[!?;]+|\.(?=\s|$)|\b(?:and|but|however|although|yet)\b)/i)
+    .map((clause) => clause.trim())
+    .filter(Boolean);
+  return (
+    evidenceClauses.length > 0 && evidenceClauses.every(isCuratedEvidenceClause)
+  );
 }
 
 function hasExplicitAction(line) {
-  const content = reviewLineContent(line).replace(
-    /^(?:\*\*)?\[?[Pp][0-3]\]?(?:\*\*)?(?:\s*[^A-Za-z0-9\s]\s*|\s+)/,
-    "",
-  );
+  const content = priorityLineContent(line);
   return (
     EXPLICIT_ACTION_LINE.test(content) || INLINE_DIRECT_ACTION.test(content)
   );
+}
+
+// The allowlist half of the prose classifier: a line stays eligible only when
+// it is one of the shapes a clean review is made of. Everything else — any
+// free sentence — makes the review actionable.
+//
+// This inverts the rule the scan used to apply. Rejecting lines that carry
+// finding vocabulary cannot bound natural language: `Anonymous callers can
+// delete every stored record.` names no priority, no severity, and no action
+// verb, so it read as clean on a fail-closed merge gate and the finding was
+// dropped before merge (issue 1966). The same reasoning #1960 applied to
+// verdict and roll-up tails applies to every other line in the body.
+//
+// Headings are recognized because the caller already validated them: the
+// review-number heading must name this PR and the review-title heading must
+// carry this PR's title or a bare LGTM. The verdict line is recognized for the
+// same reason — the caller proved there is exactly one and that it declares a
+// clean verdict with no tail.
+function isRecognizedCleanReviewLine(line) {
+  const source = String(line ?? "");
+  const raw = source.trim();
+  if (!raw) return true;
+  // An unticked box means the reviewer never completed the assertion, whatever
+  // the assertion is. This guards EVERY recognized shape rather than repeating
+  // the check per shape: `priorityAtLineStart` and `priorityLineContent` peel
+  // the box exactly as the verdict and conclusion paths do, so without this a
+  // `- [ ] [P3] Good hygiene: tests cover the changed paths.` cleared on
+  // evidence its author had not confirmed.
+  if (hasUncheckedTaskBox(source)) return false;
+  if (isClaudeTaskCompletionLine(raw)) return true;
+  if (THEMATIC_BREAK.test(raw)) return true;
+  // Headings are matched on the UNTRIMMED line so this scan recognizes exactly
+  // the set harvest validated — see the note on REVIEW_NUMBER_HEADING_LINE.
+  if (
+    REVIEW_NUMBER_HEADING_LINE.test(source) ||
+    REVIEW_TITLE_HEADING_LINE.test(source)
+  )
+    return true;
+  if (verdictDeclaration(raw)) return true;
+  if (CLEAN_SECTION_LABEL.test(reviewLineContent(raw))) return true;
+  const priority = priorityAtLineStart(raw);
+  if (priority !== undefined)
+    return (
+      priority === "3" && hasPositiveCleanEvidence(priorityLineContent(raw))
+    );
+  return false;
 }
 
 export function hasControlCharacter(value) {
@@ -337,13 +476,12 @@ export function classifyClaudeReviewProse(comment, pr) {
 
   for (const line of lines) {
     if (isCleanConclusion(line)) continue;
-    const priority = priorityAtLineStart(line);
-    if (
-      priority !== undefined &&
-      (priority !== "3" || !hasCleanP3Disposition(line))
-    )
-      return true;
+    // The explicit-action and severity rules stay in front of the allowlist.
+    // They no longer carry the classification on their own, but they still
+    // guard the recognized shapes themselves — a review-title heading repeats
+    // the PR title, and a title can name a required change.
     if (hasExplicitAction(line) || EXPLICIT_SEVERITY.test(line)) return true;
+    if (!isRecognizedCleanReviewLine(line)) return true;
   }
 
   return false;

@@ -127,21 +127,42 @@ post-conclusion review-method note stay outside the reusable grammar. The
 record binds author `claude[bot]`, creation time `2026-08-20T12:37:45Z`, head
 `0884780bfe1d5ae8710a6f845c3a6199f1bf365d`, and raw body digest
 `6ebf5de00fde8c46040def096e4c0c02ee0ab02b9fae20130e1ba8e6e84037e3`.
-A changed body or binding cannot reuse this record. The general parser then
-evaluates that review independently.
+A changed body or binding cannot reuse this record. The compatibility test also
+confirms that the general parser blocks the body without the exact record.
 
-Reviews from the observed PR #1848 shape onward use a small prose-pattern
-library. The library requires one unhedged `Verdict: LGTM` or `Overall verdict:
-LGTM` line and an explicit no-findings or no-action conclusion. P0-P2 findings,
-P3 lines without a known no-action disposition, direct action requests,
-ambiguous verdicts, and unsupported markup stay blocking. Current-head and
-unresolved-feedback checks remain separate and mandatory.
+Newer reviews go through a small prose-pattern library instead.
+
+The library clears a review only when **every line is positively recognized**.
+A line is recognized when it is blank, the Claude task-completion header, a
+thematic break, a review heading that harvest already validated, the single
+unhedged `Verdict: LGTM` or `Overall verdict: LGTM` line, a bare `Findings` or
+`Roll-up` section label, an explicit no-findings conclusion, or a P3 line whose
+every clause matches the curated `POSITIVE_EVIDENCE` allowlist. Anything else
+blocks, including ordinary narrative prose that carries no finding vocabulary.
+
+Two consequences are deliberate and easy to trip over:
+
+- **A clean review written as free prose blocks.** The observed PR #1848 body
+  is the reference case and is pinned blocking by test. It reads clean to a
+  human, but its narrative paragraphs assert nothing the gate can verify — and
+  one of them in fact asks the reader to confirm CI before merge.
+- **A no-action marker alone is not a disposition.** `No action`, `None
+blocking`, and similar leads must be followed by curated positive evidence.
+  The older behaviour, where such a marker cleared a line on its own, let a
+  defect ride along behind it.
+
+A clean verdict or conclusion may end only in a bare sentence terminator. Any
+trailing sentence blocks, because a tail is unconstrained English and no term
+list separates praise from a defect stated plainly.
 
 The registry and named phrase groups live in
 `scripts/pr-feedback-state-claude.mjs`. Add a named phrase only with a real
 review fixture and nearby blocking mutations. Add a compatibility record only
 with a byte-exact source fixture and single-field binding mutations. The
-library does not try to prove the meaning of arbitrary English prose.
+library does not try to prove the meaning of arbitrary English prose — it
+refuses prose it cannot recognize, and the compatibility registry is the escape
+hatch for a specific historical body.
+Current-head and unresolved-feedback checks remain separate and mandatory.
 
 ## Expected CLI contract
 
