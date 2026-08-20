@@ -73,6 +73,8 @@ function eligiblePool(overrides: Partial<PoolRow> = {}): PoolRow {
     reserves1: "1000000000000000000",
     token0Decimals: 18,
     token1Decimals: 18,
+    invertRateFeed: false,
+    invertRateFeedKnown: true,
     rebalancerAddress: "0x0000000000000000000000000000000000000beef",
     wrappedExchangeId: "",
     wrappedExchangeDeprecated: false,

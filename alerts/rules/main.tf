@@ -264,8 +264,18 @@ locals {
   # ratio costs a swapper nothing on its own. A side running dry does: once one
   # leg is empty every swap into that leg reverts, and well before that the
   # remaining bandwidth on that side is too thin to serve normal size.
-  # `min(side share)` is that signal, read from the same reserve-share gauges
-  # the deviation annotations already render.
+  # `min(side share)` is that signal — measured by VALUE, not by token count.
+  #
+  # The count share (`mento_pool_reserve_share_token*`) is not a depletion
+  # signal on a pair that does not trade near parity: it is dominated by the
+  # exchange rate. A healthy, balanced JPYm/USDm pool reads 0.4% / 99.6% by
+  # count purely because one JPY is worth ~0.0063 USD, and the first shipped
+  # version of these rules (PR #1940) would have paged on both JPYm pools
+  # forever. `mento_pool_reserve_value_share_token*` converts each leg through
+  # the pool's own oracle reference — the same frame the FPMM contract and the
+  # indexer's `priceDifference` use, including the per-pool `invertRateFeed`
+  # orientation — so 50/50 here means "sitting on the oracle" and the floors
+  # below read as economic one-sidedness.
   #
   # `min without(token_symbol)` folds the two flat per-token gauges into one
   # series per pool. Aggregation drops `__name__`, so the result carries
@@ -274,20 +284,46 @@ locals {
   # skipped when a pool's reserves are both zero, so an unfunded pool produces
   # no series and cannot fire either tier.
   #
+  # The value gauges additionally need a live median and an on-chain-read feed
+  # orientation, so a pool with a dark feed publishes neither and both tiers
+  # evaluate NoData. `no_data_state = "OK"` on both rules makes that silence,
+  # not a page: a dark oracle is what the oracle staleness rules are for, and
+  # a depletion number derived from a stale or guessed rate would be worse
+  # than none. Today that is the Polygon EURm/EUROP pool, which has never
+  # landed a median; a feed that goes dark later drops out the same way,
+  # because the bridge gates on the median being live and not merely on the
+  # retained last price.
+  #
   # Deliberately NOT FX-weekend gated, unlike the deviation rules above. Those
   # gate FX pairs because their signal derives from an oracle that legitimately
   # stops updating while the market is closed. Reserve share is on-chain
-  # balances only: a pool that is 95/5 on Saturday genuinely cannot serve one
-  # swap direction, and the weekend is exactly when nobody is watching. Same
-  # reasoning as the un-gated Oracle Jump rules in rules-fpmms.tf.
-  pool_min_reserve_share_promql = "min without(token_symbol) (mento_pool_reserve_share_token0 or mento_pool_reserve_share_token1)"
+  # balances only: a pool that is 95/5 by value on Saturday genuinely cannot
+  # serve one swap direction, and the weekend is exactly when nobody is
+  # watching. The rate used to weight the legs is the last median, which on a
+  # closed FX pair is Friday's — stale for pricing a trade, fine for deciding
+  # whether the two legs are worth roughly the same. Same reasoning as the
+  # un-gated Oracle Jump rules in rules-fpmms.tf.
+  pool_min_reserve_value_share_promql = "min without(token_symbol) (mento_pool_reserve_value_share_token0 or mento_pool_reserve_value_share_token1)"
+  # Rendered as percentages for the annotations, which name the thin side and
+  # the number an operator will quote back. Value shares, so the number in
+  # Slack is the same one that decided the alert.
+  pool_depletion_value_share_annotation_queries = [
+    {
+      ref_id = "V0"
+      expr   = "mento_pool_reserve_value_share_token0 * 100"
+    },
+    {
+      ref_id = "V1"
+      expr   = "mento_pool_reserve_value_share_token1 * 100"
+    },
+  ]
   # Two mutually exclusive bands, same shape as the oracle-jump tiers: a pool
   # matches the page rule or the critical rule, never both, so one depleting
   # pool never produces two notifications. The page band is open-ended
   # downward (a fully drained 0% side still pages); the critical band is
   # floored at the page share here and capped by its own Grafana evaluator.
-  pool_depletion_page_active_promql     = local.pool_min_reserve_share_promql
-  pool_depletion_critical_active_promql = "(${local.pool_min_reserve_share_promql}) >= 0.1"
+  pool_depletion_page_active_promql     = local.pool_min_reserve_value_share_promql
+  pool_depletion_critical_active_promql = "(${local.pool_min_reserve_value_share_promql}) >= 0.1"
 
   # Transition markers let resolved notifications say why an alert stopped
   # instead of listing every possible cause. Each base alert rule adds the
@@ -360,12 +396,13 @@ locals {
   #     NoData through the deviation rules and stuck them in Normal for
   #     ~9h on 2026-04-28).
   #   - `pool_depletion_summary_annotation` names the depleting side from the
-  #     same R0/R1 queries: whichever share is smaller is the leg that runs out
-  #     first, and its `token_symbol` label is the token swappers will stop
-  #     being able to buy. The `$values.A` fallback renders the aggregated min
-  #     share through `humanizePercentage` — safe here because A is a [0, 1]
-  #     fraction, nowhere near the 1e4 regime where that helper flips to
-  #     scientific notation.
+  #     V0/V1 value-share queries — not R0/R1, which are token counts and on an
+  #     off-parity pair name the wrong side. Whichever value share is smaller is
+  #     the leg that runs out first, and its `token_symbol` label is the token
+  #     swappers will stop being able to buy. The `$values.A` fallback renders
+  #     the aggregated min value share through `humanizePercentage` — safe here
+  #     because A is a [0, 1] fraction, nowhere near the 1e4 regime where that
+  #     helper flips to scientific notation.
   deviation_warning_summary_annotation = <<-EOT
     {{- if $values.Dev -}}
       {{- $dev := $values.Dev.Value -}}
@@ -398,17 +435,28 @@ locals {
   # Risk" / "Pool Nearly One-Sided") carry the severity distinction, so the
   # copy only has to answer the two operator questions: which side is running
   # out, and what to check.
-  pool_depletion_summary_annotation               = <<-EOT
-    {{- if and $values.R0 $values.R1 -}}
-      {{- if lt $values.R0.Value $values.R1.Value -}}
-        {{- printf "Only %.0f%% of pool reserves are %s. Users cannot swap into %s once that side empties — check the rebalancer and %s reserve bandwidth." $values.R0.Value $values.R0.Labels.token_symbol $values.R0.Labels.token_symbol $values.R0.Labels.token_symbol -}}
+  pool_depletion_summary_annotation = <<-EOT
+    {{- if and $values.V0 $values.V1 -}}
+      {{- if lt $values.V0.Value $values.V1.Value -}}
+        {{- printf "Only %.0f%% of pool value is %s. Users cannot swap into %s once that side empties — check the rebalancer and %s reserve bandwidth." $values.V0.Value $values.V0.Labels.token_symbol $values.V0.Labels.token_symbol $values.V0.Labels.token_symbol -}}
       {{- else -}}
-        {{- printf "Only %.0f%% of pool reserves are %s. Users cannot swap into %s once that side empties — check the rebalancer and %s reserve bandwidth." $values.R1.Value $values.R1.Labels.token_symbol $values.R1.Labels.token_symbol $values.R1.Labels.token_symbol -}}
+        {{- printf "Only %.0f%% of pool value is %s. Users cannot swap into %s once that side empties — check the rebalancer and %s reserve bandwidth." $values.V1.Value $values.V1.Labels.token_symbol $values.V1.Labels.token_symbol $values.V1.Labels.token_symbol -}}
       {{- end -}}
     {{- else if $values.A -}}
-      {{- printf "Smallest pool side holds only %s of reserves. Users cannot swap into it once it empties — check the rebalancer and reserve bandwidth." (humanizePercentage $values.A.Value) -}}
+      {{- printf "Smallest pool side holds only %s of pool value. Users cannot swap into it once it empties — check the rebalancer and reserve bandwidth." (humanizePercentage $values.A.Value) -}}
     {{- else -}}
       One pool side is nearly drained. Users cannot swap into it once it empties — check the rebalancer and reserve bandwidth.
+    {{- end -}}
+  EOT
+  # Depletion-only companion to `current_reserves`. The two lines answer
+  # different questions and can look contradictory on an off-parity pair by
+  # design: a balanced JPYm/USDm pool is "0% USDm / 100% JPYm" by token count
+  # and "40% USDm / 60% JPYm" by value. The alert fires on the value line, so
+  # it says so in words rather than leaving on-call to guess which number the
+  # threshold used.
+  pool_depletion_value_composition_annotation     = <<-EOT
+    {{- if and $values.V0 $values.V1 -}}
+      {{- printf "%.0f%%" $values.V0.Value }} {{ $values.V0.Labels.token_symbol }} / {{ printf "%.0f%%" $values.V1.Value }} {{ $values.V1.Labels.token_symbol }} (value-weighted share, at the last oracle median)
     {{- end -}}
   EOT
   deviation_current_reserves_annotation           = <<-EOT
