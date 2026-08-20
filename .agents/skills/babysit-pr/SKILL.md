@@ -5,7 +5,7 @@ title: Babysit PR Skill
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-13
+last_verified: 2026-08-20
 doc_type: skill
 scope: repo-wide
 review_interval_days: 90
@@ -120,9 +120,13 @@ item required.
 - Failing required check: inspect the failing workflow/log, fix only PR-caused
   failures, run focused validation, commit, and push.
 - Merge conflict: fetch `baseRefName` from the verified `BASE_REMOTE` and merge
-  that remote-tracking ref into the already-published PR branch. Resolve, run
-  focused validation, commit, and push through `HEAD_REMOTE`. Do not rebase a
-  published PR because the resulting force-push violates this workflow.
+  that remote-tracking ref into the already-published PR branch. Treat the
+  resolved tree as a new substantive head. Recompute review scope against the
+  fetched base, then run focused validation and the mapped quality gate. Repeat
+  the applicable closeout review when the resolution or inherited base changes
+  a reviewed surface or materiality. Commit and push through `HEAD_REMOTE`. Do
+  not rebase a published PR because the resulting force-push violates this
+  workflow.
 - Feedback blocker: triage every normalized finding, implement valid fixes, and
   sweep review bodies, top-level comments, threads, annotations, and failing
   logs before all-clear. Reply before resolving a thread. The reply forms,

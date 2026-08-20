@@ -3,7 +3,7 @@ title: Recurring PR Review Patterns
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-23
+last_verified: 2026-08-20
 doc_type: checklist
 scope: repo-wide
 review_interval_days: 90
@@ -130,6 +130,16 @@ tldr: **ruleset-required** workflows (`ci`, `Code Quality`, the Vercel checks) M
 
 - If a setup/cache script uses marker files or input hashes to skip work, the skip condition MUST verify the actual output that downstream commands need, not just the marker. Examples: dependency skips should verify a representative package resolves, Playwright skips should verify the browser executable exists, and codegen skips should verify the generated facade file exists.
 - Write marker files only after every validation step represented by that marker has passed. A failed post-install validation must not leave a fresh marker that makes the next run skip the install or rebuild path.
+
+### Shell failure propagation and fixture environments
+
+- A function invoked as a condition in `if`, `!`, `&&`, or `||` cannot rely on
+  `set -e` to stop its body. Check each load-bearing command explicitly. Add a
+  negative test that proves later commands do not run after the first failure.
+- A fixture that sources or spawns a script must create the feature state it
+  tests. Set enable flags and clear ambient opt-outs inside the fixture. For a
+  load-bearing flag, also run the fixture under the inverse caller state and
+  prove that the target path ran.
 
 ### Supply-chain advisory bumps
 

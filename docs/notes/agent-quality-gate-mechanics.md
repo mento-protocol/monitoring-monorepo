@@ -3,7 +3,7 @@ title: Agent Quality Gate — Mechanics
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-18
+last_verified: 2026-08-20
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -40,6 +40,13 @@ freshness stamp, so the next run cannot use `--skip-if-fresh`. Each run appends
 per-command JSON plus one `__run_total__` line to gitignored
 `.tmp/agent-quality-gate/durations.jsonl`. Targets: 3 minutes for common mapped
 sets and 8 minutes for the full workspace (Refs #1415).
+
+If a sandboxed mapped run fails only because a command needs host capabilities,
+rerun the full mapped gate with host access on the same head. The gate reuses
+fresh successes, runs the blocked commands, and records their freshness stamps.
+Running those commands directly proves them but does not warm
+`--skip-if-fresh`; a later push otherwise repeats them and can queue for the
+machine-wide lock.
 
 For a manual full-repository reproduction of the server-side pre-push baseline,
 including when hooks are absent or uncertain, use:
