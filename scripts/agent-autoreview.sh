@@ -6025,11 +6025,17 @@ run_capture_pipeline() {
   local partial_file="$4"
   shift 4
   local -a statuses
+  local had_errexit=0
   # Errexit stays off until the bookkeeping below is written, not just for the
   # pipeline. On the prebounded path this function runs in the wrapper's own
   # shell, where a full or failing $TMPDIR would otherwise abort the whole run
   # under errexit with no diagnostic -- the failure the caller's `set +e` exists
-  # to convert into an ordinary capture failure.
+  # to convert into an ordinary capture failure. Restore whatever the caller
+  # had rather than switching errexit on: on that same inline path, turning it
+  # on unconditionally would end the caller's `set +e` region early.
+  case "$-" in
+    *e*) had_errexit=1 ;;
+  esac
   set +e
   "$@" | head -c "$limit" >"$output"
   statuses=("${PIPESTATUS[@]}")
@@ -6042,7 +6048,9 @@ run_capture_pipeline() {
   # symlink another user can plant before this write.
   printf '%s %s\n' "${statuses[0]:-1}" "${statuses[1]:-1}" >"$partial_file"
   mv -f "$partial_file" "$status_file"
-  set -e
+  if [[ "$had_errexit" -eq 1 ]]; then
+    set -e
+  fi
 }
 
 # Bound one capture with the wall clock the capture budget has left. The pipeline
