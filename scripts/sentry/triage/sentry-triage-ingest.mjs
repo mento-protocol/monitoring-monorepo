@@ -544,14 +544,13 @@ async function fetchSentryIssuesPage(url, token, fetchImpl) {
 
 /**
  * Page through one Sentry issue query. Fails loud past `maxPages` for the same
- * reason `ghPaginate` does: a truncated scan is indistinguishable from a short
- * one at every consumer above this. The queue it feeds is built by DIFFERENCE —
- * a Sentry issue absent from the result set is one no stub gets created for —
- * so silently dropping the tail buries exactly the newest occurrences the run
- * exists to surface, and nothing downstream can tell.
+ * reason `ghPaginate` does: the queue it feeds is built by DIFFERENCE, so an
+ * issue missing from the result set is one no stub gets created for, and a
+ * truncated scan is indistinguishable from a quiet Sentry at every consumer
+ * above this.
  *
- * Exported for the pagination test; the merge entry point below is the caller
- * production uses.
+ * Exported for the pagination test; the merge entry point below is production's
+ * caller.
  */
 export async function fetchAllSentryIssues({
   query,

@@ -248,17 +248,19 @@ export function rewriteRegionLinks(payload, brokerOrigin) {
  * The upstream back-pressure headers this broker relays to its client.
  *
  * Sentry answers a throttled read with `Retry-After` and a family of
- * `X-Sentry-Rate-Limit-*` headers, and the MCP server is written to obey them.
- * Dropping them turns a 429 into a bare status: the client cannot tell how long
- * to wait, so it retries immediately against a Sentry already refusing it, and
- * the run burns its budget on requests none of which can succeed.
+ * `X-Sentry-Rate-Limit-*` headers, and the MCP server obeys them. Dropping them
+ * turns a 429 into a bare status: the client cannot tell how long to wait, so it
+ * retries immediately against a Sentry already refusing it.
  *
- * A PREFIX allowlist, not a passthrough. The broker exists so that only what it
- * chose crosses it, and the two things named here carry no credential and no
- * routing — but a name-by-name list would silently drop whichever member of the
- * family Sentry adds next, which is the failure this fixes in the first place.
+ * A PREFIX allowlist, not a passthrough — but the prefix carries its trailing
+ * HYPHEN, so it admits the family and not merely anything starting with those
+ * letters. Without it `x-sentry-rate-limitation` would cross a boundary that
+ * exists to let through only what it chose. Sentry's plural
+ * `X-Sentry-Rate-Limits` is an ingest/envelope response header; every path in
+ * ALLOWED_PATHS is a `/api/0/organizations/` Web API read, so it cannot arrive
+ * here and the hyphen drops nothing.
  */
-const RATE_LIMIT_HEADER_PREFIX = "x-sentry-rate-limit";
+const RATE_LIMIT_HEADER_PREFIX = "x-sentry-rate-limit-";
 
 export function isBackPressureHeader(name) {
   const lower = String(name ?? "").toLowerCase();
@@ -416,15 +418,53 @@ export function createHandler(config) {
 }
 
 /**
+ * A post-startup `error` on the server is FATAL, and the workflow is why.
+ *
+ * Both broker streams redirect to a log file
+ * (.github/workflows/sentry-triage-agent.yml), and that file is printed only
+ * when the readiness wait fails. Past readiness, a logged line goes somewhere
+ * nobody reads — so logging alone leaves the agent running its whole turn budget
+ * against a broker that has stopped accepting connections, which is the silent
+ * needs-human verdict issue #1938 was filed for.
+ *
+ * So say what failed, then STOP. A dead broker is a shape this pipeline already
+ * handles loudly: the pre-flight probe refuses to register the toolset and the
+ * job fails with `sentry:needs-triage` still on the stub. Being alive and unable
+ * to accept is the only state nothing downstream can see.
+ *
+ * Fatal is safe because of WHICH errors land here: per-connection failures go to
+ * `clientError`, so `error` after `listening` is accept-level and a broker that
+ * cannot accept has nothing left to serve. `exit` is injectable so tests can
+ * observe the decision rather than take the process down with them.
+ */
+export function handleFatalServerError(error, { server, log, exit }) {
+  log(
+    `sentry-mcp-broker: SERVER-ERROR ${
+      error instanceof Error ? error.message : String(error)
+    }`,
+  );
+  try {
+    server.close();
+  } catch {
+    // Already down, which is the outcome this wanted.
+  }
+  exit(1);
+}
+
+/**
  * Starts the broker on `port`. Binds loopback only.
  *
  * @returns {Promise<import("node:http").Server>}
  */
 export async function startBroker(config) {
   const handler = createHandler(config);
+  // One sink for both diagnostics below, with the same console fallback
+  // `createHandler` applies. An optional call would silently discard them
+  // whenever a caller supplies no `log`.
+  const log = config.log ?? ((line) => console.log(line));
   const server = createServer((req, res) => {
     handler(req, res).catch((error) => {
-      config.log?.(`sentry-mcp-broker: HANDLER-ERROR ${error}`);
+      log(`sentry-mcp-broker: HANDLER-ERROR ${error}`);
       if (!res.headersSent) deny(res, 500, "internal error");
       else res.end();
     });
@@ -438,23 +478,14 @@ export async function startBroker(config) {
     });
   });
   // Past startup that `reject` is a no-op, and it was the server's ONLY `error`
-  // listener — so every later socket error was discarded in silence, which for a
-  // broker whose whole job is to be the one path to Sentry reads as "the run
-  // simply stopped getting answers". Log it instead. Nothing here throws: an
-  // `error` event with no listener is an uncaught exception that would take the
-  // broker down with the run still using it.
-  //
-  // Unconditional, with the same console fallback `createHandler` applies: an
-  // optional call would restore the silence this exists to end whenever a caller
-  // supplies no sink.
-  const logServerError = config.log ?? ((line) => console.log(line));
-  server.on("error", (error) => {
-    logServerError(
-      `sentry-mcp-broker: SERVER-ERROR ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-  });
+  // listener, so every later socket error was discarded in silence.
+  server.on("error", (error) =>
+    handleFatalServerError(error, {
+      server,
+      log,
+      exit: config.exit ?? ((code) => process.exit(code)),
+    }),
+  );
   const { port } = server.address();
   // `validateRegionUrl` demands an https URL and accepts the base host; the MCP
   // client then keeps the host and re-applies its own (http) protocol, so this

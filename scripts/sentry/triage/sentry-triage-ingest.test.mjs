@@ -1213,13 +1213,13 @@ await test("Sentry pagination fails loud past maxPages instead of truncating", a
   );
   assertEqual(served, 3);
 
-  // The bounded case still returns: a scan that ends inside the cap is not an
-  // error, so the guard cannot be a blanket refusal at the last page. Both
-  // terminators, because Sentry uses the SECOND one: it keeps sending a
+  // The bounded case still returns, and the boundary is where it matters:
+  // `maxPages: 2` for a scan that ends ON its last allowed page, so a guard
+  // reading "the cap was reached" rather than "a cursor survived it" is caught.
+  // Both terminators, because Sentry uses the SECOND one: it keeps sending a
   // `rel="next"` link at the end of a result set and signals exhaustion with
-  // `results="false"`. A guard that only recognised a missing Link header would
-  // throw on every real ingest run, which is a far louder break than the silent
-  // truncation above.
+  // `results="false"`. A guard recognising only a missing Link header would
+  // throw on every real ingest run.
   for (const [label, terminator] of [
     ["no Link header at all", null],
     [
@@ -1249,11 +1249,11 @@ await test("Sentry pagination fails loud past maxPages instead of truncating", a
       baseUrl: "https://us.sentry.io",
       token: "t",
       fetchImpl: finite,
-      maxPages: 3,
+      maxPages: 2,
     });
     assert(
       issues.length === 2,
-      `a scan ending with ${label} must return both pages; got ${issues.length}`,
+      `a scan ending exactly at the page budget with ${label} must return both pages; got ${issues.length}`,
     );
   }
 });
