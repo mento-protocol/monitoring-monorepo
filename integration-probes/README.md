@@ -1,4 +1,4 @@
-<!-- agent-context: title="Integration Probes" status=active owner=eng canonical=true last_verified=2026-07-29 doc_type=reference scope=integration-probes review_interval_days=90 garden_lane=package-readmes-reference -->
+<!-- agent-context: title="Integration Probes" status=active owner=eng canonical=true last_verified=2026-08-20 doc_type=reference scope=integration-probes review_interval_days=90 garden_lane=package-readmes-reference -->
 
 # Integration Probes
 

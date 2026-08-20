@@ -2,7 +2,7 @@
 
 Real-time monitoring infrastructure for Mento v3 on-chain pools — a multichain [Envio HyperIndex](https://docs.envio.dev/) indexer paired with a Next.js 16 + Plotly.js dashboard.
 
-<!-- agent-context: title="Mento Monitoring Monorepo" status=active owner=eng canonical=true last_verified=2026-07-26 doc_type=reference scope=repo-wide review_interval_days=90 garden_lane=package-readmes-reference -->
+<!-- agent-context: title="Mento Monitoring Monorepo" status=active owner=eng canonical=true last_verified=2026-08-20 doc_type=reference scope=repo-wide review_interval_days=90 garden_lane=package-readmes-reference -->
 
 **Live dashboard:** [monitoring.mento.org](https://monitoring.mento.org)
 
@@ -12,7 +12,7 @@ Real-time monitoring infrastructure for Mento v3 on-chain pools — a multichain
 | ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | [`indexer-envio`](./indexer-envio/)                                     | Envio HyperIndex indexer — Celo, Monad, Polygon, and Ethereum reserve-yield data                            |
 | [`ui-dashboard`](./ui-dashboard/)                                       | Next.js 16 + Plotly.js multi-chain dashboard — all chains shown together, network derived from the pool URL |
-| [`metrics-bridge`](./metrics-bridge/)                                   | Hasura state + isolated CEX/RPC peg observations → Prometheus exporter                                      |
+| [`metrics-bridge`](./metrics-bridge/)                                   | Hasura state + isolated CEX/RPC peg observations → Prometheus metrics and current peg decisions             |
 | [`shared-config`](./shared-config/)                                     | Public `@mento-protocol/config` package for protocol metadata, thresholds, and shared ABIs                  |
 | [`aegis`](./aegis/)                                                     | App Engine v2 alerting service + Aegis Grafana dashboards                                                   |
 | [`integration-probes`](./integration-probes/)                           | Read-only DEX aggregator and cross-chain router probes → Upstash and dashboard                              |
@@ -50,6 +50,10 @@ publishes a bounded consecutive-absence streak; it never discovers or mutates
 source topology. Asset onboarding, policy publication, producer and dashboard
 proof, and protected rule activation are in
 [`docs/notes/peg-monitoring-onboarding.md`](docs/notes/peg-monitoring-onboarding.md).
+The dashboard reads current decisions through its same-origin
+`/api/peg-monitoring` route. Separate server-only routes read peg history and
+alert state from Grafana Cloud. A history failure does not replace or block the
+current decision package.
 
 **Static production endpoint:** `https://indexer.hyperindex.xyz/2f3dd15/v1/graphql`
 
