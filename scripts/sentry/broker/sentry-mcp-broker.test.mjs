@@ -32,7 +32,7 @@ import {
   assertTokenAbsentFromExecEnv,
   classify,
   handleMatches,
-  handleFatalServerError,
+  handleServerError,
   isAllowedPath,
   isBackPressureHeader,
   isEntryPoint,
@@ -464,12 +464,15 @@ test("a socket error AFTER startup is logged AND fails the broker closed", async
   );
 });
 
-test("handleFatalServerError says what failed before it stops, and stops regardless", () => {
+test("handleServerError says what failed before it stops, and stops regardless", () => {
   const lines = [];
   const exits = [];
   let closed = 0;
-  handleFatalServerError(new Error("EMFILE"), {
+  const error = new Error("listening socket is gone");
+  error.code = "EADDRNOTAVAIL";
+  handleServerError(error, {
     server: {
+      listening: false,
       close: () => {
         closed += 1;
         // The order is load-bearing: a close that throws must not swallow the
@@ -480,9 +483,74 @@ test("handleFatalServerError says what failed before it stops, and stops regardl
     log: (line) => lines.push(line),
     exit: (code) => exits.push(code),
   });
-  assert.deepEqual(lines, ["sentry-mcp-broker: SERVER-ERROR EMFILE"]);
+  assert.deepEqual(lines, [
+    "sentry-mcp-broker: SERVER-ERROR listening socket is gone",
+  ]);
   assert.equal(closed, 1);
   assert.deepEqual(exits, [1]);
+});
+
+test("a transient accept error does NOT take the broker down while it is still listening", () => {
+  // One momentary fd squeeze is not a lost listener. Tearing down on it would
+  // reach the same dead-broker outcome the fatal path exists to prevent, just
+  // sooner — so a code known to be per-connection survives, and says so.
+  for (const code of ["EMFILE", "ENFILE", "ENOBUFS", "ECONNABORTED"]) {
+    const lines = [];
+    const exits = [];
+    let closed = 0;
+    const error = new Error(`accept failed: ${code}`);
+    error.code = code;
+    handleServerError(error, {
+      server: {
+        listening: true,
+        close: () => {
+          closed += 1;
+        },
+      },
+      log: (line) => lines.push(line),
+      exit: (c) => exits.push(c),
+    });
+    assert.equal(closed, 0, `${code} must not close a live listener`);
+    assert.deepEqual(exits, [], `${code} must not exit`);
+    assert.ok(
+      lines.some((line) => line.includes(`accept failed: ${code}`)),
+      `${code} must still be reported`,
+    );
+    assert.ok(
+      lines.some((line) => line.includes("staying up")),
+      `${code} must say it stayed up`,
+    );
+  }
+});
+
+test("the fatal default holds: an unknown code, or a lost listener, stops the broker", () => {
+  // The two directions are not symmetric. Staying up with the listener gone
+  // restores the silence this whole handler exists to end; going down when it
+  // was fine costs a run that fails visibly. So anything not KNOWN to be
+  // per-connection is treated as the listener being gone.
+  const cases = [
+    ["an unknown code", "ESOMETHINGNEW", true],
+    ["no code at all", undefined, true],
+    ["a transient code but a listener that is gone", "EMFILE", false],
+  ];
+  for (const [label, code, listening] of cases) {
+    const exits = [];
+    let closed = 0;
+    const error = new Error(label);
+    if (code) error.code = code;
+    handleServerError(error, {
+      server: {
+        listening,
+        close: () => {
+          closed += 1;
+        },
+      },
+      log: () => {},
+      exit: (c) => exits.push(c),
+    });
+    assert.equal(closed, 1, `${label} must close`);
+    assert.deepEqual(exits, [1], `${label} must exit non-zero`);
+  }
 });
 
 /** Runs `body` with `console.log` captured, restoring it however body ends. */

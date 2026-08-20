@@ -418,31 +418,60 @@ export function createHandler(config) {
 }
 
 /**
- * A post-startup `error` on the server is FATAL, and the workflow is why.
+ * Accept-level errors a LISTENER SURVIVES: the runner ran out of a resource for
+ * one connection, not the socket the broker is bound to. Tearing down on these
+ * would turn a momentary fd or memory squeeze into a dead broker, which is the
+ * outcome the handler below exists to avoid, reached faster.
+ */
+const TRANSIENT_ACCEPT_ERRORS = new Set([
+  "EMFILE",
+  "ENFILE",
+  "ENOBUFS",
+  "ENOMEM",
+  "ECONNABORTED",
+  "EAGAIN",
+  "EPROTO",
+]);
+
+/**
+ * What a post-startup `error` on the server does, and the workflow is why it
+ * cannot just be logged.
  *
  * Both broker streams redirect to a log file
  * (.github/workflows/sentry-triage-agent.yml), and that file is printed only
- * when the readiness wait fails. Past readiness, a logged line goes somewhere
- * nobody reads — so logging alone leaves the agent running its whole turn budget
- * against a broker that has stopped accepting connections, which is the silent
+ * when the readiness wait fails. Past readiness a logged line goes somewhere
+ * nobody reads — so logging alone leaves the agent spending its whole turn
+ * budget against a broker that has stopped accepting, which is the silent
  * needs-human verdict issue #1938 was filed for.
  *
- * So say what failed, then STOP. A dead broker is a shape this pipeline already
- * handles loudly: the pre-flight probe refuses to register the toolset and the
- * job fails with `sentry:needs-triage` still on the stub. Being alive and unable
- * to accept is the only state nothing downstream can see.
+ * So a broker that has lost its listener says what failed and STOPS. That shape
+ * this pipeline already handles loudly: the port is released, so the pre-flight
+ * probe cannot register the toolset and the job fails with `sentry:needs-triage`
+ * still on the stub. Alive and unable to accept is the state nothing sees.
  *
- * Fatal is safe because of WHICH errors land here: per-connection failures go to
- * `clientError`, so `error` after `listening` is accept-level and a broker that
- * cannot accept has nothing left to serve. `exit` is injectable so tests can
- * observe the decision rather than take the process down with them.
+ * The DEFAULT is fatal, and the direction is the reason. Staying up when the
+ * listener is gone restores the silence; going down when it was not costs a run
+ * that fails visibly. Only codes known to be per-connection survive, and only
+ * while the listener is demonstrably still up — an unknown code is treated as
+ * the listener being gone, never the other way round.
+ *
+ * Per-connection parse failures never reach here at all; those are `clientError`.
+ * `exit` is injectable so tests observe the decision rather than take the runner
+ * down with them.
  */
-export function handleFatalServerError(error, { server, log, exit }) {
+export function handleServerError(error, { server, log, exit }) {
   log(
     `sentry-mcp-broker: SERVER-ERROR ${
       error instanceof Error ? error.message : String(error)
     }`,
   );
+  const code = error && typeof error === "object" ? error.code : undefined;
+  if (TRANSIENT_ACCEPT_ERRORS.has(code) && server.listening) {
+    log(
+      `sentry-mcp-broker: SERVER-ERROR ${code} is accept-level and the listener is still up; staying up`,
+    );
+    return;
+  }
   try {
     server.close();
   } catch {
@@ -480,7 +509,7 @@ export async function startBroker(config) {
   // Past startup that `reject` is a no-op, and it was the server's ONLY `error`
   // listener, so every later socket error was discarded in silence.
   server.on("error", (error) =>
-    handleFatalServerError(error, {
+    handleServerError(error, {
       server,
       log,
       exit: config.exit ?? ((code) => process.exit(code)),
