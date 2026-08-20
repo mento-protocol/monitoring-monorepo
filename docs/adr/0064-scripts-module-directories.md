@@ -3,7 +3,7 @@ title: scripts/ may use module subdirectories; basenames and pinned paths are th
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-18
+last_verified: 2026-08-20
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -179,6 +179,33 @@ scheduled document, for context an agent gets from the directory map in
   a pinned constant, recompute the constant, update every doc that records it,
   and treat operator regeneration as a release step. P6 hit this with
   `scripts/mcp/upstash-mcp-launcher.mjs`.
+- A file read from `origin/main` rather than the working tree cannot move in one
+  PR. `agent-autoreview.sh` materializes the `pr-*-state` helpers from the
+  protected `origin/main` snapshot because the checked-out copies are not
+  trusted, and a missing path there fails closed. The wrapper that runs is
+  whichever one the developer has checked out, so any single PR that both moves
+  the files and repoints the pin leaves one pairing broken: a pre-move wrapper
+  reading a post-move `origin/main`, or a post-move wrapper reading the
+  `origin/main` that still predates its own merge. D3 splits it across three
+  merges — add the copies and teach the wrapper to accept either location; then
+  repoint every consumer; then delete the pre-move copies and the fallback. The
+  middle state keeps both locations live on `origin/main`, which is what lets a
+  wrapper generation from either side of the move keep working. This is stricter
+  than the `pr-description.yml` case above, which degrades to a warning; here
+  there is no fallback to degrade to. Hold the last step until no wrapper old
+  enough to need the pre-move paths is still in use.
+- Duplicated copies diverge through the merge queue, not through the PR that
+  duplicates them. While both locations are live, an unrelated PR that edits one
+  side is not a conflict for the copy PR, so git merges both cleanly and the two
+  drift. D3 hit this immediately: #1967 rewrote the clean-evidence grammar in
+  `scripts/pr-feedback-state-{core,claude}.mjs` while the copy PR was in flight,
+  both merged without a conflict, and because the wrapper prefers the new
+  location, `origin/main` then materialized the pre-#1967 logic. Pin the pair
+  with a byte-identity test in the suite each side routes to, and route both
+  locations to it — that is what caught this one merge later. A copy PR's own
+  green run does not prove the pair still matches after it merges, so re-check
+  identity at the start of the PR that repoints, and treat any edit to a
+  duplicated file as an edit to every copy.
 
 ## Sweep checklist for a move
 
@@ -193,9 +220,10 @@ routing, not procedure.
    runs a script from the PR's **base** ref must probe the new path and the
    pre-move path; see the trusted-validator consequence above.
 4. `terraform.stacks.json` — each stack's `changedPathPatterns` enumerates
-   exact `scripts/` paths, which `docs/terraform.md` requires the workflow
-   filters to mirror, and `tf-stacks.test.mjs` asserts three of them per stack.
-   A stale entry stops the stack reacting to its own tooling.
+   exact `scripts/` paths. The registry's broad `workflowAdmissionPatterns`
+   boundary admits `scripts/**`; `tf-stacks.test.mjs` proves it subsumes every
+   stack pattern. A stale stack entry still stops that stack reacting to its
+   own tooling.
 5. `.trunk/trunk.yaml` pre-push hook, and `.gitattributes`.
 6. `.claude/settings.json`, `.codex/hooks.json`,
    `.claude/hooks/session-start.sh`, and the verbatim copies and invocation

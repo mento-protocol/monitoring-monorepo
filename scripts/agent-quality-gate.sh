@@ -2803,8 +2803,8 @@ add_root_tooling_package_script_checks() {
   add_command "pnpm sentry:broker:test" "$reason"
   add_command "pnpm sentry:requeue:test" "$reason"
   add_command "node scripts/sentry/ci-wiring/check-sentry-suites-in-ci.test.mjs" "$reason"
-  add_command "node scripts/pr-feedback-state.test.mjs" "$reason"
-  add_command "node scripts/pr-ready-state.test.mjs" "$reason"
+  add_command "node scripts/pr/pr-feedback-state.test.mjs" "$reason"
+  add_command "node scripts/pr/pr-ready-state.test.mjs" "$reason"
   add_command "node scripts/coderabbit-config.test.mjs" "$reason"
   add_command "node scripts/terraform/terraform-fmt-check.test.mjs" "$reason"
   add_command "node scripts/tf-stacks.test.mjs" "$reason"
@@ -4131,10 +4131,17 @@ while IFS= read -r path; do
           # verdict-label maps.
           add_command "pnpm sentry:project:test" "Sentry re-queue chokepoint changed"
           ;;
-        scripts/pr-feedback-state.mjs|scripts/pr-feedback-state-core.mjs|scripts/pr-feedback-state-claude.mjs|scripts/pr-feedback-state.test.mjs)
+        # scripts/pr/ is canonical: the aliases, the suites, and the autoreview
+        # wrapper all resolve there. The flat runtime paths stay listed only
+        # because the wrapper still falls back to them from an older
+        # origin/main, and the identity tests fail if one side drifts — so an
+        # edit to either copy must run the suite. Drop the flat entries with
+        # the copies in the move's last step. Neither arm is a glob, so each
+        # path needs naming outright.
+        scripts/pr/pr-feedback-state.mjs|scripts/pr/pr-feedback-state-core.mjs|scripts/pr/pr-feedback-state-claude.mjs|scripts/pr/pr-feedback-state.test.mjs|scripts/pr-feedback-state.mjs|scripts/pr-feedback-state-core.mjs|scripts/pr-feedback-state-claude.mjs)
           add_command "pnpm pr:feedback-state:test" "PR feedback-state helper changed"
           ;;
-        scripts/pr-ready-state.mjs|scripts/pr-ready-state-core.mjs|scripts/pr-ready-state-format.mjs|scripts/pr-ready-state.test.mjs)
+        scripts/pr/pr-ready-state.mjs|scripts/pr/pr-ready-state-core.mjs|scripts/pr/pr-ready-state-format.mjs|scripts/pr/pr-ready-state.test.mjs|scripts/pr-ready-state.mjs|scripts/pr-ready-state-core.mjs|scripts/pr-ready-state-format.mjs)
           add_command "pnpm pr:ready-state:test" "PR ready-state helper changed"
           ;;
         scripts/pr/review-process-metrics.mjs|scripts/pr/review-process-metrics.test.mjs)

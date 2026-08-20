@@ -22,6 +22,10 @@ import {
   UNTRUSTED_PATH,
 } from "./check-sentry-suites-in-ci-gate-fixtures.mjs";
 import {
+  probeDirs,
+  runProbeShell,
+} from "./check-sentry-suites-in-ci-gate-extract.mjs";
+import {
   GATE,
   gateClassifications,
   GATE_PATH,
@@ -194,6 +198,84 @@ test("the gate probe will not carry a trailer off the closing brace", () => {
     );
   } finally {
     rmSync(join(owned, ".."), { recursive: true, force: true });
+  }
+});
+
+test("a probe that outruns its deadline is killed outright, never asked to stop", () => {
+  // `spawnSync` sends its `killSignal` and then keeps WAITING for the child; it
+  // escalates to SIGKILL only when the signal call itself errors, which a shell
+  // that traps or ignores SIGTERM does not make it do. Under the default signal
+  // such a probe outlives its deadline and this call never returns — so the
+  // group cleanup that follows it never runs either, because the call it follows
+  // has not come back.
+  //
+  // The assertion is on the signal the child died of rather than on a
+  // SIGTERM-ignoring fixture: that fixture is the hang itself, and a suite that
+  // hangs instead of failing tells nobody anything.
+  const root = mkdtempSync(join(tmpdir(), "gate-probe-deadline-"));
+  try {
+    const dirs = probeDirs(root);
+    for (const [, { candidate, version }] of installedBashes()) {
+      // A bash builtin loop: the probe's `$PATH` is an empty directory, so an
+      // external `sleep` would not be found and the shell would exit at once.
+      const result = runProbeShell(candidate, ["-c", "while :; do :; done"], {
+        dirs,
+        timeout: 500,
+      });
+      assert.equal(
+        result.error?.code,
+        "ETIMEDOUT",
+        `bash ${version} did not report the deadline`,
+      );
+      assert.equal(
+        result.signal,
+        "SIGKILL",
+        `bash ${version} was signalled ${result.signal}, which a probe can ignore`,
+      );
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the deadline holds even when the probe leaves a descendant behind", () => {
+  // The worry this answers: `spawnSync` captures stdout and stderr through
+  // pipes, and a descendant that outlives the shell inherits those write ends —
+  // so if the call waited for EOF rather than for the child, killing the shell
+  // would leave it blocked on a pipe nothing will close, and the negative-pid
+  // group cleanup after it could never run.
+  //
+  // It does not wait. Measured here on both shapes the probe can produce: a
+  // backgrounded descendant, and the `$(…)` command substitution the classifier
+  // actually runs in. Each returns at its deadline, which is also what the group
+  // cleanup below needs in order to happen at all. Absolute paths because the
+  // probe's `$PATH` is an empty directory.
+  const root = mkdtempSync(join(tmpdir(), "gate-probe-descendant-"));
+  try {
+    const dirs = probeDirs(root);
+    for (const [, { candidate, version }] of installedBashes()) {
+      for (const [shape, script] of [
+        ["a backgrounded descendant", "/bin/sleep 30 &\nwhile :; do :; done"],
+        ["a command substitution", 'x="$(/bin/sleep 30; echo late)"'],
+      ]) {
+        const started = Date.now();
+        const result = runProbeShell(candidate, ["-c", script], {
+          dirs,
+          timeout: 500,
+        });
+        assert.equal(
+          result.error?.code,
+          "ETIMEDOUT",
+          `bash ${version} did not report the deadline for ${shape}`,
+        );
+        assert.ok(
+          Date.now() - started < 15_000,
+          `bash ${version} outran its 500ms deadline on ${shape} by holding a captured pipe`,
+        );
+      }
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
 

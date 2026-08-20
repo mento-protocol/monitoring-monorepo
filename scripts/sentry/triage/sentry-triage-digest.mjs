@@ -681,10 +681,9 @@ async function main() {
   for (const warning of doubleVerdictWarnings(issues)) {
     process.stderr.write(`::warning::${warning}\n`);
   }
-  const payload = buildDigest(issues, {
-    channel: options.channel,
-    now: new Date(),
-  });
+  // No `now`: the payload carries no clock (see buildDigest), so passing one
+  // only suggests the digest is time-dependent when it is not.
+  const payload = buildDigest(issues, { channel: options.channel });
   // ONLY the payload goes to stdout (the workflow redirects it to a file for
   // the posting step); all diagnostics go to stderr.
   process.stdout.write(`${JSON.stringify(payload)}\n`);

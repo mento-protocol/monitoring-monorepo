@@ -17,12 +17,13 @@ garden_lane: agent-entry-points
 ## Scope
 
 `scripts/` holds deploy wrappers, agent quality gates, code-health checks, and
-repo maintenance utilities. Its top level has 38 files.
+repo maintenance utilities. 37 files sit flat at the top level today.
 
 ## Layout
 
-[ADR 0064](../docs/adr/0064-scripts-module-directories.md) governs these
-subdirectories and links the completed P1–P15 reorganization.
+[ADR 0064](../docs/adr/0064-scripts-module-directories.md) governs
+subdirectories here and links the reorganization issue; phases P1–P15 have all
+landed.
 
 | Directory       | Holds                                  |
 | --------------- | -------------------------------------- |
@@ -58,18 +59,21 @@ stay with their domain.
 
 ## Why Files Stay Flat
 
-`scripts/` has eleven path-pin mechanisms. Move each pin with its file.
+Eleven mechanisms pin `scripts/` paths. A file one of them names moves only when
+that mechanism moves with it, in the same PR.
 
 - **Autoreview runtime materialization.** `agent-autoreview.sh` names its
   runtime files in Perl copy lists and `runtime_paths` arrays, then materializes
-  each from a git blob. A path it omits is absent at runtime.
-- **Gate routing pins.** `agent-quality-gate.sh` uses
-  `$script_source_dir == $repo_root/scripts` to exclude stub-repo unit tests. It
-  pairs `bootstrap/codex-cloud-setup.{sh,test.sh}` for offline installer tests.
+  each from an `origin/main` blob. A path it omits is absent at runtime; moving
+  one is staged across PRs (ADR 0064).
+- **Gate source-directory guards.** `agent-quality-gate.sh` gates real-tree
+  routing on `$script_source_dir == $repo_root/scripts`, leaving its stub-repo
+  unit tests unaffected. It pairs
+  `bootstrap/codex-cloud-setup.{sh,test.sh}` for offline installer tests.
 - **Gate runtime module pins.** `agent-quality-gate.sh` resolves
   `docs/docs-navigation-eval-helpers.mjs` and `gate/lockfile-scope.mjs` from
-  `$script_source_dir`, not the stub `$repo_root`, and pins each in three
-  literals. Repoint all three; ADR 0064 lists them.
+  `$script_source_dir` — never `$repo_root`, which is a stub repo under test —
+  and names each in three literals. Repoint every one; ADR 0064 lists them.
 - **Evaluation fixture forbidden lists.** `forbidden_sources` in
   `docs/evals/documentation-navigation-fixtures.json` names the navigation
   eval's own implementation.
@@ -80,16 +84,17 @@ stay with their domain.
   `.github/workflows/` pin a `scripts/` path. `ci.yml` (`autoreviewSuite`,
   `autoreviewRootRuntime`, `versionSkew`; `rootScripts` is the recursive
   `scripts/**`), `infra.yml`, `alerts-rules.yml`, `peg-policy-publication.yml`,
-  and `schema-diff.yml` list individual files. The three terraform filters
-  (`ci.yml` `terraform`; `infra.yml` push and `pull_request`) also name
-  `scripts/lib/hcl.mjs` and `scripts/lib/workflow-yaml.mjs`, outside the
-  recursive `scripts/production-infra-identity-contract/**`; `routing.test.mjs`
-  there asserts all three. A filter also names what its listed files import. A
-  miss is silent — the job stops running while the required `ci` sentinel stays
-  green. ADR 0064 covers when a module glob such as `supply-chain.yml`'s
-  `scripts/supply-chain/**` is the safer pin.
+  and `schema-diff.yml` list individual files. The three Terraform filters are
+  the exception: `ci.yml` `terraform` plus `infra.yml` push and `pull_request`
+  copy the broad `workflowAdmissionPatterns` boundary from
+  `terraform.stacks.json`, including `scripts/**`. `routing.test.mjs` asserts
+  exact equality and proves that boundary subsumes every stack pattern. A miss
+  is silent without that contract — the job stops running while the required
+  `ci` sentinel stays green. ADR 0064 covers when a module glob such as
+  `supply-chain.yml`'s `scripts/supply-chain/**` is the safer pin.
 - **Terraform stack registry.** `terraform.stacks.json` `changedPathPatterns`
-  pins exact `scripts/` paths per stack, mirrored into those filters.
+  pins exact `scripts/` paths per stack. The broad workflow admission boundary
+  covers the directory; `pnpm tf:test` enforces subsumption.
 - **Trusted-validator probes.** `pr-description.yml` runs the validator from the
   PR's base ref via the base branch **name**, so it always resolves to the base
   branch's current tip — never a snapshot from when a PR branched. One probe

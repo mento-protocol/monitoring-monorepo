@@ -1,6 +1,16 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "version": 1,
+  "workflowAdmissionPatterns": [
+    "terraform/**",
+    "alerts/**",
+    "aegis/**",
+    "governance-watchdog/**",
+    "metrics-bridge/**",
+    "scripts/**",
+    ".github/workflows/**",
+    "terraform.stacks.json"
+  ],
   "stacks": [
     {
       "id": "platform",

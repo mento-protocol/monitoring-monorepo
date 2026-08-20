@@ -15,14 +15,11 @@ import {
 } from "./deviation-alert-state.js";
 import { classifyFxMarketPause } from "./fx-market.js";
 import { isFpmmPool, isVirtualPool, type PoolRow } from "./types.js";
-
-// SortedOracles fixed-point scale — keep in sync with
-// `indexer-envio/src/priceDifference.ts:SORTED_ORACLES_DECIMALS` and the
-// dashboard's `ui-dashboard/src/lib/format.ts`. The contract reports rates
-// in FixidityLib units, so the bridge gauge has to divide by 10^24 before
-// it leaves the bridge for the alert template / dashboard tooltip to read
-// directly.
-const SORTED_ORACLES_DECIMALS = 24;
+import {
+  SORTED_ORACLES_DECIMALS,
+  countSharesStandInForValue,
+  reserveValueShares,
+} from "./reserveShares.js";
 
 // Pools we've already warned about — prevents log spam on the 30s poll loop.
 const warnedUnknownPools = new Set<string>();
@@ -252,13 +249,13 @@ export const gauges = {
   // a raw count share is not a depletion signal on an off-parity pair.
   reserveValueShareToken0: new Gauge({
     name: "mento_pool_reserve_value_share_token0",
-    help: "Value-weighted share of pool reserves held in token0: r0_normalized × oracleRef / (r0_normalized × oracleRef + r1_normalized) ∈ [0, 1], where oracleRef is the price of token0 denominated in token1 (`mento_pool_oracle_price`, inverted when the pool's `invertRateFeed` says token0 is the feed's quote token). Equals the token-count share only when the pair trades near parity. Skipped when reserves are zero, the median price is absent or no longer live (a zero-median outage retains the last price), or the feed orientation has not been read on chain — no series rather than a wrong one. Carries the same `token_symbol` label as `mento_pool_reserve_share_token0`.",
+    help: "Value-weighted share of pool reserves held in token0: r0_normalized × oracleRef / (r0_normalized × oracleRef + r1_normalized) ∈ [0, 1], where oracleRef is the price of token0 denominated in token1 (`mento_pool_oracle_price`, inverted when the pool's `invertRateFeed` says token0 is the feed's quote token). Equals the token-count share only when oracleRef is exactly 1; near-parity is not enough. Skipped when reserves are zero, the median price is absent or no longer live (a zero-median outage retains the last price), the feed orientation has not been read on chain, or the token decimals have not been read (`tokenDecimalsKnown` false, where the schema default 18/18 would misscale an off-18 leg) — no series rather than a wrong one. The one exception is a pool whose rate feed is hardcoded 1:1 and has never landed a non-zero median (Polygon EURm/EUROP), where the token-count share is the value share and is published here instead; a feed that ever priced the pair is outside that exception, including after its median goes dark. Carries the same `token_symbol` label as `mento_pool_reserve_share_token0`.",
     labelNames: reserveShareLabels,
     registers: [register],
   }),
   reserveValueShareToken1: new Gauge({
     name: "mento_pool_reserve_value_share_token1",
-    help: "Value-weighted share of pool reserves held in token1 (mirror of mento_pool_reserve_value_share_token0): r1_normalized / (r0_normalized × oracleRef + r1_normalized). Same skip conditions and the same `token_symbol` label as its token0 twin.",
+    help: "Value-weighted share of pool reserves held in token1 (mirror of mento_pool_reserve_value_share_token0): r1_normalized / (r0_normalized × oracleRef + r1_normalized). Same skip conditions, the same hardcoded-1:1 exception, and the same `token_symbol` label as its token0 twin.",
     labelNames: reserveShareLabels,
     registers: [register],
   }),
@@ -661,79 +658,6 @@ function recordLimitMetrics(pool: PoolRow, labels: PoolDisplayLabels): void {
   );
 }
 
-/**
- * Value-weighted reserve shares, or `null` when they cannot be computed.
- *
- * A token-count share answers "how many tokens sit on each side", which is
- * only a depletion signal when the two legs are worth roughly the same. On an
- * off-parity pair it is dominated by the exchange rate: a healthy, balanced
- * JPYm/USDm pool reads 0.4% / 99.6% by count purely because one JPY is worth
- * ~0.0063 USD. What an operator needs to know — can a swapper still get out
- * on this side — is a question about value.
- *
- * The conversion uses the same frame the FPMM contract and the indexer's
- * `priceDifference` use (`indexer-envio/src/priceDifference.ts`):
- * `reservePrice = r1_normalized / r0_normalized` is compared against
- * `oracleRef`, the price of token0 denominated in token1. `oracleRef` is the
- * SortedOracles median in feed direction, inverted when the pool's on-chain
- * `invertRateFeed` flag says token0 is the feed's quote token. Weighting the
- * legs by `(oracleRef, 1)` therefore reproduces the on-chain equilibrium:
- * a pool sitting exactly on its oracle is 50/50 here, and the min side share
- * is exactly the "how lopsided by value" number the depletion floors want.
- *
- * `invertRateFeed` is per-pool, not per-pair — token ordering differs between
- * chains, and the flag is what compensates. Both JPYm/USDm pools carry the
- * same feed with opposite flags because Celo lists USDm as token0 and Monad
- * lists JPYm as token0. Assuming one orientation for all pools produces a
- * confident wrong answer on the other half of them, so an unread flag
- * (`invertRateFeedKnown === false`) publishes nothing at all.
- *
- * `medianLive` gates for the same fail-closed reason. It is false when the
- * feed's most recent `MedianUpdated` carried a zero median, and
- * `lastMedianPrice` deliberately RETAINS the last non-zero value across that
- * outage — so a price check alone would keep publishing a share derived from a
- * rate the contract itself no longer honours. `hasFreshLiveMedian` in
- * `indexer-envio/src/priceDifference.ts` refuses to derive rebalance state
- * under the same condition; this follows it rather than inventing a second
- * answer to "is this feed usable".
- *
- * Price precision follows `mento_pool_oracle_price`: both go through
- * `toHumanUnits`, so an operator can reproduce the share from the two
- * published gauges by hand.
- */
-export function reserveValueShares(
-  pool: Pick<
-    PoolRow,
-    | "reserves0"
-    | "reserves1"
-    | "token0Decimals"
-    | "token1Decimals"
-    | "lastMedianPrice"
-    | "medianLive"
-    | "invertRateFeed"
-    | "invertRateFeedKnown"
-  >,
-): { share0: number; share1: number } | null {
-  if (pool.invertRateFeedKnown !== true || pool.medianLive !== true) {
-    return null;
-  }
-  const price = toHumanUnits(
-    BigInt(pool.lastMedianPrice),
-    SORTED_ORACLES_DECIMALS,
-  );
-  if (!Number.isFinite(price) || price <= 0) return null;
-  const r0 = Number(pool.reserves0) / 10 ** pool.token0Decimals;
-  const r1 = Number(pool.reserves1) / 10 ** pool.token1Decimals;
-  // `Math.min` rather than a check per leg: NaN propagates through it, and an
-  // infinity that slips past is caught by the finite check on the total below.
-  if (!(Math.min(r0, r1) >= 0)) return null;
-  const oracleRef = pool.invertRateFeed ? 1 / price : price;
-  const value0 = r0 * oracleRef;
-  const total = value0 + r1;
-  if (!Number.isFinite(total) || total <= 0) return null;
-  return { share0: value0 / total, share1: r1 / total };
-}
-
 function recordReserveShareMetrics(
   pool: PoolRow,
   labels: PoolDisplayLabels,
@@ -757,7 +681,16 @@ function recordReserveShareMetrics(
   // yet, a median that has gone dark, unread orientation) leave the depletion
   // rules at NoData, which they treat as OK — the dark feed itself is what the
   // oracle staleness rules page on.
-  const valueShares = reserveValueShares(pool);
+  //
+  // A real value share always wins. The count-share fallback runs only on the
+  // null path, and only for a pool that has never had a non-zero median — see
+  // `countSharesStandInForValue`, which is what keeps this from overwriting a
+  // real valuation when that pool's oracle goes dark.
+  const valueShares =
+    reserveValueShares(pool) ??
+    (countSharesStandInForValue(pool)
+      ? { share0: r0 / total, share1: r1 / total }
+      : null);
   if (!valueShares) return;
   gauges.reserveValueShareToken0.set(
     { ...labels, token_symbol: token0Symbol },

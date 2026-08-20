@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Offline unit tests for scripts/pr-ready-state.mjs parsing helpers.
+ * Offline unit tests for scripts/pr/pr-ready-state.mjs parsing helpers.
  */
 
 import {
@@ -34,6 +34,9 @@ import {
   watchLoopExitCode,
   workflowPathsFromRules,
 } from "./pr-ready-state.mjs";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 let passed = 0;
 let failed = 0;
@@ -2282,6 +2285,28 @@ test("a passing CodeRabbit check does not clear a real required blocker", () => 
     !summary.required.blockers.some((blocker) => blocker.name === "CodeRabbit"),
     "CodeRabbit must never appear as a required blocker by default",
   );
+});
+
+// D3 middle state (issue 1877). `agent-autoreview.sh` materializes these
+// helpers from the protected origin/main snapshot and prefers the scripts/pr/
+// copy, while every consumer still runs the flat one. Nothing else pins the
+// pair, so a one-sided edit would leave the autoreview trust root executing
+// stale logic with both the CLI and the rest of this suite green. Delete this
+// test together with the flat copies in the move's last step.
+test("the scripts/pr/ ready-state copies stay byte-identical to the flat originals", () => {
+  const prDir = dirname(fileURLToPath(import.meta.url));
+  for (const name of [
+    "pr-ready-state.mjs",
+    "pr-ready-state-core.mjs",
+    "pr-ready-state-format.mjs",
+  ]) {
+    const moved = readFileSync(resolve(prDir, name));
+    const flat = readFileSync(resolve(prDir, "..", name));
+    assert(
+      flat.equals(moved),
+      `scripts/${name} and scripts/pr/${name} have drifted; agent-autoreview runs the scripts/pr/ copy`,
+    );
+  }
 });
 
 if (failed > 0) {

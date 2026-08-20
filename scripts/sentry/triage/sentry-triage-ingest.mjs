@@ -542,7 +542,17 @@ async function fetchSentryIssuesPage(url, token, fetchImpl) {
   return { issues: Array.isArray(body) ? body : [], next: links.next };
 }
 
-async function fetchAllSentryIssues({
+/**
+ * Page through one Sentry issue query. Fails loud past `maxPages` for the same
+ * reason `ghPaginate` does: the queue it feeds is built by DIFFERENCE, so an
+ * issue missing from the result set is one no stub gets created for, and a
+ * truncated scan is indistinguishable from a quiet Sentry at every consumer
+ * above this.
+ *
+ * Exported for the pagination test; the merge entry point below is production's
+ * caller.
+ */
+export async function fetchAllSentryIssues({
   query,
   org,
   baseUrl,
@@ -569,6 +579,11 @@ async function fetchAllSentryIssues({
       url = null;
     }
     pages += 1;
+  }
+  if (url) {
+    throw new Error(
+      `Sentry pagination exceeded ${maxPages} pages for query ${JSON.stringify(query)}; refusing to continue silently`,
+    );
   }
   return collected.map(mapSentryIssue);
 }

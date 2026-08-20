@@ -103,9 +103,11 @@ is the largest example and stays in the report: it is the entire subject of
 [issue 1498](https://github.com/mento-protocol/monitoring-monorepo/issues/1498),
 which decomposes it into sourced helper modules, so exempting it would suppress
 exactly the row that already has an owner. `pr-ready-state{,-core}.mjs` sit
-behind one list, `materialize_feedback_runtime`'s `runtime_paths`, which already
-proves itself extensible: `pr-feedback-state-claude.mjs` is an optional sixth
-entry there. One appendable array is not the six-list materializer above it. For
+behind `materialize_feedback_runtime`'s two basename lists, required and
+optional, which already prove themselves extensible: `pr-feedback-state-claude.mjs`
+is the optional entry, and the D3 move (issue 1877) added a location resolver
+under both lists without touching either name. Two appendable arrays are not the
+six-list materializer above it. For
 `deploy-staging-{contract,callsite-discovery}.mjs` only the _test_ is the
 callsite contract's single self-scan exclusion. All four stay measured. A file
 the reorganization already brought under the cap carries no entry.

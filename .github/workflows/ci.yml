@@ -171,38 +171,18 @@ jobs:
               - .github/actions/pnpm-install/**
               - .github/actions/resolve-eslint-baseline/**
             terraform:
+              # Coarse admission only. `scripts/tf-stacks.mjs` classifies the
+              # exact stacks after this job starts. Keep this list equal to
+              # terraform.stacks.json `workflowAdmissionPatterns`; `pnpm
+              # tf:test` enforces equality and registry-pattern subsumption.
               - terraform/**
-              - alerts/rules/**
-              - alerts/peg-policy-publication/**
-              - alerts/infra/**
-              - aegis/terraform/**
+              - alerts/**
+              - aegis/**
               - governance-watchdog/**
+              - metrics-bridge/**
+              - scripts/**
+              - .github/workflows/**
               - terraform.stacks.json
-              - scripts/terraform/check-metrics-bridge-template-plan.mjs
-              - scripts/terraform/check-metrics-bridge-template-plan.test.mjs
-              - scripts/alerts/check-peg-policy-publication.mjs
-              - scripts/alerts/check-peg-policy-publication.test.mjs
-              - scripts/production-infra-identity-contract/**
-              # Shared parsing cores the contract and the deploy-staging
-              # contract both import (ADR 0064). They sit outside the
-              # production-infra-identity-contract/** prefix above, so they need
-              # their own entries or a parser change stops firing these jobs.
-              - scripts/lib/hcl.mjs
-              - scripts/lib/workflow-yaml.mjs
-              # The peg registry integrity checker and the modules it imports.
-              # The stack registry counts all three as Peg policy publication
-              # inputs, so this filter has to be able to reach that inventory.
-              - scripts/alerts/check-peg-registry-integrity.mjs
-              - scripts/alerts/check-peg-registry-integrity-lineage.mjs
-              - scripts/lib/peg-policy-digest.mjs
-              - scripts/terraform/terraform-fmt-check.mjs
-              - scripts/terraform/tf-platform-plan-guard.mjs
-              - scripts/tf-stacks.mjs
-              - scripts/tf-stacks.test.mjs
-              - .github/workflows/alerts-infra.yml
-              - .github/workflows/infra.yml
-              - .github/workflows/ci.yml
-              - .github/workflows/peg-policy-publication.yml
             alerts:
               - alerts/infra/onchain-event-handler/**
               - alerts/infra/oncall-announcer/**
