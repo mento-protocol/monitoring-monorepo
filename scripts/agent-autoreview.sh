@@ -5961,18 +5961,22 @@ run_capture_pipeline() {
   local output="$1"
   local limit="$2"
   local status_file="$3"
-  shift 3
+  local partial_file="$4"
+  shift 4
   local -a statuses
   set +e
   "$@" | head -c "$limit" >"$output"
   statuses=("${PIPESTATUS[@]}")
   set -e
-  # Publish by rename. The watchdog reads this file to tell a finished capture
-  # from a running one, and a plain redirection truncates before it writes, so a
-  # deadline landing inside that window would see an empty file and refuse a
-  # capture that had in fact completed.
-  printf '%s %s\n' "${statuses[0]:-1}" "${statuses[1]:-1}" >"$status_file.partial"
-  mv -f "$status_file.partial" "$status_file"
+  # Publish by rename. The watchdog reads the status file to tell a finished
+  # capture from a running one, and a plain redirection truncates before it
+  # writes, so a deadline landing inside that window would see an empty file and
+  # refuse a capture that had in fact completed. The staging path is its own
+  # `mktemp` allocation rather than a name derived from the status file: a
+  # derived name is predictable, and on a host with a shared /tmp that is a
+  # symlink another user can plant before this write.
+  printf '%s %s\n' "${statuses[0]:-1}" "${statuses[1]:-1}" >"$partial_file"
+  mv -f "$partial_file" "$status_file"
 }
 
 # Bound one capture with the wall clock the capture budget has left. The pipeline
@@ -5988,7 +5992,8 @@ run_capture_with_deadline() {
   local deadline="$1"
   local timeout_file="$2"
   local status_file="$3"
-  shift 3
+  local partial_file="$4"
+  shift 4
   local child
   local watchdog
   local status
@@ -6037,8 +6042,8 @@ run_capture_with_deadline() {
   # this function bounds, and the watchdog would otherwise outlive it holding a
   # full-deadline sleep. Re-raise afterward so the interrupted script still dies
   # with the expected signal semantics.
-  trap 'kill -KILL "-$watchdog" 2>/dev/null || kill -KILL "$watchdog" 2>/dev/null || true; kill -TERM "-$child" 2>/dev/null || kill -TERM "$child" 2>/dev/null || true; sleep 1; kill -KILL "-$child" 2>/dev/null || kill -KILL "$child" 2>/dev/null || true; wait "$child" 2>/dev/null || true; rm -f "$timeout_file" "$status_file" "$status_file.partial"; trap - INT TERM; eval "$saved_signal_traps"; kill -s TERM "$$"' TERM
-  trap 'kill -KILL "-$watchdog" 2>/dev/null || kill -KILL "$watchdog" 2>/dev/null || true; kill -TERM "-$child" 2>/dev/null || kill -TERM "$child" 2>/dev/null || true; sleep 1; kill -KILL "-$child" 2>/dev/null || kill -KILL "$child" 2>/dev/null || true; wait "$child" 2>/dev/null || true; rm -f "$timeout_file" "$status_file" "$status_file.partial"; trap - INT TERM; eval "$saved_signal_traps"; kill -s INT "$$"' INT
+  trap 'kill -KILL "-$watchdog" 2>/dev/null || kill -KILL "$watchdog" 2>/dev/null || true; kill -TERM "-$child" 2>/dev/null || kill -TERM "$child" 2>/dev/null || true; sleep 1; kill -KILL "-$child" 2>/dev/null || kill -KILL "$child" 2>/dev/null || true; wait "$child" 2>/dev/null || true; rm -f "$timeout_file" "$status_file" "$partial_file"; trap - INT TERM; eval "$saved_signal_traps"; kill -s TERM "$$"' TERM
+  trap 'kill -KILL "-$watchdog" 2>/dev/null || kill -KILL "$watchdog" 2>/dev/null || true; kill -TERM "-$child" 2>/dev/null || kill -TERM "$child" 2>/dev/null || true; sleep 1; kill -KILL "-$child" 2>/dev/null || kill -KILL "$child" 2>/dev/null || true; wait "$child" 2>/dev/null || true; rm -f "$timeout_file" "$status_file" "$partial_file"; trap - INT TERM; eval "$saved_signal_traps"; kill -s INT "$$"' INT
   if wait "$child" 2>/dev/null; then
     status=0
   else
@@ -6085,6 +6090,7 @@ capture_budgeted_output_file() {
   local size
   local timed_out=0
   local status_file
+  local partial_file
   local timeout_file
 
   if ((remaining <= 0)); then
@@ -6107,9 +6113,16 @@ capture_budgeted_output_file() {
     return 1
   fi
   if
-    ! timeout_file="$(/usr/bin/mktemp "${TMPDIR:-/tmp}/autoreview-capture-deadline.XXXXXX")"
+    ! partial_file="$(/usr/bin/mktemp "${TMPDIR:-/tmp}/autoreview-capture-staged.XXXXXX")"
   then
     rm -f "$status_file"
+    echo "agent:autoreview: failed to allocate a capture status staging file for $label" >&2
+    return 1
+  fi
+  if
+    ! timeout_file="$(/usr/bin/mktemp "${TMPDIR:-/tmp}/autoreview-capture-deadline.XXXXXX")"
+  then
+    rm -f "$status_file" "$partial_file"
     echo "agent:autoreview: failed to allocate a capture deadline file for $label" >&2
     return 1
   fi
@@ -6118,17 +6131,20 @@ capture_budgeted_output_file() {
   # here would abort the wrapper under errexit with no diagnostic and leave both
   # bookkeeping files behind.
   if ! : >"$output"; then
-    rm -f "$status_file" "$status_file.partial" "$timeout_file"
+    rm -f "$status_file" "$partial_file" "$timeout_file"
     echo "agent:autoreview: failed to open the capture output for $label" >&2
     return 1
   fi
 
   set +e
   if [[ "$apply_deadline" -eq 1 ]]; then
-    run_capture_with_deadline "$remaining_seconds" "$timeout_file" "$status_file" \
-      run_capture_pipeline "$output" "$((remaining + 1))" "$status_file" "$@"
+    run_capture_with_deadline \
+      "$remaining_seconds" "$timeout_file" "$status_file" "$partial_file" \
+      run_capture_pipeline \
+      "$output" "$((remaining + 1))" "$status_file" "$partial_file" "$@"
   else
-    run_capture_pipeline "$output" "$((remaining + 1))" "$status_file" "$@"
+    run_capture_pipeline \
+      "$output" "$((remaining + 1))" "$status_file" "$partial_file" "$@"
   fi
   set -e
 
@@ -6140,7 +6156,7 @@ capture_budgeted_output_file() {
     command_status=1
     limiter_status=1
   fi
-  rm -f "$status_file" "$status_file.partial" "$timeout_file"
+  rm -f "$status_file" "$partial_file" "$timeout_file"
   # The marker decides, whatever the pipeline reported. The watchdog writes it
   # only after confirming the capture was still running, so it cannot appear for
   # a capture that had already finished; and once it appears the deadline has
