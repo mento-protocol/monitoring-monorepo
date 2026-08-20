@@ -1848,6 +1848,90 @@ test("flap-prone criticals keep incidents open across short recoveries", () => {
   }
 });
 
+// A token-count share is the exchange rate, not depletion: a balanced
+// JPYm/USDm pool reads 0.4% / 99.6% by count and would page forever. PR #1940
+// shipped exactly that and was corrected in #1944 before the production apply.
+// These assertions pin the value-weighted input so the cheaper-looking gauge
+// cannot be swapped back in, and pin the annotation to the same numbers the
+// threshold used.
+test("pool depletion tiers measure value share, not token-count share", () => {
+  const main = readFileSync(
+    path.resolve(repoRoot, "alerts/rules/main.tf"),
+    "utf8",
+  );
+  const stripped = stripComments(main);
+  const depletionExpressions = [
+    ...stripped.matchAll(
+      /\bpool_depletion_(?:page|critical)_active_promql\s*=\s*(.+)/g,
+    ),
+  ].map(([, value]) => value);
+  assert(
+    depletionExpressions.length === 2,
+    `expected both depletion band expressions, got ${depletionExpressions.length}`,
+  );
+  // Both bands resolve through the same local, so resolve it once and assert
+  // on the expression the rules actually evaluate.
+  const [, minShareExpression] = stripped.match(
+    /\bpool_min_reserve_value_share_promql\s*=\s*"([^"]+)"/,
+  ) ?? [null, null];
+  assert(
+    minShareExpression !== null,
+    "the depletion bands should read a value-weighted min-share local",
+  );
+  for (const gauge of [
+    "mento_pool_reserve_value_share_token0",
+    "mento_pool_reserve_value_share_token1",
+  ]) {
+    assert(
+      minShareExpression.includes(gauge),
+      `depletion min-share expression must read ${gauge}`,
+    );
+  }
+  assert(
+    !/mento_pool_reserve_share_token[01]/.test(minShareExpression),
+    "depletion must not read the raw token-count share gauges — on an off-parity pair they measure the exchange rate, not depletion",
+  );
+  for (const expression of depletionExpressions) {
+    assert(
+      expression.includes("pool_min_reserve_value_share_promql"),
+      `depletion band expression should resolve through the value-weighted local: ${expression}`,
+    );
+  }
+
+  // The summary names the thin side from the same value shares the threshold
+  // used. Reading R0/R1 here would name the wrong token on an off-parity pair.
+  const [, summary] = stripped.match(
+    /\bpool_depletion_summary_annotation\s*=\s*<<-EOT\n([\s\S]*?)\n\s*EOT/,
+  ) ?? [null, null];
+  assert(summary !== null, "pool_depletion_summary_annotation should exist");
+  assert(
+    summary.includes("$values.V0") && summary.includes("$values.V1"),
+    "depletion summary must read the V0/V1 value-share annotation queries",
+  );
+  assert(
+    !summary.includes("$values.R0") && !summary.includes("$values.R1"),
+    "depletion summary must not name the thin side from token-count shares",
+  );
+
+  // Every annotation ref the summary reads has to be supplied to both rules,
+  // or Grafana renders the fallback copy instead of the numbers.
+  const fpmmRules = readFileSync(
+    path.resolve(repoRoot, "alerts/rules/rules-fpmms.tf"),
+    "utf8",
+  );
+  for (const namePattern of [
+    /\bname\s*=\s*"Pool Depletion Risk"/,
+    /\bname\s*=\s*"Pool Nearly One-Sided"/,
+  ]) {
+    assert(
+      ruleBlockNamed(fpmmRules, namePattern).includes(
+        "local.pool_depletion_value_share_annotation_queries",
+      ),
+      `${namePattern} must attach the value-share annotation queries`,
+    );
+  }
+});
+
 test("long-lived pool criticals repeat twice daily, short-lived ones hourly", () => {
   const contactPoints = readFileSync(
     path.resolve(repoRoot, "alerts/rules/contact-points.tf"),

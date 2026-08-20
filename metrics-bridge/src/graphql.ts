@@ -164,9 +164,28 @@ export const BRIDGE_POOLS_VP_LIFECYCLE_DEPRECATION_QUERY = gql`
   }
 `;
 
+// Optional companion query for the pool's rate-feed orientation. Only the
+// value-weighted reserve-share gauges need it; if the column is unavailable
+// those gauges stop publishing and the depletion alerts go NoData (= OK)
+// rather than reading a share computed in the wrong direction.
+export const BRIDGE_POOLS_RATE_FEED_ORIENTATION_QUERY = gql`
+  query BridgePoolsRateFeedOrientation {
+    Pool(where: { source: { _like: "%fpmm%" } }) {
+      id
+      invertRateFeed
+      invertRateFeedKnown
+    }
+  }
+`;
+
 type OracleLineageRow = Pick<
   PoolRow,
   "id" | "prevMedianPrice" | "prevMedianAt"
+>;
+
+type RateFeedOrientationRow = Pick<
+  PoolRow,
+  "id" | "invertRateFeed" | "invertRateFeedKnown"
 >;
 
 type OpenBreachRow = Pick<
@@ -204,12 +223,22 @@ type BridgePoolsBaseResponse = {
     | "currentOpenBreachEntryThreshold"
     | "wrappedExchangeDeprecated"
     | "activeLiquidityStrategies"
+    | "invertRateFeed"
+    | "invertRateFeedKnown"
   >[];
 };
 
 const LINEAGE_DEFAULTS = {
   prevMedianPrice: "0",
   prevMedianAt: "0",
+} as const;
+
+// `invertRateFeedKnown: false` is the load-bearing default: it means "we have
+// not read the orientation", which suppresses the value-share gauges. The
+// `invertRateFeed: false` beside it is never acted on while `known` is false.
+const RATE_FEED_ORIENTATION_DEFAULTS = {
+  invertRateFeed: false,
+  invertRateFeedKnown: false,
 } as const;
 
 const OPEN_BREACH_DEFAULTS = {
@@ -231,6 +260,7 @@ const VP_FRESHNESS_DEFAULTS = {
 type BridgePoolCompanionResponses = {
   base: BridgePoolsBaseResponse;
   lineage: { Pool: OracleLineageRow[] };
+  rateFeedOrientation: { Pool: RateFeedOrientationRow[] };
   openBreach: { Pool: OpenBreachRow[] };
   oracleTx: { Pool: OracleTxRow[] };
   activeStrategies: ActiveLiquidityStrategiesResult;
@@ -262,6 +292,7 @@ function isUnknownFieldError(err: unknown): boolean {
 
 const unknownFieldWarnings = {
   oracleLineage: false,
+  rateFeedOrientation: false,
   openBreach: false,
   oracleTx: false,
   activeStrategies: false,
@@ -353,16 +384,65 @@ async function requestOptionalVpLifecycleDeprecationRows(
   }
 }
 
+// The `Pool`-shaped optional companions, split out so the top-level fan-out
+// stays readable as companion count grows. Every request is created before the
+// first await, here and at the call site, so all of them stay in flight
+// together — the nesting costs no round trip.
+async function requestOptionalPoolRowCompanions(
+  signal: AbortSignal,
+): Promise<
+  Pick<
+    BridgePoolCompanionResponses,
+    | "lineage"
+    | "rateFeedOrientation"
+    | "openBreach"
+    | "oracleTx"
+    | "vpFreshness"
+  >
+> {
+  const [lineage, rateFeedOrientation, openBreach, oracleTx, vpFreshness] =
+    await Promise.all([
+      requestOptionalPoolRows<OracleLineageRow>(
+        BRIDGE_POOLS_ORACLE_LINEAGE_QUERY,
+        signal,
+        "oracleLineage",
+        "[metrics-bridge] Hasura schema missing oracle-lineage fields; Oracle Jump previous-price annotation disabled until indexer catches up.",
+      ),
+      requestOptionalPoolRows<RateFeedOrientationRow>(
+        BRIDGE_POOLS_RATE_FEED_ORIENTATION_QUERY,
+        signal,
+        "rateFeedOrientation",
+        "[metrics-bridge] Hasura schema missing rate-feed orientation fields; value-weighted reserve share gauges and the pool depletion alerts they feed are disabled until indexer catches up.",
+      ),
+      requestOptionalPoolRows<OpenBreachRow>(
+        BRIDGE_POOLS_OPEN_BREACH_QUERY,
+        signal,
+        "openBreach",
+        "[metrics-bridge] Hasura schema missing open-breach fields; deviation critical de-escalation persistence disabled until indexer catches up.",
+      ),
+      requestOptionalPoolRows<OracleTxRow>(
+        BRIDGE_POOLS_ORACLE_TX_QUERY,
+        signal,
+        "oracleTx",
+        "[metrics-bridge] Hasura schema missing oracle tx hash field; oracle alert transaction links disabled until indexer catches up.",
+      ),
+      requestOptionalPoolRows<VpFreshnessRow>(
+        BRIDGE_POOLS_VP_FRESHNESS_QUERY,
+        signal,
+        "vpFreshness",
+        "[metrics-bridge] Hasura schema missing VP oracle freshness field; VirtualPool oracle staleness metric disabled until indexer catches up.",
+      ),
+    ]);
+  return { lineage, rateFeedOrientation, openBreach, oracleTx, vpFreshness };
+}
+
 async function requestBridgePoolCompanions(
   signal: AbortSignal,
 ): Promise<BridgePoolCompanionResponses> {
   const [
     base,
-    lineage,
-    openBreach,
-    oracleTx,
+    poolRowCompanions,
     activeStrategies,
-    vpFreshness,
     vpExchangeDeprecation,
     vpLifecycleDeprecation,
   ] = await Promise.all([
@@ -370,41 +450,15 @@ async function requestBridgePoolCompanions(
       document: BRIDGE_POOLS_QUERY,
       signal,
     }),
-    requestOptionalPoolRows<OracleLineageRow>(
-      BRIDGE_POOLS_ORACLE_LINEAGE_QUERY,
-      signal,
-      "oracleLineage",
-      "[metrics-bridge] Hasura schema missing oracle-lineage fields; Oracle Jump previous-price annotation disabled until indexer catches up.",
-    ),
-    requestOptionalPoolRows<OpenBreachRow>(
-      BRIDGE_POOLS_OPEN_BREACH_QUERY,
-      signal,
-      "openBreach",
-      "[metrics-bridge] Hasura schema missing open-breach fields; deviation critical de-escalation persistence disabled until indexer catches up.",
-    ),
-    requestOptionalPoolRows<OracleTxRow>(
-      BRIDGE_POOLS_ORACLE_TX_QUERY,
-      signal,
-      "oracleTx",
-      "[metrics-bridge] Hasura schema missing oracle tx hash field; oracle alert transaction links disabled until indexer catches up.",
-    ),
+    requestOptionalPoolRowCompanions(signal),
     requestOptionalActiveLiquidityStrategies(signal),
-    requestOptionalPoolRows<VpFreshnessRow>(
-      BRIDGE_POOLS_VP_FRESHNESS_QUERY,
-      signal,
-      "vpFreshness",
-      "[metrics-bridge] Hasura schema missing VP oracle freshness field; VirtualPool oracle staleness metric disabled until indexer catches up.",
-    ),
     requestOptionalVpExchangeDeprecationRows(signal),
     requestOptionalVpLifecycleDeprecationRows(signal),
   ]);
   return {
     base,
-    lineage,
-    openBreach,
-    oracleTx,
+    ...poolRowCompanions,
     activeStrategies,
-    vpFreshness,
     vpExchangeDeprecation,
     vpLifecycleDeprecation,
   };
@@ -413,6 +467,7 @@ async function requestBridgePoolCompanions(
 function mergeBridgePoolCompanions({
   base,
   lineage,
+  rateFeedOrientation,
   openBreach,
   oracleTx,
   activeStrategies,
@@ -421,6 +476,18 @@ function mergeBridgePoolCompanions({
   vpLifecycleDeprecation,
 }: BridgePoolCompanionResponses): BridgePoolsResponse {
   const lineageById = new Map(lineage.Pool.map((p) => [p.id, p]));
+  // Narrowed to the two fields on purpose: a companion row must never be able
+  // to overwrite base-query state, and `=== true` keeps a row that arrived
+  // without the columns from replacing the defaults with `undefined`.
+  const rateFeedOrientationById = new Map(
+    rateFeedOrientation.Pool.map((p) => [
+      p.id,
+      {
+        invertRateFeed: p.invertRateFeed === true,
+        invertRateFeedKnown: p.invertRateFeedKnown === true,
+      },
+    ]),
+  );
   const openBreachById = new Map(openBreach.Pool.map((p) => [p.id, p]));
   const oracleTxById = new Map(
     oracleTx.Pool.filter((p) => p.oracleTxHash).map((p) => [p.id, p]),
@@ -436,7 +503,9 @@ function mergeBridgePoolCompanions({
       ...VP_FRESHNESS_DEFAULTS,
       ...LINEAGE_DEFAULTS,
       ...OPEN_BREACH_DEFAULTS,
+      ...RATE_FEED_ORIENTATION_DEFAULTS,
       ...lineageById.get(p.id),
+      ...rateFeedOrientationById.get(p.id),
       ...openBreachById.get(p.id),
       ...oracleTxById.get(p.id),
       ...vpFreshnessById.get(p.id),

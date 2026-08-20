@@ -49,13 +49,18 @@ A pool alert is critical when it reflects **user impact** or **rebalancer
 inaction**, not when a ratio is large.
 
 - **Depletion risk becomes the pool-side critical.** Two rules in
-  `alerts/rules/rules-fpmms.tf` read `min(side share)` from the existing
-  `mento_pool_reserve_share_token{0,1}` gauges:
-  - `Pool Depletion Risk` — min side share in `[10%, 20%)`, sustained 15m,
+  `alerts/rules/rules-fpmms.tf` read `min(side share)` **measured by value**,
+  from the `mento_pool_reserve_value_share_token{0,1}` gauges:
+  - `Pool Depletion Risk` — min value share in `[10%, 20%)`, sustained 15m,
     `severity = critical`, twice-daily repeat via `notify_critical_pool_slow`.
-  - `Pool Nearly One-Sided` — min side share below 10% for 1m,
+  - `Pool Nearly One-Sided` — min value share below 10% for 1m,
     `severity = page`. Below 10% the pool is minutes from rejecting one swap
     direction outright.
+
+  PR #1940 shipped this reading the raw token-count gauges
+  (`mento_pool_reserve_share_token{0,1}`) instead, which is wrong on any pair
+  that does not trade near parity; PR #1944 corrected it before the production
+  apply. See the reversed alternative below.
 
   The bands partition the range at the page share with no gap and no overlap,
   so one depleting pool produces exactly one notification. Neither rule carries
@@ -64,8 +69,10 @@ inaction**, not when a ratio is large.
   because the held band keeps firing while the pool crosses into its
   neighbour — in both directions. The 15m dwell and the 10-percentage-point
   gap between the bands absorb churn instead. Neither rule is FX-weekend
-  gated: reserve share is on-chain balances, not an oracle-derived quantity,
-  so a market pause does not make the signal spurious.
+  gated: the quantity is on-chain balances weighted by the last median, and a
+  market pause does not make it spurious — a rate that stopped updating on
+  Friday still says whether the two legs are worth roughly the same. The
+  weekend is exactly when nobody is watching a pool drain.
 
 - **Page delivery uses one bundled contact point.** Every `service = "fpmms"`
   rule routes through rule-level `notification_settings`, which bypasses
@@ -129,9 +136,20 @@ inaction**, not when a ratio is large.
   still open. No hold placement survives both crossings, so the tiers rely on
   dwell and band separation instead. The cost is accepted: a pool oscillating
   across a band boundary can produce a fire/resolve pair per dwell period.
-- **A new metrics-bridge gauge for side share** — rejected as unnecessary. The
-  per-token reserve-share gauges already carry the value at the exact pool
-  fingerprint the alert instances use.
+- **A new metrics-bridge gauge for side share** — rejected as unnecessary in
+  PR #1940, **reversed in PR #1944**. The existing per-token reserve-share
+  gauges do carry a number at the right pool fingerprint, but it is a token
+  count, and token counts on the two sides of an off-parity pair are not
+  comparable quantities. The correct comparison needs each leg priced through
+  the pool's own oracle reference, which needs the per-pool `invertRateFeed`
+  orientation — a value PromQL has no access to and cannot infer from the
+  published series. `mento_pool_reserve_value_share_token{0,1}` therefore do
+  the conversion in the bridge, where the flag is available, the arithmetic is
+  unit-testable, and the alert expression stays a `min` over two gauges.
+  Choosing an orientation heuristically in PromQL was also considered and
+  rejected: every rule that guesses masks the catastrophic case, because a pool
+  that is genuinely drained by the square of the exchange rate reads as
+  perfectly balanced under the wrong orientation.
 
 ## Consequences
 
@@ -141,9 +159,20 @@ inaction**, not when a ratio is large.
   share, above both depletion bands, and would have been covered by
   `Rebalancer Stale` alone — which is the correct outcome.
 - Pool health now has two independent ladders that must not be conflated:
-  deviation ratio classifies drift for analytics, depletion side share measures
-  user impact and decides paging. A future change to one is not a change to the
-  other.
+  deviation ratio classifies drift for analytics, depletion value share
+  measures user impact and decides paging. A future change to one is not a
+  change to the other. They are related but not interchangeable — both derive
+  from the same reserve/oracle state, so a pool below the depletion floors is
+  necessarily far outside its rebalance band, while the converse does not hold.
+- The depletion tiers now depend on a live oracle median and an on-chain-read
+  feed orientation, which the count-share version did not. A pool missing
+  either publishes no value share, and both tiers evaluate NoData → OK. Today
+  that is the Polygon `EURm/EUROP` pool, which has never landed a median; its
+  dark feed is covered by the oracle liveness rules, not by silence here. The
+  gate is `medianLive`, not a non-zero last price: a zero-median outage retains
+  the previous price, so a price-only check would have kept pricing reserves
+  off a rate the contract had stopped honouring. This matches
+  `hasFreshLiveMedian`, which is how the indexer decides the same question.
 - `POOL_DEPLETION_CRITICAL_SHARE` and `POOL_DEPLETION_PAGE_SHARE` join the
   Terraform mirror set. `DEVIATION_CRITICAL_RATIO` leaves it; a future editor
   who bumps it will get no drift-check failure, because there is nothing in
@@ -159,16 +188,39 @@ inaction**, not when a ratio is large.
 - Applying this stack destroys `grafana_contact_point.slack_critical_transition`
   and creates `grafana_contact_point.pool_page`. Both are Grafana-side
   resources behind the `production-infra` apply gate.
-- **The page tier has a non-empty day-one firing set.** Queried against
-  production on 2026-08-19, `min(side share)` puts both `JPYm/USDm` pools below
-  the page floor — Celo at 0.42% USDm (99.58% JPYm) and Monad at 0.67% USDm
-  (99.33% JPYm). Those are true positives: a swapper cannot buy USDm out of
-  either pool. Every other pool sits at 22% or above. Whoever approves the
-  `production-infra` apply is therefore approving two immediate Splunk On-Call
-  pages for a pre-existing condition, which is the producer-first rollout check
-  in `alerts/rules/README.md` working as intended — the condition is old, only
-  the visibility is new. Fund or rebalance the USDm leg of those two pools
-  before approving, or expect the pages.
+- **Rollout order is a prerequisite, not a preference.** The depletion rules
+  read gauges the bridge publishes, so metrics-bridge must be deployed and
+  `mento_pool_reserve_value_share_token0` / `_token1` must be visible in
+  Prometheus before the `production-infra` apply. Applying first is not
+  dangerous but it is silent: with no series, both tiers sit at NoData → OK
+  and the depletion ladder looks healthy because it is not measuring anything.
+  Confirming the two gauges answer "is this actually watching the pools yet".
+- **The page tier has an empty day-one firing set.** Replayed against
+  production on 2026-08-19, the thinnest value side across all 18 live pools is
+  26% (Monad `CHFm/USDm`, the pool furthest outside its rebalance band at
+  1.29× threshold). Nothing sits in either the critical `[10%, 20%)` band or
+  the page band below 10%, so approving the `production-infra` apply adds no
+  immediate notification.
+- **A count share is not a depletion signal, and the first version of this ADR
+  said otherwise.** PR #1940 read the token-count gauges and claimed the two
+  `JPYm/USDm` pools (0.42% and 0.67% "USDm") were day-one true positives that
+  should be funded before the apply. They were not. Those readings are the
+  JPY/USD rate: one JPY is worth ~0.0063 USD, so a JPYm/USDm pool holding equal
+  value on both sides holds ~160× more JPYm tokens than USDm tokens. By value
+  the Celo pool was 40.2% USDm / 59.8% JPYm and the Monad pool 48.2% / 51.8%,
+  both inside tolerance (`deviation_ratio` 0.976 and 0.149) and both shown
+  healthy on the dashboard, which has always converted through the oracle. Had
+  the apply been approved, both pools would have paged Splunk On-Call
+  indefinitely with no operator action that could clear them. The check that
+  caught it was replaying the expression against live production data before
+  the apply, not review of the expression itself — it reads plausibly.
+- **The orientation is per pool, not per pair.** `invertRateFeed` compensates
+  the pool's token ordering, which differs by chain: the Celo `JPYm/USDm` pool
+  lists USDm as token0 and inverts its feed, the Monad one lists JPYm as token0
+  and does not. Nine of the eighteen live pools invert. Any future consumer
+  that converts a pool's reserves through `mento_pool_oracle_price` must carry
+  that flag; assuming a single direction is confidently wrong on half the
+  estate.
 
 ## Evidence
 
@@ -176,9 +228,18 @@ inaction**, not when a ratio is large.
   — the alert-state history analysis and the two-PR plan.
 - PR [#1937](https://github.com/mento-protocol/monitoring-monorepo/pull/1937)
   — Part 1, noise mechanics (`keep_firing_for`, 12h repeat, incident grouping).
+- PR [#1940](https://github.com/mento-protocol/monitoring-monorepo/pull/1940)
+  — Part 2, the depletion rules, shipped reading token-count shares.
+- PR [#1944](https://github.com/mento-protocol/monitoring-monorepo/pull/1944)
+  — the value-weighting correction, with the 18-pool production replay. Each
+  pool's value split reproduces the pool's own on-chain `priceDifference` to
+  within 1 bps, which is what establishes the conversion is in the same frame
+  the FPMM contract uses.
 - Enforcing files: `alerts/rules/rules-fpmms.tf` (the two depletion rules and
-  the threshold-mirror banner), `alerts/rules/main.tf` (the min-side-share
-  locals and the un-suppressed warning expressions),
+  the threshold-mirror banner), `alerts/rules/main.tf` (the min-value-share
+  locals, the V0/V1 annotation queries, and the un-suppressed warning
+  expressions), `metrics-bridge/src/metrics.ts` (`reserveValueShares` and the
+  two gauges it publishes),
   `alerts/rules/contact-points.tf` (`grafana_contact_point.pool_page`,
   `notify_page_pool`), `shared-config/src/thresholds.ts` (the constants and
   which of them Terraform mirrors),

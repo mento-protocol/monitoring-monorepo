@@ -41,8 +41,8 @@ export const POOL_DEPLETION_CRITICAL_SHARE = ${depletionCritical};
 export const POOL_DEPLETION_PAGE_SHARE = ${depletionPage};
 `,
     [ALERTS_MAIN_PATH]: `
-pool_min_reserve_share_promql = "min without(token_symbol) (mento_pool_reserve_share_token0 or mento_pool_reserve_share_token1)"
-pool_depletion_critical_active_promql = "(\${local.pool_min_reserve_share_promql}) >= ${bandFloor}"
+pool_min_reserve_value_share_promql = "min without(token_symbol) (mento_pool_reserve_value_share_token0 or mento_pool_reserve_value_share_token1)"
+pool_depletion_critical_active_promql = "(\${local.pool_min_reserve_value_share_promql}) >= ${bandFloor}"
 deviation_warning_summary_annotation = <<-EOT
 {{- printf "Pool %.0f%% above ${annotationTolerancePercent}%% tolerance." $values.Dev.Value -}}
 Pool above ${annotationTolerancePercent}% tolerance.

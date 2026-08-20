@@ -243,6 +243,9 @@ locals {
     {{ if .Annotations.current_reserves -}}
     *Reserves:* {{ .Annotations.current_reserves }}
     {{ end -}}
+    {{ if .Annotations.value_composition -}}
+    *Value Share:* {{ .Annotations.value_composition }}
+    {{ end -}}
     {{ if .Annotations.breach_duration -}}
     *Breach Duration:* {{ .Annotations.breach_duration }}
     {{ end -}}
@@ -292,6 +295,7 @@ locals {
   victorops_pool_page_message = <<-EOT
     {{ range .Alerts }}{{ if .Annotations.summary }}{{ .Annotations.summary }}
     {{ end }}{{ if .Annotations.current_reserves }}Reserves: {{ .Annotations.current_reserves }}
+    {{ end }}{{ if .Annotations.value_composition }}Value share: {{ .Annotations.value_composition }}
     {{ end }}{{ if .Annotations.rebalance_reason }}Rebalance blocked: {{ .Annotations.rebalance_reason }}
     {{ end }}{{ if .Labels.pool_id }}Pool: https://monitoring.mento.org/pool/{{ .Labels.pool_id }}
     {{ end }}Alert ID: {{ .Fingerprint }}
