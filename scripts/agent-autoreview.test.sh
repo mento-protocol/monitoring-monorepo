@@ -6501,9 +6501,12 @@ seed_capture_deadline_fixture() {
   # reaches two, which is what an arm needs to observe a budget spent across
   # captures rather than granted to each of them. Neither matches the scope
   # baseline's `--numstat`, which carries the same rename flags but is not a
-  # bundle capture.
+  # bundle capture. `$args` stays literal on purpose: it is the generated
+  # filter's own variable, read where that script runs, not here.
+  # shellcheck disable=SC2016
   local match_condition='"$args" == *--patch*'
   if [[ "${5:-patch}" == "patch-and-stat" ]]; then
+    # shellcheck disable=SC2016
     match_condition='( "$args" == *--patch* || "$args" == *--stat* )'
   fi
 
