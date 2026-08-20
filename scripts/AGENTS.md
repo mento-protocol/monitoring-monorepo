@@ -3,7 +3,7 @@ title: Scripts Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-18
+last_verified: 2026-08-20
 doc_type: agent-instructions
 scope: scripts
 review_interval_days: 90
@@ -17,13 +17,12 @@ garden_lane: agent-entry-points
 ## Scope
 
 `scripts/` holds deploy wrappers, agent quality gates, code-health checks, and
-repo maintenance utilities. 38 files sit flat at the top level today.
+repo maintenance utilities. Its top level has 38 files.
 
 ## Layout
 
-[ADR 0064](../docs/adr/0064-scripts-module-directories.md) governs
-subdirectories here and links the reorganization issue; phases P1–P15 have all
-landed.
+[ADR 0064](../docs/adr/0064-scripts-module-directories.md) governs these
+subdirectories and links the completed P1–P15 reorganization.
 
 | Directory       | Holds                                  |
 | --------------- | -------------------------------------- |
@@ -59,19 +58,18 @@ stay with their domain.
 
 ## Why Files Stay Flat
 
-Eleven mechanisms pin `scripts/` paths. A file one of them names moves only when
-that mechanism moves with it, in the same PR.
+`scripts/` has eleven path-pin mechanisms. Move each pin with its file.
 
 - **Autoreview runtime materialization.** `agent-autoreview.sh` names its
   runtime files in Perl copy lists and `runtime_paths` arrays, then materializes
   each from a git blob. A path it omits is absent at runtime.
-- **Gate source-directory guards.** `agent-quality-gate.sh` gates real-tree
-  routing on `$script_source_dir == $repo_root/scripts`, leaving its stub-repo
-  unit tests unaffected.
+- **Gate routing pins.** `agent-quality-gate.sh` uses
+  `$script_source_dir == $repo_root/scripts` to exclude stub-repo unit tests. It
+  pairs `bootstrap/codex-cloud-setup.{sh,test.sh}` for offline installer tests.
 - **Gate runtime module pins.** `agent-quality-gate.sh` resolves
   `docs/docs-navigation-eval-helpers.mjs` and `gate/lockfile-scope.mjs` from
-  `$script_source_dir` — never `$repo_root`, which is a stub repo under test —
-  and names each in three literals. Repoint every one; ADR 0064 lists them.
+  `$script_source_dir`, not the stub `$repo_root`, and pins each in three
+  literals. Repoint all three; ADR 0064 lists them.
 - **Evaluation fixture forbidden lists.** `forbidden_sources` in
   `docs/evals/documentation-navigation-fixtures.json` names the navigation
   eval's own implementation.

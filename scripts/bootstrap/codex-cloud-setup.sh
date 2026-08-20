@@ -8,7 +8,6 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-cd "$REPO_ROOT"
 
 # shellcheck source=scripts/bootstrap/codex-cloud-git-helpers.sh
 source "$REPO_ROOT/scripts/bootstrap/codex-cloud-git-helpers.sh"
@@ -341,6 +340,42 @@ MSG
   return 1
 }
 
+is_valid_sha256() {
+  [[ "$1" =~ ^[0-9a-fA-F]{64}$ ]]
+}
+
+# Keep the cleanup trap local to this subshell so every return removes the file.
+run_verified_foundry_installer() (
+  local foundryup_url="$1"
+  local expected_sha256="$2"
+  local installer=""
+
+  if ! installer="$(mktemp "${TMPDIR:-/tmp}/codex-cloud-foundryup.XXXXXX")"; then
+    echo "error: could not create a temporary file for the Foundry installer." >&2
+    return 1
+  fi
+  trap 'rm -f -- "$installer"' EXIT
+
+  if ! curl -fsSL "$foundryup_url" -o "$installer"; then
+    echo "error: could not download the configured Foundry installer." >&2
+    return 1
+  fi
+  if [[ ! -f "$installer" || -L "$installer" ]]; then
+    echo "error: the downloaded Foundry installer is not a regular file." >&2
+    return 1
+  fi
+
+  echo "==> Verifying configured Foundry installer sha256"
+  if ! printf '%s  %s\n' "$expected_sha256" "$installer" | sha256sum -c -; then
+    echo "error: the configured Foundry installer sha256 does not match." >&2
+    return 1
+  fi
+  if ! bash "$installer"; then
+    echo "error: the verified Foundry installer failed." >&2
+    return 1
+  fi
+)
+
 install_foundry() {
   if is_disabled "${CODEX_CLOUD_INSTALL_FOUNDRY:-true}"; then
     echo "==> Skipping Foundry install because CODEX_CLOUD_INSTALL_FOUNDRY=${CODEX_CLOUD_INSTALL_FOUNDRY}"
@@ -356,20 +391,30 @@ install_foundry() {
   fi
 
   echo "==> Installing Foundry for Aegis forge tests"
-  local foundryup_url="${CODEX_CLOUD_FOUNDRYUP_URL:-https://foundry.paradigm.xyz}"
-  if [[ -n "${CODEX_CLOUD_FOUNDRYUP_SHA256:-}" ]]; then
-    local tmp_dir
-    local installer
-    tmp_dir="$(mktemp -d)"
-    installer="${tmp_dir}/foundryup"
-    curl -fsSL "$foundryup_url" -o "$installer"
-    printf '%s  %s\n' "${CODEX_CLOUD_FOUNDRYUP_SHA256}" "$installer" | sha256sum -c -
-    bash "$installer"
-    rm -rf "$tmp_dir"
+  local default_foundryup_url="https://foundry.paradigm.xyz"
+  local foundryup_url="${CODEX_CLOUD_FOUNDRYUP_URL:-$default_foundryup_url}"
+  local foundryup_sha256="${CODEX_CLOUD_FOUNDRYUP_SHA256:-}"
+
+  if [[ "$foundryup_url" != "$default_foundryup_url" && -z "$foundryup_sha256" ]]; then
+    echo "error: CODEX_CLOUD_FOUNDRYUP_SHA256 is required when CODEX_CLOUD_FOUNDRYUP_URL changes the default Foundry installer URL." >&2
+    return 1
+  fi
+  if [[ -n "$foundryup_sha256" ]] && ! is_valid_sha256 "$foundryup_sha256"; then
+    echo "error: CODEX_CLOUD_FOUNDRYUP_SHA256 must contain exactly 64 hexadecimal characters." >&2
+    return 1
+  fi
+
+  if [[ -n "$foundryup_sha256" ]]; then
+    if ! run_verified_foundry_installer "$foundryup_url" "$foundryup_sha256"; then
+      return 1
+    fi
   else
-    # Foundry's public bootstrap script is HTTPS-only by default. Hardened
-    # environments can mirror it and set CODEX_CLOUD_FOUNDRYUP_SHA256 above.
-    curl -fsSL "$foundryup_url" | bash
+    # Preserve Foundry's documented public bootstrap path only for the exact
+    # default URL. Every custom URL must use the verified-file path above.
+    if ! curl -fsSL "$default_foundryup_url" | bash; then
+      echo "error: the default Foundry installer failed." >&2
+      return 1
+    fi
   fi
   if ! command -v foundryup >/dev/null 2>&1; then
     cat >&2 <<'MSG'
@@ -430,6 +475,13 @@ quality-gate scans.
 MSG
   return 1
 }
+
+# The offline installer suite sources these functions without running setup.
+if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
+  return 0
+fi
+
+cd "$REPO_ROOT"
 
 echo "==> Marking repository safe for git"
 git config --global --add safe.directory "$REPO_ROOT" || true

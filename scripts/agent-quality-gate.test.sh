@@ -2617,6 +2617,14 @@ run_gate "scripts/bootstrap/agent-session-end-hook.sh"
 assert_contains "- bash -n scripts/bootstrap/agent-session-end-hook.sh (shell script changed)"
 assert_contains "- pnpm agent:context-check (agent SessionEnd hook changed)"
 
+for path in \
+  scripts/bootstrap/codex-cloud-setup.sh \
+  scripts/bootstrap/codex-cloud-setup.test.sh; do
+  run_gate "$path"
+  assert_contains "- bash -n $path (shell script changed)"
+  assert_contains "- bash scripts/bootstrap/codex-cloud-setup.test.sh (Codex Cloud Foundry installer contract changed)"
+done
+
 run_gate "scripts/lib/install-marker.sh"
 assert_contains "- bash -n scripts/lib/install-marker.sh (shell script changed)"
 assert_contains "- pnpm agent:quality-gate:test (shared install-marker fragment changed)"

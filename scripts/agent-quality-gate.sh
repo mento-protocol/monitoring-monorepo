@@ -3859,6 +3859,9 @@ while IFS= read -r path; do
         scripts/bootstrap/agent-session-end-hook.sh)
           add_command "pnpm agent:context-check" "agent SessionEnd hook changed"
           ;;
+        scripts/bootstrap/codex-cloud-setup.sh|scripts/bootstrap/codex-cloud-setup.test.sh)
+          add_command "bash scripts/bootstrap/codex-cloud-setup.test.sh" "Codex Cloud Foundry installer contract changed"
+          ;;
         scripts/lib/install-marker.sh)
           # Sourced by scripts/setup.sh and
           # scripts/bootstrap/claude-code-web-setup.sh. `bash -n` cannot see the
