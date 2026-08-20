@@ -1751,6 +1751,10 @@ test("accepts the PR #1954 label-bold verdict and bracketed no-findings roll-up"
     // task box: `- [ ] No P1/P2 findings.` is an intention, not a result, and
     // treating it as a clean conclusion would additionally hide the line from
     // the actionable scan via withoutCleanReviewConclusionLines.
+    //
+    // Every prefix order reviewLineContent peels is covered. A first fix
+    // matched only the `- [ ]` shape, which left `1. [ ]`, `1) [ ]`, `### [ ]`,
+    // and `- 1. [ ]` all reading as clean.
     [
       "unchecked task conclusion",
       clean.replace(ROLLUP, "- [ ] No P1/P2 findings."),
@@ -1763,16 +1767,39 @@ test("accepts the PR #1954 label-bold verdict and bracketed no-findings roll-up"
       "negated task conclusion",
       clean.replace(ROLLUP, "- [-] No P1/P2 findings."),
     ],
+    [
+      "numbered unchecked conclusion",
+      clean.replace(ROLLUP, "1. [ ] No P1/P2 findings."),
+    ],
+    [
+      "paren-numbered unchecked conclusion",
+      clean.replace(ROLLUP, "1) [ ] No P1/P2 findings."),
+    ],
+    [
+      "numbered negated conclusion",
+      clean.replace(ROLLUP, "2. [-] No P1/P2 findings."),
+    ],
+    [
+      "heading unchecked conclusion",
+      clean.replace(ROLLUP, "### [ ] No P1/P2 findings."),
+    ],
+    [
+      "bullet-then-numbered unchecked conclusion",
+      clean.replace(ROLLUP, "- 1. [ ] No P1/P2 findings."),
+    ],
   ]) {
     expectReady(label, body, false);
   }
 
-  // The counterpart: a ticked box is a completed check and stays eligible.
-  expectReady(
-    "checked task conclusion",
-    clean.replace(ROLLUP, "- [x] No P1/P2 findings."),
-    true,
-  );
+  // The counterpart: a ticked box is a completed check and stays eligible,
+  // under the same prefix orders the rejection covers.
+  for (const [label, conclusion] of [
+    ["checked task conclusion", "- [x] No P1/P2 findings."],
+    ["checked numbered conclusion", "1. [x] No P1/P2 findings."],
+    ["capital-checked conclusion", "- [X] No P1/P2 findings."],
+  ]) {
+    expectReady(label, clean.replace(ROLLUP, conclusion), true);
+  }
 });
 
 // The body actually posted on PR #1954. Its verdict and roll-up each end in a

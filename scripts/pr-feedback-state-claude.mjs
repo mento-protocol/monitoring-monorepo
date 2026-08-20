@@ -46,9 +46,14 @@ const CLEAN_CONCLUSION_WITH_TAIL =
 // findings before merge, so the only safe rule is that a clean verdict asserts
 // cleanliness and says nothing further.
 const CLEAN_TAIL_SHAPE = /^[.!]?$/;
-// A task item whose box is empty (`- [ ]`) or explicitly negated (`- [-]`).
-// `[x]`/`[X]` is a completed check and stays eligible.
-const UNCHECKED_TASK_MARKER = /^\s*(?:[-*+]\s+)?\[[ -]\]\s/;
+// The prefix grammar `reviewLineContent` peels: bullets, numbering, headings,
+// and task boxes, in any order and up to three deep. `hasUncheckedTaskBox`
+// walks the same pattern and depth — keep them shared, never re-spelled.
+const REVIEW_LINE_PREFIX = /^(?:[-*+]\s+|\d+[.)]\s+|#{1,6}\s+|\[[ xX-]\]\s+)/;
+const REVIEW_LINE_PREFIX_DEPTH = 3;
+// An empty (`[ ]`) or negated (`[-]`) task box, once the prefixes before it are
+// gone. `[x]`/`[X]` is a completed check and stays eligible.
+const UNCHECKED_TASK_BOX = /^\[[ -]\]\s/;
 const CLEAN_P3_DISPOSITION_PATTERNS = [
   /\bno[- ]action(?:\s+requested)?\b/i,
   /\bnone\s+blocking\b/i,
@@ -137,13 +142,33 @@ function matchesCleanVerdict(line) {
   return tail !== undefined && isCleanTail(tail);
 }
 
+// True when an unchecked or negated task box sits anywhere in the line's prefix
+// run. Mirrors `reviewLineContent`'s peel loop step for step — same pattern,
+// same depth — so the two cannot drift into disagreeing about what a prefix is.
+function hasUncheckedTaskBox(line) {
+  let value = String(line ?? "").trim();
+  for (let index = 0; index < REVIEW_LINE_PREFIX_DEPTH; index += 1) {
+    if (UNCHECKED_TASK_BOX.test(value)) return true;
+    const stripped = value.replace(REVIEW_LINE_PREFIX, "");
+    if (stripped === value) break;
+    value = stripped;
+  }
+  return UNCHECKED_TASK_BOX.test(value);
+}
+
 function isCleanConclusion(line) {
-  // An UNCHECKED task marker states an intention, not a result: `- [ ] No
-  // P1/P2 findings.` is a box the reviewer never ticked. `reviewLineContent`
-  // strips `[ ]` along with the list bullet, so reject it before stripping —
-  // otherwise the line reads as a completed clean assertion and, worse,
-  // `withoutCleanReviewConclusionLines` deletes it from the actionable scan.
-  if (UNCHECKED_TASK_MARKER.test(String(line ?? ""))) return false;
+  // An UNCHECKED task box states an intention, not a result: `- [ ] No P1/P2
+  // findings.` is a box the reviewer never ticked. `reviewLineContent` peels
+  // `[ ]` along with bullets, numbering, and headings, so the box must be
+  // caught before it is peeled — otherwise the line reads as a completed clean
+  // assertion and `withoutCleanReviewConclusionLines` also deletes it from the
+  // actionable scan.
+  //
+  // Walk the SAME prefix grammar `reviewLineContent` uses rather than matching
+  // one hand-written shape. A single pattern only covered `- [ ]` and missed
+  // every other order the peeler accepts — `1. [ ]`, `1) [ ]`, `### [ ]`,
+  // `- 1. [ ]` — so the check must follow the peeler step for step.
+  if (hasUncheckedTaskBox(line)) return false;
   // Strip list/heading markers so a numbered roll-up entry is judged on its
   // text, not its `1. ` prefix.
   const value = reviewLineContent(line);
@@ -162,11 +187,8 @@ export function withoutCleanReviewConclusionLines(value) {
 
 function reviewLineContent(line) {
   let value = String(line ?? "").trim();
-  for (let index = 0; index < 3; index += 1) {
-    const stripped = value.replace(
-      /^(?:[-*+]\s+|\d+[.)]\s+|#{1,6}\s+|\[[ xX-]\]\s+)/,
-      "",
-    );
+  for (let index = 0; index < REVIEW_LINE_PREFIX_DEPTH; index += 1) {
+    const stripped = value.replace(REVIEW_LINE_PREFIX, "");
     if (stripped === value) break;
     value = stripped;
   }
