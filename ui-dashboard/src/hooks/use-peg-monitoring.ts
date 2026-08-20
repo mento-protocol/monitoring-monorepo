@@ -18,11 +18,17 @@ export type PegMonitoringResult = {
 
 const REFRESH_FAILURES_BEFORE_STALE = 2;
 
+// The route's own upstream call budgets PEG_MONITORING_UPSTREAM_TIMEOUT_MS
+// (10s, see lib/peg-monitoring-upstream.ts) for its leg alone. This client
+// deadline has to cover that same leg plus round-trip and server-side
+// parsing, so it carries a margin above it rather than matching it exactly
+// — otherwise the browser aborts before the server's own timeout can fire
+// and return a proper error. Still well under the 30s refresh interval.
 function fetchPegMonitoring(): Promise<PegMonitoringResponse> {
   return fetchJsonOrThrow<PegMonitoringResponse>(
     "/api/peg-monitoring",
     "Peg monitoring",
-    { timeoutMs: 10_000 },
+    { timeoutMs: 15_000 },
   );
 }
 
