@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   buildFeedbackFindings,
   summarizeFeedbackState,
@@ -2691,6 +2694,28 @@ test("leaves Cursor, Codex, and Claude classification unchanged beside CodeRabbi
   // machinery.
   assertEqual(summary.counts.blockingTopLevelBotComments, 1);
   assertEqual(summary.blockingTopLevelBotComments[0].author, "cursor[bot]");
+});
+
+// D3 middle state (issue 1877). `agent-autoreview.sh` materializes these
+// helpers from the protected origin/main snapshot and prefers the scripts/pr/
+// copy, while every consumer still runs the flat one. Nothing else pins the
+// pair, so a one-sided edit would leave the autoreview trust root executing
+// stale logic with both the CLI and the rest of this suite green. Delete this
+// test together with the flat copies in the move's last step.
+test("the scripts/pr/ feedback-state copies stay byte-identical to the flat originals", () => {
+  const scriptsDir = dirname(fileURLToPath(import.meta.url));
+  for (const name of [
+    "pr-feedback-state.mjs",
+    "pr-feedback-state-core.mjs",
+    "pr-feedback-state-claude.mjs",
+  ]) {
+    const flat = readFileSync(resolve(scriptsDir, name));
+    const moved = readFileSync(resolve(scriptsDir, "pr", name));
+    assert(
+      flat.equals(moved),
+      `scripts/${name} and scripts/pr/${name} have drifted; agent-autoreview runs the scripts/pr/ copy`,
+    );
+  }
 });
 
 if (failed > 0) {
