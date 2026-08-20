@@ -17,7 +17,7 @@ garden_lane: agent-entry-points
 ## Scope
 
 `scripts/` holds deploy wrappers, agent quality gates, code-health checks, and
-repo maintenance utilities. 38 files sit flat at the top level today.
+repo maintenance utilities.
 
 ## Layout
 
@@ -150,14 +150,11 @@ in the PR that moves a file. Every surface there is mandatory.
   caller plan path, or print, upload, or cache either plan form. The wrapper
   mechanism and its deploy-only bootstrap exception are in
   [ADR 0061](../docs/adr/0061-exact-plan-guard-for-manual-platform-applies.md).
-- `pnpm tf:test` enforces the deployment source-staging contract: the five
-  allowed `gcloud builds submit` / `gcloud app deploy` callsites, the Metrics
-  Bridge build config, its guarded no-refresh bootstrap plans, and the staging
-  bucket IAM. Never add a callsite, an indirect or dynamic deploy form, or a CLI
-  service-account override, and keep inert examples in
-  `scripts/deploy-staging-contract.test.mjs`.
+- `pnpm tf:test` enforces the deployment source-staging contract. Never add a
+  deploy callsite, an indirect or dynamic deploy form, or a CLI service-account
+  override; keep inert examples in `scripts/deploy-staging-contract.test.mjs`.
   [ADR 0053](../docs/adr/0053-explicit-deployment-source-staging.md) owns the
-  contract, its supported static syntax, and its explicit proof limits.
+  contract, the allowed callsites, and its proof limits.
 
 ## Verification
 
