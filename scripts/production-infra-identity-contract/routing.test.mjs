@@ -80,6 +80,11 @@ function assertBroadAdmissionPatterns(patterns) {
     "workflowAdmissionPatterns must not contain duplicates",
   );
   for (const pattern of patterns) {
+    assert.notEqual(
+      pattern,
+      ".github/**",
+      "workflow admission must not admit all .github metadata",
+    );
     const parsed = parseSimplePathPattern(pattern);
     const isRootFile = !parsed.recursive && !parsed.base.includes("/");
     const isTopLevelBoundary = parsed.recursive && !parsed.base.includes("/");
@@ -181,6 +186,11 @@ try {
     () => assertBroadAdmissionPatterns(["alerts/rules/**"]),
     /top-level boundary/u,
     "workflow admission must reject nested stack-specific recursion",
+  );
+  assert.throws(
+    () => assertBroadAdmissionPatterns([".github/**"]),
+    /must not admit all \.github metadata/u,
+    "workflow admission must reject unrelated GitHub metadata",
   );
   assert.doesNotThrow(
     () => assertBroadAdmissionPatterns([".github/workflows/**"]),
