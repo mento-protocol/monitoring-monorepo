@@ -190,7 +190,11 @@ inaction**, not when a ratio is large.
   switches off and the pool fails closed like any other. Publishing a 1:1 count
   share during an oracle outage would replace a real valuation with a fabricated
   one at the exact moment the pool most needs the real number, reading as
-  healthy while it drains.
+  healthy while it drains. The condition is "never priced", not "priced and
+  live": a report that expires or is removed before this pair ever priced keeps
+  the fallback on, because the 1:1 rate is a property of the pair rather than of
+  any one report's freshness. The stale report itself is the oracle-liveness
+  plane's job, and these two ladders stay independent.
 - `POOL_DEPLETION_CRITICAL_SHARE` and `POOL_DEPLETION_PAGE_SHARE` join the
   Terraform mirror set. `DEVIATION_CRITICAL_RATIO` leaves it; a future editor
   who bumps it will get no drift-check failure, because there is nothing in

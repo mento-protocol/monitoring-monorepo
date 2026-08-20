@@ -107,6 +107,19 @@ const COUNT_SHARE_VALUE_FALLBACK_POOL_IDS: ReadonlySet<string> = new Set([
  * there would replace a real valuation with a fabricated one at exactly the
  * moment the oracle went down, reading as healthy while the pool drains. That
  * case fails closed like every other pool.
+ *
+ * The condition is "no non-zero median was ever observed", NOT "the feed is
+ * live right now". A zero median leaves a zero price in place
+ * (`computeMedianLineageNext` in `indexer-envio/src/oracleJump.ts`), so a
+ * report that expires or is removed before this pair ever priced keeps the
+ * fallback on. That is deliberate: the 1:1 rate is a property of the pair —
+ * EUROP has no oracle-network feed to disagree with — not of any one report's
+ * freshness, so the value split stays correct while the report is stale. An
+ * expired or removed report is a real problem, and the oracle-liveness plane
+ * is what pages on it ("Oldest Report Expired [Polygon]" already carries
+ * EUROPEUR remediation copy). ADR 0067 keeps depletion and oracle liveness as
+ * independent ladders; suppressing a still-correct depletion share here would
+ * drop a good signal without adding the outage signal, which already exists.
  */
 function countSharesStandInForValue(
   pool: Pick<PoolRow, "id" | "lastMedianPrice">,
@@ -297,7 +310,7 @@ export const gauges = {
   // a raw count share is not a depletion signal on an off-parity pair.
   reserveValueShareToken0: new Gauge({
     name: "mento_pool_reserve_value_share_token0",
-    help: "Value-weighted share of pool reserves held in token0: r0_normalized × oracleRef / (r0_normalized × oracleRef + r1_normalized) ∈ [0, 1], where oracleRef is the price of token0 denominated in token1 (`mento_pool_oracle_price`, inverted when the pool's `invertRateFeed` says token0 is the feed's quote token). Equals the token-count share only when the pair trades near parity. Skipped when reserves are zero, the median price is absent or no longer live (a zero-median outage retains the last price), or the feed orientation has not been read on chain — no series rather than a wrong one. The one exception is a pool whose rate feed is hardcoded 1:1 and has never landed a median (Polygon EURm/EUROP), where the token-count share is the value share and is published here instead; a median that went dark is not covered by that exception. Carries the same `token_symbol` label as `mento_pool_reserve_share_token0`.",
+    help: "Value-weighted share of pool reserves held in token0: r0_normalized × oracleRef / (r0_normalized × oracleRef + r1_normalized) ∈ [0, 1], where oracleRef is the price of token0 denominated in token1 (`mento_pool_oracle_price`, inverted when the pool's `invertRateFeed` says token0 is the feed's quote token). Equals the token-count share only when oracleRef is exactly 1; near-parity is not enough. Skipped when reserves are zero, the median price is absent or no longer live (a zero-median outage retains the last price), or the feed orientation has not been read on chain — no series rather than a wrong one. The one exception is a pool whose rate feed is hardcoded 1:1 and has never landed a non-zero median (Polygon EURm/EUROP), where the token-count share is the value share and is published here instead; a feed that ever priced the pair is outside that exception, including after its median goes dark. Carries the same `token_symbol` label as `mento_pool_reserve_share_token0`.",
     labelNames: reserveShareLabels,
     registers: [register],
   }),
@@ -748,8 +761,9 @@ function recordLimitMetrics(pool: PoolRow, labels: PoolDisplayLabels): void {
  *
  * A null here normally means the value-share gauges publish nothing for the
  * pool. `recordReserveShareMetrics` carries one narrow exception for a pool
- * pinned to a 1:1 rate that has never landed a median — see
- * `countSharesStandInForValue`. A dark median never takes that path.
+ * pinned to a 1:1 rate that has never landed a non-zero median — see
+ * `countSharesStandInForValue`. A median that went dark after pricing the pair
+ * retains its last non-zero value, so it never takes that path.
  */
 export function reserveValueShares(
   pool: Pick<
@@ -809,9 +823,9 @@ function recordReserveShareMetrics(
   // oracle staleness rules page on.
   //
   // A real value share always wins. The count-share fallback runs only on the
-  // null path, and only for a pool that has never had a usable median at all —
-  // see `countSharesStandInForValue`, which is what keeps this from masking an
-  // oracle outage.
+  // null path, and only for a pool that has never had a non-zero median — see
+  // `countSharesStandInForValue`, which is what keeps this from overwriting a
+  // real valuation when that pool's oracle goes dark.
   const valueShares =
     reserveValueShares(pool) ??
     (countSharesStandInForValue(pool)
