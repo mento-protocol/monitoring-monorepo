@@ -350,6 +350,13 @@ jobs:
               - scripts/agent-autoreview-core.test.mjs
               - scripts/agent-autoreview-target-guard.test.mjs
               - scripts/agent-autoreview.test.sh
+              # agent-autoreview-core.test.mjs scans every Sentry suite and
+              # fails if the secret scanner refuses any of them. Without these
+              # paths a suite that commits a new fake credential merges with the
+              # sentinel green, and diffs whose context reaches it are then
+              # unreviewable (issues 1943, 1970). The assertion only protects
+              # what re-runs when the scanned files change.
+              - scripts/sentry/**/*.test.mjs
               - package.json
               - .node-version
               - .github/workflows/ci.yml

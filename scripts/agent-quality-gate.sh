@@ -3894,6 +3894,21 @@ while IFS= read -r path; do
       # Don't list it here too or `add_command` dedupes a redundant entry.
       add_surface "scripts"
       add_command "pnpm lint:scripts" "root build script changed"
+      # Deliberately BEFORE the case, not a branch inside it. `case` stops at
+      # the first match, so a `scripts/sentry/*/*.test.mjs` branch would shadow
+      # every suite-specific route below it — placing one there silently
+      # replaced `pnpm sentry:digest:test`, which the gate's own suite caught.
+      # This routing must ADD to whatever else a Sentry suite already runs.
+      #
+      # agent-autoreview-core.test.mjs asserts the secret scanner refuses no
+      # Sentry suite, so a suite committing a new fake credential must re-run
+      # it; otherwise the assertion covers only the scanner, never the files it
+      # scans, and an unregistered fixture merges green (issues 1943, 1970).
+      case "$path" in
+        scripts/sentry/*/*.test.mjs)
+          add_command "node scripts/agent-autoreview-core.test.mjs" "Sentry suite changed; the autoreview scanner asserts these files stay reviewable"
+          ;;
+      esac
       case "$path" in
         scripts/check-agent-quality-gate-package-scripts.mjs)
           add_command "node scripts/check-agent-quality-gate-package-scripts.mjs" "agent quality gate package script validator changed"

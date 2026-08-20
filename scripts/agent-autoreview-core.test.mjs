@@ -495,21 +495,26 @@ for (const entry of readdirSync(sentrySuiteRoot, {
   if (!entry.isFile() || !entry.name.endsWith(".test.mjs")) continue;
   scannedSentrySuites += 1;
   const suitePath = path.join(entry.parentPath, entry.name);
-  const suiteLines = readFileSync(suitePath, "utf8").split("\n");
-  suiteLines.forEach((suiteLine, index) => {
-    const reason = secretLikeReason(suiteLine);
-    assert.equal(
-      reason,
-      null,
-      // Deliberately does NOT quote the line. If a suite ever holds a real
-      // credential rather than a fake fixture, echoing it here would copy that
-      // credential verbatim into retained CI logs — the exact disclosure this
-      // scanner exists to prevent. Path, line number and reason are enough to
-      // find it locally.
-      `${entry.name}:${index + 1} is unreviewable — the autoreview secret scanner refuses it (${reason}). ` +
-        `If the value is a fake fixture, register the LINE in KNOWN_FAKE_FIXTURE_LINES in agent-autoreview-core.mjs.`,
-    );
-  });
+  const suiteSource = readFileSync(suitePath, "utf8");
+  // Scanned as WHOLE TEXT, not line by line. `secretLikeReason` reconstructs
+  // static concatenations across lines, so `const T = "sntrys_" +` on one line
+  // and its continuation on the next are inert individually and a credential
+  // together. A per-line scan reported such a fixture clean while any review
+  // hunk containing both lines still failed — the multiline blind spot Codex
+  // named. Whole-text scanning is also what the review bundle actually does.
+  const reason = secretLikeReason(suiteSource);
+  assert.equal(
+    reason,
+    null,
+    // Deliberately does NOT quote the offending text. If a suite ever holds a
+    // real credential rather than a fake fixture, echoing it here would copy
+    // that credential verbatim into retained CI logs — the exact disclosure
+    // this scanner exists to prevent. The path and reason are enough to find
+    // it locally.
+    `${entry.name} is unreviewable — the autoreview secret scanner refuses it (${reason}). ` +
+      `If it is a fake fixture, register the LINE in KNOWN_FAKE_FIXTURE_LINES in agent-autoreview-core.mjs; ` +
+      `re-run this file locally to see which line.`,
+  );
 }
 // The registry must stay reachable from the suites it exists for: an entry
 // nothing commits any more is dead weight that should be removed rather than
