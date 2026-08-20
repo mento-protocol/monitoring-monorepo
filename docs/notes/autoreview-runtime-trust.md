@@ -87,7 +87,10 @@ since an interrupted capture is not bound by the deadline. The helper spawns
 detached and sweeps the group after every capture, and registers terminal-signal
 handlers before it detaches anything: a caught signal cannot kill it
 mid-capture, so the deadline still fires and still reaps the tree, where a fatal
-one would strand a group no longer reachable from the terminal. The one capture
+one would strand a group no longer reachable from the terminal. A process wedged
+in uninterruptible I/O is the exception no signal reaches, on either side: the
+refusal still fires on time and still publishes nothing, but that process ends
+when its I/O does. The one capture
 the budget does not wrap is the PR feedback state, which already carries its own
 wall-clock bound; that bound is clamped to what the shared budget has left and
 the time it spends is charged there, so it cannot carry a run past the ceiling
