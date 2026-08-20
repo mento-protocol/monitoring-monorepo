@@ -6120,6 +6120,12 @@ run_capture_with_deadline() {
   else
     kill -KILL "-$watchdog" 2>/dev/null || kill -KILL "$watchdog" 2>/dev/null || true
     wait "$watchdog" 2>/dev/null || true
+    # Sweep the capture's group on the way out too, not only when it timed out.
+    # `wait` has reaped the pipeline itself, so this group holds nothing but
+    # descendants the capture forked and left behind, and nothing else would
+    # ever reap them. Immediately after the wait, so the group id cannot have
+    # been recycled.
+    kill -KILL "-$child" 2>/dev/null || true
   fi
   trap - INT TERM
   eval "$saved_signal_traps"
