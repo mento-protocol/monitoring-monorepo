@@ -24,7 +24,7 @@ import {
   buildBoundedReviewPrompts,
   createReviewInputCollector,
   isWithin,
-  knownFakeFixtureValues,
+  knownFakeFixtureLines,
   MAX_REVIEW_PROMPT_BYTES,
   readBoundedRegularFile,
   readSafeEvidenceFile,
@@ -219,34 +219,44 @@ const diffPositions = [
   ["removed", "-"],
   ["context", " "],
 ];
-const registeredFixtureValues = knownFakeFixtureValues();
+const registeredFixtureLines = knownFakeFixtureLines();
 assert.ok(
-  registeredFixtureValues.length > 0,
+  registeredFixtureLines.length > 0,
   "the known-fake fixture registry must not be empty",
 );
-for (const registered of registeredFixtureValues) {
+// Every registered LINE clears in every diff position.
+for (const registered of registeredFixtureLines) {
   for (const [position, prefix] of diffPositions) {
     assert.equal(
-      secretLikeReason(`${prefix}const TOKEN = "${registered}";`),
+      secretLikeReason(prefix + registered),
       null,
-      `registered fixtures clear the scanner on ${position} diff lines`,
+      `registered fixture lines clear the scanner on ${position} diff lines`,
     );
   }
 }
-// The three suite lines named in issue 1943, as their own suites write them.
-for (const [binding, fixtureValue] of [
-  ["REAL_TOKEN", "sntrys_the_real_read_only_token_value"],
-  ["SENTRY_TOKEN", "sntrys_deadbeefdeadbeefdeadbeef"],
-  ["TOKEN", "sntrys_archive_token"],
+// …and the whole-line rule is what makes that safe. Membership is the line, so
+// anything appended, prepended or concatenated makes it a different line that
+// the shape rules judge unchanged. These are the four bypasses the earlier
+// value-level registry produced, one per review round.
+for (const [label, mutated] of [
+  [
+    "appended after a comment marker",
+    'const TOKEN = "sntrys_archive_token";#REAL',
+  ],
+  [
+    "quoted fixture then bare suffix",
+    'TOKEN="sntrys_archive_token"REAL_SUFFIX',
+  ],
+  [
+    "unquoted fixture then comment marker",
+    "TOKEN=sntrys_archive_token#REAL_SUFFIX",
+  ],
+  ["credential key with a suffix", "password=sntrys_archive_token#REAL_SUFFIX"],
 ]) {
-  const fixtureLine = `const ${binding} = "${fixtureValue}";`;
-  for (const [position, prefix] of diffPositions) {
-    assert.equal(
-      secretLikeReason(prefix + fixtureLine),
-      null,
-      `Sentry suite fixture lines clear the scanner on ${position} diff lines: ${binding}`,
-    );
-  }
+  assert.ok(
+    secretLikeReason(mutated),
+    `a mutated fixture is a different line and stays refused: ${label}`,
+  );
 }
 
 // Issue 1970's four lines are NOT asserted by line number here. An earlier
@@ -300,10 +310,14 @@ for (const bypass of [
     `a suffix with no comment boundary is part of the value: ${bypass}`,
   );
 }
-assert.equal(
+// A registered fixture wearing a trailing comment is a DIFFERENT line, so it
+// is refused. That is the fail-closed direction and it is deliberate: under the
+// earlier value-level registry this cleared, and the same leniency is what let
+// `<fixture>#<secret>` through. The comment-boundary fix below still matters
+// for non-fixture values, where it decides how much of the line is the value.
+assert.ok(
   secretLikeReason("TOKEN=sntrys_archive_token # a real comment"),
-  null,
-  "a comment with a real boundary still terminates the value",
+  "a fixture with anything appended is a different line and is refused",
 );
 // `;` is a statement terminator, not a comment, and legitimately follows with
 // no space — requiring a boundary there broke TS interface members.
@@ -391,10 +405,17 @@ const liveSlackShape = ["xo", "xb-", "1".repeat(12), "-", "abcdefghij"].join(
 const liveStripeShape = ["sk_", "live_", "D".repeat(24)].join("");
 const liveNpmShape = ["npm", "_", "E".repeat(36)].join("");
 const liveGoogleShape = ["AI", "za", "F".repeat(35)].join("");
+// A registered LINE, not a bare value. The bare token is refused on its own —
+// membership is the whole line, so a value lifted out of its fixture line has
+// no exemption and the provider-token patterns judge it normally.
 const registeredGithubFixture = [
-  "ghs",
-  "_AbCdEfGhIjKlMnOpQrStUvWxYz012345",
+  '"ghs',
+  '_AbCdEfGhIjKlMnOpQrStUvWxYz012345 leak attempt",',
 ].join("");
+assert.ok(
+  secretLikeReason(["ghs", "_AbCdEfGhIjKlMnOpQrStUvWxYz012345"].join("")),
+  "a fixture value lifted out of its registered line is still refused",
+);
 for (const [label, liveShape] of [
   ["GitHub personal access tokens", liveGithubShape],
   ["Anthropic OAuth tokens", liveAnthropicShape],
@@ -458,7 +479,7 @@ for (const [label, refusable, expected] of [
 // Fail closed on a new fake credential nobody registered: a Sentry suite that
 // adds one would otherwise become unreviewable exactly as issue 1943 describes.
 const sentrySuiteRoot = fileURLToPath(new URL("./sentry/", import.meta.url));
-const registeredFixtureSet = new Set(registeredFixtureValues);
+const registeredFixtureSet = new Set(registeredFixtureLines);
 // Asserted by running the real scanner over every line, not by matching a list
 // of prefixes. A prefix list only caught `sntrys_` literals, so a new fake
 // `ghs_`, `sk-ant-oat01-`, or bare-hex fixture — three shapes the registry
@@ -486,7 +507,7 @@ for (const entry of readdirSync(sentrySuiteRoot, {
       // scanner exists to prevent. Path, line number and reason are enough to
       // find it locally.
       `${entry.name}:${index + 1} is unreviewable — the autoreview secret scanner refuses it (${reason}). ` +
-        `If the value is a fake fixture, register it in KNOWN_FAKE_FIXTURE_VALUES in agent-autoreview-core.mjs.`,
+        `If the value is a fake fixture, register the LINE in KNOWN_FAKE_FIXTURE_LINES in agent-autoreview-core.mjs.`,
     );
   });
 }

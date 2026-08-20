@@ -301,23 +301,38 @@ they need no scanner change and cannot go stale.
 
 One exception exists, for fixtures that must look like a real provider
 credential because the code under test parses that shape.
-`KNOWN_FAKE_FIXTURE_VALUES` in `scripts/agent-autoreview-core.mjs` holds an
-enumerated list of such values, matched EXACTLY — no trimming, no case folding,
-no prefix matching — so it widens the accepted set by precisely those strings
-and by nothing else. Registering a value is a security change: it is the one
-place a literal that reads as a credential is allowed through, so add an entry
+`KNOWN_FAKE_FIXTURE_LINES` in `scripts/agent-autoreview-core.mjs` holds an
+enumerated list of fixture LINES. Registered lines are dropped from the input
+before any rule runs; every surviving line is judged exactly as it was before
+the registry existed. Registering a line is a security change — it is the one
+place content that reads as a credential is allowed through — so add an entry
 only when composing from parts or using a placeholder genuinely will not work,
 and say in the PR why.
 
-The registry also holds two shapes that are references rather than credentials
-but do not reach the reference grammar: a shell expansion escaped for a JS
-template literal (`\${VAR}`), and one carrying its own shell quoting
-(`'"${VAR}"'`). Both are registered as exact values rather than by teaching the
-grammar to strip escapes or peel quotes. Stripping the escape would clear a
-value the scanner previously refused, because in a real shell file that
-backslash PREVENTS expansion and the application receives the literal `${…}`;
-peeling quotes accepted a quote-wrapped real credential outright. The scanner
-has no file-type context to tell those cases apart, so it does not guess.
+**Membership is the whole line, trimmed, never a value inside it**, and that
+distinction is the entire security argument. An earlier form matched the
+extracted VALUE, and a value is whatever some parser hands over. Four separate
+bypasses followed, each a different parser surrendering a substring while
+adjacent material rode along unexamined: `TOKEN=<fixture>#SUFFIX` read the
+suffix as a comment, `TOKEN="<fixture>"SUFFIX` split on the quote, the
+provider-token loop matched a fixture inside a longer run, and one attempted
+repair left the scanner weaker than before the registry existed. A whole-line
+match has no such surface: appending, prepending, quoting or concatenating
+anything makes it a different line, so it stops matching.
+
+Two consequences follow, both deliberate:
+
+- A fixture value lifted out of its line — used elsewhere, or with a comment
+  appended — is refused. Only the registered line clears.
+- The registry holds two shapes that are references rather than credentials but
+  do not reach the reference grammar: a shell expansion escaped for a JS
+  template literal (`\${VAR}`), and one carrying its own shell quoting
+  (`'"${VAR}"'`). Both are registered as lines rather than by teaching the
+  grammar to strip escapes or peel quotes. Stripping the escape would clear a
+  value the scanner previously refused, because in a real shell file that
+  backslash PREVENTS expansion and the application receives the literal `${…}`;
+  peeling quotes accepted a quote-wrapped real credential outright. The scanner
+  has no file-type context to tell those cases apart, so it does not guess.
 
 A test in `scripts/agent-autoreview-core.test.mjs` runs the scanner over every
 line of every Sentry suite and fails if any line is refused, naming the file,
