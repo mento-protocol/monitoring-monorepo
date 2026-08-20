@@ -67,10 +67,21 @@ babysit_repo_gate() {
   # from corrupting the JSON too. `--repo` is required: a cloud checkout's
   # origin is the credential-proxy URL, which gh cannot map to a repository,
   # so an implicit-repo invocation fails even after the capability gate passes.
+  # Retry once before declaring FAIL. The probe intermittently hits transient
+  # gh auth/network errors that succeed on an immediate retry, and a
+  # single-attempt FAIL turns those into false REPO_GATE_FAIL alarms — six of
+  # them across three PRs on 2026-08-20, every one reproducing clean by hand
+  # seconds later. The sibling hook in the babysit-pr skill's `hooks/` dir
+  # gained this retry on 2026-06-10 for the same symptom, but THIS file is
+  # sourced last and overrides it, so the fix never took effect. Keep both in
+  # step: a change here belongs there too.
   local output
   output=$(cd "$repo_root" && pnpm --silent pr:ready-state --pr "$pr" --repo "${owner}/${repo}" --json 2>/dev/null) || {
-    printf 'FAIL pr:ready-state errored (repro: pnpm pr:ready-state --pr %s --repo %s/%s --json)' "$pr" "$owner" "$repo"
-    return 0
+    sleep 5
+    output=$(cd "$repo_root" && pnpm --silent pr:ready-state --pr "$pr" --repo "${owner}/${repo}" --json 2>/dev/null) || {
+      printf 'FAIL pr:ready-state errored twice (repro: pnpm pr:ready-state --pr %s --repo %s/%s --json)' "$pr" "$owner" "$repo"
+      return 0
+    }
   }
 
   # Explicit boolean test — do NOT use `.ready // …` fallbacks: jq's `//`
