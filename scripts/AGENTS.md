@@ -12,18 +12,18 @@ garden_lane: agent-entry-points
 
 # AGENTS.md — Scripts
 
-> **Architecture decisions** behind these scripts live in [`docs/adr/`](../docs/adr/README.md) — read the relevant ADR before changing how something here works.
+> Read the relevant [architecture decision](../docs/adr/README.md) before
+> changing script architecture.
 
 ## Scope
 
 `scripts/` holds deploy wrappers, agent quality gates, code-health checks, and
-repo maintenance utilities. 37 files sit flat at the top level today.
+repo maintenance utilities. Its top level has 37 files.
 
 ## Layout
 
-[ADR 0064](../docs/adr/0064-scripts-module-directories.md) governs
-subdirectories here and links the reorganization issue; phases P1–P15 have all
-landed.
+[ADR 0064](../docs/adr/0064-scripts-module-directories.md) governs these
+subdirectories; reorganization phases P1–P15 are complete.
 
 | Directory       | Holds                                  |
 | --------------- | -------------------------------------- |
@@ -59,21 +59,19 @@ stay with their domain.
 
 ## Why Files Stay Flat
 
-Eleven mechanisms pin `scripts/` paths. A file one of them names moves only when
-that mechanism moves with it, in the same PR.
+`scripts/` has eleven path-pin mechanisms. Move each pin with its file in the
+same PR.
 
-- **Autoreview runtime materialization.** `agent-autoreview.sh` names its
-  runtime files in Perl copy lists and `runtime_paths` arrays, then materializes
-  each from an `origin/main` blob. A path it omits is absent at runtime; moving
-  one is staged across PRs (ADR 0064).
-- **Gate source-directory guards.** `agent-quality-gate.sh` gates real-tree
-  routing on `$script_source_dir == $repo_root/scripts`, leaving its stub-repo
-  unit tests unaffected. It pairs
+- **Autoreview runtime materialization.** `agent-autoreview.sh` lists its
+  runtime files and materializes each from an `origin/main` blob. Omitted paths
+  are absent; moves are staged across PRs (ADR 0064).
+- **Gate routing pins.** `agent-quality-gate.sh` uses
+  `$script_source_dir == $repo_root/scripts` to exclude stub-repo tests. It pairs
   `bootstrap/codex-cloud-setup.{sh,test.sh}` for offline installer tests.
 - **Gate runtime module pins.** `agent-quality-gate.sh` resolves
   `docs/docs-navigation-eval-helpers.mjs` and `gate/lockfile-scope.mjs` from
-  `$script_source_dir` — never `$repo_root`, which is a stub repo under test —
-  and names each in three literals. Repoint every one; ADR 0064 lists them.
+  `$script_source_dir`, not the stub `$repo_root`, and pins each in three
+  literals. Repoint all three; ADR 0064 lists them.
 - **Evaluation fixture forbidden lists.** `forbidden_sources` in
   `docs/evals/documentation-navigation-fixtures.json` names the navigation
   eval's own implementation.
