@@ -6123,6 +6123,12 @@ run_capture_with_deadline() {
   "$@" &
   child=$!
   (
+    # This subshell inherits errexit, and everything it does is best-effort
+    # signalling. Left on, a failed step would abort the watchdog before the
+    # kill below -- a read-only or full $TMPDIR would make the marker write
+    # fail and silently disarm the deadline, which is the one mechanism here
+    # that must not fail open. Explicit `exit 0` still ends it deliberately.
+    set +e
     sleep "$deadline"
     # Say nothing about a capture that already finished: the parent has not
     # necessarily reaped this watchdog yet, and a marker written over a
@@ -6135,7 +6141,10 @@ run_capture_with_deadline() {
     if [[ -s "$status_file" ]]; then
       exit 0
     fi
-    printf 'timeout\n' >"$timeout_file"
+    # If this write cannot land the kill still must, so the caller sees a
+    # killed capture rather than a stalled one; it then refuses on the missing
+    # statuses instead of naming the deadline.
+    printf 'timeout\n' >"$timeout_file" || true
     # SIGKILL straight away, with no SIGTERM grace: a grace period would run
     # after the deadline, so a capture that ignored SIGTERM would outlast the
     # budget by exactly the grace. Nothing in a capture needs an orderly

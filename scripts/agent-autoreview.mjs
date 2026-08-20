@@ -688,6 +688,21 @@ function finishPendingProcessTermination() {
   process.kill(process.pid, signal);
 }
 
+// Refuse to publish evidence the operator has already interrupted. A signal
+// arriving during a capture cannot be seen until the event loop runs, and
+// everything from the capture to publication is synchronous: measured, the
+// publication runs with this flag still unset and the handler fires
+// immediately afterwards. Yielding once lets a queued handler land first, so
+// the check below sees the interrupt it would otherwise miss.
+async function assertNotInterruptedBeforePublication() {
+  await new Promise((resolve) => setImmediate(resolve));
+  if (pendingTerminationSignal) {
+    throw new Error(
+      `interrupted by ${pendingTerminationSignal} before publication; no review bundle was produced`,
+    );
+  }
+}
+
 function registerTrustedExecutableCleanup() {
   if (trustedExecutableCleanupRegistered) return;
   trustedExecutableCleanupRegistered = true;
@@ -4847,6 +4862,7 @@ async function main() {
         const displayedBundleOutput =
           args.bundleOutputDisplay || args.bundleOutput;
         if (args.bundleOutput) {
+          await assertNotInterruptedBeforePublication();
           writeReviewPromptOutputs(args.bundleOutput, prompts);
           bundleOutputs = reviewPromptOutputPaths(
             displayedBundleOutput,
@@ -4945,6 +4961,7 @@ async function main() {
 
   if (args.bundleOutput) {
     const displayedBundleOutput = args.bundleOutputDisplay || args.bundleOutput;
+    await assertNotInterruptedBeforePublication();
     writeReviewPromptOutputs(args.bundleOutput, prompts);
     console.log(`bundle_output: ${displayedBundleOutput}`);
   }
