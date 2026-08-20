@@ -1968,6 +1968,42 @@ test("refuses prose the prose classifier cannot positively recognize", () => {
         "**Numbered findings roll-up: the retry loop never terminates**",
       ),
     ],
+    // A review heading is recognized only because harvest already validated
+    // its PR number and title. The line scan must therefore recognize exactly
+    // the set harvest sees: matching a TRIMMED line, or matching the number
+    // heading case-insensitively, let an unharvested heading through with its
+    // title and PR-number checks skipped. Markdown still renders a heading
+    // indented up to three spaces, so these are real review bodies.
+    [
+      "indented review heading carrying a defect",
+      [
+        `   ### Review: ${DEFECT}`,
+        "",
+        "**Verdict:** LGTM",
+        "",
+        "No P1/P2 findings.",
+      ].join("\n"),
+    ],
+    [
+      "indented review heading naming another PR",
+      [
+        "   ### Code Review — PR #9999",
+        "",
+        "**Verdict:** LGTM",
+        "",
+        "No P1/P2 findings.",
+      ].join("\n"),
+    ],
+    [
+      "mis-cased review-number heading naming another PR",
+      [
+        "### code review — PR #9999",
+        "",
+        "**Verdict:** LGTM",
+        "",
+        "No P1/P2 findings.",
+      ].join("\n"),
+    ],
   ]) {
     expectReady(label, body, false);
   }

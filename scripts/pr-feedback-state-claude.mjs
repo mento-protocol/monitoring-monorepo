@@ -21,10 +21,21 @@ const REVIEW_NUMBER_HEADING_SHAPE = String.raw`^#{1,6}\s+Code Review\s+—\s+PR\
 const REVIEW_TITLE_HEADING_SHAPE = String.raw`^#{1,6}\s+Review:\s+(.{1,200})$`;
 const REVIEW_NUMBER_HEADING = new RegExp(REVIEW_NUMBER_HEADING_SHAPE, "gm");
 const REVIEW_TITLE_HEADING = new RegExp(REVIEW_TITLE_HEADING_SHAPE, "gim");
-const REVIEW_HEADING_LINE = new RegExp(
-  `(?:${REVIEW_NUMBER_HEADING_SHAPE})|(?:${REVIEW_TITLE_HEADING_SHAPE})`,
-  "i",
-);
+// Per-shape single-line forms, each carrying the SAME flags as its harvest
+// counterpart minus `g`/`m`: the number heading stays case-sensitive like its
+// `gm` harvest, the title heading keeps `i` like its `gim` harvest. They are
+// tested against the RAW line, never a trimmed one.
+//
+// Both properties are load-bearing. The line scan treats a review heading as
+// already-validated because harvest checked its PR number and title, so the
+// two must agree on exactly which lines are headings. A single combined
+// case-insensitive pattern applied to a trimmed line disagreed twice: a
+// `   ### Review: <defect>` indented 1-3 spaces is invisible to harvest (whose
+// shape anchors `^#`) yet matched here, and a mis-cased `### code review — PR
+// #9999` is likewise unharvested but matched. Either one skipped the title and
+// PR-number checks entirely and allowlisted a defect on a fail-closed gate.
+const REVIEW_NUMBER_HEADING_LINE = new RegExp(REVIEW_NUMBER_HEADING_SHAPE);
+const REVIEW_TITLE_HEADING_LINE = new RegExp(REVIEW_TITLE_HEADING_SHAPE, "i");
 // `### Review: <PR title>` is the usual heading, but a clean review may instead
 // put the verdict there (`### Review: LGTM ✅`). Only the bare verdict word and
 // an optional approval mark are allowed — never free text, which would let a
@@ -294,11 +305,18 @@ function hasExplicitAction(line) {
 // same reason — the caller proved there is exactly one and that it declares a
 // clean verdict with no tail.
 function isRecognizedCleanReviewLine(line) {
-  const raw = String(line ?? "").trim();
+  const source = String(line ?? "");
+  const raw = source.trim();
   if (!raw) return true;
   if (isClaudeTaskCompletionLine(raw)) return true;
   if (THEMATIC_BREAK.test(raw)) return true;
-  if (REVIEW_HEADING_LINE.test(raw)) return true;
+  // Headings are matched on the UNTRIMMED line so this scan recognizes exactly
+  // the set harvest validated — see the note on REVIEW_NUMBER_HEADING_LINE.
+  if (
+    REVIEW_NUMBER_HEADING_LINE.test(source) ||
+    REVIEW_TITLE_HEADING_LINE.test(source)
+  )
+    return true;
   if (verdictDeclaration(raw)) return true;
   if (CLEAN_SECTION_LABEL.test(reviewLineContent(raw))) return true;
   const priority = priorityAtLineStart(raw);
