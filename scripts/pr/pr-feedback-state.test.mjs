@@ -3339,14 +3339,14 @@ test("leaves Cursor, Codex, and Claude classification unchanged beside CodeRabbi
 // stale logic with both the CLI and the rest of this suite green. Delete this
 // test together with the flat copies in the move's last step.
 test("the scripts/pr/ feedback-state copies stay byte-identical to the flat originals", () => {
-  const scriptsDir = dirname(fileURLToPath(import.meta.url));
+  const prDir = dirname(fileURLToPath(import.meta.url));
   for (const name of [
     "pr-feedback-state.mjs",
     "pr-feedback-state-core.mjs",
     "pr-feedback-state-claude.mjs",
   ]) {
-    const flat = readFileSync(resolve(scriptsDir, name));
-    const moved = readFileSync(resolve(scriptsDir, "pr", name));
+    const moved = readFileSync(resolve(prDir, name));
+    const flat = readFileSync(resolve(prDir, "..", name));
     assert(
       flat.equals(moved),
       `scripts/${name} and scripts/pr/${name} have drifted; agent-autoreview runs the scripts/pr/ copy`,

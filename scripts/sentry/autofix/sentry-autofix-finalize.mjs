@@ -855,7 +855,7 @@ export function runCli(argv, { stdout = process.stdout } = {}) {
       //
       // The workflow feeds this from `gh api ... --paginate --slurp`
       // (mirroring the flatten `ghApiJsonPages`/`ghApiJsonPagesResult` in
-      // scripts/pr-ready-state.mjs already do for the same gh flag pair): each
+      // scripts/pr/pr-ready-state.mjs already do for the same gh flag pair): each
       // page is a separate JSON array or object, `--slurp` wraps them in one
       // outer array, and PLAIN `--paginate` alone concatenates pages as
       // adjacent JSON values with no wrapper — `JSON.parse` throws on more

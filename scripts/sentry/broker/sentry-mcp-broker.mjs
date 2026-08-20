@@ -244,6 +244,29 @@ export function rewriteRegionLinks(payload, brokerOrigin) {
   return payload;
 }
 
+/**
+ * The upstream back-pressure headers this broker relays to its client.
+ *
+ * Sentry answers a throttled read with `Retry-After` and a family of
+ * `X-Sentry-Rate-Limit-*` headers, and the MCP server obeys them. Dropping them
+ * turns a 429 into a bare status: the client cannot tell how long to wait, so it
+ * retries immediately against a Sentry already refusing it.
+ *
+ * A PREFIX allowlist, not a passthrough — but the prefix carries its trailing
+ * HYPHEN, so it admits the family and not merely anything starting with those
+ * letters. Without it `x-sentry-rate-limitation` would cross a boundary that
+ * exists to let through only what it chose. Sentry's plural
+ * `X-Sentry-Rate-Limits` is an ingest/envelope response header; every path in
+ * ALLOWED_PATHS is a `/api/0/organizations/` Web API read, so it cannot arrive
+ * here and the hyphen drops nothing.
+ */
+const RATE_LIMIT_HEADER_PREFIX = "x-sentry-rate-limit-";
+
+export function isBackPressureHeader(name) {
+  const lower = String(name ?? "").toLowerCase();
+  return lower === "retry-after" || lower.startsWith(RATE_LIMIT_HEADER_PREFIX);
+}
+
 function deny(res, status, reason) {
   res.writeHead(status, { "content-type": "application/json" });
   res.end(JSON.stringify({ detail: `sentry-mcp-broker: ${reason}` }));
@@ -376,6 +399,11 @@ export function createHandler(config) {
     // the MCP client reads only the `cursor="…"` value out of it.
     const link = upstreamRes.headers.get("link");
     if (link) headers.link = link;
+    // Back-pressure, relayed for the same reason (see isBackPressureHeader):
+    // without it a 429 arrives stripped of every hint of when to try again.
+    for (const [name, value] of upstreamRes.headers) {
+      if (isBackPressureHeader(name)) headers[name.toLowerCase()] = value;
+    }
     res.writeHead(upstreamRes.status, headers);
     res.end(body);
     log(
@@ -390,23 +418,103 @@ export function createHandler(config) {
 }
 
 /**
+ * Accept-level errors a LISTENER SURVIVES: the runner ran out of a resource for
+ * one connection, not the socket the broker is bound to. Tearing down on these
+ * would turn a momentary fd or memory squeeze into a dead broker, which is the
+ * outcome the handler below exists to avoid, reached faster.
+ */
+const TRANSIENT_ACCEPT_ERRORS = new Set([
+  "EMFILE",
+  "ENFILE",
+  "ENOBUFS",
+  "ENOMEM",
+  "ECONNABORTED",
+  "EAGAIN",
+  "EPROTO",
+]);
+
+/**
+ * What a post-startup `error` on the server does, and the workflow is why it
+ * cannot just be logged.
+ *
+ * Both broker streams redirect to a log file
+ * (.github/workflows/sentry-triage-agent.yml), and that file is printed only
+ * when the readiness wait fails. Past readiness a logged line goes somewhere
+ * nobody reads — so logging alone leaves the agent spending its whole turn
+ * budget against a broker that has stopped accepting, which is the silent
+ * needs-human verdict issue #1938 was filed for.
+ *
+ * So a broker that has lost its listener says what failed and STOPS. That shape
+ * this pipeline already handles loudly: the port is released, so the pre-flight
+ * probe cannot register the toolset and the job fails with `sentry:needs-triage`
+ * still on the stub. Alive and unable to accept is the state nothing sees.
+ *
+ * The DEFAULT is fatal, and the direction is the reason. Staying up when the
+ * listener is gone restores the silence; going down when it was not costs a run
+ * that fails visibly. Only codes known to be per-connection survive, and only
+ * while the listener is demonstrably still up — an unknown code is treated as
+ * the listener being gone, never the other way round.
+ *
+ * Per-connection parse failures never reach here at all; those are `clientError`.
+ * `exit` is injectable so tests observe the decision rather than take the runner
+ * down with them.
+ */
+export function handleServerError(error, { server, log, exit }) {
+  log(
+    `sentry-mcp-broker: SERVER-ERROR ${
+      error instanceof Error ? error.message : String(error)
+    }`,
+  );
+  const code = error && typeof error === "object" ? error.code : undefined;
+  if (TRANSIENT_ACCEPT_ERRORS.has(code) && server.listening) {
+    log(
+      `sentry-mcp-broker: SERVER-ERROR ${code} is accept-level and the listener is still up; staying up`,
+    );
+    return;
+  }
+  try {
+    server.close();
+  } catch {
+    // Already down, which is the outcome this wanted.
+  }
+  exit(1);
+}
+
+/**
  * Starts the broker on `port`. Binds loopback only.
  *
  * @returns {Promise<import("node:http").Server>}
  */
 export async function startBroker(config) {
   const handler = createHandler(config);
+  // One sink for both diagnostics below, with the same console fallback
+  // `createHandler` applies. An optional call would silently discard them
+  // whenever a caller supplies no `log`.
+  const log = config.log ?? ((line) => console.log(line));
   const server = createServer((req, res) => {
     handler(req, res).catch((error) => {
-      config.log?.(`sentry-mcp-broker: HANDLER-ERROR ${error}`);
+      log(`sentry-mcp-broker: HANDLER-ERROR ${error}`);
       if (!res.headersSent) deny(res, 500, "internal error");
       else res.end();
     });
   });
   await new Promise((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(config.port ?? 0, BIND_HOST, resolve);
+    const onStartupError = (error) => reject(error);
+    server.once("error", onStartupError);
+    server.listen(config.port ?? 0, BIND_HOST, () => {
+      server.removeListener("error", onStartupError);
+      resolve();
+    });
   });
+  // Past startup that `reject` is a no-op, and it was the server's ONLY `error`
+  // listener, so every later socket error was discarded in silence.
+  server.on("error", (error) =>
+    handleServerError(error, {
+      server,
+      log,
+      exit: config.exit ?? ((code) => process.exit(code)),
+    }),
+  );
   const { port } = server.address();
   // `validateRegionUrl` demands an https URL and accepts the base host; the MCP
   // client then keeps the host and re-applies its own (http) protocol, so this
