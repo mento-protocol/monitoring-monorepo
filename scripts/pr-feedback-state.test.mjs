@@ -2004,6 +2004,29 @@ test("refuses prose the prose classifier cannot positively recognize", () => {
         "No P1/P2 findings.",
       ].join("\n"),
     ],
+    // An unticked box means the assertion was never completed, whatever the
+    // assertion is. The verdict and conclusion paths already guarded this; the
+    // P3 evidence path peeled the box the same way and did not, so evidence
+    // its author never confirmed cleared the gate.
+    [
+      "unchecked P3 clean-evidence task",
+      `${clean}\n\n- [ ] [P3] Good hygiene: tests cover the changed paths.`,
+    ],
+    [
+      "negated P3 clean-evidence task",
+      `${clean}\n\n- [-] [P3] Good hygiene: tests cover the changed paths.`,
+    ],
+    [
+      "numbered unchecked P3 clean-evidence task",
+      `${clean}\n\n1. [ ] [P3] Good hygiene: tests cover the changed paths.`,
+    ],
+    // `No action required` is not an accepted marker: the body-level fallback
+    // scan matches `Action required` and blocks the comment regardless, so the
+    // grammar must not advertise it as clean. Pins the two layers in agreement.
+    [
+      "P3 'No action required' is not advertised clean",
+      `${clean}\n\n1. [P3] No action required: tests cover the changed paths.`,
+    ],
   ]) {
     expectReady(label, body, false);
   }
@@ -2017,6 +2040,12 @@ test("refuses prose the prose classifier cannot positively recognize", () => {
     [
       "P3 observation with curated positive evidence",
       `${clean}\n\n1. [P3] None blocking: tests cover the changed paths.`,
+    ],
+    // The counterpart to the unchecked-box cases above: a ticked box is a
+    // completed check, so the evidence behind it still clears.
+    [
+      "checked P3 clean-evidence task",
+      `${clean}\n\n- [x] [P3] Good hygiene: tests cover the changed paths.`,
     ],
     ["bare Findings section label", `${clean}\n\n### Findings`],
   ]) {

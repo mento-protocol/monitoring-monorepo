@@ -98,8 +98,17 @@ const PRIORITY_MARKER_PREFIX =
 // is an exact-match allowlist: each entry is one reviewed phrase, never an
 // open-ended shape, because anything looser lets a defect ride along behind a
 // no-action marker.
+// `No action required` is deliberately NOT here, though it reads like a
+// sibling of `No action`. The body-level fallback scan in
+// `isActionableReviewBotComment` matches `\bAction\s+required\b` through
+// REVIEW_CONTRADICTION, so a line carrying it blocks anyway. Advertising it as
+// accepted here made the two layers disagree: the grammar called the line
+// clean and the gate still blocked it. Narrowing the marker keeps the
+// advertised set honest. The alternative — exempting recognized P3 lines from
+// the fallback scan — would weaken a fail-closed check to fix a false positive,
+// which is the wrong direction on this gate.
 const CLEAN_FINDING_MARKER =
-  /^(?:None\s+blocking|No[- ]action(?:\s+required)?|Good\s+hygiene|Lockfile\s+diff\s+is\s+fully\s+mechanical)\b[\s:—.,]*(.*)$/i;
+  /^(?:None\s+blocking|No[- ]action|Good\s+hygiene|Lockfile\s+diff\s+is\s+fully\s+mechanical)\b[\s:—.,]*(.*)$/i;
 const UNSAFE_EVIDENCE_QUALIFIER =
   /\b(?:not|never|cannot|can't|doesn't|does\s+not|fails?\s+to|may|might|could|appears?|seems?|probably|likely|possibly|perhaps|unclear|unknown)\b/i;
 const POSITIVE_EVIDENCE =
@@ -308,6 +317,13 @@ function isRecognizedCleanReviewLine(line) {
   const source = String(line ?? "");
   const raw = source.trim();
   if (!raw) return true;
+  // An unticked box means the reviewer never completed the assertion, whatever
+  // the assertion is. This guards EVERY recognized shape rather than repeating
+  // the check per shape: `priorityAtLineStart` and `priorityLineContent` peel
+  // the box exactly as the verdict and conclusion paths do, so without this a
+  // `- [ ] [P3] Good hygiene: tests cover the changed paths.` cleared on
+  // evidence its author had not confirmed.
+  if (hasUncheckedTaskBox(source)) return false;
   if (isClaudeTaskCompletionLine(raw)) return true;
   if (THEMATIC_BREAK.test(raw)) return true;
   // Headings are matched on the UNTRIMMED line so this scan recognizes exactly
