@@ -154,9 +154,10 @@ blocking`, and similar leads must be followed by curated positive evidence.
   The older behaviour, where such a marker cleared a line on its own, let a
   defect ride along behind it.
 
-A clean verdict or conclusion may end only in a bare sentence terminator. Any
-trailing sentence blocks, because a tail is unconstrained English and no term
-list separates praise from a defect stated plainly.
+A clean verdict or conclusion may end only in a bare sentence terminator, or an
+approval mark as described below. Any trailing sentence blocks, because a tail
+is unconstrained English and no term list separates praise from a defect stated
+plainly.
 
 A `What I checked` checklist is recognized whether or not the body also carries
 paired `Findings`/`Roll-up` headings — the standalone form and the preamble form
@@ -165,8 +166,11 @@ the body still needs an explicit no-findings line. An unticked or negated box
 blocks, and so does any subject outside the curated topic set, since a free
 subject is unconstrained English.
 
-A trailing approval mark (`✅`, `✔️`, `👍`) is allowed after the verdict word,
-because it asserts nothing a reader could act on. Any word after the verdict is
+A trailing approval mark (`✅`, `✔️`, `👍`) is allowed after the verdict word
+**or a no-findings conclusion** — `No P1/P2 findings ✅` clears exactly as
+`**Verdict:** LGTM ✅` does. A mark asserts nothing a reader could act on, and
+one rule governs both tails deliberately: the two are the same question, and a
+second rule would be a second thing to keep in step. Any word after either is
 prose and still blocks.
 
 The canonical registry and named phrase groups live in

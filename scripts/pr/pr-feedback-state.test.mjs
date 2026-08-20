@@ -1882,6 +1882,26 @@ test("accepts the PR #1954 label-bold verdict and bracketed no-findings roll-up"
     ),
     false,
   );
+  // One tail rule governs verdicts AND conclusions, so a mark clears on both.
+  // That is deliberate rather than incidental — the two ask the same question,
+  // and a second rule would be a second thing to keep in step — and the runbook
+  // states it. A word after either is still prose and still blocks.
+  expectReady(
+    "conclusion with an approval mark",
+    PR_1954_CLEAN_CLAUDE_BODY.replace(
+      "1. None — no [P1]/[P2]/[P3] findings.",
+      "1. None — no [P1]/[P2]/[P3] findings ✅",
+    ),
+    true,
+  );
+  expectReady(
+    "conclusion with a mark then prose",
+    PR_1954_CLEAN_CLAUDE_BODY.replace(
+      "1. None — no [P1]/[P2]/[P3] findings.",
+      "1. None — no [P1]/[P2]/[P3] findings ✅ but the retry loop never ends",
+    ),
+    false,
+  );
 
   // The widened grammar must not turn a qualified verdict, a smuggled finding,
   // or a self-contradicting roll-up into an all-clear. The declarative-defect
