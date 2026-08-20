@@ -1143,10 +1143,17 @@ await test("runArchive refuses and re-queues a live regression instead of archiv
   // not degrade — it strands EVERY re-queue on this path while nothing is wrong.
   // The workflow re-queue's readers carry the same assertion; this is the other
   // consumer of the predicate.
-  const reads = ghCalls.filter((args) => args[1] === "view");
+  const reads = ghCalls.filter(
+    (args) => args[0] === "issue" && args[1] === "view",
+  );
   assert(reads.length > 0, "the re-queue must read the stub at all");
   for (const args of reads) {
-    const fields = args[args.indexOf("--json") + 1] ?? "";
+    const jsonAt = args.indexOf("--json");
+    assert(
+      jsonAt !== -1,
+      `a stub read passed no --json at all: ${args.join(" ")}`,
+    );
+    const fields = args[jsonAt + 1] ?? "";
     assert(
       fields.split(",").includes("state"),
       `a stub read asked for "${fields}", which never yields a state the selector can accept`,
