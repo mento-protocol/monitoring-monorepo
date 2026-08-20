@@ -1747,9 +1747,32 @@ test("accepts the PR #1954 label-bold verdict and bracketed no-findings roll-up"
       "verdict heading naming another PR",
       clean.replace("### Review: LGTM ✅", "### Review: some other change"),
     ],
+    // Stripping the `1. ` roll-up prefix must not also strip an unchecked
+    // task box: `- [ ] No P1/P2 findings.` is an intention, not a result, and
+    // treating it as a clean conclusion would additionally hide the line from
+    // the actionable scan via withoutCleanReviewConclusionLines.
+    [
+      "unchecked task conclusion",
+      clean.replace(ROLLUP, "- [ ] No P1/P2 findings."),
+    ],
+    [
+      "unchecked bracketed roll-up",
+      clean.replace(ROLLUP, "- [ ] None — no [P1]/[P2]/[P3] findings."),
+    ],
+    [
+      "negated task conclusion",
+      clean.replace(ROLLUP, "- [-] No P1/P2 findings."),
+    ],
   ]) {
     expectReady(label, body, false);
   }
+
+  // The counterpart: a ticked box is a completed check and stays eligible.
+  expectReady(
+    "checked task conclusion",
+    clean.replace(ROLLUP, "- [x] No P1/P2 findings."),
+    true,
+  );
 });
 
 // The body actually posted on PR #1954. Its verdict and roll-up each end in a

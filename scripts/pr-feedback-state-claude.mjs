@@ -46,6 +46,9 @@ const CLEAN_CONCLUSION_WITH_TAIL =
 // findings before merge, so the only safe rule is that a clean verdict asserts
 // cleanliness and says nothing further.
 const CLEAN_TAIL_SHAPE = /^[.!]?$/;
+// A task item whose box is empty (`- [ ]`) or explicitly negated (`- [-]`).
+// `[x]`/`[X]` is a completed check and stays eligible.
+const UNCHECKED_TASK_MARKER = /^\s*(?:[-*+]\s+)?\[[ -]\]\s/;
 const CLEAN_P3_DISPOSITION_PATTERNS = [
   /\bno[- ]action(?:\s+requested)?\b/i,
   /\bnone\s+blocking\b/i,
@@ -135,8 +138,14 @@ function matchesCleanVerdict(line) {
 }
 
 function isCleanConclusion(line) {
-  // Strip list/heading markers first so a numbered roll-up entry is judged on
-  // its text, not its `1. ` prefix.
+  // An UNCHECKED task marker states an intention, not a result: `- [ ] No
+  // P1/P2 findings.` is a box the reviewer never ticked. `reviewLineContent`
+  // strips `[ ]` along with the list bullet, so reject it before stripping —
+  // otherwise the line reads as a completed clean assertion and, worse,
+  // `withoutCleanReviewConclusionLines` deletes it from the actionable scan.
+  if (UNCHECKED_TASK_MARKER.test(String(line ?? ""))) return false;
+  // Strip list/heading markers so a numbered roll-up entry is judged on its
+  // text, not its `1. ` prefix.
   const value = reviewLineContent(line);
   if (CLEAN_CONCLUSION_PATTERNS.some((pattern) => pattern.test(value)))
     return true;
