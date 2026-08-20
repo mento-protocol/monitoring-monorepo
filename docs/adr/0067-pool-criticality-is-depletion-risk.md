@@ -181,7 +181,7 @@ inaction**, not when a ratio is large.
   and has never landed a median. At a rate of exactly 1 the oracle reference is
   1 and the value share reduces to the token-count share, so the bridge
   publishes the count numbers into the value-share gauges for this pool
-  (`countSharesStandInForValue` in `metrics-bridge/src/metrics.ts`) and both
+  (`countSharesStandInForValue` in `metrics-bridge/src/reserveShares.ts`) and both
   tiers cover it normally. A real value share always wins when one is available.
   Membership requires a rate pinned to 1 by construction; a pair that merely
   trades near parity does not qualify, because its rate can move and the count
@@ -199,6 +199,15 @@ inaction**, not when a ratio is large.
   the fallback on, because the 1:1 rate is a property of the pair rather than of
   any one report's freshness. The stale report itself is the oracle-liveness
   plane's job, and these two ladders stay independent.
+- Value shares also require `tokenDecimalsKnown`, for every pool and not just
+  the fallback one. Unread decimals fall back to the schema default 18/18, and
+  normalizing an off-18 leg with the wrong exponent moves the share by orders of
+  magnitude — Polygon EUROP has 6 decimals, so a balanced pool would read
+  ~100%/0% and page. That is a far larger error than the rate correction the
+  value share exists to make, so it fails closed on the same principle as the
+  orientation and median gates, matching `trustedVpOracleMedianInputs` and
+  `vpOracleFreshness`. Count shares are deliberately left ungated so the pool
+  stays visible to `Pool Value Share Missing` while decimals heal.
 - The fallback and `Pool Value Share Missing` compose without a special case.
   The alert asks whether a funded pool publishes any value share; once the
   bridge publishes one for `EURm/EUROP`, that pool stops matching, so the alert
@@ -270,8 +279,9 @@ inaction**, not when a ratio is large.
 - Enforcing files: `alerts/rules/rules-fpmms.tf` (the two depletion rules and
   the threshold-mirror banner), `alerts/rules/main.tf` (the min-value-share
   locals, the V0/V1 annotation queries, and the un-suppressed warning
-  expressions), `metrics-bridge/src/metrics.ts` (`reserveValueShares`, the two
-  gauges it publishes, and `countSharesStandInForValue`),
+  expressions), `metrics-bridge/src/reserveShares.ts` (`reserveValueShares` and
+  `countSharesStandInForValue`), `metrics-bridge/src/metrics.ts` (the two gauges
+  they feed),
   `alerts/rules/contact-points.tf` (`grafana_contact_point.pool_page`,
   `notify_page_pool`), `shared-config/src/thresholds.ts` (the constants and
   which of them Terraform mirrors),

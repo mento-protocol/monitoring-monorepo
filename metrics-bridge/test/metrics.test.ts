@@ -1763,8 +1763,10 @@ describe("updateMetrics", () => {
         chainId: 137,
         token0: "0x4d502d735b4c574b487ed641ae87ceae884731c7",
         token1: "0x888883b5f5d21fb10dfeb70e8f9722b9fb0e5e51",
+        // EUROP is a 6-decimal token on Polygon; EURm is 18. 4 EURm / 6 EUROP.
         reserves0: "4000000000000000000",
-        reserves1: "6000000000000000000",
+        reserves1: "6000000",
+        token1Decimals: 6,
         lastMedianPrice: "0",
       }),
     ]);
@@ -1806,6 +1808,57 @@ describe("updateMetrics", () => {
     );
   });
 
+  it("does not fall back to count shares while an allowlisted pool's token decimals are unread", async () => {
+    // The 1:1 argument is about the RATE, not the scale. Before decimal
+    // self-healing succeeds the pool carries the schema defaults (18/18), which
+    // normalizes the 6-decimal EUROP leg 10^12 times too small — a balanced
+    // pool would read ~100%/0% and page. Count shares still publish, so the
+    // pool stays visible to `Pool Value Share Missing` rather than going dark.
+    updateMetrics([
+      makePool({
+        id: "137-0xcd8c6811d975981f57e7fb32e59f0bee66af3201",
+        chainId: 137,
+        token0: "0x4d502d735b4c574b487ed641ae87ceae884731c7",
+        token1: "0x888883b5f5d21fb10dfeb70e8f9722b9fb0e5e51",
+        reserves0: "4000000000000000000",
+        reserves1: "6000000",
+        tokenDecimalsKnown: false,
+        lastMedianPrice: "0",
+      }),
+    ]);
+    expect(
+      await getGaugeValue(register, "mento_pool_reserve_share_token0", {
+        token_symbol: "EURm",
+      }),
+    ).toBeDefined();
+    expect(
+      await getGaugeValue(register, "mento_pool_reserve_value_share_token0", {
+        token_symbol: "EURm",
+      }),
+    ).toBeUndefined();
+    expect(
+      await getGaugeValue(register, "mento_pool_reserve_value_share_token1", {
+        token_symbol: "EUROP",
+      }),
+    ).toBeUndefined();
+  });
+
+  it("publishes no value share for any pool whose token decimals are unread", async () => {
+    // Not allowlist-specific: unread decimals default to 18/18, and an off-18
+    // leg then moves the value share by orders of magnitude.
+    updateMetrics([makePool({ tokenDecimalsKnown: false })]);
+    expect(
+      await getGaugeValue(register, "mento_pool_reserve_share_token0", {
+        token_symbol: "USDm",
+      }),
+    ).toBeCloseTo(0.5);
+    expect(
+      await getGaugeValue(register, "mento_pool_reserve_value_share_token0", {
+        token_symbol: "USDm",
+      }),
+    ).toBeUndefined();
+  });
+
   it("does not fall back to count shares when an allowlisted pool's median goes dark", async () => {
     // The fallback must not survive this pair acquiring a real feed. A dark
     // median RETAINS its last non-zero price, so a retained price means a real
@@ -1818,8 +1871,10 @@ describe("updateMetrics", () => {
         chainId: 137,
         token0: "0x4d502d735b4c574b487ed641ae87ceae884731c7",
         token1: "0x888883b5f5d21fb10dfeb70e8f9722b9fb0e5e51",
+        // EUROP is a 6-decimal token on Polygon; EURm is 18. 4 EURm / 6 EUROP.
         reserves0: "4000000000000000000",
-        reserves1: "6000000000000000000",
+        reserves1: "6000000",
+        token1Decimals: 6,
         medianLive: false,
         lastMedianPrice: "500000000000000000000000",
       }),
@@ -1852,8 +1907,10 @@ describe("updateMetrics", () => {
         chainId: 137,
         token0: "0x4d502d735b4c574b487ed641ae87ceae884731c7",
         token1: "0x888883b5f5d21fb10dfeb70e8f9722b9fb0e5e51",
+        // EUROP is a 6-decimal token on Polygon; EURm is 18. 4 EURm / 6 EUROP.
         reserves0: "4000000000000000000",
-        reserves1: "6000000000000000000",
+        reserves1: "6000000",
+        token1Decimals: 6,
         lastMedianPrice: "500000000000000000000000",
         medianLive: true,
         invertRateFeed: false,
