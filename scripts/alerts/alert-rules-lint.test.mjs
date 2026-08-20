@@ -1932,6 +1932,96 @@ test("pool depletion tiers measure value share, not token-count share", () => {
   }
 });
 
+// The depletion bands read gauges the bridge withholds whenever a pool has no
+// live median or an unread `invertRateFeed`, and `no_data_state = "OK"` turns
+// that withholding into no notification at all. A funded pool can therefore
+// lose depletion coverage entirely without anything saying so. These
+// assertions pin the visibility rule that reports the gap.
+test("a funded pool that publishes no value share surfaces as a warning", () => {
+  const stripped = stripComments(
+    readFileSync(path.resolve(repoRoot, "alerts/rules/main.tf"), "utf8"),
+  );
+  const [, expression] = stripped.match(
+    /\bpool_value_share_missing_active_promql\s*=\s*"([^"]+)"/,
+  ) ?? [null, null];
+  assert(
+    expression !== null,
+    "a local should express 'pool has reserves but no value share'",
+  );
+
+  // The gap is the difference between the two gauge families, so the
+  // expression is only meaningful while it reads both.
+  for (const gauge of [
+    "mento_pool_reserve_share_token0",
+    "mento_pool_reserve_share_token1",
+    "mento_pool_reserve_value_share_token0",
+    "mento_pool_reserve_value_share_token1",
+  ]) {
+    assert(
+      expression.includes(gauge),
+      `the coverage-gap expression must read ${gauge}`,
+    );
+  }
+
+  // Both families carry `token_symbol` and their own `__name__`, so a bare
+  // `unless` compares full label sets, never matches, and fires on every
+  // funded pool. The join has to be restricted to the pool fingerprint.
+  assert(
+    expression.includes("unless on(chain_id, pool_id, pair)"),
+    "the coverage-gap join must match on the pool fingerprint only, or it fires on every funded pool",
+  );
+
+  // `max`, not `min`: a fully one-sided pool reads 0.0 on its thin side, and
+  // the rule's `> 0` threshold would then skip exactly the pool with the worst
+  // depletion exposure. The fat side is >= 0.5 for any funded pool.
+  assert(
+    /^max without\(token_symbol\)/.test(expression),
+    "the coverage-gap expression must aggregate the fat side — a min would read 0 on a one-sided pool and never cross the > 0 threshold",
+  );
+
+  const fpmmRules = readFileSync(
+    path.resolve(repoRoot, "alerts/rules/rules-fpmms.tf"),
+    "utf8",
+  );
+  const rule = ruleBlockNamed(
+    fpmmRules,
+    /\bname\s*=\s*"Pool Value Share Missing"/,
+  );
+  assert(rule, "rules-fpmms.tf should carry the coverage-gap rule");
+  assert(
+    rule.includes("local.pool_value_share_missing_active_promql"),
+    "the coverage-gap rule must evaluate the coverage-gap local",
+  );
+  assert(
+    /\bseverity\s*=\s*"warning"/.test(rule),
+    "a missing-coverage report is a warning, not a page — nothing is on fire yet",
+  );
+  assert(
+    /\blocal\.notify_warning_pools_pool\b/.test(rule),
+    "the coverage-gap rule should route to the pools warning channel like every other pool-mechanics warning",
+  );
+  assert(
+    /\bfor\s*=\s*"30m"/.test(rule),
+    "the coverage gap is structural, so the dwell must be long enough to absorb a bridge restart or a run of missed scrapes",
+  );
+  assert(
+    /\bno_data_state\s*=\s*"OK"/.test(rule),
+    "no series at all means no funded pools reported, which is the fpmms convention for OK",
+  );
+  assert(
+    !/\bkeep_firing_for\s*=/.test(rule),
+    "no warning rule in rules-fpmms.tf holds its incident open",
+  );
+
+  // The V0/V1 queries select exactly the series this rule fires on the ABSENCE
+  // of. Attaching them hands Grafana a guaranteed-empty annotation query, which
+  // can NoData the whole rule (see alerts/AGENTS.md).
+  assert(
+    !rule.includes("local.pool_depletion_value_share_annotation_queries"),
+    "the coverage-gap rule must not attach annotation queries that are empty by construction whenever it fires",
+  );
+});
+
 test("long-lived pool criticals repeat twice daily, short-lived ones hourly", () => {
   const contactPoints = readFileSync(
     path.resolve(repoRoot, "alerts/rules/contact-points.tf"),
