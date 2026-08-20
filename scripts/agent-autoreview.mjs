@@ -4959,9 +4959,16 @@ async function main() {
     recordStageDuration("engine-invocation", engineStartedAt);
   }
 
+  // One guard for every surface below, not one per surface: the bundle, the
+  // JSON report, stdout and the output file all publish from the same
+  // synchronous run, and the last thing before them is a Git capture. A signal
+  // queued during that capture is invisible until the event loop turns, so a
+  // guard on only one of these surfaces leaves the rest writing an interrupted
+  // run's results. Yield once here and every publication below is covered.
+  await assertNotInterruptedBeforePublication();
+
   if (args.bundleOutput) {
     const displayedBundleOutput = args.bundleOutputDisplay || args.bundleOutput;
-    await assertNotInterruptedBeforePublication();
     writeReviewPromptOutputs(args.bundleOutput, prompts);
     console.log(`bundle_output: ${displayedBundleOutput}`);
   }

@@ -6607,6 +6607,12 @@ seed_capture_deadline_fixture() {
   if [[ "${5:-patch}" == "patch-and-stat" ]]; then
     # shellcheck disable=SC2016
     match_condition='( "$args" == *--patch* || "$args" == *--stat* )'
+  elif [[ "${5:-patch}" == "any-rename-capture" ]]; then
+    # Every rename-aware capture, the scope baseline's `--numstat` included.
+    # That baseline is the only one a direct `--engine local` run makes, because
+    # such a run builds no bundle.
+    # shellcheck disable=SC2016
+    match_condition='-n "$args"'
   fi
 
   init_review_repo "$review_repo"
@@ -6626,6 +6632,9 @@ while [[ "\$inspect_pid" =~ ^[1-9][0-9]*\$ && "\$level" -lt 4 ]]; do
   args="\$(ps -o args= -p "\$inspect_pid" 2>/dev/null || true)"
   if [[ $match_condition && "\$args" == *--find-renames* && "\$args" == *-l5000* ]]; then
     if [[ "$stall_seconds" -gt 0 ]]; then
+      # Record the start so an arm can wait for the capture to be in progress
+      # rather than guessing at a sleep.
+      printf '%s\n' "\$\$" >"\$state_dir/leader.pid"
       sleep $stall_seconds
       exec cat
     fi
@@ -6716,6 +6725,94 @@ run_capture_deadline_regressions() {
 run_capture_deadline_interrupt_arm() {
   run_capture_deadline_interrupt_case helper
   run_capture_deadline_interrupt_case wrapper
+  run_capture_deadline_publication_interrupt_case
+}
+
+# The cases above stall until the deadline, so the refusal comes from the
+# deadline and the publication guard never decides anything. This one gives the
+# capture a finite stall and a budget it comfortably fits, so the run reaches
+# publication normally -- and must still refuse, because the operator
+# interrupted while that capture was running. It covers the surfaces a bundle
+# target never reaches: the JSON report and the human output file.
+run_capture_deadline_publication_interrupt_case() {
+  local review_repo="$tmp_dir/capture-deadline-publication"
+  local filter_script="$tmp_dir/capture-deadline-publication-filter.sh"
+  local state_pointer="$tmp_dir/capture-deadline-publication-state-dir"
+  local state_dir="$tmp_dir/capture-deadline-publication-state"
+  local json_output="$state_dir/report.json"
+  local human_output="$state_dir/report.txt"
+  local wrapper_pid
+  local launched=0
+  local had_monitor=0
+
+  mkdir -p "$state_dir"
+  printf '%s\n' "$state_dir" >"$state_pointer"
+  : >"$state_dir/leader.pid"
+  seed_capture_deadline_fixture \
+    "$review_repo" "$filter_script" "$state_pointer" 4 any-rename-capture
+
+  begin_deadline_fixture_registration
+  case "$-" in
+    *m*) had_monitor=1 ;;
+  esac
+  set -m
+  (
+    cd "$review_repo"
+    exec /usr/bin/perl -e \
+      '$SIG{INT} = "DEFAULT"; $SIG{TERM} = "DEFAULT"; exec @ARGV; die "exec failed: $!\n";' \
+      /usr/bin/env -i \
+      "PATH=$PATH" \
+      "HOME=$HOME" \
+      "TMPDIR=${TMPDIR:-/tmp}" \
+      "AGENT_AUTOREVIEW_CAPTURE_DEADLINE_SECONDS=120" \
+      "$adapter_wrapper" \
+      --mode local \
+      --engine local \
+      --json-output "$json_output" \
+      --output "$human_output" >"$stdout" 2>"$stderr"
+  ) &
+  wrapper_pid=$!
+  arm_deadline_fixture_cleanup "$wrapper_pid" "$state_dir"
+  if [[ "$had_monitor" -eq 0 ]]; then
+    set +m
+  fi
+  for _ in {1..400}; do
+    if [[ -s "$state_dir/leader.pid" ]]; then
+      launched=1
+      break
+    fi
+    if ! process_is_runnable "$wrapper_pid"; then
+      break
+    fi
+    sleep 0.05
+  done
+  if [[ "$launched" -ne 1 ]]; then
+    cleanup_deadline_fixture_processes "$wrapper_pid" "$state_dir"
+    printf 'capture-deadline publication fixture never reached its capture\n' >&2
+    cat "$stderr" >&2
+    exit 1
+  fi
+
+  # Interrupt while the capture is running, so the signal is queued behind it.
+  kill -INT -- "-$wrapper_pid" 2>/dev/null || kill -INT "$wrapper_pid" 2>/dev/null || true
+  set +e
+  wait "$wrapper_pid" 2>/dev/null
+  set -e
+  if [[ -e "$json_output" ]]; then
+    cleanup_deadline_fixture_processes "$wrapper_pid" "$state_dir"
+    printf 'an interrupted run still wrote its JSON report: %s\n' "$json_output" >&2
+    exit 1
+  fi
+  if [[ -e "$human_output" ]]; then
+    cleanup_deadline_fixture_processes "$wrapper_pid" "$state_dir"
+    printf 'an interrupted run still wrote its output file: %s\n' "$human_output" >&2
+    exit 1
+  fi
+  cleanup_retained_test_command_runtimes
+  if ! disarm_deadline_fixture_cleanup "$wrapper_pid" "$state_dir"; then
+    printf 'capture deadline publication fixture cleanup registry drifted\n' >&2
+    exit 1
+  fi
 }
 
 run_capture_deadline_interrupt_case() {
