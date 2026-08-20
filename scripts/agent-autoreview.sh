@@ -6021,10 +6021,14 @@ run_capture_pipeline() {
   local partial_file="$4"
   shift 4
   local -a statuses
+  # Errexit stays off until the bookkeeping below is written, not just for the
+  # pipeline. On the prebounded path this function runs in the wrapper's own
+  # shell, where a full or failing $TMPDIR would otherwise abort the whole run
+  # under errexit with no diagnostic -- the failure the caller's `set +e` exists
+  # to convert into an ordinary capture failure.
   set +e
   "$@" | head -c "$limit" >"$output"
   statuses=("${PIPESTATUS[@]}")
-  set -e
   # Publish by rename. The watchdog reads the status file to tell a finished
   # capture from a running one, and a plain redirection truncates before it
   # writes, so a deadline landing inside that window would see an empty file and
@@ -6034,6 +6038,7 @@ run_capture_pipeline() {
   # symlink another user can plant before this write.
   printf '%s %s\n' "${statuses[0]:-1}" "${statuses[1]:-1}" >"$partial_file"
   mv -f "$partial_file" "$status_file"
+  set -e
 }
 
 # Bound one capture with the wall clock the capture budget has left. The pipeline

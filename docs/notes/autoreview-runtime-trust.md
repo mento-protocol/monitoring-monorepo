@@ -78,25 +78,23 @@ measures on a monotonic clock, so no clock adjustment reaches its accounting; no
 monotonic clock is available to the wrapper's shell, so a clock it cannot read,
 or one that moves backwards inside a stage, refuses the capture rather than
 restarting the stage on a fresh full budget. A capture that reaches the bound
-refuses
-by stage name and elapsed time and produces no bundle; it is never published
-partially and never skipped silently. Nothing the capture started outlives that
-refusal: the wrapper runs each capture as its own process group and SIGKILLs
-that group at the deadline, with no SIGTERM grace, because a grace period would
-run past the bound. Its interrupt path is the one that escalates, since an
-interrupted capture is not bound by the deadline. The helper spawns detached and
-sweeps the group after every capture, and registers terminal-signal handlers
-before it detaches anything: a caught signal cannot kill it mid-capture, so the
-deadline still fires and still reaps the tree, where a fatal one would strand a
-group no longer reachable from the terminal. The wrapper's budget covers its
-capture stage; in
-the helper it covers every Git spawn. The one capture it does not wrap is the PR
-feedback state, which already carries its own wall-clock bound; that bound is
-clamped to what the shared budget has left and the time it spends is charged
-there, so it cannot carry a run past the ceiling either. The number is a ceiling, not a statement
-about how long a capture takes: a 1,000-commit, 23.8 MB branch diff of this
-repository captures in about a second, and the deadline promises nothing about
-elapsed time beyond the bound it enforces. Its default is the one value in this
+refuses by stage name and elapsed time and produces no bundle; it is never
+published partially and never skipped silently. Nothing the capture started
+outlives that refusal: the wrapper runs each capture as its own process group
+and SIGKILLs that group at the deadline, with no SIGTERM grace, because a grace
+period would run past the bound. Its interrupt path is the one that escalates,
+since an interrupted capture is not bound by the deadline. The helper spawns
+detached and sweeps the group after every capture, and registers terminal-signal
+handlers before it detaches anything: a caught signal cannot kill it
+mid-capture, so the deadline still fires and still reaps the tree, where a fatal
+one would strand a group no longer reachable from the terminal. The one capture
+the budget does not wrap is the PR feedback state, which already carries its own
+wall-clock bound; that bound is clamped to what the shared budget has left and
+the time it spends is charged there, so it cannot carry a run past the ceiling
+either. The number is a ceiling, not a statement about how long a capture takes:
+a 1,000-commit, 23.8 MB branch diff of this repository captures in about a
+second, and the deadline promises nothing about elapsed time beyond the bound it
+enforces. Its default is the one value in this
 note an operator may set, alongside the other deadlines in the operator
 contract, because moving a liveness bound cannot make a review accept evidence
 it would otherwise refuse.
