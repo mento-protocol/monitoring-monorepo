@@ -4627,15 +4627,6 @@ assert_contains "- pnpm pr:ready-state:test (PR ready-state helper changed)"
 run_gate "scripts/pr/pr-ready-state.test.mjs"
 assert_contains "- pnpm pr:ready-state:test (PR ready-state helper changed)"
 
-# The pre-move flat runtime copies still route: the autoreview wrapper falls
-# back to them from an older origin/main, and the identity tests red if one
-# side drifts, so an edit to either copy has to run the suite.
-run_gate "scripts/pr-feedback-state-claude.mjs"
-assert_contains "- pnpm pr:feedback-state:test (PR feedback-state helper changed)"
-
-run_gate "scripts/pr-ready-state-format.mjs"
-assert_contains "- pnpm pr:ready-state:test (PR ready-state helper changed)"
-
 run_gate "scripts/sanitize-terraform-output.sh"
 assert_contains "- pnpm sanitize:test (Terraform output sanitizer changed)"
 

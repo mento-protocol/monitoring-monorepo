@@ -50,8 +50,8 @@ Use `--format issue` for GitHub Issues; do not append this report to `BACKLOG.md
 |  1261 | 2105 |     0 | hard cap      | `scripts/sentry/triage/sentry-triage-archive.mjs`                            |
 |   982 | 1054 |     0 | near hard cap | `metrics-bridge/src/peg/poller.ts`                                           |
 |   946 | 1032 |     0 | soft cap      | `scripts/deploy-staging-callsite-discovery.mjs`                              |
-|   888 |  993 |     0 | soft cap      | `scripts/pr-ready-state-core.mjs`                                            |
-|   867 |  977 |     0 | soft cap      | `scripts/pr-ready-state.mjs`                                                 |
+|   888 |  993 |     0 | soft cap      | `scripts/pr/pr-ready-state-core.mjs`                                         |
+|   867 |  977 |     0 | soft cap      | `scripts/pr/pr-ready-state.mjs`                                              |
 |   862 |  904 |     0 | soft cap      | `scripts/deploy-staging-contract.mjs`                                        |
 |   854 | 1490 |     0 | soft cap      | `scripts/sentry/triage/sentry-triage-ingest.mjs`                             |
 |   844 |  901 |     0 | soft cap      | `scripts/alerts/check-peg-registry-integrity.mjs`                            |
