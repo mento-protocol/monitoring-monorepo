@@ -480,9 +480,13 @@ for (const entry of readdirSync(sentrySuiteRoot, {
     assert.equal(
       reason,
       null,
+      // Deliberately does NOT quote the line. If a suite ever holds a real
+      // credential rather than a fake fixture, echoing it here would copy that
+      // credential verbatim into retained CI logs — the exact disclosure this
+      // scanner exists to prevent. Path, line number and reason are enough to
+      // find it locally.
       `${entry.name}:${index + 1} is unreviewable — the autoreview secret scanner refuses it (${reason}). ` +
-        `If the value is a fake fixture, register it in KNOWN_FAKE_FIXTURE_VALUES in agent-autoreview-core.mjs. ` +
-        `Line: ${suiteLine.trim().slice(0, 120)}`,
+        `If the value is a fake fixture, register it in KNOWN_FAKE_FIXTURE_VALUES in agent-autoreview-core.mjs.`,
     );
   });
 }
