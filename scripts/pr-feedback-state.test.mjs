@@ -2027,6 +2027,21 @@ test("refuses prose the prose classifier cannot positively recognize", () => {
       "P3 'No action required' is not advertised clean",
       `${clean}\n\n1. [P3] No action required: tests cover the changed paths.`,
     ],
+    // Matching a curated phrase as a whole must not let anything ride along
+    // with it. `POSITIVE_EVIDENCE` is anchored, so these fall through to the
+    // per-clause split and fail there.
+    [
+      "curated conjunction phrase with a defect appended",
+      `${clean}\n\n1. [P3] None blocking: no errors and failures were found. Anonymous callers can delete every stored record.`,
+    ],
+    [
+      "curated conjunction phrase joined to a defect",
+      `${clean}\n\n1. [P3] None blocking: no errors and failures were found and anonymous callers can delete every stored record.`,
+    ],
+    [
+      "curated conjunction phrase hedged",
+      `${clean}\n\n1. [P3] None blocking: no errors and failures were probably found.`,
+    ],
   ]) {
     expectReady(label, body, false);
   }
@@ -2046,6 +2061,14 @@ test("refuses prose the prose classifier cannot positively recognize", () => {
     [
       "checked P3 clean-evidence task",
       `${clean}\n\n- [x] [P3] Good hygiene: tests cover the changed paths.`,
+    ],
+    // A curated entry that spans a conjunction must match as a whole. Splitting
+    // on `and` first tore this phrase into `no errors` plus `failures were
+    // found`, and the second half is not an entry, so a curated phrase failed
+    // its own allowlist.
+    [
+      "P3 evidence whose curated phrase spans a conjunction",
+      `${clean}\n\n1. [P3] None blocking: no errors and failures were found.`,
     ],
     ["bare Findings section label", `${clean}\n\n### Findings`],
   ]) {

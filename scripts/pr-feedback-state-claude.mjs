@@ -266,27 +266,42 @@ function priorityLineContent(line) {
 // observations. Every clause after the marker must clear the hedge filter and
 // match POSITIVE_EVIDENCE exactly, so a defect appended to a no-action lead-in
 // is never read as clean.
+// One clause (or a whole tail) counts as clean evidence when it carries no
+// hedge and matches the curated allowlist exactly. Shared by both the
+// full-tail attempt and the per-clause fallback so the two cannot diverge.
+function isCuratedEvidenceClause(evidence) {
+  const withoutSafeNegation = evidence.replace(/,\s+not\s+scope\s+creep$/i, "");
+  return (
+    !UNSAFE_EVIDENCE_QUALIFIER.test(withoutSafeNegation) &&
+    POSITIVE_EVIDENCE.test(evidence)
+  );
+}
+
 export function hasPositiveCleanEvidence(value) {
   const tail = String(value ?? "")
     .trim()
     .match(CLEAN_FINDING_MARKER)?.[1];
   if (tail === undefined) return false;
+  // Try the WHOLE tail against the allowlist before splitting it. Several
+  // curated entries span a conjunction — `no errors and failures were found` is
+  // one exact `POSITIVE_EVIDENCE` phrase — and splitting on `and` first tore it
+  // into `no errors` plus `failures were found`, whose second half is not an
+  // entry, so a curated phrase failed its own allowlist.
+  //
+  // This cannot smuggle anything: `POSITIVE_EVIDENCE` is anchored `^...$`, so a
+  // full-tail match means the entire tail is one reviewed phrase. Splitting
+  // stays as the fallback for genuinely multi-clause evidence.
+  // Strip a trailing sentence terminator first: `POSITIVE_EVIDENCE` is anchored
+  // `^...$` and its entries carry no punctuation, so `...were found.` would
+  // miss. The per-clause path never saw this because its split consumes the
+  // terminator.
+  if (isCuratedEvidenceClause(tail.replace(/[.!?;]+$/, "").trim())) return true;
   const evidenceClauses = tail
     .split(/(?:[!?;]+|\.(?=\s|$)|\b(?:and|but|however|although|yet)\b)/i)
     .map((clause) => clause.trim())
     .filter(Boolean);
   return (
-    evidenceClauses.length > 0 &&
-    evidenceClauses.every((evidence) => {
-      const withoutSafeNegation = evidence.replace(
-        /,\s+not\s+scope\s+creep$/i,
-        "",
-      );
-      return (
-        !UNSAFE_EVIDENCE_QUALIFIER.test(withoutSafeNegation) &&
-        POSITIVE_EVIDENCE.test(evidence)
-      );
-    })
+    evidenceClauses.length > 0 && evidenceClauses.every(isCuratedEvidenceClause)
   );
 }
 
