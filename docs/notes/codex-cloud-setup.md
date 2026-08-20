@@ -3,7 +3,7 @@ title: Codex Cloud Setup and Maintenance
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-22
+last_verified: 2026-08-20
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -57,10 +57,14 @@ Trunk cache.
 
 Foundry installs by default so Aegis `forge test` checks can run. Set
 `CODEX_CLOUD_INSTALL_FOUNDRY=false` only when the image already supplies it. A
-custom `CODEX_CLOUD_FOUNDRYUP_URL` executes installer code, so always pair it
-with `CODEX_CLOUD_FOUNDRYUP_SHA256`; never use an unverified custom mirror.
-Fail-closed script enforcement is tracked in
-[#1477](https://github.com/mento-protocol/monitoring-monorepo/issues/1477).
+custom `CODEX_CLOUD_FOUNDRYUP_URL` executes installer code, so pair it with a
+`CODEX_CLOUD_FOUNDRYUP_SHA256` value that contains exactly 64 hexadecimal
+characters. Setup rejects a missing or malformed custom checksum before it
+downloads the installer. It downloads a custom installer to a temporary regular
+file, verifies the checksum, runs it only after verification, and removes the
+file after success or failure. The exact default URL,
+`https://foundry.paradigm.xyz`, keeps Foundry's documented public installer
+pipeline without a checksum.
 
 Setup POSTs to `https://api.osv.dev/v1/querybatch` to prove osv-scanner egress.
 Set `CODEX_CLOUD_CHECK_OSV_EGRESS=false` only when that check is intentionally
