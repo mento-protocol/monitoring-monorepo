@@ -1902,6 +1902,35 @@ test("accepts the PR #1954 label-bold verdict and bracketed no-findings roll-up"
     ),
     false,
   );
+  // The mark is stripped once, before the conclusion shapes run, so it clears
+  // EVERY accepted conclusion rather than only the tail-bearing one. Adding it
+  // to each pattern instead would have been five places to keep in step.
+  for (const conclusion of [
+    "No P1/P2 findings ✅",
+    "No inline findings ✅",
+    "No P1/P2/P3 findings — clean review ✅",
+    "No changes requested ✅",
+    "No P1/P2 findings 👍",
+  ]) {
+    expectReady(
+      `conclusion shape with a mark: ${conclusion}`,
+      PR_1954_CLEAN_CLAUDE_BODY.replace(
+        "1. None — no [P1]/[P2]/[P3] findings.",
+        conclusion,
+      ),
+      true,
+    );
+  }
+  // Stripping only removes a mark at the very END, so prose before one is left
+  // in place and the conclusion still fails.
+  expectReady(
+    "prose before a trailing mark",
+    PR_1954_CLEAN_CLAUDE_BODY.replace(
+      "1. None — no [P1]/[P2]/[P3] findings.",
+      "No P1/P2 findings but the retry loop never ends ✅",
+    ),
+    false,
+  );
 
   // The widened grammar must not turn a qualified verdict, a smuggled finding,
   // or a self-contradicting roll-up into an all-clear. The declarative-defect

@@ -265,6 +265,16 @@ function hasUncheckedTaskBox(line) {
   return UNCHECKED_TASK_BOX.test(value);
 }
 
+// A trailing approval mark carries no assertion, so it is removed before a
+// conclusion is matched. Only the marks `CLEAN_REVIEW_TITLE` already accepts,
+// optionally repeated, and only at the very end — a mark with a word after it
+// leaves that word in place, so the conclusion still fails and the line stays
+// actionable.
+const TRAILING_APPROVAL_MARK = /(?:\s*(?:✅|✔️?|\u{1F44D}️?))+$/u;
+function stripApprovalMark(value) {
+  return value.replace(TRAILING_APPROVAL_MARK, "").trimEnd();
+}
+
 function isCleanConclusion(line) {
   // An UNCHECKED task box states an intention, not a result: `- [ ] No P1/P2
   // findings.` is a box the reviewer never ticked. `reviewLineContent` peels
@@ -279,8 +289,14 @@ function isCleanConclusion(line) {
   // `- 1. [ ]` — so the check must follow the peeler step for step.
   if (hasUncheckedTaskBox(line)) return false;
   // Strip list/heading markers so a numbered roll-up entry is judged on its
-  // text, not its `1. ` prefix.
-  const value = reviewLineContent(line);
+  // text, not its `1. ` prefix, then drop a trailing approval mark.
+  //
+  // The mark is removed ONCE here rather than added to each accepted shape.
+  // Editing the four exact patterns plus the tail pattern would be five places
+  // to keep in step, and the one time this file carried a grammar in two places
+  // the copies drifted inside a single PR. Stripping also keeps the shapes
+  // themselves readable as the sentences reviewers actually write.
+  const value = stripApprovalMark(reviewLineContent(line));
   if (CLEAN_CONCLUSION_PATTERNS.some((pattern) => pattern.test(value)))
     return true;
   const tail = CLEAN_CONCLUSION_WITH_TAIL.exec(value)?.groups?.tail;
