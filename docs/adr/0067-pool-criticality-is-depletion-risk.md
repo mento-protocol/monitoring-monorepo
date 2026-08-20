@@ -3,7 +3,7 @@ title: Pool criticality is depletion risk, not deviation magnitude
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-19
+last_verified: 2026-08-20
 scope: alerts
 date: 2026-08
 doc_type: adr
@@ -166,13 +166,22 @@ inaction**, not when a ratio is large.
   necessarily far outside its rebalance band, while the converse does not hold.
 - The depletion tiers now depend on a live oracle median and an on-chain-read
   feed orientation, which the count-share version did not. A pool missing
-  either publishes no value share, and both tiers evaluate NoData → OK. Today
-  that is the Polygon `EURm/EUROP` pool, which has never landed a median; its
-  dark feed is covered by the oracle liveness rules, not by silence here. The
+  either publishes no value share, and both tiers evaluate NoData → OK. The
   gate is `medianLive`, not a non-zero last price: a zero-median outage retains
   the previous price, so a price-only check would have kept pricing reserves
   off a rate the contract had stopped honouring. This matches
   `hasFreshLiveMedian`, which is how the indexer decides the same question.
+- The Polygon `EURm/EUROP` pool is the one exception to that gate. No oracle
+  network publishes a EUROP/EUR price, so the pair runs on a hardcoded `MANUAL`
+  rate feed pinned to 1:1 ([ADR 0042](0042-metrics-bridge-external-price-poller.md))
+  and has never landed a median. At a rate of exactly 1 the oracle reference is
+  1 and the value share reduces to the token-count share, so the bridge
+  publishes the count numbers into the value-share gauges for this pool
+  (`COUNT_SHARE_VALUE_FALLBACK_POOL_IDS` in `metrics-bridge/src/metrics.ts`) and
+  both tiers cover it normally. A real value share always wins when one is
+  available. Membership requires a rate pinned to 1 by construction; a pair that
+  merely trades near parity does not qualify, because its rate can move and the
+  count share would then stop answering the depletion question.
 - `POOL_DEPLETION_CRITICAL_SHARE` and `POOL_DEPLETION_PAGE_SHARE` join the
   Terraform mirror set. `DEVIATION_CRITICAL_RATIO` leaves it; a future editor
   who bumps it will get no drift-check failure, because there is nothing in
@@ -238,8 +247,8 @@ inaction**, not when a ratio is large.
 - Enforcing files: `alerts/rules/rules-fpmms.tf` (the two depletion rules and
   the threshold-mirror banner), `alerts/rules/main.tf` (the min-value-share
   locals, the V0/V1 annotation queries, and the un-suppressed warning
-  expressions), `metrics-bridge/src/metrics.ts` (`reserveValueShares` and the
-  two gauges it publishes),
+  expressions), `metrics-bridge/src/metrics.ts` (`reserveValueShares`, the two
+  gauges it publishes, and `COUNT_SHARE_VALUE_FALLBACK_POOL_IDS`),
   `alerts/rules/contact-points.tf` (`grafana_contact_point.pool_page`,
   `notify_page_pool`), `shared-config/src/thresholds.ts` (the constants and
   which of them Terraform mirrors),

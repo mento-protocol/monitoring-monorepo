@@ -1740,13 +1740,100 @@ describe("updateMetrics", () => {
   });
 
   it("publishes no value share when a pool has never landed a median", async () => {
-    // Live case: the Polygon EURm/EUROP pool.
+    // The default fixture is the Celo GBPm/USDm pool, which is NOT in the
+    // 1:1 fallback allowlist: an ordinary pool with no median still fails
+    // closed.
     updateMetrics([makePool({ lastMedianPrice: "0" })]);
     expect(
       await getGaugeValue(register, "mento_pool_reserve_value_share_token0", {
         token_symbol: "USDm",
       }),
     ).toBeUndefined();
+  });
+
+  it("publishes count shares as value shares for the hardcoded 1:1 EURm/EUROP pool", async () => {
+    // Polygon EURm/EUROP runs on a MANUAL rate feed pinned to 1:1 (ADR 0042)
+    // and has never landed a median, so `reserveValueShares` returns null.
+    // At a rate of exactly 1 the count share IS the value share, so the
+    // fallback publishes it rather than leaving the pool without depletion
+    // coverage (ADR 0067).
+    updateMetrics([
+      makePool({
+        id: "137-0xcd8c6811d975981f57e7fb32e59f0bee66af3201",
+        chainId: 137,
+        token0: "0x4d502d735b4c574b487ed641ae87ceae884731c7",
+        token1: "0x888883b5f5d21fb10dfeb70e8f9722b9fb0e5e51",
+        reserves0: "4000000000000000000",
+        reserves1: "6000000000000000000",
+        lastMedianPrice: "0",
+      }),
+    ]);
+    const countShare0 = await getGaugeValue(
+      register,
+      "mento_pool_reserve_share_token0",
+      { token_symbol: "EURm" },
+    );
+    const countShare1 = await getGaugeValue(
+      register,
+      "mento_pool_reserve_share_token1",
+      { token_symbol: "EUROP" },
+    );
+    expect(countShare0).toBeCloseTo(0.4, 6);
+    expect(countShare1).toBeCloseTo(0.6, 6);
+    expect(
+      await getGaugeValue(register, "mento_pool_reserve_value_share_token0", {
+        token_symbol: "EURm",
+      }),
+    ).toBe(countShare0);
+    expect(
+      await getGaugeValue(register, "mento_pool_reserve_value_share_token1", {
+        token_symbol: "EUROP",
+      }),
+    ).toBe(countShare1);
+    // The fallback series must be indistinguishable from a real one to the
+    // depletion rules, which aggregate with `min without(token_symbol)`.
+    const labelsOf = async (name: string) =>
+      (await getMetricValues(register, name))
+        .map((v) => Object.keys(v.labels).sort().join(","))
+        .sort();
+    const countLabels = await labelsOf("mento_pool_reserve_share_token0");
+    expect(countLabels).toHaveLength(1);
+    expect(await labelsOf("mento_pool_reserve_value_share_token0")).toEqual(
+      countLabels,
+    );
+    expect(await labelsOf("mento_pool_reserve_value_share_token1")).toEqual(
+      countLabels,
+    );
+  });
+
+  it("prefers the real value share over the 1:1 fallback when the allowlisted pool has a live median", async () => {
+    // If EUROP ever gets a real feed, the oracle-frame conversion must win.
+    // A 0.5 median against 40/60 reserves gives ~25%/75% by value — a number
+    // the count-share fallback cannot produce.
+    updateMetrics([
+      makePool({
+        id: "137-0xcd8c6811d975981f57e7fb32e59f0bee66af3201",
+        chainId: 137,
+        token0: "0x4d502d735b4c574b487ed641ae87ceae884731c7",
+        token1: "0x888883b5f5d21fb10dfeb70e8f9722b9fb0e5e51",
+        reserves0: "4000000000000000000",
+        reserves1: "6000000000000000000",
+        lastMedianPrice: "500000000000000000000000",
+        medianLive: true,
+        invertRateFeed: false,
+        invertRateFeedKnown: true,
+      }),
+    ]);
+    expect(
+      await getGaugeValue(register, "mento_pool_reserve_value_share_token0", {
+        token_symbol: "EURm",
+      }),
+    ).toBeCloseTo(0.25, 6);
+    expect(
+      await getGaugeValue(register, "mento_pool_reserve_value_share_token1", {
+        token_symbol: "EUROP",
+      }),
+    ).toBeCloseTo(0.75, 6);
   });
 
   it("publishes no value share once a live median goes dark", async () => {

@@ -70,6 +70,28 @@ const ORACLE_STALE_SECONDS_BY_CHAIN: Readonly<Record<number, number>> = {
   10143: 360,
 };
 
+// Pools whose token-count shares ARE their value shares, published into the
+// value-share gauges when the oracle-frame conversion cannot run.
+//
+// Polygon EURm/EUROP is the only member. No oracle network publishes a
+// EUROP/EUR price, so per ADR 0042 the pair runs on a hardcoded MANUAL rate
+// feed pinned to 1:1 (`EUROPEUR` in `shared-config/oracle-reporters.json`).
+// That feed has never landed a SortedOracles median, so `reserveValueShares`
+// returns null and the pool would otherwise carry no depletion coverage at all
+// under ADR 0067. At a rate of exactly 1 the oracle reference is 1, and the
+// value share reduces to the count share — so here the count numbers are the
+// depletion measure, not an approximation of it.
+//
+// Membership requires a rate pinned to 1 by construction. A pair that merely
+// trades near parity does not qualify: its rate can move, and the count share
+// would then quietly stop answering the depletion question.
+//
+// Keys are canonical pool IDs — `{chainId}-{lowercaseAddress}`, the form
+// `indexer-envio/src/helpers.ts` builds and the only form Hasura returns.
+const COUNT_SHARE_VALUE_FALLBACK_POOL_IDS: ReadonlySet<string> = new Set([
+  "137-0xcd8c6811d975981f57e7fb32e59f0bee66af3201",
+]);
+
 export const register = new Registry();
 
 // Display-oriented labels are carried on every pool-scoped series so Slack
@@ -252,13 +274,13 @@ export const gauges = {
   // a raw count share is not a depletion signal on an off-parity pair.
   reserveValueShareToken0: new Gauge({
     name: "mento_pool_reserve_value_share_token0",
-    help: "Value-weighted share of pool reserves held in token0: r0_normalized × oracleRef / (r0_normalized × oracleRef + r1_normalized) ∈ [0, 1], where oracleRef is the price of token0 denominated in token1 (`mento_pool_oracle_price`, inverted when the pool's `invertRateFeed` says token0 is the feed's quote token). Equals the token-count share only when the pair trades near parity. Skipped when reserves are zero, the median price is absent or no longer live (a zero-median outage retains the last price), or the feed orientation has not been read on chain — no series rather than a wrong one. Carries the same `token_symbol` label as `mento_pool_reserve_share_token0`.",
+    help: "Value-weighted share of pool reserves held in token0: r0_normalized × oracleRef / (r0_normalized × oracleRef + r1_normalized) ∈ [0, 1], where oracleRef is the price of token0 denominated in token1 (`mento_pool_oracle_price`, inverted when the pool's `invertRateFeed` says token0 is the feed's quote token). Equals the token-count share only when the pair trades near parity. Skipped when reserves are zero, the median price is absent or no longer live (a zero-median outage retains the last price), or the feed orientation has not been read on chain — no series rather than a wrong one. The one exception is a pool whose rate feed is hardcoded 1:1 (Polygon EURm/EUROP), where the token-count share is the value share and is published here instead. Carries the same `token_symbol` label as `mento_pool_reserve_share_token0`.",
     labelNames: reserveShareLabels,
     registers: [register],
   }),
   reserveValueShareToken1: new Gauge({
     name: "mento_pool_reserve_value_share_token1",
-    help: "Value-weighted share of pool reserves held in token1 (mirror of mento_pool_reserve_value_share_token0): r1_normalized / (r0_normalized × oracleRef + r1_normalized). Same skip conditions and the same `token_symbol` label as its token0 twin.",
+    help: "Value-weighted share of pool reserves held in token1 (mirror of mento_pool_reserve_value_share_token0): r1_normalized / (r0_normalized × oracleRef + r1_normalized). Same skip conditions, the same hardcoded-1:1 exception, and the same `token_symbol` label as its token0 twin.",
     labelNames: reserveShareLabels,
     registers: [register],
   }),
@@ -700,6 +722,10 @@ function recordLimitMetrics(pool: PoolRow, labels: PoolDisplayLabels): void {
  * Price precision follows `mento_pool_oracle_price`: both go through
  * `toHumanUnits`, so an operator can reproduce the share from the two
  * published gauges by hand.
+ *
+ * A null here normally means the value-share gauges publish nothing for the
+ * pool. `recordReserveShareMetrics` carries one narrow exception for pools
+ * pinned to a 1:1 rate — see `COUNT_SHARE_VALUE_FALLBACK_POOL_IDS`.
  */
 export function reserveValueShares(
   pool: Pick<
@@ -757,7 +783,15 @@ function recordReserveShareMetrics(
   // yet, a median that has gone dark, unread orientation) leave the depletion
   // rules at NoData, which they treat as OK — the dark feed itself is what the
   // oracle staleness rules page on.
-  const valueShares = reserveValueShares(pool);
+  //
+  // A real value share always wins. The count-share fallback runs only on the
+  // null path, and only for the pools whose rate is pinned to 1:1 by
+  // construction — see `COUNT_SHARE_VALUE_FALLBACK_POOL_IDS`.
+  const valueShares =
+    reserveValueShares(pool) ??
+    (COUNT_SHARE_VALUE_FALLBACK_POOL_IDS.has(pool.id)
+      ? { share0: r0 / total, share1: r1 / total }
+      : null);
   if (!valueShares) return;
   gauges.reserveValueShareToken0.set(
     { ...labels, token_symbol: token0Symbol },
