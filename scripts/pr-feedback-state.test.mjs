@@ -1787,6 +1787,22 @@ test("accepts the PR #1954 label-bold verdict and bracketed no-findings roll-up"
       "bullet-then-numbered unchecked conclusion",
       clean.replace(ROLLUP, "- 1. [ ] No P1/P2 findings."),
     ],
+    // The verdict line needs the same box check as the conclusion: peeling the
+    // prefix hides an unticked box there too. Closes a hole that predates this
+    // PR — `- [ ] **Verdict: LGTM**` was accepted on main.
+    [
+      "unchecked verdict task",
+      clean.replace(VERDICT, "- [ ] **Verdict:** LGTM"),
+    ],
+    [
+      "numbered unchecked verdict task",
+      clean.replace(VERDICT, "1. [ ] **Verdict:** LGTM"),
+    ],
+    [
+      "unchecked whole-bold verdict task",
+      clean.replace(VERDICT, "- [ ] **Verdict: LGTM**"),
+    ],
+    ["negated verdict task", clean.replace(VERDICT, "- [-] **Verdict:** LGTM")],
   ]) {
     expectReady(label, body, false);
   }
@@ -1800,6 +1816,11 @@ test("accepts the PR #1954 label-bold verdict and bracketed no-findings roll-up"
   ]) {
     expectReady(label, clean.replace(ROLLUP, conclusion), true);
   }
+  expectReady(
+    "checked verdict task",
+    clean.replace(VERDICT, "- [x] **Verdict:** LGTM"),
+    true,
+  );
 });
 
 // The body actually posted on PR #1954. Its verdict and roll-up each end in a

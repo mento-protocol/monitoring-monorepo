@@ -284,6 +284,10 @@ export function classifyClaudeReviewProse(comment, pr) {
 
   if (
     verdictLines.length !== 1 ||
+    // Symmetric with isCleanConclusion: an unticked box in front of the
+    // verdict means the reviewer never completed it, and reviewLineContent
+    // peels the box away before the verdict pattern ever sees it.
+    hasUncheckedTaskBox(verdictLines[0]) ||
     !matchesCleanVerdict(reviewLineContent(verdictLines[0])) ||
     body.includes("\r") ||
     body.includes("\0") ||
