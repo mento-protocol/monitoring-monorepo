@@ -133,10 +133,12 @@ tldr: **ruleset-required** workflows (`ci`, `Code Quality`, the Vercel checks) M
 
 ### Shell failure propagation and fixture environments
 
-- A function invoked as an `if` condition, under `!`, or as a non-final command
-  in an `&&` or `||` list cannot rely on `set -e` to stop its body. Check each
-  load-bearing command explicitly. Add a negative test that proves later
-  commands do not run after the first failure.
+- A function invoked as an `if`, `while`, or `until` condition, under `!`, or as
+  a non-final command in an `&&` or `||` list cannot rely on `set -e` to stop its
+  body. Check each load-bearing command explicitly. For each applicable context,
+  add a negative test that proves remaining commands in the function body do not
+  run after the failure and the caller takes the expected branch, inversion, or
+  list operand.
 - A fixture that sources or spawns a script must create the feature state it
   tests. Set enable flags and clear ambient opt-outs inside the fixture. For a
   load-bearing flag, also run the fixture under the inverse caller state and
