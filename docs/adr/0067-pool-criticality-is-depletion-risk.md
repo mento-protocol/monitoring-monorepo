@@ -3,7 +3,7 @@ title: Pool criticality is depletion risk, not deviation magnitude
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-19
+last_verified: 2026-08-20
 scope: alerts
 date: 2026-08
 doc_type: adr
@@ -166,9 +166,7 @@ inaction**, not when a ratio is large.
   necessarily far outside its rebalance band, while the converse does not hold.
 - The depletion tiers now depend on a live oracle median and an on-chain-read
   feed orientation, which the count-share version did not. A pool missing
-  either publishes no value share, and both tiers evaluate NoData → OK. Today
-  that is the Polygon `EURm/EUROP` pool, which has never landed a median; its
-  dark feed is covered by the oracle liveness rules, not by silence here. The
+  either publishes no value share, and both tiers evaluate NoData → OK. The
   gate is `medianLive`, not a non-zero last price: a zero-median outage retains
   the previous price, so a price-only check would have kept pricing reserves
   off a rate the contract had stopped honouring. This matches
@@ -177,6 +175,45 @@ inaction**, not when a ratio is large.
   `#alerts-pools`) fires when a pool holds reserves but publishes no value
   share, so a pool falling out of depletion coverage is reported rather than
   merely absent. It surfaces the gap; closing one is still a bridge change.
+- The Polygon `EURm/EUROP` pool is the one exception to that gate. No oracle
+  network publishes a EUROP/EUR price, so the pair runs on a hardcoded `MANUAL`
+  rate feed pinned to 1:1 ([ADR 0042](0042-metrics-bridge-external-price-poller.md))
+  and has never landed a median. At a rate of exactly 1 the oracle reference is
+  1 and the value share reduces to the token-count share, so the bridge
+  publishes the count numbers into the value-share gauges for this pool
+  (`countSharesStandInForValue` in `metrics-bridge/src/reserveShares.ts`) and both
+  tiers cover it normally. A real value share always wins when one is available.
+  Membership requires a rate pinned to 1 by construction; a pair that merely
+  trades near parity does not qualify, because its rate can move and the count
+  share would then stop answering the depletion question.
+- That fallback is deliberately narrower than "the allowlisted pool published no
+  value share". It applies only while `lastMedianPrice` is zero — the state of a
+  feed that has never landed a median. It must not survive the pair acquiring a
+  real feed, and the retained-price rule above is what enforces that: a median
+  that once worked and went dark keeps its last non-zero value, so the fallback
+  switches off and the pool fails closed like any other. Publishing a 1:1 count
+  share during an oracle outage would replace a real valuation with a fabricated
+  one at the exact moment the pool most needs the real number, reading as
+  healthy while it drains. The condition is "never priced", not "priced and
+  live": a report that expires or is removed before this pair ever priced keeps
+  the fallback on, because the 1:1 rate is a property of the pair rather than of
+  any one report's freshness. The stale report itself is the oracle-liveness
+  plane's job, and these two ladders stay independent.
+- Value shares also require `tokenDecimalsKnown`, for every pool and not just
+  the fallback one. Unread decimals fall back to the schema default 18/18, and
+  normalizing an off-18 leg with the wrong exponent moves the share by orders of
+  magnitude — Polygon EUROP has 6 decimals, so a balanced pool would read
+  ~100%/0% and page. That is a far larger error than the rate correction the
+  value share exists to make, so it fails closed on the same principle as the
+  orientation and median gates, matching `trustedVpOracleMedianInputs` and
+  `vpOracleFreshness`. Count shares are deliberately left ungated so the pool
+  stays visible to `Pool Value Share Missing` while decimals heal.
+- The fallback and `Pool Value Share Missing` compose without a special case.
+  The alert asks whether a funded pool publishes any value share; once the
+  bridge publishes one for `EURm/EUROP`, that pool stops matching, so the alert
+  needs no pool-ID exclusion and gains no dead branch. If a future editor ever
+  removes the fallback, the alert starts reporting the pool instead of the gap
+  going quiet again.
 - `POOL_DEPLETION_CRITICAL_SHARE` and `POOL_DEPLETION_PAGE_SHARE` join the
   Terraform mirror set. `DEVIATION_CRITICAL_RATIO` leaves it; a future editor
   who bumps it will get no drift-check failure, because there is nothing in
@@ -242,8 +279,9 @@ inaction**, not when a ratio is large.
 - Enforcing files: `alerts/rules/rules-fpmms.tf` (the two depletion rules and
   the threshold-mirror banner), `alerts/rules/main.tf` (the min-value-share
   locals, the V0/V1 annotation queries, and the un-suppressed warning
-  expressions), `metrics-bridge/src/metrics.ts` (`reserveValueShares` and the
-  two gauges it publishes),
+  expressions), `metrics-bridge/src/reserveShares.ts` (`reserveValueShares` and
+  `countSharesStandInForValue`), `metrics-bridge/src/metrics.ts` (the two gauges
+  they feed),
   `alerts/rules/contact-points.tf` (`grafana_contact_point.pool_page`,
   `notify_page_pool`), `shared-config/src/thresholds.ts` (the constants and
   which of them Terraform mirrors),
