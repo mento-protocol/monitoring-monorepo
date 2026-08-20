@@ -1330,21 +1330,20 @@ jobs:
         run: |
           set -euo pipefail
           # The digest channel is DELIBERATELY hardcoded here (not a secret or
-          # repo variable): #sentry-triage is the standing triage-review channel,
-          # provisioned by alerts/infra/sentry-triage-channel.tf, and changing it
-          # is a one-line PR. The bot's chat:write.public scope lets it post to
-          # this public channel uninvited (same mechanism as
+          # repo variable): #engineering is the standing triage-review channel,
+          # and changing it is a one-line PR. The bot's chat:write.public scope
+          # lets it post to this public channel uninvited (same mechanism as
           # notify-slack-on-main-failure.yml). The script prints ONLY the Slack
           # payload JSON to stdout; diagnostics go to stderr.
           # --repo: same source of truth as the select/triage jobs
           # (GITHUB_REPOSITORY), so the digest reads the run's own repository
           # instead of assuming the script's default (matters on forks/renames).
           node scripts/sentry/triage/sentry-triage-digest.mjs \
-            --channel '#sentry-triage' \
+            --channel '#engineering' \
             --repo "${GITHUB_REPOSITORY}" \
             > "${RUNNER_TEMP}/digest-payload.json"
 
-      - name: Post digest to #sentry-triage
+      - name: Post digest to #engineering
         env:
           # SLACK_BOT_TOKEN reaches ONLY this posting step's env — never the
           # collector step, never echoed, never placed in a URL. Reuses the
@@ -1377,4 +1376,4 @@ jobs:
             echo "Full response: $RESPONSE"
             exit 1
           fi
-          echo "Posted Sentry triage digest to #sentry-triage."
+          echo "Posted Sentry triage digest to #engineering."

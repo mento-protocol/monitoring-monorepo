@@ -111,7 +111,7 @@ pnpm sentry:ingest --dry-run                   # Print queue-issue mutations wit
 pnpm sentry:ingest:test                        # Offline tests for the ingest helper (docs/notes/sentry-triage-pipeline.md)
 pnpm sentry:digest:test                        # Offline tests for the per-run Slack verdict-digest collector
 pnpm sentry:broker:test                        # Offline tests for the triage agent's loopback credential broker (ADR 0056)
-SENTRY_TRIAGE_ISSUES='[123]' pnpm sentry:digest --channel '#sentry-triage'  # Print the Slack digest payload for a batch (needs gh auth; does not post)
+SENTRY_TRIAGE_ISSUES='[123]' pnpm sentry:digest --channel '#engineering'  # Print the Slack digest payload for a batch (needs gh auth; does not post)
 
 # Public config package
 pnpm --filter @mento-protocol/config build     # Build the public protocol metadata package
