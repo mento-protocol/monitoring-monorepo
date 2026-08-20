@@ -1852,6 +1852,122 @@ test("accepts the PR #1954 label-bold verdict and bracketed no-findings roll-up"
   };
 
   expectReady("bare verdict and roll-up", PR_1954_CLEAN_CLAUDE_BODY, true);
+  // An approval mark asserts nothing actionable, so it clears; a word after the
+  // verdict is prose and still blocks. Observed on PR #1975, whose clean
+  // `**Verdict: LGTM** ✅` blocked its own feedback gate with no reply-based
+  // escape while pr:ready-state reported the PR ready to merge.
+  for (const [label, mark] of [
+    ["check mark", " ✅"],
+    ["heavy check", " ✔️"],
+    ["thumbs up", " 👍"],
+    ["mark then terminator", " ✅."],
+  ]) {
+    expectReady(
+      `verdict with an approval ${label}`,
+      PR_1954_CLEAN_CLAUDE_BODY.replace(
+        "**Verdict:** LGTM",
+        `**Verdict:** LGTM${mark}`,
+      ),
+      true,
+    );
+  }
+  expectReady(
+    "approval mark followed by prose",
+    PR_1954_CLEAN_CLAUDE_BODY.replace(
+      "**Verdict:** LGTM",
+      "**Verdict:** LGTM ✅ but the fallback leaks",
+    ),
+    false,
+  );
+  // One tail rule governs verdicts AND conclusions, so a mark clears on both.
+  // That is deliberate rather than incidental — the two ask the same question,
+  // and a second rule would be a second thing to keep in step — and the runbook
+  // states it. A word after either is still prose and still blocks.
+  expectReady(
+    "conclusion with an approval mark",
+    PR_1954_CLEAN_CLAUDE_BODY.replace(
+      "1. None — no [P1]/[P2]/[P3] findings.",
+      "1. None — no [P1]/[P2]/[P3] findings ✅",
+    ),
+    true,
+  );
+  expectReady(
+    "conclusion with a mark then prose",
+    PR_1954_CLEAN_CLAUDE_BODY.replace(
+      "1. None — no [P1]/[P2]/[P3] findings.",
+      "1. None — no [P1]/[P2]/[P3] findings ✅ but the retry loop never ends",
+    ),
+    false,
+  );
+  // The mark is stripped once, before the conclusion shapes run, so it clears
+  // EVERY accepted conclusion rather than only the tail-bearing one. Adding it
+  // to each pattern instead would have been five places to keep in step.
+  // Punctuated marks are covered too. Stripping only at the absolute end — the
+  // first version of this — rejected every `✅.` form, because the exact shapes
+  // then saw the emoji.
+  for (const conclusion of [
+    "No P1/P2 findings ✅",
+    "No inline findings ✅",
+    "No P1/P2/P3 findings — clean review ✅",
+    "No changes requested ✅",
+    "No P1/P2 findings 👍",
+    "No inline findings ✅.",
+    "No changes requested 👍.",
+    "No P1/P2/P3 findings ✔️",
+    "No P1/P2 findings ✅!",
+  ]) {
+    expectReady(
+      `conclusion shape with a mark: ${conclusion}`,
+      PR_1954_CLEAN_CLAUDE_BODY.replace(
+        "1. None — no [P1]/[P2]/[P3] findings.",
+        conclusion,
+      ),
+      true,
+    );
+  }
+  // Stripping only removes a mark at the very END, so prose before one is left
+  // in place and the conclusion still fails.
+  expectReady(
+    "prose before a trailing mark",
+    PR_1954_CLEAN_CLAUDE_BODY.replace(
+      "1. None — no [P1]/[P2]/[P3] findings.",
+      "No P1/P2 findings but the retry loop never ends ✅",
+    ),
+    false,
+  );
+  // Verdict and conclusion tails run through the SAME strip, so they must agree
+  // on every suffix. Spelling the mark into the verdict pattern as well left
+  // them disagreeing: `LGTM ✅` cleared but `LGTM. ✅` did not, while the
+  // conclusion accepted both. This asserts the symmetry rather than a list of
+  // remembered cases.
+  for (const suffix of ["", ".", " ✅", " ✅.", ". ✅", " 👍", ". 👍", " ✔️"]) {
+    expectReady(
+      `verdict tail ${JSON.stringify(suffix)}`,
+      PR_1954_CLEAN_CLAUDE_BODY.replace(
+        "**Verdict:** LGTM",
+        `**Verdict:** LGTM${suffix}`,
+      ),
+      true,
+    );
+    expectReady(
+      `conclusion tail ${JSON.stringify(suffix)}`,
+      PR_1954_CLEAN_CLAUDE_BODY.replace(
+        "1. None — no [P1]/[P2]/[P3] findings.",
+        `No P1/P2 findings${suffix}`,
+      ),
+      true,
+    );
+  }
+  // The lookahead permits only a terminator after the mark, so prose following
+  // a punctuated mark is not stripped either.
+  expectReady(
+    "mark, terminator, then prose",
+    PR_1954_CLEAN_CLAUDE_BODY.replace(
+      "1. None — no [P1]/[P2]/[P3] findings.",
+      "No P1/P2 findings ✅. The retry loop never ends",
+    ),
+    false,
+  );
 
   // The widened grammar must not turn a qualified verdict, a smuggled finding,
   // or a self-contradicting roll-up into an all-clear. The declarative-defect
@@ -2249,6 +2365,157 @@ test("refuses prose the prose classifier cannot positively recognize", () => {
     ["bare Findings section label", `${clean}\n\n### Findings`],
   ]) {
     expectReady(label, body, true);
+  }
+});
+
+// Issue 1968. `#### What I checked` is a shape the codebase already treated as
+// legitimate — `isSafeClaudePreamble` validates it — but only inside the
+// preamble that precedes paired `Findings`/`Roll-up` headings. Standing on its
+// own, the body routes to the prose classifier, which had no checklist shape at
+// all, so a clean review was blocked. Both paths now read ONE definition of the
+// checklist grammar and ONE curated topic allowlist, so they cannot disagree
+// about which checklist is safe.
+//
+// The allowlist is the whole safety property. `- [x] <free sentence>` would
+// readmit exactly the declarative defect issue 1966 closed, so the blocking
+// half below is the load-bearing half.
+test("recognizes a standalone What-I-checked checklist only for curated topics", () => {
+  const options = {
+    number: 1848,
+    title: "fix(agent): accept exact no-action Claude review",
+    headRefOid: PR_1848_HEAD,
+    headUpdatedAt: "2026-08-13T22:09:46Z",
+    reactionCreatedAt: "2026-08-20T09:30:00Z",
+  };
+  let fixtureId = 5353832870;
+  const expectReady = (label, body, expected) => {
+    const feedbackState = summarizeFeedbackState(
+      normalizedReadyStateForClaudeReview(
+        {
+          ...PR_1848_CLEAN_CLAUDE_REVIEW,
+          id: fixtureId++,
+          created_at: "2026-08-20T09:10:48Z",
+          updated_at: "2026-08-20T09:11:54Z",
+          body,
+        },
+        options,
+      ),
+    );
+    assertEqual(
+      feedbackState.ready,
+      expected,
+      `${label}: unexpected feedback-state result`,
+    );
+    assertEqual(
+      feedbackState.counts.blockingTopLevelBotComments,
+      expected ? 0 : 1,
+    );
+  };
+
+  // The reproduction from the issue: a verdict, a standalone checklist, and a
+  // bare conclusion, with no `Findings`/`Roll-up` headings anywhere. Subjects
+  // are curated topics — the issue's illustrative "Reviewed the diff for
+  // correctness" is not one, and deliberately still blocks below.
+  const standalone = (entries) =>
+    [
+      `### Review: ${options.title}`,
+      "",
+      "**Verdict:** LGTM",
+      "",
+      "#### What I checked",
+      ...entries,
+      "",
+      "No P1/P2/P3 findings.",
+    ].join("\n");
+  const CURATED = ["- [x] Unit tests", "- [x] Parser behavior"];
+  const DEFECT = "Anonymous callers can delete every stored record.";
+
+  for (const [label, body] of [
+    ["standalone checklist with curated topics", standalone(CURATED)],
+    [
+      "standalone checklist with and-joined curated topics",
+      standalone(["- [x] Unit tests and type safety and ci status"]),
+    ],
+    [
+      "standalone checklist under a deeper heading level",
+      standalone(CURATED).replace(
+        "#### What I checked",
+        "##### What I checked",
+      ),
+    ],
+    [
+      "standalone checklist with a legacy curated subject",
+      standalone(["- [x] `pnpm-workspace.yaml` override syntax/scope"]),
+    ],
+  ]) {
+    expectReady(label, body, true);
+  }
+
+  for (const [label, body] of [
+    // The allowlist must not become open-ended: an uncurated subject is a free
+    // sentence, and a free sentence can state a defect.
+    [
+      "checklist subject outside the curated topic set",
+      standalone([`- [x] ${DEFECT}`]),
+    ],
+    [
+      "checklist subject that only starts with a curated topic",
+      standalone(["- [x] Unit tests, but the retry loop never terminates"]),
+    ],
+    [
+      "checklist subject joining more topics than the cap allows",
+      standalone([
+        "- [x] Unit tests and type safety and ci status and review title",
+      ]),
+    ],
+    [
+      "checklist subject with an unbalanced code span",
+      standalone(["- [x] `unit tests"]),
+    ],
+    // `hasUncheckedTaskBox` guards every recognized shape, and a checklist
+    // entry is no exception: an unticked or negated box states an intention the
+    // reviewer never completed.
+    [
+      "unchecked checklist entry",
+      standalone(["- [ ] Unit tests", "- [x] Parser behavior"]),
+    ],
+    [
+      "negated checklist entry",
+      standalone(["- [-] Unit tests", "- [x] Parser behavior"]),
+    ],
+    // Recognizing the checklist must not license the rest of the body.
+    [
+      "curated checklist beside a declarative defect",
+      `${standalone(CURATED)}\n\n${DEFECT}`,
+    ],
+    [
+      "curated checklist beside an explicit action",
+      `${standalone(CURATED)}\n\nPlease fix the fallback.`,
+    ],
+    [
+      "curated checklist beside a severity finding",
+      `${standalone(CURATED)}\n\nSeverity: High — the token leaks into the log.`,
+    ],
+    // A checklist is evidence of review, never the clean conclusion itself.
+    // Dropping the conclusion must still block.
+    [
+      "curated checklist with no clean conclusion",
+      standalone(CURATED).replace("\n\nNo P1/P2/P3 findings.", ""),
+    ],
+    // The entry grammar accepts one subject, not a smuggled finding line.
+    [
+      "checklist entry carrying a priority finding",
+      standalone(["- [x] [P1] Unit tests are missing"]),
+    ],
+    [
+      "checklist heading carrying a claim",
+      standalone(CURATED).replace(
+        "#### What I checked",
+        `#### What I checked — ${DEFECT}`,
+      ),
+    ],
+  ]) {
+    expectReady(label, body, false);
   }
 });
 
