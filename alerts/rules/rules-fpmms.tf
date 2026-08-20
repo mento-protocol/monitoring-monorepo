@@ -962,8 +962,8 @@ resource "grafana_rule_group" "fpmms_depletion" {
     # view — the Slack template renders `description` for critical severity
     # alone, so everything an operator needs in the channel is in `summary`.
     annotations = {
-      summary          = "Pool holds reserves but publishes no value share, so the depletion rules cannot see it. Check the metrics-bridge logs for an unread `invertRateFeed` or a rate feed with no live median."
-      description      = "`Pool Depletion Risk` and `Pool Nearly One-Sided` both read the `mento_pool_reserve_value_share_token0` / `mento_pool_reserve_value_share_token1` pair. metrics-bridge publishes those only when the pool has a live SortedOracles median and its `invertRateFeed` orientation has been read on chain, and withholds them otherwise rather than publish a share derived from a guessed rate. Both rules treat the resulting silence as OK, so this pool is currently unwatched for depletion. ADR 0067 records the fail-closed decision."
+      summary          = "Pool holds reserves but publishes no value share, so the depletion rules cannot see it. Check the metrics-bridge logs for an unread `invertRateFeed`, unread token decimals, or a rate feed with no live median."
+      description      = "`Pool Depletion Risk` and `Pool Nearly One-Sided` both read the `mento_pool_reserve_value_share_token0` / `mento_pool_reserve_value_share_token1` pair. metrics-bridge publishes those only when the pool has a live SortedOracles median, its `invertRateFeed` orientation has been read on chain, and its token decimals have been read (`tokenDecimalsKnown`); it withholds them otherwise rather than publish a share derived from a guessed rate or a guessed decimal scale. Unread decimals are the one cause that leaves the oracle looking entirely healthy, so check `tokenDecimalsKnown` before chasing the feed. Both rules treat the resulting silence as OK, so this pool is currently unwatched for depletion. ADR 0067 records the fail-closed decision."
       resolved_title   = "Pool Value Share Restored"
       resolved_summary = "The pool publishes value shares again — the depletion rules cover it."
     }
