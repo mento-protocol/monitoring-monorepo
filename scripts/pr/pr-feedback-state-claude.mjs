@@ -168,6 +168,16 @@ const CLEAN_REVIEW_COMPATIBILITY = new Map([
       headRefOid: "7d982e05a0256d73d0d7aeafc485dfad338e63ce",
     },
   ],
+  [
+    "6ebf5de00fde8c46040def096e4c0c02ee0ab02b9fae20130e1ba8e6e84037e3",
+    {
+      author: "claude[bot]",
+      prNumber: "1965",
+      commentId: "5355983385",
+      headRefOid: "0884780bfe1d5ae8710a6f845c3a6199f1bf365d",
+      createdAt: "2026-08-20T12:37:45Z",
+    },
+  ],
 ]);
 
 function normalizedReviewTitle(value) {
@@ -405,7 +415,10 @@ export function matchesCleanReviewCompatibilityRegistry(comment, pr, rawBody) {
     String(comment?.author ?? "").toLowerCase() === registered.author &&
     String(pr?.number ?? "") === registered.prNumber &&
     String(comment?.id ?? "") === registered.commentId &&
-    String(pr?.headRefOid ?? "") === registered.headRefOid
+    String(pr?.headRefOid ?? "") === registered.headRefOid &&
+    (registered.createdAt === undefined ||
+      String(comment?.createdAt ?? comment?.created_at ?? "") ===
+        registered.createdAt)
   );
 }
 

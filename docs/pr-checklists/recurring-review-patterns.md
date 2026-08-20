@@ -88,6 +88,40 @@ be unique per run (`$GITHUB_RUN_ID`). Probe path is `/health`, never
 requires `roles/iam.serviceAccountTokenCreator` on the runtime SA the deployer
 impersonates. Full Cloud Run rules are in the linked checklist.
 
+### Environment-approved CI Terraform applies
+
+Apply this review when the owning [`terraform.stacks.json`](../../terraform.stacks.json)
+entry has `applyPolicy: "ci-production-infra-environment-approved"`. A required
+reviewer approves the `production-infra` environment job; CI then runs
+`terraform apply -auto-approve`. Review the apply path before approval:
+
+- [ ] Verify that each new or changed resource is creatable through the remote
+      API. `terraform validate`, provider schemas, and a plan do not prove that
+      the remote create or update request will succeed.
+- [ ] If a remote resource might already exist, establish a CI-compatible
+      adoption or import path before the approved apply. Do not rely on a manual
+      `terraform import` between environment approval and apply.
+- [ ] Check the authoritative API reference for field and cross-field
+      constraints that the provider schema omits or contradicts.
+- [ ] Identify the effect of a rejected API call on resources shipped in the
+      same apply. Terraform can stop after partial mutations; split or sequence
+      changes when that failure would block a co-shipped resource or leave
+      unsafe partial state.
+- [ ] When behavior changes, search operator-facing Terraform `description` and
+      `display_name` attributes as well as Markdown. Use stems and alternate word
+      forms, then read every match; for example, `success` does not match
+      `succeeded`.
+
+Worked examples:
+
+- `google_artifact_registry_repository.gcf_artifacts` targeted an auto-created
+  repository. A normal create would fail with `already exists`, so the change
+  needs a CI-compatible adoption or import path before the approved apply.
+- A Cloud Monitoring condition used `evaluation_missing_data` with
+  `duration = "0s"`. The provider schema accepted the configuration, but the
+  remote API requires at least 60 seconds when `evaluation_missing_data` is set,
+  so the create would fail.
+
 ### CI workflow gates — [checklist](ci-workflow-gates.md)
 
 tldr: **ruleset-required** workflows (`ci`, `Code Quality`, the Vercel checks) MUST NOT use `paths:`/`paths-ignore:` (skipped runs = pending forever); **advisory** workflows SHOULD use `paths:` to avoid booting a runner on irrelevant PRs (CI-cost control). Deploy jobs MUST gate on `if: github.ref == 'refs/heads/main'`. Third-party actions MUST be SHA-pinned; `node scripts/workflows/check-github-action-pins.mjs` enforces this in Code Quality. Concurrency group with `cancel-in-progress: false`. Cache keys MUST include every input that affects the cached output. Full rules in the linked checklist.

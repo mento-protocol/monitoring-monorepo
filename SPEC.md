@@ -3,7 +3,7 @@ title: Mento Monitoring Technical Specification
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-24
+last_verified: 2026-08-20
 doc_type: reference
 scope: repo-wide
 review_interval_days: 90
@@ -84,7 +84,10 @@ The system has four principal data paths:
    metric streams to Grafana Cloud for evaluation and routing. The Grafana
    rule source defines warning-only operations consumers for listing and
    indexed-pool reachability; protected activation remains separate, and
-   missing or stale listing evidence cannot fabricate delisting.
+   missing or stale listing evidence cannot fabricate delisting. The dashboard
+   reads current decisions from Metrics Bridge through a same-origin server
+   route. Separate server-only routes read historical series and alert state
+   from Grafana Cloud. History failures do not block the current-state board.
 3. **Event and incident path:** discrete events bypass the metric path.
    QuickNode and governance handlers deliver through their owning Cloud
    Functions. The Sentry-to-Slack bridge is configured directly through the
@@ -103,20 +106,20 @@ The governing decisions are
 
 ## Runtime boundaries
 
-| Surface                    | Responsibility                                          | Runtime or platform          | Owning source                                                                |
-| -------------------------- | ------------------------------------------------------- | ---------------------------- | ---------------------------------------------------------------------------- |
-| Shared config              | Chain, token, deployment, threshold, and ABI metadata   | Published TypeScript package | [`shared-config/AGENTS.md`](./shared-config/AGENTS.md)                       |
-| Indexer and GraphQL        | Event/RPC ingestion, entities, rollups, Hasura API      | Envio hosted                 | [`indexer-envio/AGENTS.md`](./indexer-envio/AGENTS.md)                       |
-| Dashboard                  | Human-facing monitoring and analysis                    | Vercel                       | [`ui-dashboard/AGENTS.md`](./ui-dashboard/AGENTS.md)                         |
-| Metrics bridge             | Indexed Hasura and direct CEX/RPC peg metrics           | Cloud Run                    | [`metrics-bridge/AGENTS.md`](./metrics-bridge/AGENTS.md)                     |
-| Aegis                      | v2 contract view calls to Prometheus metrics            | App Engine                   | [`aegis/AGENTS.md`](./aegis/AGENTS.md)                                       |
-| Collector                  | Aegis and bridge scrape jobs to Grafana Cloud           | Grafana Alloy on App Engine  | `aegis/grafana-agent/`                                                       |
-| Metric rules and routing   | Grafana rules, contact points, templates, mute timings  | Grafana Cloud                | [`alerts/AGENTS.md`](./alerts/AGENTS.md)                                     |
-| Event delivery             | QuickNode handler and on-call rotation announcer        | Cloud Functions              | [`alerts/AGENTS.md`](./alerts/AGENTS.md)                                     |
-| Sentry notification bridge | Direct Sentry-to-Slack alert and channel configuration  | Terraform providers          | [`sentry-bridge/README.md`](./alerts/infra/channels/sentry-bridge/README.md) |
-| Sentry triage and autofix  | Incident ingest, issue projection, and eligible fix PRs | GitHub Actions               | [ADR 0036](./docs/adr/0036-sentry-triage-pipeline.md)                        |
-| Governance watchdog        | Governance event notifications                          | Cloud Function               | [`governance-watchdog/README.md`](./governance-watchdog/README.md)           |
-| Integration probes         | Read-only aggregator and router coverage snapshots      | GitHub Actions and Upstash   | [`integration-probes/AGENTS.md`](./integration-probes/AGENTS.md)             |
+| Surface                    | Responsibility                                                | Runtime or platform          | Owning source                                                                |
+| -------------------------- | ------------------------------------------------------------- | ---------------------------- | ---------------------------------------------------------------------------- |
+| Shared config              | Chain, token, deployment, threshold, and ABI metadata         | Published TypeScript package | [`shared-config/AGENTS.md`](./shared-config/AGENTS.md)                       |
+| Indexer and GraphQL        | Event/RPC ingestion, entities, rollups, Hasura API            | Envio hosted                 | [`indexer-envio/AGENTS.md`](./indexer-envio/AGENTS.md)                       |
+| Dashboard                  | Human-facing monitoring and analysis                          | Vercel                       | [`ui-dashboard/AGENTS.md`](./ui-dashboard/AGENTS.md)                         |
+| Metrics bridge             | Indexed Hasura, direct CEX/RPC metrics, current peg decisions | Cloud Run                    | [`metrics-bridge/AGENTS.md`](./metrics-bridge/AGENTS.md)                     |
+| Aegis                      | v2 contract view calls to Prometheus metrics                  | App Engine                   | [`aegis/AGENTS.md`](./aegis/AGENTS.md)                                       |
+| Collector                  | Aegis and bridge scrape jobs to Grafana Cloud                 | Grafana Alloy on App Engine  | `aegis/grafana-agent/`                                                       |
+| Metric rules and routing   | Grafana rules, contact points, templates, mute timings        | Grafana Cloud                | [`alerts/AGENTS.md`](./alerts/AGENTS.md)                                     |
+| Event delivery             | QuickNode handler and on-call rotation announcer              | Cloud Functions              | [`alerts/AGENTS.md`](./alerts/AGENTS.md)                                     |
+| Sentry notification bridge | Direct Sentry-to-Slack alert and channel configuration        | Terraform providers          | [`sentry-bridge/README.md`](./alerts/infra/channels/sentry-bridge/README.md) |
+| Sentry triage and autofix  | Incident ingest, issue projection, and eligible fix PRs       | GitHub Actions               | [ADR 0036](./docs/adr/0036-sentry-triage-pipeline.md)                        |
+| Governance watchdog        | Governance event notifications                                | Cloud Function               | [`governance-watchdog/README.md`](./governance-watchdog/README.md)           |
+| Integration probes         | Read-only aggregator and router coverage snapshots            | GitHub Actions and Upstash   | [`integration-probes/AGENTS.md`](./integration-probes/AGENTS.md)             |
 
 ## Networks, contracts, and identifiers
 
