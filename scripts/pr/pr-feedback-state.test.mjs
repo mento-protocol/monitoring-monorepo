@@ -1938,6 +1938,29 @@ test("accepts the PR #1954 label-bold verdict and bracketed no-findings roll-up"
     ),
     false,
   );
+  // Verdict and conclusion tails run through the SAME strip, so they must agree
+  // on every suffix. Spelling the mark into the verdict pattern as well left
+  // them disagreeing: `LGTM ✅` cleared but `LGTM. ✅` did not, while the
+  // conclusion accepted both. This asserts the symmetry rather than a list of
+  // remembered cases.
+  for (const suffix of ["", ".", " ✅", " ✅.", ". ✅", " 👍", ". 👍", " ✔️"]) {
+    expectReady(
+      `verdict tail ${JSON.stringify(suffix)}`,
+      PR_1954_CLEAN_CLAUDE_BODY.replace(
+        "**Verdict:** LGTM",
+        `**Verdict:** LGTM${suffix}`,
+      ),
+      true,
+    );
+    expectReady(
+      `conclusion tail ${JSON.stringify(suffix)}`,
+      PR_1954_CLEAN_CLAUDE_BODY.replace(
+        "1. None — no [P1]/[P2]/[P3] findings.",
+        `No P1/P2 findings${suffix}`,
+      ),
+      true,
+    );
+  }
   // The lookahead permits only a terminator after the mark, so prose following
   // a punctuated mark is not stripped either.
   expectReady(

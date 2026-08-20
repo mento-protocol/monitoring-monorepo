@@ -67,17 +67,22 @@ const CLEAN_CONCLUSION_WITH_TAIL =
 // would read as clean. On a fail-closed gate that silently drops real reviewer
 // findings before merge, so the only safe rule is that a clean verdict asserts
 // cleanliness and says nothing further.
-// An approval mark is allowed after the verdict word, because it asserts
-// nothing a reader could act on — `**Verdict:** LGTM ✅` is the same
-// statement as `**Verdict:** LGTM`. This is the emoji set
-// `CLEAN_REVIEW_TITLE` already accepts, and nothing else joins it: any word
-// after the verdict is prose and still blocks.
+// What may follow a verdict or conclusion once any approval mark is stripped:
+// a bare sentence terminator, and nothing else.
 //
-// Without this a genuinely clean review blocked its own feedback gate with
-// no reply-based escape, because `blockingTopLevelBotComments` is computed
-// from the comment alone. PR #1975 was ready to merge and gate-blocked by
-// its own LGTM; that is the failure this closes.
-const CLEAN_TAIL_SHAPE = /^(?:✅|✔️?|\u{1F44D}️?|\s)*[.!]?$/u;
+// The mark itself is NOT spelled into this pattern. Both tails run through
+// `stripApprovalMark` first, so one rule decides what a mark is and where it
+// may sit, in one place. Spelling it here as well left the two paths disagreeing
+// — the verdict accepted `LGTM ✅` but not `LGTM. ✅`, while the conclusion
+// accepted both.
+//
+// An approval mark is allowed at all because it asserts nothing a reader could
+// act on: `**Verdict:** LGTM ✅` is the same statement as `**Verdict:** LGTM`.
+// Without it a genuinely clean review blocked its own feedback gate with no
+// reply-based escape, because `blockingTopLevelBotComments` is computed from
+// the comment alone. PR #1975 was ready to merge and gate-blocked by its own
+// LGTM.
+const CLEAN_TAIL_SHAPE = /^[.!]?$/;
 // The prefix grammar `reviewLineContent` peels: bullets, numbering, headings,
 // and task boxes, in any order and up to three deep. `hasUncheckedTaskBox`
 // walks the same pattern and depth — keep them shared, never re-spelled.
@@ -243,7 +248,7 @@ function isClaudeAuthor(value) {
 // Guards whatever trails a clean verdict or roll-up entry: only a bare sentence
 // terminator passes. See CLEAN_TAIL_SHAPE for why this is an allowlist.
 function isCleanTail(tail) {
-  return CLEAN_TAIL_SHAPE.test(String(tail ?? "").trim());
+  return CLEAN_TAIL_SHAPE.test(stripApprovalMark(String(tail ?? "").trim()));
 }
 
 function matchesCleanVerdict(line) {
