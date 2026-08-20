@@ -8,9 +8,13 @@ const THRESHOLDS_PATH = "shared-config/src/thresholds.ts";
 const ALERTS_MAIN_PATH = "alerts/rules/main.tf";
 const FPMM_RULES_PATH = "alerts/rules/rules-fpmms.tf";
 
+// Only the constants Terraform actually mirrors. `DEVIATION_CRITICAL_RATIO`
+// is intentionally absent: since ADR 0067 it is an analytics classification
+// with no Grafana consumer, so there is nothing in `alerts/` to keep in sync.
 const THRESHOLD_EXPORTS = {
   tolerance: "DEVIATION_TOLERANCE_RATIO",
-  critical: "DEVIATION_CRITICAL_RATIO",
+  depletionCritical: "POOL_DEPLETION_CRITICAL_SHARE",
+  depletionPage: "POOL_DEPLETION_PAGE_SHARE",
 };
 
 function repoRoot() {
@@ -23,15 +27,6 @@ function escapeRegex(value) {
 
 function numberLiteral(value) {
   return `(?<![0-9A-Za-z_.+-])${escapeRegex(value)}(?![0-9A-Za-z_.+-])`;
-}
-
-function percentLiteral(value) {
-  return `(?<![0-9.])${escapeRegex(value)}%{1,2}(?![0-9.%])`;
-}
-
-function percentNumberLiteral(value) {
-  const suffix = /^[0-9]+$/.test(value) ? "(?:\\.0+)?" : "";
-  return `(?<![0-9.])${escapeRegex(value)}${suffix}(?![0-9.])`;
 }
 
 function normalizeDecimalLiteral(value) {
@@ -67,13 +62,6 @@ function ratioToPercentLiteral(value) {
 function extractQuotedLocal(source, name) {
   const match = source.match(
     new RegExp(`\\b${name}\\s*=\\s*"((?:\\\\.|[^"\\\\])*)"`),
-  );
-  return match?.[1] ?? null;
-}
-
-function extractFormatStringLocal(source, name) {
-  const match = source.match(
-    new RegExp(`\\b${name}\\s*=\\s*format\\(\\s*"((?:\\\\.|[^"\\\\])*)"`),
   );
   return match?.[1] ?? null;
 }
@@ -146,10 +134,28 @@ function extractDataBlockByRefId(source, refId) {
   );
 }
 
-function extractDeviationWarningThresholdBlock(source) {
-  const rule = extractNamedRuleBlock(source, "Deviation Breach");
-  if (rule === null) return null;
-  return extractDataBlockByRefId(rule, "threshold");
+// Scope an evaluator check to one named rule's `threshold` data block, so a
+// same-shaped evaluator on a neighbouring rule cannot satisfy it.
+function thresholdBlockOf(ruleName) {
+  return (source) => {
+    const rule = extractNamedRuleBlock(source, ruleName);
+    if (rule === null) return null;
+    return extractDataBlockByRefId(rule, "threshold");
+  };
+}
+
+// Whitespace that may cross a wrapped comment line, so `#` counts as spacing.
+const GAP = "[\\s#]+";
+
+// A number wrapped in Markdown backticks, as the banner writes its literals.
+function quotedLiteral(value) {
+  return "\\x60" + numberLiteral(value) + "\\x60";
+}
+
+function evaluatorPattern(literal, comparison) {
+  return new RegExp(
+    `evaluator\\s*=\\s*\\{\\s*params\\s*=\\s*\\[${numberLiteral(literal)}\\]\\s*,\\s*type\\s*=\\s*"${comparison}"`,
+  );
 }
 
 function extractThreshold(source, exportName) {
@@ -166,61 +172,14 @@ function extractThreshold(source, exportName) {
 }
 
 function requiredChecks(thresholds) {
-  const tolerance = numberLiteral(thresholds.tolerance);
-  const critical = numberLiteral(thresholds.critical);
   const tolerancePercent = ratioToPercentLiteral(thresholds.tolerance);
-  const criticalPercent = ratioToPercentLiteral(thresholds.critical);
 
   return [
     {
-      file: ALERTS_MAIN_PATH,
-      description: "critical gate still requires current ratio above tolerance",
-      extract: (source) =>
-        extractFormatStringLocal(source, "deviation_critical_gate_promql"),
-      pattern: new RegExp(`mento_pool_deviation_ratio\\s*>\\s*${tolerance}`),
-    },
-    {
-      file: ALERTS_MAIN_PATH,
-      description:
-        "critical gate still requires open-breach peak above critical",
-      extract: (source) =>
-        extractQuotedLocal(source, "deviation_critical_magnitude_promql"),
-      pattern: new RegExp(
-        `mento_pool_deviation_open_breach_peak_ratio\\s*>\\s*${critical}`,
-      ),
-    },
-    {
-      file: ALERTS_MAIN_PATH,
-      description: "critical gate still requires current ratio above critical",
-      extract: (source) =>
-        extractQuotedLocal(source, "deviation_critical_magnitude_promql"),
-      pattern: new RegExp(`mento_pool_deviation_ratio\\s*>\\s*${critical}`),
-    },
-    {
-      file: ALERTS_MAIN_PATH,
-      description: "critical annotation mirrors critical threshold percent",
-      extract: (source) =>
-        extractHeredocLocal(source, "deviation_critical_summary_annotation"),
-      validate: (fragment) =>
-        allContextPercentLiteralsMatch(fragment, "threshold", criticalPercent),
-    },
-    {
-      file: ALERTS_MAIN_PATH,
-      description:
-        "critical annotation crossed branch mirrors critical threshold percent",
-      extract: (source) =>
-        extractHeredocLocal(source, "deviation_critical_summary_annotation"),
-      pattern: new RegExp(
-        `if\\s+lt\\s+\\$dev\\s+${percentNumberLiteral(criticalPercent)}\\s*-}}[\\s\\S]*?Pool\\s+crossed\\s+${percentLiteral(criticalPercent)}\\s+threshold`,
-      ),
-    },
-    {
-      file: ALERTS_MAIN_PATH,
-      description: "critical annotation mirrors warning tolerance percent",
-      extract: (source) =>
-        extractHeredocLocal(source, "deviation_critical_summary_annotation"),
-      validate: (fragment) =>
-        allContextPercentLiteralsMatch(fragment, "tolerance", tolerancePercent),
+      file: FPMM_RULES_PATH,
+      description: "warning Grafana threshold evaluator mirrors tolerance",
+      extract: thresholdBlockOf("Deviation Breach"),
+      pattern: evaluatorPattern(thresholds.tolerance, "gt"),
     },
     {
       file: ALERTS_MAIN_PATH,
@@ -232,17 +191,55 @@ function requiredChecks(thresholds) {
     },
     {
       file: FPMM_RULES_PATH,
-      description: "warning Grafana threshold evaluator mirrors tolerance",
-      extract: extractDeviationWarningThresholdBlock,
-      pattern: new RegExp(
-        `evaluator\\s*=\\s*\\{\\s*params\\s*=\\s*\\[${tolerance}\\]\\s*,\\s*type\\s*=\\s*"gt"`,
-      ),
+      description:
+        "depletion critical evaluator mirrors the critical side share",
+      extract: thresholdBlockOf("Pool Depletion Risk"),
+      pattern: evaluatorPattern(thresholds.depletionCritical, "lt"),
     },
     {
       file: FPMM_RULES_PATH,
-      description: "threshold banner mirrors tolerance and critical literals",
+      description: "depletion page evaluator mirrors the page side share",
+      extract: thresholdBlockOf("Pool Nearly One-Sided"),
+      pattern: evaluatorPattern(thresholds.depletionPage, "lt"),
+    },
+    {
+      // The critical band floors where the page band ends. Drift here would
+      // silently open a gap (a pool in neither band) or an overlap (one pool,
+      // two notifications), which is exactly what the partition prevents.
+      file: ALERTS_MAIN_PATH,
+      description: "depletion critical band floors at the page side share",
+      extract: (source) =>
+        extractQuotedLocal(source, "pool_depletion_critical_active_promql"),
+      pattern: new RegExp(`>=\\s*${numberLiteral(thresholds.depletionPage)}`),
+    },
+    {
+      // The banner is the first thing a reader of rules-fpmms.tf sees, so it
+      // has to name the live literals. `GAP` spans comment-continuation `#`
+      // characters because the sentence wraps across comment lines.
+      file: FPMM_RULES_PATH,
+      description: "threshold banner names every mirrored literal",
       pattern: new RegExp(
-        `bare\\s+\`${tolerance}\`\\s+\\(warn\\)\\s+and\\s+\`${critical}\`\\s+\\(critical\\)`,
+        [
+          "bare",
+          GAP,
+          quotedLiteral(thresholds.tolerance),
+          GAP,
+          "\\(deviation tolerance\\),",
+          GAP,
+          quotedLiteral(thresholds.depletionCritical),
+          GAP,
+          "\\(pool",
+          GAP,
+          "depletion critical side share\\)",
+          GAP,
+          "and",
+          GAP,
+          quotedLiteral(thresholds.depletionPage),
+          GAP,
+          "\\(pool",
+          GAP,
+          "depletion page side share\\)",
+        ].join(""),
       ),
     },
   ];
@@ -254,10 +251,12 @@ export function validateDeviationThresholdDrift(sources) {
     throw new Error(`missing source: ${THRESHOLDS_PATH}`);
   }
 
-  const thresholds = {
-    tolerance: extractThreshold(thresholdsSource, THRESHOLD_EXPORTS.tolerance),
-    critical: extractThreshold(thresholdsSource, THRESHOLD_EXPORTS.critical),
-  };
+  const thresholds = Object.fromEntries(
+    Object.entries(THRESHOLD_EXPORTS).map(([key, exportName]) => [
+      key,
+      extractThreshold(thresholdsSource, exportName),
+    ]),
+  );
 
   const failures = [];
   for (const check of requiredChecks(thresholds)) {
@@ -299,7 +298,7 @@ function main() {
   );
   if (failures.length > 0) {
     console.error(
-      "Deviation threshold drift check failed. Mirror shared-config/src/thresholds.ts into alerts/rules/main.tf and alerts/rules/rules-fpmms.tf.",
+      "Alert threshold drift check failed. Mirror shared-config/src/thresholds.ts into alerts/rules/main.tf and alerts/rules/rules-fpmms.tf.",
     );
     for (const failure of failures) console.error(`- ${failure}`);
     process.exitCode = 1;
@@ -307,7 +306,7 @@ function main() {
   }
 
   console.log(
-    `Deviation threshold drift check OK: tolerance=${thresholds.tolerance}, critical=${thresholds.critical}`,
+    `Alert threshold drift check OK: tolerance=${thresholds.tolerance}, depletion critical=${thresholds.depletionCritical}, depletion page=${thresholds.depletionPage}`,
   );
 }
 

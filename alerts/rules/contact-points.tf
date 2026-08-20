@@ -32,15 +32,44 @@ resource "grafana_contact_point" "slack_warnings" {
   }
 }
 
-resource "grafana_contact_point" "slack_critical_transition" {
-  name = "slack-alerts-critical-transition"
+# Page-grade pool delivery: Splunk On-Call and #alerts-critical from ONE
+# contact point.
+#
+# Every fpmms rule routes through rule-level `notification_settings`, which
+# bypasses `grafana_notification_policy.all` entirely. That leaves two ways for
+# a pool rule to reach Splunk On-Call:
+#
+#   1. Drop `notification_settings` from the rule and add a
+#      `service=fpmms, severity=page` branch to the policy tree, as the
+#      trading-limit and trading-mode pages do. Rejected on two counts. The
+#      policy tree's Slack contact points render through
+#      `local.alert_config_slack`, an alertname dispatcher with no branch for
+#      pool rules — the page would arrive as a raw `.CommonLabels` dump with no
+#      pool link. And it would put one rule of the fpmms plane on the
+#      label-routed plane, so any later edit that restored rule-level settings
+#      (or any new policy branch matching `service=fpmms`) would silently
+#      double-deliver the same page through both planes.
+#   2. Bundle both destinations in one contact point, as the peg plane already
+#      does with `grafana_contact_point.peg_page`. One send per firing group,
+#      one delivery per destination, no policy-tree interaction at all.
+#
+# We take (2). The Slack half reuses the v3 body template so a page looks like
+# every other pool alert; the Splunk half gets its own plain-text rendering
+# because mrkdwn arrives at the pager as literal asterisks and link syntax.
+resource "grafana_contact_point" "pool_page" {
+  name = "Pool pages (Splunk On-Call + #alerts-critical)"
 
   slack {
-    token                   = var.slack_bot_token
-    recipient               = var.slack_channel_critical
-    disable_resolve_message = true
-    title                   = "{{ if eq .Status \"firing\" }}🚨{{ else }}✅{{ end }}"
-    text                    = local.slack_body_template
+    token     = var.slack_bot_token
+    recipient = var.slack_channel_critical
+    title     = "{{ if eq .Status \"firing\" }}🚨{{ else }}✅{{ end }}"
+    text      = local.slack_body_template
+  }
+
+  victorops {
+    url         = var.splunk_on_call_alerts_webhook_url
+    title       = local.victorops_pool_page_title
+    description = local.victorops_pool_page_message
   }
 }
 
@@ -251,6 +280,24 @@ locals {
     {{ end }}
   EOT
 
+  # Plain-text Splunk On-Call rendering for pool pages. Deliberately not one of
+  # the `victorops.*` message templates in message-templates-victorops.tf:
+  # those are selected by `local.alert_config_victorops`, an alertname
+  # dispatcher belonging to the label-routed plane, and this contact point
+  # serves exactly one rule group on the rule-level plane.
+  victorops_pool_page_title = <<-EOT
+    {{ .CommonLabels.alertname }}{{ if .CommonLabels.pair }} - {{ .CommonLabels.pair }}{{ end }}{{ if .CommonLabels.chain_name }} ({{ .CommonLabels.chain_name }}){{ end }}
+  EOT
+
+  victorops_pool_page_message = <<-EOT
+    {{ range .Alerts }}{{ if .Annotations.summary }}{{ .Annotations.summary }}
+    {{ end }}{{ if .Annotations.current_reserves }}Reserves: {{ .Annotations.current_reserves }}
+    {{ end }}{{ if .Annotations.rebalance_reason }}Rebalance blocked: {{ .Annotations.rebalance_reason }}
+    {{ end }}{{ if .Labels.pool_id }}Pool: https://monitoring.mento.org/pool/{{ .Labels.pool_id }}
+    {{ end }}Alert ID: {{ .Fingerprint }}
+    {{ end }}
+  EOT
+
   # Group/repeat timings applied via notification_settings on every v3 rule.
   # Aegis root policy uses 30s/5m/4h for catch-all. v3 criticals repeat hourly by
   # default so an unacknowledged page doesn't go silent overnight; the one
@@ -258,9 +305,9 @@ locals {
   # for days at a time and where hourly repetition buries the new alerts instead
   # of surfacing the old one.
   #
-  # Four variants:
+  # Five variants:
   #   `notify_*_pool` omits `alertname` so co-firing KPI rules on the same
-  #     pool (e.g. Deviation Breach + Rebalancer Stale) collapse into one
+  #     pool (e.g. Pool Depletion Risk + Rebalancer Stale) collapse into one
   #     Slack thread per (chain_id, pool_id). Used by fpmms pool-level rules.
   #   `notify_*` keeps `alertname` (the pre-collapse grouping). Used by
   #     service-scoped rules (metrics-bridge) that lack pool labels —
@@ -269,6 +316,8 @@ locals {
   #   `notify_critical_incident` omits `pool_id` so a single upstream failure
   #     that hits many pools at once collapses into one Slack message per
   #     (chain_id, alertname). Used by the oracle-driven criticals.
+  #   `notify_page_pool` is `notify_critical_pool` pointed at the bundled
+  #     Splunk On-Call + Slack contact point, for the one pool rule that pages.
   notify_critical = {
     contact_point   = grafana_contact_point.slack_critical.name
     group_by        = ["alertname", "grafana_folder", "chain_id", "pool_id"]
@@ -341,12 +390,17 @@ locals {
     repeat_interval = "4h"
   }
 
-  notify_critical_transition = {
-    contact_point   = grafana_contact_point.slack_critical_transition.name
-    group_by        = ["alertname", "grafana_folder", "chain_id", "pool_id"]
-    group_wait      = "0s"
+  # Page-grade pool route. Same per-pool grouping as the critical routes, and
+  # the hourly critical repeat rather than the 12h slow one: a pool that is
+  # about to stop serving one swap direction is not a "check back tomorrow"
+  # condition, and it is rare enough that hourly repetition cannot bury
+  # anything.
+  notify_page_pool = {
+    contact_point   = grafana_contact_point.pool_page.name
+    group_by        = ["grafana_folder", "chain_id", "pool_id"]
+    group_wait      = "30s"
     group_interval  = "5m"
-    repeat_interval = "4h"
+    repeat_interval = "1h"
   }
 
   notify_warning_transition = {

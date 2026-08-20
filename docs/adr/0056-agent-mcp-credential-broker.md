@@ -174,3 +174,9 @@ start is theatre. The variable must be absent when the process is exec'd. So:
   `scripts/sentry/broker/sentry-mcp-broker.test.mjs` (fail-closed and mutation-checked), and
   `.github/workflows/sentry-triage-agent.yml`. Operator detail in
   [`docs/notes/sentry-triage-pipeline.md`](../notes/sentry-triage-pipeline.md).
+- Broker readiness is not the whole toolchain. The credential path can be
+  healthy while the MCP server itself never registers, and that failure is
+  silent: the CLI initialises without the server and the agent simply has no
+  Sentry tool. `scripts/sentry/broker/sentry-mcp-probe.mjs` closes that fail-open with a
+  handshake + `tools/list` pre-flight in the same job, before the agent (issue
+  #1938); it shares this broker's suite and its `env`-pinned server spec.

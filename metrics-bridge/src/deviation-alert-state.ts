@@ -8,6 +8,13 @@ import type { PoolRow } from "./types.js";
 
 export { USD_PEGGED_SYMBOLS } from "./fx-market.js";
 
+// Dwell times for the ANALYTICS alert-state classification. They were derived
+// from the deviation rules' Grafana timings and kept that shape after ADR 0067
+// deleted the magnitude-based criticals: the dashboard, breach history, and
+// `mento_pool_deviation_alert_state` all read this classification, and
+// redefining it would rewrite persisted breach accounting. No Grafana rule
+// depends on these values any more, so they are free to change on their own
+// merits rather than to track a rule.
 export const DEVIATION_WARNING_PENDING_SECONDS = 900;
 export const DEVIATION_CRITICAL_FIRING_SECONDS = 3_660;
 const DEVIATION_CRITICAL_PENDING_SECONDS = 60;

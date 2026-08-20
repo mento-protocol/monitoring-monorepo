@@ -19,22 +19,27 @@ export const PEG_POLICY_URL = env.PEG_POLICY_URL;
 // runtime's error channel.
 export const PEG_POLICY_AUTH_MODE = env.PEG_POLICY_AUTH_MODE;
 
-// Rebalance-reason probe runs every Nth Hasura poll cycle. The
-// `Deviation Breach Critical` alert needs the breach to be sustained
-// for >1h before firing, so a few-minute probe cadence is well inside the
-// noise floor and keeps RPC load proportional to "pools currently in
-// critical breach", typically 0–3 pools at Mento's scale.
+// Rebalance-reason probe runs every Nth Hasura poll cycle. Its output is an
+// annotation on the alerts that explain a stuck pool — `Rebalancer Stale`,
+// `Rebalance Ineffective`, `Deviation Breach`, and the depletion rules — none
+// of which fires inside a few minutes, so a few-minute probe cadence is well
+// inside the noise floor and keeps RPC load proportional to "pools currently
+// deep in breach", typically 0–3 pools at Mento's scale.
 export const REBALANCE_PROBE_EVERY_N_POLLS = Math.floor(
   env.REBALANCE_PROBE_EVERY_N_POLLS,
 );
 
 // Pools above tolerance whose current ratio or open-breach peak crossed this
-// threshold are eligible for the rebalance-reason probe. Mirrors the
-// `Deviation Breach Critical` rule so the annotation only attaches to alerts
-// that can actually fire. Sourced from
-// `@mento-protocol/config/thresholds` so a future bump of the
-// critical magnitude lands in one place across TS packages (the HCL literal in
-// rules-fpmms.tf still has to be edited manually — see that file's comments).
+// threshold are eligible for the rebalance-reason probe. This is a COST GATE,
+// not an alert mirror: since ADR 0067 nothing pages on the 1.05 magnitude —
+// the one Grafana rule left downstream of it is the warning-severity
+// `Deviation Breach Critical State Changed`, which reports transitions of the
+// bridge's classification rather than firing on the ratio — but a pool that
+// deep in breach is exactly the one whose blocked
+// rebalance is worth an RPC simulation, and the gate keeps that simulation off
+// the long tail of pools drifting a fraction over tolerance. Sourced from
+// `@mento-protocol/config/thresholds` so a future bump lands in one place
+// across TS packages; nothing in `alerts/` mirrors it any more.
 export const REBALANCE_PROBE_DEVIATION_THRESHOLD = DEVIATION_CRITICAL_RATIO;
 export const REBALANCE_PROBE_TOLERANCE_THRESHOLD = DEVIATION_TOLERANCE_RATIO;
 

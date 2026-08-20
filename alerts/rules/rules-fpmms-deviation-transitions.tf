@@ -98,6 +98,16 @@ resource "grafana_rule_group" "fpmms_deviation_transitions" {
     }
   }
 
+  # The bridge still classifies pools as `critical` /
+  # `deviation_ratio_unavailable_critical` at the 1.05-plus-grace analytics
+  # boundary, and the dashboard, breach history, and the indexer's persisted
+  # `criticalDurationSeconds` all still read that classification. Since ADR 0067
+  # no Grafana rule pages on it, so a transition into or out of it is a change
+  # in an analytics label, not an incident. The rule stays — those transitions
+  # are still worth reading next to the warning-state ones — but at warning
+  # severity on the #alerts-pools plane alongside its sibling above. The name is
+  # unchanged on purpose: it names the bridge state it reports, and Grafana
+  # rule names are the identity operators search alert history by.
   rule {
     name           = "Deviation Breach Critical State Changed"
     condition      = "threshold"
@@ -115,7 +125,7 @@ resource "grafana_rule_group" "fpmms_deviation_transitions" {
 
     labels = {
       service  = "fpmms"
-      severity = "critical"
+      severity = "warning"
     }
 
     data {
@@ -184,11 +194,11 @@ resource "grafana_rule_group" "fpmms_deviation_transitions" {
     }
 
     notification_settings {
-      contact_point   = local.notify_critical_transition.contact_point
-      group_by        = local.notify_critical_transition.group_by
-      group_wait      = local.notify_critical_transition.group_wait
-      group_interval  = local.notify_critical_transition.group_interval
-      repeat_interval = local.notify_critical_transition.repeat_interval
+      contact_point   = local.notify_warning_pools_transition.contact_point
+      group_by        = local.notify_warning_pools_transition.group_by
+      group_wait      = local.notify_warning_pools_transition.group_wait
+      group_interval  = local.notify_warning_pools_transition.group_interval
+      repeat_interval = local.notify_warning_pools_transition.repeat_interval
     }
   }
 }

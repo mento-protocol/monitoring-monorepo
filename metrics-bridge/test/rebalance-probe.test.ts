@@ -162,7 +162,7 @@ describe("eligibleForProbe — gating mirrors the critical alert rule", () => {
     // the Hasura `_like "%fpmm%"` filter and appear in the probe input. The
     // `wrappedExchangeId` guard is the canonical VP discriminator: non-empty
     // means VP — skip to avoid emitting a phantom `mento_pool_rebalance_blocked`
-    // gauge for a pool that no longer fires the Deviation Breach Critical alert.
+    // gauge for a pool that has no FPMM deviation or depletion alert to annotate.
     const healedVp = makePool({
       wrappedExchangeId:
         "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
