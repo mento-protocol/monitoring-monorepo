@@ -6016,8 +6016,11 @@ run_capture_with_deadline() {
       exit 0
     fi
     printf 'timeout\n' >"$timeout_file"
-    kill -TERM "-$child" 2>/dev/null || kill -TERM "$child" 2>/dev/null || true
-    sleep 1
+    # SIGKILL straight away, with no SIGTERM grace: a grace period would run
+    # after the deadline, so a capture that ignored SIGTERM would outlast the
+    # budget by exactly the grace. Nothing in a capture needs an orderly
+    # shutdown -- Git holds no lock these captures take and writes no temporary
+    # file -- and the refusal discards the output either way.
     kill -KILL "-$child" 2>/dev/null || kill -KILL "$child" 2>/dev/null || true
   ) &
   watchdog=$!
@@ -6037,10 +6040,9 @@ run_capture_with_deadline() {
     status=$?
   fi
   if [[ -s "$timeout_file" ]]; then
-    # SIGTERM already freed the pipeline shell this `wait` was blocked on, but a
-    # part of the capture tree that ignores SIGTERM is still running and only
-    # the watchdog's escalation reaches it. Let the watchdog finish before
-    # reaping it, then sweep the group once more.
+    # The watchdog wrote the marker just before signalling the group. Let it
+    # finish that signal before reaping it, then sweep the group once more, so
+    # nothing the capture started is still running when this returns.
     wait "$watchdog" 2>/dev/null || true
     kill -KILL "-$child" 2>/dev/null || true
   else
