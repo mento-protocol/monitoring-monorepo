@@ -121,13 +121,29 @@ item required.
   failures, run focused validation, commit, and push.
 - Merge conflict: fetch `baseRefName` from the verified `BASE_REMOTE`, record the
   pre-merge head, and merge that remote-tracking ref into the already-published
-  PR branch. Treat the resolved tree as a new substantive head. Recompute review
-  and validation scope from both the resolved PR diff against the fetched base
-  and the merge delta from the recorded pre-merge head. Then run focused
-  validation and the mapped quality gate. Repeat the applicable closeout review
-  when the resolution or inherited base changes a reviewed surface or
-  materiality. Commit and push through `HEAD_REMOTE`. Do not rebase a published
-  PR because the resulting force-push violates this workflow.
+  PR branch. Treat the resolved tree as a new substantive head. After resolving
+  it, write the path union to a newline-delimited file:
+
+  ```bash
+  (
+    path_tmp="$(mktemp -d)" || exit 1
+    trap 'rm -rf -- "$path_tmp"' EXIT
+    git diff --name-only --no-renames <verified-base-ref> > "$path_tmp/base" || exit 1
+    git diff --name-only --no-renames <pre-merge-head> > "$path_tmp/pre-merge" || exit 1
+    sort -u "$path_tmp/base" "$path_tmp/pre-merge" > "$path_tmp/union" || exit 1
+    mv "$path_tmp/union" <changed-paths-file> || exit 1
+  )
+  ```
+
+  Stop if this block exits nonzero. Use that union as the review and validation
+  scope. Then run focused validation and the mapped quality gate with
+  `--base <verified-base-ref>` and
+  `--changed-paths-file <changed-paths-file>` so it routes inherited-only paths.
+  Repeat any applicable closeout review if the resolution or inherited base
+  changes a reviewed surface or the change's materiality. Commit and push through
+  `HEAD_REMOTE`. Do not rebase a published PR because the resulting force-push
+  violates this workflow.
+
 - Feedback blocker: triage every normalized finding, implement valid fixes, and
   sweep review bodies, top-level comments, threads, annotations, and failing
   logs before all-clear. Reply before resolving a thread. The reply forms,
