@@ -5,79 +5,30 @@ on:
   push:
     branches: [main]
     paths:
+      # Coarse admission only. The discover job classifies exact stacks from
+      # terraform.stacks.json after the workflow starts. Keep this list equal
+      # to `workflowAdmissionPatterns`; `pnpm tf:test` enforces the contract.
       - terraform/**
-      - alerts/rules/**
-      - alerts/peg-policy-publication/**
-      - alerts/infra/**
-      - aegis/terraform/**
-      - governance-watchdog/infra/**
-      - governance-watchdog/src/**
-      - governance-watchdog/package.json
-      - governance-watchdog/pnpm-lock.yaml
-      - governance-watchdog/pnpm-workspace.yaml
-      - governance-watchdog/tsconfig.json
-      - governance-watchdog/tsconfig.build.json
+      - alerts/**
+      - aegis/**
+      - governance-watchdog/**
+      - metrics-bridge/**
+      - scripts/**
+      - .github/workflows/**
       - terraform.stacks.json
-      - scripts/terraform/check-metrics-bridge-template-plan.mjs
-      - scripts/terraform/check-metrics-bridge-template-plan.test.mjs
-      - scripts/alerts/check-peg-policy-publication.mjs
-      - scripts/alerts/check-peg-policy-publication.test.mjs
-      - scripts/production-infra-identity-contract/**
-      # Shared parsing cores (ADR 0064) that sit outside the prefix above.
-      - scripts/lib/hcl.mjs
-      - scripts/lib/workflow-yaml.mjs
-      # The peg registry integrity checker and the modules it imports. The stack
-      # registry counts all three as Peg policy publication inputs, so this
-      # filter has to be able to reach that inventory.
-      - scripts/alerts/check-peg-registry-integrity.mjs
-      - scripts/alerts/check-peg-registry-integrity-lineage.mjs
-      - scripts/lib/peg-policy-digest.mjs
-      - scripts/terraform/terraform-fmt-check.mjs
-      - scripts/terraform/tf-platform-plan-guard.mjs
-      - scripts/tf-stacks.mjs
-      - scripts/tf-stacks.test.mjs
-      - .github/workflows/alerts-infra.yml
-      - .github/workflows/infra.yml
-      - .github/workflows/governance-watchdog.yml
-      - .github/workflows/peg-policy-publication.yml
   pull_request:
     branches: [main]
     paths:
+      # Mirror the push admission boundary above. Registry classification keeps
+      # unrelated changes at the discover-only cost.
       - terraform/**
-      - alerts/rules/**
-      - alerts/peg-policy-publication/**
-      - alerts/infra/**
-      - aegis/terraform/**
-      - governance-watchdog/infra/**
-      - governance-watchdog/src/**
-      - governance-watchdog/package.json
-      - governance-watchdog/pnpm-lock.yaml
-      - governance-watchdog/pnpm-workspace.yaml
-      - governance-watchdog/tsconfig.json
-      - governance-watchdog/tsconfig.build.json
+      - alerts/**
+      - aegis/**
+      - governance-watchdog/**
+      - metrics-bridge/**
+      - scripts/**
+      - .github/workflows/**
       - terraform.stacks.json
-      - scripts/terraform/check-metrics-bridge-template-plan.mjs
-      - scripts/terraform/check-metrics-bridge-template-plan.test.mjs
-      - scripts/alerts/check-peg-policy-publication.mjs
-      - scripts/alerts/check-peg-policy-publication.test.mjs
-      - scripts/production-infra-identity-contract/**
-      # Shared parsing cores (ADR 0064) that sit outside the prefix above.
-      - scripts/lib/hcl.mjs
-      - scripts/lib/workflow-yaml.mjs
-      # The peg registry integrity checker and the modules it imports. The stack
-      # registry counts all three as Peg policy publication inputs, so this
-      # filter has to be able to reach that inventory.
-      - scripts/alerts/check-peg-registry-integrity.mjs
-      - scripts/alerts/check-peg-registry-integrity-lineage.mjs
-      - scripts/lib/peg-policy-digest.mjs
-      - scripts/terraform/terraform-fmt-check.mjs
-      - scripts/terraform/tf-platform-plan-guard.mjs
-      - scripts/tf-stacks.mjs
-      - scripts/tf-stacks.test.mjs
-      - .github/workflows/alerts-infra.yml
-      - .github/workflows/infra.yml
-      - .github/workflows/governance-watchdog.yml
-      - .github/workflows/peg-policy-publication.yml
 
 # See ci.yml for the concurrency rationale: PR runs cancel on new pushes
 # to the same PR ref; push/dispatch events use a SHA-unique group so they
