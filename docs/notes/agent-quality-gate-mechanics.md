@@ -43,10 +43,11 @@ sets and 8 minutes for the full workspace (Refs #1415).
 
 If a sandboxed mapped run fails only because a command needs host capabilities,
 rerun the full mapped gate with host access on the same head. The gate reuses
-fresh successes, runs the blocked commands, and records their freshness stamps.
-Running those commands directly proves them but does not warm
-`--skip-if-fresh`; a later push otherwise repeats them and can queue for the
-machine-wide lock.
+stamp-eligible fresh successes and runs the blocked commands. A resumed run does
+not write a whole-run stamp. Trunk and the gate self-test are stamp-exempt and
+always run, including during the later pre-push gate. Other eligible successes
+keep per-command stamps, so the later gate can avoid repeating them. Running a
+command directly proves it but records no per-command stamp.
 
 For a manual full-repository reproduction of the server-side pre-push baseline,
 including when hooks are absent or uncertain, use:
