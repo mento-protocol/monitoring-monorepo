@@ -443,8 +443,13 @@ export async function startBroker(config) {
   // simply stopped getting answers". Log it instead. Nothing here throws: an
   // `error` event with no listener is an uncaught exception that would take the
   // broker down with the run still using it.
+  //
+  // Unconditional, with the same console fallback `createHandler` applies: an
+  // optional call would restore the silence this exists to end whenever a caller
+  // supplies no sink.
+  const logServerError = config.log ?? ((line) => console.log(line));
   server.on("error", (error) => {
-    config.log?.(
+    logServerError(
       `sentry-mcp-broker: SERVER-ERROR ${
         error instanceof Error ? error.message : String(error)
       }`,

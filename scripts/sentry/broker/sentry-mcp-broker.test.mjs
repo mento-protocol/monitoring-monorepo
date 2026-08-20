@@ -449,6 +449,36 @@ test("a socket error AFTER startup is logged, not swallowed", async () => {
   });
 });
 
+test("a socket error is reported even when the caller supplies no log sink", async () => {
+  // An optional call on `config.log` would put the silence straight back for
+  // any caller that passes none, which is the whole defect. The console
+  // fallback is the same one `createHandler` already applies.
+  const upstream = await startUpstream(jsonUpstream([]));
+  const broker = await startBroker({
+    token: REAL_TOKEN,
+    handle: HANDLE,
+    upstream: upstream.origin,
+    port: 0,
+  });
+  const lines = [];
+  const realLog = console.log;
+  console.log = (line) => lines.push(String(line));
+  try {
+    broker.emit("error", new Error("no sink was supplied"));
+  } finally {
+    console.log = realLog;
+    broker.close();
+    upstream.server.close();
+  }
+  assert.ok(
+    lines.some(
+      (line) =>
+        line.includes("SERVER-ERROR") && line.includes("no sink was supplied"),
+    ),
+    `the fallback must report the error; saw ${JSON.stringify(lines)}`,
+  );
+});
+
 // ── back-pressure ────────────────────────────────────────────────────────────
 
 test("a throttled upstream reaches the client WITH its back-off headers", async () => {
