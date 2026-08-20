@@ -1138,6 +1138,27 @@ await test("runArchive refuses and re-queues a live regression instead of archiv
   );
   // Already open, so there is nothing to reopen.
   assert(!ghCall(ghCalls, "reopen"), "an open stub is left alone");
+  // The end-state check demands `state === "OPEN"`, and this reader normalizes
+  // a missing field to `""`. A `--json` list that forgets `state` therefore does
+  // not degrade — it strands EVERY re-queue on this path while nothing is wrong.
+  // The workflow re-queue's readers carry the same assertion; this is the other
+  // consumer of the predicate.
+  const reads = ghCalls.filter(
+    (args) => args[0] === "issue" && args[1] === "view",
+  );
+  assert(reads.length > 0, "the re-queue must read the stub at all");
+  for (const args of reads) {
+    const jsonAt = args.indexOf("--json");
+    assert(
+      jsonAt !== -1,
+      `a stub read passed no --json at all: ${args.join(" ")}`,
+    );
+    const fields = args[jsonAt + 1] ?? "";
+    assert(
+      fields.split(",").includes("state"),
+      `a stub read asked for "${fields}", which never yields a state the selector can accept`,
+    );
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -1425,6 +1446,20 @@ await test("isSelectableForTriage is exactly Stage B's selector, all three parts
   );
   assertEqual(isSelectableForTriage({}), false);
   assertEqual(isSelectableForTriage(), false);
+});
+
+await test("isSelectableForTriage requires a read that says OPEN, not merely one that does not say CLOSED", () => {
+  // Every `readStub` feeding this normalizes a missing or unexpected `state` to
+  // `""`. Under a not-CLOSED test that unreadable state passed, so the
+  // end-state verification could report a re-queue as successful without any
+  // read having confirmed the stub open — the one wrong answer this predicate
+  // must never give.
+  const labels = ["sentry-triage", "sentry:needs-triage"];
+  assertEqual(isSelectableForTriage({ state: "OPEN", labels }), true);
+  assertEqual(isSelectableForTriage({ state: "", labels }), false);
+  assertEqual(isSelectableForTriage({ labels }), false);
+  assertEqual(isSelectableForTriage({ state: null, labels }), false);
+  assertEqual(isSelectableForTriage({ state: "MERGED", labels }), false);
 });
 
 await test("a fence that cannot be posted stops the re-queue instead of exposing the stub", async () => {

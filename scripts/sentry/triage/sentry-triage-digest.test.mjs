@@ -855,6 +855,28 @@ function allText(payload) {
   return payload.blocks.map((block) => block.text.text).join("\n");
 }
 
+await test("the digest carries NO clock, so a `now` cannot change what it renders", () => {
+  // The CLI used to pass `now: new Date()` into a function that never read it.
+  // Removing a dead argument is only safe while it stays dead, and a comment
+  // saying so is not enforcement: pin it, and any future read of `now` fails
+  // here rather than silently changing what the posting step sends to Slack.
+  const issues = [
+    issueFixture({
+      number: 1,
+      shortId: "A-1",
+      labels: ["sentry:verdict-code-fix"],
+      comments: [{ body: verdictComment({ summary: "null deref" }) }],
+    }),
+  ];
+  assertDeepEqual(
+    buildDigest(issues, { channel: "#engineering" }),
+    buildDigest(issues, {
+      channel: "#engineering",
+      now: new Date("2001-02-03T04:05:06Z"),
+    }),
+  );
+});
+
 await test("buildDigest produces a valid chat.postMessage payload shape", () => {
   const payload = buildDigest(
     [
