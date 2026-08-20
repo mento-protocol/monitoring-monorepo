@@ -893,7 +893,12 @@ function shellExpansionWord(word) {
 // satisfy the full reference grammar below. A literal secret cannot acquire
 // that shape by having backslashes removed.
 function unescapeShellExpansions(expression) {
-  return expression.replace(/\\+\$(?=\{)/g, "$");
+  // Exactly ONE backslash, and only when it is not itself escaped. A single
+  // `\$` is the source-level escape a JS template literal needs; `\\$` is a
+  // literal backslash followed by an interpolation, which is a different
+  // string and must not be normalized into a reference. `(?<!\\)` keeps the
+  // second case out.
+  return expression.replace(/(?<!\\)\\\$(?=\{)/g, "$");
 }
 
 function shellExpansionReference(rawExpression) {
@@ -1829,7 +1834,7 @@ export function secretLikeReason(text) {
     }
   }
   const awsCredentialPattern =
-    /^[+ -]?\s*["'`]?aws[_-]?(?:access[_-]?key[_-]?id|secret[_-]?access[_-]?key|session[_-]?token)["'`]?\s*[:=]\s*["'`]?([^"'`\r\n]+?)["'`]?(?:[ \t]+(?:\/\/[^\r\n]*|\/\*[^\r\n]*\*\/)|[ \t]*(?:[#;][^\r\n]*)?)$/gim;
+    /^[+ -]?\s*["'`]?aws[_-]?(?:access[_-]?key[_-]?id|secret[_-]?access[_-]?key|session[_-]?token)["'`]?\s*[:=]\s*["'`]?([^"'`\r\n]+?)["'`]?(?:[ \t]+(?:\/\/[^\r\n]*|\/\*[^\r\n]*\*\/)|[ \t]*(?:;[^\r\n]*)?|[ \t]+#[^\r\n]*)$/gim;
   for (const match of text.matchAll(awsCredentialPattern)) {
     const value = match[1].trim();
     if (
@@ -1840,7 +1845,7 @@ export function secretLikeReason(text) {
     }
   }
   const authorizationPattern =
-    /^[+ -]?\s*["'`]?authorization["'`]?\s*([:=])\s*(["'`]?)([^"'`\r\n]+?)\2[ \t]*(,?)(?:[ \t]+(?:\/\/[^\r\n]*|\/\*[\s\S]*?\*\/)|[ \t]*(?:[#;][^\r\n]*)?)$/gim;
+    /^[+ -]?\s*["'`]?authorization["'`]?\s*([:=])\s*(["'`]?)([^"'`\r\n]+?)\2[ \t]*(,?)(?:[ \t]+(?:\/\/[^\r\n]*|\/\*[\s\S]*?\*\/)|[ \t]*(?:;[^\r\n]*)?|[ \t]+#[^\r\n]*)$/gim;
   for (const match of text.matchAll(authorizationPattern)) {
     const value = match[3].trim();
     if (
@@ -1987,7 +1992,7 @@ export function secretLikeReason(text) {
     return "literal wallet recovery phrase";
   }
   const genericTokenAssignmentPattern =
-    /^[+ -]?\s*["'`]?(token|[a-z][a-z0-9]*(?:_[a-z0-9]+)*_token)["'`]?(\s*[:=]\s*)(["'`]?)([^"'`\r\n]+?)\3[ \t]*(,?)(?:[ \t]+(?:\/\/[^\r\n]*|\/\*[^\r\n]*\*\/)|[ \t]*(?:[#;][^\r\n]*)?)$/gim;
+    /^[+ -]?\s*["'`]?(token|[a-z][a-z0-9]*(?:_[a-z0-9]+)*_token)["'`]?(\s*[:=]\s*)(["'`]?)([^"'`\r\n]+?)\3[ \t]*(,?)(?:[ \t]+(?:\/\/[^\r\n]*|\/\*[^\r\n]*\*\/)|[ \t]*(?:;[^\r\n]*)?|[ \t]+#[^\r\n]*)$/gim;
   for (const match of text.matchAll(genericTokenAssignmentPattern)) {
     const key = match[1];
     const operator = match[2];
@@ -2024,7 +2029,7 @@ export function secretLikeReason(text) {
       return "literal credential assignment";
   }
   const wrappedQuotedKeyPattern =
-    /^[+ -]?\s*["'`]?([A-Za-z][A-Za-z0-9_-]*)["'`]?\s*[:=]\s*(.+?)[ \t]*(,?)(?:[ \t]+(?:\/\/[^\r\n]*|\/\*[\s\S]*?\*\/)|[ \t]*(?:[#;][^\r\n]*)?)$/gim;
+    /^[+ -]?\s*["'`]?([A-Za-z][A-Za-z0-9_-]*)["'`]?\s*[:=]\s*(.+?)[ \t]*(,?)(?:[ \t]+(?:\/\/[^\r\n]*|\/\*[\s\S]*?\*\/)|[ \t]*(?:;[^\r\n]*)?|[ \t]+#[^\r\n]*)$/gim;
   for (const match of text.matchAll(wrappedQuotedKeyPattern)) {
     const key = match[1];
     const authorizationKey = normalizeCredentialKey(key) === "authorization";
@@ -2071,7 +2076,7 @@ export function secretLikeReason(text) {
     }
   }
   const registryAuthPattern =
-    /^[+ -]?\s*\/\/[^=\r\n]+\/?:_(?:authToken|auth|password)\s*=\s*["'`]?([^"'`\r\n]+?)["'`]?(?:[ \t]+(?:\/\/[^\r\n]*|\/\*[^\r\n]*\*\/)|[ \t]*(?:[#;][^\r\n]*)?)$/gim;
+    /^[+ -]?\s*\/\/[^=\r\n]+\/?:_(?:authToken|auth|password)\s*=\s*["'`]?([^"'`\r\n]+?)["'`]?(?:[ \t]+(?:\/\/[^\r\n]*|\/\*[^\r\n]*\*\/)|[ \t]*(?:;[^\r\n]*)?|[ \t]+#[^\r\n]*)$/gim;
   for (const match of text.matchAll(registryAuthPattern)) {
     const value = match[1].trim();
     if (
@@ -2081,7 +2086,7 @@ export function secretLikeReason(text) {
       return "literal registry credential assignment";
   }
   const unquotedKeyPattern =
-    /^[+ -]?\s*(?:export\s+)?([A-Za-z][A-Za-z0-9_-]*)(\s*[:=]\s*)([A-Za-z0-9_$+./=:@%!?~^-]{12,})[ \t]*(,?)(?:[ \t]+(?:\/\/[^\r\n]*|\/\*[^\r\n]*\*\/)|[ \t]*(?:[#;][^\r\n]*)?)$/gim;
+    /^[+ -]?\s*(?:export\s+)?([A-Za-z][A-Za-z0-9_-]*)(\s*[:=]\s*)([A-Za-z0-9_$+./=:@%!?~^-]{12,})[ \t]*(,?)(?:[ \t]+(?:\/\/[^\r\n]*|\/\*[^\r\n]*\*\/)|[ \t]*(?:;[^\r\n]*)?|[ \t]+#[^\r\n]*)$/gim;
   for (const match of text.matchAll(unquotedKeyPattern)) {
     const key = match[1];
     const operator = match[2];

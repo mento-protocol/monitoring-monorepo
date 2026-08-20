@@ -292,6 +292,52 @@ assert.ok(
   ),
   "a quote-wrapped real credential is still refused",
 );
+// A `#` with no whitespace before it is part of an unquoted shell/dotenv/YAML
+// value, not a comment. Treating it as one passed only the registered prefix to
+// the allowlist, so `<fixture>#<secret>` cleared — a bypass the registry
+// created, since the parent scanner refused the whole value. A comment now
+// needs a real boundary.
+for (const bypass of [
+  "TOKEN=sntrys_archive_token#REAL_SUFFIX",
+  "AWS_SECRET_ACCESS_KEY=aws-secret-value#REAL_SUFFIX",
+  "token: sntrys_archive_token#REAL_SUFFIX",
+]) {
+  assert.ok(
+    secretLikeReason(bypass),
+    `a suffix with no comment boundary is part of the value: ${bypass}`,
+  );
+}
+assert.equal(
+  secretLikeReason("TOKEN=sntrys_archive_token # a real comment"),
+  null,
+  "a comment with a real boundary still terminates the value",
+);
+// `;` is a statement terminator, not a comment, and legitimately follows with
+// no space — requiring a boundary there broke TS interface members.
+assert.equal(
+  secretLikeReason("  token: string;"),
+  null,
+  "a semicolon-terminated type annotation is not an assignment",
+);
+
+// Only a single, unescaped backslash is the template-literal escape. `\\${…}`
+// is a literal backslash plus an interpolation — a different string that must
+// not be normalized into a reference. Both values are long enough that a
+// non-reference is refused on length alone, so this isolates the normalization.
+{
+  const bs = String.fromCharCode(92);
+  const name = "SENTRY_TRIAGE_TOKEN_LONG_ENOUGH_TO_EXCEED_MIN";
+  assert.equal(
+    secretLikeReason(`token="${bs}\${${name}:-}"`),
+    null,
+    "one backslash is the escape and normalizes to a reference",
+  );
+  assert.ok(
+    secretLikeReason(`token="${bs}${bs}\${${name}:-}"`),
+    "two backslashes are not the escape form and stay refused",
+  );
+}
+
 // The hyphenated fixtures are exact values too — a near miss stays refused.
 assert.ok(
   secretLikeReason('AWS_SECRET_ACCESS_KEY: "aws-secret-value-real"'),
