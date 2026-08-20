@@ -158,8 +158,8 @@ list separates praise from a defect stated plainly.
 The canonical registry and named phrase groups live in
 `scripts/pr/pr-feedback-state-claude.mjs`, which is now the only copy: D3 phase
 three removed the flat wrapper fallback. Add a named phrase only with a real
-review fixture and nearby blocking mutations. Add a compatibility record only with a byte-exact source fixture and
-single-field binding mutations. The library does not try to prove the meaning
+review fixture and nearby blocking mutations. Add a compatibility record only
+with a byte-exact source fixture and single-field binding mutations. The library does not try to prove the meaning
 of arbitrary English prose — it refuses prose it cannot recognize, and the
 compatibility registry is the escape hatch for a specific historical body.
 Current-head and unresolved-feedback checks remain separate and mandatory.
