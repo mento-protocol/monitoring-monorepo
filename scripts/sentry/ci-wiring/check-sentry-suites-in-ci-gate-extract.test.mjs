@@ -238,6 +238,47 @@ test("a probe that outruns its deadline is killed outright, never asked to stop"
   }
 });
 
+test("the deadline holds even when the probe leaves a descendant behind", () => {
+  // The worry this answers: `spawnSync` captures stdout and stderr through
+  // pipes, and a descendant that outlives the shell inherits those write ends —
+  // so if the call waited for EOF rather than for the child, killing the shell
+  // would leave it blocked on a pipe nothing will close, and the negative-pid
+  // group cleanup after it could never run.
+  //
+  // It does not wait. Measured here on both shapes the probe can produce: a
+  // backgrounded descendant, and the `$(…)` command substitution the classifier
+  // actually runs in. Each returns at its deadline, which is also what the group
+  // cleanup below needs in order to happen at all. Absolute paths because the
+  // probe's `$PATH` is an empty directory.
+  const root = mkdtempSync(join(tmpdir(), "gate-probe-descendant-"));
+  try {
+    const dirs = probeDirs(root);
+    for (const [, { candidate, version }] of installedBashes()) {
+      for (const [shape, script] of [
+        ["a backgrounded descendant", "/bin/sleep 30 &\nwhile :; do :; done"],
+        ["a command substitution", 'x="$(/bin/sleep 30; echo late)"'],
+      ]) {
+        const started = Date.now();
+        const result = runProbeShell(candidate, ["-c", script], {
+          dirs,
+          timeout: 500,
+        });
+        assert.equal(
+          result.error?.code,
+          "ETIMEDOUT",
+          `bash ${version} did not report the deadline for ${shape}`,
+        );
+        assert.ok(
+          Date.now() - started < 15_000,
+          `bash ${version} outran its 500ms deadline on ${shape} by holding a captured pipe`,
+        );
+      }
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("the extractor refuses a classifier the gate never defines at top level", () => {
   // Column 0 is not top level. A definition nested inside another function is
   // never executed by the gate, so lifting it out reports verdicts for logic
