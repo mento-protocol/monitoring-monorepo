@@ -267,10 +267,14 @@ function hasUncheckedTaskBox(line) {
 
 // A trailing approval mark carries no assertion, so it is removed before a
 // conclusion is matched. Only the marks `CLEAN_REVIEW_TITLE` already accepts,
-// optionally repeated, and only at the very end — a mark with a word after it
-// leaves that word in place, so the conclusion still fails and the line stays
-// actionable.
-const TRAILING_APPROVAL_MARK = /(?:\s*(?:✅|✔️?|\u{1F44D}️?))+$/u;
+// optionally repeated.
+//
+// The lookahead is what bounds this: a mark is removed only when nothing but an
+// optional sentence terminator follows it, so `No inline findings ✅.` strips to
+// `No inline findings.` while `No P1/P2 findings ✅ but the retry loop never
+// ends` strips nothing and stays actionable. Anchoring at the absolute end
+// instead — the first version of this — rejected every punctuated mark.
+const TRAILING_APPROVAL_MARK = /(?:\s*(?:✅|✔️?|\u{1F44D}️?))+(?=\s*[.!]?$)/u;
 function stripApprovalMark(value) {
   return value.replace(TRAILING_APPROVAL_MARK, "").trimEnd();
 }

@@ -1905,12 +1905,19 @@ test("accepts the PR #1954 label-bold verdict and bracketed no-findings roll-up"
   // The mark is stripped once, before the conclusion shapes run, so it clears
   // EVERY accepted conclusion rather than only the tail-bearing one. Adding it
   // to each pattern instead would have been five places to keep in step.
+  // Punctuated marks are covered too. Stripping only at the absolute end — the
+  // first version of this — rejected every `✅.` form, because the exact shapes
+  // then saw the emoji.
   for (const conclusion of [
     "No P1/P2 findings ✅",
     "No inline findings ✅",
     "No P1/P2/P3 findings — clean review ✅",
     "No changes requested ✅",
     "No P1/P2 findings 👍",
+    "No inline findings ✅.",
+    "No changes requested 👍.",
+    "No P1/P2/P3 findings ✔️",
+    "No P1/P2 findings ✅!",
   ]) {
     expectReady(
       `conclusion shape with a mark: ${conclusion}`,
@@ -1928,6 +1935,16 @@ test("accepts the PR #1954 label-bold verdict and bracketed no-findings roll-up"
     PR_1954_CLEAN_CLAUDE_BODY.replace(
       "1. None — no [P1]/[P2]/[P3] findings.",
       "No P1/P2 findings but the retry loop never ends ✅",
+    ),
+    false,
+  );
+  // The lookahead permits only a terminator after the mark, so prose following
+  // a punctuated mark is not stripped either.
+  expectReady(
+    "mark, terminator, then prose",
+    PR_1954_CLEAN_CLAUDE_BODY.replace(
+      "1. None — no [P1]/[P2]/[P3] findings.",
+      "No P1/P2 findings ✅. The retry loop never ends",
     ),
     false,
   );
