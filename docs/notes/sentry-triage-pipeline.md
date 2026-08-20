@@ -1572,7 +1572,7 @@ error counts. A nonzero recovered count means stubs were found closed while
 still labeled `sentry:needs-triage`; a recurring one points at a producer worth
 investigating, not at the sweep.
 Scheduled workflow failures also route through the repository's main-failure
-notifier. Triage produces a per-run `#engineering` digest. Absence of an
+notifier. Triage produces a per-run `#sentry-triage` digest. Absence of an
 expected record or digest is itself a signal.
 
 ### Provision and change controls
@@ -1852,7 +1852,7 @@ keeps the aliases the local gate trusts safe.
 ```bash
 # Read-only previews that require local credentials:
 pnpm sentry:ingest --dry-run --lookback-days 8
-SENTRY_TRIAGE_ISSUES='[123,456]' pnpm sentry:digest --channel '#engineering'
+SENTRY_TRIAGE_ISSUES='[123,456]' pnpm sentry:digest --channel '#sentry-triage'
 pnpm sentry:autofix:select --cap 2
 pnpm sentry:brief --issue 1731 --dry-run
 ```
