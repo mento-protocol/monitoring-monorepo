@@ -252,7 +252,7 @@ export const gauges = {
   // a raw count share is not a depletion signal on an off-parity pair.
   reserveValueShareToken0: new Gauge({
     name: "mento_pool_reserve_value_share_token0",
-    help: "Value-weighted share of pool reserves held in token0: r0_normalized × oracleRef / (r0_normalized × oracleRef + r1_normalized) ∈ [0, 1], where oracleRef is the price of token0 denominated in token1 (`mento_pool_oracle_price`, inverted when the pool's `invertRateFeed` says token0 is the feed's quote token). Equals the token-count share only when the pair trades near parity. Skipped when reserves are zero, the median price is absent, or the feed orientation has not been read on chain — no series rather than a wrong one. Carries the same `token_symbol` label as `mento_pool_reserve_share_token0`.",
+    help: "Value-weighted share of pool reserves held in token0: r0_normalized × oracleRef / (r0_normalized × oracleRef + r1_normalized) ∈ [0, 1], where oracleRef is the price of token0 denominated in token1 (`mento_pool_oracle_price`, inverted when the pool's `invertRateFeed` says token0 is the feed's quote token). Equals the token-count share only when the pair trades near parity. Skipped when reserves are zero, the median price is absent or no longer live (a zero-median outage retains the last price), or the feed orientation has not been read on chain — no series rather than a wrong one. Carries the same `token_symbol` label as `mento_pool_reserve_share_token0`.",
     labelNames: reserveShareLabels,
     registers: [register],
   }),
@@ -688,6 +688,15 @@ function recordLimitMetrics(pool: PoolRow, labels: PoolDisplayLabels): void {
  * confident wrong answer on the other half of them, so an unread flag
  * (`invertRateFeedKnown === false`) publishes nothing at all.
  *
+ * `medianLive` gates for the same fail-closed reason. It is false when the
+ * feed's most recent `MedianUpdated` carried a zero median, and
+ * `lastMedianPrice` deliberately RETAINS the last non-zero value across that
+ * outage — so a price check alone would keep publishing a share derived from a
+ * rate the contract itself no longer honours. `hasFreshLiveMedian` in
+ * `indexer-envio/src/priceDifference.ts` refuses to derive rebalance state
+ * under the same condition; this follows it rather than inventing a second
+ * answer to "is this feed usable".
+ *
  * Price precision follows `mento_pool_oracle_price`: both go through
  * `toHumanUnits`, so an operator can reproduce the share from the two
  * published gauges by hand.
@@ -700,11 +709,14 @@ export function reserveValueShares(
     | "token0Decimals"
     | "token1Decimals"
     | "lastMedianPrice"
+    | "medianLive"
     | "invertRateFeed"
     | "invertRateFeedKnown"
   >,
 ): { share0: number; share1: number } | null {
-  if (pool.invertRateFeedKnown !== true) return null;
+  if (pool.invertRateFeedKnown !== true || pool.medianLive !== true) {
+    return null;
+  }
   const price = toHumanUnits(
     BigInt(pool.lastMedianPrice),
     SORTED_ORACLES_DECIMALS,
@@ -712,10 +724,9 @@ export function reserveValueShares(
   if (!Number.isFinite(price) || price <= 0) return null;
   const r0 = Number(pool.reserves0) / 10 ** pool.token0Decimals;
   const r1 = Number(pool.reserves1) / 10 ** pool.token1Decimals;
-  // `!(x >= 0)` rather than a finite-and-sign pair: it rejects NaN and
-  // negatives in one test, and an infinity that slips through is caught by the
-  // finite check on the total below.
-  if (!(r0 >= 0) || !(r1 >= 0)) return null;
+  // `Math.min` rather than a check per leg: NaN propagates through it, and an
+  // infinity that slips past is caught by the finite check on the total below.
+  if (!(Math.min(r0, r1) >= 0)) return null;
   const oracleRef = pool.invertRateFeed ? 1 / price : price;
   const value0 = r0 * oracleRef;
   const total = value0 + r1;
@@ -741,10 +752,11 @@ function recordReserveShareMetrics(
     { ...labels, token_symbol: token1Symbol },
     r1 / total,
   );
-  // Value shares need the oracle on top of the reserves, so they publish on a
-  // subset of the pools the count shares cover. Absent series (dark median,
-  // unread orientation) leave the depletion rules at NoData, which they treat
-  // as OK — the dark feed itself is what the oracle staleness rules page on.
+  // Value shares need a usable oracle on top of the reserves, so they publish
+  // on a subset of the pools the count shares cover. Absent series (no median
+  // yet, a median that has gone dark, unread orientation) leave the depletion
+  // rules at NoData, which they treat as OK — the dark feed itself is what the
+  // oracle staleness rules page on.
   const valueShares = reserveValueShares(pool);
   if (!valueShares) return;
   gauges.reserveValueShareToken0.set(

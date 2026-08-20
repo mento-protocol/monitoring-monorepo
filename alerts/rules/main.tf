@@ -290,7 +290,9 @@ locals {
   # not a page: a dark oracle is what the oracle staleness rules are for, and
   # a depletion number derived from a stale or guessed rate would be worse
   # than none. Today that is the Polygon EURm/EUROP pool, which has never
-  # landed a median.
+  # landed a median; a feed that goes dark later drops out the same way,
+  # because the bridge gates on the median being live and not merely on the
+  # retained last price.
   #
   # Deliberately NOT FX-weekend gated, unlike the deviation rules above. Those
   # gate FX pairs because their signal derives from an oracle that legitimately

@@ -1739,12 +1739,39 @@ describe("updateMetrics", () => {
     ).toBeUndefined();
   });
 
-  it("publishes no value share while the median feed is dark", async () => {
-    // Live case: the Polygon EURm/EUROP pool has never landed a median.
+  it("publishes no value share when a pool has never landed a median", async () => {
+    // Live case: the Polygon EURm/EUROP pool.
     updateMetrics([makePool({ lastMedianPrice: "0" })]);
     expect(
       await getGaugeValue(register, "mento_pool_reserve_value_share_token0", {
         token_symbol: "USDm",
+      }),
+    ).toBeUndefined();
+  });
+
+  it("publishes no value share once a live median goes dark", async () => {
+    // A zero-median outage sets `medianLive: false` while `lastMedianPrice`
+    // RETAINS the last non-zero value, so a price check alone would keep
+    // publishing a share priced off a rate the contract no longer honours.
+    updateMetrics([
+      makePool({
+        medianLive: false,
+        lastMedianPrice: "1150000000000000000000000",
+      }),
+    ]);
+    expect(
+      await getGaugeValue(register, "mento_pool_reserve_share_token0", {
+        token_symbol: "USDm",
+      }),
+    ).toBeCloseTo(0.5);
+    expect(
+      await getGaugeValue(register, "mento_pool_reserve_value_share_token0", {
+        token_symbol: "USDm",
+      }),
+    ).toBeUndefined();
+    expect(
+      await getGaugeValue(register, "mento_pool_reserve_value_share_token1", {
+        token_symbol: "GBPm",
       }),
     ).toBeUndefined();
   });

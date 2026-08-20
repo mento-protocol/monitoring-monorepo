@@ -168,7 +168,11 @@ inaction**, not when a ratio is large.
   feed orientation, which the count-share version did not. A pool missing
   either publishes no value share, and both tiers evaluate NoData → OK. Today
   that is the Polygon `EURm/EUROP` pool, which has never landed a median; its
-  dark feed is covered by the oracle liveness rules, not by silence here.
+  dark feed is covered by the oracle liveness rules, not by silence here. The
+  gate is `medianLive`, not a non-zero last price: a zero-median outage retains
+  the previous price, so a price-only check would have kept pricing reserves
+  off a rate the contract had stopped honouring. This matches
+  `hasFreshLiveMedian`, which is how the indexer decides the same question.
 - `POOL_DEPLETION_CRITICAL_SHARE` and `POOL_DEPLETION_PAGE_SHARE` join the
   Terraform mirror set. `DEVIATION_CRITICAL_RATIO` leaves it; a future editor
   who bumps it will get no drift-check failure, because there is nothing in
@@ -184,6 +188,13 @@ inaction**, not when a ratio is large.
 - Applying this stack destroys `grafana_contact_point.slack_critical_transition`
   and creates `grafana_contact_point.pool_page`. Both are Grafana-side
   resources behind the `production-infra` apply gate.
+- **Rollout order is a prerequisite, not a preference.** The depletion rules
+  read gauges the bridge publishes, so metrics-bridge must be deployed and
+  `mento_pool_reserve_value_share_token0` / `_token1` must be visible in
+  Prometheus before the `production-infra` apply. Applying first is not
+  dangerous but it is silent: with no series, both tiers sit at NoData → OK
+  and the depletion ladder looks healthy because it is not measuring anything.
+  Confirming the two gauges answer "is this actually watching the pools yet".
 - **The page tier has an empty day-one firing set.** Replayed against
   production on 2026-08-19, the thinnest value side across all 18 live pools is
   26% (Monad `CHFm/USDm`, the pool furthest outside its rebalance band at
