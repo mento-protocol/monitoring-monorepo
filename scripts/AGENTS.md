@@ -64,7 +64,8 @@ that mechanism moves with it, in the same PR.
 
 - **Autoreview runtime materialization.** `agent-autoreview.sh` names its
   runtime files in Perl copy lists and `runtime_paths` arrays, then materializes
-  each from a git blob. A path it omits is absent at runtime.
+  each from an `origin/main` blob. A path it omits is absent at runtime; moving
+  one is staged across PRs (ADR 0064).
 - **Gate source-directory guards.** `agent-quality-gate.sh` gates real-tree
   routing on `$script_source_dir == $repo_root/scripts`, leaving its stub-repo
   unit tests unaffected.

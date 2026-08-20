@@ -155,13 +155,14 @@ A clean verdict or conclusion may end only in a bare sentence terminator. Any
 trailing sentence blocks, because a tail is unconstrained English and no term
 list separates praise from a defect stated plainly.
 
-The registry and named phrase groups live in
-`scripts/pr-feedback-state-claude.mjs`. Add a named phrase only with a real
-review fixture and nearby blocking mutations. Add a compatibility record only
-with a byte-exact source fixture and single-field binding mutations. The
-library does not try to prove the meaning of arbitrary English prose — it
-refuses prose it cannot recognize, and the compatibility registry is the escape
-hatch for a specific historical body.
+During the D3 transition, the registry and named phrase groups live in the
+byte-identical `scripts/pr-feedback-state-claude.mjs` and
+`scripts/pr/pr-feedback-state-claude.mjs` copies. Update both in one change.
+Add a named phrase only with a real review fixture and nearby blocking
+mutations. Add a compatibility record only with a byte-exact source fixture and
+single-field binding mutations. The library does not try to prove the meaning
+of arbitrary English prose — it refuses prose it cannot recognize, and the
+compatibility registry is the escape hatch for a specific historical body.
 Current-head and unresolved-feedback checks remain separate and mandatory.
 
 ## Expected CLI contract
