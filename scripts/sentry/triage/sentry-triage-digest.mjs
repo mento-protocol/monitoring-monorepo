@@ -609,7 +609,7 @@ chat.postMessage payload (JSON) to stdout. The workflow's posting step is the
 only thing that holds the Slack token and POSTs.
 
 Options:
-  --channel <name>     Slack channel to post to (e.g. '#engineering'). Required.
+  --channel <name>     Slack channel to post to (e.g. '#sentry-triage'). Required.
                        Env fallback: SENTRY_TRIAGE_CHANNEL.
   --issues <json>      JSON array of queue-issue numbers (the select job's
                        output). Env fallback: SENTRY_TRIAGE_ISSUES.
