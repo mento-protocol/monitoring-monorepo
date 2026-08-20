@@ -853,6 +853,14 @@ const KNOWN_FAKE_FIXTURE_VALUES = new Set(
     // unbounded set.
     ["aws-secret-value"],
     ["projection-secret-value"],
+    // scripts/sentry/broker/sentry-mcp-broker.test.mjs — a shell expansion
+    // escaped for a JS template literal. Registered as an exact value rather
+    // than by unescaping `\$` before the reference grammar: in a real shell
+    // file that backslash PREVENTS expansion, so the application receives the
+    // literal `${…}` as its token, and normalizing it away would have cleared
+    // a value the scanner previously refused. The scanner has no file-type
+    // context to tell the two apart, so it must not guess.
+    ["\\${SENTRY_TRIAGE_TOKEN:-}"],
     // scripts/sentry/autofix/sentry-autofix-finalize.test.mjs — a shell
     // expansion carrying its own shell quoting, so it reaches the scanner as
     // `'"..."'` rather than a bare reference. Registered as an exact value
@@ -892,17 +900,7 @@ function shellExpansionWord(word) {
 // Only `\$` immediately before `{` is unescaped, and the result must still
 // satisfy the full reference grammar below. A literal secret cannot acquire
 // that shape by having backslashes removed.
-function unescapeShellExpansions(expression) {
-  // Exactly ONE backslash, and only when it is not itself escaped. A single
-  // `\$` is the source-level escape a JS template literal needs; `\\$` is a
-  // literal backslash followed by an interpolation, which is a different
-  // string and must not be normalized into a reference. `(?<!\\)` keeps the
-  // second case out.
-  return expression.replace(/(?<!\\)\\\$(?=\{)/g, "$");
-}
-
-function shellExpansionReference(rawExpression) {
-  const expression = unescapeShellExpansions(rawExpression);
+function shellExpansionReference(expression) {
   const head = /^\$\{(?:[A-Za-z_][A-Za-z0-9_]*|[0-9]+)(?::?[-=+?])?/.exec(
     expression,
   );

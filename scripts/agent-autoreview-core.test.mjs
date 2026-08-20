@@ -249,29 +249,18 @@ for (const [binding, fixtureValue] of [
   }
 }
 
-// Issue 1970: the remaining four Sentry-suite lines, read from the suites
-// themselves rather than transcribed. Hand-copying these through a shell got
-// them wrong twice, and a wrong fixture makes this assertion prove nothing.
-for (const [rel, lineNumber] of [
-  ["scripts/sentry/broker/sentry-mcp-broker.test.mjs", 1036],
-  ["scripts/sentry/autofix/sentry-autofix-finalize.test.mjs", 1697],
-  ["scripts/sentry/triage/sentry-triage-agent-comment.test.mjs", 390],
-  ["scripts/sentry/triage/sentry-triage-agent-comment.test.mjs", 391],
-]) {
-  const source = readFileSync(new URL(`../${rel}`, import.meta.url), "utf8");
-  const subject = source.split("\n")[lineNumber - 1];
-  assert.ok(subject, `issue 1970 fixture line missing: ${rel}:${lineNumber}`);
-  for (const [position, prefix] of diffPositions) {
-    assert.equal(
-      secretLikeReason(prefix + subject.trimStart()),
-      null,
-      `issue 1970 line clears on ${position} diff lines: ${rel}:${lineNumber}`,
-    );
-  }
-}
+// Issue 1970's four lines are NOT asserted by line number here. An earlier
+// version did, and Codex pointed out the flaw: a suite that inserts a line
+// above the offset makes this read unrelated code, which usually returns null
+// and passes while covering nothing. The whole-tree canary further down scans
+// every line of every Sentry suite, so it covers those four strictly better
+// and cannot be knocked out of alignment by an edit elsewhere.
 
-// An escaped shell expansion is a reference, but only the escaping is removed —
-// a real credential riding behind one is still refused.
+// An escaped shell expansion is registered as an exact value, NOT normalized by
+// stripping `\$` before the reference grammar. In a real shell file that
+// backslash PREVENTS expansion, so the application receives the literal `${…}`
+// as its token — normalizing it would clear a value the scanner had refused,
+// and the scanner has no file-type context to tell the two apart.
 assert.equal(secretLikeReason('token="\\${SENTRY_TRIAGE_TOKEN:-}"'), null);
 assert.ok(
   secretLikeReason(
@@ -282,6 +271,10 @@ assert.ok(
 assert.ok(
   secretLikeReason('token="\\${NOT CLOSED"'),
   "a malformed escaped expansion is still refused",
+);
+assert.ok(
+  secretLikeReason('token="\\${SOME_OTHER_UNREGISTERED_VARIABLE:-}"'),
+  "an unregistered escaped expansion is still refused",
 );
 // Quote-wrapped expansions are registered as exact values, NOT by teaching the
 // reference grammar to peel quote wrappers: peeling accepted a quote-wrapped
@@ -320,21 +313,19 @@ assert.equal(
   "a semicolon-terminated type annotation is not an assignment",
 );
 
-// Only a single, unescaped backslash is the template-literal escape. `\\${…}`
-// is a literal backslash plus an interpolation — a different string that must
-// not be normalized into a reference. Both values are long enough that a
-// non-reference is refused on length alone, so this isolates the normalization.
+// Escaped expansions are NOT normalized at all — no backslash count clears a
+// value on its own. Only the exact registered fixture passes, so an escaped
+// expansion naming a different variable is still refused however it is spelled.
 {
   const bs = String.fromCharCode(92);
   const name = "SENTRY_TRIAGE_TOKEN_LONG_ENOUGH_TO_EXCEED_MIN";
-  assert.equal(
+  assert.ok(
     secretLikeReason(`token="${bs}\${${name}:-}"`),
-    null,
-    "one backslash is the escape and normalizes to a reference",
+    "an unregistered escaped expansion is refused, not normalized",
   );
   assert.ok(
     secretLikeReason(`token="${bs}${bs}\${${name}:-}"`),
-    "two backslashes are not the escape form and stay refused",
+    "a double-backslash form is refused too",
   );
 }
 

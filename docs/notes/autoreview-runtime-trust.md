@@ -296,7 +296,34 @@ price of a rule that proves inertness from syntax alone.
 A literal in value position stays refused whatever names it: a fixture
 string is a quoted literal, and no syntax separates one from a weak credential,
 so fixtures compose the value from parts or use a documented placeholder marker
-(`fixture-token`, `example-secret`).
+(`fixture-token`, `example-secret`). Prefer one of those two for a new fixture —
+they need no scanner change and cannot go stale.
+
+One exception exists, for fixtures that must look like a real provider
+credential because the code under test parses that shape.
+`KNOWN_FAKE_FIXTURE_VALUES` in `scripts/agent-autoreview-core.mjs` holds an
+enumerated list of such values, matched EXACTLY — no trimming, no case folding,
+no prefix matching — so it widens the accepted set by precisely those strings
+and by nothing else. Registering a value is a security change: it is the one
+place a literal that reads as a credential is allowed through, so add an entry
+only when composing from parts or using a placeholder genuinely will not work,
+and say in the PR why.
+
+The registry also holds two shapes that are references rather than credentials
+but do not reach the reference grammar: a shell expansion escaped for a JS
+template literal (`\${VAR}`), and one carrying its own shell quoting
+(`'"${VAR}"'`). Both are registered as exact values rather than by teaching the
+grammar to strip escapes or peel quotes. Stripping the escape would clear a
+value the scanner previously refused, because in a real shell file that
+backslash PREVENTS expansion and the application receives the literal `${…}`;
+peeling quotes accepted a quote-wrapped real credential outright. The scanner
+has no file-type context to tell those cases apart, so it does not guess.
+
+A test in `scripts/agent-autoreview-core.test.mjs` runs the scanner over every
+line of every Sentry suite and fails if any line is refused, naming the file,
+line, reason, and this registry. That is what catches a new fixture nobody
+registered, so a fixture shape the registry does not yet know surfaces as a
+test failure rather than as an unreviewable file.
 Evidence reads reject symlinks and verify that the opened descriptor still
 identifies the file that was inspected, closing path-swap races.
 
