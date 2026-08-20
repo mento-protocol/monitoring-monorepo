@@ -3,7 +3,7 @@ title: Scripts Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-18
+last_verified: 2026-08-20
 doc_type: agent-instructions
 scope: scripts
 review_interval_days: 90
@@ -17,7 +17,7 @@ garden_lane: agent-entry-points
 ## Scope
 
 `scripts/` holds deploy wrappers, agent quality gates, code-health checks, and
-repo maintenance utilities. 38 files sit flat at the top level today.
+repo maintenance utilities.
 
 ## Layout
 
@@ -83,16 +83,17 @@ that mechanism moves with it, in the same PR.
   `.github/workflows/` pin a `scripts/` path. `ci.yml` (`autoreviewSuite`,
   `autoreviewRootRuntime`, `versionSkew`; `rootScripts` is the recursive
   `scripts/**`), `infra.yml`, `alerts-rules.yml`, `peg-policy-publication.yml`,
-  and `schema-diff.yml` list individual files. The three terraform filters
-  (`ci.yml` `terraform`; `infra.yml` push and `pull_request`) also name
-  `scripts/lib/hcl.mjs` and `scripts/lib/workflow-yaml.mjs`, outside the
-  recursive `scripts/production-infra-identity-contract/**`; `routing.test.mjs`
-  there asserts all three. A filter also names what its listed files import. A
-  miss is silent — the job stops running while the required `ci` sentinel stays
-  green. ADR 0064 covers when a module glob such as `supply-chain.yml`'s
-  `scripts/supply-chain/**` is the safer pin.
+  and `schema-diff.yml` list individual files. The three Terraform filters are
+  the exception: `ci.yml` `terraform` plus `infra.yml` push and `pull_request`
+  copy the broad `workflowAdmissionPatterns` boundary from
+  `terraform.stacks.json`, including `scripts/**`. `routing.test.mjs` asserts
+  exact equality and proves that boundary subsumes every stack pattern. A miss
+  is silent without that contract — the job stops running while the required
+  `ci` sentinel stays green. ADR 0064 covers when a module glob such as
+  `supply-chain.yml`'s `scripts/supply-chain/**` is the safer pin.
 - **Terraform stack registry.** `terraform.stacks.json` `changedPathPatterns`
-  pins exact `scripts/` paths per stack, mirrored into those filters.
+  pins exact `scripts/` paths per stack. The broad workflow admission boundary
+  covers the directory; `pnpm tf:test` enforces subsumption.
 - **Trusted-validator probes.** `pr-description.yml` runs the validator from the
   PR's base ref via the base branch **name**, so it always resolves to the base
   branch's current tip — never a snapshot from when a PR branched. One probe
@@ -149,14 +150,11 @@ in the PR that moves a file. Every surface there is mandatory.
   caller plan path, or print, upload, or cache either plan form. The wrapper
   mechanism and its deploy-only bootstrap exception are in
   [ADR 0061](../docs/adr/0061-exact-plan-guard-for-manual-platform-applies.md).
-- `pnpm tf:test` enforces the deployment source-staging contract: the five
-  allowed `gcloud builds submit` / `gcloud app deploy` callsites, the Metrics
-  Bridge build config, its guarded no-refresh bootstrap plans, and the staging
-  bucket IAM. Never add a callsite, an indirect or dynamic deploy form, or a CLI
-  service-account override, and keep inert examples in
-  `scripts/deploy-staging-contract.test.mjs`.
+- `pnpm tf:test` enforces the deployment source-staging contract. Never add a
+  deploy callsite, an indirect or dynamic deploy form, or a CLI service-account
+  override; keep inert examples in `scripts/deploy-staging-contract.test.mjs`.
   [ADR 0053](../docs/adr/0053-explicit-deployment-source-staging.md) owns the
-  contract, its supported static syntax, and its explicit proof limits.
+  contract, the allowed callsites, and its proof limits.
 
 ## Verification
 

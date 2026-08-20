@@ -3,7 +3,7 @@ title: Terraform Stacks
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-13
+last_verified: 2026-08-20
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -102,12 +102,18 @@ separately reviewed runtime rollover.
 
 ## CI Model
 
-`.github/workflows/infra.yml` uses coarse admission filters. The required
-`.github/workflows/ci.yml` sentinel runs on every PR; its internal filter and
-`scripts/tf-stacks.mjs` use the registry to validate changed stack roots. Until
-[#1501](https://github.com/mento-protocol/monitoring-monorepo/issues/1501)
-enforces parity, add each new `changedPathPatterns` entry to both workflow
-filters too.
+`terraform.stacks.json` owns the coarse `workflowAdmissionPatterns` boundary.
+The required `.github/workflows/ci.yml` workflow runs on every PR and applies
+that boundary only to its internal Terraform job. The advisory
+`.github/workflows/infra.yml` workflow copies the same boundary for push and
+pull-request admission. After either route starts, `scripts/tf-stacks.mjs`
+classifies the exact changed stacks from `changedPathPatterns`. `pnpm tf:test`
+requires all three filters to equal the registry boundary and requires that the
+boundary subsume every stack pattern. Add a new stack input under an existing
+broad boundary. If it needs a new root, extend the registry boundary and all
+three workflow copies in the same change. `.github/workflows/**` is the only
+nested boundary. Using `.github/**` would also admit unrelated repository
+metadata and actions.
 
 `alerts-rules`, `alerts-delivery`, `aegis`, and `governance-watchdog` have CI
 apply behavior on `main`, gated by the `production-infra` GitHub Environment.

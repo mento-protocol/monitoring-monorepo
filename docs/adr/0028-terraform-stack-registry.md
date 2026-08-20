@@ -3,7 +3,7 @@ title: Terraform ownership is a registry with roots split by cadence and blast r
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-24
+last_verified: 2026-08-20
 scope: terraform/infra
 date: 2026-05
 doc_type: adr
@@ -31,7 +31,9 @@ Register every Terraform root in a machine-readable **`terraform.stacks.json`**
 separate GCS state**, split by cadence and blast radius: `platform`, `alerts-rules`
 (daily), `alerts-delivery` (monthly), `aegis`, `governance-watchdog`. CI and scripts
 ask the registry which stacks changed; ownership is never inferred from directory
-names.
+names. The registry also declares one coarse `workflowAdmissionPatterns`
+boundary. Workflows use that boundary to start, then use the stack-specific
+patterns for exact classification.
 
 ## Alternatives considered
 
@@ -45,9 +47,9 @@ names.
 - Cross-stack resource moves are import-then-`state rm` (state can't cross backends),
   as done for the Aegis service-health rule group move into `alerts-rules`.
 - The registry is authoritative for ownership and changed-stack
-  classification. Coarse workflow admission filters and the required CI
-  sentinel still duplicate path coverage until issue #1501 replaces that
-  duplication with enforced parity.
+  classification. The required CI internal Terraform filter and both Infra
+  admission filters copy the registry's broad boundary. `pnpm tf:test` enforces
+  exact equality and proves that the boundary subsumes every stack pattern.
 
 ## Evidence
 

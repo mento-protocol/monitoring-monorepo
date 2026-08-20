@@ -67,7 +67,17 @@ const CLEAN_CONCLUSION_WITH_TAIL =
 // would read as clean. On a fail-closed gate that silently drops real reviewer
 // findings before merge, so the only safe rule is that a clean verdict asserts
 // cleanliness and says nothing further.
-const CLEAN_TAIL_SHAPE = /^[.!]?$/;
+// An approval mark is allowed after the verdict word, because it asserts
+// nothing a reader could act on — `**Verdict:** LGTM ✅` is the same
+// statement as `**Verdict:** LGTM`. This is the emoji set
+// `CLEAN_REVIEW_TITLE` already accepts, and nothing else joins it: any word
+// after the verdict is prose and still blocks.
+//
+// Without this a genuinely clean review blocked its own feedback gate with
+// no reply-based escape, because `blockingTopLevelBotComments` is computed
+// from the comment alone. PR #1975 was ready to merge and gate-blocked by
+// its own LGTM; that is the failure this closes.
+const CLEAN_TAIL_SHAPE = /^(?:✅|✔️?|\u{1F44D}️?|\s)*[.!]?$/u;
 // The prefix grammar `reviewLineContent` peels: bullets, numbering, headings,
 // and task boxes, in any order and up to three deep. `hasUncheckedTaskBox`
 // walks the same pattern and depth — keep them shared, never re-spelled.
@@ -204,6 +214,16 @@ const CLEAN_REVIEW_COMPATIBILITY = new Map([
       prNumber: "1837",
       commentId: "5281908631",
       headRefOid: "7d982e05a0256d73d0d7aeafc485dfad338e63ce",
+    },
+  ],
+  [
+    "6ebf5de00fde8c46040def096e4c0c02ee0ab02b9fae20130e1ba8e6e84037e3",
+    {
+      author: "claude[bot]",
+      prNumber: "1965",
+      commentId: "5355983385",
+      headRefOid: "0884780bfe1d5ae8710a6f845c3a6199f1bf365d",
+      createdAt: "2026-08-20T12:37:45Z",
     },
   ],
 ]);
@@ -490,7 +510,10 @@ export function matchesCleanReviewCompatibilityRegistry(comment, pr, rawBody) {
     String(comment?.author ?? "").toLowerCase() === registered.author &&
     String(pr?.number ?? "") === registered.prNumber &&
     String(comment?.id ?? "") === registered.commentId &&
-    String(pr?.headRefOid ?? "") === registered.headRefOid
+    String(pr?.headRefOid ?? "") === registered.headRefOid &&
+    (registered.createdAt === undefined ||
+      String(comment?.createdAt ?? comment?.created_at ?? "") ===
+        registered.createdAt)
   );
 }
 

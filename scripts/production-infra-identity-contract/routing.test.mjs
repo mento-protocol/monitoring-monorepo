@@ -12,9 +12,12 @@ const repositoryRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "../..",
 );
-const terraformStackPaths = JSON.parse(
+const terraformRegistry = JSON.parse(
   readFileSync(path.join(repositoryRoot, "terraform.stacks.json"), "utf8"),
-).stacks.map((stack) => stack.path);
+);
+const terraformStackPaths = terraformRegistry.stacks.map((stack) => stack.path);
+const terraformWorkflowAdmissionPatterns =
+  terraformRegistry.workflowAdmissionPatterns;
 const gatePath = path.join(repositoryRoot, "scripts/agent-quality-gate.sh");
 const scratchDirectory = mkdtempSync(
   path.join(os.tmpdir(), "production-identity-routing-"),
@@ -28,6 +31,71 @@ const SHARED_PARSING_CORES = [
   "scripts/lib/hcl.mjs",
   "scripts/lib/workflow-yaml.mjs",
 ];
+const NESTED_ADMISSION_EXCEPTIONS = new Set([".github/workflows/**"]);
+
+function parseSimplePathPattern(pattern) {
+  assert.equal(typeof pattern, "string", "path patterns must be strings");
+  assert(pattern.length > 0, "path patterns must not be empty");
+  const recursive = pattern.endsWith("/**");
+  const base = recursive ? pattern.slice(0, -3) : pattern;
+  assert(base.length > 0, `path pattern must name a base path: ${pattern}`);
+  assert(
+    !/[*?{}[\]]/u.test(base),
+    `path pattern uses an unsupported glob shape: ${pattern}`,
+  );
+  return { base, recursive };
+}
+
+function admissionPatternSubsumes(admissionPattern, registryPattern) {
+  const admission = parseSimplePathPattern(admissionPattern);
+  const candidate = parseSimplePathPattern(registryPattern);
+  if (!admission.recursive) {
+    return !candidate.recursive && admission.base === candidate.base;
+  }
+  return (
+    candidate.base === admission.base ||
+    candidate.base.startsWith(`${admission.base}/`)
+  );
+}
+
+function uncoveredRegistryPatterns(stacks, admissionPatterns) {
+  return stacks.flatMap((stack) =>
+    stack.changedPathPatterns
+      .filter(
+        (registryPattern) =>
+          !admissionPatterns.some((admissionPattern) =>
+            admissionPatternSubsumes(admissionPattern, registryPattern),
+          ),
+      )
+      .map((pattern) => ({ pattern, stackId: stack.id })),
+  );
+}
+
+function assertBroadAdmissionPatterns(patterns) {
+  assert(Array.isArray(patterns), "workflowAdmissionPatterns must be an array");
+  assert(patterns.length > 0, "workflowAdmissionPatterns must not be empty");
+  assert.equal(
+    new Set(patterns).size,
+    patterns.length,
+    "workflowAdmissionPatterns must not contain duplicates",
+  );
+  for (const pattern of patterns) {
+    assert.notEqual(
+      pattern,
+      ".github/**",
+      "workflow admission must not admit all .github metadata",
+    );
+    const parsed = parseSimplePathPattern(pattern);
+    const isRootFile = !parsed.recursive && !parsed.base.includes("/");
+    const isTopLevelBoundary = parsed.recursive && !parsed.base.includes("/");
+    assert(
+      isRootFile ||
+        isTopLevelBoundary ||
+        NESTED_ADMISSION_EXCEPTIONS.has(pattern),
+      `workflow admission must use a top-level boundary, documented nested exception, or root file: ${pattern}`,
+    );
+  }
+}
 
 function qualityGatePlan(changedPath) {
   writeFileSync(changedPathsFile, `${changedPath}\n`);
@@ -85,9 +153,96 @@ function assertRoutesAgentGateSelfTest(changedPath) {
 }
 
 try {
+  assertBroadAdmissionPatterns(terraformWorkflowAdmissionPatterns);
+  assert.deepEqual(
+    uncoveredRegistryPatterns(
+      terraformRegistry.stacks,
+      terraformWorkflowAdmissionPatterns,
+    ),
+    [],
+    "every stack changedPathPatterns entry must fit the workflow admission boundary",
+  );
+  assert.equal(
+    admissionPatternSubsumes("scripts/**", "scripts/tf-stacks.mjs"),
+    true,
+    "recursive workflow admission must cover a nested literal",
+  );
+  assert.equal(
+    admissionPatternSubsumes("alerts/**", "alerts/rules/**"),
+    true,
+    "recursive workflow admission must cover a nested recursive pattern",
+  );
+  assert.equal(
+    admissionPatternSubsumes("alerts/rules/**", "alerts/**"),
+    false,
+    "a narrow recursive admission must not cover its parent pattern",
+  );
+  assert.throws(
+    () => assertBroadAdmissionPatterns(["metrics-bridge/peg-registry.json"]),
+    /top-level boundary/u,
+    "workflow admission must reject nested one-file enumeration",
+  );
+  assert.throws(
+    () => assertBroadAdmissionPatterns(["alerts/rules/**"]),
+    /top-level boundary/u,
+    "workflow admission must reject nested stack-specific recursion",
+  );
+  assert.throws(
+    () => assertBroadAdmissionPatterns([".github/**"]),
+    /must not admit all \.github metadata/u,
+    "workflow admission must reject unrelated GitHub metadata",
+  );
+  assert.doesNotThrow(
+    () => assertBroadAdmissionPatterns([".github/workflows/**"]),
+    "workflow admission must allow the documented workflow-directory exception",
+  );
+  assert.deepEqual(
+    uncoveredRegistryPatterns(
+      terraformRegistry.stacks,
+      terraformWorkflowAdmissionPatterns.filter(
+        (pattern) => pattern !== "metrics-bridge/**",
+      ),
+    ),
+    [
+      {
+        pattern: "metrics-bridge/peg-registry.json",
+        stackId: "peg-policy-publication",
+      },
+    ],
+    "removing a workflow boundary must expose the registry path it strands",
+  );
+  assert.deepEqual(
+    uncoveredRegistryPatterns(
+      [
+        {
+          id: "future-stack",
+          changedPathPatterns: ["future-root/input.json"],
+        },
+      ],
+      terraformWorkflowAdmissionPatterns,
+    ),
+    [{ pattern: "future-root/input.json", stackId: "future-stack" }],
+    "a future registry root must fail until workflow admission covers it",
+  );
+
   const ciWorkflow = loadYaml(
     readFileSync(path.join(repositoryRoot, ".github/workflows/ci.yml"), "utf8"),
   );
+  const ciTriggers = ciWorkflow.on ?? ciWorkflow[true];
+  for (const eventName of ["pull_request", "push"]) {
+    const trigger = ciTriggers[eventName];
+    assert(trigger, `ci.yml must define the ${eventName} trigger`);
+    assert.equal(
+      trigger.paths,
+      undefined,
+      `required ci.yml ${eventName} trigger must not use paths`,
+    );
+    assert.equal(
+      trigger["paths-ignore"],
+      undefined,
+      `required ci.yml ${eventName} trigger must not use paths-ignore`,
+    );
+  }
   const filterStep = ciWorkflow.jobs.changes.steps.find(
     (step) => step.id === "filter",
   );
@@ -117,10 +272,8 @@ try {
     "ci.yml scripts job must run when rootScripts changes",
   );
 
-  // The three enumerated terraform paths-filters decide whether the terraform
-  // jobs run at all. `scripts/production-infra-identity-contract/**` covers the
-  // contract, but not the shared cores it imports, so each core needs its own
-  // entry in every filter.
+  // These three coarse filters decide whether registry classification runs.
+  // The registry owns the boundary, and every stack-specific path must fit it.
   const infraWorkflow = loadYaml(
     readFileSync(
       path.join(repositoryRoot, ".github/workflows/infra.yml"),
@@ -134,18 +287,84 @@ try {
     ["infra.yml pull_request paths", infraTriggers.pull_request.paths],
   ];
   for (const [label, patterns] of terraformFilters) {
-    assert(Array.isArray(patterns), `${label} must be a path list`);
-    assert(
-      patterns.includes("scripts/production-infra-identity-contract/**"),
-      `${label} must cover the identity contract directory`,
+    assert.deepEqual(
+      patterns,
+      terraformWorkflowAdmissionPatterns,
+      `${label} must equal terraform.stacks.json workflowAdmissionPatterns`,
     );
-    for (const sharedCore of SHARED_PARSING_CORES) {
-      assert(
-        patterns.includes(sharedCore),
-        `${label} must include ${sharedCore}`,
-      );
-    }
+    assert.deepEqual(
+      uncoveredRegistryPatterns(terraformRegistry.stacks, patterns),
+      [],
+      `${label} must admit every stack changedPathPatterns entry`,
+    );
   }
+  assert.equal(
+    ciWorkflow.jobs.changes.outputs.terraform,
+    "${{ steps.filter.outputs.terraform }}",
+    "ci.yml changes job must publish the Terraform admission result",
+  );
+  const terraformJob = ciWorkflow.jobs.terraform;
+  assert(terraformJob, "ci.yml must define the Terraform validation job");
+  assert.equal(
+    terraformJob.needs,
+    "changes",
+    "ci.yml Terraform validation must depend on change detection",
+  );
+  assert.equal(
+    terraformJob.if,
+    "needs.changes.outputs.terraform == 'true'",
+    "ci.yml Terraform validation must use the registry-backed admission result",
+  );
+  const ciValidateChangedStacks = terraformJob.steps.find(
+    (step) => step.name === "Validate changed stacks",
+  );
+  assert(
+    ciValidateChangedStacks,
+    "ci.yml Terraform validation must classify and validate changed stacks",
+  );
+  assert.match(
+    String(ciValidateChangedStacks.run),
+    /scripts\/tf-stacks\.mjs changed/u,
+    "ci.yml Terraform validation must classify stacks through the registry",
+  );
+  assert.match(
+    String(ciValidateChangedStacks.run),
+    /scripts\/tf-stacks\.mjs validate/u,
+    "ci.yml Terraform validation must validate each classified stack",
+  );
+
+  const infraDiscover = infraWorkflow.jobs.discover;
+  assert(infraDiscover, "infra.yml must define the stack discovery job");
+  const infraBuildMatrix = infraDiscover.steps.find(
+    (step) => step.name === "Build changed-stack matrix",
+  );
+  assert(
+    infraBuildMatrix,
+    "infra.yml discovery must build the changed-stack matrix",
+  );
+  assert.match(
+    String(infraBuildMatrix.run),
+    /scripts\/tf-stacks\.mjs changed/u,
+    "infra.yml discovery must classify stacks through the registry",
+  );
+  const infraValidate = infraWorkflow.jobs.validate;
+  assert(infraValidate, "infra.yml must define the stack validation job");
+  assert.equal(
+    infraValidate.needs,
+    "discover",
+    "infra.yml validation must depend on stack discovery",
+  );
+  assert.equal(
+    infraValidate.if,
+    "needs.discover.outputs.has-stacks == 'true'",
+    "infra.yml validation must run for a non-empty registry matrix",
+  );
+  assert(
+    infraValidate.steps.some((step) =>
+      String(step.run).includes("scripts/tf-stacks.mjs validate"),
+    ),
+    "infra.yml validation must validate each classified stack",
+  );
   const productionInfraContract = ciWorkflow.jobs["production-infra-contract"];
   assert(
     productionInfraContract,
@@ -185,6 +404,10 @@ try {
   assert(
     ciWorkflow.jobs.ci.needs.includes("production-infra-contract"),
     "ci sentinel must require production-infra-contract",
+  );
+  assert(
+    ciWorkflow.jobs.ci.needs.includes("terraform"),
+    "ci sentinel must include the Terraform validation job",
   );
   const allGreenStep = ciWorkflow.jobs.ci.steps.find((step) =>
     step.uses?.startsWith("re-actors/alls-green@"),
