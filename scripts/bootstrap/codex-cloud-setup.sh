@@ -426,7 +426,10 @@ MSG
     return 1
   fi
 
-  foundryup
+  if ! foundryup; then
+    echo "error: foundryup failed after the Foundry installer completed." >&2
+    return 1
+  fi
   forge --version
 }
 

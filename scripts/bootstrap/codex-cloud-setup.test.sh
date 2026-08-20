@@ -65,6 +65,7 @@ mkdir -p "$HOME/.foundry/bin"
   printf '%s\n' '#!/usr/bin/env bash'
   printf '%s\n' 'set -euo pipefail'
   printf '%s\n' 'printf "foundryup\\n" >>"$TEST_TOOL_LOG"'
+  printf '%s\n' '[[ "${TEST_FOUNDRYUP_FAIL:-0}" != "1" ]] || exit 24'
   printf '%s\n' 'echo "foundryup test fixture"'
 } >"$HOME/.foundry/bin/foundryup"
 {
@@ -136,6 +137,7 @@ run_install() {
   local sha_value="${2-__UNSET__}"
   local installer_fail="${3:-0}"
   local curl_fail="${4:-0}"
+  local foundryup_fail="${5:-0}"
 
   (
     export HOME="$case_home"
@@ -148,6 +150,7 @@ run_install() {
     export TEST_INSTALLER_SOURCE="$installer_source"
     export TEST_INSTALLER_FAIL="$installer_fail"
     export TEST_CURL_FAIL="$curl_fail"
+    export TEST_FOUNDRYUP_FAIL="$foundryup_fail"
     export TEST_EXPECTED_URL="${url_value/__UNSET__/$default_url}"
     unset CODEX_CLOUD_FOUNDRYUP_URL CODEX_CLOUD_FOUNDRYUP_SHA256
     if [[ "$url_value" != "__UNSET__" ]]; then
@@ -208,6 +211,18 @@ grep -Fq -- "-o " "$case_curl_log" || fail "${case_name}: did not use a file dow
 [[ "$(wc -l <"$case_exec_log")" -eq 1 ]] || fail "${case_name}: did not execute the verified installer exactly once"
 grep -Fxq "foundryup" "$case_tool_log" || fail "${case_name}: did not run foundryup"
 grep -Fxq "forge" "$case_tool_log" || fail "${case_name}: did not verify forge"
+assert_download_was_cleaned
+
+prepare_case "foundryup-failure"
+if run_install "$custom_url" "$installer_sha256" 0 0 1; then
+  fail "${case_name}: accepted a failing foundryup"
+fi
+grep -Fq "foundryup failed" "$case_stderr" ||
+  fail "${case_name}: did not explain the foundryup failure"
+grep -Fxq "foundryup" "$case_tool_log" || fail "${case_name}: did not run foundryup"
+if grep -Fxq "forge" "$case_tool_log"; then
+  fail "${case_name}: ran forge after foundryup failed"
+fi
 assert_download_was_cleaned
 
 prepare_case "custom-url-installer-failure"

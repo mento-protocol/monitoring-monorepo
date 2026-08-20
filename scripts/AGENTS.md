@@ -12,8 +12,7 @@ garden_lane: agent-entry-points
 
 # AGENTS.md — Scripts
 
-> Read the relevant [architecture decision](../docs/adr/README.md) before
-> changing script architecture.
+> **Architecture decisions** behind these scripts live in [`docs/adr/`](../docs/adr/README.md) — read the relevant ADR before changing how something here works.
 
 ## Scope
 
@@ -62,9 +61,10 @@ stay with their domain.
 `scripts/` has eleven path-pin mechanisms. Move each pin with its file in the
 same PR.
 
-- **Autoreview runtime materialization.** `agent-autoreview.sh` lists its
-  runtime files and materializes each from an `origin/main` blob. Omitted paths
-  are absent; moves are staged across PRs (ADR 0064).
+- **Autoreview runtime materialization.** `agent-autoreview.sh` names its
+  runtime files in Perl copy lists and `runtime_paths` arrays, then materializes
+  each from an `origin/main` blob. A path it omits is absent at runtime; moving
+  one is staged across PRs (ADR 0064).
 - **Gate routing pins.** `agent-quality-gate.sh` uses
   `$script_source_dir == $repo_root/scripts` to exclude stub-repo tests. It pairs
   `bootstrap/codex-cloud-setup.{sh,test.sh}` for offline installer tests.
