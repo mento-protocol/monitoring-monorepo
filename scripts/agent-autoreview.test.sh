@@ -7268,19 +7268,20 @@ run_capture_deadline_feedback_clamp_arm() {
     "$review_repo" "$filter_script" "$state_pointer" 1
   git -C "$review_repo" remote add origin \
     https://github.com/mento-protocol/monitoring-monorepo.git
-  mkdir -p "$review_repo/scripts"
+  mkdir -p "$review_repo/scripts/pr"
   # The feedback runtime is materialized from protected main and executed
-  # directly. A runtime that never returns is the cheapest way to reach the
-  # deadline the wrapper hands it.
+  # directly, and the wrapper resolves it only under `scripts/pr/`. A runtime
+  # that never returns is the cheapest way to reach the deadline the wrapper
+  # hands it.
   printf 'setInterval(() => {}, 1000);\n' \
-    >"$review_repo/scripts/pr-feedback-state.mjs"
+    >"$review_repo/scripts/pr/pr-feedback-state.mjs"
   for runtime_file in \
     pr-feedback-state-core.mjs \
     pr-feedback-state-claude.mjs \
     pr-ready-state.mjs \
     pr-ready-state-core.mjs \
     pr-ready-state-format.mjs; do
-    printf 'export {};\n' >"$review_repo/scripts/$runtime_file"
+    printf 'export {};\n' >"$review_repo/scripts/pr/$runtime_file"
   done
   commit_review_repo "$review_repo" "feedback runtime"
   # `commit_review_repo` only seeds origin/main once, and the seed commit
