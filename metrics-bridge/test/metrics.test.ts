@@ -1806,6 +1806,42 @@ describe("updateMetrics", () => {
     );
   });
 
+  it("does not fall back to count shares when an allowlisted pool's median goes dark", async () => {
+    // The fallback must not survive this pair acquiring a real feed. A dark
+    // median RETAINS its last non-zero price, so a retained price means a real
+    // valuation existed — publishing a 1:1 count share here would replace it
+    // with a fabricated one exactly when the oracle went down, reading as
+    // healthy while the pool drains. Fail closed like every other pool.
+    updateMetrics([
+      makePool({
+        id: "137-0xcd8c6811d975981f57e7fb32e59f0bee66af3201",
+        chainId: 137,
+        token0: "0x4d502d735b4c574b487ed641ae87ceae884731c7",
+        token1: "0x888883b5f5d21fb10dfeb70e8f9722b9fb0e5e51",
+        reserves0: "4000000000000000000",
+        reserves1: "6000000000000000000",
+        medianLive: false,
+        lastMedianPrice: "500000000000000000000000",
+      }),
+    ]);
+    // Count shares still publish; only the value-share conversion is gated.
+    expect(
+      await getGaugeValue(register, "mento_pool_reserve_share_token0", {
+        token_symbol: "EURm",
+      }),
+    ).toBeCloseTo(0.4, 6);
+    expect(
+      await getGaugeValue(register, "mento_pool_reserve_value_share_token0", {
+        token_symbol: "EURm",
+      }),
+    ).toBeUndefined();
+    expect(
+      await getGaugeValue(register, "mento_pool_reserve_value_share_token1", {
+        token_symbol: "EUROP",
+      }),
+    ).toBeUndefined();
+  });
+
   it("prefers the real value share over the 1:1 fallback when the allowlisted pool has a live median", async () => {
     // If EUROP ever gets a real feed, the oracle-frame conversion must win.
     // A 0.5 median against 40/60 reserves gives ~25%/75% by value — a number

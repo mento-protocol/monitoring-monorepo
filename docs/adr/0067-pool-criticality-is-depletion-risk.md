@@ -177,11 +177,20 @@ inaction**, not when a ratio is large.
   and has never landed a median. At a rate of exactly 1 the oracle reference is
   1 and the value share reduces to the token-count share, so the bridge
   publishes the count numbers into the value-share gauges for this pool
-  (`COUNT_SHARE_VALUE_FALLBACK_POOL_IDS` in `metrics-bridge/src/metrics.ts`) and
-  both tiers cover it normally. A real value share always wins when one is
-  available. Membership requires a rate pinned to 1 by construction; a pair that
-  merely trades near parity does not qualify, because its rate can move and the
-  count share would then stop answering the depletion question.
+  (`countSharesStandInForValue` in `metrics-bridge/src/metrics.ts`) and both
+  tiers cover it normally. A real value share always wins when one is available.
+  Membership requires a rate pinned to 1 by construction; a pair that merely
+  trades near parity does not qualify, because its rate can move and the count
+  share would then stop answering the depletion question.
+- That fallback is deliberately narrower than "the allowlisted pool published no
+  value share". It applies only while `lastMedianPrice` is zero — the state of a
+  feed that has never landed a median. It must not survive the pair acquiring a
+  real feed, and the retained-price rule above is what enforces that: a median
+  that once worked and went dark keeps its last non-zero value, so the fallback
+  switches off and the pool fails closed like any other. Publishing a 1:1 count
+  share during an oracle outage would replace a real valuation with a fabricated
+  one at the exact moment the pool most needs the real number, reading as
+  healthy while it drains.
 - `POOL_DEPLETION_CRITICAL_SHARE` and `POOL_DEPLETION_PAGE_SHARE` join the
   Terraform mirror set. `DEVIATION_CRITICAL_RATIO` leaves it; a future editor
   who bumps it will get no drift-check failure, because there is nothing in
@@ -248,7 +257,7 @@ inaction**, not when a ratio is large.
   the threshold-mirror banner), `alerts/rules/main.tf` (the min-value-share
   locals, the V0/V1 annotation queries, and the un-suppressed warning
   expressions), `metrics-bridge/src/metrics.ts` (`reserveValueShares`, the two
-  gauges it publishes, and `COUNT_SHARE_VALUE_FALLBACK_POOL_IDS`),
+  gauges it publishes, and `countSharesStandInForValue`),
   `alerts/rules/contact-points.tf` (`grafana_contact_point.pool_page`,
   `notify_page_pool`), `shared-config/src/thresholds.ts` (the constants and
   which of them Terraform mirrors),
