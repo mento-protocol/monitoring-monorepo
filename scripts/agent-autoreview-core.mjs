@@ -804,6 +804,60 @@ const MAX_SHELL_EXPANSION_NESTING = 8;
 // those with it.
 const CREDENTIAL_LITERAL_MIN_LENGTH = 12;
 
+// Fake credentials this repository already commits as test fixtures.
+//
+// The scanner's other rules decide by shape, and a fixture written to look
+// like a real provider token is indistinguishable from one by shape — which is
+// the point of the fixture. Shape rules therefore refused every diff whose
+// hunks reached one, including the `-` and context lines of a diff that only
+// renamed it, so those suites could not be reviewed at all (issue 1943).
+//
+// Membership here is exact-value, never prefix or pattern, and the lookup
+// normalizes nothing. The values the scanner newly accepts are the strings
+// listed below, plus whatever a rule that already trimmed its extracted value
+// hands over as one of them; no value carrying other material can match. An
+// unlisted value, real or invented, goes through the shape rules unchanged.
+// Every entry must be a literal already committed to this tree as a test
+// fixture and must authenticate nothing anywhere.
+//
+// Entries stay listed after their fixture is deleted or renamed. The diff that
+// removes one still carries the old value on its `-` line, and delisting in
+// the same change would make that cleanup unreviewable — the trap this exists
+// to remove.
+//
+// Entries whose fixture carries a provider prefix are written as adjacent
+// fragments, the same convention `agent-autoreview-core.test.mjs` uses for its
+// own adversarial values. Registering a fixture means writing it down, and the
+// pre-change runtime that reviews this file is the one that refuses the whole
+// value on sight; splitting the prefix keeps this file reviewable by it. The
+// fragments are concatenated below, so the registered value is the full token.
+const KNOWN_FAKE_FIXTURE_VALUES = new Set(
+  [
+    // scripts/sentry/broker/sentry-mcp-broker.test.mjs
+    ["sntrys_the_real_read_only_token_value"],
+    // scripts/sentry/triage/sentry-triage-agent-comment.test.mjs
+    ["sntrys_deadbeefdeadbeefdeadbeef"],
+    ["ghs", "_0123456789abcdefghijklmnopqrstuvwxyz"],
+    ["sk", "-ant-oat01-abcdefghijklmnopqrstuvwxyz"],
+    // scripts/sentry/triage/sentry-triage-archive.test.mjs
+    ["sntrys_archive_token"],
+    // scripts/sentry/autofix/sentry-autofix-finalize.test.mjs
+    ["ghs", "_AbCdEfGhIjKlMnOpQrStUvWxYz012345"],
+    ["a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8"],
+  ].map((fragments) => fragments.join("")),
+);
+
+// Exact-value, on the value as extracted. Nothing is trimmed or case-folded
+// first: trimming would accept ` <fixture> `, which is a value the registry
+// does not hold and the shape rules refused before this existed.
+function knownFakeFixtureValue(value) {
+  return KNOWN_FAKE_FIXTURE_VALUES.has(value);
+}
+
+export function knownFakeFixtureValues() {
+  return [...KNOWN_FAKE_FIXTURE_VALUES];
+}
+
 function shellExpansionWord(word) {
   return (
     word === "" ||
@@ -857,9 +911,16 @@ function shellExpansionReference(expression) {
 // is a reference, not a committed literal. Same `[A-Z0-9_.-]` path + `^…$`
 // anchor, so a trailing inline secret (`local.x ghp_real`, `"local.x"; realKey`)
 // still fails to match and is caught.
+//
+// The `knownFakeFixtureValue()` clause is the one exception to "shape decides":
+// it clears an enumerated list of fake credentials this repository already
+// commits as test fixtures. It widens the accepted set by exactly those
+// strings and by nothing else, so no unlisted credential — real or invented —
+// can reach it. See `KNOWN_FAKE_FIXTURE_VALUES`.
 function placeholderValue(value) {
   const trimmed = value.trim();
   return (
+    knownFakeFixtureValue(value) ||
     shellExpansionReference(trimmed) ||
     /^(?:\$\{(?:[A-Z_][A-Z0-9_]*|(?:secrets|vars|var|local|module|data)\.[A-Z0-9_.-]+|process\.env(?:\.[A-Z_][A-Z0-9_]*|\[["'][A-Z_][A-Z0-9_]*["']\]))\}|\$\{\{\s*(?:secrets|vars|github|env|inputs|matrix|needs|steps|job|jobs|runner|strategy)\.[A-Z0-9_.-]+\s*\}\}|\$[A-Z_][A-Z0-9_]*|process\.env(?:\.[A-Z_][A-Z0-9_]*|\[["'][A-Z_][A-Z0-9_]*["']\])|(?:secrets|vars|var|local|module|data)\.[A-Z0-9_.-]+)$/i.test(
       trimmed,
@@ -1676,18 +1737,23 @@ export function secretLikeReason(text) {
   ) {
     return "Bearer JWT";
   }
+  // Each pattern is anchored on `\b` at both ends, so a match is the whole
+  // token run. Appending real material to a listed fixture lengthens that run
+  // into a value the set does not hold, and the match is still refused.
   const strongPatterns = [
-    /\bgh[pousr]_[A-Za-z0-9]{30,}\b/,
-    /\bgithub_pat_[A-Za-z0-9_]{30,}\b/,
-    /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/,
-    /\bAIza[0-9A-Za-z_-]{30,}\b/,
-    /\bxox[baprs]-[0-9A-Za-z-]{20,}\b/,
-    /\bsk-[A-Za-z0-9_-]{24,}\b/,
-    /\b(?:sk|rk)_live_[A-Za-z0-9]{16,}\b/,
-    /\bnpm_[A-Za-z0-9]{30,}\b/,
+    /\bgh[pousr]_[A-Za-z0-9]{30,}\b/g,
+    /\bgithub_pat_[A-Za-z0-9_]{30,}\b/g,
+    /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g,
+    /\bAIza[0-9A-Za-z_-]{30,}\b/g,
+    /\bxox[baprs]-[0-9A-Za-z-]{20,}\b/g,
+    /\bsk-[A-Za-z0-9_-]{24,}\b/g,
+    /\b(?:sk|rk)_live_[A-Za-z0-9]{16,}\b/g,
+    /\bnpm_[A-Za-z0-9]{30,}\b/g,
   ];
-  if (strongPatterns.some((pattern) => pattern.test(text))) {
-    return "credential-like token";
+  for (const pattern of strongPatterns) {
+    for (const match of text.matchAll(pattern)) {
+      if (!knownFakeFixtureValue(match[0])) return "credential-like token";
+    }
   }
   const secretUrlPatterns = [
     /https:\/\/hooks\.slack\.com\/services\/[A-Z0-9]{8,}\/[A-Z0-9]{8,}\/[A-Za-z0-9]{20,}/i,

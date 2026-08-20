@@ -6,6 +6,7 @@ import {
   lstatSync,
   mkdtempSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   renameSync,
@@ -15,6 +16,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   assertNoSecretLikeContent,
   assertStableFileRead,
@@ -22,6 +24,7 @@ import {
   buildBoundedReviewPrompts,
   createReviewInputCollector,
   isWithin,
+  knownFakeFixtureValues,
   MAX_REVIEW_PROMPT_BYTES,
   readBoundedRegularFile,
   readSafeEvidenceFile,
@@ -205,6 +208,189 @@ assert.equal(
   secretLikeReason("documentation mentions -----BEGIN PRIVATE KEY----- only"),
   null,
   "a header name without key-body material is not treated as a credential",
+);
+
+// Known-fake credential fixtures (issue 1943). A suite that commits one stayed
+// unreviewable in every diff position, including the `-` and context lines of
+// the change that would have cleaned it up.
+const diffPositions = [
+  ["bare", ""],
+  ["added", "+"],
+  ["removed", "-"],
+  ["context", " "],
+];
+const registeredFixtureValues = knownFakeFixtureValues();
+assert.ok(
+  registeredFixtureValues.length > 0,
+  "the known-fake fixture registry must not be empty",
+);
+for (const registered of registeredFixtureValues) {
+  for (const [position, prefix] of diffPositions) {
+    assert.equal(
+      secretLikeReason(`${prefix}const TOKEN = "${registered}";`),
+      null,
+      `registered fixtures clear the scanner on ${position} diff lines`,
+    );
+  }
+}
+// The three suite lines named in issue 1943, as their own suites write them.
+for (const [binding, fixtureValue] of [
+  ["REAL_TOKEN", "sntrys_the_real_read_only_token_value"],
+  ["SENTRY_TOKEN", "sntrys_deadbeefdeadbeefdeadbeef"],
+  ["TOKEN", "sntrys_archive_token"],
+]) {
+  const fixtureLine = `const ${binding} = "${fixtureValue}";`;
+  for (const [position, prefix] of diffPositions) {
+    assert.equal(
+      secretLikeReason(prefix + fixtureLine),
+      null,
+      `Sentry suite fixture lines clear the scanner on ${position} diff lines: ${binding}`,
+    );
+  }
+}
+
+// Membership is exact-value. Every near miss below is a value the registry does
+// not hold, so the shape rules judge it exactly as they did before.
+const unregisteredSentryShape = ["sntrys", "_9f3a2b", "1c8d", "e4f5a6b"].join(
+  "",
+);
+const registeredWithRealTail = ["sntrys_archive_token", "_9f3a2b1c"].join("");
+const realHeadWithFixtureTail = ["sntrys", "_9f3a2b", "1c8d_", "archive"].join(
+  "",
+);
+const casefoldedFixture = "sntrys_archive_token".toUpperCase();
+for (const [label, nearMiss] of [
+  ["an unregistered value of the same shape", unregisteredSentryShape],
+  ["a registered value with real material appended", registeredWithRealTail],
+  ["a registered suffix behind real material", realHeadWithFixtureTail],
+  ["a case-folded registered value", casefoldedFixture],
+]) {
+  for (const [position, prefix] of diffPositions) {
+    assert.match(
+      secretLikeReason(`${prefix}const TOKEN = "${nearMiss}";`),
+      /literal credential assignment/,
+      `${label} is still refused on ${position} diff lines`,
+    );
+  }
+}
+// The lookup never normalizes what it is handed: a registered value arriving
+// with surrounding whitespace is not the registered value, and every rule that
+// reaches the lookup with the value as written still refuses it.
+const paddedFixture = ` ${"sntrys_archive_token"} `;
+for (const [label, paddedLine] of [
+  ["password assignments", `password = "${paddedFixture}"`],
+  ["api-key assignments", `api_key = "${paddedFixture}"`],
+]) {
+  for (const [position, prefix] of diffPositions) {
+    assert.match(
+      secretLikeReason(prefix + paddedLine),
+      /literal credential/,
+      `${label} carrying a padded registered value are refused on ${position} diff lines`,
+    );
+  }
+}
+
+// The provider-token patterns consult the registry per match, not per text, so
+// a real credential sharing a bundle with a registered fixture is still caught.
+const liveGithubShape = ["gh", "p_", "B".repeat(36)].join("");
+const liveAnthropicShape = ["sk-", "ant-", "oat01-", "C".repeat(40)].join("");
+const liveAwsShape = ["AK", "IA", "IOSFODNN7", "EXAMPLE"].join("");
+const liveSlackShape = ["xo", "xb-", "1".repeat(12), "-", "abcdefghij"].join(
+  "",
+);
+const liveStripeShape = ["sk_", "live_", "D".repeat(24)].join("");
+const liveNpmShape = ["npm", "_", "E".repeat(36)].join("");
+const liveGoogleShape = ["AI", "za", "F".repeat(35)].join("");
+const registeredGithubFixture = [
+  "ghs",
+  "_AbCdEfGhIjKlMnOpQrStUvWxYz012345",
+].join("");
+for (const [label, liveShape] of [
+  ["GitHub personal access tokens", liveGithubShape],
+  ["Anthropic OAuth tokens", liveAnthropicShape],
+  ["AWS access-key IDs", liveAwsShape],
+  ["Slack bot tokens", liveSlackShape],
+  ["Stripe live keys", liveStripeShape],
+  ["npm tokens", liveNpmShape],
+  ["Google API keys", liveGoogleShape],
+]) {
+  assert.match(
+    secretLikeReason(liveShape),
+    /credential-like token/,
+    `${label} are still refused`,
+  );
+  assert.match(
+    secretLikeReason([registeredGithubFixture, liveShape].join("\n")),
+    /credential-like token/,
+    `${label} are still refused alongside a registered fixture`,
+  );
+}
+assert.equal(
+  secretLikeReason(registeredGithubFixture),
+  null,
+  "a registered fixture alone leaves the provider-token patterns satisfied",
+);
+const truncatedGithubShape = ["gh", "p_", "B".repeat(29)].join("");
+assert.equal(
+  secretLikeReason(truncatedGithubShape),
+  null,
+  "the provider-token length bounds are unchanged by the per-match rewrite",
+);
+
+// A password, an AWS secret, and private-key material are refused whether or
+// not a registered fixture shares the text.
+const plainPasswordLine = ['password = "', "Tr0ub4dor", "&3-", 'xyzzy"'].join(
+  "",
+);
+const liveAwsSecretLine = ["aws_secret_access_key = ", "G".repeat(40)].join("");
+const privateKeyBlock = [
+  "-----BEGIN RSA ",
+  "PRIVATE KEY-----",
+  "\nMIIEow",
+].join("");
+for (const [label, refusable, expected] of [
+  ["password assignments", plainPasswordLine, /literal credential assignment/],
+  [
+    "AWS secret-access-key assignments",
+    liveAwsSecretLine,
+    /literal AWS credential assignment/,
+  ],
+  ["private key material", privateKeyBlock, /private key material/],
+]) {
+  assert.match(secretLikeReason(refusable), expected, `${label} are refused`);
+  assert.match(
+    secretLikeReason([registeredGithubFixture, refusable].join("\n")),
+    expected,
+    `${label} are refused alongside a registered fixture`,
+  );
+}
+
+// Fail closed on a new fake credential nobody registered: a Sentry suite that
+// adds one would otherwise become unreviewable exactly as issue 1943 describes.
+const sentrySuiteRoot = fileURLToPath(new URL("./sentry/", import.meta.url));
+const registeredFixtureSet = new Set(registeredFixtureValues);
+const sentryFixtureLiteralPattern = /["'`](sntrys_[A-Za-z0-9_-]+)["'`]/g;
+let scannedSentrySuites = 0;
+for (const entry of readdirSync(sentrySuiteRoot, {
+  recursive: true,
+  withFileTypes: true,
+})) {
+  if (!entry.isFile() || !entry.name.endsWith(".test.mjs")) continue;
+  scannedSentrySuites += 1;
+  const suiteSource = readFileSync(
+    path.join(entry.parentPath, entry.name),
+    "utf8",
+  );
+  for (const match of suiteSource.matchAll(sentryFixtureLiteralPattern)) {
+    assert.ok(
+      registeredFixtureSet.has(match[1]),
+      `${entry.name} commits an unregistered fake Sentry token; add it to KNOWN_FAKE_FIXTURE_VALUES in agent-autoreview-core.mjs`,
+    );
+  }
+}
+assert.ok(
+  scannedSentrySuites > 0,
+  "the Sentry suite tree must be reachable from this test",
 );
 const recoveryPhraseWords = [
   "abandon",
