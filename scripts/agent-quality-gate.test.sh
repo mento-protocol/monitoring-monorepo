@@ -868,10 +868,10 @@ validator_repo="$(mktemp -d)"
     "issue:claim": "node scripts/pr/agent-issue-board.mjs claim",
     "issue:review": "node scripts/pr/agent-issue-board.mjs review",
     "issue:release": "node scripts/pr/agent-issue-board.mjs release",
-    "pr:feedback-state": "node scripts/pr-feedback-state.mjs",
-    "pr:feedback-state:test": "node scripts/pr-feedback-state.test.mjs",
-    "pr:ready-state": "node scripts/pr-ready-state.mjs",
-    "pr:ready-state:test": "node scripts/pr-ready-state.test.mjs",
+    "pr:feedback-state": "node scripts/pr/pr-feedback-state.mjs",
+    "pr:feedback-state:test": "node scripts/pr/pr-feedback-state.test.mjs",
+    "pr:ready-state": "node scripts/pr/pr-ready-state.mjs",
+    "pr:ready-state:test": "node scripts/pr/pr-ready-state.test.mjs",
     "lockfile:lint": "node scripts/supply-chain/lockfile-lint.mjs",
     "lockfile:lint:test": "node scripts/supply-chain/lockfile-lint.test.mjs",
     "skew:check": "node scripts/supply-chain/version-skew-check.mjs",
@@ -1085,10 +1085,10 @@ package_json_repo="$(mktemp -d)"
     "issue:claim": "node scripts/pr/agent-issue-board.mjs claim",
     "issue:review": "node scripts/pr/agent-issue-board.mjs review",
     "issue:release": "node scripts/pr/agent-issue-board.mjs release",
-    "pr:feedback-state": "node scripts/pr-feedback-state.mjs",
-    "pr:feedback-state:test": "node scripts/pr-feedback-state.test.mjs",
-    "pr:ready-state": "node scripts/pr-ready-state.mjs",
-    "pr:ready-state:test": "node scripts/pr-ready-state.test.mjs",
+    "pr:feedback-state": "node scripts/pr/pr-feedback-state.mjs",
+    "pr:feedback-state:test": "node scripts/pr/pr-feedback-state.test.mjs",
+    "pr:ready-state": "node scripts/pr/pr-ready-state.mjs",
+    "pr:ready-state:test": "node scripts/pr/pr-ready-state.test.mjs",
     "lockfile:lint": "node scripts/supply-chain/lockfile-lint.mjs",
     "lockfile:lint:test": "node scripts/supply-chain/lockfile-lint.test.mjs",
     "skew:check": "node scripts/supply-chain/version-skew-check.mjs",
@@ -1115,8 +1115,8 @@ assert_contains "- node scripts/pr/review-materiality.test.mjs (root package too
 assert_contains "- node scripts/pr/agent-issue-board.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/docs/docs-garden-issue.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/docs/docs-navigation-eval.test.mjs (root package tooling script changed)"
-assert_contains "- node scripts/pr-feedback-state.test.mjs (root package tooling script changed)"
-assert_contains "- node scripts/pr-ready-state.test.mjs (root package tooling script changed)"
+assert_contains "- node scripts/pr/pr-feedback-state.test.mjs (root package tooling script changed)"
+assert_contains "- node scripts/pr/pr-ready-state.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/tf-stacks.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/supply-chain/lockfile-lint.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/supply-chain/version-skew-check.test.mjs (root package tooling script changed)"
@@ -1149,10 +1149,10 @@ dedupe_quality_gate_alias_repo="$(mktemp -d)"
     "issue:claim": "node scripts/pr/agent-issue-board.mjs claim",
     "issue:review": "node scripts/pr/agent-issue-board.mjs review",
     "issue:release": "node scripts/pr/agent-issue-board.mjs release",
-    "pr:feedback-state": "node scripts/pr-feedback-state.mjs",
-    "pr:feedback-state:test": "node scripts/pr-feedback-state.test.mjs",
-    "pr:ready-state": "node scripts/pr-ready-state.mjs",
-    "pr:ready-state:test": "node scripts/pr-ready-state.test.mjs",
+    "pr:feedback-state": "node scripts/pr/pr-feedback-state.mjs",
+    "pr:feedback-state:test": "node scripts/pr/pr-feedback-state.test.mjs",
+    "pr:ready-state": "node scripts/pr/pr-ready-state.mjs",
+    "pr:ready-state:test": "node scripts/pr/pr-ready-state.test.mjs",
     "lockfile:lint": "node scripts/supply-chain/lockfile-lint.mjs",
     "lockfile:lint:test": "node scripts/supply-chain/lockfile-lint.test.mjs",
     "skew:check": "node scripts/supply-chain/version-skew-check.mjs",
@@ -1199,10 +1199,10 @@ lockfile_script_repo="$(mktemp -d)"
     "issue:claim": "node scripts/pr/agent-issue-board.mjs claim",
     "issue:review": "node scripts/pr/agent-issue-board.mjs review",
     "issue:release": "node scripts/pr/agent-issue-board.mjs release",
-    "pr:feedback-state": "node scripts/pr-feedback-state.mjs",
-    "pr:feedback-state:test": "node scripts/pr-feedback-state.test.mjs",
-    "pr:ready-state": "node scripts/pr-ready-state.mjs",
-    "pr:ready-state:test": "node scripts/pr-ready-state.test.mjs",
+    "pr:feedback-state": "node scripts/pr/pr-feedback-state.mjs",
+    "pr:feedback-state:test": "node scripts/pr/pr-feedback-state.test.mjs",
+    "pr:ready-state": "node scripts/pr/pr-ready-state.mjs",
+    "pr:ready-state:test": "node scripts/pr/pr-ready-state.test.mjs",
     "lockfile:lint": "node scripts/supply-chain/lockfile-lint.mjs",
     "lockfile:lint:test": "node scripts/supply-chain/lockfile-lint.test.mjs",
     "skew:check": "node scripts/supply-chain/version-skew-check.mjs",
@@ -1227,8 +1227,8 @@ assert_contains "- bash scripts/agent-quality-gate.test.sh (root package tooling
 assert_contains "- node scripts/gate/agent-prewarm.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/pr/review-materiality.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/pr/agent-issue-board.test.mjs (root package tooling script changed)"
-assert_contains "- node scripts/pr-feedback-state.test.mjs (root package tooling script changed)"
-assert_contains "- node scripts/pr-ready-state.test.mjs (root package tooling script changed)"
+assert_contains "- node scripts/pr/pr-feedback-state.test.mjs (root package tooling script changed)"
+assert_contains "- node scripts/pr/pr-ready-state.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/tf-stacks.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/supply-chain/lockfile-lint.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/supply-chain/version-skew-check.test.mjs (root package tooling script changed)"
@@ -1259,10 +1259,10 @@ pr_ready_state_script_repo="$(mktemp -d)"
     "issue:claim": "node scripts/pr/agent-issue-board.mjs claim",
     "issue:review": "node scripts/pr/agent-issue-board.mjs review",
     "issue:release": "node scripts/pr/agent-issue-board.mjs release",
-    "pr:feedback-state": "node scripts/pr-feedback-state.mjs",
-    "pr:feedback-state:test": "node scripts/pr-feedback-state.test.mjs",
-    "pr:ready-state": "node scripts/pr-ready-state.mjs",
-    "pr:ready-state:test": "node scripts/pr-ready-state.test.mjs",
+    "pr:feedback-state": "node scripts/pr/pr-feedback-state.mjs",
+    "pr:feedback-state:test": "node scripts/pr/pr-feedback-state.test.mjs",
+    "pr:ready-state": "node scripts/pr/pr-ready-state.mjs",
+    "pr:ready-state:test": "node scripts/pr/pr-ready-state.test.mjs",
     "lockfile:lint": "node scripts/supply-chain/lockfile-lint.mjs",
     "lockfile:lint:test": "node scripts/supply-chain/lockfile-lint.test.mjs",
     "skew:check": "node scripts/supply-chain/version-skew-check.mjs",
@@ -1275,7 +1275,7 @@ JSON
   node - <<'NODE'
 const fs = require("fs");
 const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
-pkg.scripts["pr:ready-state:test"] = "node scripts/pr-ready-state.test.mjs --fixture";
+pkg.scripts["pr:ready-state:test"] = "node scripts/pr/pr-ready-state.test.mjs --fixture";
 fs.writeFileSync("package.json", `${JSON.stringify(pkg, null, 2)}\n`);
 NODE
   "$repo_root/scripts/agent-quality-gate.sh" --base HEAD > "$output_file"
@@ -1287,8 +1287,8 @@ assert_contains "- bash scripts/agent-quality-gate.test.sh (root package tooling
 assert_contains "- node scripts/gate/agent-prewarm.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/pr/review-materiality.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/pr/agent-issue-board.test.mjs (root package tooling script changed)"
-assert_contains "- node scripts/pr-feedback-state.test.mjs (root package tooling script changed)"
-assert_contains "- node scripts/pr-ready-state.test.mjs (root package tooling script changed)"
+assert_contains "- node scripts/pr/pr-feedback-state.test.mjs (root package tooling script changed)"
+assert_contains "- node scripts/pr/pr-ready-state.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/tf-stacks.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/supply-chain/lockfile-lint.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/supply-chain/version-skew-check.test.mjs (root package tooling script changed)"
@@ -4592,12 +4592,9 @@ assert_contains "$sentry_ci_check"
 run_gate ".github/workflows/ci.yml"
 assert_contains "- node scripts/sentry/ci-wiring/check-sentry-suites-in-ci.test.mjs (central CI workflow changed)"
 
-run_gate "scripts/pr-feedback-state-claude.mjs"
-assert_contains "- pnpm pr:feedback-state:test (PR feedback-state helper changed)"
-
-# Paired one-level arms for the D3 move. Neither arm is a glob, so the
-# scripts/pr/ copies route only because they are named outright; a miss here is
-# silent, the suite simply stops running for the copy the wrapper prefers.
+# scripts/pr/ is the canonical location: the aliases and the suites live there.
+# Neither arm is a glob, so every path routes only because it is named outright;
+# a miss here is silent, the suite simply stops running for the changed file.
 run_gate "scripts/pr/pr-feedback-state.mjs"
 assert_contains "- pnpm pr:feedback-state:test (PR feedback-state helper changed)"
 
@@ -4605,6 +4602,9 @@ run_gate "scripts/pr/pr-feedback-state-core.mjs"
 assert_contains "- pnpm pr:feedback-state:test (PR feedback-state helper changed)"
 
 run_gate "scripts/pr/pr-feedback-state-claude.mjs"
+assert_contains "- pnpm pr:feedback-state:test (PR feedback-state helper changed)"
+
+run_gate "scripts/pr/pr-feedback-state.test.mjs"
 assert_contains "- pnpm pr:feedback-state:test (PR feedback-state helper changed)"
 
 run_gate "scripts/pr/pr-ready-state.mjs"
@@ -4616,7 +4616,15 @@ assert_contains "- pnpm pr:ready-state:test (PR ready-state helper changed)"
 run_gate "scripts/pr/pr-ready-state-format.mjs"
 assert_contains "- pnpm pr:ready-state:test (PR ready-state helper changed)"
 
-# The pre-move flat paths keep routing while both locations are live.
+run_gate "scripts/pr/pr-ready-state.test.mjs"
+assert_contains "- pnpm pr:ready-state:test (PR ready-state helper changed)"
+
+# The pre-move flat runtime copies still route: the autoreview wrapper falls
+# back to them from an older origin/main, and the identity tests red if one
+# side drifts, so an edit to either copy has to run the suite.
+run_gate "scripts/pr-feedback-state-claude.mjs"
+assert_contains "- pnpm pr:feedback-state:test (PR feedback-state helper changed)"
+
 run_gate "scripts/pr-ready-state-format.mjs"
 assert_contains "- pnpm pr:ready-state:test (PR ready-state helper changed)"
 

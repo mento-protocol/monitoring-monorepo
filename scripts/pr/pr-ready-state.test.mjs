@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Offline unit tests for scripts/pr-ready-state.mjs parsing helpers.
+ * Offline unit tests for scripts/pr/pr-ready-state.mjs parsing helpers.
  */
 
 import {
@@ -2294,14 +2294,14 @@ test("a passing CodeRabbit check does not clear a real required blocker", () => 
 // stale logic with both the CLI and the rest of this suite green. Delete this
 // test together with the flat copies in the move's last step.
 test("the scripts/pr/ ready-state copies stay byte-identical to the flat originals", () => {
-  const scriptsDir = dirname(fileURLToPath(import.meta.url));
+  const prDir = dirname(fileURLToPath(import.meta.url));
   for (const name of [
     "pr-ready-state.mjs",
     "pr-ready-state-core.mjs",
     "pr-ready-state-format.mjs",
   ]) {
-    const flat = readFileSync(resolve(scriptsDir, name));
-    const moved = readFileSync(resolve(scriptsDir, "pr", name));
+    const moved = readFileSync(resolve(prDir, name));
+    const flat = readFileSync(resolve(prDir, "..", name));
     assert(
       flat.equals(moved),
       `scripts/${name} and scripts/pr/${name} have drifted; agent-autoreview runs the scripts/pr/ copy`,

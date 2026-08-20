@@ -77,7 +77,7 @@ assert.equal(
 
 Changed paths:
 - docs/notes/pr-ready-state.md
-- scripts/pr-ready-state.mjs
+- scripts/pr/pr-ready-state.mjs
 
 Mapped safe local commands:
 - pnpm pr:ready-state:test (PR ready-state helper changed)
