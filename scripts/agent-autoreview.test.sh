@@ -6599,6 +6599,113 @@ run_capture_deadline_regressions() {
   run_capture_deadline_byte_refusal_arm
   run_capture_deadline_helper_accumulation_arm
   run_capture_deadline_wrapper_accumulation_arm
+  run_capture_deadline_interrupt_arm
+}
+
+# Detaching the helper's Git captures takes them out of the group a terminal
+# interrupt reaches, which raises the question of whether an interrupt during a
+# stalled capture strands the tree. It does not, and this arm is the proof.
+# `spawnSync` blocks the event loop, so the helper's own SIGINT/SIGTERM
+# listeners cannot run mid-call -- but because they are registered, the signal
+# is caught rather than fatal, so the helper stays alive, its capture deadline
+# fires on schedule, and the group sweep reaps the whole tree. An interrupt
+# therefore costs the remaining budget, not an orphan.
+run_capture_deadline_interrupt_arm() {
+  local review_repo="$tmp_dir/capture-deadline-interrupt"
+  local filter_script="$tmp_dir/capture-deadline-interrupt-filter.sh"
+  local state_pointer="$tmp_dir/capture-deadline-interrupt-state-dir"
+  local state_dir="$tmp_dir/capture-deadline-interrupt-state"
+  local bundle_output="$state_dir/prompt.md"
+  local wrapper_pid
+  local started_at
+  local elapsed
+  local launched=0
+  local had_monitor=0
+
+  mkdir -p "$state_dir"
+  printf '%s\n' "$state_dir" >"$state_pointer"
+  : >"$state_dir/leader.pid"
+  : >"$state_dir/descendant.pid"
+  : >"$state_dir/group.pid"
+  seed_capture_deadline_fixture \
+    "$review_repo" "$filter_script" "$state_pointer"
+
+  started_at="$(date +%s)"
+  begin_deadline_fixture_registration
+  case "$-" in
+    *m*) had_monitor=1 ;;
+  esac
+  set -m
+  (
+    cd "$review_repo"
+    # Reset the dispositions bash gives a background job, so the interrupt below
+    # reaches this tree the way a terminal interrupt reaches a foreground one.
+    exec /usr/bin/perl -e \
+      '$SIG{INT} = "DEFAULT"; $SIG{TERM} = "DEFAULT"; exec @ARGV; die "exec failed: $!\n";' \
+      /usr/bin/env -i \
+      "PATH=$PATH" \
+      "HOME=$HOME" \
+      "TMPDIR=${TMPDIR:-/tmp}" \
+      "AGENT_AUTOREVIEW_CAPTURE_DEADLINE_SECONDS=5" \
+      "$adapter_wrapper" \
+      --mode local \
+      --engine local \
+      --prepare-only \
+      --bundle-output "$bundle_output" >"$stdout" 2>"$stderr"
+  ) &
+  wrapper_pid=$!
+  arm_deadline_fixture_cleanup "$wrapper_pid" "$state_dir"
+  if [[ "$had_monitor" -eq 0 ]]; then
+    set +m
+  fi
+  for _ in {1..400}; do
+    if [[ -s "$state_dir/leader.pid" && -s "$state_dir/descendant.pid" ]]; then
+      launched=1
+      break
+    fi
+    if ! process_is_runnable "$wrapper_pid"; then
+      break
+    fi
+    sleep 0.05
+  done
+  if [[ "$launched" -ne 1 ]]; then
+    cleanup_deadline_fixture_processes "$wrapper_pid" "$state_dir"
+    printf 'capture-deadline interrupt fixture never reached its stalled capture\n' >&2
+    cat "$stderr" >&2
+    exit 1
+  fi
+
+  kill -INT -- "-$wrapper_pid" 2>/dev/null || kill -INT "$wrapper_pid" 2>/dev/null || true
+  set +e
+  wait "$wrapper_pid" 2>/dev/null
+  set -e
+  # The interrupted run must still leave nothing behind: the SIGTERM-ignoring
+  # filter and its descendant are both reaped by the deadline's group sweep.
+  if ! assert_deadline_fixture_processes_stopped \
+    "capture deadline interrupt" \
+    "$state_dir/leader.pid" \
+    "$state_dir/descendant.pid"; then
+    cleanup_deadline_fixture_processes "$wrapper_pid" "$state_dir"
+    exit 1
+  fi
+  elapsed=$(($(date +%s) - started_at))
+  if ((elapsed >= 60)); then
+    cleanup_deadline_fixture_processes "$wrapper_pid" "$state_dir"
+    printf 'an interrupted capture took %ss to settle; the deadline should bound it\n' \
+      "$elapsed" >&2
+    exit 1
+  fi
+  if [[ -e "$bundle_output" ]]; then
+    cleanup_deadline_fixture_processes "$wrapper_pid" "$state_dir"
+    printf 'an interrupted capture still published a prompt: %s\n' \
+      "$bundle_output" >&2
+    exit 1
+  fi
+  cleanup_retained_test_command_runtimes
+  if ! disarm_deadline_fixture_cleanup "$wrapper_pid" "$state_dir"; then
+    printf 'capture deadline interrupt fixture cleanup registry drifted\n' >&2
+    exit 1
+  fi
 }
 
 # The same claim on the wrapper side: one budget for the whole capture stage,

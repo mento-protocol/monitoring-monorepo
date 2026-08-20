@@ -1927,6 +1927,14 @@ function captureDeadlineError(label) {
 function spawnGitWithinCaptureDeadline(git, gitArgs, options, label) {
   const remainingMs = CAPTURE_DEADLINE_MS - gitCaptureSpentMs;
   if (remainingMs <= 0) throw captureDeadlineError(label);
+  // Catch terminal signals before detaching anything. A detached capture is
+  // outside the group a terminal interrupt reaches, and spawnSync blocks the
+  // event loop, so a listener cannot run mid-call -- but registering one is
+  // what stops the signal from being fatal, which is what keeps this process
+  // alive long enough for the deadline below to fire and the sweep to reap the
+  // capture. Without it an interrupt kills the helper and strands the tree.
+  // Registration is idempotent and already happens on the engine paths.
+  registerTrustedExecutableCleanup();
   // `performance.now()` rather than `Date.now()`: it is monotonic, so a system
   // clock stepping backwards mid-run cannot make a capture that took minutes
   // charge nothing and hand the next one time the run already spent.
@@ -1956,15 +1964,13 @@ function spawnGitWithinCaptureDeadline(git, gitArgs, options, label) {
     !outOfBuffer &&
     (result.error?.code === "ETIMEDOUT" ||
       (result.signal === "SIGKILL" && elapsedMs >= remainingMs - 50));
-  // Sweep on the deadline too, not only on a reported signal. spawnSync returns
-  // when the child has exited *and* its stdio pipes are closed, so a git that
-  // exited on its own while a descendant still held the inherited stderr keeps
-  // this call running until the timer fires; Node then signals an already-reaped
-  // child, leaves `signal` null, and the descendant that caused the stall is the
-  // one thing left to reap.
-  if (outOfBuffer || result.signal || deadlineExpired) {
-    killProcessGroup(result.pid);
-  }
+  // Sweep every capture, not only the ones that ended badly. spawnSync has
+  // already waited for the child, so this group holds nothing but descendants
+  // the capture forked and left behind -- which are exactly what a detached
+  // spawn would otherwise strand, since they are no longer in the group a
+  // terminal signal reaches. Sweeping here rather than on the failure paths
+  // alone also leaves no window in which the pid could be recycled.
+  killProcessGroup(result.pid);
   if (deadlineExpired) throw captureDeadlineError(label);
   return result;
 }

@@ -81,9 +81,15 @@ restarting the stage on a fresh full budget. A capture that reaches the bound
 refuses
 by stage name and elapsed time and produces no bundle; it is never published
 partially and never skipped silently. Nothing the capture started outlives that
-refusal: the wrapper runs each capture as its own process group and escalates
-SIGTERM to a process-group SIGKILL, and the helper spawns detached and sweeps
-the group after its own kill. The wrapper's budget covers its capture stage; in
+refusal: the wrapper runs each capture as its own process group and SIGKILLs
+that group at the deadline, with no SIGTERM grace, because a grace period would
+run past the bound. Its interrupt path is the one that escalates, since an
+interrupted capture is not bound by the deadline. The helper spawns detached and
+sweeps the group after every capture, and registers terminal-signal handlers
+before it detaches anything: a caught signal cannot kill it mid-capture, so the
+deadline still fires and still reaps the tree, where a fatal one would strand a
+group no longer reachable from the terminal. The wrapper's budget covers its
+capture stage; in
 the helper it covers every Git spawn. The one capture it does not wrap is the PR
 feedback state, which already carries its own wall-clock bound; that bound is
 clamped to what the shared budget has left and the time it spends is charged
