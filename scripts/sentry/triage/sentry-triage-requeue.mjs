@@ -237,11 +237,21 @@ export function hasAdmissibleVerdict(comments) {
  * `sentry:needs-triage` — and deliberately does NOT correct this one. Removing
  * `sentry-triage` is how a human retires a stub for good, so putting it back
  * would overrule the withdrawal. Its absence is reported, never repaired.
+ *
+ * The state test demands OPEN rather than not-CLOSED. Every `readStub` feeding
+ * this normalizes a missing or unexpected `state` to `""` — a truncated `gh`
+ * payload, a JSON shape change, a field the reader forgot to request — and `""`
+ * is not `"CLOSED"`, so the loose test called such a stub selectable without any
+ * read ever having confirmed it open. That is the one thing this predicate must
+ * never do: it is the END-STATE test, so a wrong true is a re-queue reporting
+ * success over a stub Stage B cannot see. Stage B's selector says `--state open`;
+ * ask for exactly that and an unreadable state fails closed into the loud
+ * stranded path instead of passing verification by default.
  */
 export function isSelectableForTriage({ state, labels } = {}) {
   const names = Array.isArray(labels) ? labels : [];
   return (
-    String(state ?? "").toUpperCase() !== "CLOSED" &&
+    String(state ?? "").toUpperCase() === "OPEN" &&
     names.includes(QUEUE_LABEL) &&
     names.includes(NEEDS_TRIAGE_LABEL)
   );

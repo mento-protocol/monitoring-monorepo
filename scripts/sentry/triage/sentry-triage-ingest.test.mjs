@@ -26,6 +26,7 @@ import {
   defangBackticks,
   defangMentions,
   extractShortIdFromTitle,
+  fetchAllSentryIssues,
   FIX_SCOPE_ARCHITECTURAL_LABEL,
   ghPaginate,
   indexQueueIssuesByShortId,
@@ -1169,6 +1170,92 @@ await test("ghPaginate fails loud on runaway pagination and non-array responses"
   }
   assert(threw, "expected non-array response to throw");
   assert(/non-array/.test(threw.message), "wrong non-array error");
+});
+
+await test("Sentry pagination fails loud past maxPages instead of truncating", async () => {
+  // The queue is built by DIFFERENCE, so a Sentry issue missing from this
+  // result set is one no stub is created for. A cap that returns partial pages
+  // and reports success is therefore indistinguishable from a quiet Sentry —
+  // the same reason `ghPaginate` throws rather than stopping.
+  let served = 0;
+  const fetchImpl = async () => {
+    served += 1;
+    return {
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      json: async () => [{ id: String(served), shortId: `X-${served}` }],
+      // Always another page: this is the runaway the cap exists to bound.
+      headers: {
+        get: () =>
+          '<https://us.sentry.io/api/0/organizations/o/issues/?cursor=next>; rel="next"; results="true"; cursor="next"',
+      },
+    };
+  };
+
+  let threw = null;
+  try {
+    await fetchAllSentryIssues({
+      query: "is:unresolved",
+      org: "o",
+      baseUrl: "https://us.sentry.io",
+      token: "t",
+      fetchImpl,
+      maxPages: 3,
+    });
+  } catch (err) {
+    threw = err;
+  }
+  assert(threw, "expected a truncated Sentry scan to throw");
+  assert(
+    /exceeded 3 pages/.test(threw.message),
+    `wrong Sentry runaway error: ${threw?.message}`,
+  );
+  assertEqual(served, 3);
+
+  // The bounded case still returns, and the boundary is where it matters:
+  // `maxPages: 2` for a scan that ends ON its last allowed page, so a guard
+  // reading "the cap was reached" rather than "a cursor survived it" is caught.
+  // Both terminators, because Sentry uses the SECOND one: it keeps sending a
+  // `rel="next"` link at the end of a result set and signals exhaustion with
+  // `results="false"`. A guard recognising only a missing Link header would
+  // throw on every real ingest run.
+  for (const [label, terminator] of [
+    ["no Link header at all", null],
+    [
+      "Sentry's results=false terminator",
+      '<https://us.sentry.io/api/0/organizations/o/issues/?cursor=end>; rel="next"; results="false"; cursor="end"',
+    ],
+  ]) {
+    let round = 0;
+    const finite = async () => {
+      round += 1;
+      return {
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        json: async () => [{ id: String(round), shortId: `X-${round}` }],
+        headers: {
+          get: () =>
+            round < 2
+              ? '<https://us.sentry.io/api/0/organizations/o/issues/?cursor=next>; rel="next"; results="true"; cursor="next"'
+              : terminator,
+        },
+      };
+    };
+    const issues = await fetchAllSentryIssues({
+      query: "is:unresolved",
+      org: "o",
+      baseUrl: "https://us.sentry.io",
+      token: "t",
+      fetchImpl: finite,
+      maxPages: 2,
+    });
+    assert(
+      issues.length === 2,
+      `a scan ending exactly at the page budget with ${label} must return both pages; got ${issues.length}`,
+    );
+  }
 });
 
 await test("REST issue normalization flattens pages, drops PRs, uppercases state, carries closed_at + updated_at + labels + body", () => {
