@@ -193,7 +193,12 @@ scheduled document, for context an agent gets from the directory map in
   wrapper generation from either side of the move keep working. This is stricter
   than the `pr-description.yml` case above, which degrades to a warning; here
   there is no fallback to degrade to. Hold the last step until no wrapper old
-  enough to need the pre-move paths is still in use.
+  enough to need the pre-move paths is still in use. D3 completed the three
+  merges on 2026-08-20; `scripts/pr/` is now the only pinned location. The
+  residual is the one this shape is designed to make loud: a checkout whose
+  wrapper predates the first merge resolves nothing and fails closed on
+  materialization until it pulls, rather than silently reviewing against a
+  runtime that is not there.
 - Duplicated copies diverge through the merge queue, not through the PR that
   duplicates them. While both locations are live, an unrelated PR that edits one
   side is not a conflict for the copy PR, so git merges both cleanly and the two

@@ -17,13 +17,12 @@ garden_lane: agent-entry-points
 ## Scope
 
 `scripts/` holds deploy wrappers, agent quality gates, code-health checks, and
-repo maintenance utilities. 38 files sit flat at the top level today.
+repo maintenance utilities.
 
 ## Layout
 
-[ADR 0064](../docs/adr/0064-scripts-module-directories.md) governs
-subdirectories here and links the reorganization issue; phases P1–P15 have all
-landed.
+[ADR 0064](../docs/adr/0064-scripts-module-directories.md) governs these
+subdirectories; reorganization phases P1–P15 are complete.
 
 | Directory       | Holds                                  |
 | --------------- | -------------------------------------- |
@@ -59,20 +58,22 @@ stay with their domain.
 
 ## Why Files Stay Flat
 
-Eleven mechanisms pin `scripts/` paths. A file one of them names moves only when
-that mechanism moves with it, in the same PR.
+`scripts/` has eleven path-pin classes. Move each pin with its file in the
+same PR, except the `agent-autoreview.sh` feedback-runtime pins below.
 
-- **Autoreview runtime materialization.** `agent-autoreview.sh` names its
-  runtime files in Perl copy lists and `runtime_paths` arrays, then materializes
-  each from an `origin/main` blob. A path it omits is absent at runtime; moving
-  one is staged across PRs (ADR 0064).
-- **Gate source-directory guards.** `agent-quality-gate.sh` gates real-tree
-  routing on `$script_source_dir == $repo_root/scripts`, leaving its stub-repo
-  unit tests unaffected.
+- **Autoreview runtime materialization.** `agent-autoreview.sh` pins sibling
+  runtime through Perl copy lists and fixed `runtime_paths` arrays. Feedback
+  helpers resolve separately from `origin/main`. Move those feedback paths
+  across three merges: add new copies and a dual-path fallback; repoint every
+  consumer; remove old copies and fallback only after no pre-move wrapper
+  remains in use (ADR 0064).
+- **Gate routing pins.** `agent-quality-gate.sh` uses
+  `$script_source_dir == $repo_root/scripts` to exclude stub-repo tests. It pairs
+  `bootstrap/codex-cloud-setup.{sh,test.sh}` for offline installer tests.
 - **Gate runtime module pins.** `agent-quality-gate.sh` resolves
   `docs/docs-navigation-eval-helpers.mjs` and `gate/lockfile-scope.mjs` from
-  `$script_source_dir` — never `$repo_root`, which is a stub repo under test —
-  and names each in three literals. Repoint every one; ADR 0064 lists them.
+  `$script_source_dir`, not the stub `$repo_root`, and pins each in three
+  literals. Repoint all three; ADR 0064 lists them.
 - **Evaluation fixture forbidden lists.** `forbidden_sources` in
   `docs/evals/documentation-navigation-fixtures.json` names the navigation
   eval's own implementation.
@@ -150,14 +151,11 @@ in the PR that moves a file. Every surface there is mandatory.
   caller plan path, or print, upload, or cache either plan form. The wrapper
   mechanism and its deploy-only bootstrap exception are in
   [ADR 0061](../docs/adr/0061-exact-plan-guard-for-manual-platform-applies.md).
-- `pnpm tf:test` enforces the deployment source-staging contract: the five
-  allowed `gcloud builds submit` / `gcloud app deploy` callsites, the Metrics
-  Bridge build config, its guarded no-refresh bootstrap plans, and the staging
-  bucket IAM. Never add a callsite, an indirect or dynamic deploy form, or a CLI
-  service-account override, and keep inert examples in
-  `scripts/deploy-staging-contract.test.mjs`.
+- `pnpm tf:test` enforces the deployment source-staging contract. Never add a
+  deploy callsite, an indirect or dynamic deploy form, or a CLI service-account
+  override; keep inert examples in `scripts/deploy-staging-contract.test.mjs`.
   [ADR 0053](../docs/adr/0053-explicit-deployment-source-staging.md) owns the
-  contract, its supported static syntax, and its explicit proof limits.
+  contract, the allowed callsites, and its proof limits.
 
 ## Verification
 

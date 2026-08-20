@@ -4274,39 +4274,31 @@ materialize_filesystem_autoreview_runtime() {
   ' "$source_scripts_dir" "$runtime_dir" "$EUID"
 }
 
-# Resolve one feedback-runtime name against the protected snapshot, preferring
-# the scripts/pr/ location and falling back to the pre-move flat path.
+# Resolve one feedback-runtime name against the protected snapshot.
 #
-# The runtime migrates from scripts/ into scripts/pr/ over three merges (issue
-# 1877, track D3), and this wrapper reads every helper blob from origin/main
-# rather than the checked-out tree. A wrapper pinned to one location alone
-# therefore fails closed against the other side of the move: pinned to the flat
-# path it breaks the moment the move lands, pinned to scripts/pr/ it breaks on
-# every origin/main that predates it. Accepting both keeps each wrapper
-# generation working against the origin/main before the move and the one after.
-# Drop the fallback only once no reachable wrapper still needs the flat copies.
+# scripts/pr/ is the only pinned location: the D3 move is complete (issue 1877)
+# and the pre-move flat copies are gone from origin/main. A wrapper older than
+# that move reads a snapshot with no flat copy and fails closed here rather than
+# materializing anything — loud, and cured by pulling. ADR 0064 records it.
 #
-# Prints the resolved repo-relative path, or nothing when the snapshot carries
-# neither location. A git failure is reported and returns nonzero, so absence
-# and inspection failure never collapse into the same answer.
+# Prints the resolved repo-relative path, or nothing when the snapshot does not
+# carry it. A git failure is reported and returns nonzero, so absence and
+# inspection failure never collapse into the same answer.
 feedback_runtime_snapshot_path() {
   local repo="$1"
   local snapshot_ref="$2"
   local runtime_name="$3"
-  local candidate
+  local candidate="scripts/pr/$runtime_name"
   local entry
-  for candidate in "scripts/pr/$runtime_name" "scripts/$runtime_name"; do
-    if ! entry="$(
-      git_output "$repo" ls-tree "$snapshot_ref" -- "$candidate"
-    )"; then
-      echo "agent:autoreview: cannot inspect trusted feedback runtime: $candidate" >&2
-      return 1
-    fi
-    if [[ -n "$entry" ]]; then
-      printf '%s\n' "$candidate"
-      return 0
-    fi
-  done
+  if ! entry="$(
+    git_output "$repo" ls-tree "$snapshot_ref" -- "$candidate"
+  )"; then
+    echo "agent:autoreview: cannot inspect trusted feedback runtime: $candidate" >&2
+    return 1
+  fi
+  if [[ -n "$entry" ]]; then
+    printf '%s\n' "$candidate"
+  fi
   return 0
 }
 
@@ -4344,7 +4336,10 @@ materialize_feedback_runtime() {
       return 1
     fi
     if [[ -z "$resolved_path" ]]; then
-      echo "agent:autoreview: trusted feedback runtime is missing $runtime_name at $snapshot_ref: no scripts/pr/ or scripts/ copy" >&2
+      # Distinct from the cat-file failures below, which name the same path:
+      # this one means the snapshot does not carry it at all, and the operator
+      # most likely to hit it is on a wrapper older than the D3 move.
+      echo "agent:autoreview: protected snapshot $snapshot_ref does not carry scripts/pr/$runtime_name; pull an up-to-date wrapper" >&2
       return 1
     fi
     runtime_names+=("$runtime_name")
@@ -4389,10 +4384,10 @@ materialize_feedback_runtime() {
   done
 
   mkdir -p "$runtime_dir/scripts"
-  # The destination stays flat under scripts/ whichever location the snapshot
-  # carried, so the helpers' sibling relative imports and the capture call site
-  # resolve identically on both sides of the move. Each destination basename is
-  # a literal from the lists above, never a path read out of the snapshot.
+  # The destination is flat under scripts/ regardless of where the snapshot
+  # keeps the sources, so the helpers land as siblings and their relative
+  # imports and the capture call site resolve. Each destination basename is a
+  # literal from the lists above, never a path read out of the snapshot.
   for index in "${!runtime_paths[@]}"; do
     relative_path="${runtime_paths[$index]}"
     output_path="$runtime_dir/scripts/${runtime_names[$index]}"

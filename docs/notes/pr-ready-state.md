@@ -136,7 +136,10 @@ The library clears a review only when **every line is positively recognized**.
 A line is recognized when it is blank, the Claude task-completion header, a
 thematic break, a review heading that harvest already validated, the single
 unhedged `Verdict: LGTM` or `Overall verdict: LGTM` line, a bare `Findings` or
-`Roll-up` section label, an explicit no-findings conclusion, or a P3 line whose
+`Roll-up` section label, an explicit no-findings conclusion, a `What I checked`
+checklist heading, a ticked checklist entry whose subject is one to three
+curated `SAFE_CLAUDE_CHECKLIST_TOPICS` entries joined by `and` (or one of the
+four frozen `LEGACY_SAFE_CLAUDE_CHECKLIST_SUBJECT` phrases), or a P3 line whose
 every clause matches the curated `POSITIVE_EVIDENCE` allowlist. Anything else
 blocks, including ordinary narrative prose that carries no finding vocabulary.
 
@@ -151,17 +154,30 @@ blocking`, and similar leads must be followed by curated positive evidence.
   The older behaviour, where such a marker cleared a line on its own, let a
   defect ride along behind it.
 
-A clean verdict or conclusion may end only in a bare sentence terminator. Any
-trailing sentence blocks, because a tail is unconstrained English and no term
-list separates praise from a defect stated plainly.
+A clean verdict or conclusion may end only in a bare sentence terminator, or an
+approval mark as described below. Any trailing sentence blocks, because a tail
+is unconstrained English and no term list separates praise from a defect stated
+plainly.
+
+A `What I checked` checklist is recognized whether or not the body also carries
+paired `Findings`/`Roll-up` headings — the standalone form and the preamble form
+read one definition. The checklist is evidence of review, never the conclusion:
+the body still needs an explicit no-findings line. An unticked or negated box
+blocks, and so does any subject outside the curated topic set, since a free
+subject is unconstrained English.
+
+A trailing approval mark (`✅`, `✔️`, `👍`) is allowed after the verdict word
+**or a no-findings conclusion** — `No P1/P2 findings ✅` clears exactly as
+`**Verdict:** LGTM ✅` does. A mark asserts nothing a reader could act on, and
+one rule governs both tails deliberately: the two are the same question, and a
+second rule would be a second thing to keep in step. Any word after either is
+prose and still blocks.
 
 The canonical registry and named phrase groups live in
-`scripts/pr/pr-feedback-state-claude.mjs`. During D3 phase two,
-`scripts/pr-feedback-state-claude.mjs` remains a flat wrapper fallback. Keep
-both copies byte-identical and update both until phase three removes the flat
-fallback. Add a named phrase only with a real review fixture and nearby blocking
-mutations. Add a compatibility record only with a byte-exact source fixture and
-single-field binding mutations. The library does not try to prove the meaning
+`scripts/pr/pr-feedback-state-claude.mjs`, which is now the only copy: D3 phase
+three removed the flat wrapper fallback. Add a named phrase only with a real
+review fixture and nearby blocking mutations. Add a compatibility record only
+with a byte-exact source fixture and single-field binding mutations. The library does not try to prove the meaning
 of arbitrary English prose — it refuses prose it cannot recognize, and the
 compatibility registry is the escape hatch for a specific historical body.
 Current-head and unresolved-feedback checks remain separate and mandatory.

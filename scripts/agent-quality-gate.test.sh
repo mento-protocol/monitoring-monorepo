@@ -2617,6 +2617,14 @@ run_gate "scripts/bootstrap/agent-session-end-hook.sh"
 assert_contains "- bash -n scripts/bootstrap/agent-session-end-hook.sh (shell script changed)"
 assert_contains "- pnpm agent:context-check (agent SessionEnd hook changed)"
 
+for path in \
+  scripts/bootstrap/codex-cloud-setup.sh \
+  scripts/bootstrap/codex-cloud-setup.test.sh; do
+  run_gate "$path"
+  assert_contains "- bash -n $path (shell script changed)"
+  assert_contains "- bash scripts/bootstrap/codex-cloud-setup.test.sh (Codex Cloud Foundry installer contract changed)"
+done
+
 run_gate "scripts/lib/install-marker.sh"
 assert_contains "- bash -n scripts/lib/install-marker.sh (shell script changed)"
 assert_contains "- pnpm agent:quality-gate:test (shared install-marker fragment changed)"
@@ -4617,15 +4625,6 @@ run_gate "scripts/pr/pr-ready-state-format.mjs"
 assert_contains "- pnpm pr:ready-state:test (PR ready-state helper changed)"
 
 run_gate "scripts/pr/pr-ready-state.test.mjs"
-assert_contains "- pnpm pr:ready-state:test (PR ready-state helper changed)"
-
-# The pre-move flat runtime copies still route: the autoreview wrapper falls
-# back to them from an older origin/main, and the identity tests red if one
-# side drifts, so an edit to either copy has to run the suite.
-run_gate "scripts/pr-feedback-state-claude.mjs"
-assert_contains "- pnpm pr:feedback-state:test (PR feedback-state helper changed)"
-
-run_gate "scripts/pr-ready-state-format.mjs"
 assert_contains "- pnpm pr:ready-state:test (PR ready-state helper changed)"
 
 run_gate "scripts/sanitize-terraform-output.sh"
