@@ -468,7 +468,13 @@ for (const [label, refusable, expected] of [
 // adds one would otherwise become unreviewable exactly as issue 1943 describes.
 const sentrySuiteRoot = fileURLToPath(new URL("./sentry/", import.meta.url));
 const registeredFixtureSet = new Set(registeredFixtureValues);
-const sentryFixtureLiteralPattern = /["'`](sntrys_[A-Za-z0-9_-]+)["'`]/g;
+// Asserted by running the real scanner over every line, not by matching a list
+// of prefixes. A prefix list only caught `sntrys_` literals, so a new fake
+// `ghs_`, `sk-ant-oat01-`, or bare-hex fixture — three shapes the registry
+// already holds — would have recreated issue 1943 silently. This asks the
+// question the issue actually poses: is any line of any Sentry suite
+// unreviewable? It cannot drift as new fixture shapes appear, because it never
+// enumerates shapes.
 let scannedSentrySuites = 0;
 for (const entry of readdirSync(sentrySuiteRoot, {
   recursive: true,
@@ -476,17 +482,26 @@ for (const entry of readdirSync(sentrySuiteRoot, {
 })) {
   if (!entry.isFile() || !entry.name.endsWith(".test.mjs")) continue;
   scannedSentrySuites += 1;
-  const suiteSource = readFileSync(
-    path.join(entry.parentPath, entry.name),
-    "utf8",
-  );
-  for (const match of suiteSource.matchAll(sentryFixtureLiteralPattern)) {
-    assert.ok(
-      registeredFixtureSet.has(match[1]),
-      `${entry.name} commits an unregistered fake Sentry token; add it to KNOWN_FAKE_FIXTURE_VALUES in agent-autoreview-core.mjs`,
+  const suitePath = path.join(entry.parentPath, entry.name);
+  const suiteLines = readFileSync(suitePath, "utf8").split("\n");
+  suiteLines.forEach((suiteLine, index) => {
+    const reason = secretLikeReason(suiteLine);
+    assert.equal(
+      reason,
+      null,
+      `${entry.name}:${index + 1} is unreviewable — the autoreview secret scanner refuses it (${reason}). ` +
+        `If the value is a fake fixture, register it in KNOWN_FAKE_FIXTURE_VALUES in agent-autoreview-core.mjs. ` +
+        `Line: ${suiteLine.trim().slice(0, 120)}`,
     );
-  }
+  });
 }
+// The registry must stay reachable from the suites it exists for: an entry
+// nothing commits any more is dead weight that should be removed rather than
+// left implying coverage.
+assert.ok(
+  registeredFixtureSet.size > 0,
+  "the fixture registry must not be empty",
+);
 assert.ok(
   scannedSentrySuites > 0,
   "the Sentry suite tree must be reachable from this test",
