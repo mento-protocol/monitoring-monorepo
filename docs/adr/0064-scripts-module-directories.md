@@ -194,6 +194,18 @@ scheduled document, for context an agent gets from the directory map in
   than the `pr-description.yml` case above, which degrades to a warning; here
   there is no fallback to degrade to. Hold the last step until no wrapper old
   enough to need the pre-move paths is still in use.
+- Duplicated copies diverge through the merge queue, not through the PR that
+  duplicates them. While both locations are live, an unrelated PR that edits one
+  side is not a conflict for the copy PR, so git merges both cleanly and the two
+  drift. D3 hit this immediately: #1967 rewrote the clean-evidence grammar in
+  `scripts/pr-feedback-state-{core,claude}.mjs` while the copy PR was in flight,
+  both merged without a conflict, and because the wrapper prefers the new
+  location, `origin/main` then materialized the pre-#1967 logic. Pin the pair
+  with a byte-identity test in the suite each side routes to, and route both
+  locations to it — that is what caught this one merge later. A copy PR's own
+  green run does not prove the pair still matches after it merges, so re-check
+  identity at the start of the PR that repoints, and treat any edit to a
+  duplicated file as an edit to every copy.
 
 ## Sweep checklist for a move
 

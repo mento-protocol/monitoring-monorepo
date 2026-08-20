@@ -1453,7 +1453,7 @@ jobs:
           # signal.
           #
           # `--slurp` wraps every page in one outer JSON array (mirroring how
-          # scripts/pr-ready-state.mjs already combines paginated `gh api`
+          # scripts/pr/pr-ready-state.mjs already combines paginated `gh api`
           # output) — plain `--paginate` alone prints each page as a separate,
           # adjacent JSON value, which is NOT one valid JSON document once the
           # tracker issue passes its first page of comments, and would make

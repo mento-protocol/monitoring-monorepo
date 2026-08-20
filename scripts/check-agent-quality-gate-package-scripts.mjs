@@ -67,10 +67,10 @@ const expectedScripts = {
     "node --test scripts/sentry/broker/sentry-mcp-broker.test.mjs",
   "sentry:requeue:test":
     "node scripts/sentry/triage/sentry-triage-requeue.test.mjs",
-  "pr:feedback-state": "node scripts/pr-feedback-state.mjs",
-  "pr:feedback-state:test": "node scripts/pr-feedback-state.test.mjs",
-  "pr:ready-state": "node scripts/pr-ready-state.mjs",
-  "pr:ready-state:test": "node scripts/pr-ready-state.test.mjs",
+  "pr:feedback-state": "node scripts/pr/pr-feedback-state.mjs",
+  "pr:feedback-state:test": "node scripts/pr/pr-feedback-state.test.mjs",
+  "pr:ready-state": "node scripts/pr/pr-ready-state.mjs",
+  "pr:ready-state:test": "node scripts/pr/pr-ready-state.test.mjs",
   // The .coderabbit.yaml allowlist pin (ADR 0066). CodeRabbit reads that config
   // from the PR's own source branch, so the suite that pins it is exactly the
   // command a weakening PR would want to drift.
