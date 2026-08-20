@@ -2084,7 +2084,7 @@ export function secretLikeReason(text) {
       return "literal registry credential assignment";
   }
   const unquotedKeyPattern =
-    /^[+ -]?\s*(?:export\s+)?([A-Za-z][A-Za-z0-9_-]*)(\s*[:=]\s*)([A-Za-z0-9_$+./=:@%!?~^-]{12,})[ \t]*(,?)(?:[ \t]+(?:\/\/[^\r\n]*|\/\*[^\r\n]*\*\/)|[ \t]*(?:;[^\r\n]*)?|[ \t]+#[^\r\n]*)$/gim;
+    /^[+ -]?\s*(?:export\s+)?([A-Za-z][A-Za-z0-9_-]*)(\s*[:=]\s*)([A-Za-z0-9_$+./=:@%!?~^#-]{12,})[ \t]*(,?)(?:[ \t]+(?:\/\/[^\r\n]*|\/\*[^\r\n]*\*\/)|[ \t]*(?:;[^\r\n]*)?|[ \t]+#[^\r\n]*)$/gim;
   for (const match of text.matchAll(unquotedKeyPattern)) {
     const key = match[1];
     const operator = match[2];
