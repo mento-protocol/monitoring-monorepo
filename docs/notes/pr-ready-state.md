@@ -128,10 +128,11 @@ A line is recognized when it is blank, the Claude task-completion header, a
 thematic break, a review heading that harvest already validated, the single
 unhedged `Verdict: LGTM` or `Overall verdict: LGTM` line, a bare `Findings` or
 `Roll-up` section label, an explicit no-findings conclusion, a `What I checked`
-checklist heading, a ticked checklist entry whose whole subject is built from
-the curated `SAFE_CLAUDE_CHECKLIST_TOPICS` allowlist, or a P3 line whose every
-clause matches the curated `POSITIVE_EVIDENCE` allowlist. Anything else blocks,
-including ordinary narrative prose that carries no finding vocabulary.
+checklist heading, a ticked checklist entry whose subject is one to three
+curated `SAFE_CLAUDE_CHECKLIST_TOPICS` entries joined by `and` (or one of the
+four frozen `LEGACY_SAFE_CLAUDE_CHECKLIST_SUBJECT` phrases), or a P3 line whose
+every clause matches the curated `POSITIVE_EVIDENCE` allowlist. Anything else
+blocks, including ordinary narrative prose that carries no finding vocabulary.
 
 Two consequences are deliberate and easy to trip over:
 
