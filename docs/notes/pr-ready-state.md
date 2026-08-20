@@ -127,9 +127,11 @@ The library clears a review only when **every line is positively recognized**.
 A line is recognized when it is blank, the Claude task-completion header, a
 thematic break, a review heading that harvest already validated, the single
 unhedged `Verdict: LGTM` or `Overall verdict: LGTM` line, a bare `Findings` or
-`Roll-up` section label, an explicit no-findings conclusion, or a P3 line whose
-every clause matches the curated `POSITIVE_EVIDENCE` allowlist. Anything else
-blocks, including ordinary narrative prose that carries no finding vocabulary.
+`Roll-up` section label, an explicit no-findings conclusion, a `What I checked`
+checklist heading, a ticked checklist entry whose whole subject is built from
+the curated `SAFE_CLAUDE_CHECKLIST_TOPICS` allowlist, or a P3 line whose every
+clause matches the curated `POSITIVE_EVIDENCE` allowlist. Anything else blocks,
+including ordinary narrative prose that carries no finding vocabulary.
 
 Two consequences are deliberate and easy to trip over:
 
@@ -145,6 +147,13 @@ blocking`, and similar leads must be followed by curated positive evidence.
 A clean verdict or conclusion may end only in a bare sentence terminator. Any
 trailing sentence blocks, because a tail is unconstrained English and no term
 list separates praise from a defect stated plainly.
+
+A `What I checked` checklist is recognized whether or not the body also carries
+paired `Findings`/`Roll-up` headings — the standalone form and the preamble form
+read one definition. The checklist is evidence of review, never the conclusion:
+the body still needs an explicit no-findings line. An unticked or negated box
+blocks, and so does any subject outside the curated topic set, since a free
+subject is unconstrained English.
 
 The registry and named phrase groups live in
 `scripts/pr-feedback-state-claude.mjs`. Add a phrase only with a real review
