@@ -6744,12 +6744,30 @@ run_capture_deadline_regressions() {
 # is caught rather than fatal, so the helper stays alive, its capture deadline
 # fires on schedule, and the group sweep reaps the whole tree. An interrupt
 # therefore costs the remaining budget, not an orphan.
+# Both runtimes own an interrupt path, and they are different code: the helper
+# relies on its signal handlers being registered before it detaches, while the
+# wrapper's `run_capture_with_deadline` traps INT/TERM/HUP, kills both groups,
+# restores the caller's dispositions and re-raises. Run the case against each.
 run_capture_deadline_interrupt_arm() {
-  local review_repo="$tmp_dir/capture-deadline-interrupt"
-  local filter_script="$tmp_dir/capture-deadline-interrupt-filter.sh"
-  local state_pointer="$tmp_dir/capture-deadline-interrupt-state-dir"
-  local state_dir="$tmp_dir/capture-deadline-interrupt-state"
+  run_capture_deadline_interrupt_case helper
+  run_capture_deadline_interrupt_case wrapper
+}
+
+run_capture_deadline_interrupt_case() {
+  local mode="$1"
+  local review_repo="$tmp_dir/capture-deadline-interrupt-$mode"
+  local filter_script="$tmp_dir/capture-deadline-interrupt-$mode-filter.sh"
+  local state_pointer="$tmp_dir/capture-deadline-interrupt-$mode-state-dir"
+  local state_dir="$tmp_dir/capture-deadline-interrupt-$mode-state"
   local bundle_output="$state_dir/prompt.md"
+  local bundle_dir="$state_dir/bundle"
+  local -a target_args
+  if [[ "$mode" == "wrapper" ]]; then
+    # A prepared bundle puts the captures in the wrapper's own capture block.
+    target_args=(--prepare-bundle-dir "$bundle_dir")
+  else
+    target_args=(--prepare-only --bundle-output "$bundle_output")
+  fi
   local wrapper_pid
   local started_at
   local elapsed
@@ -6784,8 +6802,7 @@ run_capture_deadline_interrupt_arm() {
       "$adapter_wrapper" \
       --mode local \
       --engine local \
-      --prepare-only \
-      --bundle-output "$bundle_output" >"$stdout" 2>"$stderr"
+      "${target_args[@]}" >"$stdout" 2>"$stderr"
   ) &
   wrapper_pid=$!
   arm_deadline_fixture_cleanup "$wrapper_pid" "$state_dir"
@@ -6804,7 +6821,8 @@ run_capture_deadline_interrupt_arm() {
   done
   if [[ "$launched" -ne 1 ]]; then
     cleanup_deadline_fixture_processes "$wrapper_pid" "$state_dir"
-    printf 'capture-deadline interrupt fixture never reached its stalled capture\n' >&2
+    printf 'capture-deadline %s interrupt fixture never reached its stalled capture\n' \
+      "$mode" >&2
     cat "$stderr" >&2
     exit 1
   fi
@@ -6816,7 +6834,7 @@ run_capture_deadline_interrupt_arm() {
   # The interrupted run must still leave nothing behind: the SIGTERM-ignoring
   # filter and its descendant are both reaped by the deadline's group sweep.
   if ! assert_deadline_fixture_processes_stopped \
-    "capture deadline interrupt" \
+    "capture deadline $mode interrupt" \
     "$state_dir/leader.pid" \
     "$state_dir/descendant.pid"; then
     cleanup_deadline_fixture_processes "$wrapper_pid" "$state_dir"
@@ -6829,10 +6847,9 @@ run_capture_deadline_interrupt_arm() {
       "$elapsed" >&2
     exit 1
   fi
-  if [[ -e "$bundle_output" ]]; then
+  if [[ -e "$bundle_output" || -e "$bundle_dir" ]]; then
     cleanup_deadline_fixture_processes "$wrapper_pid" "$state_dir"
-    printf 'an interrupted capture still published a prompt: %s\n' \
-      "$bundle_output" >&2
+    printf 'an interrupted %s capture still published its artifact\n' "$mode" >&2
     exit 1
   fi
   cleanup_retained_test_command_runtimes

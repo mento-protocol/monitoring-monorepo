@@ -6071,7 +6071,7 @@ run_capture_with_deadline() {
   # path, including the re-raise, so the signal still reaches that handler.
   # `trap -p` reports the caller's traps through a command substitution, and an
   # absent trap snapshots as an empty string that evaluates to nothing.
-  saved_signal_traps="$(trap -p INT TERM)"
+  saved_signal_traps="$(trap -p INT TERM HUP)"
   case "$-" in
     *m*) had_monitor=1 ;;
   esac
@@ -6108,8 +6108,13 @@ run_capture_with_deadline() {
   # this function bounds, and the watchdog would otherwise outlive it holding a
   # full-deadline sleep. Re-raise afterward so the interrupted script still dies
   # with the expected signal semantics.
-  trap 'kill -KILL "-$watchdog" 2>/dev/null || kill -KILL "$watchdog" 2>/dev/null || true; kill -TERM "-$child" 2>/dev/null || kill -TERM "$child" 2>/dev/null || true; sleep 1; kill -KILL "-$child" 2>/dev/null || kill -KILL "$child" 2>/dev/null || true; wait "$child" 2>/dev/null || true; rm -f "$timeout_file" "$status_file" "$partial_file"; trap - INT TERM; eval "$saved_signal_traps"; kill -s TERM "$$"' TERM
-  trap 'kill -KILL "-$watchdog" 2>/dev/null || kill -KILL "$watchdog" 2>/dev/null || true; kill -TERM "-$child" 2>/dev/null || kill -TERM "$child" 2>/dev/null || true; sleep 1; kill -KILL "-$child" 2>/dev/null || kill -KILL "$child" 2>/dev/null || true; wait "$child" 2>/dev/null || true; rm -f "$timeout_file" "$status_file" "$partial_file"; trap - INT TERM; eval "$saved_signal_traps"; kill -s INT "$$"' INT
+  trap 'kill -KILL "-$watchdog" 2>/dev/null || kill -KILL "$watchdog" 2>/dev/null || true; kill -TERM "-$child" 2>/dev/null || kill -TERM "$child" 2>/dev/null || true; sleep 1; kill -KILL "-$child" 2>/dev/null || kill -KILL "$child" 2>/dev/null || true; wait "$child" 2>/dev/null || true; rm -f "$timeout_file" "$status_file" "$partial_file"; trap - INT TERM HUP; eval "$saved_signal_traps"; kill -s TERM "$$"' TERM
+  trap 'kill -KILL "-$watchdog" 2>/dev/null || kill -KILL "$watchdog" 2>/dev/null || true; kill -TERM "-$child" 2>/dev/null || kill -TERM "$child" 2>/dev/null || true; sleep 1; kill -KILL "-$child" 2>/dev/null || kill -KILL "$child" 2>/dev/null || true; wait "$child" 2>/dev/null || true; rm -f "$timeout_file" "$status_file" "$partial_file"; trap - INT TERM HUP; eval "$saved_signal_traps"; kill -s INT "$$"' INT
+  # SIGHUP for the same reasons, and specifically because `set -m` puts the
+  # capture in its own group: a hangup delivered to the terminal's foreground
+  # group no longer reaches it, so this is the only thing that reaps the tree
+  # when a session closes.
+  trap 'kill -KILL "-$watchdog" 2>/dev/null || kill -KILL "$watchdog" 2>/dev/null || true; kill -TERM "-$child" 2>/dev/null || kill -TERM "$child" 2>/dev/null || true; sleep 1; kill -KILL "-$child" 2>/dev/null || kill -KILL "$child" 2>/dev/null || true; wait "$child" 2>/dev/null || true; rm -f "$timeout_file" "$status_file" "$partial_file"; trap - INT TERM HUP; eval "$saved_signal_traps"; kill -s HUP "$$"' HUP
   if wait "$child" 2>/dev/null; then
     status=0
   else
@@ -6131,7 +6136,7 @@ run_capture_with_deadline() {
     # been recycled.
     kill -KILL "-$child" 2>/dev/null || true
   fi
-  trap - INT TERM
+  trap - INT TERM HUP
   eval "$saved_signal_traps"
   return "$status"
 }
