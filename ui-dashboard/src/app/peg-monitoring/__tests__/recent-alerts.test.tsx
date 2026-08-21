@@ -190,7 +190,42 @@ describe("RecentAlerts", () => {
     expect(row.textContent).toContain(
       "This entry records a monitoring failure and does not confirm a peg breach.",
     );
-    expect(row.textContent).not.toContain("sell price is below peg");
+    expect(row.textContent).not.toContain(
+      "The monitor uses the average price available when selling the monitored amount",
+    );
+  });
+
+  it("labels and explains monitoring recovery into Pending", () => {
+    const recovery: PegAlertEvent = {
+      ...events[0]!,
+      id: "grafana-evaluation-recovered-pending",
+      severity: "warning",
+      lead: "Grafana can evaluate the Bitvavo Peg rule again; its alert condition is pending",
+      detail: "EUROP · lasted 1 min.",
+      evidence: {
+        ...events[0]!.evidence,
+        evaluationState: "recovered-pending",
+      },
+    };
+    act(() =>
+      root.render(
+        <RecentAlerts
+          nowMs={NOW_MS}
+          events={[recovery]}
+          monitoring={monitoring}
+          state="ready"
+        />,
+      ),
+    );
+
+    const row = container.querySelector("li")!;
+    expect(row.querySelector('[role="img"]')?.getAttribute("aria-label")).toBe(
+      "Monitoring recovered; alert pending",
+    );
+    act(() => row.querySelector("summary")!.click());
+    expect(row.textContent).toContain(
+      "Grafana resumed evaluating this Peg rule, and the rule entered Pending.",
+    );
   });
 
   it("omits the separator when the cause needs no detail", () => {

@@ -49,6 +49,7 @@ function errorStateHistoryUrl(url: URL): URL | null {
     return errorUrl;
   }
   if (current === "Normal" && previous === "Alerting") {
+    errorUrl.searchParams.delete("current");
     errorUrl.searchParams.set("previous", "Error");
     return errorUrl;
   }

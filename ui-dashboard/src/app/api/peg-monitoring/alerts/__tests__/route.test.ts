@@ -266,7 +266,7 @@ describe("GET /api/peg-monitoring/alerts", () => {
       fetchMock.mock.calls.map(([input]) =>
         new URL(String(input)).searchParams.get("current"),
       ),
-    ).toEqual(["Alerting", "Error", "Normal", "Normal"]);
+    ).toEqual(["Alerting", "Error", "Normal", null]);
     expect(
       fetchMock.mock.calls.map(([input]) =>
         new URL(String(input)).searchParams.get("previous"),
@@ -445,6 +445,131 @@ describe("GET /api/peg-monitoring/alerts", () => {
         severity: "page",
         lead: "Grafana could not evaluate the Bitvavo Peg rule",
         evidence: expect.objectContaining({ evaluationState: "failed" }),
+      }),
+    ]);
+  });
+
+  it("shows monitoring recovery when Grafana resumes in Pending", () => {
+    const title = "Peg Deep-Venue Downside Critical [europ-schuman · active]";
+    const failed = stateLine({
+      previous: "Normal",
+      current: "Error",
+      fingerprint: "pending-recovery",
+      ruleTitle: title,
+      values: {},
+      labels: { alertname: title, route: "page", severity: "critical" },
+    });
+    const recoveredPending = stateLine({
+      previous: "Error",
+      current: "Pending",
+      fingerprint: "pending-recovery",
+      ruleTitle: title,
+      values: { A: 51 },
+      labels: { alertname: title, route: "page", severity: "critical" },
+    });
+    const transitions = parseStateTransitions(
+      stateFrame([
+        { at: NOW_SECONDS - 120, line: failed },
+        { at: NOW_SECONDS - 60, line: recoveredPending },
+      ]),
+      FROM_SECONDS,
+      NOW_SECONDS,
+    );
+
+    expect(combinePegAlertEvents(transitions, 4)).toEqual([
+      expect.objectContaining({
+        id: `state:pending-recovery:error-recovered-pending:${NOW_SECONDS - 60}`,
+        severity: "warning",
+        lead: "Grafana can evaluate the Bitvavo Peg rule again; its alert condition is pending",
+        detail: "EUROP · lasted 1 min.",
+        evidence: expect.objectContaining({
+          evaluationState: "recovered-pending",
+        }),
+      }),
+      expect.objectContaining({
+        id: `state:pending-recovery:error:${NOW_SECONDS - 120}`,
+        evidence: expect.objectContaining({ evaluationState: "failed" }),
+      }),
+    ]);
+  });
+
+  it("closes an active alert when evaluation recovers to Normal", () => {
+    const fingerprint = "alert-error-normal";
+    const raised = stateLine({ fingerprint, values: { A: 51 } });
+    const failed = stateLine({
+      previous: "Alerting",
+      current: "Error",
+      fingerprint,
+      values: {},
+    });
+    const recovered = stateLine({
+      previous: "Error",
+      current: "Normal",
+      fingerprint,
+      values: {},
+    });
+    const transitions = parseStateTransitions(
+      stateFrame([
+        { at: NOW_SECONDS - 180, line: raised },
+        { at: NOW_SECONDS - 120, line: failed },
+        { at: NOW_SECONDS - 60, line: recovered },
+      ]),
+      FROM_SECONDS,
+      NOW_SECONDS,
+    );
+
+    expect(combinePegAlertEvents(transitions, 6)).toEqual([
+      expect.objectContaining({
+        id: `state:${fingerprint}:cleared:${NOW_SECONDS - 60}`,
+        severity: "cleared",
+        detail: "EUROP · lasted 2 min.",
+      }),
+      expect.objectContaining({
+        id: `state:${fingerprint}:error-recovered:${NOW_SECONDS - 60}`,
+        severity: "cleared",
+      }),
+      expect.objectContaining({
+        id: `state:${fingerprint}:error:${NOW_SECONDS - 120}`,
+      }),
+      expect.objectContaining({
+        id: `state:${fingerprint}:raised:${NOW_SECONDS - 180}`,
+      }),
+    ]);
+  });
+
+  it("pairs a boundary Error to Alerting recovery with its later clear", () => {
+    const fingerprint = "boundary-error-alerting";
+    const recoveredAlerting = stateLine({
+      previous: "Error",
+      current: "Alerting",
+      fingerprint,
+      values: { A: 51 },
+    });
+    const cleared = stateLine({
+      previous: "Alerting",
+      current: "Normal",
+      fingerprint,
+      values: {},
+    });
+    const transitions = parseStateTransitions(
+      stateFrame([
+        { at: NOW_SECONDS - 120, line: recoveredAlerting },
+        { at: NOW_SECONDS - 60, line: cleared },
+      ]),
+      FROM_SECONDS,
+      NOW_SECONDS,
+    );
+
+    expect(combinePegAlertEvents(transitions, 4)).toEqual([
+      expect.objectContaining({
+        id: `state:${fingerprint}:cleared:${NOW_SECONDS - 60}`,
+        detail: "EUROP · lasted 1 min.",
+      }),
+      expect.objectContaining({
+        id: `state:${fingerprint}:error-recovered-alerting:${NOW_SECONDS - 120}`,
+        evidence: expect.objectContaining({
+          evaluationState: "recovered-alerting",
+        }),
       }),
     ]);
   });
@@ -816,7 +941,7 @@ describe("GET /api/peg-monitoring/alerts", () => {
   it("fails closed for malformed frames and oversized bodies", async () => {
     vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(json({ schema: {}, data: {} }))
-      .mockResolvedValue(json(stateFrame([])));
+      .mockImplementation(async () => json(stateFrame([])));
     expect((await GET()).status).toBe(502);
 
     vi.restoreAllMocks();
@@ -829,7 +954,7 @@ describe("GET /api/peg-monitoring/alerts", () => {
           },
         }),
       )
-      .mockResolvedValue(json(stateFrame([])));
+      .mockImplementation(async () => json(stateFrame([])));
     expect((await GET()).status).toBe(502);
   });
 
@@ -843,7 +968,7 @@ describe("GET /api/peg-monitoring/alerts", () => {
     );
     vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(json(stateFrame(sentinelRows)))
-      .mockResolvedValue(json(stateFrame([])));
+      .mockImplementation(async () => json(stateFrame([])));
 
     expect((await GET()).status).toBe(502);
   });

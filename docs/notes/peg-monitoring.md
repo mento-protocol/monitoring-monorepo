@@ -132,8 +132,9 @@ the decision package only when the event and package use the same policy
 version. Older events without cause telemetry say that the exact cause was not
 recorded. The history backend reads fired, resolved, evaluation-failure, and
 evaluation-recovery transitions from the displayed seven days. It does not read
-Pending or canceled transitions. Evaluation failures use distinct monitoring
-copy and never become confirmed peg breaches. When a matching fired transition
+general Pending or canceled history. The bounded evaluation-recovery query can
+accept an `Error` to `Pending` transition. Evaluation failures use distinct
+monitoring copy and never become confirmed peg breaches. When a matching fired transition
 is available, a resolved row keeps its cause and shows how long the alert stayed
 active. A resolution remains visible without that active time when the alert
 fired before the displayed window. Its details can still show the configured

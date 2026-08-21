@@ -81,7 +81,8 @@ type PegStateTransition = {
     | "cleared"
     | "error"
     | "error-recovered"
-    | "error-recovered-alerting";
+    | "error-recovered-alerting"
+    | "error-recovered-pending";
   identity: string;
   line: StateLine;
 };
@@ -108,6 +109,8 @@ function transitionKind(line: StateLine): PegStateTransition["kind"] | null {
   if (current === "Error") return "error";
   if (previous === "Error" && current === "Alerting")
     return "error-recovered-alerting";
+  if (previous === "Error" && current === "Pending")
+    return "error-recovered-pending";
   if (previous === "Error" && current === "Normal") return "error-recovered";
   if (current === "Alerting") return "raised";
   if (previous === "Alerting" && current === "Normal") return "cleared";
@@ -207,6 +210,13 @@ type PhrasedEvent = PegAlertEvent & {
   policySlot: ReturnType<typeof policySlot>;
 };
 
+type TransitionCycleState = {
+  open: Map<string, PegStateTransition>;
+  observedRaised: Set<string>;
+  unpairedCleared: Map<string, PegStateTransition>;
+  events: PhrasedEvent[];
+};
+
 type EvaluationState = NonNullable<
   PegAlertEvent["evidence"]["evaluationState"]
 >;
@@ -217,6 +227,7 @@ function evaluationStateFor(
   if (kind === "error") return "failed";
   if (kind === "error-recovered") return "recovered";
   if (kind === "error-recovered-alerting") return "recovered-alerting";
+  if (kind === "error-recovered-pending") return "recovered-pending";
   return undefined;
 }
 
@@ -239,7 +250,9 @@ function evaluationCause(
     lead:
       evaluationState === "recovered"
         ? `Grafana can evaluate the ${sourceName} Peg rule again`
-        : `Grafana can evaluate the ${sourceName} Peg rule again; its alert condition is active`,
+        : evaluationState === "recovered-alerting"
+          ? `Grafana can evaluate the ${sourceName} Peg rule again; its alert condition is active`
+          : `Grafana can evaluate the ${sourceName} Peg rule again; its alert condition is pending`,
   };
 }
 
@@ -249,6 +262,7 @@ function transitionSeverity(
   evaluationState: EvaluationState | undefined,
 ): PegAlertEvent["severity"] {
   if (cleared || evaluationState === "recovered") return "cleared";
+  if (evaluationState === "recovered-pending") return "warning";
   return evidence.labels.route === "page" ||
     evidence.labels.severity === "critical"
     ? "page"
@@ -264,7 +278,9 @@ function phraseTransition(
   const evaluationState = evaluationStateFor(transition.kind);
   const cause = evaluationCause(evidence, evaluationState, cleared);
   const recovered =
-    evaluationState === "recovered" || evaluationState === "recovered-alerting";
+    evaluationState === "recovered" ||
+    evaluationState === "recovered-alerting" ||
+    evaluationState === "recovered-pending";
   const detail = [
     cause.includesAsset ? null : pegAlertAssetName(evidence.labels.asset),
     (cleared || recovered) && raised !== undefined
@@ -312,6 +328,56 @@ function normalizedFailureReason(reason: number | undefined): number | null {
     : null;
 }
 
+function closeAlertCycle(
+  recovery: PegStateTransition,
+  state: TransitionCycleState,
+): void {
+  const alertKey = `${recovery.identity}:alert`;
+  const alertRaised = state.open.get(alertKey);
+  if (alertRaised === undefined) return;
+  if (alertRaised.kind !== "error-recovered-alerting")
+    state.events.push(phraseTransition(alertRaised, alertRaised));
+  state.events.push(
+    phraseTransition({ ...recovery, kind: "cleared" }, alertRaised),
+  );
+  state.open.delete(alertKey);
+}
+
+function applyRecoveryToAlertCycle(
+  transition: PegStateTransition,
+  state: TransitionCycleState,
+): void {
+  if (
+    transition.kind === "error-recovered" ||
+    transition.kind === "error-recovered-pending"
+  ) {
+    closeAlertCycle(transition, state);
+    return;
+  }
+  if (transition.kind !== "error-recovered-alerting") return;
+  const alertKey = `${transition.identity}:alert`;
+  state.observedRaised.add(alertKey);
+  if (!state.open.has(alertKey)) state.open.set(alertKey, transition);
+}
+
+function closeStateCycle(
+  transition: PegStateTransition,
+  key: string,
+  state: TransitionCycleState,
+): void {
+  const raised = state.open.get(key);
+  if (raised === undefined) {
+    if (!state.observedRaised.has(key))
+      state.unpairedCleared.set(key, transition);
+    return;
+  }
+  if (transition.at < raised.at) return;
+  if (raised.kind !== "error-recovered-alerting")
+    state.events.push(phraseTransition(raised, raised));
+  state.events.push(phraseTransition(transition, raised));
+  state.open.delete(key);
+}
+
 function pairStateTransitions(
   transitions: readonly PegStateTransition[],
 ): PhrasedEvent[] {
@@ -329,6 +395,7 @@ function pairStateTransitions(
   const observedRaised = new Set<string>();
   const unpairedCleared = new Map<string, PegStateTransition>();
   const events: PhrasedEvent[] = [];
+  const state = { events, observedRaised, open, unpairedCleared };
   for (const transition of ordered) {
     const key = cycleKey(transition);
     if (isOpening(transition)) {
@@ -341,19 +408,14 @@ function pairStateTransitions(
       if (!open.has(key)) open.set(key, transition);
       continue;
     }
-    const raised = open.get(key);
-    if (raised === undefined) {
-      if (!observedRaised.has(key)) unpairedCleared.set(key, transition);
-      continue;
-    }
-    if (transition.at < raised.at) continue;
-    events.push(phraseTransition(raised, raised));
-    events.push(phraseTransition(transition, raised));
-    open.delete(key);
+    closeStateCycle(transition, key, state);
+    applyRecoveryToAlertCycle(transition, state);
   }
   for (const cleared of unpairedCleared.values())
     events.push(phraseTransition(cleared));
-  for (const raised of open.values()) events.push(phraseTransition(raised));
+  for (const raised of open.values())
+    if (raised.kind !== "error-recovered-alerting")
+      events.push(phraseTransition(raised));
   return events;
 }
 

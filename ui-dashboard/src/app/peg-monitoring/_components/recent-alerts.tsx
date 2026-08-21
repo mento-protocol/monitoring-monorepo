@@ -25,6 +25,8 @@ function eventStatusLabel(event: PegAlertEvent): string {
     return "Monitoring recovered";
   if (event.evidence.evaluationState === "recovered-alerting")
     return "Monitoring recovered; alert active";
+  if (event.evidence.evaluationState === "recovered-pending")
+    return "Monitoring recovered; alert pending";
   return SEVERITY_LABEL[event.severity];
 }
 

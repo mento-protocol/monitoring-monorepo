@@ -300,6 +300,9 @@ export function pegAlertExplanation(
   if (event.evidence.evaluationState === "recovered-alerting") {
     return "Grafana resumed evaluating this Peg rule, and the rule entered Alerting. The upstream error text is not shown.";
   }
+  if (event.evidence.evaluationState === "recovered-pending") {
+    return "Grafana resumed evaluating this Peg rule, and the rule entered Pending. The upstream error text is not shown.";
+  }
   const policy = exactPolicyContext(event, monitoring);
   return RULE_EXPLANATIONS[event.evidence.rule](event, policy, monitoring);
 }
