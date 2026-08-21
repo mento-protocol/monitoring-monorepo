@@ -65,6 +65,11 @@ check FAIL 'fork head is refused even in a Claude cloud session' \
 # Treating that as same-repo would fail open on exactly what this gate catches.
 check PENDING 'empty fork status is not treated as same-repo' \
   'echo ""'
+# Running ahead of the cloud guard means an unreadable read in a blocked cloud
+# session must still name the cause and the MCP fallback, not just the symptom.
+check "PENDING fork status unreadable for #123 in this Claude cloud session" \
+  'blocked cloud session names the MCP fallback' \
+  'exit 1' 'CLAUDE_CODE_REMOTE=1'
 check PENDING 'unexpected fork status is not treated as same-repo' \
   'echo null'
 # Same-repo falls through to pr:ready-state. Assert on the reason, not just the

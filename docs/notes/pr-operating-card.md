@@ -123,25 +123,36 @@ Solution` (approach before implementation detail). PRs open **ready for
    out of `agent-active` and into review. Authority:
    [`agent-issue-workflow.md`](agent-issue-workflow.md).
 
-   **Commit the validated work first.** Steps 3-4 validate the worktree, so stage
+   **Bind the checkout to the target first, then commit.** Binding before the
+   commit is what makes the equality check meaningful — advancing local `HEAD`
+   first would make `HEAD == headRefOid` unsatisfiable on a normal update. Which
+   target depends on whether a PR exists yet:
+   - **An existing PR** is the push target. Resolve its head repository,
+     `headRefName` and `headRefOid`. Before creating the ship commit, require
+     local `HEAD` to equal that OID; if intended commits already exist locally,
+     require the PR's OID to be their ancestor and inspect the intervening range
+     instead of stopping. If the branch is missing current base commits, merge the
+     base in — rebase is only acceptable before first publication.
+   - **No PR yet**, so there is no `headRefOid` to match: verify `origin` serves
+     `CURRENT_REPO` and take the current branch as the head ref.
+
+   **Then commit the validated work.** Steps 3-4 validate the worktree, so stage
    only the intended files and create the ship commit before any push — otherwise
    the remote receives the old commit while every validated change stays local. If
    unrelated dirty changes are mixed with the intended scope, stop and ask before
    staging.
 
-   **Then bind the checkout to the target.** Which target depends on whether a PR
-   exists yet:
-   - **An existing PR** is the push target: resolve its head repository,
-     `headRefName` and `headRefOid`; require a configured remote serving that head
-     repository and a local `HEAD` equal to that OID before editing; push with an
-     explicit `git push <head-remote> HEAD:<headRefName>` refspec, never an
-     implicit target or the local branch name. If the branch is missing current
-     base commits, merge the base in — rebase is only acceptable before first
-     publication.
-   - **No PR yet**, so there is no `headRefOid` to match: verify `origin` serves
-     `CURRENT_REPO`, take the current branch as the head ref, push it with
-     `git push -u origin HEAD:<branch>`, and create the PR from that published
-     branch.
+   **Then push.** An existing PR takes an explicit
+   `git push <head-remote> HEAD:<headRefName>` refspec, never an implicit target
+   or the local branch name. A first publication takes
+   `git push -u origin HEAD:<branch>`, and the PR is created from that published
+   branch.
+
+   Before any ancestry decision, make the history complete: when
+   `git rev-parse --is-shallow-repository` reports `true`, run
+   `git fetch --unshallow "$BASE_REMOTE"` and refetch the base. A hosted depth-1
+   checkout otherwise reports a false ancestry failure, which turns into an
+   unnecessary base merge or a stop on an already-current branch.
 
    Either way, re-read the PR after pushing and require its `headRefOid` to equal
    local `HEAD` before treating anything as published. A fork checkout uses its
@@ -185,6 +196,13 @@ Solution` (approach before implementation detail). PRs open **ready for
    handing it back. `pnpm pr:ready-state --watch` polls until ready, merged, or
    closed, so a permanently blocked PR otherwise consumes the session. At the
    deadline, report where the PR stands and stop or escalate.
+
+   **Give each independent PR its own watcher and its own isolated worktree.** A
+   foreground `pr:ready-state --watch` on the first PR otherwise occupies the loop
+   while feedback and failures age on the others, and repairs driven through one
+   shared checkout can target the wrong branch. Bind every worker to that PR's
+   exact repository, number, head and branch; serialize only overlapping or
+   dependent fixes. The lead keeps user-facing status and approval boundaries.
 
    **Stacked PRs are the normal case here**, typically after a `/ship` batch.
    When a watched PR merges or a base moves, re-evaluate every open PR that

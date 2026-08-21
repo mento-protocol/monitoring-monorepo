@@ -55,6 +55,14 @@ babysit_repo_gate() {
   local cross
   if ! cross=$(gh pr view "$pr" --repo "${owner}/${repo}" --json isCrossRepository \
     --jq '.isCrossRepository' 2>/dev/null); then
+    # Running ahead of the cloud capability guard means this is also the first
+    # thing to fail in a blocked Claude cloud session. Name that cause and the
+    # MCP fallback, or the guard's more useful message never gets reached and
+    # the session is told only that a field was unreadable.
+    if [[ -n "${CLAUDE_CODE_REMOTE:-}" ]]; then
+      printf 'PENDING fork status unreadable for #%s in this Claude cloud session (the gh repo API is platform-blocked); establish isCrossRepository over MCP and follow the cloud watch loop in docs/notes/github-tooling-surfaces.md' "$pr"
+      return 0
+    fi
     printf 'PENDING fork status unreadable for #%s; cannot prove the head is same-repo' "$pr"
     return 0
   fi
