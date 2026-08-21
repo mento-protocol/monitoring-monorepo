@@ -506,7 +506,10 @@ jobs:
       # step's bash would source that payload before running its own command —
       # an escape from the whole permission allowlist. So the broker bounds its
       # own life with a TTL instead, set to the job timeout; the runner is
-      # ephemeral and is destroyed with the job either way.
+      # ephemeral and is destroyed with the job either way. It is also why this
+      # step arms a watchdog over the broker before it returns (see the watchdog
+      # comment below): with no later step, nothing else can notice a broker
+      # that dies while the agent is running.
       # -----------------------------------------------------------------------
       - name: Start the Sentry credential broker (trusted)
         env:
@@ -545,7 +548,15 @@ jobs:
           handle="$(openssl rand -hex 32)"
           ready_file="${RUNNER_TEMP}/sentry-mcp-broker.ready"
           log_file="${RUNNER_TEMP}/sentry-mcp-broker.log"
-          rm -f "${ready_file}"
+          # The watchdog's terminal marker and the broker's pid record, both
+          # read by the agent's comment wrapper (issue #1956). These names are
+          # the wrapper's BROKER_DOWN_FILE_RELATIVE and BROKER_PID_FILE_RELATIVE
+          # constants and must stay in step with them;
+          # scripts/sentry/triage/sentry-triage-agent-comment.test.mjs asserts
+          # they agree.
+          down_file="${RUNNER_TEMP}/sentry-mcp-broker.down"
+          pid_file="${RUNNER_TEMP}/sentry-mcp-broker.pid"
+          rm -f "${ready_file}" "${down_file}" "${down_file}.partial" "${pid_file}"
 
           # Token on STDIN via a builtin: no env var, no argv, no temp file.
           # Redirecting stdout/stderr to a file releases the step's pipe, so the
@@ -578,6 +589,78 @@ jobs:
 
           echo "SENTRY_MCP_BROKER_HANDLE=${handle}" >> "${GITHUB_ENV}"
           echo "Sentry credential broker listening on 127.0.0.1:$(cat "${ready_file}") (pid ${broker_pid})."
+
+          # The broker's identity for the comment wrapper's live check. A file
+          # under $RUNNER_TEMP and not $GITHUB_ENV: the wrapper runs inside the
+          # agent's shell, which expands its own command line, so anything it
+          # took from the environment would be a value the model can rewrite.
+          # Published .partial + mv, like the marker below.
+          #
+          # This is the SAME `broker_pid` the readiness loop above already
+          # trusts: for a backgrounded pipeline bash sets `$!` to the process it
+          # exec'd for the LAST element, with no intermediary in between
+          # (verified on bash 5.3). That holds as long as `node` on the runner
+          # is the real binary actions/setup-node installs and not a wrapper
+          # that spawns its own child — a shim's pid would outlive the broker's.
+          printf '%s' "${broker_pid}" > "${pid_file}.partial"
+          mv "${pid_file}.partial" "${pid_file}"
+
+          # WATCHDOG for the window the readiness loop above and the pre-flight
+          # probe below cannot reach: the agent step itself (issue #1956). The
+          # broker fails closed on a fatal post-startup error — it logs
+          # SERVER-ERROR, releases the port and exits — but it is BACKGROUNDED,
+          # so that exit fails nothing on its own, and this job must END with
+          # the agent (see the job banner), so no later step can notice.
+          #
+          # What a background process cannot do is write this job's log or fail
+          # a sibling step: the runner drains a step's pipe before starting the
+          # next one, so anything still holding that pipe holds the STEP open.
+          # What it CAN do is take away the round's only outcome. This loop
+          # waits for the broker to go, then writes the terminal marker that the
+          # agent's comment wrapper refuses on, with the broker's log inside it.
+          # The wrapper then posts nothing and prints that marker as a run
+          # annotation plus stderr — the one surface inside the agent step that
+          # reaches the job log. With no verdict comment the `verdict` job fails
+          # loudly and leaves `sentry:needs-triage` on the stub for the next
+          # scheduled run, instead of a toolless needs-human verdict settling as
+          # a judgement.
+          #
+          # This marker is the ATTRIBUTABLE half and it is published on a poll,
+          # so it lags the death it reports. The wrapper closes that lag itself
+          # by checking the pid recorded above in the instant before it posts.
+          # Neither half is redundant: the pid check has no lag but no story,
+          # the marker carries the broker's log and says why it died.
+          #
+          # Written via .partial + mv so the wrapper can never read a half-file,
+          # and its own streams go to /dev/null for the pipe reason above. Any
+          # broker exit voids the round, including a clean TTL exit: the TTL is
+          # the job timeout, so a round still running when it fires is over
+          # anyway.
+          # `kill -0` answers "has a pid", not "is running": a zombie keeps its
+          # pid until someone reaps it. The orphaned broker is reparented to
+          # this runner's init, which does reap — but a `container:` job's PID 1
+          # would not, and a watchdog that never fires is the silent fail-open
+          # this whole mechanism exists to close. So the state is read too.
+          (
+            while kill -0 "${broker_pid}" 2>/dev/null \
+              && ! grep -qs '^State:[[:space:]]*Z' "/proc/${broker_pid}/status"
+            do sleep 2; done
+            {
+              echo "The Sentry credential broker (pid ${broker_pid}) exited while the triage agent was running; this round is void."
+              echo "--- ${log_file} ---"
+              # The wrapper prints this marker on the agent's stderr, so the
+              # broker log becomes readable by the model. That is only sound
+              # because every line the broker writes is a fixed prefix plus a
+              # method, a path, a status, a byte COUNT or a refusal reason —
+              # never the token, a request header or a response body, and its
+              # startup assertions name the offending VARIABLE and never its
+              # value. Re-check that before adding a log line to
+              # scripts/sentry/broker/sentry-mcp-broker.mjs. The readiness
+              # failures above already `cat` this same file into the job log.
+              cat "${log_file}" 2>/dev/null || echo "(the broker log is unreadable)"
+            } > "${down_file}.partial"
+            mv "${down_file}.partial" "${down_file}"
+          ) > /dev/null 2>&1 &
 
       # -----------------------------------------------------------------------
       # PRE-FLIGHT: prove the Sentry MCP toolset registers (issue #1938).

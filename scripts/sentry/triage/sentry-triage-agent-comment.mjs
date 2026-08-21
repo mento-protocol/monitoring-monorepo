@@ -68,6 +68,22 @@
  * and their bounding, are in the workflow's containment banner and in
  * docs/notes/sentry-triage-pipeline.md.
  *
+ * A DEAD BROKER IS NOT A VERDICT (issue #1956). The Sentry credential broker
+ * runs backgrounded in the same job, and its exit fails no step: the job must
+ * END with the agent, so nothing runs afterwards to notice, and a background
+ * process can neither write the job log nor fail a sibling step. A broker that
+ * dies mid-run therefore leaves the agent reading ECONNREFUSED and reporting
+ * `needs-human` — a verdict about the TOOLING that the deterministic `verdict`
+ * job cannot tell apart from a judgement about the ISSUE, so it labels the
+ * stub, strips `sentry:needs-triage` and parks work nobody can act on. The
+ * prompt already tells the agent to post nothing in that state; this is the
+ * structural half, because a prompt-injected agent is exactly the one that
+ * ignores it. The workflow's watchdog writes BROKER_DOWN_FILE_RELATIVE when the
+ * broker goes; this script refuses on that marker and prints it, and — because
+ * a polled marker lags the death it reports — also probes the broker directly
+ * in the instant before it posts. No comment means the `verdict` job finds no
+ * verdict, fails loudly, and leaves `sentry:needs-triage` for the next run.
+ *
  * THE BODY NEVER TOUCHES THE FILESYSTEM. It goes to `gh --body-file -` on the
  * child's stdin. An earlier version validated the body, wrote it to a
  * predictable path under `$RUNNER_TEMP`, and let `gh` read it back; the agent
@@ -96,6 +112,21 @@ export { AGENT_COMMENT_MARKER, VERDICT_MARKER };
  * the agent runs. Path is `$RUNNER_TEMP` + this fixed relative path — never an
  * env var of its own, so there is no string-valued path binding to repoint. */
 export const TARGET_FILE_RELATIVE = "sentry-triage-target/target.json";
+
+/** Terminal marker the broker step's watchdog writes when the Sentry
+ * credential broker exits while the agent is running. Fixed relative path
+ * under `$RUNNER_TEMP` for the same reason as TARGET_FILE_RELATIVE: an env var
+ * naming the path would be one more model-reachable binding to repoint. The
+ * agent holds no tool that creates or deletes a file, so it can neither forge
+ * this marker nor clear one the watchdog wrote. */
+export const BROKER_DOWN_FILE_RELATIVE = "sentry-mcp-broker.down";
+
+/** The broker's pid, recorded by the trusted broker step before the agent
+ * starts. The live probe below identifies the broker by THIS and by nothing in
+ * the environment: `SENTRY_MCP_BROKER_PORT` is job env that the agent's own
+ * shell can reassign, and a port is not an identity in any case — see
+ * probeBrokerByPid. */
+export const BROKER_PID_FILE_RELATIVE = "sentry-mcp-broker.pid";
 
 /** Cross-check only. The pinned file wins; a disagreement refuses. */
 export const ISSUE_ENV_VAR = "SENTRY_TRIAGE_COMMENT_ISSUE";
@@ -175,6 +206,167 @@ export function targetFilePath(env) {
   const tempDir = String(env.RUNNER_TEMP ?? "");
   if (tempDir === "") throw new Error("RUNNER_TEMP must be set");
   return join(tempDir, TARGET_FILE_RELATIVE);
+}
+
+/** Where the broker watchdog leaves its terminal marker. */
+export function brokerDownFilePath(env) {
+  const tempDir = String(env.RUNNER_TEMP ?? "");
+  if (tempDir === "") throw new Error("RUNNER_TEMP must be set");
+  return join(tempDir, BROKER_DOWN_FILE_RELATIVE);
+}
+
+/** Where the broker step recorded the broker's pid. */
+export function brokerPidFilePath(env) {
+  const tempDir = String(env.RUNNER_TEMP ?? "");
+  if (tempDir === "") throw new Error("RUNNER_TEMP must be set");
+  return join(tempDir, BROKER_PID_FILE_RELATIVE);
+}
+
+/** Carries the marker's contents — the watchdog's reason plus the broker log —
+ * separately from the one-line refusal, because `::error::` annotations are
+ * single-line and the log is what makes the failure attributable. */
+export class BrokerDownError extends Error {
+  constructor(message, detail) {
+    super(message);
+    this.name = "BrokerDownError";
+    this.detail = detail;
+  }
+}
+
+/** Default reader: the marker's contents, or null when it is absent. Only
+ * ENOENT means absent — a marker that exists and cannot be read is the same
+ * evidence as one that can, so every other error refuses rather than shrugs. */
+function readBrokerDownDefault(path) {
+  try {
+    return readFileSync(path, "utf8");
+  } catch (err) {
+    if (err && typeof err === "object" && err.code === "ENOENT") return null;
+    const reason = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      `refusing to post: the broker-down marker at ${path} could not be read ` +
+        `(${reason}); present and unreadable is not absent.`,
+      { cause: err },
+    );
+  }
+}
+
+/**
+ * Default probe: is the broker PROCESS still there? Signal 0 — no signal is
+ * sent, only the existence-and-permission check is performed, so this cannot
+ * disturb the broker it asks about.
+ *
+ * The process, not its port. A connect to `127.0.0.1:<port>` answers a weaker
+ * question: the kernel completes the handshake from the listen backlog while
+ * the owning process is on its way out, and once the port is released anything
+ * that rebinds it answers in the broker's place. The pid names one process and
+ * nothing can stand in for it. It is also why the port is not read here at all.
+ *
+ * EPERM is refused with everything else: a pid this process may not signal is
+ * not the broker it started the run with — both run as the same user.
+ *
+ * A ZOMBIE still has a pid, so signal 0 alone would call an exited broker
+ * alive. On the hosted VM runner the orphaned broker is reparented to systemd
+ * and reaped, but a `container:` job's PID 1 does not reap, and that would be a
+ * silent fail-open of exactly the kind this whole mechanism exists to close —
+ * so the state is read too, where the kernel exposes it.
+ */
+export function probeBrokerByPid(env, readStatus = readProcStatus) {
+  const path = brokerPidFilePath(env);
+  let raw;
+  try {
+    raw = readFileSync(path, "utf8").trim();
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      `refusing to post: cannot read the broker's pid record at ${path} ` +
+        `(${reason}); without it there is no way to tell whether the broker ` +
+        "that produced this evidence is still up.",
+      { cause: err },
+    );
+  }
+  // The WHOLE trimmed record must be the pid. `Number.parseInt` stops at the
+  // first non-digit, so "4242 garbage" or a truncated write would otherwise
+  // yield a plausible pid — and asking about whatever process holds it is the
+  // fail-open this check exists to prevent.
+  const pid = /^[0-9]{1,10}$/.test(raw) ? Number(raw) : NaN;
+  if (!Number.isInteger(pid) || pid <= 1) {
+    throw new Error(
+      `refusing to post: the broker's pid record at ${path} is not a pid`,
+    );
+  }
+  try {
+    process.kill(pid, 0);
+  } catch {
+    return false;
+  }
+  return !isZombieProcStatus(readStatus(pid));
+}
+
+/** `/proc/<pid>/status`, or null where there is no procfs to read (macOS, and
+ * any kernel that does not expose it). Null refines nothing, so the signal-0
+ * answer stands — this can only ever turn an "alive" into a "gone". */
+function readProcStatus(pid) {
+  try {
+    return readFileSync(`/proc/${pid}/status`, "utf8");
+  } catch {
+    return null;
+  }
+}
+
+/** Does this `/proc/<pid>/status` describe a process that has exited and is
+ * only waiting to be reaped? Linux writes `State:\tZ (zombie)`. */
+export function isZombieProcStatus(status) {
+  if (typeof status !== "string") return false;
+  return /^State:\s*Z\b/m.test(status);
+}
+
+/**
+ * Refuse to post unless the Sentry credential broker is still up. The verdict
+ * comment is the round's only outcome, so withholding it is what turns a dead
+ * broker into a failed round instead of a settled stub. See the header.
+ *
+ * TWO CHECKS, because neither alone is enough. The watchdog's MARKER is
+ * attributable — it carries the broker's log, which says WHY it died — but it
+ * is published on a poll, so it lags the death by up to one interval. The LIVE
+ * PROBE has no lag and no story: it answers only whether the broker process is
+ * still there, at the moment of posting. A broker that dies fails the probe at
+ * once and the marker shortly after, and the post is refused on whichever
+ * notices first.
+ *
+ * The marker is read TWICE, once on each side of the probe. The probe awaits,
+ * and a death inside that await is published only afterwards — so a single read
+ * before it would miss exactly the case the watchdog exists to report.
+ */
+export async function assertBrokerAlive(
+  env,
+  readBrokerDown = readBrokerDownDefault,
+  probeBroker = probeBrokerByPid,
+) {
+  const path = brokerDownFilePath(env);
+  const refuseOnMarker = () => {
+    const record = readBrokerDown(path);
+    if (record === null || record === undefined) return;
+    throw new BrokerDownError(
+      "refusing to post: the Sentry credential broker exited during this " +
+        `run, so every Sentry read after it went was blind (see ${path}). A ` +
+        "verdict posted now would settle the stub on tooling, not evidence.",
+      String(record),
+    );
+  };
+
+  refuseOnMarker();
+  const alive = await probeBroker(env);
+  refuseOnMarker();
+  if (!alive) {
+    throw new BrokerDownError(
+      "refusing to post: the Sentry credential broker process is gone, so it " +
+        "went during this run and the reads behind this verdict cannot be " +
+        "trusted. A verdict posted now would settle the stub on tooling, not " +
+        "evidence.",
+      `the broker's watchdog had not published ${path} yet; it lags a death ` +
+        "by up to one poll interval, and this probe does not.",
+    );
+  }
 }
 
 /** Default reader: content plus mode, so the caller can reject a writable
@@ -358,10 +550,20 @@ export async function postAgentComment({
   env,
   runGh = runGhDefault,
   readPinnedTarget = readPinnedTargetDefault,
+  readBrokerDown = readBrokerDownDefault,
+  probeBroker = probeBrokerByPid,
 }) {
   const { body } = parseArgs(argv);
+  // resolveTarget first: it is what proves RUNNER_TEMP still resolves to the
+  // trusted directory, and both broker files are read from that same root.
   const { issue, repo } = resolveTarget(env, readPinnedTarget);
   assertBodyPostable(body, collectSecretValues(env));
+  // LAST, immediately before publication. The liveness answer is only as good
+  // as it is fresh, so nothing slow may sit between deciding the broker is up
+  // and handing the body to gh. The residual window is the gh call itself, and
+  // a broker that dies inside it took nothing away: every read behind this
+  // verdict already succeeded.
+  await assertBrokerAlive(env, readBrokerDown, probeBroker);
 
   const stdout = await runGh(
     ["issue", "comment", issue, "--repo", repo, "--body-file", "-"],
@@ -389,6 +591,13 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     // audit trail for an attempted exfiltration or fence probe. Annotations are
     // single-line, so the usage block follows as plain stderr the agent reads.
     process.stderr.write(`::error::sentry-triage-agent-comment: ${message}\n`);
+    // The broker watchdog's record, log included, follows as plain stderr. This
+    // is the only surface inside the agent step that reaches the job log, so a
+    // refusal that withheld it would be a silent one (#1956).
+    const detail = err instanceof Error ? err.detail : undefined;
+    if (typeof detail === "string" && detail.trim() !== "") {
+      process.stderr.write(detail.endsWith("\n") ? detail : `${detail}\n`);
+    }
     process.stderr.write(usage());
     process.exitCode = 1;
   });

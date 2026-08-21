@@ -702,6 +702,91 @@ permission allowlist entirely. The broker bounds its own life with
 `SENTRY_MCP_BROKER_TTL_SECONDS` instead (set to the job timeout), on a runner
 that is destroyed with the job.
 
+#### A broker that dies mid-agent (#1956)
+
+The broker fails closed on a fatal post-startup socket error — it logs
+`SERVER-ERROR`, releases the port and exits non-zero. It is BACKGROUNDED, so
+that exit fails no step, and because no step follows the agent there is nothing
+left to notice. The pre-flight probe covers every death before the agent starts;
+the agent's own window is the gap, and there the agent reads ECONNREFUSED for
+the rest of its turns and reports `needs-human` — a verdict about the tooling
+that the `verdict` job cannot tell apart from a judgement about the issue.
+
+Two facts bound what can close it. A background process cannot fail a sibling
+step, and it cannot write the job log either: the runner drains a step's pipe
+before starting the next one, so anything still holding that pipe holds the step
+open — which is why the broker's own streams go to a file. The only stdio inside
+the agent step that reaches the run log belongs to the agent's own child
+processes, and exactly one of those is trusted: the comment wrapper.
+
+So the mechanism is split across the two halves that can each do their part:
+
+- The broker step arms a **watchdog** after readiness — `while kill -0
+"${broker_pid}"` — that waits for the broker to go and then writes
+  `$RUNNER_TEMP/sentry-mcp-broker.down` with its reason and the broker's log
+  inside, published `.partial` + `mv` so no half-file can be read.
+- `scripts/sentry/triage/sentry-triage-agent-comment.mjs` refuses to post when
+  that marker exists (`BROKER_DOWN_FILE_RELATIVE`, the one home for the name)
+  and prints it: a single-line `::error::` annotation plus the marker's contents
+  as stderr. The agent holds no tool that creates or deletes a file, so it can
+  neither forge the marker nor clear one the watchdog wrote.
+
+Printing the marker puts the broker's log in front of the model, which is sound
+only because every line the broker writes is a fixed prefix plus a method, a
+path, a status, a byte count or a refusal reason — never the token, a request
+header or a response body — and its startup assertions name the offending
+variable and never its value. Re-check that before adding a log line to
+`scripts/sentry/broker/sentry-mcp-broker.mjs`.
+
+The wrapper also **checks the broker process directly**, in the instant before
+it hands the body to `gh`, because a polled marker lags the death it reports and
+that lag would otherwise be an opening. The two checks cover each other: the
+marker is attributable but late, the process check is immediate but has no
+story to tell.
+
+The check is `process.kill(pid, 0)` against
+`$RUNNER_TEMP/sentry-mcp-broker.pid`, recorded by the broker step before the
+agent existed. The process and not its port, deliberately: a loopback connect
+answers a weaker question, since the kernel completes the handshake from the
+listen backlog while the owning process is on its way out, and once the port is
+released anything that rebinds it answers in the broker's place. A pid names one
+process. It is also inert — signal 0 sends nothing, so the check cannot disturb
+the broker whose fatal path hangs off its server `error` event. The pid comes
+from a file rather than `SENTRY_MCP_BROKER_PORT` or any other job env value: the
+wrapper runs inside the agent's shell, which expands its own command line, so
+anything read from the environment is a value the model can rewrite. A missing
+record, a record that is not exactly a pid, and an EPERM all refuse. The marker
+is read on BOTH sides of the check, because a death that lands between them is
+published only afterwards.
+
+Both the watchdog and the wrapper additionally read `/proc/<pid>/status` and
+treat `State: Z` as gone. A pid outlives the process until someone reaps it, and
+`kill -0` cannot tell the difference. The hosted VM runner reparents the
+orphaned broker to systemd, which reaps; a `container:` job's PID 1 would not,
+and a watchdog that never fires is the silent fail-open this mechanism exists to
+close. Where there is no procfs the signal answer stands unrefined, so this can
+only ever turn an "alive" into a "gone".
+
+With no verdict comment the `verdict` job finds nothing usable, fails loudly and
+leaves `sentry:needs-triage` on the stub for the next scheduled run — the same
+ending a dead broker already gets before the agent starts.
+
+Four limits, all by construction:
+
+- **The residual window is the `gh` call itself.** A broker that dies between
+  the check and the posted comment took nothing away: every Sentry read behind
+  that verdict had already succeeded.
+- **Pid reuse would read as alive.** It needs the kernel to hand the broker's
+  exact pid to a new process inside the watchdog's poll interval, on a runner
+  that lives half an hour and is then destroyed.
+- **The agent is not killed.** Identifying its process would mean matching the
+  action's path by name, which fails open in silence the day that path changes.
+  The round is void from the moment the broker dies; the turns the agent spends
+  afterwards are bounded by `--max-turns` and the job timeout.
+- **Any broker exit voids the round**, including a clean
+  `SENTRY_MCP_BROKER_TTL_SECONDS` exit — the TTL is the job timeout, so a round
+  still running when it fires is over anyway.
+
 **Re-derive the path allowlist on a `@sentry/mcp-server` bump.** It is the
 empirical closure of the granted tools, not a guess from tool names: point the
 pinned MCP server at a capture server with
@@ -763,7 +848,11 @@ already loud as failed agent reads rather than silent as an absent toolset.
 The agent-side half of the same rule lives in `.github/prompts/sentry-triage.md`
 and covers a toolset lost _after_ the probe passed: losing the evidence source
 is the one irrecoverable failure that must NOT be posted as a verdict. The agent
-stops without commenting, and the round fails closed.
+stops without commenting, and the round fails closed. That instruction is
+advisory — a prompt-injected agent is exactly the one that ignores it — so for
+the case the pipeline can detect on its own, a dead credential broker, the
+refusal is enforced deterministically in the comment wrapper
+([above](#a-broker-that-dies-mid-agent-1956)).
 
 The deterministic parser accepts only comments from
 `github-actions[bot]`. After a regression reopen, it accepts only a verdict

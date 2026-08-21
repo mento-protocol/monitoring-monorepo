@@ -1,6 +1,16 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
@@ -9,13 +19,19 @@ import { fileURLToPath } from "node:url";
 import {
   AGENT_COMMENT_MARKER,
   assertBodyPostable,
+  assertBrokerAlive,
+  BROKER_DOWN_FILE_RELATIVE,
+  brokerDownFilePath,
+  BROKER_PID_FILE_RELATIVE,
   buildChildEnv,
   collectSecretValues,
   decorateBody,
+  isZombieProcStatus,
   ISSUE_ENV_VAR,
   MIN_SECRET_LENGTH,
   parseArgs,
   postAgentComment,
+  probeBrokerByPid,
   resolveTarget,
   TARGET_FILE_RELATIVE,
   targetFilePath,
@@ -68,12 +84,16 @@ async function post({
   argv = ["--body", VERDICT_BODY],
   env = baseEnv(),
   readPinnedTarget = pin(),
+  readBrokerDown = () => null,
+  probeBroker = () => true,
 } = {}) {
   const calls = [];
   const result = await postAgentComment({
     argv,
     env,
     readPinnedTarget,
+    readBrokerDown,
+    probeBroker,
     runGh: (args, childEnv, stdin) => {
       calls.push({ args, childEnv, stdin });
       return Promise.resolve(
@@ -92,6 +112,8 @@ async function refusal(options) {
       argv: options.argv ?? ["--body", VERDICT_BODY],
       env: options.env ?? baseEnv(),
       readPinnedTarget: options.readPinnedTarget ?? pin(),
+      readBrokerDown: options.readBrokerDown ?? (() => null),
+      probeBroker: options.probeBroker ?? (() => true),
       runGh: (args) => {
         calls.push(args);
         return Promise.resolve("");
@@ -242,6 +264,299 @@ test("a missing RUNNER_TEMP refuses", () => {
     () => resolveTarget(baseEnv({ RUNNER_TEMP: "" }), pin()),
     /RUNNER_TEMP/,
   );
+});
+
+// ── a dead credential broker is not a verdict (#1956) ───────────────────────
+
+const BROKER_DOWN_RECORD = [
+  "The Sentry credential broker (pid 4242) exited while the triage agent was running; this round is void.",
+  "--- /runner/_temp/sentry-mcp-broker.log ---",
+  "sentry-mcp-broker: SERVER-ERROR read ECONNRESET",
+].join("\n");
+
+test("the broker-down marker lives under RUNNER_TEMP at a fixed relative path", () => {
+  assert.equal(
+    brokerDownFilePath(baseEnv()),
+    `/runner/_temp/${BROKER_DOWN_FILE_RELATIVE}`,
+  );
+  assert.throws(
+    () => brokerDownFilePath(baseEnv({ RUNNER_TEMP: "" })),
+    /RUNNER_TEMP/,
+  );
+});
+
+test("a verdict is refused when the broker died mid-run", async () => {
+  // The broker is backgrounded and the job ends with the agent, so its exit
+  // fails no step. Withholding the comment is what turns that into a failed
+  // round: the verdict job then finds no verdict, fails loudly, and leaves
+  // sentry:needs-triage on the stub for the next scheduled run.
+  const err = await refusal({ readBrokerDown: () => BROKER_DOWN_RECORD });
+  assert.match(err.name, /^BrokerDownError$/);
+  assert.match(err.message, /the Sentry credential broker exited/);
+  assert.match(err.message, new RegExp(BROKER_DOWN_FILE_RELATIVE));
+  // The one-line ::error:: annotation carries the refusal; the marker — the
+  // watchdog's reason AND the broker log — rides separately, because that is
+  // what makes the failure attributable in the job log.
+  assert.equal(err.detail, BROKER_DOWN_RECORD);
+  assert.match(err.detail, /SERVER-ERROR read ECONNRESET/);
+  // Single-line, or the run annotation swallows the rest.
+  assert.ok(!err.message.includes("\n"), "the annotation must be one line");
+});
+
+test("an unreadable marker refuses too — present and unreadable is not absent", async () => {
+  // Through the DEFAULT reader, so this pins the ENOENT-only rule rather than
+  // an injected stub's behaviour. A directory where the marker should be is
+  // the cheapest read error that is not ENOENT.
+  const dir = mkdtempSync(join(tmpdir(), "sentry-triage-broker-"));
+  try {
+    mkdirSync(join(dir, BROKER_DOWN_FILE_RELATIVE));
+    await assert.rejects(
+      () => assertBrokerAlive(baseEnv({ RUNNER_TEMP: dir })),
+      /could not be read/,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("no marker and a live broker means no interference with a normal post", async () => {
+  const { calls } = await post({
+    readBrokerDown: () => null,
+    probeBroker: () => true,
+  });
+  assert.equal(calls.length, 1);
+});
+
+test("THE RACE: an unpublished marker does not let a blind verdict through", async () => {
+  // The watchdog polls, so it lags the death it reports. The live probe does
+  // not, and it is read in the instant before the post — so the window between
+  // the broker going and the marker appearing is not an opening.
+  const err = await refusal({
+    readBrokerDown: () => null,
+    probeBroker: () => false,
+  });
+  assert.match(err.name, /^BrokerDownError$/);
+  assert.match(err.message, /process is gone/);
+  assert.ok(!err.message.includes("\n"), "the annotation must be one line");
+});
+
+test("the live probe follows the broker PROCESS, both ways", async () => {
+  // Against a real process, because that is the whole claim: alive passes,
+  // gone refuses. A port cannot carry this — the kernel completes a handshake
+  // from the listen backlog while the owner is on its way out, and once the
+  // port is released anything that rebinds it answers in the broker's place.
+  const dir = mkdtempSync(join(tmpdir(), "sentry-triage-broker-"));
+  const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+    stdio: "ignore",
+  });
+  try {
+    const env = baseEnv({ RUNNER_TEMP: dir });
+    writeFileSync(join(dir, BROKER_PID_FILE_RELATIVE), String(child.pid));
+    await assertBrokerAlive(env);
+
+    const exited = new Promise((resolve) => child.once("exit", resolve));
+    child.kill("SIGKILL");
+    await exited;
+    await assert.rejects(() => assertBrokerAlive(env), /process is gone/);
+  } finally {
+    child.kill("SIGKILL");
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a ZOMBIE broker reads as gone, not as alive", () => {
+  // `kill -0` answers "has a pid". A process that has exited keeps its pid
+  // until someone reaps it, and a container job's PID 1 does not reap — so on
+  // signal 0 alone an exited broker would read as alive, which is the silent
+  // fail-open this whole mechanism exists to close.
+  assert.equal(isZombieProcStatus("Name:\tnode\nState:\tZ (zombie)\n"), true);
+  assert.equal(isZombieProcStatus("State:Z (zombie)"), true);
+  for (const live of [
+    "Name:\tnode\nState:\tS (sleeping)\n",
+    "Name:\tnode\nState:\tR (running)\n",
+    "Name:\tzsh\nState:\tD (disk sleep)\n",
+    // Not the State line, and not a state at all.
+    "Name:\tZ\nState:\tS (sleeping)\n",
+    "State:\tZombieish\n".replace("Zombieish", "S (sleeping)"),
+    "",
+  ]) {
+    assert.equal(isZombieProcStatus(live), false, JSON.stringify(live));
+  }
+  // No procfs to read refines nothing: the signal-0 answer stands.
+  assert.equal(isZombieProcStatus(null), false);
+  assert.equal(isZombieProcStatus(undefined), false);
+});
+
+test("the probe CONSULTS that state — an alive pid can still read as gone", () => {
+  // Wiring, not the predicate: this pid is genuinely alive, so signal 0 alone
+  // would say "up". The status is what overrules it. macOS has no procfs, so
+  // the reader is injected rather than staged on disk.
+  const dir = mkdtempSync(join(tmpdir(), "sentry-triage-broker-"));
+  try {
+    const env = baseEnv({ RUNNER_TEMP: dir });
+    writeFileSync(join(dir, BROKER_PID_FILE_RELATIVE), String(process.pid));
+    const asked = [];
+    const read = (pid) => {
+      asked.push(pid);
+      return "Name:\tnode\nState:\tZ (zombie)\n";
+    };
+    assert.equal(probeBrokerByPid(env, read), false);
+    assert.deepEqual(asked, [process.pid], "the recorded pid, and only it");
+    assert.equal(
+      probeBrokerByPid(env, () => "State:\tS (sleeping)\n"),
+      true,
+    );
+    assert.equal(
+      probeBrokerByPid(env, () => null),
+      true,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the live probe identifies the broker from a file, not the environment", async () => {
+  // SENTRY_MCP_BROKER_PORT is job env, so the agent's own shell can reassign it
+  // before this process starts. The pid record is written by the trusted broker
+  // step before the agent exists, and a record that is not exactly a pid — a
+  // truncated write, a numeric prefix parseInt would happily accept — refuses
+  // rather than naming some other process.
+  const dir = mkdtempSync(join(tmpdir(), "sentry-triage-broker-"));
+  try {
+    const env = baseEnv({
+      RUNNER_TEMP: dir,
+      SENTRY_MCP_BROKER_PORT: "45678",
+    });
+    for (const bad of [
+      `${process.pid} garbage`,
+      `${process.pid}x`,
+      `${process.pid}\ncorrupt`,
+      "0",
+      "1",
+      "",
+      "-1",
+      "12345678901",
+    ]) {
+      writeFileSync(join(dir, BROKER_PID_FILE_RELATIVE), bad);
+      await assert.rejects(
+        () => assertBrokerAlive(env),
+        /is not a pid/,
+        JSON.stringify(bad),
+      );
+    }
+
+    // No pid record at all is a refusal, never a pass.
+    rmSync(join(dir, BROKER_PID_FILE_RELATIVE));
+    await assert.rejects(() => assertBrokerAlive(env), /pid record/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("THE RACE, other way: a marker published DURING the probe still refuses", async () => {
+  // The probe awaits, so a broker that dies inside that await is published by
+  // the watchdog only afterwards. Reading the marker once, before the probe,
+  // would miss it and post — with the attributable record already on disk.
+  let reads = 0;
+  const err = await refusal({
+    readBrokerDown: () => (reads++ === 0 ? null : BROKER_DOWN_RECORD),
+    probeBroker: () => Promise.resolve(true),
+  });
+  assert.equal(reads, 2, "the marker must be read on both sides of the probe");
+  assert.match(err.message, /the Sentry credential broker exited/);
+  assert.equal(err.detail, BROKER_DOWN_RECORD);
+});
+
+test("the probe cannot disturb the broker it checks", async () => {
+  // The broker's fatal path hangs off its server `error` event, so a probe that
+  // spoke to it could take down the thing it was asking about. This one opens
+  // no connection and sends no signal — the pid check is signal 0 — so a live
+  // broker sees nothing at all.
+  const dir = mkdtempSync(join(tmpdir(), "sentry-triage-broker-"));
+  const received = [];
+  const server = createServer((socket) => {
+    socket.on("data", (chunk) => received.push(chunk));
+  });
+  let connections = 0;
+  server.on("connection", () => {
+    connections += 1;
+  });
+  try {
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    writeFileSync(join(dir, BROKER_PID_FILE_RELATIVE), String(process.pid));
+    await assertBrokerAlive(baseEnv({ RUNNER_TEMP: dir }));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(connections, 0, "the probe must open no connection");
+    assert.deepEqual(received, [], "the probe must send no bytes");
+  } finally {
+    server.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the marker wins over a live probe — it carries the broker's log", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "sentry-triage-broker-"));
+  try {
+    writeFileSync(join(dir, BROKER_DOWN_FILE_RELATIVE), BROKER_DOWN_RECORD);
+    await assert.rejects(
+      () =>
+        assertBrokerAlive(baseEnv({ RUNNER_TEMP: dir }), undefined, () => true),
+      /the Sentry credential broker exited/,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("END TO END: the refusal prints the broker log where the job log sees it", () => {
+  // The whole point of putting this gate in the wrapper: the agent step's own
+  // stdio is the only surface inside that step which reaches the run log, and
+  // a background watchdog has none. So drive the real CLI and read its stderr.
+  const dir = mkdtempSync(join(tmpdir(), "sentry-triage-broker-cli-"));
+  try {
+    mkdirSync(join(dir, "sentry-triage-target"));
+    const pinPath = join(dir, TARGET_FILE_RELATIVE);
+    writeFileSync(
+      pinPath,
+      JSON.stringify({
+        repo: "mento-protocol/monitoring-monorepo",
+        issue: "7",
+      }),
+    );
+    chmodSync(pinPath, 0o444);
+    writeFileSync(join(dir, BROKER_DOWN_FILE_RELATIVE), BROKER_DOWN_RECORD);
+
+    const run = spawnSync(
+      process.execPath,
+      [
+        join(SCRIPTS_DIR, "sentry-triage-agent-comment.mjs"),
+        "--body",
+        VERDICT_BODY,
+      ],
+      {
+        encoding: "utf8",
+        env: {
+          PATH: process.env.PATH,
+          RUNNER_TEMP: dir,
+          GITHUB_REPOSITORY: "mento-protocol/monitoring-monorepo",
+          [ISSUE_ENV_VAR]: "7",
+        },
+      },
+    );
+
+    assert.notEqual(run.status, 0, "a refusal must exit non-zero");
+    // One-line annotation, so the runner renders it as an error on the run.
+    assert.match(
+      run.stderr,
+      /^::error::sentry-triage-agent-comment: refusing to post: the Sentry credential broker exited[^\n]*\n/m,
+    );
+    // …and the broker's own log follows it, which is what makes the failure
+    // attributable to a cause rather than just loud.
+    assert.match(run.stderr, /SERVER-ERROR read ECONNRESET/);
+    assert.match(run.stderr, /sentry-mcp-broker\.log ---/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 // ── argument parsing fails closed ────────────────────────────────────────────
@@ -438,6 +753,7 @@ test("REGRESSION #1288 (TOCTOU): what gh receives is what was validated", async 
       argv: ["--body", VERDICT_BODY],
       env: baseEnv({ RUNNER_TEMP: dir }),
       readPinnedTarget: pin(),
+      probeBroker: () => true,
       runGh: (args, _childEnv, stdin) => {
         // Stand where gh stands: whatever is readable at this instant is what
         // gets posted. With stdin there is nothing else to read.
@@ -463,6 +779,7 @@ test("a gh failure surfaces instead of being swallowed", async () => {
       argv: ["--body", VERDICT_BODY],
       env: baseEnv(),
       readPinnedTarget: pin(),
+      probeBroker: () => true,
       runGh: () => Promise.reject(new Error("gh exited 1: HTTP 403")),
       writeFile: () => Promise.resolve(),
     }),
@@ -567,6 +884,74 @@ test("the agent job ENDS with the agent — nothing runs after it", () => {
     steps.at(-1),
     /^anthropics\/claude-code-action@/,
     `the agent must be the LAST step of its job; found "${steps.at(-1)}" after it`,
+  );
+});
+
+/** The broker step's body, from its name to the pre-flight probe step's. */
+function brokerStepBlock() {
+  const start = WORKFLOW.indexOf("- name: Start the Sentry credential broker");
+  const end = WORKFLOW.indexOf("- name: Verify the Sentry MCP toolset");
+  assert.ok(start > 0 && end > start, "broker/probe step boundaries not found");
+  return WORKFLOW.slice(start, end);
+}
+
+test("a broker that dies mid-agent voids the round (#1956)", () => {
+  const step = brokerStepBlock();
+  // The marker's name has ONE home, the wrapper's constant. A workflow writing
+  // a different name would arm nothing, and only on a live run.
+  assert.match(
+    step,
+    new RegExp(
+      `down_file="\\$\\{RUNNER_TEMP\\}/${BROKER_DOWN_FILE_RELATIVE.replace(
+        /\./g,
+        "\\.",
+      )}"`,
+    ),
+    "the broker step must derive the marker path from the wrapper's constant",
+  );
+  // Same rule for the pid record the live probe identifies the broker by, and
+  // the record must be published whole — a truncated pid names some other
+  // process, or nothing.
+  assert.match(
+    step,
+    new RegExp(
+      `pid_file="\\$\\{RUNNER_TEMP\\}/${BROKER_PID_FILE_RELATIVE.replace(
+        /\./g,
+        "\\.",
+      )}"`,
+    ),
+    "the broker step must record the pid where the wrapper's probe reads it",
+  );
+  assert.match(step, /> "\$\{pid_file\}\.partial"/);
+  assert.match(step, /mv "\$\{pid_file\}\.partial" "\$\{pid_file\}"/);
+  // A watchdog that waits on the broker's own pid — not on the port, which a
+  // later listener could re-bind, and not on the ready file, which survives it.
+  assert.match(step, /while kill -0 "\$\{broker_pid\}" 2>\/dev\/null/);
+  // …and, like the wrapper, does not call a zombie alive.
+  assert.match(
+    step,
+    /grep -qs '\^State:\[\[:space:\]\]\*Z' "\/proc\/\$\{broker_pid\}\/status"/,
+  );
+  // Attribution: the broker's log goes INTO the marker, so the wrapper's
+  // refusal carries the reason the broker died and not just the fact.
+  assert.match(step, /cat "\$\{log_file\}"/);
+  assert.match(step, /> "\$\{down_file\}\.partial"/);
+  assert.match(step, /mv "\$\{down_file\}\.partial" "\$\{down_file\}"/);
+  // Backgrounded with its streams OFF the step's pipe: the runner drains that
+  // pipe before starting the next step, so a watchdog holding it would hold
+  // the whole job at this step.
+  assert.match(step, /\) > \/dev\/null 2>&1 &/);
+  // A stale marker in a reused RUNNER_TEMP must not void a healthy round.
+  assert.match(step, /rm -f "\$\{ready_file\}" "\$\{down_file\}"/);
+});
+
+test("the watchdog is armed before the agent, since nothing can follow it", () => {
+  const job = triageJobBlock();
+  const armed = job.indexOf('mv "${down_file}.partial" "${down_file}"');
+  assert.ok(armed > 0, "the watchdog is not in the triage job at all");
+  assert.ok(
+    armed < job.indexOf("anthropics/claude-code-action@"),
+    "the watchdog must be armed before the agent step starts",
   );
 });
 
