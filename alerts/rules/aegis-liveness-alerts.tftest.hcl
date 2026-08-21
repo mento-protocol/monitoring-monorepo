@@ -20,7 +20,7 @@ run "aegis_per_chain_liveness_defers_to_global_scrape_liveness" {
         for rule in grafana_rule_group.aegis_service_alerts.rule :
         rule.no_data_state == "OK" &&
         strcontains(jsondecode(rule.data[0].model).expr, "or on() vector(0)") &&
-        strcontains(jsondecode(rule.data[0].model).expr, "and on() (time() - max(last_over_time(lastUpdatedAt[12m])) < 720)") &&
+        strcontains(jsondecode(rule.data[0].model).expr, "and on() (time() - max(max_over_time(lastUpdatedAt[12m])) < 720)") &&
         tonumber(regex("< ([0-9]+)", jsondecode(rule.data[0].model).expr)[0]) > 300 + 300 + 60
         if startswith(rule.name, "Aegis No Successful Poll")
       ])
@@ -38,7 +38,7 @@ run "aegis_per_chain_liveness_defers_to_global_scrape_liveness" {
         for rule in grafana_rule_group.aegis_testnet_health.rule :
         rule.no_data_state == "OK" &&
         strcontains(jsondecode(rule.data[0].model).expr, "or on() vector(0)") &&
-        strcontains(jsondecode(rule.data[0].model).expr, "and on() (time() - max(last_over_time(lastUpdatedAt[12m])) < 720)") &&
+        strcontains(jsondecode(rule.data[0].model).expr, "and on() (time() - max(max_over_time(lastUpdatedAt[12m])) < 720)") &&
         tonumber(regex("< ([0-9]+)", jsondecode(rule.data[0].model).expr)[0]) > 300 + 300 + 60
         if startswith(rule.name, "Aegis Testnet No Successful Poll")
       ])

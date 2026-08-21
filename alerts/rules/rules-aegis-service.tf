@@ -119,7 +119,7 @@ resource "grafana_rule_group" "aegis_service_alerts" {
         datasource_uid = var.prometheus_datasource_uid
         model = jsonencode({
           refId         = "successfulPolls"
-          expr          = "(sum(increase(view_call_query_duration_count{chain=\"${chain.value.aegis_chain}\",status=\"success\"}[10m])) or on() vector(0)) and on() (time() - max(last_over_time(lastUpdatedAt[12m])) < 720)"
+          expr          = "(sum(increase(view_call_query_duration_count{chain=\"${chain.value.aegis_chain}\",status=\"success\"}[10m])) or on() vector(0)) and on() (time() - max(max_over_time(lastUpdatedAt[12m])) < 720)"
           editorMode    = "code"
           instant       = true
           intervalMs    = 1000

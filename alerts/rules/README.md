@@ -125,9 +125,11 @@ successful `view_call_query_duration_count` samples for `celoSepolia` and
 global `lastUpdatedAt` heartbeat is less than 12 minutes old. This window keeps
 the chain result through the global page's five-minute stale threshold,
 five-minute hold, firing evaluation, and one full evaluation interval. A
-missing chain can alert while other Aegis calls still report data. After the
-handoff window, a complete data outage produces no per-chain result and stays
-owned by the production `Aegis does not report new data` page.
+range maximum preserves the last nonzero heartbeat when a restarted Aegis
+instance first exposes the gauge as zero. A missing chain can alert while other
+Aegis calls still report data. After the handoff window, a complete data outage
+produces no per-chain result and stays owned by the production
+`Aegis does not report new data` page.
 
 After the gated apply, verify rule evaluation in Grafana and delivery to the
 expected Slack channel. A synthetic threshold test changes production alerting:
