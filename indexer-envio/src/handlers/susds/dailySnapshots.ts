@@ -271,13 +271,21 @@ function requireLaunchBlockTimestamp(value: unknown): bigint {
 }
 
 async function hasSusdsLaunchBaseline(context: SusdsContext): Promise<boolean> {
+  const baseline = await context.SusdsYieldDailySnapshot.get(
+    susdsDailySnapshotId(
+      ETHEREUM_CHAIN_ID,
+      dayBucket(V3_REVENUE_LAUNCH_TIMESTAMP),
+    ),
+  );
   return (
-    (await context.SusdsYieldDailySnapshot.get(
-      susdsDailySnapshotId(
-        ETHEREUM_CHAIN_ID,
-        dayBucket(V3_REVENUE_LAUNCH_TIMESTAMP),
-      ),
-    )) !== undefined
+    baseline !== undefined &&
+    baseline.timestamp === V3_REVENUE_LAUNCH_TIMESTAMP &&
+    baseline.sampledAtBlock === BigInt(V3_REVENUE_LAUNCH_BLOCK) &&
+    baseline.sampledAtTimestamp === V3_REVENUE_LAUNCH_TIMESTAMP &&
+    baseline.sharePriceUsdWei > ZERO &&
+    baseline.dailyEarnedYieldUsdWei === ZERO &&
+    baseline.dailyRealizedYieldUsdWei === ZERO &&
+    baseline.dailyUnrealizedYieldUsdWei === ZERO
   );
 }
 

@@ -834,6 +834,15 @@ describeReserveYield("sUSDS reserve yield accounting", () => {
     );
     assert.equal(dailySnapshots(mockDb).length, 0);
 
+    await recordSusdsYieldDailySnapshot(
+      dailySnapshotContext(mockDb),
+      {
+        chainId: ETHEREUM_CHAIN_ID,
+        blockNumber: 200n,
+        blockTimestamp: V3_REVENUE_LAUNCH_TIMESTAMP + 1n,
+      },
+      WAD,
+    );
     const skipped = await recordSusdsYieldHeartbeatSnapshot(
       heartbeatContext(
         mockDb,
@@ -844,7 +853,7 @@ describeReserveYield("sUSDS reserve yield accounting", () => {
       BigInt(V3_REVENUE_LAUNCH_BLOCK) + 600n,
     );
     assert.equal(skipped, false);
-    assert.equal(dailySnapshots(mockDb).length, 0);
+    assert.equal(dailySnapshots(mockDb).length, 1);
 
     await recordSusdsYieldLaunchBaseline(dailySnapshotContext(mockDb), {
       blockTimestamp: V3_REVENUE_LAUNCH_BLOCK_TIMESTAMP,
