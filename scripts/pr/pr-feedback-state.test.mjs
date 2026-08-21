@@ -514,6 +514,12 @@ const readyState = {
       state: "in_flight",
       fallbackAction: "wait",
     },
+    codeRabbitReviewSignal: {
+      ready: false,
+      required: false,
+      state: "stale",
+      fallbackAction: "request_review_once_for_head_after_optional_check",
+    },
     reviewCommentReplies: {
       ready: false,
       required: true,
@@ -535,6 +541,7 @@ test("summarizes only feedback blockers and counts", () => {
 
   assertEqual(summary.ready, false);
   assertEqual(summary.summary, "Feedback surfaces need attention.");
+  assertEqual(summary.gates.codeRabbitReviewSignal.state, "stale");
   assertDeepEqual(
     summary.requiredFeedbackBlockers.map((blocker) => blocker.kind),
     ["review-thread", "gate"],

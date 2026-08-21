@@ -3,7 +3,7 @@ title: Babysit PR Cloud Watch Loop
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-29
+last_verified: 2026-08-21
 doc_type: skill
 scope: repo-wide
 review_interval_days: 90
@@ -45,6 +45,14 @@ Do not foreground-poll and never sleep-poll. Instead:
    - The Codex current-head signal from Codex's visible reviews/comments. The
      reaction-backed PR-description approval gate is not readable over MCP;
      report it as unverified rather than assumed.
+   - The CodeRabbit current-head signal from `get_reviews`. Count only a
+     CodeRabbit review whose body contains `**Run ID**` and whose review commit
+     equals the current full head. Ignore empty reply-only review records. After
+     the optional CodeRabbit check becomes terminal, refresh once. If the signal
+     is missing or stale and no top-level comment contains
+     `<!-- coderabbit-final-head-review:<full-head-sha> -->`, use
+     `add_issue_comment` to post `@coderabbitai review`, a blank line, and that
+     exact marker. The marker prevents a duplicate request for the same head.
 4. Blocker handling, reply shapes, and Codex-request discipline are identical
    to the local path; use the MCP write tools named in the same mapping
    (`add_reply_to_pull_request_comment` for inline review comments,

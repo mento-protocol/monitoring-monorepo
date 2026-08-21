@@ -1,5 +1,9 @@
 export const BOT_APPROVER = "chatgpt-codex-connector[bot]";
 const BOT_APPROVER_LOGIN = "chatgpt-codex-connector";
+const CODERABBIT_AUTHORS = new Set(["coderabbitai", "coderabbitai[bot]"]);
+const CODERABBIT_REVIEW_RUN_MARKER = /\*\*Run ID\*\*:\s*`[^`\r\n]+`/i;
+const CODERABBIT_FINAL_HEAD_REQUEST_MARKER =
+  /<!--\s*coderabbit-final-head-review:([0-9a-f]{40})\s*-->/i;
 const OPTIONAL_CHECK_NAMES = new Set([
   // The "CodeRabbit" check context is advisory in the same way "Cursor Bugbot"
   // is, and weaker: it PASSES when the review was rate-limited and never ran
@@ -427,6 +431,18 @@ export function isCodexReviewRequestBody(body) {
   return /(^|\s)@codex\s+review\b/i.test(String(body ?? ""));
 }
 
+export function isCodeRabbitFinalHeadReviewRequestBody(
+  body,
+  currentHeadOid = null,
+) {
+  const text = String(body ?? "");
+  if (!/(^|\s)@coderabbitai\s+review\b/i.test(text)) return false;
+  const requestedHead = text.match(CODERABBIT_FINAL_HEAD_REQUEST_MARKER)?.[1];
+  if (!requestedHead) return false;
+  if (!currentHeadOid) return true;
+  return requestedHead.toLowerCase() === String(currentHeadOid).toLowerCase();
+}
+
 function isBotApproverLogin(login) {
   return login === BOT_APPROVER || login === BOT_APPROVER_LOGIN;
 }
@@ -609,6 +625,12 @@ function terminalGates({ merged }) {
       state: merged ? "approved" : "not_applicable",
       fallbackAction: "wait",
     },
+    codeRabbitReviewSignal: {
+      ready: true,
+      required: false,
+      state: "not_applicable",
+      fallbackAction: "wait",
+    },
     reviewCommentReplies: {
       ready: true,
       required: merged,
@@ -725,6 +747,47 @@ export function classifyCodexReviewSignal({
   return "missing";
 }
 
+export function classifyCodeRabbitReviewSignal({
+  issueComments = [],
+  reviews = [],
+  currentHeadOid = null,
+  headUpdatedAt = null,
+} = {}) {
+  let hasHistoricalSignal = false;
+  let hasCurrentRequest = false;
+
+  for (const review of reviews) {
+    const author = review.author?.login ?? review.user?.login ?? null;
+    if (!CODERABBIT_AUTHORS.has(String(author ?? "").toLowerCase())) continue;
+    if (!CODERABBIT_REVIEW_RUN_MARKER.test(String(review.body ?? ""))) {
+      continue;
+    }
+
+    if (isCurrentReviewSignal(review, currentHeadOid, headUpdatedAt)) {
+      return "reviewed";
+    }
+    hasHistoricalSignal = true;
+  }
+
+  for (const comment of issueComments) {
+    const body = String(comment.body ?? "");
+    if (!isCodeRabbitFinalHeadReviewRequestBody(body)) continue;
+
+    if (
+      isCodeRabbitFinalHeadReviewRequestBody(body, currentHeadOid) &&
+      isCurrentSignal(comment.created_at ?? comment.createdAt, headUpdatedAt)
+    ) {
+      hasCurrentRequest = true;
+    } else {
+      hasHistoricalSignal = true;
+    }
+  }
+
+  if (hasCurrentRequest) return "requested";
+  if (hasHistoricalSignal) return "stale";
+  return "missing";
+}
+
 export function summarizeTerminalReadyState(pr) {
   const state = normalizeStatusValue(pr.state);
   const merged = state === "MERGED";
@@ -762,6 +825,7 @@ export function summarizeTerminalReadyState(pr) {
     topLevelBotComments: [],
     codexApprovalReaction: merged,
     codexReviewSignal: merged ? "approved" : "missing",
+    codeRabbitReviewSignal: "not_applicable",
   };
 }
 
@@ -816,6 +880,12 @@ export function summarizeReadyState({
     currentHeadOid,
     codexApprovalReaction,
     codexInFlightReaction,
+  });
+  const codeRabbitReviewSignal = classifyCodeRabbitReviewSignal({
+    issueComments,
+    reviews: pr.reviews ?? [],
+    headUpdatedAt,
+    currentHeadOid,
   });
   const activeReadinessOverrides = findActiveReadinessOverrides(
     issueComments,
@@ -935,6 +1005,14 @@ export function summarizeReadyState({
           ? "request_review_once_after_grace"
           : "wait",
     },
+    codeRabbitReviewSignal: {
+      ready: codeRabbitReviewSignal === "reviewed",
+      required: false,
+      state: codeRabbitReviewSignal,
+      fallbackAction: ["missing", "stale"].includes(codeRabbitReviewSignal)
+        ? "request_review_once_for_head_after_optional_check"
+        : "wait",
+    },
     reviewCommentReplies: {
       ready: unrepliedRootReviewComments.length === 0,
       required: true,
@@ -987,6 +1065,7 @@ export function summarizeReadyState({
     readinessOverrides: activeReadinessOverrides,
     codexApprovalReaction,
     codexReviewSignal,
+    codeRabbitReviewSignal,
   };
 
   if (includeFeedbackDetails) {

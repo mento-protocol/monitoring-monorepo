@@ -5,7 +5,7 @@ title: Ship Skill
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-13
+last_verified: 2026-08-21
 doc_type: skill
 scope: repo-wide
 review_interval_days: 90
@@ -211,7 +211,9 @@ the blocker; do not call the UI PR shipped or ready.
 Follow the operating card's Babysit and Ready-state steps: run
 `pnpm --silent pr:feedback-state` first, then `pnpm pr:ready-state`, both bound
 with `--repo "$BASE_REPO"` because checkout inference can inspect the wrong
-same-number PR. `docs/notes/pr-ready-state.md` owns that contract. In a Claude
+same-number PR. Apply the `babysit-pr` skill's idempotent CodeRabbit exact-head
+request rule before the final pair. `docs/notes/pr-ready-state.md` owns that
+contract. In a Claude
 cloud session without the capability gate the probes cannot run: use the
 `babysit-pr` skill's cloud watch loop and label its result MCP-emulated. If the
 user asked for the complete ship loop, run `babysit-pr` through current-head

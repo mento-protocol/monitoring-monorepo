@@ -3,7 +3,7 @@ title: PR Ready State
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-20
+last_verified: 2026-08-21
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -107,6 +107,25 @@ that setting is ever turned on, a `CHANGES_REQUESTED` review does not clear
 itself on a later clean push and needs the same manual fix as any other
 stuck bot review verdict: dismiss it with
 `gh api repos/<owner>/<repo>/pulls/<pr>/reviews/<review_id>/dismissals -X PUT -f message='<why>' -f event=DISMISS`.
+
+The JSON projections expose `gates.codeRabbitReviewSignal` with `missing`,
+`requested`, `stale`, `reviewed`, or `not_applicable`. A `reviewed` signal
+requires a CodeRabbit review body with its `**Run ID**` marker and a review
+commit equal to the full current head. Empty review records are reply-only
+machinery and do not count. A head-bound closeout request uses this exact body:
+
+```text
+@coderabbitai review
+
+<!-- coderabbit-final-head-review:<full-head-sha> -->
+```
+
+After the optional CodeRabbit check becomes terminal, refresh the projection
+once. If the signal is `missing` or `stale`, post that body once. A `requested`
+signal suppresses duplicates for the same head. The CodeRabbit check and review
+remain advisory: report a pending or rate-limited result as optional lag. If a
+requested review finishes while the PR is still under watch, rerun
+`pr:feedback-state` and handle its findings before all-clear.
 
 Some non-required workflows still post feedback that becomes a repo-policy
 blocker after the required status surface is green. Their workflow status stays
@@ -329,6 +348,11 @@ Field expectations:
   `eyes` reaction, a current-head Codex review, or a current-head Codex
   top-level result. `approved` means the final PR-description `+1` gate is
   present. `stale` means only older-head Codex signals exist.
+- `codeRabbitReviewSignal`: current-head CodeRabbit review state. Values are
+  `missing`, `requested`, `stale`, `reviewed`, and `not_applicable`. Only a
+  CodeRabbit review with a run marker and review commit equal to the current
+  head is `reviewed`; empty reply-only reviews do not count. A head-bound
+  request is `requested` until a real run lands.
 - `requiredStatusContexts[]`: required check contexts from classic branch
   protection or branch rulesets. Ruleset-derived entries include status-check
   rules and required-workflow rules when their check names are present in the
@@ -372,12 +396,16 @@ Field expectations:
    context; deployment/status bot comments may be informational.
 7. If ready-state `ready` is false, fix or wait only on `required.blockers` and
    required `gates`.
-8. Report optional lag separately, especially Cursor Bugbot lag and visibly
+8. After the optional CodeRabbit check becomes terminal, refresh once. If
+   `gates.codeRabbitReviewSignal.state` is `missing` or `stale`, post one
+   head-bound closeout request with the body above. Do not post when the state
+   is `requested` or `reviewed`.
+9. Report optional lag separately, especially Cursor Bugbot lag and visibly
    in-progress review-producing workflows. If you are still watching the PR when
    one finishes, rerun `pr:feedback-state` to catch late feedback; do not treat
    the optional workflow status itself as a blocker.
-9. Signal all-clear only after feedback-state has no required blocker and final
-   ready-state `ready` is true for the current head.
+10. Signal all-clear only after feedback-state has no required blocker and final
+    ready-state `ready` is true for the current head.
 
 Claude Code and Codex intentionally use the same command and readiness fields.
 Differences between Claude `Monitor` wiring and Codex polling should stay
