@@ -4,6 +4,7 @@ import { indexer } from "../indexer.js";
 import {
   handleStethLaunchBaseline,
   handleStethYieldDailySnapshotHeartbeat,
+  readAllTrackedStethBalanceResults,
   recordStethYieldEventDailySnapshots,
 } from "./steth/dailySnapshots.js";
 import { recordTransfer, shouldProcess } from "./steth/movements.js";
@@ -49,6 +50,38 @@ function eventMeta(event: {
     logIndex: event.logIndex,
     txHash: event.transaction.hash,
   };
+}
+
+export async function handleStethTransfer({
+  event,
+  context,
+}: {
+  event: {
+    chainId: number;
+    params: { from: string; to: string; value: bigint };
+    block: { number: number; timestamp: number };
+    logIndex: number;
+    transaction: { hash: string };
+  };
+  context: import("./steth/shared.js").StethContext;
+}): Promise<void> {
+  const from = asAddress(event.params.from);
+  const to = asAddress(event.params.to);
+  if (from === ZERO_ADDRESS && to === ZERO_ADDRESS) return;
+  if (from === to) return;
+  if (!isTrackedWallet(from) && !isTrackedWallet(to)) return;
+  const meta = eventMeta(event);
+  const balanceResults = await readAllTrackedStethBalanceResults(context, meta);
+  // preload-handler-note: tracked-transfer filters are event-derived; both
+  // wallet keys are awaited in preload before ordered movement reads and writes.
+  // preload-effect-helpers: readAllTrackedStethBalanceResults, recordStethYieldEventDailySnapshots
+  if (context.isPreload) return;
+  const id = eventId(meta.chainId, Number(meta.blockNumber), meta.logIndex);
+  if (!(await shouldProcess(context, id))) return;
+  if (await recordTransfer(context, meta, from, to, event.params.value)) {
+    await updateSummary(context, meta);
+    await recordStethYieldEventDailySnapshots(context, meta, balanceResults);
+  }
 }
 
 if (!stethRegistrationState.__mentoStethYieldEventHandlersRegistered) {
@@ -109,22 +142,7 @@ if (!stethRegistrationState.__mentoStethYieldEventHandlersRegistered) {
       where: () => ({ params: transferWhereParams }),
     },
     async ({ event, context }) => {
-      const from = asAddress(event.params.from);
-      const to = asAddress(event.params.to);
-      if (from === ZERO_ADDRESS && to === ZERO_ADDRESS) return;
-      if (from === to) return;
-      if (!isTrackedWallet(from) && !isTrackedWallet(to)) return;
-      const meta = eventMeta(event);
-      const id = eventId(meta.chainId, Number(meta.blockNumber), meta.logIndex);
-      // preload-handler-note: snapshot writes follow ordered movements; preload-safe
-      // balance collection is tracked in #1396.
-      // preload-effect-helpers: recordStethYieldEventDailySnapshots
-      if (context.isPreload) return;
-      if (!(await shouldProcess(context, id))) return;
-      if (await recordTransfer(context, meta, from, to, event.params.value)) {
-        await updateSummary(context, meta);
-        await recordStethYieldEventDailySnapshots(context, meta);
-      }
+      await handleStethTransfer({ event, context });
     },
   );
 }
