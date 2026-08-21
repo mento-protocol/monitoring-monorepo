@@ -70,7 +70,7 @@
     },
     "scripts/sentry/triage/sentry-triage-project.test.mjs": {
       "reporter": "count-line",
-      "floor": 112
+      "floor": 133
     },
     "scripts/sentry/triage/sentry-triage-requeue.test.mjs": {
       "reporter": "count-line",

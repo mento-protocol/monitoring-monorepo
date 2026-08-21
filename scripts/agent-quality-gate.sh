@@ -3970,7 +3970,7 @@ while IFS= read -r path; do
           add_command "pnpm sentry:archive:test" "Sentry needs-human brief helper changed"
           add_command "pnpm sentry:project:test" "Sentry needs-human brief helper changed"
           ;;
-        scripts/sentry/triage/sentry-triage-project.mjs|scripts/sentry/triage/sentry-triage-project-core.mjs|scripts/sentry/triage/sentry-triage-project-cli.mjs|scripts/sentry/triage/sentry-triage-label-ensure.mjs|scripts/sentry/triage/sentry-triage-project.test.mjs|scripts/sentry/triage/sentry-triage-text.mjs|scripts/sentry/triage/sentry-triage-projection.mjs|scripts/sentry/triage/sentry-triage-escalation-contract.mjs)
+        scripts/sentry/triage/sentry-triage-project.mjs|scripts/sentry/triage/sentry-triage-project-core.mjs|scripts/sentry/triage/sentry-triage-project-route.mjs|scripts/sentry/triage/sentry-triage-project-cli.mjs|scripts/sentry/triage/sentry-triage-label-ensure.mjs|scripts/sentry/triage/sentry-triage-project.test.mjs|scripts/sentry/triage/sentry-triage-text.mjs|scripts/sentry/triage/sentry-triage-projection.mjs|scripts/sentry/triage/sentry-triage-escalation-contract.mjs)
           # sentry-triage-project-cli.mjs (the argv surface) and
           # sentry-triage-label-ensure.mjs (the settlement label self-heal) were
           # split out of the entry module for the 1,000-line cap (#1827); both

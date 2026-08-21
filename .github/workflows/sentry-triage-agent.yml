@@ -917,7 +917,7 @@ jobs:
           # the newest "Regressed in Sentry (last seen " reopen comment counts,
           # so a stale pre-regression verdict never re-labels a regressed
           # issue), validates the verdict against the closed four-value enum,
-          # and emits {"verdict","label","projectable","shed","architecturalHold"}
+          # and emits {"verdict","label","projectable","projectionDestination","shed","architecturalHold"}
           # JSON (on a local code-fix + fix_scope:architectural verdict `label`
           # is the two-name comma list and architecturalHold is true). The comment
           # body is agent-authored from untrusted Sentry data — it is only ever
@@ -928,10 +928,10 @@ jobs:
           # omits the required `human_question` field is treated exactly like an
           # invalid verdict (same fail-loud + retry) so a lazy, non-decision
           # escalation never lands a label — see the verdict contract in
-          # docs/notes/sentry-triage-pipeline.md. `projectable` (actionable
-          # verdict + allowlisted EXTERNAL owning repo) tells the close step
-          # whether this stub is settled here or deferred to the serialized
-          # `project` job.
+          # docs/notes/sentry-triage-pipeline.md. `projectable` remains the
+          # external-only capability. `projectionDestination` tells the close
+          # step whether this stub is settled here or deferred to the
+          # serialized `project` job, including exact local config work.
           parse_file="${RUNNER_TEMP}/verdict-parse.json"
           # Plain scripts/ is correct HERE and nowhere else in this file: this
           # job has its own runner and its own pristine checkout, which the
@@ -948,6 +948,11 @@ jobs:
           verdict=$(jq -r '.verdict' "${parse_file}")
           label=$(jq -r '.label' "${parse_file}")
           projectable=$(jq -r '.projectable' "${parse_file}")
+          projection_destination=$(jq -r '.projectionDestination' "${parse_file}")
+          if ! [[ "${projection_destination}" =~ ^(external|local-config|none)$ ]]; then
+            echo "::error::projectionDestination for issue #${QUEUE_ISSUE_NUMBER} is '${projection_destination}', not a closed destination; leaving sentry:needs-triage in place for retry."
+            exit 1
+          fi
           # `shed` is every OTHER verdict label, comma-joined, from the same
           # parser (#1745). The select job admits any OPEN numeric issue, so a
           # human re-dispatching an answered escalation hands this step a stub
@@ -1089,6 +1094,7 @@ jobs:
             echo "verdict=${verdict}"
             echo "label=${label}"
             echo "projectable=${projectable}"
+            echo "projection_destination=${projection_destination}"
             echo "architectural_hold=${architectural_hold}"
           } >> "${GITHUB_OUTPUT}"
 
@@ -1183,8 +1189,9 @@ jobs:
       # -----------------------------------------------------------------------
       # Queue hygiene (#1338/#1354): a verdicted queue issue is a closed ledger
       # entry, not an archive record. This step settles every bucket EXCEPT two
-      # that stay OPEN: actionable EXTERNAL verdicts, which are deferred (left
-      # open, verdict-labeled) to the serialized `project` job below — projection
+      # that stay OPEN: routed actionable verdicts, which are deferred (left
+      # open, verdict-labeled) to the serialized `project` job below. External
+      # projection and exact local config work both serialize there.
       # and its close must run one-at-a-time to kill the same-run duplicate-family
       # race, and the projection PAT must never reach these matrix jobs — and
       # local architectural code-fix (#1812), which stays open under
@@ -1201,14 +1208,15 @@ jobs:
           VERDICT: ${{ steps.verdict.outputs.verdict }}
           VERDICT_LABEL: ${{ steps.verdict.outputs.label }}
           PROJECTABLE: ${{ steps.verdict.outputs.projectable }}
+          PROJECTION_DESTINATION: ${{ steps.verdict.outputs.projection_destination }}
           ARCHITECTURAL_HOLD: ${{ steps.verdict.outputs.architectural_hold }}
         run: |
           set -euo pipefail
           projection_note=""
           case "${VERDICT}" in
             code-fix | config-fix)
-              if [ "${PROJECTABLE}" = "true" ]; then
-                echo "Issue #${QUEUE_ISSUE_NUMBER} has an actionable external verdict; leaving it open for the serialized project job."
+              if [ "${PROJECTION_DESTINATION}" = "external" ] || [ "${PROJECTION_DESTINATION}" = "local-config" ]; then
+                echo "Issue #${QUEUE_ISSUE_NUMBER} has an actionable ${PROJECTION_DESTINATION} verdict; leaving it open for the serialized project job."
                 exit 0
               fi
               # Architectural hold (#1812): a LOCAL code-fix whose fix_scope is
@@ -1267,7 +1275,7 @@ jobs:
   # ---------------------------------------------------------------------------
   # project: SERIALIZED verdict projection (deterministic, no LLM — ADR 0038).
   # Runs ONCE per triage run, after every matrix job settles, and processes the
-  # batch's actionable EXTERNAL verdicts one at a time via the script's --batch
+  # batch's routed actionable verdicts one at a time via the script's --batch
   # mode (single node process, shared in-run registry). Serialization is the
   # point:
   #   - Two duplicate-family SHORT-IDs in one batch could otherwise both pass
@@ -1283,7 +1291,8 @@ jobs:
   #   - if: always() + count gate (like the digest): failed matrix jobs leave
   #     their stubs on sentry:needs-triage, which --batch skips; the rest of
   #     the batch still projects.
-  # Per-row outcomes: projected/reused stubs are closed here with the
+  # External and exact local-config routes reach this job. Per-row
+  # projected/reused stubs are closed here with the
   # projected URL in the fixed closing comment; skipped-no-token (main) closes
   # with the visible "not provisioned" note; failed rows re-queue through the
   # single chokepoint's workflow CLI (restore sentry:needs-triage, shed the
@@ -1314,7 +1323,7 @@ jobs:
         with:
           node-version-file: .node-version
 
-      - name: Project actionable external verdicts (serialized)
+      - name: Project actionable verdicts (serialized)
         env:
           GH_TOKEN: ${{ github.token }}
           # The ONLY place in this workflow the cross-repo projection PAT is

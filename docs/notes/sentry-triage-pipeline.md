@@ -3,7 +3,7 @@ title: Sentry Triage Pipeline
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-10
+last_verified: 2026-08-21
 scope: ci/process
 doc_type: runbook
 review_interval_days: 90
@@ -100,7 +100,7 @@ Adding a project means adding it to the allowlist, not only to Sentry.
 | Verdict              | `analytics-mento-org` (local)                                                                                                                                                                                                                     | Every other project (external)                        |
 | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
 | `code-fix`           | `fix_scope: mechanical` → **autofix-eligible**, closed ledger entry — the only path that writes code. `fix_scope: architectural` → **stays OPEN** under `sentry:fix-scope-architectural` (human design work, excluded from autofix at query time) | Projects an issue into the owning repo. Never autofix |
-| `config-fix`         | Record only: no projection (this repo is not an allowlisted target), no autofix                                                                                                                                                                   | Projects an issue into the owning repo                |
+| `config-fix`         | Projects a local work issue with `agent-ready`; no autofix                                                                                                                                                                                        | Projects an issue into the owning repo                |
 | `upstream-transient` | Closes. Nothing downstream                                                                                                                                                                                                                        | Same                                                  |
 | `needs-human`        | Stays open with a decision-ready brief                                                                                                                                                                                                            | Same                                                  |
 
@@ -385,7 +385,7 @@ The namespace is separate from the development backlog:
 | `sentry:verdict-config-fix`      | Configuration or infrastructure change is recommended                                         |
 | `sentry:verdict-upstream`        | Upstream or transient issue; no repo fix                                                      |
 | `sentry:verdict-needs-human`     | A human decision is required                                                                  |
-| `sentry:projected`               | An actionable external verdict was projected to its owning repo                               |
+| `sentry:projected`               | An external actionable verdict or local config-fix was projected to a work issue              |
 | `sentry:fix-scope-architectural` | Local code-fix, `fix_scope: architectural` — open human design work; autofix never selects it |
 | `sentry:approved-archive`        | Human approval to archive the Sentry issue                                                    |
 | `sentry:archived`                | Archive workflow settled the approved issue                                                   |
@@ -455,8 +455,9 @@ step's post-condition reread still counts exactly one label, because
 (`VERDICT_LABELS` filters on that prefix). The close step reads
 `architectural_hold` and leaves the stub open rather than closing it. So the
 "a verdicted queue issue is a closed ledger entry" invariant now has TWO open
-exceptions: an actionable EXTERNAL verdict (deferred to the project job) and a
-LOCAL architectural code-fix (held as human design work). The hold is never
+exceptions: a projectable destination (external actionable verdict or exact
+local `config-fix`, deferred to the project job) and a LOCAL architectural
+code-fix (held as human design work). The hold is never
 terminal: it is shed on regression and on any re-verdict
 (`REOPEN_SHED_LABELS`), and `shed` carries it exactly when the hold does not
 apply, so a re-dispatched stub whose scope flips to mechanical un-strands in the
@@ -929,7 +930,7 @@ the case the pipeline can detect on its own, a dead credential broker, the
 refusal is enforced deterministically in the comment wrapper
 ([above](#a-broker-that-dies-mid-agent-1956)).
 
-The deterministic parser accepts only comments from
+The deterministic parser accepts only comments from `github-actions` or
 `github-actions[bot]`. After a regression reopen, it accepts only a verdict
 newer than the latest pipeline-authored regression comment. It then applies
 the label and transition below:
@@ -938,7 +939,8 @@ the label and transition below:
 | -------------------------------- | ------------------------------------------------------------ | --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
 | `code-fix` (mechanical/external) | `sentry:verdict-code-fix`                                    | Close as completed                | Project to an allowlisted external repo, or leave a visible projection-skipped note; eligible local mechanical issues may later enter autofix |
 | `code-fix` (local architectural) | `sentry:verdict-code-fix` + `sentry:fix-scope-architectural` | **Keep open** (human design work) | Excluded from autofix at query time; re-triage to clear (#1812)                                                                               |
-| `config-fix`                     | `sentry:verdict-config-fix`                                  | Close as completed                | Project to an allowlisted external repo, or leave a visible projection-skipped note                                                           |
+| `config-fix` (external)          | `sentry:verdict-config-fix`                                  | Close as completed                | Project to an allowlisted external repo, or leave a visible projection-skipped note                                                           |
+| `config-fix` (local)             | `sentry:verdict-config-fix`                                  | Close after projection            | Create or reuse a local work issue with `agent-ready`; no projection PAT required                                                             |
 | `upstream-transient`             | `sentry:verdict-upstream`                                    | Close as completed                | None                                                                                                                                          |
 | `needs-human`                    | `sentry:verdict-needs-human`                                 | Keep open                         | Human answers the recorded question and decides the next action                                                                               |
 
@@ -1020,22 +1022,29 @@ the surviving archive-side route as well as the sweep's blind spot. It does not
 make the sweep able to see Sentry, and it is not a substitute for the fence: the
 digest, projection, and autofix consumers still read the fence.
 
-### External verdict projection
+### Verdict projection
 
-[ADR 0038](../adr/0038-sentry-central-plane-verdict-projection.md) limits projection to
-actionable `code-fix` and `config-fix` verdicts whose `affected_repo` is
-one of the script's allowlisted owning repositories. Projection runs
-serialized after the triage matrix so two related verdicts cannot race to
+[ADR 0038](../adr/0038-sentry-central-plane-verdict-projection.md) routes
+actionable verdicts through a closed destination enum. `external` is an
+allowlisted external owner. `local-config` is only a `config-fix` whose owning
+repo validation is exactly this repository. Every local `code-fix` and every
+unrecognised repo is `none`. `projectable` remains external-only. Projection
+runs serialized after the triage matrix so two related verdicts cannot race to
 create duplicate issues.
 
-The projector uses a fine-grained PAT with Issues read/write on only those
-repositories. It keys reuse to the Sentry short ID and the projector account's
-authorship. Rotating the token through a different account can break reuse and
-must be treated as a migration. On `main`, an absent
-`SENTRY_PROJECTION_TOKEN` makes projection a visible no-op and queue
-settlement continues. A non-`main` manual triage dispatch deliberately
-withholds the token; an actionable external verdict is re-queued and the job
-fails so the next `main` run can project it safely.
+The external projector uses a fine-grained PAT with Issues read/write on only
+those repositories. It keys reuse to the Sentry short ID and the projector
+account's authorship. Rotating the token through a different account can break
+reuse and must be treated as a migration. A local config route uses the
+ambient workflow token. It only matches local issues whose `gh issue list`
+author is `app/github-actions`, while marker comments use the trusted
+`github-actions` or `github-actions[bot]` comment fence. It creates a
+new issue with `agent-ready`; for a closed match, it restores that label and
+removes `agent-active`, `in-pr`, and `needs-grooming` before reopening it, so a
+failed repair stays retryable; it leaves an open match's lifecycle unchanged. On `main`, an absent
+`SENTRY_PROJECTION_TOKEN` makes only external projection a visible no-op. A
+non-`main` manual triage dispatch re-queues an external verdict for the next
+`main` run. Local config projection does not require the PAT.
 
 ### Local autofix PRs
 
@@ -1798,6 +1807,7 @@ To pause ingest/triage, autofix, or archive, set that stage's named
 `sentry_projection_token = ""` and reapply. Confirm the plan removes
 `SENTRY_PROJECTION_TOKEN`; subsequent external verdicts then record the
 visible projection-skipped outcome instead of creating owning-repo issues.
+Local config-fix projection remains available through the workflow token.
 Never widen the read-only token or reuse it for archive. Treat
 `CLAUDE_CODE_OAUTH_TOKEN` replacement as a shared-secret rotation and verify
 the existing Claude PR workflow after applying it.

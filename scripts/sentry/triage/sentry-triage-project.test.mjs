@@ -31,6 +31,8 @@ import {
   parseShortId,
   parseVerdictComment,
   PROJECTED_LABEL,
+  PROJECTION_DESTINATIONS,
+  projectionDestination,
   resolveVerdict,
   runEnsureLabels,
   runParseOnly,
@@ -46,6 +48,10 @@ import {
   VERDICT_MARKER,
   VERDICT_TO_LABEL,
 } from "./sentry-triage-project.mjs";
+import {
+  isWorkflowCreatedIssue,
+  WORKFLOW_ISSUE_AUTHOR,
+} from "./sentry-triage-project-route.mjs";
 import { BRIEF_COMMENT_MARKER } from "./sentry-triage-brief.mjs";
 
 let passed = 0;
@@ -225,6 +231,68 @@ function queueIssue({
 // projected-issue fixtures carry it as their author.
 const PROJECTOR_LOGIN = "sentry-projector-bot";
 const PROJECTOR_AUTHOR = { login: PROJECTOR_LOGIN };
+
+await test("isWorkflowCreatedIssue accepts only the live Actions App issue author", () => {
+  assertEqual(WORKFLOW_ISSUE_AUTHOR, "app/github-actions");
+  assert(
+    isWorkflowCreatedIssue("app/github-actions"),
+    "expected the live gh issue list author to pass",
+  );
+  for (const author of [
+    "app/github-actions[bot]",
+    "github-actions",
+    "github-actions[bot]",
+    "app/github-actions-evil",
+    "attacker",
+  ]) {
+    assert(
+      !isWorkflowCreatedIssue(author),
+      `unexpected trusted workflow issue author: ${author}`,
+    );
+  }
+});
+
+await test("projection destination table keeps external capability separate from local config", () => {
+  const cases = [
+    [
+      "code-fix",
+      { projectable: true, reason: "allowed" },
+      PROJECTION_DESTINATIONS.EXTERNAL,
+    ],
+    [
+      "config-fix",
+      { projectable: true, reason: "allowed" },
+      PROJECTION_DESTINATIONS.EXTERNAL,
+    ],
+    [
+      "config-fix",
+      { projectable: false, reason: "local-repo" },
+      PROJECTION_DESTINATIONS.LOCAL_CONFIG,
+    ],
+    [
+      "code-fix",
+      { projectable: false, reason: "local-repo" },
+      PROJECTION_DESTINATIONS.NONE,
+    ],
+    [
+      "config-fix",
+      { projectable: false, reason: "unrecognized-repo" },
+      PROJECTION_DESTINATIONS.NONE,
+    ],
+    [
+      "needs-human",
+      { projectable: false, reason: "local-repo" },
+      PROJECTION_DESTINATIONS.NONE,
+    ],
+  ];
+  for (const [verdict, repoCheck, expected] of cases) {
+    assertEqual(
+      projectionDestination(verdict, repoCheck),
+      expected,
+      `${verdict}/${repoCheck.reason}`,
+    );
+  }
+});
 
 // A mock `gh` runner covering the calls runProjection makes. Records every call
 // with the token it was invoked under so token routing is assertable. `stubs`
@@ -1467,6 +1535,205 @@ await test("runProjection projects config-fix as well", async () => {
   );
 });
 
+await test("runProjection creates local config work with the ambient token and agent-ready", async () => {
+  const issue = queueIssue({
+    comments: [
+      botComment(
+        verdictComment({
+          verdict: "config-fix",
+          affectedRepo: "mento-protocol/monitoring-monorepo",
+        }),
+        "2026-07-17T10:00:00Z",
+      ),
+    ],
+  });
+  const { runGh, calls } = makeRunGh({
+    issue,
+    createdUrl:
+      "https://github.com/mento-protocol/monitoring-monorepo/issues/999",
+  });
+  const result = await runProjection(
+    {
+      localRepo: "mento-protocol/monitoring-monorepo",
+      queueIssue: 500,
+      projectionToken: "",
+    },
+    { runGh },
+  );
+  assertEqual(result.status, "projected");
+  const create = calls.find((c) => c.args[1] === "create");
+  assertEqual(create.token, null);
+  assertEqual(
+    create.args[create.args.indexOf("-R") + 1],
+    "mento-protocol/monitoring-monorepo",
+  );
+  assert(
+    create.args.includes("agent-ready"),
+    "expected local work issue ready",
+  );
+  assert(
+    !calls.some((c) => c.token),
+    "every local projection call must use the ambient token, never the PAT",
+  );
+});
+
+await test("runProjection reopens a closed local config work issue and restores agent-ready", async () => {
+  const existing = [
+    {
+      number: 42,
+      url: "https://github.com/mento-protocol/monitoring-monorepo/issues/42",
+      body: `${buildProjectionMarker("APP-MENTO-ORG-12")}\nrest of body`,
+      state: "CLOSED",
+      labels: ["agent-active", "in-pr", "needs-grooming"],
+      author: { login: "app/github-actions" },
+    },
+  ];
+  const issue = queueIssue({
+    comments: [
+      botComment(
+        verdictComment({
+          verdict: "config-fix",
+          affectedRepo: "mento-protocol/monitoring-monorepo",
+        }),
+        "2026-07-17T10:00:00Z",
+      ),
+    ],
+  });
+  const { runGh, calls } = makeRunGh({ issue, existing });
+  const result = await runProjection(
+    {
+      localRepo: "mento-protocol/monitoring-monorepo",
+      queueIssue: 500,
+      projectionToken: "",
+    },
+    { runGh },
+  );
+  assertEqual(result.status, "reused");
+  const readyEdit = calls.find(
+    (c) => c.args[1] === "edit" && c.args[2] === "42",
+  );
+  assert(readyEdit?.args.includes("agent-ready"), "expected ready restore");
+  assertEqual(
+    readyEdit?.args[readyEdit.args.indexOf("--remove-label") + 1],
+    "agent-active,in-pr,needs-grooming",
+  );
+  assertEqual(readyEdit.token, null);
+  assert(
+    !calls.some((c) => c.token),
+    "every local closed-reuse call must use the ambient token, never the PAT",
+  );
+});
+
+await test("a failed local lifecycle repair remains retryable while the issue is closed", async () => {
+  const existing = [
+    {
+      number: 42,
+      url: "https://github.com/mento-protocol/monitoring-monorepo/issues/42",
+      body: `${buildProjectionMarker("APP-MENTO-ORG-12")}\nrest of body`,
+      state: "CLOSED",
+      labels: ["agent-active", "in-pr", "needs-grooming"],
+      author: { login: "app/github-actions" },
+    },
+  ];
+  const issue = queueIssue({
+    comments: [
+      botComment(
+        verdictComment({
+          verdict: "config-fix",
+          affectedRepo: "mento-protocol/monitoring-monorepo",
+        }),
+        "2026-07-17T10:00:00Z",
+      ),
+    ],
+  });
+  const base = makeRunGh({ issue, existing });
+  let failLifecycleEdit = true;
+  const runGh = async (args, opts) => {
+    if (
+      failLifecycleEdit &&
+      args[0] === "issue" &&
+      args[1] === "edit" &&
+      args[2] === "42"
+    ) {
+      failLifecycleEdit = false;
+      throw new Error("gh issue edit failed: HTTP 500");
+    }
+    const result = await base.runGh(args, opts);
+    if (args[0] === "issue" && args[1] === "reopen" && args[2] === "42") {
+      existing[0].state = "OPEN";
+    }
+    return result;
+  };
+  const options = {
+    localRepo: "mento-protocol/monitoring-monorepo",
+    queueIssue: 500,
+    projectionToken: "",
+  };
+
+  await assertRejects(
+    runProjection(options, { runGh }),
+    /edit failed: HTTP 500/,
+  );
+  assertEqual(existing[0].state, "CLOSED");
+  assert(
+    !base.calls.some((call) => call.args[1] === "reopen"),
+    "a failed lifecycle repair must not reopen the issue",
+  );
+
+  const retryStart = base.calls.length;
+  const result = await runProjection(options, { runGh });
+  assertEqual(result.status, "reused");
+  assertEqual(existing[0].state, "OPEN");
+  const retryLifecycle = base.calls
+    .slice(retryStart)
+    .filter(
+      (call) =>
+        call.args[0] === "issue" &&
+        call.args[2] === "42" &&
+        ["edit", "reopen"].includes(call.args[1]),
+    )
+    .map((call) => call.args[1]);
+  assertDeepEqual(retryLifecycle, ["edit", "reopen"]);
+});
+
+await test("runProjection preserves the lifecycle of an open local config work issue", async () => {
+  const existing = [
+    {
+      number: 42,
+      url: "https://github.com/mento-protocol/monitoring-monorepo/issues/42",
+      body: `${buildProjectionMarker("APP-MENTO-ORG-12")}\nrest of body`,
+      state: "OPEN",
+      labels: ["agent-active"],
+      author: { login: "app/github-actions" },
+    },
+  ];
+  const issue = queueIssue({
+    comments: [
+      botComment(
+        verdictComment({
+          verdict: "config-fix",
+          affectedRepo: "mento-protocol/monitoring-monorepo",
+        }),
+        "2026-07-17T10:00:00Z",
+      ),
+    ],
+  });
+  const { runGh, calls } = makeRunGh({ issue, existing });
+  const result = await runProjection(
+    {
+      localRepo: "mento-protocol/monitoring-monorepo",
+      queueIssue: 500,
+      projectionToken: "",
+    },
+    { runGh },
+  );
+  assertEqual(result.status, "reused");
+  assert(
+    !calls.some((c) => c.args[1] === "edit" && c.args[2] === "42"),
+    "an open local work issue must keep its existing lifecycle labels",
+  );
+});
+
 await test("runProjection is idempotent: reuses an existing OPEN back-linked issue without reopening", async () => {
   const existing = [
     {
@@ -2406,6 +2673,7 @@ await test("runParseOnly returns the validated verdict + mapped label + projecta
     verdict: "code-fix",
     label: "sentry:verdict-code-fix",
     projectable: true,
+    projectionDestination: PROJECTION_DESTINATIONS.EXTERNAL,
     // External allowlisted code-fix: no hold. The shed carries the architectural
     // label because the hold does NOT apply (it un-strands a re-dispatch).
     shed: "sentry:verdict-config-fix,sentry:verdict-upstream,sentry:verdict-needs-human,sentry:fix-scope-architectural",
@@ -2432,6 +2700,7 @@ await test("runParseOnly reports an actionable-but-local verdict as not projecta
   );
   assertEqual(result.projectable, false);
   assertEqual(result.verdict, "code-fix");
+  assertEqual(result.projectionDestination, PROJECTION_DESTINATIONS.NONE);
 });
 
 await test("runParseOnly maps upstream-transient to the asymmetric label", async () => {
@@ -2452,6 +2721,7 @@ await test("runParseOnly maps upstream-transient to the asymmetric label", async
     verdict: "upstream-transient",
     label: "sentry:verdict-upstream",
     projectable: false,
+    projectionDestination: PROJECTION_DESTINATIONS.NONE,
     shed: "sentry:verdict-code-fix,sentry:verdict-config-fix,sentry:verdict-needs-human,sentry:fix-scope-architectural",
     architecturalHold: false,
   });
@@ -2648,6 +2918,7 @@ await test("runParseOnly accepts a needs-human verdict WITH human_question", asy
     verdict: "needs-human",
     label: "sentry:verdict-needs-human",
     projectable: false,
+    projectionDestination: PROJECTION_DESTINATIONS.NONE,
     shed: "sentry:verdict-code-fix,sentry:verdict-config-fix,sentry:verdict-upstream,sentry:fix-scope-architectural",
     architecturalHold: false,
   });
@@ -2753,6 +3024,11 @@ await test("runParseOnly does NOT hold a LOCAL architectural CONFIG-fix (verdict
   // config-fix carries no fix_scope contract; only code-fix holds.
   assertEqual(result.architecturalHold, false);
   assertEqual(result.label, "sentry:verdict-config-fix");
+  assertEqual(result.projectable, false);
+  assertEqual(
+    result.projectionDestination,
+    PROJECTION_DESTINATIONS.LOCAL_CONFIG,
+  );
   assert(
     result.shed.split(",").includes(FIX_SCOPE_ARCHITECTURAL_LABEL),
     "config-fix sheds the hold label (hold does not apply)",

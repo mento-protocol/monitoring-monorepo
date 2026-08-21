@@ -12,7 +12,6 @@
 
 export const DEFAULT_REPO = "mento-protocol/monitoring-monorepo";
 export const LOCAL_REPO = DEFAULT_REPO;
-
 export const VERDICT_MARKER = "<!-- sentry-triage-verdict:v1 -->";
 // Stage A posts this fixed prefix when a closed stub regresses; the regression
 // fence below rejects a verdict comment that is not strictly newer than it.
@@ -57,9 +56,10 @@ export const ARCHIVE_COMMENT_MARKER = "<!-- sentry-triage-archive:v1 -->";
 // in the queue (verdict contract).
 export const PROJECTABLE_VERDICTS = ["code-fix", "config-fix"];
 
-// The FIXED projection allowlist — the three external owning repos. Anything
-// else (including this repo, whose errors are fixed here, not projected) is a
-// no-op. This list is the whole trust boundary for the cross-repo write.
+// The FIXED external projection allowlist — the three external owning repos.
+// This repo is a local-config destination only for an exact `config-fix`; every
+// other non-allowlisted destination is a no-op. This list is the whole trust
+// boundary for the cross-repo write.
 export const ALLOWED_OWNING_REPOS = [
   "mento-protocol/frontend-monorepo",
   "mento-protocol/mento-analytics-api",
