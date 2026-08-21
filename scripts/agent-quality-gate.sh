@@ -4720,10 +4720,13 @@ implementation_signature() {
     scripts/gate/routing-table/arms-workflows.mjs \
     scripts/gate/routing-table/checks.mjs \
     scripts/gate/routing-table/gate-arms.mjs \
+    scripts/gate/routing-table/gate-equality.test.mjs \
     scripts/gate/routing-table/groups-head.mjs \
     scripts/gate/routing-table/groups-tail.mjs \
     scripts/gate/routing-table/index.mjs \
+    scripts/gate/routing-table/pattern-oracle.test.mjs \
     scripts/gate/routing-table/pattern.mjs \
+    scripts/gate/routing-table/routing-table.test.mjs \
     scripts/gate/routing-table/schema.mjs \
     scripts/terraform/terraform-fmt-check.mjs \
     scripts/terraform/terraform-fmt-check.test.mjs \

@@ -159,7 +159,10 @@ has drifted from the arms fails nowhere at all.
 
 Six pins land with the table:
 
-1. **`implementation_signature()`** gains every table module. An entry it cannot
+1. **`implementation_signature()`** gains every module in the directory, suites
+   included — the same treatment `scripts/agent-quality-gate.test.sh` and
+   `scripts/terraform/terraform-fmt-check.test.mjs` already get, since a suite is
+   part of what the gate proves about itself. An entry it cannot
    `stat` hashes as `__missing__`, which **freezes** the signature, so
    `--skip-if-fresh` reuses a stale stamp and skips real pre-push work
    (`docs/adr/0064-scripts-module-directories.md:228-231`). This is the one that

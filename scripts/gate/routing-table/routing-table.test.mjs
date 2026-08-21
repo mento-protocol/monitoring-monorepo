@@ -413,9 +413,20 @@ test("the schema refuses an unknown guard and an unknown field", () => {
 
 // --- pins ------------------------------------------------------------------
 
-/** Every module in this directory that the gate has to know about. */
+/**
+ * Every module in this directory — tests included.
+ *
+ * The suites are in the signature for the same reason
+ * `scripts/agent-quality-gate.test.sh` and
+ * `scripts/terraform/terraform-fmt-check.test.mjs` already are: they are part of
+ * what the gate proves about itself, so a stamp taken before one of them changed
+ * should not be reused after. Excluding them would also make
+ * `scripts/AGENTS.md`'s pin rule — "every `gate/routing-table/*.mjs` module" —
+ * quietly untrue, and leave a class of file that can be added here without
+ * anyone noticing it never joined the pin.
+ */
 const MODULES = readdirSync(HERE)
-  .filter((name) => name.endsWith(".mjs") && !name.endsWith(".test.mjs"))
+  .filter((name) => name.endsWith(".mjs"))
   .sort();
 
 test("implementation_signature() lists every routing-table module", () => {
