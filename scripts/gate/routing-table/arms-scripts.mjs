@@ -190,6 +190,11 @@ export const SCRIPT_ARMS = [
                 command: "pnpm agent:quality-gate:test",
                 reason: "agent quality gate mapping changed",
               },
+              {
+                why: "The routing arms in the gate and this table are two copies of the same routing, and gate-equality.test.mjs is what holds them together. It has to run in BOTH drift directions. The table's own arm covers a table-only edit; this covers the commoner one — somebody adds or reorders an arm in the gate and does not touch the data. Without it the table goes stale exactly where nothing reds, which is the failure this conversion exists to end (ADR 0068).",
+                command: "pnpm gate:routing-table:test",
+                reason: "gate routing arms must still match the routing table",
+              },
             ],
           },
           {

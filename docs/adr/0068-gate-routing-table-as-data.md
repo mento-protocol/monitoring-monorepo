@@ -147,6 +147,14 @@ subset it happened to read.
 Because the arms are the code that runs, the equality test is also what makes a
 `scripts/` move complete: it fails if only one side moved.
 
+That is only true if it RUNS in both directions, so it is routed from both. A
+change under `scripts/gate/routing-table/` schedules it, and so does a change to
+`scripts/agent-quality-gate.sh` itself — the commoner drift, where somebody adds
+or reorders an arm and does not touch the data. It also runs in the required
+`ci` job, beside the routing regression suite and for the same stated reason:
+the local pre-push gate is the thing a contributor can bypass, and a table that
+has drifted from the arms fails nowhere at all.
+
 ### The new data is a pinned trust surface
 
 Six pins land with the table:
@@ -156,8 +164,10 @@ Six pins land with the table:
    `--skip-if-fresh` reuses a stale stamp and skips real pre-push work
    (`docs/adr/0064-scripts-module-directories.md:228-231`). This is the one that
    must not be forgotten, and `routing-table.test.mjs` asserts it per module.
-2. The table's own routing arm, `scripts/gate/routing-table/*.mjs`, scheduling
-   its suite and — because of pin 1 — the gate self-test.
+2. Two routing arms and one CI step, so the equality test runs in both drift
+   directions: `scripts/gate/routing-table/*.mjs` schedules its suite and —
+   because of pin 1 — the gate self-test; the gate's own arm schedules the
+   routing-table suite; and the required `ci` job runs it too.
 3. `turbo.json` inputs, beside the two existing gate entries in all three tasks.
 4. Import-time schema validation and the pairing lint, failing closed.
 5. The `scripts/AGENTS.md` pin registry, which ADR 0064 requires for any new pin.
@@ -241,9 +251,15 @@ gate is not a trust root.
   not here.
 - **The routing-table suite is the slowest new check in `scripts/`.** The bash
   oracle runs ~473 patterns against ~4,900 paths on every installed bash, about
-  8 seconds cold on this machine. It is routed only by a change under
-  `scripts/gate/routing-table/`, and it is the check the whole conversion rests
-  on.
+  8 seconds cold on this machine. It is routed by a change to the table, by a
+  change to the gate, and by the required `ci` job, because it is the check the
+  whole conversion rests on and a check that only runs on one side of a drift
+  is no check at all.
+- **The gate gains exactly one command on one existing arm.** Editing
+  `scripts/agent-quality-gate.sh` now also schedules the routing-table suite.
+  That is the one routing change in this step, and it is additive: for a changed
+  set that does not name the gate, the dry-run plan is byte-identical to the
+  plan before this decision.
 - **Issue 1498 is not satisfied as written.** Its acceptance criteria name sourced
   `scripts/lib/gate-*.sh` helpers for the watchdog, stamps and executor —
   exactly the layers this decision keeps in bash. The criteria are rewritten

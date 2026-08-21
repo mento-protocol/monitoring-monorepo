@@ -3839,6 +3839,15 @@ while IFS= read -r path; do
       case "$path" in
         scripts/agent-quality-gate.sh|scripts/agent-quality-gate.test.sh)
           add_command "pnpm agent:quality-gate:test" "agent quality gate mapping changed"
+          # The routing arms below and the routing table in
+          # scripts/gate/routing-table/ are two copies of the same routing, and
+          # gate-equality.test.mjs is what holds them together. It has to run in
+          # BOTH drift directions. The table's own arm covers a table-only edit;
+          # this covers the commoner one — somebody adds or reorders an arm here
+          # and does not touch the data. Without it the table goes stale exactly
+          # where nothing reds, which is the failure this conversion exists to
+          # end (ADR 0068).
+          add_command "pnpm gate:routing-table:test" "gate routing arms must still match the routing table"
           ;;
         scripts/agent-autoreview.sh|scripts/agent-autoreview.test.sh)
           add_command "pnpm agent:autoreview:test" "agent autoreview adapter changed"
