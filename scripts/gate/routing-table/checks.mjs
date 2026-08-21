@@ -16,6 +16,16 @@ import { MIN_REASON, walkArms } from "./schema.mjs";
 const SCRIPTS = "scripts/";
 
 /**
+ * A pattern whose text is completed at run time by the engine.
+ *
+ * Only these cannot be resolved to a path before substitution. Skipping the
+ * whole dynamic GROUP instead would exempt any fixed pattern that shares an arm
+ * with one, which is a property of where the pattern sits rather than of what
+ * it is.
+ */
+const PLACEHOLDER = /\$\{[a-z_][a-z_0-9]*\}/;
+
+/**
  * Refuse a table that has already been through `normalizeGroups`.
  *
  * Both lints read fields the normal form deliberately DROPS — `pairing`,
@@ -244,13 +254,20 @@ export function pairingProblems(rawGroups) {
 export function stalenessSubjects(groups) {
   assertRawTable(groups, "stalenessSubjects");
   const subjects = [];
-  for (const { groupId, subject, dynamic, arm } of walkArms(groups)) {
-    // A dispatch on the root-manifest class switches on a verdict string, and an
-    // engine-computed group's patterns are built at run time; neither holds a
-    // path to check.
-    if (subject === "path" && dynamic === null) {
+  for (const { groupId, subject, arm } of walkArms(groups)) {
+    // A dispatch on the root-manifest class switches on a verdict string, not a
+    // path, so none of its arms name one.
+    //
+    // A DYNAMIC group is different, and the difference was being skipped: only
+    // its placeholder patterns are built at run time. A fixed pattern sitting
+    // beside one in the same arm is an ordinary literal, and skipping the whole
+    // group meant that literal was never checked — the exemption was the group's
+    // kind rather than the pattern's shape. `PLACEHOLDER` is what actually
+    // cannot be resolved before substitution, so that is what is skipped.
+    if (subject === "path") {
       const exempt = new Set(exemptedLiterals(arm));
       for (const pattern of arm.patterns) {
+        if (PLACEHOLDER.test(pattern)) continue;
         if (isGlob(pattern) || exempt.has(pattern)) continue;
         // The PATH, not the pattern text: an escaped literal such as
         // `app/\[id\]/page.tsx` names a file whose name has no backslashes in

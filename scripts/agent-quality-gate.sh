@@ -4001,6 +4001,17 @@ while IFS= read -r path; do
           add_command "pnpm gate:routing-table:test" "gate routing table changed"
           add_command "pnpm agent:quality-gate:test" "gate routing table is an implementation-signature input"
           ;;
+        scripts/sentry/ci-wiring/check-sentry-suites-in-ci-gate-extract.mjs)
+          # The bash-from-Node machinery. Its own suite already runs, because
+          # check-sentry-suites-in-ci.test.mjs imports it and the coverage arm
+          # below routes that. What was missing is the OTHER consumer: ADR 0069's
+          # routing-table suite drives `runProbeShell`/`probeDirs` for the
+          # /bin/bash pattern oracle and `bashFunctionSource` for the
+          # implementation-signature pin. A change to the probe environment or to
+          # the end-of-function scan changes what both of those prove, and
+          # nothing said so.
+          add_command "pnpm gate:routing-table:test" "the routing table's bash oracle and signature pin run on this machinery"
+          ;;
         scripts/pr/review-materiality.mjs|scripts/pr/review-materiality-context.mjs|scripts/pr/review-materiality.test.mjs)
           add_command "pnpm agent:review-materiality:test" "agent review materiality helper changed"
           ;;

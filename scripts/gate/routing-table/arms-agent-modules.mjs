@@ -318,6 +318,19 @@ export const AGENT_MODULE_ARMS = [
     ],
   },
   {
+    why: "The bash-from-Node machinery. Its own suite already runs, because check-sentry-suites-in-ci.test.mjs imports it and the coverage arm routes that. What was missing is the OTHER consumer: ADR 0069's routing-table suite drives `runProbeShell`/`probeDirs` for the /bin/bash pattern oracle and `bashFunctionSource` for the implementation-signature pin. A change to the probe environment or to the end-of-function scan changes what both of those prove, and nothing said so.",
+    patterns: [
+      "scripts/sentry/ci-wiring/check-sentry-suites-in-ci-gate-extract.mjs",
+    ],
+    effects: [
+      {
+        command: "pnpm gate:routing-table:test",
+        reason:
+          "the routing table's bash oracle and signature pin run on this machinery",
+      },
+    ],
+  },
+  {
     patterns: [
       "scripts/pr/review-materiality.mjs",
       "scripts/pr/review-materiality-context.mjs",

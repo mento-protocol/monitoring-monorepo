@@ -92,18 +92,23 @@ Two checks come with the data and are the point of the conversion:
   any arm that already carries a sibling must declare `pairing: "paired"`, so a
   later edit cannot delete one and leave a green table. ADR 0064's rule stops
   being prose.
-- **A staleness check**, in the suite. Every glob-free pattern and every
-  repo-relative path named inside a scheduled command must exist in the tree,
-  with an `allowStale: "<reason>"` opt-out. One exemption exists today: the
-  `.npmrc` / pnpmfile arm names package-manager configuration the repository
+- **A staleness check**, in the suite. Every glob-free pattern, every checklist
+  an arm points a reviewer at, every `pathEquals` guard literal, and every
+  repo-relative path named inside a scheduled command must exist in the tree.
+  The opt-out is `allowStale`, a map from the exact pattern it exempts to that
+  pattern's own reason — deliberately not a flag on the arm, because an arm-wide
+  exemption covers every literal anyone adds to that arm later, including ones
+  nobody decided to exempt. Three entries exist today, all on the same arm: the
+  `.npmrc` and pnpmfile paths name package-manager configuration this repository
   does not carry, so that adding one routes an install on the commit that adds
-  it rather than one commit later.
+  it rather than one commit later. Each entry is retirement-checked: an exempted
+  path that has since appeared fails, so a dead exemption cannot sit there.
 
 The two checks compose. An exact path is protected by staleness, which reds
 loudly on a move; a prefix glob is protected by pairing, which is the case
 staleness cannot see because a glob keeps matching something. The pairing rule
 needs no opt-out on the table as it stands — every literal-prefix glob under
-`scripts/` carries its sibling — and staleness needs the one named above.
+`scripts/` carries its sibling — and staleness needs the three named above.
 
 Both opt-outs cost a stated reason. A bare flag would let the rule this table
 exists to enforce be suppressed with one word, and leave the next reader unable

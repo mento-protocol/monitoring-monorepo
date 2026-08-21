@@ -228,22 +228,33 @@ test("no literal path the table names has gone stale", () => {
 });
 
 test("every allowStale exemption is still doing something", () => {
+  // Per ENTRY, not per arm. `allowStale` is a map from pattern to reason, so
+  // the retirement question is asked of each exempted path on its own: one path
+  // that has since appeared makes THAT entry dead even while its siblings are
+  // still absent. Guarding on the obsolete string form here would have skipped
+  // the live exemption entirely and never retired anything.
+  let checked = 0;
   for (const { groupId, arm } of walkArms(ROUTING_GROUPS)) {
-    if (typeof arm.allowStale !== "string") continue;
-    // Only the LITERAL patterns count. A glob is never a staleness subject, so
-    // asking whether one exists on disk is a question with a constant answer —
-    // `existsSync("<repo>/*/.npmrc")` is false whatever the tree holds, and an
-    // exemption checked that way could never be retired.
-    const literals = exemptedLiterals(arm);
+    if (arm.allowStale === undefined) continue;
+    const exempted = exemptedLiterals(arm);
     assert.ok(
-      literals.length > 0,
-      `group \`${groupId}\`, arm [${arm.patterns.join(" | ")}]: carries \`allowStale\` but holds no literal pattern, so it exempts nothing`,
+      exempted.length > 0,
+      `group \`${groupId}\`, arm [${arm.patterns.join(" | ")}]: carries \`allowStale\` but exempts nothing`,
     );
-    assert.ok(
-      literals.some((pattern) => !existsSync(`${REPO}/${pattern}`)),
-      `group \`${groupId}\`, arm [${arm.patterns.join(" | ")}]: every path it exempts now exists, so the exemption is dead and should go`,
-    );
+    for (const pattern of exempted) {
+      checked += 1;
+      // The PATH the pattern names, for the same reason the staleness check
+      // resolves it: an escaped literal names a file with no backslashes in it.
+      assert.ok(
+        !existsSync(`${REPO}/${literalPatternPath(pattern)}`),
+        `group \`${groupId}\`: \`allowStale\` still exempts ${JSON.stringify(pattern)}, which now exists — that entry is dead and should go`,
+      );
+    }
   }
+  assert.ok(
+    checked > 0,
+    "no allowStale entry was checked at all; the retirement check is reading a shape the table no longer uses",
+  );
 });
 
 test("the live table breaks no pairing rule", () => {
@@ -719,6 +730,49 @@ test("the schema refuses an allowStale opt-out with no real reason", () => {
       `\`allowStale: ${JSON.stringify(reason)}\` was accepted`,
     );
   }
+});
+
+test("the schema refuses a non-boolean group flag", () => {
+  // `=== true` normalizes any non-boolean to FALSE, so `"true"` copied out of a
+  // JSON snippet would silently un-fence a repository-specific group from the
+  // gate's stub fixture repositories — fail-open, in the direction that widens
+  // routing.
+  for (const flag of ["realTreeOnly", "requiresNonEmpty"]) {
+    for (const value of ["true", "false", 1, 0, null]) {
+      assert.throws(
+        () =>
+          normalizeGroups(
+            table({ id: "x", [flag]: value, arms: [arm(["a"])] }),
+          ),
+        /is not a boolean/,
+        `${flag}: ${JSON.stringify(value)} was accepted`,
+      );
+    }
+    assert.doesNotThrow(() =>
+      normalizeGroups(table({ id: "x", [flag]: true, arms: [arm(["a"])] })),
+    );
+    assert.doesNotThrow(() =>
+      normalizeGroups(table({ id: "x", [flag]: false, arms: [arm(["a"])] })),
+    );
+  }
+});
+
+test("a fixed pattern in a dynamic group is still checked for staleness", () => {
+  // Only the PLACEHOLDER cannot be resolved before substitution. Skipping the
+  // whole dynamic group exempted any fixed pattern sharing an arm with one,
+  // which is a property of where the pattern sits rather than of what it is.
+  const subjects = stalenessSubjects(
+    table({
+      id: "x",
+      dynamic: "scriptsSymlinkTargets",
+      arms: [arm(["${scripts_symlink_target}/*", "scripts/gone/fixed.mjs"])],
+    }),
+  );
+  assert.deepEqual(
+    subjects.filter((s) => s.kind === "pattern").map((s) => s.path),
+    ["scripts/gone/fixed.mjs"],
+    "a fixed pattern beside a placeholder was skipped with the group",
+  );
 });
 
 test("the schema refuses an unknown guard and an unknown field", () => {

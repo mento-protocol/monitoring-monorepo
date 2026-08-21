@@ -2546,6 +2546,14 @@ run_gate "scripts/agent-quality-gate.sh"
 assert_contains "- pnpm agent:quality-gate:test (agent quality gate mapping changed)"
 assert_contains "- pnpm gate:routing-table:test (gate routing arms must still match the routing table)"
 
+# The bash-from-Node machinery the routing-table suite runs on: runProbeShell
+# and probeDirs back the /bin/bash pattern oracle, bashFunctionSource backs the
+# implementation-signature pin. Its own suite already runs through the
+# CI-coverage check; this is the second consumer, which nothing routed.
+run_gate "scripts/sentry/ci-wiring/check-sentry-suites-in-ci-gate-extract.mjs"
+assert_contains "- pnpm gate:routing-table:test (the routing table's bash oracle and signature pin run on this machinery)"
+assert_contains "- node scripts/sentry/ci-wiring/check-sentry-suites-in-ci.test.mjs (Sentry CI-coverage check reads this file)"
+
 # Negative control: the routing-table arm sits BELOW the per-module arms in the
 # same `case`, so a sibling under scripts/gate/ must still reach its own suite
 # and not this one. Without this the two assertions above would also pass for a

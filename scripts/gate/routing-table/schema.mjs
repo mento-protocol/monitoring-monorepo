@@ -403,6 +403,20 @@ export function normalizeGroups(groups) {
         `unknown dynamic source \`${group.dynamic}\``,
       );
     }
+    // `=== true` is the right normalization and the wrong validation. Any
+    // non-boolean — `"true"` from a copied JSON snippet, `1`, `"yes"` — reads as
+    // FALSE, so a group meant to be fenced off from the gate's stub fixture
+    // repositories would quietly stop being fenced, and the flag would be
+    // fail-open in exactly the direction that widens routing. Absent stays
+    // absent; present must be a boolean.
+    for (const flag of ["realTreeOnly", "requiresNonEmpty"]) {
+      if (group[flag] !== undefined && typeof group[flag] !== "boolean") {
+        throw new TableError(
+          where,
+          `\`${flag}\` is ${JSON.stringify(group[flag])}, which is not a boolean — a non-boolean normalizes to false and silently turns the flag off`,
+        );
+      }
+    }
     return {
       id: group.id,
       realTreeOnly: group.realTreeOnly === true,
