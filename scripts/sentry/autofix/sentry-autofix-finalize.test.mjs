@@ -609,12 +609,17 @@ await test("CLI autofix-comment / branch / label-def / refused-label-def / run-r
     "3",
     "--deferred-issues",
     "1313 1316 1326",
+    "--refused-inventory",
+    JSON.stringify({ state: "known", count: 1, issues: [1304] }),
   ]);
   assert(
     record.includes(AUTOFIX_RUN_RECORD_MARKER) &&
       record.includes("Fix PRs opened: 1") &&
       record.includes(
         "Deferred (duplicate_of family): 3 (#1313, #1316, #1326)",
+      ) &&
+      record.includes(
+        "https://github.com/mento-protocol/monitoring-monorepo/issues/1304",
       ),
     "CLI run-record assembles",
   );

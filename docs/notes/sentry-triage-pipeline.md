@@ -1027,8 +1027,14 @@ The historical refusal cluster needs operator attribution. Repeated refusals
 for #1304 and #1313 came from two `workflow_dispatch` runs after an operator
 manually removed the terminal labels. They were operator-induced retries, not
 selector lag. No stage performs automatic review, retry, or label removal for
-this cluster. The issue remains open until a human records dispositions for
-#1304, #1313, #1316, #1326, and #1328.
+this cluster. The issue remains open until a human records dispositions for the
+following issues:
+
+- #1304
+- #1313
+- #1316
+- #1326
+- #1328
 
 **Cost bound** (PR #1810, re-sized when the window went to 200). Terminal,
 projected, archived, and external-project stubs are all excluded server-side

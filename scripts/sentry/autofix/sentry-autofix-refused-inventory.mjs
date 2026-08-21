@@ -23,7 +23,7 @@ export function refusedInventoryArgs(repo) {
     "--method",
     "GET",
     "-f",
-    `q=repo:${repo} is:issue label:sentry-triage label:sentry:fix-refused`,
+    `q=repo:${repo} is:issue label:"sentry-triage" label:"sentry:fix-refused"`,
     "-f",
     "sort=created",
     "-f",

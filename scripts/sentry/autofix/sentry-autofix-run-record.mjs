@@ -66,13 +66,15 @@ export function renderRefusedStubInventory(
   refusedInventory,
   repo = REFUSED_INVENTORY_DEFAULT_REPO,
 ) {
+  const targetRepo = repo ?? REFUSED_INVENTORY_DEFAULT_REPO;
   const inventory = parseRefusedStubInventoryResult(refusedInventory);
   if (inventory.state !== "known") {
     return "- Refused stubs (all states): unknown";
   }
 
   const links = inventory.issues.map(
-    (number) => `[#${number}](https://github.com/${repo}/issues/${number})`,
+    (number) =>
+      `[#${number}](https://github.com/${targetRepo}/issues/${number})`,
   );
   const more = inventory.count - links.length;
   const details =

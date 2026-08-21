@@ -113,7 +113,7 @@ await test("refused inventory reads the exact oldest-first all-state Search quer
         const query = args.find((arg) => arg.startsWith("q=repo:"));
         assert(
           query ===
-            "q=repo:mento-protocol/monitoring-monorepo is:issue label:sentry-triage label:sentry:fix-refused",
+            'q=repo:mento-protocol/monitoring-monorepo is:issue label:"sentry-triage" label:"sentry:fix-refused"',
           "query includes both labels and is:issue",
         );
         assert(
@@ -150,6 +150,23 @@ await test("refused inventory preserves ordered links and reports a capped remai
   assertEqual(
     renderRefusedStubInventory(result, "mento-protocol/monitoring-monorepo"),
     "- Refused stubs (all states): 13 ([#1304](https://github.com/mento-protocol/monitoring-monorepo/issues/1304), [#1305](https://github.com/mento-protocol/monitoring-monorepo/issues/1305), [#1306](https://github.com/mento-protocol/monitoring-monorepo/issues/1306), [#1307](https://github.com/mento-protocol/monitoring-monorepo/issues/1307), [#1308](https://github.com/mento-protocol/monitoring-monorepo/issues/1308), [#1309](https://github.com/mento-protocol/monitoring-monorepo/issues/1309), [#1310](https://github.com/mento-protocol/monitoring-monorepo/issues/1310), [#1311](https://github.com/mento-protocol/monitoring-monorepo/issues/1311), [#1312](https://github.com/mento-protocol/monitoring-monorepo/issues/1312), [#1313](https://github.com/mento-protocol/monitoring-monorepo/issues/1313), +3 more)",
+  );
+});
+
+await test("refused inventory defaults only nullish repositories", () => {
+  const result = { state: "known", count: 1, issues: [1304] };
+  const defaultLine =
+    "- Refused stubs (all states): 1 ([#1304](https://github.com/mento-protocol/monitoring-monorepo/issues/1304))";
+  assertEqual(renderRefusedStubInventory(result), defaultLine, "omitted repo");
+  assertEqual(
+    renderRefusedStubInventory(result, null),
+    defaultLine,
+    "null repo from an omitted CLI flag",
+  );
+  assertEqual(
+    renderRefusedStubInventory(result, "example/custom-repo"),
+    "- Refused stubs (all states): 1 ([#1304](https://github.com/example/custom-repo/issues/1304))",
+    "explicit repo",
   );
 });
 
