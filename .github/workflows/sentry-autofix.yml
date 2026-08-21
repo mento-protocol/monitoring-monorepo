@@ -1412,6 +1412,12 @@ jobs:
             done < <(printf '%s' "${ENTRIES:-[]}" | jq -r '.[].issue')
           fi
 
+          # Operator inventory only. This is one bounded Search API read after
+          # selection; it is deliberately separate from the selector's
+          # ghCalls report and does not affect selection or retry behavior.
+          refused_inventory_json=$(node scripts/sentry/autofix/sentry-autofix-refused-inventory.mjs \
+            --repo "${REPO}" 2>/dev/null || printf '%s\n' '{"state":"unknown"}')
+
           trigger="${TRIGGER}"
           if [ "${TRIGGER}" = "workflow_dispatch" ] && [ -n "${DISPATCH_ISSUE:-}" ]; then
             trigger="workflow_dispatch (issue #${DISPATCH_ISSUE})"
@@ -1440,7 +1446,9 @@ jobs:
             --rate-limited "${rate_limited}" \
             --handled-overflow "${handled_overflow}" \
             --reverse-truncated "${reverse_truncated}" \
-            --reverse-nonconvergent "${reverse_nonconvergent}")
+            --reverse-nonconvergent "${reverse_nonconvergent}" \
+            --refused-inventory "${refused_inventory_json}" \
+            --refused-inventory-repo "${REPO}")
 
           # Rolling comment: PATCH the existing marker-bearing comment if present,
           # else create it. Selection is author-fenced + prefix-anchored

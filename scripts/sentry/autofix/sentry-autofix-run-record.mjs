@@ -13,6 +13,10 @@
  * the body; the finalize CLI's `run-record` subcommand renders it and the
  * always-run record job does the best-effort rolling-comment upsert.
  */
+import {
+  DEFAULT_REPO as REFUSED_INVENTORY_DEFAULT_REPO,
+  parseRefusedStubInventoryResult,
+} from "./sentry-autofix-refused-inventory.mjs";
 
 export const AUTOFIX_RUN_RECORD_MARKER =
   "<!-- sentry-autofix:run-record:v1 -->";
@@ -55,6 +59,27 @@ function renderDeferredIssues(deferredIssues) {
     .slice(0, MAX_RECORDED_DEFERRED_ISSUES);
   if (numbers.length === 0) return "";
   return ` (${numbers.map((n) => `#${n}`).join(", ")})`;
+}
+
+/** Render the bounded Search API result without trusting API-provided URLs. */
+export function renderRefusedStubInventory(
+  refusedInventory,
+  repo = REFUSED_INVENTORY_DEFAULT_REPO,
+) {
+  const inventory = parseRefusedStubInventoryResult(refusedInventory);
+  if (inventory.state !== "known") {
+    return "- Refused stubs (all states): unknown";
+  }
+
+  const links = inventory.issues.map(
+    (number) => `[#${number}](https://github.com/${repo}/issues/${number})`,
+  );
+  const more = inventory.count - links.length;
+  const details =
+    links.length > 0 || more > 0
+      ? ` (${[...links, ...(more > 0 ? [`+${more} more`] : [])].join(", ")})`
+      : "";
+  return `- Refused stubs (all states): ${inventory.count}${details}`;
 }
 
 /**
@@ -106,6 +131,8 @@ export function buildAutofixRunRecordBody({
   handledOverflow,
   reverseTruncated,
   reverseNonconvergent,
+  refusedInventory,
+  refusedInventoryRepo,
 }) {
   const lines = [
     AUTOFIX_RUN_RECORD_MARKER,
@@ -120,6 +147,7 @@ export function buildAutofixRunRecordBody({
     `- Incomplete / errored: ${nonNegativeInt(incomplete)}`,
     `- Deferred (duplicate_of family): ${nonNegativeInt(deferred)}${renderDeferredIssues(deferredIssues)}`,
     `- Skipped (fix_scope: architectural): ${nonNegativeInt(skipped)}${renderDeferredIssues(skippedIssues)}`,
+    renderRefusedStubInventory(refusedInventory, refusedInventoryRepo),
   ];
   // Window tripwire (PR #1810): rendered ONLY when the list window exceeded the
   // evaluation cap (total > evaluated). Kept as a guard rather than deleted:

@@ -1015,6 +1015,21 @@ operator who sees a standing deferred count overrides it with the single-issue
 explicit human intent that beats a heuristic signal. Selection itself stays
 read-only and never re-queues anything.
 
+The same tracker record now carries a bounded operator inventory after each
+selection: `Refused stubs (all states): N` uses one GitHub Search API read for
+this repository, both `sentry-triage` and `sentry:fix-refused` labels, no state
+filter, and oldest-first ordering. It reports the REST `total_count`, up to ten
+issue links, and `+N more`; it never derives the count from the capped result
+list. A failed or incomplete read renders `unknown` and still permits the
+tracker upsert. This read is separate from the selector's `ghCalls` count.
+
+The historical refusal cluster needs operator attribution. Repeated refusals
+for #1304 and #1313 came from two `workflow_dispatch` runs after an operator
+manually removed the terminal labels. They were operator-induced retries, not
+selector lag. No stage performs automatic review, retry, or label removal for
+this cluster. The issue remains open until a human records dispositions for
+#1304, #1313, #1316, #1326, and #1328.
+
 **Cost bound** (PR #1810, re-sized when the window went to 200). Terminal,
 projected, archived, and external-project stubs are all excluded server-side
 before `--limit` applies, so the eligible window stays single-digit at steady

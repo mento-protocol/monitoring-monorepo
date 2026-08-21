@@ -1,8 +1,24 @@
 #!/usr/bin/env node
+import { EventEmitter } from "node:events";
+import { readFileSync } from "node:fs";
+import { PassThrough } from "node:stream";
+
 import {
   AUTOFIX_RUN_RECORD_MARKER,
   buildAutofixRunRecordBody,
+  renderRefusedStubInventory,
 } from "./sentry-autofix-run-record.mjs";
+import {
+  parseRefusedStubInventory,
+  readRefusedStubInventory,
+  refusedInventoryArgs,
+  runGhWithTimeout,
+} from "./sentry-autofix-refused-inventory.mjs";
+
+const RUN_RECORD_MODULES = [
+  "sentry-autofix-run-record.mjs",
+  "sentry-autofix-refused-inventory.mjs",
+].map((name) => new URL(`./${name}`, import.meta.url));
 
 let passed = 0;
 let failed = 0;
@@ -50,6 +66,16 @@ await test("assertEqual reports the message its call site passed", () => {
   assert(thrown.includes("expected 10, got 3"), `values kept: ${thrown}`);
 });
 
+await test("run-record modules stay under the 600-line soft cap", () => {
+  for (const moduleUrl of RUN_RECORD_MODULES) {
+    const lineCount = readFileSync(moduleUrl, "utf8").split(/\r?\n/).length;
+    assert(
+      lineCount <= 600,
+      `${moduleUrl.pathname} has ${lineCount} lines; the cap is 600`,
+    );
+  }
+});
+
 await test("run record body carries the marker, trigger, state, and tallies", () => {
   const body = buildAutofixRunRecordBody({
     timestampIso: "2026-07-19T08:30:00Z",
@@ -68,6 +94,226 @@ await test("run record body carries the marker, trigger, state, and tallies", ()
   assert(body.includes("Fix PRs opened: 1"), "opened count");
   assert(body.includes("Refused (no PR): 1"), "refused count");
   assert(body.includes("Incomplete / errored: 0"), "incomplete count");
+});
+
+await test("refused inventory reads the exact oldest-first all-state Search query", async () => {
+  let calls = 0;
+  const result = await readRefusedStubInventory(
+    { repo: "mento-protocol/monitoring-monorepo" },
+    {
+      runGh: async (args) => {
+        calls += 1;
+        assertEqual(
+          JSON.stringify(args),
+          JSON.stringify(
+            refusedInventoryArgs("mento-protocol/monitoring-monorepo"),
+          ),
+          "one bounded Search API request",
+        );
+        const query = args.find((arg) => arg.startsWith("q=repo:"));
+        assert(
+          query ===
+            "q=repo:mento-protocol/monitoring-monorepo is:issue label:sentry-triage label:sentry:fix-refused",
+          "query includes both labels and is:issue",
+        );
+        assert(
+          !args.some(
+            (arg) => arg.includes("is:open") || arg.includes("is:closed"),
+          ),
+          "no state filter",
+        );
+        return JSON.stringify({
+          total_count: 2,
+          incomplete_results: false,
+          items: [{ number: 1304 }, { number: 1313 }],
+        });
+      },
+    },
+  );
+  assertEqual(calls, 1, "single read");
+  assertEqual(
+    JSON.stringify(result),
+    JSON.stringify({ state: "known", count: 2, issues: [1304, 1313] }),
+  );
+});
+
+await test("refused inventory preserves ordered links and reports a capped remainder", () => {
+  const result = parseRefusedStubInventory(
+    JSON.stringify({
+      total_count: 13,
+      incomplete_results: false,
+      items: Array.from({ length: 10 }, (_, index) => ({
+        number: 1304 + index,
+      })),
+    }),
+  );
+  assertEqual(
+    renderRefusedStubInventory(result, "mento-protocol/monitoring-monorepo"),
+    "- Refused stubs (all states): 13 ([#1304](https://github.com/mento-protocol/monitoring-monorepo/issues/1304), [#1305](https://github.com/mento-protocol/monitoring-monorepo/issues/1305), [#1306](https://github.com/mento-protocol/monitoring-monorepo/issues/1306), [#1307](https://github.com/mento-protocol/monitoring-monorepo/issues/1307), [#1308](https://github.com/mento-protocol/monitoring-monorepo/issues/1308), [#1309](https://github.com/mento-protocol/monitoring-monorepo/issues/1309), [#1310](https://github.com/mento-protocol/monitoring-monorepo/issues/1310), [#1311](https://github.com/mento-protocol/monitoring-monorepo/issues/1311), [#1312](https://github.com/mento-protocol/monitoring-monorepo/issues/1312), [#1313](https://github.com/mento-protocol/monitoring-monorepo/issues/1313), +3 more)",
+  );
+});
+
+await test("refused inventory accepts a known empty result", () => {
+  assertEqual(
+    JSON.stringify(
+      parseRefusedStubInventory(
+        JSON.stringify({
+          total_count: 0,
+          incomplete_results: false,
+          items: [],
+        }),
+      ),
+    ),
+    JSON.stringify({ state: "known", count: 0, issues: [] }),
+  );
+});
+
+await test("refused inventory rejects duplicate issue numbers", () => {
+  assertEqual(
+    JSON.stringify(
+      parseRefusedStubInventory(
+        JSON.stringify({
+          total_count: 2,
+          incomplete_results: false,
+          items: [{ number: 1304 }, { number: 1304 }],
+        }),
+      ),
+    ),
+    JSON.stringify({ state: "unknown" }),
+  );
+});
+
+await test("refused inventory requires the Search API list to be exactly capped", () => {
+  assertEqual(
+    JSON.stringify(
+      parseRefusedStubInventory(
+        JSON.stringify({
+          total_count: 12,
+          incomplete_results: false,
+          items: [{ number: 1304 }],
+        }),
+      ),
+    ),
+    JSON.stringify({ state: "unknown" }),
+  );
+});
+
+await test("a non-terminating gh child times out, is terminated, and becomes unknown", async () => {
+  const child = new EventEmitter();
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  const killSignals = [];
+  child.kill = (signal) => {
+    killSignals.push(signal);
+    return true;
+  };
+  const timers = [];
+  const resultPromise = readRefusedStubInventory(
+    { repo: "mento-protocol/monitoring-monorepo" },
+    {
+      runGh: (args) =>
+        runGhWithTimeout(args, {
+          spawnFn: () => child,
+          timeoutMs: 5,
+          killGraceMs: 10,
+          setTimeoutFn: (callback, delay) => {
+            const timer = { callback, delay, cleared: false };
+            timers.push(timer);
+            return timer;
+          },
+          clearTimeoutFn: (timer) => {
+            timer.cleared = true;
+          },
+        }),
+    },
+  );
+  assertEqual(timers.length, 1, "read arms one timeout");
+  timers[0].callback();
+  const result = await resultPromise;
+  assertEqual(JSON.stringify(result), JSON.stringify({ state: "unknown" }));
+  assertEqual(timers[0].cleared, true, "timeout is cleaned up on rejection");
+  assertEqual(
+    JSON.stringify(killSignals),
+    JSON.stringify(["SIGTERM"]),
+    "timed-out gh child first receives SIGTERM",
+  );
+  assertEqual(timers.length, 2, "SIGTERM arms one forced-kill grace timer");
+  timers[1].callback();
+  assertEqual(
+    JSON.stringify(killSignals),
+    JSON.stringify(["SIGTERM", "SIGKILL"]),
+    "a child that ignores SIGTERM receives SIGKILL",
+  );
+});
+
+await test("gh close and error paths clear the read deadline", async () => {
+  for (const event of ["close", "error"]) {
+    const child = new EventEmitter();
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    const timers = [];
+    const promise = runGhWithTimeout(["search/issues"], {
+      spawnFn: () => child,
+      setTimeoutFn: (callback) => {
+        const timer = { callback, cleared: false };
+        timers.push(timer);
+        return timer;
+      },
+      clearTimeoutFn: (timer) => {
+        timer.cleared = true;
+      },
+    });
+    if (event === "close") child.emit("close", 0);
+    else child.emit("error", new Error("spawn failed"));
+    if (event === "close") await promise;
+    else await promise.catch(() => {});
+    assertEqual(timers.length, 1, `${event} arms one deadline`);
+    assertEqual(timers[0].cleared, true, `${event} clears the deadline`);
+  }
+});
+
+await test("refused inventory fails closed for incomplete, command, JSON, shape, and count errors", async () => {
+  const cases = [
+    '{"total_count":1,"incomplete_results":true,"items":[{"number":1}]}',
+    "not json",
+    '{"total_count":1,"incomplete_results":false,"items":[{"number":"1"}]}',
+    '{"total_count":0,"incomplete_results":false,"items":[{"number":1}]}',
+  ];
+  for (const stdout of cases) {
+    assertEqual(
+      JSON.stringify(parseRefusedStubInventory(stdout)),
+      JSON.stringify({ state: "unknown" }),
+    );
+  }
+  assertEqual(
+    JSON.stringify(
+      await readRefusedStubInventory(
+        { repo: "mento-protocol/monitoring-monorepo" },
+        {
+          runGh: async () => {
+            throw new Error("Search API unavailable");
+          },
+        },
+      ),
+    ),
+    JSON.stringify({ state: "unknown" }),
+  );
+  const body = buildAutofixRunRecordBody({
+    timestampIso: "2026-07-19T08:30:00Z",
+    trigger: "schedule",
+    disposition: "active",
+    candidates: 0,
+    refused: 0,
+    refusedInventory: { state: "unknown" },
+  });
+  assert(
+    body.includes("- Refused stubs (all states): unknown"),
+    "degraded read remains explicit",
+  );
+  assert(
+    body.includes("- Refused (no PR): 0"),
+    "current-run refusal line is unchanged",
+  );
 });
 
 await test("run record body coerces missing/bad counters and labels safely", () => {
