@@ -6220,6 +6220,8 @@ gate_race_sync="$(mktemp -d)"
   race_drain_orphan_start=""
   race_drain_a_wrapper=""
   race_drain_a_wrapper_start=""
+  race_drain_b_wrapper=""
+  race_drain_b_wrapper_start=""
   race_drain_c_wrapper=""
   race_drain_c_wrapper_start=""
   race_drain_watchdog_identities=""
@@ -6426,6 +6428,8 @@ EOF
     fi
     race_drain_cleanup_direct_wrapper \
       "A gate" "$race_drain_a_wrapper" "$race_drain_a_wrapper_start" || true
+    race_drain_cleanup_direct_wrapper \
+      "B gate" "$race_drain_b_wrapper" "$race_drain_b_wrapper_start" || true
     race_drain_cleanup_direct_wrapper \
       "C gate" "$race_drain_c_wrapper" "$race_drain_c_wrapper_start" || true
     race_drain_cleanup_suspended_watchdogs || true
@@ -7219,6 +7223,10 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   race_drain_a_pid="$(sed -n 's/^pid=//p' "$gate_race_root/run.lock/owner" | head -n1)"
   [[ "$race_drain_a_pid" =~ ^[0-9]+$ ]] ||
     fail "the interrupted-drain case could not read A's gate PID"
+  [[ "$race_drain_a_pid" == "$race_drain_a_wrapper" ]] ||
+    fail "the interrupted-drain case found an owner PID that was not A's direct wrapper"
+  race_drain_process_is_expected "$race_drain_a_pid" "$race_drain_a_wrapper_start" ||
+    fail "the interrupted-drain case could not bind A's owner record to its exact wrapper identity"
   # A must crash without its EXIT trap so B inherits a live command to drain.
   # Its own watchdog normally notices that crash and correctly cleans A's
   # command. Suspend only the watchdog anchored to A's still-live gate, with
@@ -7245,6 +7253,8 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   done
   race_drain_process_is_stopped "$race_drain_watchdog_pid" "$race_drain_watchdog_start" ||
     fail "the interrupted-drain case could not confirm A's exact watchdog was stopped"
+  race_drain_process_is_expected "$race_drain_a_pid" "$race_drain_a_wrapper_start" ||
+    fail "the interrupted-drain case lost A's exact owner identity before its crash"
   kill -KILL "$race_drain_a_pid" 2>/dev/null || true
   race_drain_kill_and_reap_direct_wrapper \
     "A gate" "$race_drain_a_wrapper" "$race_drain_a_wrapper_start"
@@ -7265,7 +7275,23 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     AGENT_QUALITY_GATE_LOCK_CRASH_AT=after-drain-term \
     "$repo_root/scripts/agent-quality-gate.sh" \
     --base HEAD --run --lock-wait 45 \
-    > "$gate_race_out/drain-b.out" 2>&1 || true
+    > "$gate_race_out/drain-b.out" 2>&1 &
+  race_drain_b_wrapper=$!
+  race_drain_b_wrapper_start="$(ps -p "$race_drain_b_wrapper" -o lstart= 2>/dev/null || true)"
+  [[ -n "$race_drain_b_wrapper_start" ]] ||
+    fail "the interrupted-drain case could not record B's direct wrapper identity"
+  if race_drain_wait_for_direct_wrapper \
+    "B gate" "$race_drain_b_wrapper" "$race_drain_b_wrapper_start"; then
+    race_drain_b_exit=0
+  else
+    race_drain_b_exit=$?
+  fi
+  [[ "$race_drain_b_exit" != "124" ]] ||
+    fail "the interrupted-drain B run reached a held command or exceeded its bounded wait"
+  [[ "$race_drain_b_exit" != "0" ]] ||
+    fail "the interrupted-drain B run did not crash at the requested boundary"
+  race_drain_b_wrapper=""
+  race_drain_b_wrapper_start=""
   [[ ! -e "$race_drain_hold_file" && ! -L "$race_drain_hold_file" ]] ||
     fail "the interrupted-drain hold path appeared during B"
   race_captured_file="$(find "$gate_race_root" -name 'captured.*' 2>/dev/null | head -n1)"
