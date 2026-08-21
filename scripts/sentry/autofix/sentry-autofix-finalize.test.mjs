@@ -609,12 +609,17 @@ await test("CLI autofix-comment / branch / label-def / refused-label-def / run-r
     "3",
     "--deferred-issues",
     "1313 1316 1326",
+    "--refused-inventory",
+    JSON.stringify({ state: "known", count: 1, issues: [1304] }),
   ]);
   assert(
     record.includes(AUTOFIX_RUN_RECORD_MARKER) &&
       record.includes("Fix PRs opened: 1") &&
       record.includes(
         "Deferred (duplicate_of family): 3 (#1313, #1316, #1326)",
+      ) &&
+      record.includes(
+        "https://github.com/mento-protocol/monitoring-monorepo/issues/1304",
       ),
     "CLI run-record assembles",
   );
@@ -1796,6 +1801,54 @@ await test("fork-fence negative control: the pre-fix bare jq TRUSTS the fork PR"
       "the shipped fence must not be the bare, fork-trusting read",
     );
   }
+});
+
+await test("record-run inventory failure stays explicit and still reaches the upsert path", () => {
+  const code = workflowCode();
+  assert(
+    code.includes(
+      "refused_inventory_json=$(node scripts/sentry/autofix/sentry-autofix-refused-inventory.mjs",
+    ),
+    "record-run invokes the bounded inventory helper",
+  );
+  assert(
+    code.includes("printf '%s\\n' '{\"state\":\"unknown\"}'"),
+    "helper failure degrades to an explicit unknown result",
+  );
+  const renderIndex = code.indexOf(
+    '--refused-inventory "${refused_inventory_json}"',
+  );
+  const upsertIndex = code.indexOf(
+    'gh api -X PATCH "repos/${REPO}/issues/comments/${existing_id}"',
+  );
+  assert(renderIndex >= 0, "unknown inventory reaches run-record rendering");
+  assert(
+    upsertIndex > renderIndex,
+    "run-record rendering precedes tracker upsert",
+  );
+  const body = captureCli([
+    "run-record",
+    "--timestamp",
+    "2026-08-21T00:00:00Z",
+    "--trigger",
+    "schedule",
+    "--disposition",
+    "active",
+    "--candidates",
+    "0",
+    "--opened",
+    "0",
+    "--refused",
+    "0",
+    "--incomplete",
+    "0",
+    "--refused-inventory",
+    '{"state":"unknown"}',
+  ]);
+  assert(
+    body.includes("- Refused stubs (all states): unknown"),
+    "unknown result renders explicitly",
+  );
 });
 
 await test("the select job's timeout-minutes is pinned to the selection caps it is sized against", () => {

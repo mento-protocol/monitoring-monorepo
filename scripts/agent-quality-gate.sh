@@ -4088,10 +4088,11 @@ while IFS= read -r path; do
         scripts/sentry/autofix/sentry-autofix-finalize.mjs|scripts/sentry/autofix/sentry-autofix-finalize.test.mjs)
           add_command "pnpm sentry:autofix:finalize:test" "Sentry autofix finalize helper changed"
           ;;
-        scripts/sentry/autofix/sentry-autofix-run-record.mjs|scripts/sentry/autofix/sentry-autofix-run-record.test.mjs)
-          # The tracker run-record body builder, extracted from finalize.mjs.
-          # Run its own suite AND finalize's — finalize imports it for the
-          # `run-record` CLI subcommand, so its wiring rides on this module.
+        scripts/sentry/autofix/sentry-autofix-run-record.mjs|scripts/sentry/autofix/sentry-autofix-run-record.test.mjs|scripts/sentry/autofix/sentry-autofix-refused-inventory.mjs)
+          # The tracker run-record body builder, extracted from finalize.mjs,
+          # and its bounded refused-stub Search API helper. Run the focused
+          # suite AND finalize's — finalize imports the builder for the
+          # `run-record` CLI subcommand, so their wiring rides on this route.
           add_command "pnpm sentry:autofix:run-record:test" "Sentry autofix run-record builder changed"
           add_command "pnpm sentry:autofix:finalize:test" "Sentry autofix run-record builder changed"
           ;;
