@@ -75,9 +75,8 @@ same PR, except the `agent-autoreview.sh` feedback-runtime pins below.
   `docs/docs-navigation-eval-helpers.mjs` and `gate/lockfile-scope.mjs` to
   `$script_source_dir` in three literals, not stub `$repo_root`. Repoint all
   three (ADR 0064).
-- **Gate routing-table pins.** Every `gate/routing-table/*.mjs` module is named
-  in `implementation_signature()` and in `turbo.json`; a module the signature
-  cannot stat freezes the freshness stamp
+- **Gate routing-table pins.** Every `gate/routing-table/*.mjs` module is an
+  `implementation_signature()` and `turbo.json` entry
   ([ADR 0068](../docs/adr/0068-gate-routing-table-as-data.md)).
 - **Evaluation fixture forbidden lists.** `forbidden_sources` in
   `docs/evals/documentation-navigation-fixtures.json` names the navigation
