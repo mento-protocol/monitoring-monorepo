@@ -1768,9 +1768,19 @@ function placeholderRedactionOf(removed, spans, added) {
 // or context line stay refused. Each added line redacts at most one removal, so
 // a single placeholder cannot cover a second credential-bearing removal that is
 // really an unreplaced deletion.
-function strongCredentialTokenReason(text) {
+//
+// The exception applies only when `gitDiff` is set, which one call site does for
+// the git-generated review bundle. Supplemental input — `--prompt`, prompt
+// files, datasets, branch names, refs — is arbitrary text that an author can
+// shape at will, so no line there belongs to a hunk and every credential-shaped
+// token is refused exactly as it was before the exception existed. Requiring a
+// `diff --git` header instead would not close this: an author who can write
+// `@@ -1 +1 @@` into a prompt can write that header too.
+function strongCredentialTokenReason(text, gitDiff) {
   const lines = text.split("\n");
-  const { hunkOfLine, hunks } = splitDiffHunks(lines);
+  const { hunkOfLine, hunks } = gitDiff
+    ? splitDiffHunks(lines)
+    : { hunkOfLine: new Array(lines.length).fill(-1), hunks: [] };
   const claimed = hunks.map(() => new Set());
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
@@ -1795,7 +1805,10 @@ function strongCredentialTokenReason(text) {
   return null;
 }
 
-export function secretLikeReason(text) {
+// `gitDiff` marks text the caller knows is a git-generated patch. It is the only
+// input for which the redaction accept-shape applies; it defaults to closed so a
+// new call site cannot acquire the exception by omission.
+export function secretLikeReason(text, { gitDiff = false } = {}) {
   const privateKeyHeader =
     /-----BEGIN (?:(?:[A-Z0-9][A-Z0-9 -]* )?PRIVATE KEY|PGP PRIVATE KEY BLOCK)-----/g;
   for (const match of text.matchAll(privateKeyHeader)) {
@@ -1811,7 +1824,7 @@ export function secretLikeReason(text) {
   ) {
     return "Bearer JWT";
   }
-  const strongCredential = strongCredentialTokenReason(text);
+  const strongCredential = strongCredentialTokenReason(text, gitDiff);
   if (strongCredential) return strongCredential;
   const secretUrlPatterns = [
     /https:\/\/hooks\.slack\.com\/services\/[A-Z0-9]{8,}\/[A-Z0-9]{8,}\/[A-Za-z0-9]{20,}/i,
@@ -2131,8 +2144,8 @@ export function secretLikeReason(text) {
   return null;
 }
 
-export function assertNoSecretLikeContent(label, text) {
-  const reason = secretLikeReason(text);
+export function assertNoSecretLikeContent(label, text, options) {
+  const reason = secretLikeReason(text, options);
   if (reason) {
     throw new Error(
       `refusing to include secret-like content in review bundle (${reason}); clean or redact ${label} before running autoreview`,
