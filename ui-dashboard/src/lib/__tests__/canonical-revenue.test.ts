@@ -351,6 +351,39 @@ describe("buildCanonicalRevenue", () => {
     );
   });
 
+  it("records zero revenue and resets the baseline when stETH exposure reaches zero", () => {
+    const wallet = "0xd0697f70e79476195b742d5afab14be50f98cc1e";
+    const activeExposure = {
+      balanceAmount: usdWei(2),
+      principalAmount: usdWei(1),
+    };
+    const result = buildCanonicalRevenue({
+      networkData: [],
+      cdpDailySeries: [],
+      cdpMarkets: [],
+      reserveYield: reserveYield({
+        holdings: [
+          stethHolding({ identifier: wallet, principalUsd: 4_000, balance: 2 }),
+        ],
+      }),
+      reserveDailySnapshots: [
+        stethReserveSnapshot(ts("2026-06-10"), wallet, 1, 1, activeExposure),
+        stethReserveSnapshot(ts("2026-06-11"), wallet, 0),
+        stethReserveSnapshot(ts("2026-06-12"), wallet, 1, 1, activeExposure),
+      ],
+      nowSeconds: NOW_SECONDS,
+    });
+
+    expect(
+      result.dailySeries.find((point) => point.timestamp === ts("2026-06-11"))
+        ?.reserveYieldUsd,
+    ).toBe(0);
+    expect(result.periods.allTimeSinceV3.reserveYieldUsd).toBe(4_000);
+    expect(result.partialReasons).not.toContain(
+      "Reserve stETH earned-yield history is unavailable: current stETH USD/token pricing is missing.",
+    );
+  });
+
   it.each([
     ["balance", { balanceAmount: "1" }],
     ["principal", { principalAmount: "1" }],

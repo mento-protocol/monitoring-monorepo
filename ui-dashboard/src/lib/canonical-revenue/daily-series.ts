@@ -116,7 +116,6 @@ function reserveSnapshotTotalUsd(
   stethRates: ReadonlyMap<string, number>,
 ): number | null {
   if (!isStethSnapshot(row)) return numericUsdWei(row.totalEarnedYieldUsdWei);
-  if (isZeroExposureStethSnapshot(row)) return 0;
   const usdPerToken = stethRates.get(row.wallet.toLowerCase());
   return stethAmountUsd(row.totalEarnedYieldAmount, usdPerToken);
 }
@@ -148,7 +147,6 @@ function reserveSnapshotBaseline(
   if (!isStethSnapshot(row)) {
     return reserveSnapshotBaselineUsd(row, totalYieldUsd);
   }
-  if (isZeroExposureStethSnapshot(row)) return 0;
   const usdPerToken = stethRates.get(row.wallet.toLowerCase());
   const dailyYieldUsd = stethAmountUsd(row.dailyEarnedYieldAmount, usdPerToken);
   return dailyYieldUsd === null ? null : totalYieldUsd - dailyYieldUsd;
@@ -186,12 +184,17 @@ export function buildRevenueBuckets(args: {
   for (const row of reserveRows) {
     const timestamp = Number(row.timestamp);
     if (!Number.isFinite(timestamp)) continue;
+    const sourceKey = reserveSnapshotSourceKey(row);
+    if (isStethSnapshot(row) && isZeroExposureStethSnapshot(row)) {
+      previousReserveTotalsBySource.set(sourceKey, 0);
+      addBucketValue(buckets, timestamp, { reserveYieldUsd: 0 });
+      continue;
+    }
     const totalYieldUsd = reserveSnapshotTotalUsd(row, stethRates);
     if (totalYieldUsd === null) {
       if (isStethSnapshot(row)) reserveHistoryUnpriced = true;
       continue;
     }
-    const sourceKey = reserveSnapshotSourceKey(row);
     const previousTotalUsd = previousReserveTotalsBySource.get(sourceKey);
     const baselineUsd =
       previousTotalUsd ??
