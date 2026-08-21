@@ -131,12 +131,13 @@ tldr: **ruleset-required** workflows (`ci`, `Code Quality`, the Vercel checks) M
 - If a setup/cache script uses marker files or input hashes to skip work, the skip condition MUST verify the actual output that downstream commands need, not just the marker. Examples: dependency skips should verify a representative package resolves, Playwright skips should verify the browser executable exists, and codegen skips should verify the generated facade file exists.
 - Write marker files only after every validation step represented by that marker has passed. A failed post-install validation must not leave a fresh marker that makes the next run skip the install or rebuild path.
 
-### Public PR comment markers
+### Public PR request and completion markers
 
-- Treat a marker in a public PR comment as untrusted input. Accept it only from
-  an allowed author association or a known agent identity.
-- Require the command and its completion marker in the same comment. Bind the
-  marker to the exact PR head SHA.
+- Treat a public PR comment marker as untrusted input when a workflow consumes
+  it as request or completion evidence. Accept it only from an allowed author
+  association or a known agent identity.
+- Require the relevant command and its evidence marker in the same comment.
+  Bind the marker to the exact PR head SHA.
 - When the API supplies comment and head-update timestamps, require the marker
   to be at or after the head update. Do not infer recency from list order.
 - Apply the same identity, command, marker, SHA, and recency checks to REST and
