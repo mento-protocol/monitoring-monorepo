@@ -3,7 +3,7 @@ title: PR Operating Card
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-13
+last_verified: 2026-08-21
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -153,9 +153,10 @@ Solution` (approach before implementation detail). PRs open **ready for
    pnpm pr:ready-state --pr <number> --repo <BASE_REPO> --json
    ```
 
-   Run them in that order and preserve the two-projection contract: the
-   feedback ledger must be clean **first**, then the subsequent current-head
-   `pr:ready-state` must report ready — including the current-head
+   Run them in that order and preserve the two-projection contract. The
+   feedback ledger must be clean **first**. Before the final pair, apply the
+   CodeRabbit exact-head request rule in the `babysit-pr` skill. The subsequent
+   current-head `pr:ready-state` must report ready, including the current-head
    `chatgpt-codex-connector[bot]` PR-description approval, unless a documented
    human break-glass comment applies:
    `/pr-ready-override gate=codex-description-approval head=<full-head-sha>

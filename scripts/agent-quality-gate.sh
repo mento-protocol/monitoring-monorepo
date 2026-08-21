@@ -4175,7 +4175,7 @@ while IFS= read -r path; do
         scripts/pr/pr-feedback-state.mjs|scripts/pr/pr-feedback-state-core.mjs|scripts/pr/pr-feedback-state-claude.mjs|scripts/pr/pr-feedback-state.test.mjs)
           add_command "pnpm pr:feedback-state:test" "PR feedback-state helper changed"
           ;;
-        scripts/pr/pr-ready-state.mjs|scripts/pr/pr-ready-state-core.mjs|scripts/pr/pr-ready-state-format.mjs|scripts/pr/pr-ready-state.test.mjs)
+        scripts/pr/pr-ready-state.mjs|scripts/pr/pr-ready-state-core.mjs|scripts/pr/pr-ready-state-format.mjs|scripts/pr/pr-ready-state-review-signals.mjs|scripts/pr/pr-ready-state.test.mjs)
           add_command "pnpm pr:ready-state:test" "PR ready-state helper changed"
           ;;
         scripts/pr/review-process-metrics.mjs|scripts/pr/review-process-metrics.test.mjs)

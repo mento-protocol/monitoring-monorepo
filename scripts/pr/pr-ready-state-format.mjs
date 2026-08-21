@@ -55,6 +55,7 @@ export function formatHuman(summary) {
     }`,
   );
   lines.push(`Codex review signal: ${summary.codexReviewSignal}`);
+  lines.push(`CodeRabbit review signal: ${summary.codeRabbitReviewSignal}`);
   lines.push(
     `Readiness overrides active: ${summary.readinessOverrides?.length ?? 0}`,
   );
@@ -147,6 +148,7 @@ export function formatCompact(summary) {
     `unreplied=${summary.unrepliedRootReviewComments.length}`,
     `codex_approval=${summary.gates.codexDescriptionApproval.state}`,
     `codex_signal=${summary.codexReviewSignal}`,
+    `coderabbit_signal=${summary.codeRabbitReviewSignal}`,
     `overrides=${summary.readinessOverrides?.length ?? 0}`,
   ].join(" ");
 }

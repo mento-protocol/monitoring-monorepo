@@ -58,7 +58,9 @@ reviews:
     base_branches: []
     drafts: false
     auto_incremental_review: true
-    # Vendor default is 5. Agent fix-commit bursts run several rounds per PR, and
-    # each reviewed commit spends the Pro+ ladder. Pausing after 2 keeps the
-    # spend on review rounds that matter; `@coderabbitai review` resumes.
-    auto_pause_after_reviewed_commits: 2
+    # Keep the vendor default of 5. A threshold of 2 paused 16 of the first 29
+    # PRs after rollout, including six PRs with only 2-4 total commits. Five
+    # avoids treating one normal fix round as an active-development burst while
+    # still bounding long agent commit sequences. `@coderabbitai review`
+    # requests one exact-head closeout review after a pause.
+    auto_pause_after_reviewed_commits: 5
