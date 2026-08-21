@@ -220,10 +220,21 @@ routing, not procedure.
 
 1. Root `package.json` — 74 entries reference `scripts/`.
 2. `check-agent-quality-gate-package-scripts.mjs` — pinned alias map.
-3. `.github/workflows/` — 22 of 32 files, including the enumerated filters
-   listed under "Why Files Stay Flat" in `scripts/AGENTS.md`. A workflow that
-   runs a script from the PR's **base** ref must probe the new path and the
-   pre-move path; see the trusted-validator consequence above.
+3. `.github/workflows/` — 22 of 32 files pin a `scripts/` path. `ci.yml`
+   (`autoreviewSuite`, `autoreviewRootRuntime`, `versionSkew`; `rootScripts` is
+   the recursive `scripts/**`), `infra.yml`, `alerts-rules.yml`,
+   `peg-policy-publication.yml`, and `schema-diff.yml` list individual files.
+   The three Terraform filters are the exception: `ci.yml` `terraform` plus
+   `infra.yml` push and `pull_request` copy the broad
+   `workflowAdmissionPatterns` boundary from `terraform.stacks.json`, including
+   `scripts/**`. `routing.test.mjs` asserts exact equality and proves that
+   boundary subsumes every stack pattern. A miss is silent without that
+   contract — the job stops running while the required `ci` sentinel stays
+   green. A module glob such as `supply-chain.yml`'s `scripts/supply-chain/**`
+   is the safer pin where the job's subject really is the whole module; a
+   filter deliberately narrower than a module, like `versionSkew`, is not.
+   A workflow that runs a script from the PR's **base** ref must probe the new
+   path and the pre-move path; see the trusted-validator consequence above.
 4. `terraform.stacks.json` — each stack's `changedPathPatterns` enumerates
    exact `scripts/` paths. The registry's broad `workflowAdmissionPatterns`
    boundary admits `scripts/**`; `tf-stacks.test.mjs` proves it subsumes every
@@ -277,6 +288,14 @@ routing, not procedure.
    helper the gate cannot find exit 2 instead of falling toward the full suite —
    its caller reads a nonzero exit as "cannot narrow", so the old behaviour
    silently widened every lockfile change and the run read as slow, not broken.
+   Since ADR 0068 the same routing also exists as DATA in
+   `scripts/gate/routing-table/`, and a move has to update both. The data is the
+   easier half: its patterns are checked for staleness and its `scripts/`-anchored
+   globs are checked for their any-depth pair, so a move that misses the table
+   reds where a move that misses the arms goes quiet. The two are held together
+   by `gate-equality.test.mjs`, which fails if only one side moved — so the sweep
+   is not done until both are repointed. Every module in that directory is also
+   an `implementation_signature()` entry, with the same `__missing__` freeze.
 10. `forbidden_sources` in `docs/evals/documentation-navigation-fixtures.json`
     names the navigation evaluation's own implementation, so a run cannot read
     the answers out of it. `validateFixtureSuite` checks those paths for

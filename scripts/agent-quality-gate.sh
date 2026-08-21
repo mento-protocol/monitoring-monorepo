@@ -3981,6 +3981,17 @@ while IFS= read -r path; do
         scripts/gate/agent-prewarm.mjs|scripts/gate/agent-prewarm.test.mjs)
           add_command "pnpm agent:prewarm:test" "agent prewarm helper changed"
           ;;
+        # The routing table as data (ADR 0068). Its own suite owns the schema,
+        # ADR 0064's pairing rule, path staleness, the bash-oracle proof of the
+        # pattern compiler, and the equality check against the `case` arms in
+        # this file. The gate self-test rides along because every module here is
+        # in `implementation_signature()`: a change to one moves the freshness
+        # signature, which is gate behaviour whether or not the gate reads the
+        # table yet.
+        scripts/gate/routing-table/*.mjs)
+          add_command "pnpm gate:routing-table:test" "gate routing table changed"
+          add_command "pnpm agent:quality-gate:test" "gate routing table is an implementation-signature input"
+          ;;
         scripts/pr/review-materiality.mjs|scripts/pr/review-materiality-context.mjs|scripts/pr/review-materiality.test.mjs)
           add_command "pnpm agent:review-materiality:test" "agent review materiality helper changed"
           ;;
@@ -4689,6 +4700,22 @@ implementation_signature() {
     scripts/check-agent-quality-gate-package-scripts.mjs \
     scripts/docs/docs-navigation-eval-helpers.mjs \
     scripts/gate/lockfile-scope.mjs \
+    scripts/gate/routing-table/arms-agent-modules.mjs \
+    scripts/gate/routing-table/arms-alerts.mjs \
+    scripts/gate/routing-table/arms-packages.mjs \
+    scripts/gate/routing-table/arms-script-modules.mjs \
+    scripts/gate/routing-table/arms-scripts.mjs \
+    scripts/gate/routing-table/arms-sentry-modules.mjs \
+    scripts/gate/routing-table/arms-services.mjs \
+    scripts/gate/routing-table/arms-tooling-modules.mjs \
+    scripts/gate/routing-table/arms-workflows.mjs \
+    scripts/gate/routing-table/checks.mjs \
+    scripts/gate/routing-table/gate-arms.mjs \
+    scripts/gate/routing-table/groups-head.mjs \
+    scripts/gate/routing-table/groups-tail.mjs \
+    scripts/gate/routing-table/index.mjs \
+    scripts/gate/routing-table/pattern.mjs \
+    scripts/gate/routing-table/schema.mjs \
     scripts/terraform/terraform-fmt-check.mjs \
     scripts/terraform/terraform-fmt-check.test.mjs \
     turbo.json \
