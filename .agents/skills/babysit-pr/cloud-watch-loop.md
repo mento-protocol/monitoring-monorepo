@@ -49,10 +49,16 @@ Do not foreground-poll and never sleep-poll. Instead:
      CodeRabbit review whose body contains `**Run ID**` and whose review commit
      equals the current full head. Ignore empty reply-only review records. After
      the optional CodeRabbit check becomes terminal, refresh once. If the signal
-     is missing or stale and no top-level comment contains
+     is missing or stale and no trusted top-level comment contains both
+     `@coderabbitai review` and
      `<!-- coderabbit-final-head-review:<full-head-sha> -->`, use
      `add_issue_comment` to post `@coderabbitai review`, a blank line, and that
-     exact marker. Recheck the current full head immediately before the write.
+     exact marker. A marker comment is trusted only when its author association
+     is `OWNER`, `MEMBER`, or `COLLABORATOR`, or its author login is `claude`,
+     `claude[bot]`, `chatgpt-codex-connector`, or
+     `chatgpt-codex-connector[bot]`. When the head-update time is available,
+     require the request comment to be at or after it. Recheck the current full
+     head immediately before the write.
      The marker detects completed requests and provides best-effort duplicate
      suppression; the issue-comment API does not provide an atomic claim.
 4. Blocker handling, reply shapes, and Codex-request discipline are identical
