@@ -116,17 +116,35 @@ export const TARGET_FILE_RELATIVE = "sentry-triage-target/target.json";
 /** Terminal marker the broker step's watchdog writes when the Sentry
  * credential broker exits while the agent is running. Fixed relative path
  * under `$RUNNER_TEMP` for the same reason as TARGET_FILE_RELATIVE: an env var
- * naming the path would be one more model-reachable binding to repoint. The
- * agent holds no tool that creates or deletes a file, so it can neither forge
- * this marker nor clear one the watchdog wrote. */
+ * naming the path would be one more model-reachable binding to repoint.
+ *
+ * This one sits in the agent-WRITABLE `$RUNNER_TEMP`, and that is sound only
+ * because its trigger is EXISTENCE. The agent's permitted `gh issue view …
+ * --template … > path` composes into create-and-truncate (see the workflow's
+ * staging banner), so it can bring this marker into being or empty it — both of
+ * which refuse — but it holds nothing that unlinks or renames, so it cannot
+ * clear one the watchdog wrote. Every reachable tamper is fail-CLOSED. Do not
+ * make the refusal depend on the marker's CONTENTS; that would turn truncation
+ * into a bypass. The pid record below has no such property, which is why it is
+ * locked instead. */
 export const BROKER_DOWN_FILE_RELATIVE = "sentry-mcp-broker.down";
 
 /** The broker's pid, recorded by the trusted broker step before the agent
  * starts. The live probe below identifies the broker by THIS and by nothing in
  * the environment: `SENTRY_MCP_BROKER_PORT` is job env that the agent's own
  * shell can reassign, and a port is not an identity in any case — see
- * probeBrokerByPid. */
-export const BROKER_PID_FILE_RELATIVE = "sentry-mcp-broker.pid";
+ * probeBrokerByPid.
+ *
+ * IN ITS OWN LOCKED DIRECTORY, not bare `$RUNNER_TEMP`. Unlike the marker this
+ * record is trusted for its CONTENTS, so create-and-truncate is enough to
+ * subvert it: an agent that writes a long-lived pid (its own parent, say) makes
+ * a dead broker read as alive, and the post then only has to beat the
+ * watchdog's poll to the marker. So the broker step publishes it 0444 inside a
+ * 0555 directory — the same lock as the pinned write target — where
+ * open(O_WRONLY), create, unlink and rename all fail EACCES for the owning
+ * non-root user, and probeBrokerByPid refuses a record it finds writable. */
+export const BROKER_PID_FILE_RELATIVE =
+  "sentry-broker-identity/sentry-mcp-broker.pid";
 
 /** Cross-check only. The pinned file wins; a disagreement refuses. */
 export const ISSUE_ENV_VAR = "SENTRY_TRIAGE_COMMENT_ISSUE";
@@ -222,6 +240,78 @@ export function brokerPidFilePath(env) {
   return join(tempDir, BROKER_PID_FILE_RELATIVE);
 }
 
+/**
+ * The Sentry Web API path segments that are route STRUCTURE rather than an
+ * identifier. Everything else in an `/api/0/…` path is a coordinate — org and
+ * project slugs, issue ids and short-ids, event/trace/replay ids, monitor
+ * slugs, snapshot artifact ids, image file names.
+ *
+ * Kept in step with the broker's own ALLOWED_PATHS by
+ * `sentry-triage-agent-comment.test.mjs`, which re-derives this vocabulary from
+ * `scripts/sentry/broker/sentry-mcp-broker.mjs` and drives every allowed route
+ * through the redactor. That direction is deliberate: the broker is NOT
+ * imported here, because this wrapper's runtime closure is staged read-only by
+ * the workflow and adding the broker to it would widen what the agent step
+ * loads for no runtime benefit.
+ */
+export const SENTRY_PATH_LITERALS = new Set([
+  "api",
+  "0",
+  "organizations",
+  "projects",
+  "issues",
+  "events",
+  "latest",
+  "validate",
+  "autofix",
+  "external-issues",
+  "replay-count",
+  "replays",
+  "trace",
+  "trace-meta",
+  "ai-conversations",
+  "monitors",
+  "preprodartifacts",
+  "snapshots",
+  "images",
+]);
+
+/** What a redacted coordinate reads as. Deliberately not empty: the reader must
+ * see that a segment was there. */
+export const REDACTED_SEGMENT = "<redacted>";
+
+/**
+ * Strip Sentry coordinates out of text bound for the PUBLIC job log.
+ *
+ * The broker logs `url.pathname` for every request it proxies, and those paths
+ * carry issue, event, trace, replay, monitor, conversation and snapshot
+ * identifiers. That log is agent-readable BY DESIGN — it lives under
+ * `$RUNNER_TEMP` and the agent holds `Read` — but this repository is public, so
+ * an unedited copy on the agent's stderr publishes those coordinates to anyone.
+ * The verdict comment's permalink is the only Sentry coordinate this pipeline
+ * publishes on purpose.
+ *
+ * Route SHAPE survives, and that is the whole diagnostic: a broker refusal
+ * names the route the granted tool set produced, which is what re-derives the
+ * path allowlist on an MCP-server bump. The identifiers add nothing to that.
+ * Query strings go whole — they carry search terms and filters.
+ */
+export function redactSentryPaths(text) {
+  return String(text).replace(/\/api\/0\/[^\s?]*(?:\?\S*)?/g, (match) => {
+    const query = match.indexOf("?");
+    const pathname = query === -1 ? match : match.slice(0, query);
+    const redacted = pathname
+      .split("/")
+      .map((segment) =>
+        segment === "" || SENTRY_PATH_LITERALS.has(segment)
+          ? segment
+          : REDACTED_SEGMENT,
+      )
+      .join("/");
+    return query === -1 ? redacted : `${redacted}?${REDACTED_SEGMENT}`;
+  });
+}
+
 /** Carries the marker's contents — the watchdog's reason plus the broker log —
  * separately from the one-line refusal, because `::error::` annotations are
  * single-line and the log is what makes the failure attributable. */
@@ -273,8 +363,10 @@ function readBrokerDownDefault(path) {
 export function probeBrokerByPid(env, readStatus = readProcStatus) {
   const path = brokerPidFilePath(env);
   let raw;
+  let mode;
   try {
     raw = readFileSync(path, "utf8").trim();
+    mode = statSync(path).mode;
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
     throw new Error(
@@ -282,6 +374,19 @@ export function probeBrokerByPid(env, readStatus = readProcStatus) {
         `(${reason}); without it there is no way to tell whether the broker ` +
         "that produced this evidence is still up.",
       { cause: err },
+    );
+  }
+  // A writable record is not a record. This one is trusted for its CONTENTS —
+  // it names the process the whole liveness answer is about — and the agent's
+  // permitted `gh issue view … --template … > path` writes arbitrary text to
+  // any path this user can write. So the broker step publishes it 0444 in a
+  // 0555 directory and this refuses if it ever finds otherwise, which also
+  // catches that step regressing. Same rule, same reason, as the pinned target.
+  if ((mode & 0o222) !== 0) {
+    throw new Error(
+      `refusing to post: the broker's pid record at ${path} is writable ` +
+        `(mode ${(mode & 0o777).toString(8)}), so it is not evidence of which ` +
+        "process the broker is; the workflow must publish it read-only.",
     );
   }
   // The WHOLE trimmed record must be the pid. `Number.parseInt` stops at the
@@ -590,11 +695,18 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     // agent step stays green when a tool call fails, and the run log is the
     // audit trail for an attempted exfiltration or fence probe. Annotations are
     // single-line, so the usage block follows as plain stderr the agent reads.
-    process.stderr.write(`::error::sentry-triage-agent-comment: ${message}\n`);
+    //
+    // Everything written here reaches the run log of a PUBLIC repository, so it
+    // goes through redactSentryPaths first — see there for why the broker's own
+    // log is agent-readable but must not be published verbatim.
+    process.stderr.write(
+      `::error::sentry-triage-agent-comment: ${redactSentryPaths(message)}\n`,
+    );
     // The broker watchdog's record, log included, follows as plain stderr. This
     // is the only surface inside the agent step that reaches the job log, so a
     // refusal that withheld it would be a silent one (#1956).
-    const detail = err instanceof Error ? err.detail : undefined;
+    const raw = err instanceof Error ? err.detail : undefined;
+    const detail = typeof raw === "string" ? redactSentryPaths(raw) : undefined;
     if (typeof detail === "string" && detail.trim() !== "") {
       process.stderr.write(detail.endsWith("\n") ? detail : `${detail}\n`);
     }

@@ -32,6 +32,7 @@ import {
   parseArgs,
   postAgentComment,
   probeBrokerByPid,
+  redactSentryPaths,
   resolveTarget,
   TARGET_FILE_RELATIVE,
   targetFilePath,
@@ -66,6 +67,23 @@ function baseEnv(overrides = {}) {
     CLAUDE_CODE_OAUTH_TOKEN: OAUTH_TOKEN,
     ...overrides,
   };
+}
+
+/**
+ * A pid record as the trusted broker step leaves it: read-only, in its own
+ * directory. The directory is left writable here so the tests can clean up;
+ * that it is LOCKED on the runner is asserted separately, against the workflow
+ * and against a real 0555 directory.
+ */
+function stagePid(dir, value, mode = 0o444) {
+  const path = join(dir, BROKER_PID_FILE_RELATIVE);
+  mkdirSync(dirname(path), { recursive: true });
+  // The staged record is read-only, so a re-stage replaces it rather than
+  // reopening it for write — which is the very thing this mode forbids.
+  rmSync(path, { force: true });
+  writeFileSync(path, String(value));
+  chmodSync(path, mode);
+  return path;
 }
 
 /** A pinned target file as the trusted workflow step leaves it: read-only. */
@@ -271,6 +289,7 @@ test("a missing RUNNER_TEMP refuses", () => {
 const BROKER_DOWN_RECORD = [
   "The Sentry credential broker (pid 4242) exited while the triage agent was running; this round is void.",
   "--- /runner/_temp/sentry-mcp-broker.log ---",
+  "sentry-mcp-broker: GET /api/0/organizations/mentolabs/issues/6817342991/events/a1b2c3d4e5f60718293a4b5c6d7e8f90/ -> 200 (18213b)",
   "sentry-mcp-broker: SERVER-ERROR read ECONNRESET",
 ].join("\n");
 
@@ -351,7 +370,7 @@ test("the live probe follows the broker PROCESS, both ways", async () => {
   });
   try {
     const env = baseEnv({ RUNNER_TEMP: dir });
-    writeFileSync(join(dir, BROKER_PID_FILE_RELATIVE), String(child.pid));
+    stagePid(dir, child.pid);
     await assertBrokerAlive(env);
 
     const exited = new Promise((resolve) => child.once("exit", resolve));
@@ -394,7 +413,7 @@ test("the probe CONSULTS that state — an alive pid can still read as gone", ()
   const dir = mkdtempSync(join(tmpdir(), "sentry-triage-broker-"));
   try {
     const env = baseEnv({ RUNNER_TEMP: dir });
-    writeFileSync(join(dir, BROKER_PID_FILE_RELATIVE), String(process.pid));
+    stagePid(dir, process.pid);
     const asked = [];
     const read = (pid) => {
       asked.push(pid);
@@ -437,7 +456,7 @@ test("the live probe identifies the broker from a file, not the environment", as
       "-1",
       "12345678901",
     ]) {
-      writeFileSync(join(dir, BROKER_PID_FILE_RELATIVE), bad);
+      stagePid(dir, bad);
       await assert.rejects(
         () => assertBrokerAlive(env),
         /is not a pid/,
@@ -449,6 +468,61 @@ test("the live probe identifies the broker from a file, not the environment", as
     rmSync(join(dir, BROKER_PID_FILE_RELATIVE));
     await assert.rejects(() => assertBrokerAlive(env), /pid record/);
   } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a WRITABLE pid record refuses — it is not evidence of anything", async () => {
+  // The agent's permitted `gh issue view … --template … > path` writes
+  // arbitrary text to any path this user can write, so a pid record the agent
+  // can reach is a pid record the agent chooses. Write its own (alive) pid
+  // there and a dead broker would read as alive, leaving only the watchdog's
+  // poll lag between it and a blind verdict. The record is published read-only
+  // and this refuses if it ever is not — which also catches the workflow step
+  // dropping the chmod.
+  const dir = mkdtempSync(join(tmpdir(), "sentry-triage-broker-"));
+  try {
+    const env = baseEnv({ RUNNER_TEMP: dir });
+    for (const mode of [0o666, 0o644, 0o600, 0o444 | 0o200]) {
+      stagePid(dir, process.pid, mode);
+      await assert.rejects(
+        () => assertBrokerAlive(env),
+        /pid record .* is writable/,
+        `mode ${mode.toString(8)}`,
+      );
+    }
+    // …and the read-only record the workflow actually publishes passes.
+    stagePid(dir, process.pid, 0o444);
+    await assertBrokerAlive(env);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the staged pid lock denies the agent's write primitive outright", () => {
+  // The mode is not decoration. 0444 in a 0555 directory makes the redirection
+  // fail EACCES rather than merely being refused after the fact, and blocks the
+  // unlink-and-recreate that would otherwise route around it. Asserted against
+  // a real filesystem, since this is a kernel property and not a claim.
+  if (process.getuid && process.getuid() === 0) return; // root ignores modes
+  const dir = mkdtempSync(join(tmpdir(), "sentry-triage-broker-lock-"));
+  const path = stagePid(dir, process.pid, 0o444);
+  const identityDir = dirname(path);
+  try {
+    chmodSync(identityDir, 0o555);
+    assert.throws(() => writeFileSync(path, "1234"), { code: "EACCES" });
+    assert.throws(() => rmSync(path), { code: "EACCES" });
+    assert.throws(() => writeFileSync(join(identityDir, "other"), "x"), {
+      code: "EACCES",
+    });
+    // Control: the same writes succeed once the lock is off, so the assertions
+    // above are the mode talking and not the path being wrong.
+    chmodSync(identityDir, 0o755);
+    chmodSync(path, 0o644);
+    writeFileSync(path, "1234");
+    assert.equal(readFileSync(path, "utf8"), "1234");
+  } finally {
+    chmodSync(identityDir, 0o755);
     rmSync(dir, { recursive: true, force: true });
   }
 });
@@ -483,7 +557,7 @@ test("the probe cannot disturb the broker it checks", async () => {
   });
   try {
     await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-    writeFileSync(join(dir, BROKER_PID_FILE_RELATIVE), String(process.pid));
+    stagePid(dir, process.pid);
     await assertBrokerAlive(baseEnv({ RUNNER_TEMP: dir }));
     await new Promise((resolve) => setTimeout(resolve, 50));
     assert.equal(connections, 0, "the probe must open no connection");
@@ -554,8 +628,94 @@ test("END TO END: the refusal prints the broker log where the job log sees it", 
     // attributable to a cause rather than just loud.
     assert.match(run.stderr, /SERVER-ERROR read ECONNRESET/);
     assert.match(run.stderr, /sentry-mcp-broker\.log ---/);
+    // …but WITHOUT the Sentry coordinates. This stderr is the public run log of
+    // a public repository; the route shape is the diagnostic, the ids are not.
+    assert.ok(
+      !run.stderr.includes("6817342991"),
+      "the issue id must not reach the public run log",
+    );
+    assert.ok(
+      !run.stderr.includes("a1b2c3d4e5f60718293a4b5c6d7e8f90"),
+      "the event id must not reach the public run log",
+    );
+    assert.match(
+      run.stderr,
+      /GET \/api\/0\/organizations\/<redacted>\/issues\/<redacted>\/events\/<redacted>\/ -> 200 \(18213b\)/,
+      "the route, method, status and byte count must survive redaction",
+    );
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── the broker log is publishable only after redaction ──────────────────────
+
+test("redaction keeps the route shape and drops every coordinate", () => {
+  assert.equal(
+    redactSentryPaths(
+      "sentry-mcp-broker: GET /api/0/organizations/mentolabs/issues/68173/ -> 200 (91b)",
+    ),
+    "sentry-mcp-broker: GET /api/0/organizations/<redacted>/issues/<redacted>/ -> 200 (91b)",
+  );
+  // Query strings go whole: they carry the agent's search terms and filters.
+  assert.equal(
+    redactSentryPaths(
+      "/api/0/organizations/mentolabs/events/?query=is:unresolved",
+    ),
+    "/api/0/organizations/<redacted>/events/?<redacted>",
+  );
+  // An upstream error message embeds the absolute URL; the host is not a
+  // coordinate, everything after /api/0/ is.
+  assert.equal(
+    redactSentryPaths(
+      "sentry-mcp-broker: UPSTREAM-ERROR https://us.sentry.io/api/0/organizations/mentolabs/trace/deadbeef/ — fetch failed",
+    ),
+    "sentry-mcp-broker: UPSTREAM-ERROR https://us.sentry.io/api/0/organizations/<redacted>/trace/<redacted>/ — fetch failed",
+  );
+  // Text with no Sentry path is untouched, so a refusal reason still reads.
+  const plain = "sentry-mcp-broker: SERVER-ERROR listen EADDRINUSE";
+  assert.equal(redactSentryPaths(plain), plain);
+});
+
+test("redaction covers EVERY path the broker's allowlist admits", () => {
+  // Drift guard. The wrapper carries its own copy of the route vocabulary — it
+  // must not import the broker, whose module the workflow stages separately —
+  // so the vocabulary is re-derived HERE from ALLOWED_PATHS and every route is
+  // driven through the redactor with a distinctive marker in each variable
+  // position. A route the broker learns and this list has not is a coordinate
+  // that would reach the public run log unredacted.
+  const brokerSource = readFileSync(
+    join(SCRIPTS_DIR, "..", "broker", "sentry-mcp-broker.mjs"),
+    "utf8",
+  );
+  const start = brokerSource.indexOf("export const ALLOWED_PATHS = [");
+  const end = brokerSource.indexOf("\n];", start);
+  assert.ok(start > 0 && end > start, "ALLOWED_PATHS not found in the broker");
+  const block = brokerSource.slice(start, end);
+  const patterns = [...block.matchAll(/`([^`]+)`|path\("([^"]+)"\)/g)].map(
+    (m) => m[1] ?? m[2],
+  );
+  assert.ok(
+    patterns.length >= 18,
+    `expected the whole allowlist, parsed ${patterns.length}`,
+  );
+
+  const COORDINATE = "Zq7CoordinateZq7";
+  for (const pattern of patterns) {
+    const sample = pattern.replaceAll("${SEG}", COORDINATE);
+    const redacted = redactSentryPaths(`GET ${sample} -> 200 (1b)`);
+    assert.ok(
+      !redacted.includes(COORDINATE),
+      `an identifier survives redaction in ${pattern}`,
+    );
+    // The structure must NOT be redacted away, or the diagnostic goes with it.
+    for (const segment of sample.split("/")) {
+      if (segment === "" || segment === COORDINATE) continue;
+      assert.ok(
+        redacted.includes(`/${segment}`),
+        `route literal '${segment}' was redacted out of ${pattern}`,
+      );
+    }
   }
 });
 
@@ -924,6 +1084,34 @@ test("a broker that dies mid-agent voids the round (#1956)", () => {
   );
   assert.match(step, /> "\$\{pid_file\}\.partial"/);
   assert.match(step, /mv "\$\{pid_file\}\.partial" "\$\{pid_file\}"/);
+  // …and the record must be LOCKED before the agent exists. The agent's
+  // permitted `gh issue view … --template … > path` reaches any writable path,
+  // and this record is trusted for its contents — an agent that plants a
+  // long-lived pid makes a dead broker read as alive. The file read-only first,
+  // then its directory, so no window leaves it writable inside a writable
+  // directory.
+  const lockFile = step.indexOf('chmod 0444 "${pid_file}"');
+  const lockDir = step.indexOf('chmod 0555 "${identity_dir}"');
+  assert.ok(lockFile > 0, "the pid record must be published read-only");
+  assert.ok(lockDir > lockFile, "its directory must be locked, and after it");
+  assert.ok(
+    lockFile > step.indexOf('mv "${pid_file}.partial" "${pid_file}"'),
+    "the lock must follow the publish, not precede it",
+  );
+  // The record lives in that directory and not in bare $RUNNER_TEMP, which
+  // stays writable for the marker.
+  assert.match(
+    step,
+    /identity_dir="\$\{RUNNER_TEMP\}\/sentry-broker-identity"/,
+  );
+  assert.ok(
+    BROKER_PID_FILE_RELATIVE.startsWith("sentry-broker-identity/"),
+    "the wrapper must read the pid out of the locked directory",
+  );
+  // A reused $RUNNER_TEMP would leave the directory locked from last round, so
+  // it is unlocked before removal — otherwise this step fails under set -e.
+  assert.match(step, /chmod -R u\+rwX "\$\{identity_dir\}"/);
+  assert.match(step, /rm -rf "\$\{identity_dir\}"/);
   // A watchdog that waits on the broker's own pid — not on the port, which a
   // later listener could re-bind, and not on the ready file, which survives it.
   assert.match(step, /while kill -0 "\$\{broker_pid\}" 2>\/dev\/null/);

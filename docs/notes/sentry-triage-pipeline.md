@@ -728,15 +728,36 @@ So the mechanism is split across the two halves that can each do their part:
 - `scripts/sentry/triage/sentry-triage-agent-comment.mjs` refuses to post when
   that marker exists (`BROKER_DOWN_FILE_RELATIVE`, the one home for the name)
   and prints it: a single-line `::error::` annotation plus the marker's contents
-  as stderr. The agent holds no tool that creates or deletes a file, so it can
-  neither forge the marker nor clear one the watchdog wrote.
+  as stderr.
 
-Printing the marker puts the broker's log in front of the model, which is sound
-only because every line the broker writes is a fixed prefix plus a method, a
-path, a status, a byte count or a refusal reason — never the token, a request
-header or a response body — and its startup assertions name the offending
-variable and never its value. Re-check that before adding a log line to
-`scripts/sentry/broker/sentry-mcp-broker.mjs`.
+The marker sits in the agent-writable `$RUNNER_TEMP`, and that is sound only
+because its trigger is EXISTENCE. The agent's permitted
+`gh issue view … --template … > path` composes into create-and-truncate, so it
+can bring the marker into being or empty it — both of which refuse — but it
+holds nothing that unlinks or renames, so it cannot clear one the watchdog
+wrote. Every reachable tamper is fail-closed. **Do not make the refusal depend
+on the marker's contents**; that would turn truncation into a bypass.
+
+Printing the marker puts the broker's log in front of the model AND in this
+public repository's run log. Two separate properties carry that:
+
+- **No credential.** Every line the broker writes is a fixed prefix plus a
+  method, a path, a status, a byte count or a refusal reason — never the token,
+  a request header or a response body — and its startup assertions name the
+  offending variable and never its value. Re-check that before adding a log line
+  to `scripts/sentry/broker/sentry-mcp-broker.mjs`.
+- **No Sentry coordinates.** Those paths do carry issue, event, trace, replay,
+  monitor, conversation and snapshot identifiers. That is fine on disk — the log
+  is agent-readable by design — but not in a public run log, so the wrapper's
+  `redactSentryPaths` rewrites every `/api/0/…` path to its route shape and
+  drops the query string before printing. Route shape is the whole diagnostic
+  (it is what re-derives the path allowlist on an MCP-server bump); the
+  identifiers add nothing to it. The marker itself is written unredacted on
+  purpose: the raw log is the better artefact for anyone debugging on the
+  runner, and the wrapper is the one place it crosses into publication. The
+  redactor's route vocabulary is re-derived from the broker's `ALLOWED_PATHS` by
+  `sentry-triage-agent-comment.test.mjs`, which drives every allowed route
+  through it, so a route the broker learns cannot quietly go unredacted.
 
 The wrapper also **checks the broker process directly**, in the instant before
 it hands the body to `gh`, because a polled marker lags the death it reports and
@@ -745,9 +766,18 @@ marker is attributable but late, the process check is immediate but has no
 story to tell.
 
 The check is `process.kill(pid, 0)` against
-`$RUNNER_TEMP/sentry-mcp-broker.pid`, recorded by the broker step before the
-agent existed. The process and not its port, deliberately: a loopback connect
-answers a weaker question, since the kernel completes the handshake from the
+`$RUNNER_TEMP/sentry-broker-identity/sentry-mcp-broker.pid`, recorded by the
+broker step before the agent existed. Unlike the marker, that record is trusted
+for its CONTENTS — it names the process the whole liveness answer is about — so
+create-and-truncate is enough to subvert it: an agent that plants a long-lived
+pid (its own parent, say) makes a dead broker read as alive, and the post then
+only has to beat the watchdog's poll to the marker. So it gets the pinned write
+target's treatment: **0444 inside a 0555 directory**, where `open(O_WRONLY)`,
+create, unlink and rename all fail EACCES for the owning non-root user, and the
+wrapper refuses a record it finds writable — which also catches the broker step
+dropping the `chmod`. The process and not its port, deliberately: a loopback
+connect answers a weaker question, since the kernel completes the handshake from
+the
 listen backlog while the owning process is on its way out, and once the port is
 released anything that rebinds it answers in the broker's place. A pid names one
 process. It is also inert — signal 0 sends nothing, so the check cannot disturb

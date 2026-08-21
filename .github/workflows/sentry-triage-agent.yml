@@ -554,9 +554,34 @@ jobs:
           # constants and must stay in step with them;
           # scripts/sentry/triage/sentry-triage-agent-comment.test.mjs asserts
           # they agree.
+          #
+          # THE TWO ARE NOT PROTECTED THE SAME WAY, because they are not
+          # trusted the same way. The MARKER is triggered by EXISTENCE, so the
+          # agent's `gh issue view … --template … > path` (see the staging
+          # banner above) can only create it or empty it — both refuse — and
+          # nothing it holds unlinks or renames, so it cannot clear one this
+          # watchdog wrote. Every reachable tamper is fail-closed, and bare
+          # $RUNNER_TEMP is fine for it.
+          #
+          # The PID RECORD is trusted for its CONTENTS: it names the process the
+          # wrapper's whole liveness answer is about. The same redirection would
+          # let a prompt-injected agent write a long-lived pid there, make a dead
+          # broker read as alive and post inside the watchdog's poll lag. So it
+          # gets the pinned target's treatment instead — 0444 in a 0555
+          # directory, where open(O_WRONLY), create, unlink and rename all fail
+          # EACCES for this non-root user — and the wrapper refuses a record it
+          # finds writable, which catches this step regressing.
           down_file="${RUNNER_TEMP}/sentry-mcp-broker.down"
-          pid_file="${RUNNER_TEMP}/sentry-mcp-broker.pid"
-          rm -f "${ready_file}" "${down_file}" "${down_file}.partial" "${pid_file}"
+          identity_dir="${RUNNER_TEMP}/sentry-broker-identity"
+          pid_file="${RUNNER_TEMP}/sentry-broker-identity/sentry-mcp-broker.pid"
+          rm -f "${ready_file}" "${down_file}" "${down_file}.partial"
+          # A reused $RUNNER_TEMP would leave this directory locked from the
+          # previous round, so unlock before removing; `|| true` because absent
+          # is the normal case, not a failure.
+          chmod -R u+rwX "${identity_dir}" 2>/dev/null || true
+          rm -rf "${identity_dir}"
+          mkdir -p "${identity_dir}"
+          chmod 0755 "${identity_dir}"
 
           # Token on STDIN via a builtin: no env var, no argv, no temp file.
           # Redirecting stdout/stderr to a file releases the step's pipe, so the
@@ -604,6 +629,12 @@ jobs:
           # that spawns its own child — a shim's pid would outlive the broker's.
           printf '%s' "${broker_pid}" > "${pid_file}.partial"
           mv "${pid_file}.partial" "${pid_file}"
+          # Lock it before the agent exists. The file first so no window leaves
+          # it writable inside a still-writable directory.
+          chmod 0444 "${pid_file}"
+          chmod 0555 "${identity_dir}"
+          ls -ld "${identity_dir}"
+          ls -l "${pid_file}"
 
           # WATCHDOG for the window the readiness loop above and the pre-flight
           # probe below cannot reach: the agent step itself (issue #1956). The
@@ -649,14 +680,26 @@ jobs:
               echo "The Sentry credential broker (pid ${broker_pid}) exited while the triage agent was running; this round is void."
               echo "--- ${log_file} ---"
               # The wrapper prints this marker on the agent's stderr, so the
-              # broker log becomes readable by the model. That is only sound
-              # because every line the broker writes is a fixed prefix plus a
-              # method, a path, a status, a byte COUNT or a refusal reason —
-              # never the token, a request header or a response body, and its
-              # startup assertions name the offending VARIABLE and never its
-              # value. Re-check that before adding a log line to
-              # scripts/sentry/broker/sentry-mcp-broker.mjs. The readiness
-              # failures above already `cat` this same file into the job log.
+              # broker log becomes readable by the model AND lands in this
+              # public repository's run log. Two separate properties carry that:
+              #
+              #   - NO CREDENTIAL. Every line the broker writes is a fixed
+              #     prefix plus a method, a path, a status, a byte COUNT or a
+              #     refusal reason — never the token, a request header or a
+              #     response body — and its startup assertions name the
+              #     offending VARIABLE and never its value. Re-check that before
+              #     adding a log line to
+              #     scripts/sentry/broker/sentry-mcp-broker.mjs. The readiness
+              #     failures above already `cat` this same file into the job log.
+              #   - NO SENTRY COORDINATES. Those paths DO carry issue, event,
+              #     trace, replay, monitor and snapshot identifiers, which is
+              #     fine on disk (the log is agent-readable by design) but not
+              #     in a public run log. The wrapper redacts every `/api/0/…`
+              #     path to its route shape before printing — redactSentryPaths
+              #     in scripts/sentry/triage/sentry-triage-agent-comment.mjs.
+              #     The marker is written unredacted on purpose: the raw log is
+              #     the better artefact for anyone debugging on the runner, and
+              #     the wrapper is the one place it crosses into publication.
               cat "${log_file}" 2>/dev/null || echo "(the broker log is unreadable)"
             } > "${down_file}.partial"
             mv "${down_file}.partial" "${down_file}"
