@@ -427,6 +427,50 @@ describe('QueryService', () => {
     );
   });
 
+  it('logs primary-only and dual-endpoint terminal failures independently', async () => {
+    const primaryReadContract = jest
+      .fn()
+      .mockRejectedValueOnce(makeRevertError())
+      .mockRejectedValueOnce(makeTransportError('primary down'));
+    const fallbackReadContract = jest
+      .fn()
+      .mockRejectedValue(makeTransportError('fallback down'));
+
+    mockCreatePublicClient
+      .mockReturnValueOnce({
+        readContract: primaryReadContract,
+        getBalance: jest.fn(),
+      } as unknown as ReturnType<typeof createPublicClient>)
+      .mockReturnValueOnce({
+        readContract: fallbackReadContract,
+        getBalance: jest.fn(),
+      } as unknown as ReturnType<typeof createPublicClient>);
+
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    const loggerError = jest
+      .spyOn(Logger.prototype, 'error')
+      .mockImplementation(() => undefined);
+    const chainWithFallback = {
+      ...chain,
+      fallbackHttpRpcUrl: 'http://localhost:8546',
+    } as unknown as ChainConfig;
+    const service = new QueryService(makeConfigService([chainWithFallback]));
+    const metric = makeMetric();
+
+    await expect(service.query(metric)).resolves.toBeUndefined();
+    await expect(service.query(metric)).resolves.toBeUndefined();
+
+    expect(loggerError).toHaveBeenCalledTimes(2);
+    expect(loggerError).toHaveBeenNthCalledWith(
+      1,
+      expect.stringContaining('RPC call failed for'),
+    );
+    expect(loggerError).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining('Both RPC endpoints failed for'),
+    );
+  });
+
   // (E) Counter NOT incremented when the RPC succeeds but parse throws.
   // The counter tracks RPC-transport failures only, not parse/validation errors.
   it('does not increment rpcErrors counter when parse fails after a successful RPC', async () => {

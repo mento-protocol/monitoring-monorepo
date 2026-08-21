@@ -234,7 +234,7 @@ export class QueryService {
       } catch (fallbackError) {
         this.rateLimitedLog(
           'error',
-          `terminal:${label}`,
+          `terminal:primary-and-fallback:${label}`,
           `Both RPC endpoints failed for ${label}. Primary: ${conciseErrorMessage(primaryError)} Fallback: ${conciseErrorMessage(fallbackError)}`,
         );
         throw fallbackError;
@@ -245,7 +245,7 @@ export class QueryService {
     // would just reproduce) — re-throw the primary error for the caller.
     this.rateLimitedLog(
       'error',
-      `terminal:${label}`,
+      `terminal:primary-only:${label}`,
       `RPC call failed for ${label}: ${conciseErrorMessage(primaryError)}`,
     );
     throw primaryError;
