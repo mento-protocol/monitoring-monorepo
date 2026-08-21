@@ -25,7 +25,8 @@ import {
 const RUNNER_TEMP_FOR_TESTS = "/runner/_temp";
 // Placeholder vocabulary, per ADR 0068. `assertBodyPostable` and
 // `buildChildEnv` match these values verbatim against the environment, so no
-// provider prefix or length is load-bearing — only that the three differ.
+// provider prefix is required; each value must remain distinct and meet
+// `MIN_SECRET_LENGTH`.
 const SENTRY_CRED = "example-service-credential-value";
 const GH_CRED = "example-access-token-value";
 const OAUTH_CRED = "example-auth-credential-value";
