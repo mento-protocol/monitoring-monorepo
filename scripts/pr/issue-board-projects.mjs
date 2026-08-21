@@ -15,6 +15,9 @@ import {
 } from "./issue-board-state.mjs";
 import { getIssue, ghGraphql } from "./issue-board-transport.mjs";
 
+export const MAX_PROJECT_FIELD_VALUE_PAGES = 100;
+export const MAX_PROJECT_FIELD_VALUE_NODES = 10_000;
+
 export async function getProject(options) {
   const response = await ghGraphql(
     `query($org:String!,$number:Int!){
@@ -69,6 +72,26 @@ export async function getProject(options) {
 
 function findField(project, name) {
   return project.fields.find((field) => field.name === name);
+}
+
+export function requireBackfillFields(project) {
+  const expected = {
+    [OPTIONAL_PROJECT_FIELDS.agent]: "TEXT",
+    [OPTIONAL_PROJECT_FIELDS.claimId]: "TEXT",
+    [OPTIONAL_PROJECT_FIELDS.branch]: "TEXT",
+    [OPTIONAL_PROJECT_FIELDS.claimedAt]: "DATE",
+  };
+  const fields = {};
+  for (const [name, dataType] of Object.entries(expected)) {
+    const field = findField(project, name);
+    if (field?.dataType !== dataType) {
+      throw new Error(
+        `Project must have a ${dataType} ${name} field for backfill`,
+      );
+    }
+    fields[name] = field;
+  }
+  return fields;
 }
 
 function findIssueProjectItemInNodes(nodes, project) {
@@ -133,6 +156,95 @@ async function readProjectTextField(options, itemId, fieldId) {
   const values = response?.data?.node?.fieldValues?.nodes ?? [];
   const match = values.find((value) => value?.field?.id === fieldId);
   return match?.text ?? null;
+}
+
+export async function readBackfillProjectFields(
+  options,
+  project,
+  itemId,
+  {
+    graphql = ghGraphql,
+    maxPages = MAX_PROJECT_FIELD_VALUE_PAGES,
+    maxNodes = MAX_PROJECT_FIELD_VALUE_NODES,
+  } = {},
+) {
+  const fields = requireBackfillFields(project);
+  const valuesById = new Map();
+  let cursor = null;
+  const seenCursors = new Set();
+  let pages = 0;
+  let nodesRead = 0;
+  while (true) {
+    if (pages >= maxPages) {
+      throw new Error(
+        `Project item ${itemId} field pagination exceeded ${maxPages} pages`,
+      );
+    }
+    const response = await graphql(
+      `
+        query ($item: ID!, $cursor: String) {
+          node(id: $item) {
+            ... on ProjectV2Item {
+              fieldValues(first: 100, after: $cursor) {
+                nodes {
+                  ... on ProjectV2ItemFieldTextValue {
+                    text
+                    field {
+                      ... on ProjectV2FieldCommon {
+                        id
+                      }
+                    }
+                  }
+                  ... on ProjectV2ItemFieldDateValue {
+                    date
+                    field {
+                      ... on ProjectV2FieldCommon {
+                        id
+                      }
+                    }
+                  }
+                }
+                pageInfo {
+                  hasNextPage
+                  endCursor
+                }
+              }
+            }
+          }
+        }
+      `,
+      { item: itemId, cursor },
+    );
+    const connection = response?.data?.node?.fieldValues;
+    if (!connection) throw new Error(`Project item ${itemId} was not found`);
+    pages += 1;
+    const nodes = connection.nodes ?? [];
+    nodesRead += nodes.length;
+    if (nodesRead > maxNodes) {
+      throw new Error(
+        `Project item ${itemId} field pagination exceeded ${maxNodes} nodes`,
+      );
+    }
+    for (const value of nodes) {
+      if (value?.field?.id)
+        valuesById.set(value.field.id, value.text ?? value.date ?? null);
+    }
+    if (!connection.pageInfo?.hasNextPage) break;
+    const nextCursor = connection.pageInfo.endCursor;
+    if (!nextCursor || seenCursors.has(nextCursor)) {
+      throw new Error(
+        `Project item ${itemId} field pagination did not advance cursor`,
+      );
+    }
+    seenCursors.add(nextCursor);
+    cursor = nextCursor;
+  }
+  return Object.fromEntries(
+    Object.entries(fields).map(([name, field]) => [
+      name,
+      valuesById.get(field.id) ?? null,
+    ]),
+  );
 }
 
 export async function verifyClaimOwnership(
@@ -246,48 +358,97 @@ async function clearProjectField(options, project, itemId, fieldId) {
   );
 }
 
-async function updateTextField(options, project, itemId, fieldId, text) {
+async function updateTextField(
+  options,
+  project,
+  itemId,
+  fieldId,
+  text,
+  { graphql = ghGraphql } = {},
+) {
   if (text === undefined || text === "") return;
   if (text === null) {
     await clearProjectField(options, project, itemId, fieldId);
     return;
   }
-  await ghGraphql(
-    `mutation($project:ID!,$item:ID!,$field:ID!,$text:String!){
-      updateProjectV2ItemFieldValue(input:{
-        projectId:$project
-        itemId:$item
-        fieldId:$field
-        value:{text:$text}
-      }) {
-        projectV2Item { id }
+  await graphql(
+    `
+      mutation ($project: ID!, $item: ID!, $field: ID!, $text: String!) {
+        updateProjectV2ItemFieldValue(
+          input: {
+            projectId: $project
+            itemId: $item
+            fieldId: $field
+            value: { text: $text }
+          }
+        ) {
+          projectV2Item {
+            id
+          }
+        }
       }
-    }`,
+    `,
     { project: project.id, item: itemId, field: fieldId, text },
     { dryRun: options.dryRun, mutates: true },
   );
 }
 
-async function updateDateField(options, project, itemId, fieldId, date) {
+async function updateDateField(
+  options,
+  project,
+  itemId,
+  fieldId,
+  date,
+  { graphql = ghGraphql } = {},
+) {
   if (date === undefined || date === "") return;
   if (date === null) {
     await clearProjectField(options, project, itemId, fieldId);
     return;
   }
-  await ghGraphql(
-    `mutation($project:ID!,$item:ID!,$field:ID!,$date:Date!){
-      updateProjectV2ItemFieldValue(input:{
-        projectId:$project
-        itemId:$item
-        fieldId:$field
-        value:{date:$date}
-      }) {
-        projectV2Item { id }
+  await graphql(
+    `
+      mutation ($project: ID!, $item: ID!, $field: ID!, $date: Date!) {
+        updateProjectV2ItemFieldValue(
+          input: {
+            projectId: $project
+            itemId: $item
+            fieldId: $field
+            value: { date: $date }
+          }
+        ) {
+          projectV2Item {
+            id
+          }
+        }
       }
-    }`,
+    `,
     { project: project.id, item: itemId, field: fieldId, date },
     { dryRun: options.dryRun, mutates: true },
   );
+}
+
+export async function writeBackfillProjectFields(
+  options,
+  project,
+  itemId,
+  writes,
+  { graphql = ghGraphql } = {},
+) {
+  const fields = requireBackfillFields(project);
+  for (const write of writes) {
+    const field = fields[write.field];
+    if (!field) throw new Error(`Unknown backfill field: ${write.field}`);
+    if (field.dataType === "DATE") {
+      await updateDateField(options, project, itemId, field.id, write.value, {
+        graphql,
+      });
+    } else {
+      await updateTextField(options, project, itemId, field.id, write.value, {
+        graphql,
+      });
+    }
+  }
 }
 
 export async function updateProjectFields(

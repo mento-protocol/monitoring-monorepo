@@ -3979,9 +3979,9 @@ while IFS= read -r path; do
         scripts/pr/review-materiality.mjs|scripts/pr/review-materiality-context.mjs|scripts/pr/review-materiality.test.mjs)
           add_command "pnpm agent:review-materiality:test" "agent review materiality helper changed"
           ;;
-        scripts/pr/agent-issue-board.mjs|scripts/pr/agent-issue-board.test.mjs|scripts/pr/issue-board-cli.mjs|scripts/pr/issue-board-commands.mjs|scripts/pr/issue-board-projects.mjs|scripts/pr/issue-board-state.mjs|scripts/pr/issue-board-transport.mjs)
-          # agent-issue-board.mjs is the entry point over five layers (cli,
-          # transport, state, projects, commands). The one suite covers the
+        scripts/pr/agent-issue-board.mjs|scripts/pr/agent-issue-board.test.mjs|scripts/pr/issue-board-backfill.mjs|scripts/pr/issue-board-cli.mjs|scripts/pr/issue-board-commands.mjs|scripts/pr/issue-board-projects.mjs|scripts/pr/issue-board-state.mjs|scripts/pr/issue-board-transport.mjs)
+          # agent-issue-board.mjs is the entry point over six layers (cli,
+          # transport, state, projects, backfill, commands). The one suite covers the
           # pure state machine through the entry's re-exports, so every layer
           # routes to it.
           add_command "pnpm issue:board:test" "agent issue board helper changed"

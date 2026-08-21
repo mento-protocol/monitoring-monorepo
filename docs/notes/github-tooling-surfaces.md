@@ -3,7 +3,7 @@ title: GitHub Tooling Surfaces — gh CLI vs MCP
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-22
+last_verified: 2026-08-21
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -97,16 +97,25 @@ partial MCP emulation plus an explicit gh-capable handoff:
    label set, e.g. swap `agent-ready` for `agent-active` on claim, or
    `agent-active` for `in-pr` when the PR opens).
 2. Post the matching helper-format comment with `add_issue_comment` (claim
-   comments include the `Claim ID:` / `Branch:` / `Claimed at:` lines), and
-   state in it that Project #12 fields were not set from this session.
+   comments include the `Claim ID:` and `Claimed at:` lines, plus `Branch:`
+   when known), and state in it that Project #12 fields were not set from this
+   session.
 3. The Project Claim ID race guard is absent on this path, so the claim
    comment is the ownership record; check for a fresher competing claim
    comment before starting work.
-4. Hand off to a gh-capable surface: run `pnpm issue:board sync` afterward
-   to reconcile the Project #12 item's status. Sync writes status only — the
-   ownership fields (`Claim ID`, `Agent`, `Branch`, `Claimed At`) stay empty
-   until backfilled from the claim comment (a helper backfill path is
-   tracked in #1488), so the claim comment remains the ownership record.
+4. Hand off to a gh-capable surface. Run
+   `pnpm issue:board backfill --issue <n> --dry-run`, then rerun it without
+   `--dry-run` only when the proposed ownership-field writes are correct. The
+   helper reads the newest valid trusted claim comment. It fills empty Project
+   fields as follows: `Claim ID`, `Agent`, and `Claimed At`. It fills `Branch`
+   only when the claim supplies it. It preserves Project Status and rejects
+   non-empty conflicts.
+   Before every field write, it re-reads the lifecycle, exact trusted claim
+   snapshot, Project field types, and current values. GitHub provides no
+   compare-and-swap operation. A concurrent write can still occur after that
+   read and before the mutation. The helper does not roll back because a
+   rollback could erase concurrent state. Run `pnpm issue:board sync`
+   separately to reconcile status.
 
 ## Known MCP gaps
 

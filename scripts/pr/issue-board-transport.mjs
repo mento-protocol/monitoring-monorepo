@@ -11,6 +11,9 @@ import { spawn } from "node:child_process";
 import { splitRepo, validateOpenPr } from "./issue-board-state.mjs";
 
 const GH_OUTPUT_MAX_BYTES = 20 * 1024 * 1024;
+// A bounded traversal must fail rather than use an incomplete comment history.
+export const MAX_ISSUE_COMMENT_PAGES = 100;
+export const MAX_ISSUE_COMMENT_NODES = 10_000;
 
 function quoteArg(value) {
   if (/^[A-Za-z0-9_./:=@#-]+$/.test(value)) return value;
@@ -114,6 +117,7 @@ export async function ghJson(args, opts = {}) {
 export async function ghGraphql(query, variables = {}, opts = {}) {
   const args = ["api", "graphql", "-f", `query=${query}`];
   for (const [key, value] of Object.entries(variables)) {
+    if (value == null) continue;
     const flag = typeof value === "number" ? "-F" : "-f";
     args.push(flag, `${key}=${value}`);
   }
@@ -202,6 +206,84 @@ export async function getIssue(options, number) {
     "--json",
     "id,number,title,url,labels,state,projectItems",
   ]);
+}
+
+export async function listIssueComments(
+  options,
+  issueNumber,
+  {
+    graphql = ghGraphql,
+    maxPages = MAX_ISSUE_COMMENT_PAGES,
+    maxNodes = MAX_ISSUE_COMMENT_NODES,
+  } = {},
+) {
+  const repo = splitRepo(options.repo);
+  const comments = [];
+  let cursor = null;
+  const seenCursors = new Set();
+  let pages = 0;
+  while (true) {
+    if (pages >= maxPages) {
+      throw new Error(
+        `Issue #${issueNumber} comment pagination exceeded ${maxPages} pages`,
+      );
+    }
+    const response = await graphql(
+      `
+        query (
+          $owner: String!
+          $repo: String!
+          $number: Int!
+          $cursor: String
+        ) {
+          repository(owner: $owner, name: $repo) {
+            issue(number: $number) {
+              comments(first: 100, after: $cursor) {
+                nodes {
+                  id
+                  body
+                  createdAt
+                  authorAssociation
+                }
+                pageInfo {
+                  hasNextPage
+                  endCursor
+                }
+              }
+            }
+          }
+        }
+      `,
+      {
+        owner: repo.owner,
+        repo: repo.name,
+        number: issueNumber,
+        cursor,
+      },
+    );
+    const connection = response?.data?.repository?.issue?.comments;
+    if (!connection) {
+      throw new Error(`Issue #${issueNumber} was not found in ${options.repo}`);
+    }
+    pages += 1;
+    const nodes = (connection.nodes ?? []).filter(Boolean);
+    if (comments.length + nodes.length > maxNodes) {
+      throw new Error(
+        `Issue #${issueNumber} comment pagination exceeded ${maxNodes} nodes`,
+      );
+    }
+    comments.push(...nodes);
+    if (!connection.pageInfo?.hasNextPage) break;
+    const nextCursor = connection.pageInfo.endCursor;
+    if (!nextCursor || seenCursors.has(nextCursor)) {
+      throw new Error(
+        `Issue #${issueNumber} comment pagination did not advance cursor`,
+      );
+    }
+    seenCursors.add(nextCursor);
+    cursor = nextCursor;
+  }
+  return comments;
 }
 
 export async function getPrIssues(options) {

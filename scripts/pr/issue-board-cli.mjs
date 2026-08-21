@@ -19,6 +19,7 @@ export function usage() {
   pnpm issue:review --pr 123 --issue 901 [--issue 902]
   pnpm issue:release --issue 901 [--needs-grooming]
   pnpm issue:board sync [--dry-run]
+  pnpm issue:board backfill --issue 901 [--dry-run]
 
 Options:
   --repo <owner/name>              Repository to operate on (default: ${DEFAULT_REPO})
@@ -107,6 +108,8 @@ export function parseArgs(argv, env = process.env) {
     ),
     count: 1,
     issueValues: [],
+    backfillIssueFlags: 0,
+    positionalIssueValues: [],
     issues: [],
     agent: defaultAgent(env),
     branch: env.AGENT_BRANCH ?? "",
@@ -148,6 +151,9 @@ export function parseArgs(argv, env = process.env) {
         options.count = Number(readValue());
         break;
       case "--issue":
+        options.backfillIssueFlags += 1;
+        options.issueValues.push(readValue());
+        break;
       case "--issues":
         options.issueValues.push(readValue());
         break;
@@ -179,6 +185,7 @@ export function parseArgs(argv, env = process.env) {
       default:
         if (arg.startsWith("-")) throw new Error(`Unknown option: ${arg}`);
         options.issueValues.push(arg);
+        options.positionalIssueValues.push(arg);
     }
   }
 
@@ -194,5 +201,21 @@ export function parseArgs(argv, env = process.env) {
   }
   delete options.prValue;
   options.issues = parseIssueNumbers(options.issueValues, options.repo);
+  if (options.command === "backfill") {
+    const explicitIssue = options.issueValues[0]?.trim();
+    if (
+      options.backfillIssueFlags !== 1 ||
+      options.positionalIssueValues.length > 0 ||
+      options.issueValues.length !== 1 ||
+      !/^#?[1-9]\d*$/.test(explicitIssue ?? "") ||
+      options.issues.length !== 1
+    ) {
+      throw new Error(
+        "backfill requires exactly one explicit --issue <number>",
+      );
+    }
+  }
+  delete options.backfillIssueFlags;
+  delete options.positionalIssueValues;
   return options;
 }

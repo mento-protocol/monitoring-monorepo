@@ -4,12 +4,13 @@
  * the repo's GitHub Projects workboard.
  *
  * This file is the entry point and the public surface. The implementation
- * lives in five layers it composes:
+ * lives in six layers it composes:
  *   - `issue-board-state.mjs`     pure transitions and predicates
  *   - `issue-board-cli.mjs`       argv parsing and usage text
  *   - `issue-board-transport.mjs` the bounded `gh` runner and issue readers
  *   - `issue-board-projects.mjs`  Projects V2 field IO
- *   - `issue-board-commands.mjs`  claim, review, release, sync
+ *   - `issue-board-backfill.mjs`  trusted claim recovery and fill-only plans
+ *   - `issue-board-commands.mjs`  claim, review, release, sync, backfill
  */
 
 import { fileURLToPath } from "node:url";
@@ -17,6 +18,7 @@ import { fileURLToPath } from "node:url";
 import { parseArgs, usage } from "./issue-board-cli.mjs";
 import {
   claim,
+  backfill,
   release,
   renderResults,
   review,
@@ -24,7 +26,12 @@ import {
 } from "./issue-board-commands.mjs";
 
 export { parseArgs, parseIssueNumbers } from "./issue-board-cli.mjs";
-export { buildClaimComment } from "./issue-board-commands.mjs";
+export { backfill, buildClaimComment } from "./issue-board-commands.mjs";
+export {
+  buildBackfillPlan,
+  parseClaimComment,
+  selectNewestTrustedClaim,
+} from "./issue-board-backfill.mjs";
 export { githubProjectScopeHint } from "./issue-board-transport.mjs";
 export {
   chooseUntriedCandidate,
@@ -32,6 +39,7 @@ export {
   DEFAULT_PROJECT_OWNER,
   DEFAULT_REPO,
   isClaimable,
+  isBackfillable,
   isRecoverableClaimRaceError,
   isReleasable,
   isReviewable,
@@ -55,6 +63,9 @@ async function main() {
   switch (options.command) {
     case "claim":
       results = await claim(options);
+      break;
+    case "backfill":
+      results = await backfill(options);
       break;
     case "review":
       results = await review(options);
