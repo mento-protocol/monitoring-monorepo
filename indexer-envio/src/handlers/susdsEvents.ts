@@ -5,7 +5,6 @@ import {
   handleSusdsYieldDailySnapshotHeartbeat,
   handleSusdsYieldLaunchBaseline,
   readSharePrice,
-  recordSusdsYieldEventDailySnapshot,
 } from "./susds/dailySnapshots.js";
 import {
   recordDeposit,
@@ -145,13 +144,7 @@ export function registerSusdsYieldEventHandlers(): void {
         event.params.shares,
         sharePriceUsdWei,
       );
-      const totals = await updateSummary(context, meta, sharePriceUsdWei);
-      await recordSusdsYieldEventDailySnapshot(
-        context,
-        meta,
-        sharePriceUsdWei,
-        totals,
-      );
+      await updateSummary(context, meta, sharePriceUsdWei);
     },
   );
 
@@ -182,13 +175,7 @@ export function registerSusdsYieldEventHandlers(): void {
         shares: event.params.shares,
         sharePriceUsdWei,
       });
-      const totals = await updateSummary(context, meta, sharePriceUsdWei);
-      await recordSusdsYieldEventDailySnapshot(
-        context,
-        meta,
-        sharePriceUsdWei,
-        totals,
-      );
+      await updateSummary(context, meta, sharePriceUsdWei);
     },
   );
 
@@ -222,13 +209,7 @@ export function registerSusdsYieldEventHandlers(): void {
         event.params.value,
         sharePriceUsdWei,
       );
-      const totals = await updateSummary(context, meta, sharePriceUsdWei);
-      await recordSusdsYieldEventDailySnapshot(
-        context,
-        meta,
-        sharePriceUsdWei,
-        totals,
-      );
+      await updateSummary(context, meta, sharePriceUsdWei);
     },
   );
 }

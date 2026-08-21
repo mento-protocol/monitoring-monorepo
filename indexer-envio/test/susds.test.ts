@@ -513,7 +513,7 @@ describeReserveYield("sUSDS reserve yield accounting", () => {
     assert.equal(rows[1]?.dailyEarnedYieldUsdWei, dollars(200));
   });
 
-  it("does not emit daily actuals from sparse tracked sUSDS events", async () => {
+  it("keeps sparse post-launch events out of daily actuals without a timestamp effect", async () => {
     let mockDb = MockDb.createMockDb();
     const day1 = V3_REVENUE_LAUNCH_TIMESTAMP + 86_400n;
     const day3 = day1 + 2n * 86_400n;
@@ -527,6 +527,11 @@ describeReserveYield("sUSDS reserve yield accounting", () => {
       dollars(1000),
       Number(day1 + 3_600n),
     );
+    assert.equal(dailySnapshots(mockDb).length, 0);
+    assert.equal(
+      mockDb.entities.SusdsYieldLaunchBaseline.get("1-susds-launch"),
+      undefined,
+    );
 
     setSharePrice(300, dollars(130) / 100n);
     mockDb = await transfer(
@@ -538,9 +543,35 @@ describeReserveYield("sUSDS reserve yield accounting", () => {
       dollars(100),
       Number(day3 + 3_600n),
     );
+    assert.equal(dailySnapshots(mockDb).length, 0);
+    assert.equal(
+      mockDb.entities.SusdsYieldLaunchBaseline.get("1-susds-launch"),
+      undefined,
+    );
+
+    setSharePrice(400, dollars(130) / 100n);
+    mockDb = await withdraw(
+      mockDb,
+      400,
+      2,
+      dollars(130),
+      dollars(100),
+      Number(day3 + 7_200n),
+    );
 
     const rows = dailySnapshots(mockDb);
     assert.equal(rows.length, 0);
+    assert.equal(
+      mockDb.entities.SusdsYieldLaunchBaseline.get("1-susds-launch"),
+      undefined,
+    );
+    assert.deepEqual(
+      (
+        mockDb.entities.SusdsYieldMovement.getAll() as Array<{ kind: string }>
+      ).map((movement) => movement.kind),
+      ["deposit", "internal_transfer", "withdraw"],
+    );
+    assert.equal(summary(mockDb).currentShares, dollars(900));
     assert.equal(summary(mockDb).totalEarnedYieldUsdWei, dollars(300));
   });
 

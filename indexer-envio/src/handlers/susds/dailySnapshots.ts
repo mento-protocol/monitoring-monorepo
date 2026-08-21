@@ -31,7 +31,6 @@ type SusdsYieldDeltaBaseline = Pick<
 >;
 
 type SusdsYieldDailySnapshotOptions = {
-  requirePreviousDay?: boolean;
   allowZeroTotals?: boolean;
 };
 
@@ -153,15 +152,6 @@ export async function recordSusdsYieldDailySnapshot(
     (await findPreviousDailySnapshot(context, meta.chainId, previousDayBucket));
   const currentSnapshot = await context.SusdsYieldDailySnapshot.get(id);
 
-  if (
-    options.requirePreviousDay === true &&
-    currentSnapshot === undefined &&
-    previousDaySnapshot === undefined &&
-    bucket > launchBucket
-  ) {
-    return false;
-  }
-
   const deltaBaseline =
     latestPriorSnapshot ??
     (currentSnapshot === undefined
@@ -179,21 +169,6 @@ export async function recordSusdsYieldDailySnapshot(
     }),
   );
   return true;
-}
-
-export async function recordSusdsYieldEventDailySnapshot(
-  context: SusdsContext,
-  meta: BlockMeta,
-  sharePriceUsdWei: bigint,
-  precomputedTotals?: SusdsYieldTotals,
-): Promise<boolean> {
-  return recordSusdsYieldDailySnapshot(
-    context,
-    meta,
-    sharePriceUsdWei,
-    precomputedTotals,
-    { requirePreviousDay: true },
-  );
 }
 
 /**

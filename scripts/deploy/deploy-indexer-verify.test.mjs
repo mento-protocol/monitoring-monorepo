@@ -429,8 +429,10 @@ const baselineOnlySampler = buildSummary({
     data: {
       Pool: [{ id: "pool" }],
       PolygonPool: validPolygonPools(),
-      SusdsYieldSummary: [{ id: "susds", currentShares: "1" }],
-      SusdsYieldMovement: [{ id: "susds-move" }],
+      SusdsYieldSummary: [
+        { id: "susds", currentShares: "1", lastUpdatedBlock: "24574403" },
+      ],
+      SusdsYieldMovement: [{ id: "susds-move", blockNumber: "24574403" }],
       SusdsYieldDailySnapshot: [
         {
           id: "susds-launch-day",
@@ -446,25 +448,42 @@ const baselineOnlySampler = buildSummary({
   replayIntegrityInput: VALID_REPLAY_INTEGRITY,
 });
 assert.equal(baselineOnlySampler.ok, false);
+assert.equal(baselineOnlySampler.probe.rowCounts.SusdsYieldDailySnapshot, 1);
 assert.match(
   baselineOnlySampler.failures.join("\n"),
   /sUSDS sampler.*(no post-launch progress|still the launch baseline|stale)/,
 );
 
-const healthySampler = summarizeSusdsSamplerProgress({
+for (const lag of [0, 600]) {
+  const healthySampler = summarizeSusdsSamplerProgress({
+    summaryNonzero: true,
+    latestSnapshot: {
+      sampledAtBlock: "24573803",
+      sampledAtTimestamp: String(NOW_SECONDS - 1_000),
+    },
+    ethereumChain: {
+      processedBlock: 24_573_803 + lag,
+    },
+    nowSeconds: NOW_SECONDS,
+  });
+  assert.equal(healthySampler.ok, true);
+  assert.equal(healthySampler.blockLag, lag);
+  assert.equal(healthySampler.ageSeconds, 1_000);
+}
+
+const staleSampler = summarizeSusdsSamplerProgress({
   summaryNonzero: true,
   latestSnapshot: {
     sampledAtBlock: "24573803",
     sampledAtTimestamp: String(NOW_SECONDS - 1_000),
   },
   ethereumChain: {
-    processedBlock: 24_573_803,
+    processedBlock: 24_573_803 + 601,
   },
   nowSeconds: NOW_SECONDS,
 });
-assert.equal(healthySampler.ok, true);
-assert.equal(healthySampler.blockLag, 0);
-assert.equal(healthySampler.ageSeconds, 1_000);
+assert.equal(staleSampler.ok, false);
+assert.match(staleSampler.failures.join("\n"), /sUSDS sampler is stale/);
 
 const healthySummary = buildSummary({
   args: { allowSyncing: false },
