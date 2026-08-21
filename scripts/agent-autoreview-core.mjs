@@ -1660,6 +1660,131 @@ function literalAuthorizationCredential(value) {
   );
 }
 
+const STRONG_CREDENTIAL_PATTERNS = [
+  /\bgh[pousr]_[A-Za-z0-9]{30,}\b/g,
+  /\bgithub_pat_[A-Za-z0-9_]{30,}\b/g,
+  /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g,
+  /\bAIza[0-9A-Za-z_-]{30,}\b/g,
+  /\bxox[baprs]-[0-9A-Za-z-]{20,}\b/g,
+  /\bsk-[A-Za-z0-9_-]{24,}\b/g,
+  /\b(?:sk|rk)_live_[A-Za-z0-9]{16,}\b/g,
+  /\bnpm_[A-Za-z0-9]{30,}\b/g,
+];
+
+const DIFF_HUNK_HEADER = /^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@/;
+
+// Merged, ordered spans of every strong-pattern match on one line. Overlapping
+// matches collapse so a span never splits a single credential-shaped run.
+function strongCredentialSpans(line) {
+  const spans = [];
+  for (const pattern of STRONG_CREDENTIAL_PATTERNS) {
+    for (const match of line.matchAll(pattern)) {
+      spans.push([match.index, match.index + match[0].length]);
+    }
+  }
+  if (spans.length < 2) return spans;
+  spans.sort((left, right) => left[0] - right[0] || left[1] - right[1]);
+  const merged = [spans[0]];
+  for (const span of spans.slice(1)) {
+    const last = merged.at(-1);
+    if (span[0] <= last[1]) last[1] = Math.max(last[1], span[1]);
+    else merged.push(span);
+  }
+  return merged;
+}
+
+// Maps each diff line to the hunk it belongs to and collects that hunk's added
+// content. Only `+`/`-` lines between a hunk header and the first line that is
+// neither diff content nor context belong to a hunk, so file headers such as
+// `--- a/x` and `+++ b/x` are never mistaken for hunk lines.
+function splitDiffHunks(lines) {
+  const hunkOfLine = new Array(lines.length).fill(-1);
+  const hunks = [];
+  let current = -1;
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (DIFF_HUNK_HEADER.test(line)) {
+      hunks.push([]);
+      current = hunks.length - 1;
+      continue;
+    }
+    if (current === -1) continue;
+    const marker = line.charAt(0);
+    if (line === "" || marker === " " || marker === "\\") continue;
+    if (marker === "+") {
+      hunks[current].push(line.slice(1));
+      hunkOfLine[index] = current;
+      continue;
+    }
+    if (marker === "-") {
+      hunkOfLine[index] = current;
+      continue;
+    }
+    current = -1;
+  }
+  return { hunkOfLine, hunks };
+}
+
+// True when `added` is `removed` with every credential-shaped span replaced by
+// placeholder vocabulary and nothing else changed. Every literal segment around
+// the spans must match exactly, so a rewritten line, a line that merely happens
+// to mention a placeholder, or a swap to a different opaque literal all fail.
+// The leftmost search for each following segment is deterministic; when it does
+// not reconstruct `removed` exactly the answer is false, which refuses.
+function placeholderRedactionOf(removed, spans, added) {
+  let removedIndex = 0;
+  let addedIndex = 0;
+  for (let index = 0; index < spans.length; index += 1) {
+    const [start, end] = spans[index];
+    const prefix = removed.slice(removedIndex, start);
+    if (!added.startsWith(prefix, addedIndex)) return false;
+    addedIndex += prefix.length;
+    removedIndex = end;
+    const nextStart =
+      index + 1 < spans.length ? spans[index + 1][0] : removed.length;
+    const following = removed.slice(removedIndex, nextStart);
+    let replacementEnd;
+    if (following === "") {
+      if (index + 1 < spans.length) return false;
+      replacementEnd = added.length;
+    } else {
+      const found = added.indexOf(following, addedIndex + 1);
+      if (found === -1) return false;
+      replacementEnd = found;
+    }
+    const replacement = added.slice(addedIndex, replacementEnd);
+    if (replacement.length === 0 || !placeholderValue(replacement))
+      return false;
+    addedIndex = replacementEnd;
+  }
+  return added.slice(addedIndex) === removed.slice(removedIndex);
+}
+
+// A credential-shaped token is refused wherever it appears, with one narrow
+// exception: on the REMOVED side of a hunk whose added side carries the same
+// line with that token replaced by placeholder vocabulary — a redaction, not an
+// exfiltration. A removal with no replacement, a removal replaced by a different
+// credential-shaped literal, a replacement in another hunk, and every addition
+// or context line stay refused.
+function strongCredentialTokenReason(text) {
+  const lines = text.split("\n");
+  const { hunkOfLine, hunks } = splitDiffHunks(lines);
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const hunk = hunkOfLine[index];
+    const isRemoval = hunk !== -1 && line.startsWith("-");
+    const scanned = isRemoval ? line.slice(1) : line;
+    const spans = strongCredentialSpans(scanned);
+    if (spans.length === 0) continue;
+    if (!isRemoval) return "credential-like token";
+    const redacted = hunks[hunk].some((added) =>
+      placeholderRedactionOf(scanned, spans, added),
+    );
+    if (!redacted) return "credential-like token";
+  }
+  return null;
+}
+
 export function secretLikeReason(text) {
   const privateKeyHeader =
     /-----BEGIN (?:(?:[A-Z0-9][A-Z0-9 -]* )?PRIVATE KEY|PGP PRIVATE KEY BLOCK)-----/g;
@@ -1676,19 +1801,8 @@ export function secretLikeReason(text) {
   ) {
     return "Bearer JWT";
   }
-  const strongPatterns = [
-    /\bgh[pousr]_[A-Za-z0-9]{30,}\b/,
-    /\bgithub_pat_[A-Za-z0-9_]{30,}\b/,
-    /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/,
-    /\bAIza[0-9A-Za-z_-]{30,}\b/,
-    /\bxox[baprs]-[0-9A-Za-z-]{20,}\b/,
-    /\bsk-[A-Za-z0-9_-]{24,}\b/,
-    /\b(?:sk|rk)_live_[A-Za-z0-9]{16,}\b/,
-    /\bnpm_[A-Za-z0-9]{30,}\b/,
-  ];
-  if (strongPatterns.some((pattern) => pattern.test(text))) {
-    return "credential-like token";
-  }
+  const strongCredential = strongCredentialTokenReason(text);
+  if (strongCredential) return strongCredential;
   const secretUrlPatterns = [
     /https:\/\/hooks\.slack\.com\/services\/[A-Z0-9]{8,}\/[A-Z0-9]{8,}\/[A-Za-z0-9]{20,}/i,
     /https:\/\/(?:(?:canary|ptb)\.)?discord(?:app)?\.com\/api\/webhooks\/[0-9]{15,20}\/[A-Za-z0-9._-]{20,}/i,

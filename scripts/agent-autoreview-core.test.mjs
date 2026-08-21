@@ -165,6 +165,176 @@ assert.throws(
   () => assertNoSecretLikeContent("fixture", `token=${secret}`),
   /refusing to include secret-like content/,
 );
+
+// Redaction accept-shape: a credential-shaped token on a hunk's REMOVED side is
+// acceptable only when the same hunk's added side carries the same line with
+// that token replaced by placeholder vocabulary. Every fixture below builds its
+// credential-shaped literal by joining fragments so this corpus itself never
+// carries a bundle-refusable literal.
+const otherSecret = ["gh", "s_", "B".repeat(36)].join("");
+const redactionHunk = (removedLines, addedLines) =>
+  [
+    "diff --git a/scripts/fixture.test.mjs b/scripts/fixture.test.mjs",
+    "--- a/scripts/fixture.test.mjs",
+    "+++ b/scripts/fixture.test.mjs",
+    "@@ -1,3 +1,3 @@",
+    " const before = 1;",
+    ...removedLines.map((line) => `-${line}`),
+    ...addedLines.map((line) => `+${line}`),
+    " const after = 2;",
+  ].join("\n");
+
+const wordPlaceholderRedaction = redactionHunk(
+  [`const sample = "${secret}";`],
+  ['const sample = "redacted-fixture-token";'],
+);
+assert.equal(
+  secretLikeReason(wordPlaceholderRedaction),
+  null,
+  "a removal replaced in-place by placeholder vocabulary is a redaction, not an exfiltration",
+);
+assert.doesNotThrow(() =>
+  assertNoSecretLikeContent("redaction", wordPlaceholderRedaction),
+);
+assert.equal(
+  secretLikeReason(
+    redactionHunk(
+      [`const sample = "${secret}";`],
+      ['const sample = "<redacted>";'],
+    ),
+  ),
+  null,
+  "angle-bracket placeholders are recognized replacement vocabulary",
+);
+assert.equal(
+  secretLikeReason(
+    redactionHunk(
+      [`const sample = "${secret}";`],
+      ['const sample = "${SAMPLE_TOKEN}";'],
+    ),
+  ),
+  null,
+  "an env-reference placeholder is recognized replacement vocabulary",
+);
+assert.equal(
+  secretLikeReason(
+    redactionHunk(
+      [`const pair = ["${secret}", "${otherSecret}"];`],
+      ['const pair = ["<redacted>", "<redacted>"];'],
+    ),
+  ),
+  null,
+  "every credential-shaped span on the removed line must be replaced, and all of them may be",
+);
+
+const unreplacedRemoval = redactionHunk([`const sample = "${secret}";`], []);
+assert.match(
+  secretLikeReason(unreplacedRemoval),
+  /credential-like token/,
+  "a removal with no replacement stays refused",
+);
+assert.throws(
+  () => assertNoSecretLikeContent("unreplaced removal", unreplacedRemoval),
+  /refusing to include secret-like content/,
+);
+const swappedLiteral = redactionHunk(
+  [`const sample = "${secret}";`],
+  [`const sample = "${otherSecret}";`],
+);
+assert.match(
+  secretLikeReason(swappedLiteral),
+  /credential-like token/,
+  "a removal replaced by a different credential-shaped literal stays refused",
+);
+assert.throws(
+  () => assertNoSecretLikeContent("swapped literal", swappedLiteral),
+  /refusing to include secret-like content/,
+);
+assert.match(
+  secretLikeReason(
+    redactionHunk(
+      [`const sample = "${secret}";`],
+      ['const sample = "9f3c1a2b4d5e6f708192a3b4";'],
+    ),
+  ),
+  /credential-like token/,
+  "an opaque replacement that is not placeholder vocabulary stays refused",
+);
+assert.match(
+  secretLikeReason(
+    redactionHunk(
+      [`const sample = "${secret}";`],
+      ['const renamed = "redacted-fixture-token";'],
+    ),
+  ),
+  /credential-like token/,
+  "the line outside the credential span must match exactly, so a rewritten line stays refused",
+);
+assert.match(
+  secretLikeReason(
+    redactionHunk(
+      [`const sample = "${secret}";`],
+      ['const sample = "redacted" + resolveSuffix();'],
+    ),
+  ),
+  /credential-like token/,
+  "a replacement expression that merely starts with placeholder vocabulary stays refused",
+);
+assert.match(
+  secretLikeReason(
+    [
+      "@@ -1,2 +1,2 @@",
+      `-const sample = "${secret}";`,
+      " const tail = 1;",
+      "@@ -20,2 +20,2 @@",
+      '-const sample = "old-value-placeholder";',
+      '+const sample = "redacted-fixture-token";',
+    ].join("\n"),
+  ),
+  /credential-like token/,
+  "a placeholder replacement in a different hunk does not redact this removal",
+);
+assert.match(
+  secretLikeReason(
+    [
+      "@@ -1,3 +1,3 @@",
+      ` const sample = "${secret}";`,
+      "-const other = 1;",
+      '+const other = "redacted-token";',
+    ].join("\n"),
+  ),
+  /credential-like token/,
+  "a context line carrying the literal is not a removal and stays refused",
+);
+assert.match(
+  secretLikeReason(
+    redactionHunk(
+      ['const sample = "redacted-fixture-token";'],
+      [`const sample = "${secret}";`],
+    ),
+  ),
+  /credential-like token/,
+  "add-side detection is untouched: replacing a placeholder with a literal stays refused",
+);
+assert.match(
+  secretLikeReason(`-const sample = "${secret}";`),
+  /credential-like token/,
+  "a removal-shaped line outside any hunk stays refused",
+);
+assert.match(
+  secretLikeReason(
+    [
+      "@@ -1,2 +1,2 @@",
+      " const before = 1;",
+      "diff --git a/scripts/other.mjs b/scripts/other.mjs",
+      `-const sample = "${secret}";`,
+      '+const sample = "redacted-fixture-token";',
+    ].join("\n"),
+  ),
+  /credential-like token/,
+  "a new file header closes the hunk, so the lines after it are not hunk removals",
+);
+
 for (const label of [
   "PRIVATE KEY",
   "RSA PRIVATE KEY",
