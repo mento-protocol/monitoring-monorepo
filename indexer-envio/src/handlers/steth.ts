@@ -14,6 +14,7 @@ import {
   STETH_DAILY_SNAPSHOT_BLOCK_INTERVAL,
   TRACKED_STETH_WALLETS,
   V3_REVENUE_LAUNCH_BLOCK,
+  V3_REVENUE_LAUNCH_TIMESTAMP,
   isTrackedWallet,
   type EventMeta,
 } from "./steth/shared.js";
@@ -71,9 +72,13 @@ export async function handleStethTransfer({
   if (from === to) return;
   if (!isTrackedWallet(from) && !isTrackedWallet(to)) return;
   const meta = eventMeta(event);
-  const balanceResults = await readAllTrackedStethBalanceResults(context, meta);
-  // preload-handler-note: tracked-transfer filters are event-derived; both
-  // wallet keys are awaited in preload before ordered movement reads and writes.
+  const balanceResults =
+    meta.blockTimestamp >= V3_REVENUE_LAUNCH_TIMESTAMP
+      ? await readAllTrackedStethBalanceResults(context, meta)
+      : undefined;
+  // preload-handler-note: tracked-transfer and launch-time filters are
+  // event-derived; both wallet keys are awaited in preload before ordered
+  // movement reads and writes.
   // preload-effect-helpers: readAllTrackedStethBalanceResults, recordStethYieldEventDailySnapshots
   if (context.isPreload) return;
   const id = eventId(meta.chainId, Number(meta.blockNumber), meta.logIndex);

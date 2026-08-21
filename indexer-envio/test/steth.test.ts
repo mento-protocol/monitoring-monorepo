@@ -294,19 +294,15 @@ describeReserveYield("stETH reserve-yield ledger", () => {
     );
   });
 
-  it("preloads tracked transfer balances before ordered movement state", async () => {
+  it("skips pre-launch balance effects but preserves tracked movement state", async () => {
     const mockDb = MockDb.createMockDb();
-    const calls: unknown[] = [];
     const context = {
       ...stethSnapshotContext(mockDb, {
         [RESERVE_SAFE]: steth(10),
         [OPS_SAFE]: 0n,
       }),
-      effect: async (effect: unknown, input: unknown) => {
-        assert.equal(effect, stethBalanceOfEffect);
-        calls.push(input);
-        const account = (input as { account: string }).account;
-        return account === RESERVE_SAFE ? steth(10) : 0n;
+      effect: async () => {
+        throw new Error("pre-launch transfer must not read balance effects");
       },
       isPreload: true,
     } as Parameters<typeof handleStethTransfer>[0]["context"];
@@ -314,24 +310,106 @@ describeReserveYield("stETH reserve-yield ledger", () => {
       chainId: ETHEREUM_CHAIN_ID,
       params: { from: EXTERNAL, to: RESERVE_SAFE, value: steth(10) },
       block: {
-        number: V3_REVENUE_LAUNCH_BLOCK + 600,
-        timestamp: Number(V3_REVENUE_LAUNCH_TIMESTAMP + 1n),
+        number: V3_REVENUE_LAUNCH_BLOCK - 1,
+        timestamp: Number(V3_REVENUE_LAUNCH_TIMESTAMP - 1n),
       },
       logIndex: 1,
       transaction: { hash: txHash(1) },
     };
 
     await handleStethTransfer({ event, context });
-    const preloadCalls = [...calls];
     assert.equal(mockDb.entities.StethYieldMovement.getAll().length, 0);
 
-    calls.length = 0;
     await handleStethTransfer({
       event,
       context: { ...context, isPreload: false },
     });
-    assert.deepEqual(calls, preloadCalls);
     assert.equal(mockDb.entities.StethYieldMovement.getAll().length, 1);
+    assert.equal(summary(mockDb).currentBalance, steth(10));
+    assert.equal(mockDb.entities.StethYieldDailySnapshot.getAll().length, 0);
+  });
+
+  it("preloads exact-launch and post-launch transfer balances before ordered state", async () => {
+    const mockDb = MockDb.createMockDb();
+    await recordStethWalletLaunchBaselines(
+      stethSnapshotContext(mockDb, {
+        [RESERVE_SAFE]: 0n,
+        [OPS_SAFE]: 0n,
+      }),
+      V3_REVENUE_LAUNCH_TIMESTAMP - 1n,
+    );
+
+    const cases = [
+      {
+        blockNumber: V3_REVENUE_LAUNCH_BLOCK,
+        blockTimestamp: V3_REVENUE_LAUNCH_TIMESTAMP,
+        balance: steth(10),
+        value: steth(10),
+      },
+      {
+        blockNumber: V3_REVENUE_LAUNCH_BLOCK + 7_200,
+        blockTimestamp: dayAfterLaunch(1) + 3_600n,
+        balance: steth(15),
+        value: steth(5),
+      },
+    ];
+
+    for (const [index, testCase] of cases.entries()) {
+      const calls: Array<{ effect: unknown; input: unknown }> = [];
+      const context = {
+        ...stethSnapshotContext(mockDb, {
+          [RESERVE_SAFE]: testCase.balance,
+          [OPS_SAFE]: 0n,
+        }),
+        effect: async (effect: unknown, input: unknown) => {
+          assert.equal(effect, stethBalanceOfEffect);
+          calls.push({ effect, input });
+          const account = (input as { account: string }).account;
+          return account === RESERVE_SAFE ? testCase.balance : 0n;
+        },
+        isPreload: true,
+      } as Parameters<typeof handleStethTransfer>[0]["context"];
+      const event = {
+        chainId: ETHEREUM_CHAIN_ID,
+        params: {
+          from: EXTERNAL,
+          to: RESERVE_SAFE,
+          value: testCase.value,
+        },
+        block: {
+          number: testCase.blockNumber,
+          timestamp: Number(testCase.blockTimestamp),
+        },
+        logIndex: index + 1,
+        transaction: { hash: txHash(index + 1) },
+      };
+
+      await handleStethTransfer({ event, context });
+      const preloadCalls = [...calls];
+      assert.equal(preloadCalls.length, TRACKED_STETH_WALLETS.length);
+      assert.equal(mockDb.entities.StethYieldMovement.getAll().length, index);
+
+      calls.length = 0;
+      await handleStethTransfer({
+        event,
+        context: { ...context, isPreload: false },
+      });
+      assert.deepEqual(calls, preloadCalls);
+      assert.equal(
+        mockDb.entities.StethYieldMovement.getAll().length,
+        index + 1,
+      );
+      assert.equal(
+        walletSnapshot(
+          mockDb,
+          RESERVE_SAFE,
+          index === 0 ? V3_REVENUE_LAUNCH_TIMESTAMP : dayAfterLaunch(1),
+        ).balanceAmount,
+        testCase.balance,
+      );
+    }
+
+    assert.equal(summary(mockDb).currentBalance, steth(15));
   });
 
   it("writes ordered tracked-transfer snapshots and keeps movement writes when a later balance is null", async () => {
