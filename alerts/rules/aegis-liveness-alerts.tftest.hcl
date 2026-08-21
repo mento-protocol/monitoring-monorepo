@@ -20,11 +20,12 @@ run "aegis_per_chain_liveness_defers_to_global_scrape_liveness" {
         for rule in grafana_rule_group.aegis_service_alerts.rule :
         rule.no_data_state == "OK" &&
         strcontains(jsondecode(rule.data[0].model).expr, "or on() vector(0)") &&
-        strcontains(jsondecode(rule.data[0].model).expr, "and on() (time() - max(last_over_time(lastUpdatedAt[11m])) < 660)")
+        strcontains(jsondecode(rule.data[0].model).expr, "and on() (time() - max(last_over_time(lastUpdatedAt[12m])) < 720)") &&
+        tonumber(regex("< ([0-9]+)", jsondecode(rule.data[0].model).expr)[0]) > 300 + 300 + 60
         if startswith(rule.name, "Aegis No Successful Poll")
       ])
     )
-    error_message = "Production per-chain Aegis liveness must use the global heartbeat fallback and keep no-data non-alerting."
+    error_message = "Production per-chain Aegis liveness must overlap the global firing tick by one evaluation interval and keep no-data non-alerting."
   }
 
   assert {
@@ -37,11 +38,12 @@ run "aegis_per_chain_liveness_defers_to_global_scrape_liveness" {
         for rule in grafana_rule_group.aegis_testnet_health.rule :
         rule.no_data_state == "OK" &&
         strcontains(jsondecode(rule.data[0].model).expr, "or on() vector(0)") &&
-        strcontains(jsondecode(rule.data[0].model).expr, "and on() (time() - max(last_over_time(lastUpdatedAt[11m])) < 660)")
+        strcontains(jsondecode(rule.data[0].model).expr, "and on() (time() - max(last_over_time(lastUpdatedAt[12m])) < 720)") &&
+        tonumber(regex("< ([0-9]+)", jsondecode(rule.data[0].model).expr)[0]) > 300 + 300 + 60
         if startswith(rule.name, "Aegis Testnet No Successful Poll")
       ])
     )
-    error_message = "Testnet per-chain Aegis liveness must use the global heartbeat fallback and keep no-data non-alerting."
+    error_message = "Testnet per-chain Aegis liveness must overlap the global firing tick by one evaluation interval and keep no-data non-alerting."
   }
 
   assert {

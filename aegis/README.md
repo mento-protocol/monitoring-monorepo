@@ -295,7 +295,8 @@ starts before the current refresh ends, both cycles share the active refresh.
 Aegis also limits the service to 25 concurrent RPC call tasks across all
 chains. A task keeps its slot while it tries the primary endpoint and the
 optional fallback. These limits prevent a slow endpoint from creating an
-unbounded backlog of requests.
+unbounded backlog of requests. The initial refresh runs after module startup
+begins and does not delay the HTTP listener while slow endpoints time out.
 
 Every call attempts the chain's primary `httpRpcUrl` first. Aegis classifies a
 caught error before deciding whether to retry the fallback or count it.

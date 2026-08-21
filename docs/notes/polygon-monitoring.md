@@ -164,9 +164,10 @@ The code being merged is configuration, not proof that production has already
 cut over. The `Polygon Pool Coverage Incomplete` rule intentionally treats no
 data as alerting after 10 minutes. The per-chain Aegis rule evaluates a missing
 Polygon success series as zero only while the global `lastUpdatedAt` heartbeat
-is less than 11 minutes old. This preserves a firing chain page through the
-global rule's five-minute stale threshold, five-minute hold, and one evaluation
-interval. The global liveness rule then owns the complete Aegis data outage.
+is less than 12 minutes old. This preserves a firing chain page through the
+global rule's five-minute stale threshold, five-minute hold, firing evaluation,
+and one full evaluation interval. The global liveness rule then owns the
+complete Aegis data outage.
 The repository has no rollout mute for these rules; the weekend mute timing is
 only for scheduled FX-market closure. Producer telemetry must therefore be
 live before the protected `alerts-rules` apply is approved.

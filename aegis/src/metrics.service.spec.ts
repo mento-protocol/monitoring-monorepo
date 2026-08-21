@@ -135,13 +135,38 @@ describe('MetricsService', () => {
     ).toThrow('No metrics configured');
   });
 
-  it('refreshes every known template during module initialization', async () => {
+  it('starts the initial refresh without blocking module initialization', async () => {
+    let finishRefresh!: (value: void[]) => void;
+    const pendingRefresh = new Promise<void[]>((resolve) => {
+      finishRefresh = resolve;
+    });
     const service = new MetricsService(makeConfigService(), makeQueryService());
-    const refreshAll = jest.spyOn(service, 'refreshAll').mockResolvedValue([]);
+    const refreshAll = jest
+      .spyOn(service, 'refreshAll')
+      .mockReturnValue(pendingRefresh);
 
-    await service.onModuleInit();
+    expect(service.onModuleInit()).toBeUndefined();
 
     expect(refreshAll).toHaveBeenCalledTimes(1);
+    finishRefresh([]);
+    await pendingRefresh;
+  });
+
+  it('logs an initial refresh rejection without rejecting module initialization', async () => {
+    const loggerError = jest
+      .spyOn(Logger.prototype, 'error')
+      .mockImplementation(() => undefined);
+    const service = new MetricsService(makeConfigService(), makeQueryService());
+    jest
+      .spyOn(service, 'refreshAll')
+      .mockRejectedValue(new Error('startup refresh failed'));
+
+    expect(service.onModuleInit()).toBeUndefined();
+    await Promise.resolve();
+
+    expect(loggerError).toHaveBeenCalledWith(
+      'Initial metric refresh failed: startup refresh failed',
+    );
   });
 
   it('propagates successful query values into metric gauges', async () => {

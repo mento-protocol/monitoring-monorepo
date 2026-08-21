@@ -5,6 +5,7 @@ import { Gauge } from 'prom-client';
 import { ChainConfig, MetricTemplate } from './config';
 import { Metric } from './metric';
 import { QueryService } from './query.service';
+import { conciseErrorMessage } from './rpc-log';
 
 @Injectable()
 export class MetricsService {
@@ -60,8 +61,12 @@ export class MetricsService {
     });
   }
 
-  async onModuleInit(): Promise<void> {
-    await this.refreshAll();
+  onModuleInit(): void {
+    void this.refreshAll().catch((error: unknown) => {
+      this.logger.error(
+        `Initial metric refresh failed: ${conciseErrorMessage(error)}`,
+      );
+    });
   }
 
   async refreshAll() {

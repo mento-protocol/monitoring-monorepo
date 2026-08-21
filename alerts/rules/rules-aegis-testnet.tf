@@ -21,8 +21,8 @@ resource "grafana_rule_group" "aegis_testnet_health" {
       for            = "5m"
       exec_err_state = "Error"
       # The production Aegis liveness rule owns complete Aegis data outages.
-      # Retain this result through its 10m threshold and hold, plus one
-      # evaluation interval, so an active testnet warning cannot resolve first.
+      # Retain this result through its threshold, hold, firing evaluation, and
+      # one full interval so an active testnet warning cannot resolve first.
       no_data_state = "OK"
 
       data {
@@ -36,7 +36,7 @@ resource "grafana_rule_group" "aegis_testnet_health" {
         datasource_uid = var.prometheus_datasource_uid
         model = jsonencode({
           refId         = "successfulPolls"
-          expr          = "(sum(increase(view_call_query_duration_count{chain=\"${chain.value.aegis_chain}\",status=\"success\"}[10m])) or on() vector(0)) and on() (time() - max(last_over_time(lastUpdatedAt[11m])) < 660)"
+          expr          = "(sum(increase(view_call_query_duration_count{chain=\"${chain.value.aegis_chain}\",status=\"success\"}[10m])) or on() vector(0)) and on() (time() - max(last_over_time(lastUpdatedAt[12m])) < 720)"
           editorMode    = "code"
           instant       = true
           intervalMs    = 1000

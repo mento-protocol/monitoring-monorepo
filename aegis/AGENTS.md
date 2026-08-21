@@ -56,7 +56,8 @@ endpoint increments it. Keep that counter's labels bounded to `contract`,
 
 Keep one active refresh per metric template and a global maximum of 25 active
 RPC call tasks. A task holds its slot across the primary and optional fallback
-attempt. Keep RPC failure logs bounded to one concise line per contract,
+attempt. The initial refresh must run asynchronously so endpoint timeouts do
+not block HTTP startup. Keep RPC failure logs bounded to one concise line per contract,
 function, chain, endpoint outcome, and minute. Do not log viem error objects or
 request payloads.
 

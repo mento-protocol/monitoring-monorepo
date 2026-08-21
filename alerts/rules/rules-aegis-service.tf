@@ -103,8 +103,9 @@ resource "grafana_rule_group" "aegis_service_alerts" {
       for            = "5m"
       exec_err_state = "Error"
       # A complete Aegis data outage belongs to the global liveness rule. Keep
-      # this result through that rule's 5m stale threshold, 5m hold, and one
-      # evaluation interval so an active chain page cannot resolve first.
+      # this result through that rule's 5m stale threshold, 5m hold, firing
+      # evaluation, and one full interval so an active chain page cannot
+      # resolve first.
       no_data_state = "OK"
 
       data {
@@ -118,7 +119,7 @@ resource "grafana_rule_group" "aegis_service_alerts" {
         datasource_uid = var.prometheus_datasource_uid
         model = jsonencode({
           refId         = "successfulPolls"
-          expr          = "(sum(increase(view_call_query_duration_count{chain=\"${chain.value.aegis_chain}\",status=\"success\"}[10m])) or on() vector(0)) and on() (time() - max(last_over_time(lastUpdatedAt[11m])) < 660)"
+          expr          = "(sum(increase(view_call_query_duration_count{chain=\"${chain.value.aegis_chain}\",status=\"success\"}[10m])) or on() vector(0)) and on() (time() - max(last_over_time(lastUpdatedAt[12m])) < 720)"
           editorMode    = "code"
           instant       = true
           intervalMs    = 1000
