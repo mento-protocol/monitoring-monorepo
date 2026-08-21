@@ -264,9 +264,10 @@ gate is not a trust root.
   whole conversion rests on and a check that only runs on one side of a drift
   is no check at all.
 - **The commonest drift is the merge queue, not the author.** The equality test
-  caught main moving under this decision's own implementing PR three separate
-  times: a Sentry fixture-scan canary arm plus the canary command on two
-  existing arms, and later a fifth pattern on the PR ready-state arm. None of
+  caught main moving under this decision's own implementing PR across three
+  merges and five routing deltas: a Sentry fixture-scan canary arm and the same
+  canary command added to two existing arms; then a fifth pattern on the PR
+  ready-state arm; then a fifth pattern on the Sentry re-queue arm. None of
   those authors touched the table, and none had any reason to — the arms are
   where routing lives. A branch that adds an arm and a branch that holds the
   table are not in conflict textually, so nothing but this check stands between
