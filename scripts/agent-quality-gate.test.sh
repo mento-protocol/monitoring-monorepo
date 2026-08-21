@@ -6977,7 +6977,7 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     printf 'host=%s\n' "$(uname -n)"
     printf 'started_at=%s\n' "$(date +%s)"
     printf 'worktree=%s\n' "$gate_race_repo"
-    printf 'token=somebody-else-1-1\n'
+    printf 'token=placeholder-token\n'
   } > "$race_displaced_replacement"
   mv "$race_displaced_replacement" "$gate_race_root/run.lock/owner"
   : > "$race_displaced_release"
@@ -6988,7 +6988,7 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     fail "a displaced holder must print the exact lock-displacement error"
   [[ ! -s "$gate_race_log" ]] ||
     fail "a displaced holder must stop before executing any mapped command"
-  [[ "$(sed -n 's/^token=//p' "$gate_race_root/run.lock/owner" | head -n1)" == "somebody-else-1-1" ]] ||
+  [[ "$(sed -n 's/^token=//p' "$gate_race_root/run.lock/owner" | head -n1)" == "placeholder-token" ]] ||
     fail "a displaced holder must not delete the record that replaced its own"
   rm -rf "$gate_race_root/run.lock"
 
