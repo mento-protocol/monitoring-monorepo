@@ -136,6 +136,12 @@ tldr: **ruleset-required** workflows (`ci`, `Code Quality`, the Vercel checks) M
 - A function invoked directly as an `if`, `while`, or `until` condition, under
   `!`, or as a non-final command in an `&&` or `||` list cannot rely on `set -e`
   to stop its body.
+- A function used as a pipeline element also cannot rely on `set -e` when an
+  enclosing `if`, `while`, or `until` tests the aggregate pipeline status, when
+  `!` inverts the pipeline, or when the pipeline is a non-final command in an
+  `&&` or `||` list. This rule excludes a bare pipeline. With `errexit` and
+  `pipefail` enabled, bare `f | cat` stops `f` at its unchecked failure and
+  returns nonzero.
 - Command substitution has two independent suppression mechanisms. With
   `inherit_errexit` disabled, including default non-POSIX Bash, the substitution
   clears `errexit`. Even with `inherit_errexit` enabled, an ignored-errexit

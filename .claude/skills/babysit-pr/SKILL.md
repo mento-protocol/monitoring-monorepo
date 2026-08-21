@@ -38,13 +38,21 @@ gh pr view --json number,url,title,headRefName,headRefOid,baseRefName,headReposi
 
 In a Claude cloud session, resolve the same fields over MCP
 (`list_pull_requests` filtered by head branch, or `pull_request_read` method
-`get`) and bind by content rather than by remote name: the PR must be
-same-repository (`headRepository.nameWithOwner` equals the session-attached
-repo), local `git rev-parse HEAD` must equal the MCP-resolved `headRefOid`
-before editing, and the verified proxy `origin` serves as both `HEAD_REMOTE`
-and `BASE_REMOTE`. Cross-repository (fork) PRs stop on that surface. For the
-post-push guard there, re-resolve with `pull_request_read` method `get` in
-place of `gh pr view` and require the returned `headRefOid` to equal local
+`get`). Bind the result by content rather than by remote name.
+
+Immediately after resolving these fields, stop on every tool surface if
+`isCrossRepository` is `true`. Apply the same stop when another surface proves
+that the head repository differs from the base repository. This repo-local
+adapter cannot yet prove feedback, gate, and review trust roots end to end for
+fork-controlled source. Do not run a repo-local command, mutate a checkout,
+probe feedback, run a gate, or start a review for that target.
+
+For a remaining same-repository Claude cloud target,
+`headRepository.nameWithOwner` must equal the session-attached repo. Local
+`git rev-parse HEAD` must equal the MCP-resolved `headRefOid` before editing,
+and the verified proxy `origin` serves as both `HEAD_REMOTE` and `BASE_REMOTE`.
+For the post-push guard there, re-resolve with `pull_request_read` method `get`
+in place of `gh pr view` and require the returned `headRefOid` to equal local
 `HEAD`.
 
 For an explicit target, accept a bare number or PR URL. Derive and preserve
@@ -56,10 +64,9 @@ repository.
 Before any blocker fix mutates files or Git history, bind the checkout to that
 resolved target:
 
-- Select `HEAD_REMOTE` only after verifying that its repository equals
-  `headRepository.nameWithOwner`. For a cross-repository PR, use a dedicated
-  checkout with the fork as `HEAD_REMOTE`; keep a separately verified
-  `BASE_REMOTE` for `BASE_REPO` and never swap their roles.
+- For the remaining same-repository target, select `HEAD_REMOTE` and
+  `BASE_REMOTE` only after verifying that each remote serves the repository
+  named by both `headRepository.nameWithOwner` and `BASE_REPO`.
 - `git status --porcelain` must be empty and `git rev-parse HEAD` must equal
   the resolved `headRefOid`. If either differs, stop or switch to a clean,
   dedicated checkout at the PR head before editing.
@@ -152,6 +159,18 @@ item required.
   directories outside the worktree:
 
   ```bash
+  worktree_root="$(git rev-parse --show-toplevel)" || exit 1
+  worktree_root="$(cd "$worktree_root" && pwd -P)" || exit 1
+  bundle_parent="$(mktemp -d)" || exit 1
+  bundle_parent="$(cd "$bundle_parent" && pwd -P)" || exit 1
+  case "$bundle_parent/" in
+    "$worktree_root/"*) exit 1 ;;
+  esac
+  base_bundle="$bundle_parent/base"
+  premerge_bundle="$bundle_parent/premerge"
+  test "$base_bundle" != "$premerge_bundle" || exit 1
+  test ! -e "$base_bundle" || exit 1
+  test ! -e "$premerge_bundle" || exit 1
   pnpm agent:autoreview --prepare-bundle-dir "$base_bundle" \
     --feedback-pr <pr-number> -- --mode branch --base "$base_oid"
   pnpm agent:autoreview --prepare-bundle-dir "$premerge_bundle" \
