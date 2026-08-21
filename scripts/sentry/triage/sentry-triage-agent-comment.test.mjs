@@ -8,6 +8,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { createServer } from "node:net";
@@ -76,15 +77,42 @@ function baseEnv(overrides = {}) {
  * that it is LOCKED on the runner is asserted separately, against the workflow
  * and against a real 0555 directory.
  */
-function stagePid(dir, value, mode = 0o444) {
+function stagePid(dir, value, mode = 0o444, directoryMode = 0o555) {
   const path = join(dir, BROKER_PID_FILE_RELATIVE);
-  mkdirSync(dirname(path), { recursive: true });
+  const identityDir = dirname(path);
+  mkdirSync(identityDir, { recursive: true });
+  // Unlock the directory to (re)stage: a locked one denies the unlink and the
+  // create below, which is exactly the property under test.
+  chmodSync(identityDir, 0o755);
   // The staged record is read-only, so a re-stage replaces it rather than
   // reopening it for write — which is the very thing this mode forbids.
   rmSync(path, { force: true });
   writeFileSync(path, String(value));
   chmodSync(path, mode);
+  chmodSync(identityDir, directoryMode);
   return path;
+}
+
+/** Remove a staged record, unlocking the directory first — the lock denies the
+ * unlink, which is the point of it. The directory is left locked afterwards so
+ * the "no record at all" case still faces the real staging shape. */
+function unstagePid(dir) {
+  const path = join(dir, BROKER_PID_FILE_RELATIVE);
+  const identityDir = dirname(path);
+  chmodSync(identityDir, 0o755);
+  rmSync(path, { force: true });
+  chmodSync(identityDir, 0o555);
+}
+
+/** Unlock anything stagePid locked, then remove the tree. A 0555 directory
+ * denies the unlink `rmSync` needs, so cleanup has to undo the lock first. */
+function cleanupTemp(dir) {
+  try {
+    chmodSync(join(dir, dirname(BROKER_PID_FILE_RELATIVE)), 0o755);
+  } catch {
+    // Not every temp dir stages a pid record.
+  }
+  rmSync(dir, { recursive: true, force: true });
 }
 
 /** A pinned target file as the trusted workflow step leaves it: read-only. */
@@ -335,7 +363,7 @@ test("an unreadable marker refuses too — present and unreadable is not absent"
       /could not be read/,
     );
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    cleanupTemp(dir);
   }
 });
 
@@ -380,7 +408,7 @@ test("the live probe follows the broker PROCESS, both ways", async () => {
     await assert.rejects(() => assertBrokerAlive(env), /process is gone/);
   } finally {
     child.kill("SIGKILL");
-    rmSync(dir, { recursive: true, force: true });
+    cleanupTemp(dir);
   }
 });
 
@@ -431,7 +459,7 @@ test("the probe CONSULTS that state — an alive pid can still read as gone", ()
       true,
     );
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    cleanupTemp(dir);
   }
 });
 
@@ -466,10 +494,10 @@ test("the live probe identifies the broker from a file, not the environment", as
     }
 
     // No pid record at all is a refusal, never a pass.
-    rmSync(join(dir, BROKER_PID_FILE_RELATIVE));
+    unstagePid(dir);
     await assert.rejects(() => assertBrokerAlive(env), /pid record/);
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    cleanupTemp(dir);
   }
 });
 
@@ -496,7 +524,54 @@ test("a WRITABLE pid record refuses — it is not evidence of anything", async (
     stagePid(dir, process.pid, 0o444);
     await assertBrokerAlive(env);
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    cleanupTemp(dir);
+  }
+});
+
+test("a WRITABLE DIRECTORY refuses even when the record itself is 0444", async () => {
+  // Write permission on a DIRECTORY governs unlink and rename, not the mode of
+  // the file inside it. So a 0444 record in a 0755 directory protects nothing:
+  // delete it, lay down your own pid, chmod the replacement back to 0444, and
+  // a check that looked only at the file's mode waves it through. Verified on
+  // a real filesystem — at 0755 both unlink-and-recreate and rename-over
+  // succeed and the replacement reads 0444; at 0555 the unlink is denied.
+  if (process.getuid && process.getuid() === 0) return; // root ignores modes
+  const dir = mkdtempSync(join(tmpdir(), "sentry-triage-broker-"));
+  try {
+    const env = baseEnv({ RUNNER_TEMP: dir });
+    const path = stagePid(dir, process.pid, 0o444, 0o755);
+
+    // The substitution a file-mode check alone cannot see: the record is
+    // replaced wholesale and the replacement still reads as read-only.
+    rmSync(path);
+    writeFileSync(path, String(process.pid));
+    chmodSync(path, 0o444);
+    assert.equal(
+      statSync(path).mode & 0o777,
+      0o444,
+      "the planted record reads as locked",
+    );
+    await assert.rejects(
+      () => assertBrokerAlive(env),
+      /directory holding the broker's pid record/,
+      "a planted record in a writable directory must refuse",
+    );
+
+    // Every writable directory mode refuses, not just 0755.
+    for (const directoryMode of [0o777, 0o775, 0o755, 0o700]) {
+      stagePid(dir, process.pid, 0o444, directoryMode);
+      await assert.rejects(
+        () => assertBrokerAlive(env),
+        /is writable \(mode/,
+        `directory mode ${directoryMode.toString(8)}`,
+      );
+    }
+
+    // …and the locked pair the workflow actually publishes passes.
+    stagePid(dir, process.pid, 0o444, 0o555);
+    await assertBrokerAlive(env);
+  } finally {
+    cleanupTemp(dir);
   }
 });
 
@@ -524,7 +599,7 @@ test("the staged pid lock denies the agent's write primitive outright", () => {
     assert.equal(readFileSync(path, "utf8"), "1234");
   } finally {
     chmodSync(identityDir, 0o755);
-    rmSync(dir, { recursive: true, force: true });
+    cleanupTemp(dir);
   }
 });
 
@@ -565,7 +640,7 @@ test("the probe cannot disturb the broker it checks", async () => {
     assert.deepEqual(received, [], "the probe must send no bytes");
   } finally {
     server.close();
-    rmSync(dir, { recursive: true, force: true });
+    cleanupTemp(dir);
   }
 });
 
@@ -579,7 +654,7 @@ test("the marker wins over a live probe — it carries the broker's log", async 
       /the Sentry credential broker exited/,
     );
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    cleanupTemp(dir);
   }
 });
 
@@ -645,7 +720,7 @@ test("END TO END: the refusal prints the broker log where the job log sees it", 
       "the route, method, status and byte count must survive redaction",
     );
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    cleanupTemp(dir);
   }
 });
 
@@ -1038,7 +1113,7 @@ test("REGRESSION #1288 (TOCTOU): what gh receives is what was validated", async 
     assert.equal(seenStdin, decorateBody(VERDICT_BODY));
     assert.deepEqual(readdirSync(dir), before, "no file may survive the post");
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    cleanupTemp(dir);
   }
 });
 
@@ -1218,6 +1293,10 @@ test("a broker that dies mid-agent voids the round (#1956)", () => {
   const lockFile = step.indexOf('chmod 0444 "${pid_file}"');
   const lockDir = step.indexOf('chmod 0555 "${identity_dir}"');
   assert.ok(lockFile > 0, "the pid record must be published read-only");
+  // The DIRECTORY lock is the stronger half, not a belt-and-braces extra:
+  // directory write permission governs unlink and rename, so a 0444 record in
+  // a writable directory can simply be replaced. The wrapper refuses when it
+  // finds either unlocked; this binds the workflow to publishing both.
   assert.ok(lockDir > lockFile, "its directory must be locked, and after it");
   assert.ok(
     lockFile > step.indexOf('mv "${pid_file}.partial" "${pid_file}"'),

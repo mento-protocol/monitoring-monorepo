@@ -30,7 +30,7 @@
  */
 
 import { readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 /** Terminal marker the broker step's watchdog writes when the Sentry
  * credential broker exits while the agent is running. Fixed relative path
@@ -281,11 +281,14 @@ export function isZombieProcStatus(status) {
  */
 export function probeBrokerByPid(env, readStatus = readProcStatus) {
   const path = brokerPidFilePath(env);
+  const directory = dirname(path);
   let raw;
   let mode;
+  let directoryMode;
   try {
     raw = readFileSync(path, "utf8").trim();
     mode = statSync(path).mode;
+    directoryMode = statSync(directory).mode;
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
     throw new Error(
@@ -301,6 +304,24 @@ export function probeBrokerByPid(env, readStatus = readProcStatus) {
   // any path this user can write. So the broker step publishes it 0444 in a
   // 0555 directory and this refuses if it ever finds otherwise, which also
   // catches that step regressing. Same rule, same reason, as the pinned target.
+  //
+  // THE DIRECTORY IS CHECKED FIRST, AND IT IS THE STRONGER CLAIM. A read-only
+  // file inside a writable directory protects nothing: write permission on a
+  // directory governs unlink and rename, not the file's own mode, so anyone
+  // who can write the directory can delete the 0444 record and lay down their
+  // own — or rename one over it — and then chmod it back to 0444. Verified
+  // both ways on a real filesystem: at 0755 the unlink-and-recreate and the
+  // rename-over both succeed and the replacement reads as 0444; at 0555 the
+  // unlink is denied. So the file's mode alone answers nothing.
+  if ((directoryMode & 0o222) !== 0) {
+    throw new Error(
+      `refusing to post: the directory holding the broker's pid record ` +
+        `(${directory}) is writable (mode ` +
+        `${(directoryMode & 0o777).toString(8)}), so the record inside it can ` +
+        "be replaced whatever its own mode says; the workflow must lock the " +
+        "directory as well as the file.",
+    );
+  }
   if ((mode & 0o222) !== 0) {
     throw new Error(
       `refusing to post: the broker's pid record at ${path} is writable ` +

@@ -632,6 +632,13 @@ jobs:
           mv "${pid_file}.partial" "${pid_file}"
           # Lock it before the agent exists. The file first so no window leaves
           # it writable inside a still-writable directory.
+          #
+          # BOTH modes matter, and the directory is the stronger one: directory
+          # write permission governs unlink and rename, so a 0444 record in a
+          # 0755 directory can just be deleted and replaced (and the
+          # replacement chmod'd back to 0444). The wrapper's probe stats both
+          # and refuses if either permits writes, so dropping either chmod here
+          # fails the round loudly rather than silently reopening the hole.
           chmod 0444 "${pid_file}"
           chmod 0555 "${identity_dir}"
           ls -ld "${identity_dir}"

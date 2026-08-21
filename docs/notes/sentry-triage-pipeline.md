@@ -805,7 +805,16 @@ only has to beat the watchdog's poll to the marker. So it gets the pinned write
 target's treatment: **0444 inside a 0555 directory**, where `open(O_WRONLY)`,
 create, unlink and rename all fail EACCES for the owning non-root user, and the
 wrapper refuses a record it finds writable — which also catches the broker step
-dropping the `chmod`. The process and not its port, deliberately: a loopback
+dropping the `chmod`.
+
+**Both modes are checked, and the DIRECTORY is the stronger claim.** Write
+permission on a directory governs unlink and rename, not the mode of the file
+inside it, so a 0444 record in a writable directory protects nothing: delete it,
+lay down your own pid, `chmod` the replacement back to 0444, and a check that
+looked only at the file would wave it through. Verified on a real filesystem —
+at 0755 both unlink-and-recreate and rename-over succeed and the replacement
+reads 0444; at 0555 the unlink is denied. `probeBrokerByPid` therefore stats the
+directory as well as the file and refuses if either permits writes. The process and not its port, deliberately: a loopback
 connect answers a weaker question, since the kernel completes the handshake from
 the
 listen backlog while the owning process is on its way out, and once the port is
