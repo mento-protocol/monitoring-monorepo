@@ -89,10 +89,38 @@ test("the schema refuses a run-time placeholder in a static group", () => {
       table({
         id: "x",
         dynamic: "scriptsSymlinkTargets",
-        arms: [arm(["${some_target}/*"])],
+        arms: [arm(["${scripts_symlink_target}/*"])],
       }),
     ),
   );
+});
+
+test("a dynamic group may hold only the exact pattern its source emits", () => {
+  // A placeholder pattern cannot go through `patternProblem` — the text that
+  // replaces `${…}` is not known until run time — so an earlier version of this
+  // check skipped validation entirely for anything containing one. The allowed
+  // forms are enumerated instead, and everything else is refused rather than
+  // waved through unvalidated.
+  const refused = [
+    "${some_target}/*", // right shape, wrong variable
+    "${scripts_symlink_target}/[[:alpha:]]*", // malformed remainder
+    "${scripts_symlink_target}/*.mjs", // narrower than the engine emits
+    "${terraform_stack_path}/*", // the OTHER source's form
+  ];
+  for (const pattern of refused) {
+    assert.throws(
+      () =>
+        normalizeGroups(
+          table({
+            id: "x",
+            dynamic: "scriptsSymlinkTargets",
+            arms: [arm([pattern])],
+          }),
+        ),
+      /is not the form/,
+      `${pattern} was accepted for scriptsSymlinkTargets`,
+    );
+  }
 });
 
 test("every verb in the closed set is a function the gate defines", () => {
@@ -282,6 +310,34 @@ test("the staleness check reds on a path that is not in the tree", () => {
   );
 });
 
+test("a templated command still has its static paths checked", () => {
+  // Only the `{path}` token is exempt — it is the changed path, which exists by
+  // construction. The command carrying it can still name a static module, and
+  // that module's staleness matters exactly as much as any other arm's.
+  const subjects = stalenessSubjects(
+    table({
+      id: "x",
+      arms: [
+        arm(
+          ["docs/x.md"],
+          [
+            {
+              command: "node scripts/gone/checker.mjs --file {path}",
+              reason: "r",
+            },
+            { command: "bash -n {path}", reason: "r" },
+          ],
+        ),
+      ],
+    }),
+  );
+  assert.deepEqual(
+    subjects.filter((subject) => subject.kind === "command").map((s) => s.path),
+    ["scripts/gone/checker.mjs"],
+    "the static path in a templated command was skipped with the token",
+  );
+});
+
 test("the staleness check reds on a checklist that is not in the tree", () => {
   // The quietest of the three subject kinds: a checklist path is only ever
   // printed as a reminder, so a renamed one fails nowhere at all.
@@ -382,6 +438,72 @@ test("both lints refuse a table with nothing in it to check", () => {
       () => check([{ id: "x", arms: [{ patterns: ["a"], effects: [] }] }]),
       /no effects at all/,
     );
+  }
+});
+
+test("both lints refuse a malformed table instead of walking past the bad part", () => {
+  // `walkArms` silently skips anything that is not the shape it expects, so
+  // every one of these would otherwise be walked past and the lint would report
+  // clean over the part it did read. The schema makes them unreachable for the
+  // real table; the lints are exported and callable with anything.
+  const malformed = [
+    [
+      "a primitive where an effect belongs",
+      [{ id: "x", arms: [{ patterns: ["a"], effects: ["call"] }] }],
+      /where an effect object belongs/,
+    ],
+    [
+      "null where an effect belongs",
+      [{ id: "x", arms: [{ patterns: ["a"], effects: [null] }] }],
+      /where an effect object belongs/,
+    ],
+    [
+      "an arm with no effects array, beside a sibling that has one",
+      [
+        {
+          id: "x",
+          arms: [
+            { patterns: ["a"], effects: [{ surface: "docs" }] },
+            { patterns: ["b"] },
+          ],
+        },
+      ],
+      /`effects` that is not an array/,
+    ],
+    [
+      "an arm with no patterns",
+      [{ id: "x", arms: [{ effects: [{ surface: "docs" }] }] }],
+      /no `patterns`/,
+    ],
+    [
+      "a group whose arms are not an array",
+      [{ id: "x", arms: "everything" }],
+      /`arms` that is not a non-empty array/,
+    ],
+    [
+      "a nested dispatch whose arms are empty",
+      [
+        {
+          id: "x",
+          arms: [
+            {
+              patterns: ["a"],
+              effects: [{ dispatch: "path", arms: [] }],
+            },
+          ],
+        },
+      ],
+      /`arms` that is not a non-empty array/,
+    ],
+  ];
+  for (const check of [pairingProblems, stalenessSubjects]) {
+    for (const [name, groups, expected] of malformed) {
+      assert.throws(
+        () => check(groups),
+        expected,
+        `${check.name} accepted ${name}`,
+      );
+    }
   }
 });
 

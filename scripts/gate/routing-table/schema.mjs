@@ -245,6 +245,25 @@ export function normalizeEffects(effects, where) {
  */
 const DYNAMIC_PATTERN = /\$\{[a-z_][a-z_0-9]*\}/;
 
+/**
+ * The ONE pattern each engine-computed source is allowed to carry, verbatim.
+ *
+ * A placeholder pattern cannot go through `patternProblem`, because the text
+ * that will replace `${…}` is not known until run time — so an earlier version
+ * of this check skipped validation entirely for any pattern containing a
+ * placeholder, and would have accepted `${scripts_symlink_target}/[[:alpha:]]*`
+ * or any other malformed remainder without a word.
+ *
+ * Rather than half-validate the remainder, the allowed forms are enumerated.
+ * The gate emits exactly these two, and it emits them from a `for` loop whose
+ * body is one arm; a third form means the engine grew a shape this table has
+ * not been taught, which is a change that should be made deliberately here.
+ */
+const DYNAMIC_PATTERNS = Object.freeze({
+  scriptsSymlinkTargets: "${scripts_symlink_target}/*",
+  registeredTerraformStacks: "${terraform_stack_path}/*",
+});
+
 function normalizeArms(arms, subject, where, dynamic = null) {
   if (!Array.isArray(arms) || arms.length === 0) {
     throw new TableError(where, "`arms` is missing or empty");
@@ -269,6 +288,16 @@ function normalizeArms(arms, subject, where, dynamic = null) {
             throw new TableError(
               at,
               `pattern ${JSON.stringify(pattern)} names a run-time value, but this group is not \`dynamic\` — nothing would substitute it, so the arm would be matched as those literal characters and never fire`,
+            );
+          }
+          // Enumerated, not pattern-matched: the remainder cannot be compiled
+          // before substitution, so anything other than the exact known form is
+          // refused rather than waved through unvalidated.
+          const allowed = DYNAMIC_PATTERNS[dynamic];
+          if (pattern !== allowed) {
+            throw new TableError(
+              at,
+              `pattern ${JSON.stringify(pattern)} is not the form \`${dynamic}\` emits. That source emits exactly ${JSON.stringify(allowed)}; a placeholder pattern cannot be compiled before substitution, so any other shape is refused rather than accepted unchecked`,
             );
           }
           continue;

@@ -9,6 +9,7 @@
  * every fixture run for the wrong reason.
  */
 
+import { PATH_TOKEN } from "./gate-arms.mjs";
 import { isGlob } from "./pattern.mjs";
 import { MIN_REASON, walkArms } from "./schema.mjs";
 
@@ -29,6 +30,15 @@ const SCRIPTS = "scripts/";
  * the two shapes can never be confused for one another. A table with no effects
  * at all is refused too — there is nothing there to have linted.
  *
+ * STRUCTURE IS VALIDATED BEFORE TRAVERSAL, not assumed. `walkArms` silently
+ * skips anything that is not the shape it expects, so a primitive where an
+ * effect should be, or an arm with no `effects` array, would be walked past and
+ * the lint would report clean over the part it did read. Import-time schema
+ * validation makes those shapes unreachable for `ROUTING_GROUPS`, but both
+ * lints are exported functions that anything may call with anything, and the
+ * cost of checking is a few lines against a check whose whole output is the word
+ * "clean".
+ *
  * @param {readonly object[]} groups
  * @param {string} caller
  */
@@ -37,36 +47,54 @@ export function assertRawTable(groups, caller) {
     throw new Error(`${caller} was handed no routing groups to check`);
   }
   let effects = 0;
-  const visit = (list) => {
-    for (const effect of list ?? []) {
+  const refuse = (what, where) => {
+    throw new Error(`${caller} was handed ${what} at ${where}`);
+  };
+  const isObject = (value) =>
+    value !== null && typeof value === "object" && !Array.isArray(value);
+
+  const visitEffects = (list, where) => {
+    if (!Array.isArray(list))
+      refuse("an `effects` that is not an array", where);
+    list.forEach((effect, index) => {
+      const at = `${where}.effects[${index}]`;
+      if (!isObject(effect)) {
+        refuse(`${JSON.stringify(effect)} where an effect object belongs`, at);
+      }
       effects += 1;
-      if (
-        effect !== null &&
-        typeof effect === "object" &&
-        Object.hasOwn(effect, "kind")
-      ) {
+      if (Object.hasOwn(effect, "kind")) {
         throw new Error(
           `${caller} was handed NORMALIZED routing groups. The normal form drops \`pairing\`, ` +
             "`allowStale` and `why`, so this check would have found no violations and reported clean. " +
             "Pass the raw table (`ROUTING_GROUPS`), not `ROUTING_PLAN`.",
         );
       }
-      if (Object.hasOwn(effect, "effects")) visit(effect.effects);
-      for (const nested of effect.arms ?? []) visit(nested.effects);
-    }
+      if (Object.hasOwn(effect, "effects")) visitEffects(effect.effects, at);
+      if (Object.hasOwn(effect, "arms")) visitArms(effect.arms, at);
+    });
   };
-  for (const group of groups) {
-    if (
-      group === null ||
-      typeof group !== "object" ||
-      !Array.isArray(group.arms)
-    ) {
-      throw new Error(
-        `${caller} was handed something that is not a routing group`,
-      );
+
+  const visitArms = (arms, where) => {
+    if (!Array.isArray(arms) || arms.length === 0) {
+      refuse("an `arms` that is not a non-empty array", where);
     }
-    for (const arm of group.arms) visit(arm.effects);
-  }
+    arms.forEach((arm, index) => {
+      const at = `${where}.arms[${index}]`;
+      if (!isObject(arm)) refuse("something that is not an arm object", at);
+      if (!Array.isArray(arm.patterns) || arm.patterns.length === 0) {
+        refuse("an arm with no `patterns`", at);
+      }
+      // Every arm carries its own `effects`, empty or not. Accepting a missing
+      // one lets a sibling's effects stand in for it and the arm goes unread.
+      visitEffects(arm.effects, at);
+    });
+  };
+
+  groups.forEach((group, index) => {
+    const at = `group[${index}]`;
+    if (!isObject(group)) refuse("something that is not a routing group", at);
+    visitArms(group.arms, at);
+  });
   if (effects === 0) {
     throw new Error(
       `${caller} was handed a table with no effects at all, so it has checked nothing`,
@@ -295,10 +323,14 @@ function collectEffectPaths(effect, groupId, subjects) {
       ? effect.args[0]
       : undefined);
   if (command === undefined) return;
-  // A templated command carries the changed path, which exists by construction
-  // — the arm that schedules it is guarded on `[[ -f "$path" ]]`.
-  if (command.includes("{path}")) return;
-  for (const match of command.matchAll(COMMAND_PATH)) {
+  // The changed path itself exists by construction — the arms that template it
+  // are guarded on `[[ -f "$path" ]]`. Only the TOKEN is exempt, though, not the
+  // command that carries it: `node scripts/x.mjs {path}` names a static module
+  // whose staleness matters exactly as much as any other arm's. Blanking the
+  // token and scanning the rest keeps the whitespace boundaries the path
+  // pattern relies on.
+  const scanned = command.split(PATH_TOKEN).join(" ");
+  for (const match of scanned.matchAll(COMMAND_PATH)) {
     subjects.push({ path: match[1], groupId, kind: "command", command });
   }
 }

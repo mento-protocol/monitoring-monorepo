@@ -68,6 +68,24 @@ function readBracket(pattern, start) {
     if (character === "]") {
       return { regexp: `[${negated ? "^" : ""}${body}]`, end: index };
     }
+    if (character === "\\") {
+      // MEASURED, not assumed. Inside a bracket expression bash treats `\` as an
+      // ESCAPE, not as the literal member POSIX specifies: on both 3.2.57 and
+      // 5.3.15, `[\]]` matches `]`, `[\a]` matches `a` and not `\`, and `[a\]`
+      // matches nothing at all because the `\]` escapes the terminator and
+      // leaves the class unterminated.
+      //
+      // That last shape is why this refuses rather than implements. Getting the
+      // first two right is easy; getting "unterminated because the terminator
+      // was escaped" right, and keeping it right, is a subtlety no pattern in
+      // this table needs — nothing here uses a bracket expression at all. A
+      // compiler that half-understands a shape is the failure this whole
+      // conversion exists to remove, so the shape is refused at the door and the
+      // measurement is recorded here for whoever needs it later.
+      throw new Error(
+        `bracket expression in \`${pattern}\` contains a backslash. Bash treats it as an escape inside brackets, not as a literal member, and an escaped \`]\` leaves the class unterminated; this compiler refuses the shape rather than approximate it. No pattern in this table needs one.`,
+      );
+    }
     if (POSIX_CLASS.test(pattern.slice(index, index + 2))) {
       throw new Error(
         `bracket expression in \`${pattern}\` uses a POSIX class; this compiler refuses to approximate one, because an approximation would disagree with the shell on inputs no test happened to cover`,
@@ -86,17 +104,37 @@ function readBracket(pattern, start) {
  * @param {string} pattern
  * @returns {RegExp} anchored at both ends, because `case` matches whole words
  */
-export function casePatternToRegExp(pattern) {
+/**
+ * Scan a pattern ONCE, returning both what it compiles to and whether any
+ * character in it actually acted as a metacharacter.
+ *
+ * One scanner with two consumers, deliberately. `isGlob` used to be an
+ * independent regular expression over the raw text, and it disagreed with the
+ * compiler on exactly the shapes where being wrong costs something: an escaped
+ * metacharacter (`scripts/foo\*.mjs`) is an EXACT path that the compiler treats
+ * as a literal but the old test called a glob, and an unmatched `[` (`a[b`) is
+ * a literal to the compiler and was a glob to the test. Either misreading makes
+ * an exact path invisible to the staleness check and to the pairing rule, and
+ * feeds the oracle a synthetic path for a pattern that has no wildcards. Two
+ * implementations of one question will drift; there is now only one.
+ *
+ * @param {string} pattern
+ * @returns {{ source: string, hasMeta: boolean }}
+ */
+function scanPattern(pattern) {
   let source = "^";
+  let hasMeta = false;
   for (let index = 0; index < pattern.length; index += 1) {
     const character = pattern[index];
     if (character === "*") {
       // `[\s\S]*`, not `.*`: `.` excludes newline, and a path may contain one.
       source += "[\\s\\S]*";
+      hasMeta = true;
       continue;
     }
     if (character === "?") {
       source += "[\\s\\S]";
+      hasMeta = true;
       continue;
     }
     if (character === "\\") {
@@ -106,6 +144,7 @@ export function casePatternToRegExp(pattern) {
           `pattern \`${pattern}\` ends in a backslash with nothing to escape`,
         );
       }
+      // An escape produces a LITERAL, so it does not make the pattern a glob.
       source += escapeLiteral(escaped);
       index += 1;
       continue;
@@ -113,21 +152,39 @@ export function casePatternToRegExp(pattern) {
     if (character === "[") {
       const bracket = readBracket(pattern, index);
       if (bracket === null) {
-        // Unterminated: bash matches a literal `[`.
+        // Unterminated: bash matches a literal `[`, so this is not a glob either.
         source += "\\[";
         continue;
       }
       source += bracket.regexp;
+      hasMeta = true;
       index = bracket.end;
       continue;
     }
     source += escapeLiteral(character);
   }
-  return new RegExp(`${source}$`);
+  return { source: `${source}$`, hasMeta };
 }
 
-/** Whether `pattern` contains any `case` metacharacter at all. */
-export const isGlob = (pattern) => /[*?[\\]/.test(pattern);
+/**
+ * Compile one bash `case` pattern.
+ *
+ * @param {string} pattern
+ * @returns {RegExp} anchored at both ends, because `case` matches whole words
+ */
+export function casePatternToRegExp(pattern) {
+  return new RegExp(scanPattern(pattern).source);
+}
+
+/**
+ * Whether `pattern` holds a character that actually acts as a wildcard.
+ *
+ * Answered by the compiler's own scan, never by a separate regular expression
+ * over the raw text — see `scanPattern`. A pattern this cannot compile is not a
+ * pattern at all, and the caller has to hear about that rather than receive a
+ * boolean.
+ */
+export const isGlob = (pattern) => scanPattern(pattern).hasMeta;
 
 /**
  * Reject a pattern this table must never hold, before anything compiles it.

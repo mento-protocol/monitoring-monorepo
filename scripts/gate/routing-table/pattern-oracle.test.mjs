@@ -399,6 +399,56 @@ test("the compiler refuses what it cannot translate faithfully", () => {
     "a POSIX class has no faithful JavaScript equivalent and must be refused, not approximated",
   );
   assert.throws(() => casePatternToRegExp("scripts/x\\"), /backslash/);
+  // MEASURED on 3.2.57 and 5.3.15: inside a bracket expression bash treats `\`
+  // as an ESCAPE, not the literal member POSIX specifies — `[\]]` matches `]`,
+  // `[\a]` matches `a` and not `\`, and `[a\]` matches nothing because the
+  // escaped `]` leaves the class unterminated. That last shape is why this is
+  // refused rather than implemented; no pattern in this table uses one.
+  for (const pattern of ["scripts/[\\]]x", "scripts/[a\\]", "[\\a]"]) {
+    assert.throws(
+      () => casePatternToRegExp(pattern),
+      /backslash/,
+      `${pattern} was compiled rather than refused`,
+    );
+  }
+});
+
+test("isGlob is the compiler's own answer, not a second opinion", () => {
+  // These are the shapes where an independent regular expression over the raw
+  // text disagreed with the compiler, and disagreeing costs something: an exact
+  // path read as a glob is skipped by the staleness check and by the pairing
+  // rule, and is handed to the oracle's synthetic-path generator, which has no
+  // wildcard to substitute.
+  const literals = [
+    "scripts/foo\\*.mjs", // escaped `*` — an exact path containing a star
+    "scripts/foo\\?.mjs", // escaped `?`
+    "a[b", // unmatched `[` — bash matches it literally
+    "scripts/agent-quality-gate.sh",
+  ];
+  for (const pattern of literals) {
+    assert.equal(isGlob(pattern), false, `${pattern} was read as a glob`);
+  }
+  for (const pattern of ["scripts/*.sh", "a?b", "scripts/[ab]c", "*"]) {
+    assert.equal(isGlob(pattern), true, `${pattern} was read as a literal`);
+  }
+});
+
+test("bash agrees an escaped metacharacter is an exact path", () => {
+  // The claim `isGlob` now rests on, checked against the shell rather than
+  // asserted. `a\*b` must match the literal `a*b` and nothing else.
+  const [bash] = [...interpreters.keys()];
+  const hits = askBash(
+    bash,
+    ["a\\*b", "a[b"],
+    ["a*b", "axb", "ab", "a[b", "ab"],
+  );
+  assert.ok(
+    hits.has("0\ta*b"),
+    "bash does not match a\\*b against the literal a*b",
+  );
+  assert.ok(!hits.has("0\taxb"), "bash matched a\\*b as a wildcard");
+  assert.ok(!hits.has("0\tab"), "bash matched a\\*b as a wildcard");
+  assert.ok(hits.has("1\ta[b"), "bash does not match an unmatched [ literally");
 });
 
 test("the oracle script itself is the file this test claims it is", () => {

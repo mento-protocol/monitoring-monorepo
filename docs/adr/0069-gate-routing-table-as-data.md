@@ -263,6 +263,15 @@ gate is not a trust root.
   change to the gate, and by the required `ci` job, because it is the check the
   whole conversion rests on and a check that only runs on one side of a drift
   is no check at all.
+- **The commonest drift is the merge queue, not the author.** The equality test
+  caught main moving under this decision's own implementing PR three separate
+  times: a Sentry fixture-scan canary arm plus the canary command on two
+  existing arms, and later a fifth pattern on the PR ready-state arm. None of
+  those authors touched the table, and none had any reason to — the arms are
+  where routing lives. A branch that adds an arm and a branch that holds the
+  table are not in conflict textually, so nothing but this check stands between
+  them. Expect to reconcile on most rebases while both copies exist, and read a
+  red equality test as the merge queue working rather than as a mistake.
 - **The gate gains exactly one command on one existing arm.** Editing
   `scripts/agent-quality-gate.sh` now also schedules the routing-table suite.
   That is the one routing change in this step, and it is additive: for a changed

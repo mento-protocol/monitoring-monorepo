@@ -2518,15 +2518,26 @@ assert_contains "- node scripts/lighthouse-config.test.mjs (Lighthouse config as
 # gate-equality.test.mjs is what holds the two together. It only does that if it
 # RUNS in both drift directions, so both are pinned here.
 #
-# Table side: any module under scripts/gate/routing-table/ — not just the index,
-# because every one of them is an `implementation_signature()` entry and a change
-# to any of them moves the freshness stamp.
-run_gate "scripts/gate/routing-table/index.mjs"
-assert_contains "- pnpm gate:routing-table:test (gate routing table changed)"
-assert_contains "- pnpm agent:quality-gate:test (gate routing table is an implementation-signature input)"
-run_gate "scripts/gate/routing-table/arms-scripts.mjs"
-assert_contains "- pnpm gate:routing-table:test (gate routing table changed)"
-assert_contains "- pnpm agent:quality-gate:test (gate routing table is an implementation-signature input)"
+# Table side: EVERY module under scripts/gate/routing-table/, enumerated from the
+# real tree rather than named here. Naming two would leave the other seventeen
+# resting on the assumption that one glob covers them all — and a narrowed arm,
+# or a new module whose name an earlier arm in the same `case` happens to claim,
+# would drop one while these assertions stayed green. Enumerating means a module
+# added later is covered the day it lands, by construction.
+#
+# The names come from `$repo_root` because `run_gate` drives a fixture repository
+# that has no scripts/ tree; the routing itself only ever sees the path string.
+routing_table_modules=()
+while IFS= read -r routing_table_module; do
+  routing_table_modules+=("$routing_table_module")
+done < <(cd "$repo_root" && git ls-files 'scripts/gate/routing-table/*.mjs')
+((${#routing_table_modules[@]} >= 15)) ||
+  fail "expected the routing table to have at least 15 tracked modules, found ${#routing_table_modules[@]} — enumeration found nothing to check"
+for routing_table_module in "${routing_table_modules[@]}"; do
+  run_gate "$routing_table_module"
+  assert_contains "- pnpm gate:routing-table:test (gate routing table changed)"
+  assert_contains "- pnpm agent:quality-gate:test (gate routing table is an implementation-signature input)"
+done
 
 # Gate side, and the commoner drift: somebody adds or reorders a `case` arm in
 # this gate and does not touch the data. Before this arm existed that ran
