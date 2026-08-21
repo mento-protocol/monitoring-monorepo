@@ -16,8 +16,9 @@ garden_lane: package-readmes-reference
 
 Single multichain mainnet indexer (Ethereum reserve-yield `1`, Celo Mainnet
 `42220`, Monad `143`, and Polygon `137`) on the Envio Cloud `mento` project (org
-`mento-protocol`). Ethereum reserve-yield handlers are event-only; the
-historical sUSDS onBlock heartbeat is not registered in the hosted indexer.
+`mento-protocol`). Ethereum reserve-yield handlers use sparse events plus
+launch-aligned bounded daily samplers; the historical sUSDS onBlock heartbeat
+is not registered in the hosted indexer.
 
 This file documents only facts that stay true across redeployments. For live
 sync state and the latest deployment currently visible to Envio, run:

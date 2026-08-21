@@ -8,6 +8,7 @@ import { computeYieldTotals } from "./positions.js";
 import {
   ETHEREUM_CHAIN_ID,
   SUSDS_ADDRESS,
+  V3_REVENUE_LAUNCH_BLOCK,
   V3_REVENUE_LAUNCH_TIMESTAMP,
   ZERO,
   type BlockMeta,
@@ -26,6 +27,7 @@ type SusdsYieldDeltaBaseline = Pick<
 
 type SusdsYieldDailySnapshotOptions = {
   requirePreviousDay?: boolean;
+  allowZeroTotals?: boolean;
 };
 
 type SusdsHeartbeatEffectResults = {
@@ -119,7 +121,11 @@ export async function recordSusdsYieldDailySnapshot(
   const totals =
     precomputedTotals ??
     (await computeYieldTotals(context, meta, sharePriceUsdWei));
-  if (totals.currentShares === ZERO && totals.totalEarnedYieldUsdWei === ZERO) {
+  if (
+    options.allowZeroTotals !== true &&
+    totals.currentShares === ZERO &&
+    totals.totalEarnedYieldUsdWei === ZERO
+  ) {
     return false;
   }
 
@@ -178,6 +184,42 @@ export async function recordSusdsYieldEventDailySnapshot(
     sharePriceUsdWei,
     precomputedTotals,
     { requirePreviousDay: true },
+  );
+}
+
+/**
+ * Write the launch baseline at the final pre-launch Ethereum block.
+ *
+ * The row uses the known v3 launch timestamp, but the share price read at the
+ * preceding block. This makes launch-day earned yield zero and lets the first
+ * later sampler preserve the full launch-to-sample delta.
+ */
+export async function recordSusdsYieldLaunchBaseline(
+  context: SusdsContext,
+  effectResults: SusdsHeartbeatEffectResults,
+): Promise<boolean> {
+  if (effectResults.blockTimestamp === null) return false;
+  if (effectResults.sharePriceUsdWei === null) {
+    throw new Error(
+      `[sUSDS] convertToAssets(1e18) unavailable at launch block ${V3_REVENUE_LAUNCH_BLOCK}`,
+    );
+  }
+  const meta: BlockMeta = {
+    chainId: ETHEREUM_CHAIN_ID,
+    blockNumber: BigInt(V3_REVENUE_LAUNCH_BLOCK),
+    blockTimestamp: V3_REVENUE_LAUNCH_TIMESTAMP,
+  };
+  const totals = await computeYieldTotals(
+    context,
+    meta,
+    effectResults.sharePriceUsdWei,
+  );
+  return recordSusdsYieldDailySnapshot(
+    context,
+    meta,
+    effectResults.sharePriceUsdWei,
+    totals,
+    { allowZeroTotals: true },
   );
 }
 
@@ -255,7 +297,7 @@ export async function handleSusdsYieldDailySnapshotHeartbeat({
     BigInt(block.number),
   );
   // preload-handler-note: raw block and share-price results are awaited before
-  // this guard; the dormant heartbeat still keeps snapshot work ordered.
+  // this guard; the bounded sampler keeps snapshot work ordered.
   // preload-effect-helpers: recordSusdsYieldHeartbeatSnapshot
   if (context.isPreload) return false;
   return recordSusdsYieldHeartbeatSnapshot(
@@ -263,4 +305,24 @@ export async function handleSusdsYieldDailySnapshotHeartbeat({
     BigInt(block.number),
     effectResults,
   );
+}
+
+export async function handleSusdsYieldLaunchBaseline({
+  block,
+  context,
+}: {
+  block: { number: number | bigint };
+  context: SusdsContext;
+}): Promise<boolean> {
+  const blockNumber = BigInt(block.number);
+  if (blockNumber !== BigInt(V3_REVENUE_LAUNCH_BLOCK)) return false;
+  const effectResults = await readSusdsHeartbeatEffectResults(
+    context,
+    blockNumber,
+  );
+  // preload-handler-note: both dormant effects use the exact launch-block key
+  // in preload and processing; no entity write occurs during preload.
+  // preload-effect-helpers: recordSusdsYieldLaunchBaseline
+  if (context.isPreload) return false;
+  return recordSusdsYieldLaunchBaseline(context, effectResults);
 }

@@ -243,7 +243,7 @@ describe("buildCanonicalRevenue", () => {
     expect(result.periods.allTimeSinceV3.totalUsd).toBeNull();
     expect(result.periods.allTimeSinceV3.availableTotalUsd).toBe(12);
     expect(result.periods.allTimeSinceV3.partialReasons).toContain(
-      "Reserve earned-yield history is not indexed yet.",
+      "Reserve sUSDS earned-yield actuals unavailable: no SusdsYieldDailySnapshot source exists for current sUSDS holdings or earned signal.",
     );
   });
 
@@ -260,7 +260,7 @@ describe("buildCanonicalRevenue", () => {
     expect(result.periods.allTimeSinceV3.reserveYieldUsd).toBeNull();
     expect(result.periods.allTimeSinceV3.totalUsd).toBeNull();
     expect(result.periods.allTimeSinceV3.partialReasons).toContain(
-      "Reserve earned-yield history has no snapshots yet.",
+      "Reserve sUSDS earned-yield actuals unavailable: no SusdsYieldDailySnapshot source exists for current sUSDS holdings or earned signal.",
     );
   });
 
@@ -282,6 +282,36 @@ describe("buildCanonicalRevenue", () => {
     expect(result.periods.allTimeSinceV3.totalUsd).toBeNull();
     expect(result.periods.allTimeSinceV3.partialReasons).toContain(
       "Reserve earned-yield actuals partial: stETH earned-yield actuals pending: no indexed wallet snapshot rows yet.",
+    );
+  });
+
+  it("does not treat stETH rows as an sUSDS actual source", () => {
+    const result = buildCanonicalRevenue({
+      networkData: [],
+      cdpDailySeries: [],
+      cdpMarkets: [],
+      reserveYield: reserveYield({
+        holdings: [
+          {
+            ...stethHolding(),
+            assetSymbol: "sUSDS",
+            principalUsd: 2_000,
+          },
+        ],
+      }),
+      reserveDailySnapshots: [
+        stethReserveSnapshot(
+          ts("2026-06-12"),
+          "0xd0697f70e79476195b742d5afab14be50f98cc1e",
+          1,
+        ),
+      ],
+      nowSeconds: NOW_SECONDS,
+    });
+
+    expect(result.periods.allTimeSinceV3.reserveYieldUsd).toBeNull();
+    expect(result.partialReasons).toContain(
+      "Reserve sUSDS earned-yield actuals unavailable: no SusdsYieldDailySnapshot source exists for current sUSDS holdings or earned signal.",
     );
   });
 

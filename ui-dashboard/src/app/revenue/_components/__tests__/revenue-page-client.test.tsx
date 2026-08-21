@@ -568,9 +568,11 @@ describe("RevenuePageClient canonical revenue layout", () => {
       reserveHistoryUnavailable: true,
     });
 
-    expect(html).toContain("Reserve earned-yield history is not indexed yet.");
+    expect(html).toContain(
+      "Reserve sUSDS earned-yield actuals unavailable: no SusdsYieldDailySnapshot source exists for current sUSDS holdings or earned signal.",
+    );
     expect(capturedProps.chart?.partialReasons).toContain(
-      "Reserve earned-yield history is not indexed yet.",
+      "Reserve sUSDS earned-yield actuals unavailable: no SusdsYieldDailySnapshot source exists for current sUSDS holdings or earned signal.",
     );
     const reserveActual = capturedProps.chart?.series.reduce(
       (sum, point) => sum + (point.reserveYieldUsd ?? 0),

@@ -15,10 +15,13 @@ import {
   ETHEREUM_CHAIN_ID,
   SUSDS_ADDRESS,
   TRACKED_SUSDS_WALLETS,
+  V3_REVENUE_LAUNCH_BLOCK,
   V3_REVENUE_LAUNCH_TIMESTAMP,
 } from "../src/handlers/susds/shared.ts";
 import {
   handleSusdsYieldDailySnapshotHeartbeat,
+  handleSusdsYieldLaunchBaseline,
+  recordSusdsYieldLaunchBaseline,
   recordSusdsYieldDailySnapshot,
   recordSusdsYieldHeartbeatSnapshot,
 } from "../src/handlers/susds/dailySnapshots.ts";
@@ -724,6 +727,78 @@ describeReserveYield("sUSDS reserve yield accounting", () => {
     assert.equal(rows[1]?.dailyEarnedYieldUsdWei, dollars(200));
     assert.equal(rows[1]?.sampledAtBlock, heartbeatBlockNumber);
     assert.equal(rows[1]?.sampledAtTimestamp, heartbeatTimestamp);
+  });
+
+  it("writes the exact launch baseline with pre-launch share price and zero launch-day yield", async () => {
+    let mockDb = MockDb.createMockDb();
+    const preLaunchTimestamp = V3_REVENUE_LAUNCH_TIMESTAMP - 1n;
+    setSharePrice(V3_REVENUE_LAUNCH_BLOCK - 1, WAD);
+    mockDb = await deposit(
+      mockDb,
+      V3_REVENUE_LAUNCH_BLOCK - 1,
+      0,
+      dollars(1000),
+      dollars(1000),
+      Number(preLaunchTimestamp),
+    );
+
+    const context = {
+      ...heartbeatContext(
+        mockDb,
+        1_772_495_999n,
+        WAD,
+        BigInt(V3_REVENUE_LAUNCH_BLOCK),
+      ),
+      ...dailySnapshotContext(mockDb),
+      isPreload: false,
+    } as Parameters<typeof handleSusdsYieldLaunchBaseline>[0]["context"];
+    const didWrite = await handleSusdsYieldLaunchBaseline({
+      block: { number: V3_REVENUE_LAUNCH_BLOCK },
+      context,
+    });
+
+    const rows = dailySnapshots(mockDb);
+    assert.equal(didWrite, true);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0]?.timestamp, V3_REVENUE_LAUNCH_TIMESTAMP);
+    assert.equal(rows[0]?.sharePriceUsdWei, WAD);
+    assert.equal(rows[0]?.dailyEarnedYieldUsdWei, 0n);
+    assert.equal(rows[0]?.dailyUnrealizedYieldUsdWei, 0n);
+  });
+
+  it("preserves launch-to-sample yield on the first later sampler row", async () => {
+    let mockDb = MockDb.createMockDb();
+    setSharePrice(V3_REVENUE_LAUNCH_BLOCK - 1, WAD);
+    mockDb = await deposit(
+      mockDb,
+      V3_REVENUE_LAUNCH_BLOCK - 1,
+      0,
+      dollars(1000),
+      dollars(1000),
+      Number(V3_REVENUE_LAUNCH_TIMESTAMP - 1n),
+    );
+    await recordSusdsYieldLaunchBaseline(dailySnapshotContext(mockDb), {
+      blockTimestamp: 1_772_495_999n,
+      sharePriceUsdWei: WAD,
+    });
+
+    const sampleTimestamp = V3_REVENUE_LAUNCH_TIMESTAMP + 86_400n;
+    const didWrite = await recordSusdsYieldHeartbeatSnapshot(
+      heartbeatContext(
+        mockDb,
+        sampleTimestamp,
+        dollars(110) / 100n,
+        BigInt(V3_REVENUE_LAUNCH_BLOCK) + 600n,
+      ),
+      BigInt(V3_REVENUE_LAUNCH_BLOCK) + 600n,
+    );
+    const rows = dailySnapshots(mockDb).sort((a, b) =>
+      a.timestamp < b.timestamp ? -1 : 1,
+    );
+    assert.equal(didWrite, true);
+    assert.equal(rows.length, 2);
+    assert.equal(rows[1]?.totalEarnedYieldUsdWei, dollars(100));
+    assert.equal(rows[1]?.dailyEarnedYieldUsdWei, dollars(100));
   });
 
   it("skips the sUSDS heartbeat snapshot when block timestamp RPC returns null", async () => {

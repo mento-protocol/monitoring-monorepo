@@ -22,6 +22,36 @@ function hasReserveYieldSignal(
   );
 }
 
+function hasSusdsSnapshotSource(
+  reserveDailySnapshots: ReadonlyArray<ReserveYieldDailySnapshotRow>,
+): boolean {
+  return reserveDailySnapshots.some(
+    (row) => !("wallet" in row) && row.chainId === 1,
+  );
+}
+
+function hasSusdsActualSignal(
+  reserveYield: BuildCanonicalRevenueArgs["reserveYield"],
+): boolean {
+  if (reserveYield === null) return false;
+  const earnedYieldSignal =
+    typeof reserveYield.earnedYieldUsd === "number" &&
+    Number.isFinite(reserveYield.earnedYieldUsd) &&
+    reserveYield.earnedYieldUsd > 0;
+  const currentSusdsHolding = reserveYield.holdings.some(
+    (holding) =>
+      holding.assetSymbol.toUpperCase() === "SUSDS" && holding.principalUsd > 0,
+  );
+  return currentSusdsHolding || earnedYieldSignal;
+}
+
+function missingSusdsSnapshotSource(args: BuildCanonicalRevenueArgs): boolean {
+  return (
+    hasSusdsActualSignal(args.reserveYield) &&
+    !hasSusdsSnapshotSource(args.reserveDailySnapshots)
+  );
+}
+
 function reserveSnapshotSourceKey(row: ReserveYieldDailySnapshotRow): string {
   const tokenKey = `${row.chainId}:${row.token.toLowerCase()}`;
   return "wallet" in row ? `${tokenKey}:${row.wallet.toLowerCase()}` : tokenKey;
@@ -73,7 +103,8 @@ export function buildActualAvailability(
     args.reserveHistoryUnpriced === true ||
     (args.reserveDailySnapshots.length === 0 &&
       (args.reserveYieldFailed === true ||
-        hasReserveYieldSignal(args.reserveYield)));
+        hasReserveYieldSignal(args.reserveYield))) ||
+    missingSusdsSnapshotSource(args);
   return {
     reserve: !reserveHistoryUnavailable,
     reserveStaleAfter: reserveStaleAfterBucket(args),
@@ -83,6 +114,9 @@ export function buildActualAvailability(
 }
 
 function reservePartialReason(args: BuildCanonicalRevenueArgs): string | null {
+  if (missingSusdsSnapshotSource(args)) {
+    return "Reserve sUSDS earned-yield actuals unavailable: no SusdsYieldDailySnapshot source exists for current sUSDS holdings or earned signal.";
+  }
   if (args.reserveHistoryFailed) {
     return "Reserve earned-yield history failed to load.";
   }

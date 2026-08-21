@@ -104,9 +104,10 @@ pnpm deploy:indexer --yes
 8. Verify monitoring.mento.org in the browser, including the affected pages and console errors. A bare successful promote is not rollout closeout.
 
 Reserve-yield actuals deploy through the primary `mento` Envio project. The
-Ethereum sUSDS handlers in `config.multichain.mainnet.yaml` are event-only, and
-stETH adds a launch-aligned sub-daily wallet balance sampler. The historical sUSDS
-onBlock heartbeat is not part of the hosted path.
+Ethereum sUSDS handlers in `config.multichain.mainnet.yaml` use sparse token
+events plus a launch-aligned 600-block daily sampler, and stETH uses a
+launch-aligned sub-daily wallet balance sampler. The historical every-block
+sUSDS heartbeat is not part of the hosted path.
 
 To check whether Envio's persistent effect cache is active for a deployment:
 

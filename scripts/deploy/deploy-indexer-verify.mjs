@@ -14,6 +14,7 @@ const PROBE_TABLES = [
   "Pool",
   "SusdsYieldSummary",
   "SusdsYieldMovement",
+  "SusdsYieldDailySnapshot",
   "StethYieldSummary",
   "StethYieldMovement",
 ];
@@ -37,8 +38,9 @@ export const PROBE_QUERY = `query VerifyIndexerRows {
     healthTotalSeconds
     healthBinarySeconds
   }
-  SusdsYieldSummary(limit: 1) { id lastMovementTxHash lastUpdatedBlock }
+  SusdsYieldSummary(limit: 1) { id currentShares totalEarnedYieldUsdWei lastMovementTxHash lastUpdatedBlock }
   SusdsYieldMovement(limit: 1, order_by: { blockNumber: asc }) { id kind txHash blockNumber }
+  SusdsYieldDailySnapshot(limit: 1, order_by: { timestamp: desc }) { id timestamp totalEarnedYieldUsdWei }
   StethYieldSummary(limit: 1) { id lastMovementTxHash lastUpdatedBlock }
   StethYieldMovement(limit: 1, order_by: { blockNumber: asc }) { id kind txHash blockNumber }
 }`;
@@ -342,11 +344,42 @@ export function summarizeProbe(graphqlJson) {
     ]),
   );
   const missingTables = PROBE_TABLES.filter((table) => rowCounts[table] === 0);
+  const susdsSummary = graphqlJson.data?.SusdsYieldSummary?.[0];
+  const susdsSummaryNonzero =
+    susdsSummary !== undefined &&
+    [
+      "currentShares",
+      "totalEarnedYieldUsdWei",
+      "currentValueUsdWei",
+      "unrealizedYieldUsdWei",
+    ].some((field) => {
+      const value = susdsSummary?.[field];
+      if (typeof value === "bigint") return value !== 0n;
+      if (typeof value === "number")
+        return Number.isFinite(value) && value !== 0;
+      if (typeof value !== "string" || !/^-?\d+$/.test(value)) return false;
+      try {
+        return BigInt(value) !== 0n;
+      } catch {
+        return false;
+      }
+    });
+  if (susdsSummaryNonzero && rowCounts.SusdsYieldDailySnapshot === 0) {
+    // A nonzero summary without a daily source cannot support canonical
+    // reserve actuals, even when another reserve token has snapshot rows.
+    if (!missingTables.includes("SusdsYieldDailySnapshot")) {
+      missingTables.push("SusdsYieldDailySnapshot");
+    }
+  } else if (!susdsSummaryNonzero) {
+    const index = missingTables.indexOf("SusdsYieldDailySnapshot");
+    if (index !== -1) missingTables.splice(index, 1);
+  }
 
   return {
     rowCounts,
     errors: errors.map((error) => error.message ?? String(error)),
     missingTables,
+    susdsSummaryNonzero,
     ok: errors.length === 0 && missingTables.length === 0,
   };
 }

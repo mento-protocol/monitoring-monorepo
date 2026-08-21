@@ -31,13 +31,13 @@ sUSDS/stETH event suites with reserve-yield event tests enabled.
 - Ethereum reserve-yield indexing shares the existing production Envio project
   and GraphQL endpoint.
 - The primary entry point registers sparse sUSDS/stETH token events plus the
-  launch-aligned stETH sub-daily wallet balance sampler from
-  [`ADR 0034`](../adr/0034-steth-wallet-daily-sampler.md).
-- The primary entry point does not register the historical sUSDS `onBlock`
+  launch-aligned sUSDS and stETH samplers from [`ADR 0069`](../adr/0069-susds-launch-aligned-daily-sampler.md)
+  and [`ADR 0034`](../adr/0034-steth-wallet-daily-sampler.md).
+- The primary entry point does not register the historical every-block sUSDS
   heartbeat.
-- sUSDS event handlers write movement rows, summary rows, and daily snapshots
-  only when real `Transfer`, `Deposit`, or `Withdraw` logs for tracked reserve
-  wallets are processed.
+- sUSDS event handlers write movement and summary rows for tracked reserve
+  wallets. The bounded sampler writes at most one daily row per UTC day and
+  captures quiet-period share-price growth.
 - stETH daily snapshots are keyed by chain, wallet, and day, baseline at the
   final Ethereum block before `2026-03-03T00:00:00Z`, and skipped as a batch
   when any required historical wallet `balanceOf` read is unavailable. The
@@ -47,11 +47,10 @@ sUSDS/stETH event suites with reserve-yield event tests enabled.
 ## Why This Avoids The Hosted Replay Stall Class
 
 The failed hosted experiments stalled at Envio v3 synthetic `onBlock` batch
-boundaries (`5000`/`15000` synthetic items). The hosted entry point excludes the
-historical sUSDS heartbeat entirely, so the indexer backfills real Ethereum logs
-for the configured sUSDS/stETH contracts plus one sub-daily stETH wallet
-balance sampler. That keeps the replay work bounded enough to share the existing
-hosted project instead of paying for an additional Envio deployment.
+boundaries (`5000`/`15000` synthetic items). The hosted entry point excludes
+the historical every-block sUSDS heartbeat and uses 600-block sUSDS/stETH
+samplers. That keeps replay work bounded enough to share the existing hosted
+project instead of paying for an additional Envio deployment.
 
 ## Degraded Behavior
 
@@ -158,7 +157,8 @@ Do not promote a hosted reindex with Ethereum reserve-yield enabled until:
 3. The deployment advances beyond the old stall boundaries and catches
    up to head.
 4. `pnpm deploy:indexer:verify <commit>` returns synced chain status plus
-   non-empty `Pool`, sUSDS, and stETH GraphQL probe rows.
+   non-empty `Pool`, sUSDS, and stETH GraphQL probe rows. A nonzero sUSDS
+   summary also requires a non-empty `SusdsYieldDailySnapshot` source.
 5. The dashboard `/revenue` page shows restored reserve actuals from the
    shared endpoint and continues to label stale/partial data correctly.
 

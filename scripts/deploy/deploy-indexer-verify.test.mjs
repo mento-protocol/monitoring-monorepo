@@ -255,6 +255,7 @@ assert.deepEqual(
       Pool: [{ id: "pool" }],
       SusdsYieldSummary: [{ id: "susds" }],
       SusdsYieldMovement: [{ id: "susds-move" }],
+      SusdsYieldDailySnapshot: [],
       StethYieldSummary: [{ id: "steth" }],
       StethYieldMovement: [{ id: "steth-move" }],
     },
@@ -264,12 +265,41 @@ assert.deepEqual(
       Pool: 1,
       SusdsYieldSummary: 1,
       SusdsYieldMovement: 1,
+      SusdsYieldDailySnapshot: 0,
       StethYieldSummary: 1,
       StethYieldMovement: 1,
     },
     errors: [],
     missingTables: [],
+    susdsSummaryNonzero: false,
     ok: true,
+  },
+);
+
+assert.deepEqual(
+  summarizeProbe({
+    data: {
+      Pool: [{ id: "pool" }],
+      SusdsYieldSummary: [{ id: "susds", currentShares: "1" }],
+      SusdsYieldMovement: [{ id: "susds-move" }],
+      SusdsYieldDailySnapshot: [],
+      StethYieldSummary: [{ id: "steth" }],
+      StethYieldMovement: [{ id: "steth-move" }],
+    },
+  }),
+  {
+    rowCounts: {
+      Pool: 1,
+      SusdsYieldSummary: 1,
+      SusdsYieldMovement: 1,
+      SusdsYieldDailySnapshot: 0,
+      StethYieldSummary: 1,
+      StethYieldMovement: 1,
+    },
+    errors: [],
+    missingTables: ["SusdsYieldDailySnapshot"],
+    susdsSummaryNonzero: true,
+    ok: false,
   },
 );
 
@@ -283,6 +313,7 @@ assert.deepEqual(
       Pool: 0,
       SusdsYieldSummary: 0,
       SusdsYieldMovement: 0,
+      SusdsYieldDailySnapshot: 0,
       StethYieldSummary: 0,
       StethYieldMovement: 0,
     },
@@ -294,6 +325,7 @@ assert.deepEqual(
       "StethYieldSummary",
       "StethYieldMovement",
     ],
+    susdsSummaryNonzero: false,
     ok: false,
   },
 );
@@ -321,6 +353,7 @@ const summary = buildSummary({
       PolygonPool: validPolygonPools(),
       SusdsYieldSummary: [{ id: "susds" }],
       SusdsYieldMovement: [{ id: "susds-move" }],
+      SusdsYieldDailySnapshot: [{ id: "susds-day" }],
       StethYieldSummary: [{ id: "steth" }],
       StethYieldMovement: [{ id: "steth-move" }],
     },
@@ -356,6 +389,7 @@ const semanticFailureWhileSyncing = buildSummary({
       PolygonPool: missingPolygonPool,
       SusdsYieldSummary: [{ id: "susds" }],
       SusdsYieldMovement: [{ id: "susds-move" }],
+      SusdsYieldDailySnapshot: [{ id: "susds-day" }],
       StethYieldSummary: [{ id: "steth" }],
       StethYieldMovement: [{ id: "steth-move" }],
     },

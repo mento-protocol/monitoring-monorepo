@@ -4,9 +4,9 @@
 
 Multichain Envio HyperIndex indexer for Mento v3 — Ethereum reserve-yield (1),
 Celo Mainnet (42220), Monad Mainnet (143), and Polygon Mainnet (137). Tracks FPMM pool activity,
-oracle health, trading limits, rebalancer liveness, event-driven sUSDS reserve
-yield, and stETH reserve yield with a sub-daily wallet balance sampler that
-writes daily snapshots. The historical sUSDS `onBlock` heartbeat is
+oracle health, trading limits, rebalancer liveness, sUSDS reserve yield with a
+launch-aligned bounded daily sampler, and stETH reserve yield with a sub-daily
+wallet balance sampler. The historical every-block sUSDS heartbeat is
 intentionally excluded from the hosted path.
 
 ## What It Does
