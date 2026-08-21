@@ -123,6 +123,16 @@ Solution` (approach before implementation detail). PRs open **ready for
    out of `agent-active` and into review. Authority:
    [`agent-issue-workflow.md`](agent-issue-workflow.md).
 
+   **Bind the checkout to the target before publishing.** Resolve the PR's head
+   repository, `headRefName`, and `headRefOid`; require a configured remote that
+   serves that head repository and a local `HEAD` equal to that OID; push with an
+   explicit `git push <head-remote> HEAD:<headRefName>` refspec, never an implicit
+   target or the local branch name. Re-read the PR afterwards and require the new
+   `headRefOid` to equal local `HEAD` before treating anything as published. A
+   fork checkout uses its parent as `BASE_REPO`; never substitute a fork's
+   `origin` for its parent, and stop if the head repository has no matching push
+   remote.
+
 6. **Babysit.** Run the `babysit-pr` skill. Sweep every feedback surface:
    top-level comments, review bodies, inline comments and threads, annotations,
    and failing logs. **Reply before resolving**, on the correct surface, in
@@ -142,6 +152,25 @@ Solution` (approach before implementation detail). PRs open **ready for
    reclassification before starting a sixth. Authority:
    [`agent-issue-workflow.md`](agent-issue-workflow.md) for the deferral and
    issue-lifecycle rules.
+
+   The same checkout binding as step 5 applies before any blocker fix mutates
+   files: clean worktree, local `HEAD` equal to the resolved `headRefOid`,
+   explicit push refspec, re-verified OID afterwards. If binding fails, move to a
+   clean dedicated checkout rather than editing an unbound one.
+
+   **Bound the watch.** One hour of wall clock by default unless the user set a
+   different budget, and roughly three attempts at the same recurring item before
+   handing it back. `pnpm pr:ready-state --watch` polls until ready, merged, or
+   closed, so a permanently blocked PR otherwise consumes the session. At the
+   deadline, report where the PR stands and stop or escalate.
+
+   **Stacked PRs are the normal case here**, typically after a `/ship` batch.
+   When a watched PR merges or a base moves, re-evaluate every open PR that
+   depended on it — including ones the user never named — before calling a batch
+   healthy. A squash merge rewrites the commits a dependent branch still carries,
+   so expect conflicts there. A ready verdict on a still-open PR is revocable:
+   any change to it or its base returns it to full evaluation against the new
+   head.
 
 7. **Ready-state.** Before signalling all-clear, run both projections with
    `<BASE_REPO>` resolved from the PR URL — as the `babysit-pr` skill does —
@@ -203,12 +232,13 @@ These bind regardless of which step you are on:
 
 ## Authority map
 
-| Step                     | Authority doc                                                                                                        |
-| ------------------------ | -------------------------------------------------------------------------------------------------------------------- |
-| Claim, defer, merge-sync | [`agent-issue-workflow.md`](agent-issue-workflow.md)                                                                 |
-| Gate, autoreview         | [`agent-quality-gate-mechanics.md`](agent-quality-gate-mechanics.md)                                                 |
-| Ready-state              | [`pr-ready-state.md`](pr-ready-state.md)                                                                             |
-| Docs and drift           | [`../context-standards.md`](../context-standards.md)                                                                 |
-| Ship, babysit            | steps 5-7 here; skill entry points in [`codex-agent-skills.md`](codex-agent-skills.md#claude-global-store-shadowing) |
-| UI visual evidence       | [`dashboard-verification.md`](dashboard-verification.md)                                                             |
-| Production closeout      | [`../deployment.md`](../deployment.md) and the owning package runbook                                                |
+| Step                     | Authority doc                                                                                                  |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| Claim, defer, merge-sync | [`agent-issue-workflow.md`](agent-issue-workflow.md)                                                           |
+| Gate, autoreview         | [`agent-quality-gate-mechanics.md`](agent-quality-gate-mechanics.md)                                           |
+| Ready-state              | [`pr-ready-state.md`](pr-ready-state.md)                                                                       |
+| Docs and drift           | [`../context-standards.md`](../context-standards.md)                                                           |
+| Ship                     | steps 2-9 here; entry points in [`codex-agent-skills.md`](codex-agent-skills.md#claude-global-store-shadowing) |
+| Babysit                  | steps 6-7 here; entry points in [`codex-agent-skills.md`](codex-agent-skills.md#claude-global-store-shadowing) |
+| UI visual evidence       | [`dashboard-verification.md`](dashboard-verification.md)                                                       |
+| Production closeout      | [`../deployment.md`](../deployment.md) and the owning package runbook                                          |

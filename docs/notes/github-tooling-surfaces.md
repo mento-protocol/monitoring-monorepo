@@ -136,3 +136,42 @@ Because of these gaps, a cloud-session readiness sweep is an emulation of
 path must be labeled **MCP-emulated** rather than probe-verified, and the final
 probe-verified all-clear belongs to a surface where the probe runs (local
 babysitter or CI).
+
+## Watching a PR from a cloud session
+
+`pnpm pr:ready-state` cannot run here, so the watch is event-driven rather than
+polled. Do not foreground-poll and never sleep-poll.
+
+1. Subscribe to PR events (`subscribe_pr_activity`) so comments, reviews, and CI
+   failures arrive as webhook activity.
+2. Arm a scheduled self check-in (for example `send_later`) before ending the
+   turn, every 15-20 minutes against the operating card's one-hour default
+   deadline. Webhooks do not cover CI success, new pushes, or merge-conflict
+   transitions, so a check-in that fired only at the deadline would miss a
+   mid-window green. Re-arming is bounded by that same deadline: at it, report
+   the current state and stop or escalate rather than re-arming silently. Stop
+   when the PR is merged or closed.
+3. On every event or check-in, run the MCP emulation of the readiness sweep
+   using the mapping above: PR state and head SHA, head check runs, unresolved
+   review threads (page to the end), unreplied root review comments, and
+   top-level comments. Two readings the mapping does not make for you:
+   - The latest per-reviewer state from `get_reviews`: an outstanding
+     `CHANGES_REQUESTED` is a required blocker until approved or dismissed.
+     GitHub's aggregate review decision persists across new pushes, so do not
+     discard it for being on an older commit. Whether an approval is required at
+     all rides on branch protection, which MCP cannot read — name it unverified.
+   - The Codex current-head signal from Codex's visible reviews and comments.
+     The reaction-backed PR-description approval gate is not readable over MCP;
+     report it as unverified rather than assumed.
+4. **A fork head stops the run on this surface too.** The repo gate that refuses
+   fork heads (`.claude/babysit-pr.sh`) cannot run here, so establish
+   `isCrossRepository` from the PR payload before the first repo command and
+   refuse the same way rather than proceeding unguarded.
+5. Blocker handling, checkout binding, reply shapes, and Codex-request
+   discipline are identical to the local path — see
+   [`pr-operating-card.md`](pr-operating-card.md) steps 6 and 7 — using the MCP
+   write tools named above in place of `gh`. Reply before resolving, always.
+6. Label any all-clear **MCP-emulated**, never probe-verified. It is a status
+   report, not a terminal state: keep the step-2 loop armed, name the gates the
+   sweep could not verify as unverified rather than clear, and hand the final
+   probe-verified decision to a gh-capable surface.

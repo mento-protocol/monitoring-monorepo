@@ -232,7 +232,10 @@ A UI PR carries a `## Visual comparison` section placed immediately after
 intended file and review fix is committed and the worktree is clean, and record
 the final local `HEAD` OID before capture.
 
-- Render `BASE_REMOTE/BASE_REF` in an isolated worktree for **Before** and the
+- Resolve and record the base commit OID before capture — `BASE_REMOTE/BASE_REF`
+  is a moving reference, and a base that advances mid-capture would put a
+  different commit behind the **Before** image than the PR is measured against.
+  Render that immutable OID in an isolated worktree for **Before** and the
   recorded `HEAD` for **After**. Never simulate the old state with DOM edits,
   stale deployments, or remembered screenshots.
 - Use the same route, viewport, theme, auth state, and deterministic fixture
@@ -241,7 +244,7 @@ the final local `HEAD` OID before capture.
 - Cover each materially different route or state the PR changes. A new route
   still needs a pair: the base route's prior result, such as its 404 or nearest
   parent state, against the new route at the recorded `HEAD`.
-- Name the route or state, both exact commits, the viewport, and the fixture or
+- Name the route or state, both recorded commit OIDs, the viewport, and the fixture or
   data source. Label the images **Before** and **After** side by side in a
   Markdown table.
 

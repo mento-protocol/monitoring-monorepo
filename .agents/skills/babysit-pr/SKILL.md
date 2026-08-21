@@ -50,5 +50,6 @@ the scope baseline, and the two-projection readiness contract.
   push; reviewers push mid-session.
 
 In a Claude cloud session without the capability gate, `pnpm pr:ready-state`
-cannot run: follow [`cloud-watch-loop.md`](cloud-watch-loop.md) and label the
-result MCP-emulated, never probe-verified.
+cannot run. The event-driven watch loop, the fork stop for that surface, and the
+MCP-emulated labelling rule live in
+[`github-tooling-surfaces.md`](../../../docs/notes/github-tooling-surfaces.md).

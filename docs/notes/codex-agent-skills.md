@@ -81,11 +81,17 @@ new rule must take one of them:
 
 Do not resolve the collision by renaming `ship` or `babysit-pr`; the running
 session's skill listing, not this note, is the runtime truth for which copy
-loaded. Verify with a headless probe when it matters:
+loaded. Verify with a headless probe that exits non-zero when the assumption
+breaks, rather than one whose prose has to be read:
 
 ```bash
-claude -p "List every skill named exactly 'ship' or 'babysit-pr'." --model claude-opus-5
+claude -p "List every skill named exactly 'ship' or 'babysit-pr'. Reply with only a JSON array of the names, no prose." \
+  --model opus --output-format json |
+  python3 -c 'import sys,json,re; r=json.load(sys.stdin).get("result","");m=re.search(r"\[.*\]",r,re.S);n=sorted(json.loads(m.group(0)) if m else []);print(n);sys.exit(0 if n==["babysit-pr","ship"] else 1)'
 ```
+
+Exit 0 means one skill resolved per name, as expected. A non-zero exit means the
+collision behaviour changed and the routing above needs rechecking.
 
 ## Codex Cloud routing
 

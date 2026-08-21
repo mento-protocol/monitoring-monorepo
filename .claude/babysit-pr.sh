@@ -41,6 +41,28 @@ babysit_repo_gate() {
     return 0
   fi
 
+  # Fork-head PRs are a hard stop for this repo's gates, checked before the
+  # cloud capability guard below: that guard returns early in a Claude cloud
+  # session, and a fork head must refuse on every surface rather than depend on
+  # which one is running. `pr:ready-state`, `pr:feedback-state`, and the
+  # autoreview bundle sequence all assume the head commit is reachable through a
+  # trusted `origin` serving the base repo
+  # (docs/notes/agent-quality-gate-mechanics.md); a fork head breaks that, so
+  # the gate refuses rather than reporting a readiness it cannot prove. This
+  # lives in the hook, not a skill file, because the hook runs whichever babysit
+  # skill won the name collision (docs/notes/codex-agent-skills.md). The MCP
+  # path carries the same stop in docs/notes/github-tooling-surfaces.md.
+  local cross
+  if ! cross=$(gh pr view "$pr" --repo "${owner}/${repo}" --json isCrossRepository \
+    --jq '.isCrossRepository' 2>/dev/null); then
+    printf 'PENDING fork status unreadable for #%s; cannot prove the head is same-repo' "$pr"
+    return 0
+  fi
+  if [[ "$cross" == "true" ]]; then
+    printf 'FAIL #%s has a fork head; repo gates cannot prove trust roots for fork-controlled source (docs/notes/agent-quality-gate-mechanics.md)' "$pr"
+    return 0
+  fi
+
   # In Claude cloud sessions the platform's GitHub credential proxy blocks
   # gh's /repos/* and GraphQL paths regardless of tokens, so pr:ready-state
   # cannot run there (docs/notes/github-tooling-surfaces.md). Only repo-scoped
@@ -71,29 +93,10 @@ babysit_repo_gate() {
   # gh auth/network errors that succeed on an immediate retry, and a
   # single-attempt FAIL turns those into false REPO_GATE_FAIL alarms — six of
   # them across three PRs on 2026-08-20, every one reproducing clean by hand
-  # Fork-head PRs are a hard stop for this repo's gates. `pr:ready-state`,
-  # `pr:feedback-state`, and the autoreview bundle sequence all assume the head
-  # commit is reachable through a trusted `origin` that serves the base repo
-  # (docs/notes/agent-quality-gate-mechanics.md). A fork head breaks that
-  # assumption, so the gate refuses rather than reporting a readiness it cannot
-  # prove. This lives in the hook, not in a skill file, because the hook runs
-  # whichever babysit skill won the name collision
-  # (docs/notes/codex-agent-skills.md).
-  local cross
-  if ! cross=$(gh pr view "$pr" --repo "${owner}/${repo}" --json isCrossRepository \
-    --jq '.isCrossRepository' 2>/dev/null); then
-    printf 'PENDING fork status unreadable for #%s; cannot prove the head is same-repo' "$pr"
-    return 0
-  fi
-  if [[ "$cross" == "true" ]]; then
-    printf 'FAIL #%s has a fork head; repo gates cannot prove trust roots for fork-controlled source (docs/notes/agent-quality-gate-mechanics.md)' "$pr"
-    return 0
-  fi
-
-  # seconds later. The sibling hook in the babysit-pr skill's `hooks/` dir
-  # gained this retry on 2026-06-10 for the same symptom, but THIS file is
-  # sourced last and overrides it, so the fix never took effect. Keep both in
-  # step: a change here belongs there too.
+  # seconds later. A vendored copy of this hook in the babysit-pr skill's
+  # `hooks/` dir used to shadow-compete with this file; it was removed once the
+  # skill's path-convention discovery ($REPO_ROOT/.claude/babysit-pr.sh) made it
+  # redundant, so this file is now the only copy to keep in step.
   local output
   output=$(cd "$repo_root" && pnpm --silent pr:ready-state --pr "$pr" --repo "${owner}/${repo}" --json 2>/dev/null) || {
     sleep 5

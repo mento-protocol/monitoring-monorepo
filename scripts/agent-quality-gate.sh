@@ -3277,6 +3277,17 @@ while IFS= read -r path; do
       ;;
   esac
   case "$path" in
+    # The babysit repo hook gates PR readiness for every babysit surface, and
+    # its fork refusal is fail-closed. `bash -n` above only parses it, so wire
+    # the behavioural suite to both the subject and the test: a hook-only edit
+    # must not pass the gate without exercising the refusal.
+    .claude/babysit-pr.sh|.claude/babysit-pr.test.sh)
+      if [[ -f .claude/babysit-pr.test.sh ]]; then
+        add_command "bash .claude/babysit-pr.test.sh" "babysit repo hook changed"
+      fi
+      ;;
+  esac
+  case "$path" in
     */vitest.config.ts|*/vitest.mutation.config.ts)
       add_surface "tooling"
       add_command "node scripts/repo-health/check-hermetic-vitest-setup.mjs" "hermetic Vitest config changed"
