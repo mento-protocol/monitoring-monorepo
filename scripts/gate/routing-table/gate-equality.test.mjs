@@ -12,7 +12,7 @@
  * guards, and order. Comments are dropped on both sides, because rewording a
  * comment is not a routing change.
  *
- * Run: node --test scripts/gate/routing-table/
+ * Run: pnpm gate:routing-table:test
  */
 
 import assert from "node:assert/strict";

@@ -10,7 +10,7 @@
  * the scar, in a test that printed "All 0 deploy scripts…" and exited 0 over an
  * empty subject list.
  *
- * Run: node --test scripts/gate/routing-table/
+ * Run: pnpm gate:routing-table:test
  */
 
 import assert from "node:assert/strict";
@@ -33,7 +33,7 @@ const read = (relative) => readFileSync(`${REPO}${relative}`, "utf8");
  * Group order is routing: the plan is built in group order and `add_command`
  * keeps the FIRST reason it is given for a command, which
  * `production-infra-identity-contract/routing.test.mjs` asserts on. The table
- * is assembled by concatenating six modules, and a module split that silently
+ * is assembled by concatenating eleven data modules, and a split that silently
  * reorders is exactly what this list exists to catch — so it is spelled out
  * here rather than derived from the same imports it is checking.
  */

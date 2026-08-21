@@ -27,7 +27,7 @@
  * 3.2 at /bin/bash — the floor this repo supports and the one the pre-push hook
  * actually runs — while a developer's PATH usually has 5.x.
  *
- * Run: node --test scripts/gate/routing-table/
+ * Run: pnpm gate:routing-table:test
  */
 
 import assert from "node:assert/strict";
