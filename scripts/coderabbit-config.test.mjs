@@ -58,7 +58,7 @@ const EXPECTED_CONFIG = {
       base_branches: [],
       drafts: false,
       auto_incremental_review: true,
-      auto_pause_after_reviewed_commits: 2,
+      auto_pause_after_reviewed_commits: 5,
     },
   },
 };
@@ -118,14 +118,10 @@ test("the pin rejects a weakened config (negative control)", () => {
   assert.throws(() => assert.deepEqual(extended, EXPECTED_CONFIG));
 });
 
-test("auto-review stays on and paused low for agent commit bursts", () => {
+test("auto-review stays on with the measured five-commit burst guard", () => {
   const { auto_review: autoReview } = EXPECTED_CONFIG.reviews;
   assert.equal(autoReview.enabled, true);
-  assert.ok(
-    autoReview.auto_pause_after_reviewed_commits > 0 &&
-      autoReview.auto_pause_after_reviewed_commits <= 2,
-    "auto_pause_after_reviewed_commits must stay between 1 and 2 (no usage add-on is enabled)",
-  );
+  assert.equal(autoReview.auto_pause_after_reviewed_commits, 5);
 });
 
 process.stdout.write(`\n${asserted} passed, ${failed} failed\n`);
