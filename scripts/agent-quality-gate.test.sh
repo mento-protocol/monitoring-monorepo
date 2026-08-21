@@ -436,8 +436,8 @@ assert_script_occurrences() {
 # Every test below lives inside exactly one `run_<family>_family` function, and
 # nothing but blank lines and comments may sit between those functions. Set
 # GATE_TEST_FOCUS to a comma-separated list of family names to run just those
-# subjects while iterating; with the variable unset the dispatch at the bottom
-# of this file runs every family in file order, which is exactly the sequence
+# subjects while iterating; with the variable unset or empty the dispatch at the
+# bottom of this file runs every family in file order, which is the sequence
 # this suite ran before the partition existed. Adding a test means adding it
 # inside the family that owns its subject — see the families' documented
 # subjects and docs/notes/agent-quality-gate-mechanics.md.
@@ -605,7 +605,9 @@ dispatch_gate_test_families() {
   # it must never be able to answer for the whole suite. The gate schedules this
   # file as a mapped command, so a focus exported in a developer's shell would
   # otherwise be inherited and silently shrink the gate's own self-test; the same
-  # goes for CI's `pnpm agent:quality-gate:test`. Refuse loudly under any of:
+  # goes for CI's `pnpm agent:quality-gate:test`. Refuse loudly when any of these
+  # holds a non-empty value — the test below reads the value, not the presence,
+  # so a marker exported empty reads the same as one that was never exported:
   #
   # - AGENTQG_RUN, which the gate puts on the argv of every mapped command it
   #   runs, in every mode. This is the one that has to be here: the lock marker

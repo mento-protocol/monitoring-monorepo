@@ -1136,17 +1136,19 @@ GATE_TEST_FOCUS=routing-packaging,routing-docs bash scripts/agent-quality-gate.t
 
 Rules that keep the focus honest:
 
-- **Unset runs everything.** With `GATE_TEST_FOCUS` unset the dispatch runs
-  every family in registry order, which is the file order and the order this
+- **Unset or empty runs everything.** The dispatch tests the value, not its
+  presence, so `GATE_TEST_FOCUS` unset and `GATE_TEST_FOCUS=` behave alike: both
+  run every family in registry order, which is the file order and the order this
   suite has always used. `pnpm agent:quality-gate:test`, the gate's own mapped
   self-test, and CI all run in that mode.
-- **The focus is refused where it could answer for the whole suite.** A set
-  `GATE_TEST_FOCUS` exits 2 when `AGENTQG_RUN`, `AGENT_QUALITY_GATE_LOCK_HELD`,
-  or `GITHUB_ACTIONS` is set, so an exported focus cannot shrink the gate's
-  self-test or CI's run. `AGENTQG_RUN` is the load-bearing one: the gate puts it
-  on the argv of every mapped command in every mode, while the lock marker is
-  absent under `--no-lock` and `AGENT_QUALITY_GATE_LOCK=0`, where
-  `acquire_gate_run_lock` returns before exporting it.
+- **The focus is refused where it could answer for the whole suite.** A
+  non-empty `GATE_TEST_FOCUS` exits 2 when any of `AGENTQG_RUN`,
+  `AGENT_QUALITY_GATE_LOCK_HELD`, or `GITHUB_ACTIONS` holds a non-empty value,
+  so an exported focus cannot shrink the gate's self-test or CI's run.
+  `AGENTQG_RUN` is the load-bearing one: the gate puts it on the argv of every
+  mapped command in every mode, while the lock marker is absent under
+  `--no-lock` and `AGENT_QUALITY_GATE_LOCK=0`, where `acquire_gate_run_lock`
+  returns before exporting it.
 - **The partition is checked, not assumed.** `verify_gate_family_partition`
   runs before the family definitions, reading the suite file through the path
   resolved at startup. It reds the suite when a test line sits outside every
