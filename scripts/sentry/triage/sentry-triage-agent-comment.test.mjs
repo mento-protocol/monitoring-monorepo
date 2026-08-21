@@ -34,6 +34,7 @@ import {
   probeBrokerByPid,
   redactSentryPaths,
   resolveTarget,
+  SENTRY_ROUTES,
   TARGET_FILE_RELATIVE,
   targetFilePath,
   VERDICT_MARKER,
@@ -677,13 +678,9 @@ test("redaction keeps the route shape and drops every coordinate", () => {
   assert.equal(redactSentryPaths(plain), plain);
 });
 
-test("redaction covers EVERY path the broker's allowlist admits", () => {
-  // Drift guard. The wrapper carries its own copy of the route vocabulary — it
-  // must not import the broker, whose module the workflow stages separately —
-  // so the vocabulary is re-derived HERE from ALLOWED_PATHS and every route is
-  // driven through the redactor with a distinctive marker in each variable
-  // position. A route the broker learns and this list has not is a coordinate
-  // that would reach the public run log unredacted.
+/** The broker's ALLOWED_PATHS, re-derived from its source into the same
+ * `*`-for-a-coordinate shape SENTRY_ROUTES uses. */
+function brokerRoutes() {
   const brokerSource = readFileSync(
     join(SCRIPTS_DIR, "..", "broker", "sentry-mcp-broker.mjs"),
     "utf8",
@@ -699,21 +696,125 @@ test("redaction covers EVERY path the broker's allowlist admits", () => {
     patterns.length >= 18,
     `expected the whole allowlist, parsed ${patterns.length}`,
   );
+  return patterns.map((p) => p.replaceAll("${SEG}", "*"));
+}
+
+test("the redactor's route table IS the broker's allowlist", () => {
+  // Drift guard, and the reason redaction can be positional at all. The guard
+  // module must not import the broker — the workflow stages that module
+  // separately and the wrapper's closure is asserted — so the table is
+  // re-derived HERE and compared whole. A route the broker learns and this
+  // table has not is a path that falls through to the unmatched branch.
+  assert.deepEqual([...SENTRY_ROUTES].sort(), brokerRoutes().sort());
+});
+
+test("redaction is POSITIONAL — a slug equal to a route word still goes", () => {
+  // The bug this replaced: a global "is this segment a known route word?"
+  // membership test published any coordinate whose value happened to be one.
+  // Route words are not a reserved namespace — an organization really can be
+  // named `events`, a monitor slug really can be `replays`. A segment is a
+  // coordinate because of WHERE it sits in a matched route, and nothing else.
+  const cases = [
+    // org slug == a route word, at the org position
+    [
+      "/api/0/organizations/events/issues/123/",
+      "/api/0/organizations/<redacted>/issues/<redacted>/",
+    ],
+    // monitor slug == a route word, at the monitor position
+    [
+      "/api/0/organizations/mento/monitors/replays/",
+      "/api/0/organizations/<redacted>/monitors/<redacted>/",
+    ],
+    // BOTH segments of the project route == route words
+    ["/api/0/projects/trace/images/", "/api/0/projects/<redacted>/<redacted>/"],
+    // an issue id that spells a route word, and an org that spells another
+    [
+      "/api/0/organizations/issues/issues/events/",
+      "/api/0/organizations/<redacted>/issues/<redacted>/",
+    ],
+    // the deepest route, every coordinate a route word
+    [
+      "/api/0/organizations/snapshots/preprodartifacts/snapshots/images/images/api/",
+      "/api/0/organizations/<redacted>/preprodartifacts/snapshots/<redacted>/images/<redacted>/",
+    ],
+    // ordinary values still read as before
+    [
+      "/api/0/organizations/mentolabs/issues/68173/",
+      "/api/0/organizations/<redacted>/issues/<redacted>/",
+    ],
+  ];
+  for (const [path, expected] of cases) {
+    assert.equal(redactSentryPaths(path), expected, path);
+  }
+});
+
+test("an UNMATCHED path is redacted whole, not guessed at", () => {
+  // A path the broker refused, or one a newer MCP server produced, has no
+  // known structure. Without a pattern there is no way to tell a route word
+  // from an identifier, so every segment past `/api/0/` goes. That costs the
+  // new route word deliberately — re-deriving the allowlist is done against a
+  // capture server, not by reading a public run log.
+  assert.equal(
+    redactSentryPaths("/api/0/organizations/mento/issues/9/tags/browser/"),
+    "/api/0/<redacted>/<redacted>/<redacted>/<redacted>/<redacted>/<redacted>/",
+  );
+  assert.equal(
+    redactSentryPaths(
+      "DENY 403 GET /api/0/internal/quotas/ — path not allowed",
+    ),
+    "DENY 403 GET /api/0/<redacted>/<redacted>/ — path not allowed",
+  );
+});
+
+/** Route words that sit where another same-length route puts a coordinate.
+ * Publishing one would be a guess, so the tie-break redacts it. */
+function ambiguousLiterals(routes) {
+  const segs = routes.map((r) => r.split("/"));
+  const ambiguous = new Set();
+  for (const a of segs) {
+    for (const b of segs) {
+      if (a === b || a.length !== b.length) continue;
+      const compatible = a.every(
+        (s, i) => s === "*" || b[i] === "*" || s === b[i],
+      );
+      if (!compatible) continue;
+      a.forEach((s, i) => {
+        if (s !== "*" && s !== "" && b[i] === "*") ambiguous.add(s);
+      });
+    }
+  }
+  return ambiguous;
+}
+
+test("redaction covers EVERY path the broker's allowlist admits", () => {
+  // Every allowed route, driven with a distinctive marker in each coordinate
+  // position. Two properties, and the first is the security one:
+  //   1. no marker may survive, anywhere;
+  //   2. every route literal must survive, EXCEPT where another same-length
+  //      route puts a coordinate in that position — there, publishing the word
+  //      would be a guess, and the tie-break redacts it.
+  const routes = brokerRoutes();
+  const ambiguous = ambiguousLiterals(routes);
+  // Pinned, so the exception can never quietly widen into "most words go".
+  assert.deepEqual(
+    [...ambiguous].sort(),
+    ["latest"],
+    "the set of route words that read as coordinates changed",
+  );
 
   const COORDINATE = "Zq7CoordinateZq7";
-  for (const pattern of patterns) {
-    const sample = pattern.replaceAll("${SEG}", COORDINATE);
+  for (const route of routes) {
+    const sample = route.replaceAll("*", COORDINATE);
     const redacted = redactSentryPaths(`GET ${sample} -> 200 (1b)`);
     assert.ok(
       !redacted.includes(COORDINATE),
-      `an identifier survives redaction in ${pattern}`,
+      `an identifier survives redaction in ${route}`,
     );
-    // The structure must NOT be redacted away, or the diagnostic goes with it.
-    for (const segment of sample.split("/")) {
-      if (segment === "" || segment === COORDINATE) continue;
+    for (const segment of route.split("/")) {
+      if (segment === "" || segment === "*" || ambiguous.has(segment)) continue;
       assert.ok(
         redacted.includes(`/${segment}`),
-        `route literal '${segment}' was redacted out of ${pattern}`,
+        `route literal '${segment}' was redacted out of ${route}`,
       );
     }
   }
@@ -994,6 +1095,12 @@ test("the wrapper's runtime closure is exactly what the workflow stages", () => 
   const closure = importClosure("sentry-triage-agent-comment.mjs");
   assert.deepEqual(closure, [
     "sentry-triage-agent-comment.mjs",
+    // The broker liveness fence and the public-log redactor (#1956 split, when
+    // the wrapper crossed the 600-line soft cap). The wrapper calls both on the
+    // posting path, so the agent's job must run them from the read-only staging
+    // directory too — an unstaged guard would be loaded from the
+    // agent-WRITABLE checkout, which is the whole thing this staging prevents.
+    "sentry-triage-broker-guard.mjs",
     // The needs-human escalation rules the verdict contract re-exports (#1782
     // split, when project-core hit the 1000-line hard cap). Pure predicates over
     // parsed fields, but the verdict contract imports them, so they are staged

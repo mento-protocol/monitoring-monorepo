@@ -438,6 +438,7 @@ jobs:
           # scripts/sentry/broker/sentry-mcp-broker.test.mjs.
           for f in \
             sentry-triage-agent-comment.mjs \
+            sentry-triage-broker-guard.mjs \
             sentry-triage-project-core.mjs \
             sentry-triage-escalation-contract.mjs \
             sentry-triage-text.mjs; do
@@ -696,7 +697,9 @@ jobs:
               #     fine on disk (the log is agent-readable by design) but not
               #     in a public run log. The wrapper redacts every `/api/0/…`
               #     path to its route shape before printing — redactSentryPaths
-              #     in scripts/sentry/triage/sentry-triage-agent-comment.mjs.
+              #     in scripts/sentry/triage/sentry-triage-broker-guard.mjs,
+              #     which matches route POSITIONS and never a word list, so a
+              #     slug that spells a route word is still a coordinate.
               #     The marker is written unredacted on purpose: the raw log is
               #     the better artefact for anyone debugging on the runner, and
               #     the wrapper is the one place it crosses into publication.

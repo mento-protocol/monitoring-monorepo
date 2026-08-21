@@ -748,16 +748,46 @@ public repository's run log. Two separate properties carry that:
   to `scripts/sentry/broker/sentry-mcp-broker.mjs`.
 - **No Sentry coordinates.** Those paths do carry issue, event, trace, replay,
   monitor, conversation and snapshot identifiers. That is fine on disk — the log
-  is agent-readable by design — but not in a public run log, so the wrapper's
-  `redactSentryPaths` rewrites every `/api/0/…` path to its route shape and
-  drops the query string before printing. Route shape is the whole diagnostic
-  (it is what re-derives the path allowlist on an MCP-server bump); the
-  identifiers add nothing to it. The marker itself is written unredacted on
-  purpose: the raw log is the better artefact for anyone debugging on the
-  runner, and the wrapper is the one place it crosses into publication. The
-  redactor's route vocabulary is re-derived from the broker's `ALLOWED_PATHS` by
-  `sentry-triage-agent-comment.test.mjs`, which drives every allowed route
-  through it, so a route the broker learns cannot quietly go unredacted.
+  is agent-readable by design — but not in a public run log, so
+  `redactSentryPaths` in `sentry-triage-broker-guard.mjs` rewrites every
+  `/api/0/…` path to its route shape and drops the query string before printing.
+  Route shape is the whole diagnostic (it is what re-derives the path allowlist
+  on an MCP-server bump); the identifiers add nothing to it. The marker itself
+  is written unredacted on purpose: the raw log is the better artefact for
+  anyone debugging on the runner, and the wrapper is the one place it crosses
+  into publication.
+
+**Redaction is POSITIONAL, and it has to be.** The first version asked "is this
+segment one of the known route words?", which publishes any coordinate whose
+value happens to be one — route words are not a reserved namespace, so an
+organization really can be named `events`, a monitor slug really can be
+`replays`, and a project slug really can be `images`. The redactor instead
+matches each path against `SENTRY_ROUTES`, a table of the broker's allowed
+routes with the coordinate POSITIONS marked, and renders the result from the
+matched route rather than from the observed path — so a coordinate cannot
+survive whatever it contains. Rules that follow from that:
+
+- Where two routes match, the one that redacts MORE wins. Today that costs
+  exactly one word, `latest`, because `…/events/latest/` and the events-by-id
+  route are the same length; the test pins that set so it cannot grow quietly.
+- An UNMATCHED path — one the broker refused, or one a newer MCP server
+  produced — has every segment past `/api/0/` redacted. Without a pattern there
+  is no way to tell a route word from an identifier, and guessing is the bug
+  this replaced. Re-derive the allowlist against a capture server (below), not
+  by reading a public run log.
+- `SENTRY_ROUTES` is compared whole against the broker's `ALLOWED_PATHS`,
+  re-derived from source by `sentry-triage-agent-comment.test.mjs`, so a route
+  the broker learns cannot silently fall through to the unmatched branch.
+
+**Where this code lives.** The liveness fence and the redactor are
+`scripts/sentry/triage/sentry-triage-broker-guard.mjs`; the wrapper
+(`sentry-triage-agent-comment.mjs`) owns only "may this body be posted, and to
+which issue" and calls the guard on the posting path. They were split when the
+wrapper crossed the 600-line soft cap. The guard is part of the wrapper's
+runtime import closure, so the workflow stages it read-only with the rest — an
+unstaged guard would be loaded from the agent-writable checkout, which is the
+whole point of the staging step. It has no suite of its own: the wrapper's suite
+covers it, and the quality gate routes the guard's path there.
 
 The wrapper also **checks the broker process directly**, in the instant before
 it hands the body to `gh`, because a polled marker lags the death it reports and
