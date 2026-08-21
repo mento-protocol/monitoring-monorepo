@@ -3284,6 +3284,11 @@ while IFS= read -r path; do
     .claude/babysit-pr.sh|.claude/babysit-pr.test.sh)
       if [[ -f .claude/babysit-pr.test.sh ]]; then
         add_command "bash .claude/babysit-pr.test.sh" "babysit repo hook changed"
+      else
+        # Silently adding nothing would let a hook change ship without ever
+        # exercising the fork refusal — the same fail-open this gate refuses.
+        add_command "bash -c 'echo \"missing .claude/babysit-pr.test.sh; the babysit hook cannot change without its behavioural suite\" >&2; exit 1'" \
+          "babysit repo hook changed but its test is missing"
       fi
       ;;
   esac

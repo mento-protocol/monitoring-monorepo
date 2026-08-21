@@ -62,6 +62,13 @@ babysit_repo_gate() {
     printf 'FAIL #%s has a fork head; repo gates cannot prove trust roots for fork-controlled source (docs/notes/agent-quality-gate-mechanics.md)' "$pr"
     return 0
   fi
+  # Continue only on an explicit "false". A null, empty, or unexpected value
+  # means the field was not read, not that the head is same-repo, and treating
+  # it as same-repo would fail open on the exact case this gate exists to catch.
+  if [[ "$cross" != "false" ]]; then
+    printf 'PENDING fork status for #%s read back as %s; cannot prove the head is same-repo' "$pr" "${cross:-empty}"
+    return 0
+  fi
 
   # In Claude cloud sessions the platform's GitHub credential proxy blocks
   # gh's /repos/* and GraphQL paths regardless of tokens, so pr:ready-state

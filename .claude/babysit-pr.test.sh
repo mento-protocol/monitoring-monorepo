@@ -61,6 +61,12 @@ check PENDING 'unreadable fork status does not read as ready' \
 # path — which is where fork risk is highest. Pin the order from this side.
 check FAIL 'fork head is refused even in a Claude cloud session' \
   'echo true' 'CLAUDE_CODE_REMOTE=1'
+# A successful call that yields no usable value means the field was not read.
+# Treating that as same-repo would fail open on exactly what this gate catches.
+check PENDING 'empty fork status is not treated as same-repo' \
+  'echo ""'
+check PENDING 'unexpected fork status is not treated as same-repo' \
+  'echo null'
 # Same-repo falls through to pr:ready-state. Assert on the reason, not just the
 # verdict: both outcomes are FAIL, so a prefix check alone would pass even if
 # the gate had refused it as a fork.
