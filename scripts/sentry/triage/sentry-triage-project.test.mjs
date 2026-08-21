@@ -1,6 +1,17 @@
 #!/usr/bin/env node
-import { readFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { execFileSync } from "node:child_process";
 import { LABEL_TO_VERDICT } from "./sentry-triage-digest.mjs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 import {
   FIX_SCOPE_ARCHITECTURAL_LABEL,
   LABEL_DEFINITIONS,
@@ -344,17 +355,77 @@ await test("workflow defers local config projection before any close", () => {
   const localBranch = closeStep.indexOf(
     '[ "${PROJECTION_DESTINATION}" = "external" ] || [ "${PROJECTION_DESTINATION}" = "local-config" ]',
   );
+  const localBranchEnd = closeStep.indexOf("\n              fi", localBranch);
   const firstClose = closeStep.indexOf("gh issue close");
   assert(localBranch >= 0, "close step must branch on local-config");
+  assert(
+    localBranchEnd > localBranch,
+    "close step local-config branch must have a bounded shell body",
+  );
   assert(
     firstClose > localBranch,
     "close command must follow destination branch",
   );
   const branchExit = closeStep.indexOf("exit 0", localBranch);
   assert(
-    branchExit >= 0 && branchExit < firstClose,
+    branchExit >= 0 && branchExit < localBranchEnd && branchExit < firstClose,
     "local-config must exit before any close mutation",
   );
+
+  const runStart = closeStep.indexOf("\n        run: |\n");
+  assert(runStart >= 0, "close step run block missing");
+  const runLines = closeStep
+    .slice(runStart + "\n        run: |\n".length)
+    .split("\n");
+  const runBlock = [];
+  for (const line of runLines) {
+    if (line === "") {
+      runBlock.push("");
+      continue;
+    }
+    if (!line.startsWith("          ")) break;
+    runBlock.push(line.slice(10));
+  }
+  assert(runBlock.length > 0, "close step run block must contain shell");
+
+  const tempRoot = mkdtempSync(join(tmpdir(), "sentry-project-workflow-"));
+  const ghStub = join(tempRoot, "gh");
+  const callsFile = join(tempRoot, "gh-calls");
+  // The temporary `gh` records every invocation. The local-config branch must
+  // exit before this stub can observe even an attempted close.
+  writeFileSync(ghStub, '#!/bin/sh\nprintf \'%s\\n\' "$*" >> "$GH_CALLS"\n');
+  chmodSync(ghStub, 0o755);
+  try {
+    const output = execFileSync(
+      "/bin/bash",
+      ["-euo", "pipefail", "-c", runBlock.join("\n")],
+      {
+        cwd: fileURLToPath(new URL("../../../", import.meta.url)),
+        env: {
+          ...process.env,
+          PATH: `${tempRoot}:${process.env.PATH}`,
+          GH_CALLS: callsFile,
+          QUEUE_ISSUE_NUMBER: "500",
+          VERDICT: "config-fix",
+          VERDICT_LABEL: "sentry:verdict-config-fix",
+          PROJECTABLE: "false",
+          PROJECTION_DESTINATION: "local-config",
+          ARCHITECTURAL_HOLD: "false",
+          GITHUB_REPOSITORY: "mento-protocol/monitoring-monorepo",
+        },
+      },
+    ).toString();
+    assert(
+      output.includes("leaving it open for the serialized project job"),
+      "local-config branch must report deferral",
+    );
+    assert(
+      !existsSync(callsFile) || readFileSync(callsFile, "utf8") === "",
+      "local-config branch must not invoke gh, including issue close",
+    );
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
 });
 
 // A mock `gh` runner covering the calls runProjection makes. Records every call
@@ -1868,6 +1939,67 @@ await test("runProjection reuses a local alias with ambient calls and trusted au
   );
 });
 
+await test("a hostile local issue author cannot capture a trusted direct marker", async () => {
+  const existing = [
+    {
+      number: 77,
+      url: "https://github.com/mento-protocol/monitoring-monorepo/issues/77",
+      body: `${buildProjectionMarker("APP-MENTO-ORG-12")}\nrest of body`,
+      state: "OPEN",
+      author: { login: "attacker" },
+      comments: [
+        {
+          body: buildAliasComment({
+            shortId: "APP-MENTO-ORG-12",
+            queueIssueUrl:
+              "https://github.com/mento-protocol/monitoring-monorepo/issues/500",
+            verdict: "config-fix",
+            confidence: "medium",
+            summary: "trusted comment on hostile issue",
+            rootCause: "rc",
+            proposedAction: "pa",
+          }),
+          author: { login: "github-actions" },
+        },
+      ],
+    },
+  ];
+  const issue = queueIssue({
+    comments: [
+      botComment(
+        verdictComment({
+          verdict: "config-fix",
+          affectedRepo: "mento-protocol/monitoring-monorepo",
+        }),
+        "2026-07-17T10:00:00Z",
+      ),
+    ],
+  });
+  const { runGh, calls } = makeRunGh({
+    issue,
+    existing,
+    createdUrl:
+      "https://github.com/mento-protocol/monitoring-monorepo/issues/1000",
+  });
+  const result = await runProjection(
+    {
+      localRepo: "mento-protocol/monitoring-monorepo",
+      queueIssue: 500,
+      projectionToken: PAT,
+    },
+    { runGh },
+  );
+  assertEqual(result.status, "projected");
+  assert(
+    calls.some((call) => call.args[0] === "issue" && call.args[1] === "create"),
+    "expected a new local issue after rejecting the hostile direct-marker author",
+  );
+  assert(
+    !calls.some((call) => call.token),
+    "every hostile direct-marker local call must use the ambient token, never the PAT",
+  );
+});
+
 await test("a hostile local alias cannot capture the route", async () => {
   const existing = [
     {
@@ -1926,6 +2058,67 @@ await test("a hostile local alias cannot capture the route", async () => {
   assert(
     !calls.some((call) => call.token),
     "every hostile-alias local call must use the ambient token, never the PAT",
+  );
+});
+
+await test("a hostile local issue author cannot capture a trusted alias", async () => {
+  const existing = [
+    {
+      number: 78,
+      url: "https://github.com/mento-protocol/monitoring-monorepo/issues/78",
+      body: `${buildProjectionMarker("OTHER-9")}\nrest of body`,
+      state: "OPEN",
+      author: { login: "attacker" },
+      comments: [
+        {
+          body: buildAliasComment({
+            shortId: "APP-MENTO-ORG-12",
+            queueIssueUrl:
+              "https://github.com/mento-protocol/monitoring-monorepo/issues/500",
+            verdict: "config-fix",
+            confidence: "medium",
+            summary: "trusted alias on hostile issue",
+            rootCause: "rc",
+            proposedAction: "pa",
+          }),
+          author: { login: "github-actions[bot]" },
+        },
+      ],
+    },
+  ];
+  const issue = queueIssue({
+    comments: [
+      botComment(
+        verdictComment({
+          verdict: "config-fix",
+          affectedRepo: "mento-protocol/monitoring-monorepo",
+        }),
+        "2026-07-17T10:00:00Z",
+      ),
+    ],
+  });
+  const { runGh, calls } = makeRunGh({
+    issue,
+    existing,
+    createdUrl:
+      "https://github.com/mento-protocol/monitoring-monorepo/issues/1001",
+  });
+  const result = await runProjection(
+    {
+      localRepo: "mento-protocol/monitoring-monorepo",
+      queueIssue: 500,
+      projectionToken: PAT,
+    },
+    { runGh },
+  );
+  assertEqual(result.status, "projected");
+  assert(
+    calls.some((call) => call.args[0] === "issue" && call.args[1] === "create"),
+    "expected a new local issue after rejecting the hostile alias author",
+  );
+  assert(
+    !calls.some((call) => call.token),
+    "every hostile alias local call must use the ambient token, never the PAT",
   );
 });
 
