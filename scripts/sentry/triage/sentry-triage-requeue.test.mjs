@@ -18,6 +18,8 @@ import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { settlementHeld } from "./sentry-triage-archive.mjs";
+import { buildUnwindCorrections } from "./sentry-triage-requeue-sentinel.mjs";
 import {
   REGRESSION_PREFIX,
   VERDICT_MARKER,
@@ -878,7 +880,15 @@ await test("no re-queue path rewrites the stub body (#1692)", async () => {
 // OPEN-safe, unless the stub went TERMINAL underneath the failing step.
 // ---------------------------------------------------------------------------
 
-function makeClearFailureGh(initial, { failOn = () => null } = {}) {
+/**
+ * `after(args, state)` runs once each call has been applied, which is how the
+ * racing-interleaving tests below land the archive leg's writes at a CHOSEN
+ * point in the compensation's sequence rather than hoping for a timing.
+ */
+function makeClearFailureGh(
+  initial,
+  { failOn = () => null, after = () => {} } = {},
+) {
   const state = {
     state: initial.state ?? "OPEN",
     labels: [...(initial.labels ?? [])],
@@ -917,9 +927,48 @@ function makeClearFailureGh(initial, { failOn = () => null } = {}) {
       state.state = "OPEN";
       return "";
     }
+    if (args[0] === "issue" && args[1] === "close") {
+      state.state = "CLOSED";
+      return "";
+    }
     return "";
   };
-  return { state, calls, runGh };
+  return {
+    state,
+    calls,
+    runGh: async (args) => {
+      const out = await runGh(args);
+      after(args, state);
+      return out;
+    },
+  };
+}
+
+/**
+ * An `after` hook that lands the archive leg's settlement — the stub closes and
+ * gains the terminal marker — at the WORST point for the compensation: right
+ * after it restores `sentry:needs-triage`, so the archive's own post-settlement
+ * verification (closed + terminal marker + a verdict) has already passed and
+ * that run reported success. Everything the compensation does from here is
+ * invisible to it. Landing the settlement any later would let a blind shed
+ * survive the test, which is the mechanism under test.
+ *
+ * ONCE, because the archive settles a given stub once and a hook that re-fired
+ * would quietly repair whatever the unwind got wrong. `settleQueueStub` consumes
+ * the approval before this point, so it goes here too.
+ */
+function settleLikeArchiveOnRequeue() {
+  let settled = false;
+  return (args, state) => {
+    if (settled || args[1] !== "edit" || !args.includes("--add-label")) return;
+    settled = true;
+    state.state = "CLOSED";
+    state.labels = state.labels.filter(
+      (name) => name !== "sentry:approved-archive",
+    );
+    if (!state.labels.includes("sentry:archived"))
+      state.labels.push("sentry:archived");
+  };
 }
 
 await test("runWorkflowRequeue restores needs-triage and sheds the verdict on an OPEN stub (#1769 round 16)", async () => {
@@ -1223,6 +1272,392 @@ await test("the terminal revalidation FAILS CLOSED: an unreadable stub is never 
     2,
     "the revalidating read retries exactly once before failing closed",
   );
+});
+
+// ---------------------------------------------------------------------------
+// The archive-settlement race (#1929, ADR 0068). The revalidating read above is
+// a snapshot, so the archive leg — its own per-issue concurrency group — can
+// settle the stub between it and these writes. The interleaving each test names
+// is the one it drives, by landing the archive's writes at a chosen call.
+// ---------------------------------------------------------------------------
+
+await test("an archive settling INSIDE the write window unwinds the re-queue instead of reporting success (#1929)", async () => {
+  // The undetectable ordering: the archive's post-settlement verification has
+  // already read the stub, so nothing on its side can see this compensation.
+  // Its terminal marker is withheld from the shed, so the confirming read here
+  // still sees it — and the re-queue undoes itself.
+  const gh = makeClearFailureGh(
+    {
+      state: "OPEN",
+      labels: ["sentry-triage", "sentry:verdict-upstream"],
+    },
+    {
+      after: settleLikeArchiveOnRequeue(),
+    },
+  );
+  const result = await runWorkflowRequeue({
+    runGh: gh.runGh,
+    repo: REPO,
+    issueNumber: 1731,
+    reason: REQUEUE_REASON_BRIEF_CLEAR,
+  });
+  assertEqual(result.requeued, false);
+  assertEqual(result.reason, "settled-underneath");
+  assertEqual(gh.state.state, "CLOSED");
+  assert(
+    gh.state.labels.includes("sentry:archived"),
+    "the archive's terminal marker must survive a re-queue that raced it",
+  );
+  assert(
+    !gh.state.labels.includes(NEEDS_TRIAGE_LABEL),
+    "an archived occurrence must never be left with a selectable retry stub",
+  );
+  assert(
+    gh.state.labels.includes("sentry:verdict-upstream"),
+    "the verdict must come back: the archive's own verification demands one",
+  );
+  assert(
+    gh.state.comments.some((body) =>
+      body.includes("the re-queue was undone rather than completed"),
+    ),
+    "the stub's written record must correct the re-queue note it now contradicts",
+  );
+});
+
+await test("the sentinel marker is never removed blindly, which is what leaves it readable (#1929)", async () => {
+  // A `--remove-label` that carries the marker reports nothing about whether it
+  // was there, so after it no read can testify. Withholding it is the whole
+  // mechanism, and it costs nothing: the revalidation declines outright on a
+  // stub that already carries it, so the only marker this shed ever meets is
+  // one that appeared mid-window.
+  const gh = makeClearFailureGh(
+    { state: "OPEN", labels: ["sentry-triage", "sentry:verdict-upstream"] },
+    {
+      after: settleLikeArchiveOnRequeue(),
+    },
+  );
+  await runWorkflowRequeue({
+    runGh: gh.runGh,
+    repo: REPO,
+    issueNumber: 1731,
+    reason: REQUEUE_REASON_VERDICT_UNSETTLED,
+  });
+  for (const args of gh.calls) {
+    const at = args.indexOf("--remove-label");
+    if (at === -1) continue;
+    assert(
+      !args[at + 1].split(",").includes("sentry:archived"),
+      `a re-queue with a sentinel must not shed it: ${args[at + 1]}`,
+    );
+  }
+  // …and everything else the re-queue owes is still shed.
+  const shed = buildRequeueShedLabelArgs(1731, REPO, {
+    except: ["sentry:archived"],
+  });
+  const names = shed[shed.indexOf("--remove-label") + 1].split(",");
+  assert(!names.includes("sentry:archived"), "the sentinel must be withheld");
+  for (const name of [
+    "sentry:verdict-upstream",
+    "sentry:projected",
+    "sentry:approved-archive",
+  ]) {
+    assert(names.includes(name), `${name} must still be shed`);
+  }
+});
+
+await test("the unwind restores the shed markers but NEVER the spent approval (#1929)", async () => {
+  // The archive consumes `sentry:approved-archive` as its compare-and-swap, so
+  // by the time the sentinel fires that approval is spent. Re-adding it would
+  // hand a later workflow_dispatch an approval no human gave — and the add
+  // itself re-fires the archive workflow's `issues: labeled` trigger.
+  const gh = makeClearFailureGh(
+    {
+      state: "OPEN",
+      labels: [
+        "sentry-triage",
+        "sentry:verdict-upstream",
+        "sentry:projected",
+        "sentry:approved-archive",
+      ],
+    },
+    {
+      after: settleLikeArchiveOnRequeue(),
+    },
+  );
+  const result = await runWorkflowRequeue({
+    runGh: gh.runGh,
+    repo: REPO,
+    issueNumber: 1731,
+    reason: REQUEUE_REASON_CLOSE_FAILURE,
+  });
+  assertEqual(result.reason, "settled-underneath");
+  assert(
+    gh.state.labels.includes("sentry:verdict-upstream") &&
+      gh.state.labels.includes("sentry:projected"),
+    "the previous round's machine records must be restored",
+  );
+  assert(
+    !gh.state.labels.includes("sentry:approved-archive"),
+    "a spent human approval must never be handed back",
+  );
+});
+
+await test("an unwind that cannot be confirmed is a HARD failure, never a quiet decline (#1929)", async () => {
+  // Same discipline as the end-state verification it replaces: the stub is
+  // then neither re-queued nor demonstrably settled, so a human has to look.
+  const gh = makeClearFailureGh(
+    { state: "OPEN", labels: ["sentry-triage", "sentry:verdict-upstream"] },
+    {
+      failOn: (args) => (args[1] === "close" ? "HTTP 503 unavailable" : null),
+      after: settleLikeArchiveOnRequeue(),
+    },
+  );
+  await assertRejects(
+    runWorkflowRequeue({
+      runGh: gh.runGh,
+      repo: REPO,
+      issueNumber: 1731,
+      reason: REQUEUE_REASON_BRIEF_CLEAR,
+    }),
+    /settled underneath a re-queue and the re-queue could not be unwound/,
+  );
+  assert(
+    !gh.state.labels.includes(NEEDS_TRIAGE_LABEL),
+    "the failed unwind must still have taken selectability away first",
+  );
+});
+
+await test("a settlement first visible to the SHED RETRY's read still unwinds (#1929)", async () => {
+  // The end-state verification can take a second read: when the first shed
+  // failed, the retry sheds again and re-reads. A settlement landing between
+  // those two reads is invisible to the first one — and it is precisely the
+  // failed shed that lets it happen, because the verdict label it left behind is
+  // what makes the archive's own verification hold. The retry then removes that
+  // verdict. Every read that can change `verified` gets the sentinel decision.
+  let views = 0;
+  let sheds = 0;
+  const gh = makeClearFailureGh(
+    { state: "OPEN", labels: ["sentry-triage", "sentry:verdict-upstream"] },
+    {
+      failOn: (args) => {
+        if (args[1] !== "edit" || !args.includes("--remove-label")) return null;
+        sheds += 1;
+        return sheds === 1 ? "HTTP 503 unavailable" : null;
+      },
+      after: (args, state) => {
+        if (args[1] !== "view") return;
+        views += 1;
+        // View 1 revalidates, view 2 is the end-state confirmation. Settle
+        // immediately after that one, so only the retry's read can see it.
+        if (views !== 2) return;
+        state.state = "CLOSED";
+        if (!state.labels.includes("sentry:archived"))
+          state.labels.push("sentry:archived");
+      },
+    },
+  );
+  const result = await runWorkflowRequeue({
+    runGh: gh.runGh,
+    repo: REPO,
+    issueNumber: 1731,
+    reason: REQUEUE_REASON_VERDICT_UNSETTLED,
+  });
+  assertEqual(result.reason, "settled-underneath");
+  assertEqual(gh.state.state, "CLOSED");
+  assert(
+    !gh.state.labels.includes(NEEDS_TRIAGE_LABEL),
+    "a stub the archive settled must not keep a re-queue's needs-triage",
+  );
+  assert(
+    gh.state.labels.includes("sentry:verdict-upstream"),
+    "the verdict the retry shed must come back",
+  );
+});
+
+await test("an unwind whose marker restoration never lands is a HARD failure (#1929)", async () => {
+  // Dropping `sentry:needs-triage` and closing while the verdict re-add reported
+  // a real failure leaves a stub the archive's own verification rejects — the
+  // outcome this unwind exists to prevent. Judging only the cheap three would
+  // have called that a success.
+  const gh = makeClearFailureGh(
+    { state: "OPEN", labels: ["sentry-triage", "sentry:verdict-upstream"] },
+    {
+      failOn: (args) =>
+        args[1] === "edit" &&
+        args.includes("--add-label") &&
+        args[args.indexOf("--add-label") + 1].includes("verdict")
+          ? "HTTP 503 unavailable"
+          : null,
+      after: settleLikeArchiveOnRequeue(),
+    },
+  );
+  await assertRejects(
+    runWorkflowRequeue({
+      runGh: gh.runGh,
+      repo: REPO,
+      issueNumber: 1731,
+      reason: REQUEUE_REASON_BRIEF_CLEAR,
+    }),
+    /could not be unwound/,
+  );
+});
+
+await test("an unwind that cannot leave a VERDICT on the stub fails rather than declining (#1929)", async () => {
+  // The unwind confirms the shape the settling run demands, and that run needs a
+  // `sentry:verdict-*` label. A premise carrying none has nothing to restore, so
+  // the unwind would otherwise confirm a closed, archived, verdict-less stub the
+  // archive's verification rejects. Only a human can resolve that, so it is loud.
+  const gh = makeClearFailureGh(
+    { state: "OPEN", labels: ["sentry-triage"] },
+    { after: settleLikeArchiveOnRequeue() },
+  );
+  await assertRejects(
+    runWorkflowRequeue({
+      runGh: gh.runGh,
+      repo: REPO,
+      issueNumber: 1731,
+      reason: REQUEUE_REASON_VERDICT_UNSETTLED,
+    }),
+    /no verdict label/,
+  );
+});
+
+await test("the unwind's write order leaves every PREFIX of it unselectable (#1929)", async () => {
+  // An unwind can die half-way, so its order is a correctness property rather
+  // than a style one: `sentry:needs-triage` goes first because it is the only
+  // thing that lets another run act on the stub, and the close goes last for the
+  // same reason the re-queue puts its state change last. Asserted on the plan,
+  // not inferred from a fake's call log, so a reordering reds here directly.
+  const corrections = buildUnwindCorrections({
+    repo: REPO,
+    issueNumber: 1731,
+    sentinelLabel: "sentry:archived",
+    premise: {
+      state: "OPEN",
+      labels: ["sentry-triage", "sentry:verdict-upstream", "sentry:archived"],
+    },
+  });
+  assertDeepEqual(
+    corrections.map((c) => c.what),
+    ["drop-needs-triage", "restore-sentry:verdict-upstream", "close"],
+  );
+  assertDeepEqual(corrections[0].args.slice(-2), [
+    "--remove-label",
+    NEEDS_TRIAGE_LABEL,
+  ]);
+  assertEqual(corrections.at(-1).args[1], "close");
+  // The sentinel is never re-added: the unwind never removed it.
+  assert(
+    !corrections.some((c) => c.args.join(" ").includes("sentry:archived")),
+    "the sentinel is left in place, so nothing re-adds it",
+  );
+});
+
+await test("the archive's own verification covers the OTHER ordering (#1929)", async () => {
+  // The two runs cover the two orderings between them, and this is the half
+  // that already existed: a compensation whose writes land BEFORE the archive's
+  // post-settlement read is caught there, because that read demands closed +
+  // the terminal marker + a verdict label and the compensation has removed the
+  // verdict and reopened the stub. Pinned here so the claim the sentinel's
+  // scope rests on cannot rot in the other file.
+  const requeued = {
+    state: "OPEN",
+    labels: ["sentry-triage", "sentry:needs-triage", "sentry:archived"],
+    body: "",
+  };
+  assertEqual(settlementHeld(requeued), false);
+  assertEqual(
+    settlementHeld({
+      state: "CLOSED",
+      labels: ["sentry-triage", "sentry:archived"],
+      body: "",
+    }),
+    false,
+  );
+  assertEqual(
+    settlementHeld({
+      state: "CLOSED",
+      labels: ["sentry-triage", "sentry:archived", "sentry:verdict-upstream"],
+      body: "",
+    }),
+    true,
+  );
+});
+
+await test("a malformed sentinel declaration refuses before any I/O (#1929)", async () => {
+  // Two ways to declare one wrongly, both fatal here rather than later. Under
+  // the abort policy the sentinel is a guarantee nothing ever reads back. And a
+  // sentinel with no `declineNote` would throw at the DETECTION site — after the
+  // add, the shed and the reopen, before any correction — leaving the open,
+  // queued, still-marked stub the whole mechanism exists to prevent.
+  const cases = [
+    [
+      { sentinel: { label: "sentry:archived", declineNote: () => "s" } },
+      /needs verify-end-state/,
+      false,
+    ],
+    [
+      { sentinel: { label: "sentry:archived" } },
+      /must supply declineNote/,
+      true,
+    ],
+    [{ sentinel: { declineNote: () => "s" } }, /non-empty string/, true],
+  ];
+  for (const [extra, pattern, verify] of cases) {
+    const writer = makeWriter();
+    await assertRejects(
+      requeueQueueStub(
+        { writeGh: writer.writeGh, readStub: async () => ({}) },
+        {
+          repo: REPO,
+          issueNumber: 1731,
+          cause: REQUEUE_CAUSE_BOOKKEEPING,
+          note: "n",
+          onFailure: verify ? REQUEUE_ON_FAILURE_VERIFY_END_STATE : undefined,
+          revalidate: {
+            check: () => true,
+            declineNote: () => "d",
+            ...extra,
+          },
+        },
+      ),
+      pattern,
+    );
+    assertEqual(writer.calls.length, 0);
+  }
+});
+
+await test("a transient read failure never turns a converged unwind into a manual-repair alarm (#1929)", async () => {
+  // The unwind's confirming read gets the same bounded retry the revalidating
+  // read has, for the same reason: a compensation often runs BECAUSE a `gh` read
+  // just failed, so this read is correlated with a usually-transient failure and
+  // one attempt would raise `repair by hand` over a correctly settled stub.
+  let confirmations = 0;
+  const gh = makeClearFailureGh(
+    { state: "OPEN", labels: ["sentry-triage", "sentry:verdict-upstream"] },
+    { after: settleLikeArchiveOnRequeue() },
+  );
+  // Fail exactly once, on the first read after the unwind's close — which is
+  // the confirming read and nothing else.
+  let closed = false;
+  const runGh = async (args) => {
+    if (args[1] === "view" && closed && confirmations === 0) {
+      confirmations += 1;
+      throw new Error("HTTP 502 bad gateway");
+    }
+    const out = await gh.runGh(args);
+    if (args[1] === "close") closed = true;
+    return out;
+  };
+  const result = await runWorkflowRequeue({
+    runGh,
+    repo: REPO,
+    issueNumber: 1731,
+    reason: REQUEUE_REASON_BRIEF_CLEAR,
+  });
+  assertEqual(confirmations, 1);
+  assertEqual(result.reason, "settled-underneath");
+  assertEqual(gh.state.state, "CLOSED");
 });
 
 await test("every note this chokepoint posts reads as intent, never as a completed write", () => {

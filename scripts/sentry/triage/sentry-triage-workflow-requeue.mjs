@@ -126,6 +126,31 @@ export function buildRequeueNote(reason) {
   );
 }
 
+/**
+ * THE CORRECTION NOTE, posted only when the sentinel fired: the note above is
+ * already on the stub saying this run was re-queuing it, and the stub ends up
+ * settled instead. Fixed text, like every note this file builds — the reason is
+ * one of a closed set and nothing Sentry-derived reaches here.
+ *
+ * An unknown reason throws for the same cause as `buildRequeueNote`.
+ */
+export function buildSettledUnderneathNote(reason) {
+  if (!REQUEUE_REASON_CAUSES[reason]) {
+    throw new Error(
+      `Unknown re-queue reason ${JSON.stringify(reason)}; a settled-underneath note must name one of ${REQUEUE_REASONS.join(", ")}.`,
+    );
+  }
+  return (
+    "Correction to the note above: the human-approved archive leg settled this " +
+    "queue stub while that re-queue was running, so the re-queue was undone " +
+    "rather than completed. `sentry:needs-triage` is off again, the previous " +
+    "round's markers are back, and the stub is closed and archived. Nothing " +
+    "here can un-archive the Sentry issue, and nothing should: that is the " +
+    "outcome the approver asked for, and an escalation resurfaces it on its " +
+    "own. To triage it again, re-queue the stub by hand."
+  );
+}
+
 function defaultRunGh(args) {
   return new Promise((resolve, reject) => {
     const child = spawn("gh", args, { stdio: ["ignore", "pipe", "pipe"] });
@@ -213,10 +238,20 @@ export function isTerminalStub({ state, labels } = {}) {
  * PROPAGATES: the run goes red and the workflow names the manual repair, rather
  * than mutating a stub it could not observe.
  *
- * It narrows the window rather than closing it — an archive that lands after the
- * revalidating read still races the writes below, exactly as it races the brief
- * leg's write-side guard. Serializing the two workflows is the only thing that
- * would close it, and that is a bigger change than this class needs.
+ * THE SENTINEL (#1929, ADR 0068) is what closes the window that guard only
+ * narrowed. The read above is a snapshot too, so an archive settling between it
+ * and the writes below used to complete unseen — the shed erased
+ * `sentry:archived` with a `--remove-label` that reports nothing, so no later
+ * read could testify that it had ever been there. Declaring it as the sentinel
+ * withholds it from the shed and re-reads it after the last write: present on
+ * the confirming read means the archive settled inside this window, and the
+ * chokepoint unwinds this re-queue rather than leaving a selectable retry stub
+ * over an occurrence a human approved archiving.
+ *
+ * The two runs cover the two orderings between them. A marker already on the
+ * stub is caught here; one that lands afterwards is caught by the archive's own
+ * post-settlement verification, which by then reads a stub this run has reopened
+ * and stripped of its verdict, and rolls its settlement back.
  */
 export function runWorkflowRequeue({
   runGh = defaultRunGh,
@@ -239,6 +274,12 @@ export function runWorkflowRequeue({
         check: (live) => !isTerminalStub(live),
         declineNote: (live) =>
           `Queue stub #${issueNumber} went terminal before the ${reason} re-queue could run (state=${live.state}, labels=${live.labels.join(",") || "none"}); leaving it settled rather than reopening it over an archived or already-closed occurrence.`,
+        sentinel: {
+          label: ARCHIVED_LABEL,
+          declineNote: (live) =>
+            `Queue stub #${issueNumber} carried ${ARCHIVED_LABEL} on the ${reason} re-queue's confirming read (state=${live.state}, labels=${live.labels.join(",") || "none"}), so the archive leg settled it inside the write window; unwinding this re-queue and leaving it settled.`,
+          unwindNote: () => buildSettledUnderneathNote(reason),
+        },
       },
       onFailure: REQUEUE_ON_FAILURE_VERIFY_END_STATE,
       fallbackState: "OPEN",

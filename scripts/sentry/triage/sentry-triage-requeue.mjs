@@ -70,6 +70,7 @@ import {
   selectMarkedComment,
   selectVerdictComment,
 } from "./sentry-triage-project-core.mjs";
+import { unwindAfterSettlement } from "./sentry-triage-requeue-sentinel.mjs";
 
 // ---------------------------------------------------------------------------
 // Causes.
@@ -301,7 +302,14 @@ export function buildRequeueAddLabelArgs(issueNumber, repo) {
   ];
 }
 
-export function buildRequeueShedLabelArgs(issueNumber, repo) {
+/**
+ * `except` withholds a marker from the blind shed. Exactly one caller uses it —
+ * a re-queue that declares a settlement SENTINEL (see `requeueQueueStub`) — and
+ * withholding is what makes the sentinel work: a marker this call erases is a
+ * marker no later read can testify about.
+ */
+export function buildRequeueShedLabelArgs(issueNumber, repo, { except } = {}) {
+  const withheld = new Set(except ?? []);
   return [
     "issue",
     "edit",
@@ -309,7 +317,7 @@ export function buildRequeueShedLabelArgs(issueNumber, repo) {
     "-R",
     repo,
     "--remove-label",
-    REOPEN_SHED_LABELS.join(","),
+    REOPEN_SHED_LABELS.filter((name) => !withheld.has(name)).join(","),
   ];
 }
 
@@ -531,9 +539,10 @@ export const REQUEUE_ON_FAILURE_VERIFY_END_STATE = "verify-end-state";
  *                          fence is already on the stub. Sound ONLY where the
  *                          gate that produced this re-queue cannot fire twice for
  *                          one `lastSeen` with a verdict in between; see below.
- *   `revalidate`         — `{ check(live), declineNote(live) }`. When the caller's
- *                          premise is a snapshot, re-read and stop unless it still
- *                          holds. A failed read PROPAGATES.
+ *   `revalidate`         — `{ check(live), declineNote(live), sentinel? }`. When the
+ *                          caller's premise is a snapshot, re-read and stop unless
+ *                          it still holds. A failed read PROPAGATES. `sentinel`
+ *                          extends that premise across the WRITE window; see below.
  *   `onFailure`          — REQUEUE_ON_FAILURE_*.
  *   `fallbackState`      — pre-run state, for the verify-end-state reopen.
  *
@@ -559,6 +568,46 @@ export async function requeueQueueStub(
   const fences = requeueFences(cause);
   const verifyEndState = onFailure === REQUEUE_ON_FAILURE_VERIFY_END_STATE;
 
+  // INVARIANT 7, SECOND HALF — the premise re-checked across the WRITE window
+  // (issue #1929, ADR 0068). `revalidate` alone re-reads and then writes blind:
+  // between those two moments the archive leg — its own per-issue concurrency
+  // group — can settle the stub, and the shed then erases the very marker that
+  // would have said so. The sentinel names that marker. It is withheld from the
+  // shed, so it survives to be READ at the end; observing it on the confirming
+  // read means the settlement landed inside this window, and the re-queue
+  // unwinds instead of reporting success over a settled occurrence.
+  //
+  // Only meaningful with the end-state verification, which is what produces the
+  // confirming read; declared without it, the sentinel would be a promise
+  // nothing checks, so it throws here rather than degrading quietly.
+  // The declaration is validated BEFORE any I/O, shape included. A sentinel
+  // missing its `declineNote` would throw at the detection site instead — after
+  // the add, the shed and the reopen, and before any correction — leaving
+  // exactly the open, queued, still-marked stub this mechanism exists to
+  // prevent. A malformed declaration must cost nothing, so it costs a throw here.
+  const sentinel = revalidate?.sentinel ?? null;
+  if (sentinel && !verifyEndState) {
+    throw new Error(
+      `A re-queue sentinel (${sentinel.label}) needs ${REQUEUE_ON_FAILURE_VERIFY_END_STATE}: without the end-state verification nothing ever reads it back.`,
+    );
+  }
+  if (
+    sentinel &&
+    !(typeof sentinel.label === "string" && sentinel.label.length > 0)
+  ) {
+    throw new Error(
+      "A re-queue sentinel must name the label it watches for as a non-empty string.",
+    );
+  }
+  if (sentinel && typeof sentinel.declineNote !== "function") {
+    throw new Error(
+      `A re-queue sentinel (${sentinel.label}) must supply declineNote(live): the detection site reports before it unwinds, and a missing note would throw there — after the writes and before any correction.`,
+    );
+  }
+  const shedLabels = REOPEN_SHED_LABELS.filter(
+    (name) => name !== sentinel?.label,
+  );
+
   // INVARIANT 4 — the exclusion set records ATTEMPTS, not successes, and the
   // record is written before the first thing that can fail. A Sentry-evidence
   // re-queue that throws half-way must not be inherited by the same run's
@@ -573,8 +622,10 @@ export async function requeueQueueStub(
   // is how a snapshot-driven mutation becomes a snapshot-driven mistake. The read
   // retries within a bound first (see `readForRevalidation`) — a caller reaching
   // here often does so because a read just failed.
+  let premise = null;
   if (revalidate) {
     const live = await readForRevalidation(readStub, issueNumber);
+    premise = live;
     if (!revalidate.check(live)) {
       process.stderr.write(`::notice::${revalidate.declineNote(live)}\n`);
       return {
@@ -677,7 +728,11 @@ export async function requeueQueueStub(
   let labelError = null;
   try {
     await writeGh(buildRequeueAddLabelArgs(issueNumber, repo));
-    await writeGh(buildRequeueShedLabelArgs(issueNumber, repo));
+    await writeGh(
+      buildRequeueShedLabelArgs(issueNumber, repo, {
+        except: sentinel ? [sentinel.label] : [],
+      }),
+    );
   } catch (err) {
     if (!verifyEndState) throw err;
     // Must NOT propagate past the end-state verification below — that is exactly
@@ -737,6 +792,34 @@ export async function requeueQueueStub(
   }
 
   if (verifyEndState) {
+    // THE SENTINEL, read back — after the LAST write, and after EVERY read that
+    // follows one. An earlier-only check leaves the window between it and the
+    // reopen uncovered; a first-read-only check leaves the shed retry below
+    // uncovered, where a second read is taken and a settlement first visible
+    // there would be judged as a successful re-queue. So this runs against
+    // whatever `verified` currently holds, at each point that value can change.
+    //
+    // Both orderings are covered between the two runs: a settlement whose marker
+    // is on the stub at any of these reads is caught here, and one whose marker
+    // lands after the last of them has its own post-settlement verification
+    // looking at a stub this run has already reopened and stripped of its
+    // verdict, which fails it and rolls it back.
+    //
+    // The stub is momentarily selectable, between the reopen above and the
+    // unwind. Nothing can act on it there: the triage workflow holds one
+    // repo-wide concurrency group and this compensation runs inside its run, and
+    // ingest's dedup skips an open stub.
+    const settledUnderneath = () =>
+      sentinel && verified.labels.includes(sentinel.label);
+    const unwind = async () => {
+      process.stderr.write(`::warning::${sentinel.declineNote(verified)}\n`);
+      return unwindAfterSettlement(
+        { writeGh, readStub },
+        { repo, issueNumber, sentinel, premise },
+      );
+    };
+    if (settledUnderneath()) return await unwind();
+
     // RE-ATTEMPT THE SHED against observed state, once, before judging.
     //
     // The add and the shed share one try, so an add that REPORTS failure jumps
@@ -755,7 +838,7 @@ export async function requeueQueueStub(
     // Bounded at one extra attempt, like every other retry here, and the check
     // below still THROWS on anything that survives — the transient case
     // self-heals, the persistent one stays loud.
-    const staleAfterVerify = REOPEN_SHED_LABELS.filter((name) =>
+    const staleAfterVerify = shedLabels.filter((name) =>
       verified.labels.includes(name),
     );
     if (staleAfterVerify.length) {
@@ -763,7 +846,11 @@ export async function requeueQueueStub(
         process.stderr.write(
           `::notice::Stale markers still on #${issueNumber} after selectability was restored (${staleAfterVerify.join(", ")}); re-attempting the shed.\n`,
         );
-        await writeGh(buildRequeueShedLabelArgs(issueNumber, repo));
+        await writeGh(
+          buildRequeueShedLabelArgs(issueNumber, repo, {
+            except: sentinel ? [sentinel.label] : [],
+          }),
+        );
         // Re-read rather than assume: this write can lose its response too. Merge
         // so a reader that serves no comments cannot erase the ones the fence
         // check below judges.
@@ -779,6 +866,12 @@ export async function requeueQueueStub(
           `::notice::Shed retry on #${issueNumber} reported a failure (${retryError}); the end-state verification below still decides.\n`,
         );
       }
+      // The retry's read is a second observation, so it gets the same sentinel
+      // decision as the first. A settlement first visible HERE is the case a
+      // failed initial shed produces: the verdict it left behind is what lets
+      // the archive's verification hold, so the archive really did settle, and
+      // the retry has just removed that verdict.
+      if (settledUnderneath()) return await unwind();
     }
 
     // Judge the fence and the shed from the SAME verification read, for the same
@@ -798,7 +891,7 @@ export async function requeueQueueStub(
         "a previous verdict is still admissible — no regression fence newer than it survives on the stub — so a failing triage round could close that verdict over this live regression; post the fence by hand, or re-run this workflow, before the next triage run",
       );
     }
-    const survivingMarkers = REOPEN_SHED_LABELS.filter((name) =>
+    const survivingMarkers = shedLabels.filter((name) =>
       verified.labels.includes(name),
     );
     if (survivingMarkers.length) {
