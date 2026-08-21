@@ -688,6 +688,21 @@ function finishPendingProcessTermination() {
   process.kill(process.pid, signal);
 }
 
+// Refuse to publish evidence the operator has already interrupted. A signal
+// arriving during a capture cannot be seen until the event loop runs, and
+// everything from the capture to publication is synchronous: measured, the
+// publication runs with this flag still unset and the handler fires
+// immediately afterwards. Yielding once lets a queued handler land first, so
+// the check below sees the interrupt it would otherwise miss.
+async function assertNotInterruptedBeforePublication() {
+  await new Promise((resolve) => setImmediate(resolve));
+  if (pendingTerminationSignal) {
+    throw new Error(
+      `interrupted by ${pendingTerminationSignal} before publication; no review bundle was produced`,
+    );
+  }
+}
+
 function registerTrustedExecutableCleanup() {
   if (trustedExecutableCleanupRegistered) return;
   trustedExecutableCleanupRegistered = true;
@@ -1880,14 +1895,109 @@ function decodeGitOutput(data, label) {
   }
 }
 
+// `maxBuffer` bounds what a capture emits, never the work Git does to emit it:
+// Git reads and diffs every changed blob before the first byte reaches that
+// bound, so a pathological repository state, a hung filesystem, or a Git bug
+// stalls a capture no output bound can cut short. This is the wall-clock bound,
+// and it matches the wrapper's: one budget for every Git spawn this process
+// makes rather than a timer per spawn, so the captures together can never
+// outlast it. It charges only time spent inside Git, so a long semantic-engine
+// review cannot consume the budget the post-review source fingerprint still
+// needs. 600 seconds is far above any capture a real review performs -- a
+// 1,000-commit 23.8 MB branch diff of this repository captures in about a
+// second -- and above the documented worst case of about 74 seconds for rename
+// detection at the `-l5000` product ceiling. Overridable for tests.
+const CAPTURE_DEADLINE_MS = (() => {
+  // Whole-value match, and the same one the wrapper applies. Both runtimes read
+  // this variable independently, so a value one accepted and the other rejected
+  // would give a single run two different budgets -- `Number.parseInt` would
+  // read `1x` as one second here while the wrapper announced its 600-second
+  // fallback. Six digits is the ceiling both apply: it keeps this millisecond
+  // conversion inside the unsigned 32-bit range timeout APIs are uniformly safe
+  // with, and 999,999 seconds is eleven days, far past any bound a capture
+  // stage has a use for.
+  const configured =
+    process.env.AGENT_AUTOREVIEW_CAPTURE_DEADLINE_SECONDS || "";
+  return /^[1-9][0-9]{0,5}$/.test(configured)
+    ? Number(configured) * 1000
+    : 600_000;
+})();
+let gitCaptureSpentMs = 0;
+
+function captureDeadlineError(label) {
+  const error = new Error(
+    `review capture exceeded the ${CAPTURE_DEADLINE_MS / 1000}-second capture deadline while capturing ${label} (${Math.round(gitCaptureSpentMs / 1000)}s spent capturing); no review bundle was produced`,
+  );
+  error.code = "AUTOREVIEW_CAPTURE_TIMEOUT";
+  return error;
+}
+
+// Spend one Git spawn against that budget and fail closed when it runs out.
+// SIGKILL, not SIGTERM: spawnSync blocks until the child actually exits after
+// the timeout fires, so a child that handles or ignores SIGTERM would hang the
+// helper despite the "timeout" option. `detached: true` makes the child its own
+// process-group leader, so the sweep below reaches anything it forked instead of
+// leaving an orphan behind -- spawnSync's own timeout signals the direct child
+// only.
+function spawnGitWithinCaptureDeadline(git, gitArgs, options, label) {
+  const remainingMs = CAPTURE_DEADLINE_MS - gitCaptureSpentMs;
+  if (remainingMs <= 0) throw captureDeadlineError(label);
+  // Catch terminal signals before detaching anything. A detached capture is
+  // outside the group a terminal interrupt reaches, and spawnSync blocks the
+  // event loop, so a listener cannot run mid-call -- but registering one is
+  // what stops the signal from being fatal, which is what keeps this process
+  // alive long enough for the deadline below to fire and the sweep to reap the
+  // capture. Without it an interrupt kills the helper and strands the tree.
+  // Registration is idempotent and already happens on the engine paths.
+  registerTrustedExecutableCleanup();
+  // `performance.now()` rather than `Date.now()`: it is monotonic, so a system
+  // clock stepping backwards mid-run cannot make a capture that took minutes
+  // charge nothing and hand the next one time the run already spent.
+  const startedAt = performance.now();
+  const result = spawnTrustedSync(git, gitArgs, {
+    ...options,
+    // The monotonic clock reports fractions of a millisecond; spawnSync only
+    // takes whole ones.
+    timeout: Math.ceil(remainingMs),
+    killSignal: "SIGKILL",
+    detached: true,
+  });
+  const elapsedMs = Math.max(0, performance.now() - startedAt);
+  gitCaptureSpentMs += elapsedMs;
+  // spawnSync reports an exhausted `maxBuffer` the same way it reports an
+  // expired timeout: it kills the child with the configured signal and sets
+  // `signal` to it. Only the error code separates them, so the byte refusal has
+  // to be recognized first or every oversized capture would be reported as a
+  // wall-clock stall and never reach the aggregate-limit error the caller maps
+  // it to. The `signal` arm is a fallback for a kill Node did not label, and it
+  // only claims the deadline when the capture actually reached it -- otherwise
+  // a git the OOM killer or an operator stopped early would be reported with a
+  // cause it did not have, beside a spent figure contradicting it. Any signalled
+  // spawn still sweeps the group the detached child leads.
+  const outOfBuffer = result.error?.code === "ENOBUFS";
+  const deadlineExpired =
+    !outOfBuffer &&
+    (result.error?.code === "ETIMEDOUT" ||
+      (result.signal === "SIGKILL" && elapsedMs >= remainingMs - 50));
+  // Sweep every capture, not only the ones that ended badly. spawnSync has
+  // already waited for the child, so this group holds nothing but descendants
+  // the capture forked and left behind -- which are exactly what a detached
+  // spawn would otherwise strand, since they are no longer in the group a
+  // terminal signal reaches. Sweeping here rather than on the failure paths
+  // alone also leaves no window in which the pid could be recycled.
+  killProcessGroup(result.pid);
+  if (deadlineExpired) throw captureDeadlineError(label);
+  return result;
+}
+
 function runGitBufferResult(
   repo,
   gitArgs,
-  { maxBuffer = MAX_GIT_OUTPUT_BYTES } = {},
+  { maxBuffer = MAX_GIT_OUTPUT_BYTES, label } = {},
 ) {
   const rejectRoot = realpathSync(repo);
   const git = resolveTrustedCommand("git", rejectRoot);
-  const result = spawnTrustedSync(
+  const result = spawnGitWithinCaptureDeadline(
     git,
     ["-c", "core.fsmonitor=false", "-c", "diff.renames=false", ...gitArgs],
     {
@@ -1897,6 +2007,7 @@ function runGitBufferResult(
       maxBuffer,
       stdio: ["ignore", "pipe", "pipe"],
     },
+    label || `git ${gitArgs[0] || "command"}`,
   );
   if (result.error) {
     const error = new Error(
@@ -1915,9 +2026,9 @@ function runGitBufferResult(
 function runGitResult(
   repo,
   gitArgs,
-  { maxBuffer = MAX_GIT_OUTPUT_BYTES } = {},
+  { maxBuffer = MAX_GIT_OUTPUT_BYTES, label } = {},
 ) {
-  const result = runGitBufferResult(repo, gitArgs, { maxBuffer });
+  const result = runGitBufferResult(repo, gitArgs, { maxBuffer, label });
   return {
     status: result.status,
     stdout: decodeGitOutput(result.stdout, "git"),
@@ -1928,9 +2039,9 @@ function runGitResult(
 function runGit(
   repo,
   gitArgs,
-  { check = true, maxBuffer = MAX_GIT_OUTPUT_BYTES } = {},
+  { check = true, maxBuffer = MAX_GIT_OUTPUT_BYTES, label } = {},
 ) {
-  const result = runGitResult(repo, gitArgs, { maxBuffer });
+  const result = runGitResult(repo, gitArgs, { maxBuffer, label });
   if (check && result.status !== 0) {
     throw new Error(
       `git ${gitArgs.join(" ")} failed: ${result.stderr || result.stdout}`,
@@ -1955,7 +2066,7 @@ function repoRoot() {
   const cwd = realpathSync(process.cwd());
   const rejectRoot = checkoutRootFrom(cwd);
   const git = resolveTrustedCommand("git", rejectRoot);
-  const result = spawnTrustedSync(
+  const result = spawnGitWithinCaptureDeadline(
     git,
     ["-c", "core.fsmonitor=false", "rev-parse", "--show-toplevel"],
     {
@@ -1965,6 +2076,7 @@ function repoRoot() {
       maxBuffer: 1024 * 1024,
       stdio: ["ignore", "pipe", "pipe"],
     },
+    "git rev-parse --show-toplevel",
   );
   if (result.error || result.status !== 0) {
     throw new Error("autoreview must run inside a git repository");
@@ -2003,9 +2115,10 @@ const GH_LOOKUP_TIMEOUT_MS = (() => {
 
 // spawnSync's built-in timeout only signals the direct child; it does not
 // reach descendants the child has already forked (a gh helper call that
-// backgrounds a subprocess, say). The lookups below spawn with
-// detached: true so the child leads its own process group, letting this sweep
-// the whole group after a timeout instead of leaving an orphan running.
+// backgrounds a subprocess, say). Every deadline-bounded spawn here -- the gh
+// lookups below and the Git captures above -- passes detached: true so the child
+// leads its own process group, letting this sweep the whole group after a
+// timeout instead of leaving an orphan running.
 function killProcessGroup(pid) {
   if (!pid) return;
   try {
@@ -2286,7 +2399,7 @@ function gitBundlePart(collector, label, repo, gitArgs) {
   );
   let output;
   try {
-    output = runGit(repo, gitArgs, { maxBuffer });
+    output = runGit(repo, gitArgs, { maxBuffer, label });
   } catch (error) {
     if (error.code === "ENOBUFS") {
       throw aggregateInputLimitError(label);
@@ -4749,6 +4862,7 @@ async function main() {
         const displayedBundleOutput =
           args.bundleOutputDisplay || args.bundleOutput;
         if (args.bundleOutput) {
+          await assertNotInterruptedBeforePublication();
           writeReviewPromptOutputs(args.bundleOutput, prompts);
           bundleOutputs = reviewPromptOutputPaths(
             displayedBundleOutput,
@@ -4844,6 +4958,14 @@ async function main() {
     // duration. The top-level `.finally` flushes whatever spans were recorded.
     recordStageDuration("engine-invocation", engineStartedAt);
   }
+
+  // One guard for every surface below, not one per surface: the bundle, the
+  // JSON report, stdout and the output file all publish from the same
+  // synchronous run, and the last thing before them is a Git capture. A signal
+  // queued during that capture is invisible until the event loop turns, so a
+  // guard on only one of these surfaces leaves the rest writing an interrupted
+  // run's results. Yield once here and every publication below is covered.
+  await assertNotInterruptedBeforePublication();
 
   if (args.bundleOutput) {
     const displayedBundleOutput = args.bundleOutputDisplay || args.bundleOutput;

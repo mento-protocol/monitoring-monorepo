@@ -685,14 +685,17 @@ checks first, then let one gate own the mapped batch. For a non-trivial batch, f
 and run autoreview after the gate; after accepted fixes, rerun focused checks
 and autoreview.
 
-**Stage timing and gh-lookup deadlines.** The wrapper and helper append
+**Stage timing and capture deadlines.** The wrapper and helper append
 best-effort stage JSONL to `.tmp/agent-autoreview/durations.jsonl`; override
 the directory with `AGENT_AUTOREVIEW_DURATIONS_DIR` or enable stderr summaries
 with `AGENT_AUTOREVIEW_STAGE_SUMMARY`. Base lookup and `--feedback-pr auto`
 use `AGENT_AUTOREVIEW_GH_DEADLINE_SECONDS` (60 seconds by default); feedback
 capture uses `AGENT_AUTOREVIEW_FEEDBACK_DEADLINE_SECONDS` (120 seconds by
-default). Timeouts fail closed: the wrapper terminates then kills its process
-group, and the helper kills its synchronous child directly.
+default). Evidence capture spends one shared budget,
+`AGENT_AUTOREVIEW_CAPTURE_DEADLINE_SECONDS` (600 seconds by default), across
+every capture a run performs in each runtime. Timeouts fail closed and name the
+stage that ran out: both runtimes signal the whole process group of the command
+they bounded rather than the direct child alone.
 
 This adapter uses the repo-local helper at `scripts/agent-autoreview.mjs` and
 keeps the repo's branch-local target: merge-base-to-`HEAD` commits plus current

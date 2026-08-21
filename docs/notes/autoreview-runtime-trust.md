@@ -63,6 +63,55 @@ symmetric candidates of 50 KB blobs took about 74 seconds at the product
 ceiling, against 272 MB of restated diff with detection off. Elapsed time
 depends on hardware and blob size; the comparison count does not.
 
+Both bounds above limit output, not work. Git reads and diffs every changed
+blob before the first byte reaches the limiter, and the candidate gate caps
+comparisons rather than seconds, so a pathological repository state, a hung
+filesystem, or a Git defect can hold a capture open past either. One wall-clock
+budget bounds that work: 600 seconds, spent across every capture a run performs,
+enforced separately in each runtime, and each capture may take only what is left
+of it. The wrapper's captures are one contiguous stage, so its first capture
+fixes an absolute deadline and the stage as a whole cannot outlast it. The
+helper's Git spawns bracket a semantic review that may legitimately run for half
+an hour, so there the budget is the time those spawns actually take, and the
+review cannot consume what the post-review fingerprint still needs. The helper
+measures on a monotonic clock, so no clock adjustment reaches its accounting; no
+monotonic clock is available to the wrapper's shell, so a clock it cannot read,
+or one that moves backwards inside a stage, refuses the capture rather than
+restarting the stage on a fresh full budget. A capture that reaches the bound
+refuses by stage name and elapsed time and produces no bundle; it is never
+published partially and never skipped silently. Nothing the capture started
+outlives that refusal: the wrapper runs each capture as its own process group
+and SIGKILLs that group at the deadline, with no SIGTERM grace, because a grace
+period would run past the bound. Its interrupt path is the one that escalates,
+since an interrupted capture is not bound by the deadline. The helper spawns
+detached and sweeps the group after every capture, and registers terminal-signal
+handlers before it detaches anything: a caught signal cannot kill it
+mid-capture, so the deadline still fires and still reaps the tree, where a fatal
+one would strand a group no longer reachable from the terminal. The one capture
+the budget does not wrap is the PR feedback state, which already carries its own
+wall-clock bound; that bound is clamped to what the shared budget has left,
+minus the second that bound spends escalating, and the time it spends is charged
+there, so it cannot carry a run past the ceiling either.
+
+What the budget covers is the captures themselves: the wrapper's stage begins at
+its first capture, and in the helper it covers every Git spawn. Three things sit
+outside it, and none of them is bounded by anything else. The wrapper's own
+target-selection and runtime-materialization Git reads run before the stage
+opens, inside command substitutions that cannot stream a killable job. The
+helper's untracked-file reads are synchronous, so a wedged mount blocks the
+process itself and no timer of its own can run. And a process already wedged in
+uninterruptible I/O reaches neither runtime's SIGKILL: the refusal still fires on
+time and still publishes nothing, but that process ends when its I/O does.
+Putting every capture behind a supervisor that could abandon it would convert
+that last case from a visible hang into a silently abandoned process holding the
+same resources, which is why it is not done. The number is a ceiling, not a statement about how long a capture takes:
+a 1,000-commit, 23.8 MB branch diff of this repository captures in about a
+second, and the deadline promises nothing about elapsed time beyond the bound it
+enforces. Its default is the one value in this
+note an operator may set, alongside the other deadlines in the operator
+contract, because moving a liveness bound cannot make a review accept evidence
+it would otherwise refuse.
+
 The changed-path captures keep the pin, so both sides of a move stay enumerated
 for the sensitive-path refusal and checklist routing. The scope baseline splits
 the difference on purpose: its changed-file count comes from that rename-blind

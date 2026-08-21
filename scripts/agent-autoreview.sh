@@ -4420,6 +4420,7 @@ capture_feedback_state() {
   local runtime_dir="$2"
   local pr_number="$3"
   local repository_slug="$4"
+  local deadline_seconds
   local gh_bin
   local trusted_bin="$runtime_dir/trusted-bin"
   local env_args=()
@@ -4451,10 +4452,36 @@ capture_feedback_state() {
   if [[ -n "${GITHUB_TOKEN:-}" ]]; then
     env_args+=("GITHUB_TOKEN=$GITHUB_TOKEN")
   fi
+  # This capture keeps its own bound, so the shared budget has to reach it by
+  # hand -- and it has to be read here, immediately before the launch, or the
+  # seconds spent reaching this point would be granted twice. Without the clamp
+  # a feedback capture starting with seconds left could still run its full
+  # independent deadline and carry the run past the ceiling every other capture
+  # respects. `review_capture_measure` writes globals this subshell discards;
+  # only the reading matters.
+  if ! review_capture_measure; then
+    echo "agent:autoreview: cannot bound the PR feedback capture: the wall clock is unreadable or moved backwards" >&2
+    return 1
+  fi
+  # The caller checked the budget before allocating this capture's bookkeeping;
+  # if it ran out in between, refuse here rather than granting a floor of one
+  # more second, which would let a bundle publish past the stated ceiling.
+  # One of those seconds belongs to `run_with_deadline`, which waits a second
+  # between its SIGTERM and its SIGKILL: a capture handed the whole remaining
+  # budget would settle that second past the shared ceiling. Reserve it, and
+  # treat a budget with nothing left after the reservation as spent.
+  if ((review_capture_seconds_left <= 1)); then
+    echo "agent:autoreview: the ${max_review_capture_seconds}-second capture deadline has ${review_capture_seconds_left}s left, too little to bound the PR feedback capture; no review bundle was produced" >&2
+    return 124
+  fi
+  deadline_seconds="$feedback_capture_deadline_seconds"
+  if ((review_capture_seconds_left - 1 < deadline_seconds)); then
+    deadline_seconds=$((review_capture_seconds_left - 1))
+  fi
   (
     cd "$repo"
     run_with_deadline "PR feedback capture" \
-      "$feedback_capture_deadline_seconds" \
+      "$deadline_seconds" \
       run_trusted_node_in_clean_env \
       "${#env_args[@]}" \
       "${env_args[@]}" \
@@ -5902,28 +5929,357 @@ validate_auto_feedback_state() {
 max_review_capture_bytes=$((512000 * 8))
 review_capture_bytes=0
 
-capture_output_file() {
+# The byte budget above bounds what a capture emits, never the work Git does to
+# emit it: Git reads and diffs every changed blob before the first byte reaches
+# the limiter, so a pathological repository state, a hung filesystem, or a Git
+# bug stalls a capture that no output bound can cut short. This is the wall-clock
+# bound. It is one budget for the whole capture stage rather than a timer per
+# spawn: the first capture fixes an absolute deadline and every later one may
+# take only what is left of it, so the stage as a whole can never outlast the
+# budget. One absolute deadline rather than a sum of measured captures, because
+# this shell reads whole seconds only and a sum of roundings would let a run of
+# sub-second captures spend real time while the budget recorded none. Measured
+# on this repository, a 1,000-commit 23.8 MB branch diff captures in
+# about a second; the documented worst case, rename detection at the `-l5000`
+# product ceiling, is about 74 seconds for a single capture on one machine, and
+# the whole tracked tree (2,220 files) cannot reach that product. 600 seconds is
+# therefore far above any capture set a real review performs, and a third of the
+# reviewer's own 1,800-second default timeout. Overridable for tests, validated
+# here for the reason the gh deadline records. The helper reads the same
+# variable and applies this exact rule, so no value can hand one run two
+# different budgets. Six digits is the shared ceiling: it keeps the helper's
+# millisecond conversion inside the unsigned 32-bit range timeout APIs are
+# uniformly safe with, and 999,999 seconds is already eleven days, far past any
+# bound a capture stage has a use for.
+max_review_capture_seconds="${AGENT_AUTOREVIEW_CAPTURE_DEADLINE_SECONDS:-600}"
+if ! [[ "$max_review_capture_seconds" =~ ^[1-9][0-9]{0,5}$ ]]; then
+  echo "agent:autoreview: AGENT_AUTOREVIEW_CAPTURE_DEADLINE_SECONDS='$max_review_capture_seconds' is not a positive integer below 1000000 seconds; using default 600s" >&2
+  max_review_capture_seconds=600
+fi
+review_capture_started_epoch=0
+review_capture_seconds_left=0
+
+# Publish the seconds left before the capture stage's absolute deadline into
+# `review_capture_seconds_left`. The first call fixes the stage's start, so this
+# assigns two globals and cannot be called through a command substitution, whose
+# subshell would discard both. A clock this shell cannot read, or one that moved
+# backwards, returns non-zero, which fails the capture closed rather than
+# leaving it unbounded.
+review_capture_measure() {
+  local now
+  local elapsed
+  now="$(stage_epoch_seconds)"
+  if ! [[ "$now" =~ ^[1-9][0-9]*$ ]]; then
+    return 1
+  fi
+  if [[ "$review_capture_started_epoch" == "0" ]]; then
+    # The call that fixes the stage's start has nothing to round: its capture
+    # begins exactly now, so it gets the whole budget. Rounding here instead
+    # would silently shorten every configured deadline by a second and reject
+    # the smallest valid one outright.
+    review_capture_started_epoch="$now"
+    review_capture_seconds_left="$max_review_capture_seconds"
+    return 0
+  fi
+  elapsed=$((now - review_capture_started_epoch))
+  if ((elapsed < 0)); then
+    # No monotonic clock is available to this shell, so a clock that moved
+    # backwards has to fail closed. Restarting the stage from the new reading
+    # would hand the run a fresh full budget, and a stage that kept doing that
+    # would outlast the deadline it is supposed to enforce.
+    return 1
+  fi
+  # Round the elapsed time up by a second, for every measurement after the
+  # first. A whole-second clock truncates, so a stage that really has run 3.8
+  # seconds measures 3, and each capture then gets a fresh relative timer sized
+  # from that under-measurement; a run of them would drift past the ceiling it
+  # is supposed to hold. Charging the unmeasured fraction as a whole second
+  # keeps every timer inside the budget.
+  review_capture_seconds_left=$((max_review_capture_seconds - elapsed - 1))
+}
+
+# Read-only, so a command substitution is safe here.
+review_capture_elapsed_seconds() {
+  local now
+  now="$(stage_epoch_seconds)"
+  if [[ "$now" =~ ^[1-9][0-9]*$ && "$review_capture_started_epoch" != "0" ]] &&
+    ((now > review_capture_started_epoch)); then
+    printf '%s\n' "$((now - review_capture_started_epoch))"
+  else
+    printf '0\n'
+  fi
+}
+
+# Run one capture pipeline and record both exit statuses where the caller can
+# read them after the job has been waited on. `${PIPESTATUS[@]}` is only readable
+# in the shell that ran the pipeline, and that shell is now a background job.
+run_capture_pipeline() {
   local output="$1"
-  local label="$2"
-  local allowed_status="$3"
-  shift 3
+  local limit="$2"
+  local status_file="$3"
+  local partial_file="$4"
+  shift 4
+  local -a statuses
+  local had_errexit=0
+  # Errexit stays off until the bookkeeping below is written, not just for the
+  # pipeline. On the prebounded path this function runs in the wrapper's own
+  # shell, where a full or failing $TMPDIR would otherwise abort the whole run
+  # under errexit with no diagnostic -- the failure the caller's `set +e` exists
+  # to convert into an ordinary capture failure. Restore whatever the caller
+  # had rather than switching errexit on: on that same inline path, turning it
+  # on unconditionally would end the caller's `set +e` region early.
+  case "$-" in
+    *e*) had_errexit=1 ;;
+  esac
+  set +e
+  "$@" | head -c "$limit" >"$output"
+  statuses=("${PIPESTATUS[@]}")
+  # Publish by rename. The watchdog reads the status file to tell a finished
+  # capture from a running one, and a plain redirection truncates before it
+  # writes, so a deadline landing inside that window would see an empty file and
+  # refuse a capture that had in fact completed. The staging path is its own
+  # `mktemp` allocation rather than a name derived from the status file: a
+  # derived name is predictable, and on a host with a shared /tmp that is a
+  # symlink another user can plant before this write.
+  printf '%s %s\n' "${statuses[0]:-1}" "${statuses[1]:-1}" >"$partial_file"
+  mv -f "$partial_file" "$status_file"
+  if [[ "$had_errexit" -eq 1 ]]; then
+    set -e
+  fi
+}
+
+# Bound one capture with the wall clock the capture budget has left. The pipeline
+# runs as its own process group (`set -m`), so an expiry signals the capture
+# command and the byte limiter together instead of leaving either behind, and the
+# watchdog is a group leader too, so killing it takes its `sleep` with it. The
+# parent blocks in `wait` rather than polling, so a normal capture pays no added
+# latency; `wait` stderr is discarded because a signalled job would otherwise
+# print a job-control notice over the refusal this function exists to produce.
+# The watchdog records the expiry in $timeout_file before signalling, so the
+# caller distinguishes a deadline from any other non-zero capture.
+# Reap whatever `run_capture_with_deadline` has created so far and remove its
+# bookkeeping. Reads that function's locals by dynamic scope, and every step is
+# guarded on the pid actually existing, so it is safe to arm before either job
+# is started and safe to run twice. The watchdog dies outright; the capture tree
+# gets a SIGTERM first, since an interrupted capture is not the one the deadline
+# bounds and can afford an orderly stop.
+reap_capture_jobs() {
+  if [[ -n "$watchdog" ]]; then
+    kill -KILL "-$watchdog" 2>/dev/null ||
+      kill -KILL "$watchdog" 2>/dev/null || true
+  fi
+  if [[ -n "$child" ]]; then
+    kill -TERM "-$child" 2>/dev/null || kill -TERM "$child" 2>/dev/null || true
+    sleep 1
+    kill -KILL "-$child" 2>/dev/null || kill -KILL "$child" 2>/dev/null || true
+    wait "$child" 2>/dev/null || true
+  fi
+  rm -f "$timeout_file" "$status_file" "$partial_file"
+}
+
+run_capture_with_deadline() {
+  local deadline="$1"
+  local timeout_file="$2"
+  local status_file="$3"
+  local partial_file="$4"
+  shift 4
+  local child
+  local watchdog
+  local status
+  local saved_signal_traps
+  local had_monitor=0
+  # Unlike run_with_deadline, this runs in the wrapper's own shell, so `trap -`
+  # alone would leave every later stage without whatever INT/TERM handling the
+  # caller had. Snapshot the caller's disposition and put it back on every exit
+  # path, including the re-raise, so the signal still reaches that handler.
+  # `trap -p` reports the caller's traps through a command substitution, and an
+  # absent trap snapshots as an empty string that evaluates to nothing.
+  saved_signal_traps="$(trap -p INT TERM HUP)"
+  case "$-" in
+    *m*) had_monitor=1 ;;
+  esac
+  # Arm the cleanup before creating anything for it to clean. The traps used to
+  # install after both jobs existed, which left a window where a signal exited
+  # the wrapper with two live process groups and nothing to reap them -- the
+  # orphan class this function exists to prevent, in its own setup path.
+  # `reap_capture_jobs` tolerates either pid being empty, so arming first is
+  # safe. SIGHUP is trapped alongside INT and TERM specifically because `set -m`
+  # puts the capture in its own group: a hangup delivered to the terminal's
+  # foreground group no longer reaches it, so this is the only thing that reaps
+  # the tree when a session closes. Each trap re-raises after restoring the
+  # caller's disposition, so the interrupted script still dies with the expected
+  # signal semantics.
+  child=""
+  watchdog=""
+  trap 'reap_capture_jobs; trap - INT TERM HUP; eval "$saved_signal_traps"; kill -s TERM "$$"' TERM
+  trap 'reap_capture_jobs; trap - INT TERM HUP; eval "$saved_signal_traps"; kill -s INT "$$"' INT
+  trap 'reap_capture_jobs; trap - INT TERM HUP; eval "$saved_signal_traps"; kill -s HUP "$$"' HUP
+  set -m
+  "$@" &
+  child=$!
+  (
+    # This subshell inherits errexit, and everything it does is best-effort
+    # signalling. Left on, a failed step would abort the watchdog before the
+    # kill below -- a read-only or full $TMPDIR would make the marker write
+    # fail and silently disarm the deadline, which is the one mechanism here
+    # that must not fail open. Explicit `exit 0` still ends it deliberately.
+    set +e
+    sleep "$deadline"
+    # Say nothing about a capture that already finished: the parent has not
+    # necessarily reaped this watchdog yet, and a marker written over a
+    # completed capture would refuse a run that had nothing wrong with it.
+    # `kill -0` alone is not that check -- a child that exited moments ago is a
+    # zombie until the parent's `wait` reaps it, and a zombie and its group both
+    # still accept the signal. The pipeline renames its statuses into place as
+    # its last act, so that file appearing is what says it finished.
+    kill -0 "-$child" 2>/dev/null || kill -0 "$child" 2>/dev/null || exit 0
+    if [[ -s "$status_file" ]]; then
+      exit 0
+    fi
+    # If this write cannot land the kill still must, so the caller sees a
+    # killed capture rather than a stalled one; it then refuses on the missing
+    # statuses instead of naming the deadline.
+    printf 'timeout\n' >"$timeout_file" || true
+    # SIGKILL straight away, with no SIGTERM grace: a grace period would run
+    # after the deadline, so a capture that ignored SIGTERM would outlast the
+    # budget by exactly the grace. Nothing in a capture needs an orderly
+    # shutdown -- Git holds no lock these captures take and writes no temporary
+    # file -- and the refusal discards the output either way.
+    kill -KILL "-$child" 2>/dev/null || kill -KILL "$child" 2>/dev/null || true
+  ) &
+  watchdog=$!
+  if [[ "$had_monitor" -eq 0 ]]; then
+    set +m
+  fi
+  if wait "$child" 2>/dev/null; then
+    status=0
+  else
+    status=$?
+  fi
+  if [[ -s "$timeout_file" ]]; then
+    # The watchdog wrote the marker just before signalling the group. Let it
+    # finish that signal before reaping it, then sweep the group once more, so
+    # nothing the capture started is still running when this returns.
+    wait "$watchdog" 2>/dev/null || true
+    kill -KILL "-$child" 2>/dev/null || true
+  else
+    kill -KILL "-$watchdog" 2>/dev/null || kill -KILL "$watchdog" 2>/dev/null || true
+    wait "$watchdog" 2>/dev/null || true
+    # Sweep the capture's group on the way out too, not only when it timed out.
+    # `wait` has reaped the pipeline itself, so this group holds nothing but
+    # descendants the capture forked and left behind, and nothing else would
+    # ever reap them. Immediately after the wait, so the group id cannot have
+    # been recycled.
+    kill -KILL "-$child" 2>/dev/null || true
+  fi
+  trap - INT TERM HUP
+  eval "$saved_signal_traps"
+  return "$status"
+}
+
+capture_output_file() {
+  capture_budgeted_output_file 1 "$@"
+}
+
+# Same capture accounting without a second wall-clock bound, for a command that
+# already enforces its own. Only the PR feedback capture qualifies: it runs
+# through `run_with_deadline`, whose interrupt traps re-raise against `$$` --
+# the wrapper itself, since `$$` does not change in a subshell -- so signalling
+# it from an outer deadline would terminate the wrapper instead of refusing.
+capture_prebounded_output_file() {
+  capture_budgeted_output_file 0 "$@"
+}
+
+capture_budgeted_output_file() {
+  local apply_deadline="$1"
+  local output="$2"
+  local label="$3"
+  local allowed_status="$4"
+  shift 4
   local remaining=$((max_review_capture_bytes - review_capture_bytes))
-  local command_status
-  local limiter_status
+  local remaining_seconds
+  local command_status=""
+  local limiter_status=""
   local size
-  local pipeline_status=()
+  local timed_out=0
+  local status_file
+  local partial_file
+  local timeout_file
 
   if ((remaining <= 0)); then
     echo "agent:autoreview: review input exceeds the ${max_review_capture_bytes}-byte capture budget while capturing $label" >&2
     return 1
   fi
+  if ! review_capture_measure; then
+    echo "agent:autoreview: cannot bound the capture of $label: the wall clock is unreadable or moved backwards" >&2
+    return 1
+  fi
+  remaining_seconds="$review_capture_seconds_left"
+  if ((remaining_seconds <= 0)); then
+    echo "agent:autoreview: review capture exceeded the ${max_review_capture_seconds}-second capture deadline before capturing $label ($(review_capture_elapsed_seconds)s in the capture stage); no review bundle was produced" >&2
+    return 124
+  fi
+  if
+    ! status_file="$(/usr/bin/mktemp "${TMPDIR:-/tmp}/autoreview-capture.XXXXXX")"
+  then
+    echo "agent:autoreview: failed to allocate a capture status file for $label" >&2
+    return 1
+  fi
+  if
+    ! partial_file="$(/usr/bin/mktemp "${TMPDIR:-/tmp}/autoreview-capture-staged.XXXXXX")"
+  then
+    rm -f "$status_file"
+    echo "agent:autoreview: failed to allocate a capture status staging file for $label" >&2
+    return 1
+  fi
+  if
+    ! timeout_file="$(/usr/bin/mktemp "${TMPDIR:-/tmp}/autoreview-capture-deadline.XXXXXX")"
+  then
+    rm -f "$status_file" "$partial_file"
+    echo "agent:autoreview: failed to allocate a capture deadline file for $label" >&2
+    return 1
+  fi
+  # Guarantee the file the size check reads below exists even if the capture
+  # never starts. Checked rather than bare, because a bare redirection failure
+  # here would abort the wrapper under errexit with no diagnostic and leave both
+  # bookkeeping files behind.
+  if ! : >"$output"; then
+    rm -f "$status_file" "$partial_file" "$timeout_file"
+    echo "agent:autoreview: failed to open the capture output for $label" >&2
+    return 1
+  fi
 
   set +e
-  "$@" | head -c "$((remaining + 1))" >"$output"
-  pipeline_status=("${PIPESTATUS[@]}")
+  if [[ "$apply_deadline" -eq 1 ]]; then
+    run_capture_with_deadline \
+      "$remaining_seconds" "$timeout_file" "$status_file" "$partial_file" \
+      run_capture_pipeline \
+      "$output" "$((remaining + 1))" "$status_file" "$partial_file" "$@"
+  else
+    run_capture_pipeline \
+      "$output" "$((remaining + 1))" "$status_file" "$partial_file" "$@"
+  fi
   set -e
-  command_status="${pipeline_status[0]:-1}"
-  limiter_status="${pipeline_status[1]:-1}"
+
+  if [[ -s "$timeout_file" ]]; then
+    timed_out=1
+  fi
+  read -r command_status limiter_status <"$status_file" || true
+  if ! [[ "$command_status" =~ ^[0-9]+$ && "$limiter_status" =~ ^[0-9]+$ ]]; then
+    command_status=1
+    limiter_status=1
+  fi
+  rm -f "$status_file" "$partial_file" "$timeout_file"
+  # The marker decides, whatever the pipeline reported. The watchdog writes it
+  # only after confirming the capture was still running, so it cannot appear for
+  # a capture that had already finished; and once it appears the deadline has
+  # passed, so nothing the capture produced afterwards may be published --
+  # including output from a command that handled the SIGTERM and exited during
+  # the second before the SIGKILL.
+  if [[ "$timed_out" -eq 1 ]]; then
+    echo "agent:autoreview: capture of $label exceeded the ${max_review_capture_seconds}-second capture deadline after $(review_capture_elapsed_seconds)s; no review bundle was produced" >&2
+    return 124
+  fi
   size="$(wc -c <"$output")"
   size="${size//[[:space:]]/}"
 
@@ -6689,7 +7045,7 @@ EOF
       "$repo" \
       "$protected_main_ref" \
       "$feedback_runtime_dir"
-    capture_output_file "$staging_dir/feedback-state.json" "PR feedback state" 0 \
+    capture_prebounded_output_file "$staging_dir/feedback-state.json" "PR feedback state" 0 \
       capture_feedback_state "$repo" "$feedback_runtime_dir" "$pr_number" "$repository_slug"
     if ! safe_remove_tree \
       "$feedback_runtime_dir" \
