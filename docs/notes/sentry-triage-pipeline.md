@@ -305,7 +305,7 @@ An approval landing inside that window is shed, the archive run its label event
 started refuses out loud on its own guard, and the human re-applies the label.
 
 The re-queue CLI's version of that window is CLOSED, by a different mechanism
-(ADR 0069). It declares `sentry:archived` as a settlement SENTINEL: the marker is
+(ADR 0070). It declares `sentry:archived` as a settlement SENTINEL: the marker is
 withheld from its shed, so it survives to be read on the end-state verification,
 and finding it there means the archive settled inside the write window — at which
 point the re-queue unwinds itself rather than leaving a selectable retry stub

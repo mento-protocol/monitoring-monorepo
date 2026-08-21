@@ -1275,7 +1275,7 @@ await test("the terminal revalidation FAILS CLOSED: an unreadable stub is never 
 });
 
 // ---------------------------------------------------------------------------
-// The archive-settlement race (#1929, ADR 0069). The revalidating read above is
+// The archive-settlement race (#1929, ADR 0070). The revalidating read above is
 // a snapshot, so the archive leg — its own per-issue concurrency group — can
 // settle the stub between it and these writes. The interleaving each test names
 // is the one it drives, by landing the archive's writes at a chosen call.
@@ -1522,6 +1522,60 @@ await test("an unwind that cannot leave a VERDICT on the stub fails rather than 
   );
 });
 
+await test("an unwind that would leave TWO verdicts on the stub fails rather than declining (#1929)", async () => {
+  // `verdict-unsettled` is the compensation that fires BECAUSE more than one
+  // verdict survived (#1745), so this premise is the one that path was entered
+  // with — not a hypothetical. The unwind restores every marker the premise
+  // carried, so accepting at-least-one would undo the repair the re-queue exists
+  // to perform and report success over a CLOSED archive `classifyIssue` buckets
+  // from whichever verdict comes first. The settling run's own `settlementHeld`
+  // would accept it too, and the stranded sweep only sees OPEN stubs, so nothing
+  // downstream repairs it. It fails here or nowhere.
+  const gh = makeClearFailureGh(
+    {
+      state: "OPEN",
+      labels: [
+        "sentry-triage",
+        "sentry:verdict-upstream",
+        "sentry:verdict-code-fix",
+      ],
+    },
+    { after: settleLikeArchiveOnRequeue() },
+  );
+  await assertRejects(
+    runWorkflowRequeue({
+      runGh: gh.runGh,
+      repo: REPO,
+      issueNumber: 1731,
+      reason: REQUEUE_REASON_VERDICT_UNSETTLED,
+    }),
+    /2 verdict labels .* exactly one/,
+  );
+  // The unwind still ran in the order that leaves every prefix unselectable, so
+  // the stub a human is asked to repair is at least not selectable meanwhile.
+  assert(
+    !gh.state.labels.includes(NEEDS_TRIAGE_LABEL),
+    "the failed unwind must still have taken selectability away first",
+  );
+});
+
+await test("one verdict on the confirming read is still accepted (#1929)", async () => {
+  // The negative control for the case above: the tightening must reject TWO
+  // without rejecting the ordinary one-verdict unwind this mechanism exists for.
+  const gh = makeClearFailureGh(
+    { state: "OPEN", labels: ["sentry-triage", "sentry:verdict-upstream"] },
+    { after: settleLikeArchiveOnRequeue() },
+  );
+  const result = await runWorkflowRequeue({
+    runGh: gh.runGh,
+    repo: REPO,
+    issueNumber: 1731,
+    reason: REQUEUE_REASON_VERDICT_UNSETTLED,
+  });
+  assertEqual(result.reason, "settled-underneath");
+  assertEqual(gh.state.state, "CLOSED");
+});
+
 await test("the unwind's write order leaves every PREFIX of it unselectable (#1929)", async () => {
   // An unwind can die half-way, so its order is a correctness property rather
   // than a style one: `sentry:needs-triage` goes first because it is the only
@@ -1602,6 +1656,25 @@ await test("a malformed sentinel declaration refuses before any I/O (#1929)", as
       true,
     ],
     [{ sentinel: { declineNote: () => "s" } }, /non-empty string/, true],
+    // A sentinel outside REOPEN_SHED_LABELS INVERTS the check rather than
+    // weakening it. `sentry:needs-triage` is the worst case and passes every
+    // other check: nothing sheds it, this re-queue re-ADDS it, so the confirming
+    // read finds it on every run and unwinds a re-queue nothing settled —
+    // closing a stub that is supposed to be selectable. Fatal before any I/O.
+    [
+      {
+        sentinel: { label: NEEDS_TRIAGE_LABEL, declineNote: () => "s" },
+      },
+      /must name a label this re-queue sheds/,
+      true,
+    ],
+    [
+      {
+        sentinel: { label: "sentry-triage", declineNote: () => "s" },
+      },
+      /must name a label this re-queue sheds/,
+      true,
+    ],
   ];
   for (const [extra, pattern, verify] of cases) {
     const writer = makeWriter();

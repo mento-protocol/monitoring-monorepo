@@ -195,7 +195,7 @@ Authority: canonical
 - [`docs/adr/0066-coderabbit-replaces-bugbot-third-reviewer.md`](adr/0066-coderabbit-replaces-bugbot-third-reviewer.md) — CodeRabbit replaces Cursor BugBot as the third PR review bot
 - [`docs/adr/0067-pool-criticality-is-depletion-risk.md`](adr/0067-pool-criticality-is-depletion-risk.md) — Pool criticality is depletion risk, not deviation magnitude
 - [`docs/adr/0068-sentry-fixture-authoring-policy.md`](adr/0068-sentry-fixture-authoring-policy.md) — Adversarial fixtures are authored to scan clean; no value or line registry
-- [`docs/adr/0069-sentry-requeue-settlement-sentinel.md`](adr/0069-sentry-requeue-settlement-sentinel.md) — A withheld terminal label serializes the Sentry archive settlement against the triage re-queue
+- [`docs/adr/0070-sentry-requeue-settlement-sentinel.md`](adr/0070-sentry-requeue-settlement-sentinel.md) — A withheld terminal label serializes the Sentry archive settlement against the triage re-queue
 
 Authority: non-canonical
 

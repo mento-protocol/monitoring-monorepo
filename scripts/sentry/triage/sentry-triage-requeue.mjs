@@ -569,7 +569,7 @@ export async function requeueQueueStub(
   const verifyEndState = onFailure === REQUEUE_ON_FAILURE_VERIFY_END_STATE;
 
   // INVARIANT 7, SECOND HALF — the premise re-checked across the WRITE window
-  // (issue #1929, ADR 0069). `revalidate` alone re-reads and then writes blind:
+  // (issue #1929, ADR 0070). `revalidate` alone re-reads and then writes blind:
   // between those two moments the archive leg — its own per-issue concurrency
   // group — can settle the stub, and the shed then erases the very marker that
   // would have said so. The sentinel names that marker. It is withheld from the
@@ -602,6 +602,20 @@ export async function requeueQueueStub(
   if (sentinel && typeof sentinel.declineNote !== "function") {
     throw new Error(
       `A re-queue sentinel (${sentinel.label}) must supply declineNote(live): the detection site reports before it unwinds, and a missing note would throw there — after the writes and before any correction.`,
+    );
+  }
+  // The sentinel must be a label this call would otherwise SHED. Withholding is
+  // the whole mechanism, and there is nothing to withhold a label from unless the
+  // shed set contains it. A label outside that set inverts the check instead of
+  // weakening it: `sentry:needs-triage` passes every check above, survives the
+  // filter below trivially, and is then re-ADDED by this very re-queue — so the
+  // confirming read finds it every time and unwinds a re-queue nothing settled,
+  // closing a stub that should be selectable. That is worse than the fail-open
+  // this mechanism replaces, so a declaration that could produce it costs a throw
+  // here, before any I/O, like the three above.
+  if (sentinel && !REOPEN_SHED_LABELS.includes(sentinel.label)) {
+    throw new Error(
+      `A re-queue sentinel (${sentinel.label}) must name a label this re-queue sheds (${REOPEN_SHED_LABELS.join(", ")}): the sentinel is a marker withheld from the shed, and a label outside that set is either never removed or re-added by this run, so the confirming read would report a settlement that never happened.`,
     );
   }
   const shedLabels = REOPEN_SHED_LABELS.filter(

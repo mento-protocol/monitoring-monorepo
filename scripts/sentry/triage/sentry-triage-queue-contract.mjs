@@ -285,7 +285,7 @@ export const REOPEN_SHED_LABELS = [
 ];
 
 // Shed markers a re-queue may never put BACK, even when unwinding its own shed
-// against a stub that settled underneath it (ADR 0069). `sentry:approved-archive`
+// against a stub that settled underneath it (ADR 0070). `sentry:approved-archive`
 // is a spent human authority, and re-adding it is doubly wrong: a later
 // workflow_dispatch would read it as still-approved and archive without
 // re-review, and the add itself re-fires `sentry-triage-archive.yml`'s

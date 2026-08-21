@@ -1,5 +1,5 @@
 /**
- * THE SETTLEMENT SENTINEL, and the unwind it triggers (issue #1929, ADR 0069).
+ * THE SETTLEMENT SENTINEL, and the unwind it triggers (issue #1929, ADR 0070).
  *
  * The re-queue chokepoint's invariant 7 revalidates a snapshot-derived premise
  * immediately BEFORE mutating. That leaves the write window itself uncovered:
@@ -21,8 +21,12 @@
  * unwind runs. No read can tell the two apart: the archive publishes nothing
  * after its verification, and a marker it published would be one more racing
  * write rather than a lock. Both runs then converge on the archive's own
- * post-rollback shape (open, verdicted, unqueued), both go red, and ingest's
- * stranded sweep repairs it. ADR 0069 records that trade.
+ * post-rollback shape (open, verdicted, unqueued) and ingest's stranded sweep
+ * repairs it a day later (#1817). Neither run FAILS on that path — the archive
+ * returns `unsettled-reopened` and exits 0, and this unwind returns
+ * `settled-underneath` — so the only live signal is the `::warning::` the
+ * detection site emits. ADR 0070 records that trade and issue #2004 tracks the
+ * archive's silent rollback exit.
  *
  * Split out of scripts/sentry/triage/sentry-triage-requeue.mjs to keep that
  * module under the 1,000-line hard cap. It imports the label contract and
@@ -178,13 +182,26 @@ export async function unwindAfterSettlement(
   // the premise never carried one to restore. Both are the same answer here — a
   // verdict-less closed archive is a state only a human can resolve — so both
   // land in the throw below rather than in a quiet decline.
+  //
+  // EXACTLY one, not at least one. `verdict-unsettled` is the compensation that
+  // fires precisely BECAUSE more than one verdict survived on the stub
+  // (`REQUEUE_REASON_VERDICT_UNSETTLED`, #1745), so a multi-verdict premise is
+  // not hypothetical here — it is the reason this code path was entered. The
+  // re-queue was the repair for that ambiguity; restoring every observed verdict
+  // and confirming the result would undo the repair and report success, leaving a
+  // CLOSED archive that `classifyIssue` buckets from whichever verdict comes
+  // first and only the digest's warning ever names. The settling run's own
+  // `settlementHeld` asks the weaker at-least-one question, so it would accept
+  // that stub too; nothing downstream repairs a closed one. So it lands with the
+  // verdict-less case, in the throw below.
   const missing = restorableMarkers({
     sentinelLabel: sentinel.label,
     premise,
   }).filter((name) => !(after?.labels ?? []).includes(name));
-  const verdictHolds = VERDICT_LABELS.some((name) =>
+  const verdicts = VERDICT_LABELS.filter((name) =>
     (after?.labels ?? []).includes(name),
   );
+  const verdictHolds = verdicts.length === 1;
   const held =
     after !== null &&
     String(after.state ?? "").toUpperCase() === "CLOSED" &&
@@ -193,17 +210,22 @@ export async function unwindAfterSettlement(
     missing.length === 0 &&
     verdictHolds;
   if (!held) {
+    const verdictFault = verdictHolds
+      ? ""
+      : verdicts.length === 0
+        ? ", no verdict label"
+        : `, ${verdicts.length} verdict labels (${verdicts.join("|")}) where the queue contract allows exactly one`;
     const seen = after
       ? `state=${after.state}, labels=${(after.labels ?? []).join("|")}${
           missing.length ? `, never restored: ${missing.join("|")}` : ""
-        }${verdictHolds ? "" : ", no verdict label"}`
+        }${verdictFault}`
       : `unreadable (${readError})`;
     process.stderr.write(
       `::error::Queue stub #${issueNumber} settled underneath a re-queue (${sentinel.label} appeared inside the write window), but the re-queue could not be unwound (${seen})${
         provisional.length
           ? `; corrections reported: ${provisional.join("; ")}`
           : ""
-      }. Repair it by hand: close it, remove ${NEEDS_TRIAGE_LABEL}, restore the previous round's markers, and leave ${sentinel.label} in place — the settling run already archived the underlying occurrence.\n`,
+      }. Repair it by hand: close it, remove ${NEEDS_TRIAGE_LABEL}, leave it carrying exactly one sentry:verdict-* label plus the previous round's other markers, and leave ${sentinel.label} in place — the settling run already archived the underlying occurrence.\n`,
     );
     throw new Error(
       `Queue stub #${issueNumber} settled underneath a re-queue and the re-queue could not be unwound (${seen}).`,

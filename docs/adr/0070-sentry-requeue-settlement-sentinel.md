@@ -11,7 +11,7 @@ review_interval_days: 90
 garden_lane: adrs-architecture
 ---
 
-# ADR 0069 — The archive's terminal marker is withheld from the re-queue's shed, and read back as a sentinel
+# ADR 0070 — The archive's terminal marker is withheld from the re-queue's shed, and read back as a sentinel
 
 **Status:** Accepted (Aug 2026), in force.
 **Scope:** ci/process
@@ -117,6 +117,17 @@ shape throws, whether the verdict re-add failed or the premise never carried one
 the stub is then neither re-queued nor demonstrably settled, which only a human
 can resolve.
 
+On the verdict the read is one notch STRICTER than the settling run: it demands
+exactly one, where `settlementHeld` asks for at least one. The reason is which
+compensation gets here. `verdict-unsettled` fires precisely because more than one
+verdict survived on the stub (#1745), so a multi-verdict premise is the reason
+this path was entered, and the unwind restores every marker the premise carried.
+Accepting the result would undo the repair the re-queue existed to perform and
+report success, leaving a CLOSED archive that `classifyIssue` buckets from
+whichever verdict comes first — a state the settling run would also accept and
+nothing downstream repairs, since the stranded sweep only sees open stubs. So it
+throws with the verdict-less case.
+
 **Why every ordering is now DETECTED.** Neither writer can destroy the other's
 evidence any more. The archive's evidence about the compensation is the reopen
 and the shed verdict, which its verification reads. The compensation's evidence
@@ -132,11 +143,24 @@ sub-ordering: the archive marks and closes, the compensation reopens and sheds,
 the archive's verification reads that broken shape and begins its rollback, and
 the compensation's read still sees the marker and unwinds. Both then converge on
 the archive's own documented post-rollback shape — open, verdicted, unqueued,
-`sentry:archived` removed, Sentry left `archived_until_escalating` (ADR 0036) —
-and the archive run is RED. Serializing that away would need either a marker the
-archive publishes only after its verification, which would be one more racing
-write and not a lock, or a way to stop an in-flight run's writes, which the
-platform does not offer. See Consequences for what it costs.
+`sentry:archived` removed, Sentry left `archived_until_escalating` (ADR 0036).
+Serializing that away would need either a marker the archive publishes only
+after its verification, which would be one more racing write and not a lock, or
+a way to stop an in-flight run's writes, which the platform does not offer. See
+Consequences for what it costs.
+
+**Neither run FAILS on that sub-ordering, and that is a real gap.** The archive
+returns `{ status: "unsettled-reopened" }` from `runArchive` and exits 0 — the
+workflow does not inspect that JSON — and this compensation returns
+`settled-underneath`, also 0. So the only live signal is the `::warning::`
+annotation the detection site emits, and the stub is repaired by ingest's
+stranded sweep a day later rather than in the compensation's usual seconds.
+Making the compensation's `settled-underneath` path nonzero was considered and
+rejected: it would fail every CORRECT unwind — the common case this ADR is
+designed for — to make one sub-ordering visible, and it would still not make the
+end state right. The exit semantics that would close it belong to the archive
+leg, whose rollback path is silent for the plain concurrent-regression case too;
+that is tracked on issue #2004, not decided here.
 
 **Accepted flap.** Between the reopen and the unwind the stub is briefly
 selectable. Nothing can act on it there: the triage workflow holds one repo-wide
@@ -203,8 +227,9 @@ sentinel exists to end.
 compensation declines, so it does not re-queue a stub that in the end was NOT
 archived. The stub lands in the open-verdicted-unqueued shape, which ingest's
 stranded sweep repairs after a day (#1817) rather than the compensation's usual
-seconds, and both runs are red. That is a latency regression in one narrow
-window, traded for removing the fail-open in the window this ADR exists for —
+seconds, and neither run fails — one `::warning::` is the whole live signal
+(issue #2004). That is a latency regression in one narrow window, reported
+quietly, traded for removing the fail-open in the window this ADR exists for —
 where the same code silently produced a selectable retry stub over an archived
 occurrence and reported success. Slow-and-loud beats fast-and-wrong, and the slow
 path is one the pipeline already runs for this exact shape.
@@ -225,8 +250,11 @@ tests, not a redesign.
 
 `scripts/sentry/triage/sentry-triage-requeue.mjs` reached 1,042 lines with the
 unwind inline, past the 1,000-line hard cap the brief suite enforces for this
-family. The unwind moved to `sentry-triage-requeue-sentinel.mjs` (192 lines) and
-is listed in that cap test, so the split cannot silently rot.
+family. The unwind moved to `sentry-triage-requeue-sentinel.mjs` and is listed in
+that cap test, so the split cannot silently rot. That list is a `scripts/` path
+pin and was missing from the move sweep, so ADR 0064's checklist gained it as
+item 11 — `scripts/AGENTS.md` points at that checklist rather than carrying the
+procedure, because its scoped instruction budget has 15 bytes of headroom.
 
 The mechanism generalises only where a settling writer applies a durable terminal
 LABEL before verifying. It says nothing about a settlement whose only trace is
@@ -240,5 +268,7 @@ close-only settlement is still invisible to a re-queue that reopens.
 - Both halves of the completeness argument are pinned in one suite: the sentinel cases, and `settlementHeld` returning false for a stub the compensation has reopened or stripped of its verdict.
 - The three verification gaps review passes found are pinned as their own cases: a settlement first visible to the shed retry's read still unwinds; an unwind whose marker restoration never lands is a hard failure; and an unwind that cannot leave a verdict on the stub fails rather than declining. Removing any one check reds exactly its case.
 - The declaration is validated before any I/O — policy, label and `declineNote` — because a sentinel missing its note would throw at the DETECTION site, after the writes and before any correction, leaving the exact stub this prevents. The unwind's confirming read carries the same bounded retry the revalidating read has, so a transient 5xx does not raise a manual-repair alarm over a settled stub. Both are pinned, and removing either check reds its case.
-- `node scripts/sentry/gate/sentry-suite-gate.mjs` — 14 suites asserted from their own output. No floor moved down; the re-queue suite emitted 41 cases before and 52 now, and its floor rose 40 → 52.
+- The declaration check is a MEMBERSHIP test, not a shape test: a sentinel must name a label this re-queue sheds. A label outside `REOPEN_SHED_LABELS` inverts the mechanism rather than weakening it — `sentry:needs-triage` is never shed and is re-ADDED by this run, so the confirming read would find it every time and unwind a re-queue nothing settled. Widening the permitted set to admit it reds that case.
+- The confirming read demands EXACTLY one verdict. `verdict-unsettled` is the compensation that fires because more than one survived (#1745), so restoring every observed verdict and accepting the result would undo the repair the re-queue exists to perform. Relaxing the count to at-least-one reds the two-verdict case; a one-verdict unwind still passes, pinned as its own case.
+- `node scripts/sentry/gate/sentry-suite-gate.mjs` — 14 suites asserted from their own output. No floor moved down; the re-queue suite emitted 41 cases before and 54 now, and its floor rose 40 → 54.
 - Platform facts: `consumeApprovalLabel` in `scripts/sentry/triage/sentry-triage-archive.mjs` documents the DELETE/404 primitive (issue #1371); the single-pending-run behaviour of a shared concurrency group is recorded in `docs/notes/sentry-triage-pipeline.md` and in `sentry-triage-archive.yml`'s own `concurrency:` comment.
