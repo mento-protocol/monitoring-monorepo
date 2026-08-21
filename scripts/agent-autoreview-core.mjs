@@ -863,9 +863,11 @@ function placeholderValue(value) {
     shellExpansionReference(trimmed) ||
     // One leading backslash still leaves a reference. Inside a JS template
     // literal `\${VAR:-}` is a JS escape, so the emitted shell script receives
-    // `${VAR:-}` — a parameter expansion resolved at run time that carries
-    // nothing. Where the backslash instead survives literally, the value is
-    // placeholder text, not credential material. Exactly one backslash is
+    // `${VAR:-}` — a parameter expansion that yields the variable's value when
+    // set and non-null, and the (empty) default otherwise, always at run time.
+    // Either way the committed source carries no literal credential, which is
+    // what this scanner guards. Where the backslash instead survives
+    // literally, the value is placeholder text, not credential material. Exactly one backslash is
     // stripped and the remainder has to be a whole reference on its own; the
     // narrow form is the point, because normalizing the backslash ahead of the
     // entire grammar below would also clear escaped GitHub Actions forms

@@ -776,9 +776,11 @@ assert.match(
 );
 // Escaped shell expansions. Inside a JS template literal `\${VAR:-}` is a JS
 // escape, so the emitted shell script receives `${VAR:-}` — a parameter
-// expansion resolved at run time that carries nothing. `placeholderValue`
-// strips exactly one leading backslash and requires the remainder to be a
-// whole reference on its own.
+// expansion that yields the variable's value when set and non-null, and the
+// (empty) default otherwise, always at run time; the committed source carries
+// no literal credential either way. `placeholderValue` strips exactly one
+// leading backslash and requires the remainder to be a whole reference on its
+// own.
 //
 // Every value below uses a long variable name deliberately. A short one such
 // as `\${V}` sits under CREDENTIAL_LITERAL_MIN_LENGTH and clears whether or
