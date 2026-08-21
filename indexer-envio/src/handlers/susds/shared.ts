@@ -12,6 +12,9 @@ export const WAD = 10n ** 18n;
 export const ZERO = 0n;
 export const SUMMARY_ID = `${ETHEREUM_CHAIN_ID}-susds`;
 export const V3_REVENUE_LAUNCH_TIMESTAMP = 1_772_496_000n; // 2026-03-03T00:00:00Z
+// The effect reads the final pre-launch block. Keep this value exact so a
+// shifted or malformed launch effect cannot create a false baseline.
+export const V3_REVENUE_LAUNCH_BLOCK_TIMESTAMP = 1_772_495_999n;
 // Last Ethereum block before the v3 revenue launch timestamp. Keep the
 // baseline at this exact block so the launch-day row starts at pre-launch
 // share price while its UTC bucket starts at the v3 launch timestamp.

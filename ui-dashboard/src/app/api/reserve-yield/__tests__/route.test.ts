@@ -170,6 +170,7 @@ describe("GET /api/reserve-yield", () => {
       principalUsd: 3200,
       forecastPrincipalUsd: 3200,
       earnedYieldUsd: null,
+      susdsEarnedYieldUsd: null,
       grossApyPercent: 5.33,
       expenseBps: 15,
       revenueShareBps: 8000,
@@ -464,6 +465,7 @@ describe("GET /api/reserve-yield", () => {
     );
     expect(graphqlBody.variables.id).toBe("1-susds");
     expect(body.earnedYieldUsd).toBeCloseTo(300, 6);
+    expect(body.susdsEarnedYieldUsd).toBeCloseTo(300, 6);
     expect(body.realizedYieldUsd).toBeCloseTo(100, 6);
     expect(body.unrealizedYieldUsd).toBeCloseTo(200, 6);
     expect(body.earnedYieldAsOf).toBe("2026-06-03T10:41:11.000Z");

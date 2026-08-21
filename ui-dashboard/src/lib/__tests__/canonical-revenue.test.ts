@@ -140,6 +140,7 @@ function reserveYield(
     principalUsd: 10_000,
     forecastPrincipalUsd: 10_000,
     earnedYieldUsd: null,
+    susdsEarnedYieldUsd: null,
     realizedYieldUsd: null,
     unrealizedYieldUsd: null,
     earnedYieldAsOf: null,
@@ -233,7 +234,7 @@ describe("buildCanonicalRevenue", () => {
       ],
       cdpDailySeries: [],
       cdpMarkets: [],
-      reserveYield: reserveYield({ earnedYieldUsd: 123 }),
+      reserveYield: reserveYield({ susdsEarnedYieldUsd: 123 }),
       reserveDailySnapshots: [],
       reserveHistoryUnavailable: true,
       nowSeconds: NOW_SECONDS,
@@ -252,7 +253,7 @@ describe("buildCanonicalRevenue", () => {
       networkData: [],
       cdpDailySeries: [],
       cdpMarkets: [],
-      reserveYield: reserveYield({ earnedYieldUsd: 123 }),
+      reserveYield: reserveYield({ susdsEarnedYieldUsd: 123 }),
       reserveDailySnapshots: [],
       nowSeconds: NOW_SECONDS,
     });
@@ -297,6 +298,61 @@ describe("buildCanonicalRevenue", () => {
             assetSymbol: "sUSDS",
             principalUsd: 2_000,
           },
+        ],
+      }),
+      reserveDailySnapshots: [
+        stethReserveSnapshot(
+          ts("2026-06-12"),
+          "0xd0697f70e79476195b742d5afab14be50f98cc1e",
+          1,
+        ),
+      ],
+      nowSeconds: NOW_SECONDS,
+    });
+
+    expect(result.periods.allTimeSinceV3.reserveYieldUsd).toBeNull();
+    expect(result.partialReasons).toContain(
+      "Reserve sUSDS earned-yield actuals unavailable: no SusdsYieldDailySnapshot source exists for current sUSDS holdings or earned signal.",
+    );
+  });
+
+  it("does not use combined stETH yield as an sUSDS signal", () => {
+    const result = buildCanonicalRevenue({
+      networkData: [],
+      cdpDailySeries: [],
+      cdpMarkets: [],
+      reserveYield: reserveYield({
+        earnedYieldUsd: 123,
+        holdings: [stethHolding()],
+      }),
+      reserveDailySnapshots: [
+        stethReserveSnapshot(
+          ts("2026-06-12"),
+          "0xd0697f70e79476195b742d5afab14be50f98cc1e",
+          1,
+        ),
+      ],
+      nowSeconds: NOW_SECONDS,
+    });
+
+    expect(result.partialReasons).not.toContain(
+      "Reserve sUSDS earned-yield actuals unavailable: no SusdsYieldDailySnapshot source exists for current sUSDS holdings or earned signal.",
+    );
+  });
+
+  it("treats an unpriced current sUSDS balance as an sUSDS signal", () => {
+    const result = buildCanonicalRevenue({
+      networkData: [],
+      cdpDailySeries: [],
+      cdpMarkets: [],
+      reserveYield: reserveYield({
+        holdings: [
+          stethHolding({
+            assetSymbol: "sUSDS",
+            principalUsd: 0,
+            balance: 2_000,
+            earnedYieldUsd: null,
+          }),
         ],
       }),
       reserveDailySnapshots: [

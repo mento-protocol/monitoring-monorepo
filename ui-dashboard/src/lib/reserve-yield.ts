@@ -374,6 +374,7 @@ function buildReserveYieldResponse({
       susdsYield.earnedYieldUsd,
       stethYield.earnedYieldUsd,
     ),
+    susdsEarnedYieldUsd: susdsYield.earnedYieldUsd,
     realizedYieldUsd: sumNullable(
       susdsYield.realizedYieldUsd,
       stethYield.realizedYieldUsd,

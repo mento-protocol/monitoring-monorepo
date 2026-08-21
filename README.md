@@ -39,7 +39,7 @@ Real-time monitoring infrastructure for Mento v3 on-chain pools — a multichain
                                           Grafana Alloy / Cloud
 ```
 
-`config.multichain.mainnet.yaml` configures a single Envio project (`mento`) for Celo Mainnet (42220), Monad Mainnet (143), Polygon Mainnet (137), and Ethereum reserve-yield events (1). Polygon is live at the static production endpoint after completing the normal deploy, sync verification, promotion, and producer checks. Pool IDs are namespaced as `{chainId}-{address}` to prevent cross-chain collisions. Ethereum reserve-yield indexing is event-only; the historical sUSDS onBlock heartbeat is not registered in the hosted indexer.
+`config.multichain.mainnet.yaml` configures a single Envio project (`mento`) for Celo Mainnet (42220), Monad Mainnet (143), Polygon Mainnet (137), and Ethereum reserve-yield events (1). Polygon is live at the static production endpoint after completing the normal deploy, sync verification, promotion, and producer checks. Pool IDs are namespaced as `{chainId}-{address}` to prevent cross-chain collisions. Ethereum reserve-yield indexing includes events plus a bounded sUSDS daily sampler every 600 Ethereum blocks from the v3 launch boundary; the historical every-block sUSDS heartbeat remains excluded from the hosted indexer.
 
 `metrics-bridge` retains its indexed Hasura poller and owns an isolated peg
 lifecycle. When the protected policy artifact is configured, that loop combines

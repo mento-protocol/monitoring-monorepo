@@ -35,6 +35,8 @@ export type ReserveYieldResponse = {
   principalUsd: number | null;
   forecastPrincipalUsd: number | null;
   earnedYieldUsd: number | null;
+  /** sUSDS-only actuals. The aggregate earnedYieldUsd also includes stETH. */
+  susdsEarnedYieldUsd?: number | null;
   realizedYieldUsd: number | null;
   unrealizedYieldUsd: number | null;
   earnedYieldAsOf: string | null;

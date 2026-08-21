@@ -35,12 +35,17 @@ function hasSusdsActualSignal(
 ): boolean {
   if (reserveYield === null) return false;
   const earnedYieldSignal =
-    typeof reserveYield.earnedYieldUsd === "number" &&
-    Number.isFinite(reserveYield.earnedYieldUsd) &&
-    reserveYield.earnedYieldUsd > 0;
+    typeof reserveYield.susdsEarnedYieldUsd === "number" &&
+    Number.isFinite(reserveYield.susdsEarnedYieldUsd) &&
+    reserveYield.susdsEarnedYieldUsd !== 0;
   const currentSusdsHolding = reserveYield.holdings.some(
     (holding) =>
-      holding.assetSymbol.toUpperCase() === "SUSDS" && holding.principalUsd > 0,
+      holding.assetSymbol.toUpperCase() === "SUSDS" &&
+      ((Number.isFinite(holding.principalUsd) && holding.principalUsd > 0) ||
+        (Number.isFinite(holding.balance) && holding.balance > 0) ||
+        (holding.earnedYieldUsd !== null &&
+          Number.isFinite(holding.earnedYieldUsd) &&
+          holding.earnedYieldUsd !== 0)),
   );
   return currentSusdsHolding || earnedYieldSignal;
 }
