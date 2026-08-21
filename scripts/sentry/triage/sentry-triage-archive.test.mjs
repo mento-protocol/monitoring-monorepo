@@ -116,7 +116,7 @@ async function assertRejects(promise, pattern) {
 // Fixtures + mocks.
 // ---------------------------------------------------------------------------
 
-const TOKEN = "sntrys_archive_token";
+const SENTRY_CRED = "sntrys_archive_token";
 const APPROVER = "octomaintainer";
 const QUEUE_URL =
   "https://github.com/mento-protocol/monitoring-monorepo/issues/42";
@@ -455,7 +455,7 @@ function baseOptions(overrides = {}) {
     sentryBaseUrl: "https://us.sentry.io",
     queueIssue: 42,
     approver: APPROVER,
-    sentryToken: TOKEN,
+    sentryToken: SENTRY_CRED,
     ...overrides,
   };
 }
@@ -647,7 +647,7 @@ await test("resolveIssueIdFromShortId returns the numeric groupId", async () => 
   const id = await resolveIssueIdFromShortId(fetchImpl, {
     baseUrl: "https://us.sentry.io",
     org: "mento-labs",
-    token: TOKEN,
+    token: SENTRY_CRED,
     shortId: "GOVERNANCE-MENTO-ORG-51",
   });
   assertEqual(id, "99");
@@ -665,7 +665,7 @@ await test("resolveIssueIdFromShortId throws on a non-numeric resolution", async
     resolveIssueIdFromShortId(fetchImpl, {
       baseUrl: "https://us.sentry.io",
       org: "mento-labs",
-      token: TOKEN,
+      token: SENTRY_CRED,
       shortId: "GOV-1",
     }),
     /did not resolve to a numeric issue id/,
@@ -677,7 +677,7 @@ await test("archiveIssue PUTs the archive payload with a bearer token", async ()
   await archiveIssue(fetchImpl, {
     baseUrl: "https://us.sentry.io",
     org: "mento-labs",
-    token: TOKEN,
+    token: SENTRY_CRED,
     issueId: "6197137101",
   });
   const put = calls.find((c) => c.method === "PUT");
@@ -687,7 +687,7 @@ await test("archiveIssue PUTs the archive payload with a bearer token", async ()
     "must hit the update-an-issue endpoint",
   );
   assertDeepEqual(put.body, ARCHIVE_PAYLOAD);
-  assertEqual(put.headers.Authorization, `Bearer ${TOKEN}`);
+  assertEqual(put.headers.Authorization, `Bearer ${SENTRY_CRED}`);
 });
 
 await test("archiveIssue throws on a non-ok response", async () => {
@@ -696,7 +696,7 @@ await test("archiveIssue throws on a non-ok response", async () => {
     archiveIssue(fetchImpl, {
       baseUrl: "https://us.sentry.io",
       org: "mento-labs",
-      token: TOKEN,
+      token: SENTRY_CRED,
       issueId: "1",
     }),
     /Sentry archive request failed: 403/,
@@ -723,7 +723,7 @@ await test("restoreArchivedIssue restores only when the issue is still ours", as
   const out = await restoreArchivedIssue(stillOurs.fetchImpl, {
     baseUrl: "https://us.sentry.io",
     org: "mento-labs",
-    token: TOKEN,
+    token: SENTRY_CRED,
     issueId: "9",
     preArchive: { status: "unresolved" },
   });
@@ -737,7 +737,7 @@ await test("restoreArchivedIssue restores only when the issue is still ours", as
   const skip = await restoreArchivedIssue(moved.fetchImpl, {
     baseUrl: "https://us.sentry.io",
     org: "mento-labs",
-    token: TOKEN,
+    token: SENTRY_CRED,
     issueId: "9",
     preArchive: { status: "unresolved" },
   });
@@ -852,7 +852,7 @@ await test("runArchive happy path archives and settles the queue stub", async ()
 
   // The Sentry token must never appear in a gh argument.
   assert(
-    !ghCalls.some((args) => args.some((a) => String(a).includes(TOKEN))),
+    !ghCalls.some((args) => args.some((a) => String(a).includes(SENTRY_CRED))),
     "the Sentry token must never reach a gh call",
   );
 });
@@ -3276,7 +3276,7 @@ await test("reconciliation is idempotent — a second pass changes nothing", asy
       sentry: {
         baseUrl: "https://us.sentry.io",
         org: "mento-labs",
-        token: TOKEN,
+        token: SENTRY_CRED,
       },
       issueId: "6197137101",
       preArchive: { status: "unresolved", lastSeen: BASELINE_LAST_SEEN },
