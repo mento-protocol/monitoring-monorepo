@@ -40,26 +40,48 @@ function stateHistoryUrl(
   return url;
 }
 
+function errorStateHistoryUrl(url: URL): URL | null {
+  const current = url.searchParams.get("current");
+  const previous = url.searchParams.get("previous");
+  const errorUrl = new URL(url);
+  if (current === "Alerting" && previous === null) {
+    errorUrl.searchParams.set("current", "Error");
+    return errorUrl;
+  }
+  if (current === "Normal" && previous === "Alerting") {
+    errorUrl.searchParams.delete("current");
+    errorUrl.searchParams.set("previous", "Error");
+    return errorUrl;
+  }
+  return null;
+}
+
 async function fetchJson(
   url: URL,
   token: string,
   maximumBytes: number,
-): Promise<unknown> {
-  const response = await fetch(url, {
-    headers: {
-      Accept: "application/json",
-      Authorization: `Bearer ${token}`,
-    },
-    cache: "no-store",
-    redirect: "error",
-    signal: AbortSignal.timeout(PEG_ALERTS_UPSTREAM_TIMEOUT_MS),
-  });
-  if (!response.ok) throw new Error("Grafana unavailable");
-  if (!response.headers.get("content-type")?.includes("application/json"))
-    throw new Error("Grafana returned non-JSON");
-  return JSON.parse(
-    await readBoundedGrafanaResponse(response, maximumBytes),
-  ) as unknown;
+): Promise<unknown[]> {
+  const errorUrl = errorStateHistoryUrl(url);
+  const urls = errorUrl === null ? [url] : [url, errorUrl];
+  return Promise.all(
+    urls.map(async (requestUrl) => {
+      const response = await fetch(requestUrl, {
+        headers: {
+          Accept: "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        cache: "no-store",
+        redirect: "error",
+        signal: AbortSignal.timeout(PEG_ALERTS_UPSTREAM_TIMEOUT_MS),
+      });
+      if (!response.ok) throw new Error("Grafana unavailable");
+      if (!response.headers.get("content-type")?.includes("application/json"))
+        throw new Error("Grafana returned non-JSON");
+      return JSON.parse(
+        await readBoundedGrafanaResponse(response, maximumBytes),
+      ) as unknown;
+    }),
+  );
 }
 
 export async function GET(): Promise<NextResponse> {
