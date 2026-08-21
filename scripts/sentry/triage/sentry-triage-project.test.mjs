@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { readFileSync } from "node:fs";
 import { LABEL_TO_VERDICT } from "./sentry-triage-digest.mjs";
 import {
   FIX_SCOPE_ARCHITECTURAL_LABEL,
@@ -294,6 +295,68 @@ await test("projection destination table keeps external capability separate from
   }
 });
 
+await test("workflow defers local config projection before any close", () => {
+  const workflow = readFileSync(
+    new URL(
+      "../../../.github/workflows/sentry-triage-agent.yml",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  const parseStart = workflow.indexOf(
+    'parse_file="${RUNNER_TEMP}/verdict-parse.json"',
+  );
+  const parseEnd = workflow.indexOf(
+    "      - name: Render or clear the needs-human brief",
+    parseStart,
+  );
+  assert(
+    parseStart >= 0 && parseEnd > parseStart,
+    "verdict parse step missing",
+  );
+  const parseStep = workflow.slice(parseStart, parseEnd);
+  assert(
+    parseStep.includes("jq -r '.projectionDestination'"),
+    "parse step must read projectionDestination",
+  );
+  assert(
+    parseStep.includes(
+      'echo "projection_destination=${projection_destination}"',
+    ),
+    "parse step must serialize projection_destination",
+  );
+
+  const closeStart = workflow.indexOf(
+    "- name: Close queue stub (deterministic)",
+  );
+  const projectStart = workflow.indexOf(
+    "\n  # ---------------------------------------------------------------------------\n  # project:",
+    closeStart,
+  );
+  assert(closeStart >= 0 && projectStart > closeStart, "close step missing");
+  const closeStep = workflow.slice(closeStart, projectStart);
+  assert(
+    closeStep.includes(
+      "PROJECTION_DESTINATION: ${{ steps.verdict.outputs.projection_destination }}",
+    ),
+    "close step must consume projection_destination",
+  );
+  const localBranch = closeStep.indexOf(
+    '[ "${PROJECTION_DESTINATION}" = "external" ] || [ "${PROJECTION_DESTINATION}" = "local-config" ]',
+  );
+  const firstClose = closeStep.indexOf("gh issue close");
+  assert(localBranch >= 0, "close step must branch on local-config");
+  assert(
+    firstClose > localBranch,
+    "close command must follow destination branch",
+  );
+  const branchExit = closeStep.indexOf("exit 0", localBranch);
+  assert(
+    branchExit >= 0 && branchExit < firstClose,
+    "local-config must exit before any close mutation",
+  );
+});
+
 // A mock `gh` runner covering the calls runProjection makes. Records every call
 // with the token it was invoked under so token routing is assertable. `stubs`
 // (number -> queue issue) serves batch mode's per-issue ambient views.
@@ -312,16 +375,20 @@ function makeRunGh({
       return `${projectorLogin}\n`;
     }
     if (a0 === "issue" && a1 === "view") {
-      // A token means an OWNING-repo view (hasAliasComment's `--json
-      // comments` read); resolve it from the `existing` fixtures by issue
-      // number (each fixture may carry a `comments` array). Ambient views
-      // read the queue stub.
-      if (opts.token) {
+      // The full field set is the queue-stub read. The exact `comments` read
+      // is a projected-issue alias lookup, even when the projected issue is
+      // local. Keep these surfaces distinct so an accidental local PAT route
+      // cannot hide behind a fixture that returns the wrong object shape.
+      const jsonFields = args[args.indexOf("--json") + 1];
+      if (jsonFields === "comments") {
         const found = existing.find(
           (e) => String(e.number) === String(args[2]),
         );
         return JSON.stringify({ comments: found?.comments ?? [] });
       }
+      // Queue-stub reads always return the full issue fixture. This remains
+      // true even when a buggy caller passes a token, so the assertion on
+      // every local call catches that routing error directly.
       return JSON.stringify(stubs?.[String(args[2])] ?? issue);
     }
     if (a0 === "issue" && a1 === "list") {
@@ -1556,7 +1623,7 @@ await test("runProjection creates local config work with the ambient token and a
     {
       localRepo: "mento-protocol/monitoring-monorepo",
       queueIssue: 500,
-      projectionToken: "",
+      projectionToken: PAT,
     },
     { runGh },
   );
@@ -1604,7 +1671,7 @@ await test("runProjection reopens a closed local config work issue and restores 
     {
       localRepo: "mento-protocol/monitoring-monorepo",
       queueIssue: 500,
-      projectionToken: "",
+      projectionToken: PAT,
     },
     { runGh },
   );
@@ -1667,7 +1734,7 @@ await test("a failed local lifecycle repair remains retryable while the issue is
   const options = {
     localRepo: "mento-protocol/monitoring-monorepo",
     queueIssue: 500,
-    projectionToken: "",
+    projectionToken: PAT,
   };
 
   await assertRejects(
@@ -1723,14 +1790,142 @@ await test("runProjection preserves the lifecycle of an open local config work i
     {
       localRepo: "mento-protocol/monitoring-monorepo",
       queueIssue: 500,
-      projectionToken: "",
+      projectionToken: PAT,
     },
     { runGh },
   );
   assertEqual(result.status, "reused");
   assert(
+    !calls.some((c) => c.token),
+    "every local open-reuse call must use the ambient token, never the PAT",
+  );
+  assert(
     !calls.some((c) => c.args[1] === "edit" && c.args[2] === "42"),
     "an open local work issue must keep its existing lifecycle labels",
+  );
+});
+
+await test("runProjection reuses a local alias with ambient calls and trusted author fences", async () => {
+  const existing = [
+    {
+      number: 42,
+      url: "https://github.com/mento-protocol/monitoring-monorepo/issues/42",
+      body: `${buildProjectionMarker("OTHER-9")}\nrest of body`,
+      state: "OPEN",
+      author: { login: "app/github-actions" },
+      comments: [
+        {
+          body: buildAliasComment({
+            shortId: "APP-MENTO-ORG-12",
+            queueIssueUrl:
+              "https://github.com/mento-protocol/monitoring-monorepo/issues/500",
+            verdict: "config-fix",
+            confidence: "medium",
+            summary: "earlier local occurrence",
+            rootCause: "rc",
+            proposedAction: "pa",
+          }),
+          author: { login: "github-actions" },
+        },
+      ],
+    },
+  ];
+  const issue = queueIssue({
+    comments: [
+      botComment(
+        verdictComment({
+          verdict: "config-fix",
+          affectedRepo: "mento-protocol/monitoring-monorepo",
+        }),
+        "2026-07-17T10:00:00Z",
+      ),
+    ],
+  });
+  const { runGh, calls } = makeRunGh({ issue, existing });
+  const result = await runProjection(
+    {
+      localRepo: "mento-protocol/monitoring-monorepo",
+      queueIssue: 500,
+      projectionToken: PAT,
+    },
+    { runGh },
+  );
+  assertEqual(result.status, "reused");
+  assert(
+    calls.some(
+      (call) =>
+        call.args[0] === "issue" &&
+        call.args[1] === "view" &&
+        call.args.includes("--json") &&
+        call.args[call.args.indexOf("--json") + 1] === "comments" &&
+        call.token === null,
+    ),
+    "local alias comment reads must use the ambient token",
+  );
+  assert(
+    !calls.some((call) => call.token),
+    "every local alias reuse call must use the ambient token, never the PAT",
+  );
+});
+
+await test("a hostile local alias cannot capture the route", async () => {
+  const existing = [
+    {
+      number: 78,
+      url: "https://github.com/mento-protocol/monitoring-monorepo/issues/78",
+      body: `${buildProjectionMarker("OTHER-9")}\nrest of body`,
+      state: "OPEN",
+      author: { login: "app/github-actions" },
+      comments: [
+        {
+          body: buildAliasComment({
+            shortId: "APP-MENTO-ORG-12",
+            queueIssueUrl:
+              "https://github.com/mento-protocol/monitoring-monorepo/issues/500",
+            verdict: "config-fix",
+            confidence: "medium",
+            summary: "hostile local alias",
+            rootCause: "rc",
+            proposedAction: "pa",
+          }),
+          author: { login: "attacker" },
+        },
+      ],
+    },
+  ];
+  const issue = queueIssue({
+    comments: [
+      botComment(
+        verdictComment({
+          verdict: "config-fix",
+          affectedRepo: "mento-protocol/monitoring-monorepo",
+        }),
+        "2026-07-17T10:00:00Z",
+      ),
+    ],
+  });
+  const { runGh, calls } = makeRunGh({
+    issue,
+    existing,
+    createdUrl:
+      "https://github.com/mento-protocol/monitoring-monorepo/issues/999",
+  });
+  const result = await runProjection(
+    {
+      localRepo: "mento-protocol/monitoring-monorepo",
+      queueIssue: 500,
+      projectionToken: PAT,
+    },
+    { runGh },
+  );
+  assertEqual(result.status, "projected");
+  assert(
+    calls.some((call) => call.args[0] === "issue" && call.args[1] === "create"),
+    "expected a new local issue after rejecting the hostile alias",
+  );
+  assert(
+    !calls.some((call) => call.token),
+    "every hostile-alias local call must use the ambient token, never the PAT",
   );
 });
 

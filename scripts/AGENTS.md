@@ -70,7 +70,9 @@ same PR, except the `agent-autoreview.sh` feedback-runtime pins below.
   `bootstrap/codex-cloud-setup.{sh,test.sh}` for offline tests. It routes
   `sentry/autofix/sentry-autofix-refused-inventory.mjs` alone to
   `pnpm sentry:autofix:run-record:test` and
-  `pnpm sentry:autofix:finalize:test`.
+  `pnpm sentry:autofix:finalize:test`. The exact
+  `sentry/triage/sentry-triage-project-route.mjs` path routes to
+  `pnpm sentry:project:test` with the projection family.
 - **Gate runtime module pins.** Before `cd`, `agent-quality-gate.sh` loads
   `$script_source_dir/gate/run-handles.sh`; move it with its signature, self-test
   route, and missing-helper fixture. It also pins

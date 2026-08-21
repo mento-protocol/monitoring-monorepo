@@ -455,7 +455,7 @@ step's post-condition reread still counts exactly one label, because
 (`VERDICT_LABELS` filters on that prefix). The close step reads
 `architectural_hold` and leaves the stub open rather than closing it. So the
 "a verdicted queue issue is a closed ledger entry" invariant now has TWO open
-exceptions: a projectable destination (external actionable verdict or exact
+exceptions: a routed destination (external actionable verdict or exact
 local `config-fix`, deferred to the project job) and a LOCAL architectural
 code-fix (held as human design work). The hold is never
 terminal: it is shed on regression and on any re-verdict
