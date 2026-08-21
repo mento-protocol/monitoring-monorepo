@@ -23,9 +23,13 @@ import {
 } from "./sentry-triage-agent-comment.mjs";
 
 const RUNNER_TEMP_FOR_TESTS = "/runner/_temp";
-const SENTRY_CRED = "sntrys_deadbeefdeadbeefdeadbeef";
-const GH_CRED = "ghs" + "_0123456789abcdefghijklmnopqrstuvwxyz";
-const OAUTH_CRED = "sk" + "-ant-oat01-abcdefghijklmnopqrstuvwxyz";
+// Placeholder vocabulary, per ADR 0068. `assertBodyPostable` and
+// `buildChildEnv` match these values verbatim against the environment, so no
+// provider prefix is required; each value must remain distinct and meet
+// `MIN_SECRET_LENGTH`.
+const SENTRY_CRED = "example-service-credential-value";
+const GH_CRED = "example-access-token-value";
+const OAUTH_CRED = "example-auth-credential-value";
 
 const VERDICT_BODY = [
   VERDICT_MARKER,
