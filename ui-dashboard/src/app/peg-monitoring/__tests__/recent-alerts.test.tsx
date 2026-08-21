@@ -157,6 +157,42 @@ describe("RecentAlerts", () => {
     );
   });
 
+  it("labels and explains Grafana evaluation failures without breach copy", () => {
+    const failure: PegAlertEvent = {
+      ...events[0]!,
+      id: "grafana-evaluation-failed",
+      severity: "page",
+      lead: "Grafana could not evaluate the Bitvavo Peg rule",
+      detail: "EUROP.",
+      evidence: {
+        ...events[1]!.evidence,
+        rule: "Deep-Venue Downside Critical",
+        failureReason: null,
+        evaluationState: "failed",
+      },
+    };
+    act(() =>
+      root.render(
+        <RecentAlerts
+          nowMs={NOW_MS}
+          events={[failure]}
+          monitoring={monitoring}
+          state="ready"
+        />,
+      ),
+    );
+
+    const row = container.querySelector("li")!;
+    expect(row.querySelector('[role="img"]')?.getAttribute("aria-label")).toBe(
+      "Monitoring failed",
+    );
+    act(() => row.querySelector("summary")!.click());
+    expect(row.textContent).toContain(
+      "This entry records a monitoring failure and does not confirm a peg breach.",
+    );
+    expect(row.textContent).not.toContain("sell price is below peg");
+  });
+
   it("omits the separator when the cause needs no detail", () => {
     act(() =>
       root.render(

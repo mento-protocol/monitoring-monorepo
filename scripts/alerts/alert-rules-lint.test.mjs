@@ -1212,6 +1212,12 @@ test("Peg Grafana and Slack copy leads with the concrete cause", () => {
     path.join(rulesDir, "peg-message-templates.tf"),
     "utf8",
   );
+  const slackTitleTemplate = templates.slice(
+    templates.indexOf('resource "grafana_message_template" "peg_slack_title"'),
+    templates.indexOf(
+      'resource "grafana_message_template" "peg_slack_message"',
+    ),
+  );
 
   assert(
     definitions.includes("sell price is") &&
@@ -1246,7 +1252,21 @@ test("Peg Grafana and Slack copy leads with the concrete cause", () => {
       !templates.includes(".CommonLabels.alertname") &&
       !templates.includes("*FIRING:") &&
       !templates.includes("*RESOLVED:"),
-    "Peg Slack titles and bodies must use the cause instead of internal alert state or rule names",
+    "Peg notification bodies and pager titles must use the cause instead of internal alert state or rule names",
+  );
+  assert(
+    !slackTitleTemplate.includes("Annotations.summary") &&
+      !slackTitleTemplate.includes("Annotations.resolved_summary") &&
+      templates.includes(
+        "*<https://monitoring.mento.org/peg-monitoring|{{ . }}>*",
+      ) &&
+      templates.includes(
+        "*<https://monitoring.mento.org/peg-monitoring|Peg monitoring needs attention>*",
+      ) &&
+      templates.includes(
+        "*<https://monitoring.mento.org/peg-monitoring|Peg monitoring recovered>*",
+      ),
+    "Peg Slack must keep Grafana's fixed title link on a status icon and link each human title to Peg Monitoring",
   );
 });
 
