@@ -4469,7 +4469,10 @@ function assertReviewableBundle(paths, bundle) {
       "refusing gitlink/submodule changes because dependency contents are absent from the review bundle",
     );
   }
-  assertNoSecretLikeContent("selected change", bundle);
+  // The bundle is the only scanned text git itself produced, so it is the only
+  // one whose hunk structure can be trusted and therefore the only one allowed
+  // the redaction accept-shape. Supplemental input stays on the closed default.
+  assertNoSecretLikeContent("selected change", bundle, { gitDiff: true });
 }
 
 function hashHeadIdentity(hash, state) {

@@ -308,6 +308,7 @@ export const SENTRY_MODULE_ARMS = [
     patterns: [
       "scripts/sentry/triage/sentry-triage-requeue.mjs",
       "scripts/sentry/triage/sentry-triage-requeue.test.mjs",
+      "scripts/sentry/triage/sentry-triage-requeue-sentinel.mjs",
       "scripts/sentry/triage/sentry-triage-queue-contract.mjs",
       "scripts/sentry/triage/sentry-triage-workflow-requeue.mjs",
     ],

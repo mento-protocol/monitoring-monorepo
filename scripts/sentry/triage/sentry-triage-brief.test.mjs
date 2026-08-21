@@ -2178,6 +2178,7 @@ await test("the pipeline's shared modules stay under the file-size hard cap", ()
     "scripts/sentry/triage/sentry-triage-brief-render.mjs",
     "scripts/sentry/triage/sentry-triage-queue-contract.mjs",
     "scripts/sentry/triage/sentry-triage-requeue.mjs",
+    "scripts/sentry/triage/sentry-triage-requeue-sentinel.mjs",
     "scripts/sentry/triage/sentry-triage-workflow-requeue.mjs",
   ]
     .map((path) => [path, readRepoFile(path).split("\n").length])

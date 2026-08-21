@@ -4694,6 +4694,17 @@ run_gate "scripts/sentry/triage/sentry-triage-queue-contract.mjs"
 assert_contains "- pnpm sentry:requeue:test (Sentry re-queue chokepoint changed)"
 assert_contains "- pnpm sentry:project:test (Sentry re-queue chokepoint changed)"
 
+# The settlement-sentinel unwind, split out of the chokepoint for the 1,000-line
+# hard cap (#1929, ADR 0070). It has no suite of its own — its cases live in the
+# re-queue suite — and it decides the end state of the archive compensation, so
+# an unrouted change to it would ship without the archive suite ever running.
+# Pinned one path at a time: a sibling in the same change set would pull the
+# suites in anyway and hide the miss.
+run_gate "scripts/sentry/triage/sentry-triage-requeue-sentinel.mjs"
+assert_contains "- pnpm sentry:requeue:test (Sentry re-queue chokepoint changed)"
+assert_contains "- pnpm sentry:archive:test (Sentry re-queue chokepoint changed)"
+assert_contains "- pnpm sentry:ingest:test (Sentry re-queue chokepoint changed)"
+
 run_gate "scripts/sentry/triage/sentry-triage-project.mjs"
 assert_contains "- pnpm sentry:project:test (Sentry triage projection helper changed)"
 
