@@ -7015,12 +7015,15 @@ run_capture_deadline_engine_time_arm() {
   local json_output="$state_dir/report.json"
   local human_output="$state_dir/report.txt"
   # Sized the way the accumulation arm sizes its stalls, in the other
-  # direction. The engine gap has to dominate the budget so the refusal a wall-
-  # clock charge produces is not a near thing, and the budget has to stay far
-  # above what the captures themselves cost -- a two-file repository spends
-  # well under a second across every Git spawn a run makes, even loaded.
+  # direction, and the budget is the half that cannot shrink: it also carries
+  # every quick Git spawn the run makes, and those get slower on a loaded
+  # machine. Ten seconds against the well under a second a two-file repository
+  # spends across all of them is the same reserve that arm leaves above its own
+  # stalls. The engine gap only has to clear that budget by enough that the
+  # refusal a wall-clock charge produces is not a near thing, so it is the half
+  # kept small -- five seconds of margin, and the whole arm costs fifteen.
   local deadline_seconds=10
-  local engine_seconds=20
+  local engine_seconds=15
   local engine_started
   local engine_finished
   local engine_elapsed
