@@ -5,7 +5,7 @@ title: Babysit PR Skill
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-13
+last_verified: 2026-08-20
 doc_type: skill
 scope: repo-wide
 review_interval_days: 90
@@ -38,13 +38,21 @@ gh pr view --json number,url,title,headRefName,headRefOid,baseRefName,headReposi
 
 In a Claude cloud session, resolve the same fields over MCP
 (`list_pull_requests` filtered by head branch, or `pull_request_read` method
-`get`) and bind by content rather than by remote name: the PR must be
-same-repository (`headRepository.nameWithOwner` equals the session-attached
-repo), local `git rev-parse HEAD` must equal the MCP-resolved `headRefOid`
-before editing, and the verified proxy `origin` serves as both `HEAD_REMOTE`
-and `BASE_REMOTE`. Cross-repository (fork) PRs stop on that surface. For the
-post-push guard there, re-resolve with `pull_request_read` method `get` in
-place of `gh pr view` and require the returned `headRefOid` to equal local
+`get`). Bind the result by content rather than by remote name.
+
+Immediately after resolving these fields, stop on every tool surface if
+`isCrossRepository` is `true`. Apply the same stop when another surface proves
+that the head repository differs from the base repository. This repo-local
+adapter cannot yet prove feedback, gate, and review trust roots end to end for
+fork-controlled source. Do not run a repo-local command, mutate a checkout,
+probe feedback, run a gate, or start a review for that target.
+
+For a remaining same-repository Claude cloud target,
+`headRepository.nameWithOwner` must equal the session-attached repo. Local
+`git rev-parse HEAD` must equal the MCP-resolved `headRefOid` before editing,
+and the verified proxy `origin` serves as both `HEAD_REMOTE` and `BASE_REMOTE`.
+For the post-push guard there, re-resolve with `pull_request_read` method `get`
+in place of `gh pr view` and require the returned `headRefOid` to equal local
 `HEAD`.
 
 For an explicit target, accept a bare number or PR URL. Derive and preserve
@@ -53,13 +61,28 @@ After that initial resolution, pass `--repo <BASE_REPO>` to every `gh pr view`,
 feedback-state, and ready-state call—even when the PR began in the current
 repository.
 
+For every remaining local same-repository target, complete the repository trust
+preflight before any repo-local adapter command. Require `origin` to exist with
+one effective canonical GitHub fetch URL whose normalized slug equals both
+`BASE_REPO` and `headRepository.nameWithOwner`. Fetch `baseRefName` and protected
+`main` through that `origin` into their matching remote-tracking refs. Resolve
+and retain `base_oid` and `protected_main_oid`, then require
+`origin/<baseRefName>` and `origin/main` to keep those exact values. The values
+must match when `baseRefName` is `main`. Fail closed on ambiguity, fetch failure,
+or drift. Never repair the guard by changing a remote URL; use a clean dedicated
+checkout with the correct `origin`.
+
+Immediately before and after every feedback-state, ready-state, gate, or review
+adapter call, recheck the canonical `origin` URL and both retained refs. Any
+drift stops the workflow and invalidates that result. Any refetch restarts this
+preflight and refreshes both pins before another adapter call.
+
 Before any blocker fix mutates files or Git history, bind the checkout to that
 resolved target:
 
-- Select `HEAD_REMOTE` only after verifying that its repository equals
-  `headRepository.nameWithOwner`. For a cross-repository PR, use a dedicated
-  checkout with the fork as `HEAD_REMOTE`; keep a separately verified
-  `BASE_REMOTE` for `BASE_REPO` and never swap their roles.
+- For the remaining same-repository target, use the verified `origin` as
+  `BASE_REMOTE`. Select `HEAD_REMOTE` only after verifying that it serves the
+  repository named by both `headRepository.nameWithOwner` and `BASE_REPO`.
 - `git status --porcelain` must be empty and `git rev-parse HEAD` must equal
   the resolved `headRefOid`. If either differs, stop or switch to a clean,
   dedicated checkout at the PR head before editing.
@@ -119,10 +142,140 @@ item required.
 
 - Failing required check: inspect the failing workflow/log, fix only PR-caused
   failures, run focused validation, commit, and push.
-- Merge conflict: fetch `baseRefName` from the verified `BASE_REMOTE` and merge
-  that remote-tracking ref into the already-published PR branch. Resolve, run
-  focused validation, commit, and push through `HEAD_REMOTE`. Do not rebase a
-  published PR because the resulting force-push violates this workflow.
+- Merge conflict: restart the repository trust preflight. Fetch `baseRefName`
+  and protected `main` from the verified `BASE_REMOTE`, then refresh both
+  retained pins before any gate or review adapter. Before the merge, pin the
+  fetched base and the published PR head to immutable commit IDs:
+
+  ```bash
+  base_oid="$(git rev-parse '<verified-base-ref>^{commit}')" || exit 1
+  premerge_oid="$(git rev-parse 'HEAD^{commit}')" || exit 1
+  ```
+
+  Merge exact `base_oid`. Resolve the conflicts and run focused validation.
+  Create the merge commit locally, but do not push it yet. Stop concurrent
+  writers. Pin the final local head, require a clean worktree, and require both
+  input commits to be its ancestors:
+
+  ```bash
+  final_head="$(git rev-parse 'HEAD^{commit}')" || exit 1
+  worktree_state="$(git status --porcelain=v1)" || exit 1
+  test -z "$worktree_state" || exit 1
+  git merge-base --is-ancestor "$base_oid" "$final_head" || exit 1
+  git merge-base --is-ancestor "$premerge_oid" "$final_head" || exit 1
+  ```
+
+  Run both mapped gates against the same `final_head`:
+
+  ```bash
+  pnpm agent:quality-gate --base "$base_oid" --head HEAD --run
+  pnpm agent:quality-gate --base "$premerge_oid" --head HEAD --run
+  ```
+
+  Prepare separate verified branch-mode review bundles in different absent
+  directories outside the worktree:
+
+  ```bash
+  worktree_root="$(git rev-parse --show-toplevel)" || exit 1
+  worktree_root="$(cd "$worktree_root" && pwd -P)" || exit 1
+  bundle_parent="$(mktemp -d)" || exit 1
+  bundle_parent="$(cd "$bundle_parent" && pwd -P)" || exit 1
+  case "$bundle_parent/" in
+    "$worktree_root/"*) exit 1 ;;
+  esac
+  base_bundle="$bundle_parent/base"
+  premerge_bundle="$bundle_parent/premerge"
+  test "$base_bundle" != "$premerge_bundle" || exit 1
+  test ! -e "$base_bundle" || exit 1
+  test ! -e "$premerge_bundle" || exit 1
+  ```
+
+  Before any autoreview entrypoint runs, inspect both exact tree axes:
+  `base_oid..final_head` and `premerge_oid..final_head`. An axis is
+  runtime-sensitive if it changes `scripts/agent-autoreview.sh`,
+  `scripts/agent-autoreview.mjs`, or `scripts/agent-autoreview-core.mjs`. Check
+  all three paths on both axes. Fail closed on any Git, blob, mode, or
+  comparison error.
+
+  When neither axis is runtime-sensitive, bind the absolute final-checkout
+  wrapper and helper. Never use the package adapter for merge-review
+  provenance:
+
+  ```bash
+  autoreview_wrapper="$worktree_root/scripts/agent-autoreview.sh"
+  autoreview_helper="$worktree_root/scripts/agent-autoreview.mjs"
+  ```
+
+  When either axis is runtime-sensitive, never run the final checkout's
+  autoreview wrapper. Follow the trusted pre-change procedure in
+  [`agent-quality-gate-mechanics.md`](../../../docs/notes/agent-quality-gate-mechanics.md).
+  That procedure selects the absolute `autoreview_wrapper` and
+  `autoreview_helper` and owns trusted-commit selection, checkout and runtime
+  proof, both axis preparations, pre/post manifest verification, and
+  invalidation.
+
+  After selecting the two absolute paths, define one direct runner and use it
+  for both axes:
+
+  ```bash
+  run_bound_autoreview() {
+    (
+      cd "$worktree_root" || exit 1
+      AUTOREVIEW_HELPER="$autoreview_helper" \
+        /bin/bash "$autoreview_wrapper" "$@"
+    )
+  }
+  run_bound_autoreview --prepare-bundle-dir "$base_bundle" \
+    --feedback-pr <pr-number> -- --mode branch --base "$base_oid"
+  run_bound_autoreview --prepare-bundle-dir "$premerge_bundle" \
+    --feedback-pr <pr-number> -- --mode branch --base "$premerge_oid"
+  run_bound_autoreview --verify-bundle-dir "$base_bundle"
+  run_bound_autoreview --verify-bundle-dir "$premerge_bundle"
+  ```
+
+  The adapter has no `--pr` option. Pass the numeric PR through
+  `--feedback-pr`; `auto` is invalid with an explicit `--base`. Complete a
+  fresh-context review of each bundle and retain each pre-review manifest.
+  After both semantic reviews, postverify both bundles through the same bound
+  runner:
+
+  ```bash
+  run_bound_autoreview --verify-bundle-dir "$base_bundle" \
+    --expected-bundle-manifest <retained-base-digest>
+  run_bound_autoreview --verify-bundle-dir "$premerge_bundle" \
+    --expected-bundle-manifest <retained-premerge-digest>
+  ```
+
+  Before and after every preparation or verification call, recheck the
+  normalized `origin` identity, the retained base and protected-main refs,
+  `final_head`, the clean worktree, all three runtime identities, and any
+  trusted-checkout root. Any drift invalidates the call.
+
+  Only after both postverifications pass, run the sequential suite through the
+  direct system shell as separate behavior evidence:
+
+  ```bash
+  (
+    cd "$worktree_root" || exit 1
+    AUTOREVIEW_TEST_FOCUS=suite /bin/bash \
+      "$worktree_root/scripts/agent-autoreview.test.sh" --jobs 1
+  ) || exit 1
+  ```
+
+  Require terminal success. Then run a final origin, retained-ref, head, clean,
+  runtime-identity, and trusted-root recheck. Any suite failure or drift
+  invalidates the sequence and restarts preflight, both gates, both bundles,
+  both reviews, both postverifications, and the direct suite.
+
+  Bind the two gate results and two post-verified review verdicts to the same
+  `final_head`. Do not edit the worktree or move `HEAD` during this sequence.
+  After every command, resolve `HEAD` with an explicit success check, require it
+  to equal `final_head`, and recheck the clean worktree. Any follow-up fix
+  restarts the full sequence above from a new clean final head. The
+  trusted-runtime procedure owns its stricter restart conditions. Only then
+  push through `HEAD_REMOTE`. Do not rebase a published PR because the resulting
+  force-push violates this workflow.
+
 - Feedback blocker: triage every normalized finding, implement valid fixes, and
   sweep review bodies, top-level comments, threads, annotations, and failing
   logs before all-clear. Reply before resolving a thread. The reply forms,

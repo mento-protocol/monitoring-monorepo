@@ -100,11 +100,15 @@ even when you never open an authority.
    reviewer must inspect every prepared-bundle pass, with manifest
    verification before and after review. Capture, bundle-integrity,
    sensitive-input, runtime-trust, and explicitly-selected-unavailable-engine
-   failures all fail closed. **If this PR changes `scripts/agent-autoreview*`,
-   the current checkout is not a trust boundary for its own review** — run the
-   wrapper and helper from the last independently reviewed pre-change commit
-   instead, and run `pnpm agent:autoreview:test -- --jobs 1` as the sequential
-   full regression closeout. Authority:
+   failures all fail closed. For merge-review provenance, the `babysit-pr`
+   skill binds `origin`, the immutable base, and protected `main` before any
+   adapter call. It invokes an absolute wrapper and explicit helper through
+   `/bin/bash`, never through the package manager. If either review axis changes
+   `scripts/agent-autoreview.sh`, `scripts/agent-autoreview.mjs`, or
+   `scripts/agent-autoreview-core.mjs`, use the last independently reviewed
+   compatible pre-change runtime. After every semantic review and bound
+   postverification, run the sequential suite through `/bin/bash` as separate
+   behavior evidence. Authority:
    [`agent-quality-gate-mechanics.md`](agent-quality-gate-mechanics.md).
 
 5. **Ship.** Open the PR through the `ship` skill on every surface, including

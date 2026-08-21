@@ -3,7 +3,7 @@ title: Recurring PR Review Patterns
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-23
+last_verified: 2026-08-20
 doc_type: checklist
 scope: repo-wide
 review_interval_days: 90
@@ -130,6 +130,44 @@ tldr: **ruleset-required** workflows (`ci`, `Code Quality`, the Vercel checks) M
 
 - If a setup/cache script uses marker files or input hashes to skip work, the skip condition MUST verify the actual output that downstream commands need, not just the marker. Examples: dependency skips should verify a representative package resolves, Playwright skips should verify the browser executable exists, and codegen skips should verify the generated facade file exists.
 - Write marker files only after every validation step represented by that marker has passed. A failed post-install validation must not leave a fresh marker that makes the next run skip the install or rebuild path.
+
+### Shell failure propagation and fixture environments
+
+- A function cannot rely on `set -e` when it runs directly in an
+  ignored-`errexit` context or anywhere inside a compound command whose
+  aggregate status is tested by `if`, `while`, or `until`, inverted by `!`, or
+  used as a non-final command in an `&&` or `||` list. Compound commands include
+  brace groups, subshells, and `case` commands. This rule includes final
+  operands nested inside a tested compound command. It excludes standalone
+  compound commands and compound commands used as the final operand of a
+  top-level bare `&&` or `||` list; those forms retain normal `errexit`
+  behavior.
+- A function used as a pipeline element also cannot rely on `set -e` when an
+  enclosing `if`, `while`, or `until` tests the aggregate pipeline status, when
+  `!` inverts the pipeline, or when the pipeline is a non-final command in an
+  `&&` or `||` list. This rule excludes a bare pipeline. With `errexit` and
+  `pipefail` enabled, bare `f | cat` stops `f` at its unchecked failure and
+  returns nonzero.
+- Command substitution has two independent suppression mechanisms. With
+  `inherit_errexit` disabled, including default non-POSIX Bash, the substitution
+  clears `errexit`. Even with `inherit_errexit` enabled, an ignored-errexit
+  context around the standalone assignment-only command, or around an enclosing
+  pipeline whose whole status is tested, suppresses `errexit` in the substituted
+  function body.
+- Check each load-bearing command explicitly. Match every negative test to the
+  exact production call shape. Prove that remaining commands in the function
+  body do not run and that the caller observes failure. For direct contexts,
+  prove the expected branch, inversion, or list operand. For command
+  substitution, use a standalone assignment-only command such as `value=$(f)`
+  and prove that it returns failure. Test both `inherit_errexit` settings and
+  every nested ignored-errexit context that production uses. Do not use `local`,
+  `declare`, `export`, or `readonly`, a command argument, an assignment prefix,
+  or an assignment with a later substitution as status proof; each can mask the
+  substituted function's status.
+- A fixture that sources or spawns a script must create the feature state it
+  tests. Set enable flags and clear ambient opt-outs inside the fixture. For a
+  load-bearing flag, also run the fixture under the inverse caller state and
+  prove that the target path ran.
 
 ### Supply-chain advisory bumps
 
