@@ -1107,6 +1107,53 @@ header prints only when sharing is active. The shared dir is pure cache and
 grows without bound — delete it any time to reclaim disk:
 `rm -rf "$HOME/.cache/turbo-monitoring-monorepo"`. Refs GitHub issue 1411.
 
+## Self-test families (`GATE_TEST_FOCUS`)
+
+`scripts/agent-quality-gate.test.sh` is partitioned into families. Every test
+lives inside exactly one `run_<family>_family` function; nothing but blank lines
+and comments sits between those functions. A family is a subject, so a change to
+one part of the gate can be iterated against that subject alone instead of the
+whole ~9-minute suite:
+
+```bash
+GATE_TEST_FOCUS=routing-sources bash scripts/agent-quality-gate.test.sh
+GATE_TEST_FOCUS=routing-packaging,routing-docs bash scripts/agent-quality-gate.test.sh
+```
+
+| Family               | Subject                                                                                                                 | Solo runtime |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------- | ------------ |
+| `gate-contract`      | Pins on the gate's source text, classifier resolution, Turbo task-graph inputs, agent context check.                    | 2s           |
+| `install-wiring`     | Pre-push hook installation, the install-marker library, the package-script pin validator.                               | 1s           |
+| `routing-packaging`  | Manifests, package-manager config, root package-script and dev-metadata classification, lockfile-importer scoping.      | 52s          |
+| `routing-sources`    | Source-path routing: scoped `vitest related`, indexer codegen order, shared-config blast radius, deploy/terraform arms. | 86s          |
+| `execution-phases`   | Phase order, fail-fast prerequisites, the parallel quality pool, quality-setup, dashboard serialization.                | 41s          |
+| `stamps-freshness`   | The fresh-run stamp: what busts it and what may reuse it.                                                               | 15s          |
+| `failure-output`     | Quiet failure output, stack traces, React Doctor, renames, the manifest-change refusal.                                 | 10s          |
+| `routing-docs`       | Documentation, agent context, code-health, Sentry and PR-tooling routing, including the `scripts/` symlink reach.       | 92s          |
+| `stamps-commands`    | Per-command stamps, always-rerun exemptions, command timeouts and interrupts.                                           | 27s          |
+| `execution-parallel` | Parallel teardown process groups, the production identity contract, prerequisite reuse.                                 | 51s          |
+| `lock-drain`         | Cross-run mutual exclusion: acquisition, stale-holder reclaim, drain obligations, crash-point recovery.                 | 319s         |
+
+Rules that keep the focus honest:
+
+- **Unset runs everything.** With `GATE_TEST_FOCUS` unset the dispatch runs
+  every family in registry order, which is the file order and the order this
+  suite has always used. `pnpm agent:quality-gate:test`, the gate's own mapped
+  self-test, and CI all run in that mode.
+- **The focus is refused where it could answer for the whole suite.** A set
+  `GATE_TEST_FOCUS` exits 2 when `AGENT_QUALITY_GATE_LOCK_HELD` (any command a
+  real gate run spawns) or `GITHUB_ACTIONS` is set, so an exported focus cannot
+  shrink the gate's self-test or CI's run.
+- **The partition is checked, not assumed.** `verify_gate_family_partition`
+  runs before the family definitions. It reds the suite when a test line sits
+  outside every family, when a family is missing from the registry, and when the
+  definitions drift out of registry order. An unassigned test fails there before
+  it can execute — it never silently runs in none of the focused modes.
+- **A new test goes inside the family that owns its subject.** A new subject
+  gets a new family function plus its `gate_test_families` entry, in file order.
+- Selection follows registry order, not the order given, and a repeated family
+  runs once. Unknown family names exit 2 and print the known set.
+
 ## Common local-gate traps
 
 - `codespell` flags short variable names that match common abbreviations (e.g. a two-letter loop var that looks like a misspelling). Use descriptive names like `netData` to avoid this.
