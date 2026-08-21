@@ -47,7 +47,13 @@ even when you never open an authority.
    [`../context-standards.md`](../context-standards.md).
 
 3. **Gate.** Before opening or updating an agent-authored PR, inspect then run
-   the mapped local-only checks:
+   the mapped local-only checks. **Resolve the target and remotes first** when
+   this run will reach step 5 — the repo-identity preflight in
+   [`agent-quality-gate-mechanics.md`](agent-quality-gate-mechanics.md) governs
+   any adapter call that trusts repository identity, and this gate is one. On a
+   branch with no PR yet and an unambiguous `origin`, the local checks below are
+   safe to run first; in a fork or ambiguous-remote checkout they are not, and
+   step 5's resolution comes before this step rather than after it:
 
    ```bash
    pnpm agent:quality-gate          # inspect mapped commands and checklists
@@ -125,6 +131,12 @@ Solution` (approach before implementation detail). PRs open **ready for
    out of `agent-active` and into review. Authority:
    [`agent-issue-workflow.md`](agent-issue-workflow.md).
 
+   Before any ancestry decision, make the history complete: when
+   `git rev-parse --is-shallow-repository` reports `true`, run
+   `git fetch --unshallow "$BASE_REMOTE"` and refetch the base. A hosted depth-1
+   checkout otherwise reports a false ancestry failure, which turns into an
+   unnecessary base merge or a stop on an already-current branch.
+
    **Identify the target PR before anything else**, in this precedence: a
    user-supplied URL is used verbatim and its owner/repository overrides the
    inferred base; a bare number binds to `BASE_REPO`; with no explicit target,
@@ -172,12 +184,6 @@ Solution` (approach before implementation detail). PRs open **ready for
    or the local branch name. A first publication takes
    `git push -u origin HEAD:<branch>`, and the PR is created from that published
    branch.
-
-   Before any ancestry decision, make the history complete: when
-   `git rev-parse --is-shallow-repository` reports `true`, run
-   `git fetch --unshallow "$BASE_REMOTE"` and refetch the base. A hosted depth-1
-   checkout otherwise reports a false ancestry failure, which turns into an
-   unnecessary base merge or a stop on an already-current branch.
 
    **Integrating the base produces a new head, and that head is unvalidated.**
    Steps 3 and 4 ran against the pre-merge tree, so a base merge or conflict

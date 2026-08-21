@@ -18,6 +18,31 @@ make_root() {
   printf '%s' "$d"
 }
 
+# Same as check(), but the fake checkout has no package.json — exercising the
+# early PASS exits that must not outrank the fork refusal.
+check_no_pkg() {
+  local want=$1 label=$2 stub=$3 root out bin
+  root="$(mktemp -d)"
+  bin="$(mktemp -d)"
+  printf '#!/usr/bin/env bash\n%s\n' "$stub" >"$bin/gh"
+  chmod +x "$bin/gh"
+  out=$(
+    # shellcheck disable=SC2030,SC2031
+    PATH="$bin:$PATH"
+    unset CLAUDE_CODE_REMOTE
+    # shellcheck disable=SC1090
+    source "$HOOK"
+    babysit_repo_gate 123 mento-protocol monitoring-monorepo "$root"
+  )
+  if [[ "$out" == "$want"* ]]; then
+    printf '  ok    %s\n' "$label"; pass=$((pass + 1))
+  else
+    printf '  FAIL  %s\n        want prefix: %s\n        got:         %s\n' "$label" "$want" "$out"
+    fail=$((fail + 1))
+  fi
+  rm -rf "$root" "$bin"
+}
+
 # $1 = expected prefix, $2 = label, $3 = stub body for `gh`, $4 = optional env
 # assignment applied inside the subshell (e.g. CLAUDE_CODE_REMOTE=1)
 check() {
@@ -65,6 +90,12 @@ check FAIL 'fork head is refused even in a Claude cloud session' \
 # Treating that as same-repo would fail open on exactly what this gate catches.
 check PENDING 'empty fork status is not treated as same-repo' \
   'echo ""'
+# The fork refusal must outrank every PASS exit in the function, not just the
+# cloud guard. A checkout without package.json returns "PASS monitoring checkout
+# not available"; if the fork check sits below it, a fork PR satisfies the gate
+# on exactly the case it exists to refuse.
+check_no_pkg FAIL 'fork head is refused even with no monitoring checkout' \
+  'echo true'
 # Running ahead of the cloud guard means an unreadable read in a blocked cloud
 # session must still name the cause and the MCP fallback, not just the symptom.
 check "PENDING fork status unreadable for #123 in this Claude cloud session" \

@@ -28,21 +28,10 @@ babysit_repo_gate() {
   local repo=$3
   local repo_root=$4
 
-  if [[ ! -f "$repo_root/package.json" ]]; then
-    printf 'PASS monitoring checkout not available'
-    return 0
-  fi
-
-  # Resolve package.json / the pr:ready-state script from $repo_root, not the
-  # caller's CWD — the harness may invoke this gate from a subdirectory, and
-  # the file guard above already keys on the absolute "$repo_root/package.json".
-  if ! (cd "$repo_root" && node -e 'const scripts=require("./package.json").scripts||{}; process.exit(scripts["pr:ready-state"] ? 0 : 1)') >/dev/null 2>&1; then
-    printf 'PASS pr:ready-state script unavailable in this checkout'
-    return 0
-  fi
-
-  # Fork-head PRs are a hard stop for this repo's gates, checked before the
-  # cloud capability guard below: that guard returns early in a Claude cloud
+  # Fork-head PRs are a hard stop, checked before EVERY other exit in this
+  # function — including the checkout and script-availability guards below,
+  # which return PASS. A fork PR in a checkout without package.json would
+  # otherwise satisfy the gate on exactly the case this refuses: that guard returns early in a Claude cloud
   # session, and a fork head must refuse on every surface rather than depend on
   # which one is running. `pr:ready-state`, `pr:feedback-state`, and the
   # autoreview bundle sequence all assume the head commit is reachable through a
@@ -75,6 +64,19 @@ babysit_repo_gate() {
   # it as same-repo would fail open on the exact case this gate exists to catch.
   if [[ "$cross" != "false" ]]; then
     printf 'PENDING fork status for #%s read back as %s; cannot prove the head is same-repo' "$pr" "${cross:-empty}"
+    return 0
+  fi
+
+  if [[ ! -f "$repo_root/package.json" ]]; then
+    printf 'PASS monitoring checkout not available'
+    return 0
+  fi
+
+  # Resolve package.json / the pr:ready-state script from $repo_root, not the
+  # caller's CWD — the harness may invoke this gate from a subdirectory, and
+  # the file guard above already keys on the absolute "$repo_root/package.json".
+  if ! (cd "$repo_root" && node -e 'const scripts=require("./package.json").scripts||{}; process.exit(scripts["pr:ready-state"] ? 0 : 1)') >/dev/null 2>&1; then
+    printf 'PASS pr:ready-state script unavailable in this checkout'
     return 0
   fi
 
