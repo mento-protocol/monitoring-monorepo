@@ -6963,13 +6963,13 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   done
   [[ -f "$race_displaced_ready" && ! -L "$race_displaced_ready" && -r "$race_displaced_ready" ]] ||
     fail "the displaced-holder case timed out waiting for its regular ready file"
-  race_displaced_token="$(sed -n 's/^token=//p' "$gate_race_root/run.lock/owner" | head -n1)"
-  [[ -n "$race_displaced_token" ]] ||
+  race_displaced_owner_id="$(sed -n 's/^token=//p' "$gate_race_root/run.lock/owner" | head -n1)"
+  [[ -n "$race_displaced_owner_id" ]] ||
     fail "the displaced-holder case published ready without an owner token"
-  race_displaced_marker="$gate_race_root/holder.$race_displaced_token"
+  race_displaced_marker="$gate_race_root/holder.$race_displaced_owner_id"
   [[ -f "$race_displaced_marker" && ! -L "$race_displaced_marker" && -r "$race_displaced_marker" ]] ||
     fail "the displaced-holder case did not create a readable regular marker"
-  [[ "$(cat "$race_displaced_marker")" == "$race_displaced_token" ]] ||
+  [[ "$(cat "$race_displaced_marker")" == "$race_displaced_owner_id" ]] ||
     fail "the displaced-holder marker body does not equal the owner token"
   race_displaced_replacement="$gate_race_root/run.lock/owner.replacement.$$"
   {
