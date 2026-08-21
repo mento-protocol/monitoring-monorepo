@@ -861,6 +861,18 @@ function placeholderValue(value) {
   const trimmed = value.trim();
   return (
     shellExpansionReference(trimmed) ||
+    // One leading backslash still leaves a reference. Inside a JS template
+    // literal `\${VAR:-}` is a JS escape, so the emitted shell script receives
+    // `${VAR:-}` — a parameter expansion resolved at run time that carries
+    // nothing. Where the backslash instead survives literally, the value is
+    // placeholder text, not credential material. Exactly one backslash is
+    // stripped and the remainder has to be a whole reference on its own; the
+    // narrow form is the point, because normalizing the backslash ahead of the
+    // entire grammar below would also clear escaped GitHub Actions forms
+    // (`\${{ secrets.X }}`) and escaped HCL (`\${var.x}`). Those keep refusing
+    // here: `shellExpansionReference` accepts neither, so only the shell
+    // expansion form is widened.
+    (trimmed.startsWith("\\") && shellExpansionReference(trimmed.slice(1))) ||
     /^(?:\$\{(?:[A-Z_][A-Z0-9_]*|(?:secrets|vars|var|local|module|data)\.[A-Z0-9_.-]+|process\.env(?:\.[A-Z_][A-Z0-9_]*|\[["'][A-Z_][A-Z0-9_]*["']\]))\}|\$\{\{\s*(?:secrets|vars|github|env|inputs|matrix|needs|steps|job|jobs|runner|strategy)\.[A-Z0-9_.-]+\s*\}\}|\$[A-Z_][A-Z0-9_]*|process\.env(?:\.[A-Z_][A-Z0-9_]*|\[["'][A-Z_][A-Z0-9_]*["']\])|(?:secrets|vars|var|local|module|data)\.[A-Z0-9_.-]+)$/i.test(
       trimmed,
     ) ||

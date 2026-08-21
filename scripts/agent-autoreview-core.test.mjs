@@ -774,6 +774,186 @@ assert.match(
   /literal generic token assignment/,
   "a real literal trailing a github.* expression is still rejected (anchor holds)",
 );
+// Escaped shell expansions. Inside a JS template literal `\${VAR:-}` is a JS
+// escape, so the emitted shell script receives `${VAR:-}` — a parameter
+// expansion resolved at run time that carries nothing. `placeholderValue`
+// strips exactly one leading backslash and requires the remainder to be a
+// whole reference on its own.
+//
+// Every value below uses a long variable name deliberately. A short one such
+// as `\${V}` sits under CREDENTIAL_LITERAL_MIN_LENGTH and clears whether or
+// not the clause exists, which would make the pin vacuous: each assertion here
+// fails against a scanner without the clause.
+const BACKSLASH = "\\";
+const expansionVariable = "SENTRY_TRIAGE_TOKEN";
+const escapedExpansion = (body) => tokenAssignment([BACKSLASH, body].join(""));
+assert.equal(
+  secretLikeReason(escapedExpansion(["${", expansionVariable, "}"].join(""))),
+  null,
+  "an escaped shell expansion is a reference, not a literal token",
+);
+for (const operator of [":-", "-", ":=", "=", ":+", "+", ":?", "?"]) {
+  assert.equal(
+    secretLikeReason(
+      escapedExpansion(["${", expansionVariable, operator, "}"].join("")),
+    ),
+    null,
+    `an escaped ${operator} expansion with an empty word is a reference`,
+  );
+  assert.equal(
+    secretLikeReason(
+      escapedExpansion(
+        ["${", expansionVariable, operator, "$FALLBACK_TOKEN}"].join(""),
+      ),
+    ),
+    null,
+    `an escaped ${operator} expansion with a reference word is a reference`,
+  );
+}
+assert.equal(
+  secretLikeReason(escapedExpansion(nestedShellExpansion(8))),
+  null,
+  "escaped expansions nested to the bound are still references",
+);
+// The motivating line, copied from
+// scripts/sentry/broker/sentry-mcp-broker.test.mjs:1036 (#1970 row 1).
+const brokerShellToken = [
+  "    ",
+  "token",
+  "=",
+  '"',
+  BACKSLASH,
+  "${SENTRY_TRIAGE_TOKEN:-}",
+  '"',
+].join("");
+assert.equal(
+  secretLikeReason(brokerShellToken),
+  null,
+  "the broker suite's escaped shell expansion clears the scanner (#1970 row 1)",
+);
+// Exactly one backslash is stripped, and only the shell-expansion grammar is
+// retried. Material attached to the reference, a second backslash, or another
+// reference dialect all keep refusing.
+assert.match(
+  secretLikeReason(
+    escapedExpansion(
+      ["${", expansionVariable, ":-", genericTokenCredential, "}"].join(""),
+    ),
+  ),
+  /literal generic token assignment/,
+  "a literal default inside an escaped expansion is still rejected",
+);
+assert.match(
+  secretLikeReason(
+    escapedExpansion(
+      ["${", expansionVariable, ":-$FALLBACK_TOKEN}", "suffix"].join(""),
+    ),
+  ),
+  /literal generic token assignment/,
+  "material fused after an escaped expansion fails the ^…$ anchor",
+);
+assert.match(
+  secretLikeReason(
+    tokenAssignment(
+      ["junkjunkjunk", BACKSLASH, "${", expansionVariable, "}"].join(""),
+    ),
+  ),
+  /literal generic token assignment/,
+  "junk before an escaped expansion is rejected: the backslash has to lead",
+);
+assert.match(
+  secretLikeReason(
+    escapedExpansion([BACKSLASH, "${", expansionVariable, "}"].join("")),
+  ),
+  /literal generic token assignment/,
+  "two leading backslashes are rejected: exactly one is stripped",
+);
+assert.match(
+  secretLikeReason(
+    escapedExpansion(["${{ secrets.", expansionVariable, " }}"].join("")),
+  ),
+  /literal generic token assignment/,
+  "escaped GitHub Actions expressions stay refused: the retry is shell-only",
+);
+// An asymmetry worth stating: the unescaped `${var.x}` form clears through
+// placeholderValue's HCL clause, but the escaped form does not, because the
+// new clause retries `shellExpansionReference` alone and that grammar has no
+// HCL clause. Refusing is the fail-closed direction and no fixture needs it.
+assert.match(
+  secretLikeReason(escapedExpansion("${var.sentry_triage_token}")),
+  /literal generic token assignment/,
+  "escaped HCL traversals refuse: the retried grammar is shell-only",
+);
+assert.equal(
+  secretLikeReason(tokenAssignment("${var.sentry_triage_token}")),
+  null,
+  "the unescaped HCL traversal still clears, so the asymmetry is deliberate",
+);
+assert.match(
+  secretLikeReason(escapedExpansion(nestedShellExpansion(9))),
+  /literal generic token assignment/,
+  "escaped expansions nested past the bound are not references",
+);
+// Only the outer backslash is stripped, so the inner `\${…}` is not a valid
+// word and the whole value refuses. Fail-closed, and no real fixture needs it.
+assert.match(
+  secretLikeReason(
+    escapedExpansion(
+      ["${", expansionVariable, ":-", BACKSLASH, "${FALLBACK_TOKEN:-}}"].join(
+        "",
+      ),
+    ),
+  ),
+  /literal generic token assignment/,
+  "a nested escaped inner reference refuses: one backslash is stripped, not each",
+);
+// The other three #1970 rows are a different gap — a `%%` expansion the shell
+// grammar does not accept, and hyphenated-word fixtures — and stay refused.
+const shellOwnerTokenLine = [
+  "const SHELL_OWNER_TOKEN = ",
+  "`",
+  "'",
+  '"',
+  BACKSLASH,
+  "${REPO%%/*}",
+  '"',
+  "'",
+  "`",
+  ";",
+].join("");
+assert.match(
+  secretLikeReason(shellOwnerTokenLine),
+  /literal credential assignment/,
+  "#1970 row 2 still refuses: `%%` is not a shell-expansion operator",
+);
+assert.match(
+  secretLikeReason(
+    [
+      "      ",
+      "AWS_SECRET_ACCESS_KEY",
+      ": ",
+      '"',
+      "aws-secret-value",
+      '",',
+    ].join(""),
+  ),
+  /literal AWS credential assignment/,
+  "#1970 row 3 still refuses: hyphenated-word fixtures are a separate gap",
+);
+assert.match(
+  secretLikeReason(
+    [
+      "      ",
+      "SENTRY_PROJECTION_TOKEN",
+      ": ",
+      '"',
+      "projection-secret-value",
+      '",',
+    ].join(""),
+  ),
+  /literal generic token assignment/,
+  "#1970 row 4 still refuses: hyphenated-word fixtures are a separate gap",
+);
 // Terraform/HCL traversal references (var/local/module/data) name a value
 // resolved at plan/apply time, never an inline secret — the same reference
 // class as the ${{ … }} contexts above. `var.*` was already recognized;
