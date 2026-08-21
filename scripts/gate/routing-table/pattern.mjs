@@ -187,6 +187,36 @@ export function casePatternToRegExp(pattern) {
 export const isGlob = (pattern) => scanPattern(pattern).hasMeta;
 
 /**
+ * The filesystem path a LITERAL pattern names.
+ *
+ * A pattern and a path are not the same string. `scripts/foo\*.mjs` is an exact
+ * path whose name contains a star, and `app/\[id\]/page.tsx` is how a Next.js
+ * dynamic-route directory has to be written so its brackets are not read as a
+ * character class. Both are literals — `isGlob` says so — but asking the
+ * filesystem about the pattern text asks about a file with backslashes in its
+ * name, which never exists, and the staleness check would report every such arm
+ * stale forever.
+ *
+ * Stripping one level of escaping is exactly what bash does to a literal
+ * pattern before matching, so this is the same transformation, not a guess.
+ * Only meaningful for a pattern `isGlob` calls a literal; a glob has no single
+ * path to name.
+ *
+ * @param {string} pattern
+ * @returns {string}
+ */
+export function literalPatternPath(pattern) {
+  let path = "";
+  for (let index = 0; index < pattern.length; index += 1) {
+    if (pattern[index] === "\\" && index + 1 < pattern.length) {
+      index += 1;
+    }
+    path += pattern[index];
+  }
+  return path;
+}
+
+/**
  * Reject a pattern this table must never hold, before anything compiles it.
  *
  * @param {string} pattern

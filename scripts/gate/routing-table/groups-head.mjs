@@ -350,8 +350,16 @@ export const HEAD_GROUPS = [
       },
       {
         patterns: [".npmrc", "*/.npmrc", "pnpmfile.cjs", ".pnpmfile.cjs"],
-        allowStale:
-          "pnpm configuration this repository does not carry today. The arm exists so that adding one routes a frozen-lockfile install on the commit that adds it, rather than one commit later.",
+        // Named one by one rather than as an arm-wide flag: a fourth absent
+        // path added to this arm later must red rather than inherit these.
+        allowStale: {
+          ".npmrc":
+            "pnpm configuration this repository does not carry today. The arm exists so that adding one routes a frozen-lockfile install on the commit that adds it, rather than one commit later.",
+          "pnpmfile.cjs":
+            "the CommonJS pnpm hook file, which this repository does not carry. Routed for the same reason as .npmrc: adding one must schedule an install on its own commit.",
+          ".pnpmfile.cjs":
+            "the dot-prefixed spelling of the same pnpm hook file, which pnpm also accepts and this repository does not carry.",
+        },
         effects: [
           { set: "package_script_risk_changed" },
           {

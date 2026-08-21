@@ -386,7 +386,7 @@ export const TAIL_GROUPS = [
           {
             verb: "add_terraform_validate_commands",
             args: [
-              "$terraform_stack_path",
+              "${terraform_stack_path}",
               "registered Terraform stack changed",
             ],
           },

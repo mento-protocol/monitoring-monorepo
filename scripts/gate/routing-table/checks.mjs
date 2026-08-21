@@ -10,7 +10,7 @@
  */
 
 import { PATH_TOKEN } from "./gate-arms.mjs";
-import { isGlob } from "./pattern.mjs";
+import { isGlob, literalPatternPath } from "./pattern.mjs";
 import { MIN_REASON, walkArms } from "./schema.mjs";
 
 const SCRIPTS = "scripts/";
@@ -252,7 +252,16 @@ export function stalenessSubjects(groups) {
       const exempt = new Set(exemptedLiterals(arm));
       for (const pattern of arm.patterns) {
         if (isGlob(pattern) || exempt.has(pattern)) continue;
-        subjects.push({ path: pattern, groupId, kind: "pattern" });
+        // The PATH, not the pattern text: an escaped literal such as
+        // `app/\[id\]/page.tsx` names a file whose name has no backslashes in
+        // it, and asking the filesystem about the pattern would report every
+        // such arm stale forever.
+        subjects.push({
+          path: literalPatternPath(pattern),
+          pattern,
+          groupId,
+          kind: "pattern",
+        });
       }
     }
     for (const effect of arm.effects ?? []) {
@@ -263,20 +272,21 @@ export function stalenessSubjects(groups) {
 }
 
 /**
- * The literal patterns an `allowStale` arm exempts.
+ * The patterns an arm's `allowStale` exempts, named one by one.
  *
- * Only the literals, because only literals are staleness subjects in the first
- * place. An arm whose exempted patterns are ALL globs exempts nothing, and the
- * "is this exemption still doing something" check would be inert on it: asking
- * whether a glob exists on disk is a question with a constant answer, so an
- * exemption checked that way could never be retired.
+ * `allowStale` is a map from PATTERN to reason, not a flag on the arm. An
+ * arm-wide exemption covers every literal the arm names now and every literal
+ * anyone adds to it later: the live case exempts `.npmrc`, `pnpmfile.cjs` and
+ * `.pnpmfile.cjs` together, and a fourth absent path dropped into that arm
+ * would have inherited the exemption without anyone deciding it should. Naming
+ * each pattern means a new absent literal in the same arm still reds.
  *
  * @param {object} arm
  * @returns {string[]}
  */
 export function exemptedLiterals(arm) {
-  if (typeof arm.allowStale !== "string") return [];
-  return arm.patterns.filter((pattern) => !isGlob(pattern));
+  if (arm.allowStale === null || typeof arm.allowStale !== "object") return [];
+  return Object.keys(arm.allowStale);
 }
 
 /**

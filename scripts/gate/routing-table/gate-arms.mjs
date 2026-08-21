@@ -458,7 +458,12 @@ function parseStatement(reader, why) {
   const call = CALL.exec(normalized);
   if (call !== null) {
     reader.next();
-    return { kind: "call", why, verb: call[1], args: parseArguments(call[2]) };
+    return {
+      kind: "call",
+      why,
+      verb: call[1],
+      args: parseArguments(call[2], line),
+    };
   }
 
   return refuse(line, "unrecognised routing statement");
@@ -519,10 +524,60 @@ function plainEffect(effect) {
   throw new Error(`no normal form for a \`${effect.kind}\` routing statement`);
 }
 
-function parseArguments(text) {
+/**
+ * The bare-word arguments the routing region passes, and nothing else.
+ *
+ * Both are the loop variable of a `for` over an engine-computed set, handed
+ * straight to a verb. Anything else unquoted would be a value this parser
+ * cannot resolve into data.
+ */
+const LOOP_VARIABLES = new Set([
+  "scripts_symlink_target",
+  "terraform_stack_path",
+]);
+
+/**
+ * Anything that would make a quoted argument mean something other than its
+ * literal text: a parameter expansion, a command substitution in either
+ * spelling, or an arithmetic expansion.
+ */
+const EXPANSION = /[$`]/;
+
+function parseArguments(text, line) {
   const args = [];
   for (const match of text.matchAll(ARGUMENT)) {
-    args.push(match[1] ?? `\${${match[2].slice(1)}}`);
+    if (match[1] === undefined) {
+      // A bare word. Only the two loop variables are known; anything else is a
+      // value whose contents this parser would be guessing at.
+      const name = match[2].slice(1);
+      if (!LOOP_VARIABLES.has(name)) {
+        refuse(line, `unrecognised bare argument \`${match[2]}\``);
+      }
+      args.push(`\${${name}}`);
+      continue;
+    }
+    // A quoted argument that is EXACTLY a known loop variable is the dynamic
+    // groups' own shape: `add_terraform_validate_commands "$terraform_stack_path" …`.
+    // The quotes are there so a stack path with a space survives, not because
+    // the value is text.
+    const whole = /^\$([a-z_][a-z_0-9]*)$/.exec(match[1]);
+    if (whole !== null && LOOP_VARIABLES.has(whole[1])) {
+      args.push(`\${${whole[1]}}`);
+      continue;
+    }
+    // Otherwise a quoted argument is recorded as its literal text, so it must
+    // not carry anything the shell would expand first. The changed-path
+    // template is already folded to `{path}` before this runs, so a surviving
+    // `$` or backtick is a value the table would hold wrongly — and holding a
+    // command string wrongly is how a gate schedules something other than what
+    // the table says it schedules.
+    if (EXPANSION.test(match[1])) {
+      refuse(
+        line,
+        `argument ${JSON.stringify(match[1])} carries a shell expansion this parser does not resolve`,
+      );
+    }
+    args.push(match[1]);
   }
   return args;
 }

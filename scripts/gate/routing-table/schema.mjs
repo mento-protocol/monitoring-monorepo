@@ -317,15 +317,35 @@ function normalizeArms(arms, subject, where, dynamic = null) {
         `unknown \`pairing\` value ${JSON.stringify(arm.pairing)}`,
       );
     }
-    if (
-      arm.allowStale !== undefined &&
-      (typeof arm.allowStale !== "string" ||
-        arm.allowStale.trim().length < MIN_REASON)
-    ) {
-      throw new TableError(
-        at,
-        `\`allowStale\` must be the reason the path is allowed to be absent, as a string of at least ${MIN_REASON} characters — the opt-out turns the staleness check off for this arm, so it has to say what it is accepting`,
-      );
+    if (arm.allowStale !== undefined) {
+      // A map from PATTERN to reason, not a flag on the arm. An arm-wide
+      // exemption silently covers every literal anyone adds to that arm later,
+      // so each exempted path is named and each names its own reason.
+      if (
+        arm.allowStale === null ||
+        typeof arm.allowStale !== "object" ||
+        Array.isArray(arm.allowStale) ||
+        Object.keys(arm.allowStale).length === 0
+      ) {
+        throw new TableError(
+          at,
+          "`allowStale` must be a non-empty map from the exact pattern it exempts to the reason that pattern may be absent",
+        );
+      }
+      for (const [pattern, reason] of Object.entries(arm.allowStale)) {
+        if (!arm.patterns.includes(pattern)) {
+          throw new TableError(
+            at,
+            `\`allowStale\` exempts ${JSON.stringify(pattern)}, which this arm does not name`,
+          );
+        }
+        if (typeof reason !== "string" || reason.trim().length < MIN_REASON) {
+          throw new TableError(
+            at,
+            `\`allowStale\` for ${JSON.stringify(pattern)} must say why that path may be absent, in at least ${MIN_REASON} characters — the opt-out turns the staleness check off, so it has to say what it is accepting`,
+          );
+        }
+      }
     }
     return {
       patterns: [...arm.patterns],

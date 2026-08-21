@@ -25,6 +25,7 @@ import {
   stalenessSubjects,
 } from "./checks.mjs";
 import { parseGateRouting } from "./gate-arms.mjs";
+import { literalPatternPath } from "./pattern.mjs";
 import { ROUTING_GROUPS, ROUTING_PLAN } from "./index.mjs";
 import { VERBS, normalizeGroups, walkArms } from "./schema.mjs";
 
@@ -168,6 +169,43 @@ test("every verb's arity matches the gate's own routing call sites", () => {
     Object.keys(VERBS).filter((verb) => !measured.has(verb)),
     [],
     "the verb set holds a verb the routing region never reaches; a closed set that admits unreachable names is a spell check",
+  );
+});
+
+test("the gate parser refuses an argument it cannot resolve", () => {
+  // The parser records a quoted argument as its literal text, so anything the
+  // shell would expand first means the table holds a command string that is not
+  // the command the gate runs. Only the two loop variables the dynamic groups
+  // pass are known; everything else is refused rather than stored raw.
+  const region = (statement) =>
+    [
+      "while IFS= read -r path; do",
+      '  case "$path" in',
+      "    a)",
+      `      ${statement}`,
+      "      ;;",
+      "  esac",
+      'done < "$changed_paths_file"',
+    ].join("\n");
+  for (const statement of [
+    'add_command "node ${RUNNER}/x.mjs" "why"',
+    'add_command "node $RUNNER/x.mjs" "why"',
+    'add_command "node `which node` x" "why"',
+    'add_surface "$surface"',
+    "add_surface $unknown_variable",
+  ]) {
+    assert.throws(
+      () => parseGateRouting(region(statement)),
+      /shell expansion this parser does not resolve|unrecognised bare argument|unrecognised routing statement/,
+      `the parser accepted: ${statement}`,
+    );
+  }
+  // The two shapes it must still accept: a plain literal, and a loop variable.
+  assert.doesNotThrow(() => parseGateRouting(region('add_surface "docs"')));
+  assert.doesNotThrow(() =>
+    parseGateRouting(
+      region('add_terraform_validate_commands "$terraform_stack_path" "why"'),
+    ),
   );
 });
 
@@ -397,8 +435,10 @@ test("an allowStale exemption reaches only the arm that declares it", () => {
         arms: [
           {
             ...arm(["scripts/not-here-yet.mjs"]),
-            allowStale:
-              "a config file this repository does not carry today, routed so adding one is covered",
+            allowStale: {
+              "scripts/not-here-yet.mjs":
+                "a config file this repository does not carry today, routed so adding one is covered",
+            },
           },
         ],
       },
@@ -505,6 +545,92 @@ test("both lints refuse a malformed table instead of walking past the bad part",
       );
     }
   }
+});
+
+test("an allowStale exemption reaches only the pattern it names", () => {
+  // Per PATTERN, not per arm. The live arm exempts three absent pnpm config
+  // files together; an arm-wide flag would have covered a fourth absent path
+  // dropped in later without anyone deciding it should.
+  const subjects = stalenessSubjects(
+    table({
+      id: "x",
+      arms: [
+        {
+          patterns: ["scripts/absent-a.mjs", "scripts/absent-b.mjs"],
+          allowStale: {
+            "scripts/absent-a.mjs":
+              "deliberately not in the tree yet; the arm routes it for the commit that adds it",
+          },
+          effects: [{ surface: "docs" }],
+        },
+      ],
+    }),
+  );
+  assert.deepEqual(
+    subjects.filter((s) => s.kind === "pattern").map((s) => s.path),
+    ["scripts/absent-b.mjs"],
+    "the exemption covered a sibling pattern it does not name",
+  );
+});
+
+test("the schema refuses an allowStale that names a pattern its arm does not", () => {
+  assert.throws(
+    () =>
+      normalizeGroups(
+        table({
+          id: "x",
+          arms: [
+            {
+              ...arm(["scripts/a.mjs"]),
+              allowStale: {
+                "scripts/somewhere-else.mjs":
+                  "a reason of entirely adequate length to pass the floor",
+              },
+            },
+          ],
+        }),
+      ),
+    /which this arm does not name/,
+  );
+  for (const shape of ["a string reason of adequate length here", [], {}]) {
+    assert.throws(
+      () =>
+        normalizeGroups(
+          table({
+            id: "x",
+            arms: [{ ...arm(["scripts/a.mjs"]), allowStale: shape }],
+          }),
+        ),
+      /non-empty map/,
+      `allowStale accepted ${JSON.stringify(shape)}`,
+    );
+  }
+});
+
+test("a literal pattern is checked as the path it names, not as its pattern text", () => {
+  // `app/\[id\]/page.tsx` is how a Next.js dynamic-route directory has to be
+  // written so its brackets are not read as a character class. It is a literal,
+  // and the file it names has no backslashes in its name — asking the
+  // filesystem about the pattern text would report the arm stale forever.
+  assert.equal(
+    literalPatternPath("ui-dashboard/src/app/pool/\\[poolId\\]/page.tsx"),
+    "ui-dashboard/src/app/pool/[poolId]/page.tsx",
+  );
+  assert.equal(literalPatternPath("scripts/foo\\*.mjs"), "scripts/foo*.mjs");
+  assert.equal(literalPatternPath("scripts/plain.mjs"), "scripts/plain.mjs");
+
+  const subjects = stalenessSubjects(
+    table({
+      id: "x",
+      arms: [arm(["ui-dashboard/src/app/pool/\\[poolId\\]/page.tsx"])],
+    }),
+  );
+  const [subject] = subjects.filter((s) => s.kind === "pattern");
+  assert.equal(subject.path, "ui-dashboard/src/app/pool/[poolId]/page.tsx");
+  assert.ok(
+    existsSync(`${REPO}/${subject.path}`),
+    "the escaped-bracket path this test uses is no longer in the tree; pick another real one",
+  );
 });
 
 test("an allowStale arm with only globs exempts nothing", () => {
