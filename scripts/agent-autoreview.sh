@@ -4471,7 +4471,7 @@ capture_feedback_state() {
   # budget would settle that second past the shared ceiling. Reserve it, and
   # treat a budget with nothing left after the reservation as spent.
   if ((review_capture_seconds_left <= 1)); then
-    echo "agent:autoreview: review capture exceeded the ${max_review_capture_seconds}-second capture deadline before the PR feedback capture; no review bundle was produced" >&2
+    echo "agent:autoreview: the ${max_review_capture_seconds}-second capture deadline has ${review_capture_seconds_left}s left, too little to bound the PR feedback capture; no review bundle was produced" >&2
     return 124
   fi
   deadline_seconds="$feedback_capture_deadline_seconds"
