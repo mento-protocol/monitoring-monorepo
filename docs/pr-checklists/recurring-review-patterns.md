@@ -138,7 +138,7 @@ tldr: **ruleset-required** workflows (`ci`, `Code Quality`, the Vercel checks) M
 - Require the command and its completion marker in the same comment. Bind the
   marker to the exact PR head SHA.
 - When the API supplies comment and head-update timestamps, require the marker
-  to be newer than the head update. Do not infer recency from list order.
+  to be at or after the head update. Do not infer recency from list order.
 - Apply the same identity, command, marker, SHA, and recency checks to REST and
   GraphQL data. Test the local CLI and MCP fallback paths against the same
   fixtures so one path cannot accept evidence that another rejects.
