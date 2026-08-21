@@ -231,6 +231,15 @@ function evaluationStateFor(
   return undefined;
 }
 
+function evaluationRuleSubject(evidence: StateLine): string {
+  if (evidence.labels.source !== "")
+    return `${pegAlertSourceName(evidence.labels.source)} Peg rule`;
+  const rule = pegAlertRuleKind(evidence);
+  return evidence.labels.asset === "policy"
+    ? `${rule} rule for policy ${evidence.labels.policy_version}`
+    : `${pegAlertAssetName(evidence.labels.asset)} ${rule} rule`;
+}
+
 function evaluationCause(
   evidence: StateLine,
   evaluationState: EvaluationState | undefined,
@@ -238,21 +247,21 @@ function evaluationCause(
 ): { includesAsset: boolean; lead: string } {
   if (evaluationState === undefined)
     return pegAlertCauseCopy(evidence, cleared);
-  const sourceName = pegAlertSourceName(evidence.labels.source);
+  const subject = evaluationRuleSubject(evidence);
   if (evaluationState === "failed") {
     return {
       includesAsset: false,
-      lead: `Grafana could not evaluate the ${sourceName} Peg rule`,
+      lead: `Grafana could not evaluate the ${subject}`,
     };
   }
   return {
     includesAsset: false,
     lead:
       evaluationState === "recovered"
-        ? `Grafana can evaluate the ${sourceName} Peg rule again`
+        ? `Grafana can evaluate the ${subject} again`
         : evaluationState === "recovered-alerting"
-          ? `Grafana can evaluate the ${sourceName} Peg rule again; its alert condition is active`
-          : `Grafana can evaluate the ${sourceName} Peg rule again; its alert condition is pending`,
+          ? `Grafana can evaluate the ${subject} again; its alert condition is active`
+          : `Grafana can evaluate the ${subject} again; its alert condition is pending`,
   };
 }
 

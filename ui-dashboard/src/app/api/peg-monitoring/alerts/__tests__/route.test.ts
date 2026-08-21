@@ -395,6 +395,78 @@ describe("GET /api/peg-monitoring/alerts", () => {
     ]);
   });
 
+  it.each([
+    {
+      title: "Peg Structural Saturation Warning [europ-schuman · active]",
+      asset: "europ-schuman",
+      policyVersion: "europ-v1",
+      subject: "EUROP Structural Saturation Warning rule",
+    },
+    {
+      title: "Peg Indexed Pool Unreachable [europ-schuman · active]",
+      asset: "europ-schuman",
+      policyVersion: "europ-v1",
+      subject: "EUROP Indexed Pool Unreachable rule",
+    },
+    {
+      title: "Peg Heartbeat Missing [europ-schuman · active]",
+      asset: "europ-schuman",
+      policyVersion: "europ-v1",
+      subject: "EUROP Heartbeat Missing rule",
+    },
+    {
+      title: "Peg Policy Rollover Stuck",
+      asset: "policy",
+      policyVersion: "europ-v1",
+      subject: "Policy Rollover Stuck rule for policy europ-v1",
+    },
+  ])(
+    "labels source-less evaluation failures by rule for $title",
+    ({ title, asset, policyVersion, subject }) => {
+      const labels = {
+        alertname: title,
+        asset,
+        policy_version: policyVersion,
+        source: "",
+      };
+      const failed = stateLine({
+        previous: "Normal",
+        current: "Error",
+        fingerprint: `source-less-${asset}`,
+        ruleTitle: title,
+        values: {},
+        labels,
+      });
+      const recovered = stateLine({
+        previous: "Error",
+        current: "Normal",
+        fingerprint: `source-less-${asset}`,
+        ruleTitle: title,
+        values: {},
+        labels,
+      });
+      const events = combinePegAlertEvents(
+        parseStateTransitions(
+          stateFrame([
+            { at: NOW_SECONDS - 120, line: failed },
+            { at: NOW_SECONDS - 60, line: recovered },
+          ]),
+          FROM_SECONDS,
+          NOW_SECONDS,
+        ),
+        4,
+      );
+
+      expect(events.map(({ lead }) => lead)).toEqual([
+        `Grafana can evaluate the ${subject} again`,
+        `Grafana could not evaluate the ${subject}`,
+      ]);
+      expect(events.map(({ lead }) => lead).join(" ")).not.toContain(
+        "Price source",
+      );
+    },
+  );
+
   it("keeps Alerting to Error to Alerting separate from breach copy", () => {
     const title = "Peg Deep-Venue Downside Critical [europ-schuman · active]";
     const failed = stateLine({
