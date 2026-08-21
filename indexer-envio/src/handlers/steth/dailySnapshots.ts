@@ -37,6 +37,13 @@ type StethDailySnapshotOptions = {
   requirePreviousDay?: boolean;
 };
 
+type StethBalanceResults = readonly (bigint | null)[];
+
+type StethHeartbeatEffectResults = {
+  blockTimestamp: bigint | null;
+  balances: StethBalanceResults;
+};
+
 function stethWalletLaunchBaselineId(chainId: number, wallet: string): string {
   return `${chainId}-steth-${wallet}-launch`;
 }
@@ -136,7 +143,7 @@ async function findPreviousDailySnapshot(
   return undefined;
 }
 
-async function readStethBalance(
+function readStethBalance(
   context: StethContext,
   meta: Pick<BlockMeta, "chainId" | "blockNumber">,
   wallet: string,
@@ -149,14 +156,29 @@ async function readStethBalance(
   });
 }
 
+export function readAllTrackedStethBalanceResults(
+  context: StethContext,
+  meta: Pick<BlockMeta, "chainId" | "blockNumber">,
+): Promise<StethBalanceResults> {
+  return Promise.all(
+    TRACKED_STETH_WALLETS.map((wallet) =>
+      readStethBalance(context, meta, wallet),
+    ),
+  );
+}
+
 async function readAllTrackedBalances(
   context: StethContext,
   meta: BlockMeta,
+  balanceResults?: StethBalanceResults,
 ): Promise<Map<string, bigint> | null> {
+  const results =
+    balanceResults ?? (await readAllTrackedStethBalanceResults(context, meta));
   const balances = new Map<string, bigint>();
-  for (const wallet of TRACKED_STETH_WALLETS) {
-    const balance = await readStethBalance(context, meta, wallet);
+  for (const [index, wallet] of TRACKED_STETH_WALLETS.entries()) {
+    const balance = results[index];
     if (balance === null) return null;
+    if (balance === undefined) return null;
     balances.set(wallet, balance);
   }
   return balances;
@@ -254,10 +276,11 @@ export async function recordStethYieldDailySnapshots(
   context: StethContext,
   meta: BlockMeta,
   options: StethDailySnapshotOptions = {},
+  balanceResults?: StethBalanceResults,
 ): Promise<boolean> {
   if (meta.blockTimestamp < V3_REVENUE_LAUNCH_TIMESTAMP) return false;
 
-  const balances = await readAllTrackedBalances(context, meta);
+  const balances = await readAllTrackedBalances(context, meta, balanceResults);
   if (balances === null) return false;
 
   const totalsByWallet = new Map<string, StethWalletYieldTotals>();
@@ -292,10 +315,16 @@ export async function recordStethYieldDailySnapshots(
 export async function recordStethYieldEventDailySnapshots(
   context: StethContext,
   meta: EventMeta,
+  balanceResults?: StethBalanceResults,
 ): Promise<boolean> {
-  return recordStethYieldDailySnapshots(context, meta, {
-    requirePreviousDay: true,
-  });
+  return recordStethYieldDailySnapshots(
+    context,
+    meta,
+    {
+      requirePreviousDay: true,
+    },
+    balanceResults,
+  );
 }
 
 function launchBaselineMeta(sampledAtTimestamp: bigint): EventMeta {
@@ -431,11 +460,12 @@ export async function recordStethWalletLaunchBaselines(
 export async function recordStethYieldHeartbeatSnapshots(
   context: StethContext,
   blockNumber: bigint,
+  effectResults?: StethHeartbeatEffectResults,
 ): Promise<boolean> {
-  const blockTimestamp = await context.effect(blockTimestampEffect, {
-    chainId: ETHEREUM_CHAIN_ID,
-    blockNumber,
-  });
+  const effects =
+    effectResults ??
+    (await readStethHeartbeatEffectResults(context, blockNumber));
+  const { blockTimestamp } = effects;
   if (blockTimestamp === null || blockTimestamp <= ZERO) return false;
 
   const meta: BlockMeta = {
@@ -446,7 +476,22 @@ export async function recordStethYieldHeartbeatSnapshots(
   if (meta.blockTimestamp < V3_REVENUE_LAUNCH_TIMESTAMP) return false;
   if (!(await ensureStethWalletLaunchBaselines(context))) return false;
 
-  return recordStethYieldDailySnapshots(context, meta);
+  return recordStethYieldDailySnapshots(context, meta, {}, effects.balances);
+}
+
+async function readStethHeartbeatEffectResults(
+  context: StethContext,
+  blockNumber: bigint,
+): Promise<StethHeartbeatEffectResults> {
+  const meta = {
+    chainId: ETHEREUM_CHAIN_ID,
+    blockNumber,
+  };
+  const [blockTimestamp, balances] = await Promise.all([
+    context.effect(blockTimestampEffect, meta),
+    readAllTrackedStethBalanceResults(context, meta),
+  ]);
+  return { blockTimestamp, balances };
 }
 
 export async function handleStethLaunchBaseline({
@@ -479,9 +524,17 @@ export async function handleStethYieldDailySnapshotHeartbeat({
   block: { number: number | bigint };
   context: StethContext;
 }): Promise<boolean> {
-  // preload-handler-note: heartbeat writes need ordered daily state; preload-safe
-  // block and balance reads are tracked in #1396.
+  const effectResults = await readStethHeartbeatEffectResults(
+    context,
+    BigInt(block.number),
+  );
+  // preload-handler-note: raw block and wallet results are awaited before this
+  // guard; ordered processing alone reads baselines and writes snapshots.
   // preload-effect-helpers: recordStethYieldHeartbeatSnapshots
   if (context.isPreload) return false;
-  return recordStethYieldHeartbeatSnapshots(context, BigInt(block.number));
+  return recordStethYieldHeartbeatSnapshots(
+    context,
+    BigInt(block.number),
+    effectResults,
+  );
 }

@@ -56,6 +56,7 @@ import {
   AUTOFIX_RUN_RECORD_MARKER,
   buildAutofixRunRecordBody,
 } from "./sentry-autofix-run-record.mjs";
+import { parseRefusedStubInventoryResult } from "./sentry-autofix-refused-inventory.mjs";
 
 // The agent's diff may touch at most this many files. A real fix commonly spans
 // the change plus its tests and a couple of related call sites, so the ceiling
@@ -686,12 +687,14 @@ Commands:
              [--second-look-failed <bool>] [--gh-calls <n>] \\
              [--rate-limited <n>] \\
              [--handled-overflow <n>] [--reverse-truncated <bool>] \\
-             [--reverse-nonconvergent <bool>]
+             [--reverse-nonconvergent <bool>] \\
+             [--refused-inventory <json>] [--refused-inventory-repo <owner/name>]
       Print the tracker run-record comment body (rolling comment, marker-keyed).
       The Window line renders only when --window-total exceeds --window-evaluated;
       the Second look line only when the bounded second look actually ran; the
       DEGRADED line only when --rate-limited is nonzero; each truncation line
-      only when its budget was actually hit.
+      only when its budget was actually hit. The refused-stub inventory line is
+      known only when the separate bounded Search API read returned valid data.
   select-run-record-id --comments-file <path>
       Print the numeric id of the tracker issue's existing rolling run-record
       comment (trusted-author + prefix-anchored, selectMarkedComment),
@@ -818,6 +821,9 @@ export function runCli(argv, { stdout = process.stdout } = {}) {
       return;
     }
     case "run-record": {
+      const refusedInventory = parseRefusedStubInventoryResult(
+        readFlag(args, "--refused-inventory"),
+      );
       stdout.write(
         `${buildAutofixRunRecordBody({
           timestampIso: readFlag(args, "--timestamp"),
@@ -843,6 +849,8 @@ export function runCli(argv, { stdout = process.stdout } = {}) {
           handledOverflow: readFlag(args, "--handled-overflow"),
           reverseTruncated: readFlag(args, "--reverse-truncated"),
           reverseNonconvergent: readFlag(args, "--reverse-nonconvergent"),
+          refusedInventory,
+          refusedInventoryRepo: readFlag(args, "--refused-inventory-repo"),
         })}\n`,
       );
       return;

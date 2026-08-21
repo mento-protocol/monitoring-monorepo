@@ -4445,6 +4445,13 @@ run_gate "scripts/sentry/autofix/sentry-autofix-family-handled.mjs"
 assert_contains "- pnpm sentry:autofix:select:test (Sentry autofix handled-family lookup changed)"
 assert_contains "- pnpm sentry:autofix:finalize:test (Sentry autofix per-run cost cap changed)"
 
+# The record-run Search API inventory is not part of selector routing or its
+# gh-call budget. It shares the run-record suite and finalize wiring, so a
+# helper-only edit must still run both focused suites.
+run_gate "scripts/sentry/autofix/sentry-autofix-refused-inventory.mjs"
+assert_contains "- pnpm sentry:autofix:run-record:test (Sentry autofix run-record builder changed)"
+assert_contains "- pnpm sentry:autofix:finalize:test (Sentry autofix run-record builder changed)"
+
 # The self-run Sentry-suite gate (#1779, ADR 0062) asserts, at runtime, that the
 # suites actually ran. A contributor who edits the gate script, its own suite, or
 # the manifest it reconciles against must run scripts/sentry/gate/sentry-suite-gate.test.mjs

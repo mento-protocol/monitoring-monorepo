@@ -61,18 +61,20 @@ stay with their domain.
 same PR, except the `agent-autoreview.sh` feedback-runtime pins below.
 
 - **Autoreview runtime materialization.** `agent-autoreview.sh` pins sibling
-  runtime through Perl copy lists and fixed `runtime_paths` arrays. Feedback
-  helpers resolve separately from `origin/main`. Move those feedback paths
-  across three merges: add new copies and a dual-path fallback; repoint every
-  consumer; remove old copies and fallback only after no pre-move wrapper
-  remains in use (ADR 0064).
-- **Gate routing pins.** `agent-quality-gate.sh` uses
-  `$script_source_dir == $repo_root/scripts` to exclude stub-repo tests. It pairs
-  `bootstrap/codex-cloud-setup.{sh,test.sh}` for offline installer tests.
-- **Gate runtime module pins.** `agent-quality-gate.sh` resolves
-  `docs/docs-navigation-eval-helpers.mjs` and `gate/lockfile-scope.mjs` from
-  `$script_source_dir`, not the stub `$repo_root`, and pins each in three
-  literals. Repoint all three; ADR 0064 lists them.
+  runtime in Perl lists and `runtime_paths`; feedback helpers use `origin/main`.
+  Move feedback paths in three merges: add copies and a dual-path fallback;
+  repoint consumers; remove old paths and fallback when no pre-move wrapper
+  remains (ADR 0064).
+- **Gate routing pins.** The gate excludes stub-repo tests with
+  `$script_source_dir == $repo_root/scripts`, and pairs
+  `bootstrap/codex-cloud-setup.{sh,test.sh}` for offline tests. It routes
+  `sentry/autofix/sentry-autofix-refused-inventory.mjs` alone to
+  `pnpm sentry:autofix:run-record:test` and
+  `pnpm sentry:autofix:finalize:test`.
+- **Gate runtime module pins.** `agent-quality-gate.sh` pins
+  `docs/docs-navigation-eval-helpers.mjs` and `gate/lockfile-scope.mjs` to
+  `$script_source_dir` in three literals, not stub `$repo_root`. Repoint all
+  three (ADR 0064).
 - **Evaluation fixture forbidden lists.** `forbidden_sources` in
   `docs/evals/documentation-navigation-fixtures.json` names the navigation
   eval's own implementation.

@@ -18,11 +18,13 @@ import {
   V3_REVENUE_LAUNCH_TIMESTAMP,
 } from "../src/handlers/steth/shared.ts";
 import {
+  handleStethYieldDailySnapshotHeartbeat,
   recordStethWalletLaunchBaselines,
   recordStethYieldDailySnapshots,
   recordStethYieldEventDailySnapshots,
   recordStethYieldHeartbeatSnapshots,
 } from "../src/handlers/steth/dailySnapshots.ts";
+import { handleStethTransfer } from "../src/handlers/steth.ts";
 import {
   _clearMockStethBalanceOf,
   _setMockStethBalanceOf,
@@ -136,6 +138,18 @@ function stethSnapshotContext(
         mockDb.entities.StethYieldDailySnapshot.set(entity);
       },
     },
+    StethYieldMovement: {
+      get: async (id: string) => mockDb.entities.StethYieldMovement.get(id),
+      set: (entity: { id: string }) => {
+        mockDb.entities.StethYieldMovement.set(entity);
+      },
+    },
+    StethYieldSummary: {
+      get: async (id: string) => mockDb.entities.StethYieldSummary.get(id),
+      set: (entity: { id: string }) => {
+        mockDb.entities.StethYieldSummary.set(entity);
+      },
+    },
     effect: async (effect, input) => {
       if (effect === stethBalanceOfEffect) {
         const account = input.account.toLowerCase();
@@ -193,6 +207,300 @@ describeReserveYield("stETH reserve-yield ledger", () => {
 
   it("samples stETH sub-daily so missed slots cannot skip UTC buckets", () => {
     assert.equal(STETH_DAILY_SNAPSHOT_BLOCK_INTERVAL, 600);
+  });
+
+  it("preloads the same stETH heartbeat effects that ordered processing uses", async () => {
+    const mockDb = MockDb.createMockDb();
+    const calls: Array<{ name: string; input: unknown }> = [];
+    const context = {
+      ...stethSnapshotContext(
+        mockDb,
+        { [RESERVE_SAFE]: steth(1), [OPS_SAFE]: steth(2) },
+        V3_REVENUE_LAUNCH_TIMESTAMP + 1n,
+      ),
+      effect: async (effect: unknown, input: unknown) => {
+        calls.push({
+          name: effect === blockTimestampEffect ? "timestamp" : "stethBalance",
+          input,
+        });
+        if (effect === blockTimestampEffect) {
+          return V3_REVENUE_LAUNCH_TIMESTAMP + 1n;
+        }
+        if (effect === stethBalanceOfEffect) {
+          const account = (input as { account: string }).account;
+          return account === RESERVE_SAFE ? steth(1) : steth(2);
+        }
+        throw new Error("unexpected effect");
+      },
+      isPreload: true,
+    } as Parameters<
+      typeof handleStethYieldDailySnapshotHeartbeat
+    >[0]["context"];
+
+    assert.equal(
+      await handleStethYieldDailySnapshotHeartbeat({
+        block: { number: V3_REVENUE_LAUNCH_BLOCK + 600 },
+        context,
+      }),
+      false,
+    );
+    const preloadCalls = [...calls];
+    assert.equal(mockDb.entities.StethYieldDailySnapshot.getAll().length, 0);
+
+    calls.length = 0;
+    assert.equal(
+      await handleStethYieldDailySnapshotHeartbeat({
+        block: { number: V3_REVENUE_LAUNCH_BLOCK + 600 },
+        context: { ...context, isPreload: false },
+      }),
+      false,
+    );
+    assert.deepEqual(calls, preloadCalls);
+  });
+
+  it("writes stETH heartbeat snapshots from preloaded balances after launch baselines", async () => {
+    const mockDb = MockDb.createMockDb();
+    const day1 = dayAfterLaunch(1);
+    const heartbeatBlock = V3_REVENUE_LAUNCH_BLOCK + 7_200;
+
+    await recordStethWalletLaunchBaselines(
+      stethSnapshotContext(mockDb, {
+        [RESERVE_SAFE]: 0n,
+        [OPS_SAFE]: 0n,
+      }),
+      V3_REVENUE_LAUNCH_TIMESTAMP - 1n,
+    );
+
+    const didWrite = await handleStethYieldDailySnapshotHeartbeat({
+      block: { number: heartbeatBlock },
+      context: stethSnapshotContext(
+        mockDb,
+        {
+          [RESERVE_SAFE]: steth(10),
+          [OPS_SAFE]: steth(2),
+        },
+        day1 + 3_600n,
+      ),
+    });
+
+    assert.equal(didWrite, true);
+    assert.equal(
+      walletSnapshot(mockDb, RESERVE_SAFE, day1).balanceAmount,
+      steth(10),
+    );
+    assert.equal(
+      walletSnapshot(mockDb, OPS_SAFE, day1).balanceAmount,
+      steth(2),
+    );
+  });
+
+  it("skips pre-launch balance effects but preserves tracked movement state", async () => {
+    const mockDb = MockDb.createMockDb();
+    const context = {
+      ...stethSnapshotContext(mockDb, {
+        [RESERVE_SAFE]: steth(10),
+        [OPS_SAFE]: 0n,
+      }),
+      effect: async () => {
+        throw new Error("pre-launch transfer must not read balance effects");
+      },
+      isPreload: true,
+    } as Parameters<typeof handleStethTransfer>[0]["context"];
+    const event = {
+      chainId: ETHEREUM_CHAIN_ID,
+      params: { from: EXTERNAL, to: RESERVE_SAFE, value: steth(10) },
+      block: {
+        number: V3_REVENUE_LAUNCH_BLOCK - 1,
+        timestamp: Number(V3_REVENUE_LAUNCH_TIMESTAMP - 1n),
+      },
+      logIndex: 1,
+      transaction: { hash: txHash(1) },
+    };
+
+    await handleStethTransfer({ event, context });
+    assert.equal(mockDb.entities.StethYieldMovement.getAll().length, 0);
+
+    await handleStethTransfer({
+      event,
+      context: { ...context, isPreload: false },
+    });
+    assert.equal(mockDb.entities.StethYieldMovement.getAll().length, 1);
+    assert.equal(summary(mockDb).currentBalance, steth(10));
+    assert.equal(mockDb.entities.StethYieldDailySnapshot.getAll().length, 0);
+  });
+
+  it("preloads exact-launch and post-launch transfer balances before ordered state", async () => {
+    const mockDb = MockDb.createMockDb();
+    await recordStethWalletLaunchBaselines(
+      stethSnapshotContext(mockDb, {
+        [RESERVE_SAFE]: 0n,
+        [OPS_SAFE]: 0n,
+      }),
+      V3_REVENUE_LAUNCH_TIMESTAMP - 1n,
+    );
+
+    const cases = [
+      {
+        blockNumber: V3_REVENUE_LAUNCH_BLOCK,
+        blockTimestamp: V3_REVENUE_LAUNCH_TIMESTAMP,
+        balance: steth(10),
+        value: steth(10),
+      },
+      {
+        blockNumber: V3_REVENUE_LAUNCH_BLOCK + 7_200,
+        blockTimestamp: dayAfterLaunch(1) + 3_600n,
+        balance: steth(15),
+        value: steth(5),
+      },
+    ];
+
+    for (const [index, testCase] of cases.entries()) {
+      const calls: Array<{ effect: unknown; input: unknown }> = [];
+      const context = {
+        ...stethSnapshotContext(mockDb, {
+          [RESERVE_SAFE]: testCase.balance,
+          [OPS_SAFE]: 0n,
+        }),
+        effect: async (effect: unknown, input: unknown) => {
+          assert.equal(effect, stethBalanceOfEffect);
+          calls.push({ effect, input });
+          const account = (input as { account: string }).account;
+          return account === RESERVE_SAFE ? testCase.balance : 0n;
+        },
+        isPreload: true,
+      } as Parameters<typeof handleStethTransfer>[0]["context"];
+      const event = {
+        chainId: ETHEREUM_CHAIN_ID,
+        params: {
+          from: EXTERNAL,
+          to: RESERVE_SAFE,
+          value: testCase.value,
+        },
+        block: {
+          number: testCase.blockNumber,
+          timestamp: Number(testCase.blockTimestamp),
+        },
+        logIndex: index + 1,
+        transaction: { hash: txHash(index + 1) },
+      };
+
+      await handleStethTransfer({ event, context });
+      const preloadCalls = [...calls];
+      assert.equal(preloadCalls.length, TRACKED_STETH_WALLETS.length);
+      assert.equal(mockDb.entities.StethYieldMovement.getAll().length, index);
+
+      calls.length = 0;
+      await handleStethTransfer({
+        event,
+        context: { ...context, isPreload: false },
+      });
+      assert.deepEqual(calls, preloadCalls);
+      assert.equal(
+        mockDb.entities.StethYieldMovement.getAll().length,
+        index + 1,
+      );
+      assert.equal(
+        walletSnapshot(
+          mockDb,
+          RESERVE_SAFE,
+          index === 0 ? V3_REVENUE_LAUNCH_TIMESTAMP : dayAfterLaunch(1),
+        ).balanceAmount,
+        testCase.balance,
+      );
+    }
+
+    assert.equal(summary(mockDb).currentBalance, steth(15));
+  });
+
+  it("writes ordered tracked-transfer snapshots and keeps movement writes when a later balance is null", async () => {
+    const mockDb = MockDb.createMockDb();
+    const day1 = dayAfterLaunch(1);
+    const day2 = dayAfterLaunch(2);
+
+    await recordStethWalletLaunchBaselines(
+      stethSnapshotContext(mockDb, {
+        [RESERVE_SAFE]: 0n,
+        [OPS_SAFE]: 0n,
+      }),
+      V3_REVENUE_LAUNCH_TIMESTAMP - 1n,
+    );
+
+    const firstContext = stethSnapshotContext(mockDb, {
+      [RESERVE_SAFE]: steth(10),
+      [OPS_SAFE]: 0n,
+    }) as Parameters<typeof handleStethTransfer>[0]["context"];
+    await handleStethTransfer({
+      event: {
+        chainId: ETHEREUM_CHAIN_ID,
+        params: { from: EXTERNAL, to: RESERVE_SAFE, value: steth(10) },
+        block: {
+          number: V3_REVENUE_LAUNCH_BLOCK + 7_200,
+          timestamp: Number(day1 + 3_600n),
+        },
+        logIndex: 1,
+        transaction: { hash: txHash(1) },
+      },
+      context: firstContext,
+    });
+
+    assert.equal(
+      walletSnapshot(mockDb, RESERVE_SAFE, day1).balanceAmount,
+      steth(10),
+    );
+    assert.equal(walletSnapshot(mockDb, OPS_SAFE, day1).balanceAmount, 0n);
+    const snapshotsBeforeNullBalance = dailySnapshots(mockDb).length;
+
+    const nullBalanceContext = stethSnapshotContext(mockDb, {
+      [RESERVE_SAFE]: steth(10),
+      [OPS_SAFE]: null,
+    }) as Parameters<typeof handleStethTransfer>[0]["context"];
+    await handleStethTransfer({
+      event: {
+        chainId: ETHEREUM_CHAIN_ID,
+        params: { from: EXTERNAL, to: OPS_SAFE, value: steth(5) },
+        block: {
+          number: V3_REVENUE_LAUNCH_BLOCK + 14_400,
+          timestamp: Number(day2 + 3_600n),
+        },
+        logIndex: 2,
+        transaction: { hash: txHash(2) },
+      },
+      context: nullBalanceContext,
+    });
+
+    assert.equal(mockDb.entities.StethYieldMovement.getAll().length, 2);
+    assert.equal(summary(mockDb).currentBalance, steth(15));
+    assert.equal(dailySnapshots(mockDb).length, snapshotsBeforeNullBalance);
+    assert.equal(
+      mockDb.entities.StethYieldDailySnapshot.get(
+        `1-steth-${OPS_SAFE}-${day2}`,
+      ),
+      undefined,
+    );
+  });
+
+  it("does not start stETH balance effects for a filtered transfer", async () => {
+    const context = {
+      isPreload: true,
+      effect: async () => {
+        throw new Error("filtered transfer must not read effects");
+      },
+    } as Parameters<typeof handleStethTransfer>[0]["context"];
+
+    await handleStethTransfer({
+      event: {
+        chainId: ETHEREUM_CHAIN_ID,
+        params: {
+          from: EXTERNAL,
+          to: "0x0000000000000000000000000000000000000def",
+          value: steth(1),
+        },
+        block: { number: V3_REVENUE_LAUNCH_BLOCK + 600, timestamp: 1 },
+        logIndex: 1,
+        transaction: { hash: txHash(1) },
+      },
+      context,
+    });
   });
 
   it("records the first tracked stETH mint as FIFO principal", async () => {
