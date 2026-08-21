@@ -807,16 +807,37 @@ and isolation.
 The repo command itself is executable code from the active checkout. The
 committed/pre-change runtime comparisons protect review integrity when the
 runtime is unchanged; they do not turn an untrusted checkout into trusted
-executable code. Inspect a potentially hostile branch from a separate trusted
-checkout rather than invoking that branch's package scripts.
+executable code. Merge-review provenance must not pass through the reviewed
+checkout's package manager, package scripts, or package-manager configuration.
+
+For a same-repository merge review, bind repository identity before any
+repo-local adapter command. Require `origin` to have one effective canonical
+GitHub fetch URL. Normalize that URL and require its slug to equal the resolved
+base repository and head repository. Fetch the resolved base branch and
+protected `main` through that `origin` into their matching remote-tracking refs.
+Pin their immutable values as `base_oid` and `protected_main_oid`. Require
+`origin/<baseRefName>` and `origin/main` to keep those exact values; when the
+base is `main`, require the two pins to match. Fail closed on a missing or
+ambiguous URL, fetch error, malformed object ID, or ref drift. Do not change a
+remote URL to satisfy this guard. Use a clean dedicated checkout with the
+correct `origin`. Other verified remotes may remain, but the wrapper consumes
+only the pinned `origin` identity and refs.
+
+Repeat the canonical origin-URL check and both retained-ref checks immediately
+before and after every feedback-state, ready-state, gate, or review adapter
+call. Any error or drift stops the workflow and invalidates the result. Any
+refetch, including a conflict-triggered base refresh, restarts this preflight and
+refreshes both pins before another adapter call.
 
 For each review axis, compare its immutable base tree with the immutable final
 tree before any autoreview entrypoint runs. Treat the axis as runtime-sensitive
-only when `scripts/agent-autoreview.sh`, `scripts/agent-autoreview.mjs`, or
-`scripts/agent-autoreview-core.mjs` differs, or when the parsed
-`package.json` `scripts["agent:autoreview"]` value differs. An unrelated
-`package.json` edit is not sufficient. Fail closed on any Git, blob, JSON, or
-comparison error.
+only when
+`scripts/agent-autoreview.sh`, `scripts/agent-autoreview.mjs`, or
+`scripts/agent-autoreview-core.mjs` differs. Compare the modes and blob IDs for
+all three paths on both axes. Fail closed on any Git, blob, mode, or comparison
+error. If neither axis is sensitive, use the clean final checkout's absolute
+wrapper and explicit helper. Invoke it through `/bin/bash` from the reviewed
+checkout. Never use `pnpm agent:autoreview` for this merge-review sequence.
 
 For a runtime-changing PR, pin an immutable `trusted_oid` from the verified base
 repository. It must be the last independently reviewed commit before every
@@ -832,12 +853,18 @@ worktree. Require its `HEAD` to equal `trusted_oid` and its worktree to be clean
 Require the wrapper, helper, and core modes and blob IDs to match `trusted_oid`.
 Stop concurrent writers to both checkouts. From the reviewed checkout directory,
 use the same absolute trusted wrapper and explicit compatible
-`AUTOREVIEW_HELPER` for every required axis preparation. Use that exact trusted
-wrapper for every pre-review manifest check and retained-digest post-review
-check. Before and after every invocation, repeat the trusted `HEAD`, clean-state,
-physical-root, mode, and blob checks, and require the reviewed checkout to remain
-clean at its immutable final head. Never substitute the reviewed checkout's
-package script or wrapper.
+`AUTOREVIEW_HELPER` for every required axis preparation. Invoke the wrapper
+through `/bin/bash`. Use that exact trusted wrapper and helper for every
+pre-review manifest check and retained-digest post-review check. Never
+substitute the reviewed checkout's package script or wrapper.
+
+Before and after every preparation or verification invocation, repeat the
+normalized `origin` identity check; require the retained base and protected-main
+refs to keep their pinned OIDs; require the reviewed checkout to remain clean at
+its immutable final head; and repeat the selected wrapper/helper/core
+physical-root, mode, and blob checks. Repeat the detached `trusted_oid` and clean
+checks when the runtime is external. Any check error or drift invalidates the
+invocation.
 
 The basic one-axis call shape is:
 
@@ -847,13 +874,14 @@ trusted_checkout=/absolute/path/to/trusted-pre-change-checkout
 review_base_oid="$base_oid" # full immutable OID for this review axis
 bundle_parent="$(mktemp -d)" || exit 1
 bundle="$bundle_parent/context-bundle"
-trusted_wrapper="$trusted_checkout/scripts/agent-autoreview.sh"
-trusted_helper="$trusted_checkout/scripts/agent-autoreview.mjs"
+autoreview_wrapper="$trusted_checkout/scripts/agent-autoreview.sh"
+autoreview_helper="$trusted_checkout/scripts/agent-autoreview.mjs"
 
 run_trusted_autoreview() {
   (
     cd "$reviewed_checkout" || exit 1
-    AUTOREVIEW_HELPER="$trusted_helper" "$trusted_wrapper" "$@"
+    AUTOREVIEW_HELPER="$autoreview_helper" \
+      /bin/bash "$autoreview_wrapper" "$@"
   )
 }
 
@@ -865,16 +893,34 @@ run_trusted_autoreview --verify-bundle-dir "$bundle" \
   --expected-bundle-manifest <retained-digest>
 ```
 
-Never point `trusted_checkout` at the runtime-changing checkout.
+For a runtime-insensitive review, set `autoreview_wrapper` and
+`autoreview_helper` to the absolute final-checkout paths and use the same direct
+call shape. Never point `trusted_checkout` at the runtime-changing checkout.
 For multiple axes, allocate a distinct absent bundle path for each immutable
 base outside both worktrees, then repeat the preparation and both manifest
-checks with that base. Any fix, `HEAD` movement, dirty worktree, trusted-runtime
-or provenance drift, failed compatibility check, or manifest mismatch
-invalidates every gate and review result. Allocate new bundle paths and restart
-both gates, the sequential autoreview suite, and every bundle review from the
-new clean final head. Run `pnpm agent:autoreview:test -- --jobs 1` on that
-guarded final head only as separate behavior validation; it establishes no
-review provenance. Recheck both worktrees after it.
+checks with that base. Prepare and preverify every bundle, complete every
+semantic review, then postverify every retained digest through the same bound
+runner.
+
+Only after every postverification passes, run the sequential suite without the
+package manager:
+
+```bash
+(
+  cd "$reviewed_checkout" || exit 1
+  AUTOREVIEW_TEST_FOCUS=suite /bin/bash \
+    "$reviewed_checkout/scripts/agent-autoreview.test.sh" --jobs 1
+)
+```
+
+The suite is behavior evidence and establishes no review provenance. Require
+terminal success, then repeat the origin, retained-ref, final-head, clean-state,
+runtime-identity, and trusted-root checks. Any fix, `HEAD` movement, dirty
+worktree, origin identity drift, base or protected-ref drift, trusted-runtime or
+provenance drift, failed compatibility check, sequential-suite failure, or
+manifest mismatch invalidates every result. Restart preflight, both gates, both
+bundle preparations, both semantic reviews and postverifications, and the
+direct sequential suite from the new clean final head.
 
 For a true Codex semantic pass from inside Codex, prepare a repo-context bundle
 and pass that bundle to a fresh-context reviewer:
