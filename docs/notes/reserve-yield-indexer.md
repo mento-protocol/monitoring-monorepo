@@ -160,7 +160,9 @@ Do not promote a hosted reindex with Ethereum reserve-yield enabled until:
    up to head.
 4. `pnpm deploy:indexer:verify <commit>` returns synced chain status plus
    non-empty `Pool`, sUSDS, and stETH GraphQL probe rows. A nonzero sUSDS
-   summary also requires a non-empty `SusdsYieldDailySnapshot` source.
+   summary also requires a post-launch `SusdsYieldDailySnapshot` whose
+   `sampledAtBlock` is fresh against the Ethereum processed head and whose
+   `sampledAtTimestamp` is fresh against verifier time.
 5. The dashboard `/revenue` page shows restored reserve actuals from the
    shared endpoint and continues to label stale/partial data correctly.
 
