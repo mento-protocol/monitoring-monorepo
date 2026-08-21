@@ -17,9 +17,9 @@ describe('conciseErrorMessage', () => {
   });
 
   it('treats an isolated carriage return as a line separator', () => {
-    expect(conciseErrorMessage(new Error('\rrequest failed\rrequest body'))).toBe(
-      'request failed',
-    );
+    expect(
+      conciseErrorMessage(new Error('\rrequest failed\rrequest body')),
+    ).toBe('request failed');
   });
 
   it('bounds long messages', () => {
