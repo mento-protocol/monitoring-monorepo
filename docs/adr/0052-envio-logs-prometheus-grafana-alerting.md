@@ -4,7 +4,7 @@ status: active
 owner: eng
 canonical: true
 last_verified: 2026-08-21
-scope: indexer-envio / alerts
+scope: indexer-envio / metrics-bridge / alerts
 date: 2026-07
 doc_type: adr
 review_interval_days: 90
@@ -16,7 +16,7 @@ supersedes: ADR-0018
 
 **Status:** Accepted (Jul 2026), in force. Supersedes
 [ADR 0018](0018-indexer-observability-loki.md).
-**Scope:** indexer-envio / alerts
+**Scope:** indexer-envio / metrics-bridge / alerts
 
 ## Context
 
