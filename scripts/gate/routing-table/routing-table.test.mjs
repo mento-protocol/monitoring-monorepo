@@ -18,7 +18,11 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 
-import { pairingProblems, stalenessSubjects } from "./checks.mjs";
+import {
+  exemptedLiterals,
+  pairingProblems,
+  stalenessSubjects,
+} from "./checks.mjs";
 import { parseGateRouting } from "./gate-arms.mjs";
 import { ROUTING_GROUPS, ROUTING_PLAN } from "./index.mjs";
 import { VERBS, normalizeGroups, walkArms } from "./schema.mjs";
@@ -159,8 +163,17 @@ test("no literal path the table names has gone stale", () => {
 test("every allowStale exemption is still doing something", () => {
   for (const { groupId, arm } of walkArms(ROUTING_GROUPS)) {
     if (typeof arm.allowStale !== "string") continue;
+    // Only the LITERAL patterns count. A glob is never a staleness subject, so
+    // asking whether one exists on disk is a question with a constant answer —
+    // `existsSync("<repo>/*/.npmrc")` is false whatever the tree holds, and an
+    // exemption checked that way could never be retired.
+    const literals = exemptedLiterals(arm);
     assert.ok(
-      arm.patterns.some((pattern) => !existsSync(`${REPO}/${pattern}`)),
+      literals.length > 0,
+      `group \`${groupId}\`, arm [${arm.patterns.join(" | ")}]: carries \`allowStale\` but holds no literal pattern, so it exempts nothing`,
+    );
+    assert.ok(
+      literals.some((pattern) => !existsSync(`${REPO}/${pattern}`)),
       `group \`${groupId}\`, arm [${arm.patterns.join(" | ")}]: every path it exempts now exists, so the exemption is dead and should go`,
     );
   }
@@ -265,6 +278,38 @@ test("the staleness check reds on a path that is not in the tree", () => {
       .filter((subject) => !existsSync(`${REPO}/${subject.path}`))
       .map((s) => s.path),
     ["scripts/this-file-does-not-exist.mjs"],
+  );
+});
+
+test("the staleness check reds on a checklist that is not in the tree", () => {
+  // The quietest of the three subject kinds: a checklist path is only ever
+  // printed as a reminder, so a renamed one fails nowhere at all.
+  const subjects = stalenessSubjects(
+    table({
+      id: "x",
+      arms: [
+        arm(
+          ["docs/x.md"],
+          [{ checklist: "docs/pr-checklists/gone.md", reason: "r" }],
+        ),
+      ],
+    }),
+  );
+  assert.deepEqual(
+    subjects
+      .filter((subject) => subject.kind === "checklist")
+      .map((s) => s.path),
+    ["docs/pr-checklists/gone.md"],
+  );
+});
+
+test("an allowStale arm with only globs exempts nothing", () => {
+  assert.deepEqual(
+    exemptedLiterals({
+      patterns: ["*/.npmrc", "scripts/*.mjs"],
+      allowStale: "a reason long enough to be a real one",
+    }),
+    [],
   );
 });
 

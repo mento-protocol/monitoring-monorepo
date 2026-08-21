@@ -122,13 +122,17 @@ export function pairingProblems(rawGroups) {
 }
 
 /**
- * Every path the table asserts exists: literal patterns, plus the repo-relative
- * paths named inside the commands the table schedules.
+ * Every path the table asserts exists: literal patterns, the repo-relative
+ * paths named inside the commands the table schedules, and the checklists it
+ * points a reviewer at.
  *
- * A stale literal is invisible today — a `case` arm naming a deleted path
- * simply never matches, and no check reds. A stale path INSIDE a command fails
- * loudly when the command runs, so it is the pattern side that carries the
- * risk; both are checked because both are cheap.
+ * The three fail differently, and the quiet ones are why this exists. A stale
+ * literal PATTERN is invisible — a `case` arm naming a deleted path simply
+ * never matches, and no check reds. A stale path inside a scheduled COMMAND
+ * fails loudly the moment that command runs. A stale CHECKLIST is the quietest
+ * of the three: it is only ever printed as a reminder, so a renamed
+ * `docs/pr-checklists/*.md` leaves the gate pointing every reviewer at a
+ * document that is not there and nothing anywhere reds.
  *
  * `allowStale: "<reason>"` on an arm exempts that arm's literal patterns. ADR
  * 0064 documents the legitimate case — a pre-move probe path held until no open
@@ -142,9 +146,7 @@ export function stalenessSubjects(groups) {
   const subjects = [];
   const exempt = new Set();
   for (const { arm } of walkArms(groups)) {
-    if (typeof arm.allowStale === "string") {
-      for (const pattern of arm.patterns) exempt.add(pattern);
-    }
+    for (const pattern of exemptedLiterals(arm)) exempt.add(pattern);
   }
   for (const [pattern, groupId] of literalPatterns(groups)) {
     if (exempt.has(pattern)) continue;
@@ -152,10 +154,27 @@ export function stalenessSubjects(groups) {
   }
   for (const { groupId, arm } of walkArms(groups)) {
     for (const effect of arm.effects ?? []) {
-      collectCommandPaths(effect, groupId, subjects);
+      collectEffectPaths(effect, groupId, subjects);
     }
   }
   return subjects;
+}
+
+/**
+ * The literal patterns an `allowStale` arm exempts.
+ *
+ * Only the literals, because only literals are staleness subjects in the first
+ * place. An arm whose exempted patterns are ALL globs exempts nothing, and the
+ * "is this exemption still doing something" check would be inert on it: asking
+ * whether a glob exists on disk is a question with a constant answer, so an
+ * exemption checked that way could never be retired.
+ *
+ * @param {object} arm
+ * @returns {string[]}
+ */
+export function exemptedLiterals(arm) {
+  if (typeof arm.allowStale !== "string") return [];
+  return arm.patterns.filter((pattern) => !isGlob(pattern));
 }
 
 /**
@@ -169,10 +188,10 @@ export function stalenessSubjects(groups) {
 const COMMAND_PATH =
   /(?:^|\s)((?:[A-Za-z0-9_.@-]+\/)+[A-Za-z0-9_.@-]+\.[A-Za-z]+)(?=\s|$)/g;
 
-function collectCommandPaths(effect, groupId, subjects) {
+function collectEffectPaths(effect, groupId, subjects) {
   if (Object.hasOwn(effect, "when")) {
     for (const nested of effect.effects) {
-      collectCommandPaths(nested, groupId, subjects);
+      collectEffectPaths(nested, groupId, subjects);
     }
     return;
   }
@@ -180,6 +199,12 @@ function collectCommandPaths(effect, groupId, subjects) {
     // Nested arms are visited by `walkArms`, which reaches their effects on its
     // own pass; recursing here as well would double-count every path.
     return;
+  }
+  const checklist =
+    effect.checklist ??
+    (effect.verb === "add_checklist" ? effect.args[0] : undefined);
+  if (checklist !== undefined) {
+    subjects.push({ path: checklist, groupId, kind: "checklist" });
   }
   const command =
     effect.command ??
