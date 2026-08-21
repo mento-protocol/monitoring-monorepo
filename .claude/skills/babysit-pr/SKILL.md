@@ -171,6 +171,19 @@ item required.
   test "$base_bundle" != "$premerge_bundle" || exit 1
   test ! -e "$base_bundle" || exit 1
   test ! -e "$premerge_bundle" || exit 1
+  ```
+
+  Before any autoreview entrypoint runs, inspect both exact tree axes:
+  `base_oid..final_head` and `premerge_oid..final_head`. An axis is
+  runtime-sensitive if it changes `scripts/agent-autoreview.sh`,
+  `scripts/agent-autoreview.mjs`, or `scripts/agent-autoreview-core.mjs`, or if
+  the parsed `package.json` `scripts["agent:autoreview"]` value differs. Check
+  the paths and the parsed value on both axes. Fail closed on any Git, blob,
+  JSON, or comparison error.
+
+  When neither axis is runtime-sensitive, use the package adapter:
+
+  ```bash
   pnpm agent:autoreview --prepare-bundle-dir "$base_bundle" \
     --feedback-pr <pr-number> -- --mode branch --base "$base_oid"
   pnpm agent:autoreview --prepare-bundle-dir "$premerge_bundle" \
@@ -178,6 +191,15 @@ item required.
   pnpm agent:autoreview --verify-bundle-dir "$base_bundle"
   pnpm agent:autoreview --verify-bundle-dir "$premerge_bundle"
   ```
+
+  When either axis is runtime-sensitive, never run the final checkout's
+  `pnpm agent:autoreview` or autoreview wrapper. Follow the trusted pre-change
+  procedure in
+  [`agent-quality-gate-mechanics.md`](../../../docs/notes/agent-quality-gate-mechanics.md).
+  That procedure owns trusted-commit selection, checkout and runtime proof,
+  both axis preparations, pre/post manifest verification, and invalidation.
+  Run `pnpm agent:autoreview:test -- --jobs 1` only as separate behavior proof;
+  it establishes no review provenance.
 
   The adapter has no `--pr` option. Pass the numeric PR through
   `--feedback-pr`; `auto` is invalid with an explicit `--base`. Complete a
@@ -188,8 +210,9 @@ item required.
   `final_head`. Do not edit the worktree or move `HEAD` during this sequence.
   After every command, resolve `HEAD` with an explicit success check, require it
   to equal `final_head`, and recheck the clean worktree. Any follow-up fix
-  restarts both gates and both bundle reviews from a new clean final head. Only
-  then push through `HEAD_REMOTE`. Do not rebase a published PR because the
+  restarts both gates and both bundle reviews from a new clean final head. The
+  trusted-runtime procedure owns its stricter restart conditions. Only then
+  push through `HEAD_REMOTE`. Do not rebase a published PR because the
   resulting force-push violates this workflow.
 
 - Feedback blocker: triage every normalized finding, implement valid fixes, and

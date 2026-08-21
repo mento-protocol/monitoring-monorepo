@@ -135,7 +135,10 @@ tldr: **ruleset-required** workflows (`ci`, `Code Quality`, the Vercel checks) M
 
 - A function invoked directly as an `if`, `while`, or `until` condition, under
   `!`, or as a non-final command in an `&&` or `||` list cannot rely on `set -e`
-  to stop its body.
+  to stop its body. The same rule includes a function in the final operand when
+  an enclosing `if`, `while`, or `until` tests the complete `&&` or `||` list.
+  It excludes a final operand in a top-level bare list, such as `true && f` or
+  `false || f`; those forms retain normal `errexit` behavior.
 - A function used as a pipeline element also cannot rely on `set -e` when an
   enclosing `if`, `while`, or `until` tests the aggregate pipeline status, when
   `!` inverts the pipeline, or when the pipeline is a non-final command in an

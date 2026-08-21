@@ -810,29 +810,71 @@ runtime is unchanged; they do not turn an untrusted checkout into trusted
 executable code. Inspect a potentially hostile branch from a separate trusted
 checkout rather than invoking that branch's package scripts.
 
-For a runtime-changing PR, run the clean, detached wrapper and compatible MJS
-helper from the last independently reviewed pre-change commit while the current
-directory remains the reviewed checkout. Protected main is acceptable only when
-its helper still supports the current bundle protocol:
+For each review axis, compare its immutable base tree with the immutable final
+tree before any autoreview entrypoint runs. Treat the axis as runtime-sensitive
+only when `scripts/agent-autoreview.sh`, `scripts/agent-autoreview.mjs`, or
+`scripts/agent-autoreview-core.mjs` differs, or when the parsed
+`package.json` `scripts["agent:autoreview"]` value differs. An unrelated
+`package.json` edit is not sufficient. Fail closed on any Git, blob, JSON, or
+comparison error.
+
+For a runtime-changing PR, pin an immutable `trusted_oid` from the verified base
+repository. It must be the last independently reviewed commit before every
+runtime change found on the review axes. Retain the independent-review evidence.
+Do not infer trust from ancestry alone. Prove that the helper protocol supports
+bundle preparation, numeric feedback capture, explicit branch bases, and bound
+pre/post manifest verification. Protected main is acceptable only with both the
+review and compatibility evidence and only when it predates the runtime change
+under review.
+
+Create a clean detached physical checkout at `trusted_oid` outside the reviewed
+worktree. Require its `HEAD` to equal `trusted_oid` and its worktree to be clean.
+Require the wrapper, helper, and core modes and blob IDs to match `trusted_oid`.
+Stop concurrent writers to both checkouts. From the reviewed checkout directory,
+use the same absolute trusted wrapper and explicit compatible
+`AUTOREVIEW_HELPER` for every required axis preparation. Use that exact trusted
+wrapper for every pre-review manifest check and retained-digest post-review
+check. Before and after every invocation, repeat the trusted `HEAD`, clean-state,
+physical-root, mode, and blob checks, and require the reviewed checkout to remain
+clean at its immutable final head. Never substitute the reviewed checkout's
+package script or wrapper.
+
+The basic one-axis call shape is:
 
 ```bash
 reviewed_checkout=/absolute/path/to/reviewed-checkout
 trusted_checkout=/absolute/path/to/trusted-pre-change-checkout
-bundle_parent=/tmp/autoreview-runtime-review
-mkdir -p "$bundle_parent"
-(
-  cd "$reviewed_checkout"
-  AUTOREVIEW_HELPER="$trusted_checkout/scripts/agent-autoreview.mjs" \
-    "$trusted_checkout/scripts/agent-autoreview.sh" \
-    --prepare-bundle-dir "$bundle_parent/context-bundle" \
-    --mode auto --base origin/main --feedback-pr <number>
-)
-"$trusted_checkout/scripts/agent-autoreview.sh" \
-  --verify-bundle-dir "$bundle_parent/context-bundle"
+review_base_oid="$base_oid" # full immutable OID for this review axis
+bundle_parent="$(mktemp -d)" || exit 1
+bundle="$bundle_parent/context-bundle"
+trusted_wrapper="$trusted_checkout/scripts/agent-autoreview.sh"
+trusted_helper="$trusted_checkout/scripts/agent-autoreview.mjs"
+
+run_trusted_autoreview() {
+  (
+    cd "$reviewed_checkout" || exit 1
+    AUTOREVIEW_HELPER="$trusted_helper" "$trusted_wrapper" "$@"
+  )
+}
+
+run_trusted_autoreview --prepare-bundle-dir "$bundle" \
+  --feedback-pr <number> -- --mode branch --base "$review_base_oid"
+run_trusted_autoreview --verify-bundle-dir "$bundle"
+# Retain the printed manifest digest outside the bundle. After semantic review:
+run_trusted_autoreview --verify-bundle-dir "$bundle" \
+  --expected-bundle-manifest <retained-digest>
 ```
 
-Use that same trusted wrapper for `--expected-bundle-manifest` after the review.
 Never point `trusted_checkout` at the runtime-changing checkout.
+For multiple axes, allocate a distinct absent bundle path for each immutable
+base outside both worktrees, then repeat the preparation and both manifest
+checks with that base. Any fix, `HEAD` movement, dirty worktree, trusted-runtime
+or provenance drift, failed compatibility check, or manifest mismatch
+invalidates every gate and review result. Allocate new bundle paths and restart
+both gates, the sequential autoreview suite, and every bundle review from the
+new clean final head. Run `pnpm agent:autoreview:test -- --jobs 1` on that
+guarded final head only as separate behavior validation; it establishes no
+review provenance. Recheck both worktrees after it.
 
 For a true Codex semantic pass from inside Codex, prepare a repo-context bundle
 and pass that bundle to a fresh-context reviewer:
