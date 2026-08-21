@@ -547,6 +547,12 @@ function trustedComment({
   };
 }
 
+function commentWithHandoff(lines, options) {
+  const comment = trustedComment(options);
+  comment.body += `\n${lines.join("\n")}`;
+  return comment;
+}
+
 test("claim parser rejects conflicting newest-time claims and collapses identical ties", () => {
   assertThrows(
     () =>
@@ -600,6 +606,59 @@ test("claim parser ignores untrusted, wrong-issue, and malformed comments", () =
   const branchless = parseClaimComment(trustedComment({ branch: null }), 901);
   assertEqual(branchless.branch, null);
   assertEqual(Object.hasOwn(branchless.metadata, "Branch"), false);
+});
+
+test("claim parser accepts bounded cloud handoffs with trailing newlines", () => {
+  for (const trailingLines of [1, 2]) {
+    assert(
+      parseClaimComment(
+        commentWithHandoff([
+          "Project #12 fields were not set from this session.",
+          ...Array(trailingLines).fill(""),
+        ]),
+        901,
+      ),
+      "expected trailing newlines to be accepted",
+    );
+  }
+  assert(
+    parseClaimComment(
+      commentWithHandoff(["one", "two", "three", "four", "", ""]),
+      901,
+    ),
+    "expected four handoff lines plus trailing newlines to be accepted",
+  );
+  assert(
+    parseClaimComment(commentWithHandoff(["x".repeat(1000), "", ""]), 901),
+    "expected exactly 1000 handoff characters plus trailing newlines to be accepted",
+  );
+  const branchless = parseClaimComment(
+    commentWithHandoff(
+      ["Project #12 fields were not set from this session.", ""],
+      { branch: null },
+    ),
+    901,
+  );
+  assertEqual(branchless.branch, null);
+  assertEqual(Object.hasOwn(branchless.metadata, "Branch"), false);
+});
+
+test("claim parser rejects unsafe or oversized cloud handoffs", () => {
+  for (const lines of [
+    ["first line", "", "third line"],
+    ["first line", "Claim ID: second"],
+    ["first line", "Branch: second"],
+    ["first line", "Claimed at: 2026-08-20T10:00:00.000Z"],
+    ["handoff\u0000text"],
+    ["handoff\ttext"],
+    [" handoff"],
+    ["handoff "],
+    ["   "],
+    ["one", "two", "three", "four", "five"],
+    ["x".repeat(500), "x".repeat(500)],
+  ]) {
+    assertEqual(parseClaimComment(commentWithHandoff(lines), 901), null);
+  }
 });
 
 test("claim parser rejects unsafe text and invalid calendar dates", () => {

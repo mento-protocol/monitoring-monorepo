@@ -73,11 +73,15 @@ function isValidIsoTimestamp(value) {
 }
 
 function isBoundedCloudHandoff(lines) {
+  const handoff = [...lines];
+  while (handoff[handoff.length - 1] === "") handoff.pop();
   return (
-    lines.length <= 4 &&
-    lines.join("\n").length <= 1000 &&
-    lines.every(
-      (line) => line.length > 0 && !/^(Claim ID|Branch|Claimed at):/.test(line),
+    handoff.length <= 4 &&
+    handoff.join("\n").length <= 1000 &&
+    handoff.every(
+      (line) =>
+        isSafeSingleLineText(line, 1000) &&
+        !/^(Claim ID|Branch|Claimed at):/.test(line),
     )
   );
 }
