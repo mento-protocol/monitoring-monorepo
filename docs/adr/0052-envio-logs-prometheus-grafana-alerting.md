@@ -3,7 +3,7 @@ title: Envio logs diagnose; Prometheus and Grafana alert
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-26
+last_verified: 2026-08-21
 scope: indexer-envio / alerts
 date: 2026-07
 doc_type: adr
