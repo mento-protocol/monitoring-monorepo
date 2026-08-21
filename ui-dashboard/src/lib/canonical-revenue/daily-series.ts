@@ -152,6 +152,35 @@ function reserveSnapshotBaseline(
   return dailyYieldUsd === null ? null : totalYieldUsd - dailyYieldUsd;
 }
 
+function addReserveSnapshotRow(
+  row: ReserveYieldDailySnapshotRow,
+  stethRates: ReadonlyMap<string, number>,
+  previousTotalsBySource: Map<string, number>,
+  buckets: Map<number, RevenueBucket>,
+): boolean {
+  const timestamp = Number(row.timestamp);
+  if (!Number.isFinite(timestamp)) return false;
+  const sourceKey = reserveSnapshotSourceKey(row);
+  if (isStethSnapshot(row) && isZeroExposureStethSnapshot(row)) {
+    const previousTotalUsd = previousTotalsBySource.get(sourceKey);
+    addBucketValue(buckets, timestamp, {
+      reserveYieldUsd: previousTotalUsd === undefined ? 0 : -previousTotalUsd,
+    });
+    previousTotalsBySource.set(sourceKey, 0);
+    return false;
+  }
+  const totalYieldUsd = reserveSnapshotTotalUsd(row, stethRates);
+  if (totalYieldUsd === null) return isStethSnapshot(row);
+  const previousTotalUsd = previousTotalsBySource.get(sourceKey);
+  const baselineUsd =
+    previousTotalUsd ?? reserveSnapshotBaseline(row, totalYieldUsd, stethRates);
+  if (baselineUsd === null) return isStethSnapshot(row);
+  const dailyYieldUsd = totalYieldUsd - baselineUsd;
+  previousTotalsBySource.set(sourceKey, totalYieldUsd);
+  addBucketValue(buckets, timestamp, { reserveYieldUsd: dailyYieldUsd });
+  return false;
+}
+
 export function buildRevenueBuckets(args: {
   swapSeries: ReadonlyArray<SwapDailyFeePoint>;
   cdpDailySeries: ReadonlyArray<CdpBorrowingFeeSeriesPoint>;
@@ -182,30 +211,13 @@ export function buildRevenueBuckets(args: {
     (a, b) => Number(a.timestamp) - Number(b.timestamp),
   );
   for (const row of reserveRows) {
-    const timestamp = Number(row.timestamp);
-    if (!Number.isFinite(timestamp)) continue;
-    const sourceKey = reserveSnapshotSourceKey(row);
-    if (isStethSnapshot(row) && isZeroExposureStethSnapshot(row)) {
-      previousReserveTotalsBySource.set(sourceKey, 0);
-      addBucketValue(buckets, timestamp, { reserveYieldUsd: 0 });
-      continue;
-    }
-    const totalYieldUsd = reserveSnapshotTotalUsd(row, stethRates);
-    if (totalYieldUsd === null) {
-      if (isStethSnapshot(row)) reserveHistoryUnpriced = true;
-      continue;
-    }
-    const previousTotalUsd = previousReserveTotalsBySource.get(sourceKey);
-    const baselineUsd =
-      previousTotalUsd ??
-      reserveSnapshotBaseline(row, totalYieldUsd, stethRates);
-    if (baselineUsd === null) {
-      if (isStethSnapshot(row)) reserveHistoryUnpriced = true;
-      continue;
-    }
-    const dailyYieldUsd = totalYieldUsd - baselineUsd;
-    previousReserveTotalsBySource.set(sourceKey, totalYieldUsd);
-    addBucketValue(buckets, timestamp, { reserveYieldUsd: dailyYieldUsd });
+    const rowUnpriced = addReserveSnapshotRow(
+      row,
+      stethRates,
+      previousReserveTotalsBySource,
+      buckets,
+    );
+    reserveHistoryUnpriced = rowUnpriced || reserveHistoryUnpriced;
   }
 
   return { buckets, reserveHistoryUnpriced };

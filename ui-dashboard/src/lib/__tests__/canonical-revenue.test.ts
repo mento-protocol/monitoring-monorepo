@@ -351,7 +351,7 @@ describe("buildCanonicalRevenue", () => {
     );
   });
 
-  it("records zero revenue and resets the baseline when stETH exposure reaches zero", () => {
+  it("subtracts prior stETH yield and resets the baseline at zero exposure", () => {
     const wallet = "0xd0697f70e79476195b742d5afab14be50f98cc1e";
     const activeExposure = {
       balanceAmount: usdWei(2),
@@ -377,9 +377,83 @@ describe("buildCanonicalRevenue", () => {
     expect(
       result.dailySeries.find((point) => point.timestamp === ts("2026-06-11"))
         ?.reserveYieldUsd,
-    ).toBe(0);
-    expect(result.periods.allTimeSinceV3.reserveYieldUsd).toBe(4_000);
+    ).toBe(-2_000);
+    expect(result.periods.allTimeSinceV3.reserveYieldUsd).toBe(2_000);
     expect(result.partialReasons).not.toContain(
+      "Reserve stETH earned-yield history is unavailable: current stETH USD/token pricing is missing.",
+    );
+  });
+
+  it("nets an internal tracked-wallet stETH transfer without partial pricing", () => {
+    const sender = "0xd0697f70e79476195b742d5afab14be50f98cc1e";
+    const receiver = "0xd3d2e5c5af667da817b2d752d86c8f40c22137e1";
+    const yieldExposure = {
+      balanceAmount: usdWei(2),
+      principalAmount: usdWei(1),
+    };
+    const principalOnlyExposure = {
+      balanceAmount: usdWei(1),
+      principalAmount: usdWei(1),
+    };
+    const result = buildCanonicalRevenue({
+      networkData: [],
+      cdpDailySeries: [],
+      cdpMarkets: [],
+      reserveYield: reserveYield({
+        holdings: [
+          stethHolding({ identifier: sender, principalUsd: 2_000, balance: 1 }),
+          stethHolding({
+            identifier: receiver,
+            principalUsd: 2_000,
+            balance: 1,
+          }),
+        ],
+      }),
+      reserveDailySnapshots: [
+        stethReserveSnapshot(ts("2026-06-10"), sender, 1, 1, yieldExposure),
+        stethReserveSnapshot(ts("2026-06-11"), sender, 0),
+        stethReserveSnapshot(ts("2026-06-11"), receiver, 1, 1, yieldExposure),
+        stethReserveSnapshot(
+          ts("2026-06-12"),
+          sender,
+          0,
+          0,
+          principalOnlyExposure,
+        ),
+        stethReserveSnapshot(ts("2026-06-12"), receiver, 0, 1, yieldExposure),
+      ],
+      nowSeconds: NOW_SECONDS,
+    });
+
+    expect(
+      result.dailySeries.find((point) => point.timestamp === ts("2026-06-11"))
+        ?.reserveYieldUsd,
+    ).toBe(0);
+    expect(result.periods.allTimeSinceV3.reserveYieldUsd).toBe(2_000);
+    expect(result.partialReasons).not.toContain(
+      "Reserve stETH earned-yield history is unavailable: current stETH USD/token pricing is missing.",
+    );
+  });
+
+  it("keeps earlier unpriced stETH history partial after a zero-exposure row", () => {
+    const wallet = "0xd0697f70e79476195b742d5afab14be50f98cc1e";
+    const result = buildCanonicalRevenue({
+      networkData: [],
+      cdpDailySeries: [],
+      cdpMarkets: [],
+      reserveYield: reserveYield(),
+      reserveDailySnapshots: [
+        stethReserveSnapshot(ts("2026-06-11"), wallet, 0, 1, {
+          balanceAmount: usdWei(1),
+          principalAmount: usdWei(1),
+        }),
+        stethReserveSnapshot(ts("2026-06-12"), wallet, 0),
+      ],
+      nowSeconds: NOW_SECONDS,
+    });
+
+    expect(result.periods.allTimeSinceV3.reserveYieldUsd).toBeNull();
+    expect(result.partialReasons).toContain(
       "Reserve stETH earned-yield history is unavailable: current stETH USD/token pricing is missing.",
     );
   });
