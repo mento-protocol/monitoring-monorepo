@@ -28,6 +28,11 @@ type SusdsYieldDailySnapshotOptions = {
   requirePreviousDay?: boolean;
 };
 
+type SusdsHeartbeatEffectResults = {
+  blockTimestamp: bigint | null;
+  sharePriceUsdWei: bigint | null;
+};
+
 function baselineFromSameDaySnapshot(
   snapshot: SusdsYieldDailySnapshot,
 ): SusdsYieldDeltaBaseline {
@@ -196,11 +201,12 @@ export async function readSharePrice(
 export async function recordSusdsYieldHeartbeatSnapshot(
   context: SusdsContext,
   blockNumber: bigint,
+  effectResults?: SusdsHeartbeatEffectResults,
 ): Promise<boolean> {
-  const blockTimestamp = await context.effect(blockTimestampEffect, {
-    chainId: ETHEREUM_CHAIN_ID,
-    blockNumber,
-  });
+  const effects =
+    effectResults ??
+    (await readSusdsHeartbeatEffectResults(context, blockNumber));
+  const { blockTimestamp } = effects;
   if (blockTimestamp === null || blockTimestamp <= 0n) return false;
 
   const meta: BlockMeta = {
@@ -210,8 +216,31 @@ export async function recordSusdsYieldHeartbeatSnapshot(
   };
   if (meta.blockTimestamp < V3_REVENUE_LAUNCH_TIMESTAMP) return false;
 
-  const sharePriceUsdWei = await readSharePrice(context, meta);
+  const { sharePriceUsdWei } = effects;
+  if (sharePriceUsdWei === null) {
+    throw new Error(
+      `[sUSDS] convertToAssets(1e18) unavailable at block ${meta.blockNumber}`,
+    );
+  }
   return recordSusdsYieldDailySnapshot(context, meta, sharePriceUsdWei);
+}
+
+async function readSusdsHeartbeatEffectResults(
+  context: SusdsContext,
+  blockNumber: bigint,
+): Promise<SusdsHeartbeatEffectResults> {
+  const meta = {
+    chainId: ETHEREUM_CHAIN_ID,
+    blockNumber,
+  };
+  const [blockTimestamp, sharePriceUsdWei] = await Promise.all([
+    context.effect(blockTimestampEffect, meta),
+    context.effect(susdsSharePriceEffect, {
+      ...meta,
+      tokenAddress: SUSDS_ADDRESS,
+    }),
+  ]);
+  return { blockTimestamp, sharePriceUsdWei };
 }
 
 export async function handleSusdsYieldDailySnapshotHeartbeat({
@@ -221,9 +250,17 @@ export async function handleSusdsYieldDailySnapshotHeartbeat({
   block: { number: number | bigint };
   context: SusdsContext;
 }): Promise<boolean> {
-  // preload-handler-note: this dormant heartbeat needs ordered snapshot writes;
-  // preload-safe block/share-price reads are tracked in #1396 before activation.
+  const effectResults = await readSusdsHeartbeatEffectResults(
+    context,
+    BigInt(block.number),
+  );
+  // preload-handler-note: raw block and share-price results are awaited before
+  // this guard; the dormant heartbeat still keeps snapshot work ordered.
   // preload-effect-helpers: recordSusdsYieldHeartbeatSnapshot
   if (context.isPreload) return false;
-  return recordSusdsYieldHeartbeatSnapshot(context, BigInt(block.number));
+  return recordSusdsYieldHeartbeatSnapshot(
+    context,
+    BigInt(block.number),
+    effectResults,
+  );
 }

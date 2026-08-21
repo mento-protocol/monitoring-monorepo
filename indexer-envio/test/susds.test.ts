@@ -175,7 +175,7 @@ function dailySnapshotContext(
 function heartbeatContext(
   mockDb: MockDb,
   blockTimestamp: bigint | null,
-  sharePriceUsdWei: bigint,
+  sharePriceUsdWei: bigint | null,
   expectedBlockNumber = 300n,
 ): Parameters<typeof recordSusdsYieldHeartbeatSnapshot>[0] {
   return {
@@ -571,27 +571,102 @@ describeReserveYield("sUSDS reserve yield accounting", () => {
     assert.equal(rows[1]?.sampledAtBlock, 300n);
   });
 
-  it("skips the sUSDS heartbeat onBlock handler path while preloading", async () => {
+  it("preloads raw sUSDS heartbeat effects without writing snapshots", async () => {
     const mockDb = MockDb.createMockDb();
-    const context = heartbeatContext(
-      mockDb,
-      V3_REVENUE_LAUNCH_TIMESTAMP + 86_400n + 1n,
-      WAD,
-      300n,
-    );
+    const calls: Array<{ effect: unknown; input: unknown }> = [];
+    const context = {
+      ...heartbeatContext(
+        mockDb,
+        V3_REVENUE_LAUNCH_TIMESTAMP + 86_400n + 1n,
+        WAD,
+        300n,
+      ),
+      isPreload: true,
+      effect: async (effect: unknown, input: unknown) => {
+        calls.push({ effect, input });
+        if (effect === blockTimestampEffect) return null;
+        if (effect === susdsSharePriceEffect) return null;
+        throw new Error("unexpected effect");
+      },
+    } as Parameters<
+      typeof handleSusdsYieldDailySnapshotHeartbeat
+    >[0]["context"];
 
     const didWrite = await handleSusdsYieldDailySnapshotHeartbeat({
       block: { number: 300 },
-      context: {
-        ...context,
-        isPreload: true,
-        effect: async () => {
-          throw new Error("preload heartbeat must not read effects");
-        },
-      },
+      context,
     });
 
     assert.equal(didWrite, false);
+    assert.equal(calls.length, 2);
+    assert.equal(dailySnapshots(mockDb).length, 0);
+  });
+
+  it("keeps sUSDS timestamp-null skip ahead of a hydrated share-price failure", async () => {
+    const mockDb = MockDb.createMockDb();
+    const calls: Array<{ effect: unknown; input: unknown }> = [];
+    const context = {
+      ...heartbeatContext(mockDb, null, WAD, 300n),
+      effect: async (effect: unknown, input: unknown) => {
+        calls.push({ effect, input });
+        if (effect === blockTimestampEffect) return null;
+        if (effect === susdsSharePriceEffect) return null;
+        throw new Error("unexpected effect");
+      },
+    } as Parameters<
+      typeof handleSusdsYieldDailySnapshotHeartbeat
+    >[0]["context"];
+
+    assert.equal(
+      await handleSusdsYieldDailySnapshotHeartbeat({
+        block: { number: 300 },
+        context: { ...context, isPreload: true },
+      }),
+      false,
+    );
+    const preloadCalls = [...calls];
+    calls.length = 0;
+    assert.equal(
+      await handleSusdsYieldDailySnapshotHeartbeat({
+        block: { number: 300 },
+        context: { ...context, isPreload: false },
+      }),
+      false,
+    );
+    assert.deepEqual(calls, preloadCalls);
+  });
+
+  it("fails the sUSDS heartbeat when a valid timestamp has no share price", async () => {
+    const mockDb = MockDb.createMockDb();
+
+    await assert.rejects(
+      handleSusdsYieldDailySnapshotHeartbeat({
+        block: { number: 300 },
+        context: heartbeatContext(
+          mockDb,
+          V3_REVENUE_LAUNCH_TIMESTAMP + 1n,
+          null,
+        ),
+      }),
+      /convertToAssets\(1e18\) unavailable at block 300/,
+    );
+    assert.equal(dailySnapshots(mockDb).length, 0);
+  });
+
+  it("skips the sUSDS heartbeat before launch when the share price is null", async () => {
+    const mockDb = MockDb.createMockDb();
+
+    assert.equal(
+      await handleSusdsYieldDailySnapshotHeartbeat({
+        block: { number: 300 },
+        context: heartbeatContext(
+          mockDb,
+          V3_REVENUE_LAUNCH_TIMESTAMP - 1n,
+          null,
+        ),
+      }),
+      false,
+    );
     assert.equal(dailySnapshots(mockDb).length, 0);
   });
 
