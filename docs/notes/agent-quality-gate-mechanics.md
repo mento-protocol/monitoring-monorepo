@@ -1141,14 +1141,20 @@ Rules that keep the focus honest:
   suite has always used. `pnpm agent:quality-gate:test`, the gate's own mapped
   self-test, and CI all run in that mode.
 - **The focus is refused where it could answer for the whole suite.** A set
-  `GATE_TEST_FOCUS` exits 2 when `AGENT_QUALITY_GATE_LOCK_HELD` (any command a
-  real gate run spawns) or `GITHUB_ACTIONS` is set, so an exported focus cannot
-  shrink the gate's self-test or CI's run.
+  `GATE_TEST_FOCUS` exits 2 when `AGENTQG_RUN`, `AGENT_QUALITY_GATE_LOCK_HELD`,
+  or `GITHUB_ACTIONS` is set, so an exported focus cannot shrink the gate's
+  self-test or CI's run. `AGENTQG_RUN` is the load-bearing one: the gate puts it
+  on the argv of every mapped command in every mode, while the lock marker is
+  absent under `--no-lock` and `AGENT_QUALITY_GATE_LOCK=0`, where
+  `acquire_gate_run_lock` returns before exporting it.
 - **The partition is checked, not assumed.** `verify_gate_family_partition`
-  runs before the family definitions. It reds the suite when a test line sits
-  outside every family, when a family is missing from the registry, and when the
-  definitions drift out of registry order. An unassigned test fails there before
-  it can execute — it never silently runs in none of the focused modes.
+  runs before the family definitions, reading the suite file through the path
+  resolved at startup. It reds the suite when a test line sits outside every
+  family, when a family is missing from the registry, when the definitions drift
+  out of registry order, and when the lines after the closing marker are
+  anything but exactly one `dispatch_gate_test_families` call — a second call
+  would run every family twice, and none would run nothing and still exit 0. An
+  unassigned test fails there before it can execute.
 - **A new test goes inside the family that owns its subject.** A new subject
   gets a new family function plus its `gate_test_families` entry, in file order.
 - Selection follows registry order, not the order given, and a repeated family

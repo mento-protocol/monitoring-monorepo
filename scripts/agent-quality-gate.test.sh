@@ -18,10 +18,19 @@ set -euo pipefail
 # would arm it globally, but it also fires inside the fixture subshells and
 # command substitutions that run failing commands on purpose — output this
 # suite never had, and which a capture would swallow.
+#
+# The trap is armed before the scratch files exist, so it must survive a failure
+# in between: under `set -u` a bare $output_file there kills the handler with an
+# unbound-variable error instead of printing what died.
 arm_suite_abort_trap() {
-  trap 'echo "agent-quality-gate test suite aborted: line $LINENO: $BASH_COMMAND (exit $?)"; echo "Last gate output (tail):"; tail -40 "$output_file" 2>/dev/null | sed "s/^/  /"' ERR
+  trap 'echo "agent-quality-gate test suite aborted: line $LINENO: $BASH_COMMAND (exit $?)"; echo "Last gate output (tail):"; tail -40 "${output_file:-/dev/null}" 2>/dev/null | sed "s/^/  /"' ERR
 }
 arm_suite_abort_trap
+
+# This suite's own path, resolved before the cd below moves the ground under a
+# relative BASH_SOURCE. verify_gate_family_partition reads the file itself, so
+# it needs a path that survives the move and names no location of its own.
+gate_test_suite_source="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
@@ -438,8 +447,8 @@ assert_script_occurrences() {
 # drift out of registry order — so a test added without a family cannot
 # silently run in none of the focused modes. It runs before the definitions, so
 # an unassigned test is caught before it executes, and it covers the file from
-# the marker below to the end: past the closing marker only the one dispatch
-# call may run.
+# the marker below to the end: past the closing marker exactly one dispatch call
+# may run, and nothing else.
 #
 # The bodies are deliberately NOT re-indented. They carry heredoc fixtures whose
 # bytes are asserted, so a mechanical re-indent would rewrite fixture content;
@@ -483,13 +492,11 @@ fail_partition() {
 # registry. It reads this file rather than the shell's state, so it runs BEFORE
 # the family definitions below — an unassigned test never gets to execute.
 verify_gate_family_partition() {
-  local source_file="${BASH_SOURCE[0]}"
+  local source_file="$gate_test_suite_source"
   local expected
   local observed
-  # The suite cd's to the repo root at startup, so a path relative to the
-  # caller's directory may no longer resolve; the canonical location does.
-  [[ -f "$source_file" ]] ||
-    source_file="$repo_root/scripts/agent-quality-gate.test.sh"
+  # Fail closed: a suite that cannot read itself cannot vouch for its partition,
+  # and skipping the check is exactly the silence it exists to prevent.
   [[ -f "$source_file" ]] ||
     fail_partition "cannot read this suite's own source at $source_file"
   expected="$(printf '%s\n' "${gate_test_families[@]}")"
@@ -508,11 +515,13 @@ verify_gate_family_partition() {
       $0 == "# <<< gate family body end" { body = 2; seen_end = 1; next }
       body == 0 { previous = $0; next }
       body == 2 {
-        # Past the partition, the suite may only make its one dispatch call.
-        # Everything else here would run in every focused mode and, at the
-        # bottom of the file, after the success line has been printed.
+        # Past the partition, the suite may only make its one dispatch call —
+        # counted, because a second one would run every family twice and a
+        # missing one would exit 0 having run nothing. Everything else here
+        # would run in every focused mode and, at the bottom of the file, after
+        # the success line has been printed.
         if ($0 ~ /^[[:space:]]*$/ || $0 ~ /^[[:space:]]*#/) { next }
-        if ($0 == "dispatch_gate_test_families") { next }
+        if ($0 == "dispatch_gate_test_families") { dispatch_calls++; next }
         printf "line %d runs outside the family partition: %s\n", NR, $0 > "/dev/stderr"
         failed = 1
         exit 1
@@ -561,6 +570,11 @@ verify_gate_family_partition() {
           print "the gate family body end marker is missing" > "/dev/stderr"
           exit 1
         }
+        if (dispatch_calls != 1) {
+          printf "expected exactly one dispatch_gate_test_families call after the body, found %d\n", \
+            dispatch_calls > "/dev/stderr"
+          exit 1
+        }
       }
     ' "$source_file"
   )"; then
@@ -591,14 +605,23 @@ dispatch_gate_test_families() {
   # it must never be able to answer for the whole suite. The gate schedules this
   # file as a mapped command, so a focus exported in a developer's shell would
   # otherwise be inherited and silently shrink the gate's own self-test; the same
-  # goes for CI's `pnpm agent:quality-gate:test`. Refuse loudly under either.
-  # AGENT_QUALITY_GATE_LOCK_HELD is exported by a `--run` that holds (or
-  # inherited from one that holds) the machine-wide lock, so every command a real
-  # gate run spawns carries it. GITHUB_ACTIONS marks CI itself — CI="${CI:-true}"
-  # is not usable here because the gate exports that to mapped commands AND agent
-  # shells set it, which would refuse the focus on the very machines it is for.
+  # goes for CI's `pnpm agent:quality-gate:test`. Refuse loudly under any of:
+  #
+  # - AGENTQG_RUN, which the gate puts on the argv of every mapped command it
+  #   runs, in every mode. This is the one that has to be here: the lock marker
+  #   below is absent under `--no-lock` and AGENT_QUALITY_GATE_LOCK=0, because
+  #   acquire_gate_run_lock returns before exporting it, so a focus would have
+  #   survived into the self-test of exactly the runs that skip the lock.
+  # - AGENT_QUALITY_GATE_LOCK_HELD, exported by a `--run` holding the
+  #   machine-wide lock and inherited by nested runs. Kept as a second key on the
+  #   same door.
+  # - GITHUB_ACTIONS, which marks CI itself. CI="${CI:-true}" is not usable
+  #   here: the gate exports that to mapped commands AND agent shells set it,
+  #   which would refuse the focus on the very machines it is for.
   if [[ -n "$gate_test_focus" ]]; then
-    if [[ -n "${AGENT_QUALITY_GATE_LOCK_HELD:-}" || -n "${GITHUB_ACTIONS:-}" ]]; then
+    if [[ -n "${AGENTQG_RUN:-}" ||
+      -n "${AGENT_QUALITY_GATE_LOCK_HELD:-}" ||
+      -n "${GITHUB_ACTIONS:-}" ]]; then
       printf 'GATE_TEST_FOCUS is not honored inside a gate run or in CI: unset it to run the full suite\n' >&2
       exit 2
     fi
