@@ -77,8 +77,10 @@ even when you never open an authority.
    reference Babysit (step 6) checks new additions against. Then, for a
    non-trivial completed batch, run the closeout review. Outside an active
    Codex session — the standalone helper or `--engine claude` — a bare
-   `pnpm agent:autoreview` is the closeout, matching the `ship` skill and root
-   [`AGENTS.md`](../../AGENTS.md). Inside an active Codex session, a bare
+   `pnpm agent:autoreview` is the closeout, matching root
+   [`AGENTS.md`](../../AGENTS.md). The skill routers defer to this step rather
+   than defining the choice themselves, so do not read the agreement between them
+   as a second source. Inside an active Codex session, a bare
    invocation silently selects the local deterministic engine — the `ship`
    skill's bare closeout is NOT sufficient there; use the prepared-bundle
    fresh-context flow so a separate reviewer inspects every pass:
@@ -123,6 +125,72 @@ Solution` (approach before implementation detail). PRs open **ready for
    out of `agent-active` and into review. Authority:
    [`agent-issue-workflow.md`](agent-issue-workflow.md).
 
+   **Identify the target PR before anything else**, in this precedence: a
+   user-supplied URL is used verbatim and its owner/repository overrides the
+   inferred base; a bare number binds to `BASE_REPO`; with no explicit target,
+   list open PRs on `BASE_REPO` for the current branch, filter by
+   `headRepositoryOwner` so a same-named fork branch cannot match, and require
+   exactly zero or one result — more than one is a stop, not a guess. A failed
+   query is not evidence that no PR exists.
+
+   **Resolve the remotes too.** `BASE_REMOTE` is the configured remote whose URL
+   matches `BASE_REPO`; if none matches, add the parent as `upstream` and never
+   overwrite or retarget an existing remote. `HEAD_REMOTE` is the remote serving
+   the PR's head repository. A fork's `origin` is never a substitute for its
+   parent.
+
+   **When the deep security scan cannot run, say so.** The `claude-security`
+   scan is developer-installed and Claude Code only; this repo does not declare
+   it. Where the diff touches authn/authz, secrets handling, injection surfaces,
+   network-facing handlers, deploy/CI paths, or onchain code and the plugin is
+   unavailable, aim the gate and the closeout review at those surfaces instead,
+   and record `Claude Security scan: skipped (<surface>)` in the final summary so
+   the deep pass can be run later from a session that has it. Never imitate or
+   install it to fill the gap.
+
+   **Bind the checkout to the target first, then commit.** Binding before the
+   commit is what makes the equality check meaningful — advancing local `HEAD`
+   first would make `HEAD == headRefOid` unsatisfiable on a normal update. Which
+   target depends on whether a PR exists yet:
+   - **An existing PR** is the push target. Resolve its head repository,
+     `headRefName` and `headRefOid`. Before creating the ship commit, require
+     local `HEAD` to equal that OID; if intended commits already exist locally,
+     require the PR's OID to be their ancestor and inspect the intervening range
+     instead of stopping. If the branch is missing current base commits, merge the
+     base in — rebase is only acceptable before first publication.
+   - **No PR yet**, so there is no `headRefOid` to match: verify `origin` serves
+     `CURRENT_REPO` and take the current branch as the head ref.
+
+   **Then commit the validated work.** Steps 3-4 validate the worktree, so stage
+   only the intended files and create the ship commit before any push — otherwise
+   the remote receives the old commit while every validated change stays local. If
+   unrelated dirty changes are mixed with the intended scope, stop and ask before
+   staging.
+
+   **Then push.** An existing PR takes an explicit
+   `git push <head-remote> HEAD:<headRefName>` refspec, never an implicit target
+   or the local branch name. A first publication takes
+   `git push -u origin HEAD:<branch>`, and the PR is created from that published
+   branch.
+
+   Before any ancestry decision, make the history complete: when
+   `git rev-parse --is-shallow-repository` reports `true`, run
+   `git fetch --unshallow "$BASE_REMOTE"` and refetch the base. A hosted depth-1
+   checkout otherwise reports a false ancestry failure, which turns into an
+   unnecessary base merge or a stop on an already-current branch.
+
+   **Integrating the base produces a new head, and that head is unvalidated.**
+   Steps 3 and 4 ran against the pre-merge tree, so a base merge or conflict
+   resolution done here would otherwise reach the PR untested and unreviewed.
+   Either integrate the base before step 3, or rerun the gate and the closeout
+   review against the merged head before pushing. A conflict resolution is
+   exercised, not assumed.
+
+   Either way, re-read the PR after pushing and require its `headRefOid` to equal
+   local `HEAD` before treating anything as published. A fork checkout uses its
+   parent as `BASE_REPO`; never substitute a fork's `origin` for its parent, and
+   stop if the head repository has no matching push remote.
+
 6. **Babysit.** Run the `babysit-pr` skill. Sweep every feedback surface:
    top-level comments, review bodies, inline comments and threads, annotations,
    and failing logs. **Reply before resolving**, on the correct surface, in
@@ -143,10 +211,49 @@ Solution` (approach before implementation detail). PRs open **ready for
    [`agent-issue-workflow.md`](agent-issue-workflow.md) for the deferral and
    issue-lifecycle rules.
 
+   The same checkout binding as step 5 applies before any blocker fix mutates
+   files: clean worktree, local `HEAD` equal to the resolved `headRefOid`,
+   explicit push refspec, re-verified OID afterwards. If binding fails, move to a
+   clean dedicated checkout rather than editing an unbound one.
+
+   **A user correction updates the request baseline.** When the user changes what
+   they asked for mid-babysit, update the PR description before the next push.
+   Current-head reviewers read the description as the acceptance criteria, so a
+   stale one makes them enforce superseded behaviour and re-raise findings you
+   already resolved. This is the one edit to the description the babysit step
+   makes, alongside recording a deferral.
+
+   **Low noise is for unsolicited updates only.** Report state changes that
+   matter, not polls — but when the user asks for status, answer immediately with
+   the PR URL or number, the bound head SHA, the latest readiness result and when
+   it was observed, the current action and owner, any blocker, and the next action
+   or deadline. Then keep watching. A watcher that stays silent until its next
+   state change is not being low-noise, it is ignoring the user.
+
+   **Bound the watch.** One hour of wall clock by default unless the user set a
+   different budget, and roughly three attempts at the same recurring item before
+   handing it back. `pnpm pr:ready-state --watch` polls until ready, merged, or
+   closed, so a permanently blocked PR otherwise consumes the session. At the
+   deadline, report where the PR stands and stop or escalate.
+
+   **Give each independent PR its own watcher and its own isolated worktree.** A
+   foreground `pr:ready-state --watch` on the first PR otherwise occupies the loop
+   while feedback and failures age on the others, and repairs driven through one
+   shared checkout can target the wrong branch. Bind every worker to that PR's
+   exact repository, number, head and branch; serialize only overlapping or
+   dependent fixes. The lead keeps user-facing status and approval boundaries.
+
+   **Stacked PRs are the normal case here**, typically after a `/ship` batch.
+   When a watched PR merges or a base moves, re-evaluate every open PR that
+   depended on it — including ones the user never named — before calling a batch
+   healthy. A squash merge rewrites the commits a dependent branch still carries,
+   so expect conflicts there. A ready verdict on a still-open PR is revocable:
+   any change to it or its base returns it to full evaluation against the new
+   head.
+
 7. **Ready-state.** Before signalling all-clear, run both projections with
-   `<BASE_REPO>` resolved from the PR URL — as the `babysit-pr` skill does —
-   so a fork PR or a switched checkout cannot bind the query to the wrong
-   repository:
+   `<BASE_REPO>` resolved from the PR URL as step 5 defines it, so a fork PR or a
+   switched checkout cannot bind the query to the wrong repository:
 
    ```bash
    pnpm --silent pr:feedback-state --pr <number> --repo <BASE_REPO> --json
@@ -163,6 +270,12 @@ reason=<why this is safe>`. Do not block on slow optional bots that branch
    protection does not require, and do not post routine or duplicate `@codex
 review` requests. Authority:
    [`pr-ready-state.md`](pr-ready-state.md).
+
+   **Report an all-clear with its evidence, never bare.** Name the PR URL or
+   number, the current head SHA the result is bound to, the required-check state,
+   and the probes' blocker, thread and unreplied counts. A bare "it's green" gives
+   the user nothing to assess before a merge they are accountable for, and hides
+   which head the claim was established against.
 
 8. **Merge hygiene.** **Never merge a PR without the user's explicit, direct
    approval of that specific merge.** Green CI, bot approvals, a READY
@@ -203,11 +316,13 @@ These bind regardless of which step you are on:
 
 ## Authority map
 
-| Step                     | Authority doc                                                         |
-| ------------------------ | --------------------------------------------------------------------- |
-| Claim, defer, merge-sync | [`agent-issue-workflow.md`](agent-issue-workflow.md)                  |
-| Gate, autoreview         | [`agent-quality-gate-mechanics.md`](agent-quality-gate-mechanics.md)  |
-| Ready-state              | [`pr-ready-state.md`](pr-ready-state.md)                              |
-| Docs and drift           | [`../context-standards.md`](../context-standards.md)                  |
-| Ship, babysit            | `ship` and `babysit-pr` skills                                        |
-| Production closeout      | [`../deployment.md`](../deployment.md) and the owning package runbook |
+| Step                     | Authority doc                                                                                                  |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| Claim, defer, merge-sync | [`agent-issue-workflow.md`](agent-issue-workflow.md)                                                           |
+| Gate, autoreview         | [`agent-quality-gate-mechanics.md`](agent-quality-gate-mechanics.md)                                           |
+| Ready-state              | [`pr-ready-state.md`](pr-ready-state.md)                                                                       |
+| Docs and drift           | [`../context-standards.md`](../context-standards.md)                                                           |
+| Ship                     | steps 2-9 here; entry points in [`codex-agent-skills.md`](codex-agent-skills.md#claude-global-store-shadowing) |
+| Babysit                  | steps 6-7 here; entry points in [`codex-agent-skills.md`](codex-agent-skills.md#claude-global-store-shadowing) |
+| UI visual evidence       | [`dashboard-verification.md`](dashboard-verification.md)                                                       |
+| Production closeout      | [`../deployment.md`](../deployment.md) and the owning package runbook                                          |
