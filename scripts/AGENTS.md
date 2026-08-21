@@ -81,8 +81,7 @@ same PR, except the `agent-autoreview.sh` feedback-runtime pins below.
 - **Sentry suite manifest.** `scripts/sentry/gate/sentry-suite-manifest.json`
   keys are exact repo-relative paths, reconciled against `findSentrySuites()`
   by set equality both ways. A moved or renamed suite fails the gate closed.
-  `sentry/fixture-scan-canary.test.mjs` re-pins four of them; ADR 0068 is the
-  fixture-authoring policy.
+  `sentry/fixture-scan-canary.test.mjs` re-pins four; ADR 0068 has the policy.
 - **Enumerated workflow paths-filters.** 22 of 32 files in
   `.github/workflows/` pin a `scripts/` path. `ci.yml` (`autoreviewSuite`,
   `autoreviewRootRuntime`, `versionSkew`; `rootScripts` is the recursive
