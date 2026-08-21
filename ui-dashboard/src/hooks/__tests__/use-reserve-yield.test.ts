@@ -66,20 +66,24 @@ describe("useReserveYield", () => {
   });
 
   it("wires the shared active-tab retry guard", () => {
-    const { config } = renderReserveYieldProbe();
+    const { config, result } = renderReserveYieldProbe();
 
     expect(config.revalidateOnFocus).toBe(false);
     expect(config.revalidateOnReconnect).toBe(false);
     expect(config.refreshWhenHidden).toBe(false);
     expect(config.errorRetryCount).toBe(5);
     expect(config.onErrorRetry).toBe(rateLimitAwareRetry);
+    expect(result).toMatchObject({
+      hasError: false,
+      isLoading: false,
+      reserveCurrentHoldingsClassificationFailed: false,
+    });
   });
 
-  it("surfaces source errors in hasError", () => {
+  it("marks a holdings classification failure separately from broad source errors", () => {
     swrMock.mockReturnValue({
       data: {
-        holdingsError: null,
-        rateError: "FRED FEDFUNDS: HTTP 503",
+        holdingsError: "Reserve holdings RPC: HTTP 503",
       } satisfies Partial<ReserveYieldResponse>,
       error: undefined,
       isLoading: false,
@@ -89,6 +93,52 @@ describe("useReserveYield", () => {
     expect(result).toMatchObject({
       hasError: true,
       isLoading: false,
+      reserveCurrentHoldingsClassificationFailed: true,
     });
   });
+
+  it("marks a reserve-yield fetch failure as a holdings classification failure", () => {
+    swrMock.mockReturnValue({
+      data: undefined,
+      error: new Error("Reserve yield: HTTP 503"),
+      isLoading: false,
+    });
+
+    const { result } = renderReserveYieldProbe();
+    expect(result).toMatchObject({
+      hasError: true,
+      isLoading: false,
+      reserveCurrentHoldingsClassificationFailed: true,
+    });
+  });
+
+  it.each([
+    ["rate", { rateError: "FRED FEDFUNDS: HTTP 503" }],
+    [
+      "stETH earned yield",
+      {
+        earnedYieldError:
+          "stETH earned-yield actuals pending: no indexed wallet snapshot rows yet.",
+      },
+    ],
+  ])(
+    "keeps a %s source error out of the holdings classification signal",
+    (_source, sourceError) => {
+      swrMock.mockReturnValue({
+        data: {
+          holdingsError: null,
+          ...sourceError,
+        } satisfies Partial<ReserveYieldResponse>,
+        error: undefined,
+        isLoading: false,
+      });
+
+      const { result } = renderReserveYieldProbe();
+      expect(result).toMatchObject({
+        hasError: true,
+        isLoading: false,
+        reserveCurrentHoldingsClassificationFailed: false,
+      });
+    },
+  );
 });

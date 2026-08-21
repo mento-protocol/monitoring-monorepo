@@ -3,7 +3,7 @@ title: Indexer Deployment Reference
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-20
+last_verified: 2026-08-21
 doc_type: reference
 scope: indexer-envio
 review_interval_days: 90

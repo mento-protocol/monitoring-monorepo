@@ -3,7 +3,7 @@ title: Quick Commands
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-11
+last_verified: 2026-08-21
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -33,7 +33,7 @@ pnpm deploy:indexer:logs <commit> --errors-only --since 2h  # Explicit errors; n
 pnpm deploy:indexer:metrics <commit>  # Per-chain hosted indexing progress
 pnpm deploy:indexer:info <commit>     # Hosted deployment info/cache state
 pnpm deploy:indexer:perf <commit>     # Combined status/metrics/log snapshot for perf comparisons
-pnpm deploy:indexer:verify <commit>   # Gate promotion on sync, core rows, and Polygon replay semantics
+pnpm deploy:indexer:verify <commit>   # Gate promotion on sync, core rows, sUSDS sampler progress/freshness, and Polygon replay
 pnpm deploy:indexer:promote <commit>  # Promote a synced deployment to prod
 pnpm deploy:indexer:rollback <last-good-sha>  # Roll prod back: re-promote if still registered, else rebuild + resync
 

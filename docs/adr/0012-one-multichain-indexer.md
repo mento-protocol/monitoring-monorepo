@@ -4,7 +4,7 @@ status: active
 superseded_by: 0069-susds-launch-aligned-daily-sampler.md (sUSDS event-only clause)
 owner: eng
 canonical: true
-last_verified: 2026-07-23
+last_verified: 2026-08-21
 scope: indexer-envio
 date: 2026-03
 doc_type: adr

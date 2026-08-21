@@ -4,7 +4,7 @@ status: active
 superseded_by: 0069-susds-launch-aligned-daily-sampler.md (sUSDS event-only clause)
 owner: eng
 canonical: true
-last_verified: 2026-08-11
+last_verified: 2026-08-21
 scope: indexer-envio
 date: 2026-07
 doc_type: adr
@@ -62,9 +62,9 @@ a bounded stETH sampler:
   to already exist.
 - If any later historical stETH balance read is unavailable, the sampler skips
   the affected snapshot batch instead of writing partial wallet actuals.
-- Hosted deploy verification for reserve-yield changes checks nonzero sUSDS
-  summaries against `SusdsYieldDailySnapshot` rows and checks
-  `StethYieldDailySnapshot` rows.
+- Hosted deploy verification checks nonzero `sUSDS` summaries against post-launch
+  `SusdsYieldDailySnapshot` progress and freshness. Its `stETH` core-row probe
+  checks `StethYieldSummary` and `StethYieldMovement`.
 
 ## Evidence
 

@@ -50,9 +50,20 @@ function hasSusdsActualSignal(
   return currentSusdsHolding || earnedYieldSignal;
 }
 
-function missingSusdsSnapshotSource(args: BuildCanonicalRevenueArgs): boolean {
+function knownMissingSusdsSnapshotSource(
+  args: BuildCanonicalRevenueArgs,
+): boolean {
   return (
     hasSusdsActualSignal(args.reserveYield) &&
+    !hasSusdsSnapshotSource(args.reserveDailySnapshots)
+  );
+}
+
+function unverifiableSusdsSnapshotSource(
+  args: BuildCanonicalRevenueArgs,
+): boolean {
+  return (
+    args.reserveCurrentHoldingsClassificationFailed === true &&
     !hasSusdsSnapshotSource(args.reserveDailySnapshots)
   );
 }
@@ -109,7 +120,8 @@ export function buildActualAvailability(
     (args.reserveDailySnapshots.length === 0 &&
       (args.reserveYieldFailed === true ||
         hasReserveYieldSignal(args.reserveYield))) ||
-    missingSusdsSnapshotSource(args);
+    knownMissingSusdsSnapshotSource(args) ||
+    unverifiableSusdsSnapshotSource(args);
   return {
     reserve: !reserveHistoryUnavailable,
     reserveStaleAfter: reserveStaleAfterBucket(args),
@@ -119,11 +131,14 @@ export function buildActualAvailability(
 }
 
 function reservePartialReason(args: BuildCanonicalRevenueArgs): string | null {
-  if (missingSusdsSnapshotSource(args)) {
-    return "Reserve sUSDS earned-yield actuals unavailable: no SusdsYieldDailySnapshot source exists for current sUSDS holdings or earned signal.";
-  }
   if (args.reserveHistoryFailed) {
     return "Reserve earned-yield history failed to load.";
+  }
+  if (unverifiableSusdsSnapshotSource(args)) {
+    return "Reserve sUSDS earned-yield actuals unavailable: current reserve holdings classification failed and no SusdsYieldDailySnapshot source exists.";
+  }
+  if (knownMissingSusdsSnapshotSource(args)) {
+    return "Reserve sUSDS earned-yield actuals unavailable: no SusdsYieldDailySnapshot source exists for current sUSDS holdings or earned signal.";
   }
   if (args.reserveYield?.earnedYieldError) {
     return `Reserve earned-yield actuals partial: ${args.reserveYield.earnedYieldError}`;

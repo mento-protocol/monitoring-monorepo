@@ -92,6 +92,8 @@ function useRevenuePageState() {
     reserveHistoryFailed: reserveYieldHistory.hasError,
     reserveHistoryTruncated: reserveYieldHistory.truncated,
     reserveYieldFailed: reserveYieldState.hasError,
+    reserveCurrentHoldingsClassificationFailed:
+      reserveYieldState.reserveCurrentHoldingsClassificationFailed,
     swapFeesFailed: hasSwapFeesError,
     swapFeesApproximate: feesApprox && !hasSwapFeesError,
     cdpDailySeriesFailed:

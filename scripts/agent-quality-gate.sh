@@ -4242,8 +4242,13 @@ while IFS= read -r path; do
         # land on `pnpm lint:scripts` alone and quietly stop running its suite.
         scripts/deploy/deploy-indexer-verify.mjs | \
           scripts/deploy/deploy-indexer-verify.test.mjs | \
+          scripts/deploy/deploy-indexer-verify-analysis.mjs | \
+          scripts/deploy/deploy-indexer-verify-analysis.test.mjs | \
           scripts/*/deploy-indexer-verify.mjs | \
-          scripts/*/deploy-indexer-verify.test.mjs)
+          scripts/*/deploy-indexer-verify.test.mjs | \
+          scripts/*/deploy-indexer-verify-analysis.mjs | \
+          scripts/*/deploy-indexer-verify-analysis.test.mjs)
+          add_command "node scripts/deploy/deploy-indexer-verify-analysis.test.mjs" "indexer deploy verifier changed"
           add_command "node scripts/deploy/deploy-indexer-verify.test.mjs" "indexer deploy verifier changed"
           ;;
         scripts/deploy/deploy-indexer-perf.mjs | \

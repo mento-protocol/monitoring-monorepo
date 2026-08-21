@@ -74,6 +74,8 @@ same PR, except the `agent-autoreview.sh` feedback-runtime pins below.
   `pnpm sentry:autofix:finalize:test`. The exact
   `sentry/triage/sentry-triage-project-route.mjs` path routes to
   `pnpm sentry:project:test` with the projection family.
+  `deploy/deploy-indexer-verify{,-analysis}{,.test}.mjs` stays in one arm;
+  any-depth arms run both verifier tests.
 - **Gate runtime module pins.** Before `cd`, `agent-quality-gate.sh` loads
   `$script_source_dir/gate/run-handles.sh`; move it with its signature, self-test
   route, and missing-helper fixture. It also pins two `$script_source_dir`
@@ -146,7 +148,7 @@ in the same PR.
 - Do not add `--no-verify` to normal Git commands. `deploy-indexer.sh` uses it
   only for `envio` trigger-ref pushes, which intentionally skip redundant
   pre-push hooks; never generalize it.
-- New deploy scripts must print target, commit, and rollback or verification command around mutation.
+- New deploy scripts must print target, commit, and rollback/verification command around mutation.
 - New Node root scripts need `pnpm lint:scripts` coverage; new shell scripts must
   pass `bash -n`. Add a focused command to `scripts/agent-quality-gate.sh` for
   behavior syntax and lint checks cannot verify.

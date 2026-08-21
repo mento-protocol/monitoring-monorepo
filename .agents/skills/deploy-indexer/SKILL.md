@@ -5,7 +5,7 @@ title: Deploy Indexer Skill
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-22
+last_verified: 2026-08-21
 doc_type: skill
 scope: repo-wide
 review_interval_days: 90
@@ -240,7 +240,8 @@ Run the narrow deployment verifier before promoting:
 pnpm deploy:indexer:verify <TARGET_COMMIT>
 ```
 
-This combines status, metrics, endpoint, core-row, and Polygon replay checks.
+This combines status, metrics, endpoint, core-row, sUSDS post-launch sampler
+progress/freshness, and Polygon replay checks.
 Do not promote on any failure. `--allow-syncing` is diagnostic only and never
 waives data or replay-semantic failures. A missing replay marker or tainted
 historical RPC replay requires a fresh deployment; `docs/deployment.md` owns

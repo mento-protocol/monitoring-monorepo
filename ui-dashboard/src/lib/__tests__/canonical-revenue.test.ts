@@ -15,6 +15,8 @@ import { makeNetworkData } from "@/test-utils/network-fixtures";
 
 const NOW_SECONDS = Date.UTC(2026, 5, 12, 12, 0, 0) / 1000;
 const DAY = 86_400;
+const UNVERIFIABLE_SUSDS_SNAPSHOT_SOURCE_REASON =
+  "Reserve sUSDS earned-yield actuals unavailable: current reserve holdings classification failed and no SusdsYieldDailySnapshot source exists.";
 
 function ts(iso: string): number {
   return Date.parse(`${iso}T00:00:00Z`) / 1000;
@@ -315,6 +317,110 @@ describe("buildCanonicalRevenue", () => {
       "Reserve sUSDS earned-yield actuals unavailable: no SusdsYieldDailySnapshot source exists for current sUSDS holdings or earned signal.",
     );
   });
+
+  it("marks stETH-only rows unavailable when current holdings classification fails", () => {
+    const wallet = "0xd0697f70e79476195b742d5afab14be50f98cc1e";
+    const result = buildCanonicalRevenue({
+      networkData: [],
+      cdpDailySeries: [],
+      cdpMarkets: [],
+      reserveYield: reserveYield({
+        holdings: [stethHolding({ identifier: wallet })],
+      }),
+      reserveDailySnapshots: [
+        stethReserveSnapshot(ts("2026-06-12"), wallet, 1, 1),
+      ],
+      reserveCurrentHoldingsClassificationFailed: true,
+      nowSeconds: NOW_SECONDS,
+    });
+
+    expect(result.periods.allTimeSinceV3.reserveYieldUsd).toBeNull();
+    expect(result.partialReasons).toContain(
+      UNVERIFIABLE_SUSDS_SNAPSHOT_SOURCE_REASON,
+    );
+  });
+
+  it("prioritizes a reserve history failure over an unverifiable sUSDS source", () => {
+    const result = buildCanonicalRevenue({
+      networkData: [],
+      cdpDailySeries: [],
+      cdpMarkets: [],
+      reserveYield: reserveYield(),
+      reserveDailySnapshots: [],
+      reserveHistoryFailed: true,
+      reserveCurrentHoldingsClassificationFailed: true,
+      nowSeconds: NOW_SECONDS,
+    });
+
+    expect(result.partialReasons).toContain(
+      "Reserve earned-yield history failed to load.",
+    );
+    expect(result.partialReasons).not.toContain(
+      UNVERIFIABLE_SUSDS_SNAPSHOT_SOURCE_REASON,
+    );
+  });
+
+  it("keeps the known current sUSDS missing-source reason", () => {
+    const result = buildCanonicalRevenue({
+      networkData: [],
+      cdpDailySeries: [],
+      cdpMarkets: [],
+      reserveYield: reserveYield({ susdsEarnedYieldUsd: 123 }),
+      reserveDailySnapshots: [],
+      nowSeconds: NOW_SECONDS,
+    });
+
+    expect(result.partialReasons).toContain(
+      "Reserve sUSDS earned-yield actuals unavailable: no SusdsYieldDailySnapshot source exists for current sUSDS holdings or earned signal.",
+    );
+    expect(result.partialReasons).not.toContain(
+      UNVERIFIABLE_SUSDS_SNAPSHOT_SOURCE_REASON,
+    );
+  });
+
+  it("keeps loaded sUSDS actuals available when current holdings classification fails", () => {
+    const result = buildCanonicalRevenue({
+      networkData: [],
+      cdpDailySeries: [],
+      cdpMarkets: [],
+      reserveYield: reserveYield(),
+      reserveDailySnapshots: [reserveSnapshot(ts("2026-06-12"), 5)],
+      reserveCurrentHoldingsClassificationFailed: true,
+      nowSeconds: NOW_SECONDS,
+    });
+
+    expect(result.periods.allTimeSinceV3.reserveYieldUsd).toBe(5);
+    expect(result.partialReasons).not.toContain(
+      UNVERIFIABLE_SUSDS_SNAPSHOT_SOURCE_REASON,
+    );
+  });
+
+  it.each([
+    ["rate", { rateError: "FRED FEDFUNDS: HTTP 503" }],
+    [
+      "stETH earned-yield",
+      {
+        earnedYieldError:
+          "stETH earned-yield actuals pending: no indexed wallet snapshot rows yet.",
+      },
+    ],
+  ])(
+    "does not infer an unverifiable sUSDS source from a %s error",
+    (_source, error) => {
+      const result = buildCanonicalRevenue({
+        networkData: [],
+        cdpDailySeries: [],
+        cdpMarkets: [],
+        reserveYield: reserveYield(error),
+        reserveDailySnapshots: [],
+        nowSeconds: NOW_SECONDS,
+      });
+
+      expect(result.partialReasons).not.toContain(
+        UNVERIFIABLE_SUSDS_SNAPSHOT_SOURCE_REASON,
+      );
+    },
+  );
 
   it("does not use combined stETH yield as an sUSDS signal", () => {
     const result = buildCanonicalRevenue({

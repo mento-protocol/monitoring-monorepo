@@ -3,7 +3,7 @@ title: Reserve-Yield Indexer Topology
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-22
+last_verified: 2026-08-21
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90

@@ -270,6 +270,7 @@ function renderRevenue({
   protocolFeesLoading = false,
   reserveYieldLoading = false,
   reserveYieldError = false,
+  reserveCurrentHoldingsClassificationFailed = false,
   reserveHistoryLoading = false,
 }: {
   networkData?: NetworkData[];
@@ -288,6 +289,7 @@ function renderRevenue({
   protocolFeesLoading?: boolean;
   reserveYieldLoading?: boolean;
   reserveYieldError?: boolean;
+  reserveCurrentHoldingsClassificationFailed?: boolean;
   reserveHistoryLoading?: boolean;
 } = {}) {
   mockUseProtocolFees.mockReturnValue({
@@ -308,6 +310,7 @@ function renderRevenue({
     data: reserveYield,
     isLoading: reserveYieldLoading,
     hasError: reserveYieldError,
+    reserveCurrentHoldingsClassificationFailed,
   });
   mockUseReserveYieldHistory.mockReturnValue({
     rows: reserveRows,

@@ -1,4 +1,4 @@
-<!-- agent-context: title="Mento v3 Envio HyperIndex Indexer" status=active owner=eng canonical=true last_verified=2026-07-24 doc_type=reference scope=indexer-envio review_interval_days=90 garden_lane=package-readmes-reference -->
+<!-- agent-context: title="Mento v3 Envio HyperIndex Indexer" status=active owner=eng canonical=true last_verified=2026-08-21 doc_type=reference scope=indexer-envio review_interval_days=90 garden_lane=package-readmes-reference -->
 
 # Mento v3 Envio HyperIndex Indexer
 
@@ -278,9 +278,10 @@ pnpm deploy:indexer:promote "$COMMIT"
 ```
 
 A caught-up watcher exit is `SYNCED_PENDING_DATA_VERIFY`, not promotion
-readiness. The verifier must pass the canonical Polygon FPMM feed/expiry,
-oracle-anchor, snapshot-cursor, and health-counter checks before promotion.
-It also reads `config/replay-integrity.json` from the deployed commit. That
+readiness. The verifier checks sync and core rows, plus sUSDS post-launch
+sampler progress/freshness, before the canonical Polygon FPMM feed/expiry,
+oracle-anchor, snapshot-cursor, and health-counter checks. It also reads
+`config/replay-integrity.json` from the deployed commit. That
 versioned marker is the commit-scoped proof that the candidate was replayed by
 code enforcing the current oracle-freshness invariant; a candidate whose
 commit lacks the required version is never promotion-compatible even if later

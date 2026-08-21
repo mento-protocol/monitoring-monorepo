@@ -12,6 +12,7 @@ export type ReserveYieldResult = {
   data: ReserveYieldResponse | null;
   isLoading: boolean;
   hasError: boolean;
+  reserveCurrentHoldingsClassificationFailed: boolean;
 };
 
 function fetchReserveYield(): Promise<ReserveYieldResponse> {
@@ -38,6 +39,8 @@ export function useReserveYield(): ReserveYieldResult {
   return {
     data: data ?? null,
     isLoading,
+    reserveCurrentHoldingsClassificationFailed:
+      error !== undefined || (data?.holdingsError ?? null) !== null,
     hasError:
       error !== undefined ||
       (data?.holdingsError ?? null) !== null ||

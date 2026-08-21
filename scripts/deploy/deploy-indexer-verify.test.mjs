@@ -454,7 +454,7 @@ assert.match(
   /sUSDS sampler.*(no post-launch progress|still the launch baseline|stale)/,
 );
 
-for (const lag of [0, 600]) {
+for (const lag of [0, 599]) {
   const healthySampler = summarizeSusdsSamplerProgress({
     summaryNonzero: true,
     latestSnapshot: {
@@ -469,6 +469,22 @@ for (const lag of [0, 600]) {
   assert.equal(healthySampler.ok, true);
   assert.equal(healthySampler.blockLag, lag);
   assert.equal(healthySampler.ageSeconds, 1_000);
+}
+
+for (const lag of [600, 601]) {
+  const staleSampler = summarizeSusdsSamplerProgress({
+    summaryNonzero: true,
+    latestSnapshot: {
+      sampledAtBlock: "24573803",
+      sampledAtTimestamp: String(NOW_SECONDS - 1_000),
+    },
+    ethereumChain: {
+      processedBlock: 24_573_803 + lag,
+    },
+    nowSeconds: NOW_SECONDS,
+  });
+  assert.equal(staleSampler.ok, false);
+  assert.match(staleSampler.failures.join("\n"), /sUSDS sampler is stale/);
 }
 
 const staleSampler = summarizeSusdsSamplerProgress({
@@ -523,5 +539,45 @@ const healthySummary = buildSummary({
   replayIntegrityInput: VALID_REPLAY_INTEGRITY,
 });
 assert.equal(healthySummary.ok, true);
+
+const staleSamplerSummary = buildSummary({
+  args: { allowSyncing: false },
+  deployment: indexerJson.data.deployments[0],
+  endpoint: indexerJson.data.deployments[0].gql_endpoint,
+  endpointMode: "prod-static",
+  statusJson: {
+    data: [
+      {
+        chain_id: 1,
+        block_height: 24_574_403,
+        latest_processed_block: 24_574_403,
+        num_events_processed: 1,
+        timestamp_caught_up_to_head_or_endblock: "2026-07-03T12:00:00Z",
+      },
+    ],
+  },
+  metricsJson: { data: [] },
+  graphqlJson: {
+    data: {
+      Pool: [{ id: "pool" }],
+      PolygonPool: validPolygonPools(),
+      SusdsYieldSummary: [{ id: "susds", currentShares: "1" }],
+      SusdsYieldMovement: [{ id: "susds-move" }],
+      SusdsYieldDailySnapshot: [
+        {
+          id: "susds-sample",
+          sampledAtBlock: "24573803",
+          sampledAtTimestamp: String(NOW_SECONDS - 1_000),
+        },
+      ],
+      StethYieldSummary: [{ id: "steth" }],
+      StethYieldMovement: [{ id: "steth-move" }],
+    },
+  },
+  nowSeconds: NOW_SECONDS,
+  replayIntegrityInput: VALID_REPLAY_INTEGRITY,
+});
+assert.equal(staleSamplerSummary.ok, false);
+assert.match(staleSamplerSummary.failures.join("\n"), /sUSDS sampler is stale/);
 
 console.log("deploy-indexer-verify tests passed.");

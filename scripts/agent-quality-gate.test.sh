@@ -3000,14 +3000,26 @@ for path in \
 done
 
 # The Node deploy helpers moved with the wrappers. Their arms match exact paths,
-# so a stale pattern stops routing the focused suite silently — assert each of
-# the four moved specifiers reaches its own test.
+# so a stale pattern stops routing the focused suite silently — assert each
+# exact verifier source and test path reaches both verifier tests.
 run_gate "scripts/deploy/deploy-indexer-verify.mjs"
 assert_contains "- pnpm lint:scripts (root build script changed)"
+assert_contains "- node scripts/deploy/deploy-indexer-verify-analysis.test.mjs (indexer deploy verifier changed)"
 assert_contains "- node scripts/deploy/deploy-indexer-verify.test.mjs (indexer deploy verifier changed)"
 
 run_gate "scripts/deploy/deploy-indexer-verify.test.mjs"
 assert_contains "- pnpm lint:scripts (root build script changed)"
+assert_contains "- node scripts/deploy/deploy-indexer-verify-analysis.test.mjs (indexer deploy verifier changed)"
+assert_contains "- node scripts/deploy/deploy-indexer-verify.test.mjs (indexer deploy verifier changed)"
+
+run_gate "scripts/deploy/deploy-indexer-verify-analysis.mjs"
+assert_contains "- pnpm lint:scripts (root build script changed)"
+assert_contains "- node scripts/deploy/deploy-indexer-verify-analysis.test.mjs (indexer deploy verifier changed)"
+assert_contains "- node scripts/deploy/deploy-indexer-verify.test.mjs (indexer deploy verifier changed)"
+
+run_gate "scripts/deploy/deploy-indexer-verify-analysis.test.mjs"
+assert_contains "- pnpm lint:scripts (root build script changed)"
+assert_contains "- node scripts/deploy/deploy-indexer-verify-analysis.test.mjs (indexer deploy verifier changed)"
 assert_contains "- node scripts/deploy/deploy-indexer-verify.test.mjs (indexer deploy verifier changed)"
 
 run_gate "scripts/deploy/deploy-indexer-perf.mjs"
@@ -3022,6 +3034,19 @@ assert_contains "- node scripts/deploy/deploy-indexer-perf.test.mjs (indexer dep
 # the suite would still pass if an arm kept both spellings, which is how a
 # half-finished move survives review.
 run_gate "scripts/deploy-indexer-verify.mjs"
+assert_not_contains "- node scripts/deploy/deploy-indexer-verify-analysis.test.mjs (indexer deploy verifier changed)"
+assert_not_contains "- node scripts/deploy/deploy-indexer-verify.test.mjs (indexer deploy verifier changed)"
+
+run_gate "scripts/deploy-indexer-verify-analysis.mjs"
+assert_not_contains "- node scripts/deploy/deploy-indexer-verify-analysis.test.mjs (indexer deploy verifier changed)"
+assert_not_contains "- node scripts/deploy/deploy-indexer-verify.test.mjs (indexer deploy verifier changed)"
+
+run_gate "scripts/deploy-indexer-verify-analysis.test.mjs"
+assert_not_contains "- node scripts/deploy/deploy-indexer-verify-analysis.test.mjs (indexer deploy verifier changed)"
+assert_not_contains "- node scripts/deploy/deploy-indexer-verify.test.mjs (indexer deploy verifier changed)"
+
+run_gate "scripts/deploy-indexer-verify.test.mjs"
+assert_not_contains "- node scripts/deploy/deploy-indexer-verify-analysis.test.mjs (indexer deploy verifier changed)"
 assert_not_contains "- node scripts/deploy/deploy-indexer-verify.test.mjs (indexer deploy verifier changed)"
 
 run_gate "scripts/deploy-indexer-perf.mjs"
@@ -3058,6 +3083,19 @@ assert_contains "- node scripts/deploy/filter-envio-runtime-errors.test.mjs (ind
 # deploy-specific fallback — it would keep only `pnpm lint:scripts` and stop
 # running its suite with nothing red.
 run_gate "scripts/deploy/region/deploy-indexer-verify.mjs"
+assert_contains "- node scripts/deploy/deploy-indexer-verify-analysis.test.mjs (indexer deploy verifier changed)"
+assert_contains "- node scripts/deploy/deploy-indexer-verify.test.mjs (indexer deploy verifier changed)"
+
+run_gate "scripts/deploy/region/deploy-indexer-verify-analysis.mjs"
+assert_contains "- node scripts/deploy/deploy-indexer-verify-analysis.test.mjs (indexer deploy verifier changed)"
+assert_contains "- node scripts/deploy/deploy-indexer-verify.test.mjs (indexer deploy verifier changed)"
+
+run_gate "scripts/deploy/region/deploy-indexer-verify-analysis.test.mjs"
+assert_contains "- node scripts/deploy/deploy-indexer-verify-analysis.test.mjs (indexer deploy verifier changed)"
+assert_contains "- node scripts/deploy/deploy-indexer-verify.test.mjs (indexer deploy verifier changed)"
+
+run_gate "scripts/deploy/region/deploy-indexer-verify.test.mjs"
+assert_contains "- node scripts/deploy/deploy-indexer-verify-analysis.test.mjs (indexer deploy verifier changed)"
 assert_contains "- node scripts/deploy/deploy-indexer-verify.test.mjs (indexer deploy verifier changed)"
 
 run_gate "scripts/deploy/region/deploy-indexer-perf.test.mjs"
