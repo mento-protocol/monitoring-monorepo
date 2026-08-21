@@ -117,8 +117,8 @@ unscoped older deployment's logs; use the registration diagnostic and Envio UI.
 
 ## `envio-cloud` CLI
 
-Use the workspace-pinned CLI and its current `--help`; `envio-cloud` is still
-pre-1.0. Prefer the repo wrappers for deploy, verify, promote, rollback, logs,
+Use the workspace-pinned CLI and its current `--help`. Prefer the repo wrappers
+for deploy, verify, promote, rollback, logs,
 metrics, and info, and reach for raw subcommands (`indexer get`,
 `deployment status`, `deployment endpoint`, `indexer env list`) only for reads
 the wrappers do not cover — for example

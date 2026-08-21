@@ -147,7 +147,7 @@
     "@prometheus-io/lezer-promql": "0.311.3",
     "@upstash/mcp-server": "0.2.4",
     "dependency-cruiser": "17.4.0",
-    "envio-cloud": "0.9.3",
+    "envio-cloud": "1.0.0",
     "eslint": "^10.0.2",
     "esbuild": "0.28.1",
     "globals": "^17.4.0",
