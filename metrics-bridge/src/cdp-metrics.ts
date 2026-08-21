@@ -32,6 +32,12 @@ export const cdpGauges = {
     labelNames: cdpLabels,
     registers: [register],
   }),
+  systemParamsLoaded: new Gauge({
+    name: "mento_cdp_system_params_loaded",
+    help: "1 when the CDP market's SystemParams snapshot loaded successfully, 0 while it remains incomplete.",
+    labelNames: cdpLabels,
+    registers: [register],
+  }),
   spHeadroom: new Gauge({
     name: "mento_cdp_sp_headroom",
     help: "Stability Pool headroom in debt-token units (spDeposits − MIN_BOLD_IN_SP). ≤ 0 means the SP is at/below the on-chain minimum buffer. Absent until SystemParams is loaded.",
@@ -87,6 +93,7 @@ function cdpDisplayLabels({
 interface PreparedCdpSeries {
   labels: CdpLabelValues;
   shutdown: number;
+  systemParamsLoaded: number;
   spDeposits: number;
   systemDebt: number;
   liquidationTotal: number;
@@ -134,6 +141,7 @@ function prepareCdpSeries({
   return {
     labels: cdpDisplayLabels({ instance, collateral }),
     shutdown: instance.isShutDown ? 1 : 0,
+    systemParamsLoaded: collateral.systemParamsLoaded ? 1 : 0,
     spDeposits: toHumanUnits(BigInt(instance.spDeposits), DEBT_TOKEN_DECIMALS),
     systemDebt: toHumanUnits(BigInt(instance.systemDebt), DEBT_TOKEN_DECIMALS),
     liquidationTotal: instance.liqCountCum,
@@ -166,6 +174,7 @@ export function updateCdpMetrics(cdps: CdpInstance[]): void {
 
   for (const row of prepared) {
     cdpGauges.shutdown.set(row.labels, row.shutdown);
+    cdpGauges.systemParamsLoaded.set(row.labels, row.systemParamsLoaded);
     cdpGauges.spDeposits.set(row.labels, row.spDeposits);
     cdpGauges.systemDebt.set(row.labels, row.systemDebt);
     cdpGauges.liquidationTotal.set(row.labels, row.liquidationTotal);

@@ -11,6 +11,13 @@ templates for Mento monitoring.
 - **Not in this module:** the Aegis dashboard and the Aegis Grafana folder. Those stay in [`aegis/terraform`](../../aegis/terraform); the relocated rule group references the externally owned Aegis folder UID from `main.tf`.
 - **Folder convention:** one folder per `service` label (`FPMMs`, `Oracles`, `Indexer`, `Metrics Bridge`, `Peg Monitoring`, `Oracle Relayers`, `Reserve`, `Trading Modes`, `Trading Limits`, `CDPs`).
 
+The CDP folder includes the `CDP System Parameters Not Loaded` warning. It
+fires when a joined CDP market row reports an incomplete SystemParams snapshot
+for 10 minutes. `liquity.systemParams.deadContract` is one possible exact
+diagnostic cause; inspect the indexer logs for the cause. Metrics Bridge Poll
+Errors owns `cdp_query` and `cdp_update` failures, and the bridge liveness rule
+owns a full bridge outage.
+
 ## State
 
 Separate from `terraform/` (platform) and `aegis/terraform`: `gs://mento-terraform-tfstate-6ed6/alerts-rules`. See [`docs/terraform.md`](../../docs/terraform.md) for the stack registry and completed Aegis-to-alerts state migration record.

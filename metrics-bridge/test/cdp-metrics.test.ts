@@ -58,6 +58,33 @@ describe("updateCdpMetrics", () => {
     expect(await getGaugeValue(register, "mento_cdp_shutdown", labels)).toBe(1);
   });
 
+  it("publishes SystemParams readiness as a binary gauge", async () => {
+    updateCdpMetrics([makeCdp()]);
+    expect(
+      await getGaugeValue(register, "mento_cdp_system_params_loaded", labels),
+    ).toBe(1);
+
+    updateCdpMetrics([makeCdp({ collateral: { systemParamsLoaded: false } })]);
+    expect(
+      await getGaugeValue(register, "mento_cdp_system_params_loaded", labels),
+    ).toBe(0);
+  });
+
+  it("keeps SystemParams labels bounded to the existing CDP label set", async () => {
+    updateCdpMetrics([makeCdp()]);
+    const [series] = await getMetricValues(
+      register,
+      "mento_cdp_system_params_loaded",
+    );
+    expect(Object.keys(series.labels).sort()).toEqual([
+      "block_explorer_url",
+      "chain_id",
+      "chain_name",
+      "collateral_id",
+      "symbol",
+    ]);
+  });
+
   it("converts token-denominated columns to human units", async () => {
     updateCdpMetrics([makeCdp()]);
     expect(
@@ -153,6 +180,9 @@ describe("updateCdpMetrics", () => {
     ).toBeUndefined();
     // Other gauges still publish.
     expect(await getGaugeValue(register, "mento_cdp_shutdown", labels)).toBe(0);
+    expect(
+      await getGaugeValue(register, "mento_cdp_system_params_loaded", labels),
+    ).toBe(0);
   });
 
   it("evicts series for markets that drop out of the response", async () => {
@@ -182,6 +212,9 @@ describe("updateCdpMetrics", () => {
     expect(
       await getGaugeValue(register, "mento_cdp_system_debt", labels),
     ).toBeCloseTo(305501.17, 1);
+    expect(
+      await getGaugeValue(register, "mento_cdp_system_params_loaded", labels),
+    ).toBe(1);
   });
 
   it("carries a TroveManager block-explorer deep link", async () => {

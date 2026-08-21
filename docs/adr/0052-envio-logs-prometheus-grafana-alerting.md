@@ -48,12 +48,12 @@ transport.
   to the hosted indexer.
 - Current structured error families are diagnostic-only:
 
-  | Family                                       | Source                             | Classification                                                                                                  |
-  | -------------------------------------------- | ---------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-  | `sortedOracles.oracleExpiryStateUnavailable` | `handlers/oracleExpiryState.ts`    | Diagnostic-only; no metric/rule tracks bootstrap failure.                                                       |
-  | `sortedOracles.oracleFeedStateUnavailable`   | `handlers/oracleFeedState.ts`      | Diagnostic-only; existing oracle-freshness rules detect resulting stale pool state, not this bootstrap failure. |
-  | `liquity.systemParams.deadContract`          | `handlers/liquity/systemParams.ts` | Diagnostic-only; CDP gauges are withheld until parameters load and no rule detects this configuration failure.  |
-  | `liquity.systemParams.diagnosticFailed`      | `handlers/liquity/systemParams.ts` | Diagnostic-only; no metric/rule tracks diagnostic-RPC failure.                                                  |
+  | Family                                       | Source                             | Classification                                                                                                                          |
+  | -------------------------------------------- | ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+  | `sortedOracles.oracleExpiryStateUnavailable` | `handlers/oracleExpiryState.ts`    | Diagnostic-only; no metric/rule tracks bootstrap failure.                                                                               |
+  | `sortedOracles.oracleFeedStateUnavailable`   | `handlers/oracleFeedState.ts`      | Diagnostic-only; existing oracle-freshness rules detect resulting stale pool state, not this bootstrap failure.                         |
+  | `liquity.systemParams.deadContract`          | `handlers/liquity/systemParams.ts` | Diagnostic-only; one possible exact cause of the generic `mento_cdp_system_params_loaded` incomplete state, which has warning coverage. |
+  | `liquity.systemParams.diagnosticFailed`      | `handlers/liquity/systemParams.ts` | Diagnostic-only; no metric/rule tracks diagnostic-RPC failure.                                                                          |
 
   `envio_effect_cache_invalidations_count` is separately represented by the
   Prometheus-backed `Envio Effect Cache Invalidations` Grafana rule; it is not
@@ -70,9 +70,10 @@ transport.
 
 ## Consequences
 
-- The four diagnostic-only families need a separate owned-metric/rule decision
-  before they can notify operators. [Issue #1624](https://github.com/mento-protocol/monitoring-monorepo/issues/1624)
-  owns that work; this ADR does not claim alert coverage for them.
+- The four structured families remain diagnostic surfaces. Issue [#1624](https://github.com/mento-protocol/monitoring-monorepo/issues/1624)
+  adds generic warning coverage for persistent incomplete CDP SystemParams
+  state. It does not turn `deadContract` or `diagnosticFailed` into alert
+  labels, and the generic state does not identify one exact cause.
 - Existing operators use status and metrics to assess deployment health, then
   inspect the exact deployment's bounded error logs. A deployment is not
   healthy merely because a log query returns data or no error records.

@@ -1850,6 +1850,42 @@ function ruleBlockNamed(source, namePattern) {
   return blocks[0];
 }
 
+test("CDP System Parameters Not Loaded keeps the approved warning contract", () => {
+  const source = readFileSync(
+    path.resolve(repoRoot, "alerts/rules/rules-cdps.tf"),
+    "utf8",
+  );
+  const rule = ruleBlockNamed(
+    source,
+    /\bname\s*=\s*"CDP System Parameters Not Loaded"/,
+  );
+  assert(
+    rule.includes('expr    = "mento_cdp_system_params_loaded"'),
+    "the CDP readiness rule must read the system_params_loaded gauge",
+  );
+  assert(
+    /\bfor\s*=\s*"10m"/.test(rule),
+    "the CDP readiness warning must require 10 minutes",
+  );
+  assert(
+    /\bno_data_state\s*=\s*"OK"/.test(rule) &&
+      /\bexec_err_state\s*=\s*"OK"/.test(rule),
+    "the CDP readiness warning must treat missing data and evaluation errors as OK",
+  );
+  assert(
+    /evaluator\s*=\s*\{\s*params\s*=\s*\[0\.5\]\s*,\s*type\s*=\s*"lt"/.test(
+      rule,
+    ),
+    "the CDP readiness warning must fire below 0.5",
+  );
+  assert(
+    /\bservice\s*=\s*"cdps"/.test(rule) &&
+      /\bseverity\s*=\s*"warning"/.test(rule) &&
+      /\blocal\.notify_warning_cdps\.contact_point/.test(rule),
+    "the CDP readiness warning must use service=cdps, warning severity, and notify_warning_cdps",
+  );
+});
+
 test("flap-prone criticals keep incidents open across short recoveries", () => {
   const fpmmRules = readFileSync(
     path.resolve(repoRoot, "alerts/rules/rules-fpmms.tf"),
