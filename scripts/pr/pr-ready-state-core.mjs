@@ -431,13 +431,17 @@ export function isCodexReviewRequestBody(body) {
   return /(^|\s)@codex\s+review\b/i.test(String(body ?? ""));
 }
 
+function codeRabbitFinalHeadReviewRequestHead(body) {
+  const text = String(body ?? "");
+  if (!/(^|\s)@coderabbitai\s+review\b/i.test(text)) return null;
+  return text.match(CODERABBIT_FINAL_HEAD_REQUEST_MARKER)?.[1] ?? null;
+}
+
 export function isCodeRabbitFinalHeadReviewRequestBody(
   body,
   currentHeadOid = null,
 ) {
-  const text = String(body ?? "");
-  if (!/(^|\s)@coderabbitai\s+review\b/i.test(text)) return false;
-  const requestedHead = text.match(CODERABBIT_FINAL_HEAD_REQUEST_MARKER)?.[1];
+  const requestedHead = codeRabbitFinalHeadReviewRequestHead(body);
   if (!requestedHead) return false;
   if (!currentHeadOid) return true;
   return requestedHead.toLowerCase() === String(currentHeadOid).toLowerCase();
@@ -771,10 +775,14 @@ export function classifyCodeRabbitReviewSignal({
 
   for (const comment of issueComments) {
     const body = String(comment.body ?? "");
-    if (!isCodeRabbitFinalHeadReviewRequestBody(body)) continue;
+    const requestedHead = codeRabbitFinalHeadReviewRequestHead(body);
+    if (!requestedHead) continue;
+    const matchesCurrentHead =
+      !currentHeadOid ||
+      requestedHead.toLowerCase() === String(currentHeadOid).toLowerCase();
 
     if (
-      isCodeRabbitFinalHeadReviewRequestBody(body, currentHeadOid) &&
+      matchesCurrentHead &&
       isCurrentSignal(comment.created_at ?? comment.createdAt, headUpdatedAt)
     ) {
       hasCurrentRequest = true;
