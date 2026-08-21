@@ -1,6 +1,17 @@
 export const BOT_APPROVER = "chatgpt-codex-connector[bot]";
 const BOT_APPROVER_LOGIN = "chatgpt-codex-connector";
 const CODERABBIT_AUTHORS = new Set(["coderabbitai", "coderabbitai[bot]"]);
+const CODERABBIT_REQUEST_AUTHORS = new Set([
+  BOT_APPROVER,
+  BOT_APPROVER_LOGIN,
+  "claude",
+  "claude[bot]",
+]);
+const CODERABBIT_REQUEST_ASSOCIATIONS = new Set([
+  "COLLABORATOR",
+  "MEMBER",
+  "OWNER",
+]);
 const CODERABBIT_REVIEW_RUN_MARKER = /\*\*Run ID\*\*:\s*`[^`\r\n]+`/i;
 const CODERABBIT_FINAL_HEAD_REQUEST_MARKER =
   /<!--\s*coderabbit-final-head-review:([0-9a-f]{40})\s*-->/i;
@@ -46,6 +57,16 @@ function codeRabbitFinalHeadReviewRequestHead(body) {
   const text = String(body ?? "");
   if (!/(^|\s)@coderabbitai\s+review\b/i.test(text)) return null;
   return text.match(CODERABBIT_FINAL_HEAD_REQUEST_MARKER)?.[1] ?? null;
+}
+
+function isTrustedCodeRabbitReviewRequestComment(comment) {
+  const association = String(
+    comment.author_association ?? comment.authorAssociation ?? "",
+  ).toUpperCase();
+  if (CODERABBIT_REQUEST_ASSOCIATIONS.has(association)) return true;
+
+  const author = comment.user?.login ?? comment.author?.login ?? null;
+  return CODERABBIT_REQUEST_AUTHORS.has(String(author ?? "").toLowerCase());
 }
 
 export function isCodeRabbitFinalHeadReviewRequestBody(
@@ -200,6 +221,7 @@ export function classifyCodeRabbitReviewSignal({
   }
 
   for (const comment of issueComments) {
+    if (!isTrustedCodeRabbitReviewRequestComment(comment)) continue;
     const requestedHead = codeRabbitFinalHeadReviewRequestHead(comment.body);
     if (!requestedHead) continue;
     const matchesCurrentHead =

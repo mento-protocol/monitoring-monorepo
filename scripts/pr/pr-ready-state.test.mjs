@@ -2286,6 +2286,7 @@ test("does not classify CodeRabbit signals as current without a head SHA", () =>
       issueComments: [
         {
           body: requestBody,
+          author_association: "MEMBER",
           created_at: "2026-08-21T08:14:00Z",
         },
       ],
@@ -2348,6 +2349,7 @@ test("binds one CodeRabbit closeout request to the full current head", () => {
       issueComments: [
         {
           body: request(currentHeadOid),
+          author_association: "MEMBER",
           created_at: "2026-08-21T08:14:00Z",
         },
       ],
@@ -2361,11 +2363,72 @@ test("binds one CodeRabbit closeout request to the full current head", () => {
       issueComments: [
         {
           body: request(oldHeadOid),
+          author_association: "MEMBER",
           created_at: "2026-08-21T08:14:00Z",
         },
       ],
     }),
     "stale",
+  );
+  assertEqual(
+    classifyCodeRabbitReviewSignal({
+      currentHeadOid,
+      headUpdatedAt: Date.parse("2026-08-21T08:13:33Z"),
+      issueComments: [
+        {
+          body: request(currentHeadOid),
+          author_association: "NONE",
+          created_at: "2026-08-21T08:14:00Z",
+          user: { login: "outside-user" },
+        },
+      ],
+    }),
+    "missing",
+  );
+  assertEqual(
+    classifyCodeRabbitReviewSignal({
+      currentHeadOid,
+      headUpdatedAt: Date.parse("2026-08-21T08:13:33Z"),
+      issueComments: [
+        {
+          body: request(currentHeadOid),
+          author_association: "NONE",
+          created_at: "2026-08-21T08:14:00Z",
+          user: { login: "claude[bot]" },
+        },
+      ],
+    }),
+    "requested",
+  );
+  assertEqual(
+    classifyCodeRabbitReviewSignal({
+      currentHeadOid,
+      headUpdatedAt: Date.parse("2026-08-21T08:13:33Z"),
+      issueComments: [
+        {
+          body: request(currentHeadOid),
+          authorAssociation: "NONE",
+          createdAt: "2026-08-21T08:14:00Z",
+          author: { login: "chatgpt-codex-connector" },
+        },
+      ],
+    }),
+    "requested",
+  );
+  assertEqual(
+    classifyCodeRabbitReviewSignal({
+      currentHeadOid,
+      headUpdatedAt: Date.parse("2026-08-21T08:13:33Z"),
+      issueComments: [
+        {
+          body: request(currentHeadOid),
+          authorAssociation: "NONE",
+          createdAt: "2026-08-21T08:14:00Z",
+          author: { login: "claude" },
+        },
+      ],
+    }),
+    "requested",
   );
 });
 

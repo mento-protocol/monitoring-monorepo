@@ -120,6 +120,10 @@ machinery and do not count. A head-bound closeout request uses this exact body:
 <!-- coderabbit-final-head-review:<full-head-sha> -->
 ```
 
+Only a request from an `OWNER`, `MEMBER`, or `COLLABORATOR`, or from a
+recognized repository agent bot, counts as `requested`. A marker quoted by an
+outside commenter does not suppress the real closeout request.
+
 After the optional CodeRabbit check becomes terminal, refresh the projection
 once. If the signal is `missing` or `stale`, re-resolve `headRefOid` immediately
 before posting and require it to equal the marker head. A `requested` signal
