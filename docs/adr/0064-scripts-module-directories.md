@@ -224,6 +224,19 @@ routing, not procedure.
    listed under "Why Files Stay Flat" in `scripts/AGENTS.md`. A workflow that
    runs a script from the PR's **base** ref must probe the new path and the
    pre-move path; see the trusted-validator consequence above.
+   A `paths:` filter is not the only shape. `sentry-triage-agent.yml` also
+   **stages an exact copy list at runtime**: its trusted staging step
+   `install -m 0444`s the agent comment wrapper, its broker guard, and the rest
+   of that wrapper's runtime import closure into a read-only directory under
+   `$RUNNER_TEMP`, because the triage job must execute nothing from the
+   agent-writable checkout (issue 1288). The pins are the source paths in that
+   `for f in …` loop plus the two `scripts/sentry/broker/` installs beside it.
+   A move that misses them fails the round at runtime, not in review, and only
+   on the schedule — the staged copy is simply absent. `sentry-triage-agent-comment.test.mjs`
+   recomputes the wrapper's import closure from source and asserts every member
+   appears in that copy list, so the list cannot silently fall behind the code;
+   it cannot know the paths moved, so this sweep item is still the thing that
+   catches a move.
 4. `terraform.stacks.json` — each stack's `changedPathPatterns` enumerates
    exact `scripts/` paths. The registry's broad `workflowAdmissionPatterns`
    boundary admits `scripts/**`; `tf-stacks.test.mjs` proves it subsumes every
