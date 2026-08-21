@@ -358,13 +358,10 @@ export async function sync(options) {
 }
 
 export async function backfill(options, dependencies = {}) {
-  const project = dependencies.getProject
-    ? await dependencies.getProject(options)
-    : await getProject(options);
   return [
     await backfillIssue(options, {
       getIssue: dependencies.getIssue ?? getIssue,
-      getProject: async () => project,
+      getProject: dependencies.getProject ?? getProject,
       findIssueProjectItem:
         dependencies.findIssueProjectItem ?? findIssueProjectItem,
       listIssueComments: dependencies.listIssueComments ?? listIssueComments,

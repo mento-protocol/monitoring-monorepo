@@ -496,7 +496,7 @@ test("claim queue treats stale claim races as recoverable", () => {
   );
 });
 
-test("claim comment records agent, issue, claim id, and branch", () => {
+test("claim comment records agent, issue, claim id, and an optional branch", () => {
   const comment = buildClaimComment(
     {
       agent: "codex",
@@ -510,6 +510,16 @@ test("claim comment records agent, issue, claim id, and branch", () => {
   assert(comment.includes("codex claimed #901"), "missing agent claim line");
   assert(comment.includes("Claim ID: codex-20260617T100000"), "missing claim");
   assert(comment.includes("Branch: agent/issue-901"), "missing branch");
+
+  const branchless = buildClaimComment(
+    {
+      agent: "codex",
+      claimId: "codex-20260617T100000",
+      claimedAt: "2026-06-17T10:00:00.000Z",
+    },
+    { number: 901 },
+  );
+  assert(!branchless.includes("Branch:"), "unexpected branch");
 });
 
 function trustedComment({
@@ -522,17 +532,18 @@ function trustedComment({
   branch = "agent/901",
   claimedAt = "2026-08-20T09:00:00.000Z",
 } = {}) {
+  const lines = [
+    `Agent claim: ${agent} claimed #${issue} for implementation.`,
+    "",
+    `Claim ID: ${claimId}`,
+  ];
+  if (branch !== null) lines.push(`Branch: ${branch}`);
+  lines.push(`Claimed at: ${claimedAt}`);
   return {
     id,
     createdAt,
     authorAssociation: association,
-    body: [
-      `Agent claim: ${agent} claimed #${issue} for implementation.`,
-      "",
-      `Claim ID: ${claimId}`,
-      `Branch: ${branch}`,
-      `Claimed at: ${claimedAt}`,
-    ].join("\n"),
+    body: lines.join("\n"),
   };
 }
 
@@ -567,9 +578,7 @@ test("claim parser rejects conflicting newest-time claims and collapses identica
   assertEqual(newest.metadata["Claim ID"], "same");
 });
 
-test("claim parser ignores untrusted, wrong-issue, malformed, and missing-field comments", () => {
-  const missing = trustedComment();
-  missing.body = missing.body.replace("Branch: agent/901\n", "");
+test("claim parser ignores untrusted, wrong-issue, and malformed comments", () => {
   const missingId = trustedComment();
   delete missingId.id;
   for (const comment of [
@@ -581,13 +590,16 @@ test("claim parser ignores untrusted, wrong-issue, malformed, and missing-field 
       ...trustedComment({ claimId: "bad" }),
       body: "Agent claim: codex claimed #901.",
     },
-    missing,
   ]) {
     assertEqual(parseClaimComment(comment, 901), null);
   }
   const handoff = trustedComment();
   handoff.body += "\nProject #12 fields were not set from this session.";
   assertEqual(parseClaimComment(handoff, 901).metadata.Branch, "agent/901");
+
+  const branchless = parseClaimComment(trustedComment({ branch: null }), 901);
+  assertEqual(branchless.branch, null);
+  assertEqual(Object.hasOwn(branchless.metadata, "Branch"), false);
 });
 
 test("claim parser rejects unsafe text and invalid calendar dates", () => {
@@ -648,6 +660,24 @@ test("backfill plan normalizes dates, fills only empties, and rejects conflicts"
     () => buildBackfillPlan({ ...metadata, Branch: "other" }, metadata),
     /conflicts/,
   );
+  const branchless = { ...metadata };
+  delete branchless.Branch;
+  assertDeepEqual(
+    buildBackfillPlan(
+      {
+        Agent: null,
+        "Claim ID": null,
+        Branch: "preserved-branch",
+        "Claimed At": null,
+      },
+      branchless,
+    ),
+    [
+      { field: "Claim ID", value: "claim-1" },
+      { field: "Agent", value: "codex" },
+      { field: "Claimed At", value: "2026-08-20" },
+    ],
+  );
 });
 
 function backfillFakes({
@@ -667,6 +697,7 @@ function backfillFakes({
     ],
   };
   const state = {
+    comments,
     issue: issue ?? {
       number: 901,
       title: "Backfill",
@@ -679,20 +710,39 @@ function backfillFakes({
       Branch: null,
       "Claimed At": null,
     },
+    project,
     writes: [],
+  };
+  const expectedFieldTypes = {
+    Agent: "TEXT",
+    "Claim ID": "TEXT",
+    Branch: "TEXT",
+    "Claimed At": "DATE",
   };
   return {
     state,
-    getProject: async () => project,
+    getProject: async () => state.project,
     getIssue: async () => ({ ...state.issue, labels: [...state.issue.labels] }),
     findIssueProjectItem: async () => "item",
-    listIssueComments: async () => comments,
-    requireBackfillFields: () => project.fields,
+    listIssueComments: async () => state.comments,
+    requireBackfillFields: (candidateProject) => {
+      const fields = {};
+      for (const [name, dataType] of Object.entries(expectedFieldTypes)) {
+        const field = candidateProject.fields.find(
+          (candidate) => candidate.name === name,
+        );
+        if (field?.dataType !== dataType) {
+          throw new Error(`Project must have a ${dataType} ${name} field`);
+        }
+        fields[name] = field;
+      }
+      return fields;
+    },
     readBackfillProjectFields: async () => ({ ...state.values }),
     writeBackfillProjectFields: async (_options, _project, _item, writes) => {
       state.writes.push(...writes);
       for (const write of writes) state.values[write.field] = write.value;
-      mutate?.(state);
+      mutate?.(state, writes);
     },
   };
 }
@@ -725,6 +775,28 @@ test("backfill writes claim ID first, fills partial matches, and is idempotent",
   assertEqual(fakes.state.writes.length, 3);
 });
 
+test("backfill preserves Branch when the trusted claim omits it", async () => {
+  const fakes = backfillFakes({
+    comments: [trustedComment({ branch: null })],
+    values: {
+      Agent: null,
+      "Claim ID": null,
+      Branch: "preserved-branch",
+      "Claimed At": null,
+    },
+  });
+  const [result] = await backfill({ issues: [901], dryRun: false }, fakes);
+  assertDeepEqual(
+    result.writes.map((write) => write.field),
+    ["Claim ID", "Agent", "Claimed At"],
+  );
+  assertEqual(fakes.state.values.Branch, "preserved-branch");
+  assertEqual(
+    fakes.state.writes.some((write) => write.field === "Branch"),
+    false,
+  );
+});
+
 test("backfill aborts conflicts before writes and detects post-write verification failure", async () => {
   const conflict = backfillFakes({
     values: {
@@ -742,7 +814,7 @@ test("backfill aborts conflicts before writes and detects post-write verificatio
 
   const broken = backfillFakes({
     mutate: (state) => {
-      state.values.Branch = "other";
+      if (state.writes.length === 4) state.values.Branch = "other";
     },
   });
   await assertRejects(
@@ -783,6 +855,101 @@ test("backfill aborts when one trusted comment ID changes metadata before write"
     /changed before backfill write/,
   );
   assertEqual(fakes.state.writes.length, 0);
+});
+
+test("backfill fingerprints an absent Branch before writing", async () => {
+  const fakes = backfillFakes({ comments: [trustedComment({ branch: null })] });
+  let commentReads = 0;
+  fakes.listIssueComments = async () => [
+    trustedComment({
+      branch: commentReads++ === 0 ? null : "agent/901",
+    }),
+  ];
+  await assertRejects(
+    () => backfill({ issues: [901], dryRun: false }, fakes),
+    /changed before backfill write/,
+  );
+  assertEqual(fakes.state.writes.length, 0);
+});
+
+test("backfill stops before later writes when a newer claim arrives", async () => {
+  const fakes = backfillFakes({
+    mutate: (state) => {
+      if (state.writes.length === 1) {
+        state.comments = [
+          trustedComment({
+            id: "comment-2",
+            claimId: "claim-2",
+            createdAt: "2026-08-20T11:00:00.000Z",
+          }),
+        ];
+      }
+    },
+  });
+  await assertRejects(
+    () => backfill({ issues: [901], dryRun: false }, fakes),
+    /changed before backfill write/,
+  );
+  assertDeepEqual(
+    fakes.state.writes.map((write) => write.field),
+    ["Claim ID"],
+  );
+});
+
+test("backfill stops before later writes when a target field drifts", async () => {
+  const fakes = backfillFakes({
+    mutate: (state) => {
+      if (state.writes.length === 1) state.values.Agent = "other";
+    },
+  });
+  await assertRejects(
+    () => backfill({ issues: [901], dryRun: false }, fakes),
+    /changed before backfill write/,
+  );
+  assertDeepEqual(
+    fakes.state.writes.map((write) => write.field),
+    ["Claim ID"],
+  );
+});
+
+test("backfill stops before later writes when the lifecycle drifts", async () => {
+  const fakes = backfillFakes({
+    mutate: (state) => {
+      if (state.writes.length === 1) {
+        state.issue.labels = [{ name: "agent-ready" }];
+      }
+    },
+  });
+  await assertRejects(
+    () => backfill({ issues: [901], dryRun: false }, fakes),
+    /is not backfillable/,
+  );
+  assertDeepEqual(
+    fakes.state.writes.map((write) => write.field),
+    ["Claim ID"],
+  );
+});
+
+test("backfill stops before later writes when an ownership field type drifts", async () => {
+  const fakes = backfillFakes({
+    mutate: (state) => {
+      if (state.writes.length !== 1) return;
+      state.project = {
+        ...state.project,
+        fields: state.project.fields.map((field) =>
+          field.name === "Agent" ? { ...field, dataType: "DATE" } : field,
+        ),
+      };
+    },
+  });
+  await assertRejects(
+    () => backfill({ issues: [901], dryRun: false }, fakes),
+    /Project must have a TEXT Agent field/,
+  );
+  assertDeepEqual(
+    fakes.state.writes.map((write) => write.field),
+    ["Claim ID"],
+  );
 });
 
 function backfillProject() {

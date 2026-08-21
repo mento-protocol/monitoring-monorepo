@@ -24,6 +24,13 @@ const MAX_CLAIM_ID_LENGTH = 160;
 const MAX_BRANCH_LENGTH = 256;
 const MAX_COMMENT_ID_LENGTH = 512;
 
+function claimFields(metadata) {
+  return CLAIM_FIELDS.filter(
+    (field) =>
+      field !== OPTIONAL_PROJECT_FIELDS.branch || metadata[field] != null,
+  );
+}
+
 function hasControlCharacter(value) {
   for (const character of value) {
     const codePoint = character.codePointAt(0);
@@ -116,7 +123,8 @@ export function parseClaimComment(comment, issueNumber) {
   const claimedAt = values.get("Claimed at");
   if (
     !isSafeSingleLineText(claimId, MAX_CLAIM_ID_LENGTH) ||
-    !isSafeSingleLineText(branch, MAX_BRANCH_LENGTH) ||
+    (branch !== undefined &&
+      !isSafeSingleLineText(branch, MAX_BRANCH_LENGTH)) ||
     !isValidIsoTimestamp(claimedAt)
   ) {
     return null;
@@ -125,10 +133,13 @@ export function parseClaimComment(comment, issueNumber) {
     id: String(comment.id),
     createdAt: comment.createdAt,
     claimedAt,
+    branch: branch ?? null,
     metadata: {
       [OPTIONAL_PROJECT_FIELDS.agent]: match[1],
       [OPTIONAL_PROJECT_FIELDS.claimId]: claimId,
-      [OPTIONAL_PROJECT_FIELDS.branch]: branch,
+      ...(branch === undefined
+        ? {}
+        : { [OPTIONAL_PROJECT_FIELDS.branch]: branch }),
       [OPTIONAL_PROJECT_FIELDS.claimedAt]: projectDateFieldValue(claimedAt),
     },
   };
@@ -136,6 +147,7 @@ export function parseClaimComment(comment, issueNumber) {
 
 function claimMetadataFingerprint(claim) {
   return JSON.stringify({
+    branch: claim.branch,
     claimedAt: claim.claimedAt,
     metadata: claim.metadata,
   });
@@ -164,15 +176,11 @@ export function selectNewestTrustedClaim(comments, issueNumber) {
   return newest[0];
 }
 
-function valueFor(field, metadata) {
-  return metadata[field] ?? null;
-}
-
 export function buildBackfillPlan(values, metadata) {
   const writes = [];
-  for (const field of CLAIM_FIELDS) {
+  for (const field of claimFields(metadata)) {
     const current = values[field];
-    const expected = valueFor(field, metadata);
+    const expected = metadata[field];
     if (current == null || current === "") {
       writes.push({ field, value: expected });
     } else if (current !== expected) {
@@ -191,19 +199,75 @@ function issueFingerprint(issue) {
   });
 }
 
-function snapshotFingerprint(snapshot) {
-  return JSON.stringify({
+function backfillFieldFingerprint(fields) {
+  return Object.fromEntries(
+    Object.entries(fields)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([name, field]) => [
+        name,
+        { id: field.id, dataType: field.dataType },
+      ]),
+  );
+}
+
+function backfillValuesFingerprint(values) {
+  return JSON.stringify(
+    Object.fromEntries(
+      CLAIM_FIELDS.map((field) => [field, values[field] ?? null]),
+    ),
+  );
+}
+
+function snapshotIdentity(snapshot) {
+  return {
     issue: issueFingerprint(snapshot.issue),
+    project: {
+      id: snapshot.project.id,
+      fields: backfillFieldFingerprint(snapshot.fields),
+    },
+    itemId: snapshot.itemId,
     claim: snapshot.claim
       ? {
           id: snapshot.claim.id,
           createdAt: snapshot.claim.createdAt,
           claimedAt: snapshot.claim.claimedAt,
+          branch: snapshot.claim.branch,
           metadata: snapshot.claim.metadata,
         }
       : null,
-    values: snapshot.values,
+  };
+}
+
+function snapshotIdentityFingerprint(snapshot) {
+  return JSON.stringify(snapshotIdentity(snapshot));
+}
+
+function snapshotFingerprint(snapshot) {
+  return JSON.stringify({
+    ...snapshotIdentity(snapshot),
+    values: backfillValuesFingerprint(snapshot.values),
   });
+}
+
+function hasExpectedValues(snapshot, expectedValues) {
+  return (
+    backfillValuesFingerprint(snapshot.values) ===
+    backfillValuesFingerprint(expectedValues)
+  );
+}
+
+function assertSnapshotMatches(
+  expectedIdentity,
+  expectedValues,
+  snapshot,
+  issueNumber,
+) {
+  if (
+    snapshotIdentityFingerprint(snapshot) !== expectedIdentity ||
+    !hasExpectedValues(snapshot, expectedValues)
+  ) {
+    throw new Error(`Issue #${issueNumber} changed before backfill write`);
+  }
 }
 
 async function readSnapshot(options, dependencies) {
@@ -214,7 +278,7 @@ async function readSnapshot(options, dependencies) {
     );
   }
   const project = await dependencies.getProject(options);
-  dependencies.requireBackfillFields(project);
+  const fields = dependencies.requireBackfillFields(project);
   const itemId = await dependencies.findIssueProjectItem(
     options,
     issue,
@@ -235,7 +299,7 @@ async function readSnapshot(options, dependencies) {
       `Issue #${issue.number} has no valid trusted agent claim comment`,
     );
   }
-  return { issue, project, itemId, claim, values };
+  return { issue, project, fields, itemId, claim, values };
 }
 
 export async function backfillIssue(options, dependencies) {
@@ -260,21 +324,46 @@ export async function backfillIssue(options, dependencies) {
     beforeWrite.values,
     beforeWrite.claim.metadata,
   );
-  if (writes.length > 0) {
-    await dependencies.writeBackfillProjectFields(
-      options,
-      beforeWrite.project,
-      beforeWrite.itemId,
-      writes,
+  const expectedIdentity = snapshotIdentityFingerprint(beforeWrite);
+  const expectedValues = { ...beforeWrite.values };
+  for (const write of writes) {
+    const current = await readSnapshot(options, dependencies);
+    assertSnapshotMatches(
+      expectedIdentity,
+      expectedValues,
+      current,
+      beforeWrite.issue.number,
     );
-  }
-  const verified = await readSnapshot(options, dependencies);
-  for (const field of CLAIM_FIELDS) {
-    if (verified.values[field] !== verified.claim.metadata[field]) {
+    const currentPlan = buildBackfillPlan(
+      current.values,
+      current.claim.metadata,
+    );
+    if (
+      !currentPlan.some(
+        (candidate) =>
+          candidate.field === write.field && candidate.value === write.value,
+      )
+    ) {
       throw new Error(
-        `Issue #${verified.issue.number} backfill verification failed for ${field}`,
+        `Issue #${beforeWrite.issue.number} changed before backfill write`,
       );
     }
+    await dependencies.writeBackfillProjectFields(
+      options,
+      current.project,
+      current.itemId,
+      [write],
+    );
+    expectedValues[write.field] = write.value;
+  }
+  const verified = await readSnapshot(options, dependencies);
+  if (
+    snapshotIdentityFingerprint(verified) !== expectedIdentity ||
+    !hasExpectedValues(verified, expectedValues)
+  ) {
+    throw new Error(
+      `Issue #${beforeWrite.issue.number} backfill verification failed`,
+    );
   }
   return {
     number: verified.issue.number,

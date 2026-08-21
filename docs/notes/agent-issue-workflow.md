@@ -3,7 +3,7 @@ title: Agent Issue Workflow
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-13
+last_verified: 2026-08-21
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -124,10 +124,14 @@ Use `pnpm issue:board backfill --issue <n>` only to recover Project ownership
 fields after an eligible MCP claim. It requires one open issue with exactly one
 of `agent-active` or `in-pr`, a valid trusted claim comment, and Project fields
 with exact types: `Agent`, `Claim ID`, and `Branch` as text; `Claimed At` as a
-date. Start with `--dry-run`. The helper fills empty fields only. It rejects a
-non-empty mismatch and leaves Status unchanged. It re-reads the issue, claim,
-and fields before writing, then verifies the result. It cannot make the
-separate GitHub reads and writes atomic. It reads at most 100 comment pages or
+date. The claim comment may omit `Branch`; the helper then leaves the existing
+Project Branch value outside its fill and conflict checks. Start with
+`--dry-run`. The helper fills empty fields only. It rejects a non-empty mismatch
+and leaves Status unchanged. Before every field write, it re-reads the issue,
+exact trusted claim snapshot, Project field types, and Project field values.
+GitHub provides no compare-and-swap operation. A concurrent write can occur
+after a re-read and before its mutation. The helper does not roll back because a
+rollback could erase concurrent state. It reads at most 100 comment pages or
 10,000 comments and fails closed rather than use incomplete claim history.
 
 ## PR Body Rules
