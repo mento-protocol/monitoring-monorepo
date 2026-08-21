@@ -742,6 +742,14 @@ test("redaction is POSITIONAL — a slug equal to a route word still goes", () =
       "/api/0/organizations/mentolabs/issues/68173/",
       "/api/0/organizations/<redacted>/issues/<redacted>/",
     ],
+    // THE TIE-BREAK. This path matches both `…/events/latest/` and the
+    // events-by-id route, which are the same length. The more-redacting route
+    // must win: preferring the literal one publishes an event id that happens
+    // to be `latest`, which is the whole class of bug this replaced.
+    [
+      "/api/0/organizations/mento/issues/123/events/latest/",
+      "/api/0/organizations/<redacted>/issues/<redacted>/events/<redacted>/",
+    ],
   ];
   for (const [path, expected] of cases) {
     assert.equal(redactSentryPaths(path), expected, path);
@@ -1112,15 +1120,25 @@ test("the wrapper's runtime closure is exactly what the workflow stages", () => 
     // closure the job must run from the read-only staging directory.
     "sentry-triage-text.mjs",
   ]);
-  // Every file in the closure must appear in the staging step's copy list.
-  const stagingBlock = WORKFLOW.slice(
+  // Every file in the closure must appear in the staging step's COPY LIST —
+  // the `for f in … done` loop itself, not merely somewhere in the step's
+  // prose. A name that appears only in a comment is staged by nothing, and the
+  // slice between two step names is full of comments that mention these files.
+  const stagingStep = WORKFLOW.slice(
     WORKFLOW.indexOf("Stage immutable agent tools"),
     WORKFLOW.indexOf("Render triage prompt"),
   );
-  assert.ok(stagingBlock.length > 0, "staging step not found in the workflow");
+  assert.ok(stagingStep.length > 0, "staging step not found in the workflow");
+  const loopStart = stagingStep.indexOf("for f in");
+  const loopEnd = stagingStep.indexOf("done", loopStart);
+  assert.ok(
+    loopStart > 0 && loopEnd > loopStart,
+    "the staging step's copy loop was not found",
+  );
+  const copyList = stagingStep.slice(loopStart, loopEnd);
   for (const file of closure) {
     assert.ok(
-      stagingBlock.includes(file),
+      copyList.includes(file),
       `${file} is in the wrapper's runtime closure but the staging step does not copy it`,
     );
   }
