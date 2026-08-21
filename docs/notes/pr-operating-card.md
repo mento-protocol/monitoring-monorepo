@@ -77,8 +77,10 @@ even when you never open an authority.
    reference Babysit (step 6) checks new additions against. Then, for a
    non-trivial completed batch, run the closeout review. Outside an active
    Codex session — the standalone helper or `--engine claude` — a bare
-   `pnpm agent:autoreview` is the closeout, matching the `ship` skill and root
-   [`AGENTS.md`](../../AGENTS.md). Inside an active Codex session, a bare
+   `pnpm agent:autoreview` is the closeout, matching root
+   [`AGENTS.md`](../../AGENTS.md). The skill routers defer to this step rather
+   than defining the choice themselves, so do not read the agreement between them
+   as a second source. Inside an active Codex session, a bare
    invocation silently selects the local deterministic engine — the `ship`
    skill's bare closeout is NOT sufficient there; use the prepared-bundle
    fresh-context flow so a separate reviewer inspects every pass:
@@ -241,9 +243,8 @@ Solution` (approach before implementation detail). PRs open **ready for
    head.
 
 7. **Ready-state.** Before signalling all-clear, run both projections with
-   `<BASE_REPO>` resolved from the PR URL — as the `babysit-pr` skill does —
-   so a fork PR or a switched checkout cannot bind the query to the wrong
-   repository:
+   `<BASE_REPO>` resolved from the PR URL as step 5 defines it, so a fork PR or a
+   switched checkout cannot bind the query to the wrong repository:
 
    ```bash
    pnpm --silent pr:feedback-state --pr <number> --repo <BASE_REPO> --json
