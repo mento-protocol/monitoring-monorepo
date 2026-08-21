@@ -13,10 +13,13 @@ templates for Mento monitoring.
 
 The CDP folder includes the `CDP System Parameters Not Loaded` warning. It
 fires when a joined CDP market row reports an incomplete SystemParams snapshot
-for 10 minutes. `liquity.systemParams.deadContract` is one possible exact
-diagnostic cause; inspect the indexer logs for the cause. Metrics Bridge Poll
-Errors owns `cdp_query` and `cdp_update` failures, and the bridge liveness rule
-owns a full bridge outage.
+for 10 minutes and the unlabeled
+`mento_cdp_last_successful_poll` marker proves a successful CDP query and full
+publication within 90 seconds. `liquity.systemParams.deadContract` is one
+possible exact diagnostic cause; inspect the indexer logs for the cause. Query
+and update failures keep the prior CDP bundle while the marker ages. Metrics
+Bridge Poll Errors owns `cdp_query` and `cdp_update` failures, the CDP marker
+owns CDP freshness, and the bridge liveness rule owns a full bridge outage.
 
 ## State
 

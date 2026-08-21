@@ -44,6 +44,13 @@ transport.
   alerting plane. An event that requires warning or paging must expose an
   owned metric and have a Grafana rule with severity and routing. A
   `context.log.error` event alone creates no alert.
+- CDP SystemParams readiness requires both the per-market
+  `mento_cdp_system_params_loaded` state and a fresh unlabeled
+  `mento_cdp_last_successful_poll` marker. The marker advances only after the
+  metrics bridge completes a successful CDP query and publishes the full CDP
+  bundle. Query failures and malformed updates retain the last bundle while
+  the marker ages. The CDP marker owns CDP freshness; the FPMM
+  `mento_pool_bridge_last_poll` gauge and bounded poll-error labels do not.
 - Handlers continue to use structured `<area>.<event>` names. Do not add Sentry
   to the hosted indexer.
 - Current structured error families are diagnostic-only:
@@ -72,8 +79,9 @@ transport.
 
 - The four structured families remain diagnostic surfaces. Issue [#1624](https://github.com/mento-protocol/monitoring-monorepo/issues/1624)
   adds generic warning coverage for persistent incomplete CDP SystemParams
-  state. It does not turn `deadContract` or `diagnosticFailed` into alert
-  labels, and the generic state does not identify one exact cause.
+  state, gated by a fresh successful query and publication marker. It does not
+  turn `deadContract` or `diagnosticFailed` into alert labels, and the generic
+  state does not identify one exact cause.
 - Existing operators use status and metrics to assess deployment health, then
   inspect the exact deployment's bounded error logs. A deployment is not
   healthy merely because a log query returns data or no error records.

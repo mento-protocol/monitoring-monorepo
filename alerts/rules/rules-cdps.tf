@@ -13,9 +13,11 @@
 #
 # no_data_state / exec_err_state = "OK" on every rule: a missing CDP gauge
 # (deploy-window rollout before the bridge ships, or a stale series after the
-# bridge restarts) must NOT page. Bridge liveness is owned by the
-# metrics-bridge poll-staleness alert; absence of CDP data is never itself a
-# CDP emergency.
+# bridge restarts) must NOT page. The SystemParams rule also requires the
+# unlabeled `mento_cdp_last_successful_poll` marker to be less than 90 seconds
+# old. The marker advances only after a successful CDP query and complete
+# publication; it does not use the FPMM-owned bridge-last-poll gauge or poll
+# error labels. Bridge liveness and poll errors remain separate owners.
 #
 # NOT covered here (deliberate): TCR / ICR rules. `LiquityInstance.tcrBps`,
 # `icrP1Bps`, and `icrFracBelowMcrBps` are hardcoded −1 sentinels in the
@@ -109,8 +111,10 @@ resource "grafana_rule_group" "cdps" {
 
   # ── 2. System Parameters Not Loaded (warning) ───────────────────────────
   # This generic state covers a market whose SystemParams snapshot remains
-  # incomplete. `liquity.systemParams.deadContract` is one possible exact
-  # diagnostic cause; inspect the indexer logs for that and other causes.
+  # incomplete after a fresh successful CDP query and publication.
+  # `liquity.systemParams.deadContract` is one possible exact diagnostic
+  # cause; inspect the indexer logs for that and other causes. Query and update
+  # failures retain the last good CDP bundle while its success marker ages.
   # Transport failures remain covered by the metrics-bridge poll-error and
   # liveness rules, not by this CDP state rule.
   rule {
@@ -139,7 +143,7 @@ resource "grafana_rule_group" "cdps" {
       model = jsonencode({
         refId   = "metric"
         instant = true
-        expr    = "mento_cdp_system_params_loaded"
+        expr    = "mento_cdp_system_params_loaded and on() (time() - mento_cdp_last_successful_poll < 90)"
       })
     }
     data {
