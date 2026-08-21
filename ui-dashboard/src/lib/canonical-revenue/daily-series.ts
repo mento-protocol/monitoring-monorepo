@@ -63,6 +63,25 @@ function isStethSnapshot(
   return "wallet" in row;
 }
 
+function isZeroWei(value: string): boolean {
+  const trimmed = value.trim();
+  if (!/^-?\d+$/.test(trimmed)) return false;
+  try {
+    return BigInt(trimmed) === BigInt(0);
+  } catch {
+    return false;
+  }
+}
+
+function isZeroExposureStethSnapshot(row: StethYieldDailySnapshotRow): boolean {
+  return [
+    row.balanceAmount,
+    row.principalAmount,
+    row.totalEarnedYieldAmount,
+    row.dailyEarnedYieldAmount,
+  ].every(isZeroWei);
+}
+
 function stethUsdPerTokenByWallet(
   reserveYield: ReserveYieldResponse | null,
 ): Map<string, number> {
@@ -97,11 +116,9 @@ function reserveSnapshotTotalUsd(
   stethRates: ReadonlyMap<string, number>,
 ): number | null {
   if (!isStethSnapshot(row)) return numericUsdWei(row.totalEarnedYieldUsdWei);
+  if (isZeroExposureStethSnapshot(row)) return 0;
   const usdPerToken = stethRates.get(row.wallet.toLowerCase());
-  const earnedAmount = numericTokenWei(row.totalEarnedYieldAmount);
-  return usdPerToken === undefined || earnedAmount === null
-    ? null
-    : earnedAmount * usdPerToken;
+  return stethAmountUsd(row.totalEarnedYieldAmount, usdPerToken);
 }
 
 function reserveSnapshotBaselineUsd(
@@ -112,15 +129,15 @@ function reserveSnapshotBaselineUsd(
   return dailyYieldUsd === null ? null : totalYieldUsd - dailyYieldUsd;
 }
 
-function stethSnapshotBaselineUsd(
-  row: StethYieldDailySnapshotRow,
-  totalYieldUsd: number,
-  usdPerToken: number,
+function stethAmountUsd(
+  value: string,
+  usdPerToken: number | undefined,
 ): number | null {
-  const dailyYieldAmount = numericTokenWei(row.dailyEarnedYieldAmount);
-  return dailyYieldAmount === null
-    ? null
-    : totalYieldUsd - dailyYieldAmount * usdPerToken;
+  if (usdPerToken === undefined) return null;
+  const amount = numericTokenWei(value);
+  if (amount === null) return null;
+  const usd = amount * usdPerToken;
+  return Number.isFinite(usd) ? usd : null;
 }
 
 function reserveSnapshotBaseline(
@@ -131,10 +148,10 @@ function reserveSnapshotBaseline(
   if (!isStethSnapshot(row)) {
     return reserveSnapshotBaselineUsd(row, totalYieldUsd);
   }
+  if (isZeroExposureStethSnapshot(row)) return 0;
   const usdPerToken = stethRates.get(row.wallet.toLowerCase());
-  return usdPerToken === undefined
-    ? null
-    : stethSnapshotBaselineUsd(row, totalYieldUsd, usdPerToken);
+  const dailyYieldUsd = stethAmountUsd(row.dailyEarnedYieldAmount, usdPerToken);
+  return dailyYieldUsd === null ? null : totalYieldUsd - dailyYieldUsd;
 }
 
 export function buildRevenueBuckets(args: {

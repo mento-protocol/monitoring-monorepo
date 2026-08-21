@@ -84,6 +84,7 @@ function stethReserveSnapshot(
   wallet: string,
   dailyEarnedYieldAmount: number,
   totalEarnedYieldAmount = dailyEarnedYieldAmount,
+  overrides: Partial<StethYieldDailySnapshotRow> = {},
 ): StethYieldDailySnapshotRow {
   return {
     id: `1-steth-${wallet}-${timestamp}`,
@@ -102,6 +103,7 @@ function stethReserveSnapshot(
     dailyUnrealizedYieldAmount: usdWei(dailyEarnedYieldAmount),
     sampledAtBlock: "1",
     sampledAtTimestamp: String(timestamp),
+    ...overrides,
   };
 }
 
@@ -310,6 +312,101 @@ describe("buildCanonicalRevenue", () => {
       "Reserve stETH earned-yield history is unavailable: current stETH USD/token pricing is missing.",
     );
   });
+
+  it("keeps mixed active and zero-exposure stETH wallet history complete", () => {
+    const activeWallet = "0xd0697f70e79476195b742d5afab14be50f98cc1e";
+    const dormantWallet = "0xd3d2e5c5af667da817b2d752d86c8f40c22137e1";
+    const result = buildCanonicalRevenue({
+      networkData: [],
+      cdpDailySeries: [],
+      cdpMarkets: [],
+      reserveYield: reserveYield({
+        holdings: [
+          stethHolding({
+            identifier: activeWallet,
+            principalUsd: 4_000,
+            balance: 2,
+          }),
+        ],
+      }),
+      reserveDailySnapshots: [
+        stethReserveSnapshot(ts("2026-06-11"), activeWallet, 1, 1, {
+          balanceAmount: usdWei(2),
+          principalAmount: usdWei(1),
+        }),
+        stethReserveSnapshot(ts("2026-06-11"), dormantWallet, 0),
+        stethReserveSnapshot(ts("2026-06-12"), activeWallet, 1, 2, {
+          balanceAmount: usdWei(2),
+          principalAmount: usdWei(1),
+        }),
+        stethReserveSnapshot(ts("2026-06-12"), dormantWallet, 0),
+      ],
+      nowSeconds: NOW_SECONDS,
+    });
+
+    expect(result.periods.allTimeSinceV3.reserveYieldUsd).toBe(4_000);
+    expect(result.periods.allTimeSinceV3.totalUsd).toBe(4_000);
+    expect(result.partialReasons).not.toContain(
+      "Reserve stETH earned-yield history is unavailable: current stETH USD/token pricing is missing.",
+    );
+  });
+
+  it.each([
+    ["balance", { balanceAmount: "1" }],
+    ["principal", { principalAmount: "1" }],
+    ["cumulative yield dust", { totalEarnedYieldAmount: "1" }],
+    ["daily yield dust", { dailyEarnedYieldAmount: "1" }],
+  ])(
+    "keeps an unpriced stETH row partial when its %s is nonzero",
+    (_label, overrides) => {
+      const wallet = "0xd3d2e5c5af667da817b2d752d86c8f40c22137e1";
+      const result = buildCanonicalRevenue({
+        networkData: [],
+        cdpDailySeries: [],
+        cdpMarkets: [],
+        reserveYield: reserveYield(),
+        reserveDailySnapshots: [
+          stethReserveSnapshot(ts("2026-06-12"), wallet, 0, 0, overrides),
+        ],
+        nowSeconds: NOW_SECONDS,
+      });
+
+      expect(result.periods.allTimeSinceV3.reserveYieldUsd).toBeNull();
+      expect(result.partialReasons).toContain(
+        "Reserve stETH earned-yield history is unavailable: current stETH USD/token pricing is missing.",
+      );
+    },
+  );
+
+  it.each([
+    ["balance", { balanceAmount: "not-wei" }],
+    ["principal", { principalAmount: "not-wei" }],
+    ["cumulative yield", { totalEarnedYieldAmount: "not-wei" }],
+    ["daily yield", { dailyEarnedYieldAmount: "not-wei" }],
+    ["blank balance", { balanceAmount: "" }],
+    ["whitespace-only balance", { balanceAmount: "  " }],
+    ["non-decimal balance", { balanceAmount: "0x0" }],
+  ])(
+    "keeps an unpriced stETH row partial when its %s is malformed",
+    (_label, overrides) => {
+      const wallet = "0xd3d2e5c5af667da817b2d752d86c8f40c22137e1";
+      const result = buildCanonicalRevenue({
+        networkData: [],
+        cdpDailySeries: [],
+        cdpMarkets: [],
+        reserveYield: reserveYield(),
+        reserveDailySnapshots: [
+          stethReserveSnapshot(ts("2026-06-12"), wallet, 0, 0, overrides),
+        ],
+        nowSeconds: NOW_SECONDS,
+      });
+
+      expect(result.periods.allTimeSinceV3.reserveYieldUsd).toBeNull();
+      expect(result.partialReasons).toContain(
+        "Reserve stETH earned-yield history is unavailable: current stETH USD/token pricing is missing.",
+      );
+    },
+  );
 
   it("marks stETH reserve history partial when current wallet pricing is missing", () => {
     const wallet = "0xd0697f70e79476195b742d5afab14be50f98cc1e";
