@@ -11,7 +11,7 @@ review_interval_days: 90
 garden_lane: adrs-architecture
 ---
 
-# ADR 0068 — the quality gate's routing table is data, compiled by the repo's own bash-`case` translator
+# ADR 0069 — the quality gate's routing table is data, compiled by the repo's own bash-`case` translator
 
 **Status:** Active (Aug 2026). First implementation PR: the D5a step of
 [issue 1877](https://github.com/mento-protocol/monitoring-monorepo/issues/1877)'s

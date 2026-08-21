@@ -12,7 +12,7 @@ const expectedScripts = {
   postinstall: "pnpm --filter @mento-protocol/config build",
   "agent:quality-gate": "./scripts/agent-quality-gate.sh",
   "agent:quality-gate:test": "bash scripts/agent-quality-gate.test.sh",
-  // The routing table's own suite (ADR 0068). It is the only thing proving that
+  // The routing table's own suite (ADR 0069). It is the only thing proving that
   // the table and the gate's `case` arms still describe the same routing, that
   // the pattern compiler agrees with bash, and that no arm names a path that has
   // gone. The gate schedules it and so does the required `ci` job, which makes

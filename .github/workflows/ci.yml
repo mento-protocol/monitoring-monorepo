@@ -1025,7 +1025,7 @@ jobs:
         # and could merge if a contributor bypasses the local gate.
         run: pnpm agent:quality-gate:test
       - name: Gate routing-table suite
-        # ADR 0068. The gate's routing exists twice — as `case` arms in
+        # ADR 0069. The gate's routing exists twice — as `case` arms in
         # scripts/agent-quality-gate.sh and as data in
         # scripts/gate/routing-table/ — and this suite is what proves the two
         # still describe the same routing, alongside the pairing lint, the path

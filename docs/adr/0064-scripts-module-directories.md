@@ -288,7 +288,7 @@ routing, not procedure.
    helper the gate cannot find exit 2 instead of falling toward the full suite —
    its caller reads a nonzero exit as "cannot narrow", so the old behaviour
    silently widened every lockfile change and the run read as slow, not broken.
-   Since ADR 0068 the same routing also exists as DATA in
+   Since ADR 0069 the same routing also exists as DATA in
    `scripts/gate/routing-table/`, and a move has to update both. The data is the
    easier half: its patterns are checked for staleness and its `scripts/`-anchored
    globs are checked for their any-depth pair, so a move that misses the table

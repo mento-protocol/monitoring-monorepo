@@ -9,7 +9,7 @@
  * tree depends on are enforced by review alone once it is written that way:
  * paired any-depth arms, first-arm-wins ordering, and literal freshness. This
  * module holds the same routing as an ordered, frozen ES-module tree so those
- * three become checks instead of habits. ADR 0068 records the decision.
+ * three become checks instead of habits. ADR 0069 records the decision.
  *
  * WHAT DEPENDS ON THE ORDER
  *

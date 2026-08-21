@@ -77,7 +77,7 @@ same PR, except the `agent-autoreview.sh` feedback-runtime pins below.
   three (ADR 0064).
 - **Gate routing-table pins.** Every `gate/routing-table/*.mjs` module is an
   `implementation_signature()` and `turbo.json` entry
-  ([ADR 0068](../docs/adr/0068-gate-routing-table-as-data.md)).
+  ([ADR 0069](../docs/adr/0069-gate-routing-table-as-data.md)).
 - **Evaluation fixture forbidden lists.** `forbidden_sources` in
   `docs/evals/documentation-navigation-fixtures.json` names the navigation
   eval's own implementation.

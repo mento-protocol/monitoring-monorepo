@@ -3846,7 +3846,7 @@ while IFS= read -r path; do
           # this covers the commoner one — somebody adds or reorders an arm here
           # and does not touch the data. Without it the table goes stale exactly
           # where nothing reds, which is the failure this conversion exists to
-          # end (ADR 0068).
+          # end (ADR 0069).
           add_command "pnpm gate:routing-table:test" "gate routing arms must still match the routing table"
           ;;
         scripts/agent-autoreview.sh|scripts/agent-autoreview.test.sh)
@@ -3990,7 +3990,7 @@ while IFS= read -r path; do
         scripts/gate/agent-prewarm.mjs|scripts/gate/agent-prewarm.test.mjs)
           add_command "pnpm agent:prewarm:test" "agent prewarm helper changed"
           ;;
-        # The routing table as data (ADR 0068). Its own suite owns the schema,
+        # The routing table as data (ADR 0069). Its own suite owns the schema,
         # ADR 0064's pairing rule, path staleness, the bash-oracle proof of the
         # pattern compiler, and the equality check against the `case` arms in
         # this file. The gate self-test rides along because every module here is

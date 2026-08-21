@@ -79,6 +79,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0065](0065-scripts-file-size-watchlist-scope.md)           | `scripts/` sits inside the file-size watchlist, with named-mechanism exemptions      |
 | [0066](0066-coderabbit-replaces-bugbot-third-reviewer.md)   | CodeRabbit replaces Cursor BugBot as the third advisory PR reviewer                  |
 | [0068](0068-sentry-fixture-authoring-policy.md)             | Adversarial fixtures are authored to scan clean; no value or line registry           |
+| [0069](0069-gate-routing-table-as-data.md)                  | The gate's routing table is data, compiled by the repo's own bash-`case` translator  |
 
 ### shared-config
 
