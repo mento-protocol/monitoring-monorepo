@@ -7238,13 +7238,13 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     fail "the interrupted-drain case could not record A's exact watchdog identity"
   kill -STOP "$race_drain_watchdog_pid" 2>/dev/null ||
     fail "the interrupted-drain case could not stop A's exact watchdog"
+  race_drain_watchdog_identities="${race_drain_watchdog_pid}|${race_drain_watchdog_start}"$'\n'
   race_drain_watchdog_deadline=$(( $(date +%s) + 10 ))
   while ! race_drain_process_is_stopped "$race_drain_watchdog_pid" "$race_drain_watchdog_start" && [[ "$(date +%s)" -lt "$race_drain_watchdog_deadline" ]]; do
     sleep 1
   done
   race_drain_process_is_stopped "$race_drain_watchdog_pid" "$race_drain_watchdog_start" ||
     fail "the interrupted-drain case could not confirm A's exact watchdog was stopped"
-  race_drain_watchdog_identities="${race_drain_watchdog_pid}|${race_drain_watchdog_start}"$'\n'
   kill -KILL "$race_drain_a_pid" 2>/dev/null || true
   race_drain_kill_and_reap_direct_wrapper \
     "A gate" "$race_drain_a_wrapper" "$race_drain_a_wrapper_start"
