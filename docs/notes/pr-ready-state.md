@@ -121,11 +121,14 @@ machinery and do not count. A head-bound closeout request uses this exact body:
 ```
 
 After the optional CodeRabbit check becomes terminal, refresh the projection
-once. If the signal is `missing` or `stale`, post that body once. A `requested`
-signal suppresses duplicates for the same head. The CodeRabbit check and review
-remain advisory: report a pending or rate-limited result as optional lag. If a
-requested review finishes while the PR is still under watch, rerun
-`pr:feedback-state` and handle its findings before all-clear.
+once. If the signal is `missing` or `stale`, re-resolve `headRefOid` immediately
+before posting and require it to equal the marker head. A `requested` signal
+suppresses ordinary duplicate posts for the same head. GitHub's issue-comment
+API has no conditional-create operation, so the marker is a detection and
+best-effort suppression mechanism rather than an atomic claim. The CodeRabbit
+check and review remain advisory: report a pending or rate-limited result as
+optional lag. If a requested review finishes while the PR is still under watch,
+rerun `pr:feedback-state` and handle its findings before all-clear.
 
 Some non-required workflows still post feedback that becomes a repo-policy
 blocker after the required status surface is green. Their workflow status stays
@@ -285,6 +288,12 @@ Expected top-level fields:
       "state": "in_flight",
       "fallbackAction": "wait"
     },
+    "codeRabbitReviewSignal": {
+      "ready": false,
+      "required": false,
+      "state": "missing",
+      "fallbackAction": "request_review_once_for_head_after_optional_check"
+    },
     "reviewCommentReplies": {
       "ready": true,
       "required": true,
@@ -303,6 +312,7 @@ Expected top-level fields:
     }
   ],
   "codexReviewSignal": "in_flight",
+  "codeRabbitReviewSignal": "missing",
   "summary": "Required check trunk is still pending; Cursor Bugbot is advisory and still pending."
 }
 ```
@@ -404,8 +414,10 @@ Field expectations:
    in-progress review-producing workflows. If you are still watching the PR when
    one finishes, rerun `pr:feedback-state` to catch late feedback; do not treat
    the optional workflow status itself as a blocker.
-10. Signal all-clear only after feedback-state has no required blocker and final
-    ready-state `ready` is true for the current head.
+10. After the CodeRabbit closeout step and any final optional-review refresh,
+    rerun `pr:feedback-state` and then `pr:ready-state`. Signal all-clear only
+    when feedback-state has no required blocker and ready-state `ready` is true
+    for the current head.
 
 Claude Code and Codex intentionally use the same command and readiness fields.
 Differences between Claude `Monitor` wiring and Codex polling should stay

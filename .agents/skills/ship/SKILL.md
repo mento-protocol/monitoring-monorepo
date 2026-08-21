@@ -208,12 +208,12 @@ the blocker; do not call the UI PR shipped or ready.
 
 ## Post-Push And Closeout
 
-Follow the operating card's Babysit and Ready-state steps: run
-`pnpm --silent pr:feedback-state` first, then `pnpm pr:ready-state`, both bound
-with `--repo "$BASE_REPO"` because checkout inference can inspect the wrong
-same-number PR. Apply the `babysit-pr` skill's idempotent CodeRabbit exact-head
-request rule before the final pair. `docs/notes/pr-ready-state.md` owns that
-contract. In a Claude
+Follow the operating card's Babysit and Ready-state steps. Apply the
+`babysit-pr` skill's head-bound CodeRabbit exact-head request rule first. Then
+run `pnpm --silent pr:feedback-state` followed by `pnpm pr:ready-state`, both
+bound with `--repo "$BASE_REPO"` because checkout inference can inspect the
+wrong same-number PR. `docs/notes/pr-ready-state.md` owns that contract. In a
+Claude
 cloud session without the capability gate the probes cannot run: use the
 `babysit-pr` skill's cloud watch loop and label its result MCP-emulated. If the
 user asked for the complete ship loop, run `babysit-pr` through current-head

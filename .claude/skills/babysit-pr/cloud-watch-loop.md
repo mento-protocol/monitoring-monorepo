@@ -52,7 +52,9 @@ Do not foreground-poll and never sleep-poll. Instead:
      is missing or stale and no top-level comment contains
      `<!-- coderabbit-final-head-review:<full-head-sha> -->`, use
      `add_issue_comment` to post `@coderabbitai review`, a blank line, and that
-     exact marker. The marker prevents a duplicate request for the same head.
+     exact marker. Recheck the current full head immediately before the write.
+     The marker detects completed requests and provides best-effort duplicate
+     suppression; the issue-comment API does not provide an atomic claim.
 4. Blocker handling, reply shapes, and Codex-request discipline are identical
    to the local path; use the MCP write tools named in the same mapping
    (`add_reply_to_pull_request_comment` for inline review comments,

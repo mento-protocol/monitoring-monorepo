@@ -298,8 +298,8 @@ has state `reviewed`; empty CodeRabbit review records created by thread replies
 do not count. If the optional `CodeRabbit` check is still pending, report that
 lag and do not race it with a manual request. After the check becomes terminal,
 refresh feedback-state once. For `missing` or `stale`, re-resolve and validate
-the full 40-hex `headRefOid`, then post this body once through the bound base
-repository:
+the full 40-hex `headRefOid`. Recheck it immediately before the write and post
+this body only when it still matches, through the bound base repository:
 
 ```text
 @coderabbitai review
@@ -308,10 +308,12 @@ repository:
 ```
 
 Use `gh pr comment <number> --repo <BASE_REPO> --body-file -` with the body on
-stdin. The head marker makes the request idempotent. State `requested` or
-`reviewed` forbids another request for that head. The review remains advisory;
-report pending or rate-limited completion as optional lag. If it finishes while
-watching, rerun feedback-state and handle every new finding before all-clear.
+stdin. The head marker detects completed requests and provides best-effort
+duplicate suppression; GitHub issue comments have no conditional-create
+operation, so it is not an atomic claim. State `requested` or `reviewed` forbids
+another request for that head. The review remains advisory; report pending or
+rate-limited completion as optional lag. If it finishes while watching, rerun
+feedback-state and handle every new finding before all-clear.
 
 Before reporting all-clear, rerun both projections in that order — feedback
 ledger clean first, then current-head readiness. If an optional review-producing

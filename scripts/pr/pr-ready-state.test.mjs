@@ -2262,6 +2262,38 @@ test("classifies only real CodeRabbit runs as exact-head reviews", () => {
   );
 });
 
+test("does not classify CodeRabbit signals as current without a head SHA", () => {
+  const markedHead = "b".repeat(40);
+  const runBody = "**Run ID**: `008b2b08-511b-40b3-bfae-6673f0339188`";
+  const requestBody =
+    `@coderabbitai review\n\n` +
+    `<!-- coderabbit-final-head-review:${markedHead} -->`;
+
+  assertEqual(
+    classifyCodeRabbitReviewSignal({
+      reviews: [
+        {
+          author: { login: "coderabbitai" },
+          body: runBody,
+          commit: { oid: markedHead },
+        },
+      ],
+    }),
+    "stale",
+  );
+  assertEqual(
+    classifyCodeRabbitReviewSignal({
+      issueComments: [
+        {
+          body: requestBody,
+          created_at: "2026-08-21T08:14:00Z",
+        },
+      ],
+    }),
+    "stale",
+  );
+});
+
 test("projects the CodeRabbit exact-head run without making it required", () => {
   const currentHeadOid = "b".repeat(40);
   const summary = summarizeReadyState({
