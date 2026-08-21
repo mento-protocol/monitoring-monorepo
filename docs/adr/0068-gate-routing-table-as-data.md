@@ -101,8 +101,13 @@ Two checks come with the data and are the point of the conversion:
 
 The two checks compose. An exact path is protected by staleness, which reds
 loudly on a move; a prefix glob is protected by pairing, which is the case
-staleness cannot see because a glob keeps matching something. Neither needs an
-opt-out on the table as it stands.
+staleness cannot see because a glob keeps matching something. The pairing rule
+needs no opt-out on the table as it stands — every literal-prefix glob under
+`scripts/` carries its sibling — and staleness needs the one named above.
+
+Both opt-outs cost a stated reason. A bare flag would let the rule this table
+exists to enforce be suppressed with one word, and leave the next reader unable
+to tell a considered exception from a silenced check.
 
 ### 2. Patterns are compiled by the repo's own translator, never by a glob library
 

@@ -244,6 +244,12 @@ function flattenGroups(body, context) {
  * The long pattern lists are written across several lines; to bash they are one
  * word list, and reading them as separate lines would find an arm whose pattern
  * ends in `|` and refuse a file that is perfectly ordinary shell.
+ *
+ * A COMMENT never continues. In bash a `#` comment ends at the newline whatever
+ * the last character is, so joining a comment that happens to end in a
+ * backslash would swallow the statement under it — the parser would then report
+ * a missing effect, or an orphaned arm head, pointing at the wrong construct
+ * and disagreeing with the shell it claims to mirror.
  */
 function joinContinuations(lines) {
   const joined = [];
@@ -252,7 +258,7 @@ function joinContinuations(lines) {
     const text =
       pending === null ? line.text : `${pending.text} ${line.text.trim()}`;
     const number = pending === null ? line.number : pending.number;
-    if (text.endsWith("\\")) {
+    if (text.endsWith("\\") && !text.trimStart().startsWith("#")) {
       pending = { text: text.slice(0, -1).trimEnd(), number };
       continue;
     }

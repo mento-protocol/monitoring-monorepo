@@ -190,6 +190,14 @@ const COMMAND_PATH =
 
 function collectEffectPaths(effect, groupId, subjects) {
   if (Object.hasOwn(effect, "when")) {
+    // A `pathEquals` guard names an exact path, and it fails as quietly as a
+    // stale arm pattern does: the guarded commands simply stop being scheduled
+    // and nothing reds. Today both live guards repeat their path in the
+    // enclosing arm's pattern list, so this covers nothing new — which is
+    // precisely why it has to be here before the first one that does not.
+    if (typeof effect.when?.pathEquals === "string") {
+      subjects.push({ path: effect.when.pathEquals, groupId, kind: "guard" });
+    }
     for (const nested of effect.effects) {
       collectEffectPaths(nested, groupId, subjects);
     }

@@ -18,6 +18,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 
+import { bashFunctionSource } from "../../sentry/ci-wiring/check-sentry-suites-in-ci-gate-extract.mjs";
 import {
   exemptedLiterals,
   pairingProblems,
@@ -303,6 +304,31 @@ test("the staleness check reds on a checklist that is not in the tree", () => {
   );
 });
 
+test("the staleness check reds on a pathEquals guard that is not in the tree", () => {
+  // A guard literal fails as quietly as a stale arm pattern: the commands it
+  // guards simply stop being scheduled.
+  const subjects = stalenessSubjects(
+    table({
+      id: "x",
+      arms: [
+        arm(
+          ["docs/x.md"],
+          [
+            {
+              when: { pathEquals: "alerts/infra/gone/pnpm-workspace.yaml" },
+              effects: [{ surface: "docs" }],
+            },
+          ],
+        ),
+      ],
+    }),
+  );
+  assert.deepEqual(
+    subjects.filter((subject) => subject.kind === "guard").map((s) => s.path),
+    ["alerts/infra/gone/pnpm-workspace.yaml"],
+  );
+});
+
 test("an allowStale arm with only globs exempts nothing", () => {
   assert.deepEqual(
     exemptedLiterals({
@@ -429,15 +455,33 @@ const MODULES = readdirSync(HERE)
   .filter((name) => name.endsWith(".mjs"))
   .sort();
 
+/**
+ * The source text of `implementation_signature()` ALONE.
+ *
+ * Searching the whole gate would let a comment or a routing reason string that
+ * happens to name `scripts/gate/routing-table/foo.mjs` satisfy the pin while
+ * the module is absent from the signature — the exact `__missing__`/frozen-stamp
+ * failure the pin exists to catch. The gate already carries prose naming this
+ * directory, so the scope is not hypothetical.
+ *
+ * The span comes from `bashFunctionSource`, which asks bash where the function
+ * ends rather than looking for a closing brace: a textual terminator cannot see
+ * a heredoc, a quoted `}`, or a trailer sharing the closing line.
+ */
+const SIGNATURE_SOURCE = bashFunctionSource(
+  read("/scripts/agent-quality-gate.sh"),
+  "implementation_signature",
+  "scripts/agent-quality-gate.sh",
+);
+
 test("implementation_signature() lists every routing-table module", () => {
   // THE load-bearing pin. A path `implementation_signature()` cannot `stat`
   // hashes as the literal `__missing__`, which FREEZES the signature — so
   // `--skip-if-fresh` reuses a stale stamp and skips real pre-push work. A
   // module added here and not there fails that way and only that way.
-  const gate = read("/scripts/agent-quality-gate.sh");
   for (const module of MODULES) {
     assert.ok(
-      gate.includes(`gate/routing-table/${module}`),
+      SIGNATURE_SOURCE.includes(`gate/routing-table/${module}`),
       `\`implementation_signature()\` in scripts/agent-quality-gate.sh does not list gate/routing-table/${module}. ` +
         "A missing entry hashes as `__missing__` and freezes the freshness signature.",
     );
@@ -450,7 +494,7 @@ test("implementation_signature() lists no routing-table module that is gone", ()
   // stops moving and `--skip-if-fresh` reuses a stale stamp. A module that is
   // split or renamed leaves exactly this residue.
   const listed = [
-    ...read("/scripts/agent-quality-gate.sh").matchAll(
+    ...SIGNATURE_SOURCE.matchAll(
       /scripts\/gate\/routing-table\/([\w.-]+\.mjs)/g,
     ),
   ].map((match) => match[1]);
