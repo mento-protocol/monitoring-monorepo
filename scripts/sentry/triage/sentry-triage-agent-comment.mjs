@@ -68,21 +68,16 @@
  * and their bounding, are in the workflow's containment banner and in
  * docs/notes/sentry-triage-pipeline.md.
  *
- * A DEAD BROKER IS NOT A VERDICT (issue #1956). The Sentry credential broker
- * runs backgrounded in the same job, and its exit fails no step: the job must
- * END with the agent, so nothing runs afterwards to notice, and a background
- * process can neither write the job log nor fail a sibling step. A broker that
- * dies mid-run therefore leaves the agent reading ECONNREFUSED and reporting
- * `needs-human` — a verdict about the TOOLING that the deterministic `verdict`
- * job cannot tell apart from a judgement about the ISSUE, so it labels the
- * stub, strips `sentry:needs-triage` and parks work nobody can act on. The
- * prompt already tells the agent to post nothing in that state; this is the
- * structural half, because a prompt-injected agent is exactly the one that
- * ignores it. The workflow's watchdog writes BROKER_DOWN_FILE_RELATIVE when the
- * broker goes; this script refuses on that marker and prints it, and — because
- * a polled marker lags the death it reports — also probes the broker directly
- * in the instant before it posts. No comment means the `verdict` job finds no
- * verdict, fails loudly, and leaves `sentry:needs-triage` for the next run.
+ * A DEAD BROKER IS NOT A VERDICT (issue #1956), and this file is not where that
+ * is decided. `sentry-triage-broker-guard.mjs` owns the liveness fence and the
+ * public-log redactor; read its header for the mechanism and its limits. What
+ * matters HERE is only the call order: `assertBrokerAlive` runs LAST, in the
+ * instant before the body is handed to `gh`, because a liveness answer is worth
+ * exactly as much as it is fresh. A broker that dies mid-run otherwise leaves
+ * the agent reading ECONNREFUSED and reporting `needs-human` — a verdict about
+ * the TOOLING that the deterministic `verdict` job cannot tell apart from a
+ * judgement about the ISSUE. Withholding the comment is what makes that round
+ * fail loudly instead of settling the stub.
  *
  * THE BODY NEVER TOUCHES THE FILESYSTEM. It goes to `gh --body-file -` on the
  * child's stdin. An earlier version validated the body, wrote it to a
