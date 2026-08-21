@@ -123,15 +123,30 @@ Solution` (approach before implementation detail). PRs open **ready for
    out of `agent-active` and into review. Authority:
    [`agent-issue-workflow.md`](agent-issue-workflow.md).
 
-   **Bind the checkout to the target before publishing.** Resolve the PR's head
-   repository, `headRefName`, and `headRefOid`; require a configured remote that
-   serves that head repository and a local `HEAD` equal to that OID; push with an
-   explicit `git push <head-remote> HEAD:<headRefName>` refspec, never an implicit
-   target or the local branch name. Re-read the PR afterwards and require the new
-   `headRefOid` to equal local `HEAD` before treating anything as published. A
-   fork checkout uses its parent as `BASE_REPO`; never substitute a fork's
-   `origin` for its parent, and stop if the head repository has no matching push
-   remote.
+   **Commit the validated work first.** Steps 3-4 validate the worktree, so stage
+   only the intended files and create the ship commit before any push — otherwise
+   the remote receives the old commit while every validated change stays local. If
+   unrelated dirty changes are mixed with the intended scope, stop and ask before
+   staging.
+
+   **Then bind the checkout to the target.** Which target depends on whether a PR
+   exists yet:
+   - **An existing PR** is the push target: resolve its head repository,
+     `headRefName` and `headRefOid`; require a configured remote serving that head
+     repository and a local `HEAD` equal to that OID before editing; push with an
+     explicit `git push <head-remote> HEAD:<headRefName>` refspec, never an
+     implicit target or the local branch name. If the branch is missing current
+     base commits, merge the base in — rebase is only acceptable before first
+     publication.
+   - **No PR yet**, so there is no `headRefOid` to match: verify `origin` serves
+     `CURRENT_REPO`, take the current branch as the head ref, push it with
+     `git push -u origin HEAD:<branch>`, and create the PR from that published
+     branch.
+
+   Either way, re-read the PR after pushing and require its `headRefOid` to equal
+   local `HEAD` before treating anything as published. A fork checkout uses its
+   parent as `BASE_REPO`; never substitute a fork's `origin` for its parent, and
+   stop if the head repository has no matching push remote.
 
 6. **Babysit.** Run the `babysit-pr` skill. Sweep every feedback surface:
    top-level comments, review bodies, inline comments and threads, annotations,
@@ -157,6 +172,13 @@ Solution` (approach before implementation detail). PRs open **ready for
    files: clean worktree, local `HEAD` equal to the resolved `headRefOid`,
    explicit push refspec, re-verified OID afterwards. If binding fails, move to a
    clean dedicated checkout rather than editing an unbound one.
+
+   **A user correction updates the request baseline.** When the user changes what
+   they asked for mid-babysit, update the PR description before the next push.
+   Current-head reviewers read the description as the acceptance criteria, so a
+   stale one makes them enforce superseded behaviour and re-raise findings you
+   already resolved. This is the one edit to the description the babysit step
+   makes, alongside recording a deferral.
 
    **Bound the watch.** One hour of wall clock by default unless the user set a
    different budget, and roughly three attempts at the same recurring item before
