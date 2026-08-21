@@ -34,7 +34,10 @@ list for review.
    Claude cloud session without the capability gate use the MCP workboard
    fallback in
    [`docs/notes/github-tooling-surfaces.md`](../../../docs/notes/github-tooling-surfaces.md)
-   (label transition, claim comment, `issue:board sync` handoff). Do not
+   (label transition, claim comment, `issue:board backfill --issue <n>` and
+   `issue:board sync` handoff). Run the backfill helper first with `--dry-run`.
+   It fills empty ownership fields from a trusted claim comment and rejects
+   conflicting Project values. Do not
    overwrite a packet already labeled `needs-grooming`, `agent-active`, or
    `in-pr`; it remains the one live packet until resolved or closed.
 3. Reproduce the packet when needed:

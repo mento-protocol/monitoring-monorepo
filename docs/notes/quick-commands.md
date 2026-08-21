@@ -104,6 +104,7 @@ pnpm issue:claim --count 3 --agent codex       # Claim ready issues and move the
 pnpm issue:review --pr 123 --issue 901         # Move claimed issue to in-pr / review
 pnpm issue:release --issue 901                 # Release a mistaken claim back to agent-ready
 pnpm issue:board sync                          # Re-project labels and close merged in-pr board items
+pnpm issue:board backfill --issue 901 --dry-run # Preview fill-only ownership-field recovery from a trusted claim comment
 pnpm issue:board:test                          # Offline tests for the issue-board helper
 
 # Sentry triage pipeline (Stage A — deterministic ingest; Stage B — read-only triage + digest; ADR 0036)

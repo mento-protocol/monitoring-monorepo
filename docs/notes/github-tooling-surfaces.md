@@ -102,11 +102,14 @@ partial MCP emulation plus an explicit gh-capable handoff:
 3. The Project Claim ID race guard is absent on this path, so the claim
    comment is the ownership record; check for a fresher competing claim
    comment before starting work.
-4. Hand off to a gh-capable surface: run `pnpm issue:board sync` afterward
-   to reconcile the Project #12 item's status. Sync writes status only — the
-   ownership fields (`Claim ID`, `Agent`, `Branch`, `Claimed At`) stay empty
-   until backfilled from the claim comment (a helper backfill path is
-   tracked in #1488), so the claim comment remains the ownership record.
+4. Hand off to a gh-capable surface. Run
+   `pnpm issue:board backfill --issue <n> --dry-run`, then rerun it without
+   `--dry-run` only when the proposed ownership-field writes are correct. The
+   helper reads the newest valid trusted claim comment and fills empty `Claim
+ID`, `Agent`, `Branch`, and `Claimed At` fields. It preserves Project Status,
+   rejects non-empty conflicts, re-reads before writing, and does not provide
+   atomic compare-and-swap semantics. Run `pnpm issue:board sync` separately
+   to reconcile status.
 
 ## Known MCP gaps
 

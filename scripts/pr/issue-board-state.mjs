@@ -96,6 +96,18 @@ export function isClaimable(issue) {
   );
 }
 
+export function isBackfillable(issue) {
+  const labels = labelNames(issue);
+  const hasActive = labels.has("agent-active");
+  const hasReview = labels.has("in-pr");
+  return (
+    issue.state === "OPEN" &&
+    hasActive !== hasReview &&
+    !labels.has("agent-ready") &&
+    !labels.has("needs-grooming")
+  );
+}
+
 export function isReviewable(issue) {
   const labels = labelNames(issue);
   return (

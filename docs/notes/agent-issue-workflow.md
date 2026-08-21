@@ -100,6 +100,7 @@ pnpm issue:review --pr 123 --issue 901
 pnpm issue:release --issue 901
 pnpm issue:release --issue 901 --needs-grooming
 pnpm issue:board sync
+pnpm issue:board backfill --issue 901 --dry-run
 pnpm issue:board:test
 ```
 
@@ -118,6 +119,16 @@ The helper requires a text Project field named `Claim ID` before it will claim
 issues; this field is the ownership token that prevents two agents from both
 winning the same issue. It also populates optional Project fields named `Agent`,
 `Branch`, `Claimed At`, and `PR` when those fields exist.
+
+Use `pnpm issue:board backfill --issue <n>` only to recover Project ownership
+fields after an eligible MCP claim. It requires one open issue with exactly one
+of `agent-active` or `in-pr`, a valid trusted claim comment, and Project fields
+with exact types: `Agent`, `Claim ID`, and `Branch` as text; `Claimed At` as a
+date. Start with `--dry-run`. The helper fills empty fields only. It rejects a
+non-empty mismatch and leaves Status unchanged. It re-reads the issue, claim,
+and fields before writing, then verifies the result. It cannot make the
+separate GitHub reads and writes atomic. It reads at most 100 comment pages or
+10,000 comments and fails closed rather than use incomplete claim history.
 
 ## PR Body Rules
 

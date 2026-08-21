@@ -1,5 +1,5 @@
 /**
- * Issue-board commands: claim, review, release, and sync.
+ * Issue-board commands: claim, review, release, sync, and backfill.
  *
  * Each command drives one label transition, projects it onto the workboard,
  * and posts the matching issue comment. Label edits happen first and roll back
@@ -22,20 +22,25 @@ import {
   findIssueProjectItem,
   getProject,
   hasDifferentClaimId,
+  readBackfillProjectFields,
+  requireBackfillFields,
   requireClaimIdField,
   updateProjectFields,
   verifyClaimOwnership,
+  writeBackfillProjectFields,
 } from "./issue-board-projects.mjs";
 import {
   ensurePrExists,
   getGitBranch,
   getIssue,
   getPrIssues,
+  listIssueComments,
   listIssuesByLabel,
   listReadyIssues,
   runGh,
   sleep,
 } from "./issue-board-transport.mjs";
+import { backfillIssue } from "./issue-board-backfill.mjs";
 
 const CLAIM_SETTLE_MS = 1500;
 
@@ -352,9 +357,35 @@ export async function sync(options) {
   return results;
 }
 
+export async function backfill(options, dependencies = {}) {
+  const project = dependencies.getProject
+    ? await dependencies.getProject(options)
+    : await getProject(options);
+  return [
+    await backfillIssue(options, {
+      getIssue: dependencies.getIssue ?? getIssue,
+      getProject: async () => project,
+      findIssueProjectItem:
+        dependencies.findIssueProjectItem ?? findIssueProjectItem,
+      listIssueComments: dependencies.listIssueComments ?? listIssueComments,
+      requireBackfillFields:
+        dependencies.requireBackfillFields ?? requireBackfillFields,
+      readBackfillProjectFields:
+        dependencies.readBackfillProjectFields ?? readBackfillProjectFields,
+      writeBackfillProjectFields:
+        dependencies.writeBackfillProjectFields ?? writeBackfillProjectFields,
+    }),
+  ];
+}
+
 export function renderResults(results) {
   if (results.length === 0) return "No issues changed.";
   return results
-    .map((issue) => `#${issue.number} ${issue.state}: ${issue.title}`)
+    .map((issue) => {
+      const writes = issue.writes
+        ?.map((write) => `${write.field}=${write.value}`)
+        .join(", ");
+      return `#${issue.number} ${issue.state}: ${issue.title}${writes ? ` (${writes})` : ""}`;
+    })
     .join("\n");
 }

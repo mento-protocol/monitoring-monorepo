@@ -4663,6 +4663,9 @@ assert_contains "- pnpm issue:board:test (agent issue board helper changed)"
 run_gate "scripts/pr/agent-issue-board.test.mjs"
 assert_contains "- pnpm issue:board:test (agent issue board helper changed)"
 
+run_gate "scripts/pr/issue-board-backfill.mjs"
+assert_contains "- pnpm issue:board:test (agent issue board helper changed)"
+
 run_gate "scripts/pr/issue-board-cli.mjs"
 assert_contains "- pnpm issue:board:test (agent issue board helper changed)"
 
