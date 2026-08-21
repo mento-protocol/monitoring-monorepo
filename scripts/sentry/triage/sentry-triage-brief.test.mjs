@@ -90,10 +90,14 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
-function assertEqual(actual, expected) {
+function assertEqual(actual, expected, message) {
   if (actual !== expected) {
+    // The message is what says WHICH property was being asserted; call sites
+    // already pass one, and dropping it left a bare value mismatch to read.
     throw new Error(
-      `expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`,
+      `${message ? `${message}: ` : ""}expected ${JSON.stringify(
+        expected,
+      )}, got ${JSON.stringify(actual)}`,
     );
   }
 }
@@ -307,6 +311,21 @@ const patched = (gh) =>
   gh.calls.filter((c) => c.args[0] === "api" && c.args.includes("PATCH"));
 const deleted = (gh) =>
   gh.calls.filter((c) => c.args[0] === "api" && c.args.includes("DELETE"));
+
+await test("assertEqual reports the message its call site passed", () => {
+  let thrown = null;
+  try {
+    assertEqual(3, 10, "the count is the signal; the list is an affordance");
+  } catch (err) {
+    thrown = err instanceof Error ? err.message : String(err);
+  }
+  assert(thrown !== null, "a mismatch must throw");
+  assert(
+    thrown.includes("the count is the signal; the list is an affordance"),
+    `the failure output must name what was asserted; got: ${thrown}`,
+  );
+  assert(thrown.includes("expected 10, got 3"), `values kept: ${thrown}`);
+});
 
 // ---------------------------------------------------------------------------
 // Contract: the two new verdict fields.
@@ -2159,6 +2178,7 @@ await test("the pipeline's shared modules stay under the file-size hard cap", ()
     "scripts/sentry/triage/sentry-triage-brief-render.mjs",
     "scripts/sentry/triage/sentry-triage-queue-contract.mjs",
     "scripts/sentry/triage/sentry-triage-requeue.mjs",
+    "scripts/sentry/triage/sentry-triage-requeue-sentinel.mjs",
     "scripts/sentry/triage/sentry-triage-workflow-requeue.mjs",
   ]
     .map((path) => [path, readRepoFile(path).split("\n").length])

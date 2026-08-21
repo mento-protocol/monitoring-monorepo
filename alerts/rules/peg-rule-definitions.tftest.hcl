@@ -65,13 +65,19 @@ run "peg_rule_definitions_preserve_consumer_guard_invariant" {
 
   assert {
     condition = (
-      strcontains(grafana_message_template.peg_slack_title["peg-monitoring"].template, "$alert.Annotations.summary") &&
-      strcontains(grafana_message_template.peg_slack_title["peg-monitoring"].template, "$alert.Annotations.resolved_summary") &&
+      strcontains(grafana_message_template.peg_slack_title["peg-monitoring"].template, "🚨") &&
+      strcontains(grafana_message_template.peg_slack_title["peg-monitoring"].template, "🟡") &&
+      strcontains(grafana_message_template.peg_slack_title["peg-monitoring"].template, "✅") &&
+      !strcontains(grafana_message_template.peg_slack_title["peg-monitoring"].template, "Annotations.summary") &&
+      !strcontains(grafana_message_template.peg_slack_title["peg-monitoring"].template, "Annotations.resolved_summary") &&
       !strcontains(grafana_message_template.peg_slack_title["peg-monitoring"].template, ".CommonLabels.alertname") &&
+      strcontains(grafana_message_template.peg_slack_message["peg-monitoring"].template, "<https://monitoring.mento.org/peg-monitoring|{{ . }}>") &&
+      strcontains(grafana_message_template.peg_slack_message["peg-monitoring"].template, "Peg monitoring needs attention") &&
+      strcontains(grafana_message_template.peg_slack_message["peg-monitoring"].template, "Peg monitoring recovered") &&
       !strcontains(grafana_message_template.peg_slack_message["peg-monitoring"].template, "FIRING:") &&
       !strcontains(grafana_message_template.peg_slack_message["peg-monitoring"].template, "*Policy:*")
     )
-    error_message = "Peg Slack copy must lead with the cause and leave state to the title icon."
+    error_message = "Peg Slack titles must contain only status icons, and message bodies must link the human title to Peg Monitoring."
   }
 
   assert {

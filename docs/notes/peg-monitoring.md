@@ -3,7 +3,7 @@ title: Peg monitoring alert source validation and activation
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-15
+last_verified: 2026-08-21
 doc_type: runbook
 scope: alerts/peg-monitoring
 review_interval_days: 90
@@ -115,13 +115,14 @@ terms, and internal rule names. For example, a downside transition reads
 
 Grafana rule summaries and Peg notification templates use the same copy
 contract. Grafana keeps the internal rule name stable for alert identity, but
-the user-facing summary leads with the measured cause. Slack titles use the
-severity icon plus that summary. Slack bodies do not repeat `FIRING`,
-`RESOLVED`, the policy slot, or the internal rule name. Resolved notifications
-usually use the matching past-tense summary. Stale-data and unavailable-price
-recoveries state that the data or price is available again. Splunk On-Call uses
-the same summaries and keeps its required `P1` or `RESOLVED` state text because
-it has no color icon.
+the user-facing summary leads with the measured cause. Slack attachment titles
+use only the severity icon because Grafana fixes their link to its alert page.
+The Slack body links the human summary to Peg Monitoring. Slack bodies do not
+repeat `FIRING`, `RESOLVED`, the policy slot, or the internal rule name.
+Resolved notifications usually use the matching past-tense summary. Stale-data
+and unavailable-price recoveries state that the data or price is available
+again. Splunk On-Call uses the same summaries and keeps its required `P1` or
+`RESOLVED` state text because it has no color icon.
 Canonical display-name maps preserve asset and provider casing such as `KESm`
 and `VALR` across the dashboard, Grafana, and notifications.
 
@@ -129,13 +130,15 @@ Each dashboard alert row has a collapsed `Details` disclosure. The disclosure
 explains the fixed condition and its configured wait. It reads thresholds from
 the decision package only when the event and package use the same policy
 version. Older events without cause telemetry say that the exact cause was not
-recorded. The history backend reads only fired and resolved transitions from
-the displayed seven days. It does not read Pending or canceled transitions.
-When a matching fired transition is available, a resolved row keeps its cause
-and shows how long the alert stayed active. A resolution remains visible
-without that active time when the alert fired before the displayed window. Its
-details can still show the configured wait when the event and current policy
-versions match.
+recorded. The history backend reads fired, resolved, evaluation-failure, and
+evaluation-recovery transitions from the displayed seven days. It does not read
+general Pending or canceled history. The bounded evaluation-recovery query can
+accept an `Error` to `Pending` transition. Evaluation failures use distinct
+monitoring copy and never become confirmed peg breaches. When a matching fired transition
+is available, a resolved row keeps its cause and shows how long the alert stayed
+active. A resolution remains visible without that active time when the alert
+fired before the displayed window. Its details can still show the configured
+wait when the event and current policy versions match.
 
 Grafana state history stores the evaluated query values for each transition.
 Every Peg rule therefore includes two helper queries, `Reason` and

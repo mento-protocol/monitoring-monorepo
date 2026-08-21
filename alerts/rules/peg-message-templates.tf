@@ -1,7 +1,9 @@
 # Peg alerts carry a bounded decision package in annotations. Dedicated named
 # templates keep peg-only fields out of the protocol-wide dispatchers. Template
 # names are globally unique inside Grafana; contact points depend on these
-# resources explicitly because their template calls are plain strings.
+# resources explicitly because their template calls are plain strings. Grafana
+# hardcodes the Slack attachment title_link to its alert detail page. Keep that
+# title to one status icon. Render the linked human title in the message body.
 
 resource "grafana_message_template" "peg_slack_title" {
   for_each = local.peg_alert_instances
@@ -9,11 +11,7 @@ resource "grafana_message_template" "peg_slack_title" {
   name     = "Peg - Slack Title"
   template = <<-EOT
 {{ define "peg.slack.title" -}}
-{{ if (len .Alerts.Firing) -}}
-{{ if eq .CommonLabels.severity "critical" }}🚨{{ else }}🟡{{ end }} {{ range $i, $alert := .Alerts.Firing }}{{ if $i }}, {{ end }}{{ with $alert.Annotations.summary }}{{ . }}{{ else }}Peg monitoring needs attention{{ end }}{{ end }}
-{{- else -}}
-✅ {{ range $i, $alert := .Alerts.Resolved }}{{ if $i }}, {{ end }}{{ with $alert.Annotations.resolved_summary }}{{ . }}{{ else }}Peg monitoring recovered{{ end }}{{ end }}
-{{- end }}
+{{ if (len .Alerts.Firing) }}{{ if eq .CommonLabels.severity "critical" }}🚨{{ else }}🟡{{ end }}{{ else }}✅{{ end }}
 {{- end }}
 EOT
 }
@@ -28,7 +26,7 @@ resource "grafana_message_template" "peg_slack_message" {
 <!subteam^${var.oncall_support_usergroup_id}> Please investigate.
 {{ end -}}
 {{ range .Alerts.Firing -}}
-{{ with .Annotations.summary }}*{{ . }}*{{ else }}*Peg monitoring needs attention*{{ end }}
+{{ with .Annotations.summary }}*<https://monitoring.mento.org/peg-monitoring|{{ . }}>*{{ else }}*<https://monitoring.mento.org/peg-monitoring|Peg monitoring needs attention>*{{ end }}
 {{ with .Annotations.asset_name }}*Asset:* {{ . }}{{ end }}
 {{ with .Annotations.source_name }}*Source:* {{ . }}{{ end }}
 {{ with .Annotations.executable_price }}*Executable price:* {{ . }}{{ end }}
@@ -45,7 +43,7 @@ resource "grafana_message_template" "peg_slack_message" {
 *Alert ID:* `{{ .Fingerprint }}`
 {{ end -}}
 {{ range .Alerts.Resolved -}}
-{{ with .Annotations.resolved_summary }}*{{ . }}*{{ else }}*Peg monitoring recovered*{{ end }}
+{{ with .Annotations.resolved_summary }}*<https://monitoring.mento.org/peg-monitoring|{{ . }}>*{{ else }}*<https://monitoring.mento.org/peg-monitoring|Peg monitoring recovered>*{{ end }}
 {{ with .Annotations.asset_name }}*Asset:* {{ . }}{{ end }}
 {{ with .Annotations.source_name }}*Source:* {{ . }}{{ end }}
 *Ended:* {{ .EndsAt.Format "Mon Jan 02 15:04 UTC" }}

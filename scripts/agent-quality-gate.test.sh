@@ -12,7 +12,25 @@ set -euo pipefail
 # which is exactly how a CI-only failure stays undiagnosable. Name the dying
 # command on stdout (some CI captures drop stderr) and dump the in-flight
 # gate output, which usually holds the actual error.
-trap 'echo "agent-quality-gate test suite aborted: line $LINENO: $BASH_COMMAND (exit $?)"; echo "Last gate output (tail):"; tail -40 "$output_file" 2>/dev/null | sed "s/^/  /"' ERR
+#
+# Bash resets the ERR trap on entry to a shell function and every test lives in
+# one, so arming is a helper that each family calls on entry as well. `set -E`
+# would arm it globally, but it also fires inside the fixture subshells and
+# command substitutions that run failing commands on purpose — output this
+# suite never had, and which a capture would swallow.
+#
+# The trap is armed before the scratch files exist, so it must survive a failure
+# in between: under `set -u` a bare $output_file there kills the handler with an
+# unbound-variable error instead of printing what died.
+arm_suite_abort_trap() {
+  trap 'echo "agent-quality-gate test suite aborted: line $LINENO: $BASH_COMMAND (exit $?)"; echo "Last gate output (tail):"; tail -40 "${output_file:-/dev/null}" 2>/dev/null | sed "s/^/  /"' ERR
+}
+arm_suite_abort_trap
+
+# This suite's own path, resolved before the cd below moves the ground under a
+# relative BASH_SOURCE. verify_gate_family_partition reads the file itself, so
+# it needs a path that survives the move and names no location of its own.
+gate_test_suite_source="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
@@ -414,6 +432,260 @@ assert_script_occurrences() {
     fail "expected $expected_count occurrence(s) of '$expected' in scripts/agent-quality-gate.sh, found $actual_count"
 }
 
+# ── Family partition (GATE_TEST_FOCUS) ───────────────────────────────────────
+# Every test below lives inside exactly one `run_<family>_family` function, and
+# nothing but blank lines and comments may sit between those functions. Set
+# GATE_TEST_FOCUS to a comma-separated list of family names to run just those
+# subjects while iterating; with the variable unset or empty the dispatch at the
+# bottom of this file runs every family in file order, which is the sequence
+# this suite ran before the partition existed. Adding a test means adding it
+# inside the family that owns its subject — see the families' documented
+# subjects and docs/notes/agent-quality-gate-mechanics.md.
+#
+# verify_gate_family_partition reds the suite when a test lands outside a
+# family, when a family is missing from the registry, or when the definitions
+# drift out of registry order — so a test added without a family cannot
+# silently run in none of the focused modes. It runs before the definitions, so
+# an unassigned test is caught before it executes, and it covers the file from
+# the marker below to the end: past the closing marker exactly one dispatch call
+# may run, and nothing else.
+#
+# The bodies are deliberately NOT re-indented. They carry heredoc fixtures whose
+# bytes are asserted, so a mechanical re-indent would rewrite fixture content;
+# leaving the columns alone also keeps this partition's diff to its wrapper
+# lines, where a reviewer can see that no test moved. The one line added inside
+# each family is the `arm_suite_abort_trap` call on its first line, which bash
+# requires: it resets the ERR trap on entry to a function.
+
+# ── Family registry ──────────────────────────────────────────────────────────
+# The single source of truth for both the dispatch and the structural check
+# below: registry order is the file order of the definitions that follow, so an
+# unfocused run executes the families in the order this suite has always used.
+# Both properties are enforced by verify_gate_family_partition, not assumed.
+gate_test_families=(
+  gate-contract
+  install-wiring
+  routing-packaging
+  routing-sources
+  execution-phases
+  stamps-freshness
+  failure-output
+  routing-docs
+  stamps-commands
+  execution-parallel
+  lock-drain
+)
+
+fail_partition() {
+  # Same both-streams reporting as fail(), without the gate-output dump: a
+  # partition failure is about this file's structure, not about a gate run.
+  {
+    echo "agent-quality-gate family partition failed: $*"
+  } | tee /dev/stderr
+  exit 1
+}
+
+# Structural completeness. The families' union must be the whole suite body: a
+# test line between the body markers that sits outside every family function is
+# a test no focused mode would run, and it reds the suite here instead of
+# passing quietly. Also pins the definition set and its order against the
+# registry. It reads this file rather than the shell's state, so it runs BEFORE
+# the family definitions below — an unassigned test never gets to execute.
+verify_gate_family_partition() {
+  local source_file="$gate_test_suite_source"
+  local expected
+  local observed
+  # Fail closed: a suite that cannot read itself cannot vouch for its partition,
+  # and skipping the check is exactly the silence it exists to prevent.
+  [[ -f "$source_file" ]] ||
+    fail_partition "cannot read this suite's own source at $source_file"
+  expected="$(printf '%s\n' "${gate_test_families[@]}")"
+  if ! observed="$(
+    awk '
+      $0 == "# >>> gate family body start" {
+        if (previous != "verify_gate_family_partition") {
+          printf "line %d must be the verify_gate_family_partition call, not: %s\n", \
+            NR - 1, previous > "/dev/stderr"
+          failed = 1
+          exit 1
+        }
+        body = 1
+        next
+      }
+      $0 == "# <<< gate family body end" { body = 2; seen_end = 1; next }
+      body == 0 { previous = $0; next }
+      body == 2 {
+        # Past the partition, the suite may only make its one dispatch call —
+        # counted, because a second one would run every family twice and a
+        # missing one would exit 0 having run nothing. Everything else here
+        # would run in every focused mode and, at the bottom of the file, after
+        # the success line has been printed.
+        if ($0 ~ /^[[:space:]]*$/ || $0 ~ /^[[:space:]]*#/) { next }
+        if ($0 == "dispatch_gate_test_families") { dispatch_calls++; next }
+        printf "line %d runs outside the family partition: %s\n", NR, $0 > "/dev/stderr"
+        failed = 1
+        exit 1
+      }
+      /^run_[a-z0-9_]+_family\(\) \{$/ {
+        if (open != "") {
+          printf "family %s is still open at line %d\n", open, NR > "/dev/stderr"
+          failed = 1
+          exit 1
+        }
+        open = substr($0, 5, length($0) - 15)
+        gsub(/_/, "-", open)
+        print open
+        next
+      }
+      /^\} # end family: / {
+        closing = substr($0, 17)
+        if (open == "") {
+          printf "family end without a start at line %d\n", NR > "/dev/stderr"
+          failed = 1
+          exit 1
+        }
+        if (closing != open) {
+          printf "family %s closed as %s at line %d\n", open, closing, NR > "/dev/stderr"
+          failed = 1
+          exit 1
+        }
+        open = ""
+        next
+      }
+      open != "" { next }
+      /^[[:space:]]*$/ { next }
+      /^[[:space:]]*#/ { next }
+      {
+        printf "line %d belongs to no family: %s\n", NR, $0 > "/dev/stderr"
+        failed = 1
+        exit 1
+      }
+      END {
+        if (failed == 1) { exit 1 }
+        if (open != "") {
+          printf "family %s is never closed\n", open > "/dev/stderr"
+          exit 1
+        }
+        if (seen_end != 1) {
+          print "the gate family body end marker is missing" > "/dev/stderr"
+          exit 1
+        }
+        if (dispatch_calls != 1) {
+          printf "expected exactly one dispatch_gate_test_families call after the body, found %d\n", \
+            dispatch_calls > "/dev/stderr"
+          exit 1
+        }
+      }
+    ' "$source_file"
+  )"; then
+    fail_partition "the suite body is not fully covered by the family functions"
+  fi
+  if [[ "$observed" != "$expected" ]]; then
+    printf 'registry (expected) vs definitions (observed):\n' >&2
+    diff -u <(printf '%s\n' "$expected") <(printf '%s\n' "$observed") >&2 || true
+    fail_partition "the family definitions do not match gate_test_families in order and membership"
+  fi
+}
+
+# ── Focus dispatch ───────────────────────────────────────────────────────────
+# The dispatch is a function, defined here rather than run at the bottom of the
+# file, so that the only line after the partition's end marker is a single call
+# to it. Appending a test to the bottom of this file — the habit this suite grew
+# up with — would otherwise run it in every focused mode, and after the success
+# line had already been printed. verify_gate_family_partition enforces that.
+dispatch_gate_test_families() {
+  local gate_test_focus="${GATE_TEST_FOCUS:-}"
+  local gate_test_family
+  local gate_test_request
+  local gate_test_known
+  local -a gate_test_requested=()
+  local -a gate_test_selected=()
+
+  # GATE_TEST_FOCUS is a developer convenience for iterating on one subject, and
+  # it must never be able to answer for the whole suite. The gate schedules this
+  # file as a mapped command, so a focus exported in a developer's shell would
+  # otherwise be inherited and silently shrink the gate's own self-test; the same
+  # goes for CI's `pnpm agent:quality-gate:test`. Refuse loudly when any of these
+  # holds a non-empty value — the test below reads the value, not the presence,
+  # so a marker exported empty reads the same as one that was never exported:
+  #
+  # - AGENTQG_RUN, which the gate puts on the argv of every mapped command it
+  #   runs, in every mode. This is the one that has to be here: the lock marker
+  #   below is absent under `--no-lock` and AGENT_QUALITY_GATE_LOCK=0, because
+  #   acquire_gate_run_lock returns before exporting it, so a focus would have
+  #   survived into the self-test of exactly the runs that skip the lock.
+  # - AGENT_QUALITY_GATE_LOCK_HELD, exported by a `--run` holding the
+  #   machine-wide lock and inherited by nested runs. Kept as a second key on the
+  #   same door.
+  # - GITHUB_ACTIONS, which marks CI itself. CI="${CI:-true}" is not usable
+  #   here: the gate exports that to mapped commands AND agent shells set it,
+  #   which would refuse the focus on the very machines it is for.
+  if [[ -n "$gate_test_focus" ]]; then
+    if [[ -n "${AGENTQG_RUN:-}" ||
+      -n "${AGENT_QUALITY_GATE_LOCK_HELD:-}" ||
+      -n "${GITHUB_ACTIONS:-}" ]]; then
+      printf 'GATE_TEST_FOCUS is not honored inside a gate run or in CI: unset it to run the full suite\n' >&2
+      exit 2
+    fi
+  fi
+
+  if [[ -z "$gate_test_focus" ]]; then
+    gate_test_selected=("${gate_test_families[@]}")
+  else
+    IFS=',' read -r -a gate_test_requested <<< "$gate_test_focus"
+    for gate_test_request in "${gate_test_requested[@]}"; do
+      gate_test_request="${gate_test_request// /}"
+      [[ -n "$gate_test_request" ]] || continue
+      gate_test_known=false
+      for gate_test_family in "${gate_test_families[@]}"; do
+        if [[ "$gate_test_family" == "$gate_test_request" ]]; then
+          gate_test_known=true
+          break
+        fi
+      done
+      if [[ "$gate_test_known" != true ]]; then
+        printf 'unknown GATE_TEST_FOCUS family: %s\n' "$gate_test_request" >&2
+        printf 'known families: %s\n' "${gate_test_families[*]}" >&2
+        exit 2
+      fi
+    done
+    # Selection follows registry order, not the order the caller listed, so a
+    # focused run can never claim an ordering the full run does not have. It also
+    # collapses a repeated family to one run.
+    for gate_test_family in "${gate_test_families[@]}"; do
+      for gate_test_request in "${gate_test_requested[@]}"; do
+        if [[ "${gate_test_request// /}" == "$gate_test_family" ]]; then
+          gate_test_selected+=("$gate_test_family")
+          break
+        fi
+      done
+    done
+    if [[ "${#gate_test_selected[@]}" -eq 0 ]]; then
+      printf 'GATE_TEST_FOCUS selected no families: %s\n' "$gate_test_focus" >&2
+      exit 2
+    fi
+  fi
+
+  for gate_test_family in "${gate_test_selected[@]}"; do
+    "run_${gate_test_family//-/_}_family"
+  done
+
+  if [[ -z "$gate_test_focus" ]]; then
+    echo "agent quality gate tests passed"
+  else
+    echo "agent quality gate focused tests passed: ${gate_test_selected[*]}"
+  fi
+}
+
+verify_gate_family_partition
+# >>> gate family body start
+
+# family: gate-contract
+# Pins on the gate's own source text, the routing and lockfile-scope
+# classifier resolution contracts, the Turbo task-graph inputs, and the
+# agent context check.
+run_gate_contract_family() {
+arm_suite_abort_trap
 assert_script_occurrences 1 "trap cleanup_tmpfiles EXIT"
 assert_script_occurrences 1 'changed_paths_file="$(make_tmpfile)"'
 assert_script_occurrences 0 "trap 'rm -f \"\$changed_paths_file\"' EXIT"
@@ -699,7 +971,13 @@ printf 'scratch\n' > "$untracked_skill_artifact"
 node scripts/context/check-agent-context.mjs > "$output_file"
 assert_contains "Agent context check passed"
 rm -f "$untracked_skill_artifact"
+} # end family: gate-contract
 
+# family: install-wiring
+# Pre-push hook installation, the shared install-marker library, and the
+# package-script pin validator.
+run_install_wiring_family() {
+arm_suite_abort_trap
 hook_repo="$(mktemp -d)"
 (
   cd "$hook_repo"
@@ -887,7 +1165,14 @@ JSON
 )
 rm -rf "$validator_repo"
 assert_contains 'package.json scripts.agent:quality-gate must be "./scripts/agent-quality-gate.sh"'
+} # end family: install-wiring
 
+# family: routing-packaging
+# Routing for packaging inputs: workspace manifests, package-manager
+# config, root package-script and dev-metadata classification, the Turbo
+# shared-cache export, and lockfile-importer scoping.
+run_routing_packaging_family() {
+arm_suite_abort_trap
 run_gate "ui-dashboard/package.json"
 assert_contains "- ./tools/trunk check --all (changed paths require full-repo Trunk checks)"
 assert_contains "- pnpm install --frozen-lockfile (workspace package manifest changed)"
@@ -1803,7 +2088,14 @@ assert_order \
 assert_order \
   "- pnpm install --frozen-lockfile (link generated package after indexer codegen)" \
   "- pnpm --filter @mento-protocol/indexer-envio lint (indexer-envio changed)"
+} # end family: routing-packaging
 
+# family: routing-sources
+# Routing for source paths: scoped `vitest related` selection, indexer
+# codegen order, shared-config blast radius, the deploy/status/terraform
+# arms, and the hermetic setup routes.
+run_routing_sources_family() {
+arm_suite_abort_trap
 run_gate "indexer-envio/src/bridge.ts"
 assert_contains "- docs/pr-checklists/stateful-data-ui.md (indexer data flow changed)"
 # Single production-source edit → scoped `vitest related` (issue #1413); the
@@ -2811,7 +3103,13 @@ terraform_fmt_mapped_command="$(
 if [[ "${terraform_fmt_mapped_command/scripts\/terraform\//scripts/}" == $terraform_fmt_setup_pattern ]]; then
   fail "is_quality_setup_command still matches the pre-move flat terraform-fmt-check path"
 fi
+} # end family: routing-sources
 
+# family: execution-phases
+# Real fixture runs: phase order, fail-fast prerequisites, the parallel
+# quality pool, quality-setup commands, and dashboard serialization.
+run_execution_phases_family() {
+arm_suite_abort_trap
 fail_fast_repo="$(mktemp -d)"
 (
   cd "$fail_fast_repo"
@@ -3417,7 +3715,13 @@ STUB
 rm -rf "$dashboard_setup_failure_repo"
 assert_contains "chromium install unavailable"
 assert_contains "Running quality commands with parallelism 8."
+} # end family: execution-phases
 
+# family: stamps-freshness
+# The fresh-run stamp: what busts it (content, file mode, index state,
+# command plan, base OID, gate implementation) and what may reuse it.
+run_stamps_freshness_family() {
+arm_suite_abort_trap
 fresh_stamp_repo="$(mktemp -d)"
 (
   cd "$fresh_stamp_repo"
@@ -3946,7 +4250,13 @@ STUB
 )
 rm -rf "$sha256sum_repo"
 assert_contains "+ ./tools/trunk check fixture.txt"
+} # end family: stamps-freshness
 
+# family: failure-output
+# How a run reports trouble: quiet failure output, stack traces, the React
+# Doctor wrapper, renames, and the manifest-change refusal.
+run_failure_output_family() {
+arm_suite_abort_trap
 quiet_failure_repo="$(mktemp -d)"
 (
   cd "$quiet_failure_repo"
@@ -4096,7 +4406,13 @@ rename_repo="$(mktemp -d)"
 rm -rf "$rename_repo"
 assert_contains "Refusing to run because package manifests, patches, or lockfile changed."
 assert_contains "dependency install scripts"
+} # end family: failure-output
 
+# family: routing-docs
+# Routing for documentation, agent context, code-health, Sentry and PR
+# tooling paths, including the scripts/ symlink reach cases.
+run_routing_docs_family() {
+arm_suite_abort_trap
 scripts/agent-quality-gate.sh \
   --changed-paths-file <(printf '%s\n' "docs/deployment.md") \
   --base origin/test \
@@ -4337,6 +4653,17 @@ run_gate "scripts/sentry/triage/sentry-triage-queue-contract.mjs"
 assert_contains "- pnpm sentry:requeue:test (Sentry re-queue chokepoint changed)"
 assert_contains "- pnpm sentry:project:test (Sentry re-queue chokepoint changed)"
 
+# The settlement-sentinel unwind, split out of the chokepoint for the 1,000-line
+# hard cap (#1929, ADR 0070). It has no suite of its own — its cases live in the
+# re-queue suite — and it decides the end state of the archive compensation, so
+# an unrouted change to it would ship without the archive suite ever running.
+# Pinned one path at a time: a sibling in the same change set would pull the
+# suites in anyway and hide the miss.
+run_gate "scripts/sentry/triage/sentry-triage-requeue-sentinel.mjs"
+assert_contains "- pnpm sentry:requeue:test (Sentry re-queue chokepoint changed)"
+assert_contains "- pnpm sentry:archive:test (Sentry re-queue chokepoint changed)"
+assert_contains "- pnpm sentry:ingest:test (Sentry re-queue chokepoint changed)"
+
 run_gate "scripts/sentry/triage/sentry-triage-project.mjs"
 assert_contains "- pnpm sentry:project:test (Sentry triage projection helper changed)"
 
@@ -4401,6 +4728,39 @@ assert_contains "- pnpm sentry:archive:test (Sentry triage archive helper change
 
 run_gate "scripts/sentry/triage/sentry-triage-archive.test.mjs"
 assert_contains "- pnpm sentry:archive:test (Sentry triage archive helper changed)"
+
+# The #1943/#1970 fixture drift canary (ADR 0068). Three routes, all pinned:
+# its own file, the scanner whose credential-key vocabulary decides whether the
+# renamed fixtures still scan clean, and each of the four suites that carry
+# those fixtures. The canary's own arm sits ABOVE the per-suite arms in the
+# gate: a single combined pattern there would match those four paths first and
+# silently drop each suite's focused test, which is the routing bug #1974
+# shipped. The per-suite assertions below are what would red if someone
+# collapsed these arms that way.
+fixture_canary="- node scripts/sentry/fixture-scan-canary.test.mjs"
+
+run_gate "scripts/sentry/fixture-scan-canary.test.mjs"
+assert_contains "$fixture_canary (Sentry fixture drift canary changed)"
+
+run_gate "scripts/agent-autoreview-core.mjs"
+assert_contains "- pnpm agent:autoreview:test (agent autoreview helper changed)"
+assert_contains "$fixture_canary (autoreview secret scanner changed)"
+
+run_gate "scripts/sentry/autofix/sentry-autofix-finalize.test.mjs"
+assert_contains "- pnpm sentry:autofix:finalize:test (Sentry autofix finalize helper changed)"
+assert_contains "$fixture_canary (Sentry suite carrying scanned fixtures changed)"
+
+run_gate "scripts/sentry/broker/sentry-mcp-broker.test.mjs"
+assert_contains "- pnpm sentry:broker:test (Sentry MCP broker or pre-flight probe changed)"
+assert_contains "$fixture_canary (Sentry suite carrying scanned fixtures changed)"
+
+run_gate "scripts/sentry/triage/sentry-triage-agent-comment.test.mjs"
+assert_contains "- node scripts/sentry/triage/sentry-triage-agent-comment.test.mjs (Sentry triage agent comment wrapper changed)"
+assert_contains "$fixture_canary (Sentry suite carrying scanned fixtures changed)"
+
+run_gate "scripts/sentry/triage/sentry-triage-archive.test.mjs"
+assert_contains "- pnpm sentry:archive:test (Sentry triage archive helper changed)"
+assert_contains "$fixture_canary (Sentry suite carrying scanned fixtures changed)"
 
 # The handled-family lookup, split out of sentry-autofix-queue-io.mjs for the
 # 600-line soft cap. Pinned ALONE — a module added to this leg without a routing
@@ -4971,7 +5331,13 @@ assert_not_contains "(ESLint baseline wrapper changed)"
 # Root ESLint config changes trigger scripts lint.
 run_gate "eslint.config.mjs"
 assert_contains "- pnpm lint:scripts (root build script changed)"
+} # end family: routing-docs
 
+# family: stamps-commands
+# Per-command stamps: resume after a flaky failure, invalidation on any
+# content change, always-rerun exemptions, command timeouts and interrupts.
+run_stamps_commands_family() {
+arm_suite_abort_trap
 # GitHub issue #1410: a run that fails on one flaky command must, on rerun,
 # reuse the commands that already passed against unchanged content instead of
 # re-executing them. `pnpm lint:scripts` appends a side-effect line every time
@@ -5321,7 +5687,13 @@ STUB
   fi
 )
 rm -rf "$command_interrupt_repo"
+} # end family: stamps-commands
 
+# family: execution-parallel
+# Parallel teardown process groups, the production identity contract, and
+# prerequisite commands that are never stamped or reused.
+run_execution_parallel_family() {
+arm_suite_abort_trap
 # GitHub issue #1522: every parallel mapped command must be registered as a
 # dedicated process group before INT/TERM teardown can run. Cover both sides of
 # the original race:
@@ -5622,7 +5994,13 @@ STUB
     fail "expected the quality command to be reused on the second run"
 )
 rm -rf "$prereq_reuse_repo"
+} # end family: execution-parallel
 
+# family: lock-drain
+# Cross-run mutual exclusion: lock acquisition, stale-holder reclaim, drain
+# obligations, and crash-point recovery.
+run_lock_drain_family() {
+arm_suite_abort_trap
 # --- Cross-run mutual exclusion (GitHub issue #1802) -------------------------
 # Two gate runs on one machine starve each other, and the pre-push hook starts
 # one of its own while a manual run is still going, so `--run` takes a
@@ -7160,5 +7538,8 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   done
 )
 rm -rf "$gate_race_repo" "$gate_race_root" "$gate_race_out"
+} # end family: lock-drain
 
-echo "agent quality gate tests passed"
+# <<< gate family body end
+
+dispatch_gate_test_families

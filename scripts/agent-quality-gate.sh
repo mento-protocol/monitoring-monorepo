@@ -3907,6 +3907,11 @@ while IFS= read -r path; do
           ;;
         scripts/agent-autoreview.mjs|scripts/agent-autoreview-core.mjs|scripts/agent-autoreview-core.test.mjs|scripts/agent-autoreview-target-guard.test.mjs)
           add_command "pnpm agent:autoreview:test" "agent autoreview helper changed"
+          # The scanner half of the #1943/#1970 canary (ADR 0068). Widening
+          # `credentialAssignmentKey`'s vocabulary re-traps the renamed Sentry
+          # fixtures, and nothing else would say so until the next autoreview
+          # run refused.
+          add_command "node scripts/sentry/fixture-scan-canary.test.mjs" "autoreview secret scanner changed"
           ;;
         scripts/context/check-agent-context.mjs|scripts/context/check-agent-context-helpers.mjs|scripts/context/check-agent-context.test.mjs)
           add_command "pnpm agent:context-check" "agent context checker changed"
@@ -3986,6 +3991,14 @@ while IFS= read -r path; do
           # routes to it.
           add_command "pnpm issue:board:test" "agent issue board helper changed"
           ;;
+        scripts/sentry/fixture-scan-canary.test.mjs)
+          # The #1943/#1970 drift canary (ADR 0068). Its own arm, ABOVE the
+          # per-suite arms below, because those arms name exact paths and a
+          # combined pattern here would shadow them — the routing bug #1974
+          # shipped. The canary's watch list is a path pin: a renamed suite has
+          # to move here too, and this route is what makes that loud.
+          add_command "node scripts/sentry/fixture-scan-canary.test.mjs" "Sentry fixture drift canary changed"
+          ;;
         scripts/sentry/triage/sentry-triage-ingest.mjs|scripts/sentry/triage/sentry-triage-ingest.test.mjs)
           add_command "pnpm sentry:ingest:test" "Sentry triage ingest helper changed"
           ;;
@@ -4042,6 +4055,7 @@ while IFS= read -r path; do
           # new sentry-*.test.mjs keeps the Sentry suite manifest's file count
           # where it is.
           add_command "node scripts/sentry/triage/sentry-triage-agent-comment.test.mjs" "Sentry triage agent comment wrapper changed"
+          add_command "node scripts/sentry/fixture-scan-canary.test.mjs" "Sentry suite carrying scanned fixtures changed"
           ;;
         scripts/sentry/autofix/sentry-autofix-select.mjs|scripts/sentry/autofix/sentry-autofix-select.test.mjs)
           add_command "pnpm sentry:autofix:select:test" "Sentry autofix select helper changed"
@@ -4093,6 +4107,7 @@ while IFS= read -r path; do
           ;;
         scripts/sentry/autofix/sentry-autofix-finalize.mjs|scripts/sentry/autofix/sentry-autofix-finalize.test.mjs)
           add_command "pnpm sentry:autofix:finalize:test" "Sentry autofix finalize helper changed"
+          add_command "node scripts/sentry/fixture-scan-canary.test.mjs" "Sentry suite carrying scanned fixtures changed"
           ;;
         scripts/sentry/autofix/sentry-autofix-run-record.mjs|scripts/sentry/autofix/sentry-autofix-run-record.test.mjs|scripts/sentry/autofix/sentry-autofix-refused-inventory.mjs)
           # The tracker run-record body builder, extracted from finalize.mjs,
@@ -4112,19 +4127,26 @@ while IFS= read -r path; do
           ;;
         scripts/sentry/triage/sentry-triage-archive.mjs|scripts/sentry/triage/sentry-triage-archive.test.mjs)
           add_command "pnpm sentry:archive:test" "Sentry triage archive helper changed"
+          add_command "node scripts/sentry/fixture-scan-canary.test.mjs" "Sentry suite carrying scanned fixtures changed"
           ;;
         scripts/sentry/broker/sentry-mcp-broker.mjs|scripts/sentry/broker/sentry-mcp-broker.test.mjs|scripts/sentry/broker/sentry-mcp-probe.mjs)
           # The broker and the MCP pre-flight probe (#1938) share one suite:
           # sentry-mcp-broker.test.mjs holds both, so the probe must route here
           # too or a change touching only the probe runs none of its own tests.
           add_command "pnpm sentry:broker:test" "Sentry MCP broker or pre-flight probe changed"
+          add_command "node scripts/sentry/fixture-scan-canary.test.mjs" "Sentry suite carrying scanned fixtures changed"
           ;;
-        scripts/sentry/triage/sentry-triage-requeue.mjs|scripts/sentry/triage/sentry-triage-requeue.test.mjs|scripts/sentry/triage/sentry-triage-queue-contract.mjs|scripts/sentry/triage/sentry-triage-workflow-requeue.mjs)
-          # The single re-queue chokepoint, the queue contract it reads, and the
-          # workflow CLI that wraps it for every compensating exit in the triage
-          # agent workflow (#1769 round 17, #1782). Every site that re-queues a stub
-          # runs through the chokepoint, so its suite is never the whole story —
-          # run theirs too. The CLI's tests live in the requeue suite.
+        scripts/sentry/triage/sentry-triage-requeue.mjs|scripts/sentry/triage/sentry-triage-requeue.test.mjs|scripts/sentry/triage/sentry-triage-requeue-sentinel.mjs|scripts/sentry/triage/sentry-triage-queue-contract.mjs|scripts/sentry/triage/sentry-triage-workflow-requeue.mjs)
+          # The single re-queue chokepoint, the queue contract it reads, the
+          # settlement-sentinel unwind split out of it for the 1,000-line cap
+          # (#1929, ADR 0070), and the workflow CLI that wraps it for every
+          # compensating exit in the triage agent workflow (#1769 round 17, #1782).
+          # The sentinel module has no suite of its own — its tests live in the
+          # re-queue suite — so an unrouted change to it would ship untested, and
+          # it decides the end state of the archive compensation, which is why the
+          # archive suite is on this arm too. Every site that re-queues a stub runs
+          # through the chokepoint, so its suite is never the whole story — run
+          # theirs too. The CLI's tests live in the requeue suite.
           add_command "pnpm sentry:requeue:test" "Sentry re-queue chokepoint changed"
           add_command "pnpm sentry:ingest:test" "Sentry re-queue chokepoint changed"
           add_command "pnpm sentry:archive:test" "Sentry re-queue chokepoint changed"
@@ -4144,7 +4166,7 @@ while IFS= read -r path; do
         scripts/pr/pr-feedback-state.mjs|scripts/pr/pr-feedback-state-core.mjs|scripts/pr/pr-feedback-state-claude.mjs|scripts/pr/pr-feedback-state.test.mjs)
           add_command "pnpm pr:feedback-state:test" "PR feedback-state helper changed"
           ;;
-        scripts/pr/pr-ready-state.mjs|scripts/pr/pr-ready-state-core.mjs|scripts/pr/pr-ready-state-format.mjs|scripts/pr/pr-ready-state.test.mjs)
+        scripts/pr/pr-ready-state.mjs|scripts/pr/pr-ready-state-core.mjs|scripts/pr/pr-ready-state-format.mjs|scripts/pr/pr-ready-state-review-signals.mjs|scripts/pr/pr-ready-state.test.mjs)
           add_command "pnpm pr:ready-state:test" "PR ready-state helper changed"
           ;;
         scripts/pr/review-process-metrics.mjs|scripts/pr/review-process-metrics.test.mjs)

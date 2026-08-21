@@ -3,7 +3,7 @@ title: CodeRabbit replaces Cursor BugBot as the third PR review bot
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-18
+last_verified: 2026-08-21
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -129,8 +129,12 @@ Replace BugBot with CodeRabbit as the third advisory reviewer.
    assertive-adjacent default only if noise proves low; otherwise use the
    `chill` profile or the July 2026 `quiet` profile (critical findings inline,
    the rest summarized), `path_filters` excluding lockfiles and generated
-   trees, and `auto_pause_after_reviewed_commits` tuned so agent fix-commit
-   bursts do not burn review rounds.
+   trees, and `auto_pause_after_reviewed_commits: 5`. The initial value of 2
+   paused normal one-fix PRs because the opening review counts as the first
+   reviewed commit. The vendor default of 5 preserves the burst guard without
+   treating one normal fix round as active development. The ship and babysit
+   closeout requests one manual review for an exact head when the automatic
+   review is stale or missing after the optional check becomes terminal.
 3. **Parallel-run for ~2 weeks.** Switch BugBot to manual triggering
    (`bugbot run`) during the window to bound how often it runs — a trigger
    limit, not a spending cap; the account-level monthly spend limit is the
@@ -203,15 +207,16 @@ Replace BugBot with CodeRabbit as the third advisory reviewer.
   high-recall. CodeRabbit's known weakness is verbosity; the quiet/chill
   profiles, path filters, and pause-after-reviewed-commits are the levers, and
   the feedback-ledger discipline (every finding gets a Fixed/Won't-fix reply)
-  already forces per-finding triage. If noise stays high after tuning, that is
-  a revisit trigger, not a live-with-it.
+  already forces per-finding triage. Post-rollout evidence raised the pause
+  threshold from 2 to 5. If noise stays high after tuning, that is a revisit
+  trigger, not a live-with-it.
 - No CodeRabbit tier auto-reviews every push unmetered at this repo's
   volume. Pro+ sustains 4 reviews/hour at ~65 reviews/week and drops to
   1/hour past 90, so agent fix-commit bursts either wait or bill through
-  the add-on. Set `auto_pause_after_reviewed_commits` low and prefer
-  triggered reviews at ready points (`@coderabbitai review`, label opt-in)
-  so the ladder spends on review rounds that matter; the parallel-run
-  window should exercise this before BugBot is switched off.
+  the add-on. Keep `auto_pause_after_reviewed_commits` at 5 and request one
+  head-bound `@coderabbitai review` at closeout when the automatic review is
+  stale or missing. This spends the ladder on review rounds that matter while
+  preventing duplicate requests for the same head.
   `@coderabbitai rate limit` reports remaining capacity without consuming
   a review.
 - The cutover PR must sweep every live `cursor[bot]`/BugBot reference — the
@@ -272,6 +277,10 @@ Replace BugBot with CodeRabbit as the third advisory reviewer.
   add-on availability (paid plans only). The installed org's billing page
   confirmed the default Pro+ trial and the 2026-08-18 paid upgrade. All
   checked 2026-08-18.
+- Post-rollout pause sample, queried from GitHub on 2026-08-21: 16 of the 29
+  PRs created after `.coderabbit.yaml` merged carried CodeRabbit's generated
+  pause marker. Six of those PRs had only 2-4 total commits. Two of the 29 PRs
+  carried the rate-limit marker, and neither also carried the pause marker.
 - Greptile pricing and OSS terms: greptile.com/pricing,
   greptile.com/blog/greptile-v4 (2026-03-05 model change),
   greptile.com/docs/code-review-bot/trigger-code-review (re-review is opt-in

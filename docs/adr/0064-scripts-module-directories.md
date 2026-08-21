@@ -285,6 +285,16 @@ routing, not procedure.
     `documentation-navigation-baseline-fixtures.json` is the frozen contract for
     the committed baseline result and is deliberately left alone; editing it
     would force a rebind of that result's `fixture_digest`.
+11. File-size cap lists in `sentry/triage/sentry-triage-brief.test.mjs` — the
+    1,000-line hard cap for the triage family's shared modules and the 600-line
+    soft cap for the brief leg both enumerate exact repo-relative paths. No
+    ESLint `max-lines` reaches this tree and the watchlist reports rather than
+    blocks (ADR 0065), so these lists are the only thing that reds a file that
+    crosses. A moved path stops matching and the file drops off its cap in
+    silence — the same failure mode as a stale routing arm, with no red run to
+    announce it. Add a module here in the PR that creates it, too: the split
+    that puts a module under the cap is exactly when its entry is easiest to
+    forget.
 
 A shared module under `scripts/lib/` is routed from every arm that reads it,
 not only the arm of the consumer that happens to fail loudest.

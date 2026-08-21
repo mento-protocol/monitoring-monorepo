@@ -165,6 +165,272 @@ assert.throws(
   () => assertNoSecretLikeContent("fixture", `token=${secret}`),
   /refusing to include secret-like content/,
 );
+
+// Redaction accept-shape: a credential-shaped token on a hunk's REMOVED side is
+// acceptable only when the same hunk's added side carries the same line with
+// that token replaced by placeholder vocabulary. Every fixture below builds its
+// credential-shaped literal by joining fragments so this corpus itself never
+// carries a bundle-refusable literal.
+const otherSecret = ["gh", "s_", "B".repeat(36)].join("");
+const redactionHunk = (removedLines, addedLines) =>
+  [
+    "diff --git a/scripts/fixture.test.mjs b/scripts/fixture.test.mjs",
+    "--- a/scripts/fixture.test.mjs",
+    "+++ b/scripts/fixture.test.mjs",
+    "@@ -1,3 +1,3 @@",
+    " const before = 1;",
+    ...removedLines.map((line) => `-${line}`),
+    ...addedLines.map((line) => `+${line}`),
+    " const after = 2;",
+  ].join("\n");
+
+// The accept-shape applies only to text a caller vouches is a git-generated
+// patch, so every assertion in this block scans in that mode explicitly. The
+// supplemental-input controls at the end of the block cover the closed default.
+const diffScan = (text) => secretLikeReason(text, { gitDiff: true });
+
+const wordPlaceholderRedaction = redactionHunk(
+  [`const sample = "${secret}";`],
+  ['const sample = "redacted-fixture-token";'],
+);
+assert.equal(
+  diffScan(wordPlaceholderRedaction),
+  null,
+  "a removal replaced in-place by placeholder vocabulary is a redaction, not an exfiltration",
+);
+assert.doesNotThrow(() =>
+  assertNoSecretLikeContent("redaction", wordPlaceholderRedaction, {
+    gitDiff: true,
+  }),
+);
+assert.equal(
+  diffScan(
+    redactionHunk(
+      [`const sample = "${secret}";`],
+      ['const sample = "<redacted>";'],
+    ),
+  ),
+  null,
+  "angle-bracket placeholders are recognized replacement vocabulary",
+);
+assert.equal(
+  diffScan(
+    redactionHunk(
+      [`const sample = "${secret}";`],
+      ['const sample = "${SAMPLE_TOKEN}";'],
+    ),
+  ),
+  null,
+  "an env-reference placeholder is recognized replacement vocabulary",
+);
+assert.equal(
+  diffScan(
+    redactionHunk(
+      [`const pair = ["${secret}", "${otherSecret}"];`],
+      ['const pair = ["<redacted>", "<redacted>"];'],
+    ),
+  ),
+  null,
+  "every credential-shaped span on the removed line must be replaced, and all of them may be",
+);
+
+const sharedPlaceholderRemovals = redactionHunk(
+  [`const sample = "${secret}";`, `const sample = "${otherSecret}";`],
+  ['const sample = "redacted-fixture-token";'],
+);
+assert.match(
+  diffScan(sharedPlaceholderRemovals),
+  /credential-like token/,
+  "one placeholder redacts one removal, so a second credential-bearing removal is an unreplaced deletion",
+);
+assert.throws(
+  () =>
+    assertNoSecretLikeContent("shared placeholder", sharedPlaceholderRemovals, {
+      gitDiff: true,
+    }),
+  /refusing to include secret-like content/,
+);
+assert.equal(
+  diffScan(
+    redactionHunk(
+      [`const sample = "${secret}";`, `const sample = "${otherSecret}";`],
+      [
+        'const sample = "redacted-fixture-token";',
+        'const sample = "redacted-fixture-token";',
+      ],
+    ),
+  ),
+  null,
+  "two removals redacted by two placeholder lines are both replacements",
+);
+
+const unreplacedRemoval = redactionHunk([`const sample = "${secret}";`], []);
+assert.match(
+  diffScan(unreplacedRemoval),
+  /credential-like token/,
+  "a removal with no replacement stays refused",
+);
+assert.throws(
+  () =>
+    assertNoSecretLikeContent("unreplaced removal", unreplacedRemoval, {
+      gitDiff: true,
+    }),
+  /refusing to include secret-like content/,
+);
+const swappedLiteral = redactionHunk(
+  [`const sample = "${secret}";`],
+  [`const sample = "${otherSecret}";`],
+);
+assert.match(
+  diffScan(swappedLiteral),
+  /credential-like token/,
+  "a removal replaced by a different credential-shaped literal stays refused",
+);
+assert.throws(
+  () =>
+    assertNoSecretLikeContent("swapped literal", swappedLiteral, {
+      gitDiff: true,
+    }),
+  /refusing to include secret-like content/,
+);
+assert.match(
+  diffScan(
+    redactionHunk(
+      [`const sample = "${secret}";`],
+      ['const sample = "9f3c1a2b4d5e6f708192a3b4";'],
+    ),
+  ),
+  /credential-like token/,
+  "an opaque replacement that is not placeholder vocabulary stays refused",
+);
+assert.match(
+  diffScan(
+    redactionHunk(
+      [`const sample = "${secret}";`],
+      ['const renamed = "redacted-fixture-token";'],
+    ),
+  ),
+  /credential-like token/,
+  "the line outside the credential span must match exactly, so a rewritten line stays refused",
+);
+assert.match(
+  diffScan(
+    redactionHunk(
+      [`const sample = "${secret}";`],
+      ['const sample = "redacted" + resolveSuffix();'],
+    ),
+  ),
+  /credential-like token/,
+  "a replacement expression that merely starts with placeholder vocabulary stays refused",
+);
+assert.match(
+  diffScan(
+    [
+      "@@ -1,2 +1,2 @@",
+      `-const sample = "${secret}";`,
+      " const tail = 1;",
+      "@@ -20,2 +20,2 @@",
+      '-const sample = "old-value-placeholder";',
+      '+const sample = "redacted-fixture-token";',
+    ].join("\n"),
+  ),
+  /credential-like token/,
+  "a placeholder replacement in a different hunk does not redact this removal",
+);
+assert.match(
+  diffScan(
+    [
+      "@@ -1,3 +1,3 @@",
+      ` const sample = "${secret}";`,
+      "-const other = 1;",
+      '+const other = "redacted-token";',
+    ].join("\n"),
+  ),
+  /credential-like token/,
+  "a context line carrying the literal is not a removal and stays refused",
+);
+assert.match(
+  diffScan(
+    redactionHunk(
+      ['const sample = "redacted-fixture-token";'],
+      [`const sample = "${secret}";`],
+    ),
+  ),
+  /credential-like token/,
+  "add-side detection is untouched: replacing a placeholder with a literal stays refused",
+);
+assert.match(
+  diffScan(`-const sample = "${secret}";`),
+  /credential-like token/,
+  "a removal-shaped line outside any hunk stays refused",
+);
+assert.match(
+  diffScan(
+    [
+      "@@ -1,2 +1,2 @@",
+      " const before = 1;",
+      "diff --git a/scripts/other.mjs b/scripts/other.mjs",
+      `-const sample = "${secret}";`,
+      '+const sample = "redacted-fixture-token";',
+    ].join("\n"),
+  ),
+  /credential-like token/,
+  "a new file header closes the hunk, so the lines after it are not hunk removals",
+);
+
+// Supplemental input — `--prompt`, prompt files, datasets, branch names, refs —
+// is arbitrary text the author controls, so it never earns the accept-shape. A
+// diff-shaped prompt carrying a real credential is refused on the closed
+// default, which is what `secretLikeReason` and `assertNoSecretLikeContent` do
+// when no caller vouches for the text.
+const promptShapedAsRedaction = [
+  "@@ -1 +1 @@",
+  `-sample ${secret}`,
+  "+sample <redacted>",
+].join("\n");
+assert.equal(
+  diffScan(promptShapedAsRedaction),
+  null,
+  "negative control: this fixture is accepted when it is scanned as a git diff",
+);
+assert.match(
+  secretLikeReason(promptShapedAsRedaction),
+  /credential-like token/,
+  "a diff-shaped supplemental prompt is not a git diff, so the redaction exception does not apply",
+);
+assert.throws(
+  () => assertNoSecretLikeContent("--prompt", promptShapedAsRedaction),
+  /refusing to include secret-like content/,
+  "assertNoSecretLikeContent defaults to the closed scan, so no call site gets the exception by omission",
+);
+const promptWithFabricatedFileHeader = [
+  "diff --git a/sample.txt b/sample.txt",
+  "--- a/sample.txt",
+  "+++ b/sample.txt",
+  promptShapedAsRedaction,
+].join("\n");
+assert.match(
+  secretLikeReason(promptWithFabricatedFileHeader),
+  /credential-like token/,
+  "an author who can write a hunk header into a prompt can write a file header too, so neither earns the exception",
+);
+assert.match(
+  secretLikeReason(
+    [
+      "Please review the following change.",
+      promptShapedAsRedaction,
+      "Focus on the error handling.",
+    ].join("\n"),
+  ),
+  /credential-like token/,
+  "prose wrapped around a redaction-shaped fragment stays refused",
+);
+assert.match(
+  secretLikeReason(wordPlaceholderRedaction),
+  /credential-like token/,
+  "even a genuine bundle redaction is refused when it arrives as supplemental input",
+);
+
 for (const label of [
   "PRIVATE KEY",
   "RSA PRIVATE KEY",
@@ -773,6 +1039,188 @@ assert.match(
   ),
   /literal generic token assignment/,
   "a real literal trailing a github.* expression is still rejected (anchor holds)",
+);
+// Escaped shell expansions. Inside a JS template literal `\${VAR:-}` is a JS
+// escape, so the emitted shell script receives `${VAR:-}` — a parameter
+// expansion that yields the variable's value when set and non-null, and the
+// (empty) default otherwise, always at run time; the committed source carries
+// no literal credential either way. `placeholderValue` strips exactly one
+// leading backslash and requires the remainder to be a whole reference on its
+// own.
+//
+// Every value below uses a long variable name deliberately. A short one such
+// as `\${V}` sits under CREDENTIAL_LITERAL_MIN_LENGTH and clears whether or
+// not the clause exists, which would make the pin vacuous: each assertion here
+// fails against a scanner without the clause.
+const BACKSLASH = "\\";
+const expansionVariable = "SENTRY_TRIAGE_TOKEN";
+const escapedExpansion = (body) => tokenAssignment([BACKSLASH, body].join(""));
+assert.equal(
+  secretLikeReason(escapedExpansion(["${", expansionVariable, "}"].join(""))),
+  null,
+  "an escaped shell expansion is a reference, not a literal token",
+);
+for (const operator of [":-", "-", ":=", "=", ":+", "+", ":?", "?"]) {
+  assert.equal(
+    secretLikeReason(
+      escapedExpansion(["${", expansionVariable, operator, "}"].join("")),
+    ),
+    null,
+    `an escaped ${operator} expansion with an empty word is a reference`,
+  );
+  assert.equal(
+    secretLikeReason(
+      escapedExpansion(
+        ["${", expansionVariable, operator, "$FALLBACK_TOKEN}"].join(""),
+      ),
+    ),
+    null,
+    `an escaped ${operator} expansion with a reference word is a reference`,
+  );
+}
+assert.equal(
+  secretLikeReason(escapedExpansion(nestedShellExpansion(8))),
+  null,
+  "escaped expansions nested to the bound are still references",
+);
+// The motivating line, copied from
+// scripts/sentry/broker/sentry-mcp-broker.test.mjs:1036 (#1970 row 1).
+const brokerShellToken = [
+  "    ",
+  "token",
+  "=",
+  '"',
+  BACKSLASH,
+  "${SENTRY_TRIAGE_TOKEN:-}",
+  '"',
+].join("");
+assert.equal(
+  secretLikeReason(brokerShellToken),
+  null,
+  "the broker suite's escaped shell expansion clears the scanner (#1970 row 1)",
+);
+// Exactly one backslash is stripped, and only the shell-expansion grammar is
+// retried. Material attached to the reference, a second backslash, or another
+// reference dialect all keep refusing.
+assert.match(
+  secretLikeReason(
+    escapedExpansion(
+      ["${", expansionVariable, ":-", genericTokenCredential, "}"].join(""),
+    ),
+  ),
+  /literal generic token assignment/,
+  "a literal default inside an escaped expansion is still rejected",
+);
+assert.match(
+  secretLikeReason(
+    escapedExpansion(
+      ["${", expansionVariable, ":-$FALLBACK_TOKEN}", "suffix"].join(""),
+    ),
+  ),
+  /literal generic token assignment/,
+  "material fused after an escaped expansion fails the ^…$ anchor",
+);
+assert.match(
+  secretLikeReason(
+    tokenAssignment(
+      ["junkjunkjunk", BACKSLASH, "${", expansionVariable, "}"].join(""),
+    ),
+  ),
+  /literal generic token assignment/,
+  "junk before an escaped expansion is rejected: the backslash has to lead",
+);
+assert.match(
+  secretLikeReason(
+    escapedExpansion([BACKSLASH, "${", expansionVariable, "}"].join("")),
+  ),
+  /literal generic token assignment/,
+  "two leading backslashes are rejected: exactly one is stripped",
+);
+assert.match(
+  secretLikeReason(
+    escapedExpansion(["${{ secrets.", expansionVariable, " }}"].join("")),
+  ),
+  /literal generic token assignment/,
+  "escaped GitHub Actions expressions stay refused: the retry is shell-only",
+);
+// An asymmetry worth stating: the unescaped `${var.x}` form clears through
+// placeholderValue's HCL clause, but the escaped form does not, because the
+// new clause retries `shellExpansionReference` alone and that grammar has no
+// HCL clause. Refusing is the fail-closed direction and no fixture needs it.
+assert.match(
+  secretLikeReason(escapedExpansion("${var.sentry_triage_token}")),
+  /literal generic token assignment/,
+  "escaped HCL traversals refuse: the retried grammar is shell-only",
+);
+assert.equal(
+  secretLikeReason(tokenAssignment("${var.sentry_triage_token}")),
+  null,
+  "the unescaped HCL traversal still clears, so the asymmetry is deliberate",
+);
+assert.match(
+  secretLikeReason(escapedExpansion(nestedShellExpansion(9))),
+  /literal generic token assignment/,
+  "escaped expansions nested past the bound are not references",
+);
+// Only the outer backslash is stripped, so the inner `\${…}` is not a valid
+// word and the whole value refuses. Fail-closed, and no real fixture needs it.
+assert.match(
+  secretLikeReason(
+    escapedExpansion(
+      ["${", expansionVariable, ":-", BACKSLASH, "${FALLBACK_TOKEN:-}}"].join(
+        "",
+      ),
+    ),
+  ),
+  /literal generic token assignment/,
+  "a nested escaped inner reference refuses: one backslash is stripped, not each",
+);
+// The other three #1970 rows are a different gap — a `%%` expansion the shell
+// grammar does not accept, and hyphenated-word fixtures — and stay refused.
+const shellOwnerTokenLine = [
+  "const SHELL_OWNER_TOKEN = ",
+  "`",
+  "'",
+  '"',
+  BACKSLASH,
+  "${REPO%%/*}",
+  '"',
+  "'",
+  "`",
+  ";",
+].join("");
+assert.match(
+  secretLikeReason(shellOwnerTokenLine),
+  /literal credential assignment/,
+  "#1970 row 2 still refuses: `%%` is not a shell-expansion operator",
+);
+assert.match(
+  secretLikeReason(
+    [
+      "      ",
+      "AWS_SECRET_ACCESS_KEY",
+      ": ",
+      '"',
+      "aws-secret-value",
+      '",',
+    ].join(""),
+  ),
+  /literal AWS credential assignment/,
+  "#1970 row 3 still refuses: hyphenated-word fixtures are a separate gap",
+);
+assert.match(
+  secretLikeReason(
+    [
+      "      ",
+      "SENTRY_PROJECTION_TOKEN",
+      ": ",
+      '"',
+      "projection-secret-value",
+      '",',
+    ].join(""),
+  ),
+  /literal generic token assignment/,
+  "#1970 row 4 still refuses: hyphenated-word fixtures are a separate gap",
 );
 // Terraform/HCL traversal references (var/local/module/data) name a value
 // resolved at plan/apply time, never an inline secret — the same reference

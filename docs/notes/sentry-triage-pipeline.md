@@ -297,14 +297,20 @@ public repo: a determined commenter can keep a genuine strand below the threshol
 indefinitely. That delays a repair; it can never cause one to happen wrongly, and
 the state it preserves is the one this sweep found.
 
-The window between the sweep's revalidating read and its label shed stays open,
-like the one the re-queue CLI's terminal guard documents, and for the same
-reason: closing it needs a shared concurrency group across ingest and archive,
-which this pipeline rejected on its own terms (GitHub keeps one pending run per
-group and would silently drop a second human-approved archive queued behind an
-ingest run). An approval landing inside that window is shed, the archive run its
-label event started refuses out loud on its own guard, and the human re-applies
-the label.
+The window between the sweep's revalidating read and its label shed stays open.
+A shared concurrency group across ingest and archive is not the close, and this
+pipeline rejected it on its own terms: GitHub keeps one pending run per group and
+would silently drop a second human-approved archive queued behind an ingest run.
+An approval landing inside that window is shed, the archive run its label event
+started refuses out loud on its own guard, and the human re-applies the label.
+
+The re-queue CLI's version of that window is CLOSED, by a different mechanism
+(ADR 0070). It declares `sentry:archived` as a settlement SENTINEL: the marker is
+withheld from its shed, so it survives to be read on the end-state verification,
+and finding it there means the archive settled inside the write window — at which
+point the re-queue unwinds itself rather than leaving a selectable retry stub
+over an archived occurrence. The sweep and the autofix hold-revalidation hold the
+same premise and could adopt the same sentinel; neither does yet.
 
 The sweep re-reads each stub immediately before touching it and acts only if the
 SAME shape still holds — including its idleness, since a comment posted in the

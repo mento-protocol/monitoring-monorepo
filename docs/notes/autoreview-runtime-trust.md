@@ -3,7 +3,7 @@ title: Autoreview Runtime Trust Model
 status: active
 owner: eng
 canonical: false
-last_verified: 2026-07-29
+last_verified: 2026-08-21
 doc_type: reference
 scope: repo-wide
 review_interval_days: 180
@@ -343,9 +343,19 @@ call expression rather than a substitution, and an argument over that length,
 such as a deep path. Both refuse today too, so nothing regresses; they are the
 price of a rule that proves inertness from syntax alone.
 A literal in value position stays refused whatever names it: a fixture
-string is a quoted literal, and no syntax separates one from a weak credential,
-so fixtures compose the value from parts or use a documented placeholder marker
-(`fixture-token`, `example-secret`).
+string is a quoted literal, and no syntax separates one from a weak credential.
+Composing the value from parts is not a general escape. `staticConcatenation`
+folds adjacent literals back together before the credential-key rules run, so a
+credential-named key holding two concatenated halves refuses exactly as the
+fused literal does (measured — an example written out here re-trapped this very
+file). Composition clears only provider-prefix patterns — `ghs_…`,
+`sk-ant-…` — bound to an identifier the scanner does not read as a credential
+name; the same prefix written whole still refuses. Author fixtures with a
+documented placeholder marker (`fixture-token`, `example-secret`,
+`example-secret-value`), or with a non-credential-named identifier, and reach
+for composition only for a provider prefix that has to stay recognizable.
+`docs/adr/0068-sentry-fixture-authoring-policy.md` is the policy and the
+`scripts/sentry/fixture-scan-canary.test.mjs` canary that enforces it.
 Evidence reads reject symlinks and verify that the opened descriptor still
 identifies the file that was inspected, closing path-swap races.
 

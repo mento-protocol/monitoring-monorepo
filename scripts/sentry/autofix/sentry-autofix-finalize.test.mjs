@@ -68,6 +68,8 @@ import {
   skipReportFromIssueList,
 } from "./sentry-autofix-record-labels.mjs";
 
+const GHS_LEAK = "ghs" + "_AbCdEfGhIjKlMnOpQrStUvWxYz012345";
+
 let passed = 0;
 let failed = 0;
 
@@ -87,10 +89,14 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
-function assertEqual(actual, expected) {
+function assertEqual(actual, expected, message) {
   if (actual !== expected) {
+    // The message is what says WHICH property was being asserted; call sites
+    // already pass one, and dropping it left a bare value mismatch to read.
     throw new Error(
-      `expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`,
+      `${message ? `${message}: ` : ""}expected ${JSON.stringify(
+        expected,
+      )}, got ${JSON.stringify(actual)}`,
     );
   }
 }
@@ -108,6 +114,21 @@ function captureCli(argv) {
 }
 
 const SHORT_ID = "APP-MENTO-ORG-2S";
+
+await test("assertEqual reports the message its call site passed", () => {
+  let thrown = null;
+  try {
+    assertEqual(3, 10, "the count is the signal; the list is an affordance");
+  } catch (err) {
+    thrown = err instanceof Error ? err.message : String(err);
+  }
+  assert(thrown !== null, "a mismatch must throw");
+  assert(
+    thrown.includes("the count is the signal; the list is an affordance"),
+    `the failure output must name what was asserted; got: ${thrown}`,
+  );
+  assert(thrown.includes("expected 10, got 3"), `values kept: ${thrown}`);
+});
 
 // --- diff guard --------------------------------------------------------------
 
@@ -203,7 +224,7 @@ await test("guard refuses a diff whose file content is credential-shaped", () =>
   mkdirSync(join(dir, "ui-dashboard"), { recursive: true });
   writeFileSync(
     join(dir, "ui-dashboard", "leak.ts"),
-    'const t = "ghs_AbCdEfGhIjKlMnOpQrStUvWxYz012345";\n',
+    `const t = "${GHS_LEAK}";\n`,
   );
   writeFileSync(
     join(dir, "ui-dashboard", "clean.ts"),
@@ -259,7 +280,7 @@ await test("guard refuses a credential file whose path has a trailing space (#15
   mkdirSync(join(dir, "ui-dashboard"), { recursive: true });
   writeFileSync(
     join(dir, "ui-dashboard", "leak.ts "),
-    'const t = "ghs_AbCdEfGhIjKlMnOpQrStUvWxYz012345";\n',
+    `const t = "${GHS_LEAK}";\n`,
   );
   const r = evaluateDiffGuard(["ui-dashboard/leak.ts "], { workRoot: dir });
   assert(
@@ -431,10 +452,7 @@ await test("analysis comment is deterministic — no summary channel to smuggle 
   // buildAnalysisComment takes ONLY the machine-generated guard reason. Even if
   // a caller tried to pass extra args, the signature ignores them.
   const reason = "The autofix diff touches 25 files (limit 20).";
-  const c = buildAnalysisComment(
-    reason,
-    "ghs_AbCdEfGhIjKlMnOpQrStUvWxYz012345 leak attempt",
-  );
+  const c = buildAnalysisComment(reason, `${GHS_LEAK} leak attempt`);
   assert(c.includes(reason), "deterministic reason rendered");
   assert(
     !c.includes("ghs_AbCd"),
@@ -855,14 +873,14 @@ await test("guard resists filename-credential obfuscation and avoids false posit
   // Filenames are agent-controlled: padding before the prefix, or splitting the
   // body/prefix with a separator, must not hide a recoverable token. Fixtures are
   // concatenated so no contiguous credential literal sits in this source.
-  const TOKEN = "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8"; // 36 alnum
+  const T36 = "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8"; // 36 alnum
   const G = "ghs" + "_";
   const attacks = [
-    `ui-dashboard/lib/x${G}${TOKEN}.ts`, // padded before the prefix (kills \b)
+    `ui-dashboard/lib/x${G}${T36}.ts`, // padded before the prefix (kills \b)
     `${G}a1b2/c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8.ts`, // body split by /
     `${G}a1b2-c3d4-e5f6-g7h8-i9j0-k1l2-m3n4-o5p6.ts`, // body split by -
-    `g/hs_${TOKEN}.ts`, // prefix split by /
-    `x${"github" + "_pat_"}${TOKEN}.ts`, // padded github_pat
+    `g/hs_${T36}.ts`, // prefix split by /
+    `x${"github" + "_pat_"}${T36}.ts`, // padded github_pat
   ];
   for (const p of attacks) {
     assert(
@@ -884,7 +902,7 @@ await test("guard resists filename-credential obfuscation and avoids false posit
     );
   }
   // A padded token that reaches a path-echoing reason is masked by redaction.
-  const red = redactCredentialShaped(`forbidden: scripts/x${G}${TOKEN}.ts`);
+  const red = redactCredentialShaped(`forbidden: scripts/x${G}${T36}.ts`);
   assert(!red.includes(`${G}a1b2`), "padded token masked in a redacted reason");
 });
 
@@ -1699,10 +1717,10 @@ function workflowCode() {
 // The org owner is spliced into the fence jq via a shell breakout
 // (`("` + `'"${REPO%%/*}"'` + `"` -> `("mento-protocol"`), so a real jq receives
 // it as a string literal. Reconstruct that EFFECTIVE program for the test.
-const SHELL_OWNER_TOKEN = `'"\${REPO%%/*}"'`;
+const SHELL_OWNER_SPLICE = `'"\${REPO%%/*}"'`;
 
 function effectiveProgram(raw, owner = "mento-protocol") {
-  return raw.split(SHELL_OWNER_TOKEN).join(owner);
+  return raw.split(SHELL_OWNER_SPLICE).join(owner);
 }
 
 /** Every jq ownership-fence program the workflow feeds an owner-qualified

@@ -19,6 +19,17 @@ const SEVERITY_LABEL: Record<PegAlertSeverity, string> = {
   page: "Urgent alert active",
 };
 
+function eventStatusLabel(event: PegAlertEvent): string {
+  if (event.evidence.evaluationState === "failed") return "Monitoring failed";
+  if (event.evidence.evaluationState === "recovered")
+    return "Monitoring recovered";
+  if (event.evidence.evaluationState === "recovered-alerting")
+    return "Monitoring recovered; alert active";
+  if (event.evidence.evaluationState === "recovered-pending")
+    return "Monitoring recovered; alert pending";
+  return SEVERITY_LABEL[event.severity];
+}
+
 const clock = new Intl.DateTimeFormat("en-US", {
   hour: "2-digit",
   minute: "2-digit",
@@ -59,7 +70,7 @@ function AlertEntry({
           <span
             className="pt-[5px]"
             role="img"
-            aria-label={SEVERITY_LABEL[event.severity]}
+            aria-label={eventStatusLabel(event)}
           >
             <SeverityDot size={8} color={SEVERITY_COLOR[event.severity]} />
           </span>

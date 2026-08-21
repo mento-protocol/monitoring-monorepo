@@ -1212,6 +1212,29 @@ test("Peg Grafana and Slack copy leads with the concrete cause", () => {
     path.join(rulesDir, "peg-message-templates.tf"),
     "utf8",
   );
+  const slackTitleStart = templates.indexOf(
+    'resource "grafana_message_template" "peg_slack_title"',
+  );
+  const slackMessageStart = templates.indexOf(
+    'resource "grafana_message_template" "peg_slack_message"',
+  );
+  const victorOpsTitleStart = templates.indexOf(
+    'resource "grafana_message_template" "peg_victorops_title"',
+  );
+  assert(
+    slackTitleStart >= 0 &&
+      slackMessageStart > slackTitleStart &&
+      victorOpsTitleStart > slackMessageStart,
+    "Peg notification template resources must exist in the expected order",
+  );
+  const slackTitleTemplate = templates.slice(
+    slackTitleStart,
+    slackMessageStart,
+  );
+  const slackMessageTemplate = templates.slice(
+    slackMessageStart,
+    victorOpsTitleStart,
+  );
 
   assert(
     definitions.includes("sell price is") &&
@@ -1246,7 +1269,24 @@ test("Peg Grafana and Slack copy leads with the concrete cause", () => {
       !templates.includes(".CommonLabels.alertname") &&
       !templates.includes("*FIRING:") &&
       !templates.includes("*RESOLVED:"),
-    "Peg Slack titles and bodies must use the cause instead of internal alert state or rule names",
+    "Peg notification bodies and pager titles must use the cause instead of internal alert state or rule names",
+  );
+  assert(
+    !slackTitleTemplate.includes("Annotations.summary") &&
+      !slackTitleTemplate.includes("Annotations.resolved_summary") &&
+      slackTitleTemplate.includes("🚨") &&
+      slackTitleTemplate.includes("🟡") &&
+      slackTitleTemplate.includes("✅") &&
+      slackMessageTemplate.includes(
+        "*<https://monitoring.mento.org/peg-monitoring|{{ . }}>*",
+      ) &&
+      slackMessageTemplate.includes(
+        "*<https://monitoring.mento.org/peg-monitoring|Peg monitoring needs attention>*",
+      ) &&
+      slackMessageTemplate.includes(
+        "*<https://monitoring.mento.org/peg-monitoring|Peg monitoring recovered>*",
+      ),
+    "Peg Slack must keep Grafana's fixed title link on a status icon and link each human title to Peg Monitoring",
   );
 });
 
