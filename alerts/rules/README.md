@@ -121,9 +121,13 @@ The Polygon-specific producer checks and ordered steps are in
 
 Before applying Aegis testnet-health rules, confirm Aegis has recently emitted
 successful `view_call_query_duration_count` samples for `celoSepolia` and
-`monadTestnet`. The no-successful-poll rules intentionally use
-`no_data_state = "Alerting"` with a 5m grace, so a never-published series can
-fire immediately after apply.
+`monadTestnet`. Each no-successful-poll query falls back to zero while the last
+global `lastUpdatedAt` heartbeat is less than 11 minutes old. This window gives
+the global page its five-minute stale threshold, five-minute hold, and one
+evaluation interval before a firing chain alert resolves. A missing chain can
+alert while other Aegis calls still report data. After the handoff window, a
+complete data outage produces no per-chain result and stays owned by the
+production `Aegis does not report new data` page.
 
 After the gated apply, verify rule evaluation in Grafana and delivery to the
 expected Slack channel. A synthetic threshold test changes production alerting:

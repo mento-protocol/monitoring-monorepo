@@ -197,4 +197,29 @@ describe('MetricsService', () => {
       'Unknown metric template 00000000-0000-4000-8000-000000000099',
     );
   });
+
+  it('coalesces overlapping refreshes for the same template', async () => {
+    let releaseQueries!: () => void;
+    const queriesCanFinish = new Promise<void>((resolve) => {
+      releaseQueries = resolve;
+    });
+    const queryService = makeQueryService();
+    queryService.query.mockImplementation(async () => {
+      await queriesCanFinish;
+      return 1;
+    });
+    const service = new MetricsService(makeConfigService(), queryService);
+
+    const firstRefresh = service.refreshTemplate(templateId);
+    const overlappingRefresh = service.refreshTemplate(templateId);
+
+    expect(overlappingRefresh).toBe(firstRefresh);
+    expect(queryService.query).toHaveBeenCalledTimes(2);
+
+    releaseQueries();
+    await Promise.all([firstRefresh, overlappingRefresh]);
+
+    await service.refreshTemplate(templateId);
+    expect(queryService.query).toHaveBeenCalledTimes(4);
+  });
 });

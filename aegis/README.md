@@ -1,4 +1,4 @@
-<!-- agent-context: title="Aegis" status=active owner=eng canonical=true last_verified=2026-07-24 doc_type=reference scope=aegis review_interval_days=90 garden_lane=package-readmes-reference -->
+<!-- agent-context: title="Aegis" status=active owner=eng canonical=true last_verified=2026-08-21 doc_type=reference scope=aegis review_interval_days=90 garden_lane=package-readmes-reference -->
 
 # Aegis
 
@@ -290,6 +290,13 @@ SortedOracles_isOldestReportExpired{rateFeed="CELOBRL",rateFeedValue="0xe8537a3d
 
 ## RPC error handling
 
+Each metric template can have only one active refresh. If its next cron cycle
+starts before the current refresh ends, both cycles share the active refresh.
+Aegis also limits the service to 25 concurrent RPC call tasks across all
+chains. A task keeps its slot while it tries the primary endpoint and the
+optional fallback. These limits prevent a slow endpoint from creating an
+unbounded backlog of requests.
+
 Every call attempts the chain's primary `httpRpcUrl` first. Aegis classifies a
 caught error before deciding whether to retry the fallback or count it.
 
@@ -326,6 +333,11 @@ this counter is the diagnostic that names the failing endpoint. Its labels are
 the same closed, configuration-driven set as `view_call_query_duration`; never
 add `message`, `error`, or another dynamic string, because unbounded
 cardinality breaks Prometheus.
+
+RPC failure logs use one bounded line per contract, function, chain, endpoint
+outcome, and minute. The next emitted line includes the number of matching
+failures suppressed during the prior rate-limit window. Keep large viem error
+objects and request payloads out of production logs.
 
 To add a fallback, set `fallbackHttpRpcUrl` on the chain entry in
 `config.yaml`:
@@ -459,6 +471,7 @@ The protocol alert groups below are owned by `alerts/rules`, not by Aegis:
 **Aegis Service Alerts** (`service=aegis`):
 
 - Failed RPC calls
+- No successful production view calls for one chain while Aegis data is fresh
 - Service not reporting new data
 - Routed to: Slack `#alerts-infra`; page-severity alerts also route to `#alerts-critical` + VictorOps/Splunk.
 

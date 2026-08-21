@@ -234,7 +234,9 @@ describe('QueryService', () => {
 
     await expect(service.query(metric)).resolves.toBeUndefined();
 
-    expect(loggerError).toHaveBeenCalledWith(error);
+    expect(loggerError).toHaveBeenCalledWith(
+      'RPC call failed for BreakerBox.getRateFeedTradingMode on localnet: rpc unavailable',
+    );
     expect(metric.parse).not.toHaveBeenCalled();
   });
 
@@ -398,15 +400,16 @@ describe('QueryService', () => {
         'Primary RPC failed for BreakerBox.getRateFeedTradingMode on localnet',
       ),
     );
+    // The concise viem message omits request and response payloads.
     expect(loggerWarn).toHaveBeenCalledWith(
-      expect.stringContaining('primary down'),
+      expect.stringContaining('HTTP request failed.'),
     );
-    // When both fail, the error log surfaces BOTH errors, not just the fallback.
+    // When both fail, the terminal log identifies both endpoint outcomes.
     expect(loggerError).toHaveBeenCalledWith(
-      expect.stringContaining('primary down'),
+      expect.stringContaining('Primary: HTTP request failed.'),
     );
     expect(loggerError).toHaveBeenCalledWith(
-      expect.stringContaining('fallback down'),
+      expect.stringContaining('Fallback: HTTP request failed.'),
     );
 
     const metrics = await service.rpcErrors.get();

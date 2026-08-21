@@ -9,6 +9,7 @@ import { QueryService } from './query.service';
 @Injectable()
 export class MetricsService {
   private readonly logger = new Logger(MetricsService.name);
+  private readonly inFlightRefreshes = new Map<UUID, Promise<void>>();
   templates: Record<UUID, MetricTemplate> = {};
   metrics: Record<UUID, Metric[]> = {};
   lastUpdatedAt: Gauge;
@@ -67,12 +68,34 @@ export class MetricsService {
     return Promise.all(Object.keys(this.metrics).map(this.refreshTemplate));
   }
 
-  refreshTemplate = async (templateID: UUID) => {
+  refreshTemplate = (templateID: UUID): Promise<void> => {
     const template = this.templates[templateID];
     const metrics = this.metrics[templateID];
     if (!template || !metrics) {
-      throw new Error(`Unknown metric template ${templateID}`);
+      return Promise.reject(new Error(`Unknown metric template ${templateID}`));
     }
+
+    const inFlight = this.inFlightRefreshes.get(templateID);
+    if (inFlight) {
+      this.logger.debug(
+        `Refresh already active for ${template.source.raw}; coalescing this cycle`,
+      );
+      return inFlight;
+    }
+
+    const refresh = this.runRefreshTemplate(template, metrics).finally(() => {
+      if (this.inFlightRefreshes.get(templateID) === refresh) {
+        this.inFlightRefreshes.delete(templateID);
+      }
+    });
+    this.inFlightRefreshes.set(templateID, refresh);
+    return refresh;
+  };
+
+  private async runRefreshTemplate(
+    template: MetricTemplate,
+    metrics: Metric[],
+  ): Promise<void> {
     this.logger.debug(
       `Refreshing ${metrics.length} metrics for ${template.source.raw}`,
     );
@@ -82,7 +105,7 @@ export class MetricsService {
     this.logger.debug(
       `Refreshed ${metrics.length} metrics for ${template.source.raw} in ${duration}ms`,
     );
-  };
+  }
 
   refreshMetric = async (metric: Metric) => {
     this.logger.debug(`Refreshing metrics ${metric.nameWithLabels}`);
@@ -91,8 +114,6 @@ export class MetricsService {
       metric.update(value);
       this.lastUpdatedAt.setToCurrentTime();
       this.logger.debug(`${metric.nameWithLabels} = ${JSON.stringify(value)}`);
-    } else {
-      this.logger.warn(`${metric.nameWithLabels} could not be refreshed.`);
     }
   };
 }

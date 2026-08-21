@@ -3,7 +3,7 @@ title: Polygon monitoring coverage and rollout
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-23
+last_verified: 2026-08-21
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -137,14 +137,14 @@ metrics carry `chain_id="137"` and `chain_name="polygon"`. The source files in
 `alerts/rules/rules-fpmms*.tf` remain the executable threshold authority. The
 Polygon-specific coverage and delivery decisions are:
 
-| Condition                                                                  | Hold                                         | Severity and route                                                | Why                                                                         |
-| -------------------------------------------------------------------------- | -------------------------------------------- | ----------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| Metrics bridge exports fewer than 3 Polygon FPMMs, including no series     | 10 minutes                                   | critical to `#alerts-critical`                                    | Prevents a healthy Celo/Monad fleet from hiding a missing Polygon chain     |
-| Aegis has no successful Polygon production view call                       | 5-minute rule hold over a 10-minute lookback | page to `#alerts-critical` and Splunk On-Call                     | Detects a chain-specific RPC/config outage even while other chains poll     |
-| More than 10 Polygon production view-call failures in 5 minutes            | 5 minutes                                    | page to `#alerts-critical` and Splunk On-Call                     | Detects sustained contract-read failure                                     |
-| Polygon ReserveV2 USDC balance equals exactly zero                         | 5 minutes                                    | page to `#alerts-critical`, Splunk On-Call, and `#alerts-reserve` | USDC/USDm reserve expansion is unavailable                                  |
-| Polygon ReserveV2 EUROP balance equals exactly zero                        | 5 minutes                                    | page to `#alerts-critical`, Splunk On-Call, and `#alerts-reserve` | EURm/EUROP reserve expansion is unavailable                                 |
-| Reserve Safe or Migration multisig executes or changes ownership/threshold | event-driven                                 | Slack multisig channel                                            | Governance/treasury control-plane activity must not wait for a scrape cycle |
+| Condition                                                                      | Hold                                         | Severity and route                                                | Why                                                                                        |
+| ------------------------------------------------------------------------------ | -------------------------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| Metrics bridge exports fewer than 3 Polygon FPMMs, including no series         | 10 minutes                                   | critical to `#alerts-critical`                                    | Prevents a healthy Celo/Monad fleet from hiding a missing Polygon chain                    |
+| Aegis has no successful Polygon production view call while Aegis still reports | 5-minute rule hold over a 10-minute lookback | page to `#alerts-critical` and Splunk On-Call                     | Detects a chain-specific RPC/config outage while the global rule owns a full scrape outage |
+| More than 10 Polygon production view-call failures in 5 minutes                | 5 minutes                                    | page to `#alerts-critical` and Splunk On-Call                     | Detects sustained contract-read failure                                                    |
+| Polygon ReserveV2 USDC balance equals exactly zero                             | 5 minutes                                    | page to `#alerts-critical`, Splunk On-Call, and `#alerts-reserve` | USDC/USDm reserve expansion is unavailable                                                 |
+| Polygon ReserveV2 EUROP balance equals exactly zero                            | 5 minutes                                    | page to `#alerts-critical`, Splunk On-Call, and `#alerts-reserve` | EURm/EUROP reserve expansion is unavailable                                                |
+| Reserve Safe or Migration multisig executes or changes ownership/threshold     | event-driven                                 | Slack multisig channel                                            | Governance/treasury control-plane activity must not wait for a scrape cycle                |
 
 The reserve predicates are deliberately exact-zero only. Operational nonzero
 floors need treasury-owned SLOs and are tracked in #1332; the monitoring stack
@@ -162,11 +162,14 @@ separate checks in steps 7-8.
 
 The code being merged is configuration, not proof that production has already
 cut over. The `Polygon Pool Coverage Incomplete` rule intentionally treats no
-data as alerting after 10 minutes, and the per-chain Aegis liveness rule does
-the same after 5 minutes. The repository has no rollout mute for these rules;
-the weekend mute timing is only for scheduled FX-market closure. Producer
-telemetry must therefore be live before the protected `alerts-rules` apply is
-approved.
+data as alerting after 10 minutes. The per-chain Aegis rule evaluates a missing
+Polygon success series as zero only while the global `lastUpdatedAt` heartbeat
+is less than 11 minutes old. This preserves a firing chain page through the
+global rule's five-minute stale threshold, five-minute hold, and one evaluation
+interval. The global liveness rule then owns the complete Aegis data outage.
+The repository has no rollout mute for these rules; the weekend mute timing is
+only for scheduled FX-market closure. Producer telemetry must therefore be
+live before the protected `alerts-rules` apply is approved.
 
 Roll out in this order:
 
