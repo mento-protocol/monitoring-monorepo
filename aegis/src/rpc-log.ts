@@ -16,7 +16,7 @@ export const conciseErrorMessage = (error: unknown): string => {
         ? error.message
         : String(error);
   const firstLine = candidate
-    .split(/\r?\n/u)
+    .split(/\r\n|[\r\n\u2028\u2029]/u)
     .map((line) => line.trim())
     .find(Boolean);
   const normalized = firstLine ?? 'Unknown error';

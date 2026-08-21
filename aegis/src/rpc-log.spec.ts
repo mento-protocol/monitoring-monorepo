@@ -16,6 +16,12 @@ describe('conciseErrorMessage', () => {
     ).toBe('request failed');
   });
 
+  it('treats an isolated carriage return as a line separator', () => {
+    expect(conciseErrorMessage(new Error('\rrequest failed\rrequest body'))).toBe(
+      'request failed',
+    );
+  });
+
   it('bounds long messages', () => {
     expect(conciseErrorMessage(new Error('x'.repeat(500)))).toHaveLength(240);
   });
