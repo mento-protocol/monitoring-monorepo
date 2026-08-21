@@ -86,8 +86,24 @@ const TREE_GROUP = {
   ],
 };
 
+/**
+ * Freeze the whole tree, not just the outer array.
+ *
+ * A shallow freeze protects the group list and leaves every arm and every
+ * effect writable, which is the opposite of what a routing authority wants: an
+ * importer could push a command onto an arm and the table would carry it with
+ * no diff to review.
+ */
+function deepFreeze(value) {
+  if (value !== null && typeof value === "object" && !Object.isFrozen(value)) {
+    Object.freeze(value);
+    for (const nested of Object.values(value)) deepFreeze(nested);
+  }
+  return value;
+}
+
 /** The whole routing table, in the order the gate applies it. */
-export const ROUTING_GROUPS = Object.freeze([
+export const ROUTING_GROUPS = deepFreeze([
   ...HEAD_GROUPS,
   TREE_GROUP,
   ...TAIL_GROUPS,
@@ -99,7 +115,7 @@ export const ROUTING_GROUPS = Object.freeze([
  * `allowStale` dropped. This is what the equality test compares against the
  * gate's live `case` arms.
  */
-export const ROUTING_PLAN = Object.freeze(normalizeGroups(ROUTING_GROUPS));
+export const ROUTING_PLAN = deepFreeze(normalizeGroups(ROUTING_GROUPS));
 
 const problems = pairingProblems(ROUTING_GROUPS);
 if (problems.length > 0) {

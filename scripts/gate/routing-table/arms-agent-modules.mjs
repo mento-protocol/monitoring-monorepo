@@ -299,7 +299,7 @@ export const AGENT_MODULE_ARMS = [
     ],
   },
   {
-    why: "The routing table as data (ADR 0068). Its own suite owns the schema, ADR 0064's pairing rule, path staleness, the bash-oracle proof of the pattern compiler, and the equality check against the `case` arms in this file. The gate self-test rides along because every module here is in `implementation_signature()`: a change to one moves the freshness signature, which is gate behaviour whether or not the gate reads the table yet.",
+    why: "The routing table as data (ADR 0068). Its own suite owns the schema, ADR 0064's pairing rule, path staleness, the bash-oracle proof of the pattern compiler, and the equality check against the `case` arms in the gate. The gate self-test rides along because every module here is in `implementation_signature()`: a change to one moves the freshness signature, which is gate behaviour whether or not the gate reads the table yet.",
     patterns: ["scripts/gate/routing-table/*.mjs"],
     effects: [
       {

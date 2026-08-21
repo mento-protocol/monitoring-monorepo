@@ -225,7 +225,15 @@ export function normalizeEffects(effects, where) {
   );
 }
 
-function normalizeArms(arms, subject, where) {
+/**
+ * A pattern that names an engine-computed value, e.g. a symlink target resolved
+ * at run time. Only a `dynamic` group may hold one: the same text in a static
+ * group is a placeholder nobody substitutes, so it would be matched as the
+ * literal characters `${…}` and the arm would never fire.
+ */
+const DYNAMIC_PATTERN = /\$\{[a-z_][a-z_0-9]*\}/;
+
+function normalizeArms(arms, subject, where, dynamic = null) {
   if (!Array.isArray(arms) || arms.length === 0) {
     throw new TableError(where, "`arms` is missing or empty");
   }
@@ -244,6 +252,15 @@ function normalizeArms(arms, subject, where) {
     }
     if (subject === "path") {
       for (const pattern of arm.patterns) {
+        if (DYNAMIC_PATTERN.test(pattern)) {
+          if (dynamic === null) {
+            throw new TableError(
+              at,
+              `pattern ${JSON.stringify(pattern)} names a run-time value, but this group is not \`dynamic\` — nothing would substitute it, so the arm would be matched as those literal characters and never fire`,
+            );
+          }
+          continue;
+        }
         const problem = patternProblem(pattern);
         if (problem !== null) {
           throw new TableError(
@@ -326,7 +343,12 @@ export function normalizeGroups(groups) {
       realTreeOnly: group.realTreeOnly === true,
       dynamic: group.dynamic ?? null,
       requiresNonEmpty: group.requiresNonEmpty === true,
-      arms: normalizeArms(group.arms, "path", `${where} (${group.id})`),
+      arms: normalizeArms(
+        group.arms,
+        "path",
+        `${where} (${group.id})`,
+        group.dynamic ?? null,
+      ),
     };
   });
 }

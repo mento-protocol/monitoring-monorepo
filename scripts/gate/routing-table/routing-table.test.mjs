@@ -62,9 +62,32 @@ test("the groups are in the order the gate applies them", () => {
   );
 });
 
-test("the table is frozen", () => {
-  assert.ok(Object.isFrozen(ROUTING_GROUPS));
-  assert.ok(Object.isFrozen(ROUTING_PLAN));
+test("the table is frozen all the way down", () => {
+  // Not just the outer array: an importer that could push a command onto an arm
+  // could change what the gate schedules with no diff to review.
+  const frozen = (value) =>
+    value === null ||
+    typeof value !== "object" ||
+    (Object.isFrozen(value) && Object.values(value).every(frozen));
+  assert.ok(frozen(ROUTING_GROUPS), "ROUTING_GROUPS is not deeply frozen");
+  assert.ok(frozen(ROUTING_PLAN), "ROUTING_PLAN is not deeply frozen");
+});
+
+test("the schema refuses a run-time placeholder in a static group", () => {
+  assert.throws(
+    () =>
+      normalizeGroups(table({ id: "x", arms: [arm(["${some_target}/*"])] })),
+    /names a run-time value/,
+  );
+  assert.doesNotThrow(() =>
+    normalizeGroups(
+      table({
+        id: "x",
+        dynamic: "scriptsSymlinkTargets",
+        arms: [arm(["${some_target}/*"])],
+      }),
+    ),
+  );
 });
 
 test("every verb in the closed set is a function the gate defines", () => {
