@@ -133,15 +133,25 @@ tldr: **ruleset-required** workflows (`ci`, `Code Quality`, the Vercel checks) M
 
 ### Shell failure propagation and fixture environments
 
-- A function invoked as an `if`, `while`, or `until` condition, under `!`, as a
-  non-final command in an `&&` or `||` list, or inside a Bash command substitution
-  while `inherit_errexit` is disabled (including default non-POSIX mode) cannot
-  rely on `set -e` to stop its body. Check each load-bearing command explicitly.
-  For each applicable context, add a negative test that proves remaining commands
-  in the function body do not run after the failure and the caller observes the
-  failure. Prove the expected branch, inversion, or list operand for control-flow
-  contexts. For command substitution, prove that the substitution-owning
-  assignment returns failure.
+- A function invoked directly as an `if`, `while`, or `until` condition, under
+  `!`, or as a non-final command in an `&&` or `||` list cannot rely on `set -e`
+  to stop its body.
+- Command substitution has two independent suppression mechanisms. With
+  `inherit_errexit` disabled, including default non-POSIX Bash, the substitution
+  clears `errexit`. Even with `inherit_errexit` enabled, an ignored-errexit
+  context around the standalone assignment-only command, or around an enclosing
+  pipeline whose whole status is tested, suppresses `errexit` in the substituted
+  function body.
+- Check each load-bearing command explicitly. Match every negative test to the
+  exact production call shape. Prove that remaining commands in the function
+  body do not run and that the caller observes failure. For direct contexts,
+  prove the expected branch, inversion, or list operand. For command
+  substitution, use a standalone assignment-only command such as `value=$(f)`
+  and prove that it returns failure. Test both `inherit_errexit` settings and
+  every nested ignored-errexit context that production uses. Do not use `local`,
+  `declare`, `export`, or `readonly`, a command argument, an assignment prefix,
+  or an assignment with a later substitution as status proof; each can mask the
+  substituted function's status.
 - A fixture that sources or spawns a script must create the feature state it
   tests. Set enable flags and clear ambient opt-outs inside the fixture. For a
   load-bearing flag, also run the fixture under the inverse caller state and

@@ -119,30 +119,59 @@ item required.
 
 - Failing required check: inspect the failing workflow/log, fix only PR-caused
   failures, run focused validation, commit, and push.
-- Merge conflict: fetch `baseRefName` from the verified `BASE_REMOTE`, record the
-  pre-merge head, and merge that remote-tracking ref into the already-published
-  PR branch. Treat the resolved tree as a new substantive head. After resolving
-  it, write the path union to a newline-delimited file:
+- Merge conflict: fetch `baseRefName` from the verified `BASE_REMOTE`. Before
+  the merge, pin the fetched base and the published PR head to immutable commit
+  IDs:
 
   ```bash
-  (
-    path_tmp="$(mktemp -d)" || exit 1
-    trap 'rm -rf -- "$path_tmp"' EXIT
-    git diff --name-only --no-renames <verified-base-ref> > "$path_tmp/base" || exit 1
-    git diff --name-only --no-renames <pre-merge-head> > "$path_tmp/pre-merge" || exit 1
-    sort -u "$path_tmp/base" "$path_tmp/pre-merge" > "$path_tmp/union" || exit 1
-    mv "$path_tmp/union" <changed-paths-file> || exit 1
-  )
+  base_oid="$(git rev-parse '<verified-base-ref>^{commit}')" || exit 1
+  premerge_oid="$(git rev-parse 'HEAD^{commit}')" || exit 1
   ```
 
-  Stop if this block exits nonzero. Use that union as the review and validation
-  scope. Then run focused validation and the mapped quality gate with
-  `--base <verified-base-ref>` and
-  `--changed-paths-file <changed-paths-file>` so it routes inherited-only paths.
-  Repeat any applicable closeout review if the resolution or inherited base
-  changes a reviewed surface or the change's materiality. Commit and push through
-  `HEAD_REMOTE`. Do not rebase a published PR because the resulting force-push
-  violates this workflow.
+  Merge exact `base_oid`. Resolve the conflicts and run focused validation.
+  Create the merge commit locally, but do not push it yet. Stop concurrent
+  writers. Pin the final local head, require a clean worktree, and require both
+  input commits to be its ancestors:
+
+  ```bash
+  final_head="$(git rev-parse 'HEAD^{commit}')" || exit 1
+  worktree_state="$(git status --porcelain=v1)" || exit 1
+  test -z "$worktree_state" || exit 1
+  git merge-base --is-ancestor "$base_oid" "$final_head" || exit 1
+  git merge-base --is-ancestor "$premerge_oid" "$final_head" || exit 1
+  ```
+
+  Run both mapped gates against the same `final_head`:
+
+  ```bash
+  pnpm agent:quality-gate --base "$base_oid" --head HEAD --run
+  pnpm agent:quality-gate --base "$premerge_oid" --head HEAD --run
+  ```
+
+  Prepare separate verified branch-mode review bundles in different empty
+  directories outside the worktree:
+
+  ```bash
+  pnpm agent:autoreview --prepare-bundle-dir "$base_bundle" \
+    --feedback-pr <pr-number> -- --mode branch --base "$base_oid"
+  pnpm agent:autoreview --prepare-bundle-dir "$premerge_bundle" \
+    --feedback-pr <pr-number> -- --mode branch --base "$premerge_oid"
+  pnpm agent:autoreview --verify-bundle-dir "$base_bundle"
+  pnpm agent:autoreview --verify-bundle-dir "$premerge_bundle"
+  ```
+
+  The adapter has no `--pr` option. Pass the numeric PR through
+  `--feedback-pr`; `auto` is invalid with an explicit `--base`. Complete a
+  fresh-context review of each bundle. Retain each pre-review manifest and run
+  its generated post-review command with `--expected-bundle-manifest`.
+
+  Bind the two gate results and two post-verified review verdicts to the same
+  `final_head`. Do not edit the worktree or move `HEAD` during this sequence.
+  After every command, resolve `HEAD` with an explicit success check, require it
+  to equal `final_head`, and recheck the clean worktree. Any follow-up fix
+  restarts both gates and both bundle reviews from a new clean final head. Only
+  then push through `HEAD_REMOTE`. Do not rebase a published PR because the
+  resulting force-push violates this workflow.
 
 - Feedback blocker: triage every normalized finding, implement valid fixes, and
   sweep review bodies, top-level comments, threads, annotations, and failing
