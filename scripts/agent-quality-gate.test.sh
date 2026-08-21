@@ -6212,7 +6212,227 @@ gate_race_root="$(mktemp -d)"
 # the suite went on.
 gate_race_out="$(mktemp -d)"
 gate_race_log="$gate_race_out/race.log"
+gate_race_sync="$(mktemp -d)"
 (
+  race_drain_cleanup_active=0
+  race_drain_hold_file=""
+  race_drain_orphan=""
+  race_drain_orphan_start=""
+  race_drain_a_wrapper=""
+  race_drain_a_wrapper_start=""
+  race_drain_c_wrapper=""
+  race_drain_c_wrapper_start=""
+  race_drain_watchdog_identities=""
+
+  race_drain_process_is_expected() {
+    local pid="$1"
+    local expected_start="$2"
+    local current_start
+    [[ "$pid" =~ ^[0-9]+$ && -n "$expected_start" ]] || return 1
+    current_start="$(ps -p "$pid" -o lstart= 2>/dev/null || true)"
+    [[ -n "$current_start" && "$current_start" == "$expected_start" ]]
+  }
+
+  race_drain_victim_is_expected() {
+    [[ "$race_drain_cleanup_active" -eq 1 && -n "$race_drain_orphan" && -n "$race_drain_orphan_start" ]] || return 1
+    race_drain_process_is_expected "$race_drain_orphan" "$race_drain_orphan_start"
+  }
+
+  race_drain_process_is_stopped() {
+    local pid="$1"
+    local expected_start="$2"
+    local current_state
+    race_drain_process_is_expected "$pid" "$expected_start" || return 1
+    current_state="$(ps -p "$pid" -o stat= 2>/dev/null || true)"
+    [[ -n "$current_state" && "$current_state" == *T* ]]
+  }
+
+  # Return 0 only when a direct child is confirmed gone or a zombie, so a
+  # following wait cannot block. Return 1 for its exact live identity, 2 when
+  # it still answers but its identity/state cannot be read, and 3 for a PID
+  # that now names something else.
+  race_drain_direct_wrapper_reap_state() {
+    local wrapper_pid="$1"
+    local wrapper_start="$2"
+    local current_start current_state
+    [[ "$wrapper_pid" =~ ^[0-9]+$ && -n "$wrapper_start" ]] || return 2
+    if ! kill -0 "$wrapper_pid" 2>/dev/null; then
+      return 0
+    fi
+    current_start="$(ps -p "$wrapper_pid" -o lstart= 2>/dev/null || true)"
+    [[ -n "$current_start" ]] || return 2
+    [[ "$current_start" == "$wrapper_start" ]] || return 3
+    current_state="$(ps -p "$wrapper_pid" -o stat= 2>/dev/null || true)"
+    [[ -n "$current_state" ]] || return 2
+    [[ "$current_state" == Z* ]] && return 0
+    return 1
+  }
+
+  race_drain_direct_wrapper_is_expected() {
+    local wrapper_pid="$1"
+    local wrapper_start="$2"
+    local reap_state
+    if race_drain_direct_wrapper_reap_state "$wrapper_pid" "$wrapper_start"; then
+      return 1
+    else
+      reap_state=$?
+    fi
+    [[ "$reap_state" -eq 1 ]]
+  }
+
+  race_drain_reap_direct_wrapper() {
+    local label="$1"
+    local wrapper_pid="$2"
+    local wrapper_start="$3"
+    local reap_state
+    if race_drain_direct_wrapper_reap_state "$wrapper_pid" "$wrapper_start"; then
+      # The probe confirmed a zombie or that this PID no longer answers, so a
+      # wait on this direct child cannot block.
+      wait "$wrapper_pid" 2>/dev/null
+      return $?
+    else
+      reap_state=$?
+    fi
+    case "$reap_state" in
+      1)
+        echo "interrupted-drain cleanup: ${label} wrapper ${wrapper_pid} is still live; refusing an unbounded reap" >&2
+        ;;
+      2)
+        echo "interrupted-drain cleanup: ${label} wrapper ${wrapper_pid} still answers but its identity/state cannot be read; refusing an unbounded reap" >&2
+        ;;
+      3)
+        echo "interrupted-drain cleanup: ${label} wrapper ${wrapper_pid} no longer has its recorded identity; refusing an unbounded reap" >&2
+        ;;
+      *)
+        echo "interrupted-drain cleanup: ${label} wrapper ${wrapper_pid} had an unknown reap state; refusing an unbounded reap" >&2
+        ;;
+    esac
+    return 124
+  }
+
+  race_drain_cleanup_direct_wrapper() {
+    local label="$1"
+    local wrapper_pid="$2"
+    local wrapper_start="$3"
+    local deadline reap_status
+    [[ -n "$wrapper_pid" && -n "$wrapper_start" ]] || return 0
+
+    if race_drain_direct_wrapper_is_expected "$wrapper_pid" "$wrapper_start"; then
+      kill -TERM "$wrapper_pid" 2>/dev/null || true
+      deadline=$(( $(date +%s) + 10 ))
+      while race_drain_direct_wrapper_is_expected "$wrapper_pid" "$wrapper_start" && [[ "$(date +%s)" -lt "$deadline" ]]; do sleep 1; done
+    fi
+    if race_drain_direct_wrapper_is_expected "$wrapper_pid" "$wrapper_start"; then
+      kill -KILL "$wrapper_pid" 2>/dev/null || true
+      deadline=$(( $(date +%s) + 10 ))
+      while race_drain_direct_wrapper_is_expected "$wrapper_pid" "$wrapper_start" && [[ "$(date +%s)" -lt "$deadline" ]]; do sleep 1; done
+    fi
+    if race_drain_reap_direct_wrapper "$label" "$wrapper_pid" "$wrapper_start"; then
+      return 0
+    else
+      reap_status=$?
+    fi
+    # A reaped child can report its command's signal/non-zero status. Cleanup
+    # still completed in that case; 124 is reserved for an unsafe reap.
+    [[ "$reap_status" -eq 124 ]] && return 124
+    return 0
+  }
+
+  race_drain_wait_for_direct_wrapper() {
+    local label="$1"
+    local wrapper_pid="$2"
+    local wrapper_start="$3"
+    local deadline
+    [[ -n "$wrapper_pid" && -n "$wrapper_start" ]] || return 0
+
+    deadline=$(( $(date +%s) + 10 ))
+    while race_drain_direct_wrapper_is_expected "$wrapper_pid" "$wrapper_start" && [[ "$(date +%s)" -lt "$deadline" ]]; do sleep 1; done
+    if race_drain_direct_wrapper_is_expected "$wrapper_pid" "$wrapper_start"; then
+      race_drain_cleanup_direct_wrapper "$label" "$wrapper_pid" "$wrapper_start"
+      return 124
+    fi
+    race_drain_reap_direct_wrapper "$label" "$wrapper_pid" "$wrapper_start"
+  }
+
+  race_drain_kill_and_reap_direct_wrapper() {
+    local label="$1"
+    local wrapper_pid="$2"
+    local wrapper_start="$3"
+    local deadline reap_status
+    [[ -n "$wrapper_pid" && -n "$wrapper_start" ]] || return 0
+
+    if race_drain_direct_wrapper_is_expected "$wrapper_pid" "$wrapper_start"; then
+      kill -KILL "$wrapper_pid" 2>/dev/null || true
+    fi
+    deadline=$(( $(date +%s) + 10 ))
+    while race_drain_direct_wrapper_is_expected "$wrapper_pid" "$wrapper_start" && [[ "$(date +%s)" -lt "$deadline" ]]; do sleep 1; done
+    if race_drain_reap_direct_wrapper "$label" "$wrapper_pid" "$wrapper_start"; then
+      return 0
+    else
+      reap_status=$?
+    fi
+    [[ "$reap_status" -eq 124 ]] && return 124
+    return 0
+  }
+
+  race_drain_cleanup_suspended_watchdogs() {
+    local watchdog_pid watchdog_start deadline cleanup_status=0
+    while IFS='|' read -r watchdog_pid watchdog_start; do
+      [[ -n "$watchdog_pid" && -n "$watchdog_start" ]] || continue
+      if race_drain_process_is_expected "$watchdog_pid" "$watchdog_start"; then
+        # Leave a pending TERM unhandled. Resuming this stopped watchdog could
+        # make it run its own stale drain path. KILL removes only this exact
+        # identity without executing that deferred work.
+        kill -KILL "$watchdog_pid" 2>/dev/null || true
+        deadline=$(( $(date +%s) + 10 ))
+        while race_drain_process_is_expected "$watchdog_pid" "$watchdog_start" && [[ "$(date +%s)" -lt "$deadline" ]]; do sleep 1; done
+      fi
+      if race_drain_process_is_expected "$watchdog_pid" "$watchdog_start"; then
+        echo "interrupted-drain cleanup: watchdog ${watchdog_pid} survived the bounded cleanup wait" >&2
+        cleanup_status=124
+      fi
+    done <<EOF
+$race_drain_watchdog_identities
+EOF
+    return "$cleanup_status"
+  }
+
+  # shellcheck disable=SC2329 # invoked by the EXIT trap below
+  cleanup_interrupted_drain_fixture() {
+    local status=$?
+    local deadline
+    trap - EXIT
+    if [[ -n "$race_drain_hold_file" ]]; then
+      if [[ -L "$race_drain_hold_file" ]]; then
+        echo "interrupted-drain cleanup: refusing to release symlink $race_drain_hold_file" >&2
+      elif [[ ! -e "$race_drain_hold_file" ]]; then
+        (set -C && : > "$race_drain_hold_file") 2>/dev/null ||
+          echo "interrupted-drain cleanup: could not release $race_drain_hold_file" >&2
+      elif [[ ! -f "$race_drain_hold_file" ]]; then
+        echo "interrupted-drain cleanup: refusing to release non-regular path $race_drain_hold_file" >&2
+      fi
+    fi
+    if race_drain_victim_is_expected; then
+      kill -TERM "$race_drain_orphan" 2>/dev/null || true
+      deadline=$(( $(date +%s) + 10 ))
+      while race_drain_victim_is_expected && [[ "$(date +%s)" -lt "$deadline" ]]; do sleep 1; done
+      if race_drain_victim_is_expected; then
+        kill -KILL "$race_drain_orphan" 2>/dev/null || true
+        deadline=$(( $(date +%s) + 10 ))
+        while race_drain_victim_is_expected && [[ "$(date +%s)" -lt "$deadline" ]]; do sleep 1; done
+      fi
+      race_drain_victim_is_expected &&
+        echo "interrupted-drain cleanup: victim $race_drain_orphan survived the bounded cleanup wait" >&2
+    fi
+    race_drain_cleanup_direct_wrapper \
+      "A gate" "$race_drain_a_wrapper" "$race_drain_a_wrapper_start" || true
+    race_drain_cleanup_direct_wrapper \
+      "C gate" "$race_drain_c_wrapper" "$race_drain_c_wrapper_start" || true
+    race_drain_cleanup_suspended_watchdogs || true
+    return "$status"
+  }
+  trap cleanup_interrupted_drain_fixture EXIT
+
   cd "$gate_race_repo"
   git init -q
   git config user.email test@example.invalid
@@ -6230,8 +6450,21 @@ gate_race_log="$gate_race_out/race.log"
   # waiters, or two unexcluded runs would simply miss each other and the
   # assertion would pass on broken code. Every other case only needs the gate
   # to execute something, so they run it at its cheap default.
-  cat > tools/trunk <<STUB
+cat > tools/trunk <<STUB
 #!/usr/bin/env bash
+if [ -n "\${RACE_STUB_VICTIM_PID:-}" ] || [ -n "\${RACE_STUB_VICTIM_LSTART:-}" ] || [ -n "\${RACE_STUB_VIOLATION_FILE:-}" ]; then
+  [ -n "\${RACE_STUB_VICTIM_PID:-}" ] && [ -n "\${RACE_STUB_VICTIM_LSTART:-}" ] && [ -n "\${RACE_STUB_VIOLATION_FILE:-}" ] || {
+    echo "race stub victim identity and violation file must be set together" >&2
+    exit 64
+  }
+  race_stub_victim_start="\$(ps -p "\$RACE_STUB_VICTIM_PID" -o lstart= 2>/dev/null || true)"
+  if [ -n "\$race_stub_victim_start" ] && [ "\$race_stub_victim_start" = "\$RACE_STUB_VICTIM_LSTART" ]; then
+    if ! (set -C && printf 'victim=%s|%s\\n' "\$RACE_STUB_VICTIM_PID" "\$RACE_STUB_VICTIM_LSTART" > "\$RACE_STUB_VIOLATION_FILE") 2>/dev/null; then
+      echo "race stub could not atomically publish the C-before-victim-death violation" >&2
+      exit 64
+    fi
+  fi
+fi
 # RACE_STUB_IGNORE_TERM makes this outlive a TERM the way a real build tool
 # with its own signal handling can. The loop is what survives: its sleeps are
 # killable, it is not.
@@ -6241,8 +6474,25 @@ gate_race_log="$gate_race_out/race.log"
 [ -n "\${RACE_STUB_FORK_AND_EXIT:-}" ] && trap 'sleep ${gate_race_forkexit_seconds} & exit 0' TERM
 [ -n "\${RACE_STUB_IGNORE_TERM:-}" ] && [ -z "\${RACE_STUB_FORK_ON_TERM:-}" ] && [ -z "\${RACE_STUB_FORK_AND_EXIT:-}" ] && trap '' TERM
 printf 'enter %s %s\n' "\$\$" "\$(date +%s)" >> "$gate_race_log"
-race_stub_deadline=\$(( \$(date +%s) + \${RACE_STUB_SECONDS:-1} ))
-while [ "\$(date +%s)" -lt "\$race_stub_deadline" ]; do sleep 1 || true; done
+if [ -n "\${RACE_STUB_HOLD_FILE:-}" ]; then
+  while :; do
+    if [ -L "\$RACE_STUB_HOLD_FILE" ]; then
+      echo "race stub hold path must be a regular file, not a symlink: \$RACE_STUB_HOLD_FILE" >&2
+      exit 64
+    fi
+    if [ -e "\$RACE_STUB_HOLD_FILE" ]; then
+      [ -f "\$RACE_STUB_HOLD_FILE" ] || {
+        echo "race stub hold path is not a regular file: \$RACE_STUB_HOLD_FILE" >&2
+        exit 64
+      }
+      break
+    fi
+    sleep 1 || true
+  done
+else
+  race_stub_deadline=\$(( \$(date +%s) + \${RACE_STUB_SECONDS:-1} ))
+  while [ "\$(date +%s)" -lt "\$race_stub_deadline" ]; do sleep 1 || true; done
+fi
 printf 'exit %s %s\n' "\$\$" "\$(date +%s)" >> "$gate_race_log"
 exit 0
 STUB
@@ -6665,35 +6915,77 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   # record is replaced between taking the lock and reaching its first mapped
   # command must stop, and must not delete the record that replaced it.
   : > "$gate_race_log"
-  RACE_STUB_SECONDS=1 \
+  race_test_mode_ready="$gate_race_sync/non-test.ready"
+  race_test_mode_release="$gate_race_sync/non-test.release"
+  rm -f "$race_test_mode_ready" "$race_test_mode_release"
+  if NODE_ENV='' \
+    RACE_STUB_SECONDS=1 \
     AGENT_QUALITY_GATE_LOCK=1 \
     AGENT_QUALITY_GATE_LOCK_HELD='' \
     AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
     AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
-    AGENT_QUALITY_GATE_LOCK_HELD_DELAY_SECONDS=6 \
+    AGENT_QUALITY_GATE_LOCK_TEST_READY_FILE="$race_test_mode_ready" \
+    AGENT_QUALITY_GATE_LOCK_TEST_RELEASE_FILE="$race_test_mode_release" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 30 \
+    > "$gate_race_out/non-test-sync.out" 2>&1; then
+    race_test_mode_exit=0
+  else
+    race_test_mode_exit=$?
+  fi
+  [[ "$race_test_mode_exit" == "2" ]] ||
+    fail "test synchronization outside NODE_ENV=test must exit 2, got ${race_test_mode_exit}"
+  grep -Fx "error: gate lock test synchronization is allowed only with NODE_ENV=test." \
+    "$gate_race_out/non-test-sync.out" ||
+    fail "test synchronization outside NODE_ENV=test must fail closed"
+  [[ ! -e "$race_test_mode_ready" && ! -L "$race_test_mode_ready" && ! -e "$race_test_mode_release" && ! -L "$race_test_mode_release" ]] ||
+    fail "test synchronization outside NODE_ENV=test must not publish a barrier file"
+  [[ ! -s "$gate_race_log" ]] ||
+    fail "test synchronization outside NODE_ENV=test must not enter a mapped command"
+
+  race_displaced_ready="$gate_race_sync/displaced.ready"
+  race_displaced_release="$gate_race_sync/displaced.release"
+  RACE_STUB_SECONDS=1 \
+    NODE_ENV=test \
+    AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    AGENT_QUALITY_GATE_LOCK_TEST_READY_FILE="$race_displaced_ready" \
+    AGENT_QUALITY_GATE_LOCK_TEST_RELEASE_FILE="$race_displaced_release" \
     "$repo_root/scripts/agent-quality-gate.sh" \
     --base HEAD --run --lock-wait 30 \
     > "$gate_race_out/displaced.out" 2>&1 &
   race_displaced=$!
-  race_waited=0
-  while [[ ! -r "$gate_race_root/run.lock/owner" && "$race_waited" -lt 30 ]]; do
-    sleep 0.5
-    race_waited=$((race_waited + 1))
+  race_displaced_deadline=$(( $(date +%s) + 30 ))
+  while [[ ! -e "$race_displaced_ready" && ! -L "$race_displaced_ready" && "$(date +%s)" -lt "$race_displaced_deadline" ]]; do
+    sleep 1
   done
-  [[ -r "$gate_race_root/run.lock/owner" ]] ||
-    fail "the displaced-holder case never saw the run publish its record"
+  [[ -f "$race_displaced_ready" && ! -L "$race_displaced_ready" && -r "$race_displaced_ready" ]] ||
+    fail "the displaced-holder case timed out waiting for its regular ready file"
+  race_displaced_token="$(sed -n 's/^token=//p' "$gate_race_root/run.lock/owner" | head -n1)"
+  [[ -n "$race_displaced_token" ]] ||
+    fail "the displaced-holder case published ready without an owner token"
+  race_displaced_marker="$gate_race_root/holder.$race_displaced_token"
+  [[ -f "$race_displaced_marker" && ! -L "$race_displaced_marker" && -r "$race_displaced_marker" ]] ||
+    fail "the displaced-holder case did not create a readable regular marker"
+  [[ "$(cat "$race_displaced_marker")" == "$race_displaced_token" ]] ||
+    fail "the displaced-holder marker body does not equal the owner token"
+  race_displaced_replacement="$gate_race_root/run.lock/owner.replacement.$$"
   {
     printf 'pid=%s\n' "$$"
     printf 'host=%s\n' "$(uname -n)"
     printf 'started_at=%s\n' "$(date +%s)"
     printf 'worktree=%s\n' "$gate_race_repo"
     printf 'token=somebody-else-1-1\n'
-  } > "$gate_race_root/run.lock/owner"
+  } > "$race_displaced_replacement"
+  mv "$race_displaced_replacement" "$gate_race_root/run.lock/owner"
+  : > "$race_displaced_release"
   wait "$race_displaced" 2>/dev/null && race_displaced_exit=0 || race_displaced_exit=$?
   [[ "$race_displaced_exit" == "2" ]] ||
     fail "a displaced holder must stop with exit 2, got ${race_displaced_exit}"
-  grep -q "no longer holds the gate run lock" "$gate_race_out/displaced.out" ||
-    fail "a displaced holder must say so before stopping"
+  grep -Fx "error: this run no longer holds the gate run lock at ${gate_race_root}/run.lock." "$gate_race_out/displaced.out" ||
+    fail "a displaced holder must print the exact lock-displacement error"
   [[ ! -s "$gate_race_log" ]] ||
     fail "a displaced holder must stop before executing any mapped command"
   [[ "$(sed -n 's/^token=//p' "$gate_race_root/run.lock/owner" | head -n1)" == "somebody-else-1-1" ]] ||
@@ -6837,7 +7129,7 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   race_waited=0
   race_chain_b_pid=""
   while [[ "$race_waited" -lt 180 ]]; do
-    race_chain_b_pid="$(sed -n 's/^pid=//p' "$gate_race_root/run.lock/owner" 2>/dev/null | head -n1)"
+    race_chain_b_pid="$(sed -n 's/^pid=//p' "$gate_race_root/run.lock/owner" 2>/dev/null | head -n1 || true)"
     [[ -n "$race_chain_b_pid" && "$race_chain_b_pid" != "$race_chain_a_pid" ]] && break
     sleep 0.5
     race_waited=$((race_waited + 1))
@@ -6892,8 +7184,16 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
   rm -f "$gate_race_root"/captured.*
   : > "$gate_race_log"
+  race_drain_hold_file="$gate_race_out/interrupted-drain.release"
+  race_drain_violation_file="$gate_race_out/interrupted-drain.violation"
+  rm -f "$race_drain_hold_file"
+  rm -f "$race_drain_violation_file"
+  [[ ! -e "$race_drain_hold_file" && ! -L "$race_drain_hold_file" ]] ||
+    fail "the interrupted-drain hold path must be absent before A starts"
+  [[ ! -e "$race_drain_violation_file" && ! -L "$race_drain_violation_file" ]] ||
+    fail "the interrupted-drain violation path must be absent before A starts"
   RACE_STUB_IGNORE_TERM=1 \
-    RACE_STUB_SECONDS=60 \
+    RACE_STUB_HOLD_FILE="$race_drain_hold_file" \
     AGENT_QUALITY_GATE_LOCK=1 \
     AGENT_QUALITY_GATE_LOCK_HELD='' \
     AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
@@ -6902,20 +7202,61 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     --base HEAD --run --lock-wait 45 \
     > "$gate_race_out/drain-a.out" 2>&1 &
   race_drain_a_wrapper=$!
-  race_waited=0
-  while [[ -z "$(awk '/^enter/ { print $2; exit }' "$gate_race_log")" && "$race_waited" -lt 120 ]]; do
-    sleep 0.5
-    race_waited=$((race_waited + 1))
+  race_drain_a_wrapper_start="$(ps -p "$race_drain_a_wrapper" -o lstart= 2>/dev/null || true)"
+  [[ -n "$race_drain_a_wrapper_start" ]] ||
+    fail "the interrupted-drain case could not record A's direct wrapper identity"
+  race_drain_a_deadline=$(( $(date +%s) + 60 ))
+  while [[ -z "$(awk '/^enter/ { print $2; exit }' "$gate_race_log")" && "$(date +%s)" -lt "$race_drain_a_deadline" ]]; do
+    sleep 1
   done
   race_drain_orphan="$(awk '/^enter/ { print $2; exit }' "$gate_race_log")"
   [[ -n "$race_drain_orphan" ]] ||
-    fail "the interrupted-drain case never saw a command start"
+    fail "the interrupted-drain case timed out waiting for A to start its held command"
+  race_drain_orphan_start="$(ps -p "$race_drain_orphan" -o lstart= 2>/dev/null || true)"
+  [[ -n "$race_drain_orphan_start" ]] ||
+    fail "the interrupted-drain case could not record A's held-command identity"
+  race_drain_cleanup_active=1
   race_drain_a_pid="$(sed -n 's/^pid=//p' "$gate_race_root/run.lock/owner" | head -n1)"
-  kill -9 "$race_drain_a_pid" "$race_drain_a_wrapper" 2>/dev/null || true
-  wait "$race_drain_a_wrapper" 2>/dev/null || true
+  [[ "$race_drain_a_pid" =~ ^[0-9]+$ ]] ||
+    fail "the interrupted-drain case could not read A's gate PID"
+  # A must crash without its EXIT trap so B inherits a live command to drain.
+  # Its own watchdog normally notices that crash and correctly cleans A's
+  # command. Suspend only the watchdog anchored to A's still-live gate, with
+  # its PID pinned before cleanup can signal it.
+  race_drain_watchdogs="$(pgrep -P "$race_drain_a_pid" -f "collect_tree" 2>/dev/null || true)"
+  race_drain_watchdog_count=0
+  for race_wd in $race_drain_watchdogs; do
+    [[ "$race_wd" =~ ^[0-9]+$ ]] ||
+      fail "the interrupted-drain case found a non-PID A watchdog candidate: ${race_wd}"
+    race_drain_watchdog_count=$((race_drain_watchdog_count + 1))
+  done
+  [[ "$race_drain_watchdog_count" -eq 1 ]] ||
+    fail "the interrupted-drain case expected exactly one direct-child A watchdog, found ${race_drain_watchdog_count}"
+  race_drain_watchdog_pid="$race_drain_watchdogs"
+  race_drain_watchdog_start="$(ps -p "$race_drain_watchdog_pid" -o lstart= 2>/dev/null || true)"
+  race_drain_process_is_expected "$race_drain_watchdog_pid" "$race_drain_watchdog_start" ||
+    fail "the interrupted-drain case could not record A's exact watchdog identity"
+  kill -STOP "$race_drain_watchdog_pid" 2>/dev/null ||
+    fail "the interrupted-drain case could not stop A's exact watchdog"
+  race_drain_watchdog_deadline=$(( $(date +%s) + 10 ))
+  while ! race_drain_process_is_stopped "$race_drain_watchdog_pid" "$race_drain_watchdog_start" && [[ "$(date +%s)" -lt "$race_drain_watchdog_deadline" ]]; do
+    sleep 1
+  done
+  race_drain_process_is_stopped "$race_drain_watchdog_pid" "$race_drain_watchdog_start" ||
+    fail "the interrupted-drain case could not confirm A's exact watchdog was stopped"
+  race_drain_watchdog_identities="${race_drain_watchdog_pid}|${race_drain_watchdog_start}"$'\n'
+  kill -KILL "$race_drain_a_pid" 2>/dev/null || true
+  race_drain_kill_and_reap_direct_wrapper \
+    "A gate" "$race_drain_a_wrapper" "$race_drain_a_wrapper_start"
+  race_drain_a_wrapper=""
+  race_drain_a_wrapper_start=""
+  race_drain_victim_is_expected ||
+    fail "the interrupted-drain case needs its held command alive after A crashes"
 
   # B reclaims, sends its first TERM pass, and dies before it can escalate.
-  RACE_STUB_SECONDS=2 \
+  [[ ! -e "$race_drain_hold_file" && ! -L "$race_drain_hold_file" ]] ||
+    fail "the interrupted-drain hold path appeared before B"
+  RACE_STUB_HOLD_FILE="$race_drain_hold_file" \
     AGENT_QUALITY_GATE_LOCK=1 \
     AGENT_QUALITY_GATE_LOCK_HELD='' \
     AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
@@ -6925,6 +7266,8 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     "$repo_root/scripts/agent-quality-gate.sh" \
     --base HEAD --run --lock-wait 45 \
     > "$gate_race_out/drain-b.out" 2>&1 || true
+  [[ ! -e "$race_drain_hold_file" && ! -L "$race_drain_hold_file" ]] ||
+    fail "the interrupted-drain hold path appeared during B"
   race_captured_file="$(find "$gate_race_root" -name 'captured.*' 2>/dev/null | head -n1)"
   [[ -n "$race_captured_file" ]] ||
     fail "a drain must write down what it captured before it signals anything"
@@ -6935,17 +7278,16 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     fail "an interrupted drain must not leave an empty captured set behind"
   grep -qE '^[0-9]+\|' "$race_captured_file" ||
     fail "the captured set must name processes, not fragments"
-  kill -0 "$race_drain_orphan" 2>/dev/null ||
+  race_drain_victim_is_expected ||
     fail "the interrupted-drain case needs its TERM-ignoring command alive to mean anything"
-  (
-    race_watch_deadline=$(($(date +%s) + 300))
-    while kill -0 "$race_drain_orphan" 2>/dev/null && [ "$(date +%s)" -lt "$race_watch_deadline" ]; do sleep 0.5; done
-    # Recorded only if it really died: writing a time when the bound expired
-    # would let the assertion below read a stalled watcher as a confirmed death.
-    kill -0 "$race_drain_orphan" 2>/dev/null || date +%s > "$gate_race_out/drain_died"
-  ) &
-  race_drain_watcher=$!
-  RACE_STUB_SECONDS=2 \
+  # Keep C's mapped command held too. Its entry is now the proof point: the
+  # release file stays absent until C has drained A's command and reached it.
+  [[ ! -e "$race_drain_violation_file" && ! -L "$race_drain_violation_file" ]] ||
+    fail "the interrupted-drain violation path appeared before C started"
+  RACE_STUB_HOLD_FILE="$race_drain_hold_file" \
+    RACE_STUB_VICTIM_PID="$race_drain_orphan" \
+    RACE_STUB_VICTIM_LSTART="$race_drain_orphan_start" \
+    RACE_STUB_VIOLATION_FILE="$race_drain_violation_file" \
     AGENT_QUALITY_GATE_LOCK=1 \
     AGENT_QUALITY_GATE_LOCK_HELD='' \
     AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
@@ -6953,16 +7295,45 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
     "$repo_root/scripts/agent-quality-gate.sh" \
     --base HEAD --run --lock-wait 90 \
-    > "$gate_race_out/drain-c.out" 2>&1 || true
-  wait "$race_drain_watcher" 2>/dev/null || true
-  race_drain_died="$(cat "$gate_race_out/drain_died" 2>/dev/null || echo 0)"
-  race_drain_c_started="$(awk '/^enter/ { if (NR > 1) { print $3; exit } }' "$gate_race_log")"
+    > "$gate_race_out/drain-c.out" 2>&1 &
+  race_drain_c_wrapper=$!
+  race_drain_c_wrapper_start="$(ps -p "$race_drain_c_wrapper" -o lstart= 2>/dev/null || true)"
+  [[ -n "$race_drain_c_wrapper_start" ]] ||
+    fail "the interrupted-drain case could not record C's direct wrapper identity"
+  [[ ! -e "$race_drain_hold_file" && ! -L "$race_drain_hold_file" ]] ||
+    fail "the interrupted-drain hold path appeared before C reached its drain"
+  race_drain_c_deadline=$(( $(date +%s) + 90 ))
+  while [[ -z "$(awk '/^enter/ { if (NR > 1) { print $2; exit } }' "$gate_race_log")" && "$(date +%s)" -lt "$race_drain_c_deadline" ]]; do
+    sleep 1
+  done
+  race_drain_c_started="$(awk '/^enter/ { if (NR > 1) { print $2; exit } }' "$gate_race_log")"
   [[ -n "$race_drain_c_started" ]] ||
-    fail "the run inheriting an interrupted drain must still execute"
-  [[ "$race_drain_died" -ne 0 ]] ||
-    fail "a command inherited through an interrupted drain must not keep running"
-  [[ "$race_drain_c_started" -ge "$race_drain_died" ]] ||
-    fail "the inheriting run started $((race_drain_died - race_drain_c_started))s before the survivor died"
+    fail "the run inheriting an interrupted drain timed out before starting its held command"
+  [[ ! -e "$race_drain_violation_file" && ! -L "$race_drain_violation_file" ]] ||
+    fail "C entered while A's exact held-command identity was still alive"
+  if race_drain_victim_is_expected; then
+    fail "C started a mapped command before it killed A's held command"
+  fi
+  [[ ! -e "$race_drain_hold_file" && ! -L "$race_drain_hold_file" ]] ||
+    fail "the interrupted-drain hold path was released before the death proof"
+  if ! (set -C && : > "$race_drain_hold_file") 2>/dev/null; then
+    fail "the interrupted-drain case could not create its regular release file"
+  fi
+  if race_drain_wait_for_direct_wrapper \
+    "C gate" "$race_drain_c_wrapper" "$race_drain_c_wrapper_start"; then
+    race_drain_c_exit=0
+  else
+    race_drain_c_exit=$?
+  fi
+  race_drain_c_wrapper=""
+  race_drain_c_wrapper_start=""
+  [[ "$race_drain_c_exit" == "0" ]] ||
+    fail "the run inheriting an interrupted drain exited ${race_drain_c_exit} after its release"
+  if ! race_drain_cleanup_suspended_watchdogs; then
+    fail "the interrupted-drain case left A's exact stopped watchdog alive"
+  fi
+  race_drain_watchdog_identities=""
+  race_drain_cleanup_active=0
   [[ -z "$(find "$gate_race_root" -name 'captured.*' 2>/dev/null)" ]] ||
     fail "a captured set must be cleared once its processes are confirmed gone"
   rm -rf "$gate_race_root/run.lock"
@@ -7537,7 +7908,7 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
       fail "the run recovering from a crash at ${race_crash_point} must release the lock"
   done
 )
-rm -rf "$gate_race_repo" "$gate_race_root" "$gate_race_out"
+rm -rf "$gate_race_repo" "$gate_race_root" "$gate_race_out" "$gate_race_sync"
 } # end family: lock-drain
 
 # <<< gate family body end

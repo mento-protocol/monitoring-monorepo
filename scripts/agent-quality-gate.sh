@@ -657,6 +657,88 @@ gate_run_ensure_marker() {
   gate_run_marker_file="$marker"
 }
 
+# This barrier exists only for the lock-race fixture. It makes the otherwise
+# tiny window after acquisition deterministic without changing an ordinary run:
+# callers must opt in with both paths, and the ready file proves marker creation
+# completed before the test replaces the owner record.
+gate_lock_test_ready_and_wait_for_release() {
+  local ready_file="$1"
+  local release_file="$2"
+  local started_at now
+  local marker ready_body
+
+  if [[ -z "$ready_file" || -z "$release_file" ]]; then
+    echo "error: AGENT_QUALITY_GATE_LOCK_TEST_READY_FILE and AGENT_QUALITY_GATE_LOCK_TEST_RELEASE_FILE must be set together." >&2
+    echo "Nothing has been executed." >&2
+    exit 2
+  fi
+  if [[ -e "$ready_file" || -L "$ready_file" ]]; then
+    echo "error: test ready path ${ready_file} must be absent before the gate publishes it." >&2
+    echo "Nothing has been executed." >&2
+    exit 2
+  fi
+  if [[ -e "$release_file" || -L "$release_file" ]]; then
+    echo "error: test release path ${release_file} must be absent before the gate waits for it." >&2
+    echo "Nothing has been executed." >&2
+    exit 2
+  fi
+  marker="$(gate_run_marker_path)" || {
+    echo "error: could not resolve this run's marker before publishing the test ready file." >&2
+    echo "Nothing has been executed." >&2
+    exit 2
+  }
+  if [[ "$marker" != "$gate_run_marker_file" || -L "$marker" || ! -f "$marker" || ! -r "$marker" ]]; then
+    echo "error: current run marker ${marker} is not a readable regular file before test synchronization." >&2
+    echo "Nothing has been executed." >&2
+    exit 2
+  fi
+  if [[ "$(cat "$marker")" != "$gate_lock_token" ]]; then
+    echo "error: current run marker ${marker} does not contain this run's token before test synchronization." >&2
+    echo "Nothing has been executed." >&2
+    exit 2
+  fi
+  if ! (set -C && printf '%s\n' "$gate_lock_token" > "$ready_file") 2>/dev/null; then
+    echo "error: could not publish the test ready file at ${ready_file}." >&2
+    echo "Nothing has been executed." >&2
+    exit 2
+  fi
+  if [[ -L "$ready_file" || ! -f "$ready_file" || ! -r "$ready_file" ]]; then
+    echo "error: test ready path ${ready_file} is not a readable regular file." >&2
+    echo "Nothing has been executed." >&2
+    exit 2
+  fi
+  ready_body="$(cat "$ready_file")"
+  if [[ "$ready_body" != "$gate_lock_token" ]]; then
+    echo "error: test ready file ${ready_file} does not contain this run's token." >&2
+    echo "Nothing has been executed." >&2
+    exit 2
+  fi
+
+  started_at="$(date +%s)"
+  while :; do
+    if [[ -L "$release_file" ]]; then
+      echo "error: test release path ${release_file} must be a regular file, not a symlink." >&2
+      echo "Nothing has been executed." >&2
+      exit 2
+    fi
+    if [[ -e "$release_file" ]]; then
+      if [[ -f "$release_file" && -r "$release_file" ]]; then
+        return 0
+      fi
+      echo "error: test release path ${release_file} is not a readable regular file." >&2
+      echo "Nothing has been executed." >&2
+      exit 2
+    fi
+    now="$(date +%s)"
+    if [[ $((now - started_at)) -ge 30 ]]; then
+      echo "error: timed out after 30s waiting for test release file ${release_file}." >&2
+      echo "Nothing has been executed." >&2
+      exit 2
+    fi
+    sleep 1
+  done
+}
+
 # Every process still carrying a run's handle. The argv tag names only the
 # wrapper and dies with it, which is why two inherited handles back it up: the
 # environment, readable on a host with /proc, and the open descriptor on the
@@ -4885,6 +4967,18 @@ acquire_gate_run_lock
 # is not the run's. Failing here also means failing before ANY command, which
 # is the whole point.
 gate_run_ensure_marker
+# Test-only synchronization for the displaced-holder fixture. Normal runs do
+# not call it, so unset behavior stays exactly on the production path.
+if [[ "${AGENT_QUALITY_GATE_LOCK_TEST_READY_FILE+x}" == x || "${AGENT_QUALITY_GATE_LOCK_TEST_RELEASE_FILE+x}" == x ]]; then
+  if [[ "${NODE_ENV:-}" != "test" ]]; then
+    echo "error: gate lock test synchronization is allowed only with NODE_ENV=test." >&2
+    echo "Nothing has been executed." >&2
+    exit 2
+  fi
+  gate_lock_test_ready_and_wait_for_release \
+    "${AGENT_QUALITY_GATE_LOCK_TEST_READY_FILE:-}" \
+    "${AGENT_QUALITY_GATE_LOCK_TEST_RELEASE_FILE:-}"
+fi
 # Test-only: widens the gap between holding the lock and checking we still do,
 # which is otherwise as short as the mapping work between them.
 gate_lock_test_delay "${AGENT_QUALITY_GATE_LOCK_HELD_DELAY_SECONDS:-}"
