@@ -238,7 +238,7 @@ export function isTerminalStub({ state, labels } = {}) {
  * PROPAGATES: the run goes red and the workflow names the manual repair, rather
  * than mutating a stub it could not observe.
  *
- * THE SENTINEL (#1929, ADR 0068) is what closes the window that guard only
+ * THE SENTINEL (#1929, ADR 0069) is what closes the window that guard only
  * narrowed. The read above is a snapshot too, so an archive settling between it
  * and the writes below used to complete unseen — the shed erased
  * `sentry:archived` with a `--remove-label` that reports nothing, so no later

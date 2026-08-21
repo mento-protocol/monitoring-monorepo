@@ -1148,6 +1148,17 @@ jobs:
         # shared module, so they belong in a required job rather than only in
         # the advisory supply-chain workflow.
         run: node --test scripts/lib/pnpm-override-selector.test.mjs
+      - name: Sentry fixture scan canary
+        # Issues #1943/#1970, ADR 0068. Proves the four Sentry suites that carry
+        # credential-shaped fixtures still scan clean as whole text under
+        # scripts/agent-autoreview-core.mjs, and that none of the four paths has
+        # vanished. It is NOT a `sentry-*.test.mjs`, so the `sentry-suites` gate
+        # neither enumerates nor runs it; this step and the local quality gate
+        # are its two routes. The `rootScripts` filter is `scripts/**`, so the
+        # scanner, the four suites and the canary itself all admit this job —
+        # the same recursive entry every other scripts/ suite here relies on,
+        # rather than a new enumerated list to keep in sync.
+        run: node scripts/sentry/fixture-scan-canary.test.mjs
       # The Sentry suites used to run here, one step each (issue #1721). They
       # now run in the unconditional `sentry-suites` job, which also proves from
       # their own output that each one asserted (issue #1779, ADR 0062) — a

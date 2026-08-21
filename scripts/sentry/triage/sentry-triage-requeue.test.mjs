@@ -1275,7 +1275,7 @@ await test("the terminal revalidation FAILS CLOSED: an unreadable stub is never 
 });
 
 // ---------------------------------------------------------------------------
-// The archive-settlement race (#1929, ADR 0068). The revalidating read above is
+// The archive-settlement race (#1929, ADR 0069). The revalidating read above is
 // a snapshot, so the archive leg — its own per-issue concurrency group — can
 // settle the stub between it and these writes. The interleaving each test names
 // is the one it drives, by landing the archive's writes at a chosen call.

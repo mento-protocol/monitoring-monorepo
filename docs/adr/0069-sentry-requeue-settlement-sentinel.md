@@ -11,7 +11,7 @@ review_interval_days: 90
 garden_lane: adrs-architecture
 ---
 
-# ADR 0068 — The archive's terminal marker is withheld from the re-queue's shed, and read back as a sentinel
+# ADR 0069 — The archive's terminal marker is withheld from the re-queue's shed, and read back as a sentinel
 
 **Status:** Accepted (Aug 2026), in force.
 **Scope:** ci/process

@@ -22,7 +22,7 @@ repo maintenance utilities.
 ## Layout
 
 [ADR 0064](../docs/adr/0064-scripts-module-directories.md) governs these
-subdirectories; reorganization phases P1–P15 are complete.
+subdirectories.
 
 | Directory       | Holds                                  |
 | --------------- | -------------------------------------- |
@@ -40,8 +40,7 @@ subdirectories; reorganization phases P1–P15 are complete.
 | `gate/`         | quality-gate satellites                |
 | `sentry/`       | triage/autofix/gate/broker/ci-wiring   |
 
-`lib/` (the shared tier) and
-`production-infra-identity-contract/` predate the reorganization. `setup.sh`
+`lib/` and `production-infra-identity-contract/` predate the reorganization. `setup.sh`
 stays flat: `.config/wt.toml` runs that exact path as the Worktrunk pre-start
 hook, and eight docs name it. `redrive-onchain-deadletter.{mjs,test.mjs}` stays
 flat although `alerts/infra/` owns it; ADR 0064 has the lint reason.
@@ -82,6 +81,7 @@ same PR, except the `agent-autoreview.sh` feedback-runtime pins below.
 - **Sentry suite manifest.** `scripts/sentry/gate/sentry-suite-manifest.json`
   keys are exact repo-relative paths, reconciled against `findSentrySuites()`
   by set equality both ways. A moved or renamed suite fails the gate closed.
+  `sentry/fixture-scan-canary.test.mjs` re-pins four; ADR 0068 has the policy.
 - **Enumerated workflow paths-filters.** 22 of 32 files in
   `.github/workflows/` pin a `scripts/` path. `ci.yml` (`autoreviewSuite`,
   `autoreviewRootRuntime`, `versionSkew`; `rootScripts` is the recursive

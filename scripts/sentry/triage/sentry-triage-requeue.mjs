@@ -569,7 +569,7 @@ export async function requeueQueueStub(
   const verifyEndState = onFailure === REQUEUE_ON_FAILURE_VERIFY_END_STATE;
 
   // INVARIANT 7, SECOND HALF — the premise re-checked across the WRITE window
-  // (issue #1929, ADR 0068). `revalidate` alone re-reads and then writes blind:
+  // (issue #1929, ADR 0069). `revalidate` alone re-reads and then writes blind:
   // between those two moments the archive leg — its own per-issue concurrency
   // group — can settle the stub, and the shed then erases the very marker that
   // would have said so. The sentinel names that marker. It is withheld from the

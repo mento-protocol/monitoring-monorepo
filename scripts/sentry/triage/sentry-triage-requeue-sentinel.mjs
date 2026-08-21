@@ -1,5 +1,5 @@
 /**
- * THE SETTLEMENT SENTINEL, and the unwind it triggers (issue #1929, ADR 0068).
+ * THE SETTLEMENT SENTINEL, and the unwind it triggers (issue #1929, ADR 0069).
  *
  * The re-queue chokepoint's invariant 7 revalidates a snapshot-derived premise
  * immediately BEFORE mutating. That leaves the write window itself uncovered:
@@ -22,7 +22,7 @@
  * after its verification, and a marker it published would be one more racing
  * write rather than a lock. Both runs then converge on the archive's own
  * post-rollback shape (open, verdicted, unqueued), both go red, and ingest's
- * stranded sweep repairs it. ADR 0068 records that trade.
+ * stranded sweep repairs it. ADR 0069 records that trade.
  *
  * Split out of scripts/sentry/triage/sentry-triage-requeue.mjs to keep that
  * module under the 1,000-line hard cap. It imports the label contract and
