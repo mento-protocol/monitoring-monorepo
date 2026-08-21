@@ -2514,6 +2514,36 @@ assert_contains "- node scripts/lighthouse-config.test.mjs (Lighthouse CI budget
 run_gate "scripts/lighthouse-config.test.mjs"
 assert_contains "- node scripts/lighthouse-config.test.mjs (Lighthouse config assertion suite changed)"
 
+# The routing table (ADR 0069) is a second copy of this file's own routing, and
+# gate-equality.test.mjs is what holds the two together. It only does that if it
+# RUNS in both drift directions, so both are pinned here.
+#
+# Table side: any module under scripts/gate/routing-table/ — not just the index,
+# because every one of them is an `implementation_signature()` entry and a change
+# to any of them moves the freshness stamp.
+run_gate "scripts/gate/routing-table/index.mjs"
+assert_contains "- pnpm gate:routing-table:test (gate routing table changed)"
+assert_contains "- pnpm agent:quality-gate:test (gate routing table is an implementation-signature input)"
+run_gate "scripts/gate/routing-table/arms-scripts.mjs"
+assert_contains "- pnpm gate:routing-table:test (gate routing table changed)"
+assert_contains "- pnpm agent:quality-gate:test (gate routing table is an implementation-signature input)"
+
+# Gate side, and the commoner drift: somebody adds or reorders a `case` arm in
+# this gate and does not touch the data. Before this arm existed that ran
+# nothing, and the table went stale exactly where nothing reds.
+run_gate "scripts/agent-quality-gate.sh"
+assert_contains "- pnpm agent:quality-gate:test (agent quality gate mapping changed)"
+assert_contains "- pnpm gate:routing-table:test (gate routing arms must still match the routing table)"
+
+# Negative control: the routing-table arm sits BELOW the per-module arms in the
+# same `case`, so a sibling under scripts/gate/ must still reach its own suite
+# and not this one. Without this the two assertions above would also pass for a
+# blanket arm over scripts/gate/, which would schedule the table suite for every
+# unrelated gate satellite.
+run_gate "scripts/gate/agent-prewarm.mjs"
+assert_contains "- pnpm agent:prewarm:test (agent prewarm helper changed)"
+assert_not_contains "- pnpm gate:routing-table:test"
+
 run_gate ".github/workflows/ci.yml"
 assert_contains "- docs/pr-checklists/ci-workflow-gates.md (GitHub Actions workflow/action changed)"
 assert_contains "- node scripts/workflows/check-github-action-pins.mjs (GitHub Actions workflow/action changed)"
