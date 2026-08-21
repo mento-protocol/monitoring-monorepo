@@ -123,7 +123,9 @@ even when you never open an authority.
    hosted sessions — do not hand-roll PR creation. The description starts with
    `## The Problem` (at most three plain-language bullets) then `## The
 Solution` (approach before implementation detail). PRs open **ready for
-   review, never as drafts**; use draft only when the user asks or required
+   review, never as drafts** — a draft suppresses the automated AI reviews this
+   workflow depends on, so drafting is a decision to skip review, not a staging
+   step; use draft only when the user asks or required
    validation is intentionally pending, and state that reason in the body. Link
    the issue with `Closes #N` **only when the issue's Done means is fully
    satisfied**; otherwise use `Refs #N`. For issue-backed work, once the PR is
@@ -274,7 +276,9 @@ Solution` (approach before implementation detail). PRs open **ready for
    `/pr-ready-override gate=codex-description-approval head=<full-head-sha>
 reason=<why this is safe>`. Do not block on slow optional bots that branch
    protection does not require, and do not post routine or duplicate `@codex
-review` requests. Authority:
+review` requests. **Never tag `chatgpt-codex-connector` directly** — the reviewer is triggered
+   by the PR lifecycle, so a direct tag produces a duplicate pass rather than a
+   faster one; treat `@codex` and `@Codex` as one trigger. Authority:
    [`pr-ready-state.md`](pr-ready-state.md).
 
    **Report an all-clear with its evidence, never bare.** Name the PR URL or

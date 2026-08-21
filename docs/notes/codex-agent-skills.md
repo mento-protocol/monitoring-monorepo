@@ -107,6 +107,15 @@ following a rule that exists solely in the repo copy, precedence has changed and
 this note is wrong. That is why no rule may live solely in those two files —
 the routing above is designed so the answer stops mattering.
 
+**That invariant is checked, not assumed.** It was false when first written: a
+local Codex review found `never tag chatgpt-codex-connector directly` living
+only in the skill files, and a follow-up grep found the draft-suppression rule
+in the same state. Both now live in the operating card. Before adding a bullet to
+either skill's `What this repo adds`, grep its core assertion across `CLAUDE.md`,
+`AGENTS.md`, `docs/` and `scripts/` — a keyword heuristic is not enough, because
+a bullet whose surrounding words appear elsewhere reads as covered while its
+actual rule is not.
+
 ## Codex Cloud routing
 
 Codex Cloud does not inherit a developer's local `~/.agents`, `~/.codex`, or
