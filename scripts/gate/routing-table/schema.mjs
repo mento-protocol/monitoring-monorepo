@@ -93,6 +93,18 @@ export const DYNAMIC_SOURCES = Object.freeze([
 /** How an arm declares what it did about ADR 0064's pairing rule. */
 export const PAIRINGS = Object.freeze(["paired", "deliberately-unpaired"]);
 
+/**
+ * How long a reason has to be before it counts as one.
+ *
+ * Both escape hatches in this table — `pairing: "deliberately-unpaired"` and
+ * `allowStale` — turn a check off for one arm, so each has to say what it is
+ * accepting. A length floor is a crude test of substance and the only
+ * mechanical one available; it is set where "n/a", "ok", "see above" and "not
+ * needed" all fail and a sentence passes. Without it the opt-out is a word, and
+ * the next reader cannot tell a considered exception from a silenced check.
+ */
+export const MIN_REASON = 30;
+
 class TableError extends Error {
   constructor(where, message) {
     super(`${where}: ${message}`);
@@ -276,10 +288,14 @@ function normalizeArms(arms, subject, where, dynamic = null) {
         `unknown \`pairing\` value ${JSON.stringify(arm.pairing)}`,
       );
     }
-    if (arm.allowStale !== undefined && typeof arm.allowStale !== "string") {
+    if (
+      arm.allowStale !== undefined &&
+      (typeof arm.allowStale !== "string" ||
+        arm.allowStale.trim().length < MIN_REASON)
+    ) {
       throw new TableError(
         at,
-        "`allowStale` must be the reason it is allowed, as a string",
+        `\`allowStale\` must be the reason the path is allowed to be absent, as a string of at least ${MIN_REASON} characters — the opt-out turns the staleness check off for this arm, so it has to say what it is accepting`,
       );
     }
     return {

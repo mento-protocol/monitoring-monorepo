@@ -160,10 +160,6 @@ test("every allowStale exemption is still doing something", () => {
   for (const { groupId, arm } of walkArms(ROUTING_GROUPS)) {
     if (typeof arm.allowStale !== "string") continue;
     assert.ok(
-      arm.allowStale.length > 20,
-      `group \`${groupId}\`: an \`allowStale\` reason has to say why, not just that`,
-    );
-    assert.ok(
       arm.patterns.some((pattern) => !existsSync(`${REPO}/${pattern}`)),
       `group \`${groupId}\`, arm [${arm.patterns.join(" | ")}]: every path it exempts now exists, so the exemption is dead and should go`,
     );
@@ -192,6 +188,32 @@ test("the pairing lint reds on an unpaired literal-prefix glob", () => {
   );
   assert.equal(problems.length, 1);
   assert.match(problems[0], /scripts\/\*\/widget-\*\.mjs/);
+});
+
+test("the pairing lint reds when the opt-out carries no reason", () => {
+  // The opt-out must cost something. A bare flag would suppress the rule this
+  // table exists to enforce with one word and no argument.
+  for (const why of [undefined, "", "   ", "n/a", "not needed"]) {
+    const problems = pairingProblems(
+      table({
+        id: "x",
+        arms: [
+          {
+            patterns: ["scripts/widget-*.mjs"],
+            pairing: "deliberately-unpaired",
+            ...(why === undefined ? {} : { why }),
+            effects: [{ surface: "docs" }],
+          },
+        ],
+      }),
+    );
+    assert.equal(
+      problems.length,
+      1,
+      `\`why: ${JSON.stringify(why)}\` was accepted`,
+    );
+    assert.match(problems[0], /without a `why`/);
+  }
 });
 
 test("the pairing lint accepts an unpaired glob that says it is deliberate", () => {
@@ -306,6 +328,22 @@ test("the schema refuses the wrong number of arguments", () => {
       ),
     /takes 2 arguments/,
   );
+});
+
+test("the schema refuses an allowStale opt-out with no real reason", () => {
+  for (const reason of ["", "n/a", "not needed", 7]) {
+    assert.throws(
+      () =>
+        normalizeGroups(
+          table({
+            id: "x",
+            arms: [{ ...arm(["scripts/gone.mjs"]), allowStale: reason }],
+          }),
+        ),
+      /allowStale/,
+      `\`allowStale: ${JSON.stringify(reason)}\` was accepted`,
+    );
+  }
 });
 
 test("the schema refuses an unknown guard and an unknown field", () => {

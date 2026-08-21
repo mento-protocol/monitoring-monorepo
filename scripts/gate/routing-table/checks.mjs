@@ -10,7 +10,7 @@
  */
 
 import { isGlob } from "./pattern.mjs";
-import { literalPatterns, walkArms } from "./schema.mjs";
+import { MIN_REASON, literalPatterns, walkArms } from "./schema.mjs";
 
 const SCRIPTS = "scripts/";
 
@@ -101,6 +101,20 @@ export function pairingProblems(rawGroups) {
       problems.push(
         `group \`${groupId}\`, arm [${patterns.join(" | ")}]: ` +
           'declares `pairing: "deliberately-unpaired"` but holds no unpaired literal-prefix glob.',
+      );
+    }
+    // The opt-out has to cost something. A bare flag would let anyone suppress
+    // the rule this table exists to enforce with one word and no argument, and
+    // the next reader would have no way to tell a considered exception from a
+    // lint someone silenced. The reason is the exception.
+    if (
+      arm.pairing === "deliberately-unpaired" &&
+      (typeof arm.why !== "string" || arm.why.trim().length < MIN_REASON)
+    ) {
+      problems.push(
+        `group \`${groupId}\`, arm [${patterns.join(" | ")}]: ` +
+          'declares `pairing: "deliberately-unpaired"` without a `why` that says which move it accepts. ' +
+          `The reason must be at least ${MIN_REASON} characters — a flag on its own is not an exception, it is a silenced check.`,
       );
     }
   }
