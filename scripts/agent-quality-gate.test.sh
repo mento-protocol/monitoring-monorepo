@@ -4402,6 +4402,39 @@ assert_contains "- pnpm sentry:archive:test (Sentry triage archive helper change
 run_gate "scripts/sentry/triage/sentry-triage-archive.test.mjs"
 assert_contains "- pnpm sentry:archive:test (Sentry triage archive helper changed)"
 
+# The #1943/#1970 fixture drift canary (ADR 0068). Three routes, all pinned:
+# its own file, the scanner whose credential-key vocabulary decides whether the
+# renamed fixtures still scan clean, and each of the four suites that carry
+# those fixtures. The canary's own arm sits ABOVE the per-suite arms in the
+# gate: a single combined pattern there would match those four paths first and
+# silently drop each suite's focused test, which is the routing bug #1974
+# shipped. The per-suite assertions below are what would red if someone
+# collapsed these arms that way.
+fixture_canary="- node scripts/sentry/fixture-scan-canary.test.mjs"
+
+run_gate "scripts/sentry/fixture-scan-canary.test.mjs"
+assert_contains "$fixture_canary (Sentry fixture drift canary changed)"
+
+run_gate "scripts/agent-autoreview-core.mjs"
+assert_contains "- pnpm agent:autoreview:test (agent autoreview helper changed)"
+assert_contains "$fixture_canary (autoreview secret scanner changed)"
+
+run_gate "scripts/sentry/autofix/sentry-autofix-finalize.test.mjs"
+assert_contains "- pnpm sentry:autofix:finalize:test (Sentry autofix finalize helper changed)"
+assert_contains "$fixture_canary (Sentry suite carrying scanned fixtures changed)"
+
+run_gate "scripts/sentry/broker/sentry-mcp-broker.test.mjs"
+assert_contains "- pnpm sentry:broker:test (Sentry MCP broker or pre-flight probe changed)"
+assert_contains "$fixture_canary (Sentry suite carrying scanned fixtures changed)"
+
+run_gate "scripts/sentry/triage/sentry-triage-agent-comment.test.mjs"
+assert_contains "- node scripts/sentry/triage/sentry-triage-agent-comment.test.mjs (Sentry triage agent comment wrapper changed)"
+assert_contains "$fixture_canary (Sentry suite carrying scanned fixtures changed)"
+
+run_gate "scripts/sentry/triage/sentry-triage-archive.test.mjs"
+assert_contains "- pnpm sentry:archive:test (Sentry triage archive helper changed)"
+assert_contains "$fixture_canary (Sentry suite carrying scanned fixtures changed)"
+
 # The handled-family lookup, split out of sentry-autofix-queue-io.mjs for the
 # 600-line soft cap. Pinned ALONE — a module added to this leg without a routing
 # case matches nothing and its edits run zero tests, and a pin that lists several
