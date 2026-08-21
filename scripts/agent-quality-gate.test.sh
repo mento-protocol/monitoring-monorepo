@@ -7325,10 +7325,10 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   else
     race_drain_c_exit=$?
   fi
-  race_drain_c_wrapper=""
-  race_drain_c_wrapper_start=""
   [[ "$race_drain_c_exit" == "0" ]] ||
     fail "the run inheriting an interrupted drain exited ${race_drain_c_exit} after its release"
+  race_drain_c_wrapper=""
+  race_drain_c_wrapper_start=""
   if ! race_drain_cleanup_suspended_watchdogs; then
     fail "the interrupted-drain case left A's exact stopped watchdog alive"
   fi
