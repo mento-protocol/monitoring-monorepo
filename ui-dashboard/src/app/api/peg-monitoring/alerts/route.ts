@@ -59,7 +59,7 @@ async function fetchJson(
   url: URL,
   token: string,
   maximumBytes: number,
-): Promise<unknown> {
+): Promise<unknown[]> {
   const errorUrl = errorStateHistoryUrl(url);
   const urls = errorUrl === null ? [url] : [url, errorUrl];
   return Promise.all(
