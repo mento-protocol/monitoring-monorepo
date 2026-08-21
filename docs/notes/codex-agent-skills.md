@@ -63,13 +63,29 @@ separate.
 ## Claude global-store shadowing
 
 In a Claude Code session, a user-global skill wins over a repo skill with the
-same name, so personal `ship` or `babysit-pr` implementations shadow the repo
-copies when present. That is accepted: the repo copies stay canonical for
-Codex and for the cloud capability-gate adaptations, whose binding rules also
-live in [`github-tooling-surfaces.md`](github-tooling-surfaces.md), so a
-shadowed Claude session loses no rule. Do not resolve the collision by
-renaming either side; the running session's skill listing, not this note, is
-the runtime truth for which copy loaded.
+same name. `ship` and `babysit-pr` are not merged with the repo copies — the
+repo files are not read at all, so those two are Codex-facing only. A skill
+whose name does not collide loads normally alongside the personal set.
+
+A shadowed session loses no rule **because no rule lives only in those two
+files**. Repo-specific rules reach every surface through three routes, and any
+new rule must take one of them:
+
+1. **Repo docs.** `CLAUDE.md` loads in every session and routes to
+   [`pr-operating-card.md`](pr-operating-card.md) and its authorities; the
+   personal `ship` skill reads repo instructions first and prefers them.
+2. **The babysit hook.** `.claude/babysit-pr.sh` is discovered by path
+   convention and sourced by whichever babysit skill ran, so it gates both. It
+   owns the `pr:ready-state` gate and the fork-head refusal.
+3. **A non-colliding skill name**, for work that needs its own entry point.
+
+Do not resolve the collision by renaming `ship` or `babysit-pr`; the running
+session's skill listing, not this note, is the runtime truth for which copy
+loaded. Verify with a headless probe when it matters:
+
+```bash
+claude -p "List every skill named exactly 'ship' or 'babysit-pr'." --model claude-opus-5
+```
 
 ## Codex Cloud routing
 

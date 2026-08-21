@@ -203,11 +203,12 @@ These bind regardless of which step you are on:
 
 ## Authority map
 
-| Step                     | Authority doc                                                         |
-| ------------------------ | --------------------------------------------------------------------- |
-| Claim, defer, merge-sync | [`agent-issue-workflow.md`](agent-issue-workflow.md)                  |
-| Gate, autoreview         | [`agent-quality-gate-mechanics.md`](agent-quality-gate-mechanics.md)  |
-| Ready-state              | [`pr-ready-state.md`](pr-ready-state.md)                              |
-| Docs and drift           | [`../context-standards.md`](../context-standards.md)                  |
-| Ship, babysit            | `ship` and `babysit-pr` skills                                        |
-| Production closeout      | [`../deployment.md`](../deployment.md) and the owning package runbook |
+| Step                     | Authority doc                                                                                                        |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------- |
+| Claim, defer, merge-sync | [`agent-issue-workflow.md`](agent-issue-workflow.md)                                                                 |
+| Gate, autoreview         | [`agent-quality-gate-mechanics.md`](agent-quality-gate-mechanics.md)                                                 |
+| Ready-state              | [`pr-ready-state.md`](pr-ready-state.md)                                                                             |
+| Docs and drift           | [`../context-standards.md`](../context-standards.md)                                                                 |
+| Ship, babysit            | steps 5-7 here; skill entry points in [`codex-agent-skills.md`](codex-agent-skills.md#claude-global-store-shadowing) |
+| UI visual evidence       | [`dashboard-verification.md`](dashboard-verification.md)                                                             |
+| Production closeout      | [`../deployment.md`](../deployment.md) and the owning package runbook                                                |
