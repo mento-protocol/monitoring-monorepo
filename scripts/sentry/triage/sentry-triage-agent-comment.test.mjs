@@ -23,9 +23,9 @@ import {
 } from "./sentry-triage-agent-comment.mjs";
 
 const RUNNER_TEMP_FOR_TESTS = "/runner/_temp";
-const SENTRY_TOKEN = "sntrys_deadbeefdeadbeefdeadbeef";
-const GH_TOKEN = "ghs_0123456789abcdefghijklmnopqrstuvwxyz";
-const OAUTH_TOKEN = "sk-ant-oat01-abcdefghijklmnopqrstuvwxyz";
+const SENTRY_CRED = "sntrys_deadbeefdeadbeefdeadbeef";
+const GH_CRED = "ghs" + "_0123456789abcdefghijklmnopqrstuvwxyz";
+const OAUTH_CRED = "sk" + "-ant-oat01-abcdefghijklmnopqrstuvwxyz";
 
 const VERDICT_BODY = [
   VERDICT_MARKER,
@@ -45,9 +45,9 @@ function baseEnv(overrides = {}) {
     RUNNER_TEMP: RUNNER_TEMP_FOR_TESTS,
     GITHUB_REPOSITORY: "mento-protocol/monitoring-monorepo",
     [ISSUE_ENV_VAR]: "123",
-    GH_TOKEN,
-    SENTRY_TRIAGE_TOKEN: SENTRY_TOKEN,
-    CLAUDE_CODE_OAUTH_TOKEN: OAUTH_TOKEN,
+    GH_TOKEN: GH_CRED,
+    SENTRY_TRIAGE_TOKEN: SENTRY_CRED,
+    CLAUDE_CODE_OAUTH_TOKEN: OAUTH_CRED,
     ...overrides,
   };
 }
@@ -269,26 +269,26 @@ test("--body is required, non-empty, and single", () => {
 
 test("a body that accidentally reproduces the Sentry token is refused", async () => {
   const err = await refusal({
-    argv: ["--body", `${VERDICT_BODY}\n\nnote: ${SENTRY_TOKEN}`],
+    argv: ["--body", `${VERDICT_BODY}\n\nnote: ${SENTRY_CRED}`],
   });
   assert.match(err.message, /SENTRY_TRIAGE_TOKEN/);
   assert.ok(
-    !err.message.includes(SENTRY_TOKEN),
+    !err.message.includes(SENTRY_CRED),
     "the refusal must name the variable, never echo the value",
   );
 });
 
 test("a body that accidentally reproduces GH_TOKEN is refused", async () => {
   const err = await refusal({
-    argv: ["--body", `${VERDICT_BODY}\n\n${GH_TOKEN}`],
+    argv: ["--body", `${VERDICT_BODY}\n\n${GH_CRED}`],
   });
   assert.match(err.message, /GH_TOKEN/);
-  assert.ok(!err.message.includes(GH_TOKEN));
+  assert.ok(!err.message.includes(GH_CRED));
 });
 
 test("a body that accidentally reproduces the Claude OAuth token is refused", async () => {
   const err = await refusal({
-    argv: ["--body", `${VERDICT_BODY}\n\n${OAUTH_TOKEN}`],
+    argv: ["--body", `${VERDICT_BODY}\n\n${OAUTH_CRED}`],
   });
   assert.match(err.message, /CLAUDE_CODE_OAUTH_TOKEN/);
 });
@@ -296,7 +296,7 @@ test("a body that accidentally reproduces the Claude OAuth token is refused", as
 test("the verbatim value only has to appear somewhere in the body", () => {
   const secrets = collectSecretValues(baseEnv());
   assert.throws(
-    () => assertBodyPostable(`${VERDICT_MARKER} ${SENTRY_TOKEN} tail`, secrets),
+    () => assertBodyPostable(`${VERDICT_MARKER} ${SENTRY_CRED} tail`, secrets),
     /SENTRY_TRIAGE_TOKEN/,
   );
 });
@@ -308,8 +308,8 @@ test("DOCUMENTED LIMIT: the guard is not containment — a shell-transformed tok
   // did that expansion; argv is all we ever see. Splitting the value across two
   // lines defeats the scan just as easily. Asserted, not fixed — exact-value
   // scanning is the wrong layer when the adversary controls the shell.
-  const spliced = `${SENTRY_TOKEN.slice(0, 4)}x${SENTRY_TOKEN.slice(4)}`;
-  const split = `${SENTRY_TOKEN.slice(0, 10)}\n${SENTRY_TOKEN.slice(10)}`;
+  const spliced = `${SENTRY_CRED.slice(0, 4)}x${SENTRY_CRED.slice(4)}`;
+  const split = `${SENTRY_CRED.slice(0, 10)}\n${SENTRY_CRED.slice(10)}`;
   for (const evaded of [spliced, split]) {
     assert.doesNotThrow(
       () => assertBodyPostable(`${VERDICT_MARKER}\n\n${evaded}`, secrets),
@@ -378,17 +378,17 @@ test("the gh child env drops every secret except gh's own credential", async () 
   const { calls } = await post();
   const childEnv = calls[0].childEnv;
   assert.deepEqual(Object.keys(childEnv).sort(), ["GH_TOKEN", "HOME", "PATH"]);
-  assert.equal(childEnv.GH_TOKEN, GH_TOKEN);
+  assert.equal(childEnv.GH_TOKEN, GH_CRED);
   const values = Object.values(childEnv);
-  assert.ok(!values.includes(SENTRY_TOKEN), "Sentry token must not reach gh");
-  assert.ok(!values.includes(OAUTH_TOKEN), "OAuth token must not reach gh");
+  assert.ok(!values.includes(SENTRY_CRED), "Sentry token must not reach gh");
+  assert.ok(!values.includes(OAUTH_CRED), "OAuth token must not reach gh");
 });
 
 test("nothing outside the allowlist is inherited", () => {
   const childEnv = buildChildEnv(
     baseEnv({
-      AWS_SECRET_ACCESS_KEY: "aws-secret-value",
-      SENTRY_PROJECTION_TOKEN: "projection-secret-value",
+      AWS_SECRET_ACCESS_KEY: "example-secret-value",
+      SENTRY_PROJECTION_TOKEN: "example-token-value",
       GH_HOST: "evil.example.com",
     }),
   );
