@@ -4130,12 +4130,17 @@ while IFS= read -r path; do
           add_command "pnpm sentry:broker:test" "Sentry MCP broker or pre-flight probe changed"
           add_command "node scripts/sentry/fixture-scan-canary.test.mjs" "Sentry suite carrying scanned fixtures changed"
           ;;
-        scripts/sentry/triage/sentry-triage-requeue.mjs|scripts/sentry/triage/sentry-triage-requeue.test.mjs|scripts/sentry/triage/sentry-triage-queue-contract.mjs|scripts/sentry/triage/sentry-triage-workflow-requeue.mjs)
-          # The single re-queue chokepoint, the queue contract it reads, and the
-          # workflow CLI that wraps it for every compensating exit in the triage
-          # agent workflow (#1769 round 17, #1782). Every site that re-queues a stub
-          # runs through the chokepoint, so its suite is never the whole story —
-          # run theirs too. The CLI's tests live in the requeue suite.
+        scripts/sentry/triage/sentry-triage-requeue.mjs|scripts/sentry/triage/sentry-triage-requeue.test.mjs|scripts/sentry/triage/sentry-triage-requeue-sentinel.mjs|scripts/sentry/triage/sentry-triage-queue-contract.mjs|scripts/sentry/triage/sentry-triage-workflow-requeue.mjs)
+          # The single re-queue chokepoint, the queue contract it reads, the
+          # settlement-sentinel unwind split out of it for the 1,000-line cap
+          # (#1929, ADR 0070), and the workflow CLI that wraps it for every
+          # compensating exit in the triage agent workflow (#1769 round 17, #1782).
+          # The sentinel module has no suite of its own — its tests live in the
+          # re-queue suite — so an unrouted change to it would ship untested, and
+          # it decides the end state of the archive compensation, which is why the
+          # archive suite is on this arm too. Every site that re-queues a stub runs
+          # through the chokepoint, so its suite is never the whole story — run
+          # theirs too. The CLI's tests live in the requeue suite.
           add_command "pnpm sentry:requeue:test" "Sentry re-queue chokepoint changed"
           add_command "pnpm sentry:ingest:test" "Sentry re-queue chokepoint changed"
           add_command "pnpm sentry:archive:test" "Sentry re-queue chokepoint changed"
