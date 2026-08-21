@@ -1765,10 +1765,13 @@ function placeholderRedactionOf(removed, spans, added) {
 // line with that token replaced by placeholder vocabulary — a redaction, not an
 // exfiltration. A removal with no replacement, a removal replaced by a different
 // credential-shaped literal, a replacement in another hunk, and every addition
-// or context line stay refused.
+// or context line stay refused. Each added line redacts at most one removal, so
+// a single placeholder cannot cover a second credential-bearing removal that is
+// really an unreplaced deletion.
 function strongCredentialTokenReason(text) {
   const lines = text.split("\n");
   const { hunkOfLine, hunks } = splitDiffHunks(lines);
+  const claimed = hunks.map(() => new Set());
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
     const hunk = hunkOfLine[index];
@@ -1777,10 +1780,17 @@ function strongCredentialTokenReason(text) {
     const spans = strongCredentialSpans(scanned);
     if (spans.length === 0) continue;
     if (!isRemoval) return "credential-like token";
-    const redacted = hunks[hunk].some((added) =>
-      placeholderRedactionOf(scanned, spans, added),
-    );
-    if (!redacted) return "credential-like token";
+    const additions = hunks[hunk];
+    let redaction = -1;
+    for (let candidate = 0; candidate < additions.length; candidate += 1) {
+      if (claimed[hunk].has(candidate)) continue;
+      if (placeholderRedactionOf(scanned, spans, additions[candidate])) {
+        redaction = candidate;
+        break;
+      }
+    }
+    if (redaction === -1) return "credential-like token";
+    claimed[hunk].add(redaction);
   }
   return null;
 }

@@ -227,6 +227,34 @@ assert.equal(
   "every credential-shaped span on the removed line must be replaced, and all of them may be",
 );
 
+const sharedPlaceholderRemovals = redactionHunk(
+  [`const sample = "${secret}";`, `const sample = "${otherSecret}";`],
+  ['const sample = "redacted-fixture-token";'],
+);
+assert.match(
+  secretLikeReason(sharedPlaceholderRemovals),
+  /credential-like token/,
+  "one placeholder redacts one removal, so a second credential-bearing removal is an unreplaced deletion",
+);
+assert.throws(
+  () =>
+    assertNoSecretLikeContent("shared placeholder", sharedPlaceholderRemovals),
+  /refusing to include secret-like content/,
+);
+assert.equal(
+  secretLikeReason(
+    redactionHunk(
+      [`const sample = "${secret}";`, `const sample = "${otherSecret}";`],
+      [
+        'const sample = "redacted-fixture-token";',
+        'const sample = "redacted-fixture-token";',
+      ],
+    ),
+  ),
+  null,
+  "two removals redacted by two placeholder lines are both replacements",
+);
+
 const unreplacedRemoval = redactionHunk([`const sample = "${secret}";`], []);
 assert.match(
   secretLikeReason(unreplacedRemoval),
