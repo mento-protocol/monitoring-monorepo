@@ -59,15 +59,15 @@ current decision package.
 
 ## Networks
 
-| Network       | Chain ID | Status                                                                |
-| ------------- | -------- | --------------------------------------------------------------------- |
-| Celo Mainnet  | 42220    | Live in the production multichain indexer                             |
-| Monad Mainnet | 143      | Live in the production multichain indexer                             |
-| Polygon       | 137      | Live in the production multichain indexer                             |
-| Ethereum      | 1        | Live in the production multichain indexer — reserve-yield events only |
-| Celo Sepolia  | 11142220 | Hosted dashboard support is opt-in via testnet env vars               |
-| Monad Testnet | 10143    | Hosted dashboard support is opt-in via testnet env vars               |
-| Polygon Amoy  | 80002    | Hosted dashboard support is opt-in via testnet env vars               |
+| Network       | Chain ID | Status                                                                              |
+| ------------- | -------- | ----------------------------------------------------------------------------------- |
+| Celo Mainnet  | 42220    | Live in the production multichain indexer                                           |
+| Monad Mainnet | 143      | Live in the production multichain indexer                                           |
+| Polygon       | 137      | Live in the production multichain indexer                                           |
+| Ethereum      | 1        | Live in the production multichain indexer — reserve-yield events + bounded samplers |
+| Celo Sepolia  | 11142220 | Hosted dashboard support is opt-in via testnet env vars                             |
+| Monad Testnet | 10143    | Hosted dashboard support is opt-in via testnet env vars                             |
+| Polygon Amoy  | 80002    | Hosted dashboard support is opt-in via testnet env vars                             |
 
 The canonical Polygon contract, dashboard, alert-condition, deferral, and
 production-cutover matrix is

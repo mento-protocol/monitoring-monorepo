@@ -56,7 +56,7 @@ The schema is the source of truth for the complete entity list.
 | Volume and participants | `TraderDailySnapshot`, `TraderPoolDailySnapshot`, `AggregatorDailySnapshot`, `VolumeWindowSnapshot`                                                                             |
 | Liquity / CDP           | Instance, collateral, trove, stability-pool, reserve-trove, and daily-snapshot entities                                                                                         |
 | Stable supply           | Token supply, custody state, and daily-snapshot entities                                                                                                                        |
-| Reserve yield           | Ethereum sUSDS/stETH movement, cost-basis, position, summary, and daily-snapshot entities; stETH also records `StethWalletLaunchBaseline` for the balance sampler               |
+| Reserve yield           | Ethereum sUSDS/stETH movement, cost-basis, position, summary, and daily-snapshot entities; sUSDS and stETH also record immutable launch baselines for their samplers            |
 
 ### Pool ID Format
 

@@ -29,6 +29,7 @@ export type SusdsContext = Pick<
   EvmOnEventContext,
   | "SusdsCostBasisLot"
   | "SusdsPosition"
+  | "SusdsYieldLaunchBaseline"
   | "SusdsYieldMovement"
   | "SusdsYieldDailySnapshot"
   | "SusdsYieldSummary"

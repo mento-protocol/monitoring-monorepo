@@ -9,6 +9,11 @@ const ENVIO_INDEXER = "mento";
 const GRAPHQL_TIMEOUT_MS = 20_000;
 const REPLAY_INTEGRITY_PATH = "indexer-envio/config/replay-integrity.json";
 const REQUIRED_POLYGON_ORACLE_FRESHNESS_VERSION = 3;
+const SUSDS_LAUNCH_BLOCK = 24_573_203;
+const SUSDS_LAUNCH_TIMESTAMP = 1_772_496_000;
+const SUSDS_SAMPLE_BLOCK_INTERVAL = 600;
+const SUSDS_MAX_SAMPLE_BLOCK_LAG = SUSDS_SAMPLE_BLOCK_INTERVAL;
+const SUSDS_MAX_SAMPLE_AGE_SECONDS = 24 * 60 * 60;
 
 const PROBE_TABLES = [
   "Pool",
@@ -40,7 +45,7 @@ export const PROBE_QUERY = `query VerifyIndexerRows {
   }
   SusdsYieldSummary(limit: 1) { id currentShares totalEarnedYieldUsdWei lastMovementTxHash lastUpdatedBlock }
   SusdsYieldMovement(limit: 1, order_by: { blockNumber: asc }) { id kind txHash blockNumber }
-  SusdsYieldDailySnapshot(limit: 1, order_by: { timestamp: desc }) { id timestamp totalEarnedYieldUsdWei }
+  SusdsYieldDailySnapshot(limit: 1, order_by: { sampledAtBlock: desc }) { id timestamp totalEarnedYieldUsdWei sampledAtBlock sampledAtTimestamp }
   StethYieldSummary(limit: 1) { id lastMovementTxHash lastUpdatedBlock }
   StethYieldMovement(limit: 1, order_by: { blockNumber: asc }) { id kind txHash blockNumber }
 }`;
@@ -384,6 +389,111 @@ export function summarizeProbe(graphqlJson) {
   };
 }
 
+function parseSafeInteger(value) {
+  if (typeof value === "number") {
+    return Number.isSafeInteger(value) ? value : null;
+  }
+  if (typeof value !== "string" || !/^\d+$/.test(value)) return null;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : null;
+}
+
+export function summarizeSusdsSamplerProgress({
+  summaryNonzero,
+  latestSnapshot,
+  ethereumChain,
+  nowSeconds,
+}) {
+  if (!summaryNonzero) {
+    return {
+      ok: true,
+      failures: [],
+      latestSampledAtBlock: null,
+      latestSampledAtTimestamp: null,
+      processedBlock: ethereumChain?.processedBlock ?? null,
+      blockLag: null,
+      ageSeconds: null,
+    };
+  }
+
+  const failures = [];
+  const latestSampledAtBlock = parseSafeInteger(latestSnapshot?.sampledAtBlock);
+  const latestSampledAtTimestamp = parseSafeInteger(
+    latestSnapshot?.sampledAtTimestamp,
+  );
+  const processedBlock = parseSafeInteger(ethereumChain?.processedBlock);
+  const blockLag =
+    processedBlock !== null && latestSampledAtBlock !== null
+      ? processedBlock - latestSampledAtBlock
+      : null;
+  const currentTime = parseSafeInteger(nowSeconds);
+  const ageSeconds =
+    currentTime !== null && latestSampledAtTimestamp !== null
+      ? currentTime - latestSampledAtTimestamp
+      : null;
+
+  if (latestSnapshot === undefined) {
+    failures.push(
+      "sUSDS sampler has no daily snapshot row for the nonzero summary",
+    );
+  }
+  if (ethereumChain === undefined) {
+    failures.push(
+      "sUSDS sampler cannot verify progress because Ethereum status is missing",
+    );
+  }
+  if (latestSampledAtBlock === null) {
+    failures.push("sUSDS sampler latest daily row has no valid sampledAtBlock");
+  } else if (latestSampledAtBlock <= SUSDS_LAUNCH_BLOCK) {
+    failures.push(
+      `sUSDS sampler has no post-launch progress (latest sampledAtBlock ${latestSampledAtBlock}; launch ${SUSDS_LAUNCH_BLOCK})`,
+    );
+  }
+  if (latestSampledAtTimestamp === null) {
+    failures.push(
+      "sUSDS sampler latest daily row has no valid sampledAtTimestamp",
+    );
+  } else if (latestSampledAtTimestamp <= SUSDS_LAUNCH_TIMESTAMP) {
+    failures.push(
+      `sUSDS sampler latest sampledAtTimestamp ${latestSampledAtTimestamp} is still the launch baseline`,
+    );
+  }
+  if (processedBlock === null) {
+    failures.push("sUSDS sampler cannot verify Ethereum processed head");
+  } else if (latestSampledAtBlock !== null) {
+    if (latestSampledAtBlock > processedBlock) {
+      failures.push(
+        `sUSDS sampler latest sampledAtBlock ${latestSampledAtBlock} is ahead of Ethereum processed head ${processedBlock}`,
+      );
+    } else if (blockLag > SUSDS_MAX_SAMPLE_BLOCK_LAG) {
+      failures.push(
+        `sUSDS sampler is stale at Ethereum processed head ${processedBlock}: latest sample is ${blockLag} blocks behind (maximum ${SUSDS_MAX_SAMPLE_BLOCK_LAG})`,
+      );
+    }
+  }
+  if (currentTime !== null && latestSampledAtTimestamp !== null) {
+    if (ageSeconds < 0) {
+      failures.push(
+        `sUSDS sampler latest sampledAtTimestamp ${latestSampledAtTimestamp} is in the future relative to verifier time ${currentTime}`,
+      );
+    } else if (ageSeconds > SUSDS_MAX_SAMPLE_AGE_SECONDS) {
+      failures.push(
+        `sUSDS sampler latest sample is ${ageSeconds} seconds old (maximum ${SUSDS_MAX_SAMPLE_AGE_SECONDS})`,
+      );
+    }
+  }
+
+  return {
+    ok: failures.length === 0,
+    failures,
+    latestSampledAtBlock,
+    latestSampledAtTimestamp,
+    processedBlock,
+    blockLag,
+    ageSeconds,
+  };
+}
+
 async function queryGraphql(endpoint) {
   const response = await fetch(endpoint, {
     method: "POST",
@@ -413,6 +523,12 @@ export function buildSummary({
 }) {
   const sync = summarizeStatus(statusJson);
   const probe = summarizeProbe(graphqlJson);
+  const susdsSampler = summarizeSusdsSamplerProgress({
+    summaryNonzero: probe.susdsSummaryNonzero,
+    latestSnapshot: graphqlJson.data?.SusdsYieldDailySnapshot?.[0],
+    ethereumChain: sync.chains.find((chain) => Number(chain.chainId) === 1),
+    nowSeconds,
+  });
   const replayIntegrity = summarizeReplayIntegrity(replayIntegrityInput);
   const polygon = summarizePolygonPools(
     graphqlJson.data?.PolygonPool,
@@ -435,6 +551,7 @@ export function buildSummary({
       );
     }
   }
+  failures.push(...susdsSampler.failures);
   failures.push(...replayIntegrity.failures);
   failures.push(...polygon.failures);
 
@@ -450,6 +567,7 @@ export function buildSummary({
     sync,
     metrics: metricSummary(metricsJson),
     probe,
+    susdsSampler,
     replayIntegrity,
     polygon,
     failures,
@@ -494,6 +612,20 @@ export function renderText(summary) {
   for (const [table, count] of Object.entries(summary.probe.rowCounts)) {
     lines.push(`  ${table}: ${count}`);
   }
+  lines.push("");
+  lines.push("sUSDS sampler progress:");
+  lines.push(
+    `  latest sampled block: ${formatNumber(
+      summary.susdsSampler.latestSampledAtBlock,
+    )}; processed Ethereum head: ${formatNumber(
+      summary.susdsSampler.processedBlock,
+    )}; block lag: ${formatNumber(summary.susdsSampler.blockLag)}`,
+  );
+  lines.push(
+    `  latest sampled timestamp: ${formatNumber(
+      summary.susdsSampler.latestSampledAtTimestamp,
+    )}; age: ${formatNumber(summary.susdsSampler.ageSeconds)} seconds; healthy: ${summary.susdsSampler.ok ? "yes" : "no"}`,
+  );
   lines.push("");
   lines.push("Replay integrity contract:");
   lines.push(
@@ -602,6 +734,7 @@ async function main() {
     statusJson,
     metricsJson,
     graphqlJson,
+    nowSeconds: Math.floor(Date.now() / 1000),
     replayIntegrityInput,
   });
 

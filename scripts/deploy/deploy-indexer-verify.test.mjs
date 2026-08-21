@@ -11,6 +11,7 @@ import {
   resolveProdDeployment,
   summarizeProbe,
   summarizeReplayIntegrity,
+  summarizeSusdsSamplerProgress,
   summarizeStatus,
 } from "./deploy-indexer-verify.mjs";
 import {
@@ -406,5 +407,102 @@ assert.doesNotMatch(
   semanticFailureWhileSyncing.failures.join("\n"),
   /not caught up/,
 );
+
+const baselineOnlySampler = buildSummary({
+  args: { allowSyncing: false },
+  deployment: indexerJson.data.deployments[0],
+  endpoint: indexerJson.data.deployments[0].gql_endpoint,
+  endpointMode: "prod-static",
+  statusJson: {
+    data: [
+      {
+        chain_id: 1,
+        block_height: 24_574_403,
+        latest_processed_block: 24_574_403,
+        num_events_processed: 1,
+        timestamp_caught_up_to_head_or_endblock: "2026-07-03T12:00:00Z",
+      },
+    ],
+  },
+  metricsJson: { data: [] },
+  graphqlJson: {
+    data: {
+      Pool: [{ id: "pool" }],
+      PolygonPool: validPolygonPools(),
+      SusdsYieldSummary: [{ id: "susds", currentShares: "1" }],
+      SusdsYieldMovement: [{ id: "susds-move" }],
+      SusdsYieldDailySnapshot: [
+        {
+          id: "susds-launch-day",
+          sampledAtBlock: "24573203",
+          sampledAtTimestamp: "1772496000",
+        },
+      ],
+      StethYieldSummary: [{ id: "steth" }],
+      StethYieldMovement: [{ id: "steth-move" }],
+    },
+  },
+  nowSeconds: NOW_SECONDS,
+  replayIntegrityInput: VALID_REPLAY_INTEGRITY,
+});
+assert.equal(baselineOnlySampler.ok, false);
+assert.match(
+  baselineOnlySampler.failures.join("\n"),
+  /sUSDS sampler.*(no post-launch progress|still the launch baseline|stale)/,
+);
+
+const healthySampler = summarizeSusdsSamplerProgress({
+  summaryNonzero: true,
+  latestSnapshot: {
+    sampledAtBlock: "24573803",
+    sampledAtTimestamp: String(NOW_SECONDS - 1_000),
+  },
+  ethereumChain: {
+    processedBlock: 24_573_803,
+  },
+  nowSeconds: NOW_SECONDS,
+});
+assert.equal(healthySampler.ok, true);
+assert.equal(healthySampler.blockLag, 0);
+assert.equal(healthySampler.ageSeconds, 1_000);
+
+const healthySummary = buildSummary({
+  args: { allowSyncing: false },
+  deployment: indexerJson.data.deployments[0],
+  endpoint: indexerJson.data.deployments[0].gql_endpoint,
+  endpointMode: "prod-static",
+  statusJson: {
+    data: [
+      {
+        chain_id: 1,
+        block_height: 24_573_803,
+        latest_processed_block: 24_573_803,
+        num_events_processed: 1,
+        timestamp_caught_up_to_head_or_endblock: "2026-07-03T12:00:00Z",
+      },
+    ],
+  },
+  metricsJson: { data: [] },
+  graphqlJson: {
+    data: {
+      Pool: [{ id: "pool" }],
+      PolygonPool: validPolygonPools(),
+      SusdsYieldSummary: [{ id: "susds", currentShares: "1" }],
+      SusdsYieldMovement: [{ id: "susds-move" }],
+      SusdsYieldDailySnapshot: [
+        {
+          id: "susds-sample",
+          sampledAtBlock: "24573803",
+          sampledAtTimestamp: String(NOW_SECONDS - 1_000),
+        },
+      ],
+      StethYieldSummary: [{ id: "steth" }],
+      StethYieldMovement: [{ id: "steth-move" }],
+    },
+  },
+  nowSeconds: NOW_SECONDS,
+  replayIntegrityInput: VALID_REPLAY_INTEGRITY,
+});
+assert.equal(healthySummary.ok, true);
 
 console.log("deploy-indexer-verify tests passed.");

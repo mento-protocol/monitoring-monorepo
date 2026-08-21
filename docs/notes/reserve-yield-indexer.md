@@ -102,8 +102,10 @@ For each tracked wallet, query every indexed wallet position (`from`, `to`,
 `ENVIO_START_BLOCK_ETHEREUM_RESERVE_YIELD` or the config default to the minimum
 hit across all tracked wallets and contracts.
 
-stETH launch actuals also require the launch-baseline block from ADR 0034. The
-checked-in baseline is Ethereum block `24573203`; re-check it before changing
+sUSDS and stETH launch actuals require launch-baseline rows at the final
+pre-launch Ethereum block. The checked-in baseline is block `24573203`; sUSDS
+uses its pre-launch share price with the v3 launch-day timestamp, and both
+samplers use the bounded 600-block cadence. Re-check the block before changing
 the launch timestamp or start-block assumptions.
 
 Example `cast` shape for one wallet/topic pair:

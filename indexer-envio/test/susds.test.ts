@@ -37,6 +37,7 @@ import {
 type MockDb = MockDbWith<{
   SusdsCostBasisLot: EntityCollection;
   SusdsPosition: WritableEntity & EntityReader;
+  SusdsYieldLaunchBaseline: WritableEntity & EntityCollection;
   SusdsYieldDailySnapshot: WritableEntity & EntityCollection;
   SusdsYieldMovement: EntityCollection;
   SusdsYieldSummary: WritableEntity & EntityReader;
@@ -167,6 +168,13 @@ function dailySnapshotContext(
   return {
     SusdsPosition: {
       get: async (id: string) => mockDb.entities.SusdsPosition.get(id),
+    },
+    SusdsYieldLaunchBaseline: {
+      get: async (id: string) =>
+        mockDb.entities.SusdsYieldLaunchBaseline.get(id),
+      set: (entity: { id: string }) => {
+        mockDb.entities.SusdsYieldLaunchBaseline.set(entity);
+      },
     },
     SusdsYieldDailySnapshot: {
       get: async (id: string) =>
@@ -777,6 +785,80 @@ describeReserveYield("sUSDS reserve yield accounting", () => {
     assert.equal(rows[0]?.sharePriceUsdWei, WAD);
     assert.equal(rows[0]?.dailyEarnedYieldUsdWei, 0n);
     assert.equal(rows[0]?.dailyUnrealizedYieldUsdWei, 0n);
+    const launchBaseline = mockDb.entities.SusdsYieldLaunchBaseline.get(
+      "1-susds-launch",
+    ) as { sharePriceUsdWei: bigint; sampledAtBlock: bigint } | undefined;
+    assert.ok(launchBaseline, "expected immutable sUSDS launch baseline");
+    assert.equal(launchBaseline.sharePriceUsdWei, WAD);
+    assert.equal(
+      launchBaseline.sampledAtBlock,
+      BigInt(V3_REVENUE_LAUNCH_BLOCK),
+    );
+  });
+
+  it("keeps the launch baseline immutable across consecutive same-day samples", async () => {
+    let mockDb = MockDb.createMockDb();
+    setSharePrice(V3_REVENUE_LAUNCH_BLOCK - 1, WAD);
+    mockDb = await deposit(
+      mockDb,
+      V3_REVENUE_LAUNCH_BLOCK - 1,
+      0,
+      dollars(1000),
+      dollars(1000),
+      Number(V3_REVENUE_LAUNCH_TIMESTAMP - 1n),
+    );
+
+    assert.equal(
+      await recordSusdsYieldLaunchBaseline(dailySnapshotContext(mockDb), {
+        blockTimestamp: V3_REVENUE_LAUNCH_BLOCK_TIMESTAMP,
+        sharePriceUsdWei: WAD,
+      }),
+      true,
+    );
+
+    const firstSampleBlock = BigInt(V3_REVENUE_LAUNCH_BLOCK) + 600n;
+    const firstSampleTimestamp = V3_REVENUE_LAUNCH_TIMESTAMP + 3_600n;
+    assert.equal(
+      await recordSusdsYieldHeartbeatSnapshot(
+        heartbeatContext(
+          mockDb,
+          firstSampleTimestamp,
+          dollars(110) / 100n,
+          firstSampleBlock,
+        ),
+        firstSampleBlock,
+      ),
+      true,
+    );
+
+    const secondSampleBlock = firstSampleBlock + 600n;
+    const secondSampleTimestamp = V3_REVENUE_LAUNCH_TIMESTAMP + 7_200n;
+    assert.equal(
+      await recordSusdsYieldHeartbeatSnapshot(
+        heartbeatContext(
+          mockDb,
+          secondSampleTimestamp,
+          dollars(120) / 100n,
+          secondSampleBlock,
+        ),
+        secondSampleBlock,
+      ),
+      true,
+    );
+
+    const rows = dailySnapshots(mockDb);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0]?.dailyEarnedYieldUsdWei, dollars(200));
+    assert.equal(rows[0]?.sampledAtBlock, secondSampleBlock);
+    const launchBaseline = mockDb.entities.SusdsYieldLaunchBaseline.get(
+      "1-susds-launch",
+    ) as { sharePriceUsdWei: bigint; sampledAtBlock: bigint } | undefined;
+    assert.ok(launchBaseline, "expected immutable sUSDS launch baseline");
+    assert.equal(launchBaseline.sharePriceUsdWei, WAD);
+    assert.equal(
+      launchBaseline.sampledAtBlock,
+      BigInt(V3_REVENUE_LAUNCH_BLOCK),
+    );
   });
 
   it("fails a null launch timestamp and does not let the next sample invent a baseline", async () => {

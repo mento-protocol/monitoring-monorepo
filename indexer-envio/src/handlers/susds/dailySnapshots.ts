@@ -1,4 +1,4 @@
-import type { SusdsYieldDailySnapshot } from "envio";
+import type { SusdsYieldDailySnapshot, SusdsYieldLaunchBaseline } from "envio";
 import { SECONDS_PER_DAY, dayBucket } from "../../helpers.js";
 import {
   blockTimestampEffect,
@@ -19,6 +19,10 @@ import {
 
 function susdsDailySnapshotId(chainId: number, bucket: bigint): string {
   return `${chainId}-susds-${bucket}`;
+}
+
+function susdsLaunchBaselineId(chainId: number): string {
+  return `${chainId}-susds-launch`;
 }
 
 type SusdsYieldDeltaBaseline = Pick<
@@ -208,19 +212,38 @@ export async function recordSusdsYieldLaunchBaseline(
     effectResults.sharePriceUsdWei,
     BigInt(V3_REVENUE_LAUNCH_BLOCK),
   );
+  const baselineId = susdsLaunchBaselineId(ETHEREUM_CHAIN_ID);
+  const existingBaseline =
+    await context.SusdsYieldLaunchBaseline.get(baselineId);
+  if (existingBaseline !== undefined) {
+    requireValidSusdsLaunchBaseline(existingBaseline);
+    return false;
+  }
   const meta: BlockMeta = {
     chainId: ETHEREUM_CHAIN_ID,
     blockNumber: BigInt(V3_REVENUE_LAUNCH_BLOCK),
     blockTimestamp: V3_REVENUE_LAUNCH_TIMESTAMP,
   };
   const totals = await computeYieldTotals(context, meta, sharePriceUsdWei);
-  return recordSusdsYieldDailySnapshot(
+  const didWrite = await recordSusdsYieldDailySnapshot(
     context,
     meta,
     sharePriceUsdWei,
     totals,
     { allowZeroTotals: true },
   );
+  if (!didWrite) return false;
+  context.SusdsYieldLaunchBaseline.set({
+    id: baselineId,
+    chainId: ETHEREUM_CHAIN_ID,
+    token: SUSDS_ADDRESS,
+    launchBlock: BigInt(V3_REVENUE_LAUNCH_BLOCK),
+    launchTimestamp: V3_REVENUE_LAUNCH_TIMESTAMP,
+    sharePriceUsdWei,
+    sampledAtBlock: BigInt(V3_REVENUE_LAUNCH_BLOCK),
+    sampledAtTimestamp: V3_REVENUE_LAUNCH_TIMESTAMP,
+  });
+  return true;
 }
 
 export async function readSharePrice(
@@ -271,21 +294,32 @@ function requireLaunchBlockTimestamp(value: unknown): bigint {
 }
 
 async function hasSusdsLaunchBaseline(context: SusdsContext): Promise<boolean> {
-  const baseline = await context.SusdsYieldDailySnapshot.get(
-    susdsDailySnapshotId(
-      ETHEREUM_CHAIN_ID,
-      dayBucket(V3_REVENUE_LAUNCH_TIMESTAMP),
-    ),
+  const baseline = await context.SusdsYieldLaunchBaseline.get(
+    susdsLaunchBaselineId(ETHEREUM_CHAIN_ID),
   );
-  return (
-    baseline !== undefined &&
-    baseline.timestamp === V3_REVENUE_LAUNCH_TIMESTAMP &&
-    baseline.sampledAtBlock === BigInt(V3_REVENUE_LAUNCH_BLOCK) &&
-    baseline.sampledAtTimestamp === V3_REVENUE_LAUNCH_TIMESTAMP &&
-    baseline.sharePriceUsdWei > ZERO &&
-    baseline.dailyEarnedYieldUsdWei === ZERO &&
-    baseline.dailyRealizedYieldUsdWei === ZERO &&
-    baseline.dailyUnrealizedYieldUsdWei === ZERO
+  if (baseline === undefined) return false;
+  requireValidSusdsLaunchBaseline(baseline);
+  return true;
+}
+
+function requireValidSusdsLaunchBaseline(
+  baseline: SusdsYieldLaunchBaseline,
+): void {
+  if (
+    baseline.chainId !== ETHEREUM_CHAIN_ID ||
+    baseline.token !== SUSDS_ADDRESS ||
+    baseline.launchBlock !== BigInt(V3_REVENUE_LAUNCH_BLOCK) ||
+    baseline.launchTimestamp !== V3_REVENUE_LAUNCH_TIMESTAMP ||
+    baseline.sampledAtBlock !== BigInt(V3_REVENUE_LAUNCH_BLOCK) ||
+    baseline.sampledAtTimestamp !== V3_REVENUE_LAUNCH_TIMESTAMP
+  ) {
+    throw new Error(
+      "[sUSDS] stored launch baseline metadata is invalid; sampler cannot continue",
+    );
+  }
+  requirePositiveSharePrice(
+    baseline.sharePriceUsdWei,
+    BigInt(V3_REVENUE_LAUNCH_BLOCK),
   );
 }
 
