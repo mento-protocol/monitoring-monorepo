@@ -813,6 +813,11 @@ runtime is unchanged; they do not turn an untrusted checkout into trusted
 executable code. Merge-review provenance must not pass through the reviewed
 checkout's package manager, package scripts, or package-manager configuration.
 
+This preflight is **not merge-specific**. Any adapter call that trusts repository
+identity — `pr:feedback-state`, `pr:ready-state`, a gate, a review — needs it, so an
+ordinary babysit run binds identity before its first such call, not only when a conflict
+appears. The merge case adds the two review axes below; it does not own the preflight.
+
 For a same-repository merge review, bind repository identity before any
 repo-local adapter command. Require `origin` to have one effective canonical
 GitHub fetch URL. Normalize that URL and require its slug to equal the resolved

@@ -123,6 +123,20 @@ Solution` (approach before implementation detail). PRs open **ready for
    out of `agent-active` and into review. Authority:
    [`agent-issue-workflow.md`](agent-issue-workflow.md).
 
+   **Identify the target PR before anything else**, in this precedence: a
+   user-supplied URL is used verbatim and its owner/repository overrides the
+   inferred base; a bare number binds to `BASE_REPO`; with no explicit target,
+   list open PRs on `BASE_REPO` for the current branch, filter by
+   `headRepositoryOwner` so a same-named fork branch cannot match, and require
+   exactly zero or one result — more than one is a stop, not a guess. A failed
+   query is not evidence that no PR exists.
+
+   **Resolve the remotes too.** `BASE_REMOTE` is the configured remote whose URL
+   matches `BASE_REPO`; if none matches, add the parent as `upstream` and never
+   overwrite or retarget an existing remote. `HEAD_REMOTE` is the remote serving
+   the PR's head repository. A fork's `origin` is never a substitute for its
+   parent.
+
    **Bind the checkout to the target first, then commit.** Binding before the
    commit is what makes the equality check meaningful — advancing local `HEAD`
    first would make `HEAD == headRefOid` unsatisfiable on a normal update. Which
@@ -153,6 +167,13 @@ Solution` (approach before implementation detail). PRs open **ready for
    `git fetch --unshallow "$BASE_REMOTE"` and refetch the base. A hosted depth-1
    checkout otherwise reports a false ancestry failure, which turns into an
    unnecessary base merge or a stop on an already-current branch.
+
+   **Integrating the base produces a new head, and that head is unvalidated.**
+   Steps 3 and 4 ran against the pre-merge tree, so a base merge or conflict
+   resolution done here would otherwise reach the PR untested and unreviewed.
+   Either integrate the base before step 3, or rerun the gate and the closeout
+   review against the merged head before pushing. A conflict resolution is
+   exercised, not assumed.
 
    Either way, re-read the PR after pushing and require its `headRefOid` to equal
    local `HEAD` before treating anything as published. A fork checkout uses its
@@ -190,6 +211,13 @@ Solution` (approach before implementation detail). PRs open **ready for
    stale one makes them enforce superseded behaviour and re-raise findings you
    already resolved. This is the one edit to the description the babysit step
    makes, alongside recording a deferral.
+
+   **Low noise is for unsolicited updates only.** Report state changes that
+   matter, not polls — but when the user asks for status, answer immediately with
+   the PR URL or number, the bound head SHA, the latest readiness result and when
+   it was observed, the current action and owner, any blocker, and the next action
+   or deadline. Then keep watching. A watcher that stays silent until its next
+   state change is not being low-noise, it is ignoring the user.
 
    **Bound the watch.** One hour of wall clock by default unless the user set a
    different budget, and roughly three attempts at the same recurring item before
