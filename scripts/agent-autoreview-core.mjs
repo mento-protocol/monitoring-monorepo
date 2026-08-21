@@ -1674,7 +1674,155 @@ function literalAuthorizationCredential(value) {
   );
 }
 
-export function secretLikeReason(text) {
+const STRONG_CREDENTIAL_PATTERNS = [
+  /\bgh[pousr]_[A-Za-z0-9]{30,}\b/g,
+  /\bgithub_pat_[A-Za-z0-9_]{30,}\b/g,
+  /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g,
+  /\bAIza[0-9A-Za-z_-]{30,}\b/g,
+  /\bxox[baprs]-[0-9A-Za-z-]{20,}\b/g,
+  /\bsk-[A-Za-z0-9_-]{24,}\b/g,
+  /\b(?:sk|rk)_live_[A-Za-z0-9]{16,}\b/g,
+  /\bnpm_[A-Za-z0-9]{30,}\b/g,
+];
+
+const DIFF_HUNK_HEADER = /^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@/;
+
+// Merged, ordered spans of every strong-pattern match on one line. Overlapping
+// matches collapse so a span never splits a single credential-shaped run.
+function strongCredentialSpans(line) {
+  const spans = [];
+  for (const pattern of STRONG_CREDENTIAL_PATTERNS) {
+    for (const match of line.matchAll(pattern)) {
+      spans.push([match.index, match.index + match[0].length]);
+    }
+  }
+  if (spans.length < 2) return spans;
+  spans.sort((left, right) => left[0] - right[0] || left[1] - right[1]);
+  const merged = [spans[0]];
+  for (const span of spans.slice(1)) {
+    const last = merged.at(-1);
+    if (span[0] <= last[1]) last[1] = Math.max(last[1], span[1]);
+    else merged.push(span);
+  }
+  return merged;
+}
+
+// Maps each diff line to the hunk it belongs to and collects that hunk's added
+// content. Only `+`/`-` lines between a hunk header and the first line that is
+// neither diff content nor context belong to a hunk, so file headers such as
+// `--- a/x` and `+++ b/x` are never mistaken for hunk lines.
+function splitDiffHunks(lines) {
+  const hunkOfLine = new Array(lines.length).fill(-1);
+  const hunks = [];
+  let current = -1;
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (DIFF_HUNK_HEADER.test(line)) {
+      hunks.push([]);
+      current = hunks.length - 1;
+      continue;
+    }
+    if (current === -1) continue;
+    const marker = line.charAt(0);
+    if (line === "" || marker === " " || marker === "\\") continue;
+    if (marker === "+") {
+      hunks[current].push(line.slice(1));
+      hunkOfLine[index] = current;
+      continue;
+    }
+    if (marker === "-") {
+      hunkOfLine[index] = current;
+      continue;
+    }
+    current = -1;
+  }
+  return { hunkOfLine, hunks };
+}
+
+// True when `added` is `removed` with every credential-shaped span replaced by
+// placeholder vocabulary and nothing else changed. Every literal segment around
+// the spans must match exactly, so a rewritten line, a line that merely happens
+// to mention a placeholder, or a swap to a different opaque literal all fail.
+// The leftmost search for each following segment is deterministic; when it does
+// not reconstruct `removed` exactly the answer is false, which refuses.
+function placeholderRedactionOf(removed, spans, added) {
+  let removedIndex = 0;
+  let addedIndex = 0;
+  for (let index = 0; index < spans.length; index += 1) {
+    const [start, end] = spans[index];
+    const prefix = removed.slice(removedIndex, start);
+    if (!added.startsWith(prefix, addedIndex)) return false;
+    addedIndex += prefix.length;
+    removedIndex = end;
+    const nextStart =
+      index + 1 < spans.length ? spans[index + 1][0] : removed.length;
+    const following = removed.slice(removedIndex, nextStart);
+    let replacementEnd;
+    if (following === "") {
+      if (index + 1 < spans.length) return false;
+      replacementEnd = added.length;
+    } else {
+      const found = added.indexOf(following, addedIndex + 1);
+      if (found === -1) return false;
+      replacementEnd = found;
+    }
+    const replacement = added.slice(addedIndex, replacementEnd);
+    if (replacement.length === 0 || !placeholderValue(replacement))
+      return false;
+    addedIndex = replacementEnd;
+  }
+  return added.slice(addedIndex) === removed.slice(removedIndex);
+}
+
+// A credential-shaped token is refused wherever it appears, with one narrow
+// exception: on the REMOVED side of a hunk whose added side carries the same
+// line with that token replaced by placeholder vocabulary — a redaction, not an
+// exfiltration. A removal with no replacement, a removal replaced by a different
+// credential-shaped literal, a replacement in another hunk, and every addition
+// or context line stay refused. Each added line redacts at most one removal, so
+// a single placeholder cannot cover a second credential-bearing removal that is
+// really an unreplaced deletion.
+//
+// The exception applies only when `gitDiff` is set, which one call site does for
+// the git-generated review bundle. Supplemental input — `--prompt`, prompt
+// files, datasets, branch names, refs — is arbitrary text that an author can
+// shape at will, so no line there belongs to a hunk and every credential-shaped
+// token is refused exactly as it was before the exception existed. Requiring a
+// `diff --git` header instead would not close this: an author who can write
+// `@@ -1 +1 @@` into a prompt can write that header too.
+function strongCredentialTokenReason(text, gitDiff) {
+  const lines = text.split("\n");
+  const { hunkOfLine, hunks } = gitDiff
+    ? splitDiffHunks(lines)
+    : { hunkOfLine: new Array(lines.length).fill(-1), hunks: [] };
+  const claimed = hunks.map(() => new Set());
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const hunk = hunkOfLine[index];
+    const isRemoval = hunk !== -1 && line.startsWith("-");
+    const scanned = isRemoval ? line.slice(1) : line;
+    const spans = strongCredentialSpans(scanned);
+    if (spans.length === 0) continue;
+    if (!isRemoval) return "credential-like token";
+    const additions = hunks[hunk];
+    let redaction = -1;
+    for (let candidate = 0; candidate < additions.length; candidate += 1) {
+      if (claimed[hunk].has(candidate)) continue;
+      if (placeholderRedactionOf(scanned, spans, additions[candidate])) {
+        redaction = candidate;
+        break;
+      }
+    }
+    if (redaction === -1) return "credential-like token";
+    claimed[hunk].add(redaction);
+  }
+  return null;
+}
+
+// `gitDiff` marks text the caller knows is a git-generated patch. It is the only
+// input for which the redaction accept-shape applies; it defaults to closed so a
+// new call site cannot acquire the exception by omission.
+export function secretLikeReason(text, { gitDiff = false } = {}) {
   const privateKeyHeader =
     /-----BEGIN (?:(?:[A-Z0-9][A-Z0-9 -]* )?PRIVATE KEY|PGP PRIVATE KEY BLOCK)-----/g;
   for (const match of text.matchAll(privateKeyHeader)) {
@@ -1690,19 +1838,8 @@ export function secretLikeReason(text) {
   ) {
     return "Bearer JWT";
   }
-  const strongPatterns = [
-    /\bgh[pousr]_[A-Za-z0-9]{30,}\b/,
-    /\bgithub_pat_[A-Za-z0-9_]{30,}\b/,
-    /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/,
-    /\bAIza[0-9A-Za-z_-]{30,}\b/,
-    /\bxox[baprs]-[0-9A-Za-z-]{20,}\b/,
-    /\bsk-[A-Za-z0-9_-]{24,}\b/,
-    /\b(?:sk|rk)_live_[A-Za-z0-9]{16,}\b/,
-    /\bnpm_[A-Za-z0-9]{30,}\b/,
-  ];
-  if (strongPatterns.some((pattern) => pattern.test(text))) {
-    return "credential-like token";
-  }
+  const strongCredential = strongCredentialTokenReason(text, gitDiff);
+  if (strongCredential) return strongCredential;
   const secretUrlPatterns = [
     /https:\/\/hooks\.slack\.com\/services\/[A-Z0-9]{8,}\/[A-Z0-9]{8,}\/[A-Za-z0-9]{20,}/i,
     /https:\/\/(?:(?:canary|ptb)\.)?discord(?:app)?\.com\/api\/webhooks\/[0-9]{15,20}\/[A-Za-z0-9._-]{20,}/i,
@@ -2021,8 +2158,8 @@ export function secretLikeReason(text) {
   return null;
 }
 
-export function assertNoSecretLikeContent(label, text) {
-  const reason = secretLikeReason(text);
+export function assertNoSecretLikeContent(label, text, options) {
+  const reason = secretLikeReason(text, options);
   if (reason) {
     throw new Error(
       `refusing to include secret-like content in review bundle (${reason}); clean or redact ${label} before running autoreview`,
