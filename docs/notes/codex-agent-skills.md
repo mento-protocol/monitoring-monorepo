@@ -94,6 +94,19 @@ claude -p "List every skill named exactly 'ship' or 'babysit-pr'. Reply with onl
 Exit 0 means one skill resolved per name, as expected. A non-zero exit means the
 collision behaviour changed and the routing above needs rechecking.
 
+**This checks the name set, not which copy won**, and that limit is real rather
+than an oversight: the CLI reports resolved skill names, not the file behind
+each. If precedence ever flipped so the repo copy won, the probe would still exit 0. Asking the model whether its skill contains some repo-only phrase does not
+close the gap either — it answers by reading the file from disk and reports
+`yes` regardless of which copy actually loaded, which was verified rather than
+assumed.
+
+So treat the exit code as a check on the _collision_, not on the _winner_. The
+winner is observable only by consequence: if a session in this repo starts
+following a rule that exists solely in the repo copy, precedence has changed and
+this note is wrong. That is why no rule may live solely in those two files —
+the routing above is designed so the answer stops mattering.
+
 ## Codex Cloud routing
 
 Codex Cloud does not inherit a developer's local `~/.agents`, `~/.codex`, or

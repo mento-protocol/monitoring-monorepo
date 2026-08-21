@@ -139,6 +139,15 @@ Solution` (approach before implementation detail). PRs open **ready for
    the PR's head repository. A fork's `origin` is never a substitute for its
    parent.
 
+   **When the deep security scan cannot run, say so.** The `claude-security`
+   scan is developer-installed and Claude Code only; this repo does not declare
+   it. Where the diff touches authn/authz, secrets handling, injection surfaces,
+   network-facing handlers, deploy/CI paths, or onchain code and the plugin is
+   unavailable, aim the gate and the closeout review at those surfaces instead,
+   and record `Claude Security scan: skipped (<surface>)` in the final summary so
+   the deep pass can be run later from a session that has it. Never imitate or
+   install it to fill the gap.
+
    **Bind the checkout to the target first, then commit.** Binding before the
    commit is what makes the equality check meaningful — advancing local `HEAD`
    first would make `HEAD == headRefOid` unsatisfiable on a normal update. Which
@@ -261,6 +270,12 @@ reason=<why this is safe>`. Do not block on slow optional bots that branch
    protection does not require, and do not post routine or duplicate `@codex
 review` requests. Authority:
    [`pr-ready-state.md`](pr-ready-state.md).
+
+   **Report an all-clear with its evidence, never bare.** Name the PR URL or
+   number, the current head SHA the result is bound to, the required-check state,
+   and the probes' blocker, thread and unreplied counts. A bare "it's green" gives
+   the user nothing to assess before a merge they are accountable for, and hides
+   which head the claim was established against.
 
 8. **Merge hygiene.** **Never merge a PR without the user's explicit, direct
    approval of that specific merge.** Green CI, bot approvals, a READY
