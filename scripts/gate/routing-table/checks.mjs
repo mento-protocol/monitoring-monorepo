@@ -10,9 +10,69 @@
  */
 
 import { isGlob } from "./pattern.mjs";
-import { MIN_REASON, literalPatterns, walkArms } from "./schema.mjs";
+import { MIN_REASON, walkArms } from "./schema.mjs";
 
 const SCRIPTS = "scripts/";
+
+/**
+ * Refuse a table that has already been through `normalizeGroups`.
+ *
+ * Both lints read fields the normal form deliberately DROPS — `pairing`,
+ * `allowStale`, `why`. Handed a normalized table they would find none of them,
+ * see no violations, and return "clean". A lint that reports clean because it
+ * was looking at the wrong shape is worse than no lint: it is a green light
+ * nobody has any reason to doubt. So the shape is checked rather than
+ * documented.
+ *
+ * The discriminator is exact. `normalizeEffect` stamps every effect with a
+ * `kind`, and the schema refuses `kind` as an unknown field on a raw effect, so
+ * the two shapes can never be confused for one another. A table with no effects
+ * at all is refused too — there is nothing there to have linted.
+ *
+ * @param {readonly object[]} groups
+ * @param {string} caller
+ */
+export function assertRawTable(groups, caller) {
+  if (!Array.isArray(groups) || groups.length === 0) {
+    throw new Error(`${caller} was handed no routing groups to check`);
+  }
+  let effects = 0;
+  const visit = (list) => {
+    for (const effect of list ?? []) {
+      effects += 1;
+      if (
+        effect !== null &&
+        typeof effect === "object" &&
+        Object.hasOwn(effect, "kind")
+      ) {
+        throw new Error(
+          `${caller} was handed NORMALIZED routing groups. The normal form drops \`pairing\`, ` +
+            "`allowStale` and `why`, so this check would have found no violations and reported clean. " +
+            "Pass the raw table (`ROUTING_GROUPS`), not `ROUTING_PLAN`.",
+        );
+      }
+      if (Object.hasOwn(effect, "effects")) visit(effect.effects);
+      for (const nested of effect.arms ?? []) visit(nested.effects);
+    }
+  };
+  for (const group of groups) {
+    if (
+      group === null ||
+      typeof group !== "object" ||
+      !Array.isArray(group.arms)
+    ) {
+      throw new Error(
+        `${caller} was handed something that is not a routing group`,
+      );
+    }
+    for (const arm of group.arms) visit(arm.effects);
+  }
+  if (effects === 0) {
+    throw new Error(
+      `${caller} was handed a table with no effects at all, so it has checked nothing`,
+    );
+  }
+}
 
 /** The any-depth sibling ADR 0064 requires beside a `scripts/`-anchored pattern. */
 export function pairedSibling(pattern) {
@@ -56,10 +116,15 @@ function isLiteralPrefixGlob(pattern) {
  *    and only a future move goes quiet. "Leaving one unpaired below a widened
  *    glob is the worst case, not the safe one" — ADR 0064.
  *
- * @param {object[]} groups normalized groups, with the raw arms alongside
+ * Takes the RAW table. `pairing` and `why` do not survive `normalizeGroups`, so
+ * a normalized table would produce no violations and read as clean —
+ * `assertRawTable` refuses it rather than trusting the caller to know that.
+ *
+ * @param {readonly object[]} rawGroups the raw table, never `ROUTING_PLAN`
  * @returns {string[]} one message per violation; empty means clean
  */
 export function pairingProblems(rawGroups) {
+  assertRawTable(rawGroups, "pairingProblems");
   const problems = [];
   for (const { groupId, arm } of walkArms(rawGroups)) {
     const patterns = arm.patterns;
@@ -134,25 +199,34 @@ export function pairingProblems(rawGroups) {
  * `docs/pr-checklists/*.md` leaves the gate pointing every reviewer at a
  * document that is not there and nothing anywhere reds.
  *
- * `allowStale: "<reason>"` on an arm exempts that arm's literal patterns. ADR
- * 0064 documents the legitimate case — a pre-move probe path held until no open
- * PR bases on a pre-move tree — and this table adds one more: a config file the
- * repo does not carry today but routes correctly the day someone adds it.
+ * `allowStale: "<reason>"` exempts THE DECLARING ARM'S literal patterns and
+ * nothing else. The exemption is per arm, not per path: the same literal can be
+ * named by several arms, and one arm accepting that a path is not here yet says
+ * nothing about another arm that names it and needs it. A table-wide exemption
+ * set would let a single `allowStale` silently switch the check off everywhere
+ * that path appears — the fail-open shape this whole conversion exists to
+ * remove. ADR 0064 documents the legitimate case (a pre-move probe path held
+ * until no open PR bases on a pre-move tree); this table adds one more, a config
+ * file the repo does not carry today but routes correctly the day someone adds
+ * it.
  *
  * @param {readonly object[]} groups the raw table
  * @returns {{ path: string, groupId: string, kind: string, command?: string }[]}
  */
 export function stalenessSubjects(groups) {
+  assertRawTable(groups, "stalenessSubjects");
   const subjects = [];
-  const exempt = new Set();
-  for (const { arm } of walkArms(groups)) {
-    for (const pattern of exemptedLiterals(arm)) exempt.add(pattern);
-  }
-  for (const [pattern, groupId] of literalPatterns(groups)) {
-    if (exempt.has(pattern)) continue;
-    subjects.push({ path: pattern, groupId, kind: "pattern" });
-  }
-  for (const { groupId, arm } of walkArms(groups)) {
+  for (const { groupId, subject, dynamic, arm } of walkArms(groups)) {
+    // A dispatch on the root-manifest class switches on a verdict string, and an
+    // engine-computed group's patterns are built at run time; neither holds a
+    // path to check.
+    if (subject === "path" && dynamic === null) {
+      const exempt = new Set(exemptedLiterals(arm));
+      for (const pattern of arm.patterns) {
+        if (isGlob(pattern) || exempt.has(pattern)) continue;
+        subjects.push({ path: pattern, groupId, kind: "pattern" });
+      }
+    }
     for (const effect of arm.effects ?? []) {
       collectEffectPaths(effect, groupId, subjects);
     }

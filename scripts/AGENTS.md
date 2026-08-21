@@ -57,7 +57,7 @@ stay with their domain.
 
 ## Why Files Stay Flat
 
-`scripts/` has eleven path-pin classes. Move each pin with its file in the
+`scripts/` has twelve path-pin classes. Move each pin with its file in the
 same PR, except the `agent-autoreview.sh` feedback-runtime pins below.
 
 - **Autoreview runtime materialization.** `agent-autoreview.sh` pins sibling

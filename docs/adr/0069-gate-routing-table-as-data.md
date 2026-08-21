@@ -52,7 +52,7 @@ written that way:
    reds. This is the same failure class P0 fixed in
    `check-deploy-root-anchors.test.mjs`, which printed "All 0 deploy scripts…"
    and exited 0 over an empty subject list
-   (`docs/adr/0064-scripts-module-directories.md:136-140`).
+   (`docs/adr/0064-scripts-module-directories.md:136-141`).
 
 Meanwhile the routing is already consumed from Node in two places — a prewarm
 tool that spawns the gate and parses its stdout
@@ -170,7 +170,7 @@ Six pins land with the table:
    part of what the gate proves about itself. An entry it cannot
    `stat` hashes as `__missing__`, which **freezes** the signature, so
    `--skip-if-fresh` reuses a stale stamp and skips real pre-push work
-   (`docs/adr/0064-scripts-module-directories.md:228-231`). This is the one that
+   (`docs/adr/0064-scripts-module-directories.md:273-275`). This is the one that
    must not be forgotten, and `routing-table.test.mjs` asserts it per module.
 2. Two routing arms and one CI step, so the equality test runs in both drift
    directions: `scripts/gate/routing-table/*.mjs` schedules its suite and —

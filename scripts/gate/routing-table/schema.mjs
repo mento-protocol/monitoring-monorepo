@@ -13,7 +13,7 @@
  * the table uses is a function the gate actually defines.
  */
 
-import { isGlob, patternProblem } from "./pattern.mjs";
+import { patternProblem } from "./pattern.mjs";
 
 /**
  * Every effect verb the routing region may reach, with how many arguments each
@@ -402,26 +402,11 @@ export function walkArms(groups) {
   return found;
 }
 
-/**
- * Every literal (glob-free) path pattern in the table, mapped to its group.
- *
- * Two exclusions, both deliberate. A dispatch on the root-manifest CLASS
- * switches on a verdict string, not a path — demanding a file named
- * `package-scripts` exist is how a staleness check earns a reputation for false
- * alarms and stops being believed. And an engine-computed group's patterns are
- * built from a run-time value, so there is no literal to check.
- */
-export function literalPatterns(groups) {
-  const literals = new Map();
-  for (const { groupId, subject, dynamic, arm } of walkArms(groups)) {
-    if (subject !== "path" || dynamic !== null) continue;
-    for (const pattern of arm.patterns) {
-      if (!isGlob(pattern) && !literals.has(pattern))
-        literals.set(pattern, groupId);
-    }
-  }
-  return literals;
-}
+// There was a `literalPatterns(groups)` helper here that collapsed every
+// literal pattern into one path-keyed Map. It is deliberately gone: keying by
+// PATH rather than by ARM is what let a single `allowStale` switch the staleness
+// check off for every other arm naming the same literal. `stalenessSubjects`
+// walks arms directly so an exemption reaches only the arm that declares it.
 
 function expectExactly(keys, wanted, where) {
   const missing = wanted.filter((key) => !keys.includes(key));

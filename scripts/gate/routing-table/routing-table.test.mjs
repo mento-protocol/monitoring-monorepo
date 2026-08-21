@@ -329,6 +329,62 @@ test("the staleness check reds on a pathEquals guard that is not in the tree", (
   );
 });
 
+test("an allowStale exemption reaches only the arm that declares it", () => {
+  // The exemption is per ARM, not per path. One arm accepting that a path is
+  // not here yet says nothing about another arm that names it and needs it — and
+  // a table-wide exemption set would switch the check off everywhere the path
+  // appears, which is the fail-open shape this table exists to remove.
+  const subjects = stalenessSubjects(
+    table(
+      {
+        id: "exempting",
+        arms: [
+          {
+            ...arm(["scripts/not-here-yet.mjs"]),
+            allowStale:
+              "a config file this repository does not carry today, routed so adding one is covered",
+          },
+        ],
+      },
+      { id: "needing", arms: [arm(["scripts/not-here-yet.mjs"])] },
+    ),
+  );
+  assert.deepEqual(
+    subjects
+      .filter((subject) => subject.path === "scripts/not-here-yet.mjs")
+      .map((subject) => subject.groupId),
+    ["needing"],
+    "the exemption leaked out of the arm that declared it",
+  );
+});
+
+test("both lints refuse a normalized table instead of reporting it clean", () => {
+  // `pairing`, `allowStale` and `why` do not survive `normalizeGroups`, so a
+  // normalized table would produce no violations and read as clean. A lint that
+  // reports clean because it was handed the wrong shape is a green light nobody
+  // has reason to doubt, so the shape is checked rather than documented.
+  for (const check of [pairingProblems, stalenessSubjects]) {
+    assert.throws(
+      () => check(ROUTING_PLAN),
+      /NORMALIZED routing groups/,
+      `${check.name} accepted ROUTING_PLAN`,
+    );
+  }
+  // And it must still accept the real thing.
+  assert.deepEqual(pairingProblems(ROUTING_GROUPS), []);
+  assert.ok(stalenessSubjects(ROUTING_GROUPS).length > 400);
+});
+
+test("both lints refuse a table with nothing in it to check", () => {
+  for (const check of [pairingProblems, stalenessSubjects]) {
+    assert.throws(() => check([]), /no routing groups/);
+    assert.throws(
+      () => check([{ id: "x", arms: [{ patterns: ["a"], effects: [] }] }]),
+      /no effects at all/,
+    );
+  }
+});
+
 test("an allowStale arm with only globs exempts nothing", () => {
   assert.deepEqual(
     exemptedLiterals({
