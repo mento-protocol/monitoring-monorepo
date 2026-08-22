@@ -2171,6 +2171,7 @@ await test("the pipeline's shared modules stay under the file-size hard cap", ()
     "scripts/sentry/triage/sentry-triage-project.mjs",
     "scripts/sentry/triage/sentry-triage-project-cli.mjs",
     "scripts/sentry/triage/sentry-triage-project-core.mjs",
+    "scripts/sentry/triage/sentry-triage-project-route.mjs",
     "scripts/sentry/triage/sentry-triage-label-ensure.mjs",
     "scripts/sentry/triage/sentry-triage-escalation-contract.mjs",
     "scripts/sentry/triage/sentry-triage-text.mjs",
