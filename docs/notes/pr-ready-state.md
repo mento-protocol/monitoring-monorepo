@@ -112,11 +112,12 @@ The JSON projections expose `gates.codeRabbitReviewSignal` with `missing`,
 `requested`, `stale`, `reviewed`, or `not_applicable`. A `reviewed` signal
 requires either a CodeRabbit review body with its `**Run ID**` marker and a
 review commit equal to the full current head, or a trusted CodeRabbit top-level
-`recent_review` block for a clean run. The clean-run block must contain the Run
-ID and a reviewed commit range that ends at the full current head. Its comment
-update time must be at or after the head update time. Empty review records,
-skipped runs, and rate-limit notices do not count. A head-bound closeout request
-uses this exact body:
+clean-run block enclosed by `<!-- recent_review_start -->` and
+`<!-- recent_review_end -->`. The clean-run block must contain the Run ID and a
+reviewed commit range that ends at the full current head. Its comment update
+time must be at or after the head update time. Empty review records, skipped
+runs, and rate-limit notices do not count. A head-bound closeout request uses
+this exact body:
 
 ```text
 @coderabbitai review
@@ -369,9 +370,10 @@ Field expectations:
 - `codeRabbitReviewSignal`: current-head CodeRabbit review state. Values are
   `missing`, `requested`, `stale`, `reviewed`, and `not_applicable`. A
   CodeRabbit review with a run marker and review commit equal to the current
-  head is `reviewed`. A trusted top-level clean-run `recent_review` block also
-  counts when it contains a Run ID, ends its full commit range at the current
-  head, and was updated at or after the head. Empty reply-only reviews, skipped
+  head is `reviewed`. A trusted top-level clean-run block also counts when
+  `<!-- recent_review_start -->` and `<!-- recent_review_end -->` enclose it, it
+  contains a Run ID, its full commit range ends at the current head, and its
+  comment was updated at or after the head. Empty reply-only reviews, skipped
   runs, and rate-limit notices do not count. A head-bound request is `requested`
   until a real run lands.
 - `requiredStatusContexts[]`: required check contexts from classic branch

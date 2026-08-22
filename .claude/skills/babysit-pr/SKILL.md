@@ -295,13 +295,15 @@ in the unbound checkout.
 Apply the CodeRabbit exact-head closeout before the final projection pair. Read
 `gates.codeRabbitReviewSignal` from `pr:feedback-state`. A real current-head run
 has state `reviewed`. This includes a trusted CodeRabbit top-level clean-run
-summary that binds its Run ID and full reviewed commit range to the current
-head. Empty review records, skipped runs, and rate-limit notices do not count.
-If the optional `CodeRabbit` check is still pending, report that lag and do not
-race it with a manual request. After the check becomes terminal, refresh
-feedback-state once. For `missing` or `stale`, re-resolve and validate the full
-40-hex `headRefOid`. Recheck it immediately before the write and post this body
-only when it still matches, through the bound base repository:
+summary enclosed by `<!-- recent_review_start -->` and
+`<!-- recent_review_end -->`. The summary must bind its Run ID and full reviewed
+commit range to the current head. Its comment update time must be at or after
+the head update time. Empty review records, skipped runs, and rate-limit notices
+do not count. If the optional `CodeRabbit` check is still pending, report that
+lag and do not race it with a manual request. After the check becomes terminal,
+refresh feedback-state once. For `missing` or `stale`, re-resolve and validate
+the full 40-hex `headRefOid`. Recheck it immediately before the write and post
+this body only when it still matches, through the bound base repository:
 
 ```text
 @coderabbitai review
