@@ -118,10 +118,6 @@ const SUBJECTS = [
   "a\rb",
   "a\x07b",
   "a\vb",
-  // A control character next to a byte >= 0x80: the pass-through half of the
-  // same branch, which is only visible once the word is in ANSI-C form.
-  "a\x1bé",
-  "aéb",
 ];
 
 const interpreters = bashInterpreters();
@@ -139,12 +135,25 @@ for (const [bash, version] of interpreters) {
     //
     // Splitting the output on newlines stays safe: `%q` escapes control
     // characters, so no quoted form can contain a raw newline.
-    const output = execFileSync(
-      bash,
-      ["-c", 'printf "%q\\n" "$@"', bash, ...SUBJECTS],
-      { encoding: "utf8" },
+    // BOTH LOCALES. `printf %q` is locale-sensitive, and the pre-push hook runs
+    // the gate with a stripped environment while a developer's shell is UTF-8 —
+    // so a corpus that inherits one locale pins half the behaviour and reds in
+    // the other half's environment. Everything left in SUBJECTS must be
+    // locale-independent; the bytes that are not are refused, below.
+    const perLocale = ["C", "en_US.UTF-8"].map((locale) =>
+      execFileSync(bash, ["-c", 'printf "%q\\n" "$@"', bash, ...SUBJECTS], {
+        encoding: "utf8",
+        env: { ...process.env, LC_ALL: locale },
+      })
+        .split("\n")
+        .slice(0, SUBJECTS.length),
     );
-    const expected = output.split("\n").slice(0, SUBJECTS.length);
+    assert.deepEqual(
+      perLocale[0],
+      perLocale[1],
+      `${bash} answers differently under LC_ALL=C and LC_ALL=en_US.UTF-8 for a subject in this corpus; such a subject cannot be reproduced and belongs in the refusal test`,
+    );
+    const expected = perLocale[0];
 
     const disagreements = [];
     SUBJECTS.forEach((subject, index) => {
@@ -178,6 +187,38 @@ test("a tilde that could start an expansion is refused, not guessed", () => {
   assert.equal(shellQuote("a~b"), "a~b");
   assert.equal(shellQuote("x~"), "x~");
   assert.equal(shellQuote("a/~b"), "a/~b");
+});
+
+test("a byte >= 0x80 is refused, because the answer is the locale's", (t) => {
+  for (const subject of ["aéb", "é", "a\x1bé", "ünïcödé/path.ts"]) {
+    assert.throws(
+      () => shellQuote(subject),
+      /byte >= 0x80 is octal-escaped under LC_ALL=C/,
+      `expected a refusal for ${JSON.stringify(subject)}`,
+    );
+  }
+
+  // The control: the locales really do disagree, on every installed build.
+  const answers = new Set();
+  for (const [bash] of interpreters) {
+    for (const locale of ["C", "en_US.UTF-8"]) {
+      answers.add(
+        execFileSync(bash, ["-c", 'printf "%q" "$1"', bash, "aéb"], {
+          encoding: "utf8",
+          env: { ...process.env, LC_ALL: locale },
+        }),
+      );
+    }
+  }
+  if (answers.size < 2) {
+    t.skip(`only one answer for "aéb" on this machine: ${[...answers]}`);
+    return;
+  }
+  assert.deepEqual(
+    [...answers].sort(),
+    ["$'a\\303\\251b'", "aéb"],
+    "the disagreement is the measured one — C octal-escapes, UTF-8 passes through",
+  );
 });
 
 test("the refusal is justified: the installed bash builds disagree", (t) => {
