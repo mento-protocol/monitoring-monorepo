@@ -3899,7 +3899,13 @@ while IFS= read -r path; do
           # break its audit-comment idempotency and brief-clear (#1769 round 15).
           add_command "pnpm sentry:archive:test" "Sentry triage projection helper changed"
           ;;
-        scripts/sentry/triage/sentry-triage-agent-comment.mjs|scripts/sentry/triage/sentry-triage-agent-comment.test.mjs)
+        scripts/sentry/triage/sentry-triage-agent-comment.mjs|scripts/sentry/triage/sentry-triage-agent-comment.test.mjs|scripts/sentry/triage/sentry-triage-broker-guard.mjs)
+          # The broker guard (liveness fence + public-log redaction, #1956
+          # split) has no suite of its own — it is covered by the wrapper's,
+          # which also owns the workflow-shape and closure assertions that bind
+          # the guard's constants to the YAML. Routing it here rather than to a
+          # new sentry-*.test.mjs keeps the Sentry suite manifest's file count
+          # where it is.
           add_command "node scripts/sentry/triage/sentry-triage-agent-comment.test.mjs" "Sentry triage agent comment wrapper changed"
           add_command "node scripts/sentry/fixture-scan-canary.test.mjs" "Sentry suite carrying scanned fixtures changed"
           ;;
