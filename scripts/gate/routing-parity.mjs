@@ -63,6 +63,14 @@ function parseGateStdout(text) {
   const surfaces = [];
   const checklists = [];
   const commands = [];
+  // The gate's own normalized changed-path set, in ITS order. The gate applies
+  // `sed '/^$/d' | sort -u` to the input file, and that ordering is routing:
+  // `add_command` keeps the first reason it is given, so iterating the set in a
+  // different order produces the same commands with different reasons. Feeding
+  // the engine what the gate printed removes the question entirely — including
+  // the collation the gate's `sort` happened to use, which is locale-dependent
+  // and therefore not something this harness should try to reproduce.
+  const changedPaths = [];
   let section = null;
   for (const line of text.split("\n")) {
     if (line === "Detected surfaces:") {
@@ -90,8 +98,14 @@ function parseGateStdout(text) {
     if (section === "surface") surfaces.push(body);
     else if (section === "checklist") checklists.push(body);
     else if (section === "command") commands.push(normalize(body));
+    else if (section === "changed") changedPaths.push(body);
   }
-  return { surfaces: surfaces.sort(), checklists: checklists.sort(), commands };
+  return {
+    surfaces: surfaces.sort(),
+    checklists: checklists.sort(),
+    commands,
+    changedPaths,
+  };
 }
 
 /** The engine's plan in the same shape, so the two can be compared directly. */
@@ -186,6 +200,90 @@ function corpusTracked(limit) {
   return Array.from({ length: limit }, (_, i) => all[Math.floor(i * step)]);
 }
 
+/**
+ * Pass 2 — multi-path sets.
+ *
+ * Four behaviours are set-dependent and a single-path corpus cannot see any of
+ * them: the Trunk full-vs-targeted decision, the codegen sort (which only has
+ * something to sort when several variants are scheduled), Turbo compaction
+ * (which needs two packages sharing a task), and scoped tests (which have a
+ * 15-path threshold and four disqualifiers). Pass 1 proving zero differences
+ * says almost nothing about these, so this is where the post-passes are
+ * actually tested.
+ */
+function corpusMultiPath(tracked) {
+  const sets = [];
+  const pick = (source, count, seed) => {
+    // Deterministic, so a difference is reproducible on a re-run.
+    const chosen = [];
+    let cursor = seed;
+    for (let i = 0; i < count; i += 1) {
+      cursor = (cursor * 1103515245 + 12345) % 2147483648;
+      chosen.push(source[cursor % source.length]);
+    }
+    return [...new Set(chosen)];
+  };
+
+  for (const k of [2, 3, 5, 15, 16]) {
+    for (let seed = 1; seed <= 6; seed += 1) {
+      sets.push({
+        label: `random-k${k}-s${seed}`,
+        paths: pick(tracked, k, seed * 7919),
+      });
+    }
+  }
+
+  // Straddle each scoped-test disqualifier: the same base set with and without
+  // the one path that turns scoping off.
+  const base = [
+    "ui-dashboard/src/lib/utils.ts",
+    "indexer-envio/src/EventHandlers.ts",
+  ];
+  const straddles = {
+    "shared-config": "shared-config/src/index.ts",
+    "test-infra-hermetic": "ui-dashboard/vitest.hermetic-setup.ts",
+    "test-infra-config": "ui-dashboard/vitest.config.ts",
+    "schema-stub": "scripts/envio-schema-stubs.graphql",
+    "workspace-escalation": "package.json",
+    "lockfile-scoped": "pnpm-lock.yaml",
+    "non-source-in-package": "ui-dashboard/src/lib/types.json",
+    "test-file-in-package": "ui-dashboard/src/lib/utils.test.ts",
+  };
+  sets.push({ label: "straddle-base", paths: base });
+  for (const [name, extra] of Object.entries(straddles)) {
+    sets.push({ label: `straddle-${name}`, paths: [...base, extra] });
+  }
+
+  // The 15/16 threshold, exactly.
+  const dashboardFiles = tracked
+    .filter((p) => p.startsWith("ui-dashboard/src/") && p.endsWith(".ts"))
+    .slice(0, 16);
+  if (dashboardFiles.length === 16) {
+    sets.push({ label: "threshold-15", paths: dashboardFiles.slice(0, 15) });
+    sets.push({ label: "threshold-16", paths: dashboardFiles });
+  }
+
+  // Turbo compaction needs two packages sharing a task.
+  sets.push({
+    label: "turbo-compaction",
+    paths: [
+      "ui-dashboard/src/lib/utils.ts",
+      "metrics-bridge/src/index.ts",
+      "integration-probes/src/index.ts",
+    ],
+  });
+  // Several codegen variants at once, so the sort has something to order.
+  sets.push({
+    label: "codegen-sort",
+    paths: [
+      "indexer-envio/config.yaml",
+      "indexer-envio/config.testnet.yaml",
+      "ui-dashboard/src/lib/utils.ts",
+    ],
+  });
+  return sets;
+}
+
 const argv = process.argv.slice(2);
 const option = (name, fallback) => {
   const index = argv.indexOf(name);
@@ -199,14 +297,20 @@ const dir = mkdtempSync(join(tmpdir(), "routing-parity-"));
 let differences = 0;
 let compared = 0;
 
+const pass2 = argv.includes("--pass2");
+const work = pass2
+  ? corpusMultiPath(corpusTracked(null))
+  : paths.map((path) => ({ label: path, paths: [path] }));
+
 try {
-  for (const path of paths) {
-    const set = [path];
+  for (const { label, paths: set } of work) {
+    if (set.length === 0) continue;
     const { stdout, pathsFile } = runGate(set, dir);
     const gate = parseGateStdout(stdout);
-    const engine = await runEngine(set, pathsFile);
+    // The gate's normalized set, not the harness's raw one.
+    const engine = await runEngine(gate.changedPaths, pathsFile);
     if (mutate) engine.commands.shift();
-    const problems = diff(path, gate, engine);
+    const problems = diff(label, gate, engine);
     compared += 1;
     if (problems.length > 0) {
       differences += 1;
