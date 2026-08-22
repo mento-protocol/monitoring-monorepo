@@ -55,12 +55,12 @@ transport.
   to the hosted indexer.
 - Current structured error families are diagnostic-only:
 
-  | Family                                       | Source                             | Classification                                                                                                                          |
-  | -------------------------------------------- | ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-  | `sortedOracles.oracleExpiryStateUnavailable` | `handlers/oracleExpiryState.ts`    | Diagnostic-only; no metric/rule tracks bootstrap failure.                                                                               |
-  | `sortedOracles.oracleFeedStateUnavailable`   | `handlers/oracleFeedState.ts`      | Diagnostic-only; existing oracle-freshness rules detect resulting stale pool state, not this bootstrap failure.                         |
-  | `liquity.systemParams.deadContract`          | `handlers/liquity/systemParams.ts` | Diagnostic-only; one possible exact cause of the generic `mento_cdp_system_params_loaded` incomplete state, which has warning coverage. |
-  | `liquity.systemParams.diagnosticFailed`      | `handlers/liquity/systemParams.ts` | Diagnostic-only; no metric/rule tracks diagnostic-RPC failure.                                                                          |
+  | Family                                       | Source                             | Classification                                                                                                                                                                                |
+  | -------------------------------------------- | ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | `sortedOracles.oracleExpiryStateUnavailable` | `handlers/oracleExpiryState.ts`    | Diagnostic-only; the handler throws, so a state entity written in the failing transaction would roll back. Existing oracle-down and freshness rules own sustained operator impact.            |
+  | `sortedOracles.oracleFeedStateUnavailable`   | `handlers/oracleFeedState.ts`      | Diagnostic-only; the handler throws, so a state entity written in the failing transaction would roll back. Existing oracle-down and freshness rules own sustained operator impact.            |
+  | `liquity.systemParams.deadContract`          | `handlers/liquity/systemParams.ts` | Diagnostic-only; one possible exact cause of the generic `mento_cdp_system_params_loaded` incomplete state, which has warning coverage.                                                       |
+  | `liquity.systemParams.diagnosticFailed`      | `handlers/liquity/systemParams.ts` | Diagnostic-only; this secondary `getCode` diagnostic runs after primary parameter reads fail. Persistent primary failure leaves `systemParamsLoaded=false`, which the generic warning covers. |
 
   `envio_effect_cache_invalidations_count` is separately represented by the
   Prometheus-backed `Envio Effect Cache Invalidations` Grafana rule; it is not
@@ -107,5 +107,17 @@ Invalidations` rule with `service=indexer` and `severity=warning`.
 - `alerts/rules/rules-indexer.tf` defines the Prometheus-backed effect-cache
   invalidation rule. Oracle freshness rules consume `mento_pool_oracle_*`
   metrics in `alerts/rules/rules-fpmms.tf` and `rules-vp-oracles.tf`.
+- `indexer-envio/src/handlers/oracleExpiryState.ts` and
+  `indexer-envio/src/handlers/oracleFeedState.ts` log their named bootstrap
+  failures and then throw. `indexer-envio/src/handlers/liquity/systemParams.ts`
+  retains `systemParamsLoaded=false` when primary parameter reads fail and
+  emits `diagnosticFailed` only if the secondary `getCode` diagnostic also
+  fails.
+- `metrics-bridge/src/cdp-metrics.ts` publishes the bounded readiness and
+  freshness gauges. `metrics-bridge/test/cdp-metrics.test.ts` and
+  `metrics-bridge/test/poller.test.ts` pin their publication, recovery, and
+  failure semantics. `alerts/rules/rules-cdps.tf` defines the warning, and
+  `scripts/alerts/alert-rules-lint.test.mjs` pins its evaluation and routing
+  contract.
 - [Issue #1561](https://github.com/mento-protocol/monitoring-monorepo/issues/1561)
   is the task record for this supersession.
