@@ -318,6 +318,20 @@ export const AGENT_MODULE_ARMS = [
     ],
   },
   {
+    why: "The Node mapping engine (ADR 0069, D5b) and the parity harness that proves it against these arms. Nothing consults the engine yet — the `case` arms are still the routing that runs — so this routes the engine's own checks rather than the gate self-test. When the gate is flipped to read the engine's plan, this arm gains the self-test the way the routing-table arm already has it.",
+    patterns: [
+      "scripts/gate/mapping.mjs",
+      "scripts/gate/mapping/*.mjs",
+      "scripts/gate/routing-parity.mjs",
+    ],
+    effects: [
+      {
+        command: "node --test scripts/gate/mapping/shell-quote.test.mjs",
+        reason: "gate mapping engine changed",
+      },
+    ],
+  },
+  {
     why: "The bash-from-Node machinery. Its own suite already runs, because check-sentry-suites-in-ci.test.mjs imports it and the coverage arm routes that. What was missing is the OTHER consumer: ADR 0069's routing-table suite drives `runProbeShell`/`probeDirs` for the /bin/bash pattern oracle and `bashFunctionSource` for the implementation-signature pin. A change to the probe environment or to the end-of-function scan changes what both of those prove, and nothing said so.",
     patterns: [
       "scripts/sentry/ci-wiring/check-sentry-suites-in-ci-gate-extract.mjs",

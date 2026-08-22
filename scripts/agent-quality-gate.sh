@@ -4001,6 +4001,15 @@ while IFS= read -r path; do
           add_command "pnpm gate:routing-table:test" "gate routing table changed"
           add_command "pnpm agent:quality-gate:test" "gate routing table is an implementation-signature input"
           ;;
+        scripts/gate/mapping.mjs|scripts/gate/mapping/*.mjs|scripts/gate/routing-parity.mjs)
+          # The Node mapping engine (ADR 0069, D5b) and the parity harness that
+          # proves it against these arms. Nothing consults the engine yet — the
+          # `case` arms below are still the routing that runs — so this routes
+          # the engine's own checks rather than the gate self-test. When the
+          # gate is flipped to read the engine's plan, this arm gains the
+          # self-test the way the routing-table arm already has it.
+          add_command "node --test scripts/gate/mapping/shell-quote.test.mjs" "gate mapping engine changed"
+          ;;
         scripts/sentry/ci-wiring/check-sentry-suites-in-ci-gate-extract.mjs)
           # The bash-from-Node machinery. Its own suite already runs, because
           # check-sentry-suites-in-ci.test.mjs imports it and the coverage arm
