@@ -148,7 +148,7 @@ in the same PR.
 - Do not add `--no-verify` to normal Git commands. `deploy-indexer.sh` uses it
   only for `envio` trigger-ref pushes, which intentionally skip redundant
   pre-push hooks; never generalize it.
-- New deploy scripts must print target, commit, and rollback/verification command around mutation.
+- New deploy scripts must print target, commit, and rollback or verification command around mutation.
 - New Node root scripts need `pnpm lint:scripts` coverage; new shell scripts must
   pass `bash -n`. Add a focused command to `scripts/agent-quality-gate.sh` for
   behavior syntax and lint checks cannot verify.
