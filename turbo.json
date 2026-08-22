@@ -95,6 +95,7 @@
         "$TURBO_ROOT$/.github/workflows/size-limit.yml",
         "$TURBO_ROOT$/scripts/agent-quality-gate.sh",
         "$TURBO_ROOT$/scripts/agent-quality-gate.test.sh",
+        "$TURBO_ROOT$/scripts/gate/routing-table/**",
         "$TURBO_ROOT$/turbo.json"
       ],
       "env": ["VERCEL_ENV", "VERCEL_DEPLOYMENT_ID", "VERCEL_GIT_COMMIT_SHA"],
@@ -157,6 +158,7 @@
         "$TURBO_ROOT$/.github/workflows/size-limit.yml",
         "$TURBO_ROOT$/scripts/agent-quality-gate.sh",
         "$TURBO_ROOT$/scripts/agent-quality-gate.test.sh",
+        "$TURBO_ROOT$/scripts/gate/routing-table/**",
         "$TURBO_ROOT$/turbo.json"
       ],
       "outputs": []
@@ -198,6 +200,7 @@
         "$TURBO_ROOT$/.github/workflows/update-snapshots.yml",
         "$TURBO_ROOT$/scripts/agent-quality-gate.sh",
         "$TURBO_ROOT$/scripts/agent-quality-gate.test.sh",
+        "$TURBO_ROOT$/scripts/gate/routing-table/**",
         "$TURBO_ROOT$/turbo.json"
       ],
       "env": [

@@ -1024,6 +1024,17 @@ jobs:
         # Without this in CI, a routing regression only fails locally (pre-push)
         # and could merge if a contributor bypasses the local gate.
         run: pnpm agent:quality-gate:test
+      - name: Gate routing-table suite
+        # ADR 0069. The gate's routing exists twice — as `case` arms in
+        # scripts/agent-quality-gate.sh and as data in
+        # scripts/gate/routing-table/ — and this suite is what proves the two
+        # still describe the same routing, alongside the pairing lint, the path
+        # staleness check, and the /bin/bash oracle for the pattern compiler.
+        # It belongs in the required `ci` sentinel path for the same reason the
+        # routing regression suite above does: the local pre-push gate is the
+        # thing a contributor can bypass, and a table that has drifted from the
+        # arms fails nowhere at all.
+        run: pnpm gate:routing-table:test
       - name: CodeRabbit config allowlist pin
         # ADR 0066. CodeRabbit resolves .coderabbit.yaml from the PR's SOURCE
         # branch, so a PR can weaken the reviewer that reviews it — and its

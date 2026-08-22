@@ -57,7 +57,7 @@ stay with their domain.
 
 ## Why Files Stay Flat
 
-`scripts/` has eleven path-pin classes. Move each pin with its file in the
+`scripts/` has twelve path-pin classes. Move each pin with its file in the
 same PR, except the `agent-autoreview.sh` feedback-runtime pins below.
 
 - **Autoreview runtime materialization.** `agent-autoreview.sh` pins sibling
@@ -75,6 +75,9 @@ same PR, except the `agent-autoreview.sh` feedback-runtime pins below.
   `docs/docs-navigation-eval-helpers.mjs` and `gate/lockfile-scope.mjs` to
   `$script_source_dir` in three literals, not stub `$repo_root`. Repoint all
   three (ADR 0064).
+- **Gate routing-table pins.** Every `gate/routing-table/*.mjs` module is an
+  `implementation_signature()` and `turbo.json` entry
+  ([ADR 0069](../docs/adr/0069-gate-routing-table-as-data.md)).
 - **Evaluation fixture forbidden lists.** `forbidden_sources` in
   `docs/evals/documentation-navigation-fixtures.json` names the navigation
   eval's own implementation.
@@ -83,18 +86,13 @@ same PR, except the `agent-autoreview.sh` feedback-runtime pins below.
   by set equality both ways. A moved or renamed suite fails the gate closed.
   `sentry/fixture-scan-canary.test.mjs` re-pins four; ADR 0068 has the policy.
 - **Enumerated workflow pins.** 22 of 32 files in
-  `.github/workflows/` pin a `scripts/` path, and
-  `sentry-triage-agent.yml` stages a copy list. `ci.yml` (`autoreviewSuite`,
-  `autoreviewRootRuntime`, `versionSkew`; `rootScripts` is the recursive
-  `scripts/**`), `infra.yml`, `alerts-rules.yml`, `peg-policy-publication.yml`,
-  and `schema-diff.yml` list individual files. The three Terraform filters are
-  the exception: `ci.yml` `terraform` plus `infra.yml` push and `pull_request`
+  `.github/workflows/` pin a `scripts/` path, and `sentry-triage-agent.yml`
+  stages an exact copy list at runtime; three Terraform filters instead
   copy the broad `workflowAdmissionPatterns` boundary from
-  `terraform.stacks.json`, including `scripts/**`. `routing.test.mjs` asserts
-  exact equality and proves that boundary subsumes every stack pattern. A miss
-  is silent without that contract — the job stops running while the required
-  `ci` sentinel stays green. ADR 0064 covers when a module glob such as
-  `supply-chain.yml`'s `scripts/supply-chain/**` is the safer pin.
+  `terraform.stacks.json`. A miss is silent — the job stops running while the
+  required `ci` sentinel stays green. The enumeration, the `routing.test.mjs`
+  equality contract, and when a module glob is the safer pin are in
+  [ADR 0064](../docs/adr/0064-scripts-module-directories.md#sweep-checklist-for-a-move).
 - **Terraform stack registry.** `terraform.stacks.json` `changedPathPatterns`
   pins exact `scripts/` paths per stack. The broad workflow admission boundary
   covers the directory; `pnpm tf:test` enforces subsumption.

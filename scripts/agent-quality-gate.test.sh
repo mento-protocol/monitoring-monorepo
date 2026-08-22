@@ -2514,6 +2514,55 @@ assert_contains "- node scripts/lighthouse-config.test.mjs (Lighthouse CI budget
 run_gate "scripts/lighthouse-config.test.mjs"
 assert_contains "- node scripts/lighthouse-config.test.mjs (Lighthouse config assertion suite changed)"
 
+# The routing table (ADR 0069) is a second copy of this file's own routing, and
+# gate-equality.test.mjs is what holds the two together. It only does that if it
+# RUNS in both drift directions, so both are pinned here.
+#
+# Table side: EVERY module under scripts/gate/routing-table/, enumerated from the
+# real tree rather than named here. Naming two would leave the other seventeen
+# resting on the assumption that one glob covers them all — and a narrowed arm,
+# or a new module whose name an earlier arm in the same `case` happens to claim,
+# would drop one while these assertions stayed green. Enumerating means a module
+# added later is covered the day it lands, by construction.
+#
+# The names come from `$repo_root` because `run_gate` drives a fixture repository
+# that has no scripts/ tree; the routing itself only ever sees the path string.
+routing_table_modules=()
+while IFS= read -r routing_table_module; do
+  routing_table_modules+=("$routing_table_module")
+done < <(cd "$repo_root" && git ls-files 'scripts/gate/routing-table/*.mjs')
+((${#routing_table_modules[@]} >= 15)) ||
+  fail "expected the routing table to have at least 15 tracked modules, found ${#routing_table_modules[@]} — enumeration found nothing to check"
+for routing_table_module in "${routing_table_modules[@]}"; do
+  run_gate "$routing_table_module"
+  assert_contains "- pnpm gate:routing-table:test (gate routing table changed)"
+  assert_contains "- pnpm agent:quality-gate:test (gate routing table is an implementation-signature input)"
+done
+
+# Gate side, and the commoner drift: somebody adds or reorders a `case` arm in
+# this gate and does not touch the data. Before this arm existed that ran
+# nothing, and the table went stale exactly where nothing reds.
+run_gate "scripts/agent-quality-gate.sh"
+assert_contains "- pnpm agent:quality-gate:test (agent quality gate mapping changed)"
+assert_contains "- pnpm gate:routing-table:test (gate routing arms must still match the routing table)"
+
+# The bash-from-Node machinery the routing-table suite runs on: runProbeShell
+# and probeDirs back the /bin/bash pattern oracle, bashFunctionSource backs the
+# implementation-signature pin. Its own suite already runs through the
+# CI-coverage check; this is the second consumer, which nothing routed.
+run_gate "scripts/sentry/ci-wiring/check-sentry-suites-in-ci-gate-extract.mjs"
+assert_contains "- pnpm gate:routing-table:test (the routing table's bash oracle and signature pin run on this machinery)"
+assert_contains "- node scripts/sentry/ci-wiring/check-sentry-suites-in-ci.test.mjs (Sentry CI-coverage check reads this file)"
+
+# Negative control: the routing-table arm sits BELOW the per-module arms in the
+# same `case`, so a sibling under scripts/gate/ must still reach its own suite
+# and not this one. Without this the two assertions above would also pass for a
+# blanket arm over scripts/gate/, which would schedule the table suite for every
+# unrelated gate satellite.
+run_gate "scripts/gate/agent-prewarm.mjs"
+assert_contains "- pnpm agent:prewarm:test (agent prewarm helper changed)"
+assert_not_contains "- pnpm gate:routing-table:test"
+
 run_gate ".github/workflows/ci.yml"
 assert_contains "- docs/pr-checklists/ci-workflow-gates.md (GitHub Actions workflow/action changed)"
 assert_contains "- node scripts/workflows/check-github-action-pins.mjs (GitHub Actions workflow/action changed)"
