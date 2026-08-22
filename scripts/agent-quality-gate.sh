@@ -4027,6 +4027,9 @@ while IFS= read -r path; do
           # deleted, and this arm gains the self-test the way the routing-table
           # arm already has it.
           add_command "node --test scripts/gate/mapping/shell-quote.test.mjs" "gate mapping engine changed"
+          add_command "node --test scripts/gate/mapping/engine.test.mjs" "gate mapping engine changed (behaviour the arms will stop pinning at D5c)"
+          add_command "pnpm agent:quality-gate:test" "gate mapping engine produces the stdout the gate suite asserts on"
+          add_command "node scripts/gate/agent-prewarm.test.mjs" "gate mapping engine produces the stdout agent:prewarm parses"
           add_command "node scripts/gate/routing-parity.mjs --corpus fixture" "gate mapping engine changed (parity against the live arms, fixture repository)"
           add_command "node scripts/gate/routing-parity.mjs --corpus symlink" "gate mapping engine changed (parity against the live arms, scripts/ symlink source)"
           add_command "node scripts/gate/routing-parity.mjs --corpus multi" "gate mapping engine changed (parity against the live arms, whole-set post-passes)"
@@ -4699,6 +4702,166 @@ sort_codegen_commands
 compact_turbo_quality_commands
 apply_scoped_test_commands
 
+# ── D5b part 2: the Node mapping engine is the routing ──────────────────────
+#
+# Everything above this line is the bash `case` arms, and they still run. What
+# changes here is which plan the gate USES: the mapper's. The arms become a
+# cross-check, and the gate REFUSES the whole run if the two plans differ by one
+# byte. That is parity in production rather than parity in a harness, and it is
+# what makes the swap reversible — a divergence stops the run instead of
+# silently choosing a winner.
+#
+# D5c deletes the arms and this comparison once the soak is clean. ADR 0069.
+#
+# EVERY failure below is a refusal. A mapper that crashes, exits non-zero,
+# prints something unparsable, names a bucket that does not exist, or emits
+# nothing at all must not leave the gate running on a partial plan: fewer mapped
+# commands still print "All mapped commands passed."
+plan_records_from_bash() {
+  local entry
+  printf 'flag\tpackage_script_risk_changed\t%s\n' "$package_script_risk_changed"
+  printf 'flag\tsaw_workspace_escalation\t%s\n' "$saw_workspace_escalation"
+  for entry in "${surfaces[@]+"${surfaces[@]}"}"; do
+    printf 'surface\t%s\n' "$entry"
+  done
+  for entry in "${checklists[@]+"${checklists[@]}"}"; do
+    printf 'checklist\t%s\t%s\n' "${entry%%|*}" "${entry#*|}"
+  done
+  for entry in "${preflight_commands[@]+"${preflight_commands[@]}"}"; do
+    printf 'preflight\t%s\t%s\n' "${entry%%|*}" "${entry#*|}"
+  done
+  for entry in "${codegen_commands[@]+"${codegen_commands[@]}"}"; do
+    printf 'codegen\t%s\t%s\n' "${entry%%|*}" "${entry#*|}"
+  done
+  for entry in "${post_codegen_commands[@]+"${post_codegen_commands[@]}"}"; do
+    printf 'post-codegen\t%s\t%s\n' "${entry%%|*}" "${entry#*|}"
+  done
+  for entry in "${quality_commands[@]+"${quality_commands[@]}"}"; do
+    printf 'quality\t%s\t%s\n' "${entry%%|*}" "${entry#*|}"
+  done
+}
+
+mapper_path="$script_source_dir/gate/mapping.mjs"
+# Checked before the call, and separately from a run failure: a mapper the gate
+# cannot find is a repointing mistake, not a routing result, and it must not
+# read as one.
+if [[ ! -f "$mapper_path" ]]; then
+  echo "error: gate mapping engine could not be loaded from ${mapper_path}" >&2
+  echo "       scripts/agent-quality-gate.sh runs this module at pre-push time; moving it requires repointing that path in the same commit." >&2
+  exit 2
+fi
+
+mapper_args=(
+  "$mapper_path"
+  --repo-root "$repo_root"
+  --changed-paths-file "$changed_paths_file"
+  --base "$base_ref"
+  --head "$head_ref"
+  --script-source-dir "$script_source_dir"
+)
+if [[ "$script_source_dir" == "$repo_root/scripts" ]]; then
+  mapper_args+=(--real-tree)
+fi
+if [[ "$full_local_tests" == "1" || "$full_local_tests" == "true" ]]; then
+  mapper_args+=(--full-local-tests)
+fi
+
+mapper_plan_file="$(make_tmpfile)"
+mapper_status=0
+node "${mapper_args[@]}" > "$mapper_plan_file" || mapper_status=$?
+if [[ "$mapper_status" -ne 0 ]]; then
+  echo "error: gate mapping engine failed (exit ${mapper_status}); refusing to run on a plan it did not produce" >&2
+  exit "$mapper_status"
+fi
+if [[ ! -s "$mapper_plan_file" ]]; then
+  echo "error: gate mapping engine produced an empty plan; refusing to run" >&2
+  exit 2
+fi
+
+engine_preflight_commands=()
+engine_codegen_commands=()
+engine_post_codegen_commands=()
+engine_quality_commands=()
+engine_checklists=()
+engine_surfaces=()
+engine_package_script_risk_changed=false
+mapper_record=""
+mapper_rest=""
+mapper_field=""
+while IFS= read -r mapper_record; do
+  [[ -n "$mapper_record" ]] || continue
+  mapper_rest="${mapper_record#*$'\t'}"
+  case "$mapper_record" in
+    flag$'\t'*)
+      mapper_field="${mapper_rest%%$'\t'*}"
+      case "${mapper_field}=${mapper_rest#*$'\t'}" in
+        package_script_risk_changed=true) engine_package_script_risk_changed=true ;;
+        package_script_risk_changed=false) ;;
+        # Accepted and compared, not stored: its only reader already ran. An
+        # unrecognised VALUE still falls through to the refusal below.
+        saw_workspace_escalation=true | saw_workspace_escalation=false) ;;
+        *)
+          echo "error: gate mapping engine emitted an unknown flag record: ${mapper_record}" >&2
+          exit 2
+          ;;
+      esac
+      ;;
+    surface$'\t'*) engine_surfaces+=("$mapper_rest") ;;
+    checklist$'\t'*)
+      engine_checklists+=("${mapper_rest%%$'\t'*}|${mapper_rest#*$'\t'}")
+      ;;
+    preflight$'\t'*)
+      engine_preflight_commands+=("${mapper_rest%%$'\t'*}|${mapper_rest#*$'\t'}")
+      ;;
+    codegen$'\t'*)
+      engine_codegen_commands+=("${mapper_rest%%$'\t'*}|${mapper_rest#*$'\t'}")
+      ;;
+    post-codegen$'\t'*)
+      engine_post_codegen_commands+=("${mapper_rest%%$'\t'*}|${mapper_rest#*$'\t'}")
+      ;;
+    quality$'\t'*)
+      engine_quality_commands+=("${mapper_rest%%$'\t'*}|${mapper_rest#*$'\t'}")
+      ;;
+    *)
+      echo "error: gate mapping engine emitted an unparsable record: ${mapper_record}" >&2
+      exit 2
+      ;;
+  esac
+done < "$mapper_plan_file"
+
+# The transitional guard. Order matters on both sides — the buckets, the
+# surfaces and the checklists all print and hash in sequence — so this is a
+# byte comparison of the whole plan, not a set comparison.
+bash_plan_file="$(make_tmpfile)"
+plan_records_from_bash > "$bash_plan_file"
+if ! diff -u "$bash_plan_file" "$mapper_plan_file" > "$bash_plan_file.diff" 2>&1; then
+  echo "error: the gate mapping engine and the bash routing arms disagree." >&2
+  echo "       This is the D5c soak guard: the run is refused rather than run on either plan." >&2
+  echo "       -bash +engine:" >&2
+  sed 's/^/       /' "$bash_plan_file.diff" >&2
+  rm -f "$bash_plan_file.diff"
+  exit 2
+fi
+rm -f "$bash_plan_file.diff"
+
+# The engine's plan is the plan. Assigned from its records rather than left as
+# the bash arrays, so that when D5c deletes the arms nothing downstream moves.
+preflight_commands=("${engine_preflight_commands[@]+"${engine_preflight_commands[@]}"}")
+codegen_commands=("${engine_codegen_commands[@]+"${engine_codegen_commands[@]}"}")
+post_codegen_commands=("${engine_post_codegen_commands[@]+"${engine_post_codegen_commands[@]}"}")
+quality_commands=("${engine_quality_commands[@]+"${engine_quality_commands[@]}"}")
+checklists=("${engine_checklists[@]+"${engine_checklists[@]}"}")
+surfaces=("${engine_surfaces[@]+"${engine_surfaces[@]}"}")
+# This one is still read below, by the refusal that stops a run whose package
+# manifests or lockfile changed, so it has to cross the seam.
+package_script_risk_changed="$engine_package_script_risk_changed"
+# `saw_workspace_escalation` deliberately does NOT get assigned here. Its only
+# reader is `scoped_tests_enabled`, which ran in the post-passes above, so an
+# assignment at this point would be dead code that reads like a live flag. It is
+# still carried across the seam and compared, because a disagreement about it
+# means the two sides escalated differently even where the command lists happen
+# to match.
+
 hash_sha256() {
   if command -v sha256sum >/dev/null 2>&1; then
     sha256sum "$@"
@@ -4761,6 +4924,16 @@ implementation_signature() {
     scripts/check-agent-quality-gate-package-scripts.mjs \
     scripts/docs/docs-navigation-eval-helpers.mjs \
     scripts/gate/lockfile-scope.mjs \
+    scripts/gate/mapping.mjs \
+    scripts/gate/mapping/facts.mjs \
+    scripts/gate/mapping/plan.mjs \
+    scripts/gate/mapping/post-passes.mjs \
+    scripts/gate/mapping/route.mjs \
+    scripts/gate/mapping/shell-quote.mjs \
+    scripts/gate/mapping/shell-quote.test.mjs \
+    scripts/gate/mapping/verbs.mjs \
+    scripts/gate/mapping/engine.test.mjs \
+    scripts/gate/routing-parity.mjs \
     scripts/gate/routing-table/arms-agent-modules.mjs \
     scripts/gate/routing-table/arms-alerts.mjs \
     scripts/gate/routing-table/arms-packages.mjs \

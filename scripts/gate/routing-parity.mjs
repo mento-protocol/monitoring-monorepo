@@ -37,6 +37,8 @@
  *                       own tree and the repository-specific groups are skipped
  *   --corpus symlink    a real directory symlink under scripts/, the dynamic
  *                       pattern source no committed path can exercise
+ *   --corpus self-test   every literal run_gate argument set in the gate's own
+ *                       9-minute suite, harvested from its source
  *   --pass2             deprecated alias for `--corpus multi`
  *   --limit <n>         positive integer; sample the tracked corpus evenly
  *   --base <ref>        base ref for the corpora that do not supply their own
@@ -169,23 +171,37 @@ function runGate(changedPaths, dir, baseRef, repoRoot) {
   writeFileSync(pathsFile, `${changedPaths.join("\n")}\n`);
   // The gate SCRIPT always comes from this checkout; only the repository it
   // runs against moves. That is exactly the split `$script_source_dir` tests.
-  const stdout = execFileSync(
-    "bash",
-    [
-      join(REPO, "scripts/agent-quality-gate.sh"),
-      "--changed-paths-file",
+  try {
+    const stdout = execFileSync(
+      "bash",
+      [
+        join(REPO, "scripts/agent-quality-gate.sh"),
+        "--changed-paths-file",
+        pathsFile,
+        "--base",
+        baseRef,
+      ],
+      {
+        cwd: repoRoot,
+        encoding: "utf8",
+        env: { ...process.env, AGENT_QUALITY_GATE_LOCK: "0" },
+        maxBuffer: 64 * 1024 * 1024,
+      },
+    );
+    return { stdout, pathsFile, refusal: null };
+  } catch (error) {
+    // A REFUSAL IS THE SIGNAL NOW, not a crash. Since the swap the gate builds
+    // its plan from the engine and cross-checks it against the bash arms, so a
+    // non-zero exit here is the in-gate parity guard firing — which is exactly
+    // what these corpora exist to drive. Report it as the difference it is
+    // rather than dying on the first one.
+    const stderr = String(error.stderr ?? "").trim();
+    return {
+      stdout: String(error.stdout ?? ""),
       pathsFile,
-      "--base",
-      baseRef,
-    ],
-    {
-      cwd: repoRoot,
-      encoding: "utf8",
-      env: { ...process.env, AGENT_QUALITY_GATE_LOCK: "0" },
-      maxBuffer: 64 * 1024 * 1024,
-    },
-  );
-  return { stdout, pathsFile };
+      refusal: `gate exited ${error.status}: ${stderr.split("\n").slice(0, 12).join("\n")}`,
+    };
+  }
 }
 
 async function runEngine(changedPaths, pathsFile, baseRef, repoRoot) {
@@ -652,6 +668,60 @@ function corpusFixture(dir) {
 }
 
 /**
+ * Pass 7 — the argument sets the gate's own self-test drives.
+ *
+ * 350 `run_gate` calls, each a path set some assertion was written for: the
+ * odd shapes, the deliberate near-misses, the multi-path sets that exercise a
+ * specific post-pass. They are the corpus with the most intent behind it,
+ * because a human wrote each one to pin something.
+ *
+ * Harvested from the suite source rather than by instrumenting `run_gate` at
+ * runtime: the suite takes nine minutes and the sets are literal arguments, so
+ * reading them is both faster and reproducible. A call whose arguments are not
+ * literals (three today, built from shell variables) is skipped rather than
+ * guessed at — the skip count is reported so it cannot quietly grow.
+ */
+function corpusSelfTest() {
+  const suite = readFileSync(
+    join(REPO, "scripts/agent-quality-gate.test.sh"),
+    "utf8",
+  );
+  const sets = [];
+  const seen = new Set();
+  let skipped = 0;
+  for (const line of suite.split("\n")) {
+    const match = /^\s*run_gate\s+(.+?)\s*$/.exec(line);
+    if (match === null) continue;
+    const argumentText = match[1];
+    // Only fully literal, double-quoted arguments. Anything carrying a `$` is
+    // a shell expansion this harness cannot resolve without running the suite.
+    if (argumentText.includes("$")) {
+      skipped += 1;
+      continue;
+    }
+    const paths = [...argumentText.matchAll(/"([^"]*)"/g)].map((m) => m[1]);
+    if (paths.length === 0 || paths.some((path) => path === "")) {
+      skipped += 1;
+      continue;
+    }
+    const key = paths.join(" ");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    sets.push({ label: `self-test:${paths.join(",").slice(0, 80)}`, paths });
+  }
+  if (sets.length === 0) {
+    // The "All 0 …" shape: a changed helper name would silently empty this.
+    throw new Error(
+      "harvested no run_gate argument sets from agent-quality-gate.test.sh",
+    );
+  }
+  console.log(
+    `self-test corpus: ${sets.length} distinct sets harvested, ${skipped} non-literal calls skipped`,
+  );
+  return sets;
+}
+
+/**
  * Pass 6 — a real directory symlink under `scripts/`.
  *
  * `scriptsSymlinkTargets` is a DYNAMIC pattern source: the arms it feeds are
@@ -815,6 +885,7 @@ const CORPORA = new Set([
   "base",
   "fixture",
   "symlink",
+  "self-test",
 ]);
 const limit = parseLimit(option("--limit", null));
 const mutate = argv.includes("--mutate");
@@ -838,6 +909,7 @@ function buildWork() {
   if (corpus === "base") return corpusBase(dir);
   if (corpus === "fixture") return corpusFixture(dir);
   if (corpus === "symlink") return corpusSymlink();
+  if (corpus === "self-test") return corpusSelfTest();
   return corpusTracked(limit).map((path) => ({ label: path, paths: [path] }));
 }
 
@@ -851,17 +923,26 @@ try {
     const undo = symlink === undefined ? () => {} : withSymlink(symlink);
     let gate;
     let engine;
+    let refusal = null;
     try {
       const run = runGate(set, dir, base, root);
-      gate = parseGateStdout(run.stdout);
-      // The gate's normalized set, not the harness's raw one.
-      engine = await runEngine(gate.changedPaths, run.pathsFile, base, root);
+      refusal = run.refusal;
+      if (refusal === null) {
+        gate = parseGateStdout(run.stdout);
+        // The gate's normalized set, not the harness's raw one.
+        engine = await runEngine(gate.changedPaths, run.pathsFile, base, root);
+      }
     } finally {
       undo();
     }
+    compared += 1;
+    if (refusal !== null) {
+      differences += 1;
+      if (differences <= 15) console.log(`${label}: REFUSED\n    ${refusal}`);
+      continue;
+    }
     if (mutate) engine.commands.shift();
     const problems = diff(label, gate, engine);
-    compared += 1;
     if (problems.length > 0) {
       differences += 1;
       if (differences <= 15) console.log(problems.join("\n"));

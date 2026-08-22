@@ -7,11 +7,11 @@
  * `write_command_plan` already emits, plus two further sections for the
  * surfaces and checklists the gate prints.
  *
- * NOT YET WIRED INTO THE GATE. D5b lands this inert and proves it against the
- * live bash routing with the parity harness first; the gate is flipped to read
- * from it only once that parity is zero with a proven mutation control. Until
- * then the bash `case` arms are still the routing that runs, and this module
- * changes nothing about a gate run.
+ * THIS IS THE ROUTING THAT RUNS. D5b part 2 flipped the gate to build its plan
+ * from this module's output. The bash `case` arms still execute alongside it
+ * for the D5c soak, and the gate REFUSES the whole run if the two plans differ
+ * by one byte — parity in production, not parity in a harness. D5c retires the
+ * arms once the soak is clean.
  *
  * FAIL CLOSED. Any unknown verb, guard, dispatch subject or dynamic source
  * throws, and this exits non-zero with the reason. The one outcome that must
@@ -34,12 +34,14 @@ import {
   rmSync,
   statSync,
   writeFileSync,
+  writeSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { ROUTING_PLAN } from "./routing-table/index.mjs";
+import { Facts } from "./mapping/facts.mjs";
 import { Plan, BUCKETS } from "./mapping/plan.mjs";
 import { routeChangedPaths } from "./mapping/route.mjs";
 import {
@@ -280,7 +282,22 @@ export async function routingSensitivePathsChanged(
     failure.exitCode = 3;
     throw failure;
   }
-  return changedPaths.some((path) => isRoutingSensitivePath(path) === true);
+  let sensitive = false;
+  for (const path of changedPaths) {
+    const verdict = isRoutingSensitivePath(path);
+    // The gate accepts only `true` or `false` from this classifier and exits 2
+    // on anything else. Reading a non-boolean as falsey here would drop
+    // `--check-fixtures` from the plan, which is the smaller-plan direction.
+    if (typeof verdict !== "boolean") {
+      const failure = new Error(
+        `${classifier} returned a non-boolean for ${JSON.stringify(path)}`,
+      );
+      failure.exitCode = 2;
+      throw failure;
+    }
+    if (verdict) sensitive = true;
+  }
+  return sensitive;
 }
 
 /** Build the plan. Exported so tests and the parity harness can call it directly. */
@@ -317,9 +334,27 @@ export function buildPlan({ changedPaths, facts, routingSensitive = false }) {
   return plan;
 }
 
-/** The plan as the TSV record stream the gate reads back. */
+/**
+ * The plan as the TSV record stream the gate reads back.
+ *
+ * ORDER IS THE CONTRACT, in both directions: the gate prints surfaces,
+ * checklists and each bucket in exactly this sequence, and `write_command_plan`
+ * hashes the bucket records in exactly this sequence. A reordering here is a
+ * different stamp and a different stdout for two Node consumers that parse it.
+ *
+ * The `flag` records carry the two run-scoped booleans the routing sets that
+ * are not commands. `package_script_risk_changed` gates the gate's refusal to
+ * run at all, so the swap has to carry it across the seam or that refusal
+ * quietly stops happening.
+ */
 export function formatPlan(plan) {
   const lines = [];
+  lines.push(
+    `flag\tpackage_script_risk_changed\t${plan.packageScriptRiskChanged === true}`,
+  );
+  lines.push(
+    `flag\tsaw_workspace_escalation\t${plan.sawWorkspaceEscalation === true}`,
+  );
   for (const surface of plan.surfaces) lines.push(`surface\t${surface}`);
   for (const entry of plan.checklists) {
     lines.push(`checklist\t${entry.checklist}\t${entry.reason}`);
@@ -329,5 +364,84 @@ export function formatPlan(plan) {
       lines.push(`${bucket}\t${entry.command}\t${entry.reason}`);
     }
   }
-  return lines.length === 0 ? "" : `${lines.join("\n")}\n`;
+  return `${lines.join("\n")}\n`;
+}
+
+/**
+ * The command-line entry point the gate calls, once per run.
+ *
+ * Every failure path here is a REFUSAL with a non-zero exit and a reason on
+ * stderr. The gate turns any non-zero exit into a refusal of the whole run,
+ * because the alternative — a mapper that fails and lets the run continue on
+ * whatever it managed to emit — is the smaller plan this rewrite exists to
+ * prevent.
+ */
+async function main(argv) {
+  const option = (name) => {
+    const index = argv.indexOf(name);
+    if (index === -1) return null;
+    const value = argv[index + 1];
+    if (value === undefined) {
+      throw Object.assign(new Error(`${name} requires a value`), {
+        exitCode: 2,
+      });
+    }
+    return value;
+  };
+
+  const required = (name) => {
+    const value = option(name);
+    if (value === null) {
+      throw Object.assign(new Error(`${name} is required`), { exitCode: 2 });
+    }
+    return value;
+  };
+
+  const repoRoot = required("--repo-root");
+  const changedPathsFile = required("--changed-paths-file");
+  const scriptSourceDir = required("--script-source-dir");
+  const facts = new Facts({
+    repoRoot,
+    baseRef: required("--base"),
+    headRef: required("--head"),
+    changedPathsFile,
+    isRealTree: argv.includes("--real-tree"),
+    fullLocalTests: argv.includes("--full-local-tests"),
+    scriptSourceDir,
+  });
+
+  // The gate's already-normalized set: `sed '/^$/d' | sort -u` has run, and
+  // that ordering is routing, because `add_command` keeps the FIRST reason it
+  // is given. Re-deriving it here would be guessing at the collation the
+  // gate's `sort` used.
+  const changedPaths = readFileSync(changedPathsFile, "utf8")
+    .split(/\r?\n/)
+    .filter((line) => line !== "");
+  if (changedPaths.length === 0) {
+    throw Object.assign(
+      new Error(`${changedPathsFile} holds no changed paths`),
+      { exitCode: 2 },
+    );
+  }
+
+  const routingSensitive = await routingSensitivePathsChanged(
+    changedPaths,
+    scriptSourceDir,
+  );
+  process.stdout.write(
+    formatPlan(buildPlan({ changedPaths, facts, routingSensitive })),
+  );
+  return 0;
+}
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  try {
+    process.exitCode = await main(process.argv.slice(2));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    // writeSync, not console.error: `process.exit` drops whatever is still
+    // queued on an async stderr, and the gate runs this under a pipe.
+    writeSync(2, `agent quality gate mapper: ${message}\n`);
+    process.exit(typeof error?.exitCode === "number" ? error.exitCode : 1);
+  }
 }

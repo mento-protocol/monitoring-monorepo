@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import {
   extractTurboCacheDir,
   extractTurboPrewarmCommands,
@@ -173,6 +175,53 @@ assert.deepEqual(extractTurboPrewarmCommands(gateContractOutput), [
 assert.equal(
   extractTurboCacheDir(gateContractOutput),
   "/home/agent/.cache/turbo-monitoring-monorepo",
+);
+
+// ── The end-to-end contract, against the gate that actually runs ────────────
+//
+// Everything above rebuilds the stdout shape from literals in the gate source.
+// That catches a renamed header and nothing else. Since D5b part 2 the command
+// LINES come from the Node mapping engine rather than from bash `printf`s, so
+// the shape this parser depends on — `- <command> (<reason>)`, Turbo commands
+// carrying `--filter=` and `--cache=local:rw`, a blank line ending the block —
+// is now produced by a different program than the one the literals live in.
+//
+// The failure mode is silence: a drifted format makes `extractTurboPrewarmCommands`
+// return `[]`, and prewarm reports success having warmed nothing. So run the
+// real gate and require a real, non-empty extraction.
+const realGateOutput = execFileSync(
+  "bash",
+  [
+    fileURLToPath(new URL("../agent-quality-gate.sh", import.meta.url)),
+    "--changed-paths-file",
+    "/dev/stdin",
+    "--base",
+    "HEAD",
+  ],
+  {
+    cwd: fileURLToPath(new URL("../..", import.meta.url)),
+    input: "ui-dashboard/src/lib/utils.ts\n",
+    encoding: "utf8",
+    env: { ...process.env, AGENT_QUALITY_GATE_LOCK: "0" },
+    maxBuffer: 64 * 1024 * 1024,
+  },
+);
+
+const realCommands = extractTurboPrewarmCommands(realGateOutput);
+assert.ok(
+  realCommands.length > 0,
+  "extractTurboPrewarmCommands found NO Turbo commands in a real gate dry run; " +
+    "the stdout format drifted and agent:prewarm would warm nothing while reporting success",
+);
+assert.ok(
+  realCommands.includes(
+    "pnpm exec turbo run lint --filter=@mento-protocol/ui-dashboard --cache=local:rw",
+  ),
+  `a dashboard source change must still yield the dashboard lint task; got ${JSON.stringify(realCommands)}`,
+);
+assert.ok(
+  realCommands.every((command) => command.endsWith("--cache=local:rw")),
+  "every extracted command must still carry the local cache flag prewarm relies on",
 );
 
 console.log("agent prewarm tests passed");
