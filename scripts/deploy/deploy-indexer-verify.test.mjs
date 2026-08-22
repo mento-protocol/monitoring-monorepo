@@ -408,6 +408,50 @@ assert.doesNotMatch(
   /not caught up/,
 );
 
+const missingSampler = buildSummary({
+  args: { allowSyncing: false },
+  deployment: indexerJson.data.deployments[0],
+  endpoint: indexerJson.data.deployments[0].gql_endpoint,
+  endpointMode: "prod-static",
+  statusJson: {
+    data: [
+      {
+        chain_id: 1,
+        block_height: 24_574_403,
+        latest_processed_block: 24_574_403,
+        num_events_processed: 1,
+        timestamp_caught_up_to_head_or_endblock: "2026-07-03T12:00:00Z",
+      },
+    ],
+  },
+  metricsJson: { data: [] },
+  graphqlJson: {
+    data: {
+      Pool: [{ id: "pool" }],
+      PolygonPool: validPolygonPools(),
+      SusdsYieldSummary: [
+        { id: "susds", currentShares: "1", lastUpdatedBlock: "24574403" },
+      ],
+      SusdsYieldMovement: [{ id: "susds-move", blockNumber: "24574403" }],
+      SusdsYieldDailySnapshot: [],
+      StethYieldSummary: [{ id: "steth" }],
+      StethYieldMovement: [{ id: "steth-move" }],
+    },
+  },
+  nowSeconds: NOW_SECONDS,
+  replayIntegrityInput: VALID_REPLAY_INTEGRITY,
+});
+assert.equal(missingSampler.ok, false);
+const missingSamplerText = renderText(missingSampler);
+assert.match(
+  missingSamplerText,
+  /latest sampled block: -; processed Ethereum head: 24,574,403; block lag: -/,
+);
+assert.match(
+  missingSamplerText,
+  /latest sampled timestamp: -; age: - seconds; healthy: no/,
+);
+
 const baselineOnlySampler = buildSummary({
   args: { allowSyncing: false },
   deployment: indexerJson.data.deployments[0],
@@ -539,6 +583,10 @@ const healthySummary = buildSummary({
   replayIntegrityInput: VALID_REPLAY_INTEGRITY,
 });
 assert.equal(healthySummary.ok, true);
+assert.match(
+  renderText(healthySummary),
+  /latest sampled block: 24,573,803; processed Ethereum head: 24,573,803; block lag: 0/,
+);
 
 const staleSamplerSummary = buildSummary({
   args: { allowSyncing: false },

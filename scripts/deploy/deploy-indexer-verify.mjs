@@ -277,7 +277,8 @@ async function queryGraphql(endpoint) {
 }
 
 function formatNumber(value) {
-  return Number(value ?? 0).toLocaleString("en-US");
+  if (value == null) return "-";
+  return Number(value).toLocaleString("en-US");
 }
 
 export function renderText(summary) {
