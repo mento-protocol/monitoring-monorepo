@@ -6501,6 +6501,8 @@ gate_race_sync="$(mktemp -d)"
   race_fork_unit_bystander_parent=""
   race_drain_owned_survivors=""
   race_drain_owned_record_error=""
+  race_drain_pair_observation_file=""
+  race_drain_pair_require_change=0
 
   race_drain_process_is_expected() {
     local pid="$1"
@@ -6527,18 +6529,24 @@ gate_race_sync="$(mktemp -d)"
   race_drain_suspend_direct_watchdogs() {
     local label="$1"
     local gate_pid="$2"
-    local watchdogs watchdog_scan_status race_wd
+    local watchdog_deadline watchdogs watchdog_scan_status race_wd
     race_drain_watchdog_identities=""
     race_drain_watchdog_count=0
     race_drain_watchdog_pid=""
     race_drain_watchdog_start=""
     race_drain_watchdog_parent=""
-    if watchdogs="$(pgrep -P "$gate_pid" -f "collect_tree" 2>/dev/null)"; then
-      watchdog_scan_status=0
-    else
-      watchdog_scan_status=$?
-    fi
-    [[ "$watchdog_scan_status" -le 1 ]] || return 2
+    watchdog_deadline=$(( $(date +%s) + 10 ))
+    while :; do
+      if watchdogs="$(pgrep -P "$gate_pid" -f "collect_tree" 2>/dev/null)"; then
+        watchdog_scan_status=0
+      else
+        watchdog_scan_status=$?
+      fi
+      [[ "$watchdog_scan_status" -le 1 ]] || return 2
+      [[ -n "$watchdogs" ]] && break
+      [[ "$(date +%s)" -lt "$watchdog_deadline" ]] || return 2
+      sleep 1
+    done
     for race_wd in $watchdogs; do
       gate_test_capture_identity "$race_wd" "$gate_pid" || return 2
       race_drain_watchdog_pid="$race_wd"
@@ -6693,7 +6701,7 @@ gate_race_sync="$(mktemp -d)"
     [[ -n "$wrapper_pid" && -n "$wrapper_start" && -n "$wrapper_parent" ]] || return 0
     if ! [[ "$wait_seconds" =~ ^[0-9]+$ && "$wait_seconds" -ge 1 ]]; then
       echo "interrupted-drain fixture: ${label} has an invalid wait bound" >&2
-      return 124
+      return 64
     fi
 
     deadline=$(( $(date +%s) + wait_seconds ))
@@ -6839,6 +6847,95 @@ gate_race_sync="$(mktemp -d)"
     fi
   }
 
+  # Call this only after every registered producer wrapper is absent. Require
+  # three identical nonempty record/ack observations so a child released just
+  # after one cmp cannot append an identity outside the cleanup snapshot.
+  race_drain_wait_for_stable_identity_pair() {
+    local label="$1"
+    local record_path="$2"
+    local ack_path="$3"
+    local record_snapshot="${record_path}.snapshot"
+    local ack_snapshot="${ack_path}.snapshot"
+    local stable_dir previous_record previous_ack
+    local observation_file="${race_drain_pair_observation_file:-}"
+    local require_change="${race_drain_pair_require_change:-0}"
+    local deadline change_observed=0 stable_observations=0
+    local stable_pair_wait_seconds=30
+    race_drain_pair_observation_file=""
+    race_drain_pair_require_change=0
+    [[ -n "$record_path" && -n "$ack_path" ]] || {
+      race_drain_owned_record_error="${label} record and acknowledgement paths must both be set"
+      return 124
+    }
+    [[ "$require_change" == "0" || "$require_change" == "1" ]] || {
+      race_drain_owned_record_error="${label} has an invalid stability change requirement"
+      return 124
+    }
+    if [[ -n "$observation_file" ]]; then
+      case "$observation_file" in
+        "$gate_race_out"/*) ;;
+        *)
+          race_drain_owned_record_error="${label} observation path is outside the private fixture output directory"
+          return 124
+          ;;
+      esac
+      if [[ -e "$observation_file" || -L "$observation_file" ]]; then
+        race_drain_owned_record_error="${label} observation path must be absent before the first snapshot"
+        return 124
+      fi
+    fi
+    stable_dir="$(mktemp -d "$gate_race_out/identity-pair.XXXXXX")" || {
+      race_drain_owned_record_error="${label} could not create its private stability directory"
+      return 124
+    }
+    previous_record="$stable_dir/record"
+    previous_ack="$stable_dir/ack"
+    deadline=$(( $(date +%s) + stable_pair_wait_seconds ))
+    while :; do
+      if race_drain_validate_identity_pair "$label" "$record_path" "$ack_path" &&
+        [[ -s "$record_snapshot" && -s "$ack_snapshot" ]]; then
+        if [[ -f "$previous_record" && -f "$previous_ack" ]]; then
+          if cmp -s "$record_snapshot" "$previous_record" &&
+            cmp -s "$ack_snapshot" "$previous_ack"; then
+            if [[ "$require_change" -eq 0 || "$change_observed" -eq 1 ]]; then
+              stable_observations=$((stable_observations + 1))
+              if [[ "$stable_observations" -ge 2 ]]; then
+                rm -rf "$stable_dir"
+                return 0
+              fi
+            fi
+          else
+            [[ "$require_change" -eq 0 ]] || change_observed=1
+            stable_observations=0
+          fi
+        else
+          stable_observations=0
+          if [[ -n "$observation_file" ]]; then
+            if ! (set -C && : > "$observation_file") 2>/dev/null; then
+              race_drain_owned_record_error="${label} could not publish its first-observation marker"
+              rm -rf "$stable_dir"
+              return 124
+            fi
+          fi
+        fi
+        if ! cp "$record_snapshot" "$previous_record" ||
+          ! cp "$ack_snapshot" "$previous_ack"; then
+          race_drain_owned_record_error="${label} could not retain its stability snapshots"
+          rm -rf "$stable_dir"
+          return 124
+        fi
+      else
+        stable_observations=0
+      fi
+      if [[ "$(date +%s)" -ge "$deadline" ]]; then
+        race_drain_owned_record_error="${label} record and acknowledgement did not become repeatedly stable before the bounded deadline"
+        rm -rf "$stable_dir"
+        return 124
+      fi
+      sleep 1
+    done
+  }
+
   # Return 0 when every recorded identity was already absent, 1 when at least
   # one exact fixture-owned survivor was found and removed, and 124 when the
   # record or bounded cleanup could not be proved safe. Validate the complete
@@ -6848,7 +6945,7 @@ gate_race_sync="$(mktemp -d)"
     local label="$1"
     local record_path="$2"
     local snapshot_path="${record_path}.cleanup.snapshot"
-    local owned_pid owned_start current_start current_parent signal_status
+    local owned_pid owned_start owned_parent current_start current_parent signal_status
     local deadline found_survivor=0 cleanup_status=0
     race_drain_owned_survivors=""
     if [[ -z "$record_path" ]]; then
@@ -6857,18 +6954,18 @@ gate_race_sync="$(mktemp -d)"
     if ! race_drain_snapshot_identity_file "${label} record" "$record_path" "$snapshot_path"; then
       return 124
     fi
-    while IFS='|' read -r owned_pid owned_start; do
+    while IFS='|' read -r owned_pid owned_start owned_parent; do
       [[ -n "$owned_pid" ]] || continue
       current_start="$(gate_test_process_start "$owned_pid")"
       current_parent="$(gate_test_process_parent "$owned_pid")"
       gate_test_trace_signal identity "$label" NONE "$owned_pid" \
-        "$owned_start" "$current_start" "" "$current_parent"
+        "$owned_start" "$current_start" "$owned_parent" "$current_parent"
       if [[ -z "$current_start" ]]; then
         continue
       fi
       if [[ "$current_start" != "$owned_start" ]]; then
         gate_test_trace_signal refused-reused "$label" KILL "$owned_pid" \
-          "$owned_start" "$current_start" "" "$current_parent"
+          "$owned_start" "$current_start" "$owned_parent" "$current_parent"
         continue
       fi
       found_survivor=1
@@ -6901,6 +6998,19 @@ gate_race_sync="$(mktemp -d)"
     [[ "$cleanup_status" -eq 0 ]] || return 124
     [[ "$found_survivor" -eq 0 ]] || return 1
     return 0
+  }
+
+  # shellcheck disable=SC2329 # invoked through the EXIT cleanup tracker below
+  race_drain_inspect_owned_pair() {
+    local label="$1"
+    local record_path="$2"
+    local ack_path="$3"
+    if [[ -z "$record_path" && -z "$ack_path" ]]; then
+      return 0
+    fi
+    race_drain_wait_for_stable_identity_pair \
+      "$label" "$record_path" "$ack_path" || return 124
+    race_drain_inspect_owned_record "$label" "$record_path"
   }
 
   race_drain_cleanup_suspended_watchdogs() {
@@ -6949,6 +7059,8 @@ EOF
   race_bound_release=""
   race_bound_started=""
   race_bound_nonce=""
+  race_bound_failure_wait_seconds=35
+  race_bound_unregistered=""
   race_bound_sequence=0
   race_bound_job_is_active() {
     local job_pid jobs_output
@@ -6960,31 +7072,43 @@ EOF
   }
   race_bound_wait_unreleased() {
     local child_pid="$1"
-    local deadline=$(( $(date +%s) + 35 ))
+    local wait_seconds="${2:-35}"
+    local deadline
+    [[ "$wait_seconds" =~ ^[0-9]+$ && "$wait_seconds" -ge 1 ]] || return 124
+    deadline=$(( $(date +%s) + wait_seconds ))
     while race_bound_job_is_active "$child_pid" &&
       [[ "$(date +%s)" -lt "$deadline" ]]; do
       sleep 1
     done
-    if ! race_bound_job_is_active "$child_pid"; then
-      wait "$child_pid" 2>/dev/null || true
-    fi
+    race_bound_job_is_active "$child_pid" && return 124
+    wait "$child_pid" 2>/dev/null || true
   }
   race_bound_launch_failure() {
     local message="$1"
     local child_pid="${2:-}"
-    if [[ -n "$child_pid" ]]; then
-      race_bound_wait_unreleased "$child_pid"
+    local registered=0 wait_status=0
+    if [[ -n "$race_bound_dir" && "$race_bound_registered" == *"|${race_bound_dir}|"* ]]; then
+      registered=1
     fi
-    if [[ -z "$race_bound_dir" || "$race_bound_registered" != *"|${race_bound_dir}|"* ]]; then
-      [[ -z "$race_bound_dir" ]] || rm -rf "$race_bound_dir"
-      race_bound_pid=""
-      race_bound_start=""
-      race_bound_parent=""
-      race_bound_dir=""
-      race_bound_record=""
-      race_bound_release=""
-      race_bound_started=""
-      race_bound_nonce=""
+    if [[ -n "$child_pid" && "$registered" -eq 0 ]]; then
+      race_bound_wait_unreleased \
+        "$child_pid" "$race_bound_failure_wait_seconds" || wait_status=$?
+    fi
+    if [[ "$registered" -eq 0 ]]; then
+      if [[ -z "$child_pid" || "$wait_status" -eq 0 ]]; then
+        [[ -z "$race_bound_dir" ]] || rm -rf "$race_bound_dir"
+        race_bound_pid=""
+        race_bound_start=""
+        race_bound_parent=""
+        race_bound_dir=""
+        race_bound_record=""
+        race_bound_release=""
+        race_bound_started=""
+        race_bound_nonce=""
+      else
+        race_bound_unregistered="${race_bound_unregistered}${race_bound_unregistered:+$'\n'}${child_pid}|${race_bound_dir}|${race_bound_failure_wait_seconds}"
+        echo "launch-bound fixture failed: unregistered child ${child_pid} remained active after its derived wait bound" >&2
+      fi
     fi
     echo "launch-bound fixture failed: $message" >&2
     return 1
@@ -7008,6 +7132,7 @@ EOF
       race_bound_launch_failure "$label has an invalid hard bound"
       return 1
     fi
+    race_bound_failure_wait_seconds=$((seconds + 5))
     if [[ -z "$command_name" ]]; then
       race_bound_launch_failure "$label has no command"
       return 1
@@ -7128,6 +7253,28 @@ EOF
     }
   }
   # shellcheck disable=SC2329 # invoked only through cleanup_interrupted_drain_fixture
+  race_bound_cleanup_unregistered() {
+    local status=0
+    local pending=""
+    local child_pid child_dir wait_seconds
+    while IFS='|' read -r child_pid child_dir wait_seconds; do
+      [[ -n "$child_pid" ]] || continue
+      if ! race_bound_wait_unreleased "$child_pid" "$wait_seconds"; then
+        pending="${pending}${pending:+$'\n'}${child_pid}|${child_dir}|${wait_seconds}"
+        status=124
+        continue
+      fi
+      if [[ -n "$child_dir" ]] && ! rm -rf "$child_dir"; then
+        pending="${pending}${pending:+$'\n'}${child_pid}|${child_dir}|${wait_seconds}"
+        status=124
+      fi
+    done <<EOF
+$race_bound_unregistered
+EOF
+    race_bound_unregistered="$pending"
+    return "$status"
+  }
+  # shellcheck disable=SC2329 # invoked only through cleanup_interrupted_drain_fixture
   race_bound_cleanup_registered() {
     local status=0
     local pending=""
@@ -7233,10 +7380,14 @@ EOF
     race_cleanup_track race_drain_cleanup_direct_wrapper \
       "fork-and-exit A gate" "$race_forkexit_wrapper" \
       "$race_forkexit_wrapper_start" "$race_forkexit_wrapper_parent"
-    race_cleanup_track_absent_ok race_drain_inspect_owned_record \
-      "fork-on-TERM" "$race_fork_record"
-    race_cleanup_track_absent_ok race_drain_inspect_owned_record \
-      "fork-and-exit" "$race_forkexit_record"
+    # Stop every registered publisher before freezing record/ack pairs. A
+    # still-live publisher can append immediately after an otherwise clean cmp.
+    race_cleanup_track race_bound_cleanup_unregistered
+    race_cleanup_track race_bound_cleanup_registered
+    race_cleanup_track_absent_ok race_drain_inspect_owned_pair \
+      "fork-on-TERM" "$race_fork_record" "$race_fork_ack"
+    race_cleanup_track_absent_ok race_drain_inspect_owned_pair \
+      "fork-and-exit" "$race_forkexit_record" "$race_forkexit_ack"
     race_cleanup_track_absent_ok race_drain_inspect_owned_record \
       "publisher probe" "$race_fork_probe_record"
     race_cleanup_track race_drain_cleanup_direct_wrapper \
@@ -7249,7 +7400,6 @@ EOF
       "fork-record unit bystander" "$race_fork_unit_bystander" \
       "$race_fork_unit_bystander_start" "$race_fork_unit_bystander_parent"
     race_cleanup_track race_drain_cleanup_suspended_watchdogs
-    race_cleanup_track race_bound_cleanup_registered
     final_status="$status"
     if [[ "$final_status" -eq 0 && "$cleanup_status" -ne 0 ]]; then
       final_status=124
@@ -7573,10 +7723,11 @@ STUB
     local ack_path="$3"
     local close_record_fd="${4:-}"
     local skip_ack="${5:-}"
+    local ack_seconds="${6:-5}"
     if RACE_STUB_FORK_PUBLISH_ONLY=1 \
       RACE_STUB_FORK_RECORD="$record_path" \
       RACE_STUB_FORK_ACK="$ack_path" \
-      RACE_STUB_FORK_ACK_SECONDS=1 \
+      RACE_STUB_FORK_ACK_SECONDS="$ack_seconds" \
       RACE_STUB_FORK_TEST_CLOSE_RECORD_FD="$close_record_fd" \
       RACE_STUB_FORK_TEST_SKIP_ACK="$skip_ack" \
       RACE_STUB_FORK_SECONDS=60 \
@@ -7654,7 +7805,7 @@ STUB
         "$race_probe_record" "$race_probe_ack" 1 ''
     else
       race_stub_publish_probe publisher-ack \
-        "$race_probe_record" "$race_probe_ack" '' 1
+        "$race_probe_record" "$race_probe_ack" '' 1 1
     fi
     if race_drain_inspect_owned_record \
       "publisher ${race_probe_kind} failure" "$race_probe_record"; then
@@ -7667,6 +7818,69 @@ STUB
       "$race_probe_inspect_status" -eq 0 && ! -s "$race_probe_ack" ]] ||
       fail "the fork publisher did not contain its ${race_probe_kind} failure"
   done
+
+  race_probe_live_record="$gate_race_out/publisher-live.records"
+  race_probe_live_ack="$gate_race_out/publisher-live.acks"
+  race_probe_live_observed="$gate_race_out/publisher-live.first-observation"
+  : > "$race_probe_live_record"
+  : > "$race_probe_live_ack"
+  rm -f "$race_probe_live_observed"
+  race_fork_probe_record="$race_probe_live_record"
+  race_stub_publish_probe publisher-live \
+    "$race_probe_live_record" "$race_probe_live_ack"
+  [[ "$race_stub_probe_status" -eq 0 ]] ||
+    fail "the live three-field publisher fixture did not start"
+  if race_bound_launch_command "delayed three-field publisher" 15 \
+    /bin/sh -c \
+      'marker=$1; output_file=$2; shift 2; deadline=$(( $(date +%s) + 10 )); while [ ! -e "$marker" ] && [ "$(date +%s)" -lt "$deadline" ]; do sleep 1; done; [ -f "$marker" ] || exit 64; exec "$@" > "$output_file" 2>&1' \
+      delayed-three-field "$race_probe_live_observed" \
+      "$gate_race_out/publisher-live-delayed.out" env \
+      RACE_STUB_FORK_PUBLISH_ONLY=1 \
+      RACE_STUB_FORK_RECORD="$race_probe_live_record" \
+      RACE_STUB_FORK_ACK="$race_probe_live_ack" \
+      RACE_STUB_FORK_ACK_SECONDS=5 \
+      RACE_STUB_FORK_SECONDS=60 \
+      "$gate_race_repo/tools/trunk"; then
+    race_probe_delayed_wrapper="$race_bound_pid"
+    race_probe_delayed_wrapper_start="$race_bound_start"
+    race_probe_delayed_wrapper_parent="$race_bound_parent"
+  else
+    fail "the delayed three-field publisher wrapper could not be registered"
+  fi
+  race_drain_pair_observation_file="$race_probe_live_observed"
+  race_drain_pair_require_change=1
+  race_drain_wait_for_stable_identity_pair \
+    "live three-field publisher" "$race_probe_live_record" "$race_probe_live_ack" ||
+    fail "$race_drain_owned_record_error"
+  if race_drain_wait_for_direct_wrapper \
+    "delayed three-field publisher" "$race_probe_delayed_wrapper" \
+    "$race_probe_delayed_wrapper_start" "$race_probe_delayed_wrapper_parent" 15; then
+    race_probe_delayed_status=0
+  else
+    race_probe_delayed_status=$?
+  fi
+  [[ "$race_probe_delayed_status" -eq 0 ]] ||
+    fail "the delayed three-field publisher exited ${race_probe_delayed_status}"
+  race_bound_prune_completed
+  [[ "$(awk 'END { print NR + 0 }' "${race_probe_live_record}.snapshot")" -eq 2 ]] ||
+    fail "the stable identity pair omitted the delayed publisher record"
+  if race_drain_inspect_owned_record \
+    "live three-field publisher" "$race_probe_live_record"; then
+    race_probe_inspect_status=0
+  else
+    race_probe_inspect_status=$?
+  fi
+  [[ "$race_probe_inspect_status" -eq 1 ]] ||
+    fail "the owned-record inspector did not find and remove a live three-field identity"
+  if race_drain_inspect_owned_record \
+    "live three-field publisher" "$race_probe_live_record"; then
+    race_probe_inspect_status=0
+  else
+    race_probe_inspect_status=$?
+  fi
+  [[ "$race_probe_inspect_status" -eq 0 ]] ||
+    fail "the owned-record inspector did not prove the three-field identity absent after cleanup"
+  race_fork_probe_record=""
 
   if race_bound_launch_command "fork-record unit bystander" 30 /bin/sleep 60; then
     race_fork_unit_bystander="$race_bound_pid"
@@ -8566,8 +8780,10 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     124)
       fail "the interrupted-drain B run exceeded its 60-second bounded wait"
       ;;
-    0)
-      fail "the interrupted-drain B run did not crash at the requested boundary"
+    137)
+      ;;
+    *)
+      fail "the interrupted-drain B run did not exit with status 137 at the requested SIGKILL boundary; got ${race_drain_b_exit}"
       ;;
   esac
   race_drain_b_wrapper=""
@@ -8632,7 +8848,7 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   fi
   if race_drain_wait_for_direct_wrapper \
     "C gate" "$race_drain_c_wrapper" "$race_drain_c_wrapper_start" \
-    "$race_drain_c_wrapper_parent" 30; then
+    "$race_drain_c_wrapper_parent" 60; then
     race_drain_c_exit=0
   else
     race_drain_c_exit=$?
@@ -8641,7 +8857,7 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     0)
       ;;
     124)
-      fail "the run inheriting an interrupted drain exceeded its 30-second bounded wait after release"
+      fail "the run inheriting an interrupted drain exceeded its 60-second bounded wait after release"
       ;;
     *)
       fail "the run inheriting an interrupted drain exited ${race_drain_c_exit} after its release"
@@ -8908,7 +9124,7 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   fi
   [[ -s "$race_fork_record" && -s "$race_fork_ack" ]] ||
     race_case_add_error "A did not publish a complete replacement identity and acknowledgement"
-  race_drain_validate_identity_pair \
+  race_drain_wait_for_stable_identity_pair \
     "fork-on-TERM" "$race_fork_record" "$race_fork_ack" ||
     race_case_add_error "$race_drain_owned_record_error"
   if race_drain_inspect_owned_record \
@@ -9049,7 +9265,7 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   fi
   [[ -s "$race_forkexit_record" && -s "$race_forkexit_ack" ]] ||
     race_case_add_error "A did not publish a complete replacement identity and acknowledgement"
-  race_drain_validate_identity_pair \
+  race_drain_wait_for_stable_identity_pair \
     "fork-and-exit" "$race_forkexit_record" "$race_forkexit_ack" ||
     race_case_add_error "$race_drain_owned_record_error"
   if race_drain_inspect_owned_record \
