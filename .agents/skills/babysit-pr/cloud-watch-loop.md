@@ -45,11 +45,15 @@ Do not foreground-poll and never sleep-poll. Instead:
    - The Codex current-head signal from Codex's visible reviews/comments. The
      reaction-backed PR-description approval gate is not readable over MCP;
      report it as unverified rather than assumed.
-   - The CodeRabbit current-head signal from `get_reviews`. Count only a
-     CodeRabbit review whose body contains `**Run ID**` and whose review commit
-     equals the current full head. Ignore empty reply-only review records. After
-     the optional CodeRabbit check becomes terminal, refresh once. If the signal
-     is missing or stale and no trusted top-level comment contains both
+   - The CodeRabbit current-head signal from `get_reviews` and top-level
+     comments. Count a CodeRabbit review whose body contains `**Run ID**` and
+     whose review commit equals the current full head. Also count a trusted
+     CodeRabbit top-level clean-run `recent_review` block when it contains a Run
+     ID, ends its full reviewed commit range at the current head, and was
+     updated at or after that head. Ignore empty reply-only reviews, skipped
+     runs, and rate-limit notices. After the optional CodeRabbit check becomes
+     terminal, refresh once. If the signal is missing or stale and no trusted
+     top-level comment contains both
      `@coderabbitai review` and
      `<!-- coderabbit-final-head-review:<full-head-sha> -->`, use
      `add_issue_comment` to post `@coderabbitai review`, a blank line, and that

@@ -13,6 +13,12 @@ const CODERABBIT_REQUEST_ASSOCIATIONS = new Set([
   "OWNER",
 ]);
 const CODERABBIT_REVIEW_RUN_MARKER = /\*\*Run ID\*\*:\s*`[^`\r\n]+`/i;
+const CODERABBIT_RECENT_REVIEW_BLOCK =
+  /<!--\s*recent_review_start\s*-->([\s\S]*?)<!--\s*recent_review_end\s*-->/gi;
+const CODERABBIT_CLEAN_REVIEW_SUMMARY =
+  /No actionable comments were generated in the recent review\./i;
+const CODERABBIT_REVIEW_COMMIT_RANGE =
+  /\bbetween\s+[0-9a-f]{40}\s+and\s+([0-9a-f]{40})(?![0-9a-f])/gi;
 const CODERABBIT_FINAL_HEAD_REQUEST_MARKER =
   /<!--\s*coderabbit-final-head-review:([0-9a-f]{40})\s*-->/i;
 
@@ -67,6 +73,33 @@ function isTrustedCodeRabbitReviewRequestComment(comment) {
 
   const author = comment.user?.login ?? comment.author?.login ?? null;
   return CODERABBIT_REQUEST_AUTHORS.has(String(author ?? "").toLowerCase());
+}
+
+function codeRabbitCompletedCleanReviewHeads(body) {
+  const text = String(body ?? "");
+  const reviewedHeads = new Set();
+
+  for (const blockMatch of text.matchAll(CODERABBIT_RECENT_REVIEW_BLOCK)) {
+    const block = blockMatch[1];
+    if (!CODERABBIT_CLEAN_REVIEW_SUMMARY.test(block)) continue;
+    if (!CODERABBIT_REVIEW_RUN_MARKER.test(block)) continue;
+
+    for (const rangeMatch of block.matchAll(CODERABBIT_REVIEW_COMMIT_RANGE)) {
+      reviewedHeads.add(rangeMatch[1].toLowerCase());
+    }
+  }
+
+  return reviewedHeads;
+}
+
+function codeRabbitCommentTimestamp(comment) {
+  return (
+    comment.updated_at ??
+    comment.updatedAt ??
+    comment.created_at ??
+    comment.createdAt ??
+    null
+  );
 }
 
 export function isCodeRabbitFinalHeadReviewRequestBody(
@@ -214,6 +247,24 @@ export function classifyCodeRabbitReviewSignal({
     if (
       currentHead &&
       String(reviewCommitOid(review) ?? "").toLowerCase() === currentHead
+    ) {
+      return "reviewed";
+    }
+    hasHistoricalSignal = true;
+  }
+
+  for (const comment of issueComments) {
+    const author = comment.user?.login ?? comment.author?.login ?? null;
+    if (!CODERABBIT_AUTHORS.has(String(author ?? "").toLowerCase())) continue;
+
+    const reviewedHeads = codeRabbitCompletedCleanReviewHeads(comment.body);
+    if (reviewedHeads.size === 0) continue;
+
+    if (
+      currentHead &&
+      reviewedHeads.has(currentHead) &&
+      headUpdatedAt !== null &&
+      isAtOrAfter(codeRabbitCommentTimestamp(comment), headUpdatedAt)
     ) {
       return "reviewed";
     }
