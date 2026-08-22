@@ -21,9 +21,15 @@ vi.mock("../src/cdp-graphql.js", () => ({
   fetchCdps: vi.fn().mockResolvedValue([]),
 }));
 
-vi.mock("../src/cdp-metrics.js", () => ({
-  updateCdpMetrics: vi.fn(),
-}));
+vi.mock("../src/cdp-metrics.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/cdp-metrics.js")>();
+  return {
+    ...actual,
+    // Keep the real publication semantics so poller tests can prove that a
+    // query failure or shared 429 leaves the CDP freshness marker unchanged.
+    updateCdpMetrics: vi.fn(actual.updateCdpMetrics),
+  };
+});
 
 vi.mock("../src/server.js", () => ({
   markHealthy: vi.fn(),
@@ -194,6 +200,36 @@ describe("poll", () => {
     // A CDP query failure must not flip the FPMM bridge unhealthy.
     expect(mockUpdateCdpMetrics).not.toHaveBeenCalled();
     expect(mockMarkHealthy).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the CDP freshness marker at restart zero across query and shared-429 failures", async () => {
+    mockFetchPools.mockResolvedValue(makePoolResponse());
+    mockFetchCdps.mockRejectedValueOnce(new Error("cdp hasura down"));
+
+    await poll();
+
+    expect(
+      await getGaugeValue(register, "mento_cdp_last_successful_poll"),
+    ).toBe(0);
+
+    mockFetchPools.mockResolvedValueOnce(makePoolResponse());
+    mockFetchCdps.mockRejectedValueOnce(
+      new ClientError(
+        {
+          data: undefined,
+          errors: undefined,
+          status: 429,
+          headers: new Headers(),
+        },
+        { query: "..." },
+      ),
+    );
+
+    await poll();
+
+    expect(
+      await getGaugeValue(register, "mento_cdp_last_successful_poll"),
+    ).toBe(0);
   });
 
   it("increments pollErrors with cdp_update kind when the CDP metric update throws", async () => {
