@@ -50,8 +50,29 @@ function bashInterpreters() {
  * The subjects. Deliberately heavy on the characters where a hand-written
  * implementation goes wrong, plus the ordinary repo paths that must come back
  * untouched — if those were escaped, every command in the plan would differ.
+ *
+ * POSITION IS PART OF THE CORPUS. An earlier version tested `a#b` and `a~b`
+ * and nothing else, which says nothing about `#file` — where both builds
+ * escape and an unescaped `#` would comment out the rest of the command. Every
+ * position-sensitive character now appears leading, trailing and mid-word.
  */
 const SUBJECTS = [
+  "#",
+  "#file",
+  "#!/bin/sh",
+  "x#",
+  "a/#b",
+  "a=#b",
+  "a:#b",
+  "-file",
+  "+file",
+  "=file",
+  ":file",
+  "%file",
+  "@file",
+  ".file",
+  "x~",
+  "a/~b",
   "scripts/agent-quality-gate.sh",
   "ui-dashboard/src/lib/__generated__/graphql.ts",
   "docs/notes/a-b_c.1.md",
@@ -121,6 +142,48 @@ for (const [bash, version] of interpreters) {
     );
   });
 }
+
+/** The tilde positions where a tilde expansion could start. */
+const AMBIGUOUS_TILDES = ["~", "~file", "~/x", "a=~b", "a:~b"];
+
+test("a tilde that could start an expansion is refused, not guessed", () => {
+  for (const subject of AMBIGUOUS_TILDES) {
+    assert.throws(
+      () => shellQuote(subject),
+      /bash 3\.2 leaves a leading-position/,
+      `expected a refusal for ${JSON.stringify(subject)}`,
+    );
+  }
+  // The other positions are not ambiguous and must still round-trip.
+  assert.equal(shellQuote("a~b"), "a~b");
+  assert.equal(shellQuote("x~"), "x~");
+  assert.equal(shellQuote("a/~b"), "a/~b");
+});
+
+test("the refusal is justified: the installed bash builds disagree", (t) => {
+  // The control for the test above. If this machine has only one bash
+  // generation there is nothing to compare, and the refusal rests on the
+  // measurement recorded in shell-quote.mjs instead of on this run.
+  const answers = new Map();
+  for (const [bash, version] of interpreters) {
+    const quoted = execFileSync(bash, ["-c", `printf '%q' "$1"`, bash, "~x"], {
+      encoding: "utf8",
+    });
+    answers.set(`${bash} (${version})`, quoted);
+  }
+  const distinct = new Set(answers.values());
+  if (distinct.size < 2) {
+    t.skip(
+      `only one answer for "~x" on this machine: ${[...answers].map(([k, v]) => `${k} -> ${JSON.stringify(v)}`).join(", ")}`,
+    );
+    return;
+  }
+  assert.deepEqual(
+    [...distinct].sort(),
+    ["\\~x", "~x"],
+    "the disagreement is the measured one — 3.2 leaves it, 5.x escapes it",
+  );
+});
 
 test("ordinary repository paths are returned untouched", () => {
   // The case that matters most in practice: if these were escaped, every
