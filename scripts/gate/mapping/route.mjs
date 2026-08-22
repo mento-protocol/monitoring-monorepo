@@ -95,7 +95,10 @@ const substitute = (pattern, value) =>
   pattern.replace(/\$\{[a-z_][a-z_0-9]*\}/, value);
 
 function evaluateGuard(guard, path, facts) {
-  if (guard === "pathIsFile") return facts.pathExistsInWorktree(path);
+  // `[[ -f ]]`, not `[[ -e ]]`: a directory, a symlink to a directory and a
+  // gitlink all exist without being regular files, and the gate does not
+  // schedule `bash -n` or `node --check` against any of them.
+  if (guard === "pathIsFile") return facts.pathIsFile(path);
   if (guard === "pathIsSymlink") return facts.pathIsSymlink(path);
   if (guard === "realTreeOnly") return facts.isRealTree;
   if (guard === "nonEmpty") return facts.terraformStackPaths.length > 0;

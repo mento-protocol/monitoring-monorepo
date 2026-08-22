@@ -16,15 +16,40 @@
  * consumers already parse and 1,229 suite assertions already assert on.
  *
  * ZERO differences is the pass condition, and a green run is not believed until
- * `--mutate` has been shown to red it.
+ * `--mutate` has been shown to red it. An empty corpus is a FAILURE, not a
+ * pass: "compared 0 sets; 0 differed" is the shape of the bug this harness
+ * exists to catch, so it exits non-zero rather than reporting green.
  *
  * Usage:
- *   node scripts/gate/routing-parity.mjs --corpus tracked --limit 200
- *   node scripts/gate/routing-parity.mjs --mutate      # prove it can fail
+ *   node scripts/gate/routing-parity.mjs [--corpus <name>] [--limit <n>]
+ *                                        [--base <ref>] [--mutate]
+ *
+ *   --corpus tracked    one run per tracked path (default)
+ *   --corpus multi      multi-path sets — the four whole-set post-passes
+ *   --corpus synthetic  one built path per routing-table pattern no tracked
+ *                       path reaches, so an arm the tree cannot exercise is
+ *                       still compared
+ *   --corpus base       synthetic BASE COMMITS — the root-manifest classifier's
+ *                       four classes and the lockfile importer scoping, none of
+ *                       which is reachable while base and head are the same
+ *                       commit
+ *   --corpus fixture    a stub fixture repository, where the gate is not in its
+ *                       own tree and the repository-specific groups are skipped
+ *   --pass2             deprecated alias for `--corpus multi`
+ *   --limit <n>         positive integer; sample the tracked corpus evenly
+ *   --base <ref>        base ref for the corpora that do not supply their own
+ *                       (default HEAD)
+ *   --mutate            drop one engine command and require the harness to red
  */
 
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -32,8 +57,18 @@ import { fileURLToPath } from "node:url";
 import { Facts } from "./mapping/facts.mjs";
 import { buildPlan, routingSensitivePathsChanged } from "./mapping.mjs";
 import { BUCKETS } from "./mapping/plan.mjs";
+import { ROUTING_GROUPS } from "./routing-table/index.mjs";
+import { walkArms } from "./routing-table/schema.mjs";
+import { isGlob } from "./routing-table/pattern.mjs";
 
 const REPO = fileURLToPath(new URL("../..", import.meta.url));
+
+const git = (args, input) =>
+  execFileSync("git", ["-C", REPO, ...args], {
+    encoding: "utf8",
+    input,
+    maxBuffer: 256 * 1024 * 1024,
+  });
 
 /**
  * The gate's own dry-run stdout, reduced to the three observable sections.
@@ -125,9 +160,11 @@ function planToObservable(plan) {
   };
 }
 
-function runGate(changedPaths, dir) {
+function runGate(changedPaths, dir, baseRef, repoRoot) {
   const pathsFile = join(dir, "paths");
   writeFileSync(pathsFile, `${changedPaths.join("\n")}\n`);
+  // The gate SCRIPT always comes from this checkout; only the repository it
+  // runs against moves. That is exactly the split `$script_source_dir` tests.
   const stdout = execFileSync(
     "bash",
     [
@@ -135,10 +172,10 @@ function runGate(changedPaths, dir) {
       "--changed-paths-file",
       pathsFile,
       "--base",
-      "HEAD",
+      baseRef,
     ],
     {
-      cwd: REPO,
+      cwd: repoRoot,
       encoding: "utf8",
       env: { ...process.env, AGENT_QUALITY_GATE_LOCK: "0" },
       maxBuffer: 64 * 1024 * 1024,
@@ -147,14 +184,16 @@ function runGate(changedPaths, dir) {
   return { stdout, pathsFile };
 }
 
-async function runEngine(changedPaths, pathsFile) {
+async function runEngine(changedPaths, pathsFile, baseRef, repoRoot) {
   const scriptSourceDir = join(REPO, "scripts");
   const facts = new Facts({
-    repoRoot: REPO,
-    baseRef: "HEAD",
+    repoRoot,
+    baseRef,
     headRef: "HEAD",
     changedPathsFile: pathsFile,
-    isRealTree: true,
+    // The gate's own test, evaluated here rather than assumed: repository-
+    // specific routing is fenced behind the gate living in the tree it checks.
+    isRealTree: scriptSourceDir === join(repoRoot, "scripts"),
     scriptSourceDir,
   });
   const routingSensitive = await routingSensitivePathsChanged(
@@ -284,31 +323,401 @@ function corpusMultiPath(tracked) {
   return sets;
 }
 
+/**
+ * Pass 3 — one built path per pattern the tracked tree cannot reach.
+ *
+ * The tracked corpus exercises an arm only if some committed file happens to
+ * match it. Measured on this tree, 225 of the table's 234 arms are reached that
+ * way and nine are not — a repository with no `.npmrc`, and a star-slash
+ * `package.json` arm that every earlier package arm claims first. An arm no
+ * corpus reaches is an arm the parity evidence says nothing about, so this
+ * builds a path for it.
+ *
+ * The pattern COMPILER is not what this tests — `pattern-oracle.test.mjs`
+ * already proves every pattern against real bash, matches and near misses
+ * both. This tests the arm's effects: the verbs, the reasons and the bucket
+ * the engine produces once the arm fires.
+ */
+function corpusSynthetic(tracked) {
+  const trackedSet = new Set(tracked);
+  const seen = new Set();
+  const sets = [];
+  for (const { subject, arm } of walkArms(ROUTING_GROUPS)) {
+    // A dispatch on the root-manifest class switches on a verdict string
+    // rather than a path; `--corpus base` is what reaches those arms.
+    if (subject !== "path") continue;
+    for (const pattern of arm.patterns) {
+      // A dynamic group's pattern carries a `${placeholder}` that only means
+      // something once a symlink target or a stack path is substituted in.
+      if (/\$\{[a-z_][a-z_0-9]*\}/.test(pattern)) continue;
+      // Two expansions of `*`, because segment COUNT is routing: a nested
+      // dispatch that tries `*/*/*` before `*` is only reached by the second
+      // one, and a `*` that always spans a separator would never get there.
+      for (const star of ["a/b", "a"]) {
+        const path = synthesizeMatch(pattern, star);
+        if (path === "" || trackedSet.has(path) || seen.has(path)) continue;
+        seen.add(path);
+        sets.push({
+          label: `synthetic:${pattern}${isGlob(pattern) ? "" : " (literal)"}`,
+          paths: [path],
+        });
+      }
+    }
+  }
+  return sets;
+}
+
+/**
+ * A path built to match a bash `case` pattern, expanding `*` as `star`.
+ *
+ * `a/b` is the expansion that matters most — `*` crosses `/` in a `case`
+ * pattern, and a synthetic match that never spans a separator would not
+ * exercise that. Same construction as `pattern-oracle.test.mjs`, which proves
+ * against bash that the paths it builds really do match.
+ */
+function synthesizeMatch(pattern, star) {
+  let path = "";
+  for (let index = 0; index < pattern.length; index += 1) {
+    const character = pattern[index];
+    if (character === "*") {
+      path += star;
+    } else if (character === "?") {
+      path += "c";
+    } else if (character === "[") {
+      const close = pattern.indexOf("]", index + 2);
+      if (close === -1) {
+        path += "[";
+        continue;
+      }
+      const member = [...pattern.slice(index + 1, close)].find(
+        (candidate) => !"!^-".includes(candidate),
+      );
+      path += member ?? "d";
+      index = close;
+    } else if (character === "\\") {
+      index += 1;
+      path += pattern[index] ?? "";
+    } else {
+      path += character;
+    }
+  }
+  return path;
+}
+
+/**
+ * Pass 4 — synthetic BASE COMMITS.
+ *
+ * Every other corpus runs with base and head at the same commit, which is what
+ * makes them cheap and reproducible — and which also makes two whole routing
+ * families unreachable, because both read the DIFF between base and head
+ * rather than the changed-path list:
+ *
+ *   - `classify_root_package_json_changes` has four classes, and an empty diff
+ *     is always `workspace`. Three classes, five dispatch arms and the
+ *     29-command `add_root_tooling_package_script_checks` verb never fire.
+ *   - `lockfile_scoped_importers` reports the importer keys that CHANGED, and
+ *     an empty diff reports none — so the scoped branch is entered with an
+ *     empty importer list and the whole importer→bundle map, including the
+ *     `mark_lockfile_scoped_package` calls that disable scoped tests, is never
+ *     reached.
+ *
+ * So build a base commit that differs from HEAD in exactly one engineered way,
+ * and run both sides against it. The commit is a dangling object written with
+ * `commit-tree`; nothing is checked out and no ref moves.
+ */
+function corpusBase(dir) {
+  const headPackageJson = readFileSync(join(REPO, "package.json"), "utf8");
+  const headLockfile = readFileSync(join(REPO, "pnpm-lock.yaml"), "utf8");
+  const withPackageJson = (mutate) => {
+    const parsed = JSON.parse(headPackageJson);
+    mutate(parsed);
+    return `${JSON.stringify(parsed, null, 2)}\n`;
+  };
+
+  const sets = [
+    {
+      label: "base-class-root-tooling-scripts",
+      paths: ["package.json"],
+      file: "package.json",
+      content: withPackageJson((p) => {
+        // A tooling script pointer and nothing else → root-tooling-scripts.
+        p.scripts["docs:index"] = `${p.scripts["docs:index"]} --parity-probe`;
+      }),
+    },
+    {
+      label: "base-class-package-scripts",
+      paths: ["package.json"],
+      file: "package.json",
+      // A script that is not on the tooling list → package-scripts.
+      content: withPackageJson((p) => {
+        p.scripts["parity-probe-script"] = "true";
+      }),
+    },
+    {
+      label: "base-class-workspace-dev-metadata",
+      paths: ["package.json"],
+      file: "package.json",
+      content: withPackageJson((p) => {
+        p.description = "parity probe";
+      }),
+    },
+    {
+      label: "base-class-workspace",
+      paths: ["package.json"],
+      file: "package.json",
+      content: withPackageJson((p) => {
+        p.packageManager = "pnpm@0.0.0";
+      }),
+    },
+  ];
+
+  // One mappable importer per bundle shape the map holds, plus the two
+  // fail-toward-full shapes.
+  for (const importer of [
+    "ui-dashboard",
+    "indexer-envio",
+    "shared-config",
+    "alerts/infra/oncall-announcer",
+  ]) {
+    const content = mutateImporter(headLockfile, importer);
+    if (content === null) continue;
+    sets.push({
+      label: `base-lockfile-importer-${importer}`,
+      paths: ["pnpm-lock.yaml"],
+      file: "pnpm-lock.yaml",
+      content,
+    });
+  }
+  const rootImporter = mutateImporter(headLockfile, ".");
+  if (rootImporter !== null) {
+    // The root importer maps to no bundle → fail toward the full suite.
+    sets.push({
+      label: "base-lockfile-importer-unmappable-root",
+      paths: ["pnpm-lock.yaml"],
+      file: "pnpm-lock.yaml",
+      content: rootImporter,
+    });
+  }
+  sets.push({
+    label: "base-lockfile-non-importer-section",
+    paths: ["pnpm-lock.yaml"],
+    file: "pnpm-lock.yaml",
+    // A top-level section outside `importers` → the classifier says "full".
+    content: headLockfile.replace(
+      /^lockfileVersion: .*$/m,
+      "lockfileVersion: '0.0'",
+    ),
+  });
+  // A lockfile change alongside a manifest-class path is not lockfile-only, so
+  // it must widen even though the importer diff is perfectly scopable.
+  const straddle = mutateImporter(headLockfile, "ui-dashboard");
+  if (straddle !== null) {
+    sets.push({
+      label: "base-lockfile-with-co-changed-manifest",
+      paths: ["pnpm-lock.yaml", "ui-dashboard/package.json"],
+      file: "pnpm-lock.yaml",
+      content: straddle,
+    });
+  }
+
+  return sets.map(({ label, paths, file, content }) => ({
+    label,
+    paths,
+    baseRef: baseCommitWith(dir, file, content),
+  }));
+}
+
+/**
+ * The head lockfile with one importer's first `specifier:` altered.
+ *
+ * A textual edit, not a YAML round-trip: re-dumping the document could move
+ * something outside `importers` and the classifier would answer "full" for a
+ * reason the probe never intended. Returns null when the importer is absent.
+ */
+function mutateImporter(lockfile, importer) {
+  const lines = lockfile.split("\n");
+  const start = lines.findIndex((line) => line === `  ${importer}:`);
+  if (start === -1) return null;
+  for (let index = start + 1; index < lines.length; index += 1) {
+    // Still inside this importer's block?
+    if (/^ {0,2}\S/.test(lines[index])) return null;
+    const match = /^(\s+specifier: )(.*)$/.exec(lines[index]);
+    if (match === null) continue;
+    lines[index] = `${match[1]}${match[2]}-parity-probe`;
+    return lines.join("\n");
+  }
+  return null;
+}
+
+/**
+ * Pass 5 — a STUB FIXTURE REPOSITORY, where the gate is not in its own tree.
+ *
+ * Four routing effects are fenced behind
+ * `[[ "$script_source_dir" == "$repo_root/scripts" ]]` so the gate's own unit
+ * tests do not inherit them: the two Sentry arms, the symlink groups, and the
+ * unconditional `pnpm tf:test` sweep. Every other corpus here runs the gate on
+ * its own checkout, where that condition is true — so the engine's
+ * `isRealTree: false` branch, which SKIPS whole groups, had no comparison at
+ * all. A branch that only ever removes work is the one to check hardest.
+ *
+ * The fixture is the shape `agent-quality-gate.test.sh` builds: a throwaway git
+ * repository with a root manifest, invoked with the real gate script from this
+ * checkout.
+ */
+function corpusFixture(dir) {
+  const fixture = join(dir, "fixture");
+  const inFixture = (...args) =>
+    execFileSync("git", ["-C", fixture, ...args], { encoding: "utf8" });
+
+  mkdirSync(join(fixture, "ui-dashboard/src"), { recursive: true });
+  mkdirSync(join(fixture, "scripts"), { recursive: true });
+  mkdirSync(join(fixture, "terraform"), { recursive: true });
+  mkdirSync(join(fixture, "docs/notes"), { recursive: true });
+  writeFileSync(
+    join(fixture, "package.json"),
+    `${JSON.stringify(
+      {
+        name: "routing-parity-fixture",
+        private: true,
+        scripts: {
+          "docs:index": "node scripts/context/docs-index.mjs",
+          build: "true",
+        },
+      },
+      null,
+      2,
+    )}\n`,
+  );
+  writeFileSync(
+    join(fixture, "ui-dashboard/src/x.ts"),
+    "export const x = 1;\n",
+  );
+  writeFileSync(join(fixture, "scripts/probe.sh"), "echo probe\n");
+  writeFileSync(join(fixture, "scripts/probe.mjs"), "export const y = 1;\n");
+  writeFileSync(join(fixture, "terraform/main.tf"), "# fixture\n");
+  writeFileSync(join(fixture, "docs/notes/a.md"), "# fixture\n");
+
+  inFixture("init", "-q");
+  inFixture("config", "user.email", "routing-parity@example.invalid");
+  inFixture("config", "user.name", "routing-parity");
+  inFixture("add", "-A");
+  inFixture("commit", "-qm", "fixture");
+
+  // Uncommitted, so `git show HEAD:package.json` and the working tree differ:
+  // that diff is what the root-manifest classifier reads, and it makes the
+  // fixture reach `root-tooling-scripts` without a synthetic base commit.
+  const manifest = JSON.parse(
+    readFileSync(join(fixture, "package.json"), "utf8"),
+  );
+  manifest.scripts["docs:index"] = "node scripts/context/docs-index.mjs --f";
+  writeFileSync(
+    join(fixture, "package.json"),
+    `${JSON.stringify(manifest, null, 2)}\n`,
+  );
+
+  return [
+    { label: "fixture-shell-script", paths: ["scripts/probe.sh"] },
+    { label: "fixture-script-module", paths: ["scripts/probe.mjs"] },
+    { label: "fixture-dashboard-source", paths: ["ui-dashboard/src/x.ts"] },
+    { label: "fixture-terraform", paths: ["terraform/main.tf"] },
+    { label: "fixture-docs-note", paths: ["docs/notes/a.md"] },
+    { label: "fixture-root-manifest", paths: ["package.json"] },
+    {
+      label: "fixture-sentry-suite",
+      paths: ["scripts/sentry/gate/sentry-probe.test.mjs"],
+    },
+    {
+      label: "fixture-multi",
+      paths: ["ui-dashboard/src/x.ts", "scripts/probe.sh", "docs/notes/a.md"],
+    },
+  ].map((set) => ({ ...set, repoRoot: fixture, baseRef: "HEAD" }));
+}
+
+/** A dangling commit whose tree is HEAD's with one top-level path replaced. */
+function baseCommitWith(dir, path, content) {
+  const blobFile = join(dir, "blob");
+  writeFileSync(blobFile, content);
+  const blob = git(["hash-object", "-w", "--path", path, blobFile]).trim();
+  const entries = git(["ls-tree", "HEAD"])
+    .split("\n")
+    .filter((line) => line !== "")
+    .map((line) => {
+      const [meta, name] = line.split("\t");
+      if (name !== path) return line;
+      return `${meta.split(" ")[0]} blob ${blob}\t${name}`;
+    });
+  const tree = git(["mktree"], `${entries.join("\n")}\n`).trim();
+  return git([
+    "commit-tree",
+    tree,
+    "-m",
+    "routing-parity synthetic base",
+  ]).trim();
+}
+
 const argv = process.argv.slice(2);
 const option = (name, fallback) => {
   const index = argv.indexOf(name);
   return index === -1 ? fallback : argv[index + 1];
 };
-const limit = option("--limit", null);
-const mutate = argv.includes("--mutate");
 
-const paths = corpusTracked(limit === null ? null : Number(limit));
+const fail = (message) => {
+  console.error(`routing-parity: ${message}`);
+  process.exit(2);
+};
+
+/**
+ * A limit that is not a positive integer is a REFUSAL, not a default.
+ *
+ * `--limit` with nothing after it makes `Number(undefined)` NaN, every
+ * comparison against NaN is false, and the corpus comes out empty — so the
+ * harness would compare nothing, report "0 differed" and exit 0. That is the
+ * "All 0 …" failure this harness was written to prevent, reproduced inside the
+ * harness itself.
+ */
+function parseLimit(raw) {
+  if (raw === null) return null;
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    fail(`--limit requires a positive integer, got ${JSON.stringify(raw)}`);
+  }
+  return value;
+}
+
+const CORPORA = new Set(["tracked", "multi", "synthetic", "base", "fixture"]);
+const limit = parseLimit(option("--limit", null));
+const mutate = argv.includes("--mutate");
+const defaultBase = option("--base", "HEAD");
+if (defaultBase === undefined) fail("--base requires a ref");
+const corpus = argv.includes("--pass2")
+  ? "multi"
+  : (option("--corpus", "tracked") ?? "");
+if (!CORPORA.has(corpus)) {
+  fail(`--corpus must be one of ${[...CORPORA].join(", ")}, got "${corpus}"`);
+}
+
 const dir = mkdtempSync(join(tmpdir(), "routing-parity-"));
 let differences = 0;
 let compared = 0;
 
-const pass2 = argv.includes("--pass2");
-const work = pass2
-  ? corpusMultiPath(corpusTracked(null))
-  : paths.map((path) => ({ label: path, paths: [path] }));
+/** The work list: one entry per comparison, each with the base it runs at. */
+function buildWork() {
+  if (corpus === "multi") return corpusMultiPath(corpusTracked(null));
+  if (corpus === "synthetic") return corpusSynthetic(corpusTracked(null));
+  if (corpus === "base") return corpusBase(dir);
+  if (corpus === "fixture") return corpusFixture(dir);
+  return corpusTracked(limit).map((path) => ({ label: path, paths: [path] }));
+}
 
 try {
-  for (const { label, paths: set } of work) {
+  for (const { label, paths: set, baseRef, repoRoot } of buildWork()) {
     if (set.length === 0) continue;
-    const { stdout, pathsFile } = runGate(set, dir);
+    const base = baseRef ?? defaultBase;
+    const root = repoRoot ?? REPO;
+    const { stdout, pathsFile } = runGate(set, dir, base, root);
     const gate = parseGateStdout(stdout);
     // The gate's normalized set, not the harness's raw one.
-    const engine = await runEngine(gate.changedPaths, pathsFile);
+    const engine = await runEngine(gate.changedPaths, pathsFile, base, root);
     if (mutate) engine.commands.shift();
     const problems = diff(label, gate, engine);
     compared += 1;
@@ -321,7 +730,13 @@ try {
   rmSync(dir, { recursive: true, force: true });
 }
 
-console.log(`\ncompared ${compared} single-path sets; ${differences} differed`);
+console.log(`\ncompared ${compared} ${corpus} sets; ${differences} differed`);
+// A harness that compared nothing has proven nothing, whatever the difference
+// count says.
+if (compared === 0) {
+  console.log("EMPTY CORPUS — this run proves nothing.");
+  process.exit(2);
+}
 if (mutate) {
   console.log(
     differences > 0

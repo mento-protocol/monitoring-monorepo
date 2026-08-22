@@ -29,10 +29,10 @@
 
 import { execFileSync } from "node:child_process";
 import {
-  existsSync,
   mkdtempSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -118,6 +118,15 @@ const LOCKFILE_IMPORTER_BUNDLES = {
   },
 };
 
+/** `[[ -f <path> ]]`: a regular file, following symlinks. */
+const isRegularFile = (path) => {
+  try {
+    return statSync(path).isFile();
+  } catch {
+    return false;
+  }
+};
+
 /** Workspace-manifest-class paths whose presence disqualifies lockfile scoping. */
 const MANIFEST_CLASS = [
   /^package\.json$/,
@@ -149,7 +158,9 @@ function makeLockfileRouter(changedPaths, scriptSourceDir) {
     );
 
     const classifier = join(scriptSourceDir, "gate", "lockfile-scope.mjs");
-    if (!existsSync(classifier)) {
+    // `[[ ! -f "$lockfile_scope_path" ]]` — a directory by that name is not a
+    // classifier the gate could run either.
+    if (!isRegularFile(classifier)) {
       // Fail-toward-full is right for an ambiguous lockfile and WRONG for a
       // classifier the gate cannot find: that failure is invisible, and every
       // lockfile change would silently widen while the run read as slow.
@@ -201,7 +212,7 @@ function scopedImporters(facts, classifier) {
   const base = gitShow(facts, `${facts.baseRef}:pnpm-lock.yaml`);
   if (base === null) return null;
   const head =
-    facts.headRef === "HEAD" && facts.pathExistsInWorktree("pnpm-lock.yaml")
+    facts.headRef === "HEAD" && facts.pathIsFile("pnpm-lock.yaml")
       ? readFileSync(join(facts.repoRoot, "pnpm-lock.yaml"))
       : gitShow(facts, `${facts.headRef}:pnpm-lock.yaml`);
   if (head === null) return null;
