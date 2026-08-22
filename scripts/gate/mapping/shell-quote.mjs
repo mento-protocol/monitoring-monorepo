@@ -16,7 +16,7 @@
  *   unescaped   A-Z a-z 0-9 and . / - _ # ~ = : @ % +   (and any byte >= 0x80)
  *   escaped     space ' " $ * [ ] ( ) & ; | \ ! , ^ { } < > ?
  *   empty       ''
- *   control     ANSI-C form, e.g. a newline gives $'a\nb'
+ *   control     ANSI-C form, e.g. a newline gives $'a\nb' and ESC gives $'a\Eb'
  *
  * `#` and `~` are NOT escaped mid-string, which is the detail a hand-written
  * "escape anything unusual" implementation gets wrong; `,` and `^` ARE, which
@@ -50,7 +50,15 @@ const tildeIsAmbiguous = (value, index) =>
   value[index] === "~" &&
   (index === 0 || value[index - 1] === "=" || value[index - 1] === ":");
 
-/** The ANSI-C escapes bash emits inside `$'…'`. */
+/**
+ * The ANSI-C escapes bash emits inside `$'…'`.
+ *
+ * ESC is the one that is not guessable from the C escape table: bash's
+ * `ansic_quote` carries `case ESC: c = 'E'`, so 0x1b comes back as `\E` rather
+ * than as the octal `\033` every other unnamed control character gets.
+ * Measured on 3.2.57 and 5.3.15 — both agree. A byte >= 0x80 is NOT octal-
+ * escaped in this mode; it passes through, also measured on both.
+ */
 const ANSI_C = new Map([
   ["\x07", "\\a"],
   ["\b", "\\b"],
@@ -59,6 +67,7 @@ const ANSI_C = new Map([
   ["\r", "\\r"],
   ["\t", "\\t"],
   ["\v", "\\v"],
+  ["\x1b", "\\E"],
   ["\\", "\\\\"],
   ["'", "\\'"],
 ]);

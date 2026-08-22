@@ -105,6 +105,23 @@ const SUBJECTS = [
   "",
   "ui-dashboard/src/app/pool/[poolId]/page.tsx",
   "weird name with spaces.ts",
+  // The ANSI-C branch. Without these the whole `$'…'` form was asserted by a
+  // header comment and nothing else — which is how `\E` stayed wrong: bash
+  // gives ESC its own escape, where every other unnamed control character
+  // becomes octal.
+  "a\tb",
+  "a\x1bb",
+  "\x1b",
+  "a\x7fb",
+  "a\x01b",
+  "a\nb",
+  "a\rb",
+  "a\x07b",
+  "a\vb",
+  // A control character next to a byte >= 0x80: the pass-through half of the
+  // same branch, which is only visible once the word is in ANSI-C form.
+  "a\x1bé",
+  "aéb",
 ];
 
 const interpreters = bashInterpreters();
@@ -115,15 +132,18 @@ test("at least one bash was found to check against", () => {
 
 for (const [bash, version] of interpreters) {
   test(`shellQuote matches printf %q on ${bash} (${version})`, () => {
-    // One spawn for the whole corpus: the subjects go in on stdin, one per
-    // line, and come back `%q`-quoted in the same order.
-    const script = `
-      while IFS= read -r line; do printf '%q\\n' "$line"; done
-    `;
-    const output = execFileSync(bash, ["-c", script], {
-      input: `${SUBJECTS.join("\n")}\n`,
-      encoding: "utf8",
-    });
+    // One spawn for the whole corpus, with the subjects as POSITIONAL
+    // ARGUMENTS rather than stdin lines. The line-oriented `read -r` form this
+    // replaces could not carry a tab, an ESC or a newline, so it silently
+    // excluded every subject that reaches the ANSI-C branch.
+    //
+    // Splitting the output on newlines stays safe: `%q` escapes control
+    // characters, so no quoted form can contain a raw newline.
+    const output = execFileSync(
+      bash,
+      ["-c", 'printf "%q\\n" "$@"', bash, ...SUBJECTS],
+      { encoding: "utf8" },
+    );
     const expected = output.split("\n").slice(0, SUBJECTS.length);
 
     const disagreements = [];

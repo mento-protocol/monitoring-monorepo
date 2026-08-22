@@ -603,8 +603,14 @@ function corpusFixture(dir) {
   inFixture("init", "-q");
   inFixture("config", "user.email", "routing-parity@example.invalid");
   inFixture("config", "user.name", "routing-parity");
+  // Signing and hooks are the developer's, not this probe's. A global
+  // `commit.gpgsign` would ask a pinentry for a throwaway fixture commit —
+  // inside the outer gate run, since the mapping arm schedules this corpus —
+  // and a global `core.hooksPath` or `init.templateDir` would run their hooks
+  // against a repository that is not their work.
+  inFixture("config", "commit.gpgsign", "false");
   inFixture("add", "-A");
-  inFixture("commit", "-qm", "fixture");
+  inFixture("commit", "--no-verify", "-qm", "fixture");
 
   // Uncommitted, so `git show HEAD:package.json` and the working tree differ:
   // that diff is what the root-manifest classifier reads, and it makes the
@@ -681,19 +687,32 @@ function corpusSymlink() {
   return sets;
 }
 
-/** Create the symlink a `symlink` corpus set needs, and hand back its undo. */
+/**
+ * Create the symlink a `symlink` corpus set needs, and hand back its undo.
+ *
+ * SETUP CLEANS UP AFTER ITSELF. The caller only receives the undo once every
+ * step has succeeded, so a throw in between — a filesystem or sandbox that
+ * refuses `symlink(2)`, a transient `EEXIST` — would otherwise leave a probe
+ * directory at the root of the tree the outer gate is checking. Everything
+ * here is removed before the throw is re-raised.
+ */
 function withSymlink({ dir, link }) {
   const targetPath = join(REPO, dir);
   const linkPath = join(REPO, link);
-  rmSync(linkPath, { recursive: true, force: true });
-  rmSync(targetPath, { recursive: true, force: true });
-  mkdirSync(targetPath, { recursive: true });
-  writeFileSync(join(targetPath, "sentry-probe.test.mjs"), "// probe\n");
-  symlinkSync(targetPath, linkPath);
-  return () => {
+  const undo = () => {
     rmSync(linkPath, { recursive: true, force: true });
     rmSync(targetPath, { recursive: true, force: true });
   };
+  undo();
+  try {
+    mkdirSync(targetPath, { recursive: true });
+    writeFileSync(join(targetPath, "sentry-probe.test.mjs"), "// probe\n");
+    symlinkSync(targetPath, linkPath);
+  } catch (error) {
+    undo();
+    throw error;
+  }
+  return undo;
 }
 
 /** A dangling commit whose tree is HEAD's with one top-level path replaced. */
@@ -710,8 +729,11 @@ function baseCommitWith(dir, path, content) {
       return `${meta.split(" ")[0]} blob ${blob}\t${name}`;
     });
   const tree = git(["mktree"], `${entries.join("\n")}\n`).trim();
+  // `--no-gpg-sign`: this is a dangling probe object in the developer's REAL
+  // repository, and `commit-tree` honours `commit.gpgsign` too.
   return git([
     "commit-tree",
+    "--no-gpg-sign",
     tree,
     "-m",
     "routing-parity synthetic base",
