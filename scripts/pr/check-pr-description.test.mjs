@@ -55,9 +55,10 @@ test("required workflow installs trusted validator dependencies before validatio
   assert.notEqual(install, -1, "trusted dependency install step is present");
   assert.notEqual(validate, -1, "validator step is present");
   assert.ok(install < validate, "trusted dependencies install first");
+  const installStep = workflow.slice(install, validate);
   assert.match(
-    workflow,
-    /working-directory: trusted-base[\s\S]*pnpm --filter @mento-protocol\/monitoring-monorepo install[\s\S]*--frozen-lockfile --ignore-scripts/,
+    installStep,
+    /working-directory: trusted-base[\s\S]*pnpm --filter @mento-protocol\/monitoring-monorepo install\s+--frozen-lockfile --ignore-scripts/,
   );
 });
 
