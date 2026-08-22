@@ -262,7 +262,7 @@ export class Facts {
   /**
    * How the root `package.json` changed, as one of the four closed classes.
    *
-   * Anything unreadable or unparseable is `workspace`, which is the widest
+   * Anything unreadable or unparsable is `workspace`, which is the widest
    * answer — the full suite.
    */
   rootPackageJsonClass() {
