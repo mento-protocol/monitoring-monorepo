@@ -68,6 +68,17 @@
  * and their bounding, are in the workflow's containment banner and in
  * docs/notes/sentry-triage-pipeline.md.
  *
+ * A DEAD BROKER IS NOT A VERDICT (issue #1956), and this file is not where that
+ * is decided. `sentry-triage-broker-guard.mjs` owns the liveness fence and the
+ * public-log redactor; read its header for the mechanism and its limits. What
+ * matters HERE is only the call order: `assertBrokerAlive` runs LAST, in the
+ * instant before the body is handed to `gh`, because a liveness answer is worth
+ * exactly as much as it is fresh. A broker that dies mid-run otherwise leaves
+ * the agent reading ECONNREFUSED and reporting `needs-human` — a verdict about
+ * the TOOLING that the deterministic `verdict` job cannot tell apart from a
+ * judgement about the ISSUE. Withholding the comment is what makes that round
+ * fail loudly instead of settling the stub.
+ *
  * THE BODY NEVER TOUCHES THE FILESYSTEM. It goes to `gh --body-file -` on the
  * child's stdin. An earlier version validated the body, wrote it to a
  * predictable path under `$RUNNER_TEMP`, and let `gh` read it back; the agent
@@ -90,7 +101,32 @@ import {
   VERDICT_MARKER,
 } from "./sentry-triage-project-core.mjs";
 
+import {
+  assertBrokerAlive,
+  probeBrokerByPid,
+  redactSentryPaths,
+} from "./sentry-triage-broker-guard.mjs";
+
 export { AGENT_COMMENT_MARKER, VERDICT_MARKER };
+
+/** The broker guard's surface, re-exported so the marker and pid names still
+ * have ONE home from this module's point of view — the workflow's shape test
+ * binds its literal file names to these constants. The mechanism itself lives
+ * in `sentry-triage-broker-guard.mjs`; this file owns only "may this body be
+ * posted, and to which issue". */
+export {
+  assertBrokerAlive,
+  BROKER_DOWN_FILE_RELATIVE,
+  brokerDownFilePath,
+  BROKER_PID_FILE_RELATIVE,
+  brokerPidFilePath,
+  BrokerDownError,
+  isZombieProcStatus,
+  probeBrokerByPid,
+  redactSentryPaths,
+  REDACTED_SEGMENT,
+  SENTRY_ROUTES,
+} from "./sentry-triage-broker-guard.mjs";
 
 /** The authoritative write target, written by a trusted workflow step before
  * the agent runs. Path is `$RUNNER_TEMP` + this fixed relative path — never an
@@ -358,10 +394,23 @@ export async function postAgentComment({
   env,
   runGh = runGhDefault,
   readPinnedTarget = readPinnedTargetDefault,
+  // Left undefined rather than named here: the marker reader is private to
+  // sentry-triage-broker-guard.mjs, so assertBrokerAlive applies its own
+  // default. Tests still inject one through this seam.
+  readBrokerDown = undefined,
+  probeBroker = probeBrokerByPid,
 }) {
   const { body } = parseArgs(argv);
+  // resolveTarget first: it is what proves RUNNER_TEMP still resolves to the
+  // trusted directory, and both broker files are read from that same root.
   const { issue, repo } = resolveTarget(env, readPinnedTarget);
   assertBodyPostable(body, collectSecretValues(env));
+  // LAST, immediately before publication. The liveness answer is only as good
+  // as it is fresh, so nothing slow may sit between deciding the broker is up
+  // and handing the body to gh. The residual window is the gh call itself, and
+  // a broker that dies inside it took nothing away: every read behind this
+  // verdict already succeeded.
+  await assertBrokerAlive(env, readBrokerDown, probeBroker);
 
   const stdout = await runGh(
     ["issue", "comment", issue, "--repo", repo, "--body-file", "-"],
@@ -388,7 +437,21 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     // agent step stays green when a tool call fails, and the run log is the
     // audit trail for an attempted exfiltration or fence probe. Annotations are
     // single-line, so the usage block follows as plain stderr the agent reads.
-    process.stderr.write(`::error::sentry-triage-agent-comment: ${message}\n`);
+    //
+    // Everything written here reaches the run log of a PUBLIC repository, so it
+    // goes through redactSentryPaths first — see there for why the broker's own
+    // log is agent-readable but must not be published verbatim.
+    process.stderr.write(
+      `::error::sentry-triage-agent-comment: ${redactSentryPaths(message)}\n`,
+    );
+    // The broker watchdog's record, log included, follows as plain stderr. This
+    // is the only surface inside the agent step that reaches the job log, so a
+    // refusal that withheld it would be a silent one (#1956).
+    const raw = err instanceof Error ? err.detail : undefined;
+    const detail = typeof raw === "string" ? redactSentryPaths(raw) : undefined;
+    if (typeof detail === "string" && detail.trim() !== "") {
+      process.stderr.write(detail.endsWith("\n") ? detail : `${detail}\n`);
+    }
     process.stderr.write(usage());
     process.exitCode = 1;
   });

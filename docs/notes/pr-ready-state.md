@@ -110,9 +110,14 @@ stuck bot review verdict: dismiss it with
 
 The JSON projections expose `gates.codeRabbitReviewSignal` with `missing`,
 `requested`, `stale`, `reviewed`, or `not_applicable`. A `reviewed` signal
-requires a CodeRabbit review body with its `**Run ID**` marker and a review
-commit equal to the full current head. Empty review records are reply-only
-machinery and do not count. A head-bound closeout request uses this exact body:
+requires either a CodeRabbit review body with its `**Run ID**` marker and a
+review commit equal to the full current head, or a trusted CodeRabbit top-level
+clean-run block enclosed by `<!-- recent_review_start -->` and
+`<!-- recent_review_end -->`. The clean-run block must contain the Run ID and a
+reviewed commit range that ends at the full current head. Its comment update
+time must be at or after the head update time. Empty review records, skipped
+runs, and rate-limit notices do not count. A head-bound closeout request uses
+this exact body:
 
 ```text
 @coderabbitai review
@@ -363,10 +368,14 @@ Field expectations:
   top-level result. `approved` means the final PR-description `+1` gate is
   present. `stale` means only older-head Codex signals exist.
 - `codeRabbitReviewSignal`: current-head CodeRabbit review state. Values are
-  `missing`, `requested`, `stale`, `reviewed`, and `not_applicable`. Only a
+  `missing`, `requested`, `stale`, `reviewed`, and `not_applicable`. A
   CodeRabbit review with a run marker and review commit equal to the current
-  head is `reviewed`; empty reply-only reviews do not count. A head-bound
-  request is `requested` until a real run lands.
+  head is `reviewed`. A trusted top-level clean-run block also counts when
+  `<!-- recent_review_start -->` and `<!-- recent_review_end -->` enclose it, it
+  contains a Run ID, its full commit range ends at the current head, and its
+  comment update time is at or after the current head update time. Empty
+  reply-only reviews, skipped runs, and rate-limit notices do not count. A
+  head-bound request is `requested` until a real run lands.
 - `requiredStatusContexts[]`: required check contexts from classic branch
   protection or branch rulesets. Ruleset-derived entries include status-check
   rules and required-workflow rules when their check names are present in the

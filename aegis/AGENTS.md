@@ -3,7 +3,7 @@ title: Aegis Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-29
+last_verified: 2026-08-21
 doc_type: agent-instructions
 scope: aegis
 review_interval_days: 90
@@ -53,6 +53,13 @@ address — never retry the fallback and never increment
 `view_call_rpc_errors_total`; only transport failure of every configured
 endpoint increments it. Keep that counter's labels bounded to `contract`,
 `functionName`, and `chain`; never add dynamic strings.
+
+Keep one active refresh per metric template and a global maximum of 25 active
+RPC call tasks. A task holds its slot across the primary and optional fallback
+attempt. The initial refresh must run asynchronously so endpoint timeouts do
+not block HTTP startup. Keep RPC failure logs bounded to one concise line per contract,
+function, chain, endpoint outcome, and minute. Do not log viem error objects or
+request payloads.
 
 Verify a new `fallbackHttpRpcUrl` under the chain's real concurrent polling
 burst — an `eth_blockNumber` smoke test does not expose burst throttling. The

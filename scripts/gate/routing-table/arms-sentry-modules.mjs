@@ -136,6 +136,7 @@ export const SENTRY_MODULE_ARMS = [
     patterns: [
       "scripts/sentry/triage/sentry-triage-agent-comment.mjs",
       "scripts/sentry/triage/sentry-triage-agent-comment.test.mjs",
+      "scripts/sentry/triage/sentry-triage-broker-guard.mjs",
     ],
     effects: [
       {
