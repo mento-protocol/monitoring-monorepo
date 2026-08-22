@@ -82,8 +82,9 @@ same PR, except the `agent-autoreview.sh` feedback-runtime pins below.
   keys are exact repo-relative paths, reconciled against `findSentrySuites()`
   by set equality both ways. A moved or renamed suite fails the gate closed.
   `sentry/fixture-scan-canary.test.mjs` re-pins four; ADR 0068 has the policy.
-- **Enumerated workflow paths-filters.** 22 of 32 files in
-  `.github/workflows/` pin a `scripts/` path. `ci.yml` (`autoreviewSuite`,
+- **Enumerated workflow pins.** 22 of 32 files in
+  `.github/workflows/` pin a `scripts/` path, and
+  `sentry-triage-agent.yml` stages a copy list. `ci.yml` (`autoreviewSuite`,
   `autoreviewRootRuntime`, `versionSkew`; `rootScripts` is the recursive
   `scripts/**`), `infra.yml`, `alerts-rules.yml`, `peg-policy-publication.yml`,
   and `schema-diff.yml` list individual files. The three Terraform filters are
@@ -98,8 +99,8 @@ same PR, except the `agent-autoreview.sh` feedback-runtime pins below.
   pins exact `scripts/` paths per stack. The broad workflow admission boundary
   covers the directory; `pnpm tf:test` enforces subsumption.
 - **Trusted-validator probes.** `pr-description.yml` runs the validator from the
-  PR's base ref via the base branch **name**, so it always resolves to the base
-  branch's current tip — never a snapshot from when a PR branched. One probe
+  PR's base ref via the base branch **name**, so it resolves to that branch's
+  tip, never a PR-time snapshot. One probe
   path is enough once the target path is live on the base branch (issue 1904);
   a move still needs a temporary dual probe for the commit that performs it.
   ADR 0064 has the failure mode.
