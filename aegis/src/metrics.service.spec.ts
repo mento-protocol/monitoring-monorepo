@@ -135,13 +135,38 @@ describe('MetricsService', () => {
     ).toThrow('No metrics configured');
   });
 
-  it('refreshes every known template during module initialization', async () => {
+  it('starts the initial refresh without blocking module initialization', async () => {
+    let finishRefresh!: (value: void[]) => void;
+    const pendingRefresh = new Promise<void[]>((resolve) => {
+      finishRefresh = resolve;
+    });
     const service = new MetricsService(makeConfigService(), makeQueryService());
-    const refreshAll = jest.spyOn(service, 'refreshAll').mockResolvedValue([]);
+    const refreshAll = jest
+      .spyOn(service, 'refreshAll')
+      .mockReturnValue(pendingRefresh);
 
-    await service.onModuleInit();
+    expect(service.onModuleInit()).toBeUndefined();
 
     expect(refreshAll).toHaveBeenCalledTimes(1);
+    finishRefresh([]);
+    await pendingRefresh;
+  });
+
+  it('logs an initial refresh rejection without rejecting module initialization', async () => {
+    const loggerError = jest
+      .spyOn(Logger.prototype, 'error')
+      .mockImplementation(() => undefined);
+    const service = new MetricsService(makeConfigService(), makeQueryService());
+    jest
+      .spyOn(service, 'refreshAll')
+      .mockRejectedValue(new Error('startup refresh failed'));
+
+    expect(service.onModuleInit()).toBeUndefined();
+    await Promise.resolve();
+
+    expect(loggerError).toHaveBeenCalledWith(
+      'Initial metric refresh failed: startup refresh failed',
+    );
   });
 
   it('propagates successful query values into metric gauges', async () => {
@@ -196,5 +221,30 @@ describe('MetricsService', () => {
     ).rejects.toThrow(
       'Unknown metric template 00000000-0000-4000-8000-000000000099',
     );
+  });
+
+  it('coalesces overlapping refreshes for the same template', async () => {
+    let releaseQueries!: () => void;
+    const queriesCanFinish = new Promise<void>((resolve) => {
+      releaseQueries = resolve;
+    });
+    const queryService = makeQueryService();
+    queryService.query.mockImplementation(async () => {
+      await queriesCanFinish;
+      return 1;
+    });
+    const service = new MetricsService(makeConfigService(), queryService);
+
+    const firstRefresh = service.refreshTemplate(templateId);
+    const overlappingRefresh = service.refreshTemplate(templateId);
+
+    expect(overlappingRefresh).toBe(firstRefresh);
+    expect(queryService.query).toHaveBeenCalledTimes(2);
+
+    releaseQueries();
+    await Promise.all([firstRefresh, overlappingRefresh]);
+
+    await service.refreshTemplate(templateId);
+    expect(queryService.query).toHaveBeenCalledTimes(4);
   });
 });

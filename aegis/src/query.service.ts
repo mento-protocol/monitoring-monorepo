@@ -13,6 +13,8 @@ import {
 import * as chains from 'viem/chains';
 import { ChainConfig } from './config';
 import { Metric } from './metric';
+import { AsyncSemaphore } from './async-semaphore';
+import { conciseErrorMessage, KeyedLogRateLimiter } from './rpc-log';
 
 const makeChain = (chain: ChainConfig): chains.Chain => ({
   id: 0,
@@ -28,8 +30,8 @@ const makeChain = (chain: ChainConfig): chains.Chain => ({
   },
 });
 
-const errMsg = (err: unknown): string =>
-  err instanceof Error ? err.message : String(err);
+export const MAX_CONCURRENT_RPC_CALLS = 25;
+const RPC_LOG_INTERVAL_MS = 60_000;
 
 // JSON-RPC error code 3 = execution reverted (EIP-1474 / Ethereum yellow paper).
 const EXECUTION_REVERT_CODE = 3;
@@ -110,6 +112,8 @@ const isTransportError = (err: unknown): boolean => {
 @Injectable()
 export class QueryService {
   private readonly logger = new Logger(QueryService.name);
+  private readonly querySlots = new AsyncSemaphore(MAX_CONCURRENT_RPC_CALLS);
+  private readonly rpcLogLimiter = new KeyedLogRateLimiter(RPC_LOG_INTERVAL_MS);
   chains: Record<string, ChainConfig> = {};
   clients: Record<string, PublicClient> = {};
   fallbackClients: Record<string, PublicClient | undefined> = {};
@@ -177,6 +181,23 @@ export class QueryService {
     });
   }
 
+  private rateLimitedLog(
+    level: 'error' | 'warn',
+    key: string,
+    message: string,
+  ): void {
+    const suppressed = this.rpcLogLimiter.take(`${level}:${key}`);
+    if (suppressed === undefined) {
+      return;
+    }
+
+    const suffix =
+      suppressed > 0
+        ? ` ${suppressed} matching failures were suppressed in the previous rate-limit window.`
+        : '';
+    this.logger[level](`${message}${suffix}`);
+  }
+
   /**
    * Attempts the primary RPC call, then the fallback if available.
    * Returns the raw on-chain data or throws when all endpoints fail.
@@ -203,14 +224,18 @@ export class QueryService {
 
     const fallbackClient = this.fallbackClients[metric.chain];
     if (fallbackClient && isTransportError(primaryError)) {
-      this.logger.warn(
-        `Primary RPC failed for ${label}, retrying with fallback: ${errMsg(primaryError)}`,
+      this.rateLimitedLog(
+        'warn',
+        `primary:${label}`,
+        `Primary RPC failed for ${label}; retrying the fallback: ${conciseErrorMessage(primaryError)}`,
       );
       try {
         return await this.executeCall(fallbackClient, metric, chain, args);
       } catch (fallbackError) {
-        this.logger.error(
-          `Both primary and fallback RPC failed for ${label}. Primary: ${errMsg(primaryError)}. Fallback: ${errMsg(fallbackError)}`,
+        this.rateLimitedLog(
+          'error',
+          `terminal:primary-and-fallback:${label}`,
+          `Both RPC endpoints failed for ${label}. Primary: ${conciseErrorMessage(primaryError)} Fallback: ${conciseErrorMessage(fallbackError)}`,
         );
         throw fallbackError;
       }
@@ -218,7 +243,11 @@ export class QueryService {
 
     // No usable fallback (none configured, or the error is deterministic and
     // would just reproduce) — re-throw the primary error for the caller.
-    this.logger.error(primaryError);
+    this.rateLimitedLog(
+      'error',
+      `terminal:primary-only:${label}`,
+      `RPC call failed for ${label}: ${conciseErrorMessage(primaryError)}`,
+    );
     throw primaryError;
   }
 
@@ -244,39 +273,45 @@ export class QueryService {
     }
     const args = metric.args.map((arg) => chain.vars[arg] ?? arg);
 
-    const timer = this.queryTime.startTimer({
-      contract: contractName,
-      functionName,
-      chain: metric.chain,
-    });
+    return this.querySlots.run(async () => {
+      const timer = this.queryTime.startTimer({
+        contract: contractName,
+        functionName,
+        chain: metric.chain,
+      });
 
-    let data: unknown;
-    try {
-      data = await this.fetchWithFallback(client, metric, chain, args);
-    } catch (rpcError) {
-      // rpcErrors counts only transport-level failures (endpoint down/slow,
-      // all endpoints exhausted). Deterministic call failures (revert, bad
-      // ABI/args) and parse errors below are intentionally excluded — they
-      // are not RPC outages and would mislabel a config/protocol problem.
-      if (isTransportError(rpcError)) {
-        this.rpcErrors.inc({
-          contract: contractName,
-          functionName,
-          chain: metric.chain,
-        });
+      let data: unknown;
+      try {
+        data = await this.fetchWithFallback(client, metric, chain, args);
+      } catch (rpcError) {
+        // rpcErrors counts only transport-level failures (endpoint down/slow,
+        // all endpoints exhausted). Deterministic call failures (revert, bad
+        // ABI/args) and parse errors below are intentionally excluded — they
+        // are not RPC outages and would mislabel a config/protocol problem.
+        if (isTransportError(rpcError)) {
+          this.rpcErrors.inc({
+            contract: contractName,
+            functionName,
+            chain: metric.chain,
+          });
+        }
+        timer({ status: 'error' });
+        return undefined;
       }
-      timer({ status: 'error' });
-      return undefined;
-    }
 
-    try {
-      const value = metric.parse(data, contractName, functionName);
-      timer({ status: 'success' });
-      return value;
-    } catch (parseError) {
-      this.logger.error(parseError);
-      timer({ status: 'error' });
-      return undefined;
-    }
+      try {
+        const value = metric.parse(data, contractName, functionName);
+        timer({ status: 'success' });
+        return value;
+      } catch (parseError) {
+        this.rateLimitedLog(
+          'error',
+          `parse:${contractName}.${functionName} on ${metric.chain}`,
+          `Failed to parse ${contractName}.${functionName} on ${metric.chain}: ${conciseErrorMessage(parseError)}`,
+        );
+        timer({ status: 'error' });
+        return undefined;
+      }
+    });
   }
 }
