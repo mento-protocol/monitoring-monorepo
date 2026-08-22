@@ -318,7 +318,7 @@ export const AGENT_MODULE_ARMS = [
     ],
   },
   {
-    why: "The Node mapping engine (ADR 0069, D5b) and the parity harness that proves it against these arms. Nothing consults the engine yet — the `case` arms are still the routing that runs — so this routes the engine's own checks rather than the gate self-test. When the gate is flipped to read the engine's plan, this arm gains the self-test the way the routing-table arm already has it.",
+    why: "The Node mapping engine (ADR 0069, D5b) and the parity harness that proves it against these arms. Nothing consults the engine yet — the `case` arms are still the routing that runs — so this routes the engine's own checks rather than the gate self-test. The quoting test alone would leave routing, facts, verbs, ordering, compaction and scoped-test selection unchecked (Codex 3838109001), so the two CHEAP parity corpora run too: `fixture` (2s) covers the branch that skips repository-specific groups, and `multi` (57s) is where the four whole-set post-passes are actually exercised. The tracked, synthetic and base corpora are a 35-minute run and stay a per-PR step. When the gate is flipped to read the engine's plan the harness is deleted, and this arm gains the self-test the way the routing-table arm already has it (issue 2020).",
     patterns: [
       "scripts/gate/mapping.mjs",
       "scripts/gate/mapping/*.mjs",
@@ -328,6 +328,16 @@ export const AGENT_MODULE_ARMS = [
       {
         command: "node --test scripts/gate/mapping/shell-quote.test.mjs",
         reason: "gate mapping engine changed",
+      },
+      {
+        command: "node scripts/gate/routing-parity.mjs --corpus fixture",
+        reason:
+          "gate mapping engine changed (parity against the live arms, fixture repository)",
+      },
+      {
+        command: "node scripts/gate/routing-parity.mjs --corpus multi",
+        reason:
+          "gate mapping engine changed (parity against the live arms, whole-set post-passes)",
       },
     ],
   },
