@@ -18,6 +18,7 @@
     "deploy:dashboard": "./scripts/deploy/deploy-dashboard.sh",
     "agent:quality-gate": "./scripts/agent-quality-gate.sh",
     "agent:quality-gate:test": "bash scripts/agent-quality-gate.test.sh",
+    "gate:routing-table:test": "node --test scripts/gate/routing-table/*.test.mjs",
     "agent:prewarm": "node scripts/gate/agent-prewarm.mjs",
     "agent:prewarm:test": "node scripts/gate/agent-prewarm.test.mjs",
     "agent:review-materiality": "node scripts/pr/review-materiality.mjs",

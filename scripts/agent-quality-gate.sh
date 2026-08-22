@@ -3691,6 +3691,15 @@ while IFS= read -r path; do
       case "$path" in
         scripts/agent-quality-gate.sh|scripts/agent-quality-gate.test.sh|scripts/gate/run-handles.sh)
           add_command "pnpm agent:quality-gate:test" "agent quality gate mapping changed"
+          # The routing arms below and the routing table in
+          # scripts/gate/routing-table/ are two copies of the same routing, and
+          # gate-equality.test.mjs is what holds them together. It has to run in
+          # BOTH drift directions. The table's own arm covers a table-only edit;
+          # this covers the commoner one — somebody adds or reorders an arm here
+          # and does not touch the data. Without it the table goes stale exactly
+          # where nothing reds, which is the failure this conversion exists to
+          # end (ADR 0069).
+          add_command "pnpm gate:routing-table:test" "gate routing arms must still match the routing table"
           ;;
         scripts/agent-autoreview.sh|scripts/agent-autoreview.test.sh)
           add_command "pnpm agent:autoreview:test" "agent autoreview adapter changed"
@@ -3832,6 +3841,28 @@ while IFS= read -r path; do
           ;;
         scripts/gate/agent-prewarm.mjs|scripts/gate/agent-prewarm.test.mjs)
           add_command "pnpm agent:prewarm:test" "agent prewarm helper changed"
+          ;;
+        # The routing table as data (ADR 0069). Its own suite owns the schema,
+        # ADR 0064's pairing rule, path staleness, the bash-oracle proof of the
+        # pattern compiler, and the equality check against the `case` arms in
+        # this file. The gate self-test rides along because every module here is
+        # in `implementation_signature()`: a change to one moves the freshness
+        # signature, which is gate behaviour whether or not the gate reads the
+        # table yet.
+        scripts/gate/routing-table/*.mjs)
+          add_command "pnpm gate:routing-table:test" "gate routing table changed"
+          add_command "pnpm agent:quality-gate:test" "gate routing table is an implementation-signature input"
+          ;;
+        scripts/sentry/ci-wiring/check-sentry-suites-in-ci-gate-extract.mjs)
+          # The bash-from-Node machinery. Its own suite already runs, because
+          # check-sentry-suites-in-ci.test.mjs imports it and the coverage arm
+          # below routes that. What was missing is the OTHER consumer: ADR 0069's
+          # routing-table suite drives `runProbeShell`/`probeDirs` for the
+          # /bin/bash pattern oracle and `bashFunctionSource` for the
+          # implementation-signature pin. A change to the probe environment or to
+          # the end-of-function scan changes what both of those prove, and
+          # nothing said so.
+          add_command "pnpm gate:routing-table:test" "the routing table's bash oracle and signature pin run on this machinery"
           ;;
         scripts/pr/review-materiality.mjs|scripts/pr/review-materiality-context.mjs|scripts/pr/review-materiality.test.mjs)
           add_command "pnpm agent:review-materiality:test" "agent review materiality helper changed"
@@ -4553,6 +4584,25 @@ implementation_signature() {
     scripts/check-agent-quality-gate-package-scripts.mjs \
     scripts/docs/docs-navigation-eval-helpers.mjs \
     scripts/gate/lockfile-scope.mjs \
+    scripts/gate/routing-table/arms-agent-modules.mjs \
+    scripts/gate/routing-table/arms-alerts.mjs \
+    scripts/gate/routing-table/arms-packages.mjs \
+    scripts/gate/routing-table/arms-script-modules.mjs \
+    scripts/gate/routing-table/arms-scripts.mjs \
+    scripts/gate/routing-table/arms-sentry-modules.mjs \
+    scripts/gate/routing-table/arms-services.mjs \
+    scripts/gate/routing-table/arms-tooling-modules.mjs \
+    scripts/gate/routing-table/arms-workflows.mjs \
+    scripts/gate/routing-table/checks.mjs \
+    scripts/gate/routing-table/gate-arms.mjs \
+    scripts/gate/routing-table/gate-equality.test.mjs \
+    scripts/gate/routing-table/groups-head.mjs \
+    scripts/gate/routing-table/groups-tail.mjs \
+    scripts/gate/routing-table/index.mjs \
+    scripts/gate/routing-table/pattern-oracle.test.mjs \
+    scripts/gate/routing-table/pattern.mjs \
+    scripts/gate/routing-table/routing-table.test.mjs \
+    scripts/gate/routing-table/schema.mjs \
     scripts/terraform/terraform-fmt-check.mjs \
     scripts/terraform/terraform-fmt-check.test.mjs \
     turbo.json \
