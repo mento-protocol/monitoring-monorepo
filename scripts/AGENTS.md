@@ -75,10 +75,10 @@ same PR, except the `agent-autoreview.sh` feedback-runtime pins below.
   `docs/docs-navigation-eval-helpers.mjs` and `gate/lockfile-scope.mjs` to
   `$script_source_dir` in three literals, not stub `$repo_root`. Repoint all
   three (ADR 0064).
-- **Gate routing and mapping pins.** Every `gate/routing-table/*.mjs`,
-  `gate/mapping*.mjs` and `gate/routing-parity.mjs` is an
-  `implementation_signature()` and `turbo.json` entry. The engine is the routing
-  now, so a missing pin freezes the stamp for code that picks what runs
+- **Gate routing and mapping pins.** Every `gate/routing-table/*.mjs` and
+  `gate/mapping*.mjs` is an `implementation_signature()` and `turbo.json` entry;
+  `gate/routing-parity.mjs` is signature-only (a mapped command, not a Turbo
+  input). A missing pin freezes the stamp for routing code
   ([ADR 0069](../docs/adr/0069-gate-routing-table-as-data.md)).
 - **Evaluation fixture forbidden lists.** `forbidden_sources` in
   `docs/evals/documentation-navigation-fixtures.json` names the navigation
