@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { relative } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -42,6 +43,22 @@ test("passes when Deferrals is omitted", () => {
 
 test("accepts the deterministic Sentry autofix PR body", () => {
   assertPass(buildPrBody({ shortId: "APP-MENTO-ORG-2S", queueIssue: 1278 }));
+});
+
+test("required workflow installs trusted validator dependencies before validation", () => {
+  const workflow = readFileSync(
+    new URL("../../.github/workflows/pr-description.yml", import.meta.url),
+    "utf8",
+  );
+  const install = workflow.indexOf("Install trusted validator dependencies");
+  const validate = workflow.indexOf("Validate PR description");
+  assert.notEqual(install, -1, "trusted dependency install step is present");
+  assert.notEqual(validate, -1, "validator step is present");
+  assert.ok(install < validate, "trusted dependencies install first");
+  assert.match(
+    workflow,
+    /working-directory: trusted-base[\s\S]*pnpm --filter @mento-protocol\/monitoring-monorepo install[\s\S]*--frozen-lockfile --ignore-scripts/,
+  );
 });
 
 test("passes with explicit None deferral item", () => {

@@ -167,8 +167,9 @@ scheduled document, for context an agent gets from the directory map in
   directory.
 - A workflow that runs a script from the PR's base ref degrades rather than
   fails when that script moves. `pr-description.yml` checks the base ref out as
-  `trusted-base/` and prefers it over the PR's own copy, so a PR cannot edit the
-  rule it is judged by. With one probe path, every PR branched before the move
+  `trusted-base/`, installs its locked root dependencies with lifecycle scripts
+  disabled, and prefers it over the PR's own copy. A PR therefore cannot edit
+  the rule or dependencies that judge it. With one probe path, every PR branched before the move
   finds nothing at the old path and falls through to its own copy behind a
   `::warning::` — the job stays green while the trusted-validator property is
   gone. P5 hit this and now probes both paths, new first. Keep the pre-move

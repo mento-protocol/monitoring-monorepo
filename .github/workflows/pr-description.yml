@@ -45,6 +45,19 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           path: pr-head
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        with:
+          version: 11.9.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: trusted-base/.node-version
+          cache: pnpm
+          cache-dependency-path: trusted-base/pnpm-lock.yaml
+      - name: Install trusted validator dependencies
+        working-directory: trusted-base
+        run: >-
+          pnpm --filter @mento-protocol/monitoring-monorepo install
+          --frozen-lockfile --ignore-scripts
       - name: Validate PR description
         # Body is passed via env (never interpolated into the script) to avoid
         # shell injection from PR content.
@@ -53,8 +66,11 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Prefer the trusted base-ref copy over the PR's own, so a PR
-          # cannot edit the rule it is judged by. The legacy flat-path probe
+          # Prefer the trusted base-ref copy and its locked dependencies over
+          # the PR's own, so a PR cannot edit the rule it is judged by. The
+          # dependency install disables lifecycle scripts, so this required
+          # check does not execute repository-authored install hooks. The
+          # legacy flat-path probe
           # (pre issue-1877-P5) retired in issue 1904: the checkout above
           # uses the base branch NAME, so trusted-base/ is always current
           # main at job-execution time, never a snapshot pinned to when a PR
