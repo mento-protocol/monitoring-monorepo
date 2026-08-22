@@ -348,8 +348,15 @@ export class Facts {
             if (!statSync(absolute).isDirectory()) continue;
             const target = realpathSync(absolute);
             const rel = relative(rootPhysical, target);
-            if (rel === "" || rel.startsWith("..") || rel.startsWith(sep))
-              continue;
+            // `..name` is a directory whose NAME starts with two dots, not a
+            // path that climbs out of the repository — and the gate, which
+            // tests `case "$target/" in "$repo_root"/*`, accepts it. Rejecting
+            // every `..` prefix drops a routing pattern the gate has, which is
+            // a smaller plan. Only `..` itself and a `../` prefix leave the
+            // tree.
+            const escapes =
+              rel === ".." || rel.startsWith(`..${sep}`) || rel.startsWith(sep);
+            if (rel === "" || escapes) continue;
             this.#symlinkTargets.push(rel.split(sep).join("/"));
           } catch {
             // A dangling or unreadable link exposes no suite tree, and the

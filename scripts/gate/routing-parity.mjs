@@ -35,6 +35,8 @@
  *                       commit
  *   --corpus fixture    a stub fixture repository, where the gate is not in its
  *                       own tree and the repository-specific groups are skipped
+ *   --corpus symlink    a real directory symlink under scripts/, the dynamic
+ *                       pattern source no committed path can exercise
  *   --pass2             deprecated alias for `--corpus multi`
  *   --limit <n>         positive integer; sample the tracked corpus evenly
  *   --base <ref>        base ref for the corpora that do not supply their own
@@ -48,6 +50,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -633,6 +636,66 @@ function corpusFixture(dir) {
   ].map((set) => ({ ...set, repoRoot: fixture, baseRef: "HEAD" }));
 }
 
+/**
+ * Pass 6 — a real directory symlink under `scripts/`.
+ *
+ * `scriptsSymlinkTargets` is a DYNAMIC pattern source: the arms it feeds are
+ * built from whatever `find scripts -type l` resolves to, so with no directory
+ * symlink in the tree — and there is none today — the whole group is inert and
+ * every other corpus says nothing about it. The gate's own self-test creates
+ * one for the same reason.
+ *
+ * Two targets, because the containment rule is where this goes wrong: an
+ * ordinary directory, and one whose NAME begins with two dots. `path.relative`
+ * answers `..name` for the second, which a `startsWith("..")` test reads as
+ * "outside the repository" while the gate's prefix match accepts it
+ * (Codex 3838283142). That is a routing pattern the gate has and the engine
+ * does not, which is a smaller plan.
+ *
+ * Everything created here is removed in the same call, including on a throw.
+ */
+function corpusSymlink() {
+  const targets = [
+    { label: "plain", dir: ".routing-parity-target.tmp" },
+    { label: "dotdot-prefixed", dir: "..routing-parity-target.tmp" },
+  ];
+  const link = "scripts/.routing-parity-link.tmp";
+  const sets = [];
+  for (const { label, dir } of targets) {
+    sets.push({
+      label: `symlink-${label}-link-itself`,
+      paths: [link],
+      symlink: { dir, link },
+    });
+    sets.push({
+      label: `symlink-${label}-beneath-target`,
+      paths: [`${dir}/sentry-probe.test.mjs`],
+      symlink: { dir, link },
+    });
+    sets.push({
+      label: `symlink-${label}-unrelated-path`,
+      paths: ["ui-dashboard/src/lib/utils.ts"],
+      symlink: { dir, link },
+    });
+  }
+  return sets;
+}
+
+/** Create the symlink a `symlink` corpus set needs, and hand back its undo. */
+function withSymlink({ dir, link }) {
+  const targetPath = join(REPO, dir);
+  const linkPath = join(REPO, link);
+  rmSync(linkPath, { recursive: true, force: true });
+  rmSync(targetPath, { recursive: true, force: true });
+  mkdirSync(targetPath, { recursive: true });
+  writeFileSync(join(targetPath, "sentry-probe.test.mjs"), "// probe\n");
+  symlinkSync(targetPath, linkPath);
+  return () => {
+    rmSync(linkPath, { recursive: true, force: true });
+    rmSync(targetPath, { recursive: true, force: true });
+  };
+}
+
 /** A dangling commit whose tree is HEAD's with one top-level path replaced. */
 function baseCommitWith(dir, path, content) {
   const blobFile = join(dir, "blob");
@@ -684,7 +747,14 @@ function parseLimit(raw) {
   return value;
 }
 
-const CORPORA = new Set(["tracked", "multi", "synthetic", "base", "fixture"]);
+const CORPORA = new Set([
+  "tracked",
+  "multi",
+  "synthetic",
+  "base",
+  "fixture",
+  "symlink",
+]);
 const limit = parseLimit(option("--limit", null));
 const mutate = argv.includes("--mutate");
 const defaultBase = option("--base", "HEAD");
@@ -706,18 +776,28 @@ function buildWork() {
   if (corpus === "synthetic") return corpusSynthetic(corpusTracked(null));
   if (corpus === "base") return corpusBase(dir);
   if (corpus === "fixture") return corpusFixture(dir);
+  if (corpus === "symlink") return corpusSymlink();
   return corpusTracked(limit).map((path) => ({ label: path, paths: [path] }));
 }
 
 try {
-  for (const { label, paths: set, baseRef, repoRoot } of buildWork()) {
+  for (const { label, paths: set, baseRef, repoRoot, symlink } of buildWork()) {
     if (set.length === 0) continue;
     const base = baseRef ?? defaultBase;
     const root = repoRoot ?? REPO;
-    const { stdout, pathsFile } = runGate(set, dir, base, root);
-    const gate = parseGateStdout(stdout);
-    // The gate's normalized set, not the harness's raw one.
-    const engine = await runEngine(gate.changedPaths, pathsFile, base, root);
+    // A set that needs a symlink in the real tree owns it for exactly its own
+    // two runs, so a failure cannot leave one behind.
+    const undo = symlink === undefined ? () => {} : withSymlink(symlink);
+    let gate;
+    let engine;
+    try {
+      const run = runGate(set, dir, base, root);
+      gate = parseGateStdout(run.stdout);
+      // The gate's normalized set, not the harness's raw one.
+      engine = await runEngine(gate.changedPaths, run.pathsFile, base, root);
+    } finally {
+      undo();
+    }
     if (mutate) engine.commands.shift();
     const problems = diff(label, gate, engine);
     compared += 1;
