@@ -2,10 +2,11 @@ name: PR Description
 
 # Enforces the repo PR-description standard (AGENTS.md "PR description standard"
 # + .github/PULL_REQUEST_TEMPLATE.md): every PR body must lead with
-# `## The Problem` and `## The Solution`, and must not still contain the
-# unfilled template placeholders. The `## Deferrals` section is OPTIONAL —
-# omit it when nothing is deferred; when present it must say "None" or link a
-# GitHub issue per item (for everything knowingly deferred from the PR).
+# `## The Problem` and `## The Solution`, include visible explanatory Markdown content in both, and
+# not still contain the unfilled template placeholders. The `## Deferrals`
+# section is OPTIONAL — omit it when nothing is deferred; when present it must
+# say "None" or link a GitHub issue per item (for everything knowingly deferred
+# from the PR).
 #
 # REQUIRED-STATUS SAFETY: no workflow-level `paths:` filter — this is meant to
 # run on every PR so it can be a required status (AGENTS.md: required-status

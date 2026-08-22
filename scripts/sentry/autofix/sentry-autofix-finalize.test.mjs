@@ -437,14 +437,18 @@ await test("PR body is fully deterministic (no agent free-text accepted or publi
     "body starts with repo-standard heading (required check)",
   );
   assert(body.includes("## The Solution"), "deterministic Solution heading");
+  assert(
+    body.includes("Before this PR") && body.includes("This PR changes"),
+    "body explains the trusted before/after boundary",
+  );
   assert(body.includes(`Fixes ${SHORT_ID}`), "Fixes SHORT-ID present");
   assert(body.includes("Refs #1278"), "Refs queue issue present");
   assert(body.includes("merge stays human"), "provenance present");
   // No fenced agent block, ever — the diff is the authoritative artifact.
   assert(!body.includes("```"), "no fenced block in the body");
   assert(
-    body.toLowerCase().includes("untrusted-input"),
-    "body notes the agent notes are intentionally omitted",
+    body.includes("cannot safely publish its agent notes"),
+    "body explains why technical agent detail is omitted",
   );
 });
 

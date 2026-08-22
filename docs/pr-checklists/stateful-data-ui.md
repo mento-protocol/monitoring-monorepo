@@ -260,13 +260,15 @@ heading lines:
 ```
 
 - Maximum three bullets.
-- Explain the user/operator/reviewer problem in plain English.
+- Explain what the system did before, what failed or became difficult, and the
+  concrete effect on users or operators.
 
 ```markdown
 ## The Solution
 ```
 
-- Explain in simple terms how the PR solves that problem.
+- Explain what the system does after the PR, why that behavior improves the
+  situation, and any material limit or non-goal.
 
 Then include these deeper sections:
 
