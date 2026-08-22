@@ -31,6 +31,7 @@ import { execFileSync } from "node:child_process";
 import {
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -434,7 +435,32 @@ async function main(argv) {
   return 0;
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+/**
+ * Whether this module was RUN rather than imported.
+ *
+ * Not a string comparison against `process.argv[1]`. Node resolves the main
+ * entry to its realpath before building `import.meta.url`, and leaves
+ * `process.argv[1]` as the path it was handed — so the naive comparison is
+ * false for every invocation that reaches this file through a symlink. Measured:
+ * the gate's own suite builds `scripts/` mirrors out of symlinks, macOS `/tmp`
+ * is a symlink to `/private/tmp`, and a checkout under a symlinked home is
+ * ordinary. In all of those `main()` never ran, the mapper exited 0 having
+ * written nothing, and the gate refused every run with "produced an empty plan"
+ * — fail-closed, but pointing at the engine instead of at the path.
+ */
+function invokedAsScript() {
+  const entry = process.argv[1];
+  if (entry === undefined) return false;
+  const here = fileURLToPath(import.meta.url);
+  if (entry === here) return true;
+  try {
+    return realpathSync(entry) === realpathSync(here);
+  } catch {
+    return false;
+  }
+}
+
+if (invokedAsScript()) {
   try {
     process.exitCode = await main(process.argv.slice(2));
   } catch (error) {

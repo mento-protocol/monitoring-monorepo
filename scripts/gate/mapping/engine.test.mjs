@@ -19,10 +19,21 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
+
+import { bashFunctionSource } from "../../sentry/ci-wiring/check-sentry-suites-in-ci-gate-extract.mjs";
 
 import { Facts } from "./facts.mjs";
 import { BUCKETS, Plan, commandDedupeKey } from "./plan.mjs";
@@ -683,6 +694,123 @@ test("a tooling script plus anything else is no longer tooling-only", () => {
     assert.equal(classOf(dir), "package-scripts");
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── The CLI seam ───────────────────────────────────────────────────────────
+
+const REPO = fileURLToPath(new URL("../../..", import.meta.url));
+
+/** Run the mapper the way the gate does, from `entry`. */
+function runMapper(entry, scriptSourceDir) {
+  const dir = mkdtempSync(join(tmpdir(), "engine-cli-"));
+  const pathsFile = join(dir, "paths");
+  writeFileSync(pathsFile, "ui-dashboard/src/lib/utils.ts\n");
+  try {
+    return execFileSync(
+      "node",
+      [
+        entry,
+        "--repo-root",
+        REPO,
+        "--changed-paths-file",
+        pathsFile,
+        "--base",
+        "HEAD",
+        "--head",
+        "HEAD",
+        "--script-source-dir",
+        scriptSourceDir,
+        "--real-tree",
+      ],
+      { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test("the mapper runs when reached through a SYMLINK, not only by its real path", () => {
+  // `process.argv[1] === fileURLToPath(import.meta.url)` is false for every
+  // symlinked invocation, because Node realpaths the entry for `import.meta.url`
+  // and leaves argv alone. The module then imports, runs nothing, exits 0 with
+  // no output — and the gate refuses every run with "produced an empty plan".
+  // The gate's own suite builds `scripts/` mirrors out of symlinks, and macOS
+  // `/tmp` is one, so this is the ordinary case rather than an exotic one.
+  const real = fileURLToPath(new URL("../mapping.mjs", import.meta.url));
+  const direct = runMapper(real, join(REPO, "scripts"));
+  assert.ok(direct.includes("\tpnpm "), "the control run produced no plan");
+
+  const mirror = mkdtempSync(join(tmpdir(), "engine-mirror-"));
+  try {
+    mkdirSync(join(mirror, "gate"));
+    for (const entry of readdirSync(join(REPO, "scripts"))) {
+      if (entry === "gate") continue;
+      symlinkSync(join(REPO, "scripts", entry), join(mirror, entry));
+    }
+    for (const entry of readdirSync(join(REPO, "scripts/gate"))) {
+      symlinkSync(
+        join(REPO, "scripts/gate", entry),
+        join(mirror, "gate", entry),
+      );
+    }
+    const throughLink = runMapper(join(mirror, "gate/mapping.mjs"), mirror);
+    assert.equal(
+      throughLink,
+      direct,
+      "a symlinked invocation must produce the same plan, not an empty one",
+    );
+  } finally {
+    rmSync(mirror, { recursive: true, force: true });
+  }
+});
+
+// ── The signature pin, enumerated ──────────────────────────────────────────
+
+const SIGNATURE_ENTRIES = (() => {
+  const source = bashFunctionSource(
+    readFileSync(join(REPO, "scripts/agent-quality-gate.sh"), "utf8"),
+    "implementation_signature",
+    "scripts/agent-quality-gate.sh",
+  );
+  const entries = source
+    .split(/\s+/)
+    .filter((word) => word.startsWith("scripts/") || word.endsWith(".json"));
+  // Sanity: if the span parsed wrongly every assertion below is vacuous.
+  assert.ok(
+    entries.includes("scripts/agent-quality-gate.sh"),
+    `parsed ${entries.length} signature entries without the gate itself; the span was read wrongly`,
+  );
+  return entries;
+})();
+
+const ENGINE_MODULES = readdirSync(fileURLToPath(new URL(".", import.meta.url)))
+  .filter((name) => name.endsWith(".mjs"))
+  .sort();
+
+test("implementation_signature() lists every mapping-engine module", () => {
+  // The same load-bearing pin the routing table has, and it matters more here:
+  // an entry the signature cannot `stat` hashes as `__missing__` and FREEZES
+  // the signature, so `--skip-if-fresh` reuses a stale stamp — for the code
+  // that now decides which commands run at all.
+  assert.ok(ENGINE_MODULES.length > 0, "found no engine modules to check");
+  for (const module of ENGINE_MODULES) {
+    assert.ok(
+      SIGNATURE_ENTRIES.includes(`scripts/gate/mapping/${module}`),
+      `implementation_signature() does not list scripts/gate/mapping/${module}; a missing entry freezes the freshness signature`,
+    );
+  }
+});
+
+test("implementation_signature() lists no mapping-engine module that is gone", () => {
+  const prefix = "scripts/gate/mapping/";
+  for (const entry of SIGNATURE_ENTRIES.filter((path) =>
+    path.startsWith(prefix),
+  )) {
+    assert.ok(
+      ENGINE_MODULES.includes(entry.slice(prefix.length)),
+      `implementation_signature() still lists ${entry}, which no longer exists; a stale entry hashes as __missing__ forever`,
+    );
   }
 });
 
