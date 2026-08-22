@@ -4001,6 +4001,36 @@ while IFS= read -r path; do
           add_command "pnpm gate:routing-table:test" "gate routing table changed"
           add_command "pnpm agent:quality-gate:test" "gate routing table is an implementation-signature input"
           ;;
+        scripts/gate/mapping.mjs|scripts/gate/mapping/*.mjs|scripts/gate/routing-parity.mjs)
+          # The Node mapping engine (ADR 0069, D5b) and the parity harness that
+          # proves it against these arms. Nothing consults the engine yet — the
+          # `case` arms below are still the routing that runs — so this routes
+          # the engine's own checks rather than the gate self-test.
+          #
+          # The quoting test alone would leave routing, facts, verbs, ordering,
+          # compaction and scoped-test selection unchecked, so the three CHEAP
+          # parity corpora run too: `fixture` (2s) covers the branch that skips
+          # repository-specific groups, `symlink` (6s) covers the dynamic
+          # pattern source no committed path can reach, and `multi` (57s) is
+          # where the four whole-set post-passes are actually exercised. The
+          # tracked, synthetic and base corpora are a 35-minute run and stay a
+          # per-PR step.
+          #
+          # `symlink` creates a directory symlink under scripts/ and removes it
+          # again, the way the gate self-test does, so it must not run
+          # concurrently with another gate in this same worktree — the run lock
+          # already guarantees that.
+          #
+          # These nested gate runs are dry-run and set AGENT_QUALITY_GATE_LOCK=0
+          # themselves, so they do not queue behind the outer run's lock. When
+          # the gate is flipped to read the engine's plan the harness is
+          # deleted, and this arm gains the self-test the way the routing-table
+          # arm already has it.
+          add_command "node --test scripts/gate/mapping/shell-quote.test.mjs" "gate mapping engine changed"
+          add_command "node scripts/gate/routing-parity.mjs --corpus fixture" "gate mapping engine changed (parity against the live arms, fixture repository)"
+          add_command "node scripts/gate/routing-parity.mjs --corpus symlink" "gate mapping engine changed (parity against the live arms, scripts/ symlink source)"
+          add_command "node scripts/gate/routing-parity.mjs --corpus multi" "gate mapping engine changed (parity against the live arms, whole-set post-passes)"
+          ;;
         scripts/sentry/ci-wiring/check-sentry-suites-in-ci-gate-extract.mjs)
           # The bash-from-Node machinery. Its own suite already runs, because
           # check-sentry-suites-in-ci.test.mjs imports it and the coverage arm
