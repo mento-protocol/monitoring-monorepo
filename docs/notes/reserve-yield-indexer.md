@@ -31,7 +31,7 @@ sUSDS/stETH event suites with reserve-yield event tests enabled.
 - Ethereum reserve-yield indexing shares the existing production Envio project
   and GraphQL endpoint.
 - The primary entry point registers sparse sUSDS/stETH token events plus the
-  launch-aligned sUSDS and stETH samplers from [`ADR 0069`](../adr/0069-susds-launch-aligned-daily-sampler.md)
+  launch-aligned sUSDS and stETH samplers from [`ADR 0071`](../adr/0071-susds-launch-aligned-daily-sampler.md)
   and [`ADR 0034`](../adr/0034-steth-wallet-daily-sampler.md).
 - The primary entry point does not register the historical every-block sUSDS
   heartbeat.

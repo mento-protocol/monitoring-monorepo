@@ -1,7 +1,7 @@
 ---
 title: stETH actuals use a launch-aligned sub-daily wallet balance sampler
 status: active
-superseded_by: 0069-susds-launch-aligned-daily-sampler.md (sUSDS event-only clause)
+superseded_by: 0071-susds-launch-aligned-daily-sampler.md (sUSDS event-only clause)
 owner: eng
 canonical: true
 last_verified: 2026-08-21
@@ -14,7 +14,7 @@ garden_lane: adrs-architecture
 
 # ADR 0034 — stETH actuals use a launch-aligned sub-daily wallet balance sampler
 
-**Status:** Accepted (Jul 2026), in force. Its sUSDS event-only clause is superseded by [ADR 0069](0069-susds-launch-aligned-daily-sampler.md).
+**Status:** Accepted (Jul 2026), in force. Its sUSDS event-only clause is superseded by [ADR 0071](0071-susds-launch-aligned-daily-sampler.md).
 **Scope:** indexer-envio (constrains ui-dashboard reserve-yield reads)
 
 ## Context
@@ -36,7 +36,7 @@ a bounded stETH sampler:
   `StethYieldDailySnapshot` rows.
 - Allocate future stETH earned yield to the wallet where it accrued, even when
   principal later moves between tracked reserve wallets.
-- Use the launch-aligned bounded sUSDS sampler from [ADR 0069](0069-susds-launch-aligned-daily-sampler.md). Do not reintroduce the historical every-block heartbeat.
+- Use the launch-aligned bounded sUSDS sampler from [ADR 0071](0071-susds-launch-aligned-daily-sampler.md). Do not reintroduce the historical every-block heartbeat.
 
 ## Alternatives considered
 

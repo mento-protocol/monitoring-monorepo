@@ -11,7 +11,7 @@ review_interval_days: 90
 garden_lane: adrs-architecture
 ---
 
-# ADR 0069 — sUSDS actuals use a launch-aligned bounded daily sampler
+# ADR 0071 — sUSDS actuals use a launch-aligned bounded daily sampler
 
 **Status:** Accepted (Aug 2026), in force.
 **Scope:** indexer-envio (constrains ui-dashboard reserve-yield reads)

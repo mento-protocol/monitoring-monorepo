@@ -33,8 +33,8 @@ than architecturally forbidden.
 
 It is not one thing. The largest single region is routing: one `while IFS= read
 -r path` loop over the changed set, holding **13 top-level `case` statements**,
-**55 `case` statements** counting the nested ones, **240 arms**, **825 pattern
-occurrences** (757 distinct), **29 effect verbs**, six inline guards, two global
+**55 `case` statements** counting the nested ones, **240 arms**, **829 pattern
+occurrences** (761 distinct), **29 effect verbs**, six inline guards, two global
 flag mutations, and two pattern sets the gate computes from the tree at run
 time. That is a table written as control flow.
 
@@ -50,7 +50,7 @@ written that way:
 2. **First-arm-wins ordering.** A new arm for `scripts/<dir>/deploy-*.sh` must
    sit above the widened pair or it never runs. The constraint lives in a
    comment.
-3. **Literal freshness.** 617 distinct arm patterns name an exact path. A path
+3. **Literal freshness.** 619 distinct arm patterns name an exact path. A path
    that is deleted or moved leaves an arm that simply never matches. No check
    reds. This is the same failure class P0 fixed in
    `check-deploy-root-anchors.test.mjs`, which printed "All 0 deploy scripts…"

@@ -1,7 +1,7 @@
 ---
 title: One multichain indexer project; Ethereum reserve-yield shares the hosted deployment
 status: active
-superseded_by: 0069-susds-launch-aligned-daily-sampler.md (sUSDS event-only clause)
+superseded_by: 0071-susds-launch-aligned-daily-sampler.md (sUSDS event-only clause)
 owner: eng
 canonical: true
 last_verified: 2026-08-21
@@ -14,7 +14,7 @@ garden_lane: adrs-architecture
 
 # ADR 0012 — One multichain indexer project; Ethereum reserve-yield shares the hosted deployment
 
-**Status:** Accepted (Mar 2026; reserve-yield added Jun 2026; stETH sampler refined by ADR 0034), in force. The sUSDS event-only clause is superseded by [ADR 0069](0069-susds-launch-aligned-daily-sampler.md).
+**Status:** Accepted (Mar 2026; reserve-yield added Jun 2026; stETH sampler refined by ADR 0034), in force. The sUSDS event-only clause is superseded by [ADR 0071](0071-susds-launch-aligned-daily-sampler.md).
 **Scope:** indexer-envio
 
 ## Context
@@ -31,7 +31,7 @@ Run **one Envio project** that indexes Celo, Monad, and Polygon
 FPMM/oracle/bridge events, Celo Broker and Liquity/CDP state, and Ethereum
 reserve-yield in the same hosted deployment
 (`config.multichain.mainnet.yaml`). sUSDS and stETH use bounded,
-launch-aligned samplers recorded in [ADR 0069](0069-susds-launch-aligned-daily-sampler.md)
+launch-aligned samplers recorded in [ADR 0071](0071-susds-launch-aligned-daily-sampler.md)
 and [ADR 0034](0034-steth-wallet-daily-sampler.md). The historical every-block
 sUSDS heartbeat remains excluded from the hosted path. IDs are chain-namespaced
 so entities don't collide.
