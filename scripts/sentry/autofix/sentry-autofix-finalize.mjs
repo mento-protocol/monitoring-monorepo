@@ -627,13 +627,13 @@ export function buildPrBody({ shortId, queueIssue }) {
   const parts = [
     PROBLEM_HEADING,
     "",
-    `- Before this PR, the code linked to Sentry issue \`${shortId}\` still contained a triaged bug.`,
-    "- The automated fix pipeline selected it for a small, mechanically bounded change.",
+    `- Before this PR, the affected code path could still produce the failure tracked as Sentry issue \`${shortId}\`.`,
+    "- This left the known failure path available to recur in production.",
     "",
     SOLUTION_HEADING,
     "",
-    "- This PR changes the affected code so the triaged failure can be corrected after required CI and human review.",
-    "- The linked issue and bounded diff contain the available technical detail. The pipeline cannot safely publish its agent notes because they can contain untrusted production data.",
+    "- This PR changes the affected code path to prevent the tracked failure after required CI and human review.",
+    "- Preventing the same failure path reduces repeat errors. The linked issue and bounded diff contain the available technical detail. The pipeline cannot safely publish its agent notes because they can contain untrusted production data.",
   ];
 
   return `${parts.join("\n")}\n\n${provenanceSection(shortId, issue)}\n`;

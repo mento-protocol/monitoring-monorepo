@@ -438,8 +438,10 @@ await test("PR body is fully deterministic (no agent free-text accepted or publi
   );
   assert(body.includes("## The Solution"), "deterministic Solution heading");
   assert(
-    body.includes("Before this PR") && body.includes("This PR changes"),
-    "body explains the trusted before/after boundary",
+    body.includes("could still produce the failure") &&
+      body.includes("changes the affected code path to prevent") &&
+      body.includes("reduces repeat errors"),
+    "body explains the trusted old behavior, new behavior, and benefit",
   );
   assert(body.includes(`Fixes ${SHORT_ID}`), "Fixes SHORT-ID present");
   assert(body.includes("Refs #1278"), "Refs queue issue present");
