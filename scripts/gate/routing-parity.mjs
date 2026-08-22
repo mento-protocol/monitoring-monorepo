@@ -46,6 +46,7 @@
 
 import { execFileSync } from "node:child_process";
 import {
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -608,9 +609,17 @@ function corpusFixture(dir) {
   // inside the outer gate run, since the mapping arm schedules this corpus —
   // and a global `core.hooksPath` or `init.templateDir` would run their hooks
   // against a repository that is not their work.
+  //
+  // An empty hooks directory rather than a verification bypass: this
+  // repository does not skip hooks, it points them at a directory that holds
+  // none. The directory lives outside the fixture so it can never become
+  // fixture content.
+  const emptyHooks = join(dir, "no-hooks");
+  mkdirSync(emptyHooks, { recursive: true });
   inFixture("config", "commit.gpgsign", "false");
+  inFixture("config", "core.hooksPath", emptyHooks);
   inFixture("add", "-A");
-  inFixture("commit", "--no-verify", "-qm", "fixture");
+  inFixture("commit", "-qm", "fixture");
 
   // Uncommitted, so `git show HEAD:package.json` and the working tree differ:
   // that diff is what the root-manifest classifier reads, and it makes the
@@ -699,20 +708,50 @@ function corpusSymlink() {
 function withSymlink({ dir, link }) {
   const targetPath = join(REPO, dir);
   const linkPath = join(REPO, link);
+
+  // REFUSE, never clear the way. These are fixed names in the developer's real
+  // repository, and an `rm -rf` of a path this run did not create would delete
+  // whatever happened to be sitting there. A leftover from a killed run is a
+  // thing to be told about, not something to silently overwrite.
+  for (const path of [targetPath, linkPath]) {
+    if (!pathPresent(path)) continue;
+    const error = new Error(
+      `${path} already exists; the symlink corpus creates its own probe paths and will not remove one it did not create. Remove it by hand if it is a leftover.`,
+    );
+    error.exitCode = 2;
+    throw error;
+  }
+
+  // Undo removes exactly what this call made, in reverse order, and nothing
+  // else — including when setup throws part-way and the caller never gets it.
+  const created = [];
   const undo = () => {
-    rmSync(linkPath, { recursive: true, force: true });
-    rmSync(targetPath, { recursive: true, force: true });
+    for (const path of [...created].reverse()) {
+      rmSync(path, { recursive: true, force: true });
+    }
+    created.length = 0;
   };
-  undo();
   try {
-    mkdirSync(targetPath, { recursive: true });
+    mkdirSync(targetPath);
+    created.push(targetPath);
     writeFileSync(join(targetPath, "sentry-probe.test.mjs"), "// probe\n");
     symlinkSync(targetPath, linkPath);
+    created.push(linkPath);
   } catch (error) {
     undo();
     throw error;
   }
   return undo;
+}
+
+/** Whether any entry sits at this path — a dangling symlink included. */
+function pathPresent(path) {
+  try {
+    lstatSync(path);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** A dangling commit whose tree is HEAD's with one top-level path replaced. */
