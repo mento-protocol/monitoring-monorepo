@@ -2281,6 +2281,121 @@ test("classifies only real CodeRabbit runs as exact-head reviews", () => {
   );
 });
 
+test("classifies an exact-head CodeRabbit clean review summary as reviewed", () => {
+  const currentHeadOid = "b".repeat(40);
+  const oldHeadOid = "a".repeat(40);
+  const cleanSummary = (head = currentHeadOid) =>
+    [
+      "<!-- This is an auto-generated comment: skip review by coderabbit.ai -->",
+      "Review skipped",
+      "No new commits to review since the last review.",
+      "",
+      "<!-- recent_review_start -->",
+      "",
+      "No actionable comments were generated in the recent review. 🎉",
+      "",
+      "**Run ID**: `3113e1b8-de6d-44e8-a17a-6c634b37dbea`",
+      "",
+      `Reviewing files that changed from the base of the PR and between ${oldHeadOid} and ${head}.`,
+      "",
+      "<!-- recent_review_end -->",
+    ].join("\n");
+
+  assertEqual(
+    classifyCodeRabbitReviewSignal({
+      currentHeadOid,
+      headUpdatedAt: Date.parse("2026-08-21T15:20:00Z"),
+      issueComments: [
+        {
+          user: { login: "coderabbitai[bot]" },
+          body: cleanSummary(),
+          created_at: "2026-08-21T15:13:11Z",
+          updated_at: "2026-08-21T15:21:00Z",
+        },
+      ],
+    }),
+    "reviewed",
+  );
+});
+
+test("rejects untrusted or incomplete CodeRabbit clean review summaries", () => {
+  const currentHeadOid = "b".repeat(40);
+  const oldHeadOid = "a".repeat(40);
+  const summary = ({
+    head = currentHeadOid,
+    runMarker = "**Run ID**: `3113e1b8-de6d-44e8-a17a-6c634b37dbea`",
+    result = "No actionable comments were generated in the recent review. 🎉",
+    bounded = true,
+  } = {}) => {
+    const lines = [
+      result,
+      "",
+      runMarker,
+      "",
+      `Reviewing files that changed from the base of the PR and between ${oldHeadOid} and ${head}.`,
+    ];
+    return bounded
+      ? [
+          "<!-- recent_review_start -->",
+          ...lines,
+          "<!-- recent_review_end -->",
+        ].join("\n")
+      : lines.join("\n");
+  };
+  const classify = (body, overrides = {}) =>
+    classifyCodeRabbitReviewSignal({
+      currentHeadOid,
+      headUpdatedAt: Date.parse("2026-08-21T15:20:00Z"),
+      issueComments: [
+        {
+          user: { login: "coderabbitai[bot]" },
+          body,
+          updated_at: "2026-08-21T15:21:00Z",
+          ...overrides,
+        },
+      ],
+    });
+
+  assertEqual(
+    classify(summary(), { user: { login: "outside-user" } }),
+    "missing",
+  );
+  assertEqual(classify(summary({ bounded: false })), "missing");
+  assertEqual(classify(summary({ runMarker: "" })), "missing");
+  assertEqual(
+    classify(
+      summary({
+        result:
+          "Review skipped\n\nNo new commits to review since the last review.",
+      }),
+    ),
+    "missing",
+  );
+  assertEqual(
+    classify(summary(), { updated_at: "2026-08-21T15:19:59Z" }),
+    "stale",
+  );
+  assertEqual(classify(summary(), { updated_at: null }), "stale");
+  assertEqual(
+    classifyCodeRabbitReviewSignal({
+      currentHeadOid,
+      issueComments: [
+        {
+          user: { login: "coderabbitai[bot]" },
+          body: summary(),
+          updated_at: "2026-08-21T15:21:00Z",
+        },
+      ],
+    }),
+    "stale",
+  );
+  assertEqual(classify(summary({ head: oldHeadOid })), "stale");
+  assertEqual(
+    classify(summary({ head: currentHeadOid.slice(0, 7) })),
+    "missing",
+  );
+});
+
 test("does not classify CodeRabbit signals as current without a head SHA", () => {
   const markedHead = "b".repeat(40);
   const runBody = "**Run ID**: `008b2b08-511b-40b3-bfae-6673f0339188`";
