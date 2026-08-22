@@ -3,7 +3,7 @@ title: Scripts Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-20
+last_verified: 2026-08-22
 doc_type: agent-instructions
 scope: scripts
 review_interval_days: 90
@@ -16,8 +16,7 @@ garden_lane: agent-entry-points
 
 ## Scope
 
-`scripts/` holds deploy wrappers, agent quality gates, code-health checks, and
-repo maintenance utilities.
+`scripts/` holds deploy wrappers, quality gates, code-health checks, and repo utilities.
 
 ## Layout
 
@@ -40,41 +39,31 @@ subdirectories.
 | `gate/`         | quality-gate satellites                |
 | `sentry/`       | triage/autofix/gate/broker/ci-wiring   |
 
-`lib/` and `production-infra-identity-contract/` predate the reorganization. `setup.sh`
-stays flat: `.config/wt.toml` runs that exact path as the Worktrunk pre-start
-hook, and eight docs name it. `redrive-onchain-deadletter.{mjs,test.mjs}` stays
-flat although `alerts/infra/` owns it; ADR 0064 has the lint reason.
-
-`lib/` holds cores more than one cluster reads. `hcl.mjs` (Terraform HCL
-tokenizer and block extraction), `workflow-yaml.mjs` (Actions workflow and
-shell-run parsing), `pnpm-override-selector.mjs` (pnpm override selectors), and
-`gh-issue-lifecycle.mjs` (the `gh` runner, pagination guard, Documentation
-Garden workflow authorization, label bootstrap, and issue-queue arbitration).
-Cores stay outside domain directories; ADR 0064 records which clusters read
-each. `peg-policy-digest.mjs` is the one definition of the peg version-digest
-contract both peg validators check. Inventories, pinned hashes, and identities
-stay with their domain.
+`lib/` and `production-infra-identity-contract/` predate the reorganization.
+`setup.sh` stays flat because `.config/wt.toml` pins its pre-start path.
+`redrive-onchain-deadletter.{mjs,test.mjs}` stays flat although `alerts/infra/`
+owns it; ADR 0064 records the lint constraint. `lib/` holds shared cores;
+inventories, hashes, and identities stay with their domain.
 
 ## Why Files Stay Flat
 
 `scripts/` has eleven path-pin classes. Move each pin with its file in the
 same PR, except the `agent-autoreview.sh` feedback-runtime pins below.
 
-- **Autoreview runtime materialization.** `agent-autoreview.sh` pins sibling
-  runtime in Perl lists and `runtime_paths`; feedback helpers use `origin/main`.
-  Move feedback paths in three merges: add copies and a dual-path fallback;
-  repoint consumers; remove old paths and fallback when no pre-move wrapper
-  remains (ADR 0064).
-- **Gate routing pins.** The gate excludes stub-repo tests with
-  `$script_source_dir == $repo_root/scripts`, and pairs
-  `bootstrap/codex-cloud-setup.{sh,test.sh}` for offline tests. It routes
-  `sentry/autofix/sentry-autofix-refused-inventory.mjs` alone to
-  `pnpm sentry:autofix:run-record:test` and
-  `pnpm sentry:autofix:finalize:test`.
-- **Gate runtime module pins.** `agent-quality-gate.sh` pins
-  `docs/docs-navigation-eval-helpers.mjs` and `gate/lockfile-scope.mjs` to
-  `$script_source_dir` in three literals, not stub `$repo_root`. Repoint all
-  three (ADR 0064).
+- **Autoreview runtime.** `agent-autoreview.sh` pins runtime; feedback helpers
+  use `origin/main`. Move paths in three stages: dual path, consumers, cleanup
+  (ADR 0064).
+- **Gate routing pins.** The gate excludes stub-repo tests when
+  `$script_source_dir == $repo_root/scripts`, pairs
+  `bootstrap/codex-cloud-setup.{sh,test.sh}` for offline tests, and routes
+  `sentry/autofix/sentry-autofix-refused-inventory.mjs` only to its two Sentry
+  run-record and finalize tests.
+- **Gate runtime module pins.** `agent-quality-gate.sh` sources
+  `gate/run-handles.sh` from `$script_source_dir` before it changes directory.
+  It also pins `docs/docs-navigation-eval-helpers.mjs` and
+  `gate/lockfile-scope.mjs` to that source tree, not stub `$repo_root`. Keep the
+  run-handle source, signature, self-test route, and missing-helper fixture in
+  step. Repoint every moved path (ADR 0064).
 - **Evaluation fixture forbidden lists.** `forbidden_sources` in
   `docs/evals/documentation-navigation-fixtures.json` names the navigation
   eval's own implementation.
@@ -82,39 +71,29 @@ same PR, except the `agent-autoreview.sh` feedback-runtime pins below.
   keys are exact repo-relative paths, reconciled against `findSentrySuites()`
   by set equality both ways. A moved or renamed suite fails the gate closed.
   `sentry/fixture-scan-canary.test.mjs` re-pins four; ADR 0068 has the policy.
-- **Enumerated workflow paths-filters.** 22 of 32 files in
-  `.github/workflows/` pin a `scripts/` path. `ci.yml` (`autoreviewSuite`,
-  `autoreviewRootRuntime`, `versionSkew`; `rootScripts` is the recursive
-  `scripts/**`), `infra.yml`, `alerts-rules.yml`, `peg-policy-publication.yml`,
-  and `schema-diff.yml` list individual files. The three Terraform filters are
-  the exception: `ci.yml` `terraform` plus `infra.yml` push and `pull_request`
-  copy the broad `workflowAdmissionPatterns` boundary from
-  `terraform.stacks.json`, including `scripts/**`. `routing.test.mjs` asserts
-  exact equality and proves that boundary subsumes every stack pattern. A miss
-  is silent without that contract — the job stops running while the required
-  `ci` sentinel stays green. ADR 0064 covers when a module glob such as
-  `supply-chain.yml`'s `scripts/supply-chain/**` is the safer pin.
+- **Workflow paths-filters.** 22 of 32 `.github/workflows/` files pin a
+  `scripts/` path. `ci.yml` has `autoreviewSuite`, `autoreviewRootRuntime`, and
+  `versionSkew`; `rootScripts` is recursive `scripts/**`. `infra.yml`,
+  `alerts-rules.yml`, `peg-policy-publication.yml`, and `schema-diff.yml` pin
+  individual files. The three Terraform filters copy `terraform.stacks.json`
+  `workflowAdmissionPatterns`, including `scripts/**`. `routing.test.mjs`
+  proves equality and subsumption because a miss can skip a job while the
+  required `ci` sentinel remains green. ADR 0064 defines when a module glob is
+  safer.
 - **Terraform stack registry.** `terraform.stacks.json` `changedPathPatterns`
   pins exact `scripts/` paths per stack. The broad workflow admission boundary
   covers the directory; `pnpm tf:test` enforces subsumption.
-- **Trusted-validator probes.** `pr-description.yml` runs the validator from the
-  PR's base ref via the base branch **name**, so it always resolves to the base
-  branch's current tip — never a snapshot from when a PR branched. One probe
-  path is enough once the target path is live on the base branch (issue 1904);
-  a move still needs a temporary dual probe for the commit that performs it.
-  ADR 0064 has the failure mode.
+- **Trusted-validator probes.** `pr-description.yml` resolves the validator
+  through the PR base branch name, so it uses the base tip. A move needs a
+  temporary dual probe; ADR 0064 records the failure mode.
 - **Production infrastructure contract pins.**
   `production-infra-identity-contract/workflow-inventory.mjs` pins exact script
   paths for the workflows it audits.
-- **External console pins.** The Codex Cloud environment console holds
-  `bootstrap/codex-cloud-setup.sh` and `bootstrap/codex-cloud-maintenance.sh`;
-  Claude Code on the web resolves `bootstrap/claude-code-web-setup.sh` through
-  `.claude/hooks/session-start.sh`. No repo grep reaches the console: moving
-  either needs an operator edit there.
-- **Reviewed-artifact byte pins.** `.gitattributes` pins
-  `scripts/mcp/upstash-mcp-launcher.mjs` to `text eol=lf`, and
-  `UPSTASH_MCP_LAUNCHER_SHA256` in `scripts/mcp/render-upstash-mcp-config.mjs`
-  hashes it — a move's depth fix alone changes both. Procedure:
+- **External console pins.** The Codex Cloud console holds two bootstrap paths;
+  Claude Code web resolves its bootstrap through `.claude/hooks/session-start.sh`.
+  A move needs an operator edit because repo grep cannot reach that console.
+- **Reviewed-artifact byte pins.** `.gitattributes` pins the Upstash launcher
+  EOL and `UPSTASH_MCP_LAUNCHER_SHA256` hashes it. A move changes both. See
   [`docs/notes/upstash-mcp-operator.md`](../docs/notes/upstash-mcp-operator.md).
 
 **Any new pin of a `scripts/` path must be listed here.** An unrecorded pin

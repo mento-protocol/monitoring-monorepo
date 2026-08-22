@@ -3,7 +3,7 @@ title: Agent Quality Gate — Mechanics
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-20
+last_verified: 2026-08-22
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -221,6 +221,16 @@ run, a `--skip-if-fresh` cache hit, and a package-script refusal all exit
 before it. After waiting, a `--skip-if-fresh` run re-checks freshness, so the
 pre-push hook that queued behind a manual warm-up run reuses that run's stamp
 instead of repeating its work.
+
+The current-run handles live in `scripts/gate/run-handles.sh`. The gate sources
+that module from its own `$script_source_dir` before it changes directory, and
+fails closed if the path is missing, unreadable, or not a regular file. The
+module provides run-token validation and pattern helpers, owns the marker-path
+state and test-ready barrier, and provides tagged-process discovery. Its
+path is included in `implementation_signature()`
+and changes to it route the gate self-test. The ready/release barrier is test
+only; it requires `NODE_ENV=test` and both lock-test paths, and normal runs do
+not enter it.
 
 The invariant the lock keeps is: **at every instant at most one process
 believes it holds it, and no waiter ever removes or renames another run's
