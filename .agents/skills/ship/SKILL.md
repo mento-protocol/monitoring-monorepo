@@ -5,7 +5,7 @@ title: Ship Skill
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-21
+last_verified: 2026-08-22
 doc_type: skill
 scope: repo-wide
 review_interval_days: 90
@@ -160,21 +160,33 @@ this body shape:
 ```markdown
 ## The Problem
 
-- Maximum three bullets that explain the problem in plain English.
+- Maximum three bullets. Explain what the system did before, what failed or
+  became difficult, and the concrete effect on users or operators.
 
 ## The Solution
 
-- Simple explanation of how this PR solves it, understandable before reading
-  the diff.
+- Explain what the system does after this PR, why that behavior improves the
+  situation, and any material limit or non-goal.
 
 ## Details
 
-- Implementation details, invariants, caveats, and scope boundaries.
+- Implementation details, class names, query syntax, exact limits, invariants,
+  caveats, and scope boundaries.
 
 ## Validation
 
 - Commands and results.
 ```
+
+Write the opening for an engineer who understands the product but has not read
+the diff. Lead with behavior and effect. Put implementation mechanisms under
+`## Details`. Before publishing, read only `## The Problem` and `## The
+Solution`. Rewrite them if a reader cannot explain the old behavior, new
+behavior, concrete benefit, and any material limit without reading the diff.
+Use Markdown prose or bullets in these sections. Raw HTML other than comments,
+paragraphs that contain it, and code blocks do not satisfy the opening-content
+check. HTML comments do not count themselves, but they do not invalidate
+adjacent Markdown prose.
 
 `scripts/pr/check-pr-description.mjs` enforces the first two sections and their
 order in CI, so no change log or other content may precede them. Put
