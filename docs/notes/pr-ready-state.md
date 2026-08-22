@@ -373,9 +373,9 @@ Field expectations:
   head is `reviewed`. A trusted top-level clean-run block also counts when
   `<!-- recent_review_start -->` and `<!-- recent_review_end -->` enclose it, it
   contains a Run ID, its full commit range ends at the current head, and its
-  comment was updated at or after the head. Empty reply-only reviews, skipped
-  runs, and rate-limit notices do not count. A head-bound request is `requested`
-  until a real run lands.
+  comment update time is at or after the current head update time. Empty
+  reply-only reviews, skipped runs, and rate-limit notices do not count. A
+  head-bound request is `requested` until a real run lands.
 - `requiredStatusContexts[]`: required check contexts from classic branch
   protection or branch rulesets. Ruleset-derived entries include status-check
   rules and required-workflow rules when their check names are present in the
