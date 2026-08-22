@@ -775,6 +775,52 @@ test("a fixed pattern in a dynamic group is still checked for staleness", () => 
   );
 });
 
+test("the schema refuses a noncanonical path segment", () => {
+  // `scripts/../package.json` is a real file to `existsSync`, so the staleness
+  // check would pass it — while the gate compares the changed path as a literal
+  // string and git never emits that spelling, so the arm can never fire. The
+  // two checks would disagree in the one direction that reads as healthy: a
+  // pattern that looks verified and routes nothing.
+  for (const pattern of [
+    "scripts/../package.json",
+    "./package.json",
+    "scripts/./gate/index.mjs",
+    "scripts//gate/index.mjs",
+    "..",
+  ]) {
+    assert.throws(
+      () => normalizeGroups(table({ id: "x", arms: [arm([pattern])] })),
+      /`\.` or `\.\.` segment|empty path segment/,
+      `${pattern} was accepted`,
+    );
+  }
+  // A dot INSIDE a segment is ordinary and must still be accepted.
+  assert.doesNotThrow(() =>
+    normalizeGroups(
+      table({ id: "x", arms: [arm([".npmrc", "scripts/a.test.mjs", "a..b"])] }),
+    ),
+  );
+});
+
+test("the signature pin reads whole entries, not substrings", () => {
+  // Both substring hazards, asserted against the parsed entry list: a name that
+  // is a substring of a listed entry is not itself listed, and a path that only
+  // appears in a comment is not an entry at all.
+  assert.ok(SIGNATURE_ENTRIES.includes("scripts/gate/routing-table/index.mjs"));
+  assert.ok(
+    !SIGNATURE_ENTRIES.includes("scripts/gate/routing-table/dex.mjs"),
+    "a substring of a listed entry was read as an entry",
+  );
+  assert.ok(
+    !SIGNATURE_ENTRIES.some((entry) => entry.includes("#")),
+    "a comment survived into the parsed entry list",
+  );
+  assert.ok(
+    SIGNATURE_ENTRIES.every((entry) => !/\s/.test(entry) && entry !== "\\"),
+    "the entry list holds something that is not a bare path word",
+  );
+});
+
 test("the schema refuses an unknown guard and an unknown field", () => {
   assert.throws(
     () =>
@@ -832,6 +878,45 @@ const SIGNATURE_SOURCE = bashFunctionSource(
   "scripts/agent-quality-gate.sh",
 );
 
+/**
+ * The paths `implementation_signature()` actually iterates, as whole words.
+ *
+ * Substring matching was the wrong question twice over: an unlisted `foo.mjs`
+ * passes if its name is a substring of a listed entry, and any mention in a
+ * comment satisfies the pin without the path ever being hashed. Both make the
+ * check report a pin that is not there, which is the `__missing__` freeze it
+ * exists to prevent.
+ *
+ * The list is a bare `for path in … ; do` word list, so it is read as one:
+ * take the span between the two, drop comments and line continuations, and
+ * split on whitespace. An entry that is not a whole word in that span is not an
+ * entry.
+ */
+const SIGNATURE_ENTRIES = (() => {
+  const span = /for path in\b([\s\S]*?);\s*do\b/.exec(SIGNATURE_SOURCE);
+  assert.ok(
+    span !== null,
+    "implementation_signature() no longer iterates a `for path in … ; do` list; this pin cannot read it",
+  );
+  const entries = span[1]
+    .replace(/#[^\n]*/g, "")
+    .replace(/\\\n/g, " ")
+    .split(/\s+/)
+    .filter((word) => word !== "");
+  // Sanity: the list must still hold the gate's own two files. If it does not,
+  // the span was parsed wrongly and every assertion below would be vacuous.
+  for (const known of [
+    "scripts/agent-quality-gate.sh",
+    "scripts/agent-quality-gate.test.sh",
+  ]) {
+    assert.ok(
+      entries.includes(known),
+      `parsed ${entries.length} signature entries and ${known} was not among them, so the span was read wrongly`,
+    );
+  }
+  return entries;
+})();
+
 test("implementation_signature() lists every routing-table module", () => {
   // THE load-bearing pin. A path `implementation_signature()` cannot `stat`
   // hashes as the literal `__missing__`, which FREEZES the signature — so
@@ -839,8 +924,8 @@ test("implementation_signature() lists every routing-table module", () => {
   // module added here and not there fails that way and only that way.
   for (const module of MODULES) {
     assert.ok(
-      SIGNATURE_SOURCE.includes(`gate/routing-table/${module}`),
-      `\`implementation_signature()\` in scripts/agent-quality-gate.sh does not list gate/routing-table/${module}. ` +
+      SIGNATURE_ENTRIES.includes(`scripts/gate/routing-table/${module}`),
+      `\`implementation_signature()\` in scripts/agent-quality-gate.sh does not list scripts/gate/routing-table/${module} as an entry. ` +
         "A missing entry hashes as `__missing__` and freezes the freshness signature.",
     );
   }
@@ -851,11 +936,13 @@ test("implementation_signature() lists no routing-table module that is gone", ()
   // signature cannot `stat` hashes as `__missing__` FOREVER, so the signature
   // stops moving and `--skip-if-fresh` reuses a stale stamp. A module that is
   // split or renamed leaves exactly this residue.
-  const listed = [
-    ...SIGNATURE_SOURCE.matchAll(
-      /scripts\/gate\/routing-table\/([\w.-]+\.mjs)/g,
-    ),
-  ].map((match) => match[1]);
+  // Whole entries, for the same reason as the forward check: a path mentioned
+  // in a comment is not something the signature hashes, and reading one as an
+  // entry would make this report a stale pin that does not exist.
+  const prefix = "scripts/gate/routing-table/";
+  const listed = SIGNATURE_ENTRIES.filter((entry) =>
+    entry.startsWith(prefix),
+  ).map((entry) => entry.slice(prefix.length));
   const stale = [...new Set(listed)].filter((name) => !MODULES.includes(name));
   assert.deepEqual(
     stale,

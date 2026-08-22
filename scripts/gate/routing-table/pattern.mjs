@@ -230,6 +230,20 @@ export function patternProblem(pattern) {
     return "contains `|`, which separates arms rather than belonging to one pattern";
   }
   if (pattern.includes('"') || pattern.includes("'")) return "contains a quote";
+  // A `.` or `..` segment resolves on the filesystem but not in a `case`.
+  // `scripts/../package.json` is a real, existing file to `existsSync`, so the
+  // staleness check would pass it — while the gate compares the changed path as
+  // a LITERAL STRING, and git never emits that spelling, so the arm can never
+  // fire. The two checks would disagree in the one direction that reads as
+  // healthy: a pattern that looks verified and routes nothing. A leading `./`
+  // is the same shape and equally unreachable.
+  const segments = pattern.split("/");
+  if (segments.includes(".") || segments.includes("..")) {
+    return "contains a `.` or `..` segment, which resolves on the filesystem but never appears in a changed path, so the arm could never match while the staleness check reported it fine";
+  }
+  if (pattern.includes("//")) {
+    return "contains an empty path segment (`//`), which no changed path carries";
+  }
   try {
     casePatternToRegExp(pattern);
   } catch (error) {

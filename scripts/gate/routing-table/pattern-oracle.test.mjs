@@ -112,15 +112,32 @@ function bashInterpreters() {
   return resolved;
 }
 
-/** Every distinct path pattern the table matches changed paths against. */
+/**
+ * A pattern completed at run time by the engine. Only these have no fixed text
+ * for bash to be asked about.
+ */
+const PLACEHOLDER = /\$\{[a-z_][a-z_0-9]*\}/;
+
+/**
+ * Every distinct path pattern the table matches changed paths against.
+ *
+ * The exclusion is on the PATTERN, not on the group it sits in. Excluding whole
+ * dynamic groups also excluded any fixed pattern sharing an arm with a
+ * placeholder — those are ordinary static patterns that bash can be asked about
+ * like any other, and skipping them left them out of the oracle corpus AND out
+ * of the expansion-character guard below, which is the check that keeps the
+ * corpus honest. The staleness check already draws the line this way.
+ */
 function tablePatterns() {
   const patterns = new Set();
-  for (const { subject, dynamic, arm } of walkArms(ROUTING_GROUPS)) {
-    // A dispatch on the root-manifest class switches on a verdict string, and
-    // an engine-computed group's patterns are built at run time from a value
-    // this test does not have. Neither is a path pattern.
-    if (subject !== "path" || dynamic !== null) continue;
-    for (const pattern of arm.patterns) patterns.add(pattern);
+  for (const { subject, arm } of walkArms(ROUTING_GROUPS)) {
+    // A dispatch on the root-manifest class switches on a verdict string, not a
+    // path, so none of its arms name one.
+    if (subject !== "path") continue;
+    for (const pattern of arm.patterns) {
+      if (PLACEHOLDER.test(pattern)) continue;
+      patterns.add(pattern);
+    }
   }
   return [...patterns];
 }
@@ -287,6 +304,39 @@ test("no corpus path carries a byte the line-based oracle cannot carry", () => {
     assert.ok(
       !path.includes("\n") && !path.includes("\t"),
       `path ${JSON.stringify(path)} holds a tab or newline, which the oracle's line protocol would split`,
+    );
+  }
+});
+
+test("a fixed pattern in a dynamic group reaches the oracle", () => {
+  // The exclusion is on the PATTERN, not the group. Excluding whole dynamic
+  // groups also dropped any fixed pattern sharing an arm with a placeholder —
+  // out of this corpus AND out of the expansion-character guard that keeps the
+  // corpus honest.
+  const collected = new Set();
+  for (const { subject, arm } of walkArms(ROUTING_GROUPS)) {
+    if (subject !== "path") continue;
+    for (const pattern of arm.patterns) collected.add(pattern);
+  }
+  const placeholders = [...collected].filter((pattern) =>
+    PLACEHOLDER.test(pattern),
+  );
+  assert.ok(
+    placeholders.length > 0,
+    "no placeholder pattern found; this test is asserting nothing",
+  );
+  for (const pattern of placeholders) {
+    assert.ok(
+      !patterns.includes(pattern),
+      `${pattern} has no fixed text for bash to be asked about`,
+    );
+  }
+  // Everything else the table matches paths against must be in the corpus.
+  for (const pattern of collected) {
+    if (PLACEHOLDER.test(pattern)) continue;
+    assert.ok(
+      patterns.includes(pattern),
+      `${pattern} never reached the oracle`,
     );
   }
 });
