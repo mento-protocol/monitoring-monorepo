@@ -6,6 +6,7 @@ import {
   lstatSync,
   mkdtempSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   renameSync,
@@ -21,6 +22,8 @@ import {
   assertStableEvidencePathAfterRead,
   buildBoundedReviewPrompts,
   createReviewInputCollector,
+  getIndexerHandlerInvariantChecklistDecisions,
+  getIndexerHandlerInvariantRoutingFamilies,
   isWithin,
   MAX_REVIEW_PROMPT_BYTES,
   readBoundedRegularFile,
@@ -33,6 +36,262 @@ import {
   utf8Size,
   writeReviewPromptOutputs,
 } from "./agent-autoreview-core.mjs";
+
+function walkTypeScriptFiles(directory) {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const entryPath = path.join(directory, entry.name);
+    return entry.isDirectory()
+      ? walkTypeScriptFiles(entryPath)
+      : /\.(?:ts|tsx|mts|cts)$/.test(entry.name)
+        ? [entryPath.split(path.sep).join("/")]
+        : [];
+  });
+}
+
+const repoRoot = path.resolve(import.meta.dirname, "..");
+const currentIndexerTests = walkTypeScriptFiles(
+  path.join(repoRoot, "indexer-envio", "test"),
+)
+  .map((testPath) =>
+    path.relative(repoRoot, testPath).split(path.sep).join("/"),
+  )
+  .sort();
+const currentIndexerSources = walkTypeScriptFiles(
+  path.join(repoRoot, "indexer-envio", "src"),
+)
+  .map((sourcePath) =>
+    path.relative(repoRoot, sourcePath).split(path.sep).join("/"),
+  )
+  .sort();
+
+for (const [label, paths, routed, excluded] of [
+  ["source", currentIndexerSources, 126, 5],
+  ["test", currentIndexerTests, 84, 5],
+]) {
+  const decisions = getIndexerHandlerInvariantChecklistDecisions(paths);
+  assert.equal(decisions.length, paths.length, `${label} decision count`);
+  assert.deepEqual(
+    decisions.map(({ path: decisionPath }) => decisionPath),
+    paths,
+    `${label} decisions preserve input order and paths`,
+  );
+  assert.equal(
+    decisions.filter(({ route }) => route).length,
+    routed,
+    `${label} routed total`,
+  );
+  assert.equal(
+    decisions.filter(({ route }) => !route).length,
+    excluded,
+    `${label} excluded total`,
+  );
+  for (const decision of decisions) {
+    assert.equal(typeof decision.route, "boolean", `${label} route is boolean`);
+    assert.equal(typeof decision.owner, "string", `${label} owner is a string`);
+    assert.notEqual(decision.owner, "", `${label} owner is non-empty`);
+    assert.notEqual(
+      decision.owner,
+      "future-typescript",
+      `${label} path has an explicit current owner: ${decision.path}`,
+    );
+  }
+}
+assert.equal(currentIndexerSources.length, 131, "current source TS inventory");
+assert.equal(currentIndexerTests.length, 89, "current test TS inventory");
+
+for (const [candidatePath, route, owner] of [
+  ["indexer-envio/src/swap.ts", true, "source-runtime"],
+  ["indexer-envio/src/pool/types.ts", false, "source-excluded-type-only"],
+  ["indexer-envio/src/handlers/broker.ts", true, "handler-modules"],
+  [
+    "indexer-envio/src/handlers/liquity/troveManagerPreloadContext.ts",
+    false,
+    "liquity-type-only",
+  ],
+  ["indexer-envio/src/rpc/effects.ts", true, "rpc-effects"],
+  ["indexer-envio/src/rpc/log.ts", false, "rpc-logging-only"],
+  ["indexer-envio/src/rpc/http-test-mock-bridge.ts", true, "rpc-effects"],
+  ["indexer-envio/src/rpc/http-test-mocks.ts", true, "rpc-effects"],
+  ["indexer-envio/src/pool/self-heal.ts", true, "pool-runtime"],
+  ["indexer-envio/src/bridge.ts", true, "source-runtime"],
+  ["indexer-envio/src/constants.ts", true, "source-runtime"],
+  ["indexer-envio/src/wormhole/chainIds.ts", true, "wormhole-runtime"],
+  ["indexer-envio/src/wormhole/detail.ts", true, "wormhole-runtime"],
+  ["indexer-envio/src/wormhole/handlerContext.ts", false, "wormhole-type-only"],
+  ["indexer-envio/src/wormhole/nttAddresses.ts", true, "wormhole-runtime"],
+  ["indexer-envio/src/wormhole/pairing.ts", true, "wormhole-runtime"],
+  [
+    "indexer-envio/src/wormhole/scratchWarnings.ts",
+    false,
+    "wormhole-warning-only",
+  ],
+  ["indexer-envio/src/wormhole/status.ts", true, "wormhole-runtime"],
+  ["indexer-envio/test/bridge.test.ts", true, "invariant-tests"],
+  ["indexer-envio/test/feeTokenAllowlist.test.ts", true, "invariant-tests"],
+  [
+    "indexer-envio/test/helpers/indexerTestHarness.ts",
+    true,
+    "test-invariant-support",
+  ],
+  ["indexer-envio/test/hermeticGuard.test.ts", true, "test-invariant-support"],
+  ["indexer-envio/test/self-heal.test.ts", true, "invariant-tests"],
+  ["indexer-envio/test/startBlockInvariant.test.ts", true, "invariant-tests"],
+  ["indexer-envio/test/swap.test.ts", true, "invariant-tests"],
+  [
+    "indexer-envio/test/wormholeScratchWarnings.test.ts",
+    false,
+    "test-excluded",
+  ],
+  ["indexer-envio/abis/FPMM.json", true, "abi-runtime-inputs"],
+  [
+    "indexer-envio/abis/liquity/AddressesRegistry.json",
+    false,
+    "abi-nonruntime-inputs",
+  ],
+  [
+    "indexer-envio/abis/wormhole/NttDeployHelper.json",
+    false,
+    "abi-nonruntime-inputs",
+  ],
+  ["indexer-envio/config/fx-calendar.json", true, "config-runtime-inputs"],
+  ["indexer-envio/config.multichain.mainnet.yaml", true, "root-runtime-inputs"],
+  ["indexer-envio/schema.graphql", true, "root-runtime-inputs"],
+  ["indexer-envio/vitest.config.ts", true, "test-runtime-inputs"],
+  ["indexer-envio/vitest.fail-closed.config.ts", true, "test-runtime-inputs"],
+  ["indexer-envio/vitest.hermetic-setup.ts", true, "test-runtime-inputs"],
+]) {
+  assert.deepEqual(
+    getIndexerHandlerInvariantChecklistDecisions([candidatePath]),
+    [{ path: candidatePath, route, owner }],
+    `${candidatePath} keeps its exact routing owner`,
+  );
+}
+
+for (const extension of ["ts", "tsx", "mts", "cts"]) {
+  for (const scope of ["src", "test"]) {
+    const candidatePath = `indexer-envio/${scope}/future-handler.${extension}`;
+    assert.deepEqual(
+      getIndexerHandlerInvariantChecklistDecisions([candidatePath]),
+      [
+        {
+          path: candidatePath,
+          route: false,
+          owner: "future-typescript",
+        },
+      ],
+    );
+  }
+}
+assert.deepEqual(
+  getIndexerHandlerInvariantChecklistDecisions([
+    "indexer-envio/test/documentation-catalog.test.ts",
+  ]),
+  [
+    {
+      path: "indexer-envio/test/documentation-catalog.test.ts",
+      route: false,
+      owner: "future-typescript",
+    },
+  ],
+  "an unowned TypeScript test does not route the handler-invariant checklist",
+);
+for (const [candidatePath, owner] of [
+  ["indexer-envio/src/handlers/documentation-catalog.ts", "future-typescript"],
+  ["indexer-envio/src/rpc/documentation-catalog.ts", "future-typescript"],
+  [
+    "indexer-envio/abis/documentation-catalog.json",
+    "outside-indexer-handler-invariant-scope",
+  ],
+  [
+    "indexer-envio/config/documentation-catalog.json",
+    "outside-indexer-handler-invariant-scope",
+  ],
+]) {
+  assert.deepEqual(
+    getIndexerHandlerInvariantChecklistDecisions([candidatePath]),
+    [{ path: candidatePath, route: false, owner }],
+    `${candidatePath} does not inherit a broad checklist owner`,
+  );
+}
+for (const outsidePath of [
+  "indexer-envio/.env.example",
+  "indexer-envio/envio-env.d.ts",
+  "indexer-envio/package.json",
+  "indexer-envio/scripts/generateNttAddresses.mjs",
+  "indexer-envio/tsconfig.json",
+  "indexer-envio/src/future-handler.js",
+  "ui-dashboard/src/future-handler.ts",
+]) {
+  assert.deepEqual(
+    getIndexerHandlerInvariantChecklistDecisions([outsidePath]),
+    [
+      {
+        path: outsidePath,
+        route: false,
+        owner: "outside-indexer-handler-invariant-scope",
+      },
+    ],
+  );
+}
+
+const frozenIndexerFamilies = getIndexerHandlerInvariantRoutingFamilies();
+const copiedIndexerFamilies = getIndexerHandlerInvariantRoutingFamilies();
+const isDeeplyFrozen = (value) =>
+  value === null ||
+  typeof value !== "object" ||
+  (Object.isFrozen(value) && Object.values(value).every(isDeeplyFrozen));
+assert.ok(isDeeplyFrozen(frozenIndexerFamilies));
+assert.notStrictEqual(frozenIndexerFamilies, copiedIndexerFamilies);
+assert.notStrictEqual(frozenIndexerFamilies[0], copiedIndexerFamilies[0]);
+assert.throws(() => frozenIndexerFamilies.push({}), TypeError);
+const frozenExactIndexerFamily = frozenIndexerFamilies.find(
+  ({ exact }) => exact !== undefined,
+);
+const frozenFallbackIndexerFamily = frozenIndexerFamilies.find(
+  ({ fallback }) => fallback !== undefined,
+);
+assert.ok(frozenExactIndexerFamily);
+assert.ok(frozenFallbackIndexerFamily);
+assert.throws(() => frozenExactIndexerFamily.exact.push("changed"), TypeError);
+assert.throws(
+  () => frozenFallbackIndexerFamily.fallback.prefixes.push("changed"),
+  TypeError,
+);
+assert.deepEqual(
+  getIndexerHandlerInvariantChecklistDecisions(["indexer-envio/src/swap.ts"]),
+  [
+    {
+      path: "indexer-envio/src/swap.ts",
+      route: true,
+      owner: "source-runtime",
+    },
+  ],
+  "a caller cannot mutate later classifier decisions through the family view",
+);
+
+assert.throws(
+  () =>
+    getIndexerHandlerInvariantChecklistDecisions(
+      "indexer-envio/src/indexer.ts",
+    ),
+  /array of strings/,
+);
+assert.throws(
+  () =>
+    getIndexerHandlerInvariantChecklistDecisions([
+      "indexer-envio/src/indexer.ts",
+      1,
+    ]),
+  /array of strings/,
+);
+assert.doesNotThrow(
+  () =>
+    getIndexerHandlerInvariantChecklistDecisions([
+      ...currentIndexerSources,
+      ...currentIndexerTests,
+    ]),
+  "current family definitions must not overlap",
+);
 
 const containmentRoot = path.join(tmpdir(), "autoreview-reviewed-repo");
 assert.equal(isWithin(containmentRoot, containmentRoot), true);

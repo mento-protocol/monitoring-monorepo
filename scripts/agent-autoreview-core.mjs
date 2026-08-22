@@ -2313,3 +2313,649 @@ export function serializeSafeUntrackedFile(
   );
   return `# Untracked File\npath: ${JSON.stringify(displayPath)}\nmode: ${mode}\n${records.join("")}`;
 }
+
+// One classifier owns handler-invariant routing for both autoreview and the
+// quality gate's data model. Callers receive a detached, deeply frozen view so
+// they can derive their own representation without changing later decisions.
+const INDEXER_HANDLER_INVARIANT_FAMILIES =
+  validateAndFreezeIndexerHandlerInvariantFamilies([
+    {
+      owner: "abi-runtime-inputs",
+      route: true,
+      exact: [
+        "indexer-envio/abis/BiPoolManager.json",
+        "indexer-envio/abis/BreakerBox.json",
+        "indexer-envio/abis/Broker.json",
+        "indexer-envio/abis/ERC20.json",
+        "indexer-envio/abis/FPMM.json",
+        "indexer-envio/abis/FPMMFactory.json",
+        "indexer-envio/abis/MedianDeltaBreaker.json",
+        "indexer-envio/abis/OpenLiquidityStrategy.json",
+        "indexer-envio/abis/SortedOracles.json",
+        "indexer-envio/abis/Susds.json",
+        "indexer-envio/abis/ValueDeltaBreaker.json",
+        "indexer-envio/abis/VirtualPoolFactory.json",
+        "indexer-envio/abis/liquity/ActivePool.json",
+        "indexer-envio/abis/liquity/BorrowerOperations.json",
+        "indexer-envio/abis/liquity/CDPLiquidityStrategy.json",
+        "indexer-envio/abis/liquity/CollateralRegistry.json",
+        "indexer-envio/abis/liquity/DefaultPool.json",
+        "indexer-envio/abis/liquity/FXPriceFeed.json",
+        "indexer-envio/abis/liquity/ReserveTroveFactory.json",
+        "indexer-envio/abis/liquity/StabilityPool.json",
+        "indexer-envio/abis/liquity/SystemParams.json",
+        "indexer-envio/abis/liquity/TroveManager.json",
+        "indexer-envio/abis/liquity/TroveNFT.json",
+        "indexer-envio/abis/wormhole/NttManager.json",
+        "indexer-envio/abis/wormhole/WormholeTransceiver.json",
+      ],
+    },
+    {
+      owner: "config-runtime-inputs",
+      route: true,
+      exact: [
+        "indexer-envio/config/aggregators.json",
+        "indexer-envio/config/deployment-namespaces.json",
+        "indexer-envio/config/fx-calendar.json",
+        "indexer-envio/config/nttAddresses.json",
+        "indexer-envio/config/oracle-reporters.json",
+        "indexer-envio/config/protocolActors.json",
+        "indexer-envio/config/replay-integrity.json",
+      ],
+    },
+    {
+      owner: "abi-nonruntime-inputs",
+      route: false,
+      exact: [
+        "indexer-envio/abis/liquity/AddressesRegistry.json",
+        "indexer-envio/abis/wormhole/NttDeployHelper.json",
+      ],
+    },
+    {
+      owner: "root-runtime-inputs",
+      route: true,
+      exact: [
+        "indexer-envio/config.multichain.bridge-only.yaml",
+        "indexer-envio/config.multichain.mainnet.yaml",
+        "indexer-envio/config.multichain.testnet.yaml",
+        "indexer-envio/schema.graphql",
+      ],
+    },
+    {
+      owner: "test-runtime-inputs",
+      route: true,
+      exact: [
+        "indexer-envio/vitest.config.ts",
+        "indexer-envio/vitest.fail-closed.config.ts",
+        "indexer-envio/vitest.hermetic-setup.ts",
+      ],
+    },
+    {
+      owner: "source-excluded-type-only",
+      route: false,
+      exact: ["indexer-envio/src/pool/types.ts"],
+    },
+    {
+      owner: "liquity-type-only",
+      route: false,
+      exact: [
+        "indexer-envio/src/handlers/liquity/troveManagerPreloadContext.ts",
+      ],
+    },
+    {
+      owner: "wormhole-type-only",
+      route: false,
+      exact: ["indexer-envio/src/wormhole/handlerContext.ts"],
+    },
+    {
+      owner: "wormhole-warning-only",
+      route: false,
+      exact: ["indexer-envio/src/wormhole/scratchWarnings.ts"],
+    },
+    {
+      owner: "wormhole-runtime",
+      route: true,
+      exact: [
+        "indexer-envio/src/wormhole/chainIds.ts",
+        "indexer-envio/src/wormhole/detail.ts",
+        "indexer-envio/src/wormhole/nttAddresses.ts",
+        "indexer-envio/src/wormhole/pairing.ts",
+        "indexer-envio/src/wormhole/status.ts",
+      ],
+    },
+    {
+      owner: "handler-modules",
+      route: true,
+      exact: [
+        "indexer-envio/src/handlers/biPoolManager.ts",
+        "indexer-envio/src/handlers/breakerBox.ts",
+        "indexer-envio/src/handlers/broker.ts",
+        "indexer-envio/src/handlers/feeToken.ts",
+        "indexer-envio/src/handlers/fpmm.ts",
+        "indexer-envio/src/handlers/fpmm/factory.ts",
+        "indexer-envio/src/handlers/fpmm/limits-and-fees.ts",
+        "indexer-envio/src/handlers/fpmm/liquidity.ts",
+        "indexer-envio/src/handlers/fpmm/oracle-recovery.ts",
+        "indexer-envio/src/handlers/fpmm/state-sync.ts",
+        "indexer-envio/src/handlers/liquity/batchReplay.ts",
+        "indexer-envio/src/handlers/liquity/bootstrap.ts",
+        "indexer-envio/src/handlers/liquity/bootstrapHandler.ts",
+        "indexer-envio/src/handlers/liquity/borrowerOperations.ts",
+        "indexer-envio/src/handlers/liquity/borrowingRevenue.ts",
+        "indexer-envio/src/handlers/liquity/cdpLiquidityStrategy.ts",
+        "indexer-envio/src/handlers/liquity/collateralRegistry.ts",
+        "indexer-envio/src/handlers/liquity/config.ts",
+        "indexer-envio/src/handlers/liquity/instance.ts",
+        "indexer-envio/src/handlers/liquity/keys.ts",
+        "indexer-envio/src/handlers/liquity/math.ts",
+        "indexer-envio/src/handlers/liquity/operations.ts",
+        "indexer-envio/src/handlers/liquity/pendingOperations.ts",
+        "indexer-envio/src/handlers/liquity/pools.ts",
+        "indexer-envio/src/handlers/liquity/priceFeed.ts",
+        "indexer-envio/src/handlers/liquity/reserveTroveFactory.ts",
+        "indexer-envio/src/handlers/liquity/stabilityPool.ts",
+        "indexer-envio/src/handlers/liquity/stabilityPoolLoss.ts",
+        "indexer-envio/src/handlers/liquity/systemParams.ts",
+        "indexer-envio/src/handlers/liquity/troveManager.ts",
+        "indexer-envio/src/handlers/liquity/troveManagerPreload.ts",
+        "indexer-envio/src/handlers/liquity/troveManagerTransitions.ts",
+        "indexer-envio/src/handlers/liquity/troveNFT.ts",
+        "indexer-envio/src/handlers/liquity/troveOperationSnapshot.ts",
+        "indexer-envio/src/handlers/liquity/troveUpdates.ts",
+        "indexer-envio/src/handlers/liquity/troves.ts",
+        "indexer-envio/src/handlers/medianDeltaBreaker.ts",
+        "indexer-envio/src/handlers/openLiquidityStrategy.ts",
+        "indexer-envio/src/handlers/oracleExpiryState.ts",
+        "indexer-envio/src/handlers/oracleFeedState.ts",
+        "indexer-envio/src/handlers/rateFeed.ts",
+        "indexer-envio/src/handlers/sortedOracles.ts",
+        "indexer-envio/src/handlers/stables/bootstrap.ts",
+        "indexer-envio/src/handlers/stables/classifyKind.ts",
+        "indexer-envio/src/handlers/stables/config.ts",
+        "indexer-envio/src/handlers/stables/custody.ts",
+        "indexer-envio/src/handlers/stables/custodyState.ts",
+        "indexer-envio/src/handlers/stables/dailyFlush.ts",
+        "indexer-envio/src/handlers/stables/feeLeg.ts",
+        "indexer-envio/src/handlers/stables/transfer.ts",
+        "indexer-envio/src/handlers/steth.ts",
+        "indexer-envio/src/handlers/steth/dailySnapshots.ts",
+        "indexer-envio/src/handlers/steth/movements.ts",
+        "indexer-envio/src/handlers/steth/positions.ts",
+        "indexer-envio/src/handlers/steth/shared.ts",
+        "indexer-envio/src/handlers/susds/dailySnapshots.ts",
+        "indexer-envio/src/handlers/susds/movements.ts",
+        "indexer-envio/src/handlers/susds/positions.ts",
+        "indexer-envio/src/handlers/susds/shared.ts",
+        "indexer-envio/src/handlers/susdsEvents.ts",
+        "indexer-envio/src/handlers/valueDeltaBreaker.ts",
+        "indexer-envio/src/handlers/virtualPool.ts",
+        "indexer-envio/src/handlers/wormhole/nttManager.ts",
+        "indexer-envio/src/handlers/wormhole/wormholeTransceiver.ts",
+      ],
+    },
+    {
+      owner: "rpc-effects",
+      route: true,
+      exact: [
+        "indexer-envio/src/rpc/biPoolManager.ts",
+        "indexer-envio/src/rpc/block-fallback.ts",
+        "indexer-envio/src/rpc/block.ts",
+        "indexer-envio/src/rpc/breakers.ts",
+        "indexer-envio/src/rpc/client.ts",
+        "indexer-envio/src/rpc/effects.ts",
+        "indexer-envio/src/rpc/http-test-mock-bridge.ts",
+        "indexer-envio/src/rpc/http-test-mocks.ts",
+        "indexer-envio/src/rpc/median-timestamp-effect.ts",
+        "indexer-envio/src/rpc/oracle-report-timestamps-effect.ts",
+        "indexer-envio/src/rpc/oracle-state.ts",
+        "indexer-envio/src/rpc/pool-fees.ts",
+        "indexer-envio/src/rpc/pool-state.ts",
+        "indexer-envio/src/rpc/stable-fetchers.ts",
+        "indexer-envio/src/rpc/stables.ts",
+        "indexer-envio/src/rpc/steth.ts",
+        "indexer-envio/src/rpc/susds.ts",
+        "indexer-envio/src/rpc/tracked-effect.ts",
+      ],
+    },
+    {
+      owner: "pool-runtime",
+      route: true,
+      exact: [
+        "indexer-envio/src/pool/health.ts",
+        "indexer-envio/src/pool/oracle-rollup.ts",
+        "indexer-envio/src/pool/self-heal.ts",
+        "indexer-envio/src/pool/snapshots.ts",
+        "indexer-envio/src/pool/sources.ts",
+        "indexer-envio/src/pool/upsert-stages.ts",
+      ],
+    },
+    {
+      owner: "rpc-logging-only",
+      route: false,
+      exact: ["indexer-envio/src/rpc/log.ts"],
+    },
+    {
+      owner: "source-runtime",
+      route: true,
+      exact: [
+        "indexer-envio/src/EventHandlers.ts",
+        "indexer-envio/src/EventHandlersBridgeOnly.ts",
+        "indexer-envio/src/abis.ts",
+        "indexer-envio/src/aggregators.ts",
+        "indexer-envio/src/bridge.ts",
+        "indexer-envio/src/breakers.ts",
+        "indexer-envio/src/constants.ts",
+        "indexer-envio/src/contractAddresses.ts",
+        "indexer-envio/src/deviationBreach.ts",
+        "indexer-envio/src/env.ts",
+        "indexer-envio/src/feeToken.ts",
+        "indexer-envio/src/healthScore.ts",
+        "indexer-envio/src/helpers.ts",
+        "indexer-envio/src/indexer.ts",
+        "indexer-envio/src/liquidityStrategies.ts",
+        "indexer-envio/src/oracleExpiryState.ts",
+        "indexer-envio/src/oracleFeedState.ts",
+        "indexer-envio/src/oracleJump.ts",
+        "indexer-envio/src/oracleReporters.ts",
+        "indexer-envio/src/oracleSnapshotRetention.ts",
+        "indexer-envio/src/performance.ts",
+        "indexer-envio/src/pool.ts",
+        "indexer-envio/src/priceDifference.ts",
+        "indexer-envio/src/protocol-actors.ts",
+        "indexer-envio/src/protocolFeeSnapshot.ts",
+        "indexer-envio/src/rpc.ts",
+        "indexer-envio/src/startupChecks.ts",
+        "indexer-envio/src/swap.ts",
+        "indexer-envio/src/tradingLimits.ts",
+        "indexer-envio/src/usd.ts",
+        "indexer-envio/src/volumeSnapshots.ts",
+        "indexer-envio/src/volumeWindowFlush.ts",
+        "indexer-envio/src/volumeWindowSnapshot.ts",
+      ],
+    },
+    {
+      owner: "test-excluded",
+      route: false,
+      exact: [
+        "indexer-envio/test/aggregators-parity.test.ts",
+        "indexer-envio/test/deployment-namespaces.test.ts",
+        "indexer-envio/test/oracle-reporters-parity.test.ts",
+        "indexer-envio/test/script-findings.test.ts",
+        "indexer-envio/test/wormholeScratchWarnings.test.ts",
+      ],
+    },
+    {
+      owner: "test-invariant-support",
+      route: true,
+      exact: [
+        "indexer-envio/test/helpers/eventFixtures.ts",
+        "indexer-envio/test/helpers/httpRpc.ts",
+        "indexer-envio/test/helpers/indexerTestHarness.ts",
+        "indexer-envio/test/helpers/makePool.ts",
+        "indexer-envio/test/hermeticGuard.test.ts",
+        "indexer-envio/test/setup/publish-test-rpc.ts",
+      ],
+    },
+    {
+      owner: "invariant-tests",
+      route: true,
+      exact: [
+        "indexer-envio/test/aggregators.test.ts",
+        "indexer-envio/test/biPoolManager.test.ts",
+        "indexer-envio/test/blockFallback.test.ts",
+        "indexer-envio/test/breakerBootstrapBackoff.test.ts",
+        "indexer-envio/test/breakerHaltSync.test.ts",
+        "indexer-envio/test/breakerHandlers.test.ts",
+        "indexer-envio/test/breakerScenarios.test.ts",
+        "indexer-envio/test/breakers.test.ts",
+        "indexer-envio/test/bridge.test.ts",
+        "indexer-envio/test/bridgeHandlers.test.ts",
+        "indexer-envio/test/broker.test.ts",
+        "indexer-envio/test/code-quality-invariants.test.ts",
+        "indexer-envio/test/config-contracts.test.ts",
+        "indexer-envio/test/crossChainNamespacing.test.ts",
+        "indexer-envio/test/dailySnapshot.test.ts",
+        "indexer-envio/test/decimals.test.ts",
+        "indexer-envio/test/deviationBreach.test.ts",
+        "indexer-envio/test/deviationThresholdSharedConfigSync.test.ts",
+        "indexer-envio/test/dynamicRegistration.test.ts",
+        "indexer-envio/test/effects.test.ts",
+        "indexer-envio/test/feeUpdated.test.ts",
+        "indexer-envio/test/feeTokenAllowlist.test.ts",
+        "indexer-envio/test/feeTokenSharedConfigSync.test.ts",
+        "indexer-envio/test/fetchFees.test.ts",
+        "indexer-envio/test/fixtures/failClosedSortedOracles.case.ts",
+        "indexer-envio/test/fpmmBatchOrdering.test.ts",
+        "indexer-envio/test/fx-calendar.test.ts",
+        "indexer-envio/test/getPoolsByFeed.test.ts",
+        "indexer-envio/test/healthScore.test.ts",
+        "indexer-envio/test/healthStatusParity.test.ts",
+        "indexer-envio/test/hyperRpcToken.test.ts",
+        "indexer-envio/test/liquidityStrategies.test.ts",
+        "indexer-envio/test/liquity.test.ts",
+        "indexer-envio/test/liquityBatchReplayIdempotency.test.ts",
+        "indexer-envio/test/liquityTroveLifecycle.test.ts",
+        "indexer-envio/test/medianTimestampEffects.test.ts",
+        "indexer-envio/test/openLiquidityStrategy.test.ts",
+        "indexer-envio/test/oracle-rollup.test.ts",
+        "indexer-envio/test/oracleExpiryState.test.ts",
+        "indexer-envio/test/oracleFeedState.test.ts",
+        "indexer-envio/test/oracleFeedStateFailClosed.test.ts",
+        "indexer-envio/test/oracleFeedStateHandlers.test.ts",
+        "indexer-envio/test/oracleJump.test.ts",
+        "indexer-envio/test/oracleReportedMedianParity.test.ts",
+        "indexer-envio/test/oracleSnapshotRetention.test.ts",
+        "indexer-envio/test/performance.test.ts",
+        "indexer-envio/test/pool-helpers.test.ts",
+        "indexer-envio/test/pool.test.ts",
+        "indexer-envio/test/poolDailyFeeSnapshot.test.ts",
+        "indexer-envio/test/priceDifference.test.ts",
+        "indexer-envio/test/protocol-actors.test.ts",
+        "indexer-envio/test/protocol-fees.test.ts",
+        "indexer-envio/test/protocolFeeSnapshot.property.test.ts",
+        "indexer-envio/test/rateFeedDependencies.test.ts",
+        "indexer-envio/test/rateFeedHandlers.test.ts",
+        "indexer-envio/test/rebalancedUsd.test.ts",
+        "indexer-envio/test/rpc-fetchers.test.ts",
+        "indexer-envio/test/rpcClient.test.ts",
+        "indexer-envio/test/self-heal.test.ts",
+        "indexer-envio/test/snapshots.test.ts",
+        "indexer-envio/test/stables.test.ts",
+        "indexer-envio/test/stablesFeeLeg.test.ts",
+        "indexer-envio/test/stateSyncReconcile.test.ts",
+        "indexer-envio/test/steth.test.ts",
+        "indexer-envio/test/susds.test.ts",
+        "indexer-envio/test/swap.test.ts",
+        "indexer-envio/test/swap-reserves.test.ts",
+        "indexer-envio/test/startBlockInvariant.test.ts",
+        "indexer-envio/test/tradingLimitConfigChange.test.ts",
+        "indexer-envio/test/tradingLimits.test.ts",
+        "indexer-envio/test/upsertPoolIdempotency.test.ts",
+        "indexer-envio/test/upsertPoolStages.test.ts",
+        "indexer-envio/test/usd.test.ts",
+        "indexer-envio/test/volumeSnapshots.test.ts",
+        "indexer-envio/test/volumeWindowSnapshot.property.test.ts",
+        "indexer-envio/test/volumeWindowSnapshot.test.ts",
+        "indexer-envio/test/wormholeCompleteFlow.test.ts",
+        "indexer-envio/test/wrappedExchangeGate.test.ts",
+      ],
+    },
+    {
+      owner: "future-typescript",
+      route: false,
+      fallback: {
+        prefixes: ["indexer-envio/src/", "indexer-envio/test/"],
+        extensions: ["ts", "tsx", "mts", "cts"],
+      },
+    },
+  ]);
+
+function indexerRoutingFamilyError(message) {
+  throw new Error(
+    `invalid indexer handler invariant routing families: ${message}`,
+  );
+}
+
+function assertIndexerRoutingStringList(value, where) {
+  if (
+    !Array.isArray(value) ||
+    value.length === 0 ||
+    value.some((entry) => typeof entry !== "string" || entry === "")
+  ) {
+    indexerRoutingFamilyError(`${where} must be a non-empty string array`);
+  }
+  if (new Set(value).size !== value.length) {
+    indexerRoutingFamilyError(`${where} contains a duplicate`);
+  }
+}
+
+function isCanonicalIndexerRoutingPath(value) {
+  return (
+    /^[A-Za-z0-9._/@+-]+$/.test(value) &&
+    value.startsWith("indexer-envio/") &&
+    !value.startsWith("/") &&
+    !value.includes("//") &&
+    !value.split("/").some((segment) => segment === "." || segment === "..")
+  );
+}
+
+function isCanonicalIndexerRoutingFilePath(value) {
+  return isCanonicalIndexerRoutingPath(value) && !value.endsWith("/");
+}
+
+function validateIndexerHandlerInvariantRoutingFamilies(families) {
+  if (!Array.isArray(families) || families.length === 0) {
+    indexerRoutingFamilyError("the family list must be non-empty");
+  }
+
+  const owners = new Set();
+  const explicitFamilies = [];
+  const fallbackFamilies = [];
+  for (const [index, family] of families.entries()) {
+    const where = `family ${index}`;
+    if (
+      family === null ||
+      typeof family !== "object" ||
+      Array.isArray(family)
+    ) {
+      indexerRoutingFamilyError(`${where} must be an object`);
+    }
+    const allowedKeys = new Set(["owner", "route", "exact", "fallback"]);
+    const unknownKeys = Object.keys(family).filter(
+      (key) => !allowedKeys.has(key),
+    );
+    if (unknownKeys.length > 0) {
+      indexerRoutingFamilyError(
+        `${where} has unknown keys: ${unknownKeys.join(", ")}`,
+      );
+    }
+    if (typeof family.owner !== "string" || family.owner.trim() === "") {
+      indexerRoutingFamilyError(`${where}.owner must be a non-empty string`);
+    }
+    if (owners.has(family.owner)) {
+      indexerRoutingFamilyError(`owner ${family.owner} is duplicated`);
+    }
+    owners.add(family.owner);
+    if (typeof family.route !== "boolean") {
+      indexerRoutingFamilyError(`${where}.route must be boolean`);
+    }
+
+    const strategies = ["exact", "fallback"].filter(
+      (key) => family[key] !== undefined,
+    );
+    if (strategies.length !== 1) {
+      indexerRoutingFamilyError(
+        `${where} must define exactly one of exact or fallback`,
+      );
+    }
+
+    if (family.exact !== undefined) {
+      assertIndexerRoutingStringList(family.exact, `${where}.exact`);
+      if (
+        family.exact.some((entry) => !isCanonicalIndexerRoutingFilePath(entry))
+      ) {
+        indexerRoutingFamilyError(
+          `${where}.exact contains a noncanonical or Bash-unsafe literal path`,
+        );
+      }
+      explicitFamilies.push(family);
+      continue;
+    }
+
+    const fallback = family.fallback;
+    if (
+      fallback === null ||
+      typeof fallback !== "object" ||
+      Array.isArray(fallback) ||
+      Object.keys(fallback).sort().join(",") !== "extensions,prefixes"
+    ) {
+      indexerRoutingFamilyError(
+        `${where}.fallback must define only prefixes and extensions`,
+      );
+    }
+    assertIndexerRoutingStringList(
+      fallback.prefixes,
+      `${where}.fallback.prefixes`,
+    );
+    assertIndexerRoutingStringList(
+      fallback.extensions,
+      `${where}.fallback.extensions`,
+    );
+    const requiredPrefixes = ["indexer-envio/src/", "indexer-envio/test/"];
+    const requiredExtensions = ["ts", "tsx", "mts", "cts"];
+    if (
+      fallback.prefixes.some(
+        (prefix) =>
+          !prefix.endsWith("/") || !isCanonicalIndexerRoutingPath(prefix),
+      ) ||
+      fallback.extensions.some((extension) => !/^[a-z0-9]+$/.test(extension)) ||
+      fallback.prefixes.length !== requiredPrefixes.length ||
+      requiredPrefixes.some((prefix) => !fallback.prefixes.includes(prefix)) ||
+      fallback.extensions.length !== requiredExtensions.length ||
+      requiredExtensions.some(
+        (extension) => !fallback.extensions.includes(extension),
+      )
+    ) {
+      indexerRoutingFamilyError(
+        `${where}.fallback must define only the canonical src/test TypeScript scope`,
+      );
+    }
+    if (family.route) {
+      indexerRoutingFamilyError(`${where}.fallback must remain unclassified`);
+    }
+    fallbackFamilies.push(family);
+  }
+
+  if (fallbackFamilies.length !== 1) {
+    indexerRoutingFamilyError("exactly one future fallback family is required");
+  }
+
+  const exactPaths = explicitFamilies.flatMap(({ exact = [] }) => exact);
+  for (const candidatePath of exactPaths) {
+    const matches = explicitFamilies.filter((family) =>
+      matchesIndexerHandlerInvariantFamily(family, candidatePath),
+    );
+    if (matches.length !== 1) {
+      indexerRoutingFamilyError(
+        `explicit path ${candidatePath} has ${matches.length} owners: ${matches
+          .map(({ owner }) => owner)
+          .join(", ")}`,
+      );
+    }
+  }
+
+  return families;
+}
+
+function validateAndFreezeIndexerHandlerInvariantFamilies(families) {
+  validateIndexerHandlerInvariantRoutingFamilies(families);
+  return deepFreezeIndexerRoutingValue(families);
+}
+
+function deepFreezeIndexerRoutingValue(value) {
+  if (value !== null && typeof value === "object" && !Object.isFrozen(value)) {
+    Object.freeze(value);
+    for (const nested of Object.values(value)) {
+      deepFreezeIndexerRoutingValue(nested);
+    }
+  }
+  return value;
+}
+
+function copyIndexerHandlerInvariantFamily(family) {
+  return {
+    owner: family.owner,
+    route: family.route,
+    ...(family.exact === undefined ? {} : { exact: [...family.exact] }),
+    ...(family.fallback === undefined
+      ? {}
+      : {
+          fallback: {
+            prefixes: [...family.fallback.prefixes],
+            extensions: [...family.fallback.extensions],
+          },
+        }),
+  };
+}
+
+export function getIndexerHandlerInvariantRoutingFamilies() {
+  return deepFreezeIndexerRoutingValue(
+    INDEXER_HANDLER_INVARIANT_FAMILIES.map(copyIndexerHandlerInvariantFamily),
+  );
+}
+
+function matchesIndexerHandlerInvariantFamily(family, candidatePath) {
+  return family.exact?.includes(candidatePath) ?? false;
+}
+
+function matchesIndexerHandlerInvariantFallback(family, candidatePath) {
+  return (
+    family.fallback !== undefined &&
+    family.fallback.prefixes.some((prefix) =>
+      candidatePath.startsWith(prefix),
+    ) &&
+    family.fallback.extensions.some((extension) =>
+      candidatePath.endsWith(`.${extension}`),
+    )
+  );
+}
+
+function getIndexerHandlerInvariantDecision(candidatePath, families) {
+  const matches = families.filter(
+    (family) =>
+      family.fallback === undefined &&
+      matchesIndexerHandlerInvariantFamily(family, candidatePath),
+  );
+  if (matches.length > 1) {
+    throw new Error(
+      `indexer handler invariant families overlap for ${candidatePath}: ${matches
+        .map(({ owner }) => owner)
+        .join(", ")}`,
+    );
+  }
+  if (matches.length === 1) {
+    return {
+      path: candidatePath,
+      route: matches[0].route,
+      owner: matches[0].owner,
+    };
+  }
+
+  const fallbacks = families.filter((family) =>
+    matchesIndexerHandlerInvariantFallback(family, candidatePath),
+  );
+  if (fallbacks.length > 1) {
+    throw new Error(
+      `indexer handler invariant fallbacks overlap for ${candidatePath}: ${fallbacks
+        .map(({ owner }) => owner)
+        .join(", ")}`,
+    );
+  }
+  if (fallbacks.length === 1) {
+    return {
+      path: candidatePath,
+      route: fallbacks[0].route,
+      owner: fallbacks[0].owner,
+    };
+  }
+  return {
+    path: candidatePath,
+    route: false,
+    owner: "outside-indexer-handler-invariant-scope",
+  };
+}
+
+export function getIndexerHandlerInvariantChecklistDecisions(paths) {
+  if (
+    !Array.isArray(paths) ||
+    paths.some((candidatePath) => typeof candidatePath !== "string")
+  ) {
+    throw new TypeError(
+      "indexer handler invariant paths must be an array of strings",
+    );
+  }
+  const families = getIndexerHandlerInvariantRoutingFamilies();
+  return paths.map((candidatePath) =>
+    getIndexerHandlerInvariantDecision(candidatePath, families),
+  );
+}

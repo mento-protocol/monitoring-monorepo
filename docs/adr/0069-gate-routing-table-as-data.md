@@ -24,7 +24,7 @@ in-production parity guard. D5c retires the bash arms after the soak
 
 ## Context
 
-`scripts/agent-quality-gate.sh` is 5,878 lines and the largest file in the
+`scripts/agent-quality-gate.sh` is 6,100 lines and the largest file in the
 repository. It is the subject of
 [issue 1498](https://github.com/mento-protocol/monitoring-monorepo/issues/1498)
 and the one hard-cap row [ADR 0065](0065-scripts-file-size-watchlist-scope.md)
@@ -33,8 +33,8 @@ than architecturally forbidden.
 
 It is not one thing. The largest single region is routing: one `while IFS= read
 -r path` loop over the changed set, holding **13 top-level `case` statements**,
-**53 `case` statements** counting the nested ones, **232 arms**, **524 pattern
-occurrences** (478 distinct), **29 effect verbs**, six inline guards, two global
+**55 `case` statements** counting the nested ones, **240 arms**, **813 pattern
+occurrences** (742 distinct), **29 effect verbs**, six inline guards, two global
 flag mutations, and two pattern sets the gate computes from the tree at run
 time. That is a table written as control flow.
 
@@ -50,7 +50,7 @@ written that way:
 2. **First-arm-wins ordering.** A new arm for `scripts/<dir>/deploy-*.sh` must
    sit above the widened pair or it never runs. The constraint lives in a
    comment.
-3. **Literal freshness.** 362 distinct arm patterns name an exact path. A path
+3. **Literal freshness.** 615 distinct arm patterns name an exact path. A path
    that is deleted or moved leaves an arm that simply never matches. No check
    reds. This is the same failure class P0 fixed in
    `check-deploy-root-anchors.test.mjs`, which printed "All 0 deploy scripts…"
@@ -116,6 +116,57 @@ needs no opt-out on the table as it stands — every literal-prefix glob under
 Both opt-outs cost a stated reason. A bare flag would let the rule this table
 exists to enforce be suppressed with one word, and leave the next reader unable
 to tell a considered exception from a silenced check.
+
+One routing family has an external data source. The indexer handler-invariant
+classifier stays in the attested `scripts/agent-autoreview-core.mjs` runtime so
+autoreview and the local gate do not grow separate owner lists. The core exports
+a detached, deeply frozen family view and consumes that same view for its
+`{path, route, owner}` decisions. It validates the family schema before export:
+unknown fields, invalid types, overlapping exact owners, and Bash-unsafe literal
+paths fail import.
+
+`arms-packages.mjs` derives two first-match arms from that view. Explicit
+`route: false` families form the excluded arm. Routed exact paths form the
+second arm. The live Bash case carries the same exact patterns, so the normal
+equality test pins the derived table against the code that runs. Eight future
+`src|test` plus `ts|tsx|mts|cts` patterns and the two broad `abis/` and `config/`
+patterns only trigger the inventory check. They do not enter either checklist
+arm. The TypeScript fallback returns `route: false` until the adding PR gives
+the path an explicit owner. New ABI and config files also inherit no checklist
+route. Exact owners cover every current ABI and config input, the three
+multichain YAML files, and `schema.graphql`. Three more exact routes cover `vitest.config.ts`,
+`vitest.fail-closed.config.ts`, and `vitest.hermetic-setup.ts`.
+A source path routes when the production handler entrypoint, a registered
+handler, an RPC facade or effect, or a self-heal stage executes it and the
+module can change an entity identity or field, a rollup, an effect key or
+target, freshness, or phase behavior. This rule includes ABI and address
+sources, environment and instrumentation modules, and shared handler
+calculations. A test routes when it enforces one of those behaviors or provides
+the fixtures, harness, or HTTP mock boundary that makes the enforcing test
+hermetic. Test-runner inputs route when they set its timeout, fail-closed
+fixture, or hermetic RPC boundary. Type-only context modules, warning-only
+helpers, the console-only RPC logger adapter, the two vendored ABIs that no
+current runtime consumes, and tests limited to an independent config-copy,
+script, or warning-format contract stay explicitly excluded.
+A focused parity test covers all current TypeScript paths below `src/` and
+`test/`, every current file below `abis/` and `config/`, the four root runtime
+inputs, the three root test-support inputs, exact owners, exclusions, and
+synthetic future extensions. The local indexer route runs it for these 17
+inventory patterns, and the indexer CI job runs it for every indexer change. A
+new `src/` or `test/` TypeScript path must gain an explicit owner in the PR that
+adds it.
+
+Autoreview imports the classifier from the same selected runtime as its helper.
+For a wrapper-attested runtime, the wrapper verifies the sealed runtime
+identity and content manifest immediately before and after the classifier
+process. A difference at either boundary fails before checklist decisions are
+used. A prepared runtime keeps its existing prepared-runtime trust contract.
+When a candidate changes `scripts/agent-autoreview-core.mjs`, that protected
+classifier cannot see a new owner or a false-to-true reclassification in the
+candidate revision. The core path therefore selects the handler-invariant
+checklist in both autoreview and the local gate. This source trigger
+intentionally routes unrelated core edits. Executing the candidate classifier
+would break the protected-main trust boundary.
 
 ### 2. Patterns are compiled by the repo's own translator, never by a glob library
 
@@ -200,7 +251,8 @@ produced no refusal.
 Six pins land with the table:
 
 1. **`implementation_signature()`** gains every module in the directory, suites
-   included — the same treatment `scripts/agent-quality-gate.test.sh` and
+   included, plus the external `scripts/agent-autoreview-core.mjs` family source
+   — the same treatment `scripts/agent-quality-gate.test.sh` and
    `scripts/terraform/terraform-fmt-check.test.mjs` already get, since a suite is
    part of what the gate proves about itself. An entry it cannot
    `stat` hashes as `__missing__`, which **freezes** the signature, so
@@ -209,11 +261,13 @@ Six pins land with the table:
    must not be forgotten, and `routing-table.test.mjs` asserts it per module.
    Runtime modules hash from the gate's `$script_source_dir`; suites and the
    parity harness hash from the target `$repo_root` where their commands run.
-2. Two routing arms and one CI step, so the equality test runs in both drift
+2. Routing arms and CI steps make the equality test run in both drift
    directions: `scripts/gate/routing-table/*.mjs` schedules its suite and —
    because of pin 1 — the gate self-test; the gate's own arm schedules the
-   routing-table suite; and the required `ci` job runs it too.
-3. `turbo.json` inputs, beside the two existing gate entries in all three tasks.
+   routing-table suite; and the required `ci` job runs it too. A core-only edit
+   schedules both gate suites, and the indexer job runs the focused parity test.
+3. `turbo.json` inputs, beside the two existing gate entries in all three tasks,
+   include both the table directory and its external core source.
 4. Import-time schema validation and the pairing lint, failing closed.
 5. The `scripts/AGENTS.md` pin registry, which ADR 0064 requires for any new pin.
 6. ADR 0064's sweep-checklist item 9, so a `scripts/` move updates the data as
@@ -320,7 +374,7 @@ gate is not a trust root.
   checklist gains it. A missing `implementation_signature()` entry freezes the
   signature and makes `--skip-if-fresh` reuse a stale stamp — the pin that must
   not be forgotten.
-- **The table ships as eleven data modules plus five supporting ones**, cut on
+- **The table ships as eleven data modules plus nine supporting ones**, cut on
   family boundaries, because the arms with the reasoning they carry are ~3,700
   formatted lines: ADR 0065 hard-caps a `scripts/` module at 1,000 and reports
   one at 600, and a table that lands as a size row on day one is a table whose
@@ -328,17 +382,15 @@ gate is not a trust root.
   family decided where they fall. The index concatenates them in an explicit
   order and `routing-table.test.mjs` asserts the resulting group ids against a
   written-out list, because group order is routing.
-- **The size row for `scripts/agent-quality-gate.sh` does not move in this step.**
-  The table is additive; the arms stay. ADR 0065's exemption list does not
-  change. `docs/notes/file-size-watch.md:49` records `3953 rough / 5665 raw` for
-  the gate against a current 5,900 raw and is refreshed by its own monthly route,
-  not here.
+- **The size row for `scripts/agent-quality-gate.sh` stays active.** The table is
+  additive and the Bash arms remain during migration. ADR 0065's exemption list
+  does not change. The monthly file-size route owns the measured row.
 - **The routing-table suite is the slowest new check in `scripts/`.** The bash
-  oracle runs ~473 patterns against ~4,900 paths on every installed bash, about
-  8 seconds cold on this machine. It is routed by a change to the table, by a
-  change to the gate, and by the required `ci` job, because it is the check the
-  whole conversion rests on and a check that only runs on one side of a drift
-  is no check at all.
+  oracle runs hundreds of patterns against ~4,900 paths on every installed
+  bash, about 12 seconds cold on this machine. It is routed by a change to the
+  table, by a change to the gate, and by the required `ci` job, because it is
+  the check the whole conversion rests on and a check that only runs on one
+  side of a drift is no check at all.
 - **The commonest drift is the merge queue, not the author.** The equality test
   caught main moving under this decision's own implementing PR across three
   merges and five routing deltas: a Sentry fixture-scan canary arm and the same
@@ -349,11 +401,12 @@ gate is not a trust root.
   table are not in conflict textually, so nothing but this check stands between
   them. Expect to reconcile on most rebases while both copies exist, and read a
   red equality test as the merge queue working rather than as a mistake.
-- **The gate gains exactly one command on one existing arm.** Editing
-  `scripts/agent-quality-gate.sh` now also schedules the routing-table suite.
-  That is the one routing change in this step, and it is additive: for a changed
-  set that does not name the gate, the dry-run plan is byte-identical to the
-  plan before this decision.
+- **The initial extraction added one command to the gate's own arm.** The
+  indexer family extension also adds the focused parity command to TypeScript
+  indexer paths and focused external runtime or test-support inputs, and
+  narrows the handler-invariant checklist to its owned paths. Other changed-path
+  classes keep their prior plan, except that the autoreview-core source class
+  now receives the checklist and both gate suites by design.
 - **Issue 1498 is not satisfied as written.** Its acceptance criteria name sourced
   `scripts/lib/gate-*.sh` helpers for the watchdog, stamps and executor —
   exactly the layers this decision keeps in bash. The criteria are rewritten
@@ -373,6 +426,9 @@ gate is not a trust root.
 
 ## Evidence
 
+- The current counts above flatten each normalized `arm.patterns` array.
+  `pathEquals` guard literals and run-time pattern expansions are separate
+  routing inputs, not arm-pattern occurrences.
 - Routing region, measured at `4f8feaac`: `scripts/agent-quality-gate.sh:3157-4593`
   — 13 top-level `case` statements, 53 counting nested, 232 arms, 478 distinct
   patterns of which 362 are glob-free, 29 verbs.

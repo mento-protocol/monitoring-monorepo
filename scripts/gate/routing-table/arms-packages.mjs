@@ -17,6 +17,63 @@
  * the two overlap and the wrapper arm is the specific one. Reordering them
  * would leave the wrapper arm unreachable.
  */
+
+import { getIndexerHandlerInvariantRoutingFamilies } from "../../agent-autoreview-core.mjs";
+
+const indexerHandlerInvariantFamilies =
+  getIndexerHandlerInvariantRoutingFamilies();
+
+function indexerHandlerInvariantExplicitPatterns(family) {
+  return family.exact ?? [];
+}
+
+function indexerHandlerInvariantFallbackPatterns(family) {
+  return family.fallback === undefined
+    ? []
+    : family.fallback.prefixes.flatMap((prefix) =>
+        family.fallback.extensions.map(
+          (extension) => `${prefix}*.${extension}`,
+        ),
+      );
+}
+
+function uniquePatterns(patterns) {
+  return [...new Set(patterns)];
+}
+
+const indexerHandlerInvariantExcludedPatterns = uniquePatterns([
+  ...indexerHandlerInvariantFamilies
+    .filter(({ fallback, route }) => fallback === undefined && !route)
+    .flatMap(indexerHandlerInvariantExplicitPatterns),
+]);
+
+const indexerHandlerInvariantRoutedPatterns = uniquePatterns(
+  indexerHandlerInvariantFamilies
+    .filter(({ fallback, route }) => fallback === undefined && route)
+    .flatMap(indexerHandlerInvariantExplicitPatterns),
+);
+const indexerHandlerInvariantTypeScriptPatterns =
+  indexerHandlerInvariantFamilies
+    .filter(({ fallback }) => fallback !== undefined)
+    .flatMap(indexerHandlerInvariantFallbackPatterns);
+const indexerHandlerInvariantExternalInventoryPatterns = [
+  "indexer-envio/abis/*",
+  "indexer-envio/config/*",
+];
+const indexerHandlerInvariantInventoryPatterns = uniquePatterns([
+  ...indexerHandlerInvariantExternalInventoryPatterns,
+  ...indexerHandlerInvariantFamilies
+    .flatMap(indexerHandlerInvariantExplicitPatterns)
+    .filter(
+      (pattern) =>
+        !pattern.startsWith("indexer-envio/abis/") &&
+        !pattern.startsWith("indexer-envio/config/") &&
+        !pattern.startsWith("indexer-envio/src/") &&
+        !pattern.startsWith("indexer-envio/test/"),
+    ),
+  ...indexerHandlerInvariantTypeScriptPatterns,
+]);
+
 export const PACKAGE_ARMS = [
   {
     patterns: ["ui-dashboard/scripts/*.sh"],
@@ -430,6 +487,41 @@ export const PACKAGE_ARMS = [
               {
                 verb: "add_indexer_mutation_baseline",
                 args: ["indexer mutation baseline changed"],
+              },
+            ],
+          },
+        ],
+      },
+      {
+        why: "Every current or future src/test TypeScript path and every focused external runtime or test-support input must keep an explicit owner in the core. This test runs for all seventeen inventory patterns before a later scripts-only change can discover drift.",
+        dispatch: "path",
+        arms: [
+          {
+            patterns: indexerHandlerInvariantInventoryPatterns,
+            effects: [
+              {
+                command:
+                  "node --test scripts/gate/routing-table/indexer-invariant-parity.test.mjs",
+                reason: "indexer invariant routing inventory changed",
+              },
+            ],
+          },
+        ],
+      },
+      {
+        why: "The shared autoreview core owns the exact indexer family dispositions. The first arm carries explicit exclusions; the second carries explicit routes. Future TypeScript patterns only trigger the inventory check until they gain an explicit owner.",
+        dispatch: "path",
+        arms: [
+          {
+            patterns: indexerHandlerInvariantExcludedPatterns,
+            effects: [],
+          },
+          {
+            patterns: indexerHandlerInvariantRoutedPatterns,
+            effects: [
+              {
+                checklist: "docs/pr-checklists/indexer-handler-invariants.md",
+                reason: "indexer handler/RPC/self-heal invariant path changed",
               },
             ],
           },

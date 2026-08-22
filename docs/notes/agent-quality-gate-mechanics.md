@@ -67,9 +67,63 @@ pnpm --filter @mento-protocol/ui-dashboard test:coverage
 
 Cross-layer/stateful UI work also applies
 [`docs/pr-checklists/stateful-data-ui.md`](../pr-checklists/stateful-data-ui.md).
-Indexer changes additionally route the protected
+The handler-invariant classifier in `scripts/agent-autoreview-core.mjs` routes
+selected indexer runtime, invariant-test, and test-support changes to the protected
 [`docs/pr-checklists/indexer-handler-invariants.md`](../pr-checklists/indexer-handler-invariants.md)
-policy into prepared autoreview bundles.
+policy in the local gate and prepared autoreview bundles. It returns one
+ordered `{path, route, owner}` decision per input path. Autoreview loads the
+classifier from its selected attested runtime and validates the complete batch
+before it selects routed paths. A wrapper-attested runtime is checked against
+its sealed identity and content manifest before and after classifier import and
+execution. A difference at either boundary fails before the wrapper uses the
+decisions. Prepared runtimes retain their existing trust boundary.
+
+That protected-main boundary creates deliberate version skew when a candidate
+changes `scripts/agent-autoreview-core.mjs`. The protected classifier cannot
+see a new exact owner or a false-to-true reclassification in the candidate.
+Therefore, a change to the core source itself selects the handler-invariant
+checklist in both autoreview and the local gate. This trigger intentionally
+routes unrelated core edits. Running the candidate classifier would weaken the
+trust boundary that the protected runtime provides.
+
+`getIndexerHandlerInvariantRoutingFamilies()` returns a detached, deeply
+frozen view of the same family data the classifier uses. Import-time validation
+rejects malformed families, overlapping exact owners, and paths that cannot
+stay literal in a Bash `case`. The routing
+table derives an excluded-first, routed-second checklist dispatch from this
+view. The live Bash case mirrors the derived patterns, and the routing-table
+equality test pins both copies. The checklist arms contain exact current paths
+only. Eight broad inventory patterns cover `.ts`, `.tsx`, `.mts`, and `.cts`
+below `indexer-envio/src/` and `indexer-envio/test/`. Two more inventory
+patterns cover `indexer-envio/abis/` and `indexer-envio/config/`. None of these
+broad patterns routes the checklist. Exact owners also cover the three
+multichain YAML files, `indexer-envio/schema.graphql`, the main Vitest
+configuration, the fail-closed fixture configuration, and the hermetic setup.
+
+The routed source boundary follows executable dependencies from the production
+handler entrypoint, registered handlers, RPC facades and effects, and self-heal
+stages. It includes modules that can change entity identities or fields,
+rollups, effect keys or targets, freshness, or phase behavior. The routed test
+boundary includes direct invariant tests and the fixtures, harness, and HTTP
+mock support that enforce hermetic multi-event and RPC behavior. It also
+includes test-runner inputs that set the timeout, fail-closed fixture, and
+hermetic RPC contract. Explicit exclusions include type-only context modules,
+warning-only helpers, the console-only RPC logger adapter, the two vendored ABIs
+that no current runtime consumes, and tests that enforce a separate config-copy,
+script, or warning-format contract.
+
+The focused indexer parity test compares all current TypeScript paths below
+`src/` and `test/`, every current file below `abis/` and `config/`, the four root
+runtime inputs, and the three root test-support inputs against the table.
+The local gate runs it for all 17 inventory patterns, and the indexer CI job
+runs it for every indexer change. A new `src/` or `test/` TypeScript path is
+classified as `future-typescript` with `route: false`. The inventory assertion
+requires the adding PR to give it an explicit owner. A new file below `abis/`
+or `config/` also runs the inventory assertion without inheriting a checklist
+route. Other paths outside `src/` and `test/` stay outside this classifier.
+Core-only edits route the autoreview suite, the routing-table suite, and the
+gate self-test. The core is also an explicit freshness-signature input and a
+Turbo input beside the routing-table directory.
 
 The dry-run gate maps changed paths to package checks and PR checklists. That
 mapping is a Node engine now, cross-checked against the bash arms on every run —
