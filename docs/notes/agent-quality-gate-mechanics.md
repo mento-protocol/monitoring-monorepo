@@ -224,10 +224,10 @@ instead of repeating its work.
 
 The current-run handles live in `scripts/gate/run-handles.sh`. The gate sources
 that module from its own `$script_source_dir` before it changes directory, and
-fails closed if the path is missing, unreadable, or not a regular file. The
-module provides run-token validation and pattern helpers, owns the marker-path
-state and test-ready barrier, and provides tagged-process discovery. Its
-path is included in `implementation_signature()`
+fails closed if the path is missing, unreadable, a symlink, or not a regular
+file. The module provides run-token validation and pattern helpers, owns the
+marker-path state and test-ready barrier, and provides tagged-process
+discovery. Its path is included in `implementation_signature()`
 and changes to it route the gate self-test. The ready/release barrier is test
 only; it requires `NODE_ENV=test` and both lock-test paths, and normal runs do
 not enter it.

@@ -4103,8 +4103,22 @@ rm -rf "$index_state_stamp_repo"
 # path/command plan and the fixture's gate implementation independently. Every
 # change must execute the mapped command again instead of reusing the stamp.
 signature_stamp_repo="$(mktemp -d)"
+signature_runtime_root="$gate_cache_dir/signature-runtime-source"
+mkdir -p \
+  "$signature_runtime_root/scripts/docs" \
+  "$signature_runtime_root/scripts/gate"
+cp "$repo_root/scripts/agent-quality-gate.sh" \
+  "$signature_runtime_root/scripts/agent-quality-gate.sh"
+cp "$repo_root/scripts/gate/run-handles.sh" \
+  "$signature_runtime_root/scripts/gate/run-handles.sh"
+printf 'export function isRoutingSensitivePath() { return false; }\n' \
+  > "$signature_runtime_root/scripts/docs/docs-navigation-eval-helpers.mjs"
+printf '#!/usr/bin/env node\nprocess.exit(1);\n' \
+  > "$signature_runtime_root/scripts/gate/lockfile-scope.mjs"
+chmod +x "$signature_runtime_root/scripts/agent-quality-gate.sh"
 (
   cd "$signature_stamp_repo"
+  signature_gate="$signature_runtime_root/scripts/agent-quality-gate.sh"
   git init -q
   git config user.email test@example.invalid
   git config user.name "Quality Gate Test"
@@ -4138,13 +4152,13 @@ STUB
   printf 'fixture.txt\nsecond.txt\n' > changed-paths-two.txt
 
   COUNTER_FILE="$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
-    "$repo_root/scripts/agent-quality-gate.sh" \
+    "$signature_gate" \
       --changed-paths-file changed-paths-one.txt \
       --base "$base_one" \
       --run \
       > "$output_file" 2>&1
   COUNTER_FILE="$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
-    "$repo_root/scripts/agent-quality-gate.sh" \
+    "$signature_gate" \
       --changed-paths-file changed-paths-one.txt \
       --base "$base_two" \
       --run \
@@ -4154,7 +4168,7 @@ STUB
     fail "fresh gate stamp was reused after the base OID changed"
 
   COUNTER_FILE="$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
-    "$repo_root/scripts/agent-quality-gate.sh" \
+    "$signature_gate" \
       --changed-paths-file changed-paths-two.txt \
       --base "$base_two" \
       --run \
@@ -4163,9 +4177,9 @@ STUB
   [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "3" ]] ||
     fail "fresh gate stamp was reused after the validation path/command plan changed"
 
-  printf '# changed fixture gate implementation\n' >> scripts/agent-quality-gate.sh
+  printf '# changed runtime gate implementation\n' >> "$signature_gate"
   COUNTER_FILE="$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
-    "$repo_root/scripts/agent-quality-gate.sh" \
+    "$signature_gate" \
       --changed-paths-file changed-paths-two.txt \
       --base "$base_two" \
       --run \
@@ -4174,9 +4188,10 @@ STUB
   [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "4" ]] ||
     fail "fresh gate stamp was reused after the gate implementation changed"
 
-  printf '# changed fixture routing classifier\n' >> scripts/docs/docs-navigation-eval-helpers.mjs
+  printf '// changed runtime routing classifier\n' \
+    >> "$signature_runtime_root/scripts/docs/docs-navigation-eval-helpers.mjs"
   COUNTER_FILE="$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
-    "$repo_root/scripts/agent-quality-gate.sh" \
+    "$signature_gate" \
       --changed-paths-file changed-paths-two.txt \
       --base "$base_two" \
       --run \
@@ -4185,15 +4200,13 @@ STUB
   [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "5" ]] ||
     fail "fresh gate stamp was reused after the routing classifier changed"
 
-  # Every moved entry in implementation_signature() carries the same hazard: a
-  # path the gate cannot stat hashes as `__missing__` on both runs, so the
-  # signature stops moving and --skip-if-fresh reuses a dead stamp. The
-  # classifier above covers the P4 move; the three below cover the P10, P11, and
-  # P12 ones. The entries that have never moved are unfixtured apart from the
-  # gate itself (its suite, turbo.json, and .trunk/trunk.yaml).
+  # The signature has two path roots. Runtime modules come from the gate's own
+  # checkout, while commands and configuration come from the repository under
+  # test. The runtime gate and routing checks above cover the first root. These
+  # Terraform command checks cover the second root.
   printf '# changed fixture terraform format checker\n' >> scripts/terraform/terraform-fmt-check.mjs
   COUNTER_FILE="$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
-    "$repo_root/scripts/agent-quality-gate.sh" \
+    "$signature_gate" \
       --changed-paths-file changed-paths-two.txt \
       --base "$base_two" \
       --run \
@@ -4204,7 +4217,7 @@ STUB
 
   printf '# changed fixture terraform format checker suite\n' >> scripts/terraform/terraform-fmt-check.test.mjs
   COUNTER_FILE="$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
-    "$repo_root/scripts/agent-quality-gate.sh" \
+    "$signature_gate" \
       --changed-paths-file changed-paths-two.txt \
       --base "$base_two" \
       --run \
@@ -4217,9 +4230,10 @@ STUB
   # editing it has to move the signature. Its caller reads a nonzero exit as
   # "cannot narrow", so a stale stamp here hides a routing change nothing else
   # reports.
-  printf '# changed fixture lockfile scope classifier\n' >> scripts/gate/lockfile-scope.mjs
+  printf '// changed runtime lockfile scope classifier\n' \
+    >> "$signature_runtime_root/scripts/gate/lockfile-scope.mjs"
   COUNTER_FILE="$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
-    "$repo_root/scripts/agent-quality-gate.sh" \
+    "$signature_gate" \
       --changed-paths-file changed-paths-two.txt \
       --base "$base_two" \
       --run \
@@ -4228,16 +4242,30 @@ STUB
   [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "8" ]] ||
     fail "fresh gate stamp was reused after the lockfile scope classifier changed"
 
-  printf '# changed fixture run-handle helper\n' >> scripts/gate/run-handles.sh
+  # A placeholder in the repository under test is not the helper this gate
+  # loaded. Changing it must keep the stamp warm.
+  printf '# changed fixture run-handle placeholder\n' >> scripts/gate/run-handles.sh
   COUNTER_FILE="$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
-    "$repo_root/scripts/agent-quality-gate.sh" \
+    "$signature_gate" \
+      --changed-paths-file changed-paths-two.txt \
+      --base "$base_two" \
+      --run \
+      --skip-if-fresh \
+      > "$output_file" 2>&1
+  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "8" ]] ||
+    fail "a non-runtime run-handle placeholder invalidated the fresh stamp"
+
+  printf '# changed runtime run-handle helper\n' \
+    >> "$signature_runtime_root/scripts/gate/run-handles.sh"
+  COUNTER_FILE="$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
+    "$signature_gate" \
       --changed-paths-file changed-paths-two.txt \
       --base "$base_two" \
       --run \
       --skip-if-fresh \
       > "$output_file" 2>&1
   [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "9" ]] ||
-    fail "fresh gate stamp was reused after the run-handle helper changed"
+    fail "fresh gate stamp was reused after the loaded run-handle helper changed"
 
   # P12 renamed the pinned alias registry from .sh to .mjs. Left stale, the
   # signature entry hashes as `__missing__` on every run, so an edit to the one
@@ -4245,7 +4273,7 @@ STUB
   # skipped behind a stamp warmed before it.
   printf '// changed fixture alias validator\n' >> scripts/check-agent-quality-gate-package-scripts.mjs
   COUNTER_FILE="$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
-    "$repo_root/scripts/agent-quality-gate.sh" \
+    "$signature_gate" \
       --changed-paths-file changed-paths-two.txt \
       --base "$base_two" \
       --run \
@@ -4254,7 +4282,7 @@ STUB
   [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "10" ]] ||
     fail "fresh gate stamp was reused after the pinned alias registry changed"
 )
-rm -rf "$signature_stamp_repo"
+rm -rf "$signature_stamp_repo" "$signature_runtime_root"
 assert_not_contains "Previous successful agent quality gate run is still fresh; skipping mapped commands."
 
 sha256sum_repo="$(mktemp -d)"
@@ -6660,10 +6688,15 @@ gate_race_sync="$(mktemp -d)"
     local wrapper_pid="$2"
     local wrapper_start="$3"
     local wrapper_parent="$4"
+    local wait_seconds="${5:-10}"
     local deadline
     [[ -n "$wrapper_pid" && -n "$wrapper_start" && -n "$wrapper_parent" ]] || return 0
+    if ! [[ "$wait_seconds" =~ ^[0-9]+$ && "$wait_seconds" -ge 1 ]]; then
+      echo "interrupted-drain fixture: ${label} has an invalid wait bound" >&2
+      return 124
+    fi
 
-    deadline=$(( $(date +%s) + 10 ))
+    deadline=$(( $(date +%s) + wait_seconds ))
     while race_drain_direct_wrapper_is_expected "$wrapper_pid" "$wrapper_start" "$wrapper_parent" && [[ "$(date +%s)" -lt "$deadline" ]]; do sleep 1; done
     if race_drain_direct_wrapper_is_expected "$wrapper_pid" "$wrapper_start" "$wrapper_parent"; then
       race_drain_cleanup_direct_wrapper "$label" "$wrapper_pid" "$wrapper_start" "$wrapper_parent"
@@ -7117,6 +7150,24 @@ $race_bound_registered
 EOF
     race_bound_registered="$pending"
     return "$status"
+  }
+
+  # Remove completed launch records without signalling any fixture that still
+  # has its registered process identity. The EXIT trap retains every live one.
+  race_bound_prune_completed() {
+    local pending=""
+    local child_pid child_start child_parent child_dir child_label child_nonce child_started
+    while IFS='|' read -r child_pid child_start child_parent child_dir child_label child_nonce child_started; do
+      [[ -n "$child_pid" ]] || continue
+      if gate_test_process_has_start "$child_pid" "$child_start"; then
+        pending="${pending}${pending:+$'\n'}${child_pid}|${child_start}|${child_parent}|${child_dir}|${child_label}|${child_nonce}|${child_started}"
+      else
+        rm -rf "$child_dir"
+      fi
+    done <<EOF
+$race_bound_registered
+EOF
+    race_bound_registered="$pending"
   }
 
   # shellcheck disable=SC2329 # invoked by the EXIT trap below
@@ -8109,7 +8160,10 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
 
   race_displaced_ready="$gate_race_sync/displaced.ready"
   race_displaced_release="$gate_race_sync/displaced.release"
-  RACE_STUB_SECONDS=1 \
+  race_bound_launch_command "displaced-holder gate" 45 /bin/sh -c \
+    'output_file="$1"; shift; exec "$@" > "$output_file" 2>&1' \
+    launch-bound-command "$gate_race_out/displaced.out" env \
+    RACE_STUB_SECONDS=1 \
     NODE_ENV=test \
     AGENT_QUALITY_GATE_LOCK=1 \
     AGENT_QUALITY_GATE_LOCK_HELD='' \
@@ -8118,9 +8172,11 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     AGENT_QUALITY_GATE_LOCK_TEST_READY_FILE="$race_displaced_ready" \
     AGENT_QUALITY_GATE_LOCK_TEST_RELEASE_FILE="$race_displaced_release" \
     "$repo_root/scripts/agent-quality-gate.sh" \
-    --base HEAD --run --lock-wait 30 \
-    > "$gate_race_out/displaced.out" 2>&1 &
-  race_displaced=$!
+    --base HEAD --run --lock-wait 30 ||
+    fail "the displaced-holder case could not bind its gate wrapper"
+  race_displaced="$race_bound_pid"
+  race_displaced_start="$race_bound_start"
+  race_displaced_parent="$race_bound_parent"
   race_displaced_deadline=$(( $(date +%s) + 30 ))
   while [[ ! -e "$race_displaced_ready" && ! -L "$race_displaced_ready" && "$(date +%s)" -lt "$race_displaced_deadline" ]]; do
     sleep 1
@@ -8145,7 +8201,17 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   } > "$race_displaced_replacement"
   mv "$race_displaced_replacement" "$gate_race_root/run.lock/owner"
   : > "$race_displaced_release"
-  wait "$race_displaced" 2>/dev/null && race_displaced_exit=0 || race_displaced_exit=$?
+  if race_drain_wait_for_direct_wrapper \
+    "displaced-holder gate" "$race_displaced" "$race_displaced_start" \
+    "$race_displaced_parent" 45; then
+    race_displaced_exit=0
+  else
+    race_displaced_exit=$?
+  fi
+  race_bound_prune_completed
+  race_displaced=""
+  race_displaced_start=""
+  race_displaced_parent=""
   [[ "$race_displaced_exit" == "2" ]] ||
     fail "a displaced holder must stop with exit 2, got ${race_displaced_exit}"
   grep -Fx "error: this run no longer holds the gate run lock at ${gate_race_root}/run.lock." "$gate_race_out/displaced.out" ||
@@ -8491,15 +8557,19 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     "$race_drain_b_wrapper_parent" "$race_drain_b_wrapper_parent"
   if race_drain_wait_for_direct_wrapper \
     "B gate" "$race_drain_b_wrapper" "$race_drain_b_wrapper_start" \
-    "$race_drain_b_wrapper_parent"; then
+    "$race_drain_b_wrapper_parent" 60; then
     race_drain_b_exit=0
   else
     race_drain_b_exit=$?
   fi
-  [[ "$race_drain_b_exit" != "124" ]] ||
-    fail "the interrupted-drain B run reached a held command or exceeded its bounded wait"
-  [[ "$race_drain_b_exit" != "0" ]] ||
-    fail "the interrupted-drain B run did not crash at the requested boundary"
+  case "$race_drain_b_exit" in
+    124)
+      fail "the interrupted-drain B run exceeded its 60-second bounded wait"
+      ;;
+    0)
+      fail "the interrupted-drain B run did not crash at the requested boundary"
+      ;;
+  esac
   race_drain_b_wrapper=""
   race_drain_b_wrapper_start=""
   race_drain_b_wrapper_parent=""
@@ -8562,13 +8632,21 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   fi
   if race_drain_wait_for_direct_wrapper \
     "C gate" "$race_drain_c_wrapper" "$race_drain_c_wrapper_start" \
-    "$race_drain_c_wrapper_parent"; then
+    "$race_drain_c_wrapper_parent" 30; then
     race_drain_c_exit=0
   else
     race_drain_c_exit=$?
   fi
-  [[ "$race_drain_c_exit" == "0" ]] ||
-    fail "the run inheriting an interrupted drain exited ${race_drain_c_exit} after its release"
+  case "$race_drain_c_exit" in
+    0)
+      ;;
+    124)
+      fail "the run inheriting an interrupted drain exceeded its 30-second bounded wait after release"
+      ;;
+    *)
+      fail "the run inheriting an interrupted drain exited ${race_drain_c_exit} after its release"
+      ;;
+  esac
   race_drain_c_wrapper=""
   race_drain_c_wrapper_start=""
   race_drain_c_wrapper_parent=""
@@ -9091,6 +9169,27 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
       fail "a waiter suspended past its budget reported ${race_stopped_reported}s, not the time that passed"
   fi
   rm -rf "$gate_race_root/run.lock"
+
+  # Pattern construction is part of the scan. A sed failure must publish the
+  # scan-error sentinel and stop before pgrep; an empty pattern would otherwise
+  # turn an unanswered scan into "no survivors" and discharge the obligation.
+  race_pattern_pgrep_called="$gate_race_out/pattern-pgrep-called"
+  rm -f "$race_pattern_pgrep_called"
+  race_pattern_output="$(
+    gate_drain_scan_error="agentqg-scan-failed"
+    gate_lock_root_dir="$gate_race_root"
+    source "$repo_root/scripts/gate/run-handles.sh"
+    sed() { return 2; }
+    pgrep() {
+      : > "$race_pattern_pgrep_called"
+      return 1
+    }
+    gate_run_tagged_pids "fixture.host-1-1"
+  )" 2> "$gate_race_out/pattern-failure.err"
+  [[ "$race_pattern_output" == "agentqg-scan-failed" ]] ||
+    fail "a failed run-token pattern build did not emit only the scan-error sentinel"
+  [[ ! -e "$race_pattern_pgrep_called" ]] ||
+    fail "a failed run-token pattern build still called pgrep"
 
   # A scan that fails is not a scan that finds nothing. With `pgrep` exiting 2
   # — a real failure, not "no match" — a run inheriting an obligation cannot

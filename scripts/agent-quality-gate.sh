@@ -4539,7 +4539,7 @@ write_command_plan() {
 }
 
 implementation_signature() {
-  local path
+  local implementation_path path
   for path in \
     scripts/agent-quality-gate.sh \
     scripts/agent-quality-gate.test.sh \
@@ -4551,8 +4551,20 @@ implementation_signature() {
     scripts/terraform/terraform-fmt-check.test.mjs \
     turbo.json \
     .trunk/trunk.yaml; do
-    if [[ -f "$path" ]]; then
-      printf '%s %s\n' "$path" "$(hash_file "$path")"
+    # Four entries execute from this gate's checkout even when a fixture makes
+    # $repo_root a different repository. Hash the same source tree the gate
+    # executes. The remaining entries are commands or configuration from the
+    # repository under test and stay anchored there.
+    case "$path" in
+      scripts/agent-quality-gate.sh | scripts/docs/docs-navigation-eval-helpers.mjs | scripts/gate/lockfile-scope.mjs | scripts/gate/run-handles.sh)
+        implementation_path="$script_source_dir/${path#scripts/}"
+        ;;
+      *)
+        implementation_path="$repo_root/$path"
+        ;;
+    esac
+    if [[ -f "$implementation_path" ]]; then
+      printf '%s %s\n' "$path" "$(hash_file "$implementation_path")"
     else
       printf '%s __missing__\n' "$path"
     fi

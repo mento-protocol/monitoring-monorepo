@@ -89,9 +89,12 @@ same PR, except the `agent-autoreview.sh` feedback-runtime pins below.
 - **Production infrastructure contract pins.**
   `production-infra-identity-contract/workflow-inventory.mjs` pins exact script
   paths for the workflows it audits.
-- **External console pins.** The Codex Cloud console holds two bootstrap paths;
-  Claude Code web resolves its bootstrap through `.claude/hooks/session-start.sh`.
-  A move needs an operator edit because repo grep cannot reach that console.
+- **External console pins.** The Codex Cloud console holds
+  `bootstrap/codex-cloud-setup.sh` and
+  `bootstrap/codex-cloud-maintenance.sh`; Claude Code web resolves
+  `bootstrap/claude-code-web-setup.sh` through
+  `.claude/hooks/session-start.sh`. A move needs an operator edit because repo
+  grep cannot reach that console.
 - **Reviewed-artifact byte pins.** `.gitattributes` pins the Upstash launcher
   EOL and `UPSTASH_MCP_LAUNCHER_SHA256` hashes it. A move changes both. See
   [`docs/notes/upstash-mcp-operator.md`](../docs/notes/upstash-mcp-operator.md).

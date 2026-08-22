@@ -60,6 +60,7 @@ gate_lock_test_ready_and_wait_for_release() {
   local release_file="$2"
   local started_at now
   local marker ready_body
+  local wait_timeout_seconds=30
 
   if [[ -z "$ready_file" || -z "$release_file" ]]; then
     echo "error: AGENT_QUALITY_GATE_LOCK_TEST_READY_FILE and AGENT_QUALITY_GATE_LOCK_TEST_RELEASE_FILE must be set together." >&2
@@ -124,8 +125,8 @@ gate_lock_test_ready_and_wait_for_release() {
       exit 2
     fi
     now="$(date +%s)"
-    if [[ $((now - started_at)) -ge 30 ]]; then
-      echo "error: timed out after 30s waiting for test release file ${release_file}." >&2
+    if [[ $((now - started_at)) -ge "$wait_timeout_seconds" ]]; then
+      echo "error: timed out after ${wait_timeout_seconds}s waiting for test release file ${release_file}." >&2
       echo "Nothing has been executed." >&2
       exit 2
     fi
@@ -164,12 +165,12 @@ gate_lock_token_is_wellformed() {
 # but hostname dots would still match any character as a pattern, and only
 # escaping makes the match literal.
 gate_lock_token_pattern() {
-  printf '%s' "$1" | sed 's/[][\.*^$+?(){}|\\]/\\&/g' || true
+  printf '%s' "$1" | sed 's/[][\.*^$+?(){}|\\]/\\&/g'
 }
 
 gate_run_tagged_pids() {
   local token="$1"
-  local environ environ_entries pid marker found status
+  local environ environ_entries pid marker found pattern status
   # A token read back from a lock record names processes (through this
   # pattern) and files (holder.*), and on a shared root it can be another
   # user's writing. One that does not have the gate-generated shape is never
@@ -188,7 +189,12 @@ gate_run_tagged_pids() {
   # Anchored on both sides: the tag is one whole argv element, and an
   # unanchored match would let one token select another that merely extends
   # it. The escape keeps hostname dots literal inside the anchors.
-  found="$(pgrep -f "(^| )agentqg:$(gate_lock_token_pattern "$token")( |\$)" 2>/dev/null)" && status=0 || status=$?
+  if ! pattern="$(gate_lock_token_pattern "$token")" || [[ -z "$pattern" ]]; then
+    echo "error: could not build a match pattern for the run token; refusing to scan." >&2
+    printf '%s\n' "$gate_drain_scan_error"
+    return 0
+  fi
+  found="$(pgrep -f "(^| )agentqg:${pattern}( |\$)" 2>/dev/null)" && status=0 || status=$?
   [[ "$status" -le 1 ]] || printf '%s\n' "$gate_drain_scan_error"
   [[ -z "$found" ]] || printf '%s\n' "$found"
   if [[ -d /proc ]]; then
