@@ -1861,7 +1861,7 @@ test("CDP System Parameters Not Loaded keeps the approved warning contract", () 
   );
   assert(
     rule.includes(
-      'expr    = "mento_cdp_system_params_loaded and on() (time() - mento_cdp_last_successful_poll < 90)"',
+      'expr    = "mento_cdp_system_params_loaded and on() ((time() - mento_cdp_last_successful_poll >= 0) and (time() - mento_cdp_last_successful_poll < 90))"',
     ),
     "the CDP readiness rule must require fresh CDP publication and read the system_params_loaded gauge",
   );

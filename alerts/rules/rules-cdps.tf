@@ -14,9 +14,9 @@
 # no_data_state / exec_err_state = "OK" on every rule: a missing CDP gauge
 # (deploy-window rollout before the bridge ships, or a stale series after the
 # bridge restarts) must NOT page. The SystemParams rule also requires the
-# unlabeled `mento_cdp_last_successful_poll` marker to be less than 90 seconds
-# old. The marker advances only after a successful CDP query and complete
-# publication; it does not use the FPMM-owned bridge-last-poll gauge or poll
+# unlabeled `mento_cdp_last_successful_poll` marker to have a non-negative age
+# below 90 seconds. The marker advances only after a successful CDP query and
+# complete publication; it does not use the FPMM-owned bridge-last-poll gauge or poll
 # error labels. Bridge liveness and poll errors remain separate owners.
 #
 # NOT covered here (deliberate): TCR / ICR rules. `LiquityInstance.tcrBps`,
@@ -143,7 +143,7 @@ resource "grafana_rule_group" "cdps" {
       model = jsonencode({
         refId   = "metric"
         instant = true
-        expr    = "mento_cdp_system_params_loaded and on() (time() - mento_cdp_last_successful_poll < 90)"
+        expr    = "mento_cdp_system_params_loaded and on() ((time() - mento_cdp_last_successful_poll >= 0) and (time() - mento_cdp_last_successful_poll < 90))"
       })
     }
     data {
