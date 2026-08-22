@@ -698,6 +698,8 @@ assert_script_occurrences 0 'shasum -a 256 "$1"'
 
 classifier_missing_helper_dir="$(mktemp -d)"
 cp scripts/agent-quality-gate.sh "$classifier_missing_helper_dir/agent-quality-gate.sh"
+mkdir -p "$classifier_missing_helper_dir/gate"
+cp scripts/gate/run-handles.sh "$classifier_missing_helper_dir/gate/run-handles.sh"
 printf 'ui-dashboard/src/app/page.tsx\n' > "$paths_file"
 classifier_missing_helper_exit=0
 if bash "$classifier_missing_helper_dir/agent-quality-gate.sh" \
@@ -713,6 +715,34 @@ rm -rf "$classifier_missing_helper_dir"
   fail "missing routing classifier helper exited $classifier_missing_helper_exit instead of 2"
 assert_contains "error: routing-sensitive path classifier could not be loaded from"
 assert_contains "error: failed to classify routing-sensitive changed paths"
+
+run_handles_literal="$(
+  awk -F'"' '/^run_handles_path=/ { print $2; exit }' \
+    scripts/agent-quality-gate.sh
+)"
+[[ "$run_handles_literal" == '$script_source_dir/gate/run-handles.sh' ]] ||
+  fail "run_handles_path must stay anchored on \$script_source_dir (got '$run_handles_literal')"
+run_handles_relative="${run_handles_literal/\$script_source_dir/scripts}"
+[[ -f "$repo_root/$run_handles_relative" && ! -L "$repo_root/$run_handles_relative" && -r "$repo_root/$run_handles_relative" ]] ||
+  fail "gate run-handle helper is not a readable regular file: $run_handles_relative"
+bash -n "$repo_root/$run_handles_relative" ||
+  fail "gate run-handle helper failed bash syntax validation: $run_handles_relative"
+
+run_gate "scripts/gate/run-handles.sh"
+assert_contains "- pnpm agent:quality-gate:test (agent quality gate mapping changed)"
+
+run_handles_missing_dir="$(mktemp -d)"
+cp scripts/agent-quality-gate.sh "$run_handles_missing_dir/agent-quality-gate.sh"
+run_handles_missing_exit=0
+if bash "$run_handles_missing_dir/agent-quality-gate.sh" --base origin/test > "$output_file" 2>&1; then
+  run_handles_missing_exit=0
+else
+  run_handles_missing_exit=$?
+fi
+rm -rf "$run_handles_missing_dir"
+[[ "$run_handles_missing_exit" -eq 2 ]] ||
+  fail "missing gate run-handle helper exited $run_handles_missing_exit instead of 2"
+assert_contains "error: gate run-handle helper is missing or not a readable regular file"
 
 # The gate resolves the routing classifier from its own source directory. No CI
 # job runs the gate for real, so this suite is the only place that import is
@@ -2045,6 +2075,9 @@ for lockfile_scope_sibling in "$repo_root"/scripts/*; do
       "$lockfile_scope_missing_dir/$lockfile_scope_sibling_name"
   fi
 done
+mkdir -p "$lockfile_scope_missing_dir/gate"
+cp "$repo_root/scripts/gate/run-handles.sh" \
+  "$lockfile_scope_missing_dir/gate/run-handles.sh"
 lockfile_scope_missing_repo="$(mktemp -d)"
 (
   cd "$lockfile_scope_missing_repo"
@@ -4119,8 +4152,22 @@ rm -rf "$index_state_stamp_repo"
 # path/command plan and the fixture's gate implementation independently. Every
 # change must execute the mapped command again instead of reusing the stamp.
 signature_stamp_repo="$(mktemp -d)"
+signature_runtime_root="$gate_cache_dir/signature-runtime-source"
+mkdir -p \
+  "$signature_runtime_root/scripts/docs" \
+  "$signature_runtime_root/scripts/gate"
+cp "$repo_root/scripts/agent-quality-gate.sh" \
+  "$signature_runtime_root/scripts/agent-quality-gate.sh"
+cp "$repo_root/scripts/gate/run-handles.sh" \
+  "$signature_runtime_root/scripts/gate/run-handles.sh"
+printf 'export function isRoutingSensitivePath() { return false; }\n' \
+  > "$signature_runtime_root/scripts/docs/docs-navigation-eval-helpers.mjs"
+printf '#!/usr/bin/env node\nprocess.exit(1);\n' \
+  > "$signature_runtime_root/scripts/gate/lockfile-scope.mjs"
+chmod +x "$signature_runtime_root/scripts/agent-quality-gate.sh"
 (
   cd "$signature_stamp_repo"
+  signature_gate="$signature_runtime_root/scripts/agent-quality-gate.sh"
   git init -q
   git config user.email test@example.invalid
   git config user.name "Quality Gate Test"
@@ -4131,6 +4178,7 @@ signature_stamp_repo="$(mktemp -d)"
   printf '// fixture alias validator\n' > scripts/check-agent-quality-gate-package-scripts.mjs
   printf '# fixture routing classifier\n' > scripts/docs/docs-navigation-eval-helpers.mjs
   printf '# fixture lockfile scope classifier\n' > scripts/gate/lockfile-scope.mjs
+  printf '# fixture run-handle helper\n' > scripts/gate/run-handles.sh
   printf '# fixture terraform format checker\n' > scripts/terraform/terraform-fmt-check.mjs
   printf '# fixture terraform format checker suite\n' > scripts/terraform/terraform-fmt-check.test.mjs
   cat > tools/trunk <<'STUB'
@@ -4153,13 +4201,13 @@ STUB
   printf 'fixture.txt\nsecond.txt\n' > changed-paths-two.txt
 
   COUNTER_FILE="$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
-    "$repo_root/scripts/agent-quality-gate.sh" \
+    "$signature_gate" \
       --changed-paths-file changed-paths-one.txt \
       --base "$base_one" \
       --run \
       > "$output_file" 2>&1
   COUNTER_FILE="$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
-    "$repo_root/scripts/agent-quality-gate.sh" \
+    "$signature_gate" \
       --changed-paths-file changed-paths-one.txt \
       --base "$base_two" \
       --run \
@@ -4169,7 +4217,7 @@ STUB
     fail "fresh gate stamp was reused after the base OID changed"
 
   COUNTER_FILE="$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
-    "$repo_root/scripts/agent-quality-gate.sh" \
+    "$signature_gate" \
       --changed-paths-file changed-paths-two.txt \
       --base "$base_two" \
       --run \
@@ -4178,9 +4226,9 @@ STUB
   [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "3" ]] ||
     fail "fresh gate stamp was reused after the validation path/command plan changed"
 
-  printf '# changed fixture gate implementation\n' >> scripts/agent-quality-gate.sh
+  printf '# changed runtime gate implementation\n' >> "$signature_gate"
   COUNTER_FILE="$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
-    "$repo_root/scripts/agent-quality-gate.sh" \
+    "$signature_gate" \
       --changed-paths-file changed-paths-two.txt \
       --base "$base_two" \
       --run \
@@ -4189,9 +4237,10 @@ STUB
   [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "4" ]] ||
     fail "fresh gate stamp was reused after the gate implementation changed"
 
-  printf '# changed fixture routing classifier\n' >> scripts/docs/docs-navigation-eval-helpers.mjs
+  printf '// changed runtime routing classifier\n' \
+    >> "$signature_runtime_root/scripts/docs/docs-navigation-eval-helpers.mjs"
   COUNTER_FILE="$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
-    "$repo_root/scripts/agent-quality-gate.sh" \
+    "$signature_gate" \
       --changed-paths-file changed-paths-two.txt \
       --base "$base_two" \
       --run \
@@ -4200,15 +4249,13 @@ STUB
   [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "5" ]] ||
     fail "fresh gate stamp was reused after the routing classifier changed"
 
-  # Every moved entry in implementation_signature() carries the same hazard: a
-  # path the gate cannot stat hashes as `__missing__` on both runs, so the
-  # signature stops moving and --skip-if-fresh reuses a dead stamp. The
-  # classifier above covers the P4 move; the three below cover the P10, P11, and
-  # P12 ones. The entries that have never moved are unfixtured apart from the
-  # gate itself (its suite, turbo.json, and .trunk/trunk.yaml).
+  # The signature has two path roots. Runtime modules come from the gate's own
+  # checkout, while commands and configuration come from the repository under
+  # test. The runtime gate and routing checks above cover the first root. These
+  # Terraform command checks cover the second root.
   printf '# changed fixture terraform format checker\n' >> scripts/terraform/terraform-fmt-check.mjs
   COUNTER_FILE="$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
-    "$repo_root/scripts/agent-quality-gate.sh" \
+    "$signature_gate" \
       --changed-paths-file changed-paths-two.txt \
       --base "$base_two" \
       --run \
@@ -4219,7 +4266,7 @@ STUB
 
   printf '# changed fixture terraform format checker suite\n' >> scripts/terraform/terraform-fmt-check.test.mjs
   COUNTER_FILE="$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
-    "$repo_root/scripts/agent-quality-gate.sh" \
+    "$signature_gate" \
       --changed-paths-file changed-paths-two.txt \
       --base "$base_two" \
       --run \
@@ -4232,9 +4279,10 @@ STUB
   # editing it has to move the signature. Its caller reads a nonzero exit as
   # "cannot narrow", so a stale stamp here hides a routing change nothing else
   # reports.
-  printf '# changed fixture lockfile scope classifier\n' >> scripts/gate/lockfile-scope.mjs
+  printf '// changed runtime lockfile scope classifier\n' \
+    >> "$signature_runtime_root/scripts/gate/lockfile-scope.mjs"
   COUNTER_FILE="$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
-    "$repo_root/scripts/agent-quality-gate.sh" \
+    "$signature_gate" \
       --changed-paths-file changed-paths-two.txt \
       --base "$base_two" \
       --run \
@@ -4243,22 +4291,47 @@ STUB
   [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "8" ]] ||
     fail "fresh gate stamp was reused after the lockfile scope classifier changed"
 
-  # P12 renamed the pinned alias registry from .sh to .mjs. Left stale, the
-  # signature entry hashes as `__missing__` on every run, so an edit to the one
-  # check that stops a package-only PR redirecting a trusted command would be
-  # skipped behind a stamp warmed before it.
-  printf '// changed fixture alias validator\n' >> scripts/check-agent-quality-gate-package-scripts.mjs
+  # A placeholder in the repository under test is not the helper this gate
+  # loaded. Changing it must keep the stamp warm.
+  printf '# changed fixture run-handle placeholder\n' >> scripts/gate/run-handles.sh
   COUNTER_FILE="$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
-    "$repo_root/scripts/agent-quality-gate.sh" \
+    "$signature_gate" \
+      --changed-paths-file changed-paths-two.txt \
+      --base "$base_two" \
+      --run \
+      --skip-if-fresh \
+      > "$output_file" 2>&1
+  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "8" ]] ||
+    fail "a non-runtime run-handle placeholder invalidated the fresh stamp"
+
+  printf '# changed runtime run-handle helper\n' \
+    >> "$signature_runtime_root/scripts/gate/run-handles.sh"
+  COUNTER_FILE="$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
+    "$signature_gate" \
       --changed-paths-file changed-paths-two.txt \
       --base "$base_two" \
       --run \
       --skip-if-fresh \
       > "$output_file" 2>&1
   [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "9" ]] ||
+    fail "fresh gate stamp was reused after the loaded run-handle helper changed"
+
+  # P12 renamed the pinned alias registry from .sh to .mjs. Left stale, the
+  # signature entry hashes as `__missing__` on every run, so an edit to the one
+  # check that stops a package-only PR redirecting a trusted command would be
+  # skipped behind a stamp warmed before it.
+  printf '// changed fixture alias validator\n' >> scripts/check-agent-quality-gate-package-scripts.mjs
+  COUNTER_FILE="$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
+    "$signature_gate" \
+      --changed-paths-file changed-paths-two.txt \
+      --base "$base_two" \
+      --run \
+      --skip-if-fresh \
+      > "$output_file" 2>&1
+  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "10" ]] ||
     fail "fresh gate stamp was reused after the pinned alias registry changed"
 )
-rm -rf "$signature_stamp_repo"
+rm -rf "$signature_stamp_repo" "$signature_runtime_root"
 assert_not_contains "Previous successful agent quality gate run is still fresh; skipping mapped commands."
 
 sha256sum_repo="$(mktemp -d)"
@@ -6050,6 +6123,161 @@ rm -rf "$prereq_reuse_repo"
 # obligations, and crash-point recovery.
 run_lock_drain_family() {
 arm_suite_abort_trap
+gate_test_outer_pid="$$"
+gate_test_executor_pid="$PPID"
+gate_test_signal_shell_pid="$gate_test_outer_pid"
+gate_test_signal_trace_file="${GATE_TEST_SIGNAL_TRACE_FILE:-}"
+gate_test_captured_shell_pid=""
+gate_test_captured_start=""
+gate_test_captured_parent=""
+
+gate_test_process_start() {
+  local pid="$1"
+  [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+  TZ=UTC LC_ALL=C LANG=C ps -p "$pid" -o lstart= 2>/dev/null | head -n1 || true
+}
+
+gate_test_process_parent() {
+  local pid="$1"
+  [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+  TZ=UTC LC_ALL=C LANG=C ps -p "$pid" -o ppid= 2>/dev/null |
+    awk 'NF { print $1; exit }' || true
+}
+
+gate_test_process_is_expected() {
+  local pid="$1"
+  local expected_start="$2"
+  local expected_parent="$3"
+  local current_start current_parent
+  [[ "$pid" =~ ^[0-9]+$ && -n "$expected_start" && "$expected_parent" =~ ^[0-9]+$ ]] || return 1
+  current_start="$(gate_test_process_start "$pid")"
+  [[ -n "$current_start" && "$current_start" == "$expected_start" ]] || return 1
+  current_parent="$(gate_test_process_parent "$pid")"
+  [[ -n "$current_parent" && "$current_parent" == "$expected_parent" ]] || return 1
+}
+
+gate_test_process_has_start() {
+  local pid="$1"
+  local expected_start="$2"
+  local current_start
+  [[ "$pid" =~ ^[0-9]+$ && -n "$expected_start" ]] || return 1
+  current_start="$(gate_test_process_start "$pid")"
+  [[ -n "$current_start" && "$current_start" == "$expected_start" ]]
+}
+
+# Bash 3.2 has no nameref or safe command-substitution assignment to caller
+# variables. Publish the exact identity through these family-scoped outputs.
+gate_test_capture_identity() {
+  local pid="$1"
+  local expected_parent="${2:-}"
+  gate_test_captured_start="$(gate_test_process_start "$pid")"
+  gate_test_captured_parent="$(gate_test_process_parent "$pid")"
+  [[ -n "$gate_test_captured_start" && "$gate_test_captured_parent" =~ ^[0-9]+$ ]] || return 1
+  [[ -z "$expected_parent" || "$gate_test_captured_parent" == "$expected_parent" ]] || return 1
+  gate_test_process_is_expected \
+    "$pid" "$gate_test_captured_start" "$gate_test_captured_parent"
+}
+
+gate_test_trace_signal() {
+  local event="$1"
+  local label="$2"
+  local signal="$3"
+  local target="$4"
+  local expected_start="${5:-}"
+  local current_start="${6:-}"
+  local expected_parent="${7:-}"
+  local current_parent="${8:-}"
+  [[ -n "$gate_test_signal_trace_file" ]] || return 0
+  printf '%s|event=%s|label=%s|sender=%s|target=%s|signal=%s|expected_start=%s|current_start=%s|expected_ppid=%s|current_ppid=%s\n' \
+    "$(date +%s)" "$event" "$label" "$gate_test_signal_shell_pid" "$target" "$signal" \
+    "$expected_start" "$current_start" "$expected_parent" "$current_parent" \
+    >> "$gate_test_signal_trace_file" 2>/dev/null || true
+}
+
+gate_test_pid_is_protected() {
+  local pid="$1"
+  [[ "$pid" == "$gate_test_outer_pid" ||
+    "$pid" == "$gate_test_executor_pid" ||
+    "$pid" == "$gate_test_signal_shell_pid" ]]
+}
+
+# Return 0 after sending the signal, 1 when the recorded process is already
+# gone, and 2 when the target cannot be proved safe. The final identity read is
+# deliberately adjacent to kill: macOS has no pidfd, so this is the narrowest
+# fail-closed selector available to the Bash 3.2 test runtime.
+gate_test_signal_expected() {
+  local label="$1"
+  local signal="$2"
+  local pid="$3"
+  local expected_start="$4"
+  local expected_parent="$5"
+  local current_start current_parent
+  case "$signal" in
+    TERM|KILL|STOP|CONT) ;;
+    *) return 2 ;;
+  esac
+  [[ "$pid" =~ ^[0-9]+$ && -n "$expected_start" && "$expected_parent" =~ ^[0-9]+$ ]] || return 2
+  if gate_test_pid_is_protected "$pid"; then
+    gate_test_trace_signal refused-protected "$label" "$signal" "$pid" "$expected_start"
+    return 2
+  fi
+  current_start="$(gate_test_process_start "$pid")"
+  if [[ -z "$current_start" ]]; then
+    gate_test_trace_signal already-gone "$label" "$signal" "$pid" "$expected_start"
+    return 1
+  fi
+  current_parent="$(gate_test_process_parent "$pid")"
+  if [[ "$current_start" != "$expected_start" ||
+    "$current_parent" != "$expected_parent" ]]; then
+    gate_test_trace_signal refused-mismatch "$label" "$signal" "$pid" \
+      "$expected_start" "$current_start" "$expected_parent" "$current_parent"
+    return 2
+  fi
+  gate_test_trace_signal send "$label" "$signal" "$pid" \
+    "$expected_start" "$current_start" "$expected_parent" "$current_parent"
+  kill "-$signal" "$pid" 2>/dev/null || return 1
+}
+
+# Use this for an exact process that was reparented after capture. Keep the
+# recorded start time, then bind the signal to its current parent immediately
+# before the final identity check and signal.
+# shellcheck disable=SC2329 # invoked by the EXIT cleanup below
+gate_test_signal_with_current_parent() {
+  local label="$1"
+  local signal="$2"
+  local pid="$3"
+  local expected_start="$4"
+  local current_parent
+  current_parent="$(gate_test_process_parent "$pid")"
+  [[ "$current_parent" =~ ^[0-9]+$ ]] || return 2
+  gate_test_signal_expected \
+    "$label" "$signal" "$pid" "$expected_start" "$current_parent"
+}
+
+# Bash 3.2 has no BASHPID, while $$ and PPID keep the outer shell's values in a
+# parenthesized subshell. A directly launched sh sees the real current shell as
+# its parent and writes that PID through a path already owned by this fixture.
+gate_test_capture_current_shell_pid() {
+  local capture_file="$1"
+  gate_test_captured_shell_pid=""
+  /bin/sh -c 'printf "%s\n" "$PPID"' > "$capture_file" || return 1
+  IFS= read -r gate_test_captured_shell_pid < "$capture_file" || return 1
+  rm -f "$capture_file"
+  [[ "$gate_test_captured_shell_pid" =~ ^[0-9]+$ ]]
+}
+
+# shellcheck disable=SC2329 # invoked by the opt-in TERM traps below
+gate_test_on_term() {
+  local label="$1"
+  local shell_pid="$2"
+  gate_test_trace_signal received "$label" TERM "$shell_pid"
+  trap - TERM
+  kill -TERM "$shell_pid"
+}
+
+if [[ -n "$gate_test_signal_trace_file" ]]; then
+  trap 'gate_test_on_term outer-suite "$gate_test_outer_pid"' TERM
+fi
 # --- Cross-run mutual exclusion (GitHub issue #1802) -------------------------
 # Two gate runs on one machine starve each other, and the pre-push hook starts
 # one of its own while a manual run is still going, so `--run` takes a
@@ -6261,37 +6489,1250 @@ gate_race_root="$(mktemp -d)"
 # the suite went on.
 gate_race_out="$(mktemp -d)"
 gate_race_log="$gate_race_out/race.log"
+gate_race_sync="$(mktemp -d)"
 (
+  gate_test_capture_current_shell_pid "$gate_race_sync/race-shell.pid" ||
+    fail "could not capture the lock-race subshell PID under Bash 3.2"
+  gate_test_signal_shell_pid="$gate_test_captured_shell_pid"
+  [[ "$gate_test_signal_shell_pid" != "$gate_test_outer_pid" &&
+    "$gate_test_signal_shell_pid" != "$gate_test_executor_pid" ]] ||
+    fail "the lock-race subshell PID aliases a protected outer identity"
+  if [[ -n "$gate_test_signal_trace_file" ]]; then
+    gate_test_trace_signal identity race-subshell NONE "$gate_test_signal_shell_pid" \
+      "$(gate_test_process_start "$gate_test_signal_shell_pid")" \
+      "$(gate_test_process_start "$gate_test_signal_shell_pid")" \
+      "$gate_test_outer_pid" \
+      "$(gate_test_process_parent "$gate_test_signal_shell_pid")"
+    trap 'gate_test_on_term race-subshell "$gate_test_signal_shell_pid"' TERM
+  fi
+  gate_race_fixture_epoch="$(date +%s)"
+  race_inherited_token="$(printf "fixture-inherited-%s-%s" "$gate_test_outer_pid" "$gate_race_fixture_epoch")"
+  race_drained_first_token="$(printf "fixture-drained-first-%s-%s" "$gate_test_outer_pid" "$gate_race_fixture_epoch")"
+  race_arrived_late_token="$(printf "fixture-arrived-late-%s-%s" "$gate_test_outer_pid" "$gate_race_fixture_epoch")"
+  for race_fixture_token in \
+    "$race_inherited_token" "$race_drained_first_token" "$race_arrived_late_token"; do
+    [[ "$race_fixture_token" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,180}-[0-9]{1,10}-[0-9]{1,12}$ ]] ||
+      fail "suite-unique live fixture token is malformed: ${race_fixture_token}"
+  done
+  race_drain_cleanup_active=0
+  race_drain_hold_file=""
+  race_drain_orphan=""
+  race_drain_orphan_start=""
+  race_drain_a_wrapper=""
+  race_drain_a_wrapper_start=""
+  race_drain_a_wrapper_parent=""
+  race_drain_b_wrapper=""
+  race_drain_b_wrapper_start=""
+  race_drain_b_wrapper_parent=""
+  race_drain_c_wrapper=""
+  race_drain_c_wrapper_start=""
+  race_drain_c_wrapper_parent=""
+  race_drain_watchdog_identities=""
+  race_fork_record=""
+  race_fork_ack=""
+  race_fork_wrapper=""
+  race_fork_wrapper_start=""
+  race_fork_wrapper_parent=""
+  race_fork_bystander=""
+  race_fork_bystander_start=""
+  race_fork_bystander_parent=""
+  race_forkexit_record=""
+  race_forkexit_ack=""
+  race_forkexit_wrapper=""
+  race_forkexit_wrapper_start=""
+  race_forkexit_wrapper_parent=""
+  race_forkexit_bystander=""
+  race_forkexit_bystander_start=""
+  race_forkexit_bystander_parent=""
+  race_fork_probe_record=""
+  race_fork_unit_bystander=""
+  race_fork_unit_bystander_start=""
+  race_fork_unit_bystander_parent=""
+  race_drain_owned_survivors=""
+  race_drain_owned_record_error=""
+  race_drain_pair_observation_file=""
+  race_drain_pair_require_change=0
+
+  race_drain_process_is_expected() {
+    local pid="$1"
+    local expected_start="$2"
+    local expected_parent="$3"
+    gate_test_process_is_expected "$pid" "$expected_start" "$expected_parent"
+  }
+
+  race_drain_victim_is_expected() {
+    [[ "$race_drain_cleanup_active" -eq 1 && -n "$race_drain_orphan" && -n "$race_drain_orphan_start" ]] || return 1
+    gate_test_process_has_start "$race_drain_orphan" "$race_drain_orphan_start"
+  }
+
+  race_drain_process_is_stopped() {
+    local pid="$1"
+    local expected_start="$2"
+    local expected_parent="$3"
+    local current_state
+    race_drain_process_is_expected "$pid" "$expected_start" "$expected_parent" || return 1
+    current_state="$(ps -p "$pid" -o stat= 2>/dev/null || true)"
+    [[ -n "$current_state" && "$current_state" == *T* ]]
+  }
+
+  race_drain_suspend_direct_watchdogs() {
+    local label="$1"
+    local gate_pid="$2"
+    local watchdog_deadline watchdogs watchdog_scan_status race_wd
+    race_drain_watchdog_identities=""
+    race_drain_watchdog_count=0
+    race_drain_watchdog_pid=""
+    race_drain_watchdog_start=""
+    race_drain_watchdog_parent=""
+    watchdog_deadline=$(( $(date +%s) + 10 ))
+    while :; do
+      if watchdogs="$(pgrep -P "$gate_pid" -f "collect_tree" 2>/dev/null)"; then
+        watchdog_scan_status=0
+      else
+        watchdog_scan_status=$?
+      fi
+      [[ "$watchdog_scan_status" -le 1 ]] || return 2
+      [[ -n "$watchdogs" ]] && break
+      [[ "$(date +%s)" -lt "$watchdog_deadline" ]] || return 2
+      sleep 1
+    done
+    for race_wd in $watchdogs; do
+      gate_test_capture_identity "$race_wd" "$gate_pid" || return 2
+      race_drain_watchdog_pid="$race_wd"
+      race_drain_watchdog_start="$gate_test_captured_start"
+      race_drain_watchdog_parent="$gate_test_captured_parent"
+      race_drain_watchdog_identities="${race_drain_watchdog_identities}${race_wd}|${race_drain_watchdog_start}|${race_drain_watchdog_parent}"$'\n'
+      gate_test_signal_expected "$label" STOP \
+        "$race_wd" "$race_drain_watchdog_start" "$race_drain_watchdog_parent" ||
+        return 2
+      race_drain_watchdog_count=$((race_drain_watchdog_count + 1))
+    done
+  }
+
+  # Return 0 only when a direct child is confirmed gone or a zombie, so a
+  # following wait cannot block. Return 1 for its exact live identity, 2 when
+  # it still answers but its identity/state cannot be read, and 3 for a PID
+  # that now names something else.
+  race_drain_direct_wrapper_reap_state() {
+    local wrapper_pid="$1"
+    local wrapper_start="$2"
+    local wrapper_parent="$3"
+    local current_start current_parent current_state
+    [[ "$wrapper_pid" =~ ^[0-9]+$ && -n "$wrapper_start" ]] || return 2
+    if ! kill -0 "$wrapper_pid" 2>/dev/null; then
+      return 0
+    fi
+    current_start="$(TZ=UTC LC_ALL=C LANG=C ps -p "$wrapper_pid" -o lstart= 2>/dev/null || true)"
+    [[ -n "$current_start" ]] || return 2
+    [[ "$current_start" == "$wrapper_start" ]] || return 3
+    current_parent="$(gate_test_process_parent "$wrapper_pid")"
+    [[ -n "$current_parent" ]] || return 2
+    [[ -z "$wrapper_parent" || "$current_parent" == "$wrapper_parent" ]] || return 3
+    current_state="$(ps -p "$wrapper_pid" -o stat= 2>/dev/null || true)"
+    [[ -n "$current_state" ]] || return 2
+    [[ "$current_state" == Z* ]] && return 0
+    return 1
+  }
+
+  race_drain_direct_wrapper_is_expected() {
+    local wrapper_pid="$1"
+    local wrapper_start="$2"
+    local wrapper_parent="$3"
+    local reap_state
+    if race_drain_direct_wrapper_reap_state "$wrapper_pid" "$wrapper_start" "$wrapper_parent"; then
+      return 1
+    else
+      reap_state=$?
+    fi
+    [[ "$reap_state" -eq 1 ]]
+  }
+
+  race_drain_reap_direct_wrapper() {
+    local label="$1"
+    local wrapper_pid="$2"
+    local wrapper_start="$3"
+    local wrapper_parent="$4"
+    local reap_state wait_status deadline current_start current_parent
+    if race_drain_direct_wrapper_reap_state "$wrapper_pid" "$wrapper_start" "$wrapper_parent"; then
+      # The probe confirmed a zombie or that this PID no longer answers, so a
+      # wait on this direct child cannot block.
+      if wait "$wrapper_pid" 2>/dev/null; then
+        wait_status=0
+      else
+        wait_status=$?
+      fi
+      # `wait` can return a command's signal/non-zero status without proving
+      # that this exact PID/start identity left the process table. Do not let a
+      # successor inherit the stale owner record until that absence is bounded
+      # and explicit. PPID is intentionally not part of this death proof: a
+      # dead child can be reparented before it disappears.
+      deadline=$(( $(date +%s) + 10 ))
+      while gate_test_process_has_start "$wrapper_pid" "$wrapper_start" && \
+        [[ "$(date +%s)" -lt "$deadline" ]]; do
+        sleep 1
+      done
+      if gate_test_process_has_start "$wrapper_pid" "$wrapper_start"; then
+        current_start="$(gate_test_process_start "$wrapper_pid")"
+        current_parent="$(gate_test_process_parent "$wrapper_pid")"
+        gate_test_trace_signal post-reap-timeout "$label" NONE "$wrapper_pid" \
+          "$wrapper_start" "$current_start" "$wrapper_parent" "$current_parent"
+        return 124
+      fi
+      gate_test_trace_signal post-reap-gone "$label" NONE "$wrapper_pid" \
+        "$wrapper_start" "" "$wrapper_parent" ""
+      return "$wait_status"
+    else
+      reap_state=$?
+    fi
+    case "$reap_state" in
+      1)
+        echo "interrupted-drain cleanup: ${label} wrapper ${wrapper_pid} is still live; refusing an unbounded reap" >&2
+        ;;
+      2)
+        echo "interrupted-drain cleanup: ${label} wrapper ${wrapper_pid} still answers but its identity/state cannot be read; refusing an unbounded reap" >&2
+        ;;
+      3)
+        echo "interrupted-drain cleanup: ${label} wrapper ${wrapper_pid} no longer has its recorded identity; refusing an unbounded reap" >&2
+        ;;
+      *)
+        echo "interrupted-drain cleanup: ${label} wrapper ${wrapper_pid} had an unknown reap state; refusing an unbounded reap" >&2
+        ;;
+    esac
+    return 124
+  }
+
+  race_drain_cleanup_direct_wrapper() {
+    local label="$1"
+    local wrapper_pid="$2"
+    local wrapper_start="$3"
+    local wrapper_parent="$4"
+    local deadline reap_status signal_status
+    [[ -n "$wrapper_pid" && -n "$wrapper_start" && -n "$wrapper_parent" ]] || return 0
+
+    if race_drain_direct_wrapper_is_expected "$wrapper_pid" "$wrapper_start" "$wrapper_parent"; then
+      if gate_test_signal_expected "$label" TERM "$wrapper_pid" "$wrapper_start" "$wrapper_parent"; then
+        :
+      else
+        signal_status=$?
+        [[ "$signal_status" -eq 1 ]] || return 124
+      fi
+      deadline=$(( $(date +%s) + 10 ))
+      while race_drain_direct_wrapper_is_expected "$wrapper_pid" "$wrapper_start" "$wrapper_parent" && [[ "$(date +%s)" -lt "$deadline" ]]; do sleep 1; done
+    fi
+    if race_drain_direct_wrapper_is_expected "$wrapper_pid" "$wrapper_start" "$wrapper_parent"; then
+      if gate_test_signal_expected "$label" KILL "$wrapper_pid" "$wrapper_start" "$wrapper_parent"; then
+        :
+      else
+        signal_status=$?
+        [[ "$signal_status" -eq 1 ]] || return 124
+      fi
+      deadline=$(( $(date +%s) + 10 ))
+      while race_drain_direct_wrapper_is_expected "$wrapper_pid" "$wrapper_start" "$wrapper_parent" && [[ "$(date +%s)" -lt "$deadline" ]]; do sleep 1; done
+    fi
+    if race_drain_reap_direct_wrapper "$label" "$wrapper_pid" "$wrapper_start" "$wrapper_parent"; then
+      return 0
+    else
+      reap_status=$?
+    fi
+    # A reaped child can report its command's signal/non-zero status. Cleanup
+    # still completed in that case; 124 is reserved for an unsafe reap.
+    [[ "$reap_status" -eq 124 ]] && return 124
+    return 0
+  }
+
+  race_drain_wait_for_direct_wrapper() {
+    local label="$1"
+    local wrapper_pid="$2"
+    local wrapper_start="$3"
+    local wrapper_parent="$4"
+    local wait_seconds="${5:-10}"
+    local deadline
+    [[ -n "$wrapper_pid" && -n "$wrapper_start" && -n "$wrapper_parent" ]] || return 0
+    if ! [[ "$wait_seconds" =~ ^[0-9]+$ && "$wait_seconds" -ge 1 ]]; then
+      echo "interrupted-drain fixture: ${label} has an invalid wait bound" >&2
+      return 64
+    fi
+
+    deadline=$(( $(date +%s) + wait_seconds ))
+    while race_drain_direct_wrapper_is_expected "$wrapper_pid" "$wrapper_start" "$wrapper_parent" && [[ "$(date +%s)" -lt "$deadline" ]]; do sleep 1; done
+    if race_drain_direct_wrapper_is_expected "$wrapper_pid" "$wrapper_start" "$wrapper_parent"; then
+      race_drain_cleanup_direct_wrapper "$label" "$wrapper_pid" "$wrapper_start" "$wrapper_parent"
+      return 124
+    fi
+    race_drain_reap_direct_wrapper "$label" "$wrapper_pid" "$wrapper_start" "$wrapper_parent"
+  }
+
+  race_drain_kill_and_reap_direct_wrapper() {
+    local label="$1"
+    local wrapper_pid="$2"
+    local wrapper_start="$3"
+    local wrapper_parent="$4"
+    local deadline reap_status signal_status
+    [[ -n "$wrapper_pid" && -n "$wrapper_start" && -n "$wrapper_parent" ]] || return 0
+
+    if race_drain_direct_wrapper_is_expected "$wrapper_pid" "$wrapper_start" "$wrapper_parent"; then
+      if gate_test_signal_expected "$label" KILL "$wrapper_pid" "$wrapper_start" "$wrapper_parent"; then
+        :
+      else
+        signal_status=$?
+        [[ "$signal_status" -eq 1 ]] || return 124
+      fi
+    fi
+    deadline=$(( $(date +%s) + 10 ))
+    while race_drain_direct_wrapper_is_expected "$wrapper_pid" "$wrapper_start" "$wrapper_parent" && [[ "$(date +%s)" -lt "$deadline" ]]; do sleep 1; done
+    if race_drain_reap_direct_wrapper "$label" "$wrapper_pid" "$wrapper_start" "$wrapper_parent"; then
+      return 0
+    else
+      reap_status=$?
+    fi
+    [[ "$reap_status" -eq 124 ]] && return 124
+    return 0
+  }
+
+  race_drain_snapshot_identity_file() {
+    local label="$1"
+    local source_path="$2"
+    local snapshot_path="$3"
+    local deadline last_byte owned_pid owned_start
+    race_drain_owned_record_error=""
+    case "$source_path" in
+      "$gate_race_out"/*) ;;
+      *)
+        race_drain_owned_record_error="${label} path is outside the private fixture output directory: ${source_path}"
+        return 124
+        ;;
+    esac
+    if [[ -L "$source_path" || ! -f "$source_path" ||
+      ! -O "$source_path" || ! -r "$source_path" || ! -w "$source_path" ]]; then
+      race_drain_owned_record_error="${label} path must be an owned readable writable regular file, not a symlink: ${source_path}"
+      return 124
+    fi
+    case "$snapshot_path" in
+      "$gate_race_out"/*) ;;
+      *)
+        race_drain_owned_record_error="${label} snapshot path is outside the private fixture output directory: ${snapshot_path}"
+        return 124
+        ;;
+    esac
+    if [[ -L "$snapshot_path" ||
+      ( -e "$snapshot_path" &&
+        ( ! -f "$snapshot_path" || ! -O "$snapshot_path" ||
+          ! -r "$snapshot_path" || ! -w "$snapshot_path" ) ) ]]; then
+      race_drain_owned_record_error="${label} snapshot path must be an owned readable writable regular file, not a symlink: ${snapshot_path}"
+      return 124
+    fi
+    : > "$snapshot_path" || {
+      race_drain_owned_record_error="${label} snapshot could not be created: ${snapshot_path}"
+      return 124
+    }
+    if [[ -L "$snapshot_path" || ! -f "$snapshot_path" ||
+      ! -O "$snapshot_path" || ! -r "$snapshot_path" || ! -w "$snapshot_path" ]]; then
+      race_drain_owned_record_error="${label} snapshot path changed ownership, access, or type"
+      return 124
+    fi
+    deadline=$(( $(date +%s) + 5 ))
+    while :; do
+      if ! cp "$source_path" "$snapshot_path"; then
+        race_drain_owned_record_error="${label} could not be copied into its private snapshot"
+        return 124
+      fi
+      if [[ ! -L "$source_path" && -f "$source_path" &&
+        -O "$source_path" && -r "$source_path" && -w "$source_path" ]] &&
+        cmp -s "$source_path" "$snapshot_path"; then
+        break
+      fi
+      if [[ "$(date +%s)" -ge "$deadline" ]]; then
+        race_drain_owned_record_error="${label} did not become stable before the bounded snapshot deadline"
+        return 124
+      fi
+      sleep 1
+    done
+    if [[ -s "$snapshot_path" ]]; then
+      last_byte="$(tail -c 1 "$snapshot_path" 2>/dev/null || true)"
+      if [[ -n "$last_byte" ]]; then
+        race_drain_owned_record_error="${label} ends with an incomplete identity record"
+        return 124
+      fi
+    fi
+    if ! awk -F '|' '
+      (NF != 2 && NF != 3) || $1 !~ /^[1-9][0-9]*$/ || length($1) > 10 ||
+        $2 == "" || (NF == 3 && $3 !~ /^[1-9][0-9]*$/) || seen[$1]++ { exit 1 }
+    ' "$snapshot_path"; then
+      race_drain_owned_record_error="${label} contains a malformed or duplicate identity record"
+      return 124
+    fi
+    while IFS='|' read -r owned_pid owned_start owned_parent; do
+      [[ -n "$owned_pid" ]] || continue
+      if gate_test_pid_is_protected "$owned_pid"; then
+        race_drain_owned_record_error="${label} contains protected PID ${owned_pid}"
+        return 124
+      fi
+      [[ -n "$owned_start" ]] || {
+        race_drain_owned_record_error="${label} contains an empty start identity for PID ${owned_pid}"
+        return 124
+      }
+      [[ -z "$owned_parent" || "$owned_parent" =~ ^[1-9][0-9]*$ ]] || {
+        race_drain_owned_record_error="${label} contains an invalid parent identity for PID ${owned_pid}"
+        return 124
+      }
+    done < "$snapshot_path"
+  }
+
+  race_drain_validate_identity_pair() {
+    local label="$1"
+    local record_path="$2"
+    local ack_path="$3"
+    local record_snapshot="${record_path}.snapshot"
+    local ack_snapshot="${ack_path}.snapshot"
+    if ! race_drain_snapshot_identity_file "${label} record" "$record_path" "$record_snapshot"; then
+      return 124
+    fi
+    if ! race_drain_snapshot_identity_file "${label} acknowledgement" "$ack_path" "$ack_snapshot"; then
+      return 124
+    fi
+    if ! cmp -s "$record_snapshot" "$ack_snapshot"; then
+      race_drain_owned_record_error="${label} record and acknowledgement snapshots differ"
+      return 124
+    fi
+  }
+
+  # Call this only after every registered producer wrapper is absent. Require
+  # three identical nonempty record/ack observations so a child released just
+  # after one cmp cannot append an identity outside the cleanup snapshot.
+  race_drain_wait_for_stable_identity_pair() {
+    local label="$1"
+    local record_path="$2"
+    local ack_path="$3"
+    local record_snapshot="${record_path}.snapshot"
+    local ack_snapshot="${ack_path}.snapshot"
+    local stable_dir previous_record previous_ack
+    local observation_file="${race_drain_pair_observation_file:-}"
+    local require_change="${race_drain_pair_require_change:-0}"
+    local deadline change_observed=0 stable_observations=0
+    local stable_pair_wait_seconds=30
+    race_drain_pair_observation_file=""
+    race_drain_pair_require_change=0
+    [[ -n "$record_path" && -n "$ack_path" ]] || {
+      race_drain_owned_record_error="${label} record and acknowledgement paths must both be set"
+      return 124
+    }
+    [[ "$require_change" == "0" || "$require_change" == "1" ]] || {
+      race_drain_owned_record_error="${label} has an invalid stability change requirement"
+      return 124
+    }
+    if [[ -n "$observation_file" ]]; then
+      case "$observation_file" in
+        "$gate_race_out"/*) ;;
+        *)
+          race_drain_owned_record_error="${label} observation path is outside the private fixture output directory"
+          return 124
+          ;;
+      esac
+      if [[ -e "$observation_file" || -L "$observation_file" ]]; then
+        race_drain_owned_record_error="${label} observation path must be absent before the first snapshot"
+        return 124
+      fi
+    fi
+    stable_dir="$(mktemp -d "$gate_race_out/identity-pair.XXXXXX")" || {
+      race_drain_owned_record_error="${label} could not create its private stability directory"
+      return 124
+    }
+    previous_record="$stable_dir/record"
+    previous_ack="$stable_dir/ack"
+    deadline=$(( $(date +%s) + stable_pair_wait_seconds ))
+    while :; do
+      if race_drain_validate_identity_pair "$label" "$record_path" "$ack_path" &&
+        [[ -s "$record_snapshot" && -s "$ack_snapshot" ]]; then
+        if [[ -f "$previous_record" && -f "$previous_ack" ]]; then
+          if cmp -s "$record_snapshot" "$previous_record" &&
+            cmp -s "$ack_snapshot" "$previous_ack"; then
+            if [[ "$require_change" -eq 0 || "$change_observed" -eq 1 ]]; then
+              stable_observations=$((stable_observations + 1))
+              if [[ "$stable_observations" -ge 2 ]]; then
+                rm -rf "$stable_dir"
+                return 0
+              fi
+            fi
+          else
+            [[ "$require_change" -eq 0 ]] || change_observed=1
+            stable_observations=0
+          fi
+        else
+          stable_observations=0
+          if [[ -n "$observation_file" ]]; then
+            if ! (set -C && : > "$observation_file") 2>/dev/null; then
+              race_drain_owned_record_error="${label} could not publish its first-observation marker"
+              rm -rf "$stable_dir"
+              return 124
+            fi
+          fi
+        fi
+        if ! cp "$record_snapshot" "$previous_record" ||
+          ! cp "$ack_snapshot" "$previous_ack"; then
+          race_drain_owned_record_error="${label} could not retain its stability snapshots"
+          rm -rf "$stable_dir"
+          return 124
+        fi
+      else
+        stable_observations=0
+      fi
+      if [[ "$(date +%s)" -ge "$deadline" ]]; then
+        race_drain_owned_record_error="${label} record and acknowledgement did not become repeatedly stable before the bounded deadline"
+        rm -rf "$stable_dir"
+        return 124
+      fi
+      sleep 1
+    done
+  }
+
+  # Return 0 when every recorded identity was already absent, 1 when at least
+  # one exact fixture-owned survivor was found and removed, and 124 when the
+  # record or bounded cleanup could not be proved safe. Validate the complete
+  # snapshot before the first signal so one malformed line cannot authorize a
+  # partial cleanup.
+  race_drain_inspect_owned_record() {
+    local label="$1"
+    local record_path="$2"
+    local snapshot_path="${record_path}.cleanup.snapshot"
+    local owned_pid owned_start owned_parent current_start current_parent signal_status
+    local deadline found_survivor=0 cleanup_status=0
+    race_drain_owned_survivors=""
+    if [[ -z "$record_path" ]]; then
+      return 0
+    fi
+    if ! race_drain_snapshot_identity_file "${label} record" "$record_path" "$snapshot_path"; then
+      return 124
+    fi
+    while IFS='|' read -r owned_pid owned_start owned_parent; do
+      [[ -n "$owned_pid" ]] || continue
+      current_start="$(gate_test_process_start "$owned_pid")"
+      current_parent="$(gate_test_process_parent "$owned_pid")"
+      gate_test_trace_signal identity "$label" NONE "$owned_pid" \
+        "$owned_start" "$current_start" "$owned_parent" "$current_parent"
+      if [[ -z "$current_start" ]]; then
+        continue
+      fi
+      if [[ "$current_start" != "$owned_start" ]]; then
+        gate_test_trace_signal refused-reused "$label" KILL "$owned_pid" \
+          "$owned_start" "$current_start" "$owned_parent" "$current_parent"
+        continue
+      fi
+      found_survivor=1
+      race_drain_owned_survivors="${race_drain_owned_survivors}${race_drain_owned_survivors:+ }${owned_pid}"
+      deadline=$(( $(date +%s) + 10 ))
+      while gate_test_process_has_start "$owned_pid" "$owned_start"; do
+        if gate_test_signal_with_current_parent \
+          "${label} fixture-owned survivor" KILL "$owned_pid" "$owned_start"; then
+          break
+        else
+          signal_status=$?
+        fi
+        [[ "$signal_status" -eq 1 ]] && break
+        if [[ "$(date +%s)" -ge "$deadline" ]]; then
+          cleanup_status=124
+          break
+        fi
+        sleep 1
+      done
+      deadline=$(( $(date +%s) + 10 ))
+      while gate_test_process_has_start "$owned_pid" "$owned_start" &&
+        [[ "$(date +%s)" -lt "$deadline" ]]; do
+        sleep 1
+      done
+      if gate_test_process_has_start "$owned_pid" "$owned_start"; then
+        race_drain_owned_record_error="${label} exact survivor ${owned_pid} exceeded its bounded cleanup"
+        cleanup_status=124
+      fi
+    done < "$snapshot_path"
+    [[ "$cleanup_status" -eq 0 ]] || return 124
+    [[ "$found_survivor" -eq 0 ]] || return 1
+    return 0
+  }
+
+  # shellcheck disable=SC2329 # invoked through the EXIT cleanup tracker below
+  race_drain_inspect_owned_pair() {
+    local label="$1"
+    local record_path="$2"
+    local ack_path="$3"
+    if [[ -z "$record_path" && -z "$ack_path" ]]; then
+      return 0
+    fi
+    race_drain_wait_for_stable_identity_pair \
+      "$label" "$record_path" "$ack_path" || return 124
+    race_drain_inspect_owned_record "$label" "$record_path"
+  }
+
+  race_drain_cleanup_suspended_watchdogs() {
+    local watchdog_pid watchdog_start watchdog_parent current_parent deadline cleanup_status=0 signal_status
+    while IFS='|' read -r watchdog_pid watchdog_start watchdog_parent; do
+      [[ -n "$watchdog_pid" && -n "$watchdog_start" ]] || continue
+      if [[ ! "$watchdog_parent" =~ ^[0-9]+$ ]]; then
+        cleanup_status=124
+        continue
+      fi
+      if gate_test_process_has_start "$watchdog_pid" "$watchdog_start"; then
+        # Leave a pending TERM unhandled. Resuming this stopped watchdog could
+        # make it run its own stale drain path. KILL removes only this exact
+        # identity without executing that deferred work.
+        current_parent="$(gate_test_process_parent "$watchdog_pid")"
+        if gate_test_signal_expected "stopped watchdog" KILL \
+          "$watchdog_pid" "$watchdog_start" "$current_parent"; then
+          :
+        else
+          signal_status=$?
+          [[ "$signal_status" -eq 1 ]] || cleanup_status=124
+        fi
+        deadline=$(( $(date +%s) + 10 ))
+        while gate_test_process_has_start "$watchdog_pid" "$watchdog_start" && [[ "$(date +%s)" -lt "$deadline" ]]; do sleep 1; done
+      fi
+      if gate_test_process_has_start "$watchdog_pid" "$watchdog_start"; then
+        echo "interrupted-drain cleanup: watchdog ${watchdog_pid} survived the bounded cleanup wait" >&2
+        cleanup_status=124
+      fi
+    done <<EOF
+$race_drain_watchdog_identities
+EOF
+    return "$cleanup_status"
+  }
+
+  # Launch a fixture command through a directly-owned /bin/sh child. The
+  # child publishes one exact identity record, then waits for the parent to
+  # create a private release file with noclobber. Registration happens before
+  # that release, so an EXIT trap can always find the original process.
+  race_bound_registered=""
+  race_bound_pid=""
+  race_bound_start=""
+  race_bound_parent=""
+  race_bound_dir=""
+  race_bound_record=""
+  race_bound_release=""
+  race_bound_started=""
+  race_bound_nonce=""
+  race_bound_failure_wait_seconds=35
+  race_bound_unregistered=""
+  race_bound_sequence=0
+  race_bound_job_is_active() {
+    local job_pid jobs_output
+    jobs_output="$( { jobs -pr; jobs -ps; } 2>/dev/null || true)"
+    for job_pid in $jobs_output; do
+      [[ "$job_pid" == "$1" ]] && return 0
+    done
+    return 1
+  }
+  race_bound_wait_unreleased() {
+    local child_pid="$1"
+    local wait_seconds="${2:-35}"
+    local deadline
+    [[ "$wait_seconds" =~ ^[0-9]+$ && "$wait_seconds" -ge 1 ]] || return 124
+    deadline=$(( $(date +%s) + wait_seconds ))
+    while race_bound_job_is_active "$child_pid" &&
+      [[ "$(date +%s)" -lt "$deadline" ]]; do
+      sleep 1
+    done
+    race_bound_job_is_active "$child_pid" && return 124
+    wait "$child_pid" 2>/dev/null || true
+  }
+  race_bound_launch_failure() {
+    local message="$1"
+    local child_pid="${2:-}"
+    local registered=0 wait_status=0
+    if [[ -n "$race_bound_dir" && "$race_bound_registered" == *"|${race_bound_dir}|"* ]]; then
+      registered=1
+    fi
+    if [[ -n "$child_pid" && "$registered" -eq 0 ]]; then
+      race_bound_wait_unreleased \
+        "$child_pid" "$race_bound_failure_wait_seconds" || wait_status=$?
+    fi
+    if [[ "$registered" -eq 0 ]]; then
+      if [[ -z "$child_pid" || "$wait_status" -eq 0 ]]; then
+        [[ -z "$race_bound_dir" ]] || rm -rf "$race_bound_dir"
+        race_bound_pid=""
+        race_bound_start=""
+        race_bound_parent=""
+        race_bound_dir=""
+        race_bound_record=""
+        race_bound_release=""
+        race_bound_started=""
+        race_bound_nonce=""
+      else
+        race_bound_unregistered="${race_bound_unregistered}${race_bound_unregistered:+$'\n'}${child_pid}|${race_bound_dir}|${race_bound_failure_wait_seconds}"
+        echo "launch-bound fixture failed: unregistered child ${child_pid} remained active after its derived wait bound" >&2
+      fi
+    fi
+    echo "launch-bound fixture failed: $message" >&2
+    return 1
+  }
+  race_bound_launch_command() {
+    local label="$1"
+    local seconds="$2"
+    shift 2
+    local command_name="${1:-}"
+    local child_pid child_record_line child_record_last_byte child_start child_parent
+    local deadline
+    race_bound_pid=""
+    race_bound_start=""
+    race_bound_parent=""
+    race_bound_dir=""
+    race_bound_record=""
+    race_bound_release=""
+    race_bound_started=""
+    race_bound_nonce=""
+    if ! [[ "$seconds" =~ ^[0-9]+$ && "$seconds" -ge 1 ]]; then
+      race_bound_launch_failure "$label has an invalid hard bound"
+      return 1
+    fi
+    race_bound_failure_wait_seconds=$((seconds + 5))
+    if [[ -z "$command_name" ]]; then
+      race_bound_launch_failure "$label has no command"
+      return 1
+    fi
+    if ! race_bound_dir="$(mktemp -d "$gate_race_out/launch-bound.XXXXXX")"; then
+      race_bound_launch_failure "$label could not create a private launch directory"
+      return 1
+    fi
+    race_bound_record="$race_bound_dir/identity"
+    race_bound_release="$race_bound_dir/release"
+    race_bound_started="$race_bound_dir/started"
+    race_bound_sequence=$((race_bound_sequence + 1))
+    race_bound_nonce="launch-bound-${gate_test_outer_pid}-${race_bound_sequence}"
+    if ! [[ ! -e "$race_bound_record" && ! -L "$race_bound_record" &&
+      ! -e "$race_bound_release" && ! -L "$race_bound_release" &&
+      ! -e "$race_bound_started" && ! -L "$race_bound_started" ]]; then
+      race_bound_launch_failure "$label release or record path existed before fork"
+      return 1
+    fi
+    /bin/sh -c '
+      race_bound_seconds=$1
+      race_bound_record=$2
+      race_bound_release=$3
+      race_bound_started=$4
+      shift 4
+      race_bound_pid=$$
+      race_bound_start=$(TZ=UTC LC_ALL=C LANG=C ps -p "$race_bound_pid" -o lstart= 2>/dev/null) || exit 64
+      race_bound_parent=$PPID
+      [ -n "$race_bound_start" ] || exit 64
+      [ "$race_bound_parent" -eq "$PPID" ] 2>/dev/null || exit 64
+      (set -C && printf "%s|%s|%s\n" "$race_bound_pid" "$race_bound_start" "$race_bound_parent" > "$race_bound_record") || exit 64
+      exec 7>&-
+      exec 8>&-
+      race_bound_deadline=$(( $(date +%s) + race_bound_seconds ))
+      while [ ! -s "$race_bound_release" ] &&
+        [ "$(date +%s)" -lt "$race_bound_deadline" ]; do
+        sleep 1
+      done
+      race_bound_release_value=""
+      race_bound_release_line_count=0
+      while IFS= read -r race_bound_release_line || [ -n "$race_bound_release_line" ]; do
+        race_bound_release_line_count=$((race_bound_release_line_count + 1))
+        if [ "$race_bound_release_line_count" -ne 1 ] || [ -z "$race_bound_release_line" ]; then
+          exit 64
+        fi
+        race_bound_release_value=$race_bound_release_line
+      done < "$race_bound_release"
+      [ "$race_bound_release_line_count" -eq 1 ] || exit 64
+      [ -n "$race_bound_release_value" ] || exit 64
+      (set -C && printf "%s\n" "$race_bound_release_value" > "$race_bound_started") || exit 64
+      exec "$@"
+    ' launch-bound-child "$seconds" "$race_bound_record" "$race_bound_release" \
+      "$race_bound_started" "$@" &
+    child_pid=$!
+    race_bound_pid="$child_pid"
+    deadline=$(( $(date +%s) + 15 ))
+    child_record_line=""
+    while [[ -z "$child_record_line" && "$(date +%s)" -lt "$deadline" ]]; do
+      if [[ -f "$race_bound_record" ]]; then
+        child_record_last_byte="$(tail -c 1 "$race_bound_record" 2>/dev/null || true)"
+        if [[ -z "$child_record_last_byte" ]]; then
+          child_record_line="$(awk 'NF { print; count++ } END { if (NR != 1 || count != 1) exit 1 }' \
+            "$race_bound_record" 2>/dev/null || true)"
+        fi
+      fi
+      [[ -n "$child_record_line" ]] || sleep 1
+    done
+    if [[ -z "$child_record_line" ]]; then
+      race_bound_launch_failure "$label child did not publish one identity record" "$child_pid"
+      return 1
+    fi
+    IFS='|' read -r child_record_pid child_start child_parent <<EOF
+$child_record_line
+EOF
+    [[ "$child_record_pid" == "$child_pid" &&
+      "$child_start" != *'|'* && -n "$child_start" &&
+      "$child_parent" =~ ^[0-9]+$ &&
+      "$child_parent" == "$gate_test_signal_shell_pid" ]] || {
+      race_bound_launch_failure "$label child identity record was malformed" "$child_pid"
+      return 1
+    }
+    gate_test_pid_is_protected "$child_record_pid" && {
+      race_bound_launch_failure "$label child identity is protected" "$child_pid"
+      return 1
+    }
+    gate_test_process_is_expected "$child_pid" "$child_start" "$child_parent" || {
+      race_bound_launch_failure "$label child identity was not exact" "$child_pid"
+      return 1
+    }
+    [[ ! -e "$race_bound_started" && ! -L "$race_bound_started" ]] || {
+      race_bound_launch_failure "$label started marker existed before registration" "$child_pid"
+      return 1
+    }
+    race_bound_start="$child_start"
+    race_bound_parent="$child_parent"
+    race_bound_registered="${race_bound_registered}${race_bound_registered:+$'\n'}${child_pid}|${child_start}|${child_parent}|${race_bound_dir}|${label}|${race_bound_nonce}|${race_bound_started}"
+    [[ ! -e "$race_bound_started" && ! -L "$race_bound_started" ]] || {
+      race_bound_launch_failure "$label started marker appeared before release" "$child_pid"
+      return 1
+    }
+    (set -C && printf "%s\n" "$race_bound_nonce" > "$race_bound_release") || {
+      race_bound_launch_failure "$label release could not be atomically published" "$child_pid"
+      return 1
+    }
+    deadline=$(( $(date +%s) + 15 ))
+    while [[ ! -s "$race_bound_started" && "$(date +%s)" -lt "$deadline" ]]; do sleep 1; done
+    if [[ ! -s "$race_bound_started" ]] || ! awk -v expected="$race_bound_nonce" '
+        NR == 1 { if (NF != 1 || $0 != expected) bad = 1; found = 1 }
+        NR > 1 { bad = 1 }
+        END { exit(bad || !found ? 1 : 0) }
+    ' "$race_bound_started"; then
+      race_bound_launch_failure "$label started marker did not match the release" "$child_pid"
+      return 1
+    fi
+    gate_test_process_is_expected "$child_pid" "$child_start" "$child_parent" || {
+      race_bound_launch_failure "$label child identity changed after release" "$child_pid"
+      return 1
+    }
+  }
+  # shellcheck disable=SC2329 # invoked only through cleanup_interrupted_drain_fixture
+  race_bound_cleanup_unregistered() {
+    local status=0
+    local pending=""
+    local child_pid child_dir wait_seconds
+    while IFS='|' read -r child_pid child_dir wait_seconds; do
+      [[ -n "$child_pid" ]] || continue
+      if ! race_bound_wait_unreleased "$child_pid" "$wait_seconds"; then
+        pending="${pending}${pending:+$'\n'}${child_pid}|${child_dir}|${wait_seconds}"
+        status=124
+        continue
+      fi
+      if [[ -n "$child_dir" ]] && ! rm -rf "$child_dir"; then
+        pending="${pending}${pending:+$'\n'}${child_pid}|${child_dir}|${wait_seconds}"
+        status=124
+      fi
+    done <<EOF
+$race_bound_unregistered
+EOF
+    race_bound_unregistered="$pending"
+    return "$status"
+  }
+  # shellcheck disable=SC2329 # invoked only through cleanup_interrupted_drain_fixture
+  race_bound_cleanup_registered() {
+    local status=0
+    local pending=""
+    local child_pid child_start child_parent child_dir child_label child_nonce child_started
+    while IFS='|' read -r child_pid child_start child_parent child_dir child_label child_nonce child_started; do
+      [[ -n "$child_pid" ]] || continue
+      if gate_test_process_has_start "$child_pid" "$child_start"; then
+        race_drain_kill_and_reap_direct_wrapper \
+          "launch-bound ${child_label}" "$child_pid" "$child_start" "$child_parent" ||
+          status=124
+      fi
+      if gate_test_process_has_start "$child_pid" "$child_start"; then
+        pending="${pending}${pending:+$'\n'}${child_pid}|${child_start}|${child_parent}|${child_dir}|${child_label}|${child_nonce}|${child_started}"
+        status=124
+      else
+        rm -rf "$child_dir"
+      fi
+    done <<EOF
+$race_bound_registered
+EOF
+    race_bound_registered="$pending"
+    return "$status"
+  }
+
+  # Remove completed launch records without signalling any fixture that still
+  # has its registered process identity. The EXIT trap retains every live one.
+  race_bound_prune_completed() {
+    local pending=""
+    local child_pid child_start child_parent child_dir child_label child_nonce child_started
+    while IFS='|' read -r child_pid child_start child_parent child_dir child_label child_nonce child_started; do
+      [[ -n "$child_pid" ]] || continue
+      if gate_test_process_has_start "$child_pid" "$child_start"; then
+        pending="${pending}${pending:+$'\n'}${child_pid}|${child_start}|${child_parent}|${child_dir}|${child_label}|${child_nonce}|${child_started}"
+      else
+        rm -rf "$child_dir"
+      fi
+    done <<EOF
+$race_bound_registered
+EOF
+    race_bound_registered="$pending"
+  }
+
+  # shellcheck disable=SC2329 # invoked by the EXIT trap below
+  cleanup_interrupted_drain_fixture() {
+    local status=$?
+    local deadline cleanup_status=0 final_status
+    trap - EXIT
+    race_cleanup_track() {
+      "$@" || cleanup_status=124
+    }
+    race_cleanup_track_absent_ok() {
+      local result
+      if "$@"; then
+        return 0
+      else
+        result=$?
+      fi
+      [[ "$result" -eq 1 ]] || cleanup_status=124
+      return 0
+    }
+    if [[ -n "$race_drain_hold_file" ]]; then
+      if [[ -L "$race_drain_hold_file" ]]; then
+        echo "interrupted-drain cleanup: refusing to release symlink $race_drain_hold_file" >&2
+        cleanup_status=124
+      elif [[ ! -e "$race_drain_hold_file" ]]; then
+        if ! (set -C && : > "$race_drain_hold_file") 2>/dev/null; then
+          echo "interrupted-drain cleanup: could not release $race_drain_hold_file" >&2
+          cleanup_status=124
+        fi
+      elif [[ ! -f "$race_drain_hold_file" ]]; then
+        echo "interrupted-drain cleanup: refusing to release non-regular path $race_drain_hold_file" >&2
+        cleanup_status=124
+      fi
+    fi
+    if race_drain_victim_is_expected; then
+      race_cleanup_track_absent_ok gate_test_signal_with_current_parent "held command" TERM \
+        "$race_drain_orphan" "$race_drain_orphan_start"
+      deadline=$(( $(date +%s) + 10 ))
+      while race_drain_victim_is_expected && [[ "$(date +%s)" -lt "$deadline" ]]; do sleep 1; done
+      if race_drain_victim_is_expected; then
+        race_cleanup_track_absent_ok gate_test_signal_with_current_parent "held command" KILL \
+          "$race_drain_orphan" "$race_drain_orphan_start"
+        deadline=$(( $(date +%s) + 10 ))
+        while race_drain_victim_is_expected && [[ "$(date +%s)" -lt "$deadline" ]]; do sleep 1; done
+      fi
+      if race_drain_victim_is_expected; then
+        echo "interrupted-drain cleanup: victim $race_drain_orphan survived the bounded cleanup wait" >&2
+        cleanup_status=124
+      fi
+    fi
+    race_cleanup_track race_drain_cleanup_direct_wrapper \
+      "A gate" "$race_drain_a_wrapper" "$race_drain_a_wrapper_start" \
+      "$race_drain_a_wrapper_parent"
+    race_cleanup_track race_drain_cleanup_direct_wrapper \
+      "B gate" "$race_drain_b_wrapper" "$race_drain_b_wrapper_start" \
+      "$race_drain_b_wrapper_parent"
+    race_cleanup_track race_drain_cleanup_direct_wrapper \
+      "C gate" "$race_drain_c_wrapper" "$race_drain_c_wrapper_start" \
+      "$race_drain_c_wrapper_parent"
+    race_cleanup_track race_drain_cleanup_direct_wrapper \
+      "fork-on-TERM A gate" "$race_fork_wrapper" "$race_fork_wrapper_start" \
+      "$race_fork_wrapper_parent"
+    race_cleanup_track race_drain_cleanup_direct_wrapper \
+      "fork-and-exit A gate" "$race_forkexit_wrapper" \
+      "$race_forkexit_wrapper_start" "$race_forkexit_wrapper_parent"
+    # Stop every registered publisher before freezing record/ack pairs. A
+    # still-live publisher can append immediately after an otherwise clean cmp.
+    race_cleanup_track race_bound_cleanup_unregistered
+    race_cleanup_track race_bound_cleanup_registered
+    race_cleanup_track_absent_ok race_drain_inspect_owned_pair \
+      "fork-on-TERM" "$race_fork_record" "$race_fork_ack"
+    race_cleanup_track_absent_ok race_drain_inspect_owned_pair \
+      "fork-and-exit" "$race_forkexit_record" "$race_forkexit_ack"
+    race_cleanup_track_absent_ok race_drain_inspect_owned_record \
+      "publisher probe" "$race_fork_probe_record"
+    race_cleanup_track race_drain_cleanup_direct_wrapper \
+      "fork-on-TERM bystander" "$race_fork_bystander" \
+      "$race_fork_bystander_start" "$race_fork_bystander_parent"
+    race_cleanup_track race_drain_cleanup_direct_wrapper \
+      "fork-and-exit bystander" "$race_forkexit_bystander" \
+      "$race_forkexit_bystander_start" "$race_forkexit_bystander_parent"
+    race_cleanup_track race_drain_cleanup_direct_wrapper \
+      "fork-record unit bystander" "$race_fork_unit_bystander" \
+      "$race_fork_unit_bystander_start" "$race_fork_unit_bystander_parent"
+    race_cleanup_track race_drain_cleanup_suspended_watchdogs
+    final_status="$status"
+    if [[ "$final_status" -eq 0 && "$cleanup_status" -ne 0 ]]; then
+      final_status=124
+    fi
+    exit "$final_status"
+  }
+  trap cleanup_interrupted_drain_fixture EXIT
+
   cd "$gate_race_repo"
   git init -q
   git config user.email test@example.invalid
   git config user.name "Quality Gate Test"
   printf 'fixture\n' > fixture.txt
   mkdir -p tools
-  # The replacements these stubs fork are found again by their sleep duration,
-  # and that duration is derived from this suite's PID so it names only this
-  # suite's fixtures. A fixed number would let the teardown below `kill -9`
-  # something an unrelated process — or a second copy of this suite — happened
-  # to be running.
-  gate_race_fork_seconds="98$((RANDOM % 900 + 100))${$}"
-  gate_race_forkexit_seconds="97$((RANDOM % 900 + 100))${$}"
+  # These fixed sleeps only need to outlast the bounded production drain and
+  # fixture inspection. The child-published identity records own them; argv does not.
+  gate_race_fork_seconds=600
+  gate_race_forkexit_seconds=601
   # The two contention cases need this to outlast the stagger between their
   # waiters, or two unexcluded runs would simply miss each other and the
   # assertion would pass on broken code. Every other case only needs the gate
   # to execute something, so they run it at its cheap default.
-  cat > tools/trunk <<STUB
+cat > tools/trunk <<STUB
 #!/usr/bin/env bash
+if [ -n "\${RACE_STUB_VICTIM_PID:-}" ] || [ -n "\${RACE_STUB_VICTIM_LSTART:-}" ] || [ -n "\${RACE_STUB_VIOLATION_FILE:-}" ]; then
+  [ -n "\${RACE_STUB_VICTIM_PID:-}" ] && [ -n "\${RACE_STUB_VICTIM_LSTART:-}" ] && [ -n "\${RACE_STUB_VIOLATION_FILE:-}" ] || {
+    echo "race stub victim identity and violation file must be set together" >&2
+    exit 64
+  }
+  race_stub_victim_start="\$(TZ=UTC LC_ALL=C LANG=C ps -p "\$RACE_STUB_VICTIM_PID" -o lstart= 2>/dev/null || true)"
+  if [ -n "\$race_stub_victim_start" ] && [ "\$race_stub_victim_start" = "\$RACE_STUB_VICTIM_LSTART" ]; then
+    if ! (set -C && printf 'victim=%s|%s\\n' "\$RACE_STUB_VICTIM_PID" "\$RACE_STUB_VICTIM_LSTART" > "\$RACE_STUB_VIOLATION_FILE") 2>/dev/null; then
+      echo "race stub could not atomically publish the C-before-victim-death violation" >&2
+      exit 64
+    fi
+  fi
+fi
+race_stub_private_file_is_safe() {
+  local race_stub_private_path="\$1"
+  [[ -n "\$race_stub_private_path" && ! -L "\$race_stub_private_path" &&
+    -f "\$race_stub_private_path" && -O "\$race_stub_private_path" &&
+    -r "\$race_stub_private_path" && -w "\$race_stub_private_path" ]]
+}
+race_stub_fork_job_is_active() {
+  local race_stub_jobs_output race_stub_job_pid
+  race_stub_jobs_output="\$( { jobs -pr; jobs -ps; } 2>/dev/null || true)"
+  for race_stub_job_pid in \$race_stub_jobs_output; do
+    [ "\$race_stub_job_pid" = "\$1" ] && return 0
+  done
+  return 1
+}
+race_stub_fork_failure() {
+  local race_stub_failure_message="\$1"
+  local race_stub_failure_child="\${2:-}"
+  if [[ "\${race_stub_fork_record_fd_open:-0}" -eq 1 ]]; then
+    exec 7>&-
+    race_stub_fork_record_fd_open=0
+  fi
+  if [[ "\${race_stub_fork_ack_fd_open:-0}" -eq 1 ]]; then
+    exec 8>&-
+    race_stub_fork_ack_fd_open=0
+  fi
+  if [[ -n "\$race_stub_failure_child" ]]; then
+    race_stub_fork_deadline=\$(( \$(date +%s) + 50 ))
+    while race_stub_fork_job_is_active "\$race_stub_failure_child" &&
+      [ "\$(date +%s)" -lt "\$race_stub_fork_deadline" ]; do
+      sleep 1
+    done
+    if ! race_stub_fork_job_is_active "\$race_stub_failure_child"; then
+      wait "\$race_stub_failure_child" 2>/dev/null || true
+      [[ -z "\${race_stub_fork_release_dir:-}" ]] ||
+        rm -rf "\$race_stub_fork_release_dir"
+    fi
+  elif [[ -n "\${race_stub_fork_release_dir:-}" ]]; then
+    rm -rf "\$race_stub_fork_release_dir"
+  fi
+  echo "race stub fork publisher failed: \$race_stub_failure_message" >&2
+  exit 64
+}
+race_stub_publish_forked_sleep() {
+  local race_stub_fork_seconds="\$1"
+  local race_stub_fork_record="\${RACE_STUB_FORK_RECORD:-}"
+  local race_stub_fork_ack="\${RACE_STUB_FORK_ACK:-}"
+  local race_stub_fork_release_dir=""
+  local race_stub_fork_release=""
+  local race_stub_fork_started=""
+  local race_stub_fork_nonce=""
+  local race_stub_fork_ack_seconds="\${RACE_STUB_FORK_ACK_SECONDS:-5}"
+  local race_stub_fork_test_close_record_fd="\${RACE_STUB_FORK_TEST_CLOSE_RECORD_FD:-}"
+  local race_stub_fork_test_skip_ack="\${RACE_STUB_FORK_TEST_SKIP_ACK:-}"
+  local race_stub_fork_record_fd_open=0
+  local race_stub_fork_ack_fd_open=0
+  local race_stub_fork_child=""
+  local race_stub_fork_deadline
+  local race_stub_fork_ack_line=""
+  local race_stub_fork_ack_pid race_stub_fork_ack_start race_stub_fork_ack_parent
+  local race_stub_fork_current_start race_stub_fork_current_parent
+  local race_stub_fork_parent_pid="\$\$"
+  case "\$race_stub_fork_seconds" in
+    ''|*[!0-9]*) race_stub_fork_failure "sleep duration must be numeric" ;;
+  esac
+  case "\$race_stub_fork_ack_seconds" in
+    ''|*[!0-9]*) race_stub_fork_failure "acknowledgement budget must be numeric" ;;
+  esac
+  [ "\$race_stub_fork_ack_seconds" -ge 1 ] && [ "\$race_stub_fork_ack_seconds" -le 30 ] ||
+    race_stub_fork_failure "acknowledgement budget must be between 1 and 30 seconds"
+  [ -n "\$race_stub_fork_record" ] && [ -n "\$race_stub_fork_ack" ] &&
+    [ "\$race_stub_fork_record" != "\$race_stub_fork_ack" ] ||
+    race_stub_fork_failure "record and acknowledgement paths must be set and distinct"
+  race_stub_private_file_is_safe "\$race_stub_fork_record" ||
+    race_stub_fork_failure "record path must be an owned readable writable regular file, not a symlink"
+  race_stub_private_file_is_safe "\$race_stub_fork_ack" ||
+    race_stub_fork_failure "acknowledgement path must be an owned readable writable regular file, not a symlink"
+  if ! race_stub_fork_release_dir="\$(mktemp -d "\${race_stub_fork_record}.release.XXXXXX")"; then
+    race_stub_fork_failure "private release directory could not be created"
+  fi
+  race_stub_fork_release="\$race_stub_fork_release_dir/release"
+  race_stub_fork_started="\$race_stub_fork_release_dir/started"
+  race_stub_fork_nonce="stub-\${race_stub_fork_parent_pid}-\$(basename "\$race_stub_fork_release_dir")"
+  [ ! -e "\$race_stub_fork_release" ] && [ ! -L "\$race_stub_fork_release" ] ||
+    race_stub_fork_failure "release path must be absent before fork"
+  [ ! -e "\$race_stub_fork_started" ] && [ ! -L "\$race_stub_fork_started" ] ||
+    race_stub_fork_failure "started path must be absent before fork"
+  if ! exec 7>> "\$race_stub_fork_record"; then
+    race_stub_fork_failure "record append descriptor could not be opened"
+  fi
+  race_stub_fork_record_fd_open=1
+  if ! exec 8>> "\$race_stub_fork_ack"; then
+    race_stub_fork_failure "acknowledgement append descriptor could not be opened"
+  fi
+  race_stub_fork_ack_fd_open=1
+  race_stub_private_file_is_safe "\$race_stub_fork_record" &&
+    race_stub_private_file_is_safe "\$race_stub_fork_ack" ||
+    race_stub_fork_failure "record or acknowledgement path changed after descriptor open"
+  /bin/sh -c '
+    race_child_seconds=\$1
+    race_child_close_record_fd=\$2
+    race_child_skip_ack=\$3
+    race_child_release=\$4
+    race_child_release_dir=\$5
+    race_child_started=\$6
+    race_child_ack_seconds=\$7
+    race_child_pid=\$\$
+    race_child_start=\$(TZ=UTC LC_ALL=C LANG=C ps -p "\$race_child_pid" -o lstart= 2>/dev/null) || exit 64
+    [ -n "\$race_child_start" ] || exit 64
+    [ -z "\$race_child_close_record_fd" ] || exec 7>&-
+    race_child_parent=\$PPID
+    if ! printf "%s|%s|%s\\n" "\$race_child_pid" "\$race_child_start" "\$race_child_parent" >&7; then
+      exec 7>&-
+      exec 8>&-
+      exit 64
+    fi
+    if [ -z "\$race_child_skip_ack" ] &&
+      ! printf "%s|%s|%s\\n" "\$race_child_pid" "\$race_child_start" "\$race_child_parent" >&8; then
+      exec 7>&-
+      exec 8>&-
+      exit 64
+    fi
+    exec 7>&-
+    exec 8>&-
+    race_child_deadline=\$(( \$(date +%s) + race_child_ack_seconds + 15 ))
+    while [ ! -s "\$race_child_release" ] &&
+      [ "\$(date +%s)" -lt "\$race_child_deadline" ]; do
+      sleep 1
+    done
+    [ -s "\$race_child_release" ] || exit 64
+    [ -d "\$race_child_release_dir" ] || exit 64
+    race_child_release_value="\$(awk \
+      "NR == 1 { if (NF != 1 || \\\$0 == \"\") bad = 1; value = \\\$0; found = 1 } NR > 1 { bad = 1 } END { if (bad || !found) exit 1; print value }" \
+      "\$race_child_release" 2>/dev/null)" || exit 64
+    (set -C && printf "%s\\n" "\$race_child_release_value" > "\$race_child_started") || exit 64
+    exec sleep "\$race_child_seconds"
+  ' race-stub-fork "\$race_stub_fork_seconds" \
+    "\$race_stub_fork_test_close_record_fd" "\$race_stub_fork_test_skip_ack" \
+    "\$race_stub_fork_release" "\$race_stub_fork_release_dir" \
+    "\$race_stub_fork_started" "\$race_stub_fork_ack_seconds" &
+  race_stub_fork_child=\$!
+  exec 7>&-
+  race_stub_fork_record_fd_open=0
+  exec 8>&-
+  race_stub_fork_ack_fd_open=0
+  race_stub_fork_deadline=\$(( \$(date +%s) + race_stub_fork_ack_seconds ))
+  while [ "\$(date +%s)" -lt "\$race_stub_fork_deadline" ]; do
+    race_stub_private_file_is_safe "\$race_stub_fork_record" &&
+      race_stub_private_file_is_safe "\$race_stub_fork_ack" ||
+      race_stub_fork_failure "record or acknowledgement path changed ownership, access, or type" "\$race_stub_fork_child"
+    if race_stub_fork_ack_line="\$(awk -F '|' -v expected_pid="\$race_stub_fork_child" \
+      -v expected_parent="\$race_stub_fork_parent_pid" '
+      \$1 == expected_pid {
+        if (NF != 3 || \$2 == "" || \$3 != expected_parent || found) { bad = 1 }
+        else { found = 1; line = \$0 }
+      }
+      END { if (bad) exit 2; if (found) print line }
+    ' "\$race_stub_fork_ack" 2>/dev/null)"; then
+      [ -z "\$race_stub_fork_ack_line" ] || break
+    else
+      race_stub_fork_failure "acknowledgement is malformed or duplicated" "\$race_stub_fork_child"
+    fi
+    sleep 1
+  done
+  [ -n "\$race_stub_fork_ack_line" ] ||
+    race_stub_fork_failure "child did not acknowledge its identity before the deadline" "\$race_stub_fork_child"
+  race_stub_fork_ack_pid="\${race_stub_fork_ack_line%%|*}"
+  race_stub_fork_ack_start="\${race_stub_fork_ack_line#*|}"
+  race_stub_fork_ack_parent="\${race_stub_fork_ack_start#*|}"
+  race_stub_fork_ack_start="\${race_stub_fork_ack_start%%|*}"
+  [ "\$race_stub_fork_ack_pid" != "\$race_stub_fork_parent_pid" ] &&
+    [ "\$race_stub_fork_ack_pid" != 1 ] ||
+    race_stub_fork_failure "acknowledged child identity is protected" "\$race_stub_fork_child"
+  race_stub_private_file_is_safe "\$race_stub_fork_record" &&
+    race_stub_private_file_is_safe "\$race_stub_fork_ack" ||
+    race_stub_fork_failure "record or acknowledgement path changed before identity read" "\$race_stub_fork_child"
+  [ "\$race_stub_fork_ack_pid" = "\$race_stub_fork_child" ] &&
+    grep -Fqx "\$race_stub_fork_ack_line" "\$race_stub_fork_record" &&
+    awk -F '|' -v expected_pid="\$race_stub_fork_child" \
+      -v expected_parent="\$race_stub_fork_parent_pid" \
+      '\$1 == expected_pid {
+         if (NF != 3 || \$2 == "" || \$3 != expected_parent || found) { bad = 1 }
+         else { found = 1; line = \$0 }
+       }
+       END { exit(bad || !found ? 1 : 0) }' "\$race_stub_fork_record" ||
+    race_stub_fork_failure "record does not contain the acknowledged child identity" "\$race_stub_fork_child"
+  race_stub_fork_current_start="\$(TZ=UTC LC_ALL=C LANG=C ps -p "\$race_stub_fork_child" -o lstart= 2>/dev/null || true)"
+  race_stub_fork_current_parent="\$(TZ=UTC LC_ALL=C LANG=C ps -p "\$race_stub_fork_child" -o ppid= 2>/dev/null | awk 'NF { print \$1; exit }')"
+  [ -n "\$race_stub_fork_current_start" ] &&
+    [ "\$race_stub_fork_current_start" = "\$race_stub_fork_ack_start" ] &&
+    [ "\$race_stub_fork_current_parent" = "\$race_stub_fork_ack_parent" ] ||
+    race_stub_fork_failure "acknowledged child identity is no longer exact" "\$race_stub_fork_child"
+  (set -C && printf "%s\\n" "\$race_stub_fork_nonce" > "\$race_stub_fork_release") ||
+    race_stub_fork_failure "release could not be atomically published" "\$race_stub_fork_child"
+  race_stub_fork_deadline=\$(( \$(date +%s) + race_stub_fork_ack_seconds ))
+  while [ ! -s "\$race_stub_fork_started" ] &&
+    [ "\$(date +%s)" -lt "\$race_stub_fork_deadline" ]; do
+    sleep 1
+  done
+  awk -v expected="\$race_stub_fork_nonce" '
+    NR == 1 { if (NF != 1 || \$0 != expected) bad = 1; found = 1 }
+    NR > 1 { bad = 1 }
+    END { exit(bad || !found ? 1 : 0) }
+  ' "\$race_stub_fork_started" ||
+    race_stub_fork_failure "started marker did not match the release" "\$race_stub_fork_child"
+  race_stub_fork_current_start="\$(TZ=UTC LC_ALL=C LANG=C ps -p "\$race_stub_fork_child" -o lstart= 2>/dev/null || true)"
+  race_stub_fork_current_parent="\$(TZ=UTC LC_ALL=C LANG=C ps -p "\$race_stub_fork_child" -o ppid= 2>/dev/null | awk 'NF { print \$1; exit }')"
+  [ -n "\$race_stub_fork_current_start" ] &&
+    [ "\$race_stub_fork_current_start" = "\$race_stub_fork_ack_start" ] &&
+    [ "\$race_stub_fork_current_parent" = "\$race_stub_fork_ack_parent" ] ||
+    race_stub_fork_failure "child identity changed after release" "\$race_stub_fork_child"
+  rm -rf "\$race_stub_fork_release_dir" ||
+    race_stub_fork_failure "private release directory could not be removed after handoff" "\$race_stub_fork_child"
+}
 # RACE_STUB_IGNORE_TERM makes this outlive a TERM the way a real build tool
 # with its own signal handling can. The loop is what survives: its sleeps are
 # killable, it is not.
-[ -n "\${RACE_STUB_FORK_ON_TERM:-}" ] && trap 'sleep ${gate_race_fork_seconds} &' TERM
+[ -n "\${RACE_STUB_FORK_ON_TERM:-}" ] &&
+  trap 'race_stub_publish_forked_sleep ${gate_race_fork_seconds}' TERM
 # RACE_STUB_FORK_AND_EXIT leaves a replacement behind and then goes away, so
 # the replacement is reparented with no tagged ancestor left to walk down from.
-[ -n "\${RACE_STUB_FORK_AND_EXIT:-}" ] && trap 'sleep ${gate_race_forkexit_seconds} & exit 0' TERM
+[ -n "\${RACE_STUB_FORK_AND_EXIT:-}" ] &&
+  trap 'race_stub_publish_forked_sleep ${gate_race_forkexit_seconds}; exit 0' TERM
 [ -n "\${RACE_STUB_IGNORE_TERM:-}" ] && [ -z "\${RACE_STUB_FORK_ON_TERM:-}" ] && [ -z "\${RACE_STUB_FORK_AND_EXIT:-}" ] && trap '' TERM
+[ -z "\${RACE_STUB_FORK_PUBLISH_ONLY:-}" ] || {
+  race_stub_publish_forked_sleep "\${RACE_STUB_FORK_SECONDS:-}"
+  exit 0
+}
 printf 'enter %s %s\n' "\$\$" "\$(date +%s)" >> "$gate_race_log"
-race_stub_deadline=\$(( \$(date +%s) + \${RACE_STUB_SECONDS:-1} ))
-while [ "\$(date +%s)" -lt "\$race_stub_deadline" ]; do sleep 1 || true; done
+if [ -n "\${RACE_STUB_HOLD_FILE:-}" ]; then
+  while :; do
+    if [ -L "\$RACE_STUB_HOLD_FILE" ]; then
+      echo "race stub hold path must be a regular file, not a symlink: \$RACE_STUB_HOLD_FILE" >&2
+      exit 64
+    fi
+    if [ -e "\$RACE_STUB_HOLD_FILE" ]; then
+      [ -f "\$RACE_STUB_HOLD_FILE" ] || {
+        echo "race stub hold path is not a regular file: \$RACE_STUB_HOLD_FILE" >&2
+        exit 64
+      }
+      break
+    fi
+    sleep 1 || true
+  done
+else
+  race_stub_deadline=\$(( \$(date +%s) + \${RACE_STUB_SECONDS:-1} ))
+  while [ "\$(date +%s)" -lt "\$race_stub_deadline" ]; do sleep 1 || true; done
+fi
 printf 'exit %s %s\n' "\$\$" "\$(date +%s)" >> "$gate_race_log"
 exit 0
 STUB
@@ -6324,6 +7765,34 @@ STUB
     printf '%s\n' "$?" > "$gate_race_out/$1.status"
   }
 
+  race_stub_probe_status=0
+  race_stub_publish_probe() {
+    local label="$1"
+    local record_path="$2"
+    local ack_path="$3"
+    local close_record_fd="${4:-}"
+    local skip_ack="${5:-}"
+    local ack_seconds="${6:-5}"
+    if RACE_STUB_FORK_PUBLISH_ONLY=1 \
+      RACE_STUB_FORK_RECORD="$record_path" \
+      RACE_STUB_FORK_ACK="$ack_path" \
+      RACE_STUB_FORK_ACK_SECONDS="$ack_seconds" \
+      RACE_STUB_FORK_TEST_CLOSE_RECORD_FD="$close_record_fd" \
+      RACE_STUB_FORK_TEST_SKIP_ACK="$skip_ack" \
+      RACE_STUB_FORK_SECONDS=60 \
+      "$gate_race_repo/tools/trunk" \
+      > "$gate_race_out/${label}.out" 2>&1; then
+      race_stub_probe_status=0
+    else
+      race_stub_probe_status=$?
+    fi
+  }
+
+  race_case_errors=""
+  race_case_add_error() {
+    race_case_errors="${race_case_errors}${race_case_errors:+$'\n'}- $*"
+  }
+
   assert_runs_did_not_overlap() {
     local label="$1"
     local overlapping starts
@@ -6347,6 +7816,197 @@ STUB
     [[ "${2:-2}" -eq 0 || "$starts" -eq "${2:-2}" ]] ||
       fail "${label}: expected ${2:-2} run(s) to execute the mapped command, saw ${starts}"
   }
+
+  # The compact probes below cover publisher append/ack failure and inspector
+  # refusal. The two full cases later cover the successful handoff.
+  race_probe_publisher_target="$gate_race_out/publisher-path.target"
+  race_probe_publisher_symlink="$gate_race_out/publisher-path.records"
+  race_probe_publisher_nonregular="$gate_race_out/publisher-path.directory"
+  race_probe_publisher_ack="$gate_race_out/publisher-path.acks"
+  printf 'sentinel\n' > "$race_probe_publisher_target"
+  ln -s "$race_probe_publisher_target" "$race_probe_publisher_symlink"
+  : > "$race_probe_publisher_ack"
+  race_stub_publish_probe publisher-path-symlink \
+    "$race_probe_publisher_symlink" "$race_probe_publisher_ack"
+  [[ "$race_stub_probe_status" -eq 64 &&
+    "$(cat "$race_probe_publisher_target")" == "sentinel" &&
+    "$(grep -Fc "record path must be an owned readable writable regular file" \
+      "$gate_race_out/publisher-path-symlink.out")" -eq 1 &&
+    ! -s "$race_probe_publisher_ack" ]] ||
+    fail "the fork publisher wrote through a symlink record path"
+  mkdir "$race_probe_publisher_nonregular"
+  race_stub_publish_probe publisher-path-nonregular \
+    "$race_probe_publisher_nonregular" "$race_probe_publisher_ack"
+  [[ "$race_stub_probe_status" -eq 64 &&
+    "$(grep -Fc "record path must be an owned readable writable regular file" \
+      "$gate_race_out/publisher-path-nonregular.out")" -eq 1 &&
+    ! -s "$race_probe_publisher_ack" ]] ||
+    fail "the fork publisher accepted a non-regular record path"
+
+  for race_probe_kind in append ack; do
+    race_probe_record="$gate_race_out/publisher-${race_probe_kind}.records"
+    race_probe_ack="$gate_race_out/publisher-${race_probe_kind}.acks"
+    : > "$race_probe_record"
+    : > "$race_probe_ack"
+    race_fork_probe_record="$race_probe_record"
+    if [[ "$race_probe_kind" == "append" ]]; then
+      race_stub_publish_probe publisher-append \
+        "$race_probe_record" "$race_probe_ack" 1 ''
+    else
+      race_stub_publish_probe publisher-ack \
+        "$race_probe_record" "$race_probe_ack" '' 1 1
+    fi
+    if race_drain_inspect_owned_record \
+      "publisher ${race_probe_kind} failure" "$race_probe_record"; then
+      race_probe_inspect_status=0
+    else
+      race_probe_inspect_status=$?
+    fi
+    race_fork_probe_record=""
+    [[ "$race_stub_probe_status" -eq 64 &&
+      "$race_probe_inspect_status" -eq 0 && ! -s "$race_probe_ack" ]] ||
+      fail "the fork publisher did not contain its ${race_probe_kind} failure"
+  done
+
+  race_probe_live_record="$gate_race_out/publisher-live.records"
+  race_probe_live_ack="$gate_race_out/publisher-live.acks"
+  race_probe_live_observed="$gate_race_out/publisher-live.first-observation"
+  : > "$race_probe_live_record"
+  : > "$race_probe_live_ack"
+  rm -f "$race_probe_live_observed"
+  race_fork_probe_record="$race_probe_live_record"
+  race_stub_publish_probe publisher-live \
+    "$race_probe_live_record" "$race_probe_live_ack"
+  [[ "$race_stub_probe_status" -eq 0 ]] ||
+    fail "the live three-field publisher fixture did not start"
+  if race_bound_launch_command "delayed three-field publisher" 15 \
+    /bin/sh -c \
+      'marker=$1; output_file=$2; shift 2; deadline=$(( $(date +%s) + 10 )); while [ ! -e "$marker" ] && [ "$(date +%s)" -lt "$deadline" ]; do sleep 1; done; [ -f "$marker" ] || exit 64; exec "$@" > "$output_file" 2>&1' \
+      delayed-three-field "$race_probe_live_observed" \
+      "$gate_race_out/publisher-live-delayed.out" env \
+      RACE_STUB_FORK_PUBLISH_ONLY=1 \
+      RACE_STUB_FORK_RECORD="$race_probe_live_record" \
+      RACE_STUB_FORK_ACK="$race_probe_live_ack" \
+      RACE_STUB_FORK_ACK_SECONDS=5 \
+      RACE_STUB_FORK_SECONDS=60 \
+      "$gate_race_repo/tools/trunk"; then
+    race_probe_delayed_wrapper="$race_bound_pid"
+    race_probe_delayed_wrapper_start="$race_bound_start"
+    race_probe_delayed_wrapper_parent="$race_bound_parent"
+  else
+    fail "the delayed three-field publisher wrapper could not be registered"
+  fi
+  race_drain_pair_observation_file="$race_probe_live_observed"
+  race_drain_pair_require_change=1
+  race_drain_wait_for_stable_identity_pair \
+    "live three-field publisher" "$race_probe_live_record" "$race_probe_live_ack" ||
+    fail "$race_drain_owned_record_error"
+  if race_drain_wait_for_direct_wrapper \
+    "delayed three-field publisher" "$race_probe_delayed_wrapper" \
+    "$race_probe_delayed_wrapper_start" "$race_probe_delayed_wrapper_parent" 15; then
+    race_probe_delayed_status=0
+  else
+    race_probe_delayed_status=$?
+  fi
+  [[ "$race_probe_delayed_status" -eq 0 ]] ||
+    fail "the delayed three-field publisher exited ${race_probe_delayed_status}"
+  race_bound_prune_completed
+  [[ "$(awk 'END { print NR + 0 }' "${race_probe_live_record}.snapshot")" -eq 2 ]] ||
+    fail "the stable identity pair omitted the delayed publisher record"
+  if race_drain_inspect_owned_record \
+    "live three-field publisher" "$race_probe_live_record"; then
+    race_probe_inspect_status=0
+  else
+    race_probe_inspect_status=$?
+  fi
+  [[ "$race_probe_inspect_status" -eq 1 ]] ||
+    fail "the owned-record inspector did not find and remove a live three-field identity"
+  if race_drain_inspect_owned_record \
+    "live three-field publisher" "$race_probe_live_record"; then
+    race_probe_inspect_status=0
+  else
+    race_probe_inspect_status=$?
+  fi
+  [[ "$race_probe_inspect_status" -eq 0 ]] ||
+    fail "the owned-record inspector did not prove the three-field identity absent after cleanup"
+  race_fork_probe_record=""
+
+  if race_bound_launch_command "fork-record unit bystander" 30 /bin/sleep 60; then
+    race_fork_unit_bystander="$race_bound_pid"
+    race_fork_unit_bystander_start="$race_bound_start"
+    race_fork_unit_bystander_parent="$race_bound_parent"
+  else
+    race_fork_unit_bystander=""
+    fail "the fork-record unit fixtures could not bind their direct bystander"
+  fi
+  race_probe_malformed_record="$gate_race_out/publisher-malformed.records"
+  {
+    printf '%s|%s\n' \
+      "$race_fork_unit_bystander" "$race_fork_unit_bystander_start"
+    printf 'malformed|identity|record\n'
+    printf '0|Mon Jan  1 00:00:00 1970\n'
+    printf '12345678901|Mon Jan  1 00:00:00 1970\n'
+  } > "$race_probe_malformed_record"
+  if race_drain_inspect_owned_record \
+    "malformed publisher record" "$race_probe_malformed_record"; then
+    race_probe_inspect_status=0
+  else
+    race_probe_inspect_status=$?
+  fi
+  [[ "$race_probe_inspect_status" -eq 124 ]] ||
+    fail "the owned-record inspector accepted a malformed full snapshot"
+  gate_test_process_is_expected \
+    "$race_fork_unit_bystander" "$race_fork_unit_bystander_start" \
+    "$race_fork_unit_bystander_parent" ||
+    fail "a malformed later record authorized signalling an earlier valid identity"
+
+  race_probe_reuse_record="$gate_race_out/publisher-reused.records"
+  printf '%s|Mon Jan  1 00:00:00 1970\n' \
+    "$race_fork_unit_bystander" > "$race_probe_reuse_record"
+  if race_drain_inspect_owned_record \
+    "reused publisher identity" "$race_probe_reuse_record"; then
+    race_probe_inspect_status=0
+  else
+    race_probe_inspect_status=$?
+  fi
+  [[ "$race_probe_inspect_status" -eq 0 ]] ||
+    fail "the owned-record inspector treated a reused PID as the recorded identity"
+  gate_test_process_is_expected \
+    "$race_fork_unit_bystander" "$race_fork_unit_bystander_start" \
+    "$race_fork_unit_bystander_parent" ||
+    fail "the owned-record inspector signalled a reused PID identity"
+
+  race_probe_reader_target="$gate_race_out/publisher-reader.target"
+  race_probe_reader_symlink="$gate_race_out/publisher-reader.records"
+  race_probe_reader_nonregular="$gate_race_out/publisher-reader.directory"
+  printf '%s|%s\n' \
+    "$race_fork_unit_bystander" "$race_fork_unit_bystander_start" \
+    > "$race_probe_reader_target"
+  ln -s "$race_probe_reader_target" "$race_probe_reader_symlink"
+  mkdir "$race_probe_reader_nonregular"
+  for race_probe_reader_path in \
+    "$race_probe_reader_symlink" "$race_probe_reader_nonregular"; do
+    if race_drain_inspect_owned_record \
+      "unsafe publisher record" "$race_probe_reader_path"; then
+      race_probe_inspect_status=0
+    else
+      race_probe_inspect_status=$?
+    fi
+    [[ "$race_probe_inspect_status" -eq 124 ]] ||
+      fail "the owned-record inspector accepted a symlink or non-regular record"
+    gate_test_process_is_expected \
+      "$race_fork_unit_bystander" "$race_fork_unit_bystander_start" \
+      "$race_fork_unit_bystander_parent" ||
+      fail "the owned-record inspector signalled through an unsafe record"
+  done
+
+  race_drain_kill_and_reap_direct_wrapper \
+    "fork-record unit bystander" "$race_fork_unit_bystander" \
+    "$race_fork_unit_bystander_start" "$race_fork_unit_bystander_parent" ||
+    fail "the fork-record unit fixtures could not clean their direct bystander"
+  race_fork_unit_bystander=""
+  race_fork_unit_bystander_start=""
+  race_fork_unit_bystander_parent=""
 
   # One stale lock, two waiters. The late waiter forms its verdict first, then
   # stalls past the point where the early one has already taken the lock over,
@@ -6555,7 +8215,7 @@ STUB
     local tag="$1"
     local reclaim_delay="$2"
     local taken_delay="$3"
-    local pid dead_pid
+    local pid pid_start pid_parent signal_status reclaim_exit dead_pid
     dead_pid="$(fresh_dead_pid)" ||
       fail "${tag}: could not obtain a reaped PID that reads as dead"
     rm -rf "$gate_race_root/run.lock"
@@ -6577,6 +8237,10 @@ STUB
       --base HEAD --run --lock-wait 60 \
       > "$gate_race_out/$tag.out" 2>&1 &
     pid=$!
+    gate_test_capture_identity "$pid" "$gate_test_signal_shell_pid" ||
+      fail "${tag}: could not bind the reclaim wrapper to its direct-child identity"
+    pid_start="$gate_test_captured_start"
+    pid_parent="$gate_test_captured_parent"
     if [[ "$taken_delay" != "0" ]]; then
       # Kill it precisely while it holds the record, or the assertions below
       # would pass without the window ever being entered.
@@ -6587,8 +8251,23 @@ STUB
       ! taken_record_present ||
         fail "${tag}: expected the record to be untouched at this point"
     fi
-    kill -TERM "$pid" 2>/dev/null || true
-    wait "$pid" 2>/dev/null || true
+    if gate_test_signal_expected \
+      "${tag} reclaim wrapper" TERM "$pid" "$pid_start" "$pid_parent"; then
+      :
+    else
+      signal_status=$?
+      fail "${tag}: refused or lost its recorded reclaim wrapper before TERM (status ${signal_status})"
+    fi
+    if race_drain_wait_for_direct_wrapper \
+      "${tag} reclaim" "$pid" "$pid_start" "$pid_parent"; then
+      reclaim_exit=0
+    else
+      reclaim_exit=$?
+    fi
+    [[ "$reclaim_exit" != "124" ]] ||
+      fail "${tag}: reclaim wrapper exceeded its bounded reap"
+    [[ "$reclaim_exit" != "0" ]] ||
+      fail "${tag}: reclaim wrapper ignored the requested TERM"
     ! taken_record_present ||
       fail "${tag}: an interrupted reclaim must not orphan its temp record"
     [[ -r "$gate_race_root/run.lock/owner" ]] ||
@@ -6714,38 +8393,95 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   # record is replaced between taking the lock and reaching its first mapped
   # command must stop, and must not delete the record that replaced it.
   : > "$gate_race_log"
-  RACE_STUB_SECONDS=1 \
+  race_test_mode_ready="$gate_race_sync/non-test.ready"
+  race_test_mode_release="$gate_race_sync/non-test.release"
+  rm -f "$race_test_mode_ready" "$race_test_mode_release"
+  if NODE_ENV='' \
+    RACE_STUB_SECONDS=1 \
     AGENT_QUALITY_GATE_LOCK=1 \
     AGENT_QUALITY_GATE_LOCK_HELD='' \
     AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
     AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
-    AGENT_QUALITY_GATE_LOCK_HELD_DELAY_SECONDS=6 \
+    AGENT_QUALITY_GATE_LOCK_TEST_READY_FILE="$race_test_mode_ready" \
+    AGENT_QUALITY_GATE_LOCK_TEST_RELEASE_FILE="$race_test_mode_release" \
     "$repo_root/scripts/agent-quality-gate.sh" \
     --base HEAD --run --lock-wait 30 \
-    > "$gate_race_out/displaced.out" 2>&1 &
-  race_displaced=$!
-  race_waited=0
-  while [[ ! -r "$gate_race_root/run.lock/owner" && "$race_waited" -lt 30 ]]; do
-    sleep 0.5
-    race_waited=$((race_waited + 1))
+    > "$gate_race_out/non-test-sync.out" 2>&1; then
+    race_test_mode_exit=0
+  else
+    race_test_mode_exit=$?
+  fi
+  [[ "$race_test_mode_exit" == "2" ]] ||
+    fail "test synchronization outside NODE_ENV=test must exit 2, got ${race_test_mode_exit}"
+  grep -Fx "error: gate lock test synchronization is allowed only with NODE_ENV=test." \
+    "$gate_race_out/non-test-sync.out" ||
+    fail "test synchronization outside NODE_ENV=test must fail closed"
+  [[ ! -e "$race_test_mode_ready" && ! -L "$race_test_mode_ready" && ! -e "$race_test_mode_release" && ! -L "$race_test_mode_release" ]] ||
+    fail "test synchronization outside NODE_ENV=test must not publish a barrier file"
+  [[ ! -s "$gate_race_log" ]] ||
+    fail "test synchronization outside NODE_ENV=test must not enter a mapped command"
+
+  race_displaced_ready="$gate_race_sync/displaced.ready"
+  race_displaced_release="$gate_race_sync/displaced.release"
+  race_bound_launch_command "displaced-holder gate" 45 /bin/sh -c \
+    'output_file="$1"; shift; exec "$@" > "$output_file" 2>&1' \
+    launch-bound-command "$gate_race_out/displaced.out" env \
+    RACE_STUB_SECONDS=1 \
+    NODE_ENV=test \
+    AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    AGENT_QUALITY_GATE_LOCK_TEST_READY_FILE="$race_displaced_ready" \
+    AGENT_QUALITY_GATE_LOCK_TEST_RELEASE_FILE="$race_displaced_release" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 30 ||
+    fail "the displaced-holder case could not bind its gate wrapper"
+  race_displaced="$race_bound_pid"
+  race_displaced_start="$race_bound_start"
+  race_displaced_parent="$race_bound_parent"
+  race_displaced_deadline=$(( $(date +%s) + 30 ))
+  while [[ ! -e "$race_displaced_ready" && ! -L "$race_displaced_ready" && "$(date +%s)" -lt "$race_displaced_deadline" ]]; do
+    sleep 1
   done
-  [[ -r "$gate_race_root/run.lock/owner" ]] ||
-    fail "the displaced-holder case never saw the run publish its record"
+  [[ -f "$race_displaced_ready" && ! -L "$race_displaced_ready" && -r "$race_displaced_ready" ]] ||
+    fail "the displaced-holder case timed out waiting for its regular ready file"
+  race_displaced_owner_id="$(sed -n 's/^token=//p' "$gate_race_root/run.lock/owner" | head -n1)"
+  [[ -n "$race_displaced_owner_id" ]] ||
+    fail "the displaced-holder case published ready without an owner token"
+  race_displaced_marker="$gate_race_root/holder.$race_displaced_owner_id"
+  [[ -f "$race_displaced_marker" && ! -L "$race_displaced_marker" && -r "$race_displaced_marker" ]] ||
+    fail "the displaced-holder case did not create a readable regular marker"
+  [[ "$(cat "$race_displaced_marker")" == "$race_displaced_owner_id" ]] ||
+    fail "the displaced-holder marker body does not equal the owner token"
+  race_displaced_replacement="$gate_race_root/run.lock/owner.replacement.$$"
   {
     printf 'pid=%s\n' "$$"
     printf 'host=%s\n' "$(uname -n)"
     printf 'started_at=%s\n' "$(date +%s)"
     printf 'worktree=%s\n' "$gate_race_repo"
-    printf 'token=somebody-else-1-1\n'
-  } > "$gate_race_root/run.lock/owner"
-  wait "$race_displaced" 2>/dev/null && race_displaced_exit=0 || race_displaced_exit=$?
+    printf 'token=placeholder-token\n'
+  } > "$race_displaced_replacement"
+  mv "$race_displaced_replacement" "$gate_race_root/run.lock/owner"
+  : > "$race_displaced_release"
+  if race_drain_wait_for_direct_wrapper \
+    "displaced-holder gate" "$race_displaced" "$race_displaced_start" \
+    "$race_displaced_parent" 45; then
+    race_displaced_exit=0
+  else
+    race_displaced_exit=$?
+  fi
+  race_bound_prune_completed
+  race_displaced=""
+  race_displaced_start=""
+  race_displaced_parent=""
   [[ "$race_displaced_exit" == "2" ]] ||
     fail "a displaced holder must stop with exit 2, got ${race_displaced_exit}"
-  grep -q "no longer holds the gate run lock" "$gate_race_out/displaced.out" ||
-    fail "a displaced holder must say so before stopping"
+  grep -Fx "error: this run no longer holds the gate run lock at ${gate_race_root}/run.lock." "$gate_race_out/displaced.out" ||
+    fail "a displaced holder must print the exact lock-displacement error"
   [[ ! -s "$gate_race_log" ]] ||
     fail "a displaced holder must stop before executing any mapped command"
-  [[ "$(sed -n 's/^token=//p' "$gate_race_root/run.lock/owner" | head -n1)" == "somebody-else-1-1" ]] ||
+  [[ "$(sed -n 's/^token=//p' "$gate_race_root/run.lock/owner" | head -n1)" == "placeholder-token" ]] ||
     fail "a displaced holder must not delete the record that replaced its own"
   rm -rf "$gate_race_root/run.lock"
 
@@ -6776,6 +8512,10 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     --base HEAD --run --lock-wait 60 \
     > "$gate_race_out/orphan-victim.out" 2>&1 &
   race_victim_wrapper=$!
+  gate_test_capture_identity "$race_victim_wrapper" "$gate_test_signal_shell_pid" ||
+    fail "the orphan case could not bind its gate wrapper to the direct child"
+  race_victim_wrapper_start="$gate_test_captured_start"
+  race_victim_wrapper_parent="$gate_test_captured_parent"
   race_waited=0
   while [[ -z "$(awk '/^enter/ { print $2; exit }' "$gate_race_log")" && "$race_waited" -lt 120 ]]; do
     sleep 0.5
@@ -6784,25 +8524,34 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   race_orphan_pid="$(awk '/^enter/ { print $2; exit }' "$gate_race_log")"
   [[ -n "$race_orphan_pid" ]] ||
     fail "the orphan case never saw a mapped command start"
+  gate_test_capture_identity "$race_orphan_pid" ||
+    fail "the orphan case could not record its command identity"
+  race_orphan_start="$gate_test_captured_start"
   # Suspending the watchdog is what "descheduled" means here: nothing is left
   # that would clean up after the gate, so the next run has to do it itself.
   # Kill the gate SHELL — the PID it recorded — not the wrapper around it.
   race_victim_pid="$(sed -n 's/^pid=//p' "$gate_race_root/run.lock/owner" | head -n1)"
-  race_watchdogs=""
+  [[ "$race_victim_pid" == "$race_victim_wrapper" ]] ||
+    fail "the orphan case owner PID was not its direct wrapper"
+  gate_test_process_is_expected \
+    "$race_victim_pid" "$race_victim_wrapper_start" "$race_victim_wrapper_parent" ||
+    fail "the orphan case lost its exact gate-wrapper identity"
+  race_drain_watchdog_identities=""
   if [[ "$race_watchdog_state" == "suspended" ]]; then
     # Anchored to THIS gate by parentage: the watchdog is a child of the gate
     # shell, which is still alive here. A bare "collect_tree" match is every
     # watchdog on the machine — suspending those would disable unrelated
     # runs' timeouts mid-flight.
-    race_watchdogs="$(pgrep -P "$race_victim_pid" -f "collect_tree" 2>/dev/null | tr '\n' ' ')"
-    [[ -n "$race_watchdogs" ]] ||
+    race_drain_suspend_direct_watchdogs "orphan watchdog" "$race_victim_pid" ||
+      fail "the suspended-watchdog case could not bind and stop A's watchdog"
+    [[ "$race_drain_watchdog_count" -gt 0 ]] ||
       fail "the suspended-watchdog case found no watchdog to suspend"
-    for race_wd in $race_watchdogs; do kill -STOP "$race_wd" 2>/dev/null || true; done
   fi
-  kill -9 "$race_victim_pid" 2>/dev/null || true
-  kill -9 "$race_victim_wrapper" 2>/dev/null || true
-  wait "$race_victim_wrapper" 2>/dev/null || true
-  kill -0 "$race_orphan_pid" 2>/dev/null ||
+  race_drain_kill_and_reap_direct_wrapper \
+    "orphan gate" "$race_victim_wrapper" \
+    "$race_victim_wrapper_start" "$race_victim_wrapper_parent" ||
+    fail "the orphan case could not safely kill and reap its gate wrapper"
+  gate_test_process_has_start "$race_orphan_pid" "$race_orphan_start" ||
     fail "the orphan case needs the command to outlive its gate to mean anything"
   (
     race_watch_deadline=$(($(date +%s) + 300))
@@ -6830,11 +8579,11 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     fail "a command whose gate was killed must not keep running"
   [[ "$race_next_started" -ge "$race_orphan_died" ]] ||
     fail "watchdog ${race_watchdog_state}: the next run started $((race_orphan_died - race_next_started))s before the orphaned command died"
-  # Nothing stays suspended on the machine afterwards.
-  for race_wd in $race_watchdogs; do
-    kill -CONT "$race_wd" 2>/dev/null || true
-    kill -KILL "$race_wd" 2>/dev/null || true
-  done
+  # Nothing stays suspended on the machine afterwards. SIGKILL acts on a
+  # stopped process directly, so no unpinned CONT transition is needed.
+  race_drain_cleanup_suspended_watchdogs ||
+    fail "the orphan case could not safely remove its stopped watchdog"
+  race_drain_watchdog_identities=""
   rm -rf "$gate_race_root/run.lock"
   done
 
@@ -6854,6 +8603,13 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     --base HEAD --run --lock-wait 60 \
     > "$gate_race_out/chain-a.out" 2>&1 &
   race_chain_a_wrapper=$!
+  gate_test_capture_identity "$race_chain_a_wrapper" "$gate_test_signal_shell_pid" ||
+    fail "the crash-chain case could not bind A to its direct-child identity"
+  race_chain_a_wrapper_start="$gate_test_captured_start"
+  race_chain_a_wrapper_parent="$gate_test_captured_parent"
+  gate_test_trace_signal identity crash-chain-A NONE "$race_chain_a_wrapper" \
+    "$race_chain_a_wrapper_start" "$race_chain_a_wrapper_start" \
+    "$race_chain_a_wrapper_parent" "$race_chain_a_wrapper_parent"
   race_waited=0
   while [[ -z "$(awk '/^enter/ { print $2; exit }' "$gate_race_log")" && "$race_waited" -lt 120 ]]; do
     sleep 0.5
@@ -6862,14 +8618,27 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   race_chain_orphan="$(awk '/^enter/ { print $2; exit }' "$gate_race_log")"
   [[ -n "$race_chain_orphan" ]] ||
     fail "the crash-chain case never saw A start a command"
+  gate_test_capture_identity "$race_chain_orphan" ||
+    fail "the crash-chain case could not record A's command identity"
+  race_chain_orphan_start="$gate_test_captured_start"
   race_chain_a_pid="$(sed -n 's/^pid=//p' "$gate_race_root/run.lock/owner" | head -n1)"
+  [[ "$race_chain_a_pid" == "$race_chain_a_wrapper" ]] ||
+    fail "the crash-chain case found an A owner PID outside its direct wrapper"
+  gate_test_process_is_expected \
+    "$race_chain_a_pid" "$race_chain_a_wrapper_start" "$race_chain_a_wrapper_parent" ||
+    fail "the crash-chain case lost A's exact gate-wrapper identity"
   # Anchored to A's gate by parentage (A is still alive here) — a bare
   # "collect_tree" match is every watchdog on the machine, including
   # unrelated runs'.
-  race_chain_watchdogs="$(pgrep -P "$race_chain_a_pid" -f "collect_tree" 2>/dev/null | tr '\n' ' ')"
-  for race_wd in $race_chain_watchdogs; do kill -STOP "$race_wd" 2>/dev/null || true; done
-  kill -9 "$race_chain_a_pid" "$race_chain_a_wrapper" 2>/dev/null || true
-  wait "$race_chain_a_wrapper" 2>/dev/null || true
+  race_drain_suspend_direct_watchdogs \
+    "crash-chain A watchdog" "$race_chain_a_pid" ||
+    fail "the crash-chain case could not bind and stop A's watchdog"
+  race_drain_kill_and_reap_direct_wrapper \
+    "crash-chain A gate" "$race_chain_a_wrapper" \
+    "$race_chain_a_wrapper_start" "$race_chain_a_wrapper_parent" ||
+    fail "the crash-chain case could not safely kill and reap A"
+  ! gate_test_process_has_start "$race_chain_a_pid" "$race_chain_a_wrapper_start" ||
+    fail "the crash-chain case found A's exact gate-wrapper identity after its bounded reap"
 
   # B: reclaims A, publishes, and dies inside the window before draining.
   RACE_STUB_SECONDS=3 \
@@ -6883,21 +8652,33 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     --base HEAD --run --lock-wait 60 \
     > "$gate_race_out/chain-b.out" 2>&1 &
   race_chain_b_wrapper=$!
+  gate_test_capture_identity "$race_chain_b_wrapper" "$gate_test_signal_shell_pid" ||
+    fail "the crash-chain case could not bind B to its direct-child identity"
+  race_chain_b_wrapper_start="$gate_test_captured_start"
+  race_chain_b_wrapper_parent="$gate_test_captured_parent"
+  gate_test_trace_signal identity crash-chain-B NONE "$race_chain_b_wrapper" \
+    "$race_chain_b_wrapper_start" "$race_chain_b_wrapper_start" \
+    "$race_chain_b_wrapper_parent" "$race_chain_b_wrapper_parent"
   race_waited=0
   race_chain_b_pid=""
   while [[ "$race_waited" -lt 180 ]]; do
-    race_chain_b_pid="$(sed -n 's/^pid=//p' "$gate_race_root/run.lock/owner" 2>/dev/null | head -n1)"
-    [[ -n "$race_chain_b_pid" && "$race_chain_b_pid" != "$race_chain_a_pid" ]] && break
+    race_chain_b_pid="$(sed -n 's/^pid=//p' "$gate_race_root/run.lock/owner" 2>/dev/null | head -n1 || true)"
+    [[ "$race_chain_b_pid" == "$race_chain_b_wrapper" ]] && break
     sleep 0.5
     race_waited=$((race_waited + 1))
   done
-  [[ -n "$race_chain_b_pid" && "$race_chain_b_pid" != "$race_chain_a_pid" ]] ||
+  [[ "$race_chain_b_pid" == "$race_chain_b_wrapper" ]] ||
     fail "the crash-chain case never saw B publish its record"
+  gate_test_process_is_expected \
+    "$race_chain_b_pid" "$race_chain_b_wrapper_start" "$race_chain_b_wrapper_parent" ||
+    fail "the crash-chain case lost B's exact gate-wrapper identity"
   [[ -n "$(ls -A "$gate_race_root/condemned.d" 2>/dev/null || true)" ]] ||
     fail "B must record what it condemned before taking over, not after"
-  kill -9 "$race_chain_b_pid" "$race_chain_b_wrapper" 2>/dev/null || true
-  wait "$race_chain_b_wrapper" 2>/dev/null || true
-  kill -0 "$race_chain_orphan" 2>/dev/null ||
+  race_drain_kill_and_reap_direct_wrapper \
+    "crash-chain B gate" "$race_chain_b_wrapper" \
+    "$race_chain_b_wrapper_start" "$race_chain_b_wrapper_parent" ||
+    fail "the crash-chain case could not safely kill and reap B"
+  gate_test_process_has_start "$race_chain_orphan" "$race_chain_orphan_start" ||
     fail "the crash-chain case needs A's command alive to mean anything"
   (
     race_watch_deadline=$(($(date +%s) + 300))
@@ -6927,10 +8708,9 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     fail "the inheriting run started $((race_chain_died - race_chain_c_started))s before the first run's command died"
   [[ -z "$(ls -A "$gate_race_root/condemned.d" 2>/dev/null || true)" ]] ||
     fail "a drained obligation must be cleared once its processes are confirmed gone"
-  for race_wd in $race_chain_watchdogs; do
-    kill -CONT "$race_wd" 2>/dev/null || true
-    kill -KILL "$race_wd" 2>/dev/null || true
-  done
+  race_drain_cleanup_suspended_watchdogs ||
+    fail "the crash-chain case could not safely remove A's stopped watchdog"
+  race_drain_watchdog_identities=""
   rm -rf "$gate_race_root/run.lock"
 
   # A drain interrupted between its TERM pass and its KILL pass. That first
@@ -6941,8 +8721,16 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
   rm -f "$gate_race_root"/captured.*
   : > "$gate_race_log"
+  race_drain_hold_file="$gate_race_out/interrupted-drain.release"
+  race_drain_violation_file="$gate_race_out/interrupted-drain.violation"
+  rm -f "$race_drain_hold_file"
+  rm -f "$race_drain_violation_file"
+  [[ ! -e "$race_drain_hold_file" && ! -L "$race_drain_hold_file" ]] ||
+    fail "the interrupted-drain hold path must be absent before A starts"
+  [[ ! -e "$race_drain_violation_file" && ! -L "$race_drain_violation_file" ]] ||
+    fail "the interrupted-drain violation path must be absent before A starts"
   RACE_STUB_IGNORE_TERM=1 \
-    RACE_STUB_SECONDS=60 \
+    RACE_STUB_HOLD_FILE="$race_drain_hold_file" \
     AGENT_QUALITY_GATE_LOCK=1 \
     AGENT_QUALITY_GATE_LOCK_HELD='' \
     AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
@@ -6951,20 +8739,68 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     --base HEAD --run --lock-wait 45 \
     > "$gate_race_out/drain-a.out" 2>&1 &
   race_drain_a_wrapper=$!
-  race_waited=0
-  while [[ -z "$(awk '/^enter/ { print $2; exit }' "$gate_race_log")" && "$race_waited" -lt 120 ]]; do
-    sleep 0.5
-    race_waited=$((race_waited + 1))
+  gate_test_capture_identity "$race_drain_a_wrapper" "$gate_test_signal_shell_pid" ||
+    fail "the interrupted-drain case could not record A's direct wrapper identity"
+  race_drain_a_wrapper_start="$gate_test_captured_start"
+  race_drain_a_wrapper_parent="$gate_test_captured_parent"
+  gate_test_trace_signal identity interrupted-drain-A NONE "$race_drain_a_wrapper" \
+    "$race_drain_a_wrapper_start" "$race_drain_a_wrapper_start" \
+    "$race_drain_a_wrapper_parent" "$race_drain_a_wrapper_parent"
+  race_drain_a_deadline=$(( $(date +%s) + 60 ))
+  while [[ -z "$(awk '/^enter/ { print $2; exit }' "$gate_race_log")" && "$(date +%s)" -lt "$race_drain_a_deadline" ]]; do
+    sleep 1
   done
   race_drain_orphan="$(awk '/^enter/ { print $2; exit }' "$gate_race_log")"
   [[ -n "$race_drain_orphan" ]] ||
-    fail "the interrupted-drain case never saw a command start"
+    fail "the interrupted-drain case timed out waiting for A to start its held command"
+  gate_test_capture_identity "$race_drain_orphan" ||
+    fail "the interrupted-drain case could not record A's held-command identity"
+  race_drain_orphan_start="$gate_test_captured_start"
+  race_drain_cleanup_active=1
   race_drain_a_pid="$(sed -n 's/^pid=//p' "$gate_race_root/run.lock/owner" | head -n1)"
-  kill -9 "$race_drain_a_pid" "$race_drain_a_wrapper" 2>/dev/null || true
-  wait "$race_drain_a_wrapper" 2>/dev/null || true
+  [[ "$race_drain_a_pid" =~ ^[0-9]+$ ]] ||
+    fail "the interrupted-drain case could not read A's gate PID"
+  [[ "$race_drain_a_pid" == "$race_drain_a_wrapper" ]] ||
+    fail "the interrupted-drain case found an owner PID that was not A's direct wrapper"
+  race_drain_process_is_expected \
+    "$race_drain_a_pid" "$race_drain_a_wrapper_start" "$race_drain_a_wrapper_parent" ||
+    fail "the interrupted-drain case could not bind A's owner record to its exact wrapper identity"
+  # A must crash without its EXIT trap so B inherits a live command to drain.
+  # Its own watchdog normally notices that crash and correctly cleans A's
+  # command. Suspend only the watchdog anchored to A's still-live gate, with
+  # its PID pinned before cleanup can signal it.
+  race_drain_suspend_direct_watchdogs \
+    "interrupted-drain A watchdog" "$race_drain_a_pid" ||
+    fail "the interrupted-drain case could not bind and stop A's watchdog"
+  [[ "$race_drain_watchdog_count" -eq 1 ]] ||
+    fail "the interrupted-drain case expected exactly one direct-child A watchdog, found ${race_drain_watchdog_count}"
+  race_drain_watchdog_deadline=$(( $(date +%s) + 10 ))
+  while ! race_drain_process_is_stopped \
+    "$race_drain_watchdog_pid" "$race_drain_watchdog_start" "$race_drain_watchdog_parent" && \
+    [[ "$(date +%s)" -lt "$race_drain_watchdog_deadline" ]]; do
+    sleep 1
+  done
+  race_drain_process_is_stopped \
+    "$race_drain_watchdog_pid" "$race_drain_watchdog_start" "$race_drain_watchdog_parent" ||
+    fail "the interrupted-drain case could not confirm A's exact watchdog was stopped"
+  race_drain_process_is_expected \
+    "$race_drain_a_pid" "$race_drain_a_wrapper_start" "$race_drain_a_wrapper_parent" ||
+    fail "the interrupted-drain case lost A's exact owner identity before its crash"
+  race_drain_kill_and_reap_direct_wrapper \
+    "A gate" "$race_drain_a_wrapper" "$race_drain_a_wrapper_start" \
+    "$race_drain_a_wrapper_parent"
+  ! gate_test_process_has_start "$race_drain_a_pid" "$race_drain_a_wrapper_start" ||
+    fail "the interrupted-drain case found A's exact owner identity after its bounded reap"
+  race_drain_a_wrapper=""
+  race_drain_a_wrapper_start=""
+  race_drain_a_wrapper_parent=""
+  race_drain_victim_is_expected ||
+    fail "the interrupted-drain case needs its held command alive after A crashes"
 
   # B reclaims, sends its first TERM pass, and dies before it can escalate.
-  RACE_STUB_SECONDS=2 \
+  [[ ! -e "$race_drain_hold_file" && ! -L "$race_drain_hold_file" ]] ||
+    fail "the interrupted-drain hold path appeared before B"
+  RACE_STUB_HOLD_FILE="$race_drain_hold_file" \
     AGENT_QUALITY_GATE_LOCK=1 \
     AGENT_QUALITY_GATE_LOCK_HELD='' \
     AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
@@ -6973,7 +8809,37 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     AGENT_QUALITY_GATE_LOCK_CRASH_AT=after-drain-term \
     "$repo_root/scripts/agent-quality-gate.sh" \
     --base HEAD --run --lock-wait 45 \
-    > "$gate_race_out/drain-b.out" 2>&1 || true
+    > "$gate_race_out/drain-b.out" 2>&1 &
+  race_drain_b_wrapper=$!
+  gate_test_capture_identity "$race_drain_b_wrapper" "$gate_test_signal_shell_pid" ||
+    fail "the interrupted-drain case could not record B's direct wrapper identity"
+  race_drain_b_wrapper_start="$gate_test_captured_start"
+  race_drain_b_wrapper_parent="$gate_test_captured_parent"
+  gate_test_trace_signal identity interrupted-drain-B NONE "$race_drain_b_wrapper" \
+    "$race_drain_b_wrapper_start" "$race_drain_b_wrapper_start" \
+    "$race_drain_b_wrapper_parent" "$race_drain_b_wrapper_parent"
+  if race_drain_wait_for_direct_wrapper \
+    "B gate" "$race_drain_b_wrapper" "$race_drain_b_wrapper_start" \
+    "$race_drain_b_wrapper_parent" 60; then
+    race_drain_b_exit=0
+  else
+    race_drain_b_exit=$?
+  fi
+  case "$race_drain_b_exit" in
+    124)
+      fail "the interrupted-drain B run exceeded its 60-second bounded wait"
+      ;;
+    137)
+      ;;
+    *)
+      fail "the interrupted-drain B run did not exit with status 137 at the requested SIGKILL boundary; got ${race_drain_b_exit}"
+      ;;
+  esac
+  race_drain_b_wrapper=""
+  race_drain_b_wrapper_start=""
+  race_drain_b_wrapper_parent=""
+  [[ ! -e "$race_drain_hold_file" && ! -L "$race_drain_hold_file" ]] ||
+    fail "the interrupted-drain hold path appeared during B"
   race_captured_file="$(find "$gate_race_root" -name 'captured.*' 2>/dev/null | head -n1)"
   [[ -n "$race_captured_file" ]] ||
     fail "a drain must write down what it captured before it signals anything"
@@ -6984,17 +8850,19 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     fail "an interrupted drain must not leave an empty captured set behind"
   grep -qE '^[0-9]+\|' "$race_captured_file" ||
     fail "the captured set must name processes, not fragments"
-  kill -0 "$race_drain_orphan" 2>/dev/null ||
+  race_drain_victim_is_expected ||
     fail "the interrupted-drain case needs its TERM-ignoring command alive to mean anything"
-  (
-    race_watch_deadline=$(($(date +%s) + 300))
-    while kill -0 "$race_drain_orphan" 2>/dev/null && [ "$(date +%s)" -lt "$race_watch_deadline" ]; do sleep 0.5; done
-    # Recorded only if it really died: writing a time when the bound expired
-    # would let the assertion below read a stalled watcher as a confirmed death.
-    kill -0 "$race_drain_orphan" 2>/dev/null || date +%s > "$gate_race_out/drain_died"
-  ) &
-  race_drain_watcher=$!
-  RACE_STUB_SECONDS=2 \
+  # Keep C's mapped command held too. Its entry is now the proof point: the
+  # release file stays absent until C has drained A's command and reached it.
+  [[ ! -e "$race_drain_violation_file" && ! -L "$race_drain_violation_file" ]] ||
+    fail "the interrupted-drain violation path appeared before C started"
+  TZ=America/New_York \
+    LC_ALL=C \
+    LANG=C \
+    RACE_STUB_HOLD_FILE="$race_drain_hold_file" \
+    RACE_STUB_VICTIM_PID="$race_drain_orphan" \
+    RACE_STUB_VICTIM_LSTART="$race_drain_orphan_start" \
+    RACE_STUB_VIOLATION_FILE="$race_drain_violation_file" \
     AGENT_QUALITY_GATE_LOCK=1 \
     AGENT_QUALITY_GATE_LOCK_HELD='' \
     AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
@@ -7002,16 +8870,56 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
     "$repo_root/scripts/agent-quality-gate.sh" \
     --base HEAD --run --lock-wait 90 \
-    > "$gate_race_out/drain-c.out" 2>&1 || true
-  wait "$race_drain_watcher" 2>/dev/null || true
-  race_drain_died="$(cat "$gate_race_out/drain_died" 2>/dev/null || echo 0)"
-  race_drain_c_started="$(awk '/^enter/ { if (NR > 1) { print $3; exit } }' "$gate_race_log")"
+    > "$gate_race_out/drain-c.out" 2>&1 &
+  race_drain_c_wrapper=$!
+  gate_test_capture_identity "$race_drain_c_wrapper" "$gate_test_signal_shell_pid" ||
+    fail "the interrupted-drain case could not record C's direct wrapper identity"
+  race_drain_c_wrapper_start="$gate_test_captured_start"
+  race_drain_c_wrapper_parent="$gate_test_captured_parent"
+  [[ ! -e "$race_drain_hold_file" && ! -L "$race_drain_hold_file" ]] ||
+    fail "the interrupted-drain hold path appeared before C reached its drain"
+  race_drain_c_deadline=$(( $(date +%s) + 90 ))
+  while [[ -z "$(awk '/^enter/ { if (NR > 1) { print $2; exit } }' "$gate_race_log")" && "$(date +%s)" -lt "$race_drain_c_deadline" ]]; do
+    sleep 1
+  done
+  race_drain_c_started="$(awk '/^enter/ { if (NR > 1) { print $2; exit } }' "$gate_race_log")"
   [[ -n "$race_drain_c_started" ]] ||
-    fail "the run inheriting an interrupted drain must still execute"
-  [[ "$race_drain_died" -ne 0 ]] ||
-    fail "a command inherited through an interrupted drain must not keep running"
-  [[ "$race_drain_c_started" -ge "$race_drain_died" ]] ||
-    fail "the inheriting run started $((race_drain_died - race_drain_c_started))s before the survivor died"
+    fail "the run inheriting an interrupted drain timed out before starting its held command"
+  [[ ! -e "$race_drain_violation_file" && ! -L "$race_drain_violation_file" ]] ||
+    fail "C entered while A's exact held-command identity was still alive"
+  if race_drain_victim_is_expected; then
+    fail "C started a mapped command before it killed A's held command"
+  fi
+  [[ ! -e "$race_drain_hold_file" && ! -L "$race_drain_hold_file" ]] ||
+    fail "the interrupted-drain hold path was released before the death proof"
+  if ! (set -C && : > "$race_drain_hold_file") 2>/dev/null; then
+    fail "the interrupted-drain case could not create its regular release file"
+  fi
+  if race_drain_wait_for_direct_wrapper \
+    "C gate" "$race_drain_c_wrapper" "$race_drain_c_wrapper_start" \
+    "$race_drain_c_wrapper_parent" 60; then
+    race_drain_c_exit=0
+  else
+    race_drain_c_exit=$?
+  fi
+  case "$race_drain_c_exit" in
+    0)
+      ;;
+    124)
+      fail "the run inheriting an interrupted drain exceeded its 60-second bounded wait after release"
+      ;;
+    *)
+      fail "the run inheriting an interrupted drain exited ${race_drain_c_exit} after its release"
+      ;;
+  esac
+  race_drain_c_wrapper=""
+  race_drain_c_wrapper_start=""
+  race_drain_c_wrapper_parent=""
+  if ! race_drain_cleanup_suspended_watchdogs; then
+    fail "the interrupted-drain case left A's exact stopped watchdog alive"
+  fi
+  race_drain_watchdog_identities=""
+  race_drain_cleanup_active=0
   [[ -z "$(find "$gate_race_root" -name 'captured.*' 2>/dev/null)" ]] ||
     fail "a captured set must be cleared once its processes are confirmed gone"
   rm -rf "$gate_race_root/run.lock"
@@ -7034,6 +8942,10 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     --base HEAD --run --lock-wait 45 \
     > "$gate_race_out/remnant-a.out" 2>&1 &
   race_remnant_a_wrapper=$!
+  gate_test_capture_identity "$race_remnant_a_wrapper" "$gate_test_signal_shell_pid" ||
+    fail "the remnant-token case could not bind A to its direct-child identity"
+  race_remnant_a_wrapper_start="$gate_test_captured_start"
+  race_remnant_a_wrapper_parent="$gate_test_captured_parent"
   race_waited=0
   while [[ -z "$(awk '/^enter/ { print $2; exit }' "$gate_race_log")" && "$race_waited" -lt 120 ]]; do
     sleep 0.5
@@ -7042,14 +8954,25 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   race_remnant_orphan="$(awk '/^enter/ { print $2; exit }' "$gate_race_log")"
   [[ -n "$race_remnant_orphan" ]] ||
     fail "the remnant-token case never saw a command start"
+  gate_test_capture_identity "$race_remnant_orphan" ||
+    fail "the remnant-token case could not record A's command identity"
+  race_remnant_orphan_start="$gate_test_captured_start"
   race_remnant_a_pid="$(sed -n 's/^pid=//p' "$gate_race_root/run.lock/owner" | head -n1)"
+  [[ "$race_remnant_a_pid" == "$race_remnant_a_wrapper" ]] ||
+    fail "the remnant-token case found an A owner PID outside its direct wrapper"
+  gate_test_process_is_expected \
+    "$race_remnant_a_pid" "$race_remnant_a_wrapper_start" "$race_remnant_a_wrapper_parent" ||
+    fail "the remnant-token case lost A's exact gate-wrapper identity"
   # Anchored to A's gate by parentage (A is still alive here) — a bare
   # "collect_tree" match is every watchdog on the machine, including
   # unrelated runs'.
-  race_remnant_watchdogs="$(pgrep -P "$race_remnant_a_pid" -f "collect_tree" 2>/dev/null | tr '\n' ' ')"
-  for race_wd in $race_remnant_watchdogs; do kill -STOP "$race_wd" 2>/dev/null || true; done
-  kill -9 "$race_remnant_a_pid" "$race_remnant_a_wrapper" 2>/dev/null || true
-  wait "$race_remnant_a_wrapper" 2>/dev/null || true
+  race_drain_suspend_direct_watchdogs \
+    "remnant-token A watchdog" "$race_remnant_a_pid" ||
+    fail "the remnant-token case could not bind and stop A's watchdog"
+  race_drain_kill_and_reap_direct_wrapper \
+    "remnant-token A gate" "$race_remnant_a_wrapper" \
+    "$race_remnant_a_wrapper_start" "$race_remnant_a_wrapper_parent" ||
+    fail "the remnant-token case could not safely kill and reap A"
 
   # B takes the record and dies holding it.
   RACE_STUB_SECONDS=2 \
@@ -7064,7 +8987,7 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     > "$gate_race_out/remnant-b.out" 2>&1 || true
   [[ -n "$(find "$gate_race_root/run.lock" -name 'owner.reclaiming.*' 2>/dev/null)" ]] ||
     fail "the remnant-token case needs a parked record to mean anything"
-  kill -0 "$race_remnant_orphan" 2>/dev/null ||
+  gate_test_process_has_start "$race_remnant_orphan" "$race_remnant_orphan_start" ||
     fail "the remnant-token case needs the first run's command alive"
   (
     race_watch_deadline=$(($(date +%s) + 300))
@@ -7092,10 +9015,9 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     fail "a command named only by a discarded remnant must not keep running"
   [[ "$race_remnant_c_started" -ge "$race_remnant_died" ]] ||
     fail "the inheriting run started $((race_remnant_died - race_remnant_c_started))s before that command died"
-  for race_wd in $race_remnant_watchdogs; do
-    kill -CONT "$race_wd" 2>/dev/null || true
-    kill -KILL "$race_wd" 2>/dev/null || true
-  done
+  race_drain_cleanup_suspended_watchdogs ||
+    fail "the remnant-token case could not safely remove A's stopped watchdog"
+  race_drain_watchdog_identities=""
   rm -rf "$gate_race_root/run.lock"
 
   # An identity that cannot be read is not an identity that matches. A capture
@@ -7110,6 +9032,10 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   : > "$race_receipt"
   bash -c 'trap "printf TERMED >> \"$1\"" TERM; for _ in $(seq 1 60); do sleep 1; done' _ "$race_receipt" &
   race_bystander=$!
+  gate_test_capture_identity "$race_bystander" "$gate_test_signal_shell_pid" ||
+    fail "the empty-identity case could not bind its bystander to the direct child"
+  race_bystander_start="$gate_test_captured_start"
+  race_bystander_parent="$gate_test_captured_parent"
   sleep 1
   kill -0 "$race_bystander" 2>/dev/null ||
     fail "the empty-identity case needs its bystander alive"
@@ -7136,8 +9062,10 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     fail "an unverifiable process must hold the drain and fail closed, got exit ${race_empty_exit}"
   grep -q "could not be identified" "$gate_race_out/empty-identity.out" ||
     fail "failing closed on an unverifiable process must say so"
-  kill -9 "$race_bystander" 2>/dev/null || true
-  wait "$race_bystander" 2>/dev/null || true
+  race_drain_kill_and_reap_direct_wrapper \
+    "empty-identity bystander" "$race_bystander" \
+    "$race_bystander_start" "$race_bystander_parent" ||
+    fail "the empty-identity case could not safely kill and reap its bystander"
   rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
   rm -f "$gate_race_root"/captured.*
 
@@ -7148,7 +9076,18 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
   rm -f "$gate_race_root"/captured.*
   : > "$gate_race_log"
-  RACE_STUB_FORK_ON_TERM=1 \
+  race_case_errors=""
+  race_fork_record="$gate_race_out/fork-on-term.records"
+  race_fork_ack="$gate_race_out/fork-on-term.acks"
+  : > "$race_fork_record"
+  : > "$race_fork_ack"
+  chmod 600 "$race_fork_record" "$race_fork_ack"
+  if race_bound_launch_command "fork-on-TERM gate" 30 /bin/sh -c \
+    'output_file="$1"; shift; exec "$@" > "$output_file" 2>&1' \
+    launch-bound-command "$gate_race_out/fork-a.out" env \
+    RACE_STUB_FORK_ON_TERM=1 \
+    RACE_STUB_FORK_RECORD="$race_fork_record" \
+    RACE_STUB_FORK_ACK="$race_fork_ack" \
     RACE_STUB_IGNORE_TERM=1 \
     RACE_STUB_SECONDS=90 \
     AGENT_QUALITY_GATE_LOCK=1 \
@@ -7156,37 +9095,121 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
     AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
     "$repo_root/scripts/agent-quality-gate.sh" \
-    --base HEAD --run --lock-wait 45 \
-    > "$gate_race_out/fork-a.out" 2>&1 &
-  race_fork_wrapper=$!
+    --base HEAD --run --lock-wait 45; then
+    race_fork_wrapper="$race_bound_pid"
+    race_fork_wrapper_start="$race_bound_start"
+    race_fork_wrapper_parent="$race_bound_parent"
+  else
+    race_case_add_error "could not bind A to its direct-child identity"
+    race_fork_wrapper=""
+    race_fork_wrapper_start=""
+    race_fork_wrapper_parent=""
+  fi
   race_waited=0
   while [[ -z "$(awk '/^enter/ { print $2; exit }' "$gate_race_log")" && "$race_waited" -lt 120 ]]; do
     sleep 0.5
     race_waited=$((race_waited + 1))
   done
   [[ -n "$(awk '/^enter/ { print $2; exit }' "$gate_race_log")" ]] ||
-    fail "the fork-on-TERM case never saw a command start"
-  race_fork_pid="$(sed -n 's/^pid=//p' "$gate_race_root/run.lock/owner" | head -n1)"
-  kill -9 "$race_fork_pid" "$race_fork_wrapper" 2>/dev/null || true
-  wait "$race_fork_wrapper" 2>/dev/null || true
-  RACE_STUB_SECONDS=2 \
-    AGENT_QUALITY_GATE_LOCK=1 \
-    AGENT_QUALITY_GATE_LOCK_HELD='' \
-    AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
-    AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
-    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
-    AGENT_QUALITY_GATE_LOCK_ORPHAN_DRAIN_SECONDS=40 \
-    "$repo_root/scripts/agent-quality-gate.sh" \
-    --base HEAD --run --lock-wait 90 \
-    > "$gate_race_out/fork-b.out" 2>&1 || true
-  sleep 1
-  race_fork_survivors="$(pgrep -f "sleep ${gate_race_fork_seconds}" 2>/dev/null | tr '\n' ' ' || true)"
-  for race_leftover_pid in $race_fork_survivors; do
-    kill -9 "$race_leftover_pid" 2>/dev/null || true
-  done
-  [[ -z "$race_fork_survivors" ]] ||
-    fail "children forked while being signalled outlived the drain: ${race_fork_survivors}"
+    race_case_add_error "A never started its mapped command"
+  race_fork_pid="$(sed -n 's/^pid=//p' \
+    "$gate_race_root/run.lock/owner" 2>/dev/null | head -n1 || true)"
+  [[ "$race_fork_pid" == "$race_fork_wrapper" ]] ||
+    race_case_add_error "the owner PID was outside A's direct wrapper"
+  if [[ -n "$race_fork_wrapper_start" && -n "$race_fork_wrapper_parent" ]]; then
+    gate_test_process_is_expected \
+      "$race_fork_pid" "$race_fork_wrapper_start" "$race_fork_wrapper_parent" ||
+      race_case_add_error "A lost its exact gate-wrapper identity"
+    if race_drain_kill_and_reap_direct_wrapper \
+      "fork-on-TERM gate" "$race_fork_wrapper" \
+      "$race_fork_wrapper_start" "$race_fork_wrapper_parent"; then
+      if gate_test_process_has_start \
+        "$race_fork_wrapper" "$race_fork_wrapper_start"; then
+        race_case_add_error "A still had its exact identity after bounded reap"
+      else
+        race_fork_wrapper=""
+        race_fork_wrapper_start=""
+        race_fork_wrapper_parent=""
+      fi
+    else
+      race_case_add_error "could not safely kill and reap A"
+    fi
+  fi
+  race_fork_b_exit=125
+  if [[ -z "$race_fork_wrapper" ]]; then
+    if RACE_STUB_SECONDS=2 \
+      AGENT_QUALITY_GATE_LOCK=1 \
+      AGENT_QUALITY_GATE_LOCK_HELD='' \
+      AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+      AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
+      AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+      AGENT_QUALITY_GATE_LOCK_ORPHAN_DRAIN_SECONDS=40 \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+      --base HEAD --run --lock-wait 90 \
+      > "$gate_race_out/fork-b.out" 2>&1; then
+      race_fork_b_exit=0
+    else
+      race_fork_b_exit=$?
+    fi
+  else
+    : > "$gate_race_out/fork-b.out"
+    race_case_add_error "B was not launched because A's exact absence was not proved"
+  fi
+  [[ "$race_fork_b_exit" -eq 0 ]] ||
+    race_case_add_error "B exited ${race_fork_b_exit}, expected 0"
+  grep -Fq "All mapped commands passed." "$gate_race_out/fork-b.out" ||
+    race_case_add_error "B did not prove that its mapped command completed"
+
+  if race_bound_launch_command "fork-on-TERM bystander" 30 \
+    /bin/sleep "$gate_race_fork_seconds"; then
+    race_fork_bystander="$race_bound_pid"
+    race_fork_bystander_start="$race_bound_start"
+    race_fork_bystander_parent="$race_bound_parent"
+  else
+    race_case_add_error "could not bind the same-duration direct bystander"
+    race_fork_bystander=""
+    race_fork_bystander_start=""
+    race_fork_bystander_parent=""
+  fi
+  [[ -s "$race_fork_record" && -s "$race_fork_ack" ]] ||
+    race_case_add_error "A did not publish a complete replacement identity and acknowledgement"
+  race_drain_wait_for_stable_identity_pair \
+    "fork-on-TERM" "$race_fork_record" "$race_fork_ack" ||
+    race_case_add_error "$race_drain_owned_record_error"
+  if race_drain_inspect_owned_record \
+    "fork-on-TERM" "$race_fork_record"; then
+    race_fork_inspect_status=0
+  else
+    race_fork_inspect_status=$?
+  fi
+  race_fork_survivors="$race_drain_owned_survivors"
+  case "$race_fork_inspect_status" in
+    0) ;;
+    1) race_case_add_error "fixture-owned replacements outlived the drain: ${race_fork_survivors}" ;;
+    *) race_case_add_error "owned-record inspection failed safely: ${race_drain_owned_record_error}" ;;
+  esac
+  if [[ -n "$race_fork_bystander_start" && -n "$race_fork_bystander_parent" ]]; then
+    gate_test_process_is_expected \
+      "$race_fork_bystander" "$race_fork_bystander_start" \
+      "$race_fork_bystander_parent" ||
+      race_case_add_error "inspection signalled the unrelated same-duration bystander"
+    if race_drain_kill_and_reap_direct_wrapper \
+      "fork-on-TERM bystander" "$race_fork_bystander" \
+      "$race_fork_bystander_start" "$race_fork_bystander_parent"; then
+      race_fork_bystander=""
+      race_fork_bystander_start=""
+      race_fork_bystander_parent=""
+    else
+      race_case_add_error "could not safely clean the same-duration bystander"
+    fi
+  fi
+  race_drain_cleanup_direct_wrapper \
+    "fork-on-TERM A gate" "$race_fork_wrapper" "$race_fork_wrapper_start" \
+    "$race_fork_wrapper_parent" || true
+  race_drain_inspect_owned_record "fork-on-TERM" "$race_fork_record" || true
   rm -rf "$gate_race_root/run.lock"
+  [[ -z "$race_case_errors" ]] ||
+    fail "fork-on-TERM fixture failures:\n${race_case_errors}"
 
   # The same shape, except the command exits after forking. Its replacement is
   # reparented, carries no argv tag, and has no tagged ancestor to be walked
@@ -7194,51 +9217,152 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
   rm -f "$gate_race_root"/captured.* "$gate_race_root"/holder.*
   : > "$gate_race_log"
-  RACE_STUB_FORK_AND_EXIT=1 \
+  race_case_errors=""
+  race_forkexit_record="$gate_race_out/fork-and-exit.records"
+  race_forkexit_ack="$gate_race_out/fork-and-exit.acks"
+  : > "$race_forkexit_record"
+  : > "$race_forkexit_ack"
+  chmod 600 "$race_forkexit_record" "$race_forkexit_ack"
+  if race_bound_launch_command "fork-and-exit gate" 30 /bin/sh -c \
+    'output_file="$1"; shift; exec "$@" > "$output_file" 2>&1' \
+    launch-bound-command "$gate_race_out/forkexit-a.out" env \
+    RACE_STUB_FORK_AND_EXIT=1 \
+    RACE_STUB_FORK_RECORD="$race_forkexit_record" \
+    RACE_STUB_FORK_ACK="$race_forkexit_ack" \
     RACE_STUB_SECONDS=90 \
     AGENT_QUALITY_GATE_LOCK=1 \
     AGENT_QUALITY_GATE_LOCK_HELD='' \
     AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
     AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
     "$repo_root/scripts/agent-quality-gate.sh" \
-    --base HEAD --run --lock-wait 45 \
-    > "$gate_race_out/forkexit-a.out" 2>&1 &
-  race_forkexit_wrapper=$!
+    --base HEAD --run --lock-wait 45; then
+    race_forkexit_wrapper="$race_bound_pid"
+    race_forkexit_wrapper_start="$race_bound_start"
+    race_forkexit_wrapper_parent="$race_bound_parent"
+  else
+    race_case_add_error "could not bind A to its direct-child identity"
+    race_forkexit_wrapper=""
+    race_forkexit_wrapper_start=""
+    race_forkexit_wrapper_parent=""
+  fi
   race_waited=0
   while [[ -z "$(awk '/^enter/ { print $2; exit }' "$gate_race_log")" && "$race_waited" -lt 240 ]]; do
     sleep 0.5
     race_waited=$((race_waited + 1))
   done
   [[ -n "$(awk '/^enter/ { print $2; exit }' "$gate_race_log")" ]] ||
-    fail "the fork-and-exit case never saw a command start"
-  race_forkexit_pid="$(sed -n 's/^pid=//p' "$gate_race_root/run.lock/owner" | head -n1)"
-  kill -9 "$race_forkexit_pid" "$race_forkexit_wrapper" 2>/dev/null || true
-  wait "$race_forkexit_wrapper" 2>/dev/null || true
-  RACE_STUB_SECONDS=2 \
-    AGENT_QUALITY_GATE_LOCK=1 \
-    AGENT_QUALITY_GATE_LOCK_HELD='' \
-    AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
-    AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
-    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
-    AGENT_QUALITY_GATE_LOCK_ORPHAN_DRAIN_SECONDS=40 \
-    "$repo_root/scripts/agent-quality-gate.sh" \
-    --base HEAD --run --lock-wait 90 \
-    > "$gate_race_out/forkexit-b.out" 2>&1 || true
-  sleep 1
-  race_forkexit_survivors="$(pgrep -f "sleep ${gate_race_forkexit_seconds}" 2>/dev/null | tr '\n' ' ' || true)"
-  for race_leftover_pid in $race_forkexit_survivors; do
-    kill -9 "$race_leftover_pid" 2>/dev/null || true
-  done
-  [[ -z "$race_forkexit_survivors" ]] ||
-    fail "a replacement forked by a command that then exited outlived the drain: ${race_forkexit_survivors}"
+    race_case_add_error "A never started its mapped command"
+  race_forkexit_pid="$(sed -n 's/^pid=//p' \
+    "$gate_race_root/run.lock/owner" 2>/dev/null | head -n1 || true)"
+  [[ "$race_forkexit_pid" == "$race_forkexit_wrapper" ]] ||
+    race_case_add_error "the owner PID was outside A's direct wrapper"
+  if [[ -n "$race_forkexit_wrapper_start" && -n "$race_forkexit_wrapper_parent" ]]; then
+    gate_test_process_is_expected \
+      "$race_forkexit_pid" "$race_forkexit_wrapper_start" \
+      "$race_forkexit_wrapper_parent" ||
+      race_case_add_error "A lost its exact gate-wrapper identity"
+    if race_drain_kill_and_reap_direct_wrapper \
+      "fork-and-exit gate" "$race_forkexit_wrapper" \
+      "$race_forkexit_wrapper_start" "$race_forkexit_wrapper_parent"; then
+      if gate_test_process_has_start \
+        "$race_forkexit_wrapper" "$race_forkexit_wrapper_start"; then
+        race_case_add_error "A still had its exact identity after bounded reap"
+      else
+        race_forkexit_wrapper=""
+        race_forkexit_wrapper_start=""
+        race_forkexit_wrapper_parent=""
+      fi
+    else
+      race_case_add_error "could not safely kill and reap A"
+    fi
+  fi
+  race_forkexit_b_exit=125
+  if [[ -z "$race_forkexit_wrapper" ]]; then
+    if RACE_STUB_SECONDS=2 \
+      AGENT_QUALITY_GATE_LOCK=1 \
+      AGENT_QUALITY_GATE_LOCK_HELD='' \
+      AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+      AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
+      AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+      AGENT_QUALITY_GATE_LOCK_ORPHAN_DRAIN_SECONDS=40 \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+      --base HEAD --run --lock-wait 90 \
+      > "$gate_race_out/forkexit-b.out" 2>&1; then
+      race_forkexit_b_exit=0
+    else
+      race_forkexit_b_exit=$?
+    fi
+  else
+    : > "$gate_race_out/forkexit-b.out"
+    race_case_add_error "B was not launched because A's exact absence was not proved"
+  fi
+  [[ "$race_forkexit_b_exit" -eq 0 ]] ||
+    race_case_add_error "B exited ${race_forkexit_b_exit}, expected 0"
+  grep -Fq "All mapped commands passed." "$gate_race_out/forkexit-b.out" ||
+    race_case_add_error "B did not prove that its mapped command completed"
+
+  if race_bound_launch_command "fork-and-exit bystander" 30 \
+    /bin/sleep "$gate_race_forkexit_seconds"; then
+    race_forkexit_bystander="$race_bound_pid"
+    race_forkexit_bystander_start="$race_bound_start"
+    race_forkexit_bystander_parent="$race_bound_parent"
+  else
+    race_case_add_error "could not bind the same-duration direct bystander"
+    race_forkexit_bystander=""
+    race_forkexit_bystander_start=""
+    race_forkexit_bystander_parent=""
+  fi
+  [[ -s "$race_forkexit_record" && -s "$race_forkexit_ack" ]] ||
+    race_case_add_error "A did not publish a complete replacement identity and acknowledgement"
+  race_drain_wait_for_stable_identity_pair \
+    "fork-and-exit" "$race_forkexit_record" "$race_forkexit_ack" ||
+    race_case_add_error "$race_drain_owned_record_error"
+  if race_drain_inspect_owned_record \
+    "fork-and-exit" "$race_forkexit_record"; then
+    race_forkexit_inspect_status=0
+  else
+    race_forkexit_inspect_status=$?
+  fi
+  race_forkexit_survivors="$race_drain_owned_survivors"
+  case "$race_forkexit_inspect_status" in
+    0) ;;
+    1) race_case_add_error "fixture-owned replacement outlived the drain: ${race_forkexit_survivors}" ;;
+    *) race_case_add_error "owned-record inspection failed safely: ${race_drain_owned_record_error}" ;;
+  esac
+  if [[ -n "$race_forkexit_bystander_start" && -n "$race_forkexit_bystander_parent" ]]; then
+    gate_test_process_is_expected \
+      "$race_forkexit_bystander" "$race_forkexit_bystander_start" \
+      "$race_forkexit_bystander_parent" ||
+      race_case_add_error "inspection signalled the unrelated same-duration bystander"
+    if race_drain_kill_and_reap_direct_wrapper \
+      "fork-and-exit bystander" "$race_forkexit_bystander" \
+      "$race_forkexit_bystander_start" "$race_forkexit_bystander_parent"; then
+      race_forkexit_bystander=""
+      race_forkexit_bystander_start=""
+      race_forkexit_bystander_parent=""
+    else
+      race_case_add_error "could not safely clean the same-duration bystander"
+    fi
+  fi
+  race_drain_cleanup_direct_wrapper \
+    "fork-and-exit A gate" "$race_forkexit_wrapper" \
+    "$race_forkexit_wrapper_start" "$race_forkexit_wrapper_parent" || true
+  race_drain_inspect_owned_record \
+    "fork-and-exit" "$race_forkexit_record" || true
   rm -rf "$gate_race_root/run.lock"
   rm -f "$gate_race_root"/holder.*
+  [[ -z "$race_case_errors" ]] ||
+    fail "fork-and-exit fixture failures:\n${race_case_errors}"
 
   # A waiter that is suspended past its own budget must notice the time that
   # actually passed, not the time it asked to sleep for.
   rm -rf "$gate_race_root/run.lock"
   sleep 300 &
   race_stopped_holder=$!
+  gate_test_capture_identity "$race_stopped_holder" "$gate_test_signal_shell_pid" ||
+    fail "the suspended-waiter case could not bind its holder to the direct child"
+  race_stopped_holder_start="$gate_test_captured_start"
+  race_stopped_holder_parent="$gate_test_captured_parent"
   mkdir -p "$gate_race_root/run.lock"
   {
     printf 'pid=%s\n' "$race_stopped_holder"
@@ -7256,26 +9380,52 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     --base HEAD --run --lock-wait 14 \
     > "$gate_race_out/stopped-waiter.out" 2>&1 &
   race_stopped_wrapper=$!
+  gate_test_capture_identity "$race_stopped_wrapper" "$gate_test_signal_shell_pid" ||
+    fail "the suspended-waiter case could not bind its waiter to the direct child"
+  race_stopped_wrapper_start="$gate_test_captured_start"
+  race_stopped_wrapper_parent="$gate_test_captured_parent"
   # The budget is far longer than the suspension so the waiter is certainly
   # still waiting when it is stopped. A budget the fixture races would let this
   # case pass by skipping its own assertion — the failure it exists to catch
   # looks exactly like the gate having already exited.
   race_waited=0
-  race_stopped_waiter=""
-  while [[ -z "$race_stopped_waiter" && "$race_waited" -lt 60 ]]; do
-    race_stopped_waiter="$(pgrep -f "agent-quality-gate.sh --base HEAD --run --lock-wait 14" 2>/dev/null | head -n1 || true)"
-    [[ -n "$race_stopped_waiter" ]] && break
+  race_stopped_waiter="$race_stopped_wrapper"
+  race_stopped_ready=0
+  while [[ "$race_stopped_ready" -eq 0 && "$race_waited" -lt 60 ]]; do
+    race_stopped_owner="$(sed -n 's/^pid=//p' "$gate_race_root/run.lock/owner" 2>/dev/null | head -n1 || true)"
+    if [[ "$race_stopped_owner" == "$race_stopped_holder" ]] &&
+      gate_test_process_is_expected \
+        "$race_stopped_waiter" "$race_stopped_wrapper_start" "$race_stopped_wrapper_parent" &&
+      grep -q "Waiting for the agent quality gate run lock" \
+        "$gate_race_out/stopped-waiter.out"; then
+      race_stopped_ready=1
+      break
+    fi
     sleep 0.5
     race_waited=$((race_waited + 1))
   done
-  [[ -n "$race_stopped_waiter" ]] ||
-    fail "the suspended-waiter case never found its waiter, so it proved nothing"
-  kill -STOP "$race_stopped_waiter" 2>/dev/null ||
+  [[ "$race_stopped_ready" -eq 1 ]] ||
+    fail "the suspended-waiter case never observed its exact waiter blocked on this lock root"
+  gate_test_signal_expected "suspended waiter" STOP \
+    "$race_stopped_waiter" "$race_stopped_wrapper_start" "$race_stopped_wrapper_parent" ||
     fail "the suspended-waiter case could not suspend its waiter"
   sleep 8
-  kill -CONT "$race_stopped_waiter" 2>/dev/null || true
-  wait "$race_stopped_wrapper" 2>/dev/null || true
-  kill -9 "$race_stopped_holder" 2>/dev/null || true
+  gate_test_signal_expected "suspended waiter" CONT \
+    "$race_stopped_waiter" "$race_stopped_wrapper_start" "$race_stopped_wrapper_parent" ||
+    fail "the suspended-waiter case could not resume its exact waiter"
+  if race_drain_wait_for_direct_wrapper \
+    "suspended waiter" "$race_stopped_wrapper" \
+    "$race_stopped_wrapper_start" "$race_stopped_wrapper_parent"; then
+    race_stopped_exit=0
+  else
+    race_stopped_exit=$?
+  fi
+  [[ "$race_stopped_exit" != "124" ]] ||
+    fail "the suspended-waiter case exceeded its bounded reap"
+  race_drain_kill_and_reap_direct_wrapper \
+    "suspended-waiter holder" "$race_stopped_holder" \
+    "$race_stopped_holder_start" "$race_stopped_holder_parent" ||
+    fail "the suspended-waiter case could not safely kill and reap its holder"
   race_stopped_reported="$(sed -n 's/.*timed out after \([0-9]*\)s.*/\1/p' "$gate_race_out/stopped-waiter.out" | head -n1 || true)"
   [[ -n "$race_stopped_reported" ]] ||
     fail "a waiter suspended past its budget must still report a timeout"
@@ -7284,6 +9434,27 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
       fail "a waiter suspended past its budget reported ${race_stopped_reported}s, not the time that passed"
   fi
   rm -rf "$gate_race_root/run.lock"
+
+  # Pattern construction is part of the scan. A sed failure must publish the
+  # scan-error sentinel and stop before pgrep; an empty pattern would otherwise
+  # turn an unanswered scan into "no survivors" and discharge the obligation.
+  race_pattern_pgrep_called="$gate_race_out/pattern-pgrep-called"
+  rm -f "$race_pattern_pgrep_called"
+  race_pattern_output="$(
+    gate_drain_scan_error="agentqg-scan-failed"
+    gate_lock_root_dir="$gate_race_root"
+    source "$repo_root/scripts/gate/run-handles.sh"
+    sed() { return 2; }
+    pgrep() {
+      : > "$race_pattern_pgrep_called"
+      return 1
+    }
+    gate_run_tagged_pids "fixture.host-1-1"
+  )" 2> "$gate_race_out/pattern-failure.err"
+  [[ "$race_pattern_output" == "agentqg-scan-failed" ]] ||
+    fail "a failed run-token pattern build did not emit only the scan-error sentinel"
+  [[ ! -e "$race_pattern_pgrep_called" ]] ||
+    fail "a failed run-token pattern build still called pgrep"
 
   # A scan that fails is not a scan that finds nothing. With `pgrep` exiting 2
   # — a real failure, not "no match" — a run inheriting an obligation cannot
@@ -7465,27 +9636,44 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   # outstanding: each file is removed only after its own processes are gone, so
   # whatever remains is what the next run inherits.
   : > "$gate_race_log"
-  bash -c 'eval "$1"; exit $?' "agentqg:fixture-inherited-1-1" 'sleep 60' &
-  race_taken_proc=$!
+  race_bound_launch_command "inherited-obligation fixture" 30 /bin/bash -c \
+    'eval "$1"; exit $?' "agentqg:${race_inherited_token}" 'sleep 60' ||
+    fail "the inherited-obligation case could not bind its live fixture to the direct child"
+  race_taken_proc="$race_bound_pid"
+  race_taken_start="$race_bound_start"
+  race_taken_parent="$race_bound_parent"
   sleep 1
-  if [[ -n "$(pgrep -f "agentqg:fixture-inherited-1-1" 2>/dev/null | head -n1 || true)" ]]; then
-    mkdir -p "$gate_race_root/condemned.d"
-    printf 'fixture-inherited-1-1\n' > "$gate_race_root/condemned.d/fixture-inherited-1-1"
-    AGENT_QUALITY_GATE_LOCK=1 \
-      AGENT_QUALITY_GATE_LOCK_HELD='' \
-      AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
-      AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
-      AGENT_QUALITY_GATE_LOCK_ORPHAN_DRAIN_SECONDS=30 \
-      "$repo_root/scripts/agent-quality-gate.sh" \
-      --base HEAD --run --lock-wait 30 \
-      > "$gate_race_out/inherited-obligation.out" 2>&1 || true
-    kill -0 "$race_taken_proc" 2>/dev/null &&
-      fail "an obligation left behind by a dead drainer was never discharged"
-    [[ ! -e "$gate_race_root/condemned.d/fixture-inherited-1-1" ]] ||
-      fail "a discharged obligation must not be left behind to be drained forever"
+  race_inherited_matches=""
+  if race_inherited_matches="$(pgrep -f "agentqg:${race_inherited_token}" 2>/dev/null)"; then
+    race_inherited_pgrep_status=0
+  else
+    race_inherited_pgrep_status=$?
   fi
-  kill -9 "$race_taken_proc" 2>/dev/null || true
-  wait "$race_taken_proc" 2>/dev/null || true
+  case "$race_inherited_pgrep_status" in
+    0) [[ "$race_inherited_matches" == "$race_taken_proc" ]] ||
+      fail "the inherited-obligation fixture did not report exactly its registered direct PID" ;;
+    1) fail "the inherited-obligation fixture pgrep found no registered direct PID" ;;
+    *) fail "the inherited-obligation fixture pgrep failed with status ${race_inherited_pgrep_status}" ;;
+  esac
+  mkdir -p "$gate_race_root/condemned.d"
+  printf '%s\n' "$race_inherited_token" \
+    > "$gate_race_root/condemned.d/$race_inherited_token"
+  AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    AGENT_QUALITY_GATE_LOCK_ORPHAN_DRAIN_SECONDS=30 \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 30 \
+    > "$gate_race_out/inherited-obligation.out" 2>&1 || true
+  gate_test_process_has_start "$race_taken_proc" "$race_taken_start" &&
+    fail "an obligation left behind by a dead drainer was never discharged"
+  [[ ! -e "$gate_race_root/condemned.d/$race_inherited_token" ]] ||
+    fail "a discharged obligation must not be left behind to be drained forever"
+  race_drain_kill_and_reap_direct_wrapper \
+    "inherited-obligation fixture" "$race_taken_proc" \
+    "$race_taken_start" "$race_taken_parent" ||
+    fail "the inherited-obligation case could not safely reap its live fixture"
   rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
   rm -f "$gate_race_root"/captured.*
 
@@ -7496,52 +9684,102 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   # in production, so it is widened here the way the rest of these
   # interleavings are.
   : > "$gate_race_log"
-  bash -c 'eval "$1"; exit $?' "agentqg:fixture-drained-first-1-1" 'sleep 60' &
-  race_unlink_first=$!
+  race_bound_launch_command "unlink-window first fixture" 30 /bin/bash -c \
+    'eval "$1"; exit $?' "agentqg:${race_drained_first_token}" 'sleep 60' ||
+    fail "the unlink-window case could not bind its first fixture to the direct child"
+  race_unlink_first="$race_bound_pid"
+  race_unlink_first_start="$race_bound_start"
+  race_unlink_first_parent="$race_bound_parent"
   # The late obligation names a live process of its own, so the assertion does
   # not depend on when it is published: either its file is still there for the
   # next run, or this run drained it. Only "file gone, process alive" is the
   # loss this case exists to catch.
-  bash -c 'eval "$1"; exit $?' "agentqg:fixture-arrived-late-1-1" 'sleep 90' &
-  race_unlink_late=$!
+  race_bound_launch_command "unlink-window late fixture" 30 /bin/bash -c \
+    'eval "$1"; exit $?' "agentqg:${race_arrived_late_token}" 'sleep 90' ||
+    fail "the unlink-window case could not bind its late fixture to the direct child"
+  race_unlink_late="$race_bound_pid"
+  race_unlink_late_start="$race_bound_start"
+  race_unlink_late_parent="$race_bound_parent"
   sleep 1
-  if [[ -n "$(pgrep -f "agentqg:fixture-drained-first-1-1" 2>/dev/null | head -n1 || true)" ]]; then
-    mkdir -p "$gate_race_root/condemned.d"
-    printf 'fixture-drained-first-1-1\n' \
-      > "$gate_race_root/condemned.d/fixture-drained-first-1-1"
-    AGENT_QUALITY_GATE_LOCK=1 \
-      AGENT_QUALITY_GATE_LOCK_HELD='' \
-      AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
-      AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
-      AGENT_QUALITY_GATE_LOCK_ORPHAN_DRAIN_SECONDS=30 \
-      AGENT_QUALITY_GATE_LOCK_DRAIN_UNLINK_DELAY_SECONDS=4 \
-      "$repo_root/scripts/agent-quality-gate.sh" \
-      --base HEAD --run --lock-wait 30 \
-      > "$gate_race_out/unlink-window.out" 2>&1 &
-    race_unlink_wrapper=$!
-    # The capture file appears when that token's drain starts and is removed
-    # when it is discharged, which is where its own file is about to go.
-    race_waited=0
-    while [[ ! -e "$gate_race_root/captured.fixture-drained-first-1-1" && "$race_waited" -lt 400 ]]; do
-      sleep 0.5
-      race_waited=$((race_waited + 1))
-    done
-    race_waited=0
-    while [[ -e "$gate_race_root/captured.fixture-drained-first-1-1" && "$race_waited" -lt 120 ]]; do
-      sleep 0.5
-      race_waited=$((race_waited + 1))
-    done
-    printf 'fixture-arrived-late-1-1\n' \
-      > "$gate_race_root/condemned.d/fixture-arrived-late-1-1"
-    wait "$race_unlink_wrapper" 2>/dev/null || true
-    if [[ ! -e "$gate_race_root/condemned.d/fixture-arrived-late-1-1" ]]; then
-      kill -0 "$race_unlink_late" 2>/dev/null &&
-        fail "an obligation published during a drain was removed unread, and its command is still running"
-    fi
+  race_unlink_late_matches=""
+  if race_unlink_late_matches="$(pgrep -f "agentqg:${race_arrived_late_token}" 2>/dev/null)"; then
+    race_unlink_late_pgrep_status=0
+  else
+    race_unlink_late_pgrep_status=$?
   fi
-  kill -9 "$race_unlink_first" "$race_unlink_late" 2>/dev/null || true
-  wait "$race_unlink_first" 2>/dev/null || true
-  wait "$race_unlink_late" 2>/dev/null || true
+  case "$race_unlink_late_pgrep_status" in
+    0) [[ "$race_unlink_late_matches" == "$race_unlink_late" ]] ||
+      fail "the unlink-window fixture did not report exactly its registered late direct PID" ;;
+    1) fail "the unlink-window fixture pgrep found no registered late direct PID" ;;
+    *) fail "the unlink-window fixture pgrep failed with status ${race_unlink_late_pgrep_status}" ;;
+  esac
+  race_unlink_first_matches=""
+  if race_unlink_first_matches="$(pgrep -f "agentqg:${race_drained_first_token}" 2>/dev/null)"; then
+    race_unlink_first_pgrep_status=0
+  else
+    race_unlink_first_pgrep_status=$?
+  fi
+  case "$race_unlink_first_pgrep_status" in
+    0) [[ "$race_unlink_first_matches" == "$race_unlink_first" ]] ||
+      fail "the unlink-window fixture did not report exactly its registered first direct PID" ;;
+    1) fail "the unlink-window fixture pgrep found no registered first direct PID" ;;
+    *) fail "the unlink-window fixture pgrep failed with status ${race_unlink_first_pgrep_status}" ;;
+  esac
+  mkdir -p "$gate_race_root/condemned.d"
+  printf '%s\n' "$race_drained_first_token" \
+    > "$gate_race_root/condemned.d/$race_drained_first_token"
+  if race_bound_launch_command "unlink-window gate" 30 /bin/sh -c \
+    'output_file="$1"; shift; exec "$@" > "$output_file" 2>&1' \
+    launch-bound-command "$gate_race_out/unlink-window.out" env \
+    AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    AGENT_QUALITY_GATE_LOCK_ORPHAN_DRAIN_SECONDS=30 \
+    AGENT_QUALITY_GATE_LOCK_DRAIN_UNLINK_DELAY_SECONDS=4 \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 30; then
+    race_unlink_wrapper="$race_bound_pid"
+    race_unlink_wrapper_start="$race_bound_start"
+    race_unlink_wrapper_parent="$race_bound_parent"
+  else
+    fail "the unlink-window gate could not bind its direct child"
+  fi
+  # The capture file appears when that token's drain starts and is removed
+  # when it is discharged, which is where its own file is about to go.
+  race_waited=0
+  while [[ ! -e "$gate_race_root/captured.$race_drained_first_token" && "$race_waited" -lt 400 ]]; do
+    sleep 0.5
+    race_waited=$((race_waited + 1))
+  done
+  [[ -e "$gate_race_root/captured.$race_drained_first_token" ]] ||
+    fail "the unlink-window first capture did not appear within its bound"
+  race_waited=0
+  while [[ -e "$gate_race_root/captured.$race_drained_first_token" && "$race_waited" -lt 120 ]]; do
+    sleep 0.5
+    race_waited=$((race_waited + 1))
+  done
+  [[ ! -e "$gate_race_root/captured.$race_drained_first_token" ]] ||
+    fail "the unlink-window first capture did not disappear within its second bound"
+  gate_test_process_is_expected \
+    "$race_unlink_wrapper" "$race_unlink_wrapper_start" \
+    "$race_unlink_wrapper_parent" ||
+    fail "the unlink-window gate lost its registered exact direct-child identity"
+  printf '%s\n' "$race_arrived_late_token" \
+    > "$gate_race_root/condemned.d/$race_arrived_late_token"
+  wait "$race_unlink_wrapper" 2>/dev/null || true
+  if [[ ! -e "$gate_race_root/condemned.d/$race_arrived_late_token" ]] &&
+    gate_test_process_has_start "$race_unlink_late" "$race_unlink_late_start"; then
+    fail "an obligation published during a drain was removed unread, and its command is still running"
+  fi
+  race_drain_kill_and_reap_direct_wrapper \
+    "unlink-window first fixture" "$race_unlink_first" \
+    "$race_unlink_first_start" "$race_unlink_first_parent" ||
+    fail "the unlink-window case could not safely reap its first fixture"
+  race_drain_kill_and_reap_direct_wrapper \
+    "unlink-window late fixture" "$race_unlink_late" \
+    "$race_unlink_late_start" "$race_unlink_late_parent" ||
+    fail "the unlink-window case could not safely reap its late fixture"
   rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
   rm -f "$gate_race_root"/captured.*
 
@@ -7586,7 +9824,10 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
       fail "the run recovering from a crash at ${race_crash_point} must release the lock"
   done
 )
-rm -rf "$gate_race_repo" "$gate_race_root" "$gate_race_out"
+rm -rf "$gate_race_repo" "$gate_race_root" "$gate_race_out" "$gate_race_sync"
+if [[ -n "$gate_test_signal_trace_file" ]]; then
+  trap - TERM
+fi
 } # end family: lock-drain
 
 # <<< gate family body end
