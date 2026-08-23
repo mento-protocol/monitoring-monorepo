@@ -318,7 +318,7 @@ export const AGENT_MODULE_ARMS = [
     ],
   },
   {
-    why: "The Node mapping engine (ADR 0069, D5b) and the parity harness that proves it against these arms. Nothing consults the engine yet — the `case` arms are still the routing that runs — so this routes the engine's own checks rather than the gate self-test. The quoting test alone would leave routing, facts, verbs, ordering, compaction and scoped-test selection unchecked (Codex 3838109001), so the three CHEAP parity corpora run too: `fixture` (2s) covers the branch that skips repository-specific groups, `symlink` (6s) covers the dynamic pattern source no committed path can reach — it is the corpus that caught the `..`-prefixed target bug — and `multi` (57s) is where the four whole-set post-passes are actually exercised. The tracked, synthetic and base corpora are a 35-minute run and stay a per-PR step. When the gate is flipped to read the engine's plan the harness is deleted, and this arm gains the self-test the way the routing-table arm already has it (issue 2020).",
+    why: "The Node mapping engine (ADR 0069) and the harness that drives the parity corpora against it. Since D5b part 2 this IS the routing: the gate builds its plan from the engine and refuses the run if the bash `case` arms disagree by one byte, so a change here changes what every gate run does. The arm therefore carries the gate self-test and the prewarm contract as well as the engine's own unit tests — the suite's 1,229 assertions are assertions about this module's output now. It also runs the three CHEAP parity corpora: `fixture` (2s) covers the branch that skips repository-specific groups, `symlink` (6s) covers the dynamic pattern source no committed path can reach, and `multi` (57s) is where the four whole-set post-passes are exercised. The tracked, synthetic, base and self-test corpora are a 40-minute run and stay a per-PR step. D5c deletes the arms, the in-gate comparison and the harness together (issue 2020).",
     patterns: [
       "scripts/gate/mapping.mjs",
       "scripts/gate/mapping/*.mjs",
@@ -328,6 +328,20 @@ export const AGENT_MODULE_ARMS = [
       {
         command: "node --test scripts/gate/mapping/shell-quote.test.mjs",
         reason: "gate mapping engine changed",
+      },
+      {
+        command: "node --test scripts/gate/mapping/engine.test.mjs",
+        reason:
+          "gate mapping engine changed (behaviour the arms will stop pinning at D5c)",
+      },
+      {
+        command: "pnpm agent:quality-gate:test",
+        reason:
+          "gate mapping engine produces the stdout the gate suite asserts on",
+      },
+      {
+        command: "node scripts/gate/agent-prewarm.test.mjs",
+        reason: "gate mapping engine produces the stdout agent:prewarm parses",
       },
       {
         command: "node scripts/gate/routing-parity.mjs --corpus fixture",

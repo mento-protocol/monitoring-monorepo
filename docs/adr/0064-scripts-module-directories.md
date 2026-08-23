@@ -3,7 +3,7 @@ title: scripts/ may use module subdirectories; basenames and pinned paths are th
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-20
+last_verified: 2026-08-22
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -309,6 +309,12 @@ routing, not procedure.
    by `gate-equality.test.mjs`, which fails if only one side moved — so the sweep
    is not done until both are repointed. Every module in that directory is also
    an `implementation_signature()` entry, with the same `__missing__` freeze.
+   Since D5b part 2 there is a third side: `scripts/gate/mapping.mjs` and
+   `scripts/gate/mapping/` build the plan the gate actually uses, and the gate
+   resolves the mapper from `$script_source_dir` in one more literal. Those
+   modules carry the same signature and `turbo.json` pins, and a move that
+   misses the mapper refuses the run outright rather than going quiet — the gate
+   checks for it before it calls it.
 10. `forbidden_sources` in `docs/evals/documentation-navigation-fixtures.json`
     names the navigation evaluation's own implementation, so a run cannot read
     the answers out of it. `validateFixtureSuite` checks those paths for

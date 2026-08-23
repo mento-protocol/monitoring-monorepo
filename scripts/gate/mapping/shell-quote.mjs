@@ -13,7 +13,7 @@
  * 5.3.15 over every printable ASCII character in seven positions — alone, at
  * the start, at the end, mid-word, and after `=`, `:` and `/`:
  *
- *   unescaped   A-Z a-z 0-9 and . / - _ # ~ = : @ % +   (and any byte >= 0x80)
+ *   unescaped   A-Z a-z 0-9 and . / - _ # ~ = : @ % +
  *   escaped     space ' " $ * [ ] ( ) & ; | \ ! , ^ { } < > ?
  *   empty       ''
  *   control     ANSI-C form, e.g. a newline gives $'a\nb' and ESC gives $'a\Eb'
@@ -33,6 +33,14 @@
  *     builds DISAGREE, so there is no single string to emit, and `shellQuote`
  *     refuses rather than guessing. See the refusal below.
  *
+ * A byte >= 0x80 is the same shape of problem one level out: the answer depends
+ * on the LOCALE, not on the build. Measured, `printf %q` of `aéb` gives
+ * `$'a\303\251b'` under `LC_ALL=C` and `aéb` under `LC_ALL=en_US.UTF-8` on both
+ * builds — and with the locale unset, 3.2.57 escapes where 5.3.15 does not. The
+ * gate's own pre-push hook runs with a stripped environment, so both answers
+ * are reachable on one machine. `shellQuote` refuses those too. No tracked path
+ * in this repository carries a non-ASCII byte.
+ *
  * `shell-quote.test.mjs` asks bash itself rather than trusting this comment.
  */
 
@@ -50,14 +58,22 @@ const tildeIsAmbiguous = (value, index) =>
   value[index] === "~" &&
   (index === 0 || value[index - 1] === "=" || value[index - 1] === ":");
 
+/** The one shape of failure this module has: two answers, so neither. */
+const refusal = (value, why) => {
+  const error = new Error(
+    `cannot reproduce printf %q for ${JSON.stringify(value)}: ${why}`,
+  );
+  error.exitCode = 2;
+  return error;
+};
+
 /**
  * The ANSI-C escapes bash emits inside `$'…'`.
  *
  * ESC is the one that is not guessable from the C escape table: bash's
  * `ansic_quote` carries `case ESC: c = 'E'`, so 0x1b comes back as `\E` rather
  * than as the octal `\033` every other unnamed control character gets.
- * Measured on 3.2.57 and 5.3.15 — both agree. A byte >= 0x80 is NOT octal-
- * escaped in this mode; it passes through, also measured on both.
+ * Measured on 3.2.57 and 5.3.15 — both agree, in both locales.
  */
 const ANSI_C = new Map([
   ["\x07", "\\a"],
@@ -87,16 +103,23 @@ export function shellQuote(value) {
   if (value === "") return "''";
 
   // REFUSE rather than pick a side. The gate's own quoting is whatever bash is
-  // running it, so a guess here is a command string that matches the gate on
-  // one machine and not on another — a plan whose freshness stamp never lands
-  // and whose parity is a coin flip. No path in this repository holds one.
+  // running it, under whatever locale it inherited, so a guess here is a
+  // command string that matches the gate on one machine and not on another — a
+  // plan whose freshness stamp never lands and whose parity is a coin flip. No
+  // path in this repository holds either shape.
   for (let index = 0; index < value.length; index += 1) {
-    if (!tildeIsAmbiguous(value, index)) continue;
-    const error = new Error(
-      `cannot reproduce printf %q for ${JSON.stringify(value)}: bash 3.2 leaves a leading-position \`~\` alone and bash 5.3 escapes it, so the quoted form depends on which bash runs the gate`,
-    );
-    error.exitCode = 2;
-    throw error;
+    if (tildeIsAmbiguous(value, index)) {
+      throw refusal(
+        value,
+        "bash 3.2 leaves a leading-position `~` alone and bash 5.3 escapes it, so the quoted form depends on which bash runs the gate",
+      );
+    }
+    if (value.codePointAt(index) > 0x7f) {
+      throw refusal(
+        value,
+        "a byte >= 0x80 is octal-escaped under LC_ALL=C and passed through under a UTF-8 locale, so the quoted form depends on the environment the gate inherited",
+      );
+    }
   }
 
   // A control character forces the whole word into ANSI-C quoting; bash does

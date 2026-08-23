@@ -2070,6 +2070,51 @@ assert_contains "error: lockfile scope classifier could not be loaded from"
 assert_not_contains "lockfile change scoped to importers"
 assert_not_contains "- cd aegis && forge test (workspace dependency/config changed)"
 
+# The mapping engine is the routing now (ADR 0069, D5b part 2), so a gate that
+# cannot find it must refuse rather than fall back to the bash arms it still
+# carries. That fallback is the tempting bug: the arms are RIGHT THERE, and
+# using them would look like resilience while quietly returning the gate to a
+# routing path nothing checks any more.
+#
+# Same mirror trick as the classifier case above, one level deeper: every
+# scripts/ entry is symlinked, and `gate` is rebuilt as a real directory whose
+# contents are symlinks minus mapping.mjs.
+mapper_missing_dir="$(mktemp -d)"
+for mapper_sibling in "$repo_root"/scripts/*; do
+  mapper_sibling_name="$(basename "$mapper_sibling")"
+  if [[ "$mapper_sibling_name" != "gate" ]]; then
+    ln -s "$mapper_sibling" "$mapper_missing_dir/$mapper_sibling_name"
+  fi
+done
+mkdir -p "$mapper_missing_dir/gate"
+for mapper_gate_entry in "$repo_root"/scripts/gate/*; do
+  mapper_gate_entry_name="$(basename "$mapper_gate_entry")"
+  if [[ "$mapper_gate_entry_name" != "mapping.mjs" ]]; then
+    ln -s "$mapper_gate_entry" "$mapper_missing_dir/gate/$mapper_gate_entry_name"
+  fi
+done
+mapper_missing_repo="$(mktemp -d)"
+(
+  cd "$mapper_missing_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  printf '{ "name": "fixture" }\n' > package.json
+  git add package.json
+  git commit -qm init
+  printf 'export const changed = 1;\n' > changed.mjs
+  set +e
+  bash "$mapper_missing_dir/agent-quality-gate.sh" --base HEAD > "$output_file" 2>&1
+  printf '%s\n' "$?" > exit-code
+  set -e
+)
+mapper_missing_exit="$(cat "$mapper_missing_repo/exit-code")"
+rm -rf "$mapper_missing_dir" "$mapper_missing_repo"
+[[ "$mapper_missing_exit" -eq 2 ]] ||
+  fail "missing gate mapping engine exited $mapper_missing_exit instead of 2"
+assert_contains "error: gate mapping engine could not be loaded from"
+assert_not_contains "Mapped safe local commands:"
+
 run_gate "indexer-envio/package.json"
 assert_contains "- docs/pr-checklists/stateful-data-ui.md (indexer data flow changed)"
 assert_occurrences 1 "- pnpm install --frozen-lockfile (link generated package after indexer codegen)"
@@ -3849,11 +3894,19 @@ if [[ -f "$counter_file" ]]; then
 fi
 printf '%s\n' "$((count + 1))" > "$counter_file"
 STUB
+  # The stub exists to make the MAPPED commands free, not to break the gate's
+  # own Node helpers. Those are the `--input-type=module` heredocs and, since
+  # D5b part 2, the mapping engine the gate runs to build its plan at all — a
+  # stubbed-out mapper produces an empty plan and the gate refuses the run,
+  # which is the guard working, not the fixture.
   cat > bin/node <<'STUB'
 #!/usr/bin/env bash
 if [[ "${1:-}" == "--input-type=module" ]]; then
   exec "${REAL_NODE:?}" "$@"
 fi
+case "${1:-}" in
+  *"/scripts/gate/mapping.mjs") exec "${REAL_NODE:?}" "$@" ;;
+esac
 exit 0
 STUB
   cat > bin/pnpm <<'STUB'

@@ -96,6 +96,8 @@
         "$TURBO_ROOT$/scripts/agent-quality-gate.sh",
         "$TURBO_ROOT$/scripts/agent-quality-gate.test.sh",
         "$TURBO_ROOT$/scripts/gate/routing-table/**",
+        "$TURBO_ROOT$/scripts/gate/mapping.mjs",
+        "$TURBO_ROOT$/scripts/gate/mapping/**",
         "$TURBO_ROOT$/turbo.json"
       ],
       "env": ["VERCEL_ENV", "VERCEL_DEPLOYMENT_ID", "VERCEL_GIT_COMMIT_SHA"],
@@ -159,6 +161,8 @@
         "$TURBO_ROOT$/scripts/agent-quality-gate.sh",
         "$TURBO_ROOT$/scripts/agent-quality-gate.test.sh",
         "$TURBO_ROOT$/scripts/gate/routing-table/**",
+        "$TURBO_ROOT$/scripts/gate/mapping.mjs",
+        "$TURBO_ROOT$/scripts/gate/mapping/**",
         "$TURBO_ROOT$/turbo.json"
       ],
       "outputs": []
@@ -201,6 +205,8 @@
         "$TURBO_ROOT$/scripts/agent-quality-gate.sh",
         "$TURBO_ROOT$/scripts/agent-quality-gate.test.sh",
         "$TURBO_ROOT$/scripts/gate/routing-table/**",
+        "$TURBO_ROOT$/scripts/gate/mapping.mjs",
+        "$TURBO_ROOT$/scripts/gate/mapping/**",
         "$TURBO_ROOT$/turbo.json"
       ],
       "env": [
