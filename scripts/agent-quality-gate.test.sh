@@ -6327,8 +6327,9 @@ gate_test_process_has_start() {
 # Return success only while the recorded fixture identity can still execute. A
 # zombie can retain the same PID and start time forever under a non-reaping PID
 # 1, but it cannot run fixture code. An unreadable state stays live so cleanup
-# fails closed instead of claiming an uncertain process absent. Production
-# stale-holder semantics remain outside this test-only predicate.
+# fails closed instead of claiming an uncertain process absent. The production
+# orphan drain applies the same rule only after it revalidates the exact PID and
+# start time; lock-holder reclamation remains separate.
 gate_test_process_has_live_start() {
   local pid="$1"
   local expected_start="$2"
@@ -6684,8 +6685,10 @@ gate_race_sync="$(mktemp -d)"
   race_inherited_token="$(printf "fixture-inherited-%s-%s" "$gate_test_outer_pid" "$gate_race_fixture_epoch")"
   race_drained_first_token="$(printf "fixture-drained-first-%s-%s" "$gate_test_outer_pid" "$gate_race_fixture_epoch")"
   race_arrived_late_token="$(printf "fixture-arrived-late-%s-%s" "$gate_test_outer_pid" "$gate_race_fixture_epoch")"
+  race_zombie_token="$(printf "fixture-zombie-%s-%s" "$gate_test_outer_pid" "$gate_race_fixture_epoch")"
   for race_fixture_token in \
-    "$race_inherited_token" "$race_drained_first_token" "$race_arrived_late_token"; do
+    "$race_inherited_token" "$race_drained_first_token" \
+    "$race_arrived_late_token" "$race_zombie_token"; do
     [[ "$race_fixture_token" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,180}-[0-9]{1,10}-[0-9]{1,12}$ ]] ||
       fail "suite-unique live fixture token is malformed: ${race_fixture_token}"
   done
@@ -6723,6 +6726,12 @@ gate_race_sync="$(mktemp -d)"
   race_fork_unit_bystander=""
   race_fork_unit_bystander_start=""
   race_fork_unit_bystander_parent=""
+  race_zombie_supervisor=""
+  race_zombie_supervisor_start=""
+  race_zombie_supervisor_parent=""
+  race_zombie_supervisor_release=""
+  race_zombie_child=""
+  race_zombie_child_start=""
   race_drain_owned_survivors=""
   race_drain_owned_record_error=""
   race_drain_pair_observation_file=""
@@ -7547,6 +7556,47 @@ EOF
     race_bound_registered="$pending"
   }
 
+  race_zombie_release_and_reap_supervisor() {
+    local release_status=0
+    [[ -n "$race_zombie_supervisor" ]] || return 0
+    case "$race_zombie_supervisor_release" in
+      "$gate_race_out"/*) ;;
+      *) return 124 ;;
+    esac
+    if [[ -L "$race_zombie_supervisor_release" ]]; then
+      return 124
+    elif [[ ! -e "$race_zombie_supervisor_release" ]]; then
+      (set -C && : > "$race_zombie_supervisor_release") 2>/dev/null ||
+        release_status=124
+    elif [[ ! -f "$race_zombie_supervisor_release" ||
+      ! -O "$race_zombie_supervisor_release" ||
+      ! -r "$race_zombie_supervisor_release" ||
+      ! -w "$race_zombie_supervisor_release" ]]; then
+      release_status=124
+    fi
+    if [[ -n "$race_zombie_supervisor_start" &&
+      -n "$race_zombie_supervisor_parent" ]]; then
+      race_drain_wait_for_direct_wrapper \
+        "production zombie supervisor" "$race_zombie_supervisor" \
+        "$race_zombie_supervisor_start" "$race_zombie_supervisor_parent" 35 ||
+        release_status=124
+    else
+      race_bound_wait_unreleased "$race_zombie_supervisor" 35 ||
+        release_status=124
+    fi
+    if [[ -n "$race_zombie_child" && -n "$race_zombie_child_start" ]] &&
+      gate_test_process_has_start "$race_zombie_child" "$race_zombie_child_start"; then
+      release_status=124
+    fi
+    [[ "$release_status" -eq 0 ]] || return "$release_status"
+    race_zombie_supervisor=""
+    race_zombie_supervisor_start=""
+    race_zombie_supervisor_parent=""
+    race_zombie_child=""
+    race_zombie_child_start=""
+    return 0
+  }
+
   # shellcheck disable=SC2329 # invoked by the EXIT trap below
   cleanup_interrupted_drain_fixture() {
     local status=$?
@@ -7629,6 +7679,7 @@ EOF
     race_cleanup_track race_drain_cleanup_direct_wrapper \
       "fork-record unit bystander" "$race_fork_unit_bystander" \
       "$race_fork_unit_bystander_start" "$race_fork_unit_bystander_parent"
+    race_cleanup_track race_zombie_release_and_reap_supervisor
     race_cleanup_track race_drain_cleanup_suspended_watchdogs
     final_status="$status"
     if [[ "$final_status" -eq 0 && "$cleanup_status" -ne 0 ]]; then
@@ -8032,6 +8083,117 @@ STUB
       -z "$race_drain_owned_survivors" ]] ||
       fail "the owned-record inspector treated a zombie fixture as live"
   )
+
+  # Exercise the production orphan-drain census with an actual unreaped child.
+  # The bounded Perl supervisor keeps its exited child in Z state until this
+  # fixture releases it. The persisted capture is the same PID/start handle a
+  # killed gate leaves behind. Old production code waits for the drain bound;
+  # the zombie-aware census removes the obligation and executes the next run.
+  race_zombie_record="$gate_race_out/production-zombie.identity"
+  race_zombie_supervisor_release="$gate_race_out/production-zombie.release"
+  [[ ! -e "$race_zombie_record" && ! -L "$race_zombie_record" &&
+    ! -e "$race_zombie_supervisor_release" &&
+    ! -L "$race_zombie_supervisor_release" ]] ||
+    fail "the production zombie probe paths existed before launch"
+  /usr/bin/perl -MFcntl=:DEFAULT -e '
+    use strict;
+    use warnings;
+    use POSIX qw(_exit);
+    my ($record, $release, $bound) = @ARGV;
+    my $child = fork();
+    defined $child or exit 64;
+    if ($child == 0) {
+      _exit(0);
+    }
+    my $opened = sysopen(my $record_handle, $record,
+      O_WRONLY | O_CREAT | O_EXCL, 0600);
+    if (!$opened) {
+      waitpid($child, 0);
+      exit 64;
+    }
+    my $written = print {$record_handle} "$child\n";
+    my $closed = close $record_handle;
+    if (!$written || !$closed) {
+      waitpid($child, 0);
+      exit 64;
+    }
+    my $deadline = time() + $bound;
+    while (!-f $release && time() < $deadline) {
+      select undef, undef, undef, 0.1;
+    }
+    my $released = -f $release;
+    waitpid($child, 0);
+    exit($released ? 0 : 64);
+  ' "$race_zombie_record" "$race_zombie_supervisor_release" 30 &
+  race_zombie_supervisor=$!
+  gate_test_capture_identity \
+    "$race_zombie_supervisor" "$gate_test_signal_shell_pid" ||
+    fail "the production zombie supervisor did not keep an exact direct-child identity"
+  race_zombie_supervisor_start="$gate_test_captured_start"
+  race_zombie_supervisor_parent="$gate_test_captured_parent"
+  race_zombie_deadline=$(( $(date +%s) + 15 ))
+  while :; do
+    race_zombie_child=""
+    if [[ ! -L "$race_zombie_record" && -f "$race_zombie_record" &&
+      -O "$race_zombie_record" && -r "$race_zombie_record" &&
+      -w "$race_zombie_record" ]]; then
+      race_zombie_child="$(awk '
+        NR == 1 && $0 ~ /^[1-9][0-9]*$/ { value = $0; next }
+        { bad = 1 }
+        END { if (bad || value == "") exit 1; print value }
+      ' "$race_zombie_record" 2>/dev/null || true)"
+    fi
+    if [[ -n "$race_zombie_child" ]] &&
+      gate_test_capture_identity \
+        "$race_zombie_child" "$race_zombie_supervisor" &&
+      [[ "$(gate_test_process_state "$race_zombie_child")" == Z* ]]; then
+      race_zombie_child_start="$gate_test_captured_start"
+      break
+    fi
+    gate_test_process_is_expected \
+      "$race_zombie_supervisor" "$race_zombie_supervisor_start" \
+      "$race_zombie_supervisor_parent" ||
+      fail "the production zombie supervisor exited before publishing a zombie"
+    [[ "$(date +%s)" -lt "$race_zombie_deadline" ]] ||
+      fail "the production zombie supervisor did not publish a confirmed zombie"
+    sleep 0.1
+  done
+  : > "$gate_race_log"
+  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
+  rm -f "$gate_race_root"/captured.* "$gate_race_root"/holder.*
+  mkdir -p "$gate_race_root/condemned.d"
+  printf '%s\n' "$race_zombie_token" \
+    > "$gate_race_root/condemned.d/$race_zombie_token"
+  printf '%s|%s\n' "$race_zombie_child" "$race_zombie_child_start" \
+    > "$gate_race_root/captured.$race_zombie_token"
+  set +e
+  AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    AGENT_QUALITY_GATE_LOCK_ORPHAN_DRAIN_SECONDS=3 \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 20 \
+    > "$gate_race_out/production-zombie.out" 2>&1
+  race_zombie_gate_status=$?
+  set -e
+  [[ "$race_zombie_gate_status" -eq 0 ]] ||
+    fail "the production drain treated a confirmed zombie as live (exit ${race_zombie_gate_status})"
+  gate_test_process_is_expected \
+    "$race_zombie_child" "$race_zombie_child_start" \
+    "$race_zombie_supervisor" &&
+    [[ "$(gate_test_process_state "$race_zombie_child")" == Z* ]] ||
+    fail "the production zombie probe was not retained until supervisor cleanup"
+  [[ ! -e "$gate_race_root/condemned.d/$race_zombie_token" ]] ||
+    fail "the production drain retained an obligation for a confirmed zombie"
+  [[ ! -e "$gate_race_root/captured.$race_zombie_token" ]] ||
+    fail "the production drain retained a capture for a confirmed zombie"
+  [[ -n "$(awk '/^enter/ { print $2; exit }' "$gate_race_log")" ]] ||
+    fail "the production drain did not execute after classifying a confirmed zombie"
+  race_zombie_release_and_reap_supervisor ||
+    fail "the production zombie supervisor could not reap its child"
+  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
+  rm -f "$gate_race_root"/captured.*
 
   race_probe_publisher_target="$gate_race_out/publisher-path.target"
   race_probe_publisher_symlink="$gate_race_out/publisher-path.records"

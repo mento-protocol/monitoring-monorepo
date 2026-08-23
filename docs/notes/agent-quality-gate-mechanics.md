@@ -409,7 +409,7 @@ rediscovered one at a time.
 | taken record dropped because `ln` could not put it back | same                                         | same: the token is published under `condemned.d/` before the copy goes                                                     |
 | taken record deleted after a confirmed-stale verdict    | same                                         | `record_condemned_run` runs immediately before it, inside the election                                                     |
 | `condemned.d/<token>` removed                           | that run's commands                          | removed only after its drain confirmed those processes gone; a drain that cannot confirm exits instead                     |
-| `captured.<token>` removed after a drain                | that run's process tree                      | removed only once every captured PID is gone or is somebody else now                                                       |
+| `captured.<token>` removed after a drain                | that run's process tree                      | removed only once every captured PID is gone, is a confirmed zombie with the same identity, or is somebody else now        |
 | `captured.<token>` removed when nothing was captured    | nothing                                      | reached only when the persisted file and the tag scan are both empty, so there is nothing to hand on                       |
 | lock directory removed at release                       | this run's own commands                      | the exit trap tears down its commands before release, and release only deletes a record that still names this run          |
 | private staged/claim files removed                      | nothing                                      | never published; no other process reads or expects them                                                                    |
@@ -574,9 +574,12 @@ of them.
    the tag comes back empty, and "no tagged process" reads as "nothing
    running". So the drain walks each tagged wrapper's tree first, recording
    every PID with its pinned start string, and then judges itself finished
-   only when every process in that captured set is gone. A PID that still
-   exists but no longer matches its recorded start time was reused by someone
-   else; it is left alone and named in the output rather than signalled. The
+   only when every process in that captured set is gone or cannot execute. A
+   confirmed `Z` state with the same PID and start time is already dead, so a
+   non-reaping PID 1 cannot hold the drain to its bound. An unreadable state
+   remains live and fails closed. A PID that still exists but no longer matches
+   its recorded start time was reused by someone else; it is left alone and
+   named in the output rather than signalled. The
    walk repeats on every pass of the drain and stops recording a PID once it
    has been seen, so the census converges instead of freezing: a command whose
    `TERM` handler forks a replacement produces a child that did not exist when

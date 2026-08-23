@@ -902,6 +902,29 @@ gate_lock_process_start() {
   TZ=UTC LC_ALL=C ps -o lstart= -p "$pid" 2>/dev/null | head -n1 || true
 }
 
+gate_lock_process_state() {
+  local pid="$1"
+  [[ -n "$pid" ]] || return 0
+  TZ=UTC LC_ALL=C LANG=C ps -p "$pid" -o stat= 2>/dev/null |
+    awk 'NF { print $1; exit }' || true
+}
+
+# A zombie has exited and cannot execute, fork, or retain file descriptors. PID
+# 1 can keep its process-table record indefinitely, so kill -0 and lstart alone
+# cannot decide whether a condemned command can still overlap the next run.
+# Re-read the exact identity after the state probe. Empty or unreadable state
+# remains fail-closed because only a confirmed Z state returns success.
+gate_lock_process_is_confirmed_zombie() {
+  local pid="$1"
+  local recorded_start="$2"
+  local current_start current_state
+  [[ -n "$pid" && -n "$recorded_start" ]] || return 1
+  current_state="$(gate_lock_process_state "$pid")"
+  [[ "$current_state" == Z* ]] || return 1
+  current_start="$(gate_lock_process_start "$pid")"
+  [[ -n "$current_start" && "$current_start" == "$recorded_start" ]]
+}
+
 # Is this PID still the process that recorded itself? `kill -0` alone cannot
 # say: PIDs are reused, and a recycled one would make every later run wait on
 # an unrelated process until --lock-wait expired — the opposite of unattended
@@ -1322,6 +1345,9 @@ drain_condemned_run_commands() {
           *" ${pid} "*) : ;;
           *) recycled="${recycled}${pid} " ;;
         esac
+        continue
+      fi
+      if gate_lock_process_is_confirmed_zombie "$pid" "$recorded"; then
         continue
       fi
       alive="${alive}${pid} "
