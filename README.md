@@ -2,7 +2,7 @@
 
 Real-time monitoring infrastructure for Mento v3 on-chain pools — a multichain [Envio HyperIndex](https://docs.envio.dev/) indexer paired with a Next.js 16 + Plotly.js dashboard.
 
-<!-- agent-context: title="Mento Monitoring Monorepo" status=active owner=eng canonical=true last_verified=2026-08-21 doc_type=reference scope=repo-wide review_interval_days=90 garden_lane=package-readmes-reference -->
+<!-- agent-context: title="Mento Monitoring Monorepo" status=active owner=eng canonical=true last_verified=2026-08-23 doc_type=reference scope=repo-wide review_interval_days=90 garden_lane=package-readmes-reference -->
 
 **Live dashboard:** [monitoring.mento.org](https://monitoring.mento.org)
 
@@ -312,6 +312,8 @@ pnpm deploy:indexer:logs "$COMMIT" --errors-only --since 2h
 pnpm deploy:indexer:perf "$COMMIT"
 pnpm deploy:indexer:verify "$COMMIT"
 pnpm deploy:indexer:promote "$COMMIT"
+# After the full five-minute propagation window:
+pnpm deploy:indexer:verify "$COMMIT" --prod
 ```
 
 The status watcher only proves a deployment caught up. Promotion additionally
@@ -321,7 +323,8 @@ waives those data-integrity checks.
 
 For an agent-operated production rollout, use the repo's `/deploy-indexer`
 skill: it also captures the prior production commit, confirms promotion, waits
-for endpoint propagation, and verifies the dashboard in the browser. After a
+for endpoint propagation, verifies the static production endpoint and affected
+application API, and then verifies the dashboard and browser console. After a
 pre-merge `/deploy-indexer --no-promote`, finish a tree-matching candidate with
 an explicitly authorized `/deploy-indexer --resume-preload <commit>`; do not
 use the bare promote command as a shortcut.

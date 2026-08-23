@@ -3,7 +3,7 @@ title: Reserve-Yield Indexer Topology
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-21
+last_verified: 2026-08-23
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -152,7 +152,7 @@ changes or if an absence proof is needed for a future audit.
 
 ## Hosted Promotion Gate
 
-Do not promote a hosted reindex with Ethereum reserve-yield enabled until:
+Before promoting a hosted reindex with Ethereum reserve-yield enabled, require:
 
 1. `pnpm --filter @mento-protocol/indexer-envio indexer:reserve-yield:test` passes.
 2. A fresh hosted deployment starts from an unsynced state.
@@ -163,8 +163,20 @@ Do not promote a hosted reindex with Ethereum reserve-yield enabled until:
    summary also requires a post-launch `SusdsYieldDailySnapshot` whose
    `sampledAtBlock` is fresh against the Ethereum processed head and whose
    `sampledAtTimestamp` is fresh against verifier time.
-5. The dashboard `/revenue` page shows restored reserve actuals from the
-   shared endpoint and continues to label stale/partial data correctly.
+
+After promotion:
+
+5. Wait the full five-minute static-endpoint propagation window.
+6. `pnpm deploy:indexer:verify <commit> --prod` passes against the static
+   production endpoint and requires that exact commit to be production.
+7. An authorized same-origin request to production
+   `/api/reserve-yield?closeout=<short-commit>` with `cache: "no-store"`
+   returns HTTP 200. `susdsEarnedYieldUsd` must be a finite number,
+   `earnedYieldAsOf` must be a valid timestamp, and `earnedYieldError` must be
+   `null`. The response must also contain an sUSDS holding with a finite
+   `earnedYieldUsd`.
+8. The dashboard `/revenue` page shows current sUSDS reserve actuals without a
+   pending, unavailable, or stale label. The browser console has no errors.
 
 The manual proof that motivated this gate was completed for deployment
 `6bed96e` on 2026-07-03 after adding an archive-capable `ENVIO_RPC_URL_1` in

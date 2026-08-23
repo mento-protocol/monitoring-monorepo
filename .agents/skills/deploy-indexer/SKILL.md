@@ -1,11 +1,11 @@
 ---
 name: deploy-indexer
-description: Agent-native Envio indexer deploy orchestrator. Pushes the current branch HEAD to the `envio` branch, watches build and sync, verifies deployment health, optionally promotes to prod, waits for endpoint switchover, and verifies monitoring.mento.org. Use `--no-promote` to pre-load a feature branch's indexer changes ahead of merging. Triggers on "deploy indexer", "ship indexer", "push to envio", "pre-deploy indexer", or `/deploy-indexer`. Do NOT use for code-only PR ships — use `/ship` for that.
+description: Agent-native Envio indexer deploy orchestrator. Pushes the current branch HEAD to the `envio` branch, watches build and sync, verifies deployment health, optionally promotes to prod, waits for endpoint switchover, verifies the production endpoint and affected API, and verifies monitoring.mento.org. Use `--no-promote` to pre-load a feature branch's indexer changes ahead of merging. Triggers on "deploy indexer", "ship indexer", "push to envio", "pre-deploy indexer", or `/deploy-indexer`. Do NOT use for code-only PR ships — use `/ship` for that.
 title: Deploy Indexer Skill
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-21
+last_verified: 2026-08-23
 doc_type: skill
 scope: repo-wide
 review_interval_days: 90
@@ -16,7 +16,8 @@ garden_lane: agent-entry-points
 
 Push a commit to the `envio` branch, watch the build + re-index, verify
 deployment health, optionally promote an explicitly authorized production
-deploy, wait for the static URL to flip, then verify the dashboard. Read
+deploy, wait for the static URL to flip, verify the promoted production
+endpoint and affected application API, then verify the dashboard. Read
 `docs/deployment.md` first; it owns the canonical deploy and rollback policy.
 
 The target commit is `HEAD` of the current working directory; `pnpm
@@ -108,12 +109,13 @@ explicit end-to-end production deploy request does.
   proceed only when its `indexer-envio/` tree matches canonical protected
   `main`; removals/renames still require the approved compatibility or cutover
   plan.
-- `--no-verify` — skip Phase 6 browser/UI verification, so the deploy and the
-  endpoint-propagation wait can complete unattended.
+- `--no-verify` — skip Phase 7 application API and browser/UI verification.
+  Phase 6 still proves that the static production endpoint serves the promoted
+  commit. The resulting deploy lacks application closeout proof.
 - `--resume-preload <commit>` — after merge, reuse an already-synced candidate
   whose `indexer-envio/` tree exactly matches freshly fetched canonical `main`.
   Skip the push, reconfirm sync, then execute every remaining gate in Phases
-  3–6. This flag does not itself authorize promotion; the request must
+  3–7. This flag does not itself authorize promotion; the request must
   explicitly authorize the end-to-end production continuation.
 
 ## Phase 1 — Push to `envio`
@@ -217,7 +219,7 @@ Pre-merge deploy complete. <TARGET_COMMIT> is synced and pending deployment veri
 After merge, for additive fields/entities and with explicit production authorization: /deploy-indexer --resume-preload <TARGET_COMMIT> (removals/renames need a confirmed compatibility or cutover/rollback plan first).
 ```
 
-Do NOT continue to Phase 3 / 4 / 5 / 6. The reviewed schema is not on `main`.
+Do NOT continue to Phases 3–7. The reviewed schema is not on `main`.
 
 ## Phase 3 — Verify deployment before promotion
 
@@ -267,7 +269,7 @@ that no rollback target was captured instead of guessing.
 
 Promote only when the request explicitly authorized the end-to-end production
 deploy. Otherwise stop after verification and ask for approval to continue
-this skill through Phases 4–6; do not surface the wrapper as a standalone
+this skill through Phases 4–7; do not surface the wrapper as a standalone
 shortcut. Once authorized, run:
 
 ```bash
@@ -306,19 +308,50 @@ add new GraphQL fields, not that the routing hasn't flipped. If you have a
 strong signal in this PR's diff (a new entity / field in `schema.graphql`),
 you MAY query for it as a probe; otherwise just wait 5 min and move on.
 
-## Phase 6 — Verify the UI
+## Phase 6 — Verify the promoted production endpoint
+
+After the propagation wait, verify the target through the static production
+endpoint:
+
+```bash
+pnpm deploy:indexer:verify <TARGET_COMMIT> --prod
+```
+
+This second verifier run is separate from the candidate check in Phase 3. It
+requires the target commit to be `prod` and runs the same semantic probes
+against the static production GraphQL endpoint. Stop on any failure.
 
 If `--no-verify` was passed, stop here and print the final summary.
 
-Otherwise verify with chrome-devtools MCP directly, following the browser
-verification protocol in `AGENTS.md`. Use the target URL plus a focus hint for
-the data the new deployment touches:
+## Phase 7 — Verify the production API and UI
+
+Verify with chrome-devtools MCP directly, following the browser verification
+protocol in `AGENTS.md`. Open `https://monitoring.mento.org` in an authorized
+session. Use `evaluate_script` first for a focused application API check.
+
+For an sUSDS sampler or reserve-yield change, fetch
+`/api/reserve-yield?closeout=<TARGET_DISPLAY>` with `cache: "no-store"` from
+the production origin. Require all of these conditions:
+
+- the response status is 200;
+- `susdsEarnedYieldUsd` exists and is a finite number;
+- `earnedYieldAsOf` is a valid timestamp;
+- `earnedYieldError` is `null`;
+- `holdings` contains an sUSDS row whose `earnedYieldUsd` is a finite number.
+
+Return the checked fields as evidence. Treat a missing field, non-finite value,
+non-null error, or non-200 response as a failed production verification.
+
+Then navigate to the affected page and run the targeted UI checks. List console
+messages of type `error` after navigation. Use the target URL plus a focus hint
+for the data the new deployment touches:
 
 - The target URL: `https://monitoring.mento.org`
 - A focus hint pointing at the data the new deployment touches. Examples:
   - For a contracts bump that added a bridge token: "verify CHFm + JPYm bridge transfers render on `/bridge-flows`"
   - For a schema/entity addition: "verify the new `<entity>` field renders on `/<page>`"
   - For a pure backfill (no schema change): "smoke-test homepage / pools / bridge-flows for regressions; no new fields to verify"
+  - For the sUSDS sampler: "verify `/revenue` renders sUSDS reserve actuals without pending, unavailable, or stale labels"
 
 If chrome-devtools MCP is unavailable, surface that and stop — do not ask the
 user to verify manually.
@@ -331,18 +364,20 @@ whether to roll back. Don't auto-rollback — promote-to-prior is destructive.
 - **Deployed commit:** `<TARGET_COMMIT>`
 - **Build + sync:** time-to-caught-up (mm:ss), per-chain final blocks
 - **Performance snapshot:** `pnpm deploy:indexer:perf <TARGET_COMMIT>` captured status/metrics/log highlights
-- **Deployment verify:** `pnpm deploy:indexer:verify <TARGET_COMMIT>` passed before promotion
+- **Candidate verify:** `pnpm deploy:indexer:verify <TARGET_COMMIT>` passed before promotion
 - **Promote:** ✅ / ❌ (and `PREVIOUS_PROD_COMMIT` captured in Phase 4, for rollback reference)
 - **Endpoint propagation wait:** 5 min completed
-- **UI verify:** pages checked + console errors found (✅ if none)
+- **Production verify:** `pnpm deploy:indexer:verify <TARGET_COMMIT> --prod` passed after propagation
+- **Production API verify:** endpoint + fields checked, or explicitly skipped by `--no-verify`
+- **UI verify:** pages checked + console errors found, or explicitly skipped by `--no-verify`
 - **Rollback command (paste-ready):** `pnpm deploy:indexer:rollback <PREVIOUS_PROD_COMMIT>` — or "(none captured)" if `PREVIOUS_PROD_COMMIT` was empty.
 
 ## Idempotency
 
 For a commit already in prod, the wrapper accepts the registered no-op push and
-the status watch returns immediately. Still run deployment verification, the
-five-minute propagation wait, and UI verification; those checks are the value
-of the rerun.
+the status watch returns immediately. Still run candidate verification, the
+five-minute propagation wait, production verification, and application checks;
+those checks are the value of the rerun.
 
 ## Common pre-merge workflow
 
@@ -363,7 +398,7 @@ of the rerun.
 - **Never manually force-push** to `main` or any tracked branch. The `pnpm deploy:indexer` script's `--force-with-lease` push to `envio` is the one sanctioned exception (and `envio` is a deploy-trigger ref, not a tracking branch); any other force-push is off-limits.
 - **Never auto-rollback.** Promote-to-prior is the user's call.
 - **Never bypass the babysit phase** — don't promote based on a single status snapshot.
-- **Never bypass the deployment verifier** — run `pnpm deploy:indexer:verify <TARGET_COMMIT>` after sync and before promote.
+- **Never bypass either deployment verifier** — run `pnpm deploy:indexer:verify <TARGET_COMMIT>` before promotion and `pnpm deploy:indexer:verify <TARGET_COMMIT> --prod` after propagation.
 - **Always wait the full 5 min** for static-endpoint propagation before verifying — bypassing produces flaky verify results.
 - **Pass the full target SHA explicitly** to status and verification steps — don't rely on "latest", since a concurrent deploy by someone else could shift it.
 - **Don't open a PR** as part of deployment verification. This skill is a

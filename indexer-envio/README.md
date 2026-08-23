@@ -1,4 +1,4 @@
-<!-- agent-context: title="Mento v3 Envio HyperIndex Indexer" status=active owner=eng canonical=true last_verified=2026-08-21 doc_type=reference scope=indexer-envio review_interval_days=90 garden_lane=package-readmes-reference -->
+<!-- agent-context: title="Mento v3 Envio HyperIndex Indexer" status=active owner=eng canonical=true last_verified=2026-08-23 doc_type=reference scope=indexer-envio review_interval_days=90 garden_lane=package-readmes-reference -->
 
 # Mento v3 Envio HyperIndex Indexer
 
@@ -275,6 +275,8 @@ pnpm deploy:indexer:logs "$COMMIT" --errors-only --since 2h
 pnpm deploy:indexer:perf "$COMMIT"
 pnpm deploy:indexer:verify "$COMMIT"
 pnpm deploy:indexer:promote "$COMMIT"
+# After the full five-minute propagation window:
+pnpm deploy:indexer:verify "$COMMIT" --prod
 ```
 
 A caught-up watcher exit is `SYNCED_PENDING_DATA_VERIFY`, not promotion
@@ -287,6 +289,9 @@ code enforcing the current oracle-freshness invariant; a candidate whose
 commit lacks the required version is never promotion-compatible even if later
 rows look healthy. Bump a marker only in the same change as the new replay
 invariant and its handler-level regression tests.
+After the production verifier passes, follow the `deploy-indexer` skill's
+Phase 7 checks for the affected production API, dashboard page, and browser
+console. Promotion alone does not complete the rollout.
 
 Replay-integrity v3 replaces traffic-scaled exact `medianTimestamp` reads with
 a persisted, event-sourced `OracleFeedState`. On the first tracked

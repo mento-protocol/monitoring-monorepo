@@ -3,7 +3,7 @@ title: Deployment Guide
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-21
+last_verified: 2026-08-23
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -66,6 +66,8 @@ pnpm deploy:indexer:logs "$COMMIT" --errors-only --since 2h
 pnpm deploy:indexer:perf "$COMMIT"
 pnpm deploy:indexer:verify "$COMMIT"
 pnpm deploy:indexer:promote "$COMMIT"
+# After the full five-minute propagation window:
+pnpm deploy:indexer:verify "$COMMIT" --prod
 ```
 
 Promotion authority depends on the request. For a monitor-only or babysit
@@ -100,8 +102,10 @@ pnpm deploy:indexer --yes
 4. Verify sync, metrics, endpoint resolution, core rows, sUSDS post-launch sampler progress/freshness, and fail-closed Polygon replay semantics (`pnpm deploy:indexer:verify "$COMMIT"`). The sUSDS sampler rejects a lag of 600 blocks or more and snapshots older than 24 hours. The verifier reads `indexer-envio/config/replay-integrity.json` from that exact commit, so a pre-invariant replay cannot pass merely because later rows look healthy. A caught-up status alone is only `SYNCED_PENDING_DATA_VERIFY`.
 5. Capture the current production commit for rollback, then promote the same caught-up, semantically verified commit (`pnpm deploy:indexer:promote "$COMMIT"`) and confirm its `prod_status=prod`. The `deploy-indexer` skill owns the exact prefix-safe query and guarded rollback command.
 6. Wait the full five-minute static-endpoint propagation window.
-7. Trigger a Vercel redeploy only if dashboard code or GraphQL fields changed and the dashboard has not already deployed from `main`.
-8. Verify monitoring.mento.org in the browser, including the affected pages and console errors. A bare successful promote is not rollout closeout.
+7. Verify that the promoted commit and its semantic data are available through the static production endpoint (`pnpm deploy:indexer:verify "$COMMIT" --prod`). This check is separate from the pre-promotion candidate check.
+8. Trigger a Vercel redeploy only if dashboard code or GraphQL fields changed and the dashboard has not already deployed from `main`. Wait for that deployment before the application checks.
+9. For an sUSDS sampler or reserve-yield change, use an authorized same-origin browser session to fetch `/api/reserve-yield?closeout=<short-commit>` with `cache: "no-store"`. Require HTTP 200, a finite `susdsEarnedYieldUsd`, a valid `earnedYieldAsOf`, `earnedYieldError: null`, and an sUSDS holding with finite `earnedYieldUsd`.
+10. Verify monitoring.mento.org in the browser, including the affected pages and console errors. For an sUSDS sampler change, verify `/revenue` shows current sUSDS actuals without pending, unavailable, or stale labels. A bare successful promote is not rollout closeout.
 
 Reserve-yield actuals deploy through the primary `mento` Envio project. The
 Ethereum sUSDS handlers in `config.multichain.mainnet.yaml` use sparse token
@@ -156,7 +160,9 @@ commit:
      delete a stale non-prod deployment first
      ([envio.dev/app](https://envio.dev/app/mento-protocol/mento)).
 
-3. Verify [monitoring.mento.org](https://monitoring.mento.org) loads data.
+3. Wait the full five-minute propagation window. Run
+   `pnpm deploy:indexer:verify <last-good-sha> --prod`, then verify the affected
+   production API, dashboard page, and browser console.
 
 4. Roll forward later by promoting the fixed deployment:
    `pnpm deploy:indexer:promote <fixed-sha>`.

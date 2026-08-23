@@ -3,7 +3,7 @@ title: Polygon monitoring coverage and rollout
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-21
+last_verified: 2026-08-23
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -189,7 +189,8 @@ Roll out in this order:
    `alerts-rules` `production-infra` approval pending.
 4. With explicit human approval, promote the already caught-up candidate as
    soon as the PR lands, then wait for the static production endpoint to
-   switch to it.
+   switch to it. Run `pnpm deploy:indexer:verify <full-commit> --prod` and
+   require it to pass before the producer checks.
 5. Wait for both service deploys to finish. Verify the static endpoint serves
    the Polygon rows, metrics-bridge exposes exactly three Polygon
    `mento_pool_health_status{chain_id="137"}` series plus successful strategy
