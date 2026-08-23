@@ -13,9 +13,11 @@
 #
 # no_data_state / exec_err_state = "OK" on every rule: a missing CDP gauge
 # (deploy-window rollout before the bridge ships, or a stale series after the
-# bridge restarts) must NOT page. Bridge liveness is owned by the
-# metrics-bridge poll-staleness alert; absence of CDP data is never itself a
-# CDP emergency.
+# bridge restarts) must NOT page. The SystemParams rule also requires the
+# unlabeled `mento_cdp_last_successful_poll` marker to have a non-negative age
+# below 90 seconds. The marker advances only after a successful CDP query and
+# complete publication; it does not use the FPMM-owned bridge-last-poll gauge or poll
+# error labels. Bridge liveness and poll errors remain separate owners.
 #
 # NOT covered here (deliberate): TCR / ICR rules. `LiquityInstance.tcrBps`,
 # `icrP1Bps`, and `icrFracBelowMcrBps` are hardcoded −1 sentinels in the
@@ -107,7 +109,87 @@ resource "grafana_rule_group" "cdps" {
     }
   }
 
-  # ── 2. Stability Pool Below Floor (critical) ─────────────────────────────
+  # ── 2. System Parameters Not Loaded (warning) ───────────────────────────
+  # This generic state covers a market whose SystemParams snapshot remains
+  # incomplete after a fresh successful CDP query and publication.
+  # `liquity.systemParams.deadContract` is one possible exact diagnostic
+  # cause; inspect the indexer logs for that and other causes. Query and update
+  # failures retain the last good CDP bundle while its success marker ages.
+  # Transport failures remain covered by the metrics-bridge poll-error and
+  # liveness rules, not by this CDP state rule.
+  rule {
+    name           = "CDP System Parameters Not Loaded"
+    condition      = "threshold"
+    for            = "10m"
+    no_data_state  = "OK"
+    exec_err_state = "OK"
+
+    annotations = {
+      summary     = "CDP market {{ $labels.symbol }} SystemParams are not loaded."
+      description = "The CDP market's SystemParams snapshot remains incomplete. Check the indexer logs for the exact cause, such as liquity.systemParams.deadContract, and verify the market configuration. Metrics Bridge Poll Errors covers cdp_query/cdp_update transport and update failures; bridge liveness covers a full outage."
+    }
+    labels = {
+      service  = "cdps"
+      severity = "warning"
+    }
+
+    data {
+      ref_id         = "metric"
+      datasource_uid = var.prometheus_datasource_uid
+      relative_time_range {
+        from = local.instant_query_range_seconds
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "metric"
+        instant = true
+        expr    = "mento_cdp_system_params_loaded and on() ((time() - mento_cdp_last_successful_poll >= 0) and (time() - mento_cdp_last_successful_poll < 90))"
+      })
+    }
+    data {
+      ref_id         = "reduced"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "reduced"
+        type       = "reduce"
+        reducer    = "last"
+        expression = "metric"
+      })
+    }
+    data {
+      ref_id         = "threshold"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = jsonencode({
+        refId      = "threshold"
+        type       = "threshold"
+        expression = "reduced"
+        conditions = [{
+          evaluator = { params = [0.5], type = "lt" }
+          operator  = { type = "and" }
+          reducer   = { params = [], type = "last" }
+          type      = "query"
+        }]
+      })
+    }
+
+    notification_settings {
+      contact_point   = local.notify_warning_cdps.contact_point
+      group_by        = local.notify_warning_cdps.group_by
+      group_wait      = local.notify_warning_cdps.group_wait
+      group_interval  = local.notify_warning_cdps.group_interval
+      repeat_interval = local.notify_warning_cdps.repeat_interval
+    }
+  }
+
+  # ── 3. Stability Pool Below Floor (critical) ─────────────────────────────
   # `spHeadroom = spDeposits − MIN_BOLD_IN_SP` went negative: the SP is below
   # the on-chain governance floor, so liquidation-absorption capacity is
   # exhausted. The gauge is withheld until SystemParams is loaded (sentinel
@@ -185,7 +267,7 @@ resource "grafana_rule_group" "cdps" {
     }
   }
 
-  # ── 3. Stability Pool Thin (warning) ─────────────────────────────────────
+  # ── 4. Stability Pool Thin (warning) ─────────────────────────────────────
   # SP deposits below 2% of system debt — early-warning on absorption capacity,
   # well before the floor breach above. Measured against system debt per the
   # issue's chosen basis. 2% sits just under today's lowest market (GBPm 3.0%).
@@ -263,7 +345,7 @@ resource "grafana_rule_group" "cdps" {
     }
   }
 
-  # ── 4. Liquidations Detected (warning) ───────────────────────────────────
+  # ── 5. Liquidations Detected (warning) ───────────────────────────────────
   # Any liquidation in the last hour. CDP markets have had 0 liquidations ever,
   # so even one is worth surfacing. `increase()` over the bridged cumulative
   # counter; a constant counter yields 0 (no false fire). Caveat: an indexer
@@ -341,7 +423,7 @@ resource "grafana_rule_group" "cdps" {
     }
   }
 
-  # ── 5. User Redemptions Detected (warning) ───────────────────────────────
+  # ── 6. User Redemptions Detected (warning) ───────────────────────────────
   # Any USER (non-rebalance) redemption in the last hour. The bridge already
   # subtracts the CDPLiquidityStrategy rebalance subset, so this excludes the
   # ~100%-rebalance-driven redemption noise on production. Same increase()
@@ -417,7 +499,7 @@ resource "grafana_rule_group" "cdps" {
     }
   }
 
-  # ── 6. Redemption Shortfall Subsidized (critical) ────────────────────────
+  # ── 7. Redemption Shortfall Subsidized (critical) ────────────────────────
   # `CDPLiquidityStrategy.RedemptionShortfallSubsidized` fired — the protocol
   # absorbed a redemption shortfall, a direct economic loss. 0 have occurred.
   # 6h window so a subsidy stays visible long enough to action; increase() over

@@ -26,9 +26,24 @@ const cdpLabels = [
 type CdpLabelValues = Record<(typeof cdpLabels)[number], string>;
 
 export const cdpGauges = {
+  // This scalar is the CDP freshness boundary. It advances only after a
+  // successful Hasura CDP query has been fully prepared and published. It is
+  // deliberately separate from `mento_pool_bridge_last_poll`: that gauge is
+  // owned by the FPMM poll leg and cannot prove that CDP data is fresh.
+  lastSuccessfulPoll: new Gauge({
+    name: "mento_cdp_last_successful_poll",
+    help: "Unix timestamp of the last successful CDP query and complete metric publication. 0 before the first successful CDP poll.",
+    registers: [register],
+  }),
   shutdown: new Gauge({
     name: "mento_cdp_shutdown",
     help: "1 when a CDP market has triggered Liquity ShutDown (system below SCR; borrowing disabled), 0 otherwise.",
+    labelNames: cdpLabels,
+    registers: [register],
+  }),
+  systemParamsLoaded: new Gauge({
+    name: "mento_cdp_system_params_loaded",
+    help: "1 when the CDP market's SystemParams snapshot loaded successfully, 0 while it remains incomplete.",
     labelNames: cdpLabels,
     registers: [register],
   }),
@@ -87,6 +102,7 @@ function cdpDisplayLabels({
 interface PreparedCdpSeries {
   labels: CdpLabelValues;
   shutdown: number;
+  systemParamsLoaded: number;
   spDeposits: number;
   systemDebt: number;
   liquidationTotal: number;
@@ -134,6 +150,7 @@ function prepareCdpSeries({
   return {
     labels: cdpDisplayLabels({ instance, collateral }),
     shutdown: instance.isShutDown ? 1 : 0,
+    systemParamsLoaded: collateral.systemParamsLoaded ? 1 : 0,
     spDeposits: toHumanUnits(BigInt(instance.spDeposits), DEBT_TOKEN_DECIMALS),
     systemDebt: toHumanUnits(BigInt(instance.systemDebt), DEBT_TOKEN_DECIMALS),
     liquidationTotal: instance.liqCountCum,
@@ -154,18 +171,26 @@ function prepareCdpSeries({
 //
 // All conversions happen up front (prepareCdpSeries): a malformed value throws
 // BEFORE any gauge is reset, so the poll loop's cdp_update handler keeps the
-// last good series instead of leaving a half-cleared registry — which
-// `no_data_state=OK` would otherwise read as a silent all-clear. The reset +
-// publish loop below is pure `.set()` and cannot throw, so the registry only
-// ever transitions between two consistent states. The reset still evicts the
-// series of any market that dropped out of the indexer response.
-export function updateCdpMetrics(cdps: CdpInstance[]): void {
+// last good series and freshness timestamp instead of leaving a half-cleared
+// registry — which `no_data_state=OK` would otherwise read as a silent
+// all-clear. The reset + publish loop below is pure `.set()` and cannot throw,
+// so the registry only ever transitions between two consistent states. The
+// reset still evicts the series of any market that dropped out of the indexer
+// response. An empty response is a successful query and publication, so it
+// advances the timestamp after evicting the prior market series.
+export function updateCdpMetrics(
+  cdps: CdpInstance[],
+  nowSeconds = Math.floor(Date.now() / 1000),
+): void {
   const prepared = cdps.map(prepareCdpSeries);
 
-  for (const g of Object.values(cdpGauges)) g.reset();
+  for (const [name, g] of Object.entries(cdpGauges)) {
+    if (name !== "lastSuccessfulPoll") g.reset();
+  }
 
   for (const row of prepared) {
     cdpGauges.shutdown.set(row.labels, row.shutdown);
+    cdpGauges.systemParamsLoaded.set(row.labels, row.systemParamsLoaded);
     cdpGauges.spDeposits.set(row.labels, row.spDeposits);
     cdpGauges.systemDebt.set(row.labels, row.systemDebt);
     cdpGauges.liquidationTotal.set(row.labels, row.liquidationTotal);
@@ -175,4 +200,9 @@ export function updateCdpMetrics(cdps: CdpInstance[]): void {
       cdpGauges.spHeadroom.set(row.labels, row.spHeadroom);
     }
   }
+
+  // Publish this marker only after every CDP series has been prepared and
+  // published. Query failures never call this updater; preparation failures
+  // return before reset; both paths therefore retain the prior timestamp.
+  cdpGauges.lastSuccessfulPoll.set(nowSeconds);
 }

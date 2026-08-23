@@ -1,4 +1,4 @@
-<!-- agent-context: title="Grafana Alert Rules" status=active owner=eng canonical=true last_verified=2026-07-29 doc_type=runbook scope=alerts/rules review_interval_days=90 garden_lane=operator-runbooks -->
+<!-- agent-context: title="Grafana Alert Rules" status=active owner=eng canonical=true last_verified=2026-08-21 doc_type=runbook scope=alerts/rules review_interval_days=90 garden_lane=operator-runbooks -->
 
 # alerts/rules
 
@@ -10,6 +10,16 @@ templates for Mento monitoring.
 - **In this module:** protocol `grafana_rule_group` resources for FPMM pool health, VirtualPool oracle freshness, oracle report quality, oracle relayers, reserve balances, trading modes, trading limits, indexer health, CDP (Liquity v2) markets, metrics-bridge liveness, and policy-versioned peg monitoring, plus Aegis service-health and Aegis testnet-health rule groups. This stack also owns the singleton `grafana_notification_policy`, protocol/Aegis/peg contact points, message templates, mute timings, and protocol folders.
 - **Not in this module:** the Aegis dashboard and the Aegis Grafana folder. Those stay in [`aegis/terraform`](../../aegis/terraform); the relocated rule group references the externally owned Aegis folder UID from `main.tf`.
 - **Folder convention:** one folder per `service` label (`FPMMs`, `Oracles`, `Indexer`, `Metrics Bridge`, `Peg Monitoring`, `Oracle Relayers`, `Reserve`, `Trading Modes`, `Trading Limits`, `CDPs`).
+
+The CDP folder includes the `CDP System Parameters Not Loaded` warning. It
+fires when a joined CDP market row reports an incomplete SystemParams snapshot
+for 10 minutes and the unlabeled
+`mento_cdp_last_successful_poll` marker proves a successful CDP query and full
+publication within 90 seconds. `liquity.systemParams.deadContract` is one
+possible exact diagnostic cause; inspect the indexer logs for the cause. Query
+and update failures keep the prior CDP bundle while the marker ages. Metrics
+Bridge Poll Errors owns `cdp_query` and `cdp_update` failures, the CDP marker
+owns CDP freshness, and the bridge liveness rule owns a full bridge outage.
 
 ## State
 

@@ -50,12 +50,78 @@ describe("updateCdpMetrics", () => {
     register.resetMetrics();
   });
 
+  it("starts with no successful CDP poll", async () => {
+    expect(
+      await getGaugeValue(register, "mento_cdp_last_successful_poll"),
+    ).toBe(0);
+  });
+
+  it("marks both loaded and incomplete rows fresh when publication succeeds", async () => {
+    updateCdpMetrics(
+      [
+        makeCdp(),
+        makeCdp({
+          instance: {
+            id: "42220-0x2222222222222222222222222222222222222222",
+            collateralId: "42220-0x2222222222222222222222222222222222222222",
+          },
+          collateral: {
+            id: "42220-0x2222222222222222222222222222222222222222",
+            symbol: "CHFm",
+            troveManager: "0x2222222222222222222222222222222222222222",
+            systemParamsLoaded: false,
+          },
+        }),
+      ],
+      100,
+    );
+
+    expect(
+      await getGaugeValue(register, "mento_cdp_last_successful_poll"),
+    ).toBe(100);
+    expect(
+      await getGaugeValue(register, "mento_cdp_system_params_loaded", labels),
+    ).toBe(1);
+    expect(
+      (await getMetricValues(register, "mento_cdp_system_params_loaded")).find(
+        (series) => series.labels.symbol === "CHFm",
+      )?.value,
+    ).toBe(0);
+  });
+
   it("sets shutdown 0 when not shut down, 1 when shut down", async () => {
     updateCdpMetrics([makeCdp()]);
     expect(await getGaugeValue(register, "mento_cdp_shutdown", labels)).toBe(0);
 
     updateCdpMetrics([makeCdp({ instance: { isShutDown: true } })]);
     expect(await getGaugeValue(register, "mento_cdp_shutdown", labels)).toBe(1);
+  });
+
+  it("publishes SystemParams readiness as a binary gauge", async () => {
+    updateCdpMetrics([makeCdp()]);
+    expect(
+      await getGaugeValue(register, "mento_cdp_system_params_loaded", labels),
+    ).toBe(1);
+
+    updateCdpMetrics([makeCdp({ collateral: { systemParamsLoaded: false } })]);
+    expect(
+      await getGaugeValue(register, "mento_cdp_system_params_loaded", labels),
+    ).toBe(0);
+  });
+
+  it("keeps SystemParams labels bounded to the existing CDP label set", async () => {
+    updateCdpMetrics([makeCdp()]);
+    const [series] = await getMetricValues(
+      register,
+      "mento_cdp_system_params_loaded",
+    );
+    expect(Object.keys(series.labels).sort()).toEqual([
+      "block_explorer_url",
+      "chain_id",
+      "chain_name",
+      "collateral_id",
+      "symbol",
+    ]);
   });
 
   it("converts token-denominated columns to human units", async () => {
@@ -153,22 +219,28 @@ describe("updateCdpMetrics", () => {
     ).toBeUndefined();
     // Other gauges still publish.
     expect(await getGaugeValue(register, "mento_cdp_shutdown", labels)).toBe(0);
+    expect(
+      await getGaugeValue(register, "mento_cdp_system_params_loaded", labels),
+    ).toBe(0);
   });
 
   it("evicts series for markets that drop out of the response", async () => {
-    updateCdpMetrics([makeCdp()]);
+    updateCdpMetrics([makeCdp()], 100);
     expect((await getMetricValues(register, "mento_cdp_shutdown")).length).toBe(
       1,
     );
-    updateCdpMetrics([]);
+    updateCdpMetrics([], 130);
     expect((await getMetricValues(register, "mento_cdp_shutdown")).length).toBe(
       0,
     );
+    expect(
+      await getGaugeValue(register, "mento_cdp_last_successful_poll"),
+    ).toBe(130);
   });
 
   it("throws on a malformed row BEFORE clearing the registry (no silent all-clear)", async () => {
     // Seed a known-good poll.
-    updateCdpMetrics([makeCdp()]);
+    updateCdpMetrics([makeCdp()], 100);
     expect(await getGaugeValue(register, "mento_cdp_shutdown", labels)).toBe(0);
 
     // A row with an unparsable BigInt must throw during preparation, leaving
@@ -182,6 +254,59 @@ describe("updateCdpMetrics", () => {
     expect(
       await getGaugeValue(register, "mento_cdp_system_debt", labels),
     ).toBeCloseTo(305501.17, 1);
+    expect(
+      await getGaugeValue(register, "mento_cdp_system_params_loaded", labels),
+    ).toBe(1);
+    expect(
+      await getGaugeValue(register, "mento_cdp_last_successful_poll"),
+    ).toBe(100);
+  });
+
+  it("keeps the restart timestamp at zero when the first update is malformed", async () => {
+    expect(() =>
+      updateCdpMetrics(
+        [makeCdp({ instance: { systemDebt: "not-a-number" } })],
+        100,
+      ),
+    ).toThrow();
+    expect(
+      await getGaugeValue(register, "mento_cdp_last_successful_poll"),
+    ).toBe(0);
+  });
+
+  it("retains the last successful publication while a malformed update ages", async () => {
+    updateCdpMetrics(
+      [makeCdp({ collateral: { systemParamsLoaded: false } })],
+      100,
+    );
+    expect(() =>
+      updateCdpMetrics(
+        [makeCdp({ instance: { systemDebt: "not-a-number" } })],
+        130,
+      ),
+    ).toThrow();
+
+    expect(
+      await getGaugeValue(register, "mento_cdp_system_params_loaded", labels),
+    ).toBe(0);
+    expect(
+      await getGaugeValue(register, "mento_cdp_last_successful_poll"),
+    ).toBe(100);
+  });
+
+  it("updates freshness across incomplete-to-loaded recovery", async () => {
+    updateCdpMetrics(
+      [makeCdp({ collateral: { systemParamsLoaded: false } })],
+      100,
+    );
+    updateCdpMetrics([makeCdp()], 160);
+
+    expect(
+      await getGaugeValue(register, "mento_cdp_system_params_loaded", labels),
+    ).toBe(1);
+    expect(
+      await getGaugeValue(register, "mento_cdp_last_successful_poll"),
+    ).toBe(160);
   });
 
   it("carries a TroveManager block-explorer deep link", async () => {

@@ -139,6 +139,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0045](0045-peg-paging-semantics.md)                          | Peg paging measures executable sell price; the deep venue pages alone         |
 | [0048](0048-private-gcs-peg-policy-artifact.md)               | Archived: private GCS artifact with superseded dedicated-project hosting      |
 | [0049](0049-peg-decision-package-read-model.md)               | Peg decisions use a bounded Metrics Bridge read model                         |
+| [0052](0052-envio-logs-prometheus-grafana-alerting.md)        | Envio logs diagnose; Prometheus metrics and Grafana rules alert               |
 | [0054](0054-same-project-peg-policy-artifact.md)              | Peg policy stays private and generation-pinned in the monitoring project      |
 | [0055](0055-peg-policy-bucket-controller-recovery.md)         | Peg bucket IAM reconciliation uses a narrow controller and bounded recovery   |
 | [0057](0057-peg-observation-advancement.md)                   | Repeated provider observations retain bounded health, never sample authority  |
