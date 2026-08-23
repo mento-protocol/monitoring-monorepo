@@ -180,10 +180,12 @@ that nothing holds in place.
   100 raw lines becomes actionable on its own. The 2026-08-23 refresh produced
   the first such row —
   `scripts/sentry/triage/sentry-triage-requeue.mjs` at +117 raw, from the
-  fail-open and race fixes in #1950 and #2003 — and it is filed as
-  [issue 2022](https://github.com/mento-protocol/monitoring-monorepo/issues/2022)
-  rather than left in the table, because the Delta column resets against the next
-  refresh and the signal would decay unread.
+  fail-open and race fixes in #1950 and #2003. The row stays in the table, as
+  every row does; what the breach adds is
+  [issue 2022](https://github.com/mento-protocol/monitoring-monorepo/issues/2022),
+  because the Delta column is measured against whatever the checked-in report
+  last said and resets to 0 on the next refresh. The table keeps the size; the
+  issue keeps the fact that it moved.
 - `scripts/` test files stay outside this report. Twenty-four are over 1,000 raw
   lines, and none of them is in the 20-path list in
   `check-sentry-suites-in-ci.test.mjs` — that list holds nine test files of its
