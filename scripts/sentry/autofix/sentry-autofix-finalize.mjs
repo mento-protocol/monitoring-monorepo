@@ -627,12 +627,13 @@ export function buildPrBody({ shortId, queueIssue }) {
   const parts = [
     PROBLEM_HEADING,
     "",
-    `- A Sentry-triaged code bug (\`${shortId}\`) was verdicted \`code-fix\` for this repo.`,
-    "- The scoped, mechanically-bounded fix is in the diff of this PR.",
+    `- Before this PR, the affected code path could still produce the failure tracked as Sentry issue \`${shortId}\`.`,
+    "- This left the known failure path available to recur in production.",
     "",
     SOLUTION_HEADING,
     "",
-    "- A small code change addresses the triaged root cause. **Review the diff against the linked Sentry issue** — the diff is the authoritative artifact; the agent's working notes are intentionally not reproduced here (untrusted-input policy).",
+    "- This PR changes the affected code path to prevent the tracked failure after required CI and human review.",
+    "- Preventing the same failure path reduces repeat errors. The linked issue and bounded diff contain the available technical detail. The pipeline cannot safely publish its agent notes because they can contain untrusted production data.",
   ];
 
   return `${parts.join("\n")}\n\n${provenanceSection(shortId, issue)}\n`;

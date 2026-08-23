@@ -318,6 +318,49 @@ export const AGENT_MODULE_ARMS = [
     ],
   },
   {
+    why: "The Node mapping engine (ADR 0069) and the harness that drives the parity corpora against it. Since D5b part 2 this IS the routing: the gate builds its plan from the engine and refuses the run if the bash `case` arms disagree by one byte, so a change here changes what every gate run does. The arm therefore carries the gate self-test and the prewarm contract as well as the engine's own unit tests — the suite's 1,229 assertions are assertions about this module's output now. It also runs the three CHEAP parity corpora: `fixture` (2s) covers the branch that skips repository-specific groups, `symlink` (6s) covers the dynamic pattern source no committed path can reach, and `multi` (57s) is where the four whole-set post-passes are exercised. The tracked, synthetic, base and self-test corpora are a 40-minute run and stay a per-PR step. D5c deletes the arms, the in-gate comparison and the harness together (issue 2020).",
+    patterns: [
+      "scripts/gate/mapping.mjs",
+      "scripts/gate/mapping/*.mjs",
+      "scripts/gate/routing-parity.mjs",
+    ],
+    effects: [
+      {
+        command: "node --test scripts/gate/mapping/shell-quote.test.mjs",
+        reason: "gate mapping engine changed",
+      },
+      {
+        command: "node --test scripts/gate/mapping/engine.test.mjs",
+        reason:
+          "gate mapping engine changed (behaviour the arms will stop pinning at D5c)",
+      },
+      {
+        command: "pnpm agent:quality-gate:test",
+        reason:
+          "gate mapping engine produces the stdout the gate suite asserts on",
+      },
+      {
+        command: "node scripts/gate/agent-prewarm.test.mjs",
+        reason: "gate mapping engine produces the stdout agent:prewarm parses",
+      },
+      {
+        command: "node scripts/gate/routing-parity.mjs --corpus fixture",
+        reason:
+          "gate mapping engine changed (parity against the live arms, fixture repository)",
+      },
+      {
+        command: "node scripts/gate/routing-parity.mjs --corpus symlink",
+        reason:
+          "gate mapping engine changed (parity against the live arms, scripts/ symlink source)",
+      },
+      {
+        command: "node scripts/gate/routing-parity.mjs --corpus multi",
+        reason:
+          "gate mapping engine changed (parity against the live arms, whole-set post-passes)",
+      },
+    ],
+  },
+  {
     why: "The bash-from-Node machinery. Its own suite already runs, because check-sentry-suites-in-ci.test.mjs imports it and the coverage arm routes that. What was missing is the OTHER consumer: ADR 0069's routing-table suite drives `runProbeShell`/`probeDirs` for the /bin/bash pattern oracle and `bashFunctionSource` for the implementation-signature pin. A change to the probe environment or to the end-of-function scan changes what both of those prove, and nothing said so.",
     patterns: [
       "scripts/sentry/ci-wiring/check-sentry-suites-in-ci-gate-extract.mjs",

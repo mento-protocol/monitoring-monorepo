@@ -3,7 +3,7 @@ title: The quality gate's routing table is data, compiled by the repo's own bash
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-21
+last_verified: 2026-08-23
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -13,9 +13,12 @@ garden_lane: adrs-architecture
 
 # ADR 0069 — the quality gate's routing table is data, compiled by the repo's own bash-`case` translator
 
-**Status:** Active (Aug 2026). First implementation PR: the D5a step of
+**Status:** Active (Aug 2026). Implemented across three PRs of
 [issue 1877](https://github.com/mento-protocol/monitoring-monorepo/issues/1877)'s
-deferred track.
+deferred D5 track: D5a made the table data, D5b landed the Node mapping engine
+and proved it at parity, and D5b part 2 made it the routing behind an
+in-production parity guard. D5c retires the bash arms after the soak
+([issue 2020](https://github.com/mento-protocol/monitoring-monorepo/issues/2020)).
 
 **Scope:** ci/process
 
@@ -165,6 +168,33 @@ or reorders an arm and does not touch the data. It also runs in the required
 the local pre-push gate is the thing a contributor can bypass, and a table that
 has drifted from the arms fails nowhere at all.
 
+### 4. D5b part 2: the engine becomes the routing, behind a guard that runs in production
+
+The gate no longer builds its plan from the `case` arms. It runs
+`scripts/gate/mapping.mjs` once per run, reads the plan back as the TSV
+`write_command_plan` already emits, and uses that. The arms still execute, and
+the gate **refuses the whole run if the two plans differ by one byte** — every
+record, in order, including the two run-scoped flags the routing sets.
+
+That guard is the point of the split. The parity harness proved agreement over
+a corpus; this proves it over whatever a contributor actually changed, on every
+run, on every machine. It is also what makes the step reversible without a
+revert: a divergence stops the run rather than silently picking a winner, and
+the arms are still sitting there.
+
+Every failure around the seam is a refusal, because the failure mode this whole
+track exists to remove is a plan that came out smaller and still exited 0: a
+mapper that cannot be found, exits non-zero, emits nothing, emits a record the
+gate cannot parse, or names a bucket that does not exist. Measured, each of
+those refuses with exit 2 (evidence below).
+
+**Why the arms stay for a soak rather than going in the same PR.** The engine's
+plan is now hashed into the freshness stamp and executed. The arms cost nothing
+but wall-clock, and while they run, every gate invocation anyone makes is
+another parity sample on a path set nobody thought to put in a corpus. D5c
+deletes the arms, the comparison, and the harness together, once the soak has
+produced no refusal.
+
 ### The new data is a pinned trust surface
 
 Six pins land with the table:
@@ -177,6 +207,8 @@ Six pins land with the table:
    `--skip-if-fresh` reuses a stale stamp and skips real pre-push work
    (`docs/adr/0064-scripts-module-directories.md:273-275`). This is the one that
    must not be forgotten, and `routing-table.test.mjs` asserts it per module.
+   Runtime modules hash from the gate's `$script_source_dir`; suites and the
+   parity harness hash from the target `$repo_root` where their commands run.
 2. Two routing arms and one CI step, so the equality test runs in both drift
    directions: `scripts/gate/routing-table/*.mjs` schedules its suite and —
    because of pin 1 — the gate self-test; the gate's own arm schedules the
@@ -244,6 +276,45 @@ gate is not a trust root.
 
 ## Consequences
 
+- **Routing is Node now, and the pins moved with it.** `implementation_signature()`
+  gained the seven engine modules, the two engine test files and the harness;
+  `turbo.json` gained `scripts/gate/mapping.mjs` and `scripts/gate/mapping/**`
+  at all three sites that already carried the table. A missing entry freezes the
+  stamp, which is the ADR 0064 failure, and it is now load-bearing for code that
+  decides what runs rather than for data nothing consumed.
+- **The soak costs wall-clock; D5c pays it back with interest.** Measured on a
+  representative 24-path change set, dry run: pre-swap 10.2s, post-swap 11.1s
+  (the arms and the engine both run, plus the comparison), and 0.7s with the
+  arms disabled — the D5c projection, measured rather than estimated, by
+  starving the bash loop in a throwaway copy. The bash routing costs ~0.42s per
+  changed path; the engine maps the same 24 paths in 0.12s including Node
+  startup. On a single-path change the difference is noise (0.47s → 0.64s).
+  So the swap is slightly slower today and roughly **14× faster on a 24-path
+  change once D5c lands**.
+- **The dry-run stdout did not move.** Byte-identical before and after on the
+  24-path set and on a workspace-escalating set, after the
+  `__CHANGED_PATHS_FILE__` substitution `write_command_plan` already applies —
+  the only raw difference is the randomized scratch path, which differs between
+  two runs of the _same_ gate. The freshness stamp therefore hashes identically,
+  and the two Node consumers that parse that stdout keep parsing it.
+- **The parity harness survives the swap, and changes job.** The design had it
+  deleted here. It is kept, because after the swap its own comparison is
+  circular — the gate's plan IS the engine's — while its seven corpora are now
+  the only way to drive the _in-gate_ guard across 2,906 path sets in one
+  command. It reports a gate refusal as the difference it is instead of dying on
+  it. It goes at D5c with the arms and the guard, since all three are one
+  mechanism.
+- **The engine's behaviour is pinned by its own tests, not only by the arms.**
+  `scripts/gate/mapping/engine.test.mjs` covers dedupe and first-reason-wins, the
+  alias pairs, prepend, bucket order, the four post-passes including the 15/16
+  scoped-test threshold and every disqualifier, and the root-manifest
+  classifier's four classes. Without it, D5c would delete the only thing pinning
+  those rules in the same commit that removes the arms.
+- **`agent:prewarm` now has an end-to-end contract test.** It parses the gate's
+  dry-run stdout and no-ops silently when the format drifts; the command lines
+  are produced by a different program than the header literals it was pinned
+  against, so the test now runs the real gate and requires a non-empty
+  extraction.
 - **`scripts/gate/routing-table/` is a new pinned surface.** Every `scripts/`
   move must now update the data as well as the arms, and ADR 0064's sweep
   checklist gains it. A missing `implementation_signature()` entry freezes the
@@ -306,7 +377,11 @@ gate is not a trust root.
   — 13 top-level `case` statements, 53 counting nested, 232 arms, 478 distinct
   patterns of which 362 are glob-free, 29 verbs.
 - Paired-arm rationale, verbatim in the source: `agent-quality-gate.sh:3802-3834`.
-- `implementation_signature()`: `agent-quality-gate.sh:4667`.
+- `implementation_signature()`: `agent-quality-gate.sh:4923`, measured at D5b
+  part 2. The list grew there — seven engine modules, two engine test files and
+  the parity harness — which is why the line moved from `4667`. Both suites
+  locate the function by NAME rather than by line, so this citation is a reading
+  aid and not a pin.
 - Routing consumers: `scripts/gate/agent-prewarm.mjs:37`;
   `scripts/production-infra-identity-contract/routing.test.mjs:127`.
 - Bash-from-Node machinery reused by the oracle:

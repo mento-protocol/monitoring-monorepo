@@ -260,13 +260,19 @@ heading lines:
 ```
 
 - Maximum three bullets.
-- Explain the user/operator/reviewer problem in plain English.
+- Explain what the system did before, what failed or became difficult, and the
+  concrete effect on users or operators.
+- Use visible Markdown prose or bullets. Raw HTML other than comments,
+  paragraphs that contain it, and code blocks do not count as an explanation.
 
 ```markdown
 ## The Solution
 ```
 
-- Explain in simple terms how the PR solves that problem.
+- Explain what the system does after the PR, why that behavior improves the
+  situation, and any material limit or non-goal.
+- Use visible Markdown prose or bullets. Raw HTML other than comments,
+  paragraphs that contain it, and code blocks do not count as an explanation.
 
 Then include these deeper sections:
 

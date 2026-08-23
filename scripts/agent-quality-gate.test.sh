@@ -305,7 +305,9 @@ turbo_filter_line_number() {
 
 normalize_expected_command() {
   local expected="$1"
+  local match
   local package_name
+  local replacement
   local task_name
 
   case "$expected" in
@@ -316,12 +318,16 @@ normalize_expected_command() {
       expected="${expected/pnpm dashboard:size-limit/VERCEL_DEPLOYMENT_ID=local-quality-gate pnpm exec turbo run size-limit --filter=@mento-protocol/ui-dashboard --cache=local:rw}"
       ;;
     *"bash ui-dashboard/scripts/check-react-doctor-score.sh"*)
-      expected="${expected/bash ui-dashboard\/scripts\/check-react-doctor-score.sh/pnpm exec turbo run react-doctor:score --filter=@mento-protocol\/ui-dashboard --cache=local:rw}"
+      match="bash ui-dashboard/scripts/check-react-doctor-score.sh"
+      replacement="pnpm exec turbo run react-doctor:score --filter=@mento-protocol/ui-dashboard --cache=local:rw"
+      expected="${expected/$match/$replacement}"
       ;;
     *"bash ui-dashboard/scripts/check-react-doctor-diff.sh "*)
       local base_ref="${expected#*bash ui-dashboard/scripts/check-react-doctor-diff.sh }"
       base_ref="${base_ref%% *}"
-      expected="${expected/bash ui-dashboard\/scripts\/check-react-doctor-diff.sh ${base_ref}/REACT_DOCTOR_BASE_REF=${base_ref} REACT_DOCTOR_BASE_CACHE_KEY=__unresolved__:${base_ref} pnpm exec turbo run react-doctor:diff --filter=@mento-protocol\/ui-dashboard --cache=local:rw}"
+      match="bash ui-dashboard/scripts/check-react-doctor-diff.sh ${base_ref}"
+      replacement="REACT_DOCTOR_BASE_REF=${base_ref} REACT_DOCTOR_BASE_CACHE_KEY=__unresolved__:${base_ref} pnpm exec turbo run react-doctor:diff --filter=@mento-protocol/ui-dashboard --cache=local:rw"
+      expected="${expected/$match/$replacement}"
       ;;
     *"pnpm --filter @mento-protocol/"*" lint"*|*"pnpm --filter @mento-protocol/"*" typecheck"*|*"pnpm --filter @mento-protocol/"*" test"*|*"pnpm --filter @mento-protocol/"*" knip"*)
       package_name="${expected#*pnpm --filter }"
@@ -2103,6 +2109,52 @@ assert_contains "error: lockfile scope classifier could not be loaded from"
 assert_not_contains "lockfile change scoped to importers"
 assert_not_contains "- cd aegis && forge test (workspace dependency/config changed)"
 
+# The mapping engine is the routing now (ADR 0069, D5b part 2), so a gate that
+# cannot find it must refuse rather than fall back to the bash arms it still
+# carries. That fallback is the tempting bug: the arms are RIGHT THERE, and
+# using them would look like resilience while quietly returning the gate to a
+# routing path nothing checks any more.
+#
+# Same mirror trick as the classifier case above, one level deeper: every
+# scripts/ entry is symlinked, and `gate` is rebuilt as a real directory whose
+# contents are symlinks minus mapping.mjs.
+mapper_missing_dir="$(mktemp -d)"
+for mapper_sibling in "$repo_root"/scripts/*; do
+  mapper_sibling_name="$(basename "$mapper_sibling")"
+  if [[ "$mapper_sibling_name" != "gate" ]]; then
+    ln -s "$mapper_sibling" "$mapper_missing_dir/$mapper_sibling_name"
+  fi
+done
+mkdir -p "$mapper_missing_dir/gate"
+for mapper_gate_entry in "$repo_root"/scripts/gate/*; do
+  mapper_gate_entry_name="$(basename "$mapper_gate_entry")"
+  if [[ "$mapper_gate_entry_name" != "mapping.mjs" && "$mapper_gate_entry_name" != "run-handles.sh" ]]; then
+    ln -s "$mapper_gate_entry" "$mapper_missing_dir/gate/$mapper_gate_entry_name"
+  fi
+done
+cp "$repo_root/scripts/gate/run-handles.sh" "$mapper_missing_dir/gate/run-handles.sh"
+mapper_missing_repo="$(mktemp -d)"
+(
+  cd "$mapper_missing_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  printf '{ "name": "fixture" }\n' > package.json
+  git add package.json
+  git commit -qm init
+  printf 'export const changed = 1;\n' > changed.mjs
+  set +e
+  bash "$mapper_missing_dir/agent-quality-gate.sh" --base HEAD > "$output_file" 2>&1
+  printf '%s\n' "$?" > exit-code
+  set -e
+)
+mapper_missing_exit="$(cat "$mapper_missing_repo/exit-code")"
+rm -rf "$mapper_missing_dir" "$mapper_missing_repo"
+[[ "$mapper_missing_exit" -eq 2 ]] ||
+  fail "missing gate mapping engine exited $mapper_missing_exit instead of 2"
+assert_contains "error: gate mapping engine could not be loaded from"
+assert_not_contains "Mapped safe local commands:"
+
 run_gate "indexer-envio/package.json"
 assert_contains "- docs/pr-checklists/stateful-data-ui.md (indexer data flow changed)"
 assert_occurrences 1 "- pnpm install --frozen-lockfile (link generated package after indexer codegen)"
@@ -3882,11 +3934,19 @@ if [[ -f "$counter_file" ]]; then
 fi
 printf '%s\n' "$((count + 1))" > "$counter_file"
 STUB
+  # The stub exists to make the MAPPED commands free, not to break the gate's
+  # own Node helpers. Those are the `--input-type=module` heredocs and, since
+  # D5b part 2, the mapping engine the gate runs to build its plan at all — a
+  # stubbed-out mapper produces an empty plan and the gate refuses the run,
+  # which is the guard working, not the fixture.
   cat > bin/node <<'STUB'
 #!/usr/bin/env bash
 if [[ "${1:-}" == "--input-type=module" ]]; then
   exec "${REAL_NODE:?}" "$@"
 fi
+case "${1:-}" in
+  *"/scripts/gate/mapping.mjs") exec "${REAL_NODE:?}" "$@" ;;
+esac
 exit 0
 STUB
   cat > bin/pnpm <<'STUB'
@@ -4155,11 +4215,20 @@ signature_stamp_repo="$(mktemp -d)"
 signature_runtime_root="$gate_cache_dir/signature-runtime-source"
 mkdir -p \
   "$signature_runtime_root/scripts/docs" \
-  "$signature_runtime_root/scripts/gate"
+  "$signature_runtime_root/scripts/gate/mapping" \
+  "$signature_runtime_root/scripts/gate/routing-table"
 cp "$repo_root/scripts/agent-quality-gate.sh" \
   "$signature_runtime_root/scripts/agent-quality-gate.sh"
 cp "$repo_root/scripts/gate/run-handles.sh" \
   "$signature_runtime_root/scripts/gate/run-handles.sh"
+cp "$repo_root/scripts/gate/mapping.mjs" \
+  "$signature_runtime_root/scripts/gate/mapping.mjs"
+cp "$repo_root"/scripts/gate/mapping/*.mjs \
+  "$signature_runtime_root/scripts/gate/mapping/"
+cp "$repo_root/scripts/gate/routing-parity.mjs" \
+  "$signature_runtime_root/scripts/gate/routing-parity.mjs"
+cp "$repo_root"/scripts/gate/routing-table/*.mjs \
+  "$signature_runtime_root/scripts/gate/routing-table/"
 printf 'export function isRoutingSensitivePath() { return false; }\n' \
   > "$signature_runtime_root/scripts/docs/docs-navigation-eval-helpers.mjs"
 printf '#!/usr/bin/env node\nprocess.exit(1);\n' \
@@ -4171,7 +4240,12 @@ chmod +x "$signature_runtime_root/scripts/agent-quality-gate.sh"
   git init -q
   git config user.email test@example.invalid
   git config user.name "Quality Gate Test"
-  mkdir -p scripts/docs scripts/gate scripts/terraform tools
+  mkdir -p \
+    scripts/docs \
+    scripts/gate/mapping \
+    scripts/gate/routing-table \
+    scripts/terraform \
+    tools
   printf 'fixture\n' > fixture.txt
   printf 'second fixture\n' > second.txt
   printf '# fixture gate implementation\n' > scripts/agent-quality-gate.sh
@@ -4179,6 +4253,12 @@ chmod +x "$signature_runtime_root/scripts/agent-quality-gate.sh"
   printf '# fixture routing classifier\n' > scripts/docs/docs-navigation-eval-helpers.mjs
   printf '# fixture lockfile scope classifier\n' > scripts/gate/lockfile-scope.mjs
   printf '# fixture run-handle helper\n' > scripts/gate/run-handles.sh
+  printf '// fixture mapper entry\n' > scripts/gate/mapping.mjs
+  printf '// fixture mapper runtime module\n' > scripts/gate/mapping/facts.mjs
+  printf '// fixture mapper suite\n' > scripts/gate/mapping/engine.test.mjs
+  printf '// fixture parity harness\n' > scripts/gate/routing-parity.mjs
+  printf '// fixture routing-table runtime module\n' > scripts/gate/routing-table/index.mjs
+  printf '// fixture routing-table suite\n' > scripts/gate/routing-table/routing-table.test.mjs
   printf '# fixture terraform format checker\n' > scripts/terraform/terraform-fmt-check.mjs
   printf '# fixture terraform format checker suite\n' > scripts/terraform/terraform-fmt-check.test.mjs
   cat > tools/trunk <<'STUB'
@@ -4199,6 +4279,16 @@ STUB
   printf 'changed\n' >> fixture.txt
   printf 'fixture.txt\n' > changed-paths-one.txt
   printf 'fixture.txt\nsecond.txt\n' > changed-paths-two.txt
+
+  run_signature_gate_again() {
+    COUNTER_FILE="$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
+      "$signature_gate" \
+        --changed-paths-file changed-paths-two.txt \
+        --base "$base_two" \
+        --run \
+        --skip-if-fresh \
+        > "$output_file" 2>&1
+  }
 
   COUNTER_FILE="$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
     "$signature_gate" \
@@ -4249,6 +4339,68 @@ STUB
   [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "5" ]] ||
     fail "fresh gate stamp was reused after the routing classifier changed"
 
+  # The mapper and routing-table runtime load from this gate's source tree.
+  # Placeholders in the repository under test must not affect the signature;
+  # changing the loaded copies must invalidate it.
+  printf '// changed fixture mapper placeholders\n' >> scripts/gate/mapping.mjs
+  printf '// changed fixture mapper module placeholder\n' >> scripts/gate/mapping/facts.mjs
+  run_signature_gate_again
+  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "5" ]] ||
+    fail "non-runtime mapper placeholders invalidated the fresh stamp"
+
+  printf '// changed runtime mapper entry\n' \
+    >> "$signature_runtime_root/scripts/gate/mapping.mjs"
+  printf '// changed runtime mapper module\n' \
+    >> "$signature_runtime_root/scripts/gate/mapping/facts.mjs"
+  run_signature_gate_again
+  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "6" ]] ||
+    fail "fresh gate stamp was reused after the loaded mapper changed"
+
+  printf '// changed fixture routing-table placeholder\n' \
+    >> scripts/gate/routing-table/index.mjs
+  run_signature_gate_again
+  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "6" ]] ||
+    fail "a non-runtime routing-table placeholder invalidated the fresh stamp"
+
+  printf '// changed runtime routing-table module\n' \
+    >> "$signature_runtime_root/scripts/gate/routing-table/index.mjs"
+  run_signature_gate_again
+  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "7" ]] ||
+    fail "fresh gate stamp was reused after the loaded routing table changed"
+
+  # Suites and the parity harness are mapped target-tree commands, not modules
+  # loaded by the mapper. Their source-tree copies must stay outside the pin.
+  printf '// changed source mapper suite copy\n' \
+    >> "$signature_runtime_root/scripts/gate/mapping/engine.test.mjs"
+  run_signature_gate_again
+  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "7" ]] ||
+    fail "a non-runtime source mapper suite invalidated the fresh stamp"
+  printf '// changed fixture mapper suite\n' >> scripts/gate/mapping/engine.test.mjs
+  run_signature_gate_again
+  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "8" ]] ||
+    fail "fresh gate stamp was reused after the target mapper suite changed"
+
+  printf '// changed source routing-table suite copy\n' \
+    >> "$signature_runtime_root/scripts/gate/routing-table/routing-table.test.mjs"
+  run_signature_gate_again
+  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "8" ]] ||
+    fail "a non-runtime source routing-table suite invalidated the fresh stamp"
+  printf '// changed fixture routing-table suite\n' \
+    >> scripts/gate/routing-table/routing-table.test.mjs
+  run_signature_gate_again
+  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "9" ]] ||
+    fail "fresh gate stamp was reused after the target routing-table suite changed"
+
+  printf '// changed source parity harness copy\n' \
+    >> "$signature_runtime_root/scripts/gate/routing-parity.mjs"
+  run_signature_gate_again
+  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "9" ]] ||
+    fail "a non-runtime source parity harness invalidated the fresh stamp"
+  printf '// changed fixture parity harness\n' >> scripts/gate/routing-parity.mjs
+  run_signature_gate_again
+  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "10" ]] ||
+    fail "fresh gate stamp was reused after the target parity harness changed"
+
   # The signature has two path roots. Runtime modules come from the gate's own
   # checkout, while commands and configuration come from the repository under
   # test. The runtime gate and routing checks above cover the first root. These
@@ -4261,7 +4413,7 @@ STUB
       --run \
       --skip-if-fresh \
       > "$output_file" 2>&1
-  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "6" ]] ||
+  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "11" ]] ||
     fail "fresh gate stamp was reused after the Terraform format checker changed"
 
   printf '# changed fixture terraform format checker suite\n' >> scripts/terraform/terraform-fmt-check.test.mjs
@@ -4272,7 +4424,7 @@ STUB
       --run \
       --skip-if-fresh \
       > "$output_file" 2>&1
-  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "7" ]] ||
+  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "12" ]] ||
     fail "fresh gate stamp was reused after the Terraform format checker suite changed"
 
   # GitHub issue #1905: the lockfile scope classifier is a gate runtime pin, so
@@ -4288,7 +4440,7 @@ STUB
       --run \
       --skip-if-fresh \
       > "$output_file" 2>&1
-  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "8" ]] ||
+  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "13" ]] ||
     fail "fresh gate stamp was reused after the lockfile scope classifier changed"
 
   # A placeholder in the repository under test is not the helper this gate
@@ -4301,7 +4453,7 @@ STUB
       --run \
       --skip-if-fresh \
       > "$output_file" 2>&1
-  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "8" ]] ||
+  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "13" ]] ||
     fail "a non-runtime run-handle placeholder invalidated the fresh stamp"
 
   printf '# changed runtime run-handle helper\n' \
@@ -4313,7 +4465,7 @@ STUB
       --run \
       --skip-if-fresh \
       > "$output_file" 2>&1
-  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "9" ]] ||
+  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "14" ]] ||
     fail "fresh gate stamp was reused after the loaded run-handle helper changed"
 
   # P12 renamed the pinned alias registry from .sh to .mjs. Left stale, the
@@ -4328,7 +4480,7 @@ STUB
       --run \
       --skip-if-fresh \
       > "$output_file" 2>&1
-  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "10" ]] ||
+  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "15" ]] ||
     fail "fresh gate stamp was reused after the pinned alias registry changed"
 )
 rm -rf "$signature_stamp_repo" "$signature_runtime_root"
