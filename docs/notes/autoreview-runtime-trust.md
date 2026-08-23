@@ -190,14 +190,18 @@ linked-library closure is entirely system-only.
 
 ### The hard-linked engine binary, and why the fix stays manual
 
-A semantic-engine executable with more than one hard link is refused, and both
-routes require it: direct execution needs `nlink === 1` or root ownership, and
-the Darwin snapshot fallback requires `nlink === 1` outright
-(`agent-autoreview.mjs:1093,1124`). The rule is doing real work. The wrapper's
-guarantee is that the inode it validated is reachable only through the directory
-ancestry it inspected; a second link is a second name in a directory it never
-looked at, so the ancestry proof does not cover the file. Root ownership
-substitutes for that proof, which is why the `uid === 0` branch exists.
+A semantic-engine executable with more than one hard link is refused unless root
+owns it. The two routes differ: direct execution accepts `nlink === 1` **or**
+`uid === 0`, while the Darwin snapshot fallback requires `nlink === 1` whoever
+owns it (`agent-autoreview.mjs:1093,1124`). An engine installed by a user — which
+is every case below — therefore needs a single link.
+
+The rule is doing real work. The wrapper's guarantee is that the inode it
+validated is reachable only through the directory ancestry it inspected; a second
+link is a second name in a directory it never looked at, so the ancestry proof
+does not cover the file. Root ownership substitutes for that proof, which is why
+the `uid === 0` branch exists and why it does not extend to the snapshot path,
+where the bytes are copied rather than executed in place.
 
 This is reachable in ordinary use, not just in theory. Claude Code's own
 auto-updater has left `~/.local/share/claude/versions/<version>` with
