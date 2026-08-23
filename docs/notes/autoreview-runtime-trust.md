@@ -248,8 +248,8 @@ engine="$HOME/.local/share/claude/versions/VERSION"   # VERSION from step 1
 
 engine_links() {  # `-f` is a FORMAT on BSD and --file-system on GNU
   case "$(uname -s)" in
-    Darwin | *BSD*) stat -L -f '%l' "$1" ;;
-    *) stat -L -c '%h' "$1" ;;
+    Darwin | *BSD* | DragonFly) stat -L -f '%l' "$1" ;;  # BSD family
+    *) stat -L -c '%h' "$1" ;;                           # assume GNU
   esac
 }
 echo "$engine has $(engine_links "$engine") link(s)"
