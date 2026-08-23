@@ -184,6 +184,7 @@ export const SCRIPT_ARMS = [
             patterns: [
               "scripts/agent-quality-gate.sh",
               "scripts/agent-quality-gate.test.sh",
+              "scripts/gate/run-handles.sh",
             ],
             effects: [
               {

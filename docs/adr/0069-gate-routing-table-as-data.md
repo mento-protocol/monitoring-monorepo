@@ -3,7 +3,7 @@ title: The quality gate's routing table is data, compiled by the repo's own bash
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-22
+last_verified: 2026-08-23
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -207,6 +207,8 @@ Six pins land with the table:
    `--skip-if-fresh` reuses a stale stamp and skips real pre-push work
    (`docs/adr/0064-scripts-module-directories.md:273-275`). This is the one that
    must not be forgotten, and `routing-table.test.mjs` asserts it per module.
+   Runtime modules hash from the gate's `$script_source_dir`; suites and the
+   parity harness hash from the target `$repo_root` where their commands run.
 2. Two routing arms and one CI step, so the equality test runs in both drift
    directions: `scripts/gate/routing-table/*.mjs` schedules its suite and —
    because of pin 1 — the gate self-test; the gate's own arm schedules the

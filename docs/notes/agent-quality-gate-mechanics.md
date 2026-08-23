@@ -203,6 +203,9 @@ node "$script_source_dir/gate/mapping.mjs" \
 other gate helper is, so a fixture run finds the real one. `--real-tree` is the
 gate's own `[[ "$script_source_dir" == "$repo_root/scripts" ]]` test, which
 fences the four repository-specific effects away from fixture repositories.
+The freshness signature follows the same root: mapper and routing-table runtime
+modules hash from `$script_source_dir`. Their suites and the parity harness hash
+from `$repo_root` because the gate runs them as mapped target-tree commands.
 
 The engine answers on stdout in the TSV shape `write_command_plan` already
 emits, in this order and no other — the gate prints and the freshness stamp
@@ -254,7 +257,7 @@ node scripts/gate/routing-parity.mjs                    # every tracked path, ~2
 without the arms there is nothing to compare, and the harness's own diff becomes
 circular. What stays is the parser that reads the mapper's records — that is how
 the plan arrives — the `implementation_signature()` pins, and the engine's own
-suites. Measured, that is about 2,644 raw lines out of 6,163.
+suites. Measured, that removes about 2,644 raw lines.
 
 ### Scheduling contract (Refs #1802)
 
@@ -295,6 +298,16 @@ run, a `--skip-if-fresh` cache hit, and a package-script refusal all exit
 before it. After waiting, a `--skip-if-fresh` run re-checks freshness, so the
 pre-push hook that queued behind a manual warm-up run reuses that run's stamp
 instead of repeating its work.
+
+The current-run handles live in `scripts/gate/run-handles.sh`. The gate sources
+that module from its own `$script_source_dir` before it changes directory, and
+fails closed if the path is missing, unreadable, a symlink, or not a regular
+file. The module provides run-token validation and pattern helpers, owns the
+marker-path state and test-ready barrier, and provides tagged-process
+discovery. Its path is included in `implementation_signature()`
+and changes to it route the gate self-test. The ready/release barrier is test
+only; it requires `NODE_ENV=test` and both lock-test paths, and normal runs do
+not enter it.
 
 The invariant the lock keeps is: **at every instant at most one process
 believes it holds it, and no waiter ever removes or renames another run's
@@ -396,7 +409,7 @@ rediscovered one at a time.
 | taken record dropped because `ln` could not put it back | same                                         | same: the token is published under `condemned.d/` before the copy goes                                                     |
 | taken record deleted after a confirmed-stale verdict    | same                                         | `record_condemned_run` runs immediately before it, inside the election                                                     |
 | `condemned.d/<token>` removed                           | that run's commands                          | removed only after its drain confirmed those processes gone; a drain that cannot confirm exits instead                     |
-| `captured.<token>` removed after a drain                | that run's process tree                      | removed only once every captured PID is gone or is somebody else now                                                       |
+| `captured.<token>` removed after a drain                | that run's process tree                      | removed only once every captured PID is gone, is a confirmed zombie with the same identity, or is somebody else now        |
 | `captured.<token>` removed when nothing was captured    | nothing                                      | reached only when the persisted file and the tag scan are both empty, so there is nothing to hand on                       |
 | lock directory removed at release                       | this run's own commands                      | the exit trap tears down its commands before release, and release only deletes a record that still names this run          |
 | private staged/claim files removed                      | nothing                                      | never published; no other process reads or expects them                                                                    |
@@ -561,9 +574,12 @@ of them.
    the tag comes back empty, and "no tagged process" reads as "nothing
    running". So the drain walks each tagged wrapper's tree first, recording
    every PID with its pinned start string, and then judges itself finished
-   only when every process in that captured set is gone. A PID that still
-   exists but no longer matches its recorded start time was reused by someone
-   else; it is left alone and named in the output rather than signalled. The
+   only when every process in that captured set is gone or cannot execute. A
+   confirmed `Z` state with the same PID and start time is already dead, so a
+   non-reaping PID 1 cannot hold the drain to its bound. An unreadable state
+   remains live and fails closed. A PID that still exists but no longer matches
+   its recorded start time was reused by someone else; it is left alone and
+   named in the output rather than signalled. The
    walk repeats on every pass of the drain and stops recording a PID once it
    has been seen, so the census converges instead of freezing: a command whose
    `TERM` handler forks a replacement produces a child that did not exist when

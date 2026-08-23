@@ -3,7 +3,7 @@ title: Scripts Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-20
+last_verified: 2026-08-23
 doc_type: agent-instructions
 scope: scripts
 review_interval_days: 90
@@ -12,12 +12,12 @@ garden_lane: agent-entry-points
 
 # AGENTS.md — Scripts
 
-> **Architecture decisions** behind these scripts live in [`docs/adr/`](../docs/adr/README.md) — read the relevant ADR before changing how something here works.
+Read the relevant [ADR](../docs/adr/README.md) before changing script behavior.
 
 ## Scope
 
 `scripts/` holds deploy wrappers, agent quality gates, code-health checks, and
-repo maintenance utilities.
+maintenance utilities.
 
 ## Layout
 
@@ -40,10 +40,10 @@ subdirectories.
 | `gate/`         | gate routing engine + helpers          |
 | `sentry/`       | triage/autofix/gate/broker/ci-wiring   |
 
-`lib/` and `production-infra-identity-contract/` predate the reorganization. `setup.sh`
-stays flat: `.config/wt.toml` runs that exact path as the Worktrunk pre-start
-hook, and eight docs name it. `redrive-onchain-deadletter.{mjs,test.mjs}` stays
-flat although `alerts/infra/` owns it; ADR 0064 has the lint reason.
+`lib/` and `production-infra-identity-contract/` predate the reorganization.
+`setup.sh` stays flat because `.config/wt.toml` uses its exact Worktrunk
+pre-start path and eight docs name it. `redrive-onchain-deadletter.{mjs,test.mjs}`
+stays flat under `alerts/infra/` ownership; ADR 0064 gives the lint reason.
 
 `lib/` holds cores more than one cluster reads. `hcl.mjs` (Terraform HCL
 tokenizer and block extraction), `workflow-yaml.mjs` (Actions workflow and
@@ -71,14 +71,16 @@ same PR, except the `agent-autoreview.sh` feedback-runtime pins below.
   `sentry/autofix/sentry-autofix-refused-inventory.mjs` alone to
   `pnpm sentry:autofix:run-record:test` and
   `pnpm sentry:autofix:finalize:test`.
-- **Gate runtime module pins.** `agent-quality-gate.sh` pins
+- **Gate runtime module pins.** Before `cd`, `agent-quality-gate.sh` loads
+  `$script_source_dir/gate/run-handles.sh`; move it with its signature, self-test
+  route, and missing-helper fixture. It also pins
   `docs/docs-navigation-eval-helpers.mjs` and `gate/lockfile-scope.mjs` to
-  `$script_source_dir` in three literals, not stub `$repo_root`. Repoint all
-  three (ADR 0064).
+  `$script_source_dir` in three literals; update every pin (ADR 0064).
 - **Gate routing and mapping pins.** Every `gate/routing-table/*.mjs` and
-  `gate/mapping*.mjs` is an `implementation_signature()` and `turbo.json` entry;
-  `gate/routing-parity.mjs` is signature-only (a mapped command, not a Turbo
-  input). A missing pin freezes the stamp for routing code
+  `gate/mapping*.mjs` appears in `implementation_signature()` and `turbo.json`;
+  `gate/routing-parity.mjs` is signature-only, not a Turbo input. Runtime hashes
+  use `$script_source_dir`; test and parity hashes use `$repo_root`. A missing
+  pin freezes the stamp for routing code
   ([ADR 0069](../docs/adr/0069-gate-routing-table-as-data.md)).
 - **Evaluation fixture forbidden lists.** `forbidden_sources` in
   `docs/evals/documentation-navigation-fixtures.json` names the navigation
@@ -107,25 +109,23 @@ same PR, except the `agent-autoreview.sh` feedback-runtime pins below.
 - **Production infrastructure contract pins.**
   `production-infra-identity-contract/workflow-inventory.mjs` pins exact script
   paths for the workflows it audits.
-- **External console pins.** The Codex Cloud environment console holds
-  `bootstrap/codex-cloud-setup.sh` and `bootstrap/codex-cloud-maintenance.sh`;
-  Claude Code on the web resolves `bootstrap/claude-code-web-setup.sh` through
-  `.claude/hooks/session-start.sh`. No repo grep reaches the console: moving
-  either needs an operator edit there.
-- **Reviewed-artifact byte pins.** `.gitattributes` pins
-  `scripts/mcp/upstash-mcp-launcher.mjs` to `text eol=lf`, and
-  `UPSTASH_MCP_LAUNCHER_SHA256` in `scripts/mcp/render-upstash-mcp-config.mjs`
-  hashes it — a move's depth fix alone changes both. Procedure:
+- **External console pins.** The Codex Cloud console holds
+  `bootstrap/codex-cloud-setup.sh` and
+  `bootstrap/codex-cloud-maintenance.sh`; Claude Code web resolves
+  `bootstrap/claude-code-web-setup.sh` through `.claude/hooks/session-start.sh`.
+  A move needs an operator edit because repo grep cannot reach that console.
+- **Reviewed-artifact byte pins.** `.gitattributes` pins the Upstash launcher
+  EOL and `UPSTASH_MCP_LAUNCHER_SHA256` hashes it. A move changes both. See
   [`docs/notes/upstash-mcp-operator.md`](../docs/notes/upstash-mcp-operator.md).
 
-**Any new pin of a `scripts/` path must be listed here.** An unrecorded pin
-breaks silently on the next move.
+**List each new `scripts/` path pin here.** An unrecorded pin breaks silently on
+the next move.
 
 ## Sweep Checklist for a Move
 
-Work the eleven-surface checklist in
-[ADR 0064](../docs/adr/0064-scripts-module-directories.md#sweep-checklist-for-a-move)
-in the PR that moves a file. Every surface there is mandatory.
+Apply every item in
+[ADR 0064's eleven-surface move checklist](../docs/adr/0064-scripts-module-directories.md#sweep-checklist-for-a-move)
+in the same PR.
 
 ## Operating Rules
 

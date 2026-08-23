@@ -773,7 +773,13 @@ const SIGNATURE_ENTRIES = (() => {
     "implementation_signature",
     "scripts/agent-quality-gate.sh",
   );
+  const listEnd = source.indexOf("; do");
+  assert.ok(
+    listEnd > 0,
+    "implementation_signature() has no bounded for-path list",
+  );
   const entries = source
+    .slice(0, listEnd)
     .split(/\s+/)
     .filter((word) => word.startsWith("scripts/") || word.endsWith(".json"));
   // Sanity: if the span parsed wrongly every assertion below is vacuous.
