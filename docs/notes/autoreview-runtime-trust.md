@@ -193,8 +193,11 @@ linked-library closure is entirely system-only.
 A semantic-engine executable with more than one hard link is refused unless root
 owns it. The two routes differ: direct execution accepts `nlink === 1` **or**
 `uid === 0`, while the Darwin snapshot fallback requires `nlink === 1` whoever
-owns it (`agent-autoreview.mjs:1093,1124`). An engine installed by a user — which
-is every case below — therefore needs a single link.
+owns it. Both live in `trustedExecutableCandidate` in `agent-autoreview.mjs` —
+its `directExecutionSafe` test and the snapshot guard just below, at `:1093` and
+`:1124` measured on `2e3df696`, in a file that grew 219 lines in the two days
+before this note. Follow the function name, not the numbers. An engine installed
+by a user — which is every case below — therefore needs a single link.
 
 The rule is doing real work. The wrapper's guarantee is that the inode it
 validated is reachable only through the directory ancestry it inspected; a second
