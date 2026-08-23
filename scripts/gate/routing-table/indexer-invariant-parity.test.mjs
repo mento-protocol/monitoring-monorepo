@@ -24,6 +24,16 @@ import { casePatternToRegExp } from "./pattern.mjs";
 
 const REPO = fileURLToPath(new URL("../../..", import.meta.url));
 const read = (relative) => readFileSync(`${REPO}${relative}`, "utf8");
+const INDEXER_MODULE_EXTENSIONS = [
+  "ts",
+  "tsx",
+  "mts",
+  "cts",
+  "js",
+  "jsx",
+  "mjs",
+  "cjs",
+];
 
 function walkFiles(directory) {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -34,27 +44,27 @@ function walkFiles(directory) {
   });
 }
 
-const walkIndexerTypeScriptFiles = (directory) =>
+const walkIndexerModuleFiles = (directory) =>
   walkFiles(directory).filter((candidatePath) =>
-    /\.(?:ts|tsx|mts|cts)$/.test(candidatePath),
+    /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/.test(candidatePath),
   );
 
-const focusedRootIndexerConfigs = readdirSync(`${REPO}/indexer-envio`, {
+const focusedRootIndexerEntries = readdirSync(`${REPO}/indexer-envio`, {
   withFileTypes: true,
 })
-  .filter(
-    (entry) =>
-      (entry.isFile() || entry.isSymbolicLink()) &&
-      /^config.*\.yaml$/.test(entry.name),
-  )
+  .filter((entry) => entry.isFile() || entry.isSymbolicLink())
   .map((entry) => `indexer-envio/${entry.name}`)
   .sort();
+const focusedRootIndexerConfigs = focusedRootIndexerEntries.filter(
+  (candidatePath) => /^indexer-envio\/config[^/]*\.yaml$/.test(candidatePath),
+);
+const focusedRootIndexerVitestInputs = focusedRootIndexerEntries.filter(
+  (candidatePath) => /^indexer-envio\/vitest[^/]*$/.test(candidatePath),
+);
 
 const focusedNonConfigRootIndexerInputs = [
   "indexer-envio/schema.graphql",
-  "indexer-envio/vitest.config.ts",
-  "indexer-envio/vitest.fail-closed.config.ts",
-  "indexer-envio/vitest.hermetic-setup.ts",
+  ...focusedRootIndexerVitestInputs,
 ];
 
 const focusedRootIndexerInputs = [
@@ -67,6 +77,10 @@ const ownedRootIndexerConfigs = getIndexerHandlerInvariantRoutingFamilies()
   .filter((candidatePath) =>
     /^indexer-envio\/config[^/]*\.yaml$/.test(candidatePath),
   )
+  .sort();
+const ownedRootIndexerVitestInputs = getIndexerHandlerInvariantRoutingFamilies()
+  .flatMap(({ exact = [] }) => exact)
+  .filter((candidatePath) => /^indexer-envio\/vitest[^/]*$/.test(candidatePath))
   .sort();
 
 const indexerPackageArm = PACKAGE_ARMS.find(
@@ -145,12 +159,12 @@ test("the core-source arm preserves the checklist across classifier version skew
   );
 });
 
-test("the table and core agree on every current indexer TypeScript path", () => {
+test("the table and core agree on every current indexer module path", () => {
   const paths = [
-    ...walkIndexerTypeScriptFiles(`${REPO}/indexer-envio/src`),
-    ...walkIndexerTypeScriptFiles(`${REPO}/indexer-envio/test`),
+    ...walkIndexerModuleFiles(`${REPO}/indexer-envio/src`),
+    ...walkIndexerModuleFiles(`${REPO}/indexer-envio/test`),
   ].sort();
-  assert.equal(paths.length, 220, "current TypeScript inventory changed");
+  assert.equal(paths.length, 220, "current module inventory changed");
   const decisions = getIndexerHandlerInvariantChecklistDecisions(paths);
   for (const decision of decisions) {
     assert.equal(
@@ -160,7 +174,7 @@ test("the table and core agree on every current indexer TypeScript path", () => 
     );
     assert.notEqual(
       decision.owner,
-      "future-typescript",
+      "future-module",
       `${decision.path} has no explicit current owner`,
     );
     assert.notEqual(
@@ -182,7 +196,7 @@ test("the table and core agree on every focused input outside src and test", () 
     ...walkFiles(`${REPO}/indexer-envio/config`),
     ...focusedRootIndexerInputs,
   ].sort();
-  assert.equal(paths.length, 42, "focused external-input inventory changed");
+  assert.equal(paths.length, 43, "focused external-input inventory changed");
   const decisions = getIndexerHandlerInvariantChecklistDecisions(paths);
   for (const decision of decisions) {
     assert.notEqual(
@@ -214,11 +228,16 @@ test("the table and core agree on every focused input outside src and test", () 
   );
 });
 
-test("focused root inputs and exact config owners cannot drift", () => {
+test("focused root inputs and exact owners cannot drift", () => {
   assert.deepEqual(
     ownedRootIndexerConfigs,
     focusedRootIndexerConfigs,
     "every current root config YAML must have one live exact owner",
+  );
+  assert.deepEqual(
+    ownedRootIndexerVitestInputs,
+    focusedRootIndexerVitestInputs,
+    "every current root Vitest input must have one live exact owner",
   );
   for (const candidatePath of [
     ...ownedRootIndexerConfigs.filter(
@@ -326,7 +345,7 @@ test("every exact family member keeps its owner and table disposition", () => {
   }
 });
 
-test("the nested dispatch is excluded-first and inventories future extensions", () => {
+test("the nested dispatch is excluded-first and inventories future modules", () => {
   assert.deepEqual(
     indexerInvariantExcludedArm.effects,
     [],
@@ -334,7 +353,7 @@ test("the nested dispatch is excluded-first and inventories future extensions", 
   );
   assert.equal(indexerInvariantRoutedArm.effects.length, 1);
   const futurePatterns = ["src", "test"].flatMap((scope) =>
-    ["ts", "tsx", "mts", "cts"].map(
+    INDEXER_MODULE_EXTENSIONS.map(
       (extension) => `indexer-envio/${scope}/*.${extension}`,
     ),
   );
@@ -348,26 +367,24 @@ test("the nested dispatch is excluded-first and inventories future extensions", 
   assert.deepEqual(
     fallbackPatterns,
     futurePatterns,
-    "the fallback family widened beyond the canonical eight patterns",
+    "the fallback family differs from the canonical 16 module patterns",
   );
   const inventoryPatterns = indexerInvariantInventoryDispatch.arms[0].patterns;
   assert.deepEqual(
-    inventoryPatterns.slice(0, 7),
+    inventoryPatterns.slice(0, 5),
     [
       "indexer-envio/abis/*",
       "indexer-envio/config/*",
       "indexer-envio/config*.yaml",
+      "indexer-envio/vitest*",
       "indexer-envio/schema.graphql",
-      "indexer-envio/vitest.config.ts",
-      "indexer-envio/vitest.fail-closed.config.ts",
-      "indexer-envio/vitest.hermetic-setup.ts",
     ],
     "the focused external runtime and test-support inventory changed",
   );
   assert.deepEqual(
-    inventoryPatterns.slice(7),
+    inventoryPatterns.slice(5),
     futurePatterns,
-    "the inventory dispatch lost a future TypeScript pattern",
+    "the inventory dispatch lost a future module pattern",
   );
   for (const pattern of futurePatterns) {
     assert.ok(
@@ -385,30 +402,30 @@ test("the nested dispatch is excluded-first and inventories future extensions", 
     assert.deepEqual(decision, {
       path: candidatePath,
       route: false,
-      owner: "future-typescript",
+      owner: "future-module",
     });
     assert.equal(tableIndexerInvariantDecision(candidatePath), false);
   }
-  const unrelatedTypeScriptPath =
+  const unrelatedModulePath =
     "indexer-envio/test/documentation-catalog.test.ts";
   assert.deepEqual(
-    getIndexerHandlerInvariantChecklistDecisions([unrelatedTypeScriptPath]),
+    getIndexerHandlerInvariantChecklistDecisions([unrelatedModulePath]),
     [
       {
-        path: unrelatedTypeScriptPath,
+        path: unrelatedModulePath,
         route: false,
-        owner: "future-typescript",
+        owner: "future-module",
       },
     ],
-    "an unrelated TypeScript test remains unclassified",
+    "an unrelated test module remains unclassified",
   );
-  assert.equal(tableIndexerInvariantDecision(unrelatedTypeScriptPath), false);
+  assert.equal(tableIndexerInvariantDecision(unrelatedModulePath), false);
   assert.ok(
     matchesAny(
       indexerInvariantInventoryDispatch.arms[0].patterns,
-      unrelatedTypeScriptPath,
+      unrelatedModulePath,
     ),
-    "an unrelated TypeScript test must still trigger the inventory check",
+    "an unrelated test module must still trigger the inventory check",
   );
   for (const family of getIndexerHandlerInvariantRoutingFamilies().filter(
     ({ route }) => !route,
@@ -444,6 +461,28 @@ test("future root indexer configs trigger the exact-owner inventory", () => {
   assert.equal(tableIndexerInvariantDecision(candidatePath), false);
 });
 
+test("future root Vitest inputs trigger the exact-owner inventory", () => {
+  const candidatePath = "indexer-envio/vitest.future-runtime.config.mjs";
+  assert.ok(
+    matchesAny(
+      indexerInvariantInventoryDispatch.arms[0].patterns,
+      candidatePath,
+    ),
+    `${candidatePath} must trigger the invariant inventory check`,
+  );
+  assert.deepEqual(
+    getIndexerHandlerInvariantChecklistDecisions([candidatePath]),
+    [
+      {
+        path: candidatePath,
+        route: false,
+        owner: "outside-indexer-handler-invariant-scope",
+      },
+    ],
+  );
+  assert.equal(tableIndexerInvariantDecision(candidatePath), false);
+});
+
 test("exact owners do not widen into same-namespace files", () => {
   for (const [candidatePath, owner] of [
     ["indexer-envio/abis/FPMM.json", "abi-runtime-inputs"],
@@ -459,11 +498,8 @@ test("exact owners do not widen into same-namespace files", () => {
   }
 
   for (const [candidatePath, owner] of [
-    [
-      "indexer-envio/src/handlers/documentation-catalog.ts",
-      "future-typescript",
-    ],
-    ["indexer-envio/src/rpc/documentation-catalog.ts", "future-typescript"],
+    ["indexer-envio/src/handlers/documentation-catalog.ts", "future-module"],
+    ["indexer-envio/src/rpc/documentation-catalog.ts", "future-module"],
     [
       "indexer-envio/abis/documentation-catalog.json",
       "outside-indexer-handler-invariant-scope",
@@ -558,8 +594,8 @@ test("the external family schema fails closed before table derivation", async ()
     "fallback-route",
     (source) =>
       source.replace(
-        'owner: "future-typescript",\n      route: false,',
-        'owner: "future-typescript",\n      route: true,',
+        'owner: "future-module",\n      route: false,',
+        'owner: "future-module",\n      route: true,',
       ),
     /fallback must remain unclassified/,
   );
@@ -567,10 +603,10 @@ test("the external family schema fails closed before table derivation", async ()
     "fallback-extension",
     (source) =>
       source.replace(
-        'extensions: ["ts", "tsx", "mts", "cts"],',
-        'extensions: ["ts", "tsx", "mts", "cts", "md"],',
+        'extensions: ["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"],',
+        'extensions: ["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs", "md"],',
       ),
-    /only the canonical src\/test TypeScript scope/,
+    /only the canonical src\/test JS\/TS module scope/,
   );
   await assertMalformedCoreFailsImport(
     "fallback-prefix",
@@ -579,7 +615,7 @@ test("the external family schema fails closed before table derivation", async ()
         'prefixes: ["indexer-envio/src/", "indexer-envio/test/"],',
         'prefixes: ["indexer-envio/src/", "indexer-envio/test/", "indexer-envio/config/"],',
       ),
-    /only the canonical src\/test TypeScript scope/,
+    /only the canonical src\/test JS\/TS module scope/,
   );
 });
 

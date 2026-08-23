@@ -52,14 +52,14 @@ const indexerHandlerInvariantRoutedPatterns = uniquePatterns(
     .filter(({ fallback, route }) => fallback === undefined && route)
     .flatMap(indexerHandlerInvariantExplicitPatterns),
 );
-const indexerHandlerInvariantTypeScriptPatterns =
-  indexerHandlerInvariantFamilies
-    .filter(({ fallback }) => fallback !== undefined)
-    .flatMap(indexerHandlerInvariantFallbackPatterns);
+const indexerHandlerInvariantModulePatterns = indexerHandlerInvariantFamilies
+  .filter(({ fallback }) => fallback !== undefined)
+  .flatMap(indexerHandlerInvariantFallbackPatterns);
 const indexerHandlerInvariantExternalInventoryPatterns = [
   "indexer-envio/abis/*",
   "indexer-envio/config/*",
   "indexer-envio/config*.yaml",
+  "indexer-envio/vitest*",
 ];
 const indexerHandlerInvariantInventoryPatterns = uniquePatterns([
   ...indexerHandlerInvariantExternalInventoryPatterns,
@@ -70,10 +70,11 @@ const indexerHandlerInvariantInventoryPatterns = uniquePatterns([
         !pattern.startsWith("indexer-envio/abis/") &&
         !pattern.startsWith("indexer-envio/config/") &&
         !/^indexer-envio\/config[^/]*\.yaml$/.test(pattern) &&
+        !/^indexer-envio\/vitest[^/]*$/.test(pattern) &&
         !pattern.startsWith("indexer-envio/src/") &&
         !pattern.startsWith("indexer-envio/test/"),
     ),
-  ...indexerHandlerInvariantTypeScriptPatterns,
+  ...indexerHandlerInvariantModulePatterns,
 ]);
 
 export const PACKAGE_ARMS = [
@@ -495,7 +496,7 @@ export const PACKAGE_ARMS = [
         ],
       },
       {
-        why: "Every current or future src/test TypeScript path and every focused external runtime or test-support input must keep an explicit owner in the core. This test runs for all fifteen inventory patterns before a later scripts-only change can discover drift.",
+        why: "Every current or future src/test JS or TypeScript module and every focused external runtime or test-support input must keep an explicit owner in the core. This test runs for all 21 inventory patterns before a later scripts-only change can discover drift.",
         dispatch: "path",
         arms: [
           {
@@ -511,7 +512,7 @@ export const PACKAGE_ARMS = [
         ],
       },
       {
-        why: "The shared autoreview core owns the exact indexer family dispositions. The first arm carries explicit exclusions; the second carries explicit routes. Future TypeScript patterns only trigger the inventory check until they gain an explicit owner.",
+        why: "The shared autoreview core owns the exact indexer family dispositions. The first arm carries explicit exclusions; the second carries explicit routes. Future JS and TypeScript module patterns only trigger the inventory check until they gain an explicit owner.",
         dispatch: "path",
         arms: [
           {

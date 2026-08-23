@@ -37,26 +37,26 @@ import {
   writeReviewPromptOutputs,
 } from "./agent-autoreview-core.mjs";
 
-function walkTypeScriptFiles(directory) {
+function walkModuleFiles(directory) {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     const entryPath = path.join(directory, entry.name);
     return entry.isDirectory()
-      ? walkTypeScriptFiles(entryPath)
-      : /\.(?:ts|tsx|mts|cts)$/.test(entry.name)
+      ? walkModuleFiles(entryPath)
+      : /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/.test(entry.name)
         ? [entryPath.split(path.sep).join("/")]
         : [];
   });
 }
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
-const currentIndexerTests = walkTypeScriptFiles(
+const currentIndexerTests = walkModuleFiles(
   path.join(repoRoot, "indexer-envio", "test"),
 )
   .map((testPath) =>
     path.relative(repoRoot, testPath).split(path.sep).join("/"),
   )
   .sort();
-const currentIndexerSources = walkTypeScriptFiles(
+const currentIndexerSources = walkModuleFiles(
   path.join(repoRoot, "indexer-envio", "src"),
 )
   .map((sourcePath) =>
@@ -91,13 +91,17 @@ for (const [label, paths, routed, excluded] of [
     assert.notEqual(decision.owner, "", `${label} owner is non-empty`);
     assert.notEqual(
       decision.owner,
-      "future-typescript",
+      "future-module",
       `${label} path has an explicit current owner: ${decision.path}`,
     );
   }
 }
-assert.equal(currentIndexerSources.length, 131, "current source TS inventory");
-assert.equal(currentIndexerTests.length, 89, "current test TS inventory");
+assert.equal(
+  currentIndexerSources.length,
+  131,
+  "current source module inventory",
+);
+assert.equal(currentIndexerTests.length, 89, "current test module inventory");
 
 for (const [candidatePath, route, owner] of [
   ["indexer-envio/src/swap.ts", true, "source-runtime"],
@@ -160,6 +164,7 @@ for (const [candidatePath, route, owner] of [
   ["indexer-envio/vitest.config.ts", true, "test-runtime-inputs"],
   ["indexer-envio/vitest.fail-closed.config.ts", true, "test-runtime-inputs"],
   ["indexer-envio/vitest.hermetic-setup.ts", true, "test-runtime-inputs"],
+  ["indexer-envio/vitest.mutation.config.ts", true, "test-runtime-inputs"],
 ]) {
   assert.deepEqual(
     getIndexerHandlerInvariantChecklistDecisions([candidatePath]),
@@ -168,7 +173,16 @@ for (const [candidatePath, route, owner] of [
   );
 }
 
-for (const extension of ["ts", "tsx", "mts", "cts"]) {
+for (const extension of [
+  "ts",
+  "tsx",
+  "mts",
+  "cts",
+  "js",
+  "jsx",
+  "mjs",
+  "cjs",
+]) {
   for (const scope of ["src", "test"]) {
     const candidatePath = `indexer-envio/${scope}/future-handler.${extension}`;
     assert.deepEqual(
@@ -177,7 +191,7 @@ for (const extension of ["ts", "tsx", "mts", "cts"]) {
         {
           path: candidatePath,
           route: false,
-          owner: "future-typescript",
+          owner: "future-module",
         },
       ],
     );
@@ -191,14 +205,14 @@ assert.deepEqual(
     {
       path: "indexer-envio/test/documentation-catalog.test.ts",
       route: false,
-      owner: "future-typescript",
+      owner: "future-module",
     },
   ],
-  "an unowned TypeScript test does not route the handler-invariant checklist",
+  "an unowned test module does not route the handler-invariant checklist",
 );
 for (const [candidatePath, owner] of [
-  ["indexer-envio/src/handlers/documentation-catalog.ts", "future-typescript"],
-  ["indexer-envio/src/rpc/documentation-catalog.ts", "future-typescript"],
+  ["indexer-envio/src/handlers/documentation-catalog.ts", "future-module"],
+  ["indexer-envio/src/rpc/documentation-catalog.ts", "future-module"],
   [
     "indexer-envio/abis/documentation-catalog.json",
     "outside-indexer-handler-invariant-scope",
@@ -220,7 +234,7 @@ for (const outsidePath of [
   "indexer-envio/package.json",
   "indexer-envio/scripts/generateNttAddresses.mjs",
   "indexer-envio/tsconfig.json",
-  "indexer-envio/src/future-handler.js",
+  "indexer-envio/src/future-handler.vue",
   "ui-dashboard/src/future-handler.ts",
 ]) {
   assert.deepEqual(

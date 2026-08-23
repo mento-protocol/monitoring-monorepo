@@ -5317,7 +5317,7 @@ NODE
       new-owner)
         candidate_path="indexer-envio/src/futureProtectedSkew.ts"
         candidate_owner="source-runtime"
-        protected_owner="future-typescript"
+        protected_owner="future-module"
         ;;
       false-to-true)
         candidate_path="indexer-envio/src/rpc/log.ts"

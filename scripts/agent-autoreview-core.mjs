@@ -2389,6 +2389,7 @@ const INDEXER_HANDLER_INVARIANT_FAMILIES =
         "indexer-envio/vitest.config.ts",
         "indexer-envio/vitest.fail-closed.config.ts",
         "indexer-envio/vitest.hermetic-setup.ts",
+        "indexer-envio/vitest.mutation.config.ts",
       ],
     },
     {
@@ -2682,11 +2683,11 @@ const INDEXER_HANDLER_INVARIANT_FAMILIES =
       ],
     },
     {
-      owner: "future-typescript",
+      owner: "future-module",
       route: false,
       fallback: {
         prefixes: ["indexer-envio/src/", "indexer-envio/test/"],
-        extensions: ["ts", "tsx", "mts", "cts"],
+        extensions: ["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"],
       },
     },
   ]);
@@ -2803,7 +2804,16 @@ function validateIndexerHandlerInvariantRoutingFamilies(families) {
       `${where}.fallback.extensions`,
     );
     const requiredPrefixes = ["indexer-envio/src/", "indexer-envio/test/"];
-    const requiredExtensions = ["ts", "tsx", "mts", "cts"];
+    const requiredExtensions = [
+      "ts",
+      "tsx",
+      "mts",
+      "cts",
+      "js",
+      "jsx",
+      "mjs",
+      "cjs",
+    ];
     if (
       fallback.prefixes.some(
         (prefix) =>
@@ -2818,7 +2828,7 @@ function validateIndexerHandlerInvariantRoutingFamilies(families) {
       )
     ) {
       indexerRoutingFamilyError(
-        `${where}.fallback must define only the canonical src/test TypeScript scope`,
+        `${where}.fallback must define only the canonical src/test JS/TS module scope`,
       );
     }
     if (family.route) {

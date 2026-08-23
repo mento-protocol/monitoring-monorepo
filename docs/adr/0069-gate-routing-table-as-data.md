@@ -128,15 +128,17 @@ paths fail import.
 `arms-packages.mjs` derives two first-match arms from that view. Explicit
 `route: false` families form the excluded arm. Routed exact paths form the
 second arm. The live Bash case carries the same exact patterns, so the normal
-equality test pins the derived table against the code that runs. Eight future
-`src|test` plus `ts|tsx|mts|cts` patterns, the two broad `abis/` and `config/`
-patterns, and the broad root `config*.yaml` pattern only trigger the inventory
-check. They do not enter either checklist arm. The TypeScript fallback returns
-`route: false` until the adding PR gives the path an explicit owner. New ABI,
-config-directory, and root config YAML files also inherit no checklist route.
-Exact owners cover every current ABI, config-directory, and root config YAML
-input, plus `schema.graphql`. Three more exact routes cover `vitest.config.ts`,
-`vitest.fail-closed.config.ts`, and `vitest.hermetic-setup.ts`.
+equality test pins the derived table against the code that runs. Sixteen future
+patterns cover `src|test` plus `ts|tsx|mts|cts|js|jsx|mjs|cjs`. The four
+JavaScript extensions match the package's `allowJs` TypeScript input set. Four
+broad patterns cover `abis/`, `config/`, root `config*.yaml`, and root
+`vitest*` inputs. These 20 broad patterns only trigger the inventory check.
+They do not enter either checklist arm. The exact `schema.graphql` pattern
+completes the 21-pattern inventory. The module fallback returns `route: false`
+until the adding PR gives the path an explicit owner. New ABI,
+config-directory, root config YAML, and root Vitest files also inherit no
+checklist route. Exact owners cover every current ABI, config-directory, root
+config YAML, and root Vitest input, plus `schema.graphql`.
 A source path routes when the production handler entrypoint, a registered
 handler, an RPC facade or effect, or a self-heal stage executes it and the
 module can change an entity identity or field, a rollup, an effect key or
@@ -145,17 +147,19 @@ sources, environment and instrumentation modules, and shared handler
 calculations. A test routes when it enforces one of those behaviors or provides
 the fixtures, harness, or HTTP mock boundary that makes the enforcing test
 hermetic. Test-runner inputs route when they set its timeout, fail-closed
-fixture, or hermetic RPC boundary. Type-only context modules, warning-only
-helpers, the console-only RPC logger adapter, the two vendored ABIs that no
-current runtime consumes, and tests limited to an independent config-copy,
-script, or warning-format contract stay explicitly excluded.
-A focused parity test covers all current TypeScript paths below `src/` and
-`test/`, every current file below `abis/` and `config/`, every current root
-`config*.yaml` file, `schema.graphql`, the three root test-support inputs,
-exact owners, exclusions, and synthetic future extensions. The local indexer
-route runs it for these 15 inventory patterns, and the indexer CI job runs it
-for every indexer change. A new `src/` or `test/` TypeScript path, root config
-YAML, ABI, or config file must gain an explicit owner in the PR that adds it.
+fixture, hermetic RPC boundary, or mutation-test and coverage scope. Type-only
+context modules, warning-only helpers, the console-only RPC logger adapter, the
+two vendored ABIs that no current runtime consumes, and tests limited to an
+independent config-copy, script, or warning-format contract stay explicitly
+excluded.
+A focused parity test covers all current JS and TypeScript module paths below
+`src/` and `test/`, every current file below `abis/` and `config/`, every
+current root `config*.yaml` file and Vitest input, `schema.graphql`, exact
+owners, exclusions, and synthetic future extensions. The local indexer route
+runs it for these 21 inventory patterns, and the indexer CI job runs it for
+every indexer change. A new module below `src/` or `test/`, root config YAML,
+root Vitest input, ABI, or config file must gain an explicit owner in the PR
+that adds it.
 
 Autoreview imports the classifier from the same selected runtime as its helper.
 For a wrapper-attested runtime, the wrapper verifies the sealed runtime
@@ -403,8 +407,8 @@ gate is not a trust root.
   them. Expect to reconcile on most rebases while both copies exist, and read a
   red equality test as the merge queue working rather than as a mistake.
 - **The initial extraction added one command to the gate's own arm.** The
-  indexer family extension also adds the focused parity command to TypeScript
-  indexer paths and focused external runtime or test-support inputs, and
+  indexer family extension also adds the focused parity command to JS and
+  TypeScript indexer modules and focused external runtime or test-support inputs, and
   narrows the handler-invariant checklist to its owned paths. Other changed-path
   classes keep their prior plan, except that the autoreview-core source class
   now receives the checklist and both gate suites by design.

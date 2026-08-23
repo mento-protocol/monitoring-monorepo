@@ -2288,6 +2288,7 @@ indexer_invariant_positive_paths=(
   "indexer-envio/config.yaml"
   "indexer-envio/config.multichain.mainnet.yaml"
   "indexer-envio/vitest.fail-closed.config.ts"
+  "indexer-envio/vitest.mutation.config.ts"
   "indexer-envio/src/rpc/http-test-mocks.ts"
   "indexer-envio/src/startupChecks.ts"
   "indexer-envio/src/handlers/broker.ts"
@@ -2306,6 +2307,7 @@ indexer_invariant_negative_inventory_paths=(
   "indexer-envio/abis/liquity/AddressesRegistry.json"
   "indexer-envio/abis/wormhole/NttDeployHelper.json"
   "indexer-envio/config.multichain.owner-probe.yaml"
+  "indexer-envio/vitest.future-runtime.config.mjs"
   "indexer-envio/src/handlers/liquity/troveManagerPreloadContext.ts"
   "indexer-envio/src/pool/types.ts"
   "indexer-envio/src/rpc/log.ts"
@@ -2330,7 +2332,7 @@ for indexer_invariant_path in "${indexer_invariant_unrelated_paths[@]}"; do
 done
 
 indexer_invariant_future_paths=()
-for indexer_invariant_future_extension in ts tsx mts cts; do
+for indexer_invariant_future_extension in ts tsx mts cts js jsx mjs cjs; do
   for indexer_invariant_future_scope in src test; do
     indexer_invariant_future_paths+=(
       "indexer-envio/${indexer_invariant_future_scope}/future-handler.${indexer_invariant_future_extension}"
