@@ -6296,6 +6296,13 @@ gate_test_process_parent() {
     awk 'NF { print $1; exit }' || true
 }
 
+gate_test_process_state() {
+  local pid="$1"
+  [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+  TZ=UTC LC_ALL=C LANG=C ps -p "$pid" -o stat= 2>/dev/null |
+    awk 'NF { print $1; exit }' || true
+}
+
 gate_test_process_is_expected() {
   local pid="$1"
   local expected_start="$2"
@@ -6315,6 +6322,22 @@ gate_test_process_has_start() {
   [[ "$pid" =~ ^[0-9]+$ && -n "$expected_start" ]] || return 1
   current_start="$(gate_test_process_start "$pid")"
   [[ -n "$current_start" && "$current_start" == "$expected_start" ]]
+}
+
+# Return success only while the recorded fixture identity can still execute. A
+# zombie can retain the same PID and start time forever under a non-reaping PID
+# 1, but it cannot run fixture code. An unreadable state stays live so cleanup
+# fails closed instead of claiming an uncertain process absent. Production
+# stale-holder semantics remain outside this test-only predicate.
+gate_test_process_has_live_start() {
+  local pid="$1"
+  local expected_start="$2"
+  local current_start current_state
+  [[ "$pid" =~ ^[0-9]+$ && -n "$expected_start" ]] || return 1
+  current_start="$(gate_test_process_start "$pid")"
+  [[ -n "$current_start" && "$current_start" == "$expected_start" ]] || return 1
+  current_state="$(gate_test_process_state "$pid")"
+  [[ -z "$current_state" || "$current_state" != Z* ]]
 }
 
 # Bash 3.2 has no nameref or safe command-substitution assignment to caller
@@ -6714,7 +6737,7 @@ gate_race_sync="$(mktemp -d)"
 
   race_drain_victim_is_expected() {
     [[ "$race_drain_cleanup_active" -eq 1 && -n "$race_drain_orphan" && -n "$race_drain_orphan_start" ]] || return 1
-    gate_test_process_has_start "$race_drain_orphan" "$race_drain_orphan_start"
+    gate_test_process_has_live_start "$race_drain_orphan" "$race_drain_orphan_start"
   }
 
   race_drain_process_is_stopped() {
@@ -7146,7 +7169,7 @@ gate_race_sync="$(mktemp -d)"
     local label="$1"
     local record_path="$2"
     local snapshot_path="${record_path}.cleanup.snapshot"
-    local owned_pid owned_start owned_parent current_start current_parent signal_status
+    local owned_pid owned_start owned_parent current_start current_parent current_state signal_status
     local deadline found_survivor=0 cleanup_status=0
     race_drain_owned_survivors=""
     if [[ -z "$record_path" ]]; then
@@ -7169,10 +7192,16 @@ gate_race_sync="$(mktemp -d)"
           "$owned_start" "$current_start" "$owned_parent" "$current_parent"
         continue
       fi
+      current_state="$(gate_test_process_state "$owned_pid")"
+      if [[ "$current_state" == Z* ]]; then
+        gate_test_trace_signal absent-zombie "$label" NONE "$owned_pid" \
+          "$owned_start" "$current_start" "$owned_parent" "$current_parent"
+        continue
+      fi
       found_survivor=1
       race_drain_owned_survivors="${race_drain_owned_survivors}${race_drain_owned_survivors:+ }${owned_pid}"
       deadline=$(( $(date +%s) + 10 ))
-      while gate_test_process_has_start "$owned_pid" "$owned_start"; do
+      while gate_test_process_has_live_start "$owned_pid" "$owned_start"; do
         if gate_test_signal_with_current_parent \
           "${label} fixture-owned survivor" KILL "$owned_pid" "$owned_start"; then
           break
@@ -7187,11 +7216,11 @@ gate_race_sync="$(mktemp -d)"
         sleep 1
       done
       deadline=$(( $(date +%s) + 10 ))
-      while gate_test_process_has_start "$owned_pid" "$owned_start" &&
+      while gate_test_process_has_live_start "$owned_pid" "$owned_start" &&
         [[ "$(date +%s)" -lt "$deadline" ]]; do
         sleep 1
       done
-      if gate_test_process_has_start "$owned_pid" "$owned_start"; then
+      if gate_test_process_has_live_start "$owned_pid" "$owned_start"; then
         race_drain_owned_record_error="${label} exact survivor ${owned_pid} exceeded its bounded cleanup"
         cleanup_status=124
       fi
@@ -7222,7 +7251,7 @@ gate_race_sync="$(mktemp -d)"
         cleanup_status=124
         continue
       fi
-      if gate_test_process_has_start "$watchdog_pid" "$watchdog_start"; then
+      if gate_test_process_has_live_start "$watchdog_pid" "$watchdog_start"; then
         # Leave a pending TERM unhandled. Resuming this stopped watchdog could
         # make it run its own stale drain path. KILL removes only this exact
         # identity without executing that deferred work.
@@ -7235,9 +7264,9 @@ gate_race_sync="$(mktemp -d)"
           [[ "$signal_status" -eq 1 ]] || cleanup_status=124
         fi
         deadline=$(( $(date +%s) + 10 ))
-        while gate_test_process_has_start "$watchdog_pid" "$watchdog_start" && [[ "$(date +%s)" -lt "$deadline" ]]; do sleep 1; done
+        while gate_test_process_has_live_start "$watchdog_pid" "$watchdog_start" && [[ "$(date +%s)" -lt "$deadline" ]]; do sleep 1; done
       fi
-      if gate_test_process_has_start "$watchdog_pid" "$watchdog_start"; then
+      if gate_test_process_has_live_start "$watchdog_pid" "$watchdog_start"; then
         echo "interrupted-drain cleanup: watchdog ${watchdog_pid} survived the bounded cleanup wait" >&2
         cleanup_status=124
       fi
@@ -7971,6 +8000,39 @@ STUB
 
   # The compact probes below cover publisher append/ack failure and inspector
   # refusal. The two full cases later cover the successful handoff.
+  race_probe_zombie_pid=424242
+  race_probe_zombie_start="Mon Jan  1 00:00:00 2024"
+  race_probe_zombie_record="$gate_race_out/publisher-zombie.records"
+  printf '%s|%s|1\n' \
+    "$race_probe_zombie_pid" "$race_probe_zombie_start" \
+    > "$race_probe_zombie_record"
+  (
+    gate_test_process_start() {
+      [[ "$1" == "$race_probe_zombie_pid" ]] || return 1
+      printf '%s\n' "$race_probe_zombie_start"
+    }
+    gate_test_process_parent() {
+      [[ "$1" == "$race_probe_zombie_pid" ]] || return 1
+      printf '1\n'
+    }
+    gate_test_process_state() {
+      [[ "$1" == "$race_probe_zombie_pid" ]] || return 1
+      printf 'Z\n'
+    }
+    gate_test_signal_with_current_parent() {
+      fail "the owned-record inspector tried to signal a zombie fixture"
+    }
+    if race_drain_inspect_owned_record \
+      "zombie publisher" "$race_probe_zombie_record"; then
+      race_probe_inspect_status=0
+    else
+      race_probe_inspect_status=$?
+    fi
+    [[ "$race_probe_inspect_status" -eq 0 &&
+      -z "$race_drain_owned_survivors" ]] ||
+      fail "the owned-record inspector treated a zombie fixture as live"
+  )
+
   race_probe_publisher_target="$gate_race_out/publisher-path.target"
   race_probe_publisher_symlink="$gate_race_out/publisher-path.records"
   race_probe_publisher_nonregular="$gate_race_out/publisher-path.directory"
@@ -8703,14 +8765,18 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     "orphan gate" "$race_victim_wrapper" \
     "$race_victim_wrapper_start" "$race_victim_wrapper_parent" ||
     fail "the orphan case could not safely kill and reap its gate wrapper"
-  gate_test_process_has_start "$race_orphan_pid" "$race_orphan_start" ||
+  gate_test_process_has_live_start "$race_orphan_pid" "$race_orphan_start" ||
     fail "the orphan case needs the command to outlive its gate to mean anything"
   (
     race_watch_deadline=$(($(date +%s) + 300))
-    while kill -0 "$race_orphan_pid" 2>/dev/null && [ "$(date +%s)" -lt "$race_watch_deadline" ]; do sleep 0.5; done
+    while gate_test_process_has_live_start \
+      "$race_orphan_pid" "$race_orphan_start" &&
+      [ "$(date +%s)" -lt "$race_watch_deadline" ]; do sleep 0.5; done
     # Recorded only if it really died: writing a time when the bound expired
     # would let the assertion below read a stalled watcher as a confirmed death.
-    kill -0 "$race_orphan_pid" 2>/dev/null || date +%s > "$gate_race_out/orphan_died"
+    gate_test_process_has_live_start \
+      "$race_orphan_pid" "$race_orphan_start" ||
+      date +%s > "$gate_race_out/orphan_died"
   ) &
   race_orphan_watcher=$!
   RACE_STUB_SECONDS=2 \
@@ -8830,14 +8896,18 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     "crash-chain B gate" "$race_chain_b_wrapper" \
     "$race_chain_b_wrapper_start" "$race_chain_b_wrapper_parent" ||
     fail "the crash-chain case could not safely kill and reap B"
-  gate_test_process_has_start "$race_chain_orphan" "$race_chain_orphan_start" ||
+  gate_test_process_has_live_start "$race_chain_orphan" "$race_chain_orphan_start" ||
     fail "the crash-chain case needs A's command alive to mean anything"
   (
     race_watch_deadline=$(($(date +%s) + 300))
-    while kill -0 "$race_chain_orphan" 2>/dev/null && [ "$(date +%s)" -lt "$race_watch_deadline" ]; do sleep 0.5; done
+    while gate_test_process_has_live_start \
+      "$race_chain_orphan" "$race_chain_orphan_start" &&
+      [ "$(date +%s)" -lt "$race_watch_deadline" ]; do sleep 0.5; done
     # Recorded only if it really died: writing a time when the bound expired
     # would let the assertion below read a stalled watcher as a confirmed death.
-    kill -0 "$race_chain_orphan" 2>/dev/null || date +%s > "$gate_race_out/chain_died"
+    gate_test_process_has_live_start \
+      "$race_chain_orphan" "$race_chain_orphan_start" ||
+      date +%s > "$gate_race_out/chain_died"
   ) &
   race_chain_watcher=$!
   RACE_STUB_SECONDS=2 \
@@ -9139,14 +9209,18 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     > "$gate_race_out/remnant-b.out" 2>&1 || true
   [[ -n "$(find "$gate_race_root/run.lock" -name 'owner.reclaiming.*' 2>/dev/null)" ]] ||
     fail "the remnant-token case needs a parked record to mean anything"
-  gate_test_process_has_start "$race_remnant_orphan" "$race_remnant_orphan_start" ||
+  gate_test_process_has_live_start "$race_remnant_orphan" "$race_remnant_orphan_start" ||
     fail "the remnant-token case needs the first run's command alive"
   (
     race_watch_deadline=$(($(date +%s) + 300))
-    while kill -0 "$race_remnant_orphan" 2>/dev/null && [ "$(date +%s)" -lt "$race_watch_deadline" ]; do sleep 0.5; done
+    while gate_test_process_has_live_start \
+      "$race_remnant_orphan" "$race_remnant_orphan_start" &&
+      [ "$(date +%s)" -lt "$race_watch_deadline" ]; do sleep 0.5; done
     # Recorded only if it really died: writing a time when the bound expired
     # would let the assertion below read a stalled watcher as a confirmed death.
-    kill -0 "$race_remnant_orphan" 2>/dev/null || date +%s > "$gate_race_out/remnant_died"
+    gate_test_process_has_live_start \
+      "$race_remnant_orphan" "$race_remnant_orphan_start" ||
+      date +%s > "$gate_race_out/remnant_died"
   ) &
   race_remnant_watcher=$!
   RACE_STUB_SECONDS=2 \
@@ -9818,7 +9892,7 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     "$repo_root/scripts/agent-quality-gate.sh" \
     --base HEAD --run --lock-wait 30 \
     > "$gate_race_out/inherited-obligation.out" 2>&1 || true
-  gate_test_process_has_start "$race_taken_proc" "$race_taken_start" &&
+  gate_test_process_has_live_start "$race_taken_proc" "$race_taken_start" &&
     fail "an obligation left behind by a dead drainer was never discharged"
   [[ ! -e "$gate_race_root/condemned.d/$race_inherited_token" ]] ||
     fail "a discharged obligation must not be left behind to be drained forever"
@@ -9921,7 +9995,8 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     > "$gate_race_root/condemned.d/$race_arrived_late_token"
   wait "$race_unlink_wrapper" 2>/dev/null || true
   if [[ ! -e "$gate_race_root/condemned.d/$race_arrived_late_token" ]] &&
-    gate_test_process_has_start "$race_unlink_late" "$race_unlink_late_start"; then
+    gate_test_process_has_live_start \
+      "$race_unlink_late" "$race_unlink_late_start"; then
     fail "an obligation published during a drain was removed unread, and its command is still running"
   fi
   race_drain_kill_and_reap_direct_wrapper \
