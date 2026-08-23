@@ -3,7 +3,7 @@ title: Autoreview Runtime Trust Model
 status: active
 owner: eng
 canonical: false
-last_verified: 2026-08-21
+last_verified: 2026-08-23
 doc_type: reference
 scope: repo-wide
 review_interval_days: 180
@@ -187,6 +187,138 @@ such as `GIT_DIR` and `GIT_WORK_TREE`.
 On Darwin, Homebrew-style paths that fail only that ancestry rule are accepted
 solely through sealed private snapshots of native Mach-O executables whose
 linked-library closure is entirely system-only.
+
+### The hard-linked engine binary, and why the fix stays manual
+
+A semantic-engine executable with more than one hard link is refused unless root
+owns it. The two routes differ: direct execution accepts `nlink === 1` **or**
+`uid === 0`, while the Darwin snapshot fallback requires `nlink === 1` whoever
+owns it. Both live in `trustedExecutableCandidate` in `agent-autoreview.mjs` —
+its `directExecutionSafe` test and the snapshot guard just below, at `:1093` and
+`:1124` measured on `2e3df696`, in a file that grew 219 lines in the two days
+before this note. Follow the function name, not the numbers. An engine installed
+by a user — which is every case below — therefore needs a single link.
+
+The rule is doing real work. The wrapper's guarantee is that the inode it
+validated is reachable only through the directory ancestry it inspected; a second
+link is a second name in a directory it never looked at, so the ancestry proof
+does not cover the file. Root ownership substitutes for that proof, which is why
+the `uid === 0` branch exists and why it does not extend to the snapshot path,
+where the bytes are copied rather than executed in place.
+
+This is reachable in ordinary use, not just in theory. Claude Code's own
+auto-updater has left `~/.local/share/claude/versions/<version>` with
+`nlink=2`, and `pnpm agent:autoreview -- --engine claude` then fails with
+`claude CLI is not available outside the reviewed repo` — the message names the
+search path, so it reads as "not installed" while the binary is present and
+runnable. It can come back after any update.
+
+**The wrapper must not repair this itself.** A same-path `cp` + `mv` inside the
+adapter would be safe as a shell command and wrong as wrapper behaviour, three
+ways. It gives a read-only validator write authority over the toolchain it
+validates, which is the trust direction this whole document argues against. It
+launders an inode the wrapper has just declined to trust into the trusted path
+by copying its bytes there — the nlink rule denies exactly that inference, and
+re-deriving it one line later does not make it true. And it edits an installer's
+bookkeeping from underneath it: the remaining link keeps the ORIGINAL inode, so
+a package manager that hard-links versions for de-duplication silently stops
+sharing storage, and any integrity check it keeps over that inode now describes
+a file the wrapper no longer runs.
+
+So it is an operator step, run deliberately, on a path the operator has looked
+at:
+
+**Ask the wrapper which file it means — do not guess with `command -v`.** The
+helper searches `AUTOREVIEW_<COMMAND>_BIN`, then `PATH`, then well-known install
+directories, and `command -v claude` can resolve to something else entirely: on
+one machine here it returned a `cmux-cli-shims` wrapper in `$TMPDIR` with its own
+`nlink=1`, so checking it would have reported a healthy link count for a file the
+autoreview wrapper never runs. The refusal message prints every path it probed,
+in order, and the engine is normally the versioned file under
+`~/.local/share/claude/versions/`:
+
+```bash
+# 1. Read the "Probed:" list out of the refusal.
+pnpm agent:autoreview -- --engine claude
+
+# 2. Check the link count. `-L` is load-bearing: without it `stat` describes the
+#    SYMLINK, which always has nlink=1, and ~/.local/bin/claude is one — so the
+#    check would report healthy for a hard-linked engine behind it.
+engine="$HOME/.local/share/claude/versions/VERSION"   # VERSION from step 1
+
+engine_links() {  # `-f` is a FORMAT on BSD and --file-system on GNU
+  case "$(uname -s)" in
+    Darwin | *BSD* | DragonFly) stat -L -f '%l' "$1" ;;  # BSD family
+    *) stat -L -c '%h' "$1" ;;                           # assume GNU
+  esac
+}
+echo "$engine has $(engine_links "$engine") link(s)"
+
+# 3. Repair, only when nlink is greater than 1. Runs as a function so a failure
+#    ends the repair rather than the shell you pasted it into.
+repair_engine() {
+  engine="$1"
+  [ -n "$engine" ] || { echo "no engine path given" >&2; return 1; }
+  # Repair the regular file, never a link to it: copying through a symlink and
+  # renaming over it would replace the LINK with a copy and leave the real
+  # engine hard-linked and still refused.
+  [ -f "$engine" ] && [ ! -L "$engine" ] || {
+    echo "$engine is not a regular file; resolve it and repair the target" >&2
+    return 1
+  }
+  # Re-check the precondition here, not only by eye in step 2. Replacing an
+  # inode that already has one link achieves nothing and breaks any
+  # hard-link de-duplication a package manager is keeping over it.
+  [ "$(engine_links "$engine")" -gt 1 ] 2>/dev/null || {
+    echo "$engine already has a single link; nothing to repair" >&2
+    return 1
+  }
+  # Stage inside a private directory beside the engine, then rename across the
+  # same filesystem.
+  stage="$(mktemp -d "$(dirname "$engine")/.engine-repair.XXXXXX")" || return 1
+  if cp -p "$engine" "$stage/engine" && mv "$stage/engine" "$engine"; then
+    rmdir "$stage"
+    echo "repaired: $engine"
+  else
+    rm -rf "$stage"
+    echo "repair failed; $engine left unchanged" >&2
+    return 1
+  fi
+}
+
+repair_engine "$engine"
+```
+
+The staging directory is doing specific work. A predictable destination beside
+the engine — `"$engine".unlinked`, say — is a symlink-following overwrite:
+measured, if that name already exists as a symlink, `cp -p` writes the engine's
+bytes THROUGH it into whatever it points at, and the `mv` then installs the
+symlink at the engine path. Creating the file with `mktemp` and checking it
+afterwards is not enough either, because the check happens after `cp` has already
+opened the name: anything that can write to the directory can swap the file for a
+symlink in between. `mktemp -d` sidesteps the whole argument by writing into a
+`0700` directory created in one step, which nothing but this user can enter, and
+the rename stays inside the engine's own filesystem so it is still atomic. What
+the nlink refusal says is that the FILE has another name somewhere the wrapper
+never inspected; it says nothing about this directory being hostile, and the
+install directory is the user's own.
+
+Verified as written: a hard-linked engine repairs and returns 0 with its mode
+intact and the binary still executing; symlinks planted at both older predictable
+names change nothing and leave their target untouched; an unreadable source
+returns 1, says so, leaves the engine alone and removes the staging directory; a
+symlink passed as `$engine` is refused rather than replaced by a copy; and an
+empty `$engine` is refused before anything is created.
+
+Both `stat` spellings are given because the flags are not portable, and neither
+is `readlink -f`: it works on current macOS but is absent from the BSD
+`readlink` on older releases, and this repository declares no minimum macOS.
+
+Every check above ran on a scratch tree rather than on a live install: `nlink`
+goes 2 → 1, the bytes compare equal, and the sibling name keeps the original
+inode. Re-run the check after a CLI auto-update; the `--engine codex` path is
+unaffected either way, so a blocked `--engine claude` is never a reason to skip
+the closeout review.
 
 ## Linux root recovery, ELF validation, and loader control
 

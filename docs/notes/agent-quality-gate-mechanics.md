@@ -3,7 +3,7 @@ title: Agent Quality Gate — Mechanics
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-20
+last_verified: 2026-08-23
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -71,7 +71,9 @@ Indexer changes additionally route the protected
 [`docs/pr-checklists/indexer-handler-invariants.md`](../pr-checklists/indexer-handler-invariants.md)
 policy into prepared autoreview bundles.
 
-The dry-run gate maps changed paths to package checks and PR checklists. For a
+The dry-run gate maps changed paths to package checks and PR checklists. That
+mapping is a Node engine now, cross-checked against the bash arms on every run —
+see [Where the plan comes from](#where-the-plan-comes-from-adr-0069) below. For a
 routing-sensitive source, the shared classifier adds the offline
 `pnpm docs:navigation-eval -- --check-fixtures` check. It invokes no model or
 scheduled evaluation. Review the output, then run:
@@ -180,7 +182,79 @@ restricted mode forbids. Its verdict must also be a function of the change paths
 alone, so it may not read anything the probe did not supply: `< <(json_change_paths …)`,
 heredocs and here-strings are fine, a redirection from a file is not. Editing it
 to need any of those fails the check with an explanation; change the probe in the
-same PR or keep the classifier free of them.
+same PR or keep the classifier free of them. D5c converts that probe to import
+the Node classifier directly instead of lifting the bash function, and re-asserts
+the same property — each alias routes to its intended arm, over a closed verdict
+set — before the function is deleted.
+
+### Where the plan comes from ([ADR 0069](../adr/0069-gate-routing-table-as-data.md))
+
+Since D5b part 2 the routing is Node. After the bash `case` arms have run, the
+gate calls the mapping engine once and uses ITS plan:
+
+```bash
+node "$script_source_dir/gate/mapping.mjs" \
+  --repo-root "$repo_root" --changed-paths-file "$changed_paths_file" \
+  --base "$base_ref" --head "$head_ref" \
+  --script-source-dir "$script_source_dir" [--real-tree] [--full-local-tests]
+```
+
+`$script_source_dir`, not `$repo_root`: the mapper is resolved the way every
+other gate helper is, so a fixture run finds the real one. `--real-tree` is the
+gate's own `[[ "$script_source_dir" == "$repo_root/scripts" ]]` test, which
+fences the four repository-specific effects away from fixture repositories.
+
+The engine answers on stdout in the TSV shape `write_command_plan` already
+emits, in this order and no other — the gate prints and the freshness stamp
+hashes in the same sequence:
+
+```text
+flag<TAB>package_script_risk_changed<TAB>true|false
+flag<TAB>saw_workspace_escalation<TAB>true|false
+surface<TAB><name>
+checklist<TAB><path><TAB><reason>
+preflight|codegen|post-codegen|quality<TAB><command><TAB><reason>
+```
+
+**The bash arms still run, and disagreement stops the run.** The gate renders
+its own plan in the same shape and byte-compares the two. This is the D5c soak
+guard: parity proven over whatever you actually changed, on your machine, rather
+than over a corpus someone assembled. Every failure around the seam refuses, and
+each message is greppable:
+
+| Message on stderr                                                                   | What happened                                                |
+| ----------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| `gate mapping engine could not be loaded from …`                                    | The mapper is not at that path. A `scripts/` move missed it. |
+| `gate mapping engine failed (exit N); refusing to run on a plan it did not produce` | The mapper threw. Its own reason is on the line above.       |
+| `gate mapping engine produced an empty plan; refusing to run`                       | The mapper wrote nothing — most often a stubbed `node`.      |
+| `gate mapping engine emitted an unparsable record: …`                               | A record the gate cannot read. Never partially applied.      |
+| `gate mapping engine emitted an unknown flag record: …`                             | A `flag` record the gate does not know.                      |
+| `the gate mapping engine and the bash routing arms disagree.`                       | The guard fired. A unified diff follows, `-bash +engine`.    |
+
+Read that last diff by side: a `-` line is a command the arms produced and the
+engine did not, a `+` line the reverse. Either direction refuses, because a
+routing change landed on one side only — usually a new arm added to
+`agent-quality-gate.sh` without the matching entry in
+`scripts/gate/routing-table/`, which `gate-equality.test.mjs` also catches, or an
+engine change the arms do not have yet. Fix the side that is wrong. The guard
+has no bypass.
+
+To drive the guard over many path sets at once rather than the one you happen to
+have changed:
+
+```bash
+node scripts/gate/routing-parity.mjs --corpus multi     # 43 sets, ~1 minute
+node scripts/gate/routing-parity.mjs --corpus self-test # every run_gate set in the suite
+node scripts/gate/routing-parity.mjs                    # every tracked path, ~25 minutes
+```
+
+**What D5c removes.** The bash `case` arms and the verb helpers they call, the
+`plan_records_from_bash` renderer and the byte comparison, and
+`scripts/gate/routing-parity.mjs`. They are one mechanism and they go together:
+without the arms there is nothing to compare, and the harness's own diff becomes
+circular. What stays is the parser that reads the mapper's records — that is how
+the plan arrives — the `implementation_signature()` pins, and the engine's own
+suites. Measured, that is about 2,644 raw lines out of 6,163.
 
 ### Scheduling contract (Refs #1802)
 

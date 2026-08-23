@@ -37,7 +37,7 @@ subdirectories.
 | `alerts/`       | alert-rule lint, peg-policy checks     |
 | `repo-health/`  | code-health, file-size, lint wrappers  |
 | `terraform/`    | movable Terraform guards and helpers   |
-| `gate/`         | quality-gate satellites                |
+| `gate/`         | gate routing engine + helpers          |
 | `sentry/`       | triage/autofix/gate/broker/ci-wiring   |
 
 `lib/` and `production-infra-identity-contract/` predate the reorganization. `setup.sh`
