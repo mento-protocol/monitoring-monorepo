@@ -1,6 +1,5 @@
 /**
- * Shared GitHub issue-queue lifecycle primitives for the scheduled
- * documentation automations.
+ * Shared GitHub issue-queue lifecycle primitives for scheduled automation.
  *
  * `docs-garden-issue.mjs` and `docs-navigation-eval.mjs` both keep at most one
  * open issue per cycle, and both reach that state the same way: one `gh`
@@ -10,8 +9,11 @@
  * the garden entrypoint — the only entrypoint-imports-entrypoint edge in
  * `scripts/` — and copied the rest. Both now read them from here.
  *
- * Callers own their own markers, metadata validation, and decision branches.
- * This module owns only what was byte-identical between them.
+ * The local Sentry projection route also reads the canonical `agent-ready`
+ * definition and calls the narrowed label ensure before it creates or repairs
+ * a local work issue. Callers own their markers, metadata validation, and
+ * decision branches. This module owns the shared lifecycle label definition
+ * and the mechanisms that were byte-identical between the documentation jobs.
  */
 
 import { spawn } from "node:child_process";
@@ -21,19 +23,21 @@ const GARDEN_OIDC_AUDIENCE = "mento-docs-garden";
 const GITHUB_OIDC_ISSUER = "https://token.actions.githubusercontent.com";
 const GITHUB_OIDC_REQUEST_HOST_SUFFIX = ".actions.githubusercontent.com";
 
+export const AGENT_READY_LABEL_DEFINITION = {
+  name: "agent-ready",
+  color: "0e8a16",
+  description: "Scoped work ready for an agent to claim",
+};
+
 export const ISSUE_STATE_LABELS = [
   "needs-grooming",
-  "agent-ready",
+  AGENT_READY_LABEL_DEFINITION.name,
   "agent-active",
   "in-pr",
 ];
 
 export const LABEL_DEFINITIONS = [
-  {
-    name: "agent-ready",
-    color: "0e8a16",
-    description: "Scoped work ready for an agent to claim",
-  },
+  AGENT_READY_LABEL_DEFINITION,
   {
     name: "documentation",
     color: "0075ca",
@@ -236,12 +240,15 @@ export async function ghPaginate(
   return pages;
 }
 
-export async function ensureLabelsExist(options, { runner = runGh } = {}) {
+export async function ensureLabelsExist(
+  options,
+  { runner = runGh, definitions = LABEL_DEFINITIONS } = {},
+) {
   const pages = await ghPaginate(`repos/${options.repo}/labels`, { runner });
   const existing = new Set(
     pages.flat().map((label) => String(label?.name ?? "")),
   );
-  for (const label of LABEL_DEFINITIONS) {
+  for (const label of definitions) {
     if (existing.has(label.name)) continue;
     await runner([
       "label",

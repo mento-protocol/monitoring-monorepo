@@ -7,12 +7,18 @@
 
 import { spawn } from "node:child_process";
 
+import {
+  AGENT_READY_LABEL_DEFINITION,
+  ensureLabelsExist,
+} from "../../lib/gh-issue-lifecycle.mjs";
 import { PROJECTED_LABEL } from "./sentry-triage-project-core.mjs";
 import {
   ALIAS_NOTE_PREFIX,
   bodyBacklinksShortId,
   commentBacklinksShortId,
 } from "./sentry-triage-projection.mjs";
+
+export const AGENT_READY_LABEL = AGENT_READY_LABEL_DEFINITION.name;
 
 // `projectable` remains the external-write capability. This closed routing
 // enum adds one exact local destination without widening that capability.
@@ -185,6 +191,26 @@ const REPROJECTION_REOPEN_COMMENT =
   "Reopened by the Mento Sentry triage pipeline: the underlying Sentry issue " +
   "regressed and was re-triaged as actionable.";
 
+// The local projection route consumes the dev-backlog lifecycle label. It
+// creates only a missing label from the shared canonical definition and never
+// force-edits existing shared metadata. The ensure is best-effort. The issue
+// mutation remains authoritative and fails loudly if the label is still absent.
+export async function ensureAgentReadyLabel(owningRun, owningRepo) {
+  try {
+    await ensureLabelsExist(
+      { repo: owningRepo },
+      {
+        runner: owningRun,
+        definitions: [AGENT_READY_LABEL_DEFINITION],
+      },
+    );
+  } catch (error) {
+    process.stderr.write(
+      `warning: could not ensure label ${AGENT_READY_LABEL}: ${error.message}\n`,
+    );
+  }
+}
+
 export async function reopenProjectedIssue(
   owningRun,
   owningRepo,
@@ -195,6 +221,7 @@ export async function reopenProjectedIssue(
   // remains CLOSED so a retry runs this repair again instead of treating the
   // stale lifecycle as an already-open issue to preserve.
   if (restoreAgentReady) {
+    await ensureAgentReadyLabel(owningRun, owningRepo);
     await owningRun([
       "issue",
       "edit",
@@ -202,7 +229,7 @@ export async function reopenProjectedIssue(
       "-R",
       owningRepo,
       "--add-label",
-      "agent-ready",
+      AGENT_READY_LABEL,
       "--remove-label",
       "agent-active,in-pr,needs-grooming",
     ]);

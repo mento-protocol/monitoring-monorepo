@@ -24,6 +24,7 @@ import {
   runDocsGardenIssue,
 } from "./docs-garden-issue.mjs";
 import {
+  AGENT_READY_LABEL_DEFINITION,
   assertAuthorizedGardenWorkflow,
   ensureLabelsExist,
   ghPaginate,
@@ -324,6 +325,36 @@ await test("label setup creates only missing labels and never force-edits shared
   assert.ok(creates.length > 0);
   assert.ok(!creates.some((args) => args.includes("agent-ready")));
   assert.ok(!creates.some((args) => args.includes("--force")));
+});
+
+await test("label setup can ensure one shared definition without touching unrelated labels", async () => {
+  const calls = [];
+  await ensureLabelsExist(
+    { repo: "owner/repo" },
+    {
+      definitions: [AGENT_READY_LABEL_DEFINITION],
+      runner: async (args) => {
+        calls.push(args);
+        if (args[0] === "api") return "[]";
+        return "";
+      },
+    },
+  );
+  const creates = calls.filter(
+    (args) => args[0] === "label" && args[1] === "create",
+  );
+  assert.equal(creates.length, 1);
+  assert.deepEqual(creates[0], [
+    "label",
+    "create",
+    AGENT_READY_LABEL_DEFINITION.name,
+    "--repo",
+    "owner/repo",
+    "--color",
+    AGENT_READY_LABEL_DEFINITION.color,
+    "--description",
+    AGENT_READY_LABEL_DEFINITION.description,
+  ]);
 });
 
 await test("an open occurrence remains the target even after the calendar advances", () => {

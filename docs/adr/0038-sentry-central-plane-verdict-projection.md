@@ -3,7 +3,7 @@ title: Central Sentry triage plane with owning-repo verdict projection
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-21
+last_verified: 2026-08-23
 scope: ci/process
 date: 2026-07
 doc_type: adr
@@ -77,11 +77,13 @@ deterministic step.**
   job — the matrix jobs hosting the LLM agent never see it. For a `code-fix` /
   `config-fix` verdict whose destination is `external`, it files an issue in
   that repo. For `local-config`, it files a local work issue with
-  `agent-ready` using the ambient workflow token. Both routes label the stub
-  `sentry:projected`, comment the projected URL, and close the stub. A closed
-  local match repairs `agent-ready` and conflicting lifecycle labels before it
-  reopens, so a failed repair stays retryable; an open match keeps its
-  lifecycle. The matrix settles all `none` destinations and
+  `agent-ready` using the ambient workflow token. Immediately before a local
+  create or closed-match repair, the route ensures the canonical shared
+  `agent-ready` definition exists without force-editing existing metadata. Both
+  routes label the stub `sentry:projected`, comment the projected URL, and close
+  the stub. A closed local match repairs `agent-ready` and conflicting lifecycle
+  labels before it reopens, so a failed repair stays retryable; an open match
+  keeps its lifecycle. The matrix settles all `none` destinations and
   `upstream-transient` stubs, but leaves TWO classes OPEN: `needs-human`, and a local `code-fix` whose
   `fix_scope` is `architectural` — open human design work held under
   `sentry:fix-scope-architectural` and excluded from the autofix candidate window

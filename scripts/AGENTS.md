@@ -45,13 +45,13 @@ subdirectories.
 pre-start path and eight docs name it. `redrive-onchain-deadletter.{mjs,test.mjs}`
 stays flat under `alerts/infra/` ownership; ADR 0064 gives the lint reason.
 
-`lib/` holds cores more than one cluster reads. `hcl.mjs` (Terraform HCL
-tokenizer and block extraction), `workflow-yaml.mjs` (Actions workflow and
-shell-run parsing), `pnpm-override-selector.mjs` (pnpm override selectors), and
-`gh-issue-lifecycle.mjs` (the `gh` runner, pagination guard, Documentation
-Garden workflow authorization, label bootstrap, and issue-queue arbitration).
-Cores stay outside domain directories; ADR 0064 records which clusters read
-each. `peg-policy-digest.mjs` is the one definition of the peg version-digest
+`lib/` holds cores that multiple clusters read: `hcl.mjs` for Terraform HCL,
+`workflow-yaml.mjs` for Actions and shell parsing,
+`pnpm-override-selector.mjs` for pnpm overrides, and
+`gh-issue-lifecycle.mjs` for shared GitHub issue and label mechanics.
+Documentation schedulers use the full lifecycle module; local Sentry projection
+uses its narrowed `agent-ready` ensure. ADR 0064 lists each reader.
+`peg-policy-digest.mjs` is the one definition of the peg version-digest
 contract both peg validators check. Inventories, pinned hashes, and identities
 stay with their domain.
 

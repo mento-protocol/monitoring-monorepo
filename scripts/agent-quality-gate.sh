@@ -3847,10 +3847,11 @@ while IFS= read -r path; do
         scripts/lib/gh-issue-lifecycle.mjs)
           # The `gh` runner, pagination guard, Documentation Garden workflow
           # authorization, label bootstrap, and queue-state arbitration behind
-          # both scheduled issue automations. Neither suite covers the other's
-          # consumer, so a shared module belongs in both arms.
+          # both scheduled issue automations, plus the narrowed local Sentry
+          # projection label ensure. Each consumer suite must run here.
           add_command "pnpm docs:garden:test" "shared GitHub issue lifecycle module changed"
           add_command "pnpm docs:navigation-eval:test" "shared GitHub issue lifecycle module changed"
+          add_command "pnpm sentry:project:test" "shared GitHub issue lifecycle module changed"
           ;;
         scripts/context/agent-context-budget.mjs|scripts/context/agent-context-budget.test.mjs)
           add_command "pnpm agent:context-budget:test" "agent context budget helper changed"

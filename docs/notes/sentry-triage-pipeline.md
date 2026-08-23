@@ -3,7 +3,7 @@ title: Sentry Triage Pipeline
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-21
+last_verified: 2026-08-23
 scope: ci/process
 doc_type: runbook
 review_interval_days: 90
@@ -1038,11 +1038,14 @@ account's authorship. Rotating the token through a different account can break
 reuse and must be treated as a migration. A local config route uses the
 ambient workflow token. It only matches local issues whose `gh issue list`
 author is `app/github-actions`, while marker comments use the trusted
-`github-actions` or `github-actions[bot]` comment fence. It creates a
-new issue with `agent-ready`; for a closed match, it restores that label and
-removes `agent-active`, `in-pr`, and `needs-grooming` before reopening it, so a
-failed repair stays retryable; it leaves an open match's lifecycle unchanged. On `main`, an absent
-`SENTRY_PROJECTION_TOKEN` makes only external projection a visible no-op. A
+`github-actions` or `github-actions[bot]` comment fence. Immediately before it
+creates a local issue or repairs a closed match, it ensures the canonical shared
+`agent-ready` definition exists without force-editing existing metadata. It
+creates a new issue with `agent-ready`. For a closed match, it restores that
+label and removes `agent-active`, `in-pr`, and `needs-grooming` before reopening
+it, so a failed repair stays retryable. It leaves an open match's lifecycle
+unchanged. On `main`, an absent `SENTRY_PROJECTION_TOKEN` makes only external
+projection a visible no-op. A
 non-`main` manual triage dispatch re-queues an external verdict for the next
 `main` run. Local config projection does not require the PAT.
 

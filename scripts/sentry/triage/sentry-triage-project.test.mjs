@@ -65,6 +65,7 @@ import {
   WORKFLOW_ISSUE_AUTHOR,
 } from "./sentry-triage-project-route.mjs";
 import { BRIEF_COMMENT_MARKER } from "./sentry-triage-brief.mjs";
+import { AGENT_READY_LABEL_DEFINITION } from "../../lib/gh-issue-lifecycle.mjs";
 
 let passed = 0;
 let failed = 0;
@@ -435,15 +436,21 @@ function makeRunGh({
   issue,
   stubs = null,
   existing = [],
+  existingLabels = [AGENT_READY_LABEL_DEFINITION.name],
+  requireAgentReadyBeforeMutation = false,
   createdUrl = null,
   projectorLogin = PROJECTOR_LOGIN,
 } = {}) {
   const calls = [];
+  const repoLabels = [...existingLabels];
   const runGh = async (args, opts = {}) => {
     calls.push({ args, token: opts.token ?? null });
     const [a0, a1] = args;
     if (a0 === "api" && a1 === "user") {
       return `${projectorLogin}\n`;
+    }
+    if (a0 === "api" && a1.startsWith("repos/") && a1.includes("/labels?")) {
+      return JSON.stringify(repoLabels.map((name) => ({ name })));
     }
     if (a0 === "issue" && a1 === "view") {
       // The full field set is the queue-stub read. The exact `comments` read
@@ -480,6 +487,13 @@ function makeRunGh({
       return JSON.stringify(existing);
     }
     if (a0 === "issue" && a1 === "create") {
+      if (
+        requireAgentReadyBeforeMutation &&
+        args.includes(AGENT_READY_LABEL_DEFINITION.name) &&
+        !repoLabels.includes(AGENT_READY_LABEL_DEFINITION.name)
+      ) {
+        throw new Error("gh issue create failed: agent-ready label is absent");
+      }
       if (createdUrl == null)
         throw new Error("gh issue create failed: HTTP 403");
       return `${createdUrl}\n`;
@@ -488,10 +502,19 @@ function makeRunGh({
       a0 === "issue" &&
       (a1 === "edit" || a1 === "comment" || a1 === "reopen")
     ) {
+      if (
+        requireAgentReadyBeforeMutation &&
+        a1 === "edit" &&
+        args.includes(AGENT_READY_LABEL_DEFINITION.name) &&
+        !repoLabels.includes(AGENT_READY_LABEL_DEFINITION.name)
+      ) {
+        throw new Error("gh issue edit failed: agent-ready label is absent");
+      }
       return "";
     }
     if (a0 === "label" && a1 === "create") {
       // runProjectionBatch's idempotent self-heal of sentry:projected.
+      if (!repoLabels.includes(args[2])) repoLabels.push(args[2]);
       return "";
     }
     if (a0 === "api" && a1 === "-X" && args[2] === "DELETE") {
@@ -1671,9 +1694,84 @@ await test("runProjection projects config-fix as well", async () => {
     create.args[create.args.indexOf("-R") + 1],
     "mento-protocol/mento-analytics-api",
   );
+  assert(
+    !calls.some(
+      (call) =>
+        call.args[0] === "api" && String(call.args[1]).includes("/labels?"),
+    ),
+    "external projection must not ensure a local lifecycle label",
+  );
 });
 
 await test("runProjection creates local config work with the ambient token and agent-ready", async () => {
+  const issue = queueIssue({
+    comments: [
+      botComment(
+        verdictComment({
+          verdict: "config-fix",
+          affectedRepo: "mento-protocol/monitoring-monorepo",
+        }),
+        "2026-07-17T10:00:00Z",
+      ),
+    ],
+  });
+  const { runGh, calls } = makeRunGh({
+    issue,
+    existingLabels: [],
+    requireAgentReadyBeforeMutation: true,
+    createdUrl:
+      "https://github.com/mento-protocol/monitoring-monorepo/issues/999",
+  });
+  const result = await runProjection(
+    {
+      localRepo: "mento-protocol/monitoring-monorepo",
+      queueIssue: 500,
+      projectionToken: PAT,
+    },
+    { runGh },
+  );
+  assertEqual(result.status, "projected");
+  const labelCreate = calls.find(
+    (c) => c.args[0] === "label" && c.args[1] === "create",
+  );
+  const create = calls.find(
+    (c) => c.args[0] === "issue" && c.args[1] === "create",
+  );
+  assert(labelCreate, "expected agent-ready to be self-healed");
+  assertEqual(labelCreate.args[2], AGENT_READY_LABEL_DEFINITION.name);
+  assertEqual(
+    labelCreate.args[labelCreate.args.indexOf("--color") + 1],
+    AGENT_READY_LABEL_DEFINITION.color,
+  );
+  assertEqual(
+    labelCreate.args[labelCreate.args.indexOf("--description") + 1],
+    AGENT_READY_LABEL_DEFINITION.description,
+  );
+  assert(
+    !labelCreate.args.includes("--force"),
+    "shared lifecycle labels must not be force-edited",
+  );
+  assert(
+    calls.indexOf(labelCreate) < calls.indexOf(create),
+    "agent-ready must exist before the local issue is created",
+  );
+  assertEqual(labelCreate.token, null);
+  assertEqual(create.token, null);
+  assertEqual(
+    create.args[create.args.indexOf("-R") + 1],
+    "mento-protocol/monitoring-monorepo",
+  );
+  assert(
+    create.args.includes("agent-ready"),
+    "expected local work issue ready",
+  );
+  assert(
+    !calls.some((c) => c.token),
+    "every local projection call must use the ambient token, never the PAT",
+  );
+});
+
+await test("runProjection does not recreate an existing local agent-ready label", async () => {
   const issue = queueIssue({
     comments: [
       botComment(
@@ -1699,19 +1797,11 @@ await test("runProjection creates local config work with the ambient token and a
     { runGh },
   );
   assertEqual(result.status, "projected");
-  const create = calls.find((c) => c.args[1] === "create");
-  assertEqual(create.token, null);
-  assertEqual(
-    create.args[create.args.indexOf("-R") + 1],
-    "mento-protocol/monitoring-monorepo",
-  );
   assert(
-    create.args.includes("agent-ready"),
-    "expected local work issue ready",
-  );
-  assert(
-    !calls.some((c) => c.token),
-    "every local projection call must use the ambient token, never the PAT",
+    !calls.some(
+      (call) => call.args[0] === "label" && call.args[1] === "create",
+    ),
+    "an existing shared label must not be edited",
   );
 });
 
@@ -1737,7 +1827,12 @@ await test("runProjection reopens a closed local config work issue and restores 
       ),
     ],
   });
-  const { runGh, calls } = makeRunGh({ issue, existing });
+  const { runGh, calls } = makeRunGh({
+    issue,
+    existing,
+    existingLabels: [],
+    requireAgentReadyBeforeMutation: true,
+  });
   const result = await runProjection(
     {
       localRepo: "mento-protocol/monitoring-monorepo",
@@ -1747,8 +1842,23 @@ await test("runProjection reopens a closed local config work issue and restores 
     { runGh },
   );
   assertEqual(result.status, "reused");
+  const labelCreate = calls.find(
+    (c) => c.args[0] === "label" && c.args[1] === "create",
+  );
   const readyEdit = calls.find(
     (c) => c.args[1] === "edit" && c.args[2] === "42",
+  );
+  const reopen = calls.find(
+    (c) => c.args[1] === "reopen" && c.args[2] === "42",
+  );
+  assert(labelCreate, "expected agent-ready to be self-healed");
+  assert(
+    calls.indexOf(labelCreate) < calls.indexOf(readyEdit),
+    "agent-ready must exist before the lifecycle edit",
+  );
+  assert(
+    calls.indexOf(readyEdit) < calls.indexOf(reopen),
+    "the lifecycle edit must complete before reopen",
   );
   assert(readyEdit?.args.includes("agent-ready"), "expected ready restore");
   assertEqual(
@@ -1759,6 +1869,67 @@ await test("runProjection reopens a closed local config work issue and restores 
   assert(
     !calls.some((c) => c.token),
     "every local closed-reuse call must use the ambient token, never the PAT",
+  );
+});
+
+await test("runProjection self-heals agent-ready before reopening a closed local duplicate", async () => {
+  const existing = [
+    {
+      number: 42,
+      url: "https://github.com/mento-protocol/monitoring-monorepo/issues/42",
+      body: `${buildProjectionMarker("DUP-1")}\nrest of body`,
+      state: "CLOSED",
+      labels: ["agent-active"],
+      author: { login: "app/github-actions" },
+    },
+  ];
+  const issue = queueIssue({
+    comments: [
+      botComment(
+        verdictComment({
+          verdict: "config-fix",
+          affectedRepo: "mento-protocol/monitoring-monorepo",
+          duplicates: "[DUP-1]",
+        }),
+        "2026-07-17T10:00:00Z",
+      ),
+    ],
+  });
+  const { runGh, calls } = makeRunGh({
+    issue,
+    existing,
+    existingLabels: [],
+    requireAgentReadyBeforeMutation: true,
+  });
+  const result = await runProjection(
+    {
+      localRepo: "mento-protocol/monitoring-monorepo",
+      queueIssue: 500,
+      projectionToken: PAT,
+    },
+    { runGh },
+  );
+  assertEqual(result.status, "reused");
+  const labelCreate = calls.find(
+    (call) => call.args[0] === "label" && call.args[1] === "create",
+  );
+  const readyEdit = calls.find(
+    (call) => call.args[1] === "edit" && call.args[2] === "42",
+  );
+  const reopen = calls.find(
+    (call) => call.args[1] === "reopen" && call.args[2] === "42",
+  );
+  assert(labelCreate, "expected agent-ready to be self-healed");
+  assert(readyEdit, "expected the duplicate lifecycle to be repaired");
+  assert(reopen, "expected the duplicate issue to reopen");
+  assert(
+    calls.indexOf(labelCreate) < calls.indexOf(readyEdit) &&
+      calls.indexOf(readyEdit) < calls.indexOf(reopen),
+    "the label ensure and lifecycle repair must precede reopen",
+  );
+  assert(
+    !calls.some((call) => call.token),
+    "local duplicate reuse must use the ambient token",
   );
 });
 
@@ -1784,17 +1955,21 @@ await test("a failed local lifecycle repair remains retryable while the issue is
       ),
     ],
   });
-  const base = makeRunGh({ issue, existing });
-  let failLifecycleEdit = true;
+  const base = makeRunGh({
+    issue,
+    existing,
+    existingLabels: [],
+    requireAgentReadyBeforeMutation: true,
+  });
+  let failLabelInventory = true;
   const runGh = async (args, opts) => {
     if (
-      failLifecycleEdit &&
-      args[0] === "issue" &&
-      args[1] === "edit" &&
-      args[2] === "42"
+      failLabelInventory &&
+      args[0] === "api" &&
+      String(args[1]).includes("/labels?")
     ) {
-      failLifecycleEdit = false;
-      throw new Error("gh issue edit failed: HTTP 500");
+      failLabelInventory = false;
+      throw new Error("gh api labels failed: HTTP 500");
     }
     const result = await base.runGh(args, opts);
     if (args[0] === "issue" && args[1] === "reopen" && args[2] === "42") {
@@ -1810,9 +1985,13 @@ await test("a failed local lifecycle repair remains retryable while the issue is
 
   await assertRejects(
     runProjection(options, { runGh }),
-    /edit failed: HTTP 500/,
+    /edit failed: agent-ready label is absent/,
   );
   assertEqual(existing[0].state, "CLOSED");
+  assert(
+    base.calls.some((call) => call.args[1] === "edit" && call.args[2] === "42"),
+    "a label ensure failure must not suppress the authoritative lifecycle edit",
+  );
   assert(
     !base.calls.some((call) => call.args[1] === "reopen"),
     "a failed lifecycle repair must not reopen the issue",
@@ -1873,6 +2052,13 @@ await test("runProjection preserves the lifecycle of an open local config work i
   assert(
     !calls.some((c) => c.args[1] === "edit" && c.args[2] === "42"),
     "an open local work issue must keep its existing lifecycle labels",
+  );
+  assert(
+    !calls.some(
+      (call) =>
+        call.args[0] === "api" && String(call.args[1]).includes("/labels?"),
+    ),
+    "open local reuse must not mutate or ensure lifecycle labels",
   );
 });
 
