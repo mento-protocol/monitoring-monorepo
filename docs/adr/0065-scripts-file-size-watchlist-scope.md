@@ -3,7 +3,7 @@ title: scripts/ is inside the file-size watchlist, with named-mechanism exemptio
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-18
+last_verified: 2026-08-23
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -104,10 +104,12 @@ is the largest example and stays in the report: it is the entire subject of
 which decomposes it into sourced helper modules, so exempting it would suppress
 exactly the row that already has an owner. `pr-ready-state{,-core}.mjs` sit
 behind `materialize_feedback_runtime`'s two basename lists, required and
-optional, which already prove themselves extensible: `pr-feedback-state-claude.mjs`
-is the optional entry, and the D3 move (issue 1877) added a location resolver
-under both lists without touching either name. Two appendable arrays are not the
-six-list materializer above it. For
+optional, which already prove themselves extensible.
+`pr-feedback-state-claude.mjs` and `pr-ready-state-review-signals.mjs` are
+version-split optional entries, so coherent snapshots from before either split
+still work. The D3 move (issue 1877) added a location resolver under both lists
+without changing their names. Two appendable arrays are not the six-list
+materializer above it. For
 `deploy-staging-{contract,callsite-discovery}.mjs` only the _test_ is the
 callsite contract's single self-scan exclusion. All four stay measured. A file
 the reorganization already brought under the cap carries no entry.
