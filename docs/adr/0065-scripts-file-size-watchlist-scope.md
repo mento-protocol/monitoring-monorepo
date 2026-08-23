@@ -162,6 +162,19 @@ that nothing holds in place.
 - Two `scripts/` files join that queue: `agent-quality-gate.sh` and
   `sentry-triage-archive.mjs`. Both are over the hard cap with nothing holding
   them, and the first already has an issue.
+- **The gate's row shrinks by roughly 40% at D5c, and the residual is the
+  process-control layer by design.** Measured on `2e3df696`: the gate is 6,163
+  raw lines, of which the mapping layer — the verb helpers, the thirteen `case`
+  statements and the four post-passes at `2099-4704` — is 2,606, and the D5b
+  soak guard adds 38 more. Deleting those leaves **~3,519 raw / ~2,266 rough**,
+  against the ~3,300 the design projected. That residual is not a file waiting
+  to be split: it is the run lock, the watchdog, the orphan drain, process
+  capture, teardown and signal handling, plus the execution engine and the
+  stamps — the two layers [ADR 0069](0069-gate-routing-table-as-data.md)
+  deliberately left in bash because their safety argument rests on `mkdir`/`link`
+  atomicity, `ps -o lstart=`, Bash 3.2 job-control PGIDs and `/proc`, with no
+  oracle for a rewrite. It stays in the report, over the cap, and stated rather
+  than exempted.
 - Twenty-six further `scripts/` files sit between the watch threshold and the
   hard cap. They are recorded and delta-tracked, and any that grows by more than
   100 raw lines becomes actionable on its own.

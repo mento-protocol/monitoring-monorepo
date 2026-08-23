@@ -3,7 +3,7 @@ title: Autoreview Runtime Trust Model
 status: active
 owner: eng
 canonical: false
-last_verified: 2026-08-21
+last_verified: 2026-08-23
 doc_type: reference
 scope: repo-wide
 review_interval_days: 180
@@ -187,6 +187,55 @@ such as `GIT_DIR` and `GIT_WORK_TREE`.
 On Darwin, Homebrew-style paths that fail only that ancestry rule are accepted
 solely through sealed private snapshots of native Mach-O executables whose
 linked-library closure is entirely system-only.
+
+### The hard-linked engine binary, and why the fix stays manual
+
+A semantic-engine executable with more than one hard link is refused, and both
+routes require it: direct execution needs `nlink === 1` or root ownership, and
+the Darwin snapshot fallback requires `nlink === 1` outright
+(`agent-autoreview.mjs:1093,1124`). The rule is doing real work. The wrapper's
+guarantee is that the inode it validated is reachable only through the directory
+ancestry it inspected; a second link is a second name in a directory it never
+looked at, so the ancestry proof does not cover the file. Root ownership
+substitutes for that proof, which is why the `uid === 0` branch exists.
+
+This is reachable in ordinary use, not just in theory. Claude Code's own
+auto-updater has left `~/.local/share/claude/versions/<version>` with
+`nlink=2`, and `pnpm agent:autoreview -- --engine claude` then fails with
+`claude CLI is not available outside the reviewed repo` — the message names the
+search path, so it reads as "not installed" while the binary is present and
+runnable. It can come back after any update.
+
+**The wrapper must not repair this itself.** A same-path `cp` + `mv` inside the
+adapter would be safe as a shell command and wrong as wrapper behaviour, three
+ways. It gives a read-only validator write authority over the toolchain it
+validates, which is the trust direction this whole document argues against. It
+launders an inode the wrapper has just declined to trust into the trusted path
+by copying its bytes there — the nlink rule denies exactly that inference, and
+re-deriving it one line later does not make it true. And it edits an installer's
+bookkeeping from underneath it: the remaining link keeps the ORIGINAL inode, so
+a package manager that hard-links versions for de-duplication silently stops
+sharing storage, and any integrity check it keeps over that inode now describes
+a file the wrapper no longer runs.
+
+So it is an operator step, run deliberately, on a path the operator has looked
+at:
+
+```bash
+# Check. macOS `stat`; on Linux use `stat -c %h`.
+claude_bin="$(readlink -f "$(command -v claude)")"
+stat -f '%N nlink=%l mode=%Sp' "$claude_bin"
+
+# Repair, only when nlink is greater than 1. Same directory, mode preserved,
+# atomic replace.
+cp -p "$claude_bin" "$claude_bin.unlinked" && mv "$claude_bin.unlinked" "$claude_bin"
+```
+
+Verified on a scratch file rather than on a live install: `nlink` goes 2 → 1,
+the bytes compare equal, the mode survives, the file still executes, and the
+sibling name keeps the original inode. Re-run the check after a CLI auto-update;
+the `--engine codex` path is unaffected either way, so a blocked
+`--engine claude` is never a reason to skip the closeout review.
 
 ## Linux root recovery, ELF validation, and loader control
 
