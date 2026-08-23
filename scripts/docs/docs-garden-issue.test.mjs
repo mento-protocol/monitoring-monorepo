@@ -28,6 +28,8 @@ import {
   assertAuthorizedGardenWorkflow,
   ensureLabelsExist,
   ghPaginate,
+  ISSUE_STATE_LABEL_DEFINITIONS,
+  LABEL_DEFINITIONS,
 } from "../lib/gh-issue-lifecycle.mjs";
 
 let passed = 0;
@@ -325,6 +327,18 @@ await test("label setup creates only missing labels and never force-edits shared
   assert.ok(creates.length > 0);
   assert.ok(!creates.some((args) => args.includes("agent-ready")));
   assert.ok(!creates.some((args) => args.includes("--force")));
+});
+
+await test("default label setup excludes unrelated issue-state labels", () => {
+  const issueStateNames = new Set(
+    ISSUE_STATE_LABEL_DEFINITIONS.map((definition) => definition.name),
+  );
+  assert.deepEqual(
+    LABEL_DEFINITIONS.filter((definition) =>
+      issueStateNames.has(definition.name),
+    ).map((definition) => definition.name),
+    [AGENT_READY_LABEL_DEFINITION.name],
+  );
 });
 
 await test("label setup can ensure one shared definition without touching unrelated labels", async () => {

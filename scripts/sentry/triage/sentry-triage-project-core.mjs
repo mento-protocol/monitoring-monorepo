@@ -12,6 +12,7 @@
 
 export const DEFAULT_REPO = "mento-protocol/monitoring-monorepo";
 export const LOCAL_REPO = DEFAULT_REPO;
+
 export const VERDICT_MARKER = "<!-- sentry-triage-verdict:v1 -->";
 // Stage A posts this fixed prefix when a closed stub regresses; the regression
 // fence below rejects a verdict comment that is not strictly newer than it.

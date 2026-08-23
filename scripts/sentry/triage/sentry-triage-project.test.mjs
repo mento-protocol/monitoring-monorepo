@@ -65,7 +65,10 @@ import {
   WORKFLOW_ISSUE_AUTHOR,
 } from "./sentry-triage-project-route.mjs";
 import { BRIEF_COMMENT_MARKER } from "./sentry-triage-brief.mjs";
-import { AGENT_READY_LABEL_DEFINITION } from "../../lib/gh-issue-lifecycle.mjs";
+import {
+  AGENT_READY_LABEL_DEFINITION,
+  ISSUE_STATE_LABEL_DEFINITIONS,
+} from "../../lib/gh-issue-lifecycle.mjs";
 
 let passed = 0;
 let failed = 0;
@@ -437,7 +440,7 @@ function makeRunGh({
   stubs = null,
   existing = [],
   existingLabels = [AGENT_READY_LABEL_DEFINITION.name],
-  requireAgentReadyBeforeMutation = false,
+  requireLabelsBeforeMutation = false,
   createdUrl = null,
   projectorLogin = PROJECTOR_LOGIN,
 } = {}) {
@@ -487,12 +490,16 @@ function makeRunGh({
       return JSON.stringify(existing);
     }
     if (a0 === "issue" && a1 === "create") {
-      if (
-        requireAgentReadyBeforeMutation &&
-        args.includes(AGENT_READY_LABEL_DEFINITION.name) &&
-        !repoLabels.includes(AGENT_READY_LABEL_DEFINITION.name)
-      ) {
-        throw new Error("gh issue create failed: agent-ready label is absent");
+      if (requireLabelsBeforeMutation) {
+        const requestedLabels = args.flatMap((arg, index) =>
+          args[index - 1] === "--label" ? String(arg).split(",") : [],
+        );
+        const missing = requestedLabels.find(
+          (label) => !repoLabels.includes(label),
+        );
+        if (missing) {
+          throw new Error(`gh issue create failed: label ${missing} is absent`);
+        }
       }
       if (createdUrl == null)
         throw new Error("gh issue create failed: HTTP 403");
@@ -503,12 +510,21 @@ function makeRunGh({
       (a1 === "edit" || a1 === "comment" || a1 === "reopen")
     ) {
       if (
-        requireAgentReadyBeforeMutation &&
+        requireLabelsBeforeMutation &&
         a1 === "edit" &&
-        args.includes(AGENT_READY_LABEL_DEFINITION.name) &&
-        !repoLabels.includes(AGENT_READY_LABEL_DEFINITION.name)
+        args.includes(AGENT_READY_LABEL_DEFINITION.name)
       ) {
-        throw new Error("gh issue edit failed: agent-ready label is absent");
+        const requestedLabels = args.flatMap((arg, index) =>
+          ["--add-label", "--remove-label"].includes(args[index - 1])
+            ? String(arg).split(",")
+            : [],
+        );
+        const missing = requestedLabels.find(
+          (label) => !repoLabels.includes(label),
+        );
+        if (missing) {
+          throw new Error(`gh issue edit failed: label ${missing} is absent`);
+        }
       }
       return "";
     }
@@ -524,6 +540,37 @@ function makeRunGh({
     throw new Error(`unexpected gh call: ${args.join(" ")}`);
   };
   return { runGh, calls };
+}
+
+function assertLabelDefinitionsCreatedBefore(calls, definitions, mutation) {
+  assert(mutation, "expected the issue mutation after label setup");
+  const creates = calls.filter(
+    (call) => call.args[0] === "label" && call.args[1] === "create",
+  );
+  assertDeepEqual(
+    creates.map((call) => call.args[2]),
+    definitions.map((definition) => definition.name),
+  );
+  for (const [index, definition] of definitions.entries()) {
+    const create = creates[index];
+    assertEqual(
+      create.args[create.args.indexOf("--color") + 1],
+      definition.color,
+    );
+    assertEqual(
+      create.args[create.args.indexOf("--description") + 1],
+      definition.description,
+    );
+    assert(
+      !create.args.includes("--force"),
+      "shared lifecycle labels must not be force-edited",
+    );
+    assert(
+      calls.indexOf(create) < calls.indexOf(mutation),
+      `${definition.name} must exist before the issue mutation`,
+    );
+  }
+  return creates;
 }
 
 const PAT = "ghp_projection_token";
@@ -1718,7 +1765,7 @@ await test("runProjection creates local config work with the ambient token and a
   const { runGh, calls } = makeRunGh({
     issue,
     existingLabels: [],
-    requireAgentReadyBeforeMutation: true,
+    requireLabelsBeforeMutation: true,
     createdUrl:
       "https://github.com/mento-protocol/monitoring-monorepo/issues/999",
   });
@@ -1731,29 +1778,13 @@ await test("runProjection creates local config work with the ambient token and a
     { runGh },
   );
   assertEqual(result.status, "projected");
-  const labelCreate = calls.find(
-    (c) => c.args[0] === "label" && c.args[1] === "create",
-  );
   const create = calls.find(
     (c) => c.args[0] === "issue" && c.args[1] === "create",
   );
-  assert(labelCreate, "expected agent-ready to be self-healed");
-  assertEqual(labelCreate.args[2], AGENT_READY_LABEL_DEFINITION.name);
-  assertEqual(
-    labelCreate.args[labelCreate.args.indexOf("--color") + 1],
-    AGENT_READY_LABEL_DEFINITION.color,
-  );
-  assertEqual(
-    labelCreate.args[labelCreate.args.indexOf("--description") + 1],
-    AGENT_READY_LABEL_DEFINITION.description,
-  );
-  assert(
-    !labelCreate.args.includes("--force"),
-    "shared lifecycle labels must not be force-edited",
-  );
-  assert(
-    calls.indexOf(labelCreate) < calls.indexOf(create),
-    "agent-ready must exist before the local issue is created",
+  const [labelCreate] = assertLabelDefinitionsCreatedBefore(
+    calls,
+    [AGENT_READY_LABEL_DEFINITION],
+    create,
   );
   assertEqual(labelCreate.token, null);
   assertEqual(create.token, null);
@@ -1831,7 +1862,7 @@ await test("runProjection reopens a closed local config work issue and restores 
     issue,
     existing,
     existingLabels: [],
-    requireAgentReadyBeforeMutation: true,
+    requireLabelsBeforeMutation: true,
   });
   const result = await runProjection(
     {
@@ -1842,19 +1873,17 @@ await test("runProjection reopens a closed local config work issue and restores 
     { runGh },
   );
   assertEqual(result.status, "reused");
-  const labelCreate = calls.find(
-    (c) => c.args[0] === "label" && c.args[1] === "create",
-  );
   const readyEdit = calls.find(
     (c) => c.args[1] === "edit" && c.args[2] === "42",
   );
   const reopen = calls.find(
     (c) => c.args[1] === "reopen" && c.args[2] === "42",
   );
-  assert(labelCreate, "expected agent-ready to be self-healed");
-  assert(
-    calls.indexOf(labelCreate) < calls.indexOf(readyEdit),
-    "agent-ready must exist before the lifecycle edit",
+  assert(readyEdit, "expected the closed lifecycle to be repaired");
+  assertLabelDefinitionsCreatedBefore(
+    calls,
+    ISSUE_STATE_LABEL_DEFINITIONS,
+    readyEdit,
   );
   assert(
     calls.indexOf(readyEdit) < calls.indexOf(reopen),
@@ -1899,7 +1928,7 @@ await test("runProjection self-heals agent-ready before reopening a closed local
     issue,
     existing,
     existingLabels: [],
-    requireAgentReadyBeforeMutation: true,
+    requireLabelsBeforeMutation: true,
   });
   const result = await runProjection(
     {
@@ -1910,22 +1939,22 @@ await test("runProjection self-heals agent-ready before reopening a closed local
     { runGh },
   );
   assertEqual(result.status, "reused");
-  const labelCreate = calls.find(
-    (call) => call.args[0] === "label" && call.args[1] === "create",
-  );
   const readyEdit = calls.find(
     (call) => call.args[1] === "edit" && call.args[2] === "42",
   );
   const reopen = calls.find(
     (call) => call.args[1] === "reopen" && call.args[2] === "42",
   );
-  assert(labelCreate, "expected agent-ready to be self-healed");
   assert(readyEdit, "expected the duplicate lifecycle to be repaired");
+  assertLabelDefinitionsCreatedBefore(
+    calls,
+    ISSUE_STATE_LABEL_DEFINITIONS,
+    readyEdit,
+  );
   assert(reopen, "expected the duplicate issue to reopen");
   assert(
-    calls.indexOf(labelCreate) < calls.indexOf(readyEdit) &&
-      calls.indexOf(readyEdit) < calls.indexOf(reopen),
-    "the label ensure and lifecycle repair must precede reopen",
+    calls.indexOf(readyEdit) < calls.indexOf(reopen),
+    "the lifecycle repair must precede reopen",
   );
   assert(
     !calls.some((call) => call.token),
@@ -1959,7 +1988,7 @@ await test("a failed local lifecycle repair remains retryable while the issue is
     issue,
     existing,
     existingLabels: [],
-    requireAgentReadyBeforeMutation: true,
+    requireLabelsBeforeMutation: true,
   });
   let failLabelInventory = true;
   const runGh = async (args, opts) => {
@@ -1985,7 +2014,7 @@ await test("a failed local lifecycle repair remains retryable while the issue is
 
   await assertRejects(
     runProjection(options, { runGh }),
-    /edit failed: agent-ready label is absent/,
+    /edit failed: label agent-ready is absent/,
   );
   assertEqual(existing[0].state, "CLOSED");
   assert(
@@ -1998,19 +2027,39 @@ await test("a failed local lifecycle repair remains retryable while the issue is
   );
 
   const retryStart = base.calls.length;
+  const failedAttemptCalls = base.calls.slice(0, retryStart);
+  assert(
+    !failedAttemptCalls.some(
+      (call) => call.args[0] === "label" && call.args[1] === "create",
+    ),
+    "a failed label inventory must not claim that a label was created",
+  );
+  assert(
+    !failedAttemptCalls.some((call) => call.args[1] === "comment"),
+    "a failed lifecycle repair must not comment on the closed issue",
+  );
   const result = await runProjection(options, { runGh });
   assertEqual(result.status, "reused");
   assertEqual(existing[0].state, "OPEN");
-  const retryLifecycle = base.calls
-    .slice(retryStart)
+  const retryCalls = base.calls.slice(retryStart);
+  const retryEdit = retryCalls.find(
+    (call) => call.args[1] === "edit" && call.args[2] === "42",
+  );
+  assert(retryEdit, "expected the retry to repair the closed lifecycle");
+  assertLabelDefinitionsCreatedBefore(
+    retryCalls,
+    ISSUE_STATE_LABEL_DEFINITIONS,
+    retryEdit,
+  );
+  const retryLifecycle = retryCalls
     .filter(
       (call) =>
         call.args[0] === "issue" &&
         call.args[2] === "42" &&
-        ["edit", "reopen"].includes(call.args[1]),
+        ["edit", "reopen", "comment"].includes(call.args[1]),
     )
     .map((call) => call.args[1]);
-  assertDeepEqual(retryLifecycle, ["edit", "reopen"]);
+  assertDeepEqual(retryLifecycle, ["edit", "reopen", "comment"]);
 });
 
 await test("runProjection preserves the lifecycle of an open local config work issue", async () => {

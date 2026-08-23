@@ -10,6 +10,7 @@ import { spawn } from "node:child_process";
 import {
   AGENT_READY_LABEL_DEFINITION,
   ensureLabelsExist,
+  ISSUE_STATE_LABEL_DEFINITIONS,
 } from "../../lib/gh-issue-lifecycle.mjs";
 import { PROJECTED_LABEL } from "./sentry-triage-project-core.mjs";
 import {
@@ -191,10 +192,10 @@ const REPROJECTION_REOPEN_COMMENT =
   "Reopened by the Mento Sentry triage pipeline: the underlying Sentry issue " +
   "regressed and was re-triaged as actionable.";
 
-// The local projection route consumes the dev-backlog lifecycle label. It
-// creates only a missing label from the shared canonical definition and never
-// force-edits existing shared metadata. The ensure is best-effort. The issue
-// mutation remains authoritative and fails loudly if the label is still absent.
+// Local create consumes only the agent-ready lifecycle label. It creates a
+// missing label from the shared canonical definition and never force-edits
+// existing shared metadata. The ensure is best-effort. The issue mutation
+// remains authoritative and fails loudly if the label is still absent.
 export async function ensureAgentReadyLabel(owningRun, owningRepo) {
   try {
     await ensureLabelsExist(
@@ -211,6 +212,22 @@ export async function ensureAgentReadyLabel(owningRun, owningRepo) {
   }
 }
 
+async function ensureIssueStateLabels(owningRun, owningRepo) {
+  try {
+    await ensureLabelsExist(
+      { repo: owningRepo },
+      {
+        runner: owningRun,
+        definitions: ISSUE_STATE_LABEL_DEFINITIONS,
+      },
+    );
+  } catch (error) {
+    process.stderr.write(
+      `warning: could not ensure issue-state labels: ${error.message}\n`,
+    );
+  }
+}
+
 export async function reopenProjectedIssue(
   owningRun,
   owningRepo,
@@ -221,7 +238,7 @@ export async function reopenProjectedIssue(
   // remains CLOSED so a retry runs this repair again instead of treating the
   // stale lifecycle as an already-open issue to preserve.
   if (restoreAgentReady) {
-    await ensureAgentReadyLabel(owningRun, owningRepo);
+    await ensureIssueStateLabels(owningRun, owningRepo);
     await owningRun([
       "issue",
       "edit",

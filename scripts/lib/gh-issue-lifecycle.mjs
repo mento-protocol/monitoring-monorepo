@@ -9,11 +9,12 @@
  * the garden entrypoint — the only entrypoint-imports-entrypoint edge in
  * `scripts/` — and copied the rest. Both now read them from here.
  *
- * The local Sentry projection route also reads the canonical `agent-ready`
- * definition and calls the narrowed label ensure before it creates or repairs
- * a local work issue. Callers own their markers, metadata validation, and
- * decision branches. This module owns the shared lifecycle label definition
- * and the mechanisms that were byte-identical between the documentation jobs.
+ * The local Sentry projection route also reads the canonical issue-state label
+ * definitions. It uses the narrowed `agent-ready` definition before create and
+ * the full set before closed repair. Callers own their markers, metadata
+ * validation, and decision branches. This module owns the shared lifecycle
+ * label definitions and the mechanisms that were byte-identical between the
+ * documentation jobs.
  */
 
 import { spawn } from "node:child_process";
@@ -23,18 +24,43 @@ const GARDEN_OIDC_AUDIENCE = "mento-docs-garden";
 const GITHUB_OIDC_ISSUER = "https://token.actions.githubusercontent.com";
 const GITHUB_OIDC_REQUEST_HOST_SUFFIX = ".actions.githubusercontent.com";
 
+export const NEEDS_GROOMING_LABEL_DEFINITION = {
+  name: "needs-grooming",
+  color: "d876e3",
+  description:
+    "Needs scope, acceptance criteria, or human decision before agent work",
+};
+
 export const AGENT_READY_LABEL_DEFINITION = {
   name: "agent-ready",
   color: "0e8a16",
-  description: "Scoped work ready for an agent to claim",
+  description: "Ready for an agent to implement",
 };
 
-export const ISSUE_STATE_LABELS = [
-  "needs-grooming",
-  AGENT_READY_LABEL_DEFINITION.name,
-  "agent-active",
-  "in-pr",
+export const AGENT_ACTIVE_LABEL_DEFINITION = {
+  name: "agent-active",
+  color: "ffd33d",
+  description:
+    "An agent has claimed this issue and is working before or while opening a PR",
+};
+
+export const IN_PR_LABEL_DEFINITION = {
+  name: "in-pr",
+  color: "fef2c0",
+  description:
+    "Implementation is open in a PR; do not pick up as new agent work",
+};
+
+export const ISSUE_STATE_LABEL_DEFINITIONS = [
+  NEEDS_GROOMING_LABEL_DEFINITION,
+  AGENT_READY_LABEL_DEFINITION,
+  AGENT_ACTIVE_LABEL_DEFINITION,
+  IN_PR_LABEL_DEFINITION,
 ];
+
+export const ISSUE_STATE_LABELS = ISSUE_STATE_LABEL_DEFINITIONS.map(
+  (label) => label.name,
+);
 
 export const LABEL_DEFINITIONS = [
   AGENT_READY_LABEL_DEFINITION,

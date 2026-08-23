@@ -49,8 +49,9 @@ stays flat under `alerts/infra/` ownership; ADR 0064 gives the lint reason.
 `workflow-yaml.mjs` for Actions and shell parsing,
 `pnpm-override-selector.mjs` for pnpm overrides, and
 `gh-issue-lifecycle.mjs` for shared GitHub issue and label mechanics.
-Documentation schedulers use the full lifecycle module; local Sentry projection
-uses its narrowed `agent-ready` ensure. ADR 0064 lists each reader.
+Documentation schedulers use this module. Local projection ensures only
+`agent-ready` on create and all lifecycle labels on closed repair. ADR 0064
+lists readers.
 `peg-policy-digest.mjs` is the one definition of the peg version-digest
 contract both peg validators check. Inventories, pinned hashes, and identities
 stay with their domain.
