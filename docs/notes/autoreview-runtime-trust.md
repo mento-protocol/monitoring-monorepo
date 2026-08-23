@@ -244,9 +244,12 @@ pnpm agent:autoreview -- --engine claude
 # 2. Check the link count. `-L` is load-bearing: without it `stat` describes the
 #    SYMLINK, which always has nlink=1, and ~/.local/bin/claude is one — so the
 #    check would report healthy for a hard-linked engine behind it.
-#    macOS: stat -L -f '%N nlink=%l mode=%Sp'   GNU: stat -L -c '%n nlink=%h mode=%A'
-engine=~/.local/share/claude/versions/<version>
-stat -L -f '%N nlink=%l mode=%Sp' "$engine"
+engine="$HOME/.local/share/claude/versions/VERSION"   # VERSION from step 1
+
+engine_links() {  # BSD stat first, GNU second
+  stat -L -f '%l' "$1" 2>/dev/null || stat -L -c '%h' "$1"
+}
+echo "$engine has $(engine_links "$engine") link(s)"
 
 # 3. Repair, only when nlink is greater than 1. Runs as a function so a failure
 #    ends the repair rather than the shell you pasted it into.
@@ -258,6 +261,13 @@ repair_engine() {
   # engine hard-linked and still refused.
   [ -f "$engine" ] && [ ! -L "$engine" ] || {
     echo "$engine is not a regular file; resolve it and repair the target" >&2
+    return 1
+  }
+  # Re-check the precondition here, not only by eye in step 2. Replacing an
+  # inode that already has one link achieves nothing and breaks any
+  # hard-link de-duplication a package manager is keeping over it.
+  [ "$(engine_links "$engine")" -gt 1 ] 2>/dev/null || {
+    echo "$engine already has a single link; nothing to repair" >&2
     return 1
   }
   # Stage inside a private directory beside the engine, then rename across the

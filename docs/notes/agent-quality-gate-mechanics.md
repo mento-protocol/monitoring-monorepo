@@ -231,13 +231,13 @@ each message is greppable:
 | `gate mapping engine emitted an unknown flag record: …`                             | A `flag` record the gate does not know.                      |
 | `the gate mapping engine and the bash routing arms disagree.`                       | The guard fired. A unified diff follows, `-bash +engine`.    |
 
-The last one is the interesting one. Read the diff: a `-` line is a command the
-arms produced and the engine did not, a `+` line the reverse. Either direction
-refuses, because a routing change landed on one side only — usually a new arm
-added to `agent-quality-gate.sh` without the matching entry in
+Read that last diff by side: a `-` line is a command the arms produced and the
+engine did not, a `+` line the reverse. Either direction refuses, because a
+routing change landed on one side only — usually a new arm added to
+`agent-quality-gate.sh` without the matching entry in
 `scripts/gate/routing-table/`, which `gate-equality.test.mjs` also catches, or an
-engine change that the arms do not have yet. Fix the side that is wrong; do not
-reach for a bypass, because there is not one.
+engine change the arms do not have yet. Fix the side that is wrong. The guard
+has no bypass.
 
 To drive the guard over many path sets at once rather than the one you happen to
 have changed:
