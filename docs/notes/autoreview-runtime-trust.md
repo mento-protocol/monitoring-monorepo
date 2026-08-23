@@ -234,22 +234,39 @@ in order, and the engine is normally the versioned file under
 # 1. Read the "Probed:" list out of the refusal.
 pnpm agent:autoreview -- --engine claude
 
-# 2. Check the link count on the path the wrapper named.
-#    macOS: stat -f '%N nlink=%l mode=%Sp'    GNU: stat -c '%n nlink=%h mode=%A'
+# 2. Check the link count. `-L` is load-bearing: without it `stat` describes the
+#    SYMLINK, which always has nlink=1, and ~/.local/bin/claude is one — so the
+#    check would report healthy for a hard-linked engine behind it.
+#    macOS: stat -L -f '%N nlink=%l mode=%Sp'   GNU: stat -L -c '%n nlink=%h mode=%A'
 engine=~/.local/share/claude/versions/<version>
-stat -f '%N nlink=%l mode=%Sp' "$engine"
+stat -L -f '%N nlink=%l mode=%Sp' "$engine"
 
-# 3. Repair, only when nlink is greater than 1. Stage inside a private
-#    directory beside the engine, then rename across the same filesystem.
-stage="$(mktemp -d "$(dirname "$engine")/.engine-repair.XXXXXX")" || exit 1
-if cp -p "$engine" "$stage/engine" && mv "$stage/engine" "$engine"; then
-  rmdir "$stage"
-  echo "repaired: $engine"
-else
-  rm -rf "$stage"
-  echo "repair failed; $engine left unchanged" >&2
-  exit 1
-fi
+# 3. Repair, only when nlink is greater than 1. Runs as a function so a failure
+#    ends the repair rather than the shell you pasted it into.
+repair_engine() {
+  engine="$1"
+  [ -n "$engine" ] || { echo "no engine path given" >&2; return 1; }
+  # Repair the regular file, never a link to it: copying through a symlink and
+  # renaming over it would replace the LINK with a copy and leave the real
+  # engine hard-linked and still refused.
+  [ -f "$engine" ] && [ ! -L "$engine" ] || {
+    echo "$engine is not a regular file; resolve it and repair the target" >&2
+    return 1
+  }
+  # Stage inside a private directory beside the engine, then rename across the
+  # same filesystem.
+  stage="$(mktemp -d "$(dirname "$engine")/.engine-repair.XXXXXX")" || return 1
+  if cp -p "$engine" "$stage/engine" && mv "$stage/engine" "$engine"; then
+    rmdir "$stage"
+    echo "repaired: $engine"
+  else
+    rm -rf "$stage"
+    echo "repair failed; $engine left unchanged" >&2
+    return 1
+  fi
+}
+
+repair_engine "$engine"
 ```
 
 The staging directory is doing specific work. A predictable destination beside
@@ -266,10 +283,12 @@ the nlink refusal says is that the FILE has another name somewhere the wrapper
 never inspected; it says nothing about this directory being hostile, and the
 install directory is the user's own.
 
-Verified as written: a hard-linked engine repairs and exits 0 with its mode
+Verified as written: a hard-linked engine repairs and returns 0 with its mode
 intact and the binary still executing; symlinks planted at both older predictable
-names change nothing and leave their target untouched; an unreadable source exits
-1, says so, leaves the engine alone and removes the staging directory.
+names change nothing and leave their target untouched; an unreadable source
+returns 1, says so, leaves the engine alone and removes the staging directory; a
+symlink passed as `$engine` is refused rather than replaced by a copy; and an
+empty `$engine` is refused before anything is created.
 
 Both `stat` spellings are given because the flags are not portable, and neither
 is `readlink -f`: it works on current macOS but is absent from the BSD
