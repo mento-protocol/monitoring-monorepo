@@ -242,10 +242,12 @@ stat -f '%N nlink=%l mode=%Sp' "$engine"
 # 3. Repair, only when nlink is greater than 1. A UNIQUE name in the same
 #    directory, proven to be a regular file, then an atomic rename.
 tmp="$(mktemp "${engine}.XXXXXX")" || exit 1
-if cp -p "$engine" "$tmp" && [ -f "$tmp" ] && [ ! -L "$tmp" ]; then
-  mv "$tmp" "$engine"
+if cp -p "$engine" "$tmp" && [ -f "$tmp" ] && [ ! -L "$tmp" ] && mv "$tmp" "$engine"; then
+  echo "repaired: $engine"
 else
   rm -f "$tmp"
+  echo "repair failed; $engine left unchanged" >&2
+  exit 1
 fi
 ```
 
