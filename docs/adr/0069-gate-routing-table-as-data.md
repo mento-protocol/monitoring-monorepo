@@ -298,7 +298,7 @@ gate is not a trust root.
 - **The parity harness survives the swap, and changes job.** The design had it
   deleted here. It is kept, because after the swap its own comparison is
   circular — the gate's plan IS the engine's — while its seven corpora are now
-  the only way to drive the _in-gate_ guard across 2,905 path sets in one
+  the only way to drive the _in-gate_ guard across 2,906 path sets in one
   command. It reports a gate refusal as the difference it is instead of dying on
   it. It goes at D5c with the arms and the guard, since all three are one
   mechanism.
@@ -375,9 +375,11 @@ gate is not a trust root.
   — 13 top-level `case` statements, 53 counting nested, 232 arms, 478 distinct
   patterns of which 362 are glob-free, 29 verbs.
 - Paired-arm rationale, verbatim in the source: `agent-quality-gate.sh:3802-3834`.
-- `implementation_signature()`: `agent-quality-gate.sh:4912`. The list grew at
-  D5b part 2 — seven engine modules, two engine test files and the parity
-  harness — which is why the line moved from `4667`.
+- `implementation_signature()`: `agent-quality-gate.sh:4923`, measured at D5b
+  part 2. The list grew there — seven engine modules, two engine test files and
+  the parity harness — which is why the line moved from `4667`. Both suites
+  locate the function by NAME rather than by line, so this citation is a reading
+  aid and not a pin.
 - Routing consumers: `scripts/gate/agent-prewarm.mjs:37`;
   `scripts/production-infra-identity-contract/routing.test.mjs:127`.
 - Bash-from-Node machinery reused by the oracle:
