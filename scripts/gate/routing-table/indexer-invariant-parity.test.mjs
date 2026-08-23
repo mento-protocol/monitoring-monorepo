@@ -4,6 +4,7 @@ import {
   lstatSync,
   mkdtempSync,
   readFileSync,
+  readlinkSync,
   readdirSync,
   rmSync,
   writeFileSync,
@@ -38,15 +39,35 @@ const walkIndexerTypeScriptFiles = (directory) =>
     /\.(?:ts|tsx|mts|cts)$/.test(candidatePath),
   );
 
-const focusedRootIndexerInputs = [
-  "indexer-envio/config.multichain.bridge-only.yaml",
-  "indexer-envio/config.multichain.mainnet.yaml",
-  "indexer-envio/config.multichain.testnet.yaml",
+const focusedRootIndexerConfigs = readdirSync(`${REPO}/indexer-envio`, {
+  withFileTypes: true,
+})
+  .filter(
+    (entry) =>
+      (entry.isFile() || entry.isSymbolicLink()) &&
+      /^config.*\.yaml$/.test(entry.name),
+  )
+  .map((entry) => `indexer-envio/${entry.name}`)
+  .sort();
+
+const focusedNonConfigRootIndexerInputs = [
   "indexer-envio/schema.graphql",
   "indexer-envio/vitest.config.ts",
   "indexer-envio/vitest.fail-closed.config.ts",
   "indexer-envio/vitest.hermetic-setup.ts",
 ];
+
+const focusedRootIndexerInputs = [
+  ...focusedRootIndexerConfigs,
+  ...focusedNonConfigRootIndexerInputs,
+];
+
+const ownedRootIndexerConfigs = getIndexerHandlerInvariantRoutingFamilies()
+  .flatMap(({ exact = [] }) => exact)
+  .filter((candidatePath) =>
+    /^indexer-envio\/config[^/]*\.yaml$/.test(candidatePath),
+  )
+  .sort();
 
 const indexerPackageArm = PACKAGE_ARMS.find(
   ({ patterns }) => patterns.length === 1 && patterns[0] === "indexer-envio/*",
@@ -161,7 +182,7 @@ test("the table and core agree on every focused input outside src and test", () 
     ...walkFiles(`${REPO}/indexer-envio/config`),
     ...focusedRootIndexerInputs,
   ].sort();
-  assert.equal(paths.length, 41, "focused external-input inventory changed");
+  assert.equal(paths.length, 42, "focused external-input inventory changed");
   const decisions = getIndexerHandlerInvariantChecklistDecisions(paths);
   for (const decision of decisions) {
     assert.notEqual(
@@ -193,13 +214,38 @@ test("the table and core agree on every focused input outside src and test", () 
   );
 });
 
-test("focused root input owners cannot outlive a moved or deleted file", () => {
-  for (const candidatePath of focusedRootIndexerInputs) {
+test("focused root inputs and exact config owners cannot drift", () => {
+  assert.deepEqual(
+    ownedRootIndexerConfigs,
+    focusedRootIndexerConfigs,
+    "every current root config YAML must have one live exact owner",
+  );
+  for (const candidatePath of [
+    ...ownedRootIndexerConfigs.filter(
+      (ownedPath) => ownedPath !== "indexer-envio/config.yaml",
+    ),
+    ...focusedNonConfigRootIndexerInputs,
+  ]) {
     assert.ok(
       lstatSync(`${REPO}/${candidatePath}`).isFile(),
       `${candidatePath} must remain a regular file while the classifier owns it`,
     );
   }
+  const configAlias = `${REPO}/indexer-envio/config.yaml`;
+  assert.ok(
+    lstatSync(configAlias).isSymbolicLink(),
+    "indexer-envio/config.yaml must remain the reviewed config alias",
+  );
+  const configAliasTarget = readlinkSync(configAlias);
+  assert.equal(
+    configAliasTarget,
+    "config.multichain.mainnet.yaml",
+    "indexer-envio/config.yaml must keep its reviewed mainnet target",
+  );
+  assert.ok(
+    lstatSync(`${REPO}/indexer-envio/${configAliasTarget}`).isFile(),
+    "the indexer config alias target must remain a regular file",
+  );
 });
 
 test("focused handler and RPC test support stays routed", () => {
@@ -306,13 +352,11 @@ test("the nested dispatch is excluded-first and inventories future extensions", 
   );
   const inventoryPatterns = indexerInvariantInventoryDispatch.arms[0].patterns;
   assert.deepEqual(
-    inventoryPatterns.slice(0, 9),
+    inventoryPatterns.slice(0, 7),
     [
       "indexer-envio/abis/*",
       "indexer-envio/config/*",
-      "indexer-envio/config.multichain.bridge-only.yaml",
-      "indexer-envio/config.multichain.mainnet.yaml",
-      "indexer-envio/config.multichain.testnet.yaml",
+      "indexer-envio/config*.yaml",
       "indexer-envio/schema.graphql",
       "indexer-envio/vitest.config.ts",
       "indexer-envio/vitest.fail-closed.config.ts",
@@ -321,7 +365,7 @@ test("the nested dispatch is excluded-first and inventories future extensions", 
     "the focused external runtime and test-support inventory changed",
   );
   assert.deepEqual(
-    inventoryPatterns.slice(9),
+    inventoryPatterns.slice(7),
     futurePatterns,
     "the inventory dispatch lost a future TypeScript pattern",
   );
@@ -376,6 +420,28 @@ test("the nested dispatch is excluded-first and inventories future extensions", 
       );
     }
   }
+});
+
+test("future root indexer configs trigger the exact-owner inventory", () => {
+  const candidatePath = "indexer-envio/config.multichain.owner-probe.yaml";
+  assert.ok(
+    matchesAny(
+      indexerInvariantInventoryDispatch.arms[0].patterns,
+      candidatePath,
+    ),
+    `${candidatePath} must trigger the invariant inventory check`,
+  );
+  assert.deepEqual(
+    getIndexerHandlerInvariantChecklistDecisions([candidatePath]),
+    [
+      {
+        path: candidatePath,
+        route: false,
+        owner: "outside-indexer-handler-invariant-scope",
+      },
+    ],
+  );
+  assert.equal(tableIndexerInvariantDecision(candidatePath), false);
 });
 
 test("exact owners do not widen into same-namespace files", () => {

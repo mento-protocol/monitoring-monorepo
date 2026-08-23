@@ -154,6 +154,7 @@ for (const [candidatePath, route, owner] of [
     "abi-nonruntime-inputs",
   ],
   ["indexer-envio/config/fx-calendar.json", true, "config-runtime-inputs"],
+  ["indexer-envio/config.yaml", true, "root-runtime-inputs"],
   ["indexer-envio/config.multichain.mainnet.yaml", true, "root-runtime-inputs"],
   ["indexer-envio/schema.graphql", true, "root-runtime-inputs"],
   ["indexer-envio/vitest.config.ts", true, "test-runtime-inputs"],

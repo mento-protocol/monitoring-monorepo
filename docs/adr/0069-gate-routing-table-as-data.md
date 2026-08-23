@@ -129,12 +129,13 @@ paths fail import.
 `route: false` families form the excluded arm. Routed exact paths form the
 second arm. The live Bash case carries the same exact patterns, so the normal
 equality test pins the derived table against the code that runs. Eight future
-`src|test` plus `ts|tsx|mts|cts` patterns and the two broad `abis/` and `config/`
-patterns only trigger the inventory check. They do not enter either checklist
-arm. The TypeScript fallback returns `route: false` until the adding PR gives
-the path an explicit owner. New ABI and config files also inherit no checklist
-route. Exact owners cover every current ABI and config input, the three
-multichain YAML files, and `schema.graphql`. Three more exact routes cover `vitest.config.ts`,
+`src|test` plus `ts|tsx|mts|cts` patterns, the two broad `abis/` and `config/`
+patterns, and the broad root `config*.yaml` pattern only trigger the inventory
+check. They do not enter either checklist arm. The TypeScript fallback returns
+`route: false` until the adding PR gives the path an explicit owner. New ABI,
+config-directory, and root config YAML files also inherit no checklist route.
+Exact owners cover every current ABI, config-directory, and root config YAML
+input, plus `schema.graphql`. Three more exact routes cover `vitest.config.ts`,
 `vitest.fail-closed.config.ts`, and `vitest.hermetic-setup.ts`.
 A source path routes when the production handler entrypoint, a registered
 handler, an RPC facade or effect, or a self-heal stage executes it and the
@@ -149,12 +150,12 @@ helpers, the console-only RPC logger adapter, the two vendored ABIs that no
 current runtime consumes, and tests limited to an independent config-copy,
 script, or warning-format contract stay explicitly excluded.
 A focused parity test covers all current TypeScript paths below `src/` and
-`test/`, every current file below `abis/` and `config/`, the four root runtime
-inputs, the three root test-support inputs, exact owners, exclusions, and
-synthetic future extensions. The local indexer route runs it for these 17
-inventory patterns, and the indexer CI job runs it for every indexer change. A
-new `src/` or `test/` TypeScript path must gain an explicit owner in the PR that
-adds it.
+`test/`, every current file below `abis/` and `config/`, every current root
+`config*.yaml` file, `schema.graphql`, the three root test-support inputs,
+exact owners, exclusions, and synthetic future extensions. The local indexer
+route runs it for these 15 inventory patterns, and the indexer CI job runs it
+for every indexer change. A new `src/` or `test/` TypeScript path, root config
+YAML, ABI, or config file must gain an explicit owner in the PR that adds it.
 
 Autoreview imports the classifier from the same selected runtime as its helper.
 For a wrapper-attested runtime, the wrapper verifies the sealed runtime

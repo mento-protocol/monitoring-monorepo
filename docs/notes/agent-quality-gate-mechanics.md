@@ -94,11 +94,12 @@ table derives an excluded-first, routed-second checklist dispatch from this
 view. The live Bash case mirrors the derived patterns, and the routing-table
 equality test pins both copies. The checklist arms contain exact current paths
 only. Eight broad inventory patterns cover `.ts`, `.tsx`, `.mts`, and `.cts`
-below `indexer-envio/src/` and `indexer-envio/test/`. Two more inventory
-patterns cover `indexer-envio/abis/` and `indexer-envio/config/`. None of these
-broad patterns routes the checklist. Exact owners also cover the three
-multichain YAML files, `indexer-envio/schema.graphql`, the main Vitest
-configuration, the fail-closed fixture configuration, and the hermetic setup.
+below `indexer-envio/src/` and `indexer-envio/test/`. Three more inventory
+patterns cover `indexer-envio/abis/`, `indexer-envio/config/`, and root
+`indexer-envio/config*.yaml` files. None of these broad patterns routes the
+checklist. Exact owners also cover every current root config YAML,
+`indexer-envio/schema.graphql`, the main Vitest configuration, the fail-closed
+fixture configuration, and the hermetic setup.
 
 The routed source boundary follows executable dependencies from the production
 handler entrypoint, registered handlers, RPC facades and effects, and self-heal
@@ -113,14 +114,16 @@ that no current runtime consumes, and tests that enforce a separate config-copy,
 script, or warning-format contract.
 
 The focused indexer parity test compares all current TypeScript paths below
-`src/` and `test/`, every current file below `abis/` and `config/`, the four root
-runtime inputs, and the three root test-support inputs against the table.
-The local gate runs it for all 17 inventory patterns, and the indexer CI job
-runs it for every indexer change. A new `src/` or `test/` TypeScript path is
-classified as `future-typescript` with `route: false`. The inventory assertion
-requires the adding PR to give it an explicit owner. A new file below `abis/`
-or `config/` also runs the inventory assertion without inheriting a checklist
-route. Other paths outside `src/` and `test/` stay outside this classifier.
+`src/` and `test/`, every current file below `abis/` and `config/`, every
+current root `config*.yaml` file, `schema.graphql`, and the three root
+test-support inputs against the table. The local gate runs it for all 15
+inventory patterns, and the indexer CI job runs it for every indexer change. A
+new `src/` or `test/` TypeScript path is classified as `future-typescript` with
+`route: false`. The inventory assertion requires the adding PR to give it an
+explicit owner. A new file below `abis/` or `config/`, or a new root
+`config*.yaml` file, also runs the inventory assertion without inheriting a
+checklist route. Other paths outside `src/` and `test/` stay outside this
+classifier.
 Core-only edits route the autoreview suite, the routing-table suite, and the
 gate self-test. The core is also an explicit freshness-signature input and a
 Turbo input beside the routing-table directory.

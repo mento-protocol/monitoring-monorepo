@@ -2285,6 +2285,7 @@ assert_not_contains "vitest related --run config/aggregators.json"
 indexer_invariant_positive_paths=(
   "indexer-envio/abis/liquity/FXPriceFeed.json"
   "indexer-envio/config/fx-calendar.json"
+  "indexer-envio/config.yaml"
   "indexer-envio/config.multichain.mainnet.yaml"
   "indexer-envio/vitest.fail-closed.config.ts"
   "indexer-envio/src/rpc/http-test-mocks.ts"
@@ -2304,6 +2305,7 @@ done
 indexer_invariant_negative_inventory_paths=(
   "indexer-envio/abis/liquity/AddressesRegistry.json"
   "indexer-envio/abis/wormhole/NttDeployHelper.json"
+  "indexer-envio/config.multichain.owner-probe.yaml"
   "indexer-envio/src/handlers/liquity/troveManagerPreloadContext.ts"
   "indexer-envio/src/pool/types.ts"
   "indexer-envio/src/rpc/log.ts"

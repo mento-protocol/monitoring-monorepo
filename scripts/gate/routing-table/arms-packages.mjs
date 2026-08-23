@@ -59,6 +59,7 @@ const indexerHandlerInvariantTypeScriptPatterns =
 const indexerHandlerInvariantExternalInventoryPatterns = [
   "indexer-envio/abis/*",
   "indexer-envio/config/*",
+  "indexer-envio/config*.yaml",
 ];
 const indexerHandlerInvariantInventoryPatterns = uniquePatterns([
   ...indexerHandlerInvariantExternalInventoryPatterns,
@@ -68,6 +69,7 @@ const indexerHandlerInvariantInventoryPatterns = uniquePatterns([
       (pattern) =>
         !pattern.startsWith("indexer-envio/abis/") &&
         !pattern.startsWith("indexer-envio/config/") &&
+        !/^indexer-envio\/config[^/]*\.yaml$/.test(pattern) &&
         !pattern.startsWith("indexer-envio/src/") &&
         !pattern.startsWith("indexer-envio/test/"),
     ),
@@ -493,7 +495,7 @@ export const PACKAGE_ARMS = [
         ],
       },
       {
-        why: "Every current or future src/test TypeScript path and every focused external runtime or test-support input must keep an explicit owner in the core. This test runs for all seventeen inventory patterns before a later scripts-only change can discover drift.",
+        why: "Every current or future src/test TypeScript path and every focused external runtime or test-support input must keep an explicit owner in the core. This test runs for all fifteen inventory patterns before a later scripts-only change can discover drift.",
         dispatch: "path",
         arms: [
           {

@@ -2375,6 +2375,7 @@ const INDEXER_HANDLER_INVARIANT_FAMILIES =
       owner: "root-runtime-inputs",
       route: true,
       exact: [
+        "indexer-envio/config.yaml",
         "indexer-envio/config.multichain.bridge-only.yaml",
         "indexer-envio/config.multichain.mainnet.yaml",
         "indexer-envio/config.multichain.testnet.yaml",
