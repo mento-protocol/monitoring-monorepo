@@ -3,7 +3,7 @@ title: PR Operating Card
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-21
+last_verified: 2026-08-22
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -113,8 +113,9 @@ even when you never open an authority.
 
 5. **Ship.** Open the PR through the `ship` skill on every surface, including
    hosted sessions — do not hand-roll PR creation. The description starts with
-   `## The Problem` (at most three plain-language bullets) then `## The
-Solution` (approach before implementation detail). PRs open **ready for
+   `## The Problem` then `## The Solution`. Those sections explain the old
+   behavior, new behavior, concrete benefit, and any material limit before
+   implementation terms. PRs open **ready for
    review, never as drafts**; use draft only when the user asks or required
    validation is intentionally pending, and state that reason in the body. Link
    the issue with `Closes #N` **only when the issue's Done means is fully
