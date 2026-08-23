@@ -6000,7 +6000,8 @@ run_feedback_runtime_aggregate_regression() {
     pr-feedback-state-claude.mjs \
     pr-ready-state.mjs \
     pr-ready-state-core.mjs \
-    pr-ready-state-format.mjs; do
+    pr-ready-state-format.mjs \
+    pr-ready-state-review-signals.mjs; do
     printf 'export {};\n' >"$review_repo/scripts/pr/$runtime_file"
   done
   commit_review_repo "$review_repo" init
