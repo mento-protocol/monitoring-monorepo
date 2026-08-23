@@ -239,10 +239,23 @@ pnpm agent:autoreview -- --engine claude
 engine=~/.local/share/claude/versions/<version>
 stat -f '%N nlink=%l mode=%Sp' "$engine"
 
-# 3. Repair, only when nlink is greater than 1. Same directory, mode preserved,
-#    atomic replace.
-cp -p "$engine" "$engine.unlinked" && mv "$engine.unlinked" "$engine"
+# 3. Repair, only when nlink is greater than 1. A UNIQUE name in the same
+#    directory, proven to be a regular file, then an atomic rename.
+tmp="$(mktemp "${engine}.XXXXXX")" || exit 1
+if cp -p "$engine" "$tmp" && [ -f "$tmp" ] && [ ! -L "$tmp" ]; then
+  mv "$tmp" "$engine"
+else
+  rm -f "$tmp"
+fi
 ```
+
+The unique name is not fussiness. This runs in a directory the wrapper has
+explicitly declined to trust, so a predictable destination like
+`"$engine".unlinked` is a symlink-following overwrite: measured, if that name
+already exists as a symlink, `cp -p` writes the engine's bytes THROUGH it into
+whatever it points at, and the `mv` then installs the symlink at the engine path.
+`mktemp` creates the file itself, and the `-f`/`-L` pair rejects anything that is
+not the regular file it just made.
 
 Both `stat` spellings are given because the flags are not portable, and neither
 is `readlink -f`: it works on current macOS but is absent from the BSD
