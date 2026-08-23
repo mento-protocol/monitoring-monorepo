@@ -7710,8 +7710,15 @@ if [ -n "\${RACE_STUB_VICTIM_PID:-}" ] || [ -n "\${RACE_STUB_VICTIM_LSTART:-}" ]
     echo "race stub victim identity and violation file must be set together" >&2
     exit 64
   }
+  race_stub_victim_state="\$(TZ=UTC LC_ALL=C LANG=C ps -p "\$RACE_STUB_VICTIM_PID" -o stat= 2>/dev/null | awk 'NF { print \$1; exit }' || true)"
   race_stub_victim_start="\$(TZ=UTC LC_ALL=C LANG=C ps -p "\$RACE_STUB_VICTIM_PID" -o lstart= 2>/dev/null || true)"
-  if [ -n "\$race_stub_victim_start" ] && [ "\$race_stub_victim_start" = "\$RACE_STUB_VICTIM_LSTART" ]; then
+  case "\$race_stub_victim_state" in
+    Z*) race_stub_victim_can_execute=0 ;;
+    *) race_stub_victim_can_execute=1 ;;
+  esac
+  if [ -n "\$race_stub_victim_start" ] &&
+    [ "\$race_stub_victim_start" = "\$RACE_STUB_VICTIM_LSTART" ] &&
+    [ "\$race_stub_victim_can_execute" -eq 1 ]; then
     if ! (set -C && printf 'victim=%s|%s\\n' "\$RACE_STUB_VICTIM_PID" "\$RACE_STUB_VICTIM_LSTART" > "\$RACE_STUB_VIOLATION_FILE") 2>/dev/null; then
       echo "race stub could not atomically publish the C-before-victim-death violation" >&2
       exit 64
@@ -8158,6 +8165,16 @@ STUB
       fail "the production zombie supervisor did not publish a confirmed zombie"
     sleep 0.1
   done
+  race_zombie_overlap_violation="$gate_race_out/production-zombie-overlap.violation"
+  RACE_STUB_VICTIM_PID="$race_zombie_child" \
+    RACE_STUB_VICTIM_LSTART="$race_zombie_child_start" \
+    RACE_STUB_VIOLATION_FILE="$race_zombie_overlap_violation" \
+    RACE_STUB_SECONDS=0 \
+    "$gate_race_repo/tools/trunk" check fixture.txt \
+    > "$gate_race_out/production-zombie-overlap.out" 2>&1 ||
+    fail "the production zombie overlap probe command failed"
+  [[ ! -e "$race_zombie_overlap_violation" ]] ||
+    fail "the overlap probe treated a confirmed zombie as executable"
   : > "$gate_race_log"
   rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
   rm -f "$gate_race_root"/captured.* "$gate_race_root"/holder.*
