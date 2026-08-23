@@ -221,15 +221,32 @@ a file the wrapper no longer runs.
 So it is an operator step, run deliberately, on a path the operator has looked
 at:
 
-```bash
-# Check. macOS `stat`; on Linux use `stat -c %h`.
-claude_bin="$(readlink -f "$(command -v claude)")"
-stat -f '%N nlink=%l mode=%Sp' "$claude_bin"
+**Ask the wrapper which file it means — do not guess with `command -v`.** The
+helper searches `AUTOREVIEW_<COMMAND>_BIN`, then `PATH`, then well-known install
+directories, and `command -v claude` can resolve to something else entirely: on
+one machine here it returned a `cmux-cli-shims` wrapper in `$TMPDIR` with its own
+`nlink=1`, so checking it would have reported a healthy link count for a file the
+autoreview wrapper never runs. The refusal message prints every path it probed,
+in order, and the engine is normally the versioned file under
+`~/.local/share/claude/versions/`:
 
-# Repair, only when nlink is greater than 1. Same directory, mode preserved,
-# atomic replace.
-cp -p "$claude_bin" "$claude_bin.unlinked" && mv "$claude_bin.unlinked" "$claude_bin"
+```bash
+# 1. Read the "Probed:" list out of the refusal.
+pnpm agent:autoreview -- --engine claude
+
+# 2. Check the link count on the path the wrapper named.
+#    macOS: stat -f '%N nlink=%l mode=%Sp'    GNU: stat -c '%n nlink=%h mode=%A'
+engine=~/.local/share/claude/versions/<version>
+stat -f '%N nlink=%l mode=%Sp' "$engine"
+
+# 3. Repair, only when nlink is greater than 1. Same directory, mode preserved,
+#    atomic replace.
+cp -p "$engine" "$engine.unlinked" && mv "$engine.unlinked" "$engine"
 ```
+
+Both `stat` spellings are given because the flags are not portable, and neither
+is `readlink -f`: it works on current macOS but is absent from the BSD
+`readlink` on older releases, and this repository declares no minimum macOS.
 
 Verified on a scratch file rather than on a live install: `nlink` goes 2 → 1,
 the bytes compare equal, the mode survives, the file still executes, and the
