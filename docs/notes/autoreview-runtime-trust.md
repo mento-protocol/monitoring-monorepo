@@ -239,35 +239,47 @@ pnpm agent:autoreview -- --engine claude
 engine=~/.local/share/claude/versions/<version>
 stat -f '%N nlink=%l mode=%Sp' "$engine"
 
-# 3. Repair, only when nlink is greater than 1. A UNIQUE name in the same
-#    directory, proven to be a regular file, then an atomic rename.
-tmp="$(mktemp "${engine}.XXXXXX")" || exit 1
-if cp -p "$engine" "$tmp" && [ -f "$tmp" ] && [ ! -L "$tmp" ] && mv "$tmp" "$engine"; then
+# 3. Repair, only when nlink is greater than 1. Stage inside a private
+#    directory beside the engine, then rename across the same filesystem.
+stage="$(mktemp -d "$(dirname "$engine")/.engine-repair.XXXXXX")" || exit 1
+if cp -p "$engine" "$stage/engine" && mv "$stage/engine" "$engine"; then
+  rmdir "$stage"
   echo "repaired: $engine"
 else
-  rm -f "$tmp"
+  rm -rf "$stage"
   echo "repair failed; $engine left unchanged" >&2
   exit 1
 fi
 ```
 
-The unique name is not fussiness. This runs in a directory the wrapper has
-explicitly declined to trust, so a predictable destination like
-`"$engine".unlinked` is a symlink-following overwrite: measured, if that name
-already exists as a symlink, `cp -p` writes the engine's bytes THROUGH it into
-whatever it points at, and the `mv` then installs the symlink at the engine path.
-`mktemp` creates the file itself, and the `-f`/`-L` pair rejects anything that is
-not the regular file it just made.
+The staging directory is doing specific work. A predictable destination beside
+the engine — `"$engine".unlinked`, say — is a symlink-following overwrite:
+measured, if that name already exists as a symlink, `cp -p` writes the engine's
+bytes THROUGH it into whatever it points at, and the `mv` then installs the
+symlink at the engine path. Creating the file with `mktemp` and checking it
+afterwards is not enough either, because the check happens after `cp` has already
+opened the name: anything that can write to the directory can swap the file for a
+symlink in between. `mktemp -d` sidesteps the whole argument by writing into a
+`0700` directory created in one step, which nothing but this user can enter, and
+the rename stays inside the engine's own filesystem so it is still atomic. What
+the nlink refusal says is that the FILE has another name somewhere the wrapper
+never inspected; it says nothing about this directory being hostile, and the
+install directory is the user's own.
+
+Verified as written: a hard-linked engine repairs and exits 0 with its mode
+intact and the binary still executing; symlinks planted at both older predictable
+names change nothing and leave their target untouched; an unreadable source exits
+1, says so, leaves the engine alone and removes the staging directory.
 
 Both `stat` spellings are given because the flags are not portable, and neither
 is `readlink -f`: it works on current macOS but is absent from the BSD
 `readlink` on older releases, and this repository declares no minimum macOS.
 
-Verified on a scratch file rather than on a live install: `nlink` goes 2 → 1,
-the bytes compare equal, the mode survives, the file still executes, and the
-sibling name keeps the original inode. Re-run the check after a CLI auto-update;
-the `--engine codex` path is unaffected either way, so a blocked
-`--engine claude` is never a reason to skip the closeout review.
+Every check above ran on a scratch tree rather than on a live install: `nlink`
+goes 2 → 1, the bytes compare equal, and the sibling name keeps the original
+inode. Re-run the check after a CLI auto-update; the `--engine codex` path is
+unaffected either way, so a blocked `--engine claude` is never a reason to skip
+the closeout review.
 
 ## Linux root recovery, ELF validation, and loader control
 
