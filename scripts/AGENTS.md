@@ -41,9 +41,9 @@ subdirectories.
 | `sentry/`       | triage/autofix/gate/broker/ci-wiring   |
 
 `lib/` and `production-infra-identity-contract/` predate the reorganization.
-`setup.sh` stays flat because `.config/wt.toml` uses its exact Worktrunk
-pre-start path and eight docs name it. `redrive-onchain-deadletter.{mjs,test.mjs}`
-stays flat under `alerts/infra/` ownership; ADR 0064 gives the lint reason.
+`.config/wt.toml` pins flat `setup.sh` as its Worktrunk pre-start path; eight
+docs also name it. `redrive-onchain-deadletter.{mjs,test.mjs}` stays flat under
+`alerts/infra/`; ADR 0064 gives the lint reason.
 
 `lib/` holds cores that multiple clusters read: `hcl.mjs` for Terraform HCL,
 `workflow-yaml.mjs` for Actions and shell parsing,
@@ -52,9 +52,8 @@ stays flat under `alerts/infra/` ownership; ADR 0064 gives the lint reason.
 Documentation schedulers use this module. Local projection ensures only
 `agent-ready` on create and all lifecycle labels on closed repair. ADR 0064
 lists readers.
-`peg-policy-digest.mjs` is the one definition of the peg version-digest
-contract both peg validators check. Inventories, pinned hashes, and identities
-stay with their domain.
+`peg-policy-digest.mjs` defines the peg version-digest contract for both
+validators. Inventories, pinned hashes, and identities stay with their domain.
 
 ## Why Files Stay Flat
 
