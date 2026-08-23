@@ -763,9 +763,8 @@ await test("classifyIssue routes a re-triaged-architectural stub to Open design 
 });
 
 await test("classifyIssue picks up a projected-issue pointer for the routed link", () => {
-  // Only an EXTERNAL code-fix genuinely projects and routes; a local one holds
-  // under sentry:fix-scope-architectural in its own section (#1812), so this
-  // projected-pointer case uses an external owning repo.
+  // An external code-fix and an exact local config-fix both project. Local
+  // code-fix remains outside this route because it is autofix or design work.
   const entry = classifyIssue(
     issueFixture({
       labels: ["sentry-triage", "sentry:verdict-code-fix"],
@@ -782,6 +781,28 @@ await test("classifyIssue picks up a projected-issue pointer for the routed link
   );
   assertEqual(entry.section, "routed");
   assertEqual(entry.projectedUrl, PROJECTED_URL);
+});
+
+await test("classifyIssue routes a local config-fix to its projected local work issue", () => {
+  const localWorkUrl =
+    "https://github.com/mento-protocol/monitoring-monorepo/issues/99";
+  const entry = classifyIssue(
+    issueFixture({
+      labels: ["sentry-triage", "sentry:verdict-config-fix"],
+      comments: [
+        {
+          body: verdictComment({
+            verdict: "config-fix",
+            affectedRepo: "mento-protocol/monitoring-monorepo",
+          }),
+        },
+        { body: `${PROJECTED_COMMENT_PREFIX}${localWorkUrl}` },
+      ],
+    }),
+  );
+  assertEqual(entry.section, "routed");
+  assertEqual(entry.owningRepoIsLocal, true);
+  assertEqual(entry.projectedUrl, localWorkUrl);
 });
 
 await test("classifyIssue puts still-needs-triage issues in the failed bucket/section", () => {

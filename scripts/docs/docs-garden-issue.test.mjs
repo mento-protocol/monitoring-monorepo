@@ -24,9 +24,12 @@ import {
   runDocsGardenIssue,
 } from "./docs-garden-issue.mjs";
 import {
+  AGENT_READY_LABEL_DEFINITION,
   assertAuthorizedGardenWorkflow,
   ensureLabelsExist,
   ghPaginate,
+  ISSUE_STATE_LABEL_DEFINITIONS,
+  LABEL_DEFINITIONS,
 } from "../lib/gh-issue-lifecycle.mjs";
 
 let passed = 0;
@@ -324,6 +327,48 @@ await test("label setup creates only missing labels and never force-edits shared
   assert.ok(creates.length > 0);
   assert.ok(!creates.some((args) => args.includes("agent-ready")));
   assert.ok(!creates.some((args) => args.includes("--force")));
+});
+
+await test("default label setup excludes unrelated issue-state labels", () => {
+  const issueStateNames = new Set(
+    ISSUE_STATE_LABEL_DEFINITIONS.map((definition) => definition.name),
+  );
+  assert.deepEqual(
+    LABEL_DEFINITIONS.filter((definition) =>
+      issueStateNames.has(definition.name),
+    ).map((definition) => definition.name),
+    [AGENT_READY_LABEL_DEFINITION.name],
+  );
+});
+
+await test("label setup can ensure one shared definition without touching unrelated labels", async () => {
+  const calls = [];
+  await ensureLabelsExist(
+    { repo: "owner/repo" },
+    {
+      definitions: [AGENT_READY_LABEL_DEFINITION],
+      runner: async (args) => {
+        calls.push(args);
+        if (args[0] === "api") return "[]";
+        return "";
+      },
+    },
+  );
+  const creates = calls.filter(
+    (args) => args[0] === "label" && args[1] === "create",
+  );
+  assert.equal(creates.length, 1);
+  assert.deepEqual(creates[0], [
+    "label",
+    "create",
+    AGENT_READY_LABEL_DEFINITION.name,
+    "--repo",
+    "owner/repo",
+    "--color",
+    AGENT_READY_LABEL_DEFINITION.color,
+    "--description",
+    AGENT_READY_LABEL_DEFINITION.description,
+  ]);
 });
 
 await test("an open occurrence remains the target even after the calendar advances", () => {

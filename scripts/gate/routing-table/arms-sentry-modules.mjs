@@ -97,6 +97,7 @@ export const SENTRY_MODULE_ARMS = [
     patterns: [
       "scripts/sentry/triage/sentry-triage-project.mjs",
       "scripts/sentry/triage/sentry-triage-project-core.mjs",
+      "scripts/sentry/triage/sentry-triage-project-route.mjs",
       "scripts/sentry/triage/sentry-triage-project-cli.mjs",
       "scripts/sentry/triage/sentry-triage-label-ensure.mjs",
       "scripts/sentry/triage/sentry-triage-project.test.mjs",

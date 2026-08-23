@@ -3,7 +3,7 @@ title: scripts/ may use module subdirectories; basenames and pinned paths are th
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-22
+last_verified: 2026-08-23
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -368,7 +368,8 @@ not only the arm of the consumer that happens to fail loudest.
   domain directories: five files beyond `production-infra-identity-contract/`
   read `hcl.mjs`; the ADR 0053 deploy-staging contract reads
   `workflow-yaml.mjs`; the lockfile-lint gate and the override prune advisor
-  both read `pnpm-override-selector.mjs`; the documentation garden and the
-  navigation-eval scheduler both read `gh-issue-lifecycle.mjs`.
+  both read `pnpm-override-selector.mjs`; the documentation garden, the
+  navigation-eval scheduler, and local Sentry projection read
+  `gh-issue-lifecycle.mjs`.
 - Programme tracking issue:
   <https://github.com/mento-protocol/monitoring-monorepo/issues/1877>.

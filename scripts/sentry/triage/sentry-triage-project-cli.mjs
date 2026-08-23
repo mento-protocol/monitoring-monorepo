@@ -26,10 +26,10 @@ export function usage() {
   return `Usage: pnpm sentry:project --issue <queue-issue-number> [options]
 
 Deterministically projects an actionable (code-fix/config-fix) triage verdict
-for an EXTERNAL owning repo into a human-readable issue in that repo, labels the
-queue stub ${PROJECTED_LABEL}, and comments the projected issue URL. Prints a
-single-line JSON result ({"status": "...", "url": "..."}) to stdout; diagnostics
-and workflow annotations go to stderr.
+to an allowlisted external owning repo or an exact local config-fix work issue,
+labels the queue stub ${PROJECTED_LABEL}, and comments the projected issue URL.
+Prints a single-line JSON result ({"status": "...", "url": "..."}) to stdout;
+diagnostics and workflow annotations go to stderr.
 
 Statuses: projected | reused | skipped-verdict | skipped-repo | skipped-no-token
 (batch rows additionally: skipped-state | failed)
@@ -45,9 +45,12 @@ Options:
   --issues <json>      JSON array of queue-issue numbers (batch mode).
   --repo <owner/name>  Repo the queue stub lives in (default: ${DEFAULT_REPO}).
   --parse-only         Resolve and print the validated verdict + mapped label +
-                       projectability + shed list + architecturalHold
-                       ({"verdict","label","projectable","shed","architecturalHold"}
-                       JSON) without projecting. \`label\` is a comma list on a
+                       external projectability + projection destination + shed
+                       list + architecturalHold
+                       ({"verdict","label","projectable","projectionDestination","shed","architecturalHold"}
+                       JSON) without projecting. \`projectable\` remains
+                       external-only; \`projectionDestination\` is external,
+                       local-config, or none. \`label\` is a comma list on a
                        local code-fix + fix_scope:architectural verdict (adds
                        sentry:fix-scope-architectural), and architecturalHold then
                        tells the close step to leave the stub open. Used by the
@@ -81,9 +84,10 @@ Options:
 
 Env:
   SENTRY_PROJECTION_TOKEN  Fine-grained PAT (Issues R/W on the three owning
-                           repos) for the cross-repo create/search. Absent ->
-                           graceful no-op (status skipped-no-token).
-  GH_TOKEN                 Ambient github.token for local queue-stub mutations.
+                           repos) for external create/search. Absent ->
+                           graceful no-op for external routing only.
+  GH_TOKEN                 Ambient github.token for queue stubs and local
+                           config-fix work issues.
 `;
 }
 

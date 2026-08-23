@@ -4941,6 +4941,11 @@ assert_contains "- pnpm sentry:ingest:test (Sentry re-queue chokepoint changed)"
 run_gate "scripts/sentry/triage/sentry-triage-project.mjs"
 assert_contains "- pnpm sentry:project:test (Sentry triage projection helper changed)"
 
+# The route module owns external-PAT versus local-config I/O. A route-only
+# edit must still run the projection contract suite.
+run_gate "scripts/sentry/triage/sentry-triage-project-route.mjs"
+assert_contains "- pnpm sentry:project:test (Sentry triage projection helper changed)"
+
 # The argv surface and the settlement label self-heal, split out of the entry
 # module for the 1,000-line hard cap (#1827). Both are reached only through that
 # leg, so an unrouted change to either would ship untested.
@@ -5539,6 +5544,7 @@ run_gate "scripts/lib/gh-issue-lifecycle.mjs"
 assert_contains "- pnpm lint:scripts (root build script changed)"
 assert_contains "- pnpm docs:garden:test (shared GitHub issue lifecycle module changed)"
 assert_contains "- pnpm docs:navigation-eval:test (shared GitHub issue lifecycle module changed)"
+assert_contains "- pnpm sentry:project:test (shared GitHub issue lifecycle module changed)"
 
 run_gate "docs/evals/documentation-navigation-fixtures.json"
 assert_contains "- pnpm docs:navigation-eval:test (documentation navigation evaluation contract changed)"

@@ -3847,10 +3847,11 @@ while IFS= read -r path; do
         scripts/lib/gh-issue-lifecycle.mjs)
           # The `gh` runner, pagination guard, Documentation Garden workflow
           # authorization, label bootstrap, and queue-state arbitration behind
-          # both scheduled issue automations. Neither suite covers the other's
-          # consumer, so a shared module belongs in both arms.
+          # both scheduled issue automations, plus the narrowed local Sentry
+          # projection label ensure. Each consumer suite must run here.
           add_command "pnpm docs:garden:test" "shared GitHub issue lifecycle module changed"
           add_command "pnpm docs:navigation-eval:test" "shared GitHub issue lifecycle module changed"
+          add_command "pnpm sentry:project:test" "shared GitHub issue lifecycle module changed"
           ;;
         scripts/context/agent-context-budget.mjs|scripts/context/agent-context-budget.test.mjs)
           add_command "pnpm agent:context-budget:test" "agent context budget helper changed"
@@ -3970,7 +3971,7 @@ while IFS= read -r path; do
           add_command "pnpm sentry:archive:test" "Sentry needs-human brief helper changed"
           add_command "pnpm sentry:project:test" "Sentry needs-human brief helper changed"
           ;;
-        scripts/sentry/triage/sentry-triage-project.mjs|scripts/sentry/triage/sentry-triage-project-core.mjs|scripts/sentry/triage/sentry-triage-project-cli.mjs|scripts/sentry/triage/sentry-triage-label-ensure.mjs|scripts/sentry/triage/sentry-triage-project.test.mjs|scripts/sentry/triage/sentry-triage-text.mjs|scripts/sentry/triage/sentry-triage-projection.mjs|scripts/sentry/triage/sentry-triage-escalation-contract.mjs)
+        scripts/sentry/triage/sentry-triage-project.mjs|scripts/sentry/triage/sentry-triage-project-core.mjs|scripts/sentry/triage/sentry-triage-project-route.mjs|scripts/sentry/triage/sentry-triage-project-cli.mjs|scripts/sentry/triage/sentry-triage-label-ensure.mjs|scripts/sentry/triage/sentry-triage-project.test.mjs|scripts/sentry/triage/sentry-triage-text.mjs|scripts/sentry/triage/sentry-triage-projection.mjs|scripts/sentry/triage/sentry-triage-escalation-contract.mjs)
           # sentry-triage-project-cli.mjs (the argv surface) and
           # sentry-triage-label-ensure.mjs (the settlement label self-heal) were
           # split out of the entry module for the 1,000-line cap (#1827); both

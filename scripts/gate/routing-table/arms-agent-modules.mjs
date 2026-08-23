@@ -238,12 +238,16 @@ export const AGENT_MODULE_ARMS = [
     patterns: ["scripts/lib/gh-issue-lifecycle.mjs"],
     effects: [
       {
-        why: "The `gh` runner, pagination guard, Documentation Garden workflow authorization, label bootstrap, and queue-state arbitration behind both scheduled issue automations. Neither suite covers the other's consumer, so a shared module belongs in both arms.",
+        why: "The `gh` runner, pagination guard, Documentation Garden workflow authorization, label bootstrap, and queue-state arbitration behind both scheduled issue automations, plus the narrowed local Sentry projection label ensure. Each consumer suite must run here.",
         command: "pnpm docs:garden:test",
         reason: "shared GitHub issue lifecycle module changed",
       },
       {
         command: "pnpm docs:navigation-eval:test",
+        reason: "shared GitHub issue lifecycle module changed",
+      },
+      {
+        command: "pnpm sentry:project:test",
         reason: "shared GitHub issue lifecycle module changed",
       },
     ],

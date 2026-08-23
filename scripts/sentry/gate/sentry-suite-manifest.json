@@ -70,7 +70,8 @@
     },
     "scripts/sentry/triage/sentry-triage-project.test.mjs": {
       "reporter": "count-line",
-      "floor": 112
+      "floor": 140,
+      "reads": [".github/workflows/sentry-triage-agent.yml"]
     },
     "scripts/sentry/triage/sentry-triage-requeue.test.mjs": {
       "reporter": "count-line",
