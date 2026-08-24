@@ -37,8 +37,16 @@ force.
 - Register one sUSDS sampler every 600 produced Ethereum blocks from
   `max(chain.startBlock, 24573203)`. The sampler reads the block timestamp and
   share price through effects with the same key in preload and processing.
-- Skip a sample when the timestamp is unavailable. Fail before any entity write
-  when a post-launch share-price read is unavailable. Preload never writes.
+- Cap each of the three Ethereum reserve-yield sampler RPC effects at four
+  dispatches per fixed one-second window. Envio applies limits per effect, so
+  this permits at most 12 top-level effect executions per worker in each
+  window. Retries and fallback requests inside an execution are additional
+  provider calls.
+- Fail the launch baseline when its exact timestamp or share-price read is
+  unavailable, so Envio retries it before post-launch writes. For later
+  sampler callbacks, skip before any entity write when the timestamp or share
+  price is unavailable; the next 600-block callback retries. Invalid non-null
+  values still fail. Preload never writes.
 - Update one UTC-day row by its deterministic `(chainId, token, day)` ID. Use
   the launch row or latest earlier row as the delta baseline, including across
   days with no intervening sample.

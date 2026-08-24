@@ -321,6 +321,7 @@ export async function recordSusdsYieldHeartbeatSnapshot(
     blockTimestamp,
   };
   if (meta.blockTimestamp < V3_REVENUE_LAUNCH_TIMESTAMP) return false;
+  if (effects.sharePriceUsdWei === null) return false;
 
   const validSharePriceUsdWei = requireSharePrice(
     effects.sharePriceUsdWei,

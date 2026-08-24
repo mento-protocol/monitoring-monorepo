@@ -31,6 +31,7 @@ import {
 import { ZERO_ADDRESS } from "../src/constants.ts";
 import {
   blockTimestampEffect,
+  RESERVE_YIELD_SAMPLER_MAX_EFFECT_DISPATCHES_PER_SECOND,
   susdsSharePriceEffect,
 } from "../src/rpc/effects.ts";
 
@@ -219,6 +220,10 @@ function heartbeatContext(
 // Run through `pnpm indexer:reserve-yield:test`, which codegens the dedicated
 // chain-1 reserve-yield config before executing these event-level tests.
 describeReserveYield("sUSDS reserve yield accounting", () => {
+  it("bounds aggregate reserve-yield sampler effect dispatches", () => {
+    assert.equal(RESERVE_YIELD_SAMPLER_MAX_EFFECT_DISPATCHES_PER_SECOND, 12);
+  });
+
   afterEach(() => {
     _clearMockSusdsSharePrices();
   });
@@ -742,21 +747,51 @@ describeReserveYield("sUSDS reserve yield accounting", () => {
     assert.deepEqual(calls, preloadCalls);
   });
 
-  it("fails the sUSDS heartbeat when a valid timestamp has no share price", async () => {
-    const mockDb = MockDb.createMockDb();
+  it("skips a null post-launch share price and resumes at the next heartbeat", async () => {
+    let mockDb = MockDb.createMockDb();
+    const day1 = V3_REVENUE_LAUNCH_TIMESTAMP + 86_400n;
+    const day2 = day1 + 86_400n;
 
-    await assert.rejects(
-      handleSusdsYieldDailySnapshotHeartbeat({
+    setSharePrice(100, WAD);
+    mockDb = await deposit(
+      mockDb,
+      100,
+      0,
+      dollars(1000),
+      dollars(1000),
+      Number(day1 + 3_600n),
+    );
+    await recordSusdsYieldLaunchBaseline(dailySnapshotContext(mockDb), {
+      blockTimestamp: V3_REVENUE_LAUNCH_BLOCK_TIMESTAMP,
+      sharePriceUsdWei: WAD,
+    });
+
+    assert.equal(
+      await handleSusdsYieldDailySnapshotHeartbeat({
         block: { number: 300 },
+        context: heartbeatContext(mockDb, day2 + 3_600n, null, 300n),
+      }),
+      false,
+    );
+    assert.equal(dailySnapshots(mockDb).length, 1);
+
+    assert.equal(
+      await handleSusdsYieldDailySnapshotHeartbeat({
+        block: { number: 900 },
         context: heartbeatContext(
           mockDb,
-          V3_REVENUE_LAUNCH_TIMESTAMP + 1n,
-          null,
+          day2 + 7_200n,
+          dollars(120) / 100n,
+          900n,
         ),
       }),
-      /convertToAssets\(1e18\) unavailable at block 300/,
+      true,
     );
-    assert.equal(dailySnapshots(mockDb).length, 0);
+    const rows = dailySnapshots(mockDb).sort((a, b) =>
+      a.timestamp < b.timestamp ? -1 : 1,
+    );
+    assert.equal(rows.length, 2);
+    assert.equal(rows[1]?.sampledAtBlock, 900n);
   });
 
   it("skips the sUSDS heartbeat before launch when the share price is null", async () => {
@@ -974,6 +1009,15 @@ describeReserveYield("sUSDS reserve yield accounting", () => {
         },
       }),
       /launch block timestamp unavailable or invalid/,
+    );
+    assert.equal(dailySnapshots(mockDb).length, 0);
+
+    await assert.rejects(
+      recordSusdsYieldLaunchBaseline(dailySnapshotContext(mockDb), {
+        blockTimestamp: V3_REVENUE_LAUNCH_BLOCK_TIMESTAMP,
+        sharePriceUsdWei: null,
+      }),
+      /convertToAssets\(1e18\) unavailable at block 24573203/,
     );
     assert.equal(dailySnapshots(mockDb).length, 0);
 
