@@ -225,28 +225,7 @@ export function toAddressEntry(
 ): AddressEntry | null {
   if (!hasUsableLabel(data)) return null;
 
-  // EVM addresses are chain-agnostic, so the same `arkhamEntity`/`arkhamLabel`
-  // typically appears on every covered chain. Pick the strongest signal once;
-  // union tags across all chains.
-  let label: string | undefined;
-  let entity: ArkhamEntity | null = null;
-  let topPrediction: ArkhamEntityPrediction | undefined;
-  const tagSet = new Set<string>();
-
-  for (const perChain of Object.values(data)) {
-    const trimmed = perChain.arkhamLabel?.name?.trim();
-    if (!label && trimmed) label = trimmed;
-    if (!entity && perChain.arkhamEntity?.name?.trim())
-      entity = perChain.arkhamEntity;
-    if (entity?.type) tagSet.add(entity.type);
-    addChainTags(perChain, tagSet);
-    for (const p of perChain.entityPredictions ?? []) {
-      if (p.confidence < HIGH_CONFIDENCE) continue;
-      if (!topPrediction || p.confidence > topPrediction.confidence) {
-        topPrediction = p;
-      }
-    }
-  }
+  const { label, entity, topPrediction, tagSet } = resolveArkhamSignal(data);
 
   // Prefer the curated label, then entity name, then the predicted entity ID.
   const name = label || entity?.name?.trim() || topPrediction?.entityId || "";
@@ -351,6 +330,57 @@ export async function enrichBatch(
   }
 
   return results;
+}
+
+/**
+ * Pick the highest-confidence entity prediction between `current` and a
+ * per-chain prediction list, ignoring anything below `HIGH_CONFIDENCE`.
+ */
+function pickBetterPrediction(
+  current: ArkhamEntityPrediction | undefined,
+  predictions: ArkhamEntityPrediction[] | undefined,
+): ArkhamEntityPrediction | undefined {
+  let best = current;
+  for (const p of predictions ?? []) {
+    if (p.confidence < HIGH_CONFIDENCE) continue;
+    if (!best || p.confidence > best.confidence) best = p;
+  }
+  return best;
+}
+
+/**
+ * Reduce a multi-chain Arkham response to one signal set: the strongest
+ * curated label/entity found on any chain, the highest-confidence ML
+ * prediction across all chains, and the union of tag identifiers.
+ *
+ * EVM addresses are chain-agnostic, so the same `arkhamEntity`/`arkhamLabel`
+ * typically appears on every covered chain — pick the strongest signal once.
+ */
+function resolveArkhamSignal(data: ArkhamMultiChainResponse): {
+  label: string | undefined;
+  entity: ArkhamEntity | null;
+  topPrediction: ArkhamEntityPrediction | undefined;
+  tagSet: Set<string>;
+} {
+  let label: string | undefined;
+  let entity: ArkhamEntity | null = null;
+  let topPrediction: ArkhamEntityPrediction | undefined;
+  const tagSet = new Set<string>();
+
+  for (const perChain of Object.values(data)) {
+    const trimmed = perChain.arkhamLabel?.name?.trim();
+    if (!label && trimmed) label = trimmed;
+    if (!entity && perChain.arkhamEntity?.name?.trim())
+      entity = perChain.arkhamEntity;
+    if (entity?.type) tagSet.add(entity.type);
+    addChainTags(perChain, tagSet);
+    topPrediction = pickBetterPrediction(
+      topPrediction,
+      perChain.entityPredictions,
+    );
+  }
+
+  return { label, entity, topPrediction, tagSet };
 }
 
 /**

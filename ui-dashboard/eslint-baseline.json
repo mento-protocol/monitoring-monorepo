@@ -59,14 +59,14 @@
     "file": "src/app/bridge-flows/opengraph-image.tsx",
     "ruleId": "max-lines-per-function",
     "message": "Function 'Card' has too many lines (129). Maximum allowed is 100.",
-    "line": 91,
+    "line": 92,
     "linePreview": " | function Card({ data }: { data: BridgeFlowsOgData | null }) { | // null → \"—\" (snapshot query failed); 0 → \"$0\" (genuinely no bridge"
   },
   {
     "file": "src/app/opengraph-image.tsx",
     "ruleId": "max-lines-per-function",
     "message": "Function 'Card' has too many lines (158). Maximum allowed is 100.",
-    "line": 93,
+    "line": 94,
     "linePreview": " | function Card({ data }: { data: HomepageOgData | null }) { | // null → \"—\" (unavailable); 0 → \"$0.00\" (real empty state)."
   },
   {
@@ -122,28 +122,28 @@
     "file": "src/app/pool/[poolId]/opengraph-image.tsx",
     "ruleId": "complexity",
     "message": "Function 'Card' has a complexity of 24. Maximum allowed is 15.",
-    "line": 214,
+    "line": 215,
     "linePreview": " | function Card({ data }: { data: PoolOgData | null }) { | const name = data?.name ?? \"Mento Pool\";"
   },
   {
     "file": "src/app/pool/[poolId]/opengraph-image.tsx",
     "ruleId": "max-lines-per-function",
     "message": "Function 'Card' has too many lines (121). Maximum allowed is 100.",
-    "line": 214,
+    "line": 215,
     "linePreview": " | function Card({ data }: { data: PoolOgData | null }) { | const name = data?.name ?? \"Mento Pool\";"
   },
   {
     "file": "src/app/pools/_components/pools-page-client.tsx",
     "ruleId": "complexity",
     "message": "Function 'PoolsContent' has a complexity of 26. Maximum allowed is 15.",
-    "line": 67,
+    "line": 70,
     "linePreview": "// eslint-disable-next-line max-lines-per-function -- Existing page component owns network data, table controls, and degraded-count messaging. | function PoolsContent({ | initialNetworkData,"
   },
   {
     "file": "src/app/pools/_components/pools-page-client.tsx",
     "ruleId": "sonarjs/cognitive-complexity",
     "message": "Refactor this function to reduce its Cognitive Complexity from 24 to the 18 allowed.",
-    "line": 67,
+    "line": 70,
     "linePreview": "// eslint-disable-next-line max-lines-per-function -- Existing page component owns network data, table controls, and degraded-count messaging. | function PoolsContent({ | initialNetworkData,"
   },
   {
@@ -241,14 +241,14 @@
     "file": "src/components/pool-header/deviation-cell.tsx",
     "ruleId": "complexity",
     "message": "Function 'DeviationCell' has a complexity of 23. Maximum allowed is 15.",
-    "line": 27,
+    "line": 28,
     "linePreview": " | export function DeviationCell({ | pool,"
   },
   {
     "file": "src/components/pool-header/uptime-value.tsx",
     "ruleId": "complexity",
     "message": "Function 'UptimeValue' has a complexity of 29. Maximum allowed is 15.",
-    "line": 79,
+    "line": 81,
     "linePreview": " | export function UptimeValue({ pool }: { pool: Pool }) { | const isVirtual = isVirtualPool(pool);"
   },
   {
@@ -316,30 +316,16 @@
   },
   {
     "file": "src/lib/arkham.ts",
-    "ruleId": "complexity",
-    "message": "Function 'toAddressEntry' has a complexity of 28. Maximum allowed is 15.",
-    "line": 223,
-    "linePreview": "*/ | export function toAddressEntry( | data: ArkhamMultiChainResponse,"
-  },
-  {
-    "file": "src/lib/arkham.ts",
     "ruleId": "max-depth",
     "message": "Blocks are nested too deeply (5). Maximum allowed is 4.",
-    "line": 334,
+    "line": 313,
     "linePreview": "} catch (retryErr) { | if (retryErr instanceof ArkhamAuthError) throw retryErr; | results.push({"
   },
   {
     "file": "src/lib/arkham.ts",
     "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 21 to the 18 allowed.",
-    "line": 223,
-    "linePreview": "*/ | export function toAddressEntry( | data: ArkhamMultiChainResponse,"
-  },
-  {
-    "file": "src/lib/arkham.ts",
-    "ruleId": "sonarjs/cognitive-complexity",
     "message": "Refactor this function to reduce its Cognitive Complexity from 30 to the 18 allowed.",
-    "line": 309,
+    "line": 288,
     "linePreview": " | export async function enrichBatch( | addresses: string[],"
   },
   {
