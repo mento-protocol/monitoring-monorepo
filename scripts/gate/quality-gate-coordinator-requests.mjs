@@ -33,7 +33,7 @@ export function registerRequest(
     requestId,
     fingerprint,
     worktreeKey,
-    drainToken,
+    drainIdentity,
     capability,
     owner,
     metadata = {},
@@ -42,7 +42,7 @@ export function registerRequest(
   commit,
 ) {
   identifier(requestId, "requestId");
-  validateRunToken(drainToken, "drainToken");
+  validateRunToken(drainIdentity, "drainIdentity");
   text(worktreeKey, "worktreeKey", 4096);
   validateIdentity(owner);
   jsonSize(metadata, "metadata");
@@ -53,7 +53,7 @@ export function registerRequest(
     assertRequestAuthority(existing, owner, capability);
     if (
       existing.fingerprint !== fingerprint ||
-      existing.drainToken !== drainToken ||
+      existing.drainIdentity !== drainIdentity ||
       existing.worktreeKey !== worktreeKey
     ) {
       throw new CoordinatorError(
@@ -68,14 +68,14 @@ export function registerRequest(
       existing,
     );
   }
-  const drainTokenOwner = Object.values(coordinator.state.requests).find(
-    (request) => request.drainToken === drainToken,
+  const drainIdentityOwner = Object.values(coordinator.state.requests).find(
+    (request) => request.drainIdentity === drainIdentity,
   );
-  if (drainTokenOwner) {
+  if (drainIdentityOwner) {
     throw new CoordinatorError(
       "DRAIN_TOKEN_CONFLICT",
-      "drainToken belongs to another active request",
-      { requestId: drainTokenOwner.requestId },
+      "drainIdentity belongs to another active request",
+      { requestId: drainIdentityOwner.requestId },
     );
   }
   const singleflight = coordinator.state.singleflights[hash];
@@ -110,7 +110,7 @@ export function registerRequest(
     fingerprint,
     fingerprintHash: hash,
     worktreeKey,
-    drainToken,
+    drainIdentity,
     capabilityHash,
     owner: copy(owner),
     metadata: copy(metadata),
@@ -125,7 +125,7 @@ export function registerRequest(
       left.requestId === right.requestId &&
       left.fingerprint === right.fingerprint &&
       left.worktreeKey === right.worktreeKey &&
-      left.drainToken === right.drainToken &&
+      left.drainIdentity === right.drainIdentity &&
       left.capabilityHash === right.capabilityHash &&
       identitiesEqual(left.owner, right.owner),
   );
@@ -151,7 +151,7 @@ export function registerRequest(
     fingerprint,
     fingerprintHash: hash,
     worktreeKey,
-    drainToken,
+    drainIdentity,
     capabilityHash,
     owner: copy(owner),
     role,

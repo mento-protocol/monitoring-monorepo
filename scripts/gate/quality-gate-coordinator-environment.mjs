@@ -469,9 +469,9 @@ export function materialEnvironmentDigest({
 }) {
   const physicalRepoRoot = realpathSync(repoRoot);
   const localBinPath = join(physicalRepoRoot, "node_modules", ".bin");
-  const localBinToken = `${worktreeToken}/node_modules/.bin`;
+  const localBinEntry = `${worktreeToken}/node_modules/.bin`;
   const gateScratchPath = join(physicalRepoRoot, gateScratchRelativePath);
-  const gateScratchToken = `${worktreeToken}/${gateScratchRelativePath}`;
+  const gateScratchEntry = `${worktreeToken}/${gateScratchRelativePath}`;
   const entries = selectedEnvironmentEntries(environment).map(
     ([name, rawValue]) => {
       const value = rawValue ?? "";
@@ -482,7 +482,7 @@ export function materialEnvironmentDigest({
             .split(delimiter)
             .map((entry) =>
               pathResolvesTo(entry, localBinPath, workingDirectory)
-                ? localBinToken
+                ? localBinEntry
                 : entry,
             )
             .join(delimiter),
@@ -498,7 +498,7 @@ export function materialEnvironmentDigest({
         (name === "TMPDIR" || name === "TMP" || name === "TEMP") &&
         pathResolvesTo(value, gateScratchPath, workingDirectory)
       ) {
-        return [name, gateScratchToken];
+        return [name, gateScratchEntry];
       }
       return [name, value];
     },

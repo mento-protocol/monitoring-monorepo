@@ -35,7 +35,7 @@ function validateRequest(request, key, sequences) {
     reject(`${path}.fingerprintHash`, "does not match fingerprint");
   }
   text(request.worktreeKey, `${path}.worktreeKey`, 4096);
-  runToken(request.drainToken, `${path}.drainToken`);
+  runToken(request.drainIdentity, `${path}.drainIdentity`);
   sha256(request.capabilityHash, `${path}.capabilityHash`);
   identity(request.owner, `${path}.owner`);
   oneOf(request.role, ["leader", "follower", "completed"], `${path}.role`);
@@ -295,7 +295,7 @@ function validateObligation(obligation, key, state) {
   }
   identifier(obligation.leaseId, `${path}.leaseId`);
   identifier(obligation.requestId, `${path}.requestId`);
-  runToken(obligation.drainToken, `${path}.drainToken`);
+  runToken(obligation.drainIdentity, `${path}.drainIdentity`);
   identity(obligation.owner, `${path}.owner`);
   positiveInteger(obligation.weight, `${path}.weight`);
   const resources = array(obligation.resources, `${path}.resources`);
@@ -327,7 +327,7 @@ function validateObligation(obligation, key, state) {
   if (
     request.pendingTerminal === null ||
     request.pendingTerminal.payload.reason !== obligation.reason ||
-    request.drainToken !== obligation.drainToken ||
+    request.drainIdentity !== obligation.drainIdentity ||
     !identitiesEqual(request.owner, obligation.owner) ||
     !identitiesEqual(lease.owner, obligation.owner) ||
     lease.weight !== obligation.weight ||
@@ -375,14 +375,14 @@ export function validatePersistedJournal(state, capacity) {
   }
   const requestTokens = new Map();
   for (const request of Object.values(state.requests)) {
-    const owner = requestTokens.get(request.drainToken);
+    const owner = requestTokens.get(request.drainIdentity);
     if (owner) {
       reject(
-        `requests.${request.requestId}.drainToken`,
+        `requests.${request.requestId}.drainIdentity`,
         `duplicates the drain token owned by ${owner.requestId}`,
       );
     }
-    requestTokens.set(request.drainToken, request);
+    requestTokens.set(request.drainIdentity, request);
   }
   const heldWorktrees = new Map();
   for (const request of Object.values(state.requests)) {
@@ -497,9 +497,9 @@ export function validatePersistedJournal(state, capacity) {
 
   const obligationsByToken = new Map();
   for (const obligation of Object.values(state.drainObligations)) {
-    const siblings = obligationsByToken.get(obligation.drainToken) ?? [];
+    const siblings = obligationsByToken.get(obligation.drainIdentity) ?? [];
     siblings.push(obligation);
-    obligationsByToken.set(obligation.drainToken, siblings);
+    obligationsByToken.set(obligation.drainIdentity, siblings);
   }
   for (const [token, obligations] of obligationsByToken) {
     const requestId = obligations[0].requestId;

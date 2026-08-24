@@ -242,7 +242,7 @@ export function registrationFor(state, capacity, request) {
   return {
     role: request.role,
     requestId: request.requestId,
-    drainToken: request.drainToken,
+    drainIdentity: request.drainIdentity,
     executionId: request.executionId,
     leaderRequestId:
       request.leaderRequestId ??

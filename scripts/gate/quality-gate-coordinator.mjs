@@ -445,7 +445,7 @@ async function runCli(argv) {
         ...commonOwnerParams(parsed),
         fingerprint: required(parsed, "--fingerprint"),
         worktreeKey: required(parsed, "--worktree-key"),
-        drainToken: drainId,
+        drainIdentity: drainId,
         successMaxAgeMs: integer(parsed, "--success-max-age-ms", 0),
         metadata: json(parsed, "--metadata-json", {}),
         bindConnection: parsed.flags.has("--bind-connection"),
@@ -533,7 +533,7 @@ async function runCli(argv) {
       action = "acknowledge-drain";
       params = {
         obligationId: required(parsed, "--obligation-id"),
-        drainToken: drainId,
+        drainIdentity: drainId,
         drainer: owner(parsed, "drainer"),
         evidence: json(parsed, "--evidence-json", {}),
       };
@@ -548,7 +548,7 @@ async function runCli(argv) {
           : "release-drain-claim";
       params = {
         obligationId: required(parsed, "--obligation-id"),
-        drainToken: drainId,
+        drainIdentity: drainId,
         claimant: owner(parsed, "claimant"),
       };
       break;

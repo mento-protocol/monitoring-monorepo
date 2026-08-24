@@ -451,7 +451,7 @@ gate_coordinator_recover_stale_obligations() {
     const value = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
     for (const item of value.drainObligations ?? []) {
       if (process.argv[1] && item.requestId !== process.argv[1]) continue;
-      process.stdout.write(`${item.obligationId ?? ""}|${item.drainToken ?? ""}\n`);
+      process.stdout.write(`${item.obligationId ?? ""}|${item.drainIdentity ?? ""}\n`);
     }
   ' "$request_filter")" || return 2
   while IFS='|' read -r obligation_id drain_token; do
@@ -490,7 +490,7 @@ gate_coordinator_recover_stale_obligations() {
       const obligation = value.obligation ?? {};
       process.exit(value.claimed === true &&
         obligation.obligationId === process.argv[1] &&
-        obligation.drainToken === process.argv[2] ? 0 : 1);
+        obligation.drainIdentity === process.argv[2] ? 0 : 1);
     ' "$obligation_id" "$drain_token"; then
       gate_coordinator_cli release-drain-claim \
         --obligation-id "$obligation_id" --drain-token "$drain_token" \

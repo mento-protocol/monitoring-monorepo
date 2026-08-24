@@ -1798,11 +1798,11 @@ if ! /bin/bash -c '
     case "$1" in
       status)
         printf "%s\n" \
-          "{\"drainObligations\":[{\"obligationId\":\"obligation-1\",\"drainToken\":\"fixture-drain-1-1\"}]}"
+          "{\"drainObligations\":[{\"obligationId\":\"obligation-1\",\"drainIdentity\":\"fixture-drain-1-1\"}]}"
         ;;
       claim-drain)
         printf "%s\n" \
-          "{\"claimed\":true,\"obligation\":{\"obligationId\":\"obligation-1\",\"drainToken\":\"fixture-drain-1-1\"}}"
+          "{\"claimed\":true,\"obligation\":{\"obligationId\":\"obligation-1\",\"drainIdentity\":\"fixture-drain-1-1\"}}"
         ;;
       ack-drain)
         : > "$ack_marker"

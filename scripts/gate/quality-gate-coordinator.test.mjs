@@ -212,12 +212,12 @@ async function register(
   requestOwner,
   options = {},
 ) {
-  const drainId = options.drainToken ?? `test-${requestId}-1234-1770000000`;
+  const drainId = options.drainIdentity ?? `test-${requestId}-1234-1770000000`;
   return rpc(fixture, "register", {
     requestId,
     fingerprint,
     worktreeKey: options.worktreeKey ?? `/tmp/${requestId}`,
-    drainToken: drainId,
+    drainIdentity: drainId,
     capability: options.capability ?? capabilityFor(requestId),
     owner: requestOwner,
     successMaxAgeMs: options.successMaxAgeMs ?? 0,
@@ -266,7 +266,7 @@ async function status(fixture) {
 async function claimObligation(fixture, obligation, claimant) {
   return rpc(fixture, "claim-drain", {
     obligationId: obligation.obligationId,
-    drainToken: obligation.drainToken,
+    drainIdentity: obligation.drainIdentity,
     claimant,
   });
 }
@@ -424,7 +424,7 @@ test("request capabilities protect exposed request and lease identities", async 
         ...attackerOwnerParams,
         fingerprint: "capability-fingerprint",
         worktreeKey: exposedRequest.worktreeKey,
-        drainToken: exposedRequest.drainToken,
+        drainIdentity: exposedRequest.drainIdentity,
         successMaxAgeMs: 0,
       },
     ],
@@ -674,11 +674,11 @@ test("startup rejects corrupt journals before recovery or legacy adoption", asyn
     },
     {
       name: "duplicate request drain token",
-      path: "requests.journal-follower.drainToken",
+      path: "requests.journal-follower.drainIdentity",
       mutate: (state) => {
         const follower = state.requests["journal-follower"];
         const active = state.requests["journal-active"];
-        follower.drainToken = active.drainToken;
+        follower.drainIdentity = active.drainIdentity;
       },
     },
     {
@@ -732,7 +732,7 @@ test("startup rejects corrupt journals before recovery or legacy adoption", asyn
     },
     {
       name: "partial token-scoped drain claim",
-      path: `drainObligations.${validJournal.requests["journal-draining"].drainToken}`,
+      path: `drainObligations.${validJournal.requests["journal-draining"].drainIdentity}`,
       mutate: (state) => {
         drainingObligation(state).claim = {
           claimant: owner(229),
@@ -1187,13 +1187,13 @@ test("one active request owns each drain token across restart", async () => {
   const fixture = await createFixture();
   const firstOwner = owner(230);
   const secondOwner = owner(231);
-  const drainToken = runToken("exclusive", 230, 1_770_000_000);
+  const drainIdentity = runToken("exclusive", 230, 1_770_000_000);
   const first = await register(
     fixture,
     "drain-token-first",
     "drain-token-first-fp",
     firstOwner,
-    { drainToken },
+    { drainIdentity },
   );
   assert.equal(first.requestId, "drain-token-first");
 
@@ -1203,7 +1203,7 @@ test("one active request owns each drain token across restart", async () => {
       "drain-token-second",
       "drain-token-second-fp",
       secondOwner,
-      { drainToken },
+      { drainIdentity },
     ),
     (error) =>
       error.code === "DRAIN_TOKEN_CONFLICT" &&
@@ -1221,13 +1221,13 @@ test("one active request owns each drain token across restart", async () => {
   );
   await assert.rejects(
     register(fixture, "drain-token-first", "drain-token-first-fp", firstOwner, {
-      drainToken: runToken("changed", 230, 1_770_000_000),
+      drainIdentity: runToken("changed", 230, 1_770_000_000),
     }),
     (error) => error.code === "REQUEST_ID_CONFLICT",
   );
   await assert.rejects(
     register(fixture, "drain-token-first", "drain-token-first-fp", firstOwner, {
-      drainToken,
+      drainIdentity,
       worktreeKey: "/tmp/changed-worktree",
     }),
     (error) => error.code === "REQUEST_ID_CONFLICT",
@@ -1239,7 +1239,7 @@ test("one active request owns each drain token across restart", async () => {
         "drain-token-first",
         "drain-token-first-fp",
         firstOwner,
-        { drainToken },
+        { drainIdentity },
       )
     ).requestId,
     "drain-token-first",
@@ -1263,7 +1263,7 @@ test("one active request owns each drain token across restart", async () => {
         "drain-token-first",
         "drain-token-first-fp",
         firstOwner,
-        { drainToken },
+        { drainIdentity },
       )
     ).requestId,
     "drain-token-first",
@@ -1274,7 +1274,7 @@ test("one active request owns each drain token across restart", async () => {
       "drain-token-second",
       "drain-token-second-fp",
       secondOwner,
-      { drainToken },
+      { drainIdentity },
     ),
     (error) => error.code === "DRAIN_TOKEN_CONFLICT",
   );
@@ -1301,7 +1301,7 @@ test("a journal commit failure stops the coordinator before dirty state is serve
     capability: capabilityFor("durable-bound-request"),
     fingerprint: "durable-bound-fingerprint",
     worktreeKey: "/tmp/durable-bound-request",
-    drainToken: runToken("durable", 221, 1_770_000_000),
+    drainIdentity: runToken("durable", 221, 1_770_000_000),
     owner: boundOwner,
     successMaxAgeMs: 0,
     bindConnection: true,
@@ -1315,7 +1315,7 @@ test("a journal commit failure stops the coordinator before dirty state is serve
         capability: capabilityFor("failed-journal-request"),
         fingerprint: "failed-journal-fingerprint",
         worktreeKey: "/tmp/failed-journal-request",
-        drainToken: runToken("failed", 220, 1_770_000_000),
+        drainIdentity: runToken("failed", 220, 1_770_000_000),
         owner: requestOwner,
         successMaxAgeMs: 0,
       }),
@@ -1383,7 +1383,7 @@ test("bound cleanup stops after its first journal commit failure", async () => {
       capability: capabilityFor(requestId),
       fingerprint: `${requestId}-fingerprint`,
       worktreeKey: `/tmp/${requestId}`,
-      drainToken: runToken(requestId, 212, 1_770_000_000),
+      drainIdentity: runToken(requestId, 212, 1_770_000_000),
       owner: requestOwner,
       successMaxAgeMs: 0,
       bindConnection: true,
@@ -1469,7 +1469,7 @@ test("restart completes a drain whose terminal journal commit failed", async () 
     () =>
       fixture.coordinator.dispatch("acknowledge-drain", {
         obligationId: obligation.obligationId,
-        drainToken: obligation.drainToken,
+        drainIdentity: obligation.drainIdentity,
         drainer,
         evidence: { processTreeEmpty: true },
       }),
@@ -2048,16 +2048,16 @@ test("run tokens use the shared Bash-compatible bounded shape", async () => {
     "long-run-token",
     "long-run-token-fp",
     requestOwner,
-    { drainToken: longestValid },
+    { drainIdentity: longestValid },
   );
-  assert.equal(registration.drainToken, longestValid);
-  for (const [requestId, drainToken] of [
+  assert.equal(registration.drainIdentity, longestValid);
+  for (const [requestId, drainIdentity] of [
     ["slash-run-token", "bad/token-1-1"],
     ["dash-run-token", "-bad-1-1"],
   ]) {
     await assert.rejects(
       register(fixture, requestId, `${requestId}-fp`, owner(219), {
-        drainToken,
+        drainIdentity,
       }),
       (error) => error.code === "INVALID_ARGUMENT",
     );
@@ -3301,7 +3301,7 @@ test("a joining client can drain a dead owner's tagged process tree", async () =
     const fixture = await createFixture({ capacity: 1, ownerSweepMs: 10 });
     const deadWorkerDrainId = "gate-run-dead-worker-214-1770000000";
     await register(fixture, "dead-worker", "dead-worker-fp", deadOwner, {
-      drainToken: deadWorkerDrainId,
+      drainIdentity: deadWorkerDrainId,
     });
     await lease(fixture, "dead-worker", "dead-worker-lease", deadOwner, {
       resources: ["playwright-fixture"],
@@ -3315,7 +3315,7 @@ test("a joining client can drain a dead owner's tagged process tree", async () =
     });
     const obligation = snapshot.drainObligations[0];
     assert.equal(snapshot.usedCapacity, 1);
-    assert.equal(obligation.drainToken, deadWorkerDrainId);
+    assert.equal(obligation.drainIdentity, deadWorkerDrainId);
     assert.equal(obligation.requestId, "dead-worker");
     assert.equal(
       obligation.generationToken,
@@ -3345,15 +3345,18 @@ test("a joining client can drain a dead owner's tagged process tree", async () =
     );
     const joinedStatus = await status(fixture);
     assert.equal(
-      joinedStatus.drainObligations[0].drainToken,
-      obligation.drainToken,
+      joinedStatus.drainObligations[0].drainIdentity,
+      obligation.drainIdentity,
     );
     await claimObligation(fixture, obligation, joiningOwner);
     await rpc(fixture, "acknowledge-drain", {
       obligationId: obligation.obligationId,
-      drainToken: obligation.drainToken,
+      drainIdentity: obligation.drainIdentity,
       drainer: joiningOwner,
-      evidence: { processTreeEmpty: true, drainedToken: obligation.drainToken },
+      evidence: {
+        processTreeEmpty: true,
+        drainedToken: obligation.drainIdentity,
+      },
     });
     assert.equal(
       (await status(fixture)).leases.find(
@@ -3414,7 +3417,7 @@ test("a dead drain claimant releases its exact claim for another client", async 
     await claimObligation(fixture, obligation, liveOwner);
     await rpc(fixture, "acknowledge-drain", {
       obligationId: obligation.obligationId,
-      drainToken: obligation.drainToken,
+      drainIdentity: obligation.drainIdentity,
       drainer: liveOwner,
       evidence: { processTreeEmpty: true },
     });
@@ -3531,7 +3534,7 @@ test("an unclean bound-client disconnect creates a drain obligation", async () =
     capability: capabilityFor("disconnect-owner"),
     fingerprint: "disconnect-fingerprint",
     worktreeKey: "/tmp/disconnect-owner",
-    drainToken: disconnectedDrainId,
+    drainIdentity: disconnectedDrainId,
     owner: disconnectedOwner,
     bindConnection: true,
   });
@@ -3572,18 +3575,18 @@ test("an unclean bound-client disconnect creates a drain obligation", async () =
   );
 
   const obligation = drained.drainObligations[0];
-  assert.equal(obligation.drainToken, disconnectedDrainId);
+  assert.equal(obligation.drainIdentity, disconnectedDrainId);
   assert.equal(obligation.weight, 1);
   assert.deepEqual(obligation.resources, ["browser-fixture-3211"]);
   assert.equal(
     drained.requests.find((request) => request.requestId === "disconnect-owner")
-      .drainToken,
+      .drainIdentity,
     disconnectedDrainId,
   );
   await assert.rejects(
     rpc(fixture, "acknowledge-drain", {
       obligationId: obligation.obligationId,
-      drainToken: unrelatedDrainId,
+      drainIdentity: unrelatedDrainId,
       drainer: owner(173),
       evidence: { processTreeEmpty: true },
     }),
@@ -3602,7 +3605,7 @@ test("an unclean bound-client disconnect creates a drain obligation", async () =
   );
   await rpc(fixture, "acknowledge-drain", {
     obligationId: obligation.obligationId,
-    drainToken: obligation.drainToken,
+    drainIdentity: obligation.drainIdentity,
     drainer,
     evidence: { processTreeEmpty: true },
   });
@@ -3672,7 +3675,7 @@ test("a completed reuse registration is bound until its result handoff", async (
         capability: capabilityFor(requestId),
         fingerprint,
         worktreeKey: "/tmp/completed-bound-worktree",
-        drainToken: runToken("completed-bound-reuse", 176, 1_770_000_000),
+        drainIdentity: runToken("completed-bound-reuse", 176, 1_770_000_000),
         owner: requestOwner,
         successMaxAgeMs: 60_000,
         bindConnection: true,
@@ -3709,7 +3712,7 @@ test("a disconnected leader auto-acknowledges after drain across restart", async
     capability: capabilityFor(requestId),
     fingerprint: "restart-bound-stale-fingerprint",
     worktreeKey: "/tmp/restart-bound-worktree",
-    drainToken: runToken("restart-bound-stale", 178, 1_770_000_000),
+    drainIdentity: runToken("restart-bound-stale", 178, 1_770_000_000),
     owner: requestOwner,
     successMaxAgeMs: 0,
     bindConnection: true,
@@ -3748,7 +3751,7 @@ test("a disconnected leader auto-acknowledges after drain across restart", async
   await claimObligation(fixture, obligation, drainer);
   await rpc(fixture, "acknowledge-drain", {
     obligationId: obligation.obligationId,
-    drainToken: obligation.drainToken,
+    drainIdentity: obligation.drainIdentity,
     drainer,
     evidence: { processTreeEmpty: true },
   });
@@ -3801,7 +3804,7 @@ test("process-group TERM marks a bound request unclean", async () => {
         capability: capabilityFor(requestId),
         fingerprint: "term-bound-fingerprint",
         worktreeKey: "/tmp/term-bound-worktree",
-        drainToken: runToken("term-bound-request", 184, 1_770_000_000),
+        drainIdentity: runToken("term-bound-request", 184, 1_770_000_000),
         owner: requestOwner,
         successMaxAgeMs: 0,
       }),
@@ -3879,7 +3882,7 @@ test("stale reports require an exact PID/start identity and explicit drain ack",
   await assert.rejects(
     rpc(fixture, "acknowledge-drain", {
       obligationId: stale.drainObligations[0].obligationId,
-      drainToken: stale.drainObligations[0].drainToken,
+      drainIdentity: stale.drainObligations[0].drainIdentity,
       drainer: staleDrainer,
       evidence: { processTreeEmpty: false },
     }),
@@ -3887,7 +3890,7 @@ test("stale reports require an exact PID/start identity and explicit drain ack",
   );
   await rpc(fixture, "acknowledge-drain", {
     obligationId: stale.drainObligations[0].obligationId,
-    drainToken: stale.drainObligations[0].drainToken,
+    drainIdentity: stale.drainObligations[0].drainIdentity,
     drainer: staleDrainer,
     evidence: {
       processTreeEmpty: true,
@@ -3963,7 +3966,7 @@ test("one drain-token claim owns every sibling lease obligation", async () => {
   for (const obligation of stale.drainObligations) {
     await rpc(fixture, "acknowledge-drain", {
       obligationId: obligation.obligationId,
-      drainToken: obligation.drainToken,
+      drainIdentity: obligation.drainIdentity,
       drainer: firstClaimant,
       evidence: { processTreeEmpty: true },
     });
@@ -4026,7 +4029,7 @@ test("restart recovery preserves stale capacity until drain acknowledgement", as
   await claimObligation(fixture, snapshot.drainObligations[0], restartDrainer);
   await rpc(fixture, "acknowledge-drain", {
     obligationId: snapshot.drainObligations[0].obligationId,
-    drainToken: snapshot.drainObligations[0].drainToken,
+    drainIdentity: snapshot.drainObligations[0].drainIdentity,
     drainer: restartDrainer,
     evidence: { processTreeEmpty: true, recoveredAfterCrash: true },
   });
@@ -4069,7 +4072,7 @@ test("legacy startup queues work until adoption before owner sweeping", async ()
         capability: capabilityFor("adoption-pending"),
         fingerprint: "adoption-pending-fingerprint",
         worktreeKey: "/tmp/adoption-pending",
-        drainToken: runToken("adoption", 197, 5004),
+        drainIdentity: runToken("adoption", 197, 5004),
         owner: requestOwner,
         successMaxAgeMs: 0,
         metadata: { worktree: "/tmp/adoption-pending" },
@@ -4088,7 +4091,7 @@ test("legacy startup queues work until adoption before owner sweeping", async ()
         capability: capabilityFor("publication-before-adoption"),
         fingerprint: "publication-before-adoption-fingerprint",
         worktreeKey: "/tmp/publication-before-adoption",
-        drainToken: runToken("publication", 198, 5005),
+        drainIdentity: runToken("publication", 198, 5005),
         owner: publicationOwner,
         successMaxAgeMs: 0,
         metadata: { worktree: "/tmp/publication-before-adoption" },

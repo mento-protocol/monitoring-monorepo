@@ -505,7 +505,7 @@ export class QualityGateCoordinator extends EventEmitter {
         obligationId,
         leaseId: lease.leaseId,
         requestId: request.requestId,
-        drainToken: request.drainToken,
+        drainIdentity: request.drainIdentity,
         owner: copy(lease.owner),
         weight: lease.weight,
         resources: copy(lease.resources),
@@ -524,9 +524,9 @@ export class QualityGateCoordinator extends EventEmitter {
     this.#commit();
     return { cancelled: true, draining: true, drainObligations: obligations };
   }
-  acknowledgeDrain({ obligationId, drainToken, drainer, evidence = {} }) {
+  acknowledgeDrain({ obligationId, drainIdentity, drainer, evidence = {} }) {
     identifier(obligationId, "obligationId");
-    validateRunToken(drainToken, "drainToken");
+    validateRunToken(drainIdentity, "drainIdentity");
     validateIdentity(drainer, "drainer");
     jsonSize(evidence, "evidence");
     if (evidence.processTreeEmpty !== true) {
@@ -542,7 +542,7 @@ export class QualityGateCoordinator extends EventEmitter {
         "drain obligation is not active",
       );
     }
-    if (obligation.drainToken !== drainToken) {
+    if (obligation.drainIdentity !== drainIdentity) {
       throw new CoordinatorError(
         "DRAIN_TOKEN_MISMATCH",
         "drain token does not match the obligation",

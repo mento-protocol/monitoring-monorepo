@@ -8,9 +8,9 @@ import {
   validateRunToken,
 } from "./quality-gate-coordinator-state.mjs";
 
-function obligationFor(state, obligationId, drainToken) {
+function obligationFor(state, obligationId, drainIdentity) {
   identifier(obligationId, "obligationId");
-  validateRunToken(drainToken, "drainToken");
+  validateRunToken(drainIdentity, "drainIdentity");
   const obligation = state.drainObligations[obligationId];
   if (!obligation) {
     throw new CoordinatorError(
@@ -18,7 +18,7 @@ function obligationFor(state, obligationId, drainToken) {
       "drain obligation is not active",
     );
   }
-  if (obligation.drainToken !== drainToken) {
+  if (obligation.drainIdentity !== drainIdentity) {
     throw new CoordinatorError(
       "DRAIN_TOKEN_MISMATCH",
       "drain token does not match the obligation",
@@ -27,11 +27,15 @@ function obligationFor(state, obligationId, drainToken) {
   return obligation;
 }
 
-export function claimDrain(state, { obligationId, drainToken, claimant }, now) {
+export function claimDrain(
+  state,
+  { obligationId, drainIdentity, claimant },
+  now,
+) {
   validateIdentity(claimant, "claimant");
-  const obligation = obligationFor(state, obligationId, drainToken);
+  const obligation = obligationFor(state, obligationId, drainIdentity);
   const siblings = Object.values(state.drainObligations).filter(
-    (candidate) => candidate.drainToken === drainToken,
+    (candidate) => candidate.drainIdentity === drainIdentity,
   );
   const conflict = siblings.find(
     (candidate) =>
@@ -54,7 +58,7 @@ export function claimDrain(state, { obligationId, drainToken, claimant }, now) {
   return {
     claimed: true,
     idempotent: changed === 0,
-    drainToken,
+    drainIdentity,
     obligation: copy(obligation),
     obligations: siblings.map(copy),
   };
@@ -62,12 +66,12 @@ export function claimDrain(state, { obligationId, drainToken, claimant }, now) {
 
 export function releaseDrainClaim(
   state,
-  { obligationId, drainToken, claimant },
+  { obligationId, drainIdentity, claimant },
 ) {
   validateIdentity(claimant, "claimant");
-  obligationFor(state, obligationId, drainToken);
+  obligationFor(state, obligationId, drainIdentity);
   const siblings = Object.values(state.drainObligations).filter(
-    (candidate) => candidate.drainToken === drainToken,
+    (candidate) => candidate.drainIdentity === drainIdentity,
   );
   const claims = siblings.filter((candidate) => candidate.claim);
   if (!claims.length) return { released: false, reason: "not-claimed" };
@@ -85,7 +89,7 @@ export function releaseDrainClaim(
   return {
     released: true,
     obligationId,
-    drainToken,
+    drainIdentity,
     releasedObligations: claims.length,
   };
 }
@@ -109,10 +113,10 @@ export function assertDrainClaim(obligation, claimant) {
 export function staleDrainClaims(state) {
   const claims = new Map();
   for (const obligation of Object.values(state.drainObligations)) {
-    if (!obligation.claim || claims.has(obligation.drainToken)) continue;
-    claims.set(obligation.drainToken, {
+    if (!obligation.claim || claims.has(obligation.drainIdentity)) continue;
+    claims.set(obligation.drainIdentity, {
       obligationId: obligation.obligationId,
-      drainToken: obligation.drainToken,
+      drainIdentity: obligation.drainIdentity,
       claimant: copy(obligation.claim.claimant),
     });
   }

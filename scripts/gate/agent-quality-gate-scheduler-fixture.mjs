@@ -552,11 +552,11 @@ PATH="\${QG_FIXTURE_ORIGINAL_PATH}" exec git "$@"
             if (!status?.drainObligations?.length) return true;
             const byToken = new Map();
             for (const obligation of status.drainObligations) {
-              const entries = byToken.get(obligation.drainToken) ?? [];
+              const entries = byToken.get(obligation.drainIdentity) ?? [];
               entries.push(obligation);
-              byToken.set(obligation.drainToken, entries);
+              byToken.set(obligation.drainIdentity, entries);
             }
-            for (const [drainToken, obligations] of byToken) {
+            for (const [drainIdentity, obligations] of byToken) {
               const first = obligations[0];
               try {
                 await coordinatorCli(metadata, [
@@ -564,7 +564,7 @@ PATH="\${QG_FIXTURE_ORIGINAL_PATH}" exec git "$@"
                   "--obligation-id",
                   first.obligationId,
                   "--drain-token",
-                  drainToken,
+                  drainIdentity,
                   ...identityArgs,
                 ]);
               } catch (error) {
@@ -585,7 +585,7 @@ PATH="\${QG_FIXTURE_ORIGINAL_PATH}" exec git "$@"
                     "--obligation-id",
                     obligation.obligationId,
                     "--drain-token",
-                    drainToken,
+                    drainIdentity,
                     "--drainer-pid",
                     String(process.pid),
                     "--drainer-start-utc",

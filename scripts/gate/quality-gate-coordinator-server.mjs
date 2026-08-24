@@ -584,7 +584,7 @@ export async function startCoordinator({
             const maintained = runMaintenance("release-stale-drain-claim", () =>
               core.releaseDrainClaim({
                 obligationId: candidate.obligationId,
-                drainToken: candidate.drainToken,
+                drainIdentity: candidate.drainIdentity,
                 claimant: candidate.claimant,
               }),
             );
