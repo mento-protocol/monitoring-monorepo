@@ -1,35 +1,32 @@
 #!/usr/bin/env node
 /**
  * The routing table's own checks: the schema, the group order, the closed verb
- * set, ADR 0064's pairing rule, path staleness, and the pins that keep the
- * table a trusted input to the gate rather than a file next to it.
+ * set, ADR 0064's pairing rule, and path staleness. The pins that keep the
+ * table a trusted input to the gate — `implementation_signature()`, the Turbo
+ * inputs, the table's own routing arm — are in `pins.test.mjs` beside it.
  *
  * Every check that CAN fail closed is proven to fail: each has a negative
  * control that builds a deliberately broken table and asserts the check reds on
  * it. A check nobody has seen red is a check nobody knows works — this repo has
- * the scar, in a test that printed "All 0 deploy scripts…" and exited 0 over an
- * empty subject list.
+ * the scar, in a test that printed "All 0 deploy scripts…" and exited 0.
  *
  * Run: pnpm gate:routing-table:test
  */
 
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 
-import { bashFunctionSource } from "../../sentry/ci-wiring/check-sentry-suites-in-ci-gate-extract.mjs";
 import {
   exemptedLiterals,
   pairingProblems,
   stalenessSubjects,
 } from "./checks.mjs";
-import { parseGateRouting } from "./gate-arms.mjs";
 import { literalPatternPath } from "./pattern.mjs";
 import { ROUTING_GROUPS, ROUTING_PLAN } from "./index.mjs";
 import { VERBS, normalizeGroups, walkArms } from "./schema.mjs";
 
-const HERE = fileURLToPath(new URL(".", import.meta.url));
 const REPO = fileURLToPath(new URL("../../..", import.meta.url));
 const read = (relative) => readFileSync(`${REPO}${relative}`, "utf8");
 
@@ -63,8 +60,8 @@ test("the groups are in the order the gate applies them", () => {
   assert.deepEqual(
     ROUTING_PLAN.map((group) => group.id),
     GROUP_ORDER,
-    "the assembled group order changed. Arm order and group order are both routing; " +
-      "if this move is intended, the equality test against the gate's live arms has to agree.",
+    "the assembled group order changed. Arm order and group order are both routing, " +
+      "so this list moves only when the routing was meant to.",
   );
 });
 
@@ -124,88 +121,91 @@ test("a dynamic group may hold only the exact pattern its source emits", () => {
   }
 });
 
-test("every verb in the closed set is a function the gate defines", () => {
-  const gate = read("/scripts/agent-quality-gate.sh");
-  for (const verb of Object.keys(VERBS)) {
-    assert.ok(
-      new RegExp(`^${verb}\\(\\) \\{`, "m").test(gate),
-      `\`${verb}\` is in the table's verb set but \`scripts/agent-quality-gate.sh\` defines no such function`,
+/**
+ * Verb name → the number of `args[…]` slots the engine's dispatch reads for it.
+ *
+ * Read out of `scripts/gate/mapping/route.mjs`'s source rather than imported:
+ * the map is module-private, and arity is a property of the implementation text
+ * rather than of the value.
+ */
+const ROUTE_VERB_ARITIES = (() => {
+  const source = read("/scripts/gate/mapping/route.mjs");
+  const open = source.indexOf("\nconst VERBS = {");
+  const close = source.indexOf("\n};", open);
+  assert.ok(
+    open !== -1 && close !== -1,
+    "scripts/gate/mapping/route.mjs no longer declares a `const VERBS = { … };` object; this pin cannot read it",
+  );
+  // Each entry starts at column 2 with `<name>:`; its implementation runs to
+  // the next entry. Arity is the highest `args[N]` slot that span reads, so a
+  // verb reading none — `route_lockfile_change` — measures 0.
+  const body = source.slice(open, close);
+  const starts = [...body.matchAll(/\n {2}([a-z_][a-z0-9_]*):/g)];
+  const measured = new Map();
+  for (const [index, at] of starts.entries()) {
+    const span = body.slice(
+      at.index + at[0].length,
+      starts[index + 1]?.index ?? body.length,
+    );
+    const slots = [...span.matchAll(/\bargs\[(\d+)\]/g)].map((m) => +m[1]);
+    measured.set(at[1], slots.length === 0 ? 0 : Math.max(...slots) + 1);
+  }
+  // Controls: a parse that found nothing would report perfect agreement.
+  assert.equal(measured.get("add_command"), 2, "the verb reader is broken");
+  assert.equal(
+    measured.get("add_turbo_package_task"),
+    3,
+    "the verb reader cannot measure a three-argument verb",
+  );
+  return measured;
+})();
+
+test("the engine implements the closed verb set, at the recorded arity", () => {
+  // Before D5c this was checked against the gate's own bash `add_*` functions.
+  // The arms are gone; `route.mjs` is where a verb name becomes a call now, and
+  // every direction here fails somewhere worse if it is not checked: a name the
+  // engine does not implement throws on the change set that first reaches that
+  // arm, on somebody's pre-push; an implementation the schema does not record is
+  // unreachable and reads as live routing; and a wrong arity is caught nowhere
+  // at import, because the schema validates only the COUNT the table supplies.
+  assert.deepEqual(
+    Object.keys(VERBS).filter((verb) => !ROUTE_VERB_ARITIES.has(verb)),
+    [],
+    "the table's closed verb set holds names scripts/gate/mapping/route.mjs does not implement",
+  );
+  assert.deepEqual(
+    [...ROUTE_VERB_ARITIES.keys()].filter(
+      (verb) => !Object.hasOwn(VERBS, verb),
+    ),
+    [],
+    "scripts/gate/mapping/route.mjs implements verbs the table's closed set does not record",
+  );
+  for (const [verb, arity] of ROUTE_VERB_ARITIES) {
+    assert.equal(
+      arity,
+      VERBS[verb],
+      `scripts/gate/mapping/route.mjs reads ${arity} argument(s) for \`${verb}\`; the table records ${VERBS[verb]}`,
     );
   }
-});
 
-test("every verb's arity matches the gate's own routing call sites", () => {
-  // Read the arities out of the parsed routing region rather than out of the
-  // whole script. The gate's helper functions call the same verbs with computed
-  // arguments — `add_command "$(turbo_local_cache_command …)" "$reason"` — and
-  // counting quoted words there measures the substitution, not the call. The
-  // routing region is the surface the table mirrors, so it is the surface whose
-  // arities have to agree.
-  const measured = new Map();
+  // And no name in the set is unreachable from the table: a closed set that
+  // admits names nothing routes is a spell check.
+  const reached = new Set();
   const visit = (effects) => {
     for (const effect of effects) {
-      if (effect.kind === "call") {
-        const seen = measured.get(effect.verb) ?? new Set();
-        seen.add(effect.args.length);
-        measured.set(effect.verb, seen);
-      }
+      if (effect.kind === "call") reached.add(effect.verb);
+      if (effect.kind === "when") visit(effect.effects);
       for (const nested of effect.arms ?? []) visit(nested.effects);
-      if (effect.effects) visit(effect.effects);
     }
   };
-  for (const group of parseGateRouting(
-    read("/scripts/agent-quality-gate.sh"),
-  )) {
-    for (const armed of group.arms) visit(armed.effects);
+  for (const group of ROUTING_PLAN) {
+    for (const arm of group.arms) visit(arm.effects);
   }
-  for (const [verb, arities] of measured) {
-    assert.deepEqual(
-      [...arities],
-      [VERBS[verb]],
-      `the gate's routing region calls \`${verb}\` with ${[...arities].join(" and ")} arguments; the table records ${VERBS[verb]}`,
-    );
-  }
+  assert.ok(reached.size > 0, "the table walked to zero verbs");
   assert.deepEqual(
-    Object.keys(VERBS).filter((verb) => !measured.has(verb)),
+    Object.keys(VERBS).filter((verb) => !reached.has(verb)),
     [],
-    "the verb set holds a verb the routing region never reaches; a closed set that admits unreachable names is a spell check",
-  );
-});
-
-test("the gate parser refuses an argument it cannot resolve", () => {
-  // The parser records a quoted argument as its literal text, so anything the
-  // shell would expand first means the table holds a command string that is not
-  // the command the gate runs. Only the two loop variables the dynamic groups
-  // pass are known; everything else is refused rather than stored raw.
-  const region = (statement) =>
-    [
-      "while IFS= read -r path; do",
-      '  case "$path" in',
-      "    a)",
-      `      ${statement}`,
-      "      ;;",
-      "  esac",
-      'done < "$changed_paths_file"',
-    ].join("\n");
-  for (const statement of [
-    'add_command "node ${RUNNER}/x.mjs" "why"',
-    'add_command "node $RUNNER/x.mjs" "why"',
-    'add_command "node `which node` x" "why"',
-    'add_surface "$surface"',
-    "add_surface $unknown_variable",
-  ]) {
-    assert.throws(
-      () => parseGateRouting(region(statement)),
-      /shell expansion this parser does not resolve|unrecognised bare argument|unrecognised routing statement/,
-      `the parser accepted: ${statement}`,
-    );
-  }
-  // The two shapes it must still accept: a plain literal, and a loop variable.
-  assert.doesNotThrow(() => parseGateRouting(region('add_surface "docs"')));
-  assert.doesNotThrow(() =>
-    parseGateRouting(
-      region('add_terraform_validate_commands "$terraform_stack_path" "why"'),
-    ),
+    "the verb set holds a verb no arm in the table reaches",
   );
 });
 
@@ -802,25 +802,6 @@ test("the schema refuses a noncanonical path segment", () => {
   );
 });
 
-test("the signature pin reads whole entries, not substrings", () => {
-  // Both substring hazards, asserted against the parsed entry list: a name that
-  // is a substring of a listed entry is not itself listed, and a path that only
-  // appears in a comment is not an entry at all.
-  assert.ok(SIGNATURE_ENTRIES.includes("scripts/gate/routing-table/index.mjs"));
-  assert.ok(
-    !SIGNATURE_ENTRIES.includes("scripts/gate/routing-table/dex.mjs"),
-    "a substring of a listed entry was read as an entry",
-  );
-  assert.ok(
-    !SIGNATURE_ENTRIES.some((entry) => entry.includes("#")),
-    "a comment survived into the parsed entry list",
-  );
-  assert.ok(
-    SIGNATURE_ENTRIES.every((entry) => !/\s/.test(entry) && entry !== "\\"),
-    "the entry list holds something that is not a bare path word",
-  );
-});
-
 test("the schema refuses an unknown guard and an unknown field", () => {
   assert.throws(
     () =>
@@ -839,155 +820,4 @@ test("the schema refuses an unknown guard and an unknown field", () => {
       ),
     /unknown field/,
   );
-});
-
-// --- pins ------------------------------------------------------------------
-
-/**
- * Every module in this directory — tests included.
- *
- * The suites are in the signature for the same reason
- * `scripts/agent-quality-gate.test.sh` and
- * `scripts/terraform/terraform-fmt-check.test.mjs` already are: they are part of
- * what the gate proves about itself, so a stamp taken before one of them changed
- * should not be reused after. Excluding them would also make
- * `scripts/AGENTS.md`'s pin rule — "every `gate/routing-table/*.mjs` module" —
- * quietly untrue, and leave a class of file that can be added here without
- * anyone noticing it never joined the pin.
- */
-const MODULES = readdirSync(HERE)
-  .filter((name) => name.endsWith(".mjs"))
-  .sort();
-
-/**
- * The source text of `implementation_signature()` ALONE.
- *
- * Searching the whole gate would let a comment or a routing reason string that
- * happens to name `scripts/gate/routing-table/foo.mjs` satisfy the pin while
- * the module is absent from the signature — the exact `__missing__`/frozen-stamp
- * failure the pin exists to catch. The gate already carries prose naming this
- * directory, so the scope is not hypothetical.
- *
- * The span comes from `bashFunctionSource`, which asks bash where the function
- * ends rather than looking for a closing brace: a textual terminator cannot see
- * a heredoc, a quoted `}`, or a trailer sharing the closing line.
- */
-const SIGNATURE_SOURCE = bashFunctionSource(
-  read("/scripts/agent-quality-gate.sh"),
-  "implementation_signature",
-  "scripts/agent-quality-gate.sh",
-);
-
-/**
- * The paths `implementation_signature()` actually iterates, as whole words.
- *
- * Substring matching was the wrong question twice over: an unlisted `foo.mjs`
- * passes if its name is a substring of a listed entry, and any mention in a
- * comment satisfies the pin without the path ever being hashed. Both make the
- * check report a pin that is not there, which is the `__missing__` freeze it
- * exists to prevent.
- *
- * The list is a bare `for path in … ; do` word list, so it is read as one:
- * take the span between the two, drop comments and line continuations, and
- * split on whitespace. An entry that is not a whole word in that span is not an
- * entry.
- */
-const SIGNATURE_ENTRIES = (() => {
-  const span = /for path in\b([\s\S]*?);\s*do\b/.exec(SIGNATURE_SOURCE);
-  assert.ok(
-    span !== null,
-    "implementation_signature() no longer iterates a `for path in … ; do` list; this pin cannot read it",
-  );
-  const entries = span[1]
-    .replace(/#[^\n]*/g, "")
-    .replace(/\\\n/g, " ")
-    .split(/\s+/)
-    .filter((word) => word !== "");
-  // Sanity: the list must still hold the gate's own two files. If it does not,
-  // the span was parsed wrongly and every assertion below would be vacuous.
-  for (const known of [
-    "scripts/agent-quality-gate.sh",
-    "scripts/agent-quality-gate.test.sh",
-  ]) {
-    assert.ok(
-      entries.includes(known),
-      `parsed ${entries.length} signature entries and ${known} was not among them, so the span was read wrongly`,
-    );
-  }
-  return entries;
-})();
-
-test("implementation_signature() lists every routing-table module", () => {
-  // THE load-bearing pin. A path `implementation_signature()` cannot `stat`
-  // hashes as the literal `__missing__`, which FREEZES the signature — so
-  // `--skip-if-fresh` reuses a stale stamp and skips real pre-push work. A
-  // module added here and not there fails that way and only that way.
-  for (const module of MODULES) {
-    assert.ok(
-      SIGNATURE_ENTRIES.includes(`scripts/gate/routing-table/${module}`),
-      `\`implementation_signature()\` in scripts/agent-quality-gate.sh does not list scripts/gate/routing-table/${module} as an entry. ` +
-        "A missing entry hashes as `__missing__` and freezes the freshness signature.",
-    );
-  }
-});
-
-test("implementation_signature() lists no routing-table module that is gone", () => {
-  // The reverse of the check above, and it fails the same way: an entry the
-  // signature cannot `stat` hashes as `__missing__` FOREVER, so the signature
-  // stops moving and `--skip-if-fresh` reuses a stale stamp. A module that is
-  // split or renamed leaves exactly this residue.
-  // Whole entries, for the same reason as the forward check: a path mentioned
-  // in a comment is not something the signature hashes, and reading one as an
-  // entry would make this report a stale pin that does not exist.
-  const prefix = "scripts/gate/routing-table/";
-  const listed = SIGNATURE_ENTRIES.filter((entry) =>
-    entry.startsWith(prefix),
-  ).map((entry) => entry.slice(prefix.length));
-  const stale = [...new Set(listed)].filter((name) => !MODULES.includes(name));
-  assert.deepEqual(
-    stale,
-    [],
-    `scripts/agent-quality-gate.sh names routing-table modules that no longer exist: ${stale.join(", ")}`,
-  );
-});
-
-test("the gate routes a change to this directory", () => {
-  const gate = read("/scripts/agent-quality-gate.sh");
-  assert.match(
-    gate,
-    /scripts\/gate\/routing-table\/\*\.mjs\)/,
-    "scripts/agent-quality-gate.sh has no routing arm for scripts/gate/routing-table/*.mjs",
-  );
-  assert.match(gate, /pnpm gate:routing-table:test/);
-});
-
-test("turbo.json treats this directory as an input", () => {
-  const turbo = read("/turbo.json");
-  const occurrences = turbo.split("scripts/gate/routing-table/**").length - 1;
-  assert.ok(
-    occurrences >= 3,
-    `turbo.json names scripts/gate/routing-table/** ${occurrences} times; the gate's two files are named in three tasks and the table belongs beside them`,
-  );
-});
-
-test("scripts/AGENTS.md records the pin", () => {
-  assert.match(read("/scripts/AGENTS.md"), /routing-table/);
-});
-
-test("ADR 0064's sweep checklist names the table", () => {
-  assert.match(
-    read("/docs/adr/0064-scripts-module-directories.md"),
-    /gate\/routing-table/,
-    "a scripts/ move has to update the routing DATA as well as the routing arms",
-  );
-});
-
-test("every module is under the file-size hard cap", () => {
-  for (const module of MODULES) {
-    const lines = readFileSync(`${HERE}${module}`, "utf8").split("\n").length;
-    assert.ok(
-      lines < 1000,
-      `${module} is ${lines} lines; the scripts/ hard cap is 1,000 and the table is split by family to stay under it`,
-    );
-  }
 });

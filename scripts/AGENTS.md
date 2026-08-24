@@ -77,15 +77,15 @@ same PR, except the `agent-autoreview.sh` feedback-runtime pins below.
   both tests run.
 - **Gate runtime module pins.** Before `cd`, `agent-quality-gate.sh` loads
   `$script_source_dir/gate/run-handles.sh`; move it with its signature, self-test
-  route, and missing-helper fixture. It also pins two `$script_source_dir`
-  paths: `docs/docs-navigation-eval-helpers.mjs` and
-  `gate/lockfile-scope.mjs`; update all three literals (ADR 0064).
+  route, and missing-helper fixture. It also pins
+  `docs/docs-navigation-eval-helpers.mjs` to `$script_source_dir`; since D5c the
+  mapping engine resolves `gate/lockfile-scope.mjs` the same way. Update both
+  literals (ADR 0064).
 - **Gate mapping pins.** The signature and three Turbo inputs pin
   `gate/routing-table/**`, `gate/mapping*`, and external
-  `agent-autoreview-core.mjs`; `gate/routing-parity.mjs` is signature-only.
-  Runtime hashes use `$script_source_dir`; tests and parity use `$repo_root`.
-  Core-only edits route both gate suites. A missing pin freezes
-  the stamp ([ADR 0069](../docs/adr/0069-gate-routing-table-as-data.md)).
+  `agent-autoreview-core.mjs`. Runtime hashes use `$script_source_dir`; suites
+  use `$repo_root`. Core-only edits route both gate suites. A missing pin
+  freezes the stamp ([ADR 0069](../docs/adr/0069-gate-routing-table-as-data.md)).
 - **Evaluation fixture forbidden lists.** `forbidden_sources` in
   `docs/evals/documentation-navigation-fixtures.json` names the navigation
   eval's own implementation.

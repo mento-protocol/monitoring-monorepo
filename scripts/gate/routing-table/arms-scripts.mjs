@@ -4,10 +4,10 @@
  * schema, and the pairing lint, and it is the only module anything outside this
  * directory should import.
  *
- * ORDER IS ROUTING. Arms are first-match within their group, so an arm's index
- * IS its precedence — moving one up or down changes what the gate schedules.
- * Nothing about a diff will tell you that; `gate-equality.test.mjs`, which
- * compares this table against the gate's live `case` arms, will.
+ * ORDER IS ROUTING. Arms match first-to-last within a group, so an arm's index
+ * is its precedence: move one and the gate schedules something else. Nothing
+ * checks that. `routing-table.test.mjs` pins only the GROUP order, against a
+ * written-out list.
  */
 
 /**
@@ -192,9 +192,10 @@ export const SCRIPT_ARMS = [
                 reason: "agent quality gate mapping changed",
               },
               {
-                why: "The routing arms below and the routing table in scripts/gate/routing-table/ are two copies of the same routing, and gate-equality.test.mjs is what holds them together. It has to run in BOTH drift directions. The table's own arm covers a table-only edit; this covers the commoner one — somebody adds or reorders an arm here and does not touch the data. Without it the table goes stale exactly where nothing reds, which is the failure this conversion exists to end (ADR 0069).",
+                why: "routing-table.test.mjs reads this file: it asserts `implementation_signature()` lists every routing-table module and no module that is gone. A missing entry hashes as `__missing__` and FREEZES the freshness signature, so `--skip-if-fresh` reuses a stale stamp and skips real pre-push work — the ADR 0064 failure that reds nowhere else. The table's own arm covers a table-only edit; this covers the other direction, where somebody edits the gate's signature list and does not touch the table (ADR 0069).",
                 command: "pnpm gate:routing-table:test",
-                reason: "gate routing arms must still match the routing table",
+                reason:
+                  "gate holds the routing table's implementation-signature pin",
               },
             ],
           },

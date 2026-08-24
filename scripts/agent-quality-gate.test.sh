@@ -787,20 +787,22 @@ assert_contains "- pnpm docs:navigation-eval -- --check-fixtures (routing-sensit
 # The lockfile scope classifier is the quieter sibling of the routing classifier
 # and needs the same machine control. Its caller reads a nonzero exit as "cannot
 # narrow", so a stale path would widen every lockfile change back to the full
-# workspace suite — a run that stays green and only gets slower. Read the literal
-# out of the gate, prove it resolves against the real tree, and prove it still
-# runs as the CLI the gate spawns.
+# workspace suite — a run that stays green and only gets slower. D5c moved the
+# resolution into the mapping engine with the rest of the routing, so the literal
+# is read out of scripts/gate/mapping.mjs now; it must still be anchored on the
+# gate's own source directory, so a fixture-repo run reaches the real checkout.
 lockfile_scope_literal="$(
-  awk -F'"' '/^lockfile_scope_path=/ { print $2; exit }' \
-    scripts/agent-quality-gate.sh
+  awk -F'"' '/const classifier = join\(scriptSourceDir,/ {
+    print $2 "/" $4; exit
+  }' scripts/gate/mapping.mjs
 )"
-lockfile_scope_relative="${lockfile_scope_literal/\$script_source_dir/scripts}"
-[[ "$lockfile_scope_relative" == scripts/*.mjs ]] ||
-  fail "could not read lockfile_scope_path from scripts/agent-quality-gate.sh (got '$lockfile_scope_literal')"
-[[ "$lockfile_scope_literal" == '$script_source_dir'/* ]] ||
-  fail "lockfile_scope_path must stay anchored on \$script_source_dir so fixture-repo runs reach the real checkout (got '$lockfile_scope_literal')"
+[[ "$lockfile_scope_literal" == "gate/lockfile-scope.mjs" ]] ||
+  fail "could not read the lockfile scope classifier path out of scripts/gate/mapping.mjs (got '$lockfile_scope_literal')"
+lockfile_scope_relative="scripts/$lockfile_scope_literal"
 [[ -f "$repo_root/$lockfile_scope_relative" ]] ||
   fail "gate lockfile scope classifier path does not exist: $lockfile_scope_relative"
+grep -q 'join(scriptSourceDir, "gate", "lockfile-scope.mjs")' scripts/gate/mapping.mjs ||
+  fail "the lockfile scope classifier must stay anchored on scriptSourceDir so fixture-repo runs reach the real checkout"
 lockfile_scope_probe_dir="$(mktemp -d)"
 printf 'importers:\n  metrics-bridge:\n    dependencies:\n      viem: 2.0.0\n' \
   > "$lockfile_scope_probe_dir/base.yaml"
@@ -2071,8 +2073,10 @@ assert_not_contains "lockfile change scoped to importers"
 # A missing classifier is NOT an ambiguous lockfile, and must not be answered
 # with fail-toward-full: that reads as a slow-but-green run and nobody looks.
 # Mirror the real hazard by giving the gate a source directory that has every
-# sibling except gate/, so only the lockfile scope spawn goes stale, and require
-# a loud exit 2.
+# sibling, and a gate/ holding everything except lockfile-scope.mjs — so ONLY
+# the lockfile scope spawn goes stale — and require a loud exit 2. Since D5c
+# the mapper resolves this path, so gate/mapping.mjs and the routing table have
+# to be present or the run refuses earlier for a different reason.
 lockfile_scope_missing_dir="$(mktemp -d)"
 for lockfile_scope_sibling in "$repo_root"/scripts/*; do
   lockfile_scope_sibling_name="$(basename "$lockfile_scope_sibling")"
@@ -2082,6 +2086,14 @@ for lockfile_scope_sibling in "$repo_root"/scripts/*; do
   fi
 done
 mkdir -p "$lockfile_scope_missing_dir/gate"
+for lockfile_scope_gate_entry in "$repo_root"/scripts/gate/*; do
+  lockfile_scope_gate_entry_name="$(basename "$lockfile_scope_gate_entry")"
+  if [[ "$lockfile_scope_gate_entry_name" != "lockfile-scope.mjs" &&
+    "$lockfile_scope_gate_entry_name" != "run-handles.sh" ]]; then
+    ln -s "$lockfile_scope_gate_entry" \
+      "$lockfile_scope_missing_dir/gate/$lockfile_scope_gate_entry_name"
+  fi
+done
 cp "$repo_root/scripts/gate/run-handles.sh" \
   "$lockfile_scope_missing_dir/gate/run-handles.sh"
 lockfile_scope_missing_repo="$(mktemp -d)"
@@ -2105,15 +2117,18 @@ lockfile_scope_missing_exit="$(cat "$lockfile_scope_missing_repo/exit-code")"
 rm -rf "$lockfile_scope_missing_dir" "$lockfile_scope_missing_repo"
 [[ "$lockfile_scope_missing_exit" -eq 2 ]] ||
   fail "missing lockfile scope classifier exited $lockfile_scope_missing_exit instead of 2"
-assert_contains "error: lockfile scope classifier could not be loaded from"
+# The message names the module, and the gate turns the mapper's exit into its
+# own refusal. Both halves matter: the first is what tells a reader WHICH path
+# went stale, the second is what stops the run.
+assert_contains "lockfile scope classifier could not be loaded from"
+assert_contains "error: gate mapping engine failed (exit 2); refusing to run on a plan it did not produce"
 assert_not_contains "lockfile change scoped to importers"
 assert_not_contains "- cd aegis && forge test (workspace dependency/config changed)"
 
-# The mapping engine is the routing now (ADR 0069, D5b part 2), so a gate that
-# cannot find it must refuse rather than fall back to the bash arms it still
-# carries. That fallback is the tempting bug: the arms are RIGHT THERE, and
-# using them would look like resilience while quietly returning the gate to a
-# routing path nothing checks any more.
+# The mapping engine is the routing (ADR 0069), and since D5c it is the ONLY
+# routing — a gate that cannot find it has no plan to fall back to and must
+# refuse. Before D5c the bash arms were still sitting there and using them would
+# have looked like resilience; the refusal is what has to survive the deletion.
 #
 # Same mirror trick as the classifier case above, one level deeper: every
 # scripts/ entry is symlinked, and `gate` is rebuilt as a real directory whose
@@ -2664,16 +2679,17 @@ assert_contains "- node scripts/lighthouse-config.test.mjs (Lighthouse CI budget
 run_gate "scripts/lighthouse-config.test.mjs"
 assert_contains "- node scripts/lighthouse-config.test.mjs (Lighthouse config assertion suite changed)"
 
-# The routing table (ADR 0069) is a second copy of this file's own routing, and
-# gate-equality.test.mjs is what holds the two together. It only does that if it
-# RUNS in both drift directions, so both are pinned here.
+# The routing table (ADR 0069) is where this gate's routing lives, and
+# routing-table.test.mjs is what proves the table and this file agree about the
+# pins they share. It only does that if it RUNS in both drift directions, so
+# both are pinned here.
 #
 # Table side: EVERY module under scripts/gate/routing-table/, enumerated from the
-# real tree rather than named here. Naming two would leave the other seventeen
-# resting on the assumption that one glob covers them all — and a narrowed arm,
-# or a new module whose name an earlier arm in the same `case` happens to claim,
-# would drop one while these assertions stayed green. Enumerating means a module
-# added later is covered the day it lands, by construction.
+# real tree rather than named here. Naming two would leave the rest resting on
+# the assumption that one glob covers them all — and a narrowed arm, or a new
+# module whose name an earlier arm happens to claim, would drop one while these
+# assertions stayed green. Enumerating means a module added later is covered the
+# day it lands, by construction.
 #
 # The names come from `$repo_root` because `run_gate` drives a fixture repository
 # that has no scripts/ tree; the routing itself only ever sees the path string.
@@ -2689,12 +2705,13 @@ for routing_table_module in "${routing_table_modules[@]}"; do
   assert_contains "- pnpm agent:quality-gate:test (gate routing table is an implementation-signature input)"
 done
 
-# Gate side, and the commoner drift: somebody adds or reorders a `case` arm in
-# this gate and does not touch the data. Before this arm existed that ran
-# nothing, and the table went stale exactly where nothing reds.
+# Gate side: `implementation_signature()` lives in this file and must list every
+# routing-table module. A missing entry hashes as `__missing__` and freezes the
+# freshness signature, so `--skip-if-fresh` reuses a stale stamp. The suite that
+# checks that reads this file, so editing it has to schedule the suite.
 run_gate "scripts/agent-quality-gate.sh"
 assert_contains "- pnpm agent:quality-gate:test (agent quality gate mapping changed)"
-assert_contains "- pnpm gate:routing-table:test (gate routing arms must still match the routing table)"
+assert_contains "- pnpm gate:routing-table:test (gate holds the routing table's implementation-signature pin)"
 
 # The bash-from-Node machinery the routing-table suite runs on: runProbeShell
 # and probeDirs back the /bin/bash pattern oracle, bashFunctionSource backs the
@@ -4330,8 +4347,6 @@ cp "$repo_root/scripts/gate/mapping.mjs" \
   "$signature_runtime_root/scripts/gate/mapping.mjs"
 cp "$repo_root"/scripts/gate/mapping/*.mjs \
   "$signature_runtime_root/scripts/gate/mapping/"
-cp "$repo_root/scripts/gate/routing-parity.mjs" \
-  "$signature_runtime_root/scripts/gate/routing-parity.mjs"
 cp "$repo_root"/scripts/gate/routing-table/*.mjs \
   "$signature_runtime_root/scripts/gate/routing-table/"
 printf 'export function isRoutingSensitivePath() { return false; }\n' \
@@ -4362,7 +4377,6 @@ chmod +x "$signature_runtime_root/scripts/agent-quality-gate.sh"
   printf '// fixture mapper entry\n' > scripts/gate/mapping.mjs
   printf '// fixture mapper runtime module\n' > scripts/gate/mapping/facts.mjs
   printf '// fixture mapper suite\n' > scripts/gate/mapping/engine.test.mjs
-  printf '// fixture parity harness\n' > scripts/gate/routing-parity.mjs
   printf '// fixture routing-table runtime module\n' > scripts/gate/routing-table/index.mjs
   printf '// fixture routing-table suite\n' > scripts/gate/routing-table/routing-table.test.mjs
   printf '# fixture terraform format checker\n' > scripts/terraform/terraform-fmt-check.mjs
@@ -4497,23 +4511,13 @@ STUB
   [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "9" ]] ||
     fail "fresh gate stamp was reused after the target routing-table suite changed"
 
-  printf '// changed source parity harness copy\n' \
-    >> "$signature_runtime_root/scripts/gate/routing-parity.mjs"
-  run_signature_gate_again
-  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "9" ]] ||
-    fail "a non-runtime source parity harness invalidated the fresh stamp"
-  printf '// changed fixture parity harness\n' >> scripts/gate/routing-parity.mjs
-  run_signature_gate_again
-  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "10" ]] ||
-    fail "fresh gate stamp was reused after the target parity harness changed"
-
   # The routing table imports the indexer family view from the gate's source
   # tree. A target-repo placeholder must not affect the signature, while the
   # loaded source-tree copy must invalidate it independently.
   printf '// changed fixture autoreview core routing source\n' \
     >> scripts/agent-autoreview-core.mjs
   run_signature_gate_again
-  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "10" ]] ||
+  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "9" ]] ||
     fail "a non-runtime autoreview core placeholder invalidated the fresh stamp"
 
   printf '// changed runtime autoreview core routing source\n' \
@@ -4525,7 +4529,7 @@ STUB
       --run \
       --skip-if-fresh \
       > "$output_file" 2>&1
-  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "11" ]] ||
+  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "10" ]] ||
     fail "fresh gate stamp was reused after the indexer routing source changed"
 
   # The signature has two path roots. Runtime modules come from the gate's own
@@ -4540,7 +4544,7 @@ STUB
       --run \
       --skip-if-fresh \
       > "$output_file" 2>&1
-  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "12" ]] ||
+  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "11" ]] ||
     fail "fresh gate stamp was reused after the Terraform format checker changed"
 
   printf '# changed fixture terraform format checker suite\n' >> scripts/terraform/terraform-fmt-check.test.mjs
@@ -4551,7 +4555,7 @@ STUB
       --run \
       --skip-if-fresh \
       > "$output_file" 2>&1
-  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "13" ]] ||
+  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "12" ]] ||
     fail "fresh gate stamp was reused after the Terraform format checker suite changed"
 
   # GitHub issue #1905: the lockfile scope classifier is a gate runtime pin, so
@@ -4567,7 +4571,7 @@ STUB
       --run \
       --skip-if-fresh \
       > "$output_file" 2>&1
-  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "14" ]] ||
+  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "13" ]] ||
     fail "fresh gate stamp was reused after the lockfile scope classifier changed"
 
   # A placeholder in the repository under test is not the helper this gate
@@ -4580,7 +4584,7 @@ STUB
       --run \
       --skip-if-fresh \
       > "$output_file" 2>&1
-  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "14" ]] ||
+  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "13" ]] ||
     fail "a non-runtime run-handle placeholder invalidated the fresh stamp"
 
   printf '# changed runtime run-handle helper\n' \
@@ -4592,7 +4596,7 @@ STUB
       --run \
       --skip-if-fresh \
       > "$output_file" 2>&1
-  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "15" ]] ||
+  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "14" ]] ||
     fail "fresh gate stamp was reused after the loaded run-handle helper changed"
 
   # P12 renamed the pinned alias registry from .sh to .mjs. Left stale, the
@@ -4607,7 +4611,7 @@ STUB
       --run \
       --skip-if-fresh \
       > "$output_file" 2>&1
-  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "16" ]] ||
+  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "15" ]] ||
     fail "fresh gate stamp was reused after the pinned alias registry changed"
 )
 rm -rf "$signature_stamp_repo" "$signature_runtime_root"

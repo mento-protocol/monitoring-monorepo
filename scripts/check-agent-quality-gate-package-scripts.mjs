@@ -12,11 +12,13 @@ const expectedScripts = {
   postinstall: "pnpm --filter @mento-protocol/config build",
   "agent:quality-gate": "./scripts/agent-quality-gate.sh",
   "agent:quality-gate:test": "bash scripts/agent-quality-gate.test.sh",
-  // The routing table's own suite (ADR 0069). It is the only thing proving that
-  // the table and the gate's `case` arms still describe the same routing, that
-  // the pattern compiler agrees with bash, and that no arm names a path that has
-  // gone. The gate schedules it and so does the required `ci` job, which makes
-  // it exactly the alias a PR weakening the routing would want to repoint.
+  // The routing table's own suite (ADR 0069). Since D5c retired the gate's bash
+  // `case` arms the table IS the routing, and this suite is the only thing
+  // proving that the pattern compiler agrees with bash, that no arm names a path
+  // that has gone, that the engine implements the closed verb set, and that
+  // `implementation_signature()` still lists every module the freshness stamp
+  // must hash. The gate schedules it and so does the required `ci` job, which
+  // makes it exactly the alias a PR weakening the routing would want to repoint.
   "gate:routing-table:test":
     "node --test scripts/gate/routing-table/*.test.mjs",
   "agent:prewarm": "node scripts/gate/agent-prewarm.mjs",

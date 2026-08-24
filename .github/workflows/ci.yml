@@ -1025,15 +1025,15 @@ jobs:
         # and could merge if a contributor bypasses the local gate.
         run: pnpm agent:quality-gate:test
       - name: Gate routing-table suite
-        # ADR 0069. The gate's routing exists twice — as `case` arms in
-        # scripts/agent-quality-gate.sh and as data in
-        # scripts/gate/routing-table/ — and this suite is what proves the two
-        # still describe the same routing, alongside the pairing lint, the path
-        # staleness check, and the /bin/bash oracle for the pattern compiler.
+        # ADR 0069. The gate's routing is data in scripts/gate/routing-table/,
+        # compiled by the Node mapping engine; D5c retired the bash `case` arms
+        # that held it before. This suite is what checks the data: ADR 0064's
+        # pairing lint, the path staleness check, the /bin/bash oracle for the
+        # pattern compiler, the closed verb set against the engine, and the
+        # `implementation_signature()` pin that keeps the freshness stamp honest.
         # It belongs in the required `ci` sentinel path for the same reason the
         # routing regression suite above does: the local pre-push gate is the
-        # thing a contributor can bypass, and a table that has drifted from the
-        # arms fails nowhere at all.
+        # thing a contributor can bypass, and a broken table fails nowhere else.
         run: pnpm gate:routing-table:test
       - name: CodeRabbit config allowlist pin
         # ADR 0066. CodeRabbit resolves .coderabbit.yaml from the PR's SOURCE
