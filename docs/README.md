@@ -103,6 +103,10 @@ Authority: canonical
 - [`governance-watchdog/DEPLOY_FROM_SCRATCH.md`](../governance-watchdog/DEPLOY_FROM_SCRATCH.md)
 - [`governance-watchdog/README.md`](../governance-watchdog/README.md)
 
+Authority: non-canonical
+
+- [`docs/notes/cloud-env-smoke-test.md`](notes/cloud-env-smoke-test.md)
+
 ## pr-checklists-process
 
 Authority: canonical
