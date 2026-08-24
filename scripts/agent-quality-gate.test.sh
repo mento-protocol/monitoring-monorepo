@@ -6902,8 +6902,8 @@ STUB
   [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "7" ]] ||
     fail "fresh gate stamp was reused after the loaded routing table changed"
 
-  # Suites and the parity harness are mapped target-tree commands, not modules
-  # loaded by the mapper. Their source-tree copies must stay outside the pin.
+  # Suites are mapped target-tree commands, not modules loaded by the mapper.
+  # Their source-tree copies must stay outside the pin.
   printf '// changed source mapper suite copy\n' \
     >> "$signature_runtime_root/scripts/gate/mapping/engine.test.mjs"
   run_signature_gate_again

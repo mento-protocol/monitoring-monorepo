@@ -95,9 +95,9 @@ frozen view of the same family data the classifier uses. Import-time validation
 rejects malformed families, overlapping exact owners, and paths that cannot
 stay literal in a Bash `case`. The routing
 table derives an excluded-first, routed-second checklist dispatch from this
-view. The live Bash case mirrors the derived patterns, and the routing-table
-equality test pins both copies. The checklist arms contain exact current paths
-only. Eighteen broad inventory patterns cover `.ts`, `.tsx`, `.mts`, `.cts`,
+view. The focused indexer parity test compares the table decisions with the
+core classifier and pins every current owner. The checklist arms contain exact
+current paths only. Eighteen broad inventory patterns cover `.ts`, `.tsx`, `.mts`, `.cts`,
 `.js`, `.jsx`, `.mjs`, `.cjs`, and `.json` below `indexer-envio/src/` and
 `indexer-envio/test/`. The four JavaScript extensions match the package's
 `allowJs` TypeScript input set. JSON matches `resolveJsonModule`. Five more

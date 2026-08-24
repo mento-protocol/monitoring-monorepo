@@ -2460,10 +2460,9 @@ mapper_status=0
 node "${mapper_args[@]}" > "$mapper_plan_file" || mapper_status=$?
 if [[ "$mapper_status" -ne 0 ]]; then
   echo "error: gate mapping engine failed (exit ${mapper_status}); refusing to run on a plan it did not produce" >&2
-  # Exit 2, not the mapper's own code. 2 is this gate's refusal status, and the
-  # bash routing classifier already collapses its own 3 into a 2. Forwarding 1
-  # or 3 here would make a mapper crash look like a different failure class to
-  # anything reading the gate's status.
+  # Exit 2, not the mapper's own code. 2 is this gate's refusal status.
+  # Forwarding 1 or 3 would make a mapper crash look like a different failure
+  # class to anything reading the gate's status.
   exit 2
 fi
 if [[ ! -s "$mapper_plan_file" ]]; then
