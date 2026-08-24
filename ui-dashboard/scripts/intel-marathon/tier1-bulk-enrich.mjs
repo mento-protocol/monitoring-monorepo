@@ -1024,15 +1024,17 @@ async function main() {
       appendFileSync(progressFile, JSON.stringify({ address, status }) + "\n");
       return;
     }
-    // Body-sourced quota (no response header has ever reported a number) only
-    // refreshes via the periodic /subscription/intel-usage poll below, so
-    // `quota.remaining` can otherwise sit stale for up to INTEL_USAGE_EVERY
-    // requests while the floor check keeps comparing against it. Decrement it
-    // locally on every 200-with-data lookup — each one consumed an Intel
-    // Label datapoint on Arkham's side regardless of our own quality gate —
-    // so the floor check stays live between polls. Once headers appear,
+    // Body-sourced `remaining` only refreshes via the periodic
+    // /subscription/intel-usage poll below, so it can otherwise sit stale for
+    // up to INTEL_USAGE_EVERY requests while the floor check keeps comparing
+    // against it. Decrement it locally on every 200-with-data lookup — each
+    // one consumed an Intel Label datapoint on Arkham's side regardless of
+    // our own quality gate — so the floor check stays live between polls.
+    // Gate on remainingFromHeaders, NOT fromHeaders: a response that carries
+    // Usage/Limit but omits Remaining still leaves `remaining` body-sourced,
+    // and must keep this decrement active. Once a header reports Remaining,
     // noteQuotaHeaders() takes over per-request and this is a no-op.
-    if (!quota.fromHeaders && quota.remaining !== null) {
+    if (!quota.remainingFromHeaders && quota.remaining !== null) {
       quota.remaining -= 1;
     }
     const entry = toAddressEntry(data);
@@ -1131,7 +1133,7 @@ async function main() {
     // enough to the floor that a 500-request gap between real polls risks
     // overshooting it.
     const intelUsageEvery =
-      !quota.fromHeaders &&
+      !quota.remainingFromHeaders &&
       quota.remaining !== null &&
       quota.remaining - quotaFloor < 500
         ? 100
