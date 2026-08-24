@@ -663,7 +663,7 @@ assert.doesNotMatch(
 );
 assert.match(
   renderText(preBaselineRollbackSummary),
-  /sUSDS launch baseline:\n  required by target schema: no/,
+  /sUSDS launch baseline:\n {2}required by target schema: no/,
 );
 
 const recentSnapshotWithInvalidLaunchBaseline = buildSummary({

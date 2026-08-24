@@ -3,7 +3,6 @@
 import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import {
-  PROBE_QUERY,
   buildProbeQuery,
   buildSummary,
   summarizeSusdsLaunchBaselineSchema,
