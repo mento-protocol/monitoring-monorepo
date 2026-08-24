@@ -5026,6 +5026,349 @@ run_frozen_checklist_provenance_regression() {
   expect_empty_stderr
 }
 
+run_indexer_invariant_checklist_routing_regression() {
+  local review_repo="$tmp_dir/indexer-invariant-checklist-routing"
+  local bundle="$tmp_dir/indexer-invariant-checklist-bundle"
+  local path
+  local indexer_invariant_mixed_paths=(
+    "indexer-envio/src/startupChecks.ts"
+    "indexer-envio/src/wormhole/scratchWarnings.ts"
+    "indexer-envio/test/future-handler.mts"
+  )
+  local indexer_invariant_negative_paths=(
+    "indexer-envio/.env.example"
+    "indexer-envio/abis/liquity/AddressesRegistry.json"
+    "indexer-envio/abis/wormhole/NttDeployHelper.json"
+    "indexer-envio/src/handlers/liquity/troveManagerPreloadContext.ts"
+    "indexer-envio/src/rpc/log.ts"
+    "indexer-envio/src/wormhole/scratchWarnings.ts"
+    "indexer-envio/test/documentation-catalog.test.ts"
+  )
+
+  init_review_repo "$review_repo"
+  mkdir -p "$review_repo/docs/pr-checklists"
+  printf 'recurring review policy\n' >"$review_repo/docs/pr-checklists/recurring-review-patterns.md"
+  printf 'review exclusions\n' >"$review_repo/docs/pr-checklists/review-prompt-exclusions.md"
+  printf 'indexer invariant policy\n' >"$review_repo/docs/pr-checklists/indexer-handler-invariants.md"
+  commit_review_repo "$review_repo" init
+
+  for path in "${indexer_invariant_mixed_paths[@]}"; do
+    mkdir -p "$(dirname "$review_repo/$path")"
+    printf 'changed\n' >"$review_repo/$path"
+  done
+  run_helper_in_repo "$review_repo" \
+    --prepare-bundle-dir "$bundle" \
+    --mode local \
+    --engine local
+  expect_file_contains \
+    "$bundle/selected-checklists.txt" \
+    "docs/pr-checklists/indexer-handler-invariants.md"
+  rm -rf "$bundle"
+  for path in "${indexer_invariant_mixed_paths[@]}"; do
+    rm -f "${review_repo:?}/$path"
+  done
+
+  for path in "${indexer_invariant_negative_paths[@]}"; do
+    mkdir -p "$(dirname "$review_repo/$path")"
+    printf 'changed\n' >"$review_repo/$path"
+  done
+  run_helper_in_repo "$review_repo" \
+    --prepare-bundle-dir "$bundle" \
+    --mode local \
+    --engine local
+  expect_file_not_contains \
+    "$bundle/selected-checklists.txt" \
+    "docs/pr-checklists/indexer-handler-invariants.md"
+  rm -rf "$bundle"
+  for path in "${indexer_invariant_negative_paths[@]}"; do
+    rm -f "${review_repo:?}/$path"
+  done
+
+  mkdir -p "$review_repo/indexer-envio/src"
+  printf 'changed\n' >"$review_repo/indexer-envio/src/env.ts"
+  printf 'changed\n' >"$review_repo/indexer-envio/src/indexer.ts"
+
+  write_indexer_invariant_adapter_core() {
+    local fixture_case="$1"
+    local core_path="$adapter_runtime/scripts/agent-autoreview-core.mjs"
+    cp "$repo_root/scripts/agent-autoreview-core.mjs" "$core_path"
+    "$node_bin" --input-type=module - "$core_path" "$fixture_case" <<'NODE'
+import { readFileSync, writeFileSync } from "node:fs";
+
+const [corePath, fixtureCase] = process.argv.slice(2);
+let source = readFileSync(corePath, "utf8");
+    if (fixtureCase === "export") {
+      source = source.replace(
+    "export function getIndexerHandlerInvariantChecklistDecisions(paths) {",
+    "export function missingIndexerHandlerInvariantDecisionApi(paths) {",
+  );
+    } else {
+      if (fixtureCase === "tamper-runtime") {
+        source = source.replace("  closeSync,", "  chmodSync,\n  closeSync,");
+      }
+      const replacement = `if (
+  process.env.INDEXER_ROUTING_FIXTURE_CASE === "tamper-runtime" &&
+  process.argv[1] === "-" &&
+  process.argv[3]?.endsWith("/changed-paths.txt")
+) {
+  chmodSync(new URL(import.meta.url), 0o600);
+}
+  const fixtureCase = process.env.INDEXER_ROUTING_FIXTURE_CASE;
+  const valid = paths.map((path) => ({ path, route: true, owner: "fixture-owner" }));
+  switch (fixtureCase) {
+    case "non-array":
+      return { path: paths[0], route: true, owner: "fixture-owner" };
+    case "short":
+      return valid.slice(0, 1);
+    case "reversed":
+      return [...valid].reverse();
+    case "route-string":
+      return valid.map((decision) => ({ ...decision, route: "false" }));
+    case "whitespace-owner":
+      return valid.map((decision) => ({ ...decision, owner: "   " }));
+    case "null-decision":
+      return [null, ...valid.slice(1)];
+    case "valid-first-malformed-later":
+      return [valid[0], { ...valid[1], owner: "   " }];
+    case "throw":
+      throw new Error("fixture classifier throw");
+    case "read":
+      return valid;
+    case "second-call": {
+      const calls = (globalThis.__indexerInvariantFixtureCalls ?? 0) + 1;
+      globalThis.__indexerInvariantFixtureCalls = calls;
+      if (calls > 1) throw new Error("fixture classifier called twice");
+      return valid;
+    }
+    default:
+      return valid;
+  }`;
+  const original = `const families = getIndexerHandlerInvariantRoutingFamilies();
+  return paths.map((candidatePath) =>
+    getIndexerHandlerInvariantDecision(candidatePath, families),
+  );`;
+  source = source.replace(original, replacement);
+  if (["import", "read"].includes(fixtureCase)) {
+    const stagedFailure =
+      fixtureCase === "import"
+        ? "throw new Error(\"fixture core import failure\");"
+        : "unlinkSync(process.argv[3]);";
+    source = source.replace(
+      "export function getIndexerHandlerInvariantChecklistDecisions(paths) {",
+      `if (process.env.INDEXER_ROUTING_FIXTURE_CASE === "${fixtureCase}" && process.argv[3]?.endsWith("/changed-paths.txt")) ${stagedFailure}\n\nexport function getIndexerHandlerInvariantChecklistDecisions(paths) {`,
+    );
+  }
+}
+if (!source.includes("fixture-owner") && fixtureCase !== "export") {
+  throw new Error(`failed to prepare ${fixtureCase} indexer routing fixture`);
+}
+writeFileSync(corePath, source, "utf8");
+NODE
+  }
+
+  assert_indexer_invariant_adapter_failure() {
+    local fixture_case="$1"
+    local status=0
+    rm -rf "$bundle"
+    : >"$stdout"
+    : >"$stderr"
+    (
+      cd "$review_repo"
+      env -i \
+        "PATH=$PATH" \
+        "HOME=$HOME" \
+        "TMPDIR=${TMPDIR:-/tmp}" \
+        "INDEXER_ROUTING_FIXTURE_CASE=$fixture_case" \
+        "$adapter_wrapper" \
+        --prepare-bundle-dir "$bundle" \
+        --mode local \
+        --engine local >"$stdout" 2>"$stderr"
+    ) || status=$?
+    cleanup_retained_test_command_runtimes
+    [[ "$status" -eq 2 ]] || {
+      printf '%s attested indexer decision fixture exited %s instead of 2\nstdout:\n%s\nstderr:\n%s\n' \
+        "$fixture_case" \
+        "$status" \
+        "$(cat "$stdout")" \
+        "$(cat "$stderr")" >&2
+      exit 1
+    }
+    [[ ! -e "$bundle" ]] || {
+      printf '%s attested indexer decision fixture published a bundle\n' \
+        "$fixture_case" >&2
+      exit 1
+    }
+    cp "$repo_root/scripts/agent-autoreview-core.mjs" \
+      "$adapter_runtime/scripts/agent-autoreview-core.mjs"
+  }
+
+  for indexer_invariant_fixture in \
+    non-array short reversed null-decision route-string whitespace-owner \
+    valid-first-malformed-later throw read tamper-runtime; do
+    write_indexer_invariant_adapter_core "$indexer_invariant_fixture"
+    assert_indexer_invariant_adapter_failure "$indexer_invariant_fixture"
+    if [[ "$indexer_invariant_fixture" == "tamper-runtime" ]]; then
+      expect_file_contains \
+        "$stderr" \
+        "wrapper-attested indexer classifier runtime changed during launch"
+    fi
+  done
+
+  for indexer_invariant_fixture in import export; do
+    write_indexer_invariant_adapter_core "$indexer_invariant_fixture"
+    assert_indexer_invariant_adapter_failure "$indexer_invariant_fixture"
+  done
+
+  write_indexer_invariant_adapter_core second-call
+  rm -rf "$bundle"
+  run_helper_in_repo "$review_repo" \
+    --prepare-bundle-dir "$bundle" \
+    --mode local \
+    --engine local
+  expect_file_contains \
+    "$bundle/selected-checklists.txt" \
+    "docs/pr-checklists/indexer-handler-invariants.md"
+  rm -rf "$bundle" "$review_repo/indexer-envio"
+  cp "$repo_root/scripts/agent-autoreview-core.mjs" \
+    "$adapter_runtime/scripts/agent-autoreview-core.mjs"
+}
+
+run_indexer_invariant_classifier_skew_regression() {
+  local scenario
+  local review_repo
+  local bundle
+  local candidate_path
+  local candidate_owner
+  local protected_owner
+
+  assert_indexer_invariant_core_route() {
+    local core_path="$1"
+    local routed_path="$2"
+    local expected_route="$3"
+    local expected_owner="$4"
+    "$node_bin" --input-type=module - \
+      "$core_path" "$routed_path" "$expected_route" "$expected_owner" <<'NODE'
+import assert from "node:assert/strict";
+import { pathToFileURL } from "node:url";
+
+const [corePath, routedPath, expectedRoute, expectedOwner] =
+  process.argv.slice(2);
+const core = await import(`${pathToFileURL(corePath).href}?skew=${Date.now()}`);
+const [decision] =
+  core.getIndexerHandlerInvariantChecklistDecisions([routedPath]);
+assert.deepEqual(decision, {
+  path: routedPath,
+  route: expectedRoute === "true",
+  owner: expectedOwner,
+});
+NODE
+  }
+
+  write_indexer_invariant_candidate_core() {
+    local core_path="$1"
+    local fixture_case="$2"
+    "$node_bin" --input-type=module - "$core_path" "$fixture_case" <<'NODE'
+import { readFileSync, writeFileSync } from "node:fs";
+
+const [corePath, fixtureCase] = process.argv.slice(2);
+let source = readFileSync(corePath, "utf8");
+let anchor;
+let replacement;
+switch (fixtureCase) {
+  case "new-owner":
+    anchor = '        "indexer-envio/src/feeToken.ts",';
+    replacement = `${anchor}\n        "indexer-envio/src/futureProtectedSkew.ts",`;
+    break;
+  case "false-to-true":
+    anchor = `      owner: "rpc-logging-only",
+      route: false,
+      exact: ["indexer-envio/src/rpc/log.ts"],`;
+    replacement = anchor.replace("route: false", "route: true");
+    break;
+  default:
+    throw new Error(`unknown skew fixture: ${fixtureCase}`);
+}
+if (!source.includes(anchor)) {
+  throw new Error(`missing ${fixtureCase} classifier anchor`);
+}
+source = source.replace(anchor, replacement);
+writeFileSync(corePath, source, "utf8");
+NODE
+  }
+
+  for scenario in new-owner false-to-true; do
+    review_repo="$tmp_dir/indexer-invariant-classifier-skew-$scenario"
+    bundle="$tmp_dir/indexer-invariant-classifier-skew-$scenario-bundle"
+    init_review_repo "$review_repo"
+    mkdir -p \
+      "$review_repo/docs/pr-checklists" \
+      "$review_repo/scripts"
+    cp "$repo_root/scripts/agent-autoreview-core.mjs" \
+      "$review_repo/scripts/agent-autoreview-core.mjs"
+    printf 'review fixture\n' >"$review_repo/README.md"
+    printf 'recurring review policy\n' \
+      >"$review_repo/docs/pr-checklists/recurring-review-patterns.md"
+    printf 'review exclusions\n' \
+      >"$review_repo/docs/pr-checklists/review-prompt-exclusions.md"
+    printf 'indexer invariant policy\n' \
+      >"$review_repo/docs/pr-checklists/indexer-handler-invariants.md"
+
+    case "$scenario" in
+      new-owner)
+        candidate_path="indexer-envio/src/futureProtectedSkew.ts"
+        candidate_owner="source-runtime"
+        protected_owner="future-module"
+        ;;
+      false-to-true)
+        candidate_path="indexer-envio/src/rpc/log.ts"
+        candidate_owner="rpc-logging-only"
+        protected_owner="rpc-logging-only"
+        mkdir -p "$(dirname "$review_repo/$candidate_path")"
+        printf 'export const rpcLoggerFixture = true;\n' \
+          >"$review_repo/$candidate_path"
+        ;;
+    esac
+
+    commit_review_repo "$review_repo" init
+    assert_indexer_invariant_core_route \
+      "$adapter_runtime/scripts/agent-autoreview-core.mjs" \
+      "$candidate_path" false "$protected_owner"
+
+    git -C "$review_repo" switch -c feature >/dev/null 2>&1
+    write_indexer_invariant_candidate_core \
+      "$review_repo/scripts/agent-autoreview-core.mjs" "$scenario"
+    if [[ "$scenario" == "new-owner" ]]; then
+      mkdir -p "$(dirname "$review_repo/$candidate_path")"
+      printf 'export const futureProtectedSkew = true;\n' \
+        >"$review_repo/$candidate_path"
+    else
+      printf 'export const rpcLoggerFixture = false;\n' \
+        >"$review_repo/$candidate_path"
+    fi
+    commit_review_repo "$review_repo" "$scenario classifier change"
+
+    assert_indexer_invariant_core_route \
+      "$review_repo/scripts/agent-autoreview-core.mjs" \
+      "$candidate_path" true "$candidate_owner"
+    assert_indexer_invariant_core_route \
+      "$adapter_runtime/scripts/agent-autoreview-core.mjs" \
+      "$candidate_path" false "$protected_owner"
+
+    run_helper_in_repo "$review_repo" \
+      --prepare-bundle-dir "$bundle" \
+      --mode branch \
+      --base origin/main \
+      --engine local
+    expect_file_contains_line \
+      "$bundle/changed-paths.txt" \
+      "scripts/agent-autoreview-core.mjs"
+    expect_file_contains_line "$bundle/changed-paths.txt" "$candidate_path"
+    expect_file_contains \
+      "$bundle/selected-checklists.txt" \
+      "docs/pr-checklists/indexer-handler-invariants.md"
+  done
+}
+
 run_stage_timing_manifest_regression() {
   local review_repo="$tmp_dir/stage-timing-manifest"
   local bundle_dir="$tmp_dir/stage-timing-manifest-bundle"
@@ -8628,6 +8971,8 @@ run_runtime_trust_family() {
 
 run_bundle_integrity_family() {
   run_frozen_checklist_provenance_regression
+  run_indexer_invariant_checklist_routing_regression
+  run_indexer_invariant_classifier_skew_regression
   run_stage_timing_manifest_regression
   run_stage_timing_split_checkout_regression
   run_prepared_unsupported_path_regressions
@@ -9989,6 +10334,10 @@ case "$test_focus" in
     ;;
   bundle-integrity)
     run_bundle_integrity_family
+    ;;
+  indexer-invariant-routing)
+    run_indexer_invariant_checklist_routing_regression
+    run_indexer_invariant_classifier_skew_regression
     ;;
   adapter)
     run_adapter_family

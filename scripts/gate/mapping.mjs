@@ -7,11 +7,11 @@
  * `write_command_plan` already emits, plus two further sections for the
  * surfaces and checklists the gate prints.
  *
- * THIS IS THE ROUTING THAT RUNS. D5b part 2 flipped the gate to build its plan
- * from this module's output. The bash `case` arms still execute alongside it
- * for the D5c soak, and the gate REFUSES the whole run if the two plans differ
- * by one byte — parity in production, not parity in a harness. D5c retires the
- * arms once the soak is clean.
+ * THIS IS THE ROUTING THAT RUNS, and the only routing there is. D5b part 2
+ * flipped the gate to build its plan from this module's output behind an
+ * in-gate byte comparison against the bash `case` arms; D5c retired the arms,
+ * that comparison and the parity harness together once the soak was clean
+ * (ADR 0069, issue 2020).
  *
  * FAIL CLOSED. Any unknown verb, guard, dispatch subject or dynamic source
  * throws, and this exits non-zero with the reason. The one outcome that must

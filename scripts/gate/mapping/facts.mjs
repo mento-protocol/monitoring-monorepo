@@ -67,8 +67,9 @@ const DEV_METADATA = [
  * package scripts. A manifest whose only changes are these is safe to route to
  * the tooling checks instead of the full workspace suite.
  *
- * Transcribed from the gate's own `case` list; `check-sentry-suites-in-ci-gate-probe.mjs`
- * pins the closed verdict set this feeds.
+ * Transcribed from the gate's own `case` list, which D5c retired: this set is
+ * the allowlist now. `check-sentry-suites-in-ci-gate-probe.mjs` reads it through
+ * `classifyRootPackageJsonChanges` and asserts every `sentry:*` alias is in it.
  */
 const TOOLING_SCRIPT_POINTERS = new Set(
   [
@@ -130,6 +131,64 @@ const TOOLING_SCRIPT_POINTERS = new Set(
     "sanitize:test",
   ].map((name) => `/scripts/${name}`),
 );
+
+/**
+ * The four classes `rootPackageJsonClass()` may answer, as a closed set.
+ *
+ * Exported so a caller can refuse anything else rather than storing a
+ * plausible-looking string. A class added here has to be added on purpose.
+ */
+export const ROOT_PACKAGE_JSON_CLASSES = Object.freeze([
+  "workspace",
+  "workspace-dev-metadata",
+  "root-tooling-scripts",
+  "package-scripts",
+]);
+
+/**
+ * Classify a set of root-manifest JSON-pointer changes into one of the four
+ * classes above.
+ *
+ * The pure half of `rootPackageJsonClass()`: no git, no filesystem, no parsing.
+ * Exported because it is a routing authority two checks need to interrogate
+ * directly — `check-sentry-suites-in-ci-gate-probe.mjs` asks it which aliases
+ * the gate trusts, and it used to do that by lifting the gate's bash function
+ * out of the script and re-running it under a stubbed shell.
+ *
+ * An empty change set is `workspace`, the widest answer, which is also what an
+ * unreadable or unparsable manifest gets.
+ *
+ * @param {readonly string[]} changes JSON-pointer paths, e.g. `/scripts/tf:test`
+ * @returns {string} one of `ROOT_PACKAGE_JSON_CLASSES`
+ */
+export function classifyRootPackageJsonChanges(changes) {
+  let toolingScript = false;
+  let nonToolingScript = false;
+  let nonScript = false;
+  let devMetadata = false;
+  let nonDevMetadata = false;
+
+  for (const change of changes) {
+    if (TOOLING_SCRIPT_POINTERS.has(change)) {
+      toolingScript = true;
+    } else if (change === "/scripts" || change.startsWith("/scripts/")) {
+      nonToolingScript = true;
+    } else if (DEV_METADATA.some((pattern) => pattern.test(change))) {
+      nonScript = true;
+      devMetadata = true;
+    } else {
+      nonScript = true;
+      nonDevMetadata = true;
+    }
+  }
+
+  if (toolingScript && !nonToolingScript && !nonScript) {
+    return "root-tooling-scripts";
+  }
+  if (toolingScript || nonToolingScript) return "package-scripts";
+  if (devMetadata && !nonDevMetadata) return "workspace-dev-metadata";
+  return "workspace";
+}
 
 const escapePointer = (part) => part.replace(/~/g, "~0").replace(/\//g, "~1");
 const isRecord = (value) =>
@@ -428,31 +487,6 @@ export class Facts {
     }
     if (changes.length === 0) return "workspace";
 
-    let toolingScript = false;
-    let nonToolingScript = false;
-    let nonScript = false;
-    let devMetadata = false;
-    let nonDevMetadata = false;
-
-    for (const change of changes) {
-      if (TOOLING_SCRIPT_POINTERS.has(change)) {
-        toolingScript = true;
-      } else if (change === "/scripts" || change.startsWith("/scripts/")) {
-        nonToolingScript = true;
-      } else if (DEV_METADATA.some((pattern) => pattern.test(change))) {
-        nonScript = true;
-        devMetadata = true;
-      } else {
-        nonScript = true;
-        nonDevMetadata = true;
-      }
-    }
-
-    if (toolingScript && !nonToolingScript && !nonScript) {
-      return "root-tooling-scripts";
-    }
-    if (toolingScript || nonToolingScript) return "package-scripts";
-    if (devMetadata && !nonDevMetadata) return "workspace-dev-metadata";
-    return "workspace";
+    return classifyRootPackageJsonChanges(changes);
   }
 }

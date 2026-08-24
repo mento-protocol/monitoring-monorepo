@@ -3,7 +3,7 @@ title: The quality gate's routing table is data, compiled by the repo's own bash
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-23
+last_verified: 2026-08-24
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -13,18 +13,21 @@ garden_lane: adrs-architecture
 
 # ADR 0069 — the quality gate's routing table is data, compiled by the repo's own bash-`case` translator
 
-**Status:** Active (Aug 2026). Implemented across three PRs of
+**Status:** Active (Aug 2026), complete. Implemented across four PRs of
 [issue 1877](https://github.com/mento-protocol/monitoring-monorepo/issues/1877)'s
 deferred D5 track: D5a made the table data, D5b landed the Node mapping engine
-and proved it at parity, and D5b part 2 made it the routing behind an
-in-production parity guard. D5c retires the bash arms after the soak
+and proved it at parity, D5b part 2 made it the routing behind an in-production
+parity guard, and D5c retired the bash arms, that guard and the parity harness
+once the soak was clean
 ([issue 2020](https://github.com/mento-protocol/monitoring-monorepo/issues/2020)).
+Sections 3 and 4 below describe the transitional machinery and are kept for the
+record; what is live is the table, the engine, and the checks in section 5.
 
 **Scope:** ci/process
 
 ## Context
 
-`scripts/agent-quality-gate.sh` is 5,878 lines and the largest file in the
+`scripts/agent-quality-gate.sh` is 6,100 lines and the largest file in the
 repository. It is the subject of
 [issue 1498](https://github.com/mento-protocol/monitoring-monorepo/issues/1498)
 and the one hard-cap row [ADR 0065](0065-scripts-file-size-watchlist-scope.md)
@@ -33,8 +36,8 @@ than architecturally forbidden.
 
 It is not one thing. The largest single region is routing: one `while IFS= read
 -r path` loop over the changed set, holding **13 top-level `case` statements**,
-**53 `case` statements** counting the nested ones, **232 arms**, **524 pattern
-occurrences** (478 distinct), **29 effect verbs**, six inline guards, two global
+**55 `case` statements** counting the nested ones, **240 arms**, **825 pattern
+occurrences** (757 distinct), **29 effect verbs**, six inline guards, two global
 flag mutations, and two pattern sets the gate computes from the tree at run
 time. That is a table written as control flow.
 
@@ -50,7 +53,7 @@ written that way:
 2. **First-arm-wins ordering.** A new arm for `scripts/<dir>/deploy-*.sh` must
    sit above the widened pair or it never runs. The constraint lives in a
    comment.
-3. **Literal freshness.** 362 distinct arm patterns name an exact path. A path
+3. **Literal freshness.** 617 distinct arm patterns name an exact path. A path
    that is deleted or moved leaves an arm that simply never matches. No check
    reds. This is the same failure class P0 fixed in
    `check-deploy-root-anchors.test.mjs`, which printed "All 0 deploy scripts…"
@@ -117,6 +120,66 @@ Both opt-outs cost a stated reason. A bare flag would let the rule this table
 exists to enforce be suppressed with one word, and leave the next reader unable
 to tell a considered exception from a silenced check.
 
+One routing family has an external data source. The indexer handler-invariant
+classifier stays in the attested `scripts/agent-autoreview-core.mjs` runtime so
+autoreview and the local gate do not grow separate owner lists. The core exports
+a detached, deeply frozen family view and consumes that same view for its
+`{path, route, owner}` decisions. It validates the family schema before export:
+unknown fields, invalid types, overlapping exact owners, and Bash-unsafe literal
+paths fail import.
+
+`arms-packages.mjs` derives two first-match arms from that view. Explicit
+`route: false` families form the excluded arm. Routed exact paths form the
+second arm. The live Bash case carries the same exact patterns, so the normal
+equality test pins the derived table against the code that runs. Eighteen
+future patterns cover `src|test` plus
+`ts|tsx|mts|cts|js|jsx|mjs|cjs|json`. The four JavaScript extensions match the
+package's `allowJs` TypeScript input set. JSON matches `resolveJsonModule`. Five
+broad patterns cover `abis/`, `config/`, root `config*.yaml`, root `vitest*`,
+and `scripts/test-*.mjs` inputs. These 23 broad patterns only trigger the
+inventory check. They do not enter either checklist arm. The exact
+`schema.graphql` and `stryker.config.mjs` patterns complete the 25-pattern
+inventory. The module fallback returns `route: false`
+until the adding PR gives the path an explicit owner. New ABI,
+config-directory, root config YAML, root Vitest, and indexer test-wrapper files
+also inherit no checklist route. Exact owners cover every current ABI,
+config-directory, root config YAML, root Vitest input, and indexer test wrapper,
+plus `schema.graphql` and the Stryker mutation-test configuration. The current
+exact arms contain 253 routed paths and 12 excluded paths.
+A source path routes when the production handler entrypoint, a registered
+handler, an RPC facade or effect, or a self-heal stage executes it and the
+module can change an entity identity or field, a rollup, an effect key or
+target, freshness, or phase behavior. This rule includes ABI and address
+sources, environment and instrumentation modules, and shared handler
+calculations. A test routes when it enforces one of those behaviors or provides
+the fixtures, harness, or HTTP mock boundary that makes the enforcing test
+hermetic. Test-runner inputs route when they set its timeout, fail-closed
+fixture, hermetic RPC boundary, or mutation-test and coverage scope. Type-only
+context modules, warning-only helpers, the console-only RPC logger adapter, the
+two vendored ABIs that no current runtime consumes, and tests limited to an
+independent config-copy, script, or warning-format contract stay explicitly
+excluded.
+A focused parity test covers all current JS, JSON, and TypeScript module paths
+below `src/` and `test/`, every current file below `abis/` and `config/`, every
+current root `config*.yaml` file, Vitest input, indexer test wrapper, Stryker
+configuration, `schema.graphql`, exact owners, exclusions, and synthetic future
+extensions. The local indexer route runs it for these 25 inventory patterns,
+and the indexer CI job runs it for every indexer change. A new module below
+`src/` or `test/`, root config YAML, root Vitest input, indexer test wrapper,
+ABI, or config file must gain an explicit owner in the PR that adds it.
+
+Autoreview imports the classifier from the same selected runtime as its helper.
+For a wrapper-attested runtime, the wrapper verifies the sealed runtime
+identity and content manifest immediately before and after the classifier
+process. A difference at either boundary fails before checklist decisions are
+used. A prepared runtime keeps its existing prepared-runtime trust contract.
+When a candidate changes `scripts/agent-autoreview-core.mjs`, that protected
+classifier cannot see a new owner or a false-to-true reclassification in the
+candidate revision. The core path therefore selects the handler-invariant
+checklist in both autoreview and the local gate. This source trigger
+intentionally routes unrelated core edits. Executing the candidate classifier
+would break the protected-main trust boundary.
+
 ### 2. Patterns are compiled by the repo's own translator, never by a glob library
 
 Bash `case` patterns are not filesystem globs. Verified on `/bin/bash`
@@ -144,7 +207,14 @@ The near misses are checked twice: the shell must agree that the synthetic match
 matches and that at least one near miss does not. A control the shell rejects
 controls nothing.
 
-### 3. The bash arms stay, and an equality test holds the two together
+### 3. TRANSITIONAL (D5a–D5b): the bash arms stay, and an equality test holds the two together
+
+**Retired at D5c.** `gate-equality.test.mjs` and the `gate-arms.mjs` parser it
+rested on are deleted; the table is the only copy of the routing now, so there is
+nothing left to compare it against. The routing-table suite kept every check that
+was about the DATA — the schema, the pairing lint, staleness, the bash pattern
+oracle — and gained the closed verb set, measured against
+`scripts/gate/mapping/route.mjs` instead of against the gate's bash helpers.
 
 Until the arms are retired, the table is a second copy of a routing authority,
 and a second copy nobody compares is a copy that drifts. `gate-equality.test.mjs`
@@ -170,6 +240,11 @@ has drifted from the arms fails nowhere at all.
 
 ### 4. D5b part 2: the engine becomes the routing, behind a guard that runs in production
 
+**The guard is retired; the first paragraph is what stands.** The gate runs
+`scripts/gate/mapping.mjs` once and executes its plan, and every refusal in the
+paragraph beginning "Every failure around the seam" is still live. What went at
+D5c is the arms, `plan_records_from_bash`, and the byte comparison between them.
+
 The gate no longer builds its plan from the `case` arms. It runs
 `scripts/gate/mapping.mjs` once per run, reads the plan back as the TSV
 `write_command_plan` already emits, and uses that. The arms still execute, and
@@ -188,19 +263,71 @@ mapper that cannot be found, exits non-zero, emits nothing, emits a record the
 gate cannot parse, or names a bucket that does not exist. Measured, each of
 those refuses with exit 2 (evidence below).
 
-**Why the arms stay for a soak rather than going in the same PR.** The engine's
-plan is now hashed into the freshness stamp and executed. The arms cost nothing
-but wall-clock, and while they run, every gate invocation anyone makes is
-another parity sample on a path set nobody thought to put in a corpus. D5c
-deletes the arms, the comparison, and the harness together, once the soak has
-produced no refusal.
+**Why the arms stayed for a soak rather than going in the same PR.** The engine's
+plan is hashed into the freshness stamp and executed. The arms cost nothing but
+wall-clock, and while they ran, every gate invocation anyone made was another
+parity sample on a path set nobody thought to put in a corpus. D5c deletes the
+arms, the comparison, and the harness together, once the soak has produced no
+refusal.
+
+### 5. D5c: what the soak produced, and what routing correctness rests on now
+
+The soak was clean. Measured on `3eb5ff55`, macOS, unsandboxed, against the live
+gate's dry run — the guard executes before the dry-run exit, so a dry run is a
+real sample:
+
+- **399 real historical changed-path sets** (every commit on `main` for the last
+  400, each against its true `sha^` base): 399/399 exit 0, zero refusals.
+- The same corpus at a **30-commit-deep base** (120 sets): 120/120 clean.
+- **40 sets on a dirty tree** (an untracked directory, a modified tracked file,
+  and a directory symlink under `scripts/`): 40/40 clean.
+- **Negative control**: changing one word in the engine's targeted-Trunk reason
+  string made 12 of 20 sets refuse. The other 8 take the full-scan branch, where
+  that string never appears — so the control discriminates rather than firing on
+  everything. Restored, clean.
+- **Linux**: the gate self-test invokes the real gate, so the guard ran inside
+  its assertions; `pnpm agent:quality-gate:test` was green in 26 CI runs after
+  the swap.
+
+One initial refusal was traced to the operator's sandbox rather than to the
+routing, and it is the reason **the gate must be run unsandboxed**: `stat` was
+denied on `**/.env.*`, so bash's CWD-relative `[[ -e ]]` saw two `.env.*example`
+files as missing and routed a full-repo Trunk scan, while the engine's
+`existsSync(join(repoRoot, path))` saw them and routed a targeted one. Unsandboxed
+the same corpus passes 399/399, and after D5c there is no second oracle for a
+sandbox to disagree with.
+
+**What routing correctness rests on now.** The arms were the oracle; deleting
+them leaves two suites and nothing else, which is why both are routed from every
+side that can change them and one of them is also in the required `ci` job:
+
+- `pnpm gate:routing-table:test` — the schema, group order, ADR 0064's pairing
+  lint, path staleness, the `/bin/bash` pattern oracle, and the closed verb set
+  checked against `scripts/gate/mapping/route.mjs` in both directions and at the
+  arity each implementation actually reads. It also holds the
+  `implementation_signature()` pins, split into `pins.test.mjs` when D5c took
+  `routing-table.test.mjs` to the 1,000-line cap.
+- `node --test scripts/gate/mapping/engine.test.mjs` — dedupe and
+  first-reason-wins, the alias pairs, prepend, bucket order, the four post-passes
+  and the root-manifest classifier.
+
+**One residual, deliberately kept.** The gate still runs the routing-sensitive
+classifier itself, ahead of the engine, and validates that its answer is
+`true`/`false`. The engine classifies routing-sensitivity too and decides the
+`--check-fixtures` command from its own answer, so the bash block no longer feeds
+routing — what it buys is a refusal that names
+`scripts/docs/docs-navigation-eval-helpers.mjs` by path instead of surfacing as
+`gate mapping engine failed (exit 3)`. Its literal is pinned and both its
+messages are asserted by the gate self-test. Folding that pin onto the engine's
+stderr is a separate change with its own fixture work.
 
 ### The new data is a pinned trust surface
 
 Six pins land with the table:
 
 1. **`implementation_signature()`** gains every module in the directory, suites
-   included — the same treatment `scripts/agent-quality-gate.test.sh` and
+   included, plus the external `scripts/agent-autoreview-core.mjs` family source
+   — the same treatment `scripts/agent-quality-gate.test.sh` and
    `scripts/terraform/terraform-fmt-check.test.mjs` already get, since a suite is
    part of what the gate proves about itself. An entry it cannot
    `stat` hashes as `__missing__`, which **freezes** the signature, so
@@ -209,11 +336,13 @@ Six pins land with the table:
    must not be forgotten, and `routing-table.test.mjs` asserts it per module.
    Runtime modules hash from the gate's `$script_source_dir`; suites and the
    parity harness hash from the target `$repo_root` where their commands run.
-2. Two routing arms and one CI step, so the equality test runs in both drift
+2. Routing arms and CI steps make the equality test run in both drift
    directions: `scripts/gate/routing-table/*.mjs` schedules its suite and —
    because of pin 1 — the gate self-test; the gate's own arm schedules the
-   routing-table suite; and the required `ci` job runs it too.
-3. `turbo.json` inputs, beside the two existing gate entries in all three tasks.
+   routing-table suite; and the required `ci` job runs it too. A core-only edit
+   schedules both gate suites, and the indexer job runs the focused parity test.
+3. `turbo.json` inputs, beside the two existing gate entries in all three tasks,
+   include both the table directory and its external core source.
 4. Import-time schema validation and the pairing lint, failing closed.
 5. The `scripts/AGENTS.md` pin registry, which ADR 0064 requires for any new pin.
 6. ADR 0064's sweep-checklist item 9, so a `scripts/` move updates the data as
@@ -276,51 +405,76 @@ gate is not a trust root.
 
 ## Consequences
 
-- **Routing is Node now, and the pins moved with it.** `implementation_signature()`
-  gained the seven engine modules, the two engine test files and the harness;
-  `turbo.json` gained `scripts/gate/mapping.mjs` and `scripts/gate/mapping/**`
-  at all three sites that already carried the table. A missing entry freezes the
-  stamp, which is the ADR 0064 failure, and it is now load-bearing for code that
-  decides what runs rather than for data nothing consumed.
-- **The soak costs wall-clock; D5c pays it back with interest.** Measured on a
-  representative 24-path change set, dry run: pre-swap 10.2s, post-swap 11.1s
-  (the arms and the engine both run, plus the comparison), and 0.7s with the
-  arms disabled — the D5c projection, measured rather than estimated, by
-  starving the bash loop in a throwaway copy. The bash routing costs ~0.42s per
-  changed path; the engine maps the same 24 paths in 0.12s including Node
-  startup. On a single-path change the difference is noise (0.47s → 0.64s).
-  So the swap is slightly slower today and roughly **14× faster on a 24-path
-  change once D5c lands**.
-- **The dry-run stdout did not move.** Byte-identical before and after on the
-  24-path set and on a workspace-escalating set, after the
-  `__CHANGED_PATHS_FILE__` substitution `write_command_plan` already applies —
-  the only raw difference is the randomized scratch path, which differs between
-  two runs of the _same_ gate. The freshness stamp therefore hashes identically,
-  and the two Node consumers that parse that stdout keep parsing it.
-- **The parity harness survives the swap, and changes job.** The design had it
-  deleted here. It is kept, because after the swap its own comparison is
-  circular — the gate's plan IS the engine's — while its seven corpora are now
-  the only way to drive the _in-gate_ guard across 2,906 path sets in one
-  command. It reports a gate refusal as the difference it is instead of dying on
-  it. It goes at D5c with the arms and the guard, since all three are one
-  mechanism.
-- **The engine's behaviour is pinned by its own tests, not only by the arms.**
+- **Routing is Node, and the pins moved with it.** `implementation_signature()`
+  gained the seven engine modules and their two test files; `turbo.json` gained
+  `scripts/gate/mapping.mjs` and `scripts/gate/mapping/**` at all three sites
+  that already carried the table. D5c removed the entries for the harness, the
+  equality test and `gate-arms.mjs`, and added `pins.test.mjs`. A missing entry
+  freezes the stamp, which is the ADR 0064 failure, and it is load-bearing for
+  code that decides what runs rather than for data nothing consumed.
+- **The soak cost wall-clock; D5c paid it back.** Projected here by starving the
+  bash loop in a throwaway copy: 11.1s with both routings running, 0.7s with the
+  arms disabled. Measured after D5c landed, same machine, dry run over a 24-path
+  multi-package set: **4.85s → 0.74s**, a 6.5× cut, and the 0.7s projection
+  reproduces to within noise. (The 10.2s/11.1s figures above were taken on a
+  slower baseline; what carries across is the post-D5c number, which was the
+  prediction under test.) A single-path change goes 0.50s → 0.41s, where the
+  difference is Node startup against a loop with one iteration.
+- **The dry-run stdout did not move, at either step.** Byte-identical before and
+  after the swap, and again before and after D5c: a single path, a 24-path
+  multi-package set and a root-`package.json` escalation all hash the same after
+  the `__CHANGED_PATHS_FILE__` substitution `write_command_plan` already applies.
+  The freshness stamp therefore hashes identically and the two Node consumers
+  that parse that stdout keep parsing it.
+
+  Two change-set classes DO move at D5c, both deliberately, and both invalidate
+  the stamp on purpose. A set naming `scripts/gate/mapping.mjs` loses the three
+  `routing-parity.mjs --corpus …` commands and gains `pnpm gate:routing-table:test`,
+  because the engine now implements the table's closed verb set and that suite is
+  what checks it. And two reason strings change, because what they said stopped
+  being true: on that same arm, `engine.test.mjs` is no longer "behaviour the arms
+  will stop pinning" but the only suite pinning it; and on the arm for
+  `scripts/agent-quality-gate.sh`, `pnpm gate:routing-table:test` no longer runs
+  because "gate routing arms must still match the routing table" — there are no
+  arms — but because the gate holds that table's `implementation_signature()` pin.
+  A reason string is contract, so a set naming either path hashes differently and
+  re-runs; that is the intended reading of a stamp moving at D5c.
+
+- **The parity harness survived the swap and went at D5c.** The design had it
+  deleted at the swap. It was kept because after the swap its own comparison was
+  circular — the gate's plan IS the engine's — while its seven corpora were the
+  only way to drive the _in-gate_ guard across 2,906 path sets in one command.
+  With the guard gone there is nothing for it to drive, so it went with the arms.
+- **The engine's behaviour is pinned by its own tests.**
   `scripts/gate/mapping/engine.test.mjs` covers dedupe and first-reason-wins, the
   alias pairs, prepend, bucket order, the four post-passes including the 15/16
   scoped-test threshold and every disqualifier, and the root-manifest
-  classifier's four classes. Without it, D5c would delete the only thing pinning
-  those rules in the same commit that removes the arms.
+  classifier's four classes. It was written at D5b precisely so that D5c would
+  not delete the only thing pinning those rules in the same commit that removes
+  the arms.
+- **The root-manifest classifier became an import.**
+  `check-sentry-suites-in-ci-gate-probe.mjs` used to lift the gate's
+  `classify_root_package_json_changes` out of the script and re-run it under an
+  empty `$PATH`, restricted mode, stubbed helpers and a DEBUG trap — ~700 lines
+  of module and ~820 of test, all of it about making that safe. D5c points it at
+  `classifyRootPackageJsonChanges` in `scripts/gate/mapping/facts.mjs`, which is
+  the classifier now, and keeps the one guarantee that survives the change of
+  mechanism: a verdict outside the four closed classes fails rather than being
+  stored as a plausible string. The lifting machinery stays in
+  `check-sentry-suites-in-ci-gate-extract.mjs`, because the routing-table suite
+  reads `implementation_signature()` with it and drives `/bin/bash` as the
+  pattern oracle through it.
 - **`agent:prewarm` now has an end-to-end contract test.** It parses the gate's
   dry-run stdout and no-ops silently when the format drifts; the command lines
   are produced by a different program than the header literals it was pinned
   against, so the test now runs the real gate and requires a non-empty
   extraction.
-- **`scripts/gate/routing-table/` is a new pinned surface.** Every `scripts/`
-  move must now update the data as well as the arms, and ADR 0064's sweep
-  checklist gains it. A missing `implementation_signature()` entry freezes the
+- **`scripts/gate/routing-table/` is a pinned surface.** Every `scripts/` move
+  must update the data, which since D5c is the only copy, and ADR 0064's sweep
+  checklist names it. A missing `implementation_signature()` entry freezes the
   signature and makes `--skip-if-fresh` reuse a stale stamp — the pin that must
   not be forgotten.
-- **The table ships as eleven data modules plus five supporting ones**, cut on
+- **The table ships as eleven data modules plus nine supporting ones**, cut on
   family boundaries, because the arms with the reasoning they carry are ~3,700
   formatted lines: ADR 0065 hard-caps a `scripts/` module at 1,000 and reports
   one at 600, and a table that lands as a size row on day one is a table whose
@@ -328,60 +482,80 @@ gate is not a trust root.
   family decided where they fall. The index concatenates them in an explicit
   order and `routing-table.test.mjs` asserts the resulting group ids against a
   written-out list, because group order is routing.
-- **The size row for `scripts/agent-quality-gate.sh` does not move in this step.**
-  The table is additive; the arms stay. ADR 0065's exemption list does not
-  change. `docs/notes/file-size-watch.md:49` records `3953 rough / 5665 raw` for
-  the gate against a current 5,900 raw and is refreshed by its own monthly route,
-  not here.
+- **The size row for `scripts/agent-quality-gate.sh` halved at D5c.** The table
+  was additive while the arms stayed, so the row did not move at D5a or D5b. D5c
+  took the gate from **6,070 raw to 3,327** (4,183 rough to 2,173): the thirteen
+  `case` statements, the 71 verb and post-pass helpers only they called,
+  `plan_records_from_bash`, the byte comparison, and the three preambles that fed
+  the arms alone. ADR 0065's exemption list does not change and the gate stays in
+  the report, still over the hard cap; its row and the deleted harness's row in
+  `docs/notes/file-size-watch.md` were re-measured with the generator rather than
+  waiting for the monthly route, because a stale baseline would read the drop as
+  fresh drift next month.
 - **The routing-table suite is the slowest new check in `scripts/`.** The bash
-  oracle runs ~473 patterns against ~4,900 paths on every installed bash, about
-  8 seconds cold on this machine. It is routed by a change to the table, by a
+  oracle runs hundreds of patterns against ~4,900 paths on every installed
+  bash, about 12 seconds cold on this machine. It is routed by a change to the table, by a
   change to the gate, and by the required `ci` job, because it is the check the
   whole conversion rests on and a check that only runs on one side of a drift
   is no check at all.
-- **The commonest drift is the merge queue, not the author.** The equality test
-  caught main moving under this decision's own implementing PR across three
-  merges and five routing deltas: a Sentry fixture-scan canary arm and the same
-  canary command added to two existing arms; then a fifth pattern on the PR
-  ready-state arm; then a fifth pattern on the Sentry re-queue arm. None of
-  those authors touched the table, and none had any reason to — the arms are
-  where routing lives. A branch that adds an arm and a branch that holds the
-  table are not in conflict textually, so nothing but this check stands between
-  them. Expect to reconcile on most rebases while both copies exist, and read a
-  red equality test as the merge queue working rather than as a mistake.
-- **The gate gains exactly one command on one existing arm.** Editing
-  `scripts/agent-quality-gate.sh` now also schedules the routing-table suite.
-  That is the one routing change in this step, and it is additive: for a changed
-  set that does not name the gate, the dry-run plan is byte-identical to the
-  plan before this decision.
+- **The commonest drift was the merge queue, not the author — and D5c ends it.**
+  The equality test caught main moving under this decision's own implementing PR
+  across three merges and five routing deltas: a Sentry fixture-scan canary arm
+  and the same canary command added to two existing arms; then a fifth pattern on
+  the PR ready-state arm; then a fifth pattern on the Sentry re-queue arm. None
+  of those authors touched the table, and none had any reason to — the arms were
+  where routing lived. With one copy left there is no drift class to reconcile:
+  a branch that adds routing edits the table, and a branch that edits the table
+  conflicts textually with another that does.
+- **The gate keeps one command on one existing arm.** Editing
+  `scripts/agent-quality-gate.sh` also schedules the routing-table suite. At D5a
+  that arm was what kept the two copies in step; since D5c it is what proves
+  `implementation_signature()` still lists every routing-table module, so the
+  command stays and only its reason string changed.
+- **The indexer family extension rides on the table.** It adds the focused
+  parity command to JS and TypeScript indexer modules and focused external
+  runtime or test-support inputs, and narrows the handler-invariant checklist to
+  its owned paths. Other changed-path classes keep their prior plan, except that
+  the autoreview-core source class now receives the checklist and both gate
+  suites by design.
 - **Issue 1498 is not satisfied as written.** Its acceptance criteria name sourced
   `scripts/lib/gate-*.sh` helpers for the watchdog, stamps and executor —
   exactly the layers this decision keeps in bash. The criteria are rewritten
   rather than quietly satisfied: ADR 0065 cites 1498 by number as the reason the
   gate is not exempt, so the two records must stay consistent.
-- **`check-sentry-suites-in-ci-gate-extract.mjs` gains a second consumer.** Its
-  `runProbeShell` and `probeDirs` now back the routing oracle as well as the
-  classifier probe, so a change to that module's shell plumbing reaches two
-  checks. Its own routing arm already schedules its suite.
+- **`check-sentry-suites-in-ci-gate-extract.mjs` outlived the check it was
+  written for.** Its `runProbeShell`, `probeDirs` and `bashFunctionSource` backed
+  the classifier probe; D5c made that probe an import, and what keeps the module
+  alive is the routing-table suite — the `/bin/bash` pattern oracle and the
+  `implementation_signature()` span. Its own routing arm schedules that suite.
 - **Reason strings are contract, not decoration.**
   `production-infra-identity-contract/routing.test.mjs` pins an arm by asserting
   its reason string, because `add_command` deduplicates on the command and keeps
   the first reason. The table carries reasons verbatim and preserves
-  first-wins order; the equality test is what keeps that true.
+  first-wins order, and the schema's `MIN_REASON` rule keeps a reason from being
+  emptied out.
 - **The gate self-test still has no focus partition**, so any later step in this
   track pays it in full. Adding one is separate work.
 
 ## Evidence
 
-- Routing region, measured at `4f8feaac`: `scripts/agent-quality-gate.sh:3157-4593`
-  — 13 top-level `case` statements, 53 counting nested, 232 arms, 478 distinct
-  patterns of which 362 are glob-free, 29 verbs.
-- Paired-arm rationale, verbatim in the source: `agent-quality-gate.sh:3802-3834`.
-- `implementation_signature()`: `agent-quality-gate.sh:4923`, measured at D5b
-  part 2. The list grew there — seven engine modules, two engine test files and
-  the parity harness — which is why the line moved from `4667`. Both suites
-  locate the function by NAME rather than by line, so this citation is a reading
-  aid and not a pin.
+- The current counts above flatten each normalized `arm.patterns` array.
+  `pathEquals` guard literals and run-time pattern expansions are separate
+  routing inputs, not arm-pattern occurrences.
+- Routing region, measured at `4f8feaac`, before D5c deleted it:
+  `scripts/agent-quality-gate.sh:3157-4593` — 13 top-level `case` statements, 53
+  counting nested, 232 arms, 478 distinct patterns of which 362 are glob-free,
+  29 verbs. The paired-arm rationale it carried is now the `why` on the
+  corresponding arm in `scripts/gate/routing-table/arms-scripts.mjs`.
+- Gate size across the track: 5,878 raw when this ADR was written, 6,070 at
+  `3eb5ff55`, **3,327 after D5c** (2,173 rough). Re-measured with
+  `node scripts/repo-health/file-size-watchlist.mjs`.
+- D5c soak, on `3eb5ff55`: 399/399 historical changed-path sets clean, 120/120 at
+  a 30-commit base, 40/40 on a dirty tree; a one-word mutation of the engine's
+  targeted-Trunk reason refused 12 of 20 sets, the other 8 taking the full-scan
+  branch where that string never appears.
+- `implementation_signature()` locates by NAME in both suites, so no line
+  citation here is a pin.
 - Routing consumers: `scripts/gate/agent-prewarm.mjs:37`;
   `scripts/production-infra-identity-contract/routing.test.mjs:127`.
 - Bash-from-Node machinery reused by the oracle:

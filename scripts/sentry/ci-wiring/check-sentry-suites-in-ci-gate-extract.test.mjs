@@ -1,10 +1,18 @@
 /**
- * How the probe lifts `classify_root_package_json_changes` out of the gate.
+ * How `bashFunctionSource` lifts a function out of a shell script, and how the
+ * probe shells it runs are bounded.
  *
  * Split from check-sentry-suites-in-ci-gate-probe.test.mjs to keep both under
  * the repo's 1,000-line cap (GitHub issue #1803); the shared fixtures live in
  * check-sentry-suites-in-ci-gate-fixtures.mjs. The main check imports this
  * module, so `node scripts/sentry/ci-wiring/check-sentry-suites-in-ci.test.mjs` runs it.
+ *
+ * The extraction machinery outlived the check it was written for. D5c retired
+ * the gate's bash routing arms, so `gateClassifications` no longer lifts and
+ * re-runs anything — but ADR 0069's routing-table suite reads
+ * `implementation_signature()` out of the live gate with `bashFunctionSource`
+ * and drives `/bin/bash` as its pattern oracle through `runProbeShell`, so
+ * every defect these fixtures pin is still a defect in a live check.
  */
 
 import assert from "node:assert/strict";
@@ -14,22 +22,18 @@ import { join } from "node:path";
 import test from "node:test";
 import {
   bashFunctionSource,
-  GATE_CLASSIFIER,
+  FIXTURE_CLASSIFIER,
+  GATE,
+  GATE_FUNCTION,
+  GATE_PATH,
   gateFixture,
   installedBashes,
   legacyFunctionSource,
-  TRUSTED_PATH,
-  UNTRUSTED_PATH,
 } from "./check-sentry-suites-in-ci-gate-fixtures.mjs";
 import {
   probeDirs,
   runProbeShell,
 } from "./check-sentry-suites-in-ci-gate-extract.mjs";
-import {
-  GATE,
-  gateClassifications,
-  GATE_PATH,
-} from "./check-sentry-suites-in-ci-probes.mjs";
 
 test("the gate-function extractor ends the function where bash ends it", () => {
   // Control: on the shape the gate has today the old rule was right, so any
@@ -37,7 +41,7 @@ test("the gate-function extractor ends the function where bash ends it", () => {
   // about ordinary text.
   const clean = gateFixture({});
   assert.equal(
-    bashFunctionSource(clean, GATE_CLASSIFIER, "clean"),
+    bashFunctionSource(clean, FIXTURE_CLASSIFIER, "clean"),
     legacyFunctionSource(clean),
     "the extractor disagrees with the old terminator on a gate with nothing unusual in it",
   );
@@ -52,7 +56,11 @@ Reviewers keep proposing this shape. It is wrong:
 }
 NOTE`,
   });
-  const heredocSource = bashFunctionSource(heredoc, GATE_CLASSIFIER, "heredoc");
+  const heredocSource = bashFunctionSource(
+    heredoc,
+    FIXTURE_CLASSIFIER,
+    "heredoc",
+  );
   assert.ok(
     heredocSource.includes("\nNOTE\n"),
     `the extractor stopped inside the heredoc: ${JSON.stringify(heredocSource)}`,
@@ -75,7 +83,7 @@ later_helper() {
   });
   const trailingSource = bashFunctionSource(
     trailing,
-    GATE_CLASSIFIER,
+    FIXTURE_CLASSIFIER,
     "trailing",
   );
   assert.ok(
@@ -90,11 +98,11 @@ later_helper() {
   // The `function` keyword is a definition the old exact-string header missed
   // entirely, which read as "the function is gone" rather than as a variant.
   const keyword = gateFixture({
-    header: `function ${GATE_CLASSIFIER}() {`,
+    header: `function ${FIXTURE_CLASSIFIER}() {`,
   });
   assert.ok(
-    bashFunctionSource(keyword, GATE_CLASSIFIER, "keyword").startsWith(
-      `function ${GATE_CLASSIFIER}() {`,
+    bashFunctionSource(keyword, FIXTURE_CLASSIFIER, "keyword").startsWith(
+      `function ${FIXTURE_CLASSIFIER}() {`,
     ),
     "the extractor cannot read a `function`-keyword definition",
   );
@@ -105,9 +113,10 @@ later_helper() {
   );
 });
 
-test("the gate probe classifies a gate the old terminator could not read", () => {
+test("the extractor keeps working on a script the old terminator could not read", () => {
   // The point of the two fixtures above is not that they fail loudly — it is
-  // that the probe keeps WORKING on them. Both classify correctly.
+  // that the extractor keeps WORKING on them: a whole function, opener to
+  // closer, on each shape the old rule got wrong.
   for (const [label, script] of [
     [
       "heredoc",
@@ -119,32 +128,35 @@ NOTE`,
     ],
     [
       "function keyword",
-      gateFixture({ header: `function ${GATE_CLASSIFIER} {` }),
+      gateFixture({ header: `function ${FIXTURE_CLASSIFIER} {` }),
     ],
     // A trailing comment on the header is ordinary style, and the matcher read
-    // it as neither a definition nor an error: the probe threw "defines it 0
-    // times" and stopped working on an honest classifier.
+    // it as neither a definition nor an error: the extractor threw "defines it
+    // 0 times" and stopped working on an honest script.
     [
       "commented header",
-      gateFixture({ header: `${GATE_CLASSIFIER}() { # classify the manifest` }),
+      gateFixture({
+        header: `${FIXTURE_CLASSIFIER}() { # classify the manifest`,
+      }),
     ],
   ]) {
-    const verdicts = gateClassifications([TRUSTED_PATH, UNTRUSTED_PATH], {
-      script,
-      label,
-    });
-    assert.deepEqual(
-      [...verdicts],
-      [
-        [TRUSTED_PATH, "root-tooling-scripts"],
-        [UNTRUSTED_PATH, "package-scripts"],
-      ],
-      `the probe misread the ${label} gate`,
+    const extracted = bashFunctionSource(script, FIXTURE_CLASSIFIER, label);
+    assert.ok(
+      extracted.includes(FIXTURE_CLASSIFIER),
+      `the ${label} span does not start at the definition: ${JSON.stringify(extracted.slice(0, 80))}`,
+    );
+    assert.ok(
+      extracted.includes('echo "root-tooling-scripts"'),
+      `the ${label} span stopped before the end of the function: ${JSON.stringify(extracted)}`,
+    );
+    assert.ok(
+      !extracted.includes('root_package_json_class=""'),
+      `the ${label} span ran past the closing brace: ${JSON.stringify(extracted)}`,
     );
   }
 });
 
-test("the gate probe will not carry a trailer off the closing brace", () => {
+test("the extractor will not carry a trailer off the closing brace", () => {
   // `}; printf owned > file` ends the function AND starts a top-level command
   // on the same line. Slicing whole lines put that command inside the extracted
   // source, where both the scan and the probe ran it. The span now ends at the
@@ -156,7 +168,7 @@ test("the gate probe will not carry a trailer off the closing brace", () => {
   );
   try {
     const script = gateFixture({ closer: `}; printf owned > ${owned}` });
-    const extracted = bashFunctionSource(script, GATE_CLASSIFIER, "trailer");
+    const extracted = bashFunctionSource(script, FIXTURE_CLASSIFIER, "trailer");
     assert.ok(
       !extracted.includes("owned"),
       `the extracted span carried the trailer with it: ${JSON.stringify(extracted.split("\n").at(-2))}`,
@@ -167,16 +179,15 @@ test("the gate probe will not carry a trailer off the closing brace", () => {
     );
 
     for (const [, { candidate, version }] of installedBashes()) {
-      assert.deepEqual(
-        [
-          ...gateClassifications([TRUSTED_PATH], {
-            script,
-            label: `trailer under bash ${version}`,
-            bash: candidate,
-          }),
-        ],
-        [[TRUSTED_PATH, "root-tooling-scripts"]],
-        `the probe misread the trailer gate under bash ${version}`,
+      const underBash = bashFunctionSource(
+        script,
+        FIXTURE_CLASSIFIER,
+        `trailer under bash ${version}`,
+        candidate,
+      );
+      assert.ok(
+        !underBash.includes("owned"),
+        `bash ${version} carried the trailer into the span`,
       );
       assert.ok(
         !existsSync(owned),
@@ -190,7 +201,7 @@ test("the gate probe will not carry a trailer off the closing brace", () => {
       () =>
         bashFunctionSource(
           gateFixture({ closer: `} > /dev/null` }),
-          GATE_CLASSIFIER,
+          FIXTURE_CLASSIFIER,
           "redirected definition",
         ),
       /neither a comment nor a separate command/,
@@ -279,17 +290,18 @@ test("the deadline holds even when the probe leaves a descendant behind", () => 
   }
 });
 
-test("the extractor refuses a classifier the gate never defines at top level", () => {
+test("the extractor refuses a function the script never defines at top level", () => {
   // Column 0 is not top level. A definition nested inside another function is
-  // never executed by the gate, so lifting it out reports verdicts for logic
-  // the gate does not have — the routing test would be green on a broken gate.
-  // Nothing in the toolchain prevents the layout: this repo has no shell
-  // formatter, and shellcheck does not object to a nested definition.
+  // never reached by the script's own top-level code, so a span lifted out of
+  // one describes logic the script does not have — and the check reading that
+  // span would be green over the wrong text. Nothing in the toolchain prevents
+  // the layout: this repo has no shell formatter, and shellcheck does not
+  // object to a nested definition.
   const nested = (open, close) => `#!/usr/bin/env bash
 json_change_paths() { :; }
 
 ${open}
-${GATE_CLASSIFIER}() {
+${FIXTURE_CLASSIFIER}() {
   echo "root-tooling-scripts"
 }
 ${close}
@@ -309,7 +321,7 @@ ${close}
         () =>
           bashFunctionSource(
             nested(open, close),
-            GATE_CLASSIFIER,
+            FIXTURE_CLASSIFIER,
             `${label} under bash ${version}`,
             candidate,
           ),
@@ -318,15 +330,15 @@ ${close}
       );
     }
 
-    // The case that matters most: the real gate must still read as top level.
+    // The case that matters most: the live subject must still read as top
+    // level. ADR 0069's routing-table suite extracts this exact function from
+    // this exact file to prove `implementation_signature()` lists every module
+    // it must hash, so a refusal here is that pin going dark.
     assert.ok(
-      bashFunctionSource(
-        GATE,
-        GATE_CLASSIFIER,
-        GATE_PATH,
-        candidate,
-      ).startsWith(`${GATE_CLASSIFIER}() {`),
-      `bash ${version} no longer reads the real gate's classifier as top level`,
+      bashFunctionSource(GATE, GATE_FUNCTION, GATE_PATH, candidate).startsWith(
+        `${GATE_FUNCTION}() {`,
+      ),
+      `bash ${version} no longer reads ${GATE_FUNCTION} in the real gate as top level`,
     );
   }
 });

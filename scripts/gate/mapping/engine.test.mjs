@@ -2,13 +2,12 @@
 /**
  * The mapping engine's own unit tests.
  *
- * WHY THESE EXIST SEPARATELY FROM THE PARITY CORPORA. The corpora compare the
- * engine against the bash arms, so they answer "do the two agree" and nothing
- * else. Once D5c deletes the arms there is no oracle left, and the behaviours
+ * WHY THESE EXIST. Until D5c the engine had an oracle: the parity corpora and
+ * the in-gate guard compared it against the bash `case` arms, which answered
+ * "do the two agree" and nothing else. D5c deleted the arms, so the behaviours
  * below — which reason survives a dedupe, where a compacted Turbo command
- * lands, which of four disqualifiers switched scoped tests off — become
- * unpinned in the same commit that removes the thing pinning them. These tests
- * are what survives that deletion.
+ * lands, which of four disqualifiers switched scoped tests off — are pinned
+ * here or nowhere. These tests are what survived that deletion.
  *
  * They test BEHAVIOUR, not transcription: each one asserts a rule the runbook
  * states, and each was checked to fail under the mutation that breaks that rule

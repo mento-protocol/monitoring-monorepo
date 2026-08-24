@@ -9,9 +9,8 @@
  * every fixture run for the wrong reason.
  */
 
-import { PATH_TOKEN } from "./gate-arms.mjs";
 import { isGlob, literalPatternPath } from "./pattern.mjs";
-import { MIN_REASON, walkArms } from "./schema.mjs";
+import { MIN_REASON, PATH_TOKEN, walkArms } from "./schema.mjs";
 
 const SCRIPTS = "scripts/";
 
