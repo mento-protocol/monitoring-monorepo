@@ -78,6 +78,9 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0064](0064-scripts-module-directories.md)                  | `scripts/` may use module subdirectories; basenames and pinned paths constrain moves |
 | [0065](0065-scripts-file-size-watchlist-scope.md)           | `scripts/` sits inside the file-size watchlist, with named-mechanism exemptions      |
 | [0066](0066-coderabbit-replaces-bugbot-third-reviewer.md)   | CodeRabbit replaces Cursor BugBot as the third advisory PR reviewer                  |
+| [0068](0068-sentry-fixture-authoring-policy.md)             | Adversarial fixtures are authored to scan clean; no value or line registry           |
+| [0069](0069-gate-routing-table-as-data.md)                  | The gate's routing table is data, compiled by the repo's own bash-`case` translator  |
+| [0070](0070-sentry-requeue-settlement-sentinel.md)          | The archive's terminal label is withheld from the re-queue's shed and read back      |
 
 ### shared-config
 
@@ -136,6 +139,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0045](0045-peg-paging-semantics.md)                          | Peg paging measures executable sell price; the deep venue pages alone         |
 | [0048](0048-private-gcs-peg-policy-artifact.md)               | Archived: private GCS artifact with superseded dedicated-project hosting      |
 | [0049](0049-peg-decision-package-read-model.md)               | Peg decisions use a bounded Metrics Bridge read model                         |
+| [0052](0052-envio-logs-prometheus-grafana-alerting.md)        | Envio logs diagnose; Prometheus metrics and Grafana rules alert               |
 | [0054](0054-same-project-peg-policy-artifact.md)              | Peg policy stays private and generation-pinned in the monitoring project      |
 | [0055](0055-peg-policy-bucket-controller-recovery.md)         | Peg bucket IAM reconciliation uses a narrow controller and bounded recovery   |
 | [0057](0057-peg-observation-advancement.md)                   | Repeated provider observations retain bounded health, never sample authority  |

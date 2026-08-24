@@ -33,10 +33,14 @@ function assert(condition, msg) {
   if (!condition) throw new Error(msg);
 }
 
-function assertEqual(actual, expected) {
+function assertEqual(actual, expected, message) {
   if (actual !== expected) {
+    // The message is what says WHICH property was being asserted; call sites
+    // already pass one, and dropping it left a bare value mismatch to read.
     throw new Error(
-      `expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`,
+      `${message ? `${message}: ` : ""}expected ${JSON.stringify(
+        expected,
+      )}, got ${JSON.stringify(actual)}`,
     );
   }
 }
@@ -514,6 +518,12 @@ const readyState = {
       state: "in_flight",
       fallbackAction: "wait",
     },
+    codeRabbitReviewSignal: {
+      ready: false,
+      required: false,
+      state: "stale",
+      fallbackAction: "request_review_once_for_head_after_optional_check",
+    },
     reviewCommentReplies: {
       ready: false,
       required: true,
@@ -530,11 +540,27 @@ const readyState = {
   topLevelBotComments: [{ id: 456 }],
 };
 
+test("assertEqual reports the message its call site passed", () => {
+  let thrown = null;
+  try {
+    assertEqual(3, 10, "the count is the signal; the list is an affordance");
+  } catch (err) {
+    thrown = err instanceof Error ? err.message : String(err);
+  }
+  assert(thrown !== null, "a mismatch must throw");
+  assert(
+    thrown.includes("the count is the signal; the list is an affordance"),
+    `the failure output must name what was asserted; got: ${thrown}`,
+  );
+  assert(thrown.includes("expected 10, got 3"), `values kept: ${thrown}`);
+});
+
 test("summarizes only feedback blockers and counts", () => {
   const summary = summarizeFeedbackState(readyState);
 
   assertEqual(summary.ready, false);
   assertEqual(summary.summary, "Feedback surfaces need attention.");
+  assertEqual(summary.gates.codeRabbitReviewSignal.state, "stale");
   assertDeepEqual(
     summary.requiredFeedbackBlockers.map((blocker) => blocker.kind),
     ["review-thread", "gate"],

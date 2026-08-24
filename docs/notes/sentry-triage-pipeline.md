@@ -3,7 +3,7 @@ title: Sentry Triage Pipeline
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-10
+last_verified: 2026-08-23
 scope: ci/process
 doc_type: runbook
 review_interval_days: 90
@@ -100,7 +100,7 @@ Adding a project means adding it to the allowlist, not only to Sentry.
 | Verdict              | `analytics-mento-org` (local)                                                                                                                                                                                                                     | Every other project (external)                        |
 | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
 | `code-fix`           | `fix_scope: mechanical` → **autofix-eligible**, closed ledger entry — the only path that writes code. `fix_scope: architectural` → **stays OPEN** under `sentry:fix-scope-architectural` (human design work, excluded from autofix at query time) | Projects an issue into the owning repo. Never autofix |
-| `config-fix`         | Record only: no projection (this repo is not an allowlisted target), no autofix                                                                                                                                                                   | Projects an issue into the owning repo                |
+| `config-fix`         | Projects a local work issue with `agent-ready`; no autofix                                                                                                                                                                                        | Projects an issue into the owning repo                |
 | `upstream-transient` | Closes. Nothing downstream                                                                                                                                                                                                                        | Same                                                  |
 | `needs-human`        | Stays open with a decision-ready brief                                                                                                                                                                                                            | Same                                                  |
 
@@ -297,14 +297,20 @@ public repo: a determined commenter can keep a genuine strand below the threshol
 indefinitely. That delays a repair; it can never cause one to happen wrongly, and
 the state it preserves is the one this sweep found.
 
-The window between the sweep's revalidating read and its label shed stays open,
-like the one the re-queue CLI's terminal guard documents, and for the same
-reason: closing it needs a shared concurrency group across ingest and archive,
-which this pipeline rejected on its own terms (GitHub keeps one pending run per
-group and would silently drop a second human-approved archive queued behind an
-ingest run). An approval landing inside that window is shed, the archive run its
-label event started refuses out loud on its own guard, and the human re-applies
-the label.
+The window between the sweep's revalidating read and its label shed stays open.
+A shared concurrency group across ingest and archive is not the close, and this
+pipeline rejected it on its own terms: GitHub keeps one pending run per group and
+would silently drop a second human-approved archive queued behind an ingest run.
+An approval landing inside that window is shed, the archive run its label event
+started refuses out loud on its own guard, and the human re-applies the label.
+
+The re-queue CLI's version of that window is CLOSED, by a different mechanism
+(ADR 0070). It declares `sentry:archived` as a settlement SENTINEL: the marker is
+withheld from its shed, so it survives to be read on the end-state verification,
+and finding it there means the archive settled inside the write window — at which
+point the re-queue unwinds itself rather than leaving a selectable retry stub
+over an archived occurrence. The sweep and the autofix hold-revalidation hold the
+same premise and could adopt the same sentinel; neither does yet.
 
 The sweep re-reads each stub immediately before touching it and acts only if the
 SAME shape still holds — including its idleness, since a comment posted in the
@@ -379,7 +385,7 @@ The namespace is separate from the development backlog:
 | `sentry:verdict-config-fix`      | Configuration or infrastructure change is recommended                                         |
 | `sentry:verdict-upstream`        | Upstream or transient issue; no repo fix                                                      |
 | `sentry:verdict-needs-human`     | A human decision is required                                                                  |
-| `sentry:projected`               | An actionable external verdict was projected to its owning repo                               |
+| `sentry:projected`               | An external actionable verdict or local config-fix was projected to a work issue              |
 | `sentry:fix-scope-architectural` | Local code-fix, `fix_scope: architectural` — open human design work; autofix never selects it |
 | `sentry:approved-archive`        | Human approval to archive the Sentry issue                                                    |
 | `sentry:archived`                | Archive workflow settled the approved issue                                                   |
@@ -449,8 +455,9 @@ step's post-condition reread still counts exactly one label, because
 (`VERDICT_LABELS` filters on that prefix). The close step reads
 `architectural_hold` and leaves the stub open rather than closing it. So the
 "a verdicted queue issue is a closed ledger entry" invariant now has TWO open
-exceptions: an actionable EXTERNAL verdict (deferred to the project job) and a
-LOCAL architectural code-fix (held as human design work). The hold is never
+exceptions: a routed destination (external actionable verdict or exact
+local `config-fix`, deferred to the project job) and a LOCAL architectural
+code-fix (held as human design work). The hold is never
 terminal: it is shed on regression and on any re-verdict
 (`REOPEN_SHED_LABELS`), and `shed` carries it exactly when the hold does not
 apply, so a re-dispatched stub whose scope flips to mechanical un-strands in the
@@ -702,6 +709,160 @@ permission allowlist entirely. The broker bounds its own life with
 `SENTRY_MCP_BROKER_TTL_SECONDS` instead (set to the job timeout), on a runner
 that is destroyed with the job.
 
+#### A broker that dies mid-agent (#1956)
+
+The broker fails closed on a fatal post-startup socket error — it logs
+`SERVER-ERROR`, releases the port and exits non-zero. It is BACKGROUNDED, so
+that exit fails no step, and because no step follows the agent there is nothing
+left to notice. The pre-flight probe covers every death before the agent starts;
+the agent's own window is the gap, and there the agent reads ECONNREFUSED for
+the rest of its turns and reports `needs-human` — a verdict about the tooling
+that the `verdict` job cannot tell apart from a judgement about the issue.
+
+Two facts bound what can close it. A background process cannot fail a sibling
+step, and it cannot write the job log either: the runner drains a step's pipe
+before starting the next one, so anything still holding that pipe holds the step
+open — which is why the broker's own streams go to a file. The only stdio inside
+the agent step that reaches the run log belongs to the agent's own child
+processes, and exactly one of those is trusted: the comment wrapper.
+
+So the mechanism is split across the two halves that can each do their part:
+
+- The broker step arms a **watchdog** after readiness — `while kill -0
+"${broker_pid}"` — that waits for the broker to go and then writes
+  `$RUNNER_TEMP/sentry-mcp-broker.down` with its reason and the broker's log
+  inside, published `.partial` + `mv` so no half-file can be read.
+- `scripts/sentry/triage/sentry-triage-agent-comment.mjs` refuses to post when
+  that marker exists (`BROKER_DOWN_FILE_RELATIVE`, the one home for the name)
+  and prints it: a single-line `::error::` annotation plus the marker's contents
+  as stderr.
+
+The marker sits in the agent-writable `$RUNNER_TEMP`, and that is sound only
+because its trigger is EXISTENCE. The agent's permitted
+`gh issue view … --template … > path` composes into create-and-truncate, so it
+can bring the marker into being or empty it — both of which refuse — but it
+holds nothing that unlinks or renames, so it cannot clear one the watchdog
+wrote. Every reachable tamper is fail-closed. **Do not make the refusal depend
+on the marker's contents**; that would turn truncation into a bypass.
+
+Printing the marker puts the broker's log in front of the model AND in this
+public repository's run log. Two separate properties carry that:
+
+- **No credential.** Every line the broker writes is a fixed prefix plus a
+  method, a path, a status, a byte count or a refusal reason — never the token,
+  a request header or a response body — and its startup assertions name the
+  offending variable and never its value. Re-check that before adding a log line
+  to `scripts/sentry/broker/sentry-mcp-broker.mjs`.
+- **No Sentry coordinates.** Those paths do carry issue, event, trace, replay,
+  monitor, conversation and snapshot identifiers. That is fine on disk — the log
+  is agent-readable by design — but not in a public run log, so
+  `redactSentryPaths` in `sentry-triage-broker-guard.mjs` rewrites every
+  `/api/0/…` path to its route shape and drops the query string before printing.
+  Route shape is the whole diagnostic (it is what re-derives the path allowlist
+  on an MCP-server bump); the identifiers add nothing to it. The marker itself
+  is written unredacted on purpose: the raw log is the better artefact for
+  anyone debugging on the runner, and the wrapper is the one place it crosses
+  into publication.
+
+**Redaction is POSITIONAL, and it has to be.** The first version asked "is this
+segment one of the known route words?", which publishes any coordinate whose
+value happens to be one — route words are not a reserved namespace, so an
+organization really can be named `events`, a monitor slug really can be
+`replays`, and a project slug really can be `images`. The redactor instead
+matches each path against `SENTRY_ROUTES`, a table of the broker's allowed
+routes with the coordinate POSITIONS marked, and renders the result from the
+matched route rather than from the observed path — so a coordinate cannot
+survive whatever it contains. Rules that follow from that:
+
+- Where two routes match, the one that redacts MORE wins. Today that costs
+  exactly one word, `latest`, because `…/events/latest/` and the events-by-id
+  route are the same length; the test pins that set so it cannot grow quietly.
+- An UNMATCHED path — one the broker refused, or one a newer MCP server
+  produced — has every segment past `/api/0/` redacted. Without a pattern there
+  is no way to tell a route word from an identifier, and guessing is the bug
+  this replaced. Re-derive the allowlist against a capture server (below), not
+  by reading a public run log.
+- `SENTRY_ROUTES` is compared whole against the broker's `ALLOWED_PATHS`,
+  re-derived from source by `sentry-triage-agent-comment.test.mjs`, so a route
+  the broker learns cannot silently fall through to the unmatched branch.
+
+**Where this code lives.** The liveness fence and the redactor are
+`scripts/sentry/triage/sentry-triage-broker-guard.mjs`; the wrapper
+(`sentry-triage-agent-comment.mjs`) owns only "may this body be posted, and to
+which issue" and calls the guard on the posting path. They were split when the
+wrapper crossed the 600-line soft cap. The guard is part of the wrapper's
+runtime import closure, so the workflow stages it read-only with the rest — an
+unstaged guard would be loaded from the agent-writable checkout, which is the
+whole point of the staging step. It has no suite of its own: the wrapper's suite
+covers it, and the quality gate routes the guard's path there.
+
+The wrapper also **checks the broker process directly**, in the instant before
+it hands the body to `gh`, because a polled marker lags the death it reports and
+that lag would otherwise be an opening. The two checks cover each other: the
+marker is attributable but late, the process check is immediate but has no
+story to tell.
+
+The check is `process.kill(pid, 0)` against
+`$RUNNER_TEMP/sentry-broker-identity/sentry-mcp-broker.pid`, recorded by the
+broker step before the agent existed. Unlike the marker, that record is trusted
+for its CONTENTS — it names the process the whole liveness answer is about — so
+create-and-truncate is enough to subvert it: an agent that plants a long-lived
+pid (its own parent, say) makes a dead broker read as alive, and the post then
+only has to beat the watchdog's poll to the marker. So it gets the pinned write
+target's treatment: **0444 inside a 0555 directory**, where `open(O_WRONLY)`,
+create, unlink and rename all fail EACCES for the owning non-root user, and the
+wrapper refuses a record it finds writable — which also catches the broker step
+dropping the `chmod`.
+
+**Both modes are checked, and the DIRECTORY is the stronger claim.** Write
+permission on a directory governs unlink and rename, not the mode of the file
+inside it, so a 0444 record in a writable directory protects nothing: delete it,
+lay down your own pid, `chmod` the replacement back to 0444, and a check that
+looked only at the file would wave it through. Verified on a real filesystem —
+at 0755 both unlink-and-recreate and rename-over succeed and the replacement
+reads 0444; at 0555 the unlink is denied. `probeBrokerByPid` therefore stats the
+directory as well as the file and refuses if either permits writes. The process and not its port, deliberately: a loopback
+connect answers a weaker question, since the kernel completes the handshake from
+the
+listen backlog while the owning process is on its way out, and once the port is
+released anything that rebinds it answers in the broker's place. A pid names one
+process. It is also inert — signal 0 sends nothing, so the check cannot disturb
+the broker whose fatal path hangs off its server `error` event. The pid comes
+from a file rather than `SENTRY_MCP_BROKER_PORT` or any other job env value: the
+wrapper runs inside the agent's shell, which expands its own command line, so
+anything read from the environment is a value the model can rewrite. A missing
+record, a record that is not exactly a pid, and an EPERM all refuse. The marker
+is read on BOTH sides of the check, because a death that lands between them is
+published only afterwards.
+
+Both the watchdog and the wrapper additionally read `/proc/<pid>/status` and
+treat `State: Z` as gone. A pid outlives the process until someone reaps it, and
+`kill -0` cannot tell the difference. The hosted VM runner reparents the
+orphaned broker to systemd, which reaps; a `container:` job's PID 1 would not,
+and a watchdog that never fires is the silent fail-open this mechanism exists to
+close. Where there is no procfs the signal answer stands unrefined, so this can
+only ever turn an "alive" into a "gone".
+
+With no verdict comment the `verdict` job finds nothing usable, fails loudly and
+leaves `sentry:needs-triage` on the stub for the next scheduled run — the same
+ending a dead broker already gets before the agent starts.
+
+Four limits, all by construction:
+
+- **The residual window is the `gh` call itself.** A broker that dies between
+  the check and the posted comment took nothing away: every Sentry read behind
+  that verdict had already succeeded.
+- **Pid reuse would read as alive.** It needs the kernel to hand the broker's
+  exact pid to a new process inside the watchdog's poll interval, on a runner
+  that lives half an hour and is then destroyed.
+- **The agent is not killed.** Identifying its process would mean matching the
+  action's path by name, which fails open in silence the day that path changes.
+  The round is void from the moment the broker dies; the turns the agent spends
+  afterwards are bounded by `--max-turns` and the job timeout.
+- **Any broker exit voids the round**, including a clean
+  `SENTRY_MCP_BROKER_TTL_SECONDS` exit — the TTL is the job timeout, so a round
+  still running when it fires is over anyway.
+
 **Re-derive the path allowlist on a `@sentry/mcp-server` bump.** It is the
 empirical closure of the granted tools, not a guess from tool names: point the
 pinned MCP server at a capture server with
@@ -763,9 +924,13 @@ already loud as failed agent reads rather than silent as an absent toolset.
 The agent-side half of the same rule lives in `.github/prompts/sentry-triage.md`
 and covers a toolset lost _after_ the probe passed: losing the evidence source
 is the one irrecoverable failure that must NOT be posted as a verdict. The agent
-stops without commenting, and the round fails closed.
+stops without commenting, and the round fails closed. That instruction is
+advisory — a prompt-injected agent is exactly the one that ignores it — so for
+the case the pipeline can detect on its own, a dead credential broker, the
+refusal is enforced deterministically in the comment wrapper
+([above](#a-broker-that-dies-mid-agent-1956)).
 
-The deterministic parser accepts only comments from
+The deterministic parser accepts only comments from `github-actions` or
 `github-actions[bot]`. After a regression reopen, it accepts only a verdict
 newer than the latest pipeline-authored regression comment. It then applies
 the label and transition below:
@@ -774,7 +939,8 @@ the label and transition below:
 | -------------------------------- | ------------------------------------------------------------ | --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
 | `code-fix` (mechanical/external) | `sentry:verdict-code-fix`                                    | Close as completed                | Project to an allowlisted external repo, or leave a visible projection-skipped note; eligible local mechanical issues may later enter autofix |
 | `code-fix` (local architectural) | `sentry:verdict-code-fix` + `sentry:fix-scope-architectural` | **Keep open** (human design work) | Excluded from autofix at query time; re-triage to clear (#1812)                                                                               |
-| `config-fix`                     | `sentry:verdict-config-fix`                                  | Close as completed                | Project to an allowlisted external repo, or leave a visible projection-skipped note                                                           |
+| `config-fix` (external)          | `sentry:verdict-config-fix`                                  | Close as completed                | Project to an allowlisted external repo, or leave a visible projection-skipped note                                                           |
+| `config-fix` (local)             | `sentry:verdict-config-fix`                                  | Close after projection            | Create or reuse a local work issue with `agent-ready`; no projection PAT required                                                             |
 | `upstream-transient`             | `sentry:verdict-upstream`                                    | Close as completed                | None                                                                                                                                          |
 | `needs-human`                    | `sentry:verdict-needs-human`                                 | Keep open                         | Human answers the recorded question and decides the next action                                                                               |
 
@@ -856,22 +1022,33 @@ the surviving archive-side route as well as the sweep's blind spot. It does not
 make the sweep able to see Sentry, and it is not a substitute for the fence: the
 digest, projection, and autofix consumers still read the fence.
 
-### External verdict projection
+### Verdict projection
 
-[ADR 0038](../adr/0038-sentry-central-plane-verdict-projection.md) limits projection to
-actionable `code-fix` and `config-fix` verdicts whose `affected_repo` is
-one of the script's allowlisted owning repositories. Projection runs
-serialized after the triage matrix so two related verdicts cannot race to
+[ADR 0038](../adr/0038-sentry-central-plane-verdict-projection.md) routes
+actionable verdicts through a closed destination enum. `external` is an
+allowlisted external owner. `local-config` is only a `config-fix` whose owning
+repo validation is exactly this repository. Every local `code-fix` and every
+unrecognised repo is `none`. `projectable` remains external-only. Projection
+runs serialized after the triage matrix so two related verdicts cannot race to
 create duplicate issues.
 
-The projector uses a fine-grained PAT with Issues read/write on only those
-repositories. It keys reuse to the Sentry short ID and the projector account's
-authorship. Rotating the token through a different account can break reuse and
-must be treated as a migration. On `main`, an absent
-`SENTRY_PROJECTION_TOKEN` makes projection a visible no-op and queue
-settlement continues. A non-`main` manual triage dispatch deliberately
-withholds the token; an actionable external verdict is re-queued and the job
-fails so the next `main` run can project it safely.
+The external projector uses a fine-grained PAT with Issues read/write on only
+those repositories. It keys reuse to the Sentry short ID and the projector
+account's authorship. Rotating the token through a different account can break
+reuse and must be treated as a migration. A local config route uses the
+ambient workflow token. It only matches local issues whose `gh issue list`
+author is `app/github-actions`, while marker comments use the trusted
+`github-actions` or `github-actions[bot]` comment fence. Before it creates a
+local issue, it ensures only the canonical shared `agent-ready` definition.
+Before it repairs a closed match, it ensures all four canonical lifecycle label
+definitions named by the edit. Neither path force-edits existing metadata. It
+creates a new issue with `agent-ready`. For a closed match, it restores that
+label and removes
+`agent-active`, `in-pr`, and `needs-grooming` before reopening it, so a failed
+repair stays retryable. It leaves an open match's lifecycle unchanged. On
+`main`, an absent `SENTRY_PROJECTION_TOKEN` makes only external projection a
+visible no-op. A non-`main` manual triage dispatch re-queues an external verdict
+for the next `main` run. Local config projection does not require the PAT.
 
 ### Local autofix PRs
 
@@ -1634,6 +1811,7 @@ To pause ingest/triage, autofix, or archive, set that stage's named
 `sentry_projection_token = ""` and reapply. Confirm the plan removes
 `SENTRY_PROJECTION_TOKEN`; subsequent external verdicts then record the
 visible projection-skipped outcome instead of creating owning-repo issues.
+Local config-fix projection remains available through the workflow token.
 Never widen the read-only token or reuse it for archive. Treat
 `CLAUDE_CODE_OAUTH_TOKEN` replacement as a shared-secret rotation and verify
 the existing Claude PR workflow after applying it.

@@ -249,11 +249,17 @@ if [[ ! "$gate_lock_wait_seconds" =~ ^[0-9]+$ ]]; then
   exit 2
 fi
 
-# Resolve this script's own directory before the cd below so node helpers it
-# invokes (e.g. gate/lockfile-scope.mjs) resolve from the real checkout even when
-# the gate runs against a temp fixture repo whose working directory is elsewhere.
-# Anchoring these on $repo_root instead would make every fixture run miss them.
+# Resolve runtime helpers from this script's checkout before fixture runs change
+# directory. A $repo_root anchor would miss them in every temporary fixture repo.
 script_source_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+run_handles_path="$script_source_dir/gate/run-handles.sh"
+if [[ -L "$run_handles_path" || ! -f "$run_handles_path" || ! -r "$run_handles_path" ]]; then
+  echo "error: gate run-handle helper is missing or not a readable regular file: ${run_handles_path}" >&2
+  echo "Nothing has been executed." >&2
+  exit 2
+fi
+# shellcheck source=scripts/gate/run-handles.sh
+source "$run_handles_path"
 
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
@@ -611,160 +617,6 @@ gate_lock_owner_grace_seconds="$(gate_lock_seconds_knob AGENT_QUALITY_GATE_LOCK_
 # the same reason as the grace — the self-test asserts that waiting happens,
 # not that it takes five seconds a round.
 gate_lock_poll_seconds="$(gate_lock_seconds_knob AGENT_QUALITY_GATE_LOCK_POLL_SECONDS 5)"
-# Every process this run starts for a mapped command carries this string in its
-# own argv. It is the run's lock token, so it is unique per run and per machine,
-# and it exists exactly as long as the process does — nothing to register, no
-# file to keep in step, and no window where a child exists untracked. A run that
-# holds no lock (--no-lock, or a nested run) still tags, with its PID, so the
-# pattern never matches something it should not.
-gate_run_command_tag() {
-  printf 'agentqg:%s' "${gate_lock_token:-nolock-$$}"
-}
-
-# A file every mapped command of this run holds open. Descendants inherit open
-# descriptors and keep them after their parent exits, so this is a handle on a
-# process that no longer has a tagged ancestor to be walked down from. Its path
-# carries the run's token, so unlike a PID or a process group it can never come
-# to name a stranger.
-gate_run_marker_path() {
-  [[ -n "$gate_lock_root_dir" && -n "$gate_lock_token" ]] || return 1
-  printf '%s/holder.%s' "$gate_lock_root_dir" "$gate_lock_token"
-}
-
-gate_run_marker_file=""
-
-gate_run_ensure_marker() {
-  local marker
-  [[ -z "$gate_run_marker_file" ]] || return 0
-  marker="$(gate_run_marker_path)" || return 0
-  # Fail closed, not best-effort. On a host without /proc this marker's
-  # inherited descriptor is the only durable handle to a command that forks a
-  # replacement and exits, so starting the command without it would quietly
-  # forfeit the discovery the drain depends on. Same rule as the obligation
-  # files: stop before the act, while stopping is still safe.
-  # O_EXCL via noclobber, like the owner record: `>` would follow a symlink
-  # another writer on a shared root pre-planted under this run's token and
-  # truncate whatever it points at with this user's permissions. Exclusive
-  # creation refuses an existing path outright — symlinks, dangling ones
-  # included, by kernel contract — and a token is unique to this run, so
-  # anything already sitting at this name is not ours to replace.
-  if ! (set -C && printf '%s\n' "$gate_lock_token" > "$marker") 2>/dev/null; then
-    echo "error: could not create the run marker at ${marker} (it may already exist)." >&2
-    echo "Without it, a command that outlives a killed gate cannot be found by the next run." >&2
-    echo "Nothing has been executed. Fix that path — permissions, free space, or a leftover file — then re-run." >&2
-    exit 2
-  fi
-  gate_run_marker_file="$marker"
-}
-
-# Every process still carrying a run's handle. The argv tag names only the
-# wrapper and dies with it, which is why two inherited handles back it up: the
-# environment, readable on a host with /proc, and the open descriptor on the
-# run's marker file, readable wherever `lsof` exists. Both survive a command
-# that forks a replacement and then exits — the replacement is reparented, has
-# no tagged ancestor left, and is invisible to a tree walk. Neither can land on
-# a stranger, because both are named by a token unique to one run.
-#
-# Only this user's processes are scanned, which is the same scope the rest of
-# this path can signal, and duplicates cost nothing: the capture records a PID
-# once. Where neither inherited handle is readable the argv tag stands alone,
-# which is the pre-existing behaviour.
-# A token names processes (through a pgrep pattern) and files (holder.*,
-# captured.*, condemned.d/*), and on a shared lock root it arrives from
-# records other users can write. Only the gate-generated shape is accepted
-# where one is read back: an alphanumeric start, then hostname characters,
-# digits, dots and dashes. No slash can pass, so no derived path can leave
-# the lock root; no leading dash, so no value can read as an option.
-gate_lock_token_is_wellformed() {
-  local token="$1"
-  # The full generated structure — host, dash, PID, dash, epoch — not merely
-  # a path-safe string. A looser shape would let a crafted record carry a
-  # PREFIX of a real token, and combined with an unanchored match a prefix
-  # is enough to select a live run's processes.
-  [[ "$token" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,180}-[0-9]{1,10}-[0-9]{1,12}$ ]]
-}
-
-# ERE-escape a token for pgrep: validation keeps a token benign as a path,
-# but hostname dots would still match any character as a pattern, and only
-# escaping makes the match literal.
-gate_lock_token_pattern() {
-  printf '%s' "$1" | sed 's/[][\.*^$+?(){}|\\]/\\&/g' || true
-}
-
-gate_run_tagged_pids() {
-  local token="$1"
-  local environ environ_entries pid marker found status
-  # A token read back from a lock record names processes (through this
-  # pattern) and files (holder.*), and on a shared root it can be another
-  # user's writing. One that does not have the gate-generated shape is never
-  # matched with: a crafted '.*' would classify a stranger's processes as
-  # remnants, and this path signals what it matches. Emitting the scan-error
-  # sentinel keeps the obligation open and fails the run closed at the bound
-  # instead.
-  if ! gate_lock_token_is_wellformed "$token"; then
-    echo "error: malformed run token in a lock record; refusing to match processes with it." >&2
-    printf '%s\n' "$gate_drain_scan_error"
-    return 0
-  fi
-  # A scan that failed is not a scan that found nothing. `pgrep` exits 1 for no
-  # match and above that for a real failure, and reading the second as the first
-  # would discharge an obligation on the strength of a question never answered.
-  # Anchored on both sides: the tag is one whole argv element, and an
-  # unanchored match would let one token select another that merely extends
-  # it. The escape keeps hostname dots literal inside the anchors.
-  found="$(pgrep -f "(^| )agentqg:$(gate_lock_token_pattern "$token")( |\$)" 2>/dev/null)" && status=0 || status=$?
-  [[ "$status" -le 1 ]] || printf '%s\n' "$gate_drain_scan_error"
-  [[ -z "$found" ]] || printf '%s\n' "$found"
-  if [[ -d /proc ]]; then
-    for environ in /proc/[0-9]*/environ; do
-      # A builtin test first, because this loop runs once per process on the
-      # host: `-r` false means the read cannot succeed, and skipping there
-      # costs nothing. It is not the whole guard — `-r` answers from the
-      # permission bits, and the kernel refuses `/proc/<pid>/environ` for a
-      # process that changed credentials whatever those say.
-      [[ -r "$environ" ]] || continue
-      # The redirection is inside a group with its own stderr redirect. A
-      # redirection that cannot open its target is reported by the shell
-      # itself, before the `2>/dev/null` beside it applies, so the bare form
-      # printed `/proc/<pid>/environ: Permission denied` into the output of
-      # every drain on a runner (GitHub issue 1919); the group's redirect is
-      # already in place when the inner one is attempted. NULs are translated
-      # before the capture because command substitution cannot hold them, and
-      # the exact-entry match below depends on the separators surviving.
-      environ_entries="$({ tr '\0' '\n' < "$environ"; } 2>/dev/null)" ||
-        environ_entries=""
-      if [[ -z "$environ_entries" ]]; then
-        # Past the `-r` test and still nothing: the kernel refused the read for
-        # a process that changed credentials, the process exited between the
-        # listing and the read, or its environment is genuinely empty. None can
-        # be one of ours. Anything this run started carries this user's
-        # credentials and this run's environment, so it stays readable to it —
-        # and where a credential-changing descendant stretches that, the
-        # argv-tag scan above and the marker-descriptor scan below still name
-        # it, because neither reads the environment. Deliberately NOT the
-        # scan-error sentinel: one unreadable process is ordinary — every
-        # GitHub runner has one — and counting it as a failed scan would fail
-        # every crash recovery on such a host closed, rather than only the ones
-        # with work left to do.
-        continue
-      fi
-      # Exact entry, not substring: environ is NUL-separated, and a substring
-      # match would let one token select an environment carrying a longer one.
-      printf '%s\n' "$environ_entries" |
-        grep -qxF "AGENTQG_RUN=agentqg:${token}" || continue
-      pid="${environ#/proc/}"
-      printf '%s\n' "${pid%/environ}"
-    done
-  fi
-  marker="${gate_lock_root_dir}/holder.${token}"
-  if [[ -n "$gate_lock_root_dir" && -e "$marker" ]] &&
-    command -v lsof > /dev/null 2>&1; then
-    found="$(lsof -w -t -- "$marker" 2>/dev/null)" && status=0 || status=$?
-    [[ "$status" -le 1 ]] || printf '%s\n' "$gate_drain_scan_error"
-    [[ -z "$found" ]] || printf '%s\n' "$found"
-  fi
-}
-
 # The lock root, kept once resolved: outstanding obligations live beside the
 # lock rather than inside it, because the lock directory is what gets reclaimed
 # and the obligation has to outlive that.
@@ -1048,6 +900,29 @@ gate_lock_process_start() {
   # would then abort the whole gate from inside a command substitution —
   # silently, losing whatever stdout was still buffered.
   TZ=UTC LC_ALL=C ps -o lstart= -p "$pid" 2>/dev/null | head -n1 || true
+}
+
+gate_lock_process_state() {
+  local pid="$1"
+  [[ -n "$pid" ]] || return 0
+  TZ=UTC LC_ALL=C LANG=C ps -p "$pid" -o stat= 2>/dev/null |
+    awk 'NF { print $1; exit }' || true
+}
+
+# A zombie has exited and cannot execute, fork, or retain file descriptors. PID
+# 1 can keep its process-table record indefinitely, so kill -0 and lstart alone
+# cannot decide whether a condemned command can still overlap the next run.
+# Re-read the exact identity after the state probe. Empty or unreadable state
+# remains fail-closed because only a confirmed Z state returns success.
+gate_lock_process_is_confirmed_zombie() {
+  local pid="$1"
+  local recorded_start="$2"
+  local current_start current_state
+  [[ -n "$pid" && -n "$recorded_start" ]] || return 1
+  current_state="$(gate_lock_process_state "$pid")"
+  [[ "$current_state" == Z* ]] || return 1
+  current_start="$(gate_lock_process_start "$pid")"
+  [[ -n "$current_start" && "$current_start" == "$recorded_start" ]]
 }
 
 # Is this PID still the process that recorded itself? `kill -0` alone cannot
@@ -1470,6 +1345,9 @@ drain_condemned_run_commands() {
           *" ${pid} "*) : ;;
           *) recycled="${recycled}${pid} " ;;
         esac
+        continue
+      fi
+      if gate_lock_process_is_confirmed_zombie "$pid" "$recorded"; then
         continue
       fi
       alive="${alive}${pid} "
@@ -3853,8 +3731,17 @@ while IFS= read -r path; do
           ;;
       esac
       case "$path" in
-        scripts/agent-quality-gate.sh|scripts/agent-quality-gate.test.sh)
+        scripts/agent-quality-gate.sh|scripts/agent-quality-gate.test.sh|scripts/gate/run-handles.sh)
           add_command "pnpm agent:quality-gate:test" "agent quality gate mapping changed"
+          # The routing arms below and the routing table in
+          # scripts/gate/routing-table/ are two copies of the same routing, and
+          # gate-equality.test.mjs is what holds them together. It has to run in
+          # BOTH drift directions. The table's own arm covers a table-only edit;
+          # this covers the commoner one — somebody adds or reorders an arm here
+          # and does not touch the data. Without it the table goes stale exactly
+          # where nothing reds, which is the failure this conversion exists to
+          # end (ADR 0069).
+          add_command "pnpm gate:routing-table:test" "gate routing arms must still match the routing table"
           ;;
         scripts/agent-autoreview.sh|scripts/agent-autoreview.test.sh)
           add_command "pnpm agent:autoreview:test" "agent autoreview adapter changed"
@@ -3923,6 +3810,11 @@ while IFS= read -r path; do
           ;;
         scripts/agent-autoreview.mjs|scripts/agent-autoreview-core.mjs|scripts/agent-autoreview-core.test.mjs|scripts/agent-autoreview-target-guard.test.mjs)
           add_command "pnpm agent:autoreview:test" "agent autoreview helper changed"
+          # The scanner half of the #1943/#1970 canary (ADR 0068). Widening
+          # `credentialAssignmentKey`'s vocabulary re-traps the renamed Sentry
+          # fixtures, and nothing else would say so until the next autoreview
+          # run refused.
+          add_command "node scripts/sentry/fixture-scan-canary.test.mjs" "autoreview secret scanner changed"
           ;;
         scripts/context/check-agent-context.mjs|scripts/context/check-agent-context-helpers.mjs|scripts/context/check-agent-context.test.mjs)
           add_command "pnpm agent:context-check" "agent context checker changed"
@@ -3971,10 +3863,11 @@ while IFS= read -r path; do
         scripts/lib/gh-issue-lifecycle.mjs)
           # The `gh` runner, pagination guard, Documentation Garden workflow
           # authorization, label bootstrap, and queue-state arbitration behind
-          # both scheduled issue automations. Neither suite covers the other's
-          # consumer, so a shared module belongs in both arms.
+          # both scheduled issue automations, plus the narrowed local Sentry
+          # projection label ensure. Each consumer suite must run here.
           add_command "pnpm docs:garden:test" "shared GitHub issue lifecycle module changed"
           add_command "pnpm docs:navigation-eval:test" "shared GitHub issue lifecycle module changed"
+          add_command "pnpm sentry:project:test" "shared GitHub issue lifecycle module changed"
           ;;
         scripts/context/agent-context-budget.mjs|scripts/context/agent-context-budget.test.mjs)
           add_command "pnpm agent:context-budget:test" "agent context budget helper changed"
@@ -3992,6 +3885,61 @@ while IFS= read -r path; do
         scripts/gate/agent-prewarm.mjs|scripts/gate/agent-prewarm.test.mjs)
           add_command "pnpm agent:prewarm:test" "agent prewarm helper changed"
           ;;
+        # The routing table as data (ADR 0069). Its own suite owns the schema,
+        # ADR 0064's pairing rule, path staleness, the bash-oracle proof of the
+        # pattern compiler, and the equality check against the `case` arms in
+        # this file. The gate self-test rides along because every module here is
+        # in `implementation_signature()`: a change to one moves the freshness
+        # signature, which is gate behaviour whether or not the gate reads the
+        # table yet.
+        scripts/gate/routing-table/*.mjs)
+          add_command "pnpm gate:routing-table:test" "gate routing table changed"
+          add_command "pnpm agent:quality-gate:test" "gate routing table is an implementation-signature input"
+          ;;
+        scripts/gate/mapping.mjs|scripts/gate/mapping/*.mjs|scripts/gate/routing-parity.mjs)
+          # The Node mapping engine (ADR 0069, D5b) and the parity harness that
+          # proves it against these arms. Nothing consults the engine yet — the
+          # `case` arms below are still the routing that runs — so this routes
+          # the engine's own checks rather than the gate self-test.
+          #
+          # The quoting test alone would leave routing, facts, verbs, ordering,
+          # compaction and scoped-test selection unchecked, so the three CHEAP
+          # parity corpora run too: `fixture` (2s) covers the branch that skips
+          # repository-specific groups, `symlink` (6s) covers the dynamic
+          # pattern source no committed path can reach, and `multi` (57s) is
+          # where the four whole-set post-passes are actually exercised. The
+          # tracked, synthetic and base corpora are a 35-minute run and stay a
+          # per-PR step.
+          #
+          # `symlink` creates a directory symlink under scripts/ and removes it
+          # again, the way the gate self-test does, so it must not run
+          # concurrently with another gate in this same worktree — the run lock
+          # already guarantees that.
+          #
+          # These nested gate runs are dry-run and set AGENT_QUALITY_GATE_LOCK=0
+          # themselves, so they do not queue behind the outer run's lock. When
+          # the gate is flipped to read the engine's plan the harness is
+          # deleted, and this arm gains the self-test the way the routing-table
+          # arm already has it.
+          add_command "node --test scripts/gate/mapping/shell-quote.test.mjs" "gate mapping engine changed"
+          add_command "node --test scripts/gate/mapping/engine.test.mjs" "gate mapping engine changed (behaviour the arms will stop pinning at D5c)"
+          add_command "pnpm agent:quality-gate:test" "gate mapping engine produces the stdout the gate suite asserts on"
+          add_command "node scripts/gate/agent-prewarm.test.mjs" "gate mapping engine produces the stdout agent:prewarm parses"
+          add_command "node scripts/gate/routing-parity.mjs --corpus fixture" "gate mapping engine changed (parity against the live arms, fixture repository)"
+          add_command "node scripts/gate/routing-parity.mjs --corpus symlink" "gate mapping engine changed (parity against the live arms, scripts/ symlink source)"
+          add_command "node scripts/gate/routing-parity.mjs --corpus multi" "gate mapping engine changed (parity against the live arms, whole-set post-passes)"
+          ;;
+        scripts/sentry/ci-wiring/check-sentry-suites-in-ci-gate-extract.mjs)
+          # The bash-from-Node machinery. Its own suite already runs, because
+          # check-sentry-suites-in-ci.test.mjs imports it and the coverage arm
+          # below routes that. What was missing is the OTHER consumer: ADR 0069's
+          # routing-table suite drives `runProbeShell`/`probeDirs` for the
+          # /bin/bash pattern oracle and `bashFunctionSource` for the
+          # implementation-signature pin. A change to the probe environment or to
+          # the end-of-function scan changes what both of those prove, and
+          # nothing said so.
+          add_command "pnpm gate:routing-table:test" "the routing table's bash oracle and signature pin run on this machinery"
+          ;;
         scripts/pr/review-materiality.mjs|scripts/pr/review-materiality-context.mjs|scripts/pr/review-materiality.test.mjs)
           add_command "pnpm agent:review-materiality:test" "agent review materiality helper changed"
           ;;
@@ -4001,6 +3949,14 @@ while IFS= read -r path; do
           # pure state machine through the entry's re-exports, so every layer
           # routes to it.
           add_command "pnpm issue:board:test" "agent issue board helper changed"
+          ;;
+        scripts/sentry/fixture-scan-canary.test.mjs)
+          # The #1943/#1970 drift canary (ADR 0068). Its own arm, ABOVE the
+          # per-suite arms below, because those arms name exact paths and a
+          # combined pattern here would shadow them — the routing bug #1974
+          # shipped. The canary's watch list is a path pin: a renamed suite has
+          # to move here too, and this route is what makes that loud.
+          add_command "node scripts/sentry/fixture-scan-canary.test.mjs" "Sentry fixture drift canary changed"
           ;;
         scripts/sentry/triage/sentry-triage-ingest.mjs|scripts/sentry/triage/sentry-triage-ingest.test.mjs)
           add_command "pnpm sentry:ingest:test" "Sentry triage ingest helper changed"
@@ -4031,7 +3987,7 @@ while IFS= read -r path; do
           add_command "pnpm sentry:archive:test" "Sentry needs-human brief helper changed"
           add_command "pnpm sentry:project:test" "Sentry needs-human brief helper changed"
           ;;
-        scripts/sentry/triage/sentry-triage-project.mjs|scripts/sentry/triage/sentry-triage-project-core.mjs|scripts/sentry/triage/sentry-triage-project-cli.mjs|scripts/sentry/triage/sentry-triage-label-ensure.mjs|scripts/sentry/triage/sentry-triage-project.test.mjs|scripts/sentry/triage/sentry-triage-text.mjs|scripts/sentry/triage/sentry-triage-projection.mjs|scripts/sentry/triage/sentry-triage-escalation-contract.mjs)
+        scripts/sentry/triage/sentry-triage-project.mjs|scripts/sentry/triage/sentry-triage-project-core.mjs|scripts/sentry/triage/sentry-triage-project-route.mjs|scripts/sentry/triage/sentry-triage-project-cli.mjs|scripts/sentry/triage/sentry-triage-label-ensure.mjs|scripts/sentry/triage/sentry-triage-project.test.mjs|scripts/sentry/triage/sentry-triage-text.mjs|scripts/sentry/triage/sentry-triage-projection.mjs|scripts/sentry/triage/sentry-triage-escalation-contract.mjs)
           # sentry-triage-project-cli.mjs (the argv surface) and
           # sentry-triage-label-ensure.mjs (the settlement label self-heal) were
           # split out of the entry module for the 1,000-line cap (#1827); both
@@ -4050,8 +4006,15 @@ while IFS= read -r path; do
           # break its audit-comment idempotency and brief-clear (#1769 round 15).
           add_command "pnpm sentry:archive:test" "Sentry triage projection helper changed"
           ;;
-        scripts/sentry/triage/sentry-triage-agent-comment.mjs|scripts/sentry/triage/sentry-triage-agent-comment.test.mjs)
+        scripts/sentry/triage/sentry-triage-agent-comment.mjs|scripts/sentry/triage/sentry-triage-agent-comment.test.mjs|scripts/sentry/triage/sentry-triage-broker-guard.mjs)
+          # The broker guard (liveness fence + public-log redaction, #1956
+          # split) has no suite of its own — it is covered by the wrapper's,
+          # which also owns the workflow-shape and closure assertions that bind
+          # the guard's constants to the YAML. Routing it here rather than to a
+          # new sentry-*.test.mjs keeps the Sentry suite manifest's file count
+          # where it is.
           add_command "node scripts/sentry/triage/sentry-triage-agent-comment.test.mjs" "Sentry triage agent comment wrapper changed"
+          add_command "node scripts/sentry/fixture-scan-canary.test.mjs" "Sentry suite carrying scanned fixtures changed"
           ;;
         scripts/sentry/autofix/sentry-autofix-select.mjs|scripts/sentry/autofix/sentry-autofix-select.test.mjs)
           add_command "pnpm sentry:autofix:select:test" "Sentry autofix select helper changed"
@@ -4103,6 +4066,7 @@ while IFS= read -r path; do
           ;;
         scripts/sentry/autofix/sentry-autofix-finalize.mjs|scripts/sentry/autofix/sentry-autofix-finalize.test.mjs)
           add_command "pnpm sentry:autofix:finalize:test" "Sentry autofix finalize helper changed"
+          add_command "node scripts/sentry/fixture-scan-canary.test.mjs" "Sentry suite carrying scanned fixtures changed"
           ;;
         scripts/sentry/autofix/sentry-autofix-run-record.mjs|scripts/sentry/autofix/sentry-autofix-run-record.test.mjs|scripts/sentry/autofix/sentry-autofix-refused-inventory.mjs)
           # The tracker run-record body builder, extracted from finalize.mjs,
@@ -4122,19 +4086,26 @@ while IFS= read -r path; do
           ;;
         scripts/sentry/triage/sentry-triage-archive.mjs|scripts/sentry/triage/sentry-triage-archive.test.mjs)
           add_command "pnpm sentry:archive:test" "Sentry triage archive helper changed"
+          add_command "node scripts/sentry/fixture-scan-canary.test.mjs" "Sentry suite carrying scanned fixtures changed"
           ;;
         scripts/sentry/broker/sentry-mcp-broker.mjs|scripts/sentry/broker/sentry-mcp-broker.test.mjs|scripts/sentry/broker/sentry-mcp-probe.mjs)
           # The broker and the MCP pre-flight probe (#1938) share one suite:
           # sentry-mcp-broker.test.mjs holds both, so the probe must route here
           # too or a change touching only the probe runs none of its own tests.
           add_command "pnpm sentry:broker:test" "Sentry MCP broker or pre-flight probe changed"
+          add_command "node scripts/sentry/fixture-scan-canary.test.mjs" "Sentry suite carrying scanned fixtures changed"
           ;;
-        scripts/sentry/triage/sentry-triage-requeue.mjs|scripts/sentry/triage/sentry-triage-requeue.test.mjs|scripts/sentry/triage/sentry-triage-queue-contract.mjs|scripts/sentry/triage/sentry-triage-workflow-requeue.mjs)
-          # The single re-queue chokepoint, the queue contract it reads, and the
-          # workflow CLI that wraps it for every compensating exit in the triage
-          # agent workflow (#1769 round 17, #1782). Every site that re-queues a stub
-          # runs through the chokepoint, so its suite is never the whole story —
-          # run theirs too. The CLI's tests live in the requeue suite.
+        scripts/sentry/triage/sentry-triage-requeue.mjs|scripts/sentry/triage/sentry-triage-requeue.test.mjs|scripts/sentry/triage/sentry-triage-requeue-sentinel.mjs|scripts/sentry/triage/sentry-triage-queue-contract.mjs|scripts/sentry/triage/sentry-triage-workflow-requeue.mjs)
+          # The single re-queue chokepoint, the queue contract it reads, the
+          # settlement-sentinel unwind split out of it for the 1,000-line cap
+          # (#1929, ADR 0070), and the workflow CLI that wraps it for every
+          # compensating exit in the triage agent workflow (#1769 round 17, #1782).
+          # The sentinel module has no suite of its own — its tests live in the
+          # re-queue suite — so an unrouted change to it would ship untested, and
+          # it decides the end state of the archive compensation, which is why the
+          # archive suite is on this arm too. Every site that re-queues a stub runs
+          # through the chokepoint, so its suite is never the whole story — run
+          # theirs too. The CLI's tests live in the requeue suite.
           add_command "pnpm sentry:requeue:test" "Sentry re-queue chokepoint changed"
           add_command "pnpm sentry:ingest:test" "Sentry re-queue chokepoint changed"
           add_command "pnpm sentry:archive:test" "Sentry re-queue chokepoint changed"
@@ -4154,7 +4125,7 @@ while IFS= read -r path; do
         scripts/pr/pr-feedback-state.mjs|scripts/pr/pr-feedback-state-core.mjs|scripts/pr/pr-feedback-state-claude.mjs|scripts/pr/pr-feedback-state.test.mjs)
           add_command "pnpm pr:feedback-state:test" "PR feedback-state helper changed"
           ;;
-        scripts/pr/pr-ready-state.mjs|scripts/pr/pr-ready-state-core.mjs|scripts/pr/pr-ready-state-format.mjs|scripts/pr/pr-ready-state.test.mjs)
+        scripts/pr/pr-ready-state.mjs|scripts/pr/pr-ready-state-core.mjs|scripts/pr/pr-ready-state-format.mjs|scripts/pr/pr-ready-state-review-signals.mjs|scripts/pr/pr-ready-state.test.mjs)
           add_command "pnpm pr:ready-state:test" "PR ready-state helper changed"
           ;;
         scripts/pr/review-process-metrics.mjs|scripts/pr/review-process-metrics.test.mjs)
@@ -4626,6 +4597,170 @@ sort_codegen_commands
 compact_turbo_quality_commands
 apply_scoped_test_commands
 
+# ── D5b part 2: the Node mapping engine is the routing ──────────────────────
+#
+# Everything above this line is the bash `case` arms, and they still run. What
+# changes here is which plan the gate USES: the mapper's. The arms become a
+# cross-check, and the gate REFUSES the whole run if the two plans differ by one
+# byte. That is parity in production rather than parity in a harness, and it is
+# what makes the swap reversible — a divergence stops the run instead of
+# silently choosing a winner.
+#
+# D5c deletes the arms and this comparison once the soak is clean. ADR 0069.
+#
+# EVERY failure below is a refusal. A mapper that crashes, exits non-zero,
+# prints something unparsable, names a bucket that does not exist, or emits
+# nothing at all must not leave the gate running on a partial plan: fewer mapped
+# commands still print "All mapped commands passed."
+plan_records_from_bash() {
+  local entry
+  printf 'flag\tpackage_script_risk_changed\t%s\n' "$package_script_risk_changed"
+  printf 'flag\tsaw_workspace_escalation\t%s\n' "$saw_workspace_escalation"
+  for entry in "${surfaces[@]+"${surfaces[@]}"}"; do
+    printf 'surface\t%s\n' "$entry"
+  done
+  for entry in "${checklists[@]+"${checklists[@]}"}"; do
+    printf 'checklist\t%s\t%s\n' "${entry%%|*}" "${entry#*|}"
+  done
+  for entry in "${preflight_commands[@]+"${preflight_commands[@]}"}"; do
+    printf 'preflight\t%s\t%s\n' "${entry%%|*}" "${entry#*|}"
+  done
+  for entry in "${codegen_commands[@]+"${codegen_commands[@]}"}"; do
+    printf 'codegen\t%s\t%s\n' "${entry%%|*}" "${entry#*|}"
+  done
+  for entry in "${post_codegen_commands[@]+"${post_codegen_commands[@]}"}"; do
+    printf 'post-codegen\t%s\t%s\n' "${entry%%|*}" "${entry#*|}"
+  done
+  for entry in "${quality_commands[@]+"${quality_commands[@]}"}"; do
+    printf 'quality\t%s\t%s\n' "${entry%%|*}" "${entry#*|}"
+  done
+}
+
+mapper_path="$script_source_dir/gate/mapping.mjs"
+# Checked before the call, and separately from a run failure: a mapper the gate
+# cannot find is a repointing mistake, not a routing result, and it must not
+# read as one.
+if [[ ! -f "$mapper_path" ]]; then
+  echo "error: gate mapping engine could not be loaded from ${mapper_path}" >&2
+  echo "       scripts/agent-quality-gate.sh runs this module at pre-push time; moving it requires repointing that path in the same commit." >&2
+  exit 2
+fi
+
+mapper_args=(
+  "$mapper_path"
+  --repo-root "$repo_root"
+  --changed-paths-file "$changed_paths_file"
+  --base "$base_ref"
+  --head "$head_ref"
+  --script-source-dir "$script_source_dir"
+)
+if [[ "$script_source_dir" == "$repo_root/scripts" ]]; then
+  mapper_args+=(--real-tree)
+fi
+if [[ "$full_local_tests" == "1" || "$full_local_tests" == "true" ]]; then
+  mapper_args+=(--full-local-tests)
+fi
+
+mapper_plan_file="$(make_tmpfile)"
+mapper_status=0
+node "${mapper_args[@]}" > "$mapper_plan_file" || mapper_status=$?
+if [[ "$mapper_status" -ne 0 ]]; then
+  echo "error: gate mapping engine failed (exit ${mapper_status}); refusing to run on a plan it did not produce" >&2
+  # Exit 2, not the mapper's own code. 2 is this gate's refusal status, and the
+  # bash routing classifier already collapses its own 3 into a 2. Forwarding 1
+  # or 3 here would make a mapper crash look like a different failure class to
+  # anything reading the gate's status.
+  exit 2
+fi
+if [[ ! -s "$mapper_plan_file" ]]; then
+  echo "error: gate mapping engine produced an empty plan; refusing to run" >&2
+  exit 2
+fi
+
+engine_preflight_commands=()
+engine_codegen_commands=()
+engine_post_codegen_commands=()
+engine_quality_commands=()
+engine_checklists=()
+engine_surfaces=()
+engine_package_script_risk_changed=false
+mapper_record=""
+mapper_rest=""
+mapper_field=""
+while IFS= read -r mapper_record; do
+  [[ -n "$mapper_record" ]] || continue
+  mapper_rest="${mapper_record#*$'\t'}"
+  case "$mapper_record" in
+    flag$'\t'*)
+      mapper_field="${mapper_rest%%$'\t'*}"
+      case "${mapper_field}=${mapper_rest#*$'\t'}" in
+        package_script_risk_changed=true) engine_package_script_risk_changed=true ;;
+        package_script_risk_changed=false) ;;
+        # Accepted and compared, not stored: its only reader already ran. An
+        # unrecognised VALUE still falls through to the refusal below.
+        saw_workspace_escalation=true | saw_workspace_escalation=false) ;;
+        *)
+          echo "error: gate mapping engine emitted an unknown flag record: ${mapper_record}" >&2
+          exit 2
+          ;;
+      esac
+      ;;
+    surface$'\t'*) engine_surfaces+=("$mapper_rest") ;;
+    checklist$'\t'*)
+      engine_checklists+=("${mapper_rest%%$'\t'*}|${mapper_rest#*$'\t'}")
+      ;;
+    preflight$'\t'*)
+      engine_preflight_commands+=("${mapper_rest%%$'\t'*}|${mapper_rest#*$'\t'}")
+      ;;
+    codegen$'\t'*)
+      engine_codegen_commands+=("${mapper_rest%%$'\t'*}|${mapper_rest#*$'\t'}")
+      ;;
+    post-codegen$'\t'*)
+      engine_post_codegen_commands+=("${mapper_rest%%$'\t'*}|${mapper_rest#*$'\t'}")
+      ;;
+    quality$'\t'*)
+      engine_quality_commands+=("${mapper_rest%%$'\t'*}|${mapper_rest#*$'\t'}")
+      ;;
+    *)
+      echo "error: gate mapping engine emitted an unparsable record: ${mapper_record}" >&2
+      exit 2
+      ;;
+  esac
+done < "$mapper_plan_file"
+
+# The transitional guard. Order matters on both sides — the buckets, the
+# surfaces and the checklists all print and hash in sequence — so this is a
+# byte comparison of the whole plan, not a set comparison.
+bash_plan_file="$(make_tmpfile)"
+plan_records_from_bash > "$bash_plan_file"
+if ! diff -u "$bash_plan_file" "$mapper_plan_file" > "$bash_plan_file.diff" 2>&1; then
+  echo "error: the gate mapping engine and the bash routing arms disagree." >&2
+  echo "       This is the D5c soak guard: the run is refused rather than run on either plan." >&2
+  echo "       -bash +engine:" >&2
+  sed 's/^/       /' "$bash_plan_file.diff" >&2
+  rm -f "$bash_plan_file.diff"
+  exit 2
+fi
+rm -f "$bash_plan_file.diff"
+
+# The engine's plan is the plan. Assigned from its records rather than left as
+# the bash arrays, so that when D5c deletes the arms nothing downstream moves.
+preflight_commands=("${engine_preflight_commands[@]+"${engine_preflight_commands[@]}"}")
+codegen_commands=("${engine_codegen_commands[@]+"${engine_codegen_commands[@]}"}")
+post_codegen_commands=("${engine_post_codegen_commands[@]+"${engine_post_codegen_commands[@]}"}")
+quality_commands=("${engine_quality_commands[@]+"${engine_quality_commands[@]}"}")
+checklists=("${engine_checklists[@]+"${engine_checklists[@]}"}")
+surfaces=("${engine_surfaces[@]+"${engine_surfaces[@]}"}")
+# This one is still read below, by the refusal that stops a run whose package
+# manifests or lockfile changed, so it has to cross the seam.
+package_script_risk_changed="$engine_package_script_risk_changed"
+# `saw_workspace_escalation` deliberately does NOT get assigned here. Its only
+# reader is `scoped_tests_enabled`, which ran in the post-passes above, so an
+# assignment at this point would be dead code that reads like a live flag. It is
+# still carried across the seam and compared, because a disagreement about it
+# means the two sides escalated differently even where the command lists happen
+# to match.
+
 hash_sha256() {
   if command -v sha256sum >/dev/null 2>&1; then
     sha256sum "$@"
@@ -4681,19 +4816,64 @@ write_command_plan() {
 }
 
 implementation_signature() {
-  local path
+  local implementation_path path
   for path in \
     scripts/agent-quality-gate.sh \
     scripts/agent-quality-gate.test.sh \
+    scripts/gate/run-handles.sh \
     scripts/check-agent-quality-gate-package-scripts.mjs \
     scripts/docs/docs-navigation-eval-helpers.mjs \
     scripts/gate/lockfile-scope.mjs \
+    scripts/gate/mapping.mjs \
+    scripts/gate/mapping/facts.mjs \
+    scripts/gate/mapping/plan.mjs \
+    scripts/gate/mapping/post-passes.mjs \
+    scripts/gate/mapping/route.mjs \
+    scripts/gate/mapping/shell-quote.mjs \
+    scripts/gate/mapping/shell-quote.test.mjs \
+    scripts/gate/mapping/verbs.mjs \
+    scripts/gate/mapping/engine.test.mjs \
+    scripts/gate/routing-parity.mjs \
+    scripts/gate/routing-table/arms-agent-modules.mjs \
+    scripts/gate/routing-table/arms-alerts.mjs \
+    scripts/gate/routing-table/arms-packages.mjs \
+    scripts/gate/routing-table/arms-script-modules.mjs \
+    scripts/gate/routing-table/arms-scripts.mjs \
+    scripts/gate/routing-table/arms-sentry-modules.mjs \
+    scripts/gate/routing-table/arms-services.mjs \
+    scripts/gate/routing-table/arms-tooling-modules.mjs \
+    scripts/gate/routing-table/arms-workflows.mjs \
+    scripts/gate/routing-table/checks.mjs \
+    scripts/gate/routing-table/gate-arms.mjs \
+    scripts/gate/routing-table/gate-equality.test.mjs \
+    scripts/gate/routing-table/groups-head.mjs \
+    scripts/gate/routing-table/groups-tail.mjs \
+    scripts/gate/routing-table/index.mjs \
+    scripts/gate/routing-table/pattern-oracle.test.mjs \
+    scripts/gate/routing-table/pattern.mjs \
+    scripts/gate/routing-table/routing-table.test.mjs \
+    scripts/gate/routing-table/schema.mjs \
     scripts/terraform/terraform-fmt-check.mjs \
     scripts/terraform/terraform-fmt-check.test.mjs \
     turbo.json \
     .trunk/trunk.yaml; do
-    if [[ -f "$path" ]]; then
-      printf '%s %s\n' "$path" "$(hash_file "$path")"
+  # Gate-loaded runtime entries execute from this checkout even when a fixture
+  # makes $repo_root a different repository. Hash the same source tree the gate
+  # executes. Mapper and routing-table suites plus the parity harness are mapped
+  # commands from the repository under test, so they stay anchored there.
+  case "$path" in
+      scripts/gate/mapping/*.test.mjs | scripts/gate/routing-table/*.test.mjs | scripts/gate/routing-parity.mjs)
+        implementation_path="$repo_root/$path"
+        ;;
+      scripts/agent-quality-gate.sh | scripts/docs/docs-navigation-eval-helpers.mjs | scripts/gate/lockfile-scope.mjs | scripts/gate/run-handles.sh | scripts/gate/mapping.mjs | scripts/gate/mapping/*.mjs | scripts/gate/routing-table/*.mjs)
+        implementation_path="$script_source_dir/${path#scripts/}"
+        ;;
+      *)
+        implementation_path="$repo_root/$path"
+        ;;
+    esac
+    if [[ -f "$implementation_path" ]]; then
+      printf '%s %s\n' "$path" "$(hash_file "$implementation_path")"
     else
       printf '%s __missing__\n' "$path"
     fi
@@ -4879,6 +5059,18 @@ acquire_gate_run_lock
 # is not the run's. Failing here also means failing before ANY command, which
 # is the whole point.
 gate_run_ensure_marker
+# Test-only synchronization for the displaced-holder fixture. Normal runs do
+# not call it, so unset behavior stays exactly on the production path.
+if [[ "${AGENT_QUALITY_GATE_LOCK_TEST_READY_FILE+x}" == x || "${AGENT_QUALITY_GATE_LOCK_TEST_RELEASE_FILE+x}" == x ]]; then
+  if [[ "${NODE_ENV:-}" != "test" ]]; then
+    echo "error: gate lock test synchronization is allowed only with NODE_ENV=test." >&2
+    echo "Nothing has been executed." >&2
+    exit 2
+  fi
+  gate_lock_test_ready_and_wait_for_release \
+    "${AGENT_QUALITY_GATE_LOCK_TEST_READY_FILE:-}" \
+    "${AGENT_QUALITY_GATE_LOCK_TEST_RELEASE_FILE:-}"
+fi
 # Test-only: widens the gap between holding the lock and checking we still do,
 # which is otherwise as short as the mapping work between them.
 gate_lock_test_delay "${AGENT_QUALITY_GATE_LOCK_HELD_DELAY_SECONDS:-}"

@@ -284,6 +284,15 @@ export const REOPEN_SHED_LABELS = [
   ARCHIVED_LABEL,
 ];
 
+// Shed markers a re-queue may never put BACK, even when unwinding its own shed
+// against a stub that settled underneath it (ADR 0070). `sentry:approved-archive`
+// is a spent human authority, and re-adding it is doubly wrong: a later
+// workflow_dispatch would read it as still-approved and archive without
+// re-review, and the add itself re-fires `sentry-triage-archive.yml`'s
+// `issues: labeled` trigger. Restoring a verdict or a projection/autofix marker
+// only restores a machine record; restoring this one hands out authority.
+export const NEVER_RESTORED_LABELS = [APPROVED_ARCHIVE_LABEL];
+
 // The needs-human brief (issue #1748) is NOT here, and no longer touches this
 // body. It lives as a dedicated, updated-in-place COMMENT on the stub, its
 // marker and lifecycle owned by scripts/sentry/triage/sentry-triage-brief.mjs. Rendering it

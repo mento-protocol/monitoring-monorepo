@@ -6000,7 +6000,8 @@ run_feedback_runtime_aggregate_regression() {
     pr-feedback-state-claude.mjs \
     pr-ready-state.mjs \
     pr-ready-state-core.mjs \
-    pr-ready-state-format.mjs; do
+    pr-ready-state-format.mjs \
+    pr-ready-state-review-signals.mjs; do
     printf 'export {};\n' >"$review_repo/scripts/pr/$runtime_file"
   done
   commit_review_repo "$review_repo" init
@@ -6036,6 +6037,108 @@ run_feedback_runtime_aggregate_regression() {
   expect_stderr_contains "trusted feedback runtime exceeds the 2097152-byte aggregate limit"
   if [[ -e "$bundle_dir" ]]; then
     printf 'bundle was published after oversized feedback runtime preflight\n' >&2
+    exit 1
+  fi
+}
+
+run_feedback_runtime_version_split_regression() {
+  local review_repo="$tmp_dir/feedback-runtime-version-split"
+  local post_split_bundle="$tmp_dir/feedback-runtime-post-split-bundle"
+  local pre_split_bundle="$tmp_dir/feedback-runtime-pre-split-bundle"
+  local missing_sibling_bundle="$tmp_dir/feedback-runtime-missing-sibling-bundle"
+  local pre_split_oid
+  local post_split_oid
+  local missing_sibling_oid
+  local runtime_file
+
+  init_review_repo "$review_repo"
+  git -C "$review_repo" remote add origin \
+    https://github.com/mento-protocol/monitoring-monorepo.git
+  mkdir -p "$review_repo/scripts/pr"
+  printf 'base\n' >"$review_repo/README.md"
+  cat >"$review_repo/scripts/pr/pr-feedback-state.mjs" <<'FEEDBACK_RUNTIME'
+#!/usr/bin/env node
+import { runtimeVersion } from "./pr-ready-state-core.mjs";
+process.stdout.write(
+  `{"findings":[],"testEvidence":{"runtimeVersion":"${runtimeVersion}"}}\n`,
+);
+FEEDBACK_RUNTIME
+  for runtime_file in \
+    pr-feedback-state-core.mjs \
+    pr-ready-state.mjs \
+    pr-ready-state-format.mjs; do
+    printf 'export {};\n' >"$review_repo/scripts/pr/$runtime_file"
+  done
+  printf 'export const runtimeVersion = "pre-split";\n' \
+    >"$review_repo/scripts/pr/pr-ready-state-core.mjs"
+  commit_review_repo "$review_repo" "pre-split feedback runtime"
+  pre_split_oid="$(git -C "$review_repo" rev-parse HEAD)"
+
+  cat >"$review_repo/scripts/pr/pr-ready-state-core.mjs" <<'POST_SPLIT_CORE'
+import { reviewSignalsVersion } from "./pr-ready-state-review-signals.mjs";
+export const runtimeVersion = `post-split:${reviewSignalsVersion}`;
+POST_SPLIT_CORE
+  printf 'export const reviewSignalsVersion = "present";\n' \
+    >"$review_repo/scripts/pr/pr-ready-state-review-signals.mjs"
+  commit_review_repo "$review_repo" "post-split feedback runtime"
+  post_split_oid="$(git -C "$review_repo" rev-parse HEAD)"
+
+  git -C "$review_repo" rm scripts/pr/pr-ready-state-review-signals.mjs \
+    >/dev/null
+  commit_review_repo "$review_repo" "drop post-split feedback sibling"
+  missing_sibling_oid="$(git -C "$review_repo" rev-parse HEAD)"
+
+  git -C "$review_repo" switch -c feature "$pre_split_oid" >/dev/null 2>&1
+  printf 'feature\n' >"$review_repo/feature.txt"
+  commit_review_repo "$review_repo" feature
+
+  git -C "$review_repo" update-ref \
+    refs/remotes/origin/main \
+    "$post_split_oid"
+  (
+    cd "$review_repo"
+    run_adapter \
+      --prepare-bundle-dir "$post_split_bundle" \
+      --mode branch \
+      --base "$pre_split_oid" \
+      --feedback-pr 1299
+  )
+  expect_file_contains \
+    "$post_split_bundle/feedback-state.json" \
+    '"runtimeVersion":"post-split:present"'
+  expect_empty_stderr
+
+  git -C "$review_repo" update-ref \
+    refs/remotes/origin/main \
+    "$pre_split_oid"
+  (
+    cd "$review_repo"
+    run_adapter \
+      --prepare-bundle-dir "$pre_split_bundle" \
+      --mode branch \
+      --base "$pre_split_oid" \
+      --feedback-pr 1299
+  )
+  expect_file_contains \
+    "$pre_split_bundle/feedback-state.json" \
+    '"runtimeVersion":"pre-split"'
+  expect_empty_stderr
+
+  git -C "$review_repo" update-ref \
+    refs/remotes/origin/main \
+    "$missing_sibling_oid"
+  (
+    cd "$review_repo"
+    run_adapter_expect_failure \
+      --prepare-bundle-dir "$missing_sibling_bundle" \
+      --mode branch \
+      --base "$pre_split_oid" \
+      --feedback-pr 1299
+  )
+  expect_stderr_contains "ERR_MODULE_NOT_FOUND"
+  expect_stderr_contains "pr-ready-state-review-signals.mjs"
+  if [[ -e "$missing_sibling_bundle" ]]; then
+    printf 'bundle was published without the post-split feedback sibling\n' >&2
     exit 1
   fi
 }
@@ -6707,6 +6810,7 @@ run_capture_deadline_regressions() {
   run_capture_deadline_byte_refusal_arm
   run_capture_deadline_helper_accumulation_arm
   run_capture_deadline_wrapper_accumulation_arm
+  run_capture_deadline_engine_time_arm
   run_capture_deadline_interrupt_arm
 }
 
@@ -6991,6 +7095,128 @@ run_capture_deadline_helper_accumulation_arm() {
       "$bundle_output" >&2
     exit 1
   fi
+}
+
+# What the helper charges its budget, and what it must never charge. The
+# accumulation arm above proves Git spawns add up; this one proves the wall
+# clock between them does not. The helper's spawns bracket a semantic review
+# that legitimately runs for half an hour, so the budget is the time those
+# spawns take -- unlike the wrapper's stage clock, which is absolute because its
+# captures are one contiguous stage with no engine inside them. Giving the
+# helper that absolute clock is the natural refactor for a reader who notices
+# the difference, and it would make every real review longer than the budget
+# refuse at the post-review source fingerprint.
+#
+# So: a fake engine that burns more than the whole budget between the
+# pre-review captures and that fingerprint. Per-spawn charging leaves the
+# fingerprint the budget it needs and the run publishes; a clock charging
+# elapsed time between spawns has nothing left and refuses.
+run_capture_deadline_engine_time_arm() {
+  local review_repo="$tmp_dir/capture-deadline-engine-time"
+  local engine_bin="$tmp_dir/capture-deadline-engine-time-bin"
+  local state_dir="$tmp_dir/capture-deadline-engine-time-state"
+  local json_output="$state_dir/report.json"
+  local human_output="$state_dir/report.txt"
+  # Sized the way the accumulation arm sizes its stalls, in the other
+  # direction, and the budget is the half that cannot shrink: it also carries
+  # every quick Git spawn the run makes, and those get slower on a loaded
+  # machine. Ten seconds against the well under a second a two-file repository
+  # spends across all of them is the same reserve that arm leaves above its own
+  # stalls. The engine gap only has to clear that budget by enough that the
+  # refusal a wall-clock charge produces is not a near thing, so it is the half
+  # kept small -- five seconds of margin, and the whole arm costs fifteen.
+  local deadline_seconds=10
+  local engine_seconds=15
+  local engine_started
+  local engine_finished
+  local engine_elapsed
+  local status=0
+
+  init_review_repo "$review_repo"
+  printf 'base\n' >"$review_repo/README.md"
+  commit_review_repo "$review_repo" init
+  printf 'change\n' >>"$review_repo/README.md"
+
+  mkdir "$engine_bin" "$state_dir"
+  # The reviewer forwards `AUTOREVIEW_FAKE_*` into the engine's sanitized
+  # environment, which is how the sleep and the state directory reach a script
+  # the helper spawns with nothing else of the caller's environment.
+  cat >"$engine_bin/codex" <<'CODEX'
+#!/bin/bash
+if [[ "${1:-}" == "--version" ]]; then
+  printf 'codex-cli 9.9.9\n'
+  exit 0
+fi
+output=""
+while [[ "$#" -gt 0 ]]; do
+  case "$1" in
+    -o)
+      output="$2"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+cat >/dev/null
+date +%s >"$AUTOREVIEW_FAKE_ENGINE_STATE_DIR/engine-started"
+sleep "$AUTOREVIEW_FAKE_ENGINE_SECONDS"
+date +%s >"$AUTOREVIEW_FAKE_ENGINE_STATE_DIR/engine-finished"
+printf '%s\n' '{"findings":[],"overall_correctness":"patch is correct","overall_explanation":"clean","overall_confidence":0.9}' >"$output"
+CODEX
+  chmod +x "$engine_bin/codex"
+
+  : >"$stdout"
+  : >"$stderr"
+  (
+    cd "$review_repo"
+    env -i \
+      "PATH=$engine_bin:$hermetic_git_bin" \
+      "HOME=$HOME" \
+      "TMPDIR=${TMPDIR:-/tmp}" \
+      "GIT_CONFIG_GLOBAL=/dev/null" \
+      "AUTOREVIEW_EXTRA_BIN_DIRS=" \
+      "AGENT_AUTOREVIEW_CAPTURE_DEADLINE_SECONDS=$deadline_seconds" \
+      "AUTOREVIEW_FAKE_ENGINE_STATE_DIR=$state_dir" \
+      "AUTOREVIEW_FAKE_ENGINE_SECONDS=$engine_seconds" \
+      "$node_bin" "$repo_root/scripts/agent-autoreview.mjs" \
+      --mode local \
+      --engine codex \
+      --json-output "$json_output" \
+      --output "$human_output" >"$stdout" 2>"$stderr"
+  ) || status=$?
+  cleanup_retained_test_command_runtimes
+
+  # Negative control on the fixture. The arm proves nothing unless the engine
+  # really did consume more than the whole budget between the captures around
+  # it, so read the span the engine itself recorded rather than trusting the
+  # sleep to have happened.
+  if [[ ! -s "$state_dir/engine-started" || ! -s "$state_dir/engine-finished" ]]; then
+    printf 'the capture-budget engine fixture never completed a review\nstdout:\n%s\nstderr:\n%s\n' \
+      "$(cat "$stdout")" "$(cat "$stderr")" >&2
+    exit 1
+  fi
+  engine_started="$(cat "$state_dir/engine-started")"
+  engine_finished="$(cat "$state_dir/engine-finished")"
+  engine_elapsed=$((engine_finished - engine_started))
+  if ((engine_elapsed <= deadline_seconds)); then
+    printf 'the capture-budget engine fixture burned %ss, inside the %ss budget; the arm would pass vacuously\n' \
+      "$engine_elapsed" "$deadline_seconds" >&2
+    exit 1
+  fi
+
+  if [[ "$status" -ne 0 ]]; then
+    printf 'a review whose engine outlasted the capture budget refused to publish\nstdout:\n%s\nstderr:\n%s\n' \
+      "$(cat "$stdout")" "$(cat "$stderr")" >&2
+    exit 1
+  fi
+  expect_stdout_contains "autoreview clean"
+  # The refusal a wall-clock charge produces names the deadline; an empty stderr
+  # rules out a run that published while warning about one.
+  expect_empty_stderr
+  expect_file_contains "$human_output" "autoreview clean"
+  expect_file_contains "$json_output" "patch is correct"
 }
 
 # The deadline kills a capture with SIGKILL, and spawnSync reports an exhausted
@@ -8409,6 +8635,7 @@ run_bundle_integrity_family() {
   run_deploy_directory_checklist_routing_regression
   run_prepared_untracked_symlink_regression
   run_feedback_runtime_aggregate_regression
+  run_feedback_runtime_version_split_regression
   run_feedback_runtime_location_regression
   run_large_untracked_bound_regression
   run_aggregate_untracked_bound_regression

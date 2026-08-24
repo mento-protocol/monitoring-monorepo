@@ -3,7 +3,7 @@ title: Scripts Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-20
+last_verified: 2026-08-23
 doc_type: agent-instructions
 scope: scripts
 review_interval_days: 90
@@ -12,17 +12,17 @@ garden_lane: agent-entry-points
 
 # AGENTS.md — Scripts
 
-> **Architecture decisions** behind these scripts live in [`docs/adr/`](../docs/adr/README.md) — read the relevant ADR before changing how something here works.
+Read the relevant [ADR](../docs/adr/README.md) before changing script behavior.
 
 ## Scope
 
 `scripts/` holds deploy wrappers, agent quality gates, code-health checks, and
-repo maintenance utilities.
+maintenance utilities.
 
 ## Layout
 
 [ADR 0064](../docs/adr/0064-scripts-module-directories.md) governs these
-subdirectories; reorganization phases P1–P15 are complete.
+subdirectories.
 
 | Directory       | Holds                                  |
 | --------------- | -------------------------------------- |
@@ -37,94 +37,98 @@ subdirectories; reorganization phases P1–P15 are complete.
 | `alerts/`       | alert-rule lint, peg-policy checks     |
 | `repo-health/`  | code-health, file-size, lint wrappers  |
 | `terraform/`    | movable Terraform guards and helpers   |
-| `gate/`         | quality-gate satellites                |
+| `gate/`         | gate routing engine + helpers          |
 | `sentry/`       | triage/autofix/gate/broker/ci-wiring   |
 
-`lib/` (the shared tier) and
-`production-infra-identity-contract/` predate the reorganization. `setup.sh`
-stays flat: `.config/wt.toml` runs that exact path as the Worktrunk pre-start
-hook, and eight docs name it. `redrive-onchain-deadletter.{mjs,test.mjs}` stays
-flat although `alerts/infra/` owns it; ADR 0064 has the lint reason.
+`lib/` and `production-infra-identity-contract/` predate the reorganization.
+`setup.sh` stays flat because `.config/wt.toml` uses its exact Worktrunk
+pre-start path and eight docs name it. `redrive-onchain-deadletter.{mjs,test.mjs}`
+stays flat under `alerts/infra/` ownership; ADR 0064 gives the lint reason.
 
-`lib/` holds cores more than one cluster reads. `hcl.mjs` (Terraform HCL
-tokenizer and block extraction), `workflow-yaml.mjs` (Actions workflow and
-shell-run parsing), `pnpm-override-selector.mjs` (pnpm override selectors), and
-`gh-issue-lifecycle.mjs` (the `gh` runner, pagination guard, Documentation
-Garden workflow authorization, label bootstrap, and issue-queue arbitration).
-Cores stay outside domain directories; ADR 0064 records which clusters read
-each. `peg-policy-digest.mjs` is the one definition of the peg version-digest
+`lib/` holds cores that multiple clusters read: `hcl.mjs` for Terraform HCL,
+`workflow-yaml.mjs` for Actions and shell parsing,
+`pnpm-override-selector.mjs` for pnpm overrides, and
+`gh-issue-lifecycle.mjs` for shared GitHub issue and label mechanics.
+Documentation schedulers use this module. Local projection ensures only
+`agent-ready` on create and all lifecycle labels on closed repair. ADR 0064
+lists readers.
+`peg-policy-digest.mjs` is the one definition of the peg version-digest
 contract both peg validators check. Inventories, pinned hashes, and identities
 stay with their domain.
 
 ## Why Files Stay Flat
 
-`scripts/` has eleven path-pin classes. Move each pin with its file in the
+`scripts/` has twelve path-pin classes. Move each pin with its file in the
 same PR, except the `agent-autoreview.sh` feedback-runtime pins below.
 
-- **Autoreview runtime materialization.** `agent-autoreview.sh` pins sibling
-  runtime in Perl lists and `runtime_paths`; feedback helpers use `origin/main`.
-  Move feedback paths in three merges: add copies and a dual-path fallback;
-  repoint consumers; remove old paths and fallback when no pre-move wrapper
-  remains (ADR 0064).
+- **Autoreview runtime pins.** `agent-autoreview.sh` pins sibling runtime and
+  optional `pr-feedback-state-claude.mjs` and
+  `pr-ready-state-review-signals.mjs`; feedback blobs use `origin/main`. Move
+  feedback paths in three merges: add copies/fallback; repoint; remove old paths
+  after no pre-move wrapper remains (ADR 0064).
 - **Gate routing pins.** The gate excludes stub-repo tests with
   `$script_source_dir == $repo_root/scripts`, and pairs
   `bootstrap/codex-cloud-setup.{sh,test.sh}` for offline tests. It routes
   `sentry/autofix/sentry-autofix-refused-inventory.mjs` alone to
   `pnpm sentry:autofix:run-record:test` and
-  `pnpm sentry:autofix:finalize:test`.
-- **Gate runtime module pins.** `agent-quality-gate.sh` pins
+  `pnpm sentry:autofix:finalize:test`. The exact
+  `sentry/triage/sentry-triage-project-route.mjs` path routes to
+  `pnpm sentry:project:test` with the projection family.
+- **Gate runtime module pins.** Before `cd`, `agent-quality-gate.sh` loads
+  `$script_source_dir/gate/run-handles.sh`; move it with its signature, self-test
+  route, and missing-helper fixture. It also pins
   `docs/docs-navigation-eval-helpers.mjs` and `gate/lockfile-scope.mjs` to
-  `$script_source_dir` in three literals, not stub `$repo_root`. Repoint all
-  three (ADR 0064).
+  `$script_source_dir` in three literals; update every pin (ADR 0064).
+- **Gate routing and mapping pins.** Every `gate/routing-table/*.mjs` and
+  `gate/mapping*.mjs` appears in `implementation_signature()` and `turbo.json`;
+  `gate/routing-parity.mjs` is signature-only, not a Turbo input. Runtime hashes
+  use `$script_source_dir`; test and parity hashes use `$repo_root`. A missing
+  pin freezes the stamp for routing code
+  ([ADR 0069](../docs/adr/0069-gate-routing-table-as-data.md)).
 - **Evaluation fixture forbidden lists.** `forbidden_sources` in
   `docs/evals/documentation-navigation-fixtures.json` names the navigation
   eval's own implementation.
 - **Sentry suite manifest.** `scripts/sentry/gate/sentry-suite-manifest.json`
   keys are exact repo-relative paths, reconciled against `findSentrySuites()`
   by set equality both ways. A moved or renamed suite fails the gate closed.
-- **Enumerated workflow paths-filters.** 22 of 32 files in
-  `.github/workflows/` pin a `scripts/` path. `ci.yml` (`autoreviewSuite`,
-  `autoreviewRootRuntime`, `versionSkew`; `rootScripts` is the recursive
-  `scripts/**`), `infra.yml`, `alerts-rules.yml`, `peg-policy-publication.yml`,
-  and `schema-diff.yml` list individual files. The three Terraform filters are
-  the exception: `ci.yml` `terraform` plus `infra.yml` push and `pull_request`
+  `sentry/fixture-scan-canary.test.mjs` re-pins four; ADR 0068 has the policy.
+- **Enumerated workflow pins.** 22 of 32 files in
+  `.github/workflows/` pin a `scripts/` path, and `sentry-triage-agent.yml`
+  stages an exact copy list at runtime; three Terraform filters instead
   copy the broad `workflowAdmissionPatterns` boundary from
-  `terraform.stacks.json`, including `scripts/**`. `routing.test.mjs` asserts
-  exact equality and proves that boundary subsumes every stack pattern. A miss
-  is silent without that contract — the job stops running while the required
-  `ci` sentinel stays green. ADR 0064 covers when a module glob such as
-  `supply-chain.yml`'s `scripts/supply-chain/**` is the safer pin.
+  `terraform.stacks.json`. A miss is silent — the job stops running while the
+  required `ci` sentinel stays green. The enumeration, the `routing.test.mjs`
+  equality contract, and when a module glob is the safer pin are in
+  [ADR 0064](../docs/adr/0064-scripts-module-directories.md#sweep-checklist-for-a-move).
 - **Terraform stack registry.** `terraform.stacks.json` `changedPathPatterns`
   pins exact `scripts/` paths per stack. The broad workflow admission boundary
   covers the directory; `pnpm tf:test` enforces subsumption.
 - **Trusted-validator probes.** `pr-description.yml` runs the validator from the
-  PR's base ref via the base branch **name**, so it always resolves to the base
-  branch's current tip — never a snapshot from when a PR branched. One probe
+  PR's base ref via the base branch **name**, so it resolves to that branch's
+  tip, never a PR-time snapshot. One probe
   path is enough once the target path is live on the base branch (issue 1904);
   a move still needs a temporary dual probe for the commit that performs it.
   ADR 0064 has the failure mode.
 - **Production infrastructure contract pins.**
   `production-infra-identity-contract/workflow-inventory.mjs` pins exact script
   paths for the workflows it audits.
-- **External console pins.** The Codex Cloud environment console holds
-  `bootstrap/codex-cloud-setup.sh` and `bootstrap/codex-cloud-maintenance.sh`;
-  Claude Code on the web resolves `bootstrap/claude-code-web-setup.sh` through
-  `.claude/hooks/session-start.sh`. No repo grep reaches the console: moving
-  either needs an operator edit there.
-- **Reviewed-artifact byte pins.** `.gitattributes` pins
-  `scripts/mcp/upstash-mcp-launcher.mjs` to `text eol=lf`, and
-  `UPSTASH_MCP_LAUNCHER_SHA256` in `scripts/mcp/render-upstash-mcp-config.mjs`
-  hashes it — a move's depth fix alone changes both. Procedure:
+- **External console pins.** The Codex Cloud console holds
+  `bootstrap/codex-cloud-setup.sh` and
+  `bootstrap/codex-cloud-maintenance.sh`; Claude Code web resolves
+  `bootstrap/claude-code-web-setup.sh` through `.claude/hooks/session-start.sh`.
+  A move needs an operator edit because repo grep cannot reach that console.
+- **Reviewed-artifact byte pins.** `.gitattributes` pins the Upstash launcher
+  EOL and `UPSTASH_MCP_LAUNCHER_SHA256` hashes it. A move changes both. See
   [`docs/notes/upstash-mcp-operator.md`](../docs/notes/upstash-mcp-operator.md).
 
-**Any new pin of a `scripts/` path must be listed here.** An unrecorded pin
-breaks silently on the next move.
+**List each new `scripts/` path pin here.** An unrecorded pin breaks silently on
+the next move.
 
 ## Sweep Checklist for a Move
 
-Work the ten-surface checklist in
-[ADR 0064](../docs/adr/0064-scripts-module-directories.md#sweep-checklist-for-a-move)
-in the PR that moves a file. Every surface there is mandatory.
+Apply every item in
+[ADR 0064's eleven-surface move checklist](../docs/adr/0064-scripts-module-directories.md#sweep-checklist-for-a-move)
+in the same PR.
 
 ## Operating Rules
 

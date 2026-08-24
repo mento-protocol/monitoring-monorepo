@@ -33,6 +33,11 @@ type PegAlertEvidence = {
   quoteCurrency: string | null;
   policyVersion: string;
   failureReason: number | null;
+  evaluationState?:
+    | "failed"
+    | "recovered"
+    | "recovered-alerting"
+    | "recovered-pending";
 };
 
 export type PegAlertEvent = {

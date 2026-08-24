@@ -21,8 +21,12 @@ loads the user-global `babysit-pr` skill instead of this file
 so a rule written here and nowhere else would reach Codex only.
 
 Work [`pr-operating-card.md`](../../../docs/notes/pr-operating-card.md) steps 6
-and 7 end to end. They own the feedback sweep, the reply-before-resolve forms,
-the scope baseline, and the two-projection readiness contract.
+and 7 end to end. Step 6 opens with the babysit-only entry binding — the
+step-5 target precedence, `BASE_REPO`, both remotes, the head fields, and the
+fork stop — so a bare `/babysit-pr` invocation resolves its target before the
+first repo-local command rather than assuming step 5 already ran. The card
+steps own the feedback sweep, the reply-before-resolve forms, the scope
+baseline, and the two-projection readiness contract.
 
 | Decision                                                                      | Authority                                                                                |
 | ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
@@ -37,9 +41,11 @@ the scope baseline, and the two-projection readiness contract.
   and `pnpm pr:feedback-state` decide, bound with `--repo <BASE_REPO>` resolved
   from the PR URL. `.claude/babysit-pr.sh` enforces this as a gate for any
   babysit skill that discovers it, including the user-global one.
-- **Fork heads are refused**, not gated. The repo's probes and bundle sequence
-  assume a trusted `origin` serving the base repo. `.claude/babysit-pr.sh`
-  fails closed on `isCrossRepository`.
+- **Fork heads are refused**, not gated — at target resolution, before any
+  repo-local probe, gate, or fix runs, on every surface. The repo's probes and
+  bundle sequence assume a trusted `origin` serving the base repo.
+  `.claude/babysit-pr.sh` fails closed on `isCrossRepository` as the backstop,
+  not the first line.
 - **Codex sign-off is required here** — a 👍 reaction on the PR description at
   or after the current head. A "no major issues" comment is context, not the
   sign-off.

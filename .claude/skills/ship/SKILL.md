@@ -5,7 +5,7 @@ title: Ship Skill
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-21
+last_verified: 2026-08-22
 doc_type: skill
 scope: repo-wide
 review_interval_days: 90
@@ -50,7 +50,9 @@ hygiene, and production closeout.
 - **PRs open ready for review.** Drafts suppress the automated AI reviews this
   workflow depends on.
 - **`scripts/pr/check-pr-description.mjs` enforces `## The Problem` then
-  `## The Solution` in CI**, in that order, ahead of all other content.
+  `## The Solution` in CI**, in that order, ahead of all other content. The
+  full four-section description shape, including `## Details` and
+  `## Validation`, lives in card step 5.
 - **Never post routine or duplicate `@codex review` requests**, and never tag
   `chatgpt-codex-connector` directly.
 - **Deep security scan** (`claude-security`) is developer-installed and Claude

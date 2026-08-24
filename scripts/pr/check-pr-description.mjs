@@ -2,13 +2,15 @@
 
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { fromMarkdown } from "mdast-util-from-markdown";
 
 const PLACEHOLDER_RE =
   /\[Plain-English problem|\[Simple explanation of how|\[Implementation details, invariants|\[Commands and results/;
 const PROBLEM_HEADING_RE = /^##\s+The Problem\s*$/;
 const SOLUTION_HEADING_RE = /^##\s+The Solution\s*$/;
+const H2_HEADING_RE = /^ {0,3}##(?:[\t ]+|$)/;
 const DEFERRALS_HEADING_RE = /^##\s+Deferrals\s*$/;
-const DEFERRALS_STYLE_RE = /^[\t ]{0,3}#{1,6}\s*Deferrals([^A-Za-z0-9_]|$)/i;
+const DEFERRALS_STYLE_RE = /^ {0,3}#{1,6}\s*Deferrals([^A-Za-z0-9_]|$)/i;
 const NONE_RE = /^\s*(?:[-*]\s+)?none\s*\.?\s*$/i;
 const ISSUE_RE = /#[0-9]+|github\.com\/[^\s]+\/issues\/[0-9]+/;
 
@@ -66,19 +68,36 @@ function stripHtmlCommentLines(body) {
 }
 
 function stripFencedBlocks(body) {
-  let inFence = false;
+  let openFence = null;
   const kept = [];
 
   for (const line of linesOf(body)) {
-    if (/^\s*(?:```|~~~)/.test(line)) {
-      inFence = !inFence;
+    if (openFence !== null) {
+      const closing = line.match(/^ {0,3}(`{3,}|~{3,})[\t ]*$/);
+      if (
+        closing !== null &&
+        closing[1][0] === openFence.marker &&
+        closing[1].length >= openFence.length
+      ) {
+        openFence = null;
+      }
       continue;
     }
-    if (inFence) continue;
+
+    const opening = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
+    if (opening !== null) {
+      const marker = opening[1][0];
+      const info = opening[2];
+      if (marker !== "`" || !info.includes("`")) {
+        openFence = { marker, length: opening[1].length };
+        continue;
+      }
+    }
+
     kept.push(line);
   }
 
-  return { body: kept.join("\n"), hasUnclosedFence: inFence };
+  return { body: kept.join("\n"), hasUnclosedFence: openFence !== null };
 }
 
 function firstNonBlankLine(body) {
@@ -86,7 +105,52 @@ function firstNonBlankLine(body) {
 }
 
 function h2Headings(body) {
-  return linesOf(body).filter((line) => /^##\s/.test(line));
+  return linesOf(body).filter((line) => H2_HEADING_RE.test(line));
+}
+
+function hasVisibleCharacters(value) {
+  return value.replace(/\p{Default_Ignorable_Code_Point}/gu, "").trim() !== "";
+}
+
+function containsHtml(node) {
+  return (
+    node.type === "html" ||
+    (Array.isArray(node.children) && node.children.some(containsHtml))
+  );
+}
+
+function hasVisibleText(node) {
+  if (node.type === "text" || node.type === "inlineCode") {
+    return hasVisibleCharacters(node.value);
+  }
+  if (
+    node.type === "code" ||
+    node.type === "definition" ||
+    node.type === "html"
+  ) {
+    return false;
+  }
+  if (!Array.isArray(node.children)) return false;
+  if (node.type === "paragraph" && containsHtml(node)) return false;
+  return node.children.some(hasVisibleText);
+}
+
+function sectionContent(body, headingPattern) {
+  const sourceLines = linesOf(body);
+  const tree = fromMarkdown(body);
+  let inSection = false;
+
+  for (const node of tree.children) {
+    if (node.type === "heading" && node.depth === 2) {
+      if (inSection) break;
+      const headingLine = sourceLines[node.position.start.line - 1] ?? "";
+      if (headingPattern.test(headingLine)) inSection = true;
+      continue;
+    }
+    if (inSection && hasVisibleText(node)) return "visible";
+  }
+
+  return "";
 }
 
 function deferralsSection(body) {
@@ -98,7 +162,7 @@ function deferralsSection(body) {
       inSection = true;
       continue;
     }
-    if (inSection && /^##\s/.test(line)) {
+    if (inSection && H2_HEADING_RE.test(line)) {
       inSection = false;
       continue;
     }
@@ -150,6 +214,22 @@ export function validatePrDescription(body) {
       ok: false,
       message:
         "PR description must START with '## The Problem' then '## The Solution' as its first two sections — exact title-case, exact heading lines, in order, with no content before (only HTML comments may precede '## The Problem'). See AGENTS.md 'PR description standard' / .github/PULL_REQUEST_TEMPLATE.md.",
+    };
+  }
+
+  if (sectionContent(fenceStripped, PROBLEM_HEADING_RE) === "") {
+    return {
+      ok: false,
+      message:
+        "The '## The Problem' section must contain visible content in Markdown that explains the change. Raw HTML other than comments, paragraphs that contain it, template comments by themselves, and code blocks do not count.",
+    };
+  }
+
+  if (sectionContent(fenceStripped, SOLUTION_HEADING_RE) === "") {
+    return {
+      ok: false,
+      message:
+        "The '## The Solution' section must contain visible content in Markdown that explains the change. Raw HTML other than comments, paragraphs that contain it, template comments by themselves, and code blocks do not count.",
     };
   }
 

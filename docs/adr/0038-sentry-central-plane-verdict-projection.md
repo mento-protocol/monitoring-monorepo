@@ -3,7 +3,7 @@ title: Central Sentry triage plane with owning-repo verdict projection
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-11
+last_verified: 2026-08-23
 scope: ci/process
 date: 2026-07
 doc_type: adr
@@ -67,24 +67,33 @@ deterministic step.**
 - **Verdict projection (deterministic, no LLM, SERIALIZED).** A dedicated
   `project` job in `.github/workflows/sentry-triage-agent.yml`, driven by
   `scripts/sentry/triage/sentry-triage-project.mjs --batch`, runs after the whole triage
-  matrix and processes the batch's actionable external verdicts one at a time
-  in one process. Serialization plus an in-run registry kills the
+  matrix and processes the batch's routed actionable verdicts one at a time in
+  one process. The closed destination enum is `external`, `local-config`, or
+  `none`: external is an allowlisted owning repo; local-config is only an exact
+  local `config-fix`; local code-fix and unrecognised repositories are none.
+  `projectable` remains external-only. Serialization plus an in-run registry kills the
   duplicate-family double-file race (a just-created issue is not searchable
   for seconds-to-minutes), and it confines the projection token to this one
   job — the matrix jobs hosting the LLM agent never see it. For a `code-fix` /
-  `config-fix` verdict whose `affected_repo` is an EXTERNAL owning repo, it
-  files an issue in that repo, labels the stub `sentry:projected`, comments
-  the projected URL, and closes the stub. The matrix settles local actionable
-  and `upstream-transient` stubs and defers external actionable stubs to this
-  job, but leaves TWO classes OPEN: `needs-human`, and a local `code-fix` whose
+  `config-fix` verdict whose destination is `external`, it files an issue in
+  that repo. For `local-config`, it files a local work issue with
+  `agent-ready` using the ambient workflow token. Before a local create, the
+  route ensures only the canonical shared `agent-ready` definition. Before a
+  closed-match repair, it ensures all four canonical lifecycle label definitions
+  named by the edit. Neither path force-edits existing metadata. Both routes label the stub
+  `sentry:projected`, comment the projected URL, and close the stub. A closed
+  local match restores `agent-ready`, removes `agent-active`, `in-pr`, and
+  `needs-grooming`, and then reopens. A failed repair stays retryable; an open
+  match keeps its lifecycle. The matrix settles all `none` destinations and
+  `upstream-transient` stubs, but leaves TWO classes OPEN: `needs-human`, and a local `code-fix` whose
   `fix_scope` is `architectural` — open human design work held under
   `sentry:fix-scope-architectural` and excluded from the autofix candidate window
   at query time (issue #1812), so projection and queue-hygiene work must not
   auto-close it. `needs-human` and `upstream-transient` are never projected.
 - **The trust boundary is a fixed allowlist plus authorship.** `affected_repo`
   is untrusted agent text, validated against exactly `frontend-monorepo`,
-  `mento-analytics-api`, `minipay-dapp`; anything else (including this repo) is a
-  no-op with a `::warning::`. Only verdict comments authored by the pipeline's
+  `mento-analytics-api`, `minipay-dapp`; this repo is a local-config candidate
+  only for `config-fix`; anything else is a no-op with a `::warning::`. Only verdict comments authored by the pipeline's
   own Actions bot are honored (this repo is public — a drive-by commenter must
   not drive labels, closes, or cross-repo writes), and labeling and projection
   share ONE parser (`--parse-only`) so they can never disagree about a verdict.
@@ -94,8 +103,10 @@ deterministic step.**
   mention-defang) and multi-line fields fenced. Idempotent by Sentry SHORT-ID
   (a hidden back-link marker anchored to the body's leading marker block,
   searched across all states, with a genuine match also required to be
-  authored by the projector identity itself; a closed match is reopened so
-  regressions resurface) so re-runs and regressions never duplicate — and
+  authored by the projector identity itself. Local issues use the exact
+  `app/github-actions` issue-author fence, while comment surfaces use the
+  trusted `github-actions` or `github-actions[bot]` comment fence; a closed
+  match is reopened so regressions resurface) so re-runs and regressions never duplicate — and
   verdict-declared duplicates coalesce onto one owning-repo issue. The new
   SHORT-ID persists as a projector-authored alias comment, while the serialized
   in-run registry prevents discovery races instead of filing one issue per
@@ -108,7 +119,8 @@ deterministic step.**
   projection step, never the triage agent; the agent's allowlist and permissions
   are untouched. It is also ref-gated to `main` (a branch `workflow_dispatch`
   runs branch-modified workflow code; durable Environment protection is #1289).
-  Absent PAT → graceful no-op. Cross-repo fix **PRs** remain a later phase
+  Absent PAT → graceful no-op for external routing only. Local config routing
+  uses the existing ambient workflow token. Cross-repo fix **PRs** remain a later phase
   (ADR 0036 Stage C Phase 3, tracked in #1279) — this ADR authorizes
   Issues-write only.
 
@@ -144,7 +156,7 @@ deterministic step.**
   fetched or copied. A leaked/wrong verdict can create a readable owning-repo
   issue (Issues-write) but cannot mutate code or Sentry.
 - Projection is idempotent across regressions: a reopened-then-re-triaged stub
-  reuses the existing owning-repo issue rather than filing a duplicate.
+  reuses the existing work issue rather than filing a duplicate.
 - Owning-repo issues are advisory; the fix still happens the normal way in that
   repo. Cross-repo fix-PR automation stays out of scope (Phase 3, #1279).
 - The queue-close comment for `code-fix`/`config-fix` now records the projection

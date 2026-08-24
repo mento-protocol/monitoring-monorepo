@@ -3,7 +3,7 @@ title: PR Operating Card
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-13
+last_verified: 2026-08-22
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -65,7 +65,12 @@ even when you never open an authority.
    cache-hits. Run `git fetch origin main` first: the base commit is part of
    that stamp, the hook fetches before it runs the gate, and a stamp warmed
    against a stale `origin/main` is invalidated by that fetch, so the push pays
-   for the full gate a second time. It does not run `trunk fmt` — run
+   for the full gate a second time. A bare invocation diffs against
+   `origin/main`; for an existing PR whose `baseRefName` is not `main` — a
+   stacked PR — resolve that base first and pass
+   `--base origin/<baseRefName>`, because a child change that reverses a path
+   its parent introduced can vanish from the `origin/main...HEAD` diff and the
+   gate then schedules no checks for it. It does not run `trunk fmt` — run
    `./tools/trunk fmt` (the checked-in launcher; a global `trunk` may not exist)
    before committing so the required Code Quality CI stays green. The gate never
    deploys and never applies Terraform. It **refuses package-script,
@@ -120,9 +125,35 @@ even when you never open an authority.
    [`agent-quality-gate-mechanics.md`](agent-quality-gate-mechanics.md).
 
 5. **Ship.** Open the PR through the `ship` skill on every surface, including
-   hosted sessions — do not hand-roll PR creation. The description starts with
-   `## The Problem` (at most three plain-language bullets) then `## The
-Solution` (approach before implementation detail). PRs open **ready for
+   hosted sessions — do not hand-roll PR creation. The description follows this
+   shared shape on every surface; `scripts/pr/check-pr-description.mjs`
+   enforces the first two sections and their order in CI:
+
+   ```markdown
+   ## The Problem
+
+   - Maximum three bullets. Explain what the system did before, what failed or
+     became difficult, and the concrete effect on users or operators.
+
+   ## The Solution
+
+   - Explain what the system does after this PR, why that behavior improves
+     the situation, and any material limit or non-goal.
+
+   ## Details
+
+   - Implementation details, class names, query syntax, exact limits,
+     invariants, caveats, and scope boundaries.
+
+   ## Validation
+
+   - Commands and results.
+   ```
+
+   Write the opening for an engineer who has not read the diff: behavior and
+   effect first, implementation mechanisms under `## Details`. Use Markdown
+   prose or bullets in the first two sections; raw HTML other than comments and
+   code blocks do not satisfy the opening-content check. PRs open **ready for
    review, never as drafts** — a draft suppresses the automated AI reviews this
    workflow depends on, so drafting is a decision to skip review, not a staging
    step; use draft only when the user asks or required
@@ -132,12 +163,6 @@ Solution` (approach before implementation detail). PRs open **ready for
    open, run `pnpm issue:review --pr <pr> --issue <issue>` to move the issue
    out of `agent-active` and into review. Authority:
    [`agent-issue-workflow.md`](agent-issue-workflow.md).
-
-   Before any ancestry decision, make the history complete: when
-   `git rev-parse --is-shallow-repository` reports `true`, run
-   `git fetch --unshallow "$BASE_REMOTE"` and refetch the base. A hosted depth-1
-   checkout otherwise reports a false ancestry failure, which turns into an
-   unnecessary base merge or a stop on an already-current branch.
 
    **Identify the target PR before anything else**, in this precedence: a
    user-supplied URL is used verbatim and its owner/repository overrides the
@@ -152,6 +177,13 @@ Solution` (approach before implementation detail). PRs open **ready for
    overwrite or retarget an existing remote. `HEAD_REMOTE` is the remote serving
    the PR's head repository. A fork's `origin` is never a substitute for its
    parent.
+
+   Only after the target and `BASE_REMOTE` are resolved, make the history
+   complete before any ancestry decision: when
+   `git rev-parse --is-shallow-repository` reports `true`, run
+   `git fetch --unshallow "$BASE_REMOTE"` and refetch the base. A hosted depth-1
+   checkout otherwise reports a false ancestry failure, which turns into an
+   unnecessary base merge or a stop on an already-current branch.
 
    **When the deep security scan cannot run, say so.** The `claude-security`
    scan is developer-installed and Claude Code only; this repo does not declare
@@ -199,7 +231,16 @@ Solution` (approach before implementation detail). PRs open **ready for
    parent as `BASE_REPO`; never substitute a fork's `origin` for its parent, and
    stop if the head repository has no matching push remote.
 
-6. **Babysit.** Run the `babysit-pr` skill. Sweep every feedback surface:
+6. **Babysit.** Run the `babysit-pr` skill. Entering here without step 5 — a
+   babysit-only invocation, including one with no explicit PR — first resolve
+   the target exactly as step 5 defines: the target-PR precedence, `BASE_REPO`,
+   both remotes, and the head fields
+   (`number,url,headRefName,headRefOid,baseRefName,headRepository,headRepositoryOwner,isCrossRepository`).
+   Establish `isCrossRepository` in that resolution and **stop a fork head
+   there, before the first repo-local probe, gate, or fix** — the
+   `.claude/babysit-pr.sh` refusal at gate time is the backstop, not the first
+   line. The sweep and probes below assume that binding. Sweep every feedback
+   surface:
    top-level comments, review bodies, inline comments and threads, annotations,
    and failing logs. **Reply before resolving**, on the correct surface, in
    these exact forms:
@@ -223,6 +264,12 @@ Solution` (approach before implementation detail). PRs open **ready for
    files: clean worktree, local `HEAD` equal to the resolved `headRefOid`,
    explicit push refspec, re-verified OID afterwards. If binding fails, move to a
    clean dedicated checkout rather than editing an unbound one.
+
+   **Fix only failures this PR caused.** A required check that is red from
+   infrastructure, base-branch breakage, or a transient failure is reported and
+   left alone — check whether the same failure appears off this PR before
+   attributing it. Chasing an unrelated failure puts unrelated changes on the
+   branch.
 
    **A user correction updates the request baseline.** When the user changes what
    they asked for mid-babysit, update the PR description before the next push.
@@ -268,9 +315,11 @@ Solution` (approach before implementation detail). PRs open **ready for
    pnpm pr:ready-state --pr <number> --repo <BASE_REPO> --json
    ```
 
-   Run them in that order and preserve the two-projection contract: the
-   feedback ledger must be clean **first**, then the subsequent current-head
-   `pr:ready-state` must report ready — including the current-head
+   Run them in that order and preserve the two-projection contract. The
+   feedback ledger must be clean **first**. Before the final pair, apply the
+   CodeRabbit exact-head closeout in
+   [`pr-ready-state.md`](pr-ready-state.md). The subsequent
+   current-head `pr:ready-state` must report ready, including the current-head
    `chatgpt-codex-connector[bot]` PR-description approval, unless a documented
    human break-glass comment applies:
    `/pr-ready-override gate=codex-description-approval head=<full-head-sha>

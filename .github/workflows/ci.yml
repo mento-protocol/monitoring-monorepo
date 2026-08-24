@@ -964,14 +964,12 @@ jobs:
     needs: changes
     if: needs.changes.outputs.rootScripts == 'true'
     runs-on: blacksmith-2vcpu-ubuntu-2404
-    # Measured on this runner: the gate routing suite was 134s of the job
-    # before any lock work and 193s after, putting it at 253s against a 300s
-    # cap — which cancelled this job mid-suite twice at 5. The lock cases have
-    # since roughly doubled as review added interleavings, each spending real
-    # seconds asserting that runs queue instead of racing; shortening them
-    # stops the assertions binding. 15 leaves room for that growth rather than
-    # tracking it, since an unused cap costs nothing.
-    timeout-minutes: 15
+    # The expanded exact-identity lock suite reached 14m45s on this runner
+    # after earlier job setup. The prior 15-minute cap cancelled it before
+    # later steps could run. The waits bind real queue, cleanup, and no-signal
+    # guarantees, so keep a bounded 10-minute margin for completion and runner
+    # variance instead of weakening those assertions.
+    timeout-minutes: 25
     permissions:
       checks: write
       contents: read
@@ -1024,6 +1022,17 @@ jobs:
         # Without this in CI, a routing regression only fails locally (pre-push)
         # and could merge if a contributor bypasses the local gate.
         run: pnpm agent:quality-gate:test
+      - name: Gate routing-table suite
+        # ADR 0069. The gate's routing exists twice — as `case` arms in
+        # scripts/agent-quality-gate.sh and as data in
+        # scripts/gate/routing-table/ — and this suite is what proves the two
+        # still describe the same routing, alongside the pairing lint, the path
+        # staleness check, and the /bin/bash oracle for the pattern compiler.
+        # It belongs in the required `ci` sentinel path for the same reason the
+        # routing regression suite above does: the local pre-push gate is the
+        # thing a contributor can bypass, and a table that has drifted from the
+        # arms fails nowhere at all.
+        run: pnpm gate:routing-table:test
       - name: CodeRabbit config allowlist pin
         # ADR 0066. CodeRabbit resolves .coderabbit.yaml from the PR's SOURCE
         # branch, so a PR can weaken the reviewer that reviews it — and its
@@ -1148,6 +1157,17 @@ jobs:
         # shared module, so they belong in a required job rather than only in
         # the advisory supply-chain workflow.
         run: node --test scripts/lib/pnpm-override-selector.test.mjs
+      - name: Sentry fixture scan canary
+        # Issues #1943/#1970, ADR 0068. Proves the four Sentry suites that carry
+        # credential-shaped fixtures still scan clean as whole text under
+        # scripts/agent-autoreview-core.mjs, and that none of the four paths has
+        # vanished. It is NOT a `sentry-*.test.mjs`, so the `sentry-suites` gate
+        # neither enumerates nor runs it; this step and the local quality gate
+        # are its two routes. The `rootScripts` filter is `scripts/**`, so the
+        # scanner, the four suites and the canary itself all admit this job —
+        # the same recursive entry every other scripts/ suite here relies on,
+        # rather than a new enumerated list to keep in sync.
+        run: node scripts/sentry/fixture-scan-canary.test.mjs
       # The Sentry suites used to run here, one step each (issue #1721). They
       # now run in the unconditional `sentry-suites` job, which also proves from
       # their own output that each one asserted (issue #1779, ADR 0062) — a

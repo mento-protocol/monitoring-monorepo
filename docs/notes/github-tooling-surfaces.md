@@ -154,7 +154,7 @@ polled. Do not foreground-poll and never sleep-poll.
 3. On every event or check-in, run the MCP emulation of the readiness sweep
    using the mapping above: PR state and head SHA, head check runs, unresolved
    review threads (page to the end), unreplied root review comments, and
-   top-level comments. Two readings the mapping does not make for you:
+   top-level comments. Three readings the mapping does not make for you:
    - The latest per-reviewer state from `get_reviews`: an outstanding
      `CHANGES_REQUESTED` is a required blocker until approved or dismissed.
      GitHub's aggregate review decision persists across new pushes, so do not
@@ -163,6 +163,28 @@ polled. Do not foreground-poll and never sleep-poll.
    - The Codex current-head signal from Codex's visible reviews and comments.
      The reaction-backed PR-description approval gate is not readable over MCP;
      report it as unverified rather than assumed.
+   - The CodeRabbit current-head signal from `get_reviews` and top-level
+     comments — the MCP reading of the closeout contract
+     [`pr-ready-state.md`](pr-ready-state.md) owns. Count a CodeRabbit review
+     whose body contains `**Run ID**` and whose review commit equals the
+     current full head. Also count a trusted top-level clean-run block when
+     `<!-- recent_review_start -->` and `<!-- recent_review_end -->` enclose
+     it, it contains a Run ID, its full reviewed commit range ends at the
+     current head, and its comment update time is at or after the current head
+     update time. Ignore empty reply-only reviews, skipped runs, and rate-limit
+     notices. After the optional CodeRabbit check becomes terminal, refresh
+     once. If the signal is missing or stale and no trusted top-level comment
+     contains both `@coderabbitai review` and
+     `<!-- coderabbit-final-head-review:<full-head-sha> -->`, use
+     `add_issue_comment` to post `@coderabbitai review`, a blank line, and that
+     exact marker. A marker comment is trusted only when its author association
+     is `OWNER`, `MEMBER`, or `COLLABORATOR`, or its author login is `claude`,
+     `claude[bot]`, `chatgpt-codex-connector`, or
+     `chatgpt-codex-connector[bot]`. When the head-update time is available,
+     require the request comment to be at or after it, and recheck the current
+     full head immediately before the write. The marker detects completed
+     requests and provides best-effort duplicate suppression; the issue-comment
+     API has no atomic claim.
 4. **A fork head stops the run on this surface too.** The repo gate that refuses
    fork heads (`.claude/babysit-pr.sh`) cannot run here, so establish
    `isCrossRepository` from the PR payload before the first repo command and

@@ -55,7 +55,7 @@ import {
 } from "./sentry-mcp-probe.mjs";
 
 const HANDLE = "h".repeat(64);
-const REAL_TOKEN = "sntrys_the_real_read_only_token_value";
+const REAL_CRED = "sntrys_the_real_read_only_token_value";
 
 /** A stub Sentry that records what it was asked and with which credential. */
 async function startUpstream(respond) {
@@ -90,7 +90,7 @@ async function withBroker(respond, run, overrides = {}) {
   const upstream = await startUpstream(respond);
   const logs = [];
   const broker = await startBroker({
-    token: REAL_TOKEN,
+    token: REAL_CRED,
     handle: HANDLE,
     upstream: upstream.origin,
     port: 0,
@@ -158,7 +158,7 @@ test("an allowed GET reaches Sentry with the REAL token, never the handle", asyn
         upstream.seen[0].pathname,
         "/api/0/organizations/mento-org/issues/MONITORING-1/",
       );
-      assert.equal(upstream.seen[0].authorization, `Bearer ${REAL_TOKEN}`);
+      assert.equal(upstream.seen[0].authorization, `Bearer ${REAL_CRED}`);
       assert.ok(
         !upstream.seen[0].authorization.includes(HANDLE),
         "the run handle must never reach Sentry",
@@ -573,7 +573,7 @@ test("both broker diagnostics survive a caller that supplies no log sink", async
   const upstream = await startUpstream(jsonUpstream([]));
   const exits = [];
   const broker = await startBroker({
-    token: REAL_TOKEN,
+    token: REAL_CRED,
     handle: HANDLE,
     upstream: upstream.origin,
     port: 0,
@@ -582,7 +582,7 @@ test("both broker diagnostics survive a caller that supplies no log sink", async
   // An unparsable upstream makes the handler throw INSIDE the request path,
   // which is the only way to reach HANDLER-ERROR.
   const broken = await startBroker({
-    token: REAL_TOKEN,
+    token: REAL_CRED,
     handle: HANDLE,
     upstream: "not-a-url",
     port: 0,
@@ -718,7 +718,7 @@ test("an unreachable upstream fails closed with 502", async () => {
   const dead = upstream.origin;
   await new Promise((resolve) => upstream.server.close(resolve));
   const broker = await startBroker({
-    token: REAL_TOKEN,
+    token: REAL_CRED,
     handle: HANDLE,
     upstream: dead,
     port: 0,
@@ -806,14 +806,14 @@ test("resolveConfig fails loudly on a weak wiring, and takes NO token", () => {
 test("readTokenFromStdin reassembles a chunked pipe and trims the writer's newline", async () => {
   const { Readable } = await import("node:stream");
   assert.equal(
-    await readTokenFromStdin(Readable.from([`${REAL_TOKEN}\n`])),
-    REAL_TOKEN,
+    await readTokenFromStdin(Readable.from([`${REAL_CRED}\n`])),
+    REAL_CRED,
   );
   assert.equal(
     await readTokenFromStdin(
-      Readable.from([REAL_TOKEN.slice(0, 5), REAL_TOKEN.slice(5)]),
+      Readable.from([REAL_CRED.slice(0, 5), REAL_CRED.slice(5)]),
     ),
-    REAL_TOKEN,
+    REAL_CRED,
   );
 });
 
@@ -832,23 +832,23 @@ test("readTokenFromStdin fails closed on a TTY and on silence", async () => {
 
 test("assertTokenAbsentFromExecEnv names the leaking variable, never the value", () => {
   assert.equal(
-    assertTokenAbsentFromExecEnv(REAL_TOKEN, { PATH: "/usr/bin", CI: "true" }),
+    assertTokenAbsentFromExecEnv(REAL_CRED, { PATH: "/usr/bin", CI: "true" }),
     undefined,
   );
   for (const leaking of [
-    { SENTRY_TRIAGE_TOKEN: REAL_TOKEN },
-    { SENTRY_MCP_BROKER_TOKEN: REAL_TOKEN },
-    { SOME_URL: `https://x/?t=${REAL_TOKEN}&y=1` }, // embedded counts too
+    { SENTRY_TRIAGE_TOKEN: REAL_CRED },
+    { SENTRY_MCP_BROKER_TOKEN: REAL_CRED },
+    { SOME_URL: `https://x/?t=${REAL_CRED}&y=1` }, // embedded counts too
   ]) {
     const name = Object.keys(leaking)[0];
     assert.throws(
-      () => assertTokenAbsentFromExecEnv(REAL_TOKEN, leaking),
+      () => assertTokenAbsentFromExecEnv(REAL_CRED, leaking),
       (error) => {
         assert.match(error.message, new RegExp(`as ${name};`));
         assert.match(error.message, /\/proc\/<pid>\/environ/);
         assert.match(error.message, /Do not scrub it at runtime/);
         assert.ok(
-          !error.message.includes(REAL_TOKEN),
+          !error.message.includes(REAL_CRED),
           "the refusal must name the variable, never the value",
         );
         return true;
@@ -959,14 +959,14 @@ test("a RUNTIME scrub does not satisfy the guard — only an exec-time absence d
   // The tempting wrong fix: the variable is gone from live process.env, but the
   // exec-time block — what /proc/<pid>/environ serves — still has it.
   const liveEnvHadItDeleted = { ...base };
-  const execTimeEnv = { ...base, SENTRY_TRIAGE_TOKEN: REAL_TOKEN };
+  const execTimeEnv = { ...base, SENTRY_TRIAGE_TOKEN: REAL_CRED };
   assert.ok(!("SENTRY_TRIAGE_TOKEN" in liveEnvHadItDeleted));
 
   await assert.rejects(
     () =>
       resolveRuntime({
         envAtExec: execTimeEnv,
-        stdin: Readable.from([REAL_TOKEN]),
+        stdin: Readable.from([REAL_CRED]),
       }),
     /exec-time environment as SENTRY_TRIAGE_TOKEN/,
     "scrubbing at runtime must not make the guard pass — /proc keeps the exec-time block",
@@ -975,9 +975,9 @@ test("a RUNTIME scrub does not satisfy the guard — only an exec-time absence d
   // And the clean wiring resolves.
   const config = await resolveRuntime({
     envAtExec: base,
-    stdin: Readable.from([`${REAL_TOKEN}\n`]),
+    stdin: Readable.from([`${REAL_CRED}\n`]),
   });
-  assert.equal(config.token, REAL_TOKEN);
+  assert.equal(config.token, REAL_CRED);
   assert.equal(config.port, 9401);
 });
 
@@ -985,11 +985,11 @@ test("the Linux reader decodes a real /proc/<pid>/environ block", () => {
   // Runs on every platform: the decoding half of the Linux branch, which the
   // macOS host cannot exercise through an actual file read.
   const block = Buffer.from(
-    `PATH=/usr/bin\0SENTRY_MCP_BROKER_HANDLE=${HANDLE}\0SENTRY_TRIAGE_TOKEN=${REAL_TOKEN}\0`,
+    `PATH=/usr/bin\0SENTRY_MCP_BROKER_HANDLE=${HANDLE}\0SENTRY_TRIAGE_TOKEN=${REAL_CRED}\0`,
     "utf8",
   );
   const decoded = decodeProcBlock(block);
-  assert.ok(decoded.includes(`SENTRY_TRIAGE_TOKEN=${REAL_TOKEN}`));
+  assert.ok(decoded.includes(`SENTRY_TRIAGE_TOKEN=${REAL_CRED}`));
   assert.ok(decoded.includes("SENTRY_MCP_BROKER_HANDLE"));
   // Entries must not run together, or a leak could hide across a boundary.
   assert.deepEqual(decoded.split("\n").slice(0, 2), [
@@ -1005,7 +1005,7 @@ test("POSITIVE CONTROL: an outsider reads a child's exec-time env, and a runtime
   const child = spawn(
     process.execPath,
     ["-e", "delete process.env.PROBE_TOKEN; setTimeout(() => {}, 4000);"],
-    { env: { ...process.env, PROBE_TOKEN: REAL_TOKEN }, stdio: "ignore" },
+    { env: { ...process.env, PROBE_TOKEN: REAL_CRED }, stdio: "ignore" },
   );
   try {
     await settle(500);
@@ -1013,7 +1013,7 @@ test("POSITIVE CONTROL: an outsider reads a child's exec-time env, and a runtime
     // negative result below is only worth what this positive result is worth.
     const seen = execEnvironOf(child.pid);
     assert.ok(
-      seen.includes(REAL_TOKEN),
+      seen.includes(REAL_CRED),
       `${READER} did not detect a token in a child's exec-time env; every assertion below is vacuous until it does`,
     );
     // Belt: prove the reader returns a populated block, not a lucky substring.
@@ -1033,9 +1033,9 @@ test("the broker, spawned the way the workflow spawns it, has NO token in its ex
   const port = await freePort();
   const script = `
     set -euo pipefail
-    token="\${SENTRY_TRIAGE_TOKEN:-}"
+    tok="\${SENTRY_TRIAGE_TOKEN:-}"
     unset SENTRY_TRIAGE_TOKEN
-    printf '%s' "\${token}" | \
+    printf '%s' "\${tok}" | \
       SENTRY_MCP_BROKER_HANDLE="${HANDLE}" \
       SENTRY_MCP_BROKER_PORT=${port} \
       SENTRY_MCP_BROKER_TTL_SECONDS=30 \
@@ -1044,14 +1044,14 @@ test("the broker, spawned the way the workflow spawns it, has NO token in its ex
   `;
   const pid = execFileSync("bash", ["-c", script], {
     encoding: "utf8",
-    env: { ...process.env, SENTRY_TRIAGE_TOKEN: REAL_TOKEN },
+    env: { ...process.env, SENTRY_TRIAGE_TOKEN: REAL_CRED },
   }).trim();
   try {
     await settle(700);
     // Throws if the broker died or the read failed — never a soft null.
     const environ = execEnvironOf(pid);
     assert.ok(
-      !environ.includes(REAL_TOKEN),
+      !environ.includes(REAL_CRED),
       `the token is in the broker's exec-time environment (read via ${READER}) — the agent could take it straight out of /proc`,
     );
     // The load-bearing sanity check on BOTH reader paths: without it, a reader
@@ -1062,7 +1062,7 @@ test("the broker, spawned the way the workflow spawns it, has NO token in its ex
     );
     // /proc/<pid>/cmdline is readable the same way; the token is never an argv.
     assert.ok(
-      !commandLineOf(pid).includes(REAL_TOKEN),
+      !commandLineOf(pid).includes(REAL_CRED),
       "the token must never appear on the broker's command line",
     );
   } finally {
@@ -1080,14 +1080,14 @@ test("the broker REFUSES to start when the token is in its exec-time env", async
   const child = spawn(process.execPath, [BROKER_PATH], {
     env: {
       ...process.env,
-      SENTRY_TRIAGE_TOKEN: REAL_TOKEN, // the leak
+      SENTRY_TRIAGE_TOKEN: REAL_CRED, // the leak
       SENTRY_MCP_BROKER_HANDLE: HANDLE,
       SENTRY_MCP_BROKER_PORT: String(await freePort()),
       SENTRY_MCP_BROKER_TTL_SECONDS: "30",
     },
     stdio: ["pipe", "pipe", "pipe"],
   });
-  child.stdin.end(REAL_TOKEN);
+  child.stdin.end(REAL_CRED);
   let stderr = "";
   child.stderr.on("data", (chunk) => (stderr += chunk));
   const code = await new Promise((resolve) => child.on("exit", resolve));
@@ -1096,7 +1096,7 @@ test("the broker REFUSES to start when the token is in its exec-time env", async
   assert.match(stderr, /exec-time environment as SENTRY_TRIAGE_TOKEN/);
   assert.match(stderr, /Do not scrub it at runtime/);
   assert.ok(
-    !stderr.includes(REAL_TOKEN),
+    !stderr.includes(REAL_CRED),
     "the refusal must not print the credential it is complaining about",
   );
 });

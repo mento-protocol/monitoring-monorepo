@@ -2,15 +2,30 @@
 
 ## The Problem
 
-- [Plain-English problem. Maximum three bullets.]
+<!--
+Maximum three bullets. Explain what the system did before, what failed or
+became difficult, and the concrete effect on users or operators.
+Use Markdown prose or bullets. Raw HTML other than comments, paragraphs that
+contain it, and code blocks do not count as an explanation. HTML comments do
+not count themselves, but they do not invalidate adjacent Markdown prose.
+-->
 
 ## The Solution
 
-- [Simple explanation of how this PR solves the problem.]
+<!--
+Explain what the system does after this PR, why that behavior improves the
+situation, and any material limit or non-goal.
+Use Markdown prose or bullets. Raw HTML other than comments, paragraphs that
+contain it, and code blocks do not count as an explanation. HTML comments do
+not count themselves, but they do not invalidate adjacent Markdown prose.
+-->
 
 ## Details
 
-- [Implementation details, invariants, caveats, and scope boundaries.]
+<!--
+Put implementation details, class names, query syntax, exact limits,
+invariants, caveats, and scope boundaries here.
+-->
 
 ## Validation
 
@@ -31,7 +46,9 @@ When you keep it, CI requires each item to be "None" or link a GitHub issue.
 ## Checklist
 
 - [ ] The Problem has no more than three bullets.
-- [ ] The Solution is plain English and understandable before reading the diff.
+- [ ] The opening explains the old behavior, new behavior, and concrete benefit.
+- [ ] The opening states any material limit or non-goal that applies.
+- [ ] A reader can understand the opening without reading the diff.
 - [ ] Deeper implementation details come after the opening two sections.
 - [ ] Every knowing deferral is listed under Deferrals with a GitHub issue link.
 - [ ] Architecture decision? If this makes one, an ADR is added under `docs/adr/` (see `docs/pr-checklists/architecture-decisions.md`); otherwise not applicable.

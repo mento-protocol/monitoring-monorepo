@@ -1212,6 +1212,29 @@ test("Peg Grafana and Slack copy leads with the concrete cause", () => {
     path.join(rulesDir, "peg-message-templates.tf"),
     "utf8",
   );
+  const slackTitleStart = templates.indexOf(
+    'resource "grafana_message_template" "peg_slack_title"',
+  );
+  const slackMessageStart = templates.indexOf(
+    'resource "grafana_message_template" "peg_slack_message"',
+  );
+  const victorOpsTitleStart = templates.indexOf(
+    'resource "grafana_message_template" "peg_victorops_title"',
+  );
+  assert(
+    slackTitleStart >= 0 &&
+      slackMessageStart > slackTitleStart &&
+      victorOpsTitleStart > slackMessageStart,
+    "Peg notification template resources must exist in the expected order",
+  );
+  const slackTitleTemplate = templates.slice(
+    slackTitleStart,
+    slackMessageStart,
+  );
+  const slackMessageTemplate = templates.slice(
+    slackMessageStart,
+    victorOpsTitleStart,
+  );
 
   assert(
     definitions.includes("sell price is") &&
@@ -1246,7 +1269,24 @@ test("Peg Grafana and Slack copy leads with the concrete cause", () => {
       !templates.includes(".CommonLabels.alertname") &&
       !templates.includes("*FIRING:") &&
       !templates.includes("*RESOLVED:"),
-    "Peg Slack titles and bodies must use the cause instead of internal alert state or rule names",
+    "Peg notification bodies and pager titles must use the cause instead of internal alert state or rule names",
+  );
+  assert(
+    !slackTitleTemplate.includes("Annotations.summary") &&
+      !slackTitleTemplate.includes("Annotations.resolved_summary") &&
+      slackTitleTemplate.includes("🚨") &&
+      slackTitleTemplate.includes("🟡") &&
+      slackTitleTemplate.includes("✅") &&
+      slackMessageTemplate.includes(
+        "*<https://monitoring.mento.org/peg-monitoring|{{ . }}>*",
+      ) &&
+      slackMessageTemplate.includes(
+        "*<https://monitoring.mento.org/peg-monitoring|Peg monitoring needs attention>*",
+      ) &&
+      slackMessageTemplate.includes(
+        "*<https://monitoring.mento.org/peg-monitoring|Peg monitoring recovered>*",
+      ),
+    "Peg Slack must keep Grafana's fixed title link on a status icon and link each human title to Peg Monitoring",
   );
 });
 
@@ -1809,6 +1849,49 @@ function ruleBlockNamed(source, namePattern) {
   );
   return blocks[0];
 }
+
+test("CDP System Parameters Not Loaded keeps the approved warning contract", () => {
+  const source = readFileSync(
+    path.resolve(repoRoot, "alerts/rules/rules-cdps.tf"),
+    "utf8",
+  );
+  const rule = ruleBlockNamed(
+    source,
+    /\bname\s*=\s*"CDP System Parameters Not Loaded"/,
+  );
+  assert(
+    rule.includes(
+      'expr    = "mento_cdp_system_params_loaded and on() ((time() - mento_cdp_last_successful_poll >= 0) and (time() - mento_cdp_last_successful_poll < 90))"',
+    ),
+    "the CDP readiness rule must require fresh CDP publication and read the system_params_loaded gauge",
+  );
+  assert(
+    /mento_cdp_system_params_loaded/.test(rule) &&
+      /mento_cdp_last_successful_poll/.test(rule),
+    "the CDP readiness rule must pin both CDP metric names",
+  );
+  assert(
+    /\bfor\s*=\s*"10m"/.test(rule),
+    "the CDP readiness warning must require 10 minutes",
+  );
+  assert(
+    /\bno_data_state\s*=\s*"OK"/.test(rule) &&
+      /\bexec_err_state\s*=\s*"OK"/.test(rule),
+    "the CDP readiness warning must treat missing data and evaluation errors as OK",
+  );
+  assert(
+    /evaluator\s*=\s*\{\s*params\s*=\s*\[0\.5\]\s*,\s*type\s*=\s*"lt"/.test(
+      rule,
+    ),
+    "the CDP readiness warning must fire below 0.5",
+  );
+  assert(
+    /\bservice\s*=\s*"cdps"/.test(rule) &&
+      /\bseverity\s*=\s*"warning"/.test(rule) &&
+      /\blocal\.notify_warning_cdps\.contact_point/.test(rule),
+    "the CDP readiness warning must use service=cdps, warning severity, and notify_warning_cdps",
+  );
+});
 
 test("flap-prone criticals keep incidents open across short recoveries", () => {
   const fpmmRules = readFileSync(

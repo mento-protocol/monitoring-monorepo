@@ -3,7 +3,7 @@ title: Agent Quality Gate — Mechanics
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-20
+last_verified: 2026-08-23
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -71,7 +71,9 @@ Indexer changes additionally route the protected
 [`docs/pr-checklists/indexer-handler-invariants.md`](../pr-checklists/indexer-handler-invariants.md)
 policy into prepared autoreview bundles.
 
-The dry-run gate maps changed paths to package checks and PR checklists. For a
+The dry-run gate maps changed paths to package checks and PR checklists. That
+mapping is a Node engine now, cross-checked against the bash arms on every run —
+see [Where the plan comes from](#where-the-plan-comes-from-adr-0069) below. For a
 routing-sensitive source, the shared classifier adds the offline
 `pnpm docs:navigation-eval -- --check-fixtures` check. It invokes no model or
 scheduled evaluation. Review the output, then run:
@@ -180,7 +182,82 @@ restricted mode forbids. Its verdict must also be a function of the change paths
 alone, so it may not read anything the probe did not supply: `< <(json_change_paths …)`,
 heredocs and here-strings are fine, a redirection from a file is not. Editing it
 to need any of those fails the check with an explanation; change the probe in the
-same PR or keep the classifier free of them.
+same PR or keep the classifier free of them. D5c converts that probe to import
+the Node classifier directly instead of lifting the bash function, and re-asserts
+the same property — each alias routes to its intended arm, over a closed verdict
+set — before the function is deleted.
+
+### Where the plan comes from ([ADR 0069](../adr/0069-gate-routing-table-as-data.md))
+
+Since D5b part 2 the routing is Node. After the bash `case` arms have run, the
+gate calls the mapping engine once and uses ITS plan:
+
+```bash
+node "$script_source_dir/gate/mapping.mjs" \
+  --repo-root "$repo_root" --changed-paths-file "$changed_paths_file" \
+  --base "$base_ref" --head "$head_ref" \
+  --script-source-dir "$script_source_dir" [--real-tree] [--full-local-tests]
+```
+
+`$script_source_dir`, not `$repo_root`: the mapper is resolved the way every
+other gate helper is, so a fixture run finds the real one. `--real-tree` is the
+gate's own `[[ "$script_source_dir" == "$repo_root/scripts" ]]` test, which
+fences the four repository-specific effects away from fixture repositories.
+The freshness signature follows the same root: mapper and routing-table runtime
+modules hash from `$script_source_dir`. Their suites and the parity harness hash
+from `$repo_root` because the gate runs them as mapped target-tree commands.
+
+The engine answers on stdout in the TSV shape `write_command_plan` already
+emits, in this order and no other — the gate prints and the freshness stamp
+hashes in the same sequence:
+
+```text
+flag<TAB>package_script_risk_changed<TAB>true|false
+flag<TAB>saw_workspace_escalation<TAB>true|false
+surface<TAB><name>
+checklist<TAB><path><TAB><reason>
+preflight|codegen|post-codegen|quality<TAB><command><TAB><reason>
+```
+
+**The bash arms still run, and disagreement stops the run.** The gate renders
+its own plan in the same shape and byte-compares the two. This is the D5c soak
+guard: parity proven over whatever you actually changed, on your machine, rather
+than over a corpus someone assembled. Every failure around the seam refuses, and
+each message is greppable:
+
+| Message on stderr                                                                   | What happened                                                |
+| ----------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| `gate mapping engine could not be loaded from …`                                    | The mapper is not at that path. A `scripts/` move missed it. |
+| `gate mapping engine failed (exit N); refusing to run on a plan it did not produce` | The mapper threw. Its own reason is on the line above.       |
+| `gate mapping engine produced an empty plan; refusing to run`                       | The mapper wrote nothing — most often a stubbed `node`.      |
+| `gate mapping engine emitted an unparsable record: …`                               | A record the gate cannot read. Never partially applied.      |
+| `gate mapping engine emitted an unknown flag record: …`                             | A `flag` record the gate does not know.                      |
+| `the gate mapping engine and the bash routing arms disagree.`                       | The guard fired. A unified diff follows, `-bash +engine`.    |
+
+Read that last diff by side: a `-` line is a command the arms produced and the
+engine did not, a `+` line the reverse. Either direction refuses, because a
+routing change landed on one side only — usually a new arm added to
+`agent-quality-gate.sh` without the matching entry in
+`scripts/gate/routing-table/`, which `gate-equality.test.mjs` also catches, or an
+engine change the arms do not have yet. Fix the side that is wrong. The guard
+has no bypass.
+
+To drive the guard over many path sets at once rather than the one you happen to
+have changed:
+
+```bash
+node scripts/gate/routing-parity.mjs --corpus multi     # 43 sets, ~1 minute
+node scripts/gate/routing-parity.mjs --corpus self-test # every run_gate set in the suite
+node scripts/gate/routing-parity.mjs                    # every tracked path, ~25 minutes
+```
+
+**What D5c removes.** The bash `case` arms and the verb helpers they call, the
+`plan_records_from_bash` renderer and the byte comparison, and
+`scripts/gate/routing-parity.mjs`. They are one mechanism and they go together:
+without the arms there is nothing to compare, and the harness's own diff becomes
+circular. What stays is the parser that reads the mapper's records — that is how
+the plan arrives — the `implementation_signature()` pins, and the engine's own
+suites. Measured, that removes about 2,644 raw lines.
 
 ### Scheduling contract (Refs #1802)
 
@@ -221,6 +298,16 @@ run, a `--skip-if-fresh` cache hit, and a package-script refusal all exit
 before it. After waiting, a `--skip-if-fresh` run re-checks freshness, so the
 pre-push hook that queued behind a manual warm-up run reuses that run's stamp
 instead of repeating its work.
+
+The current-run handles live in `scripts/gate/run-handles.sh`. The gate sources
+that module from its own `$script_source_dir` before it changes directory, and
+fails closed if the path is missing, unreadable, a symlink, or not a regular
+file. The module provides run-token validation and pattern helpers, owns the
+marker-path state and test-ready barrier, and provides tagged-process
+discovery. Its path is included in `implementation_signature()`
+and changes to it route the gate self-test. The ready/release barrier is test
+only; it requires `NODE_ENV=test` and both lock-test paths, and normal runs do
+not enter it.
 
 The invariant the lock keeps is: **at every instant at most one process
 believes it holds it, and no waiter ever removes or renames another run's
@@ -322,7 +409,7 @@ rediscovered one at a time.
 | taken record dropped because `ln` could not put it back | same                                         | same: the token is published under `condemned.d/` before the copy goes                                                     |
 | taken record deleted after a confirmed-stale verdict    | same                                         | `record_condemned_run` runs immediately before it, inside the election                                                     |
 | `condemned.d/<token>` removed                           | that run's commands                          | removed only after its drain confirmed those processes gone; a drain that cannot confirm exits instead                     |
-| `captured.<token>` removed after a drain                | that run's process tree                      | removed only once every captured PID is gone or is somebody else now                                                       |
+| `captured.<token>` removed after a drain                | that run's process tree                      | removed only once every captured PID is gone, is a confirmed zombie with the same identity, or is somebody else now        |
 | `captured.<token>` removed when nothing was captured    | nothing                                      | reached only when the persisted file and the tag scan are both empty, so there is nothing to hand on                       |
 | lock directory removed at release                       | this run's own commands                      | the exit trap tears down its commands before release, and release only deletes a record that still names this run          |
 | private staged/claim files removed                      | nothing                                      | never published; no other process reads or expects them                                                                    |
@@ -487,9 +574,12 @@ of them.
    the tag comes back empty, and "no tagged process" reads as "nothing
    running". So the drain walks each tagged wrapper's tree first, recording
    every PID with its pinned start string, and then judges itself finished
-   only when every process in that captured set is gone. A PID that still
-   exists but no longer matches its recorded start time was reused by someone
-   else; it is left alone and named in the output rather than signalled. The
+   only when every process in that captured set is gone or cannot execute. A
+   confirmed `Z` state with the same PID and start time is already dead, so a
+   non-reaping PID 1 cannot hold the drain to its bound. An unreadable state
+   remains live and fails closed. A PID that still exists but no longer matches
+   its recorded start time was reused by someone else; it is left alone and
+   named in the output rather than signalled. The
    walk repeats on every pass of the drain and stops recording a PID once it
    has been seen, so the census converges instead of freezing: a command whose
    `TERM` handler forks a replacement produces a child that did not exist when
@@ -1140,6 +1230,61 @@ unset and falls back to Turbo's per-worktree default; the `Turbo cache dir:`
 header prints only when sharing is active. The shared dir is pure cache and
 grows without bound — delete it any time to reclaim disk:
 `rm -rf "$HOME/.cache/turbo-monitoring-monorepo"`. Refs GitHub issue 1411.
+
+## Self-test families (`GATE_TEST_FOCUS`)
+
+`scripts/agent-quality-gate.test.sh` is partitioned into families. Every test
+lives inside exactly one `run_<family>_family` function; nothing but blank lines
+and comments sits between those functions. A family is a subject, so a change to
+one part of the gate can be iterated against that subject alone instead of the
+whole ~9-minute suite:
+
+```bash
+GATE_TEST_FOCUS=routing-sources bash scripts/agent-quality-gate.test.sh
+GATE_TEST_FOCUS=routing-packaging,routing-docs bash scripts/agent-quality-gate.test.sh
+```
+
+| Family               | Subject                                                                                                                 | Solo runtime |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------- | ------------ |
+| `gate-contract`      | Pins on the gate's source text, classifier resolution, Turbo task-graph inputs, agent context check.                    | 2s           |
+| `install-wiring`     | Pre-push hook installation, the install-marker library, the package-script pin validator.                               | 1s           |
+| `routing-packaging`  | Manifests, package-manager config, root package-script and dev-metadata classification, lockfile-importer scoping.      | 52s          |
+| `routing-sources`    | Source-path routing: scoped `vitest related`, indexer codegen order, shared-config blast radius, deploy/terraform arms. | 86s          |
+| `execution-phases`   | Phase order, fail-fast prerequisites, the parallel quality pool, quality-setup, dashboard serialization.                | 41s          |
+| `stamps-freshness`   | The fresh-run stamp: what busts it and what may reuse it.                                                               | 15s          |
+| `failure-output`     | Quiet failure output, stack traces, React Doctor, renames, the manifest-change refusal.                                 | 10s          |
+| `routing-docs`       | Documentation, agent context, code-health, Sentry and PR-tooling routing, including the `scripts/` symlink reach.       | 92s          |
+| `stamps-commands`    | Per-command stamps, always-rerun exemptions, command timeouts and interrupts.                                           | 27s          |
+| `execution-parallel` | Parallel teardown process groups, the production identity contract, prerequisite reuse.                                 | 51s          |
+| `lock-drain`         | Cross-run mutual exclusion: acquisition, stale-holder reclaim, drain obligations, crash-point recovery.                 | 319s         |
+
+Rules that keep the focus honest:
+
+- **Unset or empty runs everything.** The dispatch tests the value, not its
+  presence, so `GATE_TEST_FOCUS` unset and `GATE_TEST_FOCUS=` behave alike: both
+  run every family in registry order, which is the file order and the order this
+  suite has always used. `pnpm agent:quality-gate:test`, the gate's own mapped
+  self-test, and CI all run in that mode.
+- **The focus is refused where it could answer for the whole suite.** A
+  non-empty `GATE_TEST_FOCUS` exits 2 when any of `AGENTQG_RUN`,
+  `AGENT_QUALITY_GATE_LOCK_HELD`, or `GITHUB_ACTIONS` holds a non-empty value,
+  so an exported focus cannot shrink the gate's self-test or CI's run.
+  `AGENTQG_RUN` is the load-bearing one: the gate puts it on the argv of every
+  mapped command in every mode, while the lock marker is absent under
+  `--no-lock` and `AGENT_QUALITY_GATE_LOCK=0`, where `acquire_gate_run_lock`
+  returns before exporting it.
+- **The partition is checked, not assumed.** `verify_gate_family_partition`
+  runs before the family definitions, reading the suite file through the path
+  resolved at startup. It reds the suite when a test line sits outside every
+  family, when a family is missing from the registry, when the definitions drift
+  out of registry order, and when the lines after the closing marker are
+  anything but exactly one `dispatch_gate_test_families` call — a second call
+  would run every family twice, and none would run nothing and still exit 0. An
+  unassigned test fails there before it can execute.
+- **A new test goes inside the family that owns its subject.** A new subject
+  gets a new family function plus its `gate_test_families` entry, in file order.
+- Selection follows registry order, not the order given, and a repeated family
+  runs once. Unknown family names exit 2 and print the known set.
 
 ## Common local-gate traps
 

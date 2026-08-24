@@ -3,7 +3,7 @@ title: scripts/ may use module subdirectories; basenames and pinned paths are th
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-20
+last_verified: 2026-08-23
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -167,8 +167,9 @@ scheduled document, for context an agent gets from the directory map in
   directory.
 - A workflow that runs a script from the PR's base ref degrades rather than
   fails when that script moves. `pr-description.yml` checks the base ref out as
-  `trusted-base/` and prefers it over the PR's own copy, so a PR cannot edit the
-  rule it is judged by. With one probe path, every PR branched before the move
+  `trusted-base/`, installs its locked root dependencies with lifecycle scripts
+  disabled, and prefers it over the PR's own copy. A PR therefore cannot edit
+  the rule or dependencies that judge it. With one probe path, every PR branched before the move
   finds nothing at the old path and falls through to its own copy behind a
   `::warning::` — the job stays green while the trusted-validator property is
   gone. P5 hit this and now probes both paths, new first. Keep the pre-move
@@ -220,10 +221,34 @@ routing, not procedure.
 
 1. Root `package.json` — 74 entries reference `scripts/`.
 2. `check-agent-quality-gate-package-scripts.mjs` — pinned alias map.
-3. `.github/workflows/` — 22 of 32 files, including the enumerated filters
-   listed under "Why Files Stay Flat" in `scripts/AGENTS.md`. A workflow that
-   runs a script from the PR's **base** ref must probe the new path and the
-   pre-move path; see the trusted-validator consequence above.
+3. `.github/workflows/` — 22 of 32 files pin a `scripts/` path. `ci.yml`
+   (`autoreviewSuite`, `autoreviewRootRuntime`, `versionSkew`; `rootScripts` is
+   the recursive `scripts/**`), `infra.yml`, `alerts-rules.yml`,
+   `peg-policy-publication.yml`, and `schema-diff.yml` list individual files.
+   The three Terraform filters are the exception: `ci.yml` `terraform` plus
+   `infra.yml` push and `pull_request` copy the broad
+   `workflowAdmissionPatterns` boundary from `terraform.stacks.json`, including
+   `scripts/**`. `routing.test.mjs` asserts exact equality and proves that
+   boundary subsumes every stack pattern. A miss is silent without that
+   contract — the job stops running while the required `ci` sentinel stays
+   green. A module glob such as `supply-chain.yml`'s `scripts/supply-chain/**`
+   is the safer pin where the job's subject really is the whole module; a
+   filter deliberately narrower than a module, like `versionSkew`, is not.
+   A workflow that runs a script from the PR's **base** ref must probe the new
+   path and the pre-move path; see the trusted-validator consequence above.
+   A `paths:` filter is not the only shape. `sentry-triage-agent.yml` also
+   **stages an exact copy list at runtime**: its trusted staging step
+   `install -m 0444`s the agent comment wrapper, its broker guard, and the rest
+   of that wrapper's runtime import closure into a read-only directory under
+   `$RUNNER_TEMP`, because the triage job must execute nothing from the
+   agent-writable checkout (issue 1288). The pins are the source paths in that
+   `for f in …` loop plus the two `scripts/sentry/broker/` installs beside it.
+   A move that misses them fails the round at runtime, not in review, and only
+   on the schedule — the staged copy is simply absent.
+   `sentry-triage-agent-comment.test.mjs` recomputes the wrapper's import
+   closure from source and asserts every member appears in that copy list, so
+   the list cannot silently fall behind the code; it cannot know the paths
+   moved, so this sweep item is still the thing that catches a move.
 4. `terraform.stacks.json` — each stack's `changedPathPatterns` enumerates
    exact `scripts/` paths. The registry's broad `workflowAdmissionPatterns`
    boundary admits `scripts/**`; `tf-stacks.test.mjs` proves it subsumes every
@@ -277,6 +302,20 @@ routing, not procedure.
    helper the gate cannot find exit 2 instead of falling toward the full suite —
    its caller reads a nonzero exit as "cannot narrow", so the old behaviour
    silently widened every lockfile change and the run read as slow, not broken.
+   Since ADR 0069 the same routing also exists as DATA in
+   `scripts/gate/routing-table/`, and a move has to update both. The data is the
+   easier half: its patterns are checked for staleness and its `scripts/`-anchored
+   globs are checked for their any-depth pair, so a move that misses the table
+   reds where a move that misses the arms goes quiet. The two are held together
+   by `gate-equality.test.mjs`, which fails if only one side moved — so the sweep
+   is not done until both are repointed. Every module in that directory is also
+   an `implementation_signature()` entry, with the same `__missing__` freeze.
+   Since D5b part 2 there is a third side: `scripts/gate/mapping.mjs` and
+   `scripts/gate/mapping/` build the plan the gate actually uses, and the gate
+   resolves the mapper from `$script_source_dir` in one more literal. Those
+   modules carry the same signature and `turbo.json` pins, and a move that
+   misses the mapper refuses the run outright rather than going quiet — the gate
+   checks for it before it calls it.
 10. `forbidden_sources` in `docs/evals/documentation-navigation-fixtures.json`
     names the navigation evaluation's own implementation, so a run cannot read
     the answers out of it. `validateFixtureSuite` checks those paths for
@@ -285,6 +324,16 @@ routing, not procedure.
     `documentation-navigation-baseline-fixtures.json` is the frozen contract for
     the committed baseline result and is deliberately left alone; editing it
     would force a rebind of that result's `fixture_digest`.
+11. File-size cap lists in `sentry/triage/sentry-triage-brief.test.mjs` — the
+    1,000-line hard cap for the triage family's shared modules and the 600-line
+    soft cap for the brief leg both enumerate exact repo-relative paths. No
+    ESLint `max-lines` reaches this tree and the watchlist reports rather than
+    blocks (ADR 0065), so these lists are the only thing that reds a file that
+    crosses. A moved path stops matching and the file drops off its cap in
+    silence — the same failure mode as a stale routing arm, with no red run to
+    announce it. Add a module here in the PR that creates it, too: the split
+    that puts a module under the cap is exactly when its entry is easiest to
+    forget.
 
 A shared module under `scripts/lib/` is routed from every arm that reads it,
 not only the arm of the consumer that happens to fail loudest.
@@ -319,7 +368,8 @@ not only the arm of the consumer that happens to fail loudest.
   domain directories: five files beyond `production-infra-identity-contract/`
   read `hcl.mjs`; the ADR 0053 deploy-staging contract reads
   `workflow-yaml.mjs`; the lockfile-lint gate and the override prune advisor
-  both read `pnpm-override-selector.mjs`; the documentation garden and the
-  navigation-eval scheduler both read `gh-issue-lifecycle.mjs`.
+  both read `pnpm-override-selector.mjs`; the documentation garden, the
+  navigation-eval scheduler, and local Sentry projection read
+  `gh-issue-lifecycle.mjs`.
 - Programme tracking issue:
   <https://github.com/mento-protocol/monitoring-monorepo/issues/1877>.

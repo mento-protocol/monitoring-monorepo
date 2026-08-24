@@ -555,6 +555,7 @@ export function summarizeFeedbackState(readyState) {
     gates: {
       codexDescriptionApproval: gates.codexDescriptionApproval ?? null,
       codexReviewSignal: gates.codexReviewSignal ?? null,
+      codeRabbitReviewSignal: gates.codeRabbitReviewSignal ?? null,
       reviewCommentReplies: gates.reviewCommentReplies ?? null,
       reviewThreads: gates.reviewThreads ?? null,
     },

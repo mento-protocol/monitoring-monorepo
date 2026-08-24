@@ -291,6 +291,18 @@ export function pegAlertExplanation(
   event: PegAlertEvent,
   monitoring: PegMonitoringResponse,
 ): string {
+  if (event.evidence.evaluationState === "failed") {
+    return "Grafana could not evaluate this Peg rule. This entry records a monitoring failure and does not confirm a peg breach. The upstream error text is not shown.";
+  }
+  if (event.evidence.evaluationState === "recovered") {
+    return "Grafana resumed evaluating this Peg rule. This entry records monitoring recovery and does not confirm that the rule's market condition occurred.";
+  }
+  if (event.evidence.evaluationState === "recovered-alerting") {
+    return "Grafana resumed evaluating this Peg rule, and the rule entered Alerting. The upstream error text is not shown.";
+  }
+  if (event.evidence.evaluationState === "recovered-pending") {
+    return "Grafana resumed evaluating this Peg rule, and the rule entered Pending. The upstream error text is not shown.";
+  }
   const policy = exactPolicyContext(event, monitoring);
   return RULE_EXPLANATIONS[event.evidence.rule](event, policy, monitoring);
 }

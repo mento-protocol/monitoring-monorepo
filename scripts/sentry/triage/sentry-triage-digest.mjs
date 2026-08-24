@@ -12,11 +12,10 @@
  *      hypotheses, what was investigated, why it was escalated, plus links).
  *   2. 🤖 Autofixed                            (renders ONLY when fix-PR data
  *      exists — see the #1278 emission interface below).
- *   3. 📮 Routed to owning repo                (code/config-fix verdicts, each
- *      linking the PROJECTED owning-repo issue; falls back to the queue-issue
- *      verdict when projection was skipped — a LOCAL code-fix never projects,
- *      and one the autofix leg will never attempt is marked as such rather
- *      than left reading as handed to a team that does not exist).
+ *   3. 📮 Routed to work issue                 (code/config-fix verdicts, each
+ *      linking the projected work issue; it can be an external owning-repo
+ *      issue or a local config-fix issue. It falls back to the queue verdict
+ *      when projection was skipped. A local code-fix never projects.
  *   4. 🙅 Wontfix / transient                  (upstream-transient verdicts,
  *      each linking the rationale on the queue issue, with a nudge toward the
  *      existing `sentry:approved-archive` label flow for that stub).
