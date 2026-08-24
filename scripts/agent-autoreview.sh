@@ -3077,6 +3077,7 @@ node_bin_identity="$(command_file_identity "$node_bin")"
 prepared_helper_override=""
 attested_helper_override=""
 attested_helper_runtime_dir=""
+indexer_handler_invariant_paths_file=""
 attested_helper_runtime_identity=""
 attested_helper_runtime_manifest=""
 
@@ -3393,21 +3394,27 @@ run_helper() {
   fi
 }
 
+attested_helper_runtime_matches_manifest() {
+  local current_manifest
+  [[
+    -n "$attested_helper_runtime_dir" &&
+      -n "$attested_helper_runtime_identity" &&
+      -n "$attested_helper_runtime_manifest"
+  ]] || return 1
+  current_manifest="$(
+    bundle_content_manifest \
+      "$attested_helper_runtime_dir" \
+      "$attested_helper_runtime_identity"
+  )" || return 1
+  [[ "$current_manifest" == "$attested_helper_runtime_manifest" ]]
+}
+
 run_attested_helper() {
   local attested_helper
-  local after_manifest
   local status=0
   if [[ -n "$attested_helper_override" ]]; then
     attested_helper="$attested_helper_override"
-    if [[
-      -z "$attested_helper_runtime_dir" ||
-        -z "$attested_helper_runtime_identity" ||
-        -z "$attested_helper_runtime_manifest"
-    ]] || ! after_manifest="$(
-      bundle_content_manifest \
-        "$attested_helper_runtime_dir" \
-        "$attested_helper_runtime_identity"
-    )" || [[ "$after_manifest" != "$attested_helper_runtime_manifest" ]]; then
+    if ! attested_helper_runtime_matches_manifest; then
       echo "agent:autoreview: wrapper-attested helper runtime changed before launch" >&2
       return 1
     fi
@@ -3422,14 +3429,31 @@ run_attested_helper() {
   fi
   PATH="$external_command_path" run_trusted_node "$attested_helper" "$@" || status=$?
   if [[ -n "$attested_helper_override" ]]; then
-    if ! after_manifest="$(
-      bundle_content_manifest \
-        "$attested_helper_runtime_dir" \
-        "$attested_helper_runtime_identity"
-    )" || [[ "$after_manifest" != "$attested_helper_runtime_manifest" ]]; then
+    if ! attested_helper_runtime_matches_manifest; then
       echo "agent:autoreview: wrapper-attested helper runtime changed during launch" >&2
       return 1
     fi
+  fi
+  return "$status"
+}
+
+run_indexer_handler_invariant_classifier() {
+  local classifier_path="$1"
+  local changed_paths_file="$2"
+  local status=0
+  if [[ -n "$attested_helper_override" ]] &&
+    ! attested_helper_runtime_matches_manifest; then
+    echo "agent:autoreview: wrapper-attested indexer classifier runtime changed before launch" >&2
+    return 1
+  fi
+  PATH="$external_command_path" \
+    run_trusted_node --input-type=module - \
+      "$classifier_path" \
+      "$changed_paths_file" || status=$?
+  if [[ -n "$attested_helper_override" ]] &&
+    ! attested_helper_runtime_matches_manifest; then
+    echo "agent:autoreview: wrapper-attested indexer classifier runtime changed during launch" >&2
+    return 1
   fi
   return "$status"
 }
@@ -6431,6 +6455,82 @@ add_checklist() {
   printf '%s\n' "$rel_path"
 }
 
+load_indexer_handler_invariant_paths() {
+  local classifier_path="$1"
+  local changed_paths_file="$2"
+  local output_file="$3"
+  if run_indexer_handler_invariant_classifier \
+    "$classifier_path" \
+    "$changed_paths_file" \
+    >"$output_file" <<'NODE'
+import { readFileSync, writeSync } from "node:fs";
+import { pathToFileURL } from "node:url";
+
+const [classifierPath, changedPathsPath] = process.argv.slice(2);
+let getIndexerHandlerInvariantChecklistDecisions;
+try {
+  ({ getIndexerHandlerInvariantChecklistDecisions } = await import(
+    pathToFileURL(classifierPath).href,
+  ));
+} catch (error) {
+  writeSync(2, `${error instanceof Error ? error.message : String(error)}\n`);
+  process.exit(2);
+}
+if (typeof getIndexerHandlerInvariantChecklistDecisions !== "function") {
+  writeSync(
+    2,
+    `${classifierPath} exports an invalid indexer handler invariant decision API\n`,
+  );
+  process.exit(2);
+}
+const paths = readFileSync(changedPathsPath, "utf8")
+  .split(/\r?\n/)
+  .filter(Boolean);
+let decisions;
+try {
+  decisions = getIndexerHandlerInvariantChecklistDecisions(paths);
+} catch (error) {
+  writeSync(2, `${error instanceof Error ? error.message : String(error)}\n`);
+  process.exit(2);
+}
+if (!Array.isArray(decisions) || decisions.length !== paths.length) {
+  writeSync(2, `${classifierPath} returned an invalid decision count\n`);
+  process.exit(2);
+}
+for (const [index, decision] of decisions.entries()) {
+  const changedPath = paths[index];
+  if (
+    !decision ||
+    typeof decision !== "object" ||
+    decision.path !== changedPath ||
+    typeof decision.route !== "boolean" ||
+    typeof decision.owner !== "string" ||
+    !decision.owner.trim()
+  ) {
+    writeSync(
+      2,
+      `${classifierPath} returned an invalid decision for ${changedPath}\n`,
+    );
+    process.exit(2);
+  }
+}
+for (const decision of decisions) {
+  if (decision.route) process.stdout.write(`${decision.path}\n`);
+}
+NODE
+  then
+    return 0
+  else
+    local status=$?
+    return "$status"
+  fi
+}
+
+is_indexer_handler_invariant_path() {
+  [[ -n "$indexer_handler_invariant_paths_file" ]] &&
+    grep -Fxq -- "$1" "$indexer_handler_invariant_paths_file"
+}
+
 select_checklists() {
   local repo="$1"
   local changed_paths_file="$2"
@@ -6468,12 +6568,16 @@ select_checklists() {
         ;;
     esac
 
-    case "$path" in
-      indexer-envio/*)
-        candidate="$(add_checklist "$repo" "docs/pr-checklists/indexer-handler-invariants.md" "$source_ref" "${checklists[@]+"${checklists[@]}"}" || true)"
-        [[ -n "$candidate" ]] && checklists+=("$candidate")
-        ;;
-    esac
+    # Autoreview executes the protected-main classifier. That classifier cannot
+    # know a candidate revision's new owner or false-to-true reclassification.
+    # Route every core-source edit conservatively. This intentionally routes an
+    # unrelated core edit rather than executing candidate code across the trust
+    # boundary.
+    if [[ "$path" == "scripts/agent-autoreview-core.mjs" ]] ||
+      is_indexer_handler_invariant_path "$path"; then
+      candidate="$(add_checklist "$repo" "docs/pr-checklists/indexer-handler-invariants.md" "$source_ref" "${checklists[@]+"${checklists[@]}"}" || true)"
+      [[ -n "$candidate" ]] && checklists+=("$candidate")
+    fi
 
     case "$path" in
       ui-dashboard/src/*)
@@ -6973,6 +7077,32 @@ EOF
         git_output "$repo" show --patch --find-renames -l5000 --no-ext-diff --no-textconv --format=fuller "$target_ref"
       ;;
   esac
+
+  local selected_indexer_classifier_runtime=""
+  case "${prepared_helper_override:-}:${attested_helper_override:-}" in
+    ?*:*)
+      selected_indexer_classifier_runtime="$(dirname "$prepared_helper_override")/agent-autoreview-core.mjs"
+      ;;
+    *:?*)
+      selected_indexer_classifier_runtime="$(dirname "$attested_helper_override")/agent-autoreview-core.mjs"
+      ;;
+    *)
+      echo "agent:autoreview: no selected attested runtime is available for indexer checklist routing" >&2
+      exit 2
+      ;;
+  esac
+  if [[ ! -f "$selected_indexer_classifier_runtime" ]]; then
+    echo "agent:autoreview: selected attested runtime is missing indexer checklist classifier: $selected_indexer_classifier_runtime" >&2
+    exit 2
+  fi
+  indexer_handler_invariant_paths_file="$staging_dir/indexer-handler-invariant-paths.txt"
+  if ! load_indexer_handler_invariant_paths \
+    "$selected_indexer_classifier_runtime" \
+    "$staging_dir/changed-paths.txt" \
+    "$indexer_handler_invariant_paths_file"; then
+    echo "agent:autoreview: failed to load the selected indexer handler invariant classifier" >&2
+    exit 2
+  fi
 
   local selected_checklists=()
   local checklist

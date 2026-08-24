@@ -44,9 +44,35 @@ export const AGENT_MODULE_ARMS = [
     ],
   },
   {
+    why: "The autoreview core exports the indexer-family source that arms-packages.mjs compiles. Autoreview executes the protected-main core, so it cannot see a candidate revision's new owner or false-to-true reclassification. The core path conservatively routes the checklist in both autoreview and the local gate. This intentionally overroutes unrelated core edits to preserve the trust boundary. A core-only edit must also exercise both the data-table parity suite and the live gate regression suite, in addition to its autoreview consumers.",
+    patterns: ["scripts/agent-autoreview-core.mjs"],
+    effects: [
+      {
+        command: "pnpm agent:autoreview:test",
+        reason: "agent autoreview helper changed",
+      },
+      {
+        checklist: "docs/pr-checklists/indexer-handler-invariants.md",
+        reason: "indexer invariant routing source changed",
+      },
+      {
+        why: "The scanner half of the #1943/#1970 canary (ADR 0068). Widening `credentialAssignmentKey`'s vocabulary re-traps the renamed Sentry fixtures, and nothing else would say so until the next autoreview run refused.",
+        command: "node scripts/sentry/fixture-scan-canary.test.mjs",
+        reason: "autoreview secret scanner changed",
+      },
+      {
+        command: "pnpm gate:routing-table:test",
+        reason: "indexer invariant routing source changed",
+      },
+      {
+        command: "pnpm agent:quality-gate:test",
+        reason: "indexer invariant routing source changed",
+      },
+    ],
+  },
+  {
     patterns: [
       "scripts/agent-autoreview.mjs",
-      "scripts/agent-autoreview-core.mjs",
       "scripts/agent-autoreview-core.test.mjs",
       "scripts/agent-autoreview-target-guard.test.mjs",
     ],

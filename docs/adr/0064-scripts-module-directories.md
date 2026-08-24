@@ -249,6 +249,9 @@ routing, not procedure.
    closure from source and asserts every member appears in that copy list, so
    the list cannot silently fall behind the code; it cannot know the paths
    moved, so this sweep item is still the thing that catches a move.
+   The indexer job also runs the exact
+   `scripts/gate/routing-table/indexer-invariant-parity.test.mjs` path. It pins
+   that supporting module even though the job's path filter is indexer-wide.
 4. `terraform.stacks.json` — each stack's `changedPathPatterns` enumerates
    exact `scripts/` paths. The registry's broad `workflowAdmissionPatterns`
    boundary admits `scripts/**`; `tf-stacks.test.mjs` proves it subsumes every
@@ -314,6 +317,11 @@ routing, not procedure.
    more literal. Those modules carry the same signature and `turbo.json` pins,
    and a move that misses the mapper refuses the run outright rather than going
    quiet — the gate checks for it before it calls it.
+   `scripts/gate/routing-table/arms-packages.mjs` also imports the indexer
+   family view from `scripts/agent-autoreview-core.mjs`. That external source
+   has its own signature entry, core-only routes to both gate suites, and exact
+   inputs in all three relevant Turbo tasks. Repoint all four pin classes
+   together.
 10. `forbidden_sources` in `docs/evals/documentation-navigation-fixtures.json`
     names the navigation evaluation's own implementation, so a run cannot read
     the answers out of it. `validateFixtureSuite` checks those paths for

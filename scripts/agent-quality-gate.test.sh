@@ -2297,6 +2297,71 @@ assert_contains "- docs/pr-checklists/stateful-data-ui.md (indexer config data f
 assert_contains "- pnpm --filter @mento-protocol/indexer-envio test:coverage"
 assert_not_contains "vitest related --run config/aggregators.json"
 
+indexer_invariant_positive_paths=(
+  "indexer-envio/abis/liquity/FXPriceFeed.json"
+  "indexer-envio/config/fx-calendar.json"
+  "indexer-envio/config.yaml"
+  "indexer-envio/config.multichain.mainnet.yaml"
+  "indexer-envio/scripts/test-reserve-yield.mjs"
+  "indexer-envio/stryker.config.mjs"
+  "indexer-envio/vitest.fail-closed.config.ts"
+  "indexer-envio/vitest.mutation.config.ts"
+  "indexer-envio/src/rpc/http-test-mocks.ts"
+  "indexer-envio/src/startupChecks.ts"
+  "indexer-envio/src/handlers/broker.ts"
+  "indexer-envio/src/pool/self-heal.ts"
+  "indexer-envio/src/wormhole/status.ts"
+  "indexer-envio/test/feeTokenAllowlist.test.ts"
+  "indexer-envio/test/helpers/indexerTestHarness.ts"
+)
+for indexer_invariant_path in "${indexer_invariant_positive_paths[@]}"; do
+  run_gate "$indexer_invariant_path"
+  assert_contains "- node --test scripts/gate/routing-table/indexer-invariant-parity.test.mjs (indexer invariant routing inventory changed)"
+  assert_contains "- docs/pr-checklists/indexer-handler-invariants.md (indexer handler/RPC/self-heal invariant path changed)"
+done
+
+indexer_invariant_negative_inventory_paths=(
+  "indexer-envio/abis/liquity/AddressesRegistry.json"
+  "indexer-envio/abis/wormhole/NttDeployHelper.json"
+  "indexer-envio/config.multichain.owner-probe.yaml"
+  "indexer-envio/scripts/test-future-runtime.mjs"
+  "indexer-envio/vitest.future-runtime.config.mjs"
+  "indexer-envio/src/handlers/liquity/troveManagerPreloadContext.ts"
+  "indexer-envio/src/pool/types.ts"
+  "indexer-envio/src/rpc/log.ts"
+  "indexer-envio/src/future-unowned.json"
+  "indexer-envio/src/wormhole/handlerContext.ts"
+  "indexer-envio/src/wormhole/scratchWarnings.ts"
+  "indexer-envio/test/aggregators-parity.test.ts"
+  "indexer-envio/test/documentation-catalog.test.ts"
+)
+for indexer_invariant_path in "${indexer_invariant_negative_inventory_paths[@]}"; do
+  run_gate "$indexer_invariant_path"
+  assert_not_contains "docs/pr-checklists/indexer-handler-invariants.md"
+  assert_contains "- node --test scripts/gate/routing-table/indexer-invariant-parity.test.mjs (indexer invariant routing inventory changed)"
+done
+
+indexer_invariant_unrelated_paths=(
+  "indexer-envio/.env.example"
+)
+for indexer_invariant_path in "${indexer_invariant_unrelated_paths[@]}"; do
+  run_gate "$indexer_invariant_path"
+  assert_not_contains "docs/pr-checklists/indexer-handler-invariants.md"
+  assert_not_contains "indexer invariant routing inventory changed"
+done
+
+indexer_invariant_future_paths=()
+for indexer_invariant_future_extension in ts tsx mts cts js jsx mjs cjs; do
+  for indexer_invariant_future_scope in src test; do
+    indexer_invariant_future_paths+=(
+      "indexer-envio/${indexer_invariant_future_scope}/future-handler.${indexer_invariant_future_extension}"
+    )
+  done
+done
+run_gate "${indexer_invariant_future_paths[@]}"
+assert_contains "- node --test scripts/gate/routing-table/indexer-invariant-parity.test.mjs (indexer invariant routing inventory changed)"
+assert_not_contains "docs/pr-checklists/indexer-handler-invariants.md"
+
 run_gate "metrics-bridge/src/graphql.ts"
 assert_contains "- docs/pr-checklists/stateful-data-ui.md (metrics bridge data flow changed)"
 assert_contains "- docs/pr-checklists/terraform-cloudrun.md (metrics bridge Cloud Run runtime changed)"
@@ -4236,6 +4301,8 @@ mkdir -p \
   "$signature_runtime_root/scripts/gate/routing-table"
 cp "$repo_root/scripts/agent-quality-gate.sh" \
   "$signature_runtime_root/scripts/agent-quality-gate.sh"
+cp "$repo_root/scripts/agent-autoreview-core.mjs" \
+  "$signature_runtime_root/scripts/agent-autoreview-core.mjs"
 cp "$repo_root/scripts/gate/run-handles.sh" \
   "$signature_runtime_root/scripts/gate/run-handles.sh"
 cp "$repo_root/scripts/gate/mapping.mjs" \
@@ -4264,6 +4331,7 @@ chmod +x "$signature_runtime_root/scripts/agent-quality-gate.sh"
   printf 'fixture\n' > fixture.txt
   printf 'second fixture\n' > second.txt
   printf '# fixture gate implementation\n' > scripts/agent-quality-gate.sh
+  printf '// fixture autoreview core routing source\n' > scripts/agent-autoreview-core.mjs
   printf '// fixture alias validator\n' > scripts/check-agent-quality-gate-package-scripts.mjs
   printf '# fixture routing classifier\n' > scripts/docs/docs-navigation-eval-helpers.mjs
   printf '# fixture lockfile scope classifier\n' > scripts/gate/lockfile-scope.mjs
@@ -4405,6 +4473,27 @@ STUB
   [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "9" ]] ||
     fail "fresh gate stamp was reused after the target routing-table suite changed"
 
+  # The routing table imports the indexer family view from the gate's source
+  # tree. A target-repo placeholder must not affect the signature, while the
+  # loaded source-tree copy must invalidate it independently.
+  printf '// changed fixture autoreview core routing source\n' \
+    >> scripts/agent-autoreview-core.mjs
+  run_signature_gate_again
+  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "9" ]] ||
+    fail "a non-runtime autoreview core placeholder invalidated the fresh stamp"
+
+  printf '// changed runtime autoreview core routing source\n' \
+    >> "$signature_runtime_root/scripts/agent-autoreview-core.mjs"
+  COUNTER_FILE="$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
+    "$signature_gate" \
+      --changed-paths-file changed-paths-two.txt \
+      --base "$base_two" \
+      --run \
+      --skip-if-fresh \
+      > "$output_file" 2>&1
+  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "10" ]] ||
+    fail "fresh gate stamp was reused after the indexer routing source changed"
+
   # The signature has two path roots. Runtime modules come from the gate's own
   # checkout, while commands and configuration come from the repository under
   # test. The runtime gate and routing checks above cover the first root. These
@@ -4417,7 +4506,7 @@ STUB
       --run \
       --skip-if-fresh \
       > "$output_file" 2>&1
-  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "10" ]] ||
+  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "11" ]] ||
     fail "fresh gate stamp was reused after the Terraform format checker changed"
 
   printf '# changed fixture terraform format checker suite\n' >> scripts/terraform/terraform-fmt-check.test.mjs
@@ -4428,7 +4517,7 @@ STUB
       --run \
       --skip-if-fresh \
       > "$output_file" 2>&1
-  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "11" ]] ||
+  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "12" ]] ||
     fail "fresh gate stamp was reused after the Terraform format checker suite changed"
 
   # GitHub issue #1905: the lockfile scope classifier is a gate runtime pin, so
@@ -4444,7 +4533,7 @@ STUB
       --run \
       --skip-if-fresh \
       > "$output_file" 2>&1
-  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "12" ]] ||
+  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "13" ]] ||
     fail "fresh gate stamp was reused after the lockfile scope classifier changed"
 
   # A placeholder in the repository under test is not the helper this gate
@@ -4457,7 +4546,7 @@ STUB
       --run \
       --skip-if-fresh \
       > "$output_file" 2>&1
-  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "12" ]] ||
+  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "13" ]] ||
     fail "a non-runtime run-handle placeholder invalidated the fresh stamp"
 
   printf '# changed runtime run-handle helper\n' \
@@ -4469,7 +4558,7 @@ STUB
       --run \
       --skip-if-fresh \
       > "$output_file" 2>&1
-  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "13" ]] ||
+  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "14" ]] ||
     fail "fresh gate stamp was reused after the loaded run-handle helper changed"
 
   # P12 renamed the pinned alias registry from .sh to .mjs. Left stale, the
@@ -4484,7 +4573,7 @@ STUB
       --run \
       --skip-if-fresh \
       > "$output_file" 2>&1
-  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "14" ]] ||
+  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "15" ]] ||
     fail "fresh gate stamp was reused after the pinned alias registry changed"
 )
 rm -rf "$signature_stamp_repo" "$signature_runtime_root"
@@ -5027,7 +5116,23 @@ assert_contains "$fixture_canary (Sentry fixture drift canary changed)"
 
 run_gate "scripts/agent-autoreview-core.mjs"
 assert_contains "- pnpm agent:autoreview:test (agent autoreview helper changed)"
+assert_contains "- docs/pr-checklists/indexer-handler-invariants.md (indexer invariant routing source changed)"
 assert_contains "$fixture_canary (autoreview secret scanner changed)"
+assert_contains "- pnpm gate:routing-table:test (indexer invariant routing source changed)"
+assert_contains "- pnpm agent:quality-gate:test (indexer invariant routing source changed)"
+
+# The protected-main classifier sees both targets below as route:false. A
+# candidate core can add the new owner or reclassify the existing owner, so the
+# changed core path must carry the checklist independently of those decisions.
+run_gate \
+  "scripts/agent-autoreview-core.mjs" \
+  "indexer-envio/src/futureProtectedSkew.ts"
+assert_contains "- docs/pr-checklists/indexer-handler-invariants.md (indexer invariant routing source changed)"
+
+run_gate \
+  "scripts/agent-autoreview-core.mjs" \
+  "indexer-envio/src/rpc/log.ts"
+assert_contains "- docs/pr-checklists/indexer-handler-invariants.md (indexer invariant routing source changed)"
 
 run_gate "scripts/sentry/autofix/sentry-autofix-finalize.test.mjs"
 assert_contains "- pnpm sentry:autofix:finalize:test (Sentry autofix finalize helper changed)"
@@ -5424,10 +5529,14 @@ assert_contains "- pnpm agent:autoreview:test (agent autoreview helper changed)"
 run_gate "scripts/agent-autoreview-core.mjs"
 assert_contains "- pnpm lint:scripts (root build script changed)"
 assert_contains "- pnpm agent:autoreview:test (agent autoreview helper changed)"
+assert_contains "- docs/pr-checklists/indexer-handler-invariants.md (indexer invariant routing source changed)"
+assert_contains "- pnpm gate:routing-table:test (indexer invariant routing source changed)"
+assert_contains "- pnpm agent:quality-gate:test (indexer invariant routing source changed)"
 
 run_gate "scripts/agent-autoreview-core.test.mjs"
 assert_contains "- pnpm lint:scripts (root build script changed)"
 assert_contains "- pnpm agent:autoreview:test (agent autoreview helper changed)"
+assert_not_contains "indexer invariant routing source changed"
 
 run_gate "scripts/agent-autoreview-target-guard.test.mjs"
 assert_contains "- pnpm lint:scripts (root build script changed)"

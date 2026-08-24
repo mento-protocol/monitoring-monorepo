@@ -67,9 +67,74 @@ pnpm --filter @mento-protocol/ui-dashboard test:coverage
 
 Cross-layer/stateful UI work also applies
 [`docs/pr-checklists/stateful-data-ui.md`](../pr-checklists/stateful-data-ui.md).
-Indexer changes additionally route the protected
+The handler-invariant classifier in `scripts/agent-autoreview-core.mjs` routes
+selected indexer runtime, invariant-test, and test-support changes to the protected
 [`docs/pr-checklists/indexer-handler-invariants.md`](../pr-checklists/indexer-handler-invariants.md)
-policy into prepared autoreview bundles.
+policy in the local gate and prepared autoreview bundles. It returns one
+ordered `{path, route, owner}` decision per input path. Autoreview loads the
+classifier from its selected attested runtime and validates the complete batch
+before it selects routed paths. A wrapper-attested runtime is checked against
+its sealed identity and content manifest before and after classifier import and
+execution. A difference at either boundary fails before the wrapper uses the
+decisions. Prepared runtimes retain their existing trust boundary.
+
+That protected-main boundary creates deliberate version skew when a candidate
+changes `scripts/agent-autoreview-core.mjs`. The protected classifier cannot
+see a new exact owner or a false-to-true reclassification in the candidate.
+Therefore, a change to the core source itself selects the handler-invariant
+checklist in both autoreview and the local gate. This trigger intentionally
+routes unrelated core edits. Running the candidate classifier would weaken the
+trust boundary that the protected runtime provides.
+
+`getIndexerHandlerInvariantRoutingFamilies()` returns a detached, deeply
+frozen view of the same family data the classifier uses. Import-time validation
+rejects malformed families, overlapping exact owners, and paths that cannot
+stay literal in a Bash `case`. The routing
+table derives an excluded-first, routed-second checklist dispatch from this
+view. The live Bash case mirrors the derived patterns, and the routing-table
+equality test pins both copies. The checklist arms contain exact current paths
+only. Eighteen broad inventory patterns cover `.ts`, `.tsx`, `.mts`, `.cts`,
+`.js`, `.jsx`, `.mjs`, `.cjs`, and `.json` below `indexer-envio/src/` and
+`indexer-envio/test/`. The four JavaScript extensions match the package's
+`allowJs` TypeScript input set. JSON matches `resolveJsonModule`. Five more
+broad patterns cover `indexer-envio/abis/`, `indexer-envio/config/`, root
+`indexer-envio/config*.yaml` files, root `indexer-envio/vitest*` inputs, and
+`indexer-envio/scripts/test-*.mjs` wrappers. None of these broad patterns routes
+the checklist. The exact `indexer-envio/schema.graphql` and
+`indexer-envio/stryker.config.mjs` patterns complete the 25-pattern inventory.
+Exact owners also cover every current root config YAML, root Vitest input, and
+indexer test wrapper. The current exact arms contain 253 routed paths and 12
+excluded paths.
+
+The routed source boundary follows executable dependencies from the production
+handler entrypoint, registered handlers, RPC facades and effects, and self-heal
+stages. It includes modules that can change entity identities or fields,
+rollups, effect keys or targets, freshness, or phase behavior. The routed test
+boundary includes direct invariant tests and the fixtures, harness, and HTTP
+mock support that enforce hermetic multi-event and RPC behavior. It also
+includes test-runner inputs that set the timeout, fail-closed fixture, and
+hermetic RPC contract, or select the mutation-test and coverage scope. Explicit
+exclusions include type-only context modules, warning-only helpers, the
+console-only RPC logger adapter, the two vendored ABIs that no current runtime
+consumes, and tests that enforce a separate config-copy, script, or
+warning-format contract.
+
+The focused indexer parity test compares every current module with one of the
+nine supported JS, JSON, or TypeScript extensions below `src/` and `test/`. It
+also compares every current file below `abis/` and `config/`, every current root
+`config*.yaml` file, Vitest input, indexer test wrapper, Stryker configuration,
+and `schema.graphql` against the table. The focused external inventory contains
+45 inputs. The local gate runs it for all 25 inventory patterns. The indexer CI
+job runs it for every indexer change. A new module below `src/` or `test/` is
+classified as `future-module` with `route: false`. The inventory assertion
+requires the adding PR to give it an explicit owner. A new file below `abis/`
+or `config/`, a new root `config*.yaml` file, a new root `vitest*` input, or a
+new `scripts/test-*.mjs` wrapper also runs the inventory assertion without
+inheriting a checklist route. Other unlisted paths outside `src/` and `test/`
+stay outside this classifier.
+Core-only edits route the autoreview suite, the routing-table suite, and the
+gate self-test. The core is also an explicit freshness-signature input and a
+Turbo input beside the routing-table directory.
 
 The dry-run gate maps changed paths to package checks and PR checklists. That
 mapping is a Node engine reading a data table — see

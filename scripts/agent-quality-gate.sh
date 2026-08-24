@@ -2063,6 +2063,7 @@ implementation_signature() {
   for path in \
     scripts/agent-quality-gate.sh \
     scripts/agent-quality-gate.test.sh \
+    scripts/agent-autoreview-core.mjs \
     scripts/gate/run-handles.sh \
     scripts/check-agent-quality-gate-package-scripts.mjs \
     scripts/docs/docs-navigation-eval-helpers.mjs \
@@ -2089,6 +2090,7 @@ implementation_signature() {
     scripts/gate/routing-table/groups-head.mjs \
     scripts/gate/routing-table/groups-tail.mjs \
     scripts/gate/routing-table/index.mjs \
+    scripts/gate/routing-table/indexer-invariant-parity.test.mjs \
     scripts/gate/routing-table/pattern-oracle.test.mjs \
     scripts/gate/routing-table/pattern.mjs \
     scripts/gate/routing-table/pins.test.mjs \
@@ -2106,7 +2108,7 @@ implementation_signature() {
       scripts/gate/mapping/*.test.mjs | scripts/gate/routing-table/*.test.mjs)
         implementation_path="$repo_root/$path"
         ;;
-      scripts/agent-quality-gate.sh | scripts/docs/docs-navigation-eval-helpers.mjs | scripts/gate/lockfile-scope.mjs | scripts/gate/run-handles.sh | scripts/gate/mapping.mjs | scripts/gate/mapping/*.mjs | scripts/gate/routing-table/*.mjs)
+      scripts/agent-quality-gate.sh | scripts/agent-autoreview-core.mjs | scripts/docs/docs-navigation-eval-helpers.mjs | scripts/gate/lockfile-scope.mjs | scripts/gate/run-handles.sh | scripts/gate/mapping.mjs | scripts/gate/mapping/*.mjs | scripts/gate/routing-table/*.mjs)
         implementation_path="$script_source_dir/${path#scripts/}"
         ;;
       *)
