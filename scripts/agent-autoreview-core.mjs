@@ -2386,6 +2386,7 @@ const INDEXER_HANDLER_INVARIANT_FAMILIES =
       owner: "test-runtime-inputs",
       route: true,
       exact: [
+        "indexer-envio/scripts/test-reserve-yield.mjs",
         "indexer-envio/stryker.config.mjs",
         "indexer-envio/vitest.config.ts",
         "indexer-envio/vitest.fail-closed.config.ts",
@@ -2688,7 +2689,17 @@ const INDEXER_HANDLER_INVARIANT_FAMILIES =
       route: false,
       fallback: {
         prefixes: ["indexer-envio/src/", "indexer-envio/test/"],
-        extensions: ["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"],
+        extensions: [
+          "ts",
+          "tsx",
+          "mts",
+          "cts",
+          "js",
+          "jsx",
+          "mjs",
+          "cjs",
+          "json",
+        ],
       },
     },
   ]);
@@ -2814,6 +2825,7 @@ function validateIndexerHandlerInvariantRoutingFamilies(families) {
       "jsx",
       "mjs",
       "cjs",
+      "json",
     ];
     if (
       fallback.prefixes.some(
@@ -2829,7 +2841,7 @@ function validateIndexerHandlerInvariantRoutingFamilies(families) {
       )
     ) {
       indexerRoutingFamilyError(
-        `${where}.fallback must define only the canonical src/test JS/TS module scope`,
+        `${where}.fallback must define only the canonical src/test JS, JSON, or TS module scope`,
       );
     }
     if (family.route) {

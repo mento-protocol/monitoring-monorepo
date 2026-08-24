@@ -60,6 +60,7 @@ const indexerHandlerInvariantExternalInventoryPatterns = [
   "indexer-envio/config/*",
   "indexer-envio/config*.yaml",
   "indexer-envio/vitest*",
+  "indexer-envio/scripts/test-*.mjs",
 ];
 const indexerHandlerInvariantInventoryPatterns = uniquePatterns([
   ...indexerHandlerInvariantExternalInventoryPatterns,
@@ -71,6 +72,7 @@ const indexerHandlerInvariantInventoryPatterns = uniquePatterns([
         !pattern.startsWith("indexer-envio/config/") &&
         !/^indexer-envio\/config[^/]*\.yaml$/.test(pattern) &&
         !/^indexer-envio\/vitest[^/]*$/.test(pattern) &&
+        !/^indexer-envio\/scripts\/test-[^/]*\.mjs$/.test(pattern) &&
         !pattern.startsWith("indexer-envio/src/") &&
         !pattern.startsWith("indexer-envio/test/"),
     ),
@@ -496,7 +498,7 @@ export const PACKAGE_ARMS = [
         ],
       },
       {
-        why: "Every current or future src/test JS or TypeScript module and every focused external runtime or test-support input must keep an explicit owner in the core. This test runs for all 22 inventory patterns before a later scripts-only change can discover drift.",
+        why: "Every current or future src/test JS, JSON, or TypeScript module and every focused external runtime or test-support input must keep an explicit owner in the core. This test runs for all 25 inventory patterns before a later scripts-only change can discover drift.",
         dispatch: "path",
         arms: [
           {
@@ -512,7 +514,7 @@ export const PACKAGE_ARMS = [
         ],
       },
       {
-        why: "The shared autoreview core owns the exact indexer family dispositions. The first arm carries explicit exclusions; the second carries explicit routes. Future JS and TypeScript module patterns only trigger the inventory check until they gain an explicit owner.",
+        why: "The shared autoreview core owns the exact indexer family dispositions. The first arm carries explicit exclusions; the second carries explicit routes. Future JS, JSON, and TypeScript module patterns only trigger the inventory check until they gain an explicit owner.",
         dispatch: "path",
         arms: [
           {

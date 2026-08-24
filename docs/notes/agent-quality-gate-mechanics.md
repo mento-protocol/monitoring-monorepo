@@ -93,17 +93,18 @@ stay literal in a Bash `case`. The routing
 table derives an excluded-first, routed-second checklist dispatch from this
 view. The live Bash case mirrors the derived patterns, and the routing-table
 equality test pins both copies. The checklist arms contain exact current paths
-only. Sixteen broad inventory patterns cover `.ts`, `.tsx`, `.mts`, `.cts`,
-`.js`, `.jsx`, `.mjs`, and `.cjs` below `indexer-envio/src/` and
+only. Eighteen broad inventory patterns cover `.ts`, `.tsx`, `.mts`, `.cts`,
+`.js`, `.jsx`, `.mjs`, `.cjs`, and `.json` below `indexer-envio/src/` and
 `indexer-envio/test/`. The four JavaScript extensions match the package's
-`allowJs` TypeScript input set. Four more broad patterns cover
-`indexer-envio/abis/`, `indexer-envio/config/`, root
-`indexer-envio/config*.yaml` files, and root `indexer-envio/vitest*` inputs.
-None of these broad patterns routes the checklist. The exact
-`indexer-envio/schema.graphql` and `indexer-envio/stryker.config.mjs` patterns
-complete the 22-pattern inventory. Exact owners also cover every current root
-config YAML and root Vitest input. The current exact arms contain 252 routed
-paths and 12 excluded paths.
+`allowJs` TypeScript input set. JSON matches `resolveJsonModule`. Five more
+broad patterns cover `indexer-envio/abis/`, `indexer-envio/config/`, root
+`indexer-envio/config*.yaml` files, root `indexer-envio/vitest*` inputs, and
+`indexer-envio/scripts/test-*.mjs` wrappers. None of these broad patterns routes
+the checklist. The exact `indexer-envio/schema.graphql` and
+`indexer-envio/stryker.config.mjs` patterns complete the 25-pattern inventory.
+Exact owners also cover every current root config YAML, root Vitest input, and
+indexer test wrapper. The current exact arms contain 253 routed paths and 12
+excluded paths.
 
 The routed source boundary follows executable dependencies from the production
 handler entrypoint, registered handlers, RPC facades and effects, and self-heal
@@ -119,17 +120,18 @@ consumes, and tests that enforce a separate config-copy, script, or
 warning-format contract.
 
 The focused indexer parity test compares every current module with one of the
-eight supported JS or TypeScript extensions below `src/` and `test/`. It also
-compares every current file below `abis/` and `config/`, every current root
-`config*.yaml` file, Vitest input, Stryker configuration, and `schema.graphql`
-against the table. The focused external inventory contains 44 inputs. The local
-gate runs it for all 22 inventory patterns. The indexer CI job runs
-it for every indexer change. A new module below `src/` or `test/` is classified
-as `future-module` with `route: false`. The inventory assertion requires the
-adding PR to give it an explicit owner. A new file below `abis/` or `config/`,
-a new root `config*.yaml` file, or a new root `vitest*` input also runs the
-inventory assertion without inheriting a checklist route. Other paths outside
-`src/` and `test/` stay outside this classifier.
+nine supported JS, JSON, or TypeScript extensions below `src/` and `test/`. It
+also compares every current file below `abis/` and `config/`, every current root
+`config*.yaml` file, Vitest input, indexer test wrapper, Stryker configuration,
+and `schema.graphql` against the table. The focused external inventory contains
+45 inputs. The local gate runs it for all 25 inventory patterns. The indexer CI
+job runs it for every indexer change. A new module below `src/` or `test/` is
+classified as `future-module` with `route: false`. The inventory assertion
+requires the adding PR to give it an explicit owner. A new file below `abis/`
+or `config/`, a new root `config*.yaml` file, a new root `vitest*` input, or a
+new `scripts/test-*.mjs` wrapper also runs the inventory assertion without
+inheriting a checklist route. Other unlisted paths outside `src/` and `test/`
+stay outside this classifier.
 Core-only edits route the autoreview suite, the routing-table suite, and the
 gate self-test. The core is also an explicit freshness-signature input and a
 Turbo input beside the routing-table directory.

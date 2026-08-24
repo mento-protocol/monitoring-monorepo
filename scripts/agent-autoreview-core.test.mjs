@@ -42,7 +42,7 @@ function walkModuleFiles(directory) {
     const entryPath = path.join(directory, entry.name);
     return entry.isDirectory()
       ? walkModuleFiles(entryPath)
-      : /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/.test(entry.name)
+      : /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs|json)$/.test(entry.name)
         ? [entryPath.split(path.sep).join("/")]
         : [];
   });
@@ -161,6 +161,7 @@ for (const [candidatePath, route, owner] of [
   ["indexer-envio/config.yaml", true, "root-runtime-inputs"],
   ["indexer-envio/config.multichain.mainnet.yaml", true, "root-runtime-inputs"],
   ["indexer-envio/schema.graphql", true, "root-runtime-inputs"],
+  ["indexer-envio/scripts/test-reserve-yield.mjs", true, "test-runtime-inputs"],
   ["indexer-envio/stryker.config.mjs", true, "test-runtime-inputs"],
   ["indexer-envio/vitest.config.ts", true, "test-runtime-inputs"],
   ["indexer-envio/vitest.fail-closed.config.ts", true, "test-runtime-inputs"],
@@ -183,6 +184,7 @@ for (const extension of [
   "jsx",
   "mjs",
   "cjs",
+  "json",
 ]) {
   for (const scope of ["src", "test"]) {
     const candidatePath = `indexer-envio/${scope}/future-handler.${extension}`;

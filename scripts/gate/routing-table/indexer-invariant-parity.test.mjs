@@ -33,6 +33,7 @@ const INDEXER_MODULE_EXTENSIONS = [
   "jsx",
   "mjs",
   "cjs",
+  "json",
 ];
 
 function walkFiles(directory) {
@@ -46,7 +47,7 @@ function walkFiles(directory) {
 
 const walkIndexerModuleFiles = (directory) =>
   walkFiles(directory).filter((candidatePath) =>
-    /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/.test(candidatePath),
+    /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs|json)$/.test(candidatePath),
   );
 
 const focusedRootIndexerEntries = readdirSync(`${REPO}/indexer-envio`, {
@@ -63,6 +64,16 @@ const focusedRootIndexerTestRuntimeInputs = focusedRootIndexerEntries.filter(
     candidatePath === "indexer-envio/stryker.config.mjs" ||
     /^indexer-envio\/vitest[^/]*$/.test(candidatePath),
 );
+const focusedIndexerScriptTestRuntimeInputs = readdirSync(
+  `${REPO}/indexer-envio/scripts`,
+  { withFileTypes: true },
+)
+  .filter((entry) => entry.isFile() || entry.isSymbolicLink())
+  .map((entry) => `indexer-envio/scripts/${entry.name}`)
+  .filter((candidatePath) =>
+    /^indexer-envio\/scripts\/test-[^/]*\.mjs$/.test(candidatePath),
+  )
+  .sort();
 
 const focusedNonConfigRootIndexerInputs = [
   "indexer-envio/schema.graphql",
@@ -80,7 +91,11 @@ const ownedRootIndexerConfigs = getIndexerHandlerInvariantRoutingFamilies()
     /^indexer-envio\/config[^/]*\.yaml$/.test(candidatePath),
   )
   .sort();
-const ownedRootIndexerTestRuntimeInputs =
+const focusedIndexerTestRuntimeInputs = [
+  ...focusedRootIndexerTestRuntimeInputs,
+  ...focusedIndexerScriptTestRuntimeInputs,
+].sort();
+const ownedIndexerTestRuntimeInputs =
   getIndexerHandlerInvariantRoutingFamilies()
     .filter(({ owner }) => owner === "test-runtime-inputs")
     .flatMap(({ exact = [] }) => exact)
@@ -130,7 +145,7 @@ assert.ok(
 
 test("the derived exact arms keep the current route counts", () => {
   assert.equal(indexerInvariantExcludedArm.patterns.length, 12);
-  assert.equal(indexerInvariantRoutedArm.patterns.length, 252);
+  assert.equal(indexerInvariantRoutedArm.patterns.length, 253);
 });
 const matchesAny = (patterns, candidatePath) =>
   patterns.some((pattern) => casePatternToRegExp(pattern).test(candidatePath));
@@ -203,8 +218,9 @@ test("the table and core agree on every focused input outside src and test", () 
     ...walkFiles(`${REPO}/indexer-envio/abis`),
     ...walkFiles(`${REPO}/indexer-envio/config`),
     ...focusedRootIndexerInputs,
+    ...focusedIndexerScriptTestRuntimeInputs,
   ].sort();
-  assert.equal(paths.length, 44, "focused external-input inventory changed");
+  assert.equal(paths.length, 45, "focused external-input inventory changed");
   const decisions = getIndexerHandlerInvariantChecklistDecisions(paths);
   for (const decision of decisions) {
     assert.notEqual(
@@ -236,22 +252,23 @@ test("the table and core agree on every focused input outside src and test", () 
   );
 });
 
-test("focused root inputs and exact owners cannot drift", () => {
+test("focused external inputs and exact owners cannot drift", () => {
   assert.deepEqual(
     ownedRootIndexerConfigs,
     focusedRootIndexerConfigs,
     "every current root config YAML must have one live exact owner",
   );
   assert.deepEqual(
-    ownedRootIndexerTestRuntimeInputs,
-    focusedRootIndexerTestRuntimeInputs,
-    "every current root test-runtime input must have one live exact owner",
+    ownedIndexerTestRuntimeInputs,
+    focusedIndexerTestRuntimeInputs,
+    "every current focused test-runtime input must have one live exact owner",
   );
   for (const candidatePath of [
     ...ownedRootIndexerConfigs.filter(
       (ownedPath) => ownedPath !== "indexer-envio/config.yaml",
     ),
     ...focusedNonConfigRootIndexerInputs,
+    ...focusedIndexerScriptTestRuntimeInputs,
   ]) {
     assert.ok(
       lstatSync(`${REPO}/${candidatePath}`).isFile(),
@@ -375,27 +392,28 @@ test("the nested dispatch is excluded-first and inventories future modules", () 
   assert.deepEqual(
     fallbackPatterns,
     futurePatterns,
-    "the fallback family differs from the canonical 16 module patterns",
+    "the fallback family differs from the canonical 18 module patterns",
   );
   const inventoryPatterns = indexerInvariantInventoryDispatch.arms[0].patterns;
   assert.deepEqual(
-    inventoryPatterns.slice(0, 6),
+    inventoryPatterns.slice(0, 7),
     [
       "indexer-envio/abis/*",
       "indexer-envio/config/*",
       "indexer-envio/config*.yaml",
       "indexer-envio/vitest*",
+      "indexer-envio/scripts/test-*.mjs",
       "indexer-envio/schema.graphql",
       "indexer-envio/stryker.config.mjs",
     ],
     "the focused external runtime and test-support inventory changed",
   );
   assert.deepEqual(
-    inventoryPatterns.slice(6),
+    inventoryPatterns.slice(7),
     futurePatterns,
     "the inventory dispatch lost a future module pattern",
   );
-  assert.equal(inventoryPatterns.length, 22, "inventory pattern count changed");
+  assert.equal(inventoryPatterns.length, 25, "inventory pattern count changed");
   for (const pattern of futurePatterns) {
     assert.ok(
       !indexerInvariantExcludedArm.patterns.includes(pattern),
@@ -473,6 +491,28 @@ test("future root indexer configs trigger the exact-owner inventory", () => {
 
 test("future root Vitest inputs trigger the exact-owner inventory", () => {
   const candidatePath = "indexer-envio/vitest.future-runtime.config.mjs";
+  assert.ok(
+    matchesAny(
+      indexerInvariantInventoryDispatch.arms[0].patterns,
+      candidatePath,
+    ),
+    `${candidatePath} must trigger the invariant inventory check`,
+  );
+  assert.deepEqual(
+    getIndexerHandlerInvariantChecklistDecisions([candidatePath]),
+    [
+      {
+        path: candidatePath,
+        route: false,
+        owner: "outside-indexer-handler-invariant-scope",
+      },
+    ],
+  );
+  assert.equal(tableIndexerInvariantDecision(candidatePath), false);
+});
+
+test("future indexer test wrappers trigger the exact-owner inventory", () => {
+  const candidatePath = "indexer-envio/scripts/test-future-runtime.mjs";
   assert.ok(
     matchesAny(
       indexerInvariantInventoryDispatch.arms[0].patterns,
@@ -613,10 +653,10 @@ test("the external family schema fails closed before table derivation", async ()
     "fallback-extension",
     (source) =>
       source.replace(
-        'extensions: ["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"],',
-        'extensions: ["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs", "md"],',
+        '          "json",\n        ],',
+        '          "json",\n          "md",\n        ],',
       ),
-    /only the canonical src\/test JS\/TS module scope/,
+    /only the canonical src\/test JS, JSON, or TS module scope/,
   );
   await assertMalformedCoreFailsImport(
     "fallback-prefix",
@@ -625,7 +665,7 @@ test("the external family schema fails closed before table derivation", async ()
         'prefixes: ["indexer-envio/src/", "indexer-envio/test/"],',
         'prefixes: ["indexer-envio/src/", "indexer-envio/test/", "indexer-envio/config/"],',
       ),
-    /only the canonical src\/test JS\/TS module scope/,
+    /only the canonical src\/test JS, JSON, or TS module scope/,
   );
 });
 
