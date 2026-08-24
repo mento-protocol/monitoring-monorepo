@@ -177,7 +177,9 @@ that nothing holds in place.
   because their safety argument rests on `mkdir`/`link` atomicity,
   `ps -o lstart=`, Bash 3.2 job-control PGIDs and `/proc`, with no oracle for a
   rewrite. It stays in the report, still over the 1,000-line hard cap, and
-  stated rather than exempted. ADR 0069 is the row's justification.
+  stated rather than exempted. ADR 0069 is the row's justification. The monthly
+  scheduler continues to surface the row as actionable; that recurring
+  visibility is deliberate and needs no permanent single-row issue owner.
 - Thirty further `scripts/` files sit between the watch threshold and the
   hard cap. They are recorded and delta-tracked, and any that grows by more than
   100 raw lines becomes actionable on its own. The 2026-08-23 refresh produced
