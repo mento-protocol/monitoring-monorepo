@@ -11,6 +11,10 @@ import {
 
 const NOW_SECONDS = 2_000_000_000;
 const SAMPLE_BLOCK = 24_573_803;
+const SAFE_LEGACY_HANDLER_INPUT = {
+  value: "await updateSummary(context, meta, sharePriceUsdWei);",
+  readError: "",
+};
 
 function summarize(overrides = {}) {
   return summarizeSusdsSamplerProgress({
@@ -39,10 +43,11 @@ const validLaunchBaseline = {
 const strictProbeQuery = buildProbeQuery();
 assert.match(strictProbeQuery, /SusdsYieldLaunchBaseline/);
 assert.match(strictProbeQuery, /SusdsYieldDailySnapshot/);
+assert.match(strictProbeQuery, /SusdsYieldSamplerProgress/);
 assert.doesNotMatch(strictProbeQuery, /_meta/);
 assert.doesNotMatch(
   buildProbeQuery({ includeSusdsSampler: false }),
-  /SusdsYield(?:LaunchBaseline|DailySnapshot)/,
+  /SusdsYield(?:LaunchBaseline|DailySnapshot|SamplerProgress)/,
 );
 assert.match(
   buildProbeQuery({ includeDeploymentIdentity: true }),
@@ -134,8 +139,85 @@ assert.deepEqual(summarizeDeploymentIdentity({}, targetSync), {
 });
 
 assert.deepEqual(
-  summarizeSusdsLaunchBaselineSchema({
+  summarizeSusdsLaunchBaselineSchema(
+    {
+      value: "type SusdsYieldLaunchBaseline { id: ID! }",
+      readError: "",
+    },
+    { legacyHandlerInput: SAFE_LEGACY_HANDLER_INPUT },
+  ),
+  {
+    ok: true,
+    schemaPath: "indexer-envio/schema.graphql",
+    detected: true,
+    required: true,
+    samplerProgressDetected: false,
+    samplerProgressRequired: false,
+    failures: [],
+  },
+);
+const preProgressSamplerSchema = summarizeSusdsLaunchBaselineSchema(
+  {
     value: "type SusdsYieldLaunchBaseline { id: ID! }",
+    readError: "",
+  },
+  { legacyHandlerInput: SAFE_LEGACY_HANDLER_INPUT },
+);
+assert.match(
+  buildProbeQuery({
+    includeSusdsSampler: preProgressSamplerSchema.required,
+    includeSusdsSamplerProgress:
+      preProgressSamplerSchema.samplerProgressRequired,
+  }),
+  /SusdsYieldDailySnapshot/,
+);
+assert.doesNotMatch(
+  buildProbeQuery({
+    includeSusdsSampler: preProgressSamplerSchema.required,
+    includeSusdsSamplerProgress:
+      preProgressSamplerSchema.samplerProgressRequired,
+  }),
+  /SusdsYieldSamplerProgress/,
+);
+const unsafeLegacySamplerSchema = summarizeSusdsLaunchBaselineSchema(
+  {
+    value: "type SusdsYieldLaunchBaseline { id: ID! }",
+    readError: "",
+  },
+  {
+    legacyHandlerInput: {
+      value:
+        "await recordSusdsYieldEventDailySnapshot(context, meta, sharePriceUsdWei);",
+      readError: "",
+    },
+  },
+);
+assert.equal(unsafeLegacySamplerSchema.ok, false);
+assert.match(
+  unsafeLegacySamplerSchema.failures.join("\n"),
+  /writes event-time daily snapshots without SusdsYieldSamplerProgress/,
+);
+const unreadableLegacyHandlerSchema = summarizeSusdsLaunchBaselineSchema(
+  {
+    value: "type SusdsYieldLaunchBaseline { id: ID! }",
+    readError: "",
+  },
+  {
+    legacyHandlerInput: {
+      value: null,
+      readError: "could not read legacy sUSDS handler",
+    },
+  },
+);
+assert.equal(unreadableLegacyHandlerSchema.ok, false);
+assert.match(
+  unreadableLegacyHandlerSchema.failures.join("\n"),
+  /could not read legacy sUSDS handler/,
+);
+assert.deepEqual(
+  summarizeSusdsLaunchBaselineSchema({
+    value:
+      "type SusdsYieldLaunchBaseline { id: ID! } type SusdsYieldSamplerProgress { id: ID! }",
     readError: "",
   }),
   {
@@ -143,8 +225,21 @@ assert.deepEqual(
     schemaPath: "indexer-envio/schema.graphql",
     detected: true,
     required: true,
+    samplerProgressDetected: true,
+    samplerProgressRequired: true,
     failures: [],
   },
+);
+const inconsistentProgressSchema = summarizeSusdsLaunchBaselineSchema({
+  value: "type SusdsYieldSamplerProgress { id: ID! }",
+  readError: "",
+});
+assert.equal(inconsistentProgressSchema.ok, false);
+assert.equal(inconsistentProgressSchema.required, false);
+assert.equal(inconsistentProgressSchema.samplerProgressRequired, true);
+assert.match(
+  inconsistentProgressSchema.failures.join("\n"),
+  /exists without SusdsYieldLaunchBaseline/,
 );
 assert.deepEqual(
   summarizeSusdsLaunchBaselineSchema({
@@ -156,6 +251,8 @@ assert.deepEqual(
     schemaPath: "indexer-envio/schema.graphql",
     detected: false,
     required: false,
+    samplerProgressDetected: false,
+    samplerProgressRequired: false,
     failures: [],
   },
 );
@@ -165,6 +262,7 @@ const unreadableSchema = summarizeSusdsLaunchBaselineSchema({
 });
 assert.equal(unreadableSchema.ok, false);
 assert.equal(unreadableSchema.required, true);
+assert.equal(unreadableSchema.samplerProgressRequired, true);
 assert.match(unreadableSchema.failures.join("\n"), /schema unavailable/);
 assert.match(
   buildProbeQuery({ includeSusdsSampler: unreadableSchema.required }),
@@ -174,12 +272,20 @@ assert.match(
   buildProbeQuery({ includeSusdsSampler: unreadableSchema.required }),
   /SusdsYieldDailySnapshot/,
 );
+assert.match(
+  buildProbeQuery({
+    includeSusdsSampler: unreadableSchema.required,
+    includeSusdsSamplerProgress: unreadableSchema.samplerProgressRequired,
+  }),
+  /SusdsYieldSamplerProgress/,
+);
 const emptySchema = summarizeSusdsLaunchBaselineSchema({
   value: "",
   readError: "",
 });
 assert.equal(emptySchema.ok, false);
 assert.equal(emptySchema.required, true);
+assert.equal(emptySchema.samplerProgressRequired, true);
 assert.match(emptySchema.failures.join("\n"), /could not inspect/);
 assert.match(
   buildProbeQuery({ includeSusdsSampler: emptySchema.required }),
@@ -188,6 +294,13 @@ assert.match(
 assert.match(
   buildProbeQuery({ includeSusdsSampler: emptySchema.required }),
   /SusdsYieldDailySnapshot/,
+);
+assert.match(
+  buildProbeQuery({
+    includeSusdsSampler: emptySchema.required,
+    includeSusdsSamplerProgress: emptySchema.samplerProgressRequired,
+  }),
+  /SusdsYieldSamplerProgress/,
 );
 for (const value of [
   "type Pool { id: ID!",
@@ -200,6 +313,8 @@ for (const value of [
   assert.equal(malformedSchema.ok, false);
   assert.equal(malformedSchema.detected, null);
   assert.equal(malformedSchema.required, true);
+  assert.equal(malformedSchema.samplerProgressDetected, null);
+  assert.equal(malformedSchema.samplerProgressRequired, true);
   assert.match(malformedSchema.failures.join("\n"), /invalid GraphQL SDL/);
   assert.match(
     buildProbeQuery({
@@ -210,8 +325,16 @@ for (const value of [
   assert.match(
     buildProbeQuery({
       includeSusdsSampler: malformedSchema.required,
+      includeSusdsSamplerProgress: malformedSchema.samplerProgressRequired,
     }),
     /SusdsYieldDailySnapshot/,
+  );
+  assert.match(
+    buildProbeQuery({
+      includeSusdsSampler: malformedSchema.required,
+      includeSusdsSamplerProgress: malformedSchema.samplerProgressRequired,
+    }),
+    /SusdsYieldSamplerProgress/,
   );
 }
 const executableDocument = summarizeSusdsLaunchBaselineSchema({
@@ -221,6 +344,8 @@ const executableDocument = summarizeSusdsLaunchBaselineSchema({
 assert.equal(executableDocument.ok, false);
 assert.equal(executableDocument.detected, null);
 assert.equal(executableDocument.required, true);
+assert.equal(executableDocument.samplerProgressDetected, null);
+assert.equal(executableDocument.samplerProgressRequired, true);
 assert.match(executableDocument.failures.join("\n"), /could not inspect/);
 
 assert.equal(summarizeSusdsLaunchBaseline(validLaunchBaseline).ok, true);
@@ -285,6 +410,31 @@ for (const lag of [600, 601]) {
   assert.equal(summary.ok, false);
   assert.match(summary.failures.join("\n"), /sUSDS sampler is stale/);
 }
+
+const staleHeartbeatBehindRecentEventRow = summarizeSusdsSamplerProgress({
+  summaryNonzero: true,
+  latestSnapshot: {
+    sampledAtBlock: String(SAMPLE_BLOCK + 600),
+    sampledAtTimestamp: String(NOW_SECONDS - 10),
+  },
+  samplerProgress: {
+    sampledAtBlock: String(SAMPLE_BLOCK),
+    sampledAtTimestamp: String(NOW_SECONDS - 1_000),
+  },
+  useSamplerProgress: true,
+  ethereumChain: { processedBlock: SAMPLE_BLOCK + 600 },
+  nowSeconds: NOW_SECONDS,
+});
+assert.equal(staleHeartbeatBehindRecentEventRow.ok, false);
+assert.equal(
+  staleHeartbeatBehindRecentEventRow.latestSampledAtBlock,
+  SAMPLE_BLOCK,
+);
+assert.equal(staleHeartbeatBehindRecentEventRow.blockLag, 600);
+assert.match(
+  staleHeartbeatBehindRecentEventRow.failures.join("\n"),
+  /sUSDS sampler is stale/,
+);
 
 assert.match(
   summarize({ latestSnapshot: undefined }).failures.join("\n"),

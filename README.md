@@ -321,9 +321,12 @@ requires `deploy:indexer:verify` to pass core rows, sUSDS post-launch sampler
 progress/freshness, Polygon replay semantics, and the exact immutable sUSDS
 launch baseline when the target commit schema declares it. The verifier reads
 the target schema from that exact commit and uses the baseline entity as the
-sUSDS sampler capability marker. A legacy rollback schema without the marker
-skips all sampler-only probes and checks. An unreadable or uninspectable target
-schema fails closed and retains the strict sampler requirements.
+sUSDS sampler capability marker. New schemas prove heartbeat freshness through
+`SusdsYieldSamplerProgress`; an older schema can use the latest daily row only
+when its exact sUSDS handler has no event-time snapshot writer. A legacy rollback
+schema without the launch marker skips all sampler-only probes and checks. An
+unreadable or inconsistent target schema or legacy handler fails closed and
+retains the strict sampler requirements.
 `--allow-syncing` never waives the remaining data-integrity checks.
 
 For an agent-operated production rollout, use the repo's `/deploy-indexer`

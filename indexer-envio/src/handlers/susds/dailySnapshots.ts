@@ -7,6 +7,7 @@ import {
 import { computeYieldTotals } from "./positions.js";
 import {
   ETHEREUM_CHAIN_ID,
+  SAMPLER_PROGRESS_ID,
   SUSDS_ADDRESS,
   V3_REVENUE_LAUNCH_BLOCK,
   V3_REVENUE_LAUNCH_BLOCK_TIMESTAMP,
@@ -31,6 +32,7 @@ type SusdsYieldDeltaBaseline = Pick<
 >;
 
 type SusdsYieldDailySnapshotOptions = {
+  requirePreviousDay?: boolean;
   allowZeroTotals?: boolean;
 };
 
@@ -153,6 +155,15 @@ export async function recordSusdsYieldDailySnapshot(
     (await findPreviousDailySnapshot(context, meta.chainId, previousDayBucket));
   const currentSnapshot = await context.SusdsYieldDailySnapshot.get(id);
 
+  if (
+    options.requirePreviousDay === true &&
+    currentSnapshot === undefined &&
+    previousDaySnapshot === undefined &&
+    bucket > launchBucket
+  ) {
+    return false;
+  }
+
   const deltaBaseline =
     latestPriorSnapshot ??
     (currentSnapshot === undefined
@@ -170,6 +181,21 @@ export async function recordSusdsYieldDailySnapshot(
     }),
   );
   return true;
+}
+
+export async function recordSusdsYieldEventDailySnapshot(
+  context: SusdsContext,
+  meta: BlockMeta,
+  sharePriceUsdWei: bigint,
+  precomputedTotals?: SusdsYieldTotals,
+): Promise<boolean> {
+  return recordSusdsYieldDailySnapshot(
+    context,
+    meta,
+    sharePriceUsdWei,
+    precomputedTotals,
+    { requirePreviousDay: true },
+  );
 }
 
 /**
@@ -328,7 +354,20 @@ export async function recordSusdsYieldHeartbeatSnapshot(
     meta.blockNumber,
   );
   if (!(await hasSusdsLaunchBaseline(context))) return false;
-  return recordSusdsYieldDailySnapshot(context, meta, validSharePriceUsdWei);
+  const didWrite = await recordSusdsYieldDailySnapshot(
+    context,
+    meta,
+    validSharePriceUsdWei,
+  );
+  if (!didWrite) return false;
+  context.SusdsYieldSamplerProgress.set({
+    id: SAMPLER_PROGRESS_ID,
+    chainId: meta.chainId,
+    token: SUSDS_ADDRESS,
+    sampledAtBlock: meta.blockNumber,
+    sampledAtTimestamp: meta.blockTimestamp,
+  });
+  return true;
 }
 
 async function readSusdsHeartbeatEffectResults(

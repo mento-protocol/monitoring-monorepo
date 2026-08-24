@@ -12,9 +12,11 @@ export { summarizeDeploymentIdentity, summarizeStatus };
 const ENVIO_ORG = "mento-protocol";
 const ENVIO_INDEXER = "mento";
 const INDEXER_SCHEMA_PATH = "indexer-envio/schema.graphql";
+const SUSDS_EVENTS_PATH = "indexer-envio/src/handlers/susdsEvents.ts";
 const REPLAY_INTEGRITY_PATH = "indexer-envio/config/replay-integrity.json";
 const REQUIRED_POLYGON_ORACLE_FRESHNESS_VERSION = 3;
 const SUSDS_LAUNCH_BASELINE_ID = "1-susds-launch";
+const SUSDS_SAMPLER_PROGRESS_ID = "1-susds-sampler";
 const SUSDS_ADDRESS = "0xa3931d71877c0e7a3148cb7eb4463524fec27fbd";
 const SUSDS_LAUNCH_BLOCK = 24_573_203;
 const SUSDS_LAUNCH_TIMESTAMP = 1_772_496_000;
@@ -38,12 +40,22 @@ const SUSDS_LAUNCH_BASELINE_PROBE = `  SusdsYieldLaunchBaseline(
 const SUSDS_DAILY_SNAPSHOT_PROBE =
   "  SusdsYieldDailySnapshot(limit: 1, order_by: { sampledAtBlock: desc }) { id timestamp totalEarnedYieldUsdWei sampledAtBlock sampledAtTimestamp }\n";
 
+const SUSDS_SAMPLER_PROGRESS_PROBE = `  SusdsYieldSamplerProgress(
+    limit: 1
+    where: { id: { _eq: "${SUSDS_SAMPLER_PROGRESS_ID}" } }
+  ) { id sampledAtBlock sampledAtTimestamp }
+`;
+
 export function buildProbeQuery({
   includeSusdsSampler = true,
+  includeSusdsSamplerProgress = includeSusdsSampler,
   includeDeploymentIdentity = false,
 } = {}) {
   const susdsSamplerProbe = includeSusdsSampler
     ? `${SUSDS_LAUNCH_BASELINE_PROBE}${SUSDS_DAILY_SNAPSHOT_PROBE}`
+    : "";
+  const susdsSamplerProgressProbe = includeSusdsSamplerProgress
+    ? SUSDS_SAMPLER_PROGRESS_PROBE
     : "";
   const deploymentIdentityProbe = includeDeploymentIdentity
     ? DEPLOYMENT_IDENTITY_PROBE
@@ -70,18 +82,22 @@ ${deploymentIdentityProbe}  Pool(limit: 1) { id chainId source }
   }
   SusdsYieldSummary(limit: 1) { id currentShares totalEarnedYieldUsdWei lastMovementTxHash lastUpdatedBlock }
   SusdsYieldMovement(limit: 1, order_by: { blockNumber: asc }) { id kind txHash blockNumber }
-${susdsSamplerProbe}  StethYieldSummary(limit: 1) { id lastMovementTxHash lastUpdatedBlock }
+${susdsSamplerProbe}${susdsSamplerProgressProbe}  StethYieldSummary(limit: 1) { id lastMovementTxHash lastUpdatedBlock }
   StethYieldMovement(limit: 1, order_by: { blockNumber: asc }) { id kind txHash blockNumber }
 }`;
 }
 
 export const PROBE_QUERY = buildProbeQuery();
 
-export function summarizeSusdsLaunchBaselineSchema(input) {
+export function summarizeSusdsLaunchBaselineSchema(
+  input,
+  { legacyHandlerInput } = {},
+) {
   const failures = [];
   if (input?.readError) failures.push(input.readError);
 
   let detected = null;
+  let samplerProgressDetected = null;
   if (!input?.readError) {
     if (typeof input?.value !== "string" || input.value.trim() === "") {
       failures.push(
@@ -98,9 +114,12 @@ export function summarizeSusdsLaunchBaselineSchema(input) {
             `could not inspect ${INDEXER_SCHEMA_PATH} for the deployment commit`,
           );
         } else {
-          detected = objectTypes.some(
-            (definition) =>
-              definition.name.value === "SusdsYieldLaunchBaseline",
+          const objectTypeNames = new Set(
+            objectTypes.map((definition) => definition.name.value),
+          );
+          detected = objectTypeNames.has("SusdsYieldLaunchBaseline");
+          samplerProgressDetected = objectTypeNames.has(
+            "SusdsYieldSamplerProgress",
           );
         }
       } catch (error) {
@@ -111,11 +130,39 @@ export function summarizeSusdsLaunchBaselineSchema(input) {
     }
   }
 
+  if (detected === true && samplerProgressDetected === false) {
+    if (legacyHandlerInput?.readError) {
+      failures.push(legacyHandlerInput.readError);
+    } else if (
+      typeof legacyHandlerInput?.value !== "string" ||
+      legacyHandlerInput.value.trim() === ""
+    ) {
+      failures.push(
+        `could not inspect ${SUSDS_EVENTS_PATH} for legacy sampler safety`,
+      );
+    } else if (
+      /\brecordSusdsYield(?:Event)?DailySnapshot\b/.test(
+        legacyHandlerInput.value,
+      )
+    ) {
+      failures.push(
+        `legacy ${SUSDS_EVENTS_PATH} writes event-time daily snapshots without SusdsYieldSamplerProgress`,
+      );
+    }
+  }
+  if (detected === false && samplerProgressDetected === true) {
+    failures.push(
+      "SusdsYieldSamplerProgress exists without SusdsYieldLaunchBaseline in the deployment schema",
+    );
+  }
+
   return {
     ok: failures.length === 0,
     schemaPath: INDEXER_SCHEMA_PATH,
     detected,
     required: detected !== false,
+    samplerProgressDetected,
+    samplerProgressRequired: samplerProgressDetected !== false,
     failures,
   };
 }
@@ -154,12 +201,18 @@ function metricSummary(metricsJson) {
 
 export function summarizeProbe(
   graphqlJson,
-  { includeSusdsSampler = true } = {},
+  {
+    includeSusdsSampler = true,
+    includeSusdsSamplerProgress = includeSusdsSampler,
+  } = {},
 ) {
   const errors = graphqlJson.errors ?? [];
   const probeTables = includeSusdsSampler
     ? [...CORE_PROBE_TABLES, "SusdsYieldDailySnapshot"]
-    : CORE_PROBE_TABLES;
+    : [...CORE_PROBE_TABLES];
+  if (includeSusdsSamplerProgress) {
+    probeTables.push("SusdsYieldSamplerProgress");
+  }
   const rowCounts = Object.fromEntries(
     probeTables.map((table) => [
       table,
@@ -199,6 +252,10 @@ export function summarizeProbe(
     }
   } else if (includeSusdsSampler && !susdsSummaryNonzero) {
     const index = missingTables.indexOf("SusdsYieldDailySnapshot");
+    if (index !== -1) missingTables.splice(index, 1);
+  }
+  if (includeSusdsSamplerProgress && !susdsSummaryNonzero) {
+    const index = missingTables.indexOf("SusdsYieldSamplerProgress");
     if (index !== -1) missingTables.splice(index, 1);
   }
 
@@ -283,6 +340,8 @@ export function summarizeSusdsSamplerProgress({
   required = true,
   summaryNonzero,
   latestSnapshot,
+  samplerProgress,
+  useSamplerProgress = false,
   ethereumChain,
   nowSeconds,
 }) {
@@ -299,9 +358,10 @@ export function summarizeSusdsSamplerProgress({
   }
 
   const failures = [];
-  const latestSampledAtBlock = parseSafeInteger(latestSnapshot?.sampledAtBlock);
+  const latestSample = useSamplerProgress ? samplerProgress : latestSnapshot;
+  const latestSampledAtBlock = parseSafeInteger(latestSample?.sampledAtBlock);
   const latestSampledAtTimestamp = parseSafeInteger(
-    latestSnapshot?.sampledAtTimestamp,
+    latestSample?.sampledAtTimestamp,
   );
   const processedBlock = parseSafeInteger(ethereumChain?.processedBlock);
   const blockLag =
@@ -314,9 +374,11 @@ export function summarizeSusdsSamplerProgress({
       ? currentTime - latestSampledAtTimestamp
       : null;
 
-  if (latestSnapshot === undefined) {
+  if (latestSample === undefined) {
     failures.push(
-      "sUSDS sampler has no daily snapshot row for the nonzero summary",
+      useSamplerProgress
+        ? "sUSDS sampler heartbeat progress row is missing for the nonzero summary"
+        : "sUSDS sampler has no daily snapshot row for the nonzero summary",
     );
   }
   if (ethereumChain === undefined) {
@@ -325,7 +387,11 @@ export function summarizeSusdsSamplerProgress({
     );
   }
   if (latestSampledAtBlock === null) {
-    failures.push("sUSDS sampler latest daily row has no valid sampledAtBlock");
+    failures.push(
+      useSamplerProgress
+        ? "sUSDS sampler heartbeat progress has no valid sampledAtBlock"
+        : "sUSDS sampler latest daily row has no valid sampledAtBlock",
+    );
   } else if (latestSampledAtBlock <= SUSDS_LAUNCH_BLOCK) {
     failures.push(
       `sUSDS sampler has no post-launch progress (latest sampledAtBlock ${latestSampledAtBlock}; launch ${SUSDS_LAUNCH_BLOCK})`,
@@ -333,7 +399,9 @@ export function summarizeSusdsSamplerProgress({
   }
   if (latestSampledAtTimestamp === null) {
     failures.push(
-      "sUSDS sampler latest daily row has no valid sampledAtTimestamp",
+      useSamplerProgress
+        ? "sUSDS sampler heartbeat progress has no valid sampledAtTimestamp"
+        : "sUSDS sampler latest daily row has no valid sampledAtTimestamp",
     );
   } else if (latestSampledAtTimestamp <= SUSDS_LAUNCH_TIMESTAMP) {
     failures.push(
@@ -391,6 +459,8 @@ export function buildSummary({
     schemaPath: INDEXER_SCHEMA_PATH,
     detected: true,
     required: true,
+    samplerProgressDetected: true,
+    samplerProgressRequired: true,
     failures: [],
   },
 }) {
@@ -400,6 +470,8 @@ export function buildSummary({
   });
   const probe = summarizeProbe(graphqlJson, {
     includeSusdsSampler: susdsLaunchBaselineSchema.required,
+    includeSusdsSamplerProgress:
+      susdsLaunchBaselineSchema.samplerProgressRequired,
   });
   const susdsLaunchBaseline = summarizeSusdsLaunchBaseline(
     graphqlJson.data?.SusdsYieldLaunchBaseline?.[0],
@@ -409,6 +481,9 @@ export function buildSummary({
     required: susdsLaunchBaselineSchema.required,
     summaryNonzero: probe.susdsSummaryNonzero,
     latestSnapshot: graphqlJson.data?.SusdsYieldDailySnapshot?.[0],
+    samplerProgress: graphqlJson.data?.SusdsYieldSamplerProgress?.[0],
+    useSamplerProgress:
+      susdsLaunchBaselineSchema.samplerProgressRequired === true,
     ethereumChain: sync.chains.find((chain) => Number(chain.chainId) === 1),
     nowSeconds,
   });

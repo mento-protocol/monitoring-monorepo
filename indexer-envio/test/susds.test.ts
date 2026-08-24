@@ -39,6 +39,7 @@ type MockDb = MockDbWith<{
   SusdsCostBasisLot: EntityCollection;
   SusdsPosition: WritableEntity & EntityReader;
   SusdsYieldLaunchBaseline: WritableEntity & EntityCollection;
+  SusdsYieldSamplerProgress: WritableEntity & EntityReader;
   SusdsYieldDailySnapshot: WritableEntity & EntityCollection;
   SusdsYieldMovement: EntityCollection;
   SusdsYieldSummary: WritableEntity & EntityReader;
@@ -177,6 +178,13 @@ function dailySnapshotContext(
         mockDb.entities.SusdsYieldLaunchBaseline.set(entity);
       },
     },
+    SusdsYieldSamplerProgress: {
+      get: async (id: string) =>
+        mockDb.entities.SusdsYieldSamplerProgress.get(id),
+      set: (entity: { id: string }) => {
+        mockDb.entities.SusdsYieldSamplerProgress.set(entity);
+      },
+    },
     SusdsYieldDailySnapshot: {
       get: async (id: string) =>
         mockDb.entities.SusdsYieldDailySnapshot.get(id),
@@ -215,6 +223,12 @@ function heartbeatContext(
       throw new Error("unexpected effect");
     },
   } as unknown as Parameters<typeof recordSusdsYieldHeartbeatSnapshot>[0];
+}
+
+function samplerProgress(mockDb: MockDb) {
+  return mockDb.entities.SusdsYieldSamplerProgress.get("1-susds-sampler") as
+    | { sampledAtBlock: bigint; sampledAtTimestamp: bigint }
+    | undefined;
 }
 
 // Run through `pnpm indexer:reserve-yield:test`, which codegens the dedicated
@@ -574,7 +588,7 @@ describeReserveYield("sUSDS reserve yield accounting", () => {
     assert.equal(rows[1]?.dailyEarnedYieldUsdWei, dollars(200));
   });
 
-  it("keeps sparse post-launch events out of daily actuals without a timestamp effect", async () => {
+  it("skips event-time snapshots when the previous UTC day is missing", async () => {
     let mockDb = MockDb.createMockDb();
     const day1 = V3_REVENUE_LAUNCH_TIMESTAMP + 86_400n;
     const day3 = day1 + 2n * 86_400n;
@@ -634,6 +648,112 @@ describeReserveYield("sUSDS reserve yield accounting", () => {
     );
     assert.equal(summary(mockDb).currentShares, dollars(900));
     assert.equal(summary(mockDb).totalEarnedYieldUsdWei, dollars(300));
+  });
+
+  it("keeps late event yield in its UTC day across the next heartbeat", async () => {
+    let mockDb = MockDb.createMockDb();
+    const day1 = V3_REVENUE_LAUNCH_TIMESTAMP + 86_400n;
+    const day2 = day1 + 86_400n;
+    const firstHeartbeatBlock = BigInt(V3_REVENUE_LAUNCH_BLOCK) + 600n;
+    const eventBlock = V3_REVENUE_LAUNCH_BLOCK + 601;
+    const nextHeartbeatBlock = BigInt(V3_REVENUE_LAUNCH_BLOCK) + 1_200n;
+
+    setSharePrice(V3_REVENUE_LAUNCH_BLOCK - 1, WAD);
+    mockDb = await deposit(
+      mockDb,
+      V3_REVENUE_LAUNCH_BLOCK - 1,
+      0,
+      dollars(1000),
+      dollars(1000),
+      Number(V3_REVENUE_LAUNCH_TIMESTAMP - 1n),
+    );
+    await recordSusdsYieldLaunchBaseline(dailySnapshotContext(mockDb), {
+      blockTimestamp: V3_REVENUE_LAUNCH_BLOCK_TIMESTAMP,
+      sharePriceUsdWei: WAD,
+    });
+
+    await recordSusdsYieldHeartbeatSnapshot(
+      heartbeatContext(
+        mockDb,
+        day1 + 82_800n,
+        dollars(110) / 100n,
+        firstHeartbeatBlock,
+      ),
+      firstHeartbeatBlock,
+    );
+    assert.deepEqual(samplerProgress(mockDb), {
+      id: "1-susds-sampler",
+      chainId: ETHEREUM_CHAIN_ID,
+      token: SUSDS_ADDRESS,
+      sampledAtBlock: firstHeartbeatBlock,
+      sampledAtTimestamp: day1 + 82_800n,
+    });
+
+    const eventTimestamp = day1 + 86_390n;
+    setSharePrice(eventBlock, dollars(120) / 100n);
+    mockDb = await transfer(
+      mockDb,
+      eventBlock,
+      1,
+      RESERVE_SAFE,
+      EXTERNAL,
+      dollars(100),
+      Number(eventTimestamp),
+    );
+
+    let eventDay = dailySnapshots(mockDb).find(
+      (snapshot) => snapshot.timestamp === day1,
+    );
+    assert.ok(eventDay, "expected event-day sUSDS snapshot");
+    assert.equal(eventDay.totalEarnedYieldUsdWei, dollars(200));
+    assert.equal(eventDay.dailyEarnedYieldUsdWei, dollars(200));
+    assert.equal(eventDay.dailyRealizedYieldUsdWei, dollars(20));
+    assert.equal(eventDay.dailyUnrealizedYieldUsdWei, dollars(180));
+    assert.equal(eventDay.sampledAtBlock, BigInt(eventBlock));
+    assert.equal(eventDay.sampledAtTimestamp, eventTimestamp);
+    assert.equal(samplerProgress(mockDb)?.sampledAtBlock, firstHeartbeatBlock);
+
+    mockDb = await transfer(
+      mockDb,
+      eventBlock,
+      1,
+      RESERVE_SAFE,
+      EXTERNAL,
+      dollars(100),
+      Number(eventTimestamp),
+    );
+    eventDay = dailySnapshots(mockDb).find(
+      (snapshot) => snapshot.timestamp === day1,
+    );
+    assert.ok(eventDay, "expected idempotent event-day sUSDS snapshot");
+    assert.equal(eventDay.totalEarnedYieldUsdWei, dollars(200));
+    assert.equal(eventDay.sampledAtBlock, BigInt(eventBlock));
+
+    await recordSusdsYieldHeartbeatSnapshot(
+      heartbeatContext(
+        mockDb,
+        day2 + 300n,
+        dollars(120) / 100n,
+        nextHeartbeatBlock,
+      ),
+      nextHeartbeatBlock,
+    );
+
+    const nextDay = dailySnapshots(mockDb).find(
+      (snapshot) => snapshot.timestamp === day2,
+    );
+    assert.ok(nextDay, "expected next-day sUSDS snapshot");
+    assert.equal(nextDay.totalEarnedYieldUsdWei, dollars(200));
+    assert.equal(nextDay.dailyEarnedYieldUsdWei, 0n);
+    assert.equal(nextDay.dailyRealizedYieldUsdWei, 0n);
+    assert.equal(nextDay.dailyUnrealizedYieldUsdWei, 0n);
+    assert.deepEqual(samplerProgress(mockDb), {
+      id: "1-susds-sampler",
+      chainId: ETHEREUM_CHAIN_ID,
+      token: SUSDS_ADDRESS,
+      sampledAtBlock: nextHeartbeatBlock,
+      sampledAtTimestamp: day2 + 300n,
+    });
   });
 
   it("writes sUSDS daily snapshots from a block-number-only heartbeat", async () => {
@@ -711,6 +831,7 @@ describeReserveYield("sUSDS reserve yield accounting", () => {
     assert.equal(didWrite, false);
     assert.equal(calls.length, 2);
     assert.equal(dailySnapshots(mockDb).length, 0);
+    assert.equal(samplerProgress(mockDb), undefined);
   });
 
   it("keeps sUSDS timestamp-null skip ahead of a hydrated share-price failure", async () => {

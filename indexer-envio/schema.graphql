@@ -1010,6 +1010,16 @@ type SusdsYieldLaunchBaseline {
   sampledAtTimestamp: BigInt!
 }
 
+# Heartbeat-only progress for the bounded sUSDS sampler. Event-time daily-row
+# refreshes must not update this entity.
+type SusdsYieldSamplerProgress {
+  id: ID! # "{chainId}-susds-sampler"
+  chainId: Int! @index
+  token: String!
+  sampledAtBlock: BigInt!
+  sampledAtTimestamp: BigInt!
+}
+
 type SusdsYieldDailySnapshot {
   id: ID! # "{chainId}-susds-{dayTimestamp}"
   chainId: Int! @index

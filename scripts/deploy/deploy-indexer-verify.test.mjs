@@ -61,14 +61,27 @@ function validSusdsLaunchBaseline() {
   };
 }
 
+function validSusdsSamplerProgress(overrides = {}) {
+  return {
+    id: "1-susds-sampler",
+    sampledAtBlock: "24573803",
+    sampledAtTimestamp: String(NOW_SECONDS - 1_000),
+    ...overrides,
+  };
+}
+
 assert.match(
   PROBE_QUERY,
   /SusdsYieldLaunchBaseline[\s\S]*id: \{ _eq: "1-susds-launch" \}[\s\S]*sharePriceUsdWei/,
 );
 assert.match(PROBE_QUERY, /SusdsYieldDailySnapshot/);
+assert.match(
+  PROBE_QUERY,
+  /SusdsYieldSamplerProgress[\s\S]*id: \{ _eq: "1-susds-sampler" \}/,
+);
 assert.doesNotMatch(
   buildProbeQuery({ includeSusdsSampler: false }),
-  /SusdsYield(?:LaunchBaseline|DailySnapshot)/,
+  /SusdsYield(?:LaunchBaseline|DailySnapshot|SamplerProgress)/,
 );
 
 const indexerJson = {
@@ -352,6 +365,7 @@ assert.deepEqual(
       SusdsYieldSummary: 1,
       SusdsYieldMovement: 1,
       SusdsYieldDailySnapshot: 0,
+      SusdsYieldSamplerProgress: 0,
       StethYieldSummary: 1,
       StethYieldMovement: 1,
     },
@@ -379,11 +393,12 @@ assert.deepEqual(
       SusdsYieldSummary: 1,
       SusdsYieldMovement: 1,
       SusdsYieldDailySnapshot: 0,
+      SusdsYieldSamplerProgress: 0,
       StethYieldSummary: 1,
       StethYieldMovement: 1,
     },
     errors: [],
-    missingTables: ["SusdsYieldDailySnapshot"],
+    missingTables: ["SusdsYieldDailySnapshot", "SusdsYieldSamplerProgress"],
     susdsSummaryNonzero: true,
     ok: false,
   },
@@ -400,6 +415,7 @@ assert.deepEqual(
       SusdsYieldSummary: 0,
       SusdsYieldMovement: 0,
       SusdsYieldDailySnapshot: 0,
+      SusdsYieldSamplerProgress: 0,
       StethYieldSummary: 0,
       StethYieldMovement: 0,
     },
@@ -701,7 +717,7 @@ assert.equal(baselineOnlySampler.ok, false);
 assert.equal(baselineOnlySampler.probe.rowCounts.SusdsYieldDailySnapshot, 1);
 assert.match(
   baselineOnlySampler.failures.join("\n"),
-  /sUSDS sampler.*(no post-launch progress|still the launch baseline|stale)/,
+  /sUSDS sampler heartbeat progress row is missing/,
 );
 
 for (const lag of [0, 599]) {
@@ -782,6 +798,7 @@ const healthySummaryInput = {
           sampledAtTimestamp: String(NOW_SECONDS - 1_000),
         },
       ],
+      SusdsYieldSamplerProgress: [validSusdsSamplerProgress()],
       StethYieldSummary: [{ id: "steth" }],
       StethYieldMovement: [{ id: "steth-move" }],
     },
@@ -798,6 +815,106 @@ assert.match(
 assert.match(
   renderText(healthySummary),
   /sUSDS launch baseline:[\s\S]*launch block: 24,573,203; sampled block: 24,573,203; healthy: yes/,
+);
+
+const recentEventRowWithStaleHeartbeat = buildSummary({
+  ...healthySummaryInput,
+  statusJson: {
+    data: [
+      {
+        ...healthySummaryInput.statusJson.data[0],
+        block_height: 24_574_403,
+        latest_processed_block: 24_574_403,
+      },
+    ],
+  },
+  graphqlJson: {
+    data: {
+      ...healthySummaryInput.graphqlJson.data,
+      SusdsYieldDailySnapshot: [
+        {
+          id: "susds-event-row",
+          sampledAtBlock: "24574403",
+          sampledAtTimestamp: String(NOW_SECONDS - 10),
+        },
+      ],
+      SusdsYieldSamplerProgress: [validSusdsSamplerProgress()],
+    },
+  },
+});
+assert.equal(recentEventRowWithStaleHeartbeat.ok, false);
+assert.equal(
+  recentEventRowWithStaleHeartbeat.susdsSampler.latestSampledAtBlock,
+  24_573_803,
+);
+assert.equal(recentEventRowWithStaleHeartbeat.susdsSampler.blockLag, 600);
+assert.match(
+  recentEventRowWithStaleHeartbeat.failures.join("\n"),
+  /sUSDS sampler is stale/,
+);
+
+const preProgressSamplerSchema = summarizeSusdsLaunchBaselineSchema(
+  {
+    value:
+      "type SusdsYieldLaunchBaseline { id: ID! } type SusdsYieldDailySnapshot { id: ID! }",
+    readError: "",
+  },
+  {
+    legacyHandlerInput: {
+      value: "await updateSummary(context, meta, sharePriceUsdWei);",
+      readError: "",
+    },
+  },
+);
+const preProgressRollbackSummary = buildSummary({
+  ...healthySummaryInput,
+  graphqlJson: {
+    data: {
+      ...healthySummaryInput.graphqlJson.data,
+      SusdsYieldSamplerProgress: undefined,
+    },
+  },
+  susdsLaunchBaselineSchema: preProgressSamplerSchema,
+});
+assert.equal(preProgressRollbackSummary.ok, true);
+assert.equal(preProgressSamplerSchema.required, true);
+assert.equal(preProgressSamplerSchema.samplerProgressRequired, false);
+assert.equal(
+  "SusdsYieldSamplerProgress" in preProgressRollbackSummary.probe.rowCounts,
+  false,
+);
+assert.equal(
+  preProgressRollbackSummary.susdsSampler.latestSampledAtBlock,
+  24_573_803,
+);
+
+const unsafePreProgressSamplerSchema = summarizeSusdsLaunchBaselineSchema(
+  {
+    value:
+      "type SusdsYieldLaunchBaseline { id: ID! } type SusdsYieldDailySnapshot { id: ID! }",
+    readError: "",
+  },
+  {
+    legacyHandlerInput: {
+      value: "await recordSusdsYieldEventDailySnapshot(context, meta);",
+      readError: "",
+    },
+  },
+);
+const unsafePreProgressRollbackSummary = buildSummary({
+  ...healthySummaryInput,
+  graphqlJson: {
+    data: {
+      ...healthySummaryInput.graphqlJson.data,
+      SusdsYieldSamplerProgress: undefined,
+    },
+  },
+  susdsLaunchBaselineSchema: unsafePreProgressSamplerSchema,
+});
+assert.equal(unsafePreProgressRollbackSummary.ok, false);
+assert.match(
+  unsafePreProgressRollbackSummary.failures.join("\n"),
+  /writes event-time daily snapshots without SusdsYieldSamplerProgress/,
 );
 
 const recentSnapshotWithoutLaunchBaseline = buildSummary({
@@ -938,6 +1055,7 @@ const staleSamplerSummary = buildSummary({
           sampledAtTimestamp: String(NOW_SECONDS - 1_000),
         },
       ],
+      SusdsYieldSamplerProgress: [validSusdsSamplerProgress()],
       StethYieldSummary: [{ id: "steth" }],
       StethYieldMovement: [{ id: "steth-move" }],
     },

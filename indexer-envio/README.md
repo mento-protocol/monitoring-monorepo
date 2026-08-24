@@ -39,24 +39,24 @@ event list; the table highlights the main monitoring surfaces.
 
 The schema is the source of truth for the complete entity list.
 
-| Entity group            | Description                                                                                                                                                                     |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Pool state              | `Pool`, `DeviationThresholdBreach`, `OracleSnapshot`, `OracleFeedState`, `OracleExpiryState`, `TradingLimit`                                                                    |
-| Pool strategies         | `PoolLiquidityStrategy` (authoritative active many-to-many registry; `Pool.rebalancerAddress` is compatibility-only)                                                            |
-| Pool activity           | `SwapEvent`, `LiquidityEvent`, `ReserveUpdate`, `RebalanceEvent`, `LiquidityPosition`, `FactoryDeployment`                                                                      |
-| Pool rollups            | `PoolSnapshot`, `PoolDailySnapshot`, `PoolDailyVolumeSnapshot`, `PoolDailyFeeSnapshot`                                                                                          |
-| Protocol fees           | `ProtocolFeeTransfer`                                                                                                                                                           |
-| Legacy v2 / Broker      | `BrokerSwapEvent`, `BrokerDailySnapshot`, `BrokerExchangeDailySnapshot`, `BrokerTraderDailySnapshot`                                                                            |
-| Broker aggregators      | `BrokerAggregatorDailySnapshot`, `BrokerAggregatorTraderDayMarker`, `BrokerVolumeWindowSnapshot`                                                                                |
-| BiPoolManager           | `BiPoolExchange`, `BucketUpdate`                                                                                                                                                |
-| VirtualPools            | `VirtualPoolLifecycle`                                                                                                                                                          |
-| Open Liquidity Strategy | `OlsPool`, `OlsLiquidityEvent`, `OlsLifecycleEvent`                                                                                                                             |
-| Circuit breakers        | `Breaker`, `BreakerConfig`, `BreakerTripEvent`, `RateFeedDependency`                                                                                                            |
-| Bridge flows            | `BridgeTransfer`, `BridgeAttestation`, `BridgeDailySnapshot`, `BridgeBridger`, `WormholeNttManager`, `WormholeTransferDetail`, `WormholeDestPending`, `WormholeTransferPending` |
-| Volume and participants | `TraderDailySnapshot`, `TraderPoolDailySnapshot`, `AggregatorDailySnapshot`, `VolumeWindowSnapshot`                                                                             |
-| Liquity / CDP           | Instance, collateral, trove, stability-pool, reserve-trove, and daily-snapshot entities                                                                                         |
-| Stable supply           | Token supply, custody state, and daily-snapshot entities                                                                                                                        |
-| Reserve yield           | Ethereum sUSDS/stETH movement, cost-basis, position, summary, and daily-snapshot entities; sUSDS and stETH also record immutable launch baselines for their samplers            |
+| Entity group            | Description                                                                                                                                                                             |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Pool state              | `Pool`, `DeviationThresholdBreach`, `OracleSnapshot`, `OracleFeedState`, `OracleExpiryState`, `TradingLimit`                                                                            |
+| Pool strategies         | `PoolLiquidityStrategy` (authoritative active many-to-many registry; `Pool.rebalancerAddress` is compatibility-only)                                                                    |
+| Pool activity           | `SwapEvent`, `LiquidityEvent`, `ReserveUpdate`, `RebalanceEvent`, `LiquidityPosition`, `FactoryDeployment`                                                                              |
+| Pool rollups            | `PoolSnapshot`, `PoolDailySnapshot`, `PoolDailyVolumeSnapshot`, `PoolDailyFeeSnapshot`                                                                                                  |
+| Protocol fees           | `ProtocolFeeTransfer`                                                                                                                                                                   |
+| Legacy v2 / Broker      | `BrokerSwapEvent`, `BrokerDailySnapshot`, `BrokerExchangeDailySnapshot`, `BrokerTraderDailySnapshot`                                                                                    |
+| Broker aggregators      | `BrokerAggregatorDailySnapshot`, `BrokerAggregatorTraderDayMarker`, `BrokerVolumeWindowSnapshot`                                                                                        |
+| BiPoolManager           | `BiPoolExchange`, `BucketUpdate`                                                                                                                                                        |
+| VirtualPools            | `VirtualPoolLifecycle`                                                                                                                                                                  |
+| Open Liquidity Strategy | `OlsPool`, `OlsLiquidityEvent`, `OlsLifecycleEvent`                                                                                                                                     |
+| Circuit breakers        | `Breaker`, `BreakerConfig`, `BreakerTripEvent`, `RateFeedDependency`                                                                                                                    |
+| Bridge flows            | `BridgeTransfer`, `BridgeAttestation`, `BridgeDailySnapshot`, `BridgeBridger`, `WormholeNttManager`, `WormholeTransferDetail`, `WormholeDestPending`, `WormholeTransferPending`         |
+| Volume and participants | `TraderDailySnapshot`, `TraderPoolDailySnapshot`, `AggregatorDailySnapshot`, `VolumeWindowSnapshot`                                                                                     |
+| Liquity / CDP           | Instance, collateral, trove, stability-pool, reserve-trove, and daily-snapshot entities                                                                                                 |
+| Stable supply           | Token supply, custody state, and daily-snapshot entities                                                                                                                                |
+| Reserve yield           | Ethereum sUSDS/stETH movement, cost-basis, position, summary, and daily-snapshot entities; sUSDS records heartbeat-only sampler progress; both tokens record immutable launch baselines |
 
 ### Pool ID Format
 

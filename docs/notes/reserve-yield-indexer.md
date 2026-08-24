@@ -36,8 +36,12 @@ sUSDS/stETH event suites with reserve-yield event tests enabled.
 - The primary entry point does not register the historical every-block sUSDS
   heartbeat.
 - sUSDS event handlers write movement and summary rows for tracked reserve
-  wallets. The bounded sampler writes at most one daily row per UTC day and
-  captures quiet-period share-price growth.
+  wallets. They also refresh the current daily row when prior history exists,
+  which preserves event-time yield at UTC-day boundaries. The bounded sampler
+  writes the same deterministic daily row and captures quiet-period share-price
+  growth.
+- Only a successful 600-block heartbeat updates
+  `SusdsYieldSamplerProgress`. Event-time refreshes do not update it.
 - stETH daily snapshots are keyed by chain, wallet, and day, baseline at the
   final Ethereum block before `2026-03-03T00:00:00Z`, and skipped as a batch
   when any required historical wallet `balanceOf` read is unavailable. The
@@ -171,12 +175,13 @@ Before promoting a hosted reindex with Ethereum reserve-yield enabled, require:
    non-empty `Pool`, sUSDS, and stETH GraphQL probe rows. It reads the target
    commit schema and uses `SusdsYieldLaunchBaseline` as the sampler capability
    marker. When the marker exists, it requires the exact immutable
-   `1-susds-launch` row and a post-launch `SusdsYieldDailySnapshot` whose
-   `sampledAtBlock` is fresh against the Ethereum processed head and whose
-   `sampledAtTimestamp` is fresh against verifier time. A legacy rollback
-   schema without the marker omits all sampler-only probes and checks. An
-   unreadable or uninspectable schema fails closed and retains the strict
-   sampler requirements.
+   `1-susds-launch` row and a post-launch `SusdsYieldDailySnapshot`. A target
+   schema with `SusdsYieldSamplerProgress` proves heartbeat freshness from that
+   row. An older schema can use the daily row only when the exact target
+   `susdsEvents.ts` is readable and has no event-time refresh path. A legacy
+   rollback schema without the launch marker omits all sampler-only probes and
+   checks. An unreadable or inconsistent schema or legacy handler fails closed
+   and retains the strict sampler requirements.
 
 After promotion:
 

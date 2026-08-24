@@ -50,6 +50,15 @@ force.
 - Update one UTC-day row by its deterministic `(chainId, token, day)` ID. Use
   the launch row or latest earlier row as the delta baseline, including across
   days with no intervening sample.
+- Refresh the current UTC-day row after each tracked sUSDS movement. Use the
+  event timestamp, the event-block share price, and the updated cumulative
+  totals. After launch day, skip an event that has no current-day or prior-day
+  row, so an event cannot invent incomplete history. This path adds no RPC
+  request.
+- Update the singleton `SusdsYieldSamplerProgress` row only after a successful
+  600-block heartbeat writes a daily row. Event-time refreshes never update this
+  row. It lets deployment verification prove heartbeat health independently of
+  recent movements.
 - Do not restore an every-block sUSDS heartbeat.
 - The dashboard requires an sUSDS snapshot source when current sUSDS holdings
   or a nonzero earned signal exist. It keeps holdings and forecasts visible,
@@ -67,11 +76,14 @@ force.
   unavailable yield signal keeps freshness active or makes actuals unavailable.
 - Deployment verification uses `SusdsYieldLaunchBaseline` in the exact target
   commit schema as the sampler capability marker. When the marker exists, the
-  verifier requires the immutable launch baseline, the daily snapshot probe,
-  and post-launch progress and freshness. A legacy rollback schema without the
-  marker omits all sampler-only probes and checks. An unreadable or
-  uninspectable target schema fails closed and retains all strict sampler
-  requirements.
+  verifier requires the immutable launch baseline and the daily snapshot probe.
+  A target schema with `SusdsYieldSamplerProgress` must prove post-launch
+  progress and freshness from that heartbeat-only row. An older schema without
+  it can use the latest daily row only when the exact target
+  `susdsEvents.ts` is readable and has no event-time snapshot writer. A legacy
+  rollback schema without the launch marker omits all sampler-only probes and
+  checks. An unreadable or inconsistent target schema or legacy handler fails
+  closed and retains all strict sampler requirements.
 
 ## Alternatives considered
 
@@ -85,7 +97,11 @@ force.
 ## Consequences
 
 - sUSDS and stETH both have launch-aligned bounded actual samplers.
-- Daily rows remain sparse and idempotent, with at most one row per UTC day.
+- Daily rows remain idempotent, with at most one row per UTC day. Bounded
+  heartbeats capture quiet growth. Event-time refreshes preserve realized-yield
+  attribution at UTC-day boundaries.
+- The heartbeat progress row prevents recent movements from masking a stalled
+  sampler during deployment verification.
 - A deployment can be caught up while reserve actuals are still incomplete;
   the verifier and dashboard now fail closed for that state.
 
@@ -94,5 +110,5 @@ force.
 - Ethereum block `24573203` has timestamp `1772495999`; block `24573204` has
   timestamp `1772496011`.
 - Focused sUSDS sampler tests cover launch baseline, quiet-period growth,
-  cross-day deltas, idempotent updates, null effects, and preload no-write
-  behavior.
+  cross-day and event-time deltas, idempotent updates, null effects, and preload
+  no-write behavior.

@@ -11,6 +11,7 @@ export const TRACKED_SUSDS_WALLETS = [
 export const WAD = 10n ** 18n;
 export const ZERO = 0n;
 export const SUMMARY_ID = `${ETHEREUM_CHAIN_ID}-susds`;
+export const SAMPLER_PROGRESS_ID = `${ETHEREUM_CHAIN_ID}-susds-sampler`;
 export const V3_REVENUE_LAUNCH_TIMESTAMP = 1_772_496_000n; // 2026-03-03T00:00:00Z
 // The effect reads the final pre-launch block. Keep this value exact so a
 // shifted or malformed launch effect cannot create a false baseline.
@@ -30,6 +31,7 @@ export type SusdsContext = Pick<
   | "SusdsCostBasisLot"
   | "SusdsPosition"
   | "SusdsYieldLaunchBaseline"
+  | "SusdsYieldSamplerProgress"
   | "SusdsYieldMovement"
   | "SusdsYieldDailySnapshot"
   | "SusdsYieldSummary"

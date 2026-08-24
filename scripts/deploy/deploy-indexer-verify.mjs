@@ -27,6 +27,7 @@ export const PRODUCTION_GRAPHQL_ENDPOINT =
   "https://indexer.hyperindex.xyz/2f3dd15/v1/graphql";
 const GRAPHQL_TIMEOUT_MS = 20_000;
 const INDEXER_SCHEMA_PATH = "indexer-envio/schema.graphql";
+const SUSDS_EVENTS_PATH = "indexer-envio/src/handlers/susdsEvents.ts";
 const REPLAY_INTEGRITY_PATH = "indexer-envio/config/replay-integrity.json";
 
 export function parseArgs(argv) {
@@ -214,6 +215,20 @@ function indexerSchemaFromCommit(commit) {
     return {
       value: null,
       readError: `could not read ${INDEXER_SCHEMA_PATH} from deployment commit ${commit}`,
+    };
+  }
+  return { value: result.stdout, readError: "" };
+}
+
+function susdsEventsFromCommit(commit) {
+  const result = spawnSync("git", ["show", `${commit}:${SUSDS_EVENTS_PATH}`], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  if (result.status !== 0) {
+    return {
+      value: null,
+      readError: `could not read ${SUSDS_EVENTS_PATH} from deployment commit ${commit}`,
     };
   }
   return { value: result.stdout, readError: "" };
@@ -491,11 +506,16 @@ async function main() {
   );
   const susdsLaunchBaselineSchema = summarizeSusdsLaunchBaselineSchema(
     indexerSchemaFromCommit(deployment.commit_hash),
+    {
+      legacyHandlerInput: susdsEventsFromCommit(deployment.commit_hash),
+    },
   );
   const graphqlJson = await queryGraphql(
     endpoint,
     buildProbeQuery({
       includeSusdsSampler: susdsLaunchBaselineSchema.required,
+      includeSusdsSamplerProgress:
+        susdsLaunchBaselineSchema.samplerProgressRequired,
       includeDeploymentIdentity: args.prod,
     }),
   );

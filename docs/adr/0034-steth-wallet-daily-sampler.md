@@ -63,13 +63,14 @@ a bounded stETH sampler:
   the affected snapshot batch instead of writing partial wallet actuals.
 - Hosted deploy verification uses `SusdsYieldLaunchBaseline` in the exact
   target commit schema as the sUSDS sampler capability marker. When the marker
-  exists, verification requires the immutable baseline and checks nonzero
-  `sUSDS` summaries against post-launch `SusdsYieldDailySnapshot` progress and
-  freshness. A legacy rollback schema without the marker omits all sUSDS
-  sampler-only probes and checks. An unreadable or uninspectable target schema
-  fails closed and retains all strict sampler requirements. The `stETH`
-  core-row probe checks
-  `StethYieldSummary` and `StethYieldMovement`.
+  exists, verification requires the immutable baseline and a post-launch daily
+  row. A target schema with `SusdsYieldSamplerProgress` proves heartbeat
+  freshness from that row. An older schema can use the daily row only when its
+  exact sUSDS handler has no event-time snapshot writer. A legacy rollback
+  schema without the launch marker omits all sUSDS sampler-only probes and
+  checks. An unreadable or inconsistent target schema or legacy handler fails
+  closed and retains all strict sampler requirements. The `stETH` core-row
+  probe checks `StethYieldSummary` and `StethYieldMovement`.
 
 ## Evidence
 
