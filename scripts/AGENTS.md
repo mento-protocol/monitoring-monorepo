@@ -49,7 +49,7 @@ subdirectories.
 `workflow-yaml.mjs` for Actions and shell parsing,
 `pnpm-override-selector.mjs` for pnpm overrides, and
 `gh-issue-lifecycle.mjs` for shared GitHub issue and label mechanics.
-Documentation schedulers use this module. Local projection ensures only
+Doc schedulers use it. Local projection keeps only
 `agent-ready` on create and all lifecycle labels on closed repair. ADR 0064
 lists readers.
 `peg-policy-digest.mjs` defines the peg version-digest contract for both
