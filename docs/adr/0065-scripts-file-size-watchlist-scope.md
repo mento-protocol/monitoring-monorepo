@@ -3,7 +3,7 @@ title: scripts/ is inside the file-size watchlist, with named-mechanism exemptio
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-23
+last_verified: 2026-08-24
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -99,12 +99,12 @@ to satisfy a line count.
 | `agent-autoreview.mjs`, `agent-autoreview-core.mjs` | The wrapper materializes exactly these two helper names under a 2 MB aggregate cap, from six literal lists — `helper_paths`, two `runtime_paths` arrays, an `lstat` loop, an ACL loop, and a Perl `@names` copy list that assigns each name its own file mode. Admitting a third rewrites that materializer. |
 
 **Nothing whose split is merely expensive is exempt.** `agent-quality-gate.sh`
-is the largest example and stays in the report: it is the entire subject of
-[issue 1498](https://github.com/mento-protocol/monitoring-monorepo/issues/1498),
-which decomposes it into sourced helper modules, so exempting it would suppress
-exactly the row that already has an owner. `pr-ready-state{,-core}.mjs` sit
-behind `materialize_feedback_runtime`'s two basename lists, required and
-optional, which already prove themselves extensible.
+is the largest example and stays measured at the hard cap without an exemption.
+Its residual process-control and execution layers are deliberate: [ADR
+0069](0069-gate-routing-table-as-data.md) rejected splitting them without a
+schema, test oracle, or checkable invariant. `pr-ready-state{,-core}.mjs` sit
+behind `materialize_feedback_runtime`'s two basename lists, required and optional,
+which already prove themselves extensible.
 `pr-feedback-state-claude.mjs` and `pr-ready-state-review-signals.mjs` are
 version-split optional entries, so coherent snapshots from before either split
 still work. The D3 move (issue 1877) added a location resolver under both lists
@@ -163,7 +163,7 @@ that nothing holds in place.
   three, all at hard or near-hard.
 - Two `scripts/` files join that queue: `agent-quality-gate.sh` and
   `sentry-triage-archive.mjs`. Both are over the hard cap with nothing holding
-  them, and the first already has an issue.
+  them.
 - **The gate's row shrank by 45% at D5c, and the residual is the process-control
   layer by design.** Projected here at `2e3df696` as ~3,519 raw / ~2,266 rough
   from a 6,163-raw file; measured after D5c landed, the gate is **3,327 raw /
@@ -177,9 +177,9 @@ that nothing holds in place.
   because their safety argument rests on `mkdir`/`link` atomicity,
   `ps -o lstart=`, Bash 3.2 job-control PGIDs and `/proc`, with no oracle for a
   rewrite. It stays in the report, still over the 1,000-line hard cap, and
-  stated rather than exempted;
-  [issue 1498](https://github.com/mento-protocol/monitoring-monorepo/issues/1498)
-  stays open as its owner.
+  stated rather than exempted. ADR 0069 is the row's justification. The monthly
+  scheduler continues to surface the row as actionable; that recurring
+  visibility is deliberate and needs no permanent single-row issue owner.
 - Thirty further `scripts/` files sit between the watch threshold and the
   hard cap. They are recorded and delta-tracked, and any that grows by more than
   100 raw lines becomes actionable on its own. The 2026-08-23 refresh produced
