@@ -15,6 +15,7 @@ export {
   summarizeProbe,
   summarizeReplayIntegrity,
   summarizeStatus,
+  summarizeDeploymentIdentity,
   summarizeSusdsLaunchBaseline,
   summarizeSusdsLaunchBaselineSchema,
   summarizeSusdsSamplerProgress,
@@ -333,6 +334,15 @@ export function renderText(summary) {
     `  all chains caught up: ${summary.sync.allSynced ? "yes" : "no"}`,
   );
   lines.push("");
+  lines.push("Production endpoint identity:");
+  if (summary.deploymentIdentity.required) {
+    lines.push(
+      `  target _meta identity match: ${summary.deploymentIdentity.ok ? "yes" : "no"}`,
+    );
+  } else {
+    lines.push("  required: no");
+  }
+  lines.push("");
   lines.push(
     `Metrics: fetched (${summary.metrics.dataKind}${
       summary.metrics.dataRows === undefined
@@ -411,7 +421,8 @@ endpoint, core rows, sUSDS post-launch sampler progress and freshness, and
 sUSDS launch-baseline integrity, and fail-closed Polygon replay semantics.
 
 Options:
-  --prod           Probe the static production endpoint and require <commit> to be prod.
+  --prod           Probe the static production endpoint, match its per-chain _meta
+                   identity to <commit>, and require <commit> to be prod.
   --allow-syncing  Do not fail solely because one or more chains are still syncing.
                    Empty rows, sUSDS baseline/sampler, and Polygon semantic failures remain failures.
   --json, -j       Print machine-readable summary JSON.
@@ -485,6 +496,7 @@ async function main() {
     endpoint,
     buildProbeQuery({
       includeSusdsSampler: susdsLaunchBaselineSchema.required,
+      includeDeploymentIdentity: args.prod,
     }),
   );
   const summary = buildSummary({

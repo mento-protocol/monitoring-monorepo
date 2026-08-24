@@ -394,6 +394,7 @@ function buildReserveYieldResponse({
       stethYield.earnedYieldUsd,
     ),
     susdsEarnedYieldUsd: susdsYield.earnedYieldUsd,
+    susdsEarnedYieldAsOf: susdsYield.earnedYieldAsOf,
     susdsYieldSignalUnavailable: susdsYield.signalUnavailable,
     susdsSnapshotSourceRequired: reserveState.susdsSnapshotSourceRequired,
     hasUnindexedSusdsHolding: reserveState.hasUnindexedSusdsHolding,

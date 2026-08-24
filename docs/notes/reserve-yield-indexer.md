@@ -3,7 +3,7 @@ title: Reserve-Yield Indexer Topology
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-23
+last_verified: 2026-08-24
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -107,8 +107,11 @@ pre-launch Ethereum block. The checked-in baseline is block `24573203`; sUSDS
 uses its pre-launch share price with the v3 launch-day timestamp, and both
 samplers use the bounded 600-block cadence. Re-check the block before changing
 the launch timestamp or start-block assumptions. A zero-only sUSDS launch row
-remains the revenue delta baseline. The dashboard excludes that aggregate from
-freshness until the current API or indexed history proves sUSDS exposure.
+remains the revenue delta baseline, and historical rows remain in actual
+revenue. The dashboard excludes that aggregate from freshness when the current
+API returns a clean null-or-zero yield state and the classification, coverage,
+source, and signal fields prove no current exposure. Historical rows alone do
+not reactivate freshness.
 
 Example `cast` shape for one wallet/topic pair:
 
@@ -188,12 +191,14 @@ After promotion:
    `susdsSnapshotSourceRequired: true` as current sUSDS exposure that exists or
    cannot be ruled out. A positive finite sUSDS holding must not pair with a
    false signal. A true current source signal or a nonzero historical earned
-   signal requires finite `susdsEarnedYieldUsd` and a valid `earnedYieldAsOf`.
-   A true current source signal also requires an sUSDS holding with finite
+   signal requires finite `susdsEarnedYieldUsd` and a valid
+   `susdsEarnedYieldAsOf`. The aggregate `earnedYieldAsOf` is not sUSDS
+   evidence because stETH can supply it independently. A true current source
+   signal also requires an sUSDS holding with finite
    `earnedYieldUsd`, so malformed sUSDS exposure without a usable holding fails
    closeout. A clean state without either signal may return
    `susdsEarnedYieldUsd: null` or finite zero and does not require an sUSDS
-   holding or `earnedYieldAsOf`.
+   holding or `susdsEarnedYieldAsOf`.
 8. If a true current sUSDS source signal or a nonzero historical signal exists, the
    dashboard `/revenue` page shows sUSDS reserve actuals without a pending,
    unavailable, or stale label. In a clean state without either signal, absent

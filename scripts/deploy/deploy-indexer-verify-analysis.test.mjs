@@ -3,6 +3,7 @@
 import assert from "node:assert/strict";
 import {
   buildProbeQuery,
+  summarizeDeploymentIdentity,
   summarizeSusdsLaunchBaseline,
   summarizeSusdsLaunchBaselineSchema,
   summarizeSusdsSamplerProgress,
@@ -38,10 +39,99 @@ const validLaunchBaseline = {
 const strictProbeQuery = buildProbeQuery();
 assert.match(strictProbeQuery, /SusdsYieldLaunchBaseline/);
 assert.match(strictProbeQuery, /SusdsYieldDailySnapshot/);
+assert.doesNotMatch(strictProbeQuery, /_meta/);
 assert.doesNotMatch(
   buildProbeQuery({ includeSusdsSampler: false }),
   /SusdsYield(?:LaunchBaseline|DailySnapshot)/,
 );
+assert.match(
+  buildProbeQuery({ includeDeploymentIdentity: true }),
+  /_meta\(order_by: \{ chainId: asc \}\) \{ chainId readyAt startBlock \}/,
+);
+
+const targetSync = {
+  allSynced: true,
+  chains: [
+    {
+      chainId: 1,
+      startBlock: 19_111_760,
+      syncedAt: "2026-08-24T16:59:33.166+00:00",
+    },
+    {
+      chainId: 137,
+      startBlock: 90_273_661,
+      syncedAt: "2026-08-24T16:59:32.916+00:00",
+    },
+  ],
+};
+const matchingIdentityRows = [
+  {
+    chainId: 1,
+    readyAt: "2026-08-24T16:59:33.166000Z",
+    startBlock: 19_111_760,
+  },
+  {
+    chainId: 137,
+    readyAt: "2026-08-24T16:59:32.916Z",
+    startBlock: 90_273_661,
+  },
+];
+
+const matchingIdentity = summarizeDeploymentIdentity(
+  { data: { _meta: matchingIdentityRows } },
+  targetSync,
+  { required: true },
+);
+assert.equal(matchingIdentity.ok, true);
+assert.equal(matchingIdentity.required, true);
+assert.deepEqual(matchingIdentity.expected, matchingIdentity.observed);
+
+const oldStaticIdentity = summarizeDeploymentIdentity(
+  {
+    data: {
+      _meta: matchingIdentityRows.map((row) => ({
+        ...row,
+        readyAt: "2026-08-21T10:46:13.111Z",
+      })),
+    },
+  },
+  targetSync,
+  { required: true },
+);
+assert.equal(oldStaticIdentity.ok, false);
+assert.match(
+  oldStaticIdentity.failures.join("\n"),
+  /does not match target chain 1[\s\S]*does not match target chain 137/,
+);
+
+for (const graphqlJson of [
+  { data: {} },
+  {
+    data: {
+      _meta: [matchingIdentityRows[0], { ...matchingIdentityRows[0] }],
+    },
+  },
+  {
+    data: {
+      _meta: [
+        matchingIdentityRows[0],
+        { ...matchingIdentityRows[1], readyAt: "0" },
+      ],
+    },
+  },
+]) {
+  assert.equal(
+    summarizeDeploymentIdentity(graphqlJson, targetSync, { required: true }).ok,
+    false,
+  );
+}
+assert.deepEqual(summarizeDeploymentIdentity({}, targetSync), {
+  required: false,
+  ok: true,
+  expected: [],
+  observed: [],
+  failures: [],
+});
 
 assert.deepEqual(
   summarizeSusdsLaunchBaselineSchema({

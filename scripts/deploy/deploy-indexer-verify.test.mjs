@@ -272,6 +272,19 @@ assert.deepEqual(
   },
 );
 
+for (const startBlock of [undefined, null, "", "invalid", -1, 1.5]) {
+  const status = summarizeStatus({
+    data: [
+      {
+        chain_id: 1,
+        start_block: startBlock,
+        timestamp_caught_up_to_head_or_endblock: "2026-07-03T12:00:00Z",
+      },
+    ],
+  });
+  assert.equal(status.chains[0].startBlock, null);
+}
+
 assert.equal(summarizePolygonPools(validPolygonPools(), NOW_SECONDS).ok, true);
 
 const missingPolygonPool = validPolygonPools().slice(1);
@@ -439,6 +452,123 @@ const summary = buildSummary({
 assert.equal(summary.ok, true);
 assert.match(renderText(summary), /Result: verified/);
 assert.match(renderText(summary), /Polygon oracle freshness: v3\/v3/);
+
+const matchingProdIdentityInput = {
+  args: { allowSyncing: false, prod: true },
+  deployment: indexerJson.data.deployments[0],
+  endpoint: indexerJson.data.deployments[0].gql_endpoint,
+  endpointMode: "prod-static",
+  statusJson: {
+    data: [
+      {
+        chain_id: 1,
+        start_block: 10,
+        block_height: 20,
+        latest_processed_block: 20,
+        num_events_processed: 1,
+        timestamp_caught_up_to_head_or_endblock: "2026-07-03T12:00:00+00:00",
+      },
+    ],
+  },
+  metricsJson: { data: [] },
+  graphqlJson: {
+    data: {
+      _meta: [
+        {
+          chainId: 1,
+          readyAt: "2026-07-03T12:00:00.000Z",
+          startBlock: 10,
+        },
+      ],
+      Pool: [{ id: "pool" }],
+      PolygonPool: validPolygonPools(),
+      SusdsYieldSummary: [{ id: "susds" }],
+      SusdsYieldMovement: [{ id: "susds-move" }],
+      SusdsYieldLaunchBaseline: [validSusdsLaunchBaseline()],
+      SusdsYieldDailySnapshot: [{ id: "susds-day" }],
+      StethYieldSummary: [{ id: "steth" }],
+      StethYieldMovement: [{ id: "steth-move" }],
+    },
+  },
+  nowSeconds: NOW_SECONDS,
+  replayIntegrityInput: VALID_REPLAY_INTEGRITY,
+};
+const matchingProdIdentitySummary = buildSummary(matchingProdIdentityInput);
+assert.equal(matchingProdIdentitySummary.ok, true);
+assert.match(
+  renderText(matchingProdIdentitySummary),
+  /target _meta identity match: yes/,
+);
+
+for (const startBlock of [undefined, "invalid"]) {
+  const invalidTargetStartBlockSummary = buildSummary({
+    ...matchingProdIdentityInput,
+    statusJson: {
+      data: [
+        {
+          chain_id: 1,
+          start_block: startBlock,
+          block_height: 20,
+          latest_processed_block: 20,
+          num_events_processed: 1,
+          timestamp_caught_up_to_head_or_endblock: "2026-07-03T12:00:00+00:00",
+        },
+      ],
+    },
+  });
+  assert.equal(invalidTargetStartBlockSummary.ok, false);
+  assert.match(
+    invalidTargetStartBlockSummary.failures.join("\n"),
+    /target deployment status identity rows are invalid/,
+  );
+}
+
+const oldStaticIdentitySummary = buildSummary({
+  args: { allowSyncing: false, prod: true },
+  deployment: indexerJson.data.deployments[0],
+  endpoint: indexerJson.data.deployments[0].gql_endpoint,
+  endpointMode: "prod-static",
+  statusJson: {
+    data: [
+      {
+        chain_id: 1,
+        start_block: 10,
+        block_height: 20,
+        latest_processed_block: 20,
+        num_events_processed: 1,
+        timestamp_caught_up_to_head_or_endblock: "2026-07-03T12:00:00+00:00",
+      },
+    ],
+  },
+  metricsJson: { data: [] },
+  graphqlJson: {
+    data: {
+      Pool: [{ id: "pool" }],
+      PolygonPool: validPolygonPools(),
+      SusdsYieldSummary: [{ id: "susds" }],
+      SusdsYieldMovement: [{ id: "susds-move" }],
+      SusdsYieldLaunchBaseline: [validSusdsLaunchBaseline()],
+      SusdsYieldDailySnapshot: [{ id: "susds-day" }],
+      StethYieldSummary: [{ id: "steth" }],
+      StethYieldMovement: [{ id: "steth-move" }],
+      _meta: [
+        {
+          chainId: 1,
+          readyAt: "2026-07-01T00:00:00.000Z",
+          startBlock: 10,
+        },
+      ],
+    },
+  },
+  nowSeconds: NOW_SECONDS,
+  replayIntegrityInput: VALID_REPLAY_INTEGRITY,
+});
+assert.equal(oldStaticIdentitySummary.probe.ok, true);
+assert.equal(oldStaticIdentitySummary.ok, false);
+assert.match(
+  oldStaticIdentitySummary.failures.join("\n"),
+  /static production endpoint identity does not match target chain 1/,
+);
 
 const semanticFailureWhileSyncing = buildSummary({
   args: { allowSyncing: true },
@@ -722,6 +852,39 @@ assert.match(
   renderText(preBaselineRollbackSummary),
   /sUSDS sampler progress:\n {2}required by target schema: no/,
 );
+
+const prodPreBaselineRollbackSummary = buildSummary({
+  ...healthySummaryInput,
+  args: { allowSyncing: false, prod: true },
+  statusJson: {
+    data: [
+      {
+        ...healthySummaryInput.statusJson.data[0],
+        start_block: 0,
+      },
+    ],
+  },
+  graphqlJson: {
+    data: {
+      ...healthySummaryInput.graphqlJson.data,
+      _meta: [
+        {
+          chainId: 1,
+          readyAt: "2026-07-03T12:00:00.000Z",
+          startBlock: 0,
+        },
+      ],
+      SusdsYieldLaunchBaseline: undefined,
+      SusdsYieldDailySnapshot: undefined,
+    },
+  },
+  susdsLaunchBaselineSchema: summarizeSusdsLaunchBaselineSchema({
+    value: "type SusdsYieldDailySnapshot { id: ID! }",
+    readError: "",
+  }),
+});
+assert.equal(prodPreBaselineRollbackSummary.ok, true);
+assert.equal(prodPreBaselineRollbackSummary.deploymentIdentity.ok, true);
 
 const recentSnapshotWithInvalidLaunchBaseline = buildSummary({
   ...healthySummaryInput,

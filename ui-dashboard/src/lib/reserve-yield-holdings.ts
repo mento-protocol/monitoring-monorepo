@@ -418,6 +418,50 @@ type SourceHoldingResult = {
   holding: ReserveYieldHolding | null;
 };
 
+// Each normalized source can add conversion and summation roundoff. Scale the
+// tolerance with the source count so only floating-point noise is accepted.
+const SOURCE_COVERAGE_ULPS_PER_SOURCE = 16;
+
+function aggregateExceedsSourceTotal(
+  aggregateValue: number | null,
+  sourceTotal: number,
+  sourceCount: number,
+): boolean {
+  if (aggregateValue === null || aggregateValue <= 0) return false;
+  if (!Number.isFinite(sourceTotal)) return true;
+  const tolerance =
+    Math.max(Math.abs(aggregateValue), Math.abs(sourceTotal), 1) *
+    Number.EPSILON *
+    Math.max(sourceCount, 1) *
+    SOURCE_COVERAGE_ULPS_PER_SOURCE;
+  return aggregateValue - sourceTotal > tolerance;
+}
+
+function hasAggregateSourceCoverageGap(
+  asset: Record<string, unknown>,
+  results: SourceHoldingResult[],
+): boolean {
+  let sourceBalanceTotal = 0;
+  let sourcePrincipalUsdTotal = 0;
+  for (const { holding } of results) {
+    if (holding === null) continue;
+    if (holding.hasTokenBalance) sourceBalanceTotal += holding.balance;
+    sourcePrincipalUsdTotal += holding.principalUsd;
+  }
+  return (
+    aggregateExceedsSourceTotal(
+      numericField(asset.balance),
+      sourceBalanceTotal,
+      results.length,
+    ) ||
+    aggregateExceedsSourceTotal(
+      numericField(asset.usd_value),
+      sourcePrincipalUsdTotal,
+      results.length,
+    )
+  );
+}
+
 function holdingHasNonzeroExposure(holding: ReserveYieldHolding): boolean {
   return (
     (Number.isFinite(holding.balance) && holding.balance !== 0) ||
@@ -444,6 +488,7 @@ function hasIncompleteSusdsSourceCoverage({
   ) {
     return true;
   }
+  if (hasAggregateSourceCoverageGap(asset, results)) return true;
   return (
     !recordProvesZeroExposure(asset) &&
     !results.some(
@@ -471,6 +516,7 @@ function hasIncompleteStethSourceCoverage({
   ) {
     return true;
   }
+  if (hasAggregateSourceCoverageGap(asset, results)) return true;
   return (
     !recordProvesZeroExposure(asset) &&
     !results.some(

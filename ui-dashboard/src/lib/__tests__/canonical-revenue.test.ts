@@ -1327,7 +1327,7 @@ describe("buildCanonicalRevenue", () => {
       networkData: [],
       cdpDailySeries: [],
       cdpMarkets: [],
-      reserveYield: reserveYield(),
+      reserveYield: reserveYield({ susdsEarnedYieldUsd: 45 }),
       reserveDailySnapshots: [reserveSnapshot(ts("2026-06-10"), 45)],
       nowSeconds: NOW_SECONDS,
     });
@@ -1440,34 +1440,40 @@ describe("buildCanonicalRevenue", () => {
     );
   });
 
-  it("retires historical sUSDS freshness after the current API proves zero exposure", () => {
-    const wallet = "0xd0697f70e79476195b742d5afab14be50f98cc1e";
-    const historicalSusdsSnapshot = {
-      ...reserveSnapshot(ts("2026-06-10"), 5, 5),
-      currentShares: "1",
-    };
-    const result = buildCanonicalRevenue({
-      networkData: [],
-      cdpDailySeries: [],
-      cdpMarkets: [],
-      reserveYield: reserveYield({
-        holdings: [
-          stethHolding({ identifier: wallet, principalUsd: 1, balance: 1 }),
+  it.each([
+    { label: "finite-zero", susdsEarnedYieldUsd: 0 },
+    { label: "clean-null", susdsEarnedYieldUsd: null },
+  ])(
+    "retires historical sUSDS freshness for a $label current ledger without removing historical actuals",
+    ({ susdsEarnedYieldUsd }) => {
+      const wallet = "0xd0697f70e79476195b742d5afab14be50f98cc1e";
+      const historicalSusdsSnapshot = {
+        ...reserveSnapshot(ts("2026-06-10"), 5, 5),
+        currentShares: "1",
+      };
+      const result = buildCanonicalRevenue({
+        networkData: [],
+        cdpDailySeries: [],
+        cdpMarkets: [],
+        reserveYield: reserveYield({
+          holdings: [
+            stethHolding({ identifier: wallet, principalUsd: 1, balance: 1 }),
+          ],
+          susdsEarnedYieldUsd,
+        }),
+        reserveDailySnapshots: [
+          historicalSusdsSnapshot,
+          stethReserveSnapshot(ts("2026-06-12"), wallet, 1),
         ],
-        susdsEarnedYieldUsd: 0,
-      }),
-      reserveDailySnapshots: [
-        historicalSusdsSnapshot,
-        stethReserveSnapshot(ts("2026-06-12"), wallet, 1),
-      ],
-      nowSeconds: NOW_SECONDS,
-    });
+        nowSeconds: NOW_SECONDS,
+      });
 
-    expect(result.periods.allTimeSinceV3.reserveYieldUsd).toBe(6);
-    expect(result.partialReasons).not.toContainEqual(
-      expect.stringContaining("Reserve earned-yield history is stale"),
-    );
-  });
+      expect(result.periods.allTimeSinceV3.reserveYieldUsd).toBe(6);
+      expect(result.partialReasons).not.toContainEqual(
+        expect.stringContaining("Reserve earned-yield history is stale"),
+      );
+    },
+  );
 
   it("keeps historical sUSDS freshness conservative when the current signal is unavailable", () => {
     const wallet = "0xd0697f70e79476195b742d5afab14be50f98cc1e";
@@ -1496,6 +1502,38 @@ describe("buildCanonicalRevenue", () => {
     );
   });
 
+  it("keeps historical sUSDS freshness conservative when the current ledger field is missing", () => {
+    const wallet = "0xd0697f70e79476195b742d5afab14be50f98cc1e";
+    const legacy: Partial<ReserveYieldResponse> = {
+      ...reserveYield({
+        holdings: [
+          stethHolding({ identifier: wallet, principalUsd: 1, balance: 1 }),
+        ],
+      }),
+    };
+    delete legacy.susdsEarnedYieldUsd;
+    const result = buildCanonicalRevenue({
+      networkData: [],
+      cdpDailySeries: [],
+      cdpMarkets: [],
+      reserveYield: legacy as ReserveYieldResponse,
+      reserveDailySnapshots: [
+        {
+          ...reserveSnapshot(ts("2026-06-10"), 5, 5),
+          currentShares: "1",
+        },
+        stethReserveSnapshot(ts("2026-06-12"), wallet, 1),
+      ],
+      nowSeconds: NOW_SECONDS,
+    });
+
+    expect(result.periods.allTimeSinceV3.reserveYieldUsd).toBeNull();
+    expect(result.periods.allTimeSinceV3.availableTotalUsd).toBe(5);
+    expect(result.partialReasons).toContain(
+      "Reserve earned-yield history is stale; latest snapshot is Jun 10, 2026.",
+    );
+  });
+
   it("marks reserve history stale when any active reserve source is stale", () => {
     const wallet = "0xd0697f70e79476195b742d5afab14be50f98cc1e";
     const result = buildCanonicalRevenue({
@@ -1503,6 +1541,7 @@ describe("buildCanonicalRevenue", () => {
       cdpDailySeries: [],
       cdpMarkets: [],
       reserveYield: reserveYield({
+        susdsEarnedYieldUsd: 5,
         holdings: [
           stethHolding({
             identifier: wallet,

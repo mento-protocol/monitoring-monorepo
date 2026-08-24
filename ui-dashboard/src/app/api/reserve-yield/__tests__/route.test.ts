@@ -171,6 +171,7 @@ describe("GET /api/reserve-yield", () => {
       forecastPrincipalUsd: 3200,
       earnedYieldUsd: null,
       susdsEarnedYieldUsd: null,
+      susdsEarnedYieldAsOf: null,
       susdsSnapshotSourceRequired: true,
       hasUnindexedSusdsHolding: false,
       stethSnapshotSourceRequired: false,
@@ -411,6 +412,7 @@ describe("GET /api/reserve-yield", () => {
     expect(body.realizedYieldUsd).toBeCloseTo(0.5 * usdPerSteth, 6);
     expect(body.unrealizedYieldUsd).toBeCloseTo(1.5 * usdPerSteth, 6);
     expect(body.earnedYieldAsOf).toBe("2026-06-03T10:41:11.000Z");
+    expect(body.susdsEarnedYieldAsOf).toBeNull();
     expect(body.earnedYieldError).toBeNull();
     expect(stethHolding.earnedYieldUsd).toBeCloseTo(2 * usdPerSteth, 6);
     expect(stethHolding).toMatchObject({
@@ -571,6 +573,7 @@ describe("GET /api/reserve-yield", () => {
     expect(graphqlBody.variables.id).toBe("1-susds");
     expect(body.earnedYieldUsd).toBeCloseTo(300, 6);
     expect(body.susdsEarnedYieldUsd).toBeCloseTo(300, 6);
+    expect(body.susdsEarnedYieldAsOf).toBe("2026-06-03T10:41:11.000Z");
     expect(body.susdsYieldSignalUnavailable).toBe(false);
     expect(body.realizedYieldUsd).toBeCloseTo(100, 6);
     expect(body.unrealizedYieldUsd).toBeCloseTo(200, 6);
@@ -578,6 +581,64 @@ describe("GET /api/reserve-yield", () => {
     expect(body.earnedYieldError).toBeNull();
     expect(body.holdings[0].assetSymbol).toBe("sUSDS");
     expect(body.holdings[0].earnedYieldUsd).toBeCloseTo(300, 6);
+  });
+
+  it("does not use a stETH timestamp as sUSDS closeout evidence", async () => {
+    vi.stubEnv("NEXT_PUBLIC_HASURA_URL", "https://hasura.example/v1/graphql");
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        Response.json({
+          collateral: {
+            assets: [
+              ...RESERVE_WITH_YIELD_COMPONENTS.collateral.assets,
+              RESERVE_WITH_STETH.collateral.assets[1],
+            ],
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response("observation_date,FEDFUNDS\n2026-05-01,5.33\n"),
+      )
+      .mockResolvedValueOnce(Response.json(SKY_SSR_RPC_RESPONSE))
+      .mockResolvedValueOnce(
+        Response.json({
+          data: {
+            SusdsYieldSummary: [
+              { ...SUSDS_LEDGER_SUMMARY, lastUpdatedTimestamp: "0" },
+            ],
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          data: {
+            StethYieldDailySnapshot: [
+              {
+                id: "1-steth-0xd0697f70e79476195b742d5afab14be50f98cc1e-1780444800",
+                chainId: 1,
+                token: "0xae7ab96520de3a18e5e111b5eaab095312d7fe84",
+                wallet: "0xd0697f70e79476195b742d5afab14be50f98cc1e",
+                timestamp: "1780444800",
+                realizedYieldAmount: "500000000000000000",
+                unrealizedYieldAmount: "1500000000000000000",
+                totalEarnedYieldAmount: "2000000000000000000",
+                sampledAtTimestamp: "1780483271",
+              },
+            ],
+          },
+        }),
+      )
+      .mockResolvedValueOnce(Response.json(LIDO_STETH_APR_RESPONSE));
+    const { GET } = await loadRoute();
+
+    const res = await GET();
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.susdsEarnedYieldUsd).toBeCloseTo(300, 6);
+    expect(body.susdsEarnedYieldAsOf).toBeNull();
+    expect(body.earnedYieldAsOf).toBe("2026-06-03T10:41:11.000Z");
+    expect(body.earnedYieldError).toBeNull();
   });
 
   it("does not refresh sUSDS earned yield from reserve rows outside indexed wallets", async () => {

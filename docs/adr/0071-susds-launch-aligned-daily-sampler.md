@@ -3,7 +3,7 @@ title: sUSDS actuals use a launch-aligned bounded daily sampler
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-21
+last_verified: 2026-08-24
 scope: indexer-envio (constrains ui-dashboard reserve-yield reads)
 date: 2026-08
 doc_type: adr
@@ -54,10 +54,17 @@ force.
 - The dashboard requires an sUSDS snapshot source when current sUSDS holdings
   or a nonzero earned signal exist. It keeps holdings and forecasts visible,
   but marks reserve actuals unavailable with an explicit sUSDS reason.
-- The dashboard keeps the zero launch row in revenue delta accounting. It
-  excludes the sUSDS aggregate from freshness only while the current API proves
-  no sUSDS signal and every indexed sUSDS exposure and earned-yield amount is
-  zero. Any current or historical sUSDS exposure activates source freshness.
+- The dashboard keeps the zero launch row and all historical sUSDS rows in
+  revenue delta accounting. It excludes the sUSDS aggregate from freshness only
+  when `susdsEarnedYieldUsd` is `null` or finite zero,
+  `reserveCurrentHoldingsClassificationFailed`, `hasUnindexedSusdsHolding`,
+  `susdsYieldSignalUnavailable`, and `susdsSnapshotSourceRequired` are
+  explicitly false, no top-level classification or coverage failure exists,
+  and no current sUSDS holding has exposure or earned yield. Historical
+  exposure does not keep an otherwise clean, exited source active. A missing
+  or legacy field, a nonzero or non-finite earned signal, positive or unknown
+  current exposure, classification failure, incomplete coverage, or an
+  unavailable yield signal keeps freshness active or makes actuals unavailable.
 - Deployment verification uses `SusdsYieldLaunchBaseline` in the exact target
   commit schema as the sampler capability marker. When the marker exists, the
   verifier requires the immutable launch baseline, the daily snapshot probe,

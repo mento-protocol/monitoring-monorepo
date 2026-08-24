@@ -166,7 +166,8 @@ function hasInactiveSusdsSource(args: BuildCanonicalRevenueArgs): boolean {
     reserveYield.hasUnindexedSusdsHolding === false &&
     reserveYield.susdsYieldSignalUnavailable === false &&
     reserveYield.susdsSnapshotSourceRequired === false &&
-    reserveYield.susdsEarnedYieldUsd === 0 &&
+    (reserveYield.susdsEarnedYieldUsd === null ||
+      reserveYield.susdsEarnedYieldUsd === 0) &&
     !hasSusdsActualSignal(reserveYield)
   );
 }

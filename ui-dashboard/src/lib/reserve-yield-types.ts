@@ -48,6 +48,8 @@ export type ReserveYieldResponse = {
   earnedYieldUsd: number | null;
   /** sUSDS-only actuals. The aggregate earnedYieldUsd also includes stETH. */
   susdsEarnedYieldUsd?: number | null;
+  /** sUSDS-only actuals timestamp. The aggregate timestamp also includes stETH. */
+  susdsEarnedYieldAsOf?: string | null;
   /** True when the current sUSDS ledger signal cannot be established. */
   susdsYieldSignalUnavailable: boolean;
   /** True when current sUSDS exposure requires an indexed snapshot source. */

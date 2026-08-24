@@ -5,7 +5,7 @@ title: Deploy Indexer Skill
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-23
+last_verified: 2026-08-24
 doc_type: skill
 scope: repo-wide
 review_interval_days: 90
@@ -329,7 +329,13 @@ requires the target commit to be `prod` and runs the same semantic probes
 against the repo-configured static production GraphQL endpoint
 `https://indexer.hyperindex.xyz/2f3dd15/v1/graphql`. In `--prod` mode, the
 verifier does not use registry endpoint metadata or the per-deployment endpoint
-resolver. Stop if it cannot query the static endpoint or any probe fails.
+resolver. It also compares the static endpoint's built-in per-chain
+`_meta.readyAt` and `startBlock` values with the target deployment status. This
+identity check proves that a schema-compatible change or backfill has switched;
+shared semantic rows alone do not. Missing, invalid, or mismatched identity
+rows fail closed. Stop if it cannot query the static endpoint or any probe
+fails. The built-in `_meta` query does not depend on the target's custom schema,
+so it also covers legacy rollback deployments.
 
 If `--no-verify` was passed, stop here and print the final summary.
 
@@ -361,17 +367,20 @@ ruled out. Confirm it with `holdings`: a positive finite sUSDS `balance` or
 `susdsEarnedYieldUsd` for a nonzero finite historical signal.
 
 When either the current source signal or a nonzero historical signal exists,
-require `susdsEarnedYieldUsd` to be finite and `earnedYieldAsOf` to be a valid
-timestamp. When the current source signal is `true`, also require an sUSDS
+require `susdsEarnedYieldUsd` to be finite and `susdsEarnedYieldAsOf` to be a
+valid timestamp. Do not use the aggregate `earnedYieldAsOf` as sUSDS evidence;
+stETH can supply that timestamp independently. When the current source signal
+is `true`, also require an sUSDS
 holding whose `earnedYieldUsd` is finite. This fails closed when a malformed
 nonzero sUSDS asset sets `susdsSnapshotSourceRequired: true` but produces no
 usable holding. When neither signal exists, accept
 `susdsEarnedYieldUsd` as `null` or finite zero and do not require an sUSDS
-holding or `earnedYieldAsOf`.
+holding or `susdsEarnedYieldAsOf`.
 
 Return the checked fields, `reserveCurrentHoldingsClassificationFailed`,
-`susdsSnapshotSourceRequired`, `hasUnindexedSusdsHolding`, and the two derived
-signal-presence booleans as evidence. Treat a field required by the applicable
+`susdsSnapshotSourceRequired`, `hasUnindexedSusdsHolding`,
+`susdsEarnedYieldAsOf`, and the two derived signal-presence booleans as
+evidence. Treat a field required by the applicable
 signal branch as missing or non-finite, a positive sUSDS holding with a false
 current source signal, `hasUnindexedSusdsHolding` as missing or true, an
 unexpected signal state, a non-null `earnedYieldError`, or a non-200 response
