@@ -175,21 +175,37 @@ MSG
 }
 
 verify_github_api_capabilities() {
+  local remote_url
   local repository
+  remote_url="$(git remote get-url origin)"
+  if [[ "$remote_url" != https://github.com/* && "$remote_url" != git@github.com:* ]]; then
+    echo "==> Skipping GitHub API probes for non-GitHub origin: ${remote_url}"
+    return 0
+  fi
+
   repository="$(gh repo view --json nameWithOwner --jq '.nameWithOwner')"
 
   echo "==> Verifying GitHub repository API access"
   gh api "repos/${repository}" >/dev/null
 
-  echo "==> Verifying GitHub pull-request API access"
+  echo "==> Verifying GitHub pull-request API read access"
   gh api "repos/${repository}/pulls?state=open&per_page=1" >/dev/null
 }
 
 verify_origin_write_access() (
+  local remote_url
   local probe_branch
   local probe_ref
+  local probe_suffix
   local created=false
-  probe_branch="codex-cloud-write-probe-$(date +%s)-$$"
+  remote_url="$(git remote get-url origin)"
+  if [[ "$remote_url" != https://github.com/* && "$remote_url" != git@github.com:* ]]; then
+    echo "==> Skipping GitHub write probe for non-GitHub origin: ${remote_url}"
+    return 0
+  fi
+
+  probe_suffix="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+  probe_branch="codex-cloud-write-probe-${probe_suffix}"
   probe_ref="refs/heads/${probe_branch}"
 
   # Invoked indirectly by the EXIT trap below.
@@ -202,6 +218,8 @@ verify_origin_write_access() (
   }
   trap cleanup_probe_ref EXIT
 
+  # A dry run suppresses the ref update, so it cannot prove that the remote
+  # accepts branch creation. Use a collision-resistant ref and remove it here.
   echo "==> Verifying git can create and delete a temporary branch on origin"
   if ! git push origin "HEAD:${probe_ref}" >/dev/null; then
     cat >&2 <<'MSG'
@@ -215,7 +233,6 @@ MSG
   created=true
 
   if ! git push origin --delete "$probe_branch" >/dev/null; then
-    created=false
     echo "error: GitHub authentication created the temporary write probe but could not delete it: ${probe_branch}" >&2
     return 1
   fi

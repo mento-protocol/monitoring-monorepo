@@ -49,7 +49,10 @@ apt-based image, it first tries the configured apt sources and then adds the
 official GitHub CLI repository as a fallback. It verifies `gh` auth before
 configuring fetch/push credentials. Setup then reads the repository and pull
 request APIs and creates and deletes a unique temporary branch. This final
-probe fails early when a token can fetch but cannot publish commits.
+probe fails early when a token can fetch but cannot publish commits. GitHub
+does not expose a non-mutating pull-request write probe, so setup verifies only
+pull-request reads; the token must still have pull-request write permission for
+PR creation, edits, and review replies.
 
 Playwright uses `install --with-deps chromium` after workspace installation so
 dashboard browser tests can launch in a fresh Linux image. Set
@@ -67,7 +70,9 @@ tool is not already present in the image or cache:
 - `trunk.io` plus GitHub release hosts for Trunk and its managed tools;
 - `foundry.paradigm.xyz` plus GitHub release hosts for Foundry;
 - `api.osv.dev` for the supply-chain egress probe; and
-- Playwright's download hosts, including `cdn.playwright.dev`, for Chromium.
+- Playwright's download hosts, including `cdn.playwright.dev`, for Chromium;
+  plus the Debian/Ubuntu package sources or approved package proxy configured
+  in the image for Linux host libraries.
 
 Configure these in the Cloud environment network policy. Do not add proxy
 bypasses in the repository except for the existing explicit Trunk override.
