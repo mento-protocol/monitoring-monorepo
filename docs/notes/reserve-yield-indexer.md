@@ -56,9 +56,13 @@ project instead of paying for an additional Envio deployment.
 
 - If the shared endpoint, schema, or summary rows are missing, the revenue page keeps
   forecast rows visible and labels earned-yield actuals as pending/unavailable.
-- If `StethYieldDailySnapshot` is missing, stale, or incomplete for a tracked
-  current stETH wallet, the revenue page keeps stETH principal and forecast
-  visible while labeling stETH earned-yield actuals as pending/unavailable.
+- If the `StethYieldDailySnapshot` query fails, the revenue page marks reserve
+  actuals unavailable even when current stETH exposure is zero. A failed query
+  cannot distinguish a never-held wallet from a wallet that earned yield and
+  later exited. A successful empty query with proven-zero current exposure
+  remains available. Missing, stale, or incomplete snapshots for a tracked
+  current wallet also keep principal and forecast visible while actuals remain
+  unavailable.
 - If daily snapshots exist but stop advancing, the revenue page marks reserve
   history stale after the latest snapshot day and renders later reserve actuals
   as `N/A`.

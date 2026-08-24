@@ -25,19 +25,27 @@ export function recordProvesZeroExposure(
 // tolerance with the source count so only floating-point noise is accepted.
 const SOURCE_COVERAGE_ULPS_PER_SOURCE = 16;
 
-function aggregateExceedsSourceTotal(
-  aggregateValue: number | null,
+function aggregateDiffersFromSourceTotal(
+  rawAggregateValue: unknown,
   sourceTotal: number,
   sourceCount: number,
 ): boolean {
-  if (aggregateValue === null || aggregateValue <= 0) return false;
-  if (!Number.isFinite(sourceTotal)) return true;
+  if (
+    rawAggregateValue === undefined ||
+    rawAggregateValue === null ||
+    rawAggregateValue === ""
+  ) {
+    return false;
+  }
+  const aggregateValue = numericField(rawAggregateValue);
+  if (aggregateValue === null || aggregateValue < 0) return true;
+  if (!Number.isFinite(sourceTotal) || sourceTotal < 0) return true;
   const tolerance =
     Math.max(Math.abs(aggregateValue), Math.abs(sourceTotal), 1) *
     Number.EPSILON *
     Math.max(sourceCount, 1) *
     SOURCE_COVERAGE_ULPS_PER_SOURCE;
-  return aggregateValue - sourceTotal > tolerance;
+  return Math.abs(aggregateValue - sourceTotal) > tolerance;
 }
 
 function hasAggregateSourceCoverageGap(
@@ -48,17 +56,23 @@ function hasAggregateSourceCoverageGap(
   let sourcePrincipalUsdTotal = 0;
   for (const { holding } of results) {
     if (holding === null) continue;
+    if (
+      (holding.hasTokenBalance && holding.balance < 0) ||
+      holding.principalUsd < 0
+    ) {
+      return true;
+    }
     if (holding.hasTokenBalance) sourceBalanceTotal += holding.balance;
     sourcePrincipalUsdTotal += holding.principalUsd;
   }
   return (
-    aggregateExceedsSourceTotal(
-      numericField(asset.balance),
+    aggregateDiffersFromSourceTotal(
+      asset.balance,
       sourceBalanceTotal,
       results.length,
     ) ||
-    aggregateExceedsSourceTotal(
-      numericField(asset.usd_value),
+    aggregateDiffersFromSourceTotal(
+      asset.usd_value,
       sourcePrincipalUsdTotal,
       results.length,
     )

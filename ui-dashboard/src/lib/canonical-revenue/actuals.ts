@@ -116,13 +116,13 @@ function incompleteStethSnapshotCoverage(
 function unavailableStethSnapshotSource(
   args: BuildCanonicalRevenueArgs,
 ): boolean {
+  // Historical stETH yield can outlive current wallet exposure. A failed
+  // history query cannot distinguish an exited wallet from a never-held wallet.
+  if (args.stethHistoryFailed === true) return true;
   if (currentHoldingsClassificationFailed(args)) return true;
   if (incompleteStethSnapshotCoverage(args)) return true;
   const sourceRequired = hasCurrentStethExposure(args.reserveYield);
-  return (
-    sourceRequired &&
-    (args.stethHistoryFailed === true || !hasStethSnapshotSource(args))
-  );
+  return sourceRequired && !hasStethSnapshotSource(args);
 }
 
 function incompleteSusdsSnapshotCoverage(

@@ -419,14 +419,45 @@ describe("buildCanonicalRevenue", () => {
     );
   });
 
-  it("keeps sUSDS actuals available when stETH history fails without current stETH exposure", () => {
+  it("fails closed when stETH history fails after current stETH exposure exits", () => {
     const result = buildCanonicalRevenue({
       networkData: [],
       cdpDailySeries: [],
       cdpMarkets: [],
-      reserveYield: reserveYield({ stethSnapshotSourceRequired: false }),
+      reserveYield: reserveYield({
+        stethSnapshotSourceRequired: false,
+        holdings: [
+          stethHolding({
+            principalUsd: 0,
+            balance: 0,
+            earnedYieldUsd: 0,
+          }),
+        ],
+      }),
       reserveDailySnapshots: [reserveSnapshot(ts("2026-06-12"), 5)],
       stethHistoryFailed: true,
+      hasStethSnapshotSource: false,
+      nowSeconds: NOW_SECONDS,
+    });
+
+    expect(result.periods.allTimeSinceV3.reserveYieldUsd).toBeNull();
+    expect(result.periods.allTimeSinceV3.totalUsd).toBeNull();
+    expect(result.partialReasons).toContain(
+      FAILED_STETH_SNAPSHOT_SOURCE_REASON,
+    );
+  });
+
+  it("keeps a clean never-held stETH state available after a successful empty history query", () => {
+    const result = buildCanonicalRevenue({
+      networkData: [],
+      cdpDailySeries: [],
+      cdpMarkets: [],
+      reserveYield: reserveYield({
+        stethSnapshotSourceRequired: false,
+        holdings: [],
+      }),
+      reserveDailySnapshots: [reserveSnapshot(ts("2026-06-12"), 5)],
+      stethHistoryFailed: false,
       hasStethSnapshotSource: false,
       nowSeconds: NOW_SECONDS,
     });
@@ -508,7 +539,7 @@ describe("buildCanonicalRevenue", () => {
     );
   });
 
-  it("isolates malformed stETH history from valid sUSDS rows", () => {
+  it("fails closed on malformed stETH history regardless of current exposure", () => {
     const wallet = "0xd0697f70e79476195b742d5afab14be50f98cc1e";
     const malformedSteth = {
       ...stethReserveSnapshot(ts("2026-06-12"), wallet, 1),
@@ -532,8 +563,10 @@ describe("buildCanonicalRevenue", () => {
       nowSeconds: NOW_SECONDS,
     });
 
-    expect(withoutStethExposure.periods.allTimeSinceV3.reserveYieldUsd).toBe(5);
-    expect(withoutStethExposure.partialReasons).not.toContain(
+    expect(
+      withoutStethExposure.periods.allTimeSinceV3.reserveYieldUsd,
+    ).toBeNull();
+    expect(withoutStethExposure.partialReasons).toContain(
       FAILED_STETH_SNAPSHOT_SOURCE_REASON,
     );
     expect(withStethExposure.periods.allTimeSinceV3.reserveYieldUsd).toBeNull();
@@ -1011,7 +1044,7 @@ describe("buildCanonicalRevenue", () => {
     );
   });
 
-  it("prices stETH reserve history with the current wallet USD/token rate", () => {
+  it("keeps successful nonzero stETH history available and priced", () => {
     const wallet = "0xd0697f70e79476195b742d5afab14be50f98cc1e";
     const result = buildCanonicalRevenue({
       networkData: [],
@@ -1030,10 +1063,15 @@ describe("buildCanonicalRevenue", () => {
         stethReserveSnapshot(ts("2026-06-11"), wallet, 1, 1),
         stethReserveSnapshot(ts("2026-06-12"), wallet, 1, 2),
       ],
+      stethHistoryFailed: false,
+      hasStethSnapshotSource: true,
       nowSeconds: NOW_SECONDS,
     });
 
     expect(result.periods.allTimeSinceV3.reserveYieldUsd).toBe(4_000);
+    expect(result.partialReasons).not.toContain(
+      FAILED_STETH_SNAPSHOT_SOURCE_REASON,
+    );
     expect(result.partialReasons).not.toContain(
       "Reserve stETH earned-yield history is unavailable: current stETH USD/token pricing is missing.",
     );
@@ -1220,7 +1258,7 @@ describe("buildCanonicalRevenue", () => {
     ["whitespace-only balance", { balanceAmount: "  " }],
     ["non-decimal balance", { balanceAmount: "0x0" }],
   ])(
-    "filters a malformed stETH %s when there is no current exposure",
+    "fails closed on a malformed stETH %s when there is no current exposure",
     (_label, overrides) => {
       const wallet = "0xd3d2e5c5af667da817b2d752d86c8f40c22137e1";
       const result = buildCanonicalRevenue({
@@ -1234,11 +1272,8 @@ describe("buildCanonicalRevenue", () => {
         nowSeconds: NOW_SECONDS,
       });
 
-      expect(result.periods.allTimeSinceV3.reserveYieldUsd).toBe(0);
-      expect(result.partialReasons).not.toContain(
-        "Reserve stETH earned-yield history is unavailable: current stETH USD/token pricing is missing.",
-      );
-      expect(result.partialReasons).not.toContain(
+      expect(result.periods.allTimeSinceV3.reserveYieldUsd).toBeNull();
+      expect(result.partialReasons).toContain(
         FAILED_STETH_SNAPSHOT_SOURCE_REASON,
       );
     },
