@@ -53,10 +53,36 @@ export const GATE_CLASSIFIER = "classifyRootPackageJsonChanges";
  * Every class the root-manifest classifier may answer. The probe rejects
  * anything else, so a verdict that came from a renamed or newly added class
  * fails the test instead of being stored as a plausible-looking string.
+ *
+ * Written out here rather than re-exported from the engine, and that
+ * duplication is the point. Deriving the accepted set from
+ * `ROOT_PACKAGE_JSON_CLASSES` would make it widen by itself: a fifth class added
+ * to `facts.mjs` would arrive here as "accepted", and the callers that compare
+ * verdicts to string literals would never be re-read. Adding a class has to cost
+ * an edit in this file.
  */
-export const GATE_ROOT_PACKAGE_JSON_CLASSES = new Set(
-  ROOT_PACKAGE_JSON_CLASSES,
-);
+export const GATE_ROOT_PACKAGE_JSON_CLASSES = new Set([
+  "workspace",
+  "workspace-dev-metadata",
+  "root-tooling-scripts",
+  "package-scripts",
+]);
+
+// And the two lists have to agree, at import, in both directions: a class the
+// engine dropped would leave a name here that nothing can produce, and a class
+// the engine added without an edit here is the widening above. Neither is
+// something to discover halfway through a suite.
+{
+  const engine = [...ROOT_PACKAGE_JSON_CLASSES].sort();
+  const accepted = [...GATE_ROOT_PACKAGE_JSON_CLASSES].sort();
+  assert.deepEqual(
+    accepted,
+    engine,
+    `${GATE_CLASSIFIER_PATH} answers ${JSON.stringify(engine)}; this probe accepts ` +
+      `${JSON.stringify(accepted)}. Reconcile them here on purpose, and re-read every caller ` +
+      "that compares a verdict to a string literal before widening the accepted set.",
+  );
+}
 
 /**
  * Classify each JSON-pointer change path on its own, as the gate would if that

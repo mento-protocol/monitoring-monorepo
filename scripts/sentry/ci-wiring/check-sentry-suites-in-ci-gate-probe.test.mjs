@@ -82,11 +82,18 @@ test("each of the four classes is reachable, by a pointer that produces it", () 
   );
 });
 
-test("the closed class set is the engine's own, not a second copy", () => {
-  // A hand-maintained copy would drift silently in the widening direction: a
-  // class added to the engine and to this list, and to nothing that checks what
-  // the new class MEANS, is a verdict the allowlist test would accept without
-  // anyone deciding it should.
+test("the closed class set is written out, and matches the engine", () => {
+  // The probe's accepted set is a LITERAL, not a re-export, so a class added to
+  // the engine cannot arrive here as "accepted" while the callers that compare
+  // verdicts to string literals go unread. The module asserts the two agree at
+  // import; this asserts the literal is really four names rather than something
+  // derived from the export it is checked against.
+  assert.deepEqual([...GATE_ROOT_PACKAGE_JSON_CLASSES].sort(), [
+    "package-scripts",
+    "root-tooling-scripts",
+    "workspace",
+    "workspace-dev-metadata",
+  ]);
   assert.deepEqual(
     [...GATE_ROOT_PACKAGE_JSON_CLASSES].sort(),
     [...ROOT_PACKAGE_JSON_CLASSES].sort(),
