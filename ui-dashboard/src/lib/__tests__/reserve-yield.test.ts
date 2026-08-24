@@ -604,6 +604,27 @@ describe("reserve yield parsing and math", () => {
 
     expect(extracted.holdings).toEqual([]);
     expect(extracted.malformedCount).toBe(2);
+    expect(extracted.reserveCurrentHoldingsClassificationFailed).toBe(false);
+    expect(extracted.susdsSnapshotSourceRequired).toBe(true);
+  });
+
+  it("does not require an sUSDS snapshot source for explicit zero exposure", () => {
+    const extracted = extractReserveYieldHoldings({
+      collateral: {
+        assets: [
+          {
+            symbol: "sUSDS",
+            chain: "ethereum",
+            balance: "0",
+            usd_value: 0,
+            sources: [],
+          },
+        ],
+      },
+    });
+
+    expect(extracted.reserveCurrentHoldingsClassificationFailed).toBe(false);
+    expect(extracted.susdsSnapshotSourceRequired).toBe(false);
   });
 
   it("uses the yield-bearing asset row when no source rows are available", () => {

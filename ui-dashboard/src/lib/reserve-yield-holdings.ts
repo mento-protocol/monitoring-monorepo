@@ -71,6 +71,33 @@ function isStethSymbol(symbol: string): boolean {
   return symbol.toUpperCase() === FORECASTABLE_STETH_SYMBOL;
 }
 
+function exposureValues(record: Record<string, unknown>): number[] | null {
+  const values: number[] = [];
+  for (const field of ["balance", "usd_value"] as const) {
+    const rawValue = record[field];
+    if (rawValue === undefined || rawValue === null || rawValue === "") {
+      continue;
+    }
+    const value = numericField(rawValue);
+    if (value === null) return null;
+    values.push(value);
+  }
+  return values;
+}
+
+function susdsSnapshotSourceRequired(asset: Record<string, unknown>): boolean {
+  const sourcesValue = asset.sources;
+  if (sourcesValue !== undefined && !Array.isArray(sourcesValue)) return true;
+  const rawSources = asArray(sourcesValue);
+  const sources = rawSources.filter(isRecord);
+  if (sources.length !== rawSources.length) return true;
+
+  const valuesByRecord = [asset, ...sources].map(exposureValues);
+  if (valuesByRecord.some((values) => values === null)) return true;
+  const values = valuesByRecord.flatMap((recordValues) => recordValues ?? []);
+  return values.length === 0 || values.some((value) => value !== 0);
+}
+
 function requiresExplicitUsdValue(symbol: string): boolean {
   return isSusdsSymbol(symbol) || isStethSymbol(symbol);
 }
@@ -370,6 +397,7 @@ export function extractReserveYieldHoldings(
   let malformedCount = 0;
   let trackedAssetCount = 0;
   let susdsAssetCount = 0;
+  let requiresSusdsSnapshotSource = false;
   let stethAssetCount = 0;
   let reserveCurrentHoldingsClassificationFailed = !Array.isArray(assetsValue);
 
@@ -389,6 +417,7 @@ export function extractReserveYieldHoldings(
     trackedAssetCount += 1;
     if (isSusdsSymbol(symbol)) {
       susdsAssetCount += 1;
+      requiresSusdsSnapshotSource ||= susdsSnapshotSourceRequired(assetValue);
     }
     if (isStethSymbol(symbol)) {
       stethAssetCount += 1;
@@ -447,6 +476,7 @@ export function extractReserveYieldHoldings(
     reserveCurrentHoldingsClassificationFailed,
     trackedAssetCount,
     susdsAssetCount,
+    susdsSnapshotSourceRequired: requiresSusdsSnapshotSource,
     stethAssetCount,
   };
 }

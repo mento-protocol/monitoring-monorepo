@@ -39,6 +39,8 @@ export type ReserveYieldResponse = {
   susdsEarnedYieldUsd?: number | null;
   /** True when the current sUSDS ledger signal cannot be established. */
   susdsYieldSignalUnavailable: boolean;
+  /** True when current sUSDS exposure requires an indexed snapshot source. */
+  susdsSnapshotSourceRequired: boolean;
   realizedYieldUsd: number | null;
   unrealizedYieldUsd: number | null;
   earnedYieldAsOf: string | null;
@@ -69,6 +71,7 @@ export type ReserveYieldExtraction = {
   reserveCurrentHoldingsClassificationFailed: boolean;
   trackedAssetCount: number;
   susdsAssetCount: number;
+  susdsSnapshotSourceRequired: boolean;
   stethAssetCount: number;
 };
 
@@ -156,5 +159,6 @@ export type ReserveHoldingsState = {
   holdingsError: string | null;
   reserveCurrentHoldingsClassificationFailed: boolean;
   hasCurrentSusdsAsset: boolean;
+  susdsSnapshotSourceRequired: boolean;
   hasCurrentStethAsset: boolean;
 };

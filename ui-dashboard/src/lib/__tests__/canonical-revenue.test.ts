@@ -146,6 +146,7 @@ function reserveYield(
     earnedYieldUsd: null,
     susdsEarnedYieldUsd: null,
     susdsYieldSignalUnavailable: false,
+    susdsSnapshotSourceRequired: false,
     realizedYieldUsd: null,
     unrealizedYieldUsd: null,
     earnedYieldAsOf: null,
@@ -383,7 +384,7 @@ describe("buildCanonicalRevenue", () => {
     );
   });
 
-  it("keeps stETH-only rows available after a clean empty sUSDS signal", () => {
+  it("keeps stETH-only rows available after a clean zero sUSDS signal", () => {
     const wallet = "0xd0697f70e79476195b742d5afab14be50f98cc1e";
     const result = buildCanonicalRevenue({
       networkData: [],
@@ -392,6 +393,7 @@ describe("buildCanonicalRevenue", () => {
       reserveYield: reserveYield({
         earnedYieldUsd: 25,
         holdings: [stethHolding({ identifier: wallet })],
+        susdsSnapshotSourceRequired: false,
         susdsYieldSignalUnavailable: false,
       }),
       reserveDailySnapshots: [
@@ -459,6 +461,29 @@ describe("buildCanonicalRevenue", () => {
     );
     expect(result.partialReasons).not.toContain(
       UNVERIFIABLE_SUSDS_SNAPSHOT_SOURCE_REASON,
+    );
+  });
+
+  it("fails closed for a known current sUSDS row without a usable holding", () => {
+    const wallet = "0xd0697f70e79476195b742d5afab14be50f98cc1e";
+    const result = buildCanonicalRevenue({
+      networkData: [],
+      cdpDailySeries: [],
+      cdpMarkets: [],
+      reserveYield: reserveYield({
+        susdsSnapshotSourceRequired: true,
+        holdings: [],
+        susdsEarnedYieldUsd: 0,
+      }),
+      reserveDailySnapshots: [
+        stethReserveSnapshot(ts("2026-06-12"), wallet, 1, 25),
+      ],
+      nowSeconds: NOW_SECONDS,
+    });
+
+    expect(result.periods.allTimeSinceV3.reserveYieldUsd).toBeNull();
+    expect(result.partialReasons).toContain(
+      "Reserve sUSDS earned-yield actuals unavailable: no SusdsYieldDailySnapshot source exists for current sUSDS holdings or earned signal.",
     );
   });
 

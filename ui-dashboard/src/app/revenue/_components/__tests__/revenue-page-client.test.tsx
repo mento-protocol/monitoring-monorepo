@@ -119,6 +119,7 @@ const RESERVE_YIELD: ReserveYieldResponse = {
   forecastPrincipalUsd: 4_700,
   earnedYieldUsd: 439.4,
   susdsYieldSignalUnavailable: false,
+  susdsSnapshotSourceRequired: true,
   realizedYieldUsd: 275.58,
   unrealizedYieldUsd: 163.82,
   earnedYieldAsOf: "2026-06-03T10:41:11.000Z",

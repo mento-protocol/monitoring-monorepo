@@ -34,6 +34,7 @@ function hasSusdsActualSignal(
   reserveYield: BuildCanonicalRevenueArgs["reserveYield"],
 ): boolean {
   if (reserveYield === null) return false;
+  if (reserveYield.susdsSnapshotSourceRequired === true) return true;
   const earnedYieldSignal =
     typeof reserveYield.susdsEarnedYieldUsd === "number" &&
     Number.isFinite(reserveYield.susdsEarnedYieldUsd) &&

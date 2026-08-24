@@ -171,6 +171,7 @@ describe("GET /api/reserve-yield", () => {
       forecastPrincipalUsd: 3200,
       earnedYieldUsd: null,
       susdsEarnedYieldUsd: null,
+      susdsSnapshotSourceRequired: true,
       grossApyPercent: 5.33,
       expenseBps: 15,
       revenueShareBps: 8000,
@@ -623,6 +624,8 @@ describe("GET /api/reserve-yield", () => {
     expect(body.holdings).toEqual([]);
     expect(body.principalUsd).toBeNull();
     expect(body.holdingsError).toContain("without usable USD values");
+    expect(body.reserveCurrentHoldingsClassificationFailed).toBe(false);
+    expect(body.susdsSnapshotSourceRequired).toBe(true);
     expect(body.earnedYieldUsd).toBeCloseTo(200, 6);
     expect(body.realizedYieldUsd).toBeCloseTo(100, 6);
     expect(body.unrealizedYieldUsd).toBeCloseTo(100, 6);
@@ -875,6 +878,7 @@ describe("GET /api/reserve-yield", () => {
     expect(body.holdings).toEqual([]);
     expect(body.holdingsError).toContain("without usable USD values");
     expect(body.reserveCurrentHoldingsClassificationFailed).toBe(false);
+    expect(body.susdsSnapshotSourceRequired).toBe(false);
   });
 
   it("returns a clear empty holdings shape when the reserve has no yield-bearing rows", async () => {

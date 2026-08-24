@@ -239,6 +239,7 @@ function reserveHoldingsState(
       holdingsError: errorMessage("Reserve API", reserveResult.reason),
       reserveCurrentHoldingsClassificationFailed: true,
       hasCurrentSusdsAsset: false,
+      susdsSnapshotSourceRequired: true,
       hasCurrentStethAsset: false,
     };
   }
@@ -270,6 +271,7 @@ function reserveHoldingsState(
     reserveCurrentHoldingsClassificationFailed:
       extracted.reserveCurrentHoldingsClassificationFailed,
     hasCurrentSusdsAsset: extracted.susdsAssetCount > 0,
+    susdsSnapshotSourceRequired: extracted.susdsSnapshotSourceRequired,
     hasCurrentStethAsset: extracted.stethAssetCount > 0,
   };
 }
@@ -386,6 +388,7 @@ function buildReserveYieldResponse({
     ),
     susdsEarnedYieldUsd: susdsYield.earnedYieldUsd,
     susdsYieldSignalUnavailable: susdsYield.signalUnavailable,
+    susdsSnapshotSourceRequired: reserveState.susdsSnapshotSourceRequired,
     realizedYieldUsd: sumNullable(
       susdsYield.realizedYieldUsd,
       stethYield.realizedYieldUsd,
