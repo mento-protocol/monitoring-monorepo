@@ -149,12 +149,12 @@ controls nothing.
 
 ### 3. TRANSITIONAL (D5a–D5b): the bash arms stay, and an equality test holds the two together
 
-_Retired at D5c. `gate-equality.test.mjs` and the `gate-arms.mjs` parser it rested
-on are deleted; the table is the only copy of the routing now, so there is
+**Retired at D5c.** `gate-equality.test.mjs` and the `gate-arms.mjs` parser it
+rested on are deleted; the table is the only copy of the routing now, so there is
 nothing left to compare it against. The routing-table suite kept every check that
 was about the DATA — the schema, the pairing lint, staleness, the bash pattern
-oracle — and gained the closed verb set measured against
-`scripts/gate/mapping/route.mjs` instead of against the gate's `add_\*` functions.\_
+oracle — and gained the closed verb set, measured against
+`scripts/gate/mapping/route.mjs` instead of against the gate's bash helpers.
 
 Until the arms are retired, the table is a second copy of a routing authority,
 and a second copy nobody compares is a copy that drifts. `gate-equality.test.mjs`
@@ -180,10 +180,10 @@ has drifted from the arms fails nowhere at all.
 
 ### 4. D5b part 2: the engine becomes the routing, behind a guard that runs in production
 
-_The guard is retired; the first paragraph is what stands. The gate runs
+**The guard is retired; the first paragraph is what stands.** The gate runs
 `scripts/gate/mapping.mjs` once and executes its plan, and every refusal in the
 paragraph beginning "Every failure around the seam" is still live. What went at
-D5c is the arms, `plan_records_from_bash`, and the byte comparison between them._
+D5c is the arms, `plan_records_from_bash`, and the byte comparison between them.
 
 The gate no longer builds its plan from the `case` arms. It runs
 `scripts/gate/mapping.mjs` once per run, reads the plan back as the TSV
