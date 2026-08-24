@@ -318,8 +318,12 @@ pnpm deploy:indexer:verify "$COMMIT" --prod
 
 The status watcher only proves a deployment caught up. Promotion additionally
 requires `deploy:indexer:verify` to pass core rows, sUSDS post-launch sampler
-progress/freshness, the exact immutable sUSDS launch baseline, and Polygon
-replay semantics; `--allow-syncing` never waives those data-integrity checks.
+progress/freshness, Polygon replay semantics, and the exact immutable sUSDS
+launch baseline when the target commit schema declares it. The verifier reads
+the target schema from that exact commit. A legacy rollback schema that
+predates the baseline entity skips only that unsupported probe. An unreadable
+or uninspectable target schema fails closed. `--allow-syncing` never waives the
+remaining data-integrity checks.
 
 For an agent-operated production rollout, use the repo's `/deploy-indexer`
 skill: it also captures the prior production commit, confirms promotion, waits

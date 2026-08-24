@@ -159,11 +159,14 @@ Before promoting a hosted reindex with Ethereum reserve-yield enabled, require:
 3. The deployment advances beyond the old stall boundaries and catches
    up to head.
 4. `pnpm deploy:indexer:verify <commit>` returns synced chain status plus
-   non-empty `Pool`, sUSDS, and stETH GraphQL probe rows. It requires the exact
-   immutable `1-susds-launch` baseline row for the launch-aligned sampler. A
-   nonzero sUSDS summary also requires a post-launch `SusdsYieldDailySnapshot` whose
-   `sampledAtBlock` is fresh against the Ethereum processed head and whose
-   `sampledAtTimestamp` is fresh against verifier time.
+   non-empty `Pool`, sUSDS, and stETH GraphQL probe rows. It reads the target
+   commit schema and requires the exact immutable `1-susds-launch` baseline
+   row when that schema declares the entity. A legacy rollback schema that
+   predates the entity omits only that probe. An unreadable or uninspectable
+   schema fails closed. A nonzero sUSDS summary also requires a post-launch
+   `SusdsYieldDailySnapshot` whose `sampledAtBlock` is fresh against the
+   Ethereum processed head and whose `sampledAtTimestamp` is fresh against
+   verifier time.
 
 After promotion:
 
@@ -175,13 +178,19 @@ After promotion:
    returns HTTP 200. The query value marks the target in browser and network
    logs and gives it a distinct shared HTTP cache key; the route does not read
    it. `earnedYieldError` must be `null`, and
-   `susdsYieldSignalUnavailable` must be `false`. Current sUSDS exposure or
-   a nonzero historical earned signal requires finite `susdsEarnedYieldUsd`
-   and a valid `earnedYieldAsOf`. Current exposure also requires an sUSDS
-   holding with finite `earnedYieldUsd`. A clean state without either signal
-   may return `susdsEarnedYieldUsd: null` or finite zero and does not require
-   an sUSDS holding or `earnedYieldAsOf`.
-8. If current sUSDS exposure or a nonzero historical signal exists, the
+   `susdsYieldSignalUnavailable` must be `false`,
+   `reserveCurrentHoldingsClassificationFailed` must be `false`, and
+   `susdsSnapshotSourceRequired` must be a boolean. Treat
+   `susdsSnapshotSourceRequired: true` as current sUSDS exposure that exists or
+   cannot be ruled out. A positive finite sUSDS holding must not pair with a
+   false signal. A true current source signal or a nonzero historical earned
+   signal requires finite `susdsEarnedYieldUsd` and a valid `earnedYieldAsOf`.
+   A true current source signal also requires an sUSDS holding with finite
+   `earnedYieldUsd`, so malformed sUSDS exposure without a usable holding fails
+   closeout. A clean state without either signal may return
+   `susdsEarnedYieldUsd: null` or finite zero and does not require an sUSDS
+   holding or `earnedYieldAsOf`.
+8. If a true current sUSDS source signal or a nonzero historical signal exists, the
    dashboard `/revenue` page shows sUSDS reserve actuals without a pending,
    unavailable, or stale label. In a clean state without either signal, absent
    sUSDS history does not add one of those labels and no current sUSDS actual is

@@ -4,22 +4,27 @@ import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import {
   PROBE_QUERY,
+  buildProbeQuery,
   buildSummary,
+  summarizeSusdsLaunchBaselineSchema,
 } from "./deploy-indexer-verify-analysis.mjs";
 
 export {
   PROBE_QUERY,
+  buildProbeQuery,
   buildSummary,
   summarizeProbe,
   summarizeReplayIntegrity,
   summarizeStatus,
   summarizeSusdsLaunchBaseline,
+  summarizeSusdsLaunchBaselineSchema,
   summarizeSusdsSamplerProgress,
 } from "./deploy-indexer-verify-analysis.mjs";
 
 const ENVIO_ORG = "mento-protocol";
 const ENVIO_INDEXER = "mento";
 const GRAPHQL_TIMEOUT_MS = 20_000;
+const INDEXER_SCHEMA_PATH = "indexer-envio/schema.graphql";
 const REPLAY_INTEGRITY_PATH = "indexer-envio/config/replay-integrity.json";
 
 export function parseArgs(argv) {
@@ -194,6 +199,24 @@ function replayIntegrityFromCommit(commit) {
   }
 }
 
+function indexerSchemaFromCommit(commit) {
+  const result = spawnSync(
+    "git",
+    ["show", `${commit}:${INDEXER_SCHEMA_PATH}`],
+    {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    },
+  );
+  if (result.status !== 0) {
+    return {
+      value: null,
+      readError: `could not read ${INDEXER_SCHEMA_PATH} from deployment commit ${commit}`,
+    };
+  }
+  return { value: result.stdout, readError: "" };
+}
+
 function deploymentsFromIndexer(indexerJson) {
   return [...(indexerJson.data?.deployments ?? [])].sort((a, b) =>
     String(b.created_time ?? "").localeCompare(String(a.created_time ?? "")),
@@ -261,11 +284,11 @@ function resolveDeploymentEndpoint(deployment) {
   return extracted;
 }
 
-async function queryGraphql(endpoint) {
+async function queryGraphql(endpoint, query) {
   const response = await fetch(endpoint, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ query: PROBE_QUERY }),
+    body: JSON.stringify({ query }),
     signal: AbortSignal.timeout(GRAPHQL_TIMEOUT_MS),
   });
 
@@ -318,13 +341,17 @@ export function renderText(summary) {
   }
   lines.push("");
   lines.push("sUSDS launch baseline:");
-  lines.push(
-    `  launch block: ${formatNumber(
-      summary.susdsLaunchBaseline.launchBlock,
-    )}; sampled block: ${formatNumber(
-      summary.susdsLaunchBaseline.sampledAtBlock,
-    )}; healthy: ${summary.susdsLaunchBaseline.ok ? "yes" : "no"}`,
-  );
+  if (summary.susdsLaunchBaselineSchema.required) {
+    lines.push(
+      `  required by target schema: yes; launch block: ${formatNumber(
+        summary.susdsLaunchBaseline.launchBlock,
+      )}; sampled block: ${formatNumber(
+        summary.susdsLaunchBaseline.sampledAtBlock,
+      )}; healthy: ${summary.susdsLaunchBaseline.ok ? "yes" : "no"}`,
+    );
+  } else {
+    lines.push("  required by target schema: no");
+  }
   lines.push("");
   lines.push("sUSDS sampler progress:");
   lines.push(
@@ -439,7 +466,15 @@ async function main() {
   const replayIntegrityInput = replayIntegrityFromCommit(
     deployment.commit_hash,
   );
-  const graphqlJson = await queryGraphql(endpoint);
+  const susdsLaunchBaselineSchema = summarizeSusdsLaunchBaselineSchema(
+    indexerSchemaFromCommit(deployment.commit_hash),
+  );
+  const graphqlJson = await queryGraphql(
+    endpoint,
+    buildProbeQuery({
+      includeSusdsLaunchBaseline: susdsLaunchBaselineSchema.required,
+    }),
+  );
   const summary = buildSummary({
     args,
     deployment,
@@ -450,6 +485,7 @@ async function main() {
     graphqlJson,
     nowSeconds: Math.floor(Date.now() / 1000),
     replayIntegrityInput,
+    susdsLaunchBaselineSchema,
   });
 
   if (args.json) {

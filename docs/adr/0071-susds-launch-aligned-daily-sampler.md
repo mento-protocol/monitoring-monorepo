@@ -54,8 +54,11 @@ force.
 - The dashboard requires an sUSDS snapshot source when current sUSDS holdings
   or a nonzero earned signal exist. It keeps holdings and forecasts visible,
   but marks reserve actuals unavailable with an explicit sUSDS reason.
-- Deployment verification requires the exact immutable sUSDS launch baseline.
-  It also fails when a nonzero sUSDS summary has no daily snapshot row.
+- Deployment verification requires the exact immutable sUSDS launch baseline
+  when the target commit schema declares the entity. A legacy rollback schema
+  that predates the entity omits only that unsupported probe. An unreadable or
+  uninspectable target schema fails closed. Verification also fails when a
+  nonzero sUSDS summary has no daily snapshot row.
 
 ## Alternatives considered
 

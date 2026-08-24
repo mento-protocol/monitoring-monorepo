@@ -1,7 +1,9 @@
+import { Kind, parse } from "graphql";
 import { summarizePolygonPools } from "../lib/polygon-deployment-semantics.mjs";
 
 const ENVIO_ORG = "mento-protocol";
 const ENVIO_INDEXER = "mento";
+const INDEXER_SCHEMA_PATH = "indexer-envio/schema.graphql";
 const REPLAY_INTEGRITY_PATH = "indexer-envio/config/replay-integrity.json";
 const REQUIRED_POLYGON_ORACLE_FRESHNESS_VERSION = 3;
 const SUSDS_LAUNCH_BASELINE_ID = "1-susds-launch";
@@ -20,7 +22,18 @@ const PROBE_TABLES = [
   "StethYieldMovement",
 ];
 
-export const PROBE_QUERY = `query VerifyIndexerRows {
+const SUSDS_LAUNCH_BASELINE_PROBE = `  SusdsYieldLaunchBaseline(
+    limit: 1
+    where: { id: { _eq: "1-susds-launch" } }
+  ) { id chainId token launchBlock launchTimestamp sharePriceUsdWei sampledAtBlock sampledAtTimestamp }
+`;
+
+export function buildProbeQuery({ includeSusdsLaunchBaseline = true } = {}) {
+  const launchBaselineProbe = includeSusdsLaunchBaseline
+    ? SUSDS_LAUNCH_BASELINE_PROBE
+    : "";
+
+  return `query VerifyIndexerRows {
   Pool(limit: 1) { id chainId source }
   PolygonPool: Pool(
     where: { chainId: { _eq: 137 }, source: { _eq: "fpmm_factory" } }
@@ -41,14 +54,56 @@ export const PROBE_QUERY = `query VerifyIndexerRows {
   }
   SusdsYieldSummary(limit: 1) { id currentShares totalEarnedYieldUsdWei lastMovementTxHash lastUpdatedBlock }
   SusdsYieldMovement(limit: 1, order_by: { blockNumber: asc }) { id kind txHash blockNumber }
-  SusdsYieldLaunchBaseline(
-    limit: 1
-    where: { id: { _eq: "1-susds-launch" } }
-  ) { id chainId token launchBlock launchTimestamp sharePriceUsdWei sampledAtBlock sampledAtTimestamp }
-  SusdsYieldDailySnapshot(limit: 1, order_by: { sampledAtBlock: desc }) { id timestamp totalEarnedYieldUsdWei sampledAtBlock sampledAtTimestamp }
+${launchBaselineProbe}  SusdsYieldDailySnapshot(limit: 1, order_by: { sampledAtBlock: desc }) { id timestamp totalEarnedYieldUsdWei sampledAtBlock sampledAtTimestamp }
   StethYieldSummary(limit: 1) { id lastMovementTxHash lastUpdatedBlock }
   StethYieldMovement(limit: 1, order_by: { blockNumber: asc }) { id kind txHash blockNumber }
 }`;
+}
+
+export const PROBE_QUERY = buildProbeQuery();
+
+export function summarizeSusdsLaunchBaselineSchema(input) {
+  const failures = [];
+  if (input?.readError) failures.push(input.readError);
+
+  let detected = null;
+  if (!input?.readError) {
+    if (typeof input?.value !== "string" || input.value.trim() === "") {
+      failures.push(
+        `could not inspect ${INDEXER_SCHEMA_PATH} for the deployment commit`,
+      );
+    } else {
+      try {
+        const document = parse(input.value);
+        const objectTypes = document.definitions.filter(
+          (definition) => definition.kind === Kind.OBJECT_TYPE_DEFINITION,
+        );
+        if (objectTypes.length === 0) {
+          failures.push(
+            `could not inspect ${INDEXER_SCHEMA_PATH} for the deployment commit`,
+          );
+        } else {
+          detected = objectTypes.some(
+            (definition) =>
+              definition.name.value === "SusdsYieldLaunchBaseline",
+          );
+        }
+      } catch (error) {
+        failures.push(
+          `${INDEXER_SCHEMA_PATH} is invalid GraphQL SDL at the deployment commit: ${error.message}`,
+        );
+      }
+    }
+  }
+
+  return {
+    ok: failures.length === 0,
+    schemaPath: INDEXER_SCHEMA_PATH,
+    detected,
+    required: detected !== false,
+    failures,
+  };
+}
 
 export function summarizeReplayIntegrity(input) {
   const observedVersion = Number(
@@ -167,9 +222,12 @@ function hasPositiveBigInteger(value) {
   }
 }
 
-export function summarizeSusdsLaunchBaseline(baseline) {
+export function summarizeSusdsLaunchBaseline(
+  baseline,
+  { required = true } = {},
+) {
   const failures = [];
-  if (baseline === undefined) {
+  if (required && baseline === undefined) {
     failures.push(
       `sUSDS sampler launch baseline row ${SUSDS_LAUNCH_BASELINE_ID} is missing`,
     );
@@ -184,7 +242,7 @@ export function summarizeSusdsLaunchBaseline(baseline) {
   const sampledAtTimestamp = parseSafeInteger(baseline?.sampledAtTimestamp);
   const sharePriceValid = hasPositiveBigInteger(baseline?.sharePriceUsdWei);
 
-  if (baseline !== undefined) {
+  if (required && baseline !== undefined) {
     const expectedFields = [
       ["id", id, SUSDS_LAUNCH_BASELINE_ID],
       ["chainId", chainId, 1],
@@ -328,11 +386,19 @@ export function buildSummary({
   graphqlJson,
   nowSeconds,
   replayIntegrityInput,
+  susdsLaunchBaselineSchema = {
+    ok: true,
+    schemaPath: INDEXER_SCHEMA_PATH,
+    detected: true,
+    required: true,
+    failures: [],
+  },
 }) {
   const sync = summarizeStatus(statusJson);
   const probe = summarizeProbe(graphqlJson);
   const susdsLaunchBaseline = summarizeSusdsLaunchBaseline(
     graphqlJson.data?.SusdsYieldLaunchBaseline?.[0],
+    { required: susdsLaunchBaselineSchema.required },
   );
   const susdsSampler = summarizeSusdsSamplerProgress({
     summaryNonzero: probe.susdsSummaryNonzero,
@@ -362,6 +428,7 @@ export function buildSummary({
       );
     }
   }
+  failures.push(...susdsLaunchBaselineSchema.failures);
   failures.push(...susdsLaunchBaseline.failures);
   failures.push(...susdsSampler.failures);
   failures.push(...replayIntegrity.failures);
@@ -379,6 +446,7 @@ export function buildSummary({
     sync,
     metrics: metricSummary(metricsJson),
     probe,
+    susdsLaunchBaselineSchema,
     susdsLaunchBaseline,
     susdsSampler,
     replayIntegrity,

@@ -3,6 +3,7 @@
 import assert from "node:assert/strict";
 import {
   PROBE_QUERY,
+  buildProbeQuery,
   buildSummary,
   extractJsonValue,
   parseArgs,
@@ -13,6 +14,7 @@ import {
   summarizeProbe,
   summarizeReplayIntegrity,
   summarizeSusdsSamplerProgress,
+  summarizeSusdsLaunchBaselineSchema,
   summarizeStatus,
 } from "./deploy-indexer-verify.mjs";
 import {
@@ -59,6 +61,10 @@ function validSusdsLaunchBaseline() {
 assert.match(
   PROBE_QUERY,
   /SusdsYieldLaunchBaseline[\s\S]*id: \{ _eq: "1-susds-launch" \}[\s\S]*sharePriceUsdWei/,
+);
+assert.doesNotMatch(
+  buildProbeQuery({ includeSusdsLaunchBaseline: false }),
+  /SusdsYieldLaunchBaseline/,
 );
 
 const indexerJson = {
@@ -631,6 +637,33 @@ assert.equal(recentSnapshotWithoutLaunchBaseline.ok, false);
 assert.match(
   recentSnapshotWithoutLaunchBaseline.failures.join("\n"),
   /launch baseline row 1-susds-launch is missing/,
+);
+
+const preBaselineRollbackSummary = buildSummary({
+  ...healthySummaryInput,
+  graphqlJson: {
+    data: {
+      ...healthySummaryInput.graphqlJson.data,
+      SusdsYieldLaunchBaseline: undefined,
+    },
+  },
+  susdsLaunchBaselineSchema: summarizeSusdsLaunchBaselineSchema({
+    value: "type SusdsYieldDailySnapshot { id: ID! }",
+    readError: "",
+  }),
+});
+assert.equal(preBaselineRollbackSummary.ok, true);
+assert.equal(
+  preBaselineRollbackSummary.susdsLaunchBaselineSchema.required,
+  false,
+);
+assert.doesNotMatch(
+  preBaselineRollbackSummary.failures.join("\n"),
+  /launch baseline/,
+);
+assert.match(
+  renderText(preBaselineRollbackSummary),
+  /sUSDS launch baseline:\n  required by target schema: no/,
 );
 
 const recentSnapshotWithInvalidLaunchBaseline = buildSummary({

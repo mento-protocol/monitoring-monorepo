@@ -62,9 +62,12 @@ a bounded stETH sampler:
 - If any later historical stETH balance read is unavailable, the sampler skips
   the affected snapshot batch instead of writing partial wallet actuals.
 - Hosted deploy verification requires the exact immutable sUSDS launch
-  baseline. It checks nonzero `sUSDS` summaries against post-launch
-  `SusdsYieldDailySnapshot` progress and freshness. Its `stETH` core-row probe
-  checks `StethYieldSummary` and `StethYieldMovement`.
+  baseline when the target commit schema declares the entity. A legacy
+  rollback schema that predates the entity omits only that unsupported probe.
+  An unreadable or uninspectable target schema fails closed. Verification checks
+  nonzero `sUSDS` summaries against post-launch `SusdsYieldDailySnapshot`
+  progress and freshness. Its `stETH` core-row probe checks
+  `StethYieldSummary` and `StethYieldMovement`.
 
 ## Evidence
 

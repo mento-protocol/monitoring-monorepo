@@ -2,7 +2,9 @@
 
 import assert from "node:assert/strict";
 import {
+  buildProbeQuery,
   summarizeSusdsLaunchBaseline,
+  summarizeSusdsLaunchBaselineSchema,
   summarizeSusdsSamplerProgress,
 } from "./deploy-indexer-verify-analysis.mjs";
 
@@ -33,7 +35,98 @@ const validLaunchBaseline = {
   sampledAtTimestamp: "1772496000",
 };
 
+const strictProbeQuery = buildProbeQuery();
+assert.match(strictProbeQuery, /SusdsYieldLaunchBaseline/);
+assert.doesNotMatch(
+  buildProbeQuery({ includeSusdsLaunchBaseline: false }),
+  /SusdsYieldLaunchBaseline/,
+);
+
+assert.deepEqual(
+  summarizeSusdsLaunchBaselineSchema({
+    value: "type SusdsYieldLaunchBaseline { id: ID! }",
+    readError: "",
+  }),
+  {
+    ok: true,
+    schemaPath: "indexer-envio/schema.graphql",
+    detected: true,
+    required: true,
+    failures: [],
+  },
+);
+assert.deepEqual(
+  summarizeSusdsLaunchBaselineSchema({
+    value: "type SusdsYieldDailySnapshot { id: ID! }",
+    readError: "",
+  }),
+  {
+    ok: true,
+    schemaPath: "indexer-envio/schema.graphql",
+    detected: false,
+    required: false,
+    failures: [],
+  },
+);
+const unreadableSchema = summarizeSusdsLaunchBaselineSchema({
+  value: null,
+  readError: "schema unavailable",
+});
+assert.equal(unreadableSchema.ok, false);
+assert.equal(unreadableSchema.required, true);
+assert.match(unreadableSchema.failures.join("\n"), /schema unavailable/);
+const emptySchema = summarizeSusdsLaunchBaselineSchema({
+  value: "",
+  readError: "",
+});
+assert.equal(emptySchema.ok, false);
+assert.equal(emptySchema.required, true);
+assert.match(emptySchema.failures.join("\n"), /could not inspect/);
+assert.match(
+  buildProbeQuery({ includeSusdsLaunchBaseline: emptySchema.required }),
+  /SusdsYieldLaunchBaseline/,
+);
+for (const value of [
+  "type Pool { id: ID!",
+  "type SusdsYieldLaunchBaseline { id: ID!",
+]) {
+  const malformedSchema = summarizeSusdsLaunchBaselineSchema({
+    value,
+    readError: "",
+  });
+  assert.equal(malformedSchema.ok, false);
+  assert.equal(malformedSchema.detected, null);
+  assert.equal(malformedSchema.required, true);
+  assert.match(malformedSchema.failures.join("\n"), /invalid GraphQL SDL/);
+  assert.match(
+    buildProbeQuery({
+      includeSusdsLaunchBaseline: malformedSchema.required,
+    }),
+    /SusdsYieldLaunchBaseline/,
+  );
+}
+const executableDocument = summarizeSusdsLaunchBaselineSchema({
+  value: "query Probe { Pool { id } }",
+  readError: "",
+});
+assert.equal(executableDocument.ok, false);
+assert.equal(executableDocument.detected, null);
+assert.equal(executableDocument.required, true);
+assert.match(executableDocument.failures.join("\n"), /could not inspect/);
+
 assert.equal(summarizeSusdsLaunchBaseline(validLaunchBaseline).ok, true);
+assert.deepEqual(summarizeSusdsLaunchBaseline(undefined, { required: false }), {
+  ok: true,
+  id: null,
+  chainId: null,
+  token: null,
+  launchBlock: null,
+  launchTimestamp: null,
+  sampledAtBlock: null,
+  sampledAtTimestamp: null,
+  sharePriceValid: false,
+  failures: [],
+});
 assert.match(
   summarizeSusdsLaunchBaseline(undefined).failures.join("\n"),
   /launch baseline row 1-susds-launch is missing/,
