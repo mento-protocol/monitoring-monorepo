@@ -12691,14 +12691,14 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
   race_padded_capture_pid="$race_bound_pid"
   race_padded_capture_start="$race_bound_start"
   race_padded_capture_parent="$race_bound_parent"
-  race_padded_capture_token="fixture-padded-capture-$$-1"
+  race_padded_capture_id="fixture-padded-capture-$$-1"
   mkdir -p "$gate_race_root/condemned.d"
-  printf '%s\n' "$race_padded_capture_token" \
-    > "$gate_race_root/condemned.d/$race_padded_capture_token"
+  printf '%s\n' "$race_padded_capture_id" \
+    > "$gate_race_root/condemned.d/$race_padded_capture_id"
   printf '%s|  %s  \n' \
     "$race_padded_capture_pid" \
     "$(normalized_process_start "$race_padded_capture_pid")" \
-    > "$gate_race_root/captured.$race_padded_capture_token"
+    > "$gate_race_root/captured.$race_padded_capture_id"
   race_waiter padded-captured 0 0 0
   [[ "$(cat "$gate_race_out/padded-captured.status")" == "0" ]] ||
     fail "the padded captured-process drain did not complete"
@@ -12718,9 +12718,9 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     "$race_padded_capture_pid" "$race_padded_capture_start" ||
     fail "the padded captured process retained its recorded identity after the drain"
   race_bound_prune_completed
-  [[ ! -e "$gate_race_root/condemned.d/$race_padded_capture_token" ]] ||
+  [[ ! -e "$gate_race_root/condemned.d/$race_padded_capture_id" ]] ||
     fail "the padded captured-process obligation was not removed"
-  [[ ! -e "$gate_race_root/captured.$race_padded_capture_token" ]] ||
+  [[ ! -e "$gate_race_root/captured.$race_padded_capture_id" ]] ||
     fail "the padded captured-process evidence was not removed"
   [[ -n "$(awk '/^enter/ { print; exit }' "$gate_race_log")" ]] ||
     fail "mapped work did not start after the padded captured process drained"

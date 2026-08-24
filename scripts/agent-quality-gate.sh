@@ -1773,7 +1773,7 @@ assert_gate_run_lock_still_ours_legacy() {
 }
 
 release_gate_run_lock_legacy() {
-  local recorded release_dir release_taken release_owner moved_token inert_stage inert_name inert_pid
+  local recorded release_dir release_taken release_owner moved_owner_identity inert_stage inert_name inert_pid
   [[ -n "$gate_lock_dir" ]] || return 0
   recorded="$(gate_lock_owner_field "$gate_lock_dir" token)"
   # A token check followed by recursive deletion is not an ownership proof.
@@ -1808,8 +1808,8 @@ release_gate_run_lock_legacy() {
     return 0
   fi
   gate_lock_test_crash after-release-visible-take
-  moved_token="$(gate_lock_field_from_file "$release_taken" token)"
-  if [[ "$moved_token" != "$gate_lock_token" ]]; then
+  moved_owner_identity="$(gate_lock_field_from_file "$release_taken" token)"
+  if [[ "$moved_owner_identity" != "$gate_lock_token" ]]; then
     if ln "$release_taken" "$gate_lock_dir/owner" 2>/dev/null; then
       rm -f "$release_taken"
     elif gate_lock_condemn_before_discard "$release_taken"; then
