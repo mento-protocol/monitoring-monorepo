@@ -11,6 +11,7 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  readdirSync,
   renameSync,
   rmdirSync,
   unlinkSync,
@@ -153,6 +154,48 @@ function fsyncDirectory(path) {
   }
 }
 
+function removeInertLegacyOwnerStages(lockDirectory) {
+  let removed = false;
+  for (const name of readdirSync(lockDirectory)) {
+    if (!/^owner\.(?:claiming|coordinator|rollback)\.[1-9][0-9]*$/.test(name)) {
+      continue;
+    }
+    const path = join(lockDirectory, name);
+    let stat;
+    try {
+      stat = lstatSync(path);
+    } catch (error) {
+      if (error.code === "ENOENT") continue;
+      throw error;
+    }
+    if (
+      !stat.isFile() ||
+      stat.isSymbolicLink() ||
+      (typeof process.getuid === "function" && stat.uid !== process.getuid())
+    ) {
+      continue;
+    }
+    const stagePid = Number(name.slice(name.lastIndexOf(".") + 1));
+    const snapshot = processSnapshot(stagePid);
+    if (snapshot && !snapshot.state.startsWith("Z")) continue;
+    if (!snapshot) {
+      try {
+        process.kill(stagePid, 0);
+        continue;
+      } catch (error) {
+        if (error.code !== "ESRCH") continue;
+      }
+    }
+    try {
+      unlinkSync(path);
+      removed = true;
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+  }
+  if (removed) fsyncDirectory(lockDirectory);
+}
+
 function validateLegacyLockRoot(path) {
   let stat;
   try {
@@ -281,6 +324,10 @@ export function adoptLegacyRunLock({
   coordinatorIdentity,
   worktree = "quality-gate-coordinator",
   beforeOwnerPublish = null,
+  beforeReleaseOwnerTake = null,
+  afterReleaseOwnerVisibleTake = null,
+  afterReleaseOwnerTake = null,
+  beforeReleaseOwnerRestore = null,
 }) {
   validateLegacyToken(expectedOwnerToken, "expected legacy owner token");
   validateLegacyToken(generationToken, "coordinator generation token");
@@ -463,30 +510,99 @@ export function adoptLegacyRunLock({
       abandon();
       return { released: false, reason: "authority-lost", ...probe };
     }
-    const backup = join(lockRoot, `owner.release.${generationToken}`);
-    writeOwner(backup, record);
-    if (ownerFields(ownerPath).token !== generationToken) {
-      unlinkSync(backup);
+    const releaseDirectory = join(
+      lockRoot,
+      `.owner-release.${process.pid}.${randomUUID()}`,
+    );
+    const releaseTaken = join(
+      lockDirectory,
+      `owner.reclaiming.release.coordinator.${process.pid}.${randomUUID()}`,
+    );
+    const releaseOwner = join(releaseDirectory, "owner");
+    const settleSuccessorOwner = () => {
+      unlinkSync(releaseOwner);
+      fsyncDirectory(releaseDirectory);
+      rmdirSync(releaseDirectory);
+      fsyncDirectory(lockRoot);
       abandon();
       return { released: false, reason: "authority-changed", ...authority() };
-    }
-    unlinkSync(ownerPath);
-    fsyncDirectory(lockDirectory);
+    };
+    let takenOwner = null;
     try {
+      if (beforeReleaseOwnerTake) beforeReleaseOwnerTake({ ownerPath });
+      // Keep an unvalidated take inside run.lock. Legacy recovery scans this
+      // namespace, so a crash cannot hide a live successor in private state.
+      renameSync(ownerPath, releaseTaken);
+      takenOwner = releaseTaken;
+      fsyncDirectory(lockDirectory);
+      if (afterReleaseOwnerVisibleTake)
+        afterReleaseOwnerVisibleTake({ ownerPath, releaseTaken });
+      if (ownerFields(releaseTaken).token !== generationToken) {
+        restoreTakenOwner(releaseTaken, ownerPath, lockDirectory, lockRoot);
+        takenOwner = null;
+        abandon();
+        return { released: false, reason: "authority-changed", ...authority() };
+      }
+      mkdirSync(releaseDirectory, { mode: 0o700 });
+      fsyncDirectory(lockRoot);
+      renameSync(releaseTaken, releaseOwner);
+      takenOwner = releaseOwner;
+      fsyncDirectory(lockDirectory);
+      fsyncDirectory(releaseDirectory);
+      if (afterReleaseOwnerTake)
+        afterReleaseOwnerTake({ ownerPath, releaseOwner });
+    } catch (error) {
+      if (takenOwner && existsSync(takenOwner) && existsSync(lockDirectory)) {
+        restoreTakenOwner(takenOwner, ownerPath, lockDirectory, lockRoot);
+        if (takenOwner === releaseOwner && existsSync(releaseDirectory)) {
+          fsyncDirectory(releaseDirectory);
+        }
+      }
+      if (existsSync(releaseDirectory)) rmdirSync(releaseDirectory);
+      fsyncDirectory(lockRoot);
+      abandon();
+      throw error;
+    }
+    try {
+      // These exact paths are unpublished owner stages. Remove only stages
+      // whose publishing PID is gone. A live handoff or rollback still needs
+      // its stage and must make this release restore or yield its owner.
+      removeInertLegacyOwnerStages(lockDirectory);
       rmdirSync(lockDirectory);
     } catch (error) {
-      if (!existsSync(ownerPath)) {
-        linkSync(backup, ownerPath);
-        fsyncDirectory(lockDirectory);
+      if (existsSync(ownerPath)) {
+        return settleSuccessorOwner();
       }
-      unlinkSync(backup);
+      try {
+        if (beforeReleaseOwnerRestore)
+          beforeReleaseOwnerRestore({ ownerPath, releaseOwner });
+        linkSync(releaseOwner, ownerPath);
+      } catch (restoreError) {
+        if (restoreError.code === "EEXIST" || existsSync(ownerPath)) {
+          return settleSuccessorOwner();
+        }
+        abandon();
+        throw new CoordinatorError(
+          "LEGACY_RELEASE_FAILED",
+          `could not remove legacy run.lock: ${error.message}; owner restoration failed: ${restoreError.message}`,
+        );
+      }
+      fsyncDirectory(lockDirectory);
+      unlinkSync(releaseOwner);
+      fsyncDirectory(releaseDirectory);
+      rmdirSync(releaseDirectory);
+      fsyncDirectory(lockRoot);
+      abandon();
       throw new CoordinatorError(
         "LEGACY_RELEASE_FAILED",
         `could not remove legacy run.lock: ${error.message}`,
       );
     }
     fsyncDirectory(lockRoot);
-    unlinkSync(backup);
+    unlinkSync(releaseOwner);
+    fsyncDirectory(releaseDirectory);
+    rmdirSync(releaseDirectory);
+    fsyncDirectory(lockRoot);
     closeMarker();
     if (
       existsSync(markerPath) &&

@@ -153,12 +153,22 @@ legacy lock and waits. If an older gate owns the lock first, a new gate waits
 for that owner before it starts a coordinator.
 
 This compatibility rule prevents an old worktree from running beside scheduled
-workers. Release rechecks the generation token, unlinks only the matching owner
-record, then removes the empty lock directory. A failed directory removal
-restores the owner record and closes the holder marker descriptor. Shutdown
-then reports `release-failed` and settles every close waiter. The next gate can
-recover the restored owner. The coordinator releases the legacy lock only
-after every admitted worker and recovery drain is gone.
+workers. New Bash publishers retain the padded legacy process-start wire value;
+new readers normalize only at comparison boundaries. Release atomically moves
+the owner to a recovery-visible record inside `run.lock` and validates the
+moved generation token. It moves only a matching record into a private release
+directory. A crash before validation leaves a live successor visible to the
+legacy recovery scan. That scan treats another host's record as live evidence.
+It also stops on an unreadable or unsafe remnant, or if a shared-root access
+rule prevents restoration while the canonical owner is absent. Release then
+removes only an empty lock directory. Before `rmdir`, it removes only known
+unpublished owner stages whose publishing PID is gone. A successor owner or
+live stage keeps the directory non-empty and remains untouched. Another
+directory-removal failure restores the moved owner and closes the holder marker
+descriptor. Shutdown then reports `release-failed` and settles every close
+waiter. The next gate can recover the restored owner.
+The coordinator releases the legacy lock only after every admitted worker and
+recovery drain is gone.
 
 The coordinator checks its legacy owner and marker before each request,
 response, and maintenance mutation. The scheduler checks again immediately

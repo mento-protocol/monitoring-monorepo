@@ -4824,6 +4824,13 @@ test("legacy handoff is safe for mixed Bash field reads and releases by token", 
   );
   assert.equal(legacy.authority().owned, true);
   assert.equal(existsSync(legacy.markerPath), true);
+  for (const name of [
+    "owner.claiming.2147483645",
+    "owner.coordinator.2147483646",
+    "owner.rollback.2147483647",
+  ]) {
+    writeFileSync(join(lockDirectory, name), "unpublished owner stage\n");
+  }
 
   const released = legacy.releaseIfOwned();
   assert.equal(released.released, true);
@@ -4869,7 +4876,18 @@ test("legacy release failure settles every close caller after restoring ownershi
     return result.stdout.trim().split(/\s+/).filter(Boolean);
   };
   assert.ok(markerHolders().includes(String(process.pid)));
-  writeFileSync(join(lockDirectory, "inert"), "keep run.lock non-empty\n");
+  const retainedEntries = [
+    "inert",
+    "owner.claiming.0",
+    "owner.claiming.12.extra",
+    "owner.reclaiming.12",
+    `owner.claiming.${process.pid}`,
+    `owner.coordinator.${process.pid}`,
+    `owner.rollback.${process.pid}`,
+  ];
+  for (const name of retainedEntries) {
+    writeFileSync(join(lockDirectory, name), "keep run.lock non-empty\n");
+  }
 
   const firstClose = fixture.coordinator.close("release-failure-test");
   const concurrentClose = fixture.coordinator.close("ignored-concurrent");
@@ -4894,7 +4912,150 @@ test("legacy release failure settles every close caller after restoring ownershi
   assert.equal(existsSync(socketPath), false);
   assert.equal(readFileSync(ownerPath, "utf8"), adoptedOwner);
   assert.equal(existsSync(markerPath), true);
+  for (const name of retainedEntries) {
+    assert.equal(existsSync(join(lockDirectory, name)), true);
+  }
   assert.deepEqual(markerHolders(), []);
+});
+
+test("legacy release never removes a successor owner", () => {
+  for (const phase of ["before-take", "after-take", "before-restore"]) {
+    const root = mkdtempSync(
+      join(tmpdir(), `quality-gate-legacy-release-${phase}-`),
+    );
+    fixtures.push({ root, coordinator: null });
+    const lockDirectory = join(root, "run.lock");
+    const ownerPath = join(lockDirectory, "owner");
+    mkdirSync(lockDirectory);
+    const oldId = `legacy-release-${phase}-${process.pid}-1400`;
+    const generationId = `coordinator-release-${phase}-${process.pid}-1401`;
+    const successorId = `legacy-successor-${phase}-${process.pid}-1402`;
+    const successorOwner = `pid=${process.pid}\nstart_utc=successor\ntoken=${successorId}\n`;
+    writeFileSync(
+      ownerPath,
+      `pid=${process.pid}\nstart_utc=old\ntoken=${oldId}\n`,
+    );
+    const legacy = adoptLegacyRunLock({
+      lockRoot: root,
+      expectedOwnerToken: oldId,
+      generationToken: generationId,
+      coordinatorIdentity: {
+        pid: process.pid,
+        startUtc: `test-release-${phase}-process-start`,
+      },
+      beforeReleaseOwnerTake:
+        phase === "before-take"
+          ? () => writeFileSync(ownerPath, successorOwner)
+          : null,
+      afterReleaseOwnerVisibleTake:
+        phase === "before-take"
+          ? ({ releaseTaken }) => {
+              assert.equal(existsSync(ownerPath), false);
+              assert.ok(releaseTaken.startsWith(`${lockDirectory}/`));
+              assert.match(
+                basename(releaseTaken),
+                /^owner\.reclaiming\.release\.coordinator\./,
+              );
+              assert.equal(ownerFields(releaseTaken).token, successorId);
+            }
+          : null,
+      afterReleaseOwnerTake:
+        phase === "after-take"
+          ? () => writeFileSync(ownerPath, successorOwner, { flag: "wx" })
+          : null,
+      beforeReleaseOwnerRestore:
+        phase === "before-restore"
+          ? () => writeFileSync(ownerPath, successorOwner, { flag: "wx" })
+          : null,
+    });
+    if (phase === "before-restore") {
+      writeFileSync(join(lockDirectory, "release-blocker"), "block rmdir\n");
+    }
+
+    const released = legacy.releaseIfOwned();
+    assert.equal(released.released, false);
+    assert.equal(released.reason, "authority-changed");
+    assert.equal(ownerFields(ownerPath).token, successorId);
+    assert.deepEqual(
+      readdirSync(lockDirectory).sort(),
+      phase === "before-restore" ? ["owner", "release-blocker"] : ["owner"],
+    );
+    assert.equal(
+      readdirSync(root).some((entry) => entry.startsWith(".owner-release.")),
+      false,
+    );
+  }
+});
+
+test("legacy release leaves a live successor recovery-visible across SIGKILL", () => {
+  const root = mkdtempSync(join(tmpdir(), "quality-gate-release-crash-"));
+  fixtures.push({ root, coordinator: null });
+  const lockDirectory = join(root, "run.lock");
+  const ownerPath = join(lockDirectory, "owner");
+  mkdirSync(lockDirectory);
+  const oldId = `legacy-release-crash-${process.pid}-1500`;
+  const generationId = `coordinator-release-crash-${process.pid}-1501`;
+  const successorId = `legacy-successor-crash-${process.pid}-1502`;
+  const successorStart = processStartUtc(process.pid);
+  assert.ok(successorStart);
+  writeFileSync(
+    ownerPath,
+    `pid=${process.pid}\nstart_utc=old\ntoken=${oldId}\n`,
+  );
+  const helperPath = join(root, "release-crash.mjs");
+  const legacyModuleUrl = new URL(
+    "./quality-gate-coordinator-legacy.mjs",
+    import.meta.url,
+  ).href;
+  writeFileSync(
+    helperPath,
+    [
+      'import { writeFileSync } from "node:fs";',
+      `import { adoptLegacyRunLock, processStartUtc } from ${JSON.stringify(legacyModuleUrl)};`,
+      "const [lockRoot, expectedOwnerToken, generationToken, successorToken, successorPid, successorStart] = process.argv.slice(2);",
+      "const ownerPath = `${lockRoot}/run.lock/owner`;",
+      "const legacy = adoptLegacyRunLock({",
+      "  lockRoot,",
+      "  expectedOwnerToken,",
+      "  generationToken,",
+      "  coordinatorIdentity: { pid: process.pid, startUtc: processStartUtc(process.pid) },",
+      "  beforeReleaseOwnerTake: () => {",
+      "    writeFileSync(ownerPath, `pid=${successorPid}\\nstart_utc=${successorStart}\\ntoken=${successorToken}\\n`);",
+      "  },",
+      '  afterReleaseOwnerVisibleTake: () => process.kill(process.pid, "SIGKILL"),',
+      "});",
+      "legacy.releaseIfOwned();",
+      "",
+    ].join("\n"),
+  );
+
+  const crashed = spawnSync(
+    process.execPath,
+    [
+      helperPath,
+      root,
+      oldId,
+      generationId,
+      successorId,
+      String(process.pid),
+      successorStart,
+    ],
+    { encoding: "utf8" },
+  );
+  assert.equal(crashed.signal, "SIGKILL", crashed.stderr);
+  assert.equal(existsSync(ownerPath), false);
+  const remnants = readdirSync(lockDirectory).filter((entry) =>
+    entry.startsWith("owner.reclaiming.release.coordinator."),
+  );
+  assert.equal(remnants.length, 1);
+  assert.equal(
+    ownerFields(join(lockDirectory, remnants[0])).token,
+    successorId,
+  );
+  assert.equal(
+    readdirSync(root).some((entry) => entry.startsWith(".owner-release.")),
+    false,
+  );
 });
 
 test("legacy handoff never overwrites an owner published during adoption", () => {

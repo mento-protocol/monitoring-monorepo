@@ -136,6 +136,10 @@ normalized_process_start() {
     head -n1 | sed 's/^[[:blank:]]*//; s/[[:blank:]]*$//' || true
 }
 
+legacy_process_start() {
+  TZ=UTC LC_ALL=C ps -o lstart= -p "$1" 2>/dev/null | head -n1 || true
+}
+
 run_gate() {
   : > "$paths_file"
   local path
@@ -11334,6 +11338,192 @@ STUB
   [[ ! -d "$gate_race_root/run.lock" ]] ||
     fail "both race runs finished; the lock must not be left behind"
 
+  # Release must take and validate the exact owner it removes. Exercise both
+  # sides of that take: a successor that replaces the owner just before the
+  # rename, and one that publishes after the old owner has moved aside. The
+  # releasing gate must preserve either successor and must never remove its
+  # lock directory recursively.
+  for race_release_phase in before after; do
+    rm -rf "$gate_race_root/run.lock"
+    rm -rf "$gate_race_root"/owner-release.*
+    : > "$gate_race_log"
+    race_release_output="$gate_race_out/release-${race_release_phase}.out"
+    race_release_successor="release-successor-${race_release_phase}-$$-1"
+    if [[ "$race_release_phase" == "before" ]]; then
+      race_release_delay_name="AGENT_QUALITY_GATE_LOCK_RELEASE_BEFORE_TAKE_DELAY_SECONDS"
+    else
+      race_release_delay_name="AGENT_QUALITY_GATE_LOCK_RELEASE_AFTER_TAKE_DELAY_SECONDS"
+    fi
+    race_bound_launch_command "release ${race_release_phase}-take gate" 30 \
+      /bin/sh -c 'output_file="$1"; shift; exec "$@" > "$output_file" 2>&1' \
+      launch-bound-command "$race_release_output" env \
+      RACE_STUB_SECONDS=0 \
+      AGENT_QUALITY_GATE_LOCK=1 \
+      AGENT_QUALITY_GATE_LOCK_HELD='' \
+      AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+      AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+      "$race_release_delay_name=8" \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+      --base HEAD --run --lock-wait 30 ||
+      fail "the release ${race_release_phase}-take gate could not bind its direct child"
+    race_release_pid="$race_bound_pid"
+    race_release_start="$race_bound_start"
+    race_release_parent="$race_bound_parent"
+    race_release_deadline=$(( $(date +%s) + 15 ))
+    race_release_dir=""
+    race_release_ready=0
+    while [[ "$(date +%s)" -lt "$race_release_deadline" ]]; do
+      race_release_dir="$(find "$gate_race_root" -maxdepth 1 -type d \
+        -name 'owner-release.*' -print 2>/dev/null | head -n1)"
+      if [[ -n "$race_release_dir" ]]; then
+        if [[ "$race_release_phase" == "before" &&
+          -e "$gate_race_root/run.lock/owner" ]]; then
+          race_release_ready=1
+          break
+        fi
+        if [[ "$race_release_phase" == "after" &&
+          -e "$race_release_dir/owner" &&
+          ! -e "$gate_race_root/run.lock/owner" ]]; then
+          race_release_ready=1
+          break
+        fi
+      fi
+      sleep 0.05
+    done
+    [[ "$race_release_ready" -eq 1 ]] ||
+      fail "release ${race_release_phase}-take did not reach its private owner take"
+    race_release_staged="$gate_race_root/run.lock/owner.successor.$$"
+    {
+      printf 'pid=%s\n' "$$"
+      printf 'host=%s\n' "$(uname -n)"
+      printf 'started_at=%s\n' "$(date +%s)"
+      printf 'start_utc=\n'
+      printf 'worktree=%s\n' "$gate_race_repo"
+      printf 'token=%s\n' "$race_release_successor"
+    } > "$race_release_staged"
+    if [[ "$race_release_phase" == "before" ]]; then
+      mv -f "$race_release_staged" "$gate_race_root/run.lock/owner"
+    else
+      ln "$race_release_staged" "$gate_race_root/run.lock/owner" ||
+        fail "the after-take successor could not publish its owner"
+      rm -f "$race_release_staged"
+    fi
+    race_drain_wait_for_direct_wrapper \
+      "release ${race_release_phase}-take gate" "$race_release_pid" \
+      "$race_release_start" "$race_release_parent" 20 ||
+      fail "release ${race_release_phase}-take did not finish within its bound"
+    race_bound_prune_completed
+    [[ "$(sed -n 's/^token=//p' "$gate_race_root/run.lock/owner" | head -n1)" == "$race_release_successor" ]] ||
+      fail "release ${race_release_phase}-take removed or changed the successor owner"
+    [[ -z "$(find "$gate_race_root" -maxdepth 1 -type d \
+      -name 'owner-release.*' -print 2>/dev/null)" ]] ||
+      fail "release ${race_release_phase}-take left private release state"
+    rm -rf "$gate_race_root/run.lock"
+  done
+
+  # A stale releaser can read its own token, pause, and then take a live
+  # successor's record. Kill it after that take but before token validation.
+  # The successor must remain visible to hidden-record recovery, and a real
+  # waiter must restore and wait for it instead of starting mapped work.
+  rm -rf "$gate_race_root/run.lock"
+  rm -rf "$gate_race_root"/owner-release.*
+  : > "$gate_race_log"
+  race_bound_launch_command "release visible-take successor" 60 /bin/sleep 60 ||
+    fail "the release visible-take case could not start its live successor"
+  race_release_successor_pid="$race_bound_pid"
+  race_release_successor_start="$race_bound_start"
+  race_release_successor_parent="$race_bound_parent"
+  race_release_successor="release-successor-visible-$$-1"
+  race_release_output="$gate_race_out/release-visible-crash.out"
+  race_bound_launch_command "release visible-take crash gate" 30 \
+    /bin/sh -c 'output_file="$1"; shift; exec "$@" > "$output_file" 2>&1' \
+    launch-bound-command "$race_release_output" env \
+    RACE_STUB_SECONDS=0 \
+    AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    AGENT_QUALITY_GATE_LOCK_RELEASE_BEFORE_TAKE_DELAY_SECONDS=8 \
+    AGENT_QUALITY_GATE_LOCK_CRASH_AT=after-release-visible-take \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 30 ||
+    fail "the release visible-take crash gate could not bind its direct child"
+  race_release_pid="$race_bound_pid"
+  race_release_start="$race_bound_start"
+  race_release_parent="$race_bound_parent"
+  race_release_deadline=$(( $(date +%s) + 15 ))
+  race_release_dir=""
+  while [[ "$(date +%s)" -lt "$race_release_deadline" ]]; do
+    race_release_dir="$(find "$gate_race_root" -maxdepth 1 -type d \
+      -name 'owner-release.*' -print 2>/dev/null | head -n1)"
+    [[ -n "$race_release_dir" && -e "$gate_race_root/run.lock/owner" ]] && break
+    sleep 0.05
+  done
+  [[ -n "$race_release_dir" && -e "$gate_race_root/run.lock/owner" ]] ||
+    fail "the release visible-take crash gate did not reach its pre-take boundary"
+  race_release_staged="$gate_race_root/run.lock/owner.successor.$$"
+  {
+    printf 'pid=%s\n' "$race_release_successor_pid"
+    printf 'host=%s\n' "$(uname -n)"
+    printf 'started_at=%s\n' "$(date +%s)"
+    printf 'start_utc=%s\n' "$race_release_successor_start"
+    printf 'worktree=%s\n' "$gate_race_repo"
+    printf 'token=%s\n' "$race_release_successor"
+  } > "$race_release_staged"
+  mv -f "$race_release_staged" "$gate_race_root/run.lock/owner"
+  if race_drain_wait_for_direct_wrapper \
+    "release visible-take crash gate" "$race_release_pid" \
+    "$race_release_start" "$race_release_parent" 20; then
+    race_release_crash_exit=0
+  else
+    race_release_crash_exit=$?
+  fi
+  [[ "$race_release_crash_exit" -eq 137 ]] ||
+    fail "the release visible-take crash gate did not exit with SIGKILL; got ${race_release_crash_exit}"
+  race_bound_prune_completed
+  race_release_remnant="$(find "$gate_race_root/run.lock" -maxdepth 1 -type f \
+    -name 'owner.reclaiming.release.*' -print 2>/dev/null | head -n1)"
+  [[ -n "$race_release_remnant" ]] ||
+    fail "SIGKILL after the visible release take did not leave a recoverable owner"
+  [[ "$(sed -n 's/^token=//p' "$race_release_remnant" | head -n1)" == "$race_release_successor" ]] ||
+    fail "the visible release remnant did not preserve the live successor"
+  [[ ! -e "$gate_race_root/run.lock/owner" ]] ||
+    fail "the visible release crash unexpectedly left a canonical owner"
+  race_release_enter_count="$(awk '/^enter/ { count++ } END { print count + 0 }' "$gate_race_log")"
+  if RACE_STUB_SECONDS=0 \
+    AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+    AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
+    AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+    --base HEAD --run --lock-wait 3 \
+    > "$gate_race_out/release-visible-waiter.out" 2>&1; then
+    fail "a waiter ran while the recovered release successor was live"
+  fi
+  grep -q "timed out after .* waiting for the gate run lock" \
+    "$gate_race_out/release-visible-waiter.out" ||
+    fail "the waiter did not wait for the recovered release successor"
+  [[ "$(awk '/^enter/ { count++ } END { print count + 0 }' "$gate_race_log")" -eq "$race_release_enter_count" ]] ||
+    fail "the waiter executed mapped work beside the recovered release successor"
+  [[ "$(sed -n 's/^token=//p' "$gate_race_root/run.lock/owner" | head -n1)" == "$race_release_successor" ]] ||
+    fail "the waiter did not restore the live successor as canonical owner"
+  [[ -z "$(find "$gate_race_root/run.lock" -maxdepth 1 -type f \
+    -name 'owner.reclaiming.release.*' -print 2>/dev/null)" ]] ||
+    fail "the waiter left the restored release remnant behind"
+  race_drain_kill_and_reap_direct_wrapper \
+    "release visible-take successor" "$race_release_successor_pid" \
+    "$race_release_successor_start" "$race_release_successor_parent" ||
+    fail "the release visible-take case could not reap its successor"
+  race_bound_prune_completed
+  race_waiter release-visible-recovered 0 0 0
+  grep -q "All mapped commands passed" \
+    "$gate_race_out/release-visible-recovered.out" ||
+    fail "the final waiter did not reclaim and run after the successor exited"
+  [[ ! -d "$gate_race_root/run.lock" ]] ||
+    fail "the final release-visible waiter did not release the lock"
+  rm -rf "$gate_race_root"/owner-release.*
+
   # `kill -0` cannot tell a holder from whatever inherited its PID after it
   # died. A recycled PID reads as alive, so without a start-time identity every
   # later run waits on an unrelated process until --lock-wait expires — the
@@ -11395,6 +11585,37 @@ STUB
         fail "a waiter must leave a genuine holder's lock in place (${race_tz})"
       rm -rf "$gate_race_root/run.lock"
     done
+
+    # Older macOS gates persisted ps padding at both edges of start_utc. A new
+    # gate must normalize only that outer padding before it compares identities.
+    # Treating the old record as a different process reclaims a live holder and
+    # lets its release race delete the replacement lock.
+    : > "$gate_race_log"
+    mkdir -p "$gate_race_root/run.lock"
+    {
+      printf 'pid=%s\n' "$$"
+      printf 'host=%s\n' "$(uname -n)"
+      printf 'started_at=%s\n' "$(date +%s)"
+      printf 'start_utc=  %s  \n' "$race_lock_start"
+      printf 'worktree=%s\n' "$gate_race_repo"
+      printf 'token=padded-live-holder-1-1\n'
+    } > "$gate_race_root/run.lock/owner"
+    AGENT_QUALITY_GATE_LOCK=1 \
+      AGENT_QUALITY_GATE_LOCK_HELD='' \
+      AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+      AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+      --base HEAD --run --lock-wait 2 \
+      > "$gate_race_out/padded-live.out" 2>&1 || true
+    grep -q "timed out after" "$gate_race_out/padded-live.out" ||
+      fail "a padded old-format live holder must be waited for"
+    grep -q "reclaiming it" "$gate_race_out/padded-live.out" &&
+      fail "outer start-time padding must not make a live holder stale"
+    [[ -z "$(awk '/^enter/ { print; exit }' "$gate_race_log")" ]] ||
+      fail "a waiter ran mapped work beside a padded old-format live holder"
+    [[ "$(sed -n 's/^token=//p' "$gate_race_root/run.lock/owner" | head -n1)" == "padded-live-holder-1-1" ]] ||
+      fail "a waiter replaced a padded old-format live owner"
+    rm -rf "$gate_race_root/run.lock"
 
     # A record from a gate that predates the pinned field carries no readable
     # start time. Liveness must fall back to PID existence and WAIT, never
@@ -11604,6 +11825,141 @@ STUB
       fail "the recovered remnant must become the owner record"
     [[ -z "$(find "$gate_race_root/run.lock" -name 'owner.reclaiming.*' 2>/dev/null)" ]] ||
       fail "a recovered remnant must not be left behind to be read twice"
+    rm -rf "$gate_race_root/run.lock"
+
+    # This is the exact state a release crash leaves after it takes a successor
+    # from a shared lock root. Its PID belongs to the recorded host, not this
+    # machine. Recovery must restore it and let the canonical foreign-host rule
+    # wait; probing the same number in the local PID table can discard a live
+    # remote owner.
+    race_dead_pid="$(fresh_dead_pid)" ||
+      fail "could not obtain a reaped local PID for the foreign release-remnant case"
+    mkdir -p "$gate_race_root/run.lock"
+    {
+      printf 'pid=%s\n' "$race_dead_pid"
+      printf 'host=fixture.remote.invalid\n'
+      printf 'started_at=%s\n' "$(date +%s)"
+      printf 'start_utc=Thu Jan  1 00:00:00 1970\n'
+      printf 'worktree=/remote/quality-gate\n'
+      printf 'token=foreign-release-successor-1-1\n'
+    } > "$gate_race_root/run.lock/owner.reclaiming.release.foreign-fixture"
+    : > "$gate_race_log"
+    AGENT_QUALITY_GATE_LOCK=1 \
+      AGENT_QUALITY_GATE_LOCK_HELD='' \
+      AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+      AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
+      AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+      --base HEAD --run --lock-wait 2 \
+      > "$gate_race_out/foreign-release-remnant.out" 2>&1 || true
+    grep -q "Recovered the record of live holder pid ${race_dead_pid}" \
+      "$gate_race_out/foreign-release-remnant.out" ||
+      fail "a foreign-host release remnant was not restored as live evidence"
+    grep -q "timed out after .* waiting for the gate run lock" \
+      "$gate_race_out/foreign-release-remnant.out" ||
+      fail "a waiter did not wait for the restored foreign-host successor"
+    grep -q "reclaiming it" "$gate_race_out/foreign-release-remnant.out" &&
+      fail "a foreign-host release remnant was reclaimed from the local PID table"
+    [[ -z "$(awk '/^enter/ { print; exit }' "$gate_race_log")" ]] ||
+      fail "a waiter ran mapped work beside a foreign-host release successor"
+    [[ "$(sed -n 's/^token=//p' "$gate_race_root/run.lock/owner" | head -n1)" == "foreign-release-successor-1-1" ]] ||
+      fail "the foreign-host release remnant did not become canonical"
+    rm -rf "$gate_race_root/run.lock"
+
+    # A live remnant can belong to another user on a shared root. Protected
+    # hard-link policy can then reject `ln` even though the file is readable.
+    # If no canonical owner appeared, that access failure must stop this gate;
+    # treating it as an ordinary lost race would allow an ownerless claim.
+    race_stub_bin="$gate_race_out/failing-remnant-link-bin"
+    mkdir -p "$race_stub_bin"
+    cat > "$race_stub_bin/ln" <<'STUB'
+#!/bin/sh
+if [ "$#" -eq 2 ]; then
+  case "$1" in
+    */owner.reclaiming.*)
+      case "$2" in
+        */run.lock/owner) exit 73 ;;
+      esac
+      ;;
+  esac
+fi
+exec /bin/ln "$@"
+STUB
+    chmod +x "$race_stub_bin/ln"
+    mkdir -p "$gate_race_root/run.lock"
+    {
+      printf 'pid=%s\n' "$$"
+      printf 'host=%s\n' "$(uname -n)"
+      printf 'started_at=%s\n' "$(date +%s)"
+      printf 'start_utc=%s\n' "$race_lock_start"
+      printf 'worktree=%s\n' "$gate_race_repo"
+      printf 'token=unrestorable-live-remnant-1-1\n'
+    } > "$gate_race_root/run.lock/owner.reclaiming.release.unrestorable-fixture"
+    : > "$gate_race_log"
+    if PATH="$race_stub_bin:$PATH" \
+      AGENT_QUALITY_GATE_LOCK=1 \
+      AGENT_QUALITY_GATE_LOCK_HELD='' \
+      AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+      AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
+      AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+      --base HEAD --run --lock-wait 5 \
+      > "$gate_race_out/unrestorable-live-remnant.out" 2>&1; then
+      race_unrestorable_exit=0
+    else
+      race_unrestorable_exit=$?
+    fi
+    [[ "$race_unrestorable_exit" -eq 2 ]] ||
+      fail "an unrestorable live remnant must fail closed with status 2; got ${race_unrestorable_exit}"
+    grep -q "could not restore the live quality-gate owner record" \
+      "$gate_race_out/unrestorable-live-remnant.out" ||
+      fail "an unrestorable live remnant did not report the recovery failure"
+    [[ -z "$(awk '/^enter/ { print; exit }' "$gate_race_log")" ]] ||
+      fail "a waiter ran mapped work after live-remnant restoration failed"
+    [[ ! -e "$gate_race_root/run.lock/owner" ]] ||
+      fail "the failing-link fixture unexpectedly published a canonical owner"
+    [[ -e "$gate_race_root/run.lock/owner.reclaiming.release.unrestorable-fixture" ]] ||
+      fail "the failing-link fixture discarded the only live owner evidence"
+    rm -rf "$gate_race_root/run.lock"
+
+    # A cross-user remnant can be present but unreadable. Field helpers return
+    # empty values for that file; recovery must not interpret those empty reads
+    # as a dead holder and unlink the only owner evidence.
+    mkdir -p "$gate_race_root/run.lock"
+    {
+      printf 'pid=%s\n' "$$"
+      printf 'host=%s\n' "$(uname -n)"
+      printf 'started_at=%s\n' "$(date +%s)"
+      printf 'start_utc=%s\n' "$race_lock_start"
+      printf 'worktree=%s\n' "$gate_race_repo"
+      printf 'token=unreadable-live-remnant-1-1\n'
+    } > "$gate_race_root/run.lock/owner.reclaiming.release.unreadable-fixture"
+    chmod 000 "$gate_race_root/run.lock/owner.reclaiming.release.unreadable-fixture"
+    : > "$gate_race_log"
+    if AGENT_QUALITY_GATE_LOCK=1 \
+      AGENT_QUALITY_GATE_LOCK_HELD='' \
+      AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+      AGENT_QUALITY_GATE_LOCK_OWNER_GRACE_SECONDS=1 \
+      AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+      --base HEAD --run --lock-wait 5 \
+      > "$gate_race_out/unreadable-live-remnant.out" 2>&1; then
+      race_unreadable_remnant_exit=0
+    else
+      race_unreadable_remnant_exit=$?
+    fi
+    chmod 600 "$gate_race_root/run.lock/owner.reclaiming.release.unreadable-fixture" 2>/dev/null || true
+    [[ "$race_unreadable_remnant_exit" -eq 2 ]] ||
+      fail "an unreadable live remnant must fail closed with status 2; got ${race_unreadable_remnant_exit}"
+    grep -q "is not a readable regular file" \
+      "$gate_race_out/unreadable-live-remnant.out" ||
+      fail "an unreadable live remnant did not report the recovery failure"
+    [[ -z "$(awk '/^enter/ { print; exit }' "$gate_race_log")" ]] ||
+      fail "a waiter ran mapped work after an unreadable live remnant"
+    [[ ! -e "$gate_race_root/run.lock/owner" ]] ||
+      fail "the unreadable-remnant fixture unexpectedly published a canonical owner"
+    [[ -e "$gate_race_root/run.lock/owner.reclaiming.release.unreadable-fixture" ]] ||
+      fail "the unreadable-remnant fixture discarded the only live owner evidence"
     rm -rf "$gate_race_root/run.lock"
 
     # The converse: a remnant naming a process that is gone is spent, and must
@@ -12048,6 +12404,11 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     fail "the interrupted-drain case could not read A's gate PID"
   [[ "$race_drain_a_pid" == "$race_drain_a_wrapper" ]] ||
     fail "the interrupted-drain case found an owner PID that was not A's direct wrapper"
+  race_drain_a_recorded_start="$(sed -n 's/^start_utc=//p' \
+    "$gate_race_root/run.lock/owner" | head -n1)"
+  [[ -n "$race_drain_a_recorded_start" &&
+    "$race_drain_a_recorded_start" == "$(legacy_process_start "$race_drain_a_pid")" ]] ||
+    fail "a current owner record is not byte-compatible with the historical macOS reader"
   race_drain_process_is_expected \
     "$race_drain_a_pid" "$race_drain_a_wrapper_start" "$race_drain_a_wrapper_parent" ||
     fail "the interrupted-drain case could not bind A's owner record to its exact wrapper identity"
@@ -12138,6 +12499,12 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     fail "the captured set must name processes, not fragments"
   race_drain_victim_is_expected ||
     fail "the interrupted-drain case needs its TERM-ignoring command alive to mean anything"
+  race_drain_legacy_capture_start="$(awk -F '|' -v pid="$race_drain_orphan" '
+    $1 == pid { print substr($0, index($0, "|") + 1); exit }
+  ' "$race_captured_file")"
+  [[ -n "$race_drain_legacy_capture_start" &&
+    "$race_drain_legacy_capture_start" == "$(legacy_process_start "$race_drain_orphan")" ]] ||
+    fail "a current captured identity is not byte-compatible with the historical macOS drainer"
   # Keep C's mapped command held too. Its entry is now the proof point: the
   # release file stays absent until C has drained A's command and reached it.
   [[ ! -e "$race_drain_violation_file" && ! -L "$race_drain_violation_file" ]] ||
@@ -12309,6 +12676,55 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     fail "the remnant-token case could not safely remove A's stopped watchdog"
   race_drain_watchdog_identities=""
   rm -rf "$gate_race_root/run.lock"
+
+  # Old macOS gates also persisted padded start strings in captured process
+  # identities. A successor must normalize that padding before both the census
+  # and the adjacent pre-signal recheck, then drain the exact process before it
+  # starts mapped work.
+  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
+  rm -f "$gate_race_root"/captured.*
+  : > "$gate_race_log"
+  race_bound_launch_command "padded captured process" 30 \
+    node -e 'process.on("SIGTERM", () => process.exit(0)); setInterval(() => {}, 1_000)' ||
+    fail "the padded captured-process case could not bind its direct child"
+  race_padded_capture_pid="$race_bound_pid"
+  race_padded_capture_start="$race_bound_start"
+  race_padded_capture_parent="$race_bound_parent"
+  race_padded_capture_token="fixture-padded-capture-$$-1"
+  mkdir -p "$gate_race_root/condemned.d"
+  printf '%s\n' "$race_padded_capture_token" \
+    > "$gate_race_root/condemned.d/$race_padded_capture_token"
+  printf '%s|  %s  \n' \
+    "$race_padded_capture_pid" \
+    "$(normalized_process_start "$race_padded_capture_pid")" \
+    > "$gate_race_root/captured.$race_padded_capture_token"
+  race_waiter padded-captured 0 0 0
+  [[ "$(cat "$gate_race_out/padded-captured.status")" == "0" ]] ||
+    fail "the padded captured-process drain did not complete"
+  grep -q "Left alone: pid(s).*now belong to unrelated processes" \
+    "$gate_race_out/padded-captured.out" &&
+    fail "a padded captured identity was classified as a recycled PID"
+  if race_drain_wait_for_direct_wrapper \
+    "padded captured process" "$race_padded_capture_pid" \
+    "$race_padded_capture_start" "$race_padded_capture_parent" 15; then
+    race_padded_capture_exit=0
+  else
+    race_padded_capture_exit=$?
+  fi
+  [[ "$race_padded_capture_exit" != "124" ]] ||
+    fail "the padded captured process survived the successor drain"
+  ! gate_test_process_has_start \
+    "$race_padded_capture_pid" "$race_padded_capture_start" ||
+    fail "the padded captured process retained its recorded identity after the drain"
+  race_bound_prune_completed
+  [[ ! -e "$gate_race_root/condemned.d/$race_padded_capture_token" ]] ||
+    fail "the padded captured-process obligation was not removed"
+  [[ ! -e "$gate_race_root/captured.$race_padded_capture_token" ]] ||
+    fail "the padded captured-process evidence was not removed"
+  [[ -n "$(awk '/^enter/ { print; exit }' "$gate_race_log")" ]] ||
+    fail "mapped work did not start after the padded captured process drained"
+  rm -rf "$gate_race_root/run.lock" "$gate_race_root/condemned.d"
+  rm -f "$gate_race_root"/captured.*
 
   # An identity that cannot be read is not an identity that matches. A capture
   # records an empty start time when the process exits between the tree walk

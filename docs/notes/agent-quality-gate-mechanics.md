@@ -686,12 +686,23 @@ that token. A different process identity cannot acknowledge one of those
 obligations while the token claim is live. Each acknowledgement must use the
 same token and claimant and state `processTreeEmpty=true`.
 
-Legacy release is also token-scoped. It writes a backup owner, rechecks the
-coordinator generation token, unlinks only that owner, and calls `rmdir` on the
-empty `run.lock`. If `rmdir` fails, it links the backup owner back into place and
-closes the holder marker descriptor. Coordinator shutdown reports
-`release-failed` to every close waiter. It never recursively removes the lock
-directory.
+Legacy release is also token-scoped. It first atomically moves the owner to a
+recovery-visible `owner.reclaiming.release.*` record inside `run.lock`. It
+validates the moved generation token, moves a matching record into a private
+release directory, and calls `rmdir` on `run.lock`. A crash before validation
+leaves the record where legacy hidden-record recovery can restore a live
+successor. Recovery applies the canonical foreign-host rule before it reads a
+PID from the local process table. If it cannot link a live remnant back and no
+canonical owner exists, it retains the remnant and stops the gate. After
+validation, release removes only current-UID regular files with the unpublished
+`owner.claiming.<positive-pid>`,
+`owner.coordinator.<positive-pid>`, or `owner.rollback.<positive-pid>` name. An
+interrupted claim or handoff can leave these files in the directory. Release
+removes one only after the publishing PID is gone or is a zombie. A live stage,
+a successor owner, or any other entry makes `rmdir` fail. The successor remains
+in place. Without one, release restores the moved owner before shutdown reports
+`release-failed` to every close waiter. Release never recursively removes the
+lock directory.
 
 The legacy lock uses `mkdir(2)`, `link(2)`, and `rename(2)` because macOS has no
 `flock(1)` and the repo's floor is Bash 3.2. `mkdir` creates the lock. `link`
@@ -734,11 +745,18 @@ Liveness is an identity check, not a PID check. `kill -0` succeeds on whatever
 inherited a dead holder's PID, and a recycled PID would make every later run
 wait on an unrelated process until `--lock-wait` expired — the opposite of
 unattended recovery. A legacy Bash holder record stores the kernel's own
-start-time string (`ps -o lstart=`), compared verbatim: same PID and same start
-string means the holder, while a different start string means the PID was
-reused and the lock is stale. Where no start time is available on either side —
-a sandbox without `ps` or a lock written by an older gate — this falls back to
-PID existence, which errs toward waiting rather than evicting.
+start-time string (`ps -o lstart=`). Comparisons trim only leading and trailing
+blank padding because older macOS gates persisted the padding that `ps` emits.
+Internal spacing remains exact. The same PID and normalized start string mean
+the holder. A different start string means the PID was reused and the lock is
+stale. Where no start time is available on either side — a sandbox without
+`ps` or a lock written by an older gate — this falls back to PID existence,
+which errs toward waiting rather than evicting.
+
+Owner and captured-process publishers retain the historical padded
+`ps -o lstart=` wire value. Gates that predate normalization compare that value
+byte-for-byte. Current gates normalize it only when they compare identities.
+This keeps both old-to-new and new-to-old worktree transitions safe.
 
 A coordinator legacy record intentionally writes a blank `start_utc=` and the
 real identity in `coordinator_start_utc=`. Older Bash readers fetch fields in
@@ -790,38 +808,39 @@ process believes it holds the lock, no record naming a live holder is invisible
 to the next reader, and no stale command can make a later run exceed capacity or
 cross a named-resource boundary.
 
-| Crash lands                                                                    | State left behind                                                                                               | Next run                                                                                                                                                    |
-| ------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| before `mkdir run.lock`                                                        | nothing                                                                                                         | takes the lock normally                                                                                                                                     |
-| after `mkdir`, before the record is staged                                     | lock directory, no record                                                                                       | no complete record, so after the grace it publishes its own                                                                                                 |
-| after staging, before `link`                                                   | `owner.claiming.<pid>` only                                                                                     | same as above; the staged file is private and inert, and goes when the lock does                                                                            |
-| after `link`, before the staged copy is unlinked                               | complete record plus an inert `owner.claiming.<pid>`                                                            | reads the record; reclaims it if its holder is gone                                                                                                         |
-| after the not-ready socket binds, before legacy adoption                       | bound socket rejects `COORDINATOR_STARTING`; the prior legacy owner is unchanged                                | clients retry; a failed startup removes the socket and preserves or restores the prior owner                                                                |
-| after legacy adoption, before ready metadata and handler activation            | coordinator owns the legacy record; the bound socket still rejects requests                                     | a handled error rolls back the owner; after a crash, the next gate reclaims the dead coordinator identity and drains its token                              |
-| after a request or lease record is published, before its acknowledgement       | durable queued request or reserved resource with no client acknowledgement                                      | a successor drops queued command leases because their wait connections ended; it converts each granted lease to a drain obligation                          |
-| while a worker runs mapped commands                                            | durable lease and worker identity; the command can outlive its gate client or coordinator                       | the coordinator or its successor finds the worker by the recorded token and handles, stops it when uncertain, and confirms it is gone                       |
-| after a sequential wrapper exits while its descendant still holds a run handle | the command lease and token-scoped marker still identify that descendant                                        | the same gate persists and drains the descendant before lease release; a crash leaves the lease or legacy obligation for the next gate                      |
-| while a worker runs, with its watchdog descheduled or suspended                | same, and the watchdog might not clean up on its own                                                            | recovery scans processes instead of waiting for the watchdog, so a watchdog that never runs changes nothing                                                 |
-| after the last lease is released, before terminal-result publication           | active request with no lease and no terminal result                                                             | the leader retries publication; if it dies, recovery publishes cancellation and never infers success                                                        |
-| after a terminal staging file is fsynced, before its final link                | old journal plus one exact staging file                                                                         | startup ignores the staging file; retention removes it only after the strict two-hour bound                                                                 |
-| after the final result link, before its first directory fsync                  | old journal plus the final and staging links                                                                    | startup validates and fsyncs the result path before it reconstructs and commits result-ready state                                                          |
-| after the first result-directory fsync, before staging unlink                  | old journal plus one durable final result and its staging link                                                  | startup validates the final result; the staging link remains inert until strict retention removes it                                                        |
-| after immutable result creation, before journal cleanup                        | exact terminal result plus its active execution; the old journal can retain its last drain lease and obligation | a successor removes only that execution's stale leases and obligations, reconstructs result-ready state, and returns the exact result                       |
-| after result-ready state commits, before a client's acknowledgement            | that client's terminal request still holds its worktree admission                                               | the client reconnects and acknowledges; a bound disconnect auto-acknowledges now or after any persisted drain reaches terminal state                        |
-| after expired success-index removal commits, before result unlink              | unindexed, valid expired result                                                                                 | startup accepts the orphaned result and the next prune removes it                                                                                           |
-| after a state-namespace writer creates a staging file, before publication      | one exact staging path listed above                                                                             | after legacy adoption and required index commits, maintenance removes it only when it is a current-UID regular non-symlink file more than two hours old     |
-| while the empty-namespace deletion marker is published                         | `.deleting-v1.staging` alone, or the staging and marker links                                                   | stage-only recovery cancels marker creation; marker-plus-stage recovery fsyncs the marker before it removes protected entries                               |
-| after empty-namespace deletion starts                                          | a valid deletion marker and a subset of the three protected namespace entries                                   | startup validates the marker, removes only empty or owned protected entries, and completes the parent-directory fsync                                       |
-| after a token-scoped drain claim, before acknowledgement                       | all sibling obligations for that token name one claimant; their leases remain reserved                          | only that identity can acknowledge them; a successor releases the claim only after it verifies the claimant is dead or reused                               |
-| after `mv owner → owner.reclaiming.<pid>`, before the taken record is judged   | no `owner`, one remnant                                                                                         | reads the remnant first: a live identity is linked back as the record, a spent one is discarded                                                             |
-| after judging a taken record stale, before the new record is published         | no `owner`, no remnant                                                                                          | no complete record, so after the grace it publishes its own                                                                                                 |
-| after a taken record is judged NOT stale, before it is put back                | same as the take boundary above                                                                                 | same as the take boundary above                                                                                                                             |
-| after token-checked owner unlink, before `rmdir run.lock`                      | empty lock, inert backup owner, and the old marker                                                              | release removes the empty directory; an `rmdir` failure restores the backup owner, closes its marker descriptor, and leaves stale recovery to the next gate |
-| after `rmdir run.lock`, before backup and marker cleanup                       | no lock; inert token-scoped backup and marker files                                                             | the next gate takes the lock normally; those files do not grant authority                                                                                   |
-| after noting a condemned run, before publishing the replacement                | the obligation names a run whose record is still in place                                                       | reclaims that record again and notes the same token twice; draining a token whose processes are gone is a no-op                                             |
-| after publishing a replacement, before draining what it condemned              | the obligation names a run nobody is clearing                                                                   | inherits the whole directory, not just the holder it reclaimed, so a chain of crashes loses nothing                                                         |
-| after capturing a dead run's process tree, before the first signal             | the captured set is on disk, nothing has been signalled yet                                                     | re-reads it, unions it with its own tag scan, and confirms every entry — a set naming already-dead PIDs costs identity-checked no-op checks                 |
-| mid-drain, after the TERM pass has killed the tag carrier                      | no tagged process remains, but an untagged descendant may still run                                             | inherits the persisted captured set, so it looks for those PIDs rather than for a tag nobody carries any more                                               |
+| Crash lands                                                                    | State left behind                                                                                               | Next run                                                                                                                                                                    |
+| ------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| before `mkdir run.lock`                                                        | nothing                                                                                                         | takes the lock normally                                                                                                                                                     |
+| after `mkdir`, before the record is staged                                     | lock directory, no record                                                                                       | no complete record, so after the grace it publishes its own                                                                                                                 |
+| after staging, before `link`                                                   | `owner.claiming.<pid>` only                                                                                     | same as above; the staged file is private and inert, and a validated release removes it before `rmdir`                                                                      |
+| after `link`, before the staged copy is unlinked                               | complete record plus an inert `owner.claiming.<pid>`                                                            | reads the record; reclaims it if its holder is gone, then removes the unpublished stage during validated release                                                            |
+| after the not-ready socket binds, before legacy adoption                       | bound socket rejects `COORDINATOR_STARTING`; the prior legacy owner is unchanged                                | clients retry; a failed startup removes the socket and preserves or restores the prior owner                                                                                |
+| after legacy adoption, before ready metadata and handler activation            | coordinator owns the legacy record; the bound socket still rejects requests                                     | a handled error rolls back the owner; after a crash, the next gate reclaims the dead coordinator identity and drains its token                                              |
+| after a request or lease record is published, before its acknowledgement       | durable queued request or reserved resource with no client acknowledgement                                      | a successor drops queued command leases because their wait connections ended; it converts each granted lease to a drain obligation                                          |
+| while a worker runs mapped commands                                            | durable lease and worker identity; the command can outlive its gate client or coordinator                       | the coordinator or its successor finds the worker by the recorded token and handles, stops it when uncertain, and confirms it is gone                                       |
+| after a sequential wrapper exits while its descendant still holds a run handle | the command lease and token-scoped marker still identify that descendant                                        | the same gate persists and drains the descendant before lease release; a crash leaves the lease or legacy obligation for the next gate                                      |
+| while a worker runs, with its watchdog descheduled or suspended                | same, and the watchdog might not clean up on its own                                                            | recovery scans processes instead of waiting for the watchdog, so a watchdog that never runs changes nothing                                                                 |
+| after the last lease is released, before terminal-result publication           | active request with no lease and no terminal result                                                             | the leader retries publication; if it dies, recovery publishes cancellation and never infers success                                                                        |
+| after a terminal staging file is fsynced, before its final link                | old journal plus one exact staging file                                                                         | startup ignores the staging file; retention removes it only after the strict two-hour bound                                                                                 |
+| after the final result link, before its first directory fsync                  | old journal plus the final and staging links                                                                    | startup validates and fsyncs the result path before it reconstructs and commits result-ready state                                                                          |
+| after the first result-directory fsync, before staging unlink                  | old journal plus one durable final result and its staging link                                                  | startup validates the final result; the staging link remains inert until strict retention removes it                                                                        |
+| after immutable result creation, before journal cleanup                        | exact terminal result plus its active execution; the old journal can retain its last drain lease and obligation | a successor removes only that execution's stale leases and obligations, reconstructs result-ready state, and returns the exact result                                       |
+| after result-ready state commits, before a client's acknowledgement            | that client's terminal request still holds its worktree admission                                               | the client reconnects and acknowledges; a bound disconnect auto-acknowledges now or after any persisted drain reaches terminal state                                        |
+| after expired success-index removal commits, before result unlink              | unindexed, valid expired result                                                                                 | startup accepts the orphaned result and the next prune removes it                                                                                                           |
+| after a state-namespace writer creates a staging file, before publication      | one exact staging path listed above                                                                             | after legacy adoption and required index commits, maintenance removes it only when it is a current-UID regular non-symlink file more than two hours old                     |
+| while the empty-namespace deletion marker is published                         | `.deleting-v1.staging` alone, or the staging and marker links                                                   | stage-only recovery cancels marker creation; marker-plus-stage recovery fsyncs the marker before it removes protected entries                                               |
+| after empty-namespace deletion starts                                          | a valid deletion marker and a subset of the three protected namespace entries                                   | startup validates the marker, removes only empty or owned protected entries, and completes the parent-directory fsync                                                       |
+| after a token-scoped drain claim, before acknowledgement                       | all sibling obligations for that token name one claimant; their leases remain reserved                          | only that identity can acknowledge them; a successor releases the claim only after it verifies the claimant is dead or reused                                               |
+| after `mv owner → owner.reclaiming.<pid>`, before the taken record is judged   | no `owner`, one remnant                                                                                         | reads the remnant first: a live identity is linked back as the record, a spent one is discarded                                                                             |
+| after judging a taken record stale, before the new record is published         | no `owner`, no remnant                                                                                          | no complete record, so after the grace it publishes its own                                                                                                                 |
+| after a taken record is judged NOT stale, before it is put back                | same as the take boundary above                                                                                 | same as the take boundary above                                                                                                                                             |
+| after `mv owner → owner.reclaiming.release.*`, before token validation         | ownerless lock, one recovery-visible release remnant, and the old marker                                        | restores a local-live or foreign-host successor as canonical; an unrestorable live remnant stops the gate; a spent local identity becomes a drain obligation before removal |
+| after validation and `mv remnant → <private-release>/owner`, before `rmdir`    | ownerless lock, validated private owner, the old marker, and possible unpublished owner stages                  | release removes only known unpublished stages, then removes an empty directory; a successor owner makes `rmdir` fail and remains canonical                                  |
+| after `rmdir run.lock`, before private owner and marker cleanup                | no lock; inert private owner and marker files                                                                   | the next gate takes the lock normally; those private files do not grant authority                                                                                           |
+| after noting a condemned run, before publishing the replacement                | the obligation names a run whose record is still in place                                                       | reclaims that record again and notes the same token twice; draining a token whose processes are gone is a no-op                                                             |
+| after publishing a replacement, before draining what it condemned              | the obligation names a run nobody is clearing                                                                   | inherits the whole directory, not just the holder it reclaimed, so a chain of crashes loses nothing                                                                         |
+| after capturing a dead run's process tree, before the first signal             | the captured set is on disk, nothing has been signalled yet                                                     | re-reads it, unions it with its own tag scan, and confirms every entry — a set naming already-dead PIDs costs identity-checked no-op checks                                 |
+| mid-drain, after the TERM pass has killed the tag carrier                      | no tagged process remains, but an untagged descendant may still run                                             | inherits the persisted captured set, so it looks for those PIDs rather than for a tag nobody carries any more                                                               |
 
 #### Where evidence is destroyed
 
@@ -843,9 +862,10 @@ grant no execution authority and carry no recovery obligation.
 | `condemned.d/<token>` removed                                           | that run's commands                                | removed only after its drain confirmed those processes gone; a drain that cannot confirm exits instead                                                                                                     |
 | `captured.<token>` removed after a drain                                | that run's process tree                            | removed only once every captured PID is gone, is a confirmed zombie with the same identity, or is somebody else now                                                                                        |
 | `captured.<token>` removed when nothing was captured                    | nothing                                            | reached only when the persisted file and the tag scan are both empty, so there is nothing to hand on                                                                                                       |
-| matching legacy owner unlinked during release                           | legacy ownership evidence                          | release first writes a backup and rechecks the token; an `rmdir` failure restores the owner, and release starts only when workers and drains are empty                                                     |
-| empty legacy `run.lock` removed                                         | machine-wide compatibility ownership               | only its token-checked owner calls `rmdir`; the directory must be empty, and a failure restores the backed-up owner                                                                                        |
-| legacy release backup and marker removed                                | rollback evidence for that release                 | cleanup runs only after `rmdir` succeeds; without the lock directory those private token-scoped files grant no authority                                                                                   |
+| unvalidated legacy owner moved during release                           | legacy ownership evidence                          | the first move stays under `owner.reclaiming.release.*`; hidden-record recovery restores a live identity after a crash, and validation precedes the move to private state                                  |
+| matching legacy owner moved into private release state                  | legacy ownership evidence                          | release has validated the exact moved record; a later failure restores it with an exclusive link or persists it as a drain obligation                                                                      |
+| empty legacy `run.lock` removed                                         | machine-wide compatibility ownership               | only the process holding the validated private owner calls `rmdir`; a successor owner keeps the directory non-empty and remains untouched                                                                  |
+| private legacy release owner and marker removed                         | rollback evidence for that release                 | cleanup runs only after `rmdir` succeeds or after a canonical successor blocks removal; without the lock directory the old private record grants no authority                                              |
 | private legacy staged/claim files removed                               | nothing                                            | never published; no other process reads or expects them                                                                                                                                                    |
 | coordinator journal replaces its prior revision                         | coordinator state omitted by the new revision      | the complete new journal is fsynced before atomic rename; commit failure stops the server, and recovery reads a complete old or new revision                                                               |
 | queued coordinator lease dropped on restart or cancellation             | a pending reservation                              | queued means no command received a grant; the replacement journal commits before the scheduler can reuse its sequence or capacity                                                                          |
@@ -983,7 +1003,12 @@ of them.
    makes a read fail, and treating an unreadable obligation as an absent one is
    how a run comes to execute beside commands it never drained. An obligation
    file, or the directory holding them, that exists but cannot be read stops
-   the run and is named in the output.
+   the run and is named in the output. Hidden-owner recovery has the same
+   failure direction. An unreadable, symlinked, or non-regular remnant stays in
+   place and stops the gate. A remnant recorded on another host stays live
+   evidence; its PID is not checked on this host. If protected-hardlink policy
+   or another access error prevents restoration while the canonical owner is
+   absent, the gate retains the remnant and exits before mapped work.
 
    **Obligation evidence is never rewritten in place.** A `>` redirection
    truncates the file the moment it opens, so a rewrite has a window in which
@@ -1098,9 +1123,9 @@ of them.
 Rule 4 does not depend on getting an interleaving right. The other rules keep
 clients and workers from crossing resource boundaries. Rule 4 makes any
 residual displacement a single loud abort. Release stays token-guarded. It
-unlinks only the matching owner, removes only an empty lock directory, and
-restores the owner if `rmdir` fails. A stopped coordinator cannot delete the
-lock of its successor.
+moves and validates the exact owner, removes only an empty lock directory, and
+restores the owner if `rmdir` fails without a successor. A stopped coordinator
+cannot delete the lock of its successor.
 
 The Bash self-test sweeps the legacy-lock crash boundaries by killing a holder
 at each named point. It asserts that the next run reaches its mapped commands
@@ -1115,6 +1140,10 @@ persistent operation to its crash table and test boundary in the same change.
 `AGENT_QUALITY_GATE_TEST_DRAIN_REFRESH_BARRIER` is a `NODE_ENV=test`-only
 ready/release seam between a drain's refreshed tag capture and its census. It
 pins replacements that appear at that exact boundary. Normal runs reject it.
+The self-test also sets
+`AGENT_QUALITY_GATE_LOCK_RELEASE_BEFORE_TAKE_DELAY_SECONDS` and
+`AGENT_QUALITY_GATE_LOCK_RELEASE_AFTER_TAKE_DELAY_SECONDS` to widen the two
+release-owner interleavings. Normal runs leave both values unset.
 
 A lock with no usable owner record — no file at all, or an unfinished one from
 a run killed mid-write — counts as abandoned after a 30-second grace, measured

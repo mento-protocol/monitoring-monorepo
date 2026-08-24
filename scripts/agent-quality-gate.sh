@@ -669,18 +669,44 @@ gate_lock_condemn_before_discard() {
 
 gate_lock_recover_hidden_record() {
   local lock="$1"
-  local remnant pid start recovered=1
+  local this_host="$2"
+  local remnant pid host start recovered=1
   for remnant in "$lock"/owner.reclaiming.*; do
-    [[ -e "$remnant" ]] || continue
+    [[ -e "$remnant" || -L "$remnant" ]] || continue
+    if [[ -L "$remnant" || ! -f "$remnant" || ! -r "$remnant" ]]; then
+      # A shared root can expose another user's mode-0600 record. Empty field
+      # reads are not evidence that its holder is dead. Unknown file types are
+      # equally unsafe because legitimate remnants are regular files.
+      echo "error: the hidden quality-gate owner record at ${remnant} is not a readable regular file." >&2
+      echo "The record was retained. Nothing has been executed." >&2
+      gate_report_coordinated_no_work_failure 2 "legacy owner recovery" \
+        "No mapped command ran in this request"
+      exit 2
+    fi
     pid="$(gate_lock_field_from_file "$remnant" pid)"
+    host="$(gate_lock_field_from_file "$remnant" host)"
     start="$(gate_lock_field_from_file "$remnant" start_utc)"
-    if gate_lock_holder_is_live "$pid" "$start"; then
+    # A PID from another host has no local meaning. Treat the record as live
+    # evidence, as the canonical-owner path does, until that host replaces or
+    # removes it through the shared root.
+    if [[ -n "$host" && "$host" != "$this_host" ]] ||
+      gate_lock_holder_is_live "$pid" "$start"; then
       # `ln` refuses an occupied path, so a record published while we were
       # reading loses nothing: ours is then the stale copy and just goes away.
       if ln "$remnant" "$lock/owner" 2>/dev/null; then
         echo "Recovered the record of live holder pid ${pid} from an interrupted reclaim." >&2
         rm -f "$remnant"
         recovered=0
+      elif [[ ! -e "$lock/owner" && ! -L "$lock/owner" ]]; then
+        # A shared root can expose another user's mode-0600 remnant while the
+        # platform's protected-hardlink policy refuses our link. With no
+        # canonical owner, continuing would turn that access error into an
+        # ownerless claim beside a live holder.
+        echo "error: could not restore the live quality-gate owner record at ${remnant}." >&2
+        echo "The canonical owner is still absent. Nothing has been executed." >&2
+        gate_report_coordinated_no_work_failure 2 "legacy owner recovery" \
+          "No mapped command ran in this request"
+        exit 2
       fi
       # If the link failed the canonical path already holds something. This
       # copy still names a live process, so it stays: a record naming a live
@@ -1036,6 +1062,16 @@ gate_wall_millis() {
   printf '%s000\n' "$(date +%s)"
 }
 
+# Older gates persist and compare `ps -o lstart=` output byte-for-byte. Keep
+# that padded wire value when publishing owner and captured-process records so
+# an old worktree can identify a live new run. Current readers normalize only
+# at comparison boundaries.
+gate_lock_process_start_legacy_wire() {
+  local pid="$1"
+  [[ -n "$pid" ]] || return 0
+  TZ=UTC LC_ALL=C ps -o lstart= -p "$pid" 2>/dev/null | head -n1 || true
+}
+
 # Read the kernel's start-time string and process state in one snapshot.
 # Comparing the start string avoids date parsing. Pin the formatting
 # environment because `ps` renders lstart in the caller's time zone and locale.
@@ -1053,11 +1089,16 @@ gate_lock_process_snapshot() {
     head -n1 | sed 's/^[[:blank:]]*//; s/[[:blank:]]*$//' || true
 }
 
+gate_lock_normalize_process_start() {
+  printf '%s\n' "$1" |
+    sed 's/^[[:blank:]]*//; s/[[:blank:]]*$//'
+}
+
 gate_lock_process_start() {
   local snapshot
   snapshot="$(gate_lock_process_snapshot "$1")"
   [[ "$snapshot" == *" "* ]] || return 0
-  printf '%s\n' "${snapshot% *}" | sed 's/[[:blank:]]*$//'
+  gate_lock_normalize_process_start "${snapshot% *}"
 }
 
 gate_lock_process_state() {
@@ -1076,12 +1117,13 @@ gate_lock_process_is_confirmed_zombie() {
   local pid="$1"
   local recorded_start="$2"
   local snapshot current_start current_state
+  recorded_start="$(gate_lock_normalize_process_start "$recorded_start")"
   [[ -n "$pid" && -n "$recorded_start" ]] || return 1
   snapshot="$(gate_lock_process_snapshot "$pid")"
   [[ "$snapshot" == *" "* ]] || return 1
   current_state="${snapshot##* }"
   [[ "$current_state" == Z* ]] || return 1
-  current_start="$(printf '%s\n' "${snapshot% *}" | sed 's/[[:blank:]]*$//')"
+  current_start="$(gate_lock_normalize_process_start "${snapshot% *}")"
   [[ -n "$current_start" && "$current_start" == "$recorded_start" ]]
 }
 
@@ -1099,6 +1141,7 @@ gate_lock_holder_is_live() {
   local pid="$1"
   local recorded_start="$2"
   local snapshot current_start current_state
+  recorded_start="$(gate_lock_normalize_process_start "$recorded_start")"
   [[ -n "$pid" ]] || return 1
   # `kill -0` fails two ways that mean opposite things: no such process, and a
   # live process this user may not signal. A lock root shared between users
@@ -1116,7 +1159,7 @@ gate_lock_holder_is_live() {
   current_state="${snapshot##* }"
   [[ "$current_state" != Z* ]] || return 1
   [[ -n "$recorded_start" ]] || return 0
-  current_start="$(printf '%s\n' "${snapshot% *}" | sed 's/[[:blank:]]*$//')"
+  current_start="$(gate_lock_normalize_process_start "${snapshot% *}")"
   [[ "$current_start" == "$recorded_start" ]]
 }
 
@@ -1165,7 +1208,7 @@ claim_gate_run_lock() {
     printf 'pid=%s\n' "$$"
     printf 'host=%s\n' "$(uname -n)"
     printf 'started_at=%s\n' "$(date +%s)"
-    printf 'start_utc=%s\n' "$(gate_lock_process_start $$)"
+    printf 'start_utc=%s\n' "$(gate_lock_process_start_legacy_wire $$)"
     printf 'worktree=%s\n' "$repo_root"
     # Written last on purpose: a record without a token is one whose write did
     # not finish, and readers below treat it as no record at all.
@@ -1312,7 +1355,7 @@ capture_process_tree() {
   case " ${gate_drain_seen} " in
     *" ${root_pid} "*) return 0 ;;
   esac
-  start="$(gate_lock_process_start "$root_pid")"
+  start="$(gate_lock_process_start_legacy_wire "$root_pid")"
   if [[ -z "$start" ]]; then
     if gate_lock_identity_source_available; then
       # The walk saw it, the identity read did not: it exited in between. A
@@ -1531,6 +1574,7 @@ drain_condemned_run_commands() {
         fi
         continue
       fi
+      recorded="$(gate_lock_normalize_process_start "$recorded")"
       current="$(gate_lock_process_start "$pid")"
       if [[ -z "$recorded" || -z "$current" ]]; then
         # An identity we cannot read is not an identity that matches. Empty
@@ -1611,6 +1655,7 @@ EOF
     while IFS='|' read -r pid recorded; do
       [[ -n "$pid" ]] || continue
       if [[ "$recorded" != "$gate_lock_identity_unavailable" ]]; then
+        recorded="$(gate_lock_normalize_process_start "$recorded")"
         current="$(gate_lock_process_start "$pid")"
         if [[ -z "$current" || "$current" != "$recorded" ]]; then
           # Gone, or somebody else now. Either way this signal is not ours to
@@ -1728,16 +1773,114 @@ assert_gate_run_lock_still_ours_legacy() {
 }
 
 release_gate_run_lock_legacy() {
-  local recorded
+  local recorded release_dir release_taken release_owner moved_token inert_stage inert_name inert_pid
   [[ -n "$gate_lock_dir" ]] || return 0
   recorded="$(gate_lock_owner_field "$gate_lock_dir" token)"
-  # Our lock may have been reclaimed as stale and re-taken by another run while
-  # this one was stopped (SIGSTOP, a long swap). Deleting by path would then
-  # delete somebody else's lock, so release only what still names us.
-  if [[ "$recorded" == "$gate_lock_token" ]]; then
-    rm -rf "$gate_lock_dir"
+  # A token check followed by recursive deletion is not an ownership proof.
+  # Another run can publish between those two operations. Take the exact owner
+  # record by atomic rename, validate the copy, and remove only an empty lock
+  # directory. A successor owner makes rmdir fail and remains untouched.
+  if [[ "$recorded" != "$gate_lock_token" ]]; then
+    gate_lock_dir=""
+    return 0
   fi
+  release_dir="$(mktemp -d "${gate_lock_root_dir}/owner-release.XXXXXX")" || {
+    echo "error: could not create private state for quality-gate lock release; leaving the lock for stale recovery." >&2
+    gate_lock_dir=""
+    return 2
+  }
+  chmod 700 "$release_dir" || {
+    rmdir "$release_dir" 2>/dev/null || true
+    echo "error: could not protect private state for quality-gate lock release; leaving the lock for stale recovery." >&2
+    gate_lock_dir=""
+    return 2
+  }
+  # The unique private-directory basename also gives the in-lock take a name
+  # no other releaser can own. Keep the record recovery-visible until its token
+  # is validated. A SIGKILL before that check must not hide a live successor in
+  # private state where the next waiter cannot find it.
+  release_taken="${gate_lock_dir}/owner.reclaiming.release.${release_dir##*/}"
+  release_owner="$release_dir/owner"
+  gate_lock_test_delay "${AGENT_QUALITY_GATE_LOCK_RELEASE_BEFORE_TAKE_DELAY_SECONDS:-}"
+  if ! mv "$gate_lock_dir/owner" "$release_taken" 2>/dev/null; then
+    rmdir "$release_dir" 2>/dev/null || true
+    gate_lock_dir=""
+    return 0
+  fi
+  gate_lock_test_crash after-release-visible-take
+  moved_token="$(gate_lock_field_from_file "$release_taken" token)"
+  if [[ "$moved_token" != "$gate_lock_token" ]]; then
+    if ln "$release_taken" "$gate_lock_dir/owner" 2>/dev/null; then
+      rm -f "$release_taken"
+    elif gate_lock_condemn_before_discard "$release_taken"; then
+      rm -f "$release_taken"
+    else
+      echo "error: could not restore or preserve the displaced quality-gate owner; retained ${release_taken}." >&2
+      gate_lock_dir=""
+      return 2
+    fi
+    rmdir "$release_dir" 2>/dev/null || true
+    gate_lock_dir=""
+    return 0
+  fi
+  if ! mv "$release_taken" "$release_owner" 2>/dev/null; then
+    # Recovery can restore a live record while this process is descheduled.
+    # Yield to the canonical owner if that happened. Otherwise retain the
+    # in-lock remnant so the next waiter can recover it.
+    rmdir "$release_dir" 2>/dev/null || true
+    if [[ -e "$gate_lock_dir/owner" || -L "$gate_lock_dir/owner" ]]; then
+      gate_lock_dir=""
+      return 0
+    fi
+    echo "error: could not move the validated quality-gate owner into private release state; retained ${release_taken}." >&2
+    gate_lock_dir=""
+    return 2
+  fi
+  gate_lock_test_delay "${AGENT_QUALITY_GATE_LOCK_RELEASE_AFTER_TAKE_DELAY_SECONDS:-}"
+  # A gate killed while it built or published an owner can leave a private
+  # staging link in run.lock. These exact names never grant authority and no
+  # reader consumes them. Remove them only after the canonical owner has been
+  # taken and validated and their publishing PID is gone. A live handoff or
+  # rollback still needs its stage, so it must block rmdir and make this
+  # release restore or yield its owner.
+  for inert_stage in \
+    "$gate_lock_dir"/owner.claiming.* \
+    "$gate_lock_dir"/owner.coordinator.* \
+    "$gate_lock_dir"/owner.rollback.*; do
+    inert_name="${inert_stage##*/}"
+    [[ "$inert_name" =~ ^owner\.(claiming|coordinator|rollback)\.[1-9][0-9]*$ ]] || continue
+    [[ -f "$inert_stage" && ! -L "$inert_stage" && -O "$inert_stage" ]] || continue
+    inert_pid="${inert_name##*.}"
+    gate_lock_holder_is_live "$inert_pid" "" && continue
+    if ! rm -f "$inert_stage"; then
+      echo "error: could not remove stale quality-gate owner stage ${inert_stage}; restoring the owner." >&2
+      break
+    fi
+  done
+  if rmdir "$gate_lock_dir" 2>/dev/null; then
+    rm -f "$release_owner"
+    rmdir "$release_dir" 2>/dev/null || true
+    gate_lock_dir=""
+    return 0
+  fi
+  if [[ -e "$gate_lock_dir/owner" ]]; then
+    # A successor published while this release held the old record. Its
+    # canonical owner blocks rmdir, so only our private record is obsolete.
+    rm -f "$release_owner"
+  elif ln "$release_owner" "$gate_lock_dir/owner" 2>/dev/null; then
+    rm -f "$release_owner"
+  elif [[ -e "$gate_lock_dir/owner" || -L "$gate_lock_dir/owner" ]]; then
+    # A successor won the canonical path between the check and exclusive link.
+    # Preserve it and discard only this run's private release record.
+    rm -f "$release_owner"
+  else
+    echo "error: could not restore the quality-gate owner after lock release failed; retained ${release_owner}." >&2
+    gate_lock_dir=""
+    return 2
+  fi
+  rmdir "$release_dir" 2>/dev/null || true
   gate_lock_dir=""
+  return 0
 }
 
 acquire_gate_run_lock_legacy() {
@@ -1830,7 +1973,7 @@ acquire_gate_run_lock_legacy() {
     if [[ -z "$owner_token_value" ]]; then
       # Before believing there is no holder, read the remnants of any reclaim
       # that was killed mid-take. One of them may be the holder's own record.
-      if gate_lock_recover_hidden_record "$lock"; then
+      if gate_lock_recover_hidden_record "$lock" "$this_host"; then
         owner_pid="$(gate_lock_owner_field "$lock" pid)"
         owner_host="$(gate_lock_owner_field "$lock" host)"
         owner_worktree="$(gate_lock_owner_field "$lock" worktree)"
@@ -1879,7 +2022,7 @@ acquire_gate_run_lock_legacy() {
       # right here, because a record in flight under a remnant means an empty
       # canonical path is not evidence that the lock is free. If that restores
       # a live holder, this verdict is void and we go back to waiting.
-      if gate_lock_recover_hidden_record "$lock"; then
+      if gate_lock_recover_hidden_record "$lock" "$this_host"; then
         owner_pid="$(gate_lock_owner_field "$lock" pid)"
         owner_host="$(gate_lock_owner_field "$lock" host)"
         owner_worktree="$(gate_lock_owner_field "$lock" worktree)"
