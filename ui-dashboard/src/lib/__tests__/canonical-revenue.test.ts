@@ -1011,6 +1011,126 @@ describe("buildCanonicalRevenue", () => {
     );
   });
 
+  it("ignores an inactive zero-only sUSDS baseline when stETH history is fresh", () => {
+    const wallet = "0xd0697f70e79476195b742d5afab14be50f98cc1e";
+    const result = buildCanonicalRevenue({
+      networkData: [],
+      cdpDailySeries: [],
+      cdpMarkets: [],
+      reserveYield: reserveYield({
+        earnedYieldUsd: 25,
+        susdsEarnedYieldUsd: 0,
+        holdings: [
+          stethHolding({ identifier: wallet }),
+          stethHolding({
+            id: "ethereum-susds-reserve-safe",
+            assetSymbol: "sUSDS",
+            identifier: wallet,
+            principalUsd: 0,
+            balance: 0,
+            earnedYieldUsd: 0,
+          }),
+        ],
+      }),
+      reserveDailySnapshots: [
+        reserveSnapshot(V3_REVENUE_LAUNCH_TIMESTAMP, 0, 0),
+        stethReserveSnapshot(ts("2026-06-12"), wallet, 1, 25),
+      ],
+      nowSeconds: NOW_SECONDS,
+    });
+
+    expect(result.periods.allTimeSinceV3.reserveYieldUsd).not.toBeNull();
+    expect(result.partialReasons).not.toContainEqual(
+      expect.stringContaining("Reserve earned-yield history is stale"),
+    );
+  });
+
+  it("keeps zero-only sUSDS freshness conservative when nested classification is unknown", () => {
+    const wallet = "0xd0697f70e79476195b742d5afab14be50f98cc1e";
+    const legacy: Partial<ReserveYieldResponse> = {
+      ...reserveYield({
+        earnedYieldUsd: 25,
+        holdings: [stethHolding({ identifier: wallet })],
+      }),
+    };
+    delete legacy.reserveCurrentHoldingsClassificationFailed;
+    const result = buildCanonicalRevenue({
+      networkData: [],
+      cdpDailySeries: [],
+      cdpMarkets: [],
+      reserveYield: legacy as ReserveYieldResponse,
+      reserveDailySnapshots: [
+        reserveSnapshot(V3_REVENUE_LAUNCH_TIMESTAMP, 0, 0),
+        stethReserveSnapshot(ts("2026-06-12"), wallet, 1, 25),
+      ],
+      nowSeconds: NOW_SECONDS,
+    });
+
+    expect(result.periods.allTimeSinceV3.reserveYieldUsd).toBeNull();
+    expect(result.partialReasons).toContain(
+      "Reserve earned-yield history is stale; latest snapshot is Mar 3, 2026.",
+    );
+  });
+
+  it("keeps a current sUSDS source in reserve freshness checks", () => {
+    const wallet = "0xd0697f70e79476195b742d5afab14be50f98cc1e";
+    const result = buildCanonicalRevenue({
+      networkData: [],
+      cdpDailySeries: [],
+      cdpMarkets: [],
+      reserveYield: reserveYield({
+        holdings: [
+          stethHolding({ identifier: wallet }),
+          stethHolding({
+            id: "ethereum-susds-reserve-safe",
+            assetSymbol: "sUSDS",
+            identifier: wallet,
+            principalUsd: 1_000,
+            balance: 1_000,
+          }),
+        ],
+        susdsSnapshotSourceRequired: true,
+      }),
+      reserveDailySnapshots: [
+        reserveSnapshot(V3_REVENUE_LAUNCH_TIMESTAMP, 0, 0),
+        stethReserveSnapshot(ts("2026-06-12"), wallet, 1),
+      ],
+      nowSeconds: NOW_SECONDS,
+    });
+
+    expect(result.periods.allTimeSinceV3.reserveYieldUsd).toBeNull();
+    expect(result.partialReasons).toContain(
+      "Reserve earned-yield history is stale; latest snapshot is Mar 3, 2026.",
+    );
+  });
+
+  it("keeps a historical sUSDS source active through later zero snapshots", () => {
+    const wallet = "0xd0697f70e79476195b742d5afab14be50f98cc1e";
+    const historicalSusdsSnapshot = {
+      ...reserveSnapshot(ts("2026-06-10"), 0, 0),
+      currentShares: "1",
+    };
+    const result = buildCanonicalRevenue({
+      networkData: [],
+      cdpDailySeries: [],
+      cdpMarkets: [],
+      reserveYield: reserveYield({
+        holdings: [stethHolding({ identifier: wallet })],
+      }),
+      reserveDailySnapshots: [
+        historicalSusdsSnapshot,
+        reserveSnapshot(ts("2026-06-11"), 0, 0),
+        stethReserveSnapshot(ts("2026-06-12"), wallet, 1),
+      ],
+      nowSeconds: NOW_SECONDS,
+    });
+
+    expect(result.periods.allTimeSinceV3.reserveYieldUsd).toBeNull();
+    expect(result.partialReasons).toContain(
+      "Reserve earned-yield history is stale; latest snapshot is Jun 11, 2026.",
+    );
+  });
+
   it("marks reserve history stale when any active reserve source is stale", () => {
     const wallet = "0xd0697f70e79476195b742d5afab14be50f98cc1e";
     const result = buildCanonicalRevenue({

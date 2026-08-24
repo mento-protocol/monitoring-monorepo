@@ -106,7 +106,9 @@ sUSDS and stETH launch actuals require launch-baseline rows at the final
 pre-launch Ethereum block. The checked-in baseline is block `24573203`; sUSDS
 uses its pre-launch share price with the v3 launch-day timestamp, and both
 samplers use the bounded 600-block cadence. Re-check the block before changing
-the launch timestamp or start-block assumptions.
+the launch timestamp or start-block assumptions. A zero-only sUSDS launch row
+remains the revenue delta baseline. The dashboard excludes that aggregate from
+freshness until the current API or indexed history proves sUSDS exposure.
 
 Example `cast` shape for one wallet/topic pair:
 

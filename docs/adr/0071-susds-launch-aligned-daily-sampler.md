@@ -54,6 +54,10 @@ force.
 - The dashboard requires an sUSDS snapshot source when current sUSDS holdings
   or a nonzero earned signal exist. It keeps holdings and forecasts visible,
   but marks reserve actuals unavailable with an explicit sUSDS reason.
+- The dashboard keeps the zero launch row in revenue delta accounting. It
+  excludes the sUSDS aggregate from freshness only while the current API proves
+  no sUSDS signal and every indexed sUSDS exposure and earned-yield amount is
+  zero. Any current or historical sUSDS exposure activates source freshness.
 - Deployment verification uses `SusdsYieldLaunchBaseline` in the exact target
   commit schema as the sampler capability marker. When the marker exists, the
   verifier requires the immutable launch baseline, the daily snapshot probe,
