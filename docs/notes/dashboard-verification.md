@@ -232,7 +232,8 @@ A UI PR carries a `## Visual comparison` section immediately after
 intended file and review fix is committed and the worktree is clean, recording
 the final local `HEAD` OID first.
 
-- Resolve and record the base commit OID before capture — `BASE_REMOTE/BASE_REF`
+- Resolve and record the base commit OID before capture —
+  `$BASE_REMOTE/$baseRefName` (both from the ship flow's target binding)
   moves, and a base advancing mid-capture puts a different commit behind
   **Before** than the PR is measured against. Render that immutable OID in an
   isolated worktree for **Before** and the recorded `HEAD` for **After**;

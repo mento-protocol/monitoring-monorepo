@@ -66,8 +66,9 @@ even when you never open an authority.
    `BASE_REMOTE` from step 5's resolution when it ran first, plain `origin`
    only in the non-fork single-remote case above; in a fork checkout `origin`
    serves the fork, so an `origin/...` base diffs the wrong repository and
-   real changes skip their mapped checks. Run `git fetch <base-remote> main`
-   first: the
+   real changes skip their mapped checks. Fetch every base the gate will diff
+   against first — `git fetch <base-remote> main`, plus `<baseRefName>` for a
+   stacked PR, whose tracking ref is otherwise stale or absent: the
    base commit is part of the freshness stamp, the hook fetches before it runs
    the gate, and a stamp warmed against a stale base is invalidated by that
    fetch, so the push pays for the full gate a second time. A bare invocation
