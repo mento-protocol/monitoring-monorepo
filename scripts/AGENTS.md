@@ -37,7 +37,7 @@ subdirectories.
 | `alerts/`       | alert-rule lint, peg-policy checks     |
 | `repo-health/`  | code-health, file-size, lint wrappers  |
 | `terraform/`    | movable Terraform guards and helpers   |
-| `gate/`         | gate routing engine + helpers          |
+| `gate/`         | routing engine + coordinator           |
 | `sentry/`       | triage/autofix/gate/broker/ci-wiring   |
 
 `lib/` and `production-infra-identity-contract/` predate the reorganization.
@@ -76,12 +76,13 @@ same PR, except the `agent-autoreview.sh` feedback-runtime pins below.
   `deploy/deploy-indexer-verify{,-analysis}{,.test}.mjs` and
   `deploy/deploy-indexer-verify-status-identity.mjs` use one any-depth arm;
   both verifier tests run.
-- **Gate runtime module pins.** Before `cd`, `agent-quality-gate.sh` loads
-  `$script_source_dir/gate/run-handles.sh`; move it with its signature, self-test
-  route, and missing-helper fixture. It also pins
-  `docs/docs-navigation-eval-helpers.mjs` to `$script_source_dir`; since D5c the
-  mapping engine resolves `gate/lockfile-scope.mjs` the same way. Update both
-  literals (ADR 0064).
+- **Gate runtime module pins.** Before `cd`, the gate loads
+  `$script_source_dir/gate/run-handles.sh`. It resolves coordinator adapters and
+  coordinator modules from `$script_source_dir`. Scheduler fixtures and
+  coordinator tests hash from `$repo_root`. Move each path with its route,
+  signature, and missing-helper fixture (ADRs 0064 and 0071). It also pins
+  `docs/docs-navigation-eval-helpers.mjs` and `gate/lockfile-scope.mjs` from
+  `$script_source_dir`; update all exact literals.
 - **Gate mapping pins.** The signature and three Turbo inputs pin
   `gate/routing-table/**`, `gate/mapping*`, and external
   `agent-autoreview-core.mjs`. Runtime hashes use `$script_source_dir`; suites

@@ -201,6 +201,18 @@ export const SCRIPT_ARMS = [
           },
           {
             patterns: [
+              "scripts/gate/quality-gate-coordinator.sh",
+              "scripts/gate/quality-gate-coordinator-support.sh",
+            ],
+            effects: [
+              {
+                command: "pnpm agent:quality-gate:test",
+                reason: "quality-gate coordinator changed",
+              },
+            ],
+          },
+          {
+            patterns: [
               "scripts/agent-autoreview.sh",
               "scripts/agent-autoreview.test.sh",
             ],

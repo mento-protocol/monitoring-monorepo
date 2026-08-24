@@ -71,7 +71,22 @@ restore_hook_configs() {
   cp "$claude_settings_backup" "$claude_settings_fixture"
 }
 
-trap 'restore_hook_configs; rm -rf "$gate_cache_dir" "$sentry_symlink_target_dir"; rm -f "$paths_file" "$output_file" "$turbo_facts_file" "$output_file.pnpm-args" "$untracked_skill_artifact" "$sentry_symlink_probe" "$sentry_symlink_to_target" "$codex_hooks_backup" "$claude_settings_backup" "$codex_hooks_fixture" "$claude_settings_fixture"' EXIT
+cleanup_test_artifacts() {
+  restore_hook_configs
+  rm -rf "$gate_cache_dir" "$sentry_symlink_target_dir"
+  rm -f "$paths_file" "$output_file" "$turbo_facts_file" \
+    "$output_file.pnpm-args" "$untracked_skill_artifact" \
+    "$sentry_symlink_probe" "$sentry_symlink_to_target" \
+    "$codex_hooks_backup" "$claude_settings_backup" \
+    "$codex_hooks_fixture" "$claude_settings_fixture"
+  if [[ -n "${coordinator_gate_pipeline_repo:-}" ]]; then
+    rm -rf "$coordinator_gate_pipeline_repo"
+  fi
+  if [[ -n "${coordinator_gate_pipeline_lock:-}" ]]; then
+    rm -rf "$coordinator_gate_pipeline_lock"
+  fi
+}
+trap cleanup_test_artifacts EXIT
 
 fail() {
   # Stdout AND stderr: some CI log captures drop the suite's stderr, which
@@ -114,6 +129,11 @@ fresh_dead_pid() {
     fi
   done
   return 1
+}
+
+normalized_process_start() {
+  TZ=UTC LC_ALL=C ps -o lstart= -p "$1" 2>/dev/null |
+    head -n1 | sed 's/^[[:blank:]]*//; s/[[:blank:]]*$//' || true
 }
 
 run_gate() {
@@ -470,6 +490,7 @@ assert_script_occurrences() {
 # Both properties are enforced by verify_gate_family_partition, not assumed.
 gate_test_families=(
   gate-contract
+  coordinator
   install-wiring
   routing-packaging
   routing-sources
@@ -708,7 +729,8 @@ mkdir -p "$classifier_missing_helper_dir/gate"
 cp scripts/gate/run-handles.sh "$classifier_missing_helper_dir/gate/run-handles.sh"
 printf 'ui-dashboard/src/app/page.tsx\n' > "$paths_file"
 classifier_missing_helper_exit=0
-if bash "$classifier_missing_helper_dir/agent-quality-gate.sh" \
+if AGENT_QUALITY_GATE_COORDINATOR=0 \
+  bash "$classifier_missing_helper_dir/agent-quality-gate.sh" \
     --changed-paths-file "$paths_file" \
     --base origin/test \
     > "$output_file" 2>&1; then
@@ -1010,6 +1032,2126 @@ node scripts/context/check-agent-context.mjs > "$output_file"
 assert_contains "Agent context check passed"
 rm -f "$untracked_skill_artifact"
 } # end family: gate-contract
+
+# family: coordinator
+# Focused scheduler protocol, fairness, capacity, coalescing, and recovery tests.
+run_coordinator_family() {
+arm_suite_abort_trap
+
+# The sequential descendant regression runs in this family before the
+# lock-drain family defines its larger process-fixture helper set. Keep the
+# small identity-bound subset here so focused coordinator runs are complete.
+gate_test_process_start() {
+  local pid="$1"
+  [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+  TZ=UTC LC_ALL=C LANG=C ps -p "$pid" -o lstart= 2>/dev/null | head -n1 || true
+}
+
+# shellcheck disable=SC2329 # called through the EXIT-trap cleanup helper below
+gate_test_process_parent() {
+  local pid="$1"
+  [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+  TZ=UTC LC_ALL=C LANG=C ps -p "$pid" -o ppid= 2>/dev/null |
+    awk 'NF { print $1; exit }' || true
+}
+
+gate_test_process_state() {
+  local pid="$1"
+  [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+  TZ=UTC LC_ALL=C LANG=C ps -p "$pid" -o stat= 2>/dev/null |
+    awk 'NF { print $1; exit }' || true
+}
+
+gate_test_process_has_live_start() {
+  local pid="$1"
+  local expected_start="$2"
+  local current_start current_state
+  [[ "$pid" =~ ^[0-9]+$ && -n "$expected_start" ]] || return 1
+  current_start="$(gate_test_process_start "$pid")"
+  [[ -n "$current_start" && "$current_start" == "$expected_start" ]] || return 1
+  current_state="$(gate_test_process_state "$pid")"
+  [[ -z "$current_state" || "$current_state" != Z* ]]
+}
+
+# shellcheck disable=SC2329 # called through the EXIT-trap cleanup helper below
+gate_test_signal_with_current_parent() {
+  local _label="$1"
+  local signal="$2"
+  local pid="$3"
+  local expected_start="$4"
+  local current_start current_parent verified_parent
+  case "$signal" in
+    TERM|KILL) ;;
+    *) return 2 ;;
+  esac
+  [[ "$pid" =~ ^[1-9][0-9]*$ && "$pid" != "$$" && "$pid" != "$PPID" && -n "$expected_start" ]] || return 2
+  current_parent="$(gate_test_process_parent "$pid")"
+  current_start="$(gate_test_process_start "$pid")"
+  verified_parent="$(gate_test_process_parent "$pid")"
+  [[ -n "$current_start" && "$current_start" == "$expected_start" &&
+    "$current_parent" =~ ^[0-9]+$ && "$current_parent" == "$verified_parent" ]] || return 2
+  kill "-$signal" "$pid" 2>/dev/null || return 1
+}
+
+if ! node - <<'NODE'
+const assert = require("node:assert/strict");
+const source = require("node:fs").readFileSync(
+  "scripts/agent-quality-gate.sh",
+  "utf8",
+);
+const support = require("node:fs").readFileSync(
+  "scripts/gate/quality-gate-coordinator-support.sh",
+  "utf8",
+);
+const runHandles = require("node:fs").readFileSync(
+  "scripts/gate/run-handles.sh",
+  "utf8",
+);
+assert.match(
+  source,
+  /if gate_coordinator_requested; then\n  exec 7>&1\n  gate_coordinator_stdout_reserved=1\n  if ! gate_run_ensure_token; then[\s\S]*?if ! gate_coordinator_prepare_registration_fingerprint; then/u,
+  "the coordinator stdout descriptor must open before drain-token and fingerprint preparation",
+);
+assert.match(
+  source,
+  /if \[\[ "\$5" == 1 \]\]; then\n        exec 7>&-\n      fi\n      eval "\$2"/u,
+  "mapped commands must close fd 7 only when the coordinator reserved it",
+);
+assert.match(
+  source,
+  /if ! prune_command_stamps; then[\s\S]*?gate_report_coordinated_no_work_failure 2 "command-stamp pruning"/u,
+  "pre-dispatch command-stamp failures must emit a coordinated stdout verdict",
+);
+assert.match(
+  runHandles,
+  /gate_run_ensure_marker\(\)[\s\S]*?gate_report_coordinated_no_work_failure 2 "run-marker preparation"/u,
+  "coordinated run-marker refusal must emit a stdout no-work verdict",
+);
+assert.match(
+  source,
+  /gate_lock_obligation_unwritable\(\)[\s\S]*?gate_report_coordinated_no_work_failure 2 "stale-obligation recovery"/u,
+  "coordinated legacy-obligation refusal must emit a stdout no-work verdict",
+);
+assert.match(
+  source,
+  /if ! gate_coordinator_recover_stale_obligations; then\n    echo "error: scheduler stale-worker recovery failed before first dispatch\."[\s\S]*?gate_coordinator_report_no_work_failure 2 "stale-obligation recovery"/u,
+  "pre-dispatch stale-obligation recovery must emit a stdout no-work verdict",
+);
+assert.match(
+  source,
+  /could not compute the coordinated freshness context\.[\s\S]*?gate_coordinator_report_no_work_failure 2 "freshness identity preparation"/u,
+  "coordinated freshness preparation failures must emit a stdout no-work verdict",
+);
+assert.match(
+  source,
+  /if gate_coordinator_requested; then\n    gate_coordinator_report_no_work_failure 2 "pre-execution policy"/u,
+  "coordinated package-policy refusal must emit a stdout no-work verdict",
+);
+assert.match(
+  source,
+  /ps -o lstart= -o stat=.*\|\n    head -n1 \| sed 's\/\^\[\[:blank:\]\]\*\/\/; s\/\[\[:blank:\]\]\*\$\/\/'/u,
+  "Bash and Node must compare one normalized process-start and state snapshot",
+);
+for (const refName of ["base", "head"]) {
+  assert.match(
+    support,
+    new RegExp(`fresh_${refName}=.*ref_oid.*\\|\\| return 1`, "u"),
+    `fingerprint ${refName} OID resolution must fail closed`,
+  );
+}
+assert.match(
+  support,
+  /"commandTimeout=\$\{command_timeout_seconds\}"[\s\S]*?"qualityParallelism=\$\{quality_parallelism\}" "failFast=\$\{fail_fast\}"/u,
+  "shared executions must bind timeout, parallelism, and fail-fast controls",
+);
+assert.match(
+  source,
+  /"commandTimeout=\$\{command_timeout_seconds\}"[\s\S]*?"qualityParallelism=\$\{quality_parallelism\}" "failFast=\$\{fail_fast\}"/u,
+  "coordinated freshness must bind timeout, parallelism, and fail-fast controls",
+);
+assert.match(
+  support,
+  /gate_coordinator_root="\$\{root\}\/qgc-v1-u\$\{user_id\}"/u,
+  "the socket namespace must stay private per user and stable across policy or capacity changes",
+);
+assert.match(
+  source,
+  /last_command_infrastructure_failed=true\n      rc=2/u,
+  "a coordinator release failure must remain distinct from a mapped command failure",
+);
+assert.match(
+  source,
+  /fail_command_scheduler_infrastructure "\$command" \|\| return \$\?/u,
+  "scheduler infrastructure failure must stop sequential and parallel dispatch",
+);
+NODE
+then
+  fail "quality-gate coordinator Bash source contracts failed"
+fi
+coordinator_adapter_probe="$(mktemp)"
+rm -f "$coordinator_adapter_probe"
+if ! /bin/bash -c '
+  repo_root="$1"
+  probe="$2"
+  script_source_dir="$repo_root/scripts"
+  source "$repo_root/scripts/gate/quality-gate-coordinator.sh"
+  gate_coordinator_active=1
+  gate_coordinator_request_id="adapter-release-request"
+  gate_coordinator_owner_pid="$$"
+  gate_coordinator_owner_start="adapter-release-owner"
+  gate_coordinator_active_lease_id="adapter-release-lease"
+  gate_coordinator_cli() { return 1; }
+  set +e
+  gate_coordinator_after_command "true" >/dev/null 2>&1
+  release_rc=$?
+  set -e
+  [[ "$release_rc" -eq 2 ]]
+  [[ "$gate_coordinator_infrastructure_failed" -eq 1 ]]
+  [[ "$gate_coordinator_active_lease_id" == "adapter-release-lease" ]]
+  gate_coordinator_cli() { : > "$probe"; return 1; }
+  set +e
+  gate_coordinator_before_command "true" >/dev/null 2>&1
+  next_rc=$?
+  set -e
+  [[ "$next_rc" -eq 2 ]]
+  [[ ! -e "$probe" ]]
+' coordinator-adapter-test "$repo_root" "$coordinator_adapter_probe"; then
+  fail "quality-gate coordinator adapter release-failure test failed"
+fi
+rm -f "$coordinator_adapter_probe"
+
+coordinator_pipeline_scratch="$(mktemp -d)"
+if ! /bin/bash -c '
+  set -euo pipefail
+  repo_root="$1"
+  scratch_dir="$2"
+  script_source_dir="$repo_root/scripts"
+  durations_file="$scratch_dir/durations.jsonl"
+  source "$repo_root/scripts/gate/quality-gate-coordinator.sh"
+
+  gate_coordinator_active=1
+  gate_coordinator_owner_pid="$$"
+  gate_coordinator_owner_start="pipeline-owner"
+  gate_coordinator_owner_subshell=-1
+  gate_coordinator_request_id="pipeline-request"
+  gate_coordinator_execution_id="pipeline-execution"
+  gate_coordinator_registration_fingerprint="pipeline-fingerprint"
+  gate_coordinator_policy_hash="pipeline-policy"
+  gate_run_id="pipeline-drain-token"
+  skip_if_fresh=0
+  success_stamp_ttl_seconds=60
+  gate_lock_wait_seconds=0
+  hash_stream() { printf "%064d\n" 0; }
+  gate_coordinator_assert_authority() { return 0; }
+  gate_coordinator_verify_registration_fingerprint() { return 0; }
+  gate_coordinator_cli() {
+    case "${1:-}" in
+      lease)
+        printf "%s\n" \
+          "{\"status\":\"queued\",\"sequence\":17,\"blockers\":[{\"type\":\"capacity\"}]}"
+        ;;
+      abandon-lease) return 0 ;;
+      *) return 1 ;;
+    esac
+  }
+
+  run_pipeline_scenario() {
+    local scenario="$1"
+    exec 7>&1
+    case "$scenario" in
+      admission)
+        gate_coordinator_registration_admission="queued"
+        gate_coordinator_registration_blocker="other-request"
+        gate_coordinator_wait_for_admission
+        ;;
+      registration)
+        gate_coordinator_register
+        ;;
+      lease)
+        gate_coordinator_active_lease_id=""
+        gate_coordinator_infrastructure_failed=0
+        gate_coordinator_before_command "fixture command"
+        ;;
+      coalesced)
+        gate_coordinator_role="follower"
+        gate_coordinator_wait_for_shared_result
+        ;;
+      shared)
+        gate_coordinator_role="completed"
+        gate_coordinator_completed_result_json="{\"result\":{\"status\":\"failure\",\"fingerprint\":\"$gate_coordinator_registration_fingerprint\",\"policyHash\":\"$gate_coordinator_policy_hash\",\"executionId\":\"$gate_coordinator_execution_id\"}}"
+        gate_coordinator_wait_for_shared_result
+        ;;
+      *) return 99 ;;
+    esac
+  }
+
+  assert_pipeline_failure() {
+    local scenario="$1" expected_status="$2" phase="$3"
+    local work_verdict="$4" stderr_fragment="$5"
+    local stdout_file="$scratch_dir/$scenario.stdout"
+    local stderr_file="$scratch_dir/$scenario.stderr"
+    local -a pipeline_statuses
+    set +e
+    set +o pipefail
+    run_pipeline_scenario "$scenario" 2>"$stderr_file" | cat > "$stdout_file"
+    pipeline_statuses=("${PIPESTATUS[@]}")
+    set -o pipefail
+    set -e
+    [[ "${pipeline_statuses[0]}" -eq "$expected_status" ]]
+    [[ "${pipeline_statuses[1]}" -eq 0 ]]
+    grep -Fq -- \
+      "Quality-gate coordinator $phase failed. $work_verdict; this gate exits $expected_status." \
+      "$stdout_file"
+    grep -Fq -- \
+      "Piped? A pipeline reports the reader status: read \${PIPESTATUS[0]} or set -o pipefail." \
+      "$stdout_file"
+    grep -Fq -- "$stderr_fragment" "$stderr_file"
+  }
+
+  assert_pipeline_failure admission 2 "worktree admission" \
+    "No mapped command ran in this request" \
+    "quality-gate request is queued for its worktree"
+  assert_pipeline_failure registration 2 "registration" \
+    "No mapped command ran in this request" \
+    "compatible coordinator rejected quality-gate registration"
+  assert_pipeline_failure lease 2 "command lease acquisition" \
+    "The mapped command did not run" \
+    "command needs a scheduler lease"
+  assert_pipeline_failure coalesced 2 "coalesced result wait" \
+    "No mapped command ran in this request" \
+    "a coalesced result is pending"
+  assert_pipeline_failure shared 1 "shared execution" \
+    "No mapped command ran in this request" \
+    "Shared coordinator execution ended with status failure"
+
+  set +e
+  set +o pipefail
+  (
+    exec 7>&1
+    sleep 0.1
+    gate_coordinator_report_no_work_failure 2 \
+      "closed-pipe probe" "No mapped command ran in this request"
+    exit 2
+  ) 2>/dev/null | true
+  closed_pipe_statuses=("${PIPESTATUS[@]}")
+  set -o pipefail
+  set -e
+  [[ "${closed_pipe_statuses[0]}" -eq 2 ]]
+  [[ "${closed_pipe_statuses[1]}" -eq 0 ]]
+' coordinator-pipeline-test "$repo_root" "$coordinator_pipeline_scratch"; then
+  rm -rf "$coordinator_pipeline_scratch"
+  fail "quality-gate coordinator pipeline verdict test failed"
+fi
+rm -rf "$coordinator_pipeline_scratch"
+
+coordinator_gate_pipeline_repo="$(mktemp -d)"
+coordinator_gate_pipeline_lock="$(mktemp -d /tmp/qgp.XXXXXX)"
+(
+  cd "$coordinator_gate_pipeline_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  mkdir -p bin scripts/context scripts/gate tools
+  printf 'console.log("holder fixture");\n' > scripts/gate/agent-prewarm.mjs
+  printf 'console.log("contender fixture");\n' \
+    > scripts/context/agent-context-budget.mjs
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+if [[ -n "${QG_CONTENDER_COMMAND_MARKER:-}" ]]; then
+  : > "$QG_CONTENDER_COMMAND_MARKER"
+fi
+if [[ -n "${QG_INHERITED_FD7_MESSAGE:-}" ]]; then
+  printf '%s\n' "$QG_INHERITED_FD7_MESSAGE" >&7
+fi
+exit 0
+STUB
+  cat > bin/pnpm <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--version" ]]; then
+  printf '9.0.0\n'
+  exit 0
+fi
+if [[ -n "${QG_CONTENDER_COMMAND_MARKER:-}" ]]; then
+  : > "$QG_CONTENDER_COMMAND_MARKER"
+fi
+if [[ -n "${QG_INHERITED_FD7_MESSAGE:-}" ]]; then
+  printf '%s\n' "$QG_INHERITED_FD7_MESSAGE" >&7
+fi
+if [[ "$*" == "agent:prewarm:test" && -n "${QG_HOLDER_STARTED:-}" ]]; then
+  : > "${QG_HOLDER_STARTED:?}"
+  while [[ ! -e "${QG_HOLDER_RELEASE:?}" ]]; do
+    sleep 0.05
+  done
+fi
+exit 0
+STUB
+  cat > bin/uname <<'STUB'
+#!/usr/bin/env bash
+if [[ "${QG_INVALID_HOSTNAME:-}" == 1 && "${1:-}" == "-n" ]]; then
+  printf 'invalid/host\n'
+  exit 0
+fi
+exec "${REAL_UNAME_COMMAND:?}" "$@"
+STUB
+  cat > bin/cp <<'STUB'
+#!/usr/bin/env bash
+if [[ "${QG_FAIL_COMMAND_STAMP_READ:-}" == 1 &&
+  "${1:-}" == */.tmp/agent-quality-gate/command-stamps.tsv ]]; then
+  exit 93
+fi
+exec "${REAL_CP_COMMAND:?}" "$@"
+STUB
+  chmod +x bin/cp bin/pnpm bin/uname tools/trunk
+  git add .
+  git commit -qm init
+  printf 'scripts/gate/agent-prewarm.mjs\n' > holder-paths.txt
+  printf 'scripts/context/agent-context-budget.mjs\n' > contender-paths.txt
+
+  holder_started="$coordinator_gate_pipeline_repo/holder-started"
+  holder_release="$coordinator_gate_pipeline_repo/holder-release"
+  holder_output="$coordinator_gate_pipeline_repo/holder-output"
+  preparation_stdout="$coordinator_gate_pipeline_repo/preparation-stdout"
+  preparation_stderr="$coordinator_gate_pipeline_repo/preparation-stderr"
+  contender_stdout="$coordinator_gate_pipeline_repo/contender-stdout"
+  contender_stderr="$coordinator_gate_pipeline_repo/contender-stderr"
+  contender_command_marker="$coordinator_gate_pipeline_repo/contender-command-ran"
+  prune_stdout="$coordinator_gate_pipeline_repo/prune-stdout"
+  prune_stderr="$coordinator_gate_pipeline_repo/prune-stderr"
+  prune_command_marker="$coordinator_gate_pipeline_repo/prune-command-ran"
+  legacy_stdout="$coordinator_gate_pipeline_repo/legacy-stdout"
+  legacy_stderr="$coordinator_gate_pipeline_repo/legacy-stderr"
+  legacy_fd7_output="$coordinator_gate_pipeline_repo/legacy-fd7-output"
+  holder_pid=""
+  coordinator_pid=""
+  coordinator_metadata=""
+  real_cp_command="$(command -v cp)"
+  real_uname_command="$(command -v uname)"
+
+  # shellcheck disable=SC2329
+  cleanup_gate_pipeline_fixture() {
+    : > "$holder_release"
+    if [[ "$holder_pid" =~ ^[1-9][0-9]*$ ]]; then
+      kill -TERM "$holder_pid" 2>/dev/null || true
+      wait "$holder_pid" 2>/dev/null || true
+      holder_pid=""
+    fi
+    coordinator_metadata="$({
+      find "$coordinator_gate_pipeline_lock" -type f \
+        -name coordinator.json -print 2>/dev/null
+    } | head -n1)"
+    if [[ -f "$coordinator_metadata" ]]; then
+      coordinator_pid="$(node -e '
+        const value = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+        process.stdout.write(String(value.coordinatorIdentity?.pid ?? ""));
+      ' "$coordinator_metadata" 2>/dev/null || true)"
+      if [[ "$coordinator_pid" =~ ^[1-9][0-9]*$ ]]; then
+        kill -TERM "$coordinator_pid" 2>/dev/null || true
+      fi
+    fi
+  }
+  fail_gate_pipeline_fixture() {
+    {
+      sed 's/^/holder: /' "$holder_output" 2>/dev/null || true
+      sed 's/^/preparation stdout: /' "$preparation_stdout" 2>/dev/null || true
+      sed 's/^/preparation stderr: /' "$preparation_stderr" 2>/dev/null || true
+      sed 's/^/contender stdout: /' "$contender_stdout" 2>/dev/null || true
+      sed 's/^/contender stderr: /' "$contender_stderr" 2>/dev/null || true
+      sed 's/^/prune stdout: /' "$prune_stdout" 2>/dev/null || true
+      sed 's/^/prune stderr: /' "$prune_stderr" 2>/dev/null || true
+      sed 's/^/legacy stdout: /' "$legacy_stdout" 2>/dev/null || true
+      sed 's/^/legacy stderr: /' "$legacy_stderr" 2>/dev/null || true
+      sed 's/^/legacy fd7: /' "$legacy_fd7_output" 2>/dev/null || true
+    } > "$output_file"
+    fail "$*"
+  }
+  trap cleanup_gate_pipeline_fixture EXIT
+
+  set +e
+  set +o pipefail
+  AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$coordinator_gate_pipeline_lock" \
+    AGENT_QUALITY_GATE_COORDINATOR=1 \
+    AGENT_QUALITY_GATE_CAPACITY=3 \
+    NODE_ENV=test \
+    QG_INVALID_HOSTNAME=1 \
+    QG_CONTENDER_COMMAND_MARKER="$contender_command_marker" \
+    REAL_CP_COMMAND="$real_cp_command" \
+    REAL_UNAME_COMMAND="$real_uname_command" \
+    PATH="$coordinator_gate_pipeline_repo/bin:$PATH" \
+    /bin/bash "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file contender-paths.txt \
+      --base HEAD --run --parallel 1 --lock-wait 0 \
+      2> "$preparation_stderr" | cat > "$preparation_stdout"
+  preparation_statuses=("${PIPESTATUS[@]}")
+  set -o pipefail
+  set -e
+  [[ "${preparation_statuses[0]}" -eq 2 ]] ||
+    fail_gate_pipeline_fixture "piped coordinator registration preparation did not exit 2"
+  [[ "${preparation_statuses[1]}" -eq 0 ]] ||
+    fail_gate_pipeline_fixture "registration-preparation pipeline reader did not exit 0"
+  grep -Fq -- \
+    "Quality-gate coordinator registration preparation failed. No mapped command ran in this request; this gate exits 2." \
+    "$preparation_stdout" ||
+    fail_gate_pipeline_fixture "registration-preparation failure omitted its stdout verdict"
+  grep -Fq -- "could not create a safe scheduler drain token" \
+    "$preparation_stderr" ||
+    fail_gate_pipeline_fixture "registration-preparation failure omitted its stderr diagnosis"
+  [[ ! -e "$contender_command_marker" ]] ||
+    fail_gate_pipeline_fixture "registration-preparation failure ran a mapped command"
+
+  AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$coordinator_gate_pipeline_lock" \
+    AGENT_QUALITY_GATE_COORDINATOR=1 \
+    AGENT_QUALITY_GATE_CAPACITY=3 \
+    NODE_ENV=test \
+    QG_HOLDER_STARTED="$holder_started" \
+    QG_HOLDER_RELEASE="$holder_release" \
+    REAL_CP_COMMAND="$real_cp_command" \
+    REAL_UNAME_COMMAND="$real_uname_command" \
+    PATH="$coordinator_gate_pipeline_repo/bin:$PATH" \
+    /bin/bash "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file holder-paths.txt \
+      --base HEAD --run --parallel 1 --lock-wait 30 \
+      > "$holder_output" 2>&1 &
+  holder_pid=$!
+
+  holder_ready=0
+  for ((attempt = 0; attempt < 300; attempt++)); do
+    if [[ -e "$holder_started" ]]; then
+      holder_ready=1
+      break
+    fi
+    kill -0 "$holder_pid" 2>/dev/null || break
+    sleep 0.05
+  done
+  [[ "$holder_ready" -eq 1 ]] ||
+    fail_gate_pipeline_fixture "end-to-end pipeline holder never started its mapped command"
+
+  set +e
+  set +o pipefail
+  AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$coordinator_gate_pipeline_lock" \
+    AGENT_QUALITY_GATE_COORDINATOR=1 \
+    AGENT_QUALITY_GATE_CAPACITY=3 \
+    NODE_ENV=test \
+    QG_CONTENDER_COMMAND_MARKER="$contender_command_marker" \
+    REAL_CP_COMMAND="$real_cp_command" \
+    REAL_UNAME_COMMAND="$real_uname_command" \
+    PATH="$coordinator_gate_pipeline_repo/bin:$PATH" \
+    /bin/bash "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file contender-paths.txt \
+      --base HEAD --run --parallel 1 --lock-wait 0 \
+      2> "$contender_stderr" | cat > "$contender_stdout"
+  contender_statuses=("${PIPESTATUS[@]}")
+  set -o pipefail
+  set -e
+  [[ "${contender_statuses[0]}" -eq 2 ]] ||
+    fail_gate_pipeline_fixture "end-to-end piped coordinator refusal did not exit 2"
+  [[ "${contender_statuses[1]}" -eq 0 ]] ||
+    fail_gate_pipeline_fixture "end-to-end pipeline reader did not exit 0"
+  grep -Fq -- \
+    "Quality-gate coordinator worktree admission failed. No mapped command ran in this request; this gate exits 2." \
+    "$contender_stdout" ||
+    fail_gate_pipeline_fixture "end-to-end piped coordinator refusal omitted its stdout verdict"
+  grep -Fq -- \
+    'Piped? A pipeline reports the reader status: read ${PIPESTATUS[0]} or set -o pipefail.' \
+    "$contender_stdout" ||
+    fail_gate_pipeline_fixture "end-to-end piped coordinator refusal omitted pipe status guidance"
+  grep -Fq -- "quality-gate request is queued for its worktree" \
+    "$contender_stderr" ||
+    fail_gate_pipeline_fixture "end-to-end piped coordinator refusal omitted its stderr diagnosis"
+  [[ ! -e "$contender_command_marker" ]] ||
+    fail_gate_pipeline_fixture "end-to-end refused coordinator request ran a mapped command"
+
+  : > "$holder_release"
+  set +e
+  wait "$holder_pid"
+  holder_status=$?
+  set -e
+  holder_pid=""
+  [[ "$holder_status" -eq 0 ]] ||
+    fail_gate_pipeline_fixture "end-to-end pipeline holder did not finish successfully"
+
+  mkdir -p .tmp/agent-quality-gate
+  printf 'invalid fixture stamp\n' > .tmp/agent-quality-gate/command-stamps.tsv
+  set +e
+  set +o pipefail
+  AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$coordinator_gate_pipeline_lock" \
+    AGENT_QUALITY_GATE_COORDINATOR=1 \
+    AGENT_QUALITY_GATE_CAPACITY=3 \
+    NODE_ENV=test \
+    QG_CONTENDER_COMMAND_MARKER="$prune_command_marker" \
+    QG_FAIL_COMMAND_STAMP_READ=1 \
+    REAL_CP_COMMAND="$real_cp_command" \
+    REAL_UNAME_COMMAND="$real_uname_command" \
+    PATH="$coordinator_gate_pipeline_repo/bin:$PATH" \
+    /bin/bash "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file contender-paths.txt \
+      --base HEAD --run --parallel 1 --lock-wait 30 \
+      2> "$prune_stderr" | cat > "$prune_stdout"
+  prune_statuses=("${PIPESTATUS[@]}")
+  set -o pipefail
+  set -e
+  [[ "${prune_statuses[0]}" -eq 2 ]] ||
+    fail_gate_pipeline_fixture "piped command-stamp pruning failure did not exit 2"
+  [[ "${prune_statuses[1]}" -eq 0 ]] ||
+    fail_gate_pipeline_fixture "command-stamp pruning pipeline reader did not exit 0"
+  grep -Fq -- \
+    "Quality-gate coordinator command-stamp pruning failed. No mapped command ran in this request; this gate exits 2." \
+    "$prune_stdout" ||
+    fail_gate_pipeline_fixture "command-stamp pruning failure omitted its stdout verdict"
+  grep -Fq -- "could not read or prune the per-command stamp cache before first dispatch" \
+    "$prune_stderr" ||
+    fail_gate_pipeline_fixture "command-stamp pruning failure omitted its stderr diagnosis"
+  [[ ! -e "$prune_command_marker" ]] ||
+    fail_gate_pipeline_fixture "command-stamp pruning failure ran a mapped command"
+
+  set +e
+  AGENT_QUALITY_GATE_LOCK=0 \
+    AGENT_QUALITY_GATE_COORDINATOR=0 \
+    NODE_ENV=test \
+    QG_INHERITED_FD7_MESSAGE="legacy mapped command kept inherited fd7" \
+    REAL_CP_COMMAND="$real_cp_command" \
+    REAL_UNAME_COMMAND="$real_uname_command" \
+    PATH="$coordinator_gate_pipeline_repo/bin:$PATH" \
+    /bin/bash -c '
+      fd7_output="$1"
+      shift
+      exec 7> "$fd7_output"
+      exec "$@"
+    ' quality-gate-legacy-fd7 "$legacy_fd7_output" \
+      /bin/bash "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file holder-paths.txt \
+      --base HEAD --run --parallel 1 --lock-wait 0 \
+      > "$legacy_stdout" 2> "$legacy_stderr"
+  legacy_status=$?
+  set -e
+  [[ "$legacy_status" -eq 0 ]] ||
+    fail_gate_pipeline_fixture "legacy inherited-fd7 gate did not finish successfully"
+  grep -Fq -- "legacy mapped command kept inherited fd7" "$legacy_fd7_output" ||
+    fail_gate_pipeline_fixture "legacy mapped command did not preserve inherited fd7"
+  cleanup_gate_pipeline_fixture
+  trap - EXIT
+)
+rm -rf "$coordinator_gate_pipeline_repo" "$coordinator_gate_pipeline_lock"
+
+coordinator_policy_output="$(
+  gate_coordinator_entry="$repo_root/scripts/gate/quality-gate-coordinator.mjs" \
+    /bin/bash -c 'source "$1"; gate_coordinator_node_policy_hash' \
+      quality-gate-policy-test \
+      "$repo_root/scripts/gate/quality-gate-coordinator-support.sh"
+)" || fail "quality-gate coordinator policy hash probe failed"
+[[ "$coordinator_policy_output" =~ ^[a-f0-9]{64}$ ]] ||
+  fail "quality-gate coordinator policy hash probe emitted non-hash output"
+coordinator_node_runtime_output="$(
+  gate_coordinator_entry="$repo_root/scripts/gate/quality-gate-coordinator.mjs" \
+    /bin/bash -c 'source "$1"; gate_coordinator_node_runtime_hash' \
+      quality-gate-node-runtime-test \
+      "$repo_root/scripts/gate/quality-gate-coordinator-support.sh"
+)" || fail "quality-gate coordinator Node runtime hash probe failed"
+[[ "$coordinator_node_runtime_output" =~ ^[a-f0-9]{64}$ ]] ||
+  fail "quality-gate coordinator Node runtime hash probe emitted non-hash output"
+if ! /bin/bash -c '
+  repo_root="$1"
+  runtime_dir="$(mktemp -d)"
+  runtime_dir="$(cd "$runtime_dir" && pwd -P)"
+  trap '\''rm -rf "$runtime_dir"'\'' EXIT
+  cp "$repo_root"/scripts/gate/quality-gate-coordinator*.mjs "$runtime_dir/"
+  cp "$repo_root/scripts/gate/quality-gate-coordinator.sh" "$runtime_dir/"
+  cp "$repo_root/scripts/gate/quality-gate-coordinator-support.sh" "$runtime_dir/"
+  gate_coordinator_entry="$runtime_dir/quality-gate-coordinator.mjs"
+  gate_coordinator_capacity=3
+  source "$repo_root/scripts/gate/quality-gate-coordinator-support.sh"
+  first="$(gate_coordinator_effective_policy_hash)"
+  stable="$(gate_coordinator_effective_policy_hash)"
+  original_node_options="${NODE_OPTIONS-}"
+  NODE_OPTIONS="${original_node_options:+${original_node_options} }--stack-trace-limit=77"
+  export NODE_OPTIONS
+  changed_node="$(gate_coordinator_effective_policy_hash)"
+  NODE_OPTIONS="$original_node_options"
+  export NODE_OPTIONS
+  printf "\n// changed coordinator source\n" \
+    >> "$runtime_dir/quality-gate-coordinator-policy.mjs"
+  changed_source="$(gate_coordinator_effective_policy_hash)"
+  [[ "$first" =~ ^[a-f0-9]{64}$ ]]
+  [[ "$first" == "$stable" ]]
+  [[ "$first" != "$changed_node" ]]
+  [[ "$first" != "$changed_source" ]]
+' quality-gate-runtime-policy-test "$repo_root"; then
+  fail "quality-gate effective policy must include its production runtime"
+fi
+loaded_adapter_mismatch_output="$(mktemp)"
+if gate_coordinator_entry="$repo_root/scripts/gate/quality-gate-coordinator.mjs" \
+  gate_coordinator_capacity=3 \
+  gate_coordinator_loaded_adapter_main_hash=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+  gate_coordinator_loaded_adapter_support_hash=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb \
+  /bin/bash -c '
+    source "$1"
+    gate_coordinator_effective_policy_hash
+  ' quality-gate-loaded-adapter-mismatch \
+    "$repo_root/scripts/gate/quality-gate-coordinator-support.sh" \
+    > "$loaded_adapter_mismatch_output" 2>&1; then
+  fail "quality-gate policy accepted mismatched loaded adapter hashes"
+fi
+grep -Fq 'POLICY_IDENTITY_CHANGED' "$loaded_adapter_mismatch_output" ||
+  fail "quality-gate policy did not report a loaded adapter identity mismatch"
+rm -f "$loaded_adapter_mismatch_output"
+
+coordinator_drain_scratch="$(mktemp -d)"
+coordinator_drain_ack="$coordinator_drain_scratch/acknowledged"
+if ! /bin/bash -c '
+  set -u
+  support="$1"
+  scratch_dir="$2"
+  ack_marker="$3"
+  gate_lock_root_dir="$scratch_dir/lock"
+  gate_lock_drained_tokens=""
+  gate_coordinator_owner_pid="$$"
+  gate_coordinator_owner_start="fixture-owner"
+  gate_coordinator_owner_subshell="${BASH_SUBSHELL:-0}"
+  mkdir -p "$gate_lock_root_dir/condemned.d"
+  gate_coordinator_is_active() { return 0; }
+  gate_lock_token_is_wellformed() { return 0; }
+  gate_lock_condemned_dir() {
+    printf "%s/condemned.d\n" "$gate_lock_root_dir"
+  }
+  record_condemned_run() {
+    printf "%s\n" "$1" > "$gate_lock_root_dir/condemned.d/$1"
+  }
+  drain_condemned_run_commands() { return 1; }
+  gate_coordinator_cli() {
+    case "$1" in
+      status)
+        printf "%s\n" \
+          "{\"drainObligations\":[{\"obligationId\":\"obligation-1\",\"drainToken\":\"fixture-drain-1-1\"}]}"
+        ;;
+      claim-drain)
+        printf "%s\n" \
+          "{\"claimed\":true,\"obligation\":{\"obligationId\":\"obligation-1\",\"drainToken\":\"fixture-drain-1-1\"}}"
+        ;;
+      ack-drain)
+        : > "$ack_marker"
+        ;;
+      *) return 1 ;;
+    esac
+  }
+  source "$support"
+  set +e
+  gate_coordinator_recover_stale_obligations >/dev/null 2>&1
+  drain_status=$?
+  set -e
+  [[ "$drain_status" -eq 2 ]]
+  [[ -f "$gate_lock_root_dir/condemned.d/fixture-drain-1-1" ]]
+  [[ ! -e "$ack_marker" ]]
+  [[ " $gate_lock_drained_tokens " != *" fixture-drain-1-1 "* ]]
+' quality-gate-drain-failure \
+  "$repo_root/scripts/gate/quality-gate-coordinator-support.sh" \
+  "$coordinator_drain_scratch" "$coordinator_drain_ack"; then
+  fail "failed coordinator drain did not preserve its unacknowledged evidence"
+fi
+rm -rf "$coordinator_drain_scratch"
+
+adapter_drift_repo="$(mktemp -d)"
+adapter_drift_repo="$(cd "$adapter_drift_repo" && pwd -P)"
+adapter_drift_lock="$(mktemp -d /tmp/qga.XXXXXX)"
+adapter_drift_lock="$(cd "$adapter_drift_lock" && pwd -P)"
+(
+  cd "$adapter_drift_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  mkdir -p bin scripts/docs scripts/gate/mapping \
+    scripts/gate/routing-table scripts/lib tools
+  cp "$repo_root/scripts/agent-quality-gate.sh" scripts/agent-quality-gate.sh
+  cp "$repo_root/scripts/docs/docs-navigation-eval-helpers.mjs" scripts/docs/
+  cp "$repo_root/scripts/lib/gh-issue-lifecycle.mjs" scripts/lib/
+  cp "$repo_root/scripts/gate/lockfile-scope.mjs" scripts/gate/
+  cp "$repo_root/scripts/gate/run-handles.sh" scripts/gate/
+  cp "$repo_root/scripts/gate/mapping.mjs" scripts/gate/
+  cp "$repo_root"/scripts/gate/mapping/*.mjs scripts/gate/mapping/
+  cp "$repo_root"/scripts/gate/routing-table/*.mjs scripts/gate/routing-table/
+  cp "$repo_root"/scripts/gate/quality-gate-coordinator*.mjs scripts/gate/
+  cp "$repo_root/scripts/gate/quality-gate-coordinator.sh" scripts/gate/
+  cp "$repo_root/scripts/gate/quality-gate-coordinator-support.sh" scripts/gate/
+  cp scripts/gate/quality-gate-coordinator.sh coordinator-main.pristine
+  cp scripts/gate/quality-gate-coordinator-support.sh coordinator-support.pristine
+  printf 'fixture\n' > fixture.txt
+  printf 'fixture.txt\n' > changed-paths.txt
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+: > "${MAPPED_COMMAND_MARKER:?}"
+STUB
+  cat > bin/cp <<'STUB'
+#!/usr/bin/env bash
+if [[ "${ADAPTER_DRIFT_MODE:-}" == materialize &&
+  "${1:-}" == "${ADAPTER_SOURCE_MAIN:?}" ]]; then
+  "${REAL_CP_COMMAND:?}" "$@" || exit $?
+  printf '\n# adapter changed during materialization\n' \
+    >> "${ADAPTER_SOURCE_SUPPORT:?}"
+  exit 0
+fi
+exec "${REAL_CP_COMMAND:?}" "$@"
+STUB
+  chmod +x bin/cp tools/trunk
+  git add .
+  git commit -qm init
+  printf 'changed\n' >> fixture.txt
+
+  adapter_main="$adapter_drift_repo/scripts/gate/quality-gate-coordinator.sh"
+  adapter_support="$adapter_drift_repo/scripts/gate/quality-gate-coordinator-support.sh"
+  mapped_marker="$adapter_drift_repo/mapped-command-ran"
+  real_cp_command="$(command -v cp)"
+
+  # The outer full gate exports its held marker to this suite. Clear it so the
+  # nested fixtures exercise coordinator policy checks instead of nested mode.
+  set +e
+  ADAPTER_DRIFT_MODE=materialize \
+    AGENT_QUALITY_GATE_COORDINATOR=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    ADAPTER_SOURCE_MAIN="$adapter_main" \
+    ADAPTER_SOURCE_SUPPORT="$adapter_support" \
+    MAPPED_COMMAND_MARKER="$mapped_marker" \
+    REAL_CP_COMMAND="$real_cp_command" \
+    PATH="$adapter_drift_repo/bin:$PATH" \
+    /bin/bash scripts/agent-quality-gate.sh \
+      --changed-paths-file changed-paths.txt --base HEAD --run \
+      > "$output_file" 2>&1
+  materialize_status=$?
+  set -e
+  [[ "$materialize_status" -eq 2 ]] ||
+    fail "adapter drift during materialization did not exit 2"
+  grep -Fq "could not load one stable quality-gate coordinator adapter" \
+    "$output_file" ||
+    fail "adapter drift during materialization did not report its refusal"
+  [[ ! -e "$mapped_marker" ]] ||
+    fail "adapter drift during materialization ran a mapped command"
+
+  cp coordinator-main.pristine "$adapter_main"
+  cp coordinator-support.pristine "$adapter_support"
+  cat >> "$adapter_main" <<'SOURCE_DRIFT'
+
+printf '\n# adapter changed while its verified copy was sourced\n' \
+  >> "$script_source_dir/gate/quality-gate-coordinator-support.sh"
+SOURCE_DRIFT
+  : > "$output_file"
+  set +e
+  ADAPTER_SOURCE_MAIN="$adapter_main" \
+    ADAPTER_SOURCE_SUPPORT="$adapter_support" \
+    AGENT_QUALITY_GATE_COORDINATOR=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    MAPPED_COMMAND_MARKER="$mapped_marker" \
+    REAL_CP_COMMAND="$real_cp_command" \
+    PATH="$adapter_drift_repo/bin:$PATH" \
+    AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_DIR="$adapter_drift_lock" \
+    /bin/bash scripts/agent-quality-gate.sh \
+      --changed-paths-file changed-paths.txt --base HEAD --run \
+      > "$output_file" 2>&1
+  source_status=$?
+  set -e
+  [[ "$source_status" -eq 2 ]] ||
+    fail "adapter drift during source did not exit 2"
+  grep -Fq "POLICY_IDENTITY_CHANGED" "$output_file" ||
+    fail "adapter drift during source did not fail loaded identity policy"
+  [[ ! -e "$mapped_marker" ]] ||
+    fail "adapter drift during source ran a mapped command"
+  [[ ! -e "$adapter_drift_lock/run.lock" ]] ||
+    fail "adapter drift during source acquired the legacy lock"
+)
+rm -rf "$adapter_drift_repo" "$adapter_drift_lock"
+if ! node --test scripts/gate/quality-gate-coordinator.test.mjs > "$output_file" 2>&1; then
+  fail "quality-gate coordinator tests failed"
+fi
+if ! node --test scripts/gate/quality-gate-coordinator-policy.test.mjs \
+  > "$output_file" 2>&1; then
+  fail "quality-gate coordinator policy tests failed"
+fi
+if ! node --test scripts/gate/agent-quality-gate-scheduler.integration.test.mjs \
+  > "$output_file" 2>&1; then
+  fail "quality-gate scheduler integration tests failed"
+fi
+
+run_parallel_worker_loss_coordinator_regression() {
+  local fixture_repo
+  local fixture_lock_root
+  fixture_repo="$(mktemp -d)"
+  # Coordinator socket paths have a 100-byte portable ceiling. macOS TMPDIR
+  # is already long enough that a nested coordinator namespace can exceed it.
+  fixture_lock_root="$(mktemp -d /tmp/qgw.XXXXXX)"
+  (
+    cd "$fixture_repo"
+    git init -q
+    git config user.email test@example.invalid
+    git config user.name "Quality Gate Test"
+    mkdir -p bin scripts/context scripts/gate tools
+    printf 'console.log("fixture");\n' > scripts/gate/agent-prewarm.mjs
+    printf 'console.log("fixture");\n' > scripts/context/agent-context-budget.mjs
+    cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+printf './tools/trunk %s\n' "$*" >> "${QG_WORKER_STARTED:?}"
+exec sleep 45
+STUB
+    cat > bin/pnpm <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--version" ]]; then
+  printf '9.0.0\n'
+  exit 0
+fi
+printf 'pnpm %s\n' "$*" >> "${QG_WORKER_STARTED:?}"
+exec sleep 45
+STUB
+    chmod +x bin/pnpm tools/trunk
+    git add .
+    git commit -qm init
+    printf 'scripts/gate/agent-prewarm.mjs\nscripts/context/agent-context-budget.mjs\n' \
+      > changed-paths.txt
+
+    local barrier="$fixture_repo/worker-registration"
+    local gate_output="$fixture_repo/gate-output"
+    local worker_started="$fixture_repo/worker-started"
+    local gate_pid=""
+    local worker_pgid=""
+    local killed_command=""
+    local coordinator_metadata=""
+    local coordinator_pid=""
+    local state_root=""
+    local socket_path=""
+    local journal_path=""
+    local gate_exit=""
+    local killed_command_key=""
+    local attempt
+    local ready=0
+    local settled=0
+
+    # shellcheck disable=SC2329
+    cleanup_worker_loss_fixture() {
+      if [[ "$worker_pgid" =~ ^[1-9][0-9]*$ ]]; then
+        kill -KILL -- "-$worker_pgid" 2>/dev/null || true
+      fi
+      if [[ "$gate_pid" =~ ^[1-9][0-9]*$ ]]; then
+        kill -CONT "$gate_pid" 2>/dev/null || true
+        kill -KILL "$gate_pid" 2>/dev/null || true
+        wait "$gate_pid" 2>/dev/null || true
+      fi
+      if [[ -f "$coordinator_metadata" ]]; then
+        coordinator_pid="$(node -e '
+          const value = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+          process.stdout.write(String(value.coordinatorIdentity?.pid ?? ""));
+        ' "$coordinator_metadata" 2>/dev/null || true)"
+        if [[ "$coordinator_pid" =~ ^[1-9][0-9]*$ ]]; then
+          kill -TERM "$coordinator_pid" 2>/dev/null || true
+        fi
+      fi
+    }
+    fail_worker_loss_fixture() {
+      cp "$gate_output" "$output_file" 2>/dev/null || true
+      fail "$*"
+    }
+    trap cleanup_worker_loss_fixture EXIT
+
+    AGENT_QUALITY_GATE_LOCK=1 \
+      AGENT_QUALITY_GATE_LOCK_HELD='' \
+      AGENT_QUALITY_GATE_LOCK_DIR="$fixture_lock_root" \
+      AGENT_QUALITY_GATE_COORDINATOR=1 \
+      AGENT_QUALITY_GATE_CAPACITY=3 \
+      AGENT_QUALITY_GATE_TEST_WORKER_REGISTRATION_BARRIER="$barrier" \
+      NODE_ENV=test \
+      QG_WORKER_STARTED="$worker_started" \
+      PATH="$fixture_repo/bin:$PATH" \
+      /bin/bash "$repo_root/scripts/agent-quality-gate.sh" \
+        --changed-paths-file changed-paths.txt \
+        --base HEAD \
+        --run \
+        --parallel 2 \
+        --lock-wait 30 \
+        > "$gate_output" 2>&1 &
+    gate_pid=$!
+
+    for ((attempt = 0; attempt < 300; attempt++)); do
+      if [[ -s "${barrier}.ready" && -s "$worker_started" ]]; then
+        ready=1
+        break
+      fi
+      kill -0 "$gate_pid" 2>/dev/null || break
+      sleep 0.05
+    done
+    [[ "$ready" -eq 1 ]] ||
+      fail_worker_loss_fixture "parallel worker-loss fixture never acquired its first command lease"
+    worker_pgid="$(sed -n '1p' "${barrier}.ready")"
+    killed_command="$(sed -n '1p' "$worker_started")"
+    [[ "$worker_pgid" =~ ^[1-9][0-9]*$ ]] ||
+      fail_worker_loss_fixture "parallel worker-loss fixture recorded an invalid worker PGID"
+    [[ -n "$killed_command" ]] ||
+      fail_worker_loss_fixture "parallel worker-loss fixture did not record its command"
+    kill -0 -- "-$worker_pgid" 2>/dev/null ||
+      fail_worker_loss_fixture "parallel worker-loss fixture has no dedicated worker process group"
+
+    : > "${barrier}.release"
+    ready=0
+    for ((attempt = 0; attempt < 200; attempt++)); do
+      if [[ "$(wc -l < "$worker_started" | tr -d '[:space:]')" -ge 2 ]]; then
+        ready=1
+        break
+      fi
+      kill -0 "$gate_pid" 2>/dev/null || break
+      sleep 0.05
+    done
+    [[ "$ready" -eq 1 ]] ||
+      fail_worker_loss_fixture "parallel worker-loss fixture never started its remaining worker"
+
+    # Freeze only the parent while the worker group dies. This makes the test
+    # prove that SIGKILL targeted the worker and that the live parent performs
+    # coordinator cancellation and drain recovery after it resumes.
+    kill -STOP "$gate_pid"
+    kill -KILL -- "-$worker_pgid"
+    kill -0 "$gate_pid" 2>/dev/null ||
+      fail_worker_loss_fixture "killing one worker process group also killed the gate parent"
+    kill -CONT "$gate_pid"
+
+    for ((attempt = 0; attempt < 200; attempt++)); do
+      kill -0 "$gate_pid" 2>/dev/null || {
+        settled=1
+        break
+      }
+      sleep 0.1
+    done
+    [[ "$settled" -eq 1 ]] ||
+      fail_worker_loss_fixture "live gate parent did not settle after its worker disappeared"
+    set +e
+    wait "$gate_pid"
+    gate_exit=$?
+    set -e
+    gate_pid=""
+    [[ "$gate_exit" -ne 0 ]] ||
+      fail_worker_loss_fixture "a missing parallel worker result must fail the gate"
+    grep -q "parallel worker left an invalid status result" "$gate_output" ||
+      fail_worker_loss_fixture "worker loss did not report an infrastructure result failure"
+    ! grep -qF "✓ ${killed_command} (" "$gate_output" ||
+      fail_worker_loss_fixture "the killed worker was reported as successful"
+    [[ ! -e "$fixture_repo/.tmp/agent-quality-gate/last-success.stamp" ]] ||
+      fail_worker_loss_fixture "worker loss wrote a reusable whole-run success stamp"
+    killed_command_key="$(node -e '
+      process.stdout.write(require("node:crypto").createHash("sha256").update(process.argv[1]).digest("hex"));
+    ' "$killed_command")"
+    if [[ -f "$fixture_repo/.tmp/agent-quality-gate/command-stamps.tsv" ]] &&
+      awk -F '\t' -v key="$killed_command_key" '$2 == key { found = 1 } END { exit found ? 0 : 1 }' \
+        "$fixture_repo/.tmp/agent-quality-gate/command-stamps.tsv"; then
+      fail_worker_loss_fixture "worker loss wrote a reusable stamp for the killed command"
+    fi
+
+    coordinator_metadata="$({
+      find "$fixture_lock_root" -type f -name coordinator.json -print
+    } | head -n1)"
+    [[ -f "$coordinator_metadata" ]] ||
+      fail_worker_loss_fixture "worker-loss fixture did not retain coordinator metadata"
+    IFS=$'\t' read -r state_root socket_path coordinator_pid <<< "$(node -e '
+      const value = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+      process.stdout.write([
+        value.stateRoot ?? "",
+        value.socketPath ?? "",
+        String(value.coordinatorIdentity?.pid ?? ""),
+      ].join("\t"));
+    ' "$coordinator_metadata")"
+    [[ -n "$state_root" && -n "$socket_path" ]] ||
+      fail_worker_loss_fixture "worker-loss fixture coordinator metadata is incomplete"
+    journal_path="$state_root/journal.json"
+    settled=0
+    for ((attempt = 0; attempt < 100; attempt++)); do
+      if node -e '
+        const value = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+        process.exit(
+          Object.keys(value.leases ?? {}).length === 0 &&
+          Object.keys(value.requests ?? {}).length === 0 &&
+          Object.keys(value.drainObligations ?? {}).length === 0 ? 0 : 1
+        );
+      ' "$journal_path" 2>/dev/null; then
+        settled=1
+        break
+      fi
+      sleep 0.1
+    done
+    [[ "$settled" -eq 1 ]] ||
+      fail_worker_loss_fixture "worker loss left a queued, granted, or drain-required coordinator lease"
+
+    settled=0
+    for ((attempt = 0; attempt < 100; attempt++)); do
+      if [[ ! -e "$socket_path" && ! -e "$fixture_lock_root/run.lock" ]]; then
+        settled=1
+        break
+      fi
+      sleep 0.1
+    done
+    [[ "$settled" -eq 1 ]] ||
+      fail_worker_loss_fixture "the drained worker-loss coordinator did not release its socket and legacy lock"
+    coordinator_pid=""
+    trap - EXIT
+  )
+  rm -rf "$fixture_repo" "$fixture_lock_root"
+}
+
+run_parallel_release_failure_coordinator_regression() {
+  local fixture_repo
+  local fixture_lock_root
+  fixture_repo="$(mktemp -d)"
+  fixture_lock_root="$(mktemp -d /tmp/qgr.XXXXXX)"
+  (
+    cd "$fixture_repo"
+    git init -q
+    git config user.email test@example.invalid
+    git config user.name "Quality Gate Test"
+    mkdir -p bin scripts/context scripts/gate tools
+    printf 'console.log("fixture");\n' > scripts/gate/agent-prewarm.mjs
+    printf 'console.log("fixture");\n' > scripts/context/agent-context-budget.mjs
+    cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+printf './tools/trunk %s\n' "$*" >> "${QG_RELEASE_STARTED:?}"
+sleep 0.2
+STUB
+    cat > bin/pnpm <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--version" ]]; then
+  printf '9.0.0\n'
+  exit 0
+fi
+printf 'pnpm %s\n' "$*" >> "${QG_RELEASE_STARTED:?}"
+sleep 0.2
+STUB
+    chmod +x bin/pnpm tools/trunk
+    git add .
+    git commit -qm init
+    printf 'scripts/gate/agent-prewarm.mjs\nscripts/context/agent-context-budget.mjs\n' \
+      > changed-paths.txt
+
+    local gate_output="$fixture_repo/gate-output"
+    local worker_started="$fixture_repo/worker-started"
+    local gate_exit
+    local coordinator_pid=""
+    local coordinator_metadata=""
+    local attempt
+    local settled=0
+
+    # shellcheck disable=SC2329
+    cleanup_release_failure_fixture() {
+      if [[ "$coordinator_pid" =~ ^[1-9][0-9]*$ ]]; then
+        kill -TERM "$coordinator_pid" 2>/dev/null || true
+      fi
+    }
+    fail_release_failure_fixture() {
+      cp "$gate_output" "$output_file" 2>/dev/null || true
+      fail "$*"
+    }
+    trap cleanup_release_failure_fixture EXIT
+
+    set +e
+    AGENT_QUALITY_GATE_LOCK=1 \
+      AGENT_QUALITY_GATE_LOCK_HELD='' \
+      AGENT_QUALITY_GATE_LOCK_DIR="$fixture_lock_root" \
+      AGENT_QUALITY_GATE_COORDINATOR=1 \
+      AGENT_QUALITY_GATE_CAPACITY=3 \
+      AGENT_QUALITY_GATE_TEST_PARALLEL_RELEASE_FAILURE_AT=1 \
+      NODE_ENV=test \
+      QG_RELEASE_STARTED="$worker_started" \
+      PATH="$fixture_repo/bin:$PATH" \
+      /bin/bash "$repo_root/scripts/agent-quality-gate.sh" \
+        --changed-paths-file changed-paths.txt \
+        --base HEAD \
+        --run \
+        --parallel 2 \
+        --lock-wait 30 \
+        > "$gate_output" 2>&1
+    gate_exit=$?
+    set -e
+    [[ "$gate_exit" -eq 2 ]] ||
+      fail_release_failure_fixture "parallel release failure must stop the gate with exit 2"
+    grep -q "injected parallel coordinator lease-release failure" "$gate_output" ||
+      fail_release_failure_fixture "parallel release failure injection did not run"
+    grep -q "The quality gate stops before it schedules another command" "$gate_output" ||
+      fail_release_failure_fixture "parallel release failure did not report fail-stop dispatch"
+    node -e '
+      const output = require("node:fs").readFileSync(process.argv[1], "utf8");
+      const marker = "Running quality commands with parallelism 2.";
+      const segment = output.slice(output.indexOf(marker) + marker.length);
+      const starts = segment.match(/^\+ /gmu) ?? [];
+      if (!output.includes(marker) || starts.length !== 2) process.exit(1);
+    ' "$gate_output" ||
+      fail_release_failure_fixture "the parallel pool refilled after a lease-release failure"
+    [[ ! -e "$fixture_repo/.tmp/agent-quality-gate/last-success.stamp" ]] ||
+      fail_release_failure_fixture "parallel release failure wrote a reusable success stamp"
+
+    coordinator_metadata="$({
+      find "$fixture_lock_root" -type f -name coordinator.json -print
+    } | head -n1)"
+    [[ -f "$coordinator_metadata" ]] ||
+      fail_release_failure_fixture "parallel release fixture did not retain coordinator metadata"
+    coordinator_pid="$(node -e '
+      const value = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+      process.stdout.write(String(value.coordinatorIdentity?.pid ?? ""));
+    ' "$coordinator_metadata")"
+    for ((attempt = 0; attempt < 100; attempt++)); do
+      if [[ ! -e "$fixture_lock_root/run.lock" ]]; then
+        settled=1
+        break
+      fi
+      sleep 0.1
+    done
+    [[ "$settled" -eq 1 ]] ||
+      fail_release_failure_fixture "parallel release failure left the coordinator lock held"
+    coordinator_pid=""
+    trap - EXIT
+  )
+  rm -rf "$fixture_repo" "$fixture_lock_root"
+}
+
+run_stale_failure_result_regression() {
+  local fixture_repo
+  local fixture_lock_root
+  fixture_repo="$(mktemp -d)"
+  fixture_lock_root="$(mktemp -d /tmp/qgf.XXXXXX)"
+  (
+    cd "$fixture_repo"
+    git init -q
+    git config user.email test@example.invalid
+    git config user.name "Quality Gate Test"
+    mkdir -p bin scripts/gate tools
+    printf 'console.log("fixture");\n' > scripts/gate/agent-prewarm.mjs
+    cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+    cat > bin/pnpm <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--version" ]]; then
+  printf '9.0.0\n'
+  exit 0
+fi
+if [[ "$*" == "agent:prewarm:test" ]]; then
+  : > "${QG_FAILING_COMMAND_STARTED:?}"
+  while [[ ! -e "${QG_FAILING_COMMAND_RELEASE:?}" ]]; do
+    sleep 0.05
+  done
+  printf 'intentional fixture failure\n' >&2
+  exit 1
+fi
+exit 0
+STUB
+    chmod +x bin/pnpm tools/trunk
+    git add .
+    git commit -qm init
+    printf 'scripts/gate/agent-prewarm.mjs\n' > changed-paths.txt
+
+    local gate_output="$fixture_repo/gate-output"
+    local command_started="$fixture_repo/command-started"
+    local command_release="$fixture_repo/command-release"
+    local gate_pid=""
+    local coordinator_metadata=""
+    local coordinator_pid=""
+    local state_root=""
+    local socket_path=""
+    local result_file=""
+    local gate_exit=""
+    local attempt
+    local ready=0
+    local settled=0
+
+    # shellcheck disable=SC2329
+    cleanup_stale_failure_fixture() {
+      if [[ "$gate_pid" =~ ^[1-9][0-9]*$ ]]; then
+        kill -KILL "$gate_pid" 2>/dev/null || true
+        wait "$gate_pid" 2>/dev/null || true
+      fi
+      if [[ -f "$coordinator_metadata" ]]; then
+        coordinator_pid="$(node -e '
+          const value = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+          process.stdout.write(String(value.coordinatorIdentity?.pid ?? ""));
+        ' "$coordinator_metadata" 2>/dev/null || true)"
+        if [[ "$coordinator_pid" =~ ^[1-9][0-9]*$ ]]; then
+          kill -TERM "$coordinator_pid" 2>/dev/null || true
+        fi
+      fi
+    }
+    fail_stale_failure_fixture() {
+      cp "$gate_output" "$output_file" 2>/dev/null || true
+      fail "$*"
+    }
+    trap cleanup_stale_failure_fixture EXIT
+
+    AGENT_QUALITY_GATE_LOCK=1 \
+      AGENT_QUALITY_GATE_LOCK_HELD='' \
+      AGENT_QUALITY_GATE_LOCK_DIR="$fixture_lock_root" \
+      AGENT_QUALITY_GATE_COORDINATOR=1 \
+      AGENT_QUALITY_GATE_CAPACITY=3 \
+      QG_FAILING_COMMAND_STARTED="$command_started" \
+      QG_FAILING_COMMAND_RELEASE="$command_release" \
+      PATH="$fixture_repo/bin:$PATH" \
+      /bin/bash "$repo_root/scripts/agent-quality-gate.sh" \
+        --changed-paths-file changed-paths.txt \
+        --base HEAD \
+        --run \
+        --parallel 1 \
+        --lock-wait 30 \
+        > "$gate_output" 2>&1 &
+    gate_pid=$!
+
+    for ((attempt = 0; attempt < 300; attempt++)); do
+      if [[ -e "$command_started" ]]; then
+        ready=1
+        break
+      fi
+      kill -0 "$gate_pid" 2>/dev/null || break
+      sleep 0.05
+    done
+    [[ "$ready" -eq 1 ]] ||
+      fail_stale_failure_fixture "stale-failure fixture never started its failing mapped command"
+    printf 'console.log("changed while failing");\n' >> scripts/gate/agent-prewarm.mjs
+    : > "$command_release"
+
+    set +e
+    wait "$gate_pid"
+    gate_exit=$?
+    set -e
+    gate_pid=""
+    [[ "$gate_exit" -ne 0 ]] ||
+      fail_stale_failure_fixture "a mapped command failure with changed inputs must fail"
+    grep -q "quality-gate inputs changed before terminal result publication" "$gate_output" ||
+      fail_stale_failure_fixture "failure publication did not revalidate the coordinator fingerprint"
+    grep -q "shared terminal result is forbidden" "$gate_output" ||
+      fail_stale_failure_fixture "fingerprint mismatch did not forbid terminal result publication"
+    [[ ! -e "$fixture_repo/.tmp/agent-quality-gate/last-success.stamp" ]] ||
+      fail_stale_failure_fixture "stale failure wrote a whole-run success stamp"
+
+    coordinator_metadata="$({
+      find "$fixture_lock_root" -type f -name coordinator.json -print
+    } | head -n1)"
+    [[ -f "$coordinator_metadata" ]] ||
+      fail_stale_failure_fixture "stale-failure fixture did not retain coordinator metadata"
+    IFS=$'\t' read -r state_root socket_path coordinator_pid <<< "$(node -e '
+      const value = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+      process.stdout.write([
+        value.stateRoot ?? "",
+        value.socketPath ?? "",
+        String(value.coordinatorIdentity?.pid ?? ""),
+      ].join("\t"));
+    ' "$coordinator_metadata")"
+    [[ -n "$state_root" && -n "$socket_path" ]] ||
+      fail_stale_failure_fixture "stale-failure coordinator metadata is incomplete"
+    result_file="$({
+      find "$state_root/results" -type f -name '*.json' -print 2>/dev/null
+    } | head -n1)"
+    [[ -f "$result_file" ]] ||
+      fail_stale_failure_fixture "fingerprint cancellation did not persist a terminal coordinator result"
+    node -e '
+      const value = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+      if (value.status !== "cancelled") process.exit(1);
+      if (value.payload?.reason !== "fingerprint changed before terminal result publication") process.exit(1);
+    ' "$result_file" ||
+      fail_stale_failure_fixture "changed failing inputs published a stale failure instead of cancellation"
+    if ! node -e '
+      const fs = require("node:fs");
+      const path = require("node:path");
+      for (const directory of fs.readdirSync(process.argv[1])) {
+        const candidate = path.join(process.argv[1], directory);
+        if (!fs.statSync(candidate).isDirectory()) continue;
+        for (const name of fs.readdirSync(candidate)) {
+          const value = JSON.parse(fs.readFileSync(path.join(candidate, name), "utf8"));
+          if (value.status === "failure") process.exit(1);
+        }
+      }
+    ' "$state_root/results"; then
+      fail_stale_failure_fixture "changed failing inputs persisted a shareable failure result"
+    fi
+
+    settled=0
+    for ((attempt = 0; attempt < 100; attempt++)); do
+      if [[ ! -e "$socket_path" && ! -e "$fixture_lock_root/run.lock" ]]; then
+        settled=1
+        break
+      fi
+      sleep 0.1
+    done
+    [[ "$settled" -eq 1 ]] ||
+      fail_stale_failure_fixture "stale-failure coordinator did not settle after cancellation"
+    coordinator_pid=""
+    trap - EXIT
+  )
+  rm -rf "$fixture_repo" "$fixture_lock_root"
+}
+
+run_sequential_descendant_lease_regression() {
+  local fixture_repo
+  local fixture_lock_root
+  fixture_repo="$(mktemp -d)"
+  fixture_lock_root="$(mktemp -d /tmp/qgd.XXXXXX)"
+  (
+    cd "$fixture_repo"
+    git init -q
+    git config user.email test@example.invalid
+    git config user.name "Quality Gate Test"
+    mkdir -p bin scripts/context scripts/gate tools
+    printf 'console.log("holder fixture");\n' > scripts/gate/agent-prewarm.mjs
+    printf 'console.log("contender fixture");\n' \
+      > scripts/context/agent-context-budget.mjs
+    cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+if [[ -n "${QG_CONTENDER_STARTED:-}" ]]; then
+  : > "$QG_CONTENDER_STARTED"
+fi
+exit 0
+STUB
+    cat > bin/qg-sequential-descendant <<'STUB'
+#!/usr/bin/env bash
+trap '' TERM
+if [[ -n "${QG_REPLACEMENT_PID_FILE:-}" ]]; then
+  if [[ "${QG_IS_REPLACEMENT:-}" == 1 ]]; then
+    printf '%s\n' "$$" > "$QG_REPLACEMENT_PID_FILE"
+    while :; do sleep 1; done
+  fi
+  printf '%s\n' "$$" > "${QG_DESCENDANT_PID_FILE:?}"
+  while [[ ! -e "${QG_DRAIN_REFRESH_BARRIER:?}.ready" ]]; do sleep 0.01; done
+  QG_IS_REPLACEMENT=1 qg-sequential-descendant >/dev/null 2>&1 &
+  while [[ ! -s "$QG_REPLACEMENT_PID_FILE" ]]; do sleep 0.01; done
+  exit 0
+fi
+printf '%s\n' "$$" > "${QG_DESCENDANT_PID_FILE:?}"
+while :; do sleep 1; done
+STUB
+    cat > bin/pnpm <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--version" ]]; then
+  printf '9.0.0\n'
+  exit 0
+fi
+if [[ "${QG_GATE_ROLE:-}" == "holder" &&
+  "$*" == "agent:prewarm:test" ]]; then
+  qg-sequential-descendant >/dev/null 2>&1 &
+  exit 0
+fi
+if [[ -n "${QG_CONTENDER_STARTED:-}" ]]; then
+  : > "$QG_CONTENDER_STARTED"
+fi
+exit 0
+STUB
+    chmod +x bin/pnpm bin/qg-sequential-descendant tools/trunk
+    git add .
+    git commit -qm init
+    printf 'scripts/gate/agent-prewarm.mjs\n' > holder-paths.txt
+    printf 'scripts/context/agent-context-budget.mjs\n' > contender-paths.txt
+
+    local holder_output="$fixture_repo/holder-output"
+    local contender_output="$fixture_repo/contender-output"
+    local descendant_pid_file="$fixture_repo/descendant-pid"
+    local replacement_pid_file="$fixture_repo/replacement-pid"
+    local drain_refresh_barrier="$fixture_repo/drain-refresh"
+    local contender_started="$fixture_repo/contender-started"
+    local holder_pid=""
+    local holder_start=""
+    local contender_pid=""
+    local contender_start=""
+    local descendant_pid=""
+    local descendant_start=""
+    local replacement_pid=""
+    local replacement_start=""
+    local coordinator_pid=""
+    local coordinator_start=""
+    local coordinator_metadata=""
+    local state_root=""
+    local journal_path=""
+    local holder_exit
+    local contender_exit
+    local ready=0
+    local observed=0
+    local settled=0
+    local attempt
+
+    # shellcheck disable=SC2329
+    cleanup_sequential_descendant_fixture() {
+      if [[ "$holder_pid" =~ ^[1-9][0-9]*$ && -n "$holder_start" ]] &&
+        gate_test_process_has_live_start "$holder_pid" "$holder_start"; then
+        gate_test_signal_with_current_parent \
+          "sequential descendant holder gate" TERM \
+          "$holder_pid" "$holder_start" || true
+      fi
+      if [[ "$contender_pid" =~ ^[1-9][0-9]*$ && -n "$contender_start" ]] &&
+        gate_test_process_has_live_start "$contender_pid" "$contender_start"; then
+        gate_test_signal_with_current_parent \
+          "sequential descendant contender gate" TERM \
+          "$contender_pid" "$contender_start" || true
+      fi
+      if [[ "$descendant_pid" =~ ^[1-9][0-9]*$ && -n "$descendant_start" ]] &&
+        gate_test_process_has_live_start "$descendant_pid" "$descendant_start"; then
+        gate_test_signal_with_current_parent \
+          "sequential mapped-command descendant" KILL \
+          "$descendant_pid" "$descendant_start" || true
+      fi
+      if [[ "$replacement_pid" =~ ^[1-9][0-9]*$ && -n "$replacement_start" ]] &&
+        gate_test_process_has_live_start "$replacement_pid" "$replacement_start"; then
+        gate_test_signal_with_current_parent \
+          "sequential mapped-command replacement" KILL \
+          "$replacement_pid" "$replacement_start" || true
+      fi
+      wait "$holder_pid" 2>/dev/null || true
+      wait "$contender_pid" 2>/dev/null || true
+      coordinator_metadata="$({
+        find "$fixture_lock_root" -type f -name coordinator.json -print 2>/dev/null
+      } | head -n1)"
+      if [[ -f "$coordinator_metadata" ]]; then
+        IFS=$'\t' read -r coordinator_pid coordinator_start <<< "$(node -e '
+          const value = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+          process.stdout.write([
+            String(value.coordinatorIdentity?.pid ?? ""),
+            value.coordinatorIdentity?.startUtc ?? "",
+          ].join("\t"));
+        ' "$coordinator_metadata" 2>/dev/null || true)"
+        if [[ "$coordinator_pid" =~ ^[1-9][0-9]*$ && -n "$coordinator_start" ]] &&
+          gate_test_process_has_live_start "$coordinator_pid" "$coordinator_start"; then
+          gate_test_signal_with_current_parent \
+            "sequential descendant coordinator" TERM \
+            "$coordinator_pid" "$coordinator_start" || true
+        fi
+      fi
+    }
+    fail_sequential_descendant_fixture() {
+      {
+        sed 's/^/holder: /' "$holder_output" 2>/dev/null || true
+        sed 's/^/contender: /' "$contender_output" 2>/dev/null || true
+      } > "$output_file"
+      fail "$*"
+    }
+    trap cleanup_sequential_descendant_fixture EXIT
+
+    AGENT_QUALITY_GATE_LOCK=1 \
+      AGENT_QUALITY_GATE_LOCK_HELD='' \
+      AGENT_QUALITY_GATE_LOCK_DIR="$fixture_lock_root" \
+      AGENT_QUALITY_GATE_COORDINATOR=1 \
+      AGENT_QUALITY_GATE_CAPACITY=1 \
+      NODE_ENV=test \
+      QG_GATE_ROLE=holder \
+      QG_DESCENDANT_PID_FILE="$descendant_pid_file" \
+      PATH="$fixture_repo/bin:$PATH" \
+      /bin/bash "$repo_root/scripts/agent-quality-gate.sh" \
+        --changed-paths-file holder-paths.txt \
+        --base HEAD --run --parallel 1 --lock-wait 30 \
+        > "$holder_output" 2>&1 &
+    holder_pid=$!
+    holder_start="$(gate_test_process_start "$holder_pid")"
+    [[ -n "$holder_start" ]] ||
+      fail_sequential_descendant_fixture "could not identify the holder gate"
+
+    for ((attempt = 0; attempt < 400; attempt++)); do
+      if [[ -s "$descendant_pid_file" ]]; then
+        ready=1
+        break
+      fi
+      gate_test_process_has_live_start "$holder_pid" "$holder_start" || break
+      sleep 0.05
+    done
+    [[ "$ready" -eq 1 ]] ||
+      fail_sequential_descendant_fixture "the holder command did not fork its descendant"
+    descendant_pid="$(cat "$descendant_pid_file")"
+    descendant_start="$(gate_test_process_start "$descendant_pid")"
+    [[ "$descendant_pid" =~ ^[1-9][0-9]*$ && -n "$descendant_start" ]] ||
+      fail_sequential_descendant_fixture "the holder recorded an invalid descendant identity"
+    gate_test_process_has_live_start "$descendant_pid" "$descendant_start" ||
+      fail_sequential_descendant_fixture "the descendant was not alive before the contender registered"
+
+    AGENT_QUALITY_GATE_LOCK=1 \
+      AGENT_QUALITY_GATE_LOCK_HELD='' \
+      AGENT_QUALITY_GATE_LOCK_DIR="$fixture_lock_root" \
+      AGENT_QUALITY_GATE_COORDINATOR=1 \
+      AGENT_QUALITY_GATE_CAPACITY=1 \
+      NODE_ENV=test \
+      QG_GATE_ROLE=contender \
+      QG_CONTENDER_STARTED="$contender_started" \
+      PATH="$fixture_repo/bin:$PATH" \
+      /bin/bash "$repo_root/scripts/agent-quality-gate.sh" \
+        --changed-paths-file contender-paths.txt \
+        --base HEAD --run --parallel 1 --lock-wait 30 \
+        > "$contender_output" 2>&1 &
+    contender_pid=$!
+    contender_start="$(gate_test_process_start "$contender_pid")"
+    [[ -n "$contender_start" ]] ||
+      fail_sequential_descendant_fixture "could not identify the contender gate"
+
+    for ((attempt = 0; attempt < 400; attempt++)); do
+      if [[ -e "$contender_started" ]]; then
+        if gate_test_process_has_live_start "$descendant_pid" "$descendant_start"; then
+          fail_sequential_descendant_fixture \
+            "the contender acquired capacity while the completed command's descendant was alive"
+        fi
+        observed=1
+        break
+      fi
+      gate_test_process_has_live_start "$contender_pid" "$contender_start" || break
+      sleep 0.05
+    done
+    [[ "$observed" -eq 1 ]] ||
+      fail_sequential_descendant_fixture "the contender did not start after descendant cleanup"
+
+    set +e
+    wait "$holder_pid"
+    holder_exit=$?
+    wait "$contender_pid"
+    contender_exit=$?
+    set -e
+    holder_pid=""
+    contender_pid=""
+    [[ "$holder_exit" -eq 0 && "$contender_exit" -eq 0 ]] ||
+      fail_sequential_descendant_fixture \
+        "the sequential descendant gates did not both complete successfully"
+    grep -Fq \
+      "A completed mapped command left descendants running; stopping them before releasing its scheduler lease." \
+      "$holder_output" ||
+      fail_sequential_descendant_fixture "the holder did not report descendant cleanup"
+    grep -Fq \
+      "The completed mapped command's descendants are gone; releasing its scheduler lease." \
+      "$holder_output" ||
+      fail_sequential_descendant_fixture "the holder did not confirm descendant cleanup"
+    descendant_pid=""
+
+    for ((attempt = 0; attempt < 200; attempt++)); do
+      if [[ ! -e "$fixture_lock_root/run.lock" ]]; then
+        settled=1
+        break
+      fi
+      sleep 0.05
+    done
+    [[ "$settled" -eq 1 ]] ||
+      fail_sequential_descendant_fixture \
+        "the coordinator did not release its legacy owner after the happy-path drain"
+
+    # Hold the drain after its top refresh and capture. The live descendant
+    # replaces itself with a process that inherits the run handles, then exits.
+    # The next refresh must capture the replacement before capacity is released.
+    holder_output="$fixture_repo/replacement-holder-output"
+    contender_output="$fixture_repo/replacement-contender-output"
+    rm -f "$descendant_pid_file" "$replacement_pid_file" "$contender_started" \
+      "${drain_refresh_barrier}.used" "${drain_refresh_barrier}.ready" \
+      "${drain_refresh_barrier}.release"
+    holder_start=""
+    contender_start=""
+    descendant_start=""
+    replacement_start=""
+    ready=0
+    observed=0
+
+    AGENT_QUALITY_GATE_LOCK=1 \
+      AGENT_QUALITY_GATE_LOCK_HELD='' \
+      AGENT_QUALITY_GATE_LOCK_DIR="$fixture_lock_root" \
+      AGENT_QUALITY_GATE_COORDINATOR=1 \
+      AGENT_QUALITY_GATE_CAPACITY=1 \
+      AGENT_QUALITY_GATE_TEST_DRAIN_REFRESH_BARRIER="$drain_refresh_barrier" \
+      NODE_ENV=test \
+      QG_GATE_ROLE=holder \
+      QG_DESCENDANT_PID_FILE="$descendant_pid_file" \
+      QG_REPLACEMENT_PID_FILE="$replacement_pid_file" \
+      QG_DRAIN_REFRESH_BARRIER="$drain_refresh_barrier" \
+      PATH="$fixture_repo/bin:$PATH" \
+      /bin/bash "$repo_root/scripts/agent-quality-gate.sh" \
+        --changed-paths-file holder-paths.txt \
+        --base HEAD --run --parallel 1 --lock-wait 30 \
+        > "$holder_output" 2>&1 &
+    holder_pid=$!
+    holder_start="$(gate_test_process_start "$holder_pid")"
+    [[ -n "$holder_start" ]] ||
+      fail_sequential_descendant_fixture \
+        "could not identify the replacement holder gate"
+    for ((attempt = 0; attempt < 400; attempt++)); do
+      if [[ -s "$descendant_pid_file" ]]; then
+        ready=1
+        break
+      fi
+      gate_test_process_has_live_start "$holder_pid" "$holder_start" || break
+      sleep 0.05
+    done
+    [[ "$ready" -eq 1 ]] ||
+      fail_sequential_descendant_fixture \
+        "the replacement holder did not fork its first descendant"
+    descendant_pid="$(cat "$descendant_pid_file")"
+    descendant_start="$(gate_test_process_start "$descendant_pid")"
+    [[ "$descendant_pid" =~ ^[1-9][0-9]*$ && -n "$descendant_start" ]] ||
+      fail_sequential_descendant_fixture \
+        "the replacement holder recorded an invalid first descendant identity"
+
+    AGENT_QUALITY_GATE_LOCK=1 \
+      AGENT_QUALITY_GATE_LOCK_HELD='' \
+      AGENT_QUALITY_GATE_LOCK_DIR="$fixture_lock_root" \
+      AGENT_QUALITY_GATE_COORDINATOR=1 \
+      AGENT_QUALITY_GATE_CAPACITY=1 \
+      NODE_ENV=test \
+      QG_GATE_ROLE=contender \
+      QG_CONTENDER_STARTED="$contender_started" \
+      PATH="$fixture_repo/bin:$PATH" \
+      /bin/bash "$repo_root/scripts/agent-quality-gate.sh" \
+        --changed-paths-file contender-paths.txt \
+        --base HEAD --run --parallel 1 --lock-wait 30 \
+        > "$contender_output" 2>&1 &
+    contender_pid=$!
+    contender_start="$(gate_test_process_start "$contender_pid")"
+    [[ -n "$contender_start" ]] ||
+      fail_sequential_descendant_fixture \
+        "could not identify the replacement contender gate"
+
+    ready=0
+    for ((attempt = 0; attempt < 400; attempt++)); do
+      if [[ -e "${drain_refresh_barrier}.ready" &&
+        -s "$replacement_pid_file" ]]; then
+        ready=1
+        break
+      fi
+      gate_test_process_has_live_start "$holder_pid" "$holder_start" || break
+      sleep 0.05
+    done
+    [[ "$ready" -eq 1 ]] ||
+      fail_sequential_descendant_fixture \
+        "the descendant did not publish its replacement at the drain refresh barrier"
+    replacement_pid="$(cat "$replacement_pid_file")"
+    replacement_start="$(gate_test_process_start "$replacement_pid")"
+    [[ "$replacement_pid" =~ ^[1-9][0-9]*$ && -n "$replacement_start" ]] ||
+      fail_sequential_descendant_fixture \
+        "the descendant recorded an invalid replacement identity"
+    gate_test_process_has_live_start "$replacement_pid" "$replacement_start" ||
+      fail_sequential_descendant_fixture \
+        "the replacement was not alive while the drain barrier was held"
+    if [[ -e "$contender_started" ]]; then
+      fail_sequential_descendant_fixture \
+        "the contender started while the replacement held the scheduler lease"
+    fi
+    for ((attempt = 0; attempt < 200; attempt++)); do
+      gate_test_process_has_live_start "$descendant_pid" "$descendant_start" || break
+      sleep 0.01
+    done
+    if gate_test_process_has_live_start "$descendant_pid" "$descendant_start"; then
+      fail_sequential_descendant_fixture \
+        "the first descendant did not exit after publishing its replacement"
+    fi
+    : > "${drain_refresh_barrier}.release"
+
+    for ((attempt = 0; attempt < 500; attempt++)); do
+      if [[ -e "$contender_started" ]]; then
+        if gate_test_process_has_live_start "$replacement_pid" "$replacement_start"; then
+          fail_sequential_descendant_fixture \
+            "the contender acquired capacity while the replacement was alive"
+        fi
+        observed=1
+        break
+      fi
+      gate_test_process_has_live_start "$contender_pid" "$contender_start" || break
+      sleep 0.05
+    done
+    [[ "$observed" -eq 1 ]] ||
+      fail_sequential_descendant_fixture \
+        "the contender did not start after the replacement drain"
+    set +e
+    wait "$holder_pid"
+    holder_exit=$?
+    wait "$contender_pid"
+    contender_exit=$?
+    set -e
+    holder_pid=""
+    contender_pid=""
+    [[ "$holder_exit" -eq 0 && "$contender_exit" -eq 0 ]] ||
+      fail_sequential_descendant_fixture \
+        "the replacement holder and contender did not both complete successfully"
+    settled=0
+    for ((attempt = 0; attempt < 200; attempt++)); do
+      if [[ ! -e "$fixture_lock_root/run.lock" ]]; then
+        settled=1
+        break
+      fi
+      sleep 0.05
+    done
+    [[ "$settled" -eq 1 ]] ||
+      fail_sequential_descendant_fixture \
+        "the replacement drain left its coordinator run lock behind"
+    settled=0
+    for ((attempt = 0; attempt < 200; attempt++)); do
+      if [[ -z "$(find "$fixture_lock_root" -type f \
+        \( -name 'captured.*' -o -name 'holder.*' \) -print 2>/dev/null)" &&
+        -z "$(find "$fixture_lock_root/condemned.d" -type f -print 2>/dev/null)" ]]; then
+        settled=1
+        break
+      fi
+      sleep 0.05
+    done
+    [[ "$settled" -eq 1 ]] ||
+      fail_sequential_descendant_fixture \
+        "the replacement drain did not finish its marker cleanup after coordinator shutdown"
+    [[ -z "$(find "$fixture_lock_root" -type f -name 'captured.*' -print 2>/dev/null)" ]] ||
+      fail_sequential_descendant_fixture \
+        "the replacement drain left a captured process set behind"
+    [[ -z "$(find "$fixture_lock_root" -type f -name 'holder.*' -print 2>/dev/null)" ]] ||
+      fail_sequential_descendant_fixture \
+        "the replacement drain left its descendant marker behind"
+    [[ -z "$(find "$fixture_lock_root/condemned.d" -type f -print 2>/dev/null)" ]] ||
+      fail_sequential_descendant_fixture \
+        "the replacement drain left a recovery obligation behind"
+    descendant_pid=""
+    replacement_pid=""
+
+    # Force coordinator-mode cleanup to stop before its first signal. The
+    # failed active-command drain must keep the mapped-command verdict, its
+    # descendant, and its journal obligation. A later coordinator client must
+    # drain that exact obligation before it starts mapped work.
+    holder_output="$fixture_repo/coordinator-failed-holder-output"
+    contender_output="$fixture_repo/coordinator-recovery-output"
+    rm -f "$descendant_pid_file" "$contender_started"
+    holder_start=""
+    contender_start=""
+    descendant_start=""
+    ready=0
+    observed=0
+
+    AGENT_QUALITY_GATE_LOCK=1 \
+      AGENT_QUALITY_GATE_LOCK_HELD='' \
+      AGENT_QUALITY_GATE_LOCK_DIR="$fixture_lock_root" \
+      AGENT_QUALITY_GATE_COORDINATOR=1 \
+      AGENT_QUALITY_GATE_CAPACITY=1 \
+      AGENT_QUALITY_GATE_LOCK_ORPHAN_DRAIN_SECONDS=0 \
+      NODE_ENV=test \
+      QG_GATE_ROLE=holder \
+      QG_DESCENDANT_PID_FILE="$descendant_pid_file" \
+      PATH="$fixture_repo/bin:$PATH" \
+      /bin/bash "$repo_root/scripts/agent-quality-gate.sh" \
+        --changed-paths-file holder-paths.txt \
+        --base HEAD --run --parallel 1 --lock-wait 30 \
+        > "$holder_output" 2>&1 &
+    holder_pid=$!
+    holder_start="$(gate_test_process_start "$holder_pid")"
+    [[ -n "$holder_start" ]] ||
+      fail_sequential_descendant_fixture \
+        "could not identify the zero-bound coordinator holder gate"
+    for ((attempt = 0; attempt < 400; attempt++)); do
+      if [[ -s "$descendant_pid_file" ]]; then
+        ready=1
+        break
+      fi
+      gate_test_process_has_live_start "$holder_pid" "$holder_start" || break
+      sleep 0.05
+    done
+    [[ "$ready" -eq 1 ]] ||
+      fail_sequential_descendant_fixture \
+        "the zero-bound coordinator holder did not fork its descendant"
+    descendant_pid="$(cat "$descendant_pid_file")"
+    descendant_start="$(gate_test_process_start "$descendant_pid")"
+    [[ "$descendant_pid" =~ ^[1-9][0-9]*$ && -n "$descendant_start" ]] ||
+      fail_sequential_descendant_fixture \
+        "the zero-bound coordinator holder recorded an invalid descendant identity"
+
+    set +e
+    wait "$holder_pid"
+    holder_exit=$?
+    set -e
+    holder_pid=""
+    [[ "$holder_exit" -eq 2 ]] ||
+      fail_sequential_descendant_fixture \
+        "the zero-bound coordinator descendant cleanup did not fail closed"
+    gate_test_process_has_live_start "$descendant_pid" "$descendant_start" ||
+      fail_sequential_descendant_fixture \
+        "the forced coordinator cleanup failure did not leave its descendant for recovery"
+    grep -Fq \
+      "The mapped command finished, but descendant cleanup did not complete." \
+      "$holder_output" ||
+      fail_sequential_descendant_fixture \
+        "the failed coordinator active drain did not report mapped-command execution"
+    if grep -Fq "No mapped command ran" "$holder_output"; then
+      fail_sequential_descendant_fixture \
+        "the failed coordinator active drain reported a no-work verdict"
+    fi
+    [[ -n "$(find "$fixture_lock_root/condemned.d" -type f -print 2>/dev/null)" ]] ||
+      fail_sequential_descendant_fixture \
+        "the failed coordinator cleanup did not persist its recovery record"
+    [[ -n "$(find "$fixture_lock_root" -type f -name 'holder.*' -print 2>/dev/null)" ]] ||
+      fail_sequential_descendant_fixture \
+        "the failed coordinator cleanup removed its descendant marker"
+
+    coordinator_metadata="$({
+      find "$fixture_lock_root" -type f -name coordinator.json -print 2>/dev/null
+    } | head -n1)"
+    [[ -f "$coordinator_metadata" ]] ||
+      fail_sequential_descendant_fixture \
+        "the failed coordinator cleanup did not retain coordinator metadata"
+    IFS=$'\t' read -r state_root journal_path <<< "$(node -e '
+      const value = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+      const root = value.stateRoot ?? "";
+      process.stdout.write([root, root ? `${root}/journal.json` : ""].join("\t"));
+    ' "$coordinator_metadata")"
+    [[ -n "$state_root" && -f "$journal_path" ]] ||
+      fail_sequential_descendant_fixture \
+        "the failed coordinator cleanup did not retain its journal"
+    node -e '
+      const value = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+      process.exit(Object.keys(value.drainObligations ?? {}).length > 0 ? 0 : 1);
+    ' "$journal_path" ||
+      fail_sequential_descendant_fixture \
+        "the failed coordinator cleanup did not retain a drain obligation"
+
+    AGENT_QUALITY_GATE_LOCK=1 \
+      AGENT_QUALITY_GATE_LOCK_HELD='' \
+      AGENT_QUALITY_GATE_LOCK_DIR="$fixture_lock_root" \
+      AGENT_QUALITY_GATE_COORDINATOR=1 \
+      AGENT_QUALITY_GATE_CAPACITY=1 \
+      AGENT_QUALITY_GATE_LOCK_ORPHAN_DRAIN_SECONDS=10 \
+      NODE_ENV=test \
+      QG_GATE_ROLE=contender \
+      QG_CONTENDER_STARTED="$contender_started" \
+      PATH="$fixture_repo/bin:$PATH" \
+      /bin/bash "$repo_root/scripts/agent-quality-gate.sh" \
+        --changed-paths-file contender-paths.txt \
+        --base HEAD --run --parallel 1 --lock-wait 30 \
+        > "$contender_output" 2>&1 &
+    contender_pid=$!
+    contender_start="$(gate_test_process_start "$contender_pid")"
+    [[ -n "$contender_start" ]] ||
+      fail_sequential_descendant_fixture \
+        "could not identify the coordinator recovery gate"
+    for ((attempt = 0; attempt < 400; attempt++)); do
+      if [[ -e "$contender_started" ]]; then
+        if gate_test_process_has_live_start "$descendant_pid" "$descendant_start"; then
+          fail_sequential_descendant_fixture \
+            "the coordinator recovery gate started before it drained the prior descendant"
+        fi
+        observed=1
+        break
+      fi
+      gate_test_process_has_live_start "$contender_pid" "$contender_start" || break
+      sleep 0.05
+    done
+    [[ "$observed" -eq 1 ]] ||
+      fail_sequential_descendant_fixture \
+        "the coordinator recovery gate did not start after draining the obligation"
+    set +e
+    wait "$contender_pid"
+    contender_exit=$?
+    set -e
+    contender_pid=""
+    [[ "$contender_exit" -eq 0 ]] ||
+      fail_sequential_descendant_fixture \
+        "the coordinator recovery gate failed after draining the prior descendant"
+    settled=0
+    for ((attempt = 0; attempt < 200; attempt++)); do
+      if node -e '
+        const value = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+        process.exit(
+          Object.keys(value.leases ?? {}).length === 0 &&
+          Object.keys(value.requests ?? {}).length === 0 &&
+          Object.keys(value.drainObligations ?? {}).length === 0 ? 0 : 1
+        );
+      ' "$journal_path" 2>/dev/null; then
+        settled=1
+        break
+      fi
+      sleep 0.05
+    done
+    [[ "$settled" -eq 1 ]] ||
+      fail_sequential_descendant_fixture \
+        "the coordinator recovery gate left a request or drain obligation behind"
+    settled=0
+    for ((attempt = 0; attempt < 200; attempt++)); do
+      if [[ ! -e "$fixture_lock_root/run.lock" ]]; then
+        settled=1
+        break
+      fi
+      sleep 0.05
+    done
+    [[ "$settled" -eq 1 ]] ||
+      fail_sequential_descendant_fixture \
+        "the coordinator recovery gate left its run lock behind"
+    settled=0
+    for ((attempt = 0; attempt < 200; attempt++)); do
+      if [[ -z "$(find "$fixture_lock_root" -type f \
+        \( -name 'captured.*' -o -name 'holder.*' \) -print 2>/dev/null)" &&
+        -z "$(find "$fixture_lock_root/condemned.d" -type f -print 2>/dev/null)" ]]; then
+        settled=1
+        break
+      fi
+      sleep 0.05
+    done
+    [[ "$settled" -eq 1 ]] ||
+      fail_sequential_descendant_fixture \
+        "the coordinator recovery gate did not finish marker cleanup after shutdown"
+    [[ -z "$(find "$fixture_lock_root" -type f -name 'captured.*' -print 2>/dev/null)" ]] ||
+      fail_sequential_descendant_fixture \
+        "the coordinator recovery gate left a captured process set behind"
+    [[ -z "$(find "$fixture_lock_root/condemned.d" -type f -print 2>/dev/null)" ]] ||
+      fail_sequential_descendant_fixture \
+        "the coordinator recovery gate left a completed recovery record behind"
+    [[ -z "$(find "$fixture_lock_root" -type f -name 'holder.*' -print 2>/dev/null)" ]] ||
+      fail_sequential_descendant_fixture \
+        "the coordinator recovery gate left the prior descendant marker behind"
+    descendant_pid=""
+
+    # Force the same cleanup to stop before its first signal in legacy mode.
+    # The completed run must publish a token-scoped obligation before that
+    # failure, leave its marker, and let the next legacy holder drain it before
+    # any mapped command starts.
+    holder_output="$fixture_repo/legacy-holder-output"
+    contender_output="$fixture_repo/legacy-contender-output"
+    rm -f "$descendant_pid_file" "$contender_started"
+    holder_start=""
+    contender_start=""
+    descendant_start=""
+    ready=0
+    observed=0
+
+    AGENT_QUALITY_GATE_LOCK=1 \
+      AGENT_QUALITY_GATE_LOCK_HELD='' \
+      AGENT_QUALITY_GATE_LOCK_DIR="$fixture_lock_root" \
+      AGENT_QUALITY_GATE_COORDINATOR=0 \
+      AGENT_QUALITY_GATE_LOCK_ORPHAN_DRAIN_SECONDS=0 \
+      NODE_ENV=test \
+      QG_GATE_ROLE=holder \
+      QG_DESCENDANT_PID_FILE="$descendant_pid_file" \
+      PATH="$fixture_repo/bin:$PATH" \
+      /bin/bash "$repo_root/scripts/agent-quality-gate.sh" \
+        --changed-paths-file holder-paths.txt \
+        --base HEAD --run --parallel 1 --lock-wait 30 \
+        > "$holder_output" 2>&1 &
+    holder_pid=$!
+    holder_start="$(gate_test_process_start "$holder_pid")"
+    [[ -n "$holder_start" ]] ||
+      fail_sequential_descendant_fixture "could not identify the legacy holder gate"
+    for ((attempt = 0; attempt < 400; attempt++)); do
+      if [[ -s "$descendant_pid_file" ]]; then
+        ready=1
+        break
+      fi
+      gate_test_process_has_live_start "$holder_pid" "$holder_start" || break
+      sleep 0.05
+    done
+    [[ "$ready" -eq 1 ]] ||
+      fail_sequential_descendant_fixture \
+        "the legacy holder command did not fork its descendant"
+    descendant_pid="$(cat "$descendant_pid_file")"
+    descendant_start="$(gate_test_process_start "$descendant_pid")"
+    [[ "$descendant_pid" =~ ^[1-9][0-9]*$ && -n "$descendant_start" ]] ||
+      fail_sequential_descendant_fixture \
+        "the legacy holder recorded an invalid descendant identity"
+
+    set +e
+    wait "$holder_pid"
+    holder_exit=$?
+    set -e
+    holder_pid=""
+    [[ "$holder_exit" -eq 2 ]] ||
+      fail_sequential_descendant_fixture \
+        "the zero-bound legacy descendant cleanup did not fail closed"
+    gate_test_process_has_live_start "$descendant_pid" "$descendant_start" ||
+      fail_sequential_descendant_fixture \
+        "the forced legacy cleanup failure did not leave its descendant for recovery"
+    [[ -n "$(find "$fixture_lock_root/condemned.d" -type f -print 2>/dev/null)" ]] ||
+      fail_sequential_descendant_fixture \
+        "the failed legacy cleanup did not persist its recovery obligation"
+    [[ -n "$(find "$fixture_lock_root" -type f -name 'holder.*' -print 2>/dev/null)" ]] ||
+      fail_sequential_descendant_fixture \
+        "the failed legacy cleanup removed its descendant marker"
+    grep -Fq \
+      "The mapped command finished, but descendant cleanup did not complete." \
+      "$holder_output" ||
+      fail_sequential_descendant_fixture \
+        "the failed active drain reported stale-run execution evidence"
+
+    AGENT_QUALITY_GATE_LOCK=1 \
+      AGENT_QUALITY_GATE_LOCK_HELD='' \
+      AGENT_QUALITY_GATE_LOCK_DIR="$fixture_lock_root" \
+      AGENT_QUALITY_GATE_COORDINATOR=0 \
+      AGENT_QUALITY_GATE_LOCK_ORPHAN_DRAIN_SECONDS=10 \
+      NODE_ENV=test \
+      QG_GATE_ROLE=contender \
+      QG_CONTENDER_STARTED="$contender_started" \
+      PATH="$fixture_repo/bin:$PATH" \
+      /bin/bash "$repo_root/scripts/agent-quality-gate.sh" \
+        --changed-paths-file contender-paths.txt \
+        --base HEAD --run --parallel 1 --lock-wait 30 \
+        > "$contender_output" 2>&1 &
+    contender_pid=$!
+    contender_start="$(gate_test_process_start "$contender_pid")"
+    [[ -n "$contender_start" ]] ||
+      fail_sequential_descendant_fixture "could not identify the legacy recovery gate"
+    for ((attempt = 0; attempt < 400; attempt++)); do
+      if [[ -e "$contender_started" ]]; then
+        if gate_test_process_has_live_start "$descendant_pid" "$descendant_start"; then
+          fail_sequential_descendant_fixture \
+            "the legacy recovery gate started before it drained the prior descendant"
+        fi
+        observed=1
+        break
+      fi
+      gate_test_process_has_live_start "$contender_pid" "$contender_start" || break
+      sleep 0.05
+    done
+    [[ "$observed" -eq 1 ]] ||
+      fail_sequential_descendant_fixture \
+        "the legacy recovery gate did not start after draining the obligation"
+    set +e
+    wait "$contender_pid"
+    contender_exit=$?
+    set -e
+    contender_pid=""
+    [[ "$contender_exit" -eq 0 ]] ||
+      fail_sequential_descendant_fixture \
+        "the legacy recovery gate failed after draining the prior descendant"
+    [[ -z "$(find "$fixture_lock_root/condemned.d" -type f -print 2>/dev/null)" ]] ||
+      fail_sequential_descendant_fixture \
+        "the legacy recovery gate left a completed obligation behind"
+    [[ -z "$(find "$fixture_lock_root" -type f -name 'holder.*' -print 2>/dev/null)" ]] ||
+      fail_sequential_descendant_fixture \
+        "the legacy recovery gate left the prior descendant marker behind"
+    [[ ! -e "$fixture_lock_root/run.lock" ]] ||
+      fail_sequential_descendant_fixture \
+        "the legacy recovery gate left its run lock behind"
+    descendant_pid=""
+    trap - EXIT
+  )
+  rm -rf "$fixture_repo" "$fixture_lock_root"
+}
+
+run_parallel_worker_loss_coordinator_regression
+run_parallel_release_failure_coordinator_regression
+run_stale_failure_result_regression
+run_sequential_descendant_lease_regression
+
+for invalid_capacity in "" 0 65 invalid; do
+  if AGENT_QUALITY_GATE_CAPACITY="$invalid_capacity" \
+    scripts/agent-quality-gate.sh --help > "$output_file" 2>&1; then
+    capacity_status=0
+  else
+    capacity_status=$?
+  fi
+  [[ "$capacity_status" -eq 2 ]] ||
+    fail "coordinator capacity '${invalid_capacity}' must fail with exit 2"
+  assert_contains "AGENT_QUALITY_GATE_CAPACITY must be an integer from 1 through 64"
+done
+
+for valid_capacity in 1 3 64; do
+  AGENT_QUALITY_GATE_CAPACITY="$valid_capacity" \
+    scripts/agent-quality-gate.sh --help > "$output_file" 2>&1 ||
+    fail "coordinator capacity '${valid_capacity}' must be accepted"
+  assert_contains "Global coordinator capacity. Default: 3. Range: 1-64."
+done
+
+for invalid_coordinator in "" invalid; do
+  if AGENT_QUALITY_GATE_COORDINATOR="$invalid_coordinator" \
+    scripts/agent-quality-gate.sh --help > "$output_file" 2>&1; then
+    coordinator_status=0
+  else
+    coordinator_status=$?
+  fi
+  [[ "$coordinator_status" -eq 2 ]] ||
+    fail "coordinator switch '${invalid_coordinator}' must fail with exit 2"
+  assert_contains "AGENT_QUALITY_GATE_COORDINATOR must be 0, false, no, 1, true, or yes"
+done
+
+for valid_coordinator in 0 false no 1 true yes; do
+  AGENT_QUALITY_GATE_COORDINATOR="$valid_coordinator" \
+    scripts/agent-quality-gate.sh --help > "$output_file" 2>&1 ||
+    fail "coordinator switch '${valid_coordinator}' must be accepted"
+  assert_contains "Internal compatibility switch. Set to 0, false, or no"
+done
+} # end family: coordinator
 
 # family: install-wiring
 # Pre-push hook installation, the shared install-marker library, and the
@@ -2109,7 +4251,9 @@ lockfile_scope_missing_repo="$(mktemp -d)"
   printf 'lockfileVersion: %s\nsettings:\n  autoInstallPeers: true\noverrides: {}\nimporters:\n  .:\n    dependencies: {}\n  metrics-bridge:\n    dependencies:\n      viem:\n        specifier: ^2.1.0\n        version: 2.1.0\n  integration-probes:\n    dependencies:\n      undici:\n        specifier: ^6.0.0\n        version: 6.0.0\npackages:\n  viem@2.0.0: {}\n' \
     "'9.0'" > pnpm-lock.yaml
   set +e
-  bash "$lockfile_scope_missing_dir/agent-quality-gate.sh" --base HEAD > "$output_file" 2>&1
+  AGENT_QUALITY_GATE_COORDINATOR=0 \
+    bash "$lockfile_scope_missing_dir/agent-quality-gate.sh" --base HEAD \
+      > "$output_file" 2>&1
   printf '%s\n' "$?" > exit-code
   set -e
 )
@@ -2159,7 +4303,9 @@ mapper_missing_repo="$(mktemp -d)"
   git commit -qm init
   printf 'export const changed = 1;\n' > changed.mjs
   set +e
-  bash "$mapper_missing_dir/agent-quality-gate.sh" --base HEAD > "$output_file" 2>&1
+  AGENT_QUALITY_GATE_COORDINATOR=0 \
+    bash "$mapper_missing_dir/agent-quality-gate.sh" --base HEAD \
+      > "$output_file" 2>&1
   printf '%s\n' "$?" > exit-code
   set -e
 )
@@ -3224,6 +5370,24 @@ assert_contains "- pnpm lint:scripts (root build script changed)"
 assert_contains "- node scripts/check-agent-quality-gate-package-scripts.mjs (agent quality gate package script validator changed)"
 assert_contains "- pnpm agent:quality-gate:test (agent quality gate mapping changed)"
 
+for path in \
+  scripts/gate/quality-gate-coordinator-core.mjs \
+  scripts/gate/agent-quality-gate-scheduler.integration.test.mjs \
+  scripts/gate/agent-quality-gate-scheduler-benchmark.mjs \
+  scripts/gate/agent-quality-gate-fixture-processes.mjs; do
+  run_gate "$path"
+  assert_contains "- pnpm lint:scripts (root build script changed)"
+  assert_contains "- pnpm agent:quality-gate:test (quality-gate coordinator changed)"
+done
+
+for path in \
+  scripts/gate/quality-gate-coordinator.sh \
+  scripts/gate/quality-gate-coordinator-support.sh; do
+  run_gate "$path"
+  assert_contains "- bash -n $path (shell script changed)"
+  assert_contains "- pnpm agent:quality-gate:test (quality-gate coordinator changed)"
+done
+
 run_gate ".agents/skills/ship/SKILL.md"
 assert_contains "- agent-context"
 assert_contains "- pnpm agent:context-check (agent context files changed)"
@@ -4046,6 +6210,148 @@ STUB
 rm -rf "$fresh_stamp_repo"
 assert_not_contains "Previous successful agent quality gate run is still fresh; skipping mapped commands."
 
+# Coordinated fast-path reuse binds every execution input except HEAD. The HEAD
+# exception preserves warm-then-push when a commit records the same validated
+# bytes. Exact repeats and that commit-only transition skip; a material
+# environment or tool-version change must execute the mapped command again.
+coordinated_fresh_stamp_repo="$(mktemp -d)"
+coordinated_fresh_stamp_lock="$(mktemp -d /tmp/qgf.XXXXXX)"
+coordinated_fresh_tool_version="$(mktemp /tmp/qgv.XXXXXX)"
+(
+  cd "$coordinated_fresh_stamp_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  printf 'fixture\n' > fixture.txt
+  mkdir -p bin tools
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+counter_file="${COUNTER_FILE:?}"
+count=0
+if [[ -f "$counter_file" ]]; then
+  count="$(cat "$counter_file")"
+fi
+printf '%s\n' "$((count + 1))" > "$counter_file"
+STUB
+  cat > bin/pnpm <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--version" ]]; then
+  cat "${QG_TOOL_VERSION_FILE:?}"
+  exit 0
+fi
+exit 0
+STUB
+  chmod +x bin/pnpm tools/trunk
+  git add .
+  git commit -qm init
+  base_ref="$(git rev-parse --verify HEAD)"
+  printf 'changed\n' >> fixture.txt
+  printf '9.0.0\n' > "$coordinated_fresh_tool_version"
+  counter="$coordinated_fresh_stamp_repo/.tmp/agent-quality-gate/trunk-count"
+  stamp_file="$coordinated_fresh_stamp_repo/.tmp/agent-quality-gate/last-success.stamp"
+
+  cleanup_coordinated_fresh_stamp_fixture() {
+    local metadata coordinator_pid
+    metadata="$(
+      find "$coordinated_fresh_stamp_lock" -type f -name coordinator.json \
+        -print 2>/dev/null | head -n1 || true
+    )"
+    if [[ -f "$metadata" ]]; then
+      coordinator_pid="$(node -e '
+        const value = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+        process.stdout.write(String(value.coordinatorIdentity?.pid ?? ""));
+      ' "$metadata" 2>/dev/null || true)"
+      if [[ "$coordinator_pid" =~ ^[1-9][0-9]*$ ]]; then
+        kill -TERM "$coordinator_pid" 2>/dev/null || true
+      fi
+    fi
+  }
+  trap cleanup_coordinated_fresh_stamp_fixture EXIT
+
+  coordinated_fresh_gate() {
+    local rustflags="$1"
+    shift
+    AGENT_QUALITY_GATE_LOCK=1 \
+      AGENT_QUALITY_GATE_LOCK_HELD='' \
+      AGENT_QUALITY_GATE_LOCK_DIR="$coordinated_fresh_stamp_lock" \
+      AGENT_QUALITY_GATE_COORDINATOR=1 \
+      AGENT_QUALITY_GATE_CAPACITY=3 \
+      COUNTER_FILE="$counter" \
+      QG_TOOL_VERSION_FILE="$coordinated_fresh_tool_version" \
+      RUSTFLAGS="$rustflags" \
+      PATH="$coordinated_fresh_stamp_repo/bin:$PATH" \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+        --base "$base_ref" --run --lock-wait 30 "$@" \
+        > "$output_file" 2>&1
+  }
+
+  coordinated_fresh_gate '-C debuginfo=0'
+  grep -q '^stamp=v3.*coordinatorContext=[a-f0-9]\{64\}$' \
+    "$stamp_file" ||
+    fail "coordinated success did not write the strengthened freshness stamp"
+  grep -q '^execution_fingerprint=[a-f0-9]\{64\}$' \
+    "$stamp_file" ||
+    fail "coordinated success did not record its exact execution fingerprint"
+  grep -q '^execution_head=[a-f0-9]\{40\}\([a-f0-9]\{24\}\)\?$' \
+    "$stamp_file" ||
+    fail "coordinated success did not record its exact execution HEAD"
+
+  coordinated_fresh_gate '-C debuginfo=0' --skip-if-fresh
+  [[ "$(cat "$counter")" == "1" ]] ||
+    fail "an exact coordinated repeat did not reuse its fresh success"
+  grep -Fq -- "Previous successful agent quality gate run is still fresh; skipping mapped commands." \
+    "$output_file" ||
+    fail "an exact coordinated repeat did not report its freshness skip"
+
+  cp "$stamp_file" "${stamp_file}.valid"
+  {
+    sed -n '1,2p' "${stamp_file}.valid"
+    printf 'execution_fingerprint=%064d\n' 0
+    sed -n '4p' "${stamp_file}.valid"
+  } > "$stamp_file"
+  coordinated_fresh_gate '-C debuginfo=0' --skip-if-fresh
+  if grep -Fq -- "Previous successful agent quality gate run is still fresh; skipping mapped commands." \
+    "$output_file"; then
+    fail "a mismatched exact fingerprint was accepted for an unchanged HEAD"
+  fi
+  grep -Fq -- "Shared coordinator execution passed; no mapped command ran in this request." \
+    "$output_file" ||
+    fail "an unchanged-HEAD fingerprint mismatch did not fall through to exact retained-result reuse"
+  [[ "$(cat "$counter")" == "1" ]] ||
+    fail "exact retained-result reuse re-executed the mapped command"
+  mv "${stamp_file}.valid" "$stamp_file"
+
+  git add fixture.txt
+  git commit -qm "commit validated content"
+  coordinated_fresh_gate '-C debuginfo=0' --skip-if-fresh
+  [[ "$(cat "$counter")" == "1" ]] ||
+    fail "committing identical validated bytes invalidated coordinated warm-then-push reuse"
+
+  coordinated_fresh_gate '-C debuginfo=1' --skip-if-fresh
+  [[ "$(cat "$counter")" == "2" ]] ||
+    fail "a material environment change reused the coordinated freshness stamp"
+  if grep -Fq -- "Previous successful agent quality gate run is still fresh; skipping mapped commands." \
+    "$output_file"; then
+    fail "a material environment change reported a coordinated freshness skip"
+  fi
+
+  printf '9.0.1\n' > "$coordinated_fresh_tool_version"
+  coordinated_fresh_gate '-C debuginfo=1' --skip-if-fresh
+  [[ "$(cat "$counter")" == "3" ]] ||
+    fail "a pnpm version change reused the coordinated freshness stamp"
+
+  cleanup_coordinated_fresh_stamp_fixture
+  for _ in {1..100}; do
+    [[ ! -e "$coordinated_fresh_stamp_lock/run.lock" ]] && break
+    sleep 0.05
+  done
+  [[ ! -e "$coordinated_fresh_stamp_lock/run.lock" ]] ||
+    fail "coordinated freshness fixture did not release its legacy lock"
+  trap - EXIT
+)
+rm -rf "$coordinated_fresh_stamp_repo" "$coordinated_fresh_stamp_lock"
+rm -f "$coordinated_fresh_tool_version"
+
 # Workflow changes add the ADR reminder command, whose execution argument uses
 # a randomized changed-paths scratch file. That volatile path must be
 # normalized out of the command-plan hash or an identical pre-push run can
@@ -4074,7 +6380,9 @@ STUB
   # which is the guard working, not the fixture.
   cat > bin/node <<'STUB'
 #!/usr/bin/env bash
-if [[ "${1:-}" == "--input-type=module" ]]; then
+if [[ "${1:-}" == "--input-type=module" ||
+  "${1:-}" == */quality-gate-coordinator.mjs ||
+  ( "${1:-}" == -e && "${2:-}" == *'digest(process.argv[1])'* ) ]]; then
   exec "${REAL_NODE:?}" "$@"
 fi
 case "${1:-}" in
@@ -4362,6 +6670,14 @@ cp "$repo_root"/scripts/gate/mapping/*.mjs \
   "$signature_runtime_root/scripts/gate/mapping/"
 cp "$repo_root"/scripts/gate/routing-table/*.mjs \
   "$signature_runtime_root/scripts/gate/routing-table/"
+cp "$repo_root"/scripts/gate/quality-gate-coordinator*.mjs \
+  "$signature_runtime_root/scripts/gate/"
+cp "$repo_root/scripts/gate/quality-gate-coordinator.sh" \
+  "$signature_runtime_root/scripts/gate/quality-gate-coordinator.sh"
+cp "$repo_root/scripts/gate/quality-gate-coordinator-support.sh" \
+  "$signature_runtime_root/scripts/gate/quality-gate-coordinator-support.sh"
+cp "$repo_root/scripts/gate/agent-quality-gate-scheduler-fixture.mjs" \
+  "$signature_runtime_root/scripts/gate/agent-quality-gate-scheduler-fixture.mjs"
 printf 'export function isRoutingSensitivePath() { return false; }\n' \
   > "$signature_runtime_root/scripts/docs/docs-navigation-eval-helpers.mjs"
 printf '#!/usr/bin/env node\nprocess.exit(1);\n' \
@@ -4370,6 +6686,8 @@ chmod +x "$signature_runtime_root/scripts/agent-quality-gate.sh"
 (
   cd "$signature_stamp_repo"
   signature_gate="$signature_runtime_root/scripts/agent-quality-gate.sh"
+  # shellcheck disable=SC2030 # this fixture confines legacy mode to its subshell
+  export AGENT_QUALITY_GATE_COORDINATOR=0
   git init -q
   git config user.email test@example.invalid
   git config user.name "Quality Gate Test"
@@ -4392,6 +6710,14 @@ chmod +x "$signature_runtime_root/scripts/agent-quality-gate.sh"
   printf '// fixture mapper suite\n' > scripts/gate/mapping/engine.test.mjs
   printf '// fixture routing-table runtime module\n' > scripts/gate/routing-table/index.mjs
   printf '// fixture routing-table suite\n' > scripts/gate/routing-table/routing-table.test.mjs
+  printf '// fixture coordinator runtime placeholder\n' \
+    > scripts/gate/quality-gate-coordinator-core.mjs
+  printf '// fixture coordinator suite\n' \
+    > scripts/gate/quality-gate-coordinator.test.mjs
+  printf '// fixture scheduler helper\n' \
+    > scripts/gate/agent-quality-gate-scheduler-fixture.mjs
+  printf '// fixture scheduler process helper\n' \
+    > scripts/gate/agent-quality-gate-fixture-processes.mjs
   printf '# fixture terraform format checker\n' > scripts/terraform/terraform-fmt-check.mjs
   printf '# fixture terraform format checker suite\n' > scripts/terraform/terraform-fmt-check.test.mjs
   cat > tools/trunk <<'STUB'
@@ -4612,6 +6938,32 @@ STUB
   [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "14" ]] ||
     fail "fresh gate stamp was reused after the loaded run-handle helper changed"
 
+  # Production coordinator modules load from the gate source. Tests and
+  # scheduler fixtures execute from the repository under test.
+  printf '// changed target coordinator runtime placeholder\n' \
+    >> scripts/gate/quality-gate-coordinator-core.mjs
+  run_signature_gate_again
+  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "14" ]] ||
+    fail "a non-runtime coordinator placeholder invalidated the fresh stamp"
+
+  printf '// changed loaded coordinator runtime\n' \
+    >> "$signature_runtime_root/scripts/gate/quality-gate-coordinator-core.mjs"
+  run_signature_gate_again
+  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "15" ]] ||
+    fail "fresh gate stamp was reused after the loaded coordinator runtime changed"
+
+  printf '// changed source scheduler fixture copy\n' \
+    >> "$signature_runtime_root/scripts/gate/agent-quality-gate-scheduler-fixture.mjs"
+  run_signature_gate_again
+  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "15" ]] ||
+    fail "a non-runtime source scheduler fixture invalidated the fresh stamp"
+
+  printf '// changed target scheduler fixture\n' \
+    >> scripts/gate/agent-quality-gate-scheduler-fixture.mjs
+  run_signature_gate_again
+  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "16" ]] ||
+    fail "fresh gate stamp was reused after the target scheduler fixture changed"
+
   # P12 renamed the pinned alias registry from .sh to .mjs. Left stale, the
   # signature entry hashes as `__missing__` on every run, so an edit to the one
   # check that stops a package-only PR redirecting a trusted command would be
@@ -4624,7 +6976,7 @@ STUB
       --run \
       --skip-if-fresh \
       > "$output_file" 2>&1
-  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "15" ]] ||
+  [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "17" ]] ||
     fail "fresh gate stamp was reused after the pinned alias registry changed"
 )
 rm -rf "$signature_stamp_repo" "$signature_runtime_root"
@@ -4647,10 +6999,10 @@ if [[ -f "$counter_file" ]]; then
 fi
 count=$((count + 1))
 printf '%s\n' "$count" > "$counter_file"
-if [[ "$#" -eq 0 ]]; then
+  if [[ "$#" -eq 0 ]]; then
   cat >/dev/null
 fi
-printf 'fixturehash  %s\n' "${1:--}"
+printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  %s\n' "${1:--}"
 STUB
   cat > tools/trunk <<'STUB'
 #!/usr/bin/env bash
@@ -4668,6 +7020,117 @@ STUB
 )
 rm -rf "$sha256sum_repo"
 assert_contains "+ ./tools/trunk check fixture.txt"
+
+# Implementation hashing must fail at each position without help from
+# inherit_errexit. The production function also owns discovery and sorting, so
+# failures in those commands must stop before the mapped command starts.
+implementation_hash_failure_repo="$(mktemp -d)"
+(
+  cd "$implementation_hash_failure_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  mkdir -p bin scripts/gate tools
+  printf 'fixture\n' > fixture.txt
+  printf '# fixture gate implementation\n' > scripts/agent-quality-gate.sh
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+: > "${MAPPED_COMMAND_MARKER:?}"
+STUB
+  cat > bin/sha256sum <<'STUB'
+#!/usr/bin/env bash
+target="${1:-__stream__}"
+case "${IMPLEMENTATION_FAILURE_MODE:-}:${target}" in
+  hash-first:"${IMPLEMENTATION_RUNTIME_ROOT:?}/agent-quality-gate.sh"|\
+  hash-middle:"${IMPLEMENTATION_RUNTIME_ROOT:?}/gate/quality-gate-coordinator-journal.mjs"|\
+  hash-final:"${IMPLEMENTATION_RUNTIME_ROOT:?}/gate/quality-gate-coordinator.mjs"|\
+  hash-manifest:*implementation-signature.*)
+    exit 91
+    ;;
+esac
+if [[ "${REAL_HASH_KIND:?}" == sha256sum ]]; then
+  exec "${REAL_HASH_COMMAND:?}" "$@"
+fi
+exec "${REAL_HASH_COMMAND:?}" -a 256 "$@"
+STUB
+  cat > bin/find <<'STUB'
+#!/usr/bin/env bash
+if [[ "${IMPLEMENTATION_FAILURE_MODE:-}" == find &&
+  "${1:-}" == "${IMPLEMENTATION_RUNTIME_GATE_DIR:?}" ]]; then
+  exit 92
+fi
+exec "${REAL_FIND_COMMAND:?}" "$@"
+STUB
+  cat > bin/sort <<'STUB'
+#!/usr/bin/env bash
+if [[ "${IMPLEMENTATION_FAILURE_MODE:-}" == sort &&
+  "${1:-}" == -o && "${2:-}" == *implementation-*paths.* ]]; then
+  exit 93
+fi
+exec "${REAL_SORT_COMMAND:?}" "$@"
+STUB
+  chmod +x bin/sha256sum bin/find bin/sort tools/trunk
+  git add .
+  git commit -qm init
+  printf 'changed\n' >> fixture.txt
+  printf 'fixture.txt\n' > changed-paths.txt
+
+  if command -v sha256sum >/dev/null 2>&1; then
+    real_hash_command="$(command -v sha256sum)"
+    real_hash_kind=sha256sum
+  else
+    real_hash_command="$(command -v shasum)"
+    real_hash_kind=shasum
+  fi
+  real_find_command="$(command -v find)"
+  real_sort_command="$(command -v sort)"
+  mapped_command_marker="$implementation_hash_failure_repo/mapped-command-ran"
+
+  for failure_mode in \
+    hash-first hash-middle hash-final hash-manifest find sort; do
+    rm -f "$mapped_command_marker"
+    : > "$output_file"
+    set +e
+    IMPLEMENTATION_FAILURE_MODE="$failure_mode" \
+      AGENT_QUALITY_GATE_COORDINATOR=0 \
+      MAPPED_COMMAND_MARKER="$mapped_command_marker" \
+      IMPLEMENTATION_RUNTIME_ROOT="$repo_root/scripts" \
+      IMPLEMENTATION_RUNTIME_GATE_DIR="$repo_root/scripts/gate" \
+      REAL_HASH_COMMAND="$real_hash_command" \
+      REAL_HASH_KIND="$real_hash_kind" \
+      REAL_FIND_COMMAND="$real_find_command" \
+      REAL_SORT_COMMAND="$real_sort_command" \
+      PATH="$implementation_hash_failure_repo/bin:$PATH" \
+      /bin/bash -c '
+        shopt -u inherit_errexit 2>/dev/null || true
+        if shopt -q inherit_errexit 2>/dev/null; then
+          exit 97
+        fi
+        cd "$1"
+        shift
+        source "$1" "${@:2}"
+      ' implementation-hash-failure \
+        "$implementation_hash_failure_repo" \
+        "$repo_root/scripts/agent-quality-gate.sh" \
+        --changed-paths-file changed-paths.txt \
+        --base HEAD \
+        --run \
+        > "$output_file" 2>&1
+    failure_status=$?
+    set -e
+    [[ "$failure_status" -ne 0 ]] ||
+      fail "${failure_mode}: implementation failure did not stop the gate"
+    [[ ! -e "$mapped_command_marker" ]] ||
+      fail "${failure_mode}: mapped command ran after implementation failure"
+    [[ ! -e .tmp/agent-quality-gate/last-success.stamp ]] ||
+      fail "${failure_mode}: implementation failure wrote a success stamp"
+    if [[ "$failure_mode" == hash-* ]]; then
+      grep -Fq "could not hash required implementation file" "$output_file" ||
+        fail "${failure_mode}: hash failure did not name the required file"
+    fi
+  done
+)
+rm -rf "$implementation_hash_failure_repo"
 } # end family: stamps-freshness
 
 # family: failure-output
@@ -6768,6 +9231,10 @@ gate_test_on_term() {
 if [[ -n "$gate_test_signal_trace_file" ]]; then
   trap 'gate_test_on_term outer-suite "$gate_test_outer_pid"' TERM
 fi
+# This family pins the legacy whole-run lock. The coordinator has separate
+# protocol and integration coverage and must not change these lock fixtures.
+# shellcheck disable=SC2031 # this family intentionally sets its own legacy mode
+export AGENT_QUALITY_GATE_COORDINATOR=0
 # --- Cross-run mutual exclusion (GitHub issue #1802) -------------------------
 # Two gate runs on one machine starve each other, and the pre-push hook starts
 # one of its own while a manual run is still going, so `--run` takes a
@@ -6958,9 +9425,43 @@ STUB
   stale_exit="$(run_locked_gate)"
   [[ "$stale_exit" == "0" ]] ||
     fail "expected a stale lock to be reclaimed without manual cleanup, got $stale_exit"
-  assert_contains "is stale (holder pid ${dead_holder_pid} is gone); reclaiming it."
+  assert_contains "is stale ("
+  assert_contains "${dead_holder_pid}"
+  assert_contains "reclaiming it."
   [[ ! -d "$gate_lock_root/run.lock" ]] ||
     fail "a successful run must release the lock it acquired"
+
+  # An unreaped child still answers kill -0 and appears in ps. Its Z state
+  # makes it terminal work, so it must not retain the legacy lock.
+  if command -v perl >/dev/null 2>&1; then
+    zombie_pid_file="$(mktemp)"
+    perl -e '$| = 1; $child = fork(); if (!$child) { exit 0; } print "$child\n"; sleep 30;' \
+      > "$zombie_pid_file" &
+    zombie_parent_pid=$!
+    for _ in {1..50}; do
+      [[ -s "$zombie_pid_file" ]] && break
+      sleep 0.02
+    done
+    zombie_holder_pid="$(head -n1 "$zombie_pid_file")"
+    [[ "$zombie_holder_pid" =~ ^[0-9]+$ ]] ||
+      fail "could not create a zombie lock-holder fixture"
+    for _ in {1..50}; do
+      zombie_state="$(ps -o stat= -p "$zombie_holder_pid" 2>/dev/null | head -n1 | sed 's/[[:blank:]]//g')"
+      [[ "$zombie_state" == Z* ]] && break
+      sleep 0.02
+    done
+    [[ "$zombie_state" == Z* ]] || fail "fixture child did not become a zombie"
+    write_lock_owner "$zombie_holder_pid"
+    zombie_exit="$(run_locked_gate)"
+    kill "$zombie_parent_pid" 2>/dev/null || true
+    wait "$zombie_parent_pid" 2>/dev/null || true
+    rm -f "$zombie_pid_file"
+    [[ "$zombie_exit" == "0" ]] ||
+      fail "expected a zombie holder to be reclaimed, got $zombie_exit"
+    assert_contains "is stale (holder pid ${zombie_holder_pid} has exited and is awaiting reap); reclaiming it."
+    [[ ! -d "$gate_lock_root/run.lock" ]] ||
+      fail "a zombie holder must not retain the legacy lock"
+  fi
 )
 rm -rf "$gate_lock_repo" "$gate_lock_root"
 
@@ -8770,7 +11271,7 @@ STUB
   # whose PID has been reused, and never evict a holder that is genuinely it.
   # Recorded exactly as the gate records it. `ps` renders lstart in the
   # caller's TZ and locale, so the pin is part of the identity, not decoration.
-  race_lock_start="$(TZ=UTC LC_ALL=C ps -o lstart= -p $$ 2>/dev/null | head -n1)"
+  race_lock_start="$(normalized_process_start $$)"
   if [[ -n "$race_lock_start" ]]; then
     rm -rf "$gate_race_root/run.lock"
     : > "$gate_race_log"
@@ -10087,7 +12588,7 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
     printf 'pid=%s\n' "$race_stopped_holder"
     printf 'host=%s\n' "$(uname -n)"
     printf 'started_at=%s\n' "$(date +%s)"
-    printf 'start_utc=%s\n' "$(TZ=UTC LC_ALL=C ps -o lstart= -p "$race_stopped_holder" 2>/dev/null | head -n1)"
+    printf 'start_utc=%s\n' "$(normalized_process_start "$race_stopped_holder")"
     printf 'worktree=%s\n' "$gate_race_repo"
     printf 'token=live-holder-1-1\n'
   } > "$gate_race_root/run.lock/owner"
@@ -10219,7 +12720,7 @@ $(sed 's/^/      /' "$gate_race_out/$race_tag.out")"
       printf 'pid=1\n'
       printf 'host=%s\n' "$(uname -n)"
       printf 'started_at=%s\n' "$(date +%s)"
-      printf 'start_utc=%s\n' "$(TZ=UTC LC_ALL=C ps -o lstart= -p 1 2>/dev/null | head -n1)"
+      printf 'start_utc=%s\n' "$(normalized_process_start 1)"
       printf 'worktree=%s\n' "$gate_race_repo"
       printf 'token=other-user-holder-1-1\n'
     } > "$gate_race_root/run.lock/owner"

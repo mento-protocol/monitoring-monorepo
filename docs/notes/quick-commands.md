@@ -48,7 +48,7 @@ pnpm code-health:duplication       # jscpd duplication report → reports/jscpd/
 pnpm code-health:schema-diff       # GraphQL schema breaking-change diff vs origin/main (advisory, never blocks)
 pnpm code-health                   # Run knip + deps together (everything except history + duplication)
 pnpm agent:quality-gate            # Map changed paths to required local checks and PR checklists
-pnpm agent:quality-gate --run      # Execute the mapped local-only checks
+pnpm agent:quality-gate --run      # Execute mapped checks through the fair machine coordinator; default capacity 3
 # Package scripts, package-manager settings, and lockfiles can change code that
 # runs during install. Review those changes before acknowledging them:
 pnpm agent:quality-gate --run --allow-package-script-changes

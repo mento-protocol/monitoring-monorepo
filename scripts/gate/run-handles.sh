@@ -15,14 +15,19 @@ gate_run_command_tag() {
   printf 'agentqg:%s' "${gate_lock_token:-nolock-$$}"
 }
 
+gate_run_request_tag() {
+  printf 'agentqg:%s' "${gate_run_id:-${gate_lock_token:-nolock-$$}}"
+}
+
 # A file every mapped command of this run holds open. Descendants inherit open
 # descriptors and keep them after their parent exits, so this is a handle on a
 # process that no longer has a tagged ancestor to be walked down from. Its path
 # carries the run's token, so unlike a PID or a process group it can never come
 # to name a stranger.
 gate_run_marker_path() {
-  [[ -n "$gate_lock_root_dir" && -n "$gate_lock_token" ]] || return 1
-  printf '%s/holder.%s' "$gate_lock_root_dir" "$gate_lock_token"
+  local token="${gate_run_id:-$gate_lock_token}"
+  [[ -n "$gate_lock_root_dir" && -n "$token" ]] || return 1
+  printf '%s/holder.%s' "$gate_lock_root_dir" "$token"
 }
 
 gate_run_marker_file=""
@@ -42,10 +47,12 @@ gate_run_ensure_marker() {
   # creation refuses an occupied path outright — symlinks, dangling ones
   # included, by kernel contract — and a token is unique to this run, so
   # anything already sitting at this name is not ours to replace.
-  if ! (set -C && printf '%s\n' "$gate_lock_token" > "$marker") 2>/dev/null; then
+  if ! (set -C && printf '%s\n' "${gate_run_id:-$gate_lock_token}" > "$marker") 2>/dev/null; then
     echo "error: could not create the run marker at ${marker} (it may already exist)." >&2
     echo "Without it, a command that outlives a killed gate cannot be found by the next run." >&2
     echo "Nothing has been executed. Fix that path — permissions, free space, or a leftover file — then re-run." >&2
+    gate_report_coordinated_no_work_failure 2 "run-marker preparation" \
+      "No mapped command ran in this request"
     exit 2
   fi
   gate_run_marker_file="$marker"
@@ -232,8 +239,12 @@ gate_run_tagged_pids() {
       fi
       # Exact entry, not substring: environ is NUL-separated, and a substring
       # match would let one token select an environment carrying a longer one.
-      printf '%s\n' "$environ_entries" |
-        grep -qxF "AGENTQG_RUN=agentqg:${token}" || continue
+      if ! printf '%s\n' "$environ_entries" |
+        grep -qxF "AGENTQG_RUN=agentqg:${token}" &&
+        ! printf '%s\n' "$environ_entries" |
+          grep -qxF "AGENTQG_REQUEST=agentqg:${token}"; then
+        continue
+      fi
       pid="${environ#/proc/}"
       printf '%s\n' "${pid%/environ}"
     done

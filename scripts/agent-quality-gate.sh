@@ -25,7 +25,8 @@ Options:
   --skip-if-fresh
                  With --run, skip execution when the previous successful run
                  used the same base, changed paths, command plan, gate
-                 implementation, and validated file content. Intended for the
+                 implementation, validated file content, toolchain, material
+                 environment, runtime, and scheduler policy. Intended for the
                  pre-push hook only.
   --parallel <n> With --run, execute independent quality commands with up to
                  n concurrent jobs. Default: auto, capped at 4. Fail-fast mode
@@ -40,10 +41,11 @@ Options:
                  than n seconds and report it as a failure. Default: 1500. The
                  timeout is per command, never for the whole run.
   --lock-wait <n>
-                 With --run, wait at most n seconds for another gate run on
-                 this machine to finish before starting. Default: 1800.
-  --no-lock      With --run, skip cross-run mutual exclusion and start even
-                 while another gate run is executing mapped commands.
+                 With --run, wait at most n seconds for scheduler admission,
+                 a command lease, a coalesced result, or a legacy holder.
+                 Default: 1800.
+  --no-lock      With --run, bypass the scheduler and legacy compatibility
+                 lock. Mapped commands then run without machine coordination.
   -h, --help     Show this help.
 
 Environment:
@@ -64,6 +66,11 @@ Environment:
                       Set to 0 or false for the same effect as --no-lock.
   AGENT_QUALITY_GATE_LOCK_WAIT_SECONDS
                       Same behavior as --lock-wait. Default: 1800.
+  AGENT_QUALITY_GATE_COORDINATOR
+                      Internal compatibility switch. Set to 0, false, or no
+                      only in legacy-lock tests. The serialized lock remains.
+  AGENT_QUALITY_GATE_CAPACITY
+                      Global coordinator capacity. Default: 3. Range: 1-64.
   AGENT_QUALITY_GATE_LOCK_DIR
                       Directory holding the cross-run lock. Default:
                       $HOME/.cache/agent-quality-gate, falling back to
@@ -90,6 +97,35 @@ full_local_tests="${AGENT_GATE_FULL_TESTS:-false}"
 # too slow gets noticed.
 command_timeout_seconds="${AGENT_QUALITY_COMMAND_TIMEOUT_SECONDS:-1500}"
 gate_lock_enabled="${AGENT_QUALITY_GATE_LOCK:-1}"
+gate_coordinator_enabled="${AGENT_QUALITY_GATE_COORDINATOR-1}"
+gate_coordinator_capacity="${AGENT_QUALITY_GATE_CAPACITY-3}"
+if [[ ! "$gate_coordinator_capacity" =~ ^(0|[1-9][0-9]*)$ ||
+  "$gate_coordinator_capacity" -lt 1 ||
+  "$gate_coordinator_capacity" -gt 64 ]]; then
+  echo "error: AGENT_QUALITY_GATE_CAPACITY must be an integer from 1 through 64." >&2
+  exit 2
+fi
+case "$gate_coordinator_enabled" in
+  0|false|no|1|true|yes) ;;
+  *)
+    echo "error: AGENT_QUALITY_GATE_COORDINATOR must be 0, false, no, 1, true, or yes." >&2
+    exit 2
+    ;;
+esac
+
+# The coordinator reserves fd 7 as the original stdout before it can enter a
+# no-work failure path. Legacy runs never reserve it. This guard lets shared
+# legacy-drain helpers report a coordinated refusal without changing their
+# legacy output contract or failing when the descriptor is closed.
+gate_coordinator_stdout_reserved=0
+gate_report_coordinated_no_work_failure() {
+  local status="$1" phase="$2" work_verdict="$3"
+  declare -F gate_coordinator_report_no_work_failure >/dev/null 2>&1 || return 0
+  if [[ "$gate_coordinator_stdout_reserved" -eq 1 ]] &&
+    { : >&7; } 2>/dev/null; then
+    gate_coordinator_report_no_work_failure "$status" "$phase" "$work_verdict"
+  fi
+}
 
 # Reads one of the lock's tunable numbers. An override that is set but EMPTY is
 # an error rather than a silent fall back to the default: `${VAR:-default}`
@@ -264,6 +300,104 @@ source "$run_handles_path"
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
+# Print the current changed-path set. Capture each Git probe before printing
+# any output so one failed probe cannot be hidden by a later successful probe.
+collect_current_changed_paths() {
+  local committed_paths unstaged_paths staged_paths untracked_paths
+  if [[ -n "$changed_paths_input_file" ]]; then
+    sed '/^$/d' "$changed_paths_input_file"
+    return
+  fi
+  if ! committed_paths="$(git diff --name-only --no-renames "${base_ref}...${head_ref}" 2>/dev/null)"; then
+    committed_paths="$(git diff --name-only --no-renames "$base_ref" "$head_ref")" || return 1
+  fi
+  printf '%s\n' "$committed_paths"
+  if [[ "$head_ref" == "HEAD" ]]; then
+    unstaged_paths="$(git diff --name-only --no-renames)" || return 1
+    staged_paths="$(git diff --cached --name-only --no-renames)" || return 1
+    untracked_paths="$(git ls-files --others --exclude-standard --exclude='.tmp/agent-quality-gate/')" || return 1
+    printf '%s\n' "$unstaged_paths" "$staged_paths" "$untracked_paths"
+  fi
+}
+
+gate_coordinator_helper="$script_source_dir/gate/quality-gate-coordinator.sh"
+gate_coordinator_entry="$script_source_dir/gate/quality-gate-coordinator.mjs"
+gate_coordinator_adapter_copy_dir=""
+
+cleanup_gate_coordinator_adapter_copy() {
+  local copy_dir="${gate_coordinator_adapter_copy_dir:-}"
+  [[ -n "$copy_dir" ]] || return 0
+  /bin/rm -f -- \
+    "$copy_dir/quality-gate-coordinator.sh" \
+    "$copy_dir/quality-gate-coordinator-support.sh" || return 1
+  /bin/rmdir -- "$copy_dir" || return 1
+  gate_coordinator_adapter_copy_dir=""
+}
+
+materialize_gate_coordinator_adapter() {
+  local before after copied copy_parent main_hash support_hash extra
+  before="$(node "$gate_coordinator_entry" adapter-hashes)" || return 1
+  copy_parent="${TMPDIR:-/tmp}"
+  copy_parent="${copy_parent%/}"
+  gate_coordinator_adapter_copy_dir="$(
+    mktemp -d "$copy_parent/agent-quality-gate-adapter.XXXXXX"
+  )" || return 1
+  chmod 700 "$gate_coordinator_adapter_copy_dir" || return 1
+  cp "$gate_coordinator_helper" \
+    "$gate_coordinator_adapter_copy_dir/quality-gate-coordinator.sh" || return 1
+  cp "$script_source_dir/gate/quality-gate-coordinator-support.sh" \
+    "$gate_coordinator_adapter_copy_dir/quality-gate-coordinator-support.sh" || return 1
+  chmod 600 \
+    "$gate_coordinator_adapter_copy_dir/quality-gate-coordinator.sh" \
+    "$gate_coordinator_adapter_copy_dir/quality-gate-coordinator-support.sh" || return 1
+  # `${...}` below is JavaScript template interpolation.
+  # shellcheck disable=SC2016
+  copied="$(node -e '
+    const { createHash } = require("node:crypto");
+    const { readFileSync } = require("node:fs");
+    const digest = (path) => createHash("sha256").update(readFileSync(path)).digest("hex");
+    process.stdout.write(`${digest(process.argv[1])} ${digest(process.argv[2])}`);
+  ' "$gate_coordinator_adapter_copy_dir/quality-gate-coordinator.sh" \
+    "$gate_coordinator_adapter_copy_dir/quality-gate-coordinator-support.sh")" || return 1
+  after="$(node "$gate_coordinator_entry" adapter-hashes)" || return 1
+  [[ "$before" == "$copied" && "$copied" == "$after" ]] || return 1
+  read -r main_hash support_hash extra <<< "$copied"
+  [[ -z "${extra:-}" && "$main_hash" =~ ^[a-f0-9]{64}$ &&
+    "$support_hash" =~ ^[a-f0-9]{64}$ ]] || return 1
+  gate_coordinator_loaded_adapter_main_hash="$main_hash"
+  gate_coordinator_loaded_adapter_support_hash="$support_hash"
+  gate_coordinator_helper="$gate_coordinator_adapter_copy_dir/quality-gate-coordinator.sh"
+  gate_coordinator_support="$gate_coordinator_adapter_copy_dir/quality-gate-coordinator-support.sh"
+}
+
+case "$gate_coordinator_enabled" in
+  0|false|no)
+    ;;
+  1|true|yes)
+    if [[ ! -r "$gate_coordinator_helper" ]]; then
+      echo "error: quality-gate coordinator adapter is missing: ${gate_coordinator_helper}" >&2
+      echo "Set AGENT_QUALITY_GATE_COORDINATOR=0 only to run the legacy lock compatibility tests." >&2
+      exit 2
+    fi
+    if ! materialize_gate_coordinator_adapter; then
+      cleanup_gate_coordinator_adapter_copy || true
+      echo "error: could not load one stable quality-gate coordinator adapter." >&2
+      exit 2
+    fi
+    # shellcheck source=scripts/gate/quality-gate-coordinator.sh
+    if ! source "$gate_coordinator_helper"; then
+      cleanup_gate_coordinator_adapter_copy || true
+      echo "error: could not source the verified quality-gate coordinator adapter." >&2
+      exit 2
+    fi
+    if ! cleanup_gate_coordinator_adapter_copy; then
+      echo "error: could not remove the private coordinator adapter copy." >&2
+      exit 2
+    fi
+    gate_coordinator_helper="$script_source_dir/gate/quality-gate-coordinator.sh"
+    gate_coordinator_support="$script_source_dir/gate/quality-gate-coordinator-support.sh"
+    ;;
+esac
 # Use a repo-local scratch dir for tmpfiles so we don't depend on TMPDIR
 # being writable — pre-push hooks fork off trunk's daemon, which may carry
 # a TMPDIR that's outside a host sandbox's writable allowlist. Also export
@@ -326,6 +460,8 @@ tmpfiles=()
 # Set by run_with_timeout for the most recent mapped command so callers can tell
 # a timeout apart from an ordinary non-zero exit. Read only right after the call.
 last_command_timed_out=false
+last_command_execution_seconds=0
+last_command_infrastructure_failed=false
 # Monotonic counter for unique per-command timeout marker paths.
 timeout_seq=0
 # PIDs (command + watchdog) of any in-flight timed command in THIS process, so a
@@ -349,6 +485,20 @@ pending_terminating_signal=""
 worker_registration_test_barrier="${AGENT_QUALITY_GATE_TEST_WORKER_REGISTRATION_BARRIER:-}"
 if [[ -n "$worker_registration_test_barrier" && "${NODE_ENV:-}" != "test" ]]; then
   echo "AGENT_QUALITY_GATE_TEST_WORKER_REGISTRATION_BARRIER: test-only override requires NODE_ENV=test" >&2
+  exit 2
+fi
+drain_refresh_test_barrier="${AGENT_QUALITY_GATE_TEST_DRAIN_REFRESH_BARRIER:-}"
+if [[ -n "$drain_refresh_test_barrier" && "${NODE_ENV:-}" != "test" ]]; then
+  echo "AGENT_QUALITY_GATE_TEST_DRAIN_REFRESH_BARRIER: test-only override requires NODE_ENV=test" >&2
+  exit 2
+fi
+parallel_release_failure_at="${AGENT_QUALITY_GATE_TEST_PARALLEL_RELEASE_FAILURE_AT:-}"
+parallel_release_attempt=0
+if [[ -n "$parallel_release_failure_at" ]] && {
+  [[ "${NODE_ENV:-}" != "test" ]] ||
+    [[ ! "$parallel_release_failure_at" =~ ^[1-9][0-9]*$ ]];
+}; then
+  echo "AGENT_QUALITY_GATE_TEST_PARALLEL_RELEASE_FAILURE_AT: test-only override requires NODE_ENV=test and a positive integer" >&2
   exit 2
 fi
 
@@ -451,16 +601,13 @@ teardown_active_timeouts() {
 }
 
 # ---------------------------------------------------------------------------
-# Cross-run mutual exclusion (GitHub issue #1802).
+# Legacy compatibility and crash-recovery lock (GitHub issue #1802).
 #
-# Two gate runs on one machine oversubscribe it, and that is the normal case
-# here: several agents share this host, and the pre-push hook starts a run of
-# its own while a manual warm-up run is still going. The suites that lost were
-# the ones holding a wall-clock budget (ui-dashboard's browser-api-policy lint
-# runner) or a bound port, but the contention itself is machine-wide, so the
-# remedy is machine-wide: only one `--run` gate executes mapped commands at a
-# time. The intra-run half of the same problem is the exclusive phase in
-# run_quality_phase; a lock alone cannot help a suite starved inside ONE run.
+# The original remedy for machine oversubscription and fixed-port collisions
+# allowed one complete `--run` gate at a time. The coordinator now schedules
+# commands from multiple worktrees under weighted capacity and named resources.
+# It retains this lock as a mixed-version barrier, and this Bash path remains
+# the election and recovery mechanism for legacy holders and dead coordinators.
 #
 # mkdir(2), O_EXCL and rename(2) are the primitives: all three are atomic,
 # flock(1) does not exist on macOS, and the repo's floor is Bash 3.2. Renaming
@@ -476,6 +623,17 @@ teardown_active_timeouts() {
 # ---------------------------------------------------------------------------
 gate_lock_dir=""
 gate_lock_token=""
+# The request token identifies one gate invocation. The lock token identifies
+# the legacy owner. They are the same in legacy mode. Coordinator mode keeps
+# them separate so every worker inherits both the request handle and the shared
+# coordinator handle that an older gate knows how to drain.
+gate_run_id=""
+# An active sequential-command drain keeps the marker for a successor until it
+# confirms every descendant is gone. If a legacy run cannot first persist that
+# recovery obligation, it also leaves its owner record in place so the next run
+# must reclaim and condemn it before executing work.
+gate_active_command_drain_in_progress=0
+gate_cleanup_preserve_legacy_lock=0
 # Locals holding a record's token field are named *_token_value, not *_token:
 # the repo's review scanner reads a name ending in _token as a credential key
 # and refuses to bundle the diff. Keep the suffix if you rename these.
@@ -578,9 +736,10 @@ gate_lock_poll_seconds="$(gate_lock_seconds_knob AGENT_QUALITY_GATE_LOCK_POLL_SE
 # lock rather than inside it, because the lock directory is what gets reclaimed
 # and the obligation has to outlive that.
 gate_lock_root_dir=""
-# A staged obligation this process has written but not yet published. Named
-# with our PID and registered with the exit trap before it is created, so
-# cleanup can never race the write nor name another run's file.
+gate_lock_drained_tokens=""
+# A staged obligation this shell has written but not yet published. mktemp
+# gives parallel coordinator clients distinct names even though Bash 3.2 gives
+# their subshells the same $$ value.
 gate_lock_condemn_tmp=""
 
 # One file per outstanding run rather than one shared list. A shared list has
@@ -602,12 +761,9 @@ gate_lock_condemned_dir() {
 # draining leaves the previous run's survivors with nobody who knows about
 # them. On disk, the next run inherits the obligation instead.
 #
-# Written inside the reclaim election, which is already serialised by the
-# rename test-and-set: whoever won the record is the only writer here. The file
-# is built under a private per-PID name and moved into place, so a reader sees
-# the whole token or no file at all. Duplicates are harmless — draining a token
-# whose processes are already gone is a no-op — which is the right failure
-# direction for the crash between this write and the publish it precedes.
+# Legacy reclaim serializes this write. Coordinator recovery holds an atomic
+# token claim before it writes. A private mktemp name also keeps an interrupted
+# write invisible; the published token path is stable across retries.
 #
 # The write failing is a different matter from crashing after it. A crash still
 # leaves the record this obligation was derived from, because that record is
@@ -626,9 +782,7 @@ record_condemned_run() {
   gate_lock_token_is_wellformed "$token" || return 1
   dir="$(gate_lock_condemned_dir)" || return 1
   mkdir -p "$dir" 2>/dev/null || return 1
-  # Registered before it exists: the name carries our PID, so cleanup can see
-  # it whether or not the write got that far, and can never name another run's.
-  gate_lock_condemn_tmp="${dir}/.staging.$$"
+  gate_lock_condemn_tmp="$(mktemp "${dir}/.staging.XXXXXX")" || return 1
   printf '%s\n' "$token" > "$gate_lock_condemn_tmp" 2>/dev/null || {
     rm -f "$gate_lock_condemn_tmp"
     gate_lock_condemn_tmp=""
@@ -653,6 +807,8 @@ gate_lock_obligation_unwritable() {
   echo "error: could not record the previous run's commands as outstanding in ${gate_lock_root_dir:-unknown}/condemned.d." >&2
   echo "Nothing would drain them, so this run would execute alongside them." >&2
   echo "Nothing has been executed. Fix that path — permissions, or free space — then re-run." >&2
+  gate_report_coordinated_no_work_failure 2 "stale-obligation recovery" \
+    "No mapped command ran in this request"
   exit 2
 }
 
@@ -660,7 +816,30 @@ gate_lock_obligation_unreadable() {
   echo "error: the outstanding-commands record at ${1} exists but cannot be read." >&2
   echo "It names commands a dead run left behind, and skipping it would start this run alongside them." >&2
   echo "Nothing has been executed. Fix that path — permissions — then re-run." >&2
+  gate_report_coordinated_no_work_failure 2 "stale-obligation recovery" \
+    "No mapped command ran in this request"
   exit 2
+}
+
+gate_drain_fail_for_context() {
+  local drain_context="${1:-stale-run}"
+  if [[ "$drain_context" == "active-command" ]]; then
+    return 2
+  fi
+  exit 2
+}
+
+gate_drain_obligation_unreadable() {
+  local path="$1"
+  local drain_context="${2:-stale-run}"
+  if [[ "$drain_context" != "active-command" ]]; then
+    gate_lock_obligation_unreadable "$path"
+  fi
+  echo "error: the command-descendant record at ${path} exists but cannot be read." >&2
+  echo "It names processes from a completed mapped command. Releasing the scheduler lease without it could start conflicting work." >&2
+  echo "The mapped command finished, but descendant cleanup did not complete. Fix that path — permissions — then re-run." >&2
+  gate_drain_fail_for_context "$drain_context"
+  return $?
 }
 
 # Every run drains the whole outstanding set before executing anything, not
@@ -712,6 +891,8 @@ drain_condemned_runs() {
       if [[ ! -O "$claimed" ]]; then
         echo "error: obligation record ${claimed} is not owned by this user." >&2
         echo "Nothing has been executed. Inspect and remove that record, then re-run." >&2
+        gate_report_coordinated_no_work_failure 2 "stale-obligation recovery" \
+          "No mapped command ran in this request"
         exit 2
       fi
       entry_token_value="$(head -n1 "$claimed" 2>/dev/null || true)"
@@ -726,9 +907,12 @@ drain_condemned_runs() {
         # that does neither.
         echo "error: obligation record ${claimed} names a malformed run token." >&2
         echo "Nothing has been executed. Inspect and remove that record, then re-run." >&2
+        gate_report_coordinated_no_work_failure 2 "stale-obligation recovery" \
+          "No mapped command ran in this request"
         exit 2
       fi
       drain_condemned_run_commands "$entry_token_value"
+      gate_lock_drained_tokens="${gate_lock_drained_tokens} ${entry_token_value}"
       # Removed only here, with every process confirmed gone, and by a name
       # only this drainer can have created. A drain that cannot confirm exits
       # instead, leaving the rest for whoever comes next.
@@ -766,6 +950,19 @@ gate_lock_test_delay() {
 gate_lock_test_crash() {
   [[ "${AGENT_QUALITY_GATE_LOCK_CRASH_AT:-}" == "$1" ]] || return 0
   kill -9 $$
+}
+
+gate_drain_test_refresh_barrier() {
+  local barrier="$drain_refresh_test_barrier"
+  local attempt
+  [[ -n "$barrier" && ! -e "${barrier}.used" ]] || return 0
+  : > "${barrier}.used" || return 2
+  : > "${barrier}.ready" || return 2
+  for ((attempt = 0; attempt < 1000; attempt++)); do
+    [[ ! -e "${barrier}.release" ]] || return 0
+    sleep 0.02
+  done
+  return 2
 }
 
 resolve_gate_lock_root() {
@@ -839,46 +1036,52 @@ gate_wall_millis() {
   printf '%s000\n' "$(date +%s)"
 }
 
-# The kernel's own start-time string for a PID, used verbatim. Comparing it as
-# a string keeps this free of date parsing; what makes that sound is pinning
-# the formatting environment, because `ps` renders lstart in the caller's TZ
-# and locale — `TZ=America/New_York` moves the clock, and a non-C LC_ALL
-# rewrites the whole format ("Mi. 12 Aug."). Two runs with different
-# environments would otherwise read one live process as two identities and
-# reclaim a lock out from under it. Recorded under the same pin it is compared
-# with, and stored as `start_utc` so a record from a gate that predates this
-# pinning is simply not read as one (see gate_lock_holder_is_live).
-gate_lock_process_start() {
+# Read the kernel's start-time string and process state in one snapshot.
+# Comparing the start string avoids date parsing. Pin the formatting
+# environment because `ps` renders lstart in the caller's time zone and locale.
+# The state field also identifies an exited child that its parent has not reaped.
+gate_lock_process_snapshot() {
   local pid="$1"
   [[ -n "$pid" ]] || return 0
   # Asking about a process is allowed to come back empty, and must not be an
   # error: every caller here is racing the process it asks about, so `ps` fails
   # the moment that process exits. Under `set -e` with `pipefail` this pipeline
-  # would then abort the whole gate from inside a command substitution —
-  # silently, losing whatever stdout was still buffered.
-  TZ=UTC LC_ALL=C ps -o lstart= -p "$pid" 2>/dev/null | head -n1 || true
+  # would then abort the whole gate from inside a command substitution.
+  # macOS pads these fields. Normalize both edges so Bash and Node compare the
+  # same snapshot.
+  TZ=UTC LC_ALL=C ps -o lstart= -o stat= -p "$pid" 2>/dev/null |
+    head -n1 | sed 's/^[[:blank:]]*//; s/[[:blank:]]*$//' || true
+}
+
+gate_lock_process_start() {
+  local snapshot
+  snapshot="$(gate_lock_process_snapshot "$1")"
+  [[ "$snapshot" == *" "* ]] || return 0
+  printf '%s\n' "${snapshot% *}" | sed 's/[[:blank:]]*$//'
 }
 
 gate_lock_process_state() {
-  local pid="$1"
-  [[ -n "$pid" ]] || return 0
-  TZ=UTC LC_ALL=C LANG=C ps -p "$pid" -o stat= 2>/dev/null |
-    awk 'NF { print $1; exit }' || true
+  local snapshot
+  snapshot="$(gate_lock_process_snapshot "$1")"
+  [[ "$snapshot" == *" "* ]] || return 0
+  printf '%s\n' "${snapshot##* }"
 }
 
 # A zombie has exited and cannot execute, fork, or retain file descriptors. PID
 # 1 can keep its process-table record indefinitely, so kill -0 and lstart alone
 # cannot decide whether a condemned command can still overlap the next run.
-# Re-read the exact identity after the state probe. Empty or unreadable state
-# remains fail-closed because only a confirmed Z state returns success.
+# Read state and start time from one snapshot. Empty or unreadable state remains
+# fail-closed because only a confirmed matching zombie returns success.
 gate_lock_process_is_confirmed_zombie() {
   local pid="$1"
   local recorded_start="$2"
-  local current_start current_state
+  local snapshot current_start current_state
   [[ -n "$pid" && -n "$recorded_start" ]] || return 1
-  current_state="$(gate_lock_process_state "$pid")"
+  snapshot="$(gate_lock_process_snapshot "$pid")"
+  [[ "$snapshot" == *" "* ]] || return 1
+  current_state="${snapshot##* }"
   [[ "$current_state" == Z* ]] || return 1
-  current_start="$(gate_lock_process_start "$pid")"
+  current_start="$(printf '%s\n' "${snapshot% *}" | sed 's/[[:blank:]]*$//')"
   [[ -n "$current_start" && "$current_start" == "$recorded_start" ]]
 }
 
@@ -895,19 +1098,25 @@ gate_lock_process_is_confirmed_zombie() {
 gate_lock_holder_is_live() {
   local pid="$1"
   local recorded_start="$2"
-  local current_start
+  local snapshot current_start current_state
   [[ -n "$pid" ]] || return 1
   # `kill -0` fails two ways that mean opposite things: no such process, and a
   # live process this user may not signal. A lock root shared between users
   # makes the second ordinary, and reading it as "gone" would reclaim a lock
   # whose holder is still running. `ps` answers existence across users, so it
   # decides, and `kill -0` only spares the `ps` call in the common case.
-  if ! kill -0 "$pid" 2>/dev/null; then
-    ps -p "$pid" > /dev/null 2>&1 || return 1
+  snapshot="$(gate_lock_process_snapshot "$pid")"
+  if [[ -z "$snapshot" ]]; then
+    if ! kill -0 "$pid" 2>/dev/null; then
+      ps -p "$pid" > /dev/null 2>&1 || return 1
+    fi
+    return 0
   fi
+  [[ "$snapshot" == *" "* ]] || return 0
+  current_state="${snapshot##* }"
+  [[ "$current_state" != Z* ]] || return 1
   [[ -n "$recorded_start" ]] || return 0
-  current_start="$(gate_lock_process_start "$pid")"
-  [[ -n "$current_start" ]] || return 0
+  current_start="$(printf '%s\n' "${snapshot% *}" | sed 's/[[:blank:]]*$//')"
   [[ "$current_start" == "$recorded_start" ]]
 }
 
@@ -972,6 +1181,7 @@ claim_gate_run_lock() {
   [[ "$(gate_lock_owner_field "$lock" token)" == "$token" ]] || return 1
   gate_lock_dir="$lock"
   gate_lock_token="$token"
+  [[ -n "$gate_run_id" ]] || gate_run_id="$token"
   export AGENT_QUALITY_GATE_LOCK_HELD="$token"
   return 0
 }
@@ -1137,11 +1347,26 @@ capture_process_tree() {
 
 drain_condemned_run_commands() {
   local token="$1"
+  local drain_context="${2:-stale-run}"
   local wrapper entry pid recorded current alive alive_identities recycled unverified captured_file
   local waited=0
   local drain_started_at
   local announced=0
   local escalated=0
+  local drain_subject="previous run"
+  local drain_start_message="The run this lock was taken from left commands running; stopping them before starting anything."
+  local drain_done_message="Previous run's commands are gone; continuing."
+  local drain_failure_prefix="Nothing has been executed."
+  local drain_failure_phase="stale-obligation recovery"
+  local drain_failure_verdict="No mapped command ran in this request"
+  if [[ "$drain_context" == "active-command" ]]; then
+    drain_subject="completed mapped command"
+    drain_start_message="A completed mapped command left descendants running; stopping them before releasing its scheduler lease."
+    drain_done_message="The completed mapped command's descendants are gone; releasing its scheduler lease."
+    drain_failure_prefix="The mapped command finished, but descendant cleanup did not complete."
+    drain_failure_phase="command descendant cleanup"
+    drain_failure_verdict="A mapped command ran, but its descendants were not confirmed gone"
+  fi
   [[ -n "$token" ]] || return 0
   drain_started_at="$(date +%s)"
 
@@ -1164,14 +1389,16 @@ drain_condemned_run_commands() {
     # regular files, and appending through a planted link would write
     # whatever it points at with this user's permissions.
     if [[ -L "$captured_file" ]]; then
-      gate_lock_obligation_unreadable "$captured_file"
+      gate_drain_obligation_unreadable "$captured_file" "$drain_context" ||
+        return $?
     fi
     if [[ ! -e "$captured_file" ]]; then
       # Created exclusively before the first append, so every later >> lands
       # in a regular file this run made; noclobber refuses a path planted
       # between the check above and here, symlinks included.
       if ! (set -C && : > "$captured_file") 2>/dev/null; then
-        gate_lock_obligation_unreadable "$captured_file"
+        gate_drain_obligation_unreadable "$captured_file" "$drain_context" ||
+          return $?
       fi
     fi
   fi
@@ -1193,14 +1420,22 @@ drain_condemned_run_commands() {
     if [[ ! -O "$captured_file" ]]; then
       echo "error: ${captured_file} is not owned by this user, so it is not this gate's evidence." >&2
       echo "On a shared lock root that is a fabricated snapshot; killing by it could signal a stranger." >&2
-      echo "Nothing has been executed. Inspect and remove that file, then re-run." >&2
-      exit 2
+      echo "${drain_failure_prefix} Inspect and remove that file, then re-run." >&2
+      if [[ "$drain_context" == "stale-run" ]]; then
+        gate_report_coordinated_no_work_failure 2 "$drain_failure_phase" \
+          "$drain_failure_verdict"
+      fi
+      gate_drain_fail_for_context "$drain_context"
+      return $?
     fi
     # Unreadable is not empty. Starting from nothing here would lose the
     # descendants an interrupted drain recorded, and their tagged wrapper is
     # already dead by then — so the tag scan below would come back empty and
     # this run would call the job done with those processes still running.
-    [[ -r "$captured_file" ]] || gate_lock_obligation_unreadable "$captured_file"
+    if [[ ! -r "$captured_file" ]]; then
+      gate_drain_obligation_unreadable "$captured_file" "$drain_context" ||
+        return $?
+    fi
     gate_drain_capture="$(cat "$captured_file" 2>/dev/null)
 "
   fi
@@ -1235,11 +1470,16 @@ drain_condemned_run_commands() {
   if [[ "$gate_drain_capture_unpersisted" -ne 0 ]]; then
     echo "error: could not write the captured process list to ${captured_file}." >&2
     echo "Signalling now would destroy the tag those processes are still findable by, with nothing on disk to hand on." >&2
-    echo "Nothing has been executed. Fix that path — permissions, or free space — then re-run." >&2
-    exit 2
+    echo "${drain_failure_prefix} Fix that path — permissions, or free space — then re-run." >&2
+    if [[ "$drain_context" == "stale-run" ]]; then
+      gate_report_coordinated_no_work_failure 2 "$drain_failure_phase" \
+        "$drain_failure_verdict"
+    fi
+    gate_drain_fail_for_context "$drain_context"
+    return $?
   fi
 
-  echo "The run this lock was taken from left commands running; stopping them before starting anything."
+  echo "$drain_start_message"
   announced=1
   recycled=""
 
@@ -1249,6 +1489,17 @@ drain_condemned_run_commands() {
     unverified=""
     gate_drain_scan_failed=0
     gate_drain_refresh_tagged "$token"
+    # A tagged replacement can appear after the previous bottom-of-loop walk
+    # and after its captured parent exits. Persist every fresh tagged root
+    # before deciding that the old capture is empty.
+    for wrapper in $gate_drain_tagged_now; do
+      capture_process_tree "$wrapper"
+    done
+    if ! gate_drain_test_refresh_barrier; then
+      echo "error: the test-only drain refresh barrier did not release." >&2
+      gate_drain_fail_for_context "$drain_context"
+      return $?
+    fi
     while IFS='|' read -r pid recorded; do
       [[ -n "$pid" ]] || continue
       # Only signal something that reads as a PID. Appends are single short
@@ -1317,19 +1568,25 @@ EOF
     # Unverifiable entries keep the drain open even though nothing is sent to
     # them: "we could not check" is not "it is gone". A scan that failed counts
     # the same way — an unanswered question is not an empty answer.
-    [[ -n "$alive" || -n "$unverified" || "$gate_drain_scan_failed" -ne 0 ]] || break
+    [[ -n "$alive" || -n "$unverified" || -n "$gate_drain_tagged_now" ||
+      "$gate_drain_scan_failed" -ne 0 ]] || break
 
     if [[ "$waited" -ge "$gate_lock_orphan_drain_bound_seconds" ]]; then
       # Refusing to run is the whole point: proceeding here is exactly the
       # cross-run overlap the lock exists to prevent.
       [[ -z "$alive" ]] ||
-        echo "error: commands from the previous run are still alive after ${waited}s: ${alive}" >&2
+        echo "error: commands from the ${drain_subject} are still alive after ${waited}s: ${alive}" >&2
       [[ -z "$unverified" ]] ||
-        echo "error: processes from the previous run could not be identified after ${waited}s, so none were signalled: ${unverified}" >&2
+        echo "error: processes from the ${drain_subject} could not be identified after ${waited}s, so none were signalled: ${unverified}" >&2
       [[ "$gate_drain_scan_failed" -eq 0 ]] ||
-        echo "error: the scan for the previous run's processes kept failing after ${waited}s, so it is not known whether any are left." >&2
-      echo "Nothing has been executed. Investigate those processes, then re-run." >&2
-      exit 2
+        echo "error: the scan for the ${drain_subject}'s processes kept failing after ${waited}s, so it is not known whether any are left." >&2
+      echo "${drain_failure_prefix} Investigate those processes, then re-run." >&2
+      if [[ "$drain_context" == "stale-run" ]]; then
+        gate_report_coordinated_no_work_failure 2 "$drain_failure_phase" \
+          "$drain_failure_verdict"
+      fi
+      gate_drain_fail_for_context "$drain_context"
+      return $?
     fi
 
     # Same rule between passes: a re-walk that found a forked child but could
@@ -1338,8 +1595,13 @@ EOF
     if [[ "$gate_drain_capture_unpersisted" -ne 0 ]]; then
       echo "error: could not write the captured process list to ${captured_file} while draining." >&2
       echo "error: still alive: ${alive:-none}${unverified:+, unverified: ${unverified}}" >&2
-      echo "Nothing has been executed. Investigate those processes, fix that path, then re-run." >&2
-      exit 2
+      echo "${drain_failure_prefix} Investigate those processes, fix that path, then re-run." >&2
+      if [[ "$drain_context" == "stale-run" ]]; then
+        gate_report_coordinated_no_work_failure 2 "$drain_failure_phase" \
+          "$drain_failure_verdict"
+      fi
+      gate_drain_fail_for_context "$drain_context"
+      return $?
     fi
 
     # Identity is re-read here rather than trusted from the census above. The
@@ -1404,12 +1666,57 @@ EOF
     echo "Left alone: pid(s) ${recycled}now belong to unrelated processes."
   fi
   if [[ "$announced" -eq 1 ]]; then
-    echo "Previous run's commands are gone; continuing."
+    echo "$drain_done_message"
     echo
   fi
 }
 
-assert_gate_run_lock_still_ours() {
+drain_completed_sequential_command() {
+  local token="${gate_run_id:-$gate_lock_token}"
+  local condemned_dir=""
+  local coordinator_active=0
+  [[ -n "$token" ]] || return 0
+
+  if declare -F gate_coordinator_is_active >/dev/null 2>&1 &&
+    gate_coordinator_is_active; then
+    coordinator_active=1
+  fi
+
+  if [[ "$coordinator_active" -eq 0 ]]; then
+    # One assignment-only command closes the signal window between the two
+    # guards: cleanup must preserve both the marker and the legacy owner until
+    # the recovery obligation exists on disk.
+    gate_active_command_drain_in_progress=1 gate_cleanup_preserve_legacy_lock=1
+    if ! record_condemned_run "$token"; then
+      echo "error: could not record the completed command's descendants in ${gate_lock_root_dir:-unknown}/condemned.d." >&2
+      echo "The legacy lock stays in place so a later run must reclaim and drain this run before executing work." >&2
+      echo "The mapped command finished, but descendant cleanup did not start. Fix that path — permissions, or free space — then re-run." >&2
+      return 2
+    fi
+    condemned_dir="$(gate_lock_condemned_dir)" || {
+      echo "error: could not resolve the completed command's recovery directory." >&2
+      return 2
+    }
+    gate_cleanup_preserve_legacy_lock=0
+  else
+    # The coordinator journal already contains this request's drain token and
+    # lease. Preserve its marker until normal cleanup or recovery succeeds.
+    gate_active_command_drain_in_progress=1
+  fi
+
+  # The active drain stays in the gate process. A second drainer for the same
+  # token must never race this one over its append-only capture file.
+  drain_condemned_run_commands "$token" active-command || return $?
+  if [[ "$coordinator_active" -eq 0 ]]; then
+    rm -f "${condemned_dir}/${token}"
+  fi
+  # A successful drain removes the marker whose descriptor named reparented
+  # descendants. The next command creates a new marker before it starts.
+  gate_run_marker_file=""
+  gate_active_command_drain_in_progress=0
+}
+
+assert_gate_run_lock_still_ours_legacy() {
   local recorded
   [[ -n "$gate_lock_dir" ]] || return 0
   recorded="$(gate_lock_owner_field "$gate_lock_dir" token)"
@@ -1420,7 +1727,7 @@ assert_gate_run_lock_still_ours() {
   exit 2
 }
 
-release_gate_run_lock() {
+release_gate_run_lock_legacy() {
   local recorded
   [[ -n "$gate_lock_dir" ]] || return 0
   recorded="$(gate_lock_owner_field "$gate_lock_dir" token)"
@@ -1433,9 +1740,10 @@ release_gate_run_lock() {
   gate_lock_dir=""
 }
 
-acquire_gate_run_lock() {
+acquire_gate_run_lock_legacy() {
   local root lock owner_pid owner_host owner_worktree owner_token_value owner_start
-  local stale_reason nap remaining now_millis
+  local stale_reason owner_state nap remaining now_millis
+  local coordinator_join_status
   # Elapsed time comes from the clock, never from adding up requested sleeps.
   # A shell that is descheduled or SIGSTOPped sleeps far longer than it asked
   # to, and counting the request would let a run outlive the budget it printed
@@ -1468,6 +1776,8 @@ acquire_gate_run_lock() {
     echo "error: no writable lock directory, so this run cannot take the gate run lock." >&2
     echo "Set AGENT_QUALITY_GATE_LOCK_DIR to a writable path, or re-run with --no-lock to accept the contention." >&2
     echo "Nothing has been executed." >&2
+    gate_report_coordinated_no_work_failure 2 "startup" \
+      "No mapped command ran in this request"
     exit 2
   fi
   lock="$root/run.lock"
@@ -1476,6 +1786,18 @@ acquire_gate_run_lock() {
   wait_started_at="$(gate_wall_millis)"
 
   while :; do
+    # A coordinator can finish adopting the legacy owner while this waiter is
+    # in the legacy loop. Probe before each claim attempt so a new client joins
+    # it instead of waiting for its intentionally long-lived compatibility
+    # lock. Legacy-only runs never define this function.
+    if declare -F gate_coordinator_try_join_existing >/dev/null 2>&1; then
+      if gate_coordinator_try_join_existing; then
+        return 0
+      else
+        coordinator_join_status=$?
+        [[ "$coordinator_join_status" -eq 1 ]] || return "$coordinator_join_status"
+      fi
+    fi
     now_millis="$(gate_wall_millis)"
     # A clock stepped backwards mid-wait — this is a wall clock, and NTP steps
     # it — would otherwise make every later delta smaller than the budget, so
@@ -1541,7 +1863,10 @@ acquire_gate_run_lock() {
       # closed with the holder line naming the record.
       :
     elif ! gate_lock_holder_is_live "$owner_pid" "$owner_start"; then
-      if kill -0 "$owner_pid" 2>/dev/null; then
+      owner_state="$(gate_lock_process_state "$owner_pid")"
+      if [[ "$owner_state" == Z* ]]; then
+        stale_reason="holder pid ${owner_pid} has exited and is awaiting reap"
+      elif kill -0 "$owner_pid" 2>/dev/null; then
         stale_reason="pid ${owner_pid} now belongs to a different process"
       else
         stale_reason="holder pid ${owner_pid} is gone"
@@ -1678,6 +2003,80 @@ acquire_gate_run_lock() {
   done
 }
 
+gate_coordinator_requested() {
+  case "$gate_coordinator_enabled" in
+    1|true|yes) ;;
+    *) return 1 ;;
+  esac
+  case "$gate_lock_enabled" in
+    0|false|no) return 1 ;;
+  esac
+  [[ -z "${AGENT_QUALITY_GATE_LOCK_HELD:-}" ]]
+}
+
+gate_run_ensure_token() {
+  if [[ -z "$gate_run_id" ]]; then
+    gate_run_id="$(uname -n)-$$-$(date +%s)"
+  fi
+  if ! gate_lock_token_is_wellformed "$gate_run_id"; then
+    echo "error: this gate could not create a safe scheduler drain token." >&2
+    return 2
+  fi
+}
+
+acquire_gate_run_lock() {
+  local coordinator_join_status
+  if ! gate_coordinator_requested; then
+    acquire_gate_run_lock_legacy
+    return
+  fi
+
+  gate_run_ensure_token || return 2
+  if gate_coordinator_try_join_existing; then
+    return 0
+  else
+    coordinator_join_status=$?
+    [[ "$coordinator_join_status" -eq 1 ]] || return "$coordinator_join_status"
+  fi
+
+  acquire_gate_run_lock_legacy
+  # The legacy wait loop probes again on every pass. Another gate can finish
+  # coordinator startup while this request waits, in which case that probe has
+  # already registered this request and no second bootstrap is permitted.
+  if declare -F gate_coordinator_is_active >/dev/null 2>&1 &&
+    gate_coordinator_is_active; then
+    return 0
+  fi
+  if ! gate_coordinator_bootstrap_from_legacy; then
+    echo "error: the quality-gate coordinator could not adopt the legacy run lock." >&2
+    echo "No mapped command ran. Re-run after the current coordinator or legacy holder exits." >&2
+    return 2
+  fi
+}
+
+assert_gate_run_lock_still_ours() {
+  if declare -F gate_coordinator_is_active >/dev/null 2>&1 &&
+    gate_coordinator_is_active; then
+    gate_coordinator_assert_authority
+    return
+  fi
+  assert_gate_run_lock_still_ours_legacy
+}
+
+release_gate_run_lock() {
+  if declare -F gate_coordinator_is_active >/dev/null 2>&1 &&
+    gate_coordinator_is_active; then
+    # The coordinator retains and releases the legacy lock after all requests,
+    # leases, and drain obligations settle. A client must never delete it.
+    gate_lock_dir=""
+    return 0
+  fi
+  if [[ "$gate_cleanup_preserve_legacy_lock" -eq 1 ]]; then
+    return 0
+  fi
+  release_gate_run_lock_legacy
+}
+
 cleanup_tmpfiles() {
   teardown_active_timeouts
   if [[ ${#tmpfiles[@]} -gt 0 ]]; then
@@ -1703,10 +2102,14 @@ cleanup_tmpfiles() {
     rm -f "$gate_lock_condemn_tmp"
     gate_lock_condemn_tmp=""
   fi
+  if declare -F gate_coordinator_cleanup >/dev/null 2>&1; then
+    gate_coordinator_cleanup || true
+  fi
   # Dropped after the workers are down, so it is gone only once nothing of ours
   # is left holding it. A run that dies before this leaves it behind on
   # purpose: that is the handle its successor needs.
-  if [[ -n "$gate_run_marker_file" ]]; then
+  if [[ -n "$gate_run_marker_file" &&
+    "$gate_active_command_drain_in_progress" -eq 0 ]]; then
     rm -f "$gate_run_marker_file"
     gate_run_marker_file=""
   fi
@@ -1765,24 +2168,11 @@ if [[ -n "$changed_paths_input_file" ]]; then
     echo "error: changed paths file not found: ${changed_paths_input_file}" >&2
     exit 2
   fi
-  sed '/^$/d' "$changed_paths_input_file" | sort -u > "$changed_paths_file"
-else
-  {
-    if ! git diff --name-only --no-renames "${base_ref}...${head_ref}" 2>/dev/null; then
-      git diff --name-only --no-renames "$base_ref" "$head_ref"
-    fi
-
-    if [[ "$head_ref" == "HEAD" ]]; then
-      git diff --name-only --no-renames
-      git diff --cached --name-only --no-renames
-      # The scratch dir is created at line 110 *before* this collection runs.
-      # In a repo where .tmp/ isn't gitignored (e.g. the fresh fixture repos
-      # built by scripts/agent-quality-gate.test.sh), the gate's own tmpfiles
-      # would otherwise be reported as untracked user changes and bleed into
-      # downstream args (e.g. the docs-only `./tools/trunk check` builder).
-      git ls-files --others --exclude-standard --exclude='.tmp/agent-quality-gate/'
-    fi
-  } | sed '/^$/d' | sort -u > "$changed_paths_file"
+fi
+if ! collect_current_changed_paths |
+  sed '/^$/d' | LC_ALL=C sort -u > "$changed_paths_file"; then
+  echo "error: failed to collect the current changed paths." >&2
+  exit 2
 fi
 
 if [[ ! -s "$changed_paths_file" ]]; then
@@ -2020,7 +2410,23 @@ hash_stream() {
 }
 
 hash_file() {
-  hash_sha256 "$1" | awk '{ print $1 }'
+  local output digest
+  output="$(hash_sha256 "$1")" || return 1
+  digest="${output%%[[:space:]]*}"
+  printf '%s\n' "$digest"
+}
+
+checked_file_digest() {
+  local path="$1" digest
+  digest="$(hash_file "$path")" || {
+    echo "error: could not hash required implementation file: ${path}" >&2
+    return 1
+  }
+  if [[ ! "$digest" =~ ^[a-f0-9]{64}$ ]]; then
+    echo "error: implementation hash output is malformed for: ${path}" >&2
+    return 1
+  fi
+  printf '%s\n' "$digest"
 }
 
 write_command_plan() {
@@ -2059,7 +2465,9 @@ write_command_plan() {
 }
 
 implementation_signature() {
-  local implementation_path path
+  local output_file="$1"
+  local implementation_path path canonical_path digest discovered_paths status=0
+  : > "$output_file" || return 1
   for path in \
     scripts/agent-quality-gate.sh \
     scripts/agent-quality-gate.test.sh \
@@ -2096,6 +2504,8 @@ implementation_signature() {
     scripts/gate/routing-table/pins.test.mjs \
     scripts/gate/routing-table/routing-table.test.mjs \
     scripts/gate/routing-table/schema.mjs \
+    scripts/gate/quality-gate-coordinator.sh \
+    scripts/gate/quality-gate-coordinator-support.sh \
     scripts/terraform/terraform-fmt-check.mjs \
     scripts/terraform/terraform-fmt-check.test.mjs \
     turbo.json \
@@ -2105,22 +2515,113 @@ implementation_signature() {
   # executes. The mapper and routing-table suites are mapped commands from the
   # repository under test, so they stay anchored there.
   case "$path" in
-      scripts/gate/mapping/*.test.mjs | scripts/gate/routing-table/*.test.mjs)
+    scripts/gate/mapping/*.test.mjs | scripts/gate/routing-table/*.test.mjs)
         implementation_path="$repo_root/$path"
         ;;
-      scripts/agent-quality-gate.sh | scripts/agent-autoreview-core.mjs | scripts/docs/docs-navigation-eval-helpers.mjs | scripts/gate/lockfile-scope.mjs | scripts/gate/run-handles.sh | scripts/gate/mapping.mjs | scripts/gate/mapping/*.mjs | scripts/gate/routing-table/*.mjs)
+      scripts/agent-quality-gate.sh | scripts/agent-autoreview-core.mjs | scripts/docs/docs-navigation-eval-helpers.mjs | scripts/gate/lockfile-scope.mjs | scripts/gate/run-handles.sh | scripts/gate/mapping.mjs | scripts/gate/mapping/*.mjs | scripts/gate/routing-table/*.mjs | scripts/gate/quality-gate-coordinator.sh | scripts/gate/quality-gate-coordinator-support.sh)
         implementation_path="$script_source_dir/${path#scripts/}"
         ;;
       *)
         implementation_path="$repo_root/$path"
         ;;
     esac
-    if [[ -f "$implementation_path" ]]; then
-      printf '%s %s\n' "$path" "$(hash_file "$implementation_path")"
+    if [[ -L "$implementation_path" ]]; then
+      echo "error: required implementation path is a symlink: ${implementation_path}" >&2
+      return 1
+    elif [[ -f "$implementation_path" ]]; then
+      digest="$(checked_file_digest "$implementation_path")" || return 1
+      printf '%s %s\n' "$path" "$digest" >> "$output_file" || return 1
+    elif [[ -e "$implementation_path" ]]; then
+      echo "error: required implementation path is not a regular file: ${implementation_path}" >&2
+      return 1
     else
-      printf '%s __missing__\n' "$path"
+      printf '%s __missing__\n' "$path" >> "$output_file" || return 1
     fi
-  done | hash_stream
+  done
+
+  # Discover production coordinator modules from the checkout that the gate
+  # loaded. A new module must invalidate local freshness and shared execution
+  # before another caller learns its exact filename.
+  discovered_paths="$(mktemp "$scratch_dir/implementation-runtime-paths.XXXXXX")" || return 1
+  if ! find "$script_source_dir/gate" -maxdepth 1 \
+    -name 'quality-gate-coordinator*.mjs' ! -name '*.test.mjs' -print \
+    > "$discovered_paths" 2>/dev/null; then
+    rm -f "$discovered_paths"
+    return 1
+  fi
+  if ! LC_ALL=C sort -o "$discovered_paths" "$discovered_paths"; then
+    rm -f "$discovered_paths"
+    return 1
+  fi
+  while IFS= read -r implementation_path; do
+    canonical_path="scripts/gate/${implementation_path##*/}"
+    if [[ -L "$implementation_path" || ! -f "$implementation_path" ]]; then
+      echo "error: discovered implementation path is not a regular file: ${implementation_path}" >&2
+      status=1
+      break
+    fi
+    digest="$(checked_file_digest "$implementation_path")" || {
+      status=1
+      break
+    }
+    if ! printf '%s %s\n' "$canonical_path" "$digest" >> "$output_file"; then
+      status=1
+      break
+    fi
+  done < "$discovered_paths"
+  rm -f "$discovered_paths"
+  [[ "$status" -eq 0 ]] || return 1
+
+  # Coordinator tests and scheduler fixtures execute from the repository under
+  # test. Keep their physical root separate from the loaded runtime root.
+  if [[ -d "$repo_root/scripts/gate" ]]; then
+    discovered_paths="$(mktemp "$scratch_dir/implementation-test-paths.XXXXXX")" || return 1
+    if ! find "$repo_root/scripts/gate" -maxdepth 1 \
+      \( -name 'quality-gate-coordinator*.test.mjs' -o \
+      -name 'agent-quality-gate-scheduler*.mjs' -o \
+      -name 'agent-quality-gate-fixture-processes.mjs' \) -print \
+      > "$discovered_paths" 2>/dev/null; then
+      rm -f "$discovered_paths"
+      return 1
+    fi
+    if ! LC_ALL=C sort -o "$discovered_paths" "$discovered_paths"; then
+      rm -f "$discovered_paths"
+      return 1
+    fi
+    while IFS= read -r implementation_path; do
+      canonical_path="scripts/gate/${implementation_path##*/}"
+      if [[ -L "$implementation_path" || ! -f "$implementation_path" ]]; then
+        echo "error: discovered implementation path is not a regular file: ${implementation_path}" >&2
+        status=1
+        break
+      fi
+      digest="$(checked_file_digest "$implementation_path")" || {
+        status=1
+        break
+      }
+      if ! printf '%s %s\n' "$canonical_path" "$digest" >> "$output_file"; then
+        status=1
+        break
+      fi
+    done < "$discovered_paths"
+    rm -f "$discovered_paths"
+    [[ "$status" -eq 0 ]] || return 1
+  fi
+}
+
+implementation_hash_value() {
+  local manifest digest
+  manifest="$(mktemp "$scratch_dir/implementation-signature.XXXXXX")" || return 1
+  if ! implementation_signature "$manifest"; then
+    rm -f "$manifest"
+    return 1
+  fi
+  digest="$(checked_file_digest "$manifest")" || {
+    rm -f "$manifest"
+    return 1
+  }
+  rm -f "$manifest"
+  printf '%s\n' "$digest"
 }
 
 # The mode of a path, read from the worktree rather than from the index, so the
@@ -2142,18 +2643,49 @@ gate_worktree_filemode() {
   fi
 }
 
+gate_symlink_target_hash() {
+  local path="$1"
+  [[ -L "$path" ]] || return 1
+  readlink "$path" | hash_stream
+}
+
+gate_resolved_filemode() {
+  local path="$1"
+  if [[ -x "$path" ]]; then
+    printf '100755'
+  else
+    printf '100644'
+  fi
+}
+
 validation_content_signature() {
-  local path
+  local path link_hash resolved_digest
 
   {
     while IFS= read -r path; do
       printf 'path %s\0' "$path"
-      if [[ -f "$path" ]]; then
+      if [[ -L "$path" ]]; then
+        link_hash="$(gate_symlink_target_hash "$path")" || return 1
+        printf 'symlink %s\0' "$link_hash"
+        if [[ -f "$path" ]]; then
+          resolved_digest="$(hash_file "$path")" || return 1
+          printf 'resolved-file %s\0' "$resolved_digest"
+          printf 'resolved-mode %s\0' "$(gate_resolved_filemode "$path")"
+        elif [[ -d "$path" ]]; then
+          # A directory target has no bounded content digest. Keep the gate
+          # valid, but bind the physical worktree so another worktree cannot
+          # reuse a result for different directory contents behind the same
+          # relative link.
+          printf 'resolved-directory-worktree %s\0' "$repo_root"
+        elif [[ -e "$path" ]]; then
+          printf 'resolved-other-worktree %s\0' "$repo_root"
+        else
+          printf 'resolved-missing\0'
+        fi
+      elif [[ -f "$path" ]]; then
         printf 'file %s\0' "$(hash_file "$path")"
-        # The executable bit and symlink-ness are not in the content hash, and
-        # they are the part of the summary line below that says something about
-        # the file rather than about the index. Read from the worktree, so
-        # `git add` cannot move it.
+        # The executable bit is not in the content hash. Read it from the
+        # worktree so `git add` cannot move it.
         printf 'mode %s\0' "$(gate_worktree_filemode "$path")"
       elif [[ -d "$path" ]]; then
         printf 'directory\0'
@@ -2184,7 +2716,7 @@ write_command_plan "$command_plan_file"
 base_oid="$(ref_oid "$base_ref")"
 changed_paths_hash="$(hash_file "$changed_paths_file")"
 command_plan_hash="$(hash_file "$command_plan_file")"
-implementation_hash="$(implementation_signature)"
+implementation_hash="$(implementation_hash_value)"
 validated_content_hash="$(validation_content_signature)"
 
 # `allow_package_script_changes` only gates the pre-run package-script refusal,
@@ -2200,7 +2732,53 @@ else
   stamp_allow_package_scripts="n/a"
 fi
 
+gate_coordinator_freshness_context=""
+gate_coordinator_execution_head=""
+
+# The coordinator execution fingerprint binds HEAD. The pre-push workflow must
+# also accept a warm run made immediately before committing the same validated
+# bytes. Build a separate compatibility context from every execution-fingerprint
+# input except HEAD; stamp_line already carries base, paths, plan,
+# implementation, content, and package-risk policy. Equality therefore means
+# that only HEAD can differ. Legacy and --no-lock runs keep the v2 stamp.
+gate_coordinator_freshness_context_hash() {
+  local os_name os_arch node_path node_version pnpm_path pnpm_version
+  local env_digest policy_hash runtime_hash repository_identity
+  os_name="$(uname -s)" || return 1
+  os_arch="$(uname -m)" || return 1
+  node_path="$(command -v node)" || return 1
+  node_version="$(node --version 2>/dev/null)" || return 1
+  pnpm_path="$(command -v pnpm)" || return 1
+  pnpm_version="$(pnpm --version 2>/dev/null)" || return 1
+  env_digest="$(gate_coordinator_material_env_digest)" || return 1
+  policy_hash="${gate_coordinator_policy_hash:-}"
+  [[ "$policy_hash" =~ ^[a-f0-9]{64}$ ]] || return 1
+  runtime_hash="$(gate_coordinator_runtime_signature)" || return 1
+  repository_identity="$(gate_coordinator_repository_identity)" || return 1
+  printf '%s\n' \
+    "schema=v1" "repository=${repository_identity}" \
+    "commandTimeout=${command_timeout_seconds}" \
+    "qualityParallelism=${quality_parallelism}" "failFast=${fail_fast}" \
+    "os=${os_name}" "arch=${os_arch}" "nodePath=${node_path}" \
+    "node=${node_version}" "pnpmPath=${pnpm_path}" \
+    "pnpm=${pnpm_version}" "policy=${policy_hash}" \
+    "runtime=${runtime_hash}" "environment=${env_digest}" |
+    hash_stream
+}
+
 stamp_line() {
+  if [[ -n "$gate_coordinator_freshness_context" ]]; then
+    printf 'v3\tbase=%s\tpaths=%s\tplan=%s\timplementation=%s\tcontent=%s\tpackageRisk=%s\tallowPackageScripts=%s\tcoordinatorContext=%s\n' \
+      "$base_oid" \
+      "$changed_paths_hash" \
+      "$command_plan_hash" \
+      "$implementation_hash" \
+      "$validated_content_hash" \
+      "$package_script_risk_changed" \
+      "$stamp_allow_package_scripts" \
+      "$gate_coordinator_freshness_context"
+    return
+  fi
   printf 'v2\tbase=%s\tpaths=%s\tplan=%s\timplementation=%s\tcontent=%s\tpackageRisk=%s\tallowPackageScripts=%s\n' \
     "$base_oid" \
     "$changed_paths_hash" \
@@ -2211,16 +2789,67 @@ stamp_line() {
     "$stamp_allow_package_scripts"
 }
 
-current_stamp="$(stamp_line)"
+current_stamp=""
+
+recomputed_stamp_line() {
+  local fresh_paths_file fresh_plan_file fresh_base fresh_paths fresh_plan
+  local fresh_implementation fresh_content fresh_coordinator_context
+  fresh_paths_file="$(mktemp "$scratch_dir/fresh-paths.XXXXXX")" || return 1
+  fresh_plan_file="$(mktemp "$scratch_dir/fresh-plan.XXXXXX")" || {
+    rm -f "$fresh_paths_file"
+    return 1
+  }
+  if ! collect_current_changed_paths |
+    sed '/^$/d' | LC_ALL=C sort -u > "$fresh_paths_file"; then
+    rm -f "$fresh_paths_file" "$fresh_plan_file"
+    return 1
+  fi
+  write_command_plan "$fresh_plan_file"
+  fresh_base="$(ref_oid "$base_ref")"
+  fresh_paths="$(hash_file "$fresh_paths_file")"
+  fresh_plan="$(hash_file "$fresh_plan_file")"
+  fresh_implementation="$(implementation_hash_value)"
+  fresh_content="$(validation_content_signature)"
+  rm -f "$fresh_paths_file" "$fresh_plan_file"
+  if [[ -n "$gate_coordinator_freshness_context" ]]; then
+    fresh_coordinator_context="$(gate_coordinator_freshness_context_hash)" || return 1
+    printf 'v3\tbase=%s\tpaths=%s\tplan=%s\timplementation=%s\tcontent=%s\tpackageRisk=%s\tallowPackageScripts=%s\tcoordinatorContext=%s\n' \
+      "$fresh_base" "$fresh_paths" "$fresh_plan" "$fresh_implementation" \
+      "$fresh_content" "$package_script_risk_changed" \
+      "$stamp_allow_package_scripts" "$fresh_coordinator_context"
+    return
+  fi
+  printf 'v2\tbase=%s\tpaths=%s\tplan=%s\timplementation=%s\tcontent=%s\tpackageRisk=%s\tallowPackageScripts=%s\n' \
+    "$fresh_base" "$fresh_paths" "$fresh_plan" "$fresh_implementation" \
+    "$fresh_content" "$package_script_risk_changed" "$stamp_allow_package_scripts"
+}
 
 is_fresh_success_stamp() {
   local stamped_at
   local stamped_value
+  local stamped_execution_fingerprint
+  local stamped_execution_head
   local now
   [[ -f "$success_stamp_file" ]] || return 1
   stamped_at="$(sed -n '1s/^created_at=//p' "$success_stamp_file")"
   stamped_value="$(sed -n '2s/^stamp=//p' "$success_stamp_file")"
   [[ "$stamped_value" == "$current_stamp" ]] || return 1
+  if [[ -n "$gate_coordinator_freshness_context" ]]; then
+    stamped_execution_fingerprint="$(
+      sed -n '3s/^execution_fingerprint=//p' "$success_stamp_file"
+    )"
+    stamped_execution_head="$(
+      sed -n '4s/^execution_head=//p' "$success_stamp_file"
+    )"
+    [[ "$stamped_execution_fingerprint" =~ ^[a-f0-9]{64}$ ]] || return 1
+    [[ "$stamped_execution_head" =~ ^[a-f0-9]{40}([a-f0-9]{24})?$ ]] || return 1
+    if [[ "$stamped_execution_head" == "$gate_coordinator_execution_head" ]]; then
+      [[ "$stamped_execution_fingerprint" == \
+        "$gate_coordinator_registration_fingerprint" ]] || return 1
+    fi
+    # If HEAD changed after a warm run, the matching v3 stamp above proves
+    # equality for every other execution input and permits only that transition.
+  fi
   [[ "$stamped_at" =~ ^[0-9]+$ ]] || return 1
   now="$(date +%s)"
   # Reject future-dated stamps (clock stepped backward after stamping): a
@@ -2279,6 +2908,80 @@ if [[ "$mode" == "dry-run" ]]; then
   exit 0
 fi
 
+# A coordinated zero-work success must first derive the same source, plan,
+# toolchain, material environment, runtime, and policy identity used for
+# registration. The second full fingerprint read brackets the compatible
+# headless context and fails closed if any execution input moves during it.
+if gate_coordinator_requested; then
+  exec 7>&1
+  gate_coordinator_stdout_reserved=1
+  if ! gate_run_ensure_token; then
+    gate_coordinator_report_no_work_failure 2 "registration preparation" "No mapped command ran in this request"
+    exit 2
+  fi
+  if ! gate_coordinator_prepare_registration_fingerprint; then
+    gate_coordinator_report_no_work_failure 2 "registration preparation" "No mapped command ran in this request"
+    exit 2
+  fi
+  if ! gate_coordinator_requested; then
+    exec 7>&-
+    gate_coordinator_stdout_reserved=0
+  fi
+fi
+if gate_coordinator_requested; then
+  gate_coordinator_freshness_context="$(
+    gate_coordinator_freshness_context_hash
+  )" || {
+    echo "error: could not compute the coordinated freshness context." >&2
+    gate_coordinator_report_no_work_failure 2 "freshness identity preparation" \
+      "No mapped command ran in this request"
+    exit 2
+  }
+  gate_coordinator_execution_head="$(ref_oid "$head_ref")" || {
+    echo "error: could not resolve HEAD for coordinated freshness reuse." >&2
+    gate_coordinator_report_no_work_failure 2 "freshness identity preparation" \
+      "No mapped command ran in this request"
+    exit 2
+  }
+  verified_coordinator_fingerprint="$(
+    gate_coordinator_recompute_fingerprint
+  )" || {
+    echo "error: could not verify the coordinator fingerprint before freshness reuse." >&2
+    gate_coordinator_report_no_work_failure 2 "freshness identity preparation" \
+      "No mapped command ran in this request"
+    exit 2
+  }
+  if [[ "$verified_coordinator_fingerprint" != \
+    "$gate_coordinator_registration_fingerprint" ]]; then
+    echo "error: quality-gate inputs changed while the coordinated freshness identity was prepared." >&2
+    gate_coordinator_report_no_work_failure 2 "freshness identity preparation" \
+      "No mapped command ran in this request"
+    exit 2
+  fi
+  unset verified_coordinator_fingerprint
+fi
+current_stamp="$(stamp_line)" || {
+  echo "error: could not compute the quality-gate freshness stamp." >&2
+  gate_report_coordinated_no_work_failure 2 "freshness identity preparation" \
+    "No mapped command ran in this request"
+  exit 2
+}
+if [[ -n "$gate_coordinator_freshness_context" ]]; then
+  verified_freshness_stamp="$(recomputed_stamp_line)" || {
+    echo "error: could not verify repository state before coordinated freshness reuse." >&2
+    gate_coordinator_report_no_work_failure 2 "freshness identity preparation" \
+      "No mapped command ran in this request"
+    exit 2
+  }
+  if [[ "$verified_freshness_stamp" != "$current_stamp" ]]; then
+    echo "error: repository or execution inputs changed while the coordinated freshness identity was prepared." >&2
+    gate_coordinator_report_no_work_failure 2 "freshness identity preparation" \
+      "No mapped command ran in this request"
+    exit 2
+  fi
+  unset verified_freshness_stamp
+fi
+
 if [[ "$skip_if_fresh" == "1" || "$skip_if_fresh" == "true" ]]; then
   if is_fresh_success_stamp; then
     echo "Previous successful agent quality gate run is still fresh; skipping mapped commands."
@@ -2289,13 +2992,23 @@ fi
 if [[ "$package_script_risk_changed" == true && "$allow_package_script_changes" != "1" && "$allow_package_script_changes" != "true" ]]; then
   echo "Refusing to run because package manifests, patches, or lockfile changed." >&2
   echo "Review package scripts, lifecycle hooks, and dependency install scripts first, then re-run with --allow-package-script-changes if they are safe." >&2
+  if gate_coordinator_requested; then
+    gate_coordinator_report_no_work_failure 2 "pre-execution policy" \
+      "No mapped command ran in this request"
+  fi
   exit 2
 fi
 
 # Take the machine's run lock only once this run is definitely going to execute
 # something: a dry run, a fresh-stamp skip, and a package-script refusal all
-# exit above without ever competing for the machine.
+# exit above without ever competing for the machine. Coordinated runs have
+# already prepared the identity that acquisition registers.
 acquire_gate_run_lock
+if declare -F gate_coordinator_is_follower >/dev/null 2>&1 &&
+  gate_coordinator_is_follower; then
+  gate_coordinator_wait_for_shared_result
+  exit $?
+fi
 # The run marker is written here, while the gate's own stderr is still live
 # and the exit is unambiguously the gate's: inside run_with_timeout the
 # per-command capture would swallow the message, and a parallel worker's exit
@@ -2322,10 +3035,22 @@ gate_lock_test_delay "${AGENT_QUALITY_GATE_LOCK_HELD_DELAY_SECONDS:-}"
 # this exact fingerprint while we waited — the pre-push hook queued behind the
 # manual warm-up run is precisely that case — and re-running its work would
 # throw away the reason the hook passes --skip-if-fresh at all.
-if [[ "$skip_if_fresh" == "1" || "$skip_if_fresh" == "true" ]]; then
-  if is_fresh_success_stamp; then
-    echo "A concurrent agent quality gate run left a fresh success stamp; skipping mapped commands."
-    exit 0
+if ! declare -F gate_coordinator_is_active >/dev/null 2>&1 ||
+  ! gate_coordinator_is_active; then
+  if [[ "$skip_if_fresh" == "1" || "$skip_if_fresh" == "true" ]]; then
+    post_wait_stamp="$(recomputed_stamp_line)" || {
+      echo "error: could not recompute the quality-gate stamp after the lock wait." >&2
+      exit 2
+    }
+    if [[ "$post_wait_stamp" != "$current_stamp" ]]; then
+      echo "error: repository state changed while this gate waited for the run lock." >&2
+      echo "No mapped command ran. Re-run so routing and validation use the new state." >&2
+      exit 2
+    fi
+    if is_fresh_success_stamp; then
+      echo "A concurrent agent quality gate run left a fresh success stamp; skipping mapped commands."
+      exit 0
+    fi
   fi
 fi
 
@@ -2554,12 +3279,21 @@ log_duration_line() {
   local command="$3"
   local line_mode="$4"
   local ts
-  local escaped_command
 
   ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)" || return 0
-  escaped_command="$(node -e 'process.stdout.write(JSON.stringify(process.argv[1]))' -- "$command" 2>/dev/null)" || return 0
-  printf '{"ts":"%s","command":%s,"status":"%s","seconds":%s,"mode":"%s"}\n' \
-    "$ts" "$escaped_command" "$status" "$elapsed" "$line_mode" >> "$durations_file" 2>/dev/null || true
+  # This single-quoted program is JavaScript.
+  # shellcheck disable=SC2016
+  node -e '
+    const [ts, command, status, seconds, mode, requestId, sequence, role] = process.argv.slice(1);
+    process.stdout.write(`${JSON.stringify({
+      ts, command, status, seconds: Number(seconds), mode,
+      requestId: requestId || undefined,
+      sequence: sequence ? Number(sequence) : undefined,
+      role: role || undefined,
+    })}\n`);
+  ' "$ts" "$command" "$status" "$elapsed" "$line_mode" \
+    "${gate_coordinator_request_id:-}" "${gate_coordinator_sequence:-}" \
+    "${gate_coordinator_role:-}" >> "$durations_file" 2>/dev/null || true
 }
 
 record_command_summary() {
@@ -2625,11 +3359,18 @@ monitor_sequential_autoreview_progress() {
 # failure code (see below). Applies per command only, never to the whole run.
 run_with_timeout() {
   local command="$1"
+  local deferred_lease_file="${2:-}"
   local cmd_pid
   local watchdog_pid
   local rc
+  local release_rc=0
+  local drain_rc=0
   local timeout_marker
   local had_errexit=0
+  local command_started_at
+  local command_finished_at
+  local coordinator_marker="${gate_coordinator_marker_file:-}"
+  local coordinator_release_deferred=0
 
   # A `wait` that reaps a SIGTERM/SIGKILL-killed child makes bash re-raise that
   # signal at the next `return`, which would kill the gate. Run the reaping with
@@ -2641,6 +3382,29 @@ run_with_timeout() {
   set +e
 
   last_command_timed_out=false
+  last_command_execution_seconds=0
+  last_command_infrastructure_failed=false
+  if declare -F gate_coordinator_before_command >/dev/null 2>&1; then
+    gate_coordinator_before_command "$command"
+    rc=$?
+    if [[ "$rc" -ne 0 ]]; then
+      last_command_infrastructure_failed=true
+      [[ "$had_errexit" == 1 ]] && set -e
+      return "$rc"
+    fi
+    if [[ -n "$deferred_lease_file" ]] &&
+      declare -F gate_coordinator_is_active >/dev/null 2>&1 &&
+      gate_coordinator_is_active; then
+      if [[ -z "${gate_coordinator_active_lease_id:-}" ]] ||
+        ! printf '%s\n' "$gate_coordinator_active_lease_id" > "$deferred_lease_file"; then
+        gate_coordinator_abandon_active_lease || true
+        last_command_infrastructure_failed=true
+        [[ "$had_errexit" == 1 ]] && set -e
+        return 2
+      fi
+      coordinator_release_deferred=1
+    fi
+  fi
   timeout_seq=$((timeout_seq + 1))
   # mktemp guarantees a unique path even across concurrent parallel-pool
   # subshells (BASHPID would too, but stock macOS Bash 3.2 does not define it
@@ -2661,21 +3425,38 @@ run_with_timeout() {
   # something inherited can still name it. Both are keyed to this run's token,
   # so neither can come to name a stranger.
   gate_run_ensure_marker
+  command_started_at="$(date +%s)"
+  if declare -p gate_coordinator_recovery_drain_context >/dev/null 2>&1; then
+    gate_coordinator_recovery_drain_context="active-command"
+  fi
   AGENTQG_RUN="$(gate_run_command_tag)" \
+    AGENTQG_REQUEST="$(gate_run_request_tag)" \
     bash -c '
-      if [[ -n "$2" ]]; then
+      if [[ -n "$3" ]]; then
         # A marker this wrapper was given but cannot hold open is a refusal,
         # not a shrug: without the descriptor, a replacement this command
         # forks is invisible to the next run.
-        if [[ ! -r "$2" ]]; then
-          echo "error: cannot open the run marker $2; refusing to start the command" >&2
+        if [[ ! -r "$3" ]]; then
+          echo "error: cannot open the run marker $3; refusing to start the command" >&2
           exit 127
         fi
-        exec 9< "$2"
+        exec 9< "$3"
       fi
-      eval "$1"
+      if [[ -n "$4" && "$4" != "$3" ]]; then
+        if [[ ! -r "$4" ]]; then
+          echo "error: cannot open the coordinator marker $4; refusing to start the command" >&2
+          exit 127
+        fi
+        exec 8< "$4"
+      fi
+      if [[ "$5" == 1 ]]; then
+        exec 7>&-
+      fi
+      eval "$2"
       exit $?
-    ' "$(gate_run_command_tag)" "$command" "$gate_run_marker_file" &
+    ' "$(gate_run_command_tag)" "$(gate_run_request_tag)" \
+      "$command" "$gate_run_marker_file" "$coordinator_marker" \
+      "$gate_coordinator_stdout_reserved" &
   cmd_pid=$!
   # Run the watchdog via `bash -c` (which execs) rather than a `( … ) &`
   # subshell. A forked subshell inherits bash's saved copy of the caller's
@@ -2686,10 +3467,12 @@ run_with_timeout() {
   # above already execs, which is why only the watchdog needed this. The tree
   # kill is inlined because bash -c cannot see this script's functions.
   bash -c '
-    cmd_pid="$1"
-    timeout_secs="$2"
-    marker="$3"
-    gate_pid="$4"
+    exec 7>&-
+    request_tag="$1"
+    cmd_pid="$2"
+    timeout_secs="$3"
+    marker="$4"
+    gate_pid="$5"
     collect_tree() {
       local pid="$1"
       local child
@@ -2753,7 +3536,8 @@ EOF_KILL
     # re-walk would miss it. The KILL pass targets the saved list.
     kill_tree "$cmd_pid"
     exit 0
-  ' "$(gate_run_command_tag)" "$cmd_pid" "$command_timeout_seconds" "$timeout_marker" "$$" >/dev/null 2>&1 &
+  ' "$(gate_run_command_tag)" "$(gate_run_request_tag)" \
+    "$cmd_pid" "$command_timeout_seconds" "$timeout_marker" "$$" >/dev/null 2>&1 &
   watchdog_pid=$!
   active_timeout_pids=("$cmd_pid" "$watchdog_pid")
 
@@ -2772,6 +3556,25 @@ EOF_KILL
     wait "$watchdog_pid" 2>/dev/null
   fi
   active_timeout_pids=()
+  if [[ -z "$deferred_lease_file" ]]; then
+    # A sequential wrapper can exit after it reparents a descendant. Keep the
+    # scheduler lease until the run's inherited handles prove that no process
+    # from this command remains. Parallel workers defer release to their parent,
+    # which drains the registered worker process group before releasing.
+    drain_completed_sequential_command || drain_rc=$?
+  fi
+  command_finished_at="$(date +%s)"
+  last_command_execution_seconds=$((command_finished_at - command_started_at))
+
+  if [[ "$drain_rc" -ne 0 ]]; then
+    # The command finished, but its descendants were not confirmed gone. Keep
+    # the active lease and recovery marker. The caller prints the captured
+    # diagnostics before it returns this infrastructure failure.
+    last_command_infrastructure_failed=true
+    rm -f "$timeout_marker"
+    [[ "$had_errexit" == 1 ]] && set -e
+    return "$drain_rc"
+  fi
 
   if [[ -s "$timeout_marker" ]]; then
     last_command_timed_out=true
@@ -2780,6 +3583,16 @@ EOF_KILL
     rc=1
   fi
   rm -f "$timeout_marker"
+
+  if [[ "$coordinator_release_deferred" -eq 0 ]] &&
+    declare -F gate_coordinator_after_command >/dev/null 2>&1; then
+    gate_coordinator_after_command "$command"
+    release_rc=$?
+    if [[ "$release_rc" -ne 0 ]]; then
+      last_command_infrastructure_failed=true
+      rc=2
+    fi
+  fi
 
   [[ "$had_errexit" == 1 ]] && set -e
   return "$rc"
@@ -2866,14 +3679,21 @@ prune_command_stamps() {
   [[ -f "$command_stamps_file" ]] || return 0
   local now
   local tmp
+  local input_tmp
   local line
   local created_at
   local rest
   local fingerprint
 
-  now="$(date +%s)"
-  tmp="$(make_tmpfile)"
-  : > "$tmp"
+  now="$(date +%s)" || return 1
+  tmp="$(mktemp "$scratch_dir/agentqg.XXXXXX")" || return 1
+  [[ -n "$tmp" ]] || return 1
+  tmpfiles+=("$tmp")
+  input_tmp="$(mktemp "$scratch_dir/agentqg.XXXXXX")" || return 1
+  [[ -n "$input_tmp" ]] || return 1
+  tmpfiles+=("$input_tmp")
+  : > "$tmp" || return 1
+  cp "$command_stamps_file" "$input_tmp" || return 1
   while IFS= read -r line || [[ -n "$line" ]]; do
     created_at="${line%%$'\t'*}"
     [[ "$created_at" =~ ^[0-9]+$ ]] || continue
@@ -2882,8 +3702,8 @@ prune_command_stamps() {
     [[ "$fingerprint" == "$current_stamp" ]] || continue
     [[ "$created_at" -le "$now" ]] || continue
     [[ $((now - created_at)) -le "$success_stamp_ttl_seconds" ]] || continue
-    printf '%s\n' "$line" >> "$tmp"
-  done < "$command_stamps_file"
+    printf '%s\n' "$line" >> "$tmp" || return 1
+  done < "$input_tmp" || return 1
   mv -f "$tmp" "$command_stamps_file" 2>/dev/null || true
 }
 
@@ -2893,6 +3713,13 @@ prune_command_stamps() {
 # skips execution), 1 when the command must run.
 try_reuse_command() {
   local command="$1"
+  # Coordinator fingerprints bind toolchain and material environment inputs
+  # that the legacy per-command stamp does not. A coordinator leader must
+  # execute rather than promote a weaker local stamp into a shared verdict.
+  if declare -F gate_coordinator_is_active >/dev/null 2>&1 &&
+    gate_coordinator_is_active; then
+    return 1
+  fi
   [[ "${in_prerequisite_phase:-false}" == true ]] && return 1
   is_quality_setup_command "$command" && return 1
   is_stamp_exempt_command "$command" && return 1
@@ -2911,7 +3738,6 @@ run_mapped_command() {
   local monitor_done_file=""
   local monitor_pid=""
   local start_ts
-  local end_ts
   local elapsed
   local exit_code
 
@@ -2941,10 +3767,13 @@ run_mapped_command() {
     wait "$monitor_pid" 2>/dev/null || true
     rm -f "$monitor_done_file"
   fi
-  end_ts="$(date +%s)"
-  elapsed=$((end_ts - start_ts))
+  elapsed="$last_command_execution_seconds"
 
   if [[ "$exit_code" -eq 0 ]]; then
+    sed -n \
+      -e '/^A completed mapped command left descendants running; stopping them before releasing its scheduler lease\.$/p' \
+      -e "/^The completed mapped command's descendants are gone; releasing its scheduler lease\.$/p" \
+      "$output_file"
     record_command_summary "ok" "$elapsed" "$command"
     record_command_stamp "$command"
     if is_autoreview_test_command "$command"; then
@@ -2981,22 +3810,120 @@ run_mapped_command_to_files() {
   local status_file="$3"
   local elapsed_file="$4"
   local timeout_file="$5"
-  local start_ts
-  local end_ts
+  local infrastructure_file="$6"
+  local lease_file="$7"
   local elapsed
   local exit_code
 
-  start_ts="$(date +%s)"
   set +e
-  run_with_timeout "$command" > "$output_file" 2>&1
+  run_with_timeout "$command" "$lease_file" > "$output_file" 2>&1
   exit_code=$?
   set -e
-  end_ts="$(date +%s)"
-  elapsed=$((end_ts - start_ts))
+  elapsed="$last_command_execution_seconds"
 
   printf '%s\n' "$exit_code" > "$status_file"
   printf '%s\n' "$elapsed" > "$elapsed_file"
   printf '%s\n' "$last_command_timed_out" > "$timeout_file"
+  printf '%s\n' "$last_command_infrastructure_failed" > "$infrastructure_file"
+}
+
+fail_command_scheduler_infrastructure() {
+  local command="$1"
+  echo "error: command scheduler infrastructure failed for: ${command}" >&2
+  echo "The quality gate stops before it schedules another command." >&2
+  teardown_active_timeouts
+  if declare -F gate_coordinator_is_active >/dev/null 2>&1 &&
+    gate_coordinator_is_active &&
+    declare -F gate_coordinator_cancel_and_ack >/dev/null 2>&1; then
+    if ! gate_coordinator_cancel_and_ack \
+      "command scheduler infrastructure failure" active-command; then
+      echo "error: coordinator request cancellation after scheduler failure did not complete." >&2
+    fi
+  fi
+  return 2
+}
+
+read_parallel_worker_result_value() {
+  local file="$1"
+  local field_type="$2"
+  local value
+  local byte_count
+  local expected_bytes
+  local maximum
+
+  [[ -f "$file" && ! -L "$file" && -r "$file" ]] || return 1
+  value="$(cat "$file" 2>/dev/null)" || return 1
+  case "$field_type" in
+    status|elapsed)
+      [[ "$value" =~ ^[0-9]+$ ]] || return 1
+      ;;
+    boolean)
+      [[ "$value" == true || "$value" == false ]] || return 1
+      ;;
+    lease)
+      [[ "$value" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]] || return 1
+      ;;
+    *) return 1 ;;
+  esac
+  byte_count="$(LC_ALL=C wc -c < "$file" 2>/dev/null | tr -d '[:space:]')" ||
+    return 1
+  [[ "$byte_count" =~ ^[0-9]+$ ]] || return 1
+  expected_bytes=$((${#value} + 1))
+  [[ "$byte_count" -eq "$expected_bytes" ]] || return 1
+  if [[ "$field_type" == status || "$field_type" == elapsed ]]; then
+    while [[ "${#value}" -gt 1 && "$value" == 0* ]]; do
+      value="${value#0}"
+    done
+    if [[ "$field_type" == status ]]; then
+      maximum=255
+    else
+      # Keep later Bash arithmetic within the signed 32-bit range on every
+      # supported host. A command cannot legitimately run for 68 years.
+      maximum=2147483647
+    fi
+    [[ "${#value}" -le "${#maximum}" ]] || return 1
+    [[ "$value" -le "$maximum" ]] || return 1
+  fi
+  printf '%s\n' "$value"
+}
+
+release_parallel_worker_lease() {
+  local command="$1"
+  local lease_file="$2"
+  local lease_id
+  if ! declare -F gate_coordinator_is_active >/dev/null 2>&1 ||
+    ! gate_coordinator_is_active; then
+    [[ ! -s "$lease_file" ]] || return 2
+    return 0
+  fi
+  [[ -z "${gate_coordinator_active_lease_id:-}" ]] || return 2
+  lease_id="$(read_parallel_worker_result_value "$lease_file" lease)" || return 2
+  gate_coordinator_active_lease_id="$lease_id"
+  parallel_release_attempt=$((parallel_release_attempt + 1))
+  if [[ -n "$parallel_release_failure_at" &&
+    "$parallel_release_attempt" -eq "$parallel_release_failure_at" ]]; then
+    gate_coordinator_infrastructure_failed=1
+    echo "error: injected parallel coordinator lease-release failure." >&2
+    return 2
+  fi
+  gate_coordinator_after_command "$command"
+}
+
+fail_parallel_worker_infrastructure() {
+  local command="$1"
+  local field="$2"
+  echo "error: parallel worker left an invalid ${field} result for: ${command}" >&2
+  echo "The quality gate cannot trust this worker completion and stops scheduling." >&2
+  teardown_active_timeouts
+  if declare -F gate_coordinator_is_active >/dev/null 2>&1 &&
+    gate_coordinator_is_active &&
+    declare -F gate_coordinator_cancel_and_ack >/dev/null 2>&1; then
+    if ! gate_coordinator_cancel_and_ack \
+      "parallel worker infrastructure failure (${field})" active-command; then
+      echo "error: coordinator request cancellation after worker failure did not complete." >&2
+    fi
+  fi
+  return 2
 }
 
 is_quality_setup_command() {
@@ -3103,6 +4030,9 @@ run_mapped_entries_sequential() {
     command="${entry%%|*}"
     if ! run_mapped_command "$command"; then
       failures=$((failures + 1))
+      if [[ "$last_command_infrastructure_failed" == true ]]; then
+        fail_command_scheduler_infrastructure "$command" || return $?
+      fi
       if [[ "$fail_fast" == "1" || "$fail_fast" == "true" ]]; then
         echo
         echo "Stopping after first failed mapped command (--fail-fast)." >&2
@@ -3129,12 +4059,16 @@ run_mapped_entries_parallel() {
   local active_status_files=()
   local active_elapsed_files=()
   local active_timeout_files=()
+  local active_infrastructure_files=()
+  local active_lease_files=()
   local next_active_pids=()
   local next_active_commands=()
   local next_active_output_files=()
   local next_active_status_files=()
   local next_active_elapsed_files=()
   local next_active_timeout_files=()
+  local next_active_infrastructure_files=()
+  local next_active_lease_files=()
   local running_pids=()
   local entry
   local command
@@ -3142,12 +4076,15 @@ run_mapped_entries_parallel() {
   local status_file
   local elapsed_file
   local timeout_file
+  local infrastructure_file
+  local lease_file
   local pid
   local i
   local status
   local elapsed
   local timed_out
-  local phase_start_ts last_heartbeat_ts now_ts hb_cmd
+  local infrastructure_failed
+  local phase_start_ts last_heartbeat_ts last_coordinator_recovery_ts now_ts hb_cmd
   local heartbeat_interval=20
   local had_monitor=0
 
@@ -3164,8 +4101,116 @@ run_mapped_entries_parallel() {
   echo "Running ${phase} commands with parallelism ${max_parallel}."
   phase_start_ts="$(date +%s)"
   last_heartbeat_ts="$phase_start_ts"
+  last_coordinator_recovery_ts="$phase_start_ts"
 
   while [[ "$completed" -lt "$total" ]]; do
+    running_pids=()
+    while IFS= read -r pid; do
+      [[ -n "$pid" ]] && running_pids+=("$pid")
+    done < <(jobs -pr || true)
+    next_active_pids=()
+    next_active_commands=()
+    next_active_output_files=()
+    next_active_status_files=()
+    next_active_elapsed_files=()
+    next_active_timeout_files=()
+    next_active_infrastructure_files=()
+    next_active_lease_files=()
+
+    for i in "${!active_pids[@]}"; do
+      pid="${active_pids[$i]}"
+      if list_contains_word "$pid" "${running_pids[@]+"${running_pids[@]}"}"; then
+        next_active_pids+=("$pid")
+        next_active_commands+=("${active_commands[$i]}")
+        next_active_output_files+=("${active_output_files[$i]}")
+        next_active_status_files+=("${active_status_files[$i]}")
+        next_active_elapsed_files+=("${active_elapsed_files[$i]}")
+        next_active_timeout_files+=("${active_timeout_files[$i]}")
+        next_active_infrastructure_files+=("${active_infrastructure_files[$i]}")
+        next_active_lease_files+=("${active_lease_files[$i]}")
+        continue
+      fi
+
+      if ! wait "$pid"; then
+        :
+      fi
+      # A worker normally leaves an empty group because run_with_timeout reaps
+      # its command and watchdog. If the leader exited unexpectedly, drain any
+      # surviving same-group descendants before unregistering the PGID.
+      drain_worker_process_group "$pid"
+
+      command="${active_commands[$i]}"
+      output_file="${active_output_files[$i]}"
+      status_file="${active_status_files[$i]}"
+      elapsed_file="${active_elapsed_files[$i]}"
+      timeout_file="${active_timeout_files[$i]}"
+      infrastructure_file="${active_infrastructure_files[$i]}"
+      lease_file="${active_lease_files[$i]}"
+      if ! status="$(read_parallel_worker_result_value "$status_file" status)"; then
+        fail_parallel_worker_infrastructure "$command" status || return $?
+      fi
+      if ! elapsed="$(read_parallel_worker_result_value "$elapsed_file" elapsed)"; then
+        fail_parallel_worker_infrastructure "$command" elapsed || return $?
+      fi
+      if ! timed_out="$(read_parallel_worker_result_value "$timeout_file" boolean)"; then
+        fail_parallel_worker_infrastructure "$command" timeout || return $?
+      fi
+      if ! infrastructure_failed="$(read_parallel_worker_result_value "$infrastructure_file" boolean)"; then
+        fail_parallel_worker_infrastructure "$command" infrastructure || return $?
+      fi
+
+      if [[ "$infrastructure_failed" == true ]]; then
+        rm -f "$output_file" "$status_file" "$elapsed_file" "$timeout_file" \
+          "$infrastructure_file" "$lease_file"
+        fail_command_scheduler_infrastructure "$command" || return $?
+      fi
+      if ! release_parallel_worker_lease "$command" "$lease_file"; then
+        rm -f "$output_file" "$status_file" "$elapsed_file" "$timeout_file" \
+          "$infrastructure_file" "$lease_file"
+        fail_command_scheduler_infrastructure "$command" || return $?
+      fi
+
+      if [[ "$status" -eq 0 ]]; then
+        record_command_summary "ok" "$elapsed" "$command"
+        record_command_stamp "$command"
+        if is_autoreview_test_command "$command"; then
+          print_autoreview_test_timings "$output_file"
+        fi
+        echo "✓ ${command} ($(format_duration "$elapsed"))"
+      elif [[ "$timed_out" != true ]] && is_trunk_command "$command" &&
+        trunk_provisioning_is_blocked; then
+        record_command_summary "skipped" "$elapsed" "$command"
+        print_trunk_environment_blocked_warning "$command"
+      else
+        failures=$((failures + 1))
+        record_command_summary "fail" "$elapsed" "$command"
+        if [[ "$timed_out" == true ]]; then
+          echo "Command timed out after ${command_timeout_seconds}s: ${command}" >&2
+        else
+          echo "Command failed after $(format_duration "$elapsed"): ${command}" >&2
+        fi
+        filter_expected_output < "$output_file" >&2
+        record_failure_output "$command" "$output_file"
+      fi
+
+      rm -f "$output_file" "$status_file" "$elapsed_file" "$timeout_file" \
+        "$infrastructure_file" "$lease_file"
+      completed=$((completed + 1))
+    done
+
+    active_pids=("${next_active_pids[@]+"${next_active_pids[@]}"}")
+    active_worker_pgids=("${next_active_pids[@]+"${next_active_pids[@]}"}")
+    active_commands=("${next_active_commands[@]+"${next_active_commands[@]}"}")
+    active_output_files=("${next_active_output_files[@]+"${next_active_output_files[@]}"}")
+    active_status_files=("${next_active_status_files[@]+"${next_active_status_files[@]}"}")
+    active_elapsed_files=("${next_active_elapsed_files[@]+"${next_active_elapsed_files[@]}"}")
+    active_timeout_files=("${next_active_timeout_files[@]+"${next_active_timeout_files[@]}"}")
+    active_infrastructure_files=("${next_active_infrastructure_files[@]+"${next_active_infrastructure_files[@]}"}")
+    active_lease_files=("${next_active_lease_files[@]+"${next_active_lease_files[@]}"}")
+
+    # Process every completion observed above before opening another pool slot.
+    # A completed worker can report a failed coordinator lease release. Starting
+    # a replacement first would let that command run beside an unresolved lease.
     while [[ "$next_index" -lt "$total" && "${#active_pids[@]}" -lt "$max_parallel" ]]; do
       entry="${entries[$next_index]}"
       command="${entry%%|*}"
@@ -3182,6 +4227,8 @@ run_mapped_entries_parallel() {
       status_file="$(make_tmpfile)"
       elapsed_file="$(make_tmpfile)"
       timeout_file="$(make_tmpfile)"
+      infrastructure_file="$(make_tmpfile)"
+      lease_file="$(make_tmpfile)"
 
       echo
       echo "+ ${command}"
@@ -3201,7 +4248,8 @@ run_mapped_entries_parallel() {
         # watchdog children stay in that group instead of becoming new jobs.
         set +m
         run_mapped_command_to_files \
-          "$command" "$output_file" "$status_file" "$elapsed_file" "$timeout_file"
+          "$command" "$output_file" "$status_file" "$elapsed_file" \
+          "$timeout_file" "$infrastructure_file" "$lease_file"
       ) </dev/null &
       pid="$!"
       if [[ "$had_monitor" -eq 0 ]]; then
@@ -3227,87 +4275,26 @@ run_mapped_entries_parallel() {
       active_status_files+=("$status_file")
       active_elapsed_files+=("$elapsed_file")
       active_timeout_files+=("$timeout_file")
+      active_infrastructure_files+=("$infrastructure_file")
+      active_lease_files+=("$lease_file")
     done
 
-    running_pids=()
-    while IFS= read -r pid; do
-      [[ -n "$pid" ]] && running_pids+=("$pid")
-    done < <(jobs -pr || true)
-    next_active_pids=()
-    next_active_commands=()
-    next_active_output_files=()
-    next_active_status_files=()
-    next_active_elapsed_files=()
-    next_active_timeout_files=()
-
-    for i in "${!active_pids[@]}"; do
-      pid="${active_pids[$i]}"
-      if list_contains_word "$pid" "${running_pids[@]+"${running_pids[@]}"}"; then
-        next_active_pids+=("$pid")
-        next_active_commands+=("${active_commands[$i]}")
-        next_active_output_files+=("${active_output_files[$i]}")
-        next_active_status_files+=("${active_status_files[$i]}")
-        next_active_elapsed_files+=("${active_elapsed_files[$i]}")
-        next_active_timeout_files+=("${active_timeout_files[$i]}")
-        continue
-      fi
-
-      if ! wait "$pid"; then
-        :
-      fi
-      # A worker normally leaves an empty group because run_with_timeout reaps
-      # its command and watchdog. If the leader exited unexpectedly, drain any
-      # surviving same-group descendants before unregistering the PGID.
-      drain_worker_process_group "$pid"
-
-      command="${active_commands[$i]}"
-      output_file="${active_output_files[$i]}"
-      status_file="${active_status_files[$i]}"
-      elapsed_file="${active_elapsed_files[$i]}"
-      timeout_file="${active_timeout_files[$i]}"
-      status="$(cat "$status_file" 2>/dev/null || echo 127)"
-      elapsed="$(cat "$elapsed_file" 2>/dev/null || echo 0)"
-      timed_out="$(cat "$timeout_file" 2>/dev/null || echo false)"
-
-      if [[ "$status" -eq 0 ]]; then
-        record_command_summary "ok" "$elapsed" "$command"
-        record_command_stamp "$command"
-        if is_autoreview_test_command "$command"; then
-          print_autoreview_test_timings "$output_file"
-        fi
-        echo "✓ ${command} ($(format_duration "$elapsed"))"
-      elif [[ "$timed_out" != true ]] && is_trunk_command "$command" &&
-        trunk_provisioning_is_blocked; then
-        record_command_summary "skipped" "$elapsed" "$command"
-        print_trunk_environment_blocked_warning "$command"
-      else
-        failures=$((failures + 1))
-        record_command_summary "fail" "$elapsed" "$command"
-        if [[ "$timed_out" == true ]]; then
-          echo "Command timed out after ${command_timeout_seconds}s: ${command}" >&2
-        else
-          echo "Command failed after $(format_duration "$elapsed"): ${command}" >&2
-        fi
-        filter_expected_output < "$output_file" >&2
-        record_failure_output "$command" "$output_file"
-      fi
-
-      rm -f "$output_file" "$status_file" "$elapsed_file" "$timeout_file"
-      completed=$((completed + 1))
-    done
-
-    active_pids=("${next_active_pids[@]+"${next_active_pids[@]}"}")
-    active_worker_pgids=("${next_active_pids[@]+"${next_active_pids[@]}"}")
-    active_commands=("${next_active_commands[@]+"${next_active_commands[@]}"}")
-    active_output_files=("${next_active_output_files[@]+"${next_active_output_files[@]}"}")
-    active_status_files=("${next_active_status_files[@]+"${next_active_status_files[@]}"}")
-    active_elapsed_files=("${next_active_elapsed_files[@]+"${next_active_elapsed_files[@]}"}")
-    active_timeout_files=("${next_active_timeout_files[@]+"${next_active_timeout_files[@]}"}")
-
-    # Heartbeat: while commands are still in flight, emit a periodic liveness
-    # line naming what is running so a slow member is visibly working, not hung.
+    # Only this parent drains stale coordinator obligations. Parallel workers
+    # share shell state and capture files, so letting each queued lease waiter
+    # drain would race their capture and unlink operations.
     if [[ ${#active_pids[@]} -gt 0 ]]; then
       now_ts="$(date +%s)"
+      if [[ $((now_ts - last_coordinator_recovery_ts)) -ge 5 ]] &&
+        declare -F gate_coordinator_recover_stale_obligations >/dev/null 2>&1; then
+        if ! gate_coordinator_recover_stale_obligations; then
+          echo "error: scheduler stale-worker recovery failed during the parallel pool." >&2
+          return 2
+        fi
+        last_coordinator_recovery_ts="$now_ts"
+      fi
+
+      # Heartbeat: while commands are still in flight, emit a periodic liveness
+      # line naming what is running so a slow member is visibly working, not hung.
       if [[ $((now_ts - last_heartbeat_ts)) -ge "$heartbeat_interval" ]]; then
         printf '⏳ still running after %s (%d/%d done):\n' \
           "$(format_duration $((now_ts - phase_start_ts)))" "$completed" "$total"
@@ -3414,19 +4401,40 @@ run_quality_phase() {
 # Drop per-command stamps that don't match this run's fingerprint (any changed
 # validated file invalidates all of them) or that aged past the TTL, so the file
 # stays bounded and only genuine resume candidates remain.
-prune_command_stamps
+if ! prune_command_stamps; then
+  echo "error: could not read or prune the per-command stamp cache before first dispatch." >&2
+  gate_report_coordinated_no_work_failure 2 "command-stamp pruning" \
+    "No mapped command ran in this request"
+  exit 2
+fi
+
+# Queue time can be long. Bind the first dispatch to the same source, plan,
+# toolchain, environment digest, runtime, and resource policy that registration
+# used. A changed key cancels the request before any mapped command starts.
+if declare -F gate_coordinator_verify_registration_fingerprint >/dev/null 2>&1; then
+  gate_coordinator_verify_registration_fingerprint "before first dispatch"
+fi
 
 # Last thing before anything is executed: confirm this run still holds the lock
 # it took. Mapping and stamp work happen between acquiring and here, which is
 # room enough for another run to have taken it over.
 assert_gate_run_lock_still_ours
 
-# This run took the lock from a holder that died. That holder's mapped commands
-# may still be running — commands are backgrounded and outlive their shell — so
-# confirm they are gone before executing anything. Asked of the machine, not of
-# a clock: the watchdogs that would clean them up can be descheduled by the same
-# pressure that killed the gate, or suspended along with the laptop.
-drain_condemned_runs
+# A legacy holder drains every condemned run under its exclusive lock. A
+# coordinator client first claims each drain token, so only one gate parent can
+# capture and unlink its process evidence while other clients keep scheduling
+# against the stale lease's reserved capacity and named resources.
+if declare -F gate_coordinator_is_active >/dev/null 2>&1 &&
+  gate_coordinator_is_active; then
+  if ! gate_coordinator_recover_stale_obligations; then
+    echo "error: scheduler stale-worker recovery failed before first dispatch." >&2
+    gate_coordinator_report_no_work_failure 2 "stale-obligation recovery" \
+      "No mapped command ran in this request"
+    exit 2
+  fi
+else
+  drain_condemned_runs
+fi
 
 # Asked again, and this is what orders the drain against publishers rather than
 # hoping they are quiet. Publishing an obligation is not synchronised with the
@@ -3448,12 +4456,24 @@ print_command_summary
 
 gate_total_elapsed=$(( $(date +%s) - gate_start_ts ))
 
+if declare -F gate_coordinator_verify_registration_fingerprint >/dev/null 2>&1; then
+  gate_coordinator_verify_registration_fingerprint \
+    "before terminal result publication"
+fi
+
 if [[ "$failures" -gt 0 ]]; then
+  if declare -F gate_coordinator_publish_failure >/dev/null 2>&1; then
+    gate_coordinator_publish_failure "$failures" || true
+  fi
   log_duration_line "fail" "$gate_total_elapsed" "__run_total__" "run" || true
   print_failed_command_output
   echo
   echo "${failures} mapped command(s) failed." >&2
   exit 1
+fi
+
+if declare -F gate_coordinator_publish_success >/dev/null 2>&1; then
+  gate_coordinator_publish_success
 fi
 
 log_duration_line "ok" "$gate_total_elapsed" "__run_total__" "run" || true
@@ -3475,8 +4495,15 @@ if [[ "${stamp_reuse_count:-0}" -eq 0 && "$trunk_provisioning_state" != "blocked
   # provisionable — would trust the stamp and never attempt it. Withholding
   # the stamp here forces the next run to actually retry Trunk instead of
   # inheriting a pass it never earned.
-  {
+  if ! {
     printf 'created_at=%s\n' "$(date +%s)"
     printf 'stamp=%s\n' "$current_stamp"
-  } > "$success_stamp_file"
+    if [[ -n "$gate_coordinator_freshness_context" ]]; then
+      printf 'execution_fingerprint=%s\n' \
+        "$gate_coordinator_registration_fingerprint"
+      printf 'execution_head=%s\n' "$gate_coordinator_execution_head"
+    fi
+  } > "$success_stamp_file"; then
+    echo "warning: the gate passed, but its local success stamp could not be written." >&2
+  fi
 fi

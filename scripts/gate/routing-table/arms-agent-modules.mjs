@@ -21,6 +21,19 @@
  */
 export const AGENT_MODULE_ARMS = [
   {
+    patterns: [
+      "scripts/gate/quality-gate-coordinator*.mjs",
+      "scripts/gate/agent-quality-gate-scheduler*.mjs",
+      "scripts/gate/agent-quality-gate-fixture-processes.mjs",
+    ],
+    effects: [
+      {
+        command: "pnpm agent:quality-gate:test",
+        reason: "quality-gate coordinator changed",
+      },
+    ],
+  },
+  {
     patterns: ["scripts/check-agent-quality-gate-package-scripts.mjs"],
     effects: [
       {

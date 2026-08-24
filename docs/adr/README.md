@@ -30,13 +30,14 @@ altitude.
 
 ## Lifecycle
 
-Frontmatter `status` follows the repo metadata contract (`active` = in force;
-`archived` = superseded/deprecated). The ADR's own lifecycle (Accepted /
-Superseded by ADR-NNNN) lives in the body's **Status** line. In-force ADRs are
-`canonical: true` and enrolled in the 90-day re-verification check — that is the
-enforcement behind "is this still true?". Supersede an ADR by adding a new one
-and flipping the old one to `status: archived` with a `superseded_by:` pointer;
-do not silently rewrite history.
+Frontmatter `status` follows the repo metadata contract (`draft` = proposed and
+not in force; `active` = in force; `archived` = superseded/deprecated). The ADR's
+own lifecycle (Proposed / Accepted / Superseded by ADR-NNNN) lives in the body's
+**Status** line. In-force ADRs are `canonical: true` and enrolled in the 90-day
+re-verification check — that is the enforcement behind "is this still true?".
+Supersede an ADR by adding a new one and flipping the old one to
+`status: archived` with a `superseded_by:` pointer; do not silently rewrite
+history.
 
 ## Adding an ADR
 
@@ -81,6 +82,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0068](0068-sentry-fixture-authoring-policy.md)             | Adversarial fixtures are authored to scan clean; no value or line registry           |
 | [0069](0069-gate-routing-table-as-data.md)                  | The gate's routing table is data, compiled by the repo's own bash-`case` translator  |
 | [0070](0070-sentry-requeue-settlement-sentinel.md)          | The archive's terminal label is withheld from the re-queue's shed and read back      |
+| [0071](0071-fair-quality-gate-coordinator.md)               | Fair weighted coordination replaces machine-wide full-run gate exclusion             |
 
 ### shared-config
 
