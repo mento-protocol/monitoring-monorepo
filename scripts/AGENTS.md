@@ -76,18 +76,17 @@ same PR, except the `agent-autoreview.sh` feedback-runtime pins below.
   `deploy/deploy-indexer-verify{,-analysis}{,.test}.mjs` and
   `deploy/deploy-indexer-verify-status-identity.mjs` use one any-depth arm;
   both verifier tests run.
-- **Gate runtime module pins.** Before `cd`, the gate loads
-  `$script_source_dir/gate/run-handles.sh`. It resolves coordinator adapters and
-  coordinator modules from `$script_source_dir`. Scheduler fixtures and
-  coordinator tests hash from `$repo_root`. Move each path with its route,
-  signature, and missing-helper fixture (ADRs 0064 and 0071). It also pins
-  `docs/docs-navigation-eval-helpers.mjs` and `gate/lockfile-scope.mjs` from
-  `$script_source_dir`; update all exact literals.
+- **Gate runtime pins.** Before `cd`, the gate loads `gate/run-handles.sh`. It
+  resolves coordinator adapters and coordinator modules from
+  `$script_source_dir`. Scheduler fixtures and coordinator tests hash from
+  `$repo_root`. Move each with its route, signature, and fixture (ADRs 0064 and
+  0071). It pins `docs/docs-navigation-eval-helpers.mjs` and
+  `gate/lockfile-scope.mjs` from `$script_source_dir`; update all literals.
 - **Gate mapping pins.** The signature and three Turbo inputs pin
-  `gate/routing-table/**`, `gate/mapping*`, and external
+  `gate/routing-table/**`, `gate/mapping*`, and
   `agent-autoreview-core.mjs`. Runtime hashes use `$script_source_dir`; suites
-  use `$repo_root`. Core-only edits route both gate suites. A missing pin
-  freezes the stamp ([ADR 0069](../docs/adr/0069-gate-routing-table-as-data.md)).
+  use `$repo_root`. Core edits route both suites; missing pins freeze the stamp
+  ([ADR 0069](../docs/adr/0069-gate-routing-table-as-data.md)).
 - **Evaluation fixture forbidden lists.** `forbidden_sources` in
   `docs/evals/documentation-navigation-fixtures.json` names the navigation
   eval's own implementation.
