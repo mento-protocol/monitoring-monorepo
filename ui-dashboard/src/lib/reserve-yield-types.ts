@@ -9,7 +9,11 @@ export const FORECASTABLE_AUSD_SYMBOL = "AUSD";
 export const FORECASTABLE_SUSDS_SYMBOL = "SUSDS";
 export const FORECASTABLE_STETH_SYMBOL = "STETH";
 export const RESERVE_YIELD_ETHEREUM_CHAIN_ID = 1;
+// Public Ethereum contract addresses are identifiers, not credentials.
+// react-doctor-disable-next-line react-doctor/no-secrets-in-client-code
 export const SUSDS_TOKEN_ADDRESS = "0xa3931d71877c0e7a3148cb7eb4463524fec27fbd";
+// Public Ethereum contract addresses are identifiers, not credentials.
+// react-doctor-disable-next-line react-doctor/no-secrets-in-client-code
 export const STETH_TOKEN_ADDRESS = "0xae7ab96520de3a18e5e111b5eaab095312d7fe84";
 export const TRACKED_STETH_WALLET_IDENTIFIERS = [
   "0xd0697f70e79476195b742d5afab14be50f98cc1e",

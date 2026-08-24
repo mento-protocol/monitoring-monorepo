@@ -15,7 +15,6 @@ import {
   FORECASTABLE_STETH_SYMBOL,
   RESERVE_YIELD_ETHEREUM_CHAIN_ID,
   STETH_TOKEN_ADDRESS,
-  TRACKED_STETH_WALLET_IDENTIFIERS,
   type FetchImpl,
   type ReserveYieldHolding,
   type StethYieldLedgerEntry,
@@ -31,9 +30,6 @@ const LIDO_STETH_APR_URL = "https://eth-api.lido.fi/v1/protocol/steth/apr/last";
 
 const STETH_SYMBOL = "STETH";
 const STETH_LATEST_SNAPSHOT_LIMIT = 50;
-
-export { TRACKED_STETH_WALLET_IDENTIFIERS };
-export { isIndexedStethHolding };
 
 function validateStethMeta(meta: unknown): void {
   if (!isRecord(meta)) {
