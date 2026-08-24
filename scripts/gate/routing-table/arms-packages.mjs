@@ -496,7 +496,7 @@ export const PACKAGE_ARMS = [
         ],
       },
       {
-        why: "Every current or future src/test JS or TypeScript module and every focused external runtime or test-support input must keep an explicit owner in the core. This test runs for all 21 inventory patterns before a later scripts-only change can discover drift.",
+        why: "Every current or future src/test JS or TypeScript module and every focused external runtime or test-support input must keep an explicit owner in the core. This test runs for all 22 inventory patterns before a later scripts-only change can discover drift.",
         dispatch: "path",
         arms: [
           {

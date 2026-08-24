@@ -2386,6 +2386,7 @@ const INDEXER_HANDLER_INVARIANT_FAMILIES =
       owner: "test-runtime-inputs",
       route: true,
       exact: [
+        "indexer-envio/stryker.config.mjs",
         "indexer-envio/vitest.config.ts",
         "indexer-envio/vitest.fail-closed.config.ts",
         "indexer-envio/vitest.hermetic-setup.ts",

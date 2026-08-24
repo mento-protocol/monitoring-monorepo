@@ -58,13 +58,15 @@ const focusedRootIndexerEntries = readdirSync(`${REPO}/indexer-envio`, {
 const focusedRootIndexerConfigs = focusedRootIndexerEntries.filter(
   (candidatePath) => /^indexer-envio\/config[^/]*\.yaml$/.test(candidatePath),
 );
-const focusedRootIndexerVitestInputs = focusedRootIndexerEntries.filter(
-  (candidatePath) => /^indexer-envio\/vitest[^/]*$/.test(candidatePath),
+const focusedRootIndexerTestRuntimeInputs = focusedRootIndexerEntries.filter(
+  (candidatePath) =>
+    candidatePath === "indexer-envio/stryker.config.mjs" ||
+    /^indexer-envio\/vitest[^/]*$/.test(candidatePath),
 );
 
 const focusedNonConfigRootIndexerInputs = [
   "indexer-envio/schema.graphql",
-  ...focusedRootIndexerVitestInputs,
+  ...focusedRootIndexerTestRuntimeInputs,
 ];
 
 const focusedRootIndexerInputs = [
@@ -78,10 +80,11 @@ const ownedRootIndexerConfigs = getIndexerHandlerInvariantRoutingFamilies()
     /^indexer-envio\/config[^/]*\.yaml$/.test(candidatePath),
   )
   .sort();
-const ownedRootIndexerVitestInputs = getIndexerHandlerInvariantRoutingFamilies()
-  .flatMap(({ exact = [] }) => exact)
-  .filter((candidatePath) => /^indexer-envio\/vitest[^/]*$/.test(candidatePath))
-  .sort();
+const ownedRootIndexerTestRuntimeInputs =
+  getIndexerHandlerInvariantRoutingFamilies()
+    .filter(({ owner }) => owner === "test-runtime-inputs")
+    .flatMap(({ exact = [] }) => exact)
+    .sort();
 
 const indexerPackageArm = PACKAGE_ARMS.find(
   ({ patterns }) => patterns.length === 1 && patterns[0] === "indexer-envio/*",
@@ -124,6 +127,11 @@ assert.ok(
   indexerInvariantInventoryDispatch,
   "the indexer arm has no invariant inventory dispatch",
 );
+
+test("the derived exact arms keep the current route counts", () => {
+  assert.equal(indexerInvariantExcludedArm.patterns.length, 12);
+  assert.equal(indexerInvariantRoutedArm.patterns.length, 252);
+});
 const matchesAny = (patterns, candidatePath) =>
   patterns.some((pattern) => casePatternToRegExp(pattern).test(candidatePath));
 const tableIndexerInvariantDecision = (candidatePath) => {
@@ -196,7 +204,7 @@ test("the table and core agree on every focused input outside src and test", () 
     ...walkFiles(`${REPO}/indexer-envio/config`),
     ...focusedRootIndexerInputs,
   ].sort();
-  assert.equal(paths.length, 43, "focused external-input inventory changed");
+  assert.equal(paths.length, 44, "focused external-input inventory changed");
   const decisions = getIndexerHandlerInvariantChecklistDecisions(paths);
   for (const decision of decisions) {
     assert.notEqual(
@@ -235,9 +243,9 @@ test("focused root inputs and exact owners cannot drift", () => {
     "every current root config YAML must have one live exact owner",
   );
   assert.deepEqual(
-    ownedRootIndexerVitestInputs,
-    focusedRootIndexerVitestInputs,
-    "every current root Vitest input must have one live exact owner",
+    ownedRootIndexerTestRuntimeInputs,
+    focusedRootIndexerTestRuntimeInputs,
+    "every current root test-runtime input must have one live exact owner",
   );
   for (const candidatePath of [
     ...ownedRootIndexerConfigs.filter(
@@ -371,21 +379,23 @@ test("the nested dispatch is excluded-first and inventories future modules", () 
   );
   const inventoryPatterns = indexerInvariantInventoryDispatch.arms[0].patterns;
   assert.deepEqual(
-    inventoryPatterns.slice(0, 5),
+    inventoryPatterns.slice(0, 6),
     [
       "indexer-envio/abis/*",
       "indexer-envio/config/*",
       "indexer-envio/config*.yaml",
       "indexer-envio/vitest*",
       "indexer-envio/schema.graphql",
+      "indexer-envio/stryker.config.mjs",
     ],
     "the focused external runtime and test-support inventory changed",
   );
   assert.deepEqual(
-    inventoryPatterns.slice(5),
+    inventoryPatterns.slice(6),
     futurePatterns,
     "the inventory dispatch lost a future module pattern",
   );
+  assert.equal(inventoryPatterns.length, 22, "inventory pattern count changed");
   for (const pattern of futurePatterns) {
     assert.ok(
       !indexerInvariantExcludedArm.patterns.includes(pattern),

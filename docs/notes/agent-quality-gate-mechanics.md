@@ -100,8 +100,10 @@ only. Sixteen broad inventory patterns cover `.ts`, `.tsx`, `.mts`, `.cts`,
 `indexer-envio/abis/`, `indexer-envio/config/`, root
 `indexer-envio/config*.yaml` files, and root `indexer-envio/vitest*` inputs.
 None of these broad patterns routes the checklist. The exact
-`indexer-envio/schema.graphql` pattern completes the 21-pattern inventory.
-Exact owners also cover every current root config YAML and root Vitest input.
+`indexer-envio/schema.graphql` and `indexer-envio/stryker.config.mjs` patterns
+complete the 22-pattern inventory. Exact owners also cover every current root
+config YAML and root Vitest input. The current exact arms contain 252 routed
+paths and 12 excluded paths.
 
 The routed source boundary follows executable dependencies from the production
 handler entrypoint, registered handlers, RPC facades and effects, and self-heal
@@ -119,8 +121,9 @@ warning-format contract.
 The focused indexer parity test compares every current module with one of the
 eight supported JS or TypeScript extensions below `src/` and `test/`. It also
 compares every current file below `abis/` and `config/`, every current root
-`config*.yaml` file and Vitest input, and `schema.graphql` against the table.
-The local gate runs it for all 21 inventory patterns. The indexer CI job runs
+`config*.yaml` file, Vitest input, Stryker configuration, and `schema.graphql`
+against the table. The focused external inventory contains 44 inputs. The local
+gate runs it for all 22 inventory patterns. The indexer CI job runs
 it for every indexer change. A new module below `src/` or `test/` is classified
 as `future-module` with `route: false`. The inventory assertion requires the
 adding PR to give it an explicit owner. A new file below `abis/` or `config/`,

@@ -33,8 +33,8 @@ than architecturally forbidden.
 
 It is not one thing. The largest single region is routing: one `while IFS= read
 -r path` loop over the changed set, holding **13 top-level `case` statements**,
-**55 `case` statements** counting the nested ones, **240 arms**, **813 pattern
-occurrences** (742 distinct), **29 effect verbs**, six inline guards, two global
+**55 `case` statements** counting the nested ones, **240 arms**, **821 pattern
+occurrences** (753 distinct), **29 effect verbs**, six inline guards, two global
 flag mutations, and two pattern sets the gate computes from the tree at run
 time. That is a table written as control flow.
 
@@ -50,7 +50,7 @@ written that way:
 2. **First-arm-wins ordering.** A new arm for `scripts/<dir>/deploy-*.sh` must
    sit above the widened pair or it never runs. The constraint lives in a
    comment.
-3. **Literal freshness.** 615 distinct arm patterns name an exact path. A path
+3. **Literal freshness.** 616 distinct arm patterns name an exact path. A path
    that is deleted or moved leaves an arm that simply never matches. No check
    reds. This is the same failure class P0 fixed in
    `check-deploy-root-anchors.test.mjs`, which printed "All 0 deploy scripts…"
@@ -133,12 +133,15 @@ patterns cover `src|test` plus `ts|tsx|mts|cts|js|jsx|mjs|cjs`. The four
 JavaScript extensions match the package's `allowJs` TypeScript input set. Four
 broad patterns cover `abis/`, `config/`, root `config*.yaml`, and root
 `vitest*` inputs. These 20 broad patterns only trigger the inventory check.
-They do not enter either checklist arm. The exact `schema.graphql` pattern
-completes the 21-pattern inventory. The module fallback returns `route: false`
+They do not enter either checklist arm. The exact `schema.graphql` and
+`stryker.config.mjs` patterns complete the 22-pattern inventory. The module
+fallback returns `route: false`
 until the adding PR gives the path an explicit owner. New ABI,
 config-directory, root config YAML, and root Vitest files also inherit no
 checklist route. Exact owners cover every current ABI, config-directory, root
-config YAML, and root Vitest input, plus `schema.graphql`.
+config YAML and root Vitest input, plus `schema.graphql` and the Stryker
+mutation-test configuration. The current exact arms contain 252 routed paths
+and 12 excluded paths.
 A source path routes when the production handler entrypoint, a registered
 handler, an RPC facade or effect, or a self-heal stage executes it and the
 module can change an entity identity or field, a rollup, an effect key or
@@ -154,9 +157,10 @@ independent config-copy, script, or warning-format contract stay explicitly
 excluded.
 A focused parity test covers all current JS and TypeScript module paths below
 `src/` and `test/`, every current file below `abis/` and `config/`, every
-current root `config*.yaml` file and Vitest input, `schema.graphql`, exact
+current root `config*.yaml` file, Vitest input, Stryker configuration,
+`schema.graphql`, exact
 owners, exclusions, and synthetic future extensions. The local indexer route
-runs it for these 21 inventory patterns, and the indexer CI job runs it for
+runs it for these 22 inventory patterns, and the indexer CI job runs it for
 every indexer change. A new module below `src/` or `test/`, root config YAML,
 root Vitest input, ABI, or config file must gain an explicit owner in the PR
 that adds it.

@@ -2287,6 +2287,7 @@ indexer_invariant_positive_paths=(
   "indexer-envio/config/fx-calendar.json"
   "indexer-envio/config.yaml"
   "indexer-envio/config.multichain.mainnet.yaml"
+  "indexer-envio/stryker.config.mjs"
   "indexer-envio/vitest.fail-closed.config.ts"
   "indexer-envio/vitest.mutation.config.ts"
   "indexer-envio/src/rpc/http-test-mocks.ts"

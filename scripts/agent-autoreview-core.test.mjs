@@ -161,6 +161,7 @@ for (const [candidatePath, route, owner] of [
   ["indexer-envio/config.yaml", true, "root-runtime-inputs"],
   ["indexer-envio/config.multichain.mainnet.yaml", true, "root-runtime-inputs"],
   ["indexer-envio/schema.graphql", true, "root-runtime-inputs"],
+  ["indexer-envio/stryker.config.mjs", true, "test-runtime-inputs"],
   ["indexer-envio/vitest.config.ts", true, "test-runtime-inputs"],
   ["indexer-envio/vitest.fail-closed.config.ts", true, "test-runtime-inputs"],
   ["indexer-envio/vitest.hermetic-setup.ts", true, "test-runtime-inputs"],
