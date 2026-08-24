@@ -75,6 +75,10 @@
  *                      proceed even when a discovery source errored (the run
  *                      normally aborts to avoid spending quota on a silently
  *                      incomplete sweep)
+ *   --allow-unknown-quota
+ *                      start even when the startup /subscription/intel-usage
+ *                      poll yielded no Remaining (the run normally refuses
+ *                      rather than sweep with no quota ceiling visible)
  *   --chain <id>       output-file scope tag only (default "all"). Discovery
  *                      is cross-chain; pass this only to resume a prior
  *                      per-chain progress file.
@@ -146,6 +150,12 @@ function numericFlag(name, fallback) {
   return parsed;
 }
 
+// `--chain` picks the progress/inventory filenames; silently falling back to
+// "all" on a missing value would resume the wrong file.
+if (args.includes("--chain") && flagValue("--chain") === undefined) {
+  console.error("Missing value for --chain (expected a scope tag)");
+  process.exit(1);
+}
 const scope = flagValue("--chain") ?? "all";
 const limitArg = numericFlag("--limit", Infinity);
 const quotaFloor = numericFlag("--quota-floor", QUOTA_FLOOR_DEFAULT);
@@ -884,6 +894,19 @@ async function main() {
   console.log(`→ ${candidates.length} addresses to enrich this run`);
 
   await logIntelUsage("start");
+  // Fail closed on unknown quota. If the startup poll yielded nothing (timeout,
+  // non-2xx, unrecognized body) and no header has reported Remaining, the floor
+  // check would compare against null forever and the sweep would run unbounded.
+  // Headers only start arriving with the first enrichment response, so this is
+  // the last safe moment to refuse.
+  if (quota.remaining === null && !args.includes("--allow-unknown-quota")) {
+    console.error(
+      "✗ Quota unknown: /subscription/intel-usage yielded no Remaining. " +
+        "Refusing to start an unbounded sweep — retry, or pass " +
+        "--allow-unknown-quota to proceed on header-based accounting alone.",
+    );
+    process.exit(1);
+  }
 
   let attested = 0;
   let written = 0;

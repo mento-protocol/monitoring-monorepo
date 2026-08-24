@@ -48,6 +48,17 @@ for arg in "$@"; do
   if [ "$arg" = "--dry-run" ]; then DRY_RUN=1; fi
 done
 
+# Stages that never call Arkham (Upstash/Blob only) — the Arkham key is
+# resolved best-effort for them so a worktree without it can still run them.
+case "$STAGE" in
+  verify | verify-libs | inspect | measure | mirror-to-blob | mirror | migrate-rename | rename | upload-drafts | tier0)
+    NEEDS_ARKHAM=0
+    ;;
+  *)
+    NEEDS_ARKHAM=1
+    ;;
+esac
+
 # Resolve one credential: keep the exported value, else read it from tfvars.
 # Returns non-zero when neither is available — with a named error unless the
 # caller passed `optional` (a dry run, where the credential is unused).
@@ -70,7 +81,7 @@ resolve() {
   return 1
 }
 
-if [ "$DRY_RUN" = "1" ]; then
+if [ "$DRY_RUN" = "1" ] || [ "$NEEDS_ARKHAM" = "0" ]; then
   resolve ARKHAM_API_KEY arkham_api_key optional || true
 else
   resolve ARKHAM_API_KEY arkham_api_key
