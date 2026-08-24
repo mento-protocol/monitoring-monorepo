@@ -3,7 +3,7 @@ title: Agent Quality Gate — Mechanics
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-23
+last_verified: 2026-08-24
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -748,10 +748,19 @@ for it is scoped to that exact name.
 
 The pre-push hook reaches neither hatch — it runs a fixed command line and
 Trunk strips the environment those variables would arrive in — so when a hook's
-wait times out, recover in band by warming the stamps first
-(`pnpm agent:quality-gate --run`, which queues behind the holder, or
-`--no-lock` if you accept the contention) and then pushing: the hook's
-`--skip-if-fresh` cache-hits and exits before it ever takes the lock.
+wait times out, recover in band by fetching the base the hook will use and then
+warming that exact stamp (`git fetch --quiet origin main && pnpm
+agent:quality-gate --run --base origin/main`, which queues behind the holder,
+or add `--no-lock` if you accept the contention). Then push: the hook's
+`--skip-if-fresh` cache-hits and exits before it ever takes the lock. Warming
+before the fetch is not reliable because an advancing `origin/main` changes the
+base OID and every base-derived stamp input.
+
+Set `AGENT_QUALITY_GATE_DEBUG_STAMP=1` to print the seven freshness fields, one
+per line on stderr. Capture a direct run and the hook's exact fetch-and-run
+command back to back and diff stderr when a stamp misses; the first changed
+line names the input that invalidated reuse. The debug switch does not change
+the stamp or stdout.
 
 **Heavy suites do not share the worker pool.** The quality phase runs in four
 parts: ordered setup prerequisites, the serialized dashboard build/browser

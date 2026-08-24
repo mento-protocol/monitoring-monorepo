@@ -3982,6 +3982,23 @@ STUB
   grep -Fq -- "Previous successful agent quality gate run is still fresh; skipping mapped commands." "$output_file" ||
     fail "one-hour-old exact gate stamp did not report a freshness skip"
 
+  debug_stdout="${output_file}.debug.stdout"
+  debug_stderr="${output_file}.debug.stderr"
+  AGENT_QUALITY_GATE_DEBUG_STAMP=1 \
+    COUNTER_FILE="$fresh_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
+    "$repo_root/scripts/agent-quality-gate.sh" --base "$base_ref" --run --skip-if-fresh \
+      > "$debug_stdout" 2> "$debug_stderr"
+  [[ "$(grep -c '^agent-quality-gate stamp ' "$debug_stderr")" == "7" ]] ||
+    fail "stamp debug output did not report all seven fields on stderr"
+  for field in base paths plan implementation content packageRisk allowPackageScripts; do
+    grep -q "^agent-quality-gate stamp ${field}=" "$debug_stderr" ||
+      fail "stamp debug output omitted ${field}"
+  done
+  if grep -q '^agent-quality-gate stamp ' "$debug_stdout"; then
+    fail "stamp debug output leaked onto stdout"
+  fi
+  rm -f "$debug_stdout" "$debug_stderr"
+
   printf 'created_at=%s\nstamp=%s\n' \
     "$(( $(date +%s) - 2 * 60 * 60 - 1 ))" \
     "$stamp_value" \

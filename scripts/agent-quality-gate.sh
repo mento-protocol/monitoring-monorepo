@@ -1646,7 +1646,7 @@ acquire_gate_run_lock() {
       echo "Running the gate directly? --no-lock starts anyway and accepts the contention." >&2
       # The pre-push hook passes a fixed command line and Trunk strips the
       # environment, so neither escape hatch is reachable from a failed push.
-      echo "Pushing? Warm the stamps with 'pnpm agent:quality-gate --run' first, then push: --skip-if-fresh cache-hits and exits before this lock." >&2
+      echo "Pushing? Fetch the hook's base first, then warm the matching stamp with 'git fetch --quiet origin main && pnpm agent:quality-gate --run --base origin/main'; the push hook's --skip-if-fresh then exits before this lock." >&2
       # GitHub issue #1894. Every other outcome states itself on stdout — a green
       # run ends "All mapped commands passed." — but this one used to speak on
       # stderr alone, so a caller reading the gate's stdout saw the reassuring
@@ -2212,6 +2212,18 @@ stamp_line() {
 }
 
 current_stamp="$(stamp_line)"
+
+if [[ "${AGENT_QUALITY_GATE_DEBUG_STAMP:-0}" == "1" ]]; then
+  # Keep this on stderr: stdout is a human- and script-consumed gate result.
+  # One field per line makes two back-to-back captures directly diffable.
+  printf 'agent-quality-gate stamp base=%s\n' "$base_oid" >&2
+  printf 'agent-quality-gate stamp paths=%s\n' "$changed_paths_hash" >&2
+  printf 'agent-quality-gate stamp plan=%s\n' "$command_plan_hash" >&2
+  printf 'agent-quality-gate stamp implementation=%s\n' "$implementation_hash" >&2
+  printf 'agent-quality-gate stamp content=%s\n' "$validated_content_hash" >&2
+  printf 'agent-quality-gate stamp packageRisk=%s\n' "$package_script_risk_changed" >&2
+  printf 'agent-quality-gate stamp allowPackageScripts=%s\n' "$stamp_allow_package_scripts" >&2
+fi
 
 is_fresh_success_stamp() {
   local stamped_at
