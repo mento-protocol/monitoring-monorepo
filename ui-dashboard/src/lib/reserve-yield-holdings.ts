@@ -12,6 +12,10 @@ import {
   type ReserveYieldExtraction,
   type ReserveYieldHolding,
 } from "@/lib/reserve-yield-types";
+import {
+  hasUnindexedSusdsHolding as holdingsHaveUnindexedSusdsSource,
+  isIndexedSusdsHolding,
+} from "@/lib/reserve-yield-susds-coverage";
 
 const TRACKED_YIELD_SYMBOLS = new Set([
   FORECASTABLE_AUSD_SYMBOL,
@@ -96,6 +100,17 @@ function susdsSnapshotSourceRequired(asset: Record<string, unknown>): boolean {
   if (valuesByRecord.some((values) => values === null)) return true;
   const values = valuesByRecord.flatMap((recordValues) => recordValues ?? []);
   return values.length === 0 || values.some((value) => value !== 0);
+}
+
+function recordProvesZeroExposure(record: Record<string, unknown>): boolean {
+  let hasExposureValue = false;
+  for (const field of ["balance", "usd_value"] as const) {
+    const rawValue = record[field];
+    if (rawValue === undefined || rawValue === null) continue;
+    hasExposureValue = true;
+    if (numericField(rawValue) !== 0) return false;
+  }
+  return hasExposureValue;
 }
 
 function requiresExplicitUsdValue(symbol: string): boolean {
@@ -385,6 +400,96 @@ function assetFallbackHolding(
   };
 }
 
+type SourceHoldingResult = {
+  source: Record<string, unknown>;
+  holding: ReserveYieldHolding | null;
+};
+
+function holdingHasNonzeroExposure(holding: ReserveYieldHolding): boolean {
+  return (
+    (Number.isFinite(holding.balance) && holding.balance !== 0) ||
+    (Number.isFinite(holding.principalUsd) && holding.principalUsd !== 0)
+  );
+}
+
+function hasIncompleteSusdsSourceCoverage({
+  asset,
+  rawSourceCount,
+  results,
+}: {
+  asset: Record<string, unknown>;
+  rawSourceCount: number;
+  results: SourceHoldingResult[];
+}): boolean {
+  if (rawSourceCount !== results.length) return true;
+  if (
+    results.some(
+      ({ source, holding }) =>
+        !recordProvesZeroExposure(source) &&
+        (holding === null || !isIndexedSusdsHolding(holding)),
+    )
+  ) {
+    return true;
+  }
+  return (
+    !recordProvesZeroExposure(asset) &&
+    !results.some(
+      ({ holding }) => holding !== null && holdingHasNonzeroExposure(holding),
+    )
+  );
+}
+
+function extractSourceHoldings(
+  asset: Record<string, unknown>,
+  symbol: string,
+): {
+  holdings: ReserveYieldHolding[];
+  malformedCount: number;
+  hasIncompleteSusdsSourceCoverage: boolean;
+} {
+  const sourcesValue = asset.sources;
+  const rawSources = asArray(sourcesValue);
+  const sources = rawSources.filter(isRecord);
+  const principalUsdBudget = principalUsdBudgetForAsset({
+    asset,
+    sources,
+    symbol,
+  });
+  const derivation = tokenBalanceDerivationForAsset({
+    asset,
+    principalUsdBudget,
+    sources,
+    symbol,
+  });
+  const results = sources.map((source, sourceIndex) => ({
+    source,
+    holding: sourceHoldingFromRecord({
+      asset,
+      derivation,
+      principalUsdBudget,
+      source,
+      sourceIndex,
+    }),
+  }));
+  const holdings = results.flatMap(({ holding }) =>
+    holding === null ? [] : [holding],
+  );
+  return {
+    holdings,
+    malformedCount:
+      (Array.isArray(sourcesValue) ? 0 : 1) +
+      (rawSources.length - sources.length) +
+      (sources.length - holdings.length),
+    hasIncompleteSusdsSourceCoverage:
+      isSusdsSymbol(symbol) &&
+      hasIncompleteSusdsSourceCoverage({
+        asset,
+        rawSourceCount: rawSources.length,
+        results,
+      }),
+  };
+}
+
 export function extractReserveYieldHoldings(
   reservePayload: unknown,
 ): ReserveYieldExtraction {
@@ -398,6 +503,7 @@ export function extractReserveYieldHoldings(
   let trackedAssetCount = 0;
   let susdsAssetCount = 0;
   let requiresSusdsSnapshotSource = false;
+  let hasIncompleteSusdsSourceCoverage = false;
   let stethAssetCount = 0;
   let reserveCurrentHoldingsClassificationFailed = !Array.isArray(assetsValue);
 
@@ -423,42 +529,13 @@ export function extractReserveYieldHoldings(
       stethAssetCount += 1;
     }
 
-    const sourcesValue = assetValue.sources;
-    const rawSources = asArray(sourcesValue);
-    if (!Array.isArray(sourcesValue)) {
-      malformedCount += 1;
-    }
-    const sources: Record<string, unknown>[] = [];
-    for (const source of rawSources) {
-      if (isRecord(source)) sources.push(source);
-    }
-    malformedCount += rawSources.length - sources.length;
-    const sourceHoldings: ReserveYieldHolding[] = [];
-    const principalUsdBudget = principalUsdBudgetForAsset({
-      asset: assetValue,
-      sources,
-      symbol,
-    });
-    const derivation = tokenBalanceDerivationForAsset({
-      asset: assetValue,
-      principalUsdBudget,
-      sources,
-      symbol,
-    });
-    sources.forEach((source, sourceIndex) => {
-      const holding = sourceHoldingFromRecord({
-        asset: assetValue,
-        derivation,
-        principalUsdBudget,
-        source,
-        sourceIndex,
-      });
-      if (holding !== null) sourceHoldings.push(holding);
-    });
-    malformedCount += sources.length - sourceHoldings.length;
+    const sourceExtraction = extractSourceHoldings(assetValue, symbol);
+    malformedCount += sourceExtraction.malformedCount;
+    hasIncompleteSusdsSourceCoverage ||=
+      sourceExtraction.hasIncompleteSusdsSourceCoverage;
 
-    if (sourceHoldings.length > 0) {
-      holdings.push(...sourceHoldings);
+    if (sourceExtraction.holdings.length > 0) {
+      holdings.push(...sourceExtraction.holdings);
       return;
     }
 
@@ -470,13 +547,17 @@ export function extractReserveYieldHoldings(
     }
   });
 
+  const aggregatedHoldings = aggregateHoldings(holdings);
   return {
-    holdings: aggregateHoldings(holdings),
+    holdings: aggregatedHoldings,
     malformedCount,
     reserveCurrentHoldingsClassificationFailed,
     trackedAssetCount,
     susdsAssetCount,
     susdsSnapshotSourceRequired: requiresSusdsSnapshotSource,
+    hasUnindexedSusdsHolding:
+      hasIncompleteSusdsSourceCoverage ||
+      holdingsHaveUnindexedSusdsSource(aggregatedHoldings),
     stethAssetCount,
   };
 }

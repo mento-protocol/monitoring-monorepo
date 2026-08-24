@@ -211,7 +211,7 @@ function reservePartialReason(args: BuildCanonicalRevenueArgs): string | null {
     return "Reserve earned-yield history failed to load.";
   }
   if (incompleteSusdsSnapshotCoverage(args)) {
-    return "Reserve sUSDS earned-yield actuals unavailable: indexed snapshots do not cover every current sUSDS holding.";
+    return "Reserve sUSDS earned-yield actuals unavailable: indexed snapshots do not cover all current sUSDS sources.";
   }
   if (unverifiableSusdsSnapshotSource(args)) {
     return "Reserve sUSDS earned-yield actuals unavailable: current reserve holdings classification failed and no SusdsYieldDailySnapshot source exists.";

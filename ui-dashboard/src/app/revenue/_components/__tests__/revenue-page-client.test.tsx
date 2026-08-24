@@ -611,7 +611,7 @@ describe("RevenuePageClient canonical revenue layout", () => {
 
   it("renders incomplete current sUSDS snapshot coverage through the revenue page", () => {
     const reason =
-      "Reserve sUSDS earned-yield actuals unavailable: indexed snapshots do not cover every current sUSDS holding.";
+      "Reserve sUSDS earned-yield actuals unavailable: indexed snapshots do not cover all current sUSDS sources.";
     const html = renderRevenue({
       reserveYield: {
         ...RESERVE_YIELD,

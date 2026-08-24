@@ -20,7 +20,7 @@ const UNVERIFIABLE_SUSDS_SNAPSHOT_SOURCE_REASON =
 const UNAVAILABLE_SUSDS_SIGNAL_SOURCE_REASON =
   "Reserve sUSDS earned-yield actuals unavailable: the current sUSDS yield signal is unavailable and no SusdsYieldDailySnapshot source exists.";
 const INCOMPLETE_SUSDS_SNAPSHOT_COVERAGE_REASON =
-  "Reserve sUSDS earned-yield actuals unavailable: indexed snapshots do not cover every current sUSDS holding.";
+  "Reserve sUSDS earned-yield actuals unavailable: indexed snapshots do not cover all current sUSDS sources.";
 
 function ts(iso: string): number {
   return Date.parse(`${iso}T00:00:00Z`) / 1000;
@@ -387,14 +387,21 @@ describe("buildCanonicalRevenue", () => {
     );
   });
 
-  it("fails closed when indexed snapshots do not cover a current sUSDS holding", () => {
+  it("fails closed when raw coverage finds a dropped sUSDS source", () => {
     const result = buildCanonicalRevenue({
       networkData: [],
       cdpDailySeries: [],
       cdpMarkets: [],
-      reserveYield: reserveYield({ hasUnindexedSusdsHolding: true }),
+      reserveYield: reserveYield({
+        holdings: [
+          stethHolding({
+            assetSymbol: "sUSDS",
+            identifier: "0xd0697f70e79476195b742d5afab14be50f98cc1e",
+          }),
+        ],
+        hasUnindexedSusdsHolding: true,
+      }),
       reserveDailySnapshots: [reserveSnapshot(ts("2026-06-12"), 5)],
-      hasUnindexedSusdsHolding: true,
       nowSeconds: NOW_SECONDS,
     });
 

@@ -8,7 +8,6 @@ import {
   applySusdsYieldLedgerResult,
   fetchSusdsYieldLedger,
 } from "@/lib/reserve-yield-susds";
-import { hasUnindexedSusdsHolding } from "@/lib/reserve-yield-susds-coverage";
 import {
   applyStethYieldLedgerResult,
   fetchLidoStethApr,
@@ -274,7 +273,7 @@ function reserveHoldingsState(
       extracted.reserveCurrentHoldingsClassificationFailed,
     hasCurrentSusdsAsset: extracted.susdsAssetCount > 0,
     susdsSnapshotSourceRequired: extracted.susdsSnapshotSourceRequired,
-    hasUnindexedSusdsHolding: hasUnindexedSusdsHolding(extracted.holdings),
+    hasUnindexedSusdsHolding: extracted.hasUnindexedSusdsHolding,
     hasCurrentStethAsset: extracted.stethAssetCount > 0,
   };
 }

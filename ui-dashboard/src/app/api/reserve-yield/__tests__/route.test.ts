@@ -552,6 +552,64 @@ describe("GET /api/reserve-yield", () => {
     ).toBeNull();
   });
 
+  it("reports incomplete sUSDS coverage when extraction drops an unknown source", async () => {
+    vi.stubEnv("NEXT_PUBLIC_HASURA_URL", "https://hasura.example/v1/graphql");
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        Response.json({
+          collateral: {
+            assets: [
+              {
+                symbol: "sUSDS",
+                chain: "ethereum",
+                balance: "2001",
+                usd_value: 2201,
+                sources: [
+                  {
+                    type: "wallet",
+                    label: "Reserve Safe",
+                    identifier: TRACKED_SUSDS_WALLET,
+                    balance: "2000",
+                    usd_value: 2200,
+                  },
+                  {
+                    type: "wallet",
+                    label: "Unpriced Safe",
+                    identifier: "0x0000000000000000000000000000000000000001",
+                    balance: "unknown",
+                  },
+                ],
+              },
+            ],
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response("observation_date,FEDFUNDS\n2026-05-01,5.33\n"),
+      )
+      .mockResolvedValueOnce(Response.json(SKY_SSR_RPC_RESPONSE))
+      .mockResolvedValueOnce(
+        Response.json({
+          data: {
+            SusdsYieldSummary: [SUSDS_LEDGER_SUMMARY],
+          },
+        }),
+      );
+    const { GET } = await loadRoute();
+
+    const res = await GET();
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.holdings).toHaveLength(1);
+    expect(body.holdings[0]).toMatchObject({
+      identifier: TRACKED_SUSDS_WALLET,
+      principalUsd: 2200,
+    });
+    expect(body.holdingsError).toContain("missing usable USD values");
+    expect(body.hasUnindexedSusdsHolding).toBe(true);
+  });
+
   it("parses large sUSDS ledger wei without rounding before scaling", async () => {
     vi.stubEnv("NEXT_PUBLIC_HASURA_URL", "https://hasura.example/v1/graphql");
     vi.spyOn(globalThis, "fetch")

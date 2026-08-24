@@ -115,6 +115,7 @@ describe("reserve yield parsing and math", () => {
     expect(extracted.reserveCurrentHoldingsClassificationFailed).toBe(false);
     expect(extracted.trackedAssetCount).toBe(3);
     expect(extracted.susdsAssetCount).toBe(1);
+    expect(extracted.hasUnindexedSusdsHolding).toBe(false);
     expect(extracted.holdings).toHaveLength(4);
     expect(extracted.holdings[0]).toMatchObject({
       assetSymbol: "sUSDS",
@@ -183,6 +184,194 @@ describe("reserve yield parsing and math", () => {
       balance: 25,
       principalUsd: 28,
     });
+  });
+
+  it("fails sUSDS coverage when a potentially nonzero raw source is dropped", () => {
+    const extracted = extractReserveYieldHoldings({
+      collateral: {
+        assets: [
+          {
+            symbol: "sUSDS",
+            chain: "ethereum",
+            balance: "2001",
+            usd_value: 2201,
+            sources: [
+              {
+                type: "wallet",
+                label: "Tracked Safe",
+                identifier: TRACKED_SUSDS_WALLET,
+                balance: "2000",
+                usd_value: 2200,
+              },
+              {
+                type: "wallet",
+                label: "Unpriced Safe",
+                identifier: "0x0000000000000000000000000000000000000001",
+                balance: "unknown",
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(extracted.holdings).toHaveLength(1);
+    expect(extracted.malformedCount).toBe(1);
+    expect(extracted.hasUnindexedSusdsHolding).toBe(true);
+  });
+
+  it("allows a proven-zero extra sUSDS source beside indexed exposure", () => {
+    const extracted = extractReserveYieldHoldings({
+      collateral: {
+        assets: [
+          {
+            symbol: "sUSDS",
+            chain: "ethereum",
+            balance: "2000",
+            usd_value: 2200,
+            sources: [
+              {
+                type: "wallet",
+                label: "Tracked Safe",
+                identifier: TRACKED_SUSDS_WALLET,
+                balance: "2000",
+                usd_value: 2200,
+              },
+              {
+                type: "wallet",
+                label: "Unused Safe",
+                identifier: "0x0000000000000000000000000000000000000001",
+                balance: "0",
+                usd_value: 0,
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(extracted.malformedCount).toBe(0);
+    expect(extracted.hasUnindexedSusdsHolding).toBe(false);
+  });
+
+  it("fails sUSDS coverage before duplicate unindexed sources aggregate to zero", () => {
+    const extracted = extractReserveYieldHoldings({
+      collateral: {
+        assets: [
+          {
+            symbol: "sUSDS",
+            chain: "ethereum",
+            balance: "0",
+            usd_value: 0,
+            sources: [
+              {
+                type: "wallet",
+                label: "Unindexed Safe",
+                identifier: "0x0000000000000000000000000000000000000001",
+                balance: "1",
+                usd_value: 1,
+              },
+              {
+                type: "wallet",
+                label: "Unindexed Safe",
+                identifier: "0x0000000000000000000000000000000000000001",
+                balance: "-1",
+                usd_value: -1,
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(extracted.holdings).toHaveLength(1);
+    expect(extracted.holdings[0]).toMatchObject({
+      balance: 0,
+      principalUsd: 0,
+    });
+    expect(extracted.hasUnindexedSusdsHolding).toBe(true);
+  });
+
+  it("fails sUSDS coverage when a positive asset has only zero sources", () => {
+    const positiveAsset = extractReserveYieldHoldings({
+      collateral: {
+        assets: [
+          {
+            symbol: "sUSDS",
+            chain: "ethereum",
+            balance: "1",
+            usd_value: 1,
+            sources: [{ balance: "0", usd_value: 0 }],
+          },
+        ],
+      },
+    });
+    const zeroAsset = extractReserveYieldHoldings({
+      collateral: {
+        assets: [
+          {
+            symbol: "sUSDS",
+            chain: "ethereum",
+            balance: "0",
+            usd_value: 0,
+            sources: [{ balance: "0", usd_value: 0 }],
+          },
+        ],
+      },
+    });
+
+    expect(positiveAsset.hasUnindexedSusdsHolding).toBe(true);
+    expect(zeroAsset.hasUnindexedSusdsHolding).toBe(false);
+  });
+
+  it("does not let an indexed zero holding hide a positive sUSDS asset", () => {
+    const extracted = extractReserveYieldHoldings({
+      collateral: {
+        assets: [
+          {
+            symbol: "sUSDS",
+            chain: "ethereum",
+            balance: "1",
+            usd_value: 1,
+            sources: [
+              {
+                identifier: TRACKED_SUSDS_WALLET,
+                balance: "0",
+                usd_value: "unknown",
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(extracted.holdings).toHaveLength(1);
+    expect(extracted.holdings[0]).toMatchObject({
+      identifier: TRACKED_SUSDS_WALLET,
+      balance: 0,
+      principalUsd: 0,
+    });
+    expect(extracted.hasUnindexedSusdsHolding).toBe(true);
+  });
+
+  it("does not use malformed stETH sources as sUSDS coverage evidence", () => {
+    const extracted = extractReserveYieldHoldings({
+      collateral: {
+        assets: [
+          RESERVE_PAYLOAD.collateral.assets[1],
+          {
+            symbol: "stETH",
+            chain: "ethereum",
+            balance: "1",
+            usd_value: 2_000,
+            sources: [{ balance: "unknown", usd_value: "unknown" }],
+          },
+        ],
+      },
+    });
+
+    expect(extracted.malformedCount).toBeGreaterThan(0);
+    expect(extracted.hasUnindexedSusdsHolding).toBe(false);
   });
 
   it.each([
@@ -606,6 +795,7 @@ describe("reserve yield parsing and math", () => {
     expect(extracted.malformedCount).toBe(2);
     expect(extracted.reserveCurrentHoldingsClassificationFailed).toBe(false);
     expect(extracted.susdsSnapshotSourceRequired).toBe(true);
+    expect(extracted.hasUnindexedSusdsHolding).toBe(true);
   });
 
   it("does not require an sUSDS snapshot source for explicit zero exposure", () => {

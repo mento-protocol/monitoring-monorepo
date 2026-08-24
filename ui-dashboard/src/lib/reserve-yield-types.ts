@@ -41,7 +41,7 @@ export type ReserveYieldResponse = {
   susdsYieldSignalUnavailable: boolean;
   /** True when current sUSDS exposure requires an indexed snapshot source. */
   susdsSnapshotSourceRequired: boolean;
-  /** True when nonzero current sUSDS exposure includes a source outside indexed wallets. */
+  /** True when a current sUSDS source is outside indexed wallets or cannot be proven zero. */
   hasUnindexedSusdsHolding: boolean;
   realizedYieldUsd: number | null;
   unrealizedYieldUsd: number | null;
@@ -74,6 +74,7 @@ export type ReserveYieldExtraction = {
   trackedAssetCount: number;
   susdsAssetCount: number;
   susdsSnapshotSourceRequired: boolean;
+  hasUnindexedSusdsHolding: boolean;
   stethAssetCount: number;
 };
 
