@@ -33,6 +33,8 @@ gate_run_marker_path() {
 gate_run_marker_file=""
 
 gate_run_ensure_marker() {
+  local work_verdict="${1:-No mapped command ran in this request}"
+  local execution_state="${2:-Nothing has been executed.}"
   local marker
   [[ -z "$gate_run_marker_file" ]] || return 0
   marker="$(gate_run_marker_path)" || return 0
@@ -50,9 +52,9 @@ gate_run_ensure_marker() {
   if ! (set -C && printf '%s\n' "${gate_run_id:-$gate_lock_token}" > "$marker") 2>/dev/null; then
     echo "error: could not create the run marker at ${marker} (it may already exist)." >&2
     echo "Without it, a command that outlives a killed gate cannot be found by the next run." >&2
-    echo "Nothing has been executed. Fix that path — permissions, free space, or a leftover file — then re-run." >&2
+    echo "${execution_state} Fix that path — permissions, free space, or a leftover file — then re-run." >&2
     gate_report_coordinated_no_work_failure 2 "run-marker preparation" \
-      "No mapped command ran in this request"
+      "$work_verdict"
     exit 2
   fi
   gate_run_marker_file="$marker"

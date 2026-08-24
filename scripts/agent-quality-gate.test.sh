@@ -1355,10 +1355,18 @@ coordinator_gate_pipeline_lock="$(mktemp -d /tmp/qgp.XXXXXX)"
   printf 'console.log("holder fixture");\n' > scripts/gate/agent-prewarm.mjs
   printf 'console.log("contender fixture");\n' \
     > scripts/context/agent-context-budget.mjs
+  printf '#!/usr/bin/env bash\nexit 0\n' > scripts/agent-quality-gate.sh
   cat > tools/trunk <<'STUB'
 #!/usr/bin/env bash
 if [[ -n "${QG_CONTENDER_COMMAND_MARKER:-}" ]]; then
   : > "$QG_CONTENDER_COMMAND_MARKER"
+fi
+if [[ -n "${QG_SERIAL_DONE:-}" ]]; then
+  [[ -e "$QG_SERIAL_DONE" ]] || {
+    echo "parallel trunk command started before the serialized command completed"
+    exit 1
+  }
+  : > "${QG_TRUNK_RAN:?}"
 fi
 if [[ -n "${QG_INHERITED_FD7_MESSAGE:-}" ]]; then
   printf '%s\n' "$QG_INHERITED_FD7_MESSAGE" >&7
@@ -1373,6 +1381,16 @@ if [[ "${1:-}" == "--version" ]]; then
 fi
 if [[ -n "${QG_CONTENDER_COMMAND_MARKER:-}" ]]; then
   : > "$QG_CONTENDER_COMMAND_MARKER"
+fi
+if [[ "$*" == "agent:quality-gate:test" && -n "${QG_SERIAL_DONE:-}" ]]; then
+  : > "$QG_SERIAL_DONE"
+fi
+if [[ "$*" == "gate:routing-table:test" && -n "${QG_SERIAL_DONE:-}" ]]; then
+  [[ -e "$QG_SERIAL_DONE" ]] || {
+    echo "parallel routing command started before the serialized command completed"
+    exit 1
+  }
+  : > "${QG_ROUTING_RAN:?}"
 fi
 if [[ -n "${QG_INHERITED_FD7_MESSAGE:-}" ]]; then
   printf '%s\n' "$QG_INHERITED_FD7_MESSAGE" >&7
@@ -1406,6 +1424,7 @@ STUB
   git commit -qm init
   printf 'scripts/gate/agent-prewarm.mjs\n' > holder-paths.txt
   printf 'scripts/context/agent-context-budget.mjs\n' > contender-paths.txt
+  printf 'scripts/agent-quality-gate.sh\n' > marker-transition-paths.txt
 
   holder_started="$coordinator_gate_pipeline_repo/holder-started"
   holder_release="$coordinator_gate_pipeline_repo/holder-release"
@@ -1415,6 +1434,10 @@ STUB
   contender_stdout="$coordinator_gate_pipeline_repo/contender-stdout"
   contender_stderr="$coordinator_gate_pipeline_repo/contender-stderr"
   contender_command_marker="$coordinator_gate_pipeline_repo/contender-command-ran"
+  marker_transition_output="$coordinator_gate_pipeline_repo/marker-transition-output"
+  marker_transition_serial_done="$coordinator_gate_pipeline_repo/marker-transition-serial-done"
+  marker_transition_trunk_ran="$coordinator_gate_pipeline_repo/marker-transition-trunk-ran"
+  marker_transition_routing_ran="$coordinator_gate_pipeline_repo/marker-transition-routing-ran"
   prune_stdout="$coordinator_gate_pipeline_repo/prune-stdout"
   prune_stderr="$coordinator_gate_pipeline_repo/prune-stderr"
   prune_command_marker="$coordinator_gate_pipeline_repo/prune-command-ran"
@@ -1456,6 +1479,7 @@ STUB
       sed 's/^/preparation stderr: /' "$preparation_stderr" 2>/dev/null || true
       sed 's/^/contender stdout: /' "$contender_stdout" 2>/dev/null || true
       sed 's/^/contender stderr: /' "$contender_stderr" 2>/dev/null || true
+      sed 's/^/marker transition: /' "$marker_transition_output" 2>/dev/null || true
       sed 's/^/prune stdout: /' "$prune_stdout" 2>/dev/null || true
       sed 's/^/prune stderr: /' "$prune_stderr" 2>/dev/null || true
       sed 's/^/legacy stdout: /' "$legacy_stdout" 2>/dev/null || true
@@ -1574,6 +1598,52 @@ STUB
   holder_pid=""
   [[ "$holder_status" -eq 0 ]] ||
     fail_gate_pipeline_fixture "end-to-end pipeline holder did not finish successfully"
+
+  set +e
+  AGENT_QUALITY_GATE_LOCK=1 \
+    AGENT_QUALITY_GATE_LOCK_HELD='' \
+    AGENT_QUALITY_GATE_LOCK_DIR="$coordinator_gate_pipeline_lock" \
+    AGENT_QUALITY_GATE_COORDINATOR=1 \
+    AGENT_QUALITY_GATE_CAPACITY=3 \
+    NODE_ENV=test \
+    QG_SERIAL_DONE="$marker_transition_serial_done" \
+    QG_TRUNK_RAN="$marker_transition_trunk_ran" \
+    QG_ROUTING_RAN="$marker_transition_routing_ran" \
+    REAL_CP_COMMAND="$real_cp_command" \
+    REAL_UNAME_COMMAND="$real_uname_command" \
+    PATH="$coordinator_gate_pipeline_repo/bin:$PATH" \
+    /bin/bash "$repo_root/scripts/agent-quality-gate.sh" \
+      --changed-paths-file marker-transition-paths.txt \
+      --base HEAD --run --parallel 2 --lock-wait 30 \
+      > "$marker_transition_output" 2>&1
+  marker_transition_status=$?
+  set -e
+  [[ "$marker_transition_status" -eq 0 ]] ||
+    fail_gate_pipeline_fixture "serial-to-parallel marker transition did not finish successfully"
+  [[ -e "$marker_transition_serial_done" ]] ||
+    fail_gate_pipeline_fixture "serial-to-parallel marker transition skipped its serialized command"
+  [[ -e "$marker_transition_trunk_ran" ]] ||
+    fail_gate_pipeline_fixture "serial-to-parallel marker transition skipped its trunk worker"
+  [[ -e "$marker_transition_routing_ran" ]] ||
+    fail_gate_pipeline_fixture "serial-to-parallel marker transition skipped its routing worker"
+  grep -Fq -- "✓ pnpm agent:quality-gate:test" "$marker_transition_output" ||
+    fail_gate_pipeline_fixture "serial-to-parallel marker transition omitted its serialized success"
+  grep -Fq -- "Running quality commands with parallelism 2." "$marker_transition_output" ||
+    fail_gate_pipeline_fixture "serial-to-parallel marker transition omitted its parallel phase"
+  grep -Fq -- "✓ ./tools/trunk check scripts/agent-quality-gate.sh" "$marker_transition_output" ||
+    fail_gate_pipeline_fixture "serial-to-parallel marker transition omitted its trunk success"
+  grep -Fq -- "✓ bash -n scripts/agent-quality-gate.sh" "$marker_transition_output" ||
+    fail_gate_pipeline_fixture "serial-to-parallel marker transition omitted its shell syntax success"
+  grep -Fq -- "✓ pnpm gate:routing-table:test" "$marker_transition_output" ||
+    fail_gate_pipeline_fixture "serial-to-parallel marker transition omitted its routing success"
+  grep -Fq -- "All mapped commands passed." "$marker_transition_output" ||
+    fail_gate_pipeline_fixture "serial-to-parallel marker transition omitted its success verdict"
+  ! grep -Fq -- "could not create the run marker" "$marker_transition_output" ||
+    fail_gate_pipeline_fixture "serial-to-parallel workers raced run-marker creation"
+  ! grep -Fq -- "parallel worker left an invalid" "$marker_transition_output" ||
+    fail_gate_pipeline_fixture "serial-to-parallel marker failure produced an invalid worker result"
+  ! grep -Fq -- "No mapped command ran in this request" "$marker_transition_output" ||
+    fail_gate_pipeline_fixture "serial-to-parallel marker failure reported an inaccurate no-work verdict"
 
   mkdir -p .tmp/agent-quality-gate
   printf 'invalid fixture stamp\n' > .tmp/agent-quality-gate/command-stamps.tsv

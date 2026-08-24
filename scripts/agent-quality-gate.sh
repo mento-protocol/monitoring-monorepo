@@ -3424,7 +3424,9 @@ run_with_timeout() {
   # replacement reparented with no tagged ancestor to walk from, and only
   # something inherited can still name it. Both are keyed to this run's token,
   # so neither can come to name a stranger.
-  gate_run_ensure_marker
+  gate_run_ensure_marker \
+    "The mapped command did not run" \
+    "The mapped command did not start."
   command_started_at="$(date +%s)"
   if declare -p gate_coordinator_recovery_drain_context >/dev/null 2>&1; then
     gate_coordinator_recovery_drain_context="active-command"
@@ -4222,6 +4224,13 @@ run_mapped_entries_parallel() {
         completed=$((completed + 1))
         continue
       fi
+
+      # A completed serialized command drains and removes its marker. Create
+      # the next marker in this parent before forking a parallel worker. Every
+      # worker then inherits the same path and skips exclusive re-creation.
+      gate_run_ensure_marker \
+        "The parallel command batch did not run" \
+        "The parallel command batch did not start."
 
       output_file="$(make_tmpfile)"
       status_file="$(make_tmpfile)"
