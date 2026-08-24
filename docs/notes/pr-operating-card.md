@@ -207,8 +207,12 @@ even when you never open an authority.
      already exist locally, require that OID to be their ancestor and inspect
      the intervening range. If the branch is missing current base commits,
      merge the base in — rebase is only acceptable before first publication.
-   - **No PR yet**: verify `origin` serves `CURRENT_REPO` and take the current
-     branch as the head ref.
+   - **No PR yet**: a fork checkout stops here rather than first-publishing —
+     step 6 refuses every fork head, so pushing to the fork's `origin` and
+     opening a cross-repository PR creates one this same workflow can never
+     drive to ready; surface that to the user instead. Otherwise verify
+     `origin` serves `CURRENT_REPO` and take the current branch as the head
+     ref.
 
    **Then commit the validated work**: stage only the intended files and create
    the ship commit before any push, or the remote receives the old commit while
