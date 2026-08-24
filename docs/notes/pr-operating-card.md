@@ -66,11 +66,10 @@ even when you never open an authority.
    that stamp, the hook fetches before it runs the gate, and a stamp warmed
    against a stale `origin/main` is invalidated by that fetch, so the push pays
    for the full gate a second time. A bare invocation diffs against
-   `origin/main`; for an existing PR whose `baseRefName` is not `main` — a
-   stacked PR — resolve that base first and pass
-   `--base origin/<baseRefName>`, because a child change that reverses a path
-   its parent introduced can vanish from the `origin/main...HEAD` diff and the
-   gate then schedules no checks for it. It does not run `trunk fmt` — run
+   `origin/main`; a stacked PR (base not `main`) must resolve `baseRefName`
+   first and pass `--base origin/<baseRefName>` — a child change that reverses
+   a parent-introduced path can vanish from the `origin/main...HEAD` diff,
+   scheduling no checks for it. It does not run `trunk fmt` — run
    `./tools/trunk fmt` (the checked-in launcher; a global `trunk` may not exist)
    before committing so the required Code Quality CI stays green. The gate never
    deploys and never applies Terraform. It **refuses package-script,
@@ -125,35 +124,17 @@ even when you never open an authority.
    [`agent-quality-gate-mechanics.md`](agent-quality-gate-mechanics.md).
 
 5. **Ship.** Open the PR through the `ship` skill on every surface, including
-   hosted sessions — do not hand-roll PR creation. The description follows this
-   shared shape on every surface; `scripts/pr/check-pr-description.mjs`
-   enforces the first two sections and their order in CI:
-
-   ```markdown
-   ## The Problem
-
-   - Maximum three bullets. Explain what the system did before, what failed or
-     became difficult, and the concrete effect on users or operators.
-
-   ## The Solution
-
-   - Explain what the system does after this PR, why that behavior improves
-     the situation, and any material limit or non-goal.
-
-   ## Details
-
-   - Implementation details, class names, query syntax, exact limits,
-     invariants, caveats, and scope boundaries.
-
-   ## Validation
-
-   - Commands and results.
-   ```
-
-   Write the opening for an engineer who has not read the diff: behavior and
-   effect first, implementation mechanisms under `## Details`. Use Markdown
-   prose or bullets in the first two sections; raw HTML other than comments and
-   code blocks do not satisfy the opening-content check. PRs open **ready for
+   hosted sessions — do not hand-roll PR creation. The description follows the
+   repo template
+   [`.github/PULL_REQUEST_TEMPLATE.md`](../../.github/PULL_REQUEST_TEMPLATE.md)
+   in full, all four sections: `## The Problem` (maximum three bullets — old
+   behavior, what failed, concrete effect), `## The Solution` (new behavior,
+   why it improves the situation, material limits), then `## Details`
+   (implementation specifics) and `## Validation` (commands and results).
+   Write the opening for an engineer who has not read the diff.
+   `scripts/pr/check-pr-description.mjs` enforces the first two sections and
+   their order in CI; raw HTML other than comments and code blocks do not
+   satisfy its opening-content check. PRs open **ready for
    review, never as drafts** — a draft suppresses the automated AI reviews this
    workflow depends on, so drafting is a decision to skip review, not a staging
    step; use draft only when the user asks or required
@@ -194,52 +175,45 @@ even when you never open an authority.
    the deep pass can be run later from a session that has it. Never imitate or
    install it to fill the gap.
 
-   **Bind the checkout to the target first, then commit.** Binding before the
-   commit is what makes the equality check meaningful — advancing local `HEAD`
-   first would make `HEAD == headRefOid` unsatisfiable on a normal update. Which
-   target depends on whether a PR exists yet:
-   - **An existing PR** is the push target. Resolve its head repository,
-     `headRefName` and `headRefOid`. Before creating the ship commit, require
-     local `HEAD` to equal that OID; if intended commits already exist locally,
-     require the PR's OID to be their ancestor and inspect the intervening range
-     instead of stopping. If the branch is missing current base commits, merge the
-     base in — rebase is only acceptable before first publication.
-   - **No PR yet**, so there is no `headRefOid` to match: verify `origin` serves
-     `CURRENT_REPO` and take the current branch as the head ref.
+   **Bind the checkout to the target first, then commit** — binding after
+   advancing local `HEAD` would make the `HEAD == headRefOid` check
+   unsatisfiable on a normal update:
+   - **An existing PR** is the push target. Before creating the ship commit,
+     require local `HEAD` to equal its `headRefOid`; if intended commits
+     already exist locally, require that OID to be their ancestor and inspect
+     the intervening range. If the branch is missing current base commits,
+     merge the base in — rebase is only acceptable before first publication.
+   - **No PR yet**: verify `origin` serves `CURRENT_REPO` and take the current
+     branch as the head ref.
 
-   **Then commit the validated work.** Steps 3-4 validate the worktree, so stage
-   only the intended files and create the ship commit before any push — otherwise
-   the remote receives the old commit while every validated change stays local. If
-   unrelated dirty changes are mixed with the intended scope, stop and ask before
-   staging.
+   **Then commit the validated work**: stage only the intended files and create
+   the ship commit before any push, or the remote receives the old commit while
+   every validated change stays local. If unrelated dirty changes are mixed
+   with the intended scope, stop and ask before staging.
 
-   **Then push.** An existing PR takes an explicit
-   `git push <head-remote> HEAD:<headRefName>` refspec, never an implicit target
-   or the local branch name. A first publication takes
-   `git push -u origin HEAD:<branch>`, and the PR is created from that published
-   branch.
+   **Then push**, always with an explicit refspec: an existing PR takes
+   `git push <head-remote> HEAD:<headRefName>`, never an implicit target or the
+   local branch name; a first publication takes
+   `git push -u origin HEAD:<branch>` and the PR is created from that branch.
 
-   **Integrating the base produces a new head, and that head is unvalidated.**
-   Steps 3 and 4 ran against the pre-merge tree, so a base merge or conflict
-   resolution done here would otherwise reach the PR untested and unreviewed.
-   Either integrate the base before step 3, or rerun the gate and the closeout
-   review against the merged head before pushing. A conflict resolution is
-   exercised, not assumed.
+   **Integrating the base produces a new, unvalidated head.** Steps 3-4 ran
+   against the pre-merge tree, so either integrate the base before step 3 or
+   rerun the gate and the closeout review against the merged head before
+   pushing. A conflict resolution is exercised, not assumed.
 
-   Either way, re-read the PR after pushing and require its `headRefOid` to equal
-   local `HEAD` before treating anything as published. A fork checkout uses its
-   parent as `BASE_REPO`; never substitute a fork's `origin` for its parent, and
-   stop if the head repository has no matching push remote.
+   Either way, re-read the PR after pushing and require its `headRefOid` to
+   equal local `HEAD` before treating anything as published. A fork checkout
+   uses its parent as `BASE_REPO`; never substitute a fork's `origin` for its
+   parent, and stop if the head repository has no matching push remote.
 
-6. **Babysit.** Run the `babysit-pr` skill. Entering here without step 5 — a
-   babysit-only invocation, including one with no explicit PR — first resolve
-   the target exactly as step 5 defines: the target-PR precedence, `BASE_REPO`,
-   both remotes, and the head fields
-   (`number,url,headRefName,headRefOid,baseRefName,headRepository,headRepositoryOwner,isCrossRepository`).
-   Establish `isCrossRepository` in that resolution and **stop a fork head
-   there, before the first repo-local probe, gate, or fix** — the
-   `.claude/babysit-pr.sh` refusal at gate time is the backstop, not the first
-   line. The sweep and probes below assume that binding. Sweep every feedback
+6. **Babysit.** Run the `babysit-pr` skill. Entering here without step 5 — any
+   babysit-only invocation, with or without an explicit PR — first bind the
+   target as step 5 defines: the target-PR precedence, `BASE_REPO`, both
+   remotes, and
+   `number,url,headRefName,headRefOid,baseRefName,headRepository,headRepositoryOwner,isCrossRepository`.
+   **Stop a fork head at that resolution, before the first repo-local probe,
+   gate, or fix** — the `.claude/babysit-pr.sh` refusal at gate time is the
+   backstop, not the first line. Sweep every feedback
    surface:
    top-level comments, review bodies, inline comments and threads, annotations,
    and failing logs. **Reply before resolving**, on the correct surface, in
@@ -271,32 +245,29 @@ even when you never open an authority.
    attributing it. Chasing an unrelated failure puts unrelated changes on the
    branch.
 
-   **A user correction updates the request baseline.** When the user changes what
-   they asked for mid-babysit, update the PR description before the next push.
-   Current-head reviewers read the description as the acceptance criteria, so a
-   stale one makes them enforce superseded behaviour and re-raise findings you
-   already resolved. This is the one edit to the description the babysit step
-   makes, alongside recording a deferral.
+   **A user correction updates the request baseline**: update the PR
+   description before the next push, or current-head reviewers enforce the
+   superseded criteria and re-raise findings you already resolved. This and
+   recording a deferral are the only description edits the babysit step makes.
 
    **Low noise is for unsolicited updates only.** Report state changes that
-   matter, not polls — but when the user asks for status, answer immediately with
-   the PR URL or number, the bound head SHA, the latest readiness result and when
-   it was observed, the current action and owner, any blocker, and the next action
-   or deadline. Then keep watching. A watcher that stays silent until its next
-   state change is not being low-noise, it is ignoring the user.
+   matter, not polls — but answer a status request immediately: PR URL or
+   number, bound head SHA, latest readiness result and its observation time,
+   current action and owner, any blocker, and the next action or deadline. Then
+   keep watching.
 
-   **Bound the watch.** One hour of wall clock by default unless the user set a
-   different budget, and roughly three attempts at the same recurring item before
-   handing it back. `pnpm pr:ready-state --watch` polls until ready, merged, or
-   closed, so a permanently blocked PR otherwise consumes the session. At the
-   deadline, report where the PR stands and stop or escalate.
+   **Bound the watch**: one hour of wall clock by default unless the user set
+   a different budget, and roughly three attempts at the same recurring item
+   before handing it back. `pnpm pr:ready-state --watch` polls until ready,
+   merged, or closed, so a permanently blocked PR otherwise consumes the
+   session. At the deadline, report where the PR stands and stop or escalate.
 
-   **Give each independent PR its own watcher and its own isolated worktree.** A
-   foreground `pr:ready-state --watch` on the first PR otherwise occupies the loop
-   while feedback and failures age on the others, and repairs driven through one
-   shared checkout can target the wrong branch. Bind every worker to that PR's
-   exact repository, number, head and branch; serialize only overlapping or
-   dependent fixes. The lead keeps user-facing status and approval boundaries.
+   **Give each independent PR its own watcher and isolated worktree** — a
+   shared foreground watch lets feedback and failures age on the other PRs,
+   and repairs through one shared checkout can target the wrong branch. Bind
+   every worker to that PR's exact repository, number, head and branch;
+   serialize only overlapping or dependent fixes. The lead keeps user-facing
+   status and approval boundaries.
 
    **Stacked PRs are the normal case here**, typically after a `/ship` batch.
    When a watched PR merges or a base moves, re-evaluate every open PR that
@@ -325,16 +296,15 @@ even when you never open an authority.
    `/pr-ready-override gate=codex-description-approval head=<full-head-sha>
 reason=<why this is safe>`. Do not block on slow optional bots that branch
    protection does not require, and do not post routine or duplicate `@codex
-review` requests. **Never tag `chatgpt-codex-connector` directly** — the reviewer is triggered
-   by the PR lifecycle, so a direct tag produces a duplicate pass rather than a
+review` requests. **Never tag `chatgpt-codex-connector` directly** — it is
+   lifecycle-triggered, and a direct tag produces a duplicate pass, not a
    faster one; treat `@codex` and `@Codex` as one trigger. Authority:
    [`pr-ready-state.md`](pr-ready-state.md).
 
    **Report an all-clear with its evidence, never bare.** Name the PR URL or
-   number, the current head SHA the result is bound to, the required-check state,
-   and the probes' blocker, thread and unreplied counts. A bare "it's green" gives
-   the user nothing to assess before a merge they are accountable for, and hides
-   which head the claim was established against.
+   number, the current head SHA the result is bound to, the required-check
+   state, and the probes' blocker, thread and unreplied counts — a bare "it's
+   green" hides which head the claim was established against.
 
 8. **Merge hygiene.** **Never merge a PR without the user's explicit, direct
    approval of that specific merge.** Green CI, bot approvals, a READY

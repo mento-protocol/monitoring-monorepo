@@ -393,6 +393,21 @@ export const HEAD_GROUPS = [
     ],
   },
   {
+    id: "babysit-repo-hook",
+    arms: [
+      {
+        patterns: [".claude/babysit-pr.sh", ".claude/babysit-pr.test.sh"],
+        why: "The babysit repo hook gates PR readiness for every babysit surface, and its fork refusal is fail-closed. `bash -n` above only parses it, so a hook or suite edit routes the behavioural suite. Unconditional on purpose: with the suite file missing, `bash` exits 127 and the gate still fails closed.",
+        effects: [
+          {
+            command: "bash .claude/babysit-pr.test.sh",
+            reason: "babysit repo hook changed",
+          },
+        ],
+      },
+    ],
+  },
+  {
     id: "vitest-configuration",
     arms: [
       {

@@ -51,8 +51,8 @@ hygiene, and production closeout.
   workflow depends on.
 - **`scripts/pr/check-pr-description.mjs` enforces `## The Problem` then
   `## The Solution` in CI**, in that order, ahead of all other content. The
-  full four-section description shape, including `## Details` and
-  `## Validation`, lives in card step 5.
+  full four-section description shape is the repo template
+  `.github/PULL_REQUEST_TEMPLATE.md`, bound by card step 5.
 - **Never post routine or duplicate `@codex review` requests**, and never tag
   `chatgpt-codex-connector` directly.
 - **Deep security scan** (`claude-security`) is developer-installed and Claude

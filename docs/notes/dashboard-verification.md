@@ -227,35 +227,33 @@ Do not broaden these silences to make a changed file pass.
 
 ## Visual comparison in the PR description
 
-A UI PR carries a `## Visual comparison` section placed immediately after
-`## The Solution` and before `## Details`. Capture the pair only after every
-intended file and review fix is committed and the worktree is clean, and record
-the final local `HEAD` OID before capture.
+A UI PR carries a `## Visual comparison` section immediately after
+`## The Solution`, before `## Details`. Capture the pair only after every
+intended file and review fix is committed and the worktree is clean, recording
+the final local `HEAD` OID first.
 
 - Resolve and record the base commit OID before capture — `BASE_REMOTE/BASE_REF`
-  is a moving reference, and a base that advances mid-capture would put a
-  different commit behind the **Before** image than the PR is measured against.
-  Render that immutable OID in an isolated worktree for **Before** and the
-  recorded `HEAD` for **After**. Never simulate the old state with DOM edits,
-  stale deployments, or remembered screenshots.
+  moves, and a base advancing mid-capture puts a different commit behind
+  **Before** than the PR is measured against. Render that immutable OID in an
+  isolated worktree for **Before** and the recorded `HEAD` for **After**;
+  never simulate the old state with DOM edits, stale deployments, or
+  remembered screenshots.
 - Use the same route, viewport, theme, auth state, and deterministic fixture
-  data for both images. Crop to the product surface. Do not expose secrets,
+  data for both images. Crop to the product surface; expose no secrets,
   personal data, account identifiers, or unrelated browser chrome.
 - Cover each materially different route or state the PR changes. A new route
-  still needs a pair: the base route's prior result, such as its 404 or nearest
-  parent state, against the new route at the recorded `HEAD`.
-- Name the route or state, both recorded commit OIDs, the viewport, and the fixture or
-  data source. Label the images **Before** and **After** side by side in a
+  still needs a pair: the base route's prior result (its 404 or nearest parent
+  state) against the new route at the recorded `HEAD`.
+- Name the route or state, both recorded OIDs, the viewport, and the fixture
+  or data source. Label the images **Before** and **After** side by side in a
   Markdown table.
 
-Store review images outside the repository. Never add them to the product
+Store review images outside the repository; never add them to the product
 commit unless the repository already owns screenshot fixtures for that purpose.
-
-Upload through the authenticated GitHub web description editor: `gh` and the
-public Issues API cannot attach local images. Then reopen the description and
-verify both attachment URLs are present, both images render, and the labels map
-to the correct revisions. A local image path, broken Markdown, or an unverified
-upload is not visual evidence.
+Upload through the authenticated GitHub web description editor (`gh` and the
+public Issues API cannot attach local images), then reopen the description and
+verify both attachment URLs render and the labels map to the correct revisions.
+A local path, broken Markdown, or an unverified upload is not visual evidence.
 
 If either revision cannot be rendered, or the authenticated attachment surface
 is unavailable, stop before publication and report the blocker; do not call the

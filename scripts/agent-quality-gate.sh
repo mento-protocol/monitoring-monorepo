@@ -3158,16 +3158,12 @@ while IFS= read -r path; do
     # The babysit repo hook gates PR readiness for every babysit surface, and
     # its fork refusal is fail-closed. `bash -n` above only parses it, so wire
     # the behavioural suite to both the subject and the test: a hook-only edit
-    # must not pass the gate without exercising the refusal.
+    # must not pass the gate without exercising the refusal. Unconditional on
+    # purpose — with the suite file missing, `bash` exits 127 and the gate
+    # still fails closed, and the Node mapping engine (whose guards see only
+    # the changed path) can mirror this arm exactly.
     .claude/babysit-pr.sh|.claude/babysit-pr.test.sh)
-      if [[ -f .claude/babysit-pr.test.sh ]]; then
-        add_command "bash .claude/babysit-pr.test.sh" "babysit repo hook changed"
-      else
-        # Silently adding nothing would let a hook change ship without ever
-        # exercising the fork refusal — the same fail-open this gate refuses.
-        add_command "bash -c 'echo \"missing .claude/babysit-pr.test.sh; the babysit hook cannot change without its behavioural suite\" >&2; exit 1'" \
-          "babysit repo hook changed but its test is missing"
-      fi
+      add_command "bash .claude/babysit-pr.test.sh" "babysit repo hook changed"
       ;;
   esac
   case "$path" in
