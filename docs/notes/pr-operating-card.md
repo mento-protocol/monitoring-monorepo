@@ -145,7 +145,16 @@ even when you never open an authority.
    out of `agent-active` and into review. Authority:
    [`agent-issue-workflow.md`](agent-issue-workflow.md).
 
-   **Identify the target PR before anything else**, in this precedence: a
+   **Resolve the repository identities first.** Before any PR lookup, resolve
+   the checkout repository and its upstream base —
+   `gh repo view --json nameWithOwner,parent` locally, the session-attached
+   repository metadata in a Claude cloud session. `CURRENT_REPO` is the
+   checkout's own repository; a fork checkout uses its parent as `BASE_REPO`,
+   a non-fork uses itself as both. Without this resolution a fork checkout
+   cannot be told apart from its parent, and the lookup or creation below can
+   bind to the wrong repository.
+
+   **Then identify the target PR**, in this precedence: a
    user-supplied URL is used verbatim and its owner/repository overrides the
    inferred base; a bare number binds to `BASE_REPO`; with no explicit target,
    list open PRs on `BASE_REPO` for the current branch, filter by

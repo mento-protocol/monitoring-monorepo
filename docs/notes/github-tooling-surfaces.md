@@ -189,10 +189,20 @@ polled. Do not foreground-poll and never sleep-poll.
    fork heads (`.claude/babysit-pr.sh`) cannot run here, so establish
    `isCrossRepository` from the PR payload before the first repo command and
    refuse the same way rather than proceeding unguarded.
-5. Blocker handling, checkout binding, reply shapes, and Codex-request
-   discipline are identical to the local path — see
-   [`pr-operating-card.md`](pr-operating-card.md) steps 6 and 7 — using the MCP
-   write tools named above in place of `gh`. Reply before resolving, always.
+5. Blocker handling, reply shapes, and Codex-request discipline are identical
+   to the local path — see [`pr-operating-card.md`](pr-operating-card.md)
+   steps 6 and 7 — using the MCP write tools named above in place of `gh`.
+   Reply before resolving, always. **Checkout binding carries a cloud
+   exception**: the card's canonical-`origin` requirement cannot hold here,
+   because a Claude cloud `origin` is a credential-proxy URL, not a canonical
+   GitHub URL. Bind by content instead — for a same-repository target,
+   `headRepository.nameWithOwner` must equal the session-attached repository;
+   local `git rev-parse HEAD` must equal the MCP-resolved `headRefOid` before
+   editing; the verified proxy `origin` serves as both `HEAD_REMOTE` and
+   `BASE_REMOTE`; and the post-push guard re-resolves with
+   `pull_request_read` method `get` in place of `gh pr view` and requires the
+   returned `headRefOid` to equal local `HEAD`. Every other binding rule
+   (clean worktree, explicit refspec, no force-push) applies unchanged.
 6. Label any all-clear **MCP-emulated**, never probe-verified. It is a status
    report, not a terminal state: keep the step-2 loop armed, name the gates the
    sweep could not verify as unverified rather than clear, and hand the final
