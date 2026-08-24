@@ -78,7 +78,7 @@ export const PROBES =
 /** The shared V8 import parser both this check and the gate ask for imports. */
 export const STATIC_IMPORTS = "scripts/lib/static-imports.mjs";
 
-/** The sibling module that lifts the gate's classifier out and re-runs it. */
+/** The sibling module that asks the mapping engine how the gate classifies a manifest change. */
 export const GATE_PROBE =
   "scripts/sentry/ci-wiring/check-sentry-suites-in-ci-gate-probe.mjs";
 
@@ -90,16 +90,13 @@ export const GATE_PROBE_TESTS =
 export const GATE_EXTRACT =
   "scripts/sentry/ci-wiring/check-sentry-suites-in-ci-gate-extract.mjs";
 
-// The gate probe owns the gate file it reads; re-exported here so the tests
-// keep importing every probe from one façade.
+// Re-exported here so the tests keep importing every probe from one façade.
 export { bashFunctionSource } from "./check-sentry-suites-in-ci-gate-extract.mjs";
 export {
-  GATE,
   GATE_CLASSIFIER,
+  GATE_CLASSIFIER_PATH,
   gateClassifications,
-  GATE_PATH,
   GATE_ROOT_PACKAGE_JSON_CLASSES,
-  inputRedirections,
 } from "./check-sentry-suites-in-ci-gate-probe.mjs";
 
 // A throw here is the intended failure mode for a malformed workflow.

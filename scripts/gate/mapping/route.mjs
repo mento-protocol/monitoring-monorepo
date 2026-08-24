@@ -1,9 +1,9 @@
 /**
  * Walk the routing table over a changed-path set and build the command plan.
  *
- * This is the control flow the gate's thirteen `case` statements express, run
- * as data instead. The rules it has to keep are the ones D5a's table made
- * explicit and the equality test pins:
+ * This is the control flow the gate's thirteen `case` statements used to
+ * express, run as data instead. The rules it has to keep are the ones D5a's
+ * table made explicit:
  *
  *   - Every GROUP runs for every path. Groups do not shadow one another.
  *   - Within a group the FIRST matching arm wins and no later arm in that group
@@ -21,7 +21,7 @@
  * still exit 0.
  */
 
-import { PATH_TOKEN } from "../routing-table/gate-arms.mjs";
+import { PATH_TOKEN } from "../routing-table/schema.mjs";
 import { casePatternToRegExp } from "../routing-table/pattern.mjs";
 import { shellQuote } from "./shell-quote.mjs";
 import * as verbs from "./verbs.mjs";

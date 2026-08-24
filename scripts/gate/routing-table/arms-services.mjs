@@ -5,9 +5,10 @@
  * directory should import.
  *
  * ORDER IS ROUTING. Arms are first-match within their group, so an arm's index
- * IS its precedence — moving one up or down changes what the gate schedules.
- * Nothing about a diff will tell you that; `gate-equality.test.mjs`, which
- * compares this table against the gate's live `case` arms, will.
+ * IS its precedence — moving one up or down changes what the gate schedules,
+ * and nothing about the diff will tell you that. The group order this file's
+ * arms land in is asserted by `routing-table.test.mjs` against a written-out
+ * list, for the same reason.
  */
 
 /**

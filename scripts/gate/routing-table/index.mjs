@@ -112,8 +112,8 @@ export const ROUTING_GROUPS = deepFreeze([
 /**
  * The same table reduced to the form routing actually depends on: patterns,
  * verbs, arguments, guards and order, with every `why`, `pairing` and
- * `allowStale` dropped. This is what the equality test compares against the
- * gate's live `case` arms.
+ * `allowStale` dropped. This is the form `scripts/gate/mapping/route.mjs`
+ * walks, and the form the suite's order and verb pins read.
  */
 export const ROUTING_PLAN = deepFreeze(normalizeGroups(ROUTING_GROUPS));
 
