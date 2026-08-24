@@ -1024,6 +1024,17 @@ async function main() {
       appendFileSync(progressFile, JSON.stringify({ address, status }) + "\n");
       return;
     }
+    // Body-sourced quota (no response header has ever reported a number) only
+    // refreshes via the periodic /subscription/intel-usage poll below, so
+    // `quota.remaining` can otherwise sit stale for up to INTEL_USAGE_EVERY
+    // requests while the floor check keeps comparing against it. Decrement it
+    // locally on every 200-with-data lookup — each one consumed an Intel
+    // Label datapoint on Arkham's side regardless of our own quality gate —
+    // so the floor check stays live between polls. Once headers appear,
+    // noteQuotaHeaders() takes over per-request and this is a no-op.
+    if (!quota.fromHeaders && quota.remaining !== null) {
+      quota.remaining -= 1;
+    }
     const entry = toAddressEntry(data);
     if (!entry) {
       // Quality gate failed. On a refresh this deliberately leaves the prior
@@ -1113,7 +1124,19 @@ async function main() {
         `  [${done}/${candidates.length}] attested=${attested} written=${written} skipExists=${newSkippedExists} skipChanged=${refreshSkippedChanged} null=${nullCount} errors=${errorCount} elapsed=${elapsed}s ${quotaLine()}`,
       );
     }
-    if (done % INTEL_USAGE_EVERY === 0) await logIntelUsage(`after ${done}`);
+    // Tighten the poll cadence near the floor while quota is body-sourced —
+    // the local per-address decrement above is a best-effort estimate (an
+    // unlabeled 404 may not consume a datapoint the same way), so refresh
+    // against the authoritative body more often once the estimate is close
+    // enough to the floor that a 500-request gap between real polls risks
+    // overshooting it.
+    const intelUsageEvery =
+      !quota.fromHeaders &&
+      quota.remaining !== null &&
+      quota.remaining - quotaFloor < 500
+        ? 100
+        : INTEL_USAGE_EVERY;
+    if (done % intelUsageEvery === 0) await logIntelUsage(`after ${done}`);
     if (i < candidates.length - 1) await sleep(REQ_SPACING_MS);
   }
 
