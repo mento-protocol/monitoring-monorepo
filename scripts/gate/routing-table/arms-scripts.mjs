@@ -4,11 +4,10 @@
  * schema, and the pairing lint, and it is the only module anything outside this
  * directory should import.
  *
- * ORDER IS ROUTING. Arms are first-match within their group, so an arm's index
- * IS its precedence — moving one up or down changes what the gate schedules,
- * and nothing about the diff will tell you that. The group order this file's
- * arms land in is asserted by `routing-table.test.mjs` against a written-out
- * list, for the same reason.
+ * ORDER IS ROUTING. Arms match first-to-last within a group, so an arm's index
+ * is its precedence: move one and the gate schedules something else. Nothing
+ * checks that. `routing-table.test.mjs` pins only the GROUP order, against a
+ * written-out list.
  */
 
 /**

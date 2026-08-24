@@ -174,13 +174,24 @@ test("the table routes a change to this directory", () => {
   }
 });
 
-test("turbo.json treats this directory as an input", () => {
-  const turbo = read("/turbo.json");
-  const occurrences = turbo.split("scripts/gate/routing-table/**").length - 1;
-  assert.ok(
-    occurrences >= 3,
-    `turbo.json names scripts/gate/routing-table/** ${occurrences} times; the gate's two files are named in three tasks and the table belongs beside them`,
-  );
+/** The Turbo tasks that carry the gate's own two files, and so must carry the table. */
+const TURBO_GATE_TASKS = ["build", "size-limit", "test:browser"];
+
+test("turbo.json lists this directory as an input of every gate task", () => {
+  // Parsed, and matched against the exact input string in the exact task's
+  // `inputs` array. Counting occurrences of the glob in the file text was the
+  // wrong question twice over: a match in an unrelated key or an unused task
+  // satisfied it, and a total says nothing about WHICH tasks list the input —
+  // which is the whole property. A task that drops the input stops rebuilding
+  // when the routing changes, and nothing else reds.
+  const turbo = JSON.parse(read("/turbo.json"));
+  const input = "$TURBO_ROOT$/scripts/gate/routing-table/**";
+  for (const task of TURBO_GATE_TASKS) {
+    assert.ok(
+      turbo.tasks?.[task]?.inputs?.includes(input),
+      `turbo task \`${task}\` does not list ${input} as an input, so it will not rebuild when the routing table changes`,
+    );
+  }
 });
 
 test("scripts/AGENTS.md records the pin", () => {
