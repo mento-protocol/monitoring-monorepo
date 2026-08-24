@@ -355,12 +355,17 @@ timestamp. When current exposure exists, also require an sUSDS holding whose
 `susdsEarnedYieldUsd` as `null` or finite zero and do not require an sUSDS
 holding or `earnedYieldAsOf`.
 
-Return the checked fields as evidence. Treat a missing field, non-finite value,
-unexpected signal state, non-null error, or non-200 response as a failed
-production verification.
+Return the checked fields and the two derived signal-presence booleans as
+evidence. Treat a field required by the applicable signal branch as missing or
+non-finite, an unexpected signal state, a non-null error, or a non-200 response
+as a failed production verification. Do not fail a clean state because its
+optional sUSDS fields are absent.
 
-For an sUSDS sampler change, also verify that `/revenue` renders reserve
-actuals without pending, unavailable, or stale labels.
+For an sUSDS sampler change with current exposure or a nonzero historical
+signal, also verify that `/revenue` renders sUSDS reserve actuals without
+pending, unavailable, or stale labels. When neither signal exists, verify that
+the absent sUSDS history does not add one of those labels; do not require a
+current sUSDS actual.
 
 Then navigate to the affected page and run the targeted UI checks. List console
 messages of type `error` after navigation. Use the target URL plus a focus hint

@@ -181,8 +181,11 @@ After promotion:
    holding with finite `earnedYieldUsd`. A clean state without either signal
    may return `susdsEarnedYieldUsd: null` or finite zero and does not require
    an sUSDS holding or `earnedYieldAsOf`.
-8. The dashboard `/revenue` page shows current sUSDS reserve actuals without a
-   pending, unavailable, or stale label. The browser console has no errors.
+8. If current sUSDS exposure or a nonzero historical signal exists, the
+   dashboard `/revenue` page shows sUSDS reserve actuals without a pending,
+   unavailable, or stale label. In a clean state without either signal, absent
+   sUSDS history does not add one of those labels and no current sUSDS actual is
+   required. The browser console has no errors.
 
 The manual proof that motivated this gate was completed for deployment
 `6bed96e` on 2026-07-03 after adding an archive-capable `ENVIO_RPC_URL_1` in
