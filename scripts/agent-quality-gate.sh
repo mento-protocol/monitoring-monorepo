@@ -659,6 +659,29 @@ gate_lock_claim_tmp=""
 # obligation before the evidence goes — never after, because "after" is a
 # window a signal can land in. Same failure direction as the rest of this path:
 # condemning a run with nothing left alive costs one drain that finds nothing.
+gate_lock_record_is_readable_regular() {
+  local record="$1"
+  [[ ! -L "$record" && -f "$record" && -r "$record" ]]
+}
+
+gate_lock_refuse_unsafe_owner_record() {
+  local record="$1"
+  echo "error: the quality-gate owner record at ${record} is not a readable regular file." >&2
+  echo "The record was retained. Nothing has been executed." >&2
+  gate_report_coordinated_no_work_failure 2 "legacy owner recovery" \
+    "No mapped command ran in this request"
+  exit 2
+}
+
+gate_lock_require_safe_existing_owner_record() {
+  local record="$1"
+  gate_lock_record_is_readable_regular "$record" && return 0
+  # A legitimate owner can release the lock between the existence and type
+  # checks. A dangling symlink remains unsafe because -L stays true.
+  [[ ! -e "$record" && ! -L "$record" ]] && return 0
+  gate_lock_refuse_unsafe_owner_record "$record"
+}
+
 gate_lock_condemn_before_discard() {
   local record="$1"
   local record_token_value
@@ -673,7 +696,10 @@ gate_lock_recover_hidden_record() {
   local remnant pid host start recovered=1
   for remnant in "$lock"/owner.reclaiming.*; do
     [[ -e "$remnant" || -L "$remnant" ]] || continue
-    if [[ -L "$remnant" || ! -f "$remnant" || ! -r "$remnant" ]]; then
+    if ! gate_lock_record_is_readable_regular "$remnant"; then
+      # Another waiter can restore or remove this remnant after the glob saw
+      # it. Treat that release race as absent, while retaining dangling links.
+      [[ ! -e "$remnant" && ! -L "$remnant" ]] && continue
       # A shared root can expose another user's mode-0600 record. Empty field
       # reads are not evidence that its holder is dead. Unknown file types are
       # equally unsafe because legitimate remnants are regular files.
@@ -1172,9 +1198,17 @@ gate_lock_record_still_stale() {
   local decided_token="$3"
   local decided_start="$4"
   local current_pid current_token_value current_start
+  if ! gate_lock_record_is_readable_regular "$record"; then
+    [[ ! -e "$record" && ! -L "$record" ]] && return 3
+    return 2
+  fi
   current_pid="$(gate_lock_field_from_file "$record" pid)"
   current_token_value="$(gate_lock_field_from_file "$record" token)"
   current_start="$(gate_lock_field_from_file "$record" start_utc)"
+  if ! gate_lock_record_is_readable_regular "$record"; then
+    [[ ! -e "$record" && ! -L "$record" ]] && return 3
+    return 2
+  fi
   [[ "$current_pid" == "$decided_pid" ]] || return 1
   [[ "$current_token_value" == "$decided_token" ]] || return 1
   [[ "$current_start" == "$decided_start" ]] || return 1
@@ -1886,7 +1920,7 @@ release_gate_run_lock_legacy() {
 acquire_gate_run_lock_legacy() {
   local root lock owner_pid owner_host owner_worktree owner_token_value owner_start
   local stale_reason owner_state nap remaining now_millis
-  local coordinator_join_status
+  local coordinator_join_status owner_record taken_record record_status
   # Elapsed time comes from the clock, never from adding up requested sleeps.
   # A shell that is descheduled or SIGSTOPped sleeps far longer than it asked
   # to, and counting the request would let a run outlive the budget it printed
@@ -1924,6 +1958,7 @@ acquire_gate_run_lock_legacy() {
     exit 2
   fi
   lock="$root/run.lock"
+  owner_record="$lock/owner"
   gate_lock_root_dir="$root"
   this_host="$(uname -n)"
   wait_started_at="$(gate_wall_millis)"
@@ -1965,20 +2000,24 @@ acquire_gate_run_lock_legacy() {
       echo "Another run recorded ownership of ${lock} first; queueing behind it." >&2
     fi
 
+    gate_lock_require_safe_existing_owner_record "$owner_record"
     owner_pid="$(gate_lock_owner_field "$lock" pid)"
     owner_host="$(gate_lock_owner_field "$lock" host)"
     owner_worktree="$(gate_lock_owner_field "$lock" worktree)"
     owner_token_value="$(gate_lock_owner_field "$lock" token)"
     owner_start="$(gate_lock_owner_field "$lock" start_utc)"
+    gate_lock_require_safe_existing_owner_record "$owner_record"
     if [[ -z "$owner_token_value" ]]; then
       # Before believing there is no holder, read the remnants of any reclaim
       # that was killed mid-take. One of them may be the holder's own record.
       if gate_lock_recover_hidden_record "$lock" "$this_host"; then
+        gate_lock_require_safe_existing_owner_record "$owner_record"
         owner_pid="$(gate_lock_owner_field "$lock" pid)"
         owner_host="$(gate_lock_owner_field "$lock" host)"
         owner_worktree="$(gate_lock_owner_field "$lock" worktree)"
         owner_token_value="$(gate_lock_owner_field "$lock" token)"
         owner_start="$(gate_lock_owner_field "$lock" start_utc)"
+        gate_lock_require_safe_existing_owner_record "$owner_record"
       fi
     fi
 
@@ -2022,11 +2061,13 @@ acquire_gate_run_lock_legacy() {
       # right here, because a record in flight under a remnant means an empty
       # canonical path is not evidence that the lock is free. If that restores
       # a live holder, this verdict is void and we go back to waiting.
+      gate_lock_require_safe_existing_owner_record "$owner_record"
       if gate_lock_recover_hidden_record "$lock" "$this_host"; then
+        gate_lock_require_safe_existing_owner_record "$owner_record"
         owner_pid="$(gate_lock_owner_field "$lock" pid)"
         owner_host="$(gate_lock_owner_field "$lock" host)"
         owner_worktree="$(gate_lock_owner_field "$lock" worktree)"
-      elif [[ ! -e "$lock/owner" ]]; then
+      elif [[ ! -e "$owner_record" && ! -L "$owner_record" ]]; then
         # Nothing in the way: publishing the record is the whole contest.
         # Whoever links it into place first holds the lock; everyone else,
         # including the creator that stalled, finds their publish refused.
@@ -2049,11 +2090,20 @@ acquire_gate_run_lock_legacy() {
         # PID, so cleanup can never race the rename, nor name another run.
         gate_lock_reclaim_origin="$lock/owner"
         gate_lock_reclaim_tmp="${lock}/owner.reclaiming.$$"
-        if mv "$lock/owner" "$gate_lock_reclaim_tmp" 2>/dev/null; then
+        gate_lock_require_safe_existing_owner_record "$owner_record"
+        if mv "$owner_record" "$gate_lock_reclaim_tmp" 2>/dev/null; then
           gate_lock_test_crash after-take
           gate_lock_test_delay "${AGENT_QUALITY_GATE_LOCK_TAKEN_DELAY_SECONDS:-}"
-          if gate_lock_record_still_stale \
-            "$gate_lock_reclaim_tmp" "$owner_pid" "$owner_token_value" "$owner_start"; then
+          taken_record="$gate_lock_reclaim_tmp"
+          if [[ ! -e "$taken_record" && ! -L "$taken_record" ]]; then
+            gate_lock_reclaim_tmp=""
+            gate_lock_reclaim_origin=""
+          elif ! gate_lock_record_is_readable_regular "$taken_record"; then
+            gate_lock_reclaim_tmp=""
+            gate_lock_reclaim_origin=""
+            gate_lock_refuse_unsafe_owner_record "$taken_record"
+          elif gate_lock_record_still_stale \
+            "$taken_record" "$owner_pid" "$owner_token_value" "$owner_start"; then
             echo "Gate run lock at ${lock} is stale (${stale_reason}); reclaiming it." >&2
             # The holder is gone, but a gate killed mid-command leaves that
             # command running. Write down whose it was — on disk, before taking
@@ -2080,11 +2130,21 @@ acquire_gate_run_lock_legacy() {
               return 0
             fi
           else
-            # We took a record that is not the one we judged — another run
-            # reclaimed the lock while we decided. Put it back and wait. If it
-            # could not be put back or written down it stays where it is, named
-            # in the output, for the next run's hidden-record recovery.
-            restore_gate_lock_record || true
+            record_status=$?
+            if [[ "$record_status" -eq 2 ]]; then
+              gate_lock_reclaim_tmp=""
+              gate_lock_reclaim_origin=""
+              gate_lock_refuse_unsafe_owner_record "$taken_record"
+            elif [[ "$record_status" -eq 3 ]]; then
+              gate_lock_reclaim_tmp=""
+              gate_lock_reclaim_origin=""
+            else
+              # We took a record that is not the one we judged — another run
+              # reclaimed the lock while we decided. Put it back and wait. If
+              # it could not be put back or written down it stays where it is,
+              # named in the output, for the next hidden-record recovery.
+              restore_gate_lock_record || true
+            fi
           fi
         fi
         gate_lock_reclaim_tmp=""

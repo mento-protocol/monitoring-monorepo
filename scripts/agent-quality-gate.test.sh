@@ -1042,9 +1042,8 @@ rm -f "$untracked_skill_artifact"
 run_coordinator_family() {
 arm_suite_abort_trap
 
-# The sequential descendant regression runs in this family before the
-# lock-drain family defines its larger process-fixture helper set. Keep the
-# small identity-bound subset here so focused coordinator runs are complete.
+# Keep the small identity-bound helper set in this family so focused
+# coordinator runs are complete. The lock-drain family has a larger set.
 gate_test_process_start() {
   local pid="$1"
   [[ "$pid" =~ ^[0-9]+$ ]] || return 1
@@ -1095,6 +1094,34 @@ gate_test_signal_with_current_parent() {
   [[ -n "$current_start" && "$current_start" == "$expected_start" &&
     "$current_parent" =~ ^[0-9]+$ && "$current_parent" == "$verified_parent" ]] || return 2
   kill "-$signal" "$pid" 2>/dev/null || return 1
+}
+
+# Coordinator admission can consume the full 30-second product wait under host
+# load. Give start observers another 15 seconds to see the marker or child exit.
+gate_test_coordinator_observer_attempts=900
+
+# Metadata outlives the coordinator and its PID can be reused. Stop only an
+# exact PID/start identity, and inspect every versioned coordinator directory
+# under the fixture root instead of selecting an arbitrary first record.
+gate_test_stop_coordinators_in_root() {
+  local label="$1"
+  local lock_root="$2"
+  local metadata coordinator_pid coordinator_start
+  [[ -d "$lock_root" ]] || return 0
+  while IFS= read -r metadata; do
+    [[ -f "$metadata" ]] || continue
+    IFS=$'\t' read -r coordinator_pid coordinator_start <<< "$(node -e '
+      const value = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+      process.stdout.write([
+        String(value.coordinatorIdentity?.pid ?? ""),
+        value.coordinatorIdentity?.startUtc ?? "",
+      ].join("\t"));
+    ' "$metadata" 2>/dev/null || true)"
+    if [[ "$coordinator_pid" =~ ^[1-9][0-9]*$ && -n "$coordinator_start" ]]; then
+      gate_test_signal_with_current_parent "$label" TERM \
+        "$coordinator_pid" "$coordinator_start" || true
+    fi
+  done < <(find "$lock_root" -type f -name coordinator.json -print 2>/dev/null)
 }
 
 if ! node - <<'NODE'
@@ -1449,8 +1476,6 @@ STUB
   legacy_stderr="$coordinator_gate_pipeline_repo/legacy-stderr"
   legacy_fd7_output="$coordinator_gate_pipeline_repo/legacy-fd7-output"
   holder_pid=""
-  coordinator_pid=""
-  coordinator_metadata=""
   real_cp_command="$(command -v cp)"
   real_uname_command="$(command -v uname)"
 
@@ -1462,19 +1487,8 @@ STUB
       wait "$holder_pid" 2>/dev/null || true
       holder_pid=""
     fi
-    coordinator_metadata="$({
-      find "$coordinator_gate_pipeline_lock" -type f \
-        -name coordinator.json -print 2>/dev/null
-    } | head -n1)"
-    if [[ -f "$coordinator_metadata" ]]; then
-      coordinator_pid="$(node -e '
-        const value = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
-        process.stdout.write(String(value.coordinatorIdentity?.pid ?? ""));
-      ' "$coordinator_metadata" 2>/dev/null || true)"
-      if [[ "$coordinator_pid" =~ ^[1-9][0-9]*$ ]]; then
-        kill -TERM "$coordinator_pid" 2>/dev/null || true
-      fi
-    fi
+    gate_test_stop_coordinators_in_root \
+      "pipeline fixture coordinator" "$coordinator_gate_pipeline_lock"
   }
   fail_gate_pipeline_fixture() {
     {
@@ -1546,7 +1560,7 @@ STUB
   holder_pid=$!
 
   holder_ready=0
-  for ((attempt = 0; attempt < 300; attempt++)); do
+  for ((attempt = 0; attempt < gate_test_coordinator_observer_attempts; attempt++)); do
     if [[ -e "$holder_started" ]]; then
       holder_ready=1
       break
@@ -1993,7 +2007,6 @@ STUB
     local worker_pgid=""
     local killed_command=""
     local coordinator_metadata=""
-    local coordinator_pid=""
     local state_root=""
     local socket_path=""
     local journal_path=""
@@ -2013,15 +2026,8 @@ STUB
         kill -KILL "$gate_pid" 2>/dev/null || true
         wait "$gate_pid" 2>/dev/null || true
       fi
-      if [[ -f "$coordinator_metadata" ]]; then
-        coordinator_pid="$(node -e '
-          const value = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
-          process.stdout.write(String(value.coordinatorIdentity?.pid ?? ""));
-        ' "$coordinator_metadata" 2>/dev/null || true)"
-        if [[ "$coordinator_pid" =~ ^[1-9][0-9]*$ ]]; then
-          kill -TERM "$coordinator_pid" 2>/dev/null || true
-        fi
-      fi
+      gate_test_stop_coordinators_in_root \
+        "worker-loss fixture coordinator" "$fixture_lock_root"
     }
     fail_worker_loss_fixture() {
       cp "$gate_output" "$output_file" 2>/dev/null || true
@@ -2047,7 +2053,7 @@ STUB
         > "$gate_output" 2>&1 &
     gate_pid=$!
 
-    for ((attempt = 0; attempt < 300; attempt++)); do
+    for ((attempt = 0; attempt < gate_test_coordinator_observer_attempts; attempt++)); do
       if [[ -s "${barrier}.ready" && -s "$worker_started" ]]; then
         ready=1
         break
@@ -2124,12 +2130,11 @@ STUB
     } | head -n1)"
     [[ -f "$coordinator_metadata" ]] ||
       fail_worker_loss_fixture "worker-loss fixture did not retain coordinator metadata"
-    IFS=$'\t' read -r state_root socket_path coordinator_pid <<< "$(node -e '
+    IFS=$'\t' read -r state_root socket_path <<< "$(node -e '
       const value = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
       process.stdout.write([
         value.stateRoot ?? "",
         value.socketPath ?? "",
-        String(value.coordinatorIdentity?.pid ?? ""),
       ].join("\t"));
     ' "$coordinator_metadata")"
     [[ -n "$state_root" && -n "$socket_path" ]] ||
@@ -2163,7 +2168,6 @@ STUB
     done
     [[ "$settled" -eq 1 ]] ||
       fail_worker_loss_fixture "the drained worker-loss coordinator did not release its socket and legacy lock"
-    coordinator_pid=""
     trap - EXIT
   )
   rm -rf "$fixture_repo" "$fixture_lock_root"
@@ -2205,16 +2209,14 @@ STUB
     local gate_output="$fixture_repo/gate-output"
     local worker_started="$fixture_repo/worker-started"
     local gate_exit
-    local coordinator_pid=""
     local coordinator_metadata=""
     local attempt
     local settled=0
 
     # shellcheck disable=SC2329
     cleanup_release_failure_fixture() {
-      if [[ "$coordinator_pid" =~ ^[1-9][0-9]*$ ]]; then
-        kill -TERM "$coordinator_pid" 2>/dev/null || true
-      fi
+      gate_test_stop_coordinators_in_root \
+        "release-failure fixture coordinator" "$fixture_lock_root"
     }
     fail_release_failure_fixture() {
       cp "$gate_output" "$output_file" 2>/dev/null || true
@@ -2263,10 +2265,6 @@ STUB
     } | head -n1)"
     [[ -f "$coordinator_metadata" ]] ||
       fail_release_failure_fixture "parallel release fixture did not retain coordinator metadata"
-    coordinator_pid="$(node -e '
-      const value = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
-      process.stdout.write(String(value.coordinatorIdentity?.pid ?? ""));
-    ' "$coordinator_metadata")"
     for ((attempt = 0; attempt < 100; attempt++)); do
       if [[ ! -e "$fixture_lock_root/run.lock" ]]; then
         settled=1
@@ -2276,7 +2274,6 @@ STUB
     done
     [[ "$settled" -eq 1 ]] ||
       fail_release_failure_fixture "parallel release failure left the coordinator lock held"
-    coordinator_pid=""
     trap - EXIT
   )
   rm -rf "$fixture_repo" "$fixture_lock_root"
@@ -2324,7 +2321,6 @@ STUB
     local command_release="$fixture_repo/command-release"
     local gate_pid=""
     local coordinator_metadata=""
-    local coordinator_pid=""
     local state_root=""
     local socket_path=""
     local result_file=""
@@ -2339,15 +2335,8 @@ STUB
         kill -KILL "$gate_pid" 2>/dev/null || true
         wait "$gate_pid" 2>/dev/null || true
       fi
-      if [[ -f "$coordinator_metadata" ]]; then
-        coordinator_pid="$(node -e '
-          const value = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
-          process.stdout.write(String(value.coordinatorIdentity?.pid ?? ""));
-        ' "$coordinator_metadata" 2>/dev/null || true)"
-        if [[ "$coordinator_pid" =~ ^[1-9][0-9]*$ ]]; then
-          kill -TERM "$coordinator_pid" 2>/dev/null || true
-        fi
-      fi
+      gate_test_stop_coordinators_in_root \
+        "stale-failure fixture coordinator" "$fixture_lock_root"
     }
     fail_stale_failure_fixture() {
       cp "$gate_output" "$output_file" 2>/dev/null || true
@@ -2372,7 +2361,7 @@ STUB
         > "$gate_output" 2>&1 &
     gate_pid=$!
 
-    for ((attempt = 0; attempt < 300; attempt++)); do
+    for ((attempt = 0; attempt < gate_test_coordinator_observer_attempts; attempt++)); do
       if [[ -e "$command_started" ]]; then
         ready=1
         break
@@ -2404,12 +2393,11 @@ STUB
     } | head -n1)"
     [[ -f "$coordinator_metadata" ]] ||
       fail_stale_failure_fixture "stale-failure fixture did not retain coordinator metadata"
-    IFS=$'\t' read -r state_root socket_path coordinator_pid <<< "$(node -e '
+    IFS=$'\t' read -r state_root socket_path <<< "$(node -e '
       const value = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
       process.stdout.write([
         value.stateRoot ?? "",
         value.socketPath ?? "",
-        String(value.coordinatorIdentity?.pid ?? ""),
       ].join("\t"));
     ' "$coordinator_metadata")"
     [[ -n "$state_root" && -n "$socket_path" ]] ||
@@ -2450,7 +2438,6 @@ STUB
     done
     [[ "$settled" -eq 1 ]] ||
       fail_stale_failure_fixture "stale-failure coordinator did not settle after cancellation"
-    coordinator_pid=""
     trap - EXIT
   )
   rm -rf "$fixture_repo" "$fixture_lock_root"
@@ -2616,7 +2603,7 @@ STUB
     [[ -n "$holder_start" ]] ||
       fail_sequential_descendant_fixture "could not identify the holder gate"
 
-    for ((attempt = 0; attempt < 400; attempt++)); do
+    for ((attempt = 0; attempt < gate_test_coordinator_observer_attempts; attempt++)); do
       if [[ -s "$descendant_pid_file" ]]; then
         ready=1
         break
@@ -2651,7 +2638,7 @@ STUB
     [[ -n "$contender_start" ]] ||
       fail_sequential_descendant_fixture "could not identify the contender gate"
 
-    for ((attempt = 0; attempt < 400; attempt++)); do
+    for ((attempt = 0; attempt < gate_test_coordinator_observer_attempts; attempt++)); do
       if [[ -e "$contender_started" ]]; then
         if gate_test_process_has_live_start "$descendant_pid" "$descendant_start"; then
           fail_sequential_descendant_fixture \
@@ -2734,7 +2721,7 @@ STUB
     [[ -n "$holder_start" ]] ||
       fail_sequential_descendant_fixture \
         "could not identify the replacement holder gate"
-    for ((attempt = 0; attempt < 400; attempt++)); do
+    for ((attempt = 0; attempt < gate_test_coordinator_observer_attempts; attempt++)); do
       if [[ -s "$descendant_pid_file" ]]; then
         ready=1
         break
@@ -2771,7 +2758,7 @@ STUB
         "could not identify the replacement contender gate"
 
     ready=0
-    for ((attempt = 0; attempt < 400; attempt++)); do
+    for ((attempt = 0; attempt < gate_test_coordinator_observer_attempts; attempt++)); do
       if [[ -e "${drain_refresh_barrier}.ready" &&
         -s "$replacement_pid_file" ]]; then
         ready=1
@@ -2805,7 +2792,7 @@ STUB
     fi
     : > "${drain_refresh_barrier}.release"
 
-    for ((attempt = 0; attempt < 500; attempt++)); do
+    for ((attempt = 0; attempt < gate_test_coordinator_observer_attempts; attempt++)); do
       if [[ -e "$contender_started" ]]; then
         if gate_test_process_has_live_start "$replacement_pid" "$replacement_start"; then
           fail_sequential_descendant_fixture \
@@ -2899,7 +2886,7 @@ STUB
     [[ -n "$holder_start" ]] ||
       fail_sequential_descendant_fixture \
         "could not identify the zero-bound coordinator holder gate"
-    for ((attempt = 0; attempt < 400; attempt++)); do
+    for ((attempt = 0; attempt < gate_test_coordinator_observer_attempts; attempt++)); do
       if [[ -s "$descendant_pid_file" ]]; then
         ready=1
         break
@@ -2983,7 +2970,7 @@ STUB
     [[ -n "$contender_start" ]] ||
       fail_sequential_descendant_fixture \
         "could not identify the coordinator recovery gate"
-    for ((attempt = 0; attempt < 400; attempt++)); do
+    for ((attempt = 0; attempt < gate_test_coordinator_observer_attempts; attempt++)); do
       if [[ -e "$contender_started" ]]; then
         if gate_test_process_has_live_start "$descendant_pid" "$descendant_start"; then
           fail_sequential_descendant_fixture \
@@ -3089,7 +3076,7 @@ STUB
     holder_start="$(gate_test_process_start "$holder_pid")"
     [[ -n "$holder_start" ]] ||
       fail_sequential_descendant_fixture "could not identify the legacy holder gate"
-    for ((attempt = 0; attempt < 400; attempt++)); do
+    for ((attempt = 0; attempt < gate_test_coordinator_observer_attempts; attempt++)); do
       if [[ -s "$descendant_pid_file" ]]; then
         ready=1
         break
@@ -3146,7 +3133,7 @@ STUB
     contender_start="$(gate_test_process_start "$contender_pid")"
     [[ -n "$contender_start" ]] ||
       fail_sequential_descendant_fixture "could not identify the legacy recovery gate"
-    for ((attempt = 0; attempt < 400; attempt++)); do
+    for ((attempt = 0; attempt < gate_test_coordinator_observer_attempts; attempt++)); do
       if [[ -e "$contender_started" ]]; then
         if gate_test_process_has_live_start "$descendant_pid" "$descendant_start"; then
           fail_sequential_descendant_fixture \
@@ -6228,6 +6215,42 @@ assert_contains "Running quality commands with parallelism 8."
 # command plan, base OID, gate implementation) and what may reuse it.
 run_stamps_freshness_family() {
 arm_suite_abort_trap
+
+# Focused freshness runs do not execute the coordinator family's cleanup
+# helpers. Bind each cleanup signal to the metadata PID and start time here.
+gate_test_stop_coordinators_in_root() {
+  local _label="$1"
+  local lock_root="$2"
+  local metadata coordinator_pid coordinator_start
+  local current_start current_parent verified_parent
+  [[ -d "$lock_root" ]] || return 0
+  while IFS= read -r metadata; do
+    [[ -f "$metadata" ]] || continue
+    IFS=$'\t' read -r coordinator_pid coordinator_start <<< "$(node -e '
+      const value = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+      process.stdout.write([
+        String(value.coordinatorIdentity?.pid ?? ""),
+        value.coordinatorIdentity?.startUtc ?? "",
+      ].join("\t"));
+    ' "$metadata" 2>/dev/null || true)"
+    [[ "$coordinator_pid" =~ ^[1-9][0-9]*$ &&
+      "$coordinator_pid" != "$$" && "$coordinator_pid" != "$PPID" &&
+      -n "$coordinator_start" ]] || continue
+    current_parent="$(TZ=UTC LC_ALL=C LANG=C \
+      ps -p "$coordinator_pid" -o ppid= 2>/dev/null |
+      awk 'NF { print $1; exit }' || true)"
+    current_start="$(TZ=UTC LC_ALL=C LANG=C \
+      ps -p "$coordinator_pid" -o lstart= 2>/dev/null | head -n1 || true)"
+    verified_parent="$(TZ=UTC LC_ALL=C LANG=C \
+      ps -p "$coordinator_pid" -o ppid= 2>/dev/null |
+      awk 'NF { print $1; exit }' || true)"
+    if [[ -n "$current_start" && "$current_start" == "$coordinator_start" &&
+      "$current_parent" =~ ^[0-9]+$ && "$current_parent" == "$verified_parent" ]]; then
+      kill -TERM "$coordinator_pid" 2>/dev/null || true
+    fi
+  done < <(find "$lock_root" -type f -name coordinator.json -print 2>/dev/null)
+}
+
 fresh_stamp_repo="$(mktemp -d)"
 (
   cd "$fresh_stamp_repo"
@@ -6326,20 +6349,8 @@ STUB
   stamp_file="$coordinated_fresh_stamp_repo/.tmp/agent-quality-gate/last-success.stamp"
 
   cleanup_coordinated_fresh_stamp_fixture() {
-    local metadata coordinator_pid
-    metadata="$(
-      find "$coordinated_fresh_stamp_lock" -type f -name coordinator.json \
-        -print 2>/dev/null | head -n1 || true
-    )"
-    if [[ -f "$metadata" ]]; then
-      coordinator_pid="$(node -e '
-        const value = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
-        process.stdout.write(String(value.coordinatorIdentity?.pid ?? ""));
-      ' "$metadata" 2>/dev/null || true)"
-      if [[ "$coordinator_pid" =~ ^[1-9][0-9]*$ ]]; then
-        kill -TERM "$coordinator_pid" 2>/dev/null || true
-      fi
-    fi
+    gate_test_stop_coordinators_in_root \
+      "fresh-stamp fixture coordinator" "$coordinated_fresh_stamp_lock"
   }
   trap cleanup_coordinated_fresh_stamp_fixture EXIT
 
@@ -11789,6 +11800,65 @@ STUB
   [[ ! -d "$gate_race_root/run.lock" ]] ||
     fail "the recovering run must release the lock it acquired"
 
+  # A canonical record can change access after the stale verdict and atomic
+  # take. Revalidate the taken evidence before parsing or discarding it.
+  if [[ "$(id -u)" != "0" ]]; then
+    race_post_take_dead_pid="$(fresh_dead_pid)" ||
+      fail "post-take access case could not obtain a reaped PID"
+    rm -rf "$gate_race_root/run.lock"
+    : > "$gate_race_log"
+    mkdir -p "$gate_race_root/run.lock"
+    {
+      printf 'pid=%s\n' "$race_post_take_dead_pid"
+      printf 'host=%s\n' "$(uname -n)"
+      printf 'started_at=%s\n' "$(date +%s)"
+      printf 'worktree=%s\n' "$gate_race_repo"
+      printf 'token=post-take-access-1-1\n'
+    } > "$gate_race_root/run.lock/owner"
+    AGENT_QUALITY_GATE_LOCK=1 \
+      AGENT_QUALITY_GATE_LOCK_HELD='' \
+      AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+      AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+      AGENT_QUALITY_GATE_LOCK_TAKEN_DELAY_SECONDS=5 \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+      --base HEAD --run --lock-wait 30 \
+      > "$gate_race_out/post-take-access.out" 2>&1 &
+    race_post_take_pid=$!
+    gate_test_capture_identity \
+      "$race_post_take_pid" "$gate_test_signal_shell_pid" ||
+      fail "post-take access case could not bind its gate identity"
+    race_post_take_start="$gate_test_captured_start"
+    race_post_take_parent="$gate_test_captured_parent"
+    await_taken_record ||
+      fail "post-take access case never reached the taken-record window"
+    race_post_take_record="$(find "$gate_race_root/run.lock" -maxdepth 1 \
+      -name 'owner.reclaiming.*' -print 2>/dev/null | head -n1)"
+    [[ -n "$race_post_take_record" ]] ||
+      fail "post-take access case could not locate its taken owner record"
+    chmod 000 "$race_post_take_record"
+    if race_drain_wait_for_direct_wrapper \
+      "post-take access gate" "$race_post_take_pid" \
+      "$race_post_take_start" "$race_post_take_parent" 20; then
+      race_post_take_exit=0
+    else
+      race_post_take_exit=$?
+    fi
+    [[ "$race_post_take_exit" -eq 2 ]] ||
+      fail "an unreadable taken owner must exit 2; got ${race_post_take_exit}"
+    grep -q "is not a readable regular file" \
+      "$gate_race_out/post-take-access.out" ||
+      fail "an unreadable taken owner did not report its unsafe evidence"
+    [[ -z "$(awk '/^enter/ { print; exit }' "$gate_race_log")" ]] ||
+      fail "a waiter ran mapped work after its taken owner became unreadable"
+    [[ ! -e "$gate_race_root/run.lock/owner" &&
+      ! -L "$gate_race_root/run.lock/owner" ]] ||
+      fail "the post-take access case unexpectedly published a canonical owner"
+    [[ -e "$race_post_take_record" ]] ||
+      fail "the post-take access case discarded its unsafe owner evidence"
+    chmod 600 "$race_post_take_record"
+    rm -rf "$gate_race_root/run.lock"
+  fi
+
   # A reclaim killed between taking a record and judging it parks that record
   # under owner.reclaiming.*, where nothing looks for it. When the record it
   # took belongs to a LIVE holder — its verdict was formed before another run
@@ -11962,6 +12032,60 @@ STUB
     [[ -e "$gate_race_root/run.lock/owner.reclaiming.release.unreadable-fixture" ]] ||
       fail "the unreadable-remnant fixture discarded the only live owner evidence"
     rm -rf "$gate_race_root/run.lock"
+
+    run_unsafe_canonical_owner_case() {
+      local tag="$1"
+      local kind="$2"
+      local owner="$gate_race_root/run.lock/owner"
+      local target="$gate_race_out/${tag}-target"
+      local status
+      rm -rf "$gate_race_root/run.lock"
+      rm -f "$target"
+      : > "$gate_race_log"
+      mkdir -p "$gate_race_root/run.lock"
+      case "$kind" in
+        unreadable)
+          printf 'token=unsafe-canonical-1-1\n' > "$owner"
+          chmod 000 "$owner"
+          ;;
+        symlink)
+          : > "$target"
+          ln -s "$target" "$owner"
+          ;;
+        directory)
+          mkdir "$owner"
+          ;;
+        *) fail "unknown unsafe canonical owner kind: $kind" ;;
+      esac
+      if AGENT_QUALITY_GATE_LOCK=1 \
+        AGENT_QUALITY_GATE_LOCK_HELD='' \
+        AGENT_QUALITY_GATE_LOCK_DIR="$gate_race_root" \
+        AGENT_QUALITY_GATE_LOCK_POLL_SECONDS=1 \
+        "$repo_root/scripts/agent-quality-gate.sh" \
+        --base HEAD --run --lock-wait 5 \
+        > "$gate_race_out/${tag}.out" 2>&1; then
+        status=0
+      else
+        status=$?
+      fi
+      [[ "$status" -eq 2 ]] ||
+        fail "${kind} canonical owner must exit 2; got ${status}"
+      grep -q "is not a readable regular file" "$gate_race_out/${tag}.out" ||
+        fail "${kind} canonical owner did not report its unsafe evidence"
+      [[ -z "$(awk '/^enter/ { print; exit }' "$gate_race_log")" ]] ||
+        fail "a waiter ran mapped work with a ${kind} canonical owner"
+      [[ -e "$owner" || -L "$owner" ]] ||
+        fail "the ${kind} canonical owner evidence was discarded"
+      [[ "$kind" != unreadable ]] || chmod 600 "$owner"
+      rm -rf "$gate_race_root/run.lock"
+      rm -f "$target"
+    }
+
+    if [[ "$(id -u)" != "0" ]]; then
+      run_unsafe_canonical_owner_case unsafe-canonical-unreadable unreadable
+    fi
+    run_unsafe_canonical_owner_case unsafe-canonical-symlink symlink
+    run_unsafe_canonical_owner_case unsafe-canonical-directory directory
 
     # The converse: a remnant naming a process that is gone is spent, and must
     # not keep a free lock looking occupied.

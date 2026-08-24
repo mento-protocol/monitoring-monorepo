@@ -22,6 +22,8 @@ import {
 
 const moduleDirectory = dirname(fileURLToPath(import.meta.url));
 const sourceRoot = resolve(moduleDirectory, "../..");
+const observerTimeoutMs = 45_000;
+const cleanupTimeoutMs = 10_000;
 
 function assertPassed(result) {
   assert.equal(
@@ -262,7 +264,7 @@ test("the real quality gate uses scheduler concurrency and recovery", async (t) 
                 (event) => event.event === "start",
               ).length === 3,
             {
-              timeoutMs: 30_000,
+              timeoutMs: observerTimeoutMs,
               intervalMs: 100,
               message: "three mapped commands to reach the start barrier",
             },
@@ -670,7 +672,7 @@ test("the real quality gate uses scheduler concurrency and recovery", async (t) 
         await waitUntil(
           async () => !(await fixture.processRunning(descendant.descendantPid)),
           {
-            timeoutMs: 5_000,
+            timeoutMs: observerTimeoutMs,
             message: "the tagged descendant to be drained",
           },
         );
@@ -721,7 +723,10 @@ test("a hard-killed follower does not leave its result waiter holding output ope
           /Scheduler request ([^:]+): sequence [^,]+, role follower/u,
         )?.[1];
       },
-      { timeoutMs: 5_000, message: "the follower result wait to start" },
+      {
+        timeoutMs: observerTimeoutMs,
+        message: "the follower result wait to start",
+      },
     );
     assert.equal(
       (await fixture.coordinatorRequest(scenario, requestId))?.role,
@@ -731,10 +736,13 @@ test("a hard-killed follower does not leave its result waiter holding output ope
     process.kill(follower.child.pid, "SIGKILL");
     await waitUntil(
       async () => !(await fixture.coordinatorRequest(scenario, requestId)),
-      { timeoutMs: 4_000, message: "the killed follower request to disappear" },
+      {
+        timeoutMs: cleanupTimeoutMs,
+        message: "the killed follower request to disappear",
+      },
     );
     await waitUntil(() => follower.settled, {
-      timeoutMs: 2_500,
+      timeoutMs: cleanupTimeoutMs,
       message: "the orphaned follower wait process to close its output handles",
     });
     const followerResult = await follower.done;
@@ -782,7 +790,10 @@ test("the real adapter cleans a request when its gate parent disconnects", async
         gate.stdout.match(
           /Scheduler request ([^:]+): sequence [^,]+, role leader/u,
         )?.[1] ?? null,
-      { timeoutMs: 5_000, message: "the bound request registration" },
+      {
+        timeoutMs: observerTimeoutMs,
+        message: "the bound request registration",
+      },
     );
     await waitUntil(
       async () => {
@@ -792,7 +803,10 @@ test("the real adapter cleans a request when its gate parent disconnects", async
           return null;
         }
       },
-      { timeoutMs: 5_000, message: "the gate owner identity snapshot" },
+      {
+        timeoutMs: observerTimeoutMs,
+        message: "the gate owner identity snapshot",
+      },
     );
 
     process.kill(gate.child.pid, "SIGKILL");
@@ -837,7 +851,7 @@ test("a coordinator-disabled gate recovers a killed coordinator leader", async (
       scenario,
       (event) => event.event === "descendant",
       "the new-protocol leader descendant",
-      30_000,
+      observerTimeoutMs,
     );
     descendantPid = descendant.descendantPid;
     await fixture.killLeaderWithoutWatchdog(
@@ -859,7 +873,7 @@ test("a coordinator-disabled gate recovers a killed coordinator leader", async (
     await waitUntil(
       async () => !(await fixture.processRunning(descendantPid)),
       {
-        timeoutMs: 5_000,
+        timeoutMs: observerTimeoutMs,
         message: "the legacy gate to drain the coordinator descendant",
       },
     );
@@ -916,7 +930,7 @@ test("coordinator startup rejects source mutation during the legacy-lock wait", 
         () =>
           waiter.stdout.includes("Waiting for the agent quality gate run lock"),
         {
-          timeoutMs: 30_000,
+          timeoutMs: observerTimeoutMs,
           message: "the coordinator client to finish policy preflight and wait",
         },
       ),

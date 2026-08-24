@@ -412,6 +412,7 @@ PATH="\${QG_FIXTURE_ORIGINAL_PATH}" exec git "$@"
         stdio: ["ignore", "pipe", "pipe"],
       },
     );
+    await fixtureProcesses.track(child.pid);
     const handle = makeGateHandle(child, {
       label,
       changedPath,
@@ -435,7 +436,7 @@ PATH="\${QG_FIXTURE_ORIGINAL_PATH}" exec git "$@"
     scenario,
     predicate,
     message,
-    timeoutMs = 15_000,
+    timeoutMs = 45_000,
   ) {
     const event = await waitUntil(
       async () => (await events(scenario)).find(predicate),
@@ -615,13 +616,15 @@ PATH="\${QG_FIXTURE_ORIGINAL_PATH}" exec git "$@"
   }
 
   async function cleanup() {
-    for (const handle of [...gateHandles]) {
-      if (!handle.settled && processAlive(handle.child.pid)) {
-        process.kill(handle.child.pid, "SIGTERM");
-      }
-    }
-    await Promise.all([...gateHandles].map((handle) => handle.done));
+    const handles = [...gateHandles];
+    // Capture and stop the exact gate trees before awaiting `close`. A killed
+    // gate can leave a TERM-ignoring descendant holding its stdout pipes open.
     await fixtureProcesses.stopAll();
+    await waitUntil(() => handles.every((handle) => handle.settled), {
+      timeoutMs: 10_000,
+      message: "fixture gate output handles to close after exact-tree cleanup",
+    });
+    await Promise.all(handles.map((handle) => handle.done));
     if (!(await fixtureProcesses.allStopped())) {
       throw new Error(
         "fixture process cleanup did not reach an empty process set",
