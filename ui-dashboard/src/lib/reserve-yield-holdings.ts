@@ -364,7 +364,8 @@ export function extractReserveYieldHoldings(
   const collateral = isRecord(reservePayload)
     ? reservePayload.collateral
     : null;
-  const assets = isRecord(collateral) ? asArray(collateral.assets) : [];
+  const assetsValue = isRecord(collateral) ? collateral.assets : null;
+  const assets: unknown[] = Array.isArray(assetsValue) ? assetsValue : [];
   const holdings: ReserveYieldHolding[] = [];
   let malformedCount = 0;
   let trackedAssetCount = 0;
@@ -372,8 +373,15 @@ export function extractReserveYieldHoldings(
   let stethAssetCount = 0;
 
   assets.forEach((assetValue, assetIndex) => {
-    if (!isRecord(assetValue)) return;
+    if (!isRecord(assetValue)) {
+      malformedCount += 1;
+      return;
+    }
     const symbol = stringField(assetValue.symbol, "");
+    if (symbol === "") {
+      malformedCount += 1;
+      return;
+    }
     if (!isTrackedYieldAsset(symbol)) return;
     trackedAssetCount += 1;
     if (isSusdsSymbol(symbol)) {
@@ -383,10 +391,16 @@ export function extractReserveYieldHoldings(
       stethAssetCount += 1;
     }
 
+    const sourcesValue = assetValue.sources;
+    const rawSources = asArray(sourcesValue);
+    if (!Array.isArray(sourcesValue)) {
+      malformedCount += 1;
+    }
     const sources: Record<string, unknown>[] = [];
-    for (const source of asArray(assetValue.sources)) {
+    for (const source of rawSources) {
       if (isRecord(source)) sources.push(source);
     }
+    malformedCount += rawSources.length - sources.length;
     const sourceHoldings: ReserveYieldHolding[] = [];
     const principalUsdBudget = principalUsdBudgetForAsset({
       asset: assetValue,
@@ -427,6 +441,7 @@ export function extractReserveYieldHoldings(
   return {
     holdings: aggregateHoldings(holdings),
     malformedCount,
+    classificationFailed: !Array.isArray(assetsValue),
     trackedAssetCount,
     susdsAssetCount,
     stethAssetCount,

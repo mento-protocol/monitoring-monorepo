@@ -13,6 +13,7 @@ export {
   summarizeProbe,
   summarizeReplayIntegrity,
   summarizeStatus,
+  summarizeSusdsLaunchBaseline,
   summarizeSusdsSamplerProgress,
 } from "./deploy-indexer-verify-analysis.mjs";
 
@@ -316,6 +317,15 @@ export function renderText(summary) {
     lines.push(`  ${table}: ${count}`);
   }
   lines.push("");
+  lines.push("sUSDS launch baseline:");
+  lines.push(
+    `  launch block: ${formatNumber(
+      summary.susdsLaunchBaseline.launchBlock,
+    )}; sampled block: ${formatNumber(
+      summary.susdsLaunchBaseline.sampledAtBlock,
+    )}; healthy: ${summary.susdsLaunchBaseline.ok ? "yes" : "no"}`,
+  );
+  lines.push("");
   lines.push("sUSDS sampler progress:");
   lines.push(
     `  latest sampled block: ${formatNumber(
@@ -361,12 +371,12 @@ function printUsage() {
 
 Checks a registered Envio deployment by fetching status, metrics, a GraphQL
 endpoint, core rows, sUSDS post-launch sampler progress and freshness, and
-fail-closed Polygon replay semantics.
+sUSDS launch-baseline integrity, and fail-closed Polygon replay semantics.
 
 Options:
   --prod           Probe the static production endpoint and require <commit> to be prod.
   --allow-syncing  Do not fail solely because one or more chains are still syncing.
-                   Empty rows, sUSDS sampler, and Polygon semantic failures remain failures.
+                   Empty rows, sUSDS baseline/sampler, and Polygon semantic failures remain failures.
   --json, -j       Print machine-readable summary JSON.
 `);
 }

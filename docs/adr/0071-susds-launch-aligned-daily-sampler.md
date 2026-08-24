@@ -46,8 +46,8 @@ force.
 - The dashboard requires an sUSDS snapshot source when current sUSDS holdings
   or a nonzero earned signal exist. It keeps holdings and forecasts visible,
   but marks reserve actuals unavailable with an explicit sUSDS reason.
-- Deployment verification fails when a nonzero sUSDS summary has no daily
-  snapshot row.
+- Deployment verification requires the exact immutable sUSDS launch baseline.
+  It also fails when a nonzero sUSDS summary has no daily snapshot row.
 
 ## Alternatives considered
 

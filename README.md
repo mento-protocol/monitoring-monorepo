@@ -318,8 +318,8 @@ pnpm deploy:indexer:verify "$COMMIT" --prod
 
 The status watcher only proves a deployment caught up. Promotion additionally
 requires `deploy:indexer:verify` to pass core rows, sUSDS post-launch sampler
-progress/freshness, and Polygon replay semantics; `--allow-syncing` never
-waives those data-integrity checks.
+progress/freshness, the exact immutable sUSDS launch baseline, and Polygon
+replay semantics; `--allow-syncing` never waives those data-integrity checks.
 
 For an agent-operated production rollout, use the repo's `/deploy-indexer`
 skill: it also captures the prior production commit, confirms promotion, waits

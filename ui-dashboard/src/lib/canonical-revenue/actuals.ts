@@ -68,6 +68,16 @@ function unverifiableSusdsSnapshotSource(
   );
 }
 
+function unavailableSusdsSignalSource(
+  args: BuildCanonicalRevenueArgs,
+): boolean {
+  return (
+    args.reserveYield !== null &&
+    args.reserveYield.susdsYieldSignalUnavailable !== false &&
+    !hasSusdsSnapshotSource(args.reserveDailySnapshots)
+  );
+}
+
 function reserveSnapshotSourceKey(row: ReserveYieldDailySnapshotRow): string {
   const tokenKey = `${row.chainId}:${row.token.toLowerCase()}`;
   return "wallet" in row ? `${tokenKey}:${row.wallet.toLowerCase()}` : tokenKey;
@@ -121,7 +131,8 @@ export function buildActualAvailability(
       (args.reserveYieldFailed === true ||
         hasReserveYieldSignal(args.reserveYield))) ||
     knownMissingSusdsSnapshotSource(args) ||
-    unverifiableSusdsSnapshotSource(args);
+    unverifiableSusdsSnapshotSource(args) ||
+    unavailableSusdsSignalSource(args);
   return {
     reserve: !reserveHistoryUnavailable,
     reserveStaleAfter: reserveStaleAfterBucket(args),
@@ -136,6 +147,9 @@ function reservePartialReason(args: BuildCanonicalRevenueArgs): string | null {
   }
   if (unverifiableSusdsSnapshotSource(args)) {
     return "Reserve sUSDS earned-yield actuals unavailable: current reserve holdings classification failed and no SusdsYieldDailySnapshot source exists.";
+  }
+  if (unavailableSusdsSignalSource(args)) {
+    return "Reserve sUSDS earned-yield actuals unavailable: the current sUSDS yield signal is unavailable and no SusdsYieldDailySnapshot source exists.";
   }
   if (knownMissingSusdsSnapshotSource(args)) {
     return "Reserve sUSDS earned-yield actuals unavailable: no SusdsYieldDailySnapshot source exists for current sUSDS holdings or earned signal.";

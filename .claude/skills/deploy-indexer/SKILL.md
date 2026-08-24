@@ -219,7 +219,7 @@ Pre-merge deploy complete. <TARGET_COMMIT> is synced and pending deployment veri
 After merge, for additive fields/entities and with explicit production authorization: /deploy-indexer --resume-preload <TARGET_COMMIT> (removals/renames need a confirmed compatibility or cutover/rollback plan first).
 ```
 
-Do NOT continue to Phases 3–7. The reviewed schema is not on `main`.
+Do NOT continue to Phase 3 / 4 / 5 / 6. The reviewed schema is not on `main`.
 
 ## Phase 3 — Verify deployment before promotion
 
@@ -235,6 +235,9 @@ dashboard(s), not just the source branch:
   and ask for the rollout decision before running the promote command.
 - **Pure backfill/no schema contract change:** continue after confirming the
   deployment is caught up; verify the affected dashboard pages after promote.
+
+The `--no-promote` path stops before this verifier and all later phases,
+including Phase 7.
 
 Run the narrow deployment verifier before promoting:
 
@@ -342,6 +345,9 @@ the production origin. Require all of these conditions:
 Return the checked fields as evidence. Treat a missing field, non-finite value,
 non-null error, or non-200 response as a failed production verification.
 
+For an sUSDS sampler change, also verify that `/revenue` renders reserve
+actuals without pending, unavailable, or stale labels.
+
 Then navigate to the affected page and run the targeted UI checks. List console
 messages of type `error` after navigation. Use the target URL plus a focus hint
 for the data the new deployment touches:
@@ -351,7 +357,6 @@ for the data the new deployment touches:
   - For a contracts bump that added a bridge token: "verify CHFm + JPYm bridge transfers render on `/bridge-flows`"
   - For a schema/entity addition: "verify the new `<entity>` field renders on `/<page>`"
   - For a pure backfill (no schema change): "smoke-test homepage / pools / bridge-flows for regressions; no new fields to verify"
-  - For the sUSDS sampler: "verify `/revenue` renders sUSDS reserve actuals without pending, unavailable, or stale labels"
 
 If chrome-devtools MCP is unavailable, surface that and stop — do not ask the
 user to verify manually.

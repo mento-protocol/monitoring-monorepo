@@ -466,6 +466,7 @@ describe("GET /api/reserve-yield", () => {
     expect(graphqlBody.variables.id).toBe("1-susds");
     expect(body.earnedYieldUsd).toBeCloseTo(300, 6);
     expect(body.susdsEarnedYieldUsd).toBeCloseTo(300, 6);
+    expect(body.susdsYieldSignalUnavailable).toBe(false);
     expect(body.realizedYieldUsd).toBeCloseTo(100, 6);
     expect(body.unrealizedYieldUsd).toBeCloseTo(200, 6);
     expect(body.earnedYieldAsOf).toBe("2026-06-03T10:41:11.000Z");
@@ -746,6 +747,78 @@ describe("GET /api/reserve-yield", () => {
     expect(body.holdings[0].assetSymbol).toBe("AUSD");
     expect(body.earnedYieldUsd).toBeNull();
     expect(body.earnedYieldError).toBeNull();
+    expect(body.susdsYieldSignalUnavailable).toBe(true);
+  });
+
+  it("treats a clean empty sUSDS summary as an available zero signal", async () => {
+    vi.stubEnv("NEXT_PUBLIC_HASURA_URL", "https://hasura.example/v1/graphql");
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(Response.json(RESERVE_WITH_ONLY_AUSD))
+      .mockResolvedValueOnce(
+        new Response("observation_date,FEDFUNDS\n2026-05-01,5.33\n"),
+      )
+      .mockResolvedValueOnce(Response.json(SKY_SSR_RPC_RESPONSE))
+      .mockResolvedValueOnce(
+        Response.json({ data: { SusdsYieldSummary: [] } }),
+      );
+    const { GET } = await loadRoute();
+
+    const res = await GET();
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.earnedYieldError).toBeNull();
+    expect(body.susdsYieldSignalUnavailable).toBe(false);
+  });
+
+  it("fails closed for a malformed HTTP-200 sUSDS summary shape", async () => {
+    vi.stubEnv("NEXT_PUBLIC_HASURA_URL", "https://hasura.example/v1/graphql");
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(Response.json(RESERVE_WITH_ONLY_AUSD))
+      .mockResolvedValueOnce(
+        new Response("observation_date,FEDFUNDS\n2026-05-01,5.33\n"),
+      )
+      .mockResolvedValueOnce(Response.json(SKY_SSR_RPC_RESPONSE))
+      .mockResolvedValueOnce(
+        Response.json({
+          data: { SusdsYieldSummary: { unexpected: true } },
+        }),
+      );
+    const { GET } = await loadRoute();
+
+    const res = await GET();
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.earnedYieldError).toBeNull();
+    expect(body.susdsYieldSignalUnavailable).toBe(true);
+  });
+
+  it("marks malformed HTTP-200 reserve shapes as classification failures", async () => {
+    vi.stubEnv("NEXT_PUBLIC_HASURA_URL", "https://hasura.example/v1/graphql");
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        Response.json({ collateral: { assets: { unexpected: true } } }),
+      )
+      .mockResolvedValueOnce(
+        new Response("observation_date,FEDFUNDS\n2026-05-01,5.33\n"),
+      )
+      .mockResolvedValueOnce(Response.json(SKY_SSR_RPC_RESPONSE))
+      .mockResolvedValueOnce(
+        Response.json({ data: { SusdsYieldSummary: [] } }),
+      );
+    const { GET } = await loadRoute();
+
+    const res = await GET();
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.holdings).toEqual([]);
+    expect(body.principalUsd).toBeNull();
+    expect(body.holdingsError).toContain(
+      "did not contain a usable collateral.assets array",
+    );
+    expect(body.susdsYieldSignalUnavailable).toBe(false);
   });
 
   it("returns a clear empty holdings shape when the reserve has no yield-bearing rows", async () => {

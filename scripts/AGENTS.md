@@ -41,8 +41,8 @@ subdirectories.
 | `sentry/`       | triage/autofix/gate/broker/ci-wiring   |
 
 `lib/` and `production-infra-identity-contract/` predate the reorganization.
-`.config/wt.toml` pins flat `setup.sh` as its Worktrunk pre-start path; eight
-docs also name it. `redrive-onchain-deadletter.{mjs,test.mjs}` stays flat under
+`.config/wt.toml` and eight docs pin flat `setup.sh`.
+`redrive-onchain-deadletter.{mjs,test.mjs}` stays flat under
 `alerts/infra/`; ADR 0064 gives the lint reason.
 
 `lib/` holds cores that multiple clusters read: `hcl.mjs` for Terraform HCL,
@@ -73,8 +73,8 @@ same PR, except the `agent-autoreview.sh` feedback-runtime pins below.
   `pnpm sentry:autofix:finalize:test`. Exact
   `sentry/triage/sentry-triage-project-route.mjs` runs
   `pnpm sentry:project:test` in the projection arm.
-  `deploy/deploy-indexer-verify{,-analysis}{,.test}.mjs` shares one arm;
-  any-depth arms run both verifier tests.
+  `deploy/deploy-indexer-verify{,-analysis}{,.test}.mjs` uses one any-depth arm;
+  both tests run.
 - **Gate runtime module pins.** Before `cd`, `agent-quality-gate.sh` loads
   `$script_source_dir/gate/run-handles.sh`; move it with its signature, self-test
   route, and missing-helper fixture. It also pins two `$script_source_dir`

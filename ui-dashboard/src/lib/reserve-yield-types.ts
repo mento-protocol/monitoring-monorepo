@@ -37,6 +37,8 @@ export type ReserveYieldResponse = {
   earnedYieldUsd: number | null;
   /** sUSDS-only actuals. The aggregate earnedYieldUsd also includes stETH. */
   susdsEarnedYieldUsd?: number | null;
+  /** True when the current sUSDS ledger signal cannot be established. */
+  susdsYieldSignalUnavailable: boolean;
   realizedYieldUsd: number | null;
   unrealizedYieldUsd: number | null;
   earnedYieldAsOf: string | null;
@@ -62,6 +64,7 @@ export type ReserveYieldResponse = {
 export type ReserveYieldExtraction = {
   holdings: ReserveYieldHolding[];
   malformedCount: number;
+  classificationFailed: boolean;
   trackedAssetCount: number;
   susdsAssetCount: number;
   stethAssetCount: number;
@@ -119,6 +122,7 @@ export type SusdsYieldState = {
   unrealizedYieldUsd: number | null;
   earnedYieldAsOf: string | null;
   earnedYieldError: string | null;
+  signalUnavailable: boolean;
 };
 
 export type StethYieldLedgerEntry = {

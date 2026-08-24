@@ -10,7 +10,7 @@
 #
 # After pushing, use companion scripts:
 #   pnpm deploy:indexer:status <commit> --watch --compact → watch sync progress
-#   pnpm deploy:indexer:verify <commit>          → verify sync, core rows, sUSDS sampler progress/freshness, and Polygon replay
+#   pnpm deploy:indexer:verify <commit>          → verify sync, core rows, sUSDS baseline/sampler integrity, and Polygon replay
 #   pnpm deploy:indexer:promote <commit>        → promote deployment to prod
 #   pnpm deploy:indexer:logs         → tail runtime logs
 #

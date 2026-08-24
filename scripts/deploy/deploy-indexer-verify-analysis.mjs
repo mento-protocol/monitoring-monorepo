@@ -4,6 +4,8 @@ const ENVIO_ORG = "mento-protocol";
 const ENVIO_INDEXER = "mento";
 const REPLAY_INTEGRITY_PATH = "indexer-envio/config/replay-integrity.json";
 const REQUIRED_POLYGON_ORACLE_FRESHNESS_VERSION = 3;
+const SUSDS_LAUNCH_BASELINE_ID = "1-susds-launch";
+const SUSDS_ADDRESS = "0xa3931d71877c0e7a3148cb7eb4463524fec27fbd";
 const SUSDS_LAUNCH_BLOCK = 24_573_203;
 const SUSDS_LAUNCH_TIMESTAMP = 1_772_496_000;
 const SUSDS_MAX_SAMPLE_BLOCK_LAG = 600;
@@ -39,6 +41,10 @@ export const PROBE_QUERY = `query VerifyIndexerRows {
   }
   SusdsYieldSummary(limit: 1) { id currentShares totalEarnedYieldUsdWei lastMovementTxHash lastUpdatedBlock }
   SusdsYieldMovement(limit: 1, order_by: { blockNumber: asc }) { id kind txHash blockNumber }
+  SusdsYieldLaunchBaseline(
+    limit: 1
+    where: { id: { _eq: "1-susds-launch" } }
+  ) { id chainId token launchBlock launchTimestamp sharePriceUsdWei sampledAtBlock sampledAtTimestamp }
   SusdsYieldDailySnapshot(limit: 1, order_by: { sampledAtBlock: desc }) { id timestamp totalEarnedYieldUsdWei sampledAtBlock sampledAtTimestamp }
   StethYieldSummary(limit: 1) { id lastMovementTxHash lastUpdatedBlock }
   StethYieldMovement(limit: 1, order_by: { blockNumber: asc }) { id kind txHash blockNumber }
@@ -151,6 +157,71 @@ function parseSafeInteger(value) {
   return Number.isSafeInteger(parsed) ? parsed : null;
 }
 
+function hasPositiveBigInteger(value) {
+  if (typeof value === "bigint") return value > 0n;
+  if (typeof value !== "string" || !/^\d+$/.test(value)) return false;
+  try {
+    return BigInt(value) > 0n;
+  } catch {
+    return false;
+  }
+}
+
+export function summarizeSusdsLaunchBaseline(baseline) {
+  const failures = [];
+  if (baseline === undefined) {
+    failures.push(
+      `sUSDS sampler launch baseline row ${SUSDS_LAUNCH_BASELINE_ID} is missing`,
+    );
+  }
+
+  const id = typeof baseline?.id === "string" ? baseline.id : null;
+  const chainId = parseSafeInteger(baseline?.chainId);
+  const token = typeof baseline?.token === "string" ? baseline.token : null;
+  const launchBlock = parseSafeInteger(baseline?.launchBlock);
+  const launchTimestamp = parseSafeInteger(baseline?.launchTimestamp);
+  const sampledAtBlock = parseSafeInteger(baseline?.sampledAtBlock);
+  const sampledAtTimestamp = parseSafeInteger(baseline?.sampledAtTimestamp);
+  const sharePriceValid = hasPositiveBigInteger(baseline?.sharePriceUsdWei);
+
+  if (baseline !== undefined) {
+    const expectedFields = [
+      ["id", id, SUSDS_LAUNCH_BASELINE_ID],
+      ["chainId", chainId, 1],
+      ["token", token, SUSDS_ADDRESS],
+      ["launchBlock", launchBlock, SUSDS_LAUNCH_BLOCK],
+      ["launchTimestamp", launchTimestamp, SUSDS_LAUNCH_TIMESTAMP],
+      ["sampledAtBlock", sampledAtBlock, SUSDS_LAUNCH_BLOCK],
+      ["sampledAtTimestamp", sampledAtTimestamp, SUSDS_LAUNCH_TIMESTAMP],
+    ];
+    for (const [field, actual, expected] of expectedFields) {
+      if (actual !== expected) {
+        failures.push(
+          `sUSDS sampler launch baseline ${field} is ${actual ?? "missing"}; expected ${expected}`,
+        );
+      }
+    }
+    if (!sharePriceValid) {
+      failures.push(
+        "sUSDS sampler launch baseline has no positive sharePriceUsdWei",
+      );
+    }
+  }
+
+  return {
+    ok: failures.length === 0,
+    id,
+    chainId,
+    token,
+    launchBlock,
+    launchTimestamp,
+    sampledAtBlock,
+    sampledAtTimestamp,
+    sharePriceValid,
+    failures,
+  };
+}
+
 export function summarizeSusdsSamplerProgress({
   summaryNonzero,
   latestSnapshot,
@@ -260,6 +331,9 @@ export function buildSummary({
 }) {
   const sync = summarizeStatus(statusJson);
   const probe = summarizeProbe(graphqlJson);
+  const susdsLaunchBaseline = summarizeSusdsLaunchBaseline(
+    graphqlJson.data?.SusdsYieldLaunchBaseline?.[0],
+  );
   const susdsSampler = summarizeSusdsSamplerProgress({
     summaryNonzero: probe.susdsSummaryNonzero,
     latestSnapshot: graphqlJson.data?.SusdsYieldDailySnapshot?.[0],
@@ -288,6 +362,7 @@ export function buildSummary({
       );
     }
   }
+  failures.push(...susdsLaunchBaseline.failures);
   failures.push(...susdsSampler.failures);
   failures.push(...replayIntegrity.failures);
   failures.push(...polygon.failures);
@@ -304,6 +379,7 @@ export function buildSummary({
     sync,
     metrics: metricSummary(metricsJson),
     probe,
+    susdsLaunchBaseline,
     susdsSampler,
     replayIntegrity,
     polygon,

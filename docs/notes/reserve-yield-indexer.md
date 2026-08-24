@@ -159,8 +159,9 @@ Before promoting a hosted reindex with Ethereum reserve-yield enabled, require:
 3. The deployment advances beyond the old stall boundaries and catches
    up to head.
 4. `pnpm deploy:indexer:verify <commit>` returns synced chain status plus
-   non-empty `Pool`, sUSDS, and stETH GraphQL probe rows. A nonzero sUSDS
-   summary also requires a post-launch `SusdsYieldDailySnapshot` whose
+   non-empty `Pool`, sUSDS, and stETH GraphQL probe rows. It requires the exact
+   immutable `1-susds-launch` baseline row for the launch-aligned sampler. A
+   nonzero sUSDS summary also requires a post-launch `SusdsYieldDailySnapshot` whose
    `sampledAtBlock` is fresh against the Ethereum processed head and whose
    `sampledAtTimestamp` is fresh against verifier time.
 

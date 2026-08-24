@@ -2,6 +2,7 @@
 
 import assert from "node:assert/strict";
 import {
+  PROBE_QUERY,
   buildSummary,
   extractJsonValue,
   parseArgs,
@@ -41,6 +42,24 @@ function validPolygonPools() {
     healthBinarySeconds: "900",
   }));
 }
+
+function validSusdsLaunchBaseline() {
+  return {
+    id: "1-susds-launch",
+    chainId: 1,
+    token: "0xa3931d71877c0e7a3148cb7eb4463524fec27fbd",
+    launchBlock: "24573203",
+    launchTimestamp: "1772496000",
+    sharePriceUsdWei: "1100000000000000000",
+    sampledAtBlock: "24573203",
+    sampledAtTimestamp: "1772496000",
+  };
+}
+
+assert.match(
+  PROBE_QUERY,
+  /SusdsYieldLaunchBaseline[\s\S]*id: \{ _eq: "1-susds-launch" \}[\s\S]*sharePriceUsdWei/,
+);
 
 const indexerJson = {
   data: {
@@ -354,6 +373,7 @@ const summary = buildSummary({
       PolygonPool: validPolygonPools(),
       SusdsYieldSummary: [{ id: "susds" }],
       SusdsYieldMovement: [{ id: "susds-move" }],
+      SusdsYieldLaunchBaseline: [validSusdsLaunchBaseline()],
       SusdsYieldDailySnapshot: [{ id: "susds-day" }],
       StethYieldSummary: [{ id: "steth" }],
       StethYieldMovement: [{ id: "steth-move" }],
@@ -390,6 +410,7 @@ const semanticFailureWhileSyncing = buildSummary({
       PolygonPool: missingPolygonPool,
       SusdsYieldSummary: [{ id: "susds" }],
       SusdsYieldMovement: [{ id: "susds-move" }],
+      SusdsYieldLaunchBaseline: [validSusdsLaunchBaseline()],
       SusdsYieldDailySnapshot: [{ id: "susds-day" }],
       StethYieldSummary: [{ id: "steth" }],
       StethYieldMovement: [{ id: "steth-move" }],
@@ -433,6 +454,7 @@ const missingSampler = buildSummary({
         { id: "susds", currentShares: "1", lastUpdatedBlock: "24574403" },
       ],
       SusdsYieldMovement: [{ id: "susds-move", blockNumber: "24574403" }],
+      SusdsYieldLaunchBaseline: [validSusdsLaunchBaseline()],
       SusdsYieldDailySnapshot: [],
       StethYieldSummary: [{ id: "steth" }],
       StethYieldMovement: [{ id: "steth-move" }],
@@ -477,6 +499,7 @@ const baselineOnlySampler = buildSummary({
         { id: "susds", currentShares: "1", lastUpdatedBlock: "24574403" },
       ],
       SusdsYieldMovement: [{ id: "susds-move", blockNumber: "24574403" }],
+      SusdsYieldLaunchBaseline: [validSusdsLaunchBaseline()],
       SusdsYieldDailySnapshot: [
         {
           id: "susds-launch-day",
@@ -545,7 +568,7 @@ const staleSampler = summarizeSusdsSamplerProgress({
 assert.equal(staleSampler.ok, false);
 assert.match(staleSampler.failures.join("\n"), /sUSDS sampler is stale/);
 
-const healthySummary = buildSummary({
+const healthySummaryInput = {
   args: { allowSyncing: false },
   deployment: indexerJson.data.deployments[0],
   endpoint: indexerJson.data.deployments[0].gql_endpoint,
@@ -568,6 +591,7 @@ const healthySummary = buildSummary({
       PolygonPool: validPolygonPools(),
       SusdsYieldSummary: [{ id: "susds", currentShares: "1" }],
       SusdsYieldMovement: [{ id: "susds-move" }],
+      SusdsYieldLaunchBaseline: [validSusdsLaunchBaseline()],
       SusdsYieldDailySnapshot: [
         {
           id: "susds-sample",
@@ -581,11 +605,53 @@ const healthySummary = buildSummary({
   },
   nowSeconds: NOW_SECONDS,
   replayIntegrityInput: VALID_REPLAY_INTEGRITY,
-});
+};
+const healthySummary = buildSummary(healthySummaryInput);
 assert.equal(healthySummary.ok, true);
 assert.match(
   renderText(healthySummary),
   /latest sampled block: 24,573,803; processed Ethereum head: 24,573,803; block lag: 0/,
+);
+assert.match(
+  renderText(healthySummary),
+  /sUSDS launch baseline:[\s\S]*launch block: 24,573,203; sampled block: 24,573,203; healthy: yes/,
+);
+
+const recentSnapshotWithoutLaunchBaseline = buildSummary({
+  ...healthySummaryInput,
+  graphqlJson: {
+    data: {
+      ...healthySummaryInput.graphqlJson.data,
+      SusdsYieldLaunchBaseline: [],
+    },
+  },
+});
+assert.equal(recentSnapshotWithoutLaunchBaseline.susdsSampler.ok, true);
+assert.equal(recentSnapshotWithoutLaunchBaseline.ok, false);
+assert.match(
+  recentSnapshotWithoutLaunchBaseline.failures.join("\n"),
+  /launch baseline row 1-susds-launch is missing/,
+);
+
+const recentSnapshotWithInvalidLaunchBaseline = buildSummary({
+  ...healthySummaryInput,
+  graphqlJson: {
+    data: {
+      ...healthySummaryInput.graphqlJson.data,
+      SusdsYieldLaunchBaseline: [
+        {
+          ...validSusdsLaunchBaseline(),
+          launchBlock: "24573204",
+        },
+      ],
+    },
+  },
+});
+assert.equal(recentSnapshotWithInvalidLaunchBaseline.susdsSampler.ok, true);
+assert.equal(recentSnapshotWithInvalidLaunchBaseline.ok, false);
+assert.match(
+  recentSnapshotWithInvalidLaunchBaseline.failures.join("\n"),
+  /launch baseline launchBlock is 24573204; expected 24573203/,
 );
 
 const staleSamplerSummary = buildSummary({
@@ -611,6 +677,7 @@ const staleSamplerSummary = buildSummary({
       PolygonPool: validPolygonPools(),
       SusdsYieldSummary: [{ id: "susds", currentShares: "1" }],
       SusdsYieldMovement: [{ id: "susds-move" }],
+      SusdsYieldLaunchBaseline: [validSusdsLaunchBaseline()],
       SusdsYieldDailySnapshot: [
         {
           id: "susds-sample",

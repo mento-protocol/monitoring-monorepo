@@ -470,6 +470,62 @@ describeReserveYield("sUSDS reserve yield accounting", () => {
     assert.equal(rows[1]?.dailyUnrealizedYieldUsdWei, -dollars(50));
   });
 
+  it("keeps the UTC-day baseline across same-day compression and recovery", async () => {
+    let mockDb = MockDb.createMockDb();
+    setSharePrice(V3_REVENUE_LAUNCH_BLOCK - 1, WAD);
+    mockDb = await deposit(
+      mockDb,
+      V3_REVENUE_LAUNCH_BLOCK - 1,
+      0,
+      dollars(1000),
+      dollars(1000),
+      Number(V3_REVENUE_LAUNCH_TIMESTAMP - 1n),
+    );
+
+    await recordSusdsYieldLaunchBaseline(dailySnapshotContext(mockDb), {
+      blockTimestamp: V3_REVENUE_LAUNCH_BLOCK_TIMESTAMP,
+      sharePriceUsdWei: dollars(110) / 100n,
+    });
+    await recordSusdsYieldDailySnapshot(
+      dailySnapshotContext(mockDb),
+      {
+        chainId: ETHEREUM_CHAIN_ID,
+        blockNumber: BigInt(V3_REVENUE_LAUNCH_BLOCK) + 600n,
+        blockTimestamp: V3_REVENUE_LAUNCH_TIMESTAMP + 3_600n,
+      },
+      dollars(105) / 100n,
+    );
+    await recordSusdsYieldDailySnapshot(
+      dailySnapshotContext(mockDb),
+      {
+        chainId: ETHEREUM_CHAIN_ID,
+        blockNumber: BigInt(V3_REVENUE_LAUNCH_BLOCK) + 1_200n,
+        blockTimestamp: V3_REVENUE_LAUNCH_TIMESTAMP + 7_200n,
+      },
+      dollars(108) / 100n,
+    );
+
+    let rows = dailySnapshots(mockDb);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0]?.totalEarnedYieldUsdWei, dollars(80));
+    assert.equal(rows[0]?.dailyEarnedYieldUsdWei, 0n);
+
+    await recordSusdsYieldDailySnapshot(
+      dailySnapshotContext(mockDb),
+      {
+        chainId: ETHEREUM_CHAIN_ID,
+        blockNumber: BigInt(V3_REVENUE_LAUNCH_BLOCK) + 1_800n,
+        blockTimestamp: V3_REVENUE_LAUNCH_TIMESTAMP + 10_800n,
+      },
+      dollars(112) / 100n,
+    );
+
+    rows = dailySnapshots(mockDb);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0]?.totalEarnedYieldUsdWei, dollars(120));
+    assert.equal(rows[0]?.dailyEarnedYieldUsdWei, dollars(20));
+  });
+
   it("uses the latest prior sUSDS daily snapshot when the previous UTC day is missing", async () => {
     let mockDb = MockDb.createMockDb();
     const day1 = V3_REVENUE_LAUNCH_TIMESTAMP + 86_400n;
@@ -1026,7 +1082,7 @@ describeReserveYield("sUSDS reserve yield accounting", () => {
     assert.equal(dailySnapshots(mockDb).length, 0);
   });
 
-  it("preserves launch-to-sample yield on the first later sampler row", async () => {
+  it("excludes pre-v3 yield and preserves only launch-to-sample yield", async () => {
     let mockDb = MockDb.createMockDb();
     setSharePrice(V3_REVENUE_LAUNCH_BLOCK - 1, WAD);
     mockDb = await deposit(
@@ -1039,15 +1095,20 @@ describeReserveYield("sUSDS reserve yield accounting", () => {
     );
     await recordSusdsYieldLaunchBaseline(dailySnapshotContext(mockDb), {
       blockTimestamp: V3_REVENUE_LAUNCH_BLOCK_TIMESTAMP,
-      sharePriceUsdWei: WAD,
+      sharePriceUsdWei: dollars(110) / 100n,
     });
+
+    const launchRows = dailySnapshots(mockDb);
+    assert.equal(launchRows.length, 1);
+    assert.equal(launchRows[0]?.totalEarnedYieldUsdWei, dollars(100));
+    assert.equal(launchRows[0]?.dailyEarnedYieldUsdWei, 0n);
 
     const sampleTimestamp = V3_REVENUE_LAUNCH_TIMESTAMP + 86_400n;
     const didWrite = await recordSusdsYieldHeartbeatSnapshot(
       heartbeatContext(
         mockDb,
         sampleTimestamp,
-        dollars(110) / 100n,
+        dollars(120) / 100n,
         BigInt(V3_REVENUE_LAUNCH_BLOCK) + 600n,
       ),
       BigInt(V3_REVENUE_LAUNCH_BLOCK) + 600n,
@@ -1057,7 +1118,9 @@ describeReserveYield("sUSDS reserve yield accounting", () => {
     );
     assert.equal(didWrite, true);
     assert.equal(rows.length, 2);
-    assert.equal(rows[1]?.totalEarnedYieldUsdWei, dollars(100));
+    assert.equal(rows[0]?.totalEarnedYieldUsdWei, dollars(100));
+    assert.equal(rows[0]?.dailyEarnedYieldUsdWei, 0n);
+    assert.equal(rows[1]?.totalEarnedYieldUsdWei, dollars(200));
     assert.equal(rows[1]?.dailyEarnedYieldUsdWei, dollars(100));
   });
 

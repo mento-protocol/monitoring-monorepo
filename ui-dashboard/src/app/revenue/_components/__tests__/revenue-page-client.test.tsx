@@ -118,6 +118,7 @@ const RESERVE_YIELD: ReserveYieldResponse = {
   principalUsd: 4_700,
   forecastPrincipalUsd: 4_700,
   earnedYieldUsd: 439.4,
+  susdsYieldSignalUnavailable: false,
   realizedYieldUsd: 275.58,
   unrealizedYieldUsd: 163.82,
   earnedYieldAsOf: "2026-06-03T10:41:11.000Z",
@@ -582,6 +583,24 @@ describe("RevenuePageClient canonical revenue layout", () => {
       0,
     );
     expect(reserveActual).toBe(0);
+  });
+
+  it("renders the sUSDS signal-unavailable reason through the revenue page", () => {
+    const reason =
+      "Reserve sUSDS earned-yield actuals unavailable: the current sUSDS yield signal is unavailable and no SusdsYieldDailySnapshot source exists.";
+    const html = renderRevenue({
+      reserveYield: {
+        ...RESERVE_YIELD,
+        earnedYieldUsd: 25,
+        susdsYieldSignalUnavailable: true,
+        holdings: [STETH_HOLDING],
+      },
+      reserveRows: [],
+    });
+
+    expect(html).toContain(reason);
+    expect(capturedProps.chart?.partialReasons).toContain(reason);
+    expect(streamCardHtml(html, "Reserve Yield")).toContain("N/A");
   });
 
   it("shows available actual revenue in period headlines when reserve history is stale", () => {

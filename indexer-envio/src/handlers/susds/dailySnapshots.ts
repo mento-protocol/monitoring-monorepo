@@ -42,13 +42,14 @@ type SusdsHeartbeatEffectResults = {
 function baselineFromSameDaySnapshot(
   snapshot: SusdsYieldDailySnapshot,
 ): SusdsYieldDeltaBaseline {
+  const realizedYieldUsdWei =
+    snapshot.realizedYieldUsdWei - snapshot.dailyRealizedYieldUsdWei;
+  const unrealizedYieldUsdWei =
+    snapshot.unrealizedYieldUsdWei - snapshot.dailyUnrealizedYieldUsdWei;
   return {
-    totalEarnedYieldUsdWei:
-      snapshot.totalEarnedYieldUsdWei - snapshot.dailyEarnedYieldUsdWei,
-    realizedYieldUsdWei:
-      snapshot.realizedYieldUsdWei - snapshot.dailyRealizedYieldUsdWei,
-    unrealizedYieldUsdWei:
-      snapshot.unrealizedYieldUsdWei - snapshot.dailyUnrealizedYieldUsdWei,
+    totalEarnedYieldUsdWei: realizedYieldUsdWei + unrealizedYieldUsdWei,
+    realizedYieldUsdWei,
+    unrealizedYieldUsdWei,
   };
 }
 

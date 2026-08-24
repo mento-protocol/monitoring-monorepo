@@ -112,6 +112,7 @@ describe("reserve yield parsing and math", () => {
     const extracted = extractReserveYieldHoldings(RESERVE_PAYLOAD);
 
     expect(extracted.malformedCount).toBe(0);
+    expect(extracted.classificationFailed).toBe(false);
     expect(extracted.trackedAssetCount).toBe(3);
     expect(extracted.susdsAssetCount).toBe(1);
     expect(extracted.holdings).toHaveLength(4);
@@ -182,6 +183,75 @@ describe("reserve yield parsing and math", () => {
       balance: 25,
       principalUsd: 28,
     });
+  });
+
+  it.each([
+    {},
+    { collateral: {} },
+    { collateral: { assets: null } },
+    { collateral: { assets: {} } },
+  ])(
+    "fails holdings classification for a malformed reserve shape",
+    (payload) => {
+      const extracted = extractReserveYieldHoldings(payload);
+
+      expect(extracted.holdings).toEqual([]);
+      expect(extracted.malformedCount).toBe(0);
+      expect(extracted.classificationFailed).toBe(true);
+    },
+  );
+
+  it("marks malformed entries inside a valid assets array", () => {
+    const extracted = extractReserveYieldHoldings({
+      collateral: { assets: [null, {}, { symbol: 123 }] },
+    });
+
+    expect(extracted.holdings).toEqual([]);
+    expect(extracted.malformedCount).toBe(3);
+    expect(extracted.classificationFailed).toBe(false);
+  });
+
+  it("accepts an empty sources array for a tracked asset", () => {
+    const extracted = extractReserveYieldHoldings({
+      collateral: {
+        assets: [
+          {
+            symbol: "sUSDS",
+            chain: "ethereum",
+            balance: "100",
+            usd_value: 110,
+            sources: [],
+          },
+        ],
+      },
+    });
+
+    expect(extracted.holdings).toHaveLength(1);
+    expect(extracted.malformedCount).toBe(0);
+    expect(extracted.susdsAssetCount).toBe(1);
+  });
+
+  it.each([
+    ["non-array", { sources: {} }],
+    ["missing", {}],
+  ])("marks %s sources for a tracked asset as malformed", (_label, fields) => {
+    const extracted = extractReserveYieldHoldings({
+      collateral: {
+        assets: [
+          {
+            symbol: "sUSDS",
+            chain: "ethereum",
+            balance: "100",
+            usd_value: 110,
+            ...fields,
+          },
+        ],
+      },
+    });
+
+    expect(extracted.holdings).toHaveLength(1);
+    expect(extracted.malformedCount).toBe(1);
+    expect(extracted.susdsAssetCount).toBe(1);
   });
 
   it("prices stETH sources from USD values instead of token balances", () => {

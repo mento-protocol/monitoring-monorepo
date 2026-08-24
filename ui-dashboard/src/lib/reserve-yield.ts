@@ -244,7 +244,10 @@ function reserveHoldingsState(
 
   const extracted = extractReserveYieldHoldings(reserveResult.value);
   let holdingsError: string | null = null;
-  if (extracted.malformedCount > 0) {
+  if (extracted.classificationFailed) {
+    holdingsError =
+      "Reserve API response did not contain a usable collateral.assets array.";
+  } else if (extracted.malformedCount > 0) {
     holdingsError =
       extracted.holdings.length > 0
         ? "Some reserve yield rows were missing usable USD values."
@@ -254,7 +257,8 @@ function reserveHoldingsState(
   return {
     holdings: extracted.holdings,
     principalUsd:
-      extracted.holdings.length === 0 && extracted.malformedCount > 0
+      extracted.holdings.length === 0 &&
+      (extracted.classificationFailed || extracted.malformedCount > 0)
         ? null
         : extracted.holdings.reduce((sum, h) => sum + h.principalUsd, 0),
     holdingsAsOf: fetchedAt,
@@ -375,6 +379,7 @@ function buildReserveYieldResponse({
       stethYield.earnedYieldUsd,
     ),
     susdsEarnedYieldUsd: susdsYield.earnedYieldUsd,
+    susdsYieldSignalUnavailable: susdsYield.signalUnavailable,
     realizedYieldUsd: sumNullable(
       susdsYield.realizedYieldUsd,
       stethYield.realizedYieldUsd,

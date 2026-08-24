@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 
 import assert from "node:assert/strict";
-import { summarizeSusdsSamplerProgress } from "./deploy-indexer-verify-analysis.mjs";
+import {
+  summarizeSusdsLaunchBaseline,
+  summarizeSusdsSamplerProgress,
+} from "./deploy-indexer-verify-analysis.mjs";
 
 const NOW_SECONDS = 2_000_000_000;
 const SAMPLE_BLOCK = 24_573_803;
@@ -18,6 +21,33 @@ function summarize(overrides = {}) {
     ...overrides,
   });
 }
+
+const validLaunchBaseline = {
+  id: "1-susds-launch",
+  chainId: 1,
+  token: "0xa3931d71877c0e7a3148cb7eb4463524fec27fbd",
+  launchBlock: "24573203",
+  launchTimestamp: "1772496000",
+  sharePriceUsdWei: "1100000000000000000",
+  sampledAtBlock: "24573203",
+  sampledAtTimestamp: "1772496000",
+};
+
+assert.equal(summarizeSusdsLaunchBaseline(validLaunchBaseline).ok, true);
+assert.match(
+  summarizeSusdsLaunchBaseline(undefined).failures.join("\n"),
+  /launch baseline row 1-susds-launch is missing/,
+);
+assert.match(
+  summarizeSusdsLaunchBaseline({
+    ...validLaunchBaseline,
+    token: "0x0000000000000000000000000000000000000000",
+    launchBlock: "24573204",
+    sampledAtTimestamp: "1772496001",
+    sharePriceUsdWei: "0",
+  }).failures.join("\n"),
+  /token is[\s\S]*launchBlock is[\s\S]*sampledAtTimestamp is[\s\S]*no positive sharePriceUsdWei/,
+);
 
 for (const lag of [0, 599]) {
   const summary = summarize({

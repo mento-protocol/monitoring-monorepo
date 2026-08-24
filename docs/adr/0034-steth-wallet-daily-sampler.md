@@ -62,7 +62,8 @@ a bounded stETH sampler:
   to already exist.
 - If any later historical stETH balance read is unavailable, the sampler skips
   the affected snapshot batch instead of writing partial wallet actuals.
-- Hosted deploy verification checks nonzero `sUSDS` summaries against post-launch
+- Hosted deploy verification requires the exact immutable sUSDS launch
+  baseline. It checks nonzero `sUSDS` summaries against post-launch
   `SusdsYieldDailySnapshot` progress and freshness. Its `stETH` core-row probe
   checks `StethYieldSummary` and `StethYieldMovement`.
 
