@@ -244,6 +244,38 @@ describe("useReserveYieldHistory", () => {
   });
 
   it.each([
+    ["null response", null],
+    ["missing collection", {}],
+    [
+      "non-array collection",
+      { StethYieldDailySnapshot: { id: "not-an-array" } },
+    ],
+  ])(
+    "routes stETH %s through schema-drift retry handling",
+    async (_label, response) => {
+      graphQlRequestMock
+        .mockResolvedValueOnce({
+          SusdsYieldDailySnapshot: [reserveSnapshot()],
+        })
+        .mockResolvedValueOnce(response);
+
+      const { fetcher } = renderReserveYieldHistoryProbe();
+
+      await expect(fetcher()).rejects.toBeInstanceOf(GraphQLSchemaError);
+      expect(graphQlRequestMock).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it("routes a structurally invalid sUSDS response through schema-drift retry handling", async () => {
+    graphQlRequestMock.mockResolvedValueOnce({});
+
+    const { fetcher } = renderReserveYieldHistoryProbe();
+
+    await expect(fetcher()).rejects.toBeInstanceOf(GraphQLSchemaError);
+    expect(graphQlRequestMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
     ["negative chain", { chainId: -1 }],
     ["wrong chain", { chainId: 137 }],
     ["wrong token", { token: "0x0000000000000000000000000000000000000001" }],

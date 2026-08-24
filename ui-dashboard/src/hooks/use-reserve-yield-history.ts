@@ -158,15 +158,16 @@ type ReserveYieldHistoryResponseKey =
   | "SusdsYieldDailySnapshot"
   | "StethYieldDailySnapshot";
 
-function malformedHistoryRowError(
+function historySchemaError(
   responseKey: ReserveYieldHistoryResponseKey,
+  message: string,
 ): GraphQLSchemaError {
   return new GraphQLSchemaError(
     [
       {
         code: "custom",
         path: [responseKey],
-        message: "contained a malformed row",
+        message,
       },
     ],
     responseKey,
@@ -178,11 +179,11 @@ function pageRowsForResponse(
   responseKey: ReserveYieldHistoryResponseKey,
 ): ReserveYieldDailySnapshotRow[] {
   if (typeof response !== "object" || response === null) {
-    throw new Error("Reserve yield history response was not an object");
+    throw historySchemaError(responseKey, "response was not an object");
   }
   const pageRows = (response as Record<string, unknown>)[responseKey];
   if (!Array.isArray(pageRows)) {
-    throw new Error(`${responseKey} was not an array`);
+    throw historySchemaError(responseKey, "was not an array");
   }
   if (responseKey === "SusdsYieldDailySnapshot") {
     if (
@@ -192,12 +193,12 @@ function pageRowsForResponse(
           row.chainId === RESERVE_YIELD_ETHEREUM_CHAIN_ID,
       )
     ) {
-      throw malformedHistoryRowError(responseKey);
+      throw historySchemaError(responseKey, "contained a malformed row");
     }
     return pageRows;
   }
   if (!pageRows.every((row) => isValidEthereumStethSnapshot(row))) {
-    throw malformedHistoryRowError(responseKey);
+    throw historySchemaError(responseKey, "contained a malformed row");
   }
   return pageRows as StethYieldDailySnapshotRow[];
 }
