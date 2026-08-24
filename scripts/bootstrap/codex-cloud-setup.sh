@@ -183,7 +183,9 @@ verify_github_api_capabilities() {
     return 0
   fi
 
-  repository="$(gh repo view --json nameWithOwner --jq '.nameWithOwner')"
+  repository="${remote_url#https://github.com/}"
+  repository="${repository#git@github.com:}"
+  repository="${repository%.git}"
 
   echo "==> Verifying GitHub repository API access"
   gh api "repos/${repository}" >/dev/null
@@ -197,7 +199,7 @@ verify_origin_write_access() (
   local probe_branch
   local probe_ref
   local probe_suffix
-  local created=false
+  local cleanup_eligible=false
   remote_url="$(git remote get-url origin)"
   if [[ "$remote_url" != https://github.com/* && "$remote_url" != git@github.com:* ]]; then
     echo "==> Skipping GitHub write probe for non-GitHub origin: ${remote_url}"
@@ -211,7 +213,7 @@ verify_origin_write_access() (
   # Invoked indirectly by the EXIT trap below.
   # shellcheck disable=SC2329
   cleanup_probe_ref() {
-    if [[ "$created" == "true" ]]; then
+    if [[ "$cleanup_eligible" == "true" ]]; then
       git push origin --delete "$probe_branch" >/dev/null 2>&1 ||
         echo "warning: could not remove temporary GitHub write probe ${probe_branch}." >&2
     fi
@@ -221,6 +223,10 @@ verify_origin_write_access() (
   # A dry run suppresses the ref update, so it cannot prove that the remote
   # accepts branch creation. Use a collision-resistant ref and remove it here.
   echo "==> Verifying git can create and delete a temporary branch on origin"
+  # The server may create the ref even when the client loses the success
+  # response. Make cleanup eligible before the push so the EXIT trap also
+  # covers that ambiguous failure.
+  cleanup_eligible=true
   if ! git push origin "HEAD:${probe_ref}" >/dev/null; then
     cat >&2 <<'MSG'
 error: GitHub authentication can read this repository but cannot create a
@@ -230,13 +236,12 @@ ship flows cannot publish commits with a read-only token.
 MSG
     return 1
   fi
-  created=true
 
   if ! git push origin --delete "$probe_branch" >/dev/null; then
     echo "error: GitHub authentication created the temporary write probe but could not delete it: ${probe_branch}" >&2
     return 1
   fi
-  created=false
+  cleanup_eligible=false
 )
 
 append_no_proxy_host() {

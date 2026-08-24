@@ -287,6 +287,26 @@ sed -n '1p' "$case_tool_log" | grep -Eq '^push origin HEAD:refs/heads/codex-clou
 sed -n '2p' "$case_tool_log" | grep -Eq '^push origin --delete codex-cloud-write-probe-[0-9a-f]{32}$' ||
   fail "${case_name}: did not delete the temporary branch"
 
+prepare_case "github-api-origin-binding"
+(
+  # shellcheck source=scripts/bootstrap/codex-cloud-setup.sh
+  source "$setup_script"
+  git() {
+    [[ "$*" == "remote get-url origin" ]] || return 1
+    echo "https://github.com/mento-protocol/monitoring-monorepo.git"
+  }
+  gh() { printf '%s\n' "$*" >>"$case_tool_log"; }
+  GH_REPO="wrong-owner/wrong-repo" verify_github_api_capabilities
+) >"$case_stdout" 2>"$case_stderr"
+[[ "$(wc -l <"$case_tool_log")" -eq 2 ]] || fail "${case_name}: did not run both API probes"
+grep -Fxq "api repos/mento-protocol/monitoring-monorepo" "$case_tool_log" ||
+  fail "${case_name}: repository probe did not target origin"
+grep -Fxq "api repos/mento-protocol/monitoring-monorepo/pulls?state=open&per_page=1" "$case_tool_log" ||
+  fail "${case_name}: pull-request probe did not target origin"
+if grep -Fq "wrong-owner/wrong-repo" "$case_tool_log"; then
+  fail "${case_name}: GH_REPO redirected an API probe"
+fi
+
 prepare_case "origin-write-access-refused"
 (
   # shellcheck source=scripts/bootstrap/codex-cloud-setup.sh
@@ -303,6 +323,8 @@ prepare_case "origin-write-access-refused"
 ) >"$case_stdout" 2>"$case_stderr" && fail "${case_name}: accepted a read-only GitHub credential"
 grep -Fq "Contents read/write permission" "$case_stderr" ||
   fail "${case_name}: did not explain the required GitHub permission"
+[[ "$(grep -c '^push origin --delete ' "$case_tool_log")" -eq 1 ]] ||
+  fail "${case_name}: did not attempt cleanup after an ambiguous create failure"
 
 prepare_case "origin-write-access-delete-retry"
 (
