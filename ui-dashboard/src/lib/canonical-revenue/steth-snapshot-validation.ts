@@ -1,83 +1,44 @@
 import type { StethYieldDailySnapshotRow } from "./types";
+import { z } from "zod/mini";
+import {
+  type ExhaustiveSchemaShape,
+  integerStringSchema,
+  nonemptyStringSchema,
+  nonnegativeIntegerStringSchema,
+  positiveIntegerStringSchema,
+  safePositiveIntegerStringSchema,
+} from "./snapshot-validation-schema";
 import {
   RESERVE_YIELD_ETHEREUM_CHAIN_ID,
   STETH_TOKEN_ADDRESS,
 } from "@/lib/reserve-yield-types";
 import { isTrackedStethWalletIdentifier } from "@/lib/reserve-yield-steth-coverage";
 
-const STETH_NONNEGATIVE_BIGINT_FIELDS = [
-  "balanceAmount",
-  "principalAmount",
-  "realizedYieldAmount",
-  "transferredOutYieldAmount",
-  "unrealizedYieldAmount",
-  "totalEarnedYieldAmount",
-  "dailyEarnedYieldAmount",
-  "dailyRealizedYieldAmount",
-] as const satisfies ReadonlyArray<keyof StethYieldDailySnapshotRow>;
-
-const STETH_SIGNED_DELTA_FIELDS = [
-  "dailyUnrealizedYieldAmount",
-] as const satisfies ReadonlyArray<keyof StethYieldDailySnapshotRow>;
-
-const STETH_POSITIVE_BIGINT_FIELDS = [
-  "sampledAtBlock",
-  "sampledAtTimestamp",
-] as const satisfies ReadonlyArray<keyof StethYieldDailySnapshotRow>;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isNonemptyString(value: unknown): value is string {
-  return typeof value === "string" && value.trim() !== "";
-}
-
-function isIntegerString(value: unknown): value is string {
-  return typeof value === "string" && /^-?\d+$/.test(value.trim());
-}
-
-function isNonnegativeIntegerString(value: unknown): value is string {
-  return typeof value === "string" && /^\d+$/.test(value.trim());
-}
-
-function isPositiveIntegerString(value: unknown): value is string {
-  return typeof value === "string" && /^0*[1-9]\d*$/.test(value.trim());
-}
+const stethYieldDailySnapshotRowSchema = z.object({
+  id: nonemptyStringSchema,
+  chainId: z.literal(RESERVE_YIELD_ETHEREUM_CHAIN_ID),
+  token: z
+    .string()
+    .check(
+      z.refine((value) => value.trim().toLowerCase() === STETH_TOKEN_ADDRESS),
+    ),
+  wallet: nonemptyStringSchema.check(z.refine(isTrackedStethWalletIdentifier)),
+  timestamp: safePositiveIntegerStringSchema,
+  balanceAmount: nonnegativeIntegerStringSchema,
+  principalAmount: nonnegativeIntegerStringSchema,
+  realizedYieldAmount: nonnegativeIntegerStringSchema,
+  transferredOutYieldAmount: nonnegativeIntegerStringSchema,
+  unrealizedYieldAmount: nonnegativeIntegerStringSchema,
+  totalEarnedYieldAmount: nonnegativeIntegerStringSchema,
+  dailyEarnedYieldAmount: nonnegativeIntegerStringSchema,
+  dailyRealizedYieldAmount: nonnegativeIntegerStringSchema,
+  dailyUnrealizedYieldAmount: integerStringSchema,
+  sampledAtBlock: positiveIntegerStringSchema,
+  sampledAtTimestamp: positiveIntegerStringSchema,
+} satisfies ExhaustiveSchemaShape<StethYieldDailySnapshotRow>);
 
 export function isValidStethYieldDailySnapshotRow(
   value: unknown,
 ): value is StethYieldDailySnapshotRow {
-  if (!isRecord(value)) return false;
-  if (!isNonemptyString(value.id)) return false;
-  if (
-    typeof value.chainId !== "number" ||
-    !Number.isSafeInteger(value.chainId) ||
-    value.chainId !== RESERVE_YIELD_ETHEREUM_CHAIN_ID
-  ) {
-    return false;
-  }
-  if (
-    !isNonemptyString(value.token) ||
-    value.token.trim().toLowerCase() !== STETH_TOKEN_ADDRESS ||
-    !isNonemptyString(value.wallet) ||
-    !isTrackedStethWalletIdentifier(value.wallet)
-  ) {
-    return false;
-  }
-  if (
-    !isPositiveIntegerString(value.timestamp) ||
-    !Number.isSafeInteger(Number(value.timestamp))
-  ) {
-    return false;
-  }
-  return (
-    STETH_NONNEGATIVE_BIGINT_FIELDS.every((field) =>
-      isNonnegativeIntegerString(value[field]),
-    ) &&
-    STETH_SIGNED_DELTA_FIELDS.every((field) => isIntegerString(value[field])) &&
-    STETH_POSITIVE_BIGINT_FIELDS.every((field) =>
-      isPositiveIntegerString(value[field]),
-    )
-  );
+  return stethYieldDailySnapshotRowSchema.safeParse(value).success;
 }

@@ -51,6 +51,10 @@ function snapshot(
   };
 }
 
+const REQUIRED_FIELDS = Object.keys(snapshot()) as Array<
+  keyof SusdsYieldDailySnapshotRow
+>;
+
 describe("sUSDS reserve snapshot validation", () => {
   it("accepts zero balances and yield totals", () => {
     const row = snapshot(
@@ -73,6 +77,21 @@ describe("sUSDS reserve snapshot validation", () => {
   it("accepts the configured sUSDS token address case-insensitively", () => {
     const row = snapshot({
       token: "0xA3931D71877C0E7A3148CB7EB4463524FEC27FBD",
+    });
+
+    expect(isValidSusdsYieldDailySnapshotRow(row)).toBe(true);
+  });
+
+  it("accepts whitespace around validated string values", () => {
+    const row = snapshot({
+      id: " 1-susds-1772668800 ",
+      token: " 0xA3931D71877C0E7A3148CB7EB4463524FEC27FBD ",
+      timestamp: " 1772668800 ",
+      currentShares: " 1 ",
+      dailyUnrealizedYieldUsdWei: " -1 ",
+      sharePriceUsdWei: " 1 ",
+      sampledAtBlock: " 1 ",
+      sampledAtTimestamp: " 1 ",
     });
 
     expect(isValidSusdsYieldDailySnapshotRow(row)).toBe(true);
@@ -109,5 +128,26 @@ describe("sUSDS reserve snapshot validation", () => {
 
     expect(isValidSusdsYieldDailySnapshotRow(row)).toBe(false);
     expect(hasInvalidSusdsYieldDailySnapshotRow([row])).toBe(true);
+  });
+
+  it("rejects a timestamp outside the safe integer range", () => {
+    const row = snapshot({ timestamp: "9007199254740992" });
+
+    expect(isValidSusdsYieldDailySnapshotRow(row)).toBe(false);
+  });
+
+  it.each(REQUIRED_FIELDS)("rejects a missing %s field", (field) => {
+    const row: Partial<Record<keyof SusdsYieldDailySnapshotRow, unknown>> = {
+      ...snapshot(),
+    };
+    delete row[field];
+
+    expect(isValidSusdsYieldDailySnapshotRow(row)).toBe(false);
+  });
+
+  it.each(REQUIRED_FIELDS)("rejects null for the %s field", (field) => {
+    const row = { ...snapshot(), [field]: null };
+
+    expect(isValidSusdsYieldDailySnapshotRow(row)).toBe(false);
   });
 });
