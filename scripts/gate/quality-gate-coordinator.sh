@@ -5,6 +5,7 @@
 
 gate_coordinator_capacity="${gate_coordinator_capacity:-3}"
 gate_coordinator_entry="$script_source_dir/gate/quality-gate-coordinator.mjs"
+gate_coordinator_lifecycle_entry="$script_source_dir/gate/quality-gate-coordinator-lifecycle.mjs"
 gate_coordinator_active=0
 gate_coordinator_request_terminal=0
 gate_coordinator_result_acknowledged=0
@@ -25,7 +26,15 @@ gate_coordinator_completed_result_json=""
 gate_coordinator_active_lease_id=""
 gate_coordinator_infrastructure_failed=0
 gate_coordinator_wait_pid=""
+gate_coordinator_wait_dir=""
+gate_coordinator_wait_cancel_file=""
+gate_coordinator_wait_completion_file=""
+gate_coordinator_wait_error_file=""
 gate_coordinator_lifecycle_pid=""
+gate_coordinator_lifecycle_dir=""
+gate_coordinator_lifecycle_control_file=""
+gate_coordinator_lifecycle_completion_file=""
+gate_coordinator_lifecycle_error_file=""
 gate_coordinator_bound_registration_json=""
 gate_coordinator_recovery_drain_context="stale-run"
 
@@ -590,9 +599,7 @@ gate_coordinator_cleanup() {
   gate_coordinator_is_active || return 0
   [[ "${BASH_SUBSHELL:-0}" == "$gate_coordinator_owner_subshell" ]] || return 0
   if [[ -n "$gate_coordinator_wait_pid" ]]; then
-    kill -TERM "$gate_coordinator_wait_pid" 2>/dev/null || true
-    wait "$gate_coordinator_wait_pid" 2>/dev/null || true
-    gate_coordinator_wait_pid=""
+    gate_coordinator_stop_wait_cli || true
   fi
   if [[ "$gate_coordinator_request_terminal" -eq 0 ]]; then
     gate_coordinator_cancel_and_ack \

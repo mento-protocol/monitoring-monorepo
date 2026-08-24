@@ -213,65 +213,160 @@ gate_coordinator_cli() {
 }
 
 gate_coordinator_stop_request_lifecycle() {
-  local disposition="${1:-unclean}" lifecycle_pid signal
+  local disposition="${1:-unclean}" lifecycle_pid control_file completion_file
+  local lifecycle_dir error_file update_file deadline control_failed=0
+  local completion_valid=1
   lifecycle_pid="${gate_coordinator_lifecycle_pid:-}"
-  gate_coordinator_lifecycle_pid=""
-  [[ -n "$lifecycle_pid" ]] || return 0
+  lifecycle_dir="${gate_coordinator_lifecycle_dir:-}"
+  control_file="${gate_coordinator_lifecycle_control_file:-}"
+  completion_file="${gate_coordinator_lifecycle_completion_file:-}"
+  error_file="${gate_coordinator_lifecycle_error_file:-}"
+  if [[ -z "$lifecycle_pid" ]]; then
+    rm -f "$control_file" "$completion_file" "$error_file"
+    [[ -z "$lifecycle_dir" ]] || rmdir "$lifecycle_dir" 2>/dev/null || true
+    gate_coordinator_lifecycle_dir=""
+    gate_coordinator_lifecycle_control_file=""
+    gate_coordinator_lifecycle_completion_file=""
+    gate_coordinator_lifecycle_error_file=""
+    return 0
+  fi
   case "$disposition" in
-    clean) signal="USR2" ;;
-    unclean) signal="TERM" ;;
+    clean | unclean) ;;
     *) return 2 ;;
   esac
-  if kill -0 "$lifecycle_pid" 2>/dev/null; then
-    kill -"$signal" "$lifecycle_pid" 2>/dev/null || true
+  [[ -n "$lifecycle_dir" && -n "$control_file" && -n "$completion_file" ]] || {
+    echo "error: quality-gate lifecycle control state is incomplete." >&2
+    return 2
+  }
+  update_file="$(mktemp "$lifecycle_dir/update.XXXXXX")" || control_failed=1
+  if [[ "$control_failed" -eq 0 ]] &&
+    ! printf '%s\n' "$disposition" > "$update_file"; then
+    control_failed=1
   fi
-  wait "$lifecycle_pid" 2>/dev/null
+  if [[ "$control_failed" -eq 0 ]] &&
+    ! mv -f "$update_file" "$control_file"; then
+    control_failed=1
+  fi
+  if [[ "$control_failed" -ne 0 ]]; then
+    rm -f "$update_file" "$control_file"
+    echo "error: could not publish the quality-gate lifecycle disposition; forcing an unclean disconnect." >&2
+  fi
+  # The clean detach RPC can use its full five-second transport timeout. Add
+  # room for polling, scheduling, and whole-second deadline truncation.
+  deadline=$(( $(date +%s) + 8 ))
+  while [[ ! -s "$completion_file" ]]; do
+    if [[ "$(date +%s)" -ge "$deadline" ]]; then
+      echo "error: timed out while waiting for the quality-gate lifecycle client to stop." >&2
+      return 2
+    fi
+    sleep 0.05
+  done
+  if ! node -e '
+    const value = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+    if (value.status !== "stopped" || value.exitCode !== 0) process.exit(2);
+  ' "$completion_file" 2>/dev/null; then
+    completion_valid=0
+  fi
+  wait "$lifecycle_pid" 2>/dev/null || true
+  if [[ "$completion_valid" -eq 0 ]]; then
+    [[ ! -s "$error_file" ]] || cat "$error_file" >&2
+    echo "error: the quality-gate lifecycle client did not stop cleanly." >&2
+  fi
+  rm -f "$control_file" "$completion_file" "$error_file"
+  rmdir "$lifecycle_dir" 2>/dev/null || true
+  gate_coordinator_lifecycle_pid=""
+  gate_coordinator_lifecycle_dir=""
+  gate_coordinator_lifecycle_control_file=""
+  gate_coordinator_lifecycle_completion_file=""
+  gate_coordinator_lifecycle_error_file=""
+  [[ "$control_failed" -eq 0 && "$completion_valid" -eq 1 ]] || return 2
+  return 0
 }
 
 gate_coordinator_start_bound_registration() {
-  local response_file error_file lifecycle_pid deadline rc node_executable
+  local lifecycle_dir response_file error_file control_file completion_file
+  local lifecycle_pid deadline rc node_executable
   gate_coordinator_bound_registration_json=""
-  response_file="$(mktemp "$scratch_dir/coordinator-registration.XXXXXX")" || return 2
-  error_file="$(mktemp "$scratch_dir/coordinator-registration-error.XXXXXX")" || {
+  lifecycle_dir="$(mktemp -d "$scratch_dir/coordinator-lifecycle.XXXXXX")" || return 2
+  chmod 700 "$lifecycle_dir" || {
+    rmdir "$lifecycle_dir" 2>/dev/null || true
+    return 2
+  }
+  response_file="$(mktemp "$lifecycle_dir/registration.XXXXXX")" || {
+    rmdir "$lifecycle_dir" 2>/dev/null || true
+    return 2
+  }
+  error_file="$(mktemp "$lifecycle_dir/registration-error.XXXXXX")" || {
     rm -f "$response_file"
+    rmdir "$lifecycle_dir" 2>/dev/null || true
+    return 2
+  }
+  control_file="$(mktemp "$lifecycle_dir/control.XXXXXX")" || {
+    rm -f "$response_file" "$error_file"
+    rmdir "$lifecycle_dir" 2>/dev/null || true
+    return 2
+  }
+  completion_file="$(mktemp "$lifecycle_dir/completion.XXXXXX")" || {
+    rm -f "$response_file" "$error_file" "$control_file"
+    rmdir "$lifecycle_dir" 2>/dev/null || true
     return 2
   }
   node_executable="$(node -e 'process.stdout.write(process.execPath)' 2>/dev/null)" || {
-    rm -f "$response_file" "$error_file"
+    rm -f "$response_file" "$error_file" "$control_file" "$completion_file"
+    rmdir "$lifecycle_dir" 2>/dev/null || true
     return 2
   }
   case "$node_executable" in
     /*) ;;
     *)
-      rm -f "$response_file" "$error_file"
+      rm -f "$response_file" "$error_file" "$control_file" "$completion_file"
+      rmdir "$lifecycle_dir" 2>/dev/null || true
       return 2
       ;;
   esac
   [[ -f "$node_executable" && -x "$node_executable" ]] || {
-    rm -f "$response_file" "$error_file"
+    rm -f "$response_file" "$error_file" "$control_file" "$completion_file"
+    rmdir "$lifecycle_dir" 2>/dev/null || true
+    return 2
+  }
+  [[ -f "$gate_coordinator_lifecycle_entry" &&
+    -r "$gate_coordinator_lifecycle_entry" ]] || {
+    rm -f "$response_file" "$error_file" "$control_file" "$completion_file"
+    rmdir "$lifecycle_dir" 2>/dev/null || true
     return 2
   }
   deadline=$(( $(date +%s) + 10 ))
   (
     export AGENT_QUALITY_GATE_REQUEST_CAPABILITY="$gate_coordinator_request_capability"
     exec 7>&-
-    exec "$node_executable" "$gate_coordinator_entry" register "$@" \
+    exec "$node_executable" "$gate_coordinator_lifecycle_entry" \
+      "$gate_coordinator_entry" "$completion_file" register "$@" \
       --bind-connection \
       --parent-pid "$gate_coordinator_owner_pid" \
       --response-file "$response_file" \
+      --lifecycle-control-file "$control_file" \
       --root "$gate_coordinator_root" \
       --policy-hash "$gate_coordinator_policy_hash" \
       >/dev/null 2>"$error_file"
   ) &
   lifecycle_pid=$!
   gate_coordinator_lifecycle_pid="$lifecycle_pid"
+  gate_coordinator_lifecycle_dir="$lifecycle_dir"
+  gate_coordinator_lifecycle_control_file="$control_file"
+  gate_coordinator_lifecycle_completion_file="$completion_file"
+  gate_coordinator_lifecycle_error_file="$error_file"
 
   while [[ ! -s "$response_file" ]]; do
-    if ! kill -0 "$lifecycle_pid" 2>/dev/null; then
+    if [[ -s "$completion_file" ]]; then
       if wait "$lifecycle_pid" 2>/dev/null; then rc=2; else rc=$?; fi
       [[ ! -s "$error_file" ]] || cat "$error_file" >&2
-      rm -f "$response_file" "$error_file"
+      rm -f "$response_file" "$error_file" "$control_file" "$completion_file"
+      rmdir "$lifecycle_dir" 2>/dev/null || true
       gate_coordinator_lifecycle_pid=""
+      gate_coordinator_lifecycle_dir=""
+      gate_coordinator_lifecycle_control_file=""
+      gate_coordinator_lifecycle_completion_file=""
+      gate_coordinator_lifecycle_error_file=""
       [[ "$rc" -ne 0 ]] || rc=2
       return "$rc"
     fi
@@ -290,32 +385,116 @@ gate_coordinator_start_bound_registration() {
     rm -f "$response_file" "$error_file"
     return 2
   }
-  rm -f "$response_file" "$error_file"
-  kill -0 "$lifecycle_pid" 2>/dev/null || {
+  if [[ -s "$completion_file" ]]; then
     wait "$lifecycle_pid" 2>/dev/null || true
+    [[ ! -s "$error_file" ]] || cat "$error_file" >&2
+    rm -f "$response_file" "$error_file" "$control_file" "$completion_file"
+    rmdir "$lifecycle_dir" 2>/dev/null || true
     gate_coordinator_lifecycle_pid=""
+    gate_coordinator_lifecycle_dir=""
+    gate_coordinator_lifecycle_control_file=""
+    gate_coordinator_lifecycle_completion_file=""
+    gate_coordinator_lifecycle_error_file=""
+    return 2
+  fi
+  rm -f "$response_file"
+}
+
+gate_coordinator_stop_wait_cli() {
+  local wait_pid wait_dir cancel_file completion_file error_file
+  local update_file deadline control_failed=0
+  wait_pid="${gate_coordinator_wait_pid:-}"
+  wait_dir="${gate_coordinator_wait_dir:-}"
+  cancel_file="${gate_coordinator_wait_cancel_file:-}"
+  completion_file="${gate_coordinator_wait_completion_file:-}"
+  error_file="${gate_coordinator_wait_error_file:-}"
+  if [[ -z "$wait_pid" ]]; then
+    rm -f "$cancel_file" "$completion_file" "$error_file"
+    [[ -z "$wait_dir" ]] || rmdir "$wait_dir" 2>/dev/null || true
+    gate_coordinator_wait_dir=""
+    gate_coordinator_wait_cancel_file=""
+    gate_coordinator_wait_completion_file=""
+    gate_coordinator_wait_error_file=""
+    return 0
+  fi
+  [[ -n "$wait_dir" && -n "$cancel_file" && -n "$completion_file" ]] || {
+    echo "error: quality-gate coordinator wait control state is incomplete." >&2
     return 2
   }
+  update_file="$(mktemp "$wait_dir/cancel-update.XXXXXX")" || control_failed=1
+  if [[ "$control_failed" -eq 0 ]] &&
+    ! printf 'cancel\n' > "$update_file"; then
+    control_failed=1
+  fi
+  if [[ "$control_failed" -eq 0 ]] &&
+    ! mv -f "$update_file" "$cancel_file"; then
+    control_failed=1
+  fi
+  if [[ "$control_failed" -ne 0 ]]; then
+    rm -f "$update_file" "$cancel_file"
+    echo "error: could not publish the quality-gate coordinator wait cancellation." >&2
+  fi
+  deadline=$(( $(date +%s) + 8 ))
+  while [[ ! -s "$completion_file" ]]; do
+    if [[ "$(date +%s)" -ge "$deadline" ]]; then
+      echo "error: timed out while waiting for the quality-gate coordinator wait client to stop." >&2
+      return 2
+    fi
+    sleep 0.05
+  done
+  wait "$wait_pid" 2>/dev/null || true
+  [[ ! -s "$error_file" ]] || cat "$error_file" >&2
+  rm -f "$cancel_file" "$completion_file" "$error_file"
+  rmdir "$wait_dir" 2>/dev/null || true
+  gate_coordinator_wait_pid=""
+  gate_coordinator_wait_dir=""
+  gate_coordinator_wait_cancel_file=""
+  gate_coordinator_wait_completion_file=""
+  gate_coordinator_wait_error_file=""
+  [[ "$control_failed" -eq 0 ]] || return 2
+  return 0
 }
 
 gate_coordinator_wait_cli() {
   local label="$1" output_file="$2"
   shift 2
-  local wait_pid wait_error_file started now last_heartbeat last_recovery rc had_errexit=0
+  local wait_pid wait_dir wait_error_file cancel_file completion_file
+  local started now wait_deadline last_heartbeat last_recovery rc recorded_rc
+  local had_errexit=0
   local run_tag request_tag coordinator_marker
   started="$(date +%s)"
+  wait_deadline=$((started + gate_lock_wait_seconds + 10))
   last_heartbeat="$started"
   last_recovery="$started"
   gate_run_ensure_marker
   run_tag="$(gate_run_command_tag)"
   request_tag="$(gate_run_request_tag)"
   coordinator_marker="${gate_coordinator_marker_file:-}"
-  wait_error_file="$(mktemp "$scratch_dir/coordinator-wait-error.XXXXXX")" || return 2
+  wait_dir="$(mktemp -d "$scratch_dir/coordinator-wait.XXXXXX")" || return 2
+  chmod 700 "$wait_dir" || {
+    rmdir "$wait_dir" 2>/dev/null || true
+    return 2
+  }
+  wait_error_file="$(mktemp "$wait_dir/error.XXXXXX")" || {
+    rmdir "$wait_dir" 2>/dev/null || true
+    return 2
+  }
+  cancel_file="$(mktemp "$wait_dir/cancel.XXXXXX")" || {
+    rm -f "$wait_error_file"
+    rmdir "$wait_dir" 2>/dev/null || true
+    return 2
+  }
+  completion_file="$(mktemp "$wait_dir/completion.XXXXXX")" || {
+    rm -f "$wait_error_file" "$cancel_file"
+    rmdir "$wait_dir" 2>/dev/null || true
+    return 2
+  }
   # Use an exec boundary for coordinator waits. A backgrounded shell function
   # retains Bash's saved stdout descriptor as well as fd 7, so a hard-killed
   # gate can leave its caller's output pipe open until the RPC timeout. The
   # wrapper closes fd 7 and gives the RPC both process tags and both marker
-  # handles. The RPC binds result waits to their follower request, so the
+  # handles. A private cancellation file stops a live wait without signalling a
+  # stored PID. The RPC binds result waits to their follower request, so the
   # coordinator ends an orphaned wait when its owner sweep removes that request.
   AGENTQG_RUN="$run_tag" AGENTQG_REQUEST="$request_tag" \
     AGENT_QUALITY_GATE_REQUEST_CAPABILITY="$gate_coordinator_request_capability" \
@@ -326,7 +505,9 @@ gate_coordinator_wait_cli() {
       coordinator_entry="$4"
       coordinator_root="$5"
       policy_hash="$6"
-      shift 6
+      cancellation_file="$7"
+      completion_file="$8"
+      shift 8
 
       if [[ -n "$run_marker" ]]; then
         [[ -r "$run_marker" ]] || exit 127
@@ -338,39 +519,48 @@ gate_coordinator_wait_cli() {
       fi
       exec 7>&-
 
-      cli_pid=""
-      stop_cli() {
-        [[ -n "$cli_pid" ]] || return 0
-        kill -TERM "$cli_pid" 2>/dev/null || true
-        wait "$cli_pid" 2>/dev/null || true
-        cli_pid=""
+      rc=2
+      publish_completion() {
+        local completion_update="${completion_file}.tmp.$$"
+        trap - EXIT HUP INT TERM
+        if ! printf "%s\n" "$rc" > "$completion_update" ||
+          ! mv -f "$completion_update" "$completion_file"; then
+          rm -f "$completion_update"
+        fi
       }
-      trap "stop_cli; exit 143" HUP INT TERM
+      trap "publish_completion" EXIT
+      trap "rc=129; exit \"\$rc\"" HUP
+      trap "rc=130; exit \"\$rc\"" INT
+      trap "rc=143; exit \"\$rc\"" TERM
 
+      set +e
       node "$coordinator_entry" "$@" \
-        --root "$coordinator_root" --policy-hash "$policy_hash" &
-      cli_pid=$!
-      wait "$cli_pid"
+        --root "$coordinator_root" --policy-hash "$policy_hash" \
+        --cancel-file "$cancellation_file"
       rc=$?
-      cli_pid=""
       exit "$rc"
     ' "$run_tag" "$request_tag" "$gate_run_marker_file" \
       "$coordinator_marker" "$gate_coordinator_entry" \
-      "$gate_coordinator_root" "$gate_coordinator_policy_hash" "$@" \
+      "$gate_coordinator_root" "$gate_coordinator_policy_hash" \
+      "$cancel_file" "$completion_file" "$@" \
       > "$output_file" 2> "$wait_error_file" &
   wait_pid=$!
   gate_coordinator_wait_pid="$wait_pid"
-  while kill -0 "$wait_pid" 2>/dev/null; do
+  gate_coordinator_wait_dir="$wait_dir"
+  gate_coordinator_wait_cancel_file="$cancel_file"
+  gate_coordinator_wait_completion_file="$completion_file"
+  gate_coordinator_wait_error_file="$wait_error_file"
+  while [[ ! -s "$completion_file" ]]; do
     sleep 1
-    kill -0 "$wait_pid" 2>/dev/null || break
     now="$(date +%s)"
+    if [[ "$now" -ge "$wait_deadline" ]]; then
+      echo "error: quality-gate coordinator wait exceeded its client timeout." >&2
+      gate_coordinator_stop_wait_cli || true
+      return 2
+    fi
     if [[ $((now - last_recovery)) -ge 5 ]]; then
       if ! gate_coordinator_recover_stale_obligations; then
-        kill -TERM "$wait_pid" 2>/dev/null || true
-        wait "$wait_pid" 2>/dev/null || true
-        gate_coordinator_wait_pid=""
-        [[ ! -s "$wait_error_file" ]] || cat "$wait_error_file" >&2
-        rm -f "$wait_error_file"
+        gate_coordinator_stop_wait_cli || true
         return 2
       fi
       last_recovery="$now"
@@ -382,11 +572,22 @@ gate_coordinator_wait_cli() {
   done
   case "$-" in *e*) had_errexit=1 ;; esac
   set +e
-  wait "$wait_pid"
-  rc=$?
+  recorded_rc="$(<"$completion_file")" || recorded_rc=""
+  wait "$wait_pid" 2>/dev/null || true
+  if [[ "$recorded_rc" =~ ^[0-9]+$ && "$recorded_rc" -le 255 ]]; then
+    rc="$recorded_rc"
+  else
+    echo "error: quality-gate coordinator wait wrote an invalid completion status." >&2
+    rc=2
+  fi
   gate_coordinator_wait_pid=""
   [[ ! -s "$wait_error_file" ]] || cat "$wait_error_file" >&2
-  rm -f "$wait_error_file"
+  rm -f "$wait_error_file" "$cancel_file" "$completion_file"
+  rmdir "$wait_dir" 2>/dev/null || true
+  gate_coordinator_wait_dir=""
+  gate_coordinator_wait_cancel_file=""
+  gate_coordinator_wait_completion_file=""
+  gate_coordinator_wait_error_file=""
   [[ "$had_errexit" -eq 1 ]] && set -e
   return "$rc"
 }

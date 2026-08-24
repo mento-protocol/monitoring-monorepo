@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { createConnection } from "node:net";
 
 import { socketPathForRoot } from "./quality-gate-coordinator-legacy.mjs";
@@ -150,11 +151,45 @@ export async function connectCoordinator({
   };
 }
 
-export async function coordinatorRpc(options, action, params = {}) {
-  const client = await connectCoordinator(options);
+export async function coordinatorRpc(options = {}, action, params = {}) {
+  const { cancellationFile, ...connectionOptions } = options;
+  if (
+    cancellationFile !== undefined &&
+    (typeof cancellationFile !== "string" || cancellationFile === "")
+  ) {
+    throw new CoordinatorRemoteError({
+      code: "INVALID_ARGUMENT",
+      message: "coordinator cancellation requires a control file path",
+    });
+  }
+  const client = await connectCoordinator(connectionOptions);
+  let cancellationTimer = null;
   try {
-    return await client.request(action, params);
+    const request = client.request(action, params);
+    if (!cancellationFile) return await request;
+    const cancellation = new Promise(
+      (_resolveCancellation, rejectCancellation) => {
+        cancellationTimer = setInterval(() => {
+          let command;
+          try {
+            command = readFileSync(cancellationFile, "utf8").trim();
+          } catch {
+            command = "cancel";
+          }
+          if (command === "") return;
+          client.destroy();
+          rejectCancellation(
+            new CoordinatorRemoteError({
+              code: "LOCAL_CANCELLED",
+              message: "coordinator request was cancelled by its local owner",
+            }),
+          );
+        }, PARENT_LIFECYCLE_POLL_MS);
+      },
+    );
+    return await Promise.race([request, cancellation]);
   } finally {
+    if (cancellationTimer) clearInterval(cancellationTimer);
     await client.close();
   }
 }
@@ -162,7 +197,7 @@ export async function coordinatorRpc(options, action, params = {}) {
 export async function bindCoordinatorRequest(
   options,
   params,
-  { parentPid, publishResponse },
+  { parentPid, publishResponse, lifecycleControlFile },
 ) {
   if (!Number.isSafeInteger(parentPid) || parentPid <= 1) {
     throw new CoordinatorRemoteError({
@@ -174,6 +209,13 @@ export async function bindCoordinatorRequest(
     throw new CoordinatorRemoteError({
       code: "INVALID_ARGUMENT",
       message: "bound coordinator request requires a response publisher",
+    });
+  }
+  if (typeof lifecycleControlFile !== "string" || lifecycleControlFile === "") {
+    throw new CoordinatorRemoteError({
+      code: "INVALID_ARGUMENT",
+      message:
+        "bound coordinator request requires a lifecycle control file path",
     });
   }
   if (process.ppid !== parentPid) {
@@ -194,12 +236,22 @@ export async function bindCoordinatorRequest(
     lifecycleMode = mode;
     lifecycleResolve(mode);
   };
-  const onCleanStop = () => stop("clean");
   const onUncleanStop = () => stop("unclean");
-  process.once("SIGUSR2", onCleanStop);
   process.once("SIGTERM", onUncleanStop);
   process.once("SIGINT", onUncleanStop);
   process.once("SIGHUP", onUncleanStop);
+  const controlTimer = setInterval(() => {
+    let command;
+    try {
+      command = readFileSync(lifecycleControlFile, "utf8").trim();
+    } catch {
+      stop("unclean");
+      return;
+    }
+    if (command === "") return;
+    if (command === "clean" || command === "unclean") stop(command);
+    else stop("unclean");
+  }, PARENT_LIFECYCLE_POLL_MS);
   const parentTimer = setInterval(() => {
     if (process.ppid !== parentPid) stop("unclean");
   }, PARENT_LIFECYCLE_POLL_MS);
@@ -229,8 +281,8 @@ export async function bindCoordinatorRequest(
     client.destroy();
     throw error;
   } finally {
+    clearInterval(controlTimer);
     clearInterval(parentTimer);
-    process.off("SIGUSR2", onCleanStop);
     process.off("SIGTERM", onUncleanStop);
     process.off("SIGINT", onUncleanStop);
     process.off("SIGHUP", onUncleanStop);

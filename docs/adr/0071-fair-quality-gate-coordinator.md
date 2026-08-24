@@ -123,9 +123,11 @@ idempotent registration call must present both the capability and the exact
 owner PID/start identity. Stale-owner mutation is internal to the coordinator.
 It uses a bound-client disconnect or a direct process-identity observation.
 Each bound registration, including retained-result reuse, stays attached to a
-separate lifecycle process. Only a targeted `SIGUSR2` closes that attachment
-cleanly. `TERM`, `HUP`, `INT`, parent death, and transport loss destroy the
-connection and start stale-owner cleanup.
+separate lifecycle process. The parent atomically writes `clean` or `unclean`
+to a private control file, waits for the lifecycle completion record, and then
+waits for its cached child. It never signals a stored PID, which could identify
+a different process after PID reuse. `TERM`, `HUP`, `INT`, parent death, and
+transport loss destroy the connection and start stale-owner cleanup.
 
 This capability prevents one cooperative local gate from changing another
 gate's request after it copies public scheduler state. It is not a security
@@ -338,7 +340,9 @@ success-producing worker.
 Blocking RPC helpers carry the request and coordinator process handles. They do
 not retain the caller's output descriptors. A result wait is bound to the exact
 follower request and owner identity. Owner cleanup removes that request and
-ends its orphaned wait after a hard-killed follower.
+ends its orphaned wait after a hard-killed follower. Normal cleanup atomically
+writes a private cancellation file and waits for the helper's completion
+record. It never signals a stored wait-process PID.
 
 ### Persist the recovery evidence before releasing resources
 
@@ -548,6 +552,7 @@ They do not predict production gate duration.
   `quality-gate-coordinator-policy.mjs`,
   `quality-gate-coordinator-environment.mjs`,
   `quality-gate-coordinator-client.mjs`,
+  `quality-gate-coordinator-lifecycle.mjs`,
   `quality-gate-coordinator-core.mjs`,
   `quality-gate-coordinator-primitives.mjs`,
   `quality-gate-coordinator-requests.mjs`,

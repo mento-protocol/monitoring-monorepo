@@ -418,9 +418,12 @@ status, wait, lease, result, acknowledgement, cancellation, and registration
 retry requires the capability and the exact owner PID/start identity. Only the
 coordinator can mark an owner stale after a bound disconnect or process probe.
 Every bound registration includes retained-result reuse. A separate lifecycle
-process keeps the connection open. The parent sends `SIGUSR2` only after a
-clean terminal handoff. `TERM`, `HUP`, `INT`, parent death, and transport loss
-close it as an unclean disconnect.
+process keeps the connection open. The parent atomically writes `clean` or
+`unclean` to a private control file and waits for the lifecycle completion
+record. It then waits for the cached child status. Cleanup never signals the
+stored PID because the operating system can reuse that PID after the child
+exits. `TERM`, `HUP`, `INT`, parent death, and transport loss close the
+connection as an unclean disconnect.
 
 This check prevents accidental cross-session mutation between cooperative gates
 that run as one user. It does not isolate hostile code under the same operating-
@@ -543,7 +546,10 @@ Each blocking RPC helper carries the request and coordinator process tags and
 marker descriptors. It closes the caller's inherited output descriptors. A
 hard-killed gate therefore cannot leave an orphaned wait process holding its
 caller's output pipe. A result wait also includes the exact follower request and
-owner identity. Owner cleanup removes that request and ends the wait.
+owner identity. Owner cleanup removes that request and ends the wait. Normal
+cleanup atomically writes `cancel` to a private control file, waits for the
+helper's completion record, and then waits for its cached child status. It does
+not signal a stored wait-process PID.
 
 An active exact-key singleflight takes precedence over an older reusable
 success. A matching caller joins the active execution. The coordinator checks

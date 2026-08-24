@@ -3775,10 +3775,12 @@ test("process-group TERM marks a bound request unclean", async () => {
   const fixture = await createFixture({ capacity: 1 });
   const requestId = "term-bound-request";
   const requestOwner = owner(184);
+  const controlFile = join(fixture.root, "term-bound-lifecycle-control");
   const moduleUrl = new URL(
     "./quality-gate-coordinator-client.mjs",
     import.meta.url,
   ).href;
+  writeFileSync(controlFile, "");
   const child = spawn(
     process.execPath,
     [
@@ -3786,12 +3788,14 @@ test("process-group TERM marks a bound request unclean", async () => {
       "-e",
       `
         import { bindCoordinatorRequest } from ${JSON.stringify(moduleUrl)};
-        const [parentPid, root, policyHash, paramsJson] = process.argv.slice(1);
+        const [parentPid, root, policyHash, paramsJson, lifecycleControlFile] =
+          process.argv.slice(1);
         await bindCoordinatorRequest(
           { root, policyHash },
           JSON.parse(paramsJson),
           {
             parentPid: Number(parentPid),
+            lifecycleControlFile,
             publishResponse: async () => process.stdout.write("READY\\n"),
           },
         );
@@ -3808,6 +3812,7 @@ test("process-group TERM marks a bound request unclean", async () => {
         owner: requestOwner,
         successMaxAgeMs: 0,
       }),
+      controlFile,
     ],
     { detached: true, stdio: ["ignore", "pipe", "pipe"] },
   );
@@ -3839,6 +3844,263 @@ test("process-group TERM marks a bound request unclean", async () => {
     }
     assert.equal(stderr, "");
   }
+});
+
+test("a private control file marks a bound request unclean", async () => {
+  const fixture = await createFixture({ capacity: 1 });
+  const requestId = "control-bound-request";
+  const requestOwner = owner(185);
+  const controlFile = join(fixture.root, "bound-lifecycle-control");
+  const moduleUrl = new URL(
+    "./quality-gate-coordinator-client.mjs",
+    import.meta.url,
+  ).href;
+  writeFileSync(controlFile, "");
+  const child = spawn(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      `
+        import { bindCoordinatorRequest } from ${JSON.stringify(moduleUrl)};
+        const [parentPid, root, policyHash, paramsJson, lifecycleControlFile] =
+          process.argv.slice(1);
+        await bindCoordinatorRequest(
+          { root, policyHash },
+          JSON.parse(paramsJson),
+          {
+            parentPid: Number(parentPid),
+            lifecycleControlFile,
+            publishResponse: async () => process.stdout.write("READY\\n"),
+          },
+        );
+      `,
+      String(process.pid),
+      fixture.root,
+      fixture.policyHash,
+      JSON.stringify({
+        requestId,
+        capability: capabilityFor(requestId),
+        fingerprint: "control-bound-fingerprint",
+        worktreeKey: "/tmp/control-bound-worktree",
+        drainIdentity: runToken("control-bound-request", 185, 1_770_000_000),
+        owner: requestOwner,
+        successMaxAgeMs: 0,
+      }),
+      controlFile,
+    ],
+    { stdio: ["ignore", "pipe", "pipe"] },
+  );
+  let stdout = "";
+  let stderr = "";
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stdout.on("data", (chunk) => {
+    stdout += chunk;
+  });
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk;
+  });
+  try {
+    await waitUntil(() => (stdout.includes("READY\n") ? true : null));
+    await lease(fixture, requestId, "control-bound-lease", requestOwner);
+    writeFileSync(controlFile, "unclean\n");
+    await once(child, "exit");
+    const drained = await waitUntil(() => {
+      const inspected = fixture.coordinator.core.inspect();
+      return inspected.drainObligations.length === 1 ? inspected : null;
+    });
+    assert.equal(drained.requests[0].autoAcknowledge, true);
+    assert.equal(drained.leases[0].status, "drain-required");
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill("SIGKILL");
+      await once(child, "exit");
+    }
+    assert.equal(stderr, "");
+  }
+});
+
+test("coordinator cleanup never signals a recycled PID stand-in", async () => {
+  const root = mkdtempSync(join(tmpdir(), "quality-gate-lifecycle-cleanup-"));
+  fixtures.push({ root });
+  const signalFile = join(root, "sentinel-signal");
+  const supportPath = fileURLToPath(
+    new URL("./quality-gate-coordinator-support.sh", import.meta.url),
+  );
+  const sentinel = spawn(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      `
+        import { writeFileSync } from "node:fs";
+        const signalFile = process.argv[1];
+        for (const signal of ["SIGUSR2", "SIGTERM"]) {
+          process.on(signal, () => writeFileSync(signalFile, signal));
+        }
+        process.stdout.write("READY\\n");
+        setInterval(() => {}, 1_000);
+      `,
+      signalFile,
+    ],
+    { stdio: ["ignore", "pipe", "pipe"] },
+  );
+  let stdout = "";
+  let stderr = "";
+  sentinel.stdout.setEncoding("utf8");
+  sentinel.stderr.setEncoding("utf8");
+  sentinel.stdout.on("data", (chunk) => {
+    stdout += chunk;
+  });
+  sentinel.stderr.on("data", (chunk) => {
+    stderr += chunk;
+  });
+  try {
+    await waitUntil(() => (stdout.includes("READY\n") ? true : null));
+    for (const disposition of ["clean", "unclean"]) {
+      const scratch = join(root, `scratch-${disposition}`);
+      const controlFile = join(scratch, "lifecycle-control");
+      const completionFile = join(scratch, "lifecycle-completion");
+      const lifecycleErrorFile = join(scratch, "lifecycle-error");
+      mkdirSync(scratch, { recursive: true });
+      writeFileSync(controlFile, "");
+      writeFileSync(completionFile, '{"status":"stopped","exitCode":0}\n');
+      writeFileSync(lifecycleErrorFile, "");
+      const result = spawnSync(
+        "/bin/bash",
+        [
+          "-c",
+          `
+            set -euo pipefail
+            scratch_dir="$1"
+            gate_coordinator_lifecycle_dir="$1"
+            gate_coordinator_lifecycle_pid="$2"
+            gate_coordinator_lifecycle_control_file="$3"
+            gate_coordinator_lifecycle_completion_file="$4"
+            gate_coordinator_lifecycle_error_file="$5"
+            source "$6"
+            gate_coordinator_stop_request_lifecycle "$7"
+          `,
+          "lifecycle-cleanup-test",
+          scratch,
+          String(sentinel.pid),
+          controlFile,
+          completionFile,
+          lifecycleErrorFile,
+          supportPath,
+          disposition,
+        ],
+        { encoding: "utf8" },
+      );
+      assert.equal(result.status, 0, result.stderr);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      process.kill(sentinel.pid, 0);
+      assert.equal(existsSync(signalFile), false);
+    }
+    const failedScratch = join(root, "scratch-failed-lifecycle");
+    const failedControlFile = join(failedScratch, "lifecycle-control");
+    const failedCompletionFile = join(failedScratch, "lifecycle-completion");
+    const failedErrorFile = join(failedScratch, "lifecycle-error");
+    mkdirSync(failedScratch, { recursive: true });
+    writeFileSync(failedControlFile, "");
+    writeFileSync(failedCompletionFile, '{"status":"failed","exitCode":2}\n');
+    writeFileSync(failedErrorFile, "fixture lifecycle failure\n");
+    const failedResult = spawnSync(
+      "/bin/bash",
+      [
+        "-c",
+        `
+          set -euo pipefail
+          scratch_dir="$1"
+          gate_coordinator_lifecycle_dir="$1"
+          gate_coordinator_lifecycle_pid="$2"
+          gate_coordinator_lifecycle_control_file="$3"
+          gate_coordinator_lifecycle_completion_file="$4"
+          gate_coordinator_lifecycle_error_file="$5"
+          source "$6"
+          gate_coordinator_stop_request_lifecycle unclean
+        `,
+        "failed-lifecycle-cleanup-test",
+        failedScratch,
+        String(sentinel.pid),
+        failedControlFile,
+        failedCompletionFile,
+        failedErrorFile,
+        supportPath,
+      ],
+      { encoding: "utf8" },
+    );
+    assert.equal(failedResult.status, 2, failedResult.stderr);
+    assert.match(failedResult.stderr, /fixture lifecycle failure/u);
+    assert.match(failedResult.stderr, /did not stop cleanly/u);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    process.kill(sentinel.pid, 0);
+    assert.equal(existsSync(signalFile), false);
+
+    const waitScratch = join(root, "scratch-wait-cancel");
+    const cancelFile = join(waitScratch, "wait-cancel");
+    const waitCompletionFile = join(waitScratch, "wait-completion");
+    const waitErrorFile = join(waitScratch, "wait-error");
+    mkdirSync(waitScratch, { recursive: true });
+    writeFileSync(cancelFile, "");
+    writeFileSync(waitCompletionFile, "0\n");
+    writeFileSync(waitErrorFile, "");
+    const waitResult = spawnSync(
+      "/bin/bash",
+      [
+        "-c",
+        `
+          set -euo pipefail
+          gate_coordinator_wait_pid="$1"
+          gate_coordinator_wait_dir="$2"
+          gate_coordinator_wait_cancel_file="$3"
+          gate_coordinator_wait_completion_file="$4"
+          gate_coordinator_wait_error_file="$5"
+          source "$6"
+          gate_coordinator_stop_wait_cli
+        `,
+        "wait-cleanup-test",
+        String(sentinel.pid),
+        waitScratch,
+        cancelFile,
+        waitCompletionFile,
+        waitErrorFile,
+        supportPath,
+      ],
+      { encoding: "utf8" },
+    );
+    assert.equal(waitResult.status, 0, waitResult.stderr);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    process.kill(sentinel.pid, 0);
+    assert.equal(existsSync(signalFile), false);
+  } finally {
+    if (sentinel.exitCode === null && sentinel.signalCode === null) {
+      sentinel.kill("SIGKILL");
+      await once(sentinel, "exit");
+    }
+    assert.equal(stderr, "");
+  }
+});
+
+test("lifecycle bootstrap records an entrypoint failure", () => {
+  const root = mkdtempSync(join(tmpdir(), "quality-gate-lifecycle-bootstrap-"));
+  fixtures.push({ root });
+  const bootstrap = fileURLToPath(
+    new URL("./quality-gate-coordinator-lifecycle.mjs", import.meta.url),
+  );
+  const completionFile = join(root, "lifecycle-completion");
+  writeFileSync(completionFile, "");
+  const result = spawnSync(
+    process.execPath,
+    [bootstrap, join(root, "missing-entrypoint.mjs"), completionFile],
+    { encoding: "utf8" },
+  );
+  assert.equal(result.status, 2, result.stderr);
+  assert.deepEqual(JSON.parse(readFileSync(completionFile, "utf8")), {
+    status: "failed",
+    exitCode: 2,
+  });
 });
 
 test("stale reports require an exact PID/start identity and explicit drain ack", async () => {
@@ -5662,6 +5924,26 @@ test("a connected server that never replies hits the RPC transport bound", async
     (error) => error.code === "TRANSPORT_TIMEOUT",
   );
   assert.ok(Date.now() - startedAt < 500);
+  await new Promise((resolveClose) => server.close(resolveClose));
+});
+
+test("a private cancellation file stops a connected RPC wait", async () => {
+  const root = mkdtempSync(join(tmpdir(), "quality-gate-cancelled-rpc-"));
+  fixtures.push({ root, coordinator: null });
+  const cancellationFile = join(root, "wait-cancellation");
+  writeFileSync(cancellationFile, "");
+  const server = createServer((socket) => socket.on("data", () => {}));
+  await new Promise((resolveListen, rejectListen) => {
+    server.once("error", rejectListen);
+    server.listen(socketPathForRoot(root), resolveListen);
+  });
+  const cancelled = coordinatorRpc(
+    { root, rpcTimeoutMs: 5_000, cancellationFile },
+    "ping",
+  );
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  writeFileSync(cancellationFile, "cancel\n");
+  await assert.rejects(cancelled, (error) => error.code === "LOCAL_CANCELLED");
   await new Promise((resolveClose) => server.close(resolveClose));
 });
 

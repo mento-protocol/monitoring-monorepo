@@ -346,7 +346,7 @@ function commonOwnerParams(parsed) {
   };
 }
 
-async function runCli(argv) {
+export async function runCli(argv) {
   const parsed = parseCli(argv);
   if (parsed.help) {
     process.stdout.write(usage());
@@ -561,16 +561,26 @@ async function runCli(argv) {
   }
   if (action === "register" && params.bindConnection === true) {
     const responseFile = required(parsed, "--response-file");
+    const lifecycleControlFile = required(parsed, "--lifecycle-control-file");
     const parentPid = integer(parsed, "--parent-pid");
     await bindCoordinatorRequest({ root, policyHash }, params, {
       parentPid,
+      lifecycleControlFile,
       publishResponse(response) {
         writeAtomicJson(responseFile, response);
       },
     });
     return;
   }
-  const response = await coordinatorRpc({ root, policyHash }, action, params);
+  const response = await coordinatorRpc(
+    {
+      root,
+      policyHash,
+      cancellationFile: parsed.values.get("--cancel-file"),
+    },
+    action,
+    params,
+  );
   process.stdout.write(`${JSON.stringify(response)}\n`);
 }
 
