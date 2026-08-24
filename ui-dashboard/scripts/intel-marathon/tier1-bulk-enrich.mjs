@@ -1,13 +1,20 @@
 #!/usr/bin/env node
 /**
- * Tier 1 — bulk Arkham sweep of every distinct address that has interacted
- * with Mento, via /intelligence/address_enriched/{addr}/all. Persists into
- * Upstash `labels` hash (source: "arkham").
+ * Tier 1 — bulk Arkham sweep of the distinct EXTERNAL-ACTOR addresses in the
+ * indexer's data, via /intelligence/address_enriched/{addr}/all. Persists
+ * into Upstash `labels` hash (source: "arkham").
  *
  * Discovery reads the indexer's PER-ADDRESS ROLLUP entities rather than raw
  * event tables: one row per address instead of one row per event, so a full
  * sweep costs ~80 Hasura pages instead of thousands. Rollups carry no chain
  * filter — Arkham keys on the address, and EVM addresses are chain-agnostic.
+ * This is narrower than the production cron's DISCOVERY_TARGETS by design:
+ * protocol actors (isProtocolActor), router/pool contract fields
+ * (SwapEvent.recipient/.txTo, RebalanceEvent.*, Pool.rebalancerAddress), and
+ * BridgeTransfer.recipient (≈ its senders) are deliberately excluded.
+ * A discovery source that errors ABORTS the run before any quota is spent —
+ * a partial set looks identical to full coverage afterwards; pass
+ * --allow-partial-discovery to proceed anyway.
  *
  * Enrichment order (cap-aware; the trial's Intel Label quota is the binding
  * constraint, not throughput):
@@ -64,6 +71,10 @@
  *   --limit N          cap the number of addresses enriched this run
  *   --quota-floor N    stop when Intel Label Remaining <= N (default 50)
  *   --no-refresh       skip step 1; only enrich addresses with no label
+ *   --allow-partial-discovery
+ *                      proceed even when a discovery source errored (the run
+ *                      normally aborts to avoid spending quota on a silently
+ *                      incomplete sweep)
  *   --chain <id>       output-file scope tag only (default "all"). Discovery
  *                      is cross-chain; pass this only to resume a prior
  *                      per-chain progress file.
@@ -96,6 +107,7 @@ const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 const args = process.argv.slice(2);
 const dryRun = args.includes("--dry-run");
 const refresh = !args.includes("--no-refresh");
+const allowPartialDiscovery = args.includes("--allow-partial-discovery");
 
 function flagValue(name) {
   const i = args.indexOf(name);
@@ -104,11 +116,25 @@ function flagValue(name) {
   return raw === undefined || raw.startsWith("--") ? undefined : raw;
 }
 
+/**
+ * Numeric flag with a hard parse failure. A typo'd `--quota-floor 5O` would
+ * otherwise become NaN, and every `remaining <= NaN` comparison is false — the
+ * quota brake would look configured and never fire.
+ */
+function numericFlag(name, fallback) {
+  const raw = flagValue(name);
+  if (raw === undefined) return fallback;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    console.error(`Invalid ${name}: ${raw} (expected a non-negative number)`);
+    process.exit(1);
+  }
+  return parsed;
+}
+
 const scope = flagValue("--chain") ?? "all";
-const limitArg = flagValue("--limit") ? Number(flagValue("--limit")) : Infinity;
-const quotaFloor = flagValue("--quota-floor")
-  ? Number(flagValue("--quota-floor"))
-  : QUOTA_FLOOR_DEFAULT;
+const limitArg = numericFlag("--limit", Infinity);
+const quotaFloor = numericFlag("--quota-floor", QUOTA_FLOOR_DEFAULT);
 
 // Discovery is unauthenticated Hasura, so --dry-run needs no credentials.
 const required = dryRun
@@ -221,6 +247,7 @@ async function pageSource(source) {
 async function discoverAll() {
   console.log("→ Discovery from per-address rollups (all chains)...");
   const registry = new Map(); // address → { sources, volumeWei, nonBroker }
+  const failedSources = [];
   const perSource = {}; // "Table.field" → distinct address count
   for (const source of DISCOVERY_SOURCES) {
     for (const field of source.addressFields) {
@@ -261,10 +288,22 @@ async function discoverAll() {
       );
     } catch (err) {
       console.warn(`  ⚠ ${source.table}: ${err.message}`);
+      failedSources.push(source.table);
       for (const field of source.addressFields) {
         perSource[`${source.table}.${field}`] = `ERROR: ${err.message}`;
       }
     }
+  }
+  // A failed source silently shrinks the sweep — quota spent against an
+  // incomplete discovery set looks identical to full coverage afterwards.
+  // Abort instead, unless the caller explicitly accepted the gap.
+  if (failedSources.length > 0 && !allowPartialDiscovery) {
+    console.error(
+      `✗ Discovery incomplete — ${failedSources.length} source(s) failed: ` +
+        `${failedSources.join(", ")}. Re-run, or pass ` +
+        `--allow-partial-discovery to enrich the partial set anyway.`,
+    );
+    process.exit(1);
   }
   console.log(`→ Discovery total (deduped): ${registry.size} addresses`);
   return { registry, perSource };
@@ -463,16 +502,21 @@ function buildQueue(registry, existing) {
 // not to consume quota, but the numbers come from the API either way.
 //
 // Two sources, in precedence order. Response headers are authoritative and
-// per-request, so once any have been seen they own the values. The
+// per-request, so once they have been seen they own the values. The
 // /subscription/intel-usage body is the fallback: the headers are unverified,
 // and without a fallback a header-less API would leave `remaining` null and the
 // --quota-floor stop would never fire.
+//
+// Precedence is tracked per-field for `remaining`, not for the header set as a
+// whole: an API that sends Usage/Limit but no Remaining must not switch off the
+// body fallback, or `remaining` would stay null and the stop would never fire.
 const quota = {
   usage: null,
   limit: null,
   remaining: null,
   seen: false, // any source has reported numbers
   fromHeaders: false, // response headers have reported numbers at least once
+  remainingFromHeaders: false, // a header has reported Remaining specifically
 };
 
 const isFiniteNumber = (v) => typeof v === "number" && Number.isFinite(v);
@@ -496,7 +540,10 @@ function noteQuotaHeaders(res) {
     remaining < quota.remaining;
   if (usage !== null) quota.usage = usage;
   if (limit !== null) quota.limit = limit;
-  if (remaining !== null) quota.remaining = remaining;
+  if (remaining !== null) {
+    quota.remaining = remaining;
+    quota.remainingFromHeaders = true;
+  }
   quota.seen = true;
   quota.fromHeaders = true;
   return dropped;
@@ -506,7 +553,7 @@ function quotaLine() {
   if (!quota.seen) return "quota not yet observed";
   return `usage=${quota.usage ?? "?"} limit=${quota.limit ?? "?"} remaining=${
     quota.remaining ?? "?"
-  } via=${quota.fromHeaders ? "headers" : "intel-usage"}`;
+  } via=${quota.remainingFromHeaders ? "headers" : "intel-usage"}`;
 }
 
 // Live body shape (probed 2026-08-24):
@@ -537,9 +584,10 @@ async function logIntelUsage(context) {
       return;
     }
     const body = await res.json();
-    // Headers win once seen. Otherwise every poll refreshes the body-derived
-    // numbers, so the --quota-floor stop stays live on a header-less API.
-    if (!quota.fromHeaders) {
+    // A Remaining header wins once seen. Until then every poll refreshes the
+    // body-derived numbers, so the --quota-floor stop stays live on an API that
+    // sends no Remaining header at all — or only Usage/Limit.
+    if (!quota.remainingFromHeaders) {
       const remaining = remainingFromUsageBody(body);
       if (remaining !== null) {
         quota.remaining = remaining;
@@ -606,16 +654,17 @@ function toAddressEntry(data) {
     !label && !entity && topPred
       ? `Arkham prediction (${Math.round(topPred.confidence * 100)}% confidence)`
       : undefined;
-  return {
+  // sanitizeEntry(), as the lib's toAddressEntry does — a NEW entry gets the
+  // same trim / case-insensitive tag dedup / length caps the dashboard's own
+  // writes get, not just the merged refresh path below.
+  return sanitizeEntry({
     name,
-    tags: Array.from(tagSet)
-      .slice(0, 20)
-      .map((t) => String(t).slice(0, 50)),
+    tags: Array.from(tagSet),
     notes: note,
     isPublic: false,
     source: "arkham",
     updatedAt: new Date().toISOString(),
-  };
+  });
 }
 
 // Entry-shape limits, mirroring ui-dashboard/src/lib/address-labels-shared.ts.

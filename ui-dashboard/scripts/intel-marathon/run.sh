@@ -12,8 +12,11 @@
 #   UPSTASH_REDIS_REST_URL/_REST_TOKEN  ← Upstash mgmt API, itself authorized by
 #                                         tfvars `upstash_email`/`upstash_api_key`
 #
-# `tier1-bulk-enrich --dry-run` calls neither Arkham nor Upstash, so it runs
-# with no credentials at all.
+# `tier1-bulk-enrich --dry-run` never calls Arkham, so it needs no
+# ARKHAM_API_KEY. It DOES still use Upstash when credentials resolve: the dry
+# run reads the `labels` hash so its tier sizes are real, and this launcher
+# still mints a REST token below when tfvars is readable. It writes nothing.
+# With no credentials at all the dry run works too, reporting tier 1 as 0.
 #
 # Usage:
 #   bash ui-dashboard/scripts/intel-marathon/run.sh baseline-snapshot

@@ -76,7 +76,8 @@ const CLUSTER_7DC0_CONTRACTS = [
 ];
 const CLUSTER_7DC0_DEPLOYER = "0x7dc08ec28f299c062d2941de1f9cfb741df8f022";
 
-// Chains Arkham supports as of 2026-04 (per arkham SKILL.md).
+// Chains Arkham supports per live GET /chains on 2026-08-24 (ton was
+// deregistered; hypercore and robinhood were added).
 const ARKHAM_CHAINS = new Set([
   "ethereum",
   "polygon",
@@ -89,10 +90,11 @@ const ARKHAM_CHAINS = new Set([
   "tron",
   "flare",
   "solana",
-  "ton",
   "dogecoin",
   "zcash",
   "hyperevm",
+  "hypercore",
+  "robinhood",
 ]);
 
 const isValidAddress = (v) =>
@@ -343,6 +345,7 @@ function deriveTags(enriched, counterparties) {
   let name = null;
   let entitySlug = null;
   let contractFlag = false;
+  const arkhamTags = new Set();
 
   if (enriched) {
     for (const perChain of Object.values(enriched)) {
@@ -357,9 +360,13 @@ function deriveTags(enriched, counterparties) {
       if (perChain.arkhamEntity?.id)
         tags.add(`slug:${perChain.arkhamEntity.id}`);
       // Arkham replaced `tags[].slug` with `populatedTags[].id` in 2026-08.
-      // Read both so the tag set survives either shape.
-      for (const t of perChain.populatedTags ?? []) if (t.id) tags.add(t.id);
-      for (const t of perChain.tags ?? []) if (t.slug) tags.add(t.slug);
+      // Read both so the tag set survives either shape. Collected separately
+      // and appended AFTER the forensic ctp:/type: tags below — Arkham
+      // returns up to ~31 distinct ids per address (81/11k measured over 15),
+      // which would otherwise crowd this pass's own tags out of the 20-cap.
+      for (const t of perChain.populatedTags ?? [])
+        if (t.id) arkhamTags.add(t.id);
+      for (const t of perChain.tags ?? []) if (t.slug) arkhamTags.add(t.slug);
       if (perChain.contract === true) contractFlag = true;
     }
   }
@@ -385,6 +392,7 @@ function deriveTags(enriched, counterparties) {
   }
 
   if (contractFlag) tags.add("type:contract");
+  for (const t of arkhamTags) tags.add(t);
 
   return {
     name: name?.slice(0, 200) ?? null,
