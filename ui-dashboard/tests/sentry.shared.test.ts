@@ -1,9 +1,23 @@
 import { describe, it, expect } from "vitest";
 import {
   filterAndStripSentryEvent,
+  resolveTracesSampleRate,
   shouldEnableSentry,
   stripAuthHeaders,
 } from "../sentry.shared";
+
+describe("resolveTracesSampleRate", () => {
+  it("samples 20% of production traces", () => {
+    expect(resolveTracesSampleRate("production")).toBe(0.2);
+  });
+
+  it.each(["preview", "development", undefined])(
+    "disables tracing when VERCEL_ENV is %s",
+    (vercelEnv) => {
+      expect(resolveTracesSampleRate(vercelEnv)).toBe(0);
+    },
+  );
+});
 
 // Minimal test harness: stripAuthHeaders takes an ErrorEvent | TransactionEvent
 // and mutates/returns it. For unit-test purposes we can cast a loose object to
