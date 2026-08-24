@@ -901,6 +901,11 @@ async function main() {
     for (let i = 0; i < batch.length; i++) {
       if (Number(results[i]?.result) === 1) {
         written++;
+        appendFileSync(
+          progressFile,
+          JSON.stringify({ address: batch[i].address, write: "written" }) +
+            "\n",
+        );
         continue;
       }
       newSkippedExists++;
@@ -922,6 +927,10 @@ async function main() {
     for (const w of batch) {
       if (!skipped.has(w.address)) {
         written++;
+        appendFileSync(
+          progressFile,
+          JSON.stringify({ address: w.address, write: "written" }) + "\n",
+        );
         continue;
       }
       refreshSkippedChanged++;
@@ -938,10 +947,13 @@ async function main() {
       if (news.length > 0) await flushNewWrites(news);
       if (refreshes.length > 0) await flushRefreshWrites(refreshes);
     } catch (err) {
-      // Put the batch back so the next flush retries it instead of dropping
-      // already-fetched, quality-gate-passed results. Each address already
-      // has a `{address, status}` line in progressFile from the per-address
-      // loop, so a write lost here would never be retried on resume.
+      // Put the batch back (protects an in-process retry, e.g. a later
+      // threshold flush succeeding after a transient blip) and re-throw so
+      // the caller halts rather than silently grinding through the queue.
+      // recordResult() deliberately never wrote a progressFile line for
+      // these addresses, so if the process halts here instead of retrying,
+      // a resumed run re-fetches and re-attempts them rather than skipping
+      // addresses whose write never landed.
       pendingWrites.unshift(...batch);
       throw err;
     }
@@ -995,6 +1007,7 @@ async function main() {
     consecutiveErrors = 0;
     if (status !== 200 || !data) {
       nullCount++;
+      appendFileSync(progressFile, JSON.stringify({ address, status }) + "\n");
       return;
     }
     const entry = toAddressEntry(data);
@@ -1002,10 +1015,16 @@ async function main() {
       // Quality gate failed. On a refresh this deliberately leaves the prior
       // entry in place rather than deleting it.
       nullCount++;
+      appendFileSync(progressFile, JSON.stringify({ address, status }) + "\n");
       return;
     }
     // The start snapshot decides the write mode. Absent then → HSETNX now;
     // present then → compare-and-set against the `updatedAt` we read.
+    // Progress for this address is recorded once the write is durably
+    // confirmed (flushNewWrites/flushRefreshWrites/noteSkip), not here —
+    // recording it now would let a resumed run skip an address whose label
+    // write never actually landed (e.g. the process halts on a flush
+    // failure before this batch is retried).
     const current = existing[address];
     pendingWrites.push({
       address,
@@ -1029,7 +1048,8 @@ async function main() {
         rawFile,
         JSON.stringify({ address, status, data, ts: Date.now() }) + "\n",
       );
-      appendFileSync(progressFile, JSON.stringify({ address, status }) + "\n");
+      // recordResult() records progress itself, once the outcome (no write
+      // needed, or the write's durable result) is actually known.
       recordResult(address, status, data);
       if (dropped) console.log(`  quota ↓ after ${address}: ${quotaLine()}`);
     } catch (err) {
@@ -1045,10 +1065,6 @@ async function main() {
           appendFileSync(
             rawFile,
             JSON.stringify({ address, status, data, ts: Date.now() }) + "\n",
-          );
-          appendFileSync(
-            progressFile,
-            JSON.stringify({ address, status }) + "\n",
           );
           recordResult(address, status, data);
         } catch (retryErr) {

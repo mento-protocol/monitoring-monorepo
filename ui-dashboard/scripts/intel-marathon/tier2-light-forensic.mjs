@@ -362,8 +362,9 @@ function deriveTags(enriched, counterparties) {
       // Arkham replaced `tags[].slug` with `populatedTags[].id` in 2026-08.
       // Read both so the tag set survives either shape. Collected separately
       // and appended AFTER the forensic ctp:/type: tags below — Arkham
-      // returns up to ~31 distinct ids per address (81/11k measured over 15),
-      // which would otherwise crowd this pass's own tags out of the 20-cap.
+      // returns up to ~31 distinct ids per address (measured live: 81 of
+      // ~11k responses exceed 15 ids), which would otherwise crowd this
+      // pass's own tags out of the 20-cap.
       for (const t of perChain.populatedTags ?? [])
         if (t.id) arkhamTags.add(t.id);
       for (const t of perChain.tags ?? []) if (t.slug) arkhamTags.add(t.slug);

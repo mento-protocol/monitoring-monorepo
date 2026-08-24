@@ -57,7 +57,7 @@ resolve() {
   if [ -f "$TFVARS" ]; then
     # grep exits 1 on no match; `|| true` keeps `set -e` from killing the run
     # before the explicit error below.
-    value=$(grep -E "^${tfkey}[[:space:]]*=" "$TFVARS" | sed 's/.*= *"//;s/"$//' || true)
+    value=$(grep -E "^[[:space:]]*${tfkey}[[:space:]]*=" "$TFVARS" | sed 's/.*= *"//;s/"$//' || true)
     if [ -n "$value" ]; then
       printf -v "$var" '%s' "$value"
       return 0
