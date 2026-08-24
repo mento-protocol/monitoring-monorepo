@@ -425,11 +425,21 @@ gate is not a trust root.
   multi-package set and a root-`package.json` escalation all hash the same after
   the `__CHANGED_PATHS_FILE__` substitution `write_command_plan` already applies.
   The freshness stamp therefore hashes identically and the two Node consumers
-  that parse that stdout keep parsing it. The one deliberate exception at D5c is
-  the arm that routed the deleted harness: a change set naming
-  `scripts/gate/mapping.mjs` loses the three `routing-parity.mjs --corpus …`
-  commands and gains `pnpm gate:routing-table:test`, because the engine now
-  implements the table's closed verb set and that suite is what checks it.
+  that parse that stdout keep parsing it.
+
+  Two change-set classes DO move at D5c, both deliberately, and both invalidate
+  the stamp on purpose. A set naming `scripts/gate/mapping.mjs` loses the three
+  `routing-parity.mjs --corpus …` commands and gains `pnpm gate:routing-table:test`,
+  because the engine now implements the table's closed verb set and that suite is
+  what checks it. And two reason strings change, because what they said stopped
+  being true: on that same arm, `engine.test.mjs` is no longer "behaviour the arms
+  will stop pinning" but the only suite pinning it; and on the arm for
+  `scripts/agent-quality-gate.sh`, `pnpm gate:routing-table:test` no longer runs
+  because "gate routing arms must still match the routing table" — there are no
+  arms — but because the gate holds that table's `implementation_signature()` pin.
+  A reason string is contract, so a set naming either path hashes differently and
+  re-runs; that is the intended reading of a stamp moving at D5c.
+
 - **The parity harness survived the swap and went at D5c.** The design had it
   deleted at the swap. It was kept because after the swap its own comparison was
   circular — the gate's plan IS the engine's — while its seven corpora were the
