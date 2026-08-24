@@ -19,8 +19,10 @@ import {
 const ARKHAM_BASE = "https://api.arkm.com";
 const REQUEST_TIMEOUT_MS = 10_000;
 
-// Pacing for the standard rate-limit bucket (20 req/s). 60ms spacing leaves
-// ~16 req/s sustained — comfortably under the limit even with clock jitter.
+// Pacing for the standard rate-limit bucket (100 req/s as of 2026-08). 60ms
+// spacing leaves ~16 req/s sustained — well under the limit even with clock
+// jitter, and the trial's Intel Label quota, not throughput, is the binding
+// constraint on a bulk sweep.
 const REQ_SPACING_MS = 60;
 
 // Confidence floor for ML-attributed addresses. Below this, treat predictions
@@ -45,12 +47,27 @@ type ArkhamLabel = {
   chainType: string;
 };
 
+/**
+ * Legacy tag shape. Arkham stopped returning `tags` on enriched responses in
+ * 2026-08 — `populatedTags` replaced it. Kept as an optional read so a
+ * re-added field is picked up without another code change.
+ */
 type ArkhamTag = {
   id: string;
   name: string;
   slug: string;
   type?: string;
   description?: string;
+};
+
+/**
+ * Current tag shape (2026-08). `id` is the stable machine identifier and is
+ * the equivalent of the legacy `tags[].slug`; `label` is display text.
+ */
+type ArkhamPopulatedTag = {
+  id: string;
+  label?: string;
+  rank?: number;
 };
 
 type ArkhamEntityPrediction = {
@@ -68,6 +85,7 @@ export type ArkhamEnrichedAddress = {
   isUserAddress: boolean | null;
   contract: boolean | null;
   tags?: ArkhamTag[];
+  populatedTags?: ArkhamPopulatedTag[];
   entityPredictions?: ArkhamEntityPrediction[];
   clusterIds?: string[];
 };
@@ -176,6 +194,25 @@ export function hasUsableLabel(data: ArkhamMultiChainResponse): boolean {
 }
 
 /**
+ * Union the tag identifiers one per-chain entry carries into `into`.
+ *
+ * Arkham returns `populatedTags[].id` today; `tags[].slug` is the field it
+ * replaced in 2026-08. Both are read so the tag set is correct whichever
+ * shape the response carries.
+ */
+function addChainTags(
+  perChain: ArkhamEnrichedAddress,
+  into: Set<string>,
+): void {
+  for (const t of perChain.populatedTags ?? []) {
+    if (t.id) into.add(t.id);
+  }
+  for (const t of perChain.tags ?? []) {
+    if (t.slug) into.add(t.slug);
+  }
+}
+
+/**
  * Map an Arkham response onto our `AddressEntry` schema.
  *
  * Returns `null` when nothing is worth persisting (caller should skip the
@@ -202,9 +239,7 @@ export function toAddressEntry(
     if (!entity && perChain.arkhamEntity?.name?.trim())
       entity = perChain.arkhamEntity;
     if (entity?.type) tagSet.add(entity.type);
-    for (const t of perChain.tags ?? []) {
-      if (t.slug) tagSet.add(t.slug);
-    }
+    addChainTags(perChain, tagSet);
     for (const p of perChain.entityPredictions ?? []) {
       if (p.confidence < HIGH_CONFIDENCE) continue;
       if (!topPrediction || p.confidence > topPrediction.confidence) {
@@ -236,7 +271,7 @@ export function toAddressEntry(
 
 /**
  * Process a batch of addresses against Arkham, paced for the standard
- * 20 req/s rate limit.
+ * rate-limit bucket.
  *
  * Stops early on auth errors (misconfiguration — no point continuing).
  * Slows down on rate-limit errors (back off + retry once). Other errors are

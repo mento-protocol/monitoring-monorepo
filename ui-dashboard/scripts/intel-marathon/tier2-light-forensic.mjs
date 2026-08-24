@@ -356,6 +356,9 @@ function deriveTags(enriched, counterparties) {
         tags.add(`entity:${perChain.arkhamEntity.type}`);
       if (perChain.arkhamEntity?.id)
         tags.add(`slug:${perChain.arkhamEntity.id}`);
+      // Arkham replaced `tags[].slug` with `populatedTags[].id` in 2026-08.
+      // Read both so the tag set survives either shape.
+      for (const t of perChain.populatedTags ?? []) if (t.id) tags.add(t.id);
       for (const t of perChain.tags ?? []) if (t.slug) tags.add(t.slug);
       if (perChain.contract === true) contractFlag = true;
     }

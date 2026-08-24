@@ -1,10 +1,24 @@
 #!/usr/bin/env bash
-# Marathon launcher: bootstraps credentials from terraform.tfvars + Upstash
-# mgmt API, exports env vars, exec's the requested stage script.
+# Marathon launcher: resolves credentials, exports env vars, exec's the
+# requested stage script.
+#
+# Credentials come from the environment first. Anything still unset is read
+# from terraform.tfvars (plus the Upstash mgmt API for the per-DB REST token),
+# which exists only in a full clone — git worktrees have no terraform/ tree, so
+# export the vars yourself there. A credential the stage needs and that is
+# neither exported nor extractable is a named, fatal error.
+#
+#   ARKHAM_API_KEY                      ← tfvars `arkham_api_key`
+#   UPSTASH_REDIS_REST_URL/_REST_TOKEN  ← Upstash mgmt API, itself authorized by
+#                                         tfvars `upstash_email`/`upstash_api_key`
+#
+# `tier1-bulk-enrich --dry-run` calls neither Arkham nor Upstash, so it runs
+# with no credentials at all.
 #
 # Usage:
 #   bash ui-dashboard/scripts/intel-marathon/run.sh baseline-snapshot
-#   bash ui-dashboard/scripts/intel-marathon/run.sh tier1-bulk-enrich --chain 42220
+#   bash ui-dashboard/scripts/intel-marathon/run.sh tier1-bulk-enrich --dry-run
+#   bash ui-dashboard/scripts/intel-marathon/run.sh tier1-bulk-enrich
 #   bash ui-dashboard/scripts/intel-marathon/run.sh tier2-light-forensic --limit 150
 #   bash ui-dashboard/scripts/intel-marathon/run.sh verify
 #   bash ui-dashboard/scripts/intel-marathon/run.sh upload-drafts
@@ -24,20 +38,59 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 TFVARS="$REPO_ROOT/terraform/terraform.tfvars"
 DB_ID="c687bf0d-f61f-498e-879a-016de335b4ce"
 
-# Read tfvars-managed credentials.
-extract() {
-  grep -E "^$1" "$TFVARS" | sed 's/.*= *"//;s/"$//'
-}
-ARKHAM_API_KEY=$(extract arkham_api_key)
-UPSTASH_EMAIL=$(extract upstash_email)
-UPSTASH_API_KEY=$(extract upstash_api_key)
+# A dry run touches neither Arkham nor Upstash — resolve credentials
+# best-effort so it works in a worktree with nothing exported.
+DRY_RUN=0
+for arg in "$@"; do
+  if [ "$arg" = "--dry-run" ]; then DRY_RUN=1; fi
+done
 
-# Fetch the per-DB REST token from the Upstash mgmt API.
-RESPONSE=$(curl -s -u "${UPSTASH_EMAIL}:${UPSTASH_API_KEY}" \
-  "https://api.upstash.com/v2/redis/database/${DB_ID}")
-UPSTASH_REDIS_REST_TOKEN=$(echo "$RESPONSE" | python3 -c "import json,sys; print(json.load(sys.stdin)['rest_token'])")
-UPSTASH_ENDPOINT=$(echo "$RESPONSE" | python3 -c "import json,sys; print(json.load(sys.stdin)['endpoint'])")
-UPSTASH_REDIS_REST_URL="https://${UPSTASH_ENDPOINT}"
+# Resolve one credential: keep the exported value, else read it from tfvars.
+# Returns non-zero when neither is available — with a named error unless the
+# caller passed `optional` (a dry run, where the credential is unused).
+resolve() {
+  local var="$1" tfkey="$2" optional="${3:-}" value
+  if [ -n "${!var:-}" ]; then return 0; fi
+  if [ -f "$TFVARS" ]; then
+    # grep exits 1 on no match; `|| true` keeps `set -e` from killing the run
+    # before the explicit error below.
+    value=$(grep -E "^$tfkey" "$TFVARS" | sed 's/.*= *"//;s/"$//' || true)
+    if [ -n "$value" ]; then
+      printf -v "$var" '%s' "$value"
+      return 0
+    fi
+  fi
+  if [ "$optional" != "optional" ]; then
+    echo "Missing $var: not exported, and not readable from $TFVARS (key: $tfkey)." >&2
+    echo "Export $var, or run from a clone that has terraform/terraform.tfvars." >&2
+  fi
+  return 1
+}
+
+if [ "$DRY_RUN" = "1" ]; then
+  resolve ARKHAM_API_KEY arkham_api_key optional || true
+else
+  resolve ARKHAM_API_KEY arkham_api_key
+fi
+
+# Fetch the per-DB REST token from the Upstash mgmt API — skipped entirely when
+# both REST vars are already exported.
+if [ -z "${UPSTASH_REDIS_REST_URL:-}" ] || [ -z "${UPSTASH_REDIS_REST_TOKEN:-}" ]; then
+  if [ "$DRY_RUN" = "1" ]; then
+    resolve UPSTASH_EMAIL upstash_email optional || true
+    resolve UPSTASH_API_KEY upstash_api_key optional || true
+  else
+    resolve UPSTASH_EMAIL upstash_email
+    resolve UPSTASH_API_KEY upstash_api_key
+  fi
+  if [ -n "${UPSTASH_EMAIL:-}" ] && [ -n "${UPSTASH_API_KEY:-}" ]; then
+    RESPONSE=$(curl -s -u "${UPSTASH_EMAIL}:${UPSTASH_API_KEY}" \
+      "https://api.upstash.com/v2/redis/database/${DB_ID}")
+    UPSTASH_REDIS_REST_TOKEN=$(echo "$RESPONSE" | python3 -c "import json,sys; print(json.load(sys.stdin)['rest_token'])")
+    UPSTASH_ENDPOINT=$(echo "$RESPONSE" | python3 -c "import json,sys; print(json.load(sys.stdin)['endpoint'])")
+    UPSTASH_REDIS_REST_URL="https://${UPSTASH_ENDPOINT}"
+  fi
+fi
 
 export ARKHAM_API_KEY UPSTASH_REDIS_REST_URL UPSTASH_REDIS_REST_TOKEN
 

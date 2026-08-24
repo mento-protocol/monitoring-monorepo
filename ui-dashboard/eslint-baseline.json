@@ -317,29 +317,29 @@
   {
     "file": "src/lib/arkham.ts",
     "ruleId": "complexity",
-    "message": "Function 'toAddressEntry' has a complexity of 31. Maximum allowed is 15.",
-    "line": 186,
+    "message": "Function 'toAddressEntry' has a complexity of 28. Maximum allowed is 15.",
+    "line": 223,
     "linePreview": "*/ | export function toAddressEntry( | data: ArkhamMultiChainResponse,"
   },
   {
     "file": "src/lib/arkham.ts",
     "ruleId": "max-depth",
     "message": "Blocks are nested too deeply (5). Maximum allowed is 4.",
-    "line": 299,
+    "line": 334,
     "linePreview": "} catch (retryErr) { | if (retryErr instanceof ArkhamAuthError) throw retryErr; | results.push({"
   },
   {
     "file": "src/lib/arkham.ts",
     "ruleId": "sonarjs/cognitive-complexity",
-    "message": "Refactor this function to reduce its Cognitive Complexity from 26 to the 18 allowed.",
-    "line": 186,
+    "message": "Refactor this function to reduce its Cognitive Complexity from 21 to the 18 allowed.",
+    "line": 223,
     "linePreview": "*/ | export function toAddressEntry( | data: ArkhamMultiChainResponse,"
   },
   {
     "file": "src/lib/arkham.ts",
     "ruleId": "sonarjs/cognitive-complexity",
     "message": "Refactor this function to reduce its Cognitive Complexity from 30 to the 18 allowed.",
-    "line": 274,
+    "line": 309,
     "linePreview": " | export async function enrichBatch( | addresses: string[],"
   },
   {
