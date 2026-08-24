@@ -123,7 +123,19 @@ function flagValue(name) {
  */
 function numericFlag(name, fallback) {
   const raw = flagValue(name);
-  if (raw === undefined) return fallback;
+  if (raw === undefined) {
+    // A flag typed with no value (or immediately followed by another flag,
+    // e.g. `--limit --no-refresh`) must fail loudly rather than silently
+    // falling back — for --limit that fallback is Infinity, which would
+    // start an unbounded, quota-consuming sweep the caller didn't intend.
+    if (args.includes(name)) {
+      console.error(
+        `Missing value for ${name} (expected a non-negative number)`,
+      );
+      process.exit(1);
+    }
+    return fallback;
+  }
   const parsed = Number(raw);
   if (!Number.isFinite(parsed) || parsed < 0) {
     console.error(`Invalid ${name}: ${raw} (expected a non-negative number)`);
