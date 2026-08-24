@@ -164,19 +164,22 @@ that nothing holds in place.
 - Two `scripts/` files join that queue: `agent-quality-gate.sh` and
   `sentry-triage-archive.mjs`. Both are over the hard cap with nothing holding
   them, and the first already has an issue.
-- **The gate's row shrinks by roughly 40% at D5c, and the residual is the
-  process-control layer by design.** Measured on `2e3df696`: the gate is 6,163
-  raw lines, of which the mapping layer — the verb helpers, the thirteen `case`
-  statements and the four post-passes at `2099-4704` — is 2,606, and the D5c
-  soak guard adds 38 more. Deleting those leaves **~3,519 raw / ~2,266 rough**,
-  against the ~3,300 the design projected. That residual is not a file waiting
-  to be split: it is the run lock, the watchdog, the orphan drain, process
-  capture, teardown and signal handling, plus the execution engine and the
-  stamps — the two layers [ADR 0069](0069-gate-routing-table-as-data.md)
-  deliberately left in bash because their safety argument rests on `mkdir`/`link`
-  atomicity, `ps -o lstart=`, Bash 3.2 job-control PGIDs and `/proc`, with no
-  oracle for a rewrite. It stays in the report, over the cap, and stated rather
-  than exempted.
+- **The gate's row shrank by 45% at D5c, and the residual is the process-control
+  layer by design.** Projected here at `2e3df696` as ~3,519 raw / ~2,266 rough
+  from a 6,163-raw file; measured after D5c landed, the gate is **3,327 raw /
+  2,173 rough**, down from 6,070 raw on `3eb5ff55`. What went was the mapping
+  layer — the thirteen `case` statements, the 71 verb and post-pass helpers only
+  they called, the `plan_records_from_bash` renderer and the soak guard's byte
+  comparison. That residual is not a file waiting to be split: it is the run
+  lock, the watchdog, the orphan drain, process capture, teardown and signal
+  handling, plus the execution engine and the stamps — the two layers
+  [ADR 0069](0069-gate-routing-table-as-data.md) deliberately left in bash
+  because their safety argument rests on `mkdir`/`link` atomicity,
+  `ps -o lstart=`, Bash 3.2 job-control PGIDs and `/proc`, with no oracle for a
+  rewrite. It stays in the report, still over the 1,000-line hard cap, and
+  stated rather than exempted;
+  [issue 1498](https://github.com/mento-protocol/monitoring-monorepo/issues/1498)
+  stays open as its owner.
 - Thirty further `scripts/` files sit between the watch threshold and the
   hard cap. They are recorded and delta-tracked, and any that grows by more than
   100 raw lines becomes actionable on its own. The 2026-08-23 refresh produced

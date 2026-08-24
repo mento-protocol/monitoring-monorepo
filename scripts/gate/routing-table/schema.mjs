@@ -1,30 +1,41 @@
 /**
- * The routing table's schema, its closed verb set, and the normal form both
- * the table and the gate's live `case` arms are compared in.
+ * The routing table's schema, its closed verb set, and the normal form the
+ * table is validated in.
  *
  * Validation runs at IMPORT and FAILS CLOSED. That direction is the whole
  * point: a malformed table must never produce a SMALLER command plan. The gate
  * exits non-zero and says what is wrong, rather than routing a subset of the
- * arms and printing "All mapped commands passed."
+ * table and printing "All mapped commands passed."
  *
- * Verbs are recorded under the gate's own bash function names rather than
- * invented camel-case aliases. A second naming layer is a second thing to keep
- * in step; with the live names, `routing-table.test.mjs` can assert every verb
- * the table uses is a function the gate actually defines.
+ * Verbs keep the snake_case names the gate's own `add_*` helpers carried before
+ * D5c retired them, because those are the names `scripts/gate/mapping/route.mjs`
+ * dispatches on. A second naming layer would be a second thing to keep in step;
+ * with one set of names, `routing-table.test.mjs` can assert every verb the
+ * table uses is implemented by the engine, at the arity recorded here.
  */
 
 import { patternProblem } from "./pattern.mjs";
 
 /**
- * Every effect verb the routing region may reach, with how many arguments each
+ * The token a templated command carries in place of the changed path.
+ *
+ * Three arms schedule a per-file command (`bash -n {path}`, `node --check
+ * {path}`), always inside a `pathIsFile` guard. The table cannot hold the shell
+ * expansion the gate used to write (`$(quote_path "$path")`, `printf %q` over
+ * the path), so it holds this placeholder and the engine owns the quoting.
+ */
+export const PATH_TOKEN = "{path}";
+
+/**
+ * Every effect verb the routing table may reach, with how many arguments each
  * takes.
  *
- * The set is CLOSED and holds exactly the verbs the routing region reaches
- * today — not every `add_*` helper the gate defines. An unknown verb fails at
- * import, which is what stops a typo becoming an arm that routes nothing, and
- * an unreachable verb listed "just in case" would weaken that to a spell check.
- * `routing-table.test.mjs` asserts every name here is a function the gate
- * actually defines, and that each arity matches the gate's own call sites.
+ * The set is CLOSED and holds exactly the verbs the table reaches today. An
+ * unknown verb fails at import, which is what stops a typo becoming an arm that
+ * routes nothing, and an unreachable verb listed "just in case" would weaken
+ * that to a spell check. `routing-table.test.mjs` asserts every name here is
+ * implemented by `scripts/gate/mapping/route.mjs`, at the arity recorded here,
+ * and that no name here is unreachable from the table.
  */
 export const VERBS = Object.freeze({
   add_command: 2,
@@ -117,8 +128,8 @@ class TableError extends Error {
  * the routing depends on and nothing else.
  *
  * `why` is deliberately dropped: prose is for the reader, and folding it into
- * the comparison would make the equality test red on a reworded comment while
- * saying nothing about routing.
+ * the normal form would make a reworded comment look like a routing change to
+ * anything comparing two plans.
  */
 export function normalizeEffect(effect, where) {
   if (effect === null || typeof effect !== "object") {
@@ -355,8 +366,8 @@ function normalizeArms(arms, subject, where, dynamic = null) {
 }
 
 /**
- * Reduce the whole table to the form the equality test compares against the
- * gate's live arms, validating it on the way through.
+ * Reduce the whole table to the form the engine walks, validating it on the
+ * way through.
  *
  * @param {readonly object[]} groups
  * @returns {object[]}

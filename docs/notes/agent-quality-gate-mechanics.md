@@ -137,8 +137,8 @@ gate self-test. The core is also an explicit freshness-signature input and a
 Turbo input beside the routing-table directory.
 
 The dry-run gate maps changed paths to package checks and PR checklists. That
-mapping is a Node engine now, cross-checked against the bash arms on every run —
-see [Where the plan comes from](#where-the-plan-comes-from-adr-0069) below. For a
+mapping is a Node engine reading a data table — see
+[Where the plan comes from](#where-the-plan-comes-from-adr-0069) below. For a
 routing-sensitive source, the shared classifier adds the offline
 `pnpm docs:navigation-eval -- --check-fixtures` check. It invokes no model or
 scheduled evaluation. Review the output, then run:
@@ -238,24 +238,26 @@ behavior. Both classes still set the package-script risk flag, so `--run`
 continues to refuse until `--allow-package-script-changes`, and `package.json`
 still gets a full-repo Trunk scan.
 
-`classify_root_package_json_changes` is lifted out of this script and re-run by
-`scripts/sentry/ci-wiring/check-sentry-suites-in-ci-gate-probe.mjs`, which proves each alias still
-routes to the arm it is supposed to. The probe runs it with an empty `$PATH`
-under `set -r`, so the function must reach nothing but shell builtins, keywords
-and `json_change_paths` — no external command, and no output redirection, which
-restricted mode forbids. Its verdict must also be a function of the change paths
-alone, so it may not read anything the probe did not supply: `< <(json_change_paths …)`,
-heredocs and here-strings are fine, a redirection from a file is not. Editing it
-to need any of those fails the check with an explanation; change the probe in the
-same PR or keep the classifier free of them. D5c converts that probe to import
-the Node classifier directly instead of lifting the bash function, and re-asserts
-the same property — each alias routes to its intended arm, over a closed verdict
-set — before the function is deleted.
+The classifier is `classifyRootPackageJsonChanges` in
+`scripts/gate/mapping/facts.mjs`, and its trusted-alias allowlist is
+`TOOLING_SCRIPT_POINTERS` beside it.
+`scripts/sentry/ci-wiring/check-sentry-suites-in-ci-gate-probe.mjs` imports it
+and proves each `sentry:*` alias still classifies as `root-tooling-scripts`, one
+pointer per call, over a closed verdict set: a class the classifier answers that
+is not one of the four fails the check rather than being stored as a
+plausible-looking string. Adding a class means re-reading every caller that
+compares a verdict to a literal.
+
+Until D5c the classifier was the bash function `classify_root_package_json_changes`,
+and the probe lifted it out of `agent-quality-gate.sh` and re-ran it under an
+empty `$PATH` in restricted mode with stubbed helpers. The lifting machinery
+survives in `check-sentry-suites-in-ci-gate-extract.mjs`, because ADR 0069's
+routing-table suite uses it to read `implementation_signature()` and to drive
+`/bin/bash` as the pattern oracle.
 
 ### Where the plan comes from ([ADR 0069](../adr/0069-gate-routing-table-as-data.md))
 
-Since D5b part 2 the routing is Node. After the bash `case` arms have run, the
-gate calls the mapping engine once and uses ITS plan:
+Routing is Node. The gate calls the mapping engine once and uses its plan:
 
 ```bash
 node "$script_source_dir/gate/mapping.mjs" \
@@ -269,8 +271,8 @@ other gate helper is, so a fixture run finds the real one. `--real-tree` is the
 gate's own `[[ "$script_source_dir" == "$repo_root/scripts" ]]` test, which
 fences the four repository-specific effects away from fixture repositories.
 The freshness signature follows the same root: mapper and routing-table runtime
-modules hash from `$script_source_dir`. Their suites and the parity harness hash
-from `$repo_root` because the gate runs them as mapped target-tree commands.
+modules hash from `$script_source_dir`. Their suites hash from `$repo_root`
+because the gate runs them as mapped target-tree commands.
 
 The engine answers on stdout in the TSV shape `write_command_plan` already
 emits, in this order and no other — the gate prints and the freshness stamp
@@ -284,11 +286,7 @@ checklist<TAB><path><TAB><reason>
 preflight|codegen|post-codegen|quality<TAB><command><TAB><reason>
 ```
 
-**The bash arms still run, and disagreement stops the run.** The gate renders
-its own plan in the same shape and byte-compares the two. This is the D5c soak
-guard: parity proven over whatever you actually changed, on your machine, rather
-than over a corpus someone assembled. Every failure around the seam refuses, and
-each message is greppable:
+**Every failure around the seam is a refusal**, and each message is greppable:
 
 | Message on stderr                                                                   | What happened                                                |
 | ----------------------------------------------------------------------------------- | ------------------------------------------------------------ |
@@ -297,32 +295,18 @@ each message is greppable:
 | `gate mapping engine produced an empty plan; refusing to run`                       | The mapper wrote nothing — most often a stubbed `node`.      |
 | `gate mapping engine emitted an unparsable record: …`                               | A record the gate cannot read. Never partially applied.      |
 | `gate mapping engine emitted an unknown flag record: …`                             | A `flag` record the gate does not know.                      |
-| `the gate mapping engine and the bash routing arms disagree.`                       | The guard fired. A unified diff follows, `-bash +engine`.    |
 
-Read that last diff by side: a `-` line is a command the arms produced and the
-engine did not, a `+` line the reverse. Either direction refuses, because a
-routing change landed on one side only — usually a new arm added to
-`agent-quality-gate.sh` without the matching entry in
-`scripts/gate/routing-table/`, which `gate-equality.test.mjs` also catches, or an
-engine change the arms do not have yet. Fix the side that is wrong. The guard
-has no bypass.
-
-To drive the guard over many path sets at once rather than the one you happen to
-have changed:
-
-```bash
-node scripts/gate/routing-parity.mjs --corpus multi     # 43 sets, ~1 minute
-node scripts/gate/routing-parity.mjs --corpus self-test # every run_gate set in the suite
-node scripts/gate/routing-parity.mjs                    # every tracked path, ~25 minutes
-```
-
-**What D5c removes.** The bash `case` arms and the verb helpers they call, the
-`plan_records_from_bash` renderer and the byte comparison, and
-`scripts/gate/routing-parity.mjs`. They are one mechanism and they go together:
-without the arms there is nothing to compare, and the harness's own diff becomes
-circular. What stays is the parser that reads the mapper's records — that is how
-the plan arrives — the `implementation_signature()` pins, and the engine's own
-suites. Measured, that removes about 2,644 raw lines.
+There is no fallback path. Before D5c the gate also ran the bash `case` arms,
+rendered their plan in the same shape and refused on a one-byte difference — the
+soak guard. That guard, the arms and the parity harness went together at D5c
+(issue 2020): without the arms there is nothing to compare, and the harness's own
+comparison would be the engine against itself. What routing correctness rests on
+now is `pnpm gate:routing-table:test` (the pairing lint, the staleness check, the
+`/bin/bash` pattern oracle, the closed verb set) and
+`node --test scripts/gate/mapping/engine.test.mjs` (dedupe and first-reason-wins,
+bucket order, the four post-passes, the root-manifest classifier). Both are
+routed by a change to the engine or the table, and the routing-table suite also
+runs in the required `ci` job.
 
 ### Scheduling contract (Refs #1802)
 

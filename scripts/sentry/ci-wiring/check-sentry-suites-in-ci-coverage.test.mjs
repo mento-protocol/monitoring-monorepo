@@ -142,7 +142,8 @@ test("the local gate's tooling allowlist trusts every sentry:* script", () => {
   assert.deepEqual(
     missing,
     [],
-    "classify_root_package_json_changes in scripts/agent-quality-gate.sh does " +
+    "the gate's root-manifest allowlist — TOOLING_SCRIPT_POINTERS in " +
+      "scripts/gate/mapping/facts.mjs — does " +
       `not list: ${missing.join(", ")}. Without the entry, a package.json edit ` +
       "touching only that script classifies as `package-scripts` instead of " +
       "`root-tooling-scripts` — conservative, but drift.",
@@ -174,7 +175,7 @@ test("every sentry:* script the gate trusts is pinned to an exact command", () =
   assert.deepEqual(
     unpinned,
     [],
-    "these sentry:* scripts are trusted by classify_root_package_json_changes " +
+    "these sentry:* scripts are trusted by the gate's root-manifest classifier " +
       "but not pinned to an exact command in " +
       `check-agent-quality-gate-package-scripts.mjs: ${unpinned.join(", ")}. ` +
       "A trusted alias whose command is not pinned can gain an appended " +

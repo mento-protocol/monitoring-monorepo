@@ -305,20 +305,18 @@ routing, not procedure.
    helper the gate cannot find exit 2 instead of falling toward the full suite —
    its caller reads a nonzero exit as "cannot narrow", so the old behaviour
    silently widened every lockfile change and the run read as slow, not broken.
-   Since ADR 0069 the same routing also exists as DATA in
-   `scripts/gate/routing-table/`, and a move has to update both. The data is the
-   easier half: its patterns are checked for staleness and its `scripts/`-anchored
-   globs are checked for their any-depth pair, so a move that misses the table
-   reds where a move that misses the arms goes quiet. The two are held together
-   by `gate-equality.test.mjs`, which fails if only one side moved — so the sweep
-   is not done until both are repointed. Every module in that directory is also
-   an `implementation_signature()` entry, with the same `__missing__` freeze.
-   Since D5b part 2 there is a third side: `scripts/gate/mapping.mjs` and
-   `scripts/gate/mapping/` build the plan the gate actually uses, and the gate
-   resolves the mapper from `$script_source_dir` in one more literal. Those
-   modules carry the same signature and `turbo.json` pins, and a move that
-   misses the mapper refuses the run outright rather than going quiet — the gate
-   checks for it before it calls it.
+   Since ADR 0069 that routing is DATA in `scripts/gate/routing-table/`, and
+   since D5c it is the only copy — the bash `case` arms are gone. The data is the
+   easier half to sweep: its patterns are checked for staleness and its
+   `scripts/`-anchored globs are checked for their any-depth pair, so a move that
+   misses the table reds where a move that missed the arms used to go quiet.
+   Every module in that directory is also an `implementation_signature()` entry,
+   with the same `__missing__` freeze. The engine is the other side:
+   `scripts/gate/mapping.mjs` and `scripts/gate/mapping/` build the plan the gate
+   executes, and the gate resolves the mapper from `$script_source_dir` in one
+   more literal. Those modules carry the same signature and `turbo.json` pins,
+   and a move that misses the mapper refuses the run outright rather than going
+   quiet — the gate checks for it before it calls it.
    `scripts/gate/routing-table/arms-packages.mjs` also imports the indexer
    family view from `scripts/agent-autoreview-core.mjs`. That external source
    has its own signature entry, core-only routes to both gate suites, and exact
