@@ -176,6 +176,7 @@ const RESERVE_YIELD: ReserveYieldResponse = {
   next365dUsd: 3_650,
   annualRunRateUsd: 3_650,
   forecastUnavailableSymbols: [],
+  reserveCurrentHoldingsClassificationFailed: false,
   holdingsError: null,
   rateError: null,
   earnedYieldError: null,

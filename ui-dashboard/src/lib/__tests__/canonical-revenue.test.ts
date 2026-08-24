@@ -163,6 +163,7 @@ function reserveYield(
     next365dUsd: 730,
     annualRunRateUsd: 730,
     forecastUnavailableSymbols: [],
+    reserveCurrentHoldingsClassificationFailed: false,
     holdingsError: null,
     rateError: null,
     earnedYieldError: null,

@@ -83,7 +83,9 @@ describe("useReserveYield", () => {
   it("marks a holdings classification failure separately from broad source errors", () => {
     swrMock.mockReturnValue({
       data: {
-        holdingsError: "Reserve holdings RPC: HTTP 503",
+        holdingsError:
+          "Reserve API response contained asset rows without usable symbols.",
+        reserveCurrentHoldingsClassificationFailed: true,
       } satisfies Partial<ReserveYieldResponse>,
       error: undefined,
       isLoading: false,
@@ -97,6 +99,25 @@ describe("useReserveYield", () => {
     });
   });
 
+  it("keeps a known stETH source error out of the classification signal", () => {
+    swrMock.mockReturnValue({
+      data: {
+        holdingsError:
+          "Reserve API returned yield rows without usable USD values.",
+        reserveCurrentHoldingsClassificationFailed: false,
+      } satisfies Partial<ReserveYieldResponse>,
+      error: undefined,
+      isLoading: false,
+    });
+
+    const { result } = renderReserveYieldProbe();
+    expect(result).toMatchObject({
+      hasError: true,
+      isLoading: false,
+      reserveCurrentHoldingsClassificationFailed: false,
+    });
+  });
+
   it("marks a reserve-yield fetch failure as a holdings classification failure", () => {
     swrMock.mockReturnValue({
       data: undefined,
@@ -107,6 +128,23 @@ describe("useReserveYield", () => {
     const { result } = renderReserveYieldProbe();
     expect(result).toMatchObject({
       hasError: true,
+      isLoading: false,
+      reserveCurrentHoldingsClassificationFailed: true,
+    });
+  });
+
+  it("fails closed when a legacy response omits the classification signal", () => {
+    swrMock.mockReturnValue({
+      data: {
+        holdingsError: null,
+      } satisfies Partial<ReserveYieldResponse>,
+      error: undefined,
+      isLoading: false,
+    });
+
+    const { result } = renderReserveYieldProbe();
+    expect(result).toMatchObject({
+      hasError: false,
       isLoading: false,
       reserveCurrentHoldingsClassificationFailed: true,
     });
@@ -127,6 +165,7 @@ describe("useReserveYield", () => {
       swrMock.mockReturnValue({
         data: {
           holdingsError: null,
+          reserveCurrentHoldingsClassificationFailed: false,
           ...sourceError,
         } satisfies Partial<ReserveYieldResponse>,
         error: undefined,

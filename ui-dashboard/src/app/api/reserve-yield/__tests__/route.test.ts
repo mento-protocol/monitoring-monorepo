@@ -174,6 +174,7 @@ describe("GET /api/reserve-yield", () => {
       grossApyPercent: 5.33,
       expenseBps: 15,
       revenueShareBps: 8000,
+      reserveCurrentHoldingsClassificationFailed: false,
       holdingsError: null,
       rateError: null,
     });
@@ -818,7 +819,62 @@ describe("GET /api/reserve-yield", () => {
     expect(body.holdingsError).toContain(
       "did not contain a usable collateral.assets array",
     );
+    expect(body.reserveCurrentHoldingsClassificationFailed).toBe(true);
     expect(body.susdsYieldSignalUnavailable).toBe(false);
+  });
+
+  it("marks unclassifiable top-level reserve rows as classification failures", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(Response.json({ collateral: { assets: [null] } }))
+      .mockResolvedValueOnce(
+        new Response("observation_date,FEDFUNDS\n2026-05-01,5.33\n"),
+      )
+      .mockResolvedValueOnce(Response.json(SKY_SSR_RPC_RESPONSE));
+    const { GET } = await loadRoute();
+
+    const res = await GET();
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.holdingsError).toContain("asset rows without usable symbols");
+    expect(body.reserveCurrentHoldingsClassificationFailed).toBe(true);
+  });
+
+  it("keeps known stETH row errors out of the classification signal", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        Response.json({
+          collateral: {
+            assets: [
+              {
+                symbol: "stETH",
+                chain: "ethereum",
+                balance: "250",
+                sources: [
+                  {
+                    type: "wallet",
+                    label: "Reserve Safe",
+                    balance: "250",
+                  },
+                ],
+              },
+            ],
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response("observation_date,FEDFUNDS\n2026-05-01,5.33\n"),
+      )
+      .mockResolvedValueOnce(Response.json(SKY_SSR_RPC_RESPONSE));
+    const { GET } = await loadRoute();
+
+    const res = await GET();
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.holdings).toEqual([]);
+    expect(body.holdingsError).toContain("without usable USD values");
+    expect(body.reserveCurrentHoldingsClassificationFailed).toBe(false);
   });
 
   it("returns a clear empty holdings shape when the reserve has no yield-bearing rows", async () => {
@@ -858,6 +914,7 @@ describe("GET /api/reserve-yield", () => {
     expect(body.forecastPrincipalUsd).toBeNull();
     expect(body.holdings).toEqual([]);
     expect(body.holdingsError).toContain("Reserve API");
+    expect(body.reserveCurrentHoldingsClassificationFailed).toBe(true);
     expect(body.grossApyPercent).toBe(5.33);
     expect(body.skySavingsRateApyPercent).toBeCloseTo(SKY_SSR_APY_PERCENT, 12);
     expect(body.annualRunRateUsd).toBeNull();

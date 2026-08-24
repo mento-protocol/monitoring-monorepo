@@ -40,7 +40,9 @@ export function useReserveYield(): ReserveYieldResult {
     data: data ?? null,
     isLoading,
     reserveCurrentHoldingsClassificationFailed:
-      error !== undefined || (data?.holdingsError ?? null) !== null,
+      error !== undefined ||
+      (data !== undefined &&
+        data.reserveCurrentHoldingsClassificationFailed !== false),
     hasError:
       error !== undefined ||
       (data?.holdingsError ?? null) !== null ||

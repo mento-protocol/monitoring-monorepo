@@ -237,6 +237,7 @@ function reserveHoldingsState(
       principalUsd: null,
       holdingsAsOf: null,
       holdingsError: errorMessage("Reserve API", reserveResult.reason),
+      reserveCurrentHoldingsClassificationFailed: true,
       hasCurrentSusdsAsset: false,
       hasCurrentStethAsset: false,
     };
@@ -244,9 +245,11 @@ function reserveHoldingsState(
 
   const extracted = extractReserveYieldHoldings(reserveResult.value);
   let holdingsError: string | null = null;
-  if (extracted.classificationFailed) {
+  if (extracted.reserveCurrentHoldingsClassificationFailed) {
     holdingsError =
-      "Reserve API response did not contain a usable collateral.assets array.";
+      extracted.malformedCount > 0
+        ? "Reserve API response contained asset rows without usable symbols."
+        : "Reserve API response did not contain a usable collateral.assets array.";
   } else if (extracted.malformedCount > 0) {
     holdingsError =
       extracted.holdings.length > 0
@@ -258,11 +261,14 @@ function reserveHoldingsState(
     holdings: extracted.holdings,
     principalUsd:
       extracted.holdings.length === 0 &&
-      (extracted.classificationFailed || extracted.malformedCount > 0)
+      (extracted.reserveCurrentHoldingsClassificationFailed ||
+        extracted.malformedCount > 0)
         ? null
         : extracted.holdings.reduce((sum, h) => sum + h.principalUsd, 0),
     holdingsAsOf: fetchedAt,
     holdingsError,
+    reserveCurrentHoldingsClassificationFailed:
+      extracted.reserveCurrentHoldingsClassificationFailed,
     hasCurrentSusdsAsset: extracted.susdsAssetCount > 0,
     hasCurrentStethAsset: extracted.stethAssetCount > 0,
   };
@@ -406,6 +412,8 @@ function buildReserveYieldResponse({
     next365dUsd: forecast.next365dUsd,
     annualRunRateUsd: forecast.annualRunRateUsd,
     forecastUnavailableSymbols: forecast.forecastUnavailableSymbols,
+    reserveCurrentHoldingsClassificationFailed:
+      reserveState.reserveCurrentHoldingsClassificationFailed,
     holdingsError: reserveState.holdingsError,
     rateError: rateErrorForUnavailableForecasts(
       forecast.forecastUnavailableSymbols,

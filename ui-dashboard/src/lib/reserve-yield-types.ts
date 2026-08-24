@@ -56,6 +56,8 @@ export type ReserveYieldResponse = {
   next365dUsd: number | null;
   annualRunRateUsd: number | null;
   forecastUnavailableSymbols: string[];
+  /** True when the reserve request cannot establish current asset symbols. */
+  reserveCurrentHoldingsClassificationFailed: boolean;
   holdingsError: string | null;
   rateError: string | null;
   earnedYieldError: string | null;
@@ -64,7 +66,7 @@ export type ReserveYieldResponse = {
 export type ReserveYieldExtraction = {
   holdings: ReserveYieldHolding[];
   malformedCount: number;
-  classificationFailed: boolean;
+  reserveCurrentHoldingsClassificationFailed: boolean;
   trackedAssetCount: number;
   susdsAssetCount: number;
   stethAssetCount: number;
@@ -152,6 +154,7 @@ export type ReserveHoldingsState = {
   principalUsd: number | null;
   holdingsAsOf: string | null;
   holdingsError: string | null;
+  reserveCurrentHoldingsClassificationFailed: boolean;
   hasCurrentSusdsAsset: boolean;
   hasCurrentStethAsset: boolean;
 };

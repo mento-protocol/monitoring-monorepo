@@ -112,7 +112,7 @@ describe("reserve yield parsing and math", () => {
     const extracted = extractReserveYieldHoldings(RESERVE_PAYLOAD);
 
     expect(extracted.malformedCount).toBe(0);
-    expect(extracted.classificationFailed).toBe(false);
+    expect(extracted.reserveCurrentHoldingsClassificationFailed).toBe(false);
     expect(extracted.trackedAssetCount).toBe(3);
     expect(extracted.susdsAssetCount).toBe(1);
     expect(extracted.holdings).toHaveLength(4);
@@ -197,18 +197,18 @@ describe("reserve yield parsing and math", () => {
 
       expect(extracted.holdings).toEqual([]);
       expect(extracted.malformedCount).toBe(0);
-      expect(extracted.classificationFailed).toBe(true);
+      expect(extracted.reserveCurrentHoldingsClassificationFailed).toBe(true);
     },
   );
 
-  it("marks malformed entries inside a valid assets array", () => {
+  it("fails current holdings classification for unclassifiable asset rows", () => {
     const extracted = extractReserveYieldHoldings({
       collateral: { assets: [null, {}, { symbol: 123 }] },
     });
 
     expect(extracted.holdings).toEqual([]);
     expect(extracted.malformedCount).toBe(3);
-    expect(extracted.classificationFailed).toBe(false);
+    expect(extracted.reserveCurrentHoldingsClassificationFailed).toBe(true);
   });
 
   it("accepts an empty sources array for a tracked asset", () => {
@@ -578,6 +578,7 @@ describe("reserve yield parsing and math", () => {
 
     expect(extracted.holdings).toEqual([]);
     expect(extracted.malformedCount).toBe(2);
+    expect(extracted.reserveCurrentHoldingsClassificationFailed).toBe(false);
   });
 
   it("does not treat sUSDS source shares as dollars when USD values are missing", () => {

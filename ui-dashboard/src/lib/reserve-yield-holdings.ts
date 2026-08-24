@@ -371,15 +371,18 @@ export function extractReserveYieldHoldings(
   let trackedAssetCount = 0;
   let susdsAssetCount = 0;
   let stethAssetCount = 0;
+  let reserveCurrentHoldingsClassificationFailed = !Array.isArray(assetsValue);
 
   assets.forEach((assetValue, assetIndex) => {
     if (!isRecord(assetValue)) {
       malformedCount += 1;
+      reserveCurrentHoldingsClassificationFailed = true;
       return;
     }
     const symbol = stringField(assetValue.symbol, "");
     if (symbol === "") {
       malformedCount += 1;
+      reserveCurrentHoldingsClassificationFailed = true;
       return;
     }
     if (!isTrackedYieldAsset(symbol)) return;
@@ -441,7 +444,7 @@ export function extractReserveYieldHoldings(
   return {
     holdings: aggregateHoldings(holdings),
     malformedCount,
-    classificationFailed: !Array.isArray(assetsValue),
+    reserveCurrentHoldingsClassificationFailed,
     trackedAssetCount,
     susdsAssetCount,
     stethAssetCount,
