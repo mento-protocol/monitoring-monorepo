@@ -21,7 +21,7 @@ make_root() {
 # Same as check(), but the fake checkout has no package.json — exercising the
 # early PASS exits that must not outrank the fork refusal.
 check_no_pkg() {
-  local want=$1 label=$2 stub=$3 root out bin
+  local want=$1 label=$2 stub=$3 root out bin rest
   root="$(mktemp -d)"
   bin="$(mktemp -d)"
   printf '#!/usr/bin/env bash\n%s\n' "$stub" >"$bin/gh"
@@ -38,10 +38,12 @@ check_no_pkg() {
     source "$HOOK"
     babysit_repo_gate 123 mento-protocol monitoring-monorepo "$root"
   )
-  if [[ "$out" == "$want"* && ! -e "$bin/pnpm-ran" ]]; then
+  rest="${out#"$want"}"
+  if [[ "$out" == "$want"* && ! -e "$bin/pnpm-ran" &&
+    "$rest" != *"PASS "* && "$rest" != *"PENDING "* && "$rest" != *"FAIL "* ]]; then
     printf '  ok    %s\n' "$label"; pass=$((pass + 1))
   else
-    printf '  FAIL  %s\n        want prefix: %s (and no probe run)\n        got:         %s%s\n' \
+    printf '  FAIL  %s\n        want prefix: %s (single verdict, no probe run)\n        got:         %s%s\n' \
       "$label" "$want" "$out" "$([[ -e "$bin/pnpm-ran" ]] && echo ' [probe RAN after verdict]')"
     fail=$((fail + 1))
   fi
@@ -51,7 +53,7 @@ check_no_pkg() {
 # $1 = expected prefix, $2 = label, $3 = stub body for `gh`, $4 = optional env
 # assignment applied inside the subshell (e.g. CLAUDE_CODE_REMOTE=1)
 check() {
-  local want=$1 label=$2 stub=$3 extra_env=${4:-} root out bin
+  local want=$1 label=$2 stub=$3 extra_env=${4:-} root out bin rest
   root="$(make_root)"
   bin="$(mktemp -d)"
   printf '#!/usr/bin/env bash\n%s\n' "$stub" >"$bin/gh"
@@ -76,11 +78,18 @@ check() {
     babysit_repo_gate 123 mento-protocol monitoring-monorepo "$root"
   )
 
-  if [[ "$out" == "$want"* && ! -e "$bin/pnpm-ran" ]]; then
+  # Three conditions, each killing a distinct mutation: the prefix (wrong
+  # verdict), the sentinel (verdict printed, gate kept going into the probe),
+  # and no second verdict token after the expected prefix (verdict printed,
+  # gate kept going through a later verdict branch that returns before the
+  # probe — removing the refusal's `return 0` does exactly this).
+  rest="${out#"$want"}"
+  if [[ "$out" == "$want"* && ! -e "$bin/pnpm-ran" &&
+    "$rest" != *"PASS "* && "$rest" != *"PENDING "* && "$rest" != *"FAIL "* ]]; then
     printf '  ok    %s\n' "$label"
     pass=$((pass + 1))
   else
-    printf '  FAIL  %s\n        want prefix: %s (and no probe run)\n        got:         %s%s\n' \
+    printf '  FAIL  %s\n        want prefix: %s (single verdict, no probe run)\n        got:         %s%s\n' \
       "$label" "$want" "$out" "$([[ -e "$bin/pnpm-ran" ]] && echo ' [probe RAN after verdict]')"
     fail=$((fail + 1))
   fi

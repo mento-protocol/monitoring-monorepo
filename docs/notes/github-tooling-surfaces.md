@@ -193,7 +193,9 @@ polled. Do not foreground-poll and never sleep-poll.
    to the local path — see [`pr-operating-card.md`](pr-operating-card.md)
    steps 6 and 7 — using the MCP write tools named above in place of `gh`.
    Reply before resolving, always. **Checkout binding carries a cloud
-   exception**: the card's canonical-`origin` requirement cannot hold here,
+   exception, and it applies to every adapter call the repo-identity preflight
+   governs on this surface — the quality gate and a hosted ship as much as a
+   babysit blocker fix**: the canonical-`origin` requirement cannot hold here,
    because a Claude cloud `origin` is a credential-proxy URL, not a canonical
    GitHub URL. Bind by content instead — for a same-repository target,
    `headRepository.nameWithOwner` must equal the session-attached repository;

@@ -50,7 +50,12 @@ even when you never open an authority.
    the mapped local-only checks. **Resolve the target and remotes first** when
    this run will reach step 5 — the repo-identity preflight in
    [`agent-quality-gate-mechanics.md`](agent-quality-gate-mechanics.md) governs
-   any adapter call that trusts repository identity, and this gate is one. On a
+   any adapter call that trusts repository identity, and this gate is one. In a
+   Claude cloud session, where `origin` is a credential-proxy URL that can
+   never satisfy the canonical-origin requirement, the content-based cloud
+   binding in
+   [`github-tooling-surfaces.md`](github-tooling-surfaces.md) replaces that
+   preflight for every such call — gate, ship, and babysit alike. On a
    branch with no PR yet and an unambiguous `origin`, the local checks below are
    safe to run first; in a fork or ambiguous-remote checkout they are not, and
    step 5's resolution comes before this step rather than after it:
