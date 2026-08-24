@@ -393,12 +393,17 @@ function deriveTags(enriched, counterparties) {
   }
 
   if (contractFlag) tags.add("type:contract");
-  for (const t of arkhamTags) tags.add(t);
 
+  // Raw Arkham ids stay a SEPARATE group so the merge site can rank them
+  // last: this pass's forensic tags, then whatever the entry already holds,
+  // then the bulk Arkham dump — the 20-tag cap always sacrifices raw ids
+  // first, never curated content.
+  const forensic = Array.from(tags).map((t) => String(t).slice(0, 50));
   return {
     name: name?.slice(0, 200) ?? null,
-    tags: Array.from(tags)
-      .slice(0, 20)
+    tags: forensic.slice(0, 20),
+    arkhamTags: Array.from(arkhamTags)
+      .filter((t) => !tags.has(t))
       .map((t) => String(t).slice(0, 50)),
     entitySlug,
     contractFlag,
@@ -659,7 +664,11 @@ async function main() {
     }
 
     // Update labels entry — merge derived tags + name into existing or create.
-    if (derived.name || derived.tags.length > 0) {
+    if (
+      derived.name ||
+      derived.tags.length > 0 ||
+      derived.arkhamTags.length > 0
+    ) {
       const existingEntry = existingLabels[address];
       // Preserve manual entries (source !== arkham).
       const isManual =
@@ -670,14 +679,15 @@ async function main() {
           existingEntry.tags.includes("arkham")
         );
       if (!isManual) {
-        // Derived tags first: `derived.tags` already puts this pass's own
-        // ctp:/type: forensic tags ahead of raw Arkham ids (see deriveTags
-        // above). If `existingEntry.tags` came first instead, a Tier 1 entry
-        // that already fills the 20-tag cap with Arkham ids would crowd out
-        // this pass's own forensic tags at merge time.
+        // Cap precedence: this pass's forensic ctp:/type: tags, then the
+        // entry's existing tags (which may carry prior curated or forensic
+        // content), then the raw Arkham id dump last — so the 20-tag cap
+        // always drops raw ids before anything curated (mirrors the tier1
+        // buildWriteEntry ordering decision).
         const mergedTags = new Set([
           ...derived.tags,
           ...(existingEntry?.tags ?? []),
+          ...(derived.arkhamTags ?? []),
         ]);
         const newEntry = {
           // Tags-only entries keep an empty name (rendered as "—"); never

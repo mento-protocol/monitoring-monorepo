@@ -99,8 +99,10 @@ else
 fi
 
 # Fetch the per-DB REST token from the Upstash mgmt API — skipped entirely when
-# both REST vars are already exported.
-if [ -z "${UPSTASH_REDIS_REST_URL:-}" ] || [ -z "${UPSTASH_REDIS_REST_TOKEN:-}" ]; then
+# both REST vars are already exported, and never attempted for stages that do
+# not read Upstash at all (a mgmt-API network failure would abort under
+# `set -e` before a Blob-only stage ever ran).
+if [ "$NEEDS_UPSTASH" = "1" ] && { [ -z "${UPSTASH_REDIS_REST_URL:-}" ] || [ -z "${UPSTASH_REDIS_REST_TOKEN:-}" ]; }; then
   if [ "$DRY_RUN" = "1" ] || [ "$NEEDS_UPSTASH" = "0" ]; then
     resolve UPSTASH_EMAIL upstash_email optional || true
     resolve UPSTASH_API_KEY upstash_api_key optional || true
