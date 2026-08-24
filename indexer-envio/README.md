@@ -281,12 +281,9 @@ pnpm deploy:indexer:verify "$COMMIT" --prod
 
 A caught-up watcher exit is `SYNCED_PENDING_DATA_VERIFY`, not promotion
 readiness. The verifier checks sync and core rows, plus sUSDS post-launch
-sampler progress/freshness and, when the target commit schema declares it, the
-exact immutable sUSDS launch baseline. A legacy rollback schema that predates
-the baseline entity skips only that unsupported probe. An unreadable or
-uninspectable target schema fails closed. The verifier then runs the canonical
-Polygon FPMM feed/expiry, oracle-anchor, snapshot-cursor, and health-counter
-checks. It also reads
+sampler progress/freshness and the exact immutable sUSDS launch baseline,
+before the canonical Polygon FPMM feed/expiry, oracle-anchor, snapshot-cursor,
+and health-counter checks. It also reads
 `config/replay-integrity.json` from the deployed commit. That
 versioned marker is the commit-scoped proof that the candidate was replayed by
 code enforcing the current oracle-freshness invariant; a candidate whose
