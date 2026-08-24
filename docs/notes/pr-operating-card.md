@@ -65,9 +65,9 @@ even when you never open an authority.
    cache-hits. Every base ref below lives on the **resolved base remote** —
    `BASE_REMOTE` from step 5's resolution when it ran first, plain `origin`
    only in the non-fork single-remote case above; in a fork checkout `origin`
-   serves the fork, so an `origin/...` base compares against the wrong
-   repository (or a missing branch) and real changes drop out of the diff,
-   skipping their mapped checks. Run `git fetch <base-remote> main` first: the
+   serves the fork, so an `origin/...` base diffs the wrong repository and
+   real changes skip their mapped checks. Run `git fetch <base-remote> main`
+   first: the
    base commit is part of the freshness stamp, the hook fetches before it runs
    the gate, and a stamp warmed against a stale base is invalidated by that
    fetch, so the push pays for the full gate a second time. A bare invocation
@@ -141,10 +141,13 @@ even when you never open an authority.
    `scripts/pr/check-pr-description.mjs` enforces the first two sections and
    their order in CI; raw HTML other than comments and code blocks do not
    satisfy its opening-content check. PRs open **ready for
-   review, never as drafts** — a draft suppresses the automated AI reviews this
-   workflow depends on, so drafting is a decision to skip review, not a staging
-   step; use draft only when the user asks or required
-   validation is intentionally pending, and state that reason in the body. Link
+   review, never as drafts** — a draft suppresses the automated AI reviews
+   this workflow depends on; drafting is skipping review, not a staging
+   step. A ship that updates an **existing draft** converts it to ready once
+   the gate passes — `pr:ready-state` holds draft state as a required blocker,
+   so an unconverted draft never reaches all-clear. Use or keep draft only
+   when the user asks or required validation is intentionally pending, and
+   state that reason in the body. Link
    the issue with `Closes #N` **only when the issue's Done means is fully
    satisfied**; otherwise use `Refs #N`. For issue-backed work, once the PR is
    open, run `pnpm issue:review --pr <pr> --issue <issue>` to move the issue
@@ -156,9 +159,9 @@ even when you never open an authority.
    `gh repo view --json nameWithOwner,parent` locally, the session-attached
    repository metadata in a Claude cloud session. `CURRENT_REPO` is the
    checkout's own repository; a fork checkout uses its parent as `BASE_REPO`,
-   a non-fork uses itself as both. Without this resolution a fork checkout
-   cannot be told apart from its parent, and the lookup or creation below can
-   bind to the wrong repository.
+   a non-fork uses itself as both. Without it a fork checkout is
+   indistinguishable from its parent and the lookup or creation below can bind
+   to the wrong repository.
 
    **Then identify the target PR**, in this precedence: a
    user-supplied URL is used verbatim and its owner/repository overrides the
@@ -221,9 +224,9 @@ even when you never open an authority.
    uses its parent as `BASE_REPO`; never substitute a fork's `origin` for its
    parent, and stop if the head repository has no matching push remote.
 
-6. **Babysit.** Run the `babysit-pr` skill. Entering here without step 5 — any
-   babysit-only invocation, with or without an explicit PR — first bind the
-   target as step 5 defines: the target-PR precedence, `BASE_REPO`, both
+6. **Babysit.** Run the `babysit-pr` skill. A babysit-only entry (any
+   invocation that skipped step 5, with or without an explicit PR) first binds
+   the target as step 5 defines: the target-PR precedence, `BASE_REPO`, both
    remotes, and
    `number,url,headRefName,headRefOid,baseRefName,headRepository,headRepositoryOwner,isCrossRepository`.
    **Stop a fork head at that resolution, before the first repo-local probe,

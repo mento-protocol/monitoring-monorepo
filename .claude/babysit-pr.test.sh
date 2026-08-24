@@ -26,6 +26,10 @@ check_no_pkg() {
   bin="$(mktemp -d)"
   printf '#!/usr/bin/env bash\n%s\n' "$stub" >"$bin/gh"
   chmod +x "$bin/gh"
+  # Same termination sentinel as check(): without it the REAL pnpm is on PATH
+  # here, so a gate that kept going after its verdict would run it unobserved.
+  printf '#!/usr/bin/env bash\ntouch "%s/pnpm-ran"\nexit 99\n' "$bin" >"$bin/pnpm"
+  chmod +x "$bin/pnpm"
   out=$(
     # shellcheck disable=SC2030,SC2031
     PATH="$bin:$PATH"
@@ -34,10 +38,11 @@ check_no_pkg() {
     source "$HOOK"
     babysit_repo_gate 123 mento-protocol monitoring-monorepo "$root"
   )
-  if [[ "$out" == "$want"* ]]; then
+  if [[ "$out" == "$want"* && ! -e "$bin/pnpm-ran" ]]; then
     printf '  ok    %s\n' "$label"; pass=$((pass + 1))
   else
-    printf '  FAIL  %s\n        want prefix: %s\n        got:         %s\n' "$label" "$want" "$out"
+    printf '  FAIL  %s\n        want prefix: %s (and no probe run)\n        got:         %s%s\n' \
+      "$label" "$want" "$out" "$([[ -e "$bin/pnpm-ran" ]] && echo ' [probe RAN after verdict]')"
     fail=$((fail + 1))
   fi
   rm -rf "$root" "$bin"
@@ -51,8 +56,12 @@ check() {
   bin="$(mktemp -d)"
   printf '#!/usr/bin/env bash\n%s\n' "$stub" >"$bin/gh"
   chmod +x "$bin/gh"
-  # pnpm must never run for a refused PR; make it explode if the gate slips past.
-  printf '#!/usr/bin/env bash\necho "pnpm should not run" >&2\nexit 99\n' >"$bin/pnpm"
+  # pnpm must never run for a refused PR. The old stderr-only protest was
+  # invisible to this stdout-prefix assertion, so a gate that printed its
+  # verdict and then KEPT GOING to the probe still passed. The sentinel now
+  # records that it ran, and the assertion requires it did not — making the
+  # fail-closed "refusal terminates the gate" invariant a proven one.
+  printf '#!/usr/bin/env bash\ntouch "%s/pnpm-ran"\nexit 99\n' "$bin" >"$bin/pnpm"
   chmod +x "$bin/pnpm"
 
   out=$(
@@ -67,11 +76,12 @@ check() {
     babysit_repo_gate 123 mento-protocol monitoring-monorepo "$root"
   )
 
-  if [[ "$out" == "$want"* ]]; then
+  if [[ "$out" == "$want"* && ! -e "$bin/pnpm-ran" ]]; then
     printf '  ok    %s\n' "$label"
     pass=$((pass + 1))
   else
-    printf '  FAIL  %s\n        want prefix: %s\n        got:         %s\n' "$label" "$want" "$out"
+    printf '  FAIL  %s\n        want prefix: %s (and no probe run)\n        got:         %s%s\n' \
+      "$label" "$want" "$out" "$([[ -e "$bin/pnpm-ran" ]] && echo ' [probe RAN after verdict]')"
     fail=$((fail + 1))
   fi
   rm -rf "$root" "$bin"
