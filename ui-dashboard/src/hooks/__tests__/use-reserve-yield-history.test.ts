@@ -4,6 +4,7 @@ import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { rateLimitAwareRetry } from "@/lib/gql-retry";
+import { GraphQLSchemaError } from "@/lib/graphql-schema-error";
 import type {
   ReserveYieldDailySnapshotRow,
   StethYieldDailySnapshotRow,
@@ -226,7 +227,7 @@ describe("useReserveYieldHistory", () => {
     });
   });
 
-  it("keeps sUSDS rows and marks malformed stETH history as failed", async () => {
+  it("routes malformed stETH history through schema-drift retry handling", async () => {
     const susds = reserveSnapshot();
     graphQlRequestMock
       .mockResolvedValueOnce({ SusdsYieldDailySnapshot: [susds] })
@@ -238,13 +239,8 @@ describe("useReserveYieldHistory", () => {
 
     const { fetcher } = renderReserveYieldHistoryProbe();
 
-    await expect(fetcher()).resolves.toEqual({
-      rows: [susds],
-      unavailable: false,
-      truncated: false,
-      stethHistoryFailed: true,
-      hasStethSnapshotSource: false,
-    });
+    await expect(fetcher()).rejects.toBeInstanceOf(GraphQLSchemaError);
+    expect(graphQlRequestMock).toHaveBeenCalledTimes(2);
   });
 
   it.each([
@@ -273,11 +269,7 @@ describe("useReserveYieldHistory", () => {
 
     const { fetcher } = renderReserveYieldHistoryProbe();
 
-    await expect(fetcher()).resolves.toMatchObject({
-      rows: [susds],
-      stethHistoryFailed: true,
-      hasStethSnapshotSource: false,
-    });
+    await expect(fetcher()).rejects.toBeInstanceOf(GraphQLSchemaError);
   });
 
   it("accepts a signed stETH daily unrealized compression delta", async () => {
@@ -341,9 +333,7 @@ describe("useReserveYieldHistory", () => {
 
       const { fetcher } = renderReserveYieldHistoryProbe();
 
-      await expect(fetcher()).rejects.toThrow(
-        "SusdsYieldDailySnapshot contained a malformed row",
-      );
+      await expect(fetcher()).rejects.toBeInstanceOf(GraphQLSchemaError);
       expect(graphQlRequestMock).toHaveBeenCalledTimes(1);
     },
   );

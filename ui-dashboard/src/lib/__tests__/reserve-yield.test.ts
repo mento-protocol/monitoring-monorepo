@@ -1220,14 +1220,7 @@ describe("reserve yield parsing and math", () => {
     expect(result.earnedYieldError).toContain("indexed only for Ethereum");
   });
 
-  it.each([
-    ["another chain", { chainId: 137 }],
-    ["another token", { token: "0x0000000000000000000000000000000000000001" }],
-    [
-      "an untracked wallet",
-      { wallet: "0x0000000000000000000000000000000000000002" },
-    ],
-  ])("does not accept stETH ledger rows for %s", async (_label, overrides) => {
+  it("ignores stETH ledger rows for an untracked wallet", async () => {
     vi.stubEnv("NEXT_PUBLIC_HASURA_URL", "https://hasura.example/v1/graphql");
     const fetchImpl = vi.fn().mockResolvedValue(
       Response.json({
@@ -1237,13 +1230,12 @@ describe("reserve yield parsing and math", () => {
               id: "1-steth-wallet-1780444800",
               chainId: 1,
               token: "0xae7ab96520de3a18e5e111b5eaab095312d7fe84",
-              wallet: "0xd0697f70e79476195b742d5afab14be50f98cc1e",
               timestamp: "1780444800",
               realizedYieldAmount: "0",
               unrealizedYieldAmount: "1",
               totalEarnedYieldAmount: "1",
               sampledAtTimestamp: "1780444800",
-              ...overrides,
+              wallet: "0x0000000000000000000000000000000000000002",
             },
           ],
         },
@@ -1255,6 +1247,150 @@ describe("reserve yield parsing and math", () => {
         entries: [],
         error:
           "stETH earned-yield actuals pending: no indexed wallet snapshot rows yet.",
+      });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it.each([
+    ["chain", { chainId: 137 }],
+    ["token", { token: "0x0000000000000000000000000000000000000001" }],
+  ])(
+    "does not fall back to an older stETH row when the newest tracked-wallet %s is invalid",
+    async (_label, newestOverrides) => {
+      vi.stubEnv("NEXT_PUBLIC_HASURA_URL", "https://hasura.example/v1/graphql");
+      const wallet = "0xd0697f70e79476195b742d5afab14be50f98cc1e";
+      const validRow = {
+        id: "1-steth-wallet-1780358400",
+        chainId: 1,
+        token: "0xae7ab96520de3a18e5e111b5eaab095312d7fe84",
+        wallet,
+        timestamp: "1780358400",
+        realizedYieldAmount: "0",
+        unrealizedYieldAmount: "1",
+        totalEarnedYieldAmount: "1",
+        sampledAtTimestamp: "1780358400",
+      };
+      const fetchImpl = vi.fn().mockResolvedValue(
+        Response.json({
+          data: {
+            StethYieldDailySnapshot: [
+              {
+                ...validRow,
+                id: "1-steth-wallet-1780444800",
+                timestamp: "1780444800",
+                sampledAtTimestamp: "1780444800",
+                ...newestOverrides,
+              },
+              validRow,
+            ],
+          },
+        }),
+      );
+
+      try {
+        await expect(fetchStethYieldLedger(fetchImpl)).rejects.toThrow(
+          "newest row for tracked wallet",
+        );
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    },
+  );
+
+  it("rejects the full stETH ledger when one tracked wallet has an invalid newest identity", async () => {
+    vi.stubEnv("NEXT_PUBLIC_HASURA_URL", "https://hasura.example/v1/graphql");
+    const reserveWallet = "0xd0697f70e79476195b742d5afab14be50f98cc1e";
+    const opsWallet = "0xd3d2e5c5af667da817b2d752d86c8f40c22137e1";
+    const validReserveRow = {
+      id: "1-steth-reserve-1780444800",
+      chainId: 1,
+      token: "0xae7ab96520de3a18e5e111b5eaab095312d7fe84",
+      wallet: reserveWallet,
+      timestamp: "1780444800",
+      realizedYieldAmount: "0",
+      unrealizedYieldAmount: "1",
+      totalEarnedYieldAmount: "1",
+      sampledAtTimestamp: "1780444800",
+    };
+    const olderValidOpsRow = {
+      ...validReserveRow,
+      id: "1-steth-ops-1780358400",
+      wallet: opsWallet,
+      timestamp: "1780358400",
+      sampledAtTimestamp: "1780358400",
+    };
+    const fetchImpl = vi.fn().mockResolvedValue(
+      Response.json({
+        data: {
+          StethYieldDailySnapshot: [
+            validReserveRow,
+            {
+              ...olderValidOpsRow,
+              id: "1-steth-ops-1780444800",
+              chainId: 137,
+              timestamp: "1780444800",
+              sampledAtTimestamp: "1780444800",
+            },
+            olderValidOpsRow,
+          ],
+        },
+      }),
+    );
+
+    try {
+      await expect(fetchStethYieldLedger(fetchImpl)).rejects.toThrow(
+        `newest row for tracked wallet ${opsWallet} had an invalid chain or token`,
+      );
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("ignores an unrelated newer wallet without blocking a tracked stETH row", async () => {
+    vi.stubEnv("NEXT_PUBLIC_HASURA_URL", "https://hasura.example/v1/graphql");
+    const trackedWallet = "0xd0697f70e79476195b742d5afab14be50f98cc1e";
+    const validRow = {
+      id: "1-steth-wallet-1780358400",
+      chainId: 1,
+      token: "0xae7ab96520de3a18e5e111b5eaab095312d7fe84",
+      wallet: trackedWallet,
+      timestamp: "1780358400",
+      realizedYieldAmount: "0",
+      unrealizedYieldAmount: "1",
+      totalEarnedYieldAmount: "1",
+      sampledAtTimestamp: "1780358400",
+    };
+    const fetchImpl = vi.fn().mockResolvedValue(
+      Response.json({
+        data: {
+          StethYieldDailySnapshot: [
+            {
+              ...validRow,
+              id: "1-steth-unrelated-1780444800",
+              wallet: "0x0000000000000000000000000000000000000002",
+              timestamp: "1780444800",
+              sampledAtTimestamp: "1780444800",
+            },
+            validRow,
+          ],
+        },
+      }),
+    );
+
+    try {
+      await expect(fetchStethYieldLedger(fetchImpl)).resolves.toEqual({
+        entries: [
+          {
+            wallet: trackedWallet,
+            earnedYieldAmount: BigInt(1),
+            realizedYieldAmount: BigInt(0),
+            unrealizedYieldAmount: BigInt(1),
+            asOf: "2026-06-02T00:00:00.000Z",
+          },
+        ],
+        error: null,
       });
     } finally {
       vi.unstubAllEnvs();

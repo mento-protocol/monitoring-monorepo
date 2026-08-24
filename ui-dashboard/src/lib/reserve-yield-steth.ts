@@ -125,12 +125,17 @@ function isMissingStethYieldDailySnapshotEntity(err: unknown): boolean {
   );
 }
 
+function trackedStethWalletIdentifier(value: unknown): string | null {
+  if (!isRecord(value) || typeof value.wallet !== "string") return null;
+  const wallet = value.wallet.trim().toLowerCase();
+  return isTrackedStethWalletIdentifier(wallet) ? wallet : null;
+}
+
 function trackedStethYieldLedgerEntry(
   value: unknown,
 ): StethYieldLedgerEntry | null {
   if (!isRecord(value)) return null;
-  const wallet =
-    typeof value.wallet === "string" ? value.wallet.trim().toLowerCase() : null;
+  const wallet = trackedStethWalletIdentifier(value);
   const token =
     typeof value.token === "string" ? value.token.trim().toLowerCase() : null;
   if (
@@ -186,10 +191,20 @@ function parseStethYieldLedger(payload: unknown): StethYieldLedgerResult {
   const data = isRecord(payload.data) ? payload.data : null;
   const rows = data ? asArray(data.StethYieldDailySnapshot) : [];
   const latestByWallet = new Map<string, StethYieldLedgerEntry>();
+  const seenTrackedWallets = new Set<string>();
 
   for (const value of rows) {
+    const wallet = trackedStethWalletIdentifier(value);
+    if (wallet === null || seenTrackedWallets.has(wallet)) continue;
+    // The query is newest-first. An invalid newest identity must not expose an
+    // older snapshot as the current ledger entry for this tracked wallet.
+    seenTrackedWallets.add(wallet);
     const entry = trackedStethYieldLedgerEntry(value);
-    if (entry === null || latestByWallet.has(entry.wallet)) continue;
+    if (entry === null) {
+      throw new Error(
+        `StethYieldDailySnapshot newest row for tracked wallet ${wallet} had an invalid chain or token`,
+      );
+    }
     latestByWallet.set(entry.wallet, entry);
   }
 

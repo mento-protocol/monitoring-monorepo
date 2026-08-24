@@ -2,6 +2,7 @@
 
 import useSWR from "swr";
 import { GraphQLClient } from "@/lib/graphql-fetch";
+import { GraphQLSchemaError } from "@/lib/graphql-schema-error";
 import { NETWORKS } from "@/lib/networks";
 import {
   STETH_YIELD_DAILY_SNAPSHOTS,
@@ -134,7 +135,8 @@ async function fetchOptionalStethHistory(
 ): Promise<OptionalStethHistoryResult> {
   try {
     return { ...(await fetchStethHistory(client, signal)), failed: false };
-  } catch {
+  } catch (err) {
+    if (err instanceof GraphQLSchemaError) throw err;
     // Keep already-fetched sUSDS rows and report the stETH failure separately.
     return { rows: [], unavailable: false, truncated: false, failed: true };
   }
@@ -156,6 +158,21 @@ type ReserveYieldHistoryResponseKey =
   | "SusdsYieldDailySnapshot"
   | "StethYieldDailySnapshot";
 
+function malformedHistoryRowError(
+  responseKey: ReserveYieldHistoryResponseKey,
+): GraphQLSchemaError {
+  return new GraphQLSchemaError(
+    [
+      {
+        code: "custom",
+        path: [responseKey],
+        message: "contained a malformed row",
+      },
+    ],
+    responseKey,
+  );
+}
+
 function pageRowsForResponse(
   response: unknown,
   responseKey: ReserveYieldHistoryResponseKey,
@@ -175,12 +192,12 @@ function pageRowsForResponse(
           row.chainId === RESERVE_YIELD_ETHEREUM_CHAIN_ID,
       )
     ) {
-      throw new Error("SusdsYieldDailySnapshot contained a malformed row");
+      throw malformedHistoryRowError(responseKey);
     }
     return pageRows;
   }
   if (!pageRows.every((row) => isValidEthereumStethSnapshot(row))) {
-    throw new Error("StethYieldDailySnapshot contained a malformed row");
+    throw malformedHistoryRowError(responseKey);
   }
   return pageRows as StethYieldDailySnapshotRow[];
 }
