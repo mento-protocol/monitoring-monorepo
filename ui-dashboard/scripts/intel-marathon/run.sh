@@ -59,6 +59,17 @@ case "$STAGE" in
     ;;
 esac
 
+# mirror-to-blob reads only local .intel-marathon/*.jsonl plus Vercel Blob —
+# it must not die on missing Upstash credentials either.
+case "$STAGE" in
+  mirror-to-blob | mirror)
+    NEEDS_UPSTASH=0
+    ;;
+  *)
+    NEEDS_UPSTASH=1
+    ;;
+esac
+
 # Resolve one credential: keep the exported value, else read it from tfvars.
 # Returns non-zero when neither is available — with a named error unless the
 # caller passed `optional` (a dry run, where the credential is unused).
@@ -90,7 +101,7 @@ fi
 # Fetch the per-DB REST token from the Upstash mgmt API — skipped entirely when
 # both REST vars are already exported.
 if [ -z "${UPSTASH_REDIS_REST_URL:-}" ] || [ -z "${UPSTASH_REDIS_REST_TOKEN:-}" ]; then
-  if [ "$DRY_RUN" = "1" ]; then
+  if [ "$DRY_RUN" = "1" ] || [ "$NEEDS_UPSTASH" = "0" ]; then
     resolve UPSTASH_EMAIL upstash_email optional || true
     resolve UPSTASH_API_KEY upstash_api_key optional || true
   else
