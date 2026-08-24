@@ -136,7 +136,9 @@ function numericFlag(name, fallback) {
     }
     return fallback;
   }
-  const parsed = Number(raw);
+  // Number("") and Number("   ") are 0, so a shell-expansion accident like
+  // `--limit "$UNSET_VAR"` would silently become 0 instead of erroring.
+  const parsed = raw.trim() === "" ? NaN : Number(raw);
   if (!Number.isFinite(parsed) || parsed < 0) {
     console.error(`Invalid ${name}: ${raw} (expected a non-negative number)`);
     process.exit(1);
