@@ -18,6 +18,8 @@ import {
   hasInvalidSusdsYieldDailySnapshotRow,
   isValidSusdsYieldDailySnapshotRow,
 } from "@/lib/canonical-revenue/reserve-snapshot-validation";
+import { isValidStethYieldDailySnapshotRow } from "@/lib/canonical-revenue/steth-snapshot-validation";
+import { RESERVE_YIELD_ETHEREUM_CHAIN_ID } from "@/lib/reserve-yield-types";
 
 export type ReserveYieldHistoryResult = {
   rows: ReserveYieldDailySnapshotRow[];
@@ -25,6 +27,8 @@ export type ReserveYieldHistoryResult = {
   hasError: boolean;
   unavailable: boolean;
   truncated: boolean;
+  stethHistoryFailed: boolean;
+  hasStethSnapshotSource: boolean;
 };
 
 type SnapshotPageResult = {
@@ -33,7 +37,15 @@ type SnapshotPageResult = {
   truncated: boolean;
 };
 
-const ETHEREUM_CHAIN_ID = 1;
+type ReserveYieldHistoryFetchResult = SnapshotPageResult & {
+  stethHistoryFailed: boolean;
+  hasStethSnapshotSource: boolean;
+};
+
+type OptionalStethHistoryResult = SnapshotPageResult & {
+  failed: boolean;
+};
+
 const HISTORY_PAGE_SIZE = 1000;
 const HISTORY_MAX_PAGES = 20;
 
@@ -67,7 +79,16 @@ function isMissingEntity(err: unknown, entity: string): boolean {
   );
 }
 
-async function fetchReserveYieldHistory(): Promise<SnapshotPageResult> {
+function isValidEthereumStethSnapshot(
+  value: unknown,
+): value is StethYieldDailySnapshotRow {
+  return (
+    isValidStethYieldDailySnapshotRow(value) &&
+    value.chainId === RESERVE_YIELD_ETHEREUM_CHAIN_ID
+  );
+}
+
+async function fetchReserveYieldHistory(): Promise<ReserveYieldHistoryFetchResult> {
   const client = new GraphQLClient(reserveYieldHistoryHasuraUrl());
   const signal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
 
@@ -78,10 +99,18 @@ async function fetchReserveYieldHistory(): Promise<SnapshotPageResult> {
       rows: [...susds.rows, ...steth.rows],
       unavailable: false,
       truncated: susds.truncated || steth.truncated,
+      stethHistoryFailed: steth.failed,
+      hasStethSnapshotSource: steth.rows.length > 0,
     };
   } catch (err) {
     if (isMissingEntity(err, "SusdsYieldDailySnapshot")) {
-      return { rows: [], unavailable: true, truncated: false };
+      return {
+        rows: [],
+        unavailable: true,
+        truncated: false,
+        stethHistoryFailed: false,
+        hasStethSnapshotSource: false,
+      };
     }
     throw err;
   }
@@ -102,12 +131,12 @@ async function fetchSusdsHistory(
 async function fetchOptionalStethHistory(
   client: GraphQLClient,
   signal: AbortSignal,
-): Promise<SnapshotPageResult> {
+): Promise<OptionalStethHistoryResult> {
   try {
-    return await fetchStethHistory(client, signal);
+    return { ...(await fetchStethHistory(client, signal)), failed: false };
   } catch {
-    // stETH history is optional during rollout; keep already-fetched sUSDS rows.
-    return { rows: [], unavailable: false, truncated: false };
+    // Keep already-fetched sUSDS rows and report the stETH failure separately.
+    return { rows: [], unavailable: false, truncated: false, failed: true };
   }
 }
 
@@ -115,19 +144,12 @@ async function fetchStethHistory(
   client: GraphQLClient,
   signal: AbortSignal,
 ): Promise<SnapshotPageResult> {
-  try {
-    return await fetchReserveYieldHistoryPage({
-      client,
-      signal,
-      document: STETH_YIELD_DAILY_SNAPSHOTS,
-      responseKey: "StethYieldDailySnapshot",
-    });
-  } catch (err) {
-    if (isMissingEntity(err, "StethYieldDailySnapshot")) {
-      return { rows: [], unavailable: false, truncated: false };
-    }
-    throw err;
-  }
+  return fetchReserveYieldHistoryPage({
+    client,
+    signal,
+    document: STETH_YIELD_DAILY_SNAPSHOTS,
+    responseKey: "StethYieldDailySnapshot",
+  });
 }
 
 type ReserveYieldHistoryResponseKey =
@@ -150,12 +172,15 @@ function pageRowsForResponse(
       !pageRows.every(
         (row) =>
           isValidSusdsYieldDailySnapshotRow(row) &&
-          row.chainId === ETHEREUM_CHAIN_ID,
+          row.chainId === RESERVE_YIELD_ETHEREUM_CHAIN_ID,
       )
     ) {
       throw new Error("SusdsYieldDailySnapshot contained a malformed row");
     }
     return pageRows;
+  }
+  if (!pageRows.every((row) => isValidEthereumStethSnapshot(row))) {
+    throw new Error("StethYieldDailySnapshot contained a malformed row");
   }
   return pageRows as StethYieldDailySnapshotRow[];
 }
@@ -185,7 +210,7 @@ async function fetchReserveYieldHistoryPage({
     client,
     document,
     {
-      chainId: ETHEREUM_CHAIN_ID,
+      chainId: RESERVE_YIELD_ETHEREUM_CHAIN_ID,
       limit: HISTORY_PAGE_SIZE,
       offset: page * HISTORY_PAGE_SIZE,
     },
@@ -211,8 +236,35 @@ async function fetchReserveYieldHistoryPage({
   });
 }
 
+function cachedStethHistoryState(
+  data: ReserveYieldHistoryFetchResult | undefined,
+  hasError: boolean,
+): {
+  rows: ReserveYieldDailySnapshotRow[];
+  failed: boolean;
+  hasSource: boolean;
+} {
+  if (hasError || data === undefined) {
+    return { rows: [], failed: false, hasSource: false };
+  }
+  const hasMalformedRow = data.rows.some(
+    (row) => "wallet" in row && !isValidEthereumStethSnapshot(row),
+  );
+  const rows = data.rows.filter(
+    (row) => !("wallet" in row) || isValidEthereumStethSnapshot(row),
+  );
+  const hasSource = rows.some(
+    (row) => "wallet" in row && isValidEthereumStethSnapshot(row),
+  );
+  return {
+    rows,
+    failed: data.stethHistoryFailed === true || hasMalformedRow,
+    hasSource,
+  };
+}
+
 export function useReserveYieldHistory(): ReserveYieldHistoryResult {
-  const { data, error, isLoading } = useSWR<SnapshotPageResult>(
+  const { data, error, isLoading } = useSWR<ReserveYieldHistoryFetchResult>(
     SWR_KEY_RESERVE_YIELD_HISTORY,
     fetchReserveYieldHistory,
     SHARED_QUERY_SWR_CONFIG,
@@ -220,12 +272,15 @@ export function useReserveYieldHistory(): ReserveYieldHistoryResult {
   const hasMalformedCachedSusdsHistory =
     data !== undefined && hasInvalidSusdsYieldDailySnapshotRow(data.rows);
   const hasError = error !== undefined || hasMalformedCachedSusdsHistory;
+  const stethHistory = cachedStethHistoryState(data, hasError);
 
   return {
-    rows: hasError ? [] : (data?.rows ?? []),
+    rows: stethHistory.rows,
     isLoading,
     hasError,
     unavailable: hasError ? false : (data?.unavailable ?? false),
     truncated: hasError ? false : (data?.truncated ?? false),
+    stethHistoryFailed: stethHistory.failed,
+    hasStethSnapshotSource: stethHistory.hasSource,
   };
 }

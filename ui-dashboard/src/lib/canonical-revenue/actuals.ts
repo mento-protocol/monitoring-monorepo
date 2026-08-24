@@ -1,10 +1,17 @@
 import { currentDayBucket, dayBucket, isoDate } from "./utils";
 import { isValidSusdsYieldDailySnapshotRow } from "./reserve-snapshot-validation";
+import { isValidStethYieldDailySnapshotRow } from "./steth-snapshot-validation";
 import { hasUnindexedSusdsHolding } from "@/lib/reserve-yield-susds-coverage";
+import { isIndexedStethHolding } from "@/lib/reserve-yield-steth-coverage";
+import {
+  FORECASTABLE_STETH_SYMBOL,
+  RESERVE_YIELD_ETHEREUM_CHAIN_ID,
+} from "@/lib/reserve-yield-types";
 import type {
   ActualRevenueAvailability,
   BuildCanonicalRevenueArgs,
   ReserveYieldDailySnapshotRow,
+  StethYieldDailySnapshotRow,
   SusdsYieldDailySnapshotRow,
 } from "./types";
 
@@ -46,7 +53,90 @@ function hasSusdsSnapshotSource(
     (row) =>
       !("wallet" in row) &&
       isValidSusdsYieldDailySnapshotRow(row) &&
-      row.chainId === 1,
+      row.chainId === RESERVE_YIELD_ETHEREUM_CHAIN_ID,
+  );
+}
+
+function hasStethSnapshotSource(args: BuildCanonicalRevenueArgs): boolean {
+  if (args.hasStethSnapshotSource === false) return false;
+  const validRows = args.reserveDailySnapshots.filter(
+    (row): row is StethYieldDailySnapshotRow =>
+      "wallet" in row &&
+      isValidStethYieldDailySnapshotRow(row) &&
+      row.chainId === RESERVE_YIELD_ETHEREUM_CHAIN_ID,
+  );
+  if (validRows.length === 0) return false;
+  const reserveYield = args.reserveYield;
+  if (reserveYield === null) return true;
+  const currentHoldings = reserveYield.holdings.filter(
+    (holding) =>
+      holding.assetSymbol.toUpperCase() === FORECASTABLE_STETH_SYMBOL &&
+      holdingHasExposure(holding),
+  );
+  if (currentHoldings.length === 0) {
+    return reserveYield.stethSnapshotSourceRequired !== true;
+  }
+  const snapshotWallets = new Set(
+    validRows.map((row) => row.wallet.trim().toLowerCase()),
+  );
+  return currentHoldings.every(
+    (holding) =>
+      isIndexedStethHolding(holding) &&
+      holding.identifier !== null &&
+      snapshotWallets.has(holding.identifier.trim().toLowerCase()),
+  );
+}
+
+function holdingHasExposure(
+  holding: NonNullable<
+    BuildCanonicalRevenueArgs["reserveYield"]
+  >["holdings"][number],
+): boolean {
+  return (
+    holding.principalUsd !== 0 ||
+    holding.balance !== 0 ||
+    (holding.earnedYieldUsd !== null &&
+      Number.isFinite(holding.earnedYieldUsd) &&
+      holding.earnedYieldUsd !== 0)
+  );
+}
+
+function hasCurrentStethExposure(
+  reserveYield: BuildCanonicalRevenueArgs["reserveYield"],
+): boolean {
+  if (reserveYield === null) return false;
+  if (reserveYield.stethSnapshotSourceRequired === true) return true;
+  return reserveYield.holdings.some(
+    (holding) =>
+      holding.assetSymbol.toUpperCase() === FORECASTABLE_STETH_SYMBOL &&
+      holdingHasExposure(holding),
+  );
+}
+
+function currentHoldingsClassificationFailed(
+  args: BuildCanonicalRevenueArgs,
+): boolean {
+  return (
+    args.reserveCurrentHoldingsClassificationFailed === true ||
+    args.reserveYield?.reserveCurrentHoldingsClassificationFailed === true
+  );
+}
+
+function incompleteStethSnapshotCoverage(
+  args: BuildCanonicalRevenueArgs,
+): boolean {
+  return args.reserveYield?.hasIncompleteStethSourceCoverage === true;
+}
+
+function unavailableStethSnapshotSource(
+  args: BuildCanonicalRevenueArgs,
+): boolean {
+  if (currentHoldingsClassificationFailed(args)) return true;
+  if (incompleteStethSnapshotCoverage(args)) return true;
+  const sourceRequired = hasCurrentStethExposure(args.reserveYield);
+  return (
+    sourceRequired &&
+    (args.stethHistoryFailed === true || !hasStethSnapshotSource(args))
   );
 }
 
@@ -197,7 +287,8 @@ export function buildActualAvailability(
     knownMissingSusdsSnapshotSource(args) ||
     incompleteSusdsSnapshotCoverage(args) ||
     unverifiableSusdsSnapshotSource(args) ||
-    unavailableSusdsSignalSource(args);
+    unavailableSusdsSignalSource(args) ||
+    unavailableStethSnapshotSource(args);
   return {
     reserve: !reserveHistoryUnavailable,
     reserveStaleAfter: reserveStaleAfterBucket(args),
@@ -210,21 +301,13 @@ function reservePartialReason(args: BuildCanonicalRevenueArgs): string | null {
   if (args.reserveHistoryFailed) {
     return "Reserve earned-yield history failed to load.";
   }
-  if (incompleteSusdsSnapshotCoverage(args)) {
-    return "Reserve sUSDS earned-yield actuals unavailable: indexed snapshots do not cover all current sUSDS sources.";
-  }
-  if (unverifiableSusdsSnapshotSource(args)) {
-    return "Reserve sUSDS earned-yield actuals unavailable: current reserve holdings classification failed and no SusdsYieldDailySnapshot source exists.";
-  }
-  if (unavailableSusdsSignalSource(args)) {
-    return "Reserve sUSDS earned-yield actuals unavailable: the current sUSDS yield signal is unavailable and no SusdsYieldDailySnapshot source exists.";
-  }
-  if (knownMissingSusdsSnapshotSource(args)) {
-    return "Reserve sUSDS earned-yield actuals unavailable: no SusdsYieldDailySnapshot source exists for current sUSDS holdings or earned signal.";
-  }
+  const sourceReason = immediateSnapshotSourceReason(args);
+  if (sourceReason !== null) return sourceReason;
   if (args.reserveYield?.earnedYieldError) {
     return `Reserve earned-yield actuals partial: ${args.reserveYield.earnedYieldError}`;
   }
+  const missingStethReason = missingStethSnapshotSourceReason(args);
+  if (missingStethReason !== null) return missingStethReason;
   if (args.reserveHistoryUnavailable) {
     return "Reserve earned-yield history is not indexed yet.";
   }
@@ -243,6 +326,43 @@ function reservePartialReason(args: BuildCanonicalRevenueArgs): string | null {
   return hasReserveYieldSignal(args.reserveYield)
     ? "Reserve earned-yield history has no snapshots yet."
     : null;
+}
+
+function immediateSnapshotSourceReason(
+  args: BuildCanonicalRevenueArgs,
+): string | null {
+  if (unavailableStethSnapshotSource(args) && args.stethHistoryFailed) {
+    return "Reserve stETH earned-yield actuals unavailable: StethYieldDailySnapshot history failed to load.";
+  }
+  if (incompleteSusdsSnapshotCoverage(args)) {
+    return "Reserve sUSDS earned-yield actuals unavailable: indexed snapshots do not cover all current sUSDS sources.";
+  }
+  if (unverifiableSusdsSnapshotSource(args)) {
+    return "Reserve sUSDS earned-yield actuals unavailable: current reserve holdings classification failed and no SusdsYieldDailySnapshot source exists.";
+  }
+  if (unavailableSusdsSignalSource(args)) {
+    return "Reserve sUSDS earned-yield actuals unavailable: the current sUSDS yield signal is unavailable and no SusdsYieldDailySnapshot source exists.";
+  }
+  if (knownMissingSusdsSnapshotSource(args)) {
+    return "Reserve sUSDS earned-yield actuals unavailable: no SusdsYieldDailySnapshot source exists for current sUSDS holdings or earned signal.";
+  }
+  if (
+    unavailableStethSnapshotSource(args) &&
+    currentHoldingsClassificationFailed(args)
+  ) {
+    return "Reserve stETH earned-yield actuals unavailable: current reserve holdings classification failed, so current stETH wallet snapshot coverage cannot be verified.";
+  }
+  if (incompleteStethSnapshotCoverage(args)) {
+    return "Reserve stETH earned-yield actuals unavailable: indexed snapshots do not cover all current stETH sources.";
+  }
+  return null;
+}
+
+function missingStethSnapshotSourceReason(
+  args: BuildCanonicalRevenueArgs,
+): string | null {
+  if (!unavailableStethSnapshotSource(args)) return null;
+  return "Reserve stETH earned-yield actuals unavailable: no StethYieldDailySnapshot source exists for current stETH holdings.";
 }
 
 export function buildPartialReasons(args: BuildCanonicalRevenueArgs): string[] {

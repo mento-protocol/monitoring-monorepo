@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { rateLimitAwareRetry } from "@/lib/gql-retry";
 import type {
   ReserveYieldDailySnapshotRow,
+  StethYieldDailySnapshotRow,
   SusdsYieldDailySnapshotRow,
 } from "@/lib/canonical-revenue";
 
@@ -21,6 +22,8 @@ type ReserveYieldHistoryFetcher = () => Promise<{
   rows: ReserveYieldDailySnapshotRow[];
   unavailable: boolean;
   truncated: boolean;
+  stethHistoryFailed: boolean;
+  hasStethSnapshotSource: boolean;
 }>;
 
 const swrMock = vi.hoisted(() => vi.fn());
@@ -54,7 +57,7 @@ function reserveSnapshot(): SusdsYieldDailySnapshotRow {
   return {
     id: "1-susds-1772668800",
     chainId: 1,
-    token: "0xsusds",
+    token: "0xa3931d71877c0e7a3148cb7eb4463524fec27fbd",
     timestamp: "1772668800",
     currentShares: "0",
     costBasisUsdWei: "0",
@@ -68,6 +71,27 @@ function reserveSnapshot(): SusdsYieldDailySnapshotRow {
     dailyRealizedYieldUsdWei: "0",
     dailyUnrealizedYieldUsdWei: "0",
     sharePriceUsdWei: "1000000000000000000",
+    sampledAtBlock: "1",
+    sampledAtTimestamp: "1772668800",
+  };
+}
+
+function stethSnapshot(): StethYieldDailySnapshotRow {
+  return {
+    id: "1-steth-0xreserve-1772668800",
+    chainId: 1,
+    token: "0xae7ab96520de3a18e5e111b5eaab095312d7fe84",
+    wallet: "0xd0697f70e79476195b742d5afab14be50f98cc1e",
+    timestamp: "1772668800",
+    balanceAmount: "1000000000000000000",
+    principalAmount: "900000000000000000",
+    realizedYieldAmount: "0",
+    transferredOutYieldAmount: "0",
+    unrealizedYieldAmount: "100000000000000000",
+    totalEarnedYieldAmount: "100000000000000000",
+    dailyEarnedYieldAmount: "1000000000000000",
+    dailyRealizedYieldAmount: "0",
+    dailyUnrealizedYieldAmount: "1000000000000000",
     sampledAtBlock: "1",
     sampledAtTimestamp: "1772668800",
   };
@@ -130,6 +154,8 @@ describe("useReserveYieldHistory", () => {
         rows: [reserveSnapshot()],
         unavailable: true,
         truncated: true,
+        stethHistoryFailed: false,
+        hasStethSnapshotSource: false,
       },
       error: new Error("Hasura unavailable"),
       isLoading: false,
@@ -142,6 +168,8 @@ describe("useReserveYieldHistory", () => {
       hasError: true,
       unavailable: false,
       truncated: false,
+      stethHistoryFailed: false,
+      hasStethSnapshotSource: false,
     });
   });
 
@@ -157,8 +185,143 @@ describe("useReserveYieldHistory", () => {
       rows: [snapshot],
       unavailable: false,
       truncated: false,
+      stethHistoryFailed: true,
+      hasStethSnapshotSource: false,
     });
     expect(graphQlRequestMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("tracks an empty stETH response separately from a request failure", async () => {
+    const snapshot = reserveSnapshot();
+    graphQlRequestMock
+      .mockResolvedValueOnce({ SusdsYieldDailySnapshot: [snapshot] })
+      .mockResolvedValueOnce({ StethYieldDailySnapshot: [] });
+
+    const { fetcher } = renderReserveYieldHistoryProbe();
+
+    await expect(fetcher()).resolves.toEqual({
+      rows: [snapshot],
+      unavailable: false,
+      truncated: false,
+      stethHistoryFailed: false,
+      hasStethSnapshotSource: false,
+    });
+  });
+
+  it("reports a valid stETH snapshot source independently of sUSDS", async () => {
+    const susds = reserveSnapshot();
+    const steth = stethSnapshot();
+    graphQlRequestMock
+      .mockResolvedValueOnce({ SusdsYieldDailySnapshot: [susds] })
+      .mockResolvedValueOnce({ StethYieldDailySnapshot: [steth] });
+
+    const { fetcher } = renderReserveYieldHistoryProbe();
+
+    await expect(fetcher()).resolves.toEqual({
+      rows: [susds, steth],
+      unavailable: false,
+      truncated: false,
+      stethHistoryFailed: false,
+      hasStethSnapshotSource: true,
+    });
+  });
+
+  it("keeps sUSDS rows and marks malformed stETH history as failed", async () => {
+    const susds = reserveSnapshot();
+    graphQlRequestMock
+      .mockResolvedValueOnce({ SusdsYieldDailySnapshot: [susds] })
+      .mockResolvedValueOnce({
+        StethYieldDailySnapshot: [
+          { ...stethSnapshot(), totalEarnedYieldAmount: "invalid" },
+        ],
+      });
+
+    const { fetcher } = renderReserveYieldHistoryProbe();
+
+    await expect(fetcher()).resolves.toEqual({
+      rows: [susds],
+      unavailable: false,
+      truncated: false,
+      stethHistoryFailed: true,
+      hasStethSnapshotSource: false,
+    });
+  });
+
+  it.each([
+    ["negative chain", { chainId: -1 }],
+    ["wrong chain", { chainId: 137 }],
+    ["wrong token", { token: "0x0000000000000000000000000000000000000001" }],
+    [
+      "untracked wallet",
+      { wallet: "0x0000000000000000000000000000000000000002" },
+    ],
+    ["zero timestamp", { timestamp: "0" }],
+    ["negative balance", { balanceAmount: "-1" }],
+    ["negative principal", { principalAmount: "-1" }],
+    ["negative transferred yield", { transferredOutYieldAmount: "-1" }],
+    ["negative daily earned yield", { dailyEarnedYieldAmount: "-1" }],
+    ["negative daily realized yield", { dailyRealizedYieldAmount: "-1" }],
+    ["zero sampled block", { sampledAtBlock: "0" }],
+    ["negative sampled timestamp", { sampledAtTimestamp: "-1" }],
+  ])("rejects a stETH row with %s", async (_label, overrides) => {
+    const susds = reserveSnapshot();
+    graphQlRequestMock
+      .mockResolvedValueOnce({ SusdsYieldDailySnapshot: [susds] })
+      .mockResolvedValueOnce({
+        StethYieldDailySnapshot: [{ ...stethSnapshot(), ...overrides }],
+      });
+
+    const { fetcher } = renderReserveYieldHistoryProbe();
+
+    await expect(fetcher()).resolves.toMatchObject({
+      rows: [susds],
+      stethHistoryFailed: true,
+      hasStethSnapshotSource: false,
+    });
+  });
+
+  it("accepts a signed stETH daily unrealized compression delta", async () => {
+    const susds = reserveSnapshot();
+    const steth = stethSnapshot();
+    graphQlRequestMock
+      .mockResolvedValueOnce({ SusdsYieldDailySnapshot: [susds] })
+      .mockResolvedValueOnce({
+        StethYieldDailySnapshot: [
+          {
+            ...steth,
+            dailyUnrealizedYieldAmount: "-1",
+          },
+        ],
+      });
+
+    const { fetcher } = renderReserveYieldHistoryProbe();
+
+    await expect(fetcher()).resolves.toMatchObject({
+      stethHistoryFailed: false,
+      hasStethSnapshotSource: true,
+    });
+  });
+
+  it("accepts configured stETH identity fields case-insensitively", async () => {
+    const susds = reserveSnapshot();
+    graphQlRequestMock
+      .mockResolvedValueOnce({ SusdsYieldDailySnapshot: [susds] })
+      .mockResolvedValueOnce({
+        StethYieldDailySnapshot: [
+          {
+            ...stethSnapshot(),
+            token: "0xAE7AB96520DE3A18E5E111B5EAAB095312D7FE84",
+            wallet: "0xD0697F70E79476195B742D5AFAB14BE50F98CC1E",
+          },
+        ],
+      });
+
+    const { fetcher } = renderReserveYieldHistoryProbe();
+
+    await expect(fetcher()).resolves.toMatchObject({
+      stethHistoryFailed: false,
+      hasStethSnapshotSource: true,
+    });
   });
 
   it.each([
@@ -196,6 +359,8 @@ describe("useReserveYieldHistory", () => {
         ],
         unavailable: false,
         truncated: false,
+        stethHistoryFailed: false,
+        hasStethSnapshotSource: false,
       },
       error: undefined,
       isLoading: false,
@@ -208,6 +373,33 @@ describe("useReserveYieldHistory", () => {
       hasError: true,
       unavailable: false,
       truncated: false,
+    });
+  });
+
+  it("drops malformed cached stETH rows without discarding cached sUSDS", () => {
+    const susds = reserveSnapshot();
+    swrMock.mockReturnValue({
+      data: {
+        rows: [
+          susds,
+          { ...stethSnapshot(), dailyEarnedYieldAmount: "invalid" },
+        ],
+        unavailable: false,
+        truncated: false,
+        stethHistoryFailed: false,
+        hasStethSnapshotSource: true,
+      },
+      error: undefined,
+      isLoading: false,
+    });
+
+    const { result } = renderReserveYieldHistoryProbe();
+
+    expect(result).toMatchObject({
+      rows: [susds],
+      hasError: false,
+      stethHistoryFailed: true,
+      hasStethSnapshotSource: false,
     });
   });
 });

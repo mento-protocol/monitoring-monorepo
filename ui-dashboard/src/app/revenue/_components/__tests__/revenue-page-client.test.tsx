@@ -81,7 +81,7 @@ function reserveSnapshot(
   return {
     id: `1-susds-${timestamp}`,
     chainId: 1,
-    token: "0xsusds",
+    token: "0xa3931d71877c0e7a3148cb7eb4463524fec27fbd",
     timestamp: String(timestamp),
     currentShares: "0",
     costBasisUsdWei: "0",
@@ -271,6 +271,8 @@ function renderRevenue({
   reserveYield = RESERVE_YIELD,
   reserveRows = [],
   reserveHistoryUnavailable = false,
+  stethHistoryFailed = false,
+  hasStethSnapshotSource = false,
   protocolFeesLoading = false,
   reserveYieldLoading = false,
   reserveYieldError = false,
@@ -291,6 +293,8 @@ function renderRevenue({
   reserveYield?: ReserveYieldResponse | null;
   reserveRows?: SusdsYieldDailySnapshotRow[];
   reserveHistoryUnavailable?: boolean;
+  stethHistoryFailed?: boolean;
+  hasStethSnapshotSource?: boolean;
   protocolFeesLoading?: boolean;
   reserveYieldLoading?: boolean;
   reserveYieldError?: boolean;
@@ -325,6 +329,8 @@ function renderRevenue({
     hasError: false,
     unavailable: reserveHistoryUnavailable,
     truncated: false,
+    stethHistoryFailed,
+    hasStethSnapshotSource,
   });
   return renderToStaticMarkup(<RevenuePageClient />);
 }
@@ -619,6 +625,25 @@ describe("RevenuePageClient canonical revenue layout", () => {
       },
       reserveRows: [reserveSnapshot(currentDayTimestamp(), 45)],
       hasUnindexedSusdsHolding: true,
+    });
+
+    expect(html).toContain(reason);
+    expect(capturedProps.chart?.partialReasons).toContain(reason);
+    expect(streamCardHtml(html, "Reserve Yield")).toContain("N/A");
+  });
+
+  it("renders current stETH actuals unavailable when its history source fails", () => {
+    const reason =
+      "Reserve stETH earned-yield actuals unavailable: StethYieldDailySnapshot history failed to load.";
+    const html = renderRevenue({
+      reserveYield: {
+        ...RESERVE_YIELD,
+        stethSnapshotSourceRequired: true,
+        holdings: [...RESERVE_YIELD.holdings, STETH_HOLDING],
+      },
+      reserveRows: [reserveSnapshot(currentDayTimestamp(), 0)],
+      stethHistoryFailed: true,
+      hasStethSnapshotSource: false,
     });
 
     expect(html).toContain(reason);

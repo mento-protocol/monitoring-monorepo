@@ -173,6 +173,7 @@ describe("GET /api/reserve-yield", () => {
       susdsEarnedYieldUsd: null,
       susdsSnapshotSourceRequired: true,
       hasUnindexedSusdsHolding: false,
+      stethSnapshotSourceRequired: false,
       grossApyPercent: 5.33,
       expenseBps: 15,
       revenueShareBps: 8000,
@@ -226,6 +227,7 @@ describe("GET /api/reserve-yield", () => {
     expect(body.principalUsd).toBeCloseTo(420_495.97, 6);
     expect(body.forecastPrincipalUsd).toBeCloseTo(420_495.97, 6);
     expect(body.earnedYieldUsd).toBeNull();
+    expect(body.stethSnapshotSourceRequired).toBe(true);
     expect(body.annualRunRateUsd).toBeCloseTo(12_416.571115, 6);
     expect(body.next30dUsd).toBeCloseTo(1_020.540092, 6);
     expect(body.rateError).toBeNull();
@@ -241,6 +243,106 @@ describe("GET /api/reserve-yield", () => {
         "Lido stETH APR forecast; stETH mark-to-market changes are not counted as earned revenue",
     });
     expect(stethHolding.next365dUsd).toBeCloseTo(12_375.131115, 6);
+  });
+
+  it("does not require stETH history for explicit-zero current exposure", async () => {
+    const zeroStethAsset = {
+      ...RESERVE_WITH_STETH.collateral.assets[1],
+      balance: "0",
+      usd_value: 0,
+      sources: [
+        {
+          ...RESERVE_WITH_STETH.collateral.assets[1]!.sources[0],
+          balance: "0",
+          usd_value: 0,
+        },
+      ],
+    };
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        Response.json({ collateral: { assets: [zeroStethAsset] } }),
+      )
+      .mockResolvedValueOnce(
+        new Response("observation_date,FEDFUNDS\n2026-05-01,5.33\n"),
+      )
+      .mockResolvedValueOnce(Response.json(SKY_SSR_RPC_RESPONSE))
+      .mockResolvedValueOnce(Response.json(LIDO_STETH_APR_RESPONSE));
+    const { GET } = await loadRoute();
+
+    const res = await GET();
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.stethSnapshotSourceRequired).toBe(false);
+  });
+
+  it.each([
+    ["nonzero", { balance: "1", usd_value: 2_000 }],
+    ["invalid", { balance: "unknown", usd_value: "unknown" }],
+    ["missing", { balance: undefined, usd_value: undefined }],
+  ])(
+    "requires stETH history for %s raw asset exposure with zero-only sources",
+    async (_label, rawExposure) => {
+      const stethAsset = {
+        ...RESERVE_WITH_STETH.collateral.assets[1],
+        ...rawExposure,
+        sources: [
+          {
+            ...RESERVE_WITH_STETH.collateral.assets[1]!.sources[0],
+            balance: "0",
+            usd_value: 0,
+          },
+        ],
+      };
+      vi.spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(
+          Response.json({ collateral: { assets: [stethAsset] } }),
+        )
+        .mockResolvedValueOnce(
+          new Response("observation_date,FEDFUNDS\n2026-05-01,5.33\n"),
+        )
+        .mockResolvedValueOnce(Response.json(SKY_SSR_RPC_RESPONSE))
+        .mockResolvedValueOnce(Response.json(LIDO_STETH_APR_RESPONSE));
+      const { GET } = await loadRoute();
+
+      const res = await GET();
+      const body = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(body.stethSnapshotSourceRequired).toBe(true);
+    },
+  );
+
+  it("reports incomplete stETH source coverage through the API", async () => {
+    const stethAsset = {
+      ...RESERVE_WITH_STETH.collateral.assets[1],
+      sources: [
+        RESERVE_WITH_STETH.collateral.assets[1]!.sources[0],
+        {
+          type: "wallet",
+          label: "Unpriced source",
+          identifier: "0x0000000000000000000000000000000000000001",
+          balance: "unknown",
+          usd_value: "unknown",
+        },
+      ],
+    };
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        Response.json({ collateral: { assets: [stethAsset] } }),
+      )
+      .mockResolvedValueOnce(
+        new Response("observation_date,FEDFUNDS\n2026-05-01,5.33\n"),
+      )
+      .mockResolvedValueOnce(Response.json(SKY_SSR_RPC_RESPONSE))
+      .mockResolvedValueOnce(Response.json(LIDO_STETH_APR_RESPONSE));
+    const { GET } = await loadRoute();
+
+    const res = await GET();
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.hasIncompleteStethSourceCoverage).toBe(true);
   });
 
   it("applies wallet-level stETH actuals from indexed snapshots", async () => {
@@ -939,6 +1041,7 @@ describe("GET /api/reserve-yield", () => {
     expect(body.holdingsError).toContain("without usable USD values");
     expect(body.reserveCurrentHoldingsClassificationFailed).toBe(false);
     expect(body.susdsSnapshotSourceRequired).toBe(false);
+    expect(body.stethSnapshotSourceRequired).toBe(true);
   });
 
   it("returns a clear empty holdings shape when the reserve has no yield-bearing rows", async () => {
@@ -979,6 +1082,7 @@ describe("GET /api/reserve-yield", () => {
     expect(body.holdings).toEqual([]);
     expect(body.holdingsError).toContain("Reserve API");
     expect(body.reserveCurrentHoldingsClassificationFailed).toBe(true);
+    expect(body.hasIncompleteStethSourceCoverage).toBe(false);
     expect(body.grossApyPercent).toBe(5.33);
     expect(body.skySavingsRateApyPercent).toBeCloseTo(SKY_SSR_APY_PERCENT, 12);
     expect(body.annualRunRateUsd).toBeNull();

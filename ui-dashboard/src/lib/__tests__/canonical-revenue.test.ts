@@ -21,6 +21,14 @@ const UNAVAILABLE_SUSDS_SIGNAL_SOURCE_REASON =
   "Reserve sUSDS earned-yield actuals unavailable: the current sUSDS yield signal is unavailable and no SusdsYieldDailySnapshot source exists.";
 const INCOMPLETE_SUSDS_SNAPSHOT_COVERAGE_REASON =
   "Reserve sUSDS earned-yield actuals unavailable: indexed snapshots do not cover all current sUSDS sources.";
+const INCOMPLETE_STETH_SNAPSHOT_COVERAGE_REASON =
+  "Reserve stETH earned-yield actuals unavailable: indexed snapshots do not cover all current stETH sources.";
+const MISSING_STETH_SNAPSHOT_SOURCE_REASON =
+  "Reserve stETH earned-yield actuals unavailable: no StethYieldDailySnapshot source exists for current stETH holdings.";
+const FAILED_STETH_SNAPSHOT_SOURCE_REASON =
+  "Reserve stETH earned-yield actuals unavailable: StethYieldDailySnapshot history failed to load.";
+const UNVERIFIABLE_STETH_SNAPSHOT_SOURCE_REASON =
+  "Reserve stETH earned-yield actuals unavailable: current reserve holdings classification failed, so current stETH wallet snapshot coverage cannot be verified.";
 
 function ts(iso: string): number {
   return Date.parse(`${iso}T00:00:00Z`) / 1000;
@@ -66,7 +74,7 @@ function reserveSnapshot(
   return {
     id: `1-susds-${timestamp}`,
     chainId: 1,
-    token: "0xsusds",
+    token: "0xa3931d71877c0e7a3148cb7eb4463524fec27fbd",
     timestamp: String(timestamp),
     currentShares: "0",
     costBasisUsdWei: "0",
@@ -150,6 +158,7 @@ function reserveYield(
     susdsYieldSignalUnavailable: false,
     susdsSnapshotSourceRequired: false,
     hasUnindexedSusdsHolding: false,
+    hasIncompleteStethSourceCoverage: false,
     realizedYieldUsd: null,
     unrealizedYieldUsd: null,
     earnedYieldAsOf: null,
@@ -293,6 +302,284 @@ describe("buildCanonicalRevenue", () => {
     expect(result.periods.allTimeSinceV3.totalUsd).toBeNull();
     expect(result.periods.allTimeSinceV3.partialReasons).toContain(
       "Reserve earned-yield actuals partial: stETH earned-yield actuals pending: no indexed wallet snapshot rows yet.",
+    );
+  });
+
+  it("fails closed when a zero sUSDS baseline masks missing current stETH history", () => {
+    const result = buildCanonicalRevenue({
+      networkData: [],
+      cdpDailySeries: [],
+      cdpMarkets: [],
+      reserveYield: reserveYield({ holdings: [stethHolding()] }),
+      reserveDailySnapshots: [reserveSnapshot(ts("2026-06-12"), 0)],
+      nowSeconds: NOW_SECONDS,
+    });
+
+    expect(result.periods.allTimeSinceV3.reserveYieldUsd).toBeNull();
+    expect(result.periods.allTimeSinceV3.totalUsd).toBeNull();
+    expect(result.partialReasons).toContain(
+      MISSING_STETH_SNAPSHOT_SOURCE_REASON,
+    );
+  });
+
+  it("fails closed when stETH history omits the current reserve wallet", () => {
+    const currentWallet = "0xd0697f70e79476195b742d5afab14be50f98cc1e";
+    const otherWallet = "0xd3d2e5c5af667da817b2d752d86c8f40c22137e1";
+    const result = buildCanonicalRevenue({
+      networkData: [],
+      cdpDailySeries: [],
+      cdpMarkets: [],
+      reserveYield: reserveYield({
+        stethSnapshotSourceRequired: true,
+        holdings: [stethHolding({ identifier: currentWallet })],
+      }),
+      reserveDailySnapshots: [
+        reserveSnapshot(ts("2026-06-12"), 0),
+        stethReserveSnapshot(ts("2026-06-12"), otherWallet, 0),
+      ],
+      hasStethSnapshotSource: true,
+      nowSeconds: NOW_SECONDS,
+    });
+
+    expect(result.periods.allTimeSinceV3.reserveYieldUsd).toBeNull();
+    expect(result.partialReasons).toContain(
+      MISSING_STETH_SNAPSHOT_SOURCE_REASON,
+    );
+  });
+
+  it("does not let an Ethereum snapshot cover the same stETH wallet on Polygon", () => {
+    const wallet = "0xd0697f70e79476195b742d5afab14be50f98cc1e";
+    const result = buildCanonicalRevenue({
+      networkData: [],
+      cdpDailySeries: [],
+      cdpMarkets: [],
+      reserveYield: reserveYield({
+        stethSnapshotSourceRequired: true,
+        holdings: [stethHolding({ chain: "polygon", identifier: wallet })],
+      }),
+      reserveDailySnapshots: [
+        reserveSnapshot(ts("2026-06-12"), 0),
+        stethReserveSnapshot(ts("2026-06-12"), wallet, 0),
+      ],
+      hasStethSnapshotSource: true,
+      nowSeconds: NOW_SECONDS,
+    });
+
+    expect(result.periods.allTimeSinceV3.reserveYieldUsd).toBeNull();
+    expect(result.partialReasons).toContain(
+      MISSING_STETH_SNAPSHOT_SOURCE_REASON,
+    );
+  });
+
+  it("fails closed when unknown stETH exposure has no classifiable wallet", () => {
+    const result = buildCanonicalRevenue({
+      networkData: [],
+      cdpDailySeries: [],
+      cdpMarkets: [],
+      reserveYield: reserveYield({
+        stethSnapshotSourceRequired: true,
+        holdings: [],
+      }),
+      reserveDailySnapshots: [
+        reserveSnapshot(ts("2026-06-12"), 0),
+        stethReserveSnapshot(
+          ts("2026-06-12"),
+          "0xd3d2e5c5af667da817b2d752d86c8f40c22137e1",
+          0,
+        ),
+      ],
+      hasStethSnapshotSource: true,
+      nowSeconds: NOW_SECONDS,
+    });
+
+    expect(result.periods.allTimeSinceV3.reserveYieldUsd).toBeNull();
+    expect(result.partialReasons).toContain(
+      MISSING_STETH_SNAPSHOT_SOURCE_REASON,
+    );
+  });
+
+  it("fails closed when current stETH history fails independently of sUSDS", () => {
+    const result = buildCanonicalRevenue({
+      networkData: [],
+      cdpDailySeries: [],
+      cdpMarkets: [],
+      reserveYield: reserveYield({
+        stethSnapshotSourceRequired: true,
+        holdings: [stethHolding()],
+      }),
+      reserveDailySnapshots: [reserveSnapshot(ts("2026-06-12"), 0)],
+      stethHistoryFailed: true,
+      hasStethSnapshotSource: false,
+      nowSeconds: NOW_SECONDS,
+    });
+
+    expect(result.periods.allTimeSinceV3.reserveYieldUsd).toBeNull();
+    expect(result.partialReasons).toContain(
+      FAILED_STETH_SNAPSHOT_SOURCE_REASON,
+    );
+  });
+
+  it("keeps sUSDS actuals available when stETH history fails without current stETH exposure", () => {
+    const result = buildCanonicalRevenue({
+      networkData: [],
+      cdpDailySeries: [],
+      cdpMarkets: [],
+      reserveYield: reserveYield({ stethSnapshotSourceRequired: false }),
+      reserveDailySnapshots: [reserveSnapshot(ts("2026-06-12"), 5)],
+      stethHistoryFailed: true,
+      hasStethSnapshotSource: false,
+      nowSeconds: NOW_SECONDS,
+    });
+
+    expect(result.periods.allTimeSinceV3.reserveYieldUsd).toBe(5);
+    expect(result.partialReasons).not.toContain(
+      FAILED_STETH_SNAPSHOT_SOURCE_REASON,
+    );
+  });
+
+  it("does not require stETH history for explicit-zero current exposure", () => {
+    const result = buildCanonicalRevenue({
+      networkData: [],
+      cdpDailySeries: [],
+      cdpMarkets: [],
+      reserveYield: reserveYield({
+        stethSnapshotSourceRequired: false,
+        holdings: [
+          stethHolding({
+            principalUsd: 0,
+            balance: 0,
+            earnedYieldUsd: 0,
+          }),
+        ],
+      }),
+      reserveDailySnapshots: [reserveSnapshot(ts("2026-06-12"), 5)],
+      hasStethSnapshotSource: false,
+      nowSeconds: NOW_SECONDS,
+    });
+
+    expect(result.periods.allTimeSinceV3.reserveYieldUsd).toBe(5);
+    expect(result.partialReasons).not.toContain(
+      MISSING_STETH_SNAPSHOT_SOURCE_REASON,
+    );
+  });
+
+  it("does not let a contradictory false API flag hide current stETH exposure", () => {
+    const result = buildCanonicalRevenue({
+      networkData: [],
+      cdpDailySeries: [],
+      cdpMarkets: [],
+      reserveYield: reserveYield({
+        stethSnapshotSourceRequired: false,
+        holdings: [stethHolding()],
+      }),
+      reserveDailySnapshots: [reserveSnapshot(ts("2026-06-12"), 5)],
+      hasStethSnapshotSource: false,
+      nowSeconds: NOW_SECONDS,
+    });
+
+    expect(result.periods.allTimeSinceV3.reserveYieldUsd).toBeNull();
+    expect(result.partialReasons).toContain(
+      MISSING_STETH_SNAPSHOT_SOURCE_REASON,
+    );
+  });
+
+  it("requires stETH history when a legacy current value is negative", () => {
+    const result = buildCanonicalRevenue({
+      networkData: [],
+      cdpDailySeries: [],
+      cdpMarkets: [],
+      reserveYield: reserveYield({
+        holdings: [
+          stethHolding({
+            principalUsd: -1,
+            balance: 0,
+            earnedYieldUsd: 0,
+          }),
+        ],
+      }),
+      reserveDailySnapshots: [reserveSnapshot(ts("2026-06-12"), 5)],
+      hasStethSnapshotSource: false,
+      nowSeconds: NOW_SECONDS,
+    });
+
+    expect(result.periods.allTimeSinceV3.reserveYieldUsd).toBeNull();
+    expect(result.partialReasons).toContain(
+      MISSING_STETH_SNAPSHOT_SOURCE_REASON,
+    );
+  });
+
+  it("isolates malformed stETH history from valid sUSDS rows", () => {
+    const wallet = "0xd0697f70e79476195b742d5afab14be50f98cc1e";
+    const malformedSteth = {
+      ...stethReserveSnapshot(ts("2026-06-12"), wallet, 1),
+      totalEarnedYieldAmount: "invalid",
+    };
+    const rows = [reserveSnapshot(ts("2026-06-12"), 5), malformedSteth];
+    const withoutStethExposure = buildCanonicalRevenue({
+      networkData: [],
+      cdpDailySeries: [],
+      cdpMarkets: [],
+      reserveYield: reserveYield({ stethSnapshotSourceRequired: false }),
+      reserveDailySnapshots: rows,
+      nowSeconds: NOW_SECONDS,
+    });
+    const withStethExposure = buildCanonicalRevenue({
+      networkData: [],
+      cdpDailySeries: [],
+      cdpMarkets: [],
+      reserveYield: reserveYield({ holdings: [stethHolding()] }),
+      reserveDailySnapshots: rows,
+      nowSeconds: NOW_SECONDS,
+    });
+
+    expect(withoutStethExposure.periods.allTimeSinceV3.reserveYieldUsd).toBe(5);
+    expect(withoutStethExposure.partialReasons).not.toContain(
+      FAILED_STETH_SNAPSHOT_SOURCE_REASON,
+    );
+    expect(withStethExposure.periods.allTimeSinceV3.reserveYieldUsd).toBeNull();
+    expect(withStethExposure.partialReasons).toContain(
+      FAILED_STETH_SNAPSHOT_SOURCE_REASON,
+    );
+  });
+
+  it("fails closed when parsed stETH wallets omit an incomplete raw source", () => {
+    const wallet = "0xd0697f70e79476195b742d5afab14be50f98cc1e";
+    const result = buildCanonicalRevenue({
+      networkData: [],
+      cdpDailySeries: [],
+      cdpMarkets: [],
+      reserveYield: reserveYield({
+        stethSnapshotSourceRequired: true,
+        hasIncompleteStethSourceCoverage: true,
+        holdings: [stethHolding({ identifier: wallet })],
+      }),
+      reserveDailySnapshots: [
+        reserveSnapshot(ts("2026-06-12"), 5),
+        stethReserveSnapshot(ts("2026-06-12"), wallet, 1),
+      ],
+      hasStethSnapshotSource: true,
+      nowSeconds: NOW_SECONDS,
+    });
+
+    expect(result.periods.allTimeSinceV3.reserveYieldUsd).toBeNull();
+    expect(result.partialReasons).toContain(
+      INCOMPLETE_STETH_SNAPSHOT_COVERAGE_REASON,
+    );
+  });
+
+  it("fails malformed non-object history rows closed without throwing", () => {
+    const result = buildCanonicalRevenue({
+      networkData: [],
+      cdpDailySeries: [],
+      cdpMarkets: [],
+      reserveYield: reserveYield(),
+      reserveDailySnapshots: [null] as unknown as StethYieldDailySnapshotRow[],
+      nowSeconds: NOW_SECONDS,
+    });
+
+    expect(result.periods.allTimeSinceV3.reserveYieldUsd).toBeNull();
+    expect(result.partialReasons).toContain(
+      "Reserve earned-yield history failed to load.",
     );
   });
 
@@ -444,7 +731,14 @@ describe("buildCanonicalRevenue", () => {
       cdpDailySeries: [],
       cdpMarkets: [],
       reserveYield: legacySteth as ReserveYieldResponse,
-      reserveDailySnapshots: [reserveSnapshot(ts("2026-06-12"), 5)],
+      reserveDailySnapshots: [
+        reserveSnapshot(ts("2026-06-12"), 5),
+        stethReserveSnapshot(
+          ts("2026-06-12"),
+          "0xd0697f70e79476195b742d5afab14be50f98cc1e",
+          0,
+        ),
+      ],
       nowSeconds: NOW_SECONDS,
     });
 
@@ -586,20 +880,52 @@ describe("buildCanonicalRevenue", () => {
     );
   });
 
-  it("keeps loaded sUSDS actuals available when current holdings classification fails", () => {
+  it("fails closed when current holdings classification cannot rule out stETH", () => {
+    const wallet = "0xd0697f70e79476195b742d5afab14be50f98cc1e";
     const result = buildCanonicalRevenue({
       networkData: [],
       cdpDailySeries: [],
       cdpMarkets: [],
       reserveYield: reserveYield(),
-      reserveDailySnapshots: [reserveSnapshot(ts("2026-06-12"), 5)],
+      reserveDailySnapshots: [
+        reserveSnapshot(ts("2026-06-12"), 5),
+        stethReserveSnapshot(ts("2026-06-12"), wallet, 1),
+      ],
+      hasStethSnapshotSource: true,
       reserveCurrentHoldingsClassificationFailed: true,
       nowSeconds: NOW_SECONDS,
     });
 
-    expect(result.periods.allTimeSinceV3.reserveYieldUsd).toBe(5);
+    expect(result.periods.allTimeSinceV3.reserveYieldUsd).toBeNull();
+    expect(result.partialReasons).toContain(
+      UNVERIFIABLE_STETH_SNAPSHOT_SOURCE_REASON,
+    );
+  });
+
+  it("prioritizes nested stETH classification failure over incomplete coverage", () => {
+    const wallet = "0xd0697f70e79476195b742d5afab14be50f98cc1e";
+    const result = buildCanonicalRevenue({
+      networkData: [],
+      cdpDailySeries: [],
+      cdpMarkets: [],
+      reserveYield: reserveYield({
+        reserveCurrentHoldingsClassificationFailed: true,
+        hasIncompleteStethSourceCoverage: true,
+      }),
+      reserveDailySnapshots: [
+        reserveSnapshot(ts("2026-06-12"), 5),
+        stethReserveSnapshot(ts("2026-06-12"), wallet, 1),
+      ],
+      hasStethSnapshotSource: true,
+      nowSeconds: NOW_SECONDS,
+    });
+
+    expect(result.periods.allTimeSinceV3.reserveYieldUsd).toBeNull();
+    expect(result.partialReasons).toContain(
+      UNVERIFIABLE_STETH_SNAPSHOT_SOURCE_REASON,
+    );
     expect(result.partialReasons).not.toContain(
-      UNVERIFIABLE_SUSDS_SNAPSHOT_SOURCE_REASON,
+      INCOMPLETE_STETH_SNAPSHOT_COVERAGE_REASON,
     );
   });
 
@@ -894,7 +1220,7 @@ describe("buildCanonicalRevenue", () => {
     ["whitespace-only balance", { balanceAmount: "  " }],
     ["non-decimal balance", { balanceAmount: "0x0" }],
   ])(
-    "keeps an unpriced stETH row partial when its %s is malformed",
+    "filters a malformed stETH %s when there is no current exposure",
     (_label, overrides) => {
       const wallet = "0xd3d2e5c5af667da817b2d752d86c8f40c22137e1";
       const result = buildCanonicalRevenue({
@@ -908,9 +1234,12 @@ describe("buildCanonicalRevenue", () => {
         nowSeconds: NOW_SECONDS,
       });
 
-      expect(result.periods.allTimeSinceV3.reserveYieldUsd).toBeNull();
-      expect(result.partialReasons).toContain(
+      expect(result.periods.allTimeSinceV3.reserveYieldUsd).toBe(0);
+      expect(result.partialReasons).not.toContain(
         "Reserve stETH earned-yield history is unavailable: current stETH USD/token pricing is missing.",
+      );
+      expect(result.partialReasons).not.toContain(
+        FAILED_STETH_SNAPSHOT_SOURCE_REASON,
       );
     },
   );

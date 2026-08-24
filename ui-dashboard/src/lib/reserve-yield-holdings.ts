@@ -16,6 +16,7 @@ import {
   hasUnindexedSusdsHolding as holdingsHaveUnindexedSusdsSource,
   isIndexedSusdsHolding,
 } from "@/lib/reserve-yield-susds-coverage";
+import { isIndexedStethHolding } from "@/lib/reserve-yield-steth-coverage";
 
 const TRACKED_YIELD_SYMBOLS = new Set([
   FORECASTABLE_AUSD_SYMBOL,
@@ -111,6 +112,18 @@ function recordProvesZeroExposure(record: Record<string, unknown>): boolean {
     if (numericField(rawValue) !== 0) return false;
   }
   return hasExposureValue;
+}
+
+function stethSnapshotSourceRequired(asset: Record<string, unknown>): boolean {
+  const sourcesValue = asset.sources;
+  if (sourcesValue !== undefined && !Array.isArray(sourcesValue)) return true;
+  const rawSources = asArray(sourcesValue);
+  const sources = rawSources.filter(isRecord);
+  if (sources.length !== rawSources.length) return true;
+  return (
+    !recordProvesZeroExposure(asset) ||
+    sources.some((source) => !recordProvesZeroExposure(source))
+  );
 }
 
 function requiresExplicitUsdValue(symbol: string): boolean {
@@ -439,6 +452,33 @@ function hasIncompleteSusdsSourceCoverage({
   );
 }
 
+function hasIncompleteStethSourceCoverage({
+  asset,
+  rawSourceCount,
+  results,
+}: {
+  asset: Record<string, unknown>;
+  rawSourceCount: number;
+  results: SourceHoldingResult[];
+}): boolean {
+  if (rawSourceCount !== results.length) return true;
+  if (
+    results.some(
+      ({ source, holding }) =>
+        !recordProvesZeroExposure(source) &&
+        (holding === null || !isIndexedStethHolding(holding)),
+    )
+  ) {
+    return true;
+  }
+  return (
+    !recordProvesZeroExposure(asset) &&
+    !results.some(
+      ({ holding }) => holding !== null && holdingHasNonzeroExposure(holding),
+    )
+  );
+}
+
 function extractSourceHoldings(
   asset: Record<string, unknown>,
   symbol: string,
@@ -446,6 +486,7 @@ function extractSourceHoldings(
   holdings: ReserveYieldHolding[];
   malformedCount: number;
   hasIncompleteSusdsSourceCoverage: boolean;
+  hasIncompleteStethSourceCoverage: boolean;
 } {
   const sourcesValue = asset.sources;
   const rawSources = asArray(sourcesValue);
@@ -477,12 +518,19 @@ function extractSourceHoldings(
   return {
     holdings,
     malformedCount:
-      (Array.isArray(sourcesValue) ? 0 : 1) +
+      (sourcesValue === undefined || Array.isArray(sourcesValue) ? 0 : 1) +
       (rawSources.length - sources.length) +
       (sources.length - holdings.length),
     hasIncompleteSusdsSourceCoverage:
       isSusdsSymbol(symbol) &&
       hasIncompleteSusdsSourceCoverage({
+        asset,
+        rawSourceCount: rawSources.length,
+        results,
+      }),
+    hasIncompleteStethSourceCoverage:
+      isStethSymbol(symbol) &&
+      hasIncompleteStethSourceCoverage({
         asset,
         rawSourceCount: rawSources.length,
         results,
@@ -505,6 +553,8 @@ export function extractReserveYieldHoldings(
   let requiresSusdsSnapshotSource = false;
   let hasIncompleteSusdsSourceCoverage = false;
   let stethAssetCount = 0;
+  let requiresStethSnapshotSource = false;
+  let hasIncompleteStethSourceCoverage = false;
   let reserveCurrentHoldingsClassificationFailed = !Array.isArray(assetsValue);
 
   assets.forEach((assetValue, assetIndex) => {
@@ -527,12 +577,15 @@ export function extractReserveYieldHoldings(
     }
     if (isStethSymbol(symbol)) {
       stethAssetCount += 1;
+      requiresStethSnapshotSource ||= stethSnapshotSourceRequired(assetValue);
     }
 
     const sourceExtraction = extractSourceHoldings(assetValue, symbol);
     malformedCount += sourceExtraction.malformedCount;
     hasIncompleteSusdsSourceCoverage ||=
       sourceExtraction.hasIncompleteSusdsSourceCoverage;
+    hasIncompleteStethSourceCoverage ||=
+      sourceExtraction.hasIncompleteStethSourceCoverage;
 
     if (sourceExtraction.holdings.length > 0) {
       holdings.push(...sourceExtraction.holdings);
@@ -559,6 +612,8 @@ export function extractReserveYieldHoldings(
       hasIncompleteSusdsSourceCoverage ||
       holdingsHaveUnindexedSusdsSource(aggregatedHoldings),
     stethAssetCount,
+    stethSnapshotSourceRequired: requiresStethSnapshotSource,
+    hasIncompleteStethSourceCoverage,
   };
 }
 

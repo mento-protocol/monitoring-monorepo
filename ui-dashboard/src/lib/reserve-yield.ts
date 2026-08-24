@@ -242,6 +242,8 @@ function reserveHoldingsState(
       susdsSnapshotSourceRequired: true,
       hasUnindexedSusdsHolding: false,
       hasCurrentStethAsset: false,
+      stethSnapshotSourceRequired: true,
+      hasIncompleteStethSourceCoverage: false,
     };
   }
 
@@ -275,6 +277,9 @@ function reserveHoldingsState(
     susdsSnapshotSourceRequired: extracted.susdsSnapshotSourceRequired,
     hasUnindexedSusdsHolding: extracted.hasUnindexedSusdsHolding,
     hasCurrentStethAsset: extracted.stethAssetCount > 0,
+    stethSnapshotSourceRequired: extracted.stethSnapshotSourceRequired,
+    hasIncompleteStethSourceCoverage:
+      extracted.hasIncompleteStethSourceCoverage,
   };
 }
 
@@ -392,6 +397,9 @@ function buildReserveYieldResponse({
     susdsYieldSignalUnavailable: susdsYield.signalUnavailable,
     susdsSnapshotSourceRequired: reserveState.susdsSnapshotSourceRequired,
     hasUnindexedSusdsHolding: reserveState.hasUnindexedSusdsHolding,
+    stethSnapshotSourceRequired: reserveState.stethSnapshotSourceRequired,
+    hasIncompleteStethSourceCoverage:
+      reserveState.hasIncompleteStethSourceCoverage,
     realizedYieldUsd: sumNullable(
       susdsYield.realizedYieldUsd,
       stethYield.realizedYieldUsd,

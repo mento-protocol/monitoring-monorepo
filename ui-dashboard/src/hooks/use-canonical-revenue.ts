@@ -22,6 +22,8 @@ export type UseCanonicalRevenueArgs = {
   reserveHistoryUnavailable: boolean;
   reserveHistoryFailed: boolean;
   reserveHistoryTruncated: boolean;
+  stethHistoryFailed: boolean;
+  hasStethSnapshotSource: boolean;
   reserveYieldFailed: boolean;
   reserveCurrentHoldingsClassificationFailed: boolean;
   hasUnindexedSusdsHolding: boolean;
@@ -43,6 +45,8 @@ export function useCanonicalRevenue(
     reserveHistoryUnavailable,
     reserveHistoryFailed,
     reserveHistoryTruncated,
+    stethHistoryFailed,
+    hasStethSnapshotSource,
     reserveYieldFailed,
     reserveCurrentHoldingsClassificationFailed,
     hasUnindexedSusdsHolding,
@@ -63,6 +67,8 @@ export function useCanonicalRevenue(
         reserveHistoryUnavailable,
         reserveHistoryFailed,
         reserveHistoryTruncated,
+        stethHistoryFailed,
+        hasStethSnapshotSource,
         reserveYieldFailed,
         reserveCurrentHoldingsClassificationFailed,
         hasUnindexedSusdsHolding,
@@ -80,6 +86,8 @@ export function useCanonicalRevenue(
       reserveHistoryUnavailable,
       reserveHistoryFailed,
       reserveHistoryTruncated,
+      stethHistoryFailed,
+      hasStethSnapshotSource,
       reserveYieldFailed,
       reserveCurrentHoldingsClassificationFailed,
       hasUnindexedSusdsHolding,
