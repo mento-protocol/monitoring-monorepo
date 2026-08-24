@@ -331,10 +331,12 @@ export const TOOLING_MODULE_ARMS = [
       "scripts/deploy/deploy-indexer-verify.test.mjs",
       "scripts/deploy/deploy-indexer-verify-analysis.mjs",
       "scripts/deploy/deploy-indexer-verify-analysis.test.mjs",
+      "scripts/deploy/deploy-indexer-verify-status-identity.mjs",
       "scripts/*/deploy-indexer-verify.mjs",
       "scripts/*/deploy-indexer-verify.test.mjs",
       "scripts/*/deploy-indexer-verify-analysis.mjs",
       "scripts/*/deploy-indexer-verify-analysis.test.mjs",
+      "scripts/*/deploy-indexer-verify-status-identity.mjs",
     ],
     pairing: "paired",
     effects: [

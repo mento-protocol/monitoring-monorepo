@@ -12,11 +12,12 @@ import {
   type ReserveYieldExtraction,
   type ReserveYieldHolding,
 } from "@/lib/reserve-yield-types";
+import { hasUnindexedSusdsHolding as holdingsHaveUnindexedSusdsSource } from "@/lib/reserve-yield-susds-coverage";
 import {
-  hasUnindexedSusdsHolding as holdingsHaveUnindexedSusdsSource,
-  isIndexedSusdsHolding,
-} from "@/lib/reserve-yield-susds-coverage";
-import { isIndexedStethHolding } from "@/lib/reserve-yield-steth-coverage";
+  hasIncompleteStethSourceCoverage,
+  hasIncompleteSusdsSourceCoverage,
+  recordProvesZeroExposure,
+} from "@/lib/reserve-yield-aggregate-source-coverage";
 
 const TRACKED_YIELD_SYMBOLS = new Set([
   FORECASTABLE_AUSD_SYMBOL,
@@ -101,17 +102,6 @@ function susdsSnapshotSourceRequired(asset: Record<string, unknown>): boolean {
   if (valuesByRecord.some((values) => values === null)) return true;
   const values = valuesByRecord.flatMap((recordValues) => recordValues ?? []);
   return values.length === 0 || values.some((value) => value !== 0);
-}
-
-function recordProvesZeroExposure(record: Record<string, unknown>): boolean {
-  let hasExposureValue = false;
-  for (const field of ["balance", "usd_value"] as const) {
-    const rawValue = record[field];
-    if (rawValue === undefined || rawValue === null) continue;
-    hasExposureValue = true;
-    if (numericField(rawValue) !== 0) return false;
-  }
-  return hasExposureValue;
 }
 
 function stethSnapshotSourceRequired(asset: Record<string, unknown>): boolean {
@@ -411,118 +401,6 @@ function assetFallbackHolding(
     next365dUsd: null,
     annualRunRateUsd: null,
   };
-}
-
-type SourceHoldingResult = {
-  source: Record<string, unknown>;
-  holding: ReserveYieldHolding | null;
-};
-
-// Each normalized source can add conversion and summation roundoff. Scale the
-// tolerance with the source count so only floating-point noise is accepted.
-const SOURCE_COVERAGE_ULPS_PER_SOURCE = 16;
-
-function aggregateExceedsSourceTotal(
-  aggregateValue: number | null,
-  sourceTotal: number,
-  sourceCount: number,
-): boolean {
-  if (aggregateValue === null || aggregateValue <= 0) return false;
-  if (!Number.isFinite(sourceTotal)) return true;
-  const tolerance =
-    Math.max(Math.abs(aggregateValue), Math.abs(sourceTotal), 1) *
-    Number.EPSILON *
-    Math.max(sourceCount, 1) *
-    SOURCE_COVERAGE_ULPS_PER_SOURCE;
-  return aggregateValue - sourceTotal > tolerance;
-}
-
-function hasAggregateSourceCoverageGap(
-  asset: Record<string, unknown>,
-  results: SourceHoldingResult[],
-): boolean {
-  let sourceBalanceTotal = 0;
-  let sourcePrincipalUsdTotal = 0;
-  for (const { holding } of results) {
-    if (holding === null) continue;
-    if (holding.hasTokenBalance) sourceBalanceTotal += holding.balance;
-    sourcePrincipalUsdTotal += holding.principalUsd;
-  }
-  return (
-    aggregateExceedsSourceTotal(
-      numericField(asset.balance),
-      sourceBalanceTotal,
-      results.length,
-    ) ||
-    aggregateExceedsSourceTotal(
-      numericField(asset.usd_value),
-      sourcePrincipalUsdTotal,
-      results.length,
-    )
-  );
-}
-
-function holdingHasNonzeroExposure(holding: ReserveYieldHolding): boolean {
-  return (
-    (Number.isFinite(holding.balance) && holding.balance !== 0) ||
-    (Number.isFinite(holding.principalUsd) && holding.principalUsd !== 0)
-  );
-}
-
-function hasIncompleteSusdsSourceCoverage({
-  asset,
-  rawSourceCount,
-  results,
-}: {
-  asset: Record<string, unknown>;
-  rawSourceCount: number;
-  results: SourceHoldingResult[];
-}): boolean {
-  if (rawSourceCount !== results.length) return true;
-  if (
-    results.some(
-      ({ source, holding }) =>
-        !recordProvesZeroExposure(source) &&
-        (holding === null || !isIndexedSusdsHolding(holding)),
-    )
-  ) {
-    return true;
-  }
-  if (hasAggregateSourceCoverageGap(asset, results)) return true;
-  return (
-    !recordProvesZeroExposure(asset) &&
-    !results.some(
-      ({ holding }) => holding !== null && holdingHasNonzeroExposure(holding),
-    )
-  );
-}
-
-function hasIncompleteStethSourceCoverage({
-  asset,
-  rawSourceCount,
-  results,
-}: {
-  asset: Record<string, unknown>;
-  rawSourceCount: number;
-  results: SourceHoldingResult[];
-}): boolean {
-  if (rawSourceCount !== results.length) return true;
-  if (
-    results.some(
-      ({ source, holding }) =>
-        !recordProvesZeroExposure(source) &&
-        (holding === null || !isIndexedStethHolding(holding)),
-    )
-  ) {
-    return true;
-  }
-  if (hasAggregateSourceCoverageGap(asset, results)) return true;
-  return (
-    !recordProvesZeroExposure(asset) &&
-    !results.some(
-      ({ holding }) => holding !== null && holdingHasNonzeroExposure(holding),
-    )
-  );
 }
 
 function extractSourceHoldings(

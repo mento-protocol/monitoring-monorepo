@@ -3018,7 +3018,7 @@ done
 
 # The Node deploy helpers moved with the wrappers. Their arms match exact paths,
 # so a stale pattern stops routing the focused suite silently — assert each
-# exact verifier source and test path reaches both verifier tests.
+# exact verifier module and test path reaches both verifier tests.
 run_gate "scripts/deploy/deploy-indexer-verify.mjs"
 assert_contains "- pnpm lint:scripts (root build script changed)"
 assert_contains "- node scripts/deploy/deploy-indexer-verify-analysis.test.mjs (indexer deploy verifier changed)"
@@ -3035,6 +3035,11 @@ assert_contains "- node scripts/deploy/deploy-indexer-verify-analysis.test.mjs (
 assert_contains "- node scripts/deploy/deploy-indexer-verify.test.mjs (indexer deploy verifier changed)"
 
 run_gate "scripts/deploy/deploy-indexer-verify-analysis.test.mjs"
+assert_contains "- pnpm lint:scripts (root build script changed)"
+assert_contains "- node scripts/deploy/deploy-indexer-verify-analysis.test.mjs (indexer deploy verifier changed)"
+assert_contains "- node scripts/deploy/deploy-indexer-verify.test.mjs (indexer deploy verifier changed)"
+
+run_gate "scripts/deploy/deploy-indexer-verify-status-identity.mjs"
 assert_contains "- pnpm lint:scripts (root build script changed)"
 assert_contains "- node scripts/deploy/deploy-indexer-verify-analysis.test.mjs (indexer deploy verifier changed)"
 assert_contains "- node scripts/deploy/deploy-indexer-verify.test.mjs (indexer deploy verifier changed)"
@@ -3059,6 +3064,10 @@ assert_not_contains "- node scripts/deploy/deploy-indexer-verify-analysis.test.m
 assert_not_contains "- node scripts/deploy/deploy-indexer-verify.test.mjs (indexer deploy verifier changed)"
 
 run_gate "scripts/deploy-indexer-verify-analysis.test.mjs"
+assert_not_contains "- node scripts/deploy/deploy-indexer-verify-analysis.test.mjs (indexer deploy verifier changed)"
+assert_not_contains "- node scripts/deploy/deploy-indexer-verify.test.mjs (indexer deploy verifier changed)"
+
+run_gate "scripts/deploy-indexer-verify-status-identity.mjs"
 assert_not_contains "- node scripts/deploy/deploy-indexer-verify-analysis.test.mjs (indexer deploy verifier changed)"
 assert_not_contains "- node scripts/deploy/deploy-indexer-verify.test.mjs (indexer deploy verifier changed)"
 
@@ -3108,6 +3117,10 @@ assert_contains "- node scripts/deploy/deploy-indexer-verify-analysis.test.mjs (
 assert_contains "- node scripts/deploy/deploy-indexer-verify.test.mjs (indexer deploy verifier changed)"
 
 run_gate "scripts/deploy/region/deploy-indexer-verify-analysis.test.mjs"
+assert_contains "- node scripts/deploy/deploy-indexer-verify-analysis.test.mjs (indexer deploy verifier changed)"
+assert_contains "- node scripts/deploy/deploy-indexer-verify.test.mjs (indexer deploy verifier changed)"
+
+run_gate "scripts/deploy/region/deploy-indexer-verify-status-identity.mjs"
 assert_contains "- node scripts/deploy/deploy-indexer-verify-analysis.test.mjs (indexer deploy verifier changed)"
 assert_contains "- node scripts/deploy/deploy-indexer-verify.test.mjs (indexer deploy verifier changed)"
 

@@ -73,8 +73,9 @@ same PR, except the `agent-autoreview.sh` feedback-runtime pins below.
   `pnpm sentry:autofix:finalize:test`. Exact
   `sentry/triage/sentry-triage-project-route.mjs` runs
   `pnpm sentry:project:test` in the projection arm.
-  `deploy/deploy-indexer-verify{,-analysis}{,.test}.mjs` uses one any-depth arm;
-  both tests run.
+  `deploy/deploy-indexer-verify{,-analysis}{,.test}.mjs` and
+  `deploy/deploy-indexer-verify-status-identity.mjs` use one any-depth arm;
+  both verifier tests run.
 - **Gate runtime module pins.** Before `cd`, `agent-quality-gate.sh` loads
   `$script_source_dir/gate/run-handles.sh`; move it with its signature, self-test
   route, and missing-helper fixture. It also pins
