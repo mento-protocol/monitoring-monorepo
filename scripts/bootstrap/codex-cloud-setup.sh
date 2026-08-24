@@ -174,6 +174,54 @@ MSG
   return 1
 }
 
+verify_github_api_capabilities() {
+  local repository
+  repository="$(gh repo view --json nameWithOwner --jq '.nameWithOwner')"
+
+  echo "==> Verifying GitHub repository API access"
+  gh api "repos/${repository}" >/dev/null
+
+  echo "==> Verifying GitHub pull-request API access"
+  gh api "repos/${repository}/pulls?state=open&per_page=1" >/dev/null
+}
+
+verify_origin_write_access() (
+  local probe_branch
+  local probe_ref
+  local created=false
+  probe_branch="codex-cloud-write-probe-$(date +%s)-$$"
+  probe_ref="refs/heads/${probe_branch}"
+
+  # Invoked indirectly by the EXIT trap below.
+  # shellcheck disable=SC2329
+  cleanup_probe_ref() {
+    if [[ "$created" == "true" ]]; then
+      git push origin --delete "$probe_branch" >/dev/null 2>&1 ||
+        echo "warning: could not remove temporary GitHub write probe ${probe_branch}." >&2
+    fi
+  }
+  trap cleanup_probe_ref EXIT
+
+  echo "==> Verifying git can create and delete a temporary branch on origin"
+  if ! git push origin "HEAD:${probe_ref}" >/dev/null; then
+    cat >&2 <<'MSG'
+error: GitHub authentication can read this repository but cannot create a
+temporary branch. Give the Codex Cloud GH_TOKEN/GITHUB_TOKEN repository
+Contents read/write permission, then start a fresh session. Pull request and
+ship flows cannot publish commits with a read-only token.
+MSG
+    return 1
+  fi
+  created=true
+
+  if ! git push origin --delete "$probe_branch" >/dev/null; then
+    created=false
+    echo "error: GitHub authentication created the temporary write probe but could not delete it: ${probe_branch}" >&2
+    return 1
+  fi
+  created=false
+)
+
 append_no_proxy_host() {
   local host="$1"
   local existing=",${NO_PROXY:-},"
@@ -479,6 +527,16 @@ MSG
   return 1
 }
 
+install_playwright_host_dependencies() {
+  if is_disabled "${CODEX_CLOUD_INSTALL_PLAYWRIGHT_DEPS:-true}"; then
+    echo "==> Skipping Playwright host dependencies because CODEX_CLOUD_INSTALL_PLAYWRIGHT_DEPS=${CODEX_CLOUD_INSTALL_PLAYWRIGHT_DEPS}"
+    return 0
+  fi
+
+  echo "==> Installing Playwright Chromium and Linux host dependencies"
+  pnpm --filter @mento-protocol/ui-dashboard exec playwright install --with-deps chromium
+}
+
 # The offline installer suite sources these functions without running setup.
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
   return 0
@@ -495,6 +553,8 @@ configure_github_git_auth
 
 codex_cloud_ensure_origin_remote
 verify_origin_git_auth
+verify_github_api_capabilities
+verify_origin_write_access
 ensure_origin_main_ref
 
 echo "==> Configuring repository git hooks"
@@ -519,6 +579,8 @@ CI=true pnpm install --frozen-lockfile
 
 echo "==> Verifying dashboard dependency resolution"
 pnpm --filter @mento-protocol/ui-dashboard exec node -e "require.resolve('@sentry/nextjs/package.json')"
+
+install_playwright_host_dependencies
 
 echo "==> Running Envio codegen"
 # Drop any stale type facade first: a reused/cached checkout may already carry

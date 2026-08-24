@@ -3,7 +3,7 @@ title: Codex Cloud Setup and Maintenance
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-20
+last_verified: 2026-08-24
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -26,12 +26,14 @@ cached-container maintenance script as:
 Setup prepares a fresh container. It:
 
 - marks the checkout safe for Git, configures token-backed GitHub credentials,
-  and adds or rewrites `origin` to HTTPS when required;
+  adds or rewrites `origin` to HTTPS when required, checks repository and pull
+  request API reads, and proves branch write access with a temporary branch;
 - refreshes `origin/main` and enables `.trunk/hooks`;
 - activates the `packageManager` version from `package.json` through Corepack;
 - verifies the repo-local autoreview helper, prewarms Trunk, installs Foundry,
   and checks OSV API egress;
-- installs the frozen workspace dependencies; and
+- installs the frozen workspace dependencies and Playwright Chromium with its
+  Linux host libraries; and
 - regenerates and verifies Envio types, then runs `pnpm agent:context-check`.
 
 Setup fails closed when required GitHub auth/fetch, helper, tool installation,
@@ -41,10 +43,34 @@ dedicated Cloud container rather than a developer workstation.
 
 ## GitHub and package tooling
 
-Setup expects `GH_TOKEN` (preferred) or `GITHUB_TOKEN`. If `gh` is absent on an
+Setup expects `GH_TOKEN` (preferred) or `GITHUB_TOKEN` with repository Contents
+read/write and pull-request read/write access. If `gh` is absent on an
 apt-based image, it first tries the configured apt sources and then adds the
 official GitHub CLI repository as a fallback. It verifies `gh` auth before
-configuring fetch/push credentials and refreshing `origin/main`.
+configuring fetch/push credentials. Setup then reads the repository and pull
+request APIs and creates and deletes a unique temporary branch. This final
+probe fails early when a token can fetch but cannot publish commits.
+
+Playwright uses `install --with-deps chromium` after workspace installation so
+dashboard browser tests can launch in a fresh Linux image. Set
+`CODEX_CLOUD_INSTALL_PLAYWRIGHT_DEPS=false` only when the base image already
+provides Chromium and all host libraries.
+
+## Required outbound access
+
+The setup path needs HTTPS access to the hosts below when the corresponding
+tool is not already present in the image or cache:
+
+- `github.com` and `api.github.com` for Git transport and API capability probes;
+- `cli.github.com` for the GitHub CLI apt fallback;
+- `registry.npmjs.org` for workspace and tool packages;
+- `trunk.io` plus GitHub release hosts for Trunk and its managed tools;
+- `foundry.paradigm.xyz` plus GitHub release hosts for Foundry;
+- `api.osv.dev` for the supply-chain egress probe; and
+- Playwright's download hosts, including `cdn.playwright.dev`, for Chromium.
+
+Configure these in the Cloud environment network policy. Do not add proxy
+bypasses in the repository except for the existing explicit Trunk override.
 
 The pinned Trunk CLI is prewarmed and `./tools/trunk install` supplies its
 managed linters and runtimes. If the Cloud proxy blocks Trunk, allowlist
