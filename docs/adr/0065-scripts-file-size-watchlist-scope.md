@@ -163,7 +163,7 @@ that nothing holds in place.
   three, all at hard or near-hard.
 - Two `scripts/` files join that queue: `agent-quality-gate.sh` and
   `sentry-triage-archive.mjs`. Both are over the hard cap with nothing holding
-  them, and the first already has an issue.
+  them.
 - **The gate's row shrank by 45% at D5c, and the residual is the process-control
   layer by design.** Projected here at `2e3df696` as ~3,519 raw / ~2,266 rough
   from a 6,163-raw file; measured after D5c landed, the gate is **3,327 raw /
