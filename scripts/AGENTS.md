@@ -61,11 +61,11 @@ stay with their domain.
 `scripts/` has twelve path-pin classes. Move each pin with its file in the
 same PR, except the `agent-autoreview.sh` feedback-runtime pins below.
 
-- **Autoreview runtime materialization.** `agent-autoreview.sh` pins sibling
-  runtime in Perl lists and `runtime_paths`; feedback helpers use `origin/main`.
-  Move feedback paths in three merges: add copies and a dual-path fallback;
-  repoint consumers; remove old paths and fallback when no pre-move wrapper
-  remains (ADR 0064).
+- **Autoreview runtime pins.** `agent-autoreview.sh` pins sibling runtime and
+  optional `pr-feedback-state-claude.mjs` and
+  `pr-ready-state-review-signals.mjs`; feedback blobs use `origin/main`. Move
+  feedback paths in three merges: add copies/fallback; repoint; remove old paths
+  after no pre-move wrapper remains (ADR 0064).
 - **Gate routing pins.** The gate excludes stub-repo tests with
   `$script_source_dir == $repo_root/scripts`, and pairs
   `bootstrap/codex-cloud-setup.{sh,test.sh}` for offline tests. It routes

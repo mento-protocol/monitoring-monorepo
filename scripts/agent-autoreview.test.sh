@@ -6000,7 +6000,8 @@ run_feedback_runtime_aggregate_regression() {
     pr-feedback-state-claude.mjs \
     pr-ready-state.mjs \
     pr-ready-state-core.mjs \
-    pr-ready-state-format.mjs; do
+    pr-ready-state-format.mjs \
+    pr-ready-state-review-signals.mjs; do
     printf 'export {};\n' >"$review_repo/scripts/pr/$runtime_file"
   done
   commit_review_repo "$review_repo" init
@@ -6036,6 +6037,108 @@ run_feedback_runtime_aggregate_regression() {
   expect_stderr_contains "trusted feedback runtime exceeds the 2097152-byte aggregate limit"
   if [[ -e "$bundle_dir" ]]; then
     printf 'bundle was published after oversized feedback runtime preflight\n' >&2
+    exit 1
+  fi
+}
+
+run_feedback_runtime_version_split_regression() {
+  local review_repo="$tmp_dir/feedback-runtime-version-split"
+  local post_split_bundle="$tmp_dir/feedback-runtime-post-split-bundle"
+  local pre_split_bundle="$tmp_dir/feedback-runtime-pre-split-bundle"
+  local missing_sibling_bundle="$tmp_dir/feedback-runtime-missing-sibling-bundle"
+  local pre_split_oid
+  local post_split_oid
+  local missing_sibling_oid
+  local runtime_file
+
+  init_review_repo "$review_repo"
+  git -C "$review_repo" remote add origin \
+    https://github.com/mento-protocol/monitoring-monorepo.git
+  mkdir -p "$review_repo/scripts/pr"
+  printf 'base\n' >"$review_repo/README.md"
+  cat >"$review_repo/scripts/pr/pr-feedback-state.mjs" <<'FEEDBACK_RUNTIME'
+#!/usr/bin/env node
+import { runtimeVersion } from "./pr-ready-state-core.mjs";
+process.stdout.write(
+  `{"findings":[],"testEvidence":{"runtimeVersion":"${runtimeVersion}"}}\n`,
+);
+FEEDBACK_RUNTIME
+  for runtime_file in \
+    pr-feedback-state-core.mjs \
+    pr-ready-state.mjs \
+    pr-ready-state-format.mjs; do
+    printf 'export {};\n' >"$review_repo/scripts/pr/$runtime_file"
+  done
+  printf 'export const runtimeVersion = "pre-split";\n' \
+    >"$review_repo/scripts/pr/pr-ready-state-core.mjs"
+  commit_review_repo "$review_repo" "pre-split feedback runtime"
+  pre_split_oid="$(git -C "$review_repo" rev-parse HEAD)"
+
+  cat >"$review_repo/scripts/pr/pr-ready-state-core.mjs" <<'POST_SPLIT_CORE'
+import { reviewSignalsVersion } from "./pr-ready-state-review-signals.mjs";
+export const runtimeVersion = `post-split:${reviewSignalsVersion}`;
+POST_SPLIT_CORE
+  printf 'export const reviewSignalsVersion = "present";\n' \
+    >"$review_repo/scripts/pr/pr-ready-state-review-signals.mjs"
+  commit_review_repo "$review_repo" "post-split feedback runtime"
+  post_split_oid="$(git -C "$review_repo" rev-parse HEAD)"
+
+  git -C "$review_repo" rm scripts/pr/pr-ready-state-review-signals.mjs \
+    >/dev/null
+  commit_review_repo "$review_repo" "drop post-split feedback sibling"
+  missing_sibling_oid="$(git -C "$review_repo" rev-parse HEAD)"
+
+  git -C "$review_repo" switch -c feature "$pre_split_oid" >/dev/null 2>&1
+  printf 'feature\n' >"$review_repo/feature.txt"
+  commit_review_repo "$review_repo" feature
+
+  git -C "$review_repo" update-ref \
+    refs/remotes/origin/main \
+    "$post_split_oid"
+  (
+    cd "$review_repo"
+    run_adapter \
+      --prepare-bundle-dir "$post_split_bundle" \
+      --mode branch \
+      --base "$pre_split_oid" \
+      --feedback-pr 1299
+  )
+  expect_file_contains \
+    "$post_split_bundle/feedback-state.json" \
+    '"runtimeVersion":"post-split:present"'
+  expect_empty_stderr
+
+  git -C "$review_repo" update-ref \
+    refs/remotes/origin/main \
+    "$pre_split_oid"
+  (
+    cd "$review_repo"
+    run_adapter \
+      --prepare-bundle-dir "$pre_split_bundle" \
+      --mode branch \
+      --base "$pre_split_oid" \
+      --feedback-pr 1299
+  )
+  expect_file_contains \
+    "$pre_split_bundle/feedback-state.json" \
+    '"runtimeVersion":"pre-split"'
+  expect_empty_stderr
+
+  git -C "$review_repo" update-ref \
+    refs/remotes/origin/main \
+    "$missing_sibling_oid"
+  (
+    cd "$review_repo"
+    run_adapter_expect_failure \
+      --prepare-bundle-dir "$missing_sibling_bundle" \
+      --mode branch \
+      --base "$pre_split_oid" \
+      --feedback-pr 1299
+  )
+  expect_stderr_contains "ERR_MODULE_NOT_FOUND"
+  expect_stderr_contains "pr-ready-state-review-signals.mjs"
+  if [[ -e "$missing_sibling_bundle" ]]; then
+    printf 'bundle was published without the post-split feedback sibling\n' >&2
     exit 1
   fi
 }
@@ -8532,6 +8635,7 @@ run_bundle_integrity_family() {
   run_deploy_directory_checklist_routing_regression
   run_prepared_untracked_symlink_regression
   run_feedback_runtime_aggregate_regression
+  run_feedback_runtime_version_split_regression
   run_feedback_runtime_location_regression
   run_large_untracked_bound_regression
   run_aggregate_untracked_bound_regression

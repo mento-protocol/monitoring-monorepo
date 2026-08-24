@@ -4325,6 +4325,7 @@ materialize_feedback_runtime() {
   )
   local optional_runtime_names=(
     pr-feedback-state-claude.mjs
+    pr-ready-state-review-signals.mjs
   )
   local runtime_names=()
   local runtime_paths=()
